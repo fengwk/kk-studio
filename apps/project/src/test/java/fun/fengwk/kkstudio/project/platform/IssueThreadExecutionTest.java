@@ -15,29 +15,28 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.ObjectProvider;
 
+import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
+import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
+import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
+import fun.fengwk.kkstudio.harness.api.SpawnRequest;
+import fun.fengwk.kkstudio.harness.api.StopResult;
+import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
+import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.api.history.EntryPath;
+import fun.fengwk.kkstudio.harness.api.join.JoinDelivery;
+import fun.fengwk.kkstudio.harness.api.join.ThreadJoin;
+import fun.fengwk.kkstudio.harness.api.join.ThreadJoinReceipt;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
+import fun.fengwk.kkstudio.harness.api.thread.StopCommand;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionFacts;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
-import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
-import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
-import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
-import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
-import fun.fengwk.kkstudio.harness.runtime.SpawnRequest;
-import fun.fengwk.kkstudio.harness.runtime.StopCommand;
-import fun.fengwk.kkstudio.harness.runtime.StopResult;
-import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
-import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
-import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
-import fun.fengwk.kkstudio.harness.runtime.join.JoinDelivery;
-import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
-import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinReceipt;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionFacts;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
+import fun.fengwk.kkstudio.harness.spi.AcceptancePreflight;
 import fun.fengwk.kkstudio.platform.agenttask.AgentTaskService;
 
 import java.util.List;
@@ -141,7 +140,7 @@ class IssueThreadExecutionTest {
     ThreadState thread = mock(ThreadState.class);
     when(thread.id()).thenReturn(threadId);
     when(accepted.thread()).thenReturn(thread);
-    when(runtime.spawn(any(SpawnRequest.class))).thenReturn(accepted);
+    when(runtime.spawn(any(SpawnRequest.class), any())).thenReturn(accepted);
 
     assertSame(
         accepted,
@@ -157,7 +156,7 @@ class IssueThreadExecutionTest {
                 input.requestHash())));
 
     ArgumentCaptor<SpawnRequest> spawn = ArgumentCaptor.forClass(SpawnRequest.class);
-    verify(runtime).spawn(spawn.capture());
+    verify(runtime).spawn(spawn.capture(), any());
     SpawnRequest request = spawn.getValue();
     assertEquals(runId, request.ticketId());
     assertEquals(threadId, request.threadId());
@@ -181,39 +180,30 @@ class IssueThreadExecutionTest {
     verify(runtime).stop(command);
   }
 
-  /** join 查询与命令重放查询原样转发 Optional 结果。 */
+  /** join 查询原样转发 Optional 结果。 */
   @Test
   void readQueriesForwardOptionalResults() {
     UUID invocationId = UUID.randomUUID();
     ThreadJoin join = mock(ThreadJoin.class);
     ThreadJoinReceipt receipt = mock(ThreadJoinReceipt.class);
-    ThreadCommand threadCommand = mock(ThreadCommand.class);
-    UUID idempotencyKey = UUID.randomUUID();
     when(runtime.findJoin(invocationId)).thenReturn(Optional.of(join));
     when(runtime.projectJoinReceipt(invocationId)).thenReturn(Optional.of(receipt));
-    when(runtime.findThreadCommand(THREAD_ID, idempotencyKey))
-        .thenReturn(Optional.of(threadCommand));
 
     assertSame(join, port.findJoin(invocationId).orElseThrow());
     assertSame(receipt, port.projectJoinReceipt(invocationId).orElseThrow());
-    assertSame(threadCommand, port.findThreadCommand(THREAD_ID, idempotencyKey).orElseThrow());
     verify(runtime).findJoin(invocationId);
     verify(runtime).projectJoinReceipt(invocationId);
-    verify(runtime).findThreadCommand(THREAD_ID, idempotencyKey);
   }
 
-  /** 未匹配的 join / command 返回空而不制造占位对象。 */
+  /** 未匹配的 join 返回空而不制造占位对象。 */
   @Test
   void missingReadsReturnEmptyOptional() {
     UUID invocationId = UUID.randomUUID();
-    UUID idempotencyKey = UUID.randomUUID();
     when(runtime.findJoin(any())).thenReturn(Optional.empty());
     when(runtime.projectJoinReceipt(any())).thenReturn(Optional.empty());
-    when(runtime.findThreadCommand(any(), any())).thenReturn(Optional.empty());
 
     assertEquals(Optional.empty(), port.findJoin(invocationId));
     assertEquals(Optional.empty(), port.projectJoinReceipt(invocationId));
-    assertEquals(Optional.empty(), port.findThreadCommand(THREAD_ID, idempotencyKey));
   }
 
   /** 构造适配器不会提前解析运行时，避免把执行依赖拉进宿主装配顺序。 */

@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { isConflictError } from '@/shared/api/client'
 import { queryKeys } from '@/shared/lib/query-keys'
-import { systemSettingsService } from '@/shared/api/system-settings-service'
+import { systemSettingsService } from '@/features/settings/system-settings-service'
 import {
   assembleSettingsUpdate,
   DraftValidationError,

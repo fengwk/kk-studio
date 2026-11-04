@@ -352,7 +352,7 @@ test.describe('Chat Workspace 1-9 Panes Layout, Footer & User Attachments', () =
     // 超宽被省略的信息必须仍能通过 hover 完整读取，且不含内部口径说明
     const pane1Title = (await pane1Lines.nth(0).getAttribute('title')) ?? ''
     expect(pane1Title).toContain('环境：production')
-    expect(pane1Title).toContain('上下文占用（最近一次模型调用估算）：约 16000 / 128000 tokens')
+    expect(pane1Title).toContain('上下文占用，最近一次模型调用估算：约 16000 / 128000 tokens')
     expect(pane1Title).toContain('未缓存输入：12000 tokens；输出：800 tokens；推理：150 tokens')
     expect(pane1Title).toContain('缓存读取：4000 tokens；缓存写入：0 tokens')
     expect(pane1Title).toContain('估算费用：$0.042；缓存命中率：25.00%；生成速度：400 tok/s')

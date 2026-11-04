@@ -50,7 +50,7 @@ export function ModelForm({
     ? [
         {
           value: draft.providerName,
-          label: `${draft.providerName} (${t('ai.catalog.form.unavailable')})`,
+          label: `${draft.providerName} · ${t('ai.catalog.form.unavailable')}`,
           disabled: true,
         },
         ...providers.map((provider) => ({ value: provider.name, label: provider.name })),

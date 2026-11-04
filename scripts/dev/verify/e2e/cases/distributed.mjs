@@ -7,7 +7,6 @@ import {
   ENV_C_ID,
   queryDistributedEnvironmentOwners,
 } from '../lib/distributed.mjs'
-import { registerCase } from '../lib/registry.mjs'
 import { createDurationTimer } from '../lib/time.mjs'
 import {
   branchSettingsOf,
@@ -17,6 +16,10 @@ import {
   userMessageCommand,
 } from '../lib/harness.mjs'
 import { baseModelConfig } from '../lib/fixtures.mjs'
+import { createCaseAdder } from '../lib/registry.mjs'
+
+export const cases = []
+const registerCase = createCaseAdder(cases)
 
 const ENV_C_NAME = 'distributed-c'
 

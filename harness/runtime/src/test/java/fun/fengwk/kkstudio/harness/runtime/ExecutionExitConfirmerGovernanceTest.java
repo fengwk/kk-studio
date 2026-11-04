@@ -15,20 +15,20 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.slf4j.LoggerFactory;
 
+import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitFact;
+import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitKind;
+import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitState;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitConfirmer;
-import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitFact;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitJournal;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitJournalConflictException;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitJournalException;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitJournalRecord;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitJournalSnapshot;
-import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitKind;
-import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitState;
 import fun.fengwk.kkstudio.harness.runtime.execution.FileExecutionExitJournal;
 import fun.fengwk.kkstudio.harness.runtime.execution.TestExecutionExitConfirmer;
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
+import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 
 import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;

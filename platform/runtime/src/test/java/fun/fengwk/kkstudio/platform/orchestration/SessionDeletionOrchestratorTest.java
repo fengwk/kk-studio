@@ -16,16 +16,19 @@ import org.mockito.InOrder;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.dao.DataIntegrityViolationException;
 
-import fun.fengwk.kkstudio.harness.runtime.session.Session;
-import fun.fengwk.kkstudio.harness.runtime.store.EntryStore;
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.store.JoinStore;
-import fun.fengwk.kkstudio.harness.runtime.store.SessionStore;
-import fun.fengwk.kkstudio.harness.runtime.store.ThreadStore;
-import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.api.compaction.CompactionConfig;
+import fun.fengwk.kkstudio.harness.api.session.Session;
+import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
+import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
+import fun.fengwk.kkstudio.harness.spi.store.EntryStore;
+import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.spi.store.JoinStore;
+import fun.fengwk.kkstudio.harness.spi.store.SessionStore;
+import fun.fengwk.kkstudio.harness.spi.store.ThreadStore;
 import fun.fengwk.kkstudio.platform.chat.Chat;
 import fun.fengwk.kkstudio.platform.chat.ChatRepository;
 import fun.fengwk.kkstudio.platform.chat.ChatSessionRepository;
@@ -37,6 +40,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -74,7 +78,7 @@ class SessionDeletionOrchestratorTest {
   private ChatRepository chatRepository;
   private IssueAgentOwnership issueAgentOwnership;
   private ObjectProvider<IssueAgentOwnership> issueAgentOwnerships;
-  private ObjectProvider<HarnessStore> stores;
+  private ObjectProvider<HarnessRuntime> runtimes;
   private HarnessStore store;
   private HarnessStore.Transaction transaction;
   private SessionStore sessionStore;
@@ -98,7 +102,7 @@ class SessionDeletionOrchestratorTest {
     chatRepository = mock(ChatRepository.class);
     issueAgentOwnership = mock(IssueAgentOwnership.class);
     issueAgentOwnerships = mock(ObjectProvider.class);
-    stores = mock(ObjectProvider.class);
+    runtimes = mock(ObjectProvider.class);
     store = mock(HarnessStore.class);
     transaction = mock(HarnessStore.Transaction.class);
     sessionStore = mock(SessionStore.class);
@@ -111,7 +115,9 @@ class SessionDeletionOrchestratorTest {
     when(transaction.entries()).thenReturn(entryStore);
     when(transaction.threads()).thenReturn(threadStore);
     when(transaction.joins()).thenReturn(joinStore);
-    when(stores.getIfAvailable()).thenReturn(store);
+    when(runtimes.getIfAvailable())
+        .thenReturn(
+            new HarnessRuntime(store, new DriverRegistry(), () -> CompactionConfig.DEFAULT));
     when(store.transaction(any()))
         .thenAnswer(
             invocation -> {
@@ -144,7 +150,7 @@ class SessionDeletionOrchestratorTest {
 
     service =
         new SessionDeletionOrchestrator(
-            chatSessionRepository, chatRepository, issueAgentOwnerships, stores, refManager);
+            chatSessionRepository, chatRepository, issueAgentOwnerships, runtimes, refManager);
   }
 
   @Test
@@ -225,6 +231,22 @@ class SessionDeletionOrchestratorTest {
   }
 
   @Test
+  void deletesPresentSessionWithoutThreads() {
+    // 无 Thread 的 Session 仍须删除归属、释放 blob 并删除 Entry 和 Session。
+    when(chatSessionRepository.listSessionIds(CHAT_ID)).thenReturn(List.of(SESSION_1));
+    putSession(SESSION_1);
+    when(refManager.listBlobIds(SESSION_1)).thenReturn(List.of(BLOB_1));
+
+    service.deleteSessionsByOwner(CHAT_OWNER);
+
+    verify(chatSessionRepository).deleteBySessionId(SESSION_1);
+    verify(refManager).releaseRef(SESSION_1, BLOB_1);
+    verify(entryStore).delete(SESSION_1);
+    verify(sessionStore).delete(SESSION_1);
+    verify(threadStore, never()).delete(any());
+  }
+
+  @Test
   void deletesTaskChildSessionsAndParentlessForksInTheSameTree() {
     // 测试意图：task 子 Session 没有 owner relation，且其中可能有另一入口建立的无父 root fork；
     // 闭包必须以 Session 为单位推进，才能把整棵树（含 fork）一起删除，而不是留下悬挂 join/History。
@@ -282,24 +304,35 @@ class SessionDeletionOrchestratorTest {
   }
 
   @Test
-  void ownerWithoutSessionsReturnsBeforeStoreLookup() {
+  void ownerWithoutSessionsReturnsBeforeRuntimeLookup() {
     when(chatSessionRepository.listSessionIds(CHAT_ID)).thenReturn(List.of());
 
     service.deleteSessionsByOwner(CHAT_OWNER);
 
-    verify(stores, never()).getIfAvailable();
+    verify(runtimes, never()).getIfAvailable();
     verifyNoInteractions(store, transaction, refManager);
   }
 
   @Test
-  void missingStoreFailsBeforeOpeningDeletionTransaction() {
+  void missingRuntimeFailsBeforeOpeningDeletionTransaction() {
     when(chatSessionRepository.listSessionIds(CHAT_ID)).thenReturn(List.of(SESSION_1));
-    when(stores.getIfAvailable()).thenReturn(null);
+    when(runtimes.getIfAvailable()).thenReturn(null);
 
     assertThrows(IllegalStateException.class, () -> service.deleteSessionsByOwner(CHAT_OWNER));
 
     verifyNoInteractions(transaction, refManager);
     verify(chatSessionRepository, never()).deleteBySessionId(any());
+  }
+
+  @Test
+  void missingBoundThreadFailsBeforeDeletion() {
+    // 稳定绑定指向缺失 Thread 是不变量破坏，不能静默当作空会话。
+    assertThrows(
+        NoSuchElementException.class, () -> service.deleteSessionsByOwner(ISSUE_AGENT_OWNER));
+
+    verify(issueAgentOwnership, never()).deleteBinding(any());
+    verify(sessionStore, never()).delete(any());
+    verifyNoInteractions(refManager);
   }
 
   /** Run 仍引用绑定/Thread 时归属行删除被 FK RESTRICT 拒绝：深删除必须整体失败且不触碰 Thread/Entry/Session，绝无绕过业务清理的硬删。 */
@@ -329,12 +362,12 @@ class SessionDeletionOrchestratorTest {
         NullPointerException.class,
         () ->
             new SessionDeletionOrchestrator(
-                null, chatRepository, issueAgentOwnerships, stores, refManager));
+                null, chatRepository, issueAgentOwnerships, runtimes, refManager));
     assertThrows(
         NullPointerException.class,
         () ->
             new SessionDeletionOrchestrator(
-                chatSessionRepository, chatRepository, issueAgentOwnerships, stores, null));
+                chatSessionRepository, chatRepository, issueAgentOwnerships, runtimes, null));
     assertThrows(NullPointerException.class, () -> service.deleteSessionsByOwner(null));
   }
 

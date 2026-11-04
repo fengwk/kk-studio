@@ -8,6 +8,7 @@ org.springframework.boot.transaction.autoconfigure.TransactionAutoConfiguration
 org.springframework.boot.transaction.autoconfigure.TransactionManagerCustomizationAutoConfiguration
 fun.fengwk.kkstudio.project.ProjectAutoConfiguration
 fun.fengwk.kkstudio.ide.IdeAutoConfiguration
+fun.fengwk.kkstudio.canvas.http.CanvasHttpAutoConfiguration
 fun.fengwk.kkstudio.canvas.infra.CanvasInfraAutoConfiguration
 fun.fengwk.kkstudio.canvas.infra.platform.CanvasPlatformAutoConfiguration
 fun.fengwk.kkstudio.plugin.comfyui.ComfyuiAutoConfiguration

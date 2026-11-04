@@ -22,6 +22,7 @@ import fun.fengwk.kkstudio.common.result.BinaryResultContent;
 import fun.fengwk.kkstudio.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.common.result.TextResultContent;
 import fun.fengwk.kkstudio.common.schema.InputSchema;
+import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.contributor.api.BoundEnvironment;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
@@ -37,17 +38,16 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityI
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTerminationCause;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityUnavailableException;
-import fun.fengwk.kkstudio.harness.runtime.admission.ConcurrencyAdmission;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
-import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
-import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
-import fun.fengwk.kkstudio.harness.runtime.processor.ToolResultSizeLimits;
+import fun.fengwk.kkstudio.harness.spi.ToolGateway;
+import fun.fengwk.kkstudio.harness.spi.ToolInvocationRequest;
+import fun.fengwk.kkstudio.harness.spi.ToolResultSizeLimits;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalog;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.catalog.tool.TestRuntimeToolCatalogSource;
+import fun.fengwk.kkstudio.platform.harness.admission.ConcurrencyAdmission;
+import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionAction;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -961,7 +961,7 @@ class ToolExecutionGatewayRunTest {
     ToolGateway.ReattachExecution reattach =
         new ToolGateway.ReattachExecution(
             UUID.randomUUID(),
-            UUID.randomUUID(),
+            ToolGatewayTestSupport.THREAD_ID,
             request,
             ToolGatewayTestSupport.ENV_A,
             remoteExecutionId,
@@ -1023,7 +1023,7 @@ class ToolExecutionGatewayRunTest {
     ToolGateway.ReattachExecution reattach =
         new ToolGateway.ReattachExecution(
             UUID.randomUUID(),
-            UUID.randomUUID(),
+            ToolGatewayTestSupport.THREAD_ID,
             request,
             ToolGatewayTestSupport.ENV_A,
             UUID.randomUUID(),
@@ -1043,7 +1043,7 @@ class ToolExecutionGatewayRunTest {
     ToolGateway.ReattachExecution reattach =
         new ToolGateway.ReattachExecution(
             UUID.randomUUID(),
-            UUID.randomUUID(),
+            ToolGatewayTestSupport.THREAD_ID,
             request,
             ToolGatewayTestSupport.ENV_A,
             UUID.randomUUID(),
@@ -1074,7 +1074,7 @@ class ToolExecutionGatewayRunTest {
     ToolGateway.ReattachExecution reattach =
         new ToolGateway.ReattachExecution(
             UUID.randomUUID(),
-            UUID.randomUUID(),
+            ToolGatewayTestSupport.THREAD_ID,
             request,
             ToolGatewayTestSupport.ENV_A,
             UUID.randomUUID(),
@@ -1104,7 +1104,7 @@ class ToolExecutionGatewayRunTest {
     ToolGateway.ReattachExecution reattach =
         new ToolGateway.ReattachExecution(
             UUID.randomUUID(),
-            UUID.randomUUID(),
+            ToolGatewayTestSupport.THREAD_ID,
             request,
             ToolGatewayTestSupport.ENV_A,
             UUID.randomUUID(),

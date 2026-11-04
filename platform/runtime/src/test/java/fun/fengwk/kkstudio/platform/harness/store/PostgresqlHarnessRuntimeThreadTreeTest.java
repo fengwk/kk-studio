@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.platform.harness.store;
 
 import fun.fengwk.kkstudio.harness.builtin.runtime.HarnessRuntimeThreadTreeContract;
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 
 /** 真实 PostgreSQL 上复用关系树查询契约，覆盖多节点锁序与只读投影。 */
 class PostgresqlHarnessRuntimeThreadTreeTest extends HarnessRuntimeThreadTreeContract {

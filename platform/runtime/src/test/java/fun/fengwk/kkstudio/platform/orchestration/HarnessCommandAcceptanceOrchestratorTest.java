@@ -25,39 +25,31 @@ import org.mockito.InOrder;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.dao.DataIntegrityViolationException;
 
+import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
+import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
+import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
+import fun.fengwk.kkstudio.harness.api.command.GoalCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
+import fun.fengwk.kkstudio.harness.api.command.SetAgentCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
+import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.api.history.Entry;
+import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
+import fun.fengwk.kkstudio.harness.api.history.ToolResultMetadata;
+import fun.fengwk.kkstudio.harness.api.history.ToolResultStatus;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.api.session.AttachmentMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.ResourceMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.Session;
+import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.model.ImageInputTier;
-import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
-import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
-import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
-import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
-import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
-import fun.fengwk.kkstudio.harness.runtime.history.Entry;
-import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
-import fun.fengwk.kkstudio.harness.runtime.history.ToolResultMetadata;
-import fun.fengwk.kkstudio.harness.runtime.history.ToolResultStatus;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
-import fun.fengwk.kkstudio.harness.runtime.session.AttachmentMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.Session;
-import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.store.EntryStore;
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.store.SessionStore;
-import fun.fengwk.kkstudio.harness.runtime.store.ThreadStore;
-import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.GoalCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
+import fun.fengwk.kkstudio.harness.spi.AcceptancePreflight;
 import fun.fengwk.kkstudio.platform.chat.Chat;
 import fun.fengwk.kkstudio.platform.chat.ChatRepository;
 import fun.fengwk.kkstudio.platform.chat.ChatSession;
@@ -74,7 +66,6 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.function.Function;
 
 /**
  * 产品命令接受编排的单元契约。
@@ -117,13 +108,7 @@ class HarnessCommandAcceptanceOrchestratorTest {
   private ChatRepository chatRepository;
   private IssueAgentOwnership issueAgentOwnership;
   private ObjectProvider<IssueAgentOwnership> issueAgentOwnerships;
-  private ObjectProvider<HarnessStore> stores;
   private ObjectProvider<HarnessRuntime> runtimes;
-  private HarnessStore store;
-  private HarnessStore.Transaction transaction;
-  private SessionStore sessionStore;
-  private EntryStore entryStore;
-  private ThreadStore threadStore;
   private HarnessRuntime runtime;
   private StorageUploadService uploadService;
   private SessionBlobRefManager refManager;
@@ -138,31 +123,14 @@ class HarnessCommandAcceptanceOrchestratorTest {
     chatRepository = mock(ChatRepository.class);
     issueAgentOwnership = mock(IssueAgentOwnership.class);
     issueAgentOwnerships = mock(ObjectProvider.class);
-    stores = mock(ObjectProvider.class);
     runtimes = mock(ObjectProvider.class);
-    store = mock(HarnessStore.class);
-    transaction = mock(HarnessStore.Transaction.class);
-    sessionStore = mock(SessionStore.class);
-    entryStore = mock(EntryStore.class);
-    threadStore = mock(ThreadStore.class);
-    when(transaction.sessions()).thenReturn(sessionStore);
-    when(transaction.entries()).thenReturn(entryStore);
-    when(transaction.threads()).thenReturn(threadStore);
     runtime = mock(HarnessRuntime.class);
     uploadService = mock(StorageUploadService.class);
     refManager = mock(SessionBlobRefManager.class);
     blobManager = mock(StorageBlobManager.class);
     accepted = mock(AcceptedCommands.class);
 
-    when(stores.getIfAvailable()).thenReturn(store);
     when(runtimes.getIfAvailable()).thenReturn(runtime);
-    when(store.transaction(any()))
-        .thenAnswer(
-            invocation -> {
-              Function<HarnessStore.Transaction, ?> callback = invocation.getArgument(0);
-              return callback.apply(transaction);
-            });
-    when(sessionStore.find(any())).thenReturn(Optional.empty());
     when(chatRepository.lockForKeyShare(CHAT_ID)).thenReturn(mock(Chat.class));
 
     when(issueAgentOwnerships.getIfAvailable()).thenReturn(issueAgentOwnership);
@@ -176,7 +144,6 @@ class HarnessCommandAcceptanceOrchestratorTest {
             chatSessionRepository,
             chatRepository,
             issueAgentOwnerships,
-            stores,
             runtimes,
             uploadService,
             refManager,
@@ -198,7 +165,7 @@ class HarnessCommandAcceptanceOrchestratorTest {
     AcceptancePreflight chatPreflight = acceptAndCapturePreflight(CHAT_OWNER, chatCommand);
     List<NewThreadCommand> chatPrepared =
         chatPreflight.prepare(
-            transaction, new Session(SESSION_ID, "session", NOW), chatCommand.commands());
+            new Session(SESSION_ID, "session", NOW), chatCommand.commands(), List.of());
 
     assertSame(setAgent, chatPrepared.getFirst());
     assertEquals(user.idempotencyKey(), chatPrepared.get(1).idempotencyKey());
@@ -214,7 +181,7 @@ class HarnessCommandAcceptanceOrchestratorTest {
     AcceptancePreflight agentPreflight = acceptAndCapturePreflight(ISSUE_AGENT_OWNER, agentCommand);
     List<NewThreadCommand> agentPrepared =
         agentPreflight.prepare(
-            transaction, new Session(SESSION_ID, "agent session", NOW), agentCommand.commands());
+            new Session(SESSION_ID, "agent session", NOW), agentCommand.commands(), List.of());
 
     assertEquals(1, agentPrepared.size());
     assertEquals(user.idempotencyKey(), agentPrepared.getFirst().idempotencyKey());
@@ -224,8 +191,7 @@ class HarnessCommandAcceptanceOrchestratorTest {
   /** 已存在 Session（精确 replay）与 NEW_THREAD 都必须先锁 owner，再验证目标 Session 由该 owner 持有。 */
   @Test
   void authorizesExistingSessionAndNewThreadTargetsForTheirOwners() {
-    when(sessionStore.find(SESSION_ID))
-        .thenReturn(Optional.of(new Session(SESSION_ID, "session", NOW)));
+    when(runtime.sessionExists(SESSION_ID)).thenReturn(true);
     when(chatSessionRepository.findBySessionId(SESSION_ID))
         .thenReturn(new ChatSession(SESSION_ID, CHAT_ID));
     AcceptCommandsCommand replay = newSession(THREAD_ID, user(new TextMessageContent("replay")));
@@ -240,7 +206,7 @@ class HarnessCommandAcceptanceOrchestratorTest {
     assertSame(accepted, service.accept(CHAT_OWNER, entry));
 
     // Issue+Agent：绑定 Thread 解析出的 Session 必须与目标 Session 一致；同 Session 内另开 Thread 也允许。
-    when(threadStore.find(THREAD_ID)).thenReturn(Optional.of(thread(THREAD_ID, SESSION_ID)));
+    when(runtime.findThreadSessionId(THREAD_ID)).thenReturn(Optional.of(SESSION_ID));
     AcceptCommandsCommand siblingThread =
         new AcceptCommandsCommand(
             new AcceptCommandsTarget.NewThread(
@@ -289,7 +255,7 @@ class HarnessCommandAcceptanceOrchestratorTest {
     List<NewThreadCommand> prepared =
         captor
             .getValue()
-            .prepare(transaction, new Session(SESSION_ID, "session", NOW), command.commands());
+            .prepare(new Session(SESSION_ID, "session", NOW), command.commands(), List.of());
     UserMessageCommandPayload payload =
         assertInstanceOf(UserMessageCommandPayload.class, prepared.getFirst().payload());
     ResourceMessageContent resource =
@@ -355,8 +321,7 @@ class HarnessCommandAcceptanceOrchestratorTest {
   /** Session 已由另一 owner 持有时，NEW_SESSION 不能被当作 replay 接管。 */
   @Test
   void rejectsNewSessionWhenSessionIsOwnedByAnotherOwner() {
-    when(sessionStore.find(SESSION_ID))
-        .thenReturn(Optional.of(new Session(SESSION_ID, "session", NOW)));
+    when(runtime.sessionExists(SESSION_ID)).thenReturn(true);
     when(chatSessionRepository.findBySessionId(SESSION_ID))
         .thenReturn(new ChatSession(SESSION_ID, OTHER_CHAT_ID));
 
@@ -401,7 +366,7 @@ class HarnessCommandAcceptanceOrchestratorTest {
         IllegalStateException.class,
         () ->
             chatPreflight.prepare(
-                transaction, new Session(SESSION_ID, "session", NOW), chatCommand.commands()));
+                new Session(SESSION_ID, "session", NOW), chatCommand.commands(), List.of()));
 
     when(chatSessionRepository.insert(SESSION_ID, CHAT_ID))
         .thenThrow(new DataIntegrityViolationException("duplicate session owner"));
@@ -409,7 +374,7 @@ class HarnessCommandAcceptanceOrchestratorTest {
         IllegalStateException.class,
         () ->
             chatPreflight.prepare(
-                transaction, new Session(SESSION_ID, "session", NOW), chatCommand.commands()));
+                new Session(SESSION_ID, "session", NOW), chatCommand.commands(), List.of()));
   }
 
   /** Issue+Agent Thread 的 Goal 不再由产品入口拒绝：绑定 Session 内允许设置或清除 Branch Goal。 */
@@ -417,7 +382,7 @@ class HarnessCommandAcceptanceOrchestratorTest {
   void acceptsGoalCommandsForIssueAgentThreads() {
     NewThreadCommand goal =
         new NewThreadCommand(new GoalCommandPayload("ship the release"), id(21));
-    when(threadStore.find(THREAD_ID)).thenReturn(Optional.of(thread(THREAD_ID, SESSION_ID)));
+    when(runtime.findThreadSessionId(THREAD_ID)).thenReturn(Optional.of(SESSION_ID));
 
     assertSame(
         accepted,
@@ -457,7 +422,7 @@ class HarnessCommandAcceptanceOrchestratorTest {
     AcceptancePreflight preflight = acceptAndCapturePreflight(CHAT_OWNER, command);
 
     List<NewThreadCommand> prepared =
-        preflight.prepare(transaction, new Session(SESSION_ID, "session", NOW), command.commands());
+        preflight.prepare(new Session(SESSION_ID, "session", NOW), command.commands(), List.of());
 
     NewThreadCommand durable = prepared.getFirst();
     assertEquals(raw.idempotencyKey(), durable.idempotencyKey());
@@ -545,7 +510,7 @@ class HarnessCommandAcceptanceOrchestratorTest {
         IllegalArgumentException.class,
         () ->
             preflight.prepare(
-                transaction, new Session(SESSION_ID, "session", NOW), command.commands()));
+                new Session(SESSION_ID, "session", NOW), command.commands(), List.of()));
 
     doThrow(new StorageVerificationException("upload is pending"))
         .when(uploadService)
@@ -554,7 +519,7 @@ class HarnessCommandAcceptanceOrchestratorTest {
         IllegalArgumentException.class,
         () ->
             preflight.prepare(
-                transaction, new Session(SESSION_ID, "session", NOW), command.commands()));
+                new Session(SESSION_ID, "session", NOW), command.commands(), List.of()));
     verify(refManager, never()).retainRef(any(), any());
     verify(uploadService, never()).delete(any());
   }
@@ -573,11 +538,11 @@ class HarnessCommandAcceptanceOrchestratorTest {
         IllegalArgumentException.class,
         () ->
             preflight.prepare(
-                transaction, new Session(SESSION_ID, "session", NOW), command.commands()));
+                new Session(SESSION_ID, "session", NOW), command.commands(), List.of()));
 
     when(refManager.contains(SESSION_ID, BLOB_ID)).thenReturn(true);
     List<NewThreadCommand> prepared =
-        preflight.prepare(transaction, new Session(SESSION_ID, "session", NOW), command.commands());
+        preflight.prepare(new Session(SESSION_ID, "session", NOW), command.commands(), List.of());
     UserMessageCommandPayload payload =
         assertInstanceOf(UserMessageCommandPayload.class, prepared.getFirst().payload());
     assertSame(resource, payload.message().contents().getFirst());
@@ -585,24 +550,19 @@ class HarnessCommandAcceptanceOrchestratorTest {
   }
 
   @Test
-  void requiresRuntimeAndStoreBeforeAcceptance() {
-    // 缺 Runtime 或 Store 时部署必须 fail closed，不能返回伪成功。
+  void requiresRuntimeBeforeAcceptance() {
+    // 缺 Runtime 时部署必须 fail closed，不能返回伪成功。
     when(runtimes.getIfAvailable()).thenReturn(null);
     assertThrows(
         IllegalStateException.class,
         () -> service.accept(CHAT_OWNER, newSession(THREAD_ID, user(new TextMessageContent("r")))));
 
-    when(runtimes.getIfAvailable()).thenReturn(runtime);
-    when(stores.getIfAvailable()).thenReturn(null);
-    assertThrows(
-        IllegalStateException.class,
-        () -> service.accept(CHAT_OWNER, newSession(THREAD_ID, user(new TextMessageContent("s")))));
     verify(runtime, never()).acceptCommands(any(), any());
   }
 
   @Test
   void rejectsNullDependenciesAndNullOwner() {
-    // 强依赖验证：各 Repository、owner provider、Store、Runtime、Upload service、Session ref manager 与 Blob
+    // 强依赖验证：各 Repository、owner provider、Runtime、Upload service、Session ref manager 与 Blob
     // manager 必须非空注入。
     assertThrows(
         NullPointerException.class,
@@ -611,7 +571,6 @@ class HarnessCommandAcceptanceOrchestratorTest {
                 null,
                 chatRepository,
                 issueAgentOwnerships,
-                stores,
                 runtimes,
                 uploadService,
                 refManager,
@@ -623,7 +582,6 @@ class HarnessCommandAcceptanceOrchestratorTest {
                 chatSessionRepository,
                 chatRepository,
                 issueAgentOwnerships,
-                stores,
                 runtimes,
                 null,
                 refManager,
@@ -635,7 +593,6 @@ class HarnessCommandAcceptanceOrchestratorTest {
                 chatSessionRepository,
                 chatRepository,
                 issueAgentOwnerships,
-                stores,
                 runtimes,
                 uploadService,
                 refManager,
@@ -653,14 +610,14 @@ class HarnessCommandAcceptanceOrchestratorTest {
   void sessionForkCreatesChatOwnershipAndRetainsCopiedResources() {
     stubOwnedSourceSession(SESSION_ID);
     when(chatSessionRepository.insert(NEW_SESSION_ID, CHAT_ID)).thenReturn(true);
-    when(entryStore.loadBySession(NEW_SESSION_ID))
-        .thenReturn(List.of(copiedResourceEntry(), copiedToolResultEntry()));
     AcceptCommandsCommand command = sessionFork(user(new TextMessageContent("fork")));
 
     AcceptancePreflight preflight = acceptAndCapturePreflight(CHAT_OWNER, command);
     List<NewThreadCommand> prepared =
         preflight.prepare(
-            transaction, new Session(NEW_SESSION_ID, "forked", NOW), command.commands());
+            new Session(NEW_SESSION_ID, "forked", NOW),
+            command.commands(),
+            List.of(copiedResourceEntry(), copiedToolResultEntry()));
 
     assertEquals(1, prepared.size());
     verify(chatSessionRepository).insert(NEW_SESSION_ID, CHAT_ID);
@@ -673,7 +630,6 @@ class HarnessCommandAcceptanceOrchestratorTest {
   void sessionForkInitialMessageMayReuseCopiedBlobButRejectsForeignBlob() {
     stubOwnedSourceSession(SESSION_ID);
     when(chatSessionRepository.insert(NEW_SESSION_ID, CHAT_ID)).thenReturn(true);
-    when(entryStore.loadBySession(NEW_SESSION_ID)).thenReturn(List.of(copiedResourceEntry()));
     when(refManager.contains(NEW_SESSION_ID, COPIED_BLOB_ID)).thenReturn(true);
     when(refManager.contains(NEW_SESSION_ID, FOREIGN_BLOB_ID)).thenReturn(false);
 
@@ -682,7 +638,9 @@ class HarnessCommandAcceptanceOrchestratorTest {
     AcceptancePreflight reusePreflight = acceptAndCapturePreflight(CHAT_OWNER, reuse);
     List<NewThreadCommand> prepared =
         reusePreflight.prepare(
-            transaction, new Session(NEW_SESSION_ID, "forked", NOW), reuse.commands());
+            new Session(NEW_SESSION_ID, "forked", NOW),
+            reuse.commands(),
+            List.of(copiedResourceEntry()));
     assertEquals(1, prepared.size());
 
     AcceptCommandsCommand foreign =
@@ -692,7 +650,9 @@ class HarnessCommandAcceptanceOrchestratorTest {
         IllegalArgumentException.class,
         () ->
             foreignPreflight.prepare(
-                transaction, new Session(NEW_SESSION_ID, "forked", NOW), foreign.commands()));
+                new Session(NEW_SESSION_ID, "forked", NOW),
+                foreign.commands(),
+                List.of(copiedResourceEntry())));
 
     verify(refManager, never()).retainRef(NEW_SESSION_ID, FOREIGN_BLOB_ID);
   }
@@ -712,8 +672,7 @@ class HarnessCommandAcceptanceOrchestratorTest {
   /** 会话 fork 的来源 Session 必须由该 Chat 持有：别人的 Session 一律拒绝且零写入。 */
   @Test
   void rejectsSessionForkOfUnownedSourceSession() {
-    when(threadStore.find(SOURCE_THREAD_ID))
-        .thenReturn(Optional.of(thread(SOURCE_THREAD_ID, SESSION_ID)));
+    when(runtime.findThreadSessionId(SOURCE_THREAD_ID)).thenReturn(Optional.of(SESSION_ID));
     when(chatSessionRepository.findBySessionId(SESSION_ID))
         .thenReturn(new ChatSession(SESSION_ID, OTHER_CHAT_ID));
 
@@ -739,8 +698,7 @@ class HarnessCommandAcceptanceOrchestratorTest {
   }
 
   private void stubOwnedSourceSession(UUID sessionId) {
-    when(threadStore.find(SOURCE_THREAD_ID))
-        .thenReturn(Optional.of(thread(SOURCE_THREAD_ID, sessionId)));
+    when(runtime.findThreadSessionId(SOURCE_THREAD_ID)).thenReturn(Optional.of(sessionId));
     when(chatSessionRepository.findBySessionId(sessionId))
         .thenReturn(new ChatSession(sessionId, CHAT_ID));
   }
@@ -813,7 +771,7 @@ class HarnessCommandAcceptanceOrchestratorTest {
     return assertInstanceOf(
         UserMessageCommandPayload.class,
         preflight
-            .prepare(transaction, new Session(SESSION_ID, "session", NOW), command.commands())
+            .prepare(new Session(SESSION_ID, "session", NOW), command.commands(), List.of())
             .getFirst()
             .payload());
   }
@@ -866,26 +824,6 @@ class HarnessCommandAcceptanceOrchestratorTest {
     blob.setMediaType(mediaType);
     blob.setState(state);
     return blob;
-  }
-
-  private static ThreadState thread(UUID threadId, UUID sessionId) {
-    return new ThreadState(
-        threadId,
-        sessionId,
-        null,
-        ENTRY_ID,
-        "0".repeat(64),
-        "thread",
-        threadId,
-        false,
-        SpawnTrigger.USER,
-        ThreadConstraints.NONE,
-        ThreadExecutionControl.RUNNABLE,
-        0L,
-        1,
-        0,
-        NOW,
-        NOW);
   }
 
   private static UUID id(long value) {

@@ -19,17 +19,17 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
-import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
-import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
-import fun.fengwk.kkstudio.harness.runtime.history.EntryPayload;
-import fun.fengwk.kkstudio.harness.runtime.history.EntryType;
-import fun.fengwk.kkstudio.harness.runtime.history.HistoryEntryPayloadJsonCodec;
-import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
-import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
-import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
-import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
-import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.api.entry.TurnEndOutcome;
+import fun.fengwk.kkstudio.harness.api.entry.TurnStartReason;
+import fun.fengwk.kkstudio.harness.api.history.EntryPayload;
+import fun.fengwk.kkstudio.harness.api.history.EntryType;
+import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
+import fun.fengwk.kkstudio.harness.api.history.RootPayload;
+import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
+import fun.fengwk.kkstudio.harness.api.history.TurnEndReason;
+import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.codec.HistoryEntryPayloadJsonCodec;
 import fun.fengwk.kkstudio.platform.orchestration.OwnerRef;
 import fun.fengwk.kkstudio.platform.orchestration.SessionDeletionOrchestrator;
 import fun.fengwk.kkstudio.platform.storage.StorageMaintenance;
@@ -61,7 +61,7 @@ import java.util.concurrent.atomic.AtomicLong;
  *       仍可用；
  *   <li><b>Issue 删除释放全部证据引用</b>：深删除 Issue 释放其持有的证据 Blob 引用，相关表行按依赖顺序清理；
  *   <li><b>Project 删除释放全部引用</b>：证据行消失、Issue 与 Session 引用都释放、Blob 归零切 DELETING，且删除顺序满足外键约束；
- *   <li><b>活跃或 UNKNOWN 门禁拒绝删除</b>：存在活动 Run 或未核查 UNKNOWN 时严格拒绝删除 Project / Issue。
+ *   <li><b>活跃 Run 拒绝删除</b>：存在活动 Run 时严格拒绝删除 Project / Issue；已收尾的 FAILED/ERROR 暂停不阻止深删除。
  * </ul>
  */
 @AutoConfigureMockMvc
@@ -242,7 +242,7 @@ class IssueEvidenceLifecycleIntegrationTest extends WebPostgresTestSupport {
   }
 
   @Test
-  void deleteProjectRejectsWhenIssueHasActiveRunOrUnknownGate() {
+  void deleteProjectRejectsWhenIssueHasActiveRun() {
     String executor = createTestAgent();
     Fixture fixture = createIssue(executor);
     IssueRun run = issueRunService.acceptRun(fixture.issueId(), "req:accept:" + UUID.randomUUID());
@@ -254,29 +254,14 @@ class IssueEvidenceLifecycleIntegrationTest extends WebPostgresTestSupport {
             projectService.deleteProject(
                 fixture.projectId(), projectService.getProject(fixture.projectId()).getVersion()));
 
-    // 置为 UNKNOWN 门禁
+    // 结果未知的失败收尾（FAILED + ERROR 暂停）不是删除门禁：只要 Run 已收尾就可以深删除
     UUID endEntryId = appendHistoryEntry(run.getThreadId(), run.getSessionId());
-    issueRunService.markUnknown(
+    issueRunService.failRun(
         run.getId(),
         run.getVersion(),
         "req:unk:" + UUID.randomUUID(),
         endEntryId,
-        "Unknown failure");
-
-    // UNKNOWN 门禁拒绝删除
-    assertThrows(
-        ProjectValidationException.class,
-        () ->
-            projectService.deleteProject(
-                fixture.projectId(), projectService.getProject(fixture.projectId()).getVersion()));
-
-    // 人工核查后解除 UNKNOWN
-    Issue unkIssue = issueEditingService.getIssue(fixture.issueId());
-    issueLifecycleService.resolveUnknown(
-        unkIssue.getId(),
-        unkIssue.getVersion(),
-        "req:res:" + UUID.randomUUID(),
-        "Manually verified");
+        "Run stopped with in-flight side effects; outcome unknown");
 
     // 现在可以成功删除
     projectService.deleteProject(

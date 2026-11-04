@@ -8,6 +8,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
+
 /** {@link ThreadExecutionControl} 两个持久状态与 {@code isRunnable}/{@code isStopped} 全分支。 */
 class ThreadExecutionControlTest {
 

@@ -18,36 +18,36 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.ObjectProvider;
 
+import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
+import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
+import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
+import fun.fengwk.kkstudio.harness.api.SpawnRequest;
+import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
+import fun.fengwk.kkstudio.harness.api.command.SetAgentCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.SetEnvironmentCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.SetExecutionCommandPayload;
+import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.api.history.Entry;
+import fun.fengwk.kkstudio.harness.api.history.EntryCurrentState;
+import fun.fengwk.kkstudio.harness.api.history.SubagentBinding;
+import fun.fengwk.kkstudio.harness.api.history.TurnCapabilities;
+import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
+import fun.fengwk.kkstudio.harness.api.join.JoinDelivery;
+import fun.fengwk.kkstudio.harness.api.join.ThreadJoin;
+import fun.fengwk.kkstudio.harness.api.session.Session;
+import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.SubagentConfig;
 import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.SubagentTaskAcceptance;
 import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.SubagentTaskRequest;
-import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
-import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
-import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
-import fun.fengwk.kkstudio.harness.runtime.SpawnRequest;
-import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
-import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
-import fun.fengwk.kkstudio.harness.runtime.history.Entry;
-import fun.fengwk.kkstudio.harness.runtime.history.EntryCurrentState;
-import fun.fengwk.kkstudio.harness.runtime.history.SubagentBinding;
-import fun.fengwk.kkstudio.harness.runtime.history.TurnCapabilities;
-import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
-import fun.fengwk.kkstudio.harness.runtime.join.JoinDelivery;
-import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
-import fun.fengwk.kkstudio.harness.runtime.session.Session;
-import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.SetEnvironmentCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.SetExecutionCommandPayload;
 import fun.fengwk.kkstudio.platform.agenttask.AgentTaskService;
 
 import java.time.Instant;
@@ -153,7 +153,7 @@ class SubagentTaskRunnerTest {
     UUID childThreadId =
         SubagentTaskRunner.derive(invocationId, "kk-studio/harness/subagent/thread/");
     AcceptedCommands accepted = accepted(sessionId, childThreadId, false);
-    when(runtime.spawn(any())).thenReturn(accepted);
+    when(runtime.spawn(any(), any())).thenReturn(accepted);
 
     SubagentTaskAcceptance acceptance = runner(config()).accept(request(null, null));
 
@@ -161,7 +161,7 @@ class SubagentTaskRunnerTest {
     assertEquals(childThreadId, acceptance.childThreadId());
     assertFalse(acceptance.replayed());
     ArgumentCaptor<SpawnRequest> spawn = ArgumentCaptor.forClass(SpawnRequest.class);
-    verify(runtime).spawn(spawn.capture());
+    verify(runtime).spawn(spawn.capture(), any());
 
     SpawnRequest accepted1 = spawn.getValue();
     assertEquals(childThreadId, accepted1.threadId());
@@ -193,12 +193,12 @@ class SubagentTaskRunnerTest {
   void explicitMaxTurnsIsFrozenAndCommandKeysAreDeterministic() {
     stubParent(List.of(AGENT));
     AcceptedCommands accepted = accepted(UUID.randomUUID(), UUID.randomUUID(), false);
-    when(runtime.spawn(any())).thenReturn(accepted);
+    when(runtime.spawn(any(), any())).thenReturn(accepted);
 
     runner(config()).accept(request(7, null));
 
     ArgumentCaptor<SpawnRequest> command = ArgumentCaptor.forClass(SpawnRequest.class);
-    verify(runtime).spawn(command.capture());
+    verify(runtime).spawn(command.capture(), any());
     assertEquals(7, command.getValue().budget().maxTurns().intValue());
     // 命令幂等键由 invocation + 槽位稳定派生，重放才能精确命中同一批命令。
     UUID expectedKey =
@@ -248,7 +248,7 @@ class SubagentTaskRunnerTest {
     assertTrue(acceptance.replayed());
     assertEquals(childThreadId, acceptance.childThreadId());
     assertEquals(childSessionId, acceptance.childSessionId());
-    verify(runtime, never()).spawn(any());
+    verify(runtime, never()).spawn(any(), any());
     verify(runtime, never()).getThreadSnapshot(parentThreadId);
   }
 
@@ -284,7 +284,7 @@ class SubagentTaskRunnerTest {
           assertThrows(SubagentTaskRejectedException.class, () -> runner(config()).accept(other));
       assertTrue(rejected.getMessage().contains("different delegation"), rejected.getMessage());
     }
-    verify(runtime, never()).spawn(any());
+    verify(runtime, never()).spawn(any(), any());
   }
 
   @Test
@@ -325,7 +325,7 @@ class SubagentTaskRunnerTest {
 
     // 默认值从 10 变成 99：请求 hash 不含运行期默认值，回放仍然成立。
     assertTrue(runner(new SubagentConfig(3, 4, 0, 99)).accept(request(null, null)).replayed());
-    verify(runtime, never()).spawn(any());
+    verify(runtime, never()).spawn(any(), any());
   }
 
   @Test
@@ -336,13 +336,13 @@ class SubagentTaskRunnerTest {
     ThreadSnapshot child = child(childThreadId, parentThreadId, 9L);
     AcceptedCommands accepted = accepted(UUID.randomUUID(), childThreadId, false);
     when(runtime.getThreadSnapshot(childThreadId)).thenReturn(child);
-    when(runtime.spawn(any())).thenReturn(accepted);
+    when(runtime.spawn(any(), any())).thenReturn(accepted);
 
     SubagentTaskAcceptance acceptance = runner(config()).accept(request(null, childThreadId));
 
     assertEquals(childThreadId, acceptance.childThreadId());
     ArgumentCaptor<SpawnRequest> command = ArgumentCaptor.forClass(SpawnRequest.class);
-    verify(runtime).spawn(command.capture());
+    verify(runtime).spawn(command.capture(), any());
     assertEquals(childThreadId, command.getValue().threadId());
     assertNull(command.getValue().sessionId());
     assertEquals(9L, command.getValue().continuation().expectedNextCommandSequence());
@@ -383,7 +383,7 @@ class SubagentTaskRunnerTest {
             SubagentTaskRejectedException.class, () -> runner(config()).accept(changedAgent));
 
     assertTrue(rejected.getMessage().contains("different delegation"), rejected.getMessage());
-    verify(runtime, never()).spawn(any());
+    verify(runtime, never()).spawn(any(), any());
   }
 
   @Test
@@ -396,7 +396,7 @@ class SubagentTaskRunnerTest {
     ThreadSnapshot freshChild = child(childThreadId, parentThreadId, secondHead, 12L);
     AcceptedCommands accepted = accepted(UUID.randomUUID(), childThreadId, false);
     when(runtime.getThreadSnapshot(childThreadId)).thenReturn(staleChild).thenReturn(freshChild);
-    when(runtime.spawn(any()))
+    when(runtime.spawn(any(), any()))
         .thenThrow(
             new HarnessRuntimeConflictException(
                 HarnessRuntimeConflictException.Reason.STALE_COMMAND_CURSOR, "stale"))
@@ -406,7 +406,7 @@ class SubagentTaskRunnerTest {
 
     assertEquals(childThreadId, acceptance.childThreadId());
     ArgumentCaptor<SpawnRequest> command = ArgumentCaptor.forClass(SpawnRequest.class);
-    verify(runtime, times(2)).spawn(command.capture());
+    verify(runtime, times(2)).spawn(command.capture(), any());
     // 第二次必须使用重新读取的 cursor，而不是第一次的陈旧 cursor。
     assertEquals(secondHead, command.getAllValues().get(1).continuation().expectedHeadEntryId());
   }
@@ -416,7 +416,7 @@ class SubagentTaskRunnerTest {
     // 非游标错误只能复核票据，不得重复提交可能已产生副作用的请求。
     stubParent(List.of(AGENT));
     IllegalStateException failure = new IllegalStateException("store unavailable");
-    when(runtime.spawn(any())).thenThrow(failure);
+    when(runtime.spawn(any(), any())).thenThrow(failure);
 
     SubagentTaskRejectedException rejected =
         assertThrows(
@@ -424,7 +424,7 @@ class SubagentTaskRunnerTest {
             () -> runner(config()).accept(request(null, null)));
 
     assertEquals(failure, rejected.getCause());
-    verify(runtime, times(1)).spawn(any());
+    verify(runtime, times(1)).spawn(any(), any());
   }
 
   @Test
@@ -433,7 +433,7 @@ class SubagentTaskRunnerTest {
     stubParent(List.of(AGENT));
     IllegalStateException submitFailure = new IllegalStateException("store unavailable");
     IllegalStateException replayFailure = new IllegalStateException("join read failed");
-    when(runtime.spawn(any())).thenThrow(submitFailure);
+    when(runtime.spawn(any(), any())).thenThrow(submitFailure);
     when(runtime.findJoin(invocationId))
         .thenReturn(Optional.empty())
         .thenReturn(Optional.empty())
@@ -445,14 +445,14 @@ class SubagentTaskRunnerTest {
 
     assertEquals(replayFailure, thrown);
     assertEquals(List.of(submitFailure), List.of(thrown.getSuppressed()));
-    verify(runtime, times(1)).spawn(any());
+    verify(runtime, times(1)).spawn(any(), any());
   }
 
   @Test
   void nonCursorConflictDoesNotResubmit() {
     // 明确业务冲突没有匹配票据时立即拒绝。
     stubParent(List.of(AGENT));
-    when(runtime.spawn(any()))
+    when(runtime.spawn(any(), any()))
         .thenThrow(
             new HarnessRuntimeConflictException(
                 HarnessRuntimeConflictException.Reason.IDEMPOTENCY_KEY_REUSED,
@@ -461,7 +461,7 @@ class SubagentTaskRunnerTest {
     assertThrows(
         SubagentTaskRejectedException.class, () -> runner(config()).accept(request(null, null)));
 
-    verify(runtime, times(1)).spawn(any());
+    verify(runtime, times(1)).spawn(any(), any());
   }
 
   @Test
@@ -469,7 +469,7 @@ class SubagentTaskRunnerTest {
     stubParent(List.of(AGENT));
     UUID childThreadId =
         SubagentTaskRunner.derive(invocationId, "kk-studio/harness/subagent/thread/");
-    when(runtime.spawn(any()))
+    when(runtime.spawn(any(), any()))
         .thenThrow(
             new HarnessRuntimeConflictException(
                 HarnessRuntimeConflictException.Reason.IDEMPOTENCY_KEY_REUSED, "winner"));
@@ -511,7 +511,7 @@ class SubagentTaskRunnerTest {
 
     // 只提交一次；第二次循环按 join 回放，不产生部分重放也不会重复入队 prompt。
     assertTrue(acceptance.replayed());
-    verify(runtime, times(1)).spawn(any());
+    verify(runtime, times(1)).spawn(any(), any());
   }
 
   @Test
@@ -535,7 +535,7 @@ class SubagentTaskRunnerTest {
             () -> runner(config()).accept(request(null, null)));
     assertTrue(
         missingSibling.getMessage().contains("no longer attached"), missingSibling.getMessage());
-    verify(runtime, never()).spawn(any());
+    verify(runtime, never()).spawn(any(), any());
   }
 
   @Test
@@ -550,7 +550,7 @@ class SubagentTaskRunnerTest {
 
     assertTrue(rejected.getMessage().contains("is not allowed"), rejected.getMessage());
     assertTrue(rejected.getMessage().contains("beta / gamma"), rejected.getMessage());
-    verify(runtime, never()).spawn(any());
+    verify(runtime, never()).spawn(any(), any());
   }
 
   @Test
@@ -601,14 +601,14 @@ class SubagentTaskRunnerTest {
         replayedMissingChild.getMessage().contains("was not found"),
         replayedMissingChild.getMessage());
 
-    verify(runtime, never()).spawn(any());
+    verify(runtime, never()).spawn(any(), any());
   }
 
   @Test
   void exceptionWithoutMessageStillYieldsTypedFailureWithClassName() {
     // 无 message 的 Runtime 拒绝也必须给出可读原因（退回异常类名），不能吞成空消息。
     stubParent(List.of(AGENT));
-    doThrow(new IllegalArgumentException()).when(runtime).spawn(any());
+    doThrow(new IllegalArgumentException()).when(runtime).spawn(any(), any());
 
     SubagentTaskRejectedException rejected =
         assertThrows(
@@ -634,7 +634,7 @@ class SubagentTaskRunnerTest {
     assertEquals(
         "This subagent thread is no longer valid. Dispatch a new task without thread_id.",
         rejected.getMessage());
-    verify(runtime, never()).spawn(any());
+    verify(runtime, never()).spawn(any(), any());
   }
 
   @Test
@@ -653,7 +653,9 @@ class SubagentTaskRunnerTest {
 
     // Runtime 的额度/深度等业务拒绝（IllegalArgumentException）必须收敛为 typed task 失败，让 tool 报错而不是抛 NPE。
     stubParent(List.of(AGENT));
-    doThrow(new IllegalArgumentException("parent join quota exceeded")).when(runtime).spawn(any());
+    doThrow(new IllegalArgumentException("parent join quota exceeded"))
+        .when(runtime)
+        .spawn(any(), any());
     SubagentTaskRejectedException quota =
         assertThrows(
             SubagentTaskRejectedException.class,
@@ -661,7 +663,7 @@ class SubagentTaskRunnerTest {
     assertTrue(quota.getMessage().contains("quota exceeded"), quota.getMessage());
 
     // 父线程在提交前消失同样收敛为 typed 失败。
-    doThrow(new HarnessRuntimeNotFoundException("parent gone")).when(runtime).spawn(any());
+    doThrow(new HarnessRuntimeNotFoundException("parent gone")).when(runtime).spawn(any(), any());
     assertThrows(
         SubagentTaskRejectedException.class, () -> runner(config()).accept(request(null, null)));
   }

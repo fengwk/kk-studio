@@ -6,19 +6,19 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.api.history.EntryPath;
 import fun.fengwk.kkstudio.harness.builtin.port.store.BuiltinStore;
-import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
-import fun.fengwk.kkstudio.harness.runtime.store.CommandStore;
-import fun.fengwk.kkstudio.harness.runtime.store.EntryStore;
-import fun.fengwk.kkstudio.harness.runtime.store.ExecutionExitStore;
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.store.JoinStore;
-import fun.fengwk.kkstudio.harness.runtime.store.SessionStore;
-import fun.fengwk.kkstudio.harness.runtime.store.StopReceiptStore;
-import fun.fengwk.kkstudio.harness.runtime.store.ThreadStore;
-import fun.fengwk.kkstudio.harness.runtime.store.ToolStore;
-import fun.fengwk.kkstudio.harness.runtime.store.WorkStore;
+import fun.fengwk.kkstudio.harness.spi.store.CommandStore;
+import fun.fengwk.kkstudio.harness.spi.store.EntryStore;
+import fun.fengwk.kkstudio.harness.spi.store.ExecutionExitStore;
+import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.spi.store.JoinStore;
+import fun.fengwk.kkstudio.harness.spi.store.SessionStore;
+import fun.fengwk.kkstudio.harness.spi.store.StopReceiptStore;
+import fun.fengwk.kkstudio.harness.spi.store.ThreadStore;
+import fun.fengwk.kkstudio.harness.spi.store.ToolStore;
+import fun.fengwk.kkstudio.harness.spi.store.WorkStore;
 
 import java.lang.reflect.Method;
 import java.time.Instant;

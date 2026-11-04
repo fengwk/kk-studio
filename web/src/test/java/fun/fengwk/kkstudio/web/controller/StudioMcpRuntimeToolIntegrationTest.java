@@ -24,24 +24,28 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.common.result.TextResultContent;
+import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.api.history.Entry;
+import fun.fengwk.kkstudio.harness.api.history.EntryPath;
+import fun.fengwk.kkstudio.harness.api.history.RootPayload;
+import fun.fengwk.kkstudio.harness.api.session.Session;
+import fun.fengwk.kkstudio.harness.api.tool.ToolApproval;
+import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.builtin.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec;
+import fun.fengwk.kkstudio.harness.contributor.api.BranchView;
+import fun.fengwk.kkstudio.harness.contributor.api.CustomStateSnapshot;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
+import fun.fengwk.kkstudio.harness.contributor.api.GoalSnapshot;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
-import fun.fengwk.kkstudio.harness.runtime.history.Entry;
-import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
-import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApproval;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
-import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
-import fun.fengwk.kkstudio.harness.runtime.session.Session;
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.spi.ToolGateway;
+import fun.fengwk.kkstudio.harness.spi.ToolInvocationRequest;
+import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
+import fun.fengwk.kkstudio.harness.tool.TurnMediaCapabilities;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerRepository;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpTool;
 import fun.fengwk.kkstudio.platform.catalog.mcp.runtime.McpToolCatalog;
@@ -70,6 +74,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -107,6 +112,26 @@ public class StudioMcpRuntimeToolIntegrationTest extends WebPostgresTestSupport 
   }
 
   /** 验证动态 MCP 工具从发现、暴露、校验、规划到 ToolGateway 执行的完整生产路径。 */
+  /** 该场景不经过 Harness Processor，因此直接给出空 branch 事实；真实执行仍走生产 ToolExecutionGateway。 */
+  private static BranchView emptyBranchView() {
+    return new BranchView() {
+      @Override
+      public List<CustomStateSnapshot> customEntries(String customType) {
+        return List.of();
+      }
+
+      @Override
+      public Optional<CustomStateSnapshot> latestCustomEntry(String customType) {
+        return Optional.empty();
+      }
+
+      @Override
+      public Optional<GoalSnapshot> goal() {
+        return Optional.empty();
+      }
+    };
+  }
+
   @Test
   public void fullDynamicMcpToolLifecycleFromDiscoveryToExecution() throws Exception {
     // 1. 启动 FakeStreamableHttpMcpServer 并注册带 inputSchema 的 echo 工具
@@ -303,8 +328,14 @@ public class StudioMcpRuntimeToolIntegrationTest extends WebPostgresTestSupport 
     ToolGateway.Execution execution =
         new ToolGateway.Execution(
             invocationId,
-            threadId,
-            rootEntryId,
+            new ToolGateway.ExecutionScope(
+                threadId,
+                sessionId,
+                threadId,
+                sessionId,
+                UUID.randomUUID(),
+                emptyBranchView(),
+                TurnMediaCapabilities.NONE),
             1,
             invocationRequest,
             ToolApproval.notRequired(),

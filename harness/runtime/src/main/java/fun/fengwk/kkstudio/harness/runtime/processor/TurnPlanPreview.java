@@ -1,9 +1,10 @@
 package fun.fengwk.kkstudio.harness.runtime.processor;
 
-import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
-import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
+import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
+import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
+import fun.fengwk.kkstudio.harness.api.command.ThreadCommandType;
+import fun.fengwk.kkstudio.harness.api.entry.TurnStartReason;
+import fun.fengwk.kkstudio.harness.api.history.EntryPath;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -36,7 +37,9 @@ public final class TurnPlanPreview {
       EntryPath sourcePath,
       long nextCommandSequence,
       List<NewThreadCommand> commands,
-      Instant now) {
+      Instant now,
+      boolean childThread,
+      String rootEnvironmentName) {
     Objects.requireNonNull(threadId, "threadId");
     Objects.requireNonNull(sourcePath, "sourcePath");
     Objects.requireNonNull(commands, "commands");
@@ -46,6 +49,11 @@ public final class TurnPlanPreview {
     }
     if (nextCommandSequence <= 0) {
       throw new IllegalArgumentException("nextCommandSequence must be positive");
+    }
+    if (childThread
+        && commands.stream()
+            .anyMatch(command -> command.payload().type() == ThreadCommandType.SET_ENVIRONMENT)) {
+      throw new IllegalArgumentException("only the execution root can set an environment");
     }
     List<ThreadCommand> planned = new ArrayList<>(commands.size());
     for (int i = 0; i < commands.size(); i++) {
@@ -73,8 +81,8 @@ public final class TurnPlanPreview {
             now,
             null,
             false,
-            false,
-            null)
+            childThread,
+            rootEnvironmentName)
         .candidatePath();
   }
 }

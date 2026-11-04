@@ -23,7 +23,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
-import fun.fengwk.kkstudio.web.api.ApiResponse;
+import fun.fengwk.kkstudio.platform.http.ApiResponse;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Map;

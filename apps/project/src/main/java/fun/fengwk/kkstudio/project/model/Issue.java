@@ -36,7 +36,7 @@ public class Issue {
   /** BLOCKED 的业务原因；非 BLOCKED 状态必须为空。 */
   private String blockReason;
 
-  /** 控制暂停原因：USER / ERROR / UNKNOWN；与 {@code pauseDetail} 成对。 */
+  /** 控制暂停原因：USER / ERROR；与 {@code pauseDetail} 成对。 */
   private String pauseReason;
 
   /** 控制暂停详情（非空白）；与 {@code pauseReason} 成对。 */

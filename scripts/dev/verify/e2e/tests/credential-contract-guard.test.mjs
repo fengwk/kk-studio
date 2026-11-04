@@ -1,7 +1,8 @@
 /** Permanent guards for the four-provider real E2E credential boundary. */
 
 import assert from 'node:assert/strict'
-import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
 import path from 'node:path'
 import test from 'node:test'
 
@@ -80,17 +81,13 @@ test('test intent: compose never passes the TEST_ environment', () => {
   assert.ok(!compose.includes('TEST_'))
 })
 
-test('test intent: the sync script reads exactly the allowed credential environments', () => {
-  const source = readFileSync(path.join(REPOSITORY_ROOT, SYNC_SCRIPT), 'utf8')
-  const constants = new Map(
-    [...source.matchAll(/^export const (\w+) = '([^']*)'$/gm)].map((match) => [match[1], match[2]]),
-  )
-  const reads = new Set(
-    [...source.matchAll(/\benv\[(\w+)\]/g)]
-      .map((match) => constants.get(match[1]))
-      .filter((name) => name !== undefined && /^TEST_[A-Z0-9_]+_(?:BASE_URL|API_KEY)$/.test(name)),
-  )
-
-  assert.deepEqual(reads, ALLOWED_CREDENTIAL_ENVIRONMENTS)
-  assert.ok(existsSync(path.join(REPOSITORY_ROOT, SYNC_SCRIPT)))
+test('test intent: the synchronizer exposes exactly the four credential pairs without values', () => {
+  const result = spawnSync(process.execPath, [path.join(REPOSITORY_ROOT, SYNC_SCRIPT), '--list-env'], {
+    encoding: 'utf8', env: { ...process.env, TEST_GOOGLE_API_KEY: 'private-fixture' },
+  })
+  assert.equal(result.status, 0)
+  const names = result.stdout.trim().split('\n')
+  assert.equal(names.length, 8)
+  assert.deepEqual(new Set(names), ALLOWED_CREDENTIAL_ENVIRONMENTS)
+  assert.equal(result.stderr, '')
 })

@@ -1,7 +1,7 @@
 /** Permanent guards for the dev app lifecycle: clean package, runtime work dir, credential scrubbing. */
 
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
@@ -9,6 +9,7 @@ import test from 'node:test'
 import { REPOSITORY_ROOT, cleanEnvironment, functionBody, readText, runBash, shellQuote } from './support/shell.mjs'
 
 const APP_SCRIPT = path.join(REPOSITORY_ROOT, 'scripts/dev/app.sh')
+const ROOT_LIB = path.join(REPOSITORY_ROOT, 'scripts/dev/lib/repo-root.sh')
 const MATRIX_RUNNER = path.join(REPOSITORY_ROOT, 'scripts/dev/verify/e2e/run-matrix.mjs')
 
 // Deleted classes must not survive a dev-requested backend rebuild.
@@ -58,16 +59,23 @@ test('test intent: root discovery is depth independent and overridable', () => {
   const temporary = realpathSync(mkdtempSync(path.join(tmpdir(), 'kk-app-root-')))
   try {
     const checkout = path.join(temporary, 'checkout')
-    mkdirSync(path.join(checkout, '.git'), { recursive: true })
+    mkdirSync(checkout, { recursive: true })
+    writeFileSync(path.join(checkout, '.git'), 'gitdir: /tmp/example\n')
     // 深度 4 与真实 scripts/dev/app.sh 的深度 2 不同：任何固定层级推导都会指向错误目录。
     const nested = path.join(checkout, 'a/b/c/d/app.sh')
     mkdirSync(path.dirname(nested), { recursive: true })
     writeFileSync(nested, source)
+    mkdirSync(path.join(path.dirname(nested), 'lib'))
+    copyFileSync(ROOT_LIB, path.join(path.dirname(nested), 'lib/repo-root.sh'))
+    copyFileSync(path.join(path.dirname(ROOT_LIB), 'http-wait.sh'), path.join(path.dirname(nested), 'lib/http-wait.sh'))
+    mkdirSync(path.join(checkout, 'scripts/dev/lib'), { recursive: true })
+    copyFileSync(path.join(REPOSITORY_ROOT, 'scripts/dev/lib/e2e-credentials.sh'), path.join(checkout, 'scripts/dev/lib/e2e-credentials.sh'))
 
     assert.equal(resolvedRoot(nested, cleanEnvironment()), checkout)
 
     const override = path.join(temporary, 'elsewhere')
-    mkdirSync(override)
+    mkdirSync(path.join(override, 'scripts/dev/lib'), { recursive: true })
+    copyFileSync(path.join(REPOSITORY_ROOT, 'scripts/dev/lib/e2e-credentials.sh'), path.join(override, 'scripts/dev/lib/e2e-credentials.sh'))
     assert.equal(resolvedRoot(nested, { ...cleanEnvironment(), KK_STUDIO_REPO_ROOT: override }), override)
   } finally {
     rmSync(temporary, { recursive: true, force: true })
@@ -80,6 +88,8 @@ test('test intent: an unresolvable root fails closed before any lifecycle comman
     const orphan = path.join(temporary, 'snapshot/scripts/dev/app.sh')
     mkdirSync(path.dirname(orphan), { recursive: true })
     writeFileSync(orphan, readText(APP_SCRIPT))
+    mkdirSync(path.join(path.dirname(orphan), 'lib'))
+    copyFileSync(ROOT_LIB, path.join(path.dirname(orphan), 'lib/repo-root.sh'))
 
     const result = runBash(`source ${shellQuote(orphan)}`, { cwd: '/', env: cleanEnvironment() })
     assert.notEqual(result.status, 0)
@@ -89,28 +99,37 @@ test('test intent: an unresolvable root fails closed before any lifecycle comman
   }
 })
 
+test('test intent: shared resolver honors relative overrides and returns failures to its caller', () => {
+  // Overrides are relative to the invoking cwd, and sourcing the library alone must not exit the shell.
+  const temporary = realpathSync(mkdtempSync(path.join(tmpdir(), 'kk-root-lib-')))
+  try {
+    mkdirSync(path.join(temporary, 'target'))
+    const success = runBash(`source ${shellQuote(ROOT_LIB)}\nresolve_repo_root /\nprintf '%s\\n' "$REPO_ROOT"`, {
+      cwd: temporary, env: { ...cleanEnvironment(), KK_STUDIO_REPO_ROOT: 'target' },
+    })
+    assert.equal(success.status, 0, success.stderr)
+    assert.equal(success.stdout.trim(), path.join(temporary, 'target'))
+    const failure = runBash(`source ${shellQuote(ROOT_LIB)}\nresolve_repo_root / || printf 'failed\\n'`, {
+      cwd: temporary, env: cleanEnvironment(),
+    })
+    assert.equal(failure.status, 0)
+    assert.equal(failure.stdout.trim(), 'failed')
+    assert.match(failure.stderr, /cannot locate the kk-studio repository root/)
+    const invalid = runBash(`source ${shellQuote(ROOT_LIB)}\nresolve_repo_root /`, {
+      cwd: temporary, env: { ...cleanEnvironment(), KK_STUDIO_REPO_ROOT: 'missing' },
+    })
+    assert.notEqual(invalid.status, 0)
+  } finally {
+    rmSync(temporary, { recursive: true, force: true })
+  }
+})
+
 // The dev app lifecycle must never leak host provider credentials into long-lived processes.
 
 test('test intent: long-lived runtime processes scrub every TEST_ input', () => {
-  // The dev lifecycle owns its own scrubber and its own four-pair sync call.
+  // The dev lifecycle uses the shared synchronizer and scrubs long-lived processes.
   const startAll = functionBody(APP_SCRIPT, 'start_all')
-  const sync = functionBody(APP_SCRIPT, 'sync_e2e_provider_credentials')
-  const names = [
-    'TEST_GOOGLE_BASE_URL',
-    'TEST_GOOGLE_API_KEY',
-    'TEST_OPENAI_RESPONSES_BASE_URL',
-    'TEST_OPENAI_RESPONSES_API_KEY',
-    'TEST_ANTHROPIC_BASE_URL',
-    'TEST_ANTHROPIC_API_KEY',
-    'TEST_OPENAI_BASE_URL',
-    'TEST_OPENAI_API_KEY',
-  ]
-  for (const name of names) {
-    assert.ok(sync.includes(`${name}="\${${name}-}"`), name)
-  }
-  // MiniMax 凭据属于 reliability 矩阵，不得进入本机 dev 数据面。
-  assert.ok(!sync.includes('TEST_MINIMAX_BASE_URL='))
-  assert.ok(!sync.includes('TEST_MINIMAX_API_KEY='))
+  assert.ok(startAll.includes('sync_e2e_provider_credentials'))
   assert.ok(startAll.includes('"${test_env_unsets[@]}"'))
 
   const scrubber = functionBody(APP_SCRIPT, 'test_env_unset_args')

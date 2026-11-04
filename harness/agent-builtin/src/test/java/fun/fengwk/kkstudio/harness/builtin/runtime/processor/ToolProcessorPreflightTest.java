@@ -19,23 +19,23 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 
+import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.api.tool.ToolApproval;
+import fun.fengwk.kkstudio.harness.api.tool.ToolApprovalDecision;
+import fun.fengwk.kkstudio.harness.api.tool.ToolEditReview;
+import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
+import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationError;
+import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.environment.capability.ExpectedFile;
 import fun.fengwk.kkstudio.harness.runtime.execution.TestExecutionExitConfirmer;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApproval;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEditReview;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
-import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
 import fun.fengwk.kkstudio.harness.runtime.processor.ProcessResult;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessorConfig;
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
-import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
-import fun.fengwk.kkstudio.harness.runtime.work.Work;
-import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
+import fun.fengwk.kkstudio.harness.spi.ToolGateway;
+import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.spi.work.ClaimedWork;
+import fun.fengwk.kkstudio.harness.spi.work.Work;
+import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 
 import java.lang.reflect.InvocationTargetException;
@@ -176,7 +176,7 @@ class ToolProcessorPreflightTest {
         2, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(1, fixture.gateway.admitCalls);
     assertEquals(fixture.toolInvocationId, fixture.gateway.executions.get(0).invocationId());
-    assertEquals(fixture.baseline.threadId(), fixture.gateway.executions.get(0).threadId());
+    assertEquals(fixture.baseline.threadId(), fixture.gateway.executions.get(0).scope().threadId());
     assertEquals(fixture.request, fixture.gateway.executions.get(0).request());
     assertEquals(0, run.closes.get());
     assertTrue(fixture.processor.hasActiveExecution());
@@ -611,7 +611,7 @@ class ToolProcessorPreflightTest {
     assertEquals(
         2, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(fixture.toolInvocationId, fixture.gateway.executions.get(0).invocationId());
-    assertEquals(fixture.baseline.threadId(), fixture.gateway.executions.get(0).threadId());
+    assertEquals(fixture.baseline.threadId(), fixture.gateway.executions.get(0).scope().threadId());
     assertEquals(fixture.request, fixture.gateway.executions.get(0).request());
     assertEquals(0, run.closes.get());
     // registry / lease 语义与普通 Allow 路径一致：本地 execution 已注册，TOOL Work 持有 claim lease。
@@ -694,7 +694,7 @@ class ToolProcessorPreflightTest {
     assertEquals(1, fixture.gateway.admitCalls);
     ToolInvocation tool = ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId);
     assertEquals(ToolInvocationStatus.RUNNING, tool.status());
-    assertEquals(fixture.baseline.threadId(), fixture.gateway.executions.get(0).threadId());
+    assertEquals(fixture.baseline.threadId(), fixture.gateway.executions.get(0).scope().threadId());
   }
 
   /** 子代理读取真实执行根：root 关闭时子代理走正常 gateway preflight，不因自身无开关而静默 Allow。 */

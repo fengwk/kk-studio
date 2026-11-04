@@ -13,20 +13,20 @@ import java.util.UUID;
 /**
  * {@code project_issue_agent_thread} 稳定归属持久化。
  *
- * <p>绑定只保存 {@code (issueId, agentName) -> threadId}，Session 由 Thread
- * 解析；绑定不可重绑，插入冲突必须显式失败而不是静默复用别的绑定。 删除必须显式进行：Run 对绑定的复合 FK 是 RESTRICT，因此存在 Run 时删除会失败，绝不绕过业务清理硬删已绑定的
- * Thread 与 Session。
+ * <p>绑定保存 Thread 和经外键校验的 Session；绑定不可重绑，插入冲突必须显式失败而不是静默复用别的绑定。 删除必须显式进行：Run 对绑定的复合 FK 是
+ * RESTRICT，因此存在 Run 时删除会失败，绝不绕过业务清理硬删已绑定的 Thread 与 Session。
  */
 @Repository
 public class IssueAgentThreadRepository {
 
-  private static final String COLUMNS = "issue_id, agent_name, thread_id";
+  private static final String COLUMNS = "issue_id, agent_name, session_id, thread_id";
 
   private static final RowMapper<IssueAgentThread> ROW_MAPPER =
       (resultSet, rowNumber) ->
           new IssueAgentThread(
               ProjectRows.uuid(resultSet, "issue_id"),
               resultSet.getString("agent_name"),
+              ProjectRows.uuid(resultSet, "session_id"),
               ProjectRows.uuid(resultSet, "thread_id"));
 
   private final JdbcClient jdbc;
@@ -92,10 +92,11 @@ public class IssueAgentThreadRepository {
     ProjectChangeNotifier.requireTransaction();
     boolean changed =
         jdbc.sql(
-                    "insert into project_issue_agent_thread (issue_id, agent_name, thread_id)"
-                        + " values (:issueId, :agentName, :threadId)")
+                    "insert into project_issue_agent_thread (issue_id, agent_name, session_id, thread_id)"
+                        + " values (:issueId, :agentName, :sessionId, :threadId)")
                 .param("issueId", binding.issueId())
                 .param("agentName", binding.agentName())
+                .param("sessionId", binding.sessionId())
                 .param("threadId", binding.threadId())
                 .update()
             == 1;
@@ -121,23 +122,14 @@ public class IssueAgentThreadRepository {
     return changed;
   }
 
-  /**
-   * 判定一个 Harness Thread 是否属于任何 Issue+Agent 稳定归属：包含同一 Session 的兄弟分支。
-   *
-   * <p>只读取持久化归属事实（{@code project_issue_agent_thread} 与其 Harness Session 归属），不触达运行中的 Runtime；Thread
-   * 不存在或没有任何归属都返回 false，绝不猜成别的 owner。
-   */
-  public boolean isIssueAgentBranch(UUID threadId) {
-    Objects.requireNonNull(threadId, "threadId");
+  /** 判定 Session 是否存在 Issue+Agent 稳定归属。 */
+  public boolean existsBySessionId(UUID sessionId) {
+    Objects.requireNonNull(sessionId, "sessionId");
     return jdbc.sql(
             "select exists("
                 + " select 1"
-                + " from project_issue_agent_thread binding"
-                + " join harness_thread thread on thread.id = binding.thread_id"
-                + " where binding.thread_id = :threadId"
-                + " or thread.session_id ="
-                + " (select session_id from harness_thread where id = :threadId))")
-        .param("threadId", threadId)
+                + " from project_issue_agent_thread where session_id = :sessionId)")
+        .param("sessionId", sessionId)
         .query((resultSet, rowNumber) -> resultSet.getBoolean(1))
         .single();
   }

@@ -21,6 +21,30 @@ import tools.jackson.databind.MapperFeature;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
+import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.api.entry.GoalSetting;
+import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.api.entry.TurnStartReason;
+import fun.fengwk.kkstudio.harness.api.generation.GenerationProjection;
+import fun.fengwk.kkstudio.harness.api.generation.GenerationStatus;
+import fun.fengwk.kkstudio.harness.api.history.Entry;
+import fun.fengwk.kkstudio.harness.api.history.EntryCurrentState;
+import fun.fengwk.kkstudio.harness.api.history.EntryPath;
+import fun.fengwk.kkstudio.harness.api.history.EntrySlice;
+import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
+import fun.fengwk.kkstudio.harness.api.history.RootPayload;
+import fun.fengwk.kkstudio.harness.api.history.SubagentBinding;
+import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.api.session.AssistantMessageMetadata;
+import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadLiveState;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpecJsonCodec;
@@ -37,30 +61,6 @@ import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
-import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
-import fun.fengwk.kkstudio.harness.runtime.driver.GenerationProjection;
-import fun.fengwk.kkstudio.harness.runtime.driver.GenerationStatus;
-import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.runtime.entry.GoalSetting;
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
-import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
-import fun.fengwk.kkstudio.harness.runtime.history.Entry;
-import fun.fengwk.kkstudio.harness.runtime.history.EntryCurrentState;
-import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
-import fun.fengwk.kkstudio.harness.runtime.history.EntrySlice;
-import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
-import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
-import fun.fengwk.kkstudio.harness.runtime.history.SubagentBinding;
-import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
-import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
-import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLiveState;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
@@ -253,6 +253,81 @@ class ModelRequestDebugServiceTest {
         "model",
         BuiltinExecution.model(snapshot.entryState().baseSettings().execution()).modelName());
     assertEquals("env-b", snapshot.entryState().baseSettings().environmentName());
+  }
+
+  /** 子线程预览以执行根当前环境为准，而非草稿或子线程路径中的环境。 */
+  @Test
+  void usesExecutionRootEnvironmentForChildPreview() {
+    UUID childId = new UUID(0L, 10L);
+    EntryPath path = basePath();
+    ThreadState child =
+        new ThreadState(
+            childId,
+            SESSION_ID,
+            THREAD_ID,
+            USER_ENTRY_ID,
+            CREATION_REQUEST_HASH,
+            "child",
+            THREAD_ID,
+            false,
+            SpawnTrigger.MODEL_TOOL,
+            ThreadConstraints.NONE,
+            ThreadExecutionControl.RUNNABLE,
+            0L,
+            1L,
+            0L,
+            NOW,
+            NOW);
+    ThreadSnapshot snapshot =
+        new ThreadSnapshot(
+            child,
+            EntryCurrentState.from(path),
+            new EntrySlice(null, path.entries()),
+            List.of(),
+            null,
+            List.of(),
+            ThreadLiveState.IDLE_OR_HISTORICAL,
+            List.of(),
+            0,
+            false,
+            List.of(),
+            false);
+    EntryPath rootPath =
+        new EntryPath(
+            List.of(
+                new Entry(
+                    SESSION_ID,
+                    SESSION_ID,
+                    null,
+                    new RootPayload(branchSettings().withEnvironmentName("root-env")),
+                    NOW)));
+    ThreadSnapshot root = mock(ThreadSnapshot.class);
+    when(root.thread()).thenReturn(thread(SESSION_ID));
+    when(root.entryState()).thenReturn(EntryCurrentState.from(rootPath));
+    when(runtime.getThreadSnapshot(childId)).thenReturn(snapshot);
+    when(runtime.getThreadSnapshot(THREAD_ID)).thenReturn(root);
+    when(turnResolver.planLiveWithSettings(eq(childId), eq(path), any()))
+        .thenReturn(successfulPlan());
+    stubCoderDefinition();
+
+    HarnessModelRequestDebugDTO debug =
+        service.getModelRequestDebug(childId, DRAFT_MODEL, DRAFT_ENV);
+
+    verify(runtime).getThreadSnapshot(THREAD_ID);
+    verify(turnResolver)
+        .planLiveWithSettings(
+            childId,
+            path,
+            branchSettings()
+                .withExecution(BuiltinExecution.of(DRAFT_MODEL))
+                .withEnvironmentName("root-env"));
+    assertEquals("NEXT_REQUEST_PREVIEW", debug.getKind());
+    assertEquals("draft-model", debug.getModel().getModelName());
+    assertEquals("draft-variant", debug.getModel().getVariant());
+    assertEquals("root-env", debug.getEnvironmentName());
+    assertEquals("system instruction", debug.getSystemInstruction());
+    assertNull(debug.getPlanningError());
+    assertNull(debug.getFrozenInvocation());
   }
 
   /** 测试意图：environment 的 null（未选）/ 选中 / clear 只是逐次透传给同一 planner，服务本身不缓存或改写选择。 */

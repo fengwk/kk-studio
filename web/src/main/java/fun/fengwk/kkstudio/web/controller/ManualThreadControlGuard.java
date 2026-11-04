@@ -3,8 +3,8 @@ package fun.fengwk.kkstudio.web.controller;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
+import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 
 import java.util.UUID;
 

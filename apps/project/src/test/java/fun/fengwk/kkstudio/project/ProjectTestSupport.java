@@ -15,42 +15,53 @@ import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 
-import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
-import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
-import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
+import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
+import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
+import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
+import fun.fengwk.kkstudio.harness.api.SpawnRequest;
+import fun.fengwk.kkstudio.harness.api.StopResult;
+import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
+import fun.fengwk.kkstudio.harness.api.command.SetEnvironmentCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.ThreadCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.ThreadCommandType;
+import fun.fengwk.kkstudio.harness.api.compaction.CompactionConfig;
+import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
+import fun.fengwk.kkstudio.harness.api.entry.TurnEndOutcome;
+import fun.fengwk.kkstudio.harness.api.entry.TurnStartReason;
+import fun.fengwk.kkstudio.harness.api.history.Entry;
+import fun.fengwk.kkstudio.harness.api.history.EntryPath;
+import fun.fengwk.kkstudio.harness.api.history.EntryPayload;
+import fun.fengwk.kkstudio.harness.api.history.EntryType;
+import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
+import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
+import fun.fengwk.kkstudio.harness.api.history.TurnEndReason;
+import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
+import fun.fengwk.kkstudio.harness.api.join.JoinDelivery;
+import fun.fengwk.kkstudio.harness.api.join.ThreadJoin;
+import fun.fengwk.kkstudio.harness.api.join.ThreadJoinOutcome;
+import fun.fengwk.kkstudio.harness.api.join.ThreadJoinReceipt;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.api.session.AssistantMessageMetadata;
+import fun.fengwk.kkstudio.harness.api.session.Session;
+import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.api.thread.StopCommand;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionFacts;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.codec.HistoryEntryPayloadJsonCodec;
+import fun.fengwk.kkstudio.harness.codec.ThreadCommandPayloadJsonCodec;
+import fun.fengwk.kkstudio.harness.model.ModelUsage;
+import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
-import fun.fengwk.kkstudio.harness.runtime.SpawnRequest;
-import fun.fengwk.kkstudio.harness.runtime.StopCommand;
-import fun.fengwk.kkstudio.harness.runtime.StopResult;
-import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
-import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
-import fun.fengwk.kkstudio.harness.runtime.history.Entry;
-import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
-import fun.fengwk.kkstudio.harness.runtime.history.EntryPayload;
-import fun.fengwk.kkstudio.harness.runtime.history.EntryType;
-import fun.fengwk.kkstudio.harness.runtime.history.HistoryEntryPayloadJsonCodec;
-import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
-import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
-import fun.fengwk.kkstudio.harness.runtime.join.JoinDelivery;
-import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
-import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinOutcome;
-import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinReceipt;
-import fun.fengwk.kkstudio.harness.runtime.session.Session;
-import fun.fengwk.kkstudio.harness.runtime.store.EntryStore;
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.store.JoinStore;
-import fun.fengwk.kkstudio.harness.runtime.store.SessionStore;
-import fun.fengwk.kkstudio.harness.runtime.store.ThreadStore;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionFacts;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.SetContributorStateCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.SetEnvironmentCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
+import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
+import fun.fengwk.kkstudio.harness.spi.store.EntryStore;
+import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.spi.store.JoinStore;
+import fun.fengwk.kkstudio.harness.spi.store.SessionStore;
+import fun.fengwk.kkstudio.harness.spi.store.ThreadStore;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.Project;
@@ -60,8 +71,6 @@ import fun.fengwk.kkstudio.project.service.IssueLifecycleService;
 import fun.fengwk.kkstudio.project.service.IssueRunService;
 import fun.fengwk.kkstudio.project.service.IssueStageBudgetService;
 import fun.fengwk.kkstudio.project.service.ProjectService;
-import fun.fengwk.kkstudio.project.turn.ProjectRunScope;
-import fun.fengwk.kkstudio.project.turn.ProjectRunScopeJsonCodec;
 
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -193,10 +202,71 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
         "select head_entry_id from harness_thread where id = ?", UUID.class, threadId);
   }
 
+  /** 持久化真实 Turn 和消息，用于需要调用交接工具的测试。 */
+  protected UUID appendHandoffAssistant(UUID threadId) {
+    return finishHandoffTurn(threadId, beginHandoffTurn(threadId));
+  }
+
+  protected UUID beginHandoffTurn(UUID threadId) {
+    UUID turn =
+        appendHandoffEntry(
+            threadId,
+            new TurnStartPayload(
+                TurnStartReason.INPUT,
+                new BranchSettings("fixture", new ExecutionSelection("fake", "{}"), null),
+                threadId));
+    appendHandoffEntry(
+        threadId,
+        new MessagePayload(
+            new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("task"))),
+            null,
+            null));
+    return turn;
+  }
+
+  protected UUID finishHandoffTurn(UUID threadId, UUID turn) {
+    UUID assistant =
+        appendHandoffEntry(
+            threadId,
+            new MessagePayload(
+                new AgentMessage(
+                    AgentMessageRole.ASSISTANT, List.of(new TextMessageContent("answer"))),
+                new AssistantMessageMetadata(
+                    GenerationStopReason.COMPLETE,
+                    new ModelUsage(1L, 1L, 0L, 0L, Map.of(), 0L, 2L)),
+                null));
+    appendHandoffEntry(
+        threadId, new TurnEndPayload(turn, TurnEndOutcome.COMPLETED, false, null, null));
+    return assistant;
+  }
+
+  private UUID appendHandoffEntry(UUID threadId, EntryPayload payload) {
+    UUID sessionId =
+        jdbc.queryForObject(
+            "select session_id from harness_thread where id = ?", UUID.class, threadId);
+    UUID entryId = UUID.randomUUID();
+    Timestamp now = Timestamp.from(Instant.now());
+    jdbc.update(
+        "insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload,"
+            + " created_at) values (?, ?, ?, ?, ?::jsonb, ?)",
+        entryId,
+        sessionId,
+        headEntry(threadId),
+        payload.type().name(),
+        HarnessRuntimeTestConfiguration.ENTRY_CODEC.encode(payload),
+        now);
+    jdbc.update(
+        "update harness_thread set head_entry_id = ?, updated_at = ? where id = ?",
+        entryId,
+        now,
+        threadId);
+    return entryId;
+  }
+
   /**
    * 模拟 Agent 产出：向该 Thread 的历史路径追加一个 MESSAGE Entry 并推进 head，返回新 head Entry id。
    *
-   * <p>收尾冻结的区间是 {@code (start_entry_id, end_entry_id]}，因此正常收尾必须真的产出过历史；本方法用真实 Harness 表行构造该事实。
+   * <p>此不透明节点供不涉及 Turn 语义的收尾测试使用；交接测试使用 {@link #appendHandoffAssistant}。
    */
   protected UUID appendHistoryEntry(UUID threadId) {
     UUID sessionId =
@@ -220,31 +290,7 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
     return entryId;
   }
 
-  /**
-   * 读取本 Thread 上最新一次冻结的 {@code project/run} contributor state JSON：SET_CONTRIBUTOR_STATE 命令的
-   * durable payload 就是接受该 Run（或闭合 scope）时写下的业务身份，测试据此以真实来源驱动业务工具，而不是自己重算 scope。
-   */
-  protected String frozenRunScopeJson(UUID threadId) {
-    Map<String, Object> row =
-        jdbc.queryForMap(
-            "select command_type, payload::text as payload from harness_thread_command"
-                + " where thread_id = ? and command_type = 'SET_CONTRIBUTOR_STATE'"
-                + " order by sequence desc limit 1",
-            threadId);
-    ThreadCommandPayload payload =
-        new ThreadCommandPayloadJsonCodec()
-            .decode(
-                ThreadCommandType.valueOf((String) row.get("command_type")),
-                (String) row.get("payload"));
-    return ((SetContributorStateCommandPayload) payload).state().dataJson();
-  }
-
-  /** 该 Thread 上最新一次冻结的 Run scope：Run 进入终态后这里读到的是 {@code active=false} 的关闭副本。 */
-  protected ProjectRunScope latestRunScope(UUID threadId) {
-    return new ProjectRunScopeJsonCodec().decode(frozenRunScopeJson(threadId));
-  }
-
-  /** 读取本 Thread 上指定类型命令的 durable payload，用于断言显式 Run 配置与 scope 闭合写入的实际内容。 */
+  /** 读取本 Thread 上指定类型命令的 durable payload，用于断言显式 Run 配置的实际内容。 */
   protected String commandPayload(UUID threadId, String commandType) {
     return jdbc.queryForObject(
         "select payload::text from harness_thread_command where thread_id = ? and command_type = ?",
@@ -261,17 +307,6 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
                 ThreadCommandType.SET_ENVIRONMENT,
                 commandPayload(threadId, ThreadCommandType.SET_ENVIRONMENT.name()));
     return ((SetEnvironmentCommandPayload) payload).environmentName();
-  }
-
-  /** 本 Thread 上最新一次 scope 冻结命令的序号：用于断言关闭旧 scope 后新 Run 的 active=true 严格在其之后。 */
-  protected long latestRunScopeSequence(UUID threadId) {
-    Long value =
-        jdbc.queryForObject(
-            "select max(sequence) from harness_thread_command where thread_id = ? and command_type ="
-                + " 'SET_CONTRIBUTOR_STATE'",
-            Long.class,
-            threadId);
-    return value == null ? 0L : value;
   }
 
   /** 冻结本次 Run 的 root Join 结果：terminal 与 final 指向同一 Entry，模拟 Harness 执行终止后写回的固定 join 凭据。 */
@@ -358,8 +393,8 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
     /**
      * 受控 Harness 存储假件：只实现归属校验读取（Session / Thread 解析），事实直接来自真实 Harness 行。
      *
-     * <p>写入由 {@link #harnessRuntime(JdbcTemplate)} 在同一事务内完成，因此本假件不承担持久化职责，只把 orchestrator
-     * 的归属校验接到真表。
+     * <p>写入由 {@link #harnessRuntime(JdbcTemplate, HarnessStore)} 在同一事务内完成，因此本假件不承担持久化职责，只把
+     * orchestrator 的归属校验接到真表。
      */
     @Bean
     @Primary
@@ -474,18 +509,28 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
     }
 
     @Bean
-    public HarnessRuntime harnessRuntime(JdbcTemplate jdbc) {
+    public HarnessRuntime harnessRuntime(JdbcTemplate jdbc, HarnessStore store) {
       HarnessRuntime runtime = mock(HarnessRuntime.class);
+      HarnessRuntime deletionRuntime =
+          new HarnessRuntime(store, new DriverRegistry(), () -> CompactionConfig.DEFAULT);
+      when(runtime.findThreadSessionId(any(UUID.class)))
+          .thenAnswer(invocation -> deletionRuntime.findThreadSessionId(invocation.getArgument(0)));
+      doAnswer(
+              invocation -> {
+                deletionRuntime.deleteSessions(
+                    invocation.getArgument(0),
+                    invocation.getArgument(1),
+                    invocation.getArgument(2));
+                return null;
+              })
+          .when(runtime)
+          .deleteSessions(any(), any(), any());
       when(runtime.acceptCommands(any(AcceptCommandsCommand.class), any()))
           .thenAnswer(invocation -> accept(jdbc, invocation.getArgument(0)));
-      when(runtime.spawn(any(SpawnRequest.class)))
+      when(runtime.spawn(any(SpawnRequest.class), any()))
           .thenAnswer(invocation -> spawn(jdbc, invocation.getArgument(0)));
       when(runtime.findJoin(any(UUID.class)))
           .thenAnswer(invocation -> findJoin(jdbc, invocation.getArgument(0)));
-      when(runtime.findThreadCommand(any(UUID.class), any(UUID.class)))
-          .thenAnswer(
-              invocation ->
-                  findThreadCommand(jdbc, invocation.getArgument(0), invocation.getArgument(1)));
       when(runtime.projectJoinReceipt(any(UUID.class)))
           .thenAnswer(invocation -> projectJoinReceipt(jdbc, invocation.getArgument(0)));
       when(runtime.getThreadSnapshot(any(UUID.class)))
@@ -619,39 +664,6 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
               null,
               null,
               null));
-    }
-
-    /** 按 Thread + idempotencyKey 读取 durable command，用真实 payload codec 还原 typed aggregate。 */
-    private static Optional<ThreadCommand> findThreadCommand(
-        JdbcTemplate jdbc, UUID threadId, UUID idempotencyKey) {
-      List<Map<String, Object>> rows =
-          jdbc.queryForList(
-              "select sequence, command_type, payload::text as payload, request_hash,"
-                  + " applied_entry_id, stop_request_id, cancelled_at, created_at"
-                  + " from harness_thread_command where thread_id = ? and idempotency_key = ?",
-              threadId,
-              idempotencyKey);
-      if (rows.isEmpty()) {
-        return Optional.empty();
-      }
-      Map<String, Object> row = rows.get(0);
-      ThreadCommandPayload payload =
-          COMMAND_CODEC.decode(
-              ThreadCommandType.valueOf((String) row.get("command_type")),
-              (String) row.get("payload"));
-      return Optional.of(
-          new ThreadCommand(
-              threadId,
-              ((Number) row.get("sequence")).longValue(),
-              payload,
-              idempotencyKey,
-              (String) row.get("request_hash"),
-              (UUID) row.get("applied_entry_id"),
-              (UUID) row.get("stop_request_id"),
-              row.get("cancelled_at") == null
-                  ? null
-                  : ((Timestamp) row.get("cancelled_at")).toInstant(),
-              ((Timestamp) row.get("created_at")).toInstant()));
     }
 
     private static AcceptedCommands accept(JdbcTemplate jdbc, AcceptCommandsCommand command) {
@@ -802,7 +814,7 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
       return accepted;
     }
 
-    private static ThreadSnapshot snapshot(JdbcTemplate jdbc, UUID threadId) {
+    static ThreadSnapshot snapshot(JdbcTemplate jdbc, UUID threadId) {
       Map<String, Object> row =
           jdbc.queryForMap(
               "select session_id, head_entry_id, next_command_sequence, execution_control,"
@@ -874,7 +886,7 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
       return new StopResult(false, snapshot(jdbc, threadId).thread(), List.of());
     }
 
-    /** 按真实父链构造 root-to-head 路径：Entry id 全部来自 harness_entry 行，不伪造历史顺序。 */
+    /** 按真实父链投影已持久化的 payload；旧测试的空 payload 仍为不透明节点。 */
     private static EntryPath entryPath(JdbcTemplate jdbc, UUID headEntryId) {
       List<UUID> ids = new ArrayList<>();
       UUID cursor = headEntryId;
@@ -889,6 +901,16 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
       for (UUID entryId : ids) {
         Entry entry = mock(Entry.class);
         when(entry.id()).thenReturn(entryId);
+        Map<String, Object> row =
+            jdbc.queryForMap(
+                "select entry_type, payload::text as payload from harness_entry where id = ?",
+                entryId);
+        String payload = (String) row.get("payload");
+        if (!"{}".equals(payload)) {
+          when(entry.payload())
+              .thenReturn(
+                  ENTRY_CODEC.decode(EntryType.valueOf((String) row.get("entry_type")), payload));
+        }
         entries.add(entry);
       }
       EntryPath path = mock(EntryPath.class);

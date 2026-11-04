@@ -31,9 +31,9 @@ class OpenCliInstanceTest {
         OpenCliInstance.create(settings, JsonMapper.builder().build(), context);
 
     assertNotNull(instance);
-    assertTrue(instance.harnessContributors().isEmpty());
 
-    List<CanvasFunctionAdapter> adapters = instance.canvasAdapters();
+    assertTrue(instance.harnessContributors().isEmpty());
+    List<CanvasFunctionAdapter> adapters = instance.contributions(CanvasFunctionAdapter.class);
     assertEquals(2, adapters.size());
     assertThat(adapters.get(0)).isInstanceOf(GptImage2CanvasFunctionAdapter.class);
     assertThat(adapters.get(1)).isInstanceOf(SeedanceCanvasFunctionAdapter.class);

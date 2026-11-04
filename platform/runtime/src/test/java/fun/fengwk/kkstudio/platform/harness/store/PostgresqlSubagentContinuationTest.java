@@ -20,52 +20,52 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
+import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
+import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
+import fun.fengwk.kkstudio.harness.api.SpawnRequest;
+import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
+import fun.fengwk.kkstudio.harness.api.command.NotificationCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.SetAgentCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.SetEnvironmentCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.SetExecutionCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
+import fun.fengwk.kkstudio.harness.api.command.ThreadCommandState;
+import fun.fengwk.kkstudio.harness.api.command.ThreadCommandType;
+import fun.fengwk.kkstudio.harness.api.compaction.CompactionConfig;
+import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.api.generation.GenerationStatus;
+import fun.fengwk.kkstudio.harness.api.history.CustomMessagePayload;
+import fun.fengwk.kkstudio.harness.api.history.SettingsPayload;
+import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
+import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
+import fun.fengwk.kkstudio.harness.api.join.ThreadJoin;
+import fun.fengwk.kkstudio.harness.api.join.ThreadJoinOutcome;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadRuntimeStatus;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.builtin.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
-import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
-import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
-import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
-import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
-import fun.fengwk.kkstudio.harness.runtime.SpawnRequest;
 import fun.fengwk.kkstudio.harness.runtime.ThreadLifecycleCoordinator;
-import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
-import fun.fengwk.kkstudio.harness.runtime.driver.GenerationStatus;
-import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
-import fun.fengwk.kkstudio.harness.runtime.history.CustomMessagePayload;
-import fun.fengwk.kkstudio.harness.runtime.history.SettingsPayload;
-import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
-import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
-import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
-import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinOutcome;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessResult;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorConfig;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.SpawnTestSupport;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.SpawnTestSupport.Child;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.SpawnTestSupport.Ticket;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadRuntimeStatus;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.NotificationCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.SetEnvironmentCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.SetExecutionCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandState;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
-import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
-import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
-import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
+import fun.fengwk.kkstudio.harness.spi.AcceptancePreflight;
+import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.spi.work.ClaimedWork;
+import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
+import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -465,6 +465,37 @@ class PostgresqlSubagentContinuationTest {
       assertEquals(beforeCommands, commands(childId));
       assertEquals(before, snapshot(childId));
     }
+    // 即使 preflight 保留了原请求身份，也不能将合法输入替换成子线程环境命令。
+    AcceptancePreflight rewrite =
+        (session, commands, copied) ->
+            List.of(commands.getFirst().withPayload(new SetEnvironmentCommandPayload(null)));
+    ThreadState child = before.thread();
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            runtime.acceptCommands(
+                new AcceptCommandsCommand(
+                    new AcceptCommandsTarget.Thread(
+                        childId, child.headEntryId(), child.nextCommandSequence()),
+                    List.of(prompt("rewritten"))),
+                rewrite));
+    UUID rewrittenTicket = UUID.randomUUID();
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            SpawnTestSupport.acceptAndJoin(
+                runtime,
+                new Child(
+                    UUID.randomUUID(),
+                    UUID.randomUUID(),
+                    parentId,
+                    List.of(prompt("rewritten new child"))),
+                branchSettings(),
+                joinRequest(rewrittenTicket, parentId),
+                rewrite));
+    assertTrue(runtime.findJoin(rewrittenTicket).isEmpty());
+    assertEquals(beforeCommands, commands(childId));
+    assertEquals(before, snapshot(childId));
     BranchSettings selected =
         new BranchSettings(branchSettings().agentName(), branchSettings().execution(), "env-b");
     Ticket ticket = joinRequest(UUID.randomUUID(), parentId);
@@ -476,7 +507,6 @@ class PostgresqlSubagentContinuationTest {
                 UUID.randomUUID(),
                 selected,
                 List.of(prompt("new child")),
-                AcceptancePreflight.IDENTITY,
                 null,
                 false,
                 ticket));
@@ -488,7 +518,6 @@ class PostgresqlSubagentContinuationTest {
                 null,
                 selected,
                 List.of(prompt("continuation")),
-                AcceptancePreflight.IDENTITY,
                 new SpawnRequest.Continuation(
                     before.thread().headEntryId(), before.thread().nextCommandSequence()),
                 false,

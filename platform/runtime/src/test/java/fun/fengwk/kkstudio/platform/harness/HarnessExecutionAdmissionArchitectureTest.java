@@ -14,7 +14,8 @@ import java.util.stream.Stream;
  * 锁定阻塞执行的容量与准入边界：
  *
  * <ul>
- *   <li>Model 网关使用底层无界虚拟线程，Tool 在 Runtime 的独占虚拟线程上阻塞执行；两者都由显式 ConcurrencyAdmission 提供运行时准入限制；
+ *   <li>Model 网关使用底层无界虚拟线程，Tool 在 Runtime 的独占虚拟线程上阻塞执行；两者都由平台实现的显式 {@code
+ *       platform.harness.admission.ConcurrencyAdmission} 提供运行时准入限制；
  *   <li>异步 task 不再使用逐任务阻塞线程：并发额度来自持久未结清记录。
  * </ul>
  */

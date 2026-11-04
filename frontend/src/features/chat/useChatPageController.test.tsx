@@ -5,7 +5,7 @@ import { MemoryRouter } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useChatPageController } from '@/features/chat/useChatPageController'
 import { agentService } from '@/shared/api/agent-service'
-import { chatService } from '@/shared/api/chat-service'
+import { chatService } from '@/features/chat/chat-service'
 import type { AgentDefinitionDTO } from '@/shared/api/generated/contracts'
 
 vi.mock('@/shared/api/agent-service', () => ({
@@ -15,7 +15,7 @@ vi.mock('@/shared/api/agent-service', () => ({
     listAgents: vi.fn(),
   },
 }))
-vi.mock('@/shared/api/chat-service', () => ({
+vi.mock('@/features/chat/chat-service', () => ({
   chatService: {
     listChats: vi.fn(),
     createChat: vi.fn(),

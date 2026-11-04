@@ -3,11 +3,11 @@ package fun.fengwk.kkstudio.platform.harness.tool;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolHistoryRenderRequest;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolHistoryRenderer;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
-import fun.fengwk.kkstudio.harness.runtime.port.ToolHistoryActionResolver;
+import fun.fengwk.kkstudio.harness.spi.ToolHistoryActionResolver;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.catalog.tool.ToolBindingMismatchException;

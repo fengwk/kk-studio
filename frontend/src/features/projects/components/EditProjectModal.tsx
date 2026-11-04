@@ -12,10 +12,11 @@ import {
   Trash2,
 } from 'lucide-react'
 import { ApiError, isConflictError } from '@/shared/api/client'
-import { environmentService } from '@/shared/api/environment-service'
+import { environmentService } from '@/features/environment/environment-service'
 import { Button } from '@/shared/ui/controls/Button'
 import { Checkbox } from '@/shared/ui/controls/Checkbox'
 import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
+import { HelpHint } from '@/shared/ui/controls/HelpHint'
 import { IconButton } from '@/shared/ui/controls/IconButton'
 import { NumberInput } from '@/shared/ui/controls/NumberInput'
 import { Select } from '@/shared/ui/controls/Select'
@@ -521,15 +522,22 @@ function EditProjectModalContent({
           </div>
         )}
 
-        <Checkbox
-          checked={yoloEnabled}
-          disabled={isPending}
-          label={t('projects.edit.yoloToggle')}
-          onChange={(checked) => {
-            setYoloEnabled(checked)
-            setYoloSuccessMessage(null)
-          }}
-        />
+        <div className="field-label-row">
+          <Checkbox
+            checked={yoloEnabled}
+            disabled={isPending}
+            label={t('projects.edit.yoloToggle')}
+            onChange={(checked) => {
+              setYoloEnabled(checked)
+              setYoloSuccessMessage(null)
+            }}
+          />
+          <HelpHint
+            label={t('shared.helpAbout', { topic: t('projects.edit.yoloToggle') })}
+          >
+            {t('projects.edit.yoloHelp')}
+          </HelpHint>
+        </div>
 
         <div className="edit-project-form-actions">
           <Button
@@ -802,7 +810,14 @@ function EditProjectModalContent({
                   )}
 
                   <div className="edit-project-field">
-                    <FieldLabel>{t('projects.edit.nextStates')}</FieldLabel>
+                    <div className="field-label-row">
+                      <FieldLabel>{t('projects.edit.nextStates')}</FieldLabel>
+                      <HelpHint
+                        label={t('shared.helpAbout', { topic: t('projects.edit.nextStates') })}
+                      >
+                        {t('projects.edit.nextStatesHelp')}
+                      </HelpHint>
+                    </div>
                     {reserved && state.state !== 'INIT' ? (
                       <p className="edit-project-hint">{t('projects.edit.reservedNoEdges')}</p>
                     ) : targetOptions.length === 0 ? (

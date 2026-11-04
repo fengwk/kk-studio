@@ -55,7 +55,7 @@ systemd/launchd 服务，测试入口见
 | 文档与仓库结构 | [dev/verify/repository/check.mjs](dev/verify/repository/check.mjs) | Node，只读 |
 | 生成契约（前端传输、Daemon 协议代码与能力 Schema）生成/漂移 | [dev/verify/generated-contracts/check.sh](dev/verify/generated-contracts/check.sh)（更新用 [write.sh](dev/verify/generated-contracts/write.sh)） | JDK 21、Maven、Node；按 Web 控制器签名用真实 HTTP Jackson mapper 生成/比对 [frontend/src/shared/api/generated/contracts.ts](../frontend/src/shared/api/generated/contracts.ts)，根据 control.proto 校验 [daemon/src/generated/control_pb.ts](../daemon/src/generated/control_pb.ts)，并通过 capabilities.mjs 校验 [daemon/resources/capabilities](../daemon/resources/capabilities) 与 Java classpath 资源对齐，只跑 `-pl web -am` 定向 reactor；`check.sh` 只读，`write.sh` 会改源码需人工审阅 diff；`mvn verify` 执行同一 check |
 | 当前代码树敏感数据门禁 | [dev/verify/repository/check-sensitive-data.mjs](dev/verify/repository/check-sensitive-data.mjs) | Node、git，只读；命中只报告规则与位置，不回显敏感值 |
-| Git 历史敏感数据审计 | [dev/verify/repository/check-sensitive-history.mjs](dev/verify/repository/check-sensitive-history.mjs) | Node、git；扫描本地可见 refs 与当前树，可选抓取公开 PR refs 到隔离临时仓库；与当前树门禁分开使用 |
+| Git 历史敏感数据审计 | [dev/verify/repository/check-sensitive-history.mjs](dev/verify/repository/check-sensitive-history.mjs) | Node、git；扫描本地可见 refs 与当前树，可选抓取公开 PR refs 到隔离临时仓库；Daemon Release 同时检查公开 PR refs，高置信度命中或扫描不完整时停止，脱敏报告留在 runner 临时目录 |
 
 E2E 的精确 case 列表以 `run.sh --list` / `--docs` 为准，分类与执行路径见[开发与测试](../docs/operations/development-and-testing.md)。
 

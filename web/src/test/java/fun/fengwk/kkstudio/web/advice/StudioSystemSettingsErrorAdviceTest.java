@@ -10,10 +10,10 @@ import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
+import fun.fengwk.kkstudio.platform.http.ApiResponse;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsValidationException;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsVersionConflictException;
-import fun.fengwk.kkstudio.web.api.ApiResponse;
 import fun.fengwk.kkstudio.web.controller.StudioConfigSyncController;
 import fun.fengwk.kkstudio.web.controller.StudioSystemSettingsController;
 import fun.fengwk.kkstudio.web.i18n.StudioMessageService;

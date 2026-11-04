@@ -21,38 +21,38 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.springframework.beans.factory.ObjectProvider;
 
+import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
+import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
+import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
+import fun.fengwk.kkstudio.harness.api.SpawnRequest;
+import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
+import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.api.history.Entry;
+import fun.fengwk.kkstudio.harness.api.history.EntryCurrentState;
+import fun.fengwk.kkstudio.harness.api.history.EntrySlice;
+import fun.fengwk.kkstudio.harness.api.history.RootPayload;
+import fun.fengwk.kkstudio.harness.api.join.JoinDelivery;
+import fun.fengwk.kkstudio.harness.api.join.ThreadJoinOutcome;
+import fun.fengwk.kkstudio.harness.api.join.ThreadJoinReceipt;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.api.session.ResourceMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.Session;
+import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
+import fun.fengwk.kkstudio.harness.api.thread.StopCommand;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadLiveState;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
-import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
+import fun.fengwk.kkstudio.harness.codec.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
-import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
-import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
-import fun.fengwk.kkstudio.harness.runtime.SpawnRequest;
-import fun.fengwk.kkstudio.harness.runtime.StopCommand;
-import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
-import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
-import fun.fengwk.kkstudio.harness.runtime.history.Entry;
-import fun.fengwk.kkstudio.harness.runtime.history.EntryCurrentState;
-import fun.fengwk.kkstudio.harness.runtime.history.EntrySlice;
-import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
-import fun.fengwk.kkstudio.harness.runtime.join.JoinDelivery;
-import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinOutcome;
-import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinReceipt;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
-import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.Session;
-import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.testing.TestThreadChangeSource;
-import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLiveState;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
+import fun.fengwk.kkstudio.harness.spi.AcceptancePreflight;
 import fun.fengwk.kkstudio.platform.agenttask.AgentTaskService;
 import fun.fengwk.kkstudio.platform.harness.task.AgentBranchSettingsMaterializer;
 import fun.fengwk.kkstudio.platform.plugin.prompt.PluginPromptContent;
@@ -114,7 +114,7 @@ class PluginPromptTaskServiceTest {
     when(acceptedThread.id()).thenReturn(UUID.randomUUID());
     when(accepted.session()).thenReturn(acceptedSession);
     when(accepted.thread()).thenReturn(acceptedThread);
-    when(runtime.spawn(any(SpawnRequest.class))).thenReturn(accepted);
+    when(runtime.spawn(any(SpawnRequest.class), any())).thenReturn(accepted);
     when(materializer.materialize(any())).thenReturn(SETTINGS);
     changeSource = new TestThreadChangeSource();
     uploadService = mock(StorageUploadService.class);
@@ -135,7 +135,7 @@ class PluginPromptTaskServiceTest {
     UUID taskId = service.submit("worker", "system", textContents());
 
     ArgumentCaptor<SpawnRequest> command = ArgumentCaptor.forClass(SpawnRequest.class);
-    verify(runtime).spawn(command.capture());
+    verify(runtime).spawn(command.capture(), any());
 
     SpawnRequest target = command.getValue();
     assertEquals(taskId, target.threadId());
@@ -169,7 +169,9 @@ class PluginPromptTaskServiceTest {
     service.submit("worker", "  ", List.of(new PluginPromptContent.Text("only")));
 
     ArgumentCaptor<SpawnRequest> command = ArgumentCaptor.forClass(SpawnRequest.class);
-    verify(runtime).spawn(command.capture());
+    ArgumentCaptor<AcceptancePreflight> preflight =
+        ArgumentCaptor.forClass(AcceptancePreflight.class);
+    verify(runtime).spawn(command.capture(), preflight.capture());
     AgentMessage submitted =
         ((CustomMessageCommandPayload) command.getValue().commands().get(0).payload()).message();
     assertEquals(1, submitted.contents().size());
@@ -177,13 +179,7 @@ class PluginPromptTaskServiceTest {
 
     NewThreadCommand raw = command.getValue().commands().getFirst();
     List<NewThreadCommand> prepared =
-        command
-            .getValue()
-            .preflight()
-            .prepare(
-                mock(HarnessStore.Transaction.class),
-                new Session(SESSION_ID, "h3", NOW),
-                List.of(raw));
+        preflight.getValue().prepare(new Session(SESSION_ID, "h3", NOW), List.of(raw), List.of());
     AgentMessage durable = ((CustomMessageCommandPayload) prepared.getFirst().payload()).message();
     assertEquals(1, durable.contents().size());
     assertEquals("only", ((TextMessageContent) durable.contents().getFirst()).text());
@@ -209,17 +205,13 @@ class PluginPromptTaskServiceTest {
             new PluginPromptContent.Text("tail")));
 
     ArgumentCaptor<SpawnRequest> command = ArgumentCaptor.forClass(SpawnRequest.class);
-    verify(runtime).spawn(command.capture());
+    ArgumentCaptor<AcceptancePreflight> preflight =
+        ArgumentCaptor.forClass(AcceptancePreflight.class);
+    verify(runtime).spawn(command.capture(), preflight.capture());
 
     NewThreadCommand raw = command.getValue().commands().getFirst();
     List<NewThreadCommand> prepared =
-        command
-            .getValue()
-            .preflight()
-            .prepare(
-                mock(HarnessStore.Transaction.class),
-                new Session(SESSION_ID, "h3", NOW),
-                List.of(raw));
+        preflight.getValue().prepare(new Session(SESSION_ID, "h3", NOW), List.of(raw), List.of());
 
     assertEquals(1, prepared.size());
     assertEquals(raw.idempotencyKey(), prepared.getFirst().idempotencyKey());
@@ -264,19 +256,17 @@ class PluginPromptTaskServiceTest {
     service.submit("worker", "system", List.of(new PluginPromptContent.Text("only")));
 
     ArgumentCaptor<SpawnRequest> command = ArgumentCaptor.forClass(SpawnRequest.class);
-    verify(runtime).spawn(command.capture());
+    ArgumentCaptor<AcceptancePreflight> preflight =
+        ArgumentCaptor.forClass(AcceptancePreflight.class);
+    verify(runtime).spawn(command.capture(), preflight.capture());
     NewThreadCommand raw = command.getValue().commands().getFirst();
 
     assertThrows(
         IllegalStateException.class,
         () ->
-            command
+            preflight
                 .getValue()
-                .preflight()
-                .prepare(
-                    mock(HarnessStore.Transaction.class),
-                    new Session(SESSION_ID, "h3", NOW),
-                    List.of(raw, raw)));
+                .prepare(new Session(SESSION_ID, "h3", NOW), List.of(raw, raw), List.of()));
   }
 
   /** 同一内容与同一暂存句柄永远得到同一 request hash；durable 形态不参与 hash。 */
@@ -291,7 +281,7 @@ class PluginPromptTaskServiceTest {
     service.submit("worker", "system", contents);
 
     ArgumentCaptor<SpawnRequest> commands = ArgumentCaptor.forClass(SpawnRequest.class);
-    verify(runtime, times(2)).spawn(commands.capture());
+    verify(runtime, times(2)).spawn(commands.capture(), any());
     String first = commands.getAllValues().get(0).commands().getFirst().requestHash();
     String second = commands.getAllValues().get(1).commands().getFirst().requestHash();
     assertEquals(first, second);
@@ -312,7 +302,7 @@ class PluginPromptTaskServiceTest {
     assertThrows(
         NullPointerException.class,
         () -> service.submit("worker", "system", Arrays.asList((PluginPromptContent) null)));
-    verify(runtime, never()).spawn(any());
+    verify(runtime, never()).spawn(any(), any());
   }
 
   @Test

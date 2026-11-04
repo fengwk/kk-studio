@@ -3,7 +3,7 @@ package fun.fengwk.kkstudio.platform.harness.builtin.store;
 import org.springframework.transaction.PlatformTransactionManager;
 
 import fun.fengwk.kkstudio.harness.builtin.port.store.BuiltinStore;
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.platform.harness.store.PostgresqlHarnessStore;
 
 import javax.sql.DataSource;

@@ -5,10 +5,10 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { CreateChatModal } from '@/features/chat/CreateChatModal'
 import { chooseSelectOption } from '@/test-support/chooseSelectOption'
-import { environmentService } from '@/shared/api/environment-service'
+import { environmentService } from '@/features/environment/environment-service'
 import type { AgentDefinitionDTO } from '@/shared/api/generated/contracts'
 
-vi.mock('@/shared/api/environment-service', () => ({
+vi.mock('@/features/environment/environment-service', () => ({
   environmentService: {
     listEnvironments: vi.fn(),
   },
@@ -104,9 +104,9 @@ describe('CreateChatModal', () => {
     expect(screen.getAllByText('*')).toHaveLength(2)
     expect(screen.getByRole('alert')).toHaveTextContent('请填写 Chat 名称')
     expect(screen.getByText('请填写名称')).toBeInTheDocument()
-    expect(screen.getByPlaceholderText('Chat 名称（可重名）').closest('label')).toHaveClass('is-error')
+    expect(screen.getByPlaceholderText('Chat 名称').closest('label')).toHaveClass('is-error')
 
-    await user.type(screen.getByPlaceholderText('Chat 名称（可重名）'), 'My Chat')
+    await user.type(screen.getByPlaceholderText('Chat 名称'), 'My Chat')
     expect(onTitleChange).toHaveBeenCalled()
     await chooseSelectOption(user, 'Agent', 'assistant')
     expect(onSelectAgent).toHaveBeenCalledWith('assistant')
@@ -179,7 +179,7 @@ describe('CreateChatModal', () => {
     )
 
     await waitFor(() => {
-      expect(screen.getByText('deleted-env （不可用）')).toBeInTheDocument()
+      expect(screen.getByText('deleted-env · 不可用')).toBeInTheDocument()
     })
   })
 
@@ -201,7 +201,7 @@ describe('CreateChatModal', () => {
       expect(screen.getByText('环境列表加载失败，已保留当前选择')).toBeInTheDocument()
     })
     expect(screen.getByText('my-custom-env')).toBeInTheDocument()
-    expect(screen.queryByText('my-custom-env （不可用）')).not.toBeInTheDocument()
+    expect(screen.queryByText('my-custom-env · 不可用')).not.toBeInTheDocument()
   })
 
   // 验证环境列表初始加载中不提前宣称不可用，仅在确认成功且不含该项时才标记为不可用
@@ -224,16 +224,16 @@ describe('CreateChatModal', () => {
 
     // 初始加载中：保留环境名称，不宣称不可用，展示加载指示
     expect(screen.getByText('pending-env')).toBeInTheDocument()
-    expect(screen.queryByText('pending-env （不可用）')).not.toBeInTheDocument()
+    expect(screen.queryByText('pending-env · 不可用')).not.toBeInTheDocument()
     expect(screen.getByRole('status')).toHaveTextContent('正在加载 Environment')
 
-    // 列表成功返回且不含 pending-env：确认为不可用，方才标记 （不可用）
+    // 列表成功返回且不含 pending-env：确认为不可用，方才标记 “· 不可用”
     await act(async () => {
       resolvePromise!([{ name: 'ubuntu' }])
     })
 
     await waitFor(() => {
-      expect(screen.getByText('pending-env （不可用）')).toBeInTheDocument()
+      expect(screen.getByText('pending-env · 不可用')).toBeInTheDocument()
     })
   })
 })

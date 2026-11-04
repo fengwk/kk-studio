@@ -10,12 +10,13 @@ import {
 import { useNavigate } from 'react-router'
 import { Button } from '@/shared/ui/controls/Button'
 import { StateBlock } from '@/shared/ui/feedback/StateBlock'
-import type { InteractionDTO } from '@/shared/api/contracts/ai-interaction'
+import type { InteractionDTO } from '@/shared/api/generated/contracts'
 import { projectsApi } from '@/features/projects/projects-api'
 import { useI18n } from '@/shared/i18n'
 import { interactionIdentity } from '@/shared/lib/interactions'
-import { InteractionCardBody } from '@/features/chat/runtime/interactions/InteractionCardBody'
-import { useInteractionsController } from '@/features/chat/runtime/interactions/useInteractionsController'
+import { InteractionCardBody } from '@/features/thread/runtime/interactions/InteractionCardBody'
+import { useInteractionsController } from '@/features/thread/runtime/interactions/useInteractionsController'
+import '@/features/thread/runtime/interactions/interactions-page.css'
 
 export function InteractionsPage() {
   const { t } = useI18n()
@@ -163,7 +164,7 @@ export function InteractionsPage() {
                   <InteractionCardBody
                     item={item}
                     onSuccess={item.type === 'ENVIRONMENT_WAIT'
-                      ? undefined : () => removeItem(item.interactionId)}
+                      ? undefined : () => removeItem(item.interactionId!)}
                   />
                 </div>
               </div>

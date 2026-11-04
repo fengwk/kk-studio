@@ -1,13 +1,11 @@
 package fun.fengwk.kkstudio.platform.harness.read;
 
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import tools.jackson.databind.ObjectMapper;
 
 import fun.fengwk.kkstudio.harness.contributor.builtin.environment.ReadToolExecutor;
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageRepository;
 import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitCache;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
@@ -28,15 +26,11 @@ public class PlatformReadConfiguration {
   @Bean
   @ConditionalOnMissingBean
   public PlatformResourceContentReader platformResourceContentReader(
-      ObjectProvider<HarnessStore> harnessStoreProvider,
       SessionBlobRefManager sessionBlobRefManager,
       StorageBlobManager storageBlobManager,
       StorageBlobContentService storageBlobContentService) {
     return new PlatformResourceContentReader(
-        harnessStoreProvider::getIfAvailable,
-        sessionBlobRefManager,
-        storageBlobManager,
-        storageBlobContentService);
+        sessionBlobRefManager, storageBlobManager, storageBlobContentService);
   }
 
   @Bean

@@ -6,12 +6,12 @@ import { decodeCanvasFunctionVersion, isCanvasFunctionVersion } from '@/shared/a
 import { isCanonicalUUID } from '@/features/canvas/function-run'
 
 /**
- * 与 Java {@code CanvasFunctionWireContractTest} 共用的同一份生产 mapper golden：前端必须用严格解码器逐值解析，
+ * 与 Java {@code CanvasFunctionWireContractTest} 共用的同一份生产 wire golden：前端必须用严格解码器逐值解析，
  * 证明生成的 Canvas 版本/请求契约与后端实际 wire 一致（而不是手抄样本）。
  */
 const GOLDEN_DIR = resolve(
   dirname(fileURLToPath(import.meta.url)),
-  '../../../../../web/src/test/resources/fun/fengwk/kkstudio/web/canvas',
+  '../../../../../apps/canvas/runtime/src/test/resources/fun/fengwk/kkstudio/canvas/http',
 )
 
 function golden(filename: string): Record<string, unknown> {

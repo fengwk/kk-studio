@@ -1,8 +1,8 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
-import fun.fengwk.kkstudio.harness.runtime.driver.LockedDriverState;
-import fun.fengwk.kkstudio.harness.runtime.history.EntryCurrentState;
+import fun.fengwk.kkstudio.harness.api.history.EntryCurrentState;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
+import fun.fengwk.kkstudio.harness.spi.driver.LockedDriverState;
 
 import java.util.Objects;
 

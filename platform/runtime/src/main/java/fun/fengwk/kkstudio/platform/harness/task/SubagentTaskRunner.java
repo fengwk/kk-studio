@@ -1,30 +1,30 @@
 package fun.fengwk.kkstudio.platform.harness.task;
 
 import fun.fengwk.kkstudio.common.hash.Sha256;
+import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
+import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
+import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
+import fun.fengwk.kkstudio.harness.api.SpawnRequest;
+import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
+import fun.fengwk.kkstudio.harness.api.command.SetAgentCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.SetExecutionCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.ThreadCommandPayload;
+import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.api.history.SubagentBinding;
+import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
+import fun.fengwk.kkstudio.harness.api.join.ThreadJoin;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
+import fun.fengwk.kkstudio.harness.codec.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.SubagentConfig;
 import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.SubagentConfigProvider;
 import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.SubagentRunner;
 import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.SubagentTaskAcceptance;
 import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.SubagentTaskRequest;
-import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
-import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
-import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
-import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
-import fun.fengwk.kkstudio.harness.runtime.SpawnRequest;
-import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
-import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.runtime.history.SubagentBinding;
-import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
-import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.SetExecutionCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
+import fun.fengwk.kkstudio.harness.spi.AcceptancePreflight;
 import fun.fengwk.kkstudio.platform.agenttask.AgentTaskRequest;
 import fun.fengwk.kkstudio.platform.agenttask.AgentTaskService;
 
@@ -180,9 +180,8 @@ public class SubagentTaskRunner implements SubagentRunner {
   /**
    * 把委派翻译成 Agent 任务：新建时一次性携带 root settings、父关系与源 prompt；续接既有子 Thread 时只校验永久父关系后追加命令，忙碌子线程照常入队。
    *
-   * <p>续接只追加 SET_AGENT + SET_MODEL + CUSTOM_MESSAGE，绝不重发 SET_ENVIRONMENT：既有子 Thread 保留其既有运行环境，agent
-   * 变更按 {@code /agent} 设置语义在本批生效；新子 Thread 仍通过 root settings 继承父环境。SET_* 前缀按固定顺序发出，batch
-   * 形状只由本次请求的目标 settings 决定、与子线程当时的 head settings 或其可变运行时环境无关；因此同一次调用在任何重试 /
+   * <p>续接只追加 SET_AGENT + SET_EXECUTION + CUSTOM_MESSAGE；环境由执行根持有，新建与续接均不向子 Thread 写入环境。 SET_*
+   * 前缀按固定顺序发出，batch 形状只由本次请求的目标 settings 决定、与子线程当时的 head settings 或执行根环境无关；因此同一次调用在任何重试 /
    * 并发顺序下都产生同一份命令指纹，Runtime 能精确识别为重放而不是「另一份委派」。
    */
   private static AgentTaskRequest task(

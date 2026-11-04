@@ -1,34 +1,42 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
-import fun.fengwk.kkstudio.harness.runtime.driver.AgentDriver;
+import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
+import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
+import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
+import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
+import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
+import fun.fengwk.kkstudio.harness.api.Names;
+import fun.fengwk.kkstudio.harness.api.SpawnRequest;
+import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.GoalCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
+import fun.fengwk.kkstudio.harness.api.command.SetExecutionCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
+import fun.fengwk.kkstudio.harness.api.command.ThreadCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.ThreadCommandType;
+import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
+import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.api.history.Entry;
+import fun.fengwk.kkstudio.harness.api.history.EntryPath;
+import fun.fengwk.kkstudio.harness.api.history.ForkPayload;
+import fun.fengwk.kkstudio.harness.api.history.RootPayload;
+import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.Session;
+import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
-import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitLedger;
-import fun.fengwk.kkstudio.harness.runtime.history.Entry;
-import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
-import fun.fengwk.kkstudio.harness.runtime.history.ForkPayload;
-import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
-import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.Session;
-import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
-import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.GoalCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.SetExecutionCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
-import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
+import fun.fengwk.kkstudio.harness.spi.AcceptancePreflight;
+import fun.fengwk.kkstudio.harness.spi.driver.AgentDriver;
+import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.spi.store.UuidOrder;
+import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
+import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -382,10 +390,10 @@ final class AcceptCommandsControl {
               .insert(
                   new Entry(
                       rootEntryId, target.sessionId(), null, new RootPayload(rootSettings), now));
-          Entry lastCopied =
+          List<Entry> copiedEntries =
               SessionForkCopy.copyEffectiveContext(
                   tx, target.sessionId(), rootEntryId, sourceCutPath, now);
-          UUID forkParentId = lastCopied == null ? rootEntryId : lastCopied.id();
+          UUID forkParentId = copiedEntries.isEmpty() ? rootEntryId : copiedEntries.getLast().id();
           UUID forkEntryId = tx.nextId();
           tx.entries()
               .insert(
@@ -414,7 +422,7 @@ final class AcceptCommandsControl {
                   now,
                   now);
           tx.threads().insert(thread);
-          return acceptNewCommandsOnThread(tx, thread, commands, preflight, now);
+          return acceptNewCommandsOnThread(tx, thread, commands, preflight, now, copiedEntries);
         });
   }
 
@@ -457,11 +465,7 @@ final class AcceptCommandsControl {
       AcceptancePreflight preflight,
       SpawnRequest ticket,
       DriverRegistry driverRegistry) {
-    if (!thread.id().equals(thread.rootThreadId())
-        && commands.stream()
-            .anyMatch(command -> command.payload().type() == ThreadCommandType.SET_ENVIRONMENT)) {
-      throw new IllegalArgumentException("only the execution root can set an environment");
-    }
+    requireRootForEnvironment(thread, commands);
     boolean genuineUserInput = isGenuineUserInput(commands);
     boolean cursorFreeBatch =
         ticket == null && AcceptCommandsCommand.isPureUserMessageBatch(commands);
@@ -506,8 +510,9 @@ final class AcceptCommandsControl {
     SpawnTickets.admit(tx, ticket, false);
     Instant now = tx.now();
     Session session = tx.sessions().find(thread.sessionId()).orElseThrow();
-    List<NewThreadCommand> prepared = preflight.prepare(tx, session, commands);
+    List<NewThreadCommand> prepared = preflight.prepare(session, commands, List.of());
     requirePreflightShape(commands, prepared);
+    requireRootForEnvironment(thread, prepared);
     long nextSeq = thread.nextCommandSequence();
     List<ThreadCommand> allInserted = new ArrayList<>(prepared.size());
 
@@ -618,9 +623,20 @@ final class AcceptCommandsControl {
       List<NewThreadCommand> requests,
       AcceptancePreflight preflight,
       Instant now) {
+    return acceptNewCommandsOnThread(tx, thread, requests, preflight, now, List.of());
+  }
+
+  private static AcceptedCommands acceptNewCommandsOnThread(
+      HarnessStore.Transaction tx,
+      ThreadState thread,
+      List<NewThreadCommand> requests,
+      AcceptancePreflight preflight,
+      Instant now,
+      List<Entry> copiedEntries) {
     Session session = tx.sessions().find(thread.sessionId()).orElseThrow();
-    List<NewThreadCommand> prepared = preflight.prepare(tx, session, requests);
+    List<NewThreadCommand> prepared = preflight.prepare(session, requests, copiedEntries);
     requirePreflightShape(requests, prepared);
+    requireRootForEnvironment(thread, prepared);
     List<ThreadCommand> inserted = new ArrayList<>(prepared.size());
     long nextSequence = thread.nextCommandSequence();
     for (int i = 0; i < prepared.size(); i++) {
@@ -841,6 +857,15 @@ final class AcceptCommandsControl {
       return payload.message();
     }
     return ((CustomMessageCommandPayload) command.payload()).message();
+  }
+
+  private static void requireRootForEnvironment(
+      ThreadState thread, List<NewThreadCommand> commands) {
+    if (!thread.id().equals(thread.rootThreadId())
+        && commands.stream()
+            .anyMatch(command -> command.payload().type() == ThreadCommandType.SET_ENVIRONMENT)) {
+      throw new IllegalArgumentException("only the execution root can set an environment");
+    }
   }
 
   private static void requirePreflightShape(
