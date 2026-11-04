@@ -4,14 +4,14 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import fun.fengwk.kkstudio.project.notification.ProjectChangeNotifications;
+
 import java.util.Objects;
 import java.util.UUID;
 
 /** 在持久化事务中发送 Project 快照失效信号；PostgreSQL 仅在提交时投递通知。 */
 @Component
 public class ProjectChangeNotifier {
-
-  public static final String CHANNEL = "project_issue_changed";
 
   private final JdbcClient jdbc;
 
@@ -22,7 +22,7 @@ public class ProjectChangeNotifier {
   public void projectChanged(UUID projectId) {
     requireTransaction();
     jdbc.sql("select pg_notify(:channel, :projectId)")
-        .param("channel", CHANNEL)
+        .param("channel", ProjectChangeNotifications.CHANNEL)
         .param("projectId", projectId.toString())
         .query(String.class)
         .single();

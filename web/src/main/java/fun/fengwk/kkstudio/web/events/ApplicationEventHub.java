@@ -11,6 +11,7 @@ import fun.fengwk.kkstudio.harness.api.realtime.RealtimeEvent;
 import fun.fengwk.kkstudio.platform.cluster.RealtimeSubscriptionService;
 import fun.fengwk.kkstudio.platform.events.SourceSubscribed;
 import fun.fengwk.kkstudio.platform.harness.realtime.RealtimeEventSource;
+import fun.fengwk.kkstudio.platform.notification.NotificationInvalidationSource;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -126,8 +127,8 @@ final class ApplicationEventHub implements AutoCloseable {
   private final RealtimeEventSource realtimeSource;
   private final RealtimeSubscriptionService realtimeSubscriptions;
   private final CanvasVersionEventSource canvasVersionSource;
-  private final InvalidationEventSource projectInvalidationSource;
-  private final InvalidationEventSource environmentChangeSource;
+  private final NotificationInvalidationSource projectChangeSource;
+  private final NotificationInvalidationSource environmentChangeSource;
   private final int maxBufferedSignals;
   private final Map<ResourceKey, ResourceState> resources = new ConcurrentHashMap<>();
 
@@ -149,16 +150,15 @@ final class ApplicationEventHub implements AutoCloseable {
       RealtimeEventSource realtimeSource,
       RealtimeSubscriptionService realtimeSubscriptions,
       CanvasVersionEventSource canvasVersionSource,
-      InvalidationEventSource projectInvalidationSource,
-      InvalidationEventSource environmentChangeSource,
+      NotificationInvalidationSource projectChangeSource,
+      NotificationInvalidationSource environmentChangeSource,
       int maxBufferedSignals) {
     this.harnessChanges = Objects.requireNonNull(harnessChanges, "harnessChanges");
     this.realtimeSource = Objects.requireNonNull(realtimeSource, "realtimeSource");
     this.realtimeSubscriptions =
         Objects.requireNonNull(realtimeSubscriptions, "realtimeSubscriptions");
     this.canvasVersionSource = Objects.requireNonNull(canvasVersionSource, "canvasVersionSource");
-    this.projectInvalidationSource =
-        Objects.requireNonNull(projectInvalidationSource, "projectInvalidationSource");
+    this.projectChangeSource = Objects.requireNonNull(projectChangeSource, "projectChangeSource");
     this.environmentChangeSource =
         Objects.requireNonNull(environmentChangeSource, "environmentChangeSource");
     if (maxBufferedSignals <= 0) {
@@ -272,17 +272,23 @@ final class ApplicationEventHub implements AutoCloseable {
         state.canvasVersionHandle = version.handle();
         state.cursor = version.cursor();
       }
-      case PROJECTS -> state.invalidationHandle =
-          projectInvalidationSource.subscribe(null, event -> fanoutInvalidation(state, event));
-      case TREE -> state.invalidationHandle =
-          harnessChanges
-              .executionTree()
-              .subscribe(state.key.id(), event -> fanout(state, executionTreeSignal(event)));
-      case INTERACTIONS -> state.invalidationHandle =
-          harnessChanges
-              .interactions()
-              .subscribe(null, event -> fanout(state, interactionSignal(event)));
-      case ENVIRONMENTS -> state.invalidationHandle =
+      case PROJECTS -> state.invalidationRelease =
+          projectChangeSource.subscribe(null, event -> fanoutInvalidation(state, event));
+      case TREE -> {
+        HarnessChangeSubscription subscription =
+            harnessChanges
+                .executionTree()
+                .subscribe(state.key.id(), event -> fanout(state, executionTreeSignal(event)));
+        state.invalidationRelease = subscription::close;
+      }
+      case INTERACTIONS -> {
+        HarnessChangeSubscription subscription =
+            harnessChanges
+                .interactions()
+                .subscribe(null, event -> fanout(state, interactionSignal(event)));
+        state.invalidationRelease = subscription::close;
+      }
+      case ENVIRONMENTS -> state.invalidationRelease =
           environmentChangeSource.subscribe(null, event -> fanoutInvalidation(state, event));
     }
   }
@@ -311,14 +317,16 @@ final class ApplicationEventHub implements AutoCloseable {
     return new Signal.Resync();
   }
 
-  /** web 自有提示型资源的信号只做「按资源种类回读」。 */
-  private void fanoutInvalidation(ResourceState state, InvalidationEventSource.Event event) {
-    if (event.resync()) {
+  /** 提示型资源的通用失效信号按资源种类折叠为最小回读信号。 */
+  private void fanoutInvalidation(ResourceState state, NotificationInvalidationSource.Event event) {
+    if (event instanceof NotificationInvalidationSource.Event.Resync) {
       fanout(state, new Signal.Resync());
       return;
     }
+    NotificationInvalidationSource.Event.Changed changed =
+        (NotificationInvalidationSource.Event.Changed) event;
     switch (state.key.kind()) {
-      case PROJECTS -> fanout(state, new Signal.ProjectChanged(event.key()));
+      case PROJECTS -> fanout(state, new Signal.ProjectChanged(changed.key()));
       case ENVIRONMENTS -> fanout(state, new Signal.EnvironmentChanged());
       default -> throw new IllegalStateException("unexpected invalidation resource: " + state.key);
     }
@@ -428,7 +436,7 @@ final class ApplicationEventHub implements AutoCloseable {
     closeQuietly(state.threadVersionHandle);
     closeQuietly(state.realtimeHandle);
     closeQuietly(state.canvasVersionHandle);
-    closeQuietly(state.invalidationHandle);
+    closeQuietly(state.invalidationRelease);
   }
 
   private static void closeQuietly(AutoCloseable handle) {
@@ -442,6 +450,17 @@ final class ApplicationEventHub implements AutoCloseable {
     }
   }
 
+  private static void closeQuietly(Runnable release) {
+    if (release == null) {
+      return;
+    }
+    try {
+      release.run();
+    } catch (RuntimeException error) {
+      // 释放失败不影响其余订阅
+    }
+  }
+
   private static final class ResourceState {
     private final ResourceKey key;
     private final Set<LocalSubscription> subscribers = new HashSet<>();
@@ -449,7 +468,7 @@ final class ApplicationEventHub implements AutoCloseable {
     private AutoCloseable threadVersionHandle;
     private AutoCloseable realtimeHandle;
     private AutoCloseable canvasVersionHandle;
-    private AutoCloseable invalidationHandle;
+    private Runnable invalidationRelease;
     private long cursor;
 
     /** 已淘汰（最后释放/建立失败/hub close）：上游回调一律丢弃；只在状态锁内读写。 */

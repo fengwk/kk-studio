@@ -25,7 +25,7 @@ import java.util.List;
  */
 public abstract class EnvironmentNotificationTestSupport extends PostgresSpringTestSupport {
 
-  protected static final String ENVIRONMENT_CHANNEL = "environment_changed";
+  protected static final String ENVIRONMENT_CHANNEL = EnvironmentChangeNotifications.CHANNEL;
 
   @Autowired protected PlatformTransactionManager transactionManager;
   @Autowired protected JdbcTemplate jdbcTemplate;

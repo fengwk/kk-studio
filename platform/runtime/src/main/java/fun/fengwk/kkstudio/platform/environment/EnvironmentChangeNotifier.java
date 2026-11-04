@@ -30,7 +30,8 @@ public class EnvironmentChangeNotifier {
     Objects.requireNonNull(environmentId, "environmentId");
     requireTransaction();
     jdbcClient
-        .sql("select pg_notify('environment_changed', :environmentId)")
+        .sql("select pg_notify(:channel, :environmentId)")
+        .param("channel", EnvironmentChangeNotifications.CHANNEL)
         .param("environmentId", environmentId.toString())
         .query(String.class)
         .optional();

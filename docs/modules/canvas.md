@@ -103,17 +103,18 @@ HTTP 不提供画布删除入口。删除节点或资源时，无 pin 的资源�
 Canvas 独占 `canvas_revision` 通知通道：通道常量、revision 事件源与进程内 Hub 都在
 [`notification`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/notification/) 包。
 
-- [`CanvasVersionHub`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/notification/CanvasVersionHub.java)
-  是通道名（`CHANNEL = "canvas_revision"`）的唯一定义处：写侧
+- [`CanvasVersionNotifications`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/notification/CanvasVersionNotifications.java)
+  是通道名（`CHANNEL = "canvas_revision"`）与 `canvasId:revision` payload 协议的唯一定义处：写侧
   [`PostgresqlCanvasChangeNotifier`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/PostgresqlCanvasChangeNotifier.java)
   在同一事务内用该常量 `pg_notify`，宿主的 LISTEN 注册也取同一常量，因此不存在第二处通道定义。
-- Hub 只经 [`CanvasQueryService.findDocument`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/CanvasQueryService.java)
-  读权威 `revision`，不持有 LISTEN 连接，也不认识浏览器传输：`subscribe` 先注册 consumer 再读当前 revision 返回 ack cursor，返回的
-  cursor 之后的变化保证送达；`canvasId:revision` payload 只做轻量解析与定点投递，畸形 payload 与 LISTEN 建连/重连退化为全量 resync；
-  退订幂等，已关闭的订阅者不再收到投递。查询失败释放刚建立的注册并保留原始异常。
-- Hub 由 [`CanvasInfraAutoConfiguration`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/CanvasInfraAutoConfiguration.java)
-  显式注册，`notification` 包不参与组件扫描。宿主只把 `CanvasVersionHub.CHANNEL` 登记到共享 LISTEN 连接，把通知与 resync 交给 Hub，
-  再把 revision 事件转发给浏览器（见 [Web 的通知与浏览器事件](web.md#通知与浏览器事件)）。
+- 注册、cursor 与 fan-out 复用 `platform.notification` 的 `VersionNotificationHub`：本类只经
+  [`CanvasQueryService.findDocument`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/CanvasQueryService.java) 读权威
+  `revision` 并映射 revision 事件。`subscribe` 先注册 consumer 再读当前 revision 返回 ack cursor，返回的 cursor 之后的变化保证送达；
+  畸形 payload 与 LISTEN 建连/重连退化为全量 resync；退订幂等，已关闭的订阅者不再收到投递。查询失败释放刚建立的注册并保留原始异常。
+  本类不持有 LISTEN 连接，也不认识浏览器传输。
+- 生产方入口由 [`CanvasInfraAutoConfiguration`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/CanvasInfraAutoConfiguration.java)
+  显式注册，`notification` 包不参与组件扫描。宿主只把 `CanvasVersionNotifications.CHANNEL` 登记到共享 LISTEN 连接，把通知与 resync
+  交给该入口，再把 revision 事件转发给浏览器（见 [Web 的通知与浏览器事件](web.md#通知与浏览器事件)）。
 
 ## Canvas Function SPI
 
@@ -238,7 +239,7 @@ pollIntervalMillis      = 1000     rejectionDelayMillis    = 1000
 - Function 运行时：[`function`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/function/) 目录下的 dispatcher、worker、transactions、codec 是一个整体，改所有权语义时同步检查 `CanvasFunctionRunJdbcStore` 的租约围栏与锁序。
 - 新增能力：在插件模块实现 `CanvasFunctionAdapter`，由平台发布到插件快照。
 
-测试入口：HTTP 边界由 [`CanvasControllerTest.java`](../../apps/canvas/runtime/src/test/java/fun/fengwk/kkstudio/canvas/http/CanvasControllerTest.java)、[`CanvasFunctionControllerTest.java`](../../apps/canvas/runtime/src/test/java/fun/fengwk/kkstudio/canvas/http/CanvasFunctionControllerTest.java)、[`CanvasResourceControllerTest.java`](../../apps/canvas/runtime/src/test/java/fun/fengwk/kkstudio/canvas/http/CanvasResourceControllerTest.java) 在 standalone MockMvc 上覆盖，[`CanvasFunctionWireContractTest.java`](../../apps/canvas/runtime/src/test/java/fun/fengwk/kkstudio/canvas/http/CanvasFunctionWireContractTest.java) 锁定版本与请求体的 wire golden（前端测试共用同一份资源）；[`CanvasCommandPlannerTest.java`](../../apps/canvas/runtime/src/test/java/fun/fengwk/kkstudio/canvas/CanvasCommandPlannerTest.java) 与同包规划测试覆盖前置条件与冲突判定；[`CanvasFunctionRuntimeFoundationTest.java`](../../apps/canvas/runtime/src/test/java/fun/fengwk/kkstudio/canvas/infra/function/CanvasFunctionRuntimeFoundationTest.java) 在真实库上验证锁序、幂等、冻结与回滚；[`CanvasFunctionWorkStoreIntegrationTest.java`](../../apps/canvas/runtime/src/test/java/fun/fengwk/kkstudio/canvas/infra/postgresql/CanvasFunctionWorkStoreIntegrationTest.java) 验证多实例领取、租约恢复与围栏；[`CanvasBlobResourceMaterializerIntegrationTest.java`](../../apps/canvas/runtime/src/test/java/fun/fengwk/kkstudio/canvas/infra/platform/CanvasBlobResourceMaterializerIntegrationTest.java) 在平台测试宿主（`platform-runtime` test-jar）上验证输出物化与 Blob 引用转移。数据库测试需要 Docker（或本地 PostgreSQL），不可用即失败；revision 通知 Hub 的注册竞态、resync 与退订语义由 [`CanvasVersionHubTest.java`](../../apps/canvas/runtime/src/test/java/fun/fengwk/kkstudio/canvas/notification/CanvasVersionHubTest.java) 覆盖，通道上的真实 `pg_notify` 投递由 [`CanvasRevisionNotificationIntegrationTest.java`](../../apps/canvas/runtime/src/test/java/fun/fengwk/kkstudio/canvas/infra/postgresql/CanvasRevisionNotificationIntegrationTest.java) 覆盖。
+测试入口：HTTP 边界由 [`CanvasControllerTest.java`](../../apps/canvas/runtime/src/test/java/fun/fengwk/kkstudio/canvas/http/CanvasControllerTest.java)、[`CanvasFunctionControllerTest.java`](../../apps/canvas/runtime/src/test/java/fun/fengwk/kkstudio/canvas/http/CanvasFunctionControllerTest.java)、[`CanvasResourceControllerTest.java`](../../apps/canvas/runtime/src/test/java/fun/fengwk/kkstudio/canvas/http/CanvasResourceControllerTest.java) 在 standalone MockMvc 上覆盖，[`CanvasFunctionWireContractTest.java`](../../apps/canvas/runtime/src/test/java/fun/fengwk/kkstudio/canvas/http/CanvasFunctionWireContractTest.java) 锁定版本与请求体的 wire golden（前端测试共用同一份资源）；[`CanvasCommandPlannerTest.java`](../../apps/canvas/runtime/src/test/java/fun/fengwk/kkstudio/canvas/CanvasCommandPlannerTest.java) 与同包规划测试覆盖前置条件与冲突判定；[`CanvasFunctionRuntimeFoundationTest.java`](../../apps/canvas/runtime/src/test/java/fun/fengwk/kkstudio/canvas/infra/function/CanvasFunctionRuntimeFoundationTest.java) 在真实库上验证锁序、幂等、冻结与回滚；[`CanvasFunctionWorkStoreIntegrationTest.java`](../../apps/canvas/runtime/src/test/java/fun/fengwk/kkstudio/canvas/infra/postgresql/CanvasFunctionWorkStoreIntegrationTest.java) 验证多实例领取、租约恢复与围栏；[`CanvasBlobResourceMaterializerIntegrationTest.java`](../../apps/canvas/runtime/src/test/java/fun/fengwk/kkstudio/canvas/infra/platform/CanvasBlobResourceMaterializerIntegrationTest.java) 在平台测试宿主（`platform-runtime` test-jar）上验证输出物化与 Blob 引用转移。数据库测试需要 Docker（或本地 PostgreSQL），不可用即失败；revision 通知的注册竞态、resync 与退订语义由 [`CanvasVersionNotificationsTest.java`](../../apps/canvas/runtime/src/test/java/fun/fengwk/kkstudio/canvas/notification/CanvasVersionNotificationsTest.java) 覆盖，通道上的真实 `pg_notify` 投递由 [`CanvasRevisionNotificationIntegrationTest.java`](../../apps/canvas/runtime/src/test/java/fun/fengwk/kkstudio/canvas/infra/postgresql/CanvasRevisionNotificationIntegrationTest.java) 覆盖。
 
 ---
 

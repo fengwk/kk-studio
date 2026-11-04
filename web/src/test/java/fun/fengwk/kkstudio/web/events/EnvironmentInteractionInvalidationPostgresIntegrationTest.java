@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import fun.fengwk.kkstudio.platform.environment.EnvironmentChangeNotifications;
 import fun.fengwk.kkstudio.platform.harness.notification.HarnessChangeNotifications;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.ResourceKey;
@@ -54,7 +55,7 @@ class EnvironmentInteractionInvalidationPostgresIntegrationTest extends WebPostg
               countResyncs(interactionSignals) > initialInteractionResyncs
                   && environmentSignals.stream()
                       .anyMatch(signal -> signal instanceof Signal.EnvironmentChanged),
-          EnvironmentChangeHub.CHANNEL,
+          EnvironmentChangeNotifications.CHANNEL,
           environmentId.toString());
 
       // 同一 LISTEN 连接的后续根通知也是投递围栏，避免只在环境回调的中途检查负断言。
@@ -82,7 +83,7 @@ class EnvironmentInteractionInvalidationPostgresIntegrationTest extends WebPostg
           () ->
               countResyncs(interactionSignals) > interactionResyncsBefore
                   && countResyncs(environmentSignals) > environmentResyncsBefore,
-          EnvironmentChangeHub.CHANNEL,
+          EnvironmentChangeNotifications.CHANNEL,
           "");
     } finally {
       interactionSubscription.close();

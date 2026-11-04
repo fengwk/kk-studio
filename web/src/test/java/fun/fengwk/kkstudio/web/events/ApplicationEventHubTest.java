@@ -28,6 +28,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.platform.cluster.RealtimeSubscriptionService;
 import fun.fengwk.kkstudio.platform.events.SourceSubscribed;
 import fun.fengwk.kkstudio.platform.harness.realtime.RealtimeEventSource;
+import fun.fengwk.kkstudio.platform.notification.NotificationInvalidationSource;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.ResourceKey;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.ResourceKind;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.Signal;
@@ -65,10 +66,10 @@ class ApplicationEventHubTest {
   private RealtimeEventSource realtimeSource;
   private RealtimeSubscriptionService realtimeSubscriptions;
   private CanvasVersionEventSource canvasVersionSource;
-  private InvalidationEventSource projectInvalidationHub;
+  private NotificationInvalidationSource projectChangeSource;
   private HarnessInvalidationChanges executionTreeChangeSource;
   private HarnessInvalidationChanges interactionChangeSource;
-  private InvalidationEventSource environmentChangeSource;
+  private NotificationInvalidationSource environmentChangeSource;
   private HarnessChangeSubscriptions harnessChanges;
   private ApplicationEventHub hub;
 
@@ -78,10 +79,10 @@ class ApplicationEventHubTest {
     realtimeSource = mock(RealtimeEventSource.class);
     realtimeSubscriptions = mock(RealtimeSubscriptionService.class);
     canvasVersionSource = mock(CanvasVersionEventSource.class);
-    projectInvalidationHub = mock(InvalidationEventSource.class);
+    projectChangeSource = mock(NotificationInvalidationSource.class);
     executionTreeChangeSource = mock(HarnessInvalidationChanges.class);
     interactionChangeSource = mock(HarnessInvalidationChanges.class);
-    environmentChangeSource = mock(InvalidationEventSource.class);
+    environmentChangeSource = mock(NotificationInvalidationSource.class);
     harnessChanges = mock(HarnessChangeSubscriptions.class);
     when(harnessChanges.threadVersions()).thenReturn(threadVersionSource);
     when(harnessChanges.executionTree()).thenReturn(executionTreeChangeSource);
@@ -90,7 +91,7 @@ class ApplicationEventHubTest {
     when(canvasVersionSource.subscribe(any(), any()))
         .thenReturn(new SourceSubscribed(3L, () -> {}));
     when(realtimeSource.subscribe(any(), any(), any())).thenReturn(() -> {});
-    when(projectInvalidationHub.subscribe(any(), any())).thenReturn(() -> {});
+    when(projectChangeSource.subscribe(any(), any())).thenReturn(() -> {});
     when(executionTreeChangeSource.subscribe(any(), any())).thenReturn(subscribed(0L, () -> {}));
     when(interactionChangeSource.subscribe(any(), any())).thenReturn(subscribed(0L, () -> {}));
     when(environmentChangeSource.subscribe(any(), any())).thenReturn(() -> {});
@@ -100,7 +101,7 @@ class ApplicationEventHubTest {
             realtimeSource,
             realtimeSubscriptions,
             canvasVersionSource,
-            projectInvalidationHub,
+            projectChangeSource,
             environmentChangeSource,
             BUFFER_CAPACITY);
   }
@@ -355,15 +356,15 @@ class ApplicationEventHubTest {
   }
 
   @Test
-  void projectInvalidationFansOutAndReleasesItsUpstream() throws Exception {
-    AtomicReference<Consumer<InvalidationEventSource.Event>> projectConsumer =
+  void projectInvalidationFansOutAndReleasesItsUpstream() {
+    AtomicReference<Consumer<NotificationInvalidationSource.Event>> projectConsumer =
         new AtomicReference<>();
-    AutoCloseable projectHandle = mock(AutoCloseable.class);
-    when(projectInvalidationHub.subscribe(any(), any()))
+    AtomicInteger projectReleases = new AtomicInteger();
+    when(projectChangeSource.subscribe(any(), any()))
         .thenAnswer(
             inv -> {
               projectConsumer.set(inv.getArgument(1));
-              return projectHandle;
+              return (Runnable) projectReleases::incrementAndGet;
             });
 
     List<Signal> projectSignals = new ArrayList<>();
@@ -372,13 +373,14 @@ class ApplicationEventHubTest {
     projectSubscription.activate();
 
     UUID projectId = UUID.randomUUID();
-    projectConsumer.get().accept(InvalidationEventSource.Event.changed(projectId));
-    projectConsumer.get().accept(InvalidationEventSource.Event.fullResync());
+    projectConsumer.get().accept(new NotificationInvalidationSource.Event.Changed(projectId));
+    projectConsumer.get().accept(new NotificationInvalidationSource.Event.Resync());
     assertEquals(
         List.of(new Signal.ProjectChanged(projectId), new Signal.Resync()), projectSignals);
 
     projectSubscription.close();
-    verify(projectHandle).close();
+    assertEquals(
+        1, projectReleases.get(), "last release must close the generic invalidation upstream");
   }
 
   @Test
@@ -429,7 +431,7 @@ class ApplicationEventHubTest {
     // 测试意图：交互与 Environment 是全局资源，单个上游事件向全部本地订阅者投递一次最小失效信号。
     AtomicReference<Consumer<HarnessInvalidationChanges.Event>> interactionsConsumer =
         new AtomicReference<>();
-    AtomicReference<Consumer<InvalidationEventSource.Event>> environmentsConsumer =
+    AtomicReference<Consumer<NotificationInvalidationSource.Event>> environmentsConsumer =
         new AtomicReference<>();
     when(interactionChangeSource.subscribe(any(), any()))
         .thenAnswer(
@@ -441,7 +443,7 @@ class ApplicationEventHubTest {
         .thenAnswer(
             inv -> {
               environmentsConsumer.set(inv.getArgument(1));
-              return subscribed(0L, () -> {});
+              return (Runnable) () -> {};
             });
 
     List<Signal> interactionSignals = new ArrayList<>();
@@ -455,8 +457,10 @@ class ApplicationEventHubTest {
 
     UUID rootThreadId = UUID.randomUUID();
     interactionsConsumer.get().accept(new HarnessInvalidationChanges.Event.Changed(rootThreadId));
-    environmentsConsumer.get().accept(InvalidationEventSource.Event.changed(UUID.randomUUID()));
-    environmentsConsumer.get().accept(InvalidationEventSource.Event.fullResync());
+    environmentsConsumer
+        .get()
+        .accept(new NotificationInvalidationSource.Event.Changed(UUID.randomUUID()));
+    environmentsConsumer.get().accept(new NotificationInvalidationSource.Event.Resync());
 
     assertEquals(List.of(new Signal.InteractionsChanged(rootThreadId)), interactionSignals);
     assertEquals(List.of(new Signal.EnvironmentChanged(), new Signal.Resync()), environmentSignals);

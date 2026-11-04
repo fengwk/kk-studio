@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.platform.harness.notification;
 import fun.fengwk.kkstudio.harness.api.HarnessChangeSubscription;
 import fun.fengwk.kkstudio.harness.api.HarnessInvalidationChanges;
 import fun.fengwk.kkstudio.platform.notification.NotificationInvalidationHub;
+import fun.fengwk.kkstudio.platform.notification.NotificationInvalidationSource;
 
 import java.util.Objects;
 import java.util.UUID;
@@ -16,13 +17,13 @@ import java.util.function.Consumer;
  */
 public final class HarnessInvalidationSource implements HarnessInvalidationChanges {
 
-  private final NotificationInvalidationHub<Event> hub =
-      new NotificationInvalidationHub<>(Event.Changed::new, Event.Resync::new);
+  private final NotificationInvalidationHub hub = new NotificationInvalidationHub();
 
   @Override
   public HarnessChangeSubscription subscribe(UUID key, Consumer<Event> consumer) {
     Objects.requireNonNull(consumer, "consumer");
-    return new HarnessChangeSubscription(0L, hub.subscribe(key, consumer));
+    Runnable release = hub.subscribe(key, event -> consumer.accept(toEvent(event)));
+    return new HarnessChangeSubscription(0L, release);
   }
 
   /** 由统一 PostgreSQL listener 交付一条 harness 失效通知。 */
@@ -33,5 +34,12 @@ public final class HarnessInvalidationSource implements HarnessInvalidationChang
   /** 建连/重连或来源事实缺失：要求全部订阅整体回读。 */
   public void broadcastResync() {
     hub.broadcastResync();
+  }
+
+  private static Event toEvent(NotificationInvalidationSource.Event event) {
+    if (event instanceof NotificationInvalidationSource.Event.Changed changed) {
+      return new Event.Changed(changed.key());
+    }
+    return new Event.Resync();
   }
 }

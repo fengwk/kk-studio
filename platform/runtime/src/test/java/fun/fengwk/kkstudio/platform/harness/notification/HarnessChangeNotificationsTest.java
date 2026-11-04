@@ -27,15 +27,13 @@ class HarnessChangeNotificationsTest {
 
   private static final UUID THREAD = new UUID(0L, 7L);
 
-  private ThreadVersionHub threadVersionHub;
   private HarnessChangeNotifications notifications;
 
   @BeforeEach
   void setUp() {
     HarnessRuntime runtime = mock(HarnessRuntime.class);
     when(runtime.findThreadVersion(THREAD)).thenReturn(Optional.of(3L));
-    threadVersionHub = new ThreadVersionHub(() -> runtime);
-    notifications = new HarnessChangeNotifications(threadVersionHub);
+    notifications = new HarnessChangeNotifications(() -> runtime);
   }
 
   @Test
@@ -52,8 +50,8 @@ class HarnessChangeNotificationsTest {
   }
 
   @Test
-  void publicSourcesExposeTheSharedThreadVersionHub() {
-    assertSame(threadVersionHub, notifications.threadVersions());
+  void threadVersionsExposeTheSameEntryAsTheInternalWakeSource() {
+    assertSame(notifications, notifications.threadVersions());
   }
 
   @Test

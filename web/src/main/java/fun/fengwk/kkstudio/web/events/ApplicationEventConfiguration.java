@@ -7,10 +7,11 @@ import org.springframework.context.annotation.Configuration;
 import fun.fengwk.kkstudio.canvas.infra.function.ClaimedRun;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasFunctionWorkStore;
 import fun.fengwk.kkstudio.canvas.notification.CanvasVersionEventSource;
-import fun.fengwk.kkstudio.canvas.notification.CanvasVersionHub;
+import fun.fengwk.kkstudio.canvas.notification.CanvasVersionNotifications;
 import fun.fengwk.kkstudio.harness.api.HarnessChangeSubscriptions;
 import fun.fengwk.kkstudio.harness.codec.RealtimeEventJsonCodec;
 import fun.fengwk.kkstudio.platform.cluster.RealtimeSubscriptionService;
+import fun.fengwk.kkstudio.platform.environment.EnvironmentChangeNotifications;
 import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillSyncOrchestrator;
 import fun.fengwk.kkstudio.platform.harness.dispatch.HarnessWorkDispatcher;
 import fun.fengwk.kkstudio.platform.harness.notification.HarnessChangeNotifications;
@@ -19,14 +20,13 @@ import fun.fengwk.kkstudio.platform.harness.realtime.HarnessStreamCatchupService
 import fun.fengwk.kkstudio.platform.harness.realtime.PostgresqlRealtimeEventSource;
 import fun.fengwk.kkstudio.platform.harness.realtime.RealtimeBus;
 import fun.fengwk.kkstudio.platform.harness.realtime.RealtimeEventSource;
-import fun.fengwk.kkstudio.platform.notification.NotificationInvalidationHub;
 import fun.fengwk.kkstudio.platform.pluginhost.catalog.PluginCatalogRefreshTrigger;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRepository;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsChangeHandler;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
+import fun.fengwk.kkstudio.project.notification.ProjectChangeNotifications;
 import fun.fengwk.kkstudio.project.reconcile.IssueReconciler;
-import fun.fengwk.kkstudio.project.repo.ProjectChangeNotifier;
 import fun.fengwk.kkstudio.web.events.postgresql.PostgresqlNotificationHandler;
 import fun.fengwk.kkstudio.web.events.postgresql.PostgresqlNotificationLoop;
 import fun.fengwk.kkstudio.work.BoundedWorkDispatcher;
@@ -47,12 +47,6 @@ public class ApplicationEventConfiguration {
   @Bean
   public EventFrameCodec eventFrameCodec() {
     return new EventFrameCodec(new RealtimeEventJsonCodec());
-  }
-
-  @Bean
-  public NotificationInvalidationHub<InvalidationEventSource.Event> projectInvalidationHub() {
-    return new NotificationInvalidationHub<>(
-        InvalidationEventSource.Event::changed, InvalidationEventSource.Event::fullResync);
   }
 
   /**
@@ -80,12 +74,11 @@ public class ApplicationEventConfiguration {
       @Qualifier("canvasFunctionDispatcher")
           BoundedWorkDispatcher<ClaimedRun> canvasFunctionDispatcher,
       HarnessChangeNotifications harnessNotifications,
-      CanvasVersionHub canvasVersionHub,
-      @Qualifier("projectInvalidationHub")
-          NotificationInvalidationHub<InvalidationEventSource.Event> projectInvalidationHub,
+      CanvasVersionNotifications canvasVersionNotifications,
+      ProjectChangeNotifications projectChangeNotifications,
       SystemSettingsChangeHandler systemSettingsChangeHandler,
       EnvironmentSkillSyncOrchestrator environmentSkillSyncOrchestrator,
-      EnvironmentChangeHub environmentChangeHub,
+      EnvironmentChangeNotifications environmentChangeNotifications,
       PostgresqlNotificationHandler pluginCatalogNotificationHandler,
       SystemSettingsSnapshot systemSettingsSnapshot) {
     SystemSettings.Advanced advanced = systemSettingsSnapshot.get().advanced();
@@ -117,17 +110,17 @@ public class ApplicationEventConfiguration {
                 threadVersions.channel(),
                 threadVersions.onNotification(),
                 threadVersions.onResync()),
-            // 3. 画布版本失效：Canvas 拥有 canvas_revision 通道与 revision fan-out（CanvasVersionHub）；Web 只建立
-            // LISTEN 并把信号转发给浏览器事件通道以触发图谱更新
+            // 3. 画布版本失效：Canvas 拥有 canvas_revision 通道、payload 协议与 revision fan-out；Web 只建立 LISTEN
+            // 并把信号转发给浏览器事件通道以触发图谱更新
             new PostgresqlNotificationHandler(
-                CanvasVersionHub.CHANNEL,
-                canvasVersionHub::onNotification,
-                canvasVersionHub::broadcastResync),
-            // 4. Project/Issue 失效：数据库事实提交后按 projectId 提示浏览器回读权威 Snapshot
+                CanvasVersionNotifications.CHANNEL,
+                canvasVersionNotifications::onNotification,
+                canvasVersionNotifications::broadcastResync),
+            // 4. Project/Issue 失效：生产方拥有通道与订阅入口，数据库事实提交后按 projectId 提示浏览器回读权威 Snapshot
             new PostgresqlNotificationHandler(
-                ProjectChangeNotifier.CHANNEL,
-                projectInvalidationHub::onNotification,
-                projectInvalidationHub::broadcastResync),
+                ProjectChangeNotifications.CHANNEL,
+                projectChangeNotifications::onNotification,
+                projectChangeNotifications::broadcastResync),
             // 5. 系统设置同步：集群任一节点修改全局设置提交后，广播通知所有节点原子回读最新快照
             new PostgresqlNotificationHandler(
                 SystemSettingsChangeHandler.CHANNEL,
@@ -147,13 +140,13 @@ public class ApplicationEventConfiguration {
                 interactions.channel(), interactions.onNotification(), interactions.onResync()),
             // 9. 环境连接变更：payload 是环境 id，不是执行根；环境精准失效，交互全量对账。
             new PostgresqlNotificationHandler(
-                EnvironmentChangeHub.CHANNEL,
+                EnvironmentChangeNotifications.CHANNEL,
                 payload -> {
-                  environmentChangeHub.onNotification(payload);
+                  environmentChangeNotifications.onNotification(payload);
                   interactions.onResync().run();
                 },
                 () -> {
-                  environmentChangeHub.broadcastResync();
+                  environmentChangeNotifications.broadcastResync();
                   interactions.onResync().run();
                 }),
             // 10. Plugin 目录变更：集群任一节点提交配置后广播提示其它节点立即回读权威目录；payload 只作提示、不能作为可信状态，
@@ -217,17 +210,16 @@ public class ApplicationEventConfiguration {
       RealtimeEventSource realtimeSource,
       RealtimeSubscriptionService realtimeSubscriptions,
       CanvasVersionEventSource canvasVersionSource,
-      @Qualifier("projectInvalidationHub")
-          NotificationInvalidationHub<InvalidationEventSource.Event> projectInvalidationHub,
-      EnvironmentChangeHub environmentChangeHub,
+      ProjectChangeNotifications projectChangeNotifications,
+      EnvironmentChangeNotifications environmentChangeNotifications,
       ApplicationEventSettings settings) {
     return new ApplicationEventHub(
         harnessChanges,
         realtimeSource,
         realtimeSubscriptions,
         canvasVersionSource,
-        (key, consumer) -> projectInvalidationHub.subscribe(key, consumer)::run,
-        environmentChangeHub,
+        projectChangeNotifications,
+        environmentChangeNotifications,
         settings.queueCapacity());
   }
 

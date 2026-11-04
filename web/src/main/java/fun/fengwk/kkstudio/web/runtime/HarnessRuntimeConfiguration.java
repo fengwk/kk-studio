@@ -38,7 +38,6 @@ import fun.fengwk.kkstudio.platform.harness.dispatch.HarnessWorkDispatcherConfig
 import fun.fengwk.kkstudio.platform.harness.model.DatabaseProviderResolutionService;
 import fun.fengwk.kkstudio.platform.harness.model.ProviderRequestPreviewService;
 import fun.fengwk.kkstudio.platform.harness.notification.HarnessChangeNotifications;
-import fun.fengwk.kkstudio.platform.harness.notification.ThreadVersionHub;
 import fun.fengwk.kkstudio.platform.harness.thread.command.DatabaseTurnResolver;
 import fun.fengwk.kkstudio.platform.harness.thread.query.ModelRequestDebugService;
 import fun.fengwk.kkstudio.platform.plugin.resource.PluginResourceGateway;
@@ -154,19 +153,14 @@ public class HarnessRuntimeConfiguration {
   }
 
   /**
-   * Thread version 变更的公开订阅源：浏览器版本事件与内部观察者（TaskTool / PluginPromptTaskService）的纯 wake 信号共用同一份注册与
-   * resync 语义。
+   * Harness 变更订阅的公开入口，同时充当内部观察者（TaskTool / PluginPromptTaskService）的纯 wake 源：Thread version、执行树与待处理
+   * 交互共用同一份注册与 resync 语义。
    */
   @Bean
-  public ThreadVersionHub threadVersionHub(ObjectProvider<HarnessRuntime> runtime) {
+  public HarnessChangeNotifications harnessChangeNotifications(
+      ObjectProvider<HarnessRuntime> runtime) {
     // Runtime 依赖 ToolProcessor，而工具目录初始化期间会取得这个 wake 源；只在订阅时解析 Runtime。
-    return new ThreadVersionHub(runtime::getObject);
-  }
-
-  /** Harness 变更订阅的公开入口：集中 Thread version、执行树与待处理交互三个通知 channel 的协议与分发。 */
-  @Bean
-  public HarnessChangeNotifications harnessChangeNotifications(ThreadVersionHub threadVersionHub) {
-    return new HarnessChangeNotifications(threadVersionHub);
+    return new HarnessChangeNotifications(runtime::getObject);
   }
 
   /** 结构化 Model Request Debug 只读服务：依赖完整 Runtime，因此只在 Web 组合根创建。 */
