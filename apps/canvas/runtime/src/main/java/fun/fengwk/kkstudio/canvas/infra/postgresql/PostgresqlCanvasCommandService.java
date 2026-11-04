@@ -15,9 +15,7 @@ import fun.fengwk.kkstudio.canvas.CanvasConflictException;
 import fun.fengwk.kkstudio.canvas.CanvasDocument;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionResourcePin;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRun;
-import fun.fengwk.kkstudio.canvas.CanvasFunctionRunStatus;
 import fun.fengwk.kkstudio.canvas.CanvasGraph;
-import fun.fengwk.kkstudio.canvas.CanvasGroup;
 import fun.fengwk.kkstudio.canvas.CanvasMutation;
 import fun.fengwk.kkstudio.canvas.CanvasPatch;
 import fun.fengwk.kkstudio.canvas.CanvasResource;
@@ -38,7 +36,7 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * typed command 与画布生命周期的 PostgreSQL 事务实现。
+ * 画布创建与 typed command 的 PostgreSQL 事务实现。
  *
  * <p>所有写入都在 {@code canvas_document} 行锁内的短事务中完成，锁内不做上传、模型调用或任何其他外部 I/O。因此同一画布的写入按 document
  * 行锁串行提交：幂等判定、语义组前置条件校验、行级落库与 revision 前进要么整体成功，要么整体回滚。冲突不写入任何行，也不返回新基线。
@@ -133,39 +131,6 @@ public class PostgresqlCanvasCommandService implements CanvasCommandService {
     canvasStore.addCommandDedup(
         new CommandDedup(canvasId, idempotencyKey, requestHash, acceptedRevision));
     return new Accepted(plan.toPatch(acceptedRevision));
-  }
-
-  @Override
-  @Transactional
-  public void deleteCanvas(UUID canvasId) {
-    Objects.requireNonNull(canvasId, "canvasId");
-    if (canvasStore.lockDocument(canvasId).isEmpty()) {
-      return;
-    }
-    for (CanvasFunctionRun run : runRepository.findByCanvasId(canvasId)) {
-      if (run.status() == CanvasFunctionRunStatus.READY
-          || run.status() == CanvasFunctionRunStatus.RUNNING
-          || run.status() == CanvasFunctionRunStatus.UNKNOWN) {
-        throw new IllegalStateException("canvas has a non-terminal Function run: " + run.nodeId());
-      }
-    }
-    resourceLifecycle.releaseCanvasPins(canvasId);
-    runRepository.deleteByCanvasId(canvasId);
-    resourceLifecycle.deleteCanvasResources(canvasId);
-    for (NodeRecord node : canvasStore.listNodes(canvasId)) {
-      if (!canvasStore.deleteNode(canvasId, node.id())) {
-        throw new IllegalStateException("delete canvas node failed: " + node.id());
-      }
-    }
-    for (CanvasGroup group : canvasStore.listGroups(canvasId)) {
-      if (!canvasStore.deleteGroup(canvasId, group.id())) {
-        throw new IllegalStateException("delete canvas group failed: " + group.id());
-      }
-    }
-    canvasStore.deleteCommandDedupByCanvas(canvasId);
-    if (!canvasStore.deleteDocument(canvasId)) {
-      throw new IllegalStateException("delete canvas document failed: " + canvasId);
-    }
   }
 
   /** 读取 document 行锁内的权威快照，作为命令前沿的判定基础。 */

@@ -17,9 +17,6 @@ public interface CanvasResourceLifecycle {
   /** 释放节点全部 Run 的 pin，并回收因此失去最后一个 pin 的无 owner Resource。 */
   void releaseNodePins(UUID canvasId, UUID nodeId);
 
-  /** 清空画布全部 pin；随后的 Resource 由 {@link #deleteCanvasResources} 回收。 */
-  void releaseCanvasPins(UUID canvasId);
-
   /**
    * Function 成功时按冻结顺序把全部输出挂到节点：slot {@code i} 的 resource 挂到 index {@code i}。旧 owned 资源仍被其他 Run pin
    * 则解除挂接，否则删除。返回实际挂接后的 Resource 列表。
@@ -32,7 +29,4 @@ public interface CanvasResourceLifecycle {
 
   /** 删除指定 Resource 行并释放其 Blob 引用；调用方须已确认它不再被节点持有且无 pin。 */
   void discardResource(UUID canvasId, UUID resourceId);
-
-  /** 画布深删除：调用方须先删除全部 pin，随后删除每个 Resource 行并释放其 Blob 引用。 */
-  void deleteCanvasResources(UUID canvasId);
 }

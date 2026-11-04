@@ -94,9 +94,9 @@ Function 保存为 `{name, args}`，具体函数声明参数 Schema、输入限�
 
 持久化适配使用 `JdbcClient`：[`PostgresqlCanvasStore`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/PostgresqlCanvasStore.java) 聚合 document、node、group 与幂等记账的行操作，[`PostgresqlCanvasCommandService`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/PostgresqlCanvasCommandService.java) 执行上面的写协议，资源与 pin 由各自的 Repository 写入。`canvas_*` 的外键全部 RESTRICT，删除顺序由代码显式保证，不依赖 cascade。
 
-删除画布先锁 Document：存在 `READY`、`RUNNING` 或 `UNKNOWN` Run 时整体拒绝；允许删除后，依次释放 pin、删除终态 Run、删除 Resource 行并释放全局 Blob 引用、删除 Node、Group、幂等记账，最后删除 Document。解除挂接后被其他运行 pin 的资源继续保留；Blob 引用释放失败使整个事务回滚。
+HTTP 不提供画布删除入口。删除节点或资源时，无 pin 的资源行会被删除并释放其全局 Blob 引用；解除挂接后仍被 Run pin 的资源继续保留。Blob 引用释放失败使整个事务回滚。
 
-[`PostgresqlCanvasQueryService.findSnapshot`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/PostgresqlCanvasQueryService.java) 装配 document、runs、按 owner 分组的资源、node、group 与 references，并在返回前重读对比 document 与 runs：读取窗口内有并发提交就重新读取，保证 graph 与 Run 投影属于同一代次。单资源读取由 [`CanvasQueryService.findResource`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/CanvasQueryService.java) 直接按 `(canvasId, resourceId)` 查询已挂载资源（`ownerNodeId != null`），供 [`CanvasResourceUrlService`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/platform/CanvasResourceUrlService.java) 定位资源并签发下载或预览 URL，无需全量加载画布快照。HTTP 不提供画布删除入口；上述画布级删除能力目前没有生产调用方，节点与资源的删除仍会释放相应引用。
+[`PostgresqlCanvasQueryService.findSnapshot`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/PostgresqlCanvasQueryService.java) 装配 document、runs、按 owner 分组的资源、node、group 与 references，并在返回前重读对比 document 与 runs：读取窗口内有并发提交就重新读取，保证 graph 与 Run 投影属于同一代次。单资源读取由 [`CanvasQueryService.findResource`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/CanvasQueryService.java) 直接按 `(canvasId, resourceId)` 查询已挂载资源（`ownerNodeId != null`），供 [`CanvasResourceUrlService`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/platform/CanvasResourceUrlService.java) 定位资源并签发下载或预览 URL，无需全量加载画布快照。
 
 ## Revision 通知
 

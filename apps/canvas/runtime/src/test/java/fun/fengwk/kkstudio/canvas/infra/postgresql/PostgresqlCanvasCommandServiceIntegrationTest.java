@@ -35,7 +35,7 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * typed command 的 PostgreSQL 接受语义：原子性、幂等、语义组前置条件、资源生命周期与画布深删除。
+ * typed command 的 PostgreSQL 接受语义：原子性、幂等、语义组前置条件与资源生命周期。
  *
  * <p>断言都落在真实数据库行上，因此“拒绝不留部分写入”“接受恰好前进一次 revision”“重复请求只返回当时的接受位置”等事实不由 mock 声称，而由提交后的行状态证明。
  */
@@ -45,7 +45,6 @@ class PostgresqlCanvasCommandServiceIntegrationTest extends PostgresCanvasInfraT
 
   @Autowired private CanvasCommandService commandService;
   @Autowired private CanvasQueryService queryService;
-  @Autowired private PostgresqlCanvasFunctionRunRepository runRepository;
 
   /** 画布创建只接受可显示标题，revision 从 0 开始。 */
   @Test
@@ -402,42 +401,6 @@ class PostgresqlCanvasCommandServiceIntegrationTest extends PostgresCanvasInfraT
         apply(canvasId, List.of(new CanvasCommand.DeleteGroup(groupId, List.of(node.nodeId)))));
     assertTrue(canvasStore.findGroup(canvasId, groupId).isEmpty());
     assertNull(canvasStore.findNode(canvasId, node.nodeId).orElseThrow().groupId());
-  }
-
-  /** 画布深删除清空 pin、Run、Resource、Node、Group、dedup 与 document；存在未终结执行时拒绝删除。 */
-  @Test
-  void deleteCanvasClearsEveryRowAndRejectsActiveRun() {
-    UUID canvasId = commandService.createCanvas("canvas").id();
-    NodeFixture node = addTextNode(canvasId, "body");
-    UUID groupId = UUID.randomUUID();
-    apply(
-        canvasId,
-        List.of(
-            new CanvasCommand.CreateGroup(groupId, "group", TRANSFORM),
-            new CanvasCommand.SetNodeGroup(node.nodeId, null, groupId)));
-    UUID requestId = addPinnedRun(canvasId, node.nodeId, node.resourceId);
-    jdbc.update(
-        "update canvas_function_run set status = 'READY' where node_id = ? and request_id = ?",
-        node.nodeId,
-        requestId);
-
-    assertThrows(IllegalStateException.class, () -> commandService.deleteCanvas(canvasId));
-    assertNotNull(canvasStore.findDocument(canvasId).orElse(null));
-
-    jdbc.update(
-        "update canvas_function_run set status = 'CANCELLED' where node_id = ?", node.nodeId);
-    commandService.deleteCanvas(canvasId);
-
-    assertTrue(canvasStore.findDocument(canvasId).isEmpty());
-    assertTrue(canvasStore.listNodes(canvasId).isEmpty());
-    assertTrue(canvasStore.listGroups(canvasId).isEmpty());
-    assertTrue(resourceRepository.findByCanvasId(canvasId).isEmpty());
-    assertEquals(0, jdbc.queryForObject("select count(1) from canvas_function_run", Integer.class));
-    assertEquals(
-        0, jdbc.queryForObject("select count(1) from canvas_function_resource_pin", Integer.class));
-    assertEquals(
-        0, jdbc.queryForObject("select count(1) from canvas_command_dedup", Integer.class));
-    commandService.deleteCanvas(canvasId);
   }
 
   /** Run 行只能挂在 Function 节点上，pin 夹具因此需要节点带函数配置。 */

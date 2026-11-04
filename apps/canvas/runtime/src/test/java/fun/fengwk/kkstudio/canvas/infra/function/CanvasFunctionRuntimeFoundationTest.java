@@ -1686,11 +1686,6 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
     }
 
     @Override
-    public void releaseCanvasPins(UUID canvasId) {
-      pins.deleteByCanvas(canvasId);
-    }
-
-    @Override
     public void discardResource(UUID canvasId, UUID resourceId) {
       resources.delete(canvasId, resourceId);
     }
@@ -1747,13 +1742,6 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
             .findByIdForUpdate(canvasId, resourceId)
             .filter(resource -> resource.ownerNodeId() == null)
             .ifPresent(resource -> resources.delete(canvasId, resource.id()));
-      }
-    }
-
-    @Override
-    public void deleteCanvasResources(UUID canvasId) {
-      for (CanvasResource resource : resources.findByCanvasId(canvasId)) {
-        resources.delete(canvasId, resource.id());
       }
     }
 

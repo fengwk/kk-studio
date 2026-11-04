@@ -494,11 +494,10 @@ class CanvasControllerTest {
     verify(commandService, never()).applyCommands(any(UUID.class), any(UUID.class), anyList());
   }
 
-  /** 不再公开画布删除入口，也不能调用内部删除服务。 */
+  /** 不提供画布删除入口。 */
   @Test
   void deleteCanvasEndpointIsNotAvailable() throws Exception {
     mockMvc.perform(delete("/api/canvases/" + CANVAS)).andExpect(status().isMethodNotAllowed());
-    verify(commandService, never()).deleteCanvas(any());
   }
 
   /** 一个最小合法命令批；{@code extraFields} 为附加的顶层成员片段（不含逗号）。 */

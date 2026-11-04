@@ -73,28 +73,9 @@ class CanvasBlobReleaseIntegrationTest extends PostgresSpringTestSupport {
     assertEquals("DELETING", blobState(blobId));
   }
 
-  /** 画布深删除同样回收 Blob 引用：document 行删除前每个 Resource 都已完成引用减一。 */
+  /** Blob 已无法释放（非 ACTIVE）时节点删除整批回滚，节点与资源行仍然存在。 */
   @Test
-  void deleteCanvasReleasesEveryBoundBlobReference() {
-    UUID blobId = insertBlob("ACTIVE", 1L);
-    CanvasDocument canvas = commandService.createCanvas("blob-release-canvas");
-    UUID nodeId = UUID.randomUUID();
-    apply(
-        canvas,
-        new CanvasCommand.CreateNode(
-            nodeId, "node", TRANSFORM, List.of(new CanvasResourceInput.Blob("a.png", blobId))));
-
-    commandService.deleteCanvas(canvas.id());
-
-    assertEquals(0L, count("canvas_document", "id = ?", canvas.id()));
-    assertEquals(0L, count("canvas_resource", "canvas_id = ?", canvas.id()));
-    assertEquals(0L, refCount(blobId));
-    assertEquals("DELETING", blobState(blobId));
-  }
-
-  /** Blob 已无法释放（非 ACTIVE）时整批失败：画布与资源行都必须回滚，绝不出现丢失 Blob 引用的资源。 */
-  @Test
-  void failedBlobReleaseRollsBackCanvasDeletion() {
+  void failedBlobReleaseRollsBackNodeDeletion() {
     UUID blobId = insertBlob("DELETING", 0L);
     CanvasDocument canvas = commandService.createCanvas("blob-release-failure");
     UUID nodeId = UUID.randomUUID();
@@ -105,14 +86,17 @@ class CanvasBlobReleaseIntegrationTest extends PostgresSpringTestSupport {
     UUID resourceId = ownedResourceId(canvas.id(), nodeId);
 
     IllegalStateException error =
-        assertThrows(IllegalStateException.class, () -> commandService.deleteCanvas(canvas.id()));
+        assertThrows(
+            IllegalStateException.class,
+            () -> apply(canvas, new CanvasCommand.DeleteNode(nodeId, List.of(resourceId), null)));
 
     assertEquals("release canvas resource blob failed: " + blobId, error.getMessage());
-    assertEquals(1L, count("canvas_document", "id = ?", canvas.id()), "Blob 释放失败必须回滚画布删除");
+    assertEquals(1L, count("canvas_node", "canvas_id = ? and id = ?", canvas.id(), nodeId));
     assertEquals(
         1L,
         count("canvas_resource", "canvas_id = ? and id = ?", canvas.id(), resourceId),
         "Blob 释放失败必须回滚资源行删除");
+    assertEquals(resourceId, ownedResourceId(canvas.id(), nodeId));
   }
 
   /** 创建和删除必须被接受；若返回冲突，类型断言立即失败。 */

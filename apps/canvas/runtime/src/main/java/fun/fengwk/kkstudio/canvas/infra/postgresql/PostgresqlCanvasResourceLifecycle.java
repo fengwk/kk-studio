@@ -52,11 +52,6 @@ public class PostgresqlCanvasResourceLifecycle implements CanvasResourceLifecycl
   }
 
   @Override
-  public void releaseCanvasPins(UUID canvasId) {
-    pinRepository.deleteByCanvas(canvasId);
-  }
-
-  @Override
   public List<CanvasResource> replaceOwnedWithTargets(
       UUID canvasId, UUID nodeId, List<UUID> orderedTargetResourceIds) {
     Objects.requireNonNull(orderedTargetResourceIds, "orderedTargetResourceIds");
@@ -126,13 +121,6 @@ public class PostgresqlCanvasResourceLifecycle implements CanvasResourceLifecycl
     }
     if (resource.blobId() != null) {
       blobReleaser.release(resource.blobId());
-    }
-  }
-
-  @Override
-  public void deleteCanvasResources(UUID canvasId) {
-    for (CanvasResource resource : resourceRepository.findByCanvasId(canvasId)) {
-      discardResource(canvasId, resource.id());
     }
   }
 
