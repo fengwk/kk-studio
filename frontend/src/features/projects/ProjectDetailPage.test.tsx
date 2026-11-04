@@ -708,12 +708,12 @@ describe('ProjectDetailPage', () => {
       expect(screen.queryByRole('dialog', { name: '编辑项目配置' })).not.toBeInTheDocument()
     })
 
-    // 4. 点击删除按钮打开 DeleteProjectModal 并关闭
+    // 4. 点击删除按钮打开 DeleteProjectModal（普通确认走共享 alertdialog）并关闭
     fireEvent.click(screen.getByRole('button', { name: '删除' }))
-    expect(await screen.findByRole('dialog', { name: '确认删除项目' })).toBeInTheDocument()
+    expect(await screen.findByRole('alertdialog', { name: '确认删除项目' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '取消' }))
     await waitFor(() => {
-      expect(screen.queryByRole('dialog', { name: '确认删除项目' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('alertdialog', { name: '确认删除项目' })).not.toBeInTheDocument()
     })
   })
 
