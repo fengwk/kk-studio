@@ -153,3 +153,27 @@ test('narrow screen stacks the stage form without page or dialog horizontal over
   await expect(dialog.getByLabel('显示名称')).toHaveValue('窄屏草稿')
   await page.screenshot({ path: '../reports/layout/project-workflow-narrow.png' })
 })
+
+test('YOLO help hint is keyboard accessible in the basic tab', async ({ page }) => {
+  await transport(page)
+  await page.goto(URL)
+  await page.getByRole('button', { name: '编辑 / 工作流' }).click()
+  const dialog = page.getByRole('dialog')
+  await dialog.getByRole('tab', { name: '基础信息' }).click()
+
+  const help = dialog.getByRole('button', { name: '帮助：启用 YOLO 执行策略' })
+  await expect(help).toHaveAttribute('aria-expanded', 'false')
+  await help.focus()
+  await page.keyboard.press('Enter')
+  await expect(help).toHaveAttribute('aria-expanded', 'true')
+  await expect(dialog.getByRole('note')).toHaveText('自主执行，跳过人工交互门禁。')
+  await page.screenshot({ path: '../reports/layout/project-yolo-help.png' })
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  const width = await dialog.evaluate((el) => ({
+    scroll: el.scrollWidth,
+    client: el.clientWidth,
+  }))
+  expect(width.scroll).toBeLessThanOrEqual(width.client + 1)
+  await page.screenshot({ path: '../reports/layout/project-yolo-help-narrow.png' })
+})

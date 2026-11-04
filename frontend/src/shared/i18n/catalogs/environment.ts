@@ -170,6 +170,10 @@ export const environmentCatalog = {
     'en-US': 'Environment is currently offline',
     'zh-CN': '环境当前处于离线状态',
   },
+  'ai.ide.offlineShort': {
+    'en-US': 'Offline',
+    'zh-CN': '离线',
+  },
   'ai.ide.noEnvironments': {
     'en-US': 'No available environments',
     'zh-CN': '暂无可用环境',
@@ -359,8 +363,8 @@ export const environmentCatalog = {
     'zh-CN': "安装设置无效：{{field}}",
   },
   'ai.environment.install.invalidLsp': {
-    'en-US': "LSP servers are invalid: check server IDs, command, extensions (required, dot-prefixed) and markers.",
-    'zh-CN': "LSP servers 配置无效：请检查 server ID、command、extensions（必填，以 . 开头）和 markers。",
+    'en-US': 'LSP servers are invalid: check server IDs, command, extensions and markers; extensions are required and must start with a dot.',
+    'zh-CN': 'LSP servers 配置无效：请检查 server ID、command、extensions 和 markers；extensions 必填并以 . 开头。',
   },
   'ai.environment.close': {
     'en-US': 'Close',
@@ -403,8 +407,8 @@ export const environmentCatalog = {
     'zh-CN': '正在更新至 {{targetVersion}} · {{downloaded}} / {{total}}（{{percent}}%）',
   },
   'ai.environment.update.progressUnknownTotal': {
-    'en-US': 'Updating to {{targetVersion}} · {{downloaded}} downloaded (total size unknown)',
-    'zh-CN': '正在更新至 {{targetVersion}} · 已下载 {{downloaded}}（总大小未知）',
+    'en-US': 'Updating to {{targetVersion}} · {{downloaded}} downloaded · total size unknown',
+    'zh-CN': '正在更新至 {{targetVersion}} · 已下载 {{downloaded}} · 总大小未知',
   },
   'ai.environment.manage': {
     'en-US': 'Manage',

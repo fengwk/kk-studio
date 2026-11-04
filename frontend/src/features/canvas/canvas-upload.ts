@@ -5,7 +5,7 @@ import {
   createWorkerHasher,
   validateUploadFile,
   type HashFile,
-} from '@/features/chat/composer'
+} from '@/shared/lib/upload-file'
 import { storageService, type StorageService } from '@/shared/api/storage-service'
 import type { CanvasCommandDTO, CanvasTransformDTO } from '@/shared/api/generated/contracts'
 

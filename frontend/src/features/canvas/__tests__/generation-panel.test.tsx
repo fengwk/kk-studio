@@ -661,7 +661,7 @@ describe('Canvas generic generation panel', () => {
     }]
     const view = renderPanel(null, unavailable)
     await user.click(screen.getByLabelText('模型'))
-    const option = screen.getByRole('option', { name: 'Image A（quota exceeded）' })
+    const option = screen.getByRole('option', { name: 'Image A — quota exceeded' })
     expect(option).toBeDisabled()
     fireEvent.click(option)
     expect(view.scheduleFunctionConfig).not.toHaveBeenCalled()

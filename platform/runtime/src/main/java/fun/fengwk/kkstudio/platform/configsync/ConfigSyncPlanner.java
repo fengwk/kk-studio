@@ -3,7 +3,7 @@ package fun.fengwk.kkstudio.platform.configsync;
 import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Component;
 
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpConfigParser;

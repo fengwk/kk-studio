@@ -4,7 +4,7 @@ import { act, render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AiNavigation } from '@/app/ai-console/AiNavigation'
-import { AgentSelectionPanel } from '@/features/chat/SelectionPanel'
+import { AgentSelectionPanel } from '@/features/thread/SelectionPanel'
 import { CreateChatModal } from '@/features/chat/CreateChatModal'
 import { EnvironmentsPage } from '@/features/environment/EnvironmentsPage'
 import { ResourceEditorModal } from '@/features/catalog/AiConsoleResourceEditorModal'
@@ -12,13 +12,13 @@ import { emptyAgentDraft } from '@/features/catalog/ai-agent-draft-codec'
 import { emptyModelGroupDraft } from '@/features/catalog/ai-model-group-draft-codec'
 import { emptyModelDraft } from '@/features/catalog/ai-model-draft-codec'
 import { emptyProviderDraft } from '@/features/catalog/ai-provider-draft-codec'
-import { environmentService } from '@/shared/api/environment-service'
+import { environmentService } from '@/features/environment/environment-service'
 import { setLocale, translate } from '@/shared/i18n'
 import { ApplicationEventProvider } from '@/shared/app-events'
 import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
 import type { AgentDefinitionDTO } from '@/shared/api/generated/contracts'
 
-vi.mock('@/shared/api/environment-service', () => ({
+vi.mock('@/features/environment/environment-service', () => ({
   environmentService: {
     listEnvironments: vi.fn(),
     getEnvironmentRuntime: vi.fn(),
@@ -116,12 +116,12 @@ describe('AI i18n live-switch contracts', () => {
     )
 
     expect(screen.getByRole('form', { name: 'Create Chat' })).toBeInTheDocument()
-    expect(screen.getByPlaceholderText('Chat name (duplicates allowed)')).toBeInTheDocument()
+    expect(screen.getByPlaceholderText('Chat name')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Create' })).toBeInTheDocument()
 
     act(() => setLocale('zh-CN'))
     expect(screen.getByRole('form', { name: '新建 Chat' })).toBeInTheDocument()
-    expect(screen.getByPlaceholderText('Chat 名称（可重名）')).toBeInTheDocument()
+    expect(screen.getByPlaceholderText('Chat 名称')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '确认创建' })).toBeInTheDocument()
   })
 

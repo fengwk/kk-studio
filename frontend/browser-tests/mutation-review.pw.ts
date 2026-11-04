@@ -80,7 +80,7 @@ test.describe('Mutation Review UI Acceptance & Browser Regression', () => {
       '/workspace/src/LongService.java',
     )
     await expect(toolPane.locator('.thread-tool-preview-target-workdir')).toHaveText(
-      '(/workspace/root)',
+      '· /workspace/root',
     )
 
     // 正文默认展开，且 48 行全文无截断
@@ -147,7 +147,7 @@ test.describe('Mutation Review UI Acceptance & Browser Regression', () => {
     await expect(page.locator('[data-testid="active-scenario"]')).toHaveText('edit-streaming')
 
     const toolPane = page.locator('[data-testid="tool-message-pane"]')
-    await expect(toolPane.locator('.thread-tool-preview-input-label')).toHaveText('流式输入内容（等待审查）')
+    await expect(toolPane.locator('.thread-tool-preview-input-label')).toHaveText('流式输入内容')
     await expect(toolPane.locator('.thread-tool-preview-body.is-input-old')).toHaveText(
       'const oldVal = 1;',
     )

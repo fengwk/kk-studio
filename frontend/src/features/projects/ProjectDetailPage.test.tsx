@@ -29,7 +29,7 @@ vi.mock('@/shared/app-events', () => ({
 
 let capturedPaneProps: Record<string, unknown> | undefined
 
-vi.mock('@/features/chat/runtime/AgentPane', () => ({
+vi.mock('@/features/thread/runtime/AgentPane', () => ({
   AgentPane: (props: Record<string, unknown>) => {
     capturedPaneProps = props
     return (
@@ -183,17 +183,12 @@ describe('ProjectDetailPage', () => {
     blockIssue: vi.fn().mockResolvedValue(mockSnapshot.issues[0].issue),
     recoverIssue: vi.fn().mockResolvedValue(mockSnapshot.issues[0].issue),
     reopenIssue: vi.fn().mockResolvedValue(mockSnapshot.issues[0].issue),
-    pauseIssue: vi.fn().mockResolvedValue(mockSnapshot.issues[0].issue),
-    resumeIssue: vi.fn().mockResolvedValue(mockSnapshot.issues[0].issue),
     stopIssue: vi.fn().mockResolvedValue(mockSnapshot.issues[0].issue),
     resetStageBudget: vi.fn().mockResolvedValue(mockSnapshot.issues[0].issue),
     appendIssueActivity: vi.fn(),
-    listActivities: vi.fn().mockResolvedValue([]),
     addIssueEvidence: vi.fn(),
     listIssueEvidence: vi.fn().mockResolvedValue([]),
     deleteIssue: vi.fn().mockResolvedValue(undefined),
-    archiveIssue: vi.fn().mockResolvedValue(mockSnapshot.issues[0].issue),
-    unarchiveIssue: vi.fn().mockResolvedValue(mockSnapshot.issues[0].issue),
     ...overrides,
   })
 
