@@ -74,6 +74,8 @@ public class EnvironmentServerConfiguration {
         Duration.ofMillis(environment.heartbeatTimeoutMillis()),
         environment.maxResourceBytes(),
         storageMedia.temporaryResourceTtlSeconds(),
-        storageMedia.temporaryResourceCleanupIntervalSeconds());
+        storageMedia.temporaryResourceCleanupIntervalSeconds(),
+        settings.network().proxyUrl(),
+        settings.network().noProxyHosts());
   }
 }

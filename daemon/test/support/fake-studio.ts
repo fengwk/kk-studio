@@ -166,6 +166,7 @@ export class FakeStudioPeer {
               payload: {
                 case: 'settings',
                 value: create(SettingsSchema, {
+                  noProxyHosts: '',
                   resourceBudgets: create(ResourceBudgetsSchema, {
                     maxResourceBytes: 1048576n,
                     temporaryResourceTtlSeconds: 60n,

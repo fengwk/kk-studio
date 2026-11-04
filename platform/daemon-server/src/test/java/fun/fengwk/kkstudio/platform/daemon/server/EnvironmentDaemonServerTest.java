@@ -40,6 +40,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.common.result.TextResultContent;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityBusyException;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCall;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCancelledException;
@@ -857,7 +858,8 @@ class EnvironmentDaemonServerTest {
     assertEquals(Duration.ofSeconds(60), firstHandle.terminalDeliveryGrace());
 
     fixture.settings.set(
-        new EnvironmentServerSettings(Duration.ofSeconds(15), 16L * 1024 * 1024, 259200L, 1800L));
+        new EnvironmentServerSettings(
+            Duration.ofSeconds(15), 16L * 1024 * 1024, 259200L, 1800L, null, ""));
     EnvironmentCapabilityExecutionHandle secondHandle =
         fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_TWO), new RecordingListener());
     assertEquals(Duration.ofSeconds(15), secondHandle.terminalDeliveryGrace());
@@ -1724,7 +1726,7 @@ class EnvironmentDaemonServerTest {
     assertEquals(MessageType.ERROR, channel.lastEnvelope().getMessageType());
   }
 
-  /** 测试意图：已 READY 连接不会再次收到 SETTINGS，设置热更必须经同一控制通道在心跳上推送当前临时资源策略，且策略未变时不产生冗余帧。 */
+  /** 测试意图：临时资源策略在心跳上推送，未变化时不产生冗余帧。 */
   @Test
   void heartbeatPushesUpdatedTemporaryResourcePolicyToReadyConnection() {
     Fixture fixture = new Fixture();
@@ -1753,6 +1755,162 @@ class EnvironmentDaemonServerTest {
     // 已送达的策略不再重复推送。
     fixture.receive(channel, heartbeatEnvelope());
     assertEquals(1, channel.countOf(MessageType.TEMPORARY_RESOURCE_POLICY));
+  }
+
+  /** 覆盖握手期间变更、在线通知与清除：每次都下发最新权威快照。 */
+  @Test
+  void networkSettingsFollowReadyAndNotifications() {
+    Fixture fixture = new Fixture();
+    fixture.settings.set(
+        new EnvironmentServerSettings(
+            Duration.ofSeconds(60), 1024L, 60L, 30L, "http://proxy.invalid:8080", "localhost"));
+    FakeControlChannel first = fixture.openSession("network-initial");
+    assertEquals("http://proxy.invalid:8080", first.lastEnvelope().getSettings().getProxyUrl());
+    assertEquals("localhost", first.lastEnvelope().getSettings().getNoProxyHosts());
+
+    fixture.settings.set(
+        new EnvironmentServerSettings(Duration.ofSeconds(60), 1024L, 60L, 30L, null, ""));
+    fixture.server.reconcileNetworkSettings();
+    assertEquals(1, first.countOf(MessageType.SETTINGS));
+    fixture.receiveReady(first);
+    assertEquals(2, first.countOf(MessageType.SETTINGS));
+    assertFalse(first.lastEnvelope().getSettings().hasProxyUrl());
+
+    FakeControlChannel second =
+        fixture.connectReady(OTHER_ENVIRONMENT_ID, "network-second", INSTANCE_ID, OTHER_TOKEN);
+    fixture.settings.set(
+        new EnvironmentServerSettings(
+            Duration.ofSeconds(60), 1024L, 60L, 30L, "http://new.invalid:8080", "10.0.0.0/8"));
+    fixture.server.reconcileNetworkSettings();
+    for (FakeControlChannel channel : List.of(first, second)) {
+      assertEquals("http://new.invalid:8080", channel.lastEnvelope().getSettings().getProxyUrl());
+      assertEquals("10.0.0.0/8", channel.lastEnvelope().getSettings().getNoProxyHosts());
+    }
+    fixture.server.reconcileNetworkSettings();
+    assertEquals(3, first.countOf(MessageType.SETTINGS));
+    assertEquals(2, second.countOf(MessageType.SETTINGS));
+  }
+
+  /** 心跳只执行既有租约与资源策略路径；网络设置由通知驱动，不增加逐次对账。 */
+  @Test
+  void heartbeatDoesNotPollNetworkSettings() {
+    Fixture fixture = new Fixture();
+    FakeControlChannel channel = fixture.connectReady("network-no-heartbeat");
+    fixture.settings.set(
+        new EnvironmentServerSettings(
+            Duration.ofSeconds(60),
+            16L * 1024 * 1024,
+            259200L,
+            1800L,
+            "http://proxy.invalid:8080",
+            ""));
+
+    fixture.receive(channel, heartbeatEnvelope());
+    fixture.receive(channel, heartbeatEnvelope());
+    assertEquals(1, channel.countOf(MessageType.SETTINGS));
+    fixture.server.reconcileNetworkSettings();
+    assertEquals(2, channel.countOf(MessageType.SETTINGS));
+    fixture.receive(channel, heartbeatEnvelope());
+    assertEquals(2, channel.countOf(MessageType.SETTINGS));
+  }
+
+  /** READY 补发遭拒时必须关闭连接，不得通知其他组件使用该连接；重连读取最新值。 */
+  @Test
+  void failedReadyNetworkUpdateClosesWithoutReadyNotification() {
+    for (boolean throwsOnOffer : List.of(false, true)) {
+      Fixture fixture = new Fixture();
+      FakeControlChannel channel = fixture.openSession("network-ready-rejected");
+      fixture.settings.set(
+          new EnvironmentServerSettings(
+              Duration.ofSeconds(60), 1024L, 60L, 30L, "http://proxy.invalid:8080", ""));
+      channel.busyNextOffer = !throwsOnOffer;
+      channel.failNextOffer = throwsOnOffer;
+
+      fixture.receiveReady(channel);
+      assertTrue(channel.closed());
+      assertFalse(fixture.server.isReady(ENVIRONMENT_ID));
+      assertTrue(fixture.readyNotifications.isEmpty());
+      FakeControlChannel reconnected = fixture.reconnectReady("network-reconnected");
+      assertEquals(
+          "http://proxy.invalid:8080", reconnected.lastEnvelope().getSettings().getProxyUrl());
+      assertTrue(fixture.server.isReady(ENVIRONMENT_ID));
+    }
+  }
+
+  /** 传输可以在 offer 内同步通知关闭：即使返回 ACCEPTED，也不能发布已关闭连接的 READY。 */
+  @Test
+  void synchronousCloseDuringReadyNetworkUpdateSuppressesReadyNotification() {
+    Fixture fixture = new Fixture();
+    FakeControlChannel channel = fixture.openSession("network-synchronous-close");
+    fixture.settings.set(
+        new EnvironmentServerSettings(
+            Duration.ofSeconds(60), 1024L, 60L, 30L, "http://proxy.invalid:8080", ""));
+    channel.afterOffer = fixture.sessionOf(channel)::closed;
+
+    fixture.receiveReady(channel);
+    assertTrue(channel.closed());
+    assertFalse(fixture.server.isReady(ENVIRONMENT_ID));
+    assertTrue(fixture.readyNotifications.isEmpty());
+  }
+
+  /** 并行通知按现读顺序发送；阻塞的传输不得占住 stateLock 或 inventory。 */
+  @Test
+  void concurrentNetworkNotificationsRemainOrderedWithoutHoldingStateLock() throws Exception {
+    Fixture fixture = new Fixture();
+    FakeControlChannel channel = fixture.connectReady("network-concurrent");
+    fixture.settings.set(
+        new EnvironmentServerSettings(
+            Duration.ofSeconds(60), 1024L, 60L, 30L, "http://first.invalid:8080", ""));
+    channel.holdNextOffer = true;
+    try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
+      Future<?> first = executor.submit(fixture.server::reconcileNetworkSettings);
+      assertTrue(channel.awaitOfferEntered());
+      try {
+        Future<Set<EnvironmentId>> ready = executor.submit(fixture.server::readyEnvironments);
+        assertEquals(Set.of(ENVIRONMENT_ID), ready.get(2, TimeUnit.SECONDS));
+
+        fixture.settings.set(
+            new EnvironmentServerSettings(
+                Duration.ofSeconds(60), 1024L, 60L, 30L, "http://second.invalid:8080", ""));
+        CountDownLatch secondStarted = new CountDownLatch(1);
+        Future<?> second =
+            executor.submit(
+                () -> {
+                  secondStarted.countDown();
+                  fixture.server.reconcileNetworkSettings();
+                });
+        assertTrue(secondStarted.await(2, TimeUnit.SECONDS));
+        channel.releaseOffer();
+        first.get(2, TimeUnit.SECONDS);
+        second.get(2, TimeUnit.SECONDS);
+      } finally {
+        channel.releaseOffer();
+      }
+    }
+    assertEquals(
+        List.of("", "http://first.invalid:8080", "http://second.invalid:8080"),
+        channel.envelopes().stream()
+            .filter(envelope -> envelope.getMessageType() == MessageType.SETTINGS)
+            .map(envelope -> envelope.getSettings().getProxyUrl())
+            .toList());
+  }
+
+  /** 一个连接的发送失败不阻碍广播其他 READY 连接，失败连接重连后接收当前设置。 */
+  @Test
+  void failedNetworkNotificationDoesNotStopOtherSessions() {
+    Fixture fixture = new Fixture();
+    FakeControlChannel failed = fixture.connectReady("network-failed");
+    FakeControlChannel healthy =
+        fixture.connectReady(OTHER_ENVIRONMENT_ID, "network-healthy", INSTANCE_ID, OTHER_TOKEN);
+    failed.busyNextOffer = true;
+    fixture.settings.set(
+        new EnvironmentServerSettings(
+            Duration.ofSeconds(60), 1024L, 60L, 30L, "http://proxy.invalid:8080", "internal"));
+
+    fixture.server.reconcileNetworkSettings();
+    assertTrue(failed.closed());
+    assertEquals("http://proxy.invalid:8080", healthy.lastEnvelope().getSettings().getProxyUrl());
+    assertEquals("internal", healthy.lastEnvelope().getSettings().getNoProxyHosts());
   }
 
   /** 测试意图：READY 时围栏已失效不得进入 READY，必须按协议错误关闭连接。 */
@@ -2682,22 +2840,22 @@ class EnvironmentDaemonServerTest {
   void settingsRejectNonPositiveBounds() {
     assertThrows(
         IllegalArgumentException.class,
-        () -> new EnvironmentServerSettings(Duration.ZERO, 1024L, 259200L, 1800L));
+        () -> new EnvironmentServerSettings(Duration.ZERO, 1024L, 259200L, 1800L, null, ""));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new EnvironmentServerSettings(Duration.ofSeconds(1), 0L, 259200L, 1800L));
+        () -> new EnvironmentServerSettings(Duration.ofSeconds(1), 0L, 259200L, 1800L, null, ""));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new EnvironmentServerSettings(Duration.ofSeconds(1), 1024L, 0L, 1800L));
+        () -> new EnvironmentServerSettings(Duration.ofSeconds(1), 1024L, 0L, 1800L, null, ""));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new EnvironmentServerSettings(Duration.ofSeconds(1), 1024L, 259200L, 0L));
+        () -> new EnvironmentServerSettings(Duration.ofSeconds(1), 1024L, 259200L, 0L, null, ""));
     assertThrows(
         NullPointerException.class,
-        () -> new EnvironmentServerSettings(null, 1024L, 259200L, 1800L));
+        () -> new EnvironmentServerSettings(null, 1024L, 259200L, 1800L, null, ""));
     assertEquals(
         Duration.ofSeconds(1),
-        new EnvironmentServerSettings(Duration.ofSeconds(1), 1024L, 259200L, 1800L)
+        new EnvironmentServerSettings(Duration.ofSeconds(1), 1024L, 259200L, 1800L, null, "")
             .heartbeatTimeout());
   }
 

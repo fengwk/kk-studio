@@ -1,6 +1,8 @@
 import http from 'node:http'
+import https from 'node:https'
+import { execFileSync } from 'node:child_process'
 import net from 'node:net'
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
@@ -16,6 +18,7 @@ import {
   validateUpstream,
 } from '../src/transport/index.js'
 import { Runtime } from '../src/runtime.js'
+import { applyNetworkSettings } from '../src/network.js'
 import type { DaemonConfig, IdeService, IdeStreamUpstream } from '../src/contracts.js'
 import {
   EnvelopeSchema,
@@ -112,6 +115,48 @@ describe('Unified Transport & Control Protocol (X-DESIGN §1, §2, §3)', () => 
     expect(handshake?.headers['kk-capability-catalog']).toBeUndefined()
 
     await transport.close()
+  })
+
+  it('establishes WSS directly even when global and platform proxies are unusable', async () => {
+    const key = join(tempDir, 'key.pem')
+    const cert = join(tempDir, 'cert.pem')
+    execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', key, '-out', cert,
+      '-days', '1', '-subj', '/CN=localhost'], { stdio: 'ignore' })
+    const server = https.createServer({ key: readFileSync(key), cert: readFileSync(cert) })
+    const wss = new WebSocketServer({ server })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const port = (server.address() as net.AddressInfo).port
+    let handshake = false
+    wss.on('connection', (socket) => {
+      handshake = true
+      socket.terminate()
+    })
+    vi.stubEnv('NODE_TLS_REJECT_UNAUTHORIZED', '0')
+    vi.stubEnv('HTTPS_PROXY', 'http://127.0.0.1:1')
+    const globalAgent = vi.spyOn(https.globalAgent, 'addRequest').mockImplementation(() => {
+      throw new Error('global agent must not be used')
+    })
+    applyNetworkSettings('http://127.0.0.1:1', '')
+    const transport = createDaemonTransport({
+      gatewayUri: `wss://127.0.0.1:${port}/api/harness/environment-daemon`,
+      config,
+      ide: {} as IdeService,
+      daemonInstanceId: randomUUID(),
+      platformKey: 'linux-amd64',
+    })
+    try {
+      await expect(transport.connect({
+        onEnvelope: () => {}, onDisconnected: () => {}, onGoaway: () => {}, onUpgradeFailed: () => {},
+      })).rejects.toThrow()
+      expect(handshake).toBe(true)
+      expect(globalAgent).not.toHaveBeenCalled()
+    } finally {
+      await transport.close()
+      applyNetworkSettings(null, '')
+      globalAgent.mockRestore()
+      vi.unstubAllEnvs()
+      await new Promise<void>((resolve) => wss.close(() => server.close(() => resolve())))
+    }
   })
 
   it('handles 401 registration rejected as terminal FAILED', async () => {
@@ -265,6 +310,7 @@ describe('Unified Transport & Control Protocol (X-DESIGN §1, §2, §3)', () => 
       payload: {
         case: 'settings',
         value: create(SettingsSchema, {
+          noProxyHosts: '',
           resourceBudgets: create(ResourceBudgetsSchema, {
             maxResourceBytes: 1048576n,
             temporaryResourceTtlSeconds: 3600n,
@@ -649,6 +695,7 @@ describe('Unified Transport & Control Protocol (X-DESIGN §1, §2, §3)', () => 
           payload: {
             case: 'settings',
             value: create(SettingsSchema, {
+              noProxyHosts: '',
               resourceBudgets: create(ResourceBudgetsSchema, {
                 maxResourceBytes: 1048576n,
                 temporaryResourceTtlSeconds: 3600n,

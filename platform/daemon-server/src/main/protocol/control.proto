@@ -132,6 +132,8 @@ message UpgradeRequired {
 message Settings {
   ResourceBudgets resource_budgets = 1;
   optional string display_name = 2;
+  optional string proxy_url = 3;
+  optional string no_proxy_hosts = 4;
 }
 
 message ResourceBudgets {

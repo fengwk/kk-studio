@@ -5,15 +5,6 @@ import { afterEach, describe, expect, it } from 'vitest'
 
 import { createGitHttpClient, redirectHeaders, TimeoutSocketError } from '../../src/skill/http.js'
 import { installOutboundNetwork } from '../../src/network.js'
-import type { SystemProxyResolver } from '../../src/contracts.js'
-
-/** 直连系统回退：本地测试服务器不需要 OS 代理。 */
-const directSystem: SystemProxyResolver = {
-  async resolve(): Promise<string | null> {
-    return null
-  },
-  async close(): Promise<void> {},
-}
 
 interface TrackedServer {
   readonly url: string
@@ -184,7 +175,7 @@ describe('git http client against a live server', () => {
     })
     cleanups.push(server.close)
 
-    const installed = await installOutboundNetwork({}, directSystem)
+    const installed = await installOutboundNetwork()
     const client = createGitHttpClient()
     const response = await client.request({ url: `${server.url}/never-consumed` })
     expect(response.statusCode).toBe(200)

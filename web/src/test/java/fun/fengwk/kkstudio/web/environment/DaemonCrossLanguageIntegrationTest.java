@@ -118,6 +118,7 @@ class DaemonCrossLanguageIntegrationTest {
   private CountDownLatch readyLatch;
   private CountDownLatch heartbeatLatch;
   private AtomicReference<DaemonRuntimeSnapshot> lastHeartbeatSnapshot;
+  private AtomicReference<EnvironmentServerSettings> networkSettings;
 
   private Path testDataDir;
   private DaemonProcess daemonProcess;
@@ -158,10 +159,11 @@ class DaemonCrossLanguageIntegrationTest {
 
     EnvironmentUpdateListener updateListener = (environmentId, result) -> {};
     DaemonResourceTicketService ticketService = new FakeTicketService();
-    Supplier<EnvironmentServerSettings> settingsSupplier =
-        () ->
+    networkSettings =
+        new AtomicReference<>(
             new EnvironmentServerSettings(
-                Duration.ofSeconds(60), 16L * 1024 * 1024, 259200L, 1800L);
+                Duration.ofSeconds(60), 16L * 1024 * 1024, 259200L, 1800L, null, ""));
+    Supplier<EnvironmentServerSettings> settingsSupplier = networkSettings::get;
 
     daemonServer =
         new EnvironmentDaemonServer(
@@ -258,6 +260,60 @@ class DaemonCrossLanguageIntegrationTest {
                         && env.hasReady()
                         && DAEMON_VERSION.equals(env.getReady().getDaemonVersion()));
     assertTrue(hasReadyInbound, "READY envelope with correct daemon_version must be received");
+  }
+
+  /** Java SETTINGS 经真实 WebSocket/Node 运行时作用于进程，在线修改和清除无需重连。 */
+  @Test
+  void proxySettingsReachSubprocessesAcrossLanguages() throws Exception {
+    networkSettings.set(network("http://first.invalid:8080", "localhost"));
+    startDaemon(VALID_TOKEN);
+    awaitReady();
+    assertTrue(
+        proxyEnvironment()
+            .contains("http://first.invalid:8080|http://first.invalid:8080|localhost|unset|unset"));
+
+    networkSettings.set(network("http://second.invalid:8080", "internal"));
+    daemonServer.reconcileNetworkSettings();
+    assertTrue(
+        proxyEnvironment()
+            .contains(
+                "http://second.invalid:8080|http://second.invalid:8080|internal|unset|unset"));
+
+    networkSettings.set(network(null, ""));
+    daemonServer.reconcileNetworkSettings();
+    assertTrue(proxyEnvironment().contains("unset|unset||unset|unset"));
+    assertEquals(
+        1,
+        recordingSessions.inboundEnvelopes().stream()
+            .filter(envelope -> envelope.getMessageType() == MessageType.READY)
+            .count());
+  }
+
+  private EnvironmentServerSettings network(String url, String bypass) {
+    return new EnvironmentServerSettings(
+        Duration.ofSeconds(60), 16L * 1024 * 1024, 259200L, 1800L, url, bypass);
+  }
+
+  private String proxyEnvironment() throws Exception {
+    String command =
+        "printf '%s|%s|%s|%s|%s' \"${HTTP_PROXY-unset}\" \"${HTTPS_PROXY-unset}\" "
+            + "\"${NO_PROXY-unset}\" \"${http_proxy-unset}\" \"${ALL_PROXY-unset}\"";
+    EnvironmentCapabilityExecutionRequest request =
+        new EnvironmentCapabilityExecutionRequest(
+            EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.PROCESS_EXEC),
+            new EnvironmentCapabilityCall(
+                UUID.randomUUID().toString(),
+                "{\"command\":\""
+                    + escapeJson(command)
+                    + "\",\"workdir\":\""
+                    + escapeJson(testDataDir.toAbsolutePath().toString())
+                    + "\"}"),
+            Duration.ofSeconds(10));
+    TestListener listener = new TestListener();
+    daemonServer.invoke(ENVIRONMENT_ID, request, listener);
+    EnvironmentCapabilityResult result = listener.awaitCompleted(TIMEOUT);
+    assertFalse(result.error());
+    return extractCombinedText(result);
   }
 
   /**
@@ -574,7 +630,7 @@ class DaemonCrossLanguageIntegrationTest {
             new FakeTicketService(),
             () ->
                 new EnvironmentServerSettings(
-                    Duration.ofSeconds(60), 16L * 1024 * 1024, 259200L, 1800L));
+                    Duration.ofSeconds(60), 16L * 1024 * 1024, 259200L, 1800L, null, ""));
     recordingSessions.setDelegate(newServer);
 
     // 第一个 server 实例执行 drain()：排空控制流并释放 FakeLeaseStore 租约
@@ -734,6 +790,8 @@ class DaemonCrossLanguageIntegrationTest {
               "--config",
               configFile.toAbsolutePath().toString());
       pb.directory(repoRoot.toFile());
+      pb.environment().put("http_proxy", "http://127.0.0.1:1");
+      pb.environment().put("ALL_PROXY", "http://127.0.0.1:1");
       Process process = pb.start();
       return new DaemonProcess(process, dataDir);
     }

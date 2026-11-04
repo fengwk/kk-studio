@@ -298,6 +298,7 @@ function serverMessage(type: string, options: { environmentId?: string; invocati
       payload: {
         case: 'settings',
         value: create(SettingsSchema, {
+          noProxyHosts: '',
           resourceBudgets: create(ResourceBudgetsSchema, {
             maxResourceBytes: BigInt(rawPayload.resourceBudgets?.maxResourceBytes ?? 1024 * 1024),
             temporaryResourceTtlSeconds: BigInt(rawPayload.resourceBudgets?.temporaryResourceTtlSeconds ?? 60),

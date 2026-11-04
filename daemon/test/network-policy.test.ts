@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
 import { ProxyConfigurationError, ProxyPolicy, type ProxyChoice } from '../src/network.js'
-import type { SystemProxyResolver } from '../src/contracts.js'
 
 /** 只检查真实策略输出，不访问 DNS 或外网。 */
 
@@ -21,44 +20,9 @@ async function assertProxy(policy: ProxyPolicy, target: string): Promise<string>
   return (choice as { kind: 'proxy'; url: string }).url
 }
 
-/** 明确直连的系统回退：没有 OS 代理来源。 */
-function directResolver(): SystemProxyResolver {
-  return {
-    async resolve(): Promise<string | null> {
-      return null
-    },
-    async close(): Promise<void> {},
-  }
-}
-
-/** 模拟系统回退：固定返回一个代理 URL，并记录调用次数与最近一次 uri。 */
-function recordingFallback(): {
-  resolver: SystemProxyResolver
-  calls: () => number
-  last: () => string
-} {
-  let calls = 0
-  let last = ''
-  return {
-    resolver: {
-      async resolve(uri: string): Promise<string | null> {
-        calls++
-        last = uri
-        return 'http://os.invalid:9000'
-      },
-      async close(): Promise<void> {},
-    },
-    calls: () => calls,
-    last: () => last,
-  }
-}
-
-/** 显式配置的协议代理 + no_proxy 环境入口；两个协议共用同一代理地址。 */
+/** 两个协议共用平台代理地址。 */
 function policy(proxyUrl: string | null, noProxyHosts: string): ProxyPolicy {
-  return ProxyPolicy.fromEnvironment(
-    { http_proxy: proxyUrl ?? '', https_proxy: proxyUrl ?? '', no_proxy: noProxyHosts },
-    directResolver(),
-  )
+  return ProxyPolicy.fixed(proxyUrl, noProxyHosts)
 }
 
 function assertRedacted(operation: () => unknown): void {
@@ -208,25 +172,6 @@ describe('proxy policy', () => {
     for (const host of ['127.0.0.2', '192.169.0.1', '100.128.0.1', 'public.invalid']) {
       await assertProxy(selector, `http://${host}`)
     }
-
-    const fallback = recordingFallback()
-    const environment = ProxyPolicy.fromEnvironment(
-      { no_proxy: '192.168.0.0/16,100.64.0.0/10,2001:db8::/32' },
-      fallback.resolver,
-    )
-    await assertDirect(environment, 'http://192.168.1.1')
-    await assertDirect(environment, 'wss://100.64.5.5')
-    await assertDirect(environment, 'https://[2001:db8::9]')
-    expect(fallback.calls()).toBe(0)
-    expect(await select(environment, 'http://192.169.0.1')).toEqual({
-      kind: 'proxy',
-      url: 'http://os.invalid:9000',
-    })
-    expect(await select(environment, 'https://100.128.0.1')).toEqual({
-      kind: 'proxy',
-      url: 'http://os.invalid:9000',
-    })
-    expect(fallback.calls()).toBe(2)
   })
 
   it('rejects invalid configuration with a redacted failure', () => {
@@ -249,7 +194,6 @@ describe('proxy policy', () => {
       'http://[192.0.2.1::]:80',
     ]) {
       assertRedacted(() => policy(value, ''))
-      assertRedacted(() => ProxyPolicy.fromEnvironment({ https_proxy: value }, directResolver()))
     }
     for (const value of [
       ',',
@@ -297,51 +241,5 @@ describe('proxy policy', () => {
     ]) {
       assertRedacted(() => policy(PROXY_URL, value))
     }
-    assertRedacted(() => ProxyPolicy.fromEnvironment({ http_proxy: undefined }, directResolver()))
-  })
-
-  it('honours environment precedence and fallback', async () => {
-    const fallback = recordingFallback()
-    let selector = ProxyPolicy.fromEnvironment(
-      {
-        http_proxy: PROXY_URL,
-        HTTP_PROXY: 'invalid-secret',
-        HTTPS_PROXY: 'http://secure.invalid:8443',
-        no_proxy: 'bypass.invalid',
-        NO_PROXY: '*',
-      },
-      fallback.resolver,
-    )
-    expect(new URL(await assertProxy(selector, 'ws://remote.invalid')).hostname).toBe('proxy.invalid')
-    expect(new URL(await assertProxy(selector, 'wss://remote.invalid')).hostname).toBe('secure.invalid')
-    await assertDirect(selector, 'https://bypass.invalid')
-    expect(fallback.calls()).toBe(0)
-
-    selector = ProxyPolicy.fromEnvironment({ http_proxy: PROXY_URL, no_proxy: 'bypass.invalid' }, fallback.resolver)
-    await assertDirect(selector, 'https://bypass.invalid')
-    expect(fallback.calls()).toBe(0)
-    await assertProxy(selector, 'wss://remote.invalid/path?q=x%20y')
-    const forwarded = new URL(fallback.last())
-    expect(forwarded.protocol).toBe('https:')
-    expect(forwarded.search).toBe('?q=x%20y')
-    await assertProxy(selector, 'https://remote.invalid')
-
-    selector = ProxyPolicy.fromEnvironment(
-      { http_proxy: '', HTTP_PROXY: PROXY_URL, no_proxy: '', NO_PROXY: '*' },
-      fallback.resolver,
-    )
-    await assertDirect(selector, 'http://remote.invalid')
-    await assertProxy(selector, 'wss://remote.invalid')
-
-    selector = ProxyPolicy.fromEnvironment({}, fallback.resolver)
-    await assertProxy(selector, 'ws://remote.invalid')
-    expect(new URL(fallback.last()).protocol).toBe('http:')
-    await assertDirect(ProxyPolicy.fromEnvironment({}, directResolver()), 'https://remote.invalid')
-    await assertDirect(ProxyPolicy.fromEnvironment({ NO_PROXY: '*' }, fallback.resolver), 'http://remote.invalid')
-    expect(
-      new URL(await assertProxy(ProxyPolicy.fromEnvironment({ HTTP_PROXY: PROXY_URL }, directResolver()), 'http://remote.invalid'))
-        .hostname,
-    ).toBe('proxy.invalid')
-    await assertDirect(ProxyPolicy.fromEnvironment({ http_proxy: PROXY_URL }, directResolver()), 'https://remote.invalid')
   })
 })

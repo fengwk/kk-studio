@@ -39,8 +39,8 @@ POSIX 目录权限为 0700、敏感文件为 0600。`tmp/workspaces` 由受控�
 
 运行时 [`Runtime`](../../daemon/src/runtime.ts) 负责控制连接、会话与消息调度，底层使用统一传输层 [`DaemonTransport`](../../daemon/src/transport/daemon-transport.ts)：
 - 统一传输管道：在单一 WSS 连接上运行标准 HTTP/2 协议。Stream 1 为双向控制流，传输基于 Protobuf 编码的 [`Envelope`](../../daemon/src/generated/control_pb.ts) 信封；IDE HTTP 与 WebSocket 隧道在同一连接上通过 HTTP/2 流多路复用。
-- 握手流程：连接建立后服务端首先在 Stream 1 发送 `SETTINGS` 帧下发环境标识与资源配额，Daemon 确认后向服务端回送 `READY` 帧公布实例与能力状态，随后进入就绪状态。
-- 故障恢复与重连：连接断开时采用指数退避重连（1 秒至 30 秒）；重连后重新进行 `SETTINGS` / `READY` 协商，不改变进程内已有执行事实。
+- 握手流程：连接建立后服务端首先在 Stream 1 发送 `SETTINGS` 帧下发环境标识、资源配额与网络设置，Daemon 确认后向服务端回送 `READY` 帧公布实例与能力状态，随后进入就绪状态。设置变更使用后续 `SETTINGS` 更新代理，不重复发送 READY；控制 WSS 始终直连。
+- 故障恢复与重连：连接断开时按重连策略重试（1 秒至 30 秒）；首条 `SETTINGS` 中的网络设置无效时断开握手并重试。重连后重新进行 `SETTINGS` / `READY` 协商，不改变进程内已有执行事实。无效的在线网络更新不会覆盖当前设置，可通过后续更新修正。
 - 运行状态：`READY` 携带必需的 `runtimeStatus`，`HEARTBEAT` 固定携带 `{runtimeStatus, ideLeaseRound}`，状态关键变更时触发发送 `RUNTIME_STATUS`（[`runtime-status.ts`](../../daemon/src/runtime-status.ts)）。`runtimeStatus` 是 `{revision, status}`，`status` 固定 `{daemonVersion, update}`；`update` 为 null 或 `{targetVersion, downloadedBytes, totalBytes}`。revision 仅在状态内容变化时推进递增，心跳重发同一内容沿用同一 revision。
 - IDE 使用证明：有活跃视图时心跳递增 `ideLeaseRound` 并与本轮发出时的本机单调时间记录；无活跃视图时该轮次为空。Daemon 只接受当前未过期轮次的 `IDE_LEASE` 批次；证明只为已有视图续期，不创建视图。
 - 任务调用与幂等恢复：`INVOKE` 经 Protobuf 解码后，以 [`Journal`](../../daemon/src/journal.ts) 的 `start(invocationId)` 原子去重。已有条目直接重放：RUNNING 状态重放 `STARTED(replayed=true)`，已完成条目重放冻结终态，副作用不再重复执行。重连后服务端发送 `RECOVER` 查询在途调用，未命中记录时回复 `RECOVER_NOT_FOUND`，命中时重放最新状态。

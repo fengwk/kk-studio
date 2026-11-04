@@ -380,6 +380,15 @@ public final class ControlProtocolCodec {
         budgets.hasTemporaryResourceCleanupIntervalSeconds(),
         budgets.getTemporaryResourceCleanupIntervalSeconds(),
         "settings.resourceBudgets.temporaryResourceCleanupIntervalSeconds");
+    requireText(
+        settings.hasNoProxyHosts(),
+        settings.getNoProxyHosts(),
+        "settings.noProxyHosts",
+        4096,
+        false);
+    if (settings.hasProxyUrl()) {
+      requireText(true, settings.getProxyUrl(), "settings.proxyUrl", 2048, true);
+    }
     if (settings.hasDisplayName()) {
       requireText(
           true, settings.getDisplayName(), "settings.displayName", MAX_DISPLAY_NAME_CHARS, true);

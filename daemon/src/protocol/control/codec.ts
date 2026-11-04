@@ -323,6 +323,10 @@ function validateSettings(settings: Settings): void {
     settings.resourceBudgets.temporaryResourceCleanupIntervalSeconds,
     'settings.resourceBudgets.temporaryResourceCleanupIntervalSeconds',
   )
+  requireText(settings.noProxyHosts, 'settings.noProxyHosts', { maxChars: 4096 })
+  if (settings.proxyUrl !== undefined) {
+    requireText(settings.proxyUrl, 'settings.proxyUrl', { nonBlank: true, maxChars: 2048 })
+  }
   if (settings.displayName !== undefined) {
     requireText(settings.displayName, 'settings.displayName', { nonBlank: true, maxChars: MAX_DISPLAY_NAME_CHARS })
   }

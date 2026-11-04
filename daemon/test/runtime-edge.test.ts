@@ -4,6 +4,7 @@ import { create } from '@bufbuild/protobuf'
 
 import type { CapabilityResult, DaemonConfig, IdeService, ResourceUploader } from '../src/contracts.js'
 import { InMemoryInvocationJournal } from '../src/journal.js'
+import { getOutboundNetwork, subprocessEnvironment } from '../src/network.js'
 import {
   Architecture,
   CancelSchema,
@@ -63,6 +64,7 @@ function makeSettingsEnvelope(overrides: Partial<Settings> = {}): Envelope {
     payload: {
       case: 'settings',
       value: create(SettingsSchema, {
+        noProxyHosts: '',
         resourceBudgets: create(ResourceBudgetsSchema, {
           maxResourceBytes: 1048576n,
           temporaryResourceTtlSeconds: 60n,
@@ -224,11 +226,50 @@ describe('runtime lifecycle guards', () => {
 })
 
 describe('runtime inbound protocol branches', () => {
-  it('rejects a second SETTINGS on the same connection', async () => {
+  // 初始网络配置无效时重连，不把会话卡在无法接收平台后续修正的握手中。
+  it('reconnects after an invalid initial network setting and accepts a correction', async () => {
+    const transport = new FakeTransport()
+    const runtime = new Runtime(baseOptions({ transport }))
+    runtime.start()
+    try {
+      await waitFor(() => transport.connection !== null)
+      await tick()
+      const first = transport.connection!
+      transport.receive(makeSettingsEnvelope({ proxyUrl: 'http://user:private@host:80' }))
+      expect(first.isOpen()).toBe(false)
+      expect(first.sent.some((message) => message.messageType === MessageType.ERROR)).toBe(true)
+      expect((first.sent[0]!.payload.value as { message: string }).message).not.toContain('private')
+      await waitFor(() => transport.connectCount >= 2)
+      await tick()
+      transport.receive(makeSettingsEnvelope({ proxyUrl: 'http://proxy.invalid:8080' }))
+      await waitFor(() => runtime.getState() === 'READY')
+      expect(await getOutboundNetwork().selectProxy('https://outside.invalid', new AbortController().signal))
+        .toEqual({ kind: 'proxy', url: 'http://proxy.invalid:8080' })
+    } finally {
+      runtime.close()
+    }
+  })
+
+  it('applies and clears network updates without another READY and rejects invalid settings safely', async () => {
     const { runtime, transport } = await ready()
-    transport.receive(makeSettingsEnvelope())
+    const select = () => getOutboundNetwork().selectProxy('https://outside.invalid', new AbortController().signal)
+    transport.receive(makeSettingsEnvelope({ proxyUrl: 'http://proxy.invalid:8080', noProxyHosts: 'localhost' }))
+    await tick()
+    expect(await select()).toEqual({ kind: 'proxy', url: 'http://proxy.invalid:8080' })
+    expect(subprocessEnvironment({ http_proxy: 'old', HtTpS_PrOxY: 'old', ALL_PROXY: 'old', PATH: '/bin' })).toEqual({
+      PATH: '/bin', HTTP_PROXY: 'http://proxy.invalid:8080', HTTPS_PROXY: 'http://proxy.invalid:8080', NO_PROXY: 'localhost',
+    })
+    transport.receive(makeSettingsEnvelope({ proxyUrl: 'http://user:private@host:80' }))
     await tick()
     expect(sentTypes(transport)).toContain(MessageType.ERROR)
+    const error = transport.sent.find((message) => message.messageType === MessageType.ERROR)
+    expect((error?.payload.value as { message: string }).message).not.toContain('private')
+    expect(await select()).toEqual({ kind: 'proxy', url: 'http://proxy.invalid:8080' })
+    transport.receive(makeSettingsEnvelope({ noProxyHosts: '' }))
+    await tick()
+    expect(await select()).toEqual({ kind: 'direct' })
+    expect(subprocessEnvironment({ HTTP_PROXY: 'old', no_proxy: 'old', PATH: '/bin' })).toEqual({ PATH: '/bin', NO_PROXY: '' })
+    expect(sentTypes(transport).filter((type) => type === MessageType.READY)).toHaveLength(1)
     runtime.close()
   })
 
@@ -422,6 +463,7 @@ describe('runtime temporary resource policy', () => {
         payload: {
           case: 'settings',
           value: create(SettingsSchema, {
+            noProxyHosts: '',
             resourceBudgets: create(ResourceBudgetsSchema, {
               maxResourceBytes: 1048576n,
               temporaryResourceTtlSeconds: 7n,
