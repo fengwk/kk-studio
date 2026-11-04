@@ -24,3 +24,12 @@
   font-size: var(--font-size-xs);
   color: var(--fg-muted);
 }
+
+/* 子线程只读环境行：环境归执行根，子线程只展示冻结值并标明跟随主对话。 */
+.thread-readonly-environment {
+  flex: 0 0 auto;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  color: var(--fg-muted);
+  font-size: var(--font-size-xs);
+}

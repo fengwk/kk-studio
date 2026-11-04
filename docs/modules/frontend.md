@@ -195,7 +195,9 @@ PaneTarget 有四种状态：`NEW_SESSION_DRAFT`（尚无 Session/Thread）、
 其他 Driver 的 settings 原样保留；
 已有执行根 Thread（含 Issue Agent 根）可调整 Agent，子任务 Thread 只读。
 配置差异按 SET_AGENT → SET_EXECUTION → SET_ENVIRONMENT
-前缀发送。忙碌 Thread 的选择立即作为 standalone SET-only 批提交并显示“待生效”，空闲/未创建/停止保留本地草稿随下一条输入提交；YOLO 走独立控制入口。顶栏面包屑显示当前 pane 的 Chat → Session → 分支身份；
+前缀发送。忙碌 Thread 的选择立即作为 standalone SET-only 批提交并显示“待生效”，空闲/未创建/停止保留本地草稿随下一条输入提交；YOLO 走独立控制入口。
+执行根仍有正在运行的子代理时，环境菜单显示“切换对正在运行的子 Agent 同样生效”；
+提示只说明生效范围，不改变切换与提交路径。顶栏面包屑显示当前 pane 的 Chat → Session → 分支身份；
 根面板与草稿 pane 不渲染自身标题。工作区内只读子代理同样不渲染第二层标题栏或只读 badge，
 其真实身份（agent 名称与 `modelName (variant)`；默认 main
 不作为独立身份）与只读动作直接汇入工作区顶栏，并提供返回直属父 Agent 入口。
@@ -230,6 +232,9 @@ Snapshot、Debug、用量并展示真实身份，并在顶部提供返回直属�
 `/threads/{parentId}`）；身份未确认时不挂载控制 Hook。
 根面板汇聚整棵执行树的审批和问卷，提交仍携带原始调用的 Thread 与 invocation 身份。
 执行结果与任务回执始终交给直接派发的父 Agent，不走根订阅。
+子线程只读视图在顶部显示“环境：<名称> · 跟随主对话”：环境名取该 Thread Snapshot 冻结的值，
+即规划该回合时执行根已生效的环境；执行根此后切换环境不会改写既有快照，子线程下一回合才使用新环境。
+执行根没有环境时显示“环境：未选择 · 跟随主对话”，执行根自身不显示该行。
 子代理观察面板从已有 Snapshot 展示 QUEUED CUSTOM_MESSAGE 的“待处理补充要求”，
 保留命令 sequence、稳定身份和真实正文；独立于人工输入队列，不提供编辑、删除或重排。
 应用后随 Snapshot 更新移出待处理区，历史只展示持久 Entry，不复制待处理记录。
@@ -240,8 +245,10 @@ task 初次执行入口只读取规范 `task.accepted` details 中的 thread_id�
 
 全局与根交互区共用 InteractionCardBody/ApprovalCard。非文件变更工具的审批显示一次完整 `argumentsJson`（含 bash 的 workdir），
 默认权限原因本地化，额外原因完整展示；允许与拒绝复用共享 Button，拒绝使用 primary + danger。
-来源名称来自 owner 或既有根执行树，不逐卡获取 Snapshot；无名称用“查看来源”，
-后代入口用“查看 subagent 执行”，名称与跳转目标一致，不显示裸 UUID，也不改变审批/问卷的原始来源身份。
+归属统一显示为“<类型> · <标题>”（Chat、Issue、Agent 任务）：类型与标题都来自会话归属 SPI 的 `owner`，
+标题缺失时只显示类型，不逐卡获取 Snapshot，也不用来源 Thread 的 UUID 或名称冒充归属。有产品页面的归属
+点击后携带执行根 `thread` 参数跳转；`AGENT_TASK` 没有产品页面，即使服务端给了 link 也只显示文本。
+审批与问卷的写回仍使用原始 Thread 与 invocation 身份，来源导航不改变它。
 
 ### 文件变更审查与工具卡片
 

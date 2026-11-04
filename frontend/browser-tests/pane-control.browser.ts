@@ -47,13 +47,34 @@ function rootThread(overrides: Record<string, unknown> = {}) {
 }
 
 function childThread() {
+  const thread = rootThread()
   return {
-    ...rootThread(),
+    ...thread,
     name: 'worker child',
     threadId: CHILD_ID,
     parentThreadId: ROOT_ID,
     status: 'RUNNING',
+    // 子线程不保存环境选择：快照冻结的是规划该回合时执行根已生效的环境。
+    branchSettings: { ...thread.branchSettings, environmentName: 'NAS' },
   }
+}
+
+/** 环境注册表：名称与子线程快照冻结值一致。 */
+function environmentCards() {
+  return [{
+    id: 'a2000000-0000-4000-8000-0000000000e1',
+    name: 'NAS',
+    status: 'READY',
+    statusExpiresAt: null,
+    ready: true,
+    lastSeen: 1790812800,
+    capabilities: [],
+    userName: null,
+    homeDirectory: null,
+    version: '1',
+    createTime: 1790812800,
+    updateTime: 1790812800,
+  }]
 }
 
 function snapshot(thread: Record<string, unknown>) {
@@ -203,7 +224,7 @@ async function installPaneApi(
       return
     }
     if (path === '/api/environments') {
-      await route.fulfill({ json: { status: 200, data: [] } })
+      await route.fulfill({ json: { status: 200, data: environmentCards() } })
       return
     }
     if (path === '/api/storage/uploads' && method === 'POST') {
@@ -419,6 +440,9 @@ test('a child thread address mounts no composer at all', async ({ page }) => {
   const backToRoot = await expectBackEntryOnTop(page, '回到父 agent', 'link')
   await expect(backToRoot).toBeVisible()
   await expect(backToRoot).toHaveAttribute('href', '/threads/' + ROOT_ID)
+  // 子线程只读展示快照冻结的环境，并标明跟随主对话；执行根不可在此切换。
+  await expect(page.getByText('环境：NAS · 跟随主对话')).toBeVisible()
+  await page.screenshot({ path: test.info().outputPath('child-thread-environment.png'), fullPage: false })
   await expect(page.locator('.thread-composer')).toHaveCount(0)
   await expect(page.getByRole('textbox')).toHaveCount(0)
   await expect(page.getByRole('link', { name: '回到对话' })).toHaveCount(0)
@@ -428,9 +452,10 @@ test('a child thread address mounts no composer at all', async ({ page }) => {
   expect(recorded.commandRequests).toEqual([])
   expect(recorded.stopRequests).toEqual([])
 
-  // 绑定子代理目标的 pane 同样没有 Composer。
+  // 绑定子代理目标的 pane 同样没有 Composer，并保留同一环境行。
   await page.goto(`${HARNESS_URL}?scenario=pane-child`)
   await expect(page.getByRole('heading', { name: 'worker child' })).toBeVisible()
+  await expect(page.getByText('环境：NAS · 跟随主对话')).toBeVisible()
   await expect(page.locator('.thread-composer')).toHaveCount(0)
 })
 
@@ -453,8 +478,27 @@ test('an idle root still stops its running subtree with a root-scoped request', 
   expect(Object.keys(recorded.stopRequests[0] ?? {}).sort())
     .toEqual(['expectedVersion', 'stopRequestId'])
   expect(recorded.stopRequests[0]?.expectedVersion).toBe('1')
-  // 根交互汇聚的来源指向子 Thread，但决策写回仍用原始 Thread 身份。
-  await expect(page.getByRole('link', { name: /worker child/ }).first()).toBeVisible()
+  // 根交互汇聚的来源显示会话归属，不暴露来源 Thread 身份；决策仍写回原始 Thread。
+  await expect(page.getByRole('button', { name: 'Chat · Pane harness' })).toBeVisible()
+})
+
+test('switching environment on a root with running subagents warns it applies to them', async ({ page }) => {
+  const recorded = await installPaneApi(page)
+  const { composer } = await openRootPane(page, recorded)
+  await expect(page.locator('.active-thread-tree')).toBeVisible()
+
+  const environmentTrigger = composer.getByRole('button', { name: '环境', exact: true })
+  await expect(environmentTrigger).toContainText('None')
+  await environmentTrigger.click()
+  await expect(page.locator('.thread-composer-menu-hint'))
+    .toHaveText('切换对正在运行的子 Agent 同样生效')
+  await expect(page.getByRole('option', { name: 'NAS' })).toBeVisible()
+  await page.screenshot({ path: test.info().outputPath('environment-switch-notice.png'), fullPage: false })
+
+  await page.getByRole('option', { name: 'NAS' }).click()
+  await expect(environmentTrigger).toContainText('NAS')
+  // 提示不替代连接动作：空闲根只改面板草稿，不立即写命令。
+  expect(recorded.commandRequests).toEqual([])
 })
 
 test('the goal panel closes on Escape and restores focus to the editable composer', async ({ page }) => {

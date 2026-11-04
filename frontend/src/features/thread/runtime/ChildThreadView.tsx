@@ -45,6 +45,9 @@ export function ThreadView({
 }: ThreadViewProps) {
   const { t } = useI18n()
   const threadId = explicitThreadId ?? projection.threadId
+  // 子线程没有自己的环境选择：只读展示当前冻结的环境并标明跟随主对话；执行根自身不显示该行。
+  const childEnvironmentName = projection.runtimeLabels.environmentName
+  const showChildEnvironment = readOnly && projection.thread?.parentThreadId != null
   // 只读视图自持视图状态（Conversation/Debug 与滚动恢复），不进入根控制面。
   const views = useBoundThreadPanelViews(threadId, projection, {
     viewKey: `thread:${threadId}`,
@@ -85,6 +88,13 @@ export function ThreadView({
           {readOnly ? <span className="thread-readonly-badge">{t('ai.runtime.childThread.readOnly')}</span> : null}
         </> : null}
       </header> : null}
+      {showChildEnvironment ? (
+        <div className="thread-readonly-environment">
+          {childEnvironmentName
+            ? t('ai.runtime.childThread.environment', { environment: childEnvironmentName })
+            : t('ai.runtime.childThread.environmentNone')}
+        </div>
+      ) : null}
       <ThreadPane
         projection={projection}
         environments={environments}

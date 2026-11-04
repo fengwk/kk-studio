@@ -7,12 +7,28 @@ import { setLocale } from '@/shared/i18n'
 import { ApplicationEventProvider } from '@/shared/app-events'
 import { AgentPane } from '@/features/thread/runtime/AgentPane'
 import { ThreadWorkspacePage } from '@/features/chat/thread/ThreadWorkspacePage'
-import type { AgentDefinitionDTO } from '@/shared/api/generated/contracts'
+import type { AgentDefinitionDTO, EnvironmentCardDTO } from '@/shared/api/generated/contracts'
 
 setLocale('zh-CN')
 
 export const HARNESS_ROOT_THREAD_ID = 'a1000000-0000-4000-8000-0000000000a1'
 export const HARNESS_CHILD_THREAD_ID = 'a1000000-0000-4000-8000-0000000000a2'
+
+/** 环境注册表：子线程环境行与执行根切换提示都读取同一份注册表。 */
+const HARNESS_ENVIRONMENTS: EnvironmentCardDTO[] = [{
+  id: 'a2000000-0000-4000-8000-0000000000e1',
+  name: 'NAS',
+  status: 'READY',
+  statusExpiresAt: null,
+  ready: true,
+  lastSeen: 1790812800,
+  capabilities: [],
+  userName: null,
+  homeDirectory: null,
+  version: '1',
+  createTime: 1790812800,
+  updateTime: 1790812800,
+}]
 
 const HARNESS_AGENT: AgentDefinitionDTO = {
   name: 'assistant',
@@ -72,6 +88,7 @@ function PaneControlRoutes() {
                 paneId="pane-harness"
                 focused
                 agents={[HARNESS_AGENT]}
+                environments={HARNESS_ENVIRONMENTS}
                 initialTarget={{ kind: 'BOUND_THREAD', threadId }}
               />
             </div>

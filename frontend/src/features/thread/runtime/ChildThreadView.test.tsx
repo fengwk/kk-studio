@@ -320,3 +320,82 @@ describe('ChildThreadView 只读子观察面板 QUEUED CUSTOM_MESSAGE', () => {
     ))
   })
 })
+
+describe('子线程只读环境展示', () => {
+  let queryClient: QueryClient
+  let sockets: FakeWebSocketHarness
+
+  beforeEach(() => {
+    sockets = new FakeWebSocketHarness()
+    queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    act(() => setLocale('zh-CN'))
+  })
+
+  afterEach(() => {
+    cleanup()
+    queryClient.clear()
+    vi.restoreAllMocks()
+    act(() => setLocale('zh-CN'))
+  })
+
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={queryClient}>
+      <ApplicationEventProvider url="ws://test/api/events" socketFactory={sockets.factory}>
+        <MemoryRouter>
+          {children}
+        </MemoryRouter>
+      </ApplicationEventProvider>
+    </QueryClientProvider>
+  )
+
+  function childProjection(environmentName: string | null): ThreadProjection {
+    const snapshot = mockChildSnapshot()
+    snapshot.thread.branchSettings = { ...snapshot.thread.branchSettings, environmentName }
+    const projection = createMockProjection(snapshot)
+    return {
+      ...projection,
+      runtimeLabels: { ...projection.runtimeLabels, environmentName },
+    }
+  }
+
+  it('只读显示“环境：NAS · 跟随主对话”，中英文同步且无括号补充说明', () => {
+    const projection = childProjection('NAS')
+    render(
+      <ThreadView threadId={CHILD_THREAD_ID} projection={projection} environments={[]} readOnly />,
+      { wrapper },
+    )
+
+    const label = screen.getByText('环境：NAS · 跟随主对话')
+    expect(label).toHaveClass('thread-readonly-environment')
+    expect(label.textContent).not.toMatch(/[()（）]/u)
+
+    act(() => setLocale('en-US'))
+    expect(screen.getByText('Environment: NAS · Follows the main conversation')).toBeInTheDocument()
+  })
+
+  it('执行根没有环境时显示“环境：未选择 · 跟随主对话”', () => {
+    render(
+      <ThreadView
+        threadId={CHILD_THREAD_ID}
+        projection={childProjection(null)}
+        environments={[]}
+        readOnly
+      />,
+      { wrapper },
+    )
+
+    expect(screen.getByText('环境：未选择 · 跟随主对话')).toBeInTheDocument()
+  })
+
+  it('执行根自身的只读视图不显示跟随主对话', () => {
+    const snapshot = mockChildSnapshot()
+    snapshot.thread.parentThreadId = null
+    const projection = createMockProjection(snapshot)
+    render(
+      <ThreadView threadId={CHILD_THREAD_ID} projection={projection} environments={[]} readOnly />,
+      { wrapper },
+    )
+
+    expect(screen.queryByText(/跟随主对话/u)).toBeNull()
+  })
+})
