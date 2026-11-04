@@ -50,7 +50,7 @@ final class PostgresqlModelTransaction
     for (UUID threadId : threadIds) {
       models.addAll(
           tx.queryList(
-              "select * from harness_model_invocation where thread_id = ?",
+              "select * from builtin_model_invocation where thread_id = ?",
               PostgresqlBuiltinRows.MODEL_INVOCATION,
               threadId));
     }
@@ -79,7 +79,7 @@ final class PostgresqlModelTransaction
   public boolean workTargetExists(UUID targetId) {
     return Boolean.TRUE.equals(
         tx.queryForObject(
-            "select exists (select 1 from harness_model_invocation where id = ?)",
+            "select exists (select 1 from builtin_model_invocation where id = ?)",
             Boolean.class,
             targetId));
   }
@@ -143,7 +143,7 @@ final class PostgresqlModelTransaction
   public Optional<ModelInvocation> findModelInvocation(UUID id) {
     tx.checkOpen();
     return tx.queryOne(
-        "select * from harness_model_invocation where id = ?",
+        "select * from builtin_model_invocation where id = ?",
         PostgresqlBuiltinRows.MODEL_INVOCATION,
         id);
   }
@@ -155,7 +155,7 @@ final class PostgresqlModelTransaction
     tx.requireCanLock(lockKey);
     Optional<ModelInvocation> invocation =
         tx.queryOne(
-            "select * from harness_model_invocation where id = ? for update",
+            "select * from builtin_model_invocation where id = ? for update",
             PostgresqlBuiltinRows.MODEL_INVOCATION,
             id);
     invocation.ifPresent(ignored -> tx.lockResource(lockKey));
@@ -168,7 +168,7 @@ final class PostgresqlModelTransaction
     return tx.queryOne(
         """
         select *
-        from harness_model_invocation
+        from builtin_model_invocation
         where thread_id = ? and turn_start_entry_id = ?
         """,
         PostgresqlBuiltinRows.MODEL_INVOCATION,
@@ -215,7 +215,7 @@ final class PostgresqlModelTransaction
     tx.requireCanLock(lockKey);
     tx.updateJdbc(
         """
-        insert into harness_model_invocation (
+        insert into builtin_model_invocation (
             id, thread_id, turn_start_entry_id, request_head_entry_id, request_spec, status, attempt,
             stream_checkpoint, result, error, result_entry_id, failed_attempts, created_at, updated_at,
             provider_replay_state, group_execution, requested_at
@@ -266,7 +266,7 @@ final class PostgresqlModelTransaction
     int updated =
         tx.updateJdbc(
             """
-            update harness_model_invocation
+            update builtin_model_invocation
             set status = ?,
                 attempt = ?,
                 stream_checkpoint = cast(? as jsonb),
@@ -393,7 +393,7 @@ final class PostgresqlModelTransaction
           "model invocation " + modelInvocationId + " has tool invocation children");
     }
     int deleted =
-        tx.updateJdbc("delete from harness_model_invocation where id = ?", modelInvocationId);
+        tx.updateJdbc("delete from builtin_model_invocation where id = ?", modelInvocationId);
     PostgresqlHarnessTransaction.requireSingleUpdate(
         deleted, "model invocation", modelInvocationId);
     return true;
@@ -427,7 +427,7 @@ final class PostgresqlModelTransaction
             """
             select exists (
                 select 1
-                from harness_model_invocation
+                from builtin_model_invocation
                 where thread_id = ? and turn_start_entry_id = ?
             )
             """,
@@ -488,7 +488,7 @@ final class PostgresqlModelTransaction
             """
             select exists (
                 select 1
-                from harness_model_invocation
+                from builtin_model_invocation
                 where result_entry_id = ? and id <> ?
             )
             """,

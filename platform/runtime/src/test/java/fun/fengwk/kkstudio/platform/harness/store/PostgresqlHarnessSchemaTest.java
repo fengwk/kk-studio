@@ -19,8 +19,8 @@ import java.util.UUID;
 class PostgresqlHarnessSchemaTest {
 
   /**
-   * Harness runtime 协议的专有表恰好九张，Work 位于共享的 {@code durable_work}；业务表不使用 harness_ 前缀，因此 {@code
-   * harness_%} 全量查询结果必须精确等于这九张表。
+   * Harness runtime 协议的专有表恰好八张，Work 位于共享的 {@code durable_work}；Builtin 模型表不使用 harness_ 前缀，因此 {@code
+   * harness_%} 全量查询结果必须精确等于这八张表。
    *
    * <p>{@code harness_thread_join} 是原子源 prompt 接受与 join 契约的持久事实（无独立状态枚举，无 prompt/report 冗余）， {@code
    * harness_thread_stop_receipt} 是 Stop 回执集合的持久事实，均属于 runtime 协议空间。
@@ -29,7 +29,6 @@ class PostgresqlHarnessSchemaTest {
       List.of(
           "harness_entry",
           "harness_execution_exit",
-          "harness_model_invocation",
           "harness_session",
           "harness_thread",
           "harness_thread_command",
@@ -388,7 +387,7 @@ class PostgresqlHarnessSchemaTest {
 
   @Test
   void everyStructuredDurablePayloadUsesJsonb() {
-    // 只统计 runtime 协议表的 jsonb 列：session_blob_ref 无结构化载荷，不应出现。
+    // 统计 runtime 协议表和 Builtin 模型表的 jsonb 列。
     List<String> jsonbColumns =
         jdbc.queryForList(
             """
@@ -396,21 +395,21 @@ class PostgresqlHarnessSchemaTest {
             from information_schema.columns
             where table_schema = 'public'
               and data_type = 'jsonb'
-              and table_name like 'harness\\_%'
+              and (table_name like 'harness\\_%' or table_name = 'builtin_model_invocation')
             order by table_name, column_name
             """,
             String.class);
     assertEquals(
         List.of(
+            "builtin_model_invocation.error",
+            "builtin_model_invocation.failed_attempts",
+            "builtin_model_invocation.group_execution",
+            "builtin_model_invocation.provider_replay_state",
+            "builtin_model_invocation.request_spec",
+            "builtin_model_invocation.result",
+            "builtin_model_invocation.stream_checkpoint",
             "harness_entry.payload",
             "harness_entry.provider_replay_state",
-            "harness_model_invocation.error",
-            "harness_model_invocation.failed_attempts",
-            "harness_model_invocation.group_execution",
-            "harness_model_invocation.provider_replay_state",
-            "harness_model_invocation.request_spec",
-            "harness_model_invocation.result",
-            "harness_model_invocation.stream_checkpoint",
             "harness_thread.constraints",
             "harness_thread_command.payload",
             "harness_thread_stop_receipt.cancelled_inputs",
@@ -432,7 +431,7 @@ class PostgresqlHarnessSchemaTest {
             select indexname
             from pg_indexes
             where schemaname = 'public'
-              and tablename like 'harness\\_%'
+              and (tablename like 'harness\\_%' or tablename = 'builtin_model_invocation')
               and indexname not like '%_pkey'
             order by indexname
             """,
@@ -454,17 +453,17 @@ class PostgresqlHarnessSchemaTest {
             "idx_harness_tool_invocation_pending",
             "idx_harness_tool_invocation_thread_nonterminal",
             "pk_harness_thread_stop_receipt",
+            "uk_builtin_model_invocation_result",
+            "uk_builtin_model_invocation_turn",
             "uk_harness_entry_session_id",
             "uk_harness_entry_single_root",
-            "uk_harness_model_invocation_result",
-            "uk_harness_model_invocation_turn",
             "uk_harness_thread_command_idempotency",
             "uk_harness_thread_root_name",
             "uk_harness_thread_session",
             "uk_harness_tool_invocation_call_index"),
         indexes);
 
-    String modelResult = indexDefinition("uk_harness_model_invocation_result");
+    String modelResult = indexDefinition("uk_builtin_model_invocation_result");
     String workAvailable = indexDefinition("idx_durable_work_available");
     String workLease = indexDefinition("idx_durable_work_lease_until");
     String threadParent = indexDefinition("idx_harness_thread_parent");
@@ -554,7 +553,7 @@ class PostgresqlHarnessSchemaTest {
         turnStartEntryId,
         threadId);
     jdbc.update(
-        "insert into harness_model_invocation (id, thread_id, turn_start_entry_id, request_head_entry_id, request_spec,"
+        "insert into builtin_model_invocation (id, thread_id, turn_start_entry_id, request_head_entry_id, request_spec,"
             + " status, attempt, result, error, result_entry_id, failed_attempts, created_at, updated_at)"
             + " values (?, ?, ?, ?, '{}'::jsonb, 'READY', 0, null, null, null, '[]'::jsonb, statement_timestamp(), statement_timestamp())",
         modelId,
@@ -970,8 +969,8 @@ class PostgresqlHarnessSchemaTest {
   }
 
   @Test
-  void harnessModelInvocationProviderReplayStateConstraintEnforcesSucceededResultAndJsonObject() {
-    // 测试意图：真实 PostgreSQL CHECK 约束 ck_harness_model_invocation_provider_replay_state 物理门禁验证。
+  void builtinModelInvocationProviderReplayStateConstraintEnforcesSucceededResultAndJsonObject() {
+    // 测试意图：真实 PostgreSQL CHECK 约束 ck_builtin_model_invocation_provider_replay_state 物理门禁验证。
     // 规定 provider_replay_state 仅允许 SUCCEEDED + result 非 null + result_entry_id null，且必须是 JSON
     // object。
     // 验证至少分别拒绝 RUNNING、SUCCEEDED/result null、SUCCEEDED/result_entry_id 非 null、JSON 非 object；
@@ -1020,7 +1019,7 @@ class PostgresqlHarnessSchemaTest {
             DataIntegrityViolationException.class,
             () ->
                 jdbc.update(
-                    "insert into harness_model_invocation (id, thread_id, turn_start_entry_id, request_head_entry_id, request_spec,"
+                    "insert into builtin_model_invocation (id, thread_id, turn_start_entry_id, request_head_entry_id, request_spec,"
                         + " status, attempt, result, error, result_entry_id, failed_attempts, created_at, updated_at, provider_replay_state)"
                         + " values (?, ?, ?, ?, '{}'::jsonb, 'RUNNING', 0, null, null, null, '[]'::jsonb, statement_timestamp(), statement_timestamp(), ?::jsonb)",
                     UUID.randomUUID(),
@@ -1028,10 +1027,10 @@ class PostgresqlHarnessSchemaTest {
                     turnStartEntryId,
                     turnStartEntryId,
                     validReplayJson),
-            "ck_harness_model_invocation_provider_replay_state must reject RUNNING");
+            "ck_builtin_model_invocation_provider_replay_state must reject RUNNING");
     assertTrue(
-        exRunning.getMessage().contains("ck_harness_model_invocation_provider_replay_state"),
-        "expected violation of ck_harness_model_invocation_provider_replay_state but got: "
+        exRunning.getMessage().contains("ck_builtin_model_invocation_provider_replay_state"),
+        "expected violation of ck_builtin_model_invocation_provider_replay_state but got: "
             + exRunning.getMessage());
 
     // 2. 拒绝 SUCCEEDED 但 result 为 null 携带 provider_replay_state
@@ -1040,7 +1039,7 @@ class PostgresqlHarnessSchemaTest {
             DataIntegrityViolationException.class,
             () ->
                 jdbc.update(
-                    "insert into harness_model_invocation (id, thread_id, turn_start_entry_id, request_head_entry_id, request_spec,"
+                    "insert into builtin_model_invocation (id, thread_id, turn_start_entry_id, request_head_entry_id, request_spec,"
                         + " status, attempt, result, error, result_entry_id, failed_attempts, created_at, updated_at, provider_replay_state)"
                         + " values (?, ?, ?, ?, '{}'::jsonb, 'SUCCEEDED', 0, null, null, null, '[]'::jsonb, statement_timestamp(), statement_timestamp(), ?::jsonb)",
                     UUID.randomUUID(),
@@ -1048,10 +1047,10 @@ class PostgresqlHarnessSchemaTest {
                     turnStartEntryId,
                     turnStartEntryId,
                     validReplayJson),
-            "ck_harness_model_invocation_provider_replay_state must reject SUCCEEDED with null result");
+            "ck_builtin_model_invocation_provider_replay_state must reject SUCCEEDED with null result");
     assertTrue(
-        exResultNull.getMessage().contains("ck_harness_model_invocation_provider_replay_state"),
-        "expected violation of ck_harness_model_invocation_provider_replay_state but got: "
+        exResultNull.getMessage().contains("ck_builtin_model_invocation_provider_replay_state"),
+        "expected violation of ck_builtin_model_invocation_provider_replay_state but got: "
             + exResultNull.getMessage());
 
     // 3. 拒绝 SUCCEEDED 但 result_entry_id 非 null（已物化落地）携带 provider_replay_state
@@ -1060,7 +1059,7 @@ class PostgresqlHarnessSchemaTest {
             DataIntegrityViolationException.class,
             () ->
                 jdbc.update(
-                    "insert into harness_model_invocation (id, thread_id, turn_start_entry_id, request_head_entry_id, request_spec,"
+                    "insert into builtin_model_invocation (id, thread_id, turn_start_entry_id, request_head_entry_id, request_spec,"
                         + " status, attempt, result, error, result_entry_id, failed_attempts, created_at, updated_at, provider_replay_state)"
                         + " values (?, ?, ?, ?, '{}'::jsonb, 'SUCCEEDED', 0, ?::jsonb, null, ?, '[]'::jsonb, statement_timestamp(), statement_timestamp(), ?::jsonb)",
                     UUID.randomUUID(),
@@ -1070,12 +1069,12 @@ class PostgresqlHarnessSchemaTest {
                     validResultJson,
                     assistantEntryId,
                     validReplayJson),
-            "ck_harness_model_invocation_provider_replay_state must reject attached result_entry_id");
+            "ck_builtin_model_invocation_provider_replay_state must reject attached result_entry_id");
     assertTrue(
         exResultEntryNotNull
             .getMessage()
-            .contains("ck_harness_model_invocation_provider_replay_state"),
-        "expected violation of ck_harness_model_invocation_provider_replay_state but got: "
+            .contains("ck_builtin_model_invocation_provider_replay_state"),
+        "expected violation of ck_builtin_model_invocation_provider_replay_state but got: "
             + exResultEntryNotNull.getMessage());
 
     // 4. 拒绝 JSON 非 object（如 array）
@@ -1084,7 +1083,7 @@ class PostgresqlHarnessSchemaTest {
             DataIntegrityViolationException.class,
             () ->
                 jdbc.update(
-                    "insert into harness_model_invocation (id, thread_id, turn_start_entry_id, request_head_entry_id, request_spec,"
+                    "insert into builtin_model_invocation (id, thread_id, turn_start_entry_id, request_head_entry_id, request_spec,"
                         + " status, attempt, result, error, result_entry_id, failed_attempts, created_at, updated_at, provider_replay_state)"
                         + " values (?, ?, ?, ?, '{}'::jsonb, 'SUCCEEDED', 0, ?::jsonb, null, null, '[]'::jsonb, statement_timestamp(), statement_timestamp(), '[\"not_object\"]'::jsonb)",
                     UUID.randomUUID(),
@@ -1092,17 +1091,17 @@ class PostgresqlHarnessSchemaTest {
                     turnStartEntryId,
                     turnStartEntryId,
                     validResultJson),
-            "ck_harness_model_invocation_provider_replay_state must reject non-object JSON");
+            "ck_builtin_model_invocation_provider_replay_state must reject non-object JSON");
     assertTrue(
-        exNonObject.getMessage().contains("ck_harness_model_invocation_provider_replay_state"),
-        "expected violation of ck_harness_model_invocation_provider_replay_state but got: "
+        exNonObject.getMessage().contains("ck_builtin_model_invocation_provider_replay_state"),
+        "expected violation of ck_builtin_model_invocation_provider_replay_state but got: "
             + exNonObject.getMessage());
 
     // 5. 正向验证：SUCCEEDED + result 非 null + result_entry_id 为 null + JSON object 正常插入
     assertDoesNotThrow(
         () ->
             jdbc.update(
-                "insert into harness_model_invocation (id, thread_id, turn_start_entry_id, request_head_entry_id, request_spec,"
+                "insert into builtin_model_invocation (id, thread_id, turn_start_entry_id, request_head_entry_id, request_spec,"
                     + " status, attempt, result, error, result_entry_id, failed_attempts, created_at, updated_at, provider_replay_state)"
                     + " values (?, ?, ?, ?, '{}'::jsonb, 'SUCCEEDED', 0, ?::jsonb, null, null, '[]'::jsonb, statement_timestamp(), statement_timestamp(), ?::jsonb)",
                 UUID.randomUUID(),

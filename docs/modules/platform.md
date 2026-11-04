@@ -111,7 +111,7 @@ advisory 围栏与六级行锁分别记录。Thread 按 UUID、Command 按 seque
 ### 持久事实与 EntryPath 读取
 
 持久事实由 `harness_session`、`harness_entry`、`harness_thread`、
-`harness_thread_command`、`harness_model_invocation`、`harness_tool_invocation`、
+`harness_thread_command`、Builtin 的 `builtin_model_invocation`、`harness_tool_invocation`、
 `harness_thread_join`、`harness_thread_stop_receipt`、`harness_execution_exit` 与共享
 `durable_work` 保存。数据库约束形状和归属，语义由应用层维护，详细列与约束见 [Schema](schema.md)。
 其中 Entry 父子必须同属 Session，每个 Session 至多一个 ROOT；命令以 Thread 与序号为主键、

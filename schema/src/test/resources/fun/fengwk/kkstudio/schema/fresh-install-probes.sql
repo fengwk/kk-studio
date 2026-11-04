@@ -844,7 +844,7 @@ select pg_temp.rejects('unknown entry type is rejected',
     $$insert into harness_entry(id,session_id,parent_entry_id,entry_type,payload,created_at)
       values(pg_temp.uid(212),pg_temp.uid(102),pg_temp.uid(211),'UNKNOWN_ENTRY_TYPE','{}',now())$$,
     '23514', 'ck_harness_entry_type');
-insert into harness_model_invocation (id, thread_id, turn_start_entry_id, request_head_entry_id,
+insert into builtin_model_invocation (id, thread_id, turn_start_entry_id, request_head_entry_id,
     request_spec, status, attempt, failed_attempts, result, result_entry_id, created_at, updated_at)
     values (pg_temp.uid(1100), pg_temp.uid(302), pg_temp.uid(210), pg_temp.uid(210),
         '{}', 'SUCCEEDED', 1, '[]', '{}', pg_temp.uid(211), now(), now());
@@ -875,7 +875,7 @@ select pg_temp.rejects('invalid tool status is rejected',
     '23514', 'ck_harness_tool_invocation_status');
 select pg_temp.assert_true('waiting tools remain queryable after their model has succeeded',
     (select status = 'WAITING_INPUT' from harness_tool_invocation where id = pg_temp.uid(1200))
-    and (select status = 'SUCCEEDED' from harness_model_invocation where id = pg_temp.uid(1100)));
+    and (select status = 'SUCCEEDED' from builtin_model_invocation where id = pg_temp.uid(1100)));
 select pg_temp.assert_true('pending input joins back through the public Tool owner',
     (select count(*) = 1 from harness_tool_invocation t
         join harness_thread th on th.id = t.thread_id
