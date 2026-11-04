@@ -328,9 +328,9 @@ inventory 由 `node scripts/dev/verify/e2e/run-matrix.mjs --list` 与 `--docs` �
 
 ```bash
 docker compose -f deploy/local/compose.yaml config --quiet
-docker compose -f deploy/test/compose.yaml config --quiet
-docker compose -f deploy/test/compose.yaml --profile app config --quiet
-docker compose -f deploy/reliability/compose.yaml config --quiet
+COMPOSE_PROFILES=canvas-test docker compose -p kk-studio-canvas-test -f deploy/test/compose.yaml config --quiet
+COMPOSE_PROFILES=app docker compose -p kk-studio-canvas-test -f deploy/test/compose.yaml config --quiet
+COMPOSE_PROFILES=reliability docker compose -p kk-studio-reliability -f deploy/test/compose.yaml config --quiet
 ./scripts/dev/verify/e2e/distributed.sh verify
 ```
 
@@ -1092,7 +1092,7 @@ performance 入口每次运行都会自行清理 PostgreSQL/MinIO/test network�
 | dev 端口占用 | `./scripts/dev/app.sh status`；`ss -ltnp \| grep -E ':18080\|:5173'` | 先确认监听者归属；换端口或设 `DEV_KILL_PORTS=false`，不要默认强杀不属于本次开发的服务 |
 | 本机 preview 启动即失败 | `./scripts/dev/shared-preview.sh status`；核对 `SHARED_PREVIEW_ENV_FILE` 指向的文件 | 必须是绝对路径的 owner-only 普通文件；权限、属主、未知键或缺值都 fail closed，输出不回显文件内容 |
 | local app unhealthy | `docker compose -f deploy/local/compose.yaml ps`；`docker compose -f deploy/local/compose.yaml logs app postgres` | 先确认 PostgreSQL health，再检查 `/actuator/health` |
-| Canvas test 健康失败 | `docker compose -f deploy/test/compose.yaml ps`；`docker compose -f deploy/test/compose.yaml logs` | 检查 MinIO bucket、mock `/health`、ffmpeg/ffprobe |
+| Canvas test 健康失败 | `COMPOSE_PROFILES=app docker compose -p kk-studio-canvas-test -f deploy/test/compose.yaml ps`；同参数执行 `logs` | 检查 MinIO bucket、mock `/health`、ffmpeg/ffprobe |
 | E2E 只跑少数 case | `node scripts/dev/verify/e2e/run-matrix.mjs --list`；确认 `--real`、`--with-tools`、`--with-canvas-storage`、`--with-canvas-function` | 通过 `requires` 和 level 过滤是当前行为 |
 | 真实 Provider 不可用 | 检查 8 个 `TEST_{GOOGLE,OPENAI_RESPONSES,ANTHROPIC,OPENAI}_{BASE_URL,API_KEY}` 变量是否均非空 | 必须显式 `--real`，只用宿主同步器；不要放入 Compose/image/container |
 | reliability 环境未 READY | `./scripts/dev/verify/reliability/stack.sh status`；`./scripts/dev/verify/reliability/stack.sh logs app daemon` | `inspect` 先检查 non-root、volume 和 gateway |

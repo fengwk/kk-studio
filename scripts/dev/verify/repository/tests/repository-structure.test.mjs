@@ -170,7 +170,7 @@ test('docs check fails when production package lacks package-info.java', () => {
   // Test intent: deleting package metadata from an existing production package must fail closed.
   const mirrorRoot = createRepositoryMirror()
   const packageInfoRelative =
-    'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/admission/package-info.java'
+    'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/thread/package-info.java'
   const realPackageInfo = path.join(REPOSITORY_ROOT, packageInfoRelative)
   const initialPackageInfo = readFileSync(realPackageInfo, 'utf8')
   const mirrorPackageInfo = path.join(mirrorRoot, packageInfoRelative)
@@ -205,8 +205,8 @@ test('docs check fails when package-info Javadoc is empty or package declaration
   // Test intent: existing package metadata must contain documentation and declare its path package.
   const mirrorRoot = createRepositoryMirror()
   const packageInfoRelative =
-    'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/admission/package-info.java'
-  const expectedPackage = 'fun.fengwk.kkstudio.harness.runtime.admission'
+    'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/thread/package-info.java'
+  const expectedPackage = 'fun.fengwk.kkstudio.harness.api.thread'
   const realPackageInfo = path.join(REPOSITORY_ROOT, packageInfoRelative)
   const initialPackageInfo = readFileSync(realPackageInfo, 'utf8')
   const mirrorPackageInfo = path.join(mirrorRoot, packageInfoRelative)

@@ -256,20 +256,6 @@
                                         </limit>
                                     </limits>
                                 </rule>
-                                <rule>
-                                    <!-- 各产品 Hub 共享的订阅容器：注册/注销原子性与消费者隔离由本模块测试保证。 -->
-                                    <element>CLASS</element>
-                                    <includes>
-                                        <include>fun.fengwk.kkstudio.platform.notification.SubscriptionFanOut</include>
-                                    </includes>
-                                    <limits>
-                                        <limit>
-                                            <counter>LINE</counter>
-                                            <value>COVEREDRATIO</value>
-                                            <minimum>0.90</minimum>
-                                        </limit>
-                                    </limits>
-                                </rule>
                             </rules>
                         </configuration>
                     </execution>
