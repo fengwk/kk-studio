@@ -5,6 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -91,6 +93,33 @@ class ClusterEnvironmentIdeServiceTest {
     assertEquals(VIEW, dto.getViewId());
     assertEquals(IdeAction.OPEN_VIEW, localTransport.commands.get(0).getAction());
     assertTrue(client.calls.isEmpty());
+  }
+
+  /** 本地 owner 的各类视图命令只交给本地服务，不触发任何远端请求。 */
+  @Test
+  void localBoundCommandsAndQueriesDoNotUseRemoteClient() {
+    EnvironmentIdeServiceImpl delegate = mock(EnvironmentIdeServiceImpl.class);
+    IdeClusterClient remote = mock(IdeClusterClient.class);
+    service = new ClusterEnvironmentIdeService(registry, remote, delegate);
+    registry.current = Optional.of(ClusterOwnerRoute.local(NODE_A));
+    EnvironmentIdeChangeDirectoryDTO directory = new EnvironmentIdeChangeDirectoryDTO();
+    EnvironmentIdeViewBindingDTO binding = new EnvironmentIdeViewBindingDTO();
+    EnvironmentIdeCloseViewDTO close = new EnvironmentIdeCloseViewDTO();
+
+    service.changeDirectory(ENV, VIEW, directory);
+    service.focusTerminal(ENV, VIEW, binding);
+    service.collapseMobile(ENV, VIEW, binding);
+    service.closeView(ENV, VIEW, close);
+    service.listViews(ENV);
+    service.listDirectories(ENV, "/tmp");
+
+    verify(delegate).changeDirectory(ENV, VIEW, directory);
+    verify(delegate).focusTerminal(ENV, VIEW, binding);
+    verify(delegate).collapseMobile(ENV, VIEW, binding);
+    verify(delegate).closeView(ENV, VIEW, close);
+    verify(delegate).listViews(ENV);
+    verify(delegate).listDirectories(ENV, "/tmp");
+    verifyNoInteractions(remote);
   }
 
   @Test
