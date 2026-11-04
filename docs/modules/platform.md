@@ -36,6 +36,7 @@ Chat、Environment、Settings 与 Catalog 的实体仓库直接以 `JdbcClient` 
 | [harness/tool/permission](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/permission) | Tool permission 的规则模型与有序求值、Bash 静态 surface 分析，以及部署范围 permission 快照的现读端口 `ToolSettingsProvider`；只产出策略候选 |
 | [harness/admission](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/admission) | Model 与 Tool 网关共用的进程内并发槽位 `ConcurrencyAdmission`：无等待队列、幂等释放，不持久化、不跨进程协调 |
 | [harness/thread/command](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/thread/command) | `DatabaseAgentTurnContextResolver` 解析与模型无关的 Agent 目录快照；`DatabaseTurnResolver` 在其上规划模型、压缩与预算，不反查 Thread 归属 |
+| [harness/builtin/query](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/builtin/query) | Builtin 请求体预览与结构化模型请求调试，只读复用发送路径的规划和物化 |
 | [harness/builtin/realtime](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/builtin/realtime) | Builtin 流式追帧：durable 快照 + active owner attempt fence，本地优先、跨节点单次严格 envelope |
 | [harness/notification](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/notification) | 实现公开变更订阅：三个 LISTEN channel 协议、payload 解析、进程内定点分发与 resync |
 | [notification](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/notification) | 与业务无关的订阅 fan-out 容器与 NOTIFY 失效分发基座，供 Harness 源与 web 的画布、环境失效共用 |

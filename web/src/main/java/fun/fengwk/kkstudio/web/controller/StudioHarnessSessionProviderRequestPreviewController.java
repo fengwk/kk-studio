@@ -11,8 +11,8 @@ import org.springframework.web.server.ResponseStatusException;
 
 import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
-import fun.fengwk.kkstudio.platform.harness.model.ProviderRequestPreviewService;
-import fun.fengwk.kkstudio.platform.harness.model.ProviderRequestPreviewUnavailableException;
+import fun.fengwk.kkstudio.platform.harness.builtin.query.ProviderRequestPreviewService;
+import fun.fengwk.kkstudio.platform.harness.builtin.query.ProviderRequestPreviewUnavailableException;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessDraftPreviewRequestDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessProviderRequestPreviewDTO;
 import fun.fengwk.kkstudio.web.api.ApiResponse;

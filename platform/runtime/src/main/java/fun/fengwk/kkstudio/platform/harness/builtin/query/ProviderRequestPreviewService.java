@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.harness.model;
+package fun.fengwk.kkstudio.platform.harness.builtin.query;
 
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
@@ -32,7 +32,9 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.spi.compaction.CompactionConfigProvider;
-import fun.fengwk.kkstudio.platform.harness.model.ProviderRequestPreviewUnavailableException.Reason;
+import fun.fengwk.kkstudio.platform.harness.builtin.query.ProviderRequestPreviewUnavailableException.Reason;
+import fun.fengwk.kkstudio.platform.harness.model.DatabaseProviderResolutionService;
+import fun.fengwk.kkstudio.platform.harness.model.ProviderResolutionService;
 import fun.fengwk.kkstudio.platform.harness.thread.command.DatabaseTurnResolver;
 import fun.fengwk.kkstudio.platform.harness.thread.command.LiveTurnPlan;
 import fun.fengwk.kkstudio.platform.orchestration.UserMessageContentPreparer;
