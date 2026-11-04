@@ -4,6 +4,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { IdeOverlayPanel, type IdeOverlayPanelProps } from '@/features/environment/ide/IdeOverlayPanel'
 import type { IdeViewState } from '@/features/environment/ide/IdePanelProvider'
 
+const listIdeDirectories = vi.hoisted(() => vi.fn())
+
+vi.mock('@/features/environment/environment-service', () => ({
+  environmentService: { listIdeDirectories },
+}))
+
 const ENV_A = 'a1000000-0000-4000-8000-000000000001'
 const ENV_B = 'a1000000-0000-4000-8000-000000000002'
 const VIEW_A = 'c1000000-0000-4000-8000-000000000001'
@@ -59,13 +65,27 @@ function baseProps(overrides: Partial<IdeOverlayPanelProps> = {}): IdeOverlayPan
     onOpenNewView: vi.fn(),
     onRetryClaim: vi.fn(),
     onReloadEnvironments: vi.fn(),
+    readRecentDirectories: vi.fn().mockReturnValue([]),
+    recordRecentDirectory: vi.fn().mockReturnValue([]),
     ...overrides,
   }
+}
+
+const HOME_LISTING = {
+  path: '/home/user',
+  parentPath: '/home',
+  truncated: false,
+  children: [
+    { name: 'projects', path: '/home/user/projects' },
+    { name: 'notes', path: '/home/user/notes' },
+  ],
 }
 
 describe('IdeOverlayPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    listIdeDirectories.mockReset()
+    listIdeDirectories.mockResolvedValue(HOME_LISTING)
   })
 
   it('keeps every opened iframe mounted while only the selected environment is visible', () => {
@@ -95,12 +115,57 @@ describe('IdeOverlayPanel', () => {
     expect(props.onOpenTerminal).toHaveBeenCalledWith(ENV_A)
 
     await user.click(screen.getByTestId('ide-open-directory-btn'))
-    expect(screen.getByTestId('ide-directory-input')).toHaveValue(DIRECTORY_A)
-    await user.click(screen.getByRole('button', { name: '取消' }))
-    expect(screen.queryByTestId('ide-directory-input')).not.toBeInTheDocument()
+    const dialog = await screen.findByRole('dialog', { name: '打开宿主目录' })
+    expect(await within(dialog).findByTestId('ide-directory-location')).toHaveTextContent('/home/user')
+    expect(within(dialog).getByText('projects')).toBeVisible()
+    await user.click(within(dialog).getByRole('button', { name: '取消' }))
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: '打开宿主目录' })).not.toBeInTheDocument()
+    })
 
     await user.click(screen.getByTestId('ide-collapse-btn'))
     expect(props.onCollapse).toHaveBeenCalledTimes(1)
+  })
+
+  it('records the switched directory only after the change succeeds', async () => {
+    // 失败切换（dirty 或目录不可用）不写最近目录，成功后才按 Environment 记录并关闭弹窗。
+    const user = userEvent.setup()
+    const onChangeDirectory = vi.fn()
+      .mockResolvedValueOnce({ ok: false, message: 'directory-failed' })
+      .mockResolvedValueOnce({ ok: true })
+    const readRecentDirectories = vi.fn().mockReturnValue(['/workspace/projects/previous'])
+    const recordRecentDirectory = vi.fn().mockReturnValue([DIRECTORY_A, '/workspace/projects/previous'])
+    render(
+      <IdeOverlayPanel
+        {...baseProps({ onChangeDirectory, readRecentDirectories, recordRecentDirectory })}
+      />,
+    )
+
+    await user.click(screen.getByTestId('ide-open-directory-btn'))
+    const dialog = await screen.findByRole('dialog', { name: '打开宿主目录' })
+    expect(readRecentDirectories).toHaveBeenCalledWith(ENV_A)
+    expect(within(dialog).getByText('/workspace/projects/previous')).toBeVisible()
+
+    await user.click(within(dialog).getByTestId('ide-directory-confirm'))
+    expect(await within(dialog).findByTestId('ide-directory-error')).toHaveTextContent('切换目录失败')
+    expect(onChangeDirectory).toHaveBeenLastCalledWith(ENV_A, DIRECTORY_A)
+    expect(recordRecentDirectory).not.toHaveBeenCalled()
+    expect(screen.getByRole('dialog', { name: '打开宿主目录' })).toBeVisible()
+
+    await user.click(within(dialog).getByTestId('ide-directory-confirm'))
+    await waitFor(() => {
+      expect(recordRecentDirectory).toHaveBeenCalledWith(ENV_A, DIRECTORY_A)
+    })
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: '打开宿主目录' })).not.toBeInTheDocument()
+    })
+
+    // 重新打开时展示最新记录，而不是打开前的快照。
+    await user.click(screen.getByTestId('ide-open-directory-btn'))
+    const reopened = await screen.findByRole('dialog', { name: '打开宿主目录' })
+    expect(readRecentDirectories).toHaveBeenCalledTimes(2)
+    expect(readRecentDirectories).toHaveBeenLastCalledWith(ENV_A)
+    expect(reopened).toBeVisible()
   })
 
   it('copies the full directory path and reports clipboard errors', async () => {
@@ -117,7 +182,7 @@ describe('IdeOverlayPanel', () => {
     expect(await screen.findByText('无法复制目录路径')).toBeVisible()
   })
 
-  it('keeps the iframe after a dirty close and only sends discard from the explicit confirmation', async () => {
+  it('keeps the iframe after an unknown close and only forces from explicit confirmation', async () => {
     const user = userEvent.setup()
     const onCloseEnvironment = vi.fn()
       .mockResolvedValueOnce({ ok: false, dirty: true })
@@ -126,12 +191,12 @@ describe('IdeOverlayPanel', () => {
 
     await user.click(screen.getByTestId('ide-close-btn'))
 
-    const dialog = await screen.findByRole('alertdialog', { name: '放弃未保存的修改？' })
-    expect(within(dialog).getByText('IDE 中存在未保存的修改，已拒绝关闭。放弃这些修改并关闭视图？')).toBeVisible()
+    const dialog = await screen.findByRole('alertdialog', { name: '强制关闭 IDE 视图？' })
+    expect(within(dialog).getByText('IDE 状态未知或无法连接。强制关闭可能丢失未保存的修改，是否继续？')).toBeVisible()
     expect(screen.getAllByTestId('ide-iframe')).toHaveLength(2)
     expect(onCloseEnvironment).toHaveBeenNthCalledWith(1, ENV_A, false)
 
-    await user.click(within(dialog).getByRole('button', { name: '放弃并关闭' }))
+    await user.click(within(dialog).getByRole('button', { name: '强制关闭' }))
     await waitFor(() => {
       expect(onCloseEnvironment).toHaveBeenNthCalledWith(2, ENV_A, true)
     })

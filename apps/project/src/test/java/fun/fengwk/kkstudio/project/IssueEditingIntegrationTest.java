@@ -462,13 +462,15 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
     Issue issue1 = createIssue(projectId);
     issueLifecycleService.transition(issue1.getId(), issue1.getVersion(), key("t"), "DESIGN");
     IssueRun run1A = issueRunService.acceptRun(issue1.getId(), key("accept"));
-    issueRunService.completeRun(
+    issueRunService.finishRun(
         run1A.getId(),
         run1A.getVersion(),
         key("c"),
+        IssueRunStatus.COMPLETED,
         appendHistoryEntry(run1A.getThreadId()),
         null,
-        "REVIEW");
+        "REVIEW",
+        null);
     Issue inReview1 = issueEditingService.getIssue(issue1.getId());
     IssueRun run1B = issueRunService.acceptRun(inReview1.getId(), key("accept"));
 

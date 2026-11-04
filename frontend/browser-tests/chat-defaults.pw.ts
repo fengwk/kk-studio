@@ -30,6 +30,22 @@ async function setupEnvironmentRoute(page: Page) {
 }
 
 test.describe('Chat defaults & metadata contracts', () => {
+  test('mobile create dialog keeps the YOLO switch and footer reachable', async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 360, height: 640 })
+    await setupEnvironmentRoute(page)
+    await page.goto(HARNESS_URL)
+    await page.getByTestId('open-create-btn').click()
+    const dialog = page.getByRole('dialog')
+    const yolo = dialog.getByRole('switch', { name: 'YOLO 模式' })
+    const box = (await yolo.boundingBox())!
+    expect(box.width).toBeGreaterThanOrEqual(44)
+    expect(box.height).toBeGreaterThanOrEqual(44)
+    await yolo.click()
+    await expect(yolo).toHaveAttribute('aria-checked', 'true')
+    await expect(dialog.getByRole('button', { name: '确认创建' })).toBeVisible()
+    await page.screenshot({ path: testInfo.outputPath('chat-create-mobile.png'), animations: 'disabled' })
+  })
+
   test('create Chat: toggle YOLO, select environment, and submit intended configuration', async ({ page }) => {
     await setupEnvironmentRoute(page)
     await page.goto(HARNESS_URL)

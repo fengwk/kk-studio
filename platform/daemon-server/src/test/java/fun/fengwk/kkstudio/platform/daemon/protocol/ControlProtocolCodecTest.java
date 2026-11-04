@@ -7,10 +7,81 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import com.google.protobuf.UnknownFieldSet;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.platform.daemon.DaemonUpdateCommand;
+
 import java.io.IOException;
 
 /** 控制消息的 binary golden 与应用层边界测试。 */
 class ControlProtocolCodecTest {
+
+  /** 目录结果与视图回执互斥，新命令遵守绑定和路径边界。 */
+  @Test
+  void validatesDirectoryListingAndMobileCommands() {
+    Envelope command =
+        ControlProtocolCodec.decodeBinary(
+            ControlProtocolFixtures.goldenUnchecked("ide-command.bin"));
+    IdeCommand list =
+        IdeCommand.newBuilder().setAction(IdeAction.LIST_DIRECTORIES).setDirectory("/a b").build();
+    ControlProtocolCodec.encodeBinary(command.toBuilder().setIdeCommand(list).build());
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                command.toBuilder()
+                    .setIdeCommand(list.toBuilder().setViewId("unexpected"))
+                    .build()));
+    IdeCommand mobile =
+        IdeCommand.newBuilder()
+            .setAction(IdeAction.COLLAPSE_MOBILE)
+            .setViewId(command.getIdeCommand().getViewId())
+            .setDocumentId(command.getIdeCommand().getDocumentId())
+            .setBindingEpoch(1)
+            .build();
+    ControlProtocolCodec.encodeBinary(command.toBuilder().setIdeCommand(mobile).build());
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                command.toBuilder().setIdeCommand(mobile.toBuilder().setDirectory("/x")).build()));
+    Envelope result =
+        ControlProtocolCodec.decodeBinary(
+            ControlProtocolFixtures.goldenUnchecked("ide-result.bin"));
+    IdeDirectoryListing listing =
+        IdeDirectoryListing.newBuilder()
+            .setPath("/")
+            .setTruncated(false)
+            .addChildren(IdeDirectoryEntry.newBuilder().setName("x").setPath("/x"))
+            .build();
+    IdeResult reply = IdeResult.newBuilder().setOk(true).setDirectoryListing(listing).build();
+    ControlProtocolCodec.decodeBinary(
+        ControlProtocolCodec.encodeBinary(result.toBuilder().setIdeResult(reply).build()));
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                result.toBuilder()
+                    .setIdeResult(reply.toBuilder().setViewId(mobile.getViewId()))
+                    .build()));
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                result.toBuilder()
+                    .setIdeResult(
+                        reply.toBuilder().setDirectoryListing(listing.toBuilder().clearTruncated()))
+                    .build()));
+    IdeDirectoryListing.Builder large = listing.toBuilder();
+    for (int i = 0; i < 1000; i++) {
+      large.addChildren(listing.getChildren(0));
+    }
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                result.toBuilder()
+                    .setIdeResult(reply.toBuilder().setDirectoryListing(large))
+                    .build()));
+  }
 
   /** 各类消息的非法枚举、缺失必填和越界都拒绝，合法边界可以编码。 */
   @Test
@@ -229,13 +300,22 @@ class ControlProtocolCodecTest {
                 upgrade.toBuilder().setArtifactUrl("https://example.invalid/a.tar.gz").build()));
 
     Envelope update =
-        ControlProtocolCodec.decodeBinary(ControlProtocolFixtures.goldenUnchecked("update.bin"));
+        Envelope.newBuilder()
+            .setMessageType(MessageType.UPDATE)
+            .setEnvironmentId(ControlProtocolFixtures.ENVIRONMENT_ID)
+            .setUpdate(
+                Update.newBuilder()
+                    .setOperationId("11111111-1111-1111-1111-111111111111")
+                    .setTargetVersion("1.0.9"))
+            .build();
+    assertEquals(
+        update, ControlProtocolCodec.decodeBinary(ControlProtocolCodec.encodeBinary(update)));
     assertThrows(
         ControlProtocolException.class,
         () ->
             ControlProtocolCodec.encodeBinary(
                 update.toBuilder()
-                    .setUpdate(update.getUpdate().toBuilder().setArtifactSha256("zz"))
+                    .setUpdate(update.getUpdate().toBuilder().setTargetVersion("bad version"))
                     .build()));
     Envelope updateResult =
         ControlProtocolCodec.decodeBinary(
@@ -411,9 +491,27 @@ class ControlProtocolCodecTest {
         ControlProtocolException.class, () -> ControlProtocolCodec.decodeBinary(new byte[] {0x0a}));
   }
 
-  /** 三条消息的 Java 构造结果必须与 TS 生成的共享 golden 逐字节一致。 */
+  /** Java 构造结果必须与 TS 生成的共享 golden 逐字节一致。 */
   @Test
   void encodesFixtureMessagesToSharedGolden() throws IOException {
+    Envelope settings =
+        Envelope.newBuilder()
+            .setMessageType(MessageType.SETTINGS)
+            .setEnvironmentId(ControlProtocolFixtures.ENVIRONMENT_ID)
+            .setSettings(
+                Settings.newBuilder()
+                    .setDisplayName("dev-box")
+                    .setProxyUrl("http://proxy.invalid:8080")
+                    .setNoProxyHosts("localhost,10.0.0.0/8")
+                    .setResourceBudgets(
+                        ResourceBudgets.newBuilder()
+                            .setMaxResourceBytes(1048576)
+                            .setTemporaryResourceTtlSeconds(3600)
+                            .setTemporaryResourceCleanupIntervalSeconds(60)))
+            .build();
+    assertArrayEquals(
+        ControlProtocolFixtures.golden("settings.bin"),
+        ControlProtocolCodec.encodeBinary(settings));
     assertArrayEquals(
         ControlProtocolFixtures.golden("invoke.bin"),
         ControlProtocolCodec.encodeBinary(ControlProtocolFixtures.invokeEnvelope()));
@@ -423,6 +521,16 @@ class ControlProtocolCodecTest {
     assertArrayEquals(
         ControlProtocolFixtures.golden("execution-exited.bin"),
         ControlProtocolCodec.encodeBinary(ControlProtocolFixtures.executionExitedEnvelope()));
+    DaemonUpdateCommand command =
+        new DaemonUpdateCommand("88888888-8888-4888-8888-888888888888", "1.2.3");
+    Envelope update =
+        Envelope.newBuilder()
+            .setMessageType(MessageType.UPDATE)
+            .setEnvironmentId(ControlProtocolFixtures.ENVIRONMENT_ID)
+            .setUpdate(ControlProtocolCodec.toProtoUpdate(command))
+            .build();
+    assertArrayEquals(
+        ControlProtocolFixtures.golden("update.bin"), ControlProtocolCodec.encodeBinary(update));
   }
 
   /** 共享 golden 解码后重新编码必须逐字节相同，裸消息和帧路径都要覆盖。 */
@@ -450,6 +558,52 @@ class ControlProtocolCodecTest {
     CapabilityResult result = completed.getCompleted().getResult();
     assertEquals(ControlProtocolFixtures.DETAILS_JSON, result.getDetailsJson());
     assertEquals(ControlProtocolFixtures.JSON_CONTENT, result.getContents(1).getJson().getJson());
+  }
+
+  /** UPDATE 仅包含关联 ID 和版本，旧制品字段及其他未知字段均不得通过边界。 */
+  @Test
+  void validatesUpdateCommandAndRejectsUnknownFields() {
+    DaemonUpdateCommand command =
+        new DaemonUpdateCommand("11111111-1111-1111-1111-111111111111", "1.0.9");
+    Update update = ControlProtocolCodec.toProtoUpdate(command);
+    assertEquals(command, ControlProtocolCodec.toDomainUpdate(update));
+    assertEquals(2, update.getAllFields().size());
+    assertThrows(
+        ControlProtocolException.class,
+        () -> ControlProtocolCodec.validateUpdate(update.toBuilder().clearOperationId().build()));
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.validateUpdate(update.toBuilder().setOperationId("bad").build()));
+    assertThrows(
+        ControlProtocolException.class,
+        () -> ControlProtocolCodec.validateUpdate(update.toBuilder().clearTargetVersion().build()));
+    assertThrows(IllegalArgumentException.class, () -> new DaemonUpdateCommand("bad", "1.0.9"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new DaemonUpdateCommand(command.operationId(), "bad version"));
+    for (int fieldNumber : new int[] {3, 4, 100}) {
+      UnknownFieldSet unknown =
+          UnknownFieldSet.newBuilder()
+              .addField(fieldNumber, UnknownFieldSet.Field.newBuilder().addVarint(1).build())
+              .build();
+      Update invalid = update.toBuilder().mergeUnknownFields(unknown).build();
+      assertThrows(
+          ControlProtocolException.class, () -> ControlProtocolCodec.validateUpdate(invalid));
+      assertThrows(
+          ControlProtocolException.class, () -> ControlProtocolCodec.toDomainUpdate(invalid));
+      Envelope envelope =
+          Envelope.newBuilder()
+              .setMessageType(MessageType.UPDATE)
+              .setEnvironmentId(ControlProtocolFixtures.ENVIRONMENT_ID)
+              .setUpdate(invalid)
+              .build();
+      assertThrows(
+          ControlProtocolException.class, () -> ControlProtocolCodec.encodeBinary(envelope));
+      assertThrows(
+          ControlProtocolException.class,
+          () -> ControlProtocolCodec.decodeBinary(envelope.toByteArray()));
+    }
   }
 
   /** 空 text 是合法业务值；present 与内容非空不是同一个约束。 */

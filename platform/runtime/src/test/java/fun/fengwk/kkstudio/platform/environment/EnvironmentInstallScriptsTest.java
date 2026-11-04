@@ -16,6 +16,7 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInstallConfigDTO;
 
 import java.io.IOException;
@@ -40,7 +41,9 @@ class EnvironmentInstallScriptsTest {
     assumeFalse(isWindows());
     EnvironmentInstallConfigDTO config = config(operatingSystem);
     String token = "private-汉字'\"$`$(touch NEVER)";
-    Execution execution = execute(EnvironmentInstallScripts.install(config, token), 0);
+    Execution execution =
+        execute(
+            EnvironmentInstallScripts.install(config, token, SystemSettings.Network.DEFAULT), 0);
     assertEquals(0, execution.status());
     assertFalse((execution.stdout() + execution.stderr()).contains("private-"));
     assertEquals(expectedDaemon(config), execution.record().get("config"));
@@ -68,7 +71,10 @@ class EnvironmentInstallScriptsTest {
   void cleansAfterInstallerFailureAndOmitsJavaHome() throws Exception {
     assumeFalse(isWindows());
     EnvironmentInstallConfigDTO config = config("linux");
-    Execution execution = execute(EnvironmentInstallScripts.install(config, "private"), 17);
+    Execution execution =
+        execute(
+            EnvironmentInstallScripts.install(config, "private", SystemSettings.Network.DEFAULT),
+            17);
     assertEquals(17, execution.status());
     assertFalse(texts(execution.record().get("args")).contains("--java-home"));
     assertFalse(Files.exists(Path.of(execution.record().get("stage").asText())));
@@ -81,7 +87,11 @@ class EnvironmentInstallScriptsTest {
     try {
       writeExecutable(dir.resolve("curl"), "#!/bin/bash\nexit 8\n");
       ProcessResult result =
-          run(EnvironmentInstallScripts.install(config("linux"), "private"), dir, Map.of());
+          run(
+              EnvironmentInstallScripts.install(
+                  config("linux"), "private", SystemSettings.Network.DEFAULT),
+              dir,
+              Map.of());
       assertEquals(8, result.status());
       assertEquals(List.of("curl"), names(dir));
       assertFalse((result.stdout() + result.stderr()).contains("private"));
@@ -94,16 +104,61 @@ class EnvironmentInstallScriptsTest {
   @ValueSource(strings = {"linux", "macos"})
   void executesUnixUninstallWithoutCredentials(String operatingSystem) throws Exception {
     assumeFalse(isWindows());
-    Execution execution = execute(EnvironmentInstallScripts.uninstall(operatingSystem), 0);
+    Execution execution =
+        execute(
+            EnvironmentInstallScripts.uninstall(operatingSystem, SystemSettings.Network.DEFAULT),
+            0);
     assertEquals(0, execution.status());
     assertEquals(List.of("uninstall"), texts(execution.record().get("args")));
     assertFalse(execution.record().has("token"));
   }
 
+  /** 两跳下载和安装器都使用平台快照，不继承主机代理。 */
+  @Test
+  void unixInstallUsesPlatformProxyAndExplicitDirectSettings() throws Exception {
+    assumeFalse(isWindows());
+    for (SystemSettings.Network network :
+        List.of(
+            new SystemSettings.Network("http://proxy.invalid:8080", "localhost,.internal"),
+            new SystemSettings.Network(null, "localhost"))) {
+      Execution execution =
+          execute(EnvironmentInstallScripts.install(config("linux"), "token", network), 0);
+      String proxy = network.proxyUrl() == null ? "" : network.proxyUrl();
+      for (JsonNode environment :
+          List.of(execution.downloadEnvironment(), execution.record().get("env"))) {
+        assertEquals(proxy, environment.get("https_proxy").asText());
+        assertEquals(proxy, environment.get("HTTP_PROXY").asText());
+        assertEquals(network.noProxyHosts(), environment.get("NO_PROXY").asText());
+        assertFalse(environment.has("HtTp_PrOxY"));
+      }
+    }
+  }
+
+  /** Windows 首跳按平台绕过规则选择直连，安装器仍收到完整设置。 */
+  @Test
+  void windowsInstallRendersPlatformProxyAndBootstrapBypass() {
+    SystemSettings.Network proxy =
+        new SystemSettings.Network("http://proxy.invalid:8080", "localhost");
+    String command = EnvironmentInstallScripts.install(config("windows"), "token", proxy);
+    assertTrue(command.contains("$env:HTTP_PROXY = 'http://proxy.invalid:8080'"));
+    assertTrue(command.contains("$env:NO_PROXY = 'localhost'"));
+    assertTrue(command.contains("$direct = $false"));
+    assertTrue(command.contains("@proxyArguments"));
+    assertTrue(command.contains("$env:KK_DAEMON_INSTALL_PROXY_ENV = '1'"));
+    String bypass =
+        EnvironmentInstallScripts.install(
+            config("windows"),
+            "token",
+            new SystemSettings.Network("http://proxy.invalid:8080", "githubusercontent.com"));
+    assertTrue(bypass.contains("$direct = $true"));
+    assertTrue(bypass.contains("$env:HTTP_PROXY = 'http://proxy.invalid:8080'"));
+  }
+
   @Test
   void windowsCommandProtectsAclBeforeWritingCredentials() {
     EnvironmentInstallConfigDTO config = config("windows");
-    String command = EnvironmentInstallScripts.install(config, "private-'$`");
+    String command =
+        EnvironmentInstallScripts.install(config, "private-'$`", SystemSettings.Network.DEFAULT);
     assertTrue(command.contains("function Set-KkPrivateAcl"));
     assertTrue(command.contains("[Security.AccessControl.DirectorySecurity]::new()"));
     assertTrue(command.contains("[Security.AccessControl.FileSecurity]::new()"));
@@ -133,7 +188,8 @@ class EnvironmentInstallScriptsTest {
         invocation.contains("-File $installer install -ConfigFile $config -TokenFile $token"));
     assertFalse(invocation.contains("-JavaHome"));
     assertFalse(invocation.contains("private"));
-    String uninstall = EnvironmentInstallScripts.uninstall("windows");
+    String uninstall =
+        EnvironmentInstallScripts.uninstall("windows", SystemSettings.Network.DEFAULT);
     assertFalse(uninstall.contains("WriteAllText"));
     assertTrue(uninstall.contains("Set-KkPrivateAcl -Path $stage -Directory"));
     assertTrue(uninstall.contains("-File $installer uninstall"));
@@ -156,7 +212,7 @@ class EnvironmentInstallScriptsTest {
       ProcessResult failed =
           runWindows(
               executable,
-              EnvironmentInstallScripts.install(config, token),
+              EnvironmentInstallScripts.install(config, token, SystemSettings.Network.DEFAULT),
               dir,
               fixture,
               recordPath);
@@ -185,7 +241,11 @@ class EnvironmentInstallScriptsTest {
 
       ProcessResult removed =
           runWindows(
-              executable, EnvironmentInstallScripts.uninstall("windows"), dir, fixture, recordPath);
+              executable,
+              EnvironmentInstallScripts.uninstall("windows", SystemSettings.Network.DEFAULT),
+              dir,
+              fixture,
+              recordPath);
       assertEquals(1, removed.status(), removed.stdout() + removed.stderr());
       JsonNode uninstall = JSON.readTree(Files.readString(recordPath));
       assertEquals("uninstall", uninstall.get("action").asText());
@@ -200,13 +260,19 @@ class EnvironmentInstallScriptsTest {
   void rejectsBlankTokenControlCharactersAndUnknownOperatingSystem() {
     EnvironmentInstallConfigDTO config = config("linux");
     assertThrows(
-        AiValidationException.class, () -> EnvironmentInstallScripts.install(config, " \n"));
+        AiValidationException.class,
+        () -> EnvironmentInstallScripts.install(config, " \n", SystemSettings.Network.DEFAULT));
     assertThrows(
         AiValidationException.class,
-        () -> EnvironmentInstallScripts.install(config, "token\u2028"));
-    assertThrows(AiValidationException.class, () -> EnvironmentInstallScripts.uninstall("solaris"));
+        () ->
+            EnvironmentInstallScripts.install(
+                config, "token\u2028", SystemSettings.Network.DEFAULT));
     assertThrows(
-        AiValidationException.class, () -> EnvironmentInstallScripts.install(null, "token"));
+        AiValidationException.class,
+        () -> EnvironmentInstallScripts.uninstall("solaris", SystemSettings.Network.DEFAULT));
+    assertThrows(
+        AiValidationException.class,
+        () -> EnvironmentInstallScripts.install(null, "token", SystemSettings.Network.DEFAULT));
   }
 
   private static Execution execute(String command, int exit) throws Exception {
@@ -233,7 +299,12 @@ class EnvironmentInstallScriptsTest {
             .formatted(exit));
     writeExecutable(
         dir.resolve("curl"),
-        "#!/bin/bash\nwhile [[ \"$1\" != \"-o\" ]]; do shift; done\ncp \"$FIXTURE\" \"$2\"\n");
+        """
+        #!/bin/bash
+        python3 -c 'import json, os; json.dump(dict(os.environ), open(os.environ["RECORD"] + ".curl", "w"))'
+        while [[ "$1" != "-o" ]]; do shift; done
+        cp "$FIXTURE" "$2"
+        """);
     try {
       ProcessResult run =
           run(
@@ -243,9 +314,13 @@ class EnvironmentInstallScriptsTest {
                   "TMPDIR", ".",
                   "RECORD", result.toString(),
                   "FIXTURE", dir.resolve("recorder").toString(),
+                  "HtTp_PrOxY", "http://host-proxy.invalid:3128",
                   "SHELLOPTS", "xtrace:verbose",
                   "BASH_FUNC_printf%%", "() { echo unsafe >&2; exit 42; }"));
-      return new Execution(run, JSON.readTree(Files.readString(result)));
+      return new Execution(
+          run,
+          JSON.readTree(Files.readString(result)),
+          JSON.readTree(Files.readString(Path.of(result + ".curl"))));
     } finally {
       delete(dir);
     }
@@ -308,7 +383,7 @@ class EnvironmentInstallScriptsTest {
     String parent =
         """
         function Invoke-WebRequest {
-          param([switch]$UseBasicParsing, $Uri, $OutFile)
+          param([switch]$UseBasicParsing, $Uri, $OutFile, $Proxy, [switch]$NoProxy)
           if (-not $UseBasicParsing -or [string]::IsNullOrEmpty($Uri) -or [string]::IsNullOrEmpty($OutFile)) {
             throw 'download override did not receive the generated parameters'
           }
@@ -412,7 +487,7 @@ class EnvironmentInstallScriptsTest {
     return System.getProperty("os.name").toLowerCase().contains("win");
   }
 
-  private record Execution(ProcessResult run, JsonNode record) {
+  private record Execution(ProcessResult run, JsonNode record, JsonNode downloadEnvironment) {
     private int status() {
       return run.status();
     }

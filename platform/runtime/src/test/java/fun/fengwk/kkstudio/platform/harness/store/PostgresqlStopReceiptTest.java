@@ -16,13 +16,13 @@ import tools.jackson.databind.json.JsonMapper;
 import fun.fengwk.kkstudio.harness.api.CancelledThreadInput;
 import fun.fengwk.kkstudio.harness.api.StoppedThreadReceipt;
 import fun.fengwk.kkstudio.harness.api.command.GoalCommandPayload;
-import fun.fengwk.kkstudio.harness.api.command.SetContributorStateCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.SetExecutionCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
+import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.api.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.api.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.api.history.AssistantError;
 import fun.fengwk.kkstudio.harness.api.history.AssistantErrorPayload;
-import fun.fengwk.kkstudio.harness.api.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnEndReason;
@@ -679,8 +679,8 @@ class PostgresqlStopReceiptTest {
   }
 
   /**
-   * 测试意图：cancelledInputs 的自由 JSON 数值必须经真实 jsonb 存取后精确还原。SET_CONTRIBUTOR_STATE 的 state.data 是
-   * 唯一携带自由数值树的 command payload；1e309/1e-324 与高精度小数不得在 store 编解码中退化为 double 的 Infinity / 0。
+   * 测试意图：cancelledInputs 的 execution.settings 自由 JSON 数值必须经真实 jsonb 存取后精确还原； 1e309/1e-324 与高精度小数不得在
+   * store 编解码中退化为 double 的 Infinity / 0。
    *
    * <p>PostgreSQL jsonb 会按自身规则规范化极端量级的数字文本（{@code 1E+309} 展开为等值全数字），因此这里断言数值精确相等 且原始列不出现 {@code
    * Infinity}，而不是要求逐字相同的数字文本。
@@ -694,8 +694,7 @@ class PostgresqlStopReceiptTest {
         new CancelledThreadInput(
             1,
             UUID.randomUUID(),
-            new SetContributorStateCommandPayload(
-                new CustomEntryPayload("com.example.issue", "issue-scope", dataJson)));
+            new SetExecutionCommandPayload(new ExecutionSelection("builtin", dataJson)));
     StoppedThreadReceipt rootReceipt =
         new StoppedThreadReceipt(
             tree.rootThreadId(), rootStopRequestId, null, 1, List.of(cancelled));
@@ -711,7 +710,7 @@ class PostgresqlStopReceiptTest {
     assertEquals(cancelled.sequence(), loadedInput.sequence());
     assertEquals(cancelled.idempotencyKey(), loadedInput.idempotencyKey());
     String loadedDataJson =
-        ((SetContributorStateCommandPayload) loadedInput.payload()).state().dataJson();
+        ((SetExecutionCommandPayload) loadedInput.payload()).execution().settingsJson();
     JsonNode loadedData = FIXTURE_MAPPER.readTree(loadedDataJson);
     // 类型必须仍是 JSON number（而不是被改写成 "Infinity" 字符串），数值必须按 BigDecimal 精确相等。
     for (String field : List.of("big", "tiny", "exact")) {

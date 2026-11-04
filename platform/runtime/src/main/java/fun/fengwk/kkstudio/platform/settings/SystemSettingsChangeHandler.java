@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.platform.settings;
 
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Component;
 
 import java.util.Objects;
@@ -18,11 +19,15 @@ public class SystemSettingsChangeHandler {
 
   private final SystemSettingsRepository repository;
   private final SystemSettingsSnapshot snapshot;
+  private final ApplicationEventPublisher events;
 
   public SystemSettingsChangeHandler(
-      SystemSettingsRepository repository, SystemSettingsSnapshot snapshot) {
+      SystemSettingsRepository repository,
+      SystemSettingsSnapshot snapshot,
+      ApplicationEventPublisher events) {
     this.repository = Objects.requireNonNull(repository, "repository");
     this.snapshot = Objects.requireNonNull(snapshot, "snapshot");
+    this.events = Objects.requireNonNull(events, "events");
   }
 
   /** 处理一条变更通知；payload 无论为空或畸形都不影响权威回读。 */
@@ -48,6 +53,7 @@ public class SystemSettingsChangeHandler {
         return;
       }
       snapshot.replaceIfNotOlder(record);
+      events.publishEvent(snapshot.get().network());
     } catch (RuntimeException error) {
       log.warn("cannot refresh system settings snapshot after {}", reason, error);
     }

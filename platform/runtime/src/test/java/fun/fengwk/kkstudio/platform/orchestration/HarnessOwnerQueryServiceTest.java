@@ -14,7 +14,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
 
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.api.entry.TurnStartReason;
@@ -40,9 +39,6 @@ import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
-import fun.fengwk.kkstudio.platform.chat.Chat;
-import fun.fengwk.kkstudio.platform.chat.ChatRepository;
-import fun.fengwk.kkstudio.platform.chat.ChatSessionRepository;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionSummaryDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadSummaryDTO;
@@ -50,15 +46,9 @@ import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadSummaryDTO;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
 
-/**
- * owner 查询用例的单元契约。
- *
- * <p>owner→Session 的解析路径与 Session/Thread 投影分别验证：Chat 直接枚举 {@code chat_session}；Issue+Agent 只允许由稳定
- * Thread 绑定解析唯一 Session；投影事实全部来自 Runtime。
- */
+/** owner SPI 分派与 Runtime 摘要投影契约。 */
 class HarnessOwnerQueryServiceTest {
 
   private static final Instant T0 = Instant.parse("2026-01-01T00:00:00Z");
@@ -71,9 +61,7 @@ class HarnessOwnerQueryServiceTest {
       new BranchSettings(
           "assistant", BuiltinExecution.of(new ModelSelection("root-model", "default")), null);
 
-  private ChatRepository chatRepository;
-  private ChatSessionRepository chatSessionRepository;
-  private IssueAgentOwnership issueAgentOwnership;
+  private SessionOwnership ownership;
   private ObjectProvider<HarnessRuntime> runtimes;
   private HarnessRuntime runtime;
   private HarnessOwnerQueryService service;
@@ -81,35 +69,30 @@ class HarnessOwnerQueryServiceTest {
   @BeforeEach
   @SuppressWarnings("unchecked")
   void setUp() {
-    chatRepository = mock(ChatRepository.class);
-    chatSessionRepository = mock(ChatSessionRepository.class);
-    issueAgentOwnership = mock(IssueAgentOwnership.class);
-    ObjectProvider<IssueAgentOwnership> issueAgentOwnerships = mock(ObjectProvider.class);
-    when(issueAgentOwnerships.getIfAvailable()).thenReturn(issueAgentOwnership);
+    ownership = mock(SessionOwnership.class);
+    when(ownership.kind()).thenReturn("CHAT");
     runtimes = mock(ObjectProvider.class);
     runtime = mock(HarnessRuntime.class);
     when(runtimes.getIfAvailable()).thenReturn(runtime);
-    service =
-        new HarnessOwnerQueryService(
-            chatRepository, chatSessionRepository, issueAgentOwnerships, runtimes);
+    service = new HarnessOwnerQueryService(List.of(ownership), runtimes);
   }
 
-  /** owner 无法定位时必须确定性失败，不能枚举 Session 或读取任何 Harness 事实。 */
+  /** 不存在或重复的 kind 必须在查询前拒绝。 */
   @Test
   void missingOwnersFailBeforeSessionAndRuntimeLookup() {
-    UUID chatId = id(1);
-    UUID issueId = id(2);
-    String agentName = "executor";
-
-    assertThrows(AiResourceNotFoundException.class, () -> service.listChatSessions(chatId));
+    SessionOwner owner = new SessionOwner("OTHER", "1");
+    assertThrows(IllegalArgumentException.class, () -> service.listSessions(owner));
+    SessionOwnership duplicate = mock(SessionOwnership.class);
+    when(duplicate.kind()).thenReturn("CHAT");
+    HarnessOwnerQueryService ambiguous =
+        new HarnessOwnerQueryService(List.of(ownership, duplicate), runtimes);
     assertThrows(
-        AiResourceNotFoundException.class,
-        () -> service.listSessionsByOwner(new OwnerRef.IssueAgent(issueId, agentName)));
-
-    verifyNoInteractions(chatSessionRepository, runtime);
+        IllegalArgumentException.class,
+        () -> ambiguous.listSessions(new SessionOwner("CHAT", id(1).toString())));
+    verifyNoInteractions(runtime);
   }
 
-  /** Chat 摘要的 name/createdAt/预览一律来自 durable Session 与 Entry，且 OwnerRef 分派与直接查询一致。 */
+  /** Session 摘要的 name/createdAt/预览一律来自 durable Session 与 Entry。 */
   @Test
   void chatSessionSummariesProjectDurableNamesCreatedAtAndTextOnlyPreviews() {
     // 三个 Session 分别覆盖 text 预览、纯资源 USER（无 text）与空历史。
@@ -117,8 +100,8 @@ class HarnessOwnerQueryServiceTest {
     UUID textSession = id(11);
     UUID resourceSession = id(12);
     UUID emptySession = id(13);
-    when(chatRepository.getById(chatId)).thenReturn(mock(Chat.class));
-    when(chatSessionRepository.listSessionIds(chatId))
+    SessionOwner owner = new SessionOwner("CHAT", chatId.toString());
+    when(ownership.listSessions(owner))
         .thenReturn(List.of(textSession, resourceSession, emptySession));
     when(runtime.getSession(textSession)).thenReturn(new Session(textSession, "chat text", T0));
     when(runtime.getSession(resourceSession))
@@ -154,7 +137,7 @@ class HarnessOwnerQueryServiceTest {
     when(runtime.getSessionEntries(emptySession)).thenReturn(List.of());
     when(runtime.listThreadsBySession(emptySession)).thenReturn(List.of());
 
-    List<HarnessSessionSummaryDTO> summaries = service.listChatSessions(chatId);
+    List<HarnessSessionSummaryDTO> summaries = service.listSessions(owner);
 
     // 关系顺序保持仓库给出的最近归属优先顺序。
     assertEquals(
@@ -172,54 +155,16 @@ class HarnessOwnerQueryServiceTest {
     assertNull(summaries.get(2).getFirstMessagePreview(), "空历史 Session 预览必须为 null，绝不回退名称或 id");
     assertEquals(0, summaries.get(2).getThreadCount());
 
-    // OwnerRef 统一入口与 Chat 直接查询完全一致。
-    List<HarnessSessionSummaryDTO> byOwner = service.listSessionsByOwner(new OwnerRef.Chat(chatId));
-    assertEquals(
-        summaries.stream().map(HarnessSessionSummaryDTO::getSessionId).toList(),
-        byOwner.stream().map(HarnessSessionSummaryDTO::getSessionId).toList());
+    verify(ownership).listSessions(owner);
   }
 
-  /** Issue+Agent 的 Session 只能由稳定绑定 Thread 解析，同 Session 的其他 Thread 不参与归属。 */
+  /** SPI 的产品错误原样传播，且不会查询 Runtime。 */
   @Test
-  void issueAgentSessionsResolveThroughBoundThreadOnly() {
-    UUID issueId = id(30);
-    String agentName = "executor";
-    UUID threadId = id(31);
-    UUID sessionId = id(32);
-    when(issueAgentOwnership.findBoundThread(new OwnerRef.IssueAgent(issueId, agentName)))
-        .thenReturn(Optional.of(threadId));
-    Entry root = root(sessionId, id(34), T0, ROOT_SETTINGS);
-    ThreadState thread = thread(threadId, sessionId, root.id(), T0, T1);
-    when(runtime.getThreadSnapshot(threadId))
-        .thenReturn(snapshot(thread, new EntryPath(List.of(root))));
-    when(runtime.getSession(sessionId)).thenReturn(new Session(sessionId, "agent session", T0));
-    when(runtime.getSessionEntries(sessionId)).thenReturn(List.of());
-    when(runtime.listThreadsBySession(sessionId)).thenReturn(List.of(thread));
-
-    List<HarnessSessionSummaryDTO> summaries =
-        service.listSessionsByOwner(new OwnerRef.IssueAgent(issueId, agentName));
-
-    assertEquals(1, summaries.size());
-    assertEquals(sessionId.toString(), summaries.getFirst().getSessionId());
-    assertEquals("agent session", summaries.getFirst().getName());
-    verify(runtime).getThreadSnapshot(threadId);
-  }
-
-  /** 绑定存在但 Thread 已不可解析时 fail closed，不返回空列表也不猜测归属。 */
-  @Test
-  void unreadableBoundThreadFailsClosed() {
-    UUID issueId = id(40);
-    String agentName = "executor";
-    UUID threadId = id(41);
-    when(issueAgentOwnership.findBoundThread(new OwnerRef.IssueAgent(issueId, agentName)))
-        .thenReturn(Optional.of(threadId));
-    when(runtime.getThreadSnapshot(threadId))
-        .thenThrow(new HarnessRuntimeNotFoundException("thread " + threadId + " does not exist"));
-
-    assertThrows(
-        HarnessRuntimeNotFoundException.class,
-        () -> service.listSessionsByOwner(new OwnerRef.IssueAgent(issueId, agentName)));
-    verifyNoInteractions(chatSessionRepository);
+  void missingChatPropagatesSpiError() {
+    SessionOwner owner = new SessionOwner("CHAT", id(1).toString());
+    when(ownership.listSessions(owner)).thenThrow(new AiResourceNotFoundException("chat"));
+    assertThrows(AiResourceNotFoundException.class, () -> service.listSessions(owner));
+    verifyNoInteractions(runtime);
   }
 
   /** 预览必须跳过 durable USER {@code <system-reminder>}：注入的上下文提醒不是用户发言。 */
@@ -364,8 +309,7 @@ class HarnessOwnerQueryServiceTest {
   @Test
   void rejectsNullOwnerAndNullIds() {
     // owner 与 id 边界不接受缺失值。
-    assertThrows(NullPointerException.class, () -> service.listSessionsByOwner(null));
-    assertThrows(NullPointerException.class, () -> service.listChatSessions(null));
+    assertThrows(NullPointerException.class, () -> service.listSessions(null));
     assertThrows(NullPointerException.class, () -> service.listThreadSummaries(null));
     assertThrows(NullPointerException.class, () -> service.listSessionEntries(null));
   }

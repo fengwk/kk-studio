@@ -147,7 +147,7 @@ class OpenCliHubClientTest {
     assertNull(transferEncoding.get());
     assertEquals(requestBody.get().length, Long.parseLong(contentLength.get()));
     assertTrue(input.closed);
-    assertTrue(input.maxRequested <= settings.streamBufferBytes());
+    assertTrue(input.maxRequested <= 16 * 1024);
     byte[] body = requestBody.get();
     String text = new String(body, StandardCharsets.ISO_8859_1);
     assertTrue(text.contains("name=\"files\""));
@@ -421,10 +421,6 @@ class OpenCliHubClientTest {
         5_000,
         120_000,
         longPollTimeoutMillis,
-        1024,
-        512 * 1024,
-        4096,
-        65_535,
         OpenCliTestSettings.defaults().gptImage2(),
         OpenCliTestSettings.defaults().seedance());
   }

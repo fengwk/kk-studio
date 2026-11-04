@@ -92,6 +92,7 @@ export function SettingsPage({
         </div>
       </div>
       <ConflictPresenter
+        className="modal-touch-target"
         conflict={editor.conflict}
         onRefresh={reloadPage}
         onClose={editor.dismissConflict}

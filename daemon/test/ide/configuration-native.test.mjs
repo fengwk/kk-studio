@@ -453,7 +453,7 @@ exports.activate = async () => {
       await page.getByRole('button', { name: 'Cancel', exact: true }).click({ timeout: 10_000 })
       await waitUntil(() => replies.has('cancel'), 10_000, 'bridge did not report cancellation')
       assert.equal(replies.get('cancel').ok, false)
-      assert.equal(replies.get('cancel').code, 'DIRTY')
+      assert.equal(replies.get('cancel').code, 'CANCELLED')
       assert.equal(await readFile(file, 'utf8'), 'external newer content')
       stream.write(`${JSON.stringify({ type: 'command', id: 'close', op: 'closeView' })}\n`)
       await page.getByRole('button', { name: /don.t save/i }).click({ timeout: 10_000 })

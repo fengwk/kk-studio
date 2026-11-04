@@ -71,12 +71,11 @@ class HarnessRuntimePendingInteractionTest {
     runtime = HarnessRuntimeTestSupport.runtime(store, clock);
   }
 
-  /** Runtime 原样转换一批只读 sidecar（含名字/边界），空批不查 store，读取不改 Work。 */
+  /** Runtime 原样转换冻结环境和 Work 边界，空批不查 store，读取不改 Work。 */
   @Test
   void toolWaitBatchPreservesNamesDeadlinesAndNulls() {
     ToolBaseline seeded = seedToolBaselineAt(store, T1);
     EnvironmentId environment = EnvironmentId.of(UUID.randomUUID());
-    store.setEnvironmentName(environment, "frozen-env");
     WorkTarget target = new WorkTarget(WorkTargetType.TOOL, seeded.toolId());
     store.transaction(
         tx -> {
@@ -88,12 +87,12 @@ class HarnessRuntimePendingInteractionTest {
     store.forceAvailableAt(target, future);
     var before = store.transaction(tx -> tx.work().find(target)).orElseThrow();
     assertEquals(
-        List.of(new EnvironmentToolWait(seeded.toolId(), environment, false, "frozen-env", future)),
+        List.of(new EnvironmentToolWait(seeded.toolId(), environment, true, false, future)),
         runtime.listEnvironmentToolWaits(List.of(seeded.toolId(), UUID.randomUUID())));
     assertEquals(before, store.transaction(tx -> tx.work().find(target)).orElseThrow());
     store.forceAvailableAt(target, T5);
     assertEquals(
-        List.of(new EnvironmentToolWait(seeded.toolId(), environment, true, "frozen-env", null)),
+        List.of(new EnvironmentToolWait(seeded.toolId(), environment, true, true, null)),
         runtime.listEnvironmentToolWaits(List.of(seeded.toolId())));
     int count = store.transactionCount();
     assertEquals(List.of(), runtime.listEnvironmentToolWaits(List.of()));
@@ -107,17 +106,17 @@ class HarnessRuntimePendingInteractionTest {
   void toolWaitRecordsValidateIdentityAndAllowNullableSidecar() {
     UUID id = UUID.randomUUID();
     assertThrows(
-        NullPointerException.class, () -> new EnvironmentToolWait(null, null, false, null, null));
+        NullPointerException.class, () -> new EnvironmentToolWait(null, null, false, false, null));
     assertThrows(
-        IllegalArgumentException.class, () -> new EnvironmentToolWait(id, null, true, null, null));
+        IllegalArgumentException.class, () -> new EnvironmentToolWait(id, null, true, true, null));
     assertThrows(
         NullPointerException.class,
-        () -> new EnvironmentToolWaitRow(null, null, false, null, null));
+        () -> new EnvironmentToolWaitRow(null, null, false, false, null));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new EnvironmentToolWaitRow(id, null, true, null, null));
-    assertNull(new EnvironmentToolWait(id, null, false, null, null).freshnessAt());
-    assertNull(new EnvironmentToolWaitRow(id, null, false, null, null).environmentName());
+        () -> new EnvironmentToolWaitRow(id, null, true, true, null));
+    assertNull(new EnvironmentToolWait(id, null, false, false, null).workFreshnessAt());
+    assertNull(new EnvironmentToolWaitRow(id, null, false, false, null).environmentId());
   }
 
   /** 在指定时间戳创建带有 READY ToolInvocation 的 TOOL baseline。 */

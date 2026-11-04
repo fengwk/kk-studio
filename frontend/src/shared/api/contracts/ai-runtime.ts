@@ -127,9 +127,7 @@ export type HarnessCommandCreateDTO =
   | { type: 'SET_EXECUTION'; idempotencyKey: string; execution: HarnessExecutionSelectionDTO }
   | { type: 'SET_ENVIRONMENT'; idempotencyKey: string; environmentName: string | null }
 
-export type AgentRuntimeOwnerDTO =
-  | { type: 'CHAT'; chatId: string }
-  | { type: 'ISSUE_AGENT'; issueId: string; agentName: string }
+export type AgentRuntimeOwnerDTO = { kind: string; id: string }
 
 export interface NewSessionCommandTargetDTO {
   type: 'NEW_SESSION'
@@ -168,7 +166,7 @@ export type AgentCommandTargetDTO =
   | NewThreadCommandTargetDTO
   | NewForkedSessionCommandTargetDTO
 
-/** 创建型命令批次：owner、target 与 commands 均使用上方的判别联合。 */
+/** 创建型命令批次：owner 为不透明身份，target 与 commands 使用判别联合。 */
 export interface HarnessCommandBatchDTO {
   owner: AgentRuntimeOwnerDTO
   target: AgentCommandTargetDTO

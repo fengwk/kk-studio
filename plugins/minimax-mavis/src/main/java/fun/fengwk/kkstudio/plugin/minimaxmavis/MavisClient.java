@@ -6,6 +6,9 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.cfg.JsonNodeFeature;
 import tools.jackson.databind.json.JsonMapper;
 
+import fun.fengwk.kkstudio.platform.plugin.support.PluginHttpSupport;
+import fun.fengwk.kkstudio.platform.plugin.support.PluginRedaction;
+
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -23,7 +26,7 @@ import java.util.UUID;
  * <p>它只做协议：登录回调校验、capability catalog 读取、15 项能力的通用请求与 renewal。每次调用最多发送一个 HTTP 请求，不自动 redirect、不自动
  * retry；单次断连或超时的结果视为不确定，由调用方决定后续动作，因为生成类调用是 非幂等的。
  *
- * <p>所有进入错误消息的服务端文本都经 {@link MavisRedaction} 去敏并截断，因此消息可以安全地进入日志与响应。
+ * <p>所有进入错误消息的服务端文本都经 {@link PluginRedaction} 去敏并截断，因此消息可以安全地进入日志与响应。
  */
 public final class MavisClient {
 
@@ -37,10 +40,11 @@ public final class MavisClient {
   private static final int MAX_DETAIL_CHARS = 1_000;
 
   private static final ObjectMapper MAPPER =
-      JsonMapper.builder()
-          // 工具入参与响应是自由 JSON：number 按 BigDecimal 读回并原样写出，避免 1e309 / 1e-324 或高精度小数在 double 中失真。
-          .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
-          .build();
+      PluginHttpSupport.strictJson(
+          JsonMapper.builder()
+              // 工具入参与响应是自由 JSON：number 按 BigDecimal 读回并原样写出，避免 1e309 / 1e-324 或高精度小数在 double 中失真。
+              .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+              .build());
 
   private final MavisHttpTransport transport;
   private final Clock clock;
@@ -153,11 +157,10 @@ public final class MavisClient {
       throw new MavisTransportException(
           context
               + " request failed ("
-              + MavisRedaction.diagnostic(error.getMessage(), accessToken)
-              + ")",
-          error);
+              + PluginRedaction.diagnostic(error.getMessage(), accessToken)
+              + ")");
     }
-    if (response.statusCode() == 401) {
+    if (PluginHttpSupport.isAuthRejected(response.statusCode())) {
       throw new MavisAuthException(MavisAuthException.REJECTED_MESSAGE);
     }
     Optional<JsonNode> rejected = authRejection(response);
@@ -176,7 +179,7 @@ public final class MavisClient {
     try {
       payload = MAPPER.readTree(response.body());
     } catch (JacksonException error) {
-      throw new MavisProtocolException(context + " returned a non-JSON response", error);
+      throw new MavisProtocolException(context + " returned a non-JSON response");
     }
     if (payload == null || !payload.isObject()) {
       throw new MavisProtocolException(context + " response must be a JSON object");
@@ -191,8 +194,7 @@ public final class MavisClient {
   /**
    * 非 2xx 响应里已经证明的认证拒绝。
    *
-   * <p>HTTP 403 本身可能只是权限拒绝，不能一概当成凭据失效；只有 body 里出现已知认证码（{@code 401} / {@code 1004}）才算。无法解析的 body
-   * 保持为普通传输错误。
+   * <p>除 HTTP 401/403 外，非 2xx 正文中的已知认证码（{@code 401} / {@code 1004}）同样作认证拒绝；无法解析的 body 保持为普通传输错误。
    */
   private static Optional<JsonNode> authRejection(MavisHttpResponse response) {
     if (response.statusCode() >= 200 && response.statusCode() < 300) {
@@ -223,7 +225,7 @@ public final class MavisClient {
       String method, String url, String accessToken, String body, Duration timeout) {
     Map<String, String> headers = new LinkedHashMap<>();
     headers.put("User-Agent", USER_AGENT);
-    headers.put("Authorization", "Bearer " + accessToken);
+    headers.put("Authorization", PluginHttpSupport.bearer(accessToken));
     if (body != null) {
       headers.put("Content-Type", "application/json");
     }
@@ -267,7 +269,7 @@ public final class MavisClient {
   }
 
   private static String bounded(String value, String accessToken) {
-    String redacted = MavisRedaction.diagnostic(value, accessToken);
+    String redacted = PluginRedaction.diagnostic(value, accessToken);
     return redacted.length() <= MAX_DETAIL_CHARS
         ? redacted
         : redacted.substring(0, MAX_DETAIL_CHARS);

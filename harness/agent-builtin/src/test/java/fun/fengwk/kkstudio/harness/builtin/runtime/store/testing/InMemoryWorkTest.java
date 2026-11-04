@@ -44,8 +44,6 @@ class InMemoryWorkTest extends HarnessStoreWorkContract {
     readyEnvironments.clear();
     InMemoryHarnessStore store = new InMemoryBuiltinHarnessStore();
     store.setClock(Clock.fixed(CLOCK, ZoneOffset.UTC));
-    store.setEnvironmentReadyLeasePredicate(
-        (environmentId, now) -> readyEnvironments.contains(environmentId.value()));
     return store;
   }
 
@@ -80,13 +78,12 @@ class InMemoryWorkTest extends HarnessStoreWorkContract {
     readyEnvironments.remove(environmentId.value());
   }
 
-  /** boolean 环境谓词没有到期时刻；每调用仍精确输出 Work 最早未来边界，等于 now 即不再定时。 */
+  /** 每调用精确输出 Work 最早未来边界，环境连接状态不影响引擎事实。 */
   @Test
   void toolProjectionUsesFrozenNameAndWorkDeadlineWithBooleanEnvironment() {
     SeededTool seeded = seedTool(store);
     EnvironmentId environment = EnvironmentId.of(UUID.randomUUID());
     InMemoryHarnessStore memory = (InMemoryBuiltinHarnessStore) store;
-    memory.setEnvironmentName(environment, "frozen-environment");
     WorkTarget target = new WorkTarget(WorkTargetType.TOOL, seeded.toolId());
     inTransaction(
         store,
@@ -96,17 +93,17 @@ class InMemoryWorkTest extends HarnessStoreWorkContract {
         });
     seedReadyEnvironmentLease(environment);
     var online = toolWait(seeded);
-    assertEquals("frozen-environment", online.environmentName());
-    assertFalse(online.waitingForEnvironment());
-    assertNull(online.freshnessAt());
+    assertEquals(environment, online.environmentId());
+    assertTrue(online.workAvailable());
+    assertNull(online.workFreshnessAt());
     Instant due = CLOCK.plusSeconds(60);
     memory.forceAvailableAt(target, due);
-    assertEquals(due, toolWait(seeded).freshnessAt());
+    assertEquals(due, toolWait(seeded).workFreshnessAt());
     expireReadyEnvironmentLease(environment);
     memory.setNow(due);
     var expired = toolWait(seeded);
-    assertTrue(expired.waitingForEnvironment());
-    assertNull(expired.freshnessAt());
+    assertTrue(expired.workAvailable());
+    assertNull(expired.workFreshnessAt());
     memory.setRouteReadyPredicate((node, env, now) -> true);
     seedReadyEnvironmentLease(environment);
     ClaimedWork claim =
@@ -123,15 +120,15 @@ class InMemoryWorkTest extends HarnessStoreWorkContract {
     expireReadyEnvironmentLease(environment);
     Instant nextDue = due.plusSeconds(120);
     memory.forceAvailableAt(target, nextDue);
-    assertEquals(nextDue, toolWait(seeded).freshnessAt());
+    assertEquals(nextDue, toolWait(seeded).workFreshnessAt());
     memory.forceAvailableAt(target, Instant.EPOCH);
     var leased = toolWait(seeded);
-    assertFalse(leased.waitingForEnvironment());
-    assertEquals(claim.leaseUntil(), leased.freshnessAt());
+    assertFalse(leased.workAvailable());
+    assertEquals(claim.leaseUntil(), leased.workFreshnessAt());
     memory.setNow(claim.leaseUntil());
     var leaseExpired = toolWait(seeded);
-    assertTrue(leaseExpired.waitingForEnvironment());
-    assertNull(leaseExpired.freshnessAt());
+    assertTrue(leaseExpired.workAvailable());
+    assertNull(leaseExpired.workFreshnessAt());
   }
 
   private EnvironmentToolWaitRow toolWait(SeededTool seeded) {

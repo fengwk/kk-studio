@@ -670,6 +670,21 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
     return Boolean.TRUE.equals(exists);
   }
 
+  /** 返回数据库时间下仍有效的 READY 租约截止点，用于读取模型的自然到期回读。 */
+  public Optional<Instant> findReadyLeaseUntil(EnvironmentId environmentId) {
+    Objects.requireNonNull(environmentId, "environmentId");
+    return jdbcClient
+        .sql(
+            """
+            select lease_until from environment_connection
+            where environment_id = :environmentId
+              and status = 'READY' and lease_until > statement_timestamp()
+            """)
+        .param("environmentId", environmentId.value())
+        .query((rs, rowNumber) -> rs.getTimestamp("lease_until").toInstant())
+        .optional();
+  }
+
   /** 数据库现在时判定当前节点是否持有有效的 READY 路由租约（用于本地 capability INVOKE 准入）。 */
   @Override
   public boolean holdsReadyLease(EnvironmentId environmentId, UUID leaseToken) {

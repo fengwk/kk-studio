@@ -25,8 +25,7 @@ it('renders environment waits read-only without approval or questionnaire action
   const item: InteractionDTO = {
     type: 'ENVIRONMENT_WAIT', rootThreadId: 'root', environmentId: 'env',
     environmentName: 'archlinux', waitingCount: 2, createTime: 1780000000,
-    owner: { type: 'CHAT', chatId: 'chat', chatTitle: 'Chat', issueId: null,
-      issueTitle: null, agentName: null, rootThreadName: 'Root' },
+    owner: { kind: 'CHAT', id: 'chat', title: 'Chat', link: '/chats/chat' },
     interactionId: null, status: null, threadId: null, sessionId: null,
     toolCallId: null, toolName: null, argumentsJson: null, approvalJson: null,
   }
@@ -50,8 +49,7 @@ it('renders and submits a long questionnaire without truncating questions, optio
     argumentsJson: LONG_QUESTIONNAIRE_JSON,
     approvalJson: null, environmentId: null, environmentName: null, waitingCount: null,
     createTime: 1780000000,
-    owner: { type: 'CHAT', chatId: 'chat', chatTitle: 'Chat', issueId: null,
-      issueTitle: null, agentName: null, rootThreadName: 'Root' },
+    owner: { kind: 'CHAT', id: 'chat', title: 'Chat', link: '/chats/chat' },
   }
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   render(

@@ -89,7 +89,7 @@ export function SyncImportModal({
 
   return (
     <Dialog
-      className="settings-sync-modal"
+      className="settings-sync-modal modal-touch-target"
       title={t('settings.sync.import.title')}
       pending={pending}
       onClose={onClose}

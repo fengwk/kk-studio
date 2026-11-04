@@ -8,8 +8,8 @@ import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.api.thread.StopCommand;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionFacts;
-import fun.fengwk.kkstudio.platform.orchestration.OwnerRef;
 import fun.fengwk.kkstudio.platform.orchestration.SessionDeletionOrchestrator;
+import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
 import fun.fengwk.kkstudio.project.domain.IssueStateTransitions;
 import fun.fengwk.kkstudio.project.domain.ProjectStateCode;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowReservedState;
@@ -29,6 +29,7 @@ import fun.fengwk.kkstudio.project.repo.IssueRepository;
 import fun.fengwk.kkstudio.project.repo.IssueRunRepository;
 import fun.fengwk.kkstudio.project.repo.IssueStageBudgetRepository;
 import fun.fengwk.kkstudio.project.service.IssueActivityIdempotency.Identity;
+import fun.fengwk.kkstudio.project.service.IssueActivityIdempotency.ReceiptLock;
 import fun.fengwk.kkstudio.work.DurableWorkStore;
 
 import java.nio.charset.StandardCharsets;
@@ -104,13 +105,14 @@ public class IssueLifecycleService {
             reason, "reason", ProjectValidationUtils.MAX_LARGE_TEXT_BYTES);
     Identity identity =
         IssueActivityIdempotency.identity(IssueActivityKind.CONTROL, "BLOCK", key, validReason);
-    if (mutationSupport.replayed(issueId, identity)) {
-      return mutationSupport.currentIssue(issueId);
+    ReceiptLock<IssueMutationSupport.Locked> receipt =
+        mutationSupport.lockUnlessReplayed(issueId, identity);
+    if (receipt.activity() != null) {
+      return receipt.locked() == null
+          ? mutationSupport.currentIssue(issueId)
+          : receipt.locked().issue();
     }
-    IssueMutationSupport.Locked locked = mutationSupport.lockOwner(issueId);
-    if (mutationSupport.replayedUnderLock(locked.issue(), identity)) {
-      return locked.issue();
-    }
+    IssueMutationSupport.Locked locked = receipt.locked();
     mutationSupport.requireMutable(locked, false);
     mutationSupport.requireVersion(locked, expectedVersion);
     ProjectStateCode from = ProjectStateCode.of(locked.issue().getState());
@@ -136,13 +138,14 @@ public class IssueLifecycleService {
     String key = ProjectValidationUtils.requireRequestKey(requestKey);
     Identity identity =
         IssueActivityIdempotency.identity(IssueActivityKind.CONTROL, "RECOVER", key);
-    if (mutationSupport.replayed(issueId, identity)) {
-      return mutationSupport.currentIssue(issueId);
+    ReceiptLock<IssueMutationSupport.Locked> receipt =
+        mutationSupport.lockUnlessReplayed(issueId, identity);
+    if (receipt.activity() != null) {
+      return receipt.locked() == null
+          ? mutationSupport.currentIssue(issueId)
+          : receipt.locked().issue();
     }
-    IssueMutationSupport.Locked locked = mutationSupport.lockOwner(issueId);
-    if (mutationSupport.replayedUnderLock(locked.issue(), identity)) {
-      return locked.issue();
-    }
+    IssueMutationSupport.Locked locked = receipt.locked();
     mutationSupport.requireMutable(locked, false);
     mutationSupport.requireVersion(locked, expectedVersion);
     Issue issue = locked.issue();
@@ -183,13 +186,14 @@ public class IssueLifecycleService {
     Identity identity =
         IssueActivityIdempotency.identity(
             IssueActivityKind.CONTROL, "PAUSE", key, reason.name(), validDetail);
-    if (mutationSupport.replayed(issueId, identity)) {
-      return mutationSupport.currentIssue(issueId);
+    ReceiptLock<IssueMutationSupport.Locked> receipt =
+        mutationSupport.lockUnlessReplayed(issueId, identity);
+    if (receipt.activity() != null) {
+      return receipt.locked() == null
+          ? mutationSupport.currentIssue(issueId)
+          : receipt.locked().issue();
     }
-    IssueMutationSupport.Locked locked = mutationSupport.lockOwner(issueId);
-    if (mutationSupport.replayedUnderLock(locked.issue(), identity)) {
-      return locked.issue();
-    }
+    IssueMutationSupport.Locked locked = receipt.locked();
     mutationSupport.requireMutable(locked, false);
     mutationSupport.requireVersion(locked, expectedVersion);
     ObjectNode data = mutationSupport.newData();
@@ -208,13 +212,14 @@ public class IssueLifecycleService {
     Objects.requireNonNull(issueId, "issueId");
     String key = ProjectValidationUtils.requireRequestKey(requestKey);
     Identity identity = IssueActivityIdempotency.identity(IssueActivityKind.CONTROL, "RESUME", key);
-    if (mutationSupport.replayed(issueId, identity)) {
-      return mutationSupport.currentIssue(issueId);
+    ReceiptLock<IssueMutationSupport.Locked> receipt =
+        mutationSupport.lockUnlessReplayed(issueId, identity);
+    if (receipt.activity() != null) {
+      return receipt.locked() == null
+          ? mutationSupport.currentIssue(issueId)
+          : receipt.locked().issue();
     }
-    IssueMutationSupport.Locked locked = mutationSupport.lockOwner(issueId);
-    if (mutationSupport.replayedUnderLock(locked.issue(), identity)) {
-      return locked.issue();
-    }
+    IssueMutationSupport.Locked locked = receipt.locked();
     mutationSupport.requireMutable(locked, false);
     mutationSupport.requireVersion(locked, expectedVersion);
     ObjectNode data = mutationSupport.newData();
@@ -248,13 +253,14 @@ public class IssueLifecycleService {
                 detail, "detail", ProjectValidationUtils.MAX_LARGE_TEXT_BYTES);
     Identity identity =
         IssueActivityIdempotency.identity(IssueActivityKind.CONTROL, "STOP", key, validDetail);
-    if (mutationSupport.replayed(issueId, identity)) {
-      return mutationSupport.currentIssue(issueId);
+    ReceiptLock<IssueMutationSupport.Locked> receipt =
+        mutationSupport.lockUnlessReplayed(issueId, identity);
+    if (receipt.activity() != null) {
+      return receipt.locked() == null
+          ? mutationSupport.currentIssue(issueId)
+          : receipt.locked().issue();
     }
-    IssueMutationSupport.Locked locked = mutationSupport.lockOwner(issueId);
-    if (mutationSupport.replayedUnderLock(locked.issue(), identity)) {
-      return locked.issue();
-    }
+    IssueMutationSupport.Locked locked = receipt.locked();
     mutationSupport.requireMutable(locked, false);
     mutationSupport.requireVersion(locked, expectedVersion);
     IssueRun activeRun = issueRunRepository.lockActiveByIssueId(issueId);
@@ -290,15 +296,26 @@ public class IssueLifecycleService {
     mutationSupport.persist(locked, expectedVersion);
     if (outcomeUnknown) {
       // 在途副作用无法安全判定：按失败收尾并保留 ERROR 暂停，原因明确声明结果未知；不自动重试，需显式 resumeIssue。
-      issueRunService.failRun(
+      issueRunService.finishRun(
           activeRun.getId(),
           activeRun.getVersion(),
           key + ":unknown",
+          IssueRunStatus.FAILED,
           stopHead,
+          null,
+          null,
           OUTCOME_UNKNOWN_FAILURE);
       return mutationSupport.currentIssue(issueId);
     }
-    issueRunService.cancelRun(activeRun.getId(), activeRun.getVersion(), key + ":cancel", stopHead);
+    issueRunService.finishRun(
+        activeRun.getId(),
+        activeRun.getVersion(),
+        key + ":cancel",
+        IssueRunStatus.CANCELLED,
+        stopHead,
+        null,
+        null,
+        null);
     return mutationSupport.currentIssue(issueId);
   }
 
@@ -327,7 +344,8 @@ public class IssueLifecycleService {
     stageBudgetRepository.deleteByIssueId(issueId);
     List<IssueAgentThread> bindings = issueAgentThreadRepository.listByIssueId(issueId);
     for (IssueAgentThread binding : bindings) {
-      sessionDeletion.deleteSessionsByOwner(new OwnerRef.IssueAgent(issueId, binding.agentName()));
+      sessionDeletion.deleteSessionsByOwner(
+          ProjectSessionOwnership.owner(issueId, binding.agentName()));
     }
     if (!issueRepository.deleteById(issueId, expectedVersion)) {
       throw new ProjectVersionConflictException(
@@ -344,13 +362,14 @@ public class IssueLifecycleService {
     Identity identity =
         IssueActivityIdempotency.identity(
             IssueActivityKind.STATE_CHANGE, "TRANSITION", key, toState);
-    if (mutationSupport.replayed(issueId, identity)) {
-      return mutationSupport.currentIssue(issueId);
+    ReceiptLock<IssueMutationSupport.Locked> receipt =
+        mutationSupport.lockUnlessReplayed(issueId, identity);
+    if (receipt.activity() != null) {
+      return receipt.locked() == null
+          ? mutationSupport.currentIssue(issueId)
+          : receipt.locked().issue();
     }
-    IssueMutationSupport.Locked locked = mutationSupport.lockOwner(issueId);
-    if (mutationSupport.replayedUnderLock(locked.issue(), identity)) {
-      return locked.issue();
-    }
+    IssueMutationSupport.Locked locked = receipt.locked();
     mutationSupport.requireMutable(locked, false);
     mutationSupport.requireVersion(locked, expectedVersion);
     if (issueRunRepository.lockActiveByIssueId(issueId) != null) {
@@ -382,13 +401,14 @@ public class IssueLifecycleService {
     String key = ProjectValidationUtils.requireRequestKey(requestKey);
     Identity identity =
         IssueActivityIdempotency.identity(IssueActivityKind.STATE_CHANGE, "REOPEN", key);
-    if (mutationSupport.replayed(issueId, identity)) {
-      return mutationSupport.currentIssue(issueId);
+    ReceiptLock<IssueMutationSupport.Locked> receipt =
+        mutationSupport.lockUnlessReplayed(issueId, identity);
+    if (receipt.activity() != null) {
+      return receipt.locked() == null
+          ? mutationSupport.currentIssue(issueId)
+          : receipt.locked().issue();
     }
-    IssueMutationSupport.Locked locked = mutationSupport.lockOwner(issueId);
-    if (mutationSupport.replayedUnderLock(locked.issue(), identity)) {
-      return locked.issue();
-    }
+    IssueMutationSupport.Locked locked = receipt.locked();
     mutationSupport.requireMutable(locked, false);
     mutationSupport.requireVersion(locked, expectedVersion);
     if (issueRunRepository.lockActiveByIssueId(issueId) != null) {

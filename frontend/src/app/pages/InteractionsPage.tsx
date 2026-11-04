@@ -1,17 +1,13 @@
 import {
-  Bot,
   CheckCircle2,
   ExternalLink,
   LoaderCircle,
-  MessageSquare,
   RotateCw,
-  Workflow,
 } from 'lucide-react'
 import { useNavigate } from 'react-router'
 import { Button } from '@/shared/ui/controls/Button'
 import { StateBlock } from '@/shared/ui/feedback/StateBlock'
 import type { InteractionDTO } from '@/shared/api/generated/contracts'
-import { projectsApi } from '@/features/projects/projects-api'
 import { useI18n } from '@/shared/i18n'
 import { interactionIdentity } from '@/shared/lib/interactions'
 import { InteractionCardBody } from '@/features/thread/runtime/interactions/InteractionCardBody'
@@ -33,62 +29,28 @@ export function InteractionsPage() {
     removeItem,
   } = useInteractionsController()
 
-  const handleOpenIssueSource = async (issueId: string, threadId: string) => {
-    try {
-      const issueDetail = await projectsApi.getIssue(issueId)
-      const projectId = issueDetail.issue.projectId
-      navigate(`/projects/${encodeURIComponent(projectId)}?issue=${encodeURIComponent(issueId)}&thread=${encodeURIComponent(threadId)}`)
-    } catch {
-      navigate('/projects')
-    }
-  }
-
   // 全局交互中心把 owner 导航到执行根：根面板统一承接审批与问卷，来源身份仍是原始调用。
   const renderOwnerSource = (item: InteractionDTO) => {
     const owner = item.owner
-    if (owner.type === 'CHAT' && owner.chatId) {
+    const link = owner.link
+    if (link && /^\/(?!\/)/.test(link) && !link.includes('\\') && !/\p{Cc}/u.test(link)) {
+      const url = new URL(link, window.location.origin)
+      url.searchParams.set('thread', item.rootThreadId)
       return (
         <Button
           variant="inline"
-          onClick={() => navigate(`/chats/${encodeURIComponent(owner.chatId!)}?thread=${encodeURIComponent(item.rootThreadId)}`)}
-          title={t('ai.interaction.openChatSource')}
+          onClick={() => navigate(`${url.pathname}${url.search}${url.hash}`)}
+          title={t('ai.interaction.viewSource')}
         >
-          <MessageSquare size={14} aria-hidden="true" />
-          <span>{owner.chatTitle ?? t('ai.interaction.viewSource')}</span>
-          {owner.rootThreadName ? <span>{owner.rootThreadName}</span> : null}
+          <span>{owner.title ?? t('ai.interaction.viewSource')}</span>
           <ExternalLink size={12} aria-hidden="true" />
         </Button>
       )
     }
-
-    if (owner.type === 'ISSUE_AGENT' && owner.issueId) {
+    if (owner.title) {
       return (
-        <Button
-          variant="inline"
-          onClick={() => void handleOpenIssueSource(owner.issueId!, item.rootThreadId)}
-          title={t('ai.interaction.openIssueSource')}
-        >
-          <Workflow size={14} aria-hidden="true" />
-          <span>{owner.issueTitle ?? t('ai.interaction.viewSource')}</span>
-          {owner.rootThreadName ? <span>{owner.rootThreadName}</span> : null}
-          {owner.agentName ? (
-            <span className="interaction-agent-badge">{owner.agentName}</span>
-          ) : null}
-          <ExternalLink size={12} aria-hidden="true" />
-        </Button>
-      )
-    }
-
-    if (owner.type === 'AGENT_TASK') {
-      // 独立任务没有产品页面：只标明来源，审批与作答直接在本页完成。
-      return (
-        <span className="interaction-task-source" title={t('ai.interaction.sourceAgentTask')}>
-          <Bot size={14} aria-hidden="true" />
-          <span>{t('ai.interaction.sourceAgentTask')}</span>
-          {owner.rootThreadName ? <span>{owner.rootThreadName}</span> : null}
-          {owner.agentName ? (
-            <span className="interaction-agent-badge">{owner.agentName}</span>
-          ) : null}
+        <span className="interaction-task-source">
+          <span>{owner.title}</span>
         </span>
       )
     }

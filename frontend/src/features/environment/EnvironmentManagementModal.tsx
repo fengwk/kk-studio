@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Dialog } from '@/shared/ui/overlays/Dialog'
+import { Button } from '@/shared/ui/controls/Button'
 import { useI18n } from '@/shared/i18n'
 import { environmentService } from '@/features/environment/environment-service'
 import { queryKeys } from '@/shared/lib/query-keys'
@@ -36,7 +37,7 @@ export function EnvironmentManagementModal({
 
   return (
     <Dialog
-      className="env-management-modal-card"
+      className="env-management-modal-card modal-touch-target"
       title={`${t('ai.environment.managementTitle')} - ${environment.name}`}
       onClose={onClose}
     >
@@ -77,6 +78,9 @@ export function EnvironmentManagementModal({
               </div>
             )}
           </section>
+        </div>
+        <div className="modal-footer">
+          <Button variant="ghost" onClick={onClose}>{t('shared.close')}</Button>
         </div>
     </Dialog>
   )

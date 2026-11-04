@@ -20,9 +20,6 @@ import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.spi.store.UuidOrder;
-import fun.fengwk.kkstudio.platform.chat.ChatRepository;
-import fun.fengwk.kkstudio.platform.chat.ChatSessionRepository;
-import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessExecutionSelectionDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionSummaryDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadSummaryDTO;
@@ -35,63 +32,29 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
-/**
- * 产品 owner 共用的 Harness Session 查询用例。
- *
- * <p>owner 关系只负责定位 Session：Chat 直接持有 {@code chat_session}；Issue+Agent 先解析稳定 Thread 绑定，再由该 Thread
- * 解析唯一 Session。Session/Thread 的事实统一从 {@link HarnessRuntime} 读取（Session 名称与创建时间来自 durable {@code
- * Session}，Thread 名称来自 durable {@code ThreadState}）；不引入 Session title 或 Thread status 的冗余持久化字段。
- */
+/** 通过 owner SPI 定位 Session，并从 Harness Runtime 投影 Session 和 Thread 摘要。 */
 @Service
 public class HarnessOwnerQueryService {
 
-  private final ChatRepository chatRepository;
-  private final ChatSessionRepository chatSessionRepository;
-  private final ObjectProvider<IssueAgentOwnership> issueAgentOwnership;
+  private final List<SessionOwnership> ownerships;
   private final ObjectProvider<HarnessRuntime> runtimes;
 
   public HarnessOwnerQueryService(
-      ChatRepository chatRepository,
-      ChatSessionRepository chatSessionRepository,
-      ObjectProvider<IssueAgentOwnership> issueAgentOwnership,
-      ObjectProvider<HarnessRuntime> runtimes) {
-    this.chatRepository = Objects.requireNonNull(chatRepository, "chatRepository");
-    this.chatSessionRepository =
-        Objects.requireNonNull(chatSessionRepository, "chatSessionRepository");
-    this.issueAgentOwnership = Objects.requireNonNull(issueAgentOwnership, "issueAgentOwnership");
+      List<SessionOwnership> ownerships, ObjectProvider<HarnessRuntime> runtimes) {
+    this.ownerships = List.copyOf(ownerships);
     this.runtimes = Objects.requireNonNull(runtimes, "runtimes");
   }
 
-  /** 返回 Chat owner 的 Session 摘要，关系顺序保持最近归属优先。 */
-  public List<HarnessSessionSummaryDTO> listChatSessions(UUID chatId) {
-    Objects.requireNonNull(chatId, "chatId");
-    if (chatRepository.getById(chatId) == null) {
-      throw new AiResourceNotFoundException("chat");
-    }
-    return listSessionSummaries(chatSessionRepository.listSessionIds(chatId));
-  }
-
-  /** 统一按 owner 查询 Session 摘要；owner 无法定位时确定性拒绝，绝不返回其他归属的 Session。 */
-  public List<HarnessSessionSummaryDTO> listSessionsByOwner(OwnerRef owner) {
+  /** 按 owner SPI 返回 Session 摘要，保持 SPI 返回的顺序。 */
+  public List<HarnessSessionSummaryDTO> listSessions(SessionOwner owner) {
     Objects.requireNonNull(owner, "owner");
-    return switch (owner) {
-      case OwnerRef.Chat chat -> listChatSessions(chat.chatId());
-      case OwnerRef.IssueAgent issueAgent -> listIssueAgentSessions(issueAgent);
-    };
-  }
-
-  /**
-   * 返回 Issue+Agent 稳定归属持有的 Session 摘要：绑定必须存在，Session 只能由绑定 Thread 解析。
-   *
-   * <p>绑定缺失或 Thread 不可解析都是确定性失败，不能回退为“空列表”或枚举同 Session 的其他 Thread。
-   */
-  private List<HarnessSessionSummaryDTO> listIssueAgentSessions(OwnerRef.IssueAgent owner) {
-    UUID threadId =
-        requireIssueAgentOwnership()
-            .findBoundThread(owner)
-            .orElseThrow(() -> new AiResourceNotFoundException("issue_agent_thread"));
-    UUID sessionId = requireRuntime().getThreadSnapshot(threadId).thread().sessionId();
-    return listSessionSummaries(List.of(sessionId));
+    List<SessionOwnership> matches =
+        ownerships.stream().filter(ownership -> owner.kind().equals(ownership.kind())).toList();
+    if (matches.size() != 1) {
+      throw new IllegalArgumentException(
+          "Unknown or ambiguous session owner kind: " + owner.kind());
+    }
+    return listSessionSummaries(matches.getFirst().listSessions(owner));
   }
 
   /** 返回一个 Session 的 Thread 摘要，状态与 Model 均从同一 snapshot 派生，名称来自 durable ThreadState。 */
@@ -265,13 +228,5 @@ public class HarnessOwnerQueryService {
       throw new IllegalStateException("harness runtime is not available in this deployment");
     }
     return runtime;
-  }
-
-  private IssueAgentOwnership requireIssueAgentOwnership() {
-    IssueAgentOwnership ownership = issueAgentOwnership.getIfAvailable();
-    if (ownership == null) {
-      throw new IllegalStateException("Issue agent owners require the Project application");
-    }
-    return ownership;
   }
 }

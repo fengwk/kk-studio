@@ -23,6 +23,7 @@ import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionConfigVali
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionReferenceResolver;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionService;
+import fun.fengwk.kkstudio.platform.catalog.definition.BuiltinAgentExecutionValidator;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpDiscoveryStatus;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServer;
@@ -44,7 +45,6 @@ import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
 import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.platform.environment.Environment;
 import fun.fengwk.kkstudio.platform.environment.RegistrationTokens;
-import fun.fengwk.kkstudio.platform.harness.builtin.BuiltinAgentExecutionValidator;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthSpec;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfig;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfigSchema;
@@ -128,7 +128,8 @@ final class ConfigSyncFixtures {
           mock(AgentDefinitionConfigValidator.class),
           AGENT_CONFIG_CODEC,
           EDITABLE_SUPPORT,
-          mock(PluginAgentDependencies.class));
+          mock(PluginAgentDependencies.class),
+          List.of());
 
   private static DriverRegistry builtinDrivers() {
     AgentDriver driver = mock(AgentDriver.class);
@@ -218,7 +219,6 @@ final class ConfigSyncFixtures {
     config.setTools(tools);
     config.setSkills(skills);
     config.setSubagents(subagents);
-    config.setInheritParentEnvironment(Boolean.TRUE);
     return config;
   }
 

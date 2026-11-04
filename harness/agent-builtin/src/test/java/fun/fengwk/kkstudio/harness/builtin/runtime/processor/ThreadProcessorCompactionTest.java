@@ -595,7 +595,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
             new BranchSettings(
                 "compaction",
                 BuiltinExecution.of(ThreadProcessorTestSupport.builtinExecutionModel()),
-                branchSettings().environmentName(),
+                null,
                 null));
     CompactionPreparation historyPrep = historyPreparation();
     CompactionStart child =

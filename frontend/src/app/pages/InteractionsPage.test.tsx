@@ -8,9 +8,7 @@ import { harnessService } from '@/shared/api/harness-service'
 import { ApplicationEventProvider } from '@/shared/app-events'
 import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
 import { setLocale } from '@/shared/i18n'
-import { projectsApi } from '@/features/projects/projects-api'
 import { InteractionsPage } from './InteractionsPage'
-import type { IssueDetailDTO } from '@/shared/api/generated/contracts'
 
 const mockedNavigate = vi.fn()
 vi.mock('react-router', async () => {
@@ -99,15 +97,7 @@ describe('InteractionsPage', () => {
           threadId: 'th-3',
           rootThreadId: 'th-3',
           sessionId: 'sess-3',
-          owner: {
-            type: 'AGENT_TASK',
-            chatId: null,
-            chatTitle: null,
-            issueId: null,
-            issueTitle: null,
-            agentName: 'reporter',
-            rootThreadName: '夜间报告',
-          },
+          owner: { kind: 'AGENT_TASK', id: 'th-3', title: 'reporter', link: null },
           toolCallId: 'call-3',
           toolName: 'bash',
           argumentsJson: '{"command":"ls"}',
@@ -125,9 +115,8 @@ describe('InteractionsPage', () => {
 
     render(<InteractionsPage />, { wrapper })
 
-    expect(await screen.findByText('夜间报告')).toBeInTheDocument()
-    expect(screen.getByText('reporter')).toBeInTheDocument()
-    expect(screen.getByTitle('Agent 任务')).toBeInTheDocument()
+    expect(await screen.findByText('reporter')).toBeInTheDocument()
+    expect(screen.getByText('reporter').closest('button')).toBeNull()
     expect(screen.getByRole('button', { name: '允许' })).toBeInTheDocument()
     expect(mockedNavigate).not.toHaveBeenCalled()
   })
@@ -168,15 +157,7 @@ describe('InteractionsPage', () => {
           threadId: 'th-1',
           rootThreadId: 'root-th-1',
           sessionId: 'sess-1',
-          owner: {
-            type: 'CHAT',
-            chatId: 'chat-abc',
-            chatTitle: '产品对话',
-            issueId: null,
-            issueTitle: null,
-            agentName: null,
-            rootThreadName: '根线程',
-          },
+          owner: { kind: 'CHAT', id: 'chat-abc', title: '产品对话', link: '/chats/chat-abc' },
           toolCallId: 'call-1',
           toolName: 'ask_user',
           argumentsJson: JSON.stringify({
@@ -195,15 +176,8 @@ describe('InteractionsPage', () => {
           threadId: 'th-2',
           rootThreadId: 'root-th-2',
           sessionId: 'sess-2',
-          owner: {
-            type: 'ISSUE_AGENT',
-            chatId: null,
-            chatTitle: null,
-            issueId: 'issue-101',
-            issueTitle: '修复缺陷',
-            agentName: 'architect',
-            rootThreadName: '根线程',
-          },
+          owner: { kind: 'ISSUE_AGENT', id: 'issue-101:architect', title: '修复缺陷',
+            link: '/projects/proj-xyz?issue=issue-101&thread=old#details' },
           toolCallId: 'call-2',
           toolName: 'write',
           argumentsJson: '{"path":"main.ts"}',
@@ -237,26 +211,15 @@ describe('InteractionsPage', () => {
     expect(screen.getByText('写代码')).toBeInTheDocument()
 
     // 点击 Chat 来源按钮，验证跳转至目标 Chat 并定位到 thread
-    const chatSourceBtn = screen.getByTitle('打开对话')
+    const chatSourceBtn = screen.getByRole('button', { name: '产品对话' })
     fireEvent.click(chatSourceBtn)
     expect(mockedNavigate).toHaveBeenCalledWith('/chats/chat-abc?thread=root-th-1')
 
-    // 测试意图：验证点击 ISSUE_AGENT 来源时通过 query issue 解析 projectId 并精准跳转至 /projects/{id}?issue={id}&thread={threadId}
-    vi.spyOn(projectsApi, 'getIssue').mockResolvedValue({
-      issue: {
-        id: 'issue-101',
-        projectId: 'proj-xyz',
-        title: 'Fix issue',
-        description: '',
-        state: 'IN_PROGRESS',
-        version: '1',
-      },
-    } as unknown as IssueDetailDTO)
-
-    const issueSourceBtn = screen.getByTitle('打开任务对话')
+    // 服务器提供的查询参数与片段必须保留，旧 thread 则替换为执行根。
+    const issueSourceBtn = screen.getByRole('button', { name: '修复缺陷' })
     fireEvent.click(issueSourceBtn)
     await waitFor(() => {
-      expect(mockedNavigate).toHaveBeenCalledWith('/projects/proj-xyz?issue=issue-101&thread=root-th-2')
+      expect(mockedNavigate).toHaveBeenCalledWith('/projects/proj-xyz?issue=issue-101&thread=root-th-2#details')
     })
     // 审批仍写原始调用并只移除完成的条目，不影响问卷。
     const decision = vi.spyOn(harnessService, 'decideApproval').mockResolvedValue({
@@ -290,7 +253,9 @@ describe('InteractionsPage', () => {
     expect(screen.getByText('你选择哪个？')).toBeInTheDocument()
   })
 
-  it('navigates to /projects when getIssue fails', async () => {
+  // 不可信链接不可成为导航入口；title 仍可作为非交互来源显示。
+  it.each(['https://example.com/path', 'javascript:alert(1)', 'relative/path', '//example.com/path', '/\\example.com/path', '/x\n/y'])(
+    'does not navigate to an unsafe source link %s', async (link) => {
     vi.spyOn(interactionService, 'listInteractions').mockResolvedValue({
       items: [
         {
@@ -300,15 +265,7 @@ describe('InteractionsPage', () => {
           threadId: 'th-err',
           rootThreadId: 'root-th-err',
           sessionId: 'sess-err',
-          owner: {
-            type: 'ISSUE_AGENT',
-            chatId: null,
-            chatTitle: null,
-            issueId: 'issue-missing',
-            issueTitle: null,
-            agentName: 'coder',
-            rootThreadName: null,
-          },
+          owner: { kind: 'ISSUE_AGENT', id: 'issue-missing:coder', title: '来源', link },
           toolCallId: 'call-err',
           toolName: 'ask_user',
           argumentsJson: '{}',
@@ -323,17 +280,11 @@ describe('InteractionsPage', () => {
       total: 1,
       freshnessAt: null,
     })
-    vi.spyOn(projectsApi, 'getIssue').mockRejectedValue(new Error('not found'))
-
     render(<InteractionsPage />, { wrapper })
-    await waitFor(() => {
-      expect(screen.getByTitle('打开任务对话')).toBeInTheDocument()
-    })
-
-    fireEvent.click(screen.getByTitle('打开任务对话'))
-    await waitFor(() => {
-      expect(mockedNavigate).toHaveBeenCalledWith('/projects')
-    })
+    const source = await screen.findByText('来源')
+    expect(source.closest('button')).toBeNull()
+    fireEvent.click(source)
+    expect(mockedNavigate).not.toHaveBeenCalled()
   })
 
   it('supports refresh and load more, and renders environment waits read-only without raw fallback', async () => {
@@ -358,15 +309,7 @@ describe('InteractionsPage', () => {
               environmentId: 'env-1',
               environmentName: 'archlinux',
               waitingCount: 3,
-              owner: {
-                type: 'CHAT',
-                chatId: 'c1',
-                chatTitle: null,
-                issueId: null,
-                issueTitle: null,
-                agentName: null,
-                rootThreadName: null,
-              },
+              owner: { kind: 'CHAT', id: 'c1', title: null, link: '/chats/c1' },
             },
             {
               type: 'APPROVAL',
@@ -375,15 +318,7 @@ describe('InteractionsPage', () => {
               threadId: 'th-appr',
               rootThreadId: 'root-th-appr',
               sessionId: 'sess-appr',
-              owner: {
-                type: 'CHAT',
-                chatId: 'c1',
-                chatTitle: null,
-                issueId: null,
-                issueTitle: null,
-                agentName: null,
-                rootThreadName: null,
-              },
+              owner: { kind: 'CHAT', id: 'c1', title: null, link: '/chats/c1' },
               toolCallId: 'call-appr',
               toolName: 'shell',
               argumentsJson: '{"cmd":"ls"}',
@@ -411,15 +346,7 @@ describe('InteractionsPage', () => {
             threadId: 'th-more',
             rootThreadId: 'root-th-more',
             sessionId: 'sess-more',
-            owner: {
-              type: 'CHAT',
-              chatId: 'c1',
-              chatTitle: null,
-              issueId: null,
-              issueTitle: null,
-              agentName: null,
-              rootThreadName: null,
-            },
+            owner: { kind: 'CHAT', id: 'c1', title: null, link: '/chats/c1' },
             toolCallId: 'call-more',
             toolName: 'ask_user',
             argumentsJson: JSON.stringify({ questions: [{ question: 'More Q', options: [] }] }),

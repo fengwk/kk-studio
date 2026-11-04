@@ -30,11 +30,11 @@ import fun.fengwk.kkstudio.harness.api.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.codec.HistoryEntryPayloadJsonCodec;
-import fun.fengwk.kkstudio.platform.orchestration.OwnerRef;
 import fun.fengwk.kkstudio.platform.orchestration.SessionDeletionOrchestrator;
 import fun.fengwk.kkstudio.platform.storage.StorageMaintenance;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
+import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
 import fun.fengwk.kkstudio.project.error.ProjectValidationException;
 import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.IssueRun;
@@ -44,6 +44,7 @@ import fun.fengwk.kkstudio.project.service.IssueEvidenceService;
 import fun.fengwk.kkstudio.project.service.IssueLifecycleService;
 import fun.fengwk.kkstudio.project.service.IssueRunService;
 import fun.fengwk.kkstudio.project.service.ProjectService;
+import fun.fengwk.kkstudio.project.service.ProjectSessionOwnership;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 import fun.fengwk.kkstudio.web.storage.InMemoryS3StorageService;
 import fun.fengwk.kkstudio.web.storage.WebStorageS3TestConfiguration;
@@ -178,8 +179,15 @@ class IssueEvidenceLifecycleIntegrationTest extends WebPostgresTestSupport {
 
     // 收尾并删除 Run，以便能独立测试 Session 删除
     UUID endEntryId = appendHistoryEntry(run.getThreadId(), run.getSessionId());
-    issueRunService.completeRun(
-        run.getId(), run.getVersion(), "req:comp:" + UUID.randomUUID(), endEntryId, null, null);
+    issueRunService.finishRun(
+        run.getId(),
+        run.getVersion(),
+        "req:comp:" + UUID.randomUUID(),
+        IssueRunStatus.COMPLETED,
+        endEntryId,
+        null,
+        null,
+        null);
     // 深删除 Run 前必须先移除引用它的 RUN 事实（fk_project_issue_activity_run 为 RESTRICT），
     // 与 Project 深删除 Activities -> Runs 的顺序一致。
     jdbc.update(
@@ -189,7 +197,7 @@ class IssueEvidenceLifecycleIntegrationTest extends WebPostgresTestSupport {
     jdbc.update("delete from project_issue_run where id = ?", run.getId());
 
     sessionDeletionOrchestrator.deleteSessionsByOwner(
-        new OwnerRef.IssueAgent(fixture.issueId(), executor));
+        ProjectSessionOwnership.owner(fixture.issueId(), executor));
 
     // Session 侧引用随 Session 消失，Issue 证据与 Issue 持有的引用保留，Blob 仍可用
     assertEquals(0, support.count("session_blob_ref", "session_id", run.getSessionId()));
@@ -226,8 +234,15 @@ class IssueEvidenceLifecycleIntegrationTest extends WebPostgresTestSupport {
     assertEquals(2L, support.refCount(blobId));
 
     UUID endEntryId = appendHistoryEntry(run.getThreadId(), run.getSessionId());
-    issueRunService.completeRun(
-        run.getId(), run.getVersion(), "req:comp:" + UUID.randomUUID(), endEntryId, null, null);
+    issueRunService.finishRun(
+        run.getId(),
+        run.getVersion(),
+        "req:comp:" + UUID.randomUUID(),
+        IssueRunStatus.COMPLETED,
+        endEntryId,
+        null,
+        null,
+        null);
 
     projectService.deleteProject(
         fixture.projectId(), projectService.getProject(fixture.projectId()).getVersion());
@@ -256,11 +271,14 @@ class IssueEvidenceLifecycleIntegrationTest extends WebPostgresTestSupport {
 
     // 结果未知的失败收尾（FAILED + ERROR 暂停）不是删除门禁：只要 Run 已收尾就可以深删除
     UUID endEntryId = appendHistoryEntry(run.getThreadId(), run.getSessionId());
-    issueRunService.failRun(
+    issueRunService.finishRun(
         run.getId(),
         run.getVersion(),
         "req:unk:" + UUID.randomUUID(),
+        IssueRunStatus.FAILED,
         endEntryId,
+        null,
+        null,
         "Run stopped with in-flight side effects; outcome unknown");
 
     // 现在可以成功删除

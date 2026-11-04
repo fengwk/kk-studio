@@ -212,7 +212,7 @@ export function usePaneAcceptance(options: PaneAcceptanceOptions) {
 
   function makePending(frozen: FrozenCommandBatchRequest): PendingAcceptance {
     return {
-      owner: owner ? { ...owner } : { type: 'CHAT', chatId: '' },
+      owner: { ...frozen.owner },
       target: frozen.target,
       request: frozen.request,
       branchDraft: frozen.branchDraft,

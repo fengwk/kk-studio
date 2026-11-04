@@ -4,7 +4,6 @@ import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.GoalCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.NotificationCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.SetAgentCommandPayload;
-import fun.fengwk.kkstudio.harness.api.command.SetContributorStateCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.SetExecutionCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
@@ -36,10 +35,9 @@ import java.util.function.Supplier;
  * 纯 turn planner：基于同一事务内捕获的 source EntryPath 与 queued Command 快照构造完整合法 candidate EntryPath，不接触
  * Store、不写任何 durable 状态。Thread YOLO 不进入 plan。
  *
- * <p>INPUT 收获快照内<b>全部</b> queued Command（不再在首条 user-like 后截断），消费到冻结 cutoff 为止；SET_* 与
- * SET_CONTRIBUTOR_STATE 按 sequence 归约成该轮配置（SET_CONTRIBUTOR_STATE 同时追加 CUSTOM state Entry），
- * USER_MESSAGE / CUSTOM_MESSAGE / GOAL 追加对应消息，NOTIFICATION 追加为系统通知 Entry。cutoff 之后到达的输入留到下一轮。
- * 只要快照含至少一条消息或通知就允许规划；纯设置不单独触发。CONTINUATION 只消费设置，保留消息与通知留待下一轮 INPUT；COMPACTION 消费零
+ * <p>INPUT 收获快照内<b>全部</b> queued Command（不再在首条 user-like 后截断），消费到冻结 cutoff 为止；SET_* 按 sequence
+ * 归约成该轮配置， USER_MESSAGE / CUSTOM_MESSAGE / GOAL 追加对应消息，NOTIFICATION 追加为系统通知 Entry。cutoff
+ * 之后到达的输入留到下一轮。 只要快照含至少一条消息或通知就允许规划；纯设置不单独触发。CONTINUATION 只消费设置，保留消息与通知留待下一轮 INPUT；COMPACTION 消费零
  * Command。candidate Entry 使用调用方提供的 ID 分配器，createdAt 使用调用方时钟。
  */
 final class TurnPlanBuilder {
@@ -56,7 +54,9 @@ final class TurnPlanBuilder {
       Supplier<UUID> idAllocator,
       Instant now,
       CompactionPreparation preparation,
-      boolean pendingNotificationInput) {
+      boolean pendingNotificationInput,
+      boolean childThread,
+      String rootEnvironmentName) {
     Objects.requireNonNull(sourcePath, "sourcePath");
     Objects.requireNonNull(reason, "reason");
     Objects.requireNonNull(plannedCommands, "plannedCommands");
@@ -89,6 +89,10 @@ final class TurnPlanBuilder {
     }
     var settings =
         harvestReducer.reduce(threadId, sourcePath.baseSettings(), consumedCommands, idAllocator);
+    if (childThread) {
+      // 子线程没有环境选择；本次 turn 仅冻结规划时执行根的环境，历史调用不随之后的切换改变。
+      settings = settings.withEnvironmentName(rootEnvironmentName);
+    }
 
     UUID sessionId = sourcePath.root().sessionId();
 
@@ -181,11 +185,6 @@ final class TurnPlanBuilder {
             appliedEntryIds.put(command.sequence(), entryId);
             parentId = entryId;
           }
-          case SetContributorStateCommandPayload value -> {
-            UUID entryId = idAllocator.get();
-            candidateEntries.add(new Entry(entryId, sessionId, parentId, value.state(), now));
-            parentId = entryId;
-          }
           case SetAgentCommandPayload ignored -> {}
           case SetExecutionCommandPayload ignored -> {}
           case SetEnvironmentCommandPayload ignored -> {}
@@ -215,7 +214,7 @@ final class TurnPlanBuilder {
         preparation);
   }
 
-  /** INPUT 消费全部 queued 快照；CONTINUATION 只消费设置（含 contributor state）；COMPACTION 消费零 Command。 */
+  /** INPUT 消费全部 queued 快照；CONTINUATION 只消费设置；COMPACTION 消费零 Command。 */
   static boolean isConsumed(TurnStartReason reason, ThreadCommand command) {
     if (reason == TurnStartReason.INPUT) {
       return true;

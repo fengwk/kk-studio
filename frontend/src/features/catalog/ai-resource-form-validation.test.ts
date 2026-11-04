@@ -14,7 +14,6 @@ const EMPTY_AGENT_DRAFT = {
   systemPrompt: '',
   model: '',
   variant: '',
-  inheritParentEnvironment: true,
   tools: [],
   skills: [],
   subagents: [],

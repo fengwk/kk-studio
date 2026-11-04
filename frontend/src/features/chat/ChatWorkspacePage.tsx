@@ -167,7 +167,7 @@ function ChatWorkspaceContent({
       return [pane.id, {
         target,
         draftKey: partsKey(parts),
-        pending: loadPendingAcceptance({ type: 'CHAT', chatId: chat.id }, pane.id, undefined, target) != null,
+        pending: loadPendingAcceptance({ kind: 'CHAT', id: chat.id }, pane.id, undefined, target) != null,
         hasUnsentDraft: trimMessageParts(parts).length > 0,
         sessionId: target.kind === 'NEW_THREAD_DRAFT' ? target.sessionId : null,
         branchName: target.kind === 'NEW_THREAD_DRAFT' ? target.threadName : null,

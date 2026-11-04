@@ -16,7 +16,7 @@ describe('harnessService', () => {
     const http = createClient()
     const service = createHarnessService(http)
     const request: HarnessCommandBatchDTO = {
-      owner: { type: 'CHAT' as const, chatId: 'chat-1' },
+      owner: { kind: 'CHAT', id: 'chat-1' },
       target: {
         type: 'NEW_SESSION' as const,
         sessionId: 's1',
@@ -37,6 +37,10 @@ describe('harnessService', () => {
     }
     await service.acceptCommandBatch(request)
     expect(http.post).toHaveBeenCalledWith('/command-batches', request)
+    // 未知归属也原样传递，授权由服务端决定。
+    const opaque = { ...request, owner: { kind: 'PLUGIN', id: 'opaque:id' } }
+    await service.acceptCommandBatch(opaque)
+    expect(http.post).toHaveBeenLastCalledWith('/command-batches', opaque)
   })
 
   /**

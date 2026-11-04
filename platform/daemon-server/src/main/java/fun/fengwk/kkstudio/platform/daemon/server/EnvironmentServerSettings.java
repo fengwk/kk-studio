@@ -8,10 +8,13 @@ public record EnvironmentServerSettings(
     Duration heartbeatTimeout,
     long maxResourceBytes,
     long temporaryResourceTtlSeconds,
-    long temporaryResourceCleanupIntervalSeconds) {
+    long temporaryResourceCleanupIntervalSeconds,
+    String proxyUrl,
+    String noProxyHosts) {
 
   public EnvironmentServerSettings {
     heartbeatTimeout = Objects.requireNonNull(heartbeatTimeout, "heartbeatTimeout");
+    noProxyHosts = Objects.requireNonNull(noProxyHosts, "noProxyHosts");
     if (heartbeatTimeout.isZero() || heartbeatTimeout.isNegative()) {
       throw new IllegalArgumentException("heartbeatTimeout must be positive");
     }

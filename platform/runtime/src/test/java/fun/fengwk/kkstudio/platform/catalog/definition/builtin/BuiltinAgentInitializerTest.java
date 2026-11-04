@@ -48,7 +48,6 @@ class BuiltinAgentInitializerTest {
     assertTrue(config.getTools().isEmpty());
     assertTrue(config.getSkills().isEmpty());
     assertTrue(config.getSubagents().isEmpty());
-    assertEquals(Boolean.TRUE, config.getInheritParentEnvironment());
   }
 
   @Test

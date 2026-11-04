@@ -17,20 +17,20 @@ export interface TemporaryResourceSweeper {
   sweep(ttlSeconds: number): Promise<void>
 }
 
-/** 受管更新端口；由 {@code src/update} 提供。UPDATE 结果只暴露运行时用于编码 UPDATE_RESULT 的窄结构。 */
+/** 受管更新端口；由 {@code src/installer} 提供。UPDATE 结果只暴露运行时用于编码 UPDATE_RESULT 的窄结构。 */
 export interface UpdateOutcomeLike {
   phase: string
   message?: string | null
   /** 已接受交接的许可释放步骤；由 Runtime 在回执入缓存并完成一次出站尝试后调用，并随重放/重连重发重试。 */
   releasePermit?: () => Promise<void>
+  /** 在交接后仍运行的 Daemon 可观察到安装器失败；返回停止观察的函数。 */
+  watchFailure?: (report: (message: string) => void) => () => void
 }
 
 /**
  * 更新器适配边界。
  *
- * <p>{@link handleUpdate} 的 reportProgress 接收一次下载进度对象，与 updater 的实际入口一致；可选 {@link getProgress}
- * 供没有事件回调的适配器拉取当前字节数。Runtime 只在当前被准入的 operation 上接受进度，并在心跳/重连时把最新快照带给
- * Server。
+ * <p>可选的字节进度端口只在当前被准入的 operation 上接收快照；官方安装器不提供字节进度。
  */
 export type UpdateProgressReporter = (progress: UpdateByteProgress) => void
 
