@@ -21,9 +21,12 @@ import fun.fengwk.kkstudio.project.model.IssueRun;
 import fun.fengwk.kkstudio.project.model.PauseReason;
 import fun.fengwk.kkstudio.project.model.Project;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.Callable;
@@ -813,6 +816,80 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
     assertThrows(
         ProjectValidationException.class,
         () -> issueRunService.acceptRun(issue.getId(), key("accept")));
+  }
+
+  /** 失败与取消的 receipt 必须绑定精确终态字段，重试不重复写入或解除暂停。 */
+  @Test
+  void failedAndCancelledReceiptsUseExactHashesAndReplay() throws Exception {
+    String agent = createAgent();
+    UUID projectId = createProjectWithStages("终态收据", agent, agent, 3);
+    Issue issue = createIssue(projectId);
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    for (IssueRunStatus status : List.of(IssueRunStatus.FAILED, IssueRunStatus.CANCELLED)) {
+      String acceptKey = key("accept");
+      IssueRun run = issueRunService.acceptRun(issue.getId(), acceptKey);
+      String terminalKey = key("terminal");
+      String error = status == IssueRunStatus.FAILED ? "failure detail" : null;
+      UUID end = run.getStartEntryId();
+      IssueRun finished =
+          issueRunService.finishRun(
+              run.getId(), run.getVersion(), terminalKey, status, end, null, null, error);
+      Issue after = issueEditingService.getIssue(issue.getId());
+      String canonical =
+          (status == IssueRunStatus.FAILED ? "FAIL_RUN" : "CANCEL_RUN")
+              + "\u001f"
+              + run.getId()
+              + "\u001f"
+              + end
+              + "\u001f"
+              + (error == null ? "USER" : error);
+      String hash =
+          HexFormat.of()
+              .formatHex(
+                  MessageDigest.getInstance("SHA-256")
+                      .digest(canonical.getBytes(StandardCharsets.UTF_8)));
+      assertEquals(
+          hash,
+          jdbc.queryForObject(
+              "select request_hash from project_issue_activity where issue_id = ? and idempotency_key = ?",
+              String.class,
+              issue.getId(),
+              "control:" + terminalKey));
+      assertEquals(
+          finished.getVersion(),
+          issueRunService
+              .finishRun(run.getId(), run.getVersion(), terminalKey, status, end, null, null, error)
+              .getVersion());
+      assertEquals(status, issueRunService.acceptRun(issue.getId(), acceptKey).getStatus());
+      UUID differentEnd = UUID.randomUUID();
+      assertThrows(
+          ProjectDuplicateException.class,
+          () ->
+              issueRunService.finishRun(
+                  run.getId(),
+                  run.getVersion(),
+                  terminalKey,
+                  status,
+                  differentEnd,
+                  null,
+                  null,
+                  error));
+      if (error != null) {
+        assertThrows(
+            ProjectDuplicateException.class,
+            () ->
+                issueRunService.finishRun(
+                    run.getId(), run.getVersion(), terminalKey, status, end, null, null, "other"));
+      }
+      assertEquals(after.getVersion(), issueEditingService.getIssue(issue.getId()).getVersion());
+      assertEquals(
+          1L,
+          count(
+              "select count(*) from project_issue_activity where issue_id = ? and idempotency_key = ?",
+              issue.getId(),
+              "control:" + terminalKey));
+      issueLifecycleService.resumeIssue(issue.getId(), after.getVersion(), key("resume"));
+    }
   }
 
   /** WAITING/RUNNING 的重复置位是空重放：丢响应后的旧版本重试不再冲突，也不重复消耗额度或推进 Run 版本。 */

@@ -333,6 +333,52 @@ class IssueRunServiceTest {
     verify(issueRunRepository, never()).getById(any());
   }
 
+  /** 缺少 Harness 运行时必须明确失败，不能伪造已接受的 Run。 */
+  @Test
+  void missingHarnessRuntimeRejectsAcceptance() {
+    Issue issue = issue();
+    when(issueRepository.getById(ISSUE_ID)).thenReturn(issue);
+    when(projectRepository.lockForKeyShare(PROJECT_ID)).thenReturn(project());
+    when(issueRepository.lockById(ISSUE_ID)).thenReturn(issue);
+    when(stageBudgetRepository.insert(any(), any())).thenReturn(true);
+    when(agentBranchSettings.materialize("worker"))
+        .thenReturn(
+            new BranchSettings(
+                "worker", BuiltinExecution.of(ModelSelection.model("model", "default")), null));
+
+    IllegalStateException error =
+        assertThrows(IllegalStateException.class, () -> service.acceptRun(ISSUE_ID, "accept"));
+    assertTrue(error.getMessage().contains("harness runtime"));
+    verify(issueRunRepository, never()).insert(any());
+  }
+
+  /** 耗尽的执行额度不能通过等待或恢复绕过；终态也不能被重新激活。 */
+  @Test
+  void exhaustedAndTerminalRunsCannotWaitOrResume() {
+    UUID runId = UUID.randomUUID();
+    IssueRun run =
+        IssueRun.builder()
+            .id(runId)
+            .issueId(ISSUE_ID)
+            .status(IssueRunStatus.RUNNING)
+            .remainingExecutionMs(0)
+            .version(1)
+            .build();
+    when(issueRunRepository.getById(runId)).thenReturn(run);
+    when(issueRepository.getById(ISSUE_ID)).thenReturn(issue());
+    when(projectRepository.lockForKeyShare(PROJECT_ID)).thenReturn(project());
+    when(issueRepository.lockById(ISSUE_ID)).thenReturn(issue());
+    when(issueRunRepository.lockById(runId)).thenReturn(run);
+
+    assertThrows(ProjectValidationException.class, () -> service.waitRun(runId, 1));
+    run.setStatus(IssueRunStatus.WAITING);
+    assertThrows(ProjectValidationException.class, () -> service.resumeRun(runId, 1));
+    run.setStatus(IssueRunStatus.FAILED);
+    assertThrows(ProjectValidationException.class, () -> service.resumeRun(runId, 1));
+    assertThrows(ProjectValidationException.class, () -> service.waitRun(runId, 1));
+    verify(issueRunRepository, never()).updateById(any(), anyLong());
+  }
+
   private static Issue issue() {
     return Issue.builder()
         .id(ISSUE_ID)

@@ -192,6 +192,55 @@ class IssueStageBudgetIntegrationTest extends ProjectTestSupport {
                 afterAuth.getId(), afterAuth.getVersion(), key("auth"), "DESIGN", 5));
   }
 
+  /** 重放绕过旧版本与活动 Run 检查；异 payload 和新的重置请求不能改变额度。 */
+  @Test
+  void budgetReceiptsReplayAndActiveRunBlocksNewReset() {
+    String agent = createAgent();
+    UUID projectId = createProjectWithStages("额度重放", agent, agent, 3);
+    Issue issue = createIssue(projectId);
+    String authKey = key("auth");
+    StageBudgetView authorized =
+        issueStageBudgetService.authorizeStageBudget(
+            issue.getId(), issue.getVersion(), authKey, "DESIGN", 2);
+    assertEquals(
+        authorized,
+        issueStageBudgetService.authorizeStageBudget(
+            issue.getId(), issue.getVersion(), authKey, "DESIGN", 2));
+    assertThrows(
+        ProjectDuplicateException.class,
+        () ->
+            issueStageBudgetService.authorizeStageBudget(
+                issue.getId(), issue.getVersion(), authKey, "DESIGN", 3));
+    Issue afterAuth = issueEditingService.getIssue(issue.getId());
+    String resetKey = key("reset");
+    StageBudgetView reset =
+        issueStageBudgetService.resetStageBudget(
+            issue.getId(), afterAuth.getVersion(), resetKey, "REVIEW", 2);
+    assertEquals(0, reset.budgetAfterOrdinal());
+    Issue afterReset = issueEditingService.getIssue(issue.getId());
+    issueLifecycleService.transition(issue.getId(), afterReset.getVersion(), key("t"), "DESIGN");
+    issueRunService.acceptRun(issue.getId(), key("accept"));
+    Issue active = issueEditingService.getIssue(issue.getId());
+    assertEquals(
+        reset,
+        issueStageBudgetService.resetStageBudget(
+            issue.getId(), afterAuth.getVersion(), resetKey, "REVIEW", 2));
+    assertThrows(
+        ProjectDuplicateException.class,
+        () ->
+            issueStageBudgetService.resetStageBudget(
+                issue.getId(), active.getVersion(), resetKey, "REVIEW", 3));
+    ProjectValidationException error =
+        assertThrows(
+            ProjectValidationException.class,
+            () ->
+                issueStageBudgetService.resetStageBudget(
+                    issue.getId(), active.getVersion(), key("reset"), "DESIGN", 4));
+    assertTrue(error.getMessage().contains("active run"));
+    assertEquals(2, issueStageBudgetService.getStageBudget(issue.getId(), "DESIGN").maxRuns());
+    assertEquals(active.getVersion(), issueEditingService.getIssue(issue.getId()).getVersion());
+  }
+
   /** 额度计算不按 Agent 过滤，因此切换 Agent 不重置已消耗次数。 */
   @Test
   void budgetCountingIgnoresAgentIdentity() {
