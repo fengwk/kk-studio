@@ -5,9 +5,14 @@ import lombok.extern.slf4j.Slf4j;
 import fun.fengwk.kkstudio.common.result.BinaryResultContent;
 import fun.fengwk.kkstudio.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.common.result.ResultContent;
+import fun.fengwk.kkstudio.harness.api.history.CustomEntryPayload;
+import fun.fengwk.kkstudio.harness.api.tool.ContributorStateAccess;
+import fun.fengwk.kkstudio.harness.api.tool.ContributorStateAccessMode;
+import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
+import fun.fengwk.kkstudio.harness.api.tool.ToolEffectBatch;
+import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.contributor.api.AppendCustomEntry;
 import fun.fengwk.kkstudio.harness.contributor.api.BoundEnvironment;
-import fun.fengwk.kkstudio.harness.contributor.api.BranchView;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
@@ -32,22 +37,10 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityT
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTransport;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityUnavailableException;
 import fun.fengwk.kkstudio.harness.environment.capability.ExpectedFile;
-import fun.fengwk.kkstudio.harness.runtime.admission.ConcurrencyAdmission;
-import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorStateAccess;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorStateAccessMode;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEffectBatch;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
-import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
-import fun.fengwk.kkstudio.harness.runtime.permission.PermissionEvaluationContext;
-import fun.fengwk.kkstudio.harness.runtime.permission.PermissionEvaluator;
-import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettings;
-import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettingsProvider;
-import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
-import fun.fengwk.kkstudio.harness.runtime.port.ToolSuccess;
-import fun.fengwk.kkstudio.harness.runtime.processor.ToolResultSizeLimits;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
+import fun.fengwk.kkstudio.harness.spi.ToolGateway;
+import fun.fengwk.kkstudio.harness.spi.ToolInvocationRequest;
+import fun.fengwk.kkstudio.harness.spi.ToolResultSizeLimits;
+import fun.fengwk.kkstudio.harness.spi.ToolSuccess;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolErrorGuidance;
 import fun.fengwk.kkstudio.harness.tool.ToolErrorGuidance.ExecutionFact;
@@ -55,7 +48,12 @@ import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.catalog.tool.ToolBindingMismatchException;
-import fun.fengwk.kkstudio.platform.harness.contributor.ContributorBranchViewLoader;
+import fun.fengwk.kkstudio.platform.harness.admission.ConcurrencyAdmission;
+import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionAction;
+import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionEvaluationContext;
+import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionEvaluator;
+import fun.fengwk.kkstudio.platform.harness.tool.permission.ToolSettings;
+import fun.fengwk.kkstudio.platform.harness.tool.permission.ToolSettingsProvider;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -78,8 +76,8 @@ import java.util.function.Supplier;
  * 生产工具执行网关，连接 Harness Runtime、运行时工具目录和 Contributor {@link Tool} SPI。
  *
  * <p>{@link #preflight} 校验冻结绑定、Environment 与权限；需要审批的文件编辑还会只读生成真实文件审查。{@link #admit}
- * 是纯本地检查：申请并发租约、钉住目录租用、装配分支视图与可选环境绑定，不触碰任何外部系统，因此 {@link ToolGateway.Busy} / {@link
- * ToolGateway.Rejected} 肯定没有副作用。
+ * 是纯本地检查：申请并发租约、钉住目录租用、装配可选环境绑定，不触碰任何外部系统，也不查询 Harness 存储（分支视图、会话与冻结媒体能力由 Harness 随执行描述传入），因此
+ * {@link ToolGateway.Busy} / {@link ToolGateway.Rejected} 肯定没有副作用。
  *
  * <p>{@link #preflight} 与 {@link #admit} 都在当前目录租用中严格取回冻结贡献：工具不存在或已被停用（例如插件被关闭）或定义、贡献身份、
  * requirements 变化时以确定性错误告知模型，绝不按新定义执行旧参数。
@@ -137,7 +135,6 @@ public final class ToolExecutionGateway implements ToolGateway {
       "Check whether the tool already took effect before calling it again";
 
   private final RuntimeToolCatalogSource toolCatalogSource;
-  private final ContributorBranchViewLoader contributorBranchViewLoader;
   private final EnvironmentCapabilityTransport capabilityTransport;
   private final PermissionEvaluator permissionEvaluator;
   private final ToolSettingsProvider toolSettingsProvider;
@@ -148,7 +145,6 @@ public final class ToolExecutionGateway implements ToolGateway {
 
   public ToolExecutionGateway(
       RuntimeToolCatalogSource toolCatalogSource,
-      ContributorBranchViewLoader contributorBranchViewLoader,
       EnvironmentCapabilityTransport capabilityTransport,
       PermissionEvaluator permissionEvaluator,
       ToolSettingsProvider toolSettingsProvider,
@@ -158,8 +154,6 @@ public final class ToolExecutionGateway implements ToolGateway {
       Clock clock,
       ConcurrencyAdmission admission) {
     this.toolCatalogSource = Objects.requireNonNull(toolCatalogSource, "toolCatalogSource");
-    this.contributorBranchViewLoader =
-        Objects.requireNonNull(contributorBranchViewLoader, "contributorBranchViewLoader");
     this.capabilityTransport = Objects.requireNonNull(capabilityTransport, "capabilityTransport");
     this.permissionEvaluator = Objects.requireNonNull(permissionEvaluator, "permissionEvaluator");
     this.toolSettingsProvider =
@@ -322,9 +316,6 @@ public final class ToolExecutionGateway implements ToolGateway {
                     EDIT_REVIEW_REQUIRED_NEXT_ACTION)));
       }
 
-      BranchView branch =
-          contributorBranchViewLoader.load(
-              execution.assistantEntryId(), contribution.id().contributorId().value());
       BoundEnvironment boundEnvironment =
           execution.request().binding().environmentId() != null
               ? new PlatformBoundEnvironment(
@@ -334,12 +325,18 @@ public final class ToolExecutionGateway implements ToolGateway {
                   execution.expectedFile(),
                   execution.remoteExecutions())
               : null;
+      ToolGateway.ExecutionScope scope = execution.scope();
       ToolExecutionContext context =
           new ToolExecutionContext(
               execution.invocationId(),
-              execution.threadId(),
+              scope.threadId(),
+              scope.sessionId(),
+              scope.rootThreadId(),
+              scope.rootSessionId(),
+              scope.assistantEntryId(),
               clock.instant(),
-              branch,
+              scope.mediaCapabilities(),
+              scope.branch(),
               Optional.ofNullable(boundEnvironment));
       // 超时在执行前只解析一次：解析结果原样进入请求，下游不再回落默认值或施加任何上限。
       ToolExecutionRequest toolRequest;

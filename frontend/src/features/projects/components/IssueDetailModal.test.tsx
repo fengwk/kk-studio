@@ -127,13 +127,9 @@ describe('IssueDetailModal', () => {
     blockIssue: vi.fn().mockResolvedValue(mockActiveIssueDetail.issue),
     recoverIssue: vi.fn().mockResolvedValue(mockActiveIssueDetail.issue),
     reopenIssue: vi.fn().mockResolvedValue(mockActiveIssueDetail.issue),
-    resolveUnknown: vi.fn().mockResolvedValue(mockActiveIssueDetail.issue),
-    pauseIssue: vi.fn().mockResolvedValue(mockActiveIssueDetail.issue),
-    resumeIssue: vi.fn().mockResolvedValue(mockActiveIssueDetail.issue),
     stopIssue: vi.fn().mockResolvedValue(mockActiveIssueDetail.issue),
     resetStageBudget: vi.fn().mockResolvedValue(mockActiveIssueDetail.issue),
     appendIssueActivity: vi.fn().mockResolvedValue(mockActiveIssueDetail.activities[0]),
-    listActivities: vi.fn().mockResolvedValue([]),
     addIssueEvidence: vi.fn().mockResolvedValue({
       issueId,
       blobId: 'blob-1',
@@ -145,8 +141,6 @@ describe('IssueDetailModal', () => {
     }),
     listIssueEvidence: vi.fn().mockResolvedValue([]),
     deleteIssue: vi.fn().mockResolvedValue(undefined),
-    archiveIssue: vi.fn().mockResolvedValue(mockActiveIssueDetail.issue),
-    unarchiveIssue: vi.fn().mockResolvedValue(mockActiveIssueDetail.issue),
     ...overrides,
   })
 
@@ -365,7 +359,7 @@ describe('IssueDetailModal', () => {
     )
 
     await screen.findByLabelText('Issue #12 详情')
-    fireEvent.click(screen.getByRole('button', { name: '终止 (Stop)' }))
+    fireEvent.click(screen.getByRole('button', { name: '终止' }))
 
     expect(screen.getByRole('heading', { name: /终止当前运行/i })).toBeInTheDocument()
     const detailInput = screen.getByPlaceholderText(/说明人工中止执行的原因/i)
@@ -385,17 +379,18 @@ describe('IssueDetailModal', () => {
     })
   })
 
-  it('resolves UNKNOWN issue state via human verification dialog', async () => {
-    // 测试意图：当 Issue 状态为 UNKNOWN 时，验证打开 resolve-unknown 人工裁决对话框并正确提交裁决说明
-    const unknownIssueDetail: IssueDetailDTO = {
+  it('shows the ERROR pause badge without any UNKNOWN verification action', async () => {
+    // 测试意图：结果未知的失败收尾以 ERROR 暂停表达，界面只显示 ERROR 徽标，不再提供人工核查入口。
+    const failedIssueDetail: IssueDetailDTO = {
       ...mockActiveIssueDetail,
       issue: {
         ...mockActiveIssueDetail.issue,
-        state: 'UNKNOWN',
+        pauseReason: 'ERROR',
+        pauseDetail: 'Run stopped with in-flight side effects; outcome unknown',
       },
     }
     const api = createMockApi({
-      getIssue: vi.fn().mockResolvedValue(unknownIssueDetail),
+      getIssue: vi.fn().mockResolvedValue(failedIssueDetail),
     })
 
     renderModal(
@@ -409,25 +404,9 @@ describe('IssueDetailModal', () => {
       />,
     )
 
-    const resolveBtn = await screen.findByRole('button', { name: '人工核查' })
-    fireEvent.click(resolveBtn)
-
-    expect(screen.getByRole('heading', { name: /解除 UNKNOWN（人工核查）/i })).toBeInTheDocument()
-    const verificationInput = screen.getByPlaceholderText(/说明已核实的内容与外部状态一致性保证/i)
-    fireEvent.change(verificationInput, { target: { value: 'Manually verified as safe to continue.' } })
-
-    fireEvent.click(screen.getByRole('button', { name: '确认解除 UNKNOWN' }))
-
-    await waitFor(() => {
-      expect(api.resolveUnknown).toHaveBeenCalledWith(
-        issueId,
-        expect.objectContaining({
-          expectedVersion: '3',
-          verification: 'Manually verified as safe to continue.',
-          requestKey: expect.any(String),
-        }),
-      )
-    })
+    expect(await screen.findByText('ERROR')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '人工核查' })).toBeNull()
+    expect(screen.queryByRole('heading', { name: /解除 UNKNOWN/ })).toBeNull()
   })
 
   it('deletes issue with expectedVersion', async () => {

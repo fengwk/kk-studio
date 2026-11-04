@@ -81,7 +81,7 @@ describe('PermissionEditor UI', () => {
     const select = within(group).getByLabelText('工具')
     expect(select).toHaveAttribute('data-value', 'missing_tool')
     await user.click(select)
-    expect(screen.getByRole('option', { name: 'missing_tool (不可用)' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'missing_tool · 不可用' })).toBeInTheDocument()
   })
 
   it('edits the action of a rule via the select', async () => {

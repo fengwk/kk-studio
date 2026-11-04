@@ -1,5 +1,8 @@
 import { assert, cid, envelopeData, sleep } from '../lib/http.mjs'
-import { registerCase } from '../lib/registry.mjs'
+import { createCaseAdder } from '../lib/registry.mjs'
+
+export const cases = []
+const registerCase = createCaseAdder(cases)
 
 registerCase({
   id: 'events.heartbeat_keepalive',

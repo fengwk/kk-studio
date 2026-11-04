@@ -215,8 +215,7 @@ async function createStubCatalog({ jsonCall }) {
     name: 'default-assistant',
     description: 'offline smoke stub agent',
     systemPrompt: 'You are the offline smoke assistant.',
-    model: 'acceptance-stub',
-    variant: 'default',
+    execution: { driver: 'builtin', settings: { modelName: 'acceptance-stub', variant: 'default' } },
     config: { tools: [], skills: [], subagents: [] },
   })
 }

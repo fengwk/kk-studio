@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.compaction;
 
-import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
+import fun.fengwk.kkstudio.harness.api.history.EntryPath;
 
 import java.util.Objects;
 import java.util.UUID;
@@ -30,8 +30,8 @@ public final class CompactionNoGain {
     Objects.requireNonNull(path, "path");
     Objects.requireNonNull(summaryText, "summaryText");
     Objects.requireNonNull(cutEntryId, "cutEntryId");
-    long before = CompactionPlanner.estimateProjectionTokens(path);
-    long after = CompactionPlanner.estimateProjectionTokensAfter(path, summaryText, cutEntryId);
+    long before = TokenEstimator.estimateProjectionTokens(path);
+    long after = TokenEstimator.estimateProjectionTokensAfter(path, summaryText, cutEntryId);
     return after < before;
   }
 }

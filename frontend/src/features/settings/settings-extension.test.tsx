@@ -4,7 +4,7 @@ import { MemoryRouter, Route, Routes } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { BrowserPreferencesProvider } from '@/features/settings/browser-preferences'
 import { settingsExtension } from '@/features/settings/settings-extension'
-import { systemSettingsService } from '@/shared/api/system-settings-service'
+import { systemSettingsService } from '@/features/settings/system-settings-service'
 import { makeSettingsDto, makeSettingsSchema } from '@/test-support/settings-test-fixtures'
 import { ApplicationContributionsProvider } from '@/platform/extensions/ApplicationContributionsContext'
 import { WorkbenchShell } from '@/platform/workbench/WorkbenchShell'
@@ -12,7 +12,7 @@ import { ApplicationEventProvider } from '@/shared/app-events'
 import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
 import { makeApplicationContributions } from '@/test-support/application-contributions'
 
-vi.mock('@/shared/api/system-settings-service', () => ({
+vi.mock('@/features/settings/system-settings-service', () => ({
   systemSettingsService: { get: vi.fn(), getSchema: vi.fn(), update: vi.fn() },
   createSystemSettingsService: () => ({ get: vi.fn(), getSchema: vi.fn(), update: vi.fn() }),
 }))

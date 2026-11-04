@@ -12,6 +12,7 @@ import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
 import fun.fengwk.kkstudio.platform.environment.Environment;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.platform.harness.builtin.BuiltinConfigSyncAdapter;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRow;
 import fun.fengwk.kkstudio.platform.pluginhost.service.PluginAgentDependencies;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
@@ -191,7 +192,10 @@ public final class ConfigSyncGraph {
   private List<ConfigSyncRef> agentDependencies(
       AgentDefinition agent, Map<String, String> toolServer, Set<String> builtinAgentNames) {
     Set<ConfigSyncRef> deps = new LinkedHashSet<>();
-    deps.add(ConfigSyncRefs.model(agent.modelName()));
+    var model = BuiltinConfigSyncAdapter.model(agent.execution());
+    if (model != null) {
+      deps.add(ConfigSyncRefs.model(model.modelName()));
+    }
     AgentDefinitionConfigDTO config = agentConfigCodec.decode(agent.configJson());
     if (config.getSkills() != null) {
       for (SkillRefDTO skill : config.getSkills()) {

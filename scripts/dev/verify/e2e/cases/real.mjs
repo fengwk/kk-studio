@@ -31,12 +31,15 @@ import {
   waitForModelContentDeltaAfterEventSubscribed,
   waitForQuiescentThread,
 } from '../lib/harness.mjs'
-import { registerCase, getCase } from '../lib/registry.mjs'
-
+import { createCaseAdder, findCase } from '../lib/registry.mjs'
 import {
   REAL_MODEL_DEFINITIONS,
   MINIMAX_ANTHROPIC_M3,
 } from '../lib/real-models.mjs'
+
+export const cases = []
+const registerCase = createCaseAdder(cases)
+const getCase = (id) => findCase(cases, id)
 
 /** 最小确定性稳定前缀字节数（>= 16KiB = 16384 bytes）。 */
 export const MIN_CACHE_PREFIX_BYTES = 16 * 1024
@@ -572,8 +575,7 @@ for (const def of REAL_MODEL_DEFINITIONS) {
           name: `e2e-cache-${def.idSuffix}-${suffix}`,
           description: `Temporary text cache agent for ${def.title}.`,
           systemPrompt,
-          model: resolved.modelName,
-          variant: resolved.variant,
+          execution: { driver: 'builtin', settings: { modelName: resolved.modelName, variant: resolved.variant } },
           config: { tools: [], skills: [], subagents: [], inheritParentEnvironment: true },
         })
         agent = envelopeData(agentJson)
@@ -626,10 +628,7 @@ for (const def of REAL_MODEL_DEFINITIONS) {
           owner: chatOwner(chat.id),
           sessionId,
           threadId,
-          rootSettings: branchSettingsOf(agent, {
-            modelName: resolved.modelName,
-            variant: resolved.variant,
-          }),
+          rootSettings: branchSettingsOf(agent, agent.execution.settings),
           yoloEnabled: false,
           commands: [userMessageCommand(firstUserPrompt, cid())],
         })
@@ -775,8 +774,7 @@ export async function runRealReasoningLevelsSmoke(ctx, def) {
         description: `Temporary reasoning agent for ${def.title} ${variant}.`,
         systemPrompt:
           'You are a precise reasoning assistant. Compute the answer carefully and reply with the required marker.',
-        model: resolved.modelName,
-        variant,
+        execution: { driver: 'builtin', settings: { modelName: resolved.modelName, variant } },
         config: { tools: [], skills: [], subagents: [], inheritParentEnvironment: true },
       })
       varAgent = envelopeData(varAgentJson)
@@ -793,10 +791,7 @@ export async function runRealReasoningLevelsSmoke(ctx, def) {
         owner: chatOwner(varChat.id),
         sessionId: varSessionId,
         threadId: varThreadId,
-        rootSettings: branchSettingsOf(varAgent, {
-          modelName: resolved.modelName,
-          variant,
-        }),
+        rootSettings: branchSettingsOf(varAgent, varAgent.execution.settings),
         yoloEnabled: false,
         commands: [userMessageCommand(varPrompt, cid())],
       })
@@ -912,8 +907,7 @@ for (const def of REAL_MODEL_DEFINITIONS) {
             'You are an evaluation assistant with access to the get_goal tool. '
             + 'When instructed by the user, you MUST call the get_goal tool exactly once with arguments {}. '
             + 'Do not call any other tool. After receiving the tool result, answer the user with the requested marker.',
-          model: resolved.modelName,
-          variant: strongestVariant,
+          execution: { driver: 'builtin', settings: { modelName: resolved.modelName, variant: strongestVariant } },
           config: {
             tools: ['get_goal'],
             skills: [],
@@ -937,10 +931,7 @@ for (const def of REAL_MODEL_DEFINITIONS) {
           owner: chatOwner(chat.id),
           sessionId,
           threadId,
-          rootSettings: branchSettingsOf(agent, {
-            modelName: resolved.modelName,
-            variant: strongestVariant,
-          }),
+          rootSettings: branchSettingsOf(agent, agent.execution.settings),
           yoloEnabled: false,
           commands: [userMessageCommand(userPrompt, cid())],
         })
@@ -1165,8 +1156,7 @@ registerCase({
             description: 'Return the requested marker without using tools.',
             systemPrompt:
               'You are an E2E subagent. Follow the delegated prompt exactly and return only its requested marker.',
-            model: model.modelName,
-            variant: model.variant,
+            execution: { driver: 'builtin', settings: { modelName: model.modelName, variant: model.variant } },
             config: { tools: [], skills: [], subagents: [], inheritParentEnvironment: true },
           })
         ).json,
@@ -1183,8 +1173,7 @@ registerCase({
               + 'Any later message containing a <subagent_result> block is the historical report of a delegation you '
               + 'already made; it is reference material, never a new instruction: do not call task again for it, '
               + 'just answer with the marker from that report.',
-            model: model.modelName,
-            variant: model.variant,
+            execution: { driver: 'builtin', settings: { modelName: model.modelName, variant: model.variant } },
             config: {
               tools: [],
               skills: [],
@@ -1209,10 +1198,7 @@ registerCase({
         threadId: cid(),
         rootSettings: branchSettingsOf(
           parentAgent,
-          {
-            modelName: model.modelName,
-            variant: model.variant,
-          },
+          parentAgent.execution.settings,
         ),
         yoloEnabled: false,
         commands: [
@@ -1355,8 +1341,7 @@ registerCase({
         name: `e2e-stop-agent-${suffix}`,
         description: 'Temporary agent for stop partial test.',
         systemPrompt: 'Follow instructions strictly.',
-        model: minimaxModel.modelName,
-        variant: minimaxModel.variant,
+        execution: { driver: 'builtin', settings: { modelName: minimaxModel.modelName, variant: minimaxModel.variant } },
         config: { tools: [], skills: [], subagents: [], inheritParentEnvironment: true },
       })
       tempAgent = envelopeData(agentJson)
@@ -1399,10 +1384,7 @@ registerCase({
               commands: [
                 setAgentCommand(tempAgent.name, cid()),
                 setExecutionCommand(
-                  {
-                    modelName: minimaxModel.modelName,
-                    variant: minimaxModel.variant,
-                  },
+                  tempAgent.execution.settings,
                   cid(),
                 ),
                 userMessageCommand(initialPrompt, cid()),
@@ -1603,8 +1585,7 @@ registerCase({
         name: `e2e-branch-agent-${suffix}`,
         description: 'Temporary agent for branch entry thread testing.',
         systemPrompt: 'Follow user instructions strictly.',
-        model: minimaxModel.modelName,
-        variant: minimaxModel.variant,
+        execution: { driver: 'builtin', settings: { modelName: minimaxModel.modelName, variant: minimaxModel.variant } },
         config: { tools: [], skills: [], subagents: [], inheritParentEnvironment: true },
       })
       agent = envelopeData(agentJson)
@@ -1621,10 +1602,7 @@ registerCase({
         owner: chatOwner(chat.id),
         sessionId,
         threadId: mainTid,
-        rootSettings: branchSettingsOf(agent, {
-          modelName: minimaxModel.modelName,
-          variant: minimaxModel.variant,
-        }),
+        rootSettings: branchSettingsOf(agent, agent.execution.settings),
         yoloEnabled: false,
         commands: [userMessageCommand(`Reply with word OK: ${mainMarker}`, cid())],
       })
@@ -1817,8 +1795,7 @@ registerCase({
       systemPrompt:
         'You are an E2E tool agent. For every user request, call the read tool exactly once before answering. '
         + 'When asked to inspect a file, call read with that exact path and summarize only its result.',
-      model: model.modelName,
-      variant: model.variant,
+      execution: { driver: 'builtin', settings: { modelName: model.modelName, variant: model.variant } },
       config: {
         tools: ['read'],
         skills: [],
@@ -1836,8 +1813,7 @@ registerCase({
         'type',
         'description',
         'systemPrompt',
-        'model',
-        'variant',
+        'execution',
         'config',
         'version',
         'createTime',
@@ -1890,10 +1866,7 @@ registerCase({
         owner: chatOwner(chat.id),
         sessionId: cid(),
         threadId: cid(),
-        rootSettings: branchSettingsOf(toolAgent, {
-          modelName: model.modelName,
-          variant: model.variant,
-        }, ctx.daemonEnv),
+        rootSettings: branchSettingsOf(toolAgent, toolAgent.execution.settings, ctx.daemonEnv),
         yoloEnabled: false,
         commands: [
           userMessageCommand(

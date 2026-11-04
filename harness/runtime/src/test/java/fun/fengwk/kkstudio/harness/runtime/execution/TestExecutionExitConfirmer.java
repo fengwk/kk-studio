@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.execution;
 
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 
 import java.time.Clock;
 import java.util.List;

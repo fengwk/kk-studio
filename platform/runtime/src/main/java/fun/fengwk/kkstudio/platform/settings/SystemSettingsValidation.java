@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.platform.settings;
 
-import fun.fengwk.kkstudio.harness.runtime.permission.PermissionPathPattern;
+import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionPathPattern;
 
 /**
  * {@link SystemSettings} 各 section 共享的字段级校验工具。

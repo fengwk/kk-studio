@@ -10,7 +10,7 @@ import type { CanvasController } from '@/features/canvas/useCanvasController'
 import type { CanvasFunctionConfig } from '@/features/canvas/types'
 import type { CanvasFunctionDefinitionDTO } from '@/shared/api/generated/contracts'
 
-vi.mock('@/shared/api/studio-service', () => ({
+vi.mock('@/features/canvas/canvas-api', () => ({
   getCanvasResourceOriginalUrl: vi.fn(),
   getCanvasResourcePreviewUrl: vi.fn(async () => ({
     method: 'GET',
@@ -661,7 +661,7 @@ describe('Canvas generic generation panel', () => {
     }]
     const view = renderPanel(null, unavailable)
     await user.click(screen.getByLabelText('模型'))
-    const option = screen.getByRole('option', { name: 'Image A（quota exceeded）' })
+    const option = screen.getByRole('option', { name: 'Image A — quota exceeded' })
     expect(option).toBeDisabled()
     fireEvent.click(option)
     expect(view.scheduleFunctionConfig).not.toHaveBeenCalled()

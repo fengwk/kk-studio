@@ -5,7 +5,7 @@ import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitJournal;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitJournalConflictException;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitJournalRecord;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitJournalSnapshot;
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 
 import java.time.Clock;
 import java.util.List;

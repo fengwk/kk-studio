@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.input;
 
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
+import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
 
 /**
  * 运行时拥有的人工输入工具身份。

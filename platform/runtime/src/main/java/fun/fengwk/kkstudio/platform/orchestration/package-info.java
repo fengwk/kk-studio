@@ -3,6 +3,6 @@
  *
  * <p>Canvas 领域与持久化分别位于 {@code fun.fengwk.kkstudio.canvas} 与 {@code
  * fun.fengwk.kkstudio.canvas.infra}；Canvas DTO 映射位于 {@code
- * fun.fengwk.kkstudio.canvas.infra.dto}，HTTP 控制器位于 {@code fun.fengwk.kkstudio.web.controller}。
+ * fun.fengwk.kkstudio.canvas.infra.dto}，HTTP 控制器位于 {@code fun.fengwk.kkstudio.canvas.http}。
  */
 package fun.fengwk.kkstudio.platform.orchestration;

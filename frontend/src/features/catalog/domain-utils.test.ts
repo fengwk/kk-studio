@@ -7,10 +7,6 @@ import {
   formatCatalogSupportIssue,
   resourceTitle,
 } from '@/features/catalog/catalog-utils'
-import {
-  filterChats,
-  formatBackendDate,
-} from '@/features/chat/chat-utils'
 import { filterEnvironments } from '@/features/environment/environment-utils'
 import {
   includesSearch,
@@ -36,7 +32,6 @@ import type {
   AgentModelConfigDTO,
   AgentModelDTO,
   AgentProviderDTO,
-  ChatDTO,
   EnvironmentCardDTO,
 } from '@/shared/api/generated/contracts'
 
@@ -156,8 +151,7 @@ describe('AI domain utilities', () => {
         description: 'desc',
         systemPrompt: 'prompt',
         type: 'USER',
-        model: 'MiniMax-M2.7',
-        variant: 'default',
+        execution: { driver: 'builtin', settings: { modelName: 'MiniMax-M2.7', variant: 'default' } },
         config: {
           inheritParentEnvironment: true,
           tools: ['search'],
@@ -294,8 +288,7 @@ describe('AI domain utilities', () => {
       name: 'assistant',
       description: 'desc',
       systemPrompt: 'prompt',
-      model: 'MiniMax-M2.7',
-      variant: 'default',
+      execution: { driver: 'builtin', settings: { modelName: 'MiniMax-M2.7', variant: 'default' } },
       config: {
         inheritParentEnvironment: true,
         tools: ['search'],
@@ -307,8 +300,7 @@ describe('AI domain utilities', () => {
     expect(toEditableAgentUpdate(agentInput)).toEqual({
       description: 'desc',
       systemPrompt: 'prompt',
-      model: 'MiniMax-M2.7',
-      variant: 'default',
+      execution: { driver: 'builtin', settings: { modelName: 'MiniMax-M2.7', variant: 'default' } },
       config: {
         inheritParentEnvironment: true,
         tools: ['search'],
@@ -316,7 +308,9 @@ describe('AI domain utilities', () => {
         subagents: ['helper'],
       },
     })
-    expect(toEditableAgent({ ...agentInput, variant: ' ' }).variant).toBeNull()
+    expect(toEditableAgent({ ...agentInput, variant: ' ' }).execution).toEqual({
+      driver: 'builtin', settings: { modelName: 'MiniMax-M2.7', variant: null },
+    })
   })
 
   /** 搜索与展示辅助函数覆盖结构化的 model 默认值。 */
@@ -328,8 +322,7 @@ describe('AI domain utilities', () => {
         description: 'Cloud agent',
         systemPrompt: null,
         type: 'USER' as const,
-        model: 'MiniMax-M2.7',
-        variant: 'default',
+        execution: { driver: 'builtin', settings: { modelName: 'MiniMax-M2.7', variant: 'default' } },
         config: {
           inheritParentEnvironment: true,
           tools: [],
@@ -389,43 +382,6 @@ describe('AI domain utilities', () => {
       'platform',
       'tool-e2e',
     ])
-    expect(
-      filterChats(
-        [
-          {
-            id: '2',
-            title: 'beta',
-            agentName: 'missing',
-            environmentName: null,
-            yoloEnabled: false,
-            version: '1',
-            createTime: 1782000000,
-            updateTime: 1782000000,
-          } satisfies ChatDTO,
-          {
-            id: '1',
-            title: 'alpha',
-            agentName: 'missing',
-            environmentName: null,
-            yoloEnabled: false,
-            version: '1',
-            createTime: 1782086400,
-            updateTime: 1781913600,
-          } satisfies ChatDTO,
-        ],
-        '',
-      ).map((item) => item.title),
-    ).toEqual(['alpha', 'beta'])
-      expect(filterChats([{
-        id: '1',
-        title: 'alpha',
-        agentName: 'missing',
-        environmentName: null,
-        yoloEnabled: false,
-        version: '1',
-        createTime: 0,
-        updateTime: 0,
-      } satisfies ChatDTO], 'alp')).toHaveLength(1)
     expect(naturalNameCompare('m2', 'm10')).toBeLessThan(0)
     expect(includesSearch('MiniMax', 'mini')).toBe(true)
     expect(includesSearch('MiniMax', '')).toBe(true)
@@ -433,7 +389,6 @@ describe('AI domain utilities', () => {
     expect(resourceTitle({ kind: 'provider', mode: 'create' })).toBe('新建 Provider')
     expect(resourceTitle({ kind: 'model', mode: 'edit', resourceKind: 'MODEL', name: 'MiniMax-M2.7', expectedVersion: '1' })).toBe('编辑 Model')
     expect(resourceTitle({ kind: 'agent', mode: 'create', type: 'USER' })).toBe('新建 Agent')
-    expect(formatBackendDate(Number.NaN)).toBe('-')
   })
 
   /** 可为空的 optional 资源字段映射为完整的可编辑草稿。 */
@@ -475,8 +430,7 @@ describe('AI domain utilities', () => {
         description: null,
         systemPrompt: null,
         type: 'USER',
-        model: 'gpt-5.4',
-        variant: 'default',
+        execution: { driver: 'builtin', settings: { modelName: 'gpt-5.4', variant: 'default' } },
         config: {
           inheritParentEnvironment: true,
           tools: [],

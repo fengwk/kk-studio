@@ -1,0 +1,57 @@
+package fun.fengwk.kkstudio.harness.api.retry;
+
+import fun.fengwk.kkstudio.common.time.HarnessStoreTime;
+
+import java.time.Duration;
+import java.util.Objects;
+
+/**
+ * Model 与 Tool Invocation 瞬态失败共享的全局自动重试策略。
+ *
+ * <p>策略只描述部署配置与纯退避计算，不读取时钟、不持有 durable 状态；本策略单独不构成重试决策，调用方还要结合错误是否可重试与已消耗 attempt 才决定是否重试。
+ */
+public record InvocationRetryPolicy(
+    int maxRetries,
+    InvocationRetryBackoffStrategy backoffStrategy,
+    Duration baseDelay,
+    Duration maxDelay) {
+  public InvocationRetryPolicy {
+    if (maxRetries < 0) {
+      throw new IllegalArgumentException("maxRetries must not be negative");
+    }
+    backoffStrategy = Objects.requireNonNull(backoffStrategy, "backoffStrategy");
+    baseDelay = requirePositive(baseDelay, "baseDelay");
+    maxDelay = requirePositive(maxDelay, "maxDelay");
+    if (maxDelay.compareTo(baseDelay) < 0) {
+      throw new IllegalArgumentException("maxDelay must not be less than baseDelay");
+    }
+  }
+
+  /** {@code retryAttempt} 从 1 开始，表示首次失败后的第一次重试。 */
+  public Duration delayBeforeRetry(int retryAttempt) {
+    if (retryAttempt <= 0) {
+      throw new IllegalArgumentException("retryAttempt must be positive");
+    }
+    if (backoffStrategy == InvocationRetryBackoffStrategy.FIXED || retryAttempt == 1) {
+      return baseDelay;
+    }
+    long ceilingMillis = maxDelay.toMillis();
+    long delayMillis = baseDelay.toMillis();
+    for (int attempt = 1; attempt < retryAttempt && delayMillis < ceilingMillis; attempt++) {
+      delayMillis = Math.min(ceilingMillis, saturatedDouble(delayMillis));
+    }
+    return Duration.ofMillis(delayMillis);
+  }
+
+  public boolean allowsRetry(int retryAttempt) {
+    return retryAttempt > 0 && retryAttempt <= maxRetries;
+  }
+
+  private static Duration requirePositive(Duration value, String name) {
+    return HarnessStoreTime.requireWholeMillisecondDuration(value, name);
+  }
+
+  private static long saturatedDouble(long value) {
+    return value > Long.MAX_VALUE / 2 ? Long.MAX_VALUE : value * 2;
+  }
+}

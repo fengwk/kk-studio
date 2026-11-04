@@ -10,20 +10,25 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.api.tool.ToolApproval;
+import fun.fengwk.kkstudio.harness.api.tool.ToolApprovalDecision;
+import fun.fengwk.kkstudio.harness.api.tool.ToolEditReview;
+import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.builtin.port.PortTestData;
+import fun.fengwk.kkstudio.harness.contributor.api.BranchView;
+import fun.fengwk.kkstudio.harness.contributor.api.CustomStateSnapshot;
+import fun.fengwk.kkstudio.harness.contributor.api.GoalSnapshot;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.capability.ExpectedFile;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApproval;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEditReview;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
-import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
+import fun.fengwk.kkstudio.harness.spi.ToolGateway;
+import fun.fengwk.kkstudio.harness.spi.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
+import fun.fengwk.kkstudio.harness.tool.TurnMediaCapabilities;
 
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Consumer;
 
@@ -61,19 +66,25 @@ class ToolGatewayTest {
   @Test
   void executionFreezesTheKeyAndTheRequest() {
     ToolGateway.RemoteExecutionObserver observer = recordingObserver();
+    UUID threadId = UUID.fromString("00000000-0000-0000-0000-000000000007");
     ToolGateway.Execution execution =
         new ToolGateway.Execution(
             UUID.fromString("00000000-0000-0000-0000-000000000009"),
-            UUID.fromString("00000000-0000-0000-0000-000000000007"),
-            UUID.fromString("00000000-0000-0000-0000-00000000000b"),
+            scope(threadId),
             1,
             PortTestData.toolRequest(),
             ToolApproval.notRequired(),
             observer);
     assertEquals(UUID.fromString("00000000-0000-0000-0000-000000000009"), execution.invocationId());
-    assertEquals(UUID.fromString("00000000-0000-0000-0000-000000000007"), execution.threadId());
+    assertEquals(threadId, execution.scope().threadId());
     assertEquals(
-        UUID.fromString("00000000-0000-0000-0000-00000000000b"), execution.assistantEntryId());
+        UUID.fromString("00000000-0000-0000-0000-0000000000c1"), execution.scope().sessionId());
+    assertEquals(
+        UUID.fromString("00000000-0000-0000-0000-0000000000c2"), execution.scope().rootThreadId());
+    assertEquals(
+        UUID.fromString("00000000-0000-0000-0000-0000000000c3"), execution.scope().rootSessionId());
+    assertEquals(TurnMediaCapabilities.NONE, execution.scope().mediaCapabilities());
+    assertNotNull(execution.scope().branch());
     assertEquals(1, execution.attempt());
     assertEquals(PortTestData.toolRequest(), execution.request());
     assertEquals(ToolApproval.notRequired(), execution.approval());
@@ -84,8 +95,7 @@ class ToolGatewayTest {
         () ->
             new ToolGateway.Execution(
                 UUID.fromString("00000000-0000-0000-0000-000000000001"),
-                UUID.fromString("00000000-0000-0000-0000-000000000001"),
-                UUID.fromString("00000000-0000-0000-0000-000000000001"),
+                scope(UUID.fromString("00000000-0000-0000-0000-000000000001")),
                 1,
                 null,
                 ToolApproval.notRequired(),
@@ -95,8 +105,7 @@ class ToolGatewayTest {
         () ->
             new ToolGateway.Execution(
                 UUID.fromString("00000000-0000-0000-0000-000000000001"),
-                UUID.fromString("00000000-0000-0000-0000-000000000001"),
-                UUID.fromString("00000000-0000-0000-0000-000000000001"),
+                scope(UUID.fromString("00000000-0000-0000-0000-000000000001")),
                 1,
                 PortTestData.toolRequest(),
                 null,
@@ -106,8 +115,7 @@ class ToolGatewayTest {
         () ->
             new ToolGateway.Execution(
                 UUID.fromString("00000000-0000-0000-0000-000000000001"),
-                UUID.fromString("00000000-0000-0000-0000-000000000001"),
-                UUID.fromString("00000000-0000-0000-0000-000000000001"),
+                scope(UUID.fromString("00000000-0000-0000-0000-000000000001")),
                 1,
                 PortTestData.toolRequest(),
                 ToolApproval.notRequired(),
@@ -130,8 +138,7 @@ class ToolGatewayTest {
     ToolGateway.Execution reviewedExecution =
         new ToolGateway.Execution(
             UUID.fromString("00000000-0000-0000-0000-000000000009"),
-            UUID.fromString("00000000-0000-0000-0000-000000000007"),
-            UUID.fromString("00000000-0000-0000-0000-00000000000b"),
+            scope(UUID.fromString("00000000-0000-0000-0000-000000000007")),
             1,
             PortTestData.toolRequest(),
             reviewedApproval,
@@ -213,8 +220,7 @@ class ToolGatewayTest {
         gateway.admit(
             new ToolGateway.Execution(
                 UUID.fromString("00000000-0000-0000-0000-000000000005"),
-                UUID.fromString("00000000-0000-0000-0000-000000000003"),
-                UUID.fromString("00000000-0000-0000-0000-000000000007"),
+                scope(UUID.fromString("00000000-0000-0000-0000-000000000003")),
                 1,
                 PortTestData.toolRequest(),
                 ToolApproval.notRequired(),
@@ -308,6 +314,33 @@ class ToolGatewayTest {
                 remoteExecutionId,
                 Duration.ofNanos(500),
                 observer));
+  }
+
+  /** 测试用的冻结上下文事实：Harness 在 admission 前随执行描述传入。 */
+  private static ToolGateway.ExecutionScope scope(UUID threadId) {
+    return new ToolGateway.ExecutionScope(
+        threadId,
+        UUID.fromString("00000000-0000-0000-0000-0000000000c1"),
+        UUID.fromString("00000000-0000-0000-0000-0000000000c2"),
+        UUID.fromString("00000000-0000-0000-0000-0000000000c3"),
+        UUID.fromString("00000000-0000-0000-0000-0000000000c4"),
+        new BranchView() {
+          @Override
+          public List<CustomStateSnapshot> customEntries(String customType) {
+            return List.of();
+          }
+
+          @Override
+          public Optional<CustomStateSnapshot> latestCustomEntry(String customType) {
+            return Optional.empty();
+          }
+
+          @Override
+          public Optional<GoalSnapshot> goal() {
+            return Optional.empty();
+          }
+        },
+        TurnMediaCapabilities.NONE);
   }
 
   /** 测试显式提供的观察者，不代替生产登记实现。 */

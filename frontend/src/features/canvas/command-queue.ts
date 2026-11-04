@@ -2,7 +2,7 @@ import { ApiError } from '@/shared/api/client'
 import {
   getCanvas,
   postCanvasCommands,
-} from '@/shared/api/studio-service'
+} from '@/features/canvas/canvas-api'
 import { compareCanvasRevisions } from '@/shared/lib/canvas-version'
 import { getCurrentUserId } from '@/features/canvas/canvas-local-store'
 import { getEditingSessionId } from '@/features/canvas/canvas-editing-session'
