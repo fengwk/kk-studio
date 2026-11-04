@@ -12,7 +12,9 @@ import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
@@ -25,8 +27,9 @@ import java.util.function.Supplier;
  * Model / Tool / local / remote 共用的退出确认入口。
  *
  * <p>数据库任何读取或提交之前先把正向 proof 冻结到本机 write-ahead journal；数据库不可用时文件仍在，重启后可重放。确认与 Join 结算提交后才
- * 删除记录。快路径只锁本 Thread，Thread 为 RUNNABLE 且没有未完成 Join 时只推进 version；需要祖先结算时先结束只读探测事务，再以 {@link
- * ExecutionExitLedger#lockAncestorChain} 作为新事务第一把锁重新确认。
+ * 删除记录。每轮重放把本进程 proof 与磁盘 journal 记录按 execution 身份合并为同一待重放集合，每个 execution 每轮最多尝试一次；目录枚举失败
+ * 只跳过本轮磁盘记录，不阻断本进程 proof。快路径只锁本 Thread，Thread 为 RUNNABLE 且没有未完成 Join 时只推进
+ * version；需要祖先结算时先结束只读探测事务，再以 {@link ExecutionExitLedger#lockAncestorChain} 作为新事务第一把锁重新确认。
  *
  * <p>同一 execution 的确认在进程内按稳定 stripe 串行化，事实与 version 推进幂等，并始终复用待确认记录的第一次 canonical proof
  * 的身份、目标和确认时刻。首次 journal 写入失败时 proof 只保留在本进程内等待重试，不能宣称跨进程 durable。事实缺失或 canonical proof 与
@@ -74,61 +77,60 @@ public final class ExecutionExitConfirmer {
     return locked(expected.executionId(), () -> confirmInLock(candidate, PHASE_CONFIRM, now));
   }
 
-  /** 重放内存 proof 与磁盘 snapshot；单条失败保留该记录并继续其它记录。 */
+  /** 重放待确认的退出证明；单条失败保留该记录并继续其它记录。 */
   public void replayPending() {
     Instant now = clock.instant();
-    Set<UUID> attempted = new HashSet<>();
+    Map<UUID, ReplayCandidate> candidates = new LinkedHashMap<>();
     for (UUID executionId : List.copyOf(proofs.keySet())) {
-      boolean replayed =
-          locked(
-              executionId,
-              () -> {
-                PendingProof pending = proofs.get(executionId);
-                if (pending == null || !shouldAttempt(executionId, now)) {
-                  return false;
-                }
-                replayOne(pending.record(), now);
-                return true;
-              });
-      if (replayed) {
-        attempted.add(executionId);
+      if (proofs.containsKey(executionId)) {
+        candidates.put(executionId, ReplayCandidate.inMemory(executionId));
       }
     }
+    if (shouldLoadDirectory(now)) {
+      try {
+        ExecutionExitJournalSnapshot snapshot = journal.loadAll();
+        directoryFailure.set(null);
+        reportFileFailures(snapshot.failures());
+        for (ExecutionExitJournalRecord record : snapshot.records()) {
+          candidates.putIfAbsent(
+              record.executionId(), ReplayCandidate.persisted(record.executionId(), record));
+        }
+      } catch (RuntimeException failure) {
+        reportDirectoryFailure(now, failure);
+      }
+    }
+    for (ReplayCandidate candidate : candidates.values()) {
+      replay(candidate, now);
+    }
+  }
 
-    ExecutionExitJournalSnapshot snapshot;
-    if (!shouldLoadDirectory(now)) {
+  private void replay(ReplayCandidate candidate, Instant now) {
+    UUID executionId = candidate.executionId();
+    if (!shouldAttempt(executionId, now)) {
       return;
     }
-    try {
-      snapshot = journal.loadAll();
-    } catch (RuntimeException failure) {
-      reportDirectoryFailure(now, failure);
-      return;
-    }
-    directoryFailure.set(null);
-    reportFileFailures(snapshot.failures());
-    for (ExecutionExitJournalRecord record : snapshot.records()) {
-      UUID executionId = record.executionId();
-      if (attempted.contains(executionId)
-          || proofs.containsKey(executionId)
-          || !shouldAttempt(executionId, now)) {
-        continue;
-      }
-      boolean replayed =
-          locked(
-              executionId,
-              () -> {
-                if (proofs.containsKey(executionId) || !shouldAttempt(executionId, now)) {
-                  return false;
-                }
-                proofs.put(executionId, new PendingProof(record));
-                replayOne(record, now);
-                return true;
-              });
-      if (replayed) {
-        attempted.add(executionId);
-      }
-    }
+    locked(
+        executionId,
+        () -> {
+          PendingProof current = proofs.get(executionId);
+          if (candidate.inMemory()) {
+            // 等待锁期间已由并发确认完成并删除 proof，本轮不再重放。
+            if (current == null) {
+              return null;
+            }
+          } else {
+            // 磁盘记录只在本进程还没有同一执行的 proof 时装入。
+            if (current != null) {
+              return null;
+            }
+            current = new PendingProof(candidate.journalRecord());
+            proofs.put(executionId, current);
+          }
+          if (shouldAttempt(executionId, now)) {
+            replayOne(current.record(), now);
+          }
+          return null;
+        });
   }
 
   private <T> T locked(UUID executionId, Supplier<T> action) {
@@ -426,6 +428,20 @@ public final class ExecutionExitConfirmer {
   }
 
   private record PendingProof(ExecutionExitJournalRecord record) {}
+
+  /** 一轮重放中的候选：内存 proof 优先，磁盘记录只补足本进程还没有的执行。 */
+  private record ReplayCandidate(
+      UUID executionId, boolean inMemory, ExecutionExitJournalRecord journalRecord) {
+
+    private static ReplayCandidate inMemory(UUID executionId) {
+      return new ReplayCandidate(executionId, true, null);
+    }
+
+    private static ReplayCandidate persisted(
+        UUID executionId, ExecutionExitJournalRecord journalRecord) {
+      return new ReplayCandidate(executionId, false, journalRecord);
+    }
+  }
 
   private record DirectoryFailure(int attempts, Instant nextAttemptAt) {}
 
