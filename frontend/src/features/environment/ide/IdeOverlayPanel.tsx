@@ -92,6 +92,12 @@ export function IdeOverlayPanel({
   const [dirtyCloseEnvironmentId, setDirtyCloseEnvironmentId] = useState<string | null>(null)
   const [discarding, setDiscarding] = useState(false)
   const lastSelectedRef = useRef(selectedEnvironmentId)
+  const viewsRef = useRef(views)
+  const forceBindingRef = useRef<{ viewId: string; bindingEpoch: string } | null>(null)
+
+  useEffect(() => {
+    viewsRef.current = views
+  }, [views])
 
   useEffect(() => {
     if (lastSelectedRef.current === selectedEnvironmentId) {
@@ -158,8 +164,13 @@ export function IdeOverlayPanel({
     if (selectedEnvironmentId == null) {
       return
     }
+    const view = viewsRef.current[selectedEnvironmentId]
     void onCloseEnvironment(selectedEnvironmentId, false).then((result) => {
-      if (!result.ok && result.dirty) {
+      const current = viewsRef.current[selectedEnvironmentId]
+      if (!result.ok && result.dirty && view?.bindingEpoch != null
+        && current?.viewId === view.viewId && current.bindingEpoch === view.bindingEpoch
+        && lastSelectedRef.current === selectedEnvironmentId) {
+        forceBindingRef.current = { viewId: view.viewId, bindingEpoch: view.bindingEpoch }
         setDirtyCloseEnvironmentId(selectedEnvironmentId)
       }
     })
@@ -167,6 +178,12 @@ export function IdeOverlayPanel({
 
   const handleDiscardClose = useCallback(async () => {
     if (dirtyCloseEnvironmentId == null || discarding) {
+      return
+    }
+    const current = viewsRef.current[dirtyCloseEnvironmentId]
+    if (current?.viewId !== forceBindingRef.current?.viewId
+      || current?.bindingEpoch !== forceBindingRef.current?.bindingEpoch) {
+      setDirtyCloseEnvironmentId(null)
       return
     }
     setDiscarding(true)

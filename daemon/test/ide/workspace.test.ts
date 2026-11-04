@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, parse } from 'node:path'
 import type { DaemonConfig } from '../../src/contracts.js'
 import { IdeError, safeMessage } from '../../src/ide/errors.js'
 import { verifyPrivateFile } from '../../src/native/index.js'
@@ -9,6 +9,7 @@ import {
   RecoveryQuotaError,
   canonicalDirectory,
   hostHome,
+  listDirectories,
   newViewId,
   readRecoveryBackup,
   recoveryDirectory,
@@ -58,6 +59,49 @@ function backup(viewId: string, text = 'unsaved'): RecoveryBackup {
 }
 
 describe('view identity and workspace files', () => {
+  it('lists sorted real child directories and resolves the input symlink', async () => {
+    const dir = await tempDir()
+    const target = join(dir, 'target')
+    await mkdir(target)
+    await mkdir(join(target, 'z'))
+    await mkdir(join(target, 'a'))
+    await writeFile(join(target, 'file'), '')
+    const linkType = process.platform === 'win32' ? 'junction' : 'dir'
+    await symlink(join(target, 'a'), join(target, 'link'), linkType)
+    await symlink(target, join(dir, 'alias'), linkType)
+    const canonicalTarget = await realpath(target)
+    // Child links and files are not traversed, but the input is canonicalized.
+    expect(await listDirectories(join(dir, 'alias'))).toEqual({
+      path: canonicalTarget, parentPath: await realpath(dir),
+      children: [{ name: 'a', path: join(canonicalTarget, 'a') }, { name: 'z', path: join(canonicalTarget, 'z') }],
+      truncated: false,
+    })
+    expect((await listDirectories(parse(canonicalTarget).root)).parentPath).toBeUndefined()
+    await expect(listDirectories('relative')).rejects.toThrow()
+    await expect(listDirectories(join(dir, 'missing'))).rejects.toThrow()
+    await expect(listDirectories(join(target, 'file'))).rejects.toThrow()
+  })
+
+  it('bounds listings by both entry count and serialized bytes', async () => {
+    // A short parent keeps the byte limit from masking the 1000-entry limit.
+    const dir = await mkdtemp(join(tmpdir(), 'x'))
+    cleanups.push(() => rm(dir, { recursive: true, force: true }))
+    const many = dir
+    const long = join(dir, 'long')
+    await mkdir(long)
+    await Promise.all(Array.from({ length: 1001 }, (_, i) => mkdir(join(many, String(i).padStart(4, '0')))))
+    const count = await listDirectories(many)
+    expect(count.truncated).toBe(true)
+    expect(count.children).toHaveLength(1000)
+    expect(count.children.at(-1)?.name).toBe('0999')
+    await Promise.all(Array.from({ length: 300 }, (_, i) => mkdir(join(long, `${String(i).padStart(4, '0')}${'界'.repeat(60)}`))))
+    const bytes = await listDirectories(long)
+    // Multibyte names hit the byte bound well before the count bound.
+    expect(bytes.truncated).toBe(true)
+    expect(bytes.children.length).toBeLessThan(300)
+    expect(Buffer.byteLength(JSON.stringify(bytes))).toBeLessThanOrEqual(48 * 1024)
+  })
+
   it('accepts only canonical lowercase UUIDs and positive long epochs', () => {
     expect(validateViewId('11111111-1111-4111-8111-111111111111')).toBe('11111111-1111-4111-8111-111111111111')
     expect(() => validateViewId('AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA')).toThrow(IdeError)

@@ -242,5 +242,17 @@ describe('environmentService', () => {
       '/environments/env%2Fa/ide/views/c1000000-0000-4000-8000-000000000001',
       { data: binding },
     )
+    await service.closeIdeView('env/a', 'view/a', { ...binding, discard: false })
+    expect(client.delete).toHaveBeenLastCalledWith(
+      '/environments/env%2Fa/ide/views/view%2Fa',
+      { data: { ...binding, discard: false }, timeout: 0 },
+    )
+  })
+
+  it('sends the binding to the mobile layout endpoint', async () => {
+    const client = createMockHttpClient()
+    const binding = { documentId: 'doc', bindingEpoch: '7' }
+    await createEnvironmentService(client).setIdeViewMobileLayout('env/a', 'view/a', binding)
+    expect(client.post).toHaveBeenCalledWith('/environments/env%2Fa/ide/views/view%2Fa/mobile-layout', binding)
   })
 })

@@ -19,6 +19,7 @@ interface MutationConfig extends RequestConfig {
 
 interface DeleteConfig extends GetConfig {
   data?: unknown
+  timeout?: number
 }
 
 export interface HttpClient {

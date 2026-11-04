@@ -12,6 +12,7 @@ import fun.fengwk.kkstudio.platform.daemon.protocol.IdeCommand;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeChangeDirectoryDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeCloseViewDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeDirectoryListingDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeOpenViewDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewBindingDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewDTO;
@@ -225,6 +226,18 @@ class IdeLeaseCoordinatorTest {
     public void focusTerminal(
         EnvironmentId environmentId, String viewId, EnvironmentIdeViewBindingDTO request) {
       throw new AssertionError("unexpected focus");
+    }
+
+    @Override
+    public void collapseMobile(
+        EnvironmentId environmentId, String viewId, EnvironmentIdeViewBindingDTO request) {
+      throw new AssertionError("unexpected mobile layout");
+    }
+
+    @Override
+    public EnvironmentIdeDirectoryListingDTO listDirectories(
+        EnvironmentId environmentId, String path) {
+      throw new AssertionError("unexpected directory listing");
     }
 
     @Override

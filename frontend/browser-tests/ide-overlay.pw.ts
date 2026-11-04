@@ -218,9 +218,8 @@ async function installTransport(page: Page, state: TransportState): Promise<void
           status: 409,
           json: {
             status: 409,
-            code: 'IDE_UNAVAILABLE',
-            message: 'IDE view has unsaved changes; save or discard',
-            errors: { detail: 'DIRTY: save or discard' },
+            code: 'ide_unavailable',
+            message: 'IDE bridge unavailable',
           },
         })
         return
@@ -483,9 +482,9 @@ test.describe('tab-global IDE panel', () => {
     await page.getByRole('button', { name: '取消' }).click()
     state.dirtyCloseOnce = true
     await page.getByTestId('ide-close-btn').click()
-    const confirmation = page.getByRole('alertdialog', { name: '放弃未保存的修改？' })
+    const confirmation = page.getByRole('alertdialog', { name: '强制关闭 IDE 视图？' })
     await expect(confirmation).toBeVisible()
-    for (const label of ['取消', '放弃并关闭']) {
+    for (const label of ['取消', '强制关闭']) {
       const target = (await confirmation.getByRole('button', { name: label }).boundingBox())!
       expect(target.width).toBeGreaterThanOrEqual(44)
       expect(target.height).toBeGreaterThanOrEqual(44)
@@ -611,7 +610,7 @@ test.describe('tab-global IDE panel', () => {
     expect(state.directoryCalls).toHaveLength(0)
   })
 
-  test('dirty close keeps the iframe until the user explicitly discards', async ({ page }) => {
+  test('unknown close state keeps the iframe until the user explicitly forces close', async ({ page }) => {
     const state = createState()
     await openHarness(page, state)
     await openEnvironment(page, 'A')
@@ -621,7 +620,7 @@ test.describe('tab-global IDE panel', () => {
 
     state.dirtyCloseOnce = true
     await page.getByTestId('ide-close-btn').click()
-    await expect(page.getByRole('alertdialog', { name: '放弃未保存的修改？' })).toBeVisible()
+    await expect(page.getByRole('alertdialog', { name: '强制关闭 IDE 视图？' })).toBeVisible()
     await expect(page.getByTestId('ide-iframe')).toHaveCount(1)
     await expect.poll(() => state.closeCalls.length).toBe(1)
     expect(state.closeCalls[0]).toMatchObject({
@@ -630,7 +629,7 @@ test.describe('tab-global IDE panel', () => {
       body: { discard: false },
     })
 
-    await page.getByRole('button', { name: '放弃并关闭' }).click()
+    await page.getByRole('button', { name: '强制关闭' }).click()
     await expect(page.getByTestId('ide-overlay-panel')).toHaveAttribute('hidden')
     await expect(page.getByTestId('ide-iframe')).toHaveCount(0)
     await expect.poll(() => state.closeCalls.length).toBe(2)

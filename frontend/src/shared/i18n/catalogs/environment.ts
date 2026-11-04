@@ -83,16 +83,16 @@ export const environmentCatalog = {
     'zh-CN': 'IDE 绑定已变化，结果未应用。',
   },
   'ai.ide.dirtyDiscardTitle': {
-    'en-US': 'Discard unsaved changes?',
-    'zh-CN': '放弃未保存的修改？',
+    'en-US': 'Force close IDE view?',
+    'zh-CN': '强制关闭 IDE 视图？',
   },
   'ai.ide.dirtyDiscardMessage': {
-    'en-US': 'The IDE has unsaved changes and rejected the close. Discard them and close this view?',
-    'zh-CN': 'IDE 中存在未保存的修改，已拒绝关闭。放弃这些修改并关闭视图？',
+    'en-US': 'The IDE state is unknown or unreachable. Force closing may discard unsaved changes. Continue?',
+    'zh-CN': 'IDE 状态未知或无法连接。强制关闭可能丢失未保存的修改，是否继续？',
   },
   'ai.ide.discardAndClose': {
-    'en-US': 'Discard and Close',
-    'zh-CN': '放弃并关闭',
+    'en-US': 'Force Close',
+    'zh-CN': '强制关闭',
   },
   'ai.ide.openTerminal': {
     'en-US': 'Open Terminal',

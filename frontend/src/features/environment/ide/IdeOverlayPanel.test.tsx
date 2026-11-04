@@ -117,7 +117,7 @@ describe('IdeOverlayPanel', () => {
     expect(await screen.findByText('无法复制目录路径')).toBeVisible()
   })
 
-  it('keeps the iframe after a dirty close and only sends discard from the explicit confirmation', async () => {
+  it('keeps the iframe after an unknown close and only forces from explicit confirmation', async () => {
     const user = userEvent.setup()
     const onCloseEnvironment = vi.fn()
       .mockResolvedValueOnce({ ok: false, dirty: true })
@@ -126,12 +126,12 @@ describe('IdeOverlayPanel', () => {
 
     await user.click(screen.getByTestId('ide-close-btn'))
 
-    const dialog = await screen.findByRole('alertdialog', { name: '放弃未保存的修改？' })
-    expect(within(dialog).getByText('IDE 中存在未保存的修改，已拒绝关闭。放弃这些修改并关闭视图？')).toBeVisible()
+    const dialog = await screen.findByRole('alertdialog', { name: '强制关闭 IDE 视图？' })
+    expect(within(dialog).getByText('IDE 状态未知或无法连接。强制关闭可能丢失未保存的修改，是否继续？')).toBeVisible()
     expect(screen.getAllByTestId('ide-iframe')).toHaveLength(2)
     expect(onCloseEnvironment).toHaveBeenNthCalledWith(1, ENV_A, false)
 
-    await user.click(within(dialog).getByRole('button', { name: '放弃并关闭' }))
+    await user.click(within(dialog).getByRole('button', { name: '强制关闭' }))
     await waitFor(() => {
       expect(onCloseEnvironment).toHaveBeenNthCalledWith(2, ENV_A, true)
     })
