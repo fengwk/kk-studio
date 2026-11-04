@@ -181,16 +181,14 @@ public class EnvironmentDaemonAdmissionController {
 
   private void sendUpgradeRequired(HttpServletRequest request, HttpServletResponse response)
       throws IOException {
-    UpgradeRequired.Builder builder =
-        UpgradeRequired.newBuilder()
-            .setTargetProtocolVersion(ControlProtocolCodec.PROTOCOL_VERSION);
+    UpgradeRequired.Builder builder = UpgradeRequired.newBuilder();
 
     String platformHeader = request.getHeader(HEADER_PLATFORM);
     if (platformHeader != null && !platformHeader.isBlank()) {
-      populateArtifactMetadata(builder, platformHeader.trim());
+      populateTargetVersion(builder, platformHeader.trim());
     }
 
-    byte[] payload = builder.build().toByteArray();
+    byte[] payload = builder.hasTargetVersion() ? builder.build().toByteArray() : new byte[0];
     response.setStatus(426);
     response.setContentType("application/x-protobuf");
     response.setContentLength(payload.length);
@@ -198,7 +196,7 @@ public class EnvironmentDaemonAdmissionController {
     response.flushBuffer();
   }
 
-  private void populateArtifactMetadata(UpgradeRequired.Builder builder, String platformHeader) {
+  private void populateTargetVersion(UpgradeRequired.Builder builder, String platformHeader) {
     DaemonReleaseProvider provider = releaseProvider.getIfAvailable();
     if (provider == null) {
       return;
@@ -219,11 +217,7 @@ public class EnvironmentDaemonAdmissionController {
     }
 
     Optional<DaemonReleaseTarget> targetOpt = provider.resolveTarget(os, arch);
-    if (targetOpt.isPresent()) {
-      DaemonReleaseTarget target = targetOpt.get();
-      builder.setArtifactUrl(target.artifactUrl());
-      builder.setArtifactSha256(target.artifactSha256());
-    }
+    targetOpt.ifPresent(target -> builder.setTargetVersion(target.targetVersion()));
   }
 
   private static boolean isWebSocketUpgradeRequest(HttpServletRequest request) {

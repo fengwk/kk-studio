@@ -52,7 +52,6 @@ import {
 import { Runtime, type TemporaryResourceSweeper, type UpdatePort, type UpdateProgressReporter } from '../src/runtime.js'
 import { fileCapabilities } from '../src/coding/files.js'
 import { processCapabilities } from '../src/coding/process.js'
-import { artifactFixture } from './support/update-fixture.js'
 import {
   FakeTransport,
   fakeProcessSupervisor,
@@ -60,6 +59,8 @@ import {
   tick,
   waitFor,
 } from './helpers.js'
+
+const UPDATE_TARGET_VERSION = '1.1.1'
 
 const ENV = '11111111-2222-4333-8444-555555555555'
 const OTHER_ENV = '99999999-2222-4333-8444-555555555555'
@@ -1358,7 +1359,7 @@ describe('runtime update handling', () => {
   const operationId = '33333333-4444-4555-8666-777777777777'
   const command = {
     operationId,
-    targetVersion: artifactFixture.targetVersion,
+    targetVersion: UPDATE_TARGET_VERSION,
   }
 
   it('acknowledges ACCEPTED then reports PREPARED and dedups by operationId', async () => {
@@ -2139,7 +2140,7 @@ describe('runtime extension handlers', () => {
   const operationId = '33333333-4444-4555-8666-777777777777'
   const command = {
     operationId,
-    targetVersion: artifactFixture.targetVersion,
+    targetVersion: UPDATE_TARGET_VERSION,
   }
   const binding = {
     generation: '1',
@@ -2562,7 +2563,7 @@ describe('runtime connection management', () => {
     retry.runtime.close()
   })
 
-  it('runs managed update on 426 with artifacts without being aborted by shutdown', async () => {
+  it('runs managed update on 426 with a target version without being aborted by shutdown', async () => {
     const updateGate = Promise.withResolvers<void>()
     let observedSignal: AbortSignal | null = null
     const update: UpdatePort = {
@@ -2577,11 +2578,7 @@ describe('runtime connection management', () => {
     const setup = buildRuntime({ update })
     setup.runtime.start()
     await waitFor(() => setup.transport.connection !== null)
-    setup.transport.listener?.onUpgradeFailed(426, {
-      targetProtocolVersion: 1,
-      artifactUrl: 'https://github.com/fengwk/kk-studio/releases/download/v1.0.0/kk-studio-daemon-v1.0.0-linux-amd64.tar.gz',
-      artifactSha256: 'a'.repeat(64),
-    })
+    setup.transport.listener?.onUpgradeFailed(426, { targetVersion: '1.0.0' })
     await waitFor(() => setup.runtime.getRuntimeStatus().status.update !== null)
     expect(observedSignal).not.toBeNull()
     expect((observedSignal as unknown as AbortSignal).aborted).toBe(false)
@@ -2792,7 +2789,7 @@ describe('runtime IDE command lifetime and shutdown convergence', () => {
         environmentId: ENV,
         payload: {
           operationId: '55555555-4444-4555-8666-777777777777',
-          targetVersion: artifactFixture.targetVersion,
+          targetVersion: UPDATE_TARGET_VERSION,
         },
       }),
     )

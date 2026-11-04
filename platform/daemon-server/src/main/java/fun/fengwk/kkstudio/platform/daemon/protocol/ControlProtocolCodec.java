@@ -12,7 +12,6 @@ import fun.fengwk.kkstudio.platform.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.platform.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.platform.daemon.DaemonIdeLease;
 import fun.fengwk.kkstudio.platform.daemon.DaemonPresignedPut;
-import fun.fengwk.kkstudio.platform.daemon.DaemonUpdateArtifact;
 import fun.fengwk.kkstudio.platform.daemon.DaemonUpdateCommand;
 import fun.fengwk.kkstudio.platform.daemon.DaemonUpdateProgress;
 import fun.fengwk.kkstudio.platform.daemon.DaemonUpdateResult;
@@ -191,32 +190,13 @@ public final class ControlProtocolCodec {
       throw new ControlProtocolException("upgradeRequired must not be null");
     }
     requireNoUnknown(upgrade, "upgradeRequired");
-    requireInt32(
-        upgrade.hasTargetProtocolVersion(),
-        upgrade.getTargetProtocolVersion(),
-        "upgradeRequired.targetProtocolVersion",
-        1,
-        Integer.MAX_VALUE);
-    boolean hasUrl = upgrade.hasArtifactUrl();
-    boolean hasSha = upgrade.hasArtifactSha256();
-    if (hasUrl != hasSha) {
-      throw new ControlProtocolException(
-          "upgradeRequired artifactUrl and artifactSha256 must both be present or both absent");
+    if (!upgrade.hasTargetVersion()) {
+      throw new ControlProtocolException("upgradeRequired.targetVersion is required");
     }
-    if (hasUrl) {
-      String url =
-          requireText(
-              true,
-              upgrade.getArtifactUrl(),
-              "upgradeRequired.artifactUrl",
-              Integer.MAX_VALUE,
-              true);
-      requireArtifactUrl(url, "upgradeRequired.artifactUrl");
-      requirePattern(
-          true,
-          upgrade.getArtifactSha256(),
-          "upgradeRequired.artifactSha256",
-          DaemonUpdateArtifact.SHA256_PATTERN);
+    try {
+      DaemonCapabilities.validateDaemonVersion(upgrade.getTargetVersion());
+    } catch (IllegalArgumentException error) {
+      throw new ControlProtocolException("upgradeRequired.targetVersion is invalid", error);
     }
     return upgrade;
   }
@@ -1182,12 +1162,6 @@ public final class ControlProtocolCodec {
     requireText(true, value, name, MAX_IDE_PATH_CHARS, true);
     if (value.codePoints().anyMatch(code -> code <= 0x1f || code == 0x7f)) {
       throw new ControlProtocolException(name + " must not contain control characters");
-    }
-  }
-
-  private static void requireArtifactUrl(String value, String name) {
-    if (!DaemonUpdateArtifact.ARTIFACT_URL_PATTERN.matcher(value).matches()) {
-      throw new ControlProtocolException(name + " must be the official platform release archive");
     }
   }
 

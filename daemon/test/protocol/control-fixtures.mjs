@@ -156,8 +156,6 @@ const CLAIM = '55555555-5555-4555-8555-555555555555'
 const TRANSFER = '66666666-6666-4666-8666-666666666666'
 const UPLOAD = '77777777-7777-4777-8777-777777777777'
 const OPERATION = '88888888-8888-4888-8888-888888888888'
-const ARTIFACT =
-  'https://github.com/fengwk/kk-studio/releases/download/v1.2.3/kk-studio-daemon-v1.2.3-linux-amd64.tar.gz'
 
 function runtimeSnapshot(withUpdate) {
   return create(RuntimeSnapshotSchema, {
@@ -423,11 +421,7 @@ export function errorEnvelope() {
 }
 
 export function upgradeRequired() {
-  return create(UpgradeRequiredSchema, {
-    targetProtocolVersion: 1,
-    artifactUrl: ARTIFACT,
-    artifactSha256: 'b'.repeat(64),
-  })
+  return create(UpgradeRequiredSchema, { targetVersion: '1.2.3' })
 }
 
 export const GOLDEN_FIXTURES = [

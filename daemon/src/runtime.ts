@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { create } from '@bufbuild/protobuf'
 
-import { DAEMON_VERSION_PATTERN, parseReleaseArtifactUrl } from './release.js'
+import { DAEMON_VERSION_PATTERN } from './release.js'
 import type {
   CapabilityCall,
   CapabilityContext,
@@ -302,8 +302,8 @@ export class Runtime {
       return
     }
     if (statusCode === 426) {
-      const target = upgradeRequired?.artifactUrl ? parseReleaseArtifactUrl(upgradeRequired.artifactUrl) : null
-      if (target !== null && upgradeRequired?.artifactSha256 && this.update !== null) {
+      const targetVersion = upgradeRequired?.targetVersion
+      if (targetVersion !== undefined && this.update !== null) {
         const operationId = randomUUID()
         const updateCommand = create(EnvelopeSchema, {
           messageType: MessageType.UPDATE,
@@ -313,7 +313,7 @@ export class Runtime {
             value: {
               $typeName: 'kkstudio.environment.control.Update',
               operationId,
-              targetVersion: target.targetVersion,
+              targetVersion,
             },
           },
         })
@@ -322,13 +322,13 @@ export class Runtime {
         const active: ActiveUpdate = {
           operationId,
           commandKey: receipt.commandKey,
-          targetVersion: target.targetVersion,
+          targetVersion,
           controller: new AbortController(),
           receipt,
           prepared: false,
         }
         this.activeUpdate = active
-        this.runtimeStatus.beginUpdate(target.targetVersion)
+        this.runtimeStatus.beginUpdate(targetVersion)
         void this.track(
           (async () => {
             await this.executeUpdate(active, updateCommand.payload.value as Update)

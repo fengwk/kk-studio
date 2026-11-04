@@ -202,14 +202,12 @@ class EnvironmentDaemonAdmissionControllerTest {
     assertEquals(426, response.getStatus());
     assertEquals("application/x-protobuf", response.getContentType());
     UpgradeRequired proto = UpgradeRequired.parseFrom(response.getContentAsByteArray());
-    assertEquals(ControlProtocolCodec.PROTOCOL_VERSION, proto.getTargetProtocolVersion());
-    assertFalse(proto.hasArtifactUrl());
-    assertFalse(proto.hasArtifactSha256());
+    assertFalse(proto.hasTargetVersion());
     assertNoSecretLeak(response);
   }
 
   @Test
-  void protocolMismatchWithReleaseReturns426WithArtifactMetadata() throws Exception {
+  void protocolMismatchWithReleaseReturns426WithTargetVersion() throws Exception {
     testReleaseProvider.target =
         new DaemonReleaseTarget(
             "1.0.0",
@@ -228,11 +226,8 @@ class EnvironmentDaemonAdmissionControllerTest {
     assertEquals(426, response.getStatus());
     assertEquals("application/x-protobuf", response.getContentType());
     UpgradeRequired proto = UpgradeRequired.parseFrom(response.getContentAsByteArray());
-    assertEquals(ControlProtocolCodec.PROTOCOL_VERSION, proto.getTargetProtocolVersion());
-    assertTrue(proto.hasArtifactUrl());
-    assertEquals(testReleaseProvider.target.artifactUrl(), proto.getArtifactUrl());
-    assertTrue(proto.hasArtifactSha256());
-    assertEquals(testReleaseProvider.target.artifactSha256(), proto.getArtifactSha256());
+    assertTrue(proto.hasTargetVersion());
+    assertEquals(testReleaseProvider.target.targetVersion(), proto.getTargetVersion());
     assertNoSecretLeak(response);
   }
 

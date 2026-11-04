@@ -125,11 +125,11 @@ message Envelope {
   }
 }
 
-// HTTP 426 升级拒绝的 protobuf 载荷。
+// HTTP 426 升级拒绝的 protobuf 载荷；只携带 Studio 当前 Daemon 目标版本。
 message UpgradeRequired {
-  optional int32 target_protocol_version = 1;
-  optional string artifact_url = 2;
-  optional string artifact_sha256 = 3;
+  optional string target_version = 1;
+  reserved 2, 3;
+  reserved "artifact_url", "artifact_sha256";
 }
 
 message Settings {

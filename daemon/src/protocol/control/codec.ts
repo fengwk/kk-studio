@@ -36,7 +36,7 @@ import {
   type UpdateResult,
   type UpgradeRequired,
 } from '../../generated/control_pb.js'
-import { DAEMON_VERSION_PATTERN, parseReleaseArtifactUrl } from '../../release.js'
+import { DAEMON_VERSION_PATTERN } from '../../release.js'
 import { frame, unframe } from './framing.js'
 import {
   MAX_MESSAGE_BYTES,
@@ -75,7 +75,6 @@ export const MAX_PRESIGNED_HEADER_CHARS = 1024
 export const MAX_POSITIVE_BIGINT = 9223372036854775807n
 
 const CAPABILITY_ID_PATTERN = /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/
-const SHA256_ANY_PATTERN = /^[0-9a-fA-F]{64}$/
 const IDE_CODE_PATTERN = /^[A-Z][A-Z0-9_]{0,63}$/
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f-\u009f]/
 
@@ -166,25 +165,10 @@ export function encodeFrame(envelope: Envelope): Uint8Array {
 /** Validates the HTTP 426 upgrade payload. It is not a control-stream envelope. */
 export function validateUpgrade(upgrade: UpgradeRequired): UpgradeRequired {
   assertNoUnknown(upgrade, 'upgradeRequired')
-  requirePositiveInt32(
-    upgrade.targetProtocolVersion,
-    'upgradeRequired.targetProtocolVersion',
-  )
-  const hasUrl = upgrade.artifactUrl !== undefined
-  const hasSha = upgrade.artifactSha256 !== undefined
-  if (hasUrl !== hasSha) {
-    throw new Error('upgradeRequired artifactUrl and artifactSha256 must both be present or both absent')
-  }
-  if (hasUrl) {
-    const url = requireText(upgrade.artifactUrl, 'upgradeRequired.artifactUrl', { nonBlank: true })
-    if (parseReleaseArtifactUrl(url) === null) {
-      throw new Error('upgradeRequired.artifactUrl must be the official platform release archive')
-    }
-    const sha = requireText(upgrade.artifactSha256, 'upgradeRequired.artifactSha256', { nonBlank: true })
-    if (!SHA256_ANY_PATTERN.test(sha)) {
-      throw new Error('upgradeRequired.artifactSha256 has invalid syntax')
-    }
-  }
+  requireText(upgrade.targetVersion, 'upgradeRequired.targetVersion', {
+    nonBlank: true,
+    pattern: DAEMON_VERSION_PATTERN,
+  })
   return upgrade
 }
 
@@ -848,14 +832,6 @@ function requireDaemonVersion(value: unknown, name: string): string {
 
 function requirePositive(value: unknown, name: string): bigint {
   return requireSafeLong(value, name, 1n, MAX_POSITIVE_BIGINT)
-}
-
-/** proto int32 is a 32-bit signed integer; values above 2^31-1 are not representable. */
-function requirePositiveInt32(value: unknown, name: string): number {
-  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > 2147483647) {
-    throw new Error(`${name} must be in 1..2147483647`)
-  }
-  return value
 }
 
 function requireSingleLine(value: unknown, name: string, maxChars = Number.MAX_SAFE_INTEGER): string {

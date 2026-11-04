@@ -1393,25 +1393,15 @@ describe('control binary codec', () => {
 })
 
 describe('upgrade payload', () => {
-  it('accepts only a positive int32 target protocol version and enforces url/sha co-presence', () => {
+  it('accepts only the target daemon version', () => {
     const upgrade = upgradeRequired()
-    expect(validateUpgrade({ ...upgrade, targetProtocolVersion: 2147483647 }).targetProtocolVersion).toBe(
-      2147483647,
-    )
+    expect(validateUpgrade(upgrade).targetVersion).toBe('1.2.3')
 
-    for (const targetProtocolVersion of [undefined, 0, -1, 1.5, 2147483648]) {
-      expect(() => validateUpgrade({ ...upgrade, targetProtocolVersion })).toThrow(
-        /targetProtocolVersion must be in 1\.\.2147483647/,
+    for (const targetVersion of [undefined, '', ' 1.2.3 ', '1.2.3 bad', 'v'.repeat(65)]) {
+      expect(() => validateUpgrade({ ...upgrade, targetVersion })).toThrow(
+        /upgradeRequired\.targetVersion/,
       )
     }
-
-    expect(validateUpgrade({ targetProtocolVersion: 1 })).toBeDefined()
-    expect(() => validateUpgrade({ targetProtocolVersion: 1, artifactUrl: upgrade.artifactUrl })).toThrow(
-      /must both be present or both absent/,
-    )
-    expect(() => validateUpgrade({ targetProtocolVersion: 1, artifactSha256: upgrade.artifactSha256 })).toThrow(
-      /must both be present or both absent/,
-    )
   })
 })
 

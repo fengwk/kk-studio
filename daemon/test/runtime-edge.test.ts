@@ -45,7 +45,8 @@ import {
   releaseStep,
 } from '../src/runtime-shutdown.js'
 import { FakeConnection, FakeTransport, fakeProcessSupervisor, testConfig, tick, waitFor } from './helpers.js'
-import { artifactFixture } from './support/update-fixture.js'
+
+const UPDATE_TARGET_VERSION = '1.1.1'
 
 const ENV = '11111111-2222-4333-8444-555555555555'
 const environment = {
@@ -499,7 +500,7 @@ describe('runtime managed update branches', () => {
   const operationId = '33333333-4444-4555-8666-777777777777'
   const command = create(UpdateSchema, {
     operationId,
-    targetVersion: artifactFixture.targetVersion,
+    targetVersion: UPDATE_TARGET_VERSION,
   })
 
   function makeUpdateEnvelope(): Envelope {
