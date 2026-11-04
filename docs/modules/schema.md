@@ -86,6 +86,9 @@ Issue 同时保持工作阶段、控制暂停和 Run 执行状态；同 Issue �
 阶段预算按 Issue/state，Work 为每 Issue 一个 durable 邮箱。
 Harness 命令按 sequence 与 idempotencyKey 唯一，Thread 持有 `execution_control`（`RUNNABLE`/`STOPPED`）与 `input_through_sequence` 输入水位；`harness_execution_exit` 每个具体 Driver/Tool/Remote 代次一行，以不可变 identity（thread/invocation/attempt/lease/kind/parent）关联，保存 `UNCONFIRMED`、三类真实退出之一或显式 `ABANDONED`，不随 Invocation 删除。`ABANDONED` 只带 `abandoned_at`，真实证据只带 `confirmed_at`；真实证据替换放弃时保留原 `abandoned_at`，两种时间都不得早于 `registered_at`，但彼此没有先后约束。仅 DRIVER/TOOL 可确认 `STUDIO_EXITED`，仅 REMOTE 可确认 `REMOTE_ACKNOWLEDGED`；REMOTE 代次必须携带 `environment_id`，DRIVER/TOOL 该列必须为 NULL。部分索引 `idx_harness_execution_exit_unconfirmed_remote` 支持按环境查询 `UNCONFIRMED` 远端代次。远端代次必须挂同 Thread/invocation/attempt/lease 的 TOOL 或 DRIVER 父代。Join 固定 `terminal_entry_id`/`final_answer_entry_id` 回执与交付坐标；Stop 在 `harness_thread_stop_receipt` 按 `(thread_id, stop_request_id)` 保存逐 Thread 回执。
 同一 Session 的执行根（`parent_thread_id IS NULL`）按规范化后的名称精确唯一，部分唯一索引 `uk_harness_thread_root_name` 裁决并发创建与重命名；冲突返回 HTTP 409、reason `THREAD_NAME_CONFLICT`。跨 Session 或子代理同名不受此约束，精确创建重放仍返回已有身份，不再次插入。
+`agent_definition.execution` 为可空 JSONB：USER 必填，BUILTIN 可为 null；非空对象恰含
+`driver` 和对象类型的 `settings`。具体 settings、注册 Driver 和模型引用由应用校验，
+Builtin 模型引用通过按 driver 过滤的索引与同事务行锁保护，不依赖数据库外键。
 Work lease 成对，环境亲和性由各模块声明。Fill First 模型组的有序成员保存在 `agent_model.group_config`，成员 Variant、立即降级状态码与
 固定冷却秒数由应用 codec 校验；`agent_model_group_cooldown` 只保存 `(组, 成员模型, 成员 Variant)`
 的冷却截止时间和写入时的组版本。组配置变更使旧版本冷却不再参与选择。组本身没有价格列，
@@ -128,9 +131,8 @@ UUID、行版本、连接和执行状态不随配置文件恢复，完整运行�
 [`FreshInstallSchemaContractTest`](../../schema/src/test/java/fun/fengwk/kkstudio/schema/FreshInstallSchemaContractTest.java)
 在隔离 PostgreSQL 执行 baseline，检查快照与 SQL 探针。
 [Platform schema 测试](../../platform/runtime/src/test/java/fun/fengwk/kkstudio/platform/harness/persistence/postgresql)
-覆盖精确表/列/外键/索引、非法事实、Blob 引用、删除语义和 seed 幂等；
-[Web bootstrap 测试](../../web/src/test/java/fun/fengwk/kkstudio/web/FlywayBootstrapArchitectureTest.java)
-验证依赖 scope 与 profile 入口。命令和数据库测试基座见 [开发与测试](../operations/development-and-testing.md)。
+覆盖精确表/列/外键/索引、非法事实、Blob 引用、删除语义和 seed 幂等。
+命令和数据库测试基座见 [开发与测试](../operations/development-and-testing.md)。
 
 上级：[系统设计](../system-design.md)。相关文档：[Platform](platform.md)、[Web](web.md)、
 [Canvas](canvas.md)、[Project](project.md)。

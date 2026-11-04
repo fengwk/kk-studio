@@ -1,4 +1,4 @@
-import { AlertCircle, Clock, RotateCcw, ShieldAlert, XCircle } from 'lucide-react'
+import { AlertCircle, Clock, RotateCcw, XCircle } from 'lucide-react'
 import { Badge } from '@/shared/ui/data/Badge'
 import { useI18n } from '@/shared/i18n'
 import { Button } from '@/shared/ui/controls/Button'
@@ -12,7 +12,6 @@ export interface IssueCardProps {
   onBlock?: () => void
   onRecover?: () => void
   onReopen?: () => void
-  onResolveUnknown?: () => void
 }
 
 /**
@@ -27,19 +26,17 @@ export function IssueCard({
   onBlock,
   onRecover,
   onReopen,
-  onResolveUnknown,
 }: IssueCardProps) {
   const { t } = useI18n()
   const { issue, currentOrLatestRun } = item
   const isBlocked = issue.state === 'BLOCKED' || Boolean(issue.blockedFromState)
-  const isUnknown = issue.pauseReason === 'UNKNOWN' || currentOrLatestRun?.status === 'UNKNOWN'
   const isWaiting = currentOrLatestRun?.status === 'WAITING'
   const isFailed = currentOrLatestRun?.status === 'FAILED'
   const isDone = issue.state === 'DONE'
 
   return (
     <article
-      className={`issue-card ${isBlocked ? 'is-blocked' : ''} ${isUnknown ? 'is-unknown' : ''}`}
+      className={`issue-card ${isBlocked ? 'is-blocked' : ''}`}
       data-testid={`issue-card-${issue.id}`}
     >
       <div className="issue-card-header">
@@ -58,12 +55,6 @@ export function IssueCard({
             >
               <AlertCircle size={12} aria-hidden="true" />
               BLOCKED
-            </Badge>
-          )}
-          {isUnknown && (
-            <Badge tone="info" title={t('projects.issue.unknownBadgeTitle')}>
-              <ShieldAlert size={12} aria-hidden="true" />
-              UNKNOWN
             </Badge>
           )}
           {issue.pauseReason === 'USER' && (
@@ -122,19 +113,6 @@ export function IssueCard({
 
       {/* 快捷操作区：与标题导航平级的共享按钮，不冒泡成卡片导航 */}
       <div className="issue-card-quick-actions">
-        {isUnknown && onResolveUnknown && (
-          <Button
-            size="compact"
-            variant="ghost"
-            danger
-            onClick={onResolveUnknown}
-            title={t('projects.issue.actionVerifyTitle')}
-          >
-            <ShieldAlert size={12} aria-hidden="true" />
-            <span>{t('projects.issue.actionVerify')}</span>
-          </Button>
-        )}
-
         {isBlocked && onRecover && (
           <Button
             size="compact"

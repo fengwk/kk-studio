@@ -51,7 +51,6 @@ import fun.fengwk.kkstudio.share.project.PauseIssueRequestDTO;
 import fun.fengwk.kkstudio.share.project.RecoverIssueRequestDTO;
 import fun.fengwk.kkstudio.share.project.ReopenIssueRequestDTO;
 import fun.fengwk.kkstudio.share.project.ResetStageBudgetRequestDTO;
-import fun.fengwk.kkstudio.share.project.ResolveUnknownIssueRequestDTO;
 import fun.fengwk.kkstudio.share.project.ResumeIssueRequestDTO;
 import fun.fengwk.kkstudio.share.project.StopIssueRequestDTO;
 import fun.fengwk.kkstudio.share.project.TransitionIssueRequestDTO;
@@ -162,7 +161,7 @@ class StudioIssueControllerTest {
     when(issueEditingService.listActivities(issueId, 0L, 50)).thenReturn(List.of());
     UUID threadId = UUID.randomUUID();
     when(issueEditingService.listAgentThreads(issueId))
-        .thenReturn(List.of(new IssueAgentThread(issueId, "coder", threadId)));
+        .thenReturn(List.of(new IssueAgentThread(issueId, "coder", UUID.randomUUID(), threadId)));
 
     IssueRun run =
         IssueRun.builder()
@@ -618,43 +617,6 @@ class StudioIssueControllerTest {
         .andExpect(jsonPath("$.data.pauseDetail").value("Manual stop"));
 
     verify(issueLifecycleService).stopIssue(issueId, 1L, "stop-1", "Manual stop");
-  }
-
-  @Test
-  void testResolveUnknown() throws Exception {
-    ResolveUnknownIssueRequestDTO req =
-        ResolveUnknownIssueRequestDTO.builder()
-            .expectedVersion("2")
-            .requestKey("res-1")
-            .verification("Verified clean")
-            .build();
-    Issue resolved =
-        Issue.builder()
-            .id(issueId)
-            .projectId(projectId)
-            .number(1L)
-            .title("Task")
-            .description("Desc")
-            .state("INIT")
-            .pauseReason(PauseReason.USER.name())
-            .pauseDetail("Verified clean")
-            .version(3L)
-            .createdAt(now)
-            .updatedAt(now)
-            .build();
-    when(issueLifecycleService.resolveUnknown(issueId, 2L, "res-1", "Verified clean"))
-        .thenReturn(resolved);
-
-    mockMvc
-        .perform(
-            post("/api/issues/" + issueId + "/resolve-unknown")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(req)))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.pauseReason").value("USER"))
-        .andExpect(jsonPath("$.data.pauseDetail").value("Verified clean"));
-
-    verify(issueLifecycleService).resolveUnknown(issueId, 2L, "res-1", "Verified clean");
   }
 
   @Test

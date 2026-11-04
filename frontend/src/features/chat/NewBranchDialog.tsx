@@ -4,7 +4,7 @@ import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
 import { Select } from '@/shared/ui/controls/Select'
 import { TextInput } from '@/shared/ui/controls/TextInput'
 import { Dialog } from '@/shared/ui/overlays/Dialog'
-import { normalizeThreadName } from '@/features/chat/thread-name'
+import { normalizeThreadName } from '@/features/thread/thread-name'
 import { useI18n } from '@/shared/i18n'
 import '@/features/chat/new-branch-dialog.css'
 

@@ -208,8 +208,9 @@ class DatabaseTurnResolverTest {
   void resolvesExactBranchModelReferencesWithoutFallback() {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
     // Agent 自带的 model/variant 引用是旧数据，绝不能被读取。
-    fixture.editAgent(agent -> agent.modelName("old-model"));
-    fixture.editAgent(agent -> agent.variant("old-variant"));
+    fixture.editAgent(
+        agent ->
+            agent.execution(BuiltinExecution.of(new ModelSelection("old-model", "old-variant"))));
     when(fixture.models.getByName("old-model")).thenReturn(null);
     TurnResolver.Resolved resolved = fixture.resolvedResult(fixture.path(settings("custom")), null);
     ModelRequestSpec requestSpec = resolved.spec();
@@ -246,7 +247,8 @@ class DatabaseTurnResolverTest {
     fixture.missingModel();
     ModelSelection backup = ModelSelection.model("backup-model", "default");
     fixture.addModel("backup-provider", backup, Fixture.parsedModel());
-    fixture.editAgent(agent -> agent.modelName("backup-model"));
+    fixture.editAgent(
+        agent -> agent.execution(BuiltinExecution.of(new ModelSelection("backup-model", null))));
 
     ModelRequestSpec requestSpec = fixture.resolved(fixture.path(settings("custom")));
 
@@ -261,7 +263,8 @@ class DatabaseTurnResolverTest {
   void rejectsWhenThreadAndAgentDefaultModelsAreBothUnavailable() {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
     fixture.missingModel();
-    fixture.editAgent(agent -> agent.modelName("backup-model"));
+    fixture.editAgent(
+        agent -> agent.execution(BuiltinExecution.of(new ModelSelection("backup-model", null))));
 
     assertEquals(
         "model model and the agent default model are both unavailable; bind an available model",
@@ -269,7 +272,8 @@ class DatabaseTurnResolverTest {
 
     fixture = new Fixture(List.of(), List.of(), List.of());
     fixture.missingModel();
-    fixture.editAgent(agent -> agent.modelName("model"));
+    fixture.editAgent(
+        agent -> agent.execution(BuiltinExecution.of(new ModelSelection("model", null))));
     assertEquals(
         "model model and the agent default model are both unavailable; bind an available model",
         fixture.rejected(fixture.path(settings("default"))).error().message());
@@ -3608,7 +3612,7 @@ class DatabaseTurnResolverTest {
               .systemPrompt(COMPACTION_SYSTEM_PROMPT)
               .configJson("agent-config");
       if (selection != null) {
-        compaction.modelName(selection.modelName()).variant(selection.variant());
+        compaction.execution(BuiltinExecution.of(selection));
       }
       when(agents.getByName("Compaction")).thenReturn(compaction.build());
     }

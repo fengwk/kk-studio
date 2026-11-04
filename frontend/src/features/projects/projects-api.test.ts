@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { HttpClient } from '@/shared/api/client'
+import type { ProjectDTO } from '@/shared/api/generated/contracts'
 import { createProjectsApi } from './projects-api'
 
 describe('projectsApi', () => {
@@ -9,8 +10,8 @@ describe('projectsApi', () => {
     description: '',
     workflow: {
       states: [
-        { state: 'INIT', name: '待开始', next: ['DONE'] },
-        { state: 'DONE', name: '完成' },
+        { state: 'INIT', name: '待开始', agent: null, environment: null, instructions: null, maxRuns: null, next: ['DONE'] },
+        { state: 'DONE', name: '完成', agent: null, environment: null, instructions: null, maxRuns: null },
       ],
     },
     yoloEnabled: true,
@@ -19,7 +20,7 @@ describe('projectsApi', () => {
     archivedAt: null,
     createdAt: '2026-09-14T00:00:00Z',
     updatedAt: '2026-09-14T00:00:00Z',
-  }
+  } satisfies ProjectDTO
 
   const mockIssue = {
     id: 'b0000000-0000-0000-0000-000000000001',
@@ -48,14 +49,14 @@ describe('projectsApi', () => {
   const api = createProjectsApi({ client: mockClient })
 
   it('listProjects should query /projects with includeArchived parameter', async () => {
-    // 测试意图：验证 listProjects 发送 GET /projects 并正确传递 includeArchived 参数并由 decodeProjectList 解码
+    // 测试意图：生成契约数据原样返回，包含可选字段，保留查询参数。
     vi.mocked(mockClient.get).mockResolvedValueOnce([mockProject])
     const res = await api.listProjects(true)
     expect(mockClient.get).toHaveBeenCalledWith('/projects', {
       params: { includeArchived: true },
     })
     expect(res).toHaveLength(1)
-    expect(res[0].id).toBe(mockProject.id)
+    expect(res[0]).toBe(mockProject)
   })
 
   it('createProject should post to /projects with yoloEnabled', async () => {
@@ -167,8 +168,8 @@ describe('projectsApi', () => {
     expect(res.id).toBe(mockIssue.id)
   })
 
-  it('getIssue and listActivities should support pagination', async () => {
-    // 测试意图：验证 Issue 详情和活动列表查询支持游标和分页
+  it('getIssue should support pagination', async () => {
+    // 测试意图：验证 Issue 详情查询支持游标和分页
     vi.mocked(mockClient.get).mockResolvedValueOnce({
       issue: mockIssue,
       activities: [],
@@ -184,11 +185,6 @@ describe('projectsApi', () => {
       params: { afterSequence: '10', limit: 20 },
     })
 
-    vi.mocked(mockClient.get).mockResolvedValueOnce([])
-    await api.listActivities(mockIssue.id, '5', 50)
-    expect(mockClient.get).toHaveBeenCalledWith(`/issues/${mockIssue.id}/activities`, {
-      params: { afterSequence: '5', limit: 50 },
-    })
   })
 
   it('updateIssue should put to /issues/:id', async () => {
@@ -246,33 +242,6 @@ describe('projectsApi', () => {
     })
   })
 
-  it('pauseIssue and resumeIssue should control execution state', async () => {
-    // 测试意图：验证人工暂停与继续执行操作
-    vi.mocked(mockClient.post).mockResolvedValueOnce({ ...mockIssue, pauseReason: 'USER' })
-    await api.pauseIssue(mockIssue.id, {
-      expectedVersion: '2',
-      requestKey: 'k-pause',
-      reason: 'USER',
-      detail: 'Pausing manually',
-    })
-    expect(mockClient.post).toHaveBeenCalledWith(`/issues/${mockIssue.id}/pause`, {
-      expectedVersion: '2',
-      requestKey: 'k-pause',
-      reason: 'USER',
-      detail: 'Pausing manually',
-    })
-
-    vi.mocked(mockClient.post).mockResolvedValueOnce({ ...mockIssue, pauseReason: null })
-    await api.resumeIssue(mockIssue.id, {
-      expectedVersion: '3',
-      requestKey: 'k-res',
-    })
-    expect(mockClient.post).toHaveBeenCalledWith(`/issues/${mockIssue.id}/resume`, {
-      expectedVersion: '3',
-      requestKey: 'k-res',
-    })
-  })
-
   it('stopIssue should post to /issues/:id/stop', async () => {
     // 测试意图：验证 stopIssue 终止运行
     vi.mocked(mockClient.post).mockResolvedValueOnce({ ...mockIssue, pauseReason: 'USER' })
@@ -285,21 +254,6 @@ describe('projectsApi', () => {
       expectedVersion: '3',
       requestKey: 'k-stop',
       detail: 'Stopped by user',
-    })
-  })
-
-  it('resolveUnknown should post to /issues/:id/resolve-unknown', async () => {
-    // 测试意图：验证 resolveUnknown 解除 UNKNOWN 门禁
-    vi.mocked(mockClient.post).mockResolvedValueOnce({ ...mockIssue, pauseReason: null })
-    await api.resolveUnknown(mockIssue.id, {
-      expectedVersion: '4',
-      requestKey: 'k-unk',
-      verification: 'Verified no external changes',
-    })
-    expect(mockClient.post).toHaveBeenCalledWith(`/issues/${mockIssue.id}/resolve-unknown`, {
-      expectedVersion: '4',
-      requestKey: 'k-unk',
-      verification: 'Verified no external changes',
     })
   })
 
@@ -347,24 +301,6 @@ describe('projectsApi', () => {
       maxRuns: 5,
     })
     expect(budget.maxRuns).toBe(5)
-  })
-
-  it('archiveIssue and unarchiveIssue should post to sub-resources', async () => {
-    // 测试意图：验证 Issue 归档与取消归档
-    vi.mocked(mockClient.post).mockResolvedValueOnce({
-      ...mockIssue,
-      archivedAt: '2026-09-14T00:00:00Z',
-    })
-    await api.archiveIssue(mockIssue.id, { expectedVersion: '7' })
-    expect(mockClient.post).toHaveBeenCalledWith(`/issues/${mockIssue.id}/archive`, {
-      expectedVersion: '7',
-    })
-
-    vi.mocked(mockClient.post).mockResolvedValueOnce(mockIssue)
-    await api.unarchiveIssue(mockIssue.id, { expectedVersion: '8' })
-    expect(mockClient.post).toHaveBeenCalledWith(`/issues/${mockIssue.id}/unarchive`, {
-      expectedVersion: '8',
-    })
   })
 
   it('appendIssueActivity should post to /issues/:id/activities', async () => {

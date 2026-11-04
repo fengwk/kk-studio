@@ -217,8 +217,10 @@ class PluginConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     String reserved =
         "agents:\n  - name: "
             + BuiltinAgentDefinitions.COMPACTION_NAME
-            + "\n    description: overridden\n    model: acceptance-stub\n"
-            + "    systemPrompt: overridden\n";
+            + "\n    description: overridden\n"
+            + "    execution: {driver: builtin, settings: {modelName: acceptance-stub, variant: default}}\n"
+            + "    systemPrompt: overridden\n"
+            + "    config: {tools: [], skills: [], subagents: []}\n";
     mockMvc
         .perform(
             post("/api/settings/sync/import")
@@ -256,8 +258,7 @@ class PluginConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     dto.setName(name);
     dto.setDescription("agent " + name);
     dto.setSystemPrompt("prompt " + name);
-    dto.setModel("acceptance-stub");
-    dto.setVariant("default");
+    dto.setExecution(execution("acceptance-stub", "default"));
     dto.setConfig(config);
     postData("/api/agents", dto);
   }

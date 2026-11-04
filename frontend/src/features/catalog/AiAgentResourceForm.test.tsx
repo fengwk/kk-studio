@@ -71,8 +71,7 @@ function agentDefinition(name: string, description: string | null): AgentDefinit
     description,
     systemPrompt: null,
     type: 'USER',
-    model: 'MiniMax',
-    variant: null,
+    execution: { driver: 'builtin', settings: { modelName: 'MiniMax', variant: null } },
     config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
     version: '1',
     createTime: 0,
@@ -81,6 +80,38 @@ function agentDefinition(name: string, description: string | null): AgentDefinit
 }
 
 describe('AgentForm current contracts', () => {
+  it('shows an unknown driver without model prompts and preserves its settings through edits', async () => {
+    const user = userEvent.setup()
+    const execution = { driver: 'future', settings: { nested: { token: 'opaque' } } }
+    let latest: AgentDraft = { ...emptyAgentDraft(), name: 'assistant', execution }
+    function Harness() {
+      const [draft, setDraft] = useState(latest)
+      return <AgentForm mode="edit" draft={draft} models={[modelWithVariants()]} onChange={(next) => {
+        latest = next
+        setDraft(next)
+      }} />
+    }
+    render(<Harness />)
+    // 非内置执行配置不应暴露模型校验或重置入口；普通编辑不改变不透明配置。
+    expect(screen.getByLabelText('执行驱动')).toHaveTextContent('future')
+    expect(screen.queryByLabelText('Default Model')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '使用第一个 Model 填充默认配置' })).not.toBeInTheDocument()
+    await chooseSelectOption(user, '执行驱动', 'future (不可用)')
+    fireEvent.change(screen.getByPlaceholderText('用途说明'), { target: { value: 'edited' } })
+    expect(toEditableAgentUpdate(latest).execution).toEqual(execution)
+    await chooseSelectOption(user, '执行驱动', 'builtin')
+    expect(screen.getByLabelText('Default Model')).toBeInTheDocument()
+    expect(latest.execution).toBeNull()
+  })
+
+  it('does not ask for a model when an unknown driver is configured and the catalog is empty', () => {
+    // 独立于 catalog 是否为空，不支持的 driver 都不应显示 builtin 的配置引导。
+    const draft = { ...emptyAgentDraft(), name: 'assistant', execution: { driver: 'future', settings: {} } }
+    render(<AgentForm mode="edit" draft={draft} models={[]} onChange={() => undefined} />)
+    expect(screen.queryByLabelText('Default Model')).not.toBeInTheDocument()
+    expect(screen.queryByText('需要先创建 Model 才能配置 Agent。')).not.toBeInTheDocument()
+  })
+
   it('preserves multiline description and prompt through controlled edits and serialization', () => {
     let latest = { ...emptyAgentDraft(modelWithVariants()), name: 'assistant' }
     function Harness() {
@@ -313,8 +344,7 @@ describe('AgentForm current contracts', () => {
       name: 'assistant',
       description: 'my description',
       systemPrompt: 'my prompt',
-      model: 'MiniMax',
-      variant: 'fast',
+      execution: { driver: 'builtin', settings: { modelName: 'MiniMax', variant: 'fast' } },
       config: {
         inheritParentEnvironment: true,
         tools: ['bash'],
@@ -376,7 +406,7 @@ describe('AgentForm current contracts', () => {
 
     // 4. 保存为 BUILTIN 更新 payload：model 包含所选值，且 payload 不含只读 type
     const payload = toEditableAgentUpdate(currentDraft, true)
-    expect(payload.model).toBe('MiniMax')
+    expect(payload.execution).toEqual({ driver: 'builtin', settings: { modelName: 'MiniMax', variant: null } })
     expect(payload).not.toHaveProperty('type')
   })
 

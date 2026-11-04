@@ -34,8 +34,8 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.function.Function;
 
 /**
- * Tool admission 的冻结执行上下文事实：会话、执行根与其会话、assistant 分支视图与 TURN_START 冻结的消费者媒体能力都来自 Processor 已锁定的
- * Thread 与该调用的 assistant path，平台不再为此查询 Harness 存储。
+ * Tool admission 的冻结执行上下文事实：会话、执行根与其会话、该调用的 assistant 入口、assistant 分支视图与 TURN_START 冻结的消费者媒体能力都来自
+ * Processor 已锁定的 Thread 与该调用的 assistant path，平台不再为此查询 Harness 存储。
  *
  * <p>同时钉住两条恢复语义：远端重新挂接只连接既有远端执行、不读取这些事实；READY prepare 内读取这些事实失败时事务完整回滚并按旧 admission 失败路径有界重排。
  */
@@ -62,6 +62,10 @@ class ToolProcessorExecutionScopeTest {
     assertEquals(thread.sessionId(), scope.sessionId());
     assertEquals(thread.rootThreadId(), scope.rootThreadId());
     assertEquals(thread.sessionId(), scope.rootSessionId());
+    // assistant 入口就是该 Tool 调用冻结的真实调用位置，平台据此装配执行上下文而不查询 Harness 存储。
+    assertEquals(
+        ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).assistantEntryId(),
+        scope.assistantEntryId());
     // 媒体能力唯一来源是该调用 TURN_START 的冻结快照，而不是实时模型。
     assertTrue(scope.mediaCapabilities().declares(ModelInputModality.IMAGE));
     assertTrue(scope.mediaCapabilities().acceptsProtocolPosition(ModelInputModality.IMAGE));
@@ -96,6 +100,10 @@ class ToolProcessorExecutionScopeTest {
         scope.sessionId(),
         scope.rootSessionId(),
         "subagent runs in its own session while the execution root keeps the origin session");
+    assertEquals(
+        ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).assistantEntryId(),
+        scope.assistantEntryId(),
+        "child scope keeps the call's own assistant entry, not the root thread's");
     assertNotNull(scope.branch());
     assertNotNull(scope.mediaCapabilities());
   }

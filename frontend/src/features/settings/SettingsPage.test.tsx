@@ -11,7 +11,7 @@ import { SettingsPage } from '@/features/settings/SettingsPage'
 
 const mocks = vi.hoisted(() => ({ get: vi.fn(), getSchema: vi.fn(), update: vi.fn() }))
 
-vi.mock('@/shared/api/system-settings-service', () => ({
+vi.mock('@/features/settings/system-settings-service', () => ({
   systemSettingsService: { get: mocks.get, getSchema: mocks.getSchema, update: mocks.update },
   createSystemSettingsService: () => ({ get: vi.fn(), getSchema: vi.fn(), update: vi.fn() }),
 }))
@@ -30,7 +30,7 @@ const syncMocks = vi.hoisted(() => ({
   importConfig: vi.fn(),
 }))
 
-vi.mock('@/shared/api/config-sync-service', () => ({
+vi.mock('@/features/settings/config-sync-service', () => ({
   configSyncService: {
     getInventory: syncMocks.getInventory,
     exportConfig: syncMocks.exportConfig,

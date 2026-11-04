@@ -64,6 +64,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentModelRateSetDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelVariantDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.ai.mcp.McpServerCreateDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessExecutionSelectionDTO;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
 import java.io.IOException;
@@ -241,8 +242,10 @@ public class StudioMcpRuntimeToolIntegrationTest extends WebPostgresTestSupport 
     invalidConfig.setSubagents(List.of());
     AgentDefinitionCreateDTO invalidAgent = new AgentDefinitionCreateDTO();
     invalidAgent.setName(agentName + "-invalid");
-    invalidAgent.setModel(configuredModelName);
-    invalidAgent.setVariant("default");
+    HarnessExecutionSelectionDTO agentExecution = new HarnessExecutionSelectionDTO();
+    agentExecution.setDriver("builtin");
+    agentExecution.setSettings(Map.of("modelName", configuredModelName, "variant", "default"));
+    invalidAgent.setExecution(agentExecution);
     invalidAgent.setConfig(invalidConfig);
 
     mockMvc
@@ -260,8 +263,7 @@ public class StudioMcpRuntimeToolIntegrationTest extends WebPostgresTestSupport 
     validConfig.setSubagents(List.of());
     AgentDefinitionCreateDTO agentDto = new AgentDefinitionCreateDTO();
     agentDto.setName(agentName);
-    agentDto.setModel(configuredModelName);
-    agentDto.setVariant("default");
+    agentDto.setExecution(agentExecution);
     agentDto.setConfig(validConfig);
 
     mockMvc
@@ -331,6 +333,7 @@ public class StudioMcpRuntimeToolIntegrationTest extends WebPostgresTestSupport 
                 sessionId,
                 threadId,
                 sessionId,
+                UUID.randomUUID(),
                 emptyBranchView(),
                 TurnMediaCapabilities.NONE),
             1,

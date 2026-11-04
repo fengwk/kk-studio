@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.platform.configsync;
 
 import org.springframework.stereotype.Component;
 
+import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionService;
 import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgentDefinitions;
@@ -12,6 +13,7 @@ import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogService;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentInstallConfigs;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentService;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.platform.harness.builtin.BuiltinConfigSyncAdapter;
 import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
 import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsCodec;
@@ -23,6 +25,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentModelGroupDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelKind;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderEditablePropertiesDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInstallConfigDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessExecutionSelectionDTO;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncKind;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncSkipped;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSectionsDTO;
@@ -301,8 +304,14 @@ public final class ConfigSyncParser {
     declared.add(name);
     String description = entry.optString("description");
     String systemPrompt = entry.optString("systemPrompt");
-    String modelName = entry.reqString("model");
-    String variant = entry.optString("variant");
+    if (entry.raw.containsKey("model") || entry.raw.containsKey("variant")) {
+      throw new AiValidationException(RESOURCE, entry.path + " contains legacy agent fields");
+    }
+    Object executionNode = requireObject(entry, "execution");
+    Map<?, ?> executionMap = (Map<?, ?>) executionNode;
+    if (!executionMap.keySet().equals(Set.of("driver", "settings"))) {
+      throw new AiValidationException(RESOURCE, entry.path + ".execution has invalid fields");
+    }
     Object configNode = requireObject(entry, "config");
     List<String> removed = new ArrayList<>();
     Object cleanedConfig =
@@ -311,8 +320,8 @@ public final class ConfigSyncParser {
     AgentDefinitionEditablePropertiesDTO properties = new AgentDefinitionEditablePropertiesDTO();
     properties.setDescription(description);
     properties.setSystemPrompt(systemPrompt);
-    properties.setModel(modelName);
-    properties.setVariant(variant);
+    properties.setExecution(
+        yaml.convert(executionNode, HarnessExecutionSelectionDTO.class, entry.path + ".execution"));
     properties.setConfig(
         yaml.convert(cleanedConfig, AgentDefinitionConfigDTO.class, entry.path + ".config"));
     // 先用写入路径校验 known 字段（含嵌套 config 缺必填/非法值），未知字段不能绕过硬错误。
@@ -323,7 +332,8 @@ public final class ConfigSyncParser {
     if (reportUnknownConfig(removed, ConfigSyncKind.AGENTS, name, skipped)) {
       return null;
     }
-    return new AgentSpec(name, modelName, properties);
+    return new AgentSpec(
+        name, BuiltinConfigSyncAdapter.model(properties.getExecution()), properties);
   }
 
   private SkillSpec parseSkillPackage(
@@ -524,7 +534,7 @@ public final class ConfigSyncParser {
   public record ModelSpec(String name, AgentModelEditablePropertiesDTO properties) {}
 
   public record AgentSpec(
-      String name, String modelName, AgentDefinitionEditablePropertiesDTO properties) {}
+      String name, ModelSelection builtinModel, AgentDefinitionEditablePropertiesDTO properties) {}
 
   public record SkillSpec(
       String packageName,

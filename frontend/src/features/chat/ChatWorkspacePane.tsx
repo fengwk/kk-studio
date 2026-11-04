@@ -1,7 +1,8 @@
-import { AgentPane } from '@/features/chat/runtime/AgentPane'
-import type { BranchRequestInput, PaneReport } from '@/features/chat/runtime/root-thread/types'
-import type { PaneTarget } from '@/features/chat/runtime/agent-pane'
-import type { ThreadPresentation } from '@/features/chat/runtime/thread-presentation'
+import { AgentPane } from '@/features/thread/runtime/AgentPane'
+import type { BranchRequestInput, PaneReport } from '@/features/thread/runtime/root-thread/types'
+import type { PaneTarget } from '@/features/thread/runtime/agent-pane'
+import type { ThreadPresentation } from '@/features/thread/runtime/thread-presentation'
+import { chatService } from '@/features/chat/chat-service'
 import type {
   AgentDefinitionDTO,
   ChatDTO,
@@ -71,6 +72,12 @@ export function ChatWorkspacePane({
         ? undefined
         : (report) => onPaneReport(pane.id, report)}
       onPresentation={onPresentation == null ? undefined : (report) => onPresentation(pane.id, report)}
+      loadSessions={(owner) => {
+        if (owner.type !== 'CHAT') {
+          return Promise.resolve([])
+        }
+        return chatService.listChatSessions(owner.chatId)
+      }}
     />
   )
 }

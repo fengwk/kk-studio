@@ -140,8 +140,9 @@ insert into agent_provider (name, provider_type, base_url, config, connection_ge
     values ('fixture', 'openai', 'https://example.invalid', '{}', pg_temp.uid(9999));
 insert into agent_model (name, kind, provider_name, model_id, config)
     values ('fixture', 'MODEL', 'fixture', 'fixture', '{}');
-insert into agent_definition (name, model_name, config)
-    values ('designer', 'fixture', '{}'), ('reviewer', 'fixture', '{}');
+insert into agent_definition (name, execution, config)
+    values ('designer', '{"driver":"builtin","settings":{"modelName":"fixture","variant":null}}', '{}'),
+           ('reviewer', '{"driver":"builtin","settings":{"modelName":"fixture","variant":null}}', '{}');
 
 -- 名称是跨 MODEL/GROUP 的全局主键；MODEL/GROUP 字段形状由数据库约束保证。
 select pg_temp.rejects('agent model name is globally unique',
@@ -166,22 +167,30 @@ select pg_temp.assert_true('user agent is the default ownership',
     (select type = 'USER' from agent_definition where name = 'designer'));
 insert into agent_definition (name, type, config)
     values ('probe-builtin', 'BUILTIN', '{}');
-select pg_temp.assert_true('built-in agent accepts an unconfigured model',
-    (select model_name is null and variant is null
+select pg_temp.assert_true('built-in agent accepts unconfigured execution',
+    (select execution is null
         from agent_definition where name = 'probe-builtin'));
 select pg_temp.rejects('unknown agent ownership is rejected',
-    $$insert into agent_definition(name,type,model_name,config)
-      values('probe-unknown','ROOT','fixture','{}')$$,
+    $$insert into agent_definition(name,type,execution,config)
+      values('probe-unknown','ROOT','{"driver":"x","settings":{}}','{}')$$,
     '23514', 'ck_agent_definition_type');
-select pg_temp.assert_true('agent binds a globally unique model name',
-    (select model_name = 'fixture' from agent_definition where name = 'designer'));
-select pg_temp.rejects('agent variant requires a model',
-    $$insert into agent_definition(name,type,variant,config)
-      values('probe-variant','BUILTIN','default','{}')$$,
-    '23514', 'ck_agent_definition_variant_requires_model');
-select pg_temp.rejects('user agent requires a model',
+select pg_temp.assert_true('agent stores builtin execution',
+    (select execution -> 'settings' ->> 'modelName' = 'fixture' from agent_definition where name = 'designer'));
+select pg_temp.rejects('execution requires object settings',
+    $$insert into agent_definition(name,type,execution,config)
+      values('probe-invalid','BUILTIN','{"driver":"x","settings":null}','{}')$$,
+    '23514', 'ck_agent_definition_execution_shape');
+select pg_temp.rejects('user agent requires execution',
     $$insert into agent_definition(name,type,config) values('probe-user','USER','{}')$$,
-    '23514', 'ck_agent_definition_user_requires_model');
+    '23514', 'ck_agent_definition_user_requires_execution');
+select pg_temp.rejects('execution rejects extra fields',
+    $$insert into agent_definition(name,execution,config)
+      values('probe-extra','{"driver":"x","settings":{},"extra":true}','{}')$$,
+    '23514', 'ck_agent_definition_execution_shape');
+select pg_temp.rejects('execution requires a driver',
+    $$insert into agent_definition(name,execution,config)
+      values('probe-missing','{"settings":{}}','{}')$$,
+    '23514', 'ck_agent_definition_execution_shape');
 
 insert into project (id, title, description, workflow) values
     (pg_temp.uid(1), 'one', '',
@@ -265,12 +274,16 @@ delete from harness_thread where id = pg_temp.uid(306);
 select pg_temp.assert_true('deleting a thread cascades its realtime subscriptions',
     not exists(select 1 from realtime_subscription where thread_id = pg_temp.uid(306)));
 
-insert into project_issue_agent_thread (issue_id, agent_name, thread_id) values
+insert into project_issue_agent_thread (issue_id, agent_name, session_id, thread_id)
+select v.issue_id, v.agent_name, t.session_id, t.id
+from (values
     (pg_temp.uid(10), 'designer', pg_temp.uid(300)),
     (pg_temp.uid(10), 'reviewer', pg_temp.uid(301)),
     (pg_temp.uid(11), 'designer', pg_temp.uid(302)),
     (pg_temp.uid(11), 'reviewer', pg_temp.uid(303)),
-    (pg_temp.uid(13), 'designer', pg_temp.uid(305));
+    (pg_temp.uid(13), 'designer', pg_temp.uid(305))
+) as v(issue_id, agent_name, thread_id)
+join harness_thread t on t.id = v.thread_id;
 insert into project_issue_stage_budget (issue_id, state, max_runs) values
     (pg_temp.uid(10), 'WORK', 2),
     (pg_temp.uid(10), 'REVIEW', 2),
@@ -329,10 +342,10 @@ select pg_temp.assert_true('Harness Thread gained a same-Session composite key',
 select pg_temp.assert_true('chat gained a nullable archived_at',
     exists(select 1 from information_schema.columns
         where table_name = 'chat' and column_name = 'archived_at'));
-select pg_temp.assert_true('the Agent Thread binding stores no Session pointer',
-    (select count(*) = 4 from information_schema.columns
+select pg_temp.assert_true('the Agent Thread binding stores its Session',
+    (select count(*) = 5 from information_schema.columns
         where table_name = 'project_issue_agent_thread')
-    and not exists(select 1 from information_schema.columns
+    and exists(select 1 from information_schema.columns
         where table_name = 'project_issue_agent_thread' and column_name = 'session_id'));
 select pg_temp.assert_true('the stage budget stores no Session or Thread pointer',
     (select count(*) = 6 from information_schema.columns
@@ -391,8 +404,8 @@ select pg_temp.rejects('a non-BLOCKED Issue cannot keep a block reason',
 update project_issue set state='WORK', blocked_from_state=null, block_reason=null where id = pg_temp.uid(10);
 select pg_temp.rejects('pause reason without detail',
     $$update project_issue set pause_reason='ERROR' where id=pg_temp.uid(10)$$, '23514');
-select pg_temp.rejects('pause reason must be USER/ERROR/UNKNOWN',
-    $$update project_issue set pause_reason='OTHER',pause_detail='x' where id=pg_temp.uid(10)$$, '23514');
+select pg_temp.rejects('pause reason must be USER/ERROR',
+    $$update project_issue set pause_reason='UNKNOWN',pause_detail='x' where id=pg_temp.uid(10)$$, '23514');
 select pg_temp.rejects('pause detail without a reason',
     $$update project_issue set pause_detail='x' where id=pg_temp.uid(10)$$, '23514');
 update project_issue set pause_reason='ERROR', pause_detail='execution failed' where id = pg_temp.uid(10);
@@ -407,14 +420,18 @@ select pg_temp.assert_true('one Issue binds a distinct Thread per Agent',
     (select count(*) = 2 and count(distinct thread_id) = 2
         from project_issue_agent_thread where issue_id = pg_temp.uid(10)));
 select pg_temp.rejects('an unknown Agent cannot own a Thread',
-    $$insert into project_issue_agent_thread(issue_id,agent_name,thread_id)
-      values(pg_temp.uid(12),'ghost',pg_temp.uid(304))$$, '23503', 'fk_project_issue_agent_thread_agent');
+    $$insert into project_issue_agent_thread(issue_id,agent_name,session_id,thread_id)
+      select pg_temp.uid(12),'ghost',session_id,id from harness_thread where id=pg_temp.uid(304)$$, '23503', 'fk_project_issue_agent_thread_agent');
 select pg_temp.rejects('one stable Thread per Issue+Agent',
-    $$insert into project_issue_agent_thread(issue_id,agent_name,thread_id)
-      values(pg_temp.uid(10),'designer',pg_temp.uid(304))$$, '23505', 'pk_project_issue_agent_thread');
+    $$insert into project_issue_agent_thread(issue_id,agent_name,session_id,thread_id)
+      select pg_temp.uid(10),'designer',session_id,id from harness_thread where id=pg_temp.uid(304)$$, '23505', 'pk_project_issue_agent_thread');
 select pg_temp.rejects('a bound Thread cannot be shared by another Issue',
-    $$insert into project_issue_agent_thread(issue_id,agent_name,thread_id)
-      values(pg_temp.uid(12),'designer',pg_temp.uid(300))$$, '23505', 'uk_project_issue_agent_thread_thread');
+    $$insert into project_issue_agent_thread(issue_id,agent_name,session_id,thread_id)
+      select pg_temp.uid(12),'designer',session_id,id from harness_thread where id=pg_temp.uid(300)$$, '23505', 'uk_project_issue_agent_thread_thread');
+select pg_temp.rejects('a binding cannot claim another Session',
+    $$insert into project_issue_agent_thread(issue_id,agent_name,session_id,thread_id)
+      values(pg_temp.uid(12),'designer',pg_temp.uid(100),pg_temp.uid(304))$$,
+    '23503', 'fk_project_issue_agent_thread_thread');
 -- Harness supports forks; this standalone Thread is not a second Project Agent
 -- binding. Product services prevent out-of-Run execution on an Issue Session.
 select pg_temp.assert_true('Harness may hold an unbound sibling Thread in the same Session',
@@ -509,9 +526,12 @@ select pg_temp.rejects('a final answer Entry must belong to the Run Session',
 select pg_temp.rejects('a frozen end Entry must belong to the Run Session',
     $$update project_issue_run set end_entry_id=pg_temp.uid(201) where id=pg_temp.uid(400)$$,
     '23503', 'fk_project_issue_run_end_entry');
--- The UNKNOWN fixture is already fully terminal, so only the missing reason can fail.
-select pg_temp.rejects('UNKNOWN requires a reason on a fully terminal Run',
-    $$update project_issue_run set status='UNKNOWN' where id=pg_temp.uid(400)$$, '23514',
+-- Run status has no separate "outcome unknown" state: an undetermined stop is a
+-- FAILED Run whose reason says the outcome is unknown.
+select pg_temp.rejects('Run status has no UNKNOWN terminal',
+    $$update project_issue_run set status='UNKNOWN' where id=pg_temp.uid(400)$$, '23514');
+select pg_temp.rejects('FAILED requires a reason on a fully terminal Run',
+    $$update project_issue_run set status='FAILED', error=null where id=pg_temp.uid(400)$$, '23514',
     'ck_project_issue_run_error_reason');
 select pg_temp.rejects('COMPLETED cannot carry an error',
     $$update project_issue_run set error='x' where id=pg_temp.uid(400)$$, '23514',

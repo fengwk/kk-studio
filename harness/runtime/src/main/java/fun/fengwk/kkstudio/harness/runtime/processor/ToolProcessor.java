@@ -240,8 +240,8 @@ public final class ToolProcessor implements AutoCloseable {
   }
 
   /**
-   * 冻结本次执行的上下文事实：Thread 自身会话、不可变执行根与其会话、该 Contributor 在当前 assistant 分支上的只读视图，以及该调用 TURN_START
-   * 已冻结的消费者媒体能力。
+   * 冻结本次执行的上下文事实：Thread 自身会话、不可变执行根与其会话、该调用的 assistant 分支入口、该 Contributor 在该 assistant
+   * 分支上的只读视图，以及该调用 TURN_START 已冻结的消费者媒体能力。
    *
    * <p>事实全部来自当前已锁定 Thread 与该调用 assistant path 的同一事务读取，因此 admission 与工具执行都不再查询 Harness 存储。执行根会话
    * 从真实执行根 Thread 行读取，缺失时显式失败，绝不按当前 Thread 合成。
@@ -277,6 +277,7 @@ public final class ToolProcessor implements AutoCloseable {
         thread.sessionId(),
         rootThreadId,
         rootSessionId,
+        tool.assistantEntryId(),
         branchView(tx, tool.assistantEntryId(), tool.binding().contributor().contributorId()),
         frozenMediaCapabilities(tx, thread, tool));
   }

@@ -90,7 +90,12 @@ public interface AgentDriver {
   /** Stop 已推进公共 Thread head 后调用；默认 no-op。外部 Driver 用来把私有 record 的 current head 与已提交 Thread 对齐。 */
   default void completeStop(HarnessStore.Transaction tx, ThreadState thread, DriverCommit commit) {}
 
-  /** 撤销 Driver 执行资格；返回已追加 barrier 与需要提交后取消的本地执行身份。 */
+  /**
+   * 撤销 Driver 执行资格；返回已追加 barrier 与需要提交后取消的本地执行身份。
+   *
+   * <p>Tool 批次停止时，公共工具结果已物化且工具子行已删除，但 {@code thread} 与 {@code path} 仍指向结算前的 assistant head，供 Driver
+   * 校验并清理私有父记录；全部操作属于同一事务。
+   */
   DriverStopResult stop(
       HarnessStore.Transaction tx,
       ThreadState thread,

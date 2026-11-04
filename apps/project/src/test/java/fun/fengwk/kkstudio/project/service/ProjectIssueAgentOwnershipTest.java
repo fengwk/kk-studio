@@ -55,9 +55,9 @@ class ProjectIssueAgentOwnershipTest {
     when(issueRepository.getById(ISSUE_ID)).thenReturn(issue(PROJECT_ID, null));
     when(issueRepository.lockById(ISSUE_ID)).thenReturn(issue(PROJECT_ID, null));
     when(bindings.findByIssueIdAndAgentName(ISSUE_ID, AGENT))
-        .thenReturn(new IssueAgentThread(ISSUE_ID, AGENT, THREAD_ID));
+        .thenReturn(new IssueAgentThread(ISSUE_ID, AGENT, PROJECT_ID, THREAD_ID));
     when(bindings.findByThreadId(THREAD_ID))
-        .thenReturn(new IssueAgentThread(ISSUE_ID, AGENT, THREAD_ID));
+        .thenReturn(new IssueAgentThread(ISSUE_ID, AGENT, PROJECT_ID, THREAD_ID));
   }
 
   /** 接受路径严格按 Project KEY SHARE -> Issue UPDATE -> 稳定绑定读取的顺序执行，并返回绑定 Thread。 */

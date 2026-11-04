@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { environmentService } from '@/shared/api/environment-service'
+import { environmentService } from '@/features/environment/environment-service'
 import { isConflictError } from '@/shared/api/client'
 import { presentConflict, type ConflictPresentation } from '@/shared/conflict/conflict-presenter'
 import { ConflictPresenter } from '@/shared/conflict/ConflictPresenter'
@@ -352,7 +352,7 @@ export function EnvironmentInstallModal({ environment, uninstall = false, onClos
                 {lspEnabled && (
                   <div className="install-field">
                     <label className="form-group">
-                      <span>LSP servers (JSON)</span>
+                      <span>LSP servers</span>
                       <TextArea
                         rows={8}
                         value={servers}
