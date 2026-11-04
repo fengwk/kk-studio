@@ -84,6 +84,21 @@ public class EnvironmentService {
     return toCardDto(env, null);
   }
 
+  /** Work 路由使用数据库时间判定 READY 租约，不使用展示卡片的 JVM 时钟。 */
+  public Optional<Instant> findReadyLeaseUntil(EnvironmentId id) {
+    return environmentRegistry.findReadyLeaseUntil(Objects.requireNonNull(id, "id"));
+  }
+
+  /** 沿 Work 冻结的环境身份取得展示名。 */
+  public String requireName(EnvironmentId id) {
+    Environment environment =
+        environmentRepository.getById(Objects.requireNonNull(id, "id").value());
+    if (environment == null) {
+      throw new IllegalStateException("waiting environment registry entry does not exist: " + id);
+    }
+    return environment.getName();
+  }
+
   public List<EnvironmentCardDTO> list() {
     List<Environment> envs = environmentRepository.listNewestFirst();
     List<EnvironmentCardDTO> results = new ArrayList<>(envs.size());

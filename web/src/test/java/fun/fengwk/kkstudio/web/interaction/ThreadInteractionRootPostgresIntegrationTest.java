@@ -88,6 +88,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.platform.harness.dispatch.HarnessWorkDispatcher;
 import fun.fengwk.kkstudio.platform.harness.dispatch.HarnessWorkDispatcherConfig;
+import fun.fengwk.kkstudio.platform.harness.thread.query.EnvironmentWaitProjectionService;
 import fun.fengwk.kkstudio.platform.harness.thread.query.ModelRequestDebugService;
 import fun.fengwk.kkstudio.platform.harness.thread.query.UsageCostProjectionService;
 import fun.fengwk.kkstudio.platform.interaction.InteractionQueryService;
@@ -157,6 +158,7 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
   @Autowired private HarnessStore store;
   @Autowired private InteractionQueryService queryService;
   @Autowired private InteractionService interactionService;
+  @Autowired private EnvironmentWaitProjectionService environmentWaitProjectionService;
   @Autowired private JdbcTemplate jdbc;
   @Autowired private Clock clock;
   @Autowired private ThreadProcessor threadProcessor;
@@ -496,7 +498,8 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
             runtime,
             mock(ModelRequestDebugService.class),
             interactionService,
-            mock(UsageCostProjectionService.class));
+            mock(UsageCostProjectionService.class),
+            environmentWaitProjectionService);
     var waitingTool =
         threadController
             .getSnapshot(second.threadId().toString(), null)
@@ -561,17 +564,18 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
     assertEquals(1, afterReady.size());
     assertEnvironmentWait(
         afterReady.get(0), third.threadId(), secondEnvironmentId, 1, null, "CHAT", null);
+    // limit=1 必须跨过多个在线候选分组，而不是在过滤后丢失后面的离线分组。
+    InteractionPageDTO filteredPage = queryService.listInteractions(null, null, 1);
+    assertEquals(1, filteredPage.getTotal());
+    assertEquals(third.threadId().toString(), filteredPage.getItems().getFirst().getRootThreadId());
     assertEquals(
         jdbc.queryForObject(
             "select lease_until from environment_connection where environment_id = ?",
             (rs, row) -> rs.getTimestamp(1).toInstant(),
             firstEnvironmentId),
         queryService.listInteractions(null, null, 10).getFreshnessAt());
-    assertFalse(
-        runtime
-            .listEnvironmentToolWaits(List.of(firstInvocationId))
-            .getFirst()
-            .waitingForEnvironment());
+    assertTrue(
+        runtime.listEnvironmentToolWaits(List.of(firstInvocationId)).getFirst().workAvailable());
 
     // 模拟已过期的租约：不写任何等待行，分组按原始事实重新出现。
     markEnvironmentOffline(firstEnvironmentId);
@@ -683,6 +687,7 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
     UUID environmentId = bindEnvironment(name);
     Seed seed =
         seedStandaloneRoot(false, "{}", false, false, true, EnvironmentId.of(environmentId));
+    bindChat(seed.sessionId());
     // 当前 Thread 设置没有环境，Work 冻结的环境仍应完整呈现。
     assertNull(SETTINGS.environmentName());
     MockMvc mvc = MockMvcBuilders.webAppContextSetup(webContext).build();
@@ -710,6 +715,7 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
     assertEquals(version, online.path("version").asText());
     var onlineTool = online.path("toolInvocations").get(0);
     assertFalse(onlineTool.path("waitingForEnvironment").asBoolean());
+    assertEquals(0, queryService.listInteractions(null, null, 1).getTotal());
     // 新字段与既有 Instant 用同一真实 HTTP mapper，epoch 时间戳而非独立字符串转换。
     assertTrue(onlineTool.path("environmentWaitFreshnessAt").isNumber());
     assertEquals(
@@ -723,6 +729,7 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
                     Boolean.class,
                     environmentId)),
         "database environment lease must naturally expire");
+    assertEquals(1, queryService.listInteractions(null, null, 1).getTotal());
     var expired = snapshotHttp(mvc, seed.threadId());
     assertEquals(version, expired.path("version").asText());
     assertTrue(expired.path("toolInvocations").get(0).path("waitingForEnvironment").asBoolean());

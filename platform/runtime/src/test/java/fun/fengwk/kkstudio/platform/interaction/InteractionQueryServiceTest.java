@@ -35,8 +35,7 @@ import fun.fengwk.kkstudio.platform.chat.Chat;
 import fun.fengwk.kkstudio.platform.chat.ChatRepository;
 import fun.fengwk.kkstudio.platform.chat.ChatSession;
 import fun.fengwk.kkstudio.platform.chat.ChatSessionRepository;
-import fun.fengwk.kkstudio.platform.environment.Environment;
-import fun.fengwk.kkstudio.platform.environment.EnvironmentRepository;
+import fun.fengwk.kkstudio.platform.environment.EnvironmentService;
 import fun.fengwk.kkstudio.platform.orchestration.IssueAgentOwnership;
 import fun.fengwk.kkstudio.share.ai.interaction.InteractionDTO;
 import fun.fengwk.kkstudio.share.ai.interaction.InteractionOwnerDTO;
@@ -60,7 +59,7 @@ class InteractionQueryServiceTest {
   private ChatRepository chatRepository;
   private IssueAgentOwnership issueAgentOwnership;
   private ObjectProvider<IssueAgentOwnership> issueAgentOwnerships;
-  private EnvironmentRepository environmentRepository;
+  private EnvironmentService environmentService;
   private ObjectProvider<HarnessRuntime> runtimes;
   private HarnessRuntime runtime;
   private InteractionQueryService service;
@@ -73,20 +72,20 @@ class InteractionQueryServiceTest {
     issueAgentOwnership = mock(IssueAgentOwnership.class);
     issueAgentOwnerships = mock(ObjectProvider.class);
     when(issueAgentOwnerships.getIfAvailable()).thenReturn(issueAgentOwnership);
-    environmentRepository = mock(EnvironmentRepository.class);
+    environmentService = mock(EnvironmentService.class);
     runtimes = mock(ObjectProvider.class);
     runtime = mock(HarnessRuntime.class);
 
     when(runtimes.getIfAvailable()).thenReturn(runtime);
     // 默认没有环境等待分组；需要环境等待的用例再显式覆盖本 stub。
-    when(runtime.listPendingEnvironmentWaits(any(), any(), anyInt()))
+    when(runtime.listEnvironmentWaitCandidates(any(), any(), anyInt()))
         .thenReturn(new PendingEnvironmentWaitPage(List.of(), false));
     service =
         new InteractionQueryService(
             chatSessionRepository,
             chatRepository,
             issueAgentOwnerships,
-            environmentRepository,
+            environmentService,
             runtimes);
   }
 
@@ -600,7 +599,7 @@ class InteractionQueryServiceTest {
       int size,
       List<PendingEnvironmentWait> rows,
       boolean hasMore) {
-    when(runtime.listPendingEnvironmentWaits(afterCreatedAt, afterId, size))
+    when(runtime.listEnvironmentWaitCandidates(afterCreatedAt, afterId, size))
         .thenReturn(new PendingEnvironmentWaitPage(rows, hasMore));
   }
 
@@ -611,9 +610,7 @@ class InteractionQueryServiceTest {
   }
 
   private void stubEnvironmentName(String environmentId, String name) {
-    Environment environment = mock(Environment.class);
-    when(environment.getName()).thenReturn(name);
-    when(environmentRepository.getById(UUID.fromString(environmentId))).thenReturn(environment);
+    when(environmentService.requireName(EnvironmentId.parse(environmentId))).thenReturn(name);
   }
 
   /**
@@ -786,7 +783,7 @@ class InteractionQueryServiceTest {
     assertEquals(0, page.getItems().size());
     assertEquals(0, page.getTotal());
     assertNull(page.getNextCursor());
-    verifyNoInteractions(environmentRepository);
+    verifyNoInteractions(environmentService);
   }
 
   /** 测试意图：控制器/插件发起、没有 Chat 或 Issue 归属的独立任务根以 AGENT_TASK 暴露并计数，否则其审批无人可见、任务永久挂起。 */
@@ -837,21 +834,17 @@ class InteractionQueryServiceTest {
         NullPointerException.class,
         () ->
             new InteractionQueryService(
-                null, chatRepository, issueAgentOwnerships, environmentRepository, runtimes));
+                null, chatRepository, issueAgentOwnerships, environmentService, runtimes));
     assertThrows(
         NullPointerException.class,
         () ->
             new InteractionQueryService(
-                chatSessionRepository,
-                null,
-                issueAgentOwnerships,
-                environmentRepository,
-                runtimes));
+                chatSessionRepository, null, issueAgentOwnerships, environmentService, runtimes));
     assertThrows(
         NullPointerException.class,
         () ->
             new InteractionQueryService(
-                chatSessionRepository, chatRepository, null, environmentRepository, runtimes));
+                chatSessionRepository, chatRepository, null, environmentService, runtimes));
     assertThrows(
         NullPointerException.class,
         () ->
@@ -864,7 +857,7 @@ class InteractionQueryServiceTest {
                 chatSessionRepository,
                 chatRepository,
                 issueAgentOwnerships,
-                environmentRepository,
+                environmentService,
                 null));
   }
 }

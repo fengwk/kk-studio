@@ -23,7 +23,7 @@ import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.platform.chat.ChatRepository;
 import fun.fengwk.kkstudio.platform.chat.ChatSessionRepository;
-import fun.fengwk.kkstudio.platform.environment.EnvironmentRepository;
+import fun.fengwk.kkstudio.platform.environment.EnvironmentService;
 import fun.fengwk.kkstudio.platform.orchestration.IssueAgentOwnership;
 import fun.fengwk.kkstudio.share.ai.interaction.InteractionDTO;
 import fun.fengwk.kkstudio.share.ai.interaction.InteractionPageDTO;
@@ -48,7 +48,7 @@ class InteractionRootAttributionConsistencyTest {
 
   private ChatSessionRepository chatSessionRepository;
   private IssueAgentOwnership issueAgentOwnership;
-  private EnvironmentRepository environmentRepository;
+  private EnvironmentService environmentService;
   private ObjectProvider<HarnessRuntime> runtimes;
   private HarnessRuntime runtime;
   private InteractionQueryService queryService;
@@ -61,19 +61,19 @@ class InteractionRootAttributionConsistencyTest {
     issueAgentOwnership = mock(IssueAgentOwnership.class);
     ObjectProvider<IssueAgentOwnership> issueAgentOwnerships = mock(ObjectProvider.class);
     when(issueAgentOwnerships.getIfAvailable()).thenReturn(issueAgentOwnership);
-    environmentRepository = mock(EnvironmentRepository.class);
+    environmentService = mock(EnvironmentService.class);
     runtimes = mock(ObjectProvider.class);
     runtime = mock(HarnessRuntime.class);
 
     when(runtimes.getIfAvailable()).thenReturn(runtime);
-    when(runtime.listPendingEnvironmentWaits(any(), any(), anyInt()))
+    when(runtime.listEnvironmentWaitCandidates(any(), any(), anyInt()))
         .thenReturn(new PendingEnvironmentWaitPage(List.of(), false));
     queryService =
         new InteractionQueryService(
             chatSessionRepository,
             mock(ChatRepository.class),
             issueAgentOwnerships,
-            environmentRepository,
+            environmentService,
             runtimes);
     interactionService = new InteractionService(issueAgentOwnerships, runtimes);
   }

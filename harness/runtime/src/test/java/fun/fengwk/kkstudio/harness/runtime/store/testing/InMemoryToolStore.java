@@ -133,7 +133,7 @@ final class InMemoryToolStore implements ToolStore {
   }
 
   @Override
-  public List<PendingEnvironmentWaitRow> listPendingEnvironmentWaits(
+  public List<PendingEnvironmentWaitRow> listEnvironmentWaitCandidates(
       Instant afterRepresentativeCreatedAt, UUID afterRepresentativeInvocationId, int limit) {
     tx.checkOpen();
     Instant now = tx.now();
@@ -156,9 +156,6 @@ final class InMemoryToolStore implements ToolStore {
         continue;
       }
       if (work.leaseToken() != null && work.leaseUntil().isAfter(now)) {
-        continue;
-      }
-      if (tx.hasReadyEnvironmentLease(environmentId, now)) {
         continue;
       }
       ThreadState thread = state.threads.get(invocation.threadId());
@@ -210,20 +207,32 @@ final class InMemoryToolStore implements ToolStore {
         freshnessAt =
             earliestOf(laterThan(work.availableAt(), now), laterThan(work.leaseUntil(), now));
       }
-      // 已有内存 READY 环境谓词只有 boolean、没有 deadline；仍真实计算本调用的 Work 时间边界。
       rows.add(
           new EnvironmentToolWaitRow(
               invocationId,
               environmentId,
-              isWaitingForEnvironment(invocation, work, now),
-              tx.environmentName(environmentId),
+              invocation.status() == ToolInvocationStatus.READY,
+              isEnvironmentWorkAvailable(invocation, work, now),
               freshnessAt));
     }
     return List.copyOf(rows);
   }
 
   @Override
-  public Optional<Instant> findNextEnvironmentWaitChange() {
+  public List<EnvironmentId> listReadyToolEnvironments() {
+    tx.checkOpen();
+    return state.toolInvocations.values().stream()
+        .filter(invocation -> invocation.status() == ToolInvocationStatus.READY)
+        .map(invocation -> state.works.get(new WorkTarget(WorkTargetType.TOOL, invocation.id())))
+        .filter(Objects::nonNull)
+        .map(Work::requiredEnvironmentId)
+        .filter(Objects::nonNull)
+        .distinct()
+        .toList();
+  }
+
+  @Override
+  public Optional<Instant> findNextEnvironmentWorkChange() {
     tx.checkOpen();
     Instant now = tx.now();
     Instant earliest = null;
@@ -240,12 +249,10 @@ final class InMemoryToolStore implements ToolStore {
           earliestOf(
               earliest, laterThan(work.leaseToken() != null ? work.leaseUntil() : null, now));
     }
-    // 内存实现的 READY 环境租约只是布尔谓词，没有 deadline，因此无法在这里表达「环境租约自然到期」这一类变更；
-    // 生产实现（数据库）用 environment_connection.lease_until 覆盖它。
     return Optional.ofNullable(earliest);
   }
 
-  private boolean isWaitingForEnvironment(ToolInvocation invocation, Work work, Instant now) {
+  private boolean isEnvironmentWorkAvailable(ToolInvocation invocation, Work work, Instant now) {
     if (invocation.status() != ToolInvocationStatus.READY || work == null) {
       return false;
     }
@@ -256,7 +263,7 @@ final class InMemoryToolStore implements ToolStore {
     if (work.leaseToken() != null && work.leaseUntil().isAfter(now)) {
       return false;
     }
-    return !tx.hasReadyEnvironmentLease(environmentId, now);
+    return true;
   }
 
   private static Instant laterThan(Instant candidate, Instant now) {

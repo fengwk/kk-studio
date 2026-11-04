@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.spi.store;
 
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 
 import java.time.Instant;
 import java.util.Collection;
@@ -31,15 +32,18 @@ public interface ToolStore {
   /** 按 {@code (createdAt, id)} 稳定读取等待输入的 ToolInvocation 分页。 */
   List<PendingToolInvocationRow> listPending(Instant afterCreatedAt, UUID afterId, int limit);
 
-  /** 读取「等待环境」分组投影。 */
-  List<PendingEnvironmentWaitRow> listPendingEnvironmentWaits(
+  /** 先分组再分页读取冻结环境的待领取调用，不判断环境连接。 */
+  List<PendingEnvironmentWaitRow> listEnvironmentWaitCandidates(
       Instant afterRepresentativeCreatedAt, UUID afterRepresentativeInvocationId, int limit);
 
   /** 按调用读取环境等待只读快照。 */
   List<EnvironmentToolWaitRow> listEnvironmentWaits(Collection<UUID> invocationIds);
 
-  /** 返回等待投影仅因时间推移最早可能改变的权威时刻。 */
-  Optional<Instant> findNextEnvironmentWaitChange();
+  /** 所有 READY 调用关联的冻结环境，包括 Work 尚未到期或仍有执行租约的调用。 */
+  List<EnvironmentId> listReadyToolEnvironments();
+
+  /** 返回 Work 可领取性仅因时间推移最早可能改变的权威时刻。 */
+  Optional<Instant> findNextEnvironmentWorkChange();
 
   /** 批量插入 ToolInvocation；要求 Thread 已锁定。 */
   void insert(List<ToolInvocation> invocations);

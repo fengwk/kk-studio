@@ -7,7 +7,7 @@ import java.util.Objects;
 import java.util.UUID;
 
 /**
- * 一个「等待环境」只读条目：按 {@code (真实执行根, 所需环境)} 聚合的一组待领取 TOOL 调用的只读投影。
+ * 等待环境候选：按 {@code (真实执行根, 所需环境)} 聚合的一组待领取 TOOL 调用；环境是否在线由调用方判断。
  *
  * <p>它是与 {@link PendingInteraction} 并列的只读事实，不复制待办台账、不落地持久等待状态。条目身份是 {@code rootThreadId +
  * environmentId}；{@code representativeCreatedAt}/{@code representativeInvocationId}
