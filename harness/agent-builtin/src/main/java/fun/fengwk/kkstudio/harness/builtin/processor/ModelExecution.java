@@ -76,7 +76,6 @@ public final class ModelExecution
   /** 登记成功后冻结的本代身份。确认只比对这一身份，不读取之后可能已更换的 lease。 */
   private volatile ExecutionExitFact registered;
 
-  private final Clock clock;
   private final WorkHeartbeat heartbeat;
   private final Consumer<ModelExecution> ownerRelease;
   private final LongSupplier nanoTime;
@@ -160,7 +159,7 @@ public final class ModelExecution
     this.invocationId = claim.target().id();
     this.threadId = Objects.requireNonNull(threadId, "threadId");
     this.attempt = attempt;
-    this.clock = HarnessStoreTime.millisecondClock(clock);
+    Clock storeClock = HarnessStoreTime.millisecondClock(clock);
     this.ownerRelease = Objects.requireNonNull(ownerRelease, "ownerRelease");
     this.nanoTime = Objects.requireNonNull(nanoTime, "nanoTime");
     this.heartbeat =
@@ -179,7 +178,7 @@ public final class ModelExecution
             attempt,
             config,
             Objects.requireNonNull(realtimeEventSink, "realtimeEventSink"),
-            this.clock,
+            storeClock,
             scheduler,
             Objects.requireNonNull(flushExecutor, "flushExecutor"),
             this.nanoTime,

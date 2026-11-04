@@ -319,7 +319,7 @@ final class ModelStreamPublisher {
   /** 标记流已结束并停止周期 tick；lock 内调用，幂等。 */
   void markFinished() {
     finished = true;
-    cancelTickLocked();
+    cancelTick();
   }
 
   /** 取消周期 tick；abandon 在任意线程调用，幂等。 */
@@ -328,10 +328,6 @@ final class ModelStreamPublisher {
     if (timer != null) {
       timer.cancel(false);
     }
-  }
-
-  private void cancelTickLocked() {
-    cancelTick();
   }
 
   /** 首个非空输出 delta 到成功回调的生成计时；任一端点缺失时返回 null。 */
