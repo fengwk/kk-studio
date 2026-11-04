@@ -1,0 +1,22 @@
+name: Run repository script tests
+description: Discover and run repository script tests
+inputs:
+  globs:
+    description: Space-separated test discovery globs
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Run repository script tests
+      shell: bash
+      env:
+        TEST_GLOBS: ${{ inputs.globs }}
+      run: |
+        set -euo pipefail
+        shopt -s nullglob
+        node_files=( ${TEST_GLOBS} )
+        if [ "${#node_files[@]}" -eq 0 ]; then
+          echo "no script tests discovered below scripts/" >&2
+          exit 1
+        fi
+        node --test "${node_files[@]}"

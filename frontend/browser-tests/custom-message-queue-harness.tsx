@@ -3,12 +3,12 @@ import { createRoot } from 'react-dom/client'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router'
 import '@/styles.css'
-import { ThreadView } from '@/features/chat/runtime/ChildThreadView'
-import { buildThreadTimeline } from '@/features/chat/runtime/thread-timeline'
-import { extractQueuedCustomMessages } from '@/features/chat/runtime/queued-custom-messages'
+import { ThreadView } from '@/features/thread/runtime/ChildThreadView'
+import { buildThreadTimeline } from '@/features/thread/runtime/thread-timeline'
+import { extractQueuedCustomMessages } from '@/features/thread/runtime/queued-custom-messages'
 import { ApplicationEventProvider } from '@/shared/app-events'
 import { setLocale } from '@/shared/i18n'
-import type { ThreadProjection } from '@/features/chat/runtime/useThreadProjection'
+import type { ThreadProjection } from '@/features/thread/runtime/useThreadProjection'
 import type {
   HarnessSessionEntryDTO,
   HarnessThreadCommandDTO,

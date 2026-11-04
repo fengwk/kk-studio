@@ -688,3 +688,52 @@
   transform: translateX(18px);
   background: var(--accent);
 }
+
+/* 统一的 ? 帮助提示：图标按钮可键盘聚焦，展开文本保持在同一布局流中。 */
+.field-label-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.ui-help-hint {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+}
+
+.ui-help-hint-trigger {
+  display: inline-grid;
+  flex: 0 0 20px;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: help;
+}
+
+.ui-help-hint-trigger:hover,
+.ui-help-hint-trigger[aria-expanded='true'] {
+  background: var(--surface-hover);
+  color: var(--fg);
+}
+
+.ui-help-hint-trigger:focus-visible {
+  outline: none;
+  color: var(--fg);
+  box-shadow: 0 0 0 2px var(--focus-ring);
+}
+
+.ui-help-hint-text {
+  min-width: 0;
+  color: var(--fg-muted);
+  font-size: var(--font-size-xs);
+  line-height: 1.4;
+}

@@ -3,11 +3,7 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { findNodeAtLocation } from 'jsonc-parser'
 import { describe, expect, it } from 'vitest'
-import {
-  decodePluginAuthPrepareDTO,
-  decodePluginConnectionCheckDTO,
-  decodePluginList,
-} from '@/shared/api/ai-plugin-codec'
+import type { PluginDTO } from '@/shared/api/generated/contracts'
 import { getNodeSlice, parseStrictJsonObject } from './plugin-config-json'
 import { parsePluginValuesSchema } from './plugin-schema'
 
@@ -26,10 +22,10 @@ function httpGoldenData(filename: string): unknown {
 
 describe('plugin HTTP contract', () => {
   it('decodes the exact Boot HTTP golden shared with the Java MVC contract tests', () => {
-    const plugins = decodePluginList(httpGoldenData('plugins-http.json'))
+    const plugins = httpGoldenData('plugins-http.json') as PluginDTO[]
     expect(plugins).toHaveLength(5)
-    expect(plugins[0].authKind).toBeNull()
-    expect(plugins[0].status).toBeNull()
+    expect(plugins[0].authKind ?? null).toBeNull()
+    expect(plugins[0].status ?? null).toBeNull()
     expect(plugins[1].authKind?.type).toBe('STATIC_KEY')
     expect(plugins[2].status).toBe('REAUTH_REQUIRED')
     expect(plugins[2].lastRefreshError).toBe('provider rejected the stored static key')
@@ -57,7 +53,7 @@ describe('plugin HTTP contract', () => {
         expect(schema.schema.properties['constructor'].kind).toBe('boolean')
       }
     }
-    expect(decodePluginAuthPrepareDTO(httpGoldenData('auth-prepare-http.json'))).toEqual({
+    expect(httpGoldenData('auth-prepare-http.json')).toEqual({
       authAttemptId: 'attempt-handle-c0ffee-cafe',
       loginUrl: 'https://auth.example.com/deep-link?region=us-east-1',
     })
@@ -66,7 +62,7 @@ describe('plugin HTTP contract', () => {
   // 真实后端 golden 的已应用坐标、检查时刻与三个维度必须逐值解码，且绝不携带远端材料。
   it('decodes the committed connection-check HTTP golden shared with the Java MVC contract test', () => {
     const raw = httpGoldenData('connection-check-http.json')
-    expect(decodePluginConnectionCheckDTO(raw)).toEqual({
+    expect(raw).toEqual({
       pluginId: 'beta-deep-connected',
       appliedRevision: '8',
       checkedAt: 1772366400,

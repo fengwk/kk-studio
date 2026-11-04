@@ -3,7 +3,7 @@ import test from 'node:test'
 import { HttpError } from '../lib/http.mjs'
 
 import { linuxInstallConfig, assertInstallConfig, assertExpiresNearFiveMinutes } from '../cases/environment-install-config.mjs'
-import { ALL_CASES, getCase } from '../lib/registry.mjs'
+import { ALL_CASES, getCase } from '../run-matrix.mjs'
 
 const CASE_ID = 'environment.install_config_cas_roundtrip'
 

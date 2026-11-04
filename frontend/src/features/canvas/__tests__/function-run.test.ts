@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { act, renderHook } from '@testing-library/react'
 import { QueryClient } from '@tanstack/react-query'
 import { ApiError } from '@/shared/api/client'
-import * as studioService from '@/shared/api/studio-service'
+import * as canvasApi from '@/features/canvas/canvas-api'
 import {
   clearPendingFunctionRun,
   discardPendingFunctionRun,
@@ -186,7 +186,7 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
     cleanupTestStorage()
     let persistedBeforeSend: ReturnType<typeof loadPendingFunctionRun> = null
 
-    vi.spyOn(studioService, 'startCanvasFunctionRun').mockImplementation(async (_cid, _nid, req) => {
+    vi.spyOn(canvasApi, 'startCanvasFunctionRun').mockImplementation(async (_cid, _nid, req) => {
       persistedBeforeSend = loadPendingFunctionRun(canvasId, nodeId)
       expect(persistedBeforeSend?.request).toEqual({
         requestId: req.requestId,
@@ -206,7 +206,7 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
 
   it('错误分类：403 Forbidden 属于不可重试终态，清除 pending 记录', async () => {
     cleanupTestStorage()
-    vi.spyOn(studioService, 'startCanvasFunctionRun').mockRejectedValueOnce(
+    vi.spyOn(canvasApi, 'startCanvasFunctionRun').mockRejectedValueOnce(
       new ApiError('forbidden', 403, 'FORBIDDEN'),
     )
     const { result, setToast } = setupHook()
@@ -219,11 +219,11 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
 
   it('409 Conflict：清 pending、提示手动刷新函数目录，零自动重提且零对账 GET', async () => {
     cleanupTestStorage()
-    const startSpy = vi.spyOn(studioService, 'startCanvasFunctionRun').mockRejectedValueOnce(
+    const startSpy = vi.spyOn(canvasApi, 'startCanvasFunctionRun').mockRejectedValueOnce(
       new ApiError('conflict', 409, 'CANVAS_CONFLICT'),
     )
     startSpy.mockClear()
-    const getRunSpy = vi.spyOn(studioService, 'getCanvasFunctionRun')
+    const getRunSpy = vi.spyOn(canvasApi, 'getCanvasFunctionRun')
     getRunSpy.mockClear()
 
     const { result, setToast } = setupHook()
@@ -244,10 +244,10 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
 
   it('错误分类：408 请求超时 与 429 限流属于非终态可重试，保留原 attempt 供复用', async () => {
     cleanupTestStorage()
-    vi.spyOn(studioService, 'startCanvasFunctionRun').mockRejectedValueOnce(
+    vi.spyOn(canvasApi, 'startCanvasFunctionRun').mockRejectedValueOnce(
       new ApiError('timeout', 408, 'REQUEST_TIMEOUT'),
     )
-    vi.spyOn(studioService, 'getCanvasFunctionRun').mockRejectedValueOnce(
+    vi.spyOn(canvasApi, 'getCanvasFunctionRun').mockRejectedValueOnce(
       new ApiError('not found', 404),
     )
 
@@ -260,10 +260,10 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
     expect(attemptAfter408).not.toBeNull()
 
     // 429 Too Many Requests
-    vi.spyOn(studioService, 'startCanvasFunctionRun').mockRejectedValueOnce(
+    vi.spyOn(canvasApi, 'startCanvasFunctionRun').mockRejectedValueOnce(
       new ApiError('rate limited', 429, 'TOO_MANY_REQUESTS'),
     )
-    vi.spyOn(studioService, 'getCanvasFunctionRun').mockRejectedValueOnce(
+    vi.spyOn(canvasApi, 'getCanvasFunctionRun').mockRejectedValueOnce(
       new ApiError('not found', 404),
     )
     await act(async () => {
@@ -277,11 +277,11 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
     cleanupTestStorage()
     const calls: CanvasFunctionRunRequestDTO[] = []
 
-    vi.spyOn(studioService, 'startCanvasFunctionRun').mockImplementation(async (_cid, _nid, req) => {
+    vi.spyOn(canvasApi, 'startCanvasFunctionRun').mockImplementation(async (_cid, _nid, req) => {
       calls.push(req)
       throw new Error('Network error / connection dropped')
     })
-    vi.spyOn(studioService, 'getCanvasFunctionRun').mockRejectedValue(
+    vi.spyOn(canvasApi, 'getCanvasFunctionRun').mockRejectedValue(
       new Error('Reconciliation unreachable'),
     )
 
@@ -306,7 +306,7 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
 
   it('存储异常 fail-closed：localStorage.setItem 失败阻断请求，startCanvasFunctionRun 严格调用 0 次', async () => {
     cleanupTestStorage()
-    const startSpy = vi.spyOn(studioService, 'startCanvasFunctionRun')
+    const startSpy = vi.spyOn(canvasApi, 'startCanvasFunctionRun')
     startSpy.mockClear()
 
     const setItemSpy = vi.spyOn(Storage.prototype, 'setItem').mockImplementationOnce(() => {
@@ -326,10 +326,10 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
   it('未知重试语义：既有未决 attempt 存在时不冲刷新配置，避免破坏待确认请求', async () => {
     cleanupTestStorage()
     const flushFunctionConfig = vi.fn().mockResolvedValue(undefined)
-    const startSpy = vi.spyOn(studioService, 'startCanvasFunctionRun').mockRejectedValueOnce(
+    const startSpy = vi.spyOn(canvasApi, 'startCanvasFunctionRun').mockRejectedValueOnce(
       new ApiError('timeout', 408),
     )
-    vi.spyOn(studioService, 'getCanvasFunctionRun').mockRejectedValueOnce(new Error('unreachable'))
+    vi.spyOn(canvasApi, 'getCanvasFunctionRun').mockRejectedValueOnce(new Error('unreachable'))
 
     const { result } = setupHook({ flushFunctionConfig })
 
@@ -351,7 +351,7 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
   it('并发连点防御：同一节点并发 start 请求互斥锁生效', async () => {
     cleanupTestStorage()
     let resolveFirst!: (val: CanvasFunctionRunDTO) => void
-    const startSpy = vi.spyOn(studioService, 'startCanvasFunctionRun')
+    const startSpy = vi.spyOn(canvasApi, 'startCanvasFunctionRun')
     startSpy.mockReset()
     startSpy.mockImplementation(() => (
       new Promise<CanvasFunctionRunDTO>((res) => {
@@ -384,7 +384,7 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
       createdAt: Date.now(),
     })
 
-    const cancelSpy = vi.spyOn(studioService, 'cancelCanvasFunctionRun')
+    const cancelSpy = vi.spyOn(canvasApi, 'cancelCanvasFunctionRun')
       .mockResolvedValue(run(reqB, 'CANCELLED', 'DONE'))
 
     // 目录已推进到新版本：cancel 只按 requestId 收敛，不携带任何版本。
@@ -485,7 +485,7 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
     window.localStorage.setItem(storageKey, 'corrupt-raw-attempt-data')
 
     const flushFunctionConfig = vi.fn().mockResolvedValue(undefined)
-    const startSpy = vi.spyOn(studioService, 'startCanvasFunctionRun')
+    const startSpy = vi.spyOn(canvasApi, 'startCanvasFunctionRun')
     startSpy.mockClear()
 
     const { result, setToast } = setupHook({ flushFunctionConfig })
@@ -521,7 +521,7 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
       createdAt: Date.now(),
     }))
 
-    const startSpy = vi.spyOn(studioService, 'startCanvasFunctionRun')
+    const startSpy = vi.spyOn(canvasApi, 'startCanvasFunctionRun')
     startSpy.mockClear()
     const { result, setToast } = setupHook()
     await act(async () => {
@@ -590,7 +590,7 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
       .mockReturnValueOnce(corruptRaw)
       .mockReturnValueOnce('other-tab-replacement-record')
 
-    const startSpy = vi.spyOn(studioService, 'startCanvasFunctionRun')
+    const startSpy = vi.spyOn(canvasApi, 'startCanvasFunctionRun')
     startSpy.mockClear()
 
     try {
@@ -618,7 +618,7 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
     const removeSpy = vi.spyOn(Storage.prototype, 'removeItem').mockImplementationOnce(() => {
       throw new Error('SecurityError: The operation is insecure.')
     })
-    const startSpy = vi.spyOn(studioService, 'startCanvasFunctionRun')
+    const startSpy = vi.spyOn(canvasApi, 'startCanvasFunctionRun')
     startSpy.mockClear()
 
     try {
@@ -668,7 +668,7 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
     })
 
     const flushFunctionConfig = vi.fn().mockResolvedValue(undefined)
-    const startSpy = vi.spyOn(studioService, 'startCanvasFunctionRun')
+    const startSpy = vi.spyOn(canvasApi, 'startCanvasFunctionRun')
     startSpy.mockClear()
 
     const { result, setToast } = setupHook({ flushFunctionConfig })
@@ -694,7 +694,7 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
 
     try {
       const flushFunctionConfig = vi.fn().mockResolvedValue(undefined)
-      const startSpy = vi.spyOn(studioService, 'startCanvasFunctionRun')
+      const startSpy = vi.spyOn(canvasApi, 'startCanvasFunctionRun')
       startSpy.mockClear()
 
       const { result, setToast } = setupHook({ flushFunctionConfig })
@@ -835,7 +835,7 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
     const corruptRaw = 'corrupt-raw-attempt-payload'
     window.localStorage.setItem(storageKey, corruptRaw)
 
-    const startSpy = vi.spyOn(studioService, 'startCanvasFunctionRun').mockResolvedValue(
+    const startSpy = vi.spyOn(canvasApi, 'startCanvasFunctionRun').mockResolvedValue(
       run('valid-request-id-1234', 'RUNNING', 'RUNNING'),
     )
     startSpy.mockClear()
@@ -906,7 +906,7 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
       releaseFlush = resolve
     }))
     const sent: CanvasFunctionRunRequestDTO[] = []
-    vi.spyOn(studioService, 'startCanvasFunctionRun').mockImplementation(async (_cid, _nid, req) => {
+    vi.spyOn(canvasApi, 'startCanvasFunctionRun').mockImplementation(async (_cid, _nid, req) => {
       sent.push(req)
       return run(req.requestId, 'RUNNING', 'QUEUED')
     })
@@ -945,7 +945,7 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
     }))
     const sent: CanvasFunctionRunRequestDTO[] = []
     const persisted: Array<CanvasFunctionRunRequestDTO | null> = []
-    vi.spyOn(studioService, 'startCanvasFunctionRun').mockImplementation(async (_cid, _nid, req) => {
+    vi.spyOn(canvasApi, 'startCanvasFunctionRun').mockImplementation(async (_cid, _nid, req) => {
       sent.push(req)
       persisted.push(loadPendingFunctionRun(canvasId, nodeId)?.request ?? null)
       return run(req.requestId, 'RUNNING', 'QUEUED')
@@ -995,7 +995,7 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
 
     const flushFunctionConfig = vi.fn(async () => undefined)
     const sent: CanvasFunctionRunRequestDTO[] = []
-    vi.spyOn(studioService, 'startCanvasFunctionRun').mockImplementation(async (_cid, _nid, req) => {
+    vi.spyOn(canvasApi, 'startCanvasFunctionRun').mockImplementation(async (_cid, _nid, req) => {
       sent.push(req)
       return run(req.requestId, 'RUNNING', 'QUEUED')
     })
@@ -1018,7 +1018,7 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
   it('缺定义（无法解析目录版本）时 0 flush 0 POST', async () => {
     cleanupTestStorage()
     const flushFunctionConfig = vi.fn(async () => undefined)
-    const startSpy = vi.spyOn(studioService, 'startCanvasFunctionRun')
+    const startSpy = vi.spyOn(canvasApi, 'startCanvasFunctionRun')
     startSpy.mockClear()
 
     const { result, setToast } = setupHook({

@@ -12,8 +12,7 @@
 
 import { readFileSync } from 'node:fs'
 
-/** Python-style rendering of a scalar (`None`, `True`, `False`), as these helpers always printed. */
-const render = (value) => (value === null || value === undefined ? 'None' : value === true ? 'True' : value === false ? 'False' : String(value))
+import { render, runProbe } from '../../lib/json-probe.mjs'
 
 class ProbeError extends Error {}
 
@@ -82,14 +81,4 @@ const commands = {
   },
 }
 
-const [command, ...args] = process.argv.slice(2)
-if (!(command in commands)) {
-  process.stderr.write(`unknown probe: ${command}\n`)
-  process.exit(2)
-}
-try {
-  commands[command](...args)
-} catch (error) {
-  process.stderr.write(`${error.message}\n`)
-  process.exitCode = 1
-}
+runProbe(commands)

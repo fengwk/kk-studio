@@ -6,6 +6,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.harness.api.thread.StopCommand;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionFacts;
 import fun.fengwk.kkstudio.platform.orchestration.OwnerRef;
 import fun.fengwk.kkstudio.platform.orchestration.SessionDeletionOrchestrator;
@@ -30,20 +31,25 @@ import fun.fengwk.kkstudio.project.repo.IssueStageBudgetRepository;
 import fun.fengwk.kkstudio.project.service.IssueActivityIdempotency.Identity;
 import fun.fengwk.kkstudio.work.DurableWorkStore;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
 /**
- * Issue 生命周期用例：归档/恢复归档、阻断/恢复、暂停/继续、停止、UNKNOWN 消解、删除与状态迁移。
+ * Issue 生命周期用例：归档/恢复归档、阻断/恢复、暂停/继续、停止、删除与状态迁移。
  *
  * <p>写路径复用 {@link IssueMutationSupport} 的 owner 锁与幂等 receipt；状态合法性由领域 {@link IssueStateTransitions}
- * 判定。停止在外部执行 未收敛时收口为 UNKNOWN，而不是直接取消。
+ * 判定。停止时在途副作用结果不明，按 FAILED 收尾并保留 ERROR 暂停，原因是结果未知。
  */
 @Service
 @AllArgsConstructor
 public class IssueLifecycleService {
+
+  /** 在途副作用结果不明时停止 Run 的失败原因：明确声明结果未知，绝不声称失败原因已确认。 */
+  private static final String OUTCOME_UNKNOWN_FAILURE =
+      "Run stopped with in-flight side effects; outcome unknown";
 
   private final IssueRepository issueRepository;
   private final IssueRunRepository issueRunRepository;
@@ -66,11 +72,6 @@ public class IssueLifecycleService {
     if (issueRunRepository.lockActiveByIssueId(issueId) != null) {
       throw new ProjectValidationException(
           "issue", "Cannot archive an issue while it has an active run; stop or settle it first");
-    }
-    if (PauseReason.UNKNOWN.name().equals(locked.issue().getPauseReason())) {
-      throw new ProjectValidationException(
-          "issue",
-          "Cannot archive an issue with an unresolved UNKNOWN gate; resolve unknown verification first");
     }
     if (locked.issue().isArchived()) {
       // 当前版本已经归档：不重复写行。陈旧版本在加锁时已被拒绝。
@@ -112,11 +113,6 @@ public class IssueLifecycleService {
     }
     mutationSupport.requireMutable(locked, false);
     mutationSupport.requireVersion(locked, expectedVersion);
-    if (PauseReason.UNKNOWN.name().equals(locked.issue().getPauseReason())) {
-      throw new ProjectValidationException(
-          "issue",
-          "Cannot block an issue with an unresolved UNKNOWN gate; resolve unknown verification first");
-    }
     ProjectStateCode from = ProjectStateCode.of(locked.issue().getState());
     ProjectValidationUtils.validate(
         "issue",
@@ -174,7 +170,7 @@ public class IssueLifecycleService {
     return persisted;
   }
 
-  /** 控制暂停：阻止新派发并记录原因与详情（USER/ERROR/UNKNOWN）。 */
+  /** 控制暂停：阻止新派发并记录原因与详情（USER/ERROR）。 */
   @Transactional
   public Issue pauseIssue(
       UUID issueId, long expectedVersion, String requestKey, PauseReason reason, String detail) {
@@ -221,11 +217,6 @@ public class IssueLifecycleService {
     }
     mutationSupport.requireMutable(locked, false);
     mutationSupport.requireVersion(locked, expectedVersion);
-    if (PauseReason.UNKNOWN.name().equals(locked.issue().getPauseReason())) {
-      throw new ProjectValidationException(
-          "issue",
-          "Cannot resume an issue with unresolved UNKNOWN gate; resolve unknown verification first");
-    }
     ObjectNode data = mutationSupport.newData();
     data.put("action", "RESUME");
     data.put("reason", locked.issue().getPauseReason());
@@ -239,7 +230,13 @@ public class IssueLifecycleService {
     return persisted;
   }
 
-  /** 人工终止 Issue 执行：活动 Run 收尾为 CANCELLED 并保留 USER 暂停门禁；在途副作用不明则进入 UNKNOWN。 */
+  /**
+   * 人工终止 Issue 执行：空闲时落 USER 暂停门禁，已有 ERROR 不被覆盖；活动 Run 收尾为 CANCELLED 并保留 USER 暂停；在途副作用不明时按 FAILED
+   * 收尾并保留 ERROR 暂停，原因声明结果未知。
+   *
+   * <p>STOP receipt 与本次收尾在同一事务、同一次 Issue 行版本推进中落库，因此重复请求在任一路径都精确回放：既不会再次收尾 Run，也不会把首次收尾写入的 ERROR
+   * 暂停改写成 USER。
+   */
   @Transactional
   public Issue stopIssue(UUID issueId, long expectedVersion, String requestKey, String detail) {
     Objects.requireNonNull(issueId, "issueId");
@@ -261,68 +258,60 @@ public class IssueLifecycleService {
     mutationSupport.requireMutable(locked, false);
     mutationSupport.requireVersion(locked, expectedVersion);
     IssueRun activeRun = issueRunRepository.lockActiveByIssueId(issueId);
+    boolean outcomeUnknown = false;
+    UUID stopHead = null;
+    if (activeRun != null) {
+      IssueThreadExecution port = threadExecutions.getIfAvailable();
+      if (port == null) {
+        throw new IllegalStateException("issue thread execution is not available");
+      }
+      IssueThreadView view = port.readThread(activeRun.getThreadId());
+      outcomeUnknown = isUndeterminedInFlight(view);
+      UUID stopRequestId =
+          UUID.nameUUIDFromBytes(
+              ("issue-run-user-stop:" + activeRun.getId()).getBytes(StandardCharsets.UTF_8));
+      stopHead = port.stop(new StopCommand(activeRun.getThreadId(), stopRequestId, view.version()));
+    }
+    // 先在 Activity 流落下 STOP 事实并推进 Issue 行版本：Run 收尾（CANCEL/FAIL + PAUSE 活动）随后沿用这次推进后的行，
+    // 既不会与收尾抢同一个 activity sequence，也不会产生第二次版本 CAS。
+    boolean preserveError =
+        activeRun == null && PauseReason.ERROR.name().equals(locked.issue().getPauseReason());
+    appendStopReceipt(
+        locked.issue(),
+        identity,
+        outcomeUnknown || preserveError ? PauseReason.ERROR : PauseReason.USER);
     if (activeRun == null) {
-      ObjectNode data = mutationSupport.newData();
-      data.put("action", "STOP");
-      data.put("reason", PauseReason.USER.name());
-      mutationSupport.appendActivity(
-          locked.issue(), identity, IssueActivityActorType.HUMAN, null, null, null, data);
-      locked.issue().setPauseReason(PauseReason.USER.name());
-      locked.issue().setPauseDetail(validDetail);
+      if (!preserveError) {
+        locked.issue().setPauseReason(PauseReason.USER.name());
+        locked.issue().setPauseDetail(validDetail);
+      }
       return mutationSupport.persist(locked, expectedVersion);
     }
-    IssueThreadExecution port = threadExecutions != null ? threadExecutions.getIfAvailable() : null;
-    IssueThreadView view = port != null ? port.readThread(activeRun.getThreadId()) : null;
-    if (isUndeterminedInFlight(view)) {
-      issueRunService.markUnknown(
+    mutationSupport.persist(locked, expectedVersion);
+    if (outcomeUnknown) {
+      // 在途副作用无法安全判定：按失败收尾并保留 ERROR 暂停，原因明确声明结果未知；不自动重试，需显式 resumeIssue。
+      issueRunService.failRun(
           activeRun.getId(),
           activeRun.getVersion(),
           key + ":unknown",
-          view.headEntryId(),
-          validDetail);
+          stopHead,
+          OUTCOME_UNKNOWN_FAILURE);
       return mutationSupport.currentIssue(issueId);
     }
-    UUID endId = view != null ? view.headEntryId() : activeRun.getStartEntryId();
-    issueRunService.cancelRun(activeRun.getId(), activeRun.getVersion(), key + ":cancel", endId);
+    issueRunService.cancelRun(activeRun.getId(), activeRun.getVersion(), key + ":cancel", stopHead);
     return mutationSupport.currentIssue(issueId);
   }
 
-  /** 记录人工核查依据并解除 UNKNOWN 门禁（转为 USER 暂停门禁，需显式 resumeIssue 唤醒）。 */
-  @Transactional
-  public Issue resolveUnknown(
-      UUID issueId, long expectedVersion, String requestKey, String verification) {
-    Objects.requireNonNull(issueId, "issueId");
-    String key = ProjectValidationUtils.requireRequestKey(requestKey);
-    String validVerification =
-        ProjectValidationUtils.requireUtf8Text(
-            verification, "verification", ProjectValidationUtils.MAX_LARGE_TEXT_BYTES);
-    Identity identity =
-        IssueActivityIdempotency.identity(
-            IssueActivityKind.CONTROL, "RESOLVE_UNKNOWN", key, validVerification);
-    if (mutationSupport.replayed(issueId, identity)) {
-      return mutationSupport.currentIssue(issueId);
-    }
-    IssueMutationSupport.Locked locked = mutationSupport.lockOwner(issueId);
-    if (mutationSupport.replayedUnderLock(locked.issue(), identity)) {
-      return locked.issue();
-    }
-    mutationSupport.requireMutable(locked, false);
-    mutationSupport.requireVersion(locked, expectedVersion);
-    if (!PauseReason.UNKNOWN.name().equals(locked.issue().getPauseReason())) {
-      throw new ProjectValidationException(
-          "issue", "Issue does not carry an unresolved UNKNOWN gate");
-    }
+  /** 记录人工停止意图：本次停止最终落在哪个暂停原因由收尾结果决定，数据里保留同一判定。 */
+  private void appendStopReceipt(Issue issue, Identity identity, PauseReason reason) {
     ObjectNode data = mutationSupport.newData();
-    data.put("action", "RESOLVE_UNKNOWN");
-    data.put("verification", validVerification);
+    data.put("action", "STOP");
+    data.put("reason", reason.name());
     mutationSupport.appendActivity(
-        locked.issue(), identity, IssueActivityActorType.HUMAN, null, null, null, data);
-    locked.issue().setPauseReason(PauseReason.USER.name());
-    locked.issue().setPauseDetail(validVerification);
-    return mutationSupport.persist(locked, expectedVersion);
+        issue, identity, IssueActivityActorType.HUMAN, null, null, null, data);
   }
 
-  /** 深删除 Issue：严格要求无活动 Run 且无未核查的 UNKNOWN，按依赖顺序清理各表与 Harness Session。 */
+  /** 深删除 Issue：严格要求无活动 Run，按依赖顺序清理各表与 Harness Session。 */
   @Transactional
   public void deleteIssue(UUID issueId, long expectedVersion) {
     Objects.requireNonNull(issueId, "issueId");
@@ -330,11 +319,6 @@ public class IssueLifecycleService {
     if (issueRunRepository.lockActiveByIssueId(issueId) != null) {
       throw new ProjectValidationException(
           "issue", "Cannot delete an issue while it has an active run; stop or settle it first");
-    }
-    if (PauseReason.UNKNOWN.name().equals(locked.issue().getPauseReason())) {
-      throw new ProjectValidationException(
-          "issue",
-          "Cannot delete an issue with an unresolved UNKNOWN gate; resolve unknown verification first");
     }
     issueEvidenceService.releaseAll(issueId);
     issueActivityRepository.deleteByIssueId(issueId);
@@ -374,11 +358,6 @@ public class IssueLifecycleService {
           "issue",
           "Cannot transition an issue while it has an active run; stop or settle it first");
     }
-    if (PauseReason.UNKNOWN.name().equals(locked.issue().getPauseReason())) {
-      throw new ProjectValidationException(
-          "issue",
-          "Cannot transition an issue with an unresolved UNKNOWN gate; resolve unknown verification first");
-    }
     if (locked.issue().isPaused()) {
       throw new ProjectValidationException(
           "issue", "Cannot transition a paused issue; resume it first");
@@ -416,11 +395,6 @@ public class IssueLifecycleService {
       throw new ProjectValidationException(
           "issue", "Cannot reopen an issue while it has an active run; stop or settle it first");
     }
-    if (PauseReason.UNKNOWN.name().equals(locked.issue().getPauseReason())) {
-      throw new ProjectValidationException(
-          "issue",
-          "Cannot reopen an issue with an unresolved UNKNOWN gate; resolve unknown verification first");
-    }
     if (locked.issue().isPaused()) {
       throw new ProjectValidationException(
           "issue", "Cannot reopen a paused issue; resume it first");
@@ -435,13 +409,10 @@ public class IssueLifecycleService {
   }
 
   /**
-   * 停止必须在「执行尚未收敛」时收敛为 UNKNOWN 而不是直接取消：本地仍有工作（命令 / Model / 工具 / owned continuation） 或已有结果未定的 UNKNOWN
-   * 工具都表示外部状态无法安全判定。事实由 Runtime 统一投影。
+   * 停止必须在「执行尚未收敛」时按结果未知失败收尾，而不是直接取消：本地仍有工作（命令 / Model / 工具 / owned continuation） 或已有结果未定的 UNKNOWN
+   * 工具都表示外部状态无法安全判定。事实由 Runtime 统一投影，Harness 侧 UNKNOWN 语义不变。
    */
   private static boolean isUndeterminedInFlight(IssueThreadView view) {
-    if (view == null) {
-      return false;
-    }
     ThreadExecutionFacts facts = view.executionFacts();
     return facts.hasWork() || facts.hasUnknownToolOutcome();
   }

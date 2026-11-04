@@ -158,16 +158,8 @@ fi
 
 # Gate real provider credentials before any process startup or HTTP request
 if [ "$REAL" = "true" ]; then
-  REAL_CREDENTIAL_VARS=(
-    TEST_GOOGLE_BASE_URL
-    TEST_GOOGLE_API_KEY
-    TEST_OPENAI_RESPONSES_BASE_URL
-    TEST_OPENAI_RESPONSES_API_KEY
-    TEST_ANTHROPIC_BASE_URL
-    TEST_ANTHROPIC_API_KEY
-    TEST_OPENAI_BASE_URL
-    TEST_OPENAI_API_KEY
-  )
+  REAL_CREDENTIAL_VARS=()
+  load_e2e_credential_names || die "failed to load provider credential names"
   missing_vars=()
   for var_name in "${REAL_CREDENTIAL_VARS[@]}"; do
     if [ -z "${!var_name-}" ]; then
@@ -192,7 +184,7 @@ if [ "$REAL" = "true" ]; then
   providers_ready=$(curl -fsS "$BACKEND_URL/api/providers?pageNumber=1&pageSize=50" \
     | node "$SCRIPT_DIR/lib/json-probe.mjs" providers-ready)
   if [ "$providers_ready" != "ok" ]; then
-    die "All 4 target providers (google, openai, minimax-anthropic, deepseek) must be configured for --real ($providers_ready)"
+    die "All target providers must be configured for --real ($providers_ready)"
   fi
 fi
 

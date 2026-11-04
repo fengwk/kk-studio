@@ -94,3 +94,234 @@
     min-height: 44px;
   }
 }
+
+/* Chat workspace panes (local layout, no permanent Session/Thread sidebar) */
+.chat-workspace {
+  display: flex;
+  flex-direction: column;
+  container: chat-workspace / inline-size;
+  min-height: 0;
+  height: 100%;
+  background: var(--bg);
+}
+
+.chat-workspace-header {
+  position: relative;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 48px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--stage-bg);
+  flex-shrink: 0;
+}
+
+.chat-workspace-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.chat-workspace-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.chat-workspace-title h1 {
+  margin: 0;
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 紧凑布局下拉：尺寸只作用于 .ui-select 根，portal 菜单保持自身 display:grid。 */
+.ui-select.chat-layout-selector .ui-select-trigger {
+  height: 28px;
+  min-height: 28px;
+  min-width: 52px;
+  padding: 0 8px;
+}
+
+.ui-select-menu.chat-layout-selector.is-compact {
+  width: 80px;
+  min-width: 80px;
+  max-width: 80px;
+  max-height: min(290px, calc(100dvh - 48px), var(--ui-select-available-height));
+}
+
+.ui-select-menu.chat-layout-selector.is-compact .ui-select-option {
+  min-height: 28px;
+  padding: 0 8px;
+}
+
+/*
+ * 分割线用 grid gap + 底色：每个 1fr 格子尺寸完全相同，线在格与格之间。
+ * 若画在 pane border 上，有边框的格子内容区会少 1px，视觉不完全等大。
+ */
+.chat-pane-grid {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  gap: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.chat-pane-grid.layout-single {
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr;
+}
+
+/* 2/3/4：仅列间 */
+.chat-pane-grid.layout-split-2 {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr;
+  column-gap: 1px;
+  background: var(--border);
+}
+
+.chat-pane-grid.layout-split-3 {
+  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-rows: 1fr;
+  column-gap: 1px;
+  background: var(--border);
+}
+
+.chat-pane-grid.layout-grid-4 {
+  grid-template-columns: repeat(4, 1fr);
+  grid-template-rows: 1fr;
+  column-gap: 1px;
+  background: var(--border);
+}
+
+/* 5：左侧一整高列 + 右侧 2 列 2 行（五 pane 等列宽，共 3 列） */
+.chat-pane-grid.layout-grid-5 {
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: 1fr 1fr;
+  gap: 1px;
+  background: var(--border);
+}
+
+.chat-pane-grid.layout-grid-5 > :first-child,
+.chat-pane-grid.layout-grid-5 > .chat-pane:first-child {
+  grid-column: 1;
+  grid-row: 1 / 3;
+}
+
+/* 6/8：列间 + 行间 */
+.chat-pane-grid.layout-grid-6 {
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: 1fr 1fr;
+  gap: 1px;
+  background: var(--border);
+}
+
+/* 7：左侧整高列 + 右侧 3 列 2 行（共 4 列） */
+.chat-pane-grid.layout-grid-7 {
+  grid-template-columns: repeat(4, 1fr);
+  grid-template-rows: 1fr 1fr;
+  gap: 1px;
+  background: var(--border);
+}
+
+.chat-pane-grid.layout-grid-7 > :first-child,
+.chat-pane-grid.layout-grid-7 > .chat-pane:first-child {
+  grid-column: 1;
+  grid-row: 1 / 3;
+}
+
+.chat-pane-grid.layout-grid-8 {
+  grid-template-columns: repeat(4, 1fr);
+  grid-template-rows: 1fr 1fr;
+  gap: 1px;
+  background: var(--border);
+}
+
+/* 9：3x3 等宽等高九宫格 */
+.chat-pane-grid.layout-grid-9 {
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(3, 1fr);
+  gap: 1px;
+  background: var(--border);
+}
+
+.chat-pane {
+  min-width: 0;
+  min-height: 0;
+  background: var(--stage-bg);
+  display: flex;
+  flex-direction: column;
+}
+
+.chat-pane .chat-shell,
+.chat-pane .thread-panel {
+  height: 100%;
+}
+
+@container chat-workspace (max-width: 960px) {
+  /*
+   * 小屏多 pane：纵向堆叠滚动；
+   * 每个 pane 占满当前可见区（grid 容器高度），避免上一屏底部露出下一 pane 顶部。
+   */
+  .chat-pane-grid.layout-split-2,
+  .chat-pane-grid.layout-split-3,
+  .chat-pane-grid.layout-grid-4,
+  .chat-pane-grid.layout-grid-5,
+  .chat-pane-grid.layout-grid-6,
+  .chat-pane-grid.layout-grid-7,
+  .chat-pane-grid.layout-grid-8,
+  .chat-pane-grid.layout-grid-9 {
+    grid-template-columns: 1fr;
+    grid-template-rows: none;
+    grid-auto-rows: 100%;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+    /* 可滚动但不展示滚动条，与对话区滚动观感一致 */
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  .chat-pane-grid.layout-grid-5 > :first-child,
+  .chat-pane-grid.layout-grid-5 > .chat-pane:first-child,
+  .chat-pane-grid.layout-grid-7 > :first-child,
+  .chat-pane-grid.layout-grid-7 > .chat-pane:first-child {
+    grid-column: auto;
+    grid-row: auto;
+  }
+
+  .chat-pane-grid.layout-split-2::-webkit-scrollbar,
+  .chat-pane-grid.layout-split-3::-webkit-scrollbar,
+  .chat-pane-grid.layout-grid-4::-webkit-scrollbar,
+  .chat-pane-grid.layout-grid-5::-webkit-scrollbar,
+  .chat-pane-grid.layout-grid-6::-webkit-scrollbar,
+  .chat-pane-grid.layout-grid-7::-webkit-scrollbar,
+  .chat-pane-grid.layout-grid-8::-webkit-scrollbar,
+  .chat-pane-grid.layout-grid-9::-webkit-scrollbar {
+    display: none;
+    width: 0;
+    height: 0;
+  }
+
+  .chat-pane-grid.layout-split-2 > .chat-pane,
+  .chat-pane-grid.layout-split-3 > .chat-pane,
+  .chat-pane-grid.layout-grid-4 > .chat-pane,
+  .chat-pane-grid.layout-grid-5 > .chat-pane,
+  .chat-pane-grid.layout-grid-6 > .chat-pane,
+  .chat-pane-grid.layout-grid-7 > .chat-pane,
+  .chat-pane-grid.layout-grid-8 > .chat-pane,
+  .chat-pane-grid.layout-grid-9 > .chat-pane {
+    min-height: 100%;
+    height: 100%;
+    max-height: 100%;
+  }
+}

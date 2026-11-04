@@ -4,6 +4,8 @@ import com.fasterxml.jackson.annotation.JsonAnySetter;
 import lombok.Data;
 import org.jspecify.annotations.Nullable;
 
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessExecutionSelectionDTO;
+
 /**
  * 完整的 Agent Definition create/PUT 请求体；可空文本字段用于显式清除对应值。
  *
@@ -19,11 +21,8 @@ public class AgentDefinitionEditablePropertiesDTO {
   /** 可空系统提示词；null/空白视为清除。 */
   private @Nullable String systemPrompt;
 
-  /** 必填全局逻辑模型名（MODEL 或 GROUP）；内置 Agent 可为空表示显式未配置。 */
-  private @Nullable String model;
-
-  /** 可空单模型 Variant id（≤64 字符）；null/空白表示不覆盖，运行时回退解析 model config 的 defaultVariant；GROUP 必须为空。 */
-  private @Nullable String variant;
+  /** 用户 Agent 必填执行选择；内置 Agent 可为空表示显式未配置。 */
+  private @Nullable HarnessExecutionSelectionDTO execution;
 
   /** 必填结构化执行配置（tools/skills/subagents/inheritParentEnvironment），经严格 codec 校验后持久化为 config JSONB。 */
   private AgentDefinitionConfigDTO config;

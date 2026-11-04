@@ -1,6 +1,6 @@
 import type { Route } from '@playwright/test'
 import { expect, test, tokenColor, type Page } from './fixture'
-import type { InteractionDTO } from '../src/shared/api/contracts/ai-interaction'
+import type { InteractionDTO } from '../src/shared/api/generated/contracts'
 
 const HARNESS_URL = '/browser-tests/interactions-harness.html'
 
@@ -17,7 +17,7 @@ const LONG_REASON =
   'bash requires approval in /srv/kk-studio/frontend/browser-tests/'
   + 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/reason.json'
 const LONG_ARGUMENTS = JSON.stringify({
-  command: 'npm --prefix frontend run test -- src/features/chat/runtime/thread-panel/messages/tool-message.view.test.tsx',
+  command: 'npm --prefix frontend run test -- src/features/thread/runtime/thread-panel/messages/tool-message.view.test.tsx',
   workdir: '/srv/kk-studio/frontend/browser-tests/nested/deeply/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
   env: { NODE_ENV: 'test', CI: 'true' },
   timeoutMs: 120000,
@@ -172,8 +172,8 @@ async function mockPendingApi(page: Page, options: PendingApiOptions = {}): Prom
           return
         }
         const allItems = (options.empty ? [] : buildItems()).filter((item) => item.type === 'ENVIRONMENT_WAIT'
-          || (!state.decidedApprovals.has(item.interactionId)
-          && !state.answeredQuestionnaires.has(item.interactionId)))
+          || (!state.decidedApprovals.has(item.interactionId!)
+          && !state.answeredQuestionnaires.has(item.interactionId!)))
         const cursor = new URL(request.url()).searchParams.get('cursor')
         if (cursor && options.failFirstNextPage && !nextPageFailed) {
           nextPageFailed = true

@@ -1,4 +1,4 @@
-import { createWorkerHasher, type HashFile } from '@/features/chat/composer'
+import { createWorkerHasher, type HashFile } from '@/shared/lib/upload-file'
 import type { IssueEvidenceDTO } from '@/shared/api/generated/contracts'
 
 /** 计算上传文件的 SHA-256：优先注入的 hasher，其次 Worker，再退回 WebCrypto。 */

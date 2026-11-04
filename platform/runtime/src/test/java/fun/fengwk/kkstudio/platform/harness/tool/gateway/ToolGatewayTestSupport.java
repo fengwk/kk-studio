@@ -84,6 +84,7 @@ final class ToolGatewayTestSupport {
   static final UUID SESSION_ID = new UUID(0L, 9L);
   static final UUID ROOT_THREAD_ID = new UUID(0L, 10L);
   static final UUID ROOT_SESSION_ID = new UUID(0L, 12L);
+  static final UUID ASSISTANT_ENTRY_ID = new UUID(0L, 13L);
 
   /** 测试默认的工具资源单对象上限（与生产默认一致）。 */
   static final int RESOURCE_MAX_BYTES = 16 * 1024 * 1024;
@@ -110,7 +111,13 @@ final class ToolGatewayTestSupport {
   /** 测试默认的冻结上下文事实：Harness 会在 admission 前把这些事实随执行描述传入。 */
   static ToolGateway.ExecutionScope scope(BranchView branch) {
     return new ToolGateway.ExecutionScope(
-        THREAD_ID, SESSION_ID, ROOT_THREAD_ID, ROOT_SESSION_ID, branch, TurnMediaCapabilities.NONE);
+        THREAD_ID,
+        SESSION_ID,
+        ROOT_THREAD_ID,
+        ROOT_SESSION_ID,
+        ASSISTANT_ENTRY_ID,
+        branch,
+        TurnMediaCapabilities.NONE);
   }
 
   /** 固定 busy/overload 延迟 supplier。 */

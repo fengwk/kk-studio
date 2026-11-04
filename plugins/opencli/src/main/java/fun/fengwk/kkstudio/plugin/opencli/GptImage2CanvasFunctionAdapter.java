@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.plugin.opencli;
 
-import static fun.fengwk.kkstudio.platform.plugin.support.CanvasArguments.extractText;
+import static fun.fengwk.kkstudio.canvas.function.CanvasArguments.extractText;
 
 import lombok.extern.slf4j.Slf4j;
 

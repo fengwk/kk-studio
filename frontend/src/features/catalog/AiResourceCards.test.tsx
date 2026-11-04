@@ -38,8 +38,7 @@ function agent(overrides: Partial<AgentDefinitionDTO> = {}): AgentDefinitionDTO 
     description: 'agent description',
     systemPrompt: 'prompt',
     type: 'USER',
-    model: 'MiniMax',
-    variant: 'quality',
+    execution: { driver: 'builtin', settings: { modelName: 'MiniMax', variant: 'quality' } },
     config: {
       inheritParentEnvironment: true,
       tools: ['read', 'bash', 'grep'],
@@ -71,20 +70,32 @@ function provider(overrides: Partial<AgentProviderDTO> = {}): AgentProviderDTO {
 }
 
 describe('AI resource cards', () => {
+  it('shows an unknown execution driver without presenting it as an unconfigured model', () => {
+    // 非 builtin settings 不应被解释成模型配置。
+    render(<AgentResourceCard agent={agent({ execution: { driver: 'future', settings: { opaque: true } } })}
+      models={[]} onEdit={vi.fn()} onDelete={vi.fn()} deletePending={false} />)
+    expect(screen.getByText('future')).toBeInTheDocument()
+    expect(screen.getByText('执行驱动')).toBeInTheDocument()
+    expect(screen.queryByText('生效 Model')).not.toBeInTheDocument()
+    expect(screen.queryByText('未配置')).not.toBeInTheDocument()
+  })
+
   it('uses parentheses for inherited variants and explicit overrides on unresolved models', () => {
     const { rerender } = render(
       <AgentResourceCard
-        agent={agent({ variant: null })}
+        agent={agent({ execution: { driver: 'builtin', settings: { modelName: 'MiniMax', variant: null } } })}
         models={[model()]}
         onEdit={vi.fn()}
         onDelete={vi.fn()}
         deletePending={false}
       />,
     )
-    expect(screen.getByText('MiniMax (quality)（模型默认）')).toBeInTheDocument()
+    expect(screen.getByText('MiniMax (quality) · 模型默认')).toBeInTheDocument()
+    expect(screen.getByText('生效 Model')).toBeInTheDocument()
+    expect(screen.queryByText('执行驱动')).not.toBeInTheDocument()
     rerender(
       <AgentResourceCard
-        agent={agent({ model: 'xai/grok-4.7', variant: 'xhigh' })}
+        agent={agent({ execution: { driver: 'builtin', settings: { modelName: 'xai/grok-4.7', variant: 'xhigh' } } })}
         models={[]}
         onEdit={vi.fn()}
         onDelete={vi.fn()}
@@ -120,7 +131,7 @@ describe('AI resource cards', () => {
   it('shows the built-in type badge, an explicit unconfigured model, and protected identity by type', () => {
     render(
       <AgentResourceCard
-        agent={agent({ name: 'summarizer', type: 'BUILTIN', model: null })}
+        agent={agent({ name: 'summarizer', type: 'BUILTIN', execution: null })}
         models={[model()]}
         onEdit={vi.fn()}
         onDelete={vi.fn()}
@@ -229,8 +240,7 @@ describe('AI resource cards', () => {
       <AgentResourceCard
         agent={agent({
           description: null,
-          model: 'missing-model',
-          variant: null,
+          execution: { driver: 'builtin', settings: { modelName: 'missing-model', variant: null } },
           config: {
             inheritParentEnvironment: true,
             tools: [],
@@ -335,7 +345,7 @@ describe('AI resource cards', () => {
     )
     expect(screen.getByText('provider description')).toBeInTheDocument()
     expect(screen.getByText('not-a-number')).toBeInTheDocument()
-    expect(screen.getByText('无 API Key（无认证请求）')).toBeInTheDocument()
+    expect(screen.getByText('无 API Key，请求不认证')).toBeInTheDocument()
     expect(screen.getAllByText('—').length).toBeGreaterThan(0)
   })
 })

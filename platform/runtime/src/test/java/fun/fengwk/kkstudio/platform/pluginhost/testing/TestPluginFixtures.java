@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.platform.pluginhost.testing;
 
-import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
 import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfigSchema;
@@ -10,7 +9,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-/** 宿主 Plugin 测试的忠实最小夹具：无普通配置、无秘密、两域贡献均为空的实例。 */
+/** 宿主 Plugin 测试的忠实最小夹具：无普通配置、无秘密、不贡献任何能力的实例。 */
 public final class TestPluginFixtures {
 
   /** 无普通值、无默认值、无秘密的空配置 schema。 */
@@ -25,7 +24,7 @@ public final class TestPluginFixtures {
 
   private TestPluginFixtures() {}
 
-  /** 两域贡献均为空的实例；close 无资源可释放。 */
+  /** 不贡献任何能力的实例；close 无资源可释放。 */
   public static PluginInstance emptyInstance() {
     return new PluginInstance() {
       @Override
@@ -34,7 +33,7 @@ public final class TestPluginFixtures {
       }
 
       @Override
-      public List<CanvasFunctionAdapter> canvasAdapters() {
+      public <T> List<T> contributions(Class<T> type) {
         return List.of();
       }
 

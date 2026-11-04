@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { setLocale } from '@/shared/i18n'
 import { EnvironmentInstallModal } from './EnvironmentInstallModal'
-import { environmentService } from '@/shared/api/environment-service'
+import { environmentService } from '@/features/environment/environment-service'
 import { copyTextToClipboard } from './clipboard'
 import { ApiError } from '@/shared/api/client'
 import { chooseSelectOption } from '@/test-support/chooseSelectOption'
@@ -13,7 +13,7 @@ import type {
   EnvironmentInstallConfigDTO,
 } from '@/shared/api/generated/contracts'
 
-vi.mock('@/shared/api/environment-service', () => ({
+vi.mock('@/features/environment/environment-service', () => ({
   environmentService: {
     getEnvironment: vi.fn(),
     getEnvironmentRuntime: vi.fn(),
@@ -81,7 +81,7 @@ describe('EnvironmentInstallModal', () => {
     expect(document.querySelector('details, summary')).toBeNull()
     expect(screen.getByRole('textbox', { name: '备注' })).toHaveValue('saved note')
     expect(screen.getByRole('checkbox')).toBeChecked()
-    expect(screen.getByRole('textbox', { name: 'LSP servers (JSON)' }))
+    expect(screen.getByRole('textbox', { name: 'LSP servers' }))
       .toHaveValue(JSON.stringify(savedNormalized.daemon.lsp!.servers, null, 2))
     // Returned canonical OS, not the unsaved browser form, selects the script URL.
     vi.mocked(environmentService.saveInstallConfig).mockResolvedValue({ ...card, version: '8',
@@ -279,7 +279,7 @@ describe('EnvironmentInstallModal', () => {
     const user = userEvent.setup()
     open()
     await waitFor(() => expect(copyButton()).toBeEnabled())
-    const editor = screen.getByRole('textbox', { name: 'LSP servers (JSON)' })
+    const editor = screen.getByRole('textbox', { name: 'LSP servers' })
     fireEvent.change(editor, { target: { value: 'not JSON' } })
     await user.click(copyButton())
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/LSP servers 配置无效/))
@@ -349,9 +349,9 @@ describe('EnvironmentInstallModal', () => {
     await waitFor(() => expect(copyButton()).toBeEnabled())
     expect(screen.getByRole('textbox', { name: 'Bash 可执行文件' })).toHaveValue('')
     expect(screen.getByRole('textbox', { name: '备注' })).toHaveValue('')
-    expect(screen.queryByRole('textbox', { name: 'LSP servers (JSON)' })).toBeNull()
+    expect(screen.queryByRole('textbox', { name: 'LSP servers' })).toBeNull()
     await user.click(screen.getByRole('checkbox'))
-    const editor = screen.getByRole('textbox', { name: 'LSP servers (JSON)' })
+    const editor = screen.getByRole('textbox', { name: 'LSP servers' })
     const example = {
       jdtls: {
         command: ['~/.local/share/nvim/mason/bin/jdtls'],
@@ -387,7 +387,7 @@ describe('EnvironmentInstallModal', () => {
     open()
     await waitFor(() => expect(copyButton()).toBeEnabled())
     await user.click(screen.getByRole('checkbox'))
-    const editor = screen.getByRole('textbox', { name: 'LSP servers (JSON)' })
+    const editor = screen.getByRole('textbox', { name: 'LSP servers' })
     fireEvent.change(editor, { target: { value: '{}' } })
     expect(editor).toHaveValue('{}')
     expect(editor).toHaveAttribute('placeholder', expect.stringContaining('jdtls'))
@@ -405,7 +405,7 @@ describe('EnvironmentInstallModal', () => {
       installConfig: { operatingSystem: 'linux', daemon: { studioUrl: 'https://saved.example.com', lsp: { servers } } } })
     open()
     await waitFor(() => expect(copyButton()).toBeEnabled())
-    const editor = screen.getByRole('textbox', { name: 'LSP servers (JSON)' })
+    const editor = screen.getByRole('textbox', { name: 'LSP servers' })
     expect(editor).toHaveValue(JSON.stringify(servers, null, 2))
     expect((editor as HTMLTextAreaElement).value).not.toMatch(/mason/)
   })

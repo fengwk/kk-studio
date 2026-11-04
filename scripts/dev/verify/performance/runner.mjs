@@ -55,7 +55,7 @@ export const SCENARIOS = Object.freeze([
   }),
   Object.freeze({
     id: 'canvas',
-    name: 'Canvas transaction write',
+    name: 'Canvas create transaction',
     concurrency: 4,
     path: '/api/canvases',
   }),
@@ -356,21 +356,6 @@ export function validateCanvasCreateResponse(response) {
   return canvas
 }
 
-export function validateCanvasDeleteResponse(response) {
-  if (!response || response.status < 200 || response.status >= 300) {
-    throw new BenchmarkError(`canvas delete expected a 2xx response, got ${response?.status}`)
-  }
-}
-
-export function validateCanvasListResponse(response) {
-  requireStatus(response, 200, 'canvas list')
-  requireObject(response.json, 'canvas list response')
-  if (!Array.isArray(response.json.data)) {
-    throw new BenchmarkError('canvas list data must be an array')
-  }
-  return response.json.data
-}
-
 export function usage() {
   return [
     'Usage: scripts/dev/verify/performance/run.sh [options]',
@@ -403,11 +388,9 @@ export async function runBenchmark({
   const state = {
     canvasTitlePrefix: `performance-${runId}-`,
     canvasSequence: 0,
-    createdCanvasIds: new Set(),
   }
   const scenarioResults = []
   let runError = null
-  let finalCleanup = { attempted: 0, errors: [], remaining: [] }
 
   const onSignal = (signal) => {
     if (stopState.requested) return
@@ -440,25 +423,6 @@ export async function runBenchmark({
         result = failedScenarioResult(scenario, normalizedDuration, error)
       }
 
-      if (scenario.id === 'canvas') {
-        const cleanup = await cleanupCanvases({
-          manager,
-          state,
-          scan:
-            stopState.requested ||
-            state.createdCanvasIds.size > 0 ||
-            result.metrics.error > 0 ||
-            result.warmup.error > 0,
-        })
-        result.cleanup = cleanup
-        if (cleanup.errors.length > 0 || cleanup.remaining.length > 0) {
-          result.gate.passed = false
-          result.gate.failures.push(
-            `canvas cleanup incomplete: errors=${cleanup.errors.length}, remaining=${cleanup.remaining.length}`,
-          )
-          result.status = 'fail'
-        }
-      }
       scenarioResults.push(result)
 
       if (stopState.requested) {
@@ -472,11 +436,6 @@ export async function runBenchmark({
     if (stopState.requested) {
       manager.abortAll()
     }
-    finalCleanup = await cleanupCanvases({
-      manager,
-      state,
-      scan: stopState.requested || state.createdCanvasIds.size > 0,
-    })
     process.off('SIGINT', onSignal)
     process.off('SIGTERM', onSignal)
   }
@@ -498,9 +457,6 @@ export async function runBenchmark({
       SCENARIOS.findIndex((scenario) => scenario.id === right.id),
   )
 
-  if (finalCleanup.errors.length > 0 || finalCleanup.remaining.length > 0) {
-    runError ||= new BenchmarkError('canvas cleanup did not complete')
-  }
   const finishedAt = now().toISOString()
   const summary = buildSummary({
     runId,
@@ -512,7 +468,6 @@ export async function runBenchmark({
     skipBuild,
     scenarioResults,
     runError,
-    finalCleanup,
     runtimeMetadata: runtimeMetadata || collectRuntimeMetadata(),
     interrupted: stopState.requested ? stopState.signal : null,
   })
@@ -530,14 +485,11 @@ export function buildSummary({
   skipBuild,
   scenarioResults,
   runError,
-  finalCleanup,
   runtimeMetadata,
   interrupted,
 }) {
   const status =
     !runError &&
-    finalCleanup.errors.length === 0 &&
-    finalCleanup.remaining.length === 0 &&
     scenarioResults.every((result) => result.status === 'pass')
       ? 'pass'
       : 'fail'
@@ -576,7 +528,6 @@ export function buildSummary({
     },
     thresholds: THRESHOLDS,
     scenarios: scenarioResults,
-    cleanup: finalCleanup,
     interrupted,
     runError: runError ? serializeError(runError) : null,
   }
@@ -664,7 +615,8 @@ export function renderReport(summary) {
     `- Compose: \`${summary.isolation.composeFile}\`, profile \`${summary.isolation.profile}\`.`,
     `- Services: ${summary.isolation.services.map((service) => `\`${service}\``).join(', ')}.`,
     `- Real Provider: \`${summary.isolation.realProvider}\`; daemon: \`${summary.isolation.daemon}\`.`,
-    `- Final canvas cleanup attempts: ${summary.cleanup.attempted}; remaining IDs: ${summary.cleanup.remaining.length}; cleanup errors: ${summary.cleanup.errors.length}.`,
+    '- Canvas create rows (including warmup and possibly interrupted requests) persist until isolated test database/volume cleanup; the runner does not delete them.',
+    '- Canvas create-only results are not comparable to the former create+delete workload.',
     '',
     '## Failure details',
     '',
@@ -684,8 +636,8 @@ function createRequestManager(baseUrl, stopState) {
   const normalizedBaseUrl = baseUrl.replace(/\/$/, '')
 
   return {
-    async request(method, requestPath, body, { allowAfterStop = false } = {}) {
-      if (stopState.requested && !allowAfterStop) {
+    async request(method, requestPath, body) {
+      if (stopState.requested) {
         throw new InterruptedError(stopState.signal)
       }
       const controller = new AbortController()
@@ -727,7 +679,7 @@ function createRequestManager(baseUrl, stopState) {
         if (timedOut) {
           throw new RequestTimeoutError(method, requestPath, durationMs)
         }
-        if (stopState.requested && !allowAfterStop) {
+        if (stopState.requested) {
           throw new InterruptedError(stopState.signal)
         }
         throw new RequestFailureError(method, requestPath, durationMs, error)
@@ -877,65 +829,10 @@ function operationFor(scenarioId, manager, state) {
   if (scenarioId === 'canvas') {
     return async (workerIndex) => {
       const title = `${state.canvasTitlePrefix}${workerIndex}-${state.canvasSequence++}`
-      const createResponse = await manager.request('POST', '/api/canvases', { title })
-      const candidateId = candidateCanvasId(createResponse)
-      if (candidateId) state.createdCanvasIds.add(candidateId)
-      const canvas = validateCanvasCreateResponse(createResponse)
-      const deleteResponse = await manager.request(
-        'DELETE',
-        `/api/canvases/${canvas.id}`,
-        undefined,
-      )
-      validateCanvasDeleteResponse(deleteResponse)
-      state.createdCanvasIds.delete(canvas.id)
+      validateCanvasCreateResponse(await manager.request('POST', '/api/canvases', { title }))
     }
   }
   throw new Error(`unknown scenario operation: ${scenarioId}`)
-}
-
-async function cleanupCanvases({ manager, state, scan }) {
-  const ids = new Set(state.createdCanvasIds)
-  const errors = []
-  if (scan) {
-    try {
-      const rows = validateCanvasListResponse(
-        await manager.request('GET', '/api/canvases', undefined, { allowAfterStop: true }),
-      )
-      for (const row of rows) {
-        if (
-          row &&
-          typeof row === 'object' &&
-          typeof row.id === 'string' &&
-          typeof row.title === 'string' &&
-          row.title.startsWith(state.canvasTitlePrefix)
-        ) {
-          ids.add(row.id)
-        }
-      }
-    } catch (error) {
-      errors.push({ operation: 'list', message: serializeError(error).message })
-    }
-  }
-
-  for (const id of ids) {
-    try {
-      const response = await manager.request(
-        'DELETE',
-        `/api/canvases/${id}`,
-        undefined,
-        { allowAfterStop: true },
-      )
-      validateCanvasDeleteResponse(response)
-      state.createdCanvasIds.delete(id)
-    } catch (error) {
-      errors.push({ operation: 'delete', id, message: serializeError(error).message })
-    }
-  }
-  return {
-    attempted: ids.size,
-    errors,
-    remaining: [...state.createdCanvasIds],
-  }
 }
 
 function failedScenarioResult(scenario, durationSeconds, error) {
@@ -1077,11 +974,6 @@ function requireText(value, label) {
   if (typeof value !== 'string' || value.trim().length === 0) {
     throw new BenchmarkError(`${label} must be a non-empty string`)
   }
-}
-
-function candidateCanvasId(response) {
-  const id = response?.json?.data?.id
-  return typeof id === 'string' && UUID_PATTERN.test(id) ? id : null
 }
 
 function tryLstat(target) {
