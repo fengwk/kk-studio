@@ -10,8 +10,8 @@ import java.util.UUID;
  * fork 事实 Entry payload：{@link EntryType#FORK}。
  *
  * <p>只记录最小事实：fork 模式、作为切点的来源 Entry，以及会话 fork 时的来源 Thread；分支 fork 与来源同处一个 Session，因此不携带来源
- * Thread。不解析谱系、不复制执行树、不携带任何行为引导。模型可见文本是固定的 {@link #NOTICE}，只陈述事实，与既有平台通知一样是 USER 角色的 上下文，不是 system
- * 指令。
+ * Thread。不解析谱系、不复制执行树、不携带任何行为引导。模型可见文本是固定的 {@link #NOTICE} 或 {@link #SESSION_NOTICE}，只陈述事实，
+ * 与既有平台通知一样是 USER 角色的上下文，不是 system 指令。
  *
  * @param mode fork 模式
  * @param sourceEntryId 作为切点的来源 Entry（分支 fork 为共享前缀的边界；会话 fork 为复制上下文的边界）
@@ -20,9 +20,15 @@ import java.util.UUID;
 public record ForkPayload(ForkMode mode, UUID sourceEntryId, UUID sourceThreadId)
     implements EntryPayload {
 
-  /** 固定的英文 fork 通知：只陈述事实，不包含行为引导，也不把继承的历史任务提升为指令。 */
+  /** 分支 fork 的固定英文通知：同会话共享目录，只陈述 fork 事实。 */
   public static final String NOTICE =
       PromptRenderer.render("fun/fengwk/kkstudio/harness/prompts/messages/fork.md", Map.of())
+          .stripTrailing();
+
+  /** 会话 fork 的固定英文通知：额外说明新会话目录为空，来源文件不会复制。 */
+  public static final String SESSION_NOTICE =
+      PromptRenderer.render(
+              "fun/fengwk/kkstudio/harness/prompts/messages/fork-session.md", Map.of())
           .stripTrailing();
 
   public ForkPayload {
@@ -41,6 +47,11 @@ public record ForkPayload(ForkMode mode, UUID sourceEntryId, UUID sourceThreadId
   /** 会话 fork 事实：携带来源 Thread 与切点 Entry。 */
   public static ForkPayload session(UUID sourceThreadId, UUID sourceEntryId) {
     return new ForkPayload(ForkMode.SESSION, sourceEntryId, sourceThreadId);
+  }
+
+  /** 该 fork 事实对应的模型可见通知：只有会话 fork 才说明新会话目录为空。 */
+  public String notice() {
+    return mode == ForkMode.SESSION ? SESSION_NOTICE : NOTICE;
   }
 
   @Override

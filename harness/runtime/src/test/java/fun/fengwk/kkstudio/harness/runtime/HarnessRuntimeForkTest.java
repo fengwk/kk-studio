@@ -184,7 +184,7 @@ class HarnessRuntimeForkTest {
     // ROOT + 完整来源历史（不含来源 ROOT）+ FORK。
     assertEquals(sourcePath.entries().size() + 1, entries.size());
     assertInstanceOf(ForkPayload.class, entries.getLast().payload());
-    assertEquals(ForkPayload.NOTICE, projectedTexts(path).getLast());
+    assertEquals(ForkPayload.SESSION_NOTICE, projectedTexts(path).getLast());
 
     List<UUID> sourceIds = sourcePath.entries().stream().map(Entry::id).toList();
     for (Entry copied : entries.subList(1, entries.size() - 1)) {
@@ -304,7 +304,7 @@ class HarnessRuntimeForkTest {
     assertTrue(texts.getFirst().contains("summary"), texts.toString());
     assertTrue(texts.contains("u2"));
     assertTrue(texts.contains("u3"));
-    assertEquals(ForkPayload.NOTICE, texts.getLast());
+    assertEquals(ForkPayload.SESSION_NOTICE, texts.getLast());
   }
 
   /**
@@ -497,7 +497,7 @@ class HarnessRuntimeForkTest {
     assertEquals(ForkMode.SESSION, payload.mode());
     assertEquals(source.threadId(), payload.sourceThreadId());
     assertEquals(source.rootEntryId(), payload.sourceEntryId());
-    assertEquals(List.of(ForkPayload.NOTICE), projectedTexts(path));
+    assertEquals(List.of(ForkPayload.SESSION_NOTICE), projectedTexts(path));
   }
 
   // ---------------------------------------------------------------- 会话 fork：幂等
@@ -640,10 +640,10 @@ class HarnessRuntimeForkTest {
   private static List<String> projectedTexts(EntryPath path) {
     List<String> summaries = new ArrayList<>();
     List<String> messages = new ArrayList<>();
-    boolean forked = false;
+    ForkPayload fork = null;
     for (Entry entry : path.entries()) {
-      if (entry.payload() instanceof ForkPayload) {
-        forked = true;
+      if (entry.payload() instanceof ForkPayload payload) {
+        fork = payload;
       } else if (entry.payload() instanceof CompactionPayload compaction) {
         summaries.add(compaction.summaryText());
       } else if (entry.payload() instanceof MessagePayload message) {
@@ -656,8 +656,8 @@ class HarnessRuntimeForkTest {
     }
     List<String> texts = new ArrayList<>(summaries);
     texts.addAll(messages);
-    if (forked) {
-      texts.add(ForkPayload.NOTICE);
+    if (fork != null) {
+      texts.add(fork.notice());
     }
     return texts;
   }
