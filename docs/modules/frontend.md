@@ -387,6 +387,16 @@ epoch、claimId、iframe 与票据不持久化。localStorage 只保存最后展
 副作用恢复记录（`PendingAcceptance`、`BoundPendingMessage`、Stop 重试身份）独立持有原始请求身份，不复制进 session/local 默认快照，不因初始化或切换重新提交操作。
 页面触发 `pagehide` 时只撤回使用证明，不删除视图；bfcache 恢复后重新登记，视图由 Daemon 按租约回收。仅切换到后台或收起面板不撤回证明。
 
+目录选择器是 [`Dialog`](../../frontend/src/shared/ui/overlays/Dialog.tsx) 内的惰性目录树
+（[`OpenDirectoryModal`](../../frontend/src/features/environment/ide/OpenDirectoryModal.tsx)）：
+打开时只读取宿主主目录的直接子目录，展开某个目录才请求它自己的下一层，收起即丢弃；
+“上级目录”沿服务端返回的 `parentPath` 逐级向上，到根目录后禁用。确认后由 `CHANGE_DIRECTORY` 切换工作区，
+只有切换成功才写入该 Environment 的最近目录。最近目录按 Environment 隔离保存在 localStorage
+（`kk-studio.recent-directories:ide`，最多 8 条，最新在前），与展示意图共用同一存储适配，不提供视图身份。
+换根、切换 Environment 与关闭弹窗都会推进请求代际并中止在途请求，迟到的目录响应不覆盖当前树；
+宿主返回的权限或不存在等原因原样展示，超过上限的列表标注截断。移动端弹窗全屏，
+行、展开、帮助与上级按钮的可点击区域不小于 44px；目录说明由可访问的 `?` 提示展开，不使用括号补说明。
+
 视图被其它连接占用（`VIEW_IN_USE`）时，前端保留原 `viewId` 与目录，绝不静默替换成新视图：
 面板只提供“重试恢复”（以新 claimId 恢复同一视图）与“打开新视图”两个人工动作，由用户明确选择。
 其余不确定结果（视图消失、结果未知）同样保留恢复线索，替代视图必须由用户显式打开。

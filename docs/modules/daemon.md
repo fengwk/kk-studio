@@ -98,11 +98,11 @@ OPEN/CLOSING/创建预留都由本进程裁决；claim 在任何进程或文件�
 `mode=create` 未指定目录时使用宿主 HOME，`mode=resume` 不隐式创建视图也不改目录；相同 `claimId` 的完全相同请求返回同一绑定，
 参数漂移被拒绝。失败回执只携带安全大写 code 与去敏 message（如 `VIEW_GONE`、`VIEW_IN_USE`、`DIRTY`、`CLEANUP_FAILED`、`BUSY`、`UNAVAILABLE`）。
 
-使用证明只来自 `IDE_LEASE` 批次：45 秒没有任何有效证明即不再视为活跃占用并允许恢复竞争；最后一次有效证明起 600 秒仍无新证明进入到期释放；
-创建成功但一直没有浏览器证明的视图最多保留 600 秒；`DETACH_VIEW` 立即冻结该 epoch 的续租，迟到证明不能复活它。释放走 `OPEN → CLOSING` 门闩：
-正常关闭先由当前桥接宿主检查未保存内容，再请求桥接扩展关闭标签页；扩展使用 IDE 原生关闭流程处理保存、不保存和取消，取消或仍有未关闭编辑器时不释放终端。当前 Daemon 在请求原生关闭前仍会拒绝已知 dirty 或未知状态，桥接请求也仍有 20 秒超时。桥接接受后才中止该视图的 HTTP/WS 流，以 10 秒上限等待流收敛，再调用 code-server 的视图终止接口，最后释放 view map、锁、计时器与受管句柄。
+使用证明只来自 `IDE_LEASE` 批次：45 秒没有任何有效证明即不再视为活跃占用并允许恢复竞争；最后一次有效证明起 600 秒仍无新证明进入到期检查；
+`DETACH_VIEW` 立即冻结该 epoch 的续租，迟到证明不能复活它。到期时只有桥接可证明编辑器干净且原生关闭成功才释放视图；dirty 或状态未知时保留视图等待显式操作，期间继续占用视图配额。
+正常关闭不预拒绝 dirty，直接等待 IDE 原生保存、不保存或取消，不设交互超时。取消、控制连接断开或关闭结果未知均保留视图与终端，不采用迟到回执；只有状态未知或桥接不可达时才允许显式强制关闭。原生关闭成功后才中止该视图的 HTTP/WS 流，以 10 秒上限等待流收敛，再调用 code-server 的视图终止接口，最后释放 view map、锁、计时器与受管句柄。
 终止失败保持 CLOSING 并报告 `CLEANUP_FAILED`，不误报已释放。最后一个视图释放且无在途数据流后，闲置 60 秒停止整个 code-server。
-普通文本的未保存内容写入私有受管恢复文件，总量上限 16 MiB；备份失败产生有界事件，不伪报完成。
+强制关闭前尝试将普通文本的未保存内容写入私有受管恢复文件，总量上限 16 MiB；备份失败产生有界事件，不伪报完成。
 
 Daemon 通过 code-server 的本机管理接口操作视图（[`codeServer.ts`](../../daemon/src/ide/codeServer.ts)）：`GET /__kk/ide/views`、
 `GET /__kk/ide/views/{viewId}?bindingEpoch=...`、`POST /__kk/ide/views/{viewId}` 与 `DELETE /__kk/ide/views/{viewId}`，
@@ -114,6 +114,7 @@ Daemon 通过 code-server 的本机管理接口操作视图（[`codeServer.ts`](
 替换受管工作区的首目录时，旧宿主在公共 API 接受请求后退役控制通道；只有新宿主实际登记目标目录才确认切换。
 目录成功回执包含 Daemon 确认的规范路径，Server 不回填客户端输入。宿主退役不终止保留的终端，终端仍由受管视图负责。
 每个 view 最多记录 256 个宿主身份，跨重绑保留、释放视图时清空；达到上限后只允许当前宿主重连，不淘汰旧身份来接纳新宿主。
+窄屏打开视图后，桥接调用原生关闭侧栏与面板命令；重复调用不会切换回打开，也不修改设置。
 
 ### IDE 轻量默认值与按需能力
 
@@ -161,6 +162,7 @@ Daemon 拥有独立的 Node.js 工程与测试套件：
 - 覆盖率统计：`npm --prefix daemon run coverage`（基于 Vitest 与 `@vitest/coverage-v8`）
 
 桥接的真实 extension-host 集成测试：安装前端测试依赖与 Playwright Chromium 后，运行 `KK_STUDIO_IDE_ACCEPTANCE_DIR=<解压的code-server目录> node --test daemon/test/ide/configuration-native.test.mjs`（Node 24）。测试用独立临时 HOME、user-data、extensions 和动态 loopback 端口验证配置默认值与用户覆盖、主题实际生效、外部文件变更与保存冲突，以及原生关闭的取消、保存和不保存；不修改真实用户设置，不请求模型。
+构建 Daemon 后可用同样的环境运行 `node --test daemon/test/ide/service-native.test.mjs`，验证 Daemon 视图服务与真实 bridge、workbench 的关闭与移动布局；code-server 进程管理在该测试中替身化。
 
 多平台 CI 由 [.github/workflows/daemon-ci.yml](../../.github/workflows/daemon-ci.yml) 守卫，覆盖 Linux (amd64/arm64)、macOS (arm64/amd64) 与 Windows (amd64) 五大目标环境。发行归档由 [`scripts/daemon/prepare-release.sh`](../../scripts/daemon/prepare-release.sh) 暂存，并由 [`scripts/daemon/smoke-archive.sh`](../../scripts/daemon/smoke-archive.sh) 与 [`scripts/daemon/smoke-archive.ps1`](../../scripts/daemon/smoke-archive.ps1) 验证自足运行能力。
 

@@ -901,6 +901,20 @@ export interface EnvironmentIdeCloseViewDTO {
   discard: boolean
 }
 
+/** Java：fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeDirectoryListingDTO */
+export interface EnvironmentIdeDirectoryListingDTO {
+  path: string
+  parentPath: string | null
+  children: EnvironmentIdeDirectoryListingEntry[]
+  truncated: boolean
+}
+
+/** Java：fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeDirectoryListingDTO.Entry */
+export interface EnvironmentIdeDirectoryListingEntry {
+  name: string
+  path: string
+}
+
 /** Java：fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeOpenViewDTO */
 export interface EnvironmentIdeOpenViewDTO {
   viewId: string
