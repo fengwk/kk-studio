@@ -150,6 +150,69 @@ class SkillArchiveFileReaderTest {
   }
 
   @Test
+  void shouldRejectTamperedArchiveIndexOffsetsSizesAndCrc() throws IOException {
+    // 意图：索引被篡改为错误偏移、错误解压大小或错误 CRC 时都拒绝返回内容，绝不把损坏字节交给读取方。
+    byte[] content =
+        "---\nname: my-skill\ndescription: tamper target\n---\n".getBytes(StandardCharsets.UTF_8);
+    SkillArchiveBuilder.Result archive =
+        new SkillArchiveBuilder()
+            .fromEntries(List.of(new InputEntry("my-skill/SKILL.md", Type.FILE, false, content)));
+
+    UUID blobId = UUID.randomUUID();
+    byte[] zip = archive.zip();
+    s3Storage.putDirect(StorageObjectKeys.blobOriginal(blobId), zip, "application/zip");
+    SkillArchiveIndex.Entry original = SkillArchiveIndex.from(archive.index()).entries().get(0);
+    StorageBlob blob = new StorageBlob();
+    blob.setId(blobId);
+    blob.setState(StorageBlobState.ACTIVE);
+    when(blobManager.getBlob(blobId)).thenReturn(blob);
+
+    // 偏移错误：范围读取从错误位置开始，inflate 失败或解压结果与摘要不符，两条路径都必须拒绝。
+    blob.setArchiveIndex(
+        new SkillArchiveIndex(
+                List.of(
+                    new SkillArchiveIndex.Entry(
+                        original.path(),
+                        original.size(),
+                        original.dataOffset() + 1,
+                        original.compressedSize(),
+                        original.crc32())))
+            .encode());
+    assertThrows(RuntimeException.class, () -> reader.readFile(blobId, original.path()));
+
+    // 解压大小错误：多声明一个字节，读取后的精确大小校验必须拒绝。
+    blob.setArchiveIndex(
+        new SkillArchiveIndex(
+                List.of(
+                    new SkillArchiveIndex.Entry(
+                        original.path(),
+                        original.size() + 1,
+                        original.dataOffset(),
+                        original.compressedSize(),
+                        original.crc32())))
+            .encode());
+    IllegalStateException sizeError =
+        assertThrows(IllegalStateException.class, () -> reader.readFile(blobId, original.path()));
+    assertEquals("archive entry content mismatch: " + original.path(), sizeError.getMessage());
+
+    // CRC 错误：内容大小相同也必须拒绝。
+    String wrongCrc = original.crc32().equals("00000000") ? "ffffffff" : "00000000";
+    blob.setArchiveIndex(
+        new SkillArchiveIndex(
+                List.of(
+                    new SkillArchiveIndex.Entry(
+                        original.path(),
+                        original.size(),
+                        original.dataOffset(),
+                        original.compressedSize(),
+                        wrongCrc)))
+            .encode());
+    IllegalStateException crcError =
+        assertThrows(IllegalStateException.class, () -> reader.readFile(blobId, original.path()));
+    assertEquals("archive entry content mismatch: " + original.path(), crcError.getMessage());
+  }
+
+  @Test
   void shouldRejectWhenEntryCrcMismatch() {
     UUID blobId = UUID.randomUUID();
     // Create an entry where declared CRC32 is wrong
