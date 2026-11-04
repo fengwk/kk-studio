@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
+  appendUniqueChats,
   filterChats,
   formatBackendDate,
   mergeChatIntoList,
-  mergeChatList,
+  mergeChatPage,
   preferNewerChat,
 } from '@/features/chat/chat-utils'
 import { compareCatalogVersions } from '@/shared/lib/catalog-version'
@@ -55,25 +56,42 @@ describe('preferNewerChat', () => {
   })
 })
 
-describe('mergeChatList', () => {
-  it('returns the incoming list unchanged when no current cache exists', () => {
-    const incoming = [chat({ id: 'chat-1', version: '1' })]
-    expect(mergeChatList(undefined, incoming)).toBe(incoming)
+describe('mergeChatPage', () => {
+  it('returns the incoming page unchanged when no current cache exists', () => {
+    const incoming = { items: [chat({ id: 'chat-1', version: '1' })], nextCursor: 'next' }
+    expect(mergeChatPage(undefined, incoming)).toBe(incoming)
   })
 
-  it('merges by id preferring newer versions and keeps the incoming order', () => {
-    const current = [
-      chat({ id: 'chat-1', version: '10', title: 'cached newer' }),
-      chat({ id: 'chat-2', version: '1' }),
-    ]
-    const incoming = [
-      chat({ id: 'chat-1', version: '2', title: 'server stale' }),
-      chat({ id: 'chat-3', version: '1', title: 'new' }),
-    ]
-    const merged = mergeChatList(current, incoming)
-    expect(merged.map((item) => item.title)).toEqual(['cached newer', 'new'])
-    // server list order is authoritative; only conflicting ids fall back to the cache
-    expect(merged.map((item) => item.id)).toEqual(['chat-1', 'chat-3'])
+  it('merges page items by id preferring newer versions and keeps the incoming order and cursor', () => {
+    const current = {
+      items: [
+        chat({ id: 'chat-1', version: '10', title: 'cached newer' }),
+        chat({ id: 'chat-2', version: '1' }),
+      ],
+      nextCursor: 'stale',
+    }
+    const incoming = {
+      items: [
+        chat({ id: 'chat-1', version: '2', title: 'server stale' }),
+        chat({ id: 'chat-3', version: '1', title: 'new' }),
+      ],
+      nextCursor: 'next',
+    }
+    const merged = mergeChatPage(current, incoming)
+    expect(merged.items.map((item) => item.title)).toEqual(['cached newer', 'new'])
+    // server page order is authoritative; only conflicting ids fall back to the cache
+    expect(merged.items.map((item) => item.id)).toEqual(['chat-1', 'chat-3'])
+    expect(merged.nextCursor).toBe('next')
+  })
+})
+
+describe('appendUniqueChats', () => {
+  it('appends only unseen chats and keeps the first occurrence order', () => {
+    const current = [chat({ id: 'chat-1' }), chat({ id: 'chat-2' })]
+    expect(appendUniqueChats(current, [
+      chat({ id: 'chat-2', title: 'duplicate' }),
+      chat({ id: 'chat-3', title: 'new' }),
+    ])).toEqual([chat({ id: 'chat-1' }), chat({ id: 'chat-2' }), chat({ id: 'chat-3', title: 'new' })])
   })
 })
 

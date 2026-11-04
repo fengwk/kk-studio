@@ -25,20 +25,19 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import fun.fengwk.kkstudio.chat.dto.ChatCreateDTO;
 import fun.fengwk.kkstudio.chat.dto.ChatDTO;
+import fun.fengwk.kkstudio.chat.dto.ChatPageDTO;
+import fun.fengwk.kkstudio.chat.dto.ChatSessionPageDTO;
 import fun.fengwk.kkstudio.chat.dto.ChatUpdateDTO;
 import fun.fengwk.kkstudio.chat.http.ChatController;
-import fun.fengwk.kkstudio.platform.orchestration.HarnessOwnerQueryService;
-import fun.fengwk.kkstudio.platform.orchestration.SessionOwner;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionSummaryDTO;
 
 import java.util.List;
 import java.util.UUID;
 
-/** {@link ChatController} HTTP 契约测试：验证 /api/chats 路由复数化、path/method/query CAS 与状态码。 */
+/** {@link ChatController} HTTP 契约测试：验证 /api/chats 路由、keyset 分页参数、path/method/query CAS 与状态码。 */
 class ChatControllerTest {
 
   private ChatService chatService;
-  private HarnessOwnerQueryService harnessQueryService;
   private MockMvc mockMvc;
 
   private static UUID id(long value) {
@@ -52,27 +51,45 @@ class ChatControllerTest {
   @BeforeEach
   void setUp() {
     chatService = mock(ChatService.class);
-    harnessQueryService = mock(HarnessOwnerQueryService.class);
     mockMvc =
-        MockMvcBuilders.standaloneSetup(new ChatController(chatService, harnessQueryService))
+        MockMvcBuilders.standaloneSetup(new ChatController(chatService))
             .setControllerAdvice(new TestApiResponseStatusAdvice())
             .build();
   }
 
-  /** 测试意图：验证 GET /api/chats 集合列表查询契约与 200 OK 状态码。 */
+  /** 测试意图：验证 GET /api/chats 返回稳定分页信封（items + nextCursor）与 200 OK 状态码。 */
   @Test
-  void listChatsReturnsAllChats() throws Exception {
+  void listChatsReturnsPageWithCursor() throws Exception {
     ChatDTO chat = new ChatDTO();
     chat.setId(idText(1));
     chat.setTitle("chat-1");
-    when(chatService.listChats()).thenReturn(List.of(chat));
+    ChatPageDTO page = new ChatPageDTO();
+    page.setItems(List.of(chat));
+    page.setNextCursor("cursor-2");
+    when(chatService.listChats(null, 50)).thenReturn(page);
 
     mockMvc
         .perform(get("/api/chats"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data[0].id").value(idText(1)))
-        .andExpect(jsonPath("$.data[0].title").value("chat-1"));
-    verify(chatService).listChats();
+        .andExpect(jsonPath("$.data.items[0].id").value(idText(1)))
+        .andExpect(jsonPath("$.data.items[0].title").value("chat-1"))
+        .andExpect(jsonPath("$.data.nextCursor").value("cursor-2"));
+    verify(chatService).listChats(null, 50);
+  }
+
+  /** 测试意图：验证分页参数原样传递，且显式 limit 上限被拒绝为 400。 */
+  @Test
+  void listChatsForwardsCursorAndLimitAndRejectsOutOfRangeLimit() throws Exception {
+    ChatPageDTO page = new ChatPageDTO();
+    when(chatService.listChats("cursor-9", 20)).thenReturn(page);
+
+    mockMvc
+        .perform(get("/api/chats").param("cursor", "cursor-9").param("limit", "20"))
+        .andExpect(status().isOk());
+    verify(chatService).listChats("cursor-9", 20);
+
+    mockMvc.perform(get("/api/chats").param("limit", "101")).andExpect(status().isBadRequest());
+    mockMvc.perform(get("/api/chats").param("limit", "0")).andExpect(status().isBadRequest());
   }
 
   /** 测试意图：验证 GET /api/chats/{chatId} 单资源查询契约，明确 path variable 传递与 200 OK 状态码。 */
@@ -100,26 +117,48 @@ class ChatControllerTest {
     verify(chatService).deleteChat(idText(9), "3");
   }
 
-  /** 测试意图：验证 GET /api/chats/{chatId}/sessions 正确传递 chatId 并返回会话摘要（含权威 name）与 200 OK 状态码。 */
+  /** 测试意图：验证 GET /api/chats/{chatId}/sessions 返回分页信封并透传 chatId、cursor 与 limit。 */
   @Test
-  void listChatSessionsForwardsChatIdAndReturnsResults() throws Exception {
+  void listChatSessionsForwardsChatIdAndPagingParameters() throws Exception {
     HarnessSessionSummaryDTO summary = new HarnessSessionSummaryDTO();
     summary.setSessionId(idText(2));
     summary.setName("session name");
     summary.setFirstMessagePreview("hello");
     summary.setThreadCount(2);
+    ChatSessionPageDTO page = new ChatSessionPageDTO();
+    page.setItems(List.of(summary));
+    page.setNextCursor("next");
 
-    when(harnessQueryService.listSessions(new SessionOwner("CHAT", idText(7))))
-        .thenReturn(List.of(summary));
+    when(chatService.listSessions(idText(7), "cursor-1", 10)).thenReturn(page);
 
     mockMvc
-        .perform(get("/api/chats/" + idText(7) + "/sessions"))
+        .perform(
+            get("/api/chats/" + idText(7) + "/sessions")
+                .param("cursor", "cursor-1")
+                .param("limit", "10"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data[0].sessionId").value(idText(2)))
-        .andExpect(jsonPath("$.data[0].name").value("session name"))
-        .andExpect(jsonPath("$.data[0].firstMessagePreview").value("hello"))
-        .andExpect(jsonPath("$.data[0].threadCount").value(2));
-    verify(harnessQueryService).listSessions(new SessionOwner("CHAT", idText(7)));
+        .andExpect(jsonPath("$.data.items[0].sessionId").value(idText(2)))
+        .andExpect(jsonPath("$.data.items[0].name").value("session name"))
+        .andExpect(jsonPath("$.data.items[0].firstMessagePreview").value("hello"))
+        .andExpect(jsonPath("$.data.items[0].threadCount").value(2))
+        .andExpect(jsonPath("$.data.nextCursor").value("next"));
+    verify(chatService).listSessions(idText(7), "cursor-1", 10);
+  }
+
+  /** 测试意图：单个归属 Session 摘要按 id 解析，供面包屑与重命名使用。 */
+  @Test
+  void getChatSessionForwardsIdsAndReturnsSummary() throws Exception {
+    HarnessSessionSummaryDTO summary = new HarnessSessionSummaryDTO();
+    summary.setSessionId(idText(3));
+    summary.setName("focused session");
+    when(chatService.getSession(idText(7), idText(3))).thenReturn(summary);
+
+    mockMvc
+        .perform(get("/api/chats/" + idText(7) + "/sessions/" + idText(3)))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.sessionId").value(idText(3)))
+        .andExpect(jsonPath("$.data.name").value("focused session"));
+    verify(chatService).getSession(idText(7), idText(3));
   }
 
   /** 测试意图：验证 Chat 创建只接受当前字段，响应中不存在 Workspace 状态。 */

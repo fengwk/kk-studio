@@ -57,6 +57,8 @@ import { usePaneBackgroundProjection } from '@/features/thread/runtime/root-thre
 import {
   usePaneDraftHistory,
   usePaneNavigationQueries,
+  type SessionSummaryLoader,
+  type SessionSummaryResolver,
 } from '@/features/thread/runtime/root-thread/usePaneHistory'
 import { usePaneNavigation } from '@/features/thread/runtime/root-thread/usePaneNavigation'
 import { usePaneRename } from '@/features/thread/runtime/root-thread/usePaneRename'
@@ -72,7 +74,6 @@ import type {
 import type {
   AgentDefinitionDTO,
   EnvironmentCardDTO,
-  HarnessSessionSummaryDTO,
 } from '@/shared/api/generated/contracts'
 
 export interface UseRootThreadControlOptions {
@@ -94,8 +95,10 @@ export interface UseRootThreadControlOptions {
   /** 面板运行时摘要上报；缺失时不产生任何跨 pane 通信。 */
   onReport?: (report: PaneReport) => void
   onValidateDraftName?: (target: PaneTarget, name: string) => Promise<string | null>
-  /** 宿主读取 Owner Session 摘要（Chat 宿主注入 Chat 会话接口，其它宿主可不提供）。 */
-  loadSessions?: (owner: AgentRuntimeOwnerDTO) => Promise<HarnessSessionSummaryDTO[]>
+  /** 宿主读取 Owner Session 摘要分页（Chat 宿主注入 Chat 会话接口，其它宿主可不提供）。 */
+  loadSessions?: SessionSummaryLoader
+  /** 宿主按 id 解析单个 Owner Session 摘要；用于分页窗口外的重命名名称解析。 */
+  loadSession?: SessionSummaryResolver
   /** 由父面板持有的 Pane 绑定目标；本 Hook 只读取并请求切换。 */
   target: PaneTarget
   setTarget: (next: PaneTarget) => void
@@ -125,6 +128,7 @@ export function useRootThreadControl({
   onReport,
   onValidateDraftName,
   loadSessions,
+  loadSession,
   onOpenIde,
 }: UseRootThreadControlOptions) {
   const { t } = useI18n()
@@ -235,7 +239,15 @@ export function useRootThreadControl({
   const historySessionId = isDraftHistoryTarget(target)
     ? target.sessionId
     : threadNavigationSessionId ?? currentSessionId
-  const { sessionsQuery, threadsQuery, treeEntriesQuery } = usePaneNavigationQueries({
+  const {
+    sessionsQuery,
+    sessions,
+    sessionsHasMore,
+    sessionsLoadingMore,
+    loadMoreSessions,
+    threadsQuery,
+    treeEntriesQuery,
+  } = usePaneNavigationQueries({
     owner,
     ownerKey,
     target,
@@ -293,7 +305,10 @@ export function useRootThreadControl({
       ? null
       : { threadId: controller.thread.threadId, name: controller.thread.name },
     boundSessionId: controller.sessionId || null,
-    sessionsQuery,
+    sessions,
+    sessionsPending: sessionsQuery.isLoading,
+    sessionsError: sessionsQuery.error,
+    resolveSession: loadSession,
     hasPendingOperation,
     setInteraction,
     setActionError,
@@ -710,8 +725,11 @@ export function useRootThreadControl({
     ) => rename.openRename(kind, id, name, backTo),
     submitRename: rename.submitRename,
     closeRename: rename.closeRename,
-    sessions: sessionsQuery.data ?? [],
+    sessions,
     sessionsLoading: sessionsQuery.isLoading,
+    sessionsHasMore,
+    sessionsLoadingMore,
+    loadMoreSessions,
     threads: threadsQuery.data ?? [],
     threadsLoading: threadsQuery.isLoading,
     treeEntries: treeEntriesQuery.data ?? [],

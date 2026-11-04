@@ -57,6 +57,7 @@ vi.mock('@/features/chat/chat-service', () => ({
   chatService: {
     getChat: vi.fn(),
     listChatSessions: vi.fn(),
+    getChatSession: vi.fn(),
   },
 }))
 vi.mock('@/features/environment/environment-service', () => ({
@@ -203,14 +204,14 @@ beforeEach(() => {
     totalCount: '1',
     results: [model],
   })
-  vi.mocked(chatService.listChatSessions).mockResolvedValue([{
+  vi.mocked(chatService.getChatSession).mockResolvedValue({
     sessionId: 'session-1',
     name: 'Session One',
     createdAt: 0,
     lastActivityAt: 0,
     firstMessagePreview: null,
     threadCount: 1,
-  }])
+  })
   vi.mocked(environmentService.listEnvironments).mockResolvedValue([])
   // 根控制区以已加载的 Thread 身份为准：快照必须回显请求的 threadId，
   // 否则面板会一直停留“身份未加载”而不暴露控制区。

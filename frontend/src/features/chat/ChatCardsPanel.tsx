@@ -4,6 +4,7 @@ import { ResourceGrid } from '@/shared/ui/cards/ResourceGrid'
 import { useI18n } from '@/shared/i18n'
 import { CatalogSetupGuide } from '@/features/chat/CatalogSetupGuide'
 import { isCatalogSetupComplete, type CatalogSetupState } from '@/features/chat/catalog-setup'
+import { Button } from '@/shared/ui/controls/Button'
 import type { AgentDefinitionDTO, ChatDTO } from '@/shared/api/generated/contracts'
 
 export function ChatCardsPanel({
@@ -14,6 +15,9 @@ export function ChatCardsPanel({
   onDelete,
   deletePending = false,
   setup,
+  hasMore = false,
+  loadingMore = false,
+  onLoadMore,
 }: {
   chats: ChatDTO[]
   agents: AgentDefinitionDTO[]
@@ -23,6 +27,10 @@ export function ChatCardsPanel({
   deletePending?: boolean
   /** Catalog 是否已具备对话所需资源；未知（加载中）时不渲染引导。 */
   setup?: CatalogSetupState
+  /** 首页之后是否还有未加载的对话页。 */
+  hasMore?: boolean
+  loadingMore?: boolean
+  onLoadMore?: () => void
 }) {
   const { t } = useI18n()
   return (
@@ -45,6 +53,13 @@ export function ChatCardsPanel({
           />
         ))}
       </ResourceGrid>
+      {hasMore && onLoadMore ? (
+        <div className="chat-cards-load-more">
+          <Button variant="ghost" loading={loadingMore} onClick={onLoadMore}>
+            {t('ai.chat.loadMore')}
+          </Button>
+        </div>
+      ) : null}
     </>
   )
 }

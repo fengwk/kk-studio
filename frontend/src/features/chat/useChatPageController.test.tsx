@@ -25,7 +25,7 @@ describe('useChatPageController', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.mocked(agentService.listAgents).mockResolvedValue(page([agent()]))
-    vi.mocked(chatService.listChats).mockResolvedValue([])
+    vi.mocked(chatService.listChats).mockResolvedValue({ items: [], nextCursor: null })
     vi.mocked(chatService.createChat).mockResolvedValue({
       id: 'chat-1',
       title: '新的 Chat',

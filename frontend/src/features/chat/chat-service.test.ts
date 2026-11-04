@@ -62,8 +62,24 @@ describe('chatService', () => {
   it('queries chat sessions via GET /chats/{chatId}/sessions', async () => {
     const client = createClient()
     const service = createChatService(client)
-    await service.listChatSessions('chat /1')
+    await service.listChatSessions('chat /1', 'cursor-1')
 
-    expect(client.get).toHaveBeenCalledWith('/chats/chat%20%2F1/sessions')
+    expect(client.get).toHaveBeenCalledWith('/chats/chat%20%2F1/sessions', {
+      params: { cursor: 'cursor-1' },
+    })
+  })
+
+  /**
+   * 测试意图：单 Session 摘要用于面包屑与分页窗口外的名称解析，
+   * 端点同时规范化 chatId 与 sessionId。
+   */
+  it('queries one chat session via GET /chats/{chatId}/sessions/{sessionId}', async () => {
+    const client = createClient()
+    const service = createChatService(client)
+    await service.getChatSession('chat/1', 'session/1')
+
+    expect(client.get).toHaveBeenCalledWith(
+      '/chats/chat%2F1/sessions/session%2F1',
+    )
   })
 })

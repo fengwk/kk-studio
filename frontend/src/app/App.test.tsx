@@ -48,7 +48,7 @@ describe('App routes', () => {
     vi.mocked(agentService.listProviders).mockResolvedValue(page([]))
     vi.mocked(agentService.listModels).mockResolvedValue(page([]))
     vi.mocked(agentService.listAgents).mockResolvedValue(page([]))
-    vi.mocked(chatService.listChats).mockResolvedValue([])
+    vi.mocked(chatService.listChats).mockResolvedValue({ items: [], nextCursor: null })
     vi.mocked(environmentService.listEnvironments).mockResolvedValue([])
     vi.mocked(interactionService.listInteractions).mockResolvedValue({
       items: [],

@@ -16,31 +16,34 @@ import org.springframework.web.server.ResponseStatusException;
 import fun.fengwk.kkstudio.chat.ChatService;
 import fun.fengwk.kkstudio.chat.dto.ChatCreateDTO;
 import fun.fengwk.kkstudio.chat.dto.ChatDTO;
+import fun.fengwk.kkstudio.chat.dto.ChatPageDTO;
+import fun.fengwk.kkstudio.chat.dto.ChatSessionPageDTO;
 import fun.fengwk.kkstudio.chat.dto.ChatUpdateDTO;
-import fun.fengwk.kkstudio.common.id.Uuids;
+import fun.fengwk.kkstudio.common.number.DecimalLongs;
 import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
-import fun.fengwk.kkstudio.platform.orchestration.HarnessOwnerQueryService;
-import fun.fengwk.kkstudio.platform.orchestration.SessionOwner;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionSummaryDTO;
 
-import java.util.List;
-import java.util.UUID;
 import java.util.function.Supplier;
 
-/** Chat 集合 CRUD 与 Chat owner 的 Harness Session 摘要查询。 */
+/** Chat 集合 CRUD、keyset 分页与 Chat owner 的 Harness Session 摘要查询。 */
 @AllArgsConstructor
 @RequestMapping("/api/chats")
 @RestController
 public class ChatController {
 
+  private static final int DEFAULT_LIMIT = 50;
+  private static final int MAX_LIMIT = 100;
+
   private final ChatService chatService;
-  private final HarnessOwnerQueryService harnessQueryService;
 
   @GetMapping
-  public ApiResponse<List<ChatDTO>> listChats() {
-    return ApiResponse.ok(chatService.listChats());
+  public ApiResponse<ChatPageDTO> listChats(
+      @RequestParam(name = "cursor", required = false) String cursor,
+      @RequestParam(name = "limit", required = false) String limit) {
+    return ApiResponse.ok(
+        withRuntimeTranslation(() -> chatService.listChats(cursor, parseLimit(limit))));
   }
 
   @PostMapping
@@ -72,16 +75,33 @@ public class ChatController {
     return ApiResponse.noContent();
   }
 
-  /** 返回该 Chat 关联的 Session 摘要（按归属时间从新到旧）。 */
+  /** 返回该 Chat 的归属 Session 摘要一页（按归属时间从新到旧）。 */
   @GetMapping("/{chatId}/sessions")
-  public ApiResponse<List<HarnessSessionSummaryDTO>> listChatSessions(
-      @PathVariable("chatId") String chatId) {
+  public ApiResponse<ChatSessionPageDTO> listChatSessions(
+      @PathVariable("chatId") String chatId,
+      @RequestParam(name = "cursor", required = false) String cursor,
+      @RequestParam(name = "limit", required = false) String limit) {
     return ApiResponse.ok(
-        withRuntimeTranslation(
-            () -> {
-              UUID id = Uuids.parseCanonical(chatId, "chatId");
-              return harnessQueryService.listSessions(new SessionOwner("CHAT", id.toString()));
-            }));
+        withRuntimeTranslation(() -> chatService.listSessions(chatId, cursor, parseLimit(limit))));
+  }
+
+  /** 返回单个归属 Session 摘要；用于深链与重命名时的按 id 解析。 */
+  @GetMapping("/{chatId}/sessions/{sessionId}")
+  public ApiResponse<HarnessSessionSummaryDTO> getChatSession(
+      @PathVariable("chatId") String chatId, @PathVariable("sessionId") String sessionId) {
+    return ApiResponse.ok(withRuntimeTranslation(() -> chatService.getSession(chatId, sessionId)));
+  }
+
+  /** 分页上限：缺省 50；显式给出时必须是 [1, 100] 内的 canonical 十进制整数。 */
+  private static int parseLimit(String limit) {
+    if (limit == null) {
+      return DEFAULT_LIMIT;
+    }
+    long parsed = DecimalLongs.parsePositive(limit, "limit");
+    if (parsed > MAX_LIMIT) {
+      throw new IllegalArgumentException("limit must be within [1, " + MAX_LIMIT + "]");
+    }
+    return (int) parsed;
   }
 
   /** 将 Harness Runtime 与边界参数解析异常翻译为统一 HTTP 错误响应；领域错误交给集中 advice。 */

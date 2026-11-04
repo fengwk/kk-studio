@@ -26,6 +26,9 @@ export function SelectionPanel({
   selectionPending = false,
   renameLabel,
   emptyText,
+  hasMore = false,
+  loadingMore = false,
+  onLoadMore,
   onCycleControl,
   cycleControlHint,
   onRename,
@@ -41,6 +44,10 @@ export function SelectionPanel({
   /** 行内重命名动作的 aria-label；缺省时不渲染该动作。 */
   renameLabel?: string
   emptyText?: string
+  /** 是否还有未加载的选项页；与 onLoadMore 同时给出才渲染加载更多入口。 */
+  hasMore?: boolean
+  loadingMore?: boolean
+  onLoadMore?: () => void
   onCycleControl?: () => void
   cycleControlHint?: string
   onRename?: (id: string) => void
@@ -262,6 +269,21 @@ export function SelectionPanel({
             </li>
           )
         })}
+        {!loading && hasMore && onLoadMore ? (
+          <li className="thread-selection-row">
+            <button
+              type="button"
+              className="thread-selection-item"
+              disabled={selectionPending || loadingMore}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={onLoadMore}
+            >
+              <span className="thread-selection-item-title">
+                <span>{loadingMore ? t('ai.chat.loadingList') : t('ai.chat.loadMore')}</span>
+              </span>
+            </button>
+          </li>
+        ) : null}
       </ul>
     </ThreadInteractionPanel>
   )

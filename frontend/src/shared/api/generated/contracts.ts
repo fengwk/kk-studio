@@ -722,6 +722,18 @@ export interface ChatDTO {
   updateTime: number
 }
 
+/** Java：fun.fengwk.kkstudio.chat.dto.ChatPageDTO */
+export interface ChatPageDTO {
+  items: ChatDTO[]
+  nextCursor: string | null
+}
+
+/** Java：fun.fengwk.kkstudio.chat.dto.ChatSessionPageDTO */
+export interface ChatSessionPageDTO {
+  items: HarnessSessionSummaryDTO[]
+  nextCursor: string | null
+}
+
 /** Java：fun.fengwk.kkstudio.chat.dto.ChatUpdateDTO */
 export interface ChatUpdateDTO {
   title?: string | null

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
 import { harnessService } from '@/shared/api/harness-service'
 import type { AgentRuntimeOwnerDTO } from '@/shared/api/contracts/ai-runtime'
 import { useI18n } from '@/shared/i18n'
@@ -15,8 +15,27 @@ import {
 import type { PaneInteraction } from '@/features/thread/runtime/root-thread/types'
 import type { HarnessSessionSummaryDTO } from '@/shared/api/generated/contracts'
 
+/** 宿主返回的 Owner Session 摘要一页：items 按宿主顺序，nextCursor 非空表示还有下一页。 */
+export interface SessionSummaryPage {
+  items: HarnessSessionSummaryDTO[]
+  nextCursor?: string | null
+}
+
+/** 宿主按页读取 Owner Session 摘要；cursor 为 null 表示首屏。 */
+export type SessionSummaryLoader = (
+  owner: AgentRuntimeOwnerDTO,
+  cursor: string | null,
+) => Promise<SessionSummaryPage>
+
+/** 宿主按 id 解析单个 Owner Session 摘要；不存在或不属于当前 owner 时返回 null。 */
+export type SessionSummaryResolver = (
+  sessionId: string,
+) => Promise<HarnessSessionSummaryDTO | null>
+
+const EMPTY_SESSION_PAGE: SessionSummaryPage = { items: [], nextCursor: null }
+
 /**
- * Pane 的 owner 范围导航查询：Session 列表、Session 下 Thread 列表与完整 Entry Tree。
+ * Pane 的 owner 范围导航查询：Session 列表（keyset 分页）、Session 下 Thread 列表与完整 Entry Tree。
  * 三者都按需读取（只在对应交互打开或草稿历史目标存在时启用）。
  */
 export function usePaneNavigationQueries(options: {
@@ -26,8 +45,8 @@ export function usePaneNavigationQueries(options: {
   interaction: PaneInteraction
   threadNavigationSessionId: string | null
   historySessionId: string | null
-  /** 宿主提供的 Owner Session 摘要读取；未提供时该导航入口不可用。 */
-  loadSessions?: (owner: AgentRuntimeOwnerDTO) => Promise<HarnessSessionSummaryDTO[]>
+  /** 宿主提供的 Owner Session 摘要分页读取；未提供时该导航入口不可用。 */
+  loadSessions?: SessionSummaryLoader
 }) {
   const {
     owner,
@@ -38,19 +57,30 @@ export function usePaneNavigationQueries(options: {
     historySessionId,
     loadSessions,
   } = options
-  const sessionsQuery = useQuery<HarnessSessionSummaryDTO[]>({
+  const sessionsQuery = useInfiniteQuery({
     queryKey: ['agent-pane', 'sessions', ownerKey],
-    queryFn: () => {
+    queryFn: ({ pageParam }) => {
       if (!owner || !loadSessions) {
-        return Promise.resolve([])
+        return Promise.resolve(EMPTY_SESSION_PAGE)
       }
-      return loadSessions(owner)
+      return loadSessions(owner, pageParam)
     },
+    initialPageParam: null as string | null,
+    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
     enabled:
       owner != null
       && loadSessions != null
       && (interaction === 'thread-sessions' || interaction === 'rename-session'),
   })
+  const sessions = useMemo(
+    () => sessionsQuery.data?.pages.flatMap((page) => page.items) ?? [],
+    [sessionsQuery.data],
+  )
+  const loadMoreSessions = () => {
+    if (sessionsQuery.hasNextPage && !sessionsQuery.isFetchingNextPage) {
+      void sessionsQuery.fetchNextPage()
+    }
+  }
   const threadsQuery = useQuery({
     queryKey: ['agent-pane', 'threads', threadNavigationSessionId],
     queryFn: () => harnessService.listSessionThreads(threadNavigationSessionId!),
@@ -63,7 +93,15 @@ export function usePaneNavigationQueries(options: {
       (interaction === 'history' || isDraftHistoryTarget(target))
       && historySessionId != null,
   })
-  return { sessionsQuery, threadsQuery, treeEntriesQuery }
+  return {
+    sessionsQuery,
+    sessions,
+    sessionsHasMore: sessionsQuery.hasNextPage,
+    sessionsLoadingMore: sessionsQuery.isFetchingNextPage,
+    loadMoreSessions,
+    threadsQuery,
+    treeEntriesQuery,
+  }
 }
 
 type TreeEntriesQuery = ReturnType<typeof usePaneNavigationQueries>['treeEntriesQuery']

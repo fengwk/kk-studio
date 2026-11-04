@@ -8,18 +8,39 @@ import fun.fengwk.kkstudio.platform.persistence.PostgresJdbcTypes;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Timestamp;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
-/** {@code chat} 的 JdbcClient 仓库：读取、两种行锁与 CAS 写。 */
+/** {@code chat} 的 JdbcClient 仓库：读取、keyset 分页、两种行锁与 CAS 写。 */
 @Repository
 public class ChatRepository {
 
   private static final String COLUMNS =
       "id, title, agent_name, environment_name, yolo_enabled, version, "
           + "created_at as create_time, updated_at as update_time";
+
+  private static final String ORDER_BY =
+      " order by updated_at desc, created_at desc, title asc, id asc";
+
+  /**
+   * 严格位于游标之后的稳定行判定：主键按 {@code (updated_at, created_at)} 倒序推进，同一时刻再按 {@code title} 升序与 {@code id}
+   * 升序推进；{@code title} 为 null 时按 PostgreSQL ASC 的 NULLS LAST 语义只接受同为 null 的更大 id。
+   */
+  private static final String AFTER_CURSOR =
+      """
+      where updated_at < :updatedAt
+         or (updated_at = :updatedAt and created_at < :createdAt)
+         or (updated_at = :updatedAt and created_at = :createdAt and (
+              (cast(:title as text) is null and title is null and id > :id)
+              or (cast(:title as text) is not null
+                  and (title is null
+                       or title > cast(:title as text)
+                       or (title = cast(:title as text) and id > :id)))
+         ))
+      """;
 
   private static final String INSERT_SQL =
       """
@@ -50,10 +71,26 @@ public class ChatRepository {
     this.jdbcClient = Objects.requireNonNull(jdbcClient, "jdbcClient");
   }
 
-  public List<Chat> listNewestFirst() {
+  /**
+   * 一页对话，按 {@code (updated_at desc, created_at desc, title asc, id asc)} 稳定推进。
+   *
+   * <p>游标为 null 时返回首屏；否则只返回严格位于游标之后的稳定行。调用方多取一行判断是否还有下一页。
+   */
+  public List<Chat> listPage(ChatCursor cursor, int limit) {
+    if (cursor == null) {
+      return jdbcClient
+          .sql("select " + COLUMNS + " from chat" + ORDER_BY + " limit :limit")
+          .param("limit", limit)
+          .query(ROW_MAPPER)
+          .list();
+    }
     return jdbcClient
-        .sql(
-            "select " + COLUMNS + " from chat order by updated_at desc, created_at desc, title asc")
+        .sql("select " + COLUMNS + " from chat " + AFTER_CURSOR + ORDER_BY + " limit :limit")
+        .param("updatedAt", Timestamp.from(cursor.updatedAt()))
+        .param("createdAt", Timestamp.from(cursor.createdAt()))
+        .param("title", cursor.title())
+        .param("id", cursor.id())
+        .param("limit", limit)
         .query(ROW_MAPPER)
         .list();
   }

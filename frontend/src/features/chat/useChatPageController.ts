@@ -59,7 +59,11 @@ export function useChatPageController() {
     search,
     setSearch,
     busy: agentsQuery.isLoading || chatController.chatsQuery.isLoading,
-    error: agentsQuery.error ?? chatController.chatsQuery.error ?? null,
+    error:
+      agentsQuery.error
+      ?? chatController.chatsQuery.error
+      ?? chatController.chatsLoadMoreError
+      ?? null,
     mutationError,
     chatPanelProps: {
       chats,
@@ -69,6 +73,9 @@ export function useChatPageController() {
       onDelete: chatController.openDeleteChat,
       deletePending: chatController.deleteConfirmModal.pending,
       setup,
+      hasMore: chatController.hasMoreChats,
+      loadingMore: chatController.chatsLoadingMore,
+      onLoadMore: () => void chatController.loadMoreChats(),
     },
     createChatModal: chatController.createChatModal,
     deleteConfirmModal: chatController.deleteConfirmModal,

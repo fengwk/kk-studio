@@ -1,6 +1,6 @@
 import { includesSearch } from '@/shared/lib/search-utils'
 import type { CatalogVersion } from '@/shared/api/contracts/base'
-import type { ChatDTO } from '@/shared/api/generated/contracts'
+import type { ChatDTO, ChatPageDTO } from '@/shared/api/generated/contracts'
 
 function catalogVersionValue(version: CatalogVersion): bigint {
   try {
@@ -35,15 +35,24 @@ export function preferNewerChat(
 }
 
 /** 合并服务器列表响应，同时避免较低 Chat 版本使 cache 回退。 */
-export function mergeChatList(
-  current: ChatDTO[] | undefined,
-  incoming: ChatDTO[],
-): ChatDTO[] {
+export function mergeChatPage(
+  current: ChatPageDTO | undefined,
+  incoming: ChatPageDTO,
+): ChatPageDTO {
   if (!current) {
     return incoming
   }
-  const currentById = new Map(current.map((chat) => [chat.id, chat]))
-  return incoming.map((chat) => preferNewerChat(currentById.get(chat.id), chat))
+  const currentById = new Map(current.items.map((chat) => [chat.id, chat]))
+  return {
+    ...incoming,
+    items: incoming.items.map((chat) => preferNewerChat(currentById.get(chat.id), chat)),
+  }
+}
+
+/** 追加页与已加载列表按 id 去重，保留首次出现顺序（页面窗口内不重复展示同一 Chat）。 */
+export function appendUniqueChats(current: ChatDTO[], incoming: ChatDTO[]): ChatDTO[] {
+  const seen = new Set(current.map((chat) => chat.id))
+  return [...current, ...incoming.filter((chat) => !seen.has(chat.id))]
 }
 
 /** 将权威 Chat 响应应用到已加载的列表 cache。 */

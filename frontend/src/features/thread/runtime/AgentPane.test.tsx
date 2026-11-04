@@ -81,11 +81,11 @@ const CHAT_ID = 'chat-1'
 const THREAD_ID = '11111111-2222-4333-8444-555555555555'
 const TEST_TARGET_PREFIX = 'kk-studio.agent-pane-target.'
 
-/** 测试宿主按真实 Chat 注入契约提供 Owner Session 摘要。 */
+/** 测试宿主按真实 Chat 注入契约提供 Owner Session 摘要页。 */
 const loadSessionsMock = vi.hoisted(() => vi.fn(async (): Promise<HarnessSessionSummaryDTO[]> => []))
 
 function loadChatSessions() {
-  return loadSessionsMock()
+  return loadSessionsMock().then((items) => ({ items, nextCursor: null }))
 }
 
 function testTargetKey(owner: NonNullable<ComponentProps<typeof AgentPane>['owner']>, paneId: string): string {

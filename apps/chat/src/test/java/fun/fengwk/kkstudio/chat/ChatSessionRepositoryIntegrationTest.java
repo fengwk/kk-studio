@@ -12,10 +12,12 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 
+import java.sql.Timestamp;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
-/** {@code chat_session} 归属仓库在真实 PostgreSQL 上的契约：插入/查找/枚举/删除、FK 防悬空与 session 单归属互斥。 */
+/** {@code chat_session} 归属仓库在真实 PostgreSQL 上的契约：插入/查找/枚举/keyset 分页/删除、FK 防悬空与 session 单归属互斥。 */
 class ChatSessionRepositoryIntegrationTest extends PostgresSpringTestSupport {
 
   @Autowired private ChatSessionRepository chatSessionRepository;
@@ -67,6 +69,28 @@ class ChatSessionRepositoryIntegrationTest extends PostgresSpringTestSupport {
     assertEquals(1L, count("select count(*) from chat_session where session_id = ?", sessionId));
   }
 
+  /** 一页归属边按 created_at 倒序、再按 session_id 倒序推进，游标后无重复无遗漏。 */
+  @Test
+  void listPageAdvancesByCreatedAtThenSessionId() {
+    UUID chatId = chatRow();
+    Instant base = Instant.parse("2026-01-01T00:00:00Z");
+    UUID newest = ownedSession(chatId, base.plusSeconds(3));
+    UUID sameTimeLow = ownedSessionAt(chatId, base.plusSeconds(1), new UUID(0L, 1L));
+    UUID sameTimeHigh = ownedSessionAt(chatId, base.plusSeconds(1), new UUID(0L, 2L));
+    UUID middle = ownedSession(chatId, base.plusSeconds(2));
+
+    List<ChatSessionRow> page1 = chatSessionRepository.listPage(chatId, null, 2);
+    assertEquals(List.of(newest, middle), pageIds(page1));
+    ChatSessionCursor afterPage1 = ChatSessionCursor.of(page1.getLast());
+
+    List<ChatSessionRow> page2 = chatSessionRepository.listPage(chatId, afterPage1, 2);
+    assertEquals(List.of(sameTimeHigh, sameTimeLow), pageIds(page2));
+    assertNull(
+        chatSessionRepository.listPage(chatId, ChatSessionCursor.of(page2.getLast()), 2).stream()
+            .findFirst()
+            .orElse(null));
+  }
+
   /** FK：chat 与 harness_session 都必须存在，防止出现悬空归属。 */
   @Test
   void foreignKeysRejectOrphanedRows() {
@@ -100,6 +124,28 @@ class ChatSessionRepositoryIntegrationTest extends PostgresSpringTestSupport {
         "insert into harness_session (id, name, created_at) values (?, ?, current_timestamp)",
         sessionId,
         "test-session");
+  }
+
+  private UUID ownedSession(UUID chatId, Instant createTime) {
+    return ownedSessionAt(chatId, createTime, UUID.randomUUID());
+  }
+
+  private UUID ownedSessionAt(UUID chatId, Instant createTime, UUID sessionId) {
+    jdbc.update(
+        "insert into harness_session (id, name, created_at) values (?, ?, ?)",
+        sessionId,
+        "test-session",
+        Timestamp.from(createTime));
+    jdbc.update(
+        "insert into chat_session (session_id, chat_id, created_at) values (?, ?, ?)",
+        sessionId,
+        chatId,
+        Timestamp.from(createTime));
+    return sessionId;
+  }
+
+  private static List<UUID> pageIds(List<ChatSessionRow> rows) {
+    return rows.stream().map(ChatSessionRow::sessionId).toList();
   }
 
   private long count(String sql, UUID id) {

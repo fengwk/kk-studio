@@ -25,12 +25,18 @@ Chat 是直接持有 Harness Session 的产品之一：一次对话把多个 Ses
 
 | 方法与路径 | 语义 |
 | --- | --- |
-| `GET /api/chats` | 按最近更新倒序列出 Chat |
+| `GET /api/chats?cursor=&limit=` | 按最近更新倒序返回 Chat 一页；`nextCursor` 非空表示还有下一页 |
 | `POST /api/chats` | 创建 Chat；省略 `yoloEnabled` 为 `false`，`environmentName` 可省略或为 null（都表示无默认环境），携带时必须为已存在的 Environment 名 |
 | `GET /api/chats/{chatId}` | 读取单个 Chat 的权威版本 |
 | `PUT /api/chats/{chatId}` | 部分更新；`expectedVersion` 必填，省略 `environmentName` 保留当前默认环境、显式 null 清空；未知或非 canonical Environment 名返回 400 且当前值/version 不变 |
 | `DELETE /api/chats/{chatId}?expectedVersion=` | 深删除 Chat 及其全部归属 Session |
-| `GET /api/chats/{chatId}/sessions` | 返回该 Chat 的归属 Session 摘要 |
+| `GET /api/chats/{chatId}/sessions?cursor=&limit=` | 按归属时间从新到旧返回该 Chat 的 Session 摘要一页 |
+| `GET /api/chats/{chatId}/sessions/{sessionId}` | 按 id 读取单个归属 Session 摘要；不存在或不属于该 Chat 返回 404 |
+
+两个列表接口使用 keyset 分页：`limit` 缺省 50、范围 `[1, 100]`，`cursor` 是上一页返回的
+`nextCursor`，首屏省略；排序键包含唯一 id，因此相同时间戳与同名标题下也不会跳行或重复。Chat 的
+稳定顺序是 `(updateTime desc, createTime desc, title asc, id asc)`，Session 是
+`(createTime desc, sessionId desc)`。
 
 所有响应使用平台的 `ApiResponse` 信封；响应的 `environmentName` 是始终存在的 required-nullable 字段（未选择时为
 null）。`agentName` 与 `environmentName` 只按名称软引用目录行，不建立

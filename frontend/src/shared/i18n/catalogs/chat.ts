@@ -130,6 +130,10 @@ export const chatCatalog = {
     'en-US': 'Loading Chat…',
     'zh-CN': '正在加载 Chat…',
   },
+  'ai.chat.loadMore': {
+    'en-US': 'Load more',
+    'zh-CN': '加载更多',
+  },
   'ai.chat.loadFailed': {
     'en-US': 'Chat failed to load',
     'zh-CN': 'Chat 加载失败',

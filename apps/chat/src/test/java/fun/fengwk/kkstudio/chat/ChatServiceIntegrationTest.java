@@ -135,7 +135,7 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
       newer.setAgentName("default-assistant");
       ChatDTO second = chatService.createChat(newer);
       try {
-        List<ChatDTO> listed = chatService.listChats();
+        List<ChatDTO> listed = chatService.listChats(null, 50).getItems();
         assertTrue(indexOf(listed, second.getId()) < indexOf(listed, chatId));
       } finally {
         chatService.deleteChat(second.getId(), "0");

@@ -5,48 +5,91 @@ import org.springframework.transaction.annotation.Transactional;
 
 import fun.fengwk.kkstudio.chat.dto.ChatCreateDTO;
 import fun.fengwk.kkstudio.chat.dto.ChatDTO;
+import fun.fengwk.kkstudio.chat.dto.ChatPageDTO;
+import fun.fengwk.kkstudio.chat.dto.ChatSessionPageDTO;
 import fun.fengwk.kkstudio.chat.dto.ChatUpdateDTO;
 import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
 import fun.fengwk.kkstudio.platform.error.CatalogVersions;
+import fun.fengwk.kkstudio.platform.orchestration.HarnessOwnerQueryService;
 import fun.fengwk.kkstudio.platform.orchestration.SessionDeletionOrchestrator;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwner;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionSummaryDTO;
 
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
-import java.util.stream.Collectors;
 
 /**
- * Chat CRUD 服务；deleteChat 是深删除：排他锁定 Chat 后经共享 {@link SessionDeletionOrchestrator} 删除全部归属 Session。
+ * Chat 用例：对话 CRUD 与 keyset 分页、Chat 归属 Session 的分页摘要，以及经共享 {@link SessionDeletionOrchestrator} 的深删除。
  */
 @Service
 public class ChatService {
 
   private static final String RESOURCE = "chat";
+  private static final String CHAT_SESSION_RESOURCE = "chat_session";
 
   private final ChatRepository repository;
+  private final ChatSessionRepository sessions;
   private final ChatMutationFactory mutationFactory;
   private final ChatGuard guard;
+  private final HarnessOwnerQueryService harnessQueryService;
   private final SessionDeletionOrchestrator sessionDeletionService;
 
   public ChatService(
       ChatRepository repository,
+      ChatSessionRepository sessions,
       ChatMutationFactory mutationFactory,
       ChatGuard guard,
+      HarnessOwnerQueryService harnessQueryService,
       SessionDeletionOrchestrator sessionDeletionService) {
     this.repository = repository;
+    this.sessions = Objects.requireNonNull(sessions, "sessions");
     this.mutationFactory = mutationFactory;
     this.guard = guard;
+    this.harnessQueryService = Objects.requireNonNull(harnessQueryService, "harnessQueryService");
     this.sessionDeletionService = Objects.requireNonNull(sessionDeletionService);
   }
 
-  public List<ChatDTO> listChats() {
-    return repository.listNewestFirst().stream()
-        .map(ChatService::convert)
-        .collect(Collectors.toList());
+  /** 一页对话，按最近更新倒序稳定推进；{@code nextCursor} 非空表示还有下一页。 */
+  public ChatPageDTO listChats(String cursor, int limit) {
+    ChatCursor parsed = ChatCursor.parse(cursor);
+    List<Chat> rows = repository.listPage(parsed, limit + 1);
+    boolean hasMore = rows.size() > limit;
+    List<Chat> page = hasMore ? rows.subList(0, limit) : rows;
+    ChatPageDTO result = new ChatPageDTO();
+    result.setItems(page.stream().map(ChatService::convert).toList());
+    result.setNextCursor(hasMore ? ChatCursor.of(page.getLast()).encode() : null);
+    return result;
+  }
+
+  /** 一页 Chat 归属 Session 摘要，按归属时间从新到旧稳定推进。 */
+  public ChatSessionPageDTO listSessions(String chatId, String cursor, int limit) {
+    UUID id = Uuids.parseCanonical(chatId, "chatId");
+    ChatSessionCursor parsed = ChatSessionCursor.parse(cursor);
+    guard.requireChat(id);
+    List<ChatSessionRow> rows = sessions.listPage(id, parsed, limit + 1);
+    boolean hasMore = rows.size() > limit;
+    List<ChatSessionRow> page = hasMore ? rows.subList(0, limit) : rows;
+    ChatSessionPageDTO result = new ChatSessionPageDTO();
+    result.setItems(
+        harnessQueryService.listSessionSummaries(
+            page.stream().map(ChatSessionRow::sessionId).toList()));
+    result.setNextCursor(hasMore ? ChatSessionCursor.of(page.getLast()).encode() : null);
+    return result;
+  }
+
+  /** 单个归属 Session 的摘要；Session 不存在或不属于该 Chat 时 404。 */
+  public HarnessSessionSummaryDTO getSession(String chatId, String sessionId) {
+    UUID chat = Uuids.parseCanonical(chatId, "chatId");
+    UUID session = Uuids.parseCanonical(sessionId, "sessionId");
+    ChatSession relation = sessions.findBySessionId(session);
+    if (relation == null || !relation.chatId().equals(chat)) {
+      throw new AiResourceNotFoundException(CHAT_SESSION_RESOURCE);
+    }
+    return harnessQueryService.listSessionSummaries(List.of(session)).getFirst();
   }
 
   public ChatDTO getChat(String id) {
