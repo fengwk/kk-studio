@@ -1014,6 +1014,9 @@ function checkTableOwnership() {
 function checkKernelBoundary() {
   const manualCompaction =
     'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/ManualCompactionControl.java'
+  if (!existsSync(path.join(repositoryRoot, manualCompaction))) {
+    addError(`missing manual compaction control: ${manualCompaction}`)
+  }
   for (const { line, text } of fileLines(manualCompaction)) {
     if (text.includes('fun.fengwk.kkstudio.harness.runtime.processor.')) {
       addError(
@@ -1124,6 +1127,10 @@ function checkMcpClientBoundary() {
   ]
   const clientRoot =
     'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog/mcp/client'
+  if (!existsSync(path.join(repositoryRoot, clientRoot))) {
+    addError(`missing MCP client package: ${clientRoot}`)
+    return
+  }
   for (const { file, imported, line } of javaImports(path.join(repositoryRoot, clientRoot))) {
     if (!allowedPrefixes.some((prefix) => imported.startsWith(prefix))) {
       addError(
