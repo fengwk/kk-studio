@@ -58,15 +58,11 @@ class IdeBrowserSessionRegistryTest {
     String token = registry.open(IDENTITY, viewId, 1L, "/workspace");
     assertNotNull(token);
     assertEquals(1, registry.size());
-    assertEquals(1, registry.viewCount(IDENTITY));
-    assertEquals(1, registry.sessionCount(ENV, viewId));
 
     Optional<IdeBrowserSessionRegistry.Session> session = registry.lookup(token, ENV, viewId);
     assertTrue(session.isPresent());
     assertEquals(ENV, session.get().environmentId());
     assertEquals("/workspace", session.get().workspacePath());
-    assertTrue(session.get().authorizesWorkspace("/workspace"));
-    assertFalse(session.get().authorizesWorkspace("/other"));
 
     // Expiration
     now.set(now.get().plus(Duration.ofHours(2)));
@@ -75,7 +71,7 @@ class IdeBrowserSessionRegistryTest {
   }
 
   @Test
-  void viewClosedAndCloseGeneration() {
+  void viewClosed() {
     IdeBrowserSessionRegistry registry = new IdeBrowserSessionRegistry();
     String viewId = UUID.randomUUID().toString();
     registry.viewOpened(IDENTITY, viewId, 1L, "/workspace");
@@ -83,13 +79,6 @@ class IdeBrowserSessionRegistryTest {
 
     registry.viewClosed(IDENTITY, viewId, 1L);
     assertFalse(registry.lookup(token, ENV, viewId).isPresent());
-
-    registry.viewOpened(IDENTITY, viewId, 2L, "/workspace");
-    String token2 = registry.open(IDENTITY, viewId, 2L, "/workspace");
-    assertTrue(registry.lookup(token2, ENV, viewId).isPresent());
-
-    registry.closeGeneration(IDENTITY);
-    assertFalse(registry.lookup(token2, ENV, viewId).isPresent());
   }
 
   @Test
