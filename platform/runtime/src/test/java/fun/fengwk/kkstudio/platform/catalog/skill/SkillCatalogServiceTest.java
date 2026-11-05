@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.platform.catalog.skill;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -11,6 +12,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -259,6 +261,62 @@ class SkillCatalogServiceTest {
 
     verify(uploadService).delete(uploadId);
     verify(writes, never()).execute(any());
+  }
+
+  @Test
+  void preparedImportCleanupIsBestEffortAndDoesNotExposeTheToken() {
+    // 意图：清理故障不应阻止调用方处理其余暂存对象，准备值打印时不能泄露凭据。
+    UUID uploadId = UUID.randomUUID();
+    SkillCatalogService.PreparedGitImport prepared =
+        new SkillCatalogService.PreparedGitImport(
+            PACKAGE,
+            "description",
+            "https://git.example.com/repo.git",
+            "main",
+            "test-token",
+            HEAD,
+            List.of(),
+            uploadId);
+    doThrow(new IllegalStateException("storage unavailable")).when(uploadService).delete(uploadId);
+
+    assertDoesNotThrow(() -> service.cancelPreparedGitImport(prepared));
+    assertFalse(prepared.toString().contains("test-token"));
+  }
+
+  @Test
+  void preparedImportRechecksLockedPackageBeforeConsumingStaging() {
+    // 意图：计划后包的渠道、URL 或技能引用可能变化，发布必须以锁定后的权威状态拒绝冲突。
+    SkillCatalogService.PreparedGitImport prepared =
+        new SkillCatalogService.PreparedGitImport(
+            PACKAGE,
+            "updated",
+            "https://git.example.com/repo.git",
+            "main",
+            null,
+            HEAD,
+            List.of(new SkillManifestEntry("other", "other skill")),
+            UUID.randomUUID());
+    when(packageRepository.lockPackage(PACKAGE))
+        .thenReturn(
+            uploadPackage(1), gitPackage(1, OLD_HEAD, OLD_HEAD), gitPackage(1, OLD_HEAD, OLD_HEAD));
+    SkillCatalogService.PreparedGitImport differentUrl =
+        new SkillCatalogService.PreparedGitImport(
+            PACKAGE,
+            "updated",
+            "https://git.example.com/other.git",
+            "main",
+            null,
+            HEAD,
+            prepared.skills(),
+            prepared.stagingUploadId());
+    when(agentDefinitionRepository.existsReferencingSkill(PACKAGE, "dev")).thenReturn(true);
+
+    assertThrows(DomainException.class, () -> service.publishPreparedGitImport(prepared));
+    assertThrows(DomainException.class, () -> service.publishPreparedGitImport(differentUrl));
+    assertThrows(DomainException.class, () -> service.publishPreparedGitImport(prepared));
+
+    verify(uploadService, never()).lockReady(any());
+    verify(packageRepository, never()).updatePublication(any(), anyLong());
   }
 
   @Test

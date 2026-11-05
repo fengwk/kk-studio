@@ -224,6 +224,39 @@ class ConfigSyncGitAtomicIntegrationTest extends ConfigSyncTestSupport {
     }
   }
 
+  /** 意图：成功更新 Git 包时提交新的归档、分支与凭据事实，并原子释放旧归档引用。 */
+  @Test
+  void successfulImportUpdatesExistingGitPackageAndReleasesOldArtifact() throws Exception {
+    SkillArchiveBuilder.Result first = buildArchiveResult(Map.of("dev", "first version"));
+    SkillArchiveBuilder.Result second = buildArchiveResult(Map.of("dev", "second version"));
+    when(skillGitRepository.resolveBranchHead(EXISTING_URL, "main", "test-token"))
+        .thenReturn(COMMIT_1);
+    when(skillGitRepository.buildArchive(EXISTING_URL, COMMIT_1, "test-token")).thenReturn(first);
+    Map<String, Object> original =
+        skillPackageEntry(EXISTING_PKG, "original", EXISTING_URL, "main");
+    original.put("token", "test-token");
+    configSyncService.importYaml(request(yamlDocument(Map.of("skillPackages", List.of(original)))));
+    SkillPackage before = skillPackageRepository.getPackage(EXISTING_PKG);
+    UUID oldBlobId = before.artifactBlobId();
+
+    when(skillGitRepository.resolveBranchHead(EXISTING_URL, "next", null)).thenReturn(COMMIT_2);
+    when(skillGitRepository.buildArchive(EXISTING_URL, COMMIT_2, null)).thenReturn(second);
+    Map<String, Object> updated = skillPackageEntry(EXISTING_PKG, "original", EXISTING_URL, "next");
+    configSyncService.importYaml(request(yamlDocument(Map.of("skillPackages", List.of(updated)))));
+
+    SkillPackage after = skillPackageRepository.getPackage(EXISTING_PKG);
+    assertEquals(1L, after.version());
+    assertEquals("original", after.description());
+    assertEquals(COMMIT_2, after.packageVersion());
+    assertEquals("next", after.gitSource().branch());
+    assertEquals(COMMIT_2, after.gitSource().headCommit());
+    assertNull(after.gitSource().token());
+    assertFalse(oldBlobId.equals(after.artifactBlobId()));
+    assertEquals(0L, storageBlobManager.getBlob(oldBlobId).getRefCount());
+    assertEquals(StorageBlobState.DELETING, storageBlobManager.getBlob(oldBlobId).getState());
+    assertEquals(1L, storageBlobManager.getBlob(after.artifactBlobId()).getRefCount());
+  }
+
   /** 测试意图：单文件同时声明 Git 技能包与引用该包下合法技能的 Agent，验证全流程在同一事务内原子导入成功， 建立正确的技能包与 Agent 引用事实。 */
   @Test
   void successfulImportSameFileAgentRefersToGitSkill() throws Exception {
