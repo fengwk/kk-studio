@@ -69,7 +69,7 @@ import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
-import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
@@ -1250,12 +1250,11 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
         ProviderType.OPENAI,
         new UUID(0L, 1L),
         modelDescriptor(),
-        new ModelVariant("v1"),
+        new ModelVariant("v1", null, PromptCacheRetention.NONE, null),
         1024,
         "Test system instruction.",
         List.of(binding),
-        List.of(),
-        ProviderCacheControl.none());
+        List.of());
   }
 
   private static ProviderResponse toolCallResponse(
