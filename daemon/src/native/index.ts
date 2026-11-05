@@ -7,3 +7,9 @@ export { createProcessSupervisor, UnsupportedPlatformError } from './process-sup
 export { ensurePrivateDirectory, writePrivateFile, verifyPrivateFile } from './private-fs.js'
 export { isRealDirectory, isRealFile } from './fs-kind.js'
 export { acquireDirectoryLock, type DirectoryLock } from './lock.js'
+
+/** 属主独占的私有目录与文件操作端口。 */
+export interface PrivateFs {
+  ensurePrivateDirectory(path: string): Promise<string>
+  writePrivateFile(path: string, data: string | Uint8Array): Promise<void>
+}

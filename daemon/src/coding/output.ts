@@ -1,9 +1,9 @@
 import { lstat, open, readdir, rename, rm } from 'node:fs/promises'
 import { join, resolve, sep } from 'node:path'
 import { randomUUID } from 'node:crypto'
-import type { CapabilityResult, ResultContent } from '../contracts.js'
-import { ensurePrivateDirectory, isRealDirectory, writePrivateFile } from '../native/index.js'
-import { writeAll as writeAllBytes } from '../native/write-all.js'
+import type { CapabilityResult } from '../contracts.js'
+import { ensurePrivateDirectory, isRealDirectory, writePrivateFile, type PrivateFs } from '../native/index.js'
+import { writeAll } from '../native/write-all.js'
 import { isCanonicalUuid } from '../protocol/uuid.js'
 
 /**
@@ -15,15 +15,15 @@ import { isCanonicalUuid } from '../protocol/uuid.js'
  */
 
 /** 内联输出字节上限。 */
-export const INLINE_MAX_BYTES = 50 * 1024
+const INLINE_MAX_BYTES = 50 * 1024
 /** 内联输出行数上限。 */
-export const INLINE_MAX_LINES = 2000
+const INLINE_MAX_LINES = 2000
 /** 预览 head 字节上限。 */
-export const PREVIEW_HEAD_MAX_BYTES = 4 * 1024
+const PREVIEW_HEAD_MAX_BYTES = 4 * 1024
 /** 预览 tail 字节上限。 */
-export const PREVIEW_TAIL_MAX_BYTES = 8 * 1024
+const PREVIEW_TAIL_MAX_BYTES = 8 * 1024
 /** 默认单次调用的全文捕获预算：1 GiB。 */
-export const DEFAULT_CAPTURE_BUDGET_BYTES = 1024 * 1024 * 1024
+const DEFAULT_CAPTURE_BUDGET_BYTES = 1024 * 1024 * 1024
 
 /** 固定容量的字节尾部缓冲：只保留最近写入的 {@code capacity} 字节。 */
 export class ByteTailBuffer {
@@ -142,18 +142,6 @@ function incompleteSuffixLength(bytes: Uint8Array, length: number): number {
   return available < expected ? available : 0
 }
 
-/**
- * 真正写满整个缓冲区：短写会让 durable 全文丢失尾部，而调用方仍可能声称全部捕获。
- *
- * <p>实现只有一份，见 native/write-all；这里保留捕获层的失败文案。
- */
-export async function writeAll(
-  writer: { write(buffer: Uint8Array, offset: number, length: number): Promise<{ bytesWritten: number }> },
-  bytes: Uint8Array,
-): Promise<void> {
-  await writeAllBytes(writer, bytes, 'file write made no progress')
-}
-
 /** 简易异步互斥：串行化临时产物创建登记、in-use 获取与清扫的关键段。 */
 class Mutex {
   private tail: Promise<void> = Promise.resolve()
@@ -179,17 +167,6 @@ export interface Lease {
 }
 
 const NONE_LEASE: Lease = { close() {} }
-
-/**
- * 私有目录/文件端口：owner-only 语义由 native 切片承载（POSIX 0700/0600，Windows DACL），本片只消费不复制。
- *
- * <p>默认实现直接调用 native 边界的 {@code ensurePrivateDirectory}/{@code writePrivateFile}（静态 import，由编译器校验签名）；
- * 注入点仅用于以确定性方式测试失败路径，生产路径绝不退化为 POSIX chmod。
- */
-export interface PrivateFs {
-  ensurePrivateDirectory(path: string): Promise<string>
-  writePrivateFile(path: string, data: string | Uint8Array): Promise<void>
-}
 
 const nativePrivateFs: PrivateFs = {
   ensurePrivateDirectory: (path) => ensurePrivateDirectory(path),
@@ -435,10 +412,7 @@ export class TextOutputStore {
     if (captureBudgetBytes <= 0) {
       throw new Error('captureBudgetBytes must be positive')
     }
-    const temporaryResources =
-      privateFs === undefined
-        ? await TemporaryResourceStore.open(tmpRoot, now)
-        : await TemporaryResourceStore.open(tmpRoot, now, privateFs)
+    const temporaryResources = await TemporaryResourceStore.open(tmpRoot, now, privateFs)
     return new TextOutputStore(temporaryResources, captureBudgetBytes)
   }
 
@@ -849,7 +823,7 @@ export class OutputSpool {
         throw new Error('missing file handle')
       }
       // 必须真正写满：短写会让 durable 全文丢失尾部而 details 仍声称全部捕获。
-      await writeAll(this.fileHandle, bytes.subarray(0, accepted))
+      await writeAll(this.fileHandle, bytes.subarray(0, accepted), 'file write made no progress')
       this.capturedByteCount += accepted
       if (accepted < bytes.length) {
         this.captureTruncated = true
@@ -899,39 +873,6 @@ export class OutputSpool {
     await this.closeFileQuietly()
     await this.store.deleteStagingQuietly(staging)
     this.stagingFile = null
-  }
-}
-
-/** 结果级大文本外化：把单个超过内联阈值的文本结果落到本地 durable 全文。 */
-export async function spoolLargeTextResult(
-  store: TextOutputStore,
-  result: CapabilityResult,
-): Promise<CapabilityResult> {
-  const first = result.contents[0] as ResultContent | undefined
-  if (
-    result.contents.length !== 1 ||
-    first === undefined ||
-    first.type !== 'text' ||
-    Object.prototype.hasOwnProperty.call(result.details, 'textOutput')
-  ) {
-    return result
-  }
-  const spool = new OutputSpool(store, result.callId)
-  try {
-    await spool.write(new Uint8Array(Buffer.from(first.text, 'utf8')))
-    if (!spool.isSpilled()) {
-      return result
-    }
-    const spooled = await spool.finish(result.error)
-    const textOutput = (spooled.details as { textOutput?: unknown }).textOutput
-    return {
-      callId: result.callId,
-      error: result.error,
-      details: { ...result.details, textOutput },
-      contents: spooled.contents,
-    }
-  } finally {
-    await spool.close()
   }
 }
 

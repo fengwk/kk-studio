@@ -8,13 +8,12 @@ import {
   TemporaryResourceStore,
   alignToCharacterBoundary,
   leadingCharacterBoundary,
-  writeAll,
-  type PrivateFs,
 } from '../../src/coding/output.js'
 import { fileCapabilities, buildDiff, parseLineEndingDocument } from '../../src/coding/files.js'
 import { searchCapabilities } from '../../src/coding/search.js'
 import { callCapability, makeConfig, makeContext, openTestStore, textOf } from './helpers.js'
-import { ensurePrivateDirectory } from '../../src/native/index.js'
+import { ensurePrivateDirectory, type PrivateFs } from '../../src/native/index.js'
+import { writeAll } from '../../src/native/write-all.js'
 
 const tempDirs: string[] = []
 
@@ -181,10 +180,10 @@ describe('TemporaryResourceStore 分支', () => {
         return { bytesWritten: take }
       },
     }
-    await writeAll(shortWriter, bytes)
+    await writeAll(shortWriter, bytes, 'file write made no progress')
     expect(received).toEqual([1, 2, 3, 4, 5])
     const stuck = { async write() { return { bytesWritten: 0 } } }
-    await expect(writeAll(stuck, bytes)).rejects.toThrowError(/no progress/)
+    await expect(writeAll(stuck, bytes, 'file write made no progress')).rejects.toThrowError(/no progress/)
   })
 
   it.skipIf(process.platform !== 'linux')('发布与关闭后不泄漏文件描述符', async () => {

@@ -17,7 +17,6 @@ import {
   createUtf8Decoder,
   probe,
   readAllBytes,
-  forEachLine,
 } from '../../src/coding/text.js'
 import { searchCapabilities } from '../../src/coding/search.js'
 import { toPosix } from '../../src/coding/support.js'
@@ -81,7 +80,7 @@ describe('UTF-16 严格解码器', () => {
   })
 })
 
-describe('probe / readAllBytes / forEachLine', () => {
+describe('probe / readAllBytes', () => {
   it('probe 读取前缀，readAllBytes 读取全文', async () => {
     const dir = await tempDir()
     const file = join(dir, 'a.bin')
@@ -90,17 +89,6 @@ describe('probe / readAllBytes / forEachLine', () => {
     expect((await readAllBytes(file)).length).toBe(9000)
   })
 
-  it('超长行以 truncated 交付', async () => {
-    const dir = await tempDir()
-    const file = join(dir, 'long.txt')
-    await writeFile(file, `${'a'.repeat(1048580)}\n`)
-    let truncatedSeen = false
-    await forEachLine(file, { charset: 'UTF-8', bomLength: 0, utf16: false }, (_n, _l, truncated) => {
-      truncatedSeen = truncated
-      return true
-    })
-    expect(truncatedSeen).toBe(true)
-  })
 })
 
 describe('edit 行尾/ diff 辅助', () => {

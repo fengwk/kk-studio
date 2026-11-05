@@ -1,5 +1,4 @@
-import { ensurePrivateDirectory, writePrivateFile } from '../../src/native/index.js'
-import type { PrivateFs } from '../../src/skill/types.js'
+import { ensurePrivateDirectory, writePrivateFile, type PrivateFs } from '../../src/native/index.js'
 
 /**
  * Default private FS port for skill installer tests: the real native implementation.

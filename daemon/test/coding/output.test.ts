@@ -2,12 +2,10 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { textResult } from '../../src/contracts.js'
 import { openTestStore } from './helpers.js'
 import {
   OutputSpool,
   releaseTextOutputStore,
-  spoolLargeTextResult,
   sweepTextOutputStores,
   textOutputStoreFor,
 } from '../../src/coding/output.js'
@@ -92,22 +90,6 @@ describe('OutputSpool', () => {
     const staging = await store.createStagingFile('call')
     await store.publish(staging)
     expect(await store.sweep(10)).toBe(0)
-  })
-})
-
-describe('spoolLargeTextResult', () => {
-  it('大文本外化并在 details 携带 textOutput', async () => {
-    const dir = await tempDir()
-    const store = await openTestStore(dir)
-    const result = await spoolLargeTextResult(store, textResult('c', 'z'.repeat(60000)))
-    expect(result.details.textOutput).toBeDefined()
-  })
-
-  it('小文本原样返回', async () => {
-    const dir = await tempDir()
-    const store = await openTestStore(dir)
-    const result = await spoolLargeTextResult(store, textResult('c', 'small'))
-    expect(result.details).toEqual({})
   })
 })
 

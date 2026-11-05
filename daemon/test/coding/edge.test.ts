@@ -3,7 +3,6 @@ import { chmod, mkdir, mkdtemp, open, readFile, realpath, rm, stat, symlink, wri
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Worker } from 'node:worker_threads'
-import { textResult } from '../../src/contracts.js'
 import { fileCapabilities, setFileCapabilityHooks } from '../../src/coding/files.js'
 import { searchCapabilities, matchCenteredExcerpt } from '../../src/coding/search.js'
 import {
@@ -12,19 +11,16 @@ import {
   TextOutputStore,
   alignToCharacterBoundary,
   leadingCharacterBoundary,
-  spoolLargeTextResult,
-  type PrivateFs,
 } from '../../src/coding/output.js'
 import { commitTextFile } from '../../src/coding/commit.js'
 import {
   createUtf16Decoder,
   decodeText,
   encodeText,
-  forEachLine,
 } from '../../src/coding/text.js'
 import { toPosix, exists } from '../../src/coding/support.js'
 import { callCapability, makeContext, openTestStore, textOf } from './helpers.js'
-import { ensurePrivateDirectory } from '../../src/native/index.js'
+import { ensurePrivateDirectory, type PrivateFs } from '../../src/native/index.js'
 
 const tempDirs: string[] = []
 
@@ -526,14 +522,6 @@ describe('output 边界', () => {
     expect(await store.partialFiles()).toEqual([])
   })
 
-  it('已外化结果不二次 spool', async () => {
-    const dir = await tempDir()
-    const store = await openTestStore(dir)
-    const result = textResult('c', 'z'.repeat(60000))
-    result.details = { textOutput: { totalBytes: 1 } }
-    const again = await spoolLargeTextResult(store, result)
-    expect(again).toBe(result)
-  })
 })
 
 describe('text 边界', () => {
@@ -552,12 +540,4 @@ describe('text 边界', () => {
     expect(Array.from(encodeText('a', 'UTF-16LE', 0))).toEqual([0x61, 0x00])
   })
 
-  it('forEachLine 遇到 NUL 按二进制失败', async () => {
-    const dir = await tempDir()
-    const file = join(dir, 'nul.txt')
-    await writeFile(file, Buffer.from([0x61, 0x00]))
-    await expect(
-      forEachLine(file, { charset: 'UTF-8', bomLength: 0, utf16: false }, () => true),
-    ).rejects.toThrowError(/binary/)
-  })
 })

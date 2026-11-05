@@ -12,10 +12,9 @@ import { SkillPackageStateSchema, type SkillPackageState } from '../generated/co
 import {
   type DirectoryMover,
   type InstalledSkillPackage,
-  type PrivateFs,
   type SkillPackageInstallerOptions,
 } from './types.js'
-import { ensurePrivateDirectory, isRealDirectory, isRealFile, writePrivateFile } from '../native/index.js'
+import { ensurePrivateDirectory, isRealDirectory, isRealFile, writePrivateFile, type PrivateFs } from '../native/index.js'
 
 export const MARKER_FILENAME = '.kkstudio-sha256'
 export const MAX_ZIP_ENTRIES = 5000

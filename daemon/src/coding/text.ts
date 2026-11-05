@@ -15,12 +15,9 @@ export const DEFAULT_READ_LIMIT = 2000
 /** 最大返回行数上限。 */
 export const MAX_READ_LIMIT = 2000
 /** 整个窗口保留的正文码点上限。 */
-export const MAX_BODY_CODE_POINTS = 60000
+const MAX_BODY_CODE_POINTS = 60000
 /** 编码与二进制探测读取的前缀字节数。 */
 export const PROBE_BYTES = 8192
-/** 逐行扫描的单行保留上限（字符数）。 */
-export const MAX_LINE_CHARS = 1024 * 1024
-
 const BINARY_MESSAGE = 'file appears to be binary'
 const READ_BUFFER_CHARS = 8 * 1024
 
@@ -217,7 +214,7 @@ export function createUtf16Decoder(littleEndian: boolean): StreamingDecoder {
   }
 }
 
-export function createDecoder(encoding: Encoding): StreamingDecoder {
+function createDecoder(encoding: Encoding): StreamingDecoder {
   if (encoding.charset === 'UTF-16LE') {
     return createUtf16Decoder(true)
   }
@@ -240,7 +237,7 @@ export async function probe(path: string): Promise<Uint8Array> {
 }
 
 /** 有界读取窗口的扫描状态机：单遍投影为窗口元数据与有界正文。 */
-export class TextWindowScanner {
+class TextWindowScanner {
   private readonly offset: number
   private readonly limit: number
   private readonly columnStart: number
@@ -492,22 +489,6 @@ function requireProtocolPosition(value: number, field: string): number {
   return value
 }
 
-/** 在已解码字符块上投影窗口；块边界不切断代理对。 */
-export function readWindowFromChunks(
-  chunks: Iterable<string>,
-  offset: number,
-  limit: number,
-  columnOffset: number | null,
-  displayPath: string,
-  lspStatus: string | null,
-): string {
-  const scanner = new TextWindowScanner(offset, limit, columnOffset, displayPath, lspStatus)
-  for (const chunk of chunks) {
-    scanner.push(chunk)
-  }
-  return scanner.finish()
-}
-
 /**
  * 读取并格式化文本窗口：按既有编码严格解码后交给窗口核心。
  *
@@ -541,113 +522,6 @@ export async function readTextWindow(
     }
     scanner.push(decoder.finish())
     return scanner.finish()
-  } finally {
-    await handle.close()
-  }
-}
-
-/** 逐行扫描结果：文件总行数与是否以换行符结尾。 */
-export interface LineScanOutcome {
-  totalLines: number
-  endsWithNewline: boolean
-}
-
-/** 逐行消费者：返回 false 表示提前终止扫描。 */
-export type LineConsumer = (
-  lineNumber: number,
-  line: string,
-  truncated: boolean,
-) => boolean | Promise<boolean>
-
-/**
- * 以严格解码逐行扫描文件；单行超过 {@link MAX_LINE_CHARS} 时以保留前缀加 {@code truncated=true} 交付。
- *
- * <p>调用方必须处理 {@code truncated}：grep 视为“无法完整搜索”的显式失败，绝不把它当成该行无匹配。
- */
-export async function forEachLine(
-  path: string,
-  encoding: Encoding,
-  consumer: LineConsumer,
-  checkpoint?: () => void,
-): Promise<LineScanOutcome> {
-  const handle = await open(path, 'r')
-  try {
-    const decoder = createDecoder(encoding)
-    const buffer = Buffer.allocUnsafe(8 * 1024)
-    let line = ''
-    let lineNumber = 0
-    let truncated = false
-    let sawCr = false
-    let endedWithNewline = false
-    let position = encoding.bomLength
-    for (;;) {
-      checkpoint?.()
-      const { bytesRead } = await handle.read(buffer, 0, buffer.length, position)
-      checkpoint?.()
-      if (bytesRead === 0) {
-        break
-      }
-      position += bytesRead
-      const chunk = decoder.push(buffer.subarray(0, bytesRead))
-      for (let index = 0; index < chunk.length; index++) {
-        const value = chunk.charCodeAt(index)
-        if (value === 0) {
-          throw new ToolRunFailureError(
-            `${BINARY_MESSAGE}: contains NUL character`,
-            'CODEC',
-          )
-        }
-        if (sawCr) {
-          sawCr = false
-          lineNumber++
-          endedWithNewline = true
-          if (!(await consumer(lineNumber, line, truncated))) {
-            return { totalLines: lineNumber, endsWithNewline: true }
-          }
-          line = ''
-          truncated = false
-          if (value === 0x0a) {
-            continue
-          }
-          endedWithNewline = false
-        }
-        if (value === 0x0d) {
-          sawCr = true
-          continue
-        }
-        if (value === 0x0a) {
-          lineNumber++
-          endedWithNewline = true
-          if (!(await consumer(lineNumber, line, truncated))) {
-            return { totalLines: lineNumber, endsWithNewline: true }
-          }
-          line = ''
-          truncated = false
-          continue
-        }
-        endedWithNewline = false
-        if (line.length < MAX_LINE_CHARS) {
-          line += chunk[index]
-        } else {
-          truncated = true
-        }
-      }
-    }
-    const tail = decoder.finish()
-    if (tail.length > 0) {
-      // finish() 只在无未完成字节时返回空串；这里保守地把余量并入当前行。
-      line += tail
-    }
-    if (sawCr) {
-      lineNumber++
-      await consumer(lineNumber, line, truncated)
-      endedWithNewline = true
-    } else if (line.length > 0 || truncated) {
-      lineNumber++
-      await consumer(lineNumber, line, truncated)
-      endedWithNewline = false
-    }
-    return { totalLines: lineNumber, endsWithNewline: endedWithNewline && lineNumber > 0 }
   } finally {
     await handle.close()
   }
