@@ -378,10 +378,7 @@ class SessionDeletionOrchestratorTest {
     when(duplicate.kind()).thenReturn("ISSUE_AGENT");
     SessionDeletionOrchestrator ambiguous =
         new SessionDeletionOrchestrator(
-            List.of(issueAgentOwnership, duplicate),
-            runtimes,
-            refManager,
-            sessionFileRepository);
+            List.of(issueAgentOwnership, duplicate), runtimes, refManager, sessionFileRepository);
     assertThrows(
         IllegalArgumentException.class, () -> ambiguous.deleteSessionsByOwner(ISSUE_AGENT_OWNER));
     verify(issueAgentOwnership, never()).lockForDeletion(any());

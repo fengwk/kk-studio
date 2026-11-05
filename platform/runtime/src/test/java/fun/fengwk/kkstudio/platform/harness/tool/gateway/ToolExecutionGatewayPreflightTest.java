@@ -151,7 +151,7 @@ class ToolExecutionGatewayPreflightTest {
                         new ContributorBinding("test", "missing", List.of()),
                         EnvironmentSupport.NONE,
                         null,
-                        null),
+                        null)),
                 SCOPE));
     assertEquals(ToolErrorClassifier.TOOL_NOT_FOUND_KIND, unknownDeny.error().kind());
     assertTrue(
@@ -173,7 +173,7 @@ class ToolExecutionGatewayPreflightTest {
                         new ContributorBinding("test", "host-tool", List.of()),
                         EnvironmentSupport.NONE,
                         null,
-                        null),
+                        null)),
                 SCOPE));
     assertEquals(ToolErrorClassifier.TOOL_DEFINITION_MISMATCH_KIND, mismatchDeny.error().kind());
     assertTrue(

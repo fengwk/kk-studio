@@ -544,7 +544,7 @@ class ToolExecutionGatewayAdmitTest {
                     ToolGatewayTestSupport.vfsEditRequest("call-vfs-edit", path),
                     approved(null),
                     new ToolGatewayTestSupport.RecordingRemoteExecutions())));
-    assertEquals(ToolExecutionGateway.EDIT_REVIEW_REQUIRED_KIND, rejected.error().kind());
+    assertEquals(ToolErrorClassifier.EDIT_REVIEW_REQUIRED_KIND, rejected.error().kind());
   }
 
   private static ToolInvocationRequest editRequest(HarnessCatalog catalog, String callId) {
