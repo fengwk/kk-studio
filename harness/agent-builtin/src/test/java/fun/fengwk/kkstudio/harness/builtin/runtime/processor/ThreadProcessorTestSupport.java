@@ -64,6 +64,7 @@ import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
@@ -962,12 +963,11 @@ public final class ThreadProcessorTestSupport {
         ProviderType.OPENAI,
         new UUID(0L, 1L),
         modelDescriptor("provider", "model"),
-        new ModelVariant("v1"),
+        new ModelVariant("v1", null, PromptCacheRetention.NONE, null),
         1024,
         "Test system instruction.",
         bindings,
-        List.of(),
-        ProviderCacheControl.none());
+        List.of());
   }
 
   /** 按 candidate BranchSettings 构造机械一致的 Resolved spec（model / variant）。 */
@@ -976,30 +976,29 @@ public final class ThreadProcessorTestSupport {
         ProviderType.OPENAI,
         new UUID(0L, 1L),
         modelDescriptor("provider", builtinExecution(settings).modelName()),
-        new ModelVariant(builtinExecution(settings).variant()),
+        new ModelVariant(
+            builtinExecution(settings).variant(), null, PromptCacheRetention.NONE, null),
         1024,
         "Test system instruction.",
         List.of(),
-        List.of(),
-        ProviderCacheControl.none());
+        List.of());
   }
 
   static ToolInvocationRequest toolRequest(String callId) {
     return new ToolInvocationRequest(new ToolCall(callId, "bash", "{}"), hostBinding("bash"));
   }
 
-  /** 按指定模型构造机械一致的压缩 Resolved 请求（零 bindings、缓存 none）。 */
+  /** 按指定模型构造机械一致的压缩 Resolved 请求（零 bindings）。 */
   static ModelRequestSpec compactionRequest(ModelSelection model) {
     return new ModelRequestSpec(
         ProviderType.OPENAI,
         new UUID(0L, 1L),
         modelDescriptor("provider", model.modelName()),
-        new ModelVariant(model.variant()),
+        new ModelVariant(model.variant(), null, PromptCacheRetention.NONE, null),
         1024,
         "Test system instruction.",
         List.of(),
-        List.of(),
-        ProviderCacheControl.none());
+        List.of());
   }
 
   static ModelRequestSpec compactionRequest(CompactionPreparation preparation) {
@@ -1193,7 +1192,7 @@ public final class ThreadProcessorTestSupport {
   private static ProviderRequest providerRequest(List<ProviderToolDefinition> tools) {
     return new ProviderRequest(
         modelDescriptor(),
-        new ModelVariant("v1"),
+        new ModelVariant("v1", null, PromptCacheRetention.NONE, null),
         1024,
         "Test system instruction.",
         List.of(),

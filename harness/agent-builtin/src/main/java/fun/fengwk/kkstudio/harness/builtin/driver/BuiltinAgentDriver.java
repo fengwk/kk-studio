@@ -40,7 +40,6 @@ import fun.fengwk.kkstudio.harness.builtin.processor.ModelOutcomeAppender;
 import fun.fengwk.kkstudio.harness.builtin.processor.ModelProcessor;
 import fun.fengwk.kkstudio.harness.builtin.request.ResolvedRequestValidator;
 import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
-import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.spi.TurnResolveTransientException;
 import fun.fengwk.kkstudio.harness.spi.driver.AgentDriver;
@@ -213,7 +212,7 @@ public final class BuiltinAgentDriver implements AgentDriver {
     ModelRequestSpec spec = resolved.spec();
     ThreadConstraints constraints = thread.constraints();
     Integer cap = constraints.maxOutputTokens();
-    if (cap != null || constraints.promptCacheDisabled()) {
+    if (cap != null) {
       spec =
           new ModelRequestSpec(
               spec.providerType(),
@@ -221,11 +220,10 @@ public final class BuiltinAgentDriver implements AgentDriver {
               spec.model(),
               spec.variant(),
               spec.modelVariants(),
-              cap == null ? spec.outputTokens() : Math.min(spec.outputTokens(), cap),
+              Math.min(spec.outputTokens(), cap),
               spec.systemInstruction(),
               spec.toolBindings(),
               spec.subagentBindings(),
-              constraints.promptCacheDisabled() ? ProviderCacheControl.none() : spec.cacheControl(),
               spec.groupExecution());
     }
     // 无 cap 时保留 resolver 的模型上限元数据；有 cap 时不得超过实际请求预算。

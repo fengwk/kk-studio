@@ -24,7 +24,7 @@ import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessS
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
-import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 
 import java.time.Instant;
@@ -145,12 +145,11 @@ class BuiltinRequestQueryTest {
         new UUID(0L, 1L),
         new ModelDescriptor(
             "provider", "model", "wire-model", Set.of(ModelInputModality.TEXT), true, false),
-        new ModelVariant("v1"),
+        new ModelVariant("v1", null, PromptCacheRetention.NONE, null),
         512,
         "frozen request",
         List.of(),
-        List.of(),
-        ProviderCacheControl.none());
+        List.of());
   }
 
   private record Seed(UUID threadId, UUID modelId) {}

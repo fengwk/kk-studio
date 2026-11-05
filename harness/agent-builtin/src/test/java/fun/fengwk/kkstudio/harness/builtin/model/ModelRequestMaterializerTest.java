@@ -43,6 +43,8 @@ import fun.fengwk.kkstudio.harness.api.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.api.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
+import fun.fengwk.kkstudio.harness.builtin.port.store.ModelGroupExecution;
+import fun.fengwk.kkstudio.harness.builtin.port.store.ModelGroupMemberExecution;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpecJsonCodec;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
@@ -51,6 +53,7 @@ import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
@@ -86,23 +89,59 @@ class ModelRequestMaterializerTest {
   private static final ModelRequestMaterializer MATERIALIZER = new ModelRequestMaterializer();
   private static final ModelRequestSpecJsonCodec CODEC = new ModelRequestSpecJsonCodec();
 
+  /** 成员切换使用各自冻结的留存档位及实际 Session 身份，之后变更配置来源不影响快照。 */
+  @Test
+  void groupSwitchMaterializesCacheFromFrozenMemberAndSession() {
+    ModelVariant none = new ModelVariant("v1", null, PromptCacheRetention.NONE, null);
+    ModelVariant shortCache = new ModelVariant("v2", null, PromptCacheRetention.SHORT, null);
+    List<ModelGroupMemberExecution> members = new ArrayList<>();
+    members.add(new ModelGroupMemberExecution(ProviderType.OPENAI, id(1L), descriptor(), none));
+    members.add(
+        new ModelGroupMemberExecution(ProviderType.OPENAI, id(1L), descriptor(), shortCache));
+    ModelGroupExecution group = new ModelGroupExecution("group", 1L, members, Set.of(429), 30);
+    ModelRequestSpec spec =
+        new ModelRequestSpec(
+            ProviderType.OPENAI,
+            id(1L),
+            descriptor(),
+            none,
+            1024,
+            "system",
+            List.of(),
+            List.of(),
+            group);
+    EntryPath path = new EntryPath(List.of(entry(1, 0, new RootPayload(SETTINGS))));
+
+    ProviderRequest first = MATERIALIZER.materialize(path, spec.forMember(0));
+    members.set(1, new ModelGroupMemberExecution(ProviderType.OPENAI, id(1L), descriptor(), none));
+    ProviderRequest second = MATERIALIZER.materialize(path, spec.forMember(1));
+    assertEquals(ProviderCacheControl.none(), first.cacheControl());
+    assertEquals(
+        ProviderCacheControl.session(PromptCacheRetention.SHORT, id(100L).toString()),
+        second.cacheControl());
+    assertEquals(shortCache, second.variant());
+    assertEquals(first, MATERIALIZER.materialize(path, spec.forMember(0)));
+  }
+
   /** 只用当前实际模型的冻结 variants 重新解释历史；缺失、外模型和 null effort 均未知。 */
   @Test
   void resolvesRetainedAssistantEffortFromFrozenCurrentModelVariants() {
     ModelRequestSpec base = liveSpec(bashBinding());
-    ModelVariant current = new ModelVariant("v1", "max");
+    ModelVariant current = new ModelVariant("v1", "max", PromptCacheRetention.NONE, null);
     ModelRequestSpec spec =
         new ModelRequestSpec(
             base.providerType(),
             base.providerConnectionGenerationId(),
             base.model(),
             current,
-            List.of(current, new ModelVariant("old", "high"), new ModelVariant("unset")),
+            List.of(
+                current,
+                new ModelVariant("old", "high", PromptCacheRetention.NONE, null),
+                new ModelVariant("unset", null, PromptCacheRetention.NONE, null)),
             base.outputTokens(),
             base.systemInstruction(),
             base.toolBindings(),
-            base.subagentBindings(),
-            base.cacheControl());
+            base.subagentBindings());
     List<Entry> entries = new ArrayList<>();
     entries.add(entry(1, 0, new RootPayload(SETTINGS)));
     List<MessagePayload> replies =
@@ -148,19 +187,18 @@ class ModelRequestMaterializerTest {
   @Test
   void compactionDiscardsOldEffortWithTheRemovedAssistant() {
     ModelRequestSpec base = liveSpec(bashBinding());
-    ModelVariant current = new ModelVariant("v1", "max");
+    ModelVariant current = new ModelVariant("v1", "max", PromptCacheRetention.NONE, null);
     ModelRequestSpec spec =
         new ModelRequestSpec(
             base.providerType(),
             base.providerConnectionGenerationId(),
             base.model(),
             current,
-            List.of(current, new ModelVariant("old", "high")),
+            List.of(current, new ModelVariant("old", "high", PromptCacheRetention.NONE, null)),
             base.outputTokens(),
             base.systemInstruction(),
             base.toolBindings(),
-            base.subagentBindings(),
-            base.cacheControl());
+            base.subagentBindings());
     CompactionStart compact =
         CompactionStart.pending(
             CompactionPhase.FULL, CompactionTrigger.THRESHOLD, id(7L), null, null);
@@ -572,8 +610,7 @@ class ModelRequestMaterializerTest {
         1024,
         "Test system instruction.",
         List.of(binding),
-        List.of(),
-        ProviderCacheControl.none());
+        List.of());
   }
 
   /**
@@ -710,7 +747,7 @@ class ModelRequestMaterializerTest {
   }
 
   private static ModelVariant variant() {
-    return new ModelVariant("v1");
+    return new ModelVariant("v1", null, PromptCacheRetention.NONE, null);
   }
 
   private static Entry entry(long id, long parent, EntryPayload payload) {

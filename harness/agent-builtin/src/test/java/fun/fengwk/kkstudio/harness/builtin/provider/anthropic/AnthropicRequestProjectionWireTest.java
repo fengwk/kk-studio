@@ -203,6 +203,6 @@ class AnthropicRequestProjectionWireTest {
   }
 
   private static ModelVariant defaultVariant() {
-    return new ModelVariant("default");
+    return new ModelVariant("default", null, PromptCacheRetention.NONE, null);
   }
 }

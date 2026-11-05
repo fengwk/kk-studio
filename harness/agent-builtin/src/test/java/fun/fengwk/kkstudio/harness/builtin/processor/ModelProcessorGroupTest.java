@@ -22,7 +22,7 @@ import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
-import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.spi.work.ClaimedWork;
@@ -44,12 +44,11 @@ class ModelProcessorGroupTest extends ModelProcessorTestSupport {
         ProviderType.OPENAI,
         new UUID(0L, 1L),
         new ModelDescriptor("group", "group", "group", Set.of(ModelInputModality.TEXT), true, true),
-        new ModelVariant("v1"),
+        new ModelVariant("v1", null, PromptCacheRetention.NONE, null),
         1024,
         "Test system instruction.",
         List.of(),
         List.of(),
-        ProviderCacheControl.none(),
         new ModelGroupExecution("group", 7L, members, fallbackStatusCodes, cooldownSeconds));
   }
 
@@ -58,7 +57,7 @@ class ModelProcessorGroupTest extends ModelProcessorTestSupport {
         ProviderType.OPENAI,
         new UUID(0L, 1L),
         new ModelDescriptor("provider", name, name, Set.of(ModelInputModality.TEXT), true, true),
-        new ModelVariant("v1"));
+        new ModelVariant("v1", null, PromptCacheRetention.NONE, null));
   }
 
   private static void freezeGroupMember(Fixture fixture, String member, Instant until) {

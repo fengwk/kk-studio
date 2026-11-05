@@ -67,6 +67,7 @@ import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
@@ -723,8 +724,7 @@ public final class HarnessRuntimeTestSupport {
         1024,
         "Test system instruction.",
         List.of(askUserBinding()),
-        List.of(),
-        provider.cacheControl());
+        List.of());
   }
 
   /** 内置 contributor 贡献的 {@code ask_user}：只有该 provenance 才会被运行时视为人工输入等待。 */
@@ -1335,12 +1335,11 @@ public final class HarnessRuntimeTestSupport {
         ProviderType.OPENAI,
         new UUID(0L, 1L),
         modelDescriptor(),
-        new ModelVariant("v1"),
+        new ModelVariant("v1", null, PromptCacheRetention.NONE, null),
         1024,
         "Test system instruction.",
         bindings,
-        List.of(),
-        ProviderCacheControl.none());
+        List.of());
   }
 
   /**
@@ -1437,8 +1436,7 @@ public final class HarnessRuntimeTestSupport {
         1024,
         "Test system instruction.",
         List.of(),
-        List.of(),
-        provider.cacheControl());
+        List.of());
   }
 
   static ProviderResponse responseWithToolCalls(String... toolCallIds) {
@@ -1480,7 +1478,7 @@ public final class HarnessRuntimeTestSupport {
   private static ProviderRequest providerRequest() {
     return new ProviderRequest(
         modelDescriptor(),
-        new ModelVariant("v1"),
+        new ModelVariant("v1", null, PromptCacheRetention.NONE, null),
         1024,
         "Test system instruction.",
         List.of(),

@@ -12,7 +12,6 @@ import fun.fengwk.kkstudio.harness.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport;
 import fun.fengwk.kkstudio.harness.model.codec.ModelDescriptorJsonCodec;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
-import fun.fengwk.kkstudio.harness.model.provider.codec.ProviderRequestJsonCodec;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -25,7 +24,6 @@ public final class ModelRequestSpecJsonCodec {
 
   private static final String CONTEXT = "modelRequestSpec";
   private static final ModelDescriptorJsonCodec MODEL_CODEC = new ModelDescriptorJsonCodec();
-  private static final ProviderRequestJsonCodec PROVIDER_CODEC = new ProviderRequestJsonCodec();
   private static final ToolBindingJsonCodec BINDING_CODEC = new ToolBindingJsonCodec();
 
   public String encode(ModelRequestSpec spec) {
@@ -50,7 +48,6 @@ public final class ModelRequestSpecJsonCodec {
     for (SubagentBinding subagent : spec.subagentBindings()) {
       subagents.add(encodeSubagent(subagent));
     }
-    node.set("cacheControl", PROVIDER_CODEC.encodeCacheControlNode(spec.cacheControl()));
     if (spec.groupExecution() != null) {
       node.set("groupExecution", encodeGroup(spec.groupExecution()));
     }
@@ -77,7 +74,6 @@ public final class ModelRequestSpecJsonCodec {
               "systemInstruction",
               "toolBindings",
               "subagentBindings",
-              "cacheControl",
               "groupExecution"
             }
             : new String[] {
@@ -89,8 +85,7 @@ public final class ModelRequestSpecJsonCodec {
               "outputTokens",
               "systemInstruction",
               "toolBindings",
-              "subagentBindings",
-              "cacheControl"
+              "subagentBindings"
             });
     ArrayNode toolNodes =
         JsonCodecSupport.array(
@@ -116,8 +111,6 @@ public final class ModelRequestSpecJsonCodec {
         InvocationJsonSupport.text(node, "systemInstruction", CONTEXT),
         toolBindings,
         subagentBindings,
-        PROVIDER_CODEC.decodeCacheControlNode(
-            InvocationJsonSupport.required(node, "cacheControl", CONTEXT)),
         node.has("groupExecution") ? decodeGroup(node.get("groupExecution")) : null);
   }
 

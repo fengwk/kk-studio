@@ -22,6 +22,7 @@ import fun.fengwk.kkstudio.harness.builtin.request.ProviderMessageProjector;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
@@ -62,7 +63,8 @@ import java.util.UUID;
 class OpenAiResponsesEmptyReasoningReplayRepairTest {
 
   private static final ObjectMapper MAPPER = JsonMapper.builder().build();
-  private static final ModelVariant DEFAULT_VARIANT = new ModelVariant("default", "medium");
+  private static final ModelVariant DEFAULT_VARIANT =
+      new ModelVariant("default", "medium", PromptCacheRetention.NONE, null);
   private static final String FIXTURE = "fixtures/empty-reasoning-summary.sse";
   private static final ProviderToolDefinition TOOL =
       new ProviderToolDefinition(
