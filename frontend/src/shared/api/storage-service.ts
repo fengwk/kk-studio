@@ -7,7 +7,7 @@ import type {
 import type { StorageUploadReserveRequestDTO } from '@/shared/api/generated/contracts'
 
 /** 直传签名响应中禁止浏览器发送的请求头（浏览器会拒绝或改写它们）。 */
-const FORBIDDEN_UPLOAD_HEADERS = new Set([
+export const FORBIDDEN_UPLOAD_HEADERS = new Set([
   'accept-charset',
   'accept-encoding',
   'access-control-request-headers',

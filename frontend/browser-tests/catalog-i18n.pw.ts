@@ -140,12 +140,16 @@ test.describe('Catalog & Skill Packages i18n Real React Browser Verification', (
     await nameInput.fill('invalid:name@pkg')
     await page.getByRole('dialog').getByRole('button', { name: 'Create' }).click()
     const errorAlert = page.getByRole('dialog').getByRole('alert')
-    await expect(errorAlert).toContainText('Package name cannot contain : / @ \\')
+    await expect(errorAlert).toContainText(
+      'Package name must be 1 to 64 lowercase letters, digits or single hyphens',
+    )
     await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click()
 
-    // 4. 删除弹窗确认描述双括号插值验证
-    const deleteBtn = page.getByRole('button', { name: 'Delete Package core-tools' })
-    await deleteBtn.click()
+    // 4. 详情弹窗内的删除确认：描述双括号插值验证
+    await page.getByRole('button', { name: 'Details core-tools' }).click()
+    const detailModal = page.getByRole('dialog', { name: 'Details: core-tools' })
+    await expect(detailModal).toBeVisible()
+    await detailModal.getByRole('button', { name: 'Delete Package core-tools' }).click()
     const deleteModal = page.getByRole('alertdialog')
     await expect(deleteModal).toBeVisible()
     await expect(deleteModal).toContainText('Are you sure you want to delete skill package "core-tools"?')
@@ -153,16 +157,22 @@ test.describe('Catalog & Skill Packages i18n Real React Browser Verification', (
     // 取消删除
     await deleteModal.getByRole('button', { name: 'Cancel' }).click()
     await expect(deleteModal).toHaveCount(0)
+    await detailModal.locator('.modal-footer').getByRole('button', { name: 'Close' }).click()
+    await expect(detailModal).toHaveCount(0)
 
     // 5. 切回 zh-CN 验证删除弹窗中文插值
     await page.click('#toggle-locale-btn')
-    const zhDeleteBtn = page.getByRole('button', { name: '删除技能包 core-tools' })
-    await zhDeleteBtn.click()
+    await page.getByRole('button', { name: '详情 core-tools' }).click()
+    const zhDetailModal = page.getByRole('dialog', { name: '详情: core-tools' })
+    await expect(zhDetailModal).toContainText('概览')
+    await zhDetailModal.getByRole('button', { name: '删除技能包 core-tools' }).click()
     const zhDeleteModal = page.getByRole('alertdialog')
     await expect(zhDeleteModal).toBeVisible()
     await expect(zhDeleteModal).toContainText('确认删除技能包“core-tools”？')
     await zhDeleteModal.getByRole('button', { name: '取消' }).click()
     await expect(zhDeleteModal).toHaveCount(0)
+    await zhDetailModal.locator('.modal-footer').getByRole('button', { name: '关闭' }).click()
+    await expect(zhDetailModal).toHaveCount(0)
   })
 
   // 中英文长标签在卡片固定标签列中换行，不能覆盖旁边的提交与仓库信息。

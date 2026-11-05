@@ -87,7 +87,33 @@ const SAMPLE_PACKAGES: SkillPackageDetailDTO[] = [
 ]
 
 // 本地化回归只读取固定数据，不允许弹窗取消或校验流程发起 mutation。
-agentService.listSkillPackages = async () => SAMPLE_PACKAGES
+const SAMPLE_DETAILS = new Map(SAMPLE_PACKAGES.map((pkg) => [pkg.packageName, pkg]))
+agentService.listSkillPackages = async () =>
+  SAMPLE_PACKAGES.map(({ packageName, description, packageVersion, publishedAt, skills, source, updateAvailable, version, createTime, updateTime }) => ({
+    packageName,
+    description,
+    packageVersion,
+    publishedAt,
+    skills,
+    source,
+    updateAvailable,
+    version,
+    createTime,
+    updateTime,
+  }))
+agentService.getSkillPackage = async (name: string) => {
+  const detail = SAMPLE_DETAILS.get(name)
+  if (!detail) {
+    throw new Error(`Unknown skill package: ${name}`)
+  }
+  return detail
+}
+agentService.listSkillPackageEnvironments = async () => []
+agentService.listSkillPackageFiles = async () => [
+  { path: 'dev/SKILL.md', size: '2048' },
+  { path: 'dev/scripts/run.sh', size: '64' },
+  { path: 'bash/SKILL.md', size: '512' },
+]
 const rejectMutation = async (): Promise<never> => {
   throw new Error('Unexpected mutation in catalog i18n harness')
 }
@@ -96,6 +122,8 @@ agentService.editSkillPackage = rejectMutation
 agentService.deleteSkillPackage = rejectMutation
 agentService.checkSkillPackage = rejectMutation
 agentService.publishSkillPackage = rejectMutation
+agentService.getSkillPackageArchiveUrl = rejectMutation
+agentService.listAgents = async () => ({ pageNumber: 1, pageSize: 100, totalCount: '0', results: [] })
 
 const queryClient = new QueryClient({
   defaultOptions: {

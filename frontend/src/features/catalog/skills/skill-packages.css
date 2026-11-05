@@ -1,0 +1,275 @@
+/* 技能包页面：归档目录树、上传预览、环境同步与上传阶段状态。
+   只消费 :root 设计 token；弹窗触区由 overlays.css 的 modal-touch-target 统一提供。 */
+
+.skill-detail-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.skill-section-heading {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.skill-section-heading h3 {
+  margin: 0;
+  color: var(--fg);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+
+.skill-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-2) var(--space-4);
+  margin: 0;
+}
+
+.skill-facts > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.skill-facts dt {
+  color: var(--fg-muted);
+  font-size: var(--font-size-xs);
+}
+
+.skill-facts dd {
+  margin: 0;
+  color: var(--fg);
+  font-size: var(--font-size-sm);
+  overflow-wrap: anywhere;
+}
+
+.skill-facts dd.is-mono,
+.skill-tree-size,
+.skill-upload-percent,
+.skill-list strong {
+  font-family: var(--mono);
+}
+
+.skill-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.skill-list li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.skill-list strong {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+
+.skill-list span {
+  color: var(--fg-muted);
+  font-size: var(--font-size-xs);
+  overflow-wrap: anywhere;
+}
+
+.skill-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding-left: var(--space-4);
+  list-style: none;
+  font-size: var(--font-size-xs);
+}
+
+/* 根节点自带滚动：归档文件多时弹窗正文仍只有一条滚动链。 */
+.skill-tree-root {
+  max-height: 260px;
+  overflow: auto;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.skill-tree-item {
+  min-width: 0;
+}
+
+.skill-tree-directory,
+.skill-tree-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.skill-tree-directory {
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.skill-tree-file {
+  color: var(--fg-muted);
+}
+
+.skill-tree-directory svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  color: var(--fg-muted);
+}
+
+.skill-tree-name {
+  overflow-wrap: anywhere;
+}
+
+.skill-tree-size {
+  color: var(--fg-muted);
+  font-size: var(--font-size-xs);
+}
+
+.skill-tree-item.is-ignored > .skill-tree-directory {
+  color: var(--fg-muted);
+  font-weight: 400;
+}
+
+.skill-change-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.skill-change-group > strong {
+  color: var(--fg-muted);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+}
+
+.skill-change-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.skill-file-picker {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.skill-file-name {
+  color: var(--fg-muted);
+  font-size: var(--font-size-xs);
+  font-weight: 400;
+  overflow-wrap: anywhere;
+}
+
+/* 文件输入只承载选择语义：视觉与指针入口是可见的“选择文件”按钮。 */
+.skill-file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.skill-upload-stage {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--fg-muted);
+  font-size: var(--font-size-xs);
+}
+
+.skill-upload-progress {
+  flex: 1 1 160px;
+  height: 6px;
+  accent-color: var(--accent);
+}
+
+.skill-upload-percent {
+  color: var(--fg);
+  font-size: var(--font-size-xs);
+}
+
+.skill-source-tabs .ui-tab span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.skill-source-tabs .ui-tab svg {
+  width: 14px;
+  height: 14px;
+}
+
+.skill-source-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.skill-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.skill-environment-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.skill-environment-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  min-width: 0;
+}
+
+.skill-environment-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.skill-environment-head strong {
+  font-size: var(--font-size-sm);
+  overflow-wrap: anywhere;
+}

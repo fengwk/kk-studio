@@ -2,71 +2,59 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { SkillPackagesPage } from '@/features/catalog/skills/SkillPackagesPage'
+import { ApiError } from '@/shared/api/client'
 import { agentService } from '@/shared/api/agent-service'
+import { environmentService } from '@/features/environment/environment-service'
+import { SkillPackagesPage } from '@/features/catalog/skills/SkillPackagesPage'
 import { setLocale } from '@/shared/i18n'
-import type { SkillPackageDetailDTO } from '@/shared/api/generated/contracts'
+import type {
+  EnvironmentCardDTO,
+  SkillEnvironmentSyncDTO,
+  SkillPackageDetailDTO,
+  SkillPackageFileDTO,
+  SkillPackageSummaryDTO,
+} from '@/shared/api/generated/contracts'
 
 vi.mock('@/shared/api/agent-service', () => ({
   agentService: {
     listSkillPackages: vi.fn(),
+    getSkillPackage: vi.fn(),
+    listSkillPackageFiles: vi.fn(),
+    listSkillPackageEnvironments: vi.fn(),
     createSkillPackage: vi.fn(),
     editSkillPackage: vi.fn(),
     checkSkillPackage: vi.fn(),
     publishSkillPackage: vi.fn(),
     deleteSkillPackage: vi.fn(),
+    getSkillPackageArchiveUrl: vi.fn(),
+    resyncEnvironmentSkills: vi.fn(),
+    listAgents: vi.fn(),
   },
+}))
+
+vi.mock('@/features/environment/environment-service', () => ({
+  environmentService: { listEnvironments: vi.fn() },
 }))
 
 vi.mock('@/app/ai-console/AiNavigation', () => ({
   AiNavigation: () => <div data-testid="navigation-slot" />,
 }))
 
-function samplePackage(
-  overrides: Partial<SkillPackageDetailDTO> & {
-    repositoryUrl?: string
-    branch?: string
-    hasToken?: boolean
-    checkStatus?: string
-  } = {},
-): SkillPackageDetailDTO {
-  const packageVersion = overrides.packageVersion ?? '1111111111111111111111111111111111111111'
-  const headCommit = overrides.headCommit !== undefined ? overrides.headCommit : null
-  const headCheckedAt = overrides.headCheckedAt !== undefined ? overrides.headCheckedAt : null
-  const headCheckError = overrides.headCheckError !== undefined ? overrides.headCheckError : null
-  const updateAvailable =
-    overrides.updateAvailable !== undefined
-      ? overrides.updateAvailable
-      : overrides.checkStatus === 'UPDATE_AVAILABLE'
-        ? true
-        : Boolean(headCommit && headCommit !== packageVersion)
+const PACKAGE_VERSION = '1111111111111111111111111111111111111111'
+const HEAD_COMMIT = '2222222222222222222222222222222222222222'
 
-  const repositoryUrl =
-    overrides.git?.repositoryUrl ?? overrides.repositoryUrl ?? 'https://github.com/example/skills.git'
-  const branch = overrides.git?.branch ?? overrides.branch ?? 'main'
-  const hasToken = overrides.git?.hasToken ?? overrides.hasToken ?? false
-
+function summary(overrides: Partial<SkillPackageSummaryDTO> = {}): SkillPackageSummaryDTO {
   return {
     packageName: 'core-tools',
     description: 'Core developer skills',
-    packageVersion,
+    packageVersion: PACKAGE_VERSION,
     publishedAt: 1784505600,
     skills: [
-      { name: 'dev', description: 'dev skill' },
+      { name: 'dev', description: 'developer workflow' },
       { name: 'bash', description: 'bash runner' },
     ],
     source: 'GIT',
-    git: {
-      repositoryUrl,
-      branch,
-      hasToken,
-    },
-    headCommit,
-    headCheckedAt,
-    headCheckError,
-    updateAvailable,
-    artifactSha256: 'mock-sha256',
-    artifactSizeBytes: '1024',
+    updateAvailable: false,
     version: '1',
     createTime: 1784505600,
     updateTime: 1784509200,
@@ -74,34 +62,113 @@ function samplePackage(
   }
 }
 
+function detail(overrides: Partial<SkillPackageDetailDTO> = {}): SkillPackageDetailDTO {
+  return {
+    ...summary(),
+    git: { repositoryUrl: 'https://github.com/example/skills.git', branch: 'main', hasToken: false },
+    headCommit: null,
+    headCheckedAt: 1784509200,
+    headCheckError: null,
+    artifactSha256: 'a'.repeat(64),
+    artifactSizeBytes: '2048',
+    version: '2',
+    ...overrides,
+  }
+}
+
+function uploadDetail(overrides: Partial<SkillPackageDetailDTO> = {}): SkillPackageDetailDTO {
+  return detail({ source: 'UPLOAD', git: null, headCheckedAt: null, ...overrides })
+}
+
+function environment(id: string, name: string, ready: boolean): EnvironmentCardDTO {
+  return {
+    id,
+    name,
+    installConfig: null,
+    registrationToken: null,
+    status: ready ? 'ONLINE' : 'OFFLINE',
+    ready,
+    statusExpiresAt: null,
+    lastSeen: null,
+    operatingSystem: null,
+    timeZone: null,
+    userName: null,
+    homeDirectory: null,
+    note: null,
+    daemonVersion: null,
+    capabilities: [],
+    version: '1',
+    createTime: 0,
+    updateTime: 0,
+  }
+}
+
+function environmentSync(overrides: Partial<SkillEnvironmentSyncDTO> = {}): SkillEnvironmentSyncDTO {
+  return {
+    environmentId: 'env-nas',
+    installedSha256: 'a'.repeat(64),
+    localPath: '/skills/core-tools',
+    error: null,
+    upToDate: true,
+    ...overrides,
+  }
+}
+
+function archiveFiles(): SkillPackageFileDTO[] {
+  return [
+    { path: 'dev/SKILL.md', size: '2048' },
+    { path: 'dev/scripts/run.sh', size: '64' },
+    { path: 'bash/SKILL.md', size: '512' },
+  ]
+}
+
 describe('SkillPackagesPage', () => {
   let queryClient: QueryClient
 
   beforeEach(() => {
     vi.clearAllMocks()
-    act(() => {
-      setLocale('zh-CN')
-    })
+    act(() => setLocale('zh-CN'))
     queryClient = new QueryClient({
-      defaultOptions: {
-        queries: { retry: false, gcTime: 0 },
-        mutations: { retry: false },
-      },
+      defaultOptions: { queries: { retry: false, gcTime: 0 }, mutations: { retry: false } },
     })
 
-    vi.mocked(agentService.listSkillPackages).mockResolvedValue([samplePackage()])
-    vi.mocked(agentService.createSkillPackage).mockResolvedValue(samplePackage())
-    vi.mocked(agentService.editSkillPackage).mockResolvedValue(samplePackage({ version: '2' }))
-    vi.mocked(agentService.checkSkillPackage).mockResolvedValue(samplePackage())
-    vi.mocked(agentService.publishSkillPackage).mockResolvedValue(samplePackage({ version: '3' }))
+    vi.mocked(agentService.listSkillPackages).mockResolvedValue([summary()])
+    vi.mocked(agentService.getSkillPackage).mockResolvedValue(detail())
+    vi.mocked(agentService.listSkillPackageFiles).mockResolvedValue(archiveFiles())
+    vi.mocked(agentService.listSkillPackageEnvironments).mockResolvedValue([environmentSync()])
+    vi.mocked(agentService.checkSkillPackage).mockResolvedValue(detail())
+    vi.mocked(agentService.publishSkillPackage).mockResolvedValue(detail({ version: '3' }))
+    vi.mocked(agentService.editSkillPackage).mockResolvedValue(detail({ version: '4' }))
     vi.mocked(agentService.deleteSkillPackage).mockResolvedValue(undefined)
+    vi.mocked(agentService.getSkillPackageArchiveUrl).mockResolvedValue({
+      filename: 'core-tools-1111111.zip',
+      sha256: 'a'.repeat(64),
+      sizeBytes: '2048',
+      download: {
+        method: 'GET',
+        url: 'http://s3.example/archive',
+        headers: {},
+        expiresAt: '1784509200',
+        mediaType: 'application/zip',
+        sizeBytes: '2048',
+      },
+    })
+    vi.mocked(agentService.resyncEnvironmentSkills).mockResolvedValue(undefined)
+    vi.mocked(agentService.listAgents).mockResolvedValue({
+      pageNumber: 1,
+      pageSize: 100,
+      totalCount: '0',
+      results: [],
+    })
+    vi.mocked(environmentService.listEnvironments).mockResolvedValue([
+      environment('env-nas', 'NAS', true),
+      environment('env-offline', '离线机器', false),
+    ])
   })
 
   afterEach(() => {
     queryClient.clear()
-    act(() => {
-      setLocale('zh-CN')
-    })
+    act(() => setLocale('zh-CN'))
   })
 
   function renderPage() {
@@ -112,564 +179,286 @@ describe('SkillPackagesPage', () => {
     )
   }
 
-  it('renders skill packages list and filters via search', async () => {
+  function card(name: string): HTMLElement {
+    const element = screen
+      .getAllByRole('article')
+      .find((article) => article.querySelector('h3')?.textContent === name)
+    if (!element) {
+      throw new Error(`card not found: ${name}`)
+    }
+    return element as HTMLElement
+  }
+
+  it('renders version, source, skill count and filters by search', async () => {
     const user = userEvent.setup()
     vi.mocked(agentService.listSkillPackages).mockResolvedValue([
-      samplePackage({ packageName: 'core-tools', description: 'developer skills' }),
-      samplePackage({ packageName: 'browser-tools', description: 'web navigation' }),
+      summary({ packageName: 'core-tools', description: 'developer skills' }),
+      summary({ packageName: 'browser-tools', description: 'web navigation', source: 'UPLOAD' }),
     ])
+    vi.mocked(agentService.getSkillPackage).mockImplementation(async (name: string) =>
+      name === 'browser-tools'
+        ? uploadDetail({ packageName: 'browser-tools', description: 'web navigation' })
+        : detail())
 
     renderPage()
 
-    await waitFor(() => {
-      expect(screen.getByText('core-tools')).toBeInTheDocument()
-      expect(screen.getByText('browser-tools')).toBeInTheDocument()
-    })
+    await waitFor(() => expect(screen.getByText('core-tools')).toBeInTheDocument())
+    const coreCard = card('core-tools')
+    expect(within(coreCard).getByText('1111111111')).toBeInTheDocument()
+    expect(within(coreCard).getByText('Git 仓库')).toBeInTheDocument()
+    expect(within(coreCard).getByText('2')).toBeInTheDocument()
 
-    const searchInput = screen.getByPlaceholderText(/搜索|search/i)
-    await user.type(searchInput, 'browser')
+    await waitFor(() => expect(within(card('browser-tools')).getByText('上传压缩包')).toBeInTheDocument())
 
+    await user.type(screen.getByPlaceholderText(/搜索/), 'browser')
     expect(screen.queryByText('core-tools')).not.toBeInTheDocument()
     expect(screen.getByText('browser-tools')).toBeInTheDocument()
   })
 
-  it('creates a new skill package without editing skills body or commit', async () => {
-    const user = userEvent.setup()
+  it('offers exactly one primary action per card', async () => {
+    vi.mocked(agentService.getSkillPackage).mockImplementation(async (name: string) =>
+      name === 'with-update'
+        ? detail({ packageName: 'with-update', updateAvailable: true, headCommit: HEAD_COMMIT })
+        : detail({ packageName: 'no-update' }))
+    vi.mocked(agentService.listSkillPackages).mockResolvedValue([
+      summary({ packageName: 'with-update', updateAvailable: true }),
+      summary({ packageName: 'no-update' }),
+    ])
+
     renderPage()
 
+    await waitFor(() => expect(within(card('with-update')).getByText('有更新可用')).toBeInTheDocument())
+    const updateCard = card('with-update')
+    const updateButtons = updateCard.querySelectorAll('button.btn-primary')
+    expect(updateButtons).toHaveLength(1)
+    expect(updateButtons[0]).toHaveTextContent('更新到 2222222222')
+    expect(within(updateCard).queryByRole('button', { name: /检查更新/ })).not.toBeInTheDocument()
+
+    const checkCard = card('no-update')
+    const checkButtons = checkCard.querySelectorAll('button.btn-primary')
+    expect(checkButtons).toHaveLength(1)
+    expect(checkButtons[0]).toHaveTextContent('检查更新')
+    expect(within(checkCard).queryByRole('button', { name: /更新到/ })).not.toBeInTheDocument()
+  })
+
+  it('uses the detail version and observed head when checking and publishing', async () => {
+    const user = userEvent.setup()
+    vi.mocked(agentService.listSkillPackages).mockResolvedValue([
+      summary({ updateAvailable: false }),
+    ])
+    renderPage()
+
+    await waitFor(() => expect(within(card('core-tools')).getByText('已是最新')).toBeInTheDocument())
+
+    await user.click(within(card('core-tools')).getByRole('button', { name: /检查更新 core-tools/ }))
     await waitFor(() => {
-      expect(screen.getByText('core-tools')).toBeInTheDocument()
+      expect(agentService.checkSkillPackage).toHaveBeenCalledWith('core-tools', {
+        expectedVersion: '2',
+      })
     })
 
-    const createBtn = screen.getByRole('button', { name: /创建技能包|Create Package/i })
-    await user.click(createBtn)
+    vi.mocked(agentService.getSkillPackage).mockResolvedValue(
+      detail({ updateAvailable: true, headCommit: HEAD_COMMIT }),
+    )
+    await act(async () => {
+      await queryClient.invalidateQueries()
+    })
 
-    const modal = screen.getByRole('dialog', { name: /创建技能包|Create Package/i })
-    expect(modal).toBeInTheDocument()
-
-    const nameInput = within(modal).getByPlaceholderText('my-skills')
-    await user.type(nameInput, 'custom-pkg')
-
-    const repoInput = within(modal).getByPlaceholderText('https://github.com/org/repo.git')
-    await user.type(repoInput, 'https://github.com/myorg/skills.git')
-
-    const submitBtn = within(modal).getByRole('button', { name: /确认创建|Confirm Create/i })
-    await user.click(submitBtn)
+    const updateButton = await within(card('core-tools')).findByRole('button', {
+      name: /更新到 2222222222 core-tools/,
+    })
+    await user.click(updateButton)
 
     await waitFor(() => {
-      expect(agentService.createSkillPackage).toHaveBeenCalledWith({
-        packageName: 'custom-pkg',
-        description: null,
-        repositoryUrl: 'https://github.com/myorg/skills.git',
-        branch: 'main',
+      expect(agentService.publishSkillPackage).toHaveBeenCalledWith('core-tools', {
+        expectedVersion: '2',
+        targetCommit: HEAD_COMMIT,
       })
     })
   })
 
-  it('checks branch HEAD and updates exact observed commit', async () => {
-    const user = userEvent.setup()
-    const pkgWithUpdate = samplePackage({
-      packageName: 'core-tools',
-      updateAvailable: true,
-      packageVersion: '1111111111111111111111111111111111111111',
-      headCommit: '2222222222222222222222222222222222222222',
-      version: '1',
-    })
-    vi.mocked(agentService.listSkillPackages).mockResolvedValue([pkgWithUpdate])
+  it('shows the check failure reason and keeps upload packages without a check action', async () => {
+    vi.mocked(agentService.listSkillPackages).mockResolvedValue([
+      summary({ packageName: 'broken-git' }),
+      summary({ packageName: 'uploaded', source: 'UPLOAD' }),
+    ])
+    vi.mocked(agentService.getSkillPackage).mockImplementation(async (name: string) =>
+      name === 'broken-git'
+        ? detail({ packageName: 'broken-git', headCheckError: 'fatal: repository not reachable' })
+        : uploadDetail({ packageName: 'uploaded' }))
 
     renderPage()
 
-    await waitFor(() => {
-      expect(screen.getByText('core-tools')).toBeInTheDocument()
-    })
+    await waitFor(() => expect(within(card('broken-git')).getByText('检查失败')).toBeInTheDocument())
+    expect(within(card('broken-git')).getByText('fatal: repository not reachable')).toBeInTheDocument()
 
-    // Check button
-    const checkBtn = screen.getByRole('button', { name: /检查更新.*core-tools|Check.*core-tools/i })
-    await user.click(checkBtn)
-
-    expect(agentService.checkSkillPackage).toHaveBeenCalledWith('core-tools', {
-      expectedVersion: '1',
-    })
-
-    // Update button is present because updateAvailable && headCommit
-    const updateBtn = screen.getByRole('button', { name: /发布更新.*core-tools|Update.*core-tools/i })
-    await user.click(updateBtn)
-
-    expect(agentService.publishSkillPackage).toHaveBeenCalledWith('core-tools', {
-      expectedVersion: '1',
-      targetCommit: '2222222222222222222222222222222222222222',
-    })
+    const uploadedCard = card('uploaded')
+    expect(within(uploadedCard).queryByText('检查状态')).not.toBeInTheDocument()
+    expect(within(uploadedCard).queryByRole('button', { name: /检查更新/ })).not.toBeInTheDocument()
+    expect(uploadedCard.querySelectorAll('button.btn-primary')[0]).toHaveTextContent('详情')
   })
 
-  it('edits only description and branch with expectedVersion', async () => {
+  it('warns about sync failures only for online environments', async () => {
+    vi.mocked(agentService.listSkillPackages).mockResolvedValue([summary()])
+    vi.mocked(agentService.listSkillPackageEnvironments).mockResolvedValue([
+      environmentSync({ environmentId: 'env-nas', error: 'install failed', upToDate: false }),
+      environmentSync({ environmentId: 'env-offline', error: 'install failed', upToDate: false }),
+    ])
+
+    renderPage()
+
+    await waitFor(() =>
+      expect(within(card('core-tools')).getByText('以下环境同步失败：NAS')).toBeInTheDocument())
+    expect(within(card('core-tools')).queryByText(/离线机器/)).not.toBeInTheDocument()
+  })
+
+  it('edits Git packages from the detail dialog with a read-only repository', async () => {
     const user = userEvent.setup()
     renderPage()
 
-    await waitFor(() => {
-      expect(screen.getByText('core-tools')).toBeInTheDocument()
-    })
+    await waitFor(() => expect(screen.getByText('core-tools')).toBeInTheDocument())
+    await user.click(within(card('core-tools')).getByRole('button', { name: /详情 core-tools/ }))
+    const detailDialog = await screen.findByRole('dialog', { name: /详情: core-tools/ })
+    await user.click(await within(detailDialog).findByRole('button', { name: '编辑技能包' }))
 
-    const editBtn = screen.getByRole('button', { name: /编辑技能包.*core-tools|Edit Package.*core-tools/i })
-    await user.click(editBtn)
-
-    const modal = await screen.findByRole('dialog')
-
-    // Package name and repo are read-only
-    const nameInput = within(modal).getByDisplayValue('core-tools')
-    expect(nameInput).toBeDisabled()
+    const modal = await screen.findByRole('dialog', { name: /编辑技能包/ })
+    expect(within(modal).getByDisplayValue('https://github.com/example/skills.git')).toBeDisabled()
+    expect(within(modal).getByLabelText(/访问令牌/)).toBeInTheDocument()
 
     const branchInput = within(modal).getByDisplayValue('main')
     await user.clear(branchInput)
     await user.type(branchInput, 'develop')
-
-    const submitBtn = within(modal).getByRole('button', { name: /保存修改|Save Changes/i })
-    await user.click(submitBtn)
+    const description = within(modal).getByDisplayValue('Core developer skills')
+    await user.clear(description)
+    await user.type(description, 'Updated description')
+    await user.click(within(modal).getByRole('button', { name: /保存修改/ }))
 
     await waitFor(() => {
       expect(agentService.editSkillPackage).toHaveBeenCalledWith('core-tools', {
-        expectedVersion: '1',
-        description: 'Core developer skills',
+        expectedVersion: '2',
+        description: 'Updated description',
         branch: 'develop',
       })
     })
   })
 
-  it('deletes a package with CAS expectedVersion confirmation', async () => {
+  it('edits uploaded packages by description only', async () => {
     const user = userEvent.setup()
+    vi.mocked(agentService.listSkillPackages).mockResolvedValue([summary({ source: 'UPLOAD' })])
+    vi.mocked(agentService.getSkillPackage).mockResolvedValue(uploadDetail())
     renderPage()
 
-    await waitFor(() => {
-      expect(screen.getByText('core-tools')).toBeInTheDocument()
-    })
+    await waitFor(() => expect(screen.getByText('core-tools')).toBeInTheDocument())
+    await user.click(within(card('core-tools')).getByRole('button', { name: /详情 core-tools/ }))
+    const detailDialog = await screen.findByRole('dialog', { name: /详情: core-tools/ })
+    await user.click(await within(detailDialog).findByRole('button', { name: '编辑技能包' }))
 
-    const deleteBtn = screen.getByRole('button', { name: /删除技能包.*core-tools|Delete Package.*core-tools/i })
-    await user.click(deleteBtn)
+    const modal = await screen.findByRole('dialog', { name: /编辑技能包/ })
+    expect(within(modal).queryByLabelText(/访问令牌/)).not.toBeInTheDocument()
+    expect(within(modal).queryByText('分支')).not.toBeInTheDocument()
 
-    const confirmModal = await screen.findByRole('alertdialog')
-    expect(confirmModal).toBeInTheDocument()
-
-    // 确认弹窗描述中正确插值实际包名
-    expect(within(confirmModal).getByText(/确认删除技能包“core-tools”？/)).toBeInTheDocument()
-
-    const confirmBtn = within(confirmModal).getByRole('button', { name: /删除技能包|Delete Package/i })
-    await user.click(confirmBtn)
+    const description = within(modal).getByDisplayValue('Core developer skills')
+    await user.clear(description)
+    await user.type(description, 'Only description')
+    await user.click(within(modal).getByRole('button', { name: /保存修改/ }))
 
     await waitFor(() => {
-      expect(agentService.deleteSkillPackage).toHaveBeenCalledWith('core-tools', '1')
+      expect(agentService.editSkillPackage).toHaveBeenCalledWith('core-tools', {
+        expectedVersion: '2',
+        description: 'Only description',
+      })
     })
   })
 
-  it('switches between zh-CN and en-US in real-time across cards, status pills, labels and actions', async () => {
-    vi.mocked(agentService.listSkillPackages).mockResolvedValue([
-      samplePackage({
-        packageName: 'demo-pkg',
-        headCheckError: 'diagnostic error from git',
-        skills: [{ name: 'read', description: 'file reader' }],
-      }),
-    ])
-
-    renderPage()
-
-    await waitFor(() => {
-      expect(screen.getByText('demo-pkg')).toBeInTheDocument()
-    })
-
-    // 中文断言
-    expect(screen.getByRole('button', { name: '创建技能包' })).toBeInTheDocument()
-    expect(screen.getByTestId('check-status-pill')).toHaveTextContent('检查失败')
-    expect(screen.getByText('访问令牌')).toBeInTheDocument()
-    expect(screen.getByText('未配置')).toBeInTheDocument()
-    expect(screen.getByText('包含技能数量')).toBeInTheDocument()
-    expect(screen.getByText('技能')).toBeInTheDocument()
-    expect(screen.getByText('错误')).toBeInTheDocument()
-    // 上游诊断错误不翻译
-    expect(screen.getByText('diagnostic error from git')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /检查更新 demo-pkg/ })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /编辑技能包 demo-pkg/ })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /删除技能包 demo-pkg/ })).toBeInTheDocument()
-
-    // 实时切换到 en-US
-    act(() => {
-      setLocale('en-US')
-    })
-
-    expect(screen.getByRole('button', { name: 'Create Package' })).toBeInTheDocument()
-    expect(screen.getByTestId('check-status-pill')).toHaveTextContent('Check failed')
-    expect(screen.getByText('Access Token')).toBeInTheDocument()
-    expect(screen.getByText('Not configured')).toBeInTheDocument()
-    expect(screen.getByText('Skills Count')).toBeInTheDocument()
-    expect(screen.getByText('Skills')).toBeInTheDocument()
-    expect(screen.getByText('Error')).toBeInTheDocument()
-    expect(screen.getByText('diagnostic error from git')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Check demo-pkg/ })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Edit Package demo-pkg/ })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Delete Package demo-pkg/ })).toBeInTheDocument()
-  })
-
-  it('renders all 4 status pills with localized text while retaining wire enum classes', async () => {
-    const packages: SkillPackageDetailDTO[] = [
-      samplePackage({
-        packageName: 'p-unchecked',
-        headCheckError: null,
-        updateAvailable: false,
-        headCheckedAt: null,
-        headCommit: null,
-      }),
-      samplePackage({
-        packageName: 'p-uptodate',
-        headCheckError: null,
-        updateAvailable: false,
-        headCheckedAt: 1784505600,
-        headCommit: '1111111111111111111111111111111111111111',
-      }),
-      samplePackage({
-        packageName: 'p-updateavail',
-        headCheckError: null,
-        updateAvailable: true,
-        headCommit: '2222222222222222222222222222222222222222',
-      }),
-      samplePackage({
-        packageName: 'p-failed',
-        headCheckError: 'diagnostic error from git',
-      }),
-    ]
-    vi.mocked(agentService.listSkillPackages).mockResolvedValue(packages)
-
-    renderPage()
-
-    await waitFor(() => {
-      expect(screen.getByText('p-unchecked')).toBeInTheDocument()
-    })
-
-    const cards = screen.getAllByRole('article')
-    expect(cards).toHaveLength(4)
-
-    // 1. zh-CN 状态断言与 CSS class 保持
-    const pill1 = within(cards[0]!).getByTestId('check-status-pill')
-    expect(pill1).toHaveTextContent('未检查')
-    expect(pill1).toHaveClass('ui-badge is-warning')
-
-    const pill2 = within(cards[1]!).getByTestId('check-status-pill')
-    expect(pill2).toHaveTextContent('已是最新')
-    expect(pill2).toHaveClass('ui-badge is-success')
-
-    const pill3 = within(cards[2]!).getByTestId('check-status-pill')
-    expect(pill3).toHaveTextContent('有更新可用')
-    expect(pill3).toHaveClass('ui-badge is-warning')
-
-    const pill4 = within(cards[3]!).getByTestId('check-status-pill')
-    expect(pill4).toHaveTextContent('检查失败')
-    expect(pill4).toHaveClass('ui-badge is-danger')
-
-    // 2. 实时切 en-US
-    act(() => {
-      setLocale('en-US')
-    })
-
-    expect(within(cards[0]!).getByTestId('check-status-pill')).toHaveTextContent('Unchecked')
-    expect(within(cards[1]!).getByTestId('check-status-pill')).toHaveTextContent('Up to date')
-    expect(within(cards[2]!).getByTestId('check-status-pill')).toHaveTextContent('Update available')
-    expect(within(cards[3]!).getByTestId('check-status-pill')).toHaveTextContent('Check failed')
-  })
-
-  it('validates package name and presents localized messages for empty or forbidden characters', async () => {
+  it('deletes from the detail dialog and surfaces the backend reason when in use', async () => {
     const user = userEvent.setup()
+    vi.mocked(agentService.deleteSkillPackage).mockRejectedValue(
+      new ApiError('Request failed with status 409', 409, 'in_use', {
+        detail: 'Skill package is still referenced by Agent demo',
+      }),
+    )
     renderPage()
 
+    await waitFor(() => expect(screen.getByText('core-tools')).toBeInTheDocument())
+    await user.click(within(card('core-tools')).getByRole('button', { name: /详情 core-tools/ }))
+    const detailDialog = await screen.findByRole('dialog', { name: /详情: core-tools/ })
+    await user.click(await within(detailDialog).findByRole('button', { name: '删除技能包 core-tools' }))
+
+    const modal = await screen.findByRole('alertdialog')
+    expect(within(modal).getByText('确认删除技能包“core-tools”？')).toBeInTheDocument()
+    await user.click(within(modal).getByRole('button', { name: '删除技能包' }))
+
+    // 删除使用详情里的当前版本，而不是列表摘要里的旧版本。
     await waitFor(() => {
-      expect(screen.getByText('core-tools')).toBeInTheDocument()
+      expect(agentService.deleteSkillPackage).toHaveBeenCalledWith('core-tools', '2')
     })
-
-    await user.click(screen.getByRole('button', { name: '创建技能包' }))
-    const modal = screen.getByRole('dialog', { name: '创建技能包' })
-    const submitBtn = within(modal).getByRole('button', { name: '确认创建' })
-
-    // 1. 空包名校验
-    await user.click(submitBtn)
-    expect(within(modal).getByRole('alert')).toHaveTextContent('技能包名称不能为空')
-    expect(agentService.createSkillPackage).not.toHaveBeenCalled()
-
-    // 2. 非法符号校验 (: / @ \)
-    const nameInput = within(modal).getByPlaceholderText('my-skills')
-    await user.type(nameInput, 'user@pkg/invalid:name\\bad')
-    await user.click(submitBtn)
-    expect(within(modal).getByRole('alert')).toHaveTextContent('技能包名称不能包含 : / @ \\')
-
-    // 3. 实时切换为 en-US 时展示英文校验提示
-    act(() => {
-      setLocale('en-US')
-    })
-    await user.click(within(modal).getByRole('button', { name: 'Create' }))
-    expect(within(modal).getByRole('alert')).toHaveTextContent('Package name cannot contain : / @ \\')
-  })
-
-  it('supports cancelling create and edit modals without submitting mutations', async () => {
-    const user = userEvent.setup()
-    renderPage()
-
-    await waitFor(() => {
-      expect(screen.getByText('core-tools')).toBeInTheDocument()
-    })
-
-    // 1. 取消创建 Modal
-    await user.click(screen.getByRole('button', { name: '创建技能包' }))
-    const createModal = screen.getByRole('dialog', { name: '创建技能包' })
-    const createCancelBtn = within(createModal).getByRole('button', { name: '取消' })
-    await user.click(createCancelBtn)
-    expect(screen.queryByRole('dialog', { name: '创建技能包' })).not.toBeInTheDocument()
-    expect(agentService.createSkillPackage).not.toHaveBeenCalled()
-
-    // 2. 取消编辑 Modal
-    await user.click(screen.getByRole('button', { name: /编辑技能包.*core-tools/ }))
-    const editModal = await screen.findByRole('dialog')
-    const branchInput = within(editModal).getByDisplayValue('main')
-    await user.clear(branchInput)
-    await user.type(branchInput, 'feature-test')
-    const editCancelBtn = within(editModal).getByRole('button', { name: '取消' })
-    await user.click(editCancelBtn)
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-    expect(agentService.editSkillPackage).not.toHaveBeenCalled()
-  })
-
-  it('interpolates actual package name in delete confirmation modal across locales and handles cancel', async () => {
-    const user = userEvent.setup()
-    renderPage()
-
-    await waitFor(() => {
-      expect(screen.getByText('core-tools')).toBeInTheDocument()
-    })
-
-    // 1. zh-CN 删除弹窗取消
-    await user.click(screen.getByRole('button', { name: /删除技能包.*core-tools/ }))
-    let confirmModal = await screen.findByRole('alertdialog')
-    expect(within(confirmModal).getByText('确认删除技能包“core-tools”？')).toBeInTheDocument()
-    await user.click(within(confirmModal).getByRole('button', { name: '取消' }))
-    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
-    expect(agentService.deleteSkillPackage).not.toHaveBeenCalled()
-
-    // 2. en-US 删除弹窗插值验证
-    act(() => {
-      setLocale('en-US')
-    })
-    await user.click(screen.getByRole('button', { name: /Delete Package.*core-tools/ }))
-    confirmModal = await screen.findByRole('alertdialog')
     expect(
-      within(confirmModal).getByText('Are you sure you want to delete skill package "core-tools"?'),
+      await within(modal).findByText('Skill package is still referenced by Agent demo'),
     ).toBeInTheDocument()
-    await user.click(within(confirmModal).getByRole('button', { name: 'Cancel' }))
-    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
-    expect(agentService.deleteSkillPackage).not.toHaveBeenCalled()
+    expect(card('core-tools')).toBeInTheDocument()
   })
 
-  it('creates a package including token when a non-blank token is typed', async () => {
-    // 意图：验证创建技能包时，输入访问令牌后提交数据携带 token 字段，且输入框为密码类型与关闭自动填充
+  it('shows the real archive tree, per-environment sync state and download from the detail dialog', async () => {
     const user = userEvent.setup()
-    renderPage()
-
-    await waitFor(() => {
-      expect(screen.getByText('core-tools')).toBeInTheDocument()
-    })
-
-    await user.click(screen.getByRole('button', { name: /创建技能包|Create Package/i }))
-    const modal = screen.getByRole('dialog', { name: /创建技能包|Create Package/i })
-
-    const tokenInput = within(modal).getByPlaceholderText(/Personal Access Token/i)
-    expect(tokenInput).toHaveAttribute('type', 'password')
-    expect(tokenInput).toHaveAttribute('autocomplete', 'off')
-    expect(tokenInput).toHaveValue('')
-
-    await user.type(within(modal).getByPlaceholderText('my-skills'), 'private-pkg')
-    await user.type(
-      within(modal).getByPlaceholderText('https://github.com/org/repo.git'),
-      'https://github.com/myorg/private-skills.git',
-    )
-    await user.type(tokenInput, 'ghp_secret_access_token_123')
-
-    await user.click(within(modal).getByRole('button', { name: /确认创建|Confirm Create/i }))
-
-    await waitFor(() => {
-      expect(agentService.createSkillPackage).toHaveBeenCalledWith({
-        packageName: 'private-pkg',
-        description: null,
-        repositoryUrl: 'https://github.com/myorg/private-skills.git',
-        branch: 'main',
-        token: 'ghp_secret_access_token_123',
-      })
-    })
-  })
-
-  it('omits token in create request when token is whitespace only', async () => {
-    // 意图：验证创建时若 token 仅输入纯空白字符，按未填写处理，请求体完全省略 token
-    const user = userEvent.setup()
-    renderPage()
-
-    await waitFor(() => {
-      expect(screen.getByText('core-tools')).toBeInTheDocument()
-    })
-
-    await user.click(screen.getByRole('button', { name: /创建技能包|Create Package/i }))
-    const modal = screen.getByRole('dialog', { name: /创建技能包|Create Package/i })
-
-    await user.type(within(modal).getByPlaceholderText('my-skills'), 'blank-token-pkg')
-    await user.type(
-      within(modal).getByPlaceholderText('https://github.com/org/repo.git'),
-      'https://github.com/myorg/blank-token.git',
-    )
-    const tokenInput = within(modal).getByPlaceholderText(/Personal Access Token/i)
-    await user.type(tokenInput, '   ')
-
-    await user.click(within(modal).getByRole('button', { name: /确认创建|Confirm Create/i }))
-
-    await waitFor(() => {
-      expect(agentService.createSkillPackage).toHaveBeenCalledWith({
-        packageName: 'blank-token-pkg',
-        description: null,
-        repositoryUrl: 'https://github.com/myorg/blank-token.git',
-        branch: 'main',
-      })
-    })
-  })
-
-  it('edits a package replacing token when new token is typed', async () => {
-    // 意图：编辑弹窗输入新令牌时，提交数据携带新 token 进行替换；密码输入框默认空白且绝不回显已有密钥
-    const user = userEvent.setup()
-    vi.mocked(agentService.listSkillPackages).mockResolvedValue([
-      samplePackage({ packageName: 'core-tools', hasToken: true }),
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+    vi.mocked(agentService.listSkillPackageEnvironments).mockResolvedValue([
+      environmentSync(),
+      environmentSync({
+        environmentId: 'env-offline',
+        installedSha256: null,
+        localPath: null,
+        upToDate: false,
+      }),
+      environmentSync({
+        environmentId: 'env-nas',
+        installedSha256: null,
+        localPath: null,
+        error: 'download failed',
+        upToDate: false,
+      }),
     ])
     renderPage()
 
+    await waitFor(() => expect(screen.getByText('core-tools')).toBeInTheDocument())
+    await user.click(within(card('core-tools')).getByRole('button', { name: /详情 core-tools/ }))
+
+    const modal = await screen.findByRole('dialog', { name: /详情: core-tools/ })
+    // 文件树来自服务端归档索引，目录与文件都按路径展示。
+    expect(await within(modal).findByText('run.sh')).toBeInTheDocument()
+    expect(within(modal).getByText('scripts')).toBeInTheDocument()
+    expect(within(modal).getAllByText('SKILL.md')).toHaveLength(2)
+    expect(within(modal).getByText('共 3 个文件')).toBeInTheDocument()
+
+    expect(within(modal).getByText('已同步')).toBeInTheDocument()
+    expect(within(modal).getByText('待同步')).toBeInTheDocument()
+    expect(within(modal).getAllByText('同步失败')).not.toHaveLength(0)
+    expect(within(modal).getByText('download failed')).toBeInTheDocument()
+    expect(within(modal).getByText('离线机器')).toBeInTheDocument()
+
+    await user.click(within(modal).getByRole('button', { name: '下载归档' }))
     await waitFor(() => {
-      expect(screen.getByText('core-tools')).toBeInTheDocument()
+      expect(agentService.getSkillPackageArchiveUrl).toHaveBeenCalledWith('core-tools')
     })
+    expect(clickSpy).toHaveBeenCalled()
 
-    await user.click(screen.getByRole('button', { name: /编辑技能包.*core-tools/ }))
-    const modal = await screen.findByRole('dialog')
-
-    const tokenInput = within(modal).getByPlaceholderText(/留空保留已有令牌|Leave blank to keep existing token/i)
-    expect(tokenInput).toHaveAttribute('type', 'password')
-    expect(tokenInput).toHaveAttribute('autocomplete', 'off')
-    expect(tokenInput).toHaveValue('')
-
-    await user.type(tokenInput, 'ghp_replaced_token_456')
-    await user.click(within(modal).getByRole('button', { name: /保存修改|Save Changes/i }))
-
+    await user.click(within(modal).getByRole('button', { name: /重新同步 NAS/ }))
     await waitFor(() => {
-      expect(agentService.editSkillPackage).toHaveBeenCalledWith('core-tools', {
-        expectedVersion: '1',
-        description: 'Core developer skills',
-        branch: 'main',
-        token: 'ghp_replaced_token_456',
-      })
+      expect(agentService.resyncEnvironmentSkills).toHaveBeenCalledWith('env-nas')
     })
+    clickSpy.mockRestore()
   })
 
-  it('edits a package sending token: null when clear token is selected', async () => {
-    // 意图：三态编辑中勾选“清除令牌”时，向后端发送 token: null，并禁用密码输入框
-    const user = userEvent.setup()
-    vi.mocked(agentService.listSkillPackages).mockResolvedValue([
-      samplePackage({ packageName: 'core-tools', hasToken: true }),
-    ])
+  it('switches list labels between zh-CN and en-US', async () => {
     renderPage()
+    await waitFor(() => expect(screen.getByText('core-tools')).toBeInTheDocument())
 
-    await waitFor(() => {
-      expect(screen.getByText('core-tools')).toBeInTheDocument()
-    })
+    expect(within(card('core-tools')).getByText('检查更新')).toBeInTheDocument()
+    expect(within(card('core-tools')).getByText('来源')).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: /编辑技能包.*core-tools/ }))
-    const modal = await screen.findByRole('dialog')
+    act(() => setLocale('en-US'))
 
-    const tokenInput = within(modal).getByPlaceholderText(/留空保留已有令牌|Leave blank to keep existing token/i)
-    const clearCheckbox = within(modal).getByRole('checkbox', { name: /清除令牌|Clear token/i })
-    expect(clearCheckbox).not.toBeChecked()
-
-    // 勾选清除令牌
-    await user.click(clearCheckbox)
-    expect(clearCheckbox).toBeChecked()
-    expect(tokenInput).toBeDisabled()
-
-    await user.click(within(modal).getByRole('button', { name: /保存修改|Save Changes/i }))
-
-    await waitFor(() => {
-      expect(agentService.editSkillPackage).toHaveBeenCalledWith('core-tools', {
-        expectedVersion: '1',
-        description: 'Core developer skills',
-        branch: 'main',
-        token: null,
-      })
-    })
-  })
-
-  it('edits a package preserving token (omitting token) when left blank and clear is unchecked', async () => {
-    // 意图：编辑时密码框留空且未勾选清除，请求体中完全省略 token 字段以保留既有令牌
-    const user = userEvent.setup()
-    vi.mocked(agentService.listSkillPackages).mockResolvedValue([
-      samplePackage({ packageName: 'core-tools', hasToken: true }),
-    ])
-    renderPage()
-
-    await waitFor(() => {
-      expect(screen.getByText('core-tools')).toBeInTheDocument()
-    })
-
-    await user.click(screen.getByRole('button', { name: /编辑技能包.*core-tools/ }))
-    const modal = await screen.findByRole('dialog')
-
-    const tokenInput = within(modal).getByPlaceholderText(/留空保留已有令牌|Leave blank to keep existing token/i)
-    await user.type(tokenInput, '   ') // 纯空白亦按省略保留处理
-
-    await user.click(within(modal).getByRole('button', { name: /保存修改|Save Changes/i }))
-
-    await waitFor(() => {
-      const call = vi.mocked(agentService.editSkillPackage).mock.calls[0]
-      expect(call?.[0]).toBe('core-tools')
-      expect(call?.[1]).toEqual({
-        expectedVersion: '1',
-        description: 'Core developer skills',
-        branch: 'main',
-      })
-      expect('token' in (call?.[1] ?? {})).toBe(false)
-    })
-  })
-
-  it('renders card showing token configured vs unconfigured from hasToken without echoing secrets', async () => {
-    // 意图：卡片元信息行只展示已配置/未配置状态文案，绝不渲染任何明文令牌，支持双语
-    vi.mocked(agentService.listSkillPackages).mockResolvedValue([
-      samplePackage({ packageName: 'with-token', hasToken: true }),
-      samplePackage({ packageName: 'without-token', hasToken: false }),
-    ])
-
-    renderPage()
-
-    await waitFor(() => {
-      expect(screen.getByText('with-token')).toBeInTheDocument()
-      expect(screen.getByText('without-token')).toBeInTheDocument()
-    })
-
-    const cards = screen.getAllByRole('article')
-    expect(cards).toHaveLength(2)
-
-    // zh-CN 校验
-    const withTokenCard = cards[0]!
-    const withoutTokenCard = cards[1]!
-
-    expect(within(withTokenCard).getByText('访问令牌')).toBeInTheDocument()
-    expect(within(withTokenCard).getByText('已配置')).toBeInTheDocument()
-
-    expect(within(withoutTokenCard).getByText('访问令牌')).toBeInTheDocument()
-    expect(within(withoutTokenCard).getByText('未配置')).toBeInTheDocument()
-
-    // 绝不回显任何类似令牌的内容
-    expect(screen.queryByText(/ghp_/i)).not.toBeInTheDocument()
-
-    // 实时切 en-US 校验
-    act(() => {
-      setLocale('en-US')
-    })
-
-    expect(within(withTokenCard).getByText('Access Token')).toBeInTheDocument()
-    expect(within(withTokenCard).getByText('Configured')).toBeInTheDocument()
-
-    expect(within(withoutTokenCard).getByText('Access Token')).toBeInTheDocument()
-    expect(within(withoutTokenCard).getByText('Not configured')).toBeInTheDocument()
+    expect(within(card('core-tools')).getByText('Check')).toBeInTheDocument()
+    expect(within(card('core-tools')).getByText('Source')).toBeInTheDocument()
+    expect(within(card('core-tools')).getByText('Git repository')).toBeInTheDocument()
   })
 })

@@ -1140,13 +1140,37 @@ export const resourcesCatalog = {
     'en-US': 'Loading Skill Packages...',
     'zh-CN': '正在加载技能包...',
   },
-  'ai.skillPackages.nameRequired': {
-    'en-US': 'Package name is required',
-    'zh-CN': '技能包名称不能为空',
+  'ai.skillPackages.source': {
+    'en-US': 'Source',
+    'zh-CN': '来源',
   },
-  'ai.skillPackages.nameInvalidChars': {
-    'en-US': 'Package name cannot contain : / @ \\',
-    'zh-CN': '技能包名称不能包含 : / @ \\',
+  'ai.skillPackages.source.GIT': {
+    'en-US': 'Git repository',
+    'zh-CN': 'Git 仓库',
+  },
+  'ai.skillPackages.source.UPLOAD': {
+    'en-US': 'Uploaded archive',
+    'zh-CN': '上传压缩包',
+  },
+  'ai.skillPackages.sourceLabel': {
+    'en-US': 'Source',
+    'zh-CN': '来源',
+  },
+  'ai.skillPackages.packageNameInvalid': {
+    'en-US': 'Package name must be 1 to 64 lowercase letters, digits or single hyphens',
+    'zh-CN': '技能包名称只能使用 1 到 64 个小写字母、数字或单个连字符',
+  },
+  'ai.skillPackages.packageVersion': {
+    'en-US': 'Package Version',
+    'zh-CN': '包版本',
+  },
+  'ai.skillPackages.versionInvalid': {
+    'en-US': 'Enter a package version of 1 to 128 characters without control characters',
+    'zh-CN': '请填写 1 到 128 个字符的包版本，不能包含控制字符',
+  },
+  'ai.skillPackages.descriptionTooLong': {
+    'en-US': 'Description can be at most 1024 characters',
+    'zh-CN': '描述最多 1024 个字符',
   },
   'ai.skillPackages.repositoryUrl': {
     'en-US': 'Repository URL',
@@ -1188,9 +1212,9 @@ export const resourcesCatalog = {
     'en-US': 'Not configured',
     'zh-CN': '未配置',
   },
-  'ai.skillPackages.currentCommit': {
-    'en-US': 'Current Commit',
-    'zh-CN': '当前发布 Commit',
+  'ai.skillPackages.checkStatus': {
+    'en-US': 'Check Status',
+    'zh-CN': '检查状态',
   },
   'ai.skillPackages.observedHeadCommit': {
     'en-US': 'Observed Branch HEAD',
@@ -1200,9 +1224,209 @@ export const resourcesCatalog = {
     'en-US': 'Check',
     'zh-CN': '检查更新',
   },
-  'ai.skillPackages.update': {
-    'en-US': 'Update',
-    'zh-CN': '发布更新',
+  'ai.skillPackages.updateTo': {
+    'en-US': 'Update to {{commit}}',
+    'zh-CN': '更新到 {{commit}}',
+  },
+  'ai.skillPackages.detail': {
+    'en-US': 'Details',
+    'zh-CN': '详情',
+  },
+  'ai.skillPackages.summary': {
+    'en-US': 'Overview',
+    'zh-CN': '概览',
+  },
+  'ai.skillPackages.loadingDetail': {
+    'en-US': 'Loading skill package details...',
+    'zh-CN': '正在读取技能包详情...',
+  },
+  'ai.skillPackages.loadingFiles': {
+    'en-US': 'Loading archive files...',
+    'zh-CN': '正在读取归档文件...',
+  },
+  'ai.skillPackages.fileTree': {
+    'en-US': 'File Tree',
+    'zh-CN': '文件树',
+  },
+  'ai.skillPackages.fileTreeHelp': {
+    'en-US': 'Help: file tree',
+    'zh-CN': '帮助：文件树',
+  },
+  'ai.skillPackages.fileTreeHelpText': {
+    'en-US': 'The upload preview only has the server-side skill manifest. Every file of the published archive is listed in the details.',
+    'zh-CN': '上传预览只有服务端技能清单，归档的全部文件在发布后的详情中列出。',
+  },
+  'ai.skillPackages.ignoredBadge': {
+    'en-US': 'Not packaged',
+    'zh-CN': '未打包',
+  },
+  'ai.skillPackages.ignoredDirectoriesValue': {
+    'en-US': 'Not packaged directories: {{directories}}',
+    'zh-CN': '未打包目录：{{directories}}',
+  },
+  'ai.skillPackages.fileCount': {
+    'en-US': 'Files',
+    'zh-CN': '文件数',
+  },
+  'ai.skillPackages.fileCountValue': {
+    'en-US': '{{count}} files',
+    'zh-CN': '共 {{count}} 个文件',
+  },
+  'ai.skillPackages.contentSize': {
+    'en-US': 'Unpacked Size',
+    'zh-CN': '解压后大小',
+  },
+  'ai.skillPackages.archiveSize': {
+    'en-US': 'Archive Size',
+    'zh-CN': '归档大小',
+  },
+  'ai.skillPackages.archiveSha': {
+    'en-US': 'Archive Checksum',
+    'zh-CN': '归档摘要',
+  },
+  'ai.skillPackages.publishedAt': {
+    'en-US': 'Published',
+    'zh-CN': '发布时间',
+  },
+  'ai.skillPackages.previewSummary': {
+    'en-US': 'Archive Preview',
+    'zh-CN': '归档预览',
+  },
+  'ai.skillPackages.previewTitle': {
+    'en-US': 'Preview and Publish',
+    'zh-CN': '预览并发布',
+  },
+  'ai.skillPackages.parsePreview': {
+    'en-US': 'Preview Archive',
+    'zh-CN': '解析预览',
+  },
+  'ai.skillPackages.publish': {
+    'en-US': 'Publish',
+    'zh-CN': '发布',
+  },
+  'ai.skillPackages.changeSummary': {
+    'en-US': 'Change Summary',
+    'zh-CN': '变化摘要',
+  },
+  'ai.skillPackages.newPackageHint': {
+    'en-US': 'This is a new skill package and publishing creates it.',
+    'zh-CN': '这是新技能包，发布会创建它。',
+  },
+  'ai.skillPackages.addedSkills': {
+    'en-US': 'Added Skills',
+    'zh-CN': '新增技能',
+  },
+  'ai.skillPackages.removedSkills': {
+    'en-US': 'Removed Skills',
+    'zh-CN': '移除的技能',
+  },
+  'ai.skillPackages.noAddedSkills': {
+    'en-US': 'No added skills',
+    'zh-CN': '没有新增技能',
+  },
+  'ai.skillPackages.noRemovedSkills': {
+    'en-US': 'No removed skills',
+    'zh-CN': '没有移除技能',
+  },
+  'ai.skillPackages.referencedSkills': {
+    'en-US': 'Skills Still Referenced by Agents',
+    'zh-CN': '仍被 Agent 引用的技能',
+  },
+  'ai.skillPackages.referencedSkillsHint': {
+    'en-US': 'Publishing fails while agents still reference these skills. Update those agents first.',
+    'zh-CN': '仍有 Agent 引用这些技能时发布会失败，请先调整对应 Agent。',
+  },
+  'ai.skillPackages.noReferencedSkills': {
+    'en-US': 'No referenced skills',
+    'zh-CN': '没有仍被引用的技能',
+  },
+  'ai.skillPackages.loadingReferences': {
+    'en-US': 'Loading agent references...',
+    'zh-CN': '正在读取 Agent 引用...',
+  },
+  'ai.skillPackages.environmentSync': {
+    'en-US': 'Environment Sync',
+    'zh-CN': '环境同步',
+  },
+  'ai.skillPackages.environmentSyncFailed': {
+    'en-US': 'Sync failed on {{names}}',
+    'zh-CN': '以下环境同步失败：{{names}}',
+  },
+  'ai.skillPackages.noEnvironments': {
+    'en-US': 'No registered environments',
+    'zh-CN': '暂无已注册环境',
+  },
+  'ai.skillPackages.sync.SYNCED': {
+    'en-US': 'In sync',
+    'zh-CN': '已同步',
+  },
+  'ai.skillPackages.sync.FAILED': {
+    'en-US': 'Sync failed',
+    'zh-CN': '同步失败',
+  },
+  'ai.skillPackages.sync.PENDING': {
+    'en-US': 'Pending',
+    'zh-CN': '待同步',
+  },
+  'ai.skillPackages.resync': {
+    'en-US': 'Resync',
+    'zh-CN': '重新同步',
+  },
+  'ai.skillPackages.downloadArchive': {
+    'en-US': 'Download Archive',
+    'zh-CN': '下载归档',
+  },
+  'ai.skillPackages.skillCountValue': {
+    'en-US': '{{count}} skills',
+    'zh-CN': '共 {{count}} 个技能',
+  },
+  'ai.skillPackages.uploadGitConflict': {
+    'en-US': 'A Git-backed skill package already uses this name and cannot be replaced by an upload',
+    'zh-CN': '同名技能包已由 Git 仓库发布，不能用上传覆盖',
+  },
+  'ai.skillPackages.fileRequired': {
+    'en-US': 'Choose an archive to upload',
+    'zh-CN': '请选择要上传的压缩包',
+  },
+  'ai.skillPackages.fileTypeInvalid': {
+    'en-US': 'Only .zip and .tar.gz archives are supported',
+    'zh-CN': '只支持 .zip 与 .tar.gz 压缩包',
+  },
+  'ai.skillPackages.archiveFile': {
+    'en-US': 'Package Archive',
+    'zh-CN': '技能包压缩包',
+  },
+  'ai.skillPackages.chooseFile': {
+    'en-US': 'Choose File',
+    'zh-CN': '选择文件',
+  },
+  'ai.skillPackages.noFile': {
+    'en-US': 'No file selected',
+    'zh-CN': '尚未选择文件',
+  },
+  'ai.skillPackages.archiveFileHint': {
+    'en-US': 'Every directory that directly contains SKILL.md becomes one skill.',
+    'zh-CN': '根目录下直接包含 SKILL.md 的目录会打包为一个技能。',
+  },
+  'ai.skillPackages.uploadProgress': {
+    'en-US': 'Upload progress',
+    'zh-CN': '上传进度',
+  },
+  'ai.skillPackages.stage.validating': {
+    'en-US': 'Validating archive',
+    'zh-CN': '正在校验归档',
+  },
+  'ai.skillPackages.stage.uploading': {
+    'en-US': 'Uploading archive',
+    'zh-CN': '正在上传归档',
+  },
+  'ai.skillPackages.stage.packaging': {
+    'en-US': 'Building the archive',
+    'zh-CN': '正在服务端打包',
+  },
+  'ai.skillPackages.stage.publishing': {
+    'en-US': 'Publishing',
+    'zh-CN': '正在发布',
   },
   'ai.skillPackages.repoRequired': {
     'en-US': 'Repository URL is required',
