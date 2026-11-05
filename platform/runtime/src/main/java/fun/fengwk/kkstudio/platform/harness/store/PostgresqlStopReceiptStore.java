@@ -1,6 +1,12 @@
 package fun.fengwk.kkstudio.platform.harness.store;
 
+import org.springframework.jdbc.core.RowMapper;
+
+import fun.fengwk.kkstudio.harness.api.CancelledThreadInput;
 import fun.fengwk.kkstudio.harness.api.StoppedThreadReceipt;
+import fun.fengwk.kkstudio.harness.api.command.GoalCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
+import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
@@ -19,9 +25,20 @@ import java.util.UUID;
 /** Stop 回执聚合的 PostgreSQL 实现。 */
 final class PostgresqlStopReceiptStore implements StopReceiptStore {
 
+  private static final RowMapper<StopReceiptIdentity> STOP_RECEIPT_IDENTITY =
+      (resultSet, rowNumber) ->
+          new StopReceiptIdentity(
+              PostgresqlHarnessRows.uuid(resultSet, "thread_id"),
+              PostgresqlHarnessRows.uuid(resultSet, "stop_request_id"),
+              PostgresqlHarnessRows.nullableUuid(resultSet, "stopped_turn_end_entry_id"),
+              PostgresqlHarnessRows.uuid(resultSet, "root_stop_request_id"));
+
   private final PostgresqlHarnessTransaction tx;
 
   private record StopReceiptKey(UUID threadId, UUID stopRequestId) {}
+
+  private record StopReceiptIdentity(
+      UUID threadId, UUID stopRequestId, UUID stoppedTurnEndEntryId, UUID rootStopRequestId) {}
 
   PostgresqlStopReceiptStore(PostgresqlHarnessTransaction tx) {
     this.tx = tx;
@@ -57,6 +74,7 @@ final class PostgresqlStopReceiptStore implements StopReceiptStore {
       if (receipt.stoppedTurnEndEntryId() != null) {
         requireStoppedTurnEnd(receipt.threadId(), receipt.stoppedTurnEndEntryId());
       }
+      requireReceiptMatchesCancelledCommands(receipt);
     }
     if (!rootReceiptPresent) {
       throw new IllegalArgumentException(
@@ -66,18 +84,62 @@ final class PostgresqlStopReceiptStore implements StopReceiptStore {
       tx.updateJdbc(
           """
           insert into harness_thread_stop_receipt (
-              root_thread_id, thread_id, stop_request_id, root_stop_request_id,
-              stopped_turn_end_entry_id, cancelled_command_count, cancelled_inputs, created_at
-          ) values (?, ?, ?, ?, ?, ?, cast(? as jsonb), date_trunc('milliseconds', statement_timestamp()))
+              thread_id, stop_request_id, root_stop_request_id,
+              stopped_turn_end_entry_id, created_at
+          ) values (?, ?, ?, ?, date_trunc('milliseconds', statement_timestamp()))
           """,
-          rootThreadId,
           receipt.threadId(),
           receipt.stopRequestId(),
           rootStopRequestId,
-          receipt.stoppedTurnEndEntryId(),
-          receipt.cancelledCommandCount(),
-          PostgresqlHarnessRows.encodeCancelledInputs(receipt.cancelledInputs()));
+          receipt.stoppedTurnEndEntryId());
     }
+  }
+
+  /** 回执上的取消计数与输入必须来自 command 表的同一 Stop 事实；回执只持久化身份与停止边界。 */
+  private void requireReceiptMatchesCancelledCommands(StoppedThreadReceipt receipt) {
+    List<ThreadCommand> cancelled =
+        tx.commands().loadCancelledByRequest(receipt.threadId(), receipt.stopRequestId());
+    if (cancelled.size() != receipt.cancelledCommandCount()) {
+      throw new IllegalArgumentException(
+          "stop receipt cancelledCommandCount "
+              + receipt.cancelledCommandCount()
+              + " does not match "
+              + cancelled.size()
+              + " cancelled commands on thread "
+              + receipt.threadId());
+    }
+    List<CancelledThreadInput> derived = cancelledInputs(cancelled);
+    if (derived.size() != receipt.cancelledInputs().size()) {
+      throw new IllegalArgumentException(
+          "stop receipt cancelledInputs do not match cancelled commands on thread "
+              + receipt.threadId());
+    }
+    for (int index = 0; index < derived.size(); index++) {
+      CancelledThreadInput expected = receipt.cancelledInputs().get(index);
+      CancelledThreadInput actual = derived.get(index);
+      // payload 的权威形态是 command 行序列化后的形态；这里只校验身份字段，避免把未规范化的入参误判为不一致。
+      if (expected.sequence() != actual.sequence()
+          || !expected.idempotencyKey().equals(actual.idempotencyKey())
+          || expected.payload().type() != actual.payload().type()) {
+        throw new IllegalArgumentException(
+            "stop receipt cancelledInputs do not match cancelled commands on thread "
+                + receipt.threadId());
+      }
+    }
+  }
+
+  /** 按 sequence 升序还原被取消的人工输入（USER_MESSAGE 与 GOAL）；其它类型不退草稿。 */
+  private static List<CancelledThreadInput> cancelledInputs(List<ThreadCommand> cancelled) {
+    return cancelled.stream()
+        .filter(
+            command ->
+                command.payload() instanceof UserMessageCommandPayload
+                    || command.payload() instanceof GoalCommandPayload)
+        .map(
+            command ->
+                new CancelledThreadInput(
+                    command.sequence(), command.idempotencyKey(), command.payload()))
+        .toList();
   }
 
   /**
@@ -125,27 +187,34 @@ final class PostgresqlStopReceiptStore implements StopReceiptStore {
     Objects.requireNonNull(threadId, "threadId");
     Objects.requireNonNull(stopRequestId, "stopRequestId");
     return tx.queryOne(
-        """
-        select * from harness_thread_stop_receipt
-        where thread_id = ? and stop_request_id = ?
-        """,
-        PostgresqlHarnessRows.STOPPED_THREAD_RECEIPT,
-        threadId,
-        stopRequestId);
+            """
+            select thread_id, stop_request_id, stopped_turn_end_entry_id, root_stop_request_id
+            from harness_thread_stop_receipt
+            where thread_id = ? and stop_request_id = ?
+            """,
+            STOP_RECEIPT_IDENTITY,
+            threadId,
+            stopRequestId)
+        .map(this::toReceipt);
   }
 
   @Override
   public List<StoppedThreadReceipt> loadByThread(UUID threadId) {
     tx.checkOpen();
     Objects.requireNonNull(threadId, "threadId");
-    return tx.queryList(
-        """
-        select * from harness_thread_stop_receipt
-        where thread_id = ?
-        order by created_at, stop_request_id
-        """,
-        PostgresqlHarnessRows.STOPPED_THREAD_RECEIPT,
-        threadId);
+    return tx
+        .queryList(
+            """
+            select thread_id, stop_request_id, stopped_turn_end_entry_id, root_stop_request_id
+            from harness_thread_stop_receipt
+            where thread_id = ?
+            order by created_at, stop_request_id
+            """,
+            STOP_RECEIPT_IDENTITY,
+            threadId)
+        .stream()
+        .map(this::toReceipt)
+        .toList();
   }
 
   @Override
@@ -153,14 +222,43 @@ final class PostgresqlStopReceiptStore implements StopReceiptStore {
     tx.checkOpen();
     Objects.requireNonNull(rootThreadId, "rootThreadId");
     Objects.requireNonNull(rootStopRequestId, "rootStopRequestId");
-    return tx.queryList(
-        """
-        select * from harness_thread_stop_receipt
-        where root_thread_id = ? and root_stop_request_id = ?
-        order by thread_id
-        """,
-        PostgresqlHarnessRows.STOPPED_THREAD_RECEIPT,
-        rootThreadId,
-        rootStopRequestId);
+    return tx
+        .queryList(
+            """
+            with recursive stop_subtree(id) as (
+                select cast(? as uuid)
+                union all
+                select child.id
+                from harness_thread child
+                join stop_subtree parent on child.parent_thread_id = parent.id
+            )
+            select receipt.thread_id, receipt.stop_request_id,
+                   receipt.stopped_turn_end_entry_id, receipt.root_stop_request_id
+            from harness_thread_stop_receipt receipt
+            join harness_thread_stop_receipt root
+              on root.thread_id = ?
+             and root.stop_request_id = root.root_stop_request_id
+            where receipt.root_stop_request_id = ?
+              and receipt.thread_id in (select id from stop_subtree)
+            order by receipt.thread_id
+            """,
+            STOP_RECEIPT_IDENTITY,
+            rootThreadId,
+            rootThreadId,
+            rootStopRequestId)
+        .stream()
+        .map(this::toReceipt)
+        .toList();
+  }
+
+  private StoppedThreadReceipt toReceipt(StopReceiptIdentity identity) {
+    List<ThreadCommand> cancelled =
+        tx.commands().loadCancelledByRequest(identity.threadId(), identity.stopRequestId());
+    return new StoppedThreadReceipt(
+        identity.threadId(),
+        identity.stopRequestId(),
+        identity.stoppedTurnEndEntryId(),
+        cancelled.size(),
+        cancelledInputs(cancelled));
   }
 }

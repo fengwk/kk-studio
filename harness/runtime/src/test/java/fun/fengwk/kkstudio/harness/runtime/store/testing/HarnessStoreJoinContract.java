@@ -40,7 +40,6 @@ import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.Baseli
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.spi.store.UuidOrder;
 
-import java.sql.SQLException;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -1705,18 +1704,9 @@ public abstract class HarnessStoreJoinContract {
     assertTrue(store.transaction(tx -> tx.threads().find(threadId)).isEmpty());
   }
 
-  /** 内存校验与 PostgreSQL CHECK 都必须命中 kind/state 边界，不能由其它完整性错误让负例误通过。 */
+  /** kind/state 配对属于应用层不变量；数据库只校验枚举，负例必须在写库前被拒绝。 */
   private static void assertLocalExecutionRejectsRemoteAcknowledgement(
       IllegalArgumentException failure) {
-    for (Throwable cause = failure.getCause(); cause != null; cause = cause.getCause()) {
-      if (cause instanceof SQLException sql) {
-        assertEquals("23514", sql.getSQLState(), "must reject a CHECK violation");
-        assertTrue(
-            sql.getMessage().contains("\"ck_harness_execution_exit_kind_state\""),
-            "must reject the execution kind/state constraint");
-        return;
-      }
-    }
     assertEquals("only a remote execution can be remote-acknowledged", failure.getMessage());
   }
 

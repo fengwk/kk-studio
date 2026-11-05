@@ -8,16 +8,12 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.cfg.JsonNodeFeature;
 import tools.jackson.databind.json.JsonMapper;
-import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.common.json.StrictJson;
 import fun.fengwk.kkstudio.common.time.HarnessStoreTime;
-import fun.fengwk.kkstudio.harness.api.CancelledThreadInput;
-import fun.fengwk.kkstudio.harness.api.StoppedThreadReceipt;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
-import fun.fengwk.kkstudio.harness.api.command.ThreadCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommandType;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitFact;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitKind;
@@ -52,8 +48,6 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.UUID;
 
 /**
@@ -188,7 +182,7 @@ final class PostgresqlHarnessRows {
               JoinDelivery.valueOf(resultSet.getString("delivery")),
               nullableUuid(resultSet, "superseded_by_invocation_id"));
 
-  /** cancelled_inputs 是本模块自有持久协议：严格读取 + BigDecimal 读回自由 JSON，避免数值退化。 */
+  /** 本模块自有 JSON 列统一严格读取；{@code ObjectMapper} 同时服务 constraints 与自由 payload。 */
   private static final ObjectMapper MAPPER =
       JsonMapper.builder()
           .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
@@ -197,60 +191,6 @@ final class PostgresqlHarnessRows {
           .build();
 
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
-
-  static final RowMapper<StoppedThreadReceipt> STOPPED_THREAD_RECEIPT =
-      (resultSet, rowNumber) ->
-          new StoppedThreadReceipt(
-              uuid(resultSet, "thread_id"),
-              uuid(resultSet, "stop_request_id"),
-              nullableUuid(resultSet, "stopped_turn_end_entry_id"),
-              resultSet.getInt("cancelled_command_count"),
-              decodeCancelledInputs(resultSet.getString("cancelled_inputs")));
-
-  static List<CancelledThreadInput> decodeCancelledInputs(String json) {
-    if (json == null) {
-      return List.of();
-    }
-    try {
-      JsonNode root = MAPPER.readTree(json);
-      if (!(root instanceof ArrayNode arrayNode)) {
-        throw new IllegalArgumentException("cancelled_inputs must be a JSON array");
-      }
-      List<CancelledThreadInput> list = new ArrayList<>(arrayNode.size());
-      for (JsonNode item : arrayNode) {
-        long sequence = item.get("sequence").asLong();
-        UUID idempotencyKey = UUID.fromString(item.get("idempotencyKey").asText());
-        ThreadCommandType type = ThreadCommandType.valueOf(item.get("type").asText());
-        JsonNode payloadNode = item.get("payload");
-        String payloadJson = MAPPER.writeValueAsString(payloadNode);
-        ThreadCommandPayload payload = COMMAND_PAYLOADS.decode(type, payloadJson);
-        list.add(new CancelledThreadInput(sequence, idempotencyKey, payload));
-      }
-      return list;
-    } catch (JacksonException error) {
-      throw new IllegalArgumentException("malformed cancelled_inputs JSON", error);
-    }
-  }
-
-  static String encodeCancelledInputs(List<CancelledThreadInput> inputs) {
-    ArrayNode arrayNode = NODES.arrayNode();
-    for (CancelledThreadInput input : inputs) {
-      ObjectNode node = arrayNode.addObject();
-      node.put("sequence", input.sequence());
-      node.put("idempotencyKey", input.idempotencyKey().toString());
-      node.put("type", input.payload().type().name());
-      try {
-        node.set("payload", MAPPER.readTree(COMMAND_PAYLOADS.encode(input.payload())));
-      } catch (JacksonException error) {
-        throw new IllegalArgumentException("cannot encode cancelled input payload", error);
-      }
-    }
-    try {
-      return MAPPER.writeValueAsString(arrayNode);
-    } catch (JacksonException error) {
-      throw new IllegalArgumentException("cannot encode cancelled_inputs JSON", error);
-    }
-  }
 
   static final RowMapper<ToolInvocation> TOOL_INVOCATION =
       (resultSet, rowNumber) ->
@@ -340,11 +280,11 @@ final class PostgresqlHarnessRows {
     return value == null ? null : value.toInstant();
   }
 
-  private static UUID uuid(ResultSet resultSet, String column) throws SQLException {
+  static UUID uuid(ResultSet resultSet, String column) throws SQLException {
     return resultSet.getObject(column, UUID.class);
   }
 
-  private static UUID nullableUuid(ResultSet resultSet, String column) throws SQLException {
+  static UUID nullableUuid(ResultSet resultSet, String column) throws SQLException {
     return resultSet.getObject(column, UUID.class);
   }
 

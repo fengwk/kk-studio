@@ -199,9 +199,6 @@ create table agent_definition (
             and length(btrim(execution ->> 'driver')) > 0
             and jsonb_typeof(execution -> 'settings') = 'object', false) else false end
     ),
-    constraint ck_agent_definition_user_requires_execution check (
-        type = 'BUILTIN' or execution is not null
-    ),
     constraint ck_agent_definition_version_nonneg check (version >= 0)
 );
 
@@ -223,7 +220,7 @@ create table agent_model_group_cooldown (
     constraint fk_agent_model_group_cooldown_group foreign key (group_name)
         references agent_model (name) on update cascade on delete cascade,
     constraint fk_agent_model_group_cooldown_member foreign key (member_model_name)
-        references agent_model (name) on update cascade,
+        references agent_model (name) on update cascade on delete cascade,
     constraint ck_agent_model_group_cooldown_variant check (
         member_variant = btrim(member_variant) and char_length(member_variant) > 0
     ),
@@ -652,18 +649,16 @@ create table canvas_function_run (
     error text,
     created_at timestamptz(3) not null default current_timestamp,
     updated_at timestamptz(3) not null default current_timestamp,
-    unique (node_id, request_id),
-    check (status in ('READY', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED', 'UNKNOWN')),
-    check (status not in ('FAILED', 'UNKNOWN') or (error is not null and btrim(error) <> ''))
+    check (status in ('READY', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED', 'UNKNOWN'))
 );
 
-comment on table canvas_function_run is 'Function 节点当前/最后一次 Run：PK 为 node_id，request_id 全 UUID 且 (node_id, request_id) 唯一；调度与执行租约在 durable_work（CANVAS_RUN）';
+comment on table canvas_function_run is 'Function 节点当前/最后一次 Run：PK 为 node_id，request_id 是客户端幂等键；调度与执行租约在 durable_work（CANVAS_RUN）';
 comment on column canvas_function_run.node_id is 'Function 节点（一个节点同时至多一个 Run 行）';
 comment on column canvas_function_run.request_id is 'Run 请求 UUID（客户端生成，幂等键）';
 comment on column canvas_function_run.status is '生命周期：READY / RUNNING / SUCCEEDED / FAILED / CANCELLED / UNKNOWN';
 comment on column canvas_function_run.attempt is '成功 claim 次数；首次 claim 从 0 增加为 1';
 comment on column canvas_function_run.state_json is 'typed/versioned 冻结计划与 checkpoint（JSON object）';
-comment on column canvas_function_run.error is '公开错误信息（FAILED/UNKNOWN 时非空）';
+comment on column canvas_function_run.error is '公开错误信息；失败原因形状由应用维护';
 comment on column canvas_function_run.created_at is '当前 request 创建时间（毫秒精度）';
 comment on column canvas_function_run.updated_at is '最后更新时间（毫秒精度）';
 
@@ -678,8 +673,8 @@ create table canvas_function_resource_pin (
     primary key (canvas_id, node_id, request_id, role, resource_id),
     constraint fk_canvas_pin_node foreign key (canvas_id, node_id)
         references canvas_node (canvas_id, id) on delete restrict,
-    constraint fk_canvas_pin_run foreign key (node_id, request_id)
-        references canvas_function_run (node_id, request_id) on delete restrict,
+    constraint fk_canvas_pin_run foreign key (node_id)
+        references canvas_function_run (node_id) on delete restrict,
     constraint fk_canvas_pin_resource foreign key (canvas_id, resource_id)
         references canvas_resource (canvas_id, id) on delete restrict
 );
@@ -767,9 +762,6 @@ create table environment_connection (
     ),
     constraint ck_environment_connection_runtime_info check (
         runtime_info is null or jsonb_typeof(runtime_info) = 'object'
-    ),
-    constraint ck_environment_connection_ready_runtime_info check (
-        status <> 'READY' or (runtime_info is not null and jsonb_typeof(runtime_info) = 'object')
     ),
     constraint ck_environment_connection_skill_state check (
         jsonb_typeof(skill_state) = 'array'
@@ -926,11 +918,7 @@ create table harness_entry (
     ),
     constraint ck_harness_entry_provider_replay_state check (
         provider_replay_state is null
-        or (
-            jsonb_typeof(provider_replay_state) = 'object'
-            and entry_type = 'MESSAGE'
-            and payload->'message'->>'role' = 'ASSISTANT'
-        )
+        or jsonb_typeof(provider_replay_state) = 'object'
     )
 );
 
@@ -941,7 +929,7 @@ comment on column harness_entry.parent_entry_id is '父 Entry；ROOT 为 null，
 comment on column harness_entry.entry_type is 'Entry 类型（ROOT/TURN_START/MESSAGE/CUSTOM/MODEL_ATTEMPT_FAILURE/NATIVE_COMPACTION/CUSTOM_MESSAGE/ASSISTANT_ERROR/ASSISTANT_ABORTED/COMPACTION/TURN_END/NOTIFICATION/SETTINGS/FORK）';
 comment on column harness_entry.payload is '按 entry_type 编码的不可变 payload（JSON object）';
 comment on column harness_entry.created_at is 'Entry 创建时间（毫秒精度）';
-comment on column harness_entry.provider_replay_state is 'Provider native terminal replay 状态（JSON object，仅 ASSISTANT MESSAGE，可空）';
+comment on column harness_entry.provider_replay_state is 'Provider native terminal replay 状态（JSON object，可空）；适用状态与 payload 关联由应用维护';
 
 create unique index uk_harness_entry_single_root
     on harness_entry (session_id)
@@ -984,17 +972,8 @@ create table harness_thread (
     constraint ck_harness_thread_parent_not_self check (
         parent_thread_id is null or parent_thread_id <> id
     ),
-    -- 只有无父 Thread 是自身的执行根；YOLO 开关只属于执行根。
-    constraint ck_harness_thread_root check (
-        (parent_thread_id is null) = (root_thread_id = id)
-    ),
-    constraint ck_harness_thread_yolo_root_only check (
-        not yolo_enabled or parent_thread_id is null
-    ),
-    -- 用户只直接创建执行根；子代理总有其它来源。
     constraint ck_harness_thread_spawn_trigger check (
         spawn_trigger in ('USER', 'MODEL_TOOL', 'RUNTIME', 'CONTROLLER', 'PLUGIN')
-        and (spawn_trigger <> 'USER' or parent_thread_id is null)
     ),
     constraint ck_harness_thread_constraints check (
         jsonb_typeof(constraints) = 'object'
@@ -1105,9 +1084,6 @@ create table harness_thread_command (
     constraint ck_harness_thread_command_request_hash check (
         request_hash ~ '^[0-9a-f]{64}$'
     ),
-    constraint ck_harness_thread_command_terminal check (
-        applied_entry_id is null or cancelled_at is null
-    ),
     constraint ck_harness_thread_command_cancel_pair check (
         (stop_request_id is null and cancelled_at is null)
         or (stop_request_id is not null and cancelled_at is not null)
@@ -1187,12 +1163,7 @@ create table builtin_model_invocation (
     ),
     constraint ck_builtin_model_invocation_provider_replay_state check (
         provider_replay_state is null
-        or (
-            jsonb_typeof(provider_replay_state) = 'object'
-            and status = 'SUCCEEDED'
-            and result is not null
-            and result_entry_id is null
-        )
+        or jsonb_typeof(provider_replay_state) = 'object'
     )
 );
 
@@ -1213,7 +1184,7 @@ comment on column builtin_model_invocation.group_execution is 'Model Group 当�
 comment on column builtin_model_invocation.requested_at is '当前已确认 Provider 调用的发起时间；成功历史 metadata 记录实际请求时刻';
 comment on column builtin_model_invocation.created_at is '创建时间（毫秒精度）';
 comment on column builtin_model_invocation.updated_at is '最后更新时间（毫秒精度）';
-comment on column builtin_model_invocation.provider_replay_state is 'Provider native terminal replay 状态（JSON object，仅未物化结果的 SUCCEEDED 状态，可空）';
+comment on column builtin_model_invocation.provider_replay_state is 'Provider native terminal replay 状态（JSON object，可空）；适用状态与 result 关联由应用维护';
 
 create unique index uk_builtin_model_invocation_result
     on builtin_model_invocation (result_entry_id)
@@ -1248,12 +1219,6 @@ create table harness_tool_invocation (
     constraint fk_harness_tool_invocation_assistant foreign key (assistant_entry_id)
         references harness_entry (id),
     constraint uk_harness_tool_invocation_call_index unique (assistant_entry_id, call_index),
-    constraint ck_harness_tool_invocation_binding check (
-        binding is not null or status in ('FAILED', 'CANCELLED', 'UNKNOWN')
-    ),
-    constraint ck_harness_tool_invocation_waiting_request check (
-        status <> 'WAITING_REQUEST' or (binding is not null and approval is null and result is null and error is null)
-    ),
     constraint ck_harness_tool_invocation_status check (
         status in (
             'WAITING_APPROVAL',
@@ -1267,32 +1232,11 @@ create table harness_tool_invocation (
             'UNKNOWN'
         )
     ),
-    -- Human input is not a tool permission approval: WAITING_INPUT freezes a
-    -- binding and carries no result/error until the user answers.
-    constraint ck_harness_tool_waiting_input check (
-        status <> 'WAITING_INPUT'
-        or (binding is not null and result is null and error is null)
-    ),
-    -- Runtime-owned receipt until the ToolResult and its metadata enter Entry
-    -- history atomically. Questionnaire answers themselves remain in result.
-    constraint ck_harness_tool_input_receipt check (
-        input_receipt is null or (
-            status = 'SUCCEEDED' and result is not null
-            and jsonb_typeof(input_receipt) = 'object'
-            and coalesce(jsonb_typeof(input_receipt -> 'submissionId'), '') = 'string'
-            and coalesce(btrim(input_receipt ->> 'submissionId'), '') <> ''
-            and coalesce(jsonb_typeof(input_receipt -> 'actor'), '') = 'string'
-            and coalesce(btrim(input_receipt ->> 'actor'), '') <> ''
-            and coalesce(jsonb_typeof(input_receipt -> 'acceptedAt'), '') = 'string'
-            and coalesce(btrim(input_receipt ->> 'acceptedAt'), '') <> ''
-        )
-    ),
     constraint ck_harness_tool_invocation_terminal_facts check (
         result is null or error is null
     ),
-    constraint ck_harness_tool_invocation_effects_status check (
-        status = 'SUCCEEDED'
-        or effects = '{"customEntries": []}'::jsonb
+    constraint ck_harness_tool_input_receipt check (
+        input_receipt is null or jsonb_typeof(input_receipt) = 'object'
     )
 );
 
@@ -1308,11 +1252,11 @@ comment on column harness_tool_invocation.status is '生命周期状态（含 WA
 comment on column harness_tool_invocation.attempt is '已确认的 start 尝试次数（从 0 递增）';
 comment on column harness_tool_invocation.approval is '审批记录（JSON object，可空）';
 comment on column harness_tool_invocation.result is 'terminal 成功结果（JSON object，与 error 互斥）';
-comment on column harness_tool_invocation.effects is '副作用批（JSON object；非 SUCCEEDED 时必须为空批）';
+comment on column harness_tool_invocation.effects is '副作用批（JSON object）；空批与 status 的关联由应用维护';
 comment on column harness_tool_invocation.error is 'terminal 失败错误（JSON object，与 result 互斥）';
 comment on column harness_tool_invocation.created_at is '创建时间（毫秒精度）';
 comment on column harness_tool_invocation.updated_at is '最后更新时间（毫秒精度）';
-comment on column harness_tool_invocation.input_receipt is '交互回执（JSON object，可空）：仅在 SUCCEEDED 且 result 非空时存在，携带 submissionId/actor/acceptedAt，历史物化前由 runtime 持有';
+comment on column harness_tool_invocation.input_receipt is '交互回执（JSON object，可空）：submissionId/actor/acceptedAt 的存在与终态关联由应用维护';
 
 create index idx_harness_tool_invocation_thread_nonterminal
     on harness_tool_invocation (thread_id)
@@ -1406,11 +1350,6 @@ create table harness_thread_join (
         references harness_thread_join (invocation_id),
     constraint ck_harness_thread_join_delivery_kind check (
         delivery in ('NOTIFY_PARENT', 'SETTLE_OWNER_TURN', 'RECEIPT_ONLY')
-        and ((delivery = 'RECEIPT_ONLY') = (parent_thread_id is null))
-    ),
-    constraint ck_harness_thread_join_superseded check (
-        superseded_by_invocation_id is null
-        or (superseded_by_invocation_id <> invocation_id and terminal_entry_id is null)
     ),
     constraint ck_harness_thread_join_request_hash check (
         request_hash ~ '^[0-9a-f]{64}$'
@@ -1426,23 +1365,6 @@ create table harness_thread_join (
     ),
     constraint ck_harness_thread_join_reminder_turn check (
         reminder_turn >= 0
-    ),
-    constraint ck_harness_thread_join_final_answer check (
-        final_answer_entry_id is null or terminal_entry_id is not null
-    ),
-    constraint ck_harness_thread_join_delivery check (
-        case
-            when delivery = 'NOTIFY_PARENT' then (
-                (terminal_entry_id is null and delivery_command_sequence is null)
-                or (
-                    terminal_entry_id is not null
-                    and delivery_command_sequence is not null
-                    and delivery_command_sequence > 0
-                    and parent_thread_id is not null
-                )
-            )
-            else (delivery_command_sequence is null)
-        end
     )
 );
 
@@ -1470,37 +1392,29 @@ create index idx_harness_thread_join_child_pending
 comment on index idx_harness_thread_join_child_pending is '子 Thread 变为空闲或执行结束时检索等待匹配的 pending join';
 
 create table harness_thread_stop_receipt (
-    root_thread_id uuid not null,
     thread_id uuid not null,
     stop_request_id uuid not null,
     root_stop_request_id uuid not null,
     stopped_turn_end_entry_id uuid,
-    cancelled_command_count integer not null check (cancelled_command_count >= 0),
-    cancelled_inputs jsonb not null check (jsonb_typeof(cancelled_inputs) = 'array'),
     created_at timestamptz(3) not null,
     constraint pk_harness_thread_stop_receipt primary key (thread_id, stop_request_id),
-    constraint fk_harness_thread_stop_receipt_root_thread foreign key (root_thread_id)
-        references harness_thread (id),
     constraint fk_harness_thread_stop_receipt_thread foreign key (thread_id)
         references harness_thread (id),
     constraint fk_harness_thread_stop_receipt_turn_end foreign key (stopped_turn_end_entry_id)
         references harness_entry (id)
 );
 
-comment on table harness_thread_stop_receipt is 'Stop 回执：一次 Stop 操作在单个 Thread 上留下的持久回执；(thread_id, stop_request_id) 唯一；集合身份为 (root_thread_id, root_stop_request_id)';
-comment on column harness_thread_stop_receipt.root_thread_id is '本次 Stop 请求的目标根 Thread（集合身份的一部分，隔离不同树复用同一请求 UUID）';
+comment on table harness_thread_stop_receipt is 'Stop 回执：一次 Stop 在单个 Thread 上留下的持久身份与停止边界；集合由 root_stop_request_id 归组，被取消的输入从 command 表读取';
 comment on column harness_thread_stop_receipt.thread_id is '所属 Thread';
-comment on column harness_thread_stop_receipt.stop_request_id is '本次 Stop 在该 Thread 上的请求 ID';
-comment on column harness_thread_stop_receipt.root_stop_request_id is '本次 Stop 的根请求 ID';
+comment on column harness_thread_stop_receipt.stop_request_id is '本次 Stop 在该 Thread 上的请求 ID；根 Thread 行与 root_stop_request_id 相等';
+comment on column harness_thread_stop_receipt.root_stop_request_id is '本次 Stop 的根请求 ID；同一次 Stop 的全部回执共享它';
 comment on column harness_thread_stop_receipt.stopped_turn_end_entry_id is '本次 Stop 关闭活跃 turn 时产生的 TURN_END Entry（若有）';
-comment on column harness_thread_stop_receipt.cancelled_command_count is '本次 Stop 取消的 command 数量';
-comment on column harness_thread_stop_receipt.cancelled_inputs is '退回给用户的已取消输入列表（canonical JSON array of {sequence,idempotencyKey,type,payload}）';
 comment on column harness_thread_stop_receipt.created_at is '回执创建时间（毫秒精度）';
 
-create index idx_harness_thread_stop_receipt_root
-    on harness_thread_stop_receipt (root_thread_id, root_stop_request_id);
+create index idx_harness_thread_stop_receipt_root_request
+    on harness_thread_stop_receipt (root_stop_request_id, thread_id);
 
-comment on index idx_harness_thread_stop_receipt_root is '按 (root_thread_id, root_stop_request_id) 检索一次 Stop 产生的全部回执';
+comment on index idx_harness_thread_stop_receipt_root_request is '按 root_stop_request_id 检索一次 Stop 产生的全部回执';
 
 create table harness_execution_exit (
     execution_id uuid primary key,
@@ -1522,18 +1436,10 @@ create table harness_execution_exit (
         char_length(owner_lease_token) > 0 and owner_lease_token = btrim(owner_lease_token)
     ),
     constraint ck_harness_execution_exit_kind check (
-        (kind in ('DRIVER', 'TOOL') and parent_execution_id is null and environment_id is null)
-        or (kind = 'REMOTE' and parent_execution_id is not null and parent_execution_id <> execution_id and environment_id is not null)
+        kind in ('DRIVER', 'TOOL', 'REMOTE')
     ),
     constraint ck_harness_execution_exit_state check (
-        (state = 'UNCONFIRMED' and confirmed_at is null and abandoned_at is null)
-        or (state = 'ABANDONED' and confirmed_at is null and abandoned_at is not null)
-        or (state in ('STUDIO_EXITED', 'REMOTE_ACKNOWLEDGED', 'NOT_STARTED') and confirmed_at is not null)
-    ),
-    constraint ck_harness_execution_exit_kind_state check (
-        state in ('UNCONFIRMED', 'NOT_STARTED', 'ABANDONED')
-        or (kind in ('DRIVER', 'TOOL') and state = 'STUDIO_EXITED')
-        or (kind = 'REMOTE' and state = 'REMOTE_ACKNOWLEDGED')
+        state in ('UNCONFIRMED', 'STUDIO_EXITED', 'REMOTE_ACKNOWLEDGED', 'NOT_STARTED', 'ABANDONED')
     ),
     constraint ck_harness_execution_exit_time check (
         (confirmed_at is null or confirmed_at >= registered_at)
@@ -1567,6 +1473,9 @@ create index idx_harness_execution_exit_thread
 create index idx_harness_execution_exit_parent
     on harness_execution_exit (parent_execution_id)
     where parent_execution_id is not null;
+
+create index idx_harness_execution_exit_invocation
+    on harness_execution_exit (invocation_id, attempt);
 
 create index idx_harness_execution_exit_unconfirmed_remote
     on harness_execution_exit (environment_id)
@@ -1637,12 +1546,6 @@ create table project_issue (
     updated_at timestamptz(3) not null default current_timestamp,
     unique (project_id, number),
     check (
-        (state = 'BLOCKED' and blocked_from_state is not null
-            and blocked_from_state not in ('BLOCKED', 'DONE')
-            and block_reason is not null and btrim(block_reason) <> '')
-        or (state <> 'BLOCKED' and blocked_from_state is null and block_reason is null)
-    ),
-    check (
         (pause_reason is null and pause_detail is null)
         or (pause_reason is not null and pause_reason in ('USER', 'ERROR')
             and pause_detail is not null and btrim(pause_detail) <> '')
@@ -1655,8 +1558,8 @@ comment on column project_issue.project_id is '归属项目 UUID（RESTRICT）';
 comment on column project_issue.number is '项目内单调递增编号，>= 1';
 comment on column project_issue.state is
     'Workflow-scoped natural code; the DB only checks the charset, membership in project.workflow is application-validated';
-comment on column project_issue.blocked_from_state is 'BLOCKED 的恢复目标（不得是 BLOCKED/DONE，也不能在非 BLOCKED 状态保留）';
-comment on column project_issue.block_reason is 'BLOCKED 的原因（非空白，且非 BLOCKED 时必须为空）';
+comment on column project_issue.blocked_from_state is 'BLOCKED 的恢复目标；是否与 state 配对由应用维护';
+comment on column project_issue.block_reason is 'BLOCKED 的原因；是否与 state 配对由应用维护';
 comment on column project_issue.pause_reason is '控制暂停原因：USER / ERROR（与 pause_detail 成对）';
 comment on column project_issue.pause_detail is '控制暂停详情（非空白，且与 pause_reason 成对）';
 comment on column project_issue.next_run_ordinal is '下一个 Run ordinal 分配器，>= 1';
@@ -1705,13 +1608,12 @@ create table project_issue_stage_budget (
     constraint fk_project_issue_stage_budget_issue foreign key (issue_id)
         references project_issue (id) on delete restrict,
     constraint ck_project_issue_stage_budget_state check (state ~ '^[A-Z][A-Z0-9_]{0,63}$'),
-    constraint ck_project_issue_stage_budget_work_stage check (state not in ('INIT', 'BLOCKED', 'DONE')),
     constraint ck_project_issue_stage_budget_max_runs check (max_runs > 0),
     constraint ck_project_issue_stage_budget_after_ordinal check (budget_after_ordinal >= 0)
 );
 
 comment on table project_issue_stage_budget is 'Issue 工作阶段额度：每 Issue+state 一份，max_runs 为正，budget_after_ordinal 是重置高水位';
-comment on column project_issue_stage_budget.state is '工作阶段 state（保留态 INIT/BLOCKED/DONE 不允许建预算行）';
+comment on column project_issue_stage_budget.state is '工作阶段 state；哪些阶段可建预算行由应用维护';
 comment on column project_issue_stage_budget.max_runs is '本阶段允许的 Run 数上限（正整数）';
 comment on column project_issue_stage_budget.budget_after_ordinal is
     'Reset high-water mark; consumed = this Issue+state Runs with a greater ordinal, all statuses, never filtered by Agent';
@@ -1746,34 +1648,12 @@ create table project_issue_run (
         references project_issue_agent_thread (issue_id, thread_id) on delete restrict,
     constraint fk_project_issue_run_thread_session foreign key (session_id, thread_id)
         references harness_thread (session_id, id) on delete restrict,
-    constraint fk_project_issue_run_start_entry foreign key (session_id, start_entry_id)
-        references harness_entry (session_id, id) on delete restrict,
-    constraint fk_project_issue_run_end_entry foreign key (session_id, end_entry_id)
-        references harness_entry (session_id, id) on delete restrict,
-    constraint fk_project_issue_run_final_answer foreign key (session_id, final_answer_entry_id)
-        references harness_entry (session_id, id) on delete restrict,
     constraint ck_project_issue_run_status check (
         status in ('RUNNING', 'WAITING', 'COMPLETED', 'FAILED', 'CANCELLED')
     ),
     constraint ck_project_issue_run_next_state check (
-        next_state is null
-        or (next_state ~ '^[A-Z][A-Z0-9_]{0,63}$' and next_state <> state and next_state <> 'BLOCKED')
-    ),
-    constraint ck_project_issue_run_clock check (
-        (status = 'RUNNING' and active_since is not null and remaining_execution_ms > 0)
-        or (status = 'WAITING' and active_since is null and remaining_execution_ms > 0)
-        or (status in ('COMPLETED', 'FAILED', 'CANCELLED') and active_since is null)
-    ),
-    constraint ck_project_issue_run_terminal_shape check (
-        (status in ('RUNNING', 'WAITING') and ended_at is null and end_entry_id is null
-            and final_answer_entry_id is null and error is null)
-        or (status in ('COMPLETED', 'FAILED', 'CANCELLED')
-            and ended_at is not null and ended_at >= started_at and end_entry_id is not null)
-    ),
-    constraint ck_project_issue_run_error_reason check (
-        status <> 'FAILED' or (error is not null and btrim(error) <> '')
-    ),
-    constraint ck_project_issue_run_completed_error check (status <> 'COMPLETED' or error is null)
+        next_state is null or next_state ~ '^[A-Z][A-Z0-9_]{0,63}$'
+    )
 );
 
 comment on table project_issue_run is 'Issue 运行实体：冻结的 Issue/state/Session/Thread 坐标、剩余执行预算与终态收尾';
@@ -1784,19 +1664,19 @@ comment on column project_issue_run.state is '运行时冻结的工作阶段 sta
 comment on column project_issue_run.session_id is '冻结的 Agent 私有 Harness Session';
 comment on column project_issue_run.thread_id is '冻结的 Issue+Agent 工作 Thread（必须已绑定且属于该 Session）';
 comment on column project_issue_run.status is '状态：RUNNING, WAITING, COMPLETED, FAILED, CANCELLED';
-comment on column project_issue_run.start_entry_id is 'Run 起始 Entry（必须属于本 Session）';
-comment on column project_issue_run.end_entry_id is '终态冻结的结束 Entry（活跃 Run 必须为空）';
-comment on column project_issue_run.final_answer_entry_id is '终态最终答复 Entry（可空，必须属于本 Session）';
+comment on column project_issue_run.start_entry_id is 'Run 起始 Entry（应用保证属于本 Session）';
+comment on column project_issue_run.end_entry_id is '终态冻结的结束 Entry（应用保证终态非空、活跃为空）';
+comment on column project_issue_run.final_answer_entry_id is '终态最终答复 Entry（应用保证属于本 Session）';
 comment on column project_issue_run.next_state is
-    'Accepted handoff target; only a successful Run close commits it to Issue.state';
+    'Accepted handoff target; only a successful Run close commits it to Issue.state; 合法性由应用维护';
 comment on column project_issue_run.observed_activity_sequence is
     'Delivery cursor in the Issue activity stream, not an Entry boundary';
-comment on column project_issue_run.remaining_execution_ms is '剩余执行预算（非负）；活跃与等待 Run 必须为正';
-comment on column project_issue_run.active_since is 'RUNNING 活跃区间起点（WAITING 与终态必须为空）';
-comment on column project_issue_run.error is 'FAILED 的失败原因（非空白；结果未定时明确说明结果未知；COMPLETED 必须为空）';
+comment on column project_issue_run.remaining_execution_ms is '剩余执行预算（非负）；何时必须为正由应用维护';
+comment on column project_issue_run.active_since is 'RUNNING 活跃区间起点；与 status 的关联由应用维护';
+comment on column project_issue_run.error is 'FAILED 的失败原因；结果未定时由应用明确说明结果未知，COMPLETED 时的形状由应用维护';
 comment on column project_issue_run.version is '乐观锁行版本，>= 0';
 comment on column project_issue_run.started_at is 'Run 创建时间（毫秒精度）';
-comment on column project_issue_run.ended_at is '终态时间（毫秒精度，不得早于 started_at；活跃 Run 为空）';
+comment on column project_issue_run.ended_at is '终态时间（毫秒精度）；与 status 的关联由应用维护';
 
 create unique index uk_project_issue_run_active on project_issue_run (issue_id)
     where status in ('RUNNING', 'WAITING');
@@ -1830,14 +1710,6 @@ create table project_issue_activity (
         or (actor_type in ('HUMAN', 'SYSTEM') and actor_agent_name is null)
     ),
     check (kind in ('COMMENT', 'RUN', 'INSTRUCTION', 'SPEC_CHANGE', 'STATE_CHANGE', 'CONTROL')),
-    check (
-        (kind = 'RUN' and run_id is not null and actor_type = 'SYSTEM'
-            and body is null and data = '{}'::jsonb)
-        or (kind = 'COMMENT' and body is not null and btrim(body) <> '' and data = '{}'::jsonb)
-        or (kind = 'INSTRUCTION' and run_id is not null
-            and body is not null and btrim(body) <> '' and data = '{}'::jsonb)
-        or (kind in ('SPEC_CHANGE', 'STATE_CHANGE', 'CONTROL') and body is null)
-    ),
     check (body is null or octet_length(body) <= 1048576)
 );
 
@@ -1847,9 +1719,9 @@ comment on column project_issue_activity.sequence is 'Issue 内单调递增序�
 comment on column project_issue_activity.kind is '类型：COMMENT, RUN, INSTRUCTION, SPEC_CHANGE, STATE_CHANGE, CONTROL';
 comment on column project_issue_activity.actor_type is '操作者类型：HUMAN, AGENT, SYSTEM';
 comment on column project_issue_activity.actor_agent_name is '操作者 Agent 身份（AGENT 必填，HUMAN/SYSTEM 必须为空）';
-comment on column project_issue_activity.run_id is '相关 Run（必须属于同一 Issue；RUN/INSTRUCTION 必填）';
-comment on column project_issue_activity.body is '文本正文（最大 1 MiB；事件类必须为空）';
-comment on column project_issue_activity.data is '事件 typed data（JSON object；文本类必须为空对象）';
+comment on column project_issue_activity.run_id is '相关 Run（应用保证属于同一 Issue；kind 与 run_id 的关联由应用维护）';
+comment on column project_issue_activity.body is '文本正文（最大 1 MiB）；是否允许由 kind 决定，应用维护';
+comment on column project_issue_activity.data is '事件 typed data（JSON object）；是否为空对象由 kind 决定，应用维护';
 comment on column project_issue_activity.idempotency_key is '同 Issue 幂等键（非空白），重放同一动作不产生新记录';
 comment on column project_issue_activity.request_hash is '请求正文的 SHA-256（64 位小写十六进制）';
 
