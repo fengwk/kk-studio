@@ -9,6 +9,7 @@ import test from 'node:test'
 import { repositoryRoot } from '../../../lib/repo-root.mjs'
 import { ValidationError } from '../../../lib/provider-credentials.mjs'
 import { makeMockHttp } from '../../../tests/support/mock-http.mjs'
+import { cleanEnvironment, runBash, shellQuote } from '../../../tests/support/shell.mjs'
 import {
   TEST_MINIMAX_API_KEY,
   TEST_MINIMAX_BASE_URL,
@@ -22,7 +23,8 @@ const SYNC_TOOL_PATH = path.join(REPOSITORY_ROOT, 'scripts/dev/verify/reliabilit
 
 test('test intent: unset TEST_MINIMAX_* skips without any HTTP request', async () => {
   const { request, calls } = makeMockHttp({ rows: [] })
-  const lines = await syncMinimaxCredentials('http://backend', {}, request)
+  // An incomplete E2E credential must not be consumed by reliability.
+  const lines = await syncMinimaxCredentials('http://backend', { TEST_GOOGLE_API_KEY: 'unrelated' }, request)
 
   assert.deepEqual(lines, ['minimax: skip (no credential pair)'])
   assert.deepEqual(calls, [])
@@ -88,6 +90,39 @@ test('test intent: the stack resolves credential names through the shared list a
   assert.ok(stack.includes('--backend-url "$APP_URL"'))
   assert.ok(!stack.includes('TEST_MINIMAX_BASE_URL='))
   assert.ok(!stack.includes('TEST_MINIMAX_API_KEY='))
+})
+
+test('test intent: stack up exports unexported host credentials using the shared names', () => {
+  // Stub the stack lifecycle and inspect the actual sync invocation without Docker or HTTP.
+  const result = runBash(`
+    source ${shellQuote(STACK_SCRIPT)} help >/dev/null
+    stack_require_docker() { :; }
+    require_cmd() { :; }
+    assert_safe_config() { :; }
+    compose() { :; }
+    wait_app() { :; }
+    wait_environment() { :; }
+    node() {
+      if [ "\${2-}" = --list-env ]; then
+        command node "$@"
+      else
+        [ "\${2-}" = --backend-url ] && [ "\${3-}" = "$APP_URL" ] || return 1
+        [ "$TEST_MINIMAX_BASE_URL" = fixture-url ] && [ "$TEST_MINIMAX_API_KEY" = fixture-key ] || return 2
+        export -p | command grep -q ' TEST_MINIMAX_BASE_URL=' || return 3
+        export -p | command grep -q ' TEST_MINIMAX_API_KEY=' || return 4
+        printf 'sync-called\\n'
+      fi
+    }
+    unset TEST_MINIMAX_BASE_URL TEST_MINIMAX_API_KEY
+    TEST_MINIMAX_BASE_URL=fixture-url
+    TEST_MINIMAX_API_KEY=fixture-key
+    up_stack
+  `, { env: cleanEnvironment() })
+
+  assert.equal(result.status, 0, result.stderr)
+  assert.match(result.stdout, /sync-called/)
+  assert.ok(!result.stdout.includes('fixture-key'))
+  assert.ok(!result.stderr.includes('fixture-key'))
 })
 
 test('test intent: the sync tool reuses the shared inventory and declares no credential list', () => {

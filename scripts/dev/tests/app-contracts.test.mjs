@@ -12,6 +12,14 @@ const APP_SCRIPT = path.join(REPOSITORY_ROOT, 'scripts/dev/app.sh')
 const ROOT_LIB = path.join(REPOSITORY_ROOT, 'scripts/dev/lib/repo-root.sh')
 const MATRIX_RUNNER = path.join(REPOSITORY_ROOT, 'scripts/dev/verify/e2e/run-matrix.mjs')
 
+test('test intent: app usage points to the shared credential inventory', () => {
+  // The help path stays offline and does not maintain another variable list.
+  const result = runBash(shellQuote(APP_SCRIPT), { env: cleanEnvironment() })
+  assert.equal(result.status, 1, result.stderr)
+  assert.match(result.stdout, /sync-provider-credentials\.mjs --list-env/)
+  assert.doesNotMatch(result.stdout, /TEST_(?:GOOGLE|OPENAI_RESPONSES|ANTHROPIC|OPENAI)_(?:BASE_URL|API_KEY)/)
+})
+
 // Deleted classes must not survive a dev-requested backend rebuild.
 
 test('test intent: launchers and documentation follow the reactor version', () => {

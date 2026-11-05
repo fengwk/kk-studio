@@ -70,6 +70,7 @@ Env:
   # Real provider credential pairs are declared once by the synchronizer:
   #   node scripts/dev/verify/e2e/sync-provider-credentials.mjs --list-env
   # --real requires every printed name to be set non-empty before startup.
+  # Free modes never synchronize host credentials.
   JAVA_HOME_21=...
   E2E_MAVEN_OFFLINE=true  # opt into Maven -o; default is online
   E2E_WORK_DIR=...        # default: $REPO_ROOT/runtime/e2e
