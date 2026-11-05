@@ -472,6 +472,21 @@ class SkillCatalogServiceTest {
   }
 
   @Test
+  void uploadRejectsNonCanonicalUploadId() {
+    DomainException notUuid =
+        assertThrows(DomainException.class, () -> service.cancelUpload("not-a-uuid"));
+    assertEquals("stagingUploadId must be a canonical UUID", notUuid.getMessage());
+
+    String uppercase = "00000000-0000-0000-0000-00000000000A";
+    DomainException upper =
+        assertThrows(DomainException.class, () -> service.cancelUpload(uppercase));
+    assertEquals("stagingUploadId must be a canonical UUID", upper.getMessage());
+
+    DomainException nullId = assertThrows(DomainException.class, () -> service.cancelUpload(null));
+    assertEquals("stagingUploadId must be a canonical UUID", nullId.getMessage());
+  }
+
+  @Test
   void listEnvironmentSyncProjectsInstalledDigest() {
     SkillPackage current = uploadPackageWith(UUID.randomUUID(), ARTIFACT_SHA);
     when(packageRepository.getPackage(PACKAGE)).thenReturn(current);

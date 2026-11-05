@@ -253,6 +253,13 @@ class CanvasFunctionRunStateCodecTest {
     String invalidSubmitState = root.toString();
     assertThrows(IllegalArgumentException.class, () -> codec.decode(invalidSubmitState));
 
+    root = (ObjectNode) mapper.readTree(codec.encode(run));
+    ((ObjectNode) root.get("plan")).put("requestId", "00000000-0000-0000-0000-00000000000A");
+    String uppercaseRequestId = root.toString();
+    IllegalArgumentException uppercaseError =
+        assertThrows(IllegalArgumentException.class, () -> codec.decode(uppercaseRequestId));
+    assertTrue(uppercaseError.getMessage().startsWith("requestId must be a canonical UUID:"));
+
     String duplicate = codec.encode(run).replaceFirst("\\{\"plan\":", "{\"stage\":\"X\",\"plan\":");
     assertThrows(IllegalArgumentException.class, () -> codec.decode(duplicate));
     assertThrows(IllegalArgumentException.class, () -> codec.stage("{"));

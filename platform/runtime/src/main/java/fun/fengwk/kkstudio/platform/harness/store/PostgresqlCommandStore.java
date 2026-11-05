@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.platform.harness.store;
 
+import fun.fengwk.kkstudio.common.time.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.api.command.NotificationCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommandState;
@@ -119,8 +120,8 @@ final class PostgresqlCommandStore implements CommandStore {
     Set<CommandSequenceKey> sequences = new HashSet<>();
     Set<CommandIdempotencyKey> keys = new HashSet<>();
     for (ThreadCommand command : copied) {
-      PostgresqlHarnessRows.requireMillisecondPrecision(command.cancelledAt());
-      PostgresqlHarnessRows.requireMillisecondPrecision(command.createdAt());
+      HarnessStoreTime.requireMillisecondPrecision(command.cancelledAt());
+      HarnessStoreTime.requireMillisecondPrecision(command.createdAt());
       if (!sequences.add(new CommandSequenceKey(command.threadId(), command.sequence()))) {
         throw new IllegalArgumentException(
             "duplicate command sequence "
@@ -177,8 +178,8 @@ final class PostgresqlCommandStore implements CommandStore {
             .sorted(PostgresqlHarnessTransaction.COMMAND_LOCK_ORDER)
             .toList();
     for (ThreadCommand command : copied) {
-      PostgresqlHarnessRows.requireMillisecondPrecision(command.cancelledAt());
-      PostgresqlHarnessRows.requireMillisecondPrecision(command.createdAt());
+      HarnessStoreTime.requireMillisecondPrecision(command.cancelledAt());
+      HarnessStoreTime.requireMillisecondPrecision(command.createdAt());
       ThreadCommand stored =
           tx.commands()
               .find(command.threadId(), command.sequence())

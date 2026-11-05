@@ -732,10 +732,13 @@ null 表示强制直连；`noProxyHosts` 为逗号分隔绕过规则，默认 `l
 | `kk-studio.storage.media` | ffprobe/ffmpeg 可执行文件与临时目录 |
 | `kk-studio.plugins` | 认证尝试有效期、refresh 与远端媒体预算 |
 | `kk-studio.cluster` | 节点注册与节点间内部认证 |
-| `kk-studio.harness.environment-gateway` | Daemon 帧、出站队列和发送预算，由 Web 拥有 |
 
 应用模块各自拥有部署参数：`kk-studio.project.reconcile` 属于 [Project](project.md)，`kk-studio.canvas.function.runtime`
-属于 [Canvas](canvas.md#部署参数)，`kk-studio.harness.ide-gateway` 属于 Web 的同源 IDE 网关。
+属于 [Canvas](canvas.md#部署参数)。
+
+网关与传输层参数由核心常量持有，不设外部配置前缀：
+- Daemon 连接与控制面：入站二进制帧上限 1 MiB（[`EnvironmentDaemonAdmissionController`](../../web/src/main/java/fun/fengwk/kkstudio/web/environment/EnvironmentDaemonAdmissionController.java)）；HTTP/2 流与 session 初始窗口（1 MiB / 4 MiB）及控制流超时（[`DaemonHttp2ClientSession`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/transport/DaemonHttp2ClientSession.java)）；出站帧队列与背压（256 帧 / 16 MiB / 10s 写入超时，[`DaemonControlStream`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/transport/DaemonControlStream.java)）。
+- 同源 IDE 网关：路由与端点（`ROUTE_PREFIX = "/environment-ide/"`、`BOOTSTRAP_ENDPOINT = "/__ide/bootstrap"`、`SESSION_ENDPOINT = "/__ide/session"`）、Cookie 与会话有效期（`SESSION_COOKIE_NAME = "kk_ide_session"`、`12h`）以及请求超时与头上限（`DEFAULT_REQUEST_TIMEOUT = 5m`、`DEFAULT_CONNECT_TIMEOUT = 10s`、`MAX_HEADER_BYTES = 64 KiB`），见 [`IdeGatewayConstants`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/gateway/IdeGatewayConstants.java) 与 [IDE](ide.md)。
 
 默认值和完整字段以对应配置类及
 [`SystemSettings`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/settings/SystemSettings.java)

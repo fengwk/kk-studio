@@ -13,14 +13,12 @@ import java.time.Duration;
 public record ProcessorLeaseConfig(Duration leaseDuration, Duration heartbeatInterval) {
 
   public ProcessorLeaseConfig {
-    leaseDuration = requireMillisPositive(leaseDuration, "leaseDuration");
-    heartbeatInterval = requireMillisPositive(heartbeatInterval, "heartbeatInterval");
+    leaseDuration =
+        HarnessStoreTime.requireWholeMillisecondDuration(leaseDuration, "leaseDuration");
+    heartbeatInterval =
+        HarnessStoreTime.requireWholeMillisecondDuration(heartbeatInterval, "heartbeatInterval");
     if (heartbeatInterval.compareTo(leaseDuration) >= 0) {
       throw new IllegalArgumentException("heartbeatInterval must be less than leaseDuration");
     }
-  }
-
-  private static Duration requireMillisPositive(Duration value, String name) {
-    return HarnessStoreTime.requireWholeMillisecondDuration(value, name);
   }
 }

@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.platform.pluginhost.resource;
 
 import lombok.extern.slf4j.Slf4j;
 
+import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialUnavailableException;
 import fun.fengwk.kkstudio.platform.plugin.resource.PluginMediaFamily;
@@ -314,7 +315,7 @@ public final class StoragePluginResourceGateway implements PluginResourceGateway
       throw new PluginResourceUnavailableException("staging upload has no id");
     }
     try {
-      return UUID.fromString(upload.getId());
+      return Uuids.parseCanonical(upload.getId(), "uploadId");
     } catch (IllegalArgumentException error) {
       throw new PluginResourceUnavailableException(
           "staging upload id is not a canonical uuid", error);

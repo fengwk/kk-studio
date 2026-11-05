@@ -73,6 +73,15 @@ class CanvasFunctionCommandHashTest {
                         "{\"source\":{\"type\":\"resource\",\"nodeId\":\"00000000-0000-0000-0000-0000000000aa\","
                             + "\"index\":1.5}}"))
                 .references());
+    assertThrows(
+        CanvasValidationException.class,
+        () ->
+            new CanvasFunction(
+                    "video.generate",
+                    CanvasJson.parseObject(
+                        "{\"source\":{\"type\":\"resource\",\"nodeId\":\"00000000-0000-0000-0000-0000000000AA\","
+                            + "\"index\":0}}"))
+                .references());
   }
 
   /** 请求指纹必须稳定（同一批重试沿用原请求）且区分不同批。 */

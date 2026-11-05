@@ -25,6 +25,7 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionSubmitState;
 import fun.fengwk.kkstudio.canvas.function.CanvasJson;
 import fun.fengwk.kkstudio.canvas.function.CanvasJson.JsonObject;
 import fun.fengwk.kkstudio.canvas.function.CanvasResourceKind;
+import fun.fengwk.kkstudio.common.id.Uuids;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -421,11 +422,7 @@ public final class CanvasFunctionRunStateCodec {
     if (!value.isString()) {
       throw invalid(field + " must be a canonical UUID string");
     }
-    try {
-      return UUID.fromString(value.stringValue());
-    } catch (IllegalArgumentException exception) {
-      throw invalid(field + " must be a canonical UUID string", exception);
-    }
+    return Uuids.parseCanonical(value.stringValue(), field);
   }
 
   private static long nonnegativeLong(ObjectNode node, String field) {

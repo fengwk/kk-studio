@@ -185,7 +185,7 @@ public final class ComfyuiCanvasFunctionAdapter implements CanvasFunctionAdapter
     }
     if (state.outputs() == null) {
       List<H3OutputDescriptor> outputs =
-          awaitOutputs(context, requireText(state.promptId(), "promptId"));
+          awaitOutputs(context, ComfyuiTexts.requireText(state.promptId(), "promptId"));
       state = state.withOutputs(outputs);
       checkpoint(context, COMFY_READY, state);
       stage = COMFY_READY;
@@ -238,7 +238,8 @@ public final class ComfyuiCanvasFunctionAdapter implements CanvasFunctionAdapter
     if (state.harnessThreadId() == null) {
       checkpoint(context, PROMPT_SUBMITTING, state);
       // 提交前的确定性输入校验与准备：失败必须保持 FAILED，绝不进入 UNKNOWN 保守窗口。
-      String promptAgentName = requireText(settings.promptAgentName(), "promptAgentName");
+      String promptAgentName =
+          ComfyuiTexts.requireText(settings.promptAgentName(), "promptAgentName");
       String systemPrompt = promptBuilder.systemPrompt();
       List<PluginPromptContent> contents = prepareContents(context, run, manifest);
       UUID taskId;
@@ -300,7 +301,7 @@ public final class ComfyuiCanvasFunctionAdapter implements CanvasFunctionAdapter
       return H3WorkflowBuilder.build(
           graph,
           selector.nodeId(),
-          requireText(state.enhancedPrompt(), "enhancedPrompt"),
+          ComfyuiTexts.requireText(state.enhancedPrompt(), "enhancedPrompt"),
           extractText(run.args(), "ratio", "16:9"),
           extractInt(run.args(), "duration", 5),
           requireNonnegative(state.seed(), "seed"),
@@ -559,13 +560,6 @@ public final class ComfyuiCanvasFunctionAdapter implements CanvasFunctionAdapter
   private static long requireNonnegative(Long value, String field) {
     if (value == null || value < 0L) {
       throw new IllegalArgumentException(field + " must be nonnegative");
-    }
-    return value;
-  }
-
-  private static String requireText(String value, String field) {
-    if (value == null || value.isBlank()) {
-      throw new IllegalArgumentException(field + " must not be blank");
     }
     return value;
   }

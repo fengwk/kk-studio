@@ -45,6 +45,37 @@ class ModelInvocationTest {
         failedAt.plusSeconds(1));
   }
 
+  /** 审计时间可选的 requestedAt 与必填时间均采用毫秒精度。 */
+  @Test
+  void failureTimestampsRequireMillisecondPrecision() {
+    assertNull(failureWithTimes(null, CREATED, UPDATED).requestedAt());
+    for (int i = 0; i < 3; i++) {
+      Instant[] times = {CREATED, CREATED, UPDATED};
+      times[i] = times[i].plusNanos(1);
+      String field = List.of("requestedAt", "failedAt", "retryAt").get(i);
+      IllegalArgumentException error =
+          assertThrows(
+              IllegalArgumentException.class, () -> failureWithTimes(times[0], times[1], times[2]));
+      assertEquals(field + " must use millisecond precision", error.getMessage());
+    }
+    assertThrows(NullPointerException.class, () -> failureWithTimes(null, null, UPDATED));
+    assertThrows(NullPointerException.class, () -> failureWithTimes(null, CREATED, null));
+  }
+
+  private static ModelAttemptFailure failureWithTimes(
+      Instant requestedAt, Instant failedAt, Instant retryAt) {
+    return new ModelAttemptFailure(
+        1,
+        1,
+        "partial",
+        "",
+        ModelSelection.model("model", "v1"),
+        requestedAt,
+        new ModelInvocationError(ProviderErrorKind.TRANSIENT, "failure"),
+        failedAt,
+        retryAt);
+  }
+
   @Test
   void acceptsValidStates() {
     ModelInvocation ready = invocation(ModelInvocationStatus.READY, 0, null, null, null, null);

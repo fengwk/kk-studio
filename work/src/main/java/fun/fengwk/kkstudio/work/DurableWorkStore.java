@@ -177,7 +177,8 @@ public final class DurableWorkStore {
    */
   public DurableWork request(UUID targetId, Duration delay, UUID requiredEnvironmentId) {
     Objects.requireNonNull(targetId, "targetId");
-    Duration delayValue = requireNonNegativeWholeMillis(delay, "delay");
+    Duration delayValue =
+        HarnessStoreTime.requireNonNegativeWholeMillisecondDuration(delay, "delay");
     return jdbc.inTransaction(
         () -> {
           while (true) {
@@ -247,7 +248,8 @@ public final class DurableWorkStore {
   public Optional<WorkClaim> claimNext(
       UUID leaseToken, Duration leaseDuration, UUID nodeInstanceId) {
     UUID token = WorkState.requireLeaseToken(leaseToken);
-    Duration lease = requirePositiveWholeMillis(leaseDuration, "leaseDuration");
+    Duration lease =
+        HarnessStoreTime.requireWholeMillisecondDuration(leaseDuration, "leaseDuration");
     return jdbc.inTransaction(
         () -> {
           Optional<Row> candidate =
@@ -274,7 +276,8 @@ public final class DurableWorkStore {
    */
   public boolean renew(WorkClaim claim, Duration leaseDuration) {
     Objects.requireNonNull(claim, "claim");
-    Duration lease = requirePositiveWholeMillis(leaseDuration, "leaseDuration");
+    Duration lease =
+        HarnessStoreTime.requireWholeMillisecondDuration(leaseDuration, "leaseDuration");
     return jdbc.inTransaction(
         () -> {
           Row row = lockRow(claim.targetId());
@@ -324,7 +327,8 @@ public final class DurableWorkStore {
    */
   public void reschedule(WorkClaim claim, Duration delay) {
     Objects.requireNonNull(claim, "claim");
-    Duration delayValue = requireNonNegativeWholeMillis(delay, "delay");
+    Duration delayValue =
+        HarnessStoreTime.requireNonNegativeWholeMillisecondDuration(delay, "delay");
     jdbc.inTransaction(
         () -> {
           Row row = lockRow(claim.targetId());
@@ -457,14 +461,6 @@ public final class DurableWorkStore {
     if (!jdbc.transactionActive()) {
       throw new IllegalStateException("work row locking requires an active transaction");
     }
-  }
-
-  private static Duration requirePositiveWholeMillis(Duration duration, String name) {
-    return HarnessStoreTime.requireWholeMillisecondDuration(duration, name);
-  }
-
-  private static Duration requireNonNegativeWholeMillis(Duration duration, String name) {
-    return HarnessStoreTime.requireNonNegativeWholeMillisecondDuration(duration, name);
   }
 
   private static Instant instant(Timestamp value) {

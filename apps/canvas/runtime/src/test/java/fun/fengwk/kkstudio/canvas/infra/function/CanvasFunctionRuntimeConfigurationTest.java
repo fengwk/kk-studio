@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.canvas.infra.function;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -14,6 +15,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import io.micrometer.context.ContextSnapshotFactory;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -33,6 +35,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -55,6 +58,78 @@ class CanvasFunctionRuntimeConfigurationTest {
     drain.shutdownNow();
     workerExecutor.shutdownNow();
     poll.shutdownNow();
+  }
+
+  /** 心跳调度器独立创建时也使用配置前缀拒绝无效并发数。 */
+  @Test
+  void heartbeatSchedulerValidatesConcurrencyIndependently() {
+    CanvasFunctionRuntimeConfiguration configuration = new CanvasFunctionRuntimeConfiguration();
+    CanvasFunctionRuntimeProperties properties = new CanvasFunctionRuntimeProperties();
+    properties.setWorkerConcurrency(0);
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> configuration.canvasFunctionHeartbeatScheduler(properties));
+    assertEquals(
+        "kk-studio.canvas.function.runtime.worker-concurrency must be at least 1",
+        error.getMessage());
+
+    properties.setWorkerConcurrency(3);
+    ScheduledExecutorService scheduler = configuration.canvasFunctionHeartbeatScheduler(properties);
+    try {
+      assertEquals(3, ((ScheduledThreadPoolExecutor) scheduler).getCorePoolSize());
+    } finally {
+      scheduler.shutdownNow();
+    }
+  }
+
+  /** 部署拓扑与时间边界在创建 executor/dispatcher 时拒绝非法值。 */
+  @Test
+  void rejectsInvalidDeploymentSettings() {
+    CanvasFunctionRuntimeProperties properties = properties(1_000);
+    properties.setWorkerConcurrency(0);
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new CanvasFunctionRuntimeConfiguration()
+                .canvasFunctionWorkerExecutor(
+                    properties, ContextSnapshotFactory.builder().build()));
+
+    properties.setWorkerConcurrency(1);
+    CanvasFunctionWorkStore store = mock(CanvasFunctionWorkStore.class);
+    CanvasFunctionWorker worker = mock(CanvasFunctionWorker.class);
+    properties.setMaxDispatchTasks(2);
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> dispatcher(store, worker, workerExecutor, properties));
+    properties.setMaxDispatchTasks(0);
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> dispatcher(store, worker, workerExecutor, properties));
+    properties.setMaxDispatchTasks(1);
+    properties.setLeaseDurationMillis(0);
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> dispatcher(store, worker, workerExecutor, properties));
+    properties.setLeaseDurationMillis(30_000);
+    properties.setHeartbeatIntervalMillis(0);
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> dispatcher(store, worker, workerExecutor, properties));
+    properties.setHeartbeatIntervalMillis(30_000);
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> dispatcher(store, worker, workerExecutor, properties));
+    properties.setHeartbeatIntervalMillis(10_000);
+    properties.setRejectionDelayMillis(0);
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> dispatcher(store, worker, workerExecutor, properties));
+    properties.setRejectionDelayMillis(1_000);
+    properties.setPollIntervalMillis(0);
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> dispatcher(store, worker, workerExecutor, properties));
   }
 
   /** start 必须立即 wake；worker 占满唯一容量时不能继续 claim，释放后由 worker finally 再 wake。 */

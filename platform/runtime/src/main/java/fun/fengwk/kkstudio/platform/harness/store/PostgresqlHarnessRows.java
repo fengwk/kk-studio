@@ -252,11 +252,9 @@ final class PostgresqlHarnessRows {
   private PostgresqlHarnessRows() {}
 
   static Timestamp timestamp(Instant instant) {
-    return instant == null ? null : Timestamp.from(requireMillisecondPrecision(instant));
-  }
-
-  static Instant requireMillisecondPrecision(Instant instant) {
-    return HarnessStoreTime.requireMillisecondPrecision(instant);
+    return instant == null
+        ? null
+        : Timestamp.from(HarnessStoreTime.requireMillisecondPrecision(instant));
   }
 
   private static EnvironmentId nullableEnvironmentId(Object value) {

@@ -32,6 +32,23 @@ class HarnessStoreTimeTest {
         () -> HarnessStoreTime.requireMillisecondPrecision(canonical.plusNanos(1)));
   }
 
+  /** 命名字段校验保留非空要求与具体字段错误信息。 */
+  @Test
+  void namedPrecisionGuardRequiresNonNullAndMillisecondPrecision() {
+    Instant canonical = Instant.parse("2026-08-05T00:00:00.123Z");
+
+    assertEquals(canonical, HarnessStoreTime.requireMillisecondPrecision(canonical, "timestamp"));
+    assertThrows(
+        NullPointerException.class,
+        () -> HarnessStoreTime.requireMillisecondPrecision(null, "timestamp"));
+    IllegalArgumentException exception =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                HarnessStoreTime.requireMillisecondPrecision(canonical.plusNanos(1), "timestamp"));
+    assertEquals("timestamp must use millisecond precision", exception.getMessage());
+  }
+
   @Test
   void durableDurationsMustBePositiveWholeMilliseconds() {
     Duration canonical = Duration.ofMillis(1500);
@@ -44,6 +61,11 @@ class HarnessStoreTimeTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> HarnessStoreTime.requireWholeMillisecondDuration(Duration.ZERO, "duration"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            HarnessStoreTime.requireWholeMillisecondDuration(
+                Duration.ofNanos(500_000), "duration"));
     assertThrows(
         IllegalArgumentException.class,
         () ->

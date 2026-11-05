@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.plugin.opencli;
 
+import fun.fengwk.kkstudio.common.id.Uuids;
+
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -54,13 +56,7 @@ final class OpenCliAdapterState {
         throw new IllegalArgumentException(
             "adapterState.uploads contains an invalid resourceId/resourcePath");
       }
-      UUID id;
-      try {
-        id = UUID.fromString(idText);
-      } catch (IllegalArgumentException exception) {
-        throw new IllegalArgumentException(
-            "adapterState.uploads resourceId must be a canonical UUID string", exception);
-      }
+      UUID id = Uuids.parseCanonical(idText, "adapterState.uploads resourceId");
       uploads.add(new UploadedInput(id, path));
     }
     return List.copyOf(uploads);

@@ -164,6 +164,8 @@ class CanvasFunctionArgsSchemaTest {
           "{\"source\":{\"type\":\"image\",\"nodeId\":"
               + "\"00000000-0000-0000-0000-000000000001\",\"index\":0}}",
           "{\"source\":{\"type\":\"resource\",\"nodeId\":\"nope\",\"index\":0}}",
+          "{\"source\":{\"type\":\"resource\",\"nodeId\":"
+              + "\"00000000-0000-0000-0000-00000000000A\",\"index\":0}}",
           "{\"source\":{\"type\":\"resource\","
               + "\"nodeId\":\"00000000-0000-0000-0000-000000000001\",\"index\":-1}}",
           "{\"source\":{\"type\":\"resource\","

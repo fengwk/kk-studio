@@ -29,12 +29,12 @@ public record ToolProcessorConfig(
   public ToolProcessorConfig {
     leaseConfig = Objects.requireNonNull(leaseConfig, "leaseConfig");
     retryPolicyProvider = Objects.requireNonNull(retryPolicyProvider, "retryPolicyProvider");
-    preflightFailureDelay = requireMillisPositive(preflightFailureDelay, "preflightFailureDelay");
-    admitFailureDelay = requireMillisPositive(admitFailureDelay, "admitFailureDelay");
-    reattachWindow = requireMillisPositive(reattachWindow, "reattachWindow");
-  }
-
-  private static Duration requireMillisPositive(Duration value, String name) {
-    return HarnessStoreTime.requireWholeMillisecondDuration(value, name);
+    preflightFailureDelay =
+        HarnessStoreTime.requireWholeMillisecondDuration(
+            preflightFailureDelay, "preflightFailureDelay");
+    admitFailureDelay =
+        HarnessStoreTime.requireWholeMillisecondDuration(admitFailureDelay, "admitFailureDelay");
+    reattachWindow =
+        HarnessStoreTime.requireWholeMillisecondDuration(reattachWindow, "reattachWindow");
   }
 }

@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.canvas.infra.function;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import io.micrometer.context.ContextSnapshotFactory;
 import org.junit.jupiter.api.Test;
@@ -17,7 +16,6 @@ class CanvasFunctionRuntimePropertiesTest {
   @Test
   void defaultsMatchTheDurableWorkerDeploymentContract() {
     CanvasFunctionRuntimeProperties properties = new CanvasFunctionRuntimeProperties();
-    properties.validate();
     assertEquals(2, properties.getWorkerConcurrency());
     assertEquals(2, properties.getMaxDispatchTasks());
     assertEquals(30_000, properties.getLeaseDurationMillis());
@@ -45,20 +43,5 @@ class CanvasFunctionRuntimePropertiesTest {
     } finally {
       executor.shutdownNow();
     }
-  }
-
-  @Test
-  void rejectsInvalidConcurrencyAndHeartbeatLeaseOrdering() {
-    CanvasFunctionRuntimeProperties properties = new CanvasFunctionRuntimeProperties();
-    properties.setWorkerConcurrency(0);
-    assertThrows(IllegalArgumentException.class, properties::validate);
-
-    properties.setWorkerConcurrency(2);
-    properties.setMaxDispatchTasks(3);
-    assertThrows(IllegalArgumentException.class, properties::validate);
-
-    properties.setMaxDispatchTasks(2);
-    properties.setHeartbeatIntervalMillis(properties.getLeaseDurationMillis());
-    assertThrows(IllegalArgumentException.class, properties::validate);
   }
 }

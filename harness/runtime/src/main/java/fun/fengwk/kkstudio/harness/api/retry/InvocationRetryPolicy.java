@@ -20,8 +20,8 @@ public record InvocationRetryPolicy(
       throw new IllegalArgumentException("maxRetries must not be negative");
     }
     backoffStrategy = Objects.requireNonNull(backoffStrategy, "backoffStrategy");
-    baseDelay = requirePositive(baseDelay, "baseDelay");
-    maxDelay = requirePositive(maxDelay, "maxDelay");
+    baseDelay = HarnessStoreTime.requireWholeMillisecondDuration(baseDelay, "baseDelay");
+    maxDelay = HarnessStoreTime.requireWholeMillisecondDuration(maxDelay, "maxDelay");
     if (maxDelay.compareTo(baseDelay) < 0) {
       throw new IllegalArgumentException("maxDelay must not be less than baseDelay");
     }
@@ -45,10 +45,6 @@ public record InvocationRetryPolicy(
 
   public boolean allowsRetry(int retryAttempt) {
     return retryAttempt > 0 && retryAttempt <= maxRetries;
-  }
-
-  private static Duration requirePositive(Duration value, String name) {
-    return HarnessStoreTime.requireWholeMillisecondDuration(value, name);
   }
 
   private static long saturatedDouble(long value) {

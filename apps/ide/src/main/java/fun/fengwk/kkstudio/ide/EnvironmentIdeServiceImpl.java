@@ -15,6 +15,7 @@ import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeOpenViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewBindingDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewsDTO;
+import fun.fengwk.kkstudio.ide.gateway.IdeGatewayConstants;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeAction;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeCommand;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeOpenMode;
@@ -48,10 +49,6 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
 
   /** 除普通关闭外，单条 IDE 命令的默认等待上限。 */
   public static final Duration DEFAULT_COMMAND_TIMEOUT = Duration.ofSeconds(30);
-
-  public static final String IDE_ROUTE_PREFIX = "/environment-ide/";
-  public static final String BOOTSTRAP_PATH = "__ide/bootstrap";
-  public static final String SESSION_PATH = "__ide/session";
 
   private final IdeCommandTransport transport;
   private final IdeBootstrapTicketService bootstrapTickets;
@@ -194,12 +191,11 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     }
     EnvironmentIdeViewDTO dto = toDto(view);
     dto.setEntryUrl(
-        IDE_ROUTE_PREFIX
+        IdeGatewayConstants.ROUTE_PREFIX
             + environmentId
             + "/"
             + viewId
-            + "/"
-            + BOOTSTRAP_PATH
+            + IdeGatewayConstants.BOOTSTRAP_ENDPOINT
             + "?token="
             + ticket);
     return dto;
@@ -401,11 +397,11 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
           new ViewSnapshot(
               new IdeViewBindingRegistry.Binding(
                   result.identity(),
-                  UUID.fromString(view.getViewId()),
-                  UUID.fromString(view.getDocumentId()),
-                  UUID.fromString(view.getEventNodeId()),
-                  UUID.fromString(view.getConnectionId()),
-                  UUID.fromString(view.getClaimId()),
+                  parseUuid(view.getViewId(), "viewId"),
+                  parseUuid(view.getDocumentId(), "documentId"),
+                  parseUuid(view.getEventNodeId(), "eventNodeId"),
+                  parseUuid(view.getConnectionId(), "connectionId"),
+                  parseUuid(view.getClaimId(), "claimId"),
                   view.getBindingEpoch()),
               view.getDirectory(),
               view.getWorkspacePath(),

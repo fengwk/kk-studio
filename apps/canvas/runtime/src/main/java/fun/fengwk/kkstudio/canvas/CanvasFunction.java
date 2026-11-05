@@ -5,6 +5,7 @@ import fun.fengwk.kkstudio.canvas.function.CanvasJson.JsonArray;
 import fun.fengwk.kkstudio.canvas.function.CanvasJson.JsonNumber;
 import fun.fengwk.kkstudio.canvas.function.CanvasJson.JsonObject;
 import fun.fengwk.kkstudio.canvas.function.CanvasJson.JsonText;
+import fun.fengwk.kkstudio.common.id.Uuids;
 
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -92,13 +93,15 @@ public record CanvasFunction(String name, CanvasJson.JsonObject args) {
     }
     CanvasJson nodeId = object.values().get("nodeId");
     if (!(nodeId instanceof JsonText text)) {
-      throw new CanvasValidationException("resource reference nodeId must be a UUID string");
+      throw new CanvasValidationException(
+          "resource reference nodeId must be a canonical UUID string");
     }
     UUID parsedNodeId;
     try {
-      parsedNodeId = UUID.fromString(text.value());
+      parsedNodeId = Uuids.parseCanonical(text.value(), "resource reference nodeId");
     } catch (IllegalArgumentException error) {
-      throw new CanvasValidationException("resource reference nodeId must be a UUID string");
+      throw new CanvasValidationException(
+          "resource reference nodeId must be a canonical UUID string", error);
     }
     CanvasJson index = object.values().get("index");
     if (!(index instanceof JsonNumber number)) {
