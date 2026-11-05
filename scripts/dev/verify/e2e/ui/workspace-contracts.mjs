@@ -515,6 +515,14 @@ export async function runWorkspaceContractMatrix(ui) {
               && href === `/threads/${childThreadId}`,
             `unexpected thread link href: ${href}`,
           )
+          await link.click()
+          const childView = page.locator('.chat-pane-layer:not([hidden]) .bound-thread-view')
+          await childView.waitFor({ state: 'visible', timeout: 15_000 })
+          assert(
+            new URL(page.url()).pathname === `/chats/${fixture.chat.id}`
+              && await childView.locator('.composer-editor').count() === 0,
+            'child thread must open as a read-only pane without changing the Chat route',
+          )
 
           let resolveApproval
           const approvalPromise = new Promise((resolve) => {
