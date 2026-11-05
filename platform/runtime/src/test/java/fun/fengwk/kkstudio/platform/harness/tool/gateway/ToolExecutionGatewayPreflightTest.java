@@ -13,6 +13,7 @@ import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.common.json.JsonValues;
+import fun.fengwk.kkstudio.common.result.JsonResultContent;
 import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.common.schema.StringSchema;
 import fun.fengwk.kkstudio.harness.api.tool.ContributorBinding;
@@ -22,6 +23,7 @@ import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
 import fun.fengwk.kkstudio.harness.environment.capability.ExpectedFile;
 import fun.fengwk.kkstudio.harness.spi.ToolGateway;
 import fun.fengwk.kkstudio.harness.spi.ToolInvocationRequest;
@@ -29,6 +31,7 @@ import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolErrorGuidance;
+import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpDiscoveryStatus;
@@ -328,6 +331,59 @@ class ToolExecutionGatewayPreflightTest {
     ToolGateway.Deny deny = assertInstanceOf(ToolGateway.Deny.class, result);
     assertEquals(EditReviewPreflight.FAILED_KIND, deny.error().kind());
     assertTrue(deny.error().message().contains("old_string was not found"));
+    assertTrue(deny.error().message().contains("The tool was not executed."));
+  }
+
+  /** 逐调用路由的本地 edit 也必须在审批前冻结真实远端审查。 */
+  @Test
+  void routedEnvironmentEditApprovalCarriesPreviewAndRejectsPreviewFailure() {
+    EnvironmentId environmentId = EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
+    ToolContribution edit = ToolGatewayTestSupport.defaultCatalog().findTool("edit").orElseThrow();
+    ToolInvocationRequest request =
+        new ToolInvocationRequest(
+            new ToolCall(
+                "call-edit",
+                "edit",
+                "{\"path\":\"/repo/a.txt\",\"old_string\":\"old\",\"new_string\":\"new\"}"),
+            new ToolBinding(
+                edit.definition(),
+                new ContributorBinding(
+                    edit.id().contributorId().value(), edit.id().localName(), List.of()),
+                EnvironmentSupport.ROUTED,
+                environmentId,
+                "test-env"));
+    ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
+    transport.action = ToolGatewayTestSupport.FakeTransport.InvokeAction.SYNC_COMPLETE;
+    transport.syncResult =
+        new ToolResult(
+            "preview",
+            List.of(
+                new JsonResultContent(
+                    "{\"path\":\"/repo/a.txt\",\"diff\":\"-old\\n+new\",\"sha256\":\""
+                        + "a".repeat(64)
+                        + "\"}")),
+            false,
+            "{}");
+    ToolExecutionGateway gateway =
+        ToolGatewayTestSupport.gateway(
+            ToolGatewayTestSupport.defaultCatalog(),
+            transport,
+            new ToolGatewayTestSupport.FakeResourceStager(),
+            ToolGatewayTestSupport.settings(PermissionAction.ASK));
+
+    ToolGateway.Ask ask =
+        assertInstanceOf(ToolGateway.Ask.class, gateway.preflight(request, SCOPE));
+    assertEquals(new ExpectedFile("/repo/a.txt", "a".repeat(64)), ask.editReview().expectedFile());
+    assertEquals("-old\n+new", ask.editReview().diff());
+    assertEquals(
+        EnvironmentCapabilityIds.FS_EDIT_PREVIEW,
+        transport.invocations.get(0).request().descriptor().id());
+    assertEquals(environmentId, transport.invocations.get(0).environmentId());
+
+    transport.action = ToolGatewayTestSupport.FakeTransport.InvokeAction.THROW_UNAVAILABLE;
+    ToolGateway.Deny deny =
+        assertInstanceOf(ToolGateway.Deny.class, gateway.preflight(request, SCOPE));
+    assertEquals("EDIT_REVIEW_FAILED", deny.error().kind());
     assertTrue(deny.error().message().contains("The tool was not executed."));
   }
 

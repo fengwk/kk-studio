@@ -196,13 +196,12 @@ public final class ToolExecutionGateway implements ToolGateway {
         case ALLOW -> new ToolGateway.Allow();
         case ASK -> {
           String reason = "Permission rules require approval";
-          if (resolved.contribution().tool() instanceof EnvironmentCapabilityTool environmentTool
-              && EnvironmentCapabilityIds.FS_EDIT.equals(environmentTool.capability().id())) {
+          if (isEditTool(resolved.contribution().tool())) {
+            // vfs: 编辑从当前会话读取；环境路径由 Daemon 预览。两者均不得进入无审查审批。
+            if (isVfsPath(request.call().argumentsJson())) {
+              yield vfsEditReview(request, scope, reason);
+            }
             yield EditReviewPreflight.prepare(capabilityTransport, request, reason);
-          }
-          // vfs: 编辑由 VFS 读取当前会话文件生成审查；无法预览时拒绝，绝不进入盲批。
-          if (isVfsPath(request.call().argumentsJson())) {
-            yield vfsEditReview(request, scope, reason);
           }
           yield new ToolGateway.Ask(reason);
         }
