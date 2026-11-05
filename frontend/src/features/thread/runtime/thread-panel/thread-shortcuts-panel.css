@@ -1,0 +1,4 @@
+/* Thread /shortcuts 面板：只读快捷键列表的滚动容器。 */
+.thread-shortcuts-body {
+  overflow-y: auto;
+}

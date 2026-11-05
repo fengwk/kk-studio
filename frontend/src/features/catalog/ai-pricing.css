@@ -1,0 +1,85 @@
+/* 模型计价：rate 输入、折叠与规则列表。 */
+.price-input {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.price-affix {
+  flex: 0 0 auto;
+  color: var(--fg-muted);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  user-select: none;
+}
+
+.price-input input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.pricing-fold {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pricing-rule-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pricing-rule {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--wash-1);
+}
+
+.pricing-rule-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+}
+
+.pricing-rule-summary {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--font-size-xs);
+  text-align: left;
+  cursor: pointer;
+}
+
+.pricing-rule-summary code {
+  flex: 0 0 auto;
+}
+
+.pricing-rule-summary span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pricing-rule-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.pricing-rule-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 8px 10px 10px;
+  border-top: 1px solid var(--border);
+}

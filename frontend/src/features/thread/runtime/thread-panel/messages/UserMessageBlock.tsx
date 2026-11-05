@@ -1,5 +1,6 @@
 import type { TextDialogueMessage } from '@/features/thread/runtime/thread-timeline-types'
 import { ResourceAttachmentChip } from '@/features/thread/runtime/thread-panel/messages/ResourceAttachmentChip'
+import './resource-attachments.css'
 
 /** 全宽的 user 内容块（角色由表面样式区分，不显示标题）。 */
 export function UserMessageBlock({ message }: { message: TextDialogueMessage }) {

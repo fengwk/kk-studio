@@ -8,6 +8,7 @@ import type {
 import { CopyButton } from '@/shared/ui/markdown/CodeBlock'
 import { MarkdownRenderer } from '@/shared/ui/markdown/MarkdownRenderer'
 import { useI18n } from '@/shared/i18n'
+import './message-blocks.css'
 
 export function ModelAttemptFailureMessageBlock({
   message,

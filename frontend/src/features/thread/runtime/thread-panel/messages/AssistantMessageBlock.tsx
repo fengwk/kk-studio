@@ -5,6 +5,7 @@ import type { TextDialogueMessage } from '@/features/thread/runtime/thread-timel
 import { CopyButton } from '@/shared/ui/markdown/CodeBlock'
 import { MarkdownRenderer } from '@/shared/ui/markdown/MarkdownRenderer'
 import { useI18n } from '@/shared/i18n'
+import './message-blocks.css'
 
 /**
  * Assistant：thinking 纯文本 + 正文 Markdown。

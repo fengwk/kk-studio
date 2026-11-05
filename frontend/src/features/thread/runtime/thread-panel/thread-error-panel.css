@@ -1,0 +1,40 @@
+/* Thread 内联错误面板。 */
+.thread-error-panel {
+  flex-shrink: 0;
+  margin: 0 20px 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--danger-border);
+  border-radius: 10px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.thread-error-panel-body {
+  min-width: 0;
+  flex: 1;
+}
+
+.thread-error-panel-body strong {
+  display: block;
+  font-size: var(--font-size-xs);
+  margin-bottom: 4px;
+}
+
+.thread-error-panel-body p {
+  margin: 0;
+  font-size: var(--font-size-xs);
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.icon-button.thread-error-dismiss {
+  color: var(--danger);
+}
+
+.thread-error-dismiss svg {
+  width: 14px;
+  height: 14px;
+}

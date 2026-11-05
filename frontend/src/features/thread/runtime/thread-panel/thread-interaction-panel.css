@@ -1,0 +1,58 @@
+/* Thread 交互面板外壳。 */
+.thread-interaction-panel {
+  flex: 0 1 min(520px, 58vh);
+  min-height: 160px;
+  margin: 8px 16px 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-overlay);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.thread-interaction-header {
+  min-height: 38px;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 8px 6px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.thread-interaction-header h2 {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--fg);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thread-interaction-controls {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+}
+
+.thread-interaction-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.thread-interaction-footer {
+  flex: 0 0 auto;
+  padding: 6px 10px;
+  border-top: 1px solid var(--border);
+  color: var(--fg-muted);
+  font-size: var(--font-size-xs);
+}

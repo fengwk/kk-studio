@@ -25,10 +25,3 @@
   opacity: 1;
   pointer-events: auto;
 }
-
-/* 与代码块同理：进入表格复制时隐藏外层「复制全文」，避免叠两枚按钮 */
-.thread-assistant-shell:has(.md-table-shell:hover) > .thread-assistant-copy,
-.thread-assistant-shell:has(.md-table-shell:focus-within) > .thread-assistant-copy {
-  opacity: 0 !important;
-  pointer-events: none !important;
-}

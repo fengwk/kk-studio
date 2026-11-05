@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useI18n } from '@/shared/i18n'
 import { MediaLightbox } from '@/shared/ui/media/MediaLightbox'
+import './resource-attachments.css'
 
 type MediaKind = 'image' | 'video'
 type PreviewMode = 'image' | 'video'

@@ -4,6 +4,7 @@ import { Button } from '@/shared/ui/controls/Button'
 import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
 import { TextInput } from '@/shared/ui/controls/TextInput'
 import { useI18n } from '@/shared/i18n'
+import './catalog-form-layout.css'
 
 const RATE_FIELDS = [
   { field: 'input', labelKey: 'ai.catalog.form.inputPrice' },

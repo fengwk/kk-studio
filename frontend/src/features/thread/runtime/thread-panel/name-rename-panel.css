@@ -1,0 +1,41 @@
+/* Session / Thread 单输入重命名面板。 */
+
+/* 单输入重命名面板（Session / Thread 名称编辑）。 */
+.name-rename-panel {
+  flex-basis: min(420px, 46vh);
+}
+
+.name-rename-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 12px 6px;
+}
+
+.name-rename-field span {
+  color: var(--fg-muted);
+  font-size: var(--font-size-xs);
+}
+
+.name-rename-body input {
+  width: 100%;
+}
+
+.name-rename-error {
+  color: var(--danger);
+  font-size: var(--font-size-xs);
+}
+
+.name-rename-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 4px 12px 12px;
+}
+
+.name-rename-save {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}

@@ -16,6 +16,7 @@ import type {
   SkillPackageSummaryDTO,
   ToolCatalogEntryDTO,
 } from '@/shared/api/generated/contracts'
+import './ai-console-resource-editor.css'
 
 export function ResourceEditorModal({
   modal,

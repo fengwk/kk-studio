@@ -50,6 +50,7 @@ import { useComposerFocus } from '@/features/thread/runtime/thread-panel/useComp
 import { useComposerSubmissionSettle } from '@/features/thread/runtime/thread-panel/useComposerSubmissionSettle'
 import { useI18n } from '@/shared/i18n'
 import { IconButton } from '@/shared/ui/controls/IconButton'
+import './thread-composer.css'
 
 const EMPTY_USER_MESSAGES: readonly string[] = []
 

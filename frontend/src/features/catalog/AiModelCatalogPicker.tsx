@@ -10,6 +10,8 @@ import { Button } from '@/shared/ui/controls/Button'
 import { TextInput } from '@/shared/ui/controls/TextInput'
 import { useI18n } from '@/shared/i18n'
 import { formatCatalogSupportIssue } from '@/features/catalog/catalog-utils'
+import './catalog-form-layout.css'
+import './ai-model-catalog-picker.css'
 
 /**
  * 单 Model 的原位目录候选区：只读展示来源，逐行点击预览，每行一键填入。

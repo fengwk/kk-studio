@@ -26,6 +26,7 @@ import { Select } from '@/shared/ui/controls/Select'
 import { MediaLightbox } from '@/shared/ui/media/MediaLightbox'
 import { IconButton } from '@/shared/ui/controls/IconButton'
 import { Button } from '@/shared/ui/controls/Button'
+import './attachment-strip.css'
 
 const IMAGE_TIER_OPTIONS = [
   { value: '720P', label: '720P' },

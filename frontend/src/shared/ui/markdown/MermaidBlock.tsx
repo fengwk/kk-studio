@@ -1,6 +1,7 @@
 import { memo, useEffect, useId, useRef, useState } from 'react'
 import { CodeBlock, CopyableShell } from '@/shared/ui/markdown/CodeBlock'
 import { useI18n } from '@/shared/i18n'
+import './mermaid-block.css'
 
 type MermaidApi = {
   initialize: (config: Record<string, unknown>) => void

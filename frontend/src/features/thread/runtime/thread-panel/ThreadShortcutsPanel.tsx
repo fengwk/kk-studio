@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import { ThreadInteractionPanel } from '@/features/thread/runtime/thread-panel/ThreadInteractionPanel'
 import { KeyboardShortcutList } from '@/shared/shortcuts/KeyboardShortcutList'
 import { useI18n } from '@/shared/i18n'
+import './thread-shortcuts-panel.css'
 
 /**
  * 只读快捷键面板：在所有 Composer 场景可用（Blank/Bound、Chat/Canvas）。

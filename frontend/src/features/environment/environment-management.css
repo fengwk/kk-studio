@@ -1,0 +1,168 @@
+/* 环境管理弹窗：运行宿主信息、事件与操作。 */
+
+/* --- Environment Management Modal & Sections --- */
+.modal-card.env-management-modal-card {
+  width: min(860px, 100%);
+  max-height: calc(100vh - 48px);
+  display: flex;
+  flex-direction: column;
+}
+
+.env-mgmt-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.env-mgmt-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.env-mgmt-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.env-mgmt-section-header > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.env-mgmt-section-header h3 {
+  margin: 0;
+  font-size: var(--font-size-md);
+  font-weight: 700;
+}
+
+.env-mgmt-badge-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  border-radius: var(--radius-pill);
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  color: var(--fg-muted);
+}
+
+.env-host-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px;
+}
+
+.env-host-meta-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-raised);
+}
+
+.env-host-meta-card .lbl {
+  font-size: var(--font-size-xs);
+  color: var(--fg-muted);
+}
+
+.env-host-meta-card .val {
+  font-size: var(--font-size-sm);
+  word-break: break-all;
+}
+
+/* --- Environment Events --- */
+.env-events-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.env-event-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-raised);
+}
+
+.env-event-item.is-warn {
+  border-color: var(--warning-border);
+}
+
+.env-event-item.is-error {
+  border-color: var(--danger-border);
+}
+
+.env-event-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.env-event-level {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--fg-muted);
+}
+
+.env-event-level.is-info {
+  color: var(--info);
+  border-color: var(--info-border);
+  background: var(--info-soft);
+}
+
+.env-event-level.is-warn {
+  color: var(--warning);
+  border-color: var(--warning-border);
+  background: var(--warning-soft);
+}
+
+.env-event-level.is-error {
+  color: var(--danger);
+  border-color: var(--danger-border);
+  background: var(--danger-soft);
+}
+
+.env-event-type {
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.env-event-time {
+  font-size: var(--font-size-xs);
+  color: var(--fg-muted);
+  margin-left: auto;
+}
+
+.env-event-message {
+  font-size: var(--font-size-xs);
+  color: var(--fg-muted);
+  word-break: break-word;
+  line-height: 1.4;
+}

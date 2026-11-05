@@ -1,0 +1,162 @@
+/* Thread 选择面板：搜索、列表与行内重命名。 */
+.thread-selection-search {
+  min-width: 120px;
+  flex: 1 1 220px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--fg-muted);
+}
+
+.thread-selection-search:focus-within {
+  border-color: var(--border-hover);
+}
+
+.thread-selection-search svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+}
+
+.thread-selection-search input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--font-size-xs);
+}
+
+.thread-selection-body {
+  display: flex;
+  flex-direction: column;
+}
+
+.thread-selection-list {
+  min-height: 0;
+  flex: 1;
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.thread-selection-item {
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--fg);
+  text-align: left;
+  cursor: pointer;
+}
+
+.thread-selection-item.active,
+.thread-selection-item:hover:not(:disabled) {
+  background: var(--surface-active);
+}
+
+.thread-selection-item.current:not(.active) {
+  background: var(--accent-soft);
+}
+
+.thread-selection-item:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.thread-selection-item-title {
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: var(--font-size-sm);
+}
+
+.thread-selection-item-title > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thread-selection-item-title em {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: var(--font-size-xs);
+  font-style: normal;
+}
+
+.thread-selection-item-subtitle {
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--fg-muted);
+  font-size: var(--font-size-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thread-selection-empty {
+  padding: 18px 10px;
+  color: var(--fg-muted);
+  font-size: var(--font-size-xs);
+  text-align: center;
+}
+
+/* Session/Thread 选择行：选中按钮与行内重命名铅笔并排。 */
+.thread-selection-row {
+  position: relative;
+}
+
+.thread-selection-rename {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  z-index: 1;
+  width: 26px;
+  height: 26px;
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+
+.thread-selection-rename:hover:not(:disabled) {
+  background: var(--stage-dot);
+  color: var(--fg);
+}
+
+.thread-selection-rename:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.thread-selection-rename svg {
+  width: 13px;
+  height: 13px;
+}
+
+.thread-selection-row .thread-selection-item {
+  padding-right: 36px;
+}

@@ -1,0 +1,120 @@
+/* 共享 Markdown 代码块：复制按钮、代码表面与 highlight token。 */
+.md-code-shell {
+  position: relative;
+  margin: 0.45em 0;
+}
+
+.md-code-shell > .md-code-block,
+.md-code-shell > .md-mermaid {
+  margin: 0;
+}
+
+.md-code-copy {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 2;
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-raised);
+  color: var(--fg-muted);
+  opacity: 0;
+  pointer-events: none;
+  cursor: pointer;
+  transition: opacity var(--duration-fast), color var(--duration-fast), border-color var(--duration-fast);
+}
+
+.md-code-shell:hover > .md-code-copy,
+.md-code-shell:focus-within > .md-code-copy {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.md-code-copy:hover {
+  color: var(--fg);
+  border-color: var(--border-hover);
+}
+
+.md-code-copy svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* 代码块内复制按钮压过助手全文复制 */
+.md-code-shell > .md-code-copy {
+  z-index: 4;
+}
+
+.md-code-block {
+  display: block;
+  margin: 0.45em 0;
+  padding: 0;
+  overflow-x: auto;
+  border-radius: 0;
+  border: 0;
+  background: transparent;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: var(--font-size-xs);
+  line-height: 1.5;
+  white-space: pre;
+  tab-size: 2;
+}
+
+.md-code-block code {
+  display: block;
+  background: transparent !important;
+  border: 0 !important;
+  padding: 0 !important;
+  margin: 0;
+  font: inherit;
+  color: var(--fg);
+  white-space: inherit;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+/* highlight.js：去掉主题自带底色，仅保留关键字等 token 色 */
+.md-code-block .hljs {
+  background: transparent !important;
+  padding: 0 !important;
+  color: var(--fg);
+}
+
+.md-code-block .hljs-keyword,
+.md-code-block .hljs-selector-tag,
+.md-code-block .hljs-title,
+.md-code-block .hljs-section,
+.md-code-block .hljs-doctag,
+.md-code-block .hljs-name,
+.md-code-block .hljs-strong {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.md-code-block .hljs-string,
+.md-code-block .hljs-attr,
+.md-code-block .hljs-symbol,
+.md-code-block .hljs-bullet,
+.md-code-block .hljs-addition {
+  color: var(--info);
+}
+
+.md-code-block .hljs-comment,
+.md-code-block .hljs-quote,
+.md-code-block .hljs-deletion {
+  color: var(--fg-muted);
+}
+
+.md-code-block .hljs-number,
+.md-code-block .hljs-literal {
+  color: var(--info);
+}
+
+.md-code-block .hljs-built_in,
+.md-code-block .hljs-type {
+  color: var(--warning);
+}

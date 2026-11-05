@@ -11,6 +11,8 @@ import { Select } from '@/shared/ui/controls/Select'
 import { TagInput } from '@/shared/ui/controls/TagInput'
 import { TextInput } from '@/shared/ui/controls/TextInput'
 import { useI18n } from '@/shared/i18n'
+import './catalog-form-layout.css'
+import './ai-model-group-resource-form.css'
 
 export function ModelGroupForm({
   draft,

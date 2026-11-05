@@ -1,6 +1,7 @@
 import { X } from 'lucide-react'
 import { IconButton } from '@/shared/ui/controls/IconButton'
 import { useI18n } from '@/shared/i18n'
+import './thread-error-panel.css'
 
 /** Pi 风格的内联错误面板：消息留在 thread 中；错误展示为可关闭的横幅。 */
 export function ThreadErrorPanel({

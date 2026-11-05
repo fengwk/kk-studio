@@ -3,6 +3,7 @@ import type { KeyboardEventHandler, ReactNode } from 'react'
 import { shouldDeferToBlockingModal } from '@/shared/ui/blocking-overlay'
 import { useI18n } from '@/shared/i18n'
 import { IconButton } from '@/shared/ui/controls/IconButton'
+import './thread-interaction-panel.css'
 
 /**
  * Composer 区域的轻量交互面板外壳。

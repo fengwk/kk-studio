@@ -5,6 +5,7 @@ import { MessageList } from '@/features/thread/runtime/thread-panel/messages/Mes
 import { isVisibleDialogueMessage } from '@/features/thread/runtime/thread-panel/visibility'
 import type { DialogueMessage } from '@/features/thread/runtime/thread-timeline-types'
 import { useI18n } from '@/shared/i18n'
+import '@/features/thread/thread-state.css'
 
 /** 对话区域：满高滚动，以块状方式展示 transcript。 */
 export function ThreadTranscript({

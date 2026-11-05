@@ -8,6 +8,7 @@ import {
 import { Pencil, Search } from 'lucide-react'
 import { ThreadInteractionPanel } from '@/features/thread/runtime/thread-panel/ThreadInteractionPanel'
 import { useI18n } from '@/shared/i18n'
+import './thread-selection.css'
 
 export interface SelectionPanelItem {
   id: string

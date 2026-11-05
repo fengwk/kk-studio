@@ -1,7 +1,21 @@
 import { readFileSync } from 'node:fs'
 import { test, expect } from './fixture'
 
-const css = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8')
+// 样式已按功能拆分：媒体预览在 messages/resource-attachments.css，消息块布局在 thread-conversation.css。
+const css = [
+  readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8'),
+  readFileSync(
+    new URL('../src/features/thread/runtime/thread-panel/thread-conversation.css', import.meta.url),
+    'utf8',
+  ),
+  readFileSync(
+    new URL(
+      '../src/features/thread/runtime/thread-panel/messages/resource-attachments.css',
+      import.meta.url,
+    ),
+    'utf8',
+  ),
+].join('\n')
 
 for (const sample of [
   { name: 'landscape', width: 512, height: 288, container: 900 },

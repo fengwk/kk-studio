@@ -1,0 +1,13 @@
+/* MCP Server 编辑弹窗与 headers 文本域。 */
+
+/* MCP Server HTTP modal & headers textarea */
+.mcp-modal-card {
+  width: min(640px, 100%);
+}
+
+.mcp-headers-textarea {
+  min-height: 120px !important;
+  font-family: monospace;
+  font-size: var(--font-size-xs);
+  resize: vertical;
+}

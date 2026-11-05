@@ -5,6 +5,7 @@ import {
   type ThreadCommand,
 } from '@/features/thread/runtime/thread-panel/thread-commands'
 import { useI18n } from '@/shared/i18n'
+import './thread-command-palette.css'
 
 export function ThreadCommandPalette({
   open,

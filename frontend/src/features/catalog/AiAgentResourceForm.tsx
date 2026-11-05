@@ -26,6 +26,7 @@ import type {
   SkillPackageSummaryDTO,
   ToolCatalogEntryDTO,
 } from '@/shared/api/generated/contracts'
+import './capability-picker.css'
 
 function toggleValue(items: string[], value: string): string[] {
   return items.includes(value) ? items.filter((item) => item !== value) : [...items, value]

@@ -1,0 +1,159 @@
+/* Composer 附件轨道、附件卡片与档位选择。 */
+.thread-composer-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 0 2px 6px;
+}
+
+.attachment-reference {
+  position: relative;
+  width: 200px;
+  min-width: 0;
+  min-height: 54px;
+  flex: 0 1 200px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  padding: 6px 8px 6px 6px;
+  border-radius: 8px;
+  color: var(--fg-muted);
+  background: var(--wash-2);
+  overflow: hidden;
+  font-size: var(--font-size-xs);
+}
+
+.attachment-reference-preview,
+.attachment-reference-file-icon {
+  width: 42px;
+  height: 42px;
+  flex: 0 0 42px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-active);
+  color: var(--fg-muted);
+}
+
+.attachment-reference-preview img,
+.attachment-reference-preview video {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.attachment-reference-preview {
+  padding: 0;
+  cursor: zoom-in;
+}
+
+.attachment-reference-preview:hover {
+  border-color: var(--fg-muted);
+}
+
+.attachment-reference-file-icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.attachment-reference-file-icon.is-audio {
+  color: var(--info);
+}
+
+.attachment-reference-details {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+}
+
+.attachment-reference-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--info);
+  font-family: var(--mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachment-reference-status-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.attachment-reference-status {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-muted);
+  font-size: var(--font-size-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 附件档位选择器嵌在附件卡片的状态行内，需要比通用紧凑下拉更矮更窄。 */
+.ui-select.is-compact.attachment-reference-tier-select .ui-select-trigger {
+  min-height: 18px;
+  height: 18px;
+  padding: 0 4px;
+  gap: 3px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface-active);
+  color: var(--fg-muted);
+  font-size: var(--font-size-xs);
+  line-height: 1.2;
+}
+
+.ui-select.is-compact.attachment-reference-tier-select .ui-select-trigger:hover,
+.ui-select.is-compact.attachment-reference-tier-select .ui-select-trigger:focus-visible {
+  border-color: var(--info);
+  color: var(--fg);
+}
+
+.ui-select.is-compact.attachment-reference-tier-select .ui-select-chevron {
+  width: 10px;
+  height: 10px;
+  flex: 0 0 10px;
+}
+
+.ui-select.attachment-reference-tier-select .ui-select-option {
+  min-height: 28px;
+  font-size: var(--font-size-xs);
+}
+
+.icon-button.attachment-reference-remove {
+  width: 20px;
+  height: 20px;
+  flex-basis: 20px;
+}
+
+.attachment-reference-remove svg {
+  width: 12px;
+  height: 12px;
+}
+
+.attachment-reference-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: transparent;
+}
+
+.attachment-reference-progress span {
+  display: block;
+  height: 100%;
+  border-radius: var(--radius-pill);
+  background: var(--info);
+  transition: width var(--duration-base);
+}

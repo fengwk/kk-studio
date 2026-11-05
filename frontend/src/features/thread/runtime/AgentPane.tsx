@@ -22,6 +22,7 @@ import type { AgentPaneCapabilities, AgentPaneDefaults, BranchRequestInput, Pane
 import type { AgentRuntimeOwnerDTO } from '@/shared/api/contracts/ai-runtime'
 import type { PaneTarget } from '@/features/thread/runtime/agent-pane'
 import '@/features/thread/runtime/child-thread-view.css'
+import '@/features/thread/runtime/agent-pane.css'
 import type {
   AgentDefinitionDTO,
   EnvironmentCardDTO,
