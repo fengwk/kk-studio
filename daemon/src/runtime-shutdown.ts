@@ -31,7 +31,7 @@ function reportReleaseFailure(phase: string, error: unknown): unknown {
 }
 
 /** 这次失败的固定类型名：只认内建类型身份与「是不是 Error」，其余一律泛化为 UnknownError。 */
-export function describeFailureType(error: unknown): string {
+function describeFailureType(error: unknown): string {
   for (const [type, label] of BUILT_IN_FAILURE_TYPES) {
     if (error instanceof type) {
       return label
@@ -41,7 +41,7 @@ export function describeFailureType(error: unknown): string {
 }
 
 /** 独立执行一个停机步骤：失败记入聚合后继续，绝不把失败当成成功。 */
-export function releaseStep(failures: unknown[], phase: string, action: () => void | Promise<void>): void {
+function releaseStep(failures: unknown[], phase: string, action: () => void | Promise<void>): void {
   try {
     const result = action()
     if (result instanceof Promise) {
@@ -55,7 +55,7 @@ export function releaseStep(failures: unknown[], phase: string, action: () => vo
 }
 
 /** 记录一次停机失败，并留下安全诊断；诊断输出失败同样并入聚合且不递归。 */
-export function recordShutdownFailure(failures: unknown[], phase: string, error: unknown): void {
+function recordShutdownFailure(failures: unknown[], phase: string, error: unknown): void {
   failures.push(error)
   const diagnosticFailure = reportReleaseFailure(phase, error)
   if (diagnosticFailure !== null) {
@@ -64,7 +64,7 @@ export function recordShutdownFailure(failures: unknown[], phase: string, error:
 }
 
 /** 只留下安全诊断，不把该失败升级为停机失败。诊断输出失败仍并入可见聚合。 */
-export function collectDiagnosticFailure(failures: unknown[], phase: string, error: unknown): void {
+function collectDiagnosticFailure(failures: unknown[], phase: string, error: unknown): void {
   const diagnosticFailure = reportReleaseFailure(phase, error)
   if (diagnosticFailure !== null) {
     failures.push(diagnosticFailure)
