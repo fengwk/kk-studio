@@ -5,11 +5,6 @@
  * native 适配层内部仍按平台分发自己的系统调用。
  */
 
-/** 当前进程的宿主平台。 */
-export function hostPlatform(): NodeJS.Platform {
-  return process.platform
-}
-
 /** 当前宿主是否为 Windows。 */
 export function isWindows(): boolean {
   return process.platform === 'win32'
@@ -28,21 +23,6 @@ export function pathKeysIgnoreCase(): boolean {
 /** 冻结发行里 code-server 自带的 Node 可执行文件名。 */
 export function bundledNodeExecutableName(): string {
   return process.platform === 'win32' ? 'node.exe' : 'node'
-}
-
-/**
- * 把当前宿主映射到更新脚本使用的 OS 名。
- *
- * <p>windows 与 darwin 有专用更新脚本，其它平台按 linux 处理。
- */
-export function updateScriptOs(): 'windows' | 'macos' | 'linux' {
-  if (process.platform === 'win32') {
-    return 'windows'
-  }
-  if (process.platform === 'darwin') {
-    return 'macos'
-  }
-  return 'linux'
 }
 
 /** helper 建立执行范围时的平台阶段名。 */

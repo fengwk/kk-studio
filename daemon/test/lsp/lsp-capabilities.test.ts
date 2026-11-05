@@ -929,6 +929,40 @@ describe('Lsp Capabilities Group End-to-End', () => {
     expect(r7Timeout.error).toBe(true)
     expect((r7Timeout.contents[0] as any).text).toBe('Error: Operation timed out')
 
+    // Validation failure confirms execution exit
+    let validationExitCalled = 0
+    const rBadLine = await gotoDef(
+      {
+        invocationId: 'c-bad-line',
+        capabilityId: 'lsp.goto-definition',
+        arguments: { path: file, line: -1 },
+        timeoutMillis: 5000,
+      },
+      createContext(config, undefined, () => {
+        validationExitCalled++
+      }),
+    )
+    expect(rBadLine.error).toBe(true)
+    expect((rBadLine.contents[0] as any).text).toContain('line is required and must be a positive integer')
+    expect(validationExitCalled).toBe(1)
+
+    // Unexpected runtime error masks internal details
+    const spy = vi.spyOn(LspService.prototype, 'gotoDefinition').mockRejectedValueOnce(new Error('internal leak'))
+    const rUnexpected = await gotoDef(
+      {
+        invocationId: 'c-unexpected',
+        capabilityId: 'lsp.goto-definition',
+        arguments: { path: file, line: 1 },
+        timeoutMillis: 5000,
+      },
+      createContext(config),
+    )
+    spy.mockRestore()
+    expect(rUnexpected.error).toBe(true)
+    expect((rUnexpected.contents[0] as any).text).toBe(
+      'Error: The capability failed while running and the underlying error is not repeated to avoid leaking details',
+    )
+
     // In-flight abort during workspace-symbols and java-decompile
     const slowTranscript1 = path.join(tempDir, 'slow-abort-ws.jsonl')
     const slowJdtls1 = createJdtlsWrapper(tempDir, 'slow-init', slowTranscript1)

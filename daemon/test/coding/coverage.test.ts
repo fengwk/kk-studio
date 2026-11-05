@@ -160,10 +160,10 @@ describe('TemporaryResourceStore 分支', () => {
     let now = 1000
     const resources = await TemporaryResourceStore.open(dir, () => now)
     const workspace = await resources.create()
-    expect(resources.hasActiveLease(workspace.id)).toBe(true)
+    expect(resources.hasActiveLeases()).toBe(true)
     workspace.close()
     workspace.close()
-    expect(resources.hasActiveLease(workspace.id)).toBe(false)
+    expect(resources.hasActiveLeases()).toBe(false)
     now += 100
     // 释放后即可被 TTL 清扫，且不会因为第二次 close 而影响其它租约。
     expect(await resources.sweep(10)).toBe(1)

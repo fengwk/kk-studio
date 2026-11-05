@@ -39,13 +39,11 @@ describe('TextFileCodec', () => {
 
   it('detects binary files via control bytes', () => {
     const binaryBytes = Buffer.from([0x01, 0x02, 0x03, 0x04])
-    expect(TextFileCodec.isBinary(binaryBytes)).toBe(true)
     expect(() => TextFileCodec.decode(binaryBytes)).toThrow(/appears to be binary/)
   })
 
   it('detects binary files containing NUL characters', () => {
     const nulBytes = Buffer.from('hello\0world', 'utf8')
-    expect(TextFileCodec.isBinary(nulBytes)).toBe(true)
     expect(() => TextFileCodec.decode(nulBytes)).toThrow(/appears to be binary/)
   })
 
@@ -68,5 +66,17 @@ describe('TextFileCodec', () => {
 
     const oneByte = TextFileCodec.decode(Buffer.from('a', 'utf8'))
     expect(oneByte.text).toBe('a')
+  })
+
+  it('respects PROBE_BYTES scanning boundary', () => {
+    // 恰好在 8192 字节内的控制字符被检出
+    const within = Buffer.alloc(8192, 0x61)
+    within[8191] = 0x01
+    expect(() => TextFileCodec.decode(within)).toThrow(/appears to be binary/)
+
+    // 超出 8192 字节的控制字符不会触发二进制判定
+    const beyond = Buffer.alloc(8200, 0x61)
+    beyond[8192] = 0x01
+    expect(TextFileCodec.decode(beyond).text).toBe(beyond.toString('utf8'))
   })
 })

@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import type { Readable, Writable } from 'node:stream'
 import type { ManagedProcess, ProcessExit, ProcessSpec, ProcessSupervisor } from '../contracts.js'
 import { ProcessScopeNotConvergedError } from '../contracts.js'
+import { delay } from '../delay.js'
 import { subprocessEnvironment } from '../network.js'
 import { resolveHelperPath } from './helper-path.js'
 import { verifyPrivateFile } from './private-fs.js'
@@ -505,8 +506,4 @@ export class PosixManagedProcess implements ManagedProcess {
 function describe(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error)
   return message.replace(/\s+/g, ' ').slice(0, SUPERVISOR_MESSAGE_LIMIT)
-}
-
-function delay(millis: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, millis))
 }

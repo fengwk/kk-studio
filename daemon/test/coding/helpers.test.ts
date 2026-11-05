@@ -152,7 +152,7 @@ describe('edit 行尾/ diff 辅助', () => {
     expect(diff).toContain('|n0')
   })
 
-  it('审查 diff 完整保留超过旧内联长度的变更和代理对', () => {
+  it('审查 diff 完整保留大文本变更和代理对', () => {
     const long = `${'a'.repeat(30 * 1024 - 1)}😀`
     const diff = buildDiff(parseLineEndingDocument('old\n'), parseLineEndingDocument(`${long}\n`))
     expect(diff).toContain(`+ 1|${long}`)

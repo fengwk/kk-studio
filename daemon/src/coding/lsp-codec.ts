@@ -1,4 +1,5 @@
 import { LspError } from './lsp-error.js'
+import { isBinaryBytes } from './text.js'
 
 export interface DecodedText {
   text: string
@@ -17,21 +18,10 @@ export class TextFileCodec {
     if (this.starts(bytes, 0xfe, 0xff)) {
       return this.decodeStrict(bytes, 2, 'utf-16be')
     }
-    if (this.isBinary(bytes)) {
+    if (isBinaryBytes(bytes)) {
       throw new LspError('file appears to be binary')
     }
     return this.decodeStrict(bytes, 0, 'utf-8')
-  }
-
-  static isBinary(bytes: Uint8Array): boolean {
-    const scan = Math.min(bytes.length, 8192)
-    for (let index = 0; index < scan; index++) {
-      const value = bytes[index]!
-      if (value === 0 || value < 0x09 || (value > 0x0d && value < 0x20 && value !== 0x1b)) {
-        return true
-      }
-    }
-    return false
   }
 
   private static decodeStrict(bytes: Uint8Array, bomLength: number, charset: string): DecodedText {

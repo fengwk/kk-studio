@@ -3,11 +3,11 @@ import {
   utf8ByteLength as strictUtf8ByteLength,
 } from '../strict-json.js'
 import { isCanonicalUuid } from '../uuid.js'
+import { SHA256_LOWER_PATTERN } from '../../validation-constants.js'
 
 export const MAX_MESSAGE_BYTES = 16 * 1024 * 1024
 export const MAX_SAFE_BIGINT = 9007199254740991n
 
-const SHA256_PATTERN = /^[0-9a-f]{64}$/
 const MEDIA_TYPE_PATTERN = /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/
 
 export interface TextOptions {
@@ -45,7 +45,7 @@ export function requireUuid(value: unknown, name: string): string {
 }
 
 export function requireLowerSha256(value: unknown, name: string): string {
-  if (typeof value !== 'string' || !SHA256_PATTERN.test(value)) {
+  if (typeof value !== 'string' || !SHA256_LOWER_PATTERN.test(value)) {
     throw new Error(`${name} must be a lowercase SHA-256`)
   }
   return value

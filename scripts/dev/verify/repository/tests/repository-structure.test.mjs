@@ -526,7 +526,7 @@ test('repository check rejects prohibited session artifacts with file and line n
 })
 
 test('documentation rejects session artifacts but permits historical names and fenced examples', () => {
-  // The session-language rule remains active without the obsolete documentation blacklist.
+  // The session artifact rule applies to prose while permitting fenced examples.
   const mirrorRoot = createRepositoryMirror()
   const relativePath = 'docs/modules/common.md'
   const docPath = path.join(mirrorRoot, relativePath)

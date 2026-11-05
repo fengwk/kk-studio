@@ -527,8 +527,3 @@ async function convergenceFailure(
 }
 
 export const processCapability: CapabilityExecutor = processExecutor
-
-/** 供 Runtime 注册的单项能力表。 */
-export const processCapabilities: Record<string, CapabilityExecutor> = {
-  'process.exec': processExecutor,
-}

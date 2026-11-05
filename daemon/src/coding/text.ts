@@ -46,22 +46,7 @@ export function detectEncoding(probe: Uint8Array): Encoding {
   return { charset: 'UTF-8', bomLength: 0, utf16: false }
 }
 
-/** 控制字符（NUL、除制表/换行/回车/ESC 外的控制码）视为二进制内容；UTF-16 前缀不按此判定。 */
-export function looksBinary(probe: Uint8Array, encoding: Encoding): boolean {
-  if (encoding.utf16) {
-    return false
-  }
-  const scan = Math.min(probe.length, PROBE_BYTES)
-  for (let index = 0; index < scan; index++) {
-    const value = probe[index] as number
-    if (value === 0 || value < 0x09 || (value > 0x0d && value < 0x20 && value !== 0x1b)) {
-      return true
-    }
-  }
-  return false
-}
-
-/** 独立的二进制字节判定（用于 write/edit 的整段解码）。 */
+/** 独立的二进制字节判定（用于 write/edit 的整段解码与探测共用）。 */
 export function isBinaryBytes(bytes: Uint8Array): boolean {
   const scan = Math.min(bytes.length, PROBE_BYTES)
   for (let index = 0; index < scan; index++) {
@@ -71,6 +56,14 @@ export function isBinaryBytes(bytes: Uint8Array): boolean {
     }
   }
   return false
+}
+
+/** 控制字符（NUL、除制表/换行/回车/ESC 外的控制码）视为二进制内容；UTF-16 前缀不按此判定。 */
+export function looksBinary(probe: Uint8Array, encoding: Encoding): boolean {
+  if (encoding.utf16) {
+    return false
+  }
+  return isBinaryBytes(probe)
 }
 
 /** 流式解码器：分块推入字节，返回已能完整解码的字符串，未完成的尾部字节留待下一块。 */

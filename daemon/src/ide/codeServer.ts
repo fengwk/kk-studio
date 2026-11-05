@@ -6,6 +6,8 @@ import { createServer } from 'node:net'
 import type { AddressInfo } from 'node:net'
 import type { Readable } from 'node:stream'
 import type { DaemonConfig, ManagedProcess, ProcessSupervisor } from '../contracts.js'
+import { IDE_COMPONENT_RELATIVE_PATH } from '../config.js'
+import { delay } from '../delay.js'
 import { withLoopbackResponse } from '../network.js'
 import { bundledNodeExecutableName, isPosixHost } from '../native/host.js'
 import { ensurePrivateDirectory, writePrivateFile } from '../native/index.js'
@@ -122,7 +124,7 @@ interface Launch {
 
 /** Resolves the fixed, bundled Node CLI of the frozen distribution. */
 export function resolveCodeServerLaunch(distributionDir: string): Launch {
-  const root = join(distributionDir, 'runtime', 'code-server')
+  const root = join(distributionDir, IDE_COMPONENT_RELATIVE_PATH)
   const nodeName = bundledNodeExecutableName()
   const executable = join(root, 'lib', nodeName)
   const entry = join(root, 'out', 'node', 'entry.js')
@@ -218,10 +220,6 @@ function allocateLoopbackPort(): Promise<number> {
       probe.close(() => resolve(port))
     })
   })
-}
-
-function delay(millis: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, millis))
 }
 
 function abortError(): Error {

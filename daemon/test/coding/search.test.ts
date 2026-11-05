@@ -354,7 +354,7 @@ describe('fs.grep', () => {
 
   it('二进制文件在 NUL 之前的匹配也不输出', async () => {
     const dir = await tempDir()
-    // rg 会先报告 NUL 之前的匹配；旧契约按前 8KiB 探针把整文件视为二进制，必须整文件跳过。
+    // rg 会先报告 NUL 之前的匹配；按前 8KiB 探针把整文件视为二进制，必须整文件跳过。
     await writeFile(join(dir, 'bin.dat'), Buffer.from('match\n\u0000tail\n'))
     const result = await callCapability(grep, 'fs.grep', { pattern: '^match$', path: dir }, makeContext(dir))
     expect(result.error).toBe(false)

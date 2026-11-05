@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { create } from '@bufbuild/protobuf'
 
 import type { ResourceUploader, ResultContent } from '../contracts.js'
+import { delay } from '../delay.js'
 import { getOutboundNetwork } from '../network.js'
 import {
   EnvelopeSchema,
@@ -273,14 +274,14 @@ class DefaultResourceTransferClient implements ResourceTransferClient {
 
   private async awaitConnection(signal: AbortSignal): Promise<void> {
     while (!this.connectionAvailable && !signal.aborted) {
-      await sleep(this.connectionPollMillis)
+      await delay(this.connectionPollMillis)
     }
     this.throwIfAborted(signal)
   }
 
   private async backoff(signal: AbortSignal): Promise<void> {
     this.throwIfAborted(signal)
-    await sleep(this.retryBackoffMillis)
+    await delay(this.retryBackoffMillis)
     this.throwIfAborted(signal)
   }
 
@@ -314,12 +315,6 @@ function withTimeout<T>(promise: Promise<T>, millis: number, message: string): P
         reject(error)
       },
     )
-  })
-}
-
-function sleep(millis: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, Math.max(1, millis))
   })
 }
 

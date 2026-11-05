@@ -41,6 +41,7 @@ import {
   type UpgradeRequired,
 } from '../../generated/control_pb.js'
 import { DAEMON_VERSION_PATTERN } from '../../release.js'
+import { LONG_MAX, MAX_SKILL_PACKAGE_NAME_CHARS, SKILL_PACKAGE_NAME_PATTERN } from '../../validation-constants.js'
 import { frame, requireMessageLength, unframe } from './framing.js'
 import {
   MAX_MESSAGE_BYTES,
@@ -76,13 +77,10 @@ export const MAX_UPDATE_MESSAGE_CHARS = 500
 export const MAX_PRESIGNED_URL_CHARS = 4096
 export const MAX_PRESIGNED_HEADERS = 16
 export const MAX_PRESIGNED_HEADER_CHARS = 1024
-export const MAX_POSITIVE_BIGINT = 9223372036854775807n
 export const MAX_SKILL_PACKAGES = 512
 export const MAX_SKILL_DOWNLOAD_URL_CHARS = 4096
 export const MAX_SKILL_LOCAL_PATH_CHARS = 4096
 export const MAX_SKILL_ERROR_CHARS = 512
-export const MAX_SKILL_PACKAGE_NAME_CHARS = 64
-export const SKILL_PACKAGE_NAME_PATTERN = /^[a-z0-9]+(-[a-z0-9]+)*$/
 
 const CAPABILITY_ID_PATTERN = /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/
 const IDE_CODE_PATTERN = /^[A-Z][A-Z0-9_]{0,63}$/
@@ -930,7 +928,7 @@ function requireDaemonVersion(value: unknown, name: string): string {
 }
 
 function requirePositive(value: unknown, name: string): bigint {
-  return requireSafeLong(value, name, 1n, MAX_POSITIVE_BIGINT)
+  return requireSafeLong(value, name, 1n, LONG_MAX)
 }
 
 function requireSingleLine(value: unknown, name: string, maxChars = Number.MAX_SAFE_INTEGER): string {

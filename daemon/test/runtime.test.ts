@@ -56,10 +56,10 @@ import {
 import { Runtime } from '../src/runtime.js'
 import type { TemporaryResourceSweeper, UpdatePort, UpdateProgressReporter } from '../src/runtime-ports.js'
 import { fileCapabilities } from '../src/coding/files.js'
-import { processCapabilities } from '../src/coding/process.js'
 import {
   FakeTransport,
   fakeProcessSupervisor,
+  processCapabilities,
   testConfig,
   tick,
   waitFor,

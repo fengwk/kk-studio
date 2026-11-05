@@ -310,13 +310,9 @@ export class TemporaryResourceStore {
     })
   }
 
-  /** 删除一个已不再需要的中转 workspace（含创建登记）。 */
+  /** 删除指定的中转 workspace。 */
   async deleteWorkspace(directory: string): Promise<void> {
     await deleteTreeQuietly(directory)
-  }
-
-  hasActiveLease(id: string): boolean {
-    return this.leases.has(id)
   }
 
   /** 是否仍有任何在途租约（读取/写入中的 workspace）。 */

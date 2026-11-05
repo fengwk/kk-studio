@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import koffi from 'koffi'
+import { delay } from '../delay.js'
 
 /**
  * POSIX **会话**原语：父进程与 scope helper 都只通过这里触达 libc / libproc。
@@ -678,8 +679,4 @@ function exists(path: string): boolean {
   } catch {
     return false
   }
-}
-
-function delay(millis: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, millis))
 }

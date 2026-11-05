@@ -10,8 +10,6 @@
  * 独占直连通道，完全不读环境代理与全局 dispatcher。
  */
 
-import http from 'node:http'
-import https from 'node:https'
 import net from 'node:net'
 import { Readable } from 'node:stream'
 import type { IncomingHttpHeaders } from 'node:http'
@@ -430,14 +428,6 @@ export interface OutboundNetwork {
     signal: AbortSignal,
     use: (response: OutboundResponse) => Promise<T>,
   ): Promise<T>
-  /** 为 WS 握手创建独占 Agent；proxy 与 direct 都不复用全局 agent。 */
-  createWebSocketAgent(target: string | URL, signal: AbortSignal): Promise<WebSocketAgent>
-}
-
-export interface WebSocketAgent {
-  agent: http.Agent | https.Agent
-  /** 连接 close/error 时必须调用，释放独占 Agent。 */
-  destroy(): void
 }
 
 const REDIRECT_STATUS = new Set([301, 302, 303, 307, 308])
@@ -446,7 +436,6 @@ class DefaultOutboundNetwork implements OutboundNetwork {
   private readonly dispatchers = new Set<Dispatcher>()
   private readonly retires = new Map<Dispatcher, Promise<unknown>>()
   private readonly retired = new WeakSet<Dispatcher>()
-  private readonly agents = new Set<http.Agent | https.Agent>()
   private readonly inflight = new Set<Promise<unknown>>()
   private readonly lifetime = new AbortController()
   private closed = false
@@ -498,35 +487,6 @@ class DefaultOutboundNetwork implements OutboundNetwork {
       throw cleanup
     }
     return result as T
-  }
-
-  async createWebSocketAgent(target: string | URL, signal: AbortSignal): Promise<WebSocketAgent> {
-    this.ensureOpen()
-    const url = typeof target === 'string' ? new URL(target) : target
-    const secure = url.protocol === 'wss:' || url.protocol === 'https:'
-    const choice = await this.track(this.policy.select(url.toString(), this.combine(signal)))
-    this.ensureOpen()
-    const agent =
-      choice.kind === 'proxy'
-        ? secure
-          ? new https.Agent({ keepAlive: false, proxyEnv: { https_proxy: choice.url } })
-          : new http.Agent({ keepAlive: false, proxyEnv: { http_proxy: choice.url } })
-        : secure
-          ? new https.Agent({ keepAlive: false })
-          : new http.Agent({ keepAlive: false })
-    this.agents.add(agent)
-    let destroyed = false
-    return {
-      agent,
-      destroy: () => {
-        if (destroyed) {
-          return
-        }
-        destroyed = true
-        this.agents.delete(agent)
-        agent.destroy()
-      },
-    }
   }
 
   /** 关闭本次网络：中止生命周期并等待自身 pending 退场，再强制销毁独占资源（不无限等待未消费 body）。 */
@@ -650,16 +610,8 @@ class DefaultOutboundNetwork implements OutboundNetwork {
     for (const dispatcher of [...this.dispatchers]) {
       void this.retire(dispatcher, true)
     }
-    const agents = [...this.agents]
-    this.agents.clear()
-    const destructions = agents.map((agent) =>
-      Promise.resolve().then(() => {
-        agent.destroy()
-      }),
-    )
     // 等待所有 in-flight retire 真正 settle，再汇总其保留的 cleanup failure。
     const retireResults = await Promise.allSettled([...this.retires.values()])
-    const destructionResults = await Promise.allSettled(destructions)
     await Promise.allSettled([...this.inflight])
     const failures: unknown[] = []
     for (const result of retireResults) {
@@ -667,11 +619,6 @@ class DefaultOutboundNetwork implements OutboundNetwork {
         failures.push(result.reason)
       } else if (result.value !== undefined) {
         failures.push(result.value)
-      }
-    }
-    for (const result of destructionResults) {
-      if (result.status === 'rejected') {
-        failures.push(result.reason)
       }
     }
     throwFailures(failures)

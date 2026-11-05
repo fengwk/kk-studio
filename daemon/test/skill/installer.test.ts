@@ -13,7 +13,7 @@ describe('SkillPackageInstaller', () => {
   let skillsRoot: string
   let server: http.Server | null = null
   let serverUrl: string
-  let routes = new Map<string, { body: Buffer; statusCode?: number; onHit?: () => void }>()
+  let routes = new Map<string, { body: Buffer; statusCode?: number; location?: string; onHit?: () => void }>()
 
   beforeEach(async () => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'skill-inst-test-'))
@@ -28,6 +28,7 @@ describe('SkillPackageInstaller', () => {
         res.writeHead(handler.statusCode ?? 200, {
           'Content-Type': 'application/zip',
           'Content-Length': handler.body.length,
+          ...(handler.location === undefined ? {} : { Location: handler.location }),
         })
         res.end(handler.body)
       } else {
@@ -125,6 +126,20 @@ describe('SkillPackageInstaller', () => {
     expect(state2.installedSha256).toBe(sha)
     // Download should NOT have been called again!
     expect(downloadCount).toBe(1)
+  })
+
+  it('rejects a download redirect without contacting its target', async () => {
+    const zip = buildZipFixture([{ name: 'test.txt', content: 'content' }])
+    let targetHits = 0
+    routes.set('/redirect.zip', { body: Buffer.alloc(0), statusCode: 302, location: `${serverUrl}/target.zip` })
+    routes.set('/target.zip', { body: zip, onHit: () => targetHits++ })
+    const installer = new SkillPackageInstaller(skillsRoot, { privateFs: createTestPrivateFs() })
+
+    // 预签名下载地址的重定向保留为 HTTP 状态失败，不向新目标转发请求。
+    const state = await installer.install('redirect-pkg', sha256Of(zip), zip.length, `${serverUrl}/redirect.zip`)
+    expect(state.error).toContain('Download failed with HTTP status 302')
+    expect(targetHits).toBe(0)
+    expect(fs.existsSync(path.join(skillsRoot, 'redirect-pkg'))).toBe(false)
   })
 
   it('sha mismatch rejects and does not install package', async () => {

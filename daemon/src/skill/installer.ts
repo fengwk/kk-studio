@@ -2,11 +2,12 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { randomUUID, createHash } from 'node:crypto'
 import type { Readable } from 'node:stream'
-import { request } from 'undici'
 import yauzl from 'yauzl'
 import { create } from '@bufbuild/protobuf'
 
 import type { DaemonConfig } from '../contracts.js'
+import { getOutboundNetwork } from '../network.js'
+import { MAX_SKILL_PACKAGE_NAME_CHARS, SHA256_LOWER_PATTERN, SKILL_PACKAGE_NAME_PATTERN } from '../validation-constants.js'
 import { SkillPackageStateSchema, type SkillPackageState } from '../generated/control_pb.js'
 import {
   type DirectoryMover,
@@ -18,9 +19,6 @@ import { ensurePrivateDirectory, isRealDirectory, isRealFile, writePrivateFile }
 export const MARKER_FILENAME = '.kkstudio-sha256'
 export const MAX_ZIP_ENTRIES = 5000
 export const MAX_ZIP_UNCOMPRESSED_BYTES = 256 * 1024 * 1024 // 256 MiB
-export const MAX_SKILL_PACKAGE_NAME_CHARS = 64
-export const SKILL_PACKAGE_NAME_PATTERN = /^[a-z0-9]+(-[a-z0-9]+)*$/
-export const SHA256_LOWER_PATTERN = /^[0-9a-f]{64}$/
 
 class PackageLocks {
   private chains = new Map<string, Promise<unknown>>()
@@ -53,18 +51,12 @@ export class SkillPackageInstaller {
 
   constructor(
     skillsRoot: string,
-    optionsOrStaging?: string | SkillPackageInstallerOptions,
-    _backupRoot?: string,
-    options?: SkillPackageInstallerOptions,
+    options: SkillPackageInstallerOptions = {},
   ) {
     this._skillsRoot = path.resolve(skillsRoot)
-    const resolvedOptions =
-      typeof optionsOrStaging === 'object' && optionsOrStaging !== null
-        ? optionsOrStaging
-        : (options ?? {})
-    this.privateFs = resolvedOptions.privateFs ?? { ensurePrivateDirectory, writePrivateFile }
+    this.privateFs = options.privateFs ?? { ensurePrivateDirectory, writePrivateFile }
     this.directoryMover =
-      resolvedOptions.directoryMover ??
+      options.directoryMover ??
       (async (source: string, target: string): Promise<void> => {
         await fs.promises.rename(source, target)
       })
@@ -169,7 +161,6 @@ export class SkillPackageInstaller {
     sha256: string,
     sizeBytes: number | bigint,
     downloadUrl: string,
-    signal?: AbortSignal,
   ): Promise<SkillPackageState> {
     try {
       validatePackageName(packageName)
@@ -181,7 +172,7 @@ export class SkillPackageInstaller {
       const numericSize = typeof sizeBytes === 'bigint' ? Number(sizeBytes) : sizeBytes
 
       return await this.packageLocks.acquire(packageName, async () => {
-        return await this.doInstall(packageName, sha256, numericSize, downloadUrl, signal)
+        return await this.doInstall(packageName, sha256, numericSize, downloadUrl)
       })
     } catch (error) {
       const prev = await this.readInstalledPackageQuietly(packageName)
@@ -199,7 +190,6 @@ export class SkillPackageInstaller {
     sha256: string,
     sizeBytes: number,
     downloadUrl: string,
-    signal?: AbortSignal,
   ): Promise<SkillPackageState> {
     const packageDir = path.join(this._skillsRoot, packageName)
     const currentMarker = await this.readMarker(packageName)
@@ -219,9 +209,9 @@ export class SkillPackageInstaller {
     try {
       await this.privateFs.ensurePrivateDirectory(stagingDir)
 
-      tempZipPath = await this.downloadArchive(downloadUrl, sha256, sizeBytes, signal)
+      tempZipPath = await this.downloadArchive(downloadUrl, sha256, sizeBytes)
 
-      await this.unzipArchive(tempZipPath, stagingDir, signal)
+      await this.unzipArchive(tempZipPath, stagingDir)
 
       const markerPath = path.join(stagingDir, MARKER_FILENAME)
       await this.privateFs.writePrivateFile(markerPath, `${sha256.toLowerCase()}\n`)
@@ -267,49 +257,43 @@ export class SkillPackageInstaller {
     downloadUrl: string,
     sha256: string,
     sizeBytes: number,
-    signal?: AbortSignal,
   ): Promise<string> {
     const tempZipPath = path.join(this._skillsRoot, `.archive-${randomUUID()}.tmp`)
     const hash = createHash('sha256')
     let downloadedBytes = 0
-    let fileHandle: fs.promises.FileHandle | null = null
-
     try {
-      if (signal?.aborted) {
-        throw new Error('Operation aborted')
-      }
+      await getOutboundNetwork().withResponse(
+        downloadUrl,
+        { method: 'GET', redirect: 'manual' },
+        new AbortController().signal,
+        async (response) => {
+          if (response.statusCode < 200 || response.statusCode >= 300) {
+            throw new Error(`Download failed with HTTP status ${response.statusCode}`)
+          }
 
-      const response = await request(downloadUrl, {
-        method: 'GET',
-        signal,
-      })
-
-      if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw new Error(`Download failed with HTTP status ${response.statusCode}`)
-      }
-
-      fileHandle = await fs.promises.open(
-        tempZipPath,
-        fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL,
-        0o600,
+          const fileHandle = await fs.promises.open(
+            tempZipPath,
+            fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL,
+            0o600,
+          )
+          try {
+            for await (const chunk of response.body) {
+              const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+              downloadedBytes += buffer.length
+              if (downloadedBytes > sizeBytes) {
+                throw new Error(`Download exceeded declared size (${sizeBytes} bytes)`)
+              }
+              hash.update(buffer)
+              await fileHandle.write(buffer)
+            }
+            await fileHandle.sync()
+          } catch (error) {
+            await fileHandle.close().catch(() => undefined)
+            throw error
+          }
+          await fileHandle.close()
+        },
       )
-
-      for await (const chunk of response.body) {
-        if (signal?.aborted) {
-          throw new Error('Operation aborted')
-        }
-        const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
-        downloadedBytes += buffer.length
-        if (downloadedBytes > sizeBytes) {
-          throw new Error(`Download exceeded declared size (${sizeBytes} bytes)`)
-        }
-        hash.update(buffer)
-        await fileHandle.write(buffer)
-      }
-
-      await fileHandle.sync()
-      await fileHandle.close()
-      fileHandle = null
 
       if (downloadedBytes !== sizeBytes) {
         throw new Error(
@@ -324,11 +308,6 @@ export class SkillPackageInstaller {
 
       return tempZipPath
     } catch (error) {
-      if (fileHandle !== null) {
-        try {
-          await fileHandle.close()
-        } catch {}
-      }
       await deleteFileQuietly(tempZipPath)
       throw error
     }
@@ -337,26 +316,14 @@ export class SkillPackageInstaller {
   private async unzipArchive(
     zipPath: string,
     stagingDir: string,
-    signal?: AbortSignal,
   ): Promise<void> {
     return new Promise<void>((resolve, reject) => {
       let closed = false
       let currentStream: Readable | null = null
 
-      const onAbort = () => {
-        cleanup(new Error('Operation aborted'))
-      }
-      if (signal) {
-        if (signal.aborted) {
-          return reject(new Error('Operation aborted'))
-        }
-        signal.addEventListener('abort', onAbort, { once: true })
-      }
-
       function cleanup(error?: unknown) {
         if (closed) return
         closed = true
-        if (signal) signal.removeEventListener('abort', onAbort)
         if (currentStream) {
           try {
             currentStream.destroy()
@@ -378,7 +345,6 @@ export class SkillPackageInstaller {
         { lazyEntries: true, autoClose: false, strictFileNames: true },
         (err, zipfile) => {
         if (err || !zipfile) {
-          if (signal) signal.removeEventListener('abort', onAbort)
           return reject(new Error(`Failed to open zip archive: ${err?.message ?? 'unknown'}`))
         }
         zipfileInstance = zipfile
@@ -393,7 +359,6 @@ export class SkillPackageInstaller {
         zipfile.on('end', () => {
           if (!closed) {
             closed = true
-            if (signal) signal.removeEventListener('abort', onAbort)
             try {
               zipfile.close()
             } catch {}
@@ -404,10 +369,6 @@ export class SkillPackageInstaller {
         zipfile.on('entry', async (entry: yauzl.Entry) => {
           if (closed) return
           try {
-            if (signal?.aborted) {
-              throw new Error('Operation aborted')
-            }
-
             entryCount++
             if (entryCount > MAX_ZIP_ENTRIES) {
               throw new Error(`Archive exceeds maximum entry limit (${MAX_ZIP_ENTRIES})`)

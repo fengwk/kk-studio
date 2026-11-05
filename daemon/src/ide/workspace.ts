@@ -1,13 +1,12 @@
-import { randomUUID } from 'node:crypto'
 import { opendir, readdir, readFile, stat, realpath } from 'node:fs/promises'
 import { dirname, isAbsolute, join } from 'node:path'
 import type { DaemonConfig, IdeReply } from '../contracts.js'
 import { ensurePrivateDirectory, writePrivateFile } from '../native/index.js'
 import { isCanonicalUuid } from '../protocol/uuid.js'
+import { LONG_MAX } from '../validation-constants.js'
 import { IdeError } from './errors.js'
 
 const EPOCH_PATTERN = /^[1-9][0-9]*$/
-export const LONG_MAX = 9_223_372_036_854_775_807n
 
 export function validateUuid(value: string, field = 'id'): string {
   if (!isCanonicalUuid(value)) {
@@ -28,14 +27,6 @@ export function validateBindingEpoch(value: string): string {
     throw new IdeError('bindingEpoch is out of range')
   }
   return value
-}
-
-export function epochValue(value: string): bigint {
-  return BigInt(validateBindingEpoch(value))
-}
-
-export function newViewId(): string {
-  return randomUUID()
 }
 
 /** Resolves the host HOME used when OPEN_VIEW is called without a directory. */
