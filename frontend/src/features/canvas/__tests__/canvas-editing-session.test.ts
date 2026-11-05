@@ -6,7 +6,7 @@ import {
   resetEditingSessionForTests,
 } from '@/features/canvas/canvas-editing-session'
 
-const SESSION_STORAGE_KEY = 'kkstudio.canvas.editingSessionId'
+const SESSION_STORAGE_KEY = 'kk-studio.canvas.editingSessionId'
 
 afterEach(() => {
   vi.restoreAllMocks()
@@ -128,7 +128,7 @@ describe('Canvas 编辑会话身份', () => {
     const mySessionId = getEditingSessionId()
 
     // 模拟进入 bfcache：休眠期间另一标签页以相同的 sessionId（如复制标签页）成为活所有者
-    const OWNER_STORAGE_KEY = 'kkstudio.canvas.editingSessionOwner'
+    const OWNER_STORAGE_KEY = 'kk-studio.canvas.editingSessionOwner'
     const otherPageOwner = {
       [mySessionId]: {
         pageId: 'other-live-page-id',
@@ -174,7 +174,7 @@ describe('Canvas 编辑会话身份', () => {
     resetEditingSessionForTests()
     const mySessionId = getEditingSessionId()
 
-    const OWNER_STORAGE_KEY = 'kkstudio.canvas.editingSessionOwner'
+    const OWNER_STORAGE_KEY = 'kk-studio.canvas.editingSessionOwner'
     const otherPageOwner = {
       [mySessionId]: {
         pageId: 'other-live-page-id',

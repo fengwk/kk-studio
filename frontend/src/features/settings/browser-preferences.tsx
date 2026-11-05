@@ -10,8 +10,8 @@ import {
   type PropsWithChildren,
 } from 'react'
 
-const STORAGE_KEY = 'kkstudio.browser-preferences'
-const CHANGE_EVENT = 'kkstudio:browser-preferences'
+const STORAGE_KEY = 'kk-studio.browser-preferences'
+const CHANGE_EVENT = 'kk-studio:browser-preferences'
 
 export interface BrowserPreferences {
   notificationsEnabled: boolean

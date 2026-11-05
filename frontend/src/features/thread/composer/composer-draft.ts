@@ -6,7 +6,7 @@ import {
   type ImageInputTier,
 } from '@/features/thread/composer/composer-parts'
 
-const STORAGE_PREFIX = 'kkstudio.ai.composer-draft:'
+const STORAGE_PREFIX = 'kk-studio.composer-draft:'
 
 export function composerDraftStorageKey(scope: string): string {
   return `${STORAGE_PREFIX}${scope}`

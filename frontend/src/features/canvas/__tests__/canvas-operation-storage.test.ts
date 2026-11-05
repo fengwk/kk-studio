@@ -293,8 +293,8 @@ describe('Canvas 待确认操作持久化 (operation store)', () => {
     })
 
     // 3. 模拟 bfcache 冲突触发 sessionReloading = true
-    const OWNER_STORAGE_KEY = 'kkstudio.canvas.editingSessionOwner'
-    const SESSION_STORAGE_KEY = 'kkstudio.canvas.editingSessionId'
+    const OWNER_STORAGE_KEY = 'kk-studio.canvas.editingSessionOwner'
+    const SESSION_STORAGE_KEY = 'kk-studio.canvas.editingSessionId'
     window.sessionStorage.setItem(SESSION_STORAGE_KEY, 'tab-1')
     window.localStorage.setItem(
       OWNER_STORAGE_KEY,

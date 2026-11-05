@@ -4,7 +4,7 @@ test('discarding a corrupt pending record uses the shared confirmation', async (
   await page.setViewportSize({ width: 360, height: 740 })
   await page.addInitScript(() => {
     localStorage.setItem(
-      'kkstudio.canvas.pending-run:8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f:00000000-0000-4000-8000-000000000009',
+      'kk-studio.canvas.pending-run:8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f:00000000-0000-4000-8000-000000000009',
       'invalid-json',
     )
   })

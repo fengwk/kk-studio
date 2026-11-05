@@ -26,7 +26,7 @@ import {
 } from '@/features/canvas/canvas-editing-session'
 import type { CanvasCommandDTO } from '@/shared/api/generated/contracts'
 
-const DB_NAME = 'kkstudio.canvas.operations'
+const DB_NAME = 'kk-studio.canvas.operations'
 const DB_VERSION = 1
 const STORE_NAME = 'operations'
 const SESSION_INDEX = 'sessionKey'

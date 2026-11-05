@@ -1,4 +1,4 @@
-const STORAGE_PREFIX = 'kkstudio.ai.pending-stop:'
+const STORAGE_PREFIX = 'kk-studio.pending-stop:'
 
 /**
  * 一次含混 Stop 的精确重试身份。相同 Thread/basis 下复用原 body；权威 basis 移动后清理。

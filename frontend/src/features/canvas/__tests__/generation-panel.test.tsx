@@ -829,7 +829,7 @@ describe('Canvas generic generation panel', () => {
   it('I06: 未决记录异常展示、确认放弃弹窗与状态恢复', async () => {
     const corruptRaw = 'corrupt-raw-json-data'
     const targetId = NODE_TARGET
-    const storageKey = `kkstudio.canvas.pending-run:${CANVAS_ID}:${targetId}`
+    const storageKey = `kk-studio.canvas.pending-run:${CANVAS_ID}:${targetId}`
     window.localStorage.setItem(storageKey, corruptRaw)
 
     const view = renderPanel()

@@ -6,7 +6,7 @@ import {
   useBrowserPreferences,
 } from '@/features/settings/browser-preferences'
 
-const STORAGE_KEY = 'kkstudio.browser-preferences'
+const STORAGE_KEY = 'kk-studio.browser-preferences'
 
 describe('decodeBrowserPreferences', () => {
   it('returns the default (false) for null, malformed JSON and non-object values', () => {
