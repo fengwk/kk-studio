@@ -81,6 +81,12 @@
   flex-direction: row;
   align-items: flex-start;
   gap: 12px;
+  /* 失败原因需要独占一整行，图标与描述保持首行。 */
+  flex-wrap: wrap;
+}
+
+.confirm-modal-error {
+  flex: 1 0 100%;
 }
 
 .confirm-modal-icon {
