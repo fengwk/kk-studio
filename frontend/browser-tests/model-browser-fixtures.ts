@@ -167,7 +167,3 @@ export const FIXTURE_DEFAULTS_PAGE: ModelCatalogPageDTO = {
 export function pageResult<T>(results: T[]) {
   return { pageNumber: 1, pageSize: 50, totalCount: String(results.length), results }
 }
-
-export function resultEnvelope<T>(data: T) {
-  return { status: 200, code: 'OK', message: 'OK', data }
-}

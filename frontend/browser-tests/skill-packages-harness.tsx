@@ -197,9 +197,8 @@ function clone<T>(value: T): T {
 function requirePackage(packageName: string): FakePackage {
   const pkg = packages.get(packageName)
   if (!pkg) {
-    throw new ApiError(`skill package not found: ${packageName}`, 404, 'resource_not_found', {
-      detail: `Skill package ${packageName} not found`,
-    })
+    throw new ApiError(`skill package not found: ${packageName}`, 404, 'not_found',
+      undefined, undefined, `Skill package ${packageName} not found`)
   }
   return pkg
 }
@@ -224,9 +223,8 @@ agentService.listSkillPackageEnvironments = async (name: string) =>
 agentService.createSkillPackage = async (payload: SkillPackageGitCreateDTO) => {
   await delay(120)
   if (packages.has(payload.packageName)) {
-    throw new ApiError('duplicate', 409, 'duplicate', {
-      detail: `Skill package ${payload.packageName} already exists`,
-    })
+    throw new ApiError('duplicate', 409, 'duplicate',
+      undefined, undefined, `Skill package ${payload.packageName} already exists`)
   }
   const detail = gitDetail(payload.packageName, {
     description: payload.description ?? null,
@@ -265,9 +263,8 @@ agentService.publishSkillPackage = async (name: string, data: { expectedVersion:
   await delay(120)
   const pkg = requirePackage(name)
   if (data.expectedVersion !== pkg.detail.version) {
-    throw new ApiError('version conflict', 409, 'version_conflict', {
-      detail: 'The skill package was changed by someone else',
-    })
+    throw new ApiError('version conflict', 409, 'version_conflict',
+      undefined, undefined, 'The skill package was changed by someone else')
   }
   pkg.detail = {
     ...pkg.detail,
@@ -283,9 +280,8 @@ agentService.editSkillPackage = async (name: string, data: { expectedVersion: st
   await delay(80)
   const pkg = requirePackage(name)
   if (data.expectedVersion !== pkg.detail.version) {
-    throw new ApiError('version conflict', 409, 'version_conflict', {
-      detail: 'The skill package was changed by someone else',
-    })
+    throw new ApiError('version conflict', 409, 'version_conflict',
+      undefined, undefined, 'The skill package was changed by someone else')
   }
   pkg.detail = {
     ...pkg.detail,
@@ -300,14 +296,12 @@ agentService.deleteSkillPackage = async (name: string, expectedVersion: string) 
   await delay(80)
   const pkg = requirePackage(name)
   if (name === 'agent-used') {
-    throw new ApiError('in use', 409, 'in_use', {
-      detail: 'Skill package is still referenced by Agent demo-agent',
-    })
+    throw new ApiError('in use', 409, 'in_use', undefined, undefined,
+      'Skill package is still referenced by Agent demo-agent')
   }
   if (expectedVersion !== pkg.detail.version) {
-    throw new ApiError('version conflict', 409, 'version_conflict', {
-      detail: 'The skill package was changed by someone else',
-    })
+    throw new ApiError('version conflict', 409, 'version_conflict',
+      undefined, undefined, 'The skill package was changed by someone else')
   }
   packages.delete(name)
 }
@@ -351,20 +345,17 @@ agentService.publishSkillPackageUpload = async (payload: SkillPackageUploadPubli
   await delay(160)
   const pending = staged.get(payload.stagingUploadId)
   if (!pending) {
-    throw new ApiError('staging upload expired', 409, 'version_conflict', {
-      detail: 'The staged archive has expired',
-    })
+    throw new ApiError('staging upload expired', 409, 'version_conflict',
+      undefined, undefined, 'The staged archive has expired')
   }
   if (pending.packageName === 'agent-used') {
-    throw new ApiError('in use', 409, 'in_use', {
-      detail: 'Skill package is still referenced by Agent demo-agent',
-    })
+    throw new ApiError('in use', 409, 'in_use', undefined, undefined,
+      'Skill package is still referenced by Agent demo-agent')
   }
   const existing = packages.get(pending.packageName)
   if (existing && payload.expectedVersion !== existing.detail.version) {
-    throw new ApiError('version conflict', 409, 'version_conflict', {
-      detail: 'The skill package was changed by someone else',
-    })
+    throw new ApiError('version conflict', 409, 'version_conflict',
+      undefined, undefined, 'The skill package was changed by someone else')
   }
   const detail: SkillPackageDetailDTO = {
     ...gitDetail(pending.packageName),

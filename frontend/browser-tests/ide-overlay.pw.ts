@@ -166,7 +166,7 @@ async function installTransport(page: Page, state: TransportState): Promise<void
     const method = request.method()
 
     if (method === 'GET' && path === '/api/environments') {
-      await route.fulfill({ json: { status: 200, data: CARDS } })
+      await route.fulfill({ json: CARDS })
       return
     }
 
@@ -184,13 +184,16 @@ async function installTransport(page: Page, state: TransportState): Promise<void
       if (failure === 'view-in-use' || failure === 'view-gone') {
         await route.fulfill({
           status: 409,
+          contentType: 'application/problem+json',
           json: {
+            type: 'about:blank',
             status: 409,
-            code: 'IDE_UNAVAILABLE',
-            message: failure === 'view-in-use'
+            code: 'unavailable',
+            reason: 'IDE_UNAVAILABLE',
+            title: failure === 'view-in-use'
               ? 'IDE view is in use'
               : 'IDE view is gone; open a new view before retrying',
-            errors: { detail: failure === 'view-in-use' ? 'VIEW_IN_USE' : 'VIEW_GONE' },
+            detail: failure === 'view-in-use' ? 'VIEW_IN_USE' : 'VIEW_GONE',
           },
         })
         return
@@ -207,7 +210,7 @@ async function installTransport(page: Page, state: TransportState): Promise<void
         state: 'OPEN',
         entryUrl: `/environment-ide/${environmentId}/${viewId}/__ide/bootstrap?token=${viewId}-${state.epoch}`,
       }
-      await route.fulfill({ json: { status: 200, data: response } })
+      await route.fulfill({ json: response })
       return
     }
 
@@ -218,7 +221,7 @@ async function installTransport(page: Page, state: TransportState): Promise<void
         viewId: decodeURIComponent(terminalMatch[2]!),
         body: (request.postDataJSON() as Record<string, unknown> | null) ?? {},
       })
-      await route.fulfill({ json: { status: 200, data: null } })
+      await route.fulfill({ status: 204 })
       return
     }
 
@@ -232,23 +235,22 @@ async function installTransport(page: Page, state: TransportState): Promise<void
       if (fixture == null || fixture.denied === true) {
         await route.fulfill({
           status: 403,
+          contentType: 'application/problem+json',
           json: {
+            type: 'about:blank',
             status: 403,
-            code: 'environment',
-            message: `permission denied: ${targetPath}`,
+            code: 'unauthorized',
+            title: `permission denied: ${targetPath}`,
           },
         })
         return
       }
       await route.fulfill({
         json: {
-          status: 200,
-          data: {
-            path: targetPath,
-            parentPath: fixture.parentPath,
-            children: fixture.children,
-            truncated: fixture.truncated === true,
-          },
+          path: targetPath,
+          parentPath: fixture.parentPath,
+          children: fixture.children,
+          truncated: fixture.truncated === true,
         },
       })
       return
@@ -263,8 +265,6 @@ async function installTransport(page: Page, state: TransportState): Promise<void
       const targetDirectory = String(body.directory)
       await route.fulfill({
         json: {
-          status: 200,
-          data: {
             viewId,
             environmentId,
             documentId: body.documentId,
@@ -277,7 +277,6 @@ async function installTransport(page: Page, state: TransportState): Promise<void
             workspacePath: targetDirectory,
             state: 'OPEN',
             entryUrl: null,
-          },
         },
       })
       return
@@ -293,21 +292,25 @@ async function installTransport(page: Page, state: TransportState): Promise<void
         state.dirtyCloseOnce = false
         await route.fulfill({
           status: 409,
+          contentType: 'application/problem+json',
           json: {
+            type: 'about:blank',
             status: 409,
-            code: 'ide_unavailable',
-            message: 'IDE bridge unavailable',
+            code: 'unavailable',
+            reason: 'IDE_UNAVAILABLE',
+            title: 'IDE bridge unavailable',
           },
         })
         return
       }
-      await route.fulfill({ json: { status: 200, data: null } })
+      await route.fulfill({ status: 204 })
       return
     }
 
     await route.fulfill({
       status: 404,
-      json: { status: 404, message: `Unexpected harness request: ${method} ${path}` },
+      contentType: 'application/problem+json',
+      json: { type: 'about:blank', status: 404, code: 'not_found', title: `Unexpected harness request: ${method} ${path}` },
     })
   })
 

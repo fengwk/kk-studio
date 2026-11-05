@@ -122,43 +122,40 @@ async function installAgentTreeMock(page: Page) {
     const path = new URL(route.request().url()).pathname
     if (path === `/api/threads/${THREAD_ID}/tree`) {
       treeCalls.push(path)
-      await route.fulfill({ json: { status: 200, data: nodes } })
+      await route.fulfill({ json: nodes })
       return
     }
     if (path === `/api/threads/${THREAD_ID}`) {
       await route.fulfill({
-        json: { status: 200, data: snapshot(THREAD_ID, null, 'Preview Thread', 'IDLE') },
+        json: snapshot(THREAD_ID, null, 'Preview Thread', 'IDLE'),
       })
       return
     }
     if (path === `/api/threads/${CHILD_ID}`) {
       await route.fulfill({
-        json: {
-          status: 200,
-          data: snapshot(CHILD_ID, THREAD_ID, 'Child Planner', 'WAITING'),
-        },
+        json: snapshot(CHILD_ID, THREAD_ID, 'Child Planner', 'WAITING'),
       })
       return
     }
     if (path === `/api/threads/${GRAND_ID}`) {
       await route.fulfill({
-        json: { status: 200, data: snapshot(GRAND_ID, CHILD_ID, 'Grand Worker', 'RUNNING') },
+        json: snapshot(GRAND_ID, CHILD_ID, 'Grand Worker', 'RUNNING'),
       })
       return
     }
     if (path === '/api/interactions') {
       await route.fulfill({
-        json: { status: 200, data: { items: [], nextCursor: null, total: 0, freshnessAt: null } },
+        json: { items: [], nextCursor: null, total: 0, freshnessAt: null },
       })
       return
     }
     if (path === '/api/agents' || path === '/api/models') {
       await route.fulfill({
-        json: { status: 200, data: { pageNumber: 1, pageSize: 50, totalCount: '0', results: [] } },
+        json: { pageNumber: 1, pageSize: 50, totalCount: '0', results: [] },
       })
       return
     }
-    await route.fulfill({ json: { status: 200, data: {} } })
+    await route.fulfill({ json: {} })
   })
   return {
     treeCalls,
