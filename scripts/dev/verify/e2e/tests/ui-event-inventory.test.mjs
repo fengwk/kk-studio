@@ -33,7 +33,7 @@ test('workspace observer requires a thread ack, ignoring connected and other res
 })
 
 test('composer storage observer retains production draft schema', async () => {
-  const source = readFileSync(new URL('../../../../../frontend/src/features/chat/composer/composer-draft.ts', import.meta.url), 'utf8')
+  const source = readFileSync(new URL('../../../../../frontend/src/features/thread/composer/composer-draft.ts', import.meta.url), 'utf8')
   assert.match(source, /JSON\.stringify\(\{\s*parts:/)
   const original = globalThis.localStorage
   let payload = { parts: [{ type: 'text', text: 'draft' }] }
