@@ -45,8 +45,8 @@ import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
 import fun.fengwk.kkstudio.platform.environment.server.EnvironmentServerConfiguration;
 import fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchemaSupport;
-import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
+import fun.fengwk.kkstudio.platform.settings.SystemSettingsTestFixture;
 
 import java.sql.Connection;
 import java.sql.SQLException;
@@ -151,7 +151,7 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
     this.registryNode2 =
         new EnvironmentRegistry(jdbcClient, node2, Clock.systemUTC(), transactionManager, notifier);
 
-    SystemSettingsSnapshot snapshot = new SystemSettingsSnapshot(SystemSettings.DEFAULT);
+    SystemSettingsSnapshot snapshot = new SystemSettingsSnapshot(SystemSettingsTestFixture.DEFAULT);
     EnvironmentSessionListener sessionListener = env -> {};
     EnvironmentServerConfiguration serverConfiguration = new EnvironmentServerConfiguration();
     this.serverNode1 =

@@ -16,8 +16,8 @@ import org.springframework.context.annotation.Primary;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
-import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
+import fun.fengwk.kkstudio.platform.settings.SystemSettingsTestFixture;
 import fun.fengwk.kkstudio.platform.storage.S3PresignService;
 import fun.fengwk.kkstudio.platform.storage.S3StorageService;
 import fun.fengwk.kkstudio.platform.storage.StorageMaintenanceWakeup;
@@ -598,7 +598,7 @@ class IssueEvidenceServiceIntegrationTest extends ProjectTestSupport {
           mock(StorageUploadOperationLock.class),
           wakeups(),
           new S3StorageProperties(),
-          new SystemSettingsSnapshot(SystemSettings.DEFAULT),
+          new SystemSettingsSnapshot(SystemSettingsTestFixture.DEFAULT),
           new StorageMaintenanceProperties(),
           Clock.systemUTC(),
           mock(PlatformTransactionManager.class));

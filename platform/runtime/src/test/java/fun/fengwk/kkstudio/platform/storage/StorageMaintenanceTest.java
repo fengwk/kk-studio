@@ -13,8 +13,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.transaction.PlatformTransactionManager;
 
-import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
+import fun.fengwk.kkstudio.platform.settings.SystemSettingsTestFixture;
 import fun.fengwk.kkstudio.platform.storage.configuration.S3StorageProperties;
 import fun.fengwk.kkstudio.platform.storage.configuration.StorageMaintenanceProperties;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageBlobRepository;
@@ -386,7 +386,7 @@ class StorageMaintenanceTest {
           mock(StorageUploadOperationLock.class),
           wakeups(),
           new S3StorageProperties(),
-          new SystemSettingsSnapshot(SystemSettings.DEFAULT),
+          new SystemSettingsSnapshot(SystemSettingsTestFixture.DEFAULT),
           new StorageMaintenanceProperties(),
           Clock.systemUTC(),
           mock(PlatformTransactionManager.class));

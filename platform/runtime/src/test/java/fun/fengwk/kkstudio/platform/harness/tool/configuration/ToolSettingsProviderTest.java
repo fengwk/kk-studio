@@ -13,6 +13,7 @@ import fun.fengwk.kkstudio.platform.harness.tool.permission.ToolSettings;
 import fun.fengwk.kkstudio.platform.harness.tool.permission.ToolSettingsProvider;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsProvider;
+import fun.fengwk.kkstudio.platform.settings.SystemSettingsTestFixture;
 
 import java.util.List;
 import java.util.Map;
@@ -26,7 +27,7 @@ class ToolSettingsProviderTest {
   /** 数据库默认聚合的 permission 为 write/edit/bash 的 {@code * -> ask}，read 不受限。 */
   @Test
   void convertsDatabaseToolSectionAndSafeDefaults() {
-    ToolSettingsProvider provider = providerFor(SystemSettings.Tool.DEFAULT);
+    ToolSettingsProvider provider = providerFor(SystemSettingsTestFixture.TOOL);
 
     ToolSettings settings = provider.get();
     assertEquals(ASK_ALL, settings.rulesFor("write"));
@@ -53,7 +54,7 @@ class ToolSettingsProviderTest {
 
     // 同一 provider 在数据库快照更新后无需重建即可读到新值。
     when(systemSettingsProvider.get())
-        .thenReturn(systemSettingsWithTool(SystemSettings.Tool.DEFAULT));
+        .thenReturn(systemSettingsWithTool(SystemSettingsTestFixture.TOOL));
     assertEquals(PermissionAction.ASK, provider.get().rulesFor("bash").getFirst().action());
     assertTrue(provider.get().rulesFor("read").isEmpty());
   }
@@ -61,11 +62,11 @@ class ToolSettingsProviderTest {
   /** ACCEPTANCE: 转换直接复用数据库已校验的 permission 规则类型，不引入第二套解码/默认。 */
   @Test
   void delegatesToTheDatabaseAggregateWithoutACodec() {
-    ToolSettings settings = providerFor(SystemSettings.Tool.DEFAULT).get();
+    ToolSettings settings = providerFor(SystemSettingsTestFixture.TOOL).get();
 
     // SystemSettings.Tool.permission 与 ToolSettings.permission 是同一规则模型；转换后规则完全等价。
     assertEquals(
-        SystemSettings.Tool.DEFAULT.permission().get("bash"),
+        SystemSettingsTestFixture.TOOL.permission().get("bash"),
         settings.rulesFor("bash"),
         "permission rules must come from the DB aggregate, no second permission source");
   }
@@ -79,10 +80,10 @@ class ToolSettingsProviderTest {
   private static SystemSettings systemSettingsWithTool(SystemSettings.Tool tool) {
     return new SystemSettings(
         tool,
-        SystemSettings.AiRuntime.DEFAULT,
-        SystemSettings.Environment.DEFAULT,
-        SystemSettings.Network.DEFAULT,
-        SystemSettings.StorageMedia.DEFAULT,
-        SystemSettings.Advanced.DEFAULT);
+        SystemSettingsTestFixture.AI_RUNTIME,
+        SystemSettingsTestFixture.ENVIRONMENT,
+        SystemSettingsTestFixture.NETWORK,
+        SystemSettingsTestFixture.STORAGE_MEDIA,
+        SystemSettingsTestFixture.ADVANCED);
   }
 }

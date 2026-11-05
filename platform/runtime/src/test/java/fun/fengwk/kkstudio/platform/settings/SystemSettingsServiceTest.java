@@ -27,27 +27,27 @@ class SystemSettingsServiceTest {
   /** 与默认聚合可区分的非默认权威聚合（version=1 行的内容）。 */
   private static final SystemSettings UPDATED_SETTINGS =
       new SystemSettings(
-          SystemSettings.Tool.DEFAULT,
+          SystemSettingsTestFixture.TOOL,
           new SystemSettings.AiRuntime(
               9,
-              SystemSettings.AiRuntime.DEFAULT.retryBackoffStrategy(),
-              SystemSettings.AiRuntime.DEFAULT.retryBaseDelayMillis(),
-              SystemSettings.AiRuntime.DEFAULT.retryMaxDelayMillis(),
-              SystemSettings.AiRuntime.DEFAULT.compactionKeepRecentTokens(),
-              SystemSettings.AiRuntime.DEFAULT.subagentMaxDepth(),
-              SystemSettings.AiRuntime.DEFAULT.subagentMaxConcurrency(),
-              SystemSettings.AiRuntime.DEFAULT.subagentMaxTotalConcurrency(),
-              SystemSettings.AiRuntime.DEFAULT.subagentMaxTurns(),
-              SystemSettings.AiRuntime.DEFAULT.modelHttpRetryStatusCodes()),
-          SystemSettings.Environment.DEFAULT,
-          SystemSettings.Network.DEFAULT,
-          SystemSettings.StorageMedia.DEFAULT,
-          SystemSettings.Advanced.DEFAULT);
+              SystemSettingsTestFixture.AI_RUNTIME.retryBackoffStrategy(),
+              SystemSettingsTestFixture.AI_RUNTIME.retryBaseDelayMillis(),
+              SystemSettingsTestFixture.AI_RUNTIME.retryMaxDelayMillis(),
+              SystemSettingsTestFixture.AI_RUNTIME.compactionKeepRecentTokens(),
+              SystemSettingsTestFixture.AI_RUNTIME.subagentMaxDepth(),
+              SystemSettingsTestFixture.AI_RUNTIME.subagentMaxConcurrency(),
+              SystemSettingsTestFixture.AI_RUNTIME.subagentMaxTotalConcurrency(),
+              SystemSettingsTestFixture.AI_RUNTIME.subagentMaxTurns(),
+              SystemSettingsTestFixture.AI_RUNTIME.modelHttpRetryStatusCodes()),
+          SystemSettingsTestFixture.ENVIRONMENT,
+          SystemSettingsTestFixture.NETWORK,
+          SystemSettingsTestFixture.STORAGE_MEDIA,
+          SystemSettingsTestFixture.ADVANCED);
 
   private final SystemSettingsCodec codec = new SystemSettingsCodec();
   private final SystemSettingsRepository repository = mock(SystemSettingsRepository.class);
   private final SystemSettingsSnapshot snapshot =
-      new SystemSettingsSnapshot(SystemSettings.DEFAULT);
+      new SystemSettingsSnapshot(SystemSettingsTestFixture.DEFAULT);
   private final SystemSettingsChangeHandler changeHandler =
       new SystemSettingsChangeHandler(repository, snapshot, event -> {});
   private final SystemSettingsService service =
@@ -64,7 +64,7 @@ class SystemSettingsServiceTest {
   @Test
   void updateReportsRereadVersionWhenConditionalCasLoses() {
     when(repository.get()).thenReturn(record(0), record(1));
-    when(repository.update(SystemSettings.DEFAULT, 0)).thenReturn(false);
+    when(repository.update(SystemSettingsTestFixture.DEFAULT, 0)).thenReturn(false);
 
     SystemSettingsVersionConflictException error =
         assertThrows(
@@ -72,14 +72,14 @@ class SystemSettingsServiceTest {
 
     assertEquals("0", error.expectedVersion());
     assertEquals("1", error.actualVersion());
-    verify(repository).update(SystemSettings.DEFAULT, 0);
+    verify(repository).update(SystemSettingsTestFixture.DEFAULT, 0);
   }
 
   /** 条件更新失败后单行同时消失时，服务必须返回资源缺失而不是伪造版本冲突。 */
   @Test
   void updateReportsMissingRowWhenConditionalCasLoses() {
     when(repository.get()).thenReturn(record(0)).thenReturn(null);
-    when(repository.update(SystemSettings.DEFAULT, 0)).thenReturn(false);
+    when(repository.update(SystemSettingsTestFixture.DEFAULT, 0)).thenReturn(false);
 
     assertThrows(SystemSettingsResourceNotFoundException.class, () -> service.update(update("0")));
   }
@@ -96,12 +96,12 @@ class SystemSettingsServiceTest {
   @Test
   void replacesLiveSnapshotOnlyAfterCommit() {
     when(repository.get()).thenReturn(record(0), record(0), record(1));
-    when(repository.update(SystemSettings.DEFAULT, 0)).thenReturn(true);
+    when(repository.update(SystemSettingsTestFixture.DEFAULT, 0)).thenReturn(true);
 
     TransactionSynchronizationManager.initSynchronization();
     service.update(update("0"));
     // 事务尚未提交：内存快照不得提前更新。
-    assertEquals(SystemSettings.DEFAULT, snapshot.get());
+    assertEquals(SystemSettingsTestFixture.DEFAULT, snapshot.get());
     TransactionSynchronizationManager.getSynchronizations()
         .forEach(TransactionSynchronization::afterCommit);
     // afterCommit 回读权威行并替换。
@@ -112,7 +112,7 @@ class SystemSettingsServiceTest {
   @Test
   void rollbackNeverUpdatesLiveSnapshot() {
     when(repository.get()).thenReturn(record(0), record(0));
-    when(repository.update(SystemSettings.DEFAULT, 0)).thenReturn(true);
+    when(repository.update(SystemSettingsTestFixture.DEFAULT, 0)).thenReturn(true);
 
     TransactionSynchronizationManager.initSynchronization();
     service.update(update("0"));
@@ -121,7 +121,7 @@ class SystemSettingsServiceTest {
         .forEach(
             synchronization ->
                 synchronization.afterCompletion(TransactionSynchronization.STATUS_ROLLED_BACK));
-    assertEquals(SystemSettings.DEFAULT, snapshot.get());
+    assertEquals(SystemSettingsTestFixture.DEFAULT, snapshot.get());
   }
 
   /** 数据库已经提交后，afterCommit 权威回读短暂失败不得向 API 线程冒泡或写入错误快照；后续通知仍可恢复到最新版本。 */
@@ -131,7 +131,7 @@ class SystemSettingsServiceTest {
         .thenReturn(record(0), record(1))
         .thenThrow(new IllegalStateException("database temporarily unavailable"))
         .thenReturn(record(1));
-    when(repository.update(SystemSettings.DEFAULT, 0)).thenReturn(true);
+    when(repository.update(SystemSettingsTestFixture.DEFAULT, 0)).thenReturn(true);
 
     TransactionSynchronizationManager.initSynchronization();
     assertEquals("1", service.update(update("0")).getVersion());
@@ -139,7 +139,7 @@ class SystemSettingsServiceTest {
         () ->
             TransactionSynchronizationManager.getSynchronizations()
                 .forEach(TransactionSynchronization::afterCommit));
-    assertEquals(SystemSettings.DEFAULT, snapshot.get());
+    assertEquals(SystemSettingsTestFixture.DEFAULT, snapshot.get());
 
     changeHandler.onNotification("");
 
@@ -150,7 +150,7 @@ class SystemSettingsServiceTest {
   @Test
   void replacesSnapshotDirectlyWithoutActiveSynchronization() {
     when(repository.get()).thenReturn(record(0), record(0), record(1));
-    when(repository.update(SystemSettings.DEFAULT, 0)).thenReturn(true);
+    when(repository.update(SystemSettingsTestFixture.DEFAULT, 0)).thenReturn(true);
 
     service.update(update("0"));
 
@@ -163,14 +163,14 @@ class SystemSettingsServiceTest {
     when(repository.get())
         .thenReturn(record(0), record(1))
         .thenThrow(new IllegalStateException("database temporarily unavailable"));
-    when(repository.update(SystemSettings.DEFAULT, 0)).thenReturn(true);
+    when(repository.update(SystemSettingsTestFixture.DEFAULT, 0)).thenReturn(true);
 
     assertEquals("1", assertDoesNotThrow(() -> service.update(update("0"))).getVersion());
-    assertEquals(SystemSettings.DEFAULT, snapshot.get());
+    assertEquals(SystemSettingsTestFixture.DEFAULT, snapshot.get());
   }
 
   private SystemSettingsUpdateDTO update(String expectedVersion) {
-    SystemSettingsSectionsDTO sections = codec.toSections(SystemSettings.DEFAULT);
+    SystemSettingsSectionsDTO sections = codec.toSections(SystemSettingsTestFixture.DEFAULT);
     return update(sections, expectedVersion);
   }
 
@@ -183,13 +183,13 @@ class SystemSettingsServiceTest {
         assertThrows(SystemSettingsValidationException.class, () -> service.update(request));
     assertEquals("network.proxyUrl is invalid", error.getMessage());
     verifyNoInteractions(repository);
-    assertEquals(SystemSettings.DEFAULT, snapshot.get());
+    assertEquals(SystemSettingsTestFixture.DEFAULT, snapshot.get());
   }
 
   /** GET 映射完整聚合及版本，network 的可选字段也必须保留。 */
   @Test
   void getIncludesPersistedNetworkSection() {
-    SystemSettingsSectionsDTO sections = codec.toSections(SystemSettings.DEFAULT);
+    SystemSettingsSectionsDTO sections = codec.toSections(SystemSettingsTestFixture.DEFAULT);
     sections.getNetwork().setProxyUrl("http://proxy:3128");
     sections.getNetwork().setNoProxyHosts("");
     SystemSettings settings = codec.fromDto(sections);
@@ -218,6 +218,9 @@ class SystemSettingsServiceTest {
 
   private static SystemSettingsRepository.SystemSettingsRecord record(long version) {
     return new SystemSettingsRepository.SystemSettingsRecord(
-        version == 1 ? UPDATED_SETTINGS : SystemSettings.DEFAULT, version, CREATED_AT, UPDATED_AT);
+        version == 1 ? UPDATED_SETTINGS : SystemSettingsTestFixture.DEFAULT,
+        version,
+        CREATED_AT,
+        UPDATED_AT);
   }
 }

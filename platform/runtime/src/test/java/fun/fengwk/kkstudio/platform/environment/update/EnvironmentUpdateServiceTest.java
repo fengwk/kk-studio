@@ -42,8 +42,8 @@ import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
 import fun.fengwk.kkstudio.platform.error.AiEnvironmentUnavailableException;
 import fun.fengwk.kkstudio.platform.error.AiInUseException;
-import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
+import fun.fengwk.kkstudio.platform.settings.SystemSettingsTestFixture;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentUpdateStartDTO;
 
 import java.time.Clock;
@@ -99,7 +99,7 @@ class EnvironmentUpdateServiceTest {
         registry,
         environmentRepository,
         releaseProvider,
-        new SystemSettingsSnapshot(SystemSettings.DEFAULT),
+        new SystemSettingsSnapshot(SystemSettingsTestFixture.DEFAULT),
         CLOCK);
   }
 

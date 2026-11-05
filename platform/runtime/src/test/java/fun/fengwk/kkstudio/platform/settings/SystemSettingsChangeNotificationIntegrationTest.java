@@ -200,18 +200,18 @@ class SystemSettingsChangeNotificationIntegrationTest extends PostgresSpringTest
   }
 
   private static SystemSettings withToolBusyRetry(long busyRetryMillis) {
-    SystemSettings.Tool base = SystemSettings.DEFAULT.tool();
+    SystemSettings.Tool base = SystemSettingsTestFixture.DEFAULT.tool();
     return new SystemSettings(
         new SystemSettings.Tool(
             base.permission(),
             busyRetryMillis,
             base.toolGatewayBusyRetryMillis(),
             base.toolGatewayOverloadRetryMillis()),
-        SystemSettings.DEFAULT.aiRuntime(),
-        SystemSettings.DEFAULT.environment(),
-        SystemSettings.DEFAULT.network(),
-        SystemSettings.DEFAULT.storageMedia(),
-        SystemSettings.DEFAULT.advanced());
+        SystemSettingsTestFixture.DEFAULT.aiRuntime(),
+        SystemSettingsTestFixture.DEFAULT.environment(),
+        SystemSettingsTestFixture.DEFAULT.network(),
+        SystemSettingsTestFixture.DEFAULT.storageMedia(),
+        SystemSettingsTestFixture.DEFAULT.advanced());
   }
 
   private static SystemSettingsUpdateDTO updateFrom(

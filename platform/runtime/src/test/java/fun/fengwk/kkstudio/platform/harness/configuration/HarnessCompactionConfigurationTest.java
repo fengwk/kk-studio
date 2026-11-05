@@ -16,6 +16,7 @@ import fun.fengwk.kkstudio.harness.spi.compaction.CompactionConfigProvider;
 import fun.fengwk.kkstudio.harness.spi.compaction.RequestTokenEstimator;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
+import fun.fengwk.kkstudio.platform.settings.SystemSettingsTestFixture;
 
 import java.time.Instant;
 import java.util.List;
@@ -38,7 +39,8 @@ class HarnessCompactionConfigurationTest {
     new ApplicationContextRunner()
         .withUserConfiguration(HarnessCompactionConfiguration.class)
         .withBean(
-            SystemSettingsSnapshot.class, () -> new SystemSettingsSnapshot(SystemSettings.DEFAULT))
+            SystemSettingsSnapshot.class,
+            () -> new SystemSettingsSnapshot(SystemSettingsTestFixture.DEFAULT))
         .run(
             context -> {
               CompactionConfigProvider provider = context.getBean(CompactionConfigProvider.class);
@@ -68,7 +70,8 @@ class HarnessCompactionConfigurationTest {
     new ApplicationContextRunner()
         .withUserConfiguration(HarnessCompactionConfiguration.class)
         .withBean(
-            SystemSettingsSnapshot.class, () -> new SystemSettingsSnapshot(SystemSettings.DEFAULT))
+            SystemSettingsSnapshot.class,
+            () -> new SystemSettingsSnapshot(SystemSettingsTestFixture.DEFAULT))
         .run(
             context -> {
               RequestTokenEstimator estimator = context.getBean(RequestTokenEstimator.class);
@@ -89,21 +92,21 @@ class HarnessCompactionConfigurationTest {
     SystemSettings.AiRuntime aiRuntime =
         new SystemSettings.AiRuntime(
             3,
-            SystemSettings.AiRuntime.DEFAULT.retryBackoffStrategy(),
-            SystemSettings.AiRuntime.DEFAULT.retryBaseDelayMillis(),
-            SystemSettings.AiRuntime.DEFAULT.retryMaxDelayMillis(),
+            SystemSettingsTestFixture.AI_RUNTIME.retryBackoffStrategy(),
+            SystemSettingsTestFixture.AI_RUNTIME.retryBaseDelayMillis(),
+            SystemSettingsTestFixture.AI_RUNTIME.retryMaxDelayMillis(),
             keepRecentTokens,
-            SystemSettings.AiRuntime.DEFAULT.subagentMaxDepth(),
-            SystemSettings.AiRuntime.DEFAULT.subagentMaxConcurrency(),
-            SystemSettings.AiRuntime.DEFAULT.subagentMaxTotalConcurrency(),
-            SystemSettings.AiRuntime.DEFAULT.subagentMaxTurns(),
-            SystemSettings.AiRuntime.DEFAULT.modelHttpRetryStatusCodes());
+            SystemSettingsTestFixture.AI_RUNTIME.subagentMaxDepth(),
+            SystemSettingsTestFixture.AI_RUNTIME.subagentMaxConcurrency(),
+            SystemSettingsTestFixture.AI_RUNTIME.subagentMaxTotalConcurrency(),
+            SystemSettingsTestFixture.AI_RUNTIME.subagentMaxTurns(),
+            SystemSettingsTestFixture.AI_RUNTIME.modelHttpRetryStatusCodes());
     return new SystemSettings(
-        SystemSettings.Tool.DEFAULT,
+        SystemSettingsTestFixture.TOOL,
         aiRuntime,
-        SystemSettings.Environment.DEFAULT,
-        SystemSettings.Network.DEFAULT,
-        SystemSettings.StorageMedia.DEFAULT,
-        SystemSettings.Advanced.DEFAULT);
+        SystemSettingsTestFixture.ENVIRONMENT,
+        SystemSettingsTestFixture.NETWORK,
+        SystemSettingsTestFixture.STORAGE_MEDIA,
+        SystemSettingsTestFixture.ADVANCED);
   }
 }

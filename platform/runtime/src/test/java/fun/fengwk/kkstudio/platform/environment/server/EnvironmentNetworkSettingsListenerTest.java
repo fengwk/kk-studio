@@ -9,10 +9,10 @@ import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 
 import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer;
-import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsChangeHandler;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsRepository;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
+import fun.fengwk.kkstudio.platform.settings.SystemSettingsTestFixture;
 
 import java.time.Instant;
 
@@ -26,7 +26,7 @@ class EnvironmentNetworkSettingsListenerTest {
     when(repository.get())
         .thenReturn(
             new SystemSettingsRepository.SystemSettingsRecord(
-                SystemSettings.DEFAULT, 1L, now, now));
+                SystemSettingsTestFixture.DEFAULT, 1L, now, now));
     try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext()) {
       context.registerBean(
           EnvironmentNetworkSettingsListener.class,
@@ -34,7 +34,7 @@ class EnvironmentNetworkSettingsListenerTest {
       context.refresh();
       SystemSettingsChangeHandler handler =
           new SystemSettingsChangeHandler(
-              repository, new SystemSettingsSnapshot(SystemSettings.DEFAULT), context);
+              repository, new SystemSettingsSnapshot(SystemSettingsTestFixture.DEFAULT), context);
       handler.onNotification("1");
       handler.onResync();
       verify(server, times(2)).reconcileNetworkSettings();

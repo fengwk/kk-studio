@@ -17,6 +17,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
+import fun.fengwk.kkstudio.platform.settings.SystemSettingsTestFixture;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInstallConfigDTO;
 
 import java.io.IOException;
@@ -43,7 +44,7 @@ class EnvironmentInstallScriptsTest {
     String token = "private-汉字'\"$`$(touch NEVER)";
     Execution execution =
         execute(
-            EnvironmentInstallScripts.install(config, token, SystemSettings.Network.DEFAULT), 0);
+            EnvironmentInstallScripts.install(config, token, SystemSettingsTestFixture.NETWORK), 0);
     assertEquals(0, execution.status());
     assertFalse((execution.stdout() + execution.stderr()).contains("private-"));
     assertEquals(expectedDaemon(config), execution.record().get("config"));
@@ -73,7 +74,7 @@ class EnvironmentInstallScriptsTest {
     EnvironmentInstallConfigDTO config = config("linux");
     Execution execution =
         execute(
-            EnvironmentInstallScripts.install(config, "private", SystemSettings.Network.DEFAULT),
+            EnvironmentInstallScripts.install(config, "private", SystemSettingsTestFixture.NETWORK),
             17);
     assertEquals(17, execution.status());
     assertFalse(texts(execution.record().get("args")).contains("--java-home"));
@@ -89,7 +90,7 @@ class EnvironmentInstallScriptsTest {
       ProcessResult result =
           run(
               EnvironmentInstallScripts.install(
-                  config("linux"), "private", SystemSettings.Network.DEFAULT),
+                  config("linux"), "private", SystemSettingsTestFixture.NETWORK),
               dir,
               Map.of());
       assertEquals(8, result.status());
@@ -106,7 +107,7 @@ class EnvironmentInstallScriptsTest {
     assumeFalse(isWindows());
     Execution execution =
         execute(
-            EnvironmentInstallScripts.uninstall(operatingSystem, SystemSettings.Network.DEFAULT),
+            EnvironmentInstallScripts.uninstall(operatingSystem, SystemSettingsTestFixture.NETWORK),
             0);
     assertEquals(0, execution.status());
     assertEquals(List.of("uninstall"), texts(execution.record().get("args")));
@@ -158,7 +159,7 @@ class EnvironmentInstallScriptsTest {
   void windowsCommandProtectsAclBeforeWritingCredentials() {
     EnvironmentInstallConfigDTO config = config("windows");
     String command =
-        EnvironmentInstallScripts.install(config, "private-'$`", SystemSettings.Network.DEFAULT);
+        EnvironmentInstallScripts.install(config, "private-'$`", SystemSettingsTestFixture.NETWORK);
     assertTrue(command.contains("function Set-KkPrivateAcl"));
     assertTrue(command.contains("[Security.AccessControl.DirectorySecurity]::new()"));
     assertTrue(command.contains("[Security.AccessControl.FileSecurity]::new()"));
@@ -189,7 +190,7 @@ class EnvironmentInstallScriptsTest {
     assertFalse(invocation.contains("-JavaHome"));
     assertFalse(invocation.contains("private"));
     String uninstall =
-        EnvironmentInstallScripts.uninstall("windows", SystemSettings.Network.DEFAULT);
+        EnvironmentInstallScripts.uninstall("windows", SystemSettingsTestFixture.NETWORK);
     assertFalse(uninstall.contains("WriteAllText"));
     assertTrue(uninstall.contains("Set-KkPrivateAcl -Path $stage -Directory"));
     assertTrue(uninstall.contains("-File $installer uninstall"));
@@ -212,7 +213,7 @@ class EnvironmentInstallScriptsTest {
       ProcessResult failed =
           runWindows(
               executable,
-              EnvironmentInstallScripts.install(config, token, SystemSettings.Network.DEFAULT),
+              EnvironmentInstallScripts.install(config, token, SystemSettingsTestFixture.NETWORK),
               dir,
               fixture,
               recordPath);
@@ -242,7 +243,7 @@ class EnvironmentInstallScriptsTest {
       ProcessResult removed =
           runWindows(
               executable,
-              EnvironmentInstallScripts.uninstall("windows", SystemSettings.Network.DEFAULT),
+              EnvironmentInstallScripts.uninstall("windows", SystemSettingsTestFixture.NETWORK),
               dir,
               fixture,
               recordPath);
@@ -261,18 +262,18 @@ class EnvironmentInstallScriptsTest {
     EnvironmentInstallConfigDTO config = config("linux");
     assertThrows(
         AiValidationException.class,
-        () -> EnvironmentInstallScripts.install(config, " \n", SystemSettings.Network.DEFAULT));
+        () -> EnvironmentInstallScripts.install(config, " \n", SystemSettingsTestFixture.NETWORK));
     assertThrows(
         AiValidationException.class,
         () ->
             EnvironmentInstallScripts.install(
-                config, "token\u2028", SystemSettings.Network.DEFAULT));
+                config, "token\u2028", SystemSettingsTestFixture.NETWORK));
     assertThrows(
         AiValidationException.class,
-        () -> EnvironmentInstallScripts.uninstall("solaris", SystemSettings.Network.DEFAULT));
+        () -> EnvironmentInstallScripts.uninstall("solaris", SystemSettingsTestFixture.NETWORK));
     assertThrows(
         AiValidationException.class,
-        () -> EnvironmentInstallScripts.install(null, "token", SystemSettings.Network.DEFAULT));
+        () -> EnvironmentInstallScripts.install(null, "token", SystemSettingsTestFixture.NETWORK));
   }
 
   private static Execution execute(String command, int exit) throws Exception {

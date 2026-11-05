@@ -18,6 +18,7 @@ import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionAction;
 import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionRule;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsCodec;
+import fun.fengwk.kkstudio.platform.settings.SystemSettingsTestFixture;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -80,7 +81,7 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
         assertTrue(network.path("proxyUrl").isMissingNode());
         assertEquals("localhost,127.*,::1", network.path("noProxyHosts").asText());
         assertEquals(
-            SystemSettings.DEFAULT,
+            SystemSettingsTestFixture.DEFAULT,
             new SystemSettingsCodec().decode(configJson),
             "default row must decode to the safe default aggregate");
       }
@@ -217,7 +218,7 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
           ResultSet rs = st.executeQuery("select config from system_setting where id = 1")) {
         assertTrue(rs.next(), "e2e database must carry the system_setting row");
         SystemSettings settings = new SystemSettingsCodec().decode(rs.getString(1));
-        assertEquals(SystemSettings.Network.DEFAULT, settings.network());
+        assertEquals(SystemSettingsTestFixture.NETWORK, settings.network());
         assertEquals(
             List.of(new PermissionRule("*", PermissionAction.ASK)),
             settings.tool().permission().get("read"),
@@ -238,7 +239,7 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
       }
 
       assertEquals(900L, settings.storageMedia().uploadExpiresSeconds());
-      assertEquals(SystemSettings.Network.DEFAULT, settings.network());
+      assertEquals(SystemSettingsTestFixture.NETWORK, settings.network());
       assertRepeatableMigrationRecorded(conn, "canvas test seed");
 
       // 重新执行 canvas-test 迁移，断言 repeatable migration 二次运行幂等且设置保持正确。

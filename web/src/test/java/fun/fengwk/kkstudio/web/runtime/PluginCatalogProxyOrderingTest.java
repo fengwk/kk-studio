@@ -29,8 +29,8 @@ import fun.fengwk.kkstudio.platform.pluginhost.catalog.PluginCatalogSnapshot;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRepository;
 import fun.fengwk.kkstudio.platform.pluginhost.service.PluginContextFactory;
 import fun.fengwk.kkstudio.platform.settings.SystemNetworkConfiguration;
-import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
+import fun.fengwk.kkstudio.platform.settings.SystemSettingsTestFixture;
 
 import java.net.ProxySelector;
 import java.util.List;
@@ -52,7 +52,7 @@ class PluginCatalogProxyOrderingTest {
     ProxySelector original = ProxySelector.getDefault();
     AtomicReference<ProxySelector> observed = new AtomicReference<>();
     SystemSettingsSnapshot settings = mock(SystemSettingsSnapshot.class);
-    when(settings.get()).thenReturn(SystemSettings.DEFAULT);
+    when(settings.get()).thenReturn(SystemSettingsTestFixture.DEFAULT);
     new ApplicationContextRunner()
         .withUserConfiguration(PluginCatalogConfiguration.class)
         .withBean(

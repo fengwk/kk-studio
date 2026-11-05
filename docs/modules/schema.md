@@ -19,7 +19,7 @@ versioned migration 为 V1，repeatable seed 按 profile 加载：
 模型与 Agent。e2e seed 提供模型目录与受控审批规则，canvas-test seed 提供测试栈设置。
 [fixture seed](../../schema/src/main/resources/db/seed/fixture/R__fixture_seed.sql)
 只供集成测试显式加载，提供离线 stub Catalog。seed 重复执行保持确定性。
-V1 写入单行 SystemSettings 默认聚合；Java 解码与 profile 默认契约由测试校验。
+V1 的 `system_setting` seed 行是默认聚合的唯一事实源；测试用 `SystemSettingsTestFixture` 校验 codec 与数据库 seed 一致。
 
 ## 数据区域与维护入口
 

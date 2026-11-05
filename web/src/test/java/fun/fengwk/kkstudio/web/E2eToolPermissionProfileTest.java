@@ -10,7 +10,7 @@ import org.springframework.core.io.ClassPathResource;
 import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionAction;
 import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionRule;
 import fun.fengwk.kkstudio.platform.harness.tool.permission.ToolSettings;
-import fun.fengwk.kkstudio.platform.settings.SystemSettings;
+import fun.fengwk.kkstudio.platform.settings.SystemSettingsTestFixture;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -33,7 +33,7 @@ class E2eToolPermissionProfileTest {
    */
   @Test
   void productionDefaultKeepsReadUnrestricted() {
-    ToolSettings settings = new ToolSettings(SystemSettings.Tool.DEFAULT.permission());
+    ToolSettings settings = new ToolSettings(SystemSettingsTestFixture.TOOL.permission());
 
     assertEquals(ASK_ALL, settings.rulesFor("write"));
     assertEquals(ASK_ALL, settings.rulesFor("edit"));

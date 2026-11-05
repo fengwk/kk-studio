@@ -15,10 +15,10 @@ class DatabaseSystemSettingsProviderTest {
     when(repository.get())
         .thenReturn(
             new SystemSettingsRepository.SystemSettingsRecord(
-                SystemSettings.DEFAULT, 0, null, null));
+                SystemSettingsTestFixture.DEFAULT, 0, null, null));
     DatabaseSystemSettingsProvider provider = new DatabaseSystemSettingsProvider(repository);
 
-    assertEquals(SystemSettings.DEFAULT, provider.get());
+    assertEquals(SystemSettingsTestFixture.DEFAULT, provider.get());
   }
 
   @Test

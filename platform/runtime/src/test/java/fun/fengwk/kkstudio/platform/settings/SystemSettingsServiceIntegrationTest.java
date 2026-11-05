@@ -26,7 +26,8 @@ public class SystemSettingsServiceIntegrationTest extends PostgresSpringTestSupp
     assertEquals("0", dto.getVersion());
     assertNotNull(dto.getCreateTime());
     assertNotNull(dto.getUpdateTime());
-    assertEquals(systemSettingsCodec.toSections(SystemSettings.DEFAULT), sectionsOf(dto));
+    assertEquals(
+        systemSettingsCodec.toSections(SystemSettingsTestFixture.DEFAULT), sectionsOf(dto));
     assertTrue(dto.getTool().getPermission().containsKey("bash"));
     assertEquals("ask", dto.getTool().getPermission().get("bash").get(0).getAction());
   }
@@ -51,7 +52,7 @@ public class SystemSettingsServiceIntegrationTest extends PostgresSpringTestSupp
     assertEquals("http://proxy:3128", updated.getNetwork().getProxyUrl());
     // 未修改的 section 保持完整。
     assertEquals(
-        systemSettingsCodec.toSections(SystemSettings.DEFAULT).getEnvironment(),
+        systemSettingsCodec.toSections(SystemSettingsTestFixture.DEFAULT).getEnvironment(),
         updated.getEnvironment());
 
     // 再次读取与最新版本一致。

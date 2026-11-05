@@ -36,7 +36,7 @@ public class SystemSettingsRepositoryTest extends PostgresSpringTestSupport {
   public void baselineRowDecodesToDefaultsWithVersionZero() {
     SystemSettingsRepository.SystemSettingsRecord record = systemSettingsRepository.get();
     assertNotNull(record);
-    assertEquals(SystemSettings.DEFAULT, record.settings());
+    assertEquals(SystemSettingsTestFixture.DEFAULT, record.settings());
     assertEquals(0L, record.version());
     assertNotNull(record.createTime());
     assertNotNull(record.updateTime());
@@ -54,9 +54,9 @@ public class SystemSettingsRepositoryTest extends PostgresSpringTestSupport {
     assertFalse(
         stored.contains("\"maxMessageBytes\""),
         "V1 baseline must not persist environment.maxMessageBytes");
-    assertEquals(systemSettingsCodec.decode(stored), SystemSettings.DEFAULT);
+    assertEquals(systemSettingsCodec.decode(stored), SystemSettingsTestFixture.DEFAULT);
     assertFalse(
-        systemSettingsCodec.encode(SystemSettings.DEFAULT).contains("maxMessageBytes"),
+        systemSettingsCodec.encode(SystemSettingsTestFixture.DEFAULT).contains("maxMessageBytes"),
         "canonical defaults must not persist environment.maxMessageBytes");
   }
 
@@ -126,35 +126,35 @@ public class SystemSettingsRepositoryTest extends PostgresSpringTestSupport {
   }
 
   private static SystemSettings withToolBusyRetry(long busyRetryMillis) {
-    SystemSettings.Tool base = SystemSettings.DEFAULT.tool();
+    SystemSettings.Tool base = SystemSettingsTestFixture.DEFAULT.tool();
     return new SystemSettings(
         new SystemSettings.Tool(
             base.permission(),
             busyRetryMillis,
             base.toolGatewayBusyRetryMillis(),
             base.toolGatewayOverloadRetryMillis()),
-        SystemSettings.DEFAULT.aiRuntime(),
-        SystemSettings.DEFAULT.environment(),
-        SystemSettings.DEFAULT.network(),
-        SystemSettings.DEFAULT.storageMedia(),
-        SystemSettings.DEFAULT.advanced());
+        SystemSettingsTestFixture.DEFAULT.aiRuntime(),
+        SystemSettingsTestFixture.DEFAULT.environment(),
+        SystemSettingsTestFixture.DEFAULT.network(),
+        SystemSettingsTestFixture.DEFAULT.storageMedia(),
+        SystemSettingsTestFixture.DEFAULT.advanced());
   }
 
   private static SystemSettings withPermission(Map<String, List<PermissionRule>> permission) {
     Map<String, List<PermissionRule>> merged =
-        new LinkedHashMap<>(SystemSettings.DEFAULT.tool().permission());
+        new LinkedHashMap<>(SystemSettingsTestFixture.DEFAULT.tool().permission());
     merged.putAll(permission);
-    SystemSettings.Tool base = SystemSettings.DEFAULT.tool();
+    SystemSettings.Tool base = SystemSettingsTestFixture.DEFAULT.tool();
     return new SystemSettings(
         new SystemSettings.Tool(
             merged,
             base.modelGatewayBusyRetryMillis(),
             base.toolGatewayBusyRetryMillis(),
             base.toolGatewayOverloadRetryMillis()),
-        SystemSettings.DEFAULT.aiRuntime(),
-        SystemSettings.DEFAULT.environment(),
-        SystemSettings.DEFAULT.network(),
-        SystemSettings.DEFAULT.storageMedia(),
-        SystemSettings.DEFAULT.advanced());
+        SystemSettingsTestFixture.DEFAULT.aiRuntime(),
+        SystemSettingsTestFixture.DEFAULT.environment(),
+        SystemSettingsTestFixture.DEFAULT.network(),
+        SystemSettingsTestFixture.DEFAULT.storageMedia(),
+        SystemSettingsTestFixture.DEFAULT.advanced());
   }
 }

@@ -58,9 +58,9 @@ import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRe
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRow;
 import fun.fengwk.kkstudio.platform.pluginhost.service.PluginAgentDependencies;
 import fun.fengwk.kkstudio.platform.pluginhost.testing.TestPluginFixtures;
-import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsCodec;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsRepository;
+import fun.fengwk.kkstudio.platform.settings.SystemSettingsTestFixture;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelAbilitiesDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
@@ -338,7 +338,7 @@ final class ConfigSyncFixtures {
 
   static SystemSettingsRepository.SystemSettingsRecord settings(long version) {
     return new SystemSettingsRepository.SystemSettingsRecord(
-        SystemSettings.DEFAULT, version, Instant.EPOCH, Instant.EPOCH);
+        SystemSettingsTestFixture.DEFAULT, version, Instant.EPOCH, Instant.EPOCH);
   }
 
   static ConfigSyncSnapshot snapshot(
@@ -529,7 +529,7 @@ final class ConfigSyncFixtures {
 
   /** 当前七节 settings 的完整 DTO，便于测试按需改值后重新序列化。 */
   static SystemSettingsSectionsDTO defaultSettings() {
-    return new SystemSettingsCodec().toSections(SystemSettings.DEFAULT);
+    return new SystemSettingsCodec().toSections(SystemSettingsTestFixture.DEFAULT);
   }
 
   /** 把完整 sections 序列化为 config sync YAML 文本；settings 出现时必须完整。 */

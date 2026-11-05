@@ -27,7 +27,7 @@ class SystemSettingsChangeHandlerTest {
   @Test
   void notificationPayloadNeverPreventsAuthoritativeRefresh() {
     SystemSettingsRepository repository = mock(SystemSettingsRepository.class);
-    SystemSettingsSnapshot snapshot = new SystemSettingsSnapshot(SystemSettings.DEFAULT);
+    SystemSettingsSnapshot snapshot = new SystemSettingsSnapshot(SystemSettingsTestFixture.DEFAULT);
     when(repository.get()).thenReturn(record(VERSION_ONE, 1), record(VERSION_TWO, 2));
     SystemSettingsChangeHandler handler =
         new SystemSettingsChangeHandler(repository, snapshot, event -> {});
@@ -43,7 +43,7 @@ class SystemSettingsChangeHandlerTest {
   @Test
   void resyncRefreshesFromAuthoritativeRow() {
     SystemSettingsRepository repository = mock(SystemSettingsRepository.class);
-    SystemSettingsSnapshot snapshot = new SystemSettingsSnapshot(SystemSettings.DEFAULT);
+    SystemSettingsSnapshot snapshot = new SystemSettingsSnapshot(SystemSettingsTestFixture.DEFAULT);
     when(repository.get()).thenReturn(record(VERSION_ONE, 1));
 
     new SystemSettingsChangeHandler(repository, snapshot, event -> {}).onResync();
@@ -55,7 +55,7 @@ class SystemSettingsChangeHandlerTest {
   @Test
   void publishesNetworkAfterEachAuthoritativeRefresh() {
     SystemSettingsRepository repository = mock(SystemSettingsRepository.class);
-    SystemSettingsSnapshot snapshot = new SystemSettingsSnapshot(SystemSettings.DEFAULT);
+    SystemSettingsSnapshot snapshot = new SystemSettingsSnapshot(SystemSettingsTestFixture.DEFAULT);
     when(repository.get()).thenReturn(record(VERSION_ONE, 1));
     List<Object> events = new ArrayList<>();
     SystemSettingsChangeHandler handler =
@@ -71,7 +71,7 @@ class SystemSettingsChangeHandlerTest {
   @Test
   void refreshFailureDoesNotEscapeOrBlockLaterNotifications() {
     SystemSettingsRepository repository = mock(SystemSettingsRepository.class);
-    SystemSettingsSnapshot snapshot = new SystemSettingsSnapshot(SystemSettings.DEFAULT);
+    SystemSettingsSnapshot snapshot = new SystemSettingsSnapshot(SystemSettingsTestFixture.DEFAULT);
     when(repository.get())
         .thenThrow(new IllegalStateException("database unavailable"))
         .thenReturn(record(VERSION_ONE, 1));
@@ -88,13 +88,13 @@ class SystemSettingsChangeHandlerTest {
   @Test
   void missingRowLeavesSnapshotUnchanged() {
     SystemSettingsRepository repository = mock(SystemSettingsRepository.class);
-    SystemSettingsSnapshot snapshot = new SystemSettingsSnapshot(SystemSettings.DEFAULT);
+    SystemSettingsSnapshot snapshot = new SystemSettingsSnapshot(SystemSettingsTestFixture.DEFAULT);
     when(repository.get()).thenReturn(null);
 
     assertDoesNotThrow(
         () -> new SystemSettingsChangeHandler(repository, snapshot, event -> {}).onResync());
 
-    assertEquals(SystemSettings.DEFAULT, snapshot.get());
+    assertEquals(SystemSettingsTestFixture.DEFAULT, snapshot.get());
   }
 
   /** 较旧回读晚于较新回读完成时，version 门控必须阻止快照回退。 */
@@ -123,7 +123,7 @@ class SystemSettingsChangeHandlerTest {
             throw new UnsupportedOperationException();
           }
         };
-    SystemSettingsSnapshot snapshot = new SystemSettingsSnapshot(SystemSettings.DEFAULT);
+    SystemSettingsSnapshot snapshot = new SystemSettingsSnapshot(SystemSettingsTestFixture.DEFAULT);
     SystemSettingsChangeHandler handler =
         new SystemSettingsChangeHandler(repository, snapshot, event -> {});
     Thread older = new Thread(() -> handler.onNotification("1"));
@@ -158,21 +158,21 @@ class SystemSettingsChangeHandlerTest {
 
   private static SystemSettings settingsWithRetryMaxRetries(int retryMaxRetries) {
     return new SystemSettings(
-        SystemSettings.Tool.DEFAULT,
+        SystemSettingsTestFixture.TOOL,
         new SystemSettings.AiRuntime(
             retryMaxRetries,
-            SystemSettings.AiRuntime.DEFAULT.retryBackoffStrategy(),
-            SystemSettings.AiRuntime.DEFAULT.retryBaseDelayMillis(),
-            SystemSettings.AiRuntime.DEFAULT.retryMaxDelayMillis(),
-            SystemSettings.AiRuntime.DEFAULT.compactionKeepRecentTokens(),
-            SystemSettings.AiRuntime.DEFAULT.subagentMaxDepth(),
-            SystemSettings.AiRuntime.DEFAULT.subagentMaxConcurrency(),
-            SystemSettings.AiRuntime.DEFAULT.subagentMaxTotalConcurrency(),
-            SystemSettings.AiRuntime.DEFAULT.subagentMaxTurns(),
-            SystemSettings.AiRuntime.DEFAULT.modelHttpRetryStatusCodes()),
-        SystemSettings.Environment.DEFAULT,
-        SystemSettings.Network.DEFAULT,
-        SystemSettings.StorageMedia.DEFAULT,
-        SystemSettings.Advanced.DEFAULT);
+            SystemSettingsTestFixture.AI_RUNTIME.retryBackoffStrategy(),
+            SystemSettingsTestFixture.AI_RUNTIME.retryBaseDelayMillis(),
+            SystemSettingsTestFixture.AI_RUNTIME.retryMaxDelayMillis(),
+            SystemSettingsTestFixture.AI_RUNTIME.compactionKeepRecentTokens(),
+            SystemSettingsTestFixture.AI_RUNTIME.subagentMaxDepth(),
+            SystemSettingsTestFixture.AI_RUNTIME.subagentMaxConcurrency(),
+            SystemSettingsTestFixture.AI_RUNTIME.subagentMaxTotalConcurrency(),
+            SystemSettingsTestFixture.AI_RUNTIME.subagentMaxTurns(),
+            SystemSettingsTestFixture.AI_RUNTIME.modelHttpRetryStatusCodes()),
+        SystemSettingsTestFixture.ENVIRONMENT,
+        SystemSettingsTestFixture.NETWORK,
+        SystemSettingsTestFixture.STORAGE_MEDIA,
+        SystemSettingsTestFixture.ADVANCED);
   }
 }

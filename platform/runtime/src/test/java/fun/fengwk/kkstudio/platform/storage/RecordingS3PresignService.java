@@ -4,8 +4,8 @@ import static org.mockito.Mockito.mock;
 
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 
-import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
+import fun.fengwk.kkstudio.platform.settings.SystemSettingsTestFixture;
 import fun.fengwk.kkstudio.platform.storage.configuration.S3StorageProperties;
 
 import java.time.Instant;
@@ -26,7 +26,7 @@ public class RecordingS3PresignService extends S3PresignService {
     super(
         new S3StorageProperties(),
         mock(S3Presigner.class),
-        new SystemSettingsSnapshot(SystemSettings.DEFAULT));
+        new SystemSettingsSnapshot(SystemSettingsTestFixture.DEFAULT));
   }
 
   private final List<PresignRecord> records = new ArrayList<>();

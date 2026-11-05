@@ -231,7 +231,7 @@ class SystemNetworkConfigurationTest {
   }
 
   private static SystemSettings settings(String proxyUrl, String bypass) {
-    SystemSettings defaults = SystemSettings.DEFAULT;
+    SystemSettings defaults = SystemSettingsTestFixture.DEFAULT;
     return new SystemSettings(
         defaults.tool(),
         defaults.aiRuntime(),

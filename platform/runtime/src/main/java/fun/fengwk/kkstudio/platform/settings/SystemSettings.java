@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.platform.settings;
 
 import fun.fengwk.kkstudio.harness.api.retry.InvocationRetryBackoffStrategy;
 import fun.fengwk.kkstudio.harness.api.retry.ModelHttpErrorPolicy;
-import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionAction;
 import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionKeyValidator;
 import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionRule;
 
@@ -32,16 +31,6 @@ public record SystemSettings(
     StorageMedia storageMedia,
     Advanced advanced) {
 
-  /** 安全默认聚合：与 {@code V1__schema.sql} 的默认行完全一致（由 codec 测试守护）。 */
-  public static final SystemSettings DEFAULT =
-      new SystemSettings(
-          Tool.DEFAULT,
-          AiRuntime.DEFAULT,
-          Environment.DEFAULT,
-          Network.DEFAULT,
-          StorageMedia.DEFAULT,
-          Advanced.DEFAULT);
-
   public SystemSettings {
     tool = Objects.requireNonNull(tool, "tool");
     aiRuntime = Objects.requireNonNull(aiRuntime, "aiRuntime");
@@ -57,17 +46,6 @@ public record SystemSettings(
       long modelGatewayBusyRetryMillis,
       long toolGatewayBusyRetryMillis,
       long toolGatewayOverloadRetryMillis) {
-
-    /** 默认 permission：write/edit/bash 各自 {@code * -> ask}（read 保持不限制）。 */
-    public static final Tool DEFAULT =
-        new Tool(
-            Map.of(
-                "write", List.of(new PermissionRule("*", PermissionAction.ASK)),
-                "edit", List.of(new PermissionRule("*", PermissionAction.ASK)),
-                "bash", List.of(new PermissionRule("*", PermissionAction.ASK))),
-            5_000L,
-            1_000L,
-            5_000L);
 
     public Tool {
       permission = copyPermission(permission);
@@ -113,19 +91,6 @@ public record SystemSettings(
       int subagentMaxTurns,
       List<Integer> modelHttpRetryStatusCodes) {
 
-    public static final AiRuntime DEFAULT =
-        new AiRuntime(
-            3,
-            InvocationRetryBackoffStrategy.EXPONENTIAL,
-            2_000L,
-            60_000L,
-            20_000,
-            2,
-            10,
-            0,
-            50,
-            ModelHttpErrorPolicy.DEFAULT_RETRY_STATUS_CODES);
-
     public AiRuntime {
       SystemSettingsValidation.requireNonNegativeInt(retryMaxRetries, "aiRuntime.retryMaxRetries");
       retryBackoffStrategy =
@@ -158,9 +123,6 @@ public record SystemSettings(
   /** environment section：daemon gateway 的资源边界与心跳超时。 */
   public record Environment(long maxResourceBytes, long heartbeatTimeoutMillis) {
 
-    /** 默认单条/聚合资源字节预算：16 MiB，与 {@code advanced.resourceMaxBytes} 同一业务上限。 */
-    public static final Environment DEFAULT = new Environment(16L * 1024 * 1024, 60_000L);
-
     public Environment {
       SystemSettingsValidation.requirePositiveMillis(
           maxResourceBytes, "environment.maxResourceBytes");
@@ -171,8 +133,6 @@ public record SystemSettings(
 
   /** network section：Backend 唯一全局 HTTP 代理，保存后新发起请求生效；null 地址明确直连，不读取宿主代理。 */
   public record Network(String proxyUrl, String noProxyHosts) {
-
-    public static final Network DEFAULT = new Network(null, "localhost,127.*,::1");
 
     public Network {
       if (proxyUrl != null && proxyUrl.length() > 2048) {
@@ -208,9 +168,6 @@ public record SystemSettings(
       int thumbnailQuality,
       long temporaryResourceTtlSeconds,
       long temporaryResourceCleanupIntervalSeconds) {
-
-    public static final StorageMedia DEFAULT =
-        new StorageMedia(86_400L, 1_800L, 3_600L, 30_000L, 512, 80, 259_200L, 1_800L);
 
     public StorageMedia {
       SystemSettingsValidation.requirePositive(
@@ -253,22 +210,6 @@ public record SystemSettings(
       long applicationEventHeartbeatIntervalMillis,
       long postgresqlWorkNotificationPollMillis,
       long postgresqlWorkReconnectBackoffMillis) {
-
-    public static final Advanced DEFAULT =
-        new Advanced(
-            16L * 1024 * 1024,
-            30_000L,
-            10_000L,
-            1_000L,
-            1_000L,
-            1_000L,
-            1_000L,
-            512,
-            2L * 1024 * 1024,
-            10_000L,
-            20_000L,
-            5_000L,
-            1_000L);
 
     public Advanced {
       SystemSettingsValidation.requirePositiveMillis(resourceMaxBytes, "advanced.resourceMaxBytes");

@@ -39,6 +39,7 @@ import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
+import fun.fengwk.kkstudio.platform.settings.SystemSettingsTestFixture;
 import fun.fengwk.kkstudio.share.ai.environment.DaemonConfiguration;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCardDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCreateDTO;
@@ -88,7 +89,7 @@ class EnvironmentServiceTest {
     EnvironmentRegistry registry = mock(EnvironmentRegistry.class);
     AgentDefinitionRepository agents = mock(AgentDefinitionRepository.class);
     SystemSettingsSnapshot snapshot = mock(SystemSettingsSnapshot.class);
-    when(snapshot.get()).thenReturn(SystemSettings.DEFAULT);
+    when(snapshot.get()).thenReturn(SystemSettingsTestFixture.DEFAULT);
 
     when(repo.existsByName("local-env")).thenReturn(false);
     when(repo.create(any())).thenReturn(true);
@@ -128,7 +129,7 @@ class EnvironmentServiceTest {
     EnvironmentRegistry registry = mock(EnvironmentRegistry.class);
     AgentDefinitionRepository agents = mock(AgentDefinitionRepository.class);
     SystemSettingsSnapshot snapshot = mock(SystemSettingsSnapshot.class);
-    when(snapshot.get()).thenReturn(SystemSettings.DEFAULT);
+    when(snapshot.get()).thenReturn(SystemSettingsTestFixture.DEFAULT);
 
     when(repo.existsByName("local-env")).thenReturn(false);
     when(repo.create(any())).thenReturn(false);
@@ -148,7 +149,7 @@ class EnvironmentServiceTest {
     EnvironmentRegistry registry = mock(EnvironmentRegistry.class);
     AgentDefinitionRepository agents = mock(AgentDefinitionRepository.class);
     SystemSettingsSnapshot snapshot = mock(SystemSettingsSnapshot.class);
-    when(snapshot.get()).thenReturn(SystemSettings.DEFAULT);
+    when(snapshot.get()).thenReturn(SystemSettingsTestFixture.DEFAULT);
 
     when(repo.existsByName("local-env")).thenReturn(false);
     when(repo.create(any())).thenReturn(true);
@@ -186,7 +187,7 @@ class EnvironmentServiceTest {
     EnvironmentRegistry registry = mock(EnvironmentRegistry.class);
     AgentDefinitionRepository agents = mock(AgentDefinitionRepository.class);
     SystemSettingsSnapshot snapshot = mock(SystemSettingsSnapshot.class);
-    when(snapshot.get()).thenReturn(SystemSettings.DEFAULT);
+    when(snapshot.get()).thenReturn(SystemSettingsTestFixture.DEFAULT);
 
     Environment env = new Environment();
     env.setId(ENV_ID);
@@ -247,7 +248,7 @@ class EnvironmentServiceTest {
     EnvironmentRegistry registry = mock(EnvironmentRegistry.class);
     AgentDefinitionRepository agents = mock(AgentDefinitionRepository.class);
     SystemSettingsSnapshot snapshot = mock(SystemSettingsSnapshot.class);
-    when(snapshot.get()).thenReturn(SystemSettings.DEFAULT);
+    when(snapshot.get()).thenReturn(SystemSettingsTestFixture.DEFAULT);
 
     Environment env = new Environment();
     env.setId(ENV_ID);
@@ -285,7 +286,7 @@ class EnvironmentServiceTest {
     EnvironmentRegistry registry = mock(EnvironmentRegistry.class);
     AgentDefinitionRepository agents = mock(AgentDefinitionRepository.class);
     SystemSettingsSnapshot snapshot = mock(SystemSettingsSnapshot.class);
-    when(snapshot.get()).thenReturn(SystemSettings.DEFAULT);
+    when(snapshot.get()).thenReturn(SystemSettingsTestFixture.DEFAULT);
 
     Environment env = new Environment();
     env.setId(ENV_ID);
@@ -336,7 +337,7 @@ class EnvironmentServiceTest {
   void installationScriptIssuesAFreshTokenAndConsumesTheCode() {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
     SystemSettingsSnapshot snapshot = mock(SystemSettingsSnapshot.class);
-    SystemSettings defaults = SystemSettings.DEFAULT;
+    SystemSettings defaults = SystemSettingsTestFixture.DEFAULT;
     when(snapshot.get())
         .thenReturn(
             new SystemSettings(
@@ -458,7 +459,7 @@ class EnvironmentServiceTest {
 
   private static EnvironmentService service(EnvironmentRepository repo) {
     SystemSettingsSnapshot snapshot = mock(SystemSettingsSnapshot.class);
-    when(snapshot.get()).thenReturn(SystemSettings.DEFAULT);
+    when(snapshot.get()).thenReturn(SystemSettingsTestFixture.DEFAULT);
     return new EnvironmentService(repo, mock(EnvironmentRegistry.class), snapshot, CLOCK);
   }
 
@@ -469,7 +470,7 @@ class EnvironmentServiceTest {
     EnvironmentRegistry registry = mock(EnvironmentRegistry.class);
     AgentDefinitionRepository agents = mock(AgentDefinitionRepository.class);
     SystemSettingsSnapshot snapshot = mock(SystemSettingsSnapshot.class);
-    when(snapshot.get()).thenReturn(SystemSettings.DEFAULT);
+    when(snapshot.get()).thenReturn(SystemSettingsTestFixture.DEFAULT);
 
     Environment env = new Environment();
     env.setId(ENV_ID);
@@ -502,7 +503,7 @@ class EnvironmentServiceTest {
     EnvironmentRegistry registry = mock(EnvironmentRegistry.class);
     AgentDefinitionRepository agents = mock(AgentDefinitionRepository.class);
     SystemSettingsSnapshot snapshot = mock(SystemSettingsSnapshot.class);
-    when(snapshot.get()).thenReturn(SystemSettings.DEFAULT);
+    when(snapshot.get()).thenReturn(SystemSettingsTestFixture.DEFAULT);
 
     Environment env = new Environment();
     env.setId(ENV_ID);
@@ -539,7 +540,7 @@ class EnvironmentServiceTest {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
     EnvironmentRegistry registry = mock(EnvironmentRegistry.class);
     SystemSettingsSnapshot snapshot = mock(SystemSettingsSnapshot.class);
-    when(snapshot.get()).thenReturn(SystemSettings.DEFAULT);
+    when(snapshot.get()).thenReturn(SystemSettingsTestFixture.DEFAULT);
 
     Environment env = new Environment();
     env.setId(ENV_ID);
@@ -585,7 +586,7 @@ class EnvironmentServiceTest {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
     EnvironmentRegistry registry = mock(EnvironmentRegistry.class);
     SystemSettingsSnapshot snapshot = mock(SystemSettingsSnapshot.class);
-    when(snapshot.get()).thenReturn(SystemSettings.DEFAULT);
+    when(snapshot.get()).thenReturn(SystemSettingsTestFixture.DEFAULT);
 
     Environment env = new Environment();
     env.setId(ENV_ID);
@@ -872,7 +873,7 @@ class EnvironmentServiceTest {
   void createValidatesRequestAndMapsDuplicateConstraints() {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
     SystemSettingsSnapshot snapshot = mock(SystemSettingsSnapshot.class);
-    when(snapshot.get()).thenReturn(SystemSettings.DEFAULT);
+    when(snapshot.get()).thenReturn(SystemSettingsTestFixture.DEFAULT);
     EnvironmentService service =
         new EnvironmentService(repo, mock(EnvironmentRegistry.class), snapshot, CLOCK);
 
@@ -967,7 +968,7 @@ class EnvironmentServiceTest {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
     EnvironmentRegistry registry = mock(EnvironmentRegistry.class);
     SystemSettingsSnapshot snapshot = mock(SystemSettingsSnapshot.class);
-    when(snapshot.get()).thenReturn(SystemSettings.DEFAULT);
+    when(snapshot.get()).thenReturn(SystemSettingsTestFixture.DEFAULT);
     when(repo.getById(ENV_ID)).thenReturn(environment("token", 0L));
     when(registry.find(EnvironmentId.of(ENV_ID)))
         .thenReturn(
@@ -991,7 +992,7 @@ class EnvironmentServiceTest {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
     EnvironmentRegistry registry = mock(EnvironmentRegistry.class);
     SystemSettingsSnapshot snapshot = mock(SystemSettingsSnapshot.class);
-    when(snapshot.get()).thenReturn(SystemSettings.DEFAULT);
+    when(snapshot.get()).thenReturn(SystemSettingsTestFixture.DEFAULT);
     when(repo.getById(ENV_ID)).thenReturn(environment("token", 0L));
 
     EnvironmentService service = new EnvironmentService(repo, registry, snapshot, CLOCK);
