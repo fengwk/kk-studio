@@ -114,30 +114,30 @@ const packages = new Map<string, FakePackage>([
     },
   ],
   [
-    'legacy-pack',
+    'upload-pack',
     {
       detail: {
-        ...gitDetail('legacy-pack'),
-        description: '上传渠道的历史包',
+        ...gitDetail('upload-pack'),
+        description: '上传渠道的已有包',
         source: 'UPLOAD',
         git: null,
         packageVersion: '2026.08.1',
         skills: [
           { name: 'dev', description: 'developer workflow' },
-          { name: 'legacy', description: 'legacy skill' },
+          { name: 'dropped', description: 'skill removed by the upload' },
         ],
         headCheckedAt: null,
         version: '4',
       },
       files: [
         { path: 'dev/SKILL.md', size: '2048' },
-        { path: 'legacy/SKILL.md', size: '640' },
+        { path: 'dropped/SKILL.md', size: '640' },
       ],
       environments: [
         {
           environmentId: 'env-nas',
           installedSha256: 'a'.repeat(64),
-          localPath: '/opt/skills/legacy-pack',
+          localPath: '/opt/skills/upload-pack',
           error: null,
           upToDate: true,
         },
@@ -151,7 +151,7 @@ const packages = new Map<string, FakePackage>([
         {
           environmentId: 'env-lab',
           installedSha256: 'b'.repeat(64),
-          localPath: '/srv/skills/legacy-pack',
+          localPath: '/srv/skills/upload-pack',
           error: null,
           upToDate: false,
         },
@@ -445,7 +445,7 @@ agentService.listAgents = async () => ({
       description: null,
       systemPrompt: null,
       execution: null,
-      config: { tools: [], skills: [{ packageName: 'legacy-pack', name: 'legacy' }], subagents: [] },
+      config: { tools: [], skills: [{ packageName: 'upload-pack', name: 'dropped' }], subagents: [] },
       version: '1',
       createTime: 0,
       updateTime: 0,

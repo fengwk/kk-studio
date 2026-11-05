@@ -588,8 +588,7 @@ describe('useHarnessThreadRealtime', () => {
     const { result, sockets } = renderRealtime(client, { invocations: [active] })
     sockets.openLatest()
 
-    // 同一 createdAt、同一 payload，但 eventId 不同：这是两条独立进度，必须各追加一次
-    // （旧实现按 createdAt+payload 指纹去重会把第二条吞掉）。
+    // 同一 createdAt、同一 payload，但 eventId 不同：这是两条独立进度，必须各追加一次。
     emitRealtime(sockets, toolPartial('same', 'inv-tool-1', 1, '11111111-1111-4111-8111-111111111111'))
     emitRealtime(sockets, toolPartial('same', 'inv-tool-1', 1, '22222222-2222-4222-8222-222222222222'))
     await waitFor(() =>

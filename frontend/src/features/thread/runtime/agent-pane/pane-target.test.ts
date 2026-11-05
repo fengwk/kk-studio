@@ -417,7 +417,7 @@ describe('PaneTarget durable-local FSM', () => {
     }
     storage.setItem(key, JSON.stringify(valid))
     expect(loadPendingAcceptance(owner, 'pane-1', storage)).not.toBeNull()
-    // 测试意图：旧磁盘 DTO 即使其余字段完整，也绝不静默转换为新的 owner wire。
+    // 测试意图：持久记录的 owner 形状不合法时，即使其余字段完整也必须拒绝。
     storage.setItem(key, JSON.stringify({
       ...valid,
       owner: { type: 'CHAT', id: 'chat-1' },

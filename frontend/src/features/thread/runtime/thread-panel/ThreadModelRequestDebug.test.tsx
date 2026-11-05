@@ -397,8 +397,6 @@ describe('ThreadModelRequestDebug & Inspector', () => {
       expect(screen.getByText('SHORT')).toBeInTheDocument()
       expect(screen.getByText('会话缓存键')).toBeInTheDocument()
       expect(screen.getByText('aff-key-42')).toBeInTheDocument()
-      // 断点字段已从契约移除：不再出现任何断点行
-      expect(screen.queryByText('Cache 断点')).not.toBeInTheDocument()
 
       await user.keyboard('{Escape}')
       expect(screen.queryByTestId('thread-debug-inspector')).not.toBeInTheDocument()
@@ -480,8 +478,6 @@ describe('ThreadModelRequestDebug & Inspector', () => {
       expect(screen.getByText('NONE')).toBeInTheDocument()
       expect(screen.getByText('(No explicit cache control; provider may still cache automatically)')).toBeInTheDocument()
       expect(screen.getByText('Session Cache Key')).toBeInTheDocument()
-      // 断点字段已从 DTO 移除
-      expect(screen.queryByText('Breakpoints')).not.toBeInTheDocument()
     })
   })
 
@@ -746,7 +742,7 @@ describe('ThreadModelRequestDebug & Inspector', () => {
 
     it('renders provider request preview with metadata, preformatted payload and no authentication credentials', () => {
       // 测试意图：验证 selection.type === 'preview' 时展示请求预览标题、Provider/Model/ByteSize/Timestamp 元数据，
-      // 并以可选择预格式化代码块渲染 bodyJson（只读，无点击快照承诺），且绝不暴露任何 Authorization 头或凭据信息。
+      // 并以可选择的只读预格式化代码块渲染 bodyJson，且绝不暴露任何 Authorization 头或凭据信息。
       const mockPreview = {
         kind: 'DRAFT_REQUEST_PREVIEW' as const,
         providerType: 'OPENAI',
@@ -773,8 +769,6 @@ describe('ThreadModelRequestDebug & Inspector', () => {
 
       expect(screen.getByRole('heading', { level: 3, name: '请求预览' })).toBeInTheDocument()
       expect(screen.getByText('DRAFT_REQUEST_PREVIEW')).toBeInTheDocument()
-      // 不再有「点击快照」承诺标识：这是只读回放视图
-      expect(screen.queryByText('点击快照')).not.toBeInTheDocument()
       expect(screen.getByText('OPENAI')).toBeInTheDocument()
       expect(screen.getByText('gpt-4o')).toBeInTheDocument()
       expect(screen.getByText(/1.3 KB/)).toBeInTheDocument()

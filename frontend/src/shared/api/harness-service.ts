@@ -45,18 +45,18 @@ import type {
  * - POST /threads/{threadId}/executions/{executionId}/abandon
  * - PUT /threads/{threadId}/tool-invocations/{invocationId}/approval
  */
-export interface GetThreadSnapshotOptions {
+interface GetThreadSnapshotOptions {
   afterEntryId?: string | null
   signal?: AbortSignal
 }
 
-export interface ListSessionEntriesOptions {
+interface ListSessionEntriesOptions {
   cursor?: string | null
   limit?: number
   signal?: AbortSignal
 }
 
-export interface GetCompactionAvailabilityOptions {
+interface GetCompactionAvailabilityOptions {
   signal?: AbortSignal
 }
 

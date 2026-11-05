@@ -33,7 +33,7 @@ function MemoryRouter({ children }: { children: ReactNode }) {
 
 import { AgentPane } from '@/features/thread/runtime/AgentPane'
 import { useRootThreadControl, type UseRootThreadControlOptions } from '@/features/thread/runtime/useRootThreadControl'
-import { branchDraftFromEntry, branchDraftFromEntryPath } from '@/features/thread/runtime/root-thread/branch-draft-replay'
+import { branchDraftFromEntry } from '@/features/thread/runtime/root-thread/branch-draft-replay'
 import { sessionSelectionItem, threadSelectionItem } from '@/features/thread/runtime/root-thread/session-selection-items'
 import { usePaneTarget } from '@/features/thread/runtime/usePaneTarget'
 import { isBoundTarget, isPaneTarget, ownerIdentity, savePendingAcceptance, type PaneTarget, type PendingAcceptance } from '@/features/thread/runtime/agent-pane'
@@ -108,7 +108,7 @@ function readTestTarget(
 
 /**
  * 测试宿主：模拟 Chat workspace 对 pane target 的父级持有与提交。
- * 生产 AgentPane 只接收共享 target，不再自行读取旧 per-pane 键。
+ * 生产 AgentPane 只接收宿主提供的共享 target。
  */
 function TestAgentPane({
   owner,
@@ -1481,7 +1481,7 @@ describe('AgentPane orchestration', () => {
     act(() => hook.result.current.composer.settings?.onYoloChange(true))
     expect(hook.result.current.activeDraft?.yoloEnabled).toBe(true)
 
-    // 分叉不再改写本 pane 的目标：只向上请求（本用例无 workspace 回调，故无副作用）。
+    // 分叉只向上请求，不改写本 pane 的目标（本用例无 workspace 回调，故无副作用）。
     const targetBeforeFork = hook.result.current.target
     act(() => hook.result.current.requestBranchFromEntry({
       entryId: 'entry-settings',
@@ -1754,7 +1754,7 @@ describe('AgentPane orchestration', () => {
     })
     renderPane({ kind: 'CHAT', id: CHAT_ID })
     const composer = await screen.findByLabelText('给 AI 发送消息')
-    // 面板不再自渲染执行根身份与铅笔入口；重命名保留在 /rename-thread 命令中。
+    // 执行根身份与铅笔入口由 workspace 顶栏呈现；重命名走 /rename-thread 命令。
     expect(document.querySelector('.agent-pane-thread-heading')).toBeNull()
     await user.click(composer)
     await user.keyboard('/rename-thread{Enter}')
@@ -2788,7 +2788,7 @@ describe('AgentPane orchestration', () => {
       </QueryClientProvider>,
     )
 
-    // 面板不再自渲染执行根身份；Composer 挂载即证明面板就绪，同时断言没有任何
+    // Composer 挂载即证明面板就绪，同时断言没有任何
     // CHAT 命名空间的读写（owner 语义不串台）。
     await screen.findByLabelText('给 AI 发送消息')
 
@@ -2830,7 +2830,7 @@ function renderPane(
 }
 
 /**
- * 控制面探针：按父面板的结构提供绑定目标与唯一投影（控制 Hook 不再自建目标与订阅）。
+ * 控制面探针：按父面板的结构提供绑定目标与唯一投影。
  */
 function useRootControlProbe(
   options: Omit<UseRootThreadControlOptions, 'target' | 'setTarget' | 'projection'>,
@@ -3113,7 +3113,7 @@ describe('TURN_END 绑定与 Debug 只读退出', () => {
   })
 })
 
-describe('branchDraftFromEntry and branchDraftFromEntryPath environment replay', () => {
+describe('branchDraftFromEntry environment replay', () => {
   const fallbackDraft: BranchDraft = {
     agentName: 'assistant',
     execution: createBuiltinExecution('MiniMax', 'default'),
@@ -3170,29 +3170,6 @@ describe('branchDraftFromEntry and branchDraftFromEntryPath environment replay',
       )
       expect(result?.environmentName).toBe('initial-env')
     }
-  })
-
-  /**
-   * 测试意图：验证 branchDraftFromEntryPath 沿 entry 祖先链依序回放时，environmentName 的变更与清除能够正确链式传递。
-   */
-  it('replays environment changes sequentially along the entry path', () => {
-    const entries: HarnessSessionEntryDTO[] = [
-      { ...createEntry({ settings: { agentName: 'a1', environmentName: 'env-1' } }, 'root', null), entryType: 'ROOT' },
-      createEntry({ settings: { agentName: 'a2' } }, 'child-1', 'root'),
-      createEntry({ settings: { environmentName: null } }, 'child-2', 'child-1'),
-    ]
-
-    // 到 root：环境为 env-1
-    const atRoot = branchDraftFromEntryPath(entries, 'root', fallbackDraft)
-    expect(atRoot?.environmentName).toBe('env-1')
-
-    // 到 child-1：未改动环境，继承 env-1
-    const atChild1 = branchDraftFromEntryPath(entries, 'child-1', fallbackDraft)
-    expect(atChild1?.environmentName).toBe('env-1')
-
-    // 到 child-2：显式 null，环境被清空
-    const atChild2 = branchDraftFromEntryPath(entries, 'child-2', fallbackDraft)
-    expect(atChild2?.environmentName).toBeNull()
   })
 
   /**
@@ -3262,7 +3239,7 @@ describe('branchDraftFromEntry and branchDraftFromEntryPath environment replay',
   })
 
   it('carries composer attachments on an owner-free bound thread through the generic command batch', async () => {
-    // 测试意图：宿主不再有受控指令回调；无 owner 的既有 Thread 提交含附件的草稿时，
+    // 测试意图：无 owner 的既有 Thread 提交含附件的草稿时，
     // 附件随 USER_MESSAGE 命令批次原样发出，既不静默丢弃也不落到创建入口。
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const { result } = renderHook(
@@ -3520,7 +3497,7 @@ function previewResponse(overrides: Partial<HarnessProviderRequestPreviewDTO> = 
   })
 
   describe('owner-free bound thread interactions', () => {
-    /** 无 owner 的面板：paneId 即默认绑定的 Thread，用于验证既有 Thread 不再需要 owner。 */
+    /** 无 owner 的面板：paneId 即默认绑定的 Thread，用于验证既有 Thread 的 owner-free 操作。 */
     function renderOwnerlessController(capabilities?: { readOnly?: boolean }) {
       const client = new QueryClient({
         defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -3584,17 +3561,17 @@ function previewResponse(overrides: Partial<HarnessProviderRequestPreviewDTO> = 
       ])
     })
 
-    it('keeps container navigation owner-scoped while thread writes no longer require an owner', async () => {
+    it('keeps container navigation owner-scoped while thread writes are owner-free', async () => {
       // 测试意图：owner 只描述容器（Session / Thread 列表与创建）；既有 Thread 的
-      // Agent 切换与重命名不再被 owner 拦截，而 Session/Thread 导航仍必须拒绝无 owner 面板。
+      // Agent 切换与重命名无需 owner，而 Session/Thread 导航必须拒绝无 owner 面板。
       const { result } = renderOwnerlessController()
       await waitFor(() => expect(result.current.activeDraft).not.toBeNull())
 
-      // 1. 切换 Agent 不再需要 owner
+      // 1. 切换 Agent 无需 owner
       act(() => result.current.selectAgent('assistant'))
       expect(result.current.error).toBeNull()
 
-      // 2. 重命名不再需要 owner：打开面板后提交走真实 PUT
+      // 2. 重命名无需 owner：打开面板后提交走真实 PUT
       act(() => {
         result.current.openRenameWithBackTo('thread', THREAD_ID, 'thread-name', null)
       })
@@ -3697,8 +3674,8 @@ function previewResponse(overrides: Partial<HarnessProviderRequestPreviewDTO> = 
     })
 
     it('renders AgentPane without an owner and renames the bound thread from the palette', async () => {
-      // 测试意图：AgentPane 完全不传 owner 时不得崩溃，Thread 重命名不再按 owner 拦截，
-      // 且真实提交后能落 PUT。入口由 /rename-thread 提供（面板不再自渲染身份标题）。
+      // 测试意图：AgentPane 完全不传 owner 时不得崩溃，Thread 重命名可提交 PUT。
+      // 入口由 /rename-thread 提供，执行根身份由 workspace 顶栏呈现。
       const user = userEvent.setup()
       const client = new QueryClient({
         defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -3732,7 +3709,7 @@ function previewResponse(overrides: Partial<HarnessProviderRequestPreviewDTO> = 
     })
 
     it('applies the same owner-free bound interaction for CHAT, ISSUE_AGENT and absent owners', async () => {
-      // 测试意图：矩阵级验证——既有 Thread 的能力不再由 owner 类型裁剪：三种 owner 状态下
+      // 测试意图：矩阵级验证——既有 Thread 的能力与 owner 类型无关：三种 owner 状态下
       // 预览都只受草稿就绪度限制、settings 都暴露，owner 概念只保留给容器创建。
       const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
 
@@ -4727,7 +4704,7 @@ describe('AgentPane root control mounting', () => {
     await user.type(composer, '第一句')
     await user.click(screen.getByRole('button', { name: '发送消息' }))
 
-    // 身份不再由面板标题呈现（上移 workspace 顶栏）；同一次 commit 的可观察证据是
+    // 身份由 workspace 顶栏呈现；同一次 commit 的可观察证据是
     // 验收种子已进入快照缓存，且控制面没有被卸载重挂。
     await waitFor(() => expect(
       view.client.getQueryData(queryKeys.threads.snapshot(NEW_ROOT_ID)),

@@ -15,7 +15,7 @@ import '@/features/thread/runtime/thread-panel/messages/meta-message-block.css'
  * 无该能力时（只读子代理视图、非 Chat 宿主、分支禁用）不渲染按钮，绝不在此自造流程。
  *
  * 截断的可见摘要由 `message.text` 承载；hover 明细直接由该回合的真实 `turnUsage`
- * 事实生成完整数字与全称字段（与 Footer 共用同一格式化），不再复述紧凑缩写图例；
+ * 事实生成完整数字与全称字段（与 Footer 共用同一格式化），不复述紧凑缩写图例；
  * 没有 usage 事实时不生成任何读数。
  */
 export function MetaMessageBlock({ message }: { message: MetaDialogueMessage }) {

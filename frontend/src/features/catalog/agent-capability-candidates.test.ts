@@ -128,7 +128,7 @@ describe('agent-capability-candidates', () => {
 
     const selected = [
       { packageName: 'core-tools', name: 'dev' },
-      { packageName: 'old-pkg', name: 'legacy-skill' },
+      { packageName: 'missing-pkg', name: 'missing-skill' },
     ]
 
     const merged = withSelectedSkillOrphans(candidates, selected)
@@ -139,8 +139,8 @@ describe('agent-capability-candidates', () => {
         description: 'dev skill',
       },
       {
-        value: 'old-pkg:legacy-skill',
-        name: 'old-pkg / legacy-skill',
+        value: 'missing-pkg:missing-skill',
+        name: 'missing-pkg / missing-skill',
         description: null,
         offline: true,
         missing: true,

@@ -141,7 +141,7 @@ test.describe('Canvas library real browser regression', () => {
 
     // 窄屏单列且不横向溢出。
     await page.setViewportSize({ width: 360, height: 900 })
-    // 窄屏不恢复旧 hero 的 38px 标题。
+    // 窄屏标题字号不超过 22px。
     expect(await page.locator('#libraryTitle').evaluate(
       (element) => Number.parseFloat(getComputedStyle(element).fontSize),
     )).toBeLessThanOrEqual(22)

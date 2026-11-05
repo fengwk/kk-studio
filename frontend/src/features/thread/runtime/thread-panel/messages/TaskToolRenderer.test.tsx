@@ -127,7 +127,7 @@ describe('parseTaskReceipt', () => {
     expect(
       parseTaskReceipt({ kind: 'task.cancelled', thread_id: '00000000-0000-0000-0000-000000000004' }),
     ).toBeNull()
-    // 遗留 status 字段不被识别
+    // 缺少 kind='task.accepted' 的 details 不是受理收据。
     expect(
       parseTaskReceipt({ status: 'accepted', thread_id: '00000000-0000-0000-0000-000000000004' }),
     ).toBeNull()
@@ -414,9 +414,8 @@ describe('TaskToolRenderer result phase', () => {
     const { container } = render(<TaskToolRenderer message={terminal} expanded />)
     const output = container.querySelector('.thread-tool-output')
 
-    // 正文完整可见（折叠由卡片外壳处理），不再按行截断。
+    // 正文完整可见（折叠由卡片外壳处理）。
     expect(output).toHaveTextContent('fallback-line-1')
     expect(output).toHaveTextContent('fallback-line-7')
-    expect(output?.textContent).not.toMatch(/more line|earlier line/)
   })
 })

@@ -138,7 +138,6 @@ describe('ChatCard', () => {
 
     const card = container.querySelector('article.resource-card')
     expect(card).toBeInTheDocument()
-    expect(card).not.toHaveClass('info-card')
 
     const heading = screen.getByRole('heading', { level: 3 })
     expect(heading).toHaveTextContent('Draft')

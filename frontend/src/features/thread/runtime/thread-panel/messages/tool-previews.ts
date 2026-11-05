@@ -6,7 +6,7 @@ export interface ParsedToolArguments {
   values: Record<string, unknown>
 }
 
-export interface WriteCallPreview {
+interface WriteCallPreview {
   kind: 'write'
   path: string
   workdir?: string
@@ -15,7 +15,7 @@ export interface WriteCallPreview {
   lines: string[]
 }
 
-export type EditCallPreview =
+type EditCallPreview =
   | {
       kind: 'edit'
       mode: 'input'
@@ -40,7 +40,7 @@ export type EditCallPreview =
 
 export type ToolCallPreview = WriteCallPreview | EditCallPreview
 
-export interface EditPreviewOptions {
+interface EditPreviewOptions {
   editReview?: EditReview | null
   streaming?: boolean
   isWaitingReview?: boolean

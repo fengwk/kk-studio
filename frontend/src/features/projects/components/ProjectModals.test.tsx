@@ -288,7 +288,7 @@ describe('EditProjectModal', () => {
     const user = userEvent.setup()
     const project = { ...mockProject, workflow: { states: [
       ...mockProject.workflow.states,
-      { state: 'OLD', name: 'Old', agent: null, environment: null, instructions: null, maxRuns: null, enabled: false, next: [] },
+      { state: 'EXTRA', name: 'Extra', agent: null, environment: null, instructions: null, maxRuns: null, enabled: false, next: [] },
     ] } }
     let resolveSnapshot!: (value: { project: ProjectDTO; issues: []; referencedStateCodes: string[] }) => void
     const api = {
@@ -299,13 +299,13 @@ describe('EditProjectModal', () => {
       <EditProjectModal isOpen project={project} api={api} onClose={vi.fn()} onSuccess={vi.fn()} />
     </QueryClientProvider>)
     await user.click(screen.getByRole('tab', { name: '工作流' }))
-    await user.click(screen.getByRole('button', { name: /4Old/ }))
-    expect(screen.getByRole('button', { name: '删除 Old' })).toBeDisabled()
+    await user.click(screen.getByRole('button', { name: /4Extra/ }))
+    expect(screen.getByRole('button', { name: '删除 Extra' })).toBeDisabled()
     expect(screen.getByLabelText(/状态标识/)).toBeDisabled()
     expect(screen.getByRole('button', { name: '保存工作流' })).toBeDisabled()
     expect(api.updateWorkflow).not.toHaveBeenCalled()
     resolveSnapshot({ project, issues: [], referencedStateCodes: [] })
-    await waitFor(() => expect(screen.getByRole('button', { name: '删除 Old' })).toBeEnabled())
+    await waitFor(() => expect(screen.getByRole('button', { name: '删除 Extra' })).toBeEnabled())
     expect(screen.getByLabelText(/状态标识/)).toBeEnabled()
     expect(screen.getByRole('button', { name: '保存工作流' })).toBeEnabled()
   })
@@ -340,20 +340,20 @@ describe('EditProjectModal', () => {
     const user = userEvent.setup()
     const project = { ...mockProject, workflow: { states: [
       ...mockProject.workflow.states,
-      { state: 'OLD', name: 'Old', agent: null, environment: null, instructions: null, maxRuns: null, enabled: false, next: [] },
+      { state: 'EXTRA', name: 'Extra', agent: null, environment: null, instructions: null, maxRuns: null, enabled: false, next: [] },
     ] } }
     const api = { updateWorkflow: vi.fn() } as unknown as ProjectsApi
     const props = { isOpen: true, project, api, onClose: vi.fn(), onSuccess: vi.fn() }
     const { rerender } = renderWithClient(<EditProjectModal {...props}
       snapshot={{ project, issues: [], referencedStateCodes: [] }} />)
     await user.click(screen.getByRole('tab', { name: '工作流' }))
-    await user.click(screen.getByRole('button', { name: '删除 Old' }))
+    await user.click(screen.getByRole('button', { name: '删除 Extra' }))
     rerenderWithClient(rerender, <EditProjectModal {...props}
-      snapshot={{ project: { ...project, version: '9' }, issues: [], referencedStateCodes: ['OLD'] }} />)
+      snapshot={{ project: { ...project, version: '9' }, issues: [], referencedStateCodes: ['EXTRA'] }} />)
     await user.click(screen.getByRole('button', { name: '保存工作流' }))
     expect(api.updateWorkflow).not.toHaveBeenCalled()
-    expect(screen.getByRole('alert')).toHaveTextContent('OLD')
-    expect(screen.queryByRole('button', { name: '删除 Old' })).not.toBeInTheDocument()
+    expect(screen.getByRole('alert')).toHaveTextContent('EXTRA')
+    expect(screen.queryByRole('button', { name: '删除 Extra' })).not.toBeInTheDocument()
   })
 
   it('saves basic info with the version frozen at open time', async () => {

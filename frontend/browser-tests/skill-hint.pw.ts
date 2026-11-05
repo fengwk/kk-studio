@@ -91,7 +91,7 @@ function summaries(state: InstallState, packageName: string) {
   if (packageName === 'docs-tools') {
     return [skillSync(NAS_ID, { installedSha256: PREVIOUS_SHA, upToDate: false }), builder]
   }
-  return packageName === 'legacy'
+  return packageName === 'release-tools'
     ? [builder]
     : [skillSync(NAS_ID, { installedSha256: CURRENT_SHA, upToDate: true }), builder]
 }
@@ -197,7 +197,7 @@ test('root pane lists the skills the selected environment cannot run', async ({ 
   await expect(hint.getByText('版本不一致')).toBeVisible()
   await expect(hint.getByText('ops / deploy')).toBeVisible()
   await expect(hint.getByText('安装失败')).toBeVisible()
-  await expect(hint.getByText('legacy / migrate')).toBeVisible()
+  await expect(hint.getByText('release-tools / migrate')).toBeVisible()
   await expect(hint.getByText('未安装')).toBeVisible()
   // 已安装当前版本的技能不进入提示。
   await expect(hint.getByText('dev-tools / dev')).toHaveCount(0)

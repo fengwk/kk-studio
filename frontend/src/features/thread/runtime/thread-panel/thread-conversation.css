@@ -414,9 +414,8 @@ pre.thread-system-prompt-body {
   }
 }
 
-/* 详情列占位与空预览占位 */
-.thread-debug-placeholder,
-.thread-debug-empty-preview {
+/* 详情列占位 */
+.thread-debug-placeholder {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -460,15 +459,6 @@ pre.thread-system-prompt-body {
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.thread-event-detail-text {
-  margin: 0;
-  color: var(--fg-muted);
-  font-size: var(--font-size-xs);
-  line-height: 1.5;
-  overflow-wrap: anywhere;
-  word-break: break-word;
 }
 
 pre.thread-event-detail-payload {
@@ -518,17 +508,6 @@ pre.thread-event-detail-payload {
   padding: 0;
   border: 0;
   background: transparent;
-}
-
-.thread-block-label {
-  margin-bottom: 4px;
-  color: var(--fg-muted);
-  font-size: var(--font-size-xs);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  display: flex;
-  align-items: center;
-  gap: 8px;
 }
 
 .thread-block-body {

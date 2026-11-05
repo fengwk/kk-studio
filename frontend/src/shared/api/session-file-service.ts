@@ -20,7 +20,7 @@ export interface SessionFileTextWindow {
 }
 
 /** 下载结果：完整字节与后端给出的附件文件名。 */
-export interface SessionFileDownload {
+interface SessionFileDownload {
   blob: Blob
   fileName: string
 }

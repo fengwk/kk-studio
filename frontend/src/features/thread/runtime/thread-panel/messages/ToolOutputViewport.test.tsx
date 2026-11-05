@@ -19,11 +19,9 @@ describe('ToolOutputViewport', () => {
 
     expect(output).not.toBeNull()
     expect(output?.tagName).toBe('PRE')
-    // 完整原文都在 DOM 中：不再有 N 行截断或「还有 N 行」提示。
+    // 完整原文都在 DOM 中。
     expect(output).toHaveTextContent('line-1')
     expect(output).toHaveTextContent('line-40')
-    expect(output?.textContent).not.toContain('more line')
-    expect(output?.textContent).not.toContain('earlier line')
     // 键盘与触屏都能滚回内部日志。
     expect(output).toHaveAttribute('tabindex', '0')
   })

@@ -183,7 +183,7 @@ describe('AgentPane command registry', () => {
   })
 
   it('exposes the full BOUND_THREAD command set without owner-based filtering', () => {
-    // 既有 Thread 的能力只由目标 kind 与显式选项决定：owner 不再参与裁剪，
+    // 既有 Thread 的能力只由目标 kind 与显式选项决定：owner 不参与裁剪，
     // 因此 goal 与 stop 对 BOUND_THREAD 恒可用。
     const bound = { kind: 'BOUND_THREAD' as const, threadId: 't1' }
     const commands = threadCommandsForTarget(bound)

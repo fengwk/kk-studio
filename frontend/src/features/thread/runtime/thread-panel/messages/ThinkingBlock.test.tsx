@@ -26,7 +26,6 @@ describe('ThinkingBlock', () => {
     const { container } = render(<ThinkingBlock thinking={'first\n\nsecond   third'} />)
     const section = container.querySelector('.thread-block-thinking')
     expect(section).not.toBeNull()
-    expect(container.querySelector('.thread-block-label')).toBeNull()
     expect(container.querySelector('hr')).toBeNull()
 
     const line = container.querySelector('.thread-thinking-line')

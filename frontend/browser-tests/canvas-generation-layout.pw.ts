@@ -141,7 +141,7 @@ test.describe('Canvas Generation Panel Real Browser Layout Regression', () => {
     const panel = page.locator('.generation-panel')
     await expect(panel).toBeVisible()
 
-    // 头部动作迁移到共享 IconButton：仍是 28px 紧凑点击区，没有被 feature 重置覆盖。
+    // 头部动作使用共享 IconButton：28px 紧凑点击区，没有被 feature 重置覆盖。
     const actions = panel.locator('.generation-panel-actions .icon-button')
     expect(await actions.count()).toBe(2)
     const actionBox = (await actions.first().boundingBox())!
