@@ -20,7 +20,7 @@ public record ModelAttemptFailurePayload(
     model = Objects.requireNonNull(model, "model");
     error = Objects.requireNonNull(error, "error");
     if (requestedAt != null) {
-      requestedAt = HarnessStoreTime.requireMillisecondPrecision(requestedAt, "retryAt");
+      requestedAt = HarnessStoreTime.requireMillisecondPrecision(requestedAt, "requestedAt");
     }
     retryAt = HarnessStoreTime.requireMillisecondPrecision(retryAt, "retryAt");
   }

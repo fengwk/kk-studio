@@ -73,6 +73,25 @@ class HistoryEntryPayloadJsonCodecTest {
   private static final String UUID_0 = "00000000-0000-0000-0000-000000000000";
   private static final HistoryEntryPayloadJsonCodec CODEC = new HistoryEntryPayloadJsonCodec();
 
+  /** 毫秒精度错误指向实际无效的时间字段。 */
+  @Test
+  void attemptFailurePayloadNamesInvalidTimestamp() {
+    ModelAttemptSnapshot attempt = new ModelAttemptSnapshot(1, 7, "partial", "thinking");
+    ModelSelection model = ModelSelection.model("model", "v1");
+    AssistantError error = new AssistantError("TRANSIENT", "down");
+    Instant time = Instant.parse("2026-01-01T00:00:02Z");
+    IllegalArgumentException requestedError =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> new ModelAttemptFailurePayload(attempt, model, time.plusNanos(1), error, time));
+    assertEquals("requestedAt must use millisecond precision", requestedError.getMessage());
+    IllegalArgumentException retryError =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> new ModelAttemptFailurePayload(attempt, model, null, error, time.plusNanos(1)));
+    assertEquals("retryAt must use millisecond precision", retryError.getMessage());
+  }
+
   @Test
   void roundTripsAllPayloadTypes() {
     BranchSettings settings = settings();

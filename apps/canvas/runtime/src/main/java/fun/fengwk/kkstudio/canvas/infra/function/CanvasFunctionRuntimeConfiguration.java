@@ -6,7 +6,6 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.SmartLifecycle;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.context.annotation.DependsOn;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.PlatformTransactionManager;
 
@@ -45,14 +44,11 @@ public class CanvasFunctionRuntimeConfiguration {
   @Bean(name = "canvasFunctionWorkerExecutor", destroyMethod = "shutdownNow")
   public ExecutorService canvasFunctionWorkerExecutor(
       CanvasFunctionRuntimeProperties properties, ContextSnapshotFactory contextSnapshotFactory) {
-    if (properties.getWorkerConcurrency() < 1) {
-      throw new IllegalArgumentException(
-          "kk-studio.canvas.function.runtime.worker-concurrency must be at least 1");
-    }
+    int concurrency = workerConcurrency(properties);
     return ContextExecutorService.wrap(
         new ThreadPoolExecutor(
-            properties.getWorkerConcurrency(),
-            properties.getWorkerConcurrency(),
+            concurrency,
+            concurrency,
             0L,
             TimeUnit.MILLISECONDS,
             new SynchronousQueue<>(),
@@ -68,12 +64,20 @@ public class CanvasFunctionRuntimeConfiguration {
   }
 
   @Bean(name = "canvasFunctionHeartbeatScheduler", destroyMethod = "shutdownNow")
-  @DependsOn("canvasFunctionWorkerExecutor")
   public ScheduledExecutorService canvasFunctionHeartbeatScheduler(
       CanvasFunctionRuntimeProperties properties) {
     return Executors.newScheduledThreadPool(
-        properties.getWorkerConcurrency(),
+        workerConcurrency(properties),
         Thread.ofPlatform().name("canvas-function-heartbeat-", 0L).daemon(true).factory());
+  }
+
+  private static int workerConcurrency(CanvasFunctionRuntimeProperties properties) {
+    int concurrency = properties.getWorkerConcurrency();
+    if (concurrency < 1) {
+      throw new IllegalArgumentException(
+          "kk-studio.canvas.function.runtime.worker-concurrency must be at least 1");
+    }
+    return concurrency;
   }
 
   @Bean(name = "canvasFunctionDispatcher")

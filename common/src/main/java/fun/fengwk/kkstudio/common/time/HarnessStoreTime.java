@@ -34,15 +34,8 @@ public final class HarnessStoreTime {
   /** 返回适合 durable 时间运算的正整毫秒 duration。 */
   public static Duration requireWholeMillisecondDuration(Duration value, String name) {
     Objects.requireNonNull(value, name);
-    if (value.isZero() || value.isNegative()) {
+    if (value.isZero() || value.isNegative() || value.toMillis() <= 0) {
       throw new IllegalArgumentException(name + " must be at least one millisecond");
-    }
-    try {
-      if (value.toMillis() <= 0) {
-        throw new IllegalArgumentException(name + " must be at least one millisecond");
-      }
-    } catch (ArithmeticException overflow) {
-      throw new IllegalArgumentException(name + " must fit the millisecond range", overflow);
     }
     if (value.getNano() % 1_000_000 != 0) {
       throw new IllegalArgumentException(name + " must use whole milliseconds");

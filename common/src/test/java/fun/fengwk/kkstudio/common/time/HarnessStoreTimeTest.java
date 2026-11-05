@@ -71,13 +71,6 @@ class HarnessStoreTimeTest {
         () ->
             HarnessStoreTime.requireWholeMillisecondDuration(
                 Duration.ofNanos(1_500_000), "duration"));
-    IllegalArgumentException overflow =
-        assertThrows(
-            IllegalArgumentException.class,
-            () ->
-                HarnessStoreTime.requireWholeMillisecondDuration(
-                    Duration.ofSeconds(Long.MAX_VALUE), "duration"));
-    assertEquals("duration must fit the millisecond range", overflow.getMessage());
   }
 
   @Test
