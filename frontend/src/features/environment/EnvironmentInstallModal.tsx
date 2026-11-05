@@ -13,7 +13,7 @@ import { Toast } from '@/shared/ui/feedback/Toast'
 import { Dialog } from '@/shared/ui/overlays/Dialog'
 import { useI18n, type InterpolationValues, type TranslationKey } from '@/shared/i18n'
 import { queryKeys } from '@/shared/lib/query-keys'
-import { copyTextToClipboard } from './clipboard'
+import { copyTextToClipboard } from '@/shared/lib/clipboard'
 import {
   InstallConfigError,
   detectInstallOS,

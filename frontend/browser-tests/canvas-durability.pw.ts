@@ -160,7 +160,7 @@ test.describe('Canvas Command Durability Real Browser Regression', () => {
     // 2. 模拟复制标签页：打开标签页 B，并在初始化队列前注入 A 的 sessionStorage
     const pageB = await context.newPage()
     await pageB.addInitScript((sId) => {
-      window.sessionStorage.setItem('kkstudio.canvas.editingSessionId', sId)
+      window.sessionStorage.setItem('kk-studio.canvas.editingSessionId', sId)
     }, sessionA)
 
     await pageB.goto('/browser-tests/canvas-durability-harness.html')

@@ -46,6 +46,15 @@ describe('isCanonicalUuid', () => {
     expect(isCanonicalUuid('zg3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f')).toBe(false)
   })
 
+  // 测试意图：存储/传输的未知值直接喂给校验时必须是 false，而不需要调用方先做类型收窄。
+  it('rejects unknown non-string inputs', () => {
+    expect(isCanonicalUuid(null)).toBe(false)
+    expect(isCanonicalUuid(undefined)).toBe(false)
+    expect(isCanonicalUuid(42)).toBe(false)
+    expect(isCanonicalUuid({ id: '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f' })).toBe(false)
+    expect(isCanonicalUuid(['8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f'])).toBe(false)
+  })
+
   it('matches pattern directly', () => {
     expect(CANONICAL_UUID_PATTERN.test('8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f')).toBe(true)
     expect(CANONICAL_UUID_PATTERN.test('invalid')).toBe(false)

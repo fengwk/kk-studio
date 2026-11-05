@@ -44,7 +44,7 @@ export type DraftSaveOutcome =
   | { status: 'SAVED' }
   | { status: 'STALE'; record: ThreadDraftRecord }
 
-const DB_NAME = 'kkstudio.thread-drafts'
+const DB_NAME = 'kk-studio.thread-drafts'
 const DB_VERSION = 1
 const STORE_NAME = 'threadDrafts'
 

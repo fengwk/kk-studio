@@ -15,7 +15,7 @@ import type {
   CanvasSnapshotDTO,
 } from '@/shared/api/generated/contracts'
 
-const PENDING_RUN_STORAGE_PREFIX = 'kkstudio.canvas.pending-run:'
+const PENDING_RUN_STORAGE_PREFIX = 'kk-studio.canvas.pending-run:'
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 export function isCanonicalUUID(value: unknown): value is string {

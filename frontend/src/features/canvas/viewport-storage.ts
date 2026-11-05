@@ -9,7 +9,7 @@ export const MIN_CANVAS_ZOOM = 0.25
 export const MAX_CANVAS_ZOOM = 2
 
 export function canvasViewportStorageKey(canvasId: string): string {
-  return `kkstudio.canvas.viewport:${canvasId}`
+  return `kk-studio.canvas.viewport:${canvasId}`
 }
 
 export function hasStoredCanvasViewport(

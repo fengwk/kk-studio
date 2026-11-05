@@ -193,7 +193,7 @@ function showBrowserNotification(title: string, body: string): void {
     return
   }
   try {
-    new window.Notification(title, { body, tag: `kkstudio:${title}:${body}` })
+    new window.Notification(title, { body, tag: `kk-studio:${title}:${body}` })
   } catch {
     // 通知是辅助能力，绝不能中断审批或 Thread 生命周期。
   }

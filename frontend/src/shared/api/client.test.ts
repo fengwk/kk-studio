@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   ApiError,
   apiClient,
+  apiErrorDetail,
   isConflictError,
   isConflictReason,
   isNotFoundError,
@@ -132,6 +133,19 @@ describe('apiClient', () => {
     expect(isNotFoundError(new ApiError('missing', 404, 'NOT_FOUND'))).toBe(true)
     expect(isNotFoundError(new ApiError('failed', 500))).toBe(false)
     expect(isNotFoundError(new Error('missing'))).toBe(false)
+  })
+
+  // 测试意图：只有 ApiError 回执里的非空字符串 detail 才是去敏失败原因，其余一律返回 null。
+  it('extracts only non-empty string details from api errors', () => {
+    expect(
+      apiErrorDetail(new ApiError('unavailable', 409, 'environment_unavailable', { detail: 'no READY owner' })),
+    ).toBe('no READY owner')
+    expect(apiErrorDetail(new ApiError('blank', 400, 'BAD_REQUEST', { detail: '' }))).toBeNull()
+    expect(apiErrorDetail(new ApiError('typed', 400, 'BAD_REQUEST', { detail: 42 }))).toBeNull()
+    expect(apiErrorDetail(new ApiError('plain', 500))).toBeNull()
+    expect(apiErrorDetail(new Error('plain'))).toBeNull()
+    expect(apiErrorDetail('plain')).toBeNull()
+    expect(apiErrorDetail(null)).toBeNull()
   })
 
   it('delegates http requests to axios instance', async () => {

@@ -1,6 +1,6 @@
 import { ApiError } from '@/shared/api/client'
 
-const STORAGE_PREFIX = 'kkstudio.projects.pending-action:'
+const STORAGE_PREFIX = 'kk-studio.projects.pending-action:'
 
 export type IssueActionKind =
   | 'TRANSITION'

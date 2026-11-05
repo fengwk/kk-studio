@@ -11,8 +11,8 @@
  *   共享的固定值，而是使用本 document 稳定的随机值并告警。
  */
 
-const SESSION_STORAGE_KEY = 'kkstudio.canvas.editingSessionId'
-const OWNER_STORAGE_KEY = 'kkstudio.canvas.editingSessionOwner'
+const SESSION_STORAGE_KEY = 'kk-studio.canvas.editingSessionId'
+const OWNER_STORAGE_KEY = 'kk-studio.canvas.editingSessionOwner'
 /** 页面所有权租约：超过该时长未续约，视为原标签页已关闭。 */
 const OWNER_LEASE_MS = 8000
 const HEARTBEAT_MS = OWNER_LEASE_MS / 2

@@ -10,7 +10,7 @@ import type {
   ThreadModelRequestDebugTool,
   ThreadProviderRequestPreviewData,
 } from '@/features/thread/runtime/thread-timeline-types'
-import { formatFileSize } from '@/shared/lib/upload-file'
+import { formatByteCount } from '@/shared/lib/format-bytes'
 import { useI18n } from '@/shared/i18n'
 import { IconButton } from '@/shared/ui/controls/IconButton'
 
@@ -330,7 +330,7 @@ export function ThreadDebugInspector({
           <KeyValue>
             <KeyValueRow label={t('ai.runtime.debug.inspector.providerType')}><Mono>{selection.preview.providerType}</Mono></KeyValueRow>
             <KeyValueRow label={t('ai.runtime.debug.inspector.modelName')}><Mono>{selection.preview.modelName}</Mono></KeyValueRow>
-            <KeyValueRow label={t('ai.runtime.debug.inspector.bodyByteSize')}><Mono>{formatFileSize(selection.preview.bodyByteSize)} ({selection.preview.bodyByteSize} B)</Mono></KeyValueRow>
+            <KeyValueRow label={t('ai.runtime.debug.inspector.bodyByteSize')}><Mono>{formatByteCount(selection.preview.bodyByteSize)} ({selection.preview.bodyByteSize} B)</Mono></KeyValueRow>
             <KeyValueRow label={t(selection.preview.kind === 'HISTORICAL_REQUEST_PREVIEW'
                 ? 'ai.runtime.debug.inspector.recordedAt'
                 : 'ai.runtime.debug.inspector.generatedAt')}><Mono>{selection.preview.generatedAt}</Mono></KeyValueRow>

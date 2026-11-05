@@ -12,7 +12,7 @@ import {
 import { onCanvasStorageError } from '@/features/canvas/canvas-local-store'
 import type { CanvasCommandDTO, CanvasSnapshotDTO } from '@/shared/api/generated/contracts'
 
-const SESSION_STORAGE_KEY = 'kkstudio.canvas.editingSessionId'
+const SESSION_STORAGE_KEY = 'kk-studio.canvas.editingSessionId'
 const DEFAULT_CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f'
 
 export interface CanvasDurabilityRecordedCall {
@@ -120,8 +120,8 @@ async function resetData(): Promise<void> {
     // ignore when storage is restricted
   }
   await Promise.all([
-    deleteIdbDatabase('kkstudio.canvas.operations'),
-    deleteIdbDatabase('kkstudio.canvas.drafts'),
+    deleteIdbDatabase('kk-studio.canvas.operations'),
+    deleteIdbDatabase('kk-studio.canvas.drafts'),
   ])
 }
 

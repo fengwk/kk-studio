@@ -406,7 +406,7 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
 
   it('严格 Schema 校验：非法记录必须 throw（含旧缓存缺 expectedVersion 与坏版本），合法记录才可解析', () => {
     cleanupTestStorage()
-    const storageKey = `kkstudio.canvas.pending-run:${canvasId}:${nodeId}`
+    const storageKey = `kk-studio.canvas.pending-run:${canvasId}:${nodeId}`
     const validRequest = { requestId: crypto.randomUUID(), expectedVersion: FUNCTION_VERSION_A }
     const write = (request: unknown, createdAt: number = Date.now()) => {
       window.localStorage.setItem(storageKey, JSON.stringify({
@@ -481,7 +481,7 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
 
   it('坏缓存明确丢弃：损坏记录/旧缓存使本次点击 0 flush 0 POST，并清掉该记录，下一次显式点击才新建请求', async () => {
     cleanupTestStorage()
-    const storageKey = `kkstudio.canvas.pending-run:${canvasId}:${nodeId}`
+    const storageKey = `kk-studio.canvas.pending-run:${canvasId}:${nodeId}`
     window.localStorage.setItem(storageKey, 'corrupt-raw-attempt-data')
 
     const flushFunctionConfig = vi.fn().mockResolvedValue(undefined)
@@ -511,7 +511,7 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
 
   it('旧缓存（有 requestId 但缺 expectedVersion）同样丢弃且本次点击 0 POST', async () => {
     cleanupTestStorage()
-    const storageKey = `kkstudio.canvas.pending-run:${canvasId}:${nodeId}`
+    const storageKey = `kk-studio.canvas.pending-run:${canvasId}:${nodeId}`
     const legacyRequestId = crypto.randomUUID()
     window.localStorage.setItem(storageKey, JSON.stringify({
       canvasId,
@@ -535,7 +535,7 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
 
   it('严格存储对象校验：外层缺字段或含额外字段的未决记录必须被拒（strict schema）', () => {
     cleanupTestStorage()
-    const storageKey = `kkstudio.canvas.pending-run:${canvasId}:${nodeId}`
+    const storageKey = `kk-studio.canvas.pending-run:${canvasId}:${nodeId}`
     const request = { requestId: crypto.randomUUID(), expectedVersion: FUNCTION_VERSION_A }
     const validOuter = {
       canvasId,
@@ -581,7 +581,7 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
 
   it('坏缓存已被其它记录替换：保留新记录、本次 0 POST，并如实提示未能清理', async () => {
     cleanupTestStorage()
-    const storageKey = `kkstudio.canvas.pending-run:${canvasId}:${nodeId}`
+    const storageKey = `kk-studio.canvas.pending-run:${canvasId}:${nodeId}`
     const corruptRaw = 'corrupt-raw-attempt-payload'
     window.localStorage.setItem(storageKey, corruptRaw)
 
@@ -611,7 +611,7 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
 
   it('坏缓存清理失败（removeItem 抛错）：保留原记录、本次 0 POST，并如实提示未能清理', async () => {
     cleanupTestStorage()
-    const storageKey = `kkstudio.canvas.pending-run:${canvasId}:${nodeId}`
+    const storageKey = `kk-studio.canvas.pending-run:${canvasId}:${nodeId}`
     const corruptRaw = 'corrupt-raw-attempt-payload'
     window.localStorage.setItem(storageKey, corruptRaw)
 
@@ -638,7 +638,7 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
 
   it('clearPendingFunctionRun 只清除精确匹配 requestId 的记录，不盲目删除未知内容', () => {
     cleanupTestStorage()
-    const storageKey = `kkstudio.canvas.pending-run:${canvasId}:${nodeId}`
+    const storageKey = `kk-studio.canvas.pending-run:${canvasId}:${nodeId}`
     const storedRequestId = crypto.randomUUID()
 
     savePendingFunctionRun({
@@ -806,7 +806,7 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
 
   it('discardPendingFunctionRun 严格校验：stale 确认不删新记录，权限受限抛错', () => {
     cleanupTestStorage()
-    const storageKey = `kkstudio.canvas.pending-run:${canvasId}:${nodeId}`
+    const storageKey = `kk-studio.canvas.pending-run:${canvasId}:${nodeId}`
     const rawA = 'raw-attempt-data-version-A'
     const rawB = 'raw-attempt-data-version-B'
     window.localStorage.setItem(storageKey, rawB)
@@ -831,7 +831,7 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
 
   it('坏记录可恢复完整流程：面板可读坏记录并在确认后手动清理 -> in-flight 禁 discard -> 再次生成成功发起 POST', async () => {
     cleanupTestStorage()
-    const storageKey = `kkstudio.canvas.pending-run:${canvasId}:${nodeId}`
+    const storageKey = `kk-studio.canvas.pending-run:${canvasId}:${nodeId}`
     const corruptRaw = 'corrupt-raw-attempt-payload'
     window.localStorage.setItem(storageKey, corruptRaw)
 

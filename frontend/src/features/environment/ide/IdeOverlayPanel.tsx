@@ -13,6 +13,7 @@ import { Select } from '@/shared/ui/controls/Select'
 import { ConfirmActionModal } from '@/shared/ui/overlays/ConfirmActionModal'
 import { LoadingSpinner } from '@/shared/ui/feedback/LoadingSpinner'
 import { useI18n, type TranslationKey } from '@/shared/i18n'
+import { copyTextToClipboard } from '@/shared/lib/clipboard'
 import type { IdeEnvironmentInfo } from '@/features/environment/ide/ide-panel-context'
 import type { IdeViewState } from '@/features/environment/ide/IdePanelProvider'
 import './ide-overlay-panel.css'
@@ -337,14 +338,9 @@ export function IdeOverlayPanel({
               title={t('ai.ide.copyDirectory')}
               data-testid="ide-copy-directory-btn"
               onClick={() => {
-                if (!navigator.clipboard) {
-                  setCopyStatus('failed')
-                  return
-                }
-                void navigator.clipboard.writeText(directory).then(
-                  () => setCopyStatus('copied'),
-                  () => setCopyStatus('failed'),
-                )
+                void copyTextToClipboard(directory).then((copied) => {
+                  setCopyStatus(copied ? 'copied' : 'failed')
+                })
               }}
             >
               <Copy size={14} aria-hidden="true" />

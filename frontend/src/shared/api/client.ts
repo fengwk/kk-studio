@@ -61,6 +61,17 @@ export function isNotFoundError(error: unknown): boolean {
   return error instanceof ApiError && error.status === 404
 }
 
+/** 后端回执中的去敏失败原因；没有可展示文本时返回 null。 */
+export function apiErrorDetail(error: unknown): string | null {
+  if (error instanceof ApiError) {
+    const detail = error.errors?.detail
+    if (typeof detail === 'string' && detail.length > 0) {
+      return detail
+    }
+  }
+  return null
+}
+
 /** 只在本次请求 opt-in lossless parser；未指定时保留 Axios 默认 JSON transform。 */
 function requestConfig(config?: GetConfig | MutationConfig | DeleteConfig): Record<string, unknown> | undefined {
   if (!config) {

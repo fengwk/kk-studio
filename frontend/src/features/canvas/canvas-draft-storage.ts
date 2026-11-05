@@ -27,7 +27,7 @@ import {
 import { removeDraftField, type CanvasNodeDraft } from '@/features/canvas/canvas-drafts'
 import type { CanvasDraftAck } from '@/features/canvas/canvas-operation-storage'
 
-const DB_NAME = 'kkstudio.canvas.drafts'
+const DB_NAME = 'kk-studio.canvas.drafts'
 const DB_VERSION = 1
 const STORE_NAME = 'drafts'
 const SESSION_INDEX = 'sessionKey'

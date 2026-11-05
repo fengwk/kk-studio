@@ -14,7 +14,8 @@ import { ApiError, isNotFoundError } from '@/shared/api/client'
 import { sessionFileService, type SessionFileOwner } from '@/shared/api/session-file-service'
 import type { HarnessSessionFileEntryDTO } from '@/shared/api/generated/contracts'
 import { useI18n } from '@/shared/i18n'
-import { formatFileSize } from '@/shared/lib/upload-file'
+import { formatByteCount } from '@/shared/lib/format-bytes'
+import { errorDetailMessage } from '@/shared/lib/user-facing-error'
 import { Button } from '@/shared/ui/controls/Button'
 import { IconButton } from '@/shared/ui/controls/IconButton'
 import { LoadingSpinner } from '@/shared/ui/feedback/LoadingSpinner'
@@ -49,18 +50,6 @@ interface TextWindowPosition {
 }
 
 const INITIAL_WINDOW: TextWindowPosition = { offset: 1, columnOffset: 1 }
-
-/** 后端只回传去敏后的失败原因；分类文案与原因分行展示，不用括号拼接。 */
-function errorDetail(error: unknown): string | null {
-  if (error instanceof ApiError) {
-    const detail = error.errors?.detail
-    if (typeof detail === 'string' && detail.length > 0) {
-      return detail
-    }
-    return error.message.length > 0 ? error.message : null
-  }
-  return error instanceof Error && error.message.length > 0 ? error.message : null
-}
 
 function saveDownload(blob: Blob, fileName: string): void {
   const url = URL.createObjectURL(blob)
@@ -97,7 +86,8 @@ interface FilesErrorProps {
 
 function FilesError({ error, label, onRetry, testId }: FilesErrorProps) {
   const { t } = useI18n()
-  const detail = errorDetail(error)
+  // 后端只回传去敏后的失败原因；分类文案与原因分行展示，不用括号拼接。
+  const detail = errorDetailMessage(error)
   return (
     <div className="session-files-error" role="alert" data-testid={testId}>
       <span className="session-files-error-text">
@@ -217,7 +207,7 @@ export function SessionFilesDialog({ sessionId, owner, onClose }: SessionFilesDi
   const selectedSize = parseSizeBytes(selected?.sizeBytes)
   const selectedUpdatedAt = formatSessionFileTime(selected?.updatedAt)
   const selectedMeta = [
-    selectedSize == null ? null : formatFileSize(selectedSize),
+    selectedSize == null ? null : formatByteCount(selectedSize),
     selectedUpdatedAt == null ? null : t('ai.sessionFiles.updatedAt', { time: selectedUpdatedAt }),
   ].filter((value): value is string => value != null).join(' · ')
 
@@ -303,7 +293,7 @@ export function SessionFilesDialog({ sessionId, owner, onClose }: SessionFilesDi
                           : <FileText size={14} aria-hidden="true" />}
                       <span className="session-files-name">{entry.name}</span>
                       {!entry.directory && size != null ? (
-                        <span className="session-files-size">{formatFileSize(size)}</span>
+                        <span className="session-files-size">{formatByteCount(size)}</span>
                       ) : null}
                     </button>
                     {entry.directory ? (
