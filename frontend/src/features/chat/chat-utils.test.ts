@@ -162,4 +162,3 @@ describe('filterChats', () => {
     expect(filterChats(chats, 'title')).toHaveLength(0)
   })
 })
-
