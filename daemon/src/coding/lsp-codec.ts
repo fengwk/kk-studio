@@ -28,6 +28,7 @@ export class TextFileCodec {
     const payload = bytes.subarray(bomLength)
     let text: string
     try {
+      // After the file BOM, TextDecoder also strips a leading U+FEFF; file editing preserves it and distinguishes codec errors.
       const decoder = new TextDecoder(charset, { fatal: true })
       text = decoder.decode(payload)
     } catch {

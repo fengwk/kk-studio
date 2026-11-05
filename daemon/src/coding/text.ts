@@ -122,7 +122,7 @@ function createUtf8Decoder(): StreamingDecoder {
           const continuation = data[index + offset] as number
           codePoint = (codePoint << 6) | (continuation & 0x3f)
         }
-        if (!isValidCodePoint(codePoint)) {
+        if (!isValidCodePoint(codePoint, need)) {
           malformed()
         }
         out += String.fromCodePoint(codePoint)
@@ -139,23 +139,9 @@ function createUtf8Decoder(): StreamingDecoder {
   }
 }
 
-function isValidCodePoint(codePoint: number): boolean {
-  if (codePoint > 0x10ffff) {
-    return false
-  }
-  if (codePoint >= 0xd800 && codePoint <= 0xdfff) {
-    return false
-  }
-  if (codePoint < 0x80) {
-    return true
-  }
-  if (codePoint < 0x800) {
-    return codePoint >= 0x80
-  }
-  if (codePoint < 0x10000) {
-    return codePoint >= 0x800
-  }
-  return codePoint >= 0x10000
+function isValidCodePoint(codePoint: number, continuationBytes: number): boolean {
+  const minimum = continuationBytes === 1 ? 0x80 : continuationBytes === 2 ? 0x800 : 0x10000
+  return codePoint >= minimum && codePoint <= 0x10ffff && !(codePoint >= 0xd800 && codePoint <= 0xdfff)
 }
 
 /** 严格 UTF-16 解码：孤立代理项与奇数尾部字节立即失败。 */

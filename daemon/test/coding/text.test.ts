@@ -64,6 +64,21 @@ describe('readTextWindow', () => {
     await expect(readWindow(Uint8Array.from([0xed, 0xa0, 0x80]))).rejects.toThrowError(/malformed text encoding/)
   })
 
+  it('跨块拒绝非最短编码、代理项和越界码点', async () => {
+    // 每个字节边界都可能是文件读取边界，不完整前缀不能绕过校验。
+    for (const sequence of [
+      [0xe0, 0x81, 0x81],
+      [0xf0, 0x8f, 0xbf, 0xbf],
+      [0xed, 0xa0, 0x80],
+      [0xf4, 0x90, 0x80, 0x80],
+    ]) {
+      for (let split = 1; split < sequence.length; split++) {
+        const bytes = Buffer.concat([Buffer.alloc(8192 - split, 0x61), Buffer.from(sequence)])
+        await expect(readWindow(bytes)).rejects.toThrowError(/malformed text encoding/)
+      }
+    }
+  })
+
   it('NUL 字符按二进制拒绝', async () => {
     await expect(readWindow('a\u0000b')).rejects.toThrowError(/contains NUL character/)
   })
@@ -89,6 +104,32 @@ describe('decodeText / encodeText', () => {
   it('非法 UTF-8 与 NUL 按二进制拒绝', () => {
     expect(() => decodeText(Buffer.from([0x61, 0x00, 0x62]))).toThrowError(/binary/)
     expect(() => decodeText(Buffer.from([0x61, 0xc3, 0x28]))).toThrowError(/binary/)
+  })
+
+  it('严格拒绝非最短 UTF-8、代理项和越界码点', () => {
+    // 与 fatal TextDecoder 对相同字节的合法性保持一致。
+    for (const sequence of [
+      [0xc0, 0x81],
+      [0xc1, 0xbf],
+      [0xe0, 0x81, 0x81],
+      [0xe0, 0x9f, 0xbf],
+      [0xf0, 0x80, 0x81, 0x81],
+      [0xf0, 0x8f, 0xbf, 0xbf],
+      [0xed, 0xa0, 0x80],
+      [0xed, 0xbf, 0xbf],
+      [0xf4, 0x90, 0x80, 0x80],
+    ]) {
+      const bytes = Uint8Array.from(sequence)
+      expect(() => new TextDecoder('utf-8', { fatal: true }).decode(bytes)).toThrow()
+      expect(() => decodeText(bytes)).toThrowError(/binary: (invalid|malformed) text encoding/)
+    }
+    expect(() => decodeText(Uint8Array.from([0xe0, 0x81, 0x81]))).toThrowError(/malformed text encoding/)
+    expect(() => decodeText(Uint8Array.from([0xf0, 0x8f, 0xbf, 0xbf]))).toThrowError(/malformed text encoding/)
+  })
+
+  it('接受各 UTF-8 长度和代理区两侧的合法边界', () => {
+    const text = '\u007f\u0080\u07ff\u0800\ud7ff\ue000\uffff\u{10000}\u{10ffff}'
+    expect(decodeText(Buffer.from(text, 'utf8')).text).toBe(text)
   })
 
   it('孤立代理项编码拒绝', () => {
