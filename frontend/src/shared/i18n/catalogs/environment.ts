@@ -170,26 +170,6 @@ export const environmentCatalog = {
     'en-US': 'Cancel',
     'zh-CN': '取消',
   },
-  'ai.ide.dirtyCloseWarning': {
-    'en-US': 'Cannot close IDE view with unsaved changes. Please save or discard your changes first.',
-    'zh-CN': '当前有未保存的修改，无法关闭视图。请先保存或放弃修改后再试。',
-  },
-  'ai.ide.closeConfirmTitle': {
-    'en-US': 'Close Workspace IDE',
-    'zh-CN': '关闭工作区 IDE',
-  },
-  'ai.ide.closeConfirmMessage': {
-    'en-US': 'Unsaved changes may be lost. Are you sure you want to close the workspace IDE?',
-    'zh-CN': '可能存在未保存的修改，确认关闭工作区 IDE？',
-  },
-  'ai.ide.leaveConfirmTitle': {
-    'en-US': 'Leave Workspace',
-    'zh-CN': '离开工作区',
-  },
-  'ai.ide.leaveConfirmMessage': {
-    'en-US': 'Leaving will close the file panel. Please save any unsaved changes before leaving. Leave anyway?',
-    'zh-CN': '离开将关闭文件面板，未保存内容需先保存。确认离开？',
-  },
   'ai.ide.loading': {
     'en-US': 'Connecting to workspace IDE...',
     'zh-CN': '正在连接工作区 IDE...',
@@ -197,10 +177,6 @@ export const environmentCatalog = {
   'ai.ide.error': {
     'en-US': 'Failed to open workspace IDE',
     'zh-CN': '打开工作区 IDE 失败',
-  },
-  'ai.ide.sessionRecoveryFailed': {
-    'en-US': 'Could not restore the IDE session. Check browser cookies or network settings, then retry.',
-    'zh-CN': 'IDE 会话未能恢复，请检查浏览器 Cookie 或网络设置后重试。',
   },
   'ai.ide.offline': {
     'en-US': 'Environment is currently offline',
@@ -213,10 +189,6 @@ export const environmentCatalog = {
   'ai.ide.noEnvironments': {
     'en-US': 'No available environments',
     'zh-CN': '暂无可用环境',
-  },
-  'ai.ide.environmentNotReady': {
-    'en-US': 'Environment "{{name}}" is not ready',
-    'zh-CN': '环境“{{name}}”尚未就绪',
   },
   'ai.ide.missingEnvironment': {
     'en-US': 'Please select an environment to open IDE',
