@@ -1157,7 +1157,7 @@ describe('control binary codec', () => {
     const focusDecoded = decodeBinary(encodeBinary(focusCmd))
     expect(focusDecoded.payload.case).toBe('ideCommand')
 
-    // DETACH_VIEW
+    // DETACH_VIEW 已退役：raw enum value 5 不能再通过出站校验
     const detachCmd = create(EnvelopeSchema, {
       messageType: MessageType.IDE_COMMAND,
       environmentId: ENVIRONMENT_ID,
@@ -1165,14 +1165,14 @@ describe('control binary codec', () => {
       payload: {
         case: 'ideCommand',
         value: create(IdeCommandSchema, {
-          action: IdeAction.DETACH_VIEW,
+          action: 5 as IdeAction,
           viewId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
           documentId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
           bindingEpoch: 1n,
         }),
       },
     })
-    expect(decodeBinary(encodeBinary(detachCmd)).payload.case).toBe('ideCommand')
+    expect(() => encodeBinary(detachCmd)).toThrow(/ideCommand.action is required/)
 
     // LIST_VIEWS
     const listCmd = create(EnvelopeSchema, {
@@ -1397,25 +1397,15 @@ describe('control binary codec', () => {
 })
 
 describe('upgrade payload', () => {
-  it('accepts only a positive int32 target protocol version and enforces url/sha co-presence', () => {
+  it('accepts only the target daemon version', () => {
     const upgrade = upgradeRequired()
-    expect(validateUpgrade({ ...upgrade, targetProtocolVersion: 2147483647 }).targetProtocolVersion).toBe(
-      2147483647,
-    )
+    expect(validateUpgrade(upgrade).targetVersion).toBe('1.2.3')
 
-    for (const targetProtocolVersion of [undefined, 0, -1, 1.5, 2147483648]) {
-      expect(() => validateUpgrade({ ...upgrade, targetProtocolVersion })).toThrow(
-        /targetProtocolVersion must be in 1\.\.2147483647/,
+    for (const targetVersion of [undefined, '', ' 1.2.3 ', '1.2.3 bad', 'v'.repeat(65)]) {
+      expect(() => validateUpgrade({ ...upgrade, targetVersion })).toThrow(
+        /upgradeRequired\.targetVersion/,
       )
     }
-
-    expect(validateUpgrade({ targetProtocolVersion: 1 })).toBeDefined()
-    expect(() => validateUpgrade({ targetProtocolVersion: 1, artifactUrl: upgrade.artifactUrl })).toThrow(
-      /must both be present or both absent/,
-    )
-    expect(() => validateUpgrade({ targetProtocolVersion: 1, artifactSha256: upgrade.artifactSha256 })).toThrow(
-      /must both be present or both absent/,
-    )
   })
 })
 

@@ -40,6 +40,7 @@ import {
   type UpdateResult,
   type UpgradeRequired,
 } from '../../generated/control_pb.js'
+import { DAEMON_VERSION_PATTERN } from '../../release.js'
 import { frame, unframe } from './framing.js'
 import {
   MAX_MESSAGE_BYTES,
@@ -84,12 +85,8 @@ export const MAX_SKILL_PACKAGE_NAME_CHARS = 64
 export const SKILL_PACKAGE_NAME_PATTERN = /^[a-z0-9]+(-[a-z0-9]+)*$/
 
 const CAPABILITY_ID_PATTERN = /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/
-const DAEMON_VERSION_PATTERN = /^[0-9A-Za-z._+-]{1,64}$/
-const SHA256_ANY_PATTERN = /^[0-9a-fA-F]{64}$/
 const IDE_CODE_PATTERN = /^[A-Z][A-Z0-9_]{0,63}$/
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f-\u009f]/
-const ARTIFACT_URL_PATTERN =
-  /^https:\/\/github\.com\/fengwk\/kk-studio\/releases\/download\/v([0-9A-Za-z._+-]{1,64})\/kk-studio-daemon-v\1-((linux|macos)-(amd64|arm64)|windows-amd64)\.tar\.gz$/
 
 const BOUND = new Set<MessageType>([
   MessageType.SETTINGS,
@@ -182,25 +179,10 @@ export function encodeFrame(envelope: Envelope): Uint8Array {
 /** Validates the HTTP 426 upgrade payload. It is not a control-stream envelope. */
 export function validateUpgrade(upgrade: UpgradeRequired): UpgradeRequired {
   assertNoUnknown(upgrade, 'upgradeRequired')
-  requirePositiveInt32(
-    upgrade.targetProtocolVersion,
-    'upgradeRequired.targetProtocolVersion',
-  )
-  const hasUrl = upgrade.artifactUrl !== undefined
-  const hasSha = upgrade.artifactSha256 !== undefined
-  if (hasUrl !== hasSha) {
-    throw new Error('upgradeRequired artifactUrl and artifactSha256 must both be present or both absent')
-  }
-  if (hasUrl) {
-    const url = requireText(upgrade.artifactUrl, 'upgradeRequired.artifactUrl', { nonBlank: true })
-    if (!ARTIFACT_URL_PATTERN.test(url)) {
-      throw new Error('upgradeRequired.artifactUrl must be the official platform release archive')
-    }
-    const sha = requireText(upgrade.artifactSha256, 'upgradeRequired.artifactSha256', { nonBlank: true })
-    if (!SHA256_ANY_PATTERN.test(sha)) {
-      throw new Error('upgradeRequired.artifactSha256 has invalid syntax')
-    }
-  }
+  requireText(upgrade.targetVersion, 'upgradeRequired.targetVersion', {
+    nonBlank: true,
+    pattern: DAEMON_VERSION_PATTERN,
+  })
   return upgrade
 }
 
@@ -640,7 +622,6 @@ function validateIdeCommand(command: IdeCommand): void {
       rejectOpenFields(command)
       return
     case IdeAction.FOCUS_TERMINAL:
-    case IdeAction.DETACH_VIEW:
     case IdeAction.COLLAPSE_MOBILE:
       requireBoundView(command, false)
       if (command.directory !== undefined) {
@@ -956,14 +937,6 @@ function requireDaemonVersion(value: unknown, name: string): string {
 
 function requirePositive(value: unknown, name: string): bigint {
   return requireSafeLong(value, name, 1n, MAX_POSITIVE_BIGINT)
-}
-
-/** proto int32 is a 32-bit signed integer; values above 2^31-1 are not representable. */
-function requirePositiveInt32(value: unknown, name: string): number {
-  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > 2147483647) {
-    throw new Error(`${name} must be in 1..2147483647`)
-  }
-  return value
 }
 
 function requireSingleLine(value: unknown, name: string, maxChars = Number.MAX_SAFE_INTEGER): string {

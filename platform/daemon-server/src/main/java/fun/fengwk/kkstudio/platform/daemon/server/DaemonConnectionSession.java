@@ -282,7 +282,7 @@ final class DaemonConnectionSession implements DaemonSession {
             case RECOVER_NOT_FOUND -> handleRecoverNotFound(envelope, deferred);
             case RESOURCE_UPLOAD_REQUEST -> {
               requireReady();
-              UUID invocationId = requireCanonicalInvocationId(envelope);
+              UUID invocationId = parseInvocationId(envelope);
               ActiveInvocation active =
                   invocationTracker.registeredInvocation(environmentId, invocationId);
               if (active == null) {
@@ -299,7 +299,7 @@ final class DaemonConnectionSession implements DaemonSession {
             }
             case RESOURCE_UPLOAD_COMMIT -> {
               requireReady();
-              UUID invocationId = requireCanonicalInvocationId(envelope);
+              UUID invocationId = parseInvocationId(envelope);
               ActiveInvocation active =
                   invocationTracker.registeredInvocation(environmentId, invocationId);
               if (active == null) {
@@ -318,7 +318,7 @@ final class DaemonConnectionSession implements DaemonSession {
             }
             case IDE_RESULT -> {
               requireReady();
-              UUID invocationId = requireCanonicalInvocationId(envelope);
+              UUID invocationId = parseInvocationId(envelope);
               ideCoordinator.handleIdeResult(invocationId, envelope.getIdeResult(), this, deferred);
             }
             case SKILL_STATE -> {
@@ -451,7 +451,7 @@ final class DaemonConnectionSession implements DaemonSession {
     if (envelope.getStarted().hasReplayed() && !envelope.getStarted().getReplayed()) {
       throw new ControlProtocolException("started.replayed must be true when present");
     }
-    UUID invocationId = requireCanonicalInvocationId(envelope);
+    UUID invocationId = parseInvocationId(envelope);
     ActiveInvocation active = invocationTracker.callbackTarget(environmentId, invocationId);
     if (active == null && !invocationTracker.hasTombstone(environmentId, invocationId)) {
       LOG.log(
@@ -464,7 +464,7 @@ final class DaemonConnectionSession implements DaemonSession {
 
   private void handleProgress(Envelope envelope, List<Runnable> deferred) {
     requireReady();
-    UUID invocationId = requireCanonicalInvocationId(envelope);
+    UUID invocationId = parseInvocationId(envelope);
     ActiveInvocation active = invocationTracker.callbackTarget(environmentId, invocationId);
     if (active == null) {
       if (!invocationTracker.hasTombstone(environmentId, invocationId)) {
@@ -487,7 +487,7 @@ final class DaemonConnectionSession implements DaemonSession {
 
   private void handleCompleted(Envelope envelope, List<Runnable> deferred) {
     requireReady();
-    UUID invocationId = requireCanonicalInvocationId(envelope);
+    UUID invocationId = parseInvocationId(envelope);
     ActiveInvocation active = invocationTracker.takeTerminalTarget(environmentId, invocationId);
     if (active == null) {
       if (!invocationTracker.hasTombstone(environmentId, invocationId)) {
@@ -508,7 +508,7 @@ final class DaemonConnectionSession implements DaemonSession {
 
   private void handleFailed(Envelope envelope, List<Runnable> deferred) {
     requireReady();
-    UUID invocationId = requireCanonicalInvocationId(envelope);
+    UUID invocationId = parseInvocationId(envelope);
     ActiveInvocation active = invocationTracker.takeTerminalTarget(environmentId, invocationId);
     if (active == null) {
       if (!invocationTracker.hasTombstone(environmentId, invocationId)) {
@@ -527,7 +527,7 @@ final class DaemonConnectionSession implements DaemonSession {
 
   private void handleCancelled(Envelope envelope, List<Runnable> deferred) {
     requireReady();
-    UUID invocationId = requireCanonicalInvocationId(envelope);
+    UUID invocationId = parseInvocationId(envelope);
     ActiveInvocation active = invocationTracker.takeTerminalTarget(environmentId, invocationId);
     if (active == null) {
       if (!invocationTracker.hasTombstone(environmentId, invocationId)) {
@@ -547,7 +547,7 @@ final class DaemonConnectionSession implements DaemonSession {
 
   private void handleRecoverNotFound(Envelope envelope, List<Runnable> deferred) {
     requireReady();
-    UUID invocationId = requireCanonicalInvocationId(envelope);
+    UUID invocationId = parseInvocationId(envelope);
     ActiveInvocation active = invocationTracker.takeTerminalTarget(environmentId, invocationId);
     if (active == null) {
       if (!invocationTracker.hasTombstone(environmentId, invocationId)) {
@@ -569,7 +569,7 @@ final class DaemonConnectionSession implements DaemonSession {
 
   private void handleExecutionExited(Envelope envelope, List<Runnable> deferred) {
     requireReady();
-    UUID invocationId = requireCanonicalInvocationId(envelope);
+    UUID invocationId = parseInvocationId(envelope);
     Optional<ExitConfirmation> confirmation =
         invocationTracker.claimExitConfirmation(environmentId, invocationId, daemonInstanceId);
     boolean known =
@@ -1037,23 +1037,8 @@ final class DaemonConnectionSession implements DaemonSession {
     return builder.build();
   }
 
-  private static UUID requireCanonicalInvocationId(Envelope envelope) {
-    if (!envelope.hasInvocationId()) {
-      throw new ControlProtocolException("invocationId is required");
-    }
-    String text = envelope.getInvocationId();
-    if (text == null || text.isBlank()) {
-      throw new ControlProtocolException("invocationId must not be blank");
-    }
-    UUID parsed;
-    try {
-      parsed = UUID.fromString(text);
-    } catch (IllegalArgumentException error) {
-      throw new ControlProtocolException("invocationId must be a canonical lowercase UUID", error);
-    }
-    if (!parsed.toString().equals(text)) {
-      throw new ControlProtocolException("invocationId must be a canonical lowercase UUID");
-    }
-    return parsed;
+  /** invocationId 的必填与 canonical UUID 校验由协议层负责；这里只转换为 UUID。 */
+  private static UUID parseInvocationId(Envelope envelope) {
+    return UUID.fromString(envelope.getInvocationId());
   }
 }

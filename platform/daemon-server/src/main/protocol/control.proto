@@ -75,7 +75,8 @@ enum IdeAction {
   CHANGE_DIRECTORY = 2;
   FOCUS_TERMINAL = 3;
   CLOSE_VIEW = 4;
-  DETACH_VIEW = 5;
+  reserved 5;
+  reserved "DETACH_VIEW";
   LIST_VIEWS = 6;
   LIST_DIRECTORIES = 7;
   COLLAPSE_MOBILE = 8;
@@ -128,11 +129,11 @@ message Envelope {
   }
 }
 
-// HTTP 426 升级拒绝的 protobuf 载荷。
+// HTTP 426 升级拒绝的 protobuf 载荷；只携带 Studio 当前 Daemon 目标版本。
 message UpgradeRequired {
-  optional int32 target_protocol_version = 1;
-  optional string artifact_url = 2;
-  optional string artifact_sha256 = 3;
+  optional string target_version = 1;
+  reserved 2, 3;
+  reserved "artifact_url", "artifact_sha256";
 }
 
 message Settings {

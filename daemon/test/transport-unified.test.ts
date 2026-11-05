@@ -193,17 +193,12 @@ describe('Unified Transport & Control Protocol (X-DESIGN §1, §2, §3)', () => 
     await transport.close()
   })
 
-  it('handles 426 UpgradeRequired with and without official artifact', async () => {
-    const upgradeWithArtifact = create(UpgradeRequiredSchema, {
-      targetProtocolVersion: 1,
-      artifactUrl:
-        'https://github.com/fengwk/kk-studio/releases/download/v1.0.0/kk-studio-daemon-v1.0.0-linux-amd64.tar.gz',
-      artifactSha256: 'a'.repeat(64),
-    })
+  it('handles 426 UpgradeRequired with target version', async () => {
+    const upgradeRequired = create(UpgradeRequiredSchema, { targetVersion: '1.2.3' })
 
     peer = new FakeStudioPeer({
       onHandshake: (_req, res) => {
-        const body = toBinary(UpgradeRequiredSchema, upgradeWithArtifact)
+        const body = toBinary(UpgradeRequiredSchema, upgradeRequired)
         res.writeHead(426, { 'content-type': 'application/x-protobuf' })
         res.end(Buffer.from(body))
         return true
@@ -231,7 +226,7 @@ describe('Unified Transport & Control Protocol (X-DESIGN §1, §2, §3)', () => 
       }),
     ).rejects.toThrow(/handshake failed with 426/)
 
-    expect(upgradeReceived).not.toBeNull()
+    expect(upgradeReceived).toMatchObject({ targetVersion: '1.2.3' })
     await transport.close()
   })
 

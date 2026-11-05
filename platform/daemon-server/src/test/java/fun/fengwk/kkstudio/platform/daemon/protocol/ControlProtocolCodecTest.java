@@ -260,47 +260,20 @@ class ControlProtocolCodecTest {
     ControlProtocolCodec.encodeBinary(
         result.toBuilder().setIdeResult(IdeResult.newBuilder().setOk(true)).build());
 
-    UpgradeRequired upgrade =
-        UpgradeRequired.newBuilder()
-            .setTargetProtocolVersion(ControlProtocolCodec.PROTOCOL_VERSION)
-            .setArtifactUrl(
-                "https://github.com/fengwk/kk-studio/releases/download/v1.2.3/"
-                    + "kk-studio-daemon-v1.2.3-linux-amd64.tar.gz")
-            .setArtifactSha256("a".repeat(64))
-            .build();
+    UpgradeRequired upgrade = UpgradeRequired.newBuilder().setTargetVersion("1.2.3").build();
     ControlProtocolCodec.validateUpgrade(upgrade);
-    ControlProtocolCodec.validateUpgrade(
-        upgrade.toBuilder().setTargetProtocolVersion(Integer.MAX_VALUE).build());
-    ControlProtocolCodec.validateUpgrade(
-        UpgradeRequired.newBuilder().setTargetProtocolVersion(1).build());
+    assertThrows(
+        ControlProtocolException.class,
+        () -> ControlProtocolCodec.validateUpgrade(UpgradeRequired.getDefaultInstance()));
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.validateUpgrade(upgrade.toBuilder().clearTargetVersion().build()));
     assertThrows(
         ControlProtocolException.class,
         () ->
             ControlProtocolCodec.validateUpgrade(
-                upgrade.toBuilder().clearArtifactSha256().build()));
-    assertThrows(
-        ControlProtocolException.class,
-        () -> ControlProtocolCodec.validateUpgrade(upgrade.toBuilder().clearArtifactUrl().build()));
-    assertThrows(
-        ControlProtocolException.class,
-        () ->
-            ControlProtocolCodec.validateUpgrade(
-                upgrade.toBuilder().clearTargetProtocolVersion().build()));
-    assertThrows(
-        ControlProtocolException.class,
-        () ->
-            ControlProtocolCodec.validateUpgrade(
-                upgrade.toBuilder().setTargetProtocolVersion(0).build()));
-    assertThrows(
-        ControlProtocolException.class,
-        () ->
-            ControlProtocolCodec.validateUpgrade(
-                upgrade.toBuilder().setTargetProtocolVersion(-1).build()));
-    assertThrows(
-        ControlProtocolException.class,
-        () ->
-            ControlProtocolCodec.validateUpgrade(
-                upgrade.toBuilder().setArtifactUrl("https://example.invalid/a.tar.gz").build()));
+                upgrade.toBuilder().setTargetVersion("bad version").build()));
 
     Envelope update =
         Envelope.newBuilder()
@@ -374,11 +347,12 @@ class ControlProtocolCodecTest {
                 command.toBuilder()
                     .setIdeCommand(
                         IdeCommand.newBuilder()
-                            .setAction(IdeAction.DETACH_VIEW)
+                            .setActionValue(5)
                             .setViewId(open.getViewId())
                             .setDocumentId(open.getDocumentId())
                             .setBindingEpoch(1))
-                    .build()));
+                    .build()),
+        "DETACH_VIEW is retired; raw value 5 must be rejected");
     ControlProtocolCodec.encodeBinary(
         command.toBuilder()
             .setIdeCommand(IdeCommand.newBuilder().setAction(IdeAction.LIST_VIEWS))
@@ -766,6 +740,21 @@ class ControlProtocolCodecTest {
         ControlProtocolFixtures.invokeEnvelope().toBuilder().clearInvocationId().build();
     assertThrows(
         ControlProtocolException.class, () -> ControlProtocolCodec.encodeBinary(missingInvocation));
+
+    for (String malformedInvocationId :
+        new String[] {
+          "not-a-uuid",
+          "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA",
+          "{" + ControlProtocolFixtures.INVOCATION_ID + "}"
+        }) {
+      Envelope invalidInvocation =
+          ControlProtocolFixtures.invokeEnvelope().toBuilder()
+              .setInvocationId(malformedInvocationId)
+              .build();
+      assertThrows(
+          ControlProtocolException.class,
+          () -> ControlProtocolCodec.encodeBinary(invalidInvocation));
+    }
 
     Envelope invalidEnvironment =
         ControlProtocolFixtures.invokeEnvelope().toBuilder().setEnvironmentId("not-a-uuid").build();

@@ -1,6 +1,6 @@
-import { hostname, homedir, platform, userInfo } from 'node:os'
+import { hostname, homedir, platform, tmpdir, userInfo } from 'node:os'
 import { readFileSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { resolve } from 'node:path'
 import { create } from '@bufbuild/protobuf'
 
 import type { DaemonConfig } from './contracts.js'
@@ -11,8 +11,8 @@ import {
   type EnvironmentInfo,
 } from './generated/control_pb.js'
 
-/** 采集真实进程宿主事实：OS family、时区、进程用户、canonical HOME、稳定说明与受控临时目录。 */
-export function detectEnvironmentInfo(config: DaemonConfig, tempDirectory?: string): EnvironmentInfo {
+/** 采集真实进程宿主事实：OS family、时区、进程用户、canonical HOME、稳定说明与操作系统临时目录。 */
+export function detectEnvironmentInfo(config: DaemonConfig): EnvironmentInfo {
   const operatingSystem = detectOperatingSystem()
   const home = canonicalHomeDirectory(homedir())
   return create(EnvironmentInfoSchema, {
@@ -22,7 +22,7 @@ export function detectEnvironmentInfo(config: DaemonConfig, tempDirectory?: stri
     userName: safeUserName(),
     homeDirectory: home,
     note: config.note ?? defaultNote(operatingSystem),
-    tempDirectory: tempDirectory ?? join(resolve(config.dataDir), 'tmp'),
+    tempDirectory: tmpdir(),
   })
 }
 

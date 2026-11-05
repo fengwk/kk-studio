@@ -2,14 +2,19 @@ import { create } from '@bufbuild/protobuf'
 
 import type { IdeCommand, IdeService } from './contracts.js'
 import {
+  IdeAction,
+  IdeOpenMode,
   IdeResultSchema,
   IdeDirectoryListingSchema,
   IdeDirectoryEntrySchema,
   IdeViewState,
   IdeViewSummarySchema,
+  type IdeCommand as ProtoIdeCommand,
+  type IdeLease,
   type IdeResult,
 } from './generated/control_pb.js'
 import type { IdeReply } from './contracts.js'
+import { safeMessage } from './runtime-encoding.js'
 
 /** 在途 IDE 请求条数上界，防止无界 map 与资源耗尽。 */
 export const MAX_IN_FLIGHT_IDE_COMMANDS = 256
@@ -126,4 +131,143 @@ export function toProtoIdeResult(reply: IdeReply): IdeResult {
     code: reply.code,
     message: reply.message,
   })
+}
+
+function toIdeAction(action: IdeAction): IdeCommand['action'] {
+  switch (action) {
+    case IdeAction.OPEN_VIEW:
+      return 'OPEN_VIEW'
+    case IdeAction.CHANGE_DIRECTORY:
+      return 'CHANGE_DIRECTORY'
+    case IdeAction.FOCUS_TERMINAL:
+      return 'FOCUS_TERMINAL'
+    case IdeAction.CLOSE_VIEW:
+      return 'CLOSE_VIEW'
+    case IdeAction.LIST_VIEWS:
+      return 'LIST_VIEWS'
+    case IdeAction.LIST_DIRECTORIES:
+      return 'LIST_DIRECTORIES'
+    case IdeAction.COLLAPSE_MOBILE:
+      return 'COLLAPSE_MOBILE'
+    default:
+      throw new Error(`unsupported IDE action: ${action}`)
+  }
+}
+
+function toIdeMode(mode: IdeOpenMode | undefined): IdeCommand['mode'] | undefined {
+  if (mode === undefined || mode === IdeOpenMode.IDE_OPEN_MODE_UNSPECIFIED) {
+    return undefined
+  }
+  switch (mode) {
+    case IdeOpenMode.CREATE:
+      return 'create'
+    case IdeOpenMode.RESUME:
+      return 'resume'
+    default:
+      throw new Error(`unsupported IDE open mode: ${mode}`)
+  }
+}
+
+/** 把 wire 命令映射为 IDE 服务契约；未知动作在这里失败关闭。 */
+export function toIdeCommand(protoCmd: ProtoIdeCommand): IdeCommand {
+  return {
+    action: toIdeAction(protoCmd.action),
+    viewId: protoCmd.viewId ?? undefined,
+    documentId: protoCmd.documentId ?? undefined,
+    eventNodeId: protoCmd.eventNodeId ?? undefined,
+    connectionId: protoCmd.connectionId ?? undefined,
+    claimId: protoCmd.claimId ?? undefined,
+    bindingEpoch: protoCmd.bindingEpoch !== undefined ? protoCmd.bindingEpoch.toString() : undefined,
+    mode: toIdeMode(protoCmd.mode),
+    directory: protoCmd.directory ?? undefined,
+    discard: protoCmd.discard ?? undefined,
+  }
+}
+
+/** 把 wire 使用证明转换为 IDE 服务读取的普通身份视图；只保留 round 与绑定身份。 */
+export function toIdeLeaseProof(lease: IdeLease): IdeLease {
+  return {
+    round: String(lease.round ?? 0n),
+    bindings: (lease.bindings ?? []).map((binding) => ({
+      viewId: binding.viewId,
+      documentId: binding.documentId,
+      bindingEpoch: String(binding.bindingEpoch ?? 0n),
+    })),
+  } as unknown as IdeLease
+}
+
+export interface IdeCommandRuntimeOptions {
+  ide: IdeService | null
+  timeoutMillis: number
+  isUpdateHeld(): boolean
+  onResult(invocationId: string, reply: IdeResult): void
+  track(promise: Promise<void>): void
+}
+
+/** IDE 管理命令的在途去重、准入、deadline 与回执；副作用不进入 Agent journal。 */
+export class IdeCommandRuntime {
+  private readonly inFlight = new Map<string, AbortController>()
+
+  constructor(private readonly options: IdeCommandRuntimeOptions) {}
+
+  get inFlightCount(): number {
+    return this.inFlight.size
+  }
+
+  handle(invocationId: string, protoCmd: ProtoIdeCommand): void {
+    const command = toIdeCommand(protoCmd)
+    const admission = admitIdeCommand({
+      invocationId,
+      command,
+      inFlight: this.inFlight,
+      updateHeld: this.options.isUpdateHeld(),
+      ide: this.options.ide,
+    })
+    if (admission.kind === 'ignore') {
+      return
+    }
+    if (admission.kind === 'reply') {
+      this.options.onResult(invocationId, admission.reply)
+      return
+    }
+    const controller = admission.controller
+    this.inFlight.set(invocationId, controller)
+    // Native close waits for a person; disconnect and shutdown still abort the command.
+    const timer = command.action === 'CLOSE_VIEW' && command.discard === false
+      ? null
+      : setTimeout(() => controller.abort('IDE_COMMAND_TIMEOUT'), this.options.timeoutMillis)
+    this.options.track(this.run(invocationId, command, controller, timer))
+  }
+
+  abortAll(reason: string): void {
+    for (const controller of this.inFlight.values()) {
+      controller.abort(reason)
+    }
+    this.inFlight.clear()
+  }
+
+  private async run(
+    invocationId: string,
+    command: IdeCommand,
+    controller: AbortController,
+    timer: NodeJS.Timeout | null,
+  ): Promise<void> {
+    try {
+      const reply = await (this.options.ide as IdeService).handle(command, controller.signal)
+      if (this.inFlight.get(invocationId) === controller) {
+        this.options.onResult(invocationId, toProtoIdeResult(reply))
+      }
+    } catch (error) {
+      if (this.inFlight.get(invocationId) === controller) {
+        this.options.onResult(invocationId, ideFailureReply(error, safeMessage(error)))
+      }
+    } finally {
+      if (timer !== null) {
+        clearTimeout(timer)
+      }
+      if (this.inFlight.get(invocationId) === controller) {
+        this.inFlight.delete(invocationId)
+      }
+    }
+  }
 }

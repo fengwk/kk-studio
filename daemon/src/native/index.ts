@@ -6,4 +6,3 @@
 export { createProcessSupervisor, UnsupportedPlatformError } from './process-supervisor.js'
 export { ensurePrivateDirectory, writePrivateFile, verifyPrivateFile } from './private-fs.js'
 export { acquireDirectoryLock, acquireFileLock, type DirectoryLock } from './lock.js'
-export { processScopeCapabilities, type ProcessScopeCapabilities } from './capabilities.js'

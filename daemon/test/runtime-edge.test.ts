@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import { isAbsolute } from 'node:path'
+import { tmpdir } from 'node:os'
+import { isAbsolute, resolve } from 'node:path'
 import { create } from '@bufbuild/protobuf'
 
 import type { CapabilityResult, DaemonConfig, IdeService, ResourceUploader } from '../src/contracts.js'
@@ -44,7 +45,8 @@ import {
   releaseStep,
 } from '../src/runtime-shutdown.js'
 import { FakeConnection, FakeTransport, fakeProcessSupervisor, testConfig, tick, waitFor } from './helpers.js'
-import { artifactFixture } from './support/update-fixture.js'
+
+const UPDATE_TARGET_VERSION = '1.1.1'
 
 const ENV = '11111111-2222-4333-8444-555555555555'
 const environment = {
@@ -498,7 +500,7 @@ describe('runtime managed update branches', () => {
   const operationId = '33333333-4444-4555-8666-777777777777'
   const command = create(UpdateSchema, {
     operationId,
-    targetVersion: artifactFixture.targetVersion,
+    targetVersion: UPDATE_TARGET_VERSION,
   })
 
   function makeUpdateEnvelope(): Envelope {
@@ -733,9 +735,11 @@ describe('runtime resource upload control plane', () => {
 
 describe('environment detection helpers', () => {
   it('collects host facts and stable notes', () => {
-    const info = detectEnvironmentInfo(testConfig())
+    const config = testConfig()
+    const info = detectEnvironmentInfo(config)
     expect(isAbsolute(info.homeDirectory)).toBe(true)
-    expect(info.tempDirectory).toContain('tmp')
+    expect(info.tempDirectory).toBe(tmpdir())
+    expect(resolve(info.tempDirectory).startsWith(resolve(config.dataDir))).toBe(false)
     expect([
       OperatingSystem.WINDOWS,
       OperatingSystem.WSL,

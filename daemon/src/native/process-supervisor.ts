@@ -9,7 +9,7 @@ import { WindowsProcessSupervisor } from './process-supervisor-windows.js'
  * 启动身份核验），Windows 用创建期归属的 Job。其它平台一律显式失败，绝不静默回退到「直接 spawn / 只 kill 根进程」。
  *
  * <p>macOS 没有 Linux 的子进程收养者。未登记且故意 `setsid` 的后代会被重新挂到 launchd，收尾无法再证明它仍属于本次调用；
- * 这是会话生命周期的边界，由 {@link processScopeCapabilities} 如实暴露，不是拒绝启动普通进程的理由，也不是安全沙箱。
+ * 这是会话生命周期的已知边界，不是拒绝启动普通进程的理由，也不是安全沙箱。
  */
 export function createProcessSupervisor(): ProcessSupervisor {
   if (process.platform === 'win32') {

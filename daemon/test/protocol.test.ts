@@ -25,7 +25,6 @@ describe('protocol.ts pure unit tests', () => {
       maxBytes: 100,
       maxNestingDepth: 3,
       maxNumberLength: 5,
-      maxStringBytes: 100,
     }
 
     it('rejects non-string input', () => {

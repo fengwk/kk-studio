@@ -19,13 +19,18 @@ export interface TemporaryResourceSweeper {
 }
 
 /** 受管更新端口；由 {@code src/installer} 提供。UPDATE 结果只暴露运行时用于编码 UPDATE_RESULT 的窄结构。 */
+export type ReleasePermit = () => Promise<void>
+
+/** 安装器交接后仍可观察到失败；返回停止观察的函数。 */
+export type UpdateFailureWatcher = (report: (message: string) => void) => () => void
+
 export interface UpdateOutcomeLike {
-  phase: string
+  phase: 'PREPARED' | 'FAILED'
   message?: string | null
   /** 已接受交接的许可释放步骤；由 Runtime 在回执入缓存并完成一次出站尝试后调用，并随重放/重连重发重试。 */
-  releasePermit?: () => Promise<void>
-  /** 在交接后仍运行的 Daemon 可观察到安装器失败；返回停止观察的函数。 */
-  watchFailure?: (report: (message: string) => void) => () => void
+  releasePermit?: ReleasePermit
+  /** 在交接后仍运行的 Daemon 可观察到安装器失败。 */
+  watchFailure?: UpdateFailureWatcher
 }
 
 /**

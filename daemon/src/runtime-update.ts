@@ -7,7 +7,12 @@ import {
   type UpdateResult,
 } from './generated/control_pb.js'
 import type { UpdateByteProgress } from './runtime-status.js'
-import type { UpdateOutcomeLike, UpdatePort, UpdateProgressReporter } from './runtime-ports.js'
+import type {
+  ReleasePermit,
+  UpdateOutcomeLike,
+  UpdatePort,
+  UpdateProgressReporter,
+} from './runtime-ports.js'
 
 /** 内存中保留的受管更新回执条数上界：足够覆盖少量重发与重连重放，不无界累积。 */
 export const MAX_TRACKED_UPDATE_OPERATIONS = 8
@@ -35,7 +40,7 @@ export interface ActiveUpdate {
 export interface UpdateReceipt {
   commandKey: string
   result: UpdateResult
-  releasePermit?: () => Promise<void>
+  releasePermit?: ReleasePermit
 }
 
 export type UpdateDecision =
@@ -48,12 +53,6 @@ export type UpdateDecision =
 /** 幂等身份只比较命令参数；operationId 是请求关联键，不是参数的一部分。 */
 export function updateCommandKey(command: Update): string {
   return JSON.stringify([command.targetVersion])
-}
-
-export function normalizeUpdateResult(raw: UpdateOutcomeLike, operationId: string): UpdateResult {
-  const phase = raw.phase === 'FAILED' ? UpdatePhase.UPDATE_FAILED : UpdatePhase.UPDATE_PREPARED
-  const message = typeof raw.message === 'string' && raw.message.trim() !== '' ? raw.message : undefined
-  return create(UpdateResultSchema, { operationId, phase, message })
 }
 
 export function acceptedReceipt(command: Update): UpdateReceipt {

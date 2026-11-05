@@ -348,8 +348,8 @@ export function directChildren(ownerPid: number, excludedPids: readonly number[]
  * <p>这些后代本会话枚举看不到；只有当它的父进程退出、被内核重新挂到 `ownerPid` 名下之后才可核实。因此这里反复「列出直接子
  * 进程 -> 收敛它所属的会话」，直到不再有活的直接子进程为止，并只对刚确认为自己子进程的 pid 回收僵尸。
  *
- * <p>非 Linux 平台返回 `true`：没有收养集合可核实（见 `directChildren`），这也意味着未登记的后代无法在这里被证明收敛——
- * 这一限制由 `processScopeCapabilities().orphanAdoption` 明确暴露，不伪装成「已收敛」。
+ * <p>非 Linux 平台返回 `true`：没有收养集合可核实（见 `directChildren`），这也意味着未登记的后代无法在这里被证明收敛，
+ * 不伪装成「已收敛」。
  */
 export async function convergeAdoptedChildren(ownerPid: number, graceMillis: number, excludedPids: readonly number[]): Promise<boolean> {
   if (process.platform !== 'linux') {

@@ -30,7 +30,6 @@ const CONFIG_LIMITS = {
   maxBytes: 1024 * 1024,
   maxNestingDepth: 20,
   maxNumberLength: 64,
-  maxStringBytes: 1024 * 1024,
 }
 
 const SERVER_ID_PATTERN = /^[A-Za-z0-9_.-]+$/
@@ -112,8 +111,8 @@ function requireAbsoluteConfigPath(value: string): string {
 function readConfigFile(file: string): string {
   try {
     const stats = statSync(file)
-    if (!stats.isFile()) {
-      throw new Error('not a file')
+    if (!stats.isFile() || stats.size > CONFIG_LIMITS.maxBytes) {
+      throw new Error('not a bounded regular file')
     }
     return readFileSync(file, 'utf8')
   } catch {

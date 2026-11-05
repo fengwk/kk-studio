@@ -135,7 +135,7 @@ class DaemonHttp2SessionLoopbackTest {
         Envelope.newBuilder()
             .setMessageType(MessageType.CANCEL)
             .setEnvironmentId(ADMITTED.environmentId().value().toString())
-            .setInvocationId("inv-loopback")
+            .setInvocationId("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
             .setCancel(Cancel.getDefaultInstance())
             .build();
     assertEquals(DaemonOfferResult.ACCEPTED, openResult.control.offer(cancelEnv));

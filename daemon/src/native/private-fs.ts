@@ -31,7 +31,7 @@ export async function ensurePrivateDirectory(path: string): Promise<string> {
   // 已有路径必须先是「当前用户拥有的真实目录」，然后才收紧权限：绝不在属于别人的目录上 chmod。
   const existing = lstatOrNull(path)
   if (existing !== null) {
-    if (!existing.isDirectory() || existing.isSymbolicLink()) {
+    if (!isRealDirectory(existing)) {
       throw new Error(`the private directory path is not a real directory: ${path}`)
     }
     assertOwnedByCurrentUser(path, existing.uid, 'directory')
@@ -39,7 +39,7 @@ export async function ensurePrivateDirectory(path: string): Promise<string> {
   mkdirSync(path, { recursive: true, mode: DIRECTORY_MODE })
   chmodSync(path, DIRECTORY_MODE)
   const stats = lstatSync(path)
-  if (!stats.isDirectory() || stats.isSymbolicLink()) {
+  if (!isRealDirectory(stats)) {
     throw new Error(`the private directory path is not a real directory: ${path}`)
   }
   assertOwnerAndMode(path, stats.mode, DIRECTORY_MODE, stats.uid, 'directory')
@@ -57,7 +57,7 @@ export async function writePrivateFile(path: string, data: string | Uint8Array):
   // 已有目标若是链接或他人文件，直接拒绝：替换式写入不能成为「覆盖陌生人文件」的通道。
   const existing = lstatOrNull(path)
   if (existing !== null) {
-    if (!existing.isFile() || existing.isSymbolicLink()) {
+    if (!isRealFile(existing)) {
       throw new Error(`the private file path is not a real file: ${path}`)
     }
     assertOwnedByCurrentUser(path, existing.uid, 'file')
@@ -88,10 +88,18 @@ export async function verifyPrivateFile(path: string): Promise<void> {
     return
   }
   const stats = lstatSync(path)
-  if (!stats.isFile() || stats.isSymbolicLink()) {
+  if (!isRealFile(stats)) {
     throw new Error(`the private file path is not a real file: ${path}`)
   }
   assertOwnerAndMode(path, stats.mode, FILE_MODE, stats.uid, 'file')
+}
+
+function isRealDirectory(info: Stats): boolean {
+  return info.isDirectory() && !info.isSymbolicLink()
+}
+
+function isRealFile(info: Stats): boolean {
+  return info.isFile() && !info.isSymbolicLink()
 }
 
 function assertOwnerAndMode(path: string, mode: number, expectedMode: number, uid: number, kind: string): void {

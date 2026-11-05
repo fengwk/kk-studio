@@ -2,7 +2,6 @@ import { afterEach, describe, expect, test, vi } from 'vitest'
 import {
   acquireDirectoryLock,
   createProcessSupervisor,
-  processScopeCapabilities,
 } from '../../src/native/index.js'
 import { PosixProcessSupervisor } from '../../src/native/posix-supervisor.js'
 import { WindowsProcessSupervisor } from '../../src/native/process-supervisor-windows.js'
@@ -20,9 +19,8 @@ import {
 } from '../../src/native/posix-session.js'
 
 /**
- * 能力自述与平台分派必须按平台如实证伪：未验收的限制要显式暴露，不支持的平台必须失败关闭，
- * 绝不能把「当前平台没验证」当成「已经支持」。本文件用受控的 platform getter 在 Linux 主机上
- * 驱动其它平台分支，验证的是真实的判定逻辑，而不是伪造返回值。
+ * 平台分派必须按平台如实证伪：不支持的平台必须失败关闭，绝不能把「当前平台没验证」当成「已经支持」。
+ * 本文件用受控的 platform getter 在 Linux 主机上驱动其它平台分支，验证的是真实的判定逻辑，而不是伪造返回值。
  */
 function withPlatform<T>(platform: NodeJS.Platform, body: () => T): T {
   const spy = vi.spyOn(process, 'platform', 'get').mockReturnValue(platform)
@@ -35,50 +33,6 @@ function withPlatform<T>(platform: NodeJS.Platform, body: () => T): T {
 
 afterEach(() => {
   vi.restoreAllMocks()
-})
-
-describe('native capabilities per platform', () => {
-  test('linux declares session lifecycle with orphan adoption and no limits', () => {
-    // Linux 分支是纯能力自述（无 native 调用）：在任何主机上都必须如实且精确。
-    const capabilities = withPlatform('linux', () => processScopeCapabilities())
-    expect(capabilities).toEqual({
-      platform: 'linux',
-      sessionConvergence: true,
-      jobMembership: false,
-      orphanAdoption: true,
-      unverifiedLimits: [],
-    })
-  })
-
-  test('darwin exposes session lifecycle without orphan adoption', () => {
-    const capabilities = withPlatform('darwin', () => processScopeCapabilities())
-    expect(capabilities.platform).toBe('darwin')
-    expect(capabilities.sessionConvergence).toBe(true)
-    expect(capabilities.orphanAdoption).toBe(false)
-    expect(capabilities.jobMembership).toBe(false)
-    // 没有收养者只限制未登记且故意脱离的后代，不取消会话生命周期。
-    expect(capabilities.unverifiedLimits).toHaveLength(1)
-    expect(capabilities.unverifiedLimits[0]).toContain('child subreaper')
-    expect(capabilities.unverifiedLimits[0]).not.toContain('strict')
-  })
-
-  test('win32 declares job membership only and no session convergence', () => {
-    const capabilities = withPlatform('win32', () => processScopeCapabilities())
-    expect(capabilities.platform).toBe('win32')
-    expect(capabilities.jobMembership).toBe(true)
-    expect(capabilities.sessionConvergence).toBe(false)
-    expect(capabilities.orphanAdoption).toBe(false)
-    expect(capabilities.unverifiedLimits).toHaveLength(1)
-  })
-
-  test('an unknown platform reports every native guarantee as unavailable', () => {
-    const capabilities = withPlatform('freebsd', () => processScopeCapabilities())
-    expect(capabilities.platform).toBe('freebsd')
-    expect(capabilities.sessionConvergence).toBe(false)
-    expect(capabilities.jobMembership).toBe(false)
-    expect(capabilities.orphanAdoption).toBe(false)
-    expect(capabilities.unverifiedLimits[0]).toContain('not supported on freebsd')
-  })
 })
 
 describe('native entry points fail closed on unsupported platforms', () => {

@@ -290,7 +290,7 @@ Oversize realtime 事件不在通知里携带正文：owner 把完整 canonical 
 
 准入阶段在升级前严格校验握手：
 - 缺失或非 `websocket` 升级头：HTTP 400 Bad Request 或 426 Upgrade Required。
-- `KK-Daemon-Protocol` 低于 1：HTTP 426 Upgrade Required，body 为 protobuf 序列化的 `UpgradeRequired`，携带目标协议版本（1）及匹配请求平台架构的发布包下载 URL 与 SHA256。
+- `KK-Daemon-Protocol` 低于 1：HTTP 426 Upgrade Required，body 为 protobuf 序列化的 `UpgradeRequired`，携带匹配请求平台的目标 Daemon 版本；无法解析发布目标时 body 为空，Daemon 转入失败终止。
 - `Authorization: Bearer <token>`：缺失或校验失败返回 HTTP 401 Unauthorized；token 绝不记录入日志或回显到错误响应中。
 - `KK-Daemon-Instance` 必须为规范小写 UUID 格式；非法或畸变参数返回 HTTP 400 Bad Request。
 - 准入成功后返回 HTTP 101 Switching Protocols，并在锁外注册 10 秒超时定时器：若 Daemon 未在 10 秒内发起 HTTP/2 连接并成功建立控制通道，连接自动抛弃释放。

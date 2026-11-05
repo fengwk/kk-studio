@@ -27,7 +27,7 @@ Environment Daemon 是目标宿主上的独立 Node.js 进程，把 Platform 的
   updates/<operation-id>-*/  # 受管在线更新工作目录（安装脚本、许可和日志）
 ```
 
-POSIX 目录权限为 0700、敏感文件为 0600。`tmp/workspaces` 由受控临时存储按 TTL 自动清扫；技能安装器负责恢复或清理 staging/backup；已发布技能包不随服务卸载自动删除。更新目录保存安装脚本、许可与日志，不承载凭据。
+POSIX 目录权限为 0700、敏感文件为 0600。`tmp/workspaces` 是 Daemon 自身大文本输出与中转文件的受控根，由受控临时存储按 TTL 自动清扫；上报给平台与模型的临时目录是宿主操作系统临时目录，Agent 写在那里的暂存文件由宿主清理策略负责。技能安装器负责恢复或清理 staging/backup；已发布技能包不随服务卸载自动删除。更新目录保存安装脚本、许可与日志，不承载凭据。
 
 ## 能力装配与运行时调度
 
@@ -36,7 +36,7 @@ POSIX 目录权限为 0700、敏感文件为 0600。`tmp/workspaces` 由受控�
 - 语言服务：`lsp.goto-definition`、`lsp.workspace-symbols`、`lsp.java-decompile`；
 - 受管服务：技能状态对账（`SKILL_SYNC` / `SKILL_STATE` 控制信封）以及受管 IDE 服务（code-server：`IDE_COMMAND` / `IDE_RESULT` 承载视图生命周期，`IDE_LEASE` 承载使用证明）。
 
-运行时 [`Runtime`](../../daemon/src/runtime.ts) 负责控制连接、会话与消息调度，底层使用统一传输层 [`DaemonTransport`](../../daemon/src/transport/daemon-transport.ts)：
+运行时 [`Runtime`](../../daemon/src/runtime.ts) 负责控制连接、会话与消息调度，底层使用统一传输层 [`DaemonTransport`](../../daemon/src/transport/daemon-transport.ts)。连接代际与重连在 [`runtime-connection.ts`](../../daemon/src/runtime-connection.ts)，IDE 命令准入、在途去重、deadline 与使用证明映射在 [`runtime-ide.ts`](../../daemon/src/runtime-ide.ts)，能力结果编码在 [`runtime-encoding.ts`](../../daemon/src/runtime-encoding.ts)；`runtime.ts` 只编排这些组件与会话事实：
 - 统一传输管道：在单一 WSS 连接上运行标准 HTTP/2 协议。Stream 1 为双向控制流，传输基于 Protobuf 编码的 [`Envelope`](../../daemon/src/generated/control_pb.ts) 信封；IDE HTTP 与 WebSocket 隧道在同一连接上通过 HTTP/2 流多路复用。
 - 握手流程：连接建立后服务端首先在 Stream 1 发送 `SETTINGS` 帧下发环境标识、资源配额与网络设置，Daemon 确认后向服务端回送 `READY` 帧公布实例与能力状态，随后进入就绪状态。设置变更使用后续 `SETTINGS` 更新代理，不重复发送 READY；控制 WSS 始终直连。
 - 故障恢复与重连：连接断开时按重连策略重试（1 秒至 30 秒）；首条 `SETTINGS` 中的网络设置无效时断开握手并重试。重连后重新进行 `SETTINGS` / `READY` 协商，不改变进程内已有执行事实。无效的在线网络更新不会覆盖当前设置，可通过后续更新修正。
@@ -85,7 +85,7 @@ POSIX 目录权限为 0700、敏感文件为 0600。`tmp/workspaces` 由受控�
 
 ### 受管 IDE 与数据通道
 
-Daemon 受管运行内置的 code-server，响应控制通道的 `IDE_COMMAND` 处理视图创建、恢复、切换目录、聚焦终端、分离与关闭等动作，并回复 `IDE_RESULT`。
+Daemon 受管运行内置的 code-server，响应控制通道的 `IDE_COMMAND` 处理视图创建、恢复、切换目录、聚焦终端与关闭等动作，并回复 `IDE_RESULT`。
 数据通道与控制通道在单一物理连接上通过 HTTP/2 多路复用（[`daemon-transport.ts`](../../daemon/src/transport/daemon-transport.ts) 与 [`ide-tunnel.ts`](../../daemon/src/transport/ide-tunnel.ts)）：
 - 普通 HTTP 请求（静态资产、页面和 REST API）作为标准 HTTP/2 数据流透传至本地 code-server；
 - WebSocket 连接通过 RFC 8441 Extended CONNECT 隧道建立，双向数据流直接穿透映射至本地 code-server 的 WebSocket 端口；
@@ -97,8 +97,7 @@ OPEN/CLOSING/创建预留都由本进程裁决；claim 在任何进程或文件�
 `mode=create` 未指定目录时使用宿主 HOME，`mode=resume` 不隐式创建视图也不改目录；相同 `claimId` 的完全相同请求返回同一绑定，
 参数漂移被拒绝。失败回执只携带安全大写 code 与去敏 message（如 `VIEW_GONE`、`VIEW_IN_USE`、`DIRTY`、`CLEANUP_FAILED`、`BUSY`、`UNAVAILABLE`）。
 
-使用证明只来自 `IDE_LEASE` 批次：45 秒没有任何有效证明即不再视为活跃占用并允许恢复竞争；最后一次有效证明起 600 秒仍无新证明进入到期检查；
-`DETACH_VIEW` 立即冻结该 epoch 的续租，迟到证明不能复活它。到期时只有桥接可证明编辑器干净且原生关闭成功才释放视图；dirty 或状态未知时保留视图等待显式操作，期间继续占用视图配额。
+使用证明只来自 `IDE_LEASE` 批次：45 秒没有任何有效证明即不再视为活跃占用并允许恢复竞争；最后一次有效证明起 600 秒仍无新证明进入到期检查。到期时只有桥接可证明编辑器干净且原生关闭成功才释放视图；dirty 或状态未知时保留视图等待显式操作，期间继续占用视图配额。
 正常关闭不预拒绝 dirty，直接等待 IDE 原生保存、不保存或取消，不设交互超时。取消、控制连接断开或关闭结果未知均保留视图与终端，不采用迟到回执；只有状态未知或桥接不可达时才允许显式强制关闭。原生关闭成功后才中止该视图的 HTTP/WS 流，以 10 秒上限等待流收敛，再调用 code-server 的视图终止接口，最后释放 view map、锁、计时器与受管句柄。
 终止失败保持 CLOSING 并报告 `CLEANUP_FAILED`，不误报已释放。最后一个视图释放且无在途数据流后，闲置 60 秒停止整个 code-server。
 强制关闭前尝试将普通文本的未保存内容写入私有受管恢复文件，总量上限 16 MiB；备份失败产生有界事件，不伪报完成。
@@ -129,7 +128,7 @@ Git 不设置覆盖值，保留原生自动仓库发现。文件树、编辑、�
 
 ### Agent LSP
 
-LSP 组（[`lsp.ts`](../../daemon/src/coding/lsp.ts)）从配置中的 `lsp.servers` 初始化，按扩展名匹配语言服务器，并在目标文件所属项目根下复用 stdio JSON-RPC 连接。三项能力默认超时 180 秒覆盖启动等待、initialize 与 query 全程，统一消费 `context.signal`；共享池初始化默认 180 秒独立生命周期，单个 waiter 停止不影响其他等待者，最后退出等待 cleanup；闲置 5 分钟自动回收客户端与 1 秒 shutdown 机制保持不变；反编译能力（`lsp.java-decompile`）仅在匹配到 jdtls 服务器时可用。语言服务器的 `ManagedProcess.exit` 可能早于受管范围收尾（命令退出或 helper fallback）；已发出请求收到退出报告后等待同一 `stop` 成功再确认，正常服务端 RPC 响应不经停止路径。
+LSP 组（[`lsp.ts`](../../daemon/src/coding/lsp.ts)）从配置中的 `lsp.servers` 初始化，按扩展名匹配语言服务器，并在目标文件所属项目根下复用 stdio JSON-RPC 连接。启动时允许丢弃首个 `Content-Length` 之前最多 8 KiB 的非协议横幅，超过即失败关闭。三项能力默认超时 180 秒覆盖启动等待、initialize 与 query 全程，统一消费 `context.signal`；共享池初始化默认 180 秒独立生命周期，单个 waiter 停止不影响其他等待者，最后退出等待 cleanup；闲置 5 分钟自动回收客户端与 1 秒 shutdown 机制保持不变；反编译能力（`lsp.java-decompile`）仅在匹配到 jdtls 服务器时可用。语言服务器的 `ManagedProcess.exit` 可能早于受管范围收尾（命令退出或 helper fallback）；已发出请求收到退出报告后等待同一 `stop` 成功再确认，正常服务端 RPC 响应不经停止路径。
 
 退出确认覆盖本次目标 RPC，不代表共享语言服务器整体退出。参数、租约或发送前失败确认的是目标 RPC 未发出，不能据此推断服务器未启动、初始化未进入或启动资源已收敛；正常 RPC 响应同样不要求停止共享服务器。
 

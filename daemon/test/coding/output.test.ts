@@ -1,12 +1,15 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { textResult } from '../../src/contracts.js'
 import { openTestStore } from './helpers.js'
 import {
   OutputSpool,
+  releaseTextOutputStore,
   spoolLargeTextResult,
+  sweepTextOutputStores,
+  textOutputStoreFor,
 } from '../../src/coding/output.js'
 
 const tempDirs: string[] = []
@@ -105,5 +108,19 @@ describe('spoolLargeTextResult', () => {
     const store = await openTestStore(dir)
     const result = await spoolLargeTextResult(store, textResult('c', 'small'))
     expect(result.details).toEqual({})
+  })
+})
+
+describe('text output store lifecycle', () => {
+  it('按数据目录复用的写入根就是 TTL 清扫根', async () => {
+    const dataDir = await tempDir()
+    const store = await textOutputStoreFor(dataDir)
+    expect(store.root()).toBe(join(dataDir, 'tmp', 'workspaces'))
+    const staging = await store.createStagingFile('c')
+    await store.publish(staging)
+    // 把登记时间改为过期，证明 sweepTextOutputStores 清扫的是同一个受控实例。
+    await writeFile(join(dirname(staging), 'created-at'), '0')
+    expect(await sweepTextOutputStores(10)).toContain(1)
+    expect(await releaseTextOutputStore(dataDir)).toBe(true)
   })
 })

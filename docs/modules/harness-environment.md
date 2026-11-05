@@ -180,7 +180,7 @@ Studio -> IDE_LEASE(round, bindings)
 - `skill_state`：可重建投影，READY 后重新同步；旧代际不能覆盖新代际。
 - `recent_events`：最近 200 条去敏、有界运维事件，包括更新失败；不作为锁或完整审计账本。
 
-`READY` 携带宿主侧的环境元数据与当前运行状态。环境元数据包含目标操作系统、时区、Daemon 进程用户、用户 HOME、操作者备注、受控临时目录与 CPU 架构。运行状态（`RuntimeStatus`）由 revision 与状态详情组成：
+`READY` 携带宿主侧的环境元数据与当前运行状态。环境元数据包含目标操作系统、时区、Daemon 进程用户、用户 HOME、操作者备注、操作系统临时目录与 CPU 架构。运行状态（`RuntimeStatus`）由 revision 与状态详情组成：
 
 ```text
 runtimeStatus: {

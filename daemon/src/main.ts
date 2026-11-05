@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto'
 import { realpathSync } from 'node:fs'
-import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 import type { CapabilityExecutor, DaemonConfig } from './contracts.js'
@@ -156,7 +155,7 @@ async function runDaemon(config: DaemonConfig): Promise<number> {
       transport,
       capabilities,
       processes: supervisor,
-      environment: detectEnvironmentInfo(config, join(dataDir, 'tmp')),
+      environment: detectEnvironmentInfo(config),
       ide,
       // IDE_LEASE 的 round 起点由 Runtime 心跳时钟传入；证明不能创建或续租视图。
       ideLease: ide,

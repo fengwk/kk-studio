@@ -401,7 +401,7 @@ HOME 也不是默认工作目录。
 - **最终成功只由更新后 Daemon 以目标版本重新 READY 确认**；Daemon 的阶段回执只表达准备进度，
   连接断开派生为 `UNKNOWN`（等待重连），不等于失败。持久阶段为 `PENDING / RUNNING / PREPARED /
   SUCCEEDED / FAILED`。
-- 协议版本不一致时，准入端点返回 HTTP 426 + protobuf `UpgradeRequired`（含目标制品 URL 与 SHA256），Daemon 据此执行本机受管更新；无法受管更新时需重新覆盖安装。
+- 协议版本不一致时，准入端点返回 HTTP 426 + protobuf `UpgradeRequired`（含目标 Daemon 版本），Daemon 据此执行本机受管更新；无法受管更新时需重新覆盖安装。
 - 如需覆盖安装：在 Web 弹窗重新**“保存并复制安装命令”**，在目标主机执行一次覆盖安装即可。安装器先校验新发行归档和安装输入，再停止受管服务，发布新程序、配置与 token 并重启服务。数据目录、日志与既有备份保留。重新 `READY` 后才继续正常使用。
 
 重启会中断在途工具调用，进程内 invocation journal 不跨重启保留，已经发生的命令副作用不回滚。
