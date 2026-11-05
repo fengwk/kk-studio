@@ -27,12 +27,13 @@ export function formatTimestamp(value: number | null | undefined, locale: AppLoc
   return value == null ? '' : formatDateTime24(new Date(value * 1000), locale)
 }
 
-/** 当前 runtime 端点只在 READY owner 可用；该稳定错误码表示尚无本代 READY 快照。 */
+/** 当前 runtime 端点只在 READY owner 可用；按 code unavailable + reason ENVIRONMENT_UNAVAILABLE 识别。 */
 export function isEnvironmentRuntimeUnavailableError(error: unknown): boolean {
   return (
     error instanceof ApiError &&
     error.status === 409 &&
-    error.code === 'environment_unavailable'
+    error.code === 'unavailable' &&
+    error.reason === 'ENVIRONMENT_UNAVAILABLE'
   )
 }
 

@@ -174,7 +174,7 @@ describe('skill package model', () => {
 
   it('prefers the backend errors.detail over the transport message', () => {
     expect(
-      errorDetail(new ApiError('Request failed with status 409', 409, 'in_use', { detail: 'Skill package is in use by Agent demo' })),
+      errorDetail(new ApiError('Request failed with status 409', 409, 'in_use', undefined, undefined, 'Skill package is in use by Agent demo')),
     ).toBe('Skill package is in use by Agent demo')
     expect(errorDetail(new ApiError('Request failed with status 500', 500))).toBe(
       'Request failed with status 500',

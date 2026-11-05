@@ -394,9 +394,8 @@ describe('IdePanelProvider', () => {
       },
     }))
     service.openIdeView
-      .mockRejectedValueOnce(new ApiError('IDE view is in use', 409, 'IDE_UNAVAILABLE', {
-        detail: 'VIEW_IN_USE',
-      }))
+      .mockRejectedValueOnce(new ApiError('IDE view is in use', 409, 'unavailable',
+        undefined, 'IDE_UNAVAILABLE', 'VIEW_IN_USE'))
 
     const { sockets } = renderPanel()
     connect(sockets)
@@ -439,9 +438,8 @@ describe('IdePanelProvider', () => {
       },
     }))
     service.openIdeView
-      .mockRejectedValueOnce(new ApiError('IDE view is in use', 409, 'IDE_UNAVAILABLE', {
-        detail: 'VIEW_IN_USE',
-      }))
+      .mockRejectedValueOnce(new ApiError('IDE view is in use', 409, 'unavailable',
+        undefined, 'IDE_UNAVAILABLE', 'VIEW_IN_USE'))
 
     const { sockets } = renderPanel()
     connect(sockets)
@@ -486,9 +484,8 @@ describe('IdePanelProvider', () => {
       },
     }))
     service.openIdeView
-      .mockRejectedValueOnce(new ApiError('IDE view is gone', 409, 'IDE_UNAVAILABLE', {
-        detail: 'VIEW_GONE',
-      }))
+      .mockRejectedValueOnce(new ApiError('IDE view is gone', 409, 'unavailable',
+        undefined, 'IDE_UNAVAILABLE', 'VIEW_GONE'))
 
     const { sockets } = renderPanel()
     connect(sockets)
@@ -588,7 +585,7 @@ describe('IdePanelProvider', () => {
   it('keeps the iframe when the bridge is unavailable and forces only after confirmation', async () => {
     const user = userEvent.setup()
     service.closeIdeView
-      .mockRejectedValueOnce(new ApiError('unavailable', 409, 'ide_unavailable'))
+      .mockRejectedValueOnce(new ApiError('unavailable', 409, 'unavailable', undefined, 'IDE_UNAVAILABLE'))
       .mockResolvedValueOnce(undefined)
     const { sockets } = renderPanel()
     connect(sockets)
@@ -624,8 +621,8 @@ describe('IdePanelProvider', () => {
 
   it('does not offer force close after IDE cancellation', async () => {
     service.closeIdeView.mockRejectedValueOnce(new ApiError(
-      'closing the view was cancelled or editors remain open', 400, 'validation_error',
-      { resource: 'ide_close_cancelled' },
+      'closing the view was cancelled or editors remain open', 400, 'validation',
+      undefined, 'IDE_CLOSE_CANCELLED',
     ))
     const user = userEvent.setup()
     const { sockets } = renderPanel()

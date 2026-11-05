@@ -169,7 +169,7 @@ async function transport(
     const path = url.pathname
 
     if (path === '/api/plugins') {
-      await route.fulfill({ json: { status: 200, data: pluginsList } })
+      await route.fulfill({ json: pluginsList })
     } else if (path.endsWith('/connection-check') && route.request().method() === 'POST') {
       requests.push(path)
       if (blockStage === 'check') {
@@ -183,15 +183,12 @@ async function transport(
       }
       await route.fulfill({
         json: {
-          status: 200,
-          data: {
-            pluginId: decodeURIComponent(path.split('/')[3] ?? ''),
-            appliedRevision: postData.expectedRevision,
-            checkedAt: 1772366400,
-            reachability: 'REACHABLE',
-            authentication: 'ACCEPTED',
-            browserSession: 'UNKNOWN',
-          },
+          pluginId: decodeURIComponent(path.split('/')[3] ?? ''),
+          appliedRevision: postData.expectedRevision,
+          checkedAt: 1772366400,
+          reachability: 'REACHABLE',
+          authentication: 'ACCEPTED',
+          browserSession: 'UNKNOWN',
         },
       })
     } else if (path.endsWith('/auth/prepare')) {
@@ -201,11 +198,8 @@ async function transport(
       }
       await route.fulfill({
         json: {
-          status: 200,
-          data: {
-            authAttemptId: 'attempt-nonce-1',
-            loginUrl: 'https://auth.example.com/login',
-          },
+          authAttemptId: 'attempt-nonce-1',
+          loginUrl: 'https://auth.example.com/login',
         },
       })
     } else if (path.endsWith('/auth/complete')) {
@@ -215,7 +209,8 @@ async function transport(
       }
       await route.fulfill({
         status: 400,
-        json: { status: 400, message: 'Callback rejected' },
+        contentType: 'application/problem+json',
+        json: { type: 'about:blank', status: 400, code: 'validation', title: 'Callback rejected' },
       })
     } else if (path.endsWith('/configuration') && route.request().method() === 'PUT') {
       requests.push(path)
@@ -223,13 +218,10 @@ async function transport(
       await route.fulfill({
         status: 200,
         json: {
-          status: 200,
-          data: {
-            ...deepLinkPlugin,
-            configuration: {
-              ...deepLinkPlugin.configuration,
-              valuesJson: postData.valuesJson,
-            },
+          ...deepLinkPlugin,
+          configuration: {
+            ...deepLinkPlugin.configuration,
+            valuesJson: postData.valuesJson,
           },
         },
       })

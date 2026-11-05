@@ -104,14 +104,12 @@ describe('SessionFilesDialog', () => {
     vi.mocked(sessionFileService.readSessionFileContent).mockImplementation(
       async (_sessionId, _owner, path, window?: SessionFileTextWindow) => {
         if (path.endsWith('/missing.txt')) {
-          throw new ApiError('The requested resource was not found.', 404, 'NOT_FOUND', {
-            detail: `No such file: ${path}`,
-          })
+          throw new ApiError('The requested resource was not found.', 404, 'not_found',
+            undefined, undefined, `No such file: ${path}`)
         }
         if (path.endsWith('/binary.bin')) {
-          throw new ApiError('HTTP error (status 422).', 422, 'UNPROCESSABLE_CONTENT', {
-            detail: 'file appears to be binary',
-          })
+          throw new ApiError('HTTP error (status 422).', 422, 'validation',
+            undefined, undefined, 'file appears to be binary')
         }
         return window?.offset === 3 ? SECOND_WINDOW : FIRST_WINDOW
       },

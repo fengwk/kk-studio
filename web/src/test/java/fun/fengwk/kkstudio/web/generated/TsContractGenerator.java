@@ -7,8 +7,14 @@ import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import com.fasterxml.jackson.annotation.JsonUnwrapped;
 import org.jspecify.annotations.Nullable;
 import org.springframework.core.annotation.AnnotatedElementUtils;
+import org.springframework.core.io.Resource;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestMethod;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.ValueConstants;
 import tools.jackson.databind.BeanDescription;
 import tools.jackson.databind.JavaType;
 import tools.jackson.databind.JsonNode;
@@ -21,9 +27,12 @@ import tools.jackson.databind.introspect.BeanPropertyDefinition;
 import tools.jackson.databind.introspect.ClassIntrospector;
 import tools.jackson.databind.json.JsonMapper;
 
+import fun.fengwk.kkstudio.common.page.Page;
+import fun.fengwk.kkstudio.platform.http.ApiResponse;
 import fun.fengwk.kkstudio.share.catalog.AgentModelRatePatchDTOSerializer;
 import fun.fengwk.kkstudio.share.catalog.DecimalStringSerializer;
 
+import java.io.InputStream;
 import java.lang.annotation.Annotation;
 import java.lang.reflect.AnnotatedType;
 import java.lang.reflect.Field;
@@ -33,10 +42,14 @@ import java.lang.reflect.Parameter;
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.RecordComponent;
 import java.lang.reflect.Type;
+import java.lang.reflect.TypeVariable;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Comparator;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
@@ -47,14 +60,15 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
  * 从 Web 控制器签名与生产 HTTP Jackson 3 mapper 生成全部传输契约的 TypeScript 类型。
  *
- * <p>根类型取自控制器处理方法的 {@code @RequestBody} 参数（请求方向）与返回值（响应方向），再加上嵌在错误响应上下文里的结构化载荷； 从根出发沿属性闭包收集契约包（生产为
- * {@code fun.fengwk.kkstudio.share} 与 {@code fun.fengwk.kkstudio.canvas.dto}）下的 DTO 与枚举。属性名与顺序来自真实
- * mapper 的 introspection，枚举 wire 值由 mapper 序列化每个常量得到，标量映射在构造时用探针核验。presence 规则：
+ * <p>根类型取自控制器处理方法的 {@code @RequestBody}、路径及查询参数（请求方向）与返回值（响应方向），再加上嵌在错误响应上下文里的结构化载荷；
+ * 从根出发沿属性闭包收集契约包（生产为 {@code fun.fengwk.kkstudio}）下的 DTO 与枚举。属性名与顺序来自真实 mapper 的 introspection，枚举
+ * wire 值由 mapper 序列化每个常量得到，标量映射在构造时用探针核验。presence 规则：
  *
  * <ul>
  *   <li>未标 {@link Nullable} 的属性必填且非空；原始类型同理。
@@ -159,6 +173,7 @@ final class TsContractGenerator {
   String generate() {
     directions.clear();
     pending.clear();
+    Map<String, RouteSpec> routes = discoverRoutes();
     for (Class<?> controller : controllers) {
       for (Method method : controller.getDeclaredMethods()) {
         if (!AnnotatedElementUtils.hasAnnotation(method, RequestMapping.class)) {
@@ -168,8 +183,12 @@ final class TsContractGenerator {
           if (parameter.isAnnotationPresent(RequestBody.class)) {
             visit(parameter.getParameterizedType(), Direction.REQUEST);
           }
+          if (parameter.isAnnotationPresent(RequestParam.class)
+              || parameter.isAnnotationPresent(PathVariable.class)) {
+            visit(parameter.getParameterizedType(), Direction.REQUEST);
+          }
         }
-        visit(method.getGenericReturnType(), Direction.RESPONSE);
+        visit(unwrapResponseType(method.getGenericReturnType()), Direction.RESPONSE);
       }
     }
     for (Class<?> payload : errorPayloadTypes) {
@@ -189,7 +208,9 @@ final class TsContractGenerator {
     }
     StringBuilder builder = new StringBuilder(HEADER);
     for (Class<?> type : ordered.values()) {
-      if (type.isEnum()) {
+      if (type == Page.class) {
+        appendPageInterface(builder);
+      } else if (type.isEnum()) {
         appendEnum(builder, type);
       } else if (isPolymorphic(type)) {
         appendUnion(builder, type);
@@ -197,7 +218,70 @@ final class TsContractGenerator {
         appendObject(builder, type, directions.get(type), null);
       }
     }
+    appendApiRoutes(builder, routes);
     return builder.toString().stripTrailing() + '\n';
+  }
+
+  private void appendPageInterface(StringBuilder builder) {
+    builder.append("/** Java：").append(javaName(Page.class)).append(" */\n");
+    builder.append("export interface Page<T> {\n");
+    for (TsProperty property : properties(Page.class, Direction.RESPONSE)) {
+      try {
+        Type declared = Page.class.getDeclaredField(property.name()).getGenericType();
+        builder
+            .append("  ")
+            .append(propertyName(property.name()))
+            .append(property.optional() ? "?" : "")
+            .append(": ")
+            .append(tsType(declared, Direction.RESPONSE))
+            .append(property.nullable() ? " | null" : "")
+            .append('\n');
+      } catch (NoSuchFieldException ex) {
+        throw new IllegalStateException("cannot inspect Page property " + property.name(), ex);
+      }
+    }
+    builder.append("}\n\n");
+  }
+
+  private void appendApiRoutes(StringBuilder builder, Map<String, RouteSpec> routes) {
+    builder.append("export interface ApiRoutes {\n");
+    for (Map.Entry<String, RouteSpec> entry : routes.entrySet()) {
+      RouteSpec route = entry.getValue();
+      builder.append("  ").append(quote(entry.getKey())).append(": {\n");
+      if (route.hasPath()) {
+        builder.append("    path: ").append(route.renderPath()).append('\n');
+      }
+      if (route.hasQuery()) {
+        builder.append("    query: ").append(route.renderQuery()).append('\n');
+      }
+      if (route.hasBody()) {
+        builder
+            .append("    body")
+            .append(route.body().optional() ? "?" : "")
+            .append(": ")
+            .append(route.body().tsType())
+            .append('\n');
+      }
+      builder.append("    response: ").append(route.responseType()).append('\n');
+      if (route.hasResponseType()) {
+        builder.append("    responseType: ").append(quote(route.responseTypeKind())).append('\n');
+      }
+      builder.append("  }\n");
+    }
+    builder.append("}\n\n");
+    builder.append(
+        "export const API_RESPONSE_TYPES: Partial<Record<keyof ApiRoutes, 'text' | 'blob'>> = {\n");
+    for (Map.Entry<String, RouteSpec> entry : routes.entrySet()) {
+      if (entry.getValue().hasResponseType()) {
+        builder
+            .append("  ")
+            .append(quote(entry.getKey()))
+            .append(": ")
+            .append(quote(entry.getValue().responseTypeKind()))
+            .append(",\n");
+      }
+    }
+    builder.append("}\n");
   }
 
   private void visit(Type type, Direction direction) {
@@ -212,6 +296,11 @@ final class TsContractGenerator {
       return;
     }
     if (type instanceof ParameterizedType parameterized) {
+      if (parameterized.getRawType() instanceof Class<?> raw) {
+        if (raw != ApiResponse.class && raw != ResponseEntity.class && isContractType(raw)) {
+          register(raw, direction);
+        }
+      }
       for (Type argument : parameterized.getActualTypeArguments()) {
         visit(argument, direction);
       }
@@ -236,7 +325,7 @@ final class TsContractGenerator {
   }
 
   private void expand(Class<?> type, Direction direction) {
-    if (type.isEnum()) {
+    if (type.isEnum() || type == Page.class) {
       return;
     }
     if (isPolymorphic(type)) {
@@ -773,6 +862,354 @@ final class TsContractGenerator {
 
   private static String javaName(Class<?> type) {
     return type.getName().replace('$', '.');
+  }
+
+  private String tsType(Type type, Direction direction) {
+    if (type == void.class || type == Void.class) {
+      return "void";
+    }
+    if (type instanceof TypeVariable<?> variable) {
+      return variable.getName();
+    }
+    if (type instanceof ParameterizedType pt) {
+      Type raw = pt.getRawType();
+      if (raw == Page.class) {
+        Type arg = pt.getActualTypeArguments()[0];
+        return "Page<" + tsType(arg, direction) + ">";
+      }
+      if (raw == List.class || raw == Collection.class || raw == Set.class) {
+        Type arg = pt.getActualTypeArguments()[0];
+        String elem = tsType(arg, direction);
+        return elem.matches("[A-Za-z0-9_]+") ? elem + "[]" : "(" + elem + ")[]";
+      }
+      if (raw == Map.class) {
+        Type val = pt.getActualTypeArguments()[1];
+        return "Record<string, " + tsType(val, direction) + ">";
+      }
+    }
+    return tsType(mapper.constructType(type), direction);
+  }
+
+  private static final Pattern PATH_VAR_PATTERN = Pattern.compile("\\{(\\*?[a-zA-Z0-9_$]+)\\}");
+
+  private record RouteSpec(
+      Method controllerMethod,
+      String httpMethod,
+      String path,
+      Map<String, String> pathParams,
+      Map<String, QueryParamSpec> queryParams,
+      @Nullable BodySpec body,
+      String responseType,
+      @Nullable String responseTypeKind) {
+
+    boolean hasPath() {
+      return !pathParams.isEmpty();
+    }
+
+    boolean hasQuery() {
+      return !queryParams.isEmpty();
+    }
+
+    boolean hasBody() {
+      return body != null;
+    }
+
+    boolean hasResponseType() {
+      return responseTypeKind != null;
+    }
+
+    String renderPath() {
+      StringBuilder sb = new StringBuilder("{ ");
+      boolean first = true;
+      for (Map.Entry<String, String> entry : pathParams.entrySet()) {
+        if (!first) {
+          sb.append("; ");
+        }
+        first = false;
+        sb.append(propertyName(entry.getKey())).append(": ").append(entry.getValue());
+      }
+      return sb.append(" }").toString();
+    }
+
+    String renderQuery() {
+      StringBuilder sb = new StringBuilder("{ ");
+      boolean first = true;
+      for (Map.Entry<String, QueryParamSpec> entry : queryParams.entrySet()) {
+        if (!first) {
+          sb.append("; ");
+        }
+        first = false;
+        sb.append(propertyName(entry.getKey()))
+            .append(entry.getValue().optional() ? "?: " : ": ")
+            .append(entry.getValue().tsType());
+      }
+      return sb.append(" }").toString();
+    }
+  }
+
+  private record QueryParamSpec(String tsType, boolean optional) {}
+
+  private record BodySpec(String tsType, boolean optional) {}
+
+  private Map<String, RouteSpec> discoverRoutes() {
+    Map<String, RouteSpec> routes = new TreeMap<>();
+    for (Class<?> controller : controllers) {
+      RequestMapping classMapping =
+          AnnotatedElementUtils.findMergedAnnotation(controller, RequestMapping.class);
+      String[] classPaths = extractPaths(classMapping);
+      Method[] methods = controller.getDeclaredMethods();
+      Arrays.sort(
+          methods, Comparator.comparing(Method::getName).thenComparing(Method::toGenericString));
+      for (Method method : methods) {
+        RequestMapping methodMapping =
+            AnnotatedElementUtils.findMergedAnnotation(method, RequestMapping.class);
+        if (methodMapping == null) {
+          continue;
+        }
+        RequestMethod[] requestMethods = methodMapping.method();
+        String[] methodPaths = extractPaths(methodMapping);
+        for (String classPath : classPaths) {
+          for (String methodPath : methodPaths) {
+            String combinedPath = combinePaths(classPath, methodPath);
+            if (!combinedPath.startsWith("/api/") && !combinedPath.equals("/api")) {
+              continue;
+            }
+            if (requestMethods.length == 0) {
+              throw new IllegalStateException(
+                  "Route " + combinedPath + " on " + method + " has no HTTP method declared");
+            }
+            for (RequestMethod requestMethod : requestMethods) {
+              String routeKey = requestMethod.name() + " " + combinedPath;
+              RouteSpec routeSpec = buildRouteSpec(method, requestMethod.name(), combinedPath);
+              RouteSpec previous = routes.put(routeKey, routeSpec);
+              if (previous != null) {
+                throw new IllegalStateException(
+                    "duplicate route "
+                        + routeKey
+                        + " declared on "
+                        + method
+                        + " and "
+                        + previous.controllerMethod());
+              }
+            }
+          }
+        }
+      }
+    }
+    return routes;
+  }
+
+  private static String[] extractPaths(@Nullable RequestMapping mapping) {
+    if (mapping == null) {
+      return new String[] {""};
+    }
+    if (mapping.path().length > 0) {
+      return mapping.path();
+    }
+    if (mapping.value().length > 0) {
+      return mapping.value();
+    }
+    return new String[] {""};
+  }
+
+  static String combinePaths(String classPath, String methodPath) {
+    String cp = classPath == null ? "" : classPath.trim();
+    String mp = methodPath == null ? "" : methodPath.trim();
+    if (!cp.isEmpty() && !cp.startsWith("/")) {
+      cp = "/" + cp;
+    }
+    if (!mp.isEmpty() && !mp.startsWith("/")) {
+      mp = "/" + mp;
+    }
+    if (cp.endsWith("/")) {
+      cp = cp.substring(0, cp.length() - 1);
+    }
+    String combined = cp + mp;
+    if (!combined.startsWith("/")) {
+      combined = "/" + combined;
+    }
+    if (combined.length() > 1 && combined.endsWith("/")) {
+      combined = combined.substring(0, combined.length() - 1);
+    }
+    StringBuilder normalized = new StringBuilder();
+    for (int i = 0; i < combined.length(); i++) {
+      char ch = combined.charAt(i);
+      if (ch != '{') {
+        normalized.append(ch);
+        continue;
+      }
+      int colon = combined.indexOf(':', i);
+      int end = combined.indexOf('}', i);
+      if (end < 0) {
+        throw new IllegalStateException("unclosed path variable in " + combined);
+      }
+      if (colon < 0 || end < colon) {
+        normalized.append(combined, i, end + 1);
+        i = end;
+        continue;
+      }
+      normalized.append(combined, i, colon).append('}');
+      int depth = 1;
+      int cursor = colon + 1;
+      while (cursor < combined.length() && depth > 0) {
+        char part = combined.charAt(cursor++);
+        if (part == '{') {
+          depth++;
+        } else if (part == '}') {
+          depth--;
+        }
+      }
+      if (depth != 0) {
+        throw new IllegalStateException("unclosed path variable in " + combined);
+      }
+      i = cursor - 1;
+    }
+    return normalized.toString();
+  }
+
+  private RouteSpec buildRouteSpec(Method method, String httpMethod, String path) {
+    Matcher matcher = PATH_VAR_PATTERN.matcher(path);
+    Set<String> expectedVars = new LinkedHashSet<>();
+    while (matcher.find()) {
+      String raw = matcher.group(1);
+      String varName = raw.startsWith("*") ? raw.substring(1) : raw;
+      expectedVars.add(varName);
+    }
+
+    Map<String, Parameter> pathParamsByVar = new HashMap<>();
+    for (Parameter parameter : method.getParameters()) {
+      PathVariable pv = parameter.getAnnotation(PathVariable.class);
+      if (pv != null) {
+        String varName = resolvePathVariableName(parameter, pv);
+        if (pathParamsByVar.put(varName, parameter) != null) {
+          throw new IllegalStateException("duplicate @PathVariable " + varName + " on " + method);
+        }
+      }
+    }
+
+    for (String varName : expectedVars) {
+      if (!pathParamsByVar.containsKey(varName)) {
+        throw new IllegalStateException(
+            "path "
+                + path
+                + " requires variable "
+                + varName
+                + " but no matching @PathVariable on "
+                + method);
+      }
+    }
+    for (String varName : pathParamsByVar.keySet()) {
+      if (!expectedVars.contains(varName)) {
+        throw new IllegalStateException(
+            "@PathVariable " + varName + " on " + method + " does not exist in path " + path);
+      }
+    }
+
+    Map<String, String> pathParams = new TreeMap<>();
+    for (String varName : expectedVars) {
+      Parameter p = pathParamsByVar.get(varName);
+      pathParams.put(varName, tsType(p.getParameterizedType(), Direction.REQUEST));
+    }
+
+    Map<String, QueryParamSpec> queryParams = new TreeMap<>();
+    for (Parameter parameter : method.getParameters()) {
+      RequestParam rp = parameter.getAnnotation(RequestParam.class);
+      if (rp == null) {
+        continue;
+      }
+      String name = resolveParamName(parameter, rp);
+      boolean optional =
+          !rp.required()
+              || !ValueConstants.DEFAULT_NONE.equals(rp.defaultValue())
+              || parameter.isAnnotationPresent(Nullable.class);
+      String tsType = tsType(parameter.getParameterizedType(), Direction.REQUEST);
+      if (queryParams.put(name, new QueryParamSpec(tsType, optional)) != null) {
+        throw new IllegalStateException("duplicate @RequestParam " + name + " on " + method);
+      }
+    }
+
+    BodySpec bodySpec = null;
+    for (Parameter parameter : method.getParameters()) {
+      RequestBody rb = parameter.getAnnotation(RequestBody.class);
+      if (rb == null) {
+        continue;
+      }
+      if (bodySpec != null) {
+        throw new IllegalStateException("multiple @RequestBody on " + method);
+      }
+      boolean optional = !rb.required() || parameter.isAnnotationPresent(Nullable.class);
+      String tsType = tsType(parameter.getParameterizedType(), Direction.REQUEST);
+      bodySpec = new BodySpec(tsType, optional);
+    }
+
+    Type returnType = method.getGenericReturnType();
+    Type unwrapped = unwrapResponseType(returnType);
+    String responseTsType;
+    String responseTypeKind = null;
+    if (unwrapped == void.class || unwrapped == Void.class) {
+      responseTsType = "void";
+    } else if (unwrapped == byte[].class
+        || unwrapped == InputStream.class
+        || (unwrapped instanceof Class<?> cls && Resource.class.isAssignableFrom(cls))) {
+      responseTsType = "Blob";
+      responseTypeKind = "blob";
+    } else if ((unwrapped == String.class || unwrapped == CharSequence.class)
+        && Arrays.stream(
+                AnnotatedElementUtils.findMergedAnnotation(method, RequestMapping.class).produces())
+            .anyMatch(value -> value.startsWith("text/"))) {
+      responseTsType = "string";
+      responseTypeKind = "text";
+    } else {
+      responseTsType = tsType(unwrapped, Direction.RESPONSE);
+    }
+
+    return new RouteSpec(
+        method,
+        httpMethod,
+        path,
+        pathParams,
+        queryParams,
+        bodySpec,
+        responseTsType,
+        responseTypeKind);
+  }
+
+  private static String resolveParamName(Parameter parameter, RequestParam annotation) {
+    if (!annotation.name().isEmpty()) {
+      return annotation.name();
+    }
+    if (!annotation.value().isEmpty()) {
+      return annotation.value();
+    }
+    return parameter.getName();
+  }
+
+  private static String resolvePathVariableName(Parameter parameter, PathVariable annotation) {
+    if (!annotation.name().isEmpty()) {
+      return annotation.name();
+    }
+    if (!annotation.value().isEmpty()) {
+      return annotation.value();
+    }
+    return parameter.getName();
+  }
+
+  static Type unwrapResponseType(Type type) {
+    if (type instanceof ParameterizedType pt) {
+      Type raw = pt.getRawType();
+      if (raw == ApiResponse.class || raw == ResponseEntity.class) {
+        Type[] args = pt.getActualTypeArguments();
+        if (args.length > 0) {
+          return unwrapResponseType(args[0]);
+        }
+        return void.class;
+      }
+    } else if (type instanceof Class<?> cls) {
+      if (cls == ApiResponse.class || cls == ResponseEntity.class) {
+        return void.class;
+      }
+    }
+    return type;
   }
 
   /** 单个属性在 wire 上的 TS 投影。 */

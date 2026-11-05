@@ -265,13 +265,7 @@ test.describe('Mutation Review UI Acceptance & Browser Regression', () => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({
-          status: 200,
-          data: {
-            id: 'inv-valid-review',
-            decision: payload?.decision,
-          },
-        }),
+        body: JSON.stringify({ id: 'inv-valid-review', decision: payload?.decision }),
       })
     })
 
@@ -291,7 +285,7 @@ test.describe('Mutation Review UI Acceptance & Browser Regression', () => {
       await expect(approvalPane.getByRole('button', { name: '允许' })).toBeDisabled()
 
       await page.route(`**/api/threads/thread-1/tool-invocations/${invocationId}/approval`, (route) =>
-        route.fulfill({ status: 200, contentType: 'application/json', body: '{"status":200,"data":{}}' }),
+        route.fulfill({ status: 200, contentType: 'application/json', body: '{}' }),
       )
       const submitted = page.waitForRequest((request) =>
         request.url().endsWith(`/tool-invocations/${invocationId}/approval`),

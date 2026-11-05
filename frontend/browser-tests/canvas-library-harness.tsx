@@ -40,14 +40,13 @@ const existingCanvas: CanvasDocumentDTO = {
   updatedAt: '2026-08-10T00:00:00Z',
 }
 
-function envelope(status: number, code: string, data: unknown, message?: string) {
-  return { status, code, message: message ?? code, data }
-}
-
 function jsonResponse(status: number, code: string, data: unknown, message?: string): Response {
-  return new Response(JSON.stringify(envelope(status, code, data, message)), {
+  const problem = status >= 400
+  return new Response(JSON.stringify(problem
+    ? { type: 'about:blank', status, code, title: message ?? code }
+    : data), {
     status,
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': problem ? 'application/problem+json' : 'application/json' },
   })
 }
 
@@ -65,14 +64,14 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Re
   if (method === 'GET' && path === '/api/canvases') {
     if (listFailuresRemaining > 0) {
       listFailuresRemaining -= 1
-      return jsonResponse(500, 'INTERNAL_ERROR', null)
+      return jsonResponse(500, 'internal', null)
     }
     return jsonResponse(200, 'OK', listMode === 'empty' ? [] : [existingCanvas])
   }
 
   if (method === 'POST' && path === '/api/canvases') {
     if (createMode === 'error') {
-      return jsonResponse(409, 'CONFLICT', null, '画布名称已存在')
+      return jsonResponse(409, 'duplicate', null, '画布名称已存在')
     }
     if (createMode === 'pending') {
       return new Promise<Response>(() => undefined)
@@ -87,7 +86,7 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Re
     return jsonResponse(201, 'CREATED', created)
   }
 
-  return jsonResponse(404, 'NOT_FOUND', null)
+  return jsonResponse(404, 'not_found', null)
 }) as typeof window.fetch
 
 export function CanvasLibraryHarnessApp() {

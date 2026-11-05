@@ -1351,9 +1351,8 @@ describe('useBoundBranchPanel', () => {
       .mockResolvedValueOnce(snapshotOf(busy))
       .mockResolvedValue(snapshotOf(fresh))
     vi.mocked(harnessService.acceptThreadCommandBatch)
-      .mockRejectedValueOnce(new ApiError('stale cursor', 409, 'CONFLICT', {
-        reason: 'STALE_COMMAND_CURSOR',
-      }))
+      .mockRejectedValueOnce(new ApiError('stale cursor', 409, 'conflict',
+        undefined, 'STALE_COMMAND_CURSOR'))
       .mockImplementationOnce((threadId, request) =>
         Promise.resolve(
           acceptedResponse(busyThreadFixture(threadId, { version: '6' }), request.commands),

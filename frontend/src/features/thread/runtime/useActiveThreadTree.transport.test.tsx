@@ -1,25 +1,13 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApplicationEventProvider } from '@/shared/app-events'
 import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
 import { SubagentTreePanel } from './SubagentTreePanel'
 import { useActiveThreadTree } from './useActiveThreadTree'
 
-const transport = vi.hoisted(() => vi.fn())
-// 只替换 HTTP adapter：保留真实 Axios JSON 解析、信封解包与 harnessService 调用。
-vi.mock('axios', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('axios')>()
-  return {
-    ...actual,
-    default: {
-      ...actual.default,
-      create: (config: import('axios').CreateAxiosDefaults) =>
-        actual.default.create({ ...config, adapter: transport }),
-    },
-  }
-})
+const transport = vi.fn()
 
 const ROOT = '00000000-0000-4000-8000-000000000001'
 const CHILD = '00000000-0000-4000-8000-000000000002'
@@ -32,9 +20,8 @@ function node(threadId: string, parentThreadId: string | null) {
   }
 }
 function reply(nodes: unknown[]) {
-  transport.mockImplementation(async (config) => ({
-    config, status: 200, statusText: 'OK', headers: { 'content-type': 'application/json' },
-    data: JSON.stringify({ status: 200, code: 'OK', message: '', data: nodes }),
+  transport.mockImplementation(async () => new Response(JSON.stringify(nodes), {
+    headers: { 'Content-Type': 'application/json' },
   }))
 }
 function Panel() {
@@ -54,15 +41,17 @@ function renderPanel() {
 }
 
 describe('execution tree HTTP Instant contract', () => {
-  beforeEach(() => transport.mockReset())
+  beforeEach(() => {
+    transport.mockReset()
+    vi.stubGlobal('fetch', transport)
+  })
+  afterEach(() => vi.unstubAllGlobals())
 
   it('passes JSON epoch seconds through the real service and subscribes to the actual root', async () => {
     reply([node(ROOT, null), node(CHILD, ROOT)])
     const { client, sockets } = renderPanel()
     expect(await screen.findByRole('link', { name: /Explorer/ })).toHaveTextContent('turns: 3 · tools: 5')
-    expect(transport.mock.calls[0][0]).toMatchObject({
-      url: `/threads/${CHILD}/tree`, method: 'get', baseURL: '/api',
-    })
+    expect(transport.mock.calls[0][0]).toBe(`/api/threads/${CHILD}/tree`)
     expect(client.getQueryData(['threads', 'tree', CHILD])).toEqual([node(ROOT, null), node(CHILD, ROOT)])
     const socket = sockets.openLatest()
     await waitFor(() => expect(socket.sentMessages()).toEqual([

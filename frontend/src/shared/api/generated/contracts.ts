@@ -1729,6 +1729,14 @@ export interface ModelDefaultLimitDTO {
   output?: number | null
 }
 
+/** Java：fun.fengwk.kkstudio.common.page.Page */
+export interface Page<T> {
+  pageNumber: number
+  pageSize: number
+  results: T[]
+  totalCount: string
+}
+
 /** Java：fun.fengwk.kkstudio.share.plugin.PluginAuthCompleteRequestDTO */
 export interface PluginAuthCompleteRequestDTO {
   authAttemptId: string
@@ -2350,4 +2358,660 @@ export interface UpdateProjectWorkflowRequestDTO {
 export interface UpdateProjectYoloRequestDTO {
   expectedVersion: string
   yoloEnabled: boolean
+}
+
+export interface ApiRoutes {
+  'DELETE /api/agents/{name}': {
+    path: { name: string }
+    query: { expectedVersion: string }
+    response: void
+  }
+  'DELETE /api/chats/{chatId}': {
+    path: { chatId: string }
+    query: { expectedVersion: string }
+    response: void
+  }
+  'DELETE /api/environments/{environmentId}': {
+    path: { environmentId: string }
+    query: { expectedVersion: string }
+    response: void
+  }
+  'DELETE /api/environments/{environmentId}/ide/views/{viewId}': {
+    path: { environmentId: string; viewId: string }
+    body: EnvironmentIdeCloseViewDTO
+    response: void
+  }
+  'DELETE /api/issues/{issueId}': {
+    path: { issueId: string }
+    query: { expectedVersion: string }
+    response: void
+  }
+  'DELETE /api/mcp-servers/{name}': {
+    path: { name: string }
+    query: { expectedVersion: string }
+    response: void
+  }
+  'DELETE /api/models/{*modelName}': {
+    path: { modelName: string }
+    query: { expectedVersion: string }
+    response: void
+  }
+  'DELETE /api/plugins/{pluginId}/auth': {
+    path: { pluginId: string }
+    response: void
+  }
+  'DELETE /api/projects/{projectId}': {
+    path: { projectId: string }
+    query: { expectedVersion: string }
+    response: void
+  }
+  'DELETE /api/providers/{name}': {
+    path: { name: string }
+    query: { expectedVersion: string }
+    response: void
+  }
+  'DELETE /api/skill-packages/{name}': {
+    path: { name: string }
+    query: { expectedVersion: string }
+    response: void
+  }
+  'DELETE /api/storage/uploads/{uploadId}': {
+    path: { uploadId: string }
+    response: void
+  }
+  'GET /api/agent-tasks/{ticketId}': {
+    path: { ticketId: string }
+    response: AgentTaskDTO
+  }
+  'GET /api/agents': {
+    query: { pageNumber?: number; pageSize?: number }
+    response: Page<AgentDefinitionDTO>
+  }
+  'GET /api/canvas-functions': {
+    response: CanvasFunctionDefinitionDTO[]
+  }
+  'GET /api/canvases': {
+    response: CanvasDocumentDTO[]
+  }
+  'GET /api/canvases/{canvasId}': {
+    path: { canvasId: string }
+    response: CanvasSnapshotDTO
+  }
+  'GET /api/canvases/{canvasId}/nodes/{nodeId}/function-run': {
+    path: { canvasId: string; nodeId: string }
+    response: CanvasFunctionRunDTO
+  }
+  'GET /api/chats': {
+    query: { cursor?: string; limit?: string }
+    response: ChatPageDTO
+  }
+  'GET /api/chats/{chatId}': {
+    path: { chatId: string }
+    response: ChatDTO
+  }
+  'GET /api/chats/{chatId}/sessions': {
+    path: { chatId: string }
+    query: { cursor?: string; limit?: string }
+    response: ChatSessionPageDTO
+  }
+  'GET /api/chats/{chatId}/sessions/{sessionId}': {
+    path: { chatId: string; sessionId: string }
+    response: HarnessSessionSummaryDTO
+  }
+  'GET /api/environments': {
+    response: EnvironmentCardDTO[]
+  }
+  'GET /api/environments/uninstall/{operatingSystem}': {
+    path: { operatingSystem: string }
+    response: string
+    responseType: 'text'
+  }
+  'GET /api/environments/{environmentId}': {
+    path: { environmentId: string }
+    response: EnvironmentCardDTO
+  }
+  'GET /api/environments/{environmentId}/events': {
+    path: { environmentId: string }
+    response: EnvironmentEventDTO[]
+  }
+  'GET /api/environments/{environmentId}/ide/directories': {
+    path: { environmentId: string }
+    query: { path?: string }
+    response: EnvironmentIdeDirectoryListingDTO
+  }
+  'GET /api/environments/{environmentId}/install': {
+    path: { environmentId: string }
+    query: { code: string }
+    response: string
+    responseType: 'text'
+  }
+  'GET /api/environments/{environmentId}/runtime': {
+    path: { environmentId: string }
+    response: EnvironmentRuntimeStatusDTO
+  }
+  'GET /api/interactions': {
+    query: { cursor?: string; limit?: string; rootThreadId?: string }
+    response: InteractionPageDTO
+  }
+  'GET /api/issues/{issueId}': {
+    path: { issueId: string }
+    query: { afterSequence?: string; limit?: string }
+    response: IssueDetailDTO
+  }
+  'GET /api/issues/{issueId}/evidence': {
+    path: { issueId: string }
+    response: IssueEvidenceDTO[]
+  }
+  'GET /api/mcp-servers': {
+    query: { pageNumber?: number; pageSize?: number }
+    response: Page<McpServerDTO>
+  }
+  'GET /api/mcp-servers/{name}': {
+    path: { name: string }
+    response: McpServerDTO
+  }
+  'GET /api/mcp-servers/{name}/config': {
+    path: { name: string }
+    response: McpServerConfigDTO
+  }
+  'GET /api/model-defaults': {
+    query: { cursor?: string; pageSize?: number; query?: string }
+    response: ModelCatalogPageDTO
+  }
+  'GET /api/models': {
+    query: { pageNumber?: number; pageSize?: number }
+    response: Page<AgentModelDTO>
+  }
+  'GET /api/plugins': {
+    response: PluginDTO[]
+  }
+  'GET /api/plugins/{pluginId}': {
+    path: { pluginId: string }
+    response: PluginDTO
+  }
+  'GET /api/projects': {
+    query: { includeArchived?: boolean }
+    response: ProjectDTO[]
+  }
+  'GET /api/projects/{projectId}': {
+    path: { projectId: string }
+    response: ProjectDTO
+  }
+  'GET /api/projects/{projectId}/snapshot': {
+    path: { projectId: string }
+    response: ProjectSnapshotDTO
+  }
+  'GET /api/providers': {
+    query: { pageNumber?: number; pageSize?: number }
+    response: Page<AgentProviderDTO>
+  }
+  'GET /api/providers/{name}/remote-models': {
+    path: { name: string }
+    response: string[]
+  }
+  'GET /api/sessions/{sessionId}/entries': {
+    path: { sessionId: string }
+    query: { cursor?: string; limit?: string }
+    response: HarnessSessionEntryPageDTO
+  }
+  'GET /api/sessions/{sessionId}/entries/{entryId}/provider-request-preview': {
+    path: { entryId: string; sessionId: string }
+    response: HarnessProviderRequestPreviewDTO
+  }
+  'GET /api/sessions/{sessionId}/files': {
+    path: { sessionId: string }
+    query: { ownerId: string; ownerKind: string; path?: string }
+    response: HarnessSessionFileListDTO
+  }
+  'GET /api/sessions/{sessionId}/files/content': {
+    path: { sessionId: string }
+    query: { columnOffset?: number; limit?: number; offset?: number; ownerId: string; ownerKind: string; path: string }
+    response: HarnessSessionFileContentDTO
+  }
+  'GET /api/sessions/{sessionId}/files/download': {
+    path: { sessionId: string }
+    query: { ownerId: string; ownerKind: string; path: string }
+    response: Blob
+    responseType: 'blob'
+  }
+  'GET /api/sessions/{sessionId}/threads': {
+    path: { sessionId: string }
+    response: HarnessThreadSummaryDTO[]
+  }
+  'GET /api/settings': {
+    response: SystemSettingsDTO
+  }
+  'GET /api/settings/schema': {
+    response: SystemSettingsSchemaDTO
+  }
+  'GET /api/settings/sync': {
+    response: ConfigSyncInventoryDTO
+  }
+  'GET /api/skill-packages': {
+    response: SkillPackageSummaryDTO[]
+  }
+  'GET /api/skill-packages/{name}': {
+    path: { name: string }
+    response: SkillPackageDetailDTO
+  }
+  'GET /api/skill-packages/{name}/environments': {
+    path: { name: string }
+    response: SkillEnvironmentSyncDTO[]
+  }
+  'GET /api/skill-packages/{name}/files': {
+    path: { name: string }
+    response: SkillPackageFileDTO[]
+  }
+  'GET /api/threads/{threadId}': {
+    path: { threadId: string }
+    query: { afterEntryId?: string }
+    response: HarnessThreadSnapshotDTO
+  }
+  'GET /api/threads/{threadId}/compaction-availability': {
+    path: { threadId: string }
+    response: HarnessManualCompactionDTO
+  }
+  'GET /api/threads/{threadId}/tree': {
+    path: { threadId: string }
+    response: HarnessThreadTreeNodeDTO[]
+  }
+  'GET /api/tools': {
+    response: ToolCatalogEntryDTO[]
+  }
+  'POST /api/agent-tasks': {
+    body: AgentTaskSubmitDTO
+    response: AgentTaskDTO
+  }
+  'POST /api/agent-tasks/{ticketId}/stop': {
+    path: { ticketId: string }
+    response: AgentTaskDTO
+  }
+  'POST /api/agents': {
+    body: AgentDefinitionCreateDTO
+    response: AgentDefinitionDTO
+  }
+  'POST /api/canvases': {
+    body?: CreateCanvasRequestDTO
+    response: CanvasDocumentDTO
+  }
+  'POST /api/canvases/{canvasId}/commands': {
+    path: { canvasId: string }
+    body?: ApplyCanvasCommandsRequestDTO
+    response: CanvasPatchDTO
+  }
+  'POST /api/canvases/{canvasId}/nodes/{nodeId}/function-run': {
+    path: { canvasId: string; nodeId: string }
+    body: CanvasFunctionRunRequestDTO
+    response: CanvasFunctionRunDTO
+  }
+  'POST /api/canvases/{canvasId}/nodes/{nodeId}/function-run/cancel': {
+    path: { canvasId: string; nodeId: string }
+    body: CanvasFunctionCancelRequestDTO
+    response: CanvasFunctionRunDTO
+  }
+  'POST /api/canvases/{canvasId}/nodes/{nodeId}/function-run/resolve': {
+    path: { canvasId: string; nodeId: string }
+    body: CanvasFunctionUnknownResolutionDTO
+    response: CanvasFunctionRunDTO
+  }
+  'POST /api/canvases/{canvasId}/resources/{resourceId}/download-url': {
+    path: { canvasId: string; resourceId: string }
+    response: CanvasPresignedUrlDTO
+  }
+  'POST /api/canvases/{canvasId}/resources/{resourceId}/preview-url': {
+    path: { canvasId: string; resourceId: string }
+    response: CanvasPresignedUrlDTO
+  }
+  'POST /api/chats': {
+    body?: ChatCreateDTO
+    response: ChatDTO
+  }
+  'POST /api/command-batches': {
+    body: HarnessCommandBatchDTO
+    response: HarnessAcceptedCommandsDTO
+  }
+  'POST /api/environments': {
+    body: EnvironmentCreateDTO
+    response: EnvironmentCardDTO
+  }
+  'POST /api/environments/{environmentId}/ide/views': {
+    path: { environmentId: string }
+    body: EnvironmentIdeOpenViewDTO
+    response: EnvironmentIdeViewDTO
+  }
+  'POST /api/environments/{environmentId}/ide/views/{viewId}/mobile-layout': {
+    path: { environmentId: string; viewId: string }
+    body: EnvironmentIdeViewBindingDTO
+    response: void
+  }
+  'POST /api/environments/{environmentId}/ide/views/{viewId}/terminal': {
+    path: { environmentId: string; viewId: string }
+    body: EnvironmentIdeViewBindingDTO
+    response: void
+  }
+  'POST /api/environments/{environmentId}/install-code': {
+    path: { environmentId: string }
+    body: EnvironmentInstallCodeRequestDTO
+    response: EnvironmentInstallCodeDTO
+  }
+  'POST /api/environments/{environmentId}/registration-token': {
+    path: { environmentId: string }
+    body: EnvironmentRotateTokenDTO
+    response: EnvironmentCardDTO
+  }
+  'POST /api/environments/{environmentId}/skills/resync': {
+    path: { environmentId: string }
+    response: void
+  }
+  'POST /api/environments/{environmentId}/update': {
+    path: { environmentId: string }
+    response: EnvironmentUpdateStartDTO
+  }
+  'POST /api/interactions/{interactionId}/input': {
+    path: { interactionId: string }
+    body: HarnessToolInputDTO
+    response: HarnessToolInputResultDTO
+  }
+  'POST /api/issues/{issueId}/activities': {
+    path: { issueId: string }
+    body: AppendIssueActivityRequestDTO
+    response: IssueActivityDTO
+  }
+  'POST /api/issues/{issueId}/archive': {
+    path: { issueId: string }
+    body: ArchiveIssueRequestDTO
+    response: IssueDTO
+  }
+  'POST /api/issues/{issueId}/block': {
+    path: { issueId: string }
+    body: BlockIssueRequestDTO
+    response: IssueDTO
+  }
+  'POST /api/issues/{issueId}/budget-reset': {
+    path: { issueId: string }
+    body: ResetStageBudgetRequestDTO
+    response: IssueStageBudgetDTO
+  }
+  'POST /api/issues/{issueId}/evidence': {
+    path: { issueId: string }
+    body: AddIssueEvidenceRequestDTO
+    response: IssueEvidenceDTO
+  }
+  'POST /api/issues/{issueId}/recover': {
+    path: { issueId: string }
+    body: RecoverIssueRequestDTO
+    response: IssueDTO
+  }
+  'POST /api/issues/{issueId}/reopen': {
+    path: { issueId: string }
+    body: ReopenIssueRequestDTO
+    response: IssueDTO
+  }
+  'POST /api/issues/{issueId}/resume': {
+    path: { issueId: string }
+    body: ResumeIssueRequestDTO
+    response: IssueDTO
+  }
+  'POST /api/issues/{issueId}/stop': {
+    path: { issueId: string }
+    body: StopIssueRequestDTO
+    response: IssueDTO
+  }
+  'POST /api/issues/{issueId}/transition': {
+    path: { issueId: string }
+    body: TransitionIssueRequestDTO
+    response: IssueDTO
+  }
+  'POST /api/issues/{issueId}/unarchive': {
+    path: { issueId: string }
+    body: UnarchiveIssueRequestDTO
+    response: IssueDTO
+  }
+  'POST /api/mcp-servers': {
+    body: McpServerCreateDTO
+    response: McpServerDTO
+  }
+  'POST /api/mcp-servers/{name}/discover': {
+    path: { name: string }
+    query: { expectedVersion: string }
+    response: McpServerDTO
+  }
+  'POST /api/model-defaults/refresh': {
+    response: ModelCatalogPageDTO
+  }
+  'POST /api/models': {
+    body: AgentModelCreateDTO
+    response: AgentModelDTO
+  }
+  'POST /api/plugins/{pluginId}/auth/complete': {
+    path: { pluginId: string }
+    body: PluginAuthCompleteRequestDTO
+    response: PluginDTO
+  }
+  'POST /api/plugins/{pluginId}/auth/prepare': {
+    path: { pluginId: string }
+    body: PluginAuthPrepareRequestDTO
+    response: PluginAuthPrepareDTO
+  }
+  'POST /api/plugins/{pluginId}/connection-check': {
+    path: { pluginId: string }
+    body: PluginConnectionCheckRequestDTO
+    response: PluginConnectionCheckDTO
+  }
+  'POST /api/projects': {
+    body: CreateProjectRequestDTO
+    response: ProjectDTO
+  }
+  'POST /api/projects/{projectId}/archive': {
+    path: { projectId: string }
+    body: ProjectVersionRequestDTO
+    response: ProjectDTO
+  }
+  'POST /api/projects/{projectId}/issues': {
+    path: { projectId: string }
+    body: CreateIssueRequestDTO
+    response: IssueDTO
+  }
+  'POST /api/projects/{projectId}/unarchive': {
+    path: { projectId: string }
+    body: ProjectVersionRequestDTO
+    response: ProjectDTO
+  }
+  'POST /api/providers': {
+    body: AgentProviderCreateDTO
+    response: AgentProviderDTO
+  }
+  'POST /api/sessions/{sessionId}/provider-request-preview': {
+    path: { sessionId: string }
+    body: HarnessDraftPreviewRequestDTO
+    response: HarnessProviderRequestPreviewDTO
+  }
+  'POST /api/settings/sync/export': {
+    body: ConfigSyncExportRequestDTO
+    response: ConfigSyncExportDTO
+  }
+  'POST /api/settings/sync/import': {
+    body: ConfigSyncImportRequestDTO
+    response: ConfigSyncImportResultDTO
+  }
+  'POST /api/settings/sync/import/check': {
+    body: ConfigSyncImportCheckRequestDTO
+    response: ConfigSyncImportCheckDTO
+  }
+  'POST /api/skill-packages/git': {
+    body: SkillPackageGitCreateDTO
+    response: SkillPackageDetailDTO
+  }
+  'POST /api/skill-packages/git/{name}/check': {
+    path: { name: string }
+    body: SkillPackageCheckDTO
+    response: SkillPackageDetailDTO
+  }
+  'POST /api/skill-packages/git/{name}/publish': {
+    path: { name: string }
+    body: SkillPackageGitPublishDTO
+    response: SkillPackageDetailDTO
+  }
+  'POST /api/skill-packages/uploads/preview': {
+    body: SkillPackageUploadPreviewDTO
+    response: SkillPackagePreviewDTO
+  }
+  'POST /api/skill-packages/uploads/publish': {
+    body: SkillPackageUploadPublishDTO
+    response: SkillPackageDetailDTO
+  }
+  'POST /api/skill-packages/uploads/{stagingUploadId}/cancel': {
+    path: { stagingUploadId: string }
+    response: void
+  }
+  'POST /api/skill-packages/{name}/archive-url': {
+    path: { name: string }
+    response: SkillArchiveDownloadDTO
+  }
+  'POST /api/storage/blobs/{blobId}/download-url': {
+    path: { blobId: string }
+    response: StoragePresignedUrlDTO
+  }
+  'POST /api/storage/blobs/{blobId}/preview-url': {
+    path: { blobId: string }
+    response: StoragePresignedUrlDTO
+  }
+  'POST /api/storage/uploads': {
+    body: StorageUploadReserveRequestDTO
+    response: StorageUploadDTO
+  }
+  'POST /api/storage/uploads/{uploadId}/complete': {
+    path: { uploadId: string }
+    response: StorageUploadDTO
+  }
+  'POST /api/threads/{threadId}/command-batches': {
+    path: { threadId: string }
+    body: HarnessThreadCommandBatchDTO
+    response: HarnessAcceptedCommandsDTO
+  }
+  'POST /api/threads/{threadId}/compact': {
+    path: { threadId: string }
+    body: HarnessThreadCompactDTO
+    response: HarnessThreadCompactResultDTO
+  }
+  'POST /api/threads/{threadId}/executions/{executionId}/abandon': {
+    path: { executionId: string; threadId: string }
+    body: HarnessExecutionAbandonDTO
+    response: HarnessThreadSnapshotDTO
+  }
+  'POST /api/threads/{threadId}/model-request-debug': {
+    path: { threadId: string }
+    body: HarnessModelRequestDebugRequestDTO
+    response: HarnessModelRequestDebugDTO
+  }
+  'POST /api/threads/{threadId}/provider-request-preview': {
+    path: { threadId: string }
+    body: HarnessThreadCommandBatchDTO
+    response: HarnessProviderRequestPreviewDTO
+  }
+  'POST /api/threads/{threadId}/stop': {
+    path: { threadId: string }
+    body: HarnessThreadStopDTO
+    response: HarnessThreadStopResultDTO
+  }
+  'POST /api/threads/{threadId}/stream-catchup': {
+    path: { threadId: string }
+    body: HarnessThreadStreamCatchupDTO
+    response: void
+  }
+  'PUT /api/agents/{name}': {
+    path: { name: string }
+    body: AgentDefinitionUpdateDTO
+    response: AgentDefinitionDTO
+  }
+  'PUT /api/chats/{chatId}': {
+    path: { chatId: string }
+    body: ChatUpdateDTO
+    response: ChatDTO
+  }
+  'PUT /api/environments/{environmentId}/ide/views/{viewId}/directory': {
+    path: { environmentId: string; viewId: string }
+    body: EnvironmentIdeChangeDirectoryDTO
+    response: EnvironmentIdeViewDTO
+  }
+  'PUT /api/environments/{environmentId}/install-config': {
+    path: { environmentId: string }
+    body: Record<string, unknown>
+    response: EnvironmentCardDTO
+  }
+  'PUT /api/issues/{issueId}': {
+    path: { issueId: string }
+    body: UpdateIssueRequestDTO
+    response: IssueDTO
+  }
+  'PUT /api/mcp-servers/{name}': {
+    path: { name: string }
+    body: McpServerUpdateDTO
+    response: McpServerDTO
+  }
+  'PUT /api/models/{*modelName}': {
+    path: { modelName: string }
+    body: AgentModelUpdateDTO
+    response: AgentModelDTO
+  }
+  'PUT /api/plugins/{pluginId}/configuration': {
+    path: { pluginId: string }
+    body: PluginConfigurationUpdateRequestDTO
+    response: PluginDTO
+  }
+  'PUT /api/projects/{projectId}': {
+    path: { projectId: string }
+    body: UpdateProjectRequestDTO
+    response: ProjectDTO
+  }
+  'PUT /api/projects/{projectId}/workflow': {
+    path: { projectId: string }
+    body: UpdateProjectWorkflowRequestDTO
+    response: ProjectDTO
+  }
+  'PUT /api/projects/{projectId}/yolo': {
+    path: { projectId: string }
+    body: UpdateProjectYoloRequestDTO
+    response: ProjectDTO
+  }
+  'PUT /api/providers/{name}': {
+    path: { name: string }
+    body: AgentProviderUpdateDTO
+    response: AgentProviderDTO
+  }
+  'PUT /api/sessions/{sessionId}/name': {
+    path: { sessionId: string }
+    body: HarnessNameUpdateDTO
+    response: HarnessSessionDTO
+  }
+  'PUT /api/settings': {
+    body: SystemSettingsUpdateDTO
+    response: SystemSettingsDTO
+  }
+  'PUT /api/skill-packages/{name}': {
+    path: { name: string }
+    body: SkillPackageEditDTO
+    response: SkillPackageDetailDTO
+  }
+  'PUT /api/threads/{threadId}/name': {
+    path: { threadId: string }
+    body: HarnessNameUpdateDTO
+    response: HarnessThreadDTO
+  }
+  'PUT /api/threads/{threadId}/tool-invocations/{toolInvocationId}/approval': {
+    path: { threadId: string; toolInvocationId: string }
+    body: HarnessToolApprovalDTO
+    response: ToolInvocationDTO
+  }
+  'PUT /api/threads/{threadId}/yolo': {
+    path: { threadId: string }
+    body: HarnessThreadYoloUpdateDTO
+    response: HarnessThreadDTO
+  }
+}
+
+export const API_RESPONSE_TYPES: Partial<Record<keyof ApiRoutes, 'text' | 'blob'>> = {
+  'GET /api/environments/uninstall/{operatingSystem}': 'text',
+  'GET /api/environments/{environmentId}/install': 'text',
+  'GET /api/sessions/{sessionId}/files/download': 'blob',
 }

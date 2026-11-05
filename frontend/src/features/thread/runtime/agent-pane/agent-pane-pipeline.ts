@@ -303,7 +303,7 @@ export function acceptanceConflictReason(error: unknown): string | null {
   if (!isConflictError(error)) {
     return null
   }
-  const reason = error instanceof ApiError ? error.errors?.reason : undefined
+  const reason = error instanceof ApiError ? error.reason : undefined
   return typeof reason === 'string' && reason.trim() ? reason : 'CONFLICT'
 }
 

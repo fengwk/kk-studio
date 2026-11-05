@@ -31,7 +31,8 @@ async function api(page: Page) {
       if (conflict || body.expectedVersion !== card.version) {
         conflict = false
         card = { ...card, version: String(Number(card.version) + 1) }
-        return route.fulfill({ status: 409, json: { status: 409, code: 'CONFLICT', message: 'conflict', errors: { reason: 'stale_version' } } })
+        return route.fulfill({ status: 409, contentType: 'application/problem+json',
+          json: { type: 'about:blank', status: 409, code: 'version_conflict', title: 'conflict' } })
       }
       card = { ...card, installConfig: body.installConfig, version: String(Number(card.version) + 1) }
       return route.fulfill({ json: card })

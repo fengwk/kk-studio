@@ -4,14 +4,20 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.canvas.dto.CanvasConflictDTO;
 import fun.fengwk.kkstudio.canvas.dto.CanvasSnapshotDTO;
+import fun.fengwk.kkstudio.common.page.Page;
+import fun.fengwk.kkstudio.platform.http.ApiResponse;
 import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
 import fun.fengwk.kkstudio.web.generated.fixture.FixtureDTO;
 
@@ -67,6 +73,64 @@ class TsContractGeneratorTest {
     FixtureDTO.Unsupported unsupported() {
       throw new UnsupportedOperationException();
     }
+  }
+
+  @RequestMapping("/api/widgets")
+  static final class RoutesController {
+    @PutMapping("/{*name}")
+    ResponseEntity<ApiResponse<FixtureDTO.View>> update(
+        @PathVariable("name") String name,
+        @RequestParam("version") String version,
+        @RequestParam(value = "limit", defaultValue = "10") int limit,
+        @RequestBody FixtureDTO.Create body) {
+      throw new UnsupportedOperationException();
+    }
+
+    @GetMapping
+    ApiResponse<Page<FixtureDTO.View>> list() {
+      throw new UnsupportedOperationException();
+    }
+
+    @GetMapping(value = "/script", produces = "text/plain")
+    ResponseEntity<String> script() {
+      throw new UnsupportedOperationException();
+    }
+
+    @GetMapping("/download")
+    ResponseEntity<byte[]> download() {
+      throw new UnsupportedOperationException();
+    }
+
+    @PostMapping("/optional")
+    void optional(@RequestBody(required = false) FixtureDTO.Create body) {}
+  }
+
+  /** 路由携带精确参数和解包响应，非 JSON 与可选体可区分。 */
+  @Test
+  void generatesRouteSignatures() {
+    String generated =
+        new TsContractGenerator(
+                StrictHttpJsonMapperTestSupport.get(),
+                List.of(FIXTURE_PACKAGE, "fun.fengwk.kkstudio.common.page"),
+                List.of(RoutesController.class),
+                List.of())
+            .generate();
+    assertContains(
+        generated,
+        """
+          'PUT /api/widgets/{*name}': {
+            path: { name: string }
+            query: { limit?: number; version: string }
+            body: FixtureCreate
+            response: FixtureView
+          }
+        """);
+    assertTrue(generated.contains("response: Page<FixtureView>"));
+    assertTrue(generated.contains("body?: FixtureCreate"));
+    assertTrue(generated.contains("responseType: 'text'"));
+    assertTrue(generated.contains("responseType: 'blob'"));
+    assertTrue(
+        TsContractGenerator.combinePaths("/api", "/items/{id:[0-9]{2}}").equals("/api/items/{id}"));
   }
 
   private static String generate(Class<?> controller) {

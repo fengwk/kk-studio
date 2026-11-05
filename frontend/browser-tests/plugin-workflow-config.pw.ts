@@ -38,7 +38,7 @@ async function transport(page: Page, plugin: PluginDTO = comfyuiPlugin): Promise
   await page.route('**/api/**', async (route) => {
     const path = new URL(route.request().url()).pathname
     if (path === '/api/plugins') {
-      await route.fulfill({ json: { status: 200, data: [plugin] } })
+      await route.fulfill({ json: [plugin] })
       return
     }
     if (path === `/api/plugins/${plugin.pluginId}/configuration` && route.request().method() === 'PUT') {
@@ -46,11 +46,8 @@ async function transport(page: Page, plugin: PluginDTO = comfyuiPlugin): Promise
       recorded.puts.push(body)
       await route.fulfill({
         json: {
-          status: 200,
-          data: {
             ...plugin,
             configuration: { ...plugin.configuration, valuesJson: body.valuesJson as string },
-          },
         },
       })
       return

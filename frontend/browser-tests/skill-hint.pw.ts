@@ -118,15 +118,13 @@ async function installSkillHintApi(
   await page.route((url) => new URL(url).pathname.startsWith('/api/'), async (route: Route) => {
     const path = new URL(route.request().url()).pathname
     if (path === `/api/threads/${ROOT_ID}`) {
-      await route.fulfill({ json: { status: 200, data: snapshot(state.environmentName) } })
+      await route.fulfill({ json: snapshot(state.environmentName) })
       return
     }
     if (path === `/api/threads/${ROOT_ID}/tree`) {
       // 执行树必须包含被绑定的执行根，否则面板按非法树报错；根自身不出活跃行。
       await route.fulfill({
-        json: {
-          status: 200,
-          data: [{
+        json: [{
             threadId: ROOT_ID,
             parentThreadId: null,
             name: '根 Thread',
@@ -139,24 +137,18 @@ async function installSkillHintApi(
             outcome: null,
             updateTime: 1774958400,
           }],
-        },
       })
       return
     }
     if (path === '/api/interactions') {
       await route.fulfill({
-        json: {
-          status: 200,
-          data: { items: [], total: 0, freshnessAt: 1790812800, nextCursor: null },
-        },
+        json: { items: [], total: 0, freshnessAt: 1790812800, nextCursor: null },
       })
       return
     }
     if (path === '/api/environments') {
       await route.fulfill({
-        json: {
-          status: 200,
-          data: [
+        json: [
             {
               id: NAS_ID, name: 'NAS', status: 'READY', ready: true, statusExpiresAt: null,
               lastSeen: 1790812800, capabilities: [], userName: null, homeDirectory: null,
@@ -168,19 +160,18 @@ async function installSkillHintApi(
               version: '1', createTime: 1790812800, updateTime: 1790812800,
             },
           ],
-        },
       })
       return
     }
     const skillMatch = /^\/api\/skill-packages\/([^/]+)\/environments$/.exec(path)
     if (skillMatch != null) {
       const packageName = decodeURIComponent(skillMatch[1]!)
-      await route.fulfill({ json: { status: 200, data: summaries(state, packageName) } })
+      await route.fulfill({ json: summaries(state, packageName) })
       return
     }
     // Agent 定义由基座作为 props 提供；这里只需满足共享查询，不重复注入。
     await route.fulfill({
-      json: { status: 200, data: { pageNumber: 1, pageSize: 50, totalCount: '0', results: [] } },
+      json: { pageNumber: 1, pageSize: 50, totalCount: '0', results: [] },
     })
   })
   return state

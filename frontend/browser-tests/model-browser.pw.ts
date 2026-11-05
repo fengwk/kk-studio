@@ -4,7 +4,6 @@ import {
   FIXTURE_MODELS,
   FIXTURE_PROVIDER,
   pageResult,
-  resultEnvelope,
 } from './model-browser-fixtures'
 
 const HARNESS_URL = '/browser-tests/model-browser-harness.html'
@@ -14,7 +13,7 @@ const VIEWPORTS = [
 ]
 
 /**
- * 浏览器内 API fixture：模型页使用真实 service/axios 路径，但请求全部由测试进程
+ * 浏览器内 API fixture：模型页使用真实 service/fetch 路径，但请求全部由测试进程
  * 以固定数据回应，不连接后端、生产端口或真实模型目录。
  */
 async function installFakeCatalogServer(page: Page): Promise<string[]> {
@@ -29,7 +28,7 @@ async function installFakeCatalogServer(page: Page): Promise<string[]> {
         route.fulfill({
           status: 200,
           contentType: 'application/json',
-          body: JSON.stringify(resultEnvelope(data)),
+          body: JSON.stringify(data),
         })
 
       if (request.method() === 'GET' && path === '/api/providers') {
@@ -46,12 +45,12 @@ async function installFakeCatalogServer(page: Page): Promise<string[]> {
       }
       await route.fulfill({
         status: 404,
-        contentType: 'application/json',
+        contentType: 'application/problem+json',
         body: JSON.stringify({
           status: 404,
-          code: 'NOT_FOUND',
-          message: `Unexpected fixture request: ${request.method()} ${path}`,
-          data: null,
+          type: 'about:blank',
+          code: 'not_found',
+          title: `Unexpected fixture request: ${request.method()} ${path}`,
         }),
       })
     },

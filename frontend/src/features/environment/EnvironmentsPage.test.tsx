@@ -72,10 +72,8 @@ function runtimeStatus(
 }
 
 function runtimeUnavailableError(): ApiError {
-  return new ApiError('environment runtime unavailable', 409, 'environment_unavailable', {
-    resource: 'environment',
-    detail: 'environment runtime snapshot is unavailable; wait for READY or reconnect',
-  })
+  return new ApiError('environment runtime unavailable', 409, 'unavailable', undefined,
+    'ENVIRONMENT_UNAVAILABLE', 'environment runtime snapshot is unavailable; wait for READY or reconnect')
 }
 
 /**
@@ -556,12 +554,12 @@ describe('EnvironmentsPage', () => {
     expect(await within(modal).findByRole('alert')).toHaveTextContent('release artifact fetch failed')
 
     vi.mocked(environmentService.startEnvironmentUpdate).mockRejectedValueOnce(
-      new ApiError('环境忙', 409, 'CONFLICT', { reason: 'environment_busy', detail: 'Active tool call running' }),
+      new ApiError('环境忙', 409, 'conflict', undefined, 'ENVIRONMENT_BUSY', 'Active tool call running'),
     )
     await user.click(confirmBtn)
 
     const conflictModal = await screen.findByRole('alertdialog', { name: '数据已发生变化' })
-    expect(within(conflictModal).getByText(/environment_busy/)).toBeInTheDocument()
+    expect(within(conflictModal).getByText(/ENVIRONMENT_BUSY/)).toBeInTheDocument()
     expect(screen.queryByRole('alertdialog', { name: '更新 Daemon' })).toBeNull()
 
     await user.click(within(conflictModal).getByRole('button', { name: '刷新' }))
@@ -682,12 +680,12 @@ describe('EnvironmentsPage', () => {
 
     // 下一次测试 409 冲突
     vi.mocked(environmentService.rotateToken).mockRejectedValueOnce(
-      new ApiError('冲突', 409, 'CONFLICT', { reason: 'stale_version', detail: 'Token rotation conflict' }),
+      new ApiError('冲突', 409, 'version_conflict', undefined, undefined, 'Token rotation conflict'),
     )
     await user.click(confirmBtn)
 
     const conflictModal = await screen.findByRole('alertdialog', { name: '数据已发生变化' })
-    expect(within(conflictModal).getByText(/stale_version/)).toBeInTheDocument()
+    expect(within(conflictModal).getByText(/version_conflict/)).toBeInTheDocument()
     expect(screen.queryByRole('alertdialog', { name: '重新生成 Token' })).toBeNull()
 
     await user.click(within(conflictModal).getByRole('button', { name: '刷新' }))
@@ -719,7 +717,7 @@ describe('EnvironmentsPage', () => {
 
     // 409 冲突切换到 ConflictPresenter
     vi.mocked(environmentService.deleteEnvironment).mockRejectedValueOnce(
-      new ApiError('版本冲突', 409, 'CONFLICT', { reason: 'version_conflict', detail: 'Already deleted or modified' }),
+      new ApiError('版本冲突', 409, 'version_conflict', undefined, undefined, 'Already deleted or modified'),
     )
     await user.click(confirmBtn)
 
