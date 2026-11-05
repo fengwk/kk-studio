@@ -23,16 +23,8 @@ export function nullableString(value: unknown): string | null | undefined {
   return undefined
 }
 
-export function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value != null && !Array.isArray(value)
-}
-
 export function hasOnlyFields(record: Record<string, unknown>, fields: readonly string[]): boolean {
   return Object.keys(record).every((key) => fields.includes(key))
-}
-
-export function isNonBlankString(value: unknown): value is string {
-  return typeof value === 'string' && value.trim().length > 0
 }
 
 export function toEpochMillis(value: unknown): number | null {
@@ -49,8 +41,4 @@ export function isPositiveInteger(value: unknown): value is number {
 
 export function isNonNegativeInteger(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
-}
-
-export function getString(value: unknown): string {
-  return typeof value === 'string' ? value : ''
 }

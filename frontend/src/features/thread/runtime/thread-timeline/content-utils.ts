@@ -1,4 +1,5 @@
-import { asRecord, getString } from '@/features/thread/runtime/payload-json'
+import { asRecord } from '@/features/thread/runtime/payload-json'
+import { getString } from '@/shared/lib/value'
 import type {
   ToolAttachment,
   ToolAttachmentType,

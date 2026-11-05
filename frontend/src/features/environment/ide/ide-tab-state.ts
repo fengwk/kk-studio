@@ -1,4 +1,10 @@
 import { isCanonicalUuid } from '@/shared/lib/uuid'
+import { hasExactKeys, isRecord, utf8ByteLength } from '@/shared/lib/value'
+import {
+  loadTabSnapshot, resolveTabStorage, serializeTabSnapshot, writeTabSnapshot,
+  TAB_LAST_PREFIX, TAB_SESSION_PREFIX, TAB_STATE_MAX_BYTES,
+  type TabStorage, type TabStorageArea,
+} from '@/shared/lib/tab-storage'
 
 /** 每个浏览器 tab 唯一一份 IDE 呈现状态；新 tab 可继承同 scope 的最后状态。 */
 export interface IdePresentation {
@@ -23,12 +29,8 @@ export interface IdeLastSnapshot {
   presentation: IdePresentation
 }
 
-export type IdeTabStorageArea = Pick<Storage, 'getItem' | 'setItem'>
-
-export interface IdeTabStorage {
-  sessionStorage?: IdeTabStorageArea | null
-  localStorage?: IdeTabStorageArea | null
-}
+export type IdeTabStorageArea = TabStorageArea
+export type IdeTabStorage = TabStorage
 
 export type IdeSnapshotSource = 'session' | 'local' | 'default'
 
@@ -45,9 +47,9 @@ export interface IdeSaveResult {
   localSaved: boolean
 }
 
-export const IDE_TAB_STATE_MAX_BYTES = 64 * 1024
-export const IDE_TAB_SESSION_KEY = 'kk-studio.tab-state:ide'
-export const IDE_TAB_LAST_KEY = 'kk-studio.last-state:ide'
+export const IDE_TAB_STATE_MAX_BYTES = TAB_STATE_MAX_BYTES
+export const IDE_TAB_SESSION_KEY = `${TAB_SESSION_PREFIX}ide`
+export const IDE_TAB_LAST_KEY = `${TAB_LAST_PREFIX}ide`
 export const IDE_RECENT_DIRECTORIES_KEY = 'kk-studio.recent-directories:ide'
 export const IDE_MAX_OPEN_ENVIRONMENTS = 64
 export const IDE_MAX_DIRECTORY_CHARS = 4096
@@ -69,15 +71,6 @@ export function createDefaultIdePresentation(): IdePresentation {
     selectedEnvironmentId: null,
     openedEnvironmentIds: [],
   }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
-}
-
-function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
-  const keys = Object.keys(value)
-  return keys.length === expected.length && keys.every((key) => expected.includes(key))
 }
 
 function parsePresentation(value: unknown): IdePresentation | null {
@@ -155,41 +148,23 @@ function parseRecoveryMap(
   return recovery
 }
 
-function utf8ByteLength(value: string): number {
-  return new TextEncoder().encode(value).length
-}
-
 function parseSnapshot(
-  raw: string | null,
+  value: unknown,
   kind: 'session' | 'local',
 ): { presentation: IdePresentation; recoveryByEnvironment: Record<string, IdeRecovery> } | null {
-  if (raw == null || utf8ByteLength(raw) > IDE_TAB_STATE_MAX_BYTES) {
+  if (!isRecord(value)) {
     return null
   }
-  try {
-    const value: unknown = JSON.parse(raw)
-    if (!isRecord(value)) {
-      return null
-    }
-    if (kind === 'local') {
-      if (!hasExactKeys(value, ['presentation'])) {
-        return null
-      }
-      const presentation = parsePresentation(value.presentation)
-      return presentation == null ? null : { presentation, recoveryByEnvironment: {} }
-    }
-    if (!hasExactKeys(value, ['presentation', 'recoveryByEnvironment'])) {
-      return null
-    }
+  if (kind === 'local') {
+    if (!hasExactKeys(value, ['presentation'])) return null
     const presentation = parsePresentation(value.presentation)
-    if (presentation == null) {
-      return null
-    }
-    const recoveryByEnvironment = parseRecoveryMap(value.recoveryByEnvironment, presentation)
-    return recoveryByEnvironment == null ? null : { presentation, recoveryByEnvironment }
-  } catch {
-    return null
+    return presentation == null ? null : { presentation, recoveryByEnvironment: {} }
   }
+  if (!hasExactKeys(value, ['presentation', 'recoveryByEnvironment'])) return null
+  const presentation = parsePresentation(value.presentation)
+  if (presentation == null) return null
+  const recoveryByEnvironment = parseRecoveryMap(value.recoveryByEnvironment, presentation)
+  return recoveryByEnvironment == null ? null : { presentation, recoveryByEnvironment }
 }
 
 function serializeSession(
@@ -200,76 +175,14 @@ function serializeSession(
     presentation,
     recoveryByEnvironment,
   }
-  const serialized = JSON.stringify(snapshot)
-  if (
-    parseSnapshot(serialized, 'session') == null
-    || utf8ByteLength(serialized) > IDE_TAB_STATE_MAX_BYTES
-  ) {
-    return null
-  }
-  return serialized
+  return serializeTabSnapshot(snapshot, (value) => parseSnapshot(value, 'session'))
 }
 
 function serializeLocal(presentation: IdePresentation): string | null {
   const snapshot: IdeLastSnapshot = {
     presentation,
   }
-  const serialized = JSON.stringify(snapshot)
-  if (
-    parseSnapshot(serialized, 'local') == null
-    || utf8ByteLength(serialized) > IDE_TAB_STATE_MAX_BYTES
-  ) {
-    return null
-  }
-  return serialized
-}
-
-function resolveGlobalStorage(kind: 'sessionStorage' | 'localStorage'): IdeTabStorageArea | null {
-  try {
-    return globalThis[kind] ?? null
-  } catch {
-    return null
-  }
-}
-
-function resolveStorage(storage?: IdeTabStorage): {
-  session: IdeTabStorageArea | null
-  local: IdeTabStorageArea | null
-} {
-  const session = storage?.sessionStorage === undefined
-    ? resolveGlobalStorage('sessionStorage')
-    : storage.sessionStorage
-  const local = storage?.localStorage === undefined
-    ? resolveGlobalStorage('localStorage')
-    : storage.localStorage
-  return { session: session ?? null, local: local ?? null }
-}
-
-function readSnapshot(
-  storage: IdeTabStorageArea | null,
-  key: string,
-  kind: 'session' | 'local',
-): { presentation: IdePresentation; recoveryByEnvironment: Record<string, IdeRecovery> } | null {
-  if (storage == null) {
-    return null
-  }
-  try {
-    return parseSnapshot(storage.getItem(key), kind)
-  } catch {
-    return null
-  }
-}
-
-function writeSnapshot(storage: IdeTabStorageArea | null, key: string, value: string | null): boolean {
-  if (storage == null || value == null) {
-    return false
-  }
-  try {
-    storage.setItem(key, value)
-    return true
-  } catch {
-    return false
-  }
+  return serializeTabSnapshot(snapshot, (value) => parseSnapshot(value, 'local'))
 }
 
 /**
@@ -280,20 +193,16 @@ function writeSnapshot(storage: IdeTabStorageArea | null, key: string, value: st
  * viewId、epoch 或任何运行身份。
  */
 export function initializeIdeTabState(storage?: IdeTabStorage): IdeTabLoadResult {
-  const { session, local } = resolveStorage(storage)
-  const sessionSnapshot = readSnapshot(session, IDE_TAB_SESSION_KEY, 'session')
-  const localSnapshot = sessionSnapshot == null
-    ? readSnapshot(local, IDE_TAB_LAST_KEY, 'local')
-    : null
-  const source: IdeSnapshotSource = sessionSnapshot != null
-    ? 'session'
-    : localSnapshot != null ? 'local' : 'default'
-  const presentation = sessionSnapshot?.presentation
-    ?? localSnapshot?.presentation
-    ?? createDefaultIdePresentation()
-  const recoveryByEnvironment = sessionSnapshot?.recoveryByEnvironment ?? {}
-  const sessionSaved = writeSnapshot(
-    session,
+  const stores = resolveTabStorage(storage)
+  const { value, source } = loadTabSnapshot(
+    stores, IDE_TAB_SESSION_KEY, IDE_TAB_LAST_KEY,
+    (snapshot) => parseSnapshot(snapshot, 'session'),
+    (snapshot) => parseSnapshot(snapshot, 'local'),
+  )
+  const presentation = value?.presentation ?? createDefaultIdePresentation()
+  const recoveryByEnvironment = value?.recoveryByEnvironment ?? {}
+  const sessionSaved = writeTabSnapshot(
+    stores.session,
     IDE_TAB_SESSION_KEY,
     serializeSession(presentation, recoveryByEnvironment),
   )
@@ -306,14 +215,14 @@ export function saveIdePresentation(
   recoveryByEnvironment: Record<string, IdeRecovery>,
   storage?: IdeTabStorage,
 ): IdeSaveResult {
-  const { session, local } = resolveStorage(storage)
+  const { session, local } = resolveTabStorage(storage)
   return {
-    sessionSaved: writeSnapshot(
+    sessionSaved: writeTabSnapshot(
       session,
       IDE_TAB_SESSION_KEY,
       serializeSession(presentation, recoveryByEnvironment),
     ),
-    localSaved: writeSnapshot(local, IDE_TAB_LAST_KEY, serializeLocal(presentation)),
+    localSaved: writeTabSnapshot(local, IDE_TAB_LAST_KEY, serializeLocal(presentation)),
   }
 }
 
@@ -323,8 +232,8 @@ export function saveIdeSession(
   recoveryByEnvironment: Record<string, IdeRecovery>,
   storage?: IdeTabStorage,
 ): boolean {
-  const { session } = resolveStorage(storage)
-  return writeSnapshot(
+  const { session } = resolveTabStorage(storage)
+  return writeTabSnapshot(
     session,
     IDE_TAB_SESSION_KEY,
     serializeSession(presentation, recoveryByEnvironment),
@@ -384,7 +293,7 @@ export function readRecentDirectories(environmentId: string, storage?: IdeTabSto
   if (!isCanonicalUuid(environmentId)) {
     return []
   }
-  const { local } = resolveStorage(storage)
+  const { local } = resolveTabStorage(storage)
   if (local == null) {
     return []
   }
@@ -407,7 +316,7 @@ export function recordRecentDirectory(
   if (!isCanonicalUuid(environmentId) || !isDirectoryPath(directory)) {
     return readRecentDirectories(environmentId, storage)
   }
-  const { local } = resolveStorage(storage)
+  const { local } = resolveTabStorage(storage)
   let byEnvironment: Record<string, string[]>
   try {
     byEnvironment = parseRecentDirectories(local?.getItem(IDE_RECENT_DIRECTORIES_KEY) ?? null)

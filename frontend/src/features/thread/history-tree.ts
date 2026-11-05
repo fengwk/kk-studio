@@ -1,4 +1,5 @@
-import { asRecord, getRecordList, getString, parsePayload } from '@/features/thread/runtime/payload-json'
+import { asRecord, getRecordList, parsePayload } from '@/features/thread/runtime/payload-json'
+import { getString } from '@/shared/lib/value'
 import { FORK_NOTICE_TEXT } from '@/features/thread/runtime/thread-timeline/entry-event-projection'
 import { translate } from '@/shared/i18n'
 import type { HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'

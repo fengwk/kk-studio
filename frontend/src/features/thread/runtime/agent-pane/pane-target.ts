@@ -2,6 +2,7 @@ import type { ComposerPart } from '@/features/thread/composer/composer-parts'
 import type { BranchDraft } from '@/features/thread/branch-draft'
 import type { PendingAcceptance } from '@/features/thread/runtime/pending-request-store'
 import { isCanonicalThreadName } from '@/features/thread/thread-name'
+import { hasExactKeys, isRecord, nonBlank } from '@/shared/lib/value'
 import type {
   AgentCommandTargetDTO,
   AgentRuntimeOwnerDTO,
@@ -26,19 +27,6 @@ export type PaneTargetKind = PaneTarget['kind']
 
 export function ownerIdentity(owner: AgentRuntimeOwnerDTO): string {
   return `${encodeURIComponent(owner.kind)}:${encodeURIComponent(owner.id)}`
-}
-
-export function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
-}
-
-export function nonBlank(value: unknown): value is string {
-  return typeof value === 'string' && value.trim().length > 0
-}
-
-function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
-  const keys = Object.keys(value)
-  return keys.length === expected.length && keys.every((key) => expected.includes(key))
 }
 
 function isEnvironmentName(value: unknown): value is string | null {

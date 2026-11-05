@@ -4,6 +4,12 @@ import {
   samePaneTarget,
   type PaneTarget,
 } from '@/features/thread/runtime/agent-pane/pane-target'
+import { hasExactKeys, isRecord } from '@/shared/lib/value'
+import {
+  loadTabSnapshot, resolveTabStorage, serializeTabSnapshot, writeTabSnapshot,
+  TAB_LAST_PREFIX, TAB_SESSION_PREFIX, TAB_STATE_MAX_BYTES,
+  type TabStorage, type TabStorageArea,
+} from '@/shared/lib/tab-storage'
 
 export type ChatLayout =
   | 'single'
@@ -38,16 +44,12 @@ export interface ChatPaneLoadResult {
   saved: boolean
 }
 
-export type ChatTabStorageArea = Pick<Storage, 'getItem' | 'setItem'>
+export type ChatTabStorageArea = TabStorageArea
+export type ChatTabStorage = TabStorage
 
-export interface ChatTabStorage {
-  sessionStorage?: ChatTabStorageArea | null
-  localStorage?: ChatTabStorageArea | null
-}
-
-export const CHAT_TAB_STATE_MAX_BYTES = 64 * 1024
-export const CHAT_TAB_SESSION_PREFIX = 'kk-studio.tab-state:'
-export const CHAT_TAB_LAST_PREFIX = 'kk-studio.last-state:'
+export const CHAT_TAB_STATE_MAX_BYTES = TAB_STATE_MAX_BYTES
+export const CHAT_TAB_SESSION_PREFIX = TAB_SESSION_PREFIX
+export const CHAT_TAB_LAST_PREFIX = TAB_LAST_PREFIX
 
 export const CHAT_LAYOUT_CAPACITY: Record<ChatLayout, number> = {
   single: 1,
@@ -90,15 +92,6 @@ export function createDefaultChatPaneState(layout: ChatLayout = 'single'): ChatP
     focusedPaneId: panes[0]?.id ?? 'pane-1',
     panes,
   }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
-}
-
-function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
-  const keys = Object.keys(value)
-  return keys.length === expected.length && keys.every((key) => expected.includes(key))
 }
 
 function isChatLayout(value: unknown): value is ChatLayout {
@@ -154,10 +147,6 @@ export function parseChatPaneState(value: unknown): ChatPaneState | null {
   }
 }
 
-function utf8ByteLength(value: string): number {
-  return new TextEncoder().encode(value).length
-}
-
 function serializeChatTabSnapshot(state: ChatPaneState): string | null {
   const parsed = parseChatPaneState(state)
   if (parsed == null) {
@@ -166,74 +155,14 @@ function serializeChatTabSnapshot(state: ChatPaneState): string | null {
   const snapshot: ChatTabSnapshot = {
     presentation: parsed,
   }
-  const serialized = JSON.stringify(snapshot)
-  return utf8ByteLength(serialized) <= CHAT_TAB_STATE_MAX_BYTES ? serialized : null
+  return serializeTabSnapshot(snapshot, parseChatTabSnapshot)
 }
 
-function parseChatTabSnapshot(raw: string | null): ChatPaneState | null {
-  if (raw == null || utf8ByteLength(raw) > CHAT_TAB_STATE_MAX_BYTES) {
+function parseChatTabSnapshot(value: unknown): ChatPaneState | null {
+  if (!isRecord(value) || !hasExactKeys(value, ['presentation'])) {
     return null
   }
-  try {
-    const value: unknown = JSON.parse(raw)
-    if (
-      !isRecord(value)
-      || !hasExactKeys(value, ['presentation'])
-    ) {
-      return null
-    }
-    return parseChatPaneState(value.presentation)
-  } catch {
-    return null
-  }
-}
-
-function resolveGlobalStorage(kind: 'sessionStorage' | 'localStorage'): ChatTabStorageArea | null {
-  try {
-    return globalThis[kind] ?? null
-  } catch {
-    return null
-  }
-}
-
-function resolveStorage(storage?: ChatTabStorage): {
-  session: ChatTabStorageArea | null
-  local: ChatTabStorageArea | null
-} {
-  const session = storage?.sessionStorage === undefined
-    ? resolveGlobalStorage('sessionStorage')
-    : storage.sessionStorage
-  const local = storage?.localStorage === undefined
-    ? resolveGlobalStorage('localStorage')
-    : storage.localStorage
-  return { session: session ?? null, local: local ?? null }
-}
-
-function readSnapshot(storage: ChatTabStorageArea | null, key: string): ChatPaneState | null {
-  if (storage == null) {
-    return null
-  }
-  try {
-    return parseChatTabSnapshot(storage.getItem(key))
-  } catch {
-    return null
-  }
-}
-
-function writeSnapshot(
-  storage: ChatTabStorageArea | null,
-  key: string,
-  snapshot: string,
-): boolean {
-  if (storage == null) {
-    return false
-  }
-  try {
-    storage.setItem(key, snapshot)
-    return true
-  } catch {
-    return false
-  }
+  return parseChatPaneState(value.presentation)
 }
 
 /**
@@ -247,14 +176,13 @@ export function loadChatPaneState(
   if (!chatId) {
     return { state: createDefaultChatPaneState(), saved: false }
   }
-  const { session, local } = resolveStorage(storage)
+  const stores = resolveTabStorage(storage)
   const sessionKey = chatTabSessionStorageKey(chatId)
   const lastKey = chatTabLastStorageKey(chatId)
-  const state = readSnapshot(session, sessionKey)
-    ?? readSnapshot(local, lastKey)
+  const state = loadTabSnapshot(stores, sessionKey, lastKey, parseChatTabSnapshot, parseChatTabSnapshot).value
     ?? createDefaultChatPaneState()
   const snapshot = serializeChatTabSnapshot(state)
-  const saved = snapshot == null ? false : writeSnapshot(session, sessionKey, snapshot)
+  const saved = writeTabSnapshot(stores.session, sessionKey, snapshot)
   return { state, saved }
 }
 
@@ -274,9 +202,9 @@ export function saveChatPaneState(
   if (snapshot == null) {
     return false
   }
-  const { session, local } = resolveStorage(storage)
-  const sessionSaved = writeSnapshot(session, chatTabSessionStorageKey(chatId), snapshot)
-  const localSaved = writeSnapshot(local, chatTabLastStorageKey(chatId), snapshot)
+  const { session, local } = resolveTabStorage(storage)
+  const sessionSaved = writeTabSnapshot(session, chatTabSessionStorageKey(chatId), snapshot)
+  const localSaved = writeTabSnapshot(local, chatTabLastStorageKey(chatId), snapshot)
   return sessionSaved && localSaved
 }
 

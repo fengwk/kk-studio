@@ -1,4 +1,5 @@
-import { asRecord, getString, parsePayload } from '@/features/thread/runtime/payload-json'
+import { asRecord, parsePayload } from '@/features/thread/runtime/payload-json'
+import { getString } from '@/shared/lib/value'
 import {
   accumulateTurnUsage,
   parseAssistantUsage,

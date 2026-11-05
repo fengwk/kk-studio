@@ -6,12 +6,12 @@ import type { AgentRuntimeOwnerDTO } from '@/shared/api/contracts/ai-runtime'
 import type { BranchDraft } from '@/features/thread/branch-draft'
 import type { ComposerPart } from '@/features/thread/composer/composer-parts'
 import type { PaneTarget } from '@/features/thread/runtime/agent-pane/pane-target'
+import { hasExactKeys, isRecord, nonBlank } from '@/shared/lib/value'
 import {
   isBranchDraft,
   isComposerPart,
   isPendingAcceptanceValue,
   isThreadCommandBatchRequest,
-  nonBlank,
   ownerIdentity,
   samePaneTarget,
 } from '@/features/thread/runtime/agent-pane/pane-target'
@@ -76,15 +76,6 @@ function resolveStorage(
     return null
   }
   return null
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
-}
-
-function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
-  const ownKeys = Object.keys(value)
-  return ownKeys.length === keys.length && keys.every((key) => ownKeys.includes(key))
 }
 
 export { isPendingAcceptanceValue }
