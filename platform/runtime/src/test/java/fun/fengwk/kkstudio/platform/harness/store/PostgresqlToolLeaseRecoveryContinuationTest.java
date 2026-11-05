@@ -620,7 +620,7 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
     }
 
     @Override
-    public PreflightResult preflight(ToolInvocationRequest request) {
+    public PreflightResult preflight(ToolInvocationRequest request, ExecutionScope scope) {
       return new ToolGateway.Allow();
     }
 

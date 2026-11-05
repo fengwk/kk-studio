@@ -109,8 +109,14 @@ public class StudioSessionFileController {
     return new ResponseStatusException(HttpStatus.NOT_FOUND, error.getMessage(), error);
   }
 
+  /** owner 参数格式非法（空白等）与越权不可区分：统一返回 404 而不是 500。 */
   private static SessionOwner owner(String ownerKind, String ownerId) {
-    return new SessionOwner(ownerKind, ownerId);
+    try {
+      return new SessionOwner(ownerKind, ownerId);
+    } catch (IllegalArgumentException malformedOwner) {
+      throw new ResponseStatusException(
+          HttpStatus.NOT_FOUND, "session is not owned by the given owner", malformedOwner);
+    }
   }
 
   private static UUID id(String value) {

@@ -1122,7 +1122,7 @@ public final class ToolProcessorTestSupport {
     }
 
     @Override
-    public PreflightResult preflight(ToolInvocationRequest request) {
+    public PreflightResult preflight(ToolInvocationRequest request, ExecutionScope scope) {
       preflightCallsCount++;
       PreflightCall call = new PreflightCall(request);
       preflightCalls.add(call);

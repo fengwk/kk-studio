@@ -8,6 +8,7 @@ import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.api.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.api.tool.ToolApproval;
 import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
+import fun.fengwk.kkstudio.harness.api.tool.ToolEditReview;
 import fun.fengwk.kkstudio.harness.contributor.api.BranchView;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorDescriptor;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
@@ -31,6 +32,7 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityS
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTerminationCause;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTransport;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityUnavailableException;
+import fun.fengwk.kkstudio.harness.environment.capability.ExpectedFile;
 import fun.fengwk.kkstudio.harness.spi.ToolGateway;
 import fun.fengwk.kkstudio.harness.spi.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
@@ -44,6 +46,7 @@ import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.catalog.tool.TestRuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.harness.admission.ConcurrencyAdmission;
 import fun.fengwk.kkstudio.platform.harness.tool.BuiltinFileToolsTestSupport;
+import fun.fengwk.kkstudio.platform.harness.tool.VfsEditReviewSourceStub;
 import fun.fengwk.kkstudio.platform.harness.tool.permission.BashSurfaceAnalyzer;
 import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionAction;
 import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionEvaluator;
@@ -51,6 +54,7 @@ import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionRule;
 import fun.fengwk.kkstudio.platform.harness.tool.permission.ToolSettings;
 import fun.fengwk.kkstudio.platform.harness.tool.permission.ToolSettingsProvider;
 import fun.fengwk.kkstudio.platform.testing.TestEnvironments;
+import fun.fengwk.kkstudio.platform.vfs.VfsEditReviewSource;
 
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -223,9 +227,19 @@ final class ToolGatewayTestSupport {
       HarnessCatalog catalog,
       PermissionEvaluator evaluator,
       ToolSettingsProvider settingsProvider) {
+    return gatewayWith(catalog, evaluator, settingsProvider, VfsEditReviewSourceStub.INSTANCE);
+  }
+
+  /** 可注入 VFS 编辑预览来源的网关装配：审批预览测试使用。 */
+  static ToolExecutionGateway gatewayWith(
+      HarnessCatalog catalog,
+      PermissionEvaluator evaluator,
+      ToolSettingsProvider settingsProvider,
+      VfsEditReviewSource vfsEditReviewSource) {
     return new ToolExecutionGateway(
         TestRuntimeToolCatalogSource.of(catalog),
         new FakeTransport(),
+        vfsEditReviewSource,
         evaluator,
         settingsProvider,
         new FakeResourceStager(),
@@ -233,6 +247,73 @@ final class ToolGatewayTestSupport {
         OVERLOAD_RETRY_DELAY,
         TEST_CLOCK,
         new ConcurrencyAdmission(Integer.MAX_VALUE));
+  }
+
+  /** 显式传入预览来源的标准网关装配。 */
+  static ToolExecutionGateway gateway(
+      HarnessCatalog catalog,
+      FakeTransport transport,
+      FakeResourceStager store,
+      VfsEditReviewSource vfsEditReviewSource) {
+    return new ToolExecutionGateway(
+        TestRuntimeToolCatalogSource.of(catalog),
+        transport,
+        vfsEditReviewSource,
+        new PermissionEvaluator(new BashSurfaceAnalyzer()),
+        new FixedToolSettingsProvider(settings(PermissionAction.ALLOW)),
+        store,
+        RESOURCE_MAX_BYTES,
+        OVERLOAD_RETRY_DELAY,
+        TEST_CLOCK,
+        new ConcurrencyAdmission(Integer.MAX_VALUE));
+  }
+
+  /** vfs: 编辑请求：真实 FileTool edit binding，参数带完整会话路径。 */
+  static ToolInvocationRequest vfsEditRequest(String callId, String path) {
+    HarnessCatalog catalog = defaultCatalog();
+    ToolContribution edit = catalog.findTool("edit").orElseThrow();
+    return new ToolInvocationRequest(
+        new ToolCall(
+            callId,
+            "edit",
+            "{\"path\":\"" + path + "\",\"old_string\":\"old\",\"new_string\":\"new\"}"),
+        new ToolBinding(
+            edit.definition(),
+            new ContributorBinding(
+                edit.id().contributorId().value(), edit.id().localName(), List.of()),
+            EnvironmentSupport.ROUTED,
+            null,
+            null));
+  }
+
+  /** 可编程的 VFS 编辑预览来源：记录快照校验，可注入预览或校验失败。 */
+  static final class FakeVfsEditReviewSource implements VfsEditReviewSource {
+
+    ToolEditReview review;
+    RuntimeException prepareFailure;
+    RuntimeException verifyFailure;
+    final List<ExpectedFile> verified = new ArrayList<>();
+    final List<UUID> verifiedRootSessions = new ArrayList<>();
+    final List<UUID> verifiedRootThreads = new ArrayList<>();
+
+    @Override
+    public ToolEditReview prepare(
+        ToolInvocationRequest request, UUID rootSessionId, UUID rootThreadId) {
+      if (prepareFailure != null) {
+        throw prepareFailure;
+      }
+      return review;
+    }
+
+    @Override
+    public void verifySnapshot(UUID rootSessionId, UUID rootThreadId, ExpectedFile expectedFile) {
+      verifiedRootSessions.add(rootSessionId);
+      verifiedRootThreads.add(rootThreadId);
+      verified.add(expectedFile);
+      if (verifyFailure != null) {
+        throw verifyFailure;
+      }
+    }
   }
 
   static ToolExecutionGateway gateway(
@@ -295,6 +376,7 @@ final class ToolGatewayTestSupport {
     return new ToolExecutionGateway(
         TestRuntimeToolCatalogSource.of(catalog),
         transport,
+        VfsEditReviewSourceStub.INSTANCE,
         new PermissionEvaluator(new BashSurfaceAnalyzer()),
         new FixedToolSettingsProvider(settings(PermissionAction.ALLOW)),
         store,
@@ -314,6 +396,7 @@ final class ToolGatewayTestSupport {
     return new ToolExecutionGateway(
         toolCatalogSource,
         transport,
+        VfsEditReviewSourceStub.INSTANCE,
         new PermissionEvaluator(new BashSurfaceAnalyzer()),
         new FixedToolSettingsProvider(settings),
         store,

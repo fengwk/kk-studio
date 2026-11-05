@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.platform.vfs;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -62,6 +63,30 @@ class VfsPathTest {
     assertTrue(skill.isUnderSkillsRoot());
   }
 
+  /** 只读目录层级同样可解析：包目录与技能目录都能用于列目录，文件层级仍带完整坐标。 */
+  @Test
+  void parsesSkillPackageAndSkillDirectories() {
+    VfsPath packageDir = VfsPath.parse("vfs:/skills/dev-tools/");
+    assertEquals(Kind.SKILLS_PACKAGE, packageDir.kind());
+    assertEquals("dev-tools", packageDir.skillPackage());
+    assertNull(packageDir.skillName());
+    assertTrue(packageDir.isReadOnly());
+    assertTrue(packageDir.isUnderSkillsRoot());
+    assertEquals("vfs:/skills/dev-tools", packageDir.normalizedPath());
+
+    VfsPath skillDir = VfsPath.parse("vfs:/skills/dev-tools/review");
+    assertEquals(Kind.SKILLS_SKILL, skillDir.kind());
+    assertEquals("dev-tools", skillDir.skillPackage());
+    assertEquals("review", skillDir.skillName());
+    assertNull(skillDir.skillRelativePath());
+    assertTrue(skillDir.isReadOnly());
+
+    assertThrows(
+        IllegalArgumentException.class, () -> VfsPath.parse("vfs:/skills/dev-tools//review"));
+    assertThrows(
+        IllegalArgumentException.class, () -> VfsPath.parse("vfs:/skills//review/SKILL.md"));
+  }
+
   @Test
   void extractsThreadScopeForThreadDirectories() {
     String threadId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
@@ -94,5 +119,18 @@ class VfsPathTest {
         () -> VfsPath.parse("vfs:/sessions/" + hexSessionId.toUpperCase()));
     assertThrows(IllegalArgumentException.class, () -> VfsPath.parse("vfs:/unknown/x"));
     assertThrows(IllegalArgumentException.class, () -> VfsPath.parse("vfs:/resources/not-a-uuid"));
+    // C0（含 TAB）、DEL 与 C1 不可见控制字符一律在解析期拒绝，避免显示与写入不一致。
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> VfsPath.parse("vfs:/sessions/" + SESSION_ID + "/a\u0000b"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> VfsPath.parse("vfs:/sessions/" + SESSION_ID + "/a\u0009b"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> VfsPath.parse("vfs:/skills/dev\u007f/review/SKILL.md"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> VfsPath.parse("vfs:/skills/dev\u0085/review/SKILL.md"));
   }
 }

@@ -15,6 +15,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.TestPropertySource;
+import org.springframework.transaction.PlatformTransactionManager;
 
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.platform.storage.error.SessionFileConflictException;
@@ -22,10 +23,14 @@ import fun.fengwk.kkstudio.platform.storage.model.SessionFile;
 import fun.fengwk.kkstudio.platform.storage.persistence.SessionFileRepository;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageBlobRepository;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
+import fun.fengwk.kkstudio.platform.storage.service.SessionFileLimits;
 import fun.fengwk.kkstudio.platform.storage.service.SessionFileStore;
+import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
+import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobState;
 
+import java.time.Clock;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -59,6 +64,10 @@ class SessionFileStoreIntegrationTest extends PostgresSpringTestSupport {
   @Autowired private SessionBlobRefManager refManager;
   @Autowired private InMemoryS3StorageService s3Storage;
   @Autowired private JdbcTemplate jdbc;
+  @Autowired private StorageUploadService uploadService;
+  @Autowired private StorageBlobContentService blobContentService;
+  @Autowired private Clock clock;
+  @Autowired private PlatformTransactionManager transactionManager;
 
   @BeforeEach
   void setUp() {
@@ -244,6 +253,95 @@ class SessionFileStoreIntegrationTest extends PostgresSpringTestSupport {
     assertTrue(totalLimitError.getMessage().contains("session total size limit reached"));
   }
 
+  /** 并发写共享文件数配额时，事务内 advisory lock 必须保证落库文件数不超过上限。 */
+  @Test
+  void concurrentWritersCannotExceedTheFileQuota() throws Exception {
+    SessionFileStore limited = limitedStore(new SessionFileLimits(3, 1024, 64 * 1024));
+    int threadCount = 8;
+    ExecutorService executor = Executors.newFixedThreadPool(threadCount);
+    CountDownLatch startGate = new CountDownLatch(1);
+    AtomicInteger successes = new AtomicInteger(0);
+    AtomicInteger quotaFailures = new AtomicInteger(0);
+
+    List<Future<Void>> futures = new ArrayList<>();
+    for (int i = 0; i < threadCount; i++) {
+      final int writerId = i;
+      futures.add(
+          executor.submit(
+              () -> {
+                startGate.await();
+                try {
+                  limited.write(SESSION_A, "quota/" + writerId + ".txt", "x".getBytes(UTF_8), null);
+                  successes.incrementAndGet();
+                } catch (IllegalStateException quotaExceeded) {
+                  quotaFailures.incrementAndGet();
+                }
+                return null;
+              }));
+    }
+
+    startGate.countDown();
+    for (Future<Void> future : futures) {
+      future.get(20, TimeUnit.SECONDS);
+    }
+    executor.shutdown();
+
+    assertEquals(3, successes.get(), "only the quota allows three files");
+    assertEquals(threadCount - 3, quotaFailures.get(), "every extra writer must be refused");
+    assertEquals(3L, sessionFileRepository.countBySession(SESSION_A));
+  }
+
+  /** 并发写共享总大小配额时，事务内 advisory lock 必须保证总字节数不超过上限。 */
+  @Test
+  void concurrentWritersCannotExceedTheTotalSizeQuota() throws Exception {
+    SessionFileStore limited = limitedStore(new SessionFileLimits(100, 64, 64));
+    byte[] payload = new byte[16];
+    int threadCount = 8;
+    ExecutorService executor = Executors.newFixedThreadPool(threadCount);
+    CountDownLatch startGate = new CountDownLatch(1);
+    AtomicInteger successes = new AtomicInteger(0);
+    AtomicInteger quotaFailures = new AtomicInteger(0);
+
+    List<Future<Void>> futures = new ArrayList<>();
+    for (int i = 0; i < threadCount; i++) {
+      final int writerId = i;
+      futures.add(
+          executor.submit(
+              () -> {
+                startGate.await();
+                try {
+                  limited.write(SESSION_A, "size/" + writerId + ".bin", payload, null);
+                  successes.incrementAndGet();
+                } catch (IllegalStateException quotaExceeded) {
+                  quotaFailures.incrementAndGet();
+                }
+                return null;
+              }));
+    }
+
+    startGate.countDown();
+    for (Future<Void> future : futures) {
+      future.get(20, TimeUnit.SECONDS);
+    }
+    executor.shutdown();
+
+    assertEquals(4, successes.get(), "64 bytes of quota fits exactly four 16-byte files");
+    assertEquals(threadCount - 4, quotaFailures.get(), "every extra writer must be refused");
+    assertEquals(64L, limited.totalBytes(SESSION_A));
+  }
+
+  private SessionFileStore limitedStore(SessionFileLimits limits) {
+    return new SessionFileStore(
+        sessionFileRepository,
+        blobRepository,
+        uploadService,
+        blobContentService,
+        refManager,
+        clock,
+        transactionManager,
+        limits);
+  }
+
   @Test
   void deleteBySessionClearsRows() {
     sessionFileStore.write(SESSION_A, "a.txt", "a".getBytes(UTF_8), null);
@@ -409,5 +507,18 @@ class SessionFileStoreIntegrationTest extends PostgresSpringTestSupport {
     assertThrows(
         IllegalArgumentException.class,
         () -> sessionFileStore.write(SESSION_A, "  spaces  ", content, null));
+    // C0（含 TAB/LF）、DEL 与 C1 与数据库 CHECK 一致：写入前拒绝。
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> sessionFileStore.write(SESSION_A, "tab\there.txt", content, null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> sessionFileStore.write(SESSION_A, "line\nbreak.txt", content, null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> sessionFileStore.write(SESSION_A, "del" + (char) 0x7F + ".txt", content, null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> sessionFileStore.write(SESSION_A, "c1" + (char) 0x85 + ".txt", content, null));
   }
 }

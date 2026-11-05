@@ -145,6 +145,17 @@ class StudioSessionFileControllerTest {
         .andExpect(status().isNotFound());
   }
 
+  /** ownerId 格式非法时与「不存在」一致返回 404，而不是 500。 */
+  @Test
+  void malformedOwnerIdIsReportedAsNotFound() throws Exception {
+    mockMvc
+        .perform(
+            get("/api/sessions/{sessionId}/files", SESSION_ID)
+                .param("ownerKind", "CHAT")
+                .param("ownerId", "  "))
+        .andExpect(status().isNotFound());
+  }
+
   /** 二进制或超预算内容明确 422，不返回伪文本。 */
   @Test
   void unreadableContentIsRejected() throws Exception {

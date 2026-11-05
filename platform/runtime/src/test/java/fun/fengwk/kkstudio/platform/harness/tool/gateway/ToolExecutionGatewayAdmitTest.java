@@ -37,6 +37,7 @@ import fun.fengwk.kkstudio.harness.tool.TurnMediaCapabilities;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.harness.admission.ConcurrencyAdmission;
 import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionAction;
+import fun.fengwk.kkstudio.platform.vfs.VfsEditRejectedException;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -450,6 +451,100 @@ class ToolExecutionGatewayAdmitTest {
 
     assertEquals("edit", hostEdit.requests.get(0).descriptor().name());
     assertTrue(transport.invocations.isEmpty());
+  }
+
+  /** vfs: 编辑的审批携带 VFS 预览快照：admit 在执行前调用 verifySnapshot，expectedFile 来自审批。 */
+  @Test
+  void vfsEditApprovalVerifiesThePreviewSnapshotBeforeExecution() {
+    ToolGatewayTestSupport.FakeVfsEditReviewSource source =
+        new ToolGatewayTestSupport.FakeVfsEditReviewSource();
+    String path = "vfs:/sessions/" + ToolGatewayTestSupport.ROOT_SESSION_ID + "/a.txt";
+    source.review =
+        new ToolEditReview(new ExpectedFile(path, "a".repeat(64)), "--- a\n+++ b\n-old\n+new");
+    ToolExecutionGateway gateway =
+        ToolGatewayTestSupport.gateway(
+            ToolGatewayTestSupport.defaultCatalog(),
+            new ToolGatewayTestSupport.FakeTransport(),
+            new ToolGatewayTestSupport.FakeResourceStager(),
+            source);
+    ToolInvocationRequest request = ToolGatewayTestSupport.vfsEditRequest("call-vfs-edit", path);
+
+    ToolGateway.Admitted admitted =
+        assertInstanceOf(
+            ToolGateway.Admitted.class,
+            gateway.admit(
+                new ToolGateway.Execution(
+                    ToolGatewayTestSupport.INVOCATION_ID,
+                    ToolGatewayTestSupport.scope(ToolGatewayTestSupport.EMPTY_BRANCH_VIEW),
+                    1,
+                    request,
+                    approved(source.review),
+                    new ToolGatewayTestSupport.RecordingRemoteExecutions())));
+
+    admitted.run().close();
+    assertEquals(List.of(source.review.expectedFile()), source.verified);
+    assertEquals(List.of(ToolGatewayTestSupport.ROOT_SESSION_ID), source.verifiedRootSessions);
+    assertEquals(List.of(ToolGatewayTestSupport.ROOT_THREAD_ID), source.verifiedRootThreads);
+  }
+
+  /** 审批后文件已变化：admit 拒绝执行，要求重新审查。 */
+  @Test
+  void staleVfsEditSnapshotIsRejectedBeforeExecution() {
+    ToolGatewayTestSupport.FakeVfsEditReviewSource source =
+        new ToolGatewayTestSupport.FakeVfsEditReviewSource();
+    String path = "vfs:/sessions/" + ToolGatewayTestSupport.ROOT_SESSION_ID + "/a.txt";
+    source.review =
+        new ToolEditReview(new ExpectedFile(path, "a".repeat(64)), "--- a\n+++ b\n-old\n+new");
+    source.verifyFailure =
+        new VfsEditRejectedException(
+            ToolErrorGuidance.message(
+                path + " changed after this edit was approved",
+                ToolErrorGuidance.ExecutionFact.NOT_EXECUTED,
+                "Review and approve the edit again against the current file contents"));
+    ToolExecutionGateway gateway =
+        ToolGatewayTestSupport.gateway(
+            ToolGatewayTestSupport.defaultCatalog(),
+            new ToolGatewayTestSupport.FakeTransport(),
+            new ToolGatewayTestSupport.FakeResourceStager(),
+            source);
+
+    ToolGateway.Rejected rejected =
+        assertInstanceOf(
+            ToolGateway.Rejected.class,
+            gateway.admit(
+                new ToolGateway.Execution(
+                    ToolGatewayTestSupport.INVOCATION_ID,
+                    ToolGatewayTestSupport.scope(ToolGatewayTestSupport.EMPTY_BRANCH_VIEW),
+                    1,
+                    ToolGatewayTestSupport.vfsEditRequest("call-vfs-edit", path),
+                    approved(source.review),
+                    new ToolGatewayTestSupport.RecordingRemoteExecutions())));
+    assertEquals(EditReviewPreflight.FAILED_KIND, rejected.error().kind());
+    assertTrue(rejected.error().message().contains("changed after this edit was approved"));
+  }
+
+  /** 已审批的 vfs: 编辑缺失审查事实时仍拒绝执行，与环境的编辑审查守卫一致。 */
+  @Test
+  void vfsEditApprovalWithoutReviewIsRejected() {
+    ToolExecutionGateway gateway =
+        ToolGatewayTestSupport.gateway(
+            ToolGatewayTestSupport.defaultCatalog(),
+            new ToolGatewayTestSupport.FakeTransport(),
+            new ToolGatewayTestSupport.FakeResourceStager());
+    String path = "vfs:/sessions/" + ToolGatewayTestSupport.ROOT_SESSION_ID + "/a.txt";
+
+    ToolGateway.Rejected rejected =
+        assertInstanceOf(
+            ToolGateway.Rejected.class,
+            gateway.admit(
+                new ToolGateway.Execution(
+                    ToolGatewayTestSupport.INVOCATION_ID,
+                    ToolGatewayTestSupport.scope(ToolGatewayTestSupport.EMPTY_BRANCH_VIEW),
+                    1,
+                    ToolGatewayTestSupport.vfsEditRequest("call-vfs-edit", path),
+                    approved(null),
+                    new ToolGatewayTestSupport.RecordingRemoteExecutions())));
+    assertEquals(ToolExecutionGateway.EDIT_REVIEW_REQUIRED_KIND, rejected.error().kind());
   }
 
   private static ToolInvocationRequest editRequest(HarnessCatalog catalog, String callId) {

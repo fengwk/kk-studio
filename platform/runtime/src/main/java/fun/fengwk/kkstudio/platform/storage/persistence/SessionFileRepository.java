@@ -152,6 +152,22 @@ public class SessionFileRepository {
         .list();
   }
 
+  /**
+   * 获取按 Session 的事务级 advisory lock，串行化该 Session 的配额判断与写入。
+   *
+   * <p>锁键只由 Session ID 派生，落在独立命名空间，不触碰 Harness 引擎表；必须在读取配额与写入 {@code session_file} 之前、 在同一数据库事务内调用。
+   */
+  public void lockSessionQuota(UUID sessionId) {
+    Objects.requireNonNull(sessionId, "sessionId must not be null");
+    jdbcClient
+        .sql(
+            "select true from pg_advisory_xact_lock("
+                + "hashtextextended('session-file-quota:' || :sessionId, 0))")
+        .param("sessionId", sessionId.toString())
+        .query(Boolean.class)
+        .single();
+  }
+
   /** 获取指定 Session 内文件总数。 */
   public long countBySession(UUID sessionId) {
     Objects.requireNonNull(sessionId, "sessionId must not be null");

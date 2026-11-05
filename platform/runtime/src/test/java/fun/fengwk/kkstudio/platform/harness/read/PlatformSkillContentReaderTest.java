@@ -102,7 +102,52 @@ class PlatformSkillContentReaderTest {
     assertArrayEquals(nestedFile, actualNested);
   }
 
-  /** 测试意图：找不到 Skill Package 时抛出确定性异常。 */
+  /** 文件清单只来自服务端归档索引：相对技能目录、按路径升序，且不读取对象存储。 */
+  @Test
+  void listSkillFilesComesFromTheArchiveIndexOnly() throws IOException {
+    byte[] skillMd =
+        "---\nname: dev\ndescription: dev skill\n---\n".getBytes(StandardCharsets.UTF_8);
+    byte[] nestedFile = "nested".getBytes(StandardCharsets.UTF_8);
+    byte[] otherMd =
+        "---\nname: other\ndescription: other skill\n---\n".getBytes(StandardCharsets.UTF_8);
+    SkillArchiveBuilder.Result archive =
+        new SkillArchiveBuilder()
+            .fromEntries(
+                List.of(
+                    new InputEntry("dev/subdir/nested.txt", Type.FILE, false, nestedFile),
+                    new InputEntry("dev/SKILL.md", Type.FILE, false, skillMd),
+                    new InputEntry("other/SKILL.md", Type.FILE, false, otherMd)));
+
+    UUID blobId = UUID.randomUUID();
+    StorageBlob blob = new StorageBlob();
+    blob.setId(blobId);
+    blob.setState(StorageBlobState.ACTIVE);
+    blob.setArchiveIndex(SkillArchiveIndex.from(archive.index()).encode());
+    when(blobManager.getBlob(blobId)).thenReturn(blob);
+
+    SkillPackage pkg =
+        new SkillPackage(
+            "my-pkg",
+            "desc",
+            "v1",
+            blobId,
+            List.of(new SkillManifestEntry("dev", "dev skill")),
+            Instant.now(),
+            0L,
+            Instant.now(),
+            Instant.now(),
+            null);
+    when(skillPackageRepository.getPackage("my-pkg")).thenReturn(pkg);
+
+    assertEquals(
+        List.of(
+            new PlatformSkillContentReader.SkillFileEntry("SKILL.md", skillMd.length),
+            new PlatformSkillContentReader.SkillFileEntry("subdir/nested.txt", nestedFile.length)),
+        reader.listSkillFiles("my-pkg", "dev"));
+    assertTrue(s3Storage.networkCalls().isEmpty(), "listing must not touch object storage");
+  }
+
+  /** 找不到 Skill Package 时抛出确定性异常。 */
   @Test
   void packageNotFoundThrowsPlatformReadException() {
     when(skillPackageRepository.getPackage("unknown-pkg")).thenReturn(null);
@@ -165,6 +210,39 @@ class PlatformSkillContentReaderTest {
         assertThrows(
             PlatformReadException.class, () -> reader.readSkillFile("my-pkg", "dev", "SKILL.md"));
     assertTrue(error.getMessage().contains("failed to read skill file: blob has no archive index"));
+  }
+
+  /** 技能不存在或归档缺少服务端索引时，文件清单是确定性错误。 */
+  @Test
+  void listSkillFilesRejectsUnknownSkillAndUnindexedArchives() {
+    UUID blobId = UUID.randomUUID();
+    StorageBlob blob = new StorageBlob();
+    blob.setId(blobId);
+    blob.setState(StorageBlobState.ACTIVE);
+    blob.setArchiveIndex(null);
+    when(blobManager.getBlob(blobId)).thenReturn(blob);
+    SkillPackage pkg =
+        new SkillPackage(
+            "my-pkg",
+            "desc",
+            "v1",
+            blobId,
+            List.of(new SkillManifestEntry("dev", "desc")),
+            Instant.now(),
+            0L,
+            Instant.now(),
+            Instant.now(),
+            null);
+    when(skillPackageRepository.getPackage("my-pkg")).thenReturn(pkg);
+
+    PlatformReadException unknownSkill =
+        assertThrows(PlatformReadException.class, () -> reader.listSkillFiles("my-pkg", "missing"));
+    assertTrue(unknownSkill.getMessage().contains("skill not found: my-pkg/missing"));
+
+    PlatformReadException unindexed =
+        assertThrows(PlatformReadException.class, () -> reader.listSkillFiles("my-pkg", "dev"));
+    assertTrue(
+        unindexed.getMessage().contains("failed to list skill files: blob has no archive index"));
   }
 
   /** 测试意图：归档索引中不存在目标条目时抛出确定性异常。 */

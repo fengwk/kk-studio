@@ -149,9 +149,9 @@ public final class ModelRequestMaterializer {
         projectedMessages.add(
             ProviderMessageProjector.ProjectedMessage.of(
                 wrapNotificationMessage(notification.message())));
-      } else if (payload instanceof ForkPayload) {
+      } else if (payload instanceof ForkPayload fork) {
         projectedMessages.add(
-            ProviderMessageProjector.ProjectedMessage.of(AgentMessage.user(ForkPayload.NOTICE)));
+            ProviderMessageProjector.ProjectedMessage.of(AgentMessage.user(fork.notice())));
       } else if (payload instanceof AssistantAbortedPayload message) {
         projectedMessages.add(ProviderMessageProjector.ProjectedMessage.of(message.message()));
       }

@@ -45,7 +45,8 @@ class ToolExecutionGatewayVfsReadOnlyTest {
         ToolGatewayTestSupport.gatewayWith(catalog, evaluator, settingsProvider);
 
     ToolGateway.PreflightResult result =
-        gateway.preflight(
+        preflight(
+            gateway,
             request(catalog, "write", "{\"path\":\"" + SKILL_PATH + "\",\"content\":\"x\"}"));
 
     ToolGateway.Deny deny = assertInstanceOf(ToolGateway.Deny.class, result);
@@ -74,7 +75,8 @@ class ToolExecutionGatewayVfsReadOnlyTest {
     ToolGateway.Deny deny =
         assertInstanceOf(
             ToolGateway.Deny.class,
-            gateway.preflight(
+            preflight(
+                gateway,
                 request(
                     catalog,
                     "edit",
@@ -124,7 +126,8 @@ class ToolExecutionGatewayVfsReadOnlyTest {
             new ToolGatewayTestSupport.FakeResourceStager());
     // 目录租用与定义校验通过后由权限策略判定；这里只证明不是 VFS_READ_ONLY 拒绝。
     ToolGateway.PreflightResult result =
-        gateway.preflight(
+        preflight(
+            gateway,
             request(
                 catalog,
                 "write",
@@ -149,5 +152,12 @@ class ToolExecutionGatewayVfsReadOnlyTest {
         EnvironmentSupport.ROUTED,
         null,
         null);
+  }
+
+  /** preflight 需要冻结的执行根事实；本测试固定使用空分支视图。 */
+  private static ToolGateway.PreflightResult preflight(
+      ToolExecutionGateway gateway, ToolInvocationRequest request) {
+    return gateway.preflight(
+        request, ToolGatewayTestSupport.scope(ToolGatewayTestSupport.EMPTY_BRANCH_VIEW));
   }
 }

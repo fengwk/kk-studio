@@ -31,6 +31,7 @@ import fun.fengwk.kkstudio.platform.storage.persistence.StorageObjectCleanupRepo
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageUploadRepository;
 import fun.fengwk.kkstudio.platform.storage.service.HeadOnlyStorageMediaProbe;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
+import fun.fengwk.kkstudio.platform.storage.service.SessionFileLimits;
 import fun.fengwk.kkstudio.platform.storage.service.SessionFileStore;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
@@ -267,7 +268,8 @@ public class S3StorageConfiguration {
         blobContentService,
         refManager,
         clock,
-        transactionManager);
+        transactionManager,
+        SessionFileLimits.DEFAULT);
   }
 
   private S3Configuration newS3Configuration() {

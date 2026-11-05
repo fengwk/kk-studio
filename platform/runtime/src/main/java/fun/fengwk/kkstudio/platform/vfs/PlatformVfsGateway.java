@@ -6,8 +6,11 @@ import tools.jackson.databind.JsonNode;
 import fun.fengwk.kkstudio.common.json.ToolArguments;
 import fun.fengwk.kkstudio.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.common.result.TextResultContent;
+import fun.fengwk.kkstudio.harness.api.tool.ToolEditReview;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionContext;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
+import fun.fengwk.kkstudio.harness.environment.capability.ExpectedFile;
+import fun.fengwk.kkstudio.harness.spi.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.spi.VfsGateway;
 import fun.fengwk.kkstudio.harness.tool.ToolErrorGuidance;
 import fun.fengwk.kkstudio.harness.tool.ToolErrorGuidance.ExecutionFact;
@@ -27,7 +30,10 @@ import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 import fun.fengwk.kkstudio.platform.vfs.VfsPath.Kind;
 
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
@@ -50,11 +56,22 @@ import java.util.regex.PatternSyntaxException;
  *
  * <p>只读前缀的写入与编辑在任何存储副作用之前拒绝，因此 YOLO 与权限放行都不能绕过只读约束。
  */
-public final class PlatformVfsGateway implements VfsGateway {
+public final class PlatformVfsGateway implements VfsGateway, VfsEditReviewSource {
 
   private static final String SESSIONS_ROOT = "vfs:/sessions";
   private static final String RESOURCES_ROOT = "vfs:/resources";
   private static final String SKILLS_ROOT = "vfs:/skills";
+
+  /** find 的默认与硬上限：请求更大时按上限截断并在结果中说明。 */
+  static final int FIND_DEFAULT_LIMIT = 1000;
+
+  static final int FIND_MAX_LIMIT = 5000;
+
+  /** grep 的默认与硬上限，以及回复正文的字节上限：避免超大返回体。 */
+  static final int GREP_DEFAULT_LIMIT = 100;
+
+  static final int GREP_MAX_LIMIT = 1000;
+  static final int GREP_MAX_OUTPUT_BYTES = 256 * 1024;
 
   private static final String CONTEXT_REQUIRED =
       ToolErrorGuidance.message(
@@ -126,7 +143,7 @@ public final class PlatformVfsGateway implements VfsGateway {
                 "Provide the complete file content"));
       }
       VfsPath target = VfsPath.parse(path);
-      requireWritable(target, view.rootSessionId(), "write");
+      requireWritable(target, view, "write");
       if (target.kind() != Kind.SESSION_FILE) {
         throw notWritableDirectory(path, "write");
       }
@@ -157,78 +174,17 @@ public final class PlatformVfsGateway implements VfsGateway {
       return ToolResult.error(callId, CONTEXT_REQUIRED);
     }
     try {
-      JsonNode arguments = ToolArguments.parse(request.call().argumentsJson());
-      String path = requirePath(arguments);
-      String oldString = ToolArguments.text(arguments, "old_string");
-      String newString = string(arguments, "new_string");
-      boolean replaceAll = ToolArguments.flag(arguments, "replace_all");
-      if (oldString == null || oldString.isEmpty()) {
-        throw new VfsRejection(
-            ToolErrorGuidance.message(
-                "edit requires a non-empty old_string",
-                ExecutionFact.NOT_EXECUTED,
-                "Provide the exact text to replace"));
-      }
-      if (newString == null) {
-        throw new VfsRejection(
-            ToolErrorGuidance.message(
-                "edit requires a new_string",
-                ExecutionFact.NOT_EXECUTED,
-                "Provide the replacement text"));
-      }
-      if (oldString.equals(newString)) {
-        throw new VfsRejection(
-            ToolErrorGuidance.message(
-                "edit old_string and new_string are identical",
-                ExecutionFact.NOT_EXECUTED,
-                "Provide a replacement that changes the file"));
-      }
-      VfsPath target = VfsPath.parse(path);
-      requireWritable(target, view.rootSessionId(), "edit");
-      if (target.kind() != Kind.SESSION_FILE) {
-        throw notWritableDirectory(path, "edit");
-      }
-      String relativePath = requireFileRelativePath(target, "edit");
-      Optional<SessionFile> existing = fileStore.find(view.rootSessionId(), relativePath);
-      if (existing.isEmpty()) {
-        throw notFound(path);
-      }
-      byte[] current =
-          fileStore.read(view.rootSessionId(), relativePath).orElseThrow(() -> notFound(path));
-      String text = new String(current, StandardCharsets.UTF_8);
-      int occurrences = countOccurrences(text, oldString);
-      if (occurrences == 0) {
-        throw new VfsRejection(
-            ToolErrorGuidance.message(
-                "edit old_string was not found in " + path,
-                ExecutionFact.NOT_EXECUTED,
-                "Read the file and pass text that matches exactly"));
-      }
-      if (occurrences > 1 && !replaceAll) {
-        throw new VfsRejection(
-            ToolErrorGuidance.message(
-                "edit old_string occurs "
-                    + occurrences
-                    + " times in "
-                    + path
-                    + "; it must be unique",
-                ExecutionFact.NOT_EXECUTED,
-                "Pass replace_all: true or a longer unique old_string"));
-      }
-      String updated =
-          replaceAll
-              ? text.replace(oldString, newString)
-              : text.replaceFirst(Pattern.quote(oldString), Matcher.quoteReplacement(newString));
+      EditPlan plan = planEdit(request.call().argumentsJson(), view);
       SessionFile written =
           fileStore.write(
               view.rootSessionId(),
-              relativePath,
-              updated.getBytes(StandardCharsets.UTF_8),
-              existing.get().revision());
-      int replaced = replaceAll ? occurrences : 1;
+              plan.relativePath(),
+              plan.updated().getBytes(StandardCharsets.UTF_8),
+              plan.revision());
+      int replaced = plan.replaced();
       return text(
           callId,
-          writtenMessage("edited", written, updated.getBytes(StandardCharsets.UTF_8).length)
+          writtenMessage("edited", written, plan.updated().getBytes(StandardCharsets.UTF_8).length)
               + " ("
               + replaced
               + " replacement"
@@ -240,6 +196,155 @@ public final class PlatformVfsGateway implements VfsGateway {
       return ToolResult.error(callId, conflictFailure(conflict));
     } catch (IllegalArgumentException | IllegalStateException failure) {
       return ToolResult.error(callId, storageFailure(failure));
+    }
+  }
+
+  /**
+   * 需要审批的 {@code vfs:} 编辑：在执行之前由 VFS 读取当前文件并生成审查事实。
+   *
+   * <p>只读、只解析参数与当前会话目录，不写入任何状态；无法预览（路径不可写、文件不存在、匹配不唯一或 diff 过大）时抛出 {@link
+   * VfsEditRejectedException}，由网关转成确定性拒绝，绝不进入审批。
+   */
+  @Override
+  public ToolEditReview prepare(
+      ToolInvocationRequest request, UUID rootSessionId, UUID rootThreadId) {
+    ExecutionView view = new ExecutionView(rootSessionId, rootThreadId, TurnMediaCapabilities.NONE);
+    try {
+      EditPlan plan = planEdit(request.call().argumentsJson(), view);
+      String diff =
+          VfsEditDiff.unified(
+              plan.path(), plan.text(), plan.oldString(), plan.newString(), plan.replaceAll());
+      return new ToolEditReview(new ExpectedFile(plan.path(), sha256(plan.current())), diff);
+    } catch (VfsRejection rejection) {
+      throw new VfsEditRejectedException(rejection.getMessage());
+    } catch (IllegalArgumentException tooLarge) {
+      throw new VfsEditRejectedException(tooLarge.getMessage());
+    }
+  }
+
+  /**
+   * 审批通过后、真正执行前校验预览时的文件快照仍是当前内容：内容已变化时拒绝执行，用户必须重新审查。
+   *
+   * <p>VFS 的写入本身仍由 revision CAS 保护；这里补齐的是「用户批准的是哪一份 diff」这一语义。
+   */
+  @Override
+  public void verifySnapshot(UUID rootSessionId, UUID rootThreadId, ExpectedFile expectedFile) {
+    ExecutionView view = new ExecutionView(rootSessionId, rootThreadId, TurnMediaCapabilities.NONE);
+    try {
+      VfsPath target = VfsPath.parse(expectedFile.path());
+      requireWritable(target, view, "edit");
+      if (target.kind() != Kind.SESSION_FILE) {
+        throw notWritableDirectory(expectedFile.path(), "edit");
+      }
+      String relativePath = requireFileRelativePath(target, "edit");
+      byte[] current =
+          fileStore
+              .read(view.rootSessionId(), relativePath)
+              .orElseThrow(() -> notFound(expectedFile.path()));
+      if (!sha256(current).equals(expectedFile.sha256())) {
+        throw new VfsRejection(
+            ToolErrorGuidance.message(
+                expectedFile.path() + " changed after this edit was approved",
+                ExecutionFact.NOT_EXECUTED,
+                "Review and approve the edit again against the current file contents"));
+      }
+    } catch (VfsRejection rejection) {
+      throw new VfsEditRejectedException(rejection.getMessage());
+    }
+  }
+
+  /** 已解析、已校验的编辑计划：执行与审批预览共享同一份参数与替换语义。 */
+  private record EditPlan(
+      String path,
+      String relativePath,
+      byte[] current,
+      String text,
+      String oldString,
+      String newString,
+      String updated,
+      boolean replaceAll,
+      int occurrences,
+      int replaced,
+      int revision) {}
+
+  private EditPlan planEdit(String argumentsJson, ExecutionView view) {
+    JsonNode arguments = ToolArguments.parse(argumentsJson);
+    String path = requirePath(arguments);
+    String oldString = ToolArguments.text(arguments, "old_string");
+    String newString = string(arguments, "new_string");
+    boolean replaceAll = ToolArguments.flag(arguments, "replace_all");
+    if (oldString == null || oldString.isEmpty()) {
+      throw new VfsRejection(
+          ToolErrorGuidance.message(
+              "edit requires a non-empty old_string",
+              ExecutionFact.NOT_EXECUTED,
+              "Provide the exact text to replace"));
+    }
+    if (newString == null) {
+      throw new VfsRejection(
+          ToolErrorGuidance.message(
+              "edit requires a new_string",
+              ExecutionFact.NOT_EXECUTED,
+              "Provide the replacement text"));
+    }
+    if (oldString.equals(newString)) {
+      throw new VfsRejection(
+          ToolErrorGuidance.message(
+              "edit old_string and new_string are identical",
+              ExecutionFact.NOT_EXECUTED,
+              "Provide a replacement that changes the file"));
+    }
+    VfsPath target = VfsPath.parse(path);
+    requireWritable(target, view, "edit");
+    if (target.kind() != Kind.SESSION_FILE) {
+      throw notWritableDirectory(path, "edit");
+    }
+    String relativePath = requireFileRelativePath(target, "edit");
+    Optional<SessionFile> existing = fileStore.find(view.rootSessionId(), relativePath);
+    if (existing.isEmpty()) {
+      throw notFound(path);
+    }
+    byte[] current =
+        fileStore.read(view.rootSessionId(), relativePath).orElseThrow(() -> notFound(path));
+    String text = new String(current, StandardCharsets.UTF_8);
+    int occurrences = countOccurrences(text, oldString);
+    if (occurrences == 0) {
+      throw new VfsRejection(
+          ToolErrorGuidance.message(
+              "edit old_string was not found in " + path,
+              ExecutionFact.NOT_EXECUTED,
+              "Read the file and pass text that matches exactly"));
+    }
+    if (occurrences > 1 && !replaceAll) {
+      throw new VfsRejection(
+          ToolErrorGuidance.message(
+              "edit old_string occurs " + occurrences + " times in " + path + "; it must be unique",
+              ExecutionFact.NOT_EXECUTED,
+              "Pass replace_all: true or a longer unique old_string"));
+    }
+    String updated =
+        replaceAll
+            ? text.replace(oldString, newString)
+            : text.replaceFirst(Pattern.quote(oldString), Matcher.quoteReplacement(newString));
+    return new EditPlan(
+        path,
+        relativePath,
+        current,
+        text,
+        oldString,
+        newString,
+        updated,
+        replaceAll,
+        occurrences,
+        replaceAll ? occurrences : 1,
+        existing.get().revision());
+  }
+
+  private static String sha256(byte[] content) {
+    try {
+      return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(content));
+    } catch (NoSuchAlgorithmException impossible) {
+      throw new IllegalStateException("SHA-256 is unavailable", impossible);
     }
   }
 
@@ -261,10 +366,10 @@ public final class PlatformVfsGateway implements VfsGateway {
                 ExecutionFact.NOT_EXECUTED,
                 "Pass a pattern such as '**/*.java'"));
       }
-      Integer limit = positiveInt(arguments, "limit");
-      int resolvedLimit = limit == null ? 1000 : limit;
+      ResolvedLimit limit =
+          resolveLimit(positiveInt(arguments, "limit"), FIND_DEFAULT_LIMIT, FIND_MAX_LIMIT);
       VfsPath root = VfsPath.parse(path);
-      requireSearchable(root, view.rootSessionId());
+      requireSearchable(root, view);
       String prefix = sessionPrefix(root);
       ReadDeadline deadline = ReadDeadline.after(request.timeout());
       FastIgnoreRule rule = globRule(pattern);
@@ -279,9 +384,8 @@ public final class PlatformVfsGateway implements VfsGateway {
               callId,
               incompleteFind(path, matches.size(), "deadline reached before the scan finished"));
         }
-        if (matches.size() >= resolvedLimit) {
-          return text(
-              callId, incompleteFind(path, matches.size(), "limit " + resolvedLimit + " reached"));
+        if (matches.size() >= limit.value()) {
+          return text(callId, incompleteFind(path, matches.size(), limitStop(limit)));
         }
         String relative = relativeTo(prefix, file.path());
         if (rule == null || rule.isMatch(relative, false)) {
@@ -292,6 +396,9 @@ public final class PlatformVfsGateway implements VfsGateway {
         return text(callId, "No files match " + pattern + " under " + path + ".");
       }
       StringBuilder out = new StringBuilder();
+      if (limit.capped()) {
+        out.append(limit.capNote()).append('\n');
+      }
       out.append(matches.size()).append(" match").append(matches.size() == 1 ? "" : "es");
       out.append(" under ").append(path).append(":\n");
       for (String match : matches) {
@@ -330,10 +437,10 @@ public final class PlatformVfsGateway implements VfsGateway {
       boolean ignoreCase = ToolArguments.flag(arguments, "ignore_case");
       boolean multiline = ToolArguments.flag(arguments, "multiline");
       String include = ToolArguments.text(arguments, "include");
-      Integer limit = positiveInt(arguments, "limit");
-      int resolvedLimit = limit == null ? 100 : limit;
+      ResolvedLimit limit =
+          resolveLimit(positiveInt(arguments, "limit"), GREP_DEFAULT_LIMIT, GREP_MAX_LIMIT);
       VfsPath root = VfsPath.parse(path);
-      requireSearchable(root, view.rootSessionId());
+      requireSearchable(root, view);
       String prefix = sessionPrefix(root);
       List<SessionFile> candidates = fileStore.list(view.rootSessionId(), prefix);
       int flags = ignoreCase ? Pattern.CASE_INSENSITIVE : 0;
@@ -358,9 +465,9 @@ public final class PlatformVfsGateway implements VfsGateway {
               regex,
               multiline,
               include,
-              resolvedLimit,
+              limit.value(),
               deadline);
-      return text(callId, grepMessage(path, rawPattern, result, resolvedLimit, candidates.size()));
+      return text(callId, grepMessage(path, rawPattern, result, limit, candidates.size()));
     } catch (VfsRejection rejection) {
       return ToolResult.error(callId, rejection.getMessage());
     } catch (InterruptedException interrupted) {
@@ -397,20 +504,45 @@ public final class PlatformVfsGateway implements VfsGateway {
                 + RESOURCES_ROOT
                 + "\nkind: directory (read-only)\n\n[Read vfs:/resources/<blobId> to read a resource.]");
       case SKILLS:
-        return text(
+        return listing(
             callId,
-            "path: "
-                + SKILLS_ROOT
-                + "\nkind: directory (read-only)\n\n[Skill listing is not available yet; read vfs:/skills/<package>/<skill>/<path>.]");
+            SKILLS_ROOT,
+            skillReader.listPackages().stream()
+                .map(
+                    pkg ->
+                        pkg.packageName()
+                            + "/ (read-only)"
+                            + (pkg.description() == null ? "" : " — " + pkg.description()))
+                .toList(),
+            offset,
+            limit);
+      case SKILLS_PACKAGE:
+        return listing(
+            callId,
+            target.normalizedPath(),
+            skillReader.listSkills(target.skillPackage()).stream()
+                .map(skill -> skill.name() + "/ (read-only)")
+                .toList(),
+            offset,
+            limit);
+      case SKILLS_SKILL:
+        return listing(
+            callId,
+            target.normalizedPath(),
+            skillReader.listSkillFiles(target.skillPackage(), target.skillName()).stream()
+                .map(file -> file.path() + " (read-only, " + file.size() + " bytes)")
+                .toList(),
+            offset,
+            limit);
       case SKILLS_PATH:
         return readSkill(callId, target, offset, limit, columnOffset, deadline);
       case RESOURCE:
         return readResource(callId, target, view, offset, limit, columnOffset, deadline);
       case SESSION_DIR:
-        requireSessionScope(target, view.rootSessionId());
+        requireSessionScope(target, view);
         return listSessionDirectory(callId, target, view, offset, limit);
       case SESSION_FILE:
-        requireSessionScope(target, view.rootSessionId());
+        requireSessionScope(target, view);
         return readSessionPath(callId, target, view, offset, limit, columnOffset, deadline);
       default:
         throw notFound(target.rawPath());
@@ -534,35 +666,37 @@ public final class PlatformVfsGateway implements VfsGateway {
     return text(callId, VfsDirectoryListing.format(displayPath, entries, offset, limit));
   }
 
-  private void requireWritable(VfsPath target, UUID rootSessionId, String operation) {
+  private void requireWritable(VfsPath target, ExecutionView view, String operation) {
     if (target.isUnderSkillsRoot()) {
-      throw readOnly(target.rawPath(), SKILLS_ROOT, operation, rootSessionId);
+      throw readOnly(target.rawPath(), SKILLS_ROOT, operation, view.rootSessionId());
     }
     if (target.isUnderResourcesRoot()) {
-      throw readOnly(target.rawPath(), RESOURCES_ROOT, operation, rootSessionId);
+      throw readOnly(target.rawPath(), RESOURCES_ROOT, operation, view.rootSessionId());
     }
     if (target.kind() == Kind.ROOT || target.kind() == Kind.SESSIONS_ROOT) {
-      throw readOnly(target.rawPath(), target.normalizedPath(), operation, rootSessionId);
+      throw readOnly(target.rawPath(), target.normalizedPath(), operation, view.rootSessionId());
     }
-    requireSessionScope(target, rootSessionId);
+    requireSessionScope(target, view);
   }
 
-  private void requireSessionScope(VfsPath target, UUID rootSessionId) {
+  private void requireSessionScope(VfsPath target, ExecutionView view) {
     boolean sessionScoped = target.kind() == Kind.SESSION_DIR || target.kind() == Kind.SESSION_FILE;
     if (!sessionScoped) {
-      throw readOnly(target.rawPath(), target.normalizedPath(), "write", rootSessionId);
+      throw readOnly(target.rawPath(), target.normalizedPath(), "write", view.rootSessionId());
     }
-    if (!target.sessionId().equals(rootSessionId)) {
+    if (!target.sessionId().equals(view.rootSessionId())) {
       throw notFound(target.rawPath());
     }
+    // threads/<线程 ID>/ 的成员判据是该线程的执行根等于当前调用的执行根：
+    // 子 Agent 线程运行在独立 Session 中，但执行根仍是当前对话的根线程，因此仍可在根会话目录中使用。
     if (target.isThreadScoped()
-        && !threadMembership.isThreadInSession(rootSessionId, target.threadId())) {
+        && !threadMembership.isThreadInExecutionRoot(view.rootThreadId(), target.threadId())) {
       throw notFound(target.rawPath());
     }
   }
 
   /** find 与 grep 只在会话目录内检索：只读前缀不支持内容扫描。 */
-  private void requireSearchable(VfsPath target, UUID rootSessionId) {
+  private void requireSearchable(VfsPath target, ExecutionView view) {
     boolean sessionScoped =
         target.kind() == Kind.SESSIONS_ROOT
             || target.kind() == Kind.SESSION_DIR
@@ -577,7 +711,7 @@ public final class PlatformVfsGateway implements VfsGateway {
               "Search under vfs:/sessions/<sessionId>/ instead"));
     }
     if (target.kind() != Kind.SESSIONS_ROOT) {
-      requireSessionScope(target, rootSessionId);
+      requireSessionScope(target, view);
     }
   }
 
@@ -662,8 +796,11 @@ public final class PlatformVfsGateway implements VfsGateway {
   }
 
   private static String grepMessage(
-      String path, String pattern, VfsGrepScan.Result result, int limit, int candidates) {
+      String path, String pattern, VfsGrepScan.Result result, ResolvedLimit limit, int candidates) {
     StringBuilder out = new StringBuilder();
+    if (limit.capped()) {
+      out.append(limit.capNote()).append('\n');
+    }
     if (result.budgetHit() != null) {
       out.append("grep did not complete under ")
           .append(path)
@@ -676,10 +813,6 @@ public final class PlatformVfsGateway implements VfsGateway {
           .append(" candidate files (")
           .append(result.bytesScanned())
           .append(" bytes) before stopping.\n\n");
-    } else if (result.matchLines().size() >= limit) {
-      out.append("grep stopped after reaching the result limit of ")
-          .append(limit)
-          .append(" matches; more matches may exist.\n\n");
     }
     if (result.matchLines().isEmpty()) {
       out.append("No matches for ").append(pattern).append(" under ").append(path).append(".");
@@ -693,10 +826,71 @@ public final class PlatformVfsGateway implements VfsGateway {
         .append(" under ")
         .append(path)
         .append(":\n");
-    for (String line : result.matchLines()) {
-      out.append(line).append('\n');
+    int emitted = appendBoundedLines(out, result.matchLines());
+    int omitted = result.matchLines().size() - emitted;
+    if (omitted > 0) {
+      out.append("\n[TRUNCATED: ")
+          .append(omitted)
+          .append(" matches omitted to keep the response under ")
+          .append(GREP_MAX_OUTPUT_BYTES)
+          .append(" bytes. Re-run grep with a narrower pattern or a smaller path.]\n");
+    }
+    if (result.budgetHit() == null && result.matchLines().size() >= limit.value()) {
+      out.append("\n[grep stopped after reaching the result limit of ")
+          .append(limit.value())
+          .append(" matches; more matches may exist.]\n");
     }
     return out.toString().stripTrailing();
+  }
+
+  /** 逐行追加直到达到字节上限；返回实际追加的行数。 */
+  private static int appendBoundedLines(StringBuilder out, List<String> lines) {
+    int bytes = utf8Length(out);
+    int emitted = 0;
+    for (String line : lines) {
+      int lineBytes = utf8Length(line) + 1;
+      if (bytes + lineBytes > GREP_MAX_OUTPUT_BYTES) {
+        break;
+      }
+      out.append(line).append('\n');
+      bytes += lineBytes;
+      emitted++;
+    }
+    return emitted;
+  }
+
+  private static int utf8Length(CharSequence text) {
+    return text.toString().getBytes(StandardCharsets.UTF_8).length;
+  }
+
+  /** 请求的 limit 与硬上限：超出上限时按上限截断，并在结果中说明。 */
+  private record ResolvedLimit(int value, Integer requested) {
+
+    private boolean capped() {
+      return requested != null && requested > value;
+    }
+
+    /** 截断说明：只在请求值超过硬上限时出现，明确实际使用的上限。 */
+    private String capNote() {
+      return "Requested limit "
+          + requested
+          + " exceeds the maximum of "
+          + value
+          + "; using the maximum of "
+          + value
+          + ".";
+    }
+  }
+
+  private static ResolvedLimit resolveLimit(Integer requested, int defaultLimit, int maxLimit) {
+    int value = requested == null ? defaultLimit : Math.min(requested, maxLimit);
+    return new ResolvedLimit(value, requested);
+  }
+
+  private static String limitStop(ResolvedLimit limit) {
+    return limit.capped()
+        ? limit.capNote() + " Stopped after " + limit.value() + " matches."
+        : "limit " + limit.value() + " reached";
   }
 
   private static String incompleteFind(String path, int found, String reason) {
@@ -784,14 +978,16 @@ public final class PlatformVfsGateway implements VfsGateway {
   }
 
   /** 一次调用冻结的执行事实：执行根会话与消费者媒体能力。 */
-  private record ExecutionView(UUID rootSessionId, TurnMediaCapabilities mediaCapabilities) {
+  private record ExecutionView(
+      UUID rootSessionId, UUID rootThreadId, TurnMediaCapabilities mediaCapabilities) {
 
     private static ExecutionView of(ToolExecutionRequest request) {
       ToolExecutionContext context = request.context();
       if (context == null) {
         return null;
       }
-      return new ExecutionView(context.rootSessionId(), context.mediaCapabilities());
+      return new ExecutionView(
+          context.rootSessionId(), context.rootThreadId(), context.mediaCapabilities());
     }
   }
 

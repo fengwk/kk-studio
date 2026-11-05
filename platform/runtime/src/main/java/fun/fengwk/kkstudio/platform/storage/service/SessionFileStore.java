@@ -34,9 +34,10 @@ import java.util.regex.Pattern;
 @Slf4j
 public class SessionFileStore {
 
-  public static final int MAX_FILES_PER_SESSION = 2000;
-  public static final long MAX_SINGLE_FILE_BYTES = 8 * 1024 * 1024L; // 8 MiB
-  public static final long MAX_TOTAL_BYTES_PER_SESSION = 64 * 1024 * 1024L; // 64 MiB
+  public static final int MAX_FILES_PER_SESSION = SessionFileLimits.DEFAULT.maxFilesPerSession();
+  public static final long MAX_SINGLE_FILE_BYTES = SessionFileLimits.DEFAULT.maxSingleFileBytes();
+  public static final long MAX_TOTAL_BYTES_PER_SESSION =
+      SessionFileLimits.DEFAULT.maxTotalBytesPerSession();
 
   private static final Pattern RELATIVE_SEGMENT_PATTERN = Pattern.compile("(^|/)\\.\\.?(?:/|$)");
 
@@ -46,6 +47,7 @@ public class SessionFileStore {
   private final StorageBlobContentService blobContentService;
   private final SessionBlobRefManager refManager;
   private final Clock clock;
+  private final SessionFileLimits limits;
   private final TransactionTemplate transactionTemplate;
 
   public SessionFileStore(
@@ -55,7 +57,8 @@ public class SessionFileStore {
       StorageBlobContentService blobContentService,
       SessionBlobRefManager refManager,
       Clock clock,
-      PlatformTransactionManager transactionManager) {
+      PlatformTransactionManager transactionManager,
+      SessionFileLimits limits) {
     this.sessionFileRepository =
         Objects.requireNonNull(sessionFileRepository, "sessionFileRepository");
     this.blobRepository = Objects.requireNonNull(blobRepository, "blobRepository");
@@ -63,6 +66,7 @@ public class SessionFileStore {
     this.blobContentService = Objects.requireNonNull(blobContentService, "blobContentService");
     this.refManager = Objects.requireNonNull(refManager, "refManager");
     this.clock = Objects.requireNonNull(clock, "clock");
+    this.limits = Objects.requireNonNull(limits, "limits");
     this.transactionTemplate =
         new TransactionTemplate(Objects.requireNonNull(transactionManager, "transactionManager"));
   }
@@ -100,12 +104,12 @@ public class SessionFileStore {
     Objects.requireNonNull(content, "content must not be null");
     validatePath(path);
 
-    if (content.length > MAX_SINGLE_FILE_BYTES) {
+    if (content.length > limits.maxSingleFileBytes()) {
       throw new IllegalArgumentException(
           "session file too large: "
               + content.length
               + " bytes (limit "
-              + MAX_SINGLE_FILE_BYTES
+              + limits.maxSingleFileBytes()
               + ")");
     }
 
@@ -113,11 +117,11 @@ public class SessionFileStore {
       throw new IllegalArgumentException("expectedRevision must be positive: " + expectedRevision);
     }
 
-    // 1. 事务外快速预检配额（避免不必要的 S3 I/O）
+    // 1. 事务外快速预检（非权威，仅避免不必要的 S3 I/O）；权威判断在事务内持锁完成
     if (expectedRevision == null) {
-      if (sessionFileRepository.countBySession(sessionId) >= MAX_FILES_PER_SESSION) {
+      if (sessionFileRepository.countBySession(sessionId) >= limits.maxFilesPerSession()) {
         throw new IllegalStateException(
-            "session file limit reached: " + MAX_FILES_PER_SESSION + " files");
+            "session file limit reached: " + limits.maxFilesPerSession() + " files");
       }
     }
 
@@ -127,12 +131,14 @@ public class SessionFileStore {
             path,
             "application/octet-stream",
             new ByteArrayInputStream(content),
-            MAX_SINGLE_FILE_BYTES);
+            limits.maxSingleFileBytes());
 
     // 3. 短数据库事务内执行权威状态校验、锁行、引用转移与乐观锁写库
     try {
       return transactionTemplate.execute(
           status -> {
+            // 事务内第一步：按 Session 取 advisory lock，使「读配额 -> 写 session_file」对该 Session 串行化
+            sessionFileRepository.lockSessionQuota(sessionId);
             Optional<SessionFile> existingOpt = sessionFileRepository.find(sessionId, path);
 
             if (expectedRevision == null) {
@@ -140,12 +146,12 @@ public class SessionFileStore {
                 throw new SessionFileConflictException("session file already exists: " + path);
               }
               long fileCount = sessionFileRepository.countBySession(sessionId);
-              if (fileCount >= MAX_FILES_PER_SESSION) {
+              if (fileCount >= limits.maxFilesPerSession()) {
                 throw new IllegalStateException(
-                    "session file limit reached: " + MAX_FILES_PER_SESSION + " files");
+                    "session file limit reached: " + limits.maxFilesPerSession() + " files");
               }
               long currentTotal = sessionFileRepository.sumSizeBySession(sessionId);
-              if (currentTotal + content.length > MAX_TOTAL_BYTES_PER_SESSION) {
+              if (currentTotal + content.length > limits.maxTotalBytesPerSession()) {
                 throw new IllegalStateException("session total size limit reached");
               }
             } else {
@@ -166,7 +172,7 @@ public class SessionFileStore {
               long oldSize = oldBlob != null ? oldBlob.getSizeBytes() : 0L;
               long currentTotal = sessionFileRepository.sumSizeBySession(sessionId);
               long newTotal = currentTotal - oldSize + content.length;
-              if (newTotal > MAX_TOTAL_BYTES_PER_SESSION) {
+              if (newTotal > limits.maxTotalBytesPerSession()) {
                 throw new IllegalStateException("session total size limit reached");
               }
             }
@@ -306,5 +312,20 @@ public class SessionFileStore {
       throw new IllegalArgumentException(
           "session file path must not contain relative dot segments: " + path);
     }
+    if (containsControlCharacter(path)) {
+      throw new IllegalArgumentException(
+          "session file path must not contain control characters: " + path);
+    }
+  }
+
+  /** C0、DEL 与 C1 控制字符不可见，写入前拒绝；数据库 CHECK 同步约束同一规则。 */
+  private static boolean containsControlCharacter(String value) {
+    for (int index = 0; index < value.length(); index++) {
+      char character = value.charAt(index);
+      if (character < 0x20 || character == 0x7F || (character >= 0x80 && character <= 0x9F)) {
+        return true;
+      }
+    }
+    return false;
   }
 }

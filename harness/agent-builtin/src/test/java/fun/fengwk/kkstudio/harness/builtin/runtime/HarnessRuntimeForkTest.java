@@ -133,7 +133,7 @@ class HarnessRuntimeForkTest {
     // ROOT + 完整来源历史（不含来源 ROOT）+ FORK。
     assertEquals(sourcePath.entries().size() + 1, entries.size());
     assertInstanceOf(ForkPayload.class, entries.getLast().payload());
-    assertEquals(ForkPayload.NOTICE, projectedTexts(path).getLast());
+    assertEquals(ForkPayload.SESSION_NOTICE, projectedTexts(path).getLast());
 
     List<UUID> sourceIds = sourcePath.entries().stream().map(Entry::id).toList();
     for (Entry copied : entries.subList(1, entries.size() - 1)) {

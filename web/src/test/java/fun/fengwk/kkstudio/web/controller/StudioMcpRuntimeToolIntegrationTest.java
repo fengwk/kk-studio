@@ -321,21 +321,23 @@ public class StudioMcpRuntimeToolIntegrationTest extends WebPostgresTestSupport 
     String argumentsJson = "{\"message\":\"hello from full web runtime test\"}";
     ToolCall toolCall = new ToolCall(callId, modelName, argumentsJson);
     ToolInvocationRequest invocationRequest = new ToolInvocationRequest(toolCall, mcpBinding);
-    assertInstanceOf(ToolGateway.Allow.class, toolGateway.preflight(invocationRequest));
+    ToolGateway.ExecutionScope scope =
+        new ToolGateway.ExecutionScope(
+            threadId,
+            sessionId,
+            threadId,
+            sessionId,
+            UUID.randomUUID(),
+            emptyBranchView(),
+            TurnMediaCapabilities.NONE);
+    assertInstanceOf(ToolGateway.Allow.class, toolGateway.preflight(invocationRequest, scope));
 
     UUID invocationId = UUID.randomUUID();
     RecordingRemoteExecutions remoteExecutions = new RecordingRemoteExecutions();
     ToolGateway.Execution execution =
         new ToolGateway.Execution(
             invocationId,
-            new ToolGateway.ExecutionScope(
-                threadId,
-                sessionId,
-                threadId,
-                sessionId,
-                UUID.randomUUID(),
-                emptyBranchView(),
-                TurnMediaCapabilities.NONE),
+            scope,
             1,
             invocationRequest,
             ToolApproval.notRequired(),
