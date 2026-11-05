@@ -11,7 +11,7 @@ import type {
   HarnessNameUpdateDTO,
   HarnessProviderRequestPreviewDTO,
   HarnessSessionDTO,
-  HarnessSessionEntryDTO,
+  HarnessSessionEntryPageDTO,
   HarnessThreadCompactDTO,
   HarnessThreadCompactResultDTO,
   HarnessThreadDTO,
@@ -50,6 +50,12 @@ export interface GetThreadSnapshotOptions {
   signal?: AbortSignal
 }
 
+export interface ListSessionEntriesOptions {
+  cursor?: string | null
+  limit?: number
+  signal?: AbortSignal
+}
+
 export interface GetCompactionAvailabilityOptions {
   signal?: AbortSignal
 }
@@ -77,8 +83,23 @@ export function createHarnessService(client: HttpClient = apiClient) {
     listSessionThreads: (sessionId: string): Promise<HarnessThreadSummaryDTO[]> =>
       client.get(`/sessions/${encodeURIComponent(sessionId)}/threads`),
 
-    listSessionEntries: (sessionId: string): Promise<HarnessSessionEntryDTO[]> =>
-      client.get(`/sessions/${encodeURIComponent(sessionId)}/entries`),
+    /** 一页 Session Entry；`nextCursor` 原样回传即可继续翻页，null 表示末页。 */
+    listSessionEntries: (
+      sessionId: string,
+      options?: ListSessionEntriesOptions,
+    ): Promise<HarnessSessionEntryPageDTO> => {
+      const params: Record<string, unknown> = {}
+      if (options?.cursor != null) {
+        params.cursor = options.cursor
+      }
+      if (options?.limit != null) {
+        params.limit = options.limit
+      }
+      return client.get(`/sessions/${encodeURIComponent(sessionId)}/entries`, {
+        params,
+        signal: options?.signal,
+      })
+    },
 
     renameSession: (
       sessionId: string,

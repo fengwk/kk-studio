@@ -12,6 +12,7 @@ import {
   branchDraftFromEntry,
   cloneDraft,
 } from '@/features/thread/runtime/root-thread/branch-draft-replay'
+import { collectSessionEntries } from '@/features/thread/runtime/root-thread/session-entry-pages'
 import type { PaneInteraction } from '@/features/thread/runtime/root-thread/types'
 import type { HarnessSessionSummaryDTO } from '@/shared/api/generated/contracts'
 
@@ -58,7 +59,7 @@ export function usePaneNavigationQueries(options: {
   })
   const treeEntriesQuery = useQuery({
     queryKey: ['agent-pane', 'entries', historySessionId],
-    queryFn: () => harnessService.listSessionEntries(historySessionId!),
+    queryFn: ({ signal }) => collectSessionEntries(historySessionId!, signal),
     enabled:
       (interaction === 'history' || isDraftHistoryTarget(target))
       && historySessionId != null,

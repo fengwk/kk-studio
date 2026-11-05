@@ -719,15 +719,26 @@ export function assertSessionEntry(entry, { sessionId } = {}) {
 
 /** Session 的完整不可变 Entry Tree（parentEntryId 连接父节点；含非当前 head 历史分支）。 */
 export async function listSessionEntries(ctx, sessionId) {
-  const { json } = await ctx.call(
-    'GET',
-    `/api/sessions/${encodeURIComponent(sessionId)}/entries`,
-  )
-  const entries = envelopeData(json)
-  assert(Array.isArray(entries), `expected Session Entry array: ${JSON.stringify(json)}`)
-  for (const entry of entries) {
-    assertSessionEntry(entry, { sessionId })
-  }
+  const entries = []
+  let cursor = null
+  do {
+    const query = cursor == null ? '' : `?cursor=${encodeURIComponent(cursor)}`
+    const { json } = await ctx.call(
+      'GET',
+      `/api/sessions/${encodeURIComponent(sessionId)}/entries${query}`,
+    )
+    const page = envelopeData(json)
+    assert(Array.isArray(page?.items), `expected Session Entry page: ${JSON.stringify(json)}`)
+    for (const entry of page.items) {
+      assertSessionEntry(entry, { sessionId })
+      entries.push(entry)
+    }
+    cursor = page.nextCursor ?? null
+    assert(
+      cursor == null || typeof cursor === 'string',
+      `invalid Session Entry cursor: ${JSON.stringify(json)}`,
+    )
+  } while (cursor != null)
   return entries
 }
 

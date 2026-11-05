@@ -211,6 +211,10 @@ public class HarnessOwnerQueryService {
     return null;
   }
 
+  /**
+   * 摘要只读取时间事实与首条 USER 文本，不依赖树的父先于子关系；保留既有 {@code (createdAt, id)} tie-break， 避免改变 Chat
+   * 列表在毫秒同刻消息上的既有预览顺序。
+   */
   private static List<Entry> orderedEntries(List<Entry> entries) {
     Objects.requireNonNull(entries, "entries");
     return entries.stream()

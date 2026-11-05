@@ -130,6 +130,10 @@ Work 的租约 token 与 deadline 同空同非空，`target_type` 只校验大�
 执行退出事实按具体执行代次登记，`UNCONFIRMED` 可推进为真实退出或显式 `ABANDONED`，
 真实证据可替换放弃；事实保留到 Thread 深删除，不设 TTL。
 
+`loadBySession` 与 `loadPageBySession` 按 `harness_entry.entry_seq`（存储追加序）升序读取；
+写入先校验完整父链，因此父节点的追加序必小于子节点。分页以最后一条 Entry 的 id 为 keyset 游标，
+由 `(session_id, entry_seq)` 索引覆盖；`loadPageBySession` 不改变线程快照与 EntryPath 的窄读语义。
+
 `loadEntryPath` 使用一次递归 CTE 从 head 回溯 ROOT，在事务局部缓存完整路径；
 同事务内基于缓存父路径派生新 Entry 可避免重复 CTE。关闭句柄清空缓存，
 删除 Entry 或 Session 时按 Session 驱逐。冷查询的 `loadCurrent` 只回溯并返回分类所需锚点；

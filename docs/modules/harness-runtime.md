@@ -151,7 +151,7 @@ RUNNING          -> SUCCEEDED / FAILED / CANCELLED / UNKNOWN / READY（重试）
 
 `Work`、`WorkTarget`、`WorkTargetType` 与已认领快照 `ClaimedWork` 是持久化与分发共用的值契约，位于 [`spi.work`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/work/)，与 [`spi.store`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/store/)、[`spi.driver`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/driver/) 同处 SPI，见[端口与策略](#端口与策略)。
 
-时间只有一个权威域：生产是数据库时钟，内存实现是测试时钟；持久化时间戳都取自事务的 `tx.now()`。时间只记录事实发生的时刻，不承担排序——Entry 顺序由父链表达，推进由 version 与状态机表达。`requiredEnvironmentId` 只在 WorkTargetType 自己声明环境亲和性时允许非空（当前生产为 TOOL），THREAD 与 Builtin MODEL Work 必须为空；它在首次创建时冻结、之后不可改变；按当前节点是否持有该 Environment 的 READY 连接租约分发由平台实施。
+时间只有一个权威域：生产是数据库时钟，内存实现是测试时钟；持久化时间戳都取自事务的 `tx.now()`。时间只记录事实发生的时刻，不承担排序——Entry 的树内顺序由父链表达，推进由 version 与状态机表达；Session 级列表读取按存储追加顺序（`harness_entry.entry_seq`，创建顺序）分页，写入先校验父链因此父节点必先于子节点。`requiredEnvironmentId` 只在 WorkTargetType 自己声明环境亲和性时允许非空（当前生产为 TOOL），THREAD 与 Builtin MODEL Work 必须为空；它在首次创建时冻结、之后不可改变；按当前节点是否持有该 Environment 的 READY 连接租约分发由平台实施。
 
 ## Processor
 
