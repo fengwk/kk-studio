@@ -23,22 +23,38 @@ V1 写入单行 SystemSettings 默认聚合；Java 解码与 profile 默认契�
 
 ## 数据区域与维护入口
 
-| 区域 | 表与事实 | 语义事实源 |
+| V1 分段 | 表与事实 | 语义事实源 |
 | --- | --- | --- |
-| Catalog | agent_provider、agent_model（MODEL/GROUP 共用名称空间）、agent_model_group_cooldown、agent_definition、skill_package | [Platform Catalog](platform.md#catalog) |
-| Plugin | plugin_configuration：每个 Plugin 的当前普通配置与修订；plugin_credential：凭据载荷、状态、refresh lease；plugin_auth_attempt：待完成的交互式认证 | [Plugin 配置存储](platform.md#plugin-配置存储)、[Plugin credential](platform.md#plugin-credential) |
-| MCP | mcp_server、mcp_tool：配置与原子发现快照 | [Platform MCP](platform.md#mcp-server-与运行时工具目录) |
-| Environment | environment：注册身份、保存的安装设置（`install_config`）与一次性安装 code 摘要（`install_code`）；environment_connection：环境路由租约、最近 READY 宿主信息、Skill 同步投影与运维事件；cluster_node：App 节点内部 IDE 路由 origin 与心跳租约 | [Environment](harness-environment.md) |
-| Chat | chat、chat_session：owner 关系 | [Platform](platform.md#命令接受产品归属与派发) |
-| Canvas | canvas_document/group/node/resource、function_run、command_dedup、function_resource_pin | [Canvas](canvas.md) |
-| Project | project、project_issue 与 agent_thread/stage_budget/run/activity/evidence | [Project](project.md) |
-| Harness | harness_session/entry/thread/thread_command/tool_invocation/execution_exit/thread_join/thread_stop_receipt | [Harness Runtime](harness-runtime.md)、[Platform](platform.md#harness-持久化与调度) |
-| Platform Builtin | builtin_model_invocation | [Platform](platform.md#harness-持久化与调度) |
-| Durable Work | durable_work：全部后台调度共用的 mailbox，类型由各模块定义 | [Durable Work](work.md) |
-| Storage | storage_blob/upload/object_cleanup、session_blob_ref | [Storage](platform.md#storageblob-与-resource) |
-| Settings | system_setting，`id = 1` | [配置](platform.md#配置) |
+| 1 共享基础 | storage_blob、storage_upload、storage_object_cleanup：全局内容寻址、上传契约与对象删除墓碑 | [Storage](platform.md#storageblob-与-resource) |
+| 2 平台内核存储 | environment、environment_connection、cluster_node、system_setting；harness_session/entry/thread/thread_command/realtime_subscription/tool_invocation/execution_exit/thread_join/thread_stop_receipt；durable_work；session_blob_ref、session_file | [Environment](harness-environment.md)、[Harness Runtime](harness-runtime.md)、[Durable Work](work.md)、[Storage](platform.md#storageblob-与-resource) |
+| 3 平台 Driver 存储 | agent_provider、agent_model（MODEL/GROUP 共用名称空间）、agent_model_group_cooldown、agent_definition、skill_package + Git source；plugin_configuration/credential/auth_attempt；mcp_server/tool；builtin_model_invocation | [Platform Catalog](platform.md#catalog)、[Plugin 配置存储](platform.md#plugin-配置存储)、[Platform MCP](platform.md#mcp-server-与运行时工具目录) |
+| 4 产品 | Canvas：canvas_document/group/node/resource/function_run/function_resource_pin/command_dedup；Chat：chat、chat_session；Project：project、project_issue 与 agent_thread/stage_budget/run/activity/evidence | [Canvas](canvas.md)、[Project](project.md) |
 
 ```text
+storage_blob
+  <-- storage_upload
+  <-- session_blob_ref >-- harness_session
+  <-- session_file >-- harness_session
+  <-- skill_package
+  <-- canvas_resource
+  <-- project_issue_evidence
+
+environment --< environment_connection
+cluster_node
+system_setting
+
+harness_session
+  +--< harness_entry
+  +--< harness_thread --< realtime_subscription
+  |       +--< harness_thread_command
+  |       +--< harness_thread_join
+  |       +--< harness_thread_stop_receipt >-- harness_entry
+  |       +--< harness_execution_exit >-- environment
+  |       +--< harness_tool_invocation
+  |       +--< builtin_model_invocation >-- harness_entry
+  |       +--< durable_work
+  +--< session_blob_ref / session_file
+
 canvas_document
   +--< canvas_group
   +--< canvas_node --? canvas_group
@@ -47,18 +63,15 @@ canvas_document
   |                   +--< canvas_function_resource_pin >-- canvas_resource
   +--< canvas_command_dedup
 
+chat --< chat_session >-- harness_session
+
 project
   +--< project_issue
           +--< project_issue_agent_thread >-- harness_thread
           +--< project_issue_stage_budget
-          +--< project_issue_run >-- harness_thread
+          +--< project_issue_run >-- harness_thread / project_issue_stage_budget / project_issue_agent_thread
           +--< project_issue_activity --? project_issue_run
-          +--< project_issue_evidence >-- storage_blob
-
-chat --< chat_session >-- harness_session
-harness_thread >-- harness_session --< harness_entry
-harness_tool_invocation >-- harness_thread
-builtin_model_invocation >-- harness_thread / harness_entry
+          +--< project_issue_evidence >-- storage_blob / project_issue_run
 ```
 
 Canvas Resource 与 pin 使用同画布外键，Run 固定 requestId 与 lease；Project Run 通过
@@ -66,8 +79,15 @@ Canvas Resource 与 pin 使用同画布外键，Run 固定 requestId 与 lease�
 `harness_entry` 的外键。
 父链区间、权限、workflow 合法性和输出完整性由应用验证。表、列的准确清单与约束名直接查 V1。
 约束行为由 schema 模块的 fresh-install 探针在真实 PostgreSQL 上逐条验证。
-V1 的 Platform Builtin 分段声明 `builtin_model_invocation`；`durable_work.target_type` 只校验
+V1 的 Platform Driver 分段声明 `builtin_model_invocation`；`durable_work.target_type` 只校验
 `^[A-Z][A-Z0-9_]{0,15}$` 的格式，不枚举各模块的类型常量。
+
+## 类型与命名
+
+- 主键、外键和业务 ID 使用 `uuid`；时间列统一 `created_at` / `updated_at` / `last_seen_at`，类型为 `timestamptz(3)`。
+- 乐观锁统一 `bigint version`；`plugin_configuration.version` 与 `plugin_auth_attempt.config_version` 是配置 CAS 的同一代次。
+- 租约令牌统一 `uuid`：`durable_work.lease_token`、`plugin_credential.refresh_lease_token`、`harness_execution_exit.owner_lease_token`、`storage_upload.cleanup_token`。
+- 结构化载荷使用 `jsonb`；需要保留原始文本预算的 Plugin 配置使用严格 JSON object 的 `text`。
 
 ## 数据库兜底的不变量
 
@@ -75,10 +95,10 @@ V1 的 Platform Builtin 分段声明 `builtin_model_invocation`；`durable_work.
 Run 区间和节点资源属于同一聚合；CHECK 约束防御形状，业务授权与转换由 service 决定。
 所有外键为即时校验，删除依赖由应用按明确顺序处理；MCP 工具随所属 server 级联删除。
 
-Plugin 配置每个 pluginId 一行，`revision` 为正并以 CAS 推进。`values_json` 是 text：
+Plugin 配置每个 pluginId 一行，`version` 为正并以 CAS 推进。`values_json` 是 text：
 数据库要求严格 JSON object、每层对象键唯一及最多 65,536 UTF-8 字节，
 避免 jsonb 数值展开改变普通值的字节预算和恢复形态。秘密只在 `plugin_credential.payload_json` 中，
-其每次写入推进 `version`。`plugin_auth_attempt` 只保存 nonce 摘要与 prepare 时的配置修订。
+其每次写入推进 `version`。`plugin_auth_attempt` 只保存 nonce 摘要与 prepare 时的 `config_version`。
 
 Canvas Resource 的 blob/text 恰好一个非空，owner/index 成对且槽位唯一。
 Run 以 node_id 保存当前/最后执行，状态与 lease/available/error 字段组合匹配；
@@ -87,7 +107,7 @@ INPUT/OUTPUT pin 保护执行资源生命周期。UNKNOWN 保留资源并等待�
 
 Issue 同时保持工作阶段、控制暂停和 Run 执行状态；同 Issue 只允许一个活动主 Run。
 阶段预算按 Issue/state，Work 为每 Issue 一个 durable 邮箱。
-Harness 命令按 sequence 与 idempotencyKey 唯一，Thread 持有 `execution_control`（`RUNNABLE`/`STOPPED`）与 `input_through_sequence` 输入水位；`harness_execution_exit` 每个具体 Driver/Tool/Remote 代次一行，以不可变 identity（thread/invocation/attempt/lease/kind/parent）关联，保存 `UNCONFIRMED`、三类真实退出之一或显式 `ABANDONED`，不随 Invocation 删除。`ABANDONED` 只带 `abandoned_at`，真实证据只带 `confirmed_at`；真实证据替换放弃时保留原 `abandoned_at`，两种时间都不得早于 `registered_at`，但彼此没有先后约束。仅 DRIVER/TOOL 可确认 `STUDIO_EXITED`，仅 REMOTE 可确认 `REMOTE_ACKNOWLEDGED`；REMOTE 代次必须携带 `environment_id`，DRIVER/TOOL 该列必须为 NULL。部分索引 `idx_harness_execution_exit_unconfirmed_remote` 支持按环境查询 `UNCONFIRMED` 远端代次。远端代次必须挂同 Thread/invocation/attempt/lease 的 TOOL 或 DRIVER 父代。Join 固定 `terminal_entry_id`/`final_answer_entry_id` 回执与交付坐标；Stop 在 `harness_thread_stop_receipt` 按 `(thread_id, stop_request_id)` 保存逐 Thread 回执。
+Harness 命令按 sequence 与 idempotencyKey 唯一，Thread 持有 `execution_control`（`RUNNABLE`/`STOPPED`）与 `input_through_sequence` 输入水位；`harness_execution_exit` 每个具体 Driver/Tool/Remote 代次一行，以不可变 identity（thread/invocation/attempt/lease/kind/parent）关联，保存 `UNCONFIRMED`、三类真实退出之一或显式 `ABANDONED`，不随 Invocation 删除。`ABANDONED` 只带 `abandoned_at`，真实证据只带 `confirmed_at`；真实证据替换放弃时保留原 `abandoned_at`，两种时间都不得早于 `registered_at`，但彼此没有先后约束。仅 DRIVER/TOOL 可确认 `STUDIO_EXITED`，仅 REMOTE 可确认 `REMOTE_ACKNOWLEDGED`；REMOTE 代次必须携带 `environment_id`，DRIVER/TOOL 该列必须为 NULL。部分索引 `idx_harness_execution_exit_unconfirmed_remote` 支持按环境查询 `UNCONFIRMED` 远端代次。远端代次必须挂同 Thread/invocation/attempt/lease 的 TOOL 或 DRIVER 父代。Join 固定 `terminal_entry_id`/`final_answer_entry_id` 回执与交付坐标；Stop 在 `harness_thread_stop_receipt` 按 `(thread_id, stop_request_id)` 保存逐 Thread 回执；`root_stop_request_id` 归组同一次根停止，取消计数与人工输入由命令表派生。
 同一 Session 的执行根（`parent_thread_id IS NULL`）按规范化后的名称精确唯一，部分唯一索引 `uk_harness_thread_root_name` 裁决并发创建与重命名；冲突返回 HTTP 409、reason `THREAD_NAME_CONFLICT`。跨 Session 或子代理同名不受此约束，精确创建重放仍返回已有身份，不再次插入。
 `agent_definition.execution` 为可空 JSONB：USER 必填，BUILTIN 可为 null；非空对象恰含
 `driver` 和对象类型的 `settings`。具体 settings、注册 Driver 和模型引用由应用校验，
