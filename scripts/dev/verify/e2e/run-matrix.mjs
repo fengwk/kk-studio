@@ -489,7 +489,7 @@ async function main(argv) {
   }
 
   const selected = ALL_CASES.filter((c) => caseEnabled(c, args))
-  if (!selected.length) {
+  if (!selected.length && !(args.only.length && args.only.every((id) => id.startsWith('ui.')))) {
     console.error('No cases selected')
     return 2
   }

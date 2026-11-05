@@ -1,4 +1,6 @@
 import { createServer } from 'node:http'
+import { mkdir, rm, writeFile } from 'node:fs/promises'
+import path from 'node:path'
 
 import { baseModelConfig, encodePathTail } from '../lib/fixtures.mjs'
 import {
@@ -237,19 +239,21 @@ export async function runWorkspaceContractMatrix(ui) {
           // 只读单行 Footer：组分隔符固定为 U+2223（∣），组内统计项固定为 U+00B7（·）。
           const line = footer.locator('.thread-status-line')
           assert(await line.count() === 1, `Footer must render exactly one status line: ${await footer.innerText()}`)
-          const environmentText = `${fixture.otherEnvironment.name}（不可用）`
+          const environmentText = `${fixture.otherEnvironment.name} · 不可用`
           // Environment 由当前 branch settings 显式绑定，fixture 已切到另一 Card，
           // Footer 必须投影该 Environment（无 daemon 连接 => unavailable）。
           const lineText = (await line.innerText()).replace(/\s+/g, ' ').trim()
+          const expectedPrefix = `${environmentText} ∣ ctx 30/4.1k ∣ ↑16 · ↓9 · R14 · W0 · $0.000034 · cache 46.67% · `
           assert(
-            lineText === `${environmentText} ∣ ctx 30/4.1k ∣ ↑16 · ↓9 · R14 · $0.000 · cache 47% · — tok/s`,
+            lineText.startsWith(expectedPrefix)
+              && /^(?:—|\d+(?:\.\d+)?) tok\/s$/.test(lineText.slice(expectedPrefix.length)),
             `Footer facts are incorrect: ${lineText}`,
           )
           const footerTitle = await line.getAttribute('title')
           assert(
             footerTitle?.startsWith(`环境：${fixture.otherEnvironment.name}`)
               && footerTitle.includes('30 / 4096 tokens')
-              && footerTitle.includes('47%'),
+              && footerTitle.includes('46.67%'),
             `Footer hover readout is incomplete: ${footerTitle}`,
           )
           assert(await footer.getByRole('button').count() === 0, 'readonly Footer rendered a button')
@@ -274,7 +278,7 @@ export async function runWorkspaceContractMatrix(ui) {
 
   await run(
     'ui.chat.tool_card.streaming_layout_scroll',
-    'Tool 卡流式/稳定布局、write/edit/bash 审批与 transcript 滚轮传播',
+    'Tool 卡流式输入、审查布局、write/edit/bash 审批与有界滚动',
     async (caseArt) => {
       const originalViewport = page.viewportSize()
       await page.setViewportSize({ width: 720, height: 420 })
@@ -294,16 +298,26 @@ export async function runWorkspaceContractMatrix(ui) {
             const card = page.locator('.thread-tool-surface').filter({
               has: page.locator('.thread-tool-name', { hasText: 'edit' }),
             }).last()
-            const streamingPreview = card.locator('.thread-tool-preview-body.is-streaming')
+            const streamingPreview = card.locator('.thread-tool-preview-body.is-input-new')
             await streamingPreview.waitFor({ state: 'visible', timeout: 15_000 })
-            await streamingPreview.getByText('+new-8', { exact: true })
-              .waitFor({ state: 'visible', timeout: 15_000 })
+            await page.waitForFunction(
+              () => document.querySelector('.thread-tool-preview-body.is-input-new')?.textContent?.includes('new-8'),
+              undefined,
+              { timeout: 15_000 },
+            )
+            await page.waitForFunction(
+              (expected) => [...document.querySelectorAll('.thread-tool-surface')]
+                .some((surface) => surface.querySelector('.thread-tool-name')?.textContent === 'edit'
+                  && surface.querySelector('.thread-tool-summary-detail')?.textContent === expected),
+              fixture.path,
+              { timeout: 15_000 },
+            )
             const streaming = await card.evaluate((surface) => {
               const header = surface.querySelector('.thread-tool-header')
               const summary = surface.querySelector('.thread-tool-summary')
               const detail = surface.querySelector('.thread-tool-summary-detail')
               const toggle = surface.querySelector('.thread-tool-toggle')
-              const preview = surface.querySelector('.thread-tool-preview-body')
+              const preview = surface.querySelector('.thread-tool-preview-body.is-input-new')
               if (
                 !(header instanceof HTMLElement)
                 || !(summary instanceof HTMLElement)
@@ -329,35 +343,43 @@ export async function runWorkspaceContractMatrix(ui) {
             assert(streaming != null, 'streaming edit card did not expose the expected DOM')
             assert(streaming.name === 'edit', `streamed tool name was duplicated: ${streaming.name}`)
             assert(
-              streaming.previewLines.length === 5
-              && streaming.previewLines[0].includes('earlier lines')
-              && streaming.previewLines.at(-1) === '+new-8',
-              `edit streaming preview is not a five-line tail: ${JSON.stringify(streaming.previewLines)}`,
+              streaming.previewLines.length === 8
+              && streaming.previewLines[0] === 'new-1'
+              && streaming.previewLines.at(-1) === 'new-8'
+              && await card.getByText('流式输入内容', { exact: false }).count() === 1
+              && await card.locator('.thread-tool-preview-body.is-edit').count() === 0,
+              `edit streaming input was truncated or presented as a diff: ${JSON.stringify(streaming.previewLines)}`,
             )
             assert(
-              // edit summary 必须同时投影显式 workdir 与长 path，二者共同触发换行。
-              streaming.detail === `${fixture.path} in ${fixture.workdir}`
-              && streaming.detailWhiteSpace === 'normal'
+              // edit 使用绝对 path；长路径必须完整折行，不能被截断。
+              streaming.detail === fixture.path
+              && streaming.detailWhiteSpace === 'pre-wrap'
               && streaming.detailHeight > streaming.detailLineHeight * 1.5,
               `long tool header did not wrap completely: ${JSON.stringify(streaming)}`,
             )
             assert(
-              Math.abs(streaming.headerWidth - streaming.summaryWidth) <= 1
-              && streaming.togglePosition === 'absolute',
-              `hidden toggle still reserves header width: ${JSON.stringify(streaming)}`,
+              streaming.summaryWidth > 0
+              && streaming.summaryWidth < streaming.headerWidth
+              && streaming.togglePosition === 'static',
+              `tool header does not reserve room for its toggle: ${JSON.stringify(streaming)}`,
             )
 
             await fixture.finish()
-            const approval = card.locator('.thread-tool-approval')
+            const approval = page.locator('.interaction-approval-card')
             await approval.waitFor({ state: 'visible', timeout: 15_000 })
-            const completedPreview = card.locator('.thread-tool-preview-body.is-edit.is-unbounded')
-            await completedPreview.waitFor({ state: 'visible', timeout: 15_000 })
+            const completedPreview = approval.locator('.thread-tool-preview-body.is-edit')
+            try {
+              await completedPreview.waitFor({ state: 'visible', timeout: 15_000 })
+            } catch {
+              const interactions = await apiCtx.call('GET', `/api/interactions?rootThreadId=${encodeURIComponent(fixture.threadId)}`)
+              throw new Error(`edit review missing from approval: ${await approval.innerText()}; ${JSON.stringify(interactions.json)}`)
+            }
             const completedText = await completedPreview.textContent() ?? ''
             assert(
-              completedText.includes('-old-1')
-              && completedText.includes('-old-8')
-              && completedText.includes('+new-1')
-              && completedText.includes('+new-8')
+              completedText.includes('- 1|old-1')
+              && completedText.includes('- 8|old-8')
+              && completedText.includes('+ 1|new-1')
+              && completedText.includes('+ 8|new-8')
               && !completedText.includes('more lines'),
               `completed edit diff is not fully visible: ${completedText}`,
             )
@@ -367,14 +389,20 @@ export async function runWorkspaceContractMatrix(ui) {
               `edit did not enter approval: ${await approval.innerText()}`,
             )
             const editDeny = approval.getByRole('button', { name: '拒绝', exact: true })
-            const denyStyle = await editDeny.evaluate((element) => ({
-              borderColor: getComputedStyle(element).borderColor,
-              dangerBorder: getComputedStyle(document.documentElement)
-                .getPropertyValue('--danger-border')
-                .trim(),
-            }))
+            const denyStyle = await editDeny.evaluate((element) => {
+              const probe = document.createElement('span')
+              probe.style.borderColor = 'var(--danger-strong)'
+              element.parentElement.appendChild(probe)
+              const result = {
+                borderColor: getComputedStyle(element).borderColor,
+                dangerBorder: getComputedStyle(probe).borderColor,
+                danger: element.classList.contains('danger'),
+              }
+              probe.remove()
+              return result
+            })
             assert(
-              denyStyle.borderColor === denyStyle.dangerBorder,
+              denyStyle.danger && denyStyle.borderColor === denyStyle.dangerBorder,
               `deny button does not use the danger border: ${JSON.stringify(denyStyle)}`,
             )
             await editDeny.click()
@@ -404,8 +432,8 @@ export async function runWorkspaceContractMatrix(ui) {
               tabIndex: element.getAttribute('tabindex'),
             }))
             assert(
-              outputStyle.overflow === 'visible' && outputStyle.tabIndex == null,
-              `tool output still owns nested scrolling: ${JSON.stringify(outputStyle)}`,
+              outputStyle.overflow === 'auto' && outputStyle.tabIndex === '0',
+              `tool output is not a bounded keyboard-accessible viewport: ${JSON.stringify(outputStyle)}`,
             )
 
             await fixture.start('write')
@@ -415,7 +443,7 @@ export async function runWorkspaceContractMatrix(ui) {
               has: page.locator('.thread-tool-name', { hasText: 'write' }),
             }).last()
             await fixture.finish()
-            const writeApproval = writeCard.locator('.thread-tool-approval')
+            const writeApproval = page.locator('.interaction-approval-card')
             await writeApproval.waitFor({ state: 'visible', timeout: 15_000 })
             assert(
               await writeCard.locator('.thread-tool-name').textContent() === 'write'
@@ -437,7 +465,7 @@ export async function runWorkspaceContractMatrix(ui) {
               has: page.locator('.thread-tool-name', { hasText: 'bash' }),
             }).last()
             await fixture.finish()
-            const bashApproval = bashCard.locator('.thread-tool-approval')
+            const bashApproval = page.locator('.interaction-approval-card')
             await bashApproval.waitFor({ state: 'visible', timeout: 15_000 })
             assert(
               await bashCard.locator('.thread-tool-name').textContent() === 'bash'
@@ -465,7 +493,7 @@ export async function runWorkspaceContractMatrix(ui) {
 
   await run(
     'ui.chat.task_status.async_thread_approval',
-    'Task tool 卡片呈现 accepted 回执并链接至 /threads/:threadId，进入子 Thread 可进行独立审批',
+    'Task 回执链接子 Thread；根控制区汇聚并向子 Thread 提交审批',
     async (caseArt) => {
       await withUiFixture(
         page,
@@ -478,27 +506,53 @@ export async function runWorkspaceContractMatrix(ui) {
             has: page.locator('.thread-tool-name', { hasText: 'task' }),
           }).last()
           await taskCard.waitFor({ state: 'visible', timeout: 25_000 })
-          await taskCard.getByText('已接受 / 后台执行').waitFor({ state: 'visible', timeout: 15_000 })
-
           const link = taskCard.locator('.task-tool-thread-link')
           await link.waitFor({ state: 'visible', timeout: 10_000 })
           const href = await link.getAttribute('href')
-          const childThreadId = (await link.innerText()).trim()
-          assert(href === `/threads/${childThreadId}`, `unexpected thread link href: ${href}`)
+          const childThreadId = href?.split('/').at(-1)
+          assert(
+            /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(childThreadId ?? '')
+              && href === `/threads/${childThreadId}`,
+            `unexpected thread link href: ${href}`,
+          )
 
           let resolveApproval
           const approvalPromise = new Promise((resolve) => {
             resolveApproval = resolve
           })
 
-          const snapshotMatcher = (url) => url.pathname === `/api/threads/${childThreadId}`
-          const snapshotHandler = async (route) => {
+          const invocationId = cid()
+          let decided = false
+          const interactionsMatcher = (url) => url.pathname === '/api/interactions'
+            && url.searchParams.get('rootThreadId') === fixture.threadId
+          const interactionsHandler = async (route) => {
             await route.fulfill({
               status: 200,
               contentType: 'application/json',
               body: JSON.stringify({
                 status: 200,
-                data: childSnapshotWithPendingTool(childThreadId, fixture.threadId),
+                data: {
+                  items: decided ? [] : [{
+                    type: 'APPROVAL',
+                    interactionId: invocationId,
+                    status: 'WAITING_APPROVAL',
+                    threadId: childThreadId,
+                    rootThreadId: fixture.threadId,
+                    sessionId: fixture.sessionId,
+                    owner: { kind: 'CHAT', id: fixture.chat.id, title: fixture.chat.title, link: `/chats/${fixture.chat.id}` },
+                    toolCallId: 'call-bash-1',
+                    toolName: 'bash',
+                    argumentsJson: '{"command":"echo approval"}',
+                    approvalJson: JSON.stringify({ required: true, decision: null, reason: 'Permission rules require approval' }),
+                    environmentId: null,
+                    environmentName: null,
+                    waitingCount: null,
+                    createTime: 1,
+                  }],
+                  nextCursor: null,
+                  total: decided ? 0 : 1,
+                  freshnessAt: null,
+                },
               }),
             })
           }
@@ -508,6 +562,7 @@ export async function runWorkspaceContractMatrix(ui) {
             && url.pathname.endsWith('/approval')
           const approvalHandler = async (route) => {
             const request = route.request()
+            decided = true
             resolveApproval({
               target: request.url(),
               body: request.postDataJSON(),
@@ -518,25 +573,24 @@ export async function runWorkspaceContractMatrix(ui) {
               body: JSON.stringify({
                 status: 200,
                 data: {
-                  id: 'inv-bash-1',
+                  id: invocationId,
                   status: 'RUNNING',
                 },
               }),
             })
           }
 
-          await page.route(snapshotMatcher, snapshotHandler)
+          await page.route(interactionsMatcher, interactionsHandler)
           await page.route(approvalMatcher, approvalHandler)
 
           try {
-            await link.click()
-            await page.waitForURL(`**/threads/${childThreadId}`)
-            const approval = page.locator('.thread-tool-approval')
+            await page.reload({ waitUntil: 'networkidle', timeout: 30_000 })
+            const approval = page.locator('.interaction-approval-card')
             await approval.waitFor({ state: 'visible', timeout: 15_000 })
             assert(
               await approval.getByRole('button', { name: '允许', exact: true }).count() === 1
               && await approval.getByRole('button', { name: '拒绝', exact: true }).count() === 1,
-              'child thread approval controls missing',
+              'root control area did not expose child approval controls',
             )
 
             await approval.getByRole('button', { name: '允许', exact: true }).click()
@@ -547,7 +601,7 @@ export async function runWorkspaceContractMatrix(ui) {
               }),
             ])
             assert(
-              approvalTarget.includes(`/threads/${childThreadId}/tool-invocations/inv-bash-1/approval`),
+              approvalTarget.includes(`/threads/${childThreadId}/tool-invocations/${invocationId}/approval`),
               `approval did not target the child thread: ${approvalTarget}`,
             )
             assert(
@@ -558,7 +612,7 @@ export async function runWorkspaceContractMatrix(ui) {
             await shot(caseArt, 'child-thread-approval-routed')
             expectNoFatal(pageErrors, consoleErrors)
           } finally {
-            await page.unroute(snapshotMatcher, snapshotHandler).catch(() => undefined)
+            await page.unroute(interactionsMatcher, interactionsHandler).catch(() => undefined)
             await page.unroute(approvalMatcher, approvalHandler).catch(() => undefined)
           }
         },
@@ -885,83 +939,6 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
   }
 }
 
-function childSnapshotWithPendingTool(targetThreadId, rootThreadId) {
-  const toolEntry = {
-    entryId: 'entry-tool-1',
-    sessionId: 'session-child',
-    parentEntryId: null,
-    entryType: 'MESSAGE',
-    payloadJson: JSON.stringify({
-      message: {
-        role: 'ASSISTANT',
-        contents: [
-          {
-            type: 'tool_call',
-            toolCallId: 'call-bash-1',
-            toolName: 'bash',
-            rendererKey: 'bash',
-            argumentsJson: '{"command":"rm -rf /tmp/test"}',
-          },
-        ],
-      },
-    }),
-    createTime: '2026-07-28T10:00:01Z',
-  }
-
-  return {
-    thread: {
-      threadId: targetThreadId,
-      name: 'Child Worker Thread',
-      sessionId: 'session-child',
-      headEntryId: 'entry-tool-1',
-      // task 委派产生的是真实子代理：执行父关系与 rootThreadId 指向父执行根，自身 YOLO 开关恒为 false。
-      parentThreadId: rootThreadId,
-      rootThreadId,
-      yoloEnabled: false,
-      nextCommandSequence: '1',
-      version: '1',
-      status: 'RUNNING',
-      executionControl: 'RUNNABLE',
-      branchSettings: {
-        agentName: 'worker',
-        execution: { driver: 'builtin', settings: { modelName: 'MiniMax', variant: 'default' } },
-        environmentName: null,
-      },
-      createTime: '2026-07-28T10:00:00Z',
-      updateTime: '2026-07-28T10:00:00Z',
-    },
-    entries: [toolEntry],
-    queuedCommands: [],
-    toolInvocations: [
-      {
-        id: 'inv-bash-1',
-        turnStartEntryId: 'entry-turn-1',
-        assistantEntryId: 'entry-tool-1',
-        callIndex: 0,
-        status: 'WAITING_APPROVAL',
-        attempt: 1,
-        toolCallId: 'call-bash-1',
-        toolName: 'bash',
-        rendererKey: 'bash',
-        environmentId: null,
-        argumentsJson: '{"command":"rm -rf /tmp/test"}',
-        approvalJson: JSON.stringify({
-          required: true,
-          decision: null,
-          decisionId: null,
-          reason: 'Dangerous shell command execution',
-        }),
-        resultJson: null,
-        errorJson: null,
-        createTime: '2026-07-28T10:00:01Z',
-        updateTime: '2026-07-28T10:00:01Z',
-      },
-    ],
-    activeAssistantOutput: null,
-    generationFailures: [],
-  }
-}
-
 async function createActiveTaskFixture(apiCtx, stamp) {
   const suffix = cid().slice(0, 8)
   const parentMarker = `active task ${stamp} ${suffix}`
@@ -1113,13 +1090,15 @@ async function createToolCardFixture(apiCtx, stamp, daemonEnv) {
     typeof matchedEnv.homeDirectory === 'string' && matchedEnv.homeDirectory.startsWith('/'),
     `daemonEnv '${daemonEnv}' must project an absolute homeDirectory for explicit workdir arguments: ${JSON.stringify(matchedEnv)}`,
   )
-  const workdir = matchedEnv.homeDirectory
-  const path =
-    `${workdir}/${'very-long-directory-segment/'.repeat(12)}`
+  const workdir = process.env.DAEMON_ENV_ROOT
+  assert(typeof workdir === 'string' && workdir.startsWith('/'), 'tool fixture requires an isolated DAEMON_ENV_ROOT')
+  const fixtureDir = `${workdir}/e2e-tool-card-${suffix}`
+  const filePath =
+    `${fixtureDir}/${'very-long-directory-segment/'.repeat(12)}`
     + 'QuickSort.java'
   const mock = new ToolCardOpenAiMock({
     markers,
-    path,
+    path: filePath,
     workdir,
     oldText: Array.from({ length: 8 }, (_, index) => `old-${index + 1}`).join('\n'),
     newText: Array.from({ length: 8 }, (_, index) => `new-${index + 1}`).join('\n'),
@@ -1131,13 +1110,16 @@ async function createToolCardFixture(apiCtx, stamp, daemonEnv) {
     markers,
     mock,
     model: null,
-    path,
+    path: filePath,
+    fixtureDir,
     provider: null,
     sessionId: null,
     threadId: null,
     workdir,
   }
   try {
+    await mkdir(path.dirname(filePath), { recursive: true })
+    await writeFile(filePath, Array.from({ length: 8 }, (_, index) => `old-${index + 1}`).join('\n'))
     await mock.start()
     const providerResponse = await apiCtx.call('POST', '/api/providers', {
       name: `e2e-ui-tool-card-provider-${suffix}`,
@@ -1373,6 +1355,7 @@ async function cleanupToolCardFixture(state) {
     await stopThreadForCleanup(state.apiCtx, state.threadId)
   })
   await cleanup('tool-card mock', errors, () => state.mock.close())
+  await cleanup('tool-card files', errors, () => rm(state.fixtureDir, { recursive: true, force: true }))
   await cleanup('tool-card chat', errors, async () => {
     if (state.chat?.id) {
       await state.apiCtx.call(
@@ -1531,7 +1514,6 @@ class ToolCardOpenAiMock {
           path,
           old_string: oldText,
           new_string: newText,
-          workdir,
         }),
       },
       write: {
@@ -1539,7 +1521,6 @@ class ToolCardOpenAiMock {
         argumentsJson: JSON.stringify({
           path,
           content: Array.from({ length: 8 }, (_, index) => `write-${index + 1}`).join('\n'),
-          workdir,
         }),
       },
     }
@@ -1618,6 +1599,7 @@ class ToolCardOpenAiMock {
         },
         finish_reason: 'tool_calls',
       }],
+      usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
     }))
     response.end('data: [DONE]\n\n')
     this.callResponse = null
@@ -1764,6 +1746,7 @@ class ToolCardOpenAiMock {
       created,
       model: body.model || 'e2e-ui-tool-card-model',
       choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
     }))
     response.end('data: [DONE]\n\n')
   }
@@ -1889,6 +1872,7 @@ class TaskHoldingOpenAiMock {
       created,
       model: body.model || 'e2e-ui-task-model',
       choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
     }))
     response.end('data: [DONE]\n\n')
   }
@@ -1933,6 +1917,7 @@ class TaskHoldingOpenAiMock {
       created,
       model: body.model || 'e2e-ui-task-model',
       choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }],
+      usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
     }))
     response.end('data: [DONE]\n\n')
   }
