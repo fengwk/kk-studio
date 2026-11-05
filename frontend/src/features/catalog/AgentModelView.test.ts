@@ -50,5 +50,4 @@ describe('AgentModelView', () => {
     expect(formatModelLabel('', 'v1')).toBe('v1')
     expect(formatModelLabel('', '')).toBe('unknown-model')
   })
-
 })
