@@ -38,7 +38,7 @@ function hasHeaderUnsafeCharacter(value: string): boolean {
   return /[\u0000-\u001f\u007f]/.test(value)
 }
 
-export function validateUpstream(target: IdeStreamUpstream): IdeStreamUpstream {
+function validateUpstream(target: IdeStreamUpstream): IdeStreamUpstream {
   if (typeof target !== 'object' || target === null) {
     throw new IdeError('resolved upstream is required')
   }

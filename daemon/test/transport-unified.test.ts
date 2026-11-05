@@ -13,9 +13,6 @@ import { constants as h2constants } from 'node:http2'
 
 import {
   createDaemonTransport,
-  handleIdeConnectRequest,
-  handleIdeHttpRequest,
-  validateUpstream,
 } from '../src/transport/index.js'
 import { Runtime } from '../src/runtime.js'
 import { applyNetworkSettings } from '../src/network.js'
@@ -484,7 +481,7 @@ describe('Unified Transport & Control Protocol', () => {
       peer = new FakeStudioPeer()
       await peer.start()
 
-      let currentMode: 'VIEW_GONE' | 'UNAVAILABLE' | 'OTHER' = 'VIEW_GONE'
+      let currentMode: 'VIEW_GONE' | 'UNAVAILABLE' | 'OTHER' | 'INVALID_UPSTREAM' = 'VIEW_GONE'
       const mockIde: IdeService = {
         resolveView: async () => {
           if (currentMode === 'VIEW_GONE') {
@@ -492,6 +489,9 @@ describe('Unified Transport & Control Protocol', () => {
           }
           if (currentMode === 'UNAVAILABLE') {
             throw new IdeError('code-server down', 'UNAVAILABLE')
+          }
+          if (currentMode === 'INVALID_UPSTREAM') {
+            return { host: 'invalid.upstream.example.com' } as unknown as IdeStreamUpstream
           }
           throw new Error('network explosion')
         },
@@ -526,6 +526,10 @@ describe('Unified Transport & Control Protocol', () => {
       currentMode = 'OTHER'
       const res502 = await peer.requestHttp('/ide/11111111-1111-4111-8111-111111111111/1/', 'GET')
       expect(res502.status).toBe(502)
+
+      currentMode = 'INVALID_UPSTREAM'
+      const res503Invalid = await peer.requestHttp('/ide/11111111-1111-4111-8111-111111111111/1/', 'GET')
+      expect(res503Invalid.status).toBe(503)
 
       // 格式错误的路径返回 400
       const res400 = await peer.requestHttp('/ide/invalid-path', 'GET')
