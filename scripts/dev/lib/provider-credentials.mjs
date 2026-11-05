@@ -98,7 +98,7 @@ async function defaultRequest(url, { body, headers = {}, timeoutMillis = 30000 }
   if (!response.ok) {
     throw new HttpError(response.status)
   }
-  return response.json()
+  return response.status === 204 ? null : response.json()
 }
 
 /** Fetch existing providers from the backend. */
@@ -181,7 +181,7 @@ export async function syncProviderSpecs(backendUrl, specs, envValues, request = 
 
   // Step 3: Fetch existing providers once
   const listed = await getProviders(base, request)
-  const rows = listed?.data?.results || []
+  const rows = listed?.results || []
   const rowMap = new Map(
     rows.filter((row) => row !== null && typeof row === 'object' && 'name' in row).map((row) => [row.name, row]),
   )
@@ -208,8 +208,7 @@ export async function syncProviderSpecs(backendUrl, specs, envValues, request = 
   const results = new Map()
   for (const [spec, payload] of validations) {
     const body = await putProvider(base, spec.name, payload, request)
-    const data = body?.data || {}
-    results.set(spec.name, `${spec.name}: configured=${flag(data.configured)} baseUrl_set=${flag(data.baseUrl)}`)
+    results.set(spec.name, `${spec.name}: configured=${flag(body?.configured)} baseUrl_set=${flag(body?.baseUrl)}`)
   }
 
   // Step 6: Return formatted lines in deterministic spec order

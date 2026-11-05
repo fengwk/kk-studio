@@ -19,13 +19,15 @@ async function withResponses(mutate, run) {
         : 'responseStatus'
     const fixture = fixtures[kind]
     const body = {
+      type: 'about:blank',
+      title: fixture.messages[language],
+      status: fixture.status,
       code: fixture.code,
-      message: fixture.messages[language],
-      errors: { ...fixture.errors, ...(fixture.titles ? { title: fixture.titles[language] } : {}) },
+      detail: fixture.detail,
     }
     requests.push({ path: req.url, language: req.headers['accept-language'] })
     mutate(body, kind, language)
-    res.writeHead(fixture.status, { 'Content-Type': 'application/json' })
+    res.writeHead(fixture.status, { 'Content-Type': 'application/problem+json' })
     res.end(JSON.stringify(body))
   })
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
@@ -48,16 +50,9 @@ test('localized error case checks Chinese display text, stable codes and languag
   })
 })
 
-test('localized error case rejects translated machine resource ids', async () => {
-  // 负对照确保不会把机器资源标识一起翻译。
-  for (const [field, value, expected] of [
-    ['resource', '对话', /"resource":"对话"/],
-  ]) {
-    await withResponses((body, kind, language) => {
-      if (kind === 'domain' && language === 'zh-CN') {
-        if (field === 'message') body.message = value
-        else body.errors.resource = value
-      }
-    }, (ctx) => assert.rejects(() => caseDef.run(ctx), expected))
-  }
+test('localized error case rejects a changed stable code', async () => {
+  // 负对照确保本地化不会改变机器类别。
+  await withResponses((body, kind, language) => {
+    if (kind === 'domain' && language === 'zh-CN') body.code = 'validation'
+  }, (ctx) => assert.rejects(() => caseDef.run(ctx), /"code":"validation"/))
 })

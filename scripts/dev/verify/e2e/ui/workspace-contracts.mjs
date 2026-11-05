@@ -23,7 +23,6 @@ import {
 import {
   assert,
   cid,
-  envelopeData,
   sleep,
 } from '../lib/http.mjs'
 import { seedSplitChatPanes } from './chat-pane-storage.mjs'
@@ -538,29 +537,26 @@ export async function runWorkspaceContractMatrix(ui) {
               status: 200,
               contentType: 'application/json',
               body: JSON.stringify({
-                status: 200,
-                data: {
-                  items: decided ? [] : [{
-                    type: 'APPROVAL',
-                    interactionId: invocationId,
-                    status: 'WAITING_APPROVAL',
-                    threadId: childThreadId,
-                    rootThreadId: fixture.threadId,
-                    sessionId: fixture.sessionId,
-                    owner: { kind: 'CHAT', id: fixture.chat.id, title: fixture.chat.title, link: `/chats/${fixture.chat.id}` },
-                    toolCallId: 'call-bash-1',
-                    toolName: 'bash',
-                    argumentsJson: '{"command":"echo approval"}',
-                    approvalJson: JSON.stringify({ required: true, decision: null, reason: 'Permission rules require approval' }),
-                    environmentId: null,
-                    environmentName: null,
-                    waitingCount: null,
-                    createTime: 1,
-                  }],
-                  nextCursor: null,
-                  total: decided ? 0 : 1,
-                  freshnessAt: null,
-                },
+                items: decided ? [] : [{
+                  type: 'APPROVAL',
+                  interactionId: invocationId,
+                  status: 'WAITING_APPROVAL',
+                  threadId: childThreadId,
+                  rootThreadId: fixture.threadId,
+                  sessionId: fixture.sessionId,
+                  owner: { kind: 'CHAT', id: fixture.chat.id, title: fixture.chat.title, link: `/chats/${fixture.chat.id}` },
+                  toolCallId: 'call-bash-1',
+                  toolName: 'bash',
+                  argumentsJson: '{"command":"echo approval"}',
+                  approvalJson: JSON.stringify({ required: true, decision: null, reason: 'Permission rules require approval' }),
+                  environmentId: null,
+                  environmentName: null,
+                  waitingCount: null,
+                  createTime: 1,
+                }],
+                nextCursor: null,
+                total: decided ? 0 : 1,
+                freshnessAt: null,
               }),
             })
           }
@@ -579,11 +575,8 @@ export async function runWorkspaceContractMatrix(ui) {
               status: 200,
               contentType: 'application/json',
               body: JSON.stringify({
-                status: 200,
-                data: {
-                  id: invocationId,
-                  status: 'RUNNING',
-                },
+                id: invocationId,
+                status: 'RUNNING',
               }),
             })
           }
@@ -663,7 +656,7 @@ export async function runWorkspaceContractMatrix(ui) {
     'ui.settings.system_contract_cas',
     'Settings server tab 与 /api/settings 契约：完整聚合 CAS、冲突确认后刷新，并在收尾恢复全局状态',
     async (caseArt) => {
-      const readSettings = async () => envelopeData((await apiCtx.call('GET', '/api/settings')).json)
+      const readSettings = async () => (await apiCtx.call('GET', '/api/settings')).json
       const before = await readSettings()
       const original = before.aiRuntime.retryBaseDelayMillis
       // Long 在 wire 上是十进制字符串。
@@ -754,7 +747,7 @@ export async function runWorkspaceContractMatrix(ui) {
           }
           const res = await apiCtx.call('PUT', '/api/settings', restore)
           if (res.status === 200) {
-            const restored = envelopeData(res.json)
+            const restored = res.json
             assert(restored.aiRuntime.retryBaseDelayMillis === original, 'restore was not applied')
             break
           }
@@ -820,7 +813,7 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
       environmentResponse.status === 201,
       `create usage environment: ${JSON.stringify(environmentResponse)}`,
     )
-    state.environment = envelopeData(environmentResponse.json)
+    state.environment = environmentResponse.json
 
     const providerResponse = await apiCtx.call('POST', '/api/providers', {
       name: `e2e-ui-usage-provider-${suffix}`,
@@ -832,7 +825,7 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
       modelCallIdleTimeoutMillis: 10_000,
     })
     assert(providerResponse.status === 201, `create usage provider: ${JSON.stringify(providerResponse)}`)
-    state.provider = envelopeData(providerResponse.json)
+    state.provider = providerResponse.json
 
     const modelResponse = await apiCtx.call('POST', '/api/models', {
       kind: 'MODEL',
@@ -851,7 +844,7 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
       }),
     })
     assert(modelResponse.status === 201, `create usage model: ${JSON.stringify(modelResponse)}`)
-    state.model = envelopeData(modelResponse.json)
+    state.model = modelResponse.json
 
     const agentResponse = await apiCtx.call('POST', '/api/agents', {
       name: `e2e-ui-usage-agent-${suffix}`,
@@ -861,7 +854,7 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
       config: { tools: [], skills: [], subagents: [] },
     })
     assert(agentResponse.status === 201, `create usage agent: ${JSON.stringify(agentResponse)}`)
-    state.agent = envelopeData(agentResponse.json)
+    state.agent = agentResponse.json
 
     state.chat = await createChat(apiCtx, {
       title: `e2e-ui-footer-${stamp}-${suffix}`,
@@ -897,7 +890,7 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
       otherEnvironmentResponse.status === 201,
       `create alt usage environment: ${JSON.stringify(otherEnvironmentResponse)}`,
     )
-    state.otherEnvironment = envelopeData(otherEnvironmentResponse.json)
+    state.otherEnvironment = otherEnvironmentResponse.json
     const otherAgentResponse = await apiCtx.call('POST', '/api/agents', {
       name: `e2e-ui-usage-alt-agent-${suffix}`,
       description: 'Second environment-bound agent for Footer projection tests.',
@@ -909,7 +902,7 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
       otherAgentResponse.status === 201,
       `create alt usage agent: ${JSON.stringify(otherAgentResponse)}`,
     )
-    state.otherAgent = envelopeData(otherAgentResponse.json)
+    state.otherAgent = otherAgentResponse.json
 
     const switched = await acceptCommandBatch(apiCtx, {
       owner,
@@ -975,7 +968,7 @@ async function createActiveTaskFixture(apiCtx, stamp) {
       modelCallIdleTimeoutMillis: 60_000,
     })
     assert(providerResponse.status === 201, `create task provider: ${JSON.stringify(providerResponse)}`)
-    state.provider = envelopeData(providerResponse.json)
+    state.provider = providerResponse.json
 
     const modelResponse = await apiCtx.call('POST', '/api/models', {
       kind: 'MODEL',
@@ -994,7 +987,7 @@ async function createActiveTaskFixture(apiCtx, stamp) {
       }),
     })
     assert(modelResponse.status === 201, `create task model: ${JSON.stringify(modelResponse)}`)
-    state.model = envelopeData(modelResponse.json)
+    state.model = modelResponse.json
 
     const childResponse = await apiCtx.call('POST', '/api/agents', {
       name: childName,
@@ -1004,7 +997,7 @@ async function createActiveTaskFixture(apiCtx, stamp) {
       config: { tools: [], skills: [], subagents: [] },
     })
     assert(childResponse.status === 201, `create task child: ${JSON.stringify(childResponse)}`)
-    state.childAgent = envelopeData(childResponse.json)
+    state.childAgent = childResponse.json
 
     const parentResponse = await apiCtx.call('POST', '/api/agents', {
       name: `e2e-ui-task-parent-${suffix}`,
@@ -1018,7 +1011,7 @@ async function createActiveTaskFixture(apiCtx, stamp) {
       },
     })
     assert(parentResponse.status === 201, `create task parent: ${JSON.stringify(parentResponse)}`)
-    state.parentAgent = envelopeData(parentResponse.json)
+    state.parentAgent = parentResponse.json
 
     state.chat = await createChat(apiCtx, {
       title: `e2e-ui-task-${stamp}-${suffix}`,
@@ -1139,7 +1132,7 @@ async function createToolCardFixture(apiCtx, stamp, daemonEnv) {
       modelCallIdleTimeoutMillis: 60_000,
     })
     assert(providerResponse.status === 201, `create tool-card provider: ${JSON.stringify(providerResponse)}`)
-    state.provider = envelopeData(providerResponse.json)
+    state.provider = providerResponse.json
 
     const modelResponse = await apiCtx.call('POST', '/api/models', {
       kind: 'MODEL',
@@ -1158,7 +1151,7 @@ async function createToolCardFixture(apiCtx, stamp, daemonEnv) {
       }),
     })
     assert(modelResponse.status === 201, `create tool-card model: ${JSON.stringify(modelResponse)}`)
-    state.model = envelopeData(modelResponse.json)
+    state.model = modelResponse.json
 
 
     const agentResponse = await apiCtx.call('POST', '/api/agents', {
@@ -1173,7 +1166,7 @@ async function createToolCardFixture(apiCtx, stamp, daemonEnv) {
       },
     })
     assert(agentResponse.status === 201, `create tool-card agent: ${JSON.stringify(agentResponse)}`)
-    state.agent = envelopeData(agentResponse.json)
+    state.agent = agentResponse.json
 
     state.chat = await createChat(apiCtx, {
       title: `e2e-ui-tool-card-${stamp}-${suffix}`,

@@ -45,25 +45,25 @@ function createSettingsWorld(network) {
       world.puts.push({ body: structuredClone(body), versionAtCall: String(version) })
       const keys = Object.keys(body).sort()
       if (keys.length !== EXPECTED_KEYS.length || !keys.every((key, index) => key === EXPECTED_KEYS[index])) {
-        return { status: 400, json: { error: { message: `PUT body keys mismatch: ${JSON.stringify(keys)}` } } }
+        return { status: 400, json: { type: 'about:blank', status: 400, code: 'validation', title: 'Invalid request', detail: `PUT body keys mismatch: ${JSON.stringify(keys)}` } }
       }
       const injected = world.onPut ? world.onPut(body) : null
       if (injected) {
         return injected
       }
       if (body.expectedVersion !== String(version)) {
-        return { status: 409, json: { error: { message: 'version conflict' } } }
+        return { status: 409, json: { type: 'about:blank', status: 409, code: 'version_conflict', title: 'Version conflict' } }
       }
       for (const section of SECTIONS) {
         state[section] = structuredClone(body[section])
       }
       version += 1n
-      return { status: 200, json: { data: world.get() } }
+      return { status: 200, json: world.get() }
     },
     call(method, requestPath, body) {
       assert.equal(requestPath, '/api/settings')
       if (method === 'GET') {
-        return Promise.resolve({ status: 200, json: { data: world.get() } })
+        return Promise.resolve({ status: 200, json: world.get() })
       }
       if (method === 'PUT') {
         return Promise.resolve(world.put(body))
@@ -116,7 +116,7 @@ function createSettingsPage(world) {
           async click() {
             const response = world.put(draftBody())
             if (response.status === 200) {
-              view.knownVersion = response.json.data.version
+              view.knownVersion = response.json.version
               view.latestVisible = true
               view.conflictVisible = false
             } else if (response.status === 409) {
@@ -262,7 +262,7 @@ test('system_contract_cas still restores from the latest version when the extern
     if (body.aiRuntime.retryBaseDelayMillis === EXTERNAL_DELAY) {
       world.advanceVersion()
       world.onPut = null
-      return { status: 409, json: { error: { message: 'version conflict' } } }
+      return { status: 409, json: { type: 'about:blank', status: 409, code: 'version_conflict', title: 'Version conflict' } }
     }
     return null
   }

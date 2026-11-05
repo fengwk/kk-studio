@@ -114,7 +114,7 @@ test('test intent: getProviders issues a GET against the paged catalog endpoint'
   const [url, data] = calls[0]
   assert.ok(url.startsWith('http://backend:18080/api/providers?'))
   assert.equal(data, null)
-  assert.deepEqual(result.data.results, [{ name: 'test-p' }])
+  assert.deepEqual(result.results, [{ name: 'test-p' }])
 })
 
 test('test intent: getProviders wraps network failures without exposing internals', async () => {

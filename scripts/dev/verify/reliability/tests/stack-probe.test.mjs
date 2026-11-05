@@ -13,16 +13,16 @@ const probe = (args, input) =>
 const workspace = { Type: 'volume', Destination: '/workspace', Name: 'vol', RW: true }
 
 test('test intent: environment readiness needs READY and ready=true', () => {
-  const rows = (row) => ({ data: [{ name: 'env', ...row }] })
+  const rows = (row) => [{ name: 'env', ...row }]
   assert.equal(probe(['environment-ready', 'env'], rows({ status: 'READY', ready: true })).status, 0)
   assert.equal(probe(['environment-ready', 'env'], rows({ status: 'READY', ready: false })).status, 1)
   assert.equal(probe(['environment-ready', 'missing'], rows({ status: 'READY', ready: true })).status, 1)
 })
 
 test('test intent: environment status is printed with Python-style scalars and a missing one fails', () => {
-  const ok = probe(['environment-status', 'env'], { data: [{ name: 'env', status: 'READY', ready: true }] })
+  const ok = probe(['environment-status', 'env'], [{ name: 'env', status: 'READY', ready: true }])
   assert.equal(ok.stdout, 'environment=env status=READY ready=True\n')
-  const missing = probe(['environment-status', 'env'], { data: [] })
+  const missing = probe(['environment-status', 'env'], [])
   assert.equal(missing.status, 1)
   assert.equal(missing.stderr, 'environment not found: env\n')
 })

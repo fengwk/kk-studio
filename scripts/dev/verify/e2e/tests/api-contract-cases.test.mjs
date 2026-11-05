@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 
 import { providerCreateBody, providerUpdateBody } from '../lib/fixtures.mjs'
-import { HttpError } from '../lib/http.mjs'
+import { problemError } from './fixtures/problem.mjs'
 import { ALL_CASES, getCase } from '../run-matrix.mjs'
 
 const RUN_MATRIX = fileURLToPath(new URL('../run-matrix.mjs', import.meta.url))
@@ -39,7 +39,7 @@ function chatDefaultEnvironmentFixture() {
     requests.push({ method, path, body })
     const pathname = new URL(path, 'http://fixture.local').pathname
     if (method === 'GET' && pathname === '/api/agents') {
-      return { status: 200, json: { data: { results: [agent] } } }
+      return { status: 200, json: { results: [agent] } }
     }
     if (method === 'POST' && pathname === '/api/environments') {
       const environment = {
@@ -49,7 +49,7 @@ function chatDefaultEnvironmentFixture() {
         registrationToken: `tok-${body.name}`,
       }
       environments.set(environment.id, environment)
-      return { status: 201, json: { data: environment } }
+      return { status: 201, json: environment }
     }
     if (method === 'POST' && pathname === '/api/chats') {
       const chat = {
@@ -61,18 +61,18 @@ function chatDefaultEnvironmentFixture() {
         version: '0',
       }
       chats.set(chat.id, chat)
-      return { status: 201, json: { data: { ...chat } } }
+      return { status: 201, json: { ...chat } }
     }
     const chatMatch = pathname.match(/^\/api\/chats\/([^/]+)$/)
     if (chatMatch) {
       const id = decodeURIComponent(chatMatch[1])
       const chat = chats.get(id)
       if (method === 'GET') {
-        return { status: 200, json: { data: { ...chat } } }
+        return { status: 200, json: { ...chat } }
       }
       if (method === 'PUT') {
         if (body.expectedVersion !== chat.version) {
-          throw new HttpError(409, JSON.stringify({ message: 'version conflict' }), pathname)
+          throw problemError(409, 'version_conflict', 'version conflict', pathname)
         }
         if (body.title !== undefined) chat.title = body.title
         if (Object.hasOwn(body, 'environmentName')) {
@@ -80,16 +80,18 @@ function chatDefaultEnvironmentFixture() {
             chat.environmentName = null
           } else {
             if (String(body.environmentName).includes('/')) {
-              throw new HttpError(
+              throw problemError(
                 400,
-                JSON.stringify({ message: "environmentName must not contain '/'" }),
+                'validation',
+                "environmentName must not contain '/'",
                 pathname,
               )
             }
             if (![...environments.values()].some((env) => env.name === body.environmentName)) {
-              throw new HttpError(
+              throw problemError(
                 400,
-                JSON.stringify({ message: `unknown environment: ${body.environmentName}` }),
+                'validation',
+                `unknown environment: ${body.environmentName}`,
                 pathname,
               )
             }
@@ -97,7 +99,7 @@ function chatDefaultEnvironmentFixture() {
           }
         }
         chat.version = String(Number(chat.version) + 1)
-        return { status: 200, json: { data: { ...chat } } }
+        return { status: 200, json: { ...chat } }
       }
       if (method === 'DELETE') {
         chats.delete(id)
@@ -108,7 +110,7 @@ function chatDefaultEnvironmentFixture() {
     if (environmentMatch) {
       const id = decodeURIComponent(environmentMatch[1])
       if (method === 'GET') {
-        return { status: 200, json: { data: { ...environments.get(id) } } }
+        return { status: 200, json: { ...environments.get(id) } }
       }
       if (method === 'DELETE') {
         environments.delete(id)
@@ -189,7 +191,7 @@ test('settings contract accepts an empty existing HTTP retry list without mutati
   const ctx = {
     async call(method, path) {
       assert.equal(path, '/api/settings')
-      if (method === 'GET') return { json: { data: structuredClone(before) } }
+      if (method === 'GET') return { json: structuredClone(before) }
       assert.equal(method, 'PUT')
       puts++
       throw mutationError

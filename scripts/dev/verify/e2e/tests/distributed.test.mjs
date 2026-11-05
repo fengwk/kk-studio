@@ -12,7 +12,7 @@ import {
   runDistributedCommand,
 } from '../lib/distributed.mjs'
 import { redactSecrets } from '../lib/redact.mjs'
-import { HttpError } from '../lib/http.mjs'
+import { problemError } from './fixtures/problem.mjs'
 import { ALL_CASES } from '../run-matrix.mjs'
 import { REPO_ROOT } from '../../../lib/repo-root.mjs'
 
@@ -33,7 +33,7 @@ test('createNodeCall routes by node id and rejects unknown nodes', async () => {
   const originalFetch = globalThis.fetch
   globalThis.fetch = async (url, options) => {
     seen.push({ url, method: options?.method })
-    return new Response(JSON.stringify({ data: { ok: true } }), {
+    return new Response(JSON.stringify({ ok: true }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     })
@@ -44,8 +44,8 @@ test('createNodeCall routes by node id and rejects unknown nodes', async () => {
     const b = await call('b', 'GET', '/api/agents?pageNumber=1&pageSize=1')
     assert.equal(seen[0].url, 'http://node-a.test/api/agents?pageNumber=1&pageSize=1')
     assert.equal(seen[1].url, 'http://node-b.test/api/agents?pageNumber=1&pageSize=1')
-    assert.equal(a.json.data.ok, true)
-    assert.equal(b.json.data.ok, true)
+    assert.equal(a.json.ok, true)
+    assert.equal(b.json.ok, true)
 
     await assert.rejects(() => call('c', 'GET', '/api/agents'), /unknown node 'c'/)
     assert.equal(seen.length, 2, 'unknown node must not trigger a request')
@@ -60,7 +60,7 @@ test('createNodeCall forwards the body as JSON like the single-node path', async
   const originalFetch = globalThis.fetch
   globalThis.fetch = async (url, options) => {
     seen.push({ url, body: options?.body, headers: options?.headers })
-    return new Response('{"data":1}', { status: 200, headers: { 'Content-Type': 'application/json' } })
+    return new Response('{"id":1}', { status: 200, headers: { 'Content-Type': 'application/json' } })
   }
   try {
     const call = createNodeCall(createBaseUrls('http://a.test', 'http://b.test'))
@@ -204,10 +204,10 @@ test('DB loss case keeps one 10s fault request and restores both READY projectio
           assert.equal(node, 'a')
           assert.equal(timeoutMs, 10_000)
           if (transportTimeout) throw new Error('timeout GET')
-          throw new HttpError(500, 'database disconnected', requestPath)
+          throw problemError(500, 'internal', 'database disconnected', requestPath)
         }
         if (commands.length) recoveredNodes.push(node)
-        return { json: { data: { ready: true, status: 'READY', homeDirectory: '/home/test' } } }
+        return { json: { ready: true, status: 'READY', homeDirectory: '/home/test' } }
       },
       writeArtifact(name, data) {
         assert.equal(name, 'recovery-summary.json')
