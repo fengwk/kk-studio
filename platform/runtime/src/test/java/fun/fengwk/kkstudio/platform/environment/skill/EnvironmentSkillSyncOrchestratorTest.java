@@ -141,11 +141,14 @@ class EnvironmentSkillSyncOrchestratorTest {
 
     orchestrator.onEnvironmentReady(ENV);
     assertTrue(transport.awaitFirstSendStarted());
-    orchestrator.onEnvironmentReady(OTHER);
-
-    List<List<DaemonSkillPackage>> sends = transport.awaitSends(2);
-    assertEquals(2, sends.size());
-    transport.releaseFirstSend();
+    try {
+      orchestrator.onEnvironmentReady(OTHER);
+      // 第一次仍被阻塞时，唯一完成的下发只能来自另一个 Environment。
+      assertEquals(1, transport.awaitSends(1).size());
+    } finally {
+      transport.releaseFirstSend();
+    }
+    assertEquals(2, transport.awaitSends(2).size());
   }
 
   /** 意图：Package 变更只向本节点持有的 READY Environment 重新下发。 */
@@ -343,11 +346,11 @@ class EnvironmentSkillSyncOrchestratorTest {
 
     @Override
     public void sendSkillSync(EnvironmentId environmentId, List<DaemonSkillPackage> packages) {
-      attempts.incrementAndGet();
-      if (blockFirst && sends.isEmpty()) {
+      int attempt = attempts.incrementAndGet();
+      if (blockFirst && attempt == 1) {
         firstStarted.countDown();
         try {
-          firstRelease.await(5, TimeUnit.SECONDS);
+          firstRelease.await();
         } catch (InterruptedException error) {
           Thread.currentThread().interrupt();
         }
