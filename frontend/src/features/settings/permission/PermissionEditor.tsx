@@ -19,6 +19,7 @@ import { IconButton } from '@/shared/ui/controls/IconButton'
 import { Select } from '@/shared/ui/controls/Select'
 import { TextInput } from '@/shared/ui/controls/TextInput'
 import { StateBlock } from '@/shared/ui/feedback/StateBlock'
+import './permission-editor.css'
 import type { SystemSettingsSchemaOptionDTO } from '@/shared/api/generated/contracts'
 
 /**
