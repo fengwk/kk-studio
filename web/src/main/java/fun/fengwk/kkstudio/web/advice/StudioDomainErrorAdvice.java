@@ -8,6 +8,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
+import fun.fengwk.kkstudio.canvas.http.CanvasResourceController;
 import fun.fengwk.kkstudio.chat.http.ChatController;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.ide.web.StudioEnvironmentIdeController;
@@ -43,6 +44,7 @@ import java.util.Map;
       StudioAgentProviderController.class,
       StudioAgentModelController.class,
       StudioAgentDefinitionController.class,
+      CanvasResourceController.class,
       ChatController.class,
       StudioMcpServerController.class,
       StudioEnvironmentController.class,

@@ -16,9 +16,8 @@ import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 /**
  * 真实 Spring MVC 下 Canvas Resource 直读边界的统一 {@code Result} 错误契约。
  *
- * <p>{@link CanvasResourceController} 直接抛 400/404 {@code ResponseStatusException}，必须与其它公开
- * Controller 一样 落到 {@code StudioResponseStatusErrorAdvice} 的同一 envelope，避免同一个 404/400 因 Controller
- * 归属模块不同而形状漂移； 该控制器由 Canvas 模块的自动配置注册，本测试同时证明全局 advice 覆盖新包中的控制器。
+ * <p>{@link CanvasResourceController} 的缺失资源和无效参数分别走领域异常和状态异常映射；该控制器由 Canvas 模块自动配置注册，本测试验证 Web
+ * 组合根对它们的覆盖。
  */
 @AutoConfigureMockMvc
 class CanvasResourceControllerAdviceIntegrationTest extends WebPostgresTestSupport {
@@ -37,8 +36,8 @@ class CanvasResourceControllerAdviceIntegrationTest extends WebPostgresTestSuppo
                 .header(HttpHeaders.ACCEPT_LANGUAGE, "en-US"))
         .andExpect(status().isNotFound())
         .andExpect(jsonPath("$.status").value(404))
-        .andExpect(jsonPath("$.errors.type").value("about:blank"))
-        .andExpect(jsonPath("$.errors.title").value("Not Found"))
+        .andExpect(jsonPath("$.code").value("not_found"))
+        .andExpect(jsonPath("$.errors.resource").value("canvas"))
         .andExpect(jsonPath("$.errors.detail").value("unknown canvas: " + CANVAS));
   }
 

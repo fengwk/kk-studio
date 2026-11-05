@@ -13,8 +13,9 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.canvas.CanvasDocument;
 import fun.fengwk.kkstudio.canvas.CanvasResource;
-import fun.fengwk.kkstudio.canvas.infra.platform.CanvasResourceUrlService.ResourceNotFoundException;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasQueryService;
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.share.storage.StoragePresignedUrlDTO;
 
@@ -56,15 +57,16 @@ class CanvasResourceUrlServiceTest {
     when(query.findDocument(CANVAS))
         .thenReturn(Optional.empty(), Optional.of(mock(CanvasDocument.class)));
 
-    assertEquals(
-        "unknown canvas: " + CANVAS,
-        assertThrows(ResourceNotFoundException.class, () -> service.presign(CANVAS, RESOURCE, true))
-            .getMessage());
-    assertEquals(
-        "unknown resource: " + RESOURCE,
-        assertThrows(
-                ResourceNotFoundException.class, () -> service.presign(CANVAS, RESOURCE, false))
-            .getMessage());
+    DomainException missingCanvas =
+        assertThrows(DomainException.class, () -> service.presign(CANVAS, RESOURCE, true));
+    assertEquals(DomainErrorCode.NOT_FOUND, missingCanvas.code());
+    assertEquals("canvas", missingCanvas.resource());
+    assertEquals("unknown canvas: " + CANVAS, missingCanvas.getMessage());
+    DomainException missingResource =
+        assertThrows(DomainException.class, () -> service.presign(CANVAS, RESOURCE, false));
+    assertEquals(DomainErrorCode.NOT_FOUND, missingResource.code());
+    assertEquals("canvas_resource", missingResource.resource());
+    assertEquals("unknown resource: " + RESOURCE, missingResource.getMessage());
     verify(blobs, never()).presignOriginalUrl(any());
     verify(blobs, never()).presignPreviewUrl(any());
   }
