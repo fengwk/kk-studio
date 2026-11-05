@@ -494,7 +494,9 @@ class PostgresqlHarnessStoreConcurrencyTest {
                         return tx.threads()
                                 .delete(
                                     List.of(baseline.threadId()),
-                                    builtinRegistry(store, (threadId, path, preparation) -> null))
+                                    builtinRegistry(
+                                        store,
+                                        (threadId, rootSessionId, path, preparation) -> null))
                             == 1;
                       }));
       try {

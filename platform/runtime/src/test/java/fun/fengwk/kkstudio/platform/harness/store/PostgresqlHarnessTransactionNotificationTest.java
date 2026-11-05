@@ -267,7 +267,8 @@ class PostgresqlHarnessTransactionNotificationTest {
                 return tx.threads()
                     .delete(
                         List.of(childChain.threadId(), grandChildChain.threadId()),
-                        builtinRegistry(store, (threadId, path, preparation) -> null));
+                        builtinRegistry(
+                            store, (threadId, rootSessionId, path, preparation) -> null));
               });
       assertEquals(2, deletedChildren);
       listener.expectExactly(treeNotification(rootChain.threadId()));
@@ -281,7 +282,8 @@ class PostgresqlHarnessTransactionNotificationTest {
                 return tx.threads()
                     .delete(
                         List.of(rootChain.threadId()),
-                        builtinRegistry(store, (threadId, path, preparation) -> null));
+                        builtinRegistry(
+                            store, (threadId, rootSessionId, path, preparation) -> null));
               });
       assertEquals(1, deletedRoot);
       listener.expectExactly(treeNotification(rootChain.threadId()));
