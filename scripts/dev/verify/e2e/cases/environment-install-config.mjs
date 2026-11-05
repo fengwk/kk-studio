@@ -1,4 +1,4 @@
-import { assert, envelopeData, expectHttpError, HttpError, cid } from '../lib/http.mjs'
+import { assert, assertExactFields, envelopeData, expectHttpError, HttpError, cid } from '../lib/http.mjs'
 import { createCaseAdder } from '../lib/registry.mjs'
 
 export const cases = []
@@ -28,10 +28,7 @@ export function linuxInstallConfig() {
 export function assertInstallConfig(config) {
   assert(config && typeof config === 'object', `installConfig must be an object: ${JSON.stringify(config)}`)
   assert(config.operatingSystem === 'linux', `operatingSystem must be linux: ${config.operatingSystem}`)
-  assert(
-    !Object.hasOwn(config, 'javaHome'),
-    `retired javaHome must not round-trip: ${JSON.stringify(config.javaHome)}`,
-  )
+  assertExactFields(config, ['operatingSystem', 'daemon'], 'installConfig')
   assert(
     config.daemon?.studioUrl === 'http://127.0.0.1:18081',
     `studioUrl must round-trip: ${config.daemon?.studioUrl}`,
@@ -57,7 +54,7 @@ registerCase({
   id: 'environment.install_config_cas_roundtrip',
   level: 'L1',
   title: 'Environment installConfig PUT CAS 持久化与往返',
-  docs: 'PUT /api/environments/{id}/install-config 用 expectedVersion CAS 保存嵌套 installConfig； stale 版本 409、相同配置 no-op 不推进版本；硬非法 studioUrl/未知字段/退役 javaHome/缺 operatingSystem/null 配置 400 且不写入、不回显提交值，随后 GET 仍为已保存配置',
+  docs: 'PUT /api/environments/{id}/install-config 用 expectedVersion CAS 保存嵌套 installConfig； stale 版本 409、相同配置 no-op 不推进版本；硬非法 studioUrl/顶层或嵌套未知字段/缺 operatingSystem/null 配置 400 且不写入、不回显提交值，随后 GET 仍为已保存配置',
   async run(ctx) {
     const name = `e2e-install-cfg-${cid().slice(0, 8)}`
     const { json: createJson } = await ctx.call('POST', '/api/environments', { name })
@@ -119,7 +116,7 @@ registerCase({
           expectedVersion: version,
           installConfig: {
             operatingSystem: 'linux',
-            javaHome: '/opt/jdk',
+            unknownField: '/opt/jdk',
             daemon: { studioUrl: 'http://127.0.0.1:18081' },
           },
         },

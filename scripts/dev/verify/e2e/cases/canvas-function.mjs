@@ -167,7 +167,7 @@ registerCase({
     for (const invalid of [
       { requestId: cid() },
       { requestId: cid(), expectedVersion: null },
-      { requestId: cid(), expectedVersion: { catalogEpoch: '01', definitionFingerprint: imageVersion.definitionFingerprint } },
+      { requestId: cid(), expectedVersion: { unknownField: '01', definitionFingerprint: imageVersion.definitionFingerprint } },
       { requestId: cid(), expectedVersion: { definitionFingerprint: imageVersion.definitionFingerprint.toUpperCase() } },
       { requestId: cid(), expectedVersion: { definitionFingerprint: 'abc' } },
     ]) {

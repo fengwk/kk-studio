@@ -372,7 +372,7 @@ registerCase({
   id: 'config_sync.install_config_hard_invalid_precheck',
   level: 'L1',
   title: '配置同步 installConfig 硬错误预检查与零副作用',
-  docs: 'import/check 与 import 都必须深度校验 environment.installConfig：非法 studioUrl、未知字段、退役 javaHome、缺 operatingSystem 一律 400 硬拒绝（不得降级为 skipped 部分导入），不回显提交值，且不创建任何 Environment',
+  docs: 'import/check 与 import 都必须深度校验 environment.installConfig：非法 studioUrl、顶层或嵌套未知字段、缺 operatingSystem 一律 400 硬拒绝（不得降级为 skipped 部分导入），不回显提交值，且不创建任何 Environment',
   async run(ctx) {
     const suffix = cid().slice(0, 8)
     const name = `e2e-sync-bad-${suffix}`
@@ -383,7 +383,7 @@ registerCase({
       { daemon: { studioUrl: 'http://127.0.0.1:18081' } },
       {
         operatingSystem: 'linux',
-        javaHome: '/opt/jdk',
+        unknownField: '/opt/jdk',
         daemon: { studioUrl: 'http://127.0.0.1:18081' },
       },
     ]

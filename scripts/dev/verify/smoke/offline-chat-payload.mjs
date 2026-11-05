@@ -3,9 +3,8 @@
 /**
  * Build a canonical NEW_SESSION command batch payload for Chat owner.
  *
- * Branch settings 是精确三字段快照 agentName + model + environmentName；
+ * Branch settings 是精确三字段快照 agentName + execution + environmentName；
  * environmentName 为 nullable canonical 名称，null 表示未选择 Environment。
- * Chat/root settings 不携带任何 workspace 字段。
  */
 export function buildOfflineChatBatchRequest({
   chatId,
@@ -18,7 +17,7 @@ export function buildOfflineChatBatchRequest({
   variant = 'default',
   ...unexpected
 }) {
-  // A removed option (e.g. a workspace path) must fail loudly instead of being ignored.
+  // Unknown options must fail loudly instead of being ignored.
   if (Object.keys(unexpected).length > 0) {
     throw new TypeError(`unexpected option: ${Object.keys(unexpected).join(', ')}`)
   }

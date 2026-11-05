@@ -159,7 +159,7 @@ test('test intent: function versions contain only a canonical fingerprint', () =
   const version = definitionVersion(definitions, 'fake-image')
   assert.deepEqual(Object.keys(version), ['definitionFingerprint'])
   for (const invalid of [
-    { ...version, catalogEpoch: '7' },
+    { ...version, unknownField: '7' },
     {},
     { definitionFingerprint: version.definitionFingerprint.toUpperCase() },
     { definitionFingerprint: 'abc' },
@@ -189,7 +189,7 @@ test('test intent: non-strict, unavailable, or missing definitions fail the smok
 
 // ---------- 离线 Chat 批请求必须匹配当前 harness wire ----------
 
-test('test intent: the NEW_SESSION batch carries no workspace field and the owner is the chat', () => {
+test('test intent: the NEW_SESSION batch uses canonical root settings and the owner is the chat', () => {
   const request = buildOfflineChatBatchRequest({
     chatId: CHAT_ID,
     sessionId: SESSION_ID,
@@ -216,7 +216,7 @@ test('test intent: the NEW_SESSION batch carries no workspace field and the owne
   ])
 })
 
-test('test intent: the removed workspace path option must not silently reappear on the builder', () => {
+test('test intent: the builder rejects unknown options', () => {
   assert.throws(
     () =>
       buildOfflineChatBatchRequest({
@@ -225,7 +225,7 @@ test('test intent: the removed workspace path option must not silently reappear 
         threadId: THREAD_ID,
         commandId: COMMAND_ID,
         marker: MARKER,
-        workspacePath: 'src/tests',
+        unknownOption: 'src/tests',
       }),
     TypeError,
   )

@@ -82,7 +82,7 @@ class EnvironmentInstallConfigIntegrationTest extends ConfigSyncTestSupport {
             "{\"expectedVersion\":\"0\",\"installConfig\":{\"operatingSystem\":\"linux\",\"unknown\":1,\"daemon\":{\"studioUrl\":\"https://studio.example.com\"}}}",
             "{\"expectedVersion\":\"0\",\"installConfig\":{\"operatingSystem\":\"linux\",\"daemon\":{\"studioUrl\":\"https://studio.example.com\",\"lsp\":{\"servers\":{\"jdtls\":{\"command\":[\"jdtls\"],\"unknown\":1}}}}}}",
             "{\"expectedVersion\":\"0\",\"installConfig\":{\"operatingSystem\":\"linux\",\"daemon\":{\"studioUrl\":\"https://studio.example.com\",\"lsp\":{\"servers\":[]}}}}",
-            "{\"expectedVersion\":\"0\",\"installConfig\":{\"operatingSystem\":\"linux\",\"javaHome\":\"${JAVA_HOME}\",\"daemon\":{\"studioUrl\":\"https://studio.example.com\"}}}",
+            "{\"expectedVersion\":\"0\",\"installConfig\":{\"operatingSystem\":\"linux\",\"unknownField\":\"value\",\"daemon\":{\"studioUrl\":\"https://studio.example.com\"}}}",
             "{\"expectedVersion\":\"0\",\"installConfig\":{\"operatingSystem\":\"linux\",\"daemon\":{\"studioUrl\":\"https://studio.example.com\",\"lsp\":{\"servers\":{}}}}}")) {
       perform(put(path).contentType(MediaType.APPLICATION_JSON).content(json), 400);
     }

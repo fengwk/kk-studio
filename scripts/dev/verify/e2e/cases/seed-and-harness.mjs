@@ -210,10 +210,9 @@ registerCase({
     const names = tools.map((tool) => String(tool.name))
     assert(!names.includes('load_skill'), `load_skill must be internal: ${JSON.stringify(names)}`)
     assert(!names.includes('task'), `task must be internal: ${JSON.stringify(names)}`)
-    assert(
-      tools.every((tool) => !Object.hasOwn(tool, 'id') && !Object.hasOwn(tool, 'version')),
-      `Tool catalog entries must not expose id/version: ${JSON.stringify(tools)}`,
-    )
+    for (const tool of tools) {
+      assertExactFields(tool, ['name', 'description', 'environmentSupport'], 'Tool catalog entry')
+    }
     assert(
       ['get_goal', 'update_goal'].every((name) => names.includes(name)) &&
         !names.includes('create_goal'),
@@ -1987,7 +1986,7 @@ registerCase({
   id: 'thread.branch_settings_diff_commands',
   level: 'L1',
   title: 'SET_* 命令一个原子 batch 精确 wire 并消费投影',
-  docs: '前端固定顺序 SET_AGENT,SET_EXECUTION,USER_MESSAGE 一个 batch（yolo 走直接控制面，绝不进入 mailbox）；SET_AGENT 使用 canonical 但不存在的名称，使 Resolver 在调用 Provider 前确定性 PLANNING_FAILED；等 quiescent 后 Thread branchSettings 精确投影、queue 清空、USER entry 与 AssistantError 可见，最终 TURN_END(FAILED, continueModel=false)；缺失 environmentName 的 SET_ENVIRONMENT 与 workspacePath 字段在任何 command type 上 => 400',
+  docs: '前端固定顺序 SET_AGENT,SET_EXECUTION,USER_MESSAGE 一个 batch（yolo 走直接控制面，绝不进入 mailbox）；SET_AGENT 使用 canonical 但不存在的名称，使 Resolver 在调用 Provider 前确定性 PLANNING_FAILED；等 quiescent 后 Thread branchSettings 精确投影、queue 清空、USER entry 与 AssistantError 可见，最终 TURN_END(FAILED, continueModel=false)；缺失 environmentName 的 SET_ENVIRONMENT 与未知 command 字段 => 400',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -2213,7 +2212,7 @@ registerCase({
         }),
       { status: 400, messageIncludes: /environmentName/i },
     )
-    // 其他 discriminator 即使显式传 workspacePath 也必须按 unknown HTTP command field 拒绝。
+    // 其他 discriminator 的未知字段也必须按 unknown HTTP command field 拒绝。
     await expectHttpError(
       () =>
         acceptCommandBatch(ctx, {
@@ -2234,11 +2233,11 @@ registerCase({
                   variant: modelSelection.variant,
                 },
               },
-              workspacePath: null,
+              unknownField: null,
             },
           ],
         }),
-      { status: 400, messageIncludes: /workspacePath/i },
+      { status: 400, messageIncludes: /unknownField/i },
     )
     // 严格 wire：未预期的字段必须被拒绝（400 unknown HTTP command field: unexpected）。
     await expectHttpError(
@@ -2255,7 +2254,7 @@ registerCase({
               type: 'SET_AGENT',
               idempotencyKey: cid(),
               agentName: 'x',
-              unexpected: { workspacePath: '.' },
+              unexpected: { value: '.' },
             },
           ],
         }),

@@ -2,6 +2,7 @@ import {
   HttpError,
   assert,
   assertDecimalVersion,
+  assertExactFields,
   envelopeData,
   expectHttpError,
 } from '../lib/http.mjs'
@@ -75,14 +76,12 @@ registerCase({
       before.aiRuntime.retryBaseDelayMillis,
       'aiRuntime.retryBaseDelayMillis',
     )
-    assert(
-      !Object.hasOwn(before, 'integrations'),
-      'the retired integrations section must not remain on the wire',
-    )
-    assert(
-      !Object.hasOwn(before.storageMedia, 'canvasUploadExpiryMillis'),
-      'dead storageMedia.canvasUploadExpiryMillis must not remain on the wire',
-    )
+    assertExactFields(before, [...SECTION_NAMES, 'version', 'createTime', 'updateTime'], 'SystemSettings')
+    assertExactFields(before.storageMedia, [
+      'uploadExpiresSeconds', 's3PresignDefaultExpiresSeconds', 's3PresignMaxExpiresSeconds',
+      'canvasMediaProcessTimeoutMillis', 'thumbnailMaxDimension', 'thumbnailQuality',
+      'temporaryResourceTtlSeconds', 'temporaryResourceCleanupIntervalSeconds',
+    ], 'SystemSettings.storageMedia')
     // 系统默认值必须存在且形状合法：HTTP 重试白名单是 400–599 整数数组，tmp TTL/扫描间隔是正整数字符串。
     assertRetryStatusCodes(
       before.aiRuntime.modelHttpRetryStatusCodes,

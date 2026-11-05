@@ -158,12 +158,12 @@ class ThreadCommandPayloadJsonCodecTest {
         () ->
             codec.decode(
                 ThreadCommandType.SET_EXECUTION,
-                "{\"execution\":{\"driver\":\"builtin\",\"settings\":{},\"workspacePath\":null}}"));
+                "{\"execution\":{\"driver\":\"builtin\",\"settings\":{},\"unknownField\":null}}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             codec.decode(
-                ThreadCommandType.SET_AGENT, "{\"agentName\":\"a\",\"workspacePath\":null}"));
+                ThreadCommandType.SET_AGENT, "{\"agentName\":\"a\",\"unknownField\":null}"));
     assertThrows(
         IllegalArgumentException.class,
         () -> codec.decode(ThreadCommandType.USER_MESSAGE, "{\"message\":[]}"));
