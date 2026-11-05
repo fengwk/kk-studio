@@ -133,7 +133,7 @@ function libproc(): Libproc {
 }
 
 /** 本平台是否提供真实会话成员查询；不提供时所有枚举返回「不可判定」。 */
-export function supportsSessionEnumeration(): boolean {
+function supportsSessionEnumeration(): boolean {
   return process.platform === 'linux' || process.platform === 'darwin'
 }
 
@@ -210,7 +210,7 @@ export function membersSnapshot(session: number, excludedPid: number): SessionMe
  *
  * <p>不可判定（没有真实枚举能力、扫描失败或身份读不到）必须表现为「还有成员」：谎称已经收敛会让收尾跳过强杀阶段。
  */
-export function hasLiveMember(session: number, excludedPid: number): boolean {
+function hasLiveMember(session: number, excludedPid: number): boolean {
   const members = membersSnapshot(session, excludedPid)
   return members === null || members.length > 0
 }
@@ -277,7 +277,7 @@ export function becomeChildSubreaper(): boolean {
  *
  * <p>调用方必须等用户命令自己的退出码已经被 Node 回收之后再调用：`waitpid(-1)` 会回收任意子进程，过早调用会偷走命令的退出码。
  */
-export function reapOrphans(): void {
+function reapOrphans(): void {
   if (process.platform !== 'linux') {
     return
   }
@@ -377,7 +377,7 @@ export async function convergeAdoptedChildren(ownerPid: number, graceMillis: num
 }
 
 /** 回收一个**已经确认是自己子进程**的 pid 的僵尸；不是自己的孩子时内核返回 ECHILD，无副作用。 */
-export function reapSpecific(pid: number): void {
+function reapSpecific(pid: number): void {
   if (process.platform !== 'linux') {
     return
   }
@@ -425,6 +425,8 @@ async function sessionGone(session: number, excludedPid: number, budgetMillis: n
  * 把成员快照重排成「父进程先于子进程」的顺序。
  *
  * <p>这是纯粹的拓扑排序；顺序完全由父子拓扑决定，绝不按 PID 数值排。PID 重复或父指针成环时整份快照无法消歧，返回 `null`。
+ *
+ * <p>保留导出以验证真实内核无法稳定构造的歧义快照和信号顺序。
  */
 export function parentsBeforeChildren(members: SessionMember[]): SessionMember[] | null {
   if (members.length === 0) {

@@ -12,10 +12,8 @@ import {
   establishSession,
   membersSnapshot,
   processIdentity,
-  reapOrphans,
   sessionOf,
   startOrphanReaper,
-  supportsSessionEnumeration,
 } from '../../src/native/posix-session.js'
 
 /**
@@ -73,10 +71,9 @@ describe('posix session primitives respect platform availability', () => {
   test('non-linux platforms have no subreaper or orphan reaping', () => {
     withPlatform('darwin', () => {
       expect(becomeChildSubreaper()).toBe(false)
-      expect(() => reapOrphans()).not.toThrow()
       const stop = startOrphanReaper(10)
       expect(typeof stop).toBe('function')
-      stop()
+      expect(() => stop()).not.toThrow()
       // macOS 的孤儿被重新挂到 launchd：没有可核实的收养集合，直接判定为空。
       expect(directChildren(1, [])).toEqual([])
     })
@@ -91,17 +88,11 @@ describe('posix session primitives respect platform availability', () => {
 
   test('session enumeration is unavailable off linux/darwin', () => {
     withPlatform('freebsd', () => {
-      expect(supportsSessionEnumeration()).toBe(false)
-      expect(() => establishSession()).toThrow(/not supported on freebsd/)
+      expect(() => establishSession()).toThrow(/the POSIX process scope is not supported on freebsd/)
       expect(sessionOf(1)).toBe(-1)
       expect(processIdentity(1)).toBeNull()
       expect(membersSnapshot(1, -1)).toBeNull()
     })
   })
 
-  test('darwin advertises session enumeration', () => {
-    withPlatform('darwin', () => {
-      expect(supportsSessionEnumeration()).toBe(true)
-    })
-  })
 })
