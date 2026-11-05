@@ -52,8 +52,7 @@ Usage: scripts/dev/verify/reliability/stack.sh <command> [arguments]
 Commands:
   up
       Build and start the isolated stack, wait for app health and daemon READY,
-      then synchronize the optional host MiniMax credential pair. Credential
-      names come from sync-minimax-credentials.mjs --list-env.
+      then synchronize the optional host MiniMax credential pair.
   snapshot
       Copy clean snapshots from the non-empty PI_ANCHOR and PI_BASE_ANCHOR
       Git worktrees into the named volume.
@@ -128,19 +127,8 @@ up_stack() {
   wait_app
   wait_environment
   step "synchronizing optional MiniMax E2E credentials (secret values are never printed)"
-  local name names
-  local -a credential_names=()
-  names=$(node "$SYNC_MINIMAX_CREDENTIALS" --list-env) \
-    || die "failed to load MiniMax credential names"
-  [ -n "$names" ] || die "MiniMax credential list is empty"
-  mapfile -t credential_names <<<"$names"
-  (
-    for name in "${credential_names[@]}"; do
-      export "$name=${!name-}"
-    done
-    BACKEND_URL="$APP_URL" \
-      node "$SYNC_MINIMAX_CREDENTIALS" --backend-url "$APP_URL"
-  )
+  BACKEND_URL="$APP_URL" \
+    node "$SYNC_MINIMAX_CREDENTIALS" --backend-url "$APP_URL"
 }
 
 require_clean_anchor() {

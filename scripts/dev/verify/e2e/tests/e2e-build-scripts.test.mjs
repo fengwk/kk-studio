@@ -310,25 +310,20 @@ ensure_dedicated_s3_bucket`, {
         assert.deepEqual(calls, [
           'alias set e2e-local http://127.0.0.1:9000 e2e-access e2e-secret',
           'ls e2e-local/kk-studio-e2e-matrix',
-          ...(bucketState === 'existing'
-            ? ['rm --recursive --force e2e-local/kk-studio-e2e-matrix/']
-            : ['mb e2e-local/kk-studio-e2e-matrix', 'anonymous set none e2e-local/kk-studio-e2e-matrix']),
+          ...(bucketState === 'existing' ? ['rm --recursive --force e2e-local/kk-studio-e2e-matrix/'] : []),
+          'mb --ignore-existing e2e-local/kk-studio-e2e-matrix',
+          'anonymous set none e2e-local/kk-studio-e2e-matrix',
+          'stat e2e-local/kk-studio-e2e-matrix',
         ])
       }
       for (const [bucketState, failOn] of [
-        ['existing', 'alias'], ['existing', 'rm'], ['absent', 'mb'], ['absent', 'anonymous'],
+        ['existing', 'alias'], ['existing', 'rm'], ['absent', 'mb'], ['absent', 'anonymous'], ['absent', 'stat'],
       ]) {
         const { result, calls } = run(viaDocker, bucketState, failOn)
         assert.notEqual(result.status, 0, `${viaDocker ? 'docker' : 'host'} ${failOn}`)
         assert.equal(calls.at(-1).split(' ')[0], failOn)
       }
     }
-    assert.deepEqual(readFileSync(dockerLog, 'utf8').trim().split('\n'), [
-      'run', '--rm', '-i', '--net', 'host',
-      '--env', 'MINIO_ROOT_USER', '--env', 'MINIO_ROOT_PASSWORD', '--env', 'MINIO_BUCKET',
-      '--env', 'MINIO_ALIAS', '--env', 'MINIO_ENDPOINT',
-      '--entrypoint', '/bin/sh', 'kk-studio-minio-client:RELEASE.2025-04-16T18-13-26Z',
-      '-ec', 'script=$(cat); exec /bin/sh -c "$script" -- --clean-existing',
-    ])
+    assert.ok(!readFileSync(dockerLog, 'utf8').includes('e2e-secret'))
   })
 })

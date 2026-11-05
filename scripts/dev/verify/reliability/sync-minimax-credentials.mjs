@@ -20,16 +20,7 @@ export async function syncMinimaxCredentials(backendUrl, env = process.env, requ
 }
 
 async function main() {
-  const { values } = parseArgs({
-    options: { 'backend-url': { type: 'string' }, 'list-env': { type: 'boolean' } },
-  })
-  if (values['list-env']) {
-    for (const spec of RELIABILITY_PROVIDER_SPECS) {
-      console.log(spec.baseUrlEnv)
-      console.log(spec.apiKeyEnv)
-    }
-    return 0
-  }
+  const { values } = parseArgs({ options: { 'backend-url': { type: 'string' } } })
   if (!values['backend-url']) {
     process.stderr.write('error: the following arguments are required: --backend-url\n')
     return 2

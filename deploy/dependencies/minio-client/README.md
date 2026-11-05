@@ -43,7 +43,8 @@ bucket 私有性由镜像内的 [init-bucket.sh](init-bucket.sh) 调用 `mc anon
 
 脚本默认使用 Compose 网络中的 `http://minio:9000` 与 `local` 别名；宿主调用可分别通过
 `MINIO_ENDPOINT` 和 `MINIO_ALIAS` 指定端点与别名。E2E 专用桶使用 `--clean-existing`：
-已有桶只清空对象，不存在时创建并关闭匿名访问。此模式会删除桶内对象，只能用于专用桶。
+清空已有桶中的对象后，确保桶存在、关闭匿名访问并检查桶状态；不存在时直接创建私有桶。
+此模式会删除桶内对象，只能用于专用桶。
 
 mc 使用 GNU AGPL v3 或后续版本，不需要 AIStor 许可。对应源码：
 [tag](https://github.com/minio/mc/tree/RELEASE.2025-04-16T18-13-26Z)

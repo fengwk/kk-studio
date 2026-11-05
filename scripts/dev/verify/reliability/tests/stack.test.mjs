@@ -80,3 +80,40 @@ test('reliability commands target only their project and preserve volume cleanup
     rmSync(directory, { recursive: true, force: true })
   }
 })
+
+test('up passes exported credentials to the synchronizer without printing them', () => {
+  // Exercise a separate stack process with fake dependencies, not a running stack.
+  const directory = mkdtempSync(path.join(tmpdir(), 'kk-reliability-sync-'))
+  try {
+    const log = path.join(directory, 'sync.log')
+    writeFileSync(path.join(directory, 'docker'), '#!/bin/sh\nexit 0\n', { mode: 0o755 })
+    writeFileSync(path.join(directory, 'curl'), '#!/bin/sh\nprintf "{}\\n"\n', { mode: 0o755 })
+    writeFileSync(path.join(directory, 'node'), [
+      '#!/bin/sh',
+      'case "$1" in',
+      '  */stack-probe.mjs) cat >/dev/null ;;',
+      '  */sync-minimax-credentials.mjs)',
+      '    [ "$#" = 3 ] && [ "$2" = --backend-url ] && [ "$3" = "$EXPECTED_URL" ] || exit 1',
+      '    [ "$BACKEND_URL" = "$EXPECTED_URL" ] || exit 2',
+      '    [ "$TEST_MINIMAX_BASE_URL" = fixture-url ] && [ "$TEST_MINIMAX_API_KEY" = fixture-key ] || exit 3',
+      '    printf "sync-called\\n" >> "$SYNC_LOG" ;;',
+      '  *) exit 4 ;;',
+      'esac',
+      '',
+    ].join('\n'), { mode: 0o755 })
+    const result = runStack(['up'], {
+      PATH: `${directory}:${process.env.PATH}`,
+      RELIABILITY_APP_PORT: '18123',
+      EXPECTED_URL: 'http://127.0.0.1:18123',
+      TEST_MINIMAX_BASE_URL: 'fixture-url',
+      TEST_MINIMAX_API_KEY: 'fixture-key',
+      SYNC_LOG: log,
+    })
+
+    assert.equal(result.status, 0, result.stderr)
+    assert.equal(readFileSync(log, 'utf8'), 'sync-called\n')
+    assert.ok(!`${result.stdout}${result.stderr}`.includes('fixture-key'))
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
+})

@@ -55,20 +55,6 @@ test('test intent: a missing or blank protocol input fails before startup withou
   }
 })
 
-test('test intent: usage points at the synchronizer inventory instead of repeating credential names', () => {
-  const result = spawnSync('bash', [E2E_ENTRY, '--help'], {
-    cwd: REPOSITORY_ROOT,
-    encoding: 'utf8',
-    timeout: 10_000,
-  })
-
-  assert.equal(result.status, 0, result.stderr)
-  assert.match(result.stdout, /sync-provider-credentials\.mjs --list-env/)
-  for (const name of CREDENTIAL_NAMES) {
-    assert.ok(!result.stdout.includes(name), name)
-  }
-})
-
 test('test intent: every E2E start path and its scrubber exclude all current and future TEST_ names', () => {
   for (const name of ['start_backend', 'start_frontend', 'start_daemon']) {
     assert.ok(functionBody(E2E_LIB, name).includes('"${test_env_unsets[@]}"'), name)
