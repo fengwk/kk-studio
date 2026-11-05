@@ -6,6 +6,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -13,14 +14,17 @@ import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
+import fun.fengwk.kkstudio.harness.api.history.SessionEntryPage;
 import fun.fengwk.kkstudio.harness.api.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.platform.harness.thread.query.UsageCostProjectionService;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
+import fun.fengwk.kkstudio.platform.http.RequestParameters;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessOwnerQueryService;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessNameUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionEntryDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionEntryPageDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadSummaryDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessUsageCostDTO;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeRequestMapper;
@@ -37,6 +41,9 @@ import java.util.function.Supplier;
 @RestController
 @RequestMapping("/api/sessions")
 public class StudioHarnessSessionController {
+
+  private static final int DEFAULT_ENTRIES_LIMIT = 100;
+  private static final int MAX_ENTRIES_LIMIT = 200;
 
   private final HarnessOwnerQueryService harnessQueryService;
   private final HarnessRuntime runtime;
@@ -77,22 +84,34 @@ public class StudioHarnessSessionController {
             }));
   }
 
-  /** 返回 Session 的完整 Entry tree；每个 Entry 通过 parentEntryId 连接到父节点，并带上读取时费用投影。 */
+  /** 按存储创建顺序返回一页 Session Entry；父节点必先于子节点出现，每个 Entry 带上读取时费用投影。 */
   @GetMapping("/{sessionId}/entries")
-  public ApiResponse<List<HarnessSessionEntryDTO>> listEntries(@PathVariable String sessionId) {
+  public ApiResponse<HarnessSessionEntryPageDTO> listEntries(
+      @PathVariable String sessionId,
+      @RequestParam(name = "cursor", required = false) String cursor,
+      @RequestParam(name = "limit", required = false) String limit) {
     return ApiResponse.ok(
         withRuntimeTranslation(
             () -> {
               UUID id = Uuids.parseCanonical(sessionId, "sessionId");
-              List<Entry> entries = harnessQueryService.listSessionEntries(id);
+              UUID afterEntryId = cursor == null ? null : Uuids.parseCanonical(cursor, "cursor");
+              SessionEntryPage page =
+                  harnessQueryService.listSessionEntries(
+                      id,
+                      afterEntryId,
+                      RequestParameters.limit(limit, DEFAULT_ENTRIES_LIMIT, MAX_ENTRIES_LIMIT));
               Map<UUID, HarnessUsageCostDTO> usageCosts =
-                  usageCostProjectionService.project(entries);
-              List<HarnessSessionEntryDTO> mapped = new ArrayList<>(entries.size());
-              for (Entry entry : entries) {
-                mapped.add(
+                  usageCostProjectionService.project(page.entries());
+              List<HarnessSessionEntryDTO> items = new ArrayList<>(page.entries().size());
+              for (Entry entry : page.entries()) {
+                items.add(
                     HarnessRuntimeResponseMapper.toEntryDto(entry, usageCosts.get(entry.id())));
               }
-              return List.copyOf(mapped);
+              HarnessSessionEntryPageDTO result = new HarnessSessionEntryPageDTO();
+              result.setItems(items);
+              result.setNextCursor(
+                  page.hasMore() ? page.entries().getLast().id().toString() : null);
+              return result;
             }));
   }
 

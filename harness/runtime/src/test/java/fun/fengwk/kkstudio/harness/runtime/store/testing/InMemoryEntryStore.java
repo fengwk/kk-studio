@@ -17,7 +17,6 @@ import fun.fengwk.kkstudio.harness.api.history.SettingsPayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.spi.store.EntryStore;
-import fun.fengwk.kkstudio.harness.spi.store.UuidOrder;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -73,6 +72,7 @@ final class InMemoryEntryStore implements EntryStore {
       new EntryPath(nextPath);
     }
     state.entries.put(entry.id(), entry);
+    state.entrySequences.put(entry.id(), ++state.nextEntrySequence);
   }
 
   private boolean hasRoot(UUID sessionId) {
@@ -271,15 +271,56 @@ final class InMemoryEntryStore implements EntryStore {
     if (!state.sessions.containsKey(sessionId)) {
       throw new IllegalArgumentException("session " + sessionId + " does not exist");
     }
+    return sessionEntriesInCreationOrder(sessionId);
+  }
+
+  @Override
+  public List<Entry> loadPageBySession(UUID sessionId, UUID afterEntryId, int limit) {
+    tx.checkOpen();
+    Objects.requireNonNull(sessionId, "sessionId");
+    if (limit <= 0) {
+      throw new IllegalArgumentException("limit must be positive");
+    }
+    if (!state.sessions.containsKey(sessionId)) {
+      throw new IllegalArgumentException("session " + sessionId + " does not exist");
+    }
+    long afterSequence = -1L;
+    if (afterEntryId != null) {
+      Entry cursor = state.entries.get(afterEntryId);
+      Long sequence = state.entrySequences.get(afterEntryId);
+      if (cursor == null || sequence == null || !cursor.sessionId().equals(sessionId)) {
+        throw new IllegalArgumentException(
+            "cursor entry " + afterEntryId + " does not belong to session " + sessionId);
+      }
+      afterSequence = sequence;
+    }
+    List<Entry> entries = new ArrayList<>();
+    for (Entry entry : sessionEntriesInCreationOrder(sessionId)) {
+      if (sequenceOf(entry.id()) > afterSequence) {
+        entries.add(entry);
+      }
+    }
+    return List.copyOf(entries.size() > limit ? entries.subList(0, limit) : entries);
+  }
+
+  /** 与 PostgreSQL {@code order by entry_seq} 一致：只按写入先后，不按时间戳或 UUID 推断。 */
+  private List<Entry> sessionEntriesInCreationOrder(UUID sessionId) {
     List<Entry> entries = new ArrayList<>();
     for (Entry entry : state.entries.values()) {
       if (entry.sessionId().equals(sessionId)) {
         entries.add(entry);
       }
     }
-    entries.sort(
-        Comparator.comparing(Entry::createdAt).thenComparing(Entry::id, UuidOrder.COMPARATOR));
+    entries.sort(Comparator.comparingLong(entry -> sequenceOf(entry.id())));
     return List.copyOf(entries);
+  }
+
+  private long sequenceOf(UUID entryId) {
+    Long sequence = state.entrySequences.get(entryId);
+    if (sequence == null) {
+      throw new IllegalStateException("entry " + entryId + " has no append sequence");
+    }
+    return sequence;
   }
 
   @Override
@@ -328,6 +369,7 @@ final class InMemoryEntryStore implements EntryStore {
       }
       for (UUID entryId : deletable) {
         state.entries.remove(entryId);
+        state.entrySequences.remove(entryId);
         total++;
       }
     }

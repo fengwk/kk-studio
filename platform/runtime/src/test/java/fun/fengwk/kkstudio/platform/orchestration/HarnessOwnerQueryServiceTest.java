@@ -24,6 +24,7 @@ import fun.fengwk.kkstudio.harness.api.history.EntryPath;
 import fun.fengwk.kkstudio.harness.api.history.EntrySlice;
 import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.api.history.RootPayload;
+import fun.fengwk.kkstudio.harness.api.history.SessionEntryPage;
 import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
@@ -44,7 +45,6 @@ import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionSummaryDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadSummaryDTO;
 
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -287,22 +287,18 @@ class HarnessOwnerQueryServiceTest {
   }
 
   @Test
-  void entriesAreCopiedAndMissingRuntimeFailsClosed() {
-    // 查询结果不能暴露 Runtime 的可变列表；未装配 Runtime 时所有查询都明确失败。
+  void entryPageDelegatesToRuntimeAndMissingRuntimeFailsClosed() {
+    // 分页结果原样来自 Runtime（父先于子由存储追加序保证）；未装配 Runtime 时所有查询都明确失败。
     UUID sessionId = id(60);
     Entry root = root(sessionId, id(601), T0, ROOT_SETTINGS);
-    List<Entry> source = new ArrayList<>(List.of(root));
-    when(runtime.getSessionEntries(sessionId)).thenReturn(source);
+    SessionEntryPage page = new SessionEntryPage(List.of(root), true);
+    when(runtime.listSessionEntryPage(sessionId, null, 2)).thenReturn(page);
 
-    List<Entry> result = service.listSessionEntries(sessionId);
-    source.clear();
-
-    assertEquals(List.of(root), result);
-    assertThrows(UnsupportedOperationException.class, () -> result.add(root));
-    verify(runtime).getSessionEntries(sessionId);
+    assertEquals(page, service.listSessionEntries(sessionId, null, 2));
+    verify(runtime).listSessionEntryPage(sessionId, null, 2);
 
     when(runtimes.getIfAvailable()).thenReturn(null);
-    assertThrows(IllegalStateException.class, () -> service.listSessionEntries(sessionId));
+    assertThrows(IllegalStateException.class, () -> service.listSessionEntries(sessionId, null, 2));
     assertThrows(IllegalStateException.class, () -> service.listThreadSummaries(sessionId));
   }
 
@@ -311,7 +307,7 @@ class HarnessOwnerQueryServiceTest {
     // owner 与 id 边界不接受缺失值。
     assertThrows(NullPointerException.class, () -> service.listSessions(null));
     assertThrows(NullPointerException.class, () -> service.listThreadSummaries(null));
-    assertThrows(NullPointerException.class, () -> service.listSessionEntries(null));
+    assertThrows(NullPointerException.class, () -> service.listSessionEntries(null, null, 2));
   }
 
   private static Entry root(

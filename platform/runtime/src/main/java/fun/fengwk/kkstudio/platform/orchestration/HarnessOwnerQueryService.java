@@ -8,6 +8,7 @@ import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.api.history.CustomMessagePayload;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
+import fun.fengwk.kkstudio.harness.api.history.SessionEntryPage;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
@@ -70,10 +71,10 @@ public class HarnessOwnerQueryService {
     return List.copyOf(summaries);
   }
 
-  /** 返回完整 Session Entry tree；Entry DTO 的 wire 编码由 web runtime mapper 负责。 */
-  public List<Entry> listSessionEntries(UUID sessionId) {
+  /** 按存储创建顺序返回一页 Session Entry；Entry DTO 的 wire 编码由 web runtime mapper 负责。 */
+  public SessionEntryPage listSessionEntries(UUID sessionId, UUID afterEntryId, int limit) {
     Objects.requireNonNull(sessionId, "sessionId");
-    return List.copyOf(requireRuntime().getSessionEntries(sessionId));
+    return requireRuntime().listSessionEntryPage(sessionId, afterEntryId, limit);
   }
 
   private List<HarnessSessionSummaryDTO> listSessionSummaries(List<UUID> sessionIds) {

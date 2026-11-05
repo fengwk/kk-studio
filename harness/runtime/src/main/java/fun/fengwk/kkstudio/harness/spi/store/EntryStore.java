@@ -14,7 +14,7 @@ import java.util.UUID;
 /**
  * Entry 聚合的事务内视图。
  *
- * <p>Entry 是 append-only 不可变历史：写入前由存储实现校验完整路径；读取保持 root-to-head 或确定性时间顺序。删除仅供 Session 级深删除使用。
+ * <p>Entry 是 append-only 不可变历史：写入前由存储实现校验完整路径；读取保持 root-to-head 或存储追加顺序（创建顺序）。删除仅供 Session 级深删除使用。
  */
 public interface EntryStore {
 
@@ -67,8 +67,16 @@ public interface EntryStore {
   /** 读取指定 branch 的生效 settings 快照。 */
   BranchSettings loadBranchSettings(UUID headEntryId);
 
-  /** 读取 Session 全部 Entry，按 {@code (createdAt, unsigned UUID)} 升序。 */
+  /** 读取 Session 全部 Entry，按存储追加顺序（创建顺序）升序；同一 Session 内父节点必先于子节点。 */
   List<Entry> loadBySession(UUID sessionId);
+
+  /**
+   * 读取 Session 中游标之后的一页 Entry，按存储追加顺序（创建顺序）升序，至多 {@code limit} 条。
+   *
+   * <p>{@code afterEntryId} 为 null 时从最早一条开始；非 null 时必须属于同一 Session，否则拒绝。因为写入先校验完整父链， 同一 Session
+   * 内父节点的追加序号必小于子节点，跨页读取不会让子节点先于父节点出现。
+   */
+  List<Entry> loadPageBySession(UUID sessionId, UUID afterEntryId, int limit);
 
   /** 按原 ToolInvocation id 反查已物化的 ToolResult MESSAGE Entry。 */
   Optional<Entry> findToolResultByInvocationId(UUID sessionId, UUID invocationId);

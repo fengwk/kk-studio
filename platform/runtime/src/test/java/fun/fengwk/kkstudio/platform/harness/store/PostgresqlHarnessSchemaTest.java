@@ -439,6 +439,7 @@ class PostgresqlHarnessSchemaTest {
     assertEquals(
         List.of(
             "idx_harness_entry_parent",
+            "idx_harness_entry_session_seq",
             "idx_harness_execution_exit_parent",
             "idx_harness_execution_exit_thread",
             "idx_harness_execution_exit_thread_unconfirmed",
@@ -468,6 +469,9 @@ class PostgresqlHarnessSchemaTest {
     String workLease = indexDefinition("idx_durable_work_lease_until");
     String threadParent = indexDefinition("idx_harness_thread_parent");
     String threadSession = indexDefinition("idx_harness_thread_session");
+    // Entry 列表按存储追加序做 keyset 分页，Session 内读取必须走 (session_id, entry_seq) 索引。
+    assertTrue(
+        indexDefinition("idx_harness_entry_session_seq").contains("(session_id, entry_seq)"));
     String stopRequest = indexDefinition("idx_harness_thread_command_stop_request");
     String childPending = indexDefinition("idx_harness_thread_join_child_pending");
     String toolNonterminal = indexDefinition("idx_harness_tool_invocation_thread_nonterminal");

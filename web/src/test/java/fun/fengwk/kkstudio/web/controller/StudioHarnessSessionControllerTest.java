@@ -4,8 +4,10 @@ import static org.hamcrest.Matchers.hasKey;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -27,6 +29,7 @@ import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.api.history.RootPayload;
+import fun.fengwk.kkstudio.harness.api.history.SessionEntryPage;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.api.session.Session;
@@ -166,7 +169,7 @@ class StudioHarnessSessionControllerTest {
   }
 
   @Test
-  void listsThreadSummariesAndEntriesBySession() throws Exception {
+  void listsThreadSummariesBySession() throws Exception {
     HarnessThreadSummaryDTO thread = new HarnessThreadSummaryDTO();
     thread.setThreadId(new UUID(0L, 2L).toString());
     thread.setName("thread");
@@ -206,7 +209,11 @@ class StudioHarnessSessionControllerTest {
         .andExpect(jsonPath("$.data[0].execution.settings.variant").value("default"))
         .andExpect(jsonPath("$.data[0].headMessagePreview").value("hello"));
     verify(harnessQueryService).listThreadSummaries(SESSION_ID);
+  }
 
+  @Test
+  void listsEntryPageAndProjectsUsageForThatPageOnly() throws Exception {
+    // 意图：Entry 列表返回 keyset 页包装；费用只投影本页，未计价 Entry 显式输出 null。
     Entry root =
         new Entry(
             new UUID(0L, 3L),
@@ -232,24 +239,67 @@ class StudioHarnessSessionControllerTest {
     HarnessUsageCostDTO cost = new HarnessUsageCostDTO();
     cost.setCurrency("USD");
     cost.setAmount("0.010000000000");
-    when(harnessQueryService.listSessionEntries(SESSION_ID)).thenReturn(entries);
-    // 费用由读取时投影一次性给出：控制器只按 entry id 落位，未投影的 Entry 显式为 null。
+    when(harnessQueryService.listSessionEntries(SESSION_ID, null, 100))
+        .thenReturn(new SessionEntryPage(entries, false));
     when(usageCostProjectionService.project(entries)).thenReturn(Map.of(user.id(), cost));
 
     mockMvc
         .perform(get("/api/sessions/" + SESSION_ID + "/entries"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data[0].entryId").value(root.id().toString()))
-        .andExpect(jsonPath("$.data[0].sessionId").value(SESSION_ID.toString()))
-        .andExpect(jsonPath("$.data[0].parentEntryId").value((Object) null))
-        .andExpect(jsonPath("$.data[0].entryType").value("ROOT"))
-        .andExpect(jsonPath("$.data[0].usageCost").value((Object) null))
-        .andExpect(jsonPath("$.data[1].entryId").value(user.id().toString()))
-        .andExpect(jsonPath("$.data[1].entryType").value("MESSAGE"))
-        .andExpect(jsonPath("$.data[1].usageCost.currency").value("USD"))
-        .andExpect(jsonPath("$.data[1].usageCost.amount").value("0.010000000000"));
-    verify(harnessQueryService).listSessionEntries(SESSION_ID);
+        .andExpect(jsonPath("$.data.items[0].entryId").value(root.id().toString()))
+        .andExpect(jsonPath("$.data.items[0].sessionId").value(SESSION_ID.toString()))
+        .andExpect(jsonPath("$.data.items[0].parentEntryId").value((Object) null))
+        .andExpect(jsonPath("$.data.items[0].entryType").value("ROOT"))
+        .andExpect(jsonPath("$.data.items[0].usageCost").value((Object) null))
+        .andExpect(jsonPath("$.data.items[1].entryId").value(user.id().toString()))
+        .andExpect(jsonPath("$.data.items[1].entryType").value("MESSAGE"))
+        .andExpect(jsonPath("$.data.items[1].usageCost.currency").value("USD"))
+        .andExpect(jsonPath("$.data.items[1].usageCost.amount").value("0.010000000000"))
+        .andExpect(jsonPath("$.data.nextCursor").value((Object) null));
+    verify(harnessQueryService).listSessionEntries(SESSION_ID, null, 100);
     verify(usageCostProjectionService).project(entries);
+  }
+
+  @Test
+  void entryPageUsesKeysetCursorAndRejectsInvalidBounds() throws Exception {
+    UUID cursor = new UUID(0L, 7L);
+    Entry root =
+        new Entry(
+            new UUID(0L, 8L),
+            SESSION_ID,
+            null,
+            new RootPayload(
+                new BranchSettings(
+                    "assistant",
+                    BuiltinExecution.of(new ModelSelection("gpt-5", "default")),
+                    null)),
+            Instant.parse("2026-08-10T00:00:00Z"));
+    List<Entry> entries = List.of(root);
+    when(harnessQueryService.listSessionEntries(SESSION_ID, cursor, 25))
+        .thenReturn(new SessionEntryPage(entries, true));
+    when(usageCostProjectionService.project(entries)).thenReturn(Map.of());
+
+    mockMvc
+        .perform(
+            get("/api/sessions/" + SESSION_ID + "/entries")
+                .param("cursor", cursor.toString())
+                .param("limit", "25"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.items.length()").value(1))
+        .andExpect(jsonPath("$.data.items[0].entryId").value(root.id().toString()))
+        .andExpect(jsonPath("$.data.nextCursor").value(root.id().toString()));
+    verify(harnessQueryService).listSessionEntries(SESSION_ID, cursor, 25);
+
+    // 分页边界在到达查询服务前拒绝：0、超过上限、非十进制与非法游标都是 400。
+    for (String limit : List.of("0", "201", "abc")) {
+      mockMvc
+          .perform(get("/api/sessions/" + SESSION_ID + "/entries").param("limit", limit))
+          .andExpect(status().isBadRequest());
+    }
+    mockMvc
+        .perform(get("/api/sessions/" + SESSION_ID + "/entries").param("cursor", "not-a-uuid"))
+        .andExpect(status().isBadRequest());
+    verify(harnessQueryService, times(1)).listSessionEntries(any(), any(), anyInt());
   }
 
   @Test
