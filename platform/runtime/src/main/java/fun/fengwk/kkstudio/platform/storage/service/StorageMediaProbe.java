@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.platform.storage.service;
 
-import fun.fengwk.kkstudio.platform.storage.S3ObjectMetadata;
+import fun.fengwk.kkstudio.platform.storage.s3.S3ObjectMetadata;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageMediaFacts;
 
 /**

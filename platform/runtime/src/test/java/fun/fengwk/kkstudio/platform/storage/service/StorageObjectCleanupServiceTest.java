@@ -14,9 +14,9 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
-import fun.fengwk.kkstudio.platform.storage.S3StorageService;
 import fun.fengwk.kkstudio.platform.storage.configuration.StorageMaintenanceProperties;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageObjectCleanupRepository;
+import fun.fengwk.kkstudio.platform.storage.s3.S3StorageService;
 
 import java.time.Duration;
 import java.util.List;

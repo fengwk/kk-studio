@@ -4,9 +4,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.util.Assert;
 
-import fun.fengwk.kkstudio.platform.storage.S3StorageService;
 import fun.fengwk.kkstudio.platform.storage.configuration.StorageMaintenanceProperties;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageObjectCleanupRepository;
+import fun.fengwk.kkstudio.platform.storage.s3.S3StorageService;
 
 import java.time.Duration;
 import java.util.List;

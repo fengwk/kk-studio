@@ -3,8 +3,8 @@ package fun.fengwk.kkstudio.platform.storage.service;
 import org.springframework.util.Assert;
 import org.springframework.util.MimeTypeUtils;
 
-import fun.fengwk.kkstudio.platform.storage.S3ObjectMetadata;
 import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;
+import fun.fengwk.kkstudio.platform.storage.s3.S3ObjectMetadata;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageUpload;
 
 import java.util.Arrays;

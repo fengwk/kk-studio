@@ -4,6 +4,9 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
 
+import fun.fengwk.kkstudio.platform.storage.s3.S3PresignService;
+import fun.fengwk.kkstudio.platform.storage.s3.S3StorageService;
+
 /**
  * 存储集成测试的 S3 假件：以内存对象与记录式预签名替换真实 S3 客户端， 使 reserve/complete/expiry/delete 全链路在 PostgreSQL 上以真实事务运行。
  *

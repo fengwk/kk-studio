@@ -4,7 +4,7 @@ import org.springframework.boot.health.contributor.Health;
 import org.springframework.boot.health.contributor.HealthIndicator;
 import org.springframework.stereotype.Component;
 
-import fun.fengwk.kkstudio.platform.storage.S3ReadinessProbe;
+import fun.fengwk.kkstudio.platform.storage.s3.S3ReadinessProbe;
 
 import java.util.Objects;
 

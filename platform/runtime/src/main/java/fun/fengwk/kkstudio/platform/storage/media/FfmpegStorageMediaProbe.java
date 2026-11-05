@@ -7,9 +7,9 @@ import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
-import fun.fengwk.kkstudio.platform.storage.S3ObjectMetadata;
-import fun.fengwk.kkstudio.platform.storage.S3ObjectStream;
-import fun.fengwk.kkstudio.platform.storage.S3StorageService;
+import fun.fengwk.kkstudio.platform.storage.s3.S3ObjectMetadata;
+import fun.fengwk.kkstudio.platform.storage.s3.S3ObjectStream;
+import fun.fengwk.kkstudio.platform.storage.s3.S3StorageService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageMediaProbe;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageMediaFacts;
 

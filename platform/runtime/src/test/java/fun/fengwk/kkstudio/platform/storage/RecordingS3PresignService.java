@@ -7,6 +7,8 @@ import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.platform.storage.configuration.S3StorageProperties;
+import fun.fengwk.kkstudio.platform.storage.s3.S3PresignService;
+import fun.fengwk.kkstudio.platform.storage.s3.S3PresignedUrl;
 
 import java.time.Instant;
 import java.util.ArrayList;

@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.storage;
+package fun.fengwk.kkstudio.platform.storage.s3;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -23,6 +23,7 @@ import software.amazon.awssdk.services.s3.S3Configuration;
 
 import fun.fengwk.kkstudio.platform.harness.read.PlatformReadException;
 import fun.fengwk.kkstudio.platform.harness.read.TextReadWindow;
+import fun.fengwk.kkstudio.platform.storage.ReadDeadline;
 import fun.fengwk.kkstudio.platform.storage.configuration.S3StorageProperties;
 import fun.fengwk.kkstudio.platform.storage.error.StorageReadTimeoutException;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;

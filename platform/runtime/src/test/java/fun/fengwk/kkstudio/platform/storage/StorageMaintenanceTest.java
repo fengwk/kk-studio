@@ -20,6 +20,8 @@ import fun.fengwk.kkstudio.platform.storage.configuration.StorageMaintenanceProp
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageBlobRepository;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageObjectCleanupRepository;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageUploadRepository;
+import fun.fengwk.kkstudio.platform.storage.s3.S3PresignService;
+import fun.fengwk.kkstudio.platform.storage.s3.S3StorageService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobPreviewService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageMediaProbe;

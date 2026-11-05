@@ -5,8 +5,8 @@ import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.platform.storage.ReadDeadline;
-import fun.fengwk.kkstudio.platform.storage.S3StorageService;
 import fun.fengwk.kkstudio.platform.storage.StorageObjectKeys;
+import fun.fengwk.kkstudio.platform.storage.s3.S3StorageService;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobContent;
 

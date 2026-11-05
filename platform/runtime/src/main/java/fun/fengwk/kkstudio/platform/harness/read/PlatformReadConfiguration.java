@@ -6,7 +6,7 @@ import org.springframework.context.annotation.Configuration;
 
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageRepository;
 import fun.fengwk.kkstudio.platform.catalog.skill.archive.SkillArchiveFileReader;
-import fun.fengwk.kkstudio.platform.storage.S3StorageService;
+import fun.fengwk.kkstudio.platform.storage.s3.S3StorageService;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;

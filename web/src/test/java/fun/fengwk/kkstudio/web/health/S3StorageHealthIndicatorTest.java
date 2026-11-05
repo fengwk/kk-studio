@@ -10,7 +10,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.boot.health.contributor.Health;
 import org.springframework.boot.health.contributor.Status;
 
-import fun.fengwk.kkstudio.platform.storage.S3ReadinessProbe;
+import fun.fengwk.kkstudio.platform.storage.s3.S3ReadinessProbe;
 
 /** S3StorageHealthIndicator 测试：验证 probe 正常时返回 UP，异常时返回 DOWN，且严禁暴露 bucket、endpoint 与凭据详情。 */
 class S3StorageHealthIndicatorTest {
