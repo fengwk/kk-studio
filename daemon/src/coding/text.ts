@@ -78,7 +78,7 @@ function invalidEncoding(): never {
 }
 
 /** 严格 UTF-8 解码：非法序列、代理项编码与过短序列立即失败，绝不替换成 U+FFFD。 */
-export function createUtf8Decoder(): StreamingDecoder {
+function createUtf8Decoder(): StreamingDecoder {
   let pending: number[] = []
   return {
     push(bytes: Uint8Array): string {
@@ -159,7 +159,7 @@ function isValidCodePoint(codePoint: number): boolean {
 }
 
 /** 严格 UTF-16 解码：孤立代理项与奇数尾部字节立即失败。 */
-export function createUtf16Decoder(littleEndian: boolean): StreamingDecoder {
+function createUtf16Decoder(littleEndian: boolean): StreamingDecoder {
   let pendingByte: number | null = null
   let pendingHigh: number | null = null
   return {

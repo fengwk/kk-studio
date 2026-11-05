@@ -489,11 +489,11 @@ interface Occurrence {
   trailingEnding: string | null
 }
 
-export function normalizeToLf(value: string): string {
+function normalizeToLf(value: string): string {
   return value.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
 }
 
-export function detectLineEnding(text: string): string {
+function detectLineEnding(text: string): string {
   const hasCrlf = text.includes('\r\n')
   const withoutCrlf = text.replace(/\r\n/g, '')
   const hasCr = withoutCrlf.includes('\r')
@@ -511,7 +511,7 @@ export function detectLineEnding(text: string): string {
   return '\n'
 }
 
-export function parseLineEndingDocument(text: string): LineEndingDocument {
+function parseLineEndingDocument(text: string): LineEndingDocument {
   const lines: string[] = []
   const eolAfter: Array<string | null> = []
   let current = ''
@@ -543,7 +543,7 @@ export function parseLineEndingDocument(text: string): LineEndingDocument {
   return { lines, eolAfter }
 }
 
-export function serializeLineEndingDocument(document: LineEndingDocument): string {
+function serializeLineEndingDocument(document: LineEndingDocument): string {
   let builder = ''
   for (let index = 0; index < document.lines.length; index++) {
     builder += document.lines[index] as string
@@ -704,7 +704,7 @@ interface DiffPart {
   lines: string[]
 }
 
-export function buildDiff(originalDoc: LineEndingDocument, nextDoc: LineEndingDocument): string {
+function buildDiff(originalDoc: LineEndingDocument, nextDoc: LineEndingDocument): string {
   const originalLines = diffLines(originalDoc)
   const nextLines = diffLines(nextDoc)
   return renderDiff(originalLines, nextLines, diffParts(originalLines, nextLines))

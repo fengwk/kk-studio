@@ -14,7 +14,6 @@ import {
 } from '../../src/coding/output.js'
 import { commitTextFile } from '../../src/coding/commit.js'
 import {
-  createUtf16Decoder,
   decodeText,
   encodeText,
 } from '../../src/coding/text.js'
@@ -526,12 +525,12 @@ describe('output 边界', () => {
 
 describe('text 边界', () => {
   it('UTF-16 解码拒绝孤立代理项与奇数尾部字节', () => {
-    const decoder = createUtf16Decoder(true)
-    decoder.push(Uint8Array.from([0x00, 0xd8]))
-    expect(() => decoder.finish()).toThrowError(/invalid text encoding/)
-    const odd = createUtf16Decoder(true)
-    odd.push(Uint8Array.from([0x00]))
-    expect(() => odd.finish()).toThrowError()
+    expect(() =>
+      decodeText(Uint8Array.from([0xff, 0xfe, 0x00, 0xd8])),
+    ).toThrowError(/invalid text encoding/)
+    expect(() =>
+      decodeText(Uint8Array.from([0xff, 0xfe, 0x00])),
+    ).toThrowError(/invalid text encoding/)
   })
 
   it('decodeText 识别 UTF-16BE BOM', () => {

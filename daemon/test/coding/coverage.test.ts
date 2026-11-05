@@ -9,7 +9,7 @@ import {
   alignToCharacterBoundary,
   leadingCharacterBoundary,
 } from '../../src/coding/output.js'
-import { fileCapabilities, buildDiff, parseLineEndingDocument } from '../../src/coding/files.js'
+import { fileCapabilities } from '../../src/coding/files.js'
 import { searchCapabilities } from '../../src/coding/search.js'
 import { callCapability, makeConfig, makeContext, openTestStore, textOf } from './helpers.js'
 import { ensurePrivateDirectory, type PrivateFs } from '../../src/native/index.js'
@@ -245,15 +245,26 @@ describe('files/search 覆盖补充', () => {
     expect(await readFile(file, 'utf8')).toBe('c\n')
   })
 
-  it('buildDiff 覆盖首尾变更的前导/尾随上下文', () => {
+  it('buildDiff 覆盖首尾变更的前导/尾随上下文', async () => {
+    const dir = await tempDir()
+    const file = join(dir, 'diff-context.txt')
     const lines = Array.from({ length: 30 }, (_value, index) => `l${index}`)
+    const originalText = `${lines.join('\n')}\n`
     const changed = [...lines]
     changed[0] = 'first'
     changed[29] = 'last'
-    const diff = buildDiff(
-      parseLineEndingDocument(`${lines.join('\n')}\n`),
-      parseLineEndingDocument(`${changed.join('\n')}\n`),
+    const nextText = `${changed.join('\n')}\n`
+    await writeFile(file, originalText, 'utf8')
+    const editPreview = fileCapabilities['fs.edit.preview']!
+    const result = await callCapability(
+      editPreview,
+      'fs.edit.preview',
+      { path: file, old_string: originalText, new_string: nextText },
+      makeContext(dir),
     )
+    expect(result.error).toBe(false)
+    const review = (result.contents[0] as { type: 'json'; json: Record<string, unknown> }).json
+    const diff = review.diff as string
     expect(diff).toContain('+ 1|first')
     expect(diff).toContain('+30|last')
   })

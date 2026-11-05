@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { fileCapabilities, buildDiff, parseLineEndingDocument } from '../../src/coding/files.js'
+import { fileCapabilities } from '../../src/coding/files.js'
 import type { CapabilityCall, CapabilityContext, CapabilityExecutor, CapabilityResult, ExpectedFile } from '../../src/contracts.js'
 import { makeContext, textOf } from './helpers.js'
 
@@ -355,13 +355,31 @@ describe('EditReview suite', () => {
     expect(await readFile(file, 'utf8')).toBe('after\n')
   })
 
-  it('9. 1500 行仅首末变化精确 2 删 2 增且不退化', () => {
+  async function diffOf(
+    originalContent: string,
+    oldString: string,
+    newString: string,
+  ): Promise<string> {
+    const dir = await tempDir()
+    const file = join(dir, 'diff-target.txt')
+    await writeFile(file, originalContent, 'utf8')
+    const result = await invoke(
+      editPreview,
+      'fs.edit.preview',
+      { path: file, old_string: oldString, new_string: newString },
+      makeContext(dir),
+    )
+    expect(result.error).toBe(false)
+    const review = (result.contents[0] as { type: 'json'; json: Record<string, unknown> }).json
+    return review.diff as string
+  }
+
+  it('9. 1500 行仅首末变化精确 2 删 2 增且不退化', async () => {
     const original = ['first_old', ...Array.from({ length: 1498 }, (_, i) => `mid_${i}`), 'last_old']
     const next = ['first_new', ...Array.from({ length: 1498 }, (_, i) => `mid_${i}`), 'last_new']
-    const diff = buildDiff(
-      parseLineEndingDocument(`${original.join('\n')}\n`),
-      parseLineEndingDocument(`${next.join('\n')}\n`),
-    )
+    const origText = `${original.join('\n')}\n`
+    const nextText = `${next.join('\n')}\n`
+    const diff = await diffOf(origText, origText, nextText)
     const lines = diff.split('\n')
     const removed = lines.filter((line) => line.startsWith('-'))
     const added = lines.filter((line) => line.startsWith('+'))
@@ -374,14 +392,13 @@ describe('EditReview suite', () => {
     expect(diff).toContain('...')
   })
 
-  it('10. 50000 行仅首末变化精确 2 删 2 增且快速计算', () => {
+  it('10. 50000 行仅首末变化精确 2 删 2 增且快速计算', async () => {
     const count = 50000
     const original = ['first_old', ...Array.from({ length: count - 2 }, (_, i) => `line_${i}`), 'last_old']
     const next = ['first_new', ...Array.from({ length: count - 2 }, (_, i) => `line_${i}`), 'last_new']
-    const diff = buildDiff(
-      parseLineEndingDocument(`${original.join('\n')}\n`),
-      parseLineEndingDocument(`${next.join('\n')}\n`),
-    )
+    const origText = `${original.join('\n')}\n`
+    const nextText = `${next.join('\n')}\n`
+    const diff = await diffOf(origText, origText, nextText)
     const lines = diff.split('\n')
     const removed = lines.filter((line) => line.startsWith('-'))
     const added = lines.filter((line) => line.startsWith('+'))
@@ -394,62 +411,67 @@ describe('EditReview suite', () => {
     expect(diff).toContain('...')
   })
 
-  it('11. 空文件与非空文件之间的纯增与纯删 diff', () => {
-    const emptyDoc = parseLineEndingDocument('')
-    const populatedDoc = parseLineEndingDocument('line1\nline2\nline3\n')
-
-    // 空到非空：纯新增
-    const addDiff = buildDiff(emptyDoc, populatedDoc)
+  it('11. 追加多行与清空文件的纯增纯删 diff', async () => {
+    // 纯新增：追加多行（0 删 3 增）
+    const addDiff = await diffOf(
+      'header\n',
+      'header\n',
+      'header\nline1\nline2\nline3\n',
+    )
     const addLines = addDiff.split('\n')
     expect(addLines.filter((l) => l.startsWith('-'))).toHaveLength(0)
     expect(addLines.filter((l) => l.startsWith('+'))).toHaveLength(3)
-    expect(addDiff).toBe('+ 1|line1\n+ 2|line2\n+ 3|line3')
+    expect(addDiff).toBe('  1|header\n+ 2|line1\n+ 3|line2\n+ 4|line3')
 
-    // 非空到空：纯删除
-    const removeDiff = buildDiff(populatedDoc, emptyDoc)
+    // 纯删除：清空多行内容（3 删 0 增）
+    const removeDiff = await diffOf(
+      'line1\nline2\nline3\n',
+      'line1\nline2\nline3\n',
+      '',
+    )
     const removeLines = removeDiff.split('\n')
     expect(removeLines.filter((l) => l.startsWith('-'))).toHaveLength(3)
     expect(removeLines.filter((l) => l.startsWith('+'))).toHaveLength(0)
     expect(removeDiff).toBe('- 1|line1\n- 2|line2\n- 3|line3')
   })
 
-  it('12. 文件内纯插入与纯删除行（无修改行）', () => {
-    const baseDoc = parseLineEndingDocument('alpha\nomega\n')
-    const insertedDoc = parseLineEndingDocument('alpha\ninserted1\ninserted2\nomega\n')
-
-    const insertDiff = buildDiff(baseDoc, insertedDoc)
+  it('12. 文件内纯插入与纯删除行（无修改行）', async () => {
+    const insertDiff = await diffOf(
+      'alpha\nomega\n',
+      'alpha\n',
+      'alpha\ninserted1\ninserted2\n',
+    )
     expect(insertDiff).toContain('+ 2|inserted1')
     expect(insertDiff).toContain('+ 3|inserted2')
     expect(insertDiff.split('\n').filter((l) => l.startsWith('-'))).toHaveLength(0)
 
-    const deleteDiff = buildDiff(insertedDoc, baseDoc)
+    const deleteDiff = await diffOf(
+      'alpha\ninserted1\ninserted2\nomega\n',
+      'inserted1\ninserted2\n',
+      '',
+    )
     expect(deleteDiff).toContain('- 2|inserted1')
     expect(deleteDiff).toContain('- 3|inserted2')
     expect(deleteDiff.split('\n').filter((l) => l.startsWith('+'))).toHaveLength(0)
   })
 
-  it('13. EOF 换行差异：末尾无换行被修改时输出 \\ No newline at end of file', () => {
+  it('13. EOF 换行差异：末尾无换行被修改时输出 \\ No newline at end of file', async () => {
     // 原文末尾无换行，新文末尾无换行
-    const noEof1 = parseLineEndingDocument('foo')
-    const noEof2 = parseLineEndingDocument('bar')
-    const diff1 = buildDiff(noEof1, noEof2)
+    const diff1 = await diffOf('foo', 'foo', 'bar')
     expect(diff1).toBe('- 1|foo\n\\ No newline at end of file\n+ 1|bar\n\\ No newline at end of file')
 
     // 原文末尾有换行，新文末尾无换行
-    const withEof = parseLineEndingDocument('foo\n')
-    const diff2 = buildDiff(withEof, noEof1)
+    const diff2 = await diffOf('foo\n', 'foo\n', 'foo')
     expect(diff2).toBe('- 1|foo\n+ 1|foo\n\\ No newline at end of file')
 
     // 原文末尾无换行，新文末尾有换行
-    const diff3 = buildDiff(noEof1, withEof)
+    const diff3 = await diffOf('foo', 'foo', 'foo\n')
     expect(diff3).toBe('- 1|foo\n\\ No newline at end of file\n+ 1|foo')
   })
 
-  it('14. EOF 换行差异：普通 context 在末尾无换行时不额外伪造换行标记', () => {
+  it('14. EOF 换行差异：普通 context 在末尾无换行时不额外伪造换行标记', async () => {
     // 首行被修改，末行无修改且无 EOF 换行
-    const docA = parseLineEndingDocument('line1\nline2')
-    const docB = parseLineEndingDocument('LINE1\nline2')
-    const diff = buildDiff(docA, docB)
+    const diff = await diffOf('line1\nline2', 'line1', 'LINE1')
     expect(diff).toContain('- 1|line1')
     expect(diff).toContain('+ 1|LINE1')
     expect(diff).toContain(' 2|line2')
@@ -474,10 +496,10 @@ describe('EditReview suite', () => {
     expect(await readFile(file, 'utf8')).toBe('no EOF')
   })
 
-  it('16. 重复行：多行相同内容修改某一行时精确对齐', () => {
-    const original = parseLineEndingDocument('dup\ndup\ndup\ndup\n')
-    const next = parseLineEndingDocument('dup\nchanged\ndup\ndup\n')
-    const diff = buildDiff(original, next)
+  it('16. 重复行：多行相同内容修改某一行时精确对齐', async () => {
+    const orig = 'dup\ndup\ndup\ndup\n'
+    const next = 'dup\nchanged\ndup\ndup\n'
+    const diff = await diffOf(orig, orig, next)
     expect(diff).toContain('+ 2|changed')
     expect(diff).toContain('- 4|dup')
     const lines = diff.split('\n')
@@ -485,36 +507,28 @@ describe('EditReview suite', () => {
     expect(lines.filter((l) => l.startsWith('+'))).toHaveLength(1)
   })
 
-  it('17. 上下文 4/8 边界：前导/尾随 4 行边界', () => {
+  it('17. 上下文 4/8 边界：前导/尾随 4 行边界', async () => {
     // LEADING 上下文刚好 4 行：全部展示，无省略
-    const leading4Orig = parseLineEndingDocument('c1\nc2\nc3\nc4\nold\n')
-    const leading4Next = parseLineEndingDocument('c1\nc2\nc3\nc4\nnew\n')
-    const diffLeading4 = buildDiff(leading4Orig, leading4Next)
+    const diffLeading4 = await diffOf('c1\nc2\nc3\nc4\nold\n', 'old', 'new')
     expect(diffLeading4).not.toContain('...')
     expect(diffLeading4).toContain(' 1|c1')
     expect(diffLeading4).toContain(' 4|c4')
 
     // LEADING 上下文 5 行（> 4）：第 1 行被折叠，出现 ...
-    const leading5Orig = parseLineEndingDocument('c1\nc2\nc3\nc4\nc5\nold\n')
-    const leading5Next = parseLineEndingDocument('c1\nc2\nc3\nc4\nc5\nnew\n')
-    const diffLeading5 = buildDiff(leading5Orig, leading5Next)
+    const diffLeading5 = await diffOf('c1\nc2\nc3\nc4\nc5\nold\n', 'old', 'new')
     expect(diffLeading5).toContain('...\n')
     expect(diffLeading5).not.toContain(' 1|c1')
     expect(diffLeading5).toContain(' 2|c2')
     expect(diffLeading5).toContain(' 5|c5')
 
     // TRAILING 上下文刚好 4 行：全部展示，无省略
-    const trailing4Orig = parseLineEndingDocument('old\nc1\nc2\nc3\nc4\n')
-    const trailing4Next = parseLineEndingDocument('new\nc1\nc2\nc3\nc4\n')
-    const diffTrailing4 = buildDiff(trailing4Orig, trailing4Next)
+    const diffTrailing4 = await diffOf('old\nc1\nc2\nc3\nc4\n', 'old', 'new')
     expect(diffTrailing4).not.toContain('...')
     expect(diffTrailing4).toContain(' 2|c1')
     expect(diffTrailing4).toContain(' 5|c4')
 
     // TRAILING 上下文 5 行（> 4）：末尾第 5 行被折叠，末尾出现 ...
-    const trailing5Orig = parseLineEndingDocument('old\nc1\nc2\nc3\nc4\nc5\n')
-    const trailing5Next = parseLineEndingDocument('new\nc1\nc2\nc3\nc4\nc5\n')
-    const diffTrailing5 = buildDiff(trailing5Orig, trailing5Next)
+    const diffTrailing5 = await diffOf('old\nc1\nc2\nc3\nc4\nc5\n', 'old', 'new')
     expect(diffTrailing5).toContain('...')
     expect(diffTrailing5.endsWith('...')).toBe(true)
     expect(diffTrailing5).toContain(' 2|c1')
@@ -522,13 +536,13 @@ describe('EditReview suite', () => {
     expect(diffTrailing5).not.toContain(' 6|c5')
   })
 
-  it('18. 上下文 4/8 边界：两 hunk 间 INTER_HUNK 在 8 行与 9 行的临界行为', () => {
+  it('18. 上下文 4/8 边界：两 hunk 间 INTER_HUNK 在 8 行与 9 行的临界行为', async () => {
     // 两处改动之间恰好有 8 行相同内容（<= 2 * DIFF_CONTEXT_LINES = 8）
     // 应该完整输出这 8 行 context，不出现省略号 ...
     const middle8 = Array.from({ length: 8 }, (_, i) => `mid_${i}`)
-    const orig8 = parseLineEndingDocument(['change1_old', ...middle8, 'change2_old'].join('\n') + '\n')
-    const next8 = parseLineEndingDocument(['change1_new', ...middle8, 'change2_new'].join('\n') + '\n')
-    const diff8 = buildDiff(orig8, next8)
+    const orig8 = ['change1_old', ...middle8, 'change2_old'].join('\n') + '\n'
+    const next8 = ['change1_new', ...middle8, 'change2_new'].join('\n') + '\n'
+    const diff8 = await diffOf(orig8, orig8, next8)
     expect(diff8).not.toContain('...')
     for (let i = 0; i < 8; i++) {
       expect(diff8).toContain(`mid_${i}`)
@@ -537,9 +551,9 @@ describe('EditReview suite', () => {
     // 两处改动之间有 9 行相同内容（> 8）
     // 应该保留前 4 行和后 4 行 context，中间出现省略号 ...，第 5 个 mid 被省略
     const middle9 = Array.from({ length: 9 }, (_, i) => `mid_${i}`)
-    const orig9 = parseLineEndingDocument(['change1_old', ...middle9, 'change2_old'].join('\n') + '\n')
-    const next9 = parseLineEndingDocument(['change1_new', ...middle9, 'change2_new'].join('\n') + '\n')
-    const diff9 = buildDiff(orig9, next9)
+    const orig9 = ['change1_old', ...middle9, 'change2_old'].join('\n') + '\n'
+    const next9 = ['change1_new', ...middle9, 'change2_new'].join('\n') + '\n'
+    const diff9 = await diffOf(orig9, orig9, next9)
     expect(diff9).toContain('...\n')
     expect(diff9).toContain('mid_0')
     expect(diff9).toContain('mid_1')
@@ -575,8 +589,18 @@ describe('EditReview suite', () => {
     expect(review.diff).toContain('+ 1|hello kk-studio')
   })
 
-  it('20. 文档完全相同时 buildDiff 返回空字符串', () => {
-    const doc = parseLineEndingDocument('a\nb\nc\n')
-    expect(buildDiff(doc, doc)).toBe('')
+  it('20. fs.edit.preview 拒绝无实质变更并防止生成空 diff', async () => {
+    const dir = await tempDir()
+    const file = join(dir, 'same.txt')
+    await writeFile(file, 'a\nb\nc\n', 'utf8')
+    const context = makeContext(dir)
+    const result = await invoke(
+      editPreview,
+      'fs.edit.preview',
+      { path: file, old_string: 'b', new_string: 'b' },
+      context,
+    )
+    expect(result.error).toBe(true)
+    expect(textOf(result)).toContain('No changes to apply: old_string and new_string must differ after line-ending normalization')
   })
 })
