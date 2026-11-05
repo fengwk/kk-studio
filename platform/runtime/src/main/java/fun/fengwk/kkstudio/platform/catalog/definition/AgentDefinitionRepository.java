@@ -3,16 +3,13 @@ package fun.fengwk.kkstudio.platform.catalog.definition;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
-import tools.jackson.core.StreamReadFeature;
-import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.ObjectMapper;
-import tools.jackson.databind.cfg.JsonNodeFeature;
-import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.common.page.Page;
 import fun.fengwk.kkstudio.common.page.PageQuery;
 import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.codec.ExecutionSelectionJsonCodec;
+import fun.fengwk.kkstudio.harness.model.HarnessJson;
 import fun.fengwk.kkstudio.platform.persistence.PostgresJdbcTypes;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionType;
 
@@ -24,12 +21,7 @@ import java.util.Objects;
 @Repository
 public class AgentDefinitionRepository {
 
-  private static final ObjectMapper MAPPER =
-      JsonMapper.builder()
-          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
-          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
-          .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
-          .build();
+  private static final ObjectMapper MAPPER = HarnessJson.STRICT_DECIMAL;
 
   private static final String COLUMNS =
       "name, type, description, system_prompt, execution, config,"

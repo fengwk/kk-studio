@@ -1,15 +1,13 @@
 package fun.fengwk.kkstudio.platform.harness.builtin.realtime;
 
 import tools.jackson.core.JacksonException;
-import tools.jackson.core.StreamReadFeature;
-import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
-import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.common.id.Uuids;
+import fun.fengwk.kkstudio.harness.model.HarnessJson;
 
 import java.util.Iterator;
 import java.util.LinkedHashSet;
@@ -26,11 +24,7 @@ import java.util.UUID;
  */
 public final class HarnessStreamCatchupNotificationCodec {
 
-  private static final ObjectMapper MAPPER =
-      JsonMapper.builder()
-          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
-          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
-          .build();
+  private static final ObjectMapper MAPPER = HarnessJson.STRICT;
 
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
   private static final Set<String> FIELDS =
