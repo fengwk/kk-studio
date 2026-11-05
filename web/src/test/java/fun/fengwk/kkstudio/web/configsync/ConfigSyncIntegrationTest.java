@@ -811,7 +811,8 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
                     .put("modelGatewayBusyRetryMillis", concurrentBusyRetry)));
     JsonNode concurrent = getData("/api/settings");
 
-    assertThrows(SystemSettingsVersionConflictException.class, () -> applier.apply(plan));
+    assertThrows(
+        SystemSettingsVersionConflictException.class, () -> applier.apply(plan, List.of()));
 
     assertNull(findProvider(name), "writes preceding the settings CAS must be rolled back");
     assertEquals(

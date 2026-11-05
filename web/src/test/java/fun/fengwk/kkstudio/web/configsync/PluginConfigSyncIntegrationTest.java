@@ -145,7 +145,7 @@ class PluginConfigSyncIntegrationTest extends ConfigSyncTestSupport {
         withStalePlugin(planFor(ROLLBACK_PROVIDER, List.of(first, second)), second);
     ConfigSyncSnapshot before = snapshotReader.read();
 
-    assertThrows(DomainException.class, () -> applier.apply(tampered));
+    assertThrows(DomainException.class, () -> applier.apply(tampered, List.of()));
 
     ConfigSyncSnapshot after = snapshotReader.read();
     assertEquals(
@@ -169,7 +169,7 @@ class PluginConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     pluginManagementService.updateConfiguration(
         pluginId, row.version(), row.valuesJson(), Map.of());
 
-    assertThrows(DomainException.class, () -> applier.apply(plan));
+    assertThrows(DomainException.class, () -> applier.apply(plan, List.of()));
 
     ConfigSyncSnapshot after = snapshotReader.read();
     assertEquals(row.version() + 1, pluginRow(after, pluginId).version());

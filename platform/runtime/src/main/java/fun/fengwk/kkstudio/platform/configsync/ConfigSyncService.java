@@ -3,8 +3,11 @@ package fun.fengwk.kkstudio.platform.configsync;
 import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogService;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogService.PreparedGitImport;
 import fun.fengwk.kkstudio.platform.error.DomainErrorCode;
 import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncExportDTO;
@@ -38,6 +41,7 @@ public class ConfigSyncService {
   private final ConfigSyncParser parser;
   private final ConfigSyncPlanner planner;
   private final ConfigSyncApplier applier;
+  private final SkillCatalogService skillCatalogService;
 
   /** 返回全部可同步条目及其依赖闭包；不含配置值与凭据。 */
   @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
@@ -80,7 +84,8 @@ public class ConfigSyncService {
     return new ConfigSyncImportCheckDTO(created, updated, plan.skipped());
   }
 
-  /** 重新校验后事务导入；跳过项必须获得显式部分导入授权。 */
+  /** 重新校验并在事务外准备所有 Git 归档后事务导入；跳过项必须获得显式部分导入授权。 */
+  @Transactional(propagation = Propagation.NEVER)
   public ConfigSyncImportResultDTO importYaml(ConfigSyncImportRequestDTO request) {
     String yaml = request == null ? null : request.getYaml();
     ConfigSyncParser.ParsedDocument document = parser.parse(yaml);
@@ -91,8 +96,20 @@ public class ConfigSyncService {
     if (plan.imported().isEmpty()) {
       return new ConfigSyncImportResultDTO(plan.imported(), plan.skipped());
     }
+    List<PreparedGitImport> preparedSkills = new ArrayList<>();
+    boolean committed = false;
     try {
-      applier.apply(plan);
+      for (ConfigSyncPlan.SkillImport skill : plan.skillPackages()) {
+        preparedSkills.add(
+            skillCatalogService.prepareGitImport(
+                skill.packageName(),
+                skill.description(),
+                skill.repositoryUrl(),
+                skill.branch(),
+                skill.token()));
+      }
+      applier.apply(plan, preparedSkills);
+      committed = true;
     } catch (DomainException error) {
       if (error.code() != DomainErrorCode.VALIDATION) {
         throw error;
@@ -100,6 +117,12 @@ public class ConfigSyncService {
       // 已知校验失败：不透传可能包含真实值的下游 DTO/服务错误文本（尤其凭据片段），只给安全导入错误；
       // unexpected 异常与数据库 cause 不回显，也不被吞。
       throw DomainException.validation(RESOURCE, "config import is invalid");
+    } finally {
+      if (!committed) {
+        for (PreparedGitImport prepared : preparedSkills) {
+          skillCatalogService.cancelPreparedGitImport(prepared);
+        }
+      }
     }
     return new ConfigSyncImportResultDTO(plan.imported(), plan.skipped());
   }

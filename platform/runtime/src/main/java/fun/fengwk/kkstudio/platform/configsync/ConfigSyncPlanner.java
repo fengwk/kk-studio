@@ -41,7 +41,7 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * 导入计划：在事务外完成依赖判定与外部准备（Git exact commit、MCP 发现）。
+ * 导入计划：在事务外完成依赖判定与 MCP 发现；Git HEAD 和归档在计划之后、写事务之前准备。
  *
  * <p>文件条目的静态输入校验（缺必填、类型、有效值、未知字段与 settings 完整七节）已在 {@link ConfigSyncParser} 解析期完成；Planner 只负责与快照
  * 相关的判定：Environment token 冲突、修改 Skill 不可变 repositoryUrl、移除仍被引用的 Skill/MCP 工具都是硬错误；依赖缺失与外部准备失败才是条目级
@@ -261,7 +261,7 @@ public final class ConfigSyncPlanner {
     return models;
   }
 
-  /** Skill Package 校验不可变 repositoryUrl 与渠道；不访问 Git，真正拉取与冲突校验延迟到 apply 阶段由 importGitPackage 执行。 */
+  /** Skill Package 校验不可变 repositoryUrl 与渠道；不访问 Git，发布时在事务内再次校验。 */
   private SkillPlan planSkillPackages(
       ConfigSyncParser.ParsedDocument document,
       ConfigSyncSnapshot snapshot,

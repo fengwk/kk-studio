@@ -9,7 +9,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 导入计划：准备阶段（事务外 Git / MCP 发现）完成后的可写入事实。
+ * 导入计划：事务外依赖判定与 MCP 发现完成后的导入事实；Git 归档在计划之后、写事务之前另行准备。
  *
  * <p>{@code imported} 是最终会实际写入的引用，{@code skipped} 是被明确跳过的条目；两者都已在计划阶段定性。
  *
