@@ -180,8 +180,9 @@ describe('SkillPackagesPage', () => {
   }
 
   function card(name: string): HTMLElement {
-    const heading = screen.getByText(name)
-    const element = heading.closest('article')
+    const element = screen
+      .getAllByRole('article')
+      .find((article) => article.querySelector('h3')?.textContent === name)
     if (!element) {
       throw new Error(`card not found: ${name}`)
     }
@@ -311,12 +312,14 @@ describe('SkillPackagesPage', () => {
     expect(within(card('core-tools')).queryByText(/离线机器/)).not.toBeInTheDocument()
   })
 
-  it('edits Git packages with a read-only repository and keeps the token untouched when blank', async () => {
+  it('edits Git packages from the detail dialog with a read-only repository', async () => {
     const user = userEvent.setup()
     renderPage()
 
     await waitFor(() => expect(screen.getByText('core-tools')).toBeInTheDocument())
-    await user.click(within(card('core-tools')).getByRole('button', { name: /编辑技能包 core-tools/ }))
+    await user.click(within(card('core-tools')).getByRole('button', { name: /详情 core-tools/ }))
+    const detailDialog = await screen.findByRole('dialog', { name: /详情: core-tools/ })
+    await user.click(await within(detailDialog).findByRole('button', { name: '编辑技能包' }))
 
     const modal = await screen.findByRole('dialog', { name: /编辑技能包/ })
     expect(within(modal).getByDisplayValue('https://github.com/example/skills.git')).toBeDisabled()
@@ -346,7 +349,9 @@ describe('SkillPackagesPage', () => {
     renderPage()
 
     await waitFor(() => expect(screen.getByText('core-tools')).toBeInTheDocument())
-    await user.click(within(card('core-tools')).getByRole('button', { name: /编辑技能包 core-tools/ }))
+    await user.click(within(card('core-tools')).getByRole('button', { name: /详情 core-tools/ }))
+    const detailDialog = await screen.findByRole('dialog', { name: /详情: core-tools/ })
+    await user.click(await within(detailDialog).findByRole('button', { name: '编辑技能包' }))
 
     const modal = await screen.findByRole('dialog', { name: /编辑技能包/ })
     expect(within(modal).queryByLabelText(/访问令牌/)).not.toBeInTheDocument()
@@ -365,7 +370,7 @@ describe('SkillPackagesPage', () => {
     })
   })
 
-  it('deletes with the displayed version and surfaces the backend reason when in use', async () => {
+  it('deletes from the detail dialog and surfaces the backend reason when in use', async () => {
     const user = userEvent.setup()
     vi.mocked(agentService.deleteSkillPackage).mockRejectedValue(
       new ApiError('Request failed with status 409', 409, 'in_use', {
@@ -375,19 +380,22 @@ describe('SkillPackagesPage', () => {
     renderPage()
 
     await waitFor(() => expect(screen.getByText('core-tools')).toBeInTheDocument())
-    await user.click(within(card('core-tools')).getByRole('button', { name: /删除技能包 core-tools/ }))
+    await user.click(within(card('core-tools')).getByRole('button', { name: /详情 core-tools/ }))
+    const detailDialog = await screen.findByRole('dialog', { name: /详情: core-tools/ })
+    await user.click(await within(detailDialog).findByRole('button', { name: '删除技能包 core-tools' }))
 
     const modal = await screen.findByRole('alertdialog')
     expect(within(modal).getByText('确认删除技能包“core-tools”？')).toBeInTheDocument()
     await user.click(within(modal).getByRole('button', { name: '删除技能包' }))
 
+    // 删除使用详情里的当前版本，而不是列表摘要里的旧版本。
     await waitFor(() => {
-      expect(agentService.deleteSkillPackage).toHaveBeenCalledWith('core-tools', '1')
+      expect(agentService.deleteSkillPackage).toHaveBeenCalledWith('core-tools', '2')
     })
     expect(
       await within(modal).findByText('Skill package is still referenced by Agent demo'),
     ).toBeInTheDocument()
-    expect(screen.getByText('core-tools')).toBeInTheDocument()
+    expect(card('core-tools')).toBeInTheDocument()
   })
 
   it('shows the real archive tree, per-environment sync state and download from the detail dialog', async () => {

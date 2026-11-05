@@ -1,10 +1,10 @@
 import { useMemo, useState } from 'react'
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowUpCircle, Edit2, Package, RefreshCw, Trash2 } from 'lucide-react'
+import { ArrowUpCircle, Package, RefreshCw } from 'lucide-react'
 import { AiConsoleFrame } from '@/app/ai-console/AiConsoleFrame'
 import { agentService } from '@/shared/api/agent-service'
 import { environmentService } from '@/features/environment/environment-service'
-import type { SkillPackageDetailDTO, SkillPackageSummaryDTO } from '@/shared/api/generated/contracts'
+import type { SkillPackageDetailDTO } from '@/shared/api/generated/contracts'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n, type TranslationKey } from '@/shared/i18n'
 import { Badge, type BadgeTone } from '@/shared/ui/data/Badge'
@@ -12,7 +12,6 @@ import { Button } from '@/shared/ui/controls/Button'
 import { ResourceCard, type ResourceCardMetaRow } from '@/shared/ui/cards/ResourceCard'
 import { ResourceGrid } from '@/shared/ui/cards/ResourceGrid'
 import { CreateCard } from '@/shared/ui/feedback/CreateCard'
-import { ConfirmActionModal } from '@/shared/ui/overlays/ConfirmActionModal'
 import { SkillPackageCreateModal } from './SkillPackageCreateModal'
 import { SkillPackageDetailModal } from './SkillPackageDetailModal'
 import { SkillPackageEditModal } from './SkillPackageEditModal'
@@ -49,7 +48,6 @@ export function SkillPackagesPage() {
   const [createOpen, setCreateOpen] = useState(false)
   const [detailName, setDetailName] = useState<string | null>(null)
   const [editName, setEditName] = useState<string | null>(null)
-  const [deleteTarget, setDeleteTarget] = useState<SkillPackageSummaryDTO | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
 
   const packagesQuery = useQuery({
@@ -153,15 +151,6 @@ export function SkillPackagesPage() {
     onError: (error: unknown) => setActionError(errorDetail(error)),
   })
 
-  const deleteMutation = useMutation({
-    mutationFn: ({ name, expectedVersion }: { name: string; expectedVersion: string }) =>
-      agentService.deleteSkillPackage(name, expectedVersion),
-    onSuccess: () => {
-      setDeleteTarget(null)
-      invalidatePackages()
-    },
-  })
-
   const content = (
     <ResourceGrid>
       <CreateCard
@@ -179,7 +168,6 @@ export function SkillPackagesPage() {
           && checkMutation.variables?.name === pkg.packageName
         const updating = publishMutation.isPending
           && publishMutation.variables?.name === pkg.packageName
-        const busy = checking || updating
 
         const rows: ResourceCardMetaRow[] = [
           [
@@ -303,30 +291,6 @@ export function SkillPackagesPage() {
                     {t('ai.skillPackages.detail')}
                   </Button>
                 ) : null}
-                <Button
-                  variant="ghost"
-                  size="compact"
-                  aria-label={`${t('ai.skillPackages.edit')} ${pkg.packageName}`}
-                  disabled={busy}
-                  onClick={() => setEditName(pkg.packageName)}
-                >
-                  <Edit2 aria-hidden="true" />
-                  {t('ai.skillPackages.edit')}
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="compact"
-                  danger
-                  aria-label={`${t('ai.skillPackages.delete')} ${pkg.packageName}`}
-                  disabled={busy}
-                  onClick={() => {
-                    deleteMutation.reset()
-                    setDeleteTarget(pkg)
-                  }}
-                >
-                  <Trash2 aria-hidden="true" />
-                  {t('ai.skillPackages.delete')}
-                </Button>
               </>
             }
           />
@@ -359,6 +323,10 @@ export function SkillPackagesPage() {
           packageName={detailName}
           onClose={() => setDetailName(null)}
           onEdit={() => setEditName(detailName)}
+          onDeleted={() => {
+            setDetailName(null)
+            invalidatePackages()
+          }}
         />
       )}
 
@@ -369,28 +337,6 @@ export function SkillPackagesPage() {
           onSuccess={() => {
             setEditName(null)
             invalidatePackages()
-          }}
-        />
-      )}
-
-      {deleteTarget && (
-        <ConfirmActionModal
-          modal={{
-            title: t('ai.skillPackages.delete'),
-            description: t('ai.skillPackages.deleteConfirm', { name: deleteTarget.packageName }),
-            confirmLabel: t('ai.skillPackages.delete'),
-            tone: 'danger',
-            error: deleteMutation.error ? errorDetail(deleteMutation.error) : null,
-            onConfirm: () =>
-              deleteMutation.mutate({
-                name: deleteTarget.packageName,
-                expectedVersion: deleteTarget.version,
-              }),
-          }}
-          pending={deleteMutation.isPending}
-          onClose={() => {
-            setDeleteTarget(null)
-            deleteMutation.reset()
           }}
         />
       )}

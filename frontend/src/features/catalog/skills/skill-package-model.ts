@@ -59,8 +59,9 @@ export function isGitPackage(pkg: Pick<SkillPackageSummaryDTO, 'source'>): boole
   return pkg.source === 'GIT'
 }
 
+/** wire 上的 Instant 以 epoch 秒表示，展示时只做本地化格式化。 */
 export function formatDateTime(timestamp: number, locale: AppLocale): string {
-  return new Date(timestamp).toLocaleString(locale, {
+  return new Date(timestamp * 1000).toLocaleString(locale, {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',

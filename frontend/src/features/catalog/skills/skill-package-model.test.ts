@@ -11,6 +11,7 @@ import {
   errorDetail,
   formatBytes,
   formatCommit,
+  formatDateTime,
   isDescriptionWithinLimit,
   isSupportedSkillArchive,
   isValidPackageName,
@@ -115,6 +116,8 @@ describe('skill package model', () => {
     expect(formatBytes(2048)).toBe('2.0 KB')
     expect(formatBytes('1572864')).toBe('1.5 MB')
     expect(formatBytes('not-a-size')).toBe('—')
+    // wire 上的 Instant 是 epoch 秒：按毫秒解析会退化成 1970 年。
+    expect(formatDateTime(1784505600, 'en-US')).toContain('2026')
   })
 
   it('validates package names, versions, descriptions and archive extensions', () => {

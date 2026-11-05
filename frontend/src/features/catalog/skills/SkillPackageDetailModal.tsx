@@ -1,11 +1,13 @@
+import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Download } from 'lucide-react'
+import { Download, Trash2 } from 'lucide-react'
 import { agentService } from '@/shared/api/agent-service'
 import { environmentService } from '@/features/environment/environment-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n, type TranslationKey } from '@/shared/i18n'
 import { Badge, type BadgeTone } from '@/shared/ui/data/Badge'
 import { Button } from '@/shared/ui/controls/Button'
+import { ConfirmActionModal } from '@/shared/ui/overlays/ConfirmActionModal'
 import { Dialog } from '@/shared/ui/overlays/Dialog'
 import {
   buildFileTree,
@@ -39,13 +41,16 @@ export function SkillPackageDetailModal({
   packageName,
   onClose,
   onEdit,
+  onDeleted,
 }: {
   packageName: string
   onClose: () => void
   onEdit: () => void
+  onDeleted: () => void
 }) {
   const { t, locale } = useI18n()
   const queryClient = useQueryClient()
+  const [deleteOpen, setDeleteOpen] = useState(false)
 
   const detailQuery = useQuery({
     queryKey: skillPackageQueryKeys.detail(packageName),
@@ -76,6 +81,15 @@ export function SkillPackageDetailModal({
   const downloadMutation = useMutation({
     mutationFn: () => agentService.getSkillPackageArchiveUrl(packageName),
     onSuccess: (archive) => triggerDownload(archive.download.url, archive.filename),
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: (expectedVersion: string) => agentService.deleteSkillPackage(packageName, expectedVersion),
+    onSuccess: () => {
+      setDeleteOpen(false)
+      void queryClient.invalidateQueries({ queryKey: skillPackageQueryKeys.list })
+      onDeleted()
+    },
   })
 
   const detail = detailQuery.data
@@ -279,11 +293,44 @@ export function SkillPackageDetailModal({
         )}
       </div>
 
-      <div className="modal-footer">
+      <div className="modal-footer modal-footer-with-leading-action">
+        <div className="modal-footer-leading-action">
+          <Button
+            variant="ghost"
+            danger
+            disabled={!detail}
+            aria-label={`${t('ai.skillPackages.delete')} ${packageName}`}
+            onClick={() => {
+              deleteMutation.reset()
+              setDeleteOpen(true)
+            }}
+          >
+            <Trash2 aria-hidden="true" />
+            {t('ai.skillPackages.delete')}
+          </Button>
+        </div>
         <Button variant="inline" onClick={onClose}>
           {t('shared.close')}
         </Button>
       </div>
+
+      {deleteOpen && detail ? (
+        <ConfirmActionModal
+          modal={{
+            title: t('ai.skillPackages.delete'),
+            description: t('ai.skillPackages.deleteConfirm', { name: packageName }),
+            confirmLabel: t('ai.skillPackages.delete'),
+            tone: 'danger',
+            error: deleteMutation.error ? errorDetail(deleteMutation.error) : null,
+            onConfirm: () => deleteMutation.mutate(detail.version),
+          }}
+          pending={deleteMutation.isPending}
+          onClose={() => {
+            setDeleteOpen(false)
+            deleteMutation.reset()
+          }}
+        />
+      ) : null}
     </Dialog>
   )
 }
