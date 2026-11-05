@@ -3,11 +3,11 @@ package fun.fengwk.kkstudio.web.environment;
 import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Service;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
 import fun.fengwk.kkstudio.platform.environment.update.EnvironmentUpdateService;
-import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.share.environment.EnvironmentRuntimeStatusDTO;
 import fun.fengwk.kkstudio.share.environment.EnvironmentUpdateStartDTO;
 import fun.fengwk.kkstudio.web.environment.cluster.EnvironmentRuntimeOwnerClient;
@@ -48,7 +48,7 @@ public class EnvironmentRuntimeRoutingService {
         .route(environmentId)
         .orElseThrow(
             () ->
-                DomainException.environmentUnavailable(
-                    "environment has no current READY owner route"));
+                DomainException.unavailable(
+                    "ENVIRONMENT_UNAVAILABLE", "environment has no current READY owner route"));
   }
 }

@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.platform.environment.update;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityBusyException;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityUnavailableException;
@@ -22,7 +23,6 @@ import fun.fengwk.kkstudio.platform.environment.gateway.EnvironmentDaemonGateway
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentEvent;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
-import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.share.environment.EnvironmentRuntimeDTO;
 import fun.fengwk.kkstudio.share.environment.EnvironmentRuntimeStatusDTO;
@@ -284,7 +284,8 @@ public class EnvironmentUpdateService implements EnvironmentUpdateListener {
   }
 
   private static DomainException unavailable() {
-    return DomainException.environmentUnavailable(
+    return DomainException.unavailable(
+        "ENVIRONMENT_UNAVAILABLE",
         "environment runtime snapshot is unavailable; wait for READY or reconnect");
   }
 }

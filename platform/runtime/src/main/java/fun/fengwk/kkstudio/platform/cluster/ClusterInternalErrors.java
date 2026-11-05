@@ -3,7 +3,7 @@ package fun.fengwk.kkstudio.platform.cluster;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 
-import fun.fengwk.kkstudio.platform.error.DomainException;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
 import fun.fengwk.kkstudio.platform.http.DomainErrorResponses;
 

@@ -29,6 +29,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.EnvironmentIdeService;
 import fun.fengwk.kkstudio.ide.EnvironmentIdeServiceImpl;
@@ -49,7 +50,6 @@ import fun.fengwk.kkstudio.platform.daemon.protocol.IdeCommand;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeResult;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
 import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer;
-import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
 import fun.fengwk.kkstudio.web.advice.StudioDomainErrorAdvice;
@@ -200,10 +200,7 @@ class StudioEnvironmentIdeControllerTest {
     assertEquals("/workspace/subdir", request.getValue().getDirectory());
   }
 
-  /**
-   * 意图：离线/排队/超时等 IDE 通道故障统一映射为 409 与稳定 {@code ide_unavailable} code，机器码与 resource 不随 locale 变化，用户可见
-   * message 按请求 locale 本地化。
-   */
+  /** 意图：离线/排队/超时等 IDE 通道故障统一映射为 409 unavailable，机器码不随 locale 变化，用户可见 message 按请求 locale 本地化。 */
   @ParameterizedTest
   @CsvSource({
     "en-US,The environment IDE is unavailable. Try again later.",
@@ -212,7 +209,8 @@ class StudioEnvironmentIdeControllerTest {
   void ideChannelFailuresReturnTypedConflictInRequestLocale(
       String languageTag, String expectedMessage) throws Exception {
     when(environmentIdeService.changeDirectory(eq(EnvironmentId.of(ENV_ID)), eq(VIEW_ID), any()))
-        .thenThrow(DomainException.ideUnavailable("environment IDE command timed out"));
+        .thenThrow(
+            DomainException.unavailable("IDE_UNAVAILABLE", "environment IDE command timed out"));
 
     mockMvc
         .perform(
@@ -222,8 +220,7 @@ class StudioEnvironmentIdeControllerTest {
                 .content("{\"directory\":\"/workspace/subdir\"}"))
         .andExpect(status().isConflict())
         .andExpect(jsonPath("$.status").value(409))
-        .andExpect(jsonPath("$.code").value("ide_unavailable"))
-        .andExpect(jsonPath("$.errors.resource").value("environment"))
+        .andExpect(jsonPath("$.code").value("unavailable"))
         .andExpect(jsonPath("$.errors.detail").value("environment IDE command timed out"))
         .andExpect(jsonPath("$.message").value(expectedMessage));
   }

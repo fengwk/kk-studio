@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.web.controller;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.page.PageQuery;
-import fun.fengwk.kkstudio.platform.error.DomainException;
 
 /** 将分页值对象的边界错误收口为可翻译的请求参数校验错误。 */
 final class PageQueries {

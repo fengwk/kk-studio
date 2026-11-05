@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.platform.catalog.mcp.discovery;
 
 import tools.jackson.databind.JsonNode;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.json.JsonValues;
 import fun.fengwk.kkstudio.common.schema.ArraySchema;
 import fun.fengwk.kkstudio.common.schema.BooleanSchema;
@@ -13,7 +14,6 @@ import fun.fengwk.kkstudio.common.schema.ObjectSchema;
 import fun.fengwk.kkstudio.common.schema.SchemaElement;
 import fun.fengwk.kkstudio.common.schema.SchemaJsonCodec;
 import fun.fengwk.kkstudio.common.schema.StringSchema;
-import fun.fengwk.kkstudio.platform.error.DomainException;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;

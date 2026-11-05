@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.platform.catalog.mcp;
 
-import fun.fengwk.kkstudio.platform.error.DomainException;
+import fun.fengwk.kkstudio.common.error.DomainException;
 
 import java.net.URI;
 import java.net.URISyntaxException;

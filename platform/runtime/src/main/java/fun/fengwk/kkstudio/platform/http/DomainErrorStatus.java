@@ -2,8 +2,8 @@ package fun.fengwk.kkstudio.platform.http;
 
 import org.springframework.http.HttpStatus;
 
-import fun.fengwk.kkstudio.platform.error.DomainErrorCode;
-import fun.fengwk.kkstudio.platform.error.DomainException;
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 
 /**
  * 领域错误码到 HTTP 状态的唯一映射。
@@ -24,13 +24,11 @@ public final class DomainErrorStatus {
   public static HttpStatus of(DomainErrorCode code) {
     return switch (code) {
       case VALIDATION -> HttpStatus.BAD_REQUEST;
-      case RESOURCE_NOT_FOUND -> HttpStatus.NOT_FOUND;
-      case VERSION_CONFLICT,
-          DUPLICATE,
-          IN_USE,
-          IDE_UNAVAILABLE,
-          ENVIRONMENT_UNAVAILABLE -> HttpStatus.CONFLICT;
+      case NOT_FOUND -> HttpStatus.NOT_FOUND;
+      case VERSION_CONFLICT, CONFLICT, DUPLICATE, IN_USE, UNAVAILABLE -> HttpStatus.CONFLICT;
       case UPSTREAM_FAILED -> HttpStatus.BAD_GATEWAY;
+      case UNAUTHORIZED -> HttpStatus.UNAUTHORIZED;
+      case INTERNAL -> HttpStatus.INTERNAL_SERVER_ERROR;
     };
   }
 }

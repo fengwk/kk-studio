@@ -10,7 +10,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
-import fun.fengwk.kkstudio.platform.error.DomainException;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
 import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
 
@@ -88,7 +88,7 @@ class StudioDomainErrorAdviceTest {
     assertError(
         advice.handle(DomainException.notFound("agent")),
         404,
-        "resource_not_found",
+        "not_found",
         "The agent was not found.",
         "agent",
         "agent not found");
@@ -114,18 +114,21 @@ class StudioDomainErrorAdviceTest {
         "cursor",
         "cursor is required");
     assertError(
-        advice.handle(DomainException.ideUnavailable("environment IDE command timed out")),
+        advice.handle(
+            DomainException.unavailable("IDE_UNAVAILABLE", "environment IDE command timed out")),
         409,
-        "ide_unavailable",
+        "unavailable",
         "The environment IDE is unavailable. Try again later.",
-        "environment",
+        null,
         "environment IDE command timed out");
     assertError(
-        advice.handle(DomainException.environmentUnavailable("environment runtime is unavailable")),
+        advice.handle(
+            DomainException.unavailable(
+                "ENVIRONMENT_UNAVAILABLE", "environment runtime is unavailable")),
         409,
-        "environment_unavailable",
+        "unavailable",
         "The environment runtime is unavailable. Try again later.",
-        "environment",
+        null,
         "environment runtime is unavailable");
     assertError(
         advice.handle(
@@ -149,6 +152,7 @@ class StudioDomainErrorAdviceTest {
     ApiResponse<Void> body = response.getBody();
     assertEquals(code, body.getCode());
     assertEquals(message, body.getMessage());
-    assertEquals(Map.of("resource", resource, "detail", detail), body.getErrors());
+    assertEquals(resource, body.getErrors().get("resource"));
+    assertEquals(detail, body.getErrors().get("detail"));
   }
 }

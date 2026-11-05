@@ -13,7 +13,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.chat.dto.ChatDTO;
 import fun.fengwk.kkstudio.chat.dto.ChatPageDTO;
 import fun.fengwk.kkstudio.chat.dto.ChatSessionPageDTO;
-import fun.fengwk.kkstudio.platform.error.DomainException;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessOwnerQueryService;
 import fun.fengwk.kkstudio.platform.orchestration.SessionDeletionOrchestrator;
 import fun.fengwk.kkstudio.share.runtime.HarnessSessionSummaryDTO;

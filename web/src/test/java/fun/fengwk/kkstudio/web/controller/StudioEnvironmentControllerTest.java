@@ -24,12 +24,12 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentService;
 import fun.fengwk.kkstudio.platform.environment.update.EnvironmentUpdateService;
-import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.share.environment.EnvironmentCardDTO;
 import fun.fengwk.kkstudio.share.environment.EnvironmentCreateDTO;
@@ -112,10 +112,7 @@ class StudioEnvironmentControllerTest {
         .andExpect(jsonPath("$.data.name").value("dev"));
   }
 
-  /**
-   * 意图：验证当服务层抛出 DomainException 时，由统一 StudioDomainErrorAdvice 映射为 HTTP 404 与 RESOURCE_NOT_FOUND
-   * (code="resource_not_found") 错误信封，而不是泄露为 500。
-   */
+  /** 意图：缺失 Environment 映射为 404 not_found，而不是泄露为 500。 */
   @Test
   void getMissingEnvironmentReturnsNotFound() throws Exception {
     when(environmentService.get(eq(EnvironmentId.of(ENV_ID))))
@@ -125,7 +122,7 @@ class StudioEnvironmentControllerTest {
         .perform(get("/api/environments/" + ENV_ID))
         .andExpect(status().isNotFound())
         .andExpect(jsonPath("$.status").value(404))
-        .andExpect(jsonPath("$.code").value("resource_not_found"))
+        .andExpect(jsonPath("$.code").value("not_found"))
         .andExpect(jsonPath("$.errors.resource").value("environment"))
         .andExpect(jsonPath("$.errors.detail").value("environment not found"));
   }
@@ -185,7 +182,7 @@ class StudioEnvironmentControllerTest {
     mockMvc
         .perform(get("/api/environments/" + ENV_ID + "/events"))
         .andExpect(status().isNotFound())
-        .andExpect(jsonPath("$.code").value("resource_not_found"));
+        .andExpect(jsonPath("$.code").value("not_found"));
   }
 
   /** 意图：验证 GET /api/environments/{id} 普通详情只返回 Card 投影，绝不返回 registrationToken（凭据不进入列表/详情 缓存路径）。 */
@@ -376,7 +373,7 @@ class StudioEnvironmentControllerTest {
         .andExpect(jsonPath("$.data.status.update").value(nullValue()));
   }
 
-  /** 意图：没有 READY owner 路由时明确返回 environment_unavailable，不能伪造空 update 快照。 */
+  /** 意图：没有 READY owner 路由时明确返回 unavailable，不能伪造空 update 快照。 */
   @Test
   void runtimeEndpointReturnsUnavailableWithoutOwnerRoute() throws Exception {
     when(clusterNodeRegistry.route(any())).thenReturn(Optional.empty());
@@ -384,7 +381,7 @@ class StudioEnvironmentControllerTest {
     mockMvc
         .perform(get("/api/environments/" + ENV_ID + "/runtime"))
         .andExpect(status().isConflict())
-        .andExpect(jsonPath("$.code").value("environment_unavailable"));
+        .andExpect(jsonPath("$.code").value("unavailable"));
   }
 
   /** 意图：非 owner 的 runtime 读取同样只做一次内部 HMAC 调用，不回退本地更新服务。 */

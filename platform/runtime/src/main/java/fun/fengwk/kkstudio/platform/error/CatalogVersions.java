@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.platform.error;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.number.DecimalLongs;
 
 /**

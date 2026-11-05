@@ -26,7 +26,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
-import fun.fengwk.kkstudio.platform.error.DomainException;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.platform.pluginhost.service.PluginManagementService;
 import fun.fengwk.kkstudio.share.plugin.PluginAuthKindDTO;
@@ -113,7 +113,7 @@ class StudioPluginControllerTest {
     verify(pluginManagementService).getPlugin("my-plugin");
   }
 
-  /** 测试意图：验证对未安装的 pluginId 发起 GET 请求时返回 404 Not Found，且错误 code 为 resource_not_found。 */
+  /** 测试意图：未安装的 pluginId 返回 404 not_found。 */
   @Test
   void getPluginNonExistentIdReturnsNotFound() throws Exception {
     when(pluginManagementService.getPlugin("unknown-plugin"))
@@ -122,7 +122,7 @@ class StudioPluginControllerTest {
     mockMvc
         .perform(get("/api/plugins/unknown-plugin"))
         .andExpect(status().isNotFound())
-        .andExpect(jsonPath("$.code").value("resource_not_found"))
+        .andExpect(jsonPath("$.code").value("not_found"))
         .andExpect(jsonPath("$.errors.resource").value("plugin"));
 
     verify(pluginManagementService).getPlugin("unknown-plugin");
@@ -419,7 +419,7 @@ class StudioPluginControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body))
         .andExpect(status().isNotFound())
-        .andExpect(jsonPath("$.code").value("resource_not_found"));
+        .andExpect(jsonPath("$.code").value("not_found"));
   }
 
   /** 测试意图：非字符串坐标、未知字段与缺失坐标都只在绑定期失败为 400，绝不进入服务层也绝不回显正文。 */

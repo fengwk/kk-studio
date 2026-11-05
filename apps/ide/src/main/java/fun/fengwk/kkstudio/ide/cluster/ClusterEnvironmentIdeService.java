@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.ide.cluster;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.EnvironmentIdeService;
@@ -13,7 +14,6 @@ import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewsDTO;
 import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
-import fun.fengwk.kkstudio.platform.error.DomainException;
 
 import java.util.Objects;
 import java.util.function.Consumer;
@@ -120,7 +120,9 @@ public final class ClusterEnvironmentIdeService implements EnvironmentIdeService
         registry
             .route(environmentId)
             .orElseThrow(
-                () -> DomainException.ideUnavailable("environment IDE owner route is unavailable"));
+                () ->
+                    DomainException.unavailable(
+                        "IDE_UNAVAILABLE", "environment IDE owner route is unavailable"));
     return owner.local() ? localCall.get() : remoteCall.apply(owner);
   }
 

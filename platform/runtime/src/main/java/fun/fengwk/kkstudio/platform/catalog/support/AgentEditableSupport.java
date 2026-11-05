@@ -4,7 +4,7 @@ import org.springframework.stereotype.Component;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 
-import fun.fengwk.kkstudio.platform.error.DomainException;
+import fun.fengwk.kkstudio.common.error.DomainException;
 
 /**
  * AgentEditableSupport 负责标准化 agent 管理面的字符串与 JSON 可编辑字段。

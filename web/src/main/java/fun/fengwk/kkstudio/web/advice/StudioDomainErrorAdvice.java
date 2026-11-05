@@ -9,8 +9,8 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import fun.fengwk.kkstudio.chat.http.ChatController;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.ide.web.StudioEnvironmentIdeController;
-import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
 import fun.fengwk.kkstudio.platform.http.DomainErrorResponses;
 import fun.fengwk.kkstudio.platform.http.DomainErrorStatus;
@@ -62,7 +62,10 @@ public class StudioDomainErrorAdvice {
   public ResponseEntity<ApiResponse<Void>> handle(DomainException error) {
     return DomainErrorResponses.of(
         error,
-        messageService.domainMessage(error.code(), Map.of("resource", error.resource())),
+        messageService.domainMessage(
+            error.code(),
+            error.reason(),
+            Map.of("resource", error.resource() == null ? "resource" : error.resource())),
         error.getMessage());
   }
 

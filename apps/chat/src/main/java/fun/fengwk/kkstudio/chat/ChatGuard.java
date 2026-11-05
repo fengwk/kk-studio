@@ -2,10 +2,10 @@ package fun.fengwk.kkstudio.chat;
 
 import org.springframework.stereotype.Component;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentRepository;
-import fun.fengwk.kkstudio.platform.error.DomainException;
 
 import java.util.UUID;
 

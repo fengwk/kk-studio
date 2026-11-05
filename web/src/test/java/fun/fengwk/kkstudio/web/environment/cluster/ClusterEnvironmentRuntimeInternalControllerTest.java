@@ -98,8 +98,7 @@ class ClusterEnvironmentRuntimeInternalControllerTest {
     mockMvc
         .perform(get("/internal/environments/" + ENV_ID + "/runtime"))
         .andExpect(status().isConflict())
-        .andExpect(jsonPath("$.code").value("environment_unavailable"))
-        .andExpect(jsonPath("$.errors.resource").value("environment"));
+        .andExpect(jsonPath("$.code").value("unavailable"));
   }
 
   private static EnvironmentRuntimeStatusDTO runtimeStatus(String revision) {

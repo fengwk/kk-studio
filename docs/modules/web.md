@@ -196,7 +196,7 @@ JSON API 显式返回共享的
 都以同一类型返回；Web 仍是唯一的组合根与 advice 归属。
 
 集群内部端点（`/internal/**`）与浏览器 API 共用同一个信封、同一个领域异常
-（[`DomainException`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/error/DomainException.java)）、
+（[`DomainException`](../../common/src/main/java/fun/fengwk/kkstudio/common/error/DomainException.java)）、
 同一张错误码到状态映射
 （[`DomainErrorStatus`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/http/DomainErrorStatus.java)）
 和同一个响应构造
@@ -215,7 +215,7 @@ JSON API 显式返回共享的
 required-nullable 字段由 DTO 显式 ALWAYS。未知字段由 DTO 的 JsonAnySetter 控制，
 领域 codec 另有严格语法校验；HTTP mapper 的 trailing-token 行为保持 Jackson 配置本身的边界。
 
-领域失败统一表示为 [`DomainException`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/error/DomainException.java)：
+领域失败统一表示为 [`DomainException`](../../common/src/main/java/fun/fengwk/kkstudio/common/error/DomainException.java)：
 稳定 `DomainErrorCode` 决定 HTTP 状态，`resource` 与 `detail` 进入 `errors`，版本冲突额外携带
 `expectedVersion`/`actualVersion`。全局 [`StudioDomainErrorAdvice`](../../web/src/main/java/fun/fengwk/kkstudio/web/advice/StudioDomainErrorAdvice.java)
 只保留一个领域 handler；Plugin advice 只保留请求体安全解析，Project advice 只映射产品与 harness

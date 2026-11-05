@@ -4,6 +4,8 @@ import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeChangeDirectoryDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeCloseViewDTO;
@@ -15,8 +17,6 @@ import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewsDTO;
 import fun.fengwk.kkstudio.platform.cluster.BoundedBodySubscriber;
 import fun.fengwk.kkstudio.platform.cluster.ClusterInternalAuthentication;
 import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
-import fun.fengwk.kkstudio.platform.error.DomainErrorCode;
-import fun.fengwk.kkstudio.platform.error.DomainException;
 
 import java.net.URI;
 import java.net.URLEncoder;
@@ -203,8 +203,8 @@ public class IdeClusterClient {
         new BoundedBodySubscriber(
             maxResponseBytes,
             () ->
-                DomainException.ideUnavailable(
-                    "cluster IDE owner response exceeds the metadata limit"));
+                DomainException.unavailable(
+                    "IDE_UNAVAILABLE", "cluster IDE owner response exceeds the metadata limit"));
     CompletableFuture<byte[]> bodyFuture = subscriber.bodyFuture();
     CompletableFuture<HttpResponse<byte[]>> responseFuture =
         httpClient.sendAsync(request, responseInfo -> subscriber);
@@ -229,12 +229,14 @@ public class IdeClusterClient {
     } catch (TimeoutException error) {
       subscriber.cancel();
       responseFuture.cancel(true);
-      throw DomainException.ideUnavailable("cluster IDE owner response timed out", error);
+      throw DomainException.unavailable(
+          "IDE_UNAVAILABLE", "cluster IDE owner response timed out", error);
     } catch (InterruptedException error) {
       Thread.currentThread().interrupt();
       subscriber.cancel();
       responseFuture.cancel(true);
-      throw DomainException.ideUnavailable("cluster IDE request was interrupted", error);
+      throw DomainException.unavailable(
+          "IDE_UNAVAILABLE", "cluster IDE request was interrupted", error);
     } catch (ExecutionException error) {
       throw mapFailure(error.getCause());
     }
@@ -251,17 +253,21 @@ public class IdeClusterClient {
     if (status == 400) {
       throw DomainException.validation(errorResource(responseBody), message);
     }
-    throw DomainException.ideUnavailable(message);
+    throw DomainException.unavailable("IDE_UNAVAILABLE", message);
   }
 
   private static DomainException mapFailure(Throwable cause) {
-    if (cause instanceof DomainException error && error.code() == DomainErrorCode.IDE_UNAVAILABLE) {
+    if (cause instanceof DomainException error
+        && error.code() == DomainErrorCode.UNAVAILABLE
+        && "IDE_UNAVAILABLE".equals(error.reason())) {
       return error;
     }
     if (cause instanceof TimeoutException) {
-      return DomainException.ideUnavailable("cluster IDE owner response timed out", cause);
+      return DomainException.unavailable(
+          "IDE_UNAVAILABLE", "cluster IDE owner response timed out", cause);
     }
-    return DomainException.ideUnavailable("cluster IDE owner is unreachable", cause);
+    return DomainException.unavailable(
+        "IDE_UNAVAILABLE", "cluster IDE owner is unreachable", cause);
   }
 
   private byte[] writeRequestJson(Object body) {
@@ -282,7 +288,8 @@ public class IdeClusterClient {
     try {
       return objectMapper.readValue(body, type);
     } catch (JacksonException error) {
-      throw DomainException.ideUnavailable("cluster IDE owner returned an invalid response", error);
+      throw DomainException.unavailable(
+          "IDE_UNAVAILABLE", "cluster IDE owner returned an invalid response", error);
     }
   }
 

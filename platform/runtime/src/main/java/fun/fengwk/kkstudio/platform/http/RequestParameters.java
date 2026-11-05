@@ -1,8 +1,8 @@
 package fun.fengwk.kkstudio.platform.http;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.number.DecimalLongs;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.platform.error.DomainException;
 
 /** HTTP 边界的共享参数适配：只翻译共同解析器的拒绝，不复制值算法。 */
 public final class RequestParameters {

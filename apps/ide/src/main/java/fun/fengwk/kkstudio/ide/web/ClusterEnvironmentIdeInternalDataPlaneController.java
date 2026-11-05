@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.cluster.IdeInternalPaths;
@@ -22,7 +23,6 @@ import fun.fengwk.kkstudio.platform.cluster.ClusterInternalErrors;
 import fun.fengwk.kkstudio.platform.cluster.ClusterInternalRequests;
 import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
-import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
 import fun.fengwk.kkstudio.platform.http.RequestParameters;
 
@@ -91,7 +91,8 @@ public class ClusterEnvironmentIdeInternalDataPlaneController {
     EnvironmentId envId = RequestParameters.environmentId(environmentId);
     boolean local = clusterNodeRegistry.route(envId).filter(ClusterOwnerRoute::local).isPresent();
     if (!local) {
-      throw DomainException.ideUnavailable(
+      throw DomainException.unavailable(
+          "IDE_UNAVAILABLE",
           "internal IDE data request does not match this node's READY owner route");
     }
     return envId;

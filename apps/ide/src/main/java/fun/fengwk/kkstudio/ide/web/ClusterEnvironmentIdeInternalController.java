@@ -18,6 +18,7 @@ import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.EnvironmentIdeServiceImpl;
 import fun.fengwk.kkstudio.ide.cluster.IdeInternalPaths;
@@ -34,7 +35,6 @@ import fun.fengwk.kkstudio.platform.cluster.ClusterInternalErrors;
 import fun.fengwk.kkstudio.platform.cluster.ClusterInternalRequests;
 import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
-import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
 import fun.fengwk.kkstudio.platform.http.RequestParameters;
 
@@ -175,8 +175,8 @@ public class ClusterEnvironmentIdeInternalController {
     boolean local =
         clusterNodeRegistry.route(environmentId).filter(ClusterOwnerRoute::local).isPresent();
     if (!local) {
-      throw DomainException.ideUnavailable(
-          "internal IDE request does not match this node's READY owner route");
+      throw DomainException.unavailable(
+          "IDE_UNAVAILABLE", "internal IDE request does not match this node's READY owner route");
     }
   }
 

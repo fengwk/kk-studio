@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.platform.catalog.mcp.discovery;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpConfigParser;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServer;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpTool;
@@ -10,7 +11,6 @@ import fun.fengwk.kkstudio.platform.catalog.mcp.client.McpClientFactory;
 import fun.fengwk.kkstudio.platform.catalog.mcp.client.McpDeadline;
 import fun.fengwk.kkstudio.platform.catalog.mcp.client.McpToolDefinition;
 import fun.fengwk.kkstudio.platform.catalog.mcp.client.RemoteMcpConfig;
-import fun.fengwk.kkstudio.platform.error.DomainException;
 
 import java.time.Duration;
 import java.util.ArrayList;

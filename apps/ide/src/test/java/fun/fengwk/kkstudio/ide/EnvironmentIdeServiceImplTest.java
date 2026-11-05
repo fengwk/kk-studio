@@ -10,6 +10,8 @@ import static org.mockito.Mockito.mock;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.browser.IdeBrowserUseClient;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeChangeDirectoryDTO;
@@ -27,8 +29,6 @@ import fun.fengwk.kkstudio.platform.daemon.protocol.IdeViewState;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeViewSummary;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
 import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer;
-import fun.fengwk.kkstudio.platform.error.DomainErrorCode;
-import fun.fengwk.kkstudio.platform.error.DomainException;
 
 import java.time.Duration;
 import java.util.ArrayDeque;
@@ -231,7 +231,7 @@ class EnvironmentIdeServiceImplTest {
         IdeResult.newBuilder().setOk(false).setCode("CANCELLED").setMessage("cancelled").build());
     DomainException error =
         assertThrows(DomainException.class, () -> service.closeView(ENV, VIEW.toString(), request));
-    assertEquals("ide_close_cancelled", error.resource());
+    assertEquals("IDE_CLOSE_CANCELLED", error.reason());
     assertTrue(bindings.find(ENV, VIEW).isPresent());
     assertTrue(authorization.closed.isEmpty());
   }
@@ -639,7 +639,8 @@ class EnvironmentIdeServiceImplTest {
       assertFalse(worker.isAlive());
       assertTrue(
           failure.get() instanceof DomainException error
-              && error.code() == DomainErrorCode.IDE_UNAVAILABLE);
+              && error.code() == DomainErrorCode.UNAVAILABLE
+              && "IDE_UNAVAILABLE".equals(error.reason()));
       assertTrue(interrupted.get());
       assertEquals(1, transport.abandoned);
     } finally {

@@ -10,7 +10,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.i18n.LocaleContextHolder;
 
-import fun.fengwk.kkstudio.platform.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 
 import java.util.Locale;
 import java.util.Map;
@@ -142,12 +142,11 @@ class StudioMessageServiceTest {
     Map<DomainErrorCode, String> expected =
         Map.of(
             DomainErrorCode.VALIDATION, "Invalid agent request.",
-            DomainErrorCode.RESOURCE_NOT_FOUND, "The agent was not found.",
+            DomainErrorCode.NOT_FOUND, "The agent was not found.",
             DomainErrorCode.VERSION_CONFLICT, "The agent was modified by another request.",
             DomainErrorCode.DUPLICATE, "The agent already exists.",
             DomainErrorCode.IN_USE, "The agent is still in use.",
-            DomainErrorCode.IDE_UNAVAILABLE,
-                "The environment IDE is unavailable. Try again later.");
+            DomainErrorCode.UNAVAILABLE, "The service is temporarily unavailable.");
 
     LocaleContextHolder.setLocale(Locale.US);
     for (Map.Entry<DomainErrorCode, String> entry : expected.entrySet()) {
@@ -164,12 +163,12 @@ class StudioMessageServiceTest {
     assertEquals(
         "The environment IDE is unavailable. Try again later.",
         messageService.domainMessage(
-            DomainErrorCode.IDE_UNAVAILABLE, Map.of("resource", "environment")));
+            DomainErrorCode.UNAVAILABLE, "IDE_UNAVAILABLE", Map.of("resource", "environment")));
 
     LocaleContextHolder.setLocale(Locale.SIMPLIFIED_CHINESE);
     assertEquals(
         "环境 IDE 当前不可用，请稍后重试。",
         messageService.domainMessage(
-            DomainErrorCode.IDE_UNAVAILABLE, Map.of("resource", "environment")));
+            DomainErrorCode.UNAVAILABLE, "IDE_UNAVAILABLE", Map.of("resource", "environment")));
   }
 }

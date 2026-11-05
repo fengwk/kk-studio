@@ -27,6 +27,7 @@ import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import tools.jackson.databind.json.JsonMapper;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.EnvironmentIdeServiceImpl;
 import fun.fengwk.kkstudio.ide.cluster.IdeClusterClient;
@@ -36,7 +37,6 @@ import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO;
 import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
 import fun.fengwk.kkstudio.platform.cluster.HmacClusterInternalAuthentication;
-import fun.fengwk.kkstudio.platform.error.DomainException;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -168,7 +168,7 @@ class ClusterEnvironmentIdeInternalControllerTest {
     when(clusterNodeRegistry.route(ENV)).thenReturn(Optional.of(ClusterOwnerRoute.local(NODE_B)));
     doThrow(DomainException.validation("ide_close_cancelled", "cancelled"))
         .doThrow(DomainException.validation("other_resource", "cancelled"))
-        .doThrow(DomainException.ideUnavailable("cancelled"))
+        .doThrow(DomainException.unavailable("IDE_UNAVAILABLE", "cancelled"))
         .when(localEnvironmentIdeService)
         .closeView(eq(ENV), eq(VIEW), any());
     HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
@@ -266,8 +266,7 @@ class ClusterEnvironmentIdeInternalControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(openViewBody()))
         .andExpect(status().isConflict())
-        .andExpect(jsonPath("$.code").value("ide_unavailable"))
-        .andExpect(jsonPath("$.errors.resource").value("environment"));
+        .andExpect(jsonPath("$.code").value("unavailable"));
     verifyNoInteractions(localEnvironmentIdeService);
   }
 

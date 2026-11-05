@@ -2,6 +2,8 @@ package fun.fengwk.kkstudio.ide;
 
 import lombok.extern.slf4j.Slf4j;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.common.number.DecimalLongs;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
@@ -23,8 +25,6 @@ import fun.fengwk.kkstudio.platform.daemon.protocol.IdeResult;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeViewState;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeViewSummary;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
-import fun.fengwk.kkstudio.platform.error.DomainErrorCode;
-import fun.fengwk.kkstudio.platform.error.DomainException;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -153,7 +153,7 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
       current = loadViews(environmentId);
     } catch (RuntimeException error) {
       unknown.addSuppressed(error);
-      throw DomainException.ideUnavailable(unknown.getMessage(), unknown);
+      throw DomainException.unavailable("IDE_UNAVAILABLE", unknown.getMessage(), unknown);
     }
     ViewSnapshot view =
         current.stream()
@@ -163,7 +163,9 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
             .filter(candidate -> candidate.binding().connectionId().equals(connectionId))
             .filter(candidate -> candidate.binding().claimId().equals(claimId))
             .findFirst()
-            .orElseThrow(() -> DomainException.ideUnavailable(unknown.getMessage(), unknown));
+            .orElseThrow(
+                () ->
+                    DomainException.unavailable("IDE_UNAVAILABLE", unknown.getMessage(), unknown));
     requireIntent(eventNodeId, connectionId, documentId, environmentId, viewId, claimId);
     return publishOpen(view);
   }
@@ -186,8 +188,8 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     } catch (RuntimeException error) {
       // 出票失败时回滚本地授权/路由；Daemon 视图留给其正常过期回收，不伪造成功入口。
       revokeLocal(binding);
-      throw DomainException.ideUnavailable(
-          "environment IDE bootstrap ticket could not be issued", error);
+      throw DomainException.unavailable(
+          "IDE_UNAVAILABLE", "environment IDE bootstrap ticket could not be issued", error);
     }
     EnvironmentIdeViewDTO dto = toDto(view);
     dto.setEntryUrl(
@@ -212,7 +214,8 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
             binding.bindingEpoch(),
             view.workspacePath());
       } catch (IllegalStateException error) {
-        throw DomainException.ideUnavailable("environment IDE view capacity is exhausted", error);
+        throw DomainException.unavailable(
+            "IDE_UNAVAILABLE", "environment IDE view capacity is exhausted", error);
       }
     }
     bindings.record(binding);
@@ -496,12 +499,14 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
           browserUse.findExactIntent(
               eventNodeId, connectionId, documentId, environmentId, viewId, claimId);
     } catch (DomainException error) {
-      if (error.code() == DomainErrorCode.IDE_UNAVAILABLE) {
+      if (error.code() == DomainErrorCode.UNAVAILABLE && "IDE_UNAVAILABLE".equals(error.reason())) {
         throw error;
       }
-      throw DomainException.ideUnavailable("browser IDE usage intent is unavailable", error);
+      throw DomainException.unavailable(
+          "IDE_UNAVAILABLE", "browser IDE usage intent is unavailable", error);
     } catch (RuntimeException error) {
-      throw DomainException.ideUnavailable("browser IDE usage intent is unavailable", error);
+      throw DomainException.unavailable(
+          "IDE_UNAVAILABLE", "browser IDE usage intent is unavailable", error);
     }
     if (!matched) {
       throw viewGone();
@@ -515,7 +520,8 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     try {
       viewAuthorization.ensureViewCapacity(environmentId);
     } catch (IllegalStateException error) {
-      throw DomainException.ideUnavailable("environment IDE view capacity is exhausted", error);
+      throw DomainException.unavailable(
+          "IDE_UNAVAILABLE", "environment IDE view capacity is exhausted", error);
     }
   }
 
@@ -544,7 +550,8 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     } catch (EnvironmentCapabilitySendUncertainException error) {
       throw new IdeOutcomeUnknownException("environment IDE command outcome is uncertain", error);
     } catch (EnvironmentCapabilityUnavailableException | EnvironmentCapabilityBusyException error) {
-      throw DomainException.ideUnavailable("environment IDE channel is unavailable", error);
+      throw DomainException.unavailable(
+          "IDE_UNAVAILABLE", "environment IDE channel is unavailable", error);
     }
     IdeResult reply;
     try {
@@ -572,7 +579,7 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     try {
       return call(environmentId, command);
     } catch (IdeOutcomeUnknownException error) {
-      throw DomainException.ideUnavailable(error.getMessage(), error);
+      throw DomainException.unavailable("IDE_UNAVAILABLE", error.getMessage(), error);
     }
   }
 
@@ -624,24 +631,25 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     }
     String code = reply.hasCode() ? reply.getCode() : "";
     if ("CANCELLED".equals(code)) {
-      return DomainException.validation("ide_close_cancelled", message);
+      return DomainException.validationReason("IDE_CLOSE_CANCELLED", message);
     }
     if ("VIEW_IN_USE".equals(code)
         || "BUSY".equals(code)
         || "CLAIM_CONFLICT".equals(code)
         || "UNAVAILABLE".equals(code)
         || "CLEANUP_FAILED".equals(code)) {
-      return DomainException.ideUnavailable(message);
+      return DomainException.unavailable("IDE_UNAVAILABLE", message);
     }
     return DomainException.validation("environment", message);
   }
 
   private static DomainException viewGone() {
-    return DomainException.ideUnavailable("IDE view is gone; open a new view before retrying");
+    return DomainException.unavailable(
+        "IDE_UNAVAILABLE", "IDE view is gone; open a new view before retrying");
   }
 
   private static DomainException protocolFailure(String message) {
-    return DomainException.ideUnavailable(message);
+    return DomainException.unavailable("IDE_UNAVAILABLE", message);
   }
 
   private static EnvironmentIdeViewDTO toDto(ViewSnapshot view) {

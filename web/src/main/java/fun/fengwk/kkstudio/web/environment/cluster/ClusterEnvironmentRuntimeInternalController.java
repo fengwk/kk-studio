@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.platform.cluster.ClusterInternalAuthentication;
 import fun.fengwk.kkstudio.platform.cluster.ClusterInternalAuthenticationException;
@@ -19,7 +20,6 @@ import fun.fengwk.kkstudio.platform.cluster.ClusterInternalRequests;
 import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
 import fun.fengwk.kkstudio.platform.environment.update.EnvironmentUpdateService;
-import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
 import fun.fengwk.kkstudio.platform.http.RequestParameters;
 import fun.fengwk.kkstudio.share.environment.EnvironmentRuntimeStatusDTO;
@@ -71,7 +71,8 @@ public class ClusterEnvironmentRuntimeInternalController {
     boolean local =
         clusterNodeRegistry.route(environment).filter(ClusterOwnerRoute::local).isPresent();
     if (!local) {
-      throw DomainException.environmentUnavailable(
+      throw DomainException.unavailable(
+          "ENVIRONMENT_UNAVAILABLE",
           "internal runtime request does not match this node's READY owner route");
     }
     return environment;

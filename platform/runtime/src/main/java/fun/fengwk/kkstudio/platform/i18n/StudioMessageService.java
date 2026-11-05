@@ -4,7 +4,7 @@ import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 
-import fun.fengwk.kkstudio.platform.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -85,6 +85,16 @@ public class StudioMessageService {
   public String domainMessage(DomainErrorCode code, Map<String, ?> context) {
     Objects.requireNonNull(code, "code");
     return message(DOMAIN_PREFIX + code.code() + ".message", withResourceDisplayName(context));
+  }
+
+  public String domainMessage(DomainErrorCode code, String reason, Map<String, ?> context) {
+    if (code == DomainErrorCode.UNAVAILABLE && "IDE_UNAVAILABLE".equals(reason)) {
+      return message(DOMAIN_PREFIX + "unavailable.ide.message", context);
+    }
+    if (code == DomainErrorCode.UNAVAILABLE && "ENVIRONMENT_UNAVAILABLE".equals(reason)) {
+      return message(DOMAIN_PREFIX + "unavailable.environment.message", context);
+    }
+    return domainMessage(code, context);
   }
 
   /** 解析 resource 的本地化展示名；未登记标识回退为下划线分隔的可读形式。 */

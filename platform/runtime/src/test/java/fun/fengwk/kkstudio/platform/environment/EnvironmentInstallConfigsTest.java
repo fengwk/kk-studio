@@ -8,7 +8,7 @@ import org.junit.jupiter.api.Test;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
-import fun.fengwk.kkstudio.platform.error.DomainException;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.share.environment.DaemonConfiguration;
 import fun.fengwk.kkstudio.share.environment.EnvironmentInstallConfigDTO;
 

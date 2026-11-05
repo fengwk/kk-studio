@@ -1,12 +1,12 @@
 package fun.fengwk.kkstudio.ide;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.browser.ConnectionIdentity;
 import fun.fengwk.kkstudio.ide.browser.IdeBrowserUse;
 import fun.fengwk.kkstudio.ide.browser.IdeBrowserUseClient;
 import fun.fengwk.kkstudio.ide.browser.IdeBrowserUseView;
-import fun.fengwk.kkstudio.platform.error.DomainErrorCode;
-import fun.fengwk.kkstudio.platform.error.DomainException;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -50,7 +50,7 @@ public class IdeBrowserUseGateway {
           viewId,
           claimId);
     } catch (DomainException error) {
-      if (error.code() == DomainErrorCode.IDE_UNAVAILABLE) {
+      if (error.code() == DomainErrorCode.UNAVAILABLE && "IDE_UNAVAILABLE".equals(error.reason())) {
         throw error;
       }
       throw unavailable("browser IDE usage intent is unavailable", error);
@@ -69,7 +69,7 @@ public class IdeBrowserUseGateway {
           client.activeBoundProofs(new ConnectionIdentity(eventNodeId, connectionId), documentId);
       return usage.map(value -> toProofs(documentId, value));
     } catch (DomainException error) {
-      if (error.code() == DomainErrorCode.IDE_UNAVAILABLE) {
+      if (error.code() == DomainErrorCode.UNAVAILABLE && "IDE_UNAVAILABLE".equals(error.reason())) {
         throw error;
       }
       throw unavailable("browser IDE usage proofs are unavailable", error);
@@ -98,8 +98,8 @@ public class IdeBrowserUseGateway {
 
   private static DomainException unavailable(String message, Throwable cause) {
     return cause == null
-        ? DomainException.ideUnavailable(message)
-        : DomainException.ideUnavailable(message, cause);
+        ? DomainException.unavailable("IDE_UNAVAILABLE", message)
+        : DomainException.unavailable("IDE_UNAVAILABLE", message, cause);
   }
 
   /** 一个 document 当前带 epoch 的绑定列表（可能包含其它 Environment；调用方按 environment 过滤）。 */

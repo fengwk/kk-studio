@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.schema.ArraySchema;
 import fun.fengwk.kkstudio.common.schema.BooleanSchema;
 import fun.fengwk.kkstudio.common.schema.EnumSchema;
@@ -18,7 +19,6 @@ import fun.fengwk.kkstudio.common.schema.NumberSchema;
 import fun.fengwk.kkstudio.common.schema.ObjectSchema;
 import fun.fengwk.kkstudio.common.schema.SchemaJsonCodec;
 import fun.fengwk.kkstudio.common.schema.StringSchema;
-import fun.fengwk.kkstudio.platform.error.DomainException;
 
 import java.util.List;
 import java.util.Set;

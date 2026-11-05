@@ -3,12 +3,12 @@ package fun.fengwk.kkstudio.ide.browser;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.platform.cluster.BoundedBodySubscriber;
 import fun.fengwk.kkstudio.platform.cluster.ClusterInternalAuthentication;
 import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
-import fun.fengwk.kkstudio.platform.error.DomainErrorCode;
-import fun.fengwk.kkstudio.platform.error.DomainException;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -135,14 +135,14 @@ public final class IdeBrowserUseClient {
     if (!snapshot.eventNodeId().equals(identity.eventNodeId().toString())
         || !snapshot.connectionId().equals(identity.connectionId().toString())
         || !snapshot.documentId().equals(documentId.toString())) {
-      throw DomainException.ideUnavailable(
-          "browser event node returned a mismatched usage snapshot");
+      throw DomainException.unavailable(
+          "IDE_UNAVAILABLE", "browser event node returned a mismatched usage snapshot");
     }
     try {
       return Optional.of(snapshot.toUsage());
     } catch (IllegalArgumentException error) {
-      throw DomainException.ideUnavailable(
-          "browser event node returned an invalid usage snapshot", error);
+      throw DomainException.unavailable(
+          "IDE_UNAVAILABLE", "browser event node returned an invalid usage snapshot", error);
     }
   }
 
@@ -156,7 +156,8 @@ public final class IdeBrowserUseClient {
             .liveInternalOrigin(eventNodeId)
             .orElseThrow(
                 () ->
-                    DomainException.ideUnavailable("browser event node has no live cluster lease"));
+                    DomainException.unavailable(
+                        "IDE_UNAVAILABLE", "browser event node has no live cluster lease"));
     URI uri = resolveStrictly(origin, path);
     Map<String, String> authHeaders = authentication.sign(method, path, eventNodeId);
     HttpRequest.Builder builder =
@@ -174,8 +175,8 @@ public final class IdeBrowserUseClient {
         new BoundedBodySubscriber(
             maxResponseBytes,
             () ->
-                DomainException.ideUnavailable(
-                    "browser event node response exceeds the metadata limit"));
+                DomainException.unavailable(
+                    "IDE_UNAVAILABLE", "browser event node response exceeds the metadata limit"));
     CompletableFuture<HttpResponse<byte[]>> responseFuture =
         httpClient.sendAsync(request, responseInfo -> subscriber);
     long deadlineNanos = System.nanoTime() + requestTimeout.toNanos();
@@ -184,17 +185,21 @@ public final class IdeBrowserUseClient {
       byte[] body = await(subscriber.bodyFuture(), deadlineNanos);
       return new Response(response.statusCode(), body);
     } catch (TimeoutException error) {
-      throw DomainException.ideUnavailable("browser event node request timed out", error);
+      throw DomainException.unavailable(
+          "IDE_UNAVAILABLE", "browser event node request timed out", error);
     } catch (InterruptedException error) {
       Thread.currentThread().interrupt();
-      throw DomainException.ideUnavailable("browser event node request was interrupted", error);
+      throw DomainException.unavailable(
+          "IDE_UNAVAILABLE", "browser event node request was interrupted", error);
     } catch (ExecutionException error) {
       Throwable cause = error.getCause();
       if (cause instanceof DomainException unavailable
-          && unavailable.code() == DomainErrorCode.IDE_UNAVAILABLE) {
+          && unavailable.code() == DomainErrorCode.UNAVAILABLE
+          && "IDE_UNAVAILABLE".equals(unavailable.reason())) {
         throw unavailable;
       }
-      throw DomainException.ideUnavailable("browser event node is unreachable", cause);
+      throw DomainException.unavailable(
+          "IDE_UNAVAILABLE", "browser event node is unreachable", cause);
     } finally {
       responseFuture.cancel(true);
       subscriber.cancel();
@@ -213,7 +218,8 @@ public final class IdeBrowserUseClient {
         || (origin.getPath() != null
             && !origin.getPath().isEmpty()
             && !origin.getPath().equals("/"))) {
-      throw DomainException.ideUnavailable("browser event node origin is not trusted");
+      throw DomainException.unavailable(
+          "IDE_UNAVAILABLE", "browser event node origin is not trusted");
     }
     URI resolved = origin.resolve(path);
     int queryAt = path.indexOf('?');
@@ -224,7 +230,8 @@ public final class IdeBrowserUseClient {
         || !rawPath.equals(resolved.getRawPath())
         || !Objects.equals(rawQuery, resolved.getRawQuery())
         || resolved.getRawFragment() != null) {
-      throw DomainException.ideUnavailable("browser event node request path is invalid");
+      throw DomainException.unavailable(
+          "IDE_UNAVAILABLE", "browser event node request path is invalid");
     }
     return resolved;
   }
@@ -233,8 +240,8 @@ public final class IdeBrowserUseClient {
     try {
       return objectMapper.writeValueAsBytes(value);
     } catch (JacksonException error) {
-      throw DomainException.ideUnavailable(
-          "browser event node request could not be encoded", error);
+      throw DomainException.unavailable(
+          "IDE_UNAVAILABLE", "browser event node request could not be encoded", error);
     }
   }
 
@@ -242,8 +249,8 @@ public final class IdeBrowserUseClient {
     try {
       return objectMapper.readValue(new String(body, StandardCharsets.UTF_8), type);
     } catch (JacksonException | IllegalArgumentException error) {
-      throw DomainException.ideUnavailable(
-          "browser event node returned an invalid response", error);
+      throw DomainException.unavailable(
+          "IDE_UNAVAILABLE", "browser event node returned an invalid response", error);
     }
   }
 
@@ -258,9 +265,11 @@ public final class IdeBrowserUseClient {
 
   private static DomainException unavailableStatus(int status) {
     if (status == 400) {
-      return DomainException.ideUnavailable("browser event node rejected the usage query");
+      return DomainException.unavailable(
+          "IDE_UNAVAILABLE", "browser event node rejected the usage query");
     }
-    return DomainException.ideUnavailable("browser event node returned status " + status);
+    return DomainException.unavailable(
+        "IDE_UNAVAILABLE", "browser event node returned status " + status);
   }
 
   private record Response(int status, byte[] body) {}

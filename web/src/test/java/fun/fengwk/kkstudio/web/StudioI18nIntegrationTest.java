@@ -62,7 +62,7 @@ class StudioI18nIntegrationTest extends WebPostgresTestSupport {
         .perform(request)
         .andExpect(status().isNotFound())
         .andExpect(jsonPath("$.status").value(404))
-        .andExpect(jsonPath("$.code").value("resource_not_found"))
+        .andExpect(jsonPath("$.code").value("not_found"))
         .andExpect(jsonPath("$.message").value(expectedMessage))
         .andExpect(jsonPath("$.errors.resource").value("chat"))
         .andExpect(jsonPath("$.errors.detail").value("chat not found"));

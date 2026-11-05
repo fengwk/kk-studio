@@ -6,10 +6,10 @@ import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogService;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogService.PreparedGitImport;
-import fun.fengwk.kkstudio.platform.error.DomainErrorCode;
-import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncExportDTO;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncExportRequestDTO;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncImportCheckDTO;
