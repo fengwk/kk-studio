@@ -210,9 +210,9 @@ heartbeat 按固定间隔续租，不触碰业务事实；续租失败即停止�
 - [`CanvasFunctionController`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/http/CanvasFunctionController.java)：`/api/canvas-functions` 目录与 `/api/canvases/{canvasId}/nodes/{nodeId}/function-run` 的启动、查询、取消与 UNKNOWN 决议。
 - [`CanvasResourceController`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/http/CanvasResourceController.java)：资源下载与预览 URL 直读，从不返回 bucket 或对象 key。
 
-三个控制器统一返回共享响应信封
+三个控制器使用共享响应类型
 [`ApiResponse`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/http/ApiResponse.java)，边界错误以
-`ResponseStatusException` 表达；信封状态同步、错误 envelope 与 locale 由宿主的全局 advice 统一处理（见
+`ResponseStatusException` 或领域异常表达；宿主将成功响应转换为资源本身（见
 [Web 的 JSON 与错误边界](web.md#json错误与信任边界)）。控制器只做 HTTP 适配，不承载领域规则。
 
 ## 部署参数

@@ -38,7 +38,7 @@ Chat 是直接持有 Harness Session 的产品之一：一次对话把多个 Ses
 稳定顺序是 `(updateTime desc, createTime desc, title asc, id asc)`，Session 是
 `(createTime desc, sessionId desc)`。
 
-所有响应使用平台的 `ApiResponse` 信封；响应的 `environmentName` 是始终存在的 required-nullable 字段（未选择时为
+成功响应直接返回资源；响应的 `environmentName` 是始终存在的 required-nullable 字段（未选择时为
 null）。`agentName` 与 `environmentName` 只按名称软引用目录行，不建立
 外键：Agent 或 Environment 硬删除期间引用暂时无法解析，同名重建后重新生效。名称的 canonical
 校验只由本模块写入路径按当前目录完成，数据库不重复目录命名规则；Chat 的生命周期由创建、修改和深删除直接管理。

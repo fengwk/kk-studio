@@ -20,6 +20,7 @@ import fun.fengwk.kkstudio.platform.catalog.modelcatalog.ModelCatalogService;
 import fun.fengwk.kkstudio.share.catalog.ModelCatalogPageDTO;
 import fun.fengwk.kkstudio.share.catalog.ModelDefaultCandidateDTO;
 import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
+import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
 
 import java.time.Instant;
 import java.util.List;
@@ -35,6 +36,7 @@ class StudioModelCatalogControllerTest {
     service = mock(ModelCatalogService.class);
     mockMvc =
         MockMvcBuilders.standaloneSetup(new StudioModelCatalogController(service))
+            .setControllerAdvice(new ApiResponseStatusAdvice())
             .setMessageConverters(
                 new JacksonJsonHttpMessageConverter(StrictHttpJsonMapperTestSupport.get()))
             .build();
@@ -51,11 +53,12 @@ class StudioModelCatalogControllerTest {
                 .param("cursor", "cursor-1")
                 .param("pageSize", "5"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.generation").value("7"))
-        .andExpect(jsonPath("$.data.loading").value(false))
-        .andExpect(jsonPath("$.data.items[0].id").value("models_dev:vendor:model"))
-        .andExpect(jsonPath("$.data.items[0].pricingSupported").value(true))
-        .andExpect(jsonPath("$.data.nextCursor").value("next"));
+        .andExpect(jsonPath("$.generation").value("7"))
+        .andExpect(jsonPath("$.loading").value(false))
+        .andExpect(jsonPath("$.items[0].id").value("models_dev:vendor:model"))
+        .andExpect(jsonPath("$.items[0].pricingSupported").value(true))
+        .andExpect(jsonPath("$.nextCursor").value("next"))
+        .andExpect(jsonPath("$.data").doesNotExist());
 
     verify(service).page("gpt", "cursor-1", 5);
   }
@@ -68,12 +71,12 @@ class StudioModelCatalogControllerTest {
     mockMvc
         .perform(get("/api/model-defaults"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.items.length()").value(1));
+        .andExpect(jsonPath("$.items.length()").value(1));
 
     mockMvc
         .perform(post("/api/model-defaults/refresh"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.loading").value(true));
+        .andExpect(jsonPath("$.loading").value(true));
 
     verify(service).page(null, null, 20);
     verify(service).refresh();

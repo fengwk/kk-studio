@@ -61,7 +61,7 @@ Skill 同步与 PluginResourceGateway 留在 Harness 组合内，因为它们需
 
 ## HTTP 入口
 
-JSON Controller 使用 ApiResponse，status 与业务结果对齐；
+JSON Controller 的成功响应直接返回资源，status 与业务结果对齐；
 health、资源下载和 WebSocket 使用各自传输形式。公开路由如下：
 
 | family | 路径 | 用途 |
@@ -187,15 +187,13 @@ Evidence 接收 READY uploadId，在事务内转移引用并返回规范资源�
 
 ## JSON、错误与信任边界
 
-JSON API 显式返回共享的
+JSON Controller 暂时返回共享的
 [`ApiResponse`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/http/ApiResponse.java)
-信封，包含 `status/code/message` 与可选的 `data/errors`；`success` 由 HTTP 状态派生。
-直接返回的信封由 advice 同步 HTTP 状态；`ResponseEntity` 由控制器显式设置状态。
-下载、HTML 与字节流保留原始响应，不参与信封包装。
-信封本身属于 Platform 的共享 HTTP 模型，拥有 HTTP 边界的应用模块（例如 Canvas）与控制器的归属包无关，
-都以同一类型返回；Web 仍是唯一的组合根与 advice 归属。
+信封，Web advice 将成功信封翻译为资源本身与信封状态，无 `data` 包装；数据为空时，200 改为 204，
+其他状态保持不变，均无响应体。直接返回与 `ResponseEntity` 均适用，并保留控制器设置的响应头。
+下载、HTML 与字节流保留原始响应。
 
-集群内部端点（`/internal/**`）与浏览器 API 共用同一个信封、同一个领域异常
+集群内部端点（`/internal/**`）与浏览器 API 的领域失败共用同一个错误信封、同一个领域异常
 （[`DomainException`](../../common/src/main/java/fun/fengwk/kkstudio/common/error/DomainException.java)）、
 同一张错误码到状态映射
 （[`DomainErrorStatus`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/http/DomainErrorStatus.java)）
