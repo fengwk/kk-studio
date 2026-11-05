@@ -1,13 +1,23 @@
 package fun.fengwk.kkstudio.platform.harness.tool.gateway;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 
 import fun.fengwk.kkstudio.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.common.result.BinaryResultContent;
@@ -18,6 +28,7 @@ import fun.fengwk.kkstudio.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.contributor.builtin.environment.FileTool;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec;
+import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -833,6 +844,105 @@ class ToolResultFinalizerTest {
     assertInstanceOf(ToolResultFinalizer.Outcome.StoreFailed.class, outcome);
     assertEquals(1, discarded.size());
     assertNotNull(discarded.getFirst().blobUploadId());
+  }
+
+  /** 一次清理失败不得阻止其余清理或替换存储失败结论，并须记录对应 upload。 */
+  @Test
+  void cleanupFailureIsLoggedAndRemainingUploadsAreDiscarded() {
+    UUID firstId = UUID.randomUUID();
+    UUID secondId = UUID.randomUUID();
+    AtomicInteger calls = new AtomicInteger();
+    List<UUID> discarded = new ArrayList<>();
+    ToolResourceStager stager =
+        new ToolResourceStager() {
+          @Override
+          public ResourceRef stage(String mediaType, String name, byte[] content) {
+            int call = calls.incrementAndGet();
+            if (call == 3) {
+              throw new IllegalStateException("stage failed");
+            }
+            return new ResourceRef(
+                ResourceRef.blobUploadUri(call == 1 ? firstId : secondId),
+                mediaType,
+                name,
+                (long) content.length,
+                sha256Hex(content));
+          }
+
+          @Override
+          public void discard(ResourceRef resource) {
+            discarded.add(resource.blobUploadId());
+            if (resource.blobUploadId().equals(secondId)) {
+              throw new IllegalStateException("private detail");
+            }
+          }
+        };
+    Logger logger = (Logger) LoggerFactory.getLogger(ToolResultFinalizer.class);
+    ListAppender<ILoggingEvent> logs = new ListAppender<>();
+    logs.start();
+    logger.addAppender(logs);
+    try {
+      ToolResultFinalizer.Outcome outcome =
+          new ToolResultFinalizer(stager, ToolResultFinalizer.DEFAULT_RESOURCE_MAX_BYTES)
+              .finalizeResult(
+                  TOOL_NAME,
+                  new ToolResult(
+                      "call-1",
+                      List.of(
+                          new BinaryResultContent("application/octet-stream", new byte[] {1}),
+                          new BinaryResultContent("application/octet-stream", new byte[] {2}),
+                          new BinaryResultContent("application/octet-stream", new byte[] {3})),
+                      false,
+                      "{}"));
+      assertInstanceOf(ToolResultFinalizer.Outcome.StoreFailed.class, outcome);
+      assertEquals(List.of(secondId, firstId), discarded);
+      assertEquals(1, logs.list.size());
+      ILoggingEvent event = logs.list.getFirst();
+      assertEquals(Level.WARN, event.getLevel());
+      assertTrue(event.getFormattedMessage().contains(secondId.toString()));
+      assertTrue(event.getFormattedMessage().contains("IllegalStateException"));
+      assertFalse(event.getFormattedMessage().contains("private detail"));
+      assertNull(event.getThrowableProxy());
+    } finally {
+      logger.detachAppender(logs);
+      logs.stop();
+    }
+  }
+
+  /** 生产 staging 清理失败仍交由过期回收，日志只包含安全上下文。 */
+  @Test
+  void storageStagerLogsDiscardFailureWithoutThrowing() {
+    UUID uploadId = UUID.randomUUID();
+    StorageUploadService uploadService = mock(StorageUploadService.class);
+    doNothing()
+        .doThrow(new IllegalStateException("private detail"))
+        .when(uploadService)
+        .delete(uploadId);
+    ResourceRef resource =
+        new ResourceRef(
+            ResourceRef.blobUploadUri(uploadId), "image/png", "image", 1L, "a".repeat(64));
+    StorageUploadToolResourceStager stager =
+        new StorageUploadToolResourceStager(uploadService, 100);
+    Logger logger = (Logger) LoggerFactory.getLogger(StorageUploadToolResourceStager.class);
+    ListAppender<ILoggingEvent> logs = new ListAppender<>();
+    logs.start();
+    logger.addAppender(logs);
+    try {
+      assertDoesNotThrow(() -> stager.discard(resource));
+      assertTrue(logs.list.isEmpty());
+      assertDoesNotThrow(() -> stager.discard(resource));
+      verify(uploadService, times(2)).delete(uploadId);
+      assertEquals(1, logs.list.size());
+      ILoggingEvent event = logs.list.getFirst();
+      assertEquals(Level.WARN, event.getLevel());
+      assertTrue(event.getFormattedMessage().contains(uploadId.toString()));
+      assertTrue(event.getFormattedMessage().contains("IllegalStateException"));
+      assertFalse(event.getFormattedMessage().contains("private detail"));
+      assertNull(event.getThrowableProxy());
+    } finally {
+      logger.detachAppender(logs);
+      logs.stop();
+    }
   }
 
   private static ToolResourceStager stager(StagingFunction stagingFunction) {

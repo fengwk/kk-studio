@@ -195,6 +195,9 @@ heartbeat 按固定间隔续租，不触碰业务事实；续租失败即停止�
 - [`PlatformCanvasFunctionBlobAccess`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/platform/PlatformCanvasFunctionBlobAccess.java) 提供媒体事实、原件流与短期 URL。
 - [`CanvasBlobResourceMaterializer`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/platform/CanvasBlobResourceMaterializer.java) 物化输出：媒体写入全局 Blob，TEXT 内联在 Resource 行。媒体 `stage` 前后各一个短事务，按 document → run 加锁并复验当前 RUNNING owner 与数据库时钟下的租约；读流与对象存储暂存不持有数据库锁；后置事务插入无 owner Resource、写 OUTPUT pin 并转移上传引用。Worker 通过可选 provider 获取该具体组件，创建 Function 执行上下文时要求它存在。Resource 删除时经 [`CanvasBlobReleaser`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/platform/CanvasBlobReleaser.java) 在同一事务释放 Blob 引用。媒体探针与预览属于平台存储（见 [Platform](platform.md#storageblob-与-resource)）。
 
+媒体暂存后的竞争或事务失败会尽力释放未消费 upload；清理失败记录 upload ID 与异常类型，
+不覆盖原结果，最终由上传过期清理兜底。
+
 内置 adapter 只保留测试与 E2E 栈使用的 fake（[`FakeCanvasFunctionConfiguration`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/function/fake/FakeCanvasFunctionConfiguration.java)，`KK_STUDIO_CANVAS_FUNCTION_FAKE_ENABLED=true` 才注册），它与插件贡献一样在快照构建期并入同一目录且不归属任何插件；`image.crop` 由 Media 插件提供，ComfyUI/H3 与 OpenCLI 函数由各自的构建期插件提供。
 
 ## HTTP 边界
