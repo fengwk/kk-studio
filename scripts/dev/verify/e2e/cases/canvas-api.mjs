@@ -3,7 +3,6 @@ import {
   assertDecimalVersion,
   assertExactFields,
   cid,
-  envelopeData,
   expectHttpError,
 } from '../lib/http.mjs'
 import { createCaseAdder } from '../lib/registry.mjs'
@@ -44,12 +43,11 @@ function transform(x, y, width = 100, height = 80) {
   return { x, y, width, height }
 }
 
-/** 创建空画布并断言 document 契约（HTTP 201 + envelope code CREATED）。 */
+/** 创建空画布并断言 document 契约（HTTP 201 + 资源体）。 */
 async function createCanvas(ctx, title) {
   const created = await ctx.call('POST', '/api/canvases', { title })
   assert(created.status === 201, `create canvas status ${created.status}`)
-  assert(created.json?.code === 'CREATED', JSON.stringify(created.json))
-  const canvas = envelopeData(created.json)
+  const canvas = created.json
   assertExactFields(canvas, DOCUMENT_FIELDS, 'canvas document')
   assert(UUID_TEXT.test(canvas.id), JSON.stringify(canvas))
   assertDecimalVersion(canvas.revision, 'canvas.revision')
@@ -73,7 +71,7 @@ async function applyCommands(ctx, canvasId, { idempotencyKey, commands }) {
     commands,
   })
   assert(accepted.status === 200, `apply commands status ${accepted.status}`)
-  const patch = envelopeData(accepted.json)
+  const patch = accepted.json
   assertExactFields(patch, PATCH_FIELDS, 'canvas patch')
   assertDecimalVersion(patch.revision, 'patch.revision')
   assert(Array.isArray(patch.nodes) && Array.isArray(patch.groups), JSON.stringify(patch))
@@ -90,7 +88,7 @@ function assertEmptyPatch(patch, revision, label) {
 
 /** 读取快照并断言读模型字段集合与 document.revision。 */
 async function readSnapshot(ctx, canvasId) {
-  const snapshot = envelopeData((await ctx.call('GET', `/api/canvases/${canvasId}`)).json)
+  const snapshot = (await ctx.call('GET', `/api/canvases/${canvasId}`)).json
   assertExactFields(snapshot, SNAPSHOT_FIELDS, 'canvas snapshot')
   assertExactFields(snapshot.document, DOCUMENT_FIELDS, 'snapshot document')
   for (const node of snapshot.nodes) assertExactFields(node, NODE_FIELDS, 'snapshot node')
@@ -248,9 +246,9 @@ registerCase({
       { status: 409 },
     )
     const staleBody = JSON.parse(staleRename.body)
-    assert(staleBody.code === 'CANVAS_COMMAND_CONFLICT', staleRename.body)
+    assert(staleBody.code === 'conflict' && typeof staleBody.reason === 'string' && staleBody.reason.length > 0, staleRename.body)
     assert(
-      staleBody.errors?.detail === 'command prerequisites are stale; no write was applied'
+      staleBody.detail === 'command prerequisites are stale; no write was applied'
         && Array.isArray(staleBody.errors?.conflicts)
         && staleBody.errors.conflicts.length === 1
         && staleBody.errors.conflicts[0].kind === 'STALE_NODE'
@@ -414,7 +412,7 @@ registerCase({
       JSON.stringify(cleared.groups),
     )
 
-    const listed = envelopeData((await ctx.call('GET', '/api/canvases')).json)
+    const listed = (await ctx.call('GET', '/api/canvases')).json
     assert(Array.isArray(listed), JSON.stringify(listed))
     const listedDocument = listed.find((candidate) => candidate.id === canvas.id)
     assertExactFields(listedDocument, DOCUMENT_FIELDS, 'listed document')
@@ -476,7 +474,7 @@ registerCase({
         { status: 409 },
       )
       const body = JSON.parse(failure.body)
-      assert(body.code === 'CANVAS_COMMAND_CONFLICT', failure.body)
+      assert(body.code === 'conflict' && typeof body.reason === 'string' && body.reason.length > 0, failure.body)
       assert(Array.isArray(body.errors?.conflicts) && body.errors.conflicts.length > 0, failure.body)
       for (const conflict of body.errors.conflicts) {
         assert(!('revision' in conflict) && !('baseline' in conflict), failure.body)

@@ -37,7 +37,7 @@ test('seed case reads the execution contract, including a null builtin variant',
   await assert.rejects(getCase('seed.agent_and_provider').run(ctx), /AgentDefinitionDTO/)
 })
 
-function fixture(reasons = ['PREVIEW_STALE_CURSOR', 'PREVIEW_PLANNING_FAILED']) {
+function fixture(reasons = ['PREVIEW_STALE_CURSOR', 'PREVIEW_PLANNING_FAILED'], code = 'conflict') {
   let thread
   let previews = 0
   const ctx = {
@@ -84,7 +84,8 @@ function fixture(reasons = ['PREVIEW_STALE_CURSOR', 'PREVIEW_PLANNING_FAILED']) 
         assert.equal(Object.hasOwn(body, 'target'), false)
         const reason = reasons[previews++]
         throw new HttpError(409, JSON.stringify({
-          errors: { reason, detail: 'PREVIEW_STALE_CURSOR PREVIEW_PLANNING_FAILED' },
+          type: 'about:blank', title: 'The request conflicts with the current state.',
+          status: 409, code, reason, detail: 'PREVIEW_STALE_CURSOR PREVIEW_PLANNING_FAILED',
         }), path)
       }
       assert.fail(`unexpected call ${method} ${path}`)
@@ -113,6 +114,11 @@ test('free preview case rejects missing or mismatched reasons even when detail c
       /preview (stale cursor|planning) reason missing or mismatched/,
     )
   }
+  // Correct reason alone is insufficient when the stable category is wrong.
+  await assert.rejects(
+    getCase('thread.provider_request_preview_guard').run(fixture(undefined, 'unavailable').ctx),
+    /preview stale cursor reason missing or mismatched/,
+  )
 })
 
 test('readonly preview case is a free L1 host-mock case covering provider unavailability', () => {

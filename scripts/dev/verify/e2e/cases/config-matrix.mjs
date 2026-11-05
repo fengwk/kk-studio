@@ -173,7 +173,7 @@ registerCase({
     // best-effort cleanup of leftover matrix agents that block model delete
     try {
       const { json } = await ctx.call('GET', '/api/agents?pageNumber=1&pageSize=100')
-      const agents = (json?.data?.results || [])
+      const agents = (json?.results || [])
       for (const agent of agents) {
         const name = String(agent.name || '')
         if (name.startsWith('ag-') || name.startsWith('e2e-agent-') || name.startsWith('t-[')) {

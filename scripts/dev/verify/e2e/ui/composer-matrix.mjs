@@ -1612,8 +1612,8 @@ async function resolveCatalogTarget(apiCtx) {
       models: modelsResponse,
     })}`,
   )
-  const agents = agentsResponse.json?.data?.results || []
-  const models = modelsResponse.json?.data?.results || []
+  const agents = agentsResponse.json?.results || []
+  const models = modelsResponse.json?.results || []
   for (const agent of agents) {
     if (agent.execution?.driver !== 'builtin') continue
     const { modelName, variant } = agent.execution.settings || {}

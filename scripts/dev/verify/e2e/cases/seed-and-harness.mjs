@@ -334,9 +334,11 @@ registerCase({
       ...draft,
       expectedNextCommandSequence: String(BigInt(thread.nextCommandSequence) + 1n),
     }), { status: 409 })
-    assert(JSON.parse(stale.body).errors?.reason === 'PREVIEW_STALE_CURSOR', 'preview stale cursor reason missing or mismatched')
+    const staleProblem = JSON.parse(stale.body)
+    assert(staleProblem.code === 'conflict' && staleProblem.reason === 'PREVIEW_STALE_CURSOR', 'preview stale cursor reason missing or mismatched')
     const planning = await expectHttpError(() => ctx.call('POST', endpoint, draft), { status: 409 })
-    assert(JSON.parse(planning.body).errors?.reason === 'PREVIEW_PLANNING_FAILED', 'preview planning reason missing or mismatched')
+    const planningProblem = JSON.parse(planning.body)
+    assert(planningProblem.code === 'conflict' && planningProblem.reason === 'PREVIEW_PLANNING_FAILED', 'preview planning reason missing or mismatched')
     const after = await getThreadSnapshot(ctx, threadId)
     assert(after.thread.headEntryId === thread.headEntryId, 'preview advanced thread head')
     assert(after.thread.nextCommandSequence === thread.nextCommandSequence, 'preview reserved command sequence')
@@ -466,8 +468,9 @@ registerCase({
             }),
           { status: 409 },
         )
+        const problem = JSON.parse(unavailable.body)
         assert(
-          JSON.parse(unavailable.body).errors?.reason === 'PREVIEW_PROVIDER_UNAVAILABLE',
+          problem.code === 'conflict' && problem.reason === 'PREVIEW_PROVIDER_UNAVAILABLE',
           `draft preview reason missing or mismatched: ${unavailable.body}`,
         )
       }
@@ -1239,7 +1242,7 @@ registerCase({
     )
     const staleBody = JSON.parse(stale.body)
     assert(
-      staleBody.errors?.reason === 'STALE_COMMAND_CURSOR',
+      staleBody.code === 'conflict' && staleBody.reason === 'STALE_COMMAND_CURSOR',
       `stale settings conflict reason: ${stale.body}`,
     )
     const afterReject = await getThreadSnapshot(ctx, threadId)

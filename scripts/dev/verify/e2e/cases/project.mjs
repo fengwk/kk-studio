@@ -255,7 +255,7 @@ registerCase({
         { status: 400 },
       )
       assert(
-        /Unknown or ambiguous session owner kind: PROJECT/.test(JSON.parse(projectOwnerBatch.body).errors?.detail),
+        /Unknown or ambiguous session owner kind: PROJECT/.test(JSON.parse(projectOwnerBatch.body).detail),
         projectOwnerBatch.body,
       )
       const issueOwnerBatch = await expectHttpError(
@@ -275,7 +275,7 @@ registerCase({
       )
       assert(
         /Direct commands are not allowed for this session owner/.test(
-          JSON.parse(issueOwnerBatch.body).errors?.detail,
+          JSON.parse(issueOwnerBatch.body).detail,
         ),
         issueOwnerBatch.body,
       )
