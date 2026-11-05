@@ -1,11 +1,12 @@
 import { expect, test, type Page, type Locator } from './fixture'
-import type { IssueDetailDTO } from '@/shared/api/generated/contracts'
+import type { IssueDetailDTO, ResumeIssueRequestDTO } from '@/shared/api/generated/contracts'
 
 const PROJECT = 'a0000000-0000-0000-0000-000000000001'
 const ISSUE = 'a0000000-0000-0000-0000-000000000002'
 const RUN = 'a0000000-0000-0000-0000-000000000003'
 const STAMP = '2026-10-01T00:00:00Z'
 const STORAGE_KEY = `kk-studio.projects.pending-action:${ISSUE}`
+const PAUSE_DETAIL = '外部支付请求结果未知，请核查交易是否已完成。'
 const detail: IssueDetailDTO = {
   issue: {
     id: ISSUE, projectId: PROJECT, number: '12', title: 'Offline visual issue',
@@ -27,7 +28,13 @@ const detail: IssueDetailDTO = {
   ],
 }
 
-async function transport(page: Page) {
+async function transport(page: Page, pauseReason: 'USER' | 'ERROR' | null = null, failResumeOnce = false) {
+  const state = {
+    issue: { ...detail.issue, pauseReason, pauseDetail: pauseReason === 'ERROR' ? PAUSE_DETAIL : null },
+    resumeRequests: [] as ResumeIssueRequestDTO[],
+    committed: new Map<string, string>(),
+    issueReads: 0,
+  }
   await page.routeWebSocket('**/api/events', (socket) => {
     let connected = false
     socket.onMessage((raw) => {
@@ -47,10 +54,39 @@ async function transport(page: Page) {
   })
   await page.route('**/api/**', async (route) => {
     const path = new URL(route.request().url()).pathname
-    if (path === `/api/issues/${ISSUE}`) await route.fulfill({ json: { status: 200, data: detail } })
-    else if (path === `/api/issues/${ISSUE}/evidence`) await route.fulfill({ json: { status: 200, data: [] } })
-    else throw new Error(`Unexpected offline request: ${path}`)
+    if (path === `/api/issues/${ISSUE}` && route.request().method() === 'GET') {
+      state.issueReads++
+      await route.fulfill({ json: { status: 200, data: { ...detail, issue: state.issue } } })
+    } else if (path === `/api/issues/${ISSUE}/evidence`) {
+      await route.fulfill({ json: { status: 200, data: [] } })
+    } else if (path === `/api/issues/${ISSUE}/resume` && route.request().method() === 'POST') {
+      const request = route.request().postDataJSON() as ResumeIssueRequestDTO
+      state.resumeRequests.push(request)
+      const previousVersion = state.committed.get(request.requestKey)
+      if (previousVersion !== undefined) {
+        if (previousVersion !== request.expectedVersion) {
+          await route.fulfill({ status: 409, json: { status: 409, message: 'Identity conflict' } })
+          return
+        }
+      } else {
+        if (request.expectedVersion !== state.issue.version) {
+          await route.fulfill({ status: 409, json: { status: 409, message: 'Version conflict' } })
+          return
+        }
+        state.committed.set(request.requestKey, request.expectedVersion)
+        state.issue = { ...state.issue, pauseReason: null, pauseDetail: null, version: '2' }
+        if (failResumeOnce) {
+          // 模拟服务端已提交而网关返回 503：后续同身份重放只返回现状。
+          await route.fulfill({ status: 503, json: { status: 503, message: 'Outcome unknown' } })
+          return
+        }
+      }
+      await route.fulfill({ json: { status: 200, data: state.issue } })
+    } else {
+      throw new Error(`Unexpected offline request: ${path}`)
+    }
   })
+  return state
 }
 
 // 只用探针解析主题 token，不以静态 HTML 代替正式组件的 computed style。
@@ -164,4 +200,81 @@ test('corrupt pending record renders warning and compact danger discard without 
   await page.screenshot({ path: info.outputPath('corrupt-warning-320.png') })
   await discard.click()
   await expect(banner).toHaveCount(0)
+})
+
+for (const width of [320, 1280]) {
+  test(`ERROR pause requires confirmation before continuing at ${width}px`, async ({ page }, info) => {
+    // 验证真实弹窗中的详情、风险提醒、键盘取消及成功刷新，覆盖窄屏和桌面。
+    await page.setViewportSize({ width, height: 900 })
+    const state = await transport(page, 'ERROR')
+    await page.goto('/browser-tests/project-workflow-harness.html?issue')
+    const issueDialog = page.getByRole('dialog', { name: 'Issue #12 详情' })
+    await expect(issueDialog.getByText('ERROR', { exact: true })).toBeVisible()
+    const resume = issueDialog.getByRole('button', { name: '继续', exact: true })
+    await resume.click()
+    const confirmation = page.getByRole('dialog', { name: '继续执行' })
+    await expect(confirmation).toBeVisible()
+    await expect(confirmation).toContainText(PAUSE_DETAIL)
+    await expect(confirmation).toContainText('请先核查外部副作用及其结果')
+    await expect(confirmation.getByRole('button', { name: '取消' })).toBeFocused()
+    await noOverflow(confirmation)
+    await page.screenshot({ path: info.outputPath(`resume-error-confirm-${width}.png`) })
+
+    await page.keyboard.press('Escape')
+    await expect(confirmation).toHaveCount(0)
+    await expect(resume).toBeFocused()
+    expect(state.resumeRequests).toEqual([])
+    await resume.click()
+    await confirmation.getByRole('button', { name: '确认继续' }).click()
+    await expect.poll(() => state.resumeRequests.length).toBe(1)
+    expect(state.resumeRequests[0]).toEqual({
+      expectedVersion: '1',
+      requestKey: expect.any(String),
+    })
+    expect(state.resumeRequests[0].requestKey).not.toBe('')
+    await expect(confirmation).toHaveCount(0)
+    await expect(resume).toHaveCount(0)
+    await expect(issueDialog.getByText('ERROR', { exact: true })).toHaveCount(0)
+    expect(state.issueReads).toBeGreaterThanOrEqual(2)
+  })
+}
+
+test('USER pause continues directly and refreshes the issue', async ({ page }, info) => {
+  // USER 暂停无需额外确认，点击后应直接提交并失效 Issue 查询。
+  await page.setViewportSize({ width: 1280, height: 900 })
+  const state = await transport(page, 'USER')
+  await page.goto('/browser-tests/project-workflow-harness.html?issue')
+  const issueDialog = page.getByRole('dialog', { name: 'Issue #12 详情' })
+  const resume = issueDialog.getByRole('button', { name: '继续', exact: true })
+  await expect(issueDialog.getByText('PAUSED', { exact: true })).toBeVisible()
+  await page.screenshot({ path: info.outputPath('resume-user-1280.png') })
+  await resume.click()
+  await expect.poll(() => state.resumeRequests.length).toBe(1)
+  expect(state.resumeRequests[0]).toEqual({ expectedVersion: '1', requestKey: expect.any(String) })
+  await expect(page.getByRole('dialog', { name: '继续执行' })).toHaveCount(0)
+  await expect(resume).toHaveCount(0)
+  await expect(issueDialog.getByText('PAUSED', { exact: true })).toHaveCount(0)
+  expect(state.issueReads).toBeGreaterThanOrEqual(2)
+})
+
+test('unknown ERROR resume remains accessible and replays the same request after reload', async ({ page }, info) => {
+  // 首次请求已提交但结果未知；刷新后必须保留身份并让用户能原样重试。
+  await page.setViewportSize({ width: 320, height: 900 })
+  const state = await transport(page, 'ERROR', true)
+  await page.goto('/browser-tests/project-workflow-harness.html?issue')
+  await page.getByRole('button', { name: '继续', exact: true }).click()
+  await page.getByRole('dialog', { name: '继续执行' }).getByRole('button', { name: '确认继续' }).click()
+  const banner = page.locator('.issue-detail-alert-warning')
+  await expect(banner).toContainText('RESUME')
+  await expect(page.getByRole('dialog', { name: '继续执行' })).toHaveCount(0)
+  await expect(banner.getByRole('button', { name: '重试原操作' })).toBeVisible()
+  await page.screenshot({ path: info.outputPath('resume-unknown-320.png') })
+  await page.reload()
+  await expect(page.getByRole('dialog', { name: 'Issue #12 详情' })).toBeVisible()
+  await expect(banner).toContainText('RESUME')
+  await banner.getByRole('button', { name: '重试原操作' }).click()
+  await expect.poll(() => state.resumeRequests.length).toBe(2)
+  expect(state.resumeRequests[1]).toEqual(state.resumeRequests[0])
+  await expect(banner).toHaveCount(0)
+  expect(await page.evaluate((key) => localStorage.getItem(key), STORAGE_KEY)).toBeNull()
 })

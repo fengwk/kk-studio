@@ -16,6 +16,7 @@ import type {
   RecoverIssueRequestDTO,
   ReopenIssueRequestDTO,
   ResetStageBudgetRequestDTO,
+  ResumeIssueRequestDTO,
   StopIssueRequestDTO,
   TransitionIssueRequestDTO,
   UpdateIssueRequestDTO,
@@ -69,6 +70,8 @@ export function createProjectsApi(options: ProjectsApiOptions = {}) {
       client.post(`/issues/${encodeURIComponent(issueId)}/block`, request),
     recoverIssue: (issueId: string, request: RecoverIssueRequestDTO): Promise<IssueDTO> =>
       client.post(`/issues/${encodeURIComponent(issueId)}/recover`, request),
+    resumeIssue: (issueId: string, request: ResumeIssueRequestDTO): Promise<IssueDTO> =>
+      client.post(`/issues/${encodeURIComponent(issueId)}/resume`, request),
     stopIssue: (issueId: string, request: StopIssueRequestDTO): Promise<IssueDTO> =>
       client.post(`/issues/${encodeURIComponent(issueId)}/stop`, request),
     deleteIssue: (issueId: string, expectedVersion: string): Promise<void> =>

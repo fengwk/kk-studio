@@ -146,6 +146,52 @@ export function ResetBudgetDialog({
   )
 }
 
+/**
+ * ERROR 暂停的继续确认：正文展示暂停详情并提醒先核查外部副作用，
+ * 确认后才发送 resume 请求。
+ */
+export function ResumeIssueDialog({
+  pauseDetail,
+  isBlocked,
+  onConfirm,
+  onClose,
+}: {
+  pauseDetail: string | null
+  isBlocked: boolean
+  onConfirm: () => void
+  onClose: () => void
+}) {
+  const { t } = useI18n()
+  return (
+    <Dialog
+      className="sub-card modal-touch-target"
+      title={t('projects.issue.resumeDialogTitle')}
+      pending={isBlocked}
+      onClose={onClose}
+    >
+      <div className="modal-card-form">
+        <div className="modal-body">
+          <p className="resume-confirm-description">{t('projects.issue.resumeConfirmDesc')}</p>
+          {pauseDetail && (
+            <p className="resume-confirm-detail">
+              <span className="meta-label">{t('projects.issue.pauseDetailLabel')}</span>{' '}
+              <span>{pauseDetail}</span>
+            </p>
+          )}
+        </div>
+        <div className="modal-footer">
+          <Button variant="ghost" data-autofocus onClick={onClose}>
+            {t('projects.cancel')}
+          </Button>
+          <Button onClick={onConfirm} disabled={isBlocked}>
+            {t('projects.issue.confirmResume')}
+          </Button>
+        </div>
+      </div>
+    </Dialog>
+  )
+}
+
 export function DeleteIssueDialog({
   issueNumber,
   isBlocked,

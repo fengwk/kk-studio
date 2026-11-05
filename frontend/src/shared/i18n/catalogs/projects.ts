@@ -1150,6 +1150,26 @@ export const projectsCatalog = {
     'zh-CN': '确认终止',
     'en-US': 'Stop the run',
   },
+  'projects.issue.resumeAction': {
+    'zh-CN': '继续',
+    'en-US': 'Continue',
+  },
+  'projects.issue.resumeDialogTitle': {
+    'zh-CN': '继续执行',
+    'en-US': 'Continue execution',
+  },
+  'projects.issue.resumeConfirmDesc': {
+    'zh-CN': '执行因错误暂停。请先核查外部副作用及其结果，再决定是否继续。',
+    'en-US': 'Execution was paused after an error. Check any external side effects and their outcomes before deciding whether to continue.',
+  },
+  'projects.issue.confirmResume': {
+    'zh-CN': '确认继续',
+    'en-US': 'Continue',
+  },
+  'projects.issue.resumeChangedNotice': {
+    'zh-CN': 'Issue 已更新，请重新检查暂停详情后再继续。',
+    'en-US': 'The issue has changed. Review the pause details again before continuing.',
+  },
   'projects.issue.budgetStageFieldLabel': {
     'zh-CN': '工作阶段',
     'en-US': 'Work stage',

@@ -601,6 +601,22 @@
   color: var(--fg);
 }
 
+/* ERROR 暂停的继续确认正文 */
+.resume-confirm-description {
+  margin: 0 0 12px;
+  color: var(--fg-muted);
+  font-size: var(--font-size-sm);
+  line-height: 1.6;
+}
+
+.resume-confirm-detail {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
 /* 活动时间线 */
 .activity-input-card {
   background: var(--surface);

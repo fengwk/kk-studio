@@ -9,6 +9,7 @@ import {
   FileText,
   ListOrdered,
   Paperclip,
+  Play,
   RotateCcw,
   Send,
   Square,
@@ -36,7 +37,7 @@ import type { IssueActionKind } from '../pending-action-sidecar'
 import type { ProjectsApi } from '../projects-api'
 import { projectsApi } from '../projects-api'
 import { MAX_RUNS, parseMaxRuns } from '../workflow-draft'
-import { DeleteIssueDialog, ResetBudgetDialog, TextActionDialog } from './issue-detail/IssueActionDialogs'
+import { DeleteIssueDialog, ResetBudgetDialog, ResumeIssueDialog, TextActionDialog } from './issue-detail/IssueActionDialogs'
 import { IssueAlerts } from './issue-detail/IssueAlerts'
 import { IssueEvidencePane } from './issue-detail/IssueEvidencePane'
 import { IssueSpecPane } from './issue-detail/IssueSpecPane'
@@ -69,7 +70,7 @@ export interface IssueDetailModalProps {
 type TabKey = 'spec' | 'activities' | 'runs' | 'stageBudgets' | 'agentThreads' | 'evidence'
 
 /**
- * Issue 详情：Spec 编辑、活动、Run、阶段预算、Agent 线程与证据六个 tab，以及流转、阻塞/恢复、终止、重开、预算重置与删除等写操作。
+ * Issue 详情：Spec 编辑、活动、Run、阶段预算、Agent 线程与证据六个 tab，以及流转、阻塞/恢复、继续、终止、重开、预算重置与删除等写操作。
  * 带幂等身份的写操作统一经 {@link useIssueActionRunner} 执行。
  */
 export function IssueDetailModal({
@@ -126,6 +127,11 @@ export function IssueDetailModal({
   const [isStopModalOpen, setIsStopModalOpen] = useState(false)
   const [stopDetail, setStopDetail] = useState('')
   const stopRequest = useKeyedRequest<{ detail: string | null }>()
+  const [resumeConfirmation, setResumeConfirmation] = useState<{
+    issueId: string
+    version: string
+    pauseDetail: string | null
+  } | null>(null)
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false)
 
   const resetBlockForm = () => {
@@ -220,6 +226,7 @@ export function IssueDetailModal({
       setIsBlockModalOpen(false)
       setIsResetBudgetOpen(false)
       setIsStopModalOpen(false)
+      setResumeConfirmation(null)
       setIsDeleteModalOpen(false)
       setDraftTitle('')
       setDraftDescription('')
@@ -378,6 +385,49 @@ export function IssueDetailModal({
     )
   }
 
+  const handleResume = async () => {
+    if (!issue) return
+    const requestKey = createUuid()
+    await executeIssueAction(
+      'RESUME',
+      requestKey,
+      {},
+      (expectedVersion) => api.resumeIssue(issue.id, { expectedVersion, requestKey }),
+      () => {},
+    )
+  }
+
+  /** USER 暂停可直接继续；ERROR 暂停先核查副作用并确认。 */
+  const handleResumeClick = () => {
+    if (!issue) return
+    if (issue.pauseReason === 'ERROR') {
+      setResumeConfirmation({
+        issueId: issue.id,
+        version: issue.version,
+        pauseDetail: issue.pauseDetail,
+      })
+      return
+    }
+    void handleResume()
+  }
+
+  const handleConfirmResume = () => {
+    if (!resumeConfirmation) return
+    // 先关闭确认框，使冲突、一般错误和未知结果的重试入口不被遮挡。
+    setResumeConfirmation(null)
+    if (
+      !issue
+      || issue.id !== issueId
+      || issue.id !== resumeConfirmation.issueId
+      || issue.version !== resumeConfirmation.version
+      || issue.pauseReason !== 'ERROR'
+    ) {
+      setConflictDetail(t('projects.issue.resumeChangedNotice'))
+      return
+    }
+    void handleResume()
+  }
+
   const handleBlockSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!issue) return
@@ -527,6 +577,18 @@ export function IssueDetailModal({
         {/* 顶部操作动作条 */}
         <div className="issue-actions-bar">
           <div className="issue-actions-left">
+            {/* 暂停中：继续执行（USER 直接执行，ERROR 先确认） */}
+            {issue?.pauseReason && (
+              <Button
+                size="compact"
+                disabled={isWriteBlocked}
+                onClick={handleResumeClick}
+              >
+                <Play size={13} aria-hidden="true" />
+                <span>{t('projects.issue.resumeAction')}</span>
+              </Button>
+            )}
+
             {/* 流转目标按钮 */}
             {!isBlocked && availableNextStates.map((toState) => (
               <Button
@@ -867,6 +929,15 @@ export function IssueDetailModal({
             isBlocked={isWriteBlocked}
             onSubmit={handleStopSubmit}
             onClose={() => setIsStopModalOpen(false)}
+          />
+        )}
+
+        {resumeConfirmation && (
+          <ResumeIssueDialog
+            pauseDetail={resumeConfirmation.pauseDetail}
+            isBlocked={isWriteBlocked}
+            onConfirm={handleConfirmResume}
+            onClose={() => setResumeConfirmation(null)}
           />
         )}
 
