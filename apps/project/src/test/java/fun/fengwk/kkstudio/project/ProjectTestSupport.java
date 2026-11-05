@@ -88,9 +88,8 @@ import java.util.function.Function;
 /**
  * 目标 Project/Issue/Run 持久化与用例的集成测试基座（真实 PostgreSQL Testcontainers）。
  *
- * <p>直接经 mapper/JDBC 构造 catalog fixture（agent
- * provider/model/definition），业务事实一律经目标服务写入，使断言聚焦目标表行与契约； 每个测试前由 {@link PostgresSpringTestSupport}
- * 重置并重新迁移 schema。
+ * <p>直接经 mapper/JDBC 构造 catalog fixture（agent provider/model/definition），业务事实经目标服务写入；每个测试前由 {@link
+ * PostgresSpringTestSupport} 重置并重新迁移 schema。
  *
  * <p>platform 不是 Harness 组合根：生产 {@link HarnessRuntime} 与 {@code HarnessStore} 由 web 组合根创建，platform
  * 测试上下文没有它们。 本基座因此装配一个 {@link HarnessRuntimeTestConfiguration 受控假件}，它用调用方给出的 Session/Thread

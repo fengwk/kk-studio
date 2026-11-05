@@ -27,7 +27,6 @@ import fun.fengwk.kkstudio.project.dto.IssueDTO;
 import fun.fengwk.kkstudio.project.dto.IssueDetailDTO;
 import fun.fengwk.kkstudio.project.dto.IssueEvidenceDTO;
 import fun.fengwk.kkstudio.project.dto.IssueStageBudgetDTO;
-import fun.fengwk.kkstudio.project.dto.PauseIssueRequestDTO;
 import fun.fengwk.kkstudio.project.dto.ProjectDtoMapper;
 import fun.fengwk.kkstudio.project.dto.RecoverIssueRequestDTO;
 import fun.fengwk.kkstudio.project.dto.ReopenIssueRequestDTO;
@@ -40,7 +39,6 @@ import fun.fengwk.kkstudio.project.dto.UpdateIssueRequestDTO;
 import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.IssueActivity;
 import fun.fengwk.kkstudio.project.model.IssueEvidence;
-import fun.fengwk.kkstudio.project.model.PauseReason;
 import fun.fengwk.kkstudio.project.service.IssueDetailAssembler;
 import fun.fengwk.kkstudio.project.service.IssueEditingService;
 import fun.fengwk.kkstudio.project.service.IssueEvidenceService;
@@ -49,14 +47,13 @@ import fun.fengwk.kkstudio.project.service.IssueStageBudgetService;
 import fun.fengwk.kkstudio.project.service.StageBudgetView;
 
 import java.util.List;
-import java.util.Locale;
 import java.util.Objects;
 import java.util.UUID;
 
 /**
  * Issue 领域 REST 控制器。
  *
- * <p>提供 Issue 需求事实、工作流流转、阻塞/恢复、控制暂停/继续、阶段额度重置、活动事实流与证据公开的权威 HTTP 操作面。
+ * <p>提供 Issue 需求事实、工作流流转、阻塞/恢复、人工终止/显式恢复、阶段额度重置、活动事实流与证据公开的权威 HTTP 操作面。
  */
 @RestController
 @RequestMapping
@@ -165,20 +162,6 @@ public class IssueController {
     Issue recovered =
         issueLifecycleService.recoverIssue(issueId, expectedVersion, request.getRequestKey());
     return ApiResponse.ok(mapper.toDto(recovered));
-  }
-
-  @PostMapping("/api/issues/{issueId}/pause")
-  public ApiResponse<IssueDTO> pause(
-      @PathVariable("issueId") String issueIdStr, @RequestBody PauseIssueRequestDTO request) {
-    Objects.requireNonNull(request, "request");
-    UUID issueId = Uuids.parseCanonical(issueIdStr, "issueId");
-    long expectedVersion =
-        DecimalLongs.parseNonNegative(request.getExpectedVersion(), "expectedVersion");
-    PauseReason reason = parseEnum(request.getReason(), PauseReason.class, "reason");
-    Issue paused =
-        issueLifecycleService.pauseIssue(
-            issueId, expectedVersion, request.getRequestKey(), reason, request.getDetail());
-    return ApiResponse.ok(mapper.toDto(paused));
   }
 
   @PostMapping("/api/issues/{issueId}/resume")
@@ -318,16 +301,5 @@ public class IssueController {
       return 0;
     }
     return DecimalLongs.parseNonNegative(value, "afterSequence");
-  }
-
-  private static <E extends Enum<E>> E parseEnum(String value, Class<E> type, String fieldName) {
-    if (value == null || value.isBlank()) {
-      throw new IllegalArgumentException(fieldName + " must not be blank");
-    }
-    try {
-      return Enum.valueOf(type, value.trim().toUpperCase(Locale.ROOT));
-    } catch (IllegalArgumentException error) {
-      throw new IllegalArgumentException(fieldName + " is invalid");
-    }
   }
 }

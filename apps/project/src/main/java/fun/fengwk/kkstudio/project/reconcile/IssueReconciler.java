@@ -65,12 +65,11 @@ import java.util.UUID;
  *       延后，丢失通知由轮询恢复。
  *   <li><b>安全等待</b>：区分真正在途执行与静止等待（问答/审批等待）；已冻结 root Join 的执行先收尾，在途执行未被收尾时只延后不投递，静止等待进入 WAITING
  *       并停止活动计时。
- *   <li><b>预算耗尽安全收尾</b>：活动时长耗尽时对当前 Thread 发起显式 Stop，并以 Stop 回执的权威 head 作为收尾区间，同一业务事务失败收尾；不写通用
- *       Pause，也不再等待执行静止。
- *   <li><b>BLOCKED 覆盖门禁</b>：业务阻塞关闭派发门禁，阻止自动派发与 WAITING 恢复；Issue 控制暂停只阻止新 Run 调度，不再挂起已接受的 Thread。
+ *   <li><b>预算耗尽安全收尾</b>：活动时长耗尽时对当前 Thread 发起显式 Stop，并以 Stop 回执的权威 head 作为收尾区间，在同一业务事务失败收尾。
+ *   <li><b>门禁与安全等待</b>：控制暂停在活动 Run 收尾后设置，阻止新 Run 派发；活动 Run 在安全点因业务阻塞或安全工具等待进入 WAITING。
  *   <li><b>指示不丢</b>：定向指示按活动事实位置投递，普通评论与系统事件不卡游标；root Join 冻结先收尾时未投递的指示保留游标，由下一个 Run 处理。
  *   <li><b>完成只认 root Join</b>：Run 结束只读取本次 root Join 冻结的 terminal/final-answer entry，既不按快照最新 head
- *       猜测，也不等待永久子树 idle；工具结果未定只是 Loop 反馈，不再升级为阻塞 Thread 的人工核查门禁。
+ *       猜测，也不等待永久子树 idle；工具结果未定作为 Loop 反馈处理。
  *   <li><b>Run 收尾</b>：正常收尾冻结真实历史区间与 final-answer entry，只发布该最终答复明确引用且来源 Session 持有的
  *       Resource；无交接时保持当前阶段，之后的催促按额度新建 Run。
  *   <li><b>迟到回调拒绝</b>：旧 Run 只做安全收尾，绝不提交旧交接目标推进当前阶段；未冻结 root Join 的迟到 Run 仍在静止点才失败收尾。
@@ -264,13 +263,13 @@ public class IssueReconciler {
           claim, true, properties.getActiveDelay(), IssueReconcileOutcome.DEFERRED_PROCESSING);
     }
 
-    // Issue 控制暂停只阻止新 Run 调度，不挂起已接受的 Thread；只有业务阻塞或安全工具等待才暂停本 Run。
+    // 控制暂停在活动 Run 收尾后设置；活动 Run 在安全点因业务阻塞或安全工具等待进入 WAITING。
     boolean blocked = issue.isBlocked();
     boolean waitingTool = facts.waitingForHuman();
 
     if (run.getStatus() == IssueRunStatus.WAITING) {
       if (issue.isGateClosed() || waitingTool) {
-        // 暂停/阻塞或安全等待尚未解除：保持 WAITING，不消耗新额度也不恢复执行。
+        // 门禁或安全等待尚未解除：保持 WAITING，不消耗新额度也不恢复执行。
         return finish(
             claim, true, properties.getBlockedDelay(), IssueReconcileOutcome.WAITING_FOR_GATE);
       }
