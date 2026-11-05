@@ -122,13 +122,11 @@ class ChatServiceTest {
     UUID sessionId = id(21);
     when(sessions.findBySessionId(sessionId)).thenReturn(null);
     assertThrows(
-        DomainException.class,
-        () -> service.getSession(chatId.toString(), sessionId.toString()));
+        DomainException.class, () -> service.getSession(chatId.toString(), sessionId.toString()));
 
     when(sessions.findBySessionId(sessionId)).thenReturn(new ChatSession(sessionId, id(8)));
     assertThrows(
-        DomainException.class,
-        () -> service.getSession(chatId.toString(), sessionId.toString()));
+        DomainException.class, () -> service.getSession(chatId.toString(), sessionId.toString()));
 
     when(sessions.findBySessionId(sessionId)).thenReturn(new ChatSession(sessionId, chatId));
     when(harnessQueryService.listSessionSummaries(List.of(sessionId)))
