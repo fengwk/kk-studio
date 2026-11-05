@@ -59,8 +59,8 @@ import java.util.regex.Pattern;
  * Platform 全局 Skill Package 的应用服务：当前版本模型、两个发布渠道、暂存预览与按摘要的环境对账投影。
  *
  * <p>技能包是「名称 + 当前版本」。Git 渠道用 {@code ls-remote} 观察 branch HEAD，发布只能使用检查时看到的 exact commit； 上传渠道读取原始
- * zip/tar.gz 后走同一个规范化构建器。两个渠道都把构建结果先落成暂存上传对象供预览，发布在短事务内切换当前版本、释放旧归档引用并消费暂存对象。 Git
- * 网络与归档构建全程在事务之外完成，随后由 {@link SkillCatalogWrites} 开启短写事务并重检提案事实。
+ * zip/tar.gz 后走同一个规范化构建器。两个渠道都把构建结果先落成暂存上传对象，发布时切换当前版本、释放旧归档引用并消费暂存对象。Git 网络与归档构建全程在事务之外完成；HTTP 发布由
+ * {@link SkillCatalogWrites} 开启短写事务，配置导入则加入调用方的整份导入事务。
  */
 @Slf4j
 @Service
@@ -544,13 +544,29 @@ public class SkillCatalogService {
     releaseArtifact(current);
   }
 
-  /**
-   * 配置同步导入：按 branch 当前 HEAD 重新构建并发布。
-   *
-   * <p>repositoryUrl 是不可变身份：同名但 URL 不同拒绝导入；既有包必须是 Git 渠道。外部 Git 构建在事务之外完成。
-   */
-  @Transactional(propagation = Propagation.NOT_SUPPORTED)
-  public SkillPackageDetailDTO importGitPackage(
+  /** 配置导入发布所需的事实；暂存上传归调用方所有，失败时必须取消。 */
+  public record PreparedGitImport(
+      String packageName,
+      String description,
+      String repositoryUrl,
+      String branch,
+      String token,
+      String commit,
+      List<SkillManifestEntry> skills,
+      UUID stagingUploadId) {
+    public PreparedGitImport {
+      skills = List.copyOf(skills);
+    }
+
+    @Override
+    public String toString() {
+      return "PreparedGitImport[packageName=" + packageName + ", commit=" + commit + "]";
+    }
+  }
+
+  /** 在写事务之外解析 branch HEAD、构建归档并暂存。 */
+  @Transactional(propagation = Propagation.NEVER)
+  public PreparedGitImport prepareGitImport(
       String packageName, String description, String repositoryUrl, String branch, String token) {
     String name = requirePackageName(packageName);
     String canonicalDescription = requireDescription(description);
@@ -562,68 +578,85 @@ public class SkillCatalogService {
     SkillArchiveBuilder.Result archive =
         git(() -> skillGitRepository.buildArchive(url, commit, canonicalToken));
     UUID stagingUploadId = stageArchive(name, archive);
-    try {
-      return writes.execute(
-          () -> {
-            SkillPackage current = requirePackageForUpdateOrNull(name);
-            if (current != null && !current.isGit()) {
-              throw DomainException.validation(
-                  RESOURCE, "uploaded skill package cannot be replaced by a Git import: " + name);
-            }
-            if (current != null && !url.equals(current.gitSource().repositoryUrl())) {
-              throw DomainException.validation(
-                  RESOURCE, "skill package repositoryUrl is immutable: " + name);
-            }
-            if (current != null) {
-              ensureSkillsRemovable(name, removedSkillNames(current, archive.skills()));
-            }
-            UUID artifactBlobId = consumeStaging(stagingUploadId);
-            if (current == null) {
-              SkillPackage created =
-                  new SkillPackage(
-                      name,
-                      canonicalDescription,
-                      commit,
-                      artifactBlobId,
-                      archive.skills(),
-                      Instant.now(),
-                      0L,
-                      null,
-                      null,
-                      new SkillPackageGitSource(
-                          url, canonicalBranch, canonicalToken, commit, Instant.now(), null));
-              if (!skillPackageRepository.insertPackage(created)) {
-                throw new IllegalStateException("import skill package failed: " + name);
-              }
-            } else {
-              SkillPackage published =
-                  new SkillPackage(
-                      name,
-                      canonicalDescription,
-                      commit,
-                      artifactBlobId,
-                      archive.skills(),
-                      Instant.now(),
-                      current.version(),
-                      current.createdAt(),
-                      current.updatedAt(),
-                      current.gitSource());
-              if (!skillPackageRepository.updatePublication(published, current.version())) {
-                throw conflictOrMissing(name, CatalogVersions.format(current.version()));
-              }
-              if (!skillPackageRepository.updateGitSettings(name, canonicalBranch, canonicalToken)
-                  || !skillPackageRepository.updateGitObservation(
-                      name, commit, Instant.now(), null)) {
-                throw DomainException.notFound(RESOURCE);
-              }
-              releaseArtifact(current);
-            }
-            return getPackage(name);
-          });
-    } catch (RuntimeException error) {
-      cancelStagingBestEffort(stagingUploadId);
-      throw error;
+    return new PreparedGitImport(
+        name,
+        canonicalDescription,
+        url,
+        canonicalBranch,
+        canonicalToken,
+        commit,
+        archive.skills(),
+        stagingUploadId);
+  }
+
+  /** 加入调用方事务发布已准备的归档，并在行锁下重检渠道、URL 和技能引用。 */
+  @Transactional(propagation = Propagation.MANDATORY)
+  public void publishPreparedGitImport(PreparedGitImport prepared) {
+    String name = prepared.packageName();
+    SkillPackage current = requirePackageForUpdateOrNull(name);
+    if (current != null && !current.isGit()) {
+      throw DomainException.validation(
+          RESOURCE, "uploaded skill package cannot be replaced by a Git import: " + name);
     }
+    if (current != null && !prepared.repositoryUrl().equals(current.gitSource().repositoryUrl())) {
+      throw DomainException.validation(
+          RESOURCE, "skill package repositoryUrl is immutable: " + name);
+    }
+    if (current != null) {
+      ensureSkillsRemovable(name, removedSkillNames(current, prepared.skills()));
+    }
+    UUID artifactBlobId = consumeStaging(prepared.stagingUploadId());
+    if (current == null) {
+      SkillPackage created =
+          new SkillPackage(
+              name,
+              prepared.description(),
+              prepared.commit(),
+              artifactBlobId,
+              prepared.skills(),
+              Instant.now(),
+              0L,
+              null,
+              null,
+              new SkillPackageGitSource(
+                  prepared.repositoryUrl(),
+                  prepared.branch(),
+                  prepared.token(),
+                  prepared.commit(),
+                  Instant.now(),
+                  null));
+      if (!skillPackageRepository.insertPackage(created)) {
+        throw new IllegalStateException("import skill package failed: " + name);
+      }
+    } else {
+      SkillPackage published =
+          new SkillPackage(
+              name,
+              prepared.description(),
+              prepared.commit(),
+              artifactBlobId,
+              prepared.skills(),
+              Instant.now(),
+              current.version(),
+              current.createdAt(),
+              current.updatedAt(),
+              current.gitSource());
+      if (!skillPackageRepository.updatePublication(published, current.version())) {
+        throw conflictOrMissing(name, CatalogVersions.format(current.version()));
+      }
+      if (!skillPackageRepository.updateGitSettings(name, prepared.branch(), prepared.token())
+          || !skillPackageRepository.updateGitObservation(
+              name, prepared.commit(), Instant.now(), null)) {
+        throw DomainException.notFound(RESOURCE);
+      }
+      releaseArtifact(current);
+    }
+  }
+
+  /** 导入失败后在回滚事务之外尽力取消暂存上传；剩余上传由过期清理兜底。 */
+  @Transactional(propagation = Propagation.NEVER)
+  public void cancelPreparedGitImport(PreparedGitImport prepared) {
+    cancelStagingBestEffort(prepared.stagingUploadId());
   }
 
   /** 只校验导入字段，不访问 Git 或写入数据库。 */
@@ -670,8 +703,14 @@ public class SkillCatalogService {
             "application/zip",
             new ByteArrayInputStream(archive.zip()),
             SkillArchiveBuilder.MAX_ARCHIVE_BYTES);
-    if (!blobRepository.updateArchiveIndex(staged.blobId(), index.encode())) {
-      throw new IllegalStateException("cannot record the archive index for a staged skill archive");
+    try {
+      if (!blobRepository.updateArchiveIndex(staged.blobId(), index.encode())) {
+        throw new IllegalStateException(
+            "cannot record the archive index for a staged skill archive");
+      }
+    } catch (RuntimeException | Error error) {
+      cancelStagingBestEffort(staged.uploadId());
+      throw error;
     }
     return staged.uploadId();
   }

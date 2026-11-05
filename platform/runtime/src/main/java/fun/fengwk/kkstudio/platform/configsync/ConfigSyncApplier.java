@@ -14,6 +14,7 @@ import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModelService;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderService;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogService;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogService.PreparedGitImport;
 import fun.fengwk.kkstudio.platform.environment.Environment;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentService;
@@ -37,9 +38,9 @@ import java.util.Map;
 /**
  * 在一个数据库事务内落地 {@link ConfigSyncPlan}。
  *
- * <p>写入顺序遵守外键与引用依赖：Provider → Model → Skill Package → MCP Server → Environment → Agent → Plugin →
- * Settings。新增 Agent 先以空 subagent allowlist 创建，再在同一事务内统一更新为完整列表，使循环引用可解且事务外不可见中间态。任何写入失败都随异常整体回滚，绝不
- * 捕获后继续。
+ * <p>Git 归档已在事务外准备，技能包发布加入本事务。写入顺序遵守外键与引用依赖：Provider → Model → Skill Package → MCP Server →
+ * Environment → Agent → Plugin → Settings。新增 Agent 先以空 subagent allowlist
+ * 创建，再在同一事务内统一更新为完整列表，使循环引用可解且事务外不可见中间态。任何写入失败都随异常整体回滚，绝不 捕获后继续。
  *
  * <p>插件复用唯一写入口 {@link PluginConfigurationService}：每项都比较该插件计划期的配置修订；任一项冲突或失败都让整份导入回滚，提交后才在本节点应用。
  *
@@ -64,16 +65,11 @@ public class ConfigSyncApplier {
 
   /** 事务内写入计划中的全部事实。 */
   @Transactional
-  public void apply(ConfigSyncPlan plan) {
+  public void apply(ConfigSyncPlan plan, List<PreparedGitImport> preparedSkills) {
     applyProviders(plan.providers());
     applyModels(plan.models());
-    for (ConfigSyncPlan.SkillImport skill : plan.skillPackages()) {
-      skillCatalogService.importGitPackage(
-          skill.packageName(),
-          skill.description(),
-          skill.repositoryUrl(),
-          skill.branch(),
-          skill.token());
+    for (PreparedGitImport skill : preparedSkills) {
+      skillCatalogService.publishPreparedGitImport(skill);
     }
     for (ConfigSyncPlan.McpImport mcp : plan.mcpServers()) {
       mcpServerService.importServer(

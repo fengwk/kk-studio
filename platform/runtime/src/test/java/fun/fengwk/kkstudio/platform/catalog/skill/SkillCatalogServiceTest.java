@@ -238,6 +238,30 @@ class SkillCatalogServiceTest {
   }
 
   @Test
+  void failedArchiveIndexCancelsTheNewStagingUpload() {
+    // 意图：stage 已成功但索引保存失败时，调用方尚未拿到 uploadId，也不能遗留暂存引用。
+    SkillArchiveBuilder.Result archive = archive("dev");
+    UUID uploadId = UUID.randomUUID();
+    UUID blobId = UUID.randomUUID();
+    when(gitRepository.resolveBranchHead("https://git.example.com/repo.git", "main", null))
+        .thenReturn(HEAD);
+    when(gitRepository.buildArchive("https://git.example.com/repo.git", HEAD, null))
+        .thenReturn(archive);
+    when(uploadService.stage(eq(PACKAGE + ".zip"), eq("application/zip"), any(), anyLong()))
+        .thenReturn(staged(uploadId, blobId));
+    when(blobRepository.updateArchiveIndex(eq(blobId), anyString())).thenReturn(false);
+
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            service.prepareGitImport(
+                PACKAGE, "description", "https://git.example.com/repo.git", "main", null));
+
+    verify(uploadService).delete(uploadId);
+    verify(writes, never()).execute(any());
+  }
+
+  @Test
   void createGitPackageRejectsAnExistingName() {
     when(packageRepository.getPackage(PACKAGE)).thenReturn(uploadPackage(3));
 

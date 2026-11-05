@@ -32,6 +32,7 @@ import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModelService;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderService;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogService;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillManifestEntry;
 import fun.fengwk.kkstudio.platform.environment.Environment;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentService;
@@ -172,7 +173,8 @@ class ConfigSyncApplierTest {
             agentProperties(agentConfig(List.of(), List.of(), List.of("a"))));
 
     applier.apply(
-        plan(List.of(), List.of(), List.of(), List.of(), List.of(), List.of(specA, specB), null));
+        plan(List.of(), List.of(), List.of(), List.of(), List.of(), List.of(specA, specB), null),
+        List.of());
 
     ArgumentCaptor<AgentDefinitionCreateDTO> createCaptor =
         ArgumentCaptor.forClass(AgentDefinitionCreateDTO.class);
@@ -212,7 +214,8 @@ class ConfigSyncApplierTest {
             List.of(),
             List.of(),
             List.of(),
-            null));
+            null),
+        List.of());
 
     // 导入使用显式 upsert 命令恢复文件事实，不再区分 create/update，也不再读取 repository 判断存在性。
     verify(providerService).importProvider("new", created.properties());
@@ -240,7 +243,8 @@ class ConfigSyncApplierTest {
                 new ConfigSyncParser.EnvironmentSpec("new", "token-new", null),
                 new ConfigSyncParser.EnvironmentSpec("old", "token-old", null)),
             List.of(),
-            null));
+            null),
+        List.of());
 
     verify(environmentService).importEnvironment("new", "token-new", null);
     verify(environmentService)
@@ -255,7 +259,8 @@ class ConfigSyncApplierTest {
     sections.getNetwork().setNoProxyHosts("localhost,127.0.0.1");
     ConfigSyncPlan.SettingsUpdate update = new ConfigSyncPlan.SettingsUpdate(sections, "9");
 
-    applier.apply(plan(List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), update));
+    applier.apply(
+        plan(List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), update), List.of());
 
     ArgumentCaptor<SystemSettingsUpdateDTO> captor =
         ArgumentCaptor.forClass(SystemSettingsUpdateDTO.class);
@@ -278,7 +283,9 @@ class ConfigSyncApplierTest {
     properties.setConfig(ConfigSyncFixtures.modelConfig());
     ConfigSyncParser.ModelSpec spec = new ConfigSyncParser.ModelSpec("m", properties);
 
-    applier.apply(plan(List.of(), List.of(spec), List.of(), List.of(), List.of(), List.of(), null));
+    applier.apply(
+        plan(List.of(), List.of(spec), List.of(), List.of(), List.of(), List.of(), null),
+        List.of());
 
     ArgumentCaptor<AgentModelCreateDTO> captor = ArgumentCaptor.forClass(AgentModelCreateDTO.class);
     verify(modelService).createModel(captor.capture());
@@ -303,7 +310,8 @@ class ConfigSyncApplierTest {
             List.of(
                 new ConfigSyncPlan.PluginImport("a.plugin", 1L, values),
                 new ConfigSyncPlan.PluginImport("b.plugin", 2L, values)),
-            null));
+            null),
+        List.of());
 
     InOrder order = Mockito.inOrder(pluginConfigurationService);
     order.verify(pluginConfigurationService).configure("a.plugin", 1L, values, Map.of());
@@ -328,7 +336,8 @@ class ConfigSyncApplierTest {
                     List.of(),
                     List.of(),
                     List.of(new ConfigSyncPlan.PluginImport("a.plugin", 1L, "{}")),
-                    null)));
+                    null),
+                List.of()));
 
     verify(pluginConfigurationService).configure("a.plugin", 1L, "{}", Map.of());
   }
@@ -355,7 +364,8 @@ class ConfigSyncApplierTest {
                         List.of(),
                         List.of(),
                         List.of(new ConfigSyncPlan.PluginImport(DEPENDENT_PLUGIN_ID, 1L, values)),
-                        null)));
+                        null),
+                    List.of()));
 
     assertTrue(error.getMessage().contains("missing agent"));
     verify(pluginConfigurationService, never()).configure(anyString(), anyLong(), any(), any());
@@ -381,7 +391,8 @@ class ConfigSyncApplierTest {
                     DEPENDENT_PLUGIN_ID, 1L, String.format(values, "zeta")),
                 new ConfigSyncPlan.PluginImport("a.plugin", 1L, String.format(values, "alpha")),
                 new ConfigSyncPlan.PluginImport("b.plugin", 2L, String.format(values, "alpha"))),
-            null));
+            null),
+        List.of());
 
     InOrder order = Mockito.inOrder(definitionRepository);
     order.verify(definitionRepository).getByNameForUpdate("alpha");
@@ -411,7 +422,8 @@ class ConfigSyncApplierTest {
             List.of(
                 new ConfigSyncPlan.PluginImport(
                     DEPENDENT_PLUGIN_ID, 1L, "{\"promptAgentName\":\"dep-agent\"}")),
-            null));
+            null),
+        List.of());
 
     InOrder order =
         Mockito.inOrder(definitionService, definitionRepository, pluginConfigurationService);
@@ -440,7 +452,8 @@ class ConfigSyncApplierTest {
                         List.of(),
                         List.of(),
                         List.of(new ConfigSyncPlan.PluginImport(DEPENDENT_PLUGIN_ID, 1L, values)),
-                        null)));
+                        null),
+                    List.of()));
 
     assertEquals("plugin configuration is invalid: " + DEPENDENT_PLUGIN_ID, error.getMessage());
     assertTrue(error.getCause() == null, "the input boundary must not chain the plugin cause");
@@ -462,7 +475,8 @@ class ConfigSyncApplierTest {
                     List.of(),
                     List.of(),
                     List.of(new ConfigSyncPlan.PluginImport("broken.plugin", 1L, "{}")),
-                    null)));
+                    null),
+                List.of()));
     verify(pluginConfigurationService, never()).configure(anyString(), anyLong(), any(), any());
   }
 
@@ -477,11 +491,21 @@ class ConfigSyncApplierTest {
     return properties;
   }
 
-  /** 意图：Skill 与 MCP 导入按计划直接委托，Skill 委托给 importGitPackage。 */
+  /** 意图：Skill 与 MCP 导入按计划直接委托，Skill 委托给 publishPreparedGitImport。 */
   @Test
   void skillAndMcpImportsAreDelegatedWithPreparedPayloads() {
     ConfigSyncPlan.SkillImport skill =
         new ConfigSyncPlan.SkillImport("pkg", "d", "https://example.com/pkg.git", "main", null);
+    SkillCatalogService.PreparedGitImport prepared =
+        new SkillCatalogService.PreparedGitImport(
+            "pkg",
+            "d",
+            "https://example.com/pkg.git",
+            "main",
+            null,
+            "commit-sha",
+            List.of(new SkillManifestEntry("dev", "dev skill")),
+            UUID.randomUUID());
     McpTool tool = ConfigSyncFixtures.mcpTool("tool_x", "mcp");
     ConfigSyncPlan.McpImport mcp =
         new ConfigSyncPlan.McpImport(
@@ -493,10 +517,10 @@ class ConfigSyncApplierTest {
             List.of(tool));
 
     applier.apply(
-        plan(List.of(), List.of(), List.of(skill), List.of(mcp), List.of(), List.of(), null));
+        plan(List.of(), List.of(), List.of(skill), List.of(mcp), List.of(), List.of(), null),
+        List.of(prepared));
 
-    verify(skillCatalogService)
-        .importGitPackage("pkg", "d", "https://example.com/pkg.git", "main", null);
+    verify(skillCatalogService).publishPreparedGitImport(prepared);
     verify(mcpServerService)
         .importServer(
             "mcp",
@@ -511,15 +535,26 @@ class ConfigSyncApplierTest {
   void skillImportFailureBubblesUpAsValidationError() {
     ConfigSyncPlan.SkillImport skill =
         new ConfigSyncPlan.SkillImport("pkg", "d", "https://example.com/pkg.git", "main", null);
+    SkillCatalogService.PreparedGitImport prepared =
+        new SkillCatalogService.PreparedGitImport(
+            "pkg",
+            "d",
+            "https://example.com/pkg.git",
+            "main",
+            null,
+            "commit-sha",
+            List.of(new SkillManifestEntry("dev", "dev skill")),
+            UUID.randomUUID());
     doThrow(DomainException.validation("skill_package", "git failure"))
         .when(skillCatalogService)
-        .importGitPackage("pkg", "d", "https://example.com/pkg.git", "main", null);
+        .publishPreparedGitImport(prepared);
 
     assertThrows(
         DomainException.class,
         () ->
             applier.apply(
-                plan(List.of(), List.of(), List.of(skill), List.of(), List.of(), List.of(), null)));
+                plan(List.of(), List.of(), List.of(skill), List.of(), List.of(), List.of(), null),
+                List.of(prepared)));
   }
 
   /** 意图：既有 Model 走 CAS 更新并携带既有版本，绝不重复创建。 */
@@ -541,7 +576,9 @@ class ConfigSyncApplierTest {
     properties.setConfig(ConfigSyncFixtures.modelConfig());
     ConfigSyncParser.ModelSpec spec = new ConfigSyncParser.ModelSpec("m", properties);
 
-    applier.apply(plan(List.of(), List.of(spec), List.of(), List.of(), List.of(), List.of(), null));
+    applier.apply(
+        plan(List.of(), List.of(spec), List.of(), List.of(), List.of(), List.of(), null),
+        List.of());
 
     ArgumentCaptor<AgentModelUpdateDTO> captor = ArgumentCaptor.forClass(AgentModelUpdateDTO.class);
     verify(modelService).updateModel(eq("m"), captor.capture());
@@ -560,7 +597,9 @@ class ConfigSyncApplierTest {
             new ModelSelection("m", "default"),
             agentProperties(agentConfig(List.of(), List.of(), List.of())));
 
-    applier.apply(plan(List.of(), List.of(), List.of(), List.of(), List.of(), List.of(spec), null));
+    applier.apply(
+        plan(List.of(), List.of(), List.of(), List.of(), List.of(), List.of(spec), null),
+        List.of());
 
     verify(definitionService, never()).createAgent(any());
     ArgumentCaptor<AgentDefinitionUpdateDTO> captor =

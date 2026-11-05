@@ -19,6 +19,7 @@ import static org.mockito.Mockito.when;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerRepository;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogService;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalog;
 import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsCodec;
@@ -63,6 +64,7 @@ class ConfigSyncServiceTest {
   private final ConfigSyncMcpDiscovery mcpDiscovery = mock(ConfigSyncMcpDiscovery.class);
   private final McpServerRepository mcpServerRepository = mock(McpServerRepository.class);
   private final RuntimeToolCatalog toolCatalog = mock(RuntimeToolCatalog.class);
+  private final SkillCatalogService skillCatalogService = mock(SkillCatalogService.class);
   private final ConfigSyncPlanner planner =
       new ConfigSyncPlanner(
           snapshotReader,
@@ -74,7 +76,8 @@ class ConfigSyncServiceTest {
           ConfigSyncFixtures.agentDependencies());
 
   private final ConfigSyncService service =
-      new ConfigSyncService(snapshotReader, graph, exporter, parser, planner, applier);
+      new ConfigSyncService(
+          snapshotReader, graph, exporter, parser, planner, applier, skillCatalogService);
 
   private ConfigSyncSnapshot richSnapshot() {
     return snapshot(
@@ -148,7 +151,7 @@ class ConfigSyncServiceTest {
 
     ConfigSyncImportResultDTO result = service.importYaml(request);
 
-    verify(applier).apply(any());
+    verify(applier).apply(any(), any());
     assertTrue(result.getImported().contains(new ConfigSyncRef(ConfigSyncKind.PROVIDERS, "p")));
     assertTrue(result.getImported().contains(new ConfigSyncRef(ConfigSyncKind.MODELS, "m")));
     assertTrue(result.getSkipped().isEmpty());
@@ -176,7 +179,7 @@ class ConfigSyncServiceTest {
     assertTrue(check.getCreated().contains(new ConfigSyncRef(ConfigSyncKind.MODELS, "m")));
     assertTrue(check.getUpdated().isEmpty());
     assertTrue(check.getSkipped().isEmpty());
-    verify(applier, never()).apply(any());
+    verify(applier, never()).apply(any(), any());
   }
 
   @Test
@@ -191,7 +194,7 @@ class ConfigSyncServiceTest {
     assertTrue(check.getCreated().isEmpty());
     assertTrue(check.getUpdated().contains(new ConfigSyncRef(ConfigSyncKind.PROVIDERS, "p")));
     assertTrue(check.getUpdated().contains(new ConfigSyncRef(ConfigSyncKind.MODELS, "m")));
-    verify(applier, never()).apply(any());
+    verify(applier, never()).apply(any(), any());
   }
 
   @Test
@@ -202,14 +205,14 @@ class ConfigSyncServiceTest {
     request.setYaml("unknownThing: []\n");
 
     assertThrows(DomainException.class, () -> service.importYaml(request));
-    verify(applier, never()).apply(any());
+    verify(applier, never()).apply(any(), any());
 
     request.setAllowPartial(true);
     ConfigSyncImportResultDTO result = service.importYaml(request);
 
     assertTrue(result.getImported().isEmpty());
     assertEquals(1, result.getSkipped().size());
-    verify(applier, never()).apply(any());
+    verify(applier, never()).apply(any(), any());
   }
 
   @Test
@@ -218,7 +221,7 @@ class ConfigSyncServiceTest {
     when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
     doThrow(DomainException.validation("config_sync", "leaked-secret-value"))
         .when(applier)
-        .apply(any());
+        .apply(any(), any());
     ConfigSyncImportRequestDTO request = new ConfigSyncImportRequestDTO();
     request.setYaml(ConfigSyncFixtures.providerAndModelYaml());
 

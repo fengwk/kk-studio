@@ -253,7 +253,7 @@ class ConfigSyncPluginImportPostgresIntegrationTest {
     new TransactionTemplate(transactionManager)
         .execute(
             status -> {
-              applier.apply(plan);
+              applier.apply(plan, List.of());
               notifiedInsideTransaction.set(
                   dispatcherWakes.get() > dispatcherWakesBeforeImport
                       || catalogWakes.get() > catalogWakesBeforeImport);
@@ -284,7 +284,7 @@ class ConfigSyncPluginImportPostgresIntegrationTest {
     new TransactionTemplate(transactionManager)
         .execute(
             status -> {
-              applier.apply(plan);
+              applier.apply(plan, List.of());
               return null;
             });
   }
