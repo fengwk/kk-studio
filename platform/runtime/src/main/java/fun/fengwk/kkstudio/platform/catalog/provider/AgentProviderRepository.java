@@ -43,19 +43,34 @@ public class AgentProviderRepository {
   }
 
   public Page<AgentProvider> page(PageQuery pageQuery) {
-    List<AgentProvider> results =
+    // 聚合行始终存在，左连接保留越界空页的 total；同一语句共享 PostgreSQL 快照。
+    List<PageRow> rows =
         jdbcClient
             .sql(
-                "select "
-                    + COLUMNS
-                    + " from agent_provider order by name asc limit :limit offset :offset")
+                """
+                select page.*, totals.total_count
+                from (select count(*) as total_count from agent_provider) totals
+                left join lateral (
+                    select %s from agent_provider order by name asc limit :limit offset :offset
+                ) page on true
+                order by page.name asc
+                """
+                    .formatted(COLUMNS))
             .param("limit", pageQuery.getPageSize())
             .param("offset", pageQuery.getOffset())
-            .query(ROW_MAPPER)
+            .query(
+                (rs, rowNum) ->
+                    new PageRow(
+                        rs.getString("name") == null ? null : ROW_MAPPER.mapRow(rs, rowNum),
+                        rs.getLong("total_count")))
             .list();
-    long total = jdbcClient.sql("select count(*) from agent_provider").query(Long.class).single();
-    return new Page<>(pageQuery.getPageNumber(), pageQuery.getPageSize(), results, total);
+    List<AgentProvider> results =
+        rows.stream().map(PageRow::provider).filter(Objects::nonNull).toList();
+    return new Page<>(
+        pageQuery.getPageNumber(), pageQuery.getPageSize(), results, rows.getFirst().total());
   }
+
+  private record PageRow(AgentProvider provider, long total) {}
 
   /** 按 {@code name asc} 列出全部 provider（含凭据），用于一次性导出快照。 */
   public List<AgentProvider> listAll() {
@@ -135,11 +150,10 @@ public class AgentProviderRepository {
 
   public boolean hasModels(String providerName) {
     return jdbcClient
-            .sql("select count(*) from agent_model where provider_name = :providerName")
-            .param("providerName", providerName)
-            .query(Long.class)
-            .single()
-        > 0;
+        .sql("select exists (select 1 from agent_model where provider_name = :providerName)")
+        .param("providerName", providerName)
+        .query(Boolean.class)
+        .single();
   }
 
   private AgentProvider findOne(String sql, String name) {

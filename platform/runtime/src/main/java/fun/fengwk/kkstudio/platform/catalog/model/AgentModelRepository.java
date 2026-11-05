@@ -90,19 +90,33 @@ public class AgentModelRepository {
   }
 
   public Page<AgentModel> page(PageQuery pageQuery) {
-    List<AgentModel> results =
+    // 聚合行始终存在，左连接保留越界空页的 total；同一语句共享 PostgreSQL 快照。
+    List<PageRow> rows =
         jdbcClient
             .sql(
-                "select "
-                    + COLUMNS
-                    + " from agent_model order by name asc limit :limit offset :offset")
+                """
+                select page.*, totals.total_count
+                from (select count(*) as total_count from agent_model) totals
+                left join lateral (
+                    select %s from agent_model order by name asc limit :limit offset :offset
+                ) page on true
+                order by page.name asc
+                """
+                    .formatted(COLUMNS))
             .param("limit", pageQuery.getPageSize())
             .param("offset", pageQuery.getOffset())
-            .query(ROW_MAPPER)
+            .query(
+                (rs, rowNum) ->
+                    new PageRow(
+                        rs.getString("name") == null ? null : ROW_MAPPER.mapRow(rs, rowNum),
+                        rs.getLong("total_count")))
             .list();
-    long total = jdbcClient.sql("select count(*) from agent_model").query(Long.class).single();
-    return new Page<>(pageQuery.getPageNumber(), pageQuery.getPageSize(), results, total);
+    List<AgentModel> results = rows.stream().map(PageRow::model).filter(Objects::nonNull).toList();
+    return new Page<>(
+        pageQuery.getPageNumber(), pageQuery.getPageSize(), results, rows.getFirst().total());
   }
+
+  private record PageRow(AgentModel model, long total) {}
 
   /** 按 {@code name asc} 列出全部 model，用于一次性导出快照。 */
   public List<AgentModel> listAll() {
@@ -242,9 +256,10 @@ public class AgentModelRepository {
   /** 是否有模型组把该名称作为成员引用。 */
   public boolean hasGroupsReferencing(String name) {
     return jdbcClient
-            .sql(
-                """
-                select count(*)
+        .sql(
+            """
+            select exists (
+                select 1
                 from agent_model g
                 where g.kind = 'GROUP'
                   and exists (
@@ -252,11 +267,11 @@ public class AgentModelRepository {
                       from jsonb_array_elements(g.group_config -> 'members') as member(value)
                       where member.value ->> 'modelName' = :name
                   )
-                """)
-            .param("name", name)
-            .query(Long.class)
-            .single()
-        > 0;
+            )
+            """)
+        .param("name", name)
+        .query(Boolean.class)
+        .single();
   }
 
   /** Agent 或模型组是否引用了该单 Model 的指定 Variant。 */
@@ -265,20 +280,21 @@ public class AgentModelRepository {
       return true;
     }
     return jdbcClient
-            .sql(
-                """
-                select count(*)
+        .sql(
+            """
+            select exists (
+                select 1
                 from agent_model g,
                      lateral jsonb_array_elements(g.group_config -> 'members') as member(value)
                 where g.kind = 'GROUP'
                   and member.value ->> 'modelName' = :name
                   and member.value ->> 'variant' = :variant
-                """)
-            .param("name", name)
-            .param("variant", variant)
-            .query(Long.class)
-            .single()
-        > 0;
+            )
+            """)
+        .param("name", name)
+        .param("variant", variant)
+        .query(Boolean.class)
+        .single();
   }
 
   private void deleteGroupCooldowns(String groupName) {
