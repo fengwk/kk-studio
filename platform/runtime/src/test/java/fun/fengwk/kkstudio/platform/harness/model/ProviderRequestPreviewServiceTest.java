@@ -554,7 +554,8 @@ class ProviderRequestPreviewServiceTest {
             GENERATION_ID,
             actual,
             base.variant(),
-            List.of(base.variant(), new ModelVariant("other", "max")));
+            List.of(
+                base.variant(), new ModelVariant("other", "max", PromptCacheRetention.NONE, null)));
     var group = new ModelGroupExecution("group", 1L, List.of(member), Set.of(429), 0);
     var groupSpec =
         new ModelRequestSpec(
@@ -562,12 +563,12 @@ class ProviderRequestPreviewServiceTest {
             GENERATION_ID,
             logical,
             base.variant(),
-            List.of(base.variant(), new ModelVariant("other", "low")),
+            List.of(
+                base.variant(), new ModelVariant("other", "low", PromptCacheRetention.NONE, null)),
             base.outputTokens(),
             base.systemInstruction(),
             base.toolBindings(),
             base.subagentBindings(),
-            base.cacheControl(),
             group);
     when(turnResolver.planLive(eq(THREAD_ID), eq(SESSION_ID), any()))
         .thenReturn(new LiveTurnPlan.Planned(groupSpec, CONTEXT_WINDOW, List.of(), List.of()));
@@ -1053,12 +1054,14 @@ class ProviderRequestPreviewServiceTest {
     verify(runtime).getSessionEntries(CHILD_SESSION_ID);
     verify(turnResolver, never()).planLive(any(), any(), any());
 
-    // 规划 spec 的输出预算与 cache 被 child Thread 的不可变约束收紧。
+    // 规划 spec 的输出预算被 child Thread 约束收紧，cache 仍遵循 variant。
     ArgumentCaptor<ProviderRequest> requestCaptor = ArgumentCaptor.forClass(ProviderRequest.class);
     verify(providerResolution)
         .resolve(eq(ProviderType.OPENAI), eq(GENERATION_ID), requestCaptor.capture());
     assertEquals(COMPACTION_OUTPUT_BUDGET, requestCaptor.getValue().outputTokens());
-    assertEquals(PromptCacheRetention.NONE, requestCaptor.getValue().cacheControl().retention());
+    assertEquals(
+        ProviderCacheControl.session(PromptCacheRetention.SHORT, CHILD_SESSION_ID.toString()),
+        requestCaptor.getValue().cacheControl());
   }
 
   /**
@@ -1130,7 +1133,7 @@ class ProviderRequestPreviewServiceTest {
     when(runtime.getThreadSnapshot(CHILD_THREAD_ID))
         .thenReturn(
             snapshot(
-                childThread(CHILD_LATER_END_ID, new ThreadConstraints(null, true, false)),
+                childThread(CHILD_LATER_END_ID, new ThreadConstraints(null, false)),
                 compactionChildPath(),
                 List.of()));
     assertFrozenCompactionRejected();
@@ -1139,8 +1142,7 @@ class ProviderRequestPreviewServiceTest {
         .thenReturn(
             snapshot(
                 childThread(
-                    CHILD_LATER_END_ID,
-                    new ThreadConstraints(COMPACTION_OUTPUT_BUDGET + 1, true, false)),
+                    CHILD_LATER_END_ID, new ThreadConstraints(COMPACTION_OUTPUT_BUDGET + 1, false)),
                 compactionChildPath(),
                 List.of()));
     assertFrozenCompactionRejected();
@@ -1153,7 +1155,7 @@ class ProviderRequestPreviewServiceTest {
   @Test
   void acceptsTighterChildOutputCapForCompactionPreview() {
     stubPreviewableCompactionChild(
-        new ThreadConstraints(COMPACTION_OUTPUT_BUDGET / 2, true, false), childEntries(), 8_192);
+        new ThreadConstraints(COMPACTION_OUTPUT_BUDGET / 2, false), childEntries(), 8_192);
 
     service.previewHistorical(SESSION_ID, COMPACTION_ENTRY_ID);
 
@@ -1183,7 +1185,8 @@ class ProviderRequestPreviewServiceTest {
             GENERATION_ID,
             actual,
             base.variant(),
-            List.of(base.variant(), new ModelVariant("other", "max")));
+            List.of(
+                base.variant(), new ModelVariant("other", "max", PromptCacheRetention.NONE, null)));
     var group = new ModelGroupExecution("group", 1L, List.of(member), Set.of(429), 0);
     var groupSpec =
         new ModelRequestSpec(
@@ -1196,7 +1199,6 @@ class ProviderRequestPreviewServiceTest {
             base.systemInstruction(),
             base.toolBindings(),
             base.subagentBindings(),
-            base.cacheControl(),
             group);
 
     when(runtime.getSessionEntries(SESSION_ID)).thenReturn(compactionOutputPath().entries());
@@ -1206,8 +1208,7 @@ class ProviderRequestPreviewServiceTest {
         .thenReturn(
             snapshot(
                 childThread(
-                    CHILD_LATER_END_ID,
-                    new ThreadConstraints(COMPACTION_OUTPUT_BUDGET / 2, true, false)),
+                    CHILD_LATER_END_ID, new ThreadConstraints(COMPACTION_OUTPUT_BUDGET / 2, false)),
                 compactionChildPath(),
                 List.of()));
     when(runtime.getSessionEntries(CHILD_SESSION_ID)).thenReturn(childEntries());
@@ -1228,7 +1229,9 @@ class ProviderRequestPreviewServiceTest {
     verify(providerResolution)
         .resolve(eq(ProviderType.OPENAI), eq(GENERATION_ID), requestCaptor.capture());
     assertEquals(COMPACTION_OUTPUT_BUDGET / 2, requestCaptor.getValue().outputTokens());
-    assertEquals(ProviderCacheControl.none(), requestCaptor.getValue().cacheControl());
+    assertEquals(
+        ProviderCacheControl.session(PromptCacheRetention.SHORT, CHILD_SESSION_ID.toString()),
+        requestCaptor.getValue().cacheControl());
     assertEquals("model", requestCaptor.getValue().model().modelName());
     assertEquals("group", dto.getModelName());
   }
@@ -1489,7 +1492,7 @@ class ProviderRequestPreviewServiceTest {
   }
 
   private static ThreadState childThread(UUID headEntryId) {
-    return childThread(headEntryId, new ThreadConstraints(COMPACTION_OUTPUT_BUDGET, true, false));
+    return childThread(headEntryId, new ThreadConstraints(COMPACTION_OUTPUT_BUDGET, false));
   }
 
   private static ThreadState childThread(UUID headEntryId, ThreadConstraints constraints) {
@@ -1568,12 +1571,11 @@ class ProviderRequestPreviewServiceTest {
         GENERATION_ID,
         new ModelDescriptor(
             "provider", "model", "wire-model", Set.of(ModelInputModality.TEXT), false, false),
-        new ModelVariant("v1"),
+        new ModelVariant("v1", null, cacheControl.retention(), null),
         outputTokens,
         "system instruction",
         List.of(),
-        List.of(),
-        cacheControl);
+        List.of());
   }
 
   private static ThreadSnapshot snapshot(

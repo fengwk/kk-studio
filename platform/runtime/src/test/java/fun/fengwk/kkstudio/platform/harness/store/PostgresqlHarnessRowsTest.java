@@ -31,17 +31,17 @@ class PostgresqlHarnessRowsTest {
     for (ThreadConstraints constraints :
         List.of(
             ThreadConstraints.NONE,
-            new ThreadConstraints(1, true, false),
-            new ThreadConstraints(Integer.MAX_VALUE, false, true))) {
+            new ThreadConstraints(1, false),
+            new ThreadConstraints(Integer.MAX_VALUE, true))) {
       assertEquals(
           constraints,
           PostgresqlHarnessRows.decodeConstraints(
               PostgresqlHarnessRows.encodeConstraints(constraints)));
     }
     assertEquals(
-        new ThreadConstraints(256, true, false),
+        new ThreadConstraints(256, false),
         PostgresqlHarnessRows.decodeConstraints(
-            "{\"allowAutoCompaction\":false,\"maxOutputTokens\":256,\"promptCacheDisabled\":true}"));
+            "{\"allowAutoCompaction\":false,\"maxOutputTokens\":256}"));
   }
 
   @Test
@@ -55,13 +55,12 @@ class PostgresqlHarnessRowsTest {
             "null",
             "[]",
             "{}",
-            "{\"promptCacheDisabled\":false,\"allowAutoCompaction\":true}",
-            "{\"maxOutputTokens\":null,\"allowAutoCompaction\":true}",
-            "{\"maxOutputTokens\":null,\"promptCacheDisabled\":false}",
-            "{\"maxOutputTokens\":null,\"promptCacheDisabled\":false,\"unknown\":true}",
-            "{\"maxOutputTokens\":null,\"promptCacheDisabled\":false,\"allowAutoCompaction\":true,\"extra\":1}",
-            "{\"maxOutputTokens\":null,\"promptCacheDisabled\":false,\"allowAutoCompaction\":true,\"allowAutoCompaction\":false}",
-            "{\"maxOutputTokens\":null,\"promptCacheDisabled\":false,\"allowAutoCompaction\":true} {}")) {
+            "{\"allowAutoCompaction\":true}",
+            "{\"maxOutputTokens\":null}",
+            "{\"maxOutputTokens\":null,\"unknown\":true}",
+            "{\"maxOutputTokens\":null,\"allowAutoCompaction\":true,\"extra\":1}",
+            "{\"maxOutputTokens\":null,\"allowAutoCompaction\":true,\"allowAutoCompaction\":false}",
+            "{\"maxOutputTokens\":null,\"allowAutoCompaction\":true} {}")) {
       assertThrows(
           IllegalArgumentException.class,
           () -> PostgresqlHarnessRows.decodeConstraints(json),
@@ -73,25 +72,16 @@ class PostgresqlHarnessRowsTest {
   void constraintsRejectCoercionsAndOutOfRangeBudgets() {
     // 不允许字符串/小数/溢出整数被 Jackson 的 intValue 或 booleanValue 静默转换。
     for (String cap : List.of("\"256\"", "1.5", "2147483648", "4294967297", "0", "-1", "true")) {
-      String json =
-          "{\"maxOutputTokens\":"
-              + cap
-              + ",\"promptCacheDisabled\":false,\"allowAutoCompaction\":true}";
+      String json = "{\"maxOutputTokens\":" + cap + ",\"allowAutoCompaction\":true}";
       assertThrows(
           IllegalArgumentException.class, () -> PostgresqlHarnessRows.decodeConstraints(json), cap);
     }
     for (String value : List.of("null", "\"true\"", "1", "[]", "{}")) {
-      for (String field : List.of("promptCacheDisabled", "allowAutoCompaction")) {
-        String json =
-            "{\"maxOutputTokens\":null,\"promptCacheDisabled\":false,\"allowAutoCompaction\":true}"
-                .replace(
-                    "\"" + field + "\":" + (field.equals("promptCacheDisabled") ? "false" : "true"),
-                    "\"" + field + "\":" + value);
-        assertThrows(
-            IllegalArgumentException.class,
-            () -> PostgresqlHarnessRows.decodeConstraints(json),
-            json);
-      }
+      String json = "{\"maxOutputTokens\":null,\"allowAutoCompaction\":" + value + "}";
+      assertThrows(
+          IllegalArgumentException.class,
+          () -> PostgresqlHarnessRows.decodeConstraints(json),
+          json);
     }
   }
 }

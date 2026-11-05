@@ -17,17 +17,12 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.support.DefaultListableBeanFactory;
 
-import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.model.provider.ModelProvider;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderFactory;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
-import fun.fengwk.kkstudio.harness.model.provider.impl.anthropic.AnthropicConfiguration;
 import fun.fengwk.kkstudio.harness.model.provider.impl.anthropic.AnthropicProviderAdapter;
-import fun.fengwk.kkstudio.harness.model.provider.impl.anthropic.AnthropicThinkingMode;
 import fun.fengwk.kkstudio.harness.model.provider.impl.gemini.GeminiProviderAdapter;
 import fun.fengwk.kkstudio.harness.model.provider.impl.openai.chat.OpenAiChatProviderAdapter;
 import fun.fengwk.kkstudio.harness.model.provider.impl.openai.responses.OpenAiResponsesProviderAdapter;
@@ -42,7 +37,6 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -169,8 +163,6 @@ class ModelExecutionConfigurationTest extends PostgresSpringTestSupport {
     assertEquals(ProviderType.OPENAI_RESPONSES, openaiResponsesProviderFactory.providerType());
     assertEquals(ProviderType.ANTHROPIC, anthropicProviderFactory.providerType());
     assertEquals(ProviderType.GOOGLE, googleProviderFactory.providerType());
-    assertEquals(PromptCacheRetention.SHORT, anthropicProviderFactory.promptCacheRetention());
-    assertEquals(PromptCacheRetention.NONE, googleProviderFactory.promptCacheRetention());
   }
 
   @Test
@@ -209,108 +201,26 @@ class ModelExecutionConfigurationTest extends PostgresSpringTestSupport {
   /** 意图：验证 Spring 装配的 ProviderFactory 返回原生 Harness Provider 适配器，并共享 transport。 */
   @Test
   void createsTheAdapterMatchingEachProviderType() {
+    assertInstanceOf(OpenAiChatProviderAdapter.class, openaiProviderFactory.create("credential"));
     assertInstanceOf(
-        OpenAiChatProviderAdapter.class, openaiProviderFactory.create("credential", "{}"));
-    assertInstanceOf(
-        OpenAiResponsesProviderAdapter.class,
-        openaiResponsesProviderFactory.create("credential", "{}"));
-    assertInstanceOf(
-        AnthropicProviderAdapter.class, anthropicProviderFactory.create("credential", "{}"));
-    assertInstanceOf(GeminiProviderAdapter.class, googleProviderFactory.create("credential", "{}"));
+        OpenAiResponsesProviderAdapter.class, openaiResponsesProviderFactory.create("credential"));
+    assertInstanceOf(AnthropicProviderAdapter.class, anthropicProviderFactory.create("credential"));
+    assertInstanceOf(GeminiProviderAdapter.class, googleProviderFactory.create("credential"));
   }
 
   /** 意图：验证每个 Spring ProviderFactory 均能贯通原生 adapter 并创建对应 ModelProvider。 */
   @Test
   void createsNativeModelProviderThroughEveryFactory() {
-    assertNativeModelProvider(openaiProviderFactory, ProviderType.OPENAI, "{}");
-    assertNativeModelProvider(
-        openaiResponsesProviderFactory,
-        ProviderType.OPENAI_RESPONSES,
-        "{\"promptCacheRetention\":\"SHORT\"}");
-    assertNativeModelProvider(anthropicProviderFactory, ProviderType.ANTHROPIC, "{}");
-    assertNativeModelProvider(googleProviderFactory, ProviderType.GOOGLE, "{}");
+    assertNativeModelProvider(openaiProviderFactory, ProviderType.OPENAI);
+    assertNativeModelProvider(openaiResponsesProviderFactory, ProviderType.OPENAI_RESPONSES);
+    assertNativeModelProvider(anthropicProviderFactory, ProviderType.ANTHROPIC);
+    assertNativeModelProvider(googleProviderFactory, ProviderType.GOOGLE);
   }
 
-  /** 意图：验证 OpenAI 家族工厂基于 configJson 解析留存档位，且任何配置（含 null/空）都返回非空档位。 */
-  @Test
-  void openAiFactoriesExposeConfigAwareRetention() {
-    for (ProviderFactory factory : List.of(openaiProviderFactory, openaiResponsesProviderFactory)) {
-      assertNotNull(factory.promptCacheRetention());
-      assertNotNull(factory.promptCacheRetention(null));
-      assertNotNull(factory.promptCacheRetention("{}"));
-      assertNotNull(factory.promptCacheRetention("{\"promptCacheRetention\":\"SHORT\"}"));
-      assertNotNull(factory.promptCacheRetention("{\"promptCacheRetention\":\"LONG\"}"));
-    }
-  }
-
-  /** 意图：验证 Google 与 Anthropic 工厂暴露固定的标准留存档位。 */
-  @Test
-  void fixedFactoriesExposeExpectedRetention() {
-    assertEquals(PromptCacheRetention.NONE, googleProviderFactory.promptCacheRetention());
-    assertEquals(
-        PromptCacheRetention.NONE,
-        googleProviderFactory.promptCacheRetention("{\"ignored\":true}"));
-    assertEquals(PromptCacheRetention.SHORT, anthropicProviderFactory.promptCacheRetention());
-  }
-
-  /** 意图：验证 Anthropic 工厂将配置中的 anthropicThinkingMode 传递给适配器。 */
-  @Test
-  void anthropicFactoryAppliesConfiguredThinkingMode() {
-    AnthropicProviderAdapter adapter =
-        (AnthropicProviderAdapter)
-            anthropicProviderFactory.create("credential", "{\"anthropicThinkingMode\":\"BUDGET\"}");
-    assertEquals(AnthropicThinkingMode.BUDGET, adapter.configuration().anthropicThinkingMode());
-  }
-
-  /** 意图：验证 Anthropic 工厂只解析 thinking mode，未知配置字段不影响默认配置。 */
-  @Test
-  void anthropicFactoryIgnoresUnknownConfiguration() {
-    assertEquals(
-        AnthropicConfiguration.defaults(),
-        AnthropicConfiguration.parse("{\"unknownField\":\"unknownValue\"}"));
-  }
-
-  /** 意图：验证 Anthropic 工厂拒绝非法配置且不回显配置内容与敏感信息，因果链无暴露。 */
-  @Test
-  void anthropicFactoryRejectsMalformedConfigurationWithoutExposingInput() {
-    String sensitiveConfig = "{\"anthropicThinkingMode\":\"SUPER_SECRET_VALUE\"}";
-    ProviderException ex =
-        assertThrows(
-            ProviderException.class,
-            () -> anthropicProviderFactory.create("credential", sensitiveConfig));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex.kind());
-    assertFalse(ex.getMessage().contains("SUPER_SECRET_VALUE"));
-    assertNull(ex.getCause());
-
-    String malformedJson = "{\"anthropicThinkingMode\":";
-    ProviderException exMalformed =
-        assertThrows(
-            ProviderException.class,
-            () -> anthropicProviderFactory.create("credential", malformedJson));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, exMalformed.kind());
-    assertNull(exMalformed.getCause());
-
-    // 未知 provider 配置字段必须被忽略，且配置对象绝不回显原始 payload。
-    AnthropicConfiguration unknownIgnored =
-        AnthropicConfiguration.parse("{\"unknownField\":{\"key\":\" SUPER_SECRET_PAYLOAD \"}}");
-    assertEquals(AnthropicConfiguration.defaults(), unknownIgnored);
-    assertFalse(unknownIgnored.toString().contains("SUPER_SECRET_PAYLOAD"));
-
-    String sensitiveValue = "{\"anthropicThinkingMode\":\" SENSITIVE_VALUE \"}";
-    ProviderException exValue =
-        assertThrows(
-            ProviderException.class,
-            () -> anthropicProviderFactory.create("credential", sensitiveValue));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, exValue.kind());
-    assertFalse(exValue.getMessage().contains("SENSITIVE_VALUE"));
-    assertNull(exValue.getCause());
-  }
-
-  private static void assertNativeModelProvider(
-      ProviderFactory factory, ProviderType type, String configJson) {
+  private static void assertNativeModelProvider(ProviderFactory factory, ProviderType type) {
     ModelProvider modelProvider =
         factory
-            .create("credential", configJson)
+            .create("credential")
             .create(
                 new ProviderDescriptor(
                     "provider-" + type.wireValue(),

@@ -4,6 +4,7 @@ import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpConfigParser;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServer;
@@ -12,6 +13,7 @@ import fun.fengwk.kkstudio.platform.catalog.mcp.McpTool;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModelDefaultVariantResolver;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModelGroupConfigCodec;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRuntimeConfigParser;
+import fun.fengwk.kkstudio.platform.catalog.model.AgentModelService;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillManifestEntry;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalog;
@@ -34,6 +36,7 @@ import fun.fengwk.kkstudio.share.skill.SkillRefDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSectionsDTO;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -190,20 +193,33 @@ public final class ConfigSyncPlanner {
                 null));
       }
     }
+    Map<String, ProviderType> providerTypes = new HashMap<>();
+    for (var provider : snapshot.providers()) {
+      providerTypes.put(provider.name(), provider.providerType());
+    }
+    for (ConfigSyncParser.ProviderSpec providerSpec : document.providers()) {
+      providerTypes.put(
+          providerSpec.name(),
+          ProviderType.fromWireValue(providerSpec.properties().getProviderType()));
+    }
     Map<String, ConfigSyncParser.ModelSpec> candidateModels = new LinkedHashMap<>();
     for (ConfigSyncParser.ModelSpec spec : document.models()) {
       String key = spec.name();
       AgentModelKind kind = spec.properties().getKind();
-      if (kind == AgentModelKind.MODEL
-          && !availableProviders.contains(spec.properties().getProviderName())) {
-        skipped.add(
-            new ConfigSyncSkipped(
-                ConfigSyncKind.MODELS.wireValue(),
-                key,
-                "missing provider: " + spec.properties().getProviderName()));
-        skippedModels.add(key);
-        availableModels.remove(key);
-        continue;
+      if (kind == AgentModelKind.MODEL) {
+        if (!availableProviders.contains(spec.properties().getProviderName())) {
+          skipped.add(
+              new ConfigSyncSkipped(
+                  ConfigSyncKind.MODELS.wireValue(),
+                  key,
+                  "missing provider: " + spec.properties().getProviderName()));
+          skippedModels.add(key);
+          availableModels.remove(key);
+          continue;
+        }
+        ProviderType providerType = providerTypes.get(spec.properties().getProviderName());
+        AgentModelService.validateVariantRetentions(
+            spec.properties().getProviderName(), providerType, spec.properties().getConfig());
       }
       // 文件内同名 Model 覆盖快照：预检查按导入后将生效的配置判定。
       availableModels.put(

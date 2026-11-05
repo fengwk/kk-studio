@@ -10,9 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.atLeast;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -1552,11 +1550,9 @@ class DatabaseTurnResolverTest {
     assertThrows(IllegalStateException.class, () -> down.planLive(down.path(settings("default"))));
   }
 
-  /**
-   * 意图：cache control 由 provider factory 的留存档位与 session key 冻结：NONE → none()，非 NONE → session key。
-   */
+  /** 意图：所选 variant 的留存档位进入冻结的请求。 */
   @Test
-  void freezesSessionCacheControlFromProviderFactoryRetention() {
+  void freezesRetentionFromSelectedVariant() {
     Fixture disabled =
         new Fixture(
             List.of(),
@@ -1568,7 +1564,9 @@ class DatabaseTurnResolverTest {
             PromptCacheRetention.NONE,
             true);
     EntryPath disabledPath = disabled.path(settings("default"));
-    assertEquals(ProviderCacheControl.none(), disabled.resolved(disabledPath).cacheControl());
+    assertEquals(
+        PromptCacheRetention.NONE,
+        disabled.resolved(disabledPath).variant().promptCacheRetention());
 
     Fixture enabled =
         new Fixture(
@@ -1582,16 +1580,12 @@ class DatabaseTurnResolverTest {
             true);
     EntryPath enabledPath = enabled.path(settings("default"));
     ModelRequestSpec spec = enabled.resolved(enabledPath);
-    assertEquals(PromptCacheRetention.SHORT, spec.cacheControl().retention());
-    assertEquals(enabledPath.root().sessionId().toString(), spec.cacheControl().key());
+    assertEquals(PromptCacheRetention.SHORT, spec.variant().promptCacheRetention());
   }
 
-  /**
-   * 意图：内置压缩 Agent 的每一次请求都固定 NONE cache hint——连续 turn（含普通工具 loop 的后续 turn）都不得落到会话级 cache key；同一
-   * provider 配置下普通 Agent 仍使用会话级档位。
-   */
+  /** 意图：内置压缩 Agent 的每次请求都使用所选 variant 的档位。 */
   @Test
-  void compactorPlansUseNoCacheHintForEveryTurn() {
+  void compactorPlansUseSelectedVariantRetentionForEveryTurn() {
     Fixture fixture =
         new Fixture(
             List.of(),
@@ -1607,16 +1601,16 @@ class DatabaseTurnResolverTest {
     BranchSettings compactorSettings =
         new BranchSettings("Compaction", BuiltinExecution.of(compactor), ENV_A_NAME);
 
-    // 两次独立规划代表压缩子的连续 turn（第二个 turn 即工具 loop 之后的续作），都必须 NONE。
-    assertEquals(
-        ProviderCacheControl.none(),
-        fixture.resolved(fixture.path(compactorSettings)).cacheControl());
-    assertEquals(
-        ProviderCacheControl.none(),
-        fixture.resolved(fixture.path(compactorSettings)).cacheControl());
+    // 两次独立规划代表压缩子的连续 turn，均保留所选档位。
     assertEquals(
         PromptCacheRetention.SHORT,
-        fixture.resolved(fixture.path(settings("default"))).cacheControl().retention());
+        fixture.resolved(fixture.path(compactorSettings)).variant().promptCacheRetention());
+    assertEquals(
+        PromptCacheRetention.SHORT,
+        fixture.resolved(fixture.path(compactorSettings)).variant().promptCacheRetention());
+    assertEquals(
+        PromptCacheRetention.SHORT,
+        fixture.resolved(fixture.path(settings("default"))).variant().promptCacheRetention());
   }
 
   /** 意图：key 直接使用 session UUID 字符串，同 session 跨轮稳定、跨 session 不同。 */
@@ -1635,11 +1629,15 @@ class DatabaseTurnResolverTest {
     EntryPath path = fixture.path(settings("default"));
 
     ModelRequestSpec first = fixture.resolved(path);
-    assertEquals(PromptCacheRetention.SHORT, first.cacheControl().retention());
-    assertEquals(path.root().sessionId().toString(), first.cacheControl().key());
+    ProviderCacheControl firstCache =
+        new ModelRequestMaterializer().materialize(path, first).cacheControl();
+    assertEquals(PromptCacheRetention.SHORT, firstCache.retention());
+    assertEquals(path.root().sessionId().toString(), firstCache.key());
 
     ModelRequestSpec sameSessionAgain = fixture.resolved(fixture.path(settings("default")));
-    assertEquals(first.cacheControl().key(), sameSessionAgain.cacheControl().key());
+    assertEquals(
+        firstCache.key(),
+        new ModelRequestMaterializer().materialize(path, sameSessionAgain).cacheControl().key());
 
     // 不同 session 必须得到不同 key，避免跨会话缓存串扰。
     EntryPath otherSessionPath =
@@ -1648,14 +1646,15 @@ class DatabaseTurnResolverTest {
                 new Entry(
                     id(996), new UUID(0L, 995L), null, new RootPayload(settings("default")), NOW)));
     ModelRequestSpec otherSession = fixture.resolved(otherSessionPath);
-    assertEquals(PromptCacheRetention.SHORT, otherSession.cacheControl().retention());
-    assertNotEquals(first.cacheControl().key(), otherSession.cacheControl().key());
+    ProviderCacheControl otherCache =
+        new ModelRequestMaterializer().materialize(otherSessionPath, otherSession).cacheControl();
+    assertEquals(PromptCacheRetention.SHORT, otherCache.retention());
+    assertNotEquals(firstCache.key(), otherCache.key());
   }
 
   /** 真实 USER 历史经规划、物化、公开 resolve 到 wire：session key 稳定透传，被禁用的 NONE 不会恢复。 */
   @Test
   void sessionCacheControlSurvivesMaterializationAndPublicResolution() throws Exception {
-    String configJson = "{\"promptCacheRetention\":\"SHORT\"}";
     Fixture fixture =
         new Fixture(
             List.of(),
@@ -1666,28 +1665,22 @@ class DatabaseTurnResolverTest {
             ProviderType.OPENAI_RESPONSES,
             PromptCacheRetention.SHORT,
             true);
-    fixture.editProvider(
-        provider -> provider.configJson(configJson).baseUrl("https://example.invalid/v1"));
+    fixture.editProvider(provider -> provider.baseUrl("https://example.invalid/v1"));
     AgentModel model = fixture.models.getByName("model");
     when(fixture.models.getByName("model"))
         .thenReturn(model.toBuilder().modelId("gpt-5.6").build());
     ProviderFactory factory = fixture.resolverProviderFactory();
-    when(factory.promptCacheRetention(any())).thenReturn(PromptCacheRetention.SHORT);
     JdkHttpSseTransport transport = mock(JdkHttpSseTransport.class);
-    when(factory.create(any(), any()))
-        .thenAnswer(
-            invocation ->
-                new OpenAiResponsesProviderAdapter(
-                    transport, null, (String) invocation.getArgument(1)));
+    when(factory.create(any())).thenReturn(new OpenAiResponsesProviderAdapter(transport, null));
     Entry root = fixture.path(settings("default")).head();
     Entry turn = turnEntry(id(997), root.id(), settings("default"));
     Entry user = userEntry(id(998), turn.id(), "first user");
     EntryPath path = new EntryPath(List.of(root, turn, user));
     ModelRequestSpec spec = fixture.resolved(path);
     assertEquals("gpt-5.6", spec.model().modelId());
-    assertEquals(PromptCacheRetention.SHORT, spec.cacheControl().retention());
-    assertEquals(root.sessionId().toString(), spec.cacheControl().key());
     ProviderRequest request = new ModelRequestMaterializer().materialize(path, spec);
+    assertEquals(PromptCacheRetention.SHORT, request.cacheControl().retention());
+    assertEquals(root.sessionId().toString(), request.cacheControl().key());
     assertEquals(ProviderMessageRole.USER, request.messages().get(0).role());
     assertEquals(new ProviderTextBlock("first user"), request.messages().get(0).contents().get(0));
     StorageBlobManager blobs = mock(StorageBlobManager.class);
@@ -1700,12 +1693,12 @@ class DatabaseTurnResolverTest {
             new ProviderResourceMaterializer(blobs, content));
     ResolvedExecution execution =
         resolution.resolve(spec.providerType(), spec.providerConnectionGenerationId(), request);
-    assertEquals(spec.cacheControl(), execution.effectiveRequest().cacheControl());
+    assertEquals(request.cacheControl(), execution.effectiveRequest().cacheControl());
     ObjectMapper mapper = JsonMapper.builder().build();
     JsonNode wire = mapper.readTree(execution.encodeRequestBody());
     assertEquals("gpt-5.6", wire.path("model").asText());
     // session key 直接映射为 prompt_cache_key，不再派生哈希。
-    assertEquals(spec.cacheControl().key(), wire.path("prompt_cache_key").asText());
+    assertEquals(request.cacheControl().key(), wire.path("prompt_cache_key").asText());
     assertEquals(
         "first user", wire.path("input").get(0).path("content").get(0).path("text").asText());
 
@@ -1723,7 +1716,9 @@ class DatabaseTurnResolverTest {
                 nextTurn,
                 userEntry(id(1002), nextTurn.id(), "second user")));
     ModelRequestSpec nextSpec = fixture.resolved(nextPath);
-    assertEquals(spec.cacheControl(), nextSpec.cacheControl());
+    assertEquals(
+        request.cacheControl(),
+        new ModelRequestMaterializer().materialize(nextPath, nextSpec).cacheControl());
     JsonNode nextWire =
         mapper.readTree(
             resolution
@@ -1732,7 +1727,7 @@ class DatabaseTurnResolverTest {
                     nextSpec.providerConnectionGenerationId(),
                     new ModelRequestMaterializer().materialize(nextPath, nextSpec))
                 .encodeRequestBody());
-    assertEquals(spec.cacheControl().key(), nextWire.path("prompt_cache_key").asText());
+    assertEquals(request.cacheControl().key(), nextWire.path("prompt_cache_key").asText());
     assertEquals(
         "second user", nextWire.path("input").get(2).path("content").get(0).path("text").asText());
 
@@ -1752,60 +1747,6 @@ class DatabaseTurnResolverTest {
     JsonNode disabledWire = mapper.readTree(disabledExecution.encodeRequestBody());
     assertFalse(disabledWire.has("prompt_cache_key"));
     verifyNoInteractions(transport, blobs, content);
-    verify(factory, atLeast(2)).promptCacheRetention(configJson);
-  }
-
-  /** 意图：live turn 规划把当前 provider 的 configJson 传给 promptCacheRetention 解析留存档位。 */
-  @Test
-  void planningPassesProviderConfigJsonToResolvePromptCacheRetention() {
-    Fixture fixture =
-        new Fixture(
-            List.of(),
-            List.of(),
-            List.of(),
-            Set.of(),
-            ProviderType.OPENAI,
-            ProviderType.OPENAI,
-            PromptCacheRetention.NONE,
-            true);
-    String dynamicConfig = "{\"customCache\":true}";
-    fixture.editProvider(provider -> provider.configJson(dynamicConfig));
-
-    ProviderFactory factory = fixture.resolverProviderFactory();
-    when(factory.promptCacheRetention(dynamicConfig)).thenReturn(PromptCacheRetention.LONG);
-
-    EntryPath path = fixture.path(settings("default"));
-    ModelRequestSpec spec = fixture.resolved(path);
-    assertEquals(PromptCacheRetention.LONG, spec.cacheControl().retention());
-    assertEquals(path.root().sessionId().toString(), spec.cacheControl().key());
-  }
-
-  /** 意图：provider 配置导致 promptCacheRetention 解析抛出异常时，planning 确定性拒绝且不泄漏 config。 */
-  @Test
-  void planningRejectsInvalidProviderSpecificConfigDeterministically() {
-    Fixture fixture =
-        new Fixture(
-            List.of(),
-            List.of(),
-            List.of(),
-            Set.of(),
-            ProviderType.OPENAI,
-            ProviderType.OPENAI,
-            PromptCacheRetention.NONE,
-            true);
-    String secretConfig = "{\"apiKey\":\"super-secret-token\",\"malformed\":true}";
-    fixture.editProvider(provider -> provider.configJson(secretConfig));
-
-    ProviderFactory factory = fixture.resolverProviderFactory();
-    when(factory.promptCacheRetention(secretConfig))
-        .thenThrow(new IllegalArgumentException("syntax error in super-secret-token"));
-
-    TurnResolver.Rejected rejected = fixture.rejected(fixture.path(settings("default")));
-    assertEquals(DatabaseTurnResolver.REJECTION_CODE, rejected.error().code());
-    assertEquals(
-        "invalid prompt cache configuration for provider: provider", rejected.error().message());
-    assertFalse(rejected.error().message().contains("super-secret-token"));
-    assertFalse(rejected.error().message().contains("syntax error"));
   }
 
   @Test
@@ -2394,7 +2335,7 @@ class DatabaseTurnResolverTest {
             Set.of(ModelInputModality.TEXT),
             true,
             true,
-            List.of(new ModelVariant("fallback")),
+            List.of(new ModelVariant("fallback", null, PromptCacheRetention.NONE, null)),
             "fallback",
             pricing()));
     fixture.compactionAgent(compactorModel);
@@ -2750,10 +2691,14 @@ class DatabaseTurnResolverTest {
         group.members().stream().map(member -> member.variant().id()).toList());
     // 每个成员连同完整 variants 冻结，切换后使用该成员自己的列表。
     assertEquals(
-        List.of(new ModelVariant("custom", "medium"), new ModelVariant("deep", "max")),
+        List.of(
+            new ModelVariant("custom", "medium", PromptCacheRetention.NONE, null),
+            new ModelVariant("deep", "max", PromptCacheRetention.NONE, null)),
         group.members().get(0).modelVariants());
     assertEquals(
-        List.of(new ModelVariant("fast"), new ModelVariant("careful", "high")),
+        List.of(
+            new ModelVariant("fast", null, PromptCacheRetention.NONE, null),
+            new ModelVariant("careful", "high", PromptCacheRetention.NONE, null)),
         group.members().get(1).modelVariants());
     assertEquals(
         group.members().get(1).modelVariants(), resolved.spec().forMember(1).modelVariants());
@@ -2837,7 +2782,9 @@ class DatabaseTurnResolverTest {
                 Set.of(ModelInputModality.TEXT, ModelInputModality.IMAGE),
                 true,
                 true,
-                List.of(new ModelVariant("custom", "medium"), new ModelVariant("deep", "max")),
+                List.of(
+                    new ModelVariant("custom", "medium", PromptCacheRetention.NONE, null),
+                    new ModelVariant("deep", "max", PromptCacheRetention.NONE, null)),
                 "custom",
                 pricing()));
     fixture.addModel(
@@ -2849,7 +2796,9 @@ class DatabaseTurnResolverTest {
             secondModalities,
             true,
             true,
-            List.of(new ModelVariant("fast"), new ModelVariant("careful", "high")),
+            List.of(
+                new ModelVariant("fast", null, PromptCacheRetention.NONE, null),
+                new ModelVariant("careful", "high", PromptCacheRetention.NONE, null)),
             "fast",
             pricing()));
     AgentModel group =
@@ -3239,8 +3188,20 @@ class DatabaseTurnResolverTest {
       modelSupportsTools(true);
       modelSupportsReasoning(true);
       when(providerFactory.providerType()).thenReturn(factoryType);
-      when(providerFactory.promptCacheRetention()).thenReturn(promptCacheRetention);
-      when(providerFactory.promptCacheRetention(any())).thenReturn(promptCacheRetention);
+      ParsedAgentModelConfig parsed = parsedModel();
+      when(modelConfigParser.parse("model-config"))
+          .thenReturn(
+              new ParsedAgentModelConfig(
+                  parsed.contextWindow(),
+                  parsed.maxOutputTokens(),
+                  parsed.inputModalities(),
+                  parsed.tools(),
+                  parsed.reasoning(),
+                  List.of(
+                      new ModelVariant("default", null, promptCacheRetention, null),
+                      new ModelVariant("custom", "medium", promptCacheRetention, null)),
+                  parsed.defaultVariant(),
+                  parsed.pricing()));
       List<ProviderFactory> factories =
           includeProviderFactory ? List.of(providerFactory) : List.of();
       SubagentConfig subagentConfig = new SubagentConfig(2, 10, 0, 50);
@@ -3449,7 +3410,7 @@ class DatabaseTurnResolverTest {
                   parsed.inputModalities(),
                   parsed.tools(),
                   parsed.reasoning(),
-                  List.of(new ModelVariant("default")),
+                  List.of(new ModelVariant("default", null, PromptCacheRetention.NONE, null)),
                   parsed.defaultVariant(),
                   parsed.pricing()));
     }
@@ -3470,8 +3431,10 @@ class DatabaseTurnResolverTest {
     }
 
     static ParsedAgentModelConfig parsedModel() {
-      ModelVariant defaultVariant = new ModelVariant("default");
-      ModelVariant customVariant = new ModelVariant("custom", "medium");
+      ModelVariant defaultVariant =
+          new ModelVariant("default", null, PromptCacheRetention.NONE, null);
+      ModelVariant customVariant =
+          new ModelVariant("custom", "medium", PromptCacheRetention.NONE, null);
       return new ParsedAgentModelConfig(
           4096,
           1024,

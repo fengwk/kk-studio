@@ -93,45 +93,6 @@ class AgentProviderConfigurationCodecTest {
   }
 
   @Test
-  void isProtocolConfigEqualIgnoresTimeoutsAndChecksStructuralEquality() {
-    assertTrue(codec.isProtocolConfigEqual(null, "{}"));
-    assertTrue(
-        codec.isProtocolConfigEqual(
-            "{\"modelCallTimeoutMillis\":1000}", "{\"modelCallIdleTimeoutMillis\":500}"));
-    assertTrue(
-        codec.isProtocolConfigEqual(
-            "{\"custom\":\"value\",\"modelCallTimeoutMillis\":1000}",
-            "{\"custom\":\"value\",\"modelCallIdleTimeoutMillis\":2000}"));
-    // HTTP 重试覆盖不是协议参数：变化不能触发 connection generation 轮换。
-    assertTrue(
-        codec.isProtocolConfigEqual(
-            "{\"modelHttpRetryStatusCodes\":[429]}", "{\"modelHttpRetryStatusCodes\":[500,503]}"));
-    assertTrue(codec.isProtocolConfigEqual("{}", "{\"modelHttpRetryStatusCodes\":[429]}"));
-    assertFalse(codec.isProtocolConfigEqual("{\"custom\":\"value1\"}", "{\"custom\":\"value2\"}"));
-    assertFalse(codec.isProtocolConfigEqual("{\"extra\":1}", "{}"));
-  }
-
-  @Test
-  void isProtocolConfigEqualDistinguishesHighPrecisionDecimalsAndExtremes() {
-    // 宿主 mapper 的默认 profile 会把这两份不同精度的小数折叠成同一个 double，从而误判为等价。
-    assertFalse(
-        codec.isProtocolConfigEqual(
-            "{\"nested\":{\"ratio\":0.12345678901234567890123456789}}",
-            "{\"nested\":{\"ratio\":0.123456789012345678901234567891}}"));
-    // 1e309 在 double 中退化为 Infinity：极值必须保持可区分。
-    assertFalse(codec.isProtocolConfigEqual("{\"limit\":1e309}", "{\"limit\":1e308}"));
-    assertTrue(codec.isProtocolConfigEqual("{\"limit\":1e309}", "{\"limit\":1e309}"));
-    assertTrue(
-        codec.isProtocolConfigEqual(
-            "{\"ratio\":0.12345678901234567890123456789}",
-            "{\"ratio\":0.12345678901234567890123456789}"));
-    // 同值不同 scale 仍是同一数值：规范化尾零后比较数值等价性。
-    assertTrue(codec.isProtocolConfigEqual("{\"ratio\":1.0}", "{\"ratio\":1.00}"));
-    // 标量类型不同（整数 token 与小数 token）判定为不相等。
-    assertFalse(codec.isProtocolConfigEqual("{\"ratio\":1.0}", "{\"ratio\":1}"));
-  }
-
-  @Test
   void mergePreservesHighPrecisionAndExtremeExtensionValues() {
     // 两个 merge 接口都必须原样搬运 Provider 扩展值：不得经 double 折叠，也不得把极值写成 Infinity/0。
     String existing =

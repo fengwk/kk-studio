@@ -11,7 +11,6 @@ import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
-import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.platform.environment.skill.SkillPromptResolution;
 
@@ -117,12 +116,11 @@ class LiveTurnPlanTest {
         new UUID(0L, 42L),
         new ModelDescriptor(
             "provider", "model", "wire-model", Set.of(ModelInputModality.TEXT), true, false),
-        new ModelVariant("default"),
+        new ModelVariant("default", null, PromptCacheRetention.SHORT, null),
         512,
         "system instruction",
         List.of(),
-        List.of(),
-        ProviderCacheControl.session(PromptCacheRetention.SHORT, "affinity"));
+        List.of());
   }
 
   private static LiveTurnPlan.CandidateTool candidate(

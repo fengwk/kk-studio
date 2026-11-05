@@ -191,7 +191,7 @@ class DatabaseProviderResolutionServiceIntegrationTest extends PostgresSpringTes
   private static ProviderRequest request(String providerName, ProviderCacheControl cacheControl) {
     return new ProviderRequest(
         descriptor(providerName),
-        new ModelVariant("default"),
+        new ModelVariant("default", null, cacheControl.retention(), null),
         1024,
         "Test system instruction.",
         List.of(),
@@ -209,7 +209,6 @@ class DatabaseProviderResolutionServiceIntegrationTest extends PostgresSpringTes
 
     private final ProviderType providerType;
     private String credential;
-    private String configJson;
     private ProviderDescriptor descriptor;
     private int openCount;
 
@@ -223,17 +222,8 @@ class DatabaseProviderResolutionServiceIntegrationTest extends PostgresSpringTes
     }
 
     @Override
-    public PromptCacheRetention promptCacheRetention() {
-      return switch (providerType) {
-        case GOOGLE -> PromptCacheRetention.NONE;
-        default -> PromptCacheRetention.SHORT;
-      };
-    }
-
-    @Override
-    public ProviderAdapter create(String credential, String configJson) {
+    public ProviderAdapter create(String credential) {
       this.credential = credential;
-      this.configJson = configJson;
       return new ProviderAdapter() {
         @Override
         public ProviderType providerType() {

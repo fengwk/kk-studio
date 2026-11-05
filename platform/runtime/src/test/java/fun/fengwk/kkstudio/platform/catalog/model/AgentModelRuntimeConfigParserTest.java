@@ -23,6 +23,7 @@ import fun.fengwk.kkstudio.harness.model.ModelPricingCondition;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.model.ProviderProtocolOptions;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRuntimeConfigParser.ParsedAgentModelConfig;
 import fun.fengwk.kkstudio.share.catalog.AgentModelConfigDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentModelPricingDTO;
@@ -74,7 +75,9 @@ class AgentModelRuntimeConfigParserTest {
     assertTrue(parsed.tools());
     assertTrue(parsed.reasoning());
     assertEquals("quality", parsed.defaultVariant());
-    assertEquals(List.of(new ModelVariant("quality", "high")), parsed.variants());
+    assertEquals(
+        List.of(new ModelVariant("quality", "high", PromptCacheRetention.SHORT, null)),
+        parsed.variants());
     var pricing = parsed.pricing();
     assertEquals(new BigDecimal("1.1"), pricing.base().input());
     assertEquals(new BigDecimal("2.2"), pricing.base().output());
@@ -95,7 +98,9 @@ class AgentModelRuntimeConfigParserTest {
     var parsed = parser.parse(encoded);
     assertEquals(new BigDecimal("1.1"), parsed.pricing().base().input());
     assertEquals("quality", parsed.defaultVariant());
-    assertEquals(List.of(new ModelVariant("quality", "high")), parsed.variants());
+    assertEquals(
+        List.of(new ModelVariant("quality", "high", PromptCacheRetention.SHORT, null)),
+        parsed.variants());
   }
 
   /** 条件与规则按顺序解析；日期允许单侧缺省，显式 reasoning:null 与未声明 reasoning 保持不同语义。 */
@@ -267,7 +272,9 @@ class AgentModelRuntimeConfigParserTest {
   void keepsAbsentReasoningEffortAsProtocolDefault() {
     String config = validConfig().replace(",\"reasoningEffort\":\"high\"", "");
     var parsed = parser.parse(config);
-    assertEquals(new ModelVariant("quality"), parsed.variants().get(0));
+    assertEquals(
+        new ModelVariant("quality", null, PromptCacheRetention.SHORT, null),
+        parsed.variants().get(0));
     assertFalse(parsed.variants().get(0).reasoningOff());
     assertTrue(parsed.variants().get(0).protocolOptions().isEmpty());
     assertEquals(ProviderProtocolOptions.EMPTY, parsed.variants().get(0).protocolOptions());
@@ -281,7 +288,11 @@ class AgentModelRuntimeConfigParserTest {
   void roundTripsProtocolOptionsFromApiConfigIntoRuntimeVariant() {
     String config = withProtocolOptions(validConfig(), PROTOCOL_OPTIONS_JSON);
     ModelVariant expected =
-        new ModelVariant("quality", "high", new ProviderProtocolOptions(PROTOCOL_OPTIONS_JSON));
+        new ModelVariant(
+            "quality",
+            "high",
+            PromptCacheRetention.SHORT,
+            new ProviderProtocolOptions(PROTOCOL_OPTIONS_JSON));
 
     ParsedAgentModelConfig parsed = parser.parse(config);
     assertEquals(List.of(expected), parsed.variants());
@@ -303,8 +314,8 @@ class AgentModelRuntimeConfigParserTest {
         validConfig()
             .replace(
                 VARIANT_JSON,
-                "\"variants\":[{\"id\":\"quality\",\"protocolOptionsJson\":"
-                    + "\"  { \\\"n\\\":1.100 }  \"},{\"id\":\"fast\","
+                "\"variants\":[{\"id\":\"quality\",\"promptCacheRetention\":\"SHORT\",\"protocolOptionsJson\":"
+                    + "\"  { \\\"n\\\":1.100 }  \"},{\"id\":\"fast\",\"promptCacheRetention\":\"NONE\","
                     + "\"protocolOptionsJson\":\"{\\\"n\\\":1e-324}\"}],");
     AgentModelConfigDTO dto = parser.decode(config);
     assertEquals("{ \"n\":1.100 }", dto.getVariants().get(0).getProtocolOptionsJson());
@@ -548,7 +559,9 @@ class AgentModelRuntimeConfigParserTest {
             .replace(",\"reasoningEffort\":\"high\"", "");
     var parsed = parser.parse(config);
     assertFalse(parsed.reasoning());
-    assertEquals(new ModelVariant("quality"), parsed.variants().get(0));
+    assertEquals(
+        new ModelVariant("quality", null, PromptCacheRetention.SHORT, null),
+        parsed.variants().get(0));
   }
 
   /** 缺失字段、错误的 JSON 类型、未知枚举与无效 variant 都明确失败。 */
@@ -582,8 +595,8 @@ class AgentModelRuntimeConfigParserTest {
     assertInvalid(
         validConfig()
             .replace(
-                "\"reasoningEffort\":\"high\"}]",
-                "\"reasoningEffort\":\"high\"},{" + "\"id\":\"quality\"}]"),
+                "\"promptCacheRetention\":\"SHORT\"}]",
+                "\"promptCacheRetention\":\"SHORT\"},{\"id\":\"quality\",\"promptCacheRetention\":\"NONE\"}]"),
         "duplicate id");
     assertInvalid(
         validConfig().replace("\"defaultVariant\":\"quality\"", "\"defaultVariant\":\"missing\""),
@@ -809,7 +822,7 @@ class AgentModelRuntimeConfigParserTest {
         + "\"abilities\":{\"tools\":true,\"reasoning\":true,"
         + "\"inputModalities\":[\"TEXT\",\"IMAGE\"]},"
         + "\"defaultVariant\":\"quality\","
-        + "\"variants\":[{\"id\":\"quality\",\"reasoningEffort\":\"high\"}]}";
+        + "\"variants\":[{\"id\":\"quality\",\"reasoningEffort\":\"high\",\"promptCacheRetention\":\"SHORT\"}]}";
   }
 
   private static AgentModelConfigDTO copy(
@@ -833,7 +846,7 @@ class AgentModelRuntimeConfigParserTest {
 
   /** canonical variant wire：只含 id 与 reasoningEffort。 */
   private static final String VARIANT_JSON =
-      "\"variants\":[{\"id\":\"quality\",\"reasoningEffort\":\"high\"}],";
+      "\"variants\":[{\"id\":\"quality\",\"reasoningEffort\":\"high\",\"promptCacheRetention\":\"SHORT\"}],";
 
   private static final String EXPLICIT_ZERO_PRICING =
       "{\"base\":{\"input\":\"0\",\"output\":\"0\",\"cacheRead\":\"0\",\"cacheWrite\":\"0\","

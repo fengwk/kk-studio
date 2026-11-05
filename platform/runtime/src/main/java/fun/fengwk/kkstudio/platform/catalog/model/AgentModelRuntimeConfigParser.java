@@ -17,6 +17,7 @@ import fun.fengwk.kkstudio.harness.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.model.ProviderProtocolOptions;
 import fun.fengwk.kkstudio.harness.model.ProviderProtocolOptions.InvalidOptionsException;
 import fun.fengwk.kkstudio.harness.model.ProviderProtocolOptions.InvalidReason;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.share.catalog.AgentModelAbilitiesDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentModelConfigDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentModelInputModality;
@@ -225,6 +226,20 @@ public final class AgentModelRuntimeConfigParser {
       if (!ids.add(variant.getId())) {
         throw invalid("config.variants contains duplicate id: " + variant.getId());
       }
+      String rawRetention = variant.getPromptCacheRetention();
+      if (rawRetention == null || rawRetention.isBlank()) {
+        throw invalid(path + ".promptCacheRetention must be a non-blank string");
+      }
+      if (!rawRetention.equals(rawRetention.trim())) {
+        throw invalid(path + ".promptCacheRetention must not have surrounding whitespace");
+      }
+      PromptCacheRetention retention;
+      try {
+        retention = PromptCacheRetention.valueOf(rawRetention.trim());
+      } catch (IllegalArgumentException error) {
+        throw invalid(path + ".promptCacheRetention is invalid: " + rawRetention);
+      }
+      variant.setPromptCacheRetention(retention.name());
       // reasoning 关闭时任何非 null reasoningEffort 都是自相矛盾配置；null（协议默认）仍然合法。
       if (Boolean.FALSE.equals(abilities.getReasoning()) && variant.getReasoningEffort() != null) {
         throw invalid(
@@ -310,7 +325,9 @@ public final class AgentModelRuntimeConfigParser {
   private static ModelVariant toModelVariant(
       AgentModelVariantDTO variant, ProviderProtocolOptions options) {
     try {
-      return new ModelVariant(variant.getId(), variant.getReasoningEffort(), options);
+      PromptCacheRetention retention =
+          PromptCacheRetention.valueOf(variant.getPromptCacheRetention().trim());
+      return new ModelVariant(variant.getId(), variant.getReasoningEffort(), retention, options);
     } catch (IllegalArgumentException error) {
       throw invalid(
           "config.variants[" + variant.getId() + "] is invalid: " + error.getMessage(), error);

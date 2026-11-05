@@ -103,7 +103,7 @@ final class PostgresqlHarnessRows {
               instant(resultSet, "created_at"),
               instant(resultSet, "updated_at"));
 
-  /** {@code harness_thread.constraints} 的本模块自有持久协议：固定三个键的 JSON 对象。 */
+  /** {@code harness_thread.constraints} 的本模块自有持久协议：固定两个键的 JSON 对象。 */
   static String encodeConstraints(ThreadConstraints constraints) {
     ObjectNode node = NODES.objectNode();
     if (constraints.maxOutputTokens() == null) {
@@ -111,7 +111,6 @@ final class PostgresqlHarnessRows {
     } else {
       node.put("maxOutputTokens", constraints.maxOutputTokens());
     }
-    node.put("promptCacheDisabled", constraints.promptCacheDisabled());
     node.put("allowAutoCompaction", constraints.allowAutoCompaction());
     return node.toString();
   }
@@ -122,24 +121,19 @@ final class PostgresqlHarnessRows {
     }
     try {
       JsonNode node = MAPPER.readTree(json);
-      if (node == null || !node.isObject() || node.size() != 3) {
-        throw new IllegalArgumentException("thread constraints must contain exactly three fields");
+      if (node == null || !node.isObject() || node.size() != 2) {
+        throw new IllegalArgumentException("thread constraints must contain exactly two fields");
       }
       JsonNode cap = node.get("maxOutputTokens");
-      JsonNode cacheDisabled = node.get("promptCacheDisabled");
       JsonNode autoCompaction = node.get("allowAutoCompaction");
       if (cap == null
           || (!cap.isNull() && (!cap.isIntegralNumber() || !cap.canConvertToInt()))
-          || cacheDisabled == null
-          || !cacheDisabled.isBoolean()
           || autoCompaction == null
           || !autoCompaction.isBoolean()) {
         throw new IllegalArgumentException("invalid thread constraints fields");
       }
       return new ThreadConstraints(
-          cap.isNull() ? null : cap.intValue(),
-          cacheDisabled.booleanValue(),
-          autoCompaction.booleanValue());
+          cap.isNull() ? null : cap.intValue(), autoCompaction.booleanValue());
     } catch (JacksonException error) {
       throw new IllegalArgumentException("malformed thread constraints JSON", error);
     }

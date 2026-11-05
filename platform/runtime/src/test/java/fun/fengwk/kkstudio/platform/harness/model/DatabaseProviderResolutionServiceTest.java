@@ -156,7 +156,7 @@ class DatabaseProviderResolutionServiceTest {
 
     assertTrue(failure.getMessage().contains("provider connection generation drift"));
     // generation fence 必须先于 adapter 创建，确保漂移的 endpoint/credential 永远不会进入执行路径。
-    verify(factory, never()).create(anyString(), anyString());
+    verify(factory, never()).create(anyString());
     verify(adapter, never()).create(any(ProviderDescriptor.class));
   }
 
@@ -240,8 +240,7 @@ class DatabaseProviderResolutionServiceTest {
   void resolveWrapsFactoryCreateFailure() {
     when(repository.getByName(PROVIDER_NAME)).thenReturn(provider(ProviderType.OPENAI, ENDPOINT));
     ProviderFactory factory = factory(ProviderType.OPENAI, PromptCacheRetention.SHORT, null);
-    when(factory.create(anyString(), anyString()))
-        .thenThrow(new IllegalStateException("factory boom"));
+    when(factory.create(anyString())).thenThrow(new IllegalStateException("factory boom"));
     DatabaseProviderResolutionService resolution = resolution(factory);
     IllegalArgumentException failure =
         assertThrows(
@@ -751,9 +750,7 @@ class DatabaseProviderResolutionServiceTest {
       ProviderType type, PromptCacheRetention retention, ProviderAdapter adapter) {
     ProviderFactory factory = mock(ProviderFactory.class);
     when(factory.providerType()).thenReturn(type);
-    when(factory.promptCacheRetention()).thenReturn(retention);
-    when(factory.promptCacheRetention(any())).thenReturn(retention);
-    when(factory.create(anyString(), anyString())).thenReturn(adapter);
+    when(factory.create(anyString())).thenReturn(adapter);
     return factory;
   }
 
@@ -803,7 +800,7 @@ class DatabaseProviderResolutionServiceTest {
       Set<ModelInputModality> inputModalities) {
     return new ProviderRequest(
         new ModelDescriptor(PROVIDER_NAME, "model", "model", inputModalities, false, false),
-        new ModelVariant("default"),
+        new ModelVariant("default", null, cacheControl.retention(), null),
         1024,
         "Test system instruction.",
         messages,

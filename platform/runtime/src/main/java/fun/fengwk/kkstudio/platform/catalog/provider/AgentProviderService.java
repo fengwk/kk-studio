@@ -6,6 +6,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import fun.fengwk.kkstudio.common.page.Page;
 import fun.fengwk.kkstudio.common.page.PageQuery;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.model.provider.impl.ProviderModelDiscovery;
 import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
@@ -202,9 +203,7 @@ public class AgentProviderService {
     boolean protocolChanged =
         !Objects.equals(provider.providerType(), mutation.providerType())
             || !Objects.equals(provider.baseUrl(), mutation.baseUrl())
-            || !Objects.equals(provider.credential(), mutation.credential())
-            || !configurationCodec.isProtocolConfigEqual(
-                provider.configJson(), mutation.configJson());
+            || !Objects.equals(provider.credential(), mutation.credential());
     UUID generationId =
         provider.connectionGenerationId() == null || protocolChanged
             ? UUID.randomUUID()
@@ -297,6 +296,11 @@ public class AgentProviderService {
     dto.setModelCallIdleTimeoutMillis(timeoutPolicy.modelCallIdleTimeout().toMillis());
     dto.setModelHttpRetryStatusCodes(
         configurationCodec.readHttpRetryStatusCodes(provider.configJson()));
+    dto.setPromptCacheRetentions(
+        provider.providerType().promptCacheRetentions().stream()
+            .sorted()
+            .map(PromptCacheRetention::name)
+            .toList());
     dto.setVersion(CatalogVersions.format(provider.version()));
     dto.setCreateTime(provider.createTime());
     dto.setUpdateTime(provider.updateTime());

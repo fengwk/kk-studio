@@ -118,7 +118,7 @@ public final class ModelRequestDebugService {
     LiveTurnPlan plan =
         turnResolver.planLiveWithSettings(threadId, rootSessionId, path, draftSettings);
     if (plan instanceof LiveTurnPlan.Planned planned) {
-      project(dto, planned);
+      project(dto, planned, path.root().sessionId());
     } else {
       projectPlanningError(dto, (LiveTurnPlan.Rejected) plan);
     }
@@ -127,7 +127,8 @@ public final class ModelRequestDebugService {
     return dto;
   }
 
-  private void project(HarnessModelRequestDebugDTO dto, LiveTurnPlan.Planned planned) {
+  private void project(
+      HarnessModelRequestDebugDTO dto, LiveTurnPlan.Planned planned, UUID sessionId) {
     ModelRequestSpec spec = planned.spec();
     dto.setSystemInstruction(spec.systemInstruction());
     dto.setTools(planned.candidateTools().stream().map(ModelRequestDebugService::tool).toList());
@@ -135,7 +136,9 @@ public final class ModelRequestDebugService {
     dto.setSkills(
         planned.skills().stream().map(skill -> skill(skill, environmentSelected)).toList());
     dto.setSubagents(spec.subagentBindings().stream().map(this::subagent).toList());
-    dto.setCacheControl(cacheControl(spec.cacheControl()));
+    ProviderCacheControl cache =
+        ProviderCacheControl.session(spec.variant().promptCacheRetention(), sessionId.toString());
+    dto.setCacheControl(cacheControl(cache));
     dto.setPlanningError(null);
   }
 

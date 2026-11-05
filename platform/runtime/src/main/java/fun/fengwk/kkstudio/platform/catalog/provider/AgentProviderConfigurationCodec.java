@@ -32,14 +32,11 @@ public final class AgentProviderConfigurationCodec {
 
   private final ObjectMapper objectMapper;
   private final ObjectReader configReader;
-  private final ObjectReader comparisonReader;
 
   public AgentProviderConfigurationCodec(ObjectMapper objectMapper) {
     this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
     // 扩展配置按 BigDecimal 读取，保留极值与有效位；写出沿用宿主 mapper。
     this.configReader = objectMapper.reader().with(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS);
-    // 比较时忽略无语义尾零，不改变 merge 写出的 scale。
-    this.comparisonReader = configReader.with(JsonNodeFeature.STRIP_TRAILING_BIGDECIMAL_ZEROES);
   }
 
   /** 读取策略；未配置的字段使用产品默认值。 */
@@ -78,19 +75,6 @@ public final class AgentProviderConfigurationCodec {
     } catch (JacksonException error) {
       throw new IllegalStateException("cannot encode provider configuration", error);
     }
-  }
-
-  /** 比较两份配置在剔除超时字段与 HTTP 重试覆盖后是否在结构上完全等价（用于判断是否需要轮换 connection_generation_id）。 */
-  public boolean isProtocolConfigEqual(String configJson1, String configJson2) {
-    ObjectNode node1 = readObject(comparisonReader, configJson1).deepCopy();
-    ObjectNode node2 = readObject(comparisonReader, configJson2).deepCopy();
-    node1.remove(MODEL_CALL_TIMEOUT_MILLIS);
-    node1.remove(MODEL_CALL_IDLE_TIMEOUT_MILLIS);
-    node1.remove(MODEL_HTTP_RETRY_STATUS_CODES);
-    node2.remove(MODEL_CALL_TIMEOUT_MILLIS);
-    node2.remove(MODEL_CALL_IDLE_TIMEOUT_MILLIS);
-    node2.remove(MODEL_HTTP_RETRY_STATUS_CODES);
-    return node1.equals(node2);
   }
 
   /**
