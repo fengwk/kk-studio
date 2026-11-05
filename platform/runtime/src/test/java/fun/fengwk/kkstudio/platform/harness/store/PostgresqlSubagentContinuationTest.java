@@ -95,7 +95,7 @@ class PostgresqlSubagentContinuationTest {
     store = PostgresqlHarnessStoreFixture.resetAndCreate();
     Clock clock = Clock.fixed(T1, ZoneOffset.UTC);
     TurnResolver resolver =
-        (threadId, path, preparation) -> {
+        (threadId, rootSessionId, path, preparation) -> {
           TurnStartPayload start = (TurnStartPayload) path.openTurnStart().orElseThrow().payload();
           assertEquals(start.settings(), path.baseSettings());
           resolverEnvironments

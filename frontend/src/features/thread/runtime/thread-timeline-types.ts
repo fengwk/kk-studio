@@ -314,7 +314,7 @@ export interface ThreadModelRequestDebugSkill {
   headCommit: string | null
   artifactSha256: string
   installedSha256: string | null
-  promptXml: string
+  promptXml: string | null
 }
 
 export interface ThreadModelRequestDebugSubagent {

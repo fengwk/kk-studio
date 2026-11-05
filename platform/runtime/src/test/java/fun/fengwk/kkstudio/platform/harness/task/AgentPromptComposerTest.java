@@ -13,9 +13,6 @@ import fun.fengwk.kkstudio.harness.prompt.PromptRenderer;
 import fun.fengwk.kkstudio.platform.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.platform.testing.TestEnvironments;
 
-import java.time.Instant;
-import java.time.LocalDate;
-import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
 
@@ -103,7 +100,6 @@ class AgentPromptComposerTest {
             "dev&user",
             "/home/<dev>",
             "/tmp/<dev>",
-            LocalDate.of(2026, 8, 9),
             "Use <mount> & \"commands\" from 'Windows'.");
     AgentPromptInput input =
         input(
@@ -120,6 +116,17 @@ class AgentPromptComposerTest {
     assertTrue(rendered.contains("<home>/home/&lt;dev&gt;</home>"), rendered);
     assertTrue(rendered.contains("<name>a&amp;b</name>"), rendered);
     assertTrue(rendered.contains("<name>x&lt;y&gt;</name>"), rendered);
+  }
+
+  /** 空描述没有在 Java 中拼接固定文案，而是由模板条件分支输出模型可见回退说明。 */
+  @Test
+  void rendersSubagentDescriptionFallbackFromTemplate() {
+    AgentPromptInput input =
+        input(null, none(), List.of(), List.of(), List.of(new SubagentBinding("explorer", "  ")));
+
+    String rendered = composer.compose(input);
+
+    assertTrue(rendered.contains("<description>(no description)</description>"), rendered);
   }
 
   /** Agent 正文原样插入：不执行 ${date}、{{...}} 或 XML 转义。 */
@@ -168,7 +175,7 @@ class AgentPromptComposerTest {
   }
 
   private static CurrentEnvironmentContext none() {
-    return CurrentEnvironmentContext.none(Instant.parse("2026-08-09T00:00:00Z"), ZoneOffset.UTC);
+    return CurrentEnvironmentContext.none();
   }
 
   private static CurrentEnvironmentContext environment() {
@@ -177,9 +184,8 @@ class AgentPromptComposerTest {
         "NAS",
         DaemonOperatingSystem.LINUX,
         "fengwk",
-        "/home/fengwk",
+        "/home/dev",
         "/tmp",
-        LocalDate.of(2026, 8, 9),
         "Linux environment.");
   }
 

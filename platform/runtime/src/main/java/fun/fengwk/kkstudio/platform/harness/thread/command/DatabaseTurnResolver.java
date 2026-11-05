@@ -42,8 +42,6 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentModelGroupDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelGroupMemberDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelKind;
 
-import java.time.Clock;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -85,7 +83,6 @@ public final class DatabaseTurnResolver implements TurnResolver {
   private final CompactionConfigProvider compactionConfigProvider;
   private final DatabaseAgentTurnContextResolver contextResolver;
   private final RequestTokenEstimator requestTokenEstimator;
-  private final Clock clock;
 
   public DatabaseTurnResolver(
       AgentDefinitionRepository agentDefinitionRepository,
@@ -96,8 +93,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
       Map<ProviderType, ProviderFactory> providerFactories,
       CompactionConfigProvider compactionConfigProvider,
       DatabaseAgentTurnContextResolver contextResolver,
-      RequestTokenEstimator requestTokenEstimator,
-      Clock clock) {
+      RequestTokenEstimator requestTokenEstimator) {
     this.agentDefinitionRepository =
         Objects.requireNonNull(agentDefinitionRepository, "agentDefinitionRepository");
     this.modelRepository = Objects.requireNonNull(modelRepository, "modelRepository");
@@ -111,19 +107,22 @@ public final class DatabaseTurnResolver implements TurnResolver {
     this.contextResolver = Objects.requireNonNull(contextResolver, "contextResolver");
     this.requestTokenEstimator =
         Objects.requireNonNull(requestTokenEstimator, "requestTokenEstimator");
-    this.clock = Objects.requireNonNull(clock, "clock");
   }
 
   @Override
   public Result resolve(
-      UUID threadId, EntryPath path, CompactionPreparation compactionPreparation) {
+      UUID threadId,
+      UUID rootSessionId,
+      EntryPath path,
+      CompactionPreparation compactionPreparation) {
     Objects.requireNonNull(path, "path");
     try {
       if (compactionPreparation != null) {
         return resolveCompaction(compactionPreparation);
       }
       Objects.requireNonNull(threadId, "threadId");
-      return resolved(plan(threadId, path, path.baseSettings(), clock.instant()));
+      Objects.requireNonNull(rootSessionId, "rootSessionId");
+      return resolved(plan(threadId, rootSessionId, path, path.baseSettings()));
     } catch (Rejection | AgentTurnContextException rejection) {
       // 只把显式构造的确定性拒绝转为 typed Rejected；repository/registry 等基础设施异常按类型分别处理。
       return rejected(rejection.getMessage());
@@ -138,19 +137,12 @@ public final class DatabaseTurnResolver implements TurnResolver {
   /**
    * 只读现算 live 规划：与 {@link #resolve} 共用同一条 Agent/Environment/Tool/Skill 解析纯函数，供 Debug 预览直接消费。
    *
-   * <p>确定性拒绝被投影为 {@link LiveTurnPlan.Rejected}（稳定 {@value #REJECTION_CODE}）；repository / registry /
-   * projector 等基础设施或编程异常照常传播， 绝不伪装成 planning 失败。压缩路径不属于本入口。
+   * <p>{@code rootSessionId} 是目标 Thread 的执行根会话；确定性拒绝被投影为 {@link LiveTurnPlan.Rejected}（稳定 {@value
+   * #REJECTION_CODE}）；repository / registry / projector 等基础设施或编程异常照常传播， 绝不伪装成 planning
+   * 失败。压缩路径不属于本入口。
    */
-  public LiveTurnPlan planLive(UUID threadId, EntryPath path) {
-    return planLive(threadId, path, path.baseSettings(), clock.instant());
-  }
-
-  /**
-   * 指定历史时刻的只读 live 规划：与 {@link #planLive(UUID, EntryPath)} 共用同一 planner，仅把 Environment
-   * 宿主事实的「当前时间」替换为显式 {@code now}，供历史请求预览在所选 Entry 的真实时间点上重建。
-   */
-  public LiveTurnPlan planLive(UUID threadId, EntryPath path, Instant now) {
-    return planLive(threadId, path, path.baseSettings(), now);
+  public LiveTurnPlan planLive(UUID threadId, UUID rootSessionId, EntryPath path) {
+    return planLive(threadId, rootSessionId, path, path.baseSettings());
   }
 
   /**
@@ -160,18 +152,19 @@ public final class DatabaseTurnResolver implements TurnResolver {
    * <p>供 Debug 预览以 UI 当前草稿选择现算，绝不改变 Thread 的持久事实：不落 Entry、不动 cursor、不做 CAS、不发布 Package、也不触发 Daemon
    * sync。
    */
-  public LiveTurnPlan planLiveWithSettings(UUID threadId, EntryPath path, BranchSettings settings) {
-    return planLive(threadId, path, settings, clock.instant());
+  public LiveTurnPlan planLiveWithSettings(
+      UUID threadId, UUID rootSessionId, EntryPath path, BranchSettings settings) {
+    return planLive(threadId, rootSessionId, path, settings);
   }
 
   private LiveTurnPlan planLive(
-      UUID threadId, EntryPath path, BranchSettings settings, Instant now) {
+      UUID threadId, UUID rootSessionId, EntryPath path, BranchSettings settings) {
     Objects.requireNonNull(threadId, "threadId");
+    Objects.requireNonNull(rootSessionId, "rootSessionId");
     Objects.requireNonNull(path, "path");
     Objects.requireNonNull(settings, "settings");
-    Objects.requireNonNull(now, "now");
     try {
-      return plan(threadId, path, settings, now);
+      return plan(threadId, rootSessionId, path, settings);
     } catch (Rejection | AgentTurnContextException rejection) {
       return new LiveTurnPlan.Rejected(REJECTION_CODE, rejection.getMessage());
     }
@@ -180,20 +173,20 @@ public final class DatabaseTurnResolver implements TurnResolver {
   /**
    * 历史模型输出的只读规划：请求前缀是 ROOT 到该输出的 parent。
    *
-   * <p>普通输出与 live 共用同一 planner（环境宿主事实用显式 {@code now}）。父 COMPACTION turn 自身不创建 ModelInvocation：它只冻结
-   * run group 与输出预算，真实 provider 请求属于独立的压缩子 Thread（子请求按父冻结预算收紧），因此这里绝不伪造一份零工具请求，而是返回稳定 typed 拒绝。
+   * <p>普通输出与 live 共用同一 planner。父 COMPACTION turn 自身不创建 ModelInvocation：它只冻结 run group 与输出预算，真实
+   * provider 请求属于独立的压缩子 Thread（子请求按父冻结预算收紧），因此这里绝不伪造一份零工具请求，而是返回稳定 typed 拒绝。
    */
-  public LiveTurnPlan planHistorical(UUID threadId, EntryPath path, Instant now) {
+  public LiveTurnPlan planHistorical(UUID threadId, UUID rootSessionId, EntryPath path) {
     Objects.requireNonNull(threadId, "threadId");
+    Objects.requireNonNull(rootSessionId, "rootSessionId");
     Objects.requireNonNull(path, "path");
-    Objects.requireNonNull(now, "now");
     if (isCompactionParentTurnStart(path.head())) {
       return new LiveTurnPlan.Rejected(
           REJECTION_CODE,
           "a COMPACTION parent turn has no model invocation; its provider request belongs to the"
               + " compaction child thread");
     }
-    return planLive(threadId, path, now);
+    return planLive(threadId, rootSessionId, path);
   }
 
   /** 请求头是否是父 COMPACTION turn 的 TURN_START：该回合只冻结 run group 与预算，从不发出 provider 请求。 */
@@ -207,11 +200,11 @@ public final class DatabaseTurnResolver implements TurnResolver {
   }
 
   private LiveTurnPlan.Planned plan(
-      UUID threadId, EntryPath path, BranchSettings settings, Instant now) {
+      UUID threadId, UUID rootSessionId, EntryPath path, BranchSettings settings) {
     UUID sessionId = path.root().sessionId();
 
     // 一次上下文解析租用一份 catalog 快照：Agent/Environment/tools/skills/subagents/prompt 同源。
-    AgentTurnContext context = contextResolver.resolve(threadId, path, settings, now);
+    AgentTurnContext context = contextResolver.resolve(threadId, rootSessionId, path, settings);
     ResolvedSelection resolved =
         resolveSelection(BuiltinExecution.model(settings.execution()), context.agent());
     MemberRuntime first = resolved.members().getFirst();

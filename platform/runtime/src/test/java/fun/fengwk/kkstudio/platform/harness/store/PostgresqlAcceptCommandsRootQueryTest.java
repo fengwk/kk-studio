@@ -59,7 +59,7 @@ class PostgresqlAcceptCommandsRootQueryTest {
     runtime =
         new HarnessRuntime(
             store,
-            builtinRegistry(store, (threadId, path, prep) -> null),
+            builtinRegistry(store, (threadId, rootSessionId, path, prep) -> null),
             () -> CompactionConfig.DEFAULT);
   }
 

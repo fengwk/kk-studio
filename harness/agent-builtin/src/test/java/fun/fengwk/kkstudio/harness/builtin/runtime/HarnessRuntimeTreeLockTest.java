@@ -590,7 +590,7 @@ class HarnessRuntimeTreeLockTest {
     InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
     Clock clock = Clock.fixed(T0, ZoneOffset.UTC);
     TurnResolver resolver =
-        (threadId, candidatePath, preparation) -> {
+        (threadId, rootSessionId, candidatePath, preparation) -> {
           if (preparation != null) {
             return new TurnResolver.CompactionResolved(
                 HarnessRuntimeTestSupport.executionSelection(),

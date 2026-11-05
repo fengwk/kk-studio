@@ -95,13 +95,11 @@ public final class ModelRequestDebugService {
     Objects.requireNonNull(model, "model");
     ThreadSnapshot snapshot = runtime.getThreadSnapshot(threadId);
     EntryPath path = snapshot.requireFullPath();
+    UUID rootSessionId = snapshot.thread().sessionId();
     if (!threadId.equals(snapshot.thread().rootThreadId())) {
-      environmentName =
-          runtime
-              .getThreadSnapshot(snapshot.thread().rootThreadId())
-              .entryState()
-              .baseSettings()
-              .environmentName();
+      ThreadSnapshot root = runtime.getThreadSnapshot(snapshot.thread().rootThreadId());
+      rootSessionId = root.thread().sessionId();
+      environmentName = root.entryState().baseSettings().environmentName();
     }
     if (!BuiltinExecution.DRIVER.equals(path.baseSettings().execution().driver())) {
       throw new IllegalArgumentException(
@@ -117,7 +115,8 @@ public final class ModelRequestDebugService {
     dto.setGeneratedAt(clock.instant());
     dto.setModel(modelSelection(model));
     dto.setEnvironmentName(environmentName);
-    LiveTurnPlan plan = turnResolver.planLiveWithSettings(threadId, path, draftSettings);
+    LiveTurnPlan plan =
+        turnResolver.planLiveWithSettings(threadId, rootSessionId, path, draftSettings);
     if (plan instanceof LiveTurnPlan.Planned planned) {
       project(dto, planned);
     } else {
@@ -132,7 +131,9 @@ public final class ModelRequestDebugService {
     ModelRequestSpec spec = planned.spec();
     dto.setSystemInstruction(spec.systemInstruction());
     dto.setTools(planned.candidateTools().stream().map(ModelRequestDebugService::tool).toList());
-    dto.setSkills(planned.skills().stream().map(ModelRequestDebugService::skill).toList());
+    boolean environmentSelected = dto.getEnvironmentName() != null;
+    dto.setSkills(
+        planned.skills().stream().map(skill -> skill(skill, environmentSelected)).toList());
     dto.setSubagents(spec.subagentBindings().stream().map(this::subagent).toList());
     dto.setCacheControl(cacheControl(spec.cacheControl()));
     dto.setPlanningError(null);
@@ -162,7 +163,8 @@ public final class ModelRequestDebugService {
     return dto;
   }
 
-  private static HarnessModelRequestDebugDTO.SkillDTO skill(LiveTurnPlan.PlannedSkill skill) {
+  private static HarnessModelRequestDebugDTO.SkillDTO skill(
+      LiveTurnPlan.PlannedSkill skill, boolean environmentSelected) {
     HarnessModelRequestDebugDTO.SkillDTO dto = new HarnessModelRequestDebugDTO.SkillDTO();
     dto.setPackageName(skill.packageName());
     dto.setName(skill.name());
@@ -173,8 +175,11 @@ public final class ModelRequestDebugService {
     dto.setHeadCommit(skill.headCommit());
     dto.setArtifactSha256(skill.artifactSha256());
     dto.setInstalledSha256(skill.installedSha256());
-    // 与 compose 共用同一个渲染入口：展示的 XML 就是实际进入 systemInstruction 的片段。
-    dto.setPromptXml(AgentPromptComposer.skillFragment(skill.promptEntry()));
+    // 只有实际进入 systemInstruction 的 Skill 才展示 Prompt 片段；未进入时保留其余结构化事实。
+    dto.setPromptXml(
+        skill.promptVisible(environmentSelected)
+            ? AgentPromptComposer.skillFragment(skill.promptEntry())
+            : null);
     return dto;
   }
 

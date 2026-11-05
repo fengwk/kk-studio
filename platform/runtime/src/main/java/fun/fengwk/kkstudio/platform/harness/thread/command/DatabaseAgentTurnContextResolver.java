@@ -40,8 +40,6 @@ import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
 
-import java.time.Clock;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -67,7 +65,6 @@ public final class DatabaseAgentTurnContextResolver {
   private final SkillPromptPathResolver skillPromptPathResolver;
   private final StorageBlobManager blobManager;
   private final AgentPromptComposer promptComposer;
-  private final Clock clock;
   private final SchemaJsonCodec schemaCodec;
 
   public DatabaseAgentTurnContextResolver(
@@ -79,8 +76,7 @@ public final class DatabaseAgentTurnContextResolver {
       SkillPackageRepository skillPackageRepository,
       SkillPromptPathResolver skillPromptPathResolver,
       StorageBlobManager blobManager,
-      AgentPromptComposer promptComposer,
-      Clock clock) {
+      AgentPromptComposer promptComposer) {
     this.agentDefinitionRepository =
         Objects.requireNonNull(agentDefinitionRepository, "agentDefinitionRepository");
     this.agentConfigCodec = Objects.requireNonNull(agentConfigCodec, "agentConfigCodec");
@@ -94,17 +90,16 @@ public final class DatabaseAgentTurnContextResolver {
         Objects.requireNonNull(skillPromptPathResolver, "skillPromptPathResolver");
     this.blobManager = Objects.requireNonNull(blobManager, "blobManager");
     this.promptComposer = Objects.requireNonNull(promptComposer, "promptComposer");
-    this.clock = Objects.requireNonNull(clock, "clock");
     this.schemaCodec = new SchemaJsonCodec();
   }
 
   /** 在一次目录租用内解析完整的 Agent Turn 上下文。 */
   public AgentTurnContext resolve(
-      UUID threadId, EntryPath path, BranchSettings settings, Instant now) {
+      UUID threadId, UUID rootSessionId, EntryPath path, BranchSettings settings) {
     Objects.requireNonNull(threadId, "threadId");
+    Objects.requireNonNull(rootSessionId, "rootSessionId");
     Objects.requireNonNull(path, "path");
     Objects.requireNonNull(settings, "settings");
-    Objects.requireNonNull(now, "now");
 
     AgentDefinition agent =
         require(
@@ -114,7 +109,7 @@ public final class DatabaseAgentTurnContextResolver {
 
     // Environment 只由 branch settings 的可空 environmentName 决定。
     Environment selectedEnvironment = resolveEnvironment(settings.environmentName());
-    CurrentEnvironmentContext currentEnvironment = currentEnvironment(selectedEnvironment, now);
+    CurrentEnvironmentContext currentEnvironment = currentEnvironment(selectedEnvironment);
     // 路由身份与 prompt 上下文同源于选中的 Environment，绝不各自回退。
     EnvironmentId environmentId = currentEnvironment.environmentId();
     List<LiveTurnPlan.PlannedSkill> skills = resolveSkills(environmentId, agentConfig.getSkills());
@@ -128,10 +123,10 @@ public final class DatabaseAgentTurnContextResolver {
           systemInstruction(
               agent.systemPrompt(),
               currentEnvironment,
-              path.root().sessionId(),
+              rootSessionId,
               threadId,
               tools.bindings().stream().map(binding -> binding.descriptor().name()).toList(),
-              skills.stream().map(LiveTurnPlan.PlannedSkill::promptEntry).toList(),
+              promptSkills(environmentId, skills),
               subagentBindings);
       return new AgentTurnContext(
           agent,
@@ -343,17 +338,31 @@ public final class DatabaseAgentTurnContextResolver {
   }
 
   /**
-   * 当前 Environment 的宿主事实只来自最近一次被接受的 READY payload：连接行从未 READY 时所有可选事实整行省略，绝不伪造或回退到 Platform
-   * 主机；日期用宿主时区换算，未报告时用 Platform 时钟时区。未选择 Environment 时只保留 Platform 当前日期。
+   * 只有「未选环境」与「已选环境且精确安装」两种事实进入 Prompt：未选环境使用 platform URI；已选环境使用 Daemon 本地稳定路径。
+   *
+   * <p>已选环境但未安装、摘要不一致或安装失败时，技能不进入 system prompt；结构化 Skill 事实仍保留在 {@link AgentTurnContext} 中，
+   * 供对话界面解释未注入原因。该提示不由 Prompt 组装负责。
    */
-  private CurrentEnvironmentContext currentEnvironment(Environment selected, Instant now) {
+  private static List<SkillPromptEntry> promptSkills(
+      EnvironmentId environmentId, List<LiveTurnPlan.PlannedSkill> skills) {
+    return skills.stream()
+        .filter(skill -> skill.promptVisible(environmentId != null))
+        .map(LiveTurnPlan.PlannedSkill::promptEntry)
+        .toList();
+  }
+
+  /**
+   * 当前 Environment 的宿主事实只来自最近一次被接受的 READY payload：连接行从未 READY 时所有可选事实保持 null，绝不伪造或回退到 Platform
+   * 主机。未选择 Environment 时上下文不携带任何宿主事实。
+   */
+  private CurrentEnvironmentContext currentEnvironment(Environment selected) {
     if (selected == null) {
-      return CurrentEnvironmentContext.none(now, clock.getZone());
+      return CurrentEnvironmentContext.none();
     }
     EnvironmentId environmentId = EnvironmentId.of(selected.getId());
     EnvironmentConnection connection = environmentRegistry.find(environmentId).orElse(null);
     return CurrentEnvironmentContext.selected(
-        environmentId, selected.getName(), hostFacts(connection), now, clock.getZone());
+        environmentId, selected.getName(), hostFacts(connection));
   }
 
   private static DaemonEnvironmentInfo hostFacts(EnvironmentConnection connection) {

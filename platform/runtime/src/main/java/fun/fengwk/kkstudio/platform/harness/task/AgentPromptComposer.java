@@ -187,9 +187,9 @@ public final class AgentPromptComposer {
                         "name",
                         subagent.name(),
                         "description",
-                        subagent.description().isBlank()
-                            ? "(no description)"
-                            : subagent.description())))
+                        subagent.description(),
+                        "hasDescription",
+                        !subagent.description().isBlank())))
         .collect(Collectors.joining("\n"));
   }
 

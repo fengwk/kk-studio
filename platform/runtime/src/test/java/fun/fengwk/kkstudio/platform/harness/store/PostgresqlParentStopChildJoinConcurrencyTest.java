@@ -106,7 +106,7 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
     runtime =
         new HarnessRuntime(
             store,
-            builtinRegistry(store, (threadId, path, prep) -> null),
+            builtinRegistry(store, (threadId, rootSessionId, path, prep) -> null),
             () -> CompactionConfig.DEFAULT);
   }
 
@@ -270,7 +270,7 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
 
   private ThreadProcessor createThreadProcessor(Instant now, ScheduledExecutorService scheduler) {
     TurnResolver resolver =
-        (threadId, path, preparation) ->
+        (threadId, rootSessionId, path, preparation) ->
             new TurnResolver.Rejected(
                 new AssistantError("RESOLVER_REJECT", "no continuation in test"));
     return new ThreadProcessor(
@@ -364,7 +364,7 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
     HarnessRuntime latchingRuntime =
         new HarnessRuntime(
             latchingStore,
-            builtinRegistry(latchingStore, (t, p, c) -> null),
+            builtinRegistry(latchingStore, (t, rootSessionId, p, c) -> null),
             () -> CompactionConfig.DEFAULT);
 
     ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();

@@ -95,7 +95,7 @@ class PostgresqlJoinAcceptanceRollbackTest {
     runtime =
         new HarnessRuntime(
             store,
-            builtinRegistry(store, (threadId, path, prep) -> null),
+            builtinRegistry(store, (threadId, rootSessionId, path, prep) -> null),
             () -> CompactionConfig.DEFAULT);
     jdbcTemplate = new JdbcTemplate(PostgresqlHarnessStoreFixture.dataSource());
   }
@@ -653,7 +653,7 @@ class PostgresqlJoinAcceptanceRollbackTest {
     ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
     try {
       TurnResolver resolver =
-          (threadId, path, preparation) ->
+          (threadId, rootSessionId, path, preparation) ->
               new TurnResolver.Resolved(modelRequest(), 100_000, 16_384);
       ThreadProcessor processor =
           new ThreadProcessor(

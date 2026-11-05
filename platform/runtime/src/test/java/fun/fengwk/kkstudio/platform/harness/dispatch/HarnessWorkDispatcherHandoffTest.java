@@ -441,7 +441,7 @@ class HarnessWorkDispatcherHandoffTest {
             store,
             builtinRegistry(
                 store,
-                (threadId, path, preparation) -> {
+                (threadId, rootSessionId, path, preparation) -> {
                   throw new AssertionError("resolver must not be called for a quiescent thread");
                 }),
             new ThreadProcessorConfig(Duration.ofSeconds(1), () -> CompactionConfig.DEFAULT));

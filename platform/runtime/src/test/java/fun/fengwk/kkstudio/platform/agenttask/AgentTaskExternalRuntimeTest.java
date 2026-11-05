@@ -62,7 +62,7 @@ class AgentTaskExternalRuntimeTest {
     runtime =
         new HarnessRuntime(
             store,
-            builtinRegistry(store, (tid, path, prep) -> null),
+            builtinRegistry(store, (tid, rootSessionId, path, prep) -> null),
             () -> CompactionConfig.DEFAULT);
     ObjectProvider<HarnessRuntime> provider = mock(ObjectProvider.class);
     when(provider.getIfAvailable()).thenReturn(runtime);

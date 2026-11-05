@@ -65,8 +65,8 @@ import java.util.UUID;
  * 输出的记录时间显式交给规划，绝不用当前时间冒充。
  *
  * <p>预览与正式发送同源：candidate 历史由同一 {@link HarnessRuntime#previewInputCandidatePath} 构造，冻结请求来自同一 {@link
- * DatabaseTurnResolver#planLive(UUID, EntryPath, Instant)}（历史模型输出走 {@link
- * DatabaseTurnResolver#planHistorical(UUID, EntryPath, Instant)}），有效请求来自同一 {@link
+ * DatabaseTurnResolver#planLive(UUID, UUID, EntryPath)}（历史模型输出走 {@link
+ * DatabaseTurnResolver#planHistorical(UUID, UUID, EntryPath)}），有效请求来自同一 {@link
  * DatabaseProviderResolutionService#resolve}，最终字节来自同一 {@link
  * ProviderAdapter#encodeRequestBody}。附件只做 READY 的只读 peek，RESOURCE 仍必须由目标 Session 持有。压缩 Turn
  * 也是真实模型输出：按其 durable COMPACTION TURN_START 冻结的 executionModel 与预算走同一条物化/编码路径。
@@ -133,14 +133,14 @@ public final class ProviderRequestPreviewService {
         contentPreparer.prepare(snapshot.thread().sessionId(), command.commands());
     Instant now = clock.instant();
     boolean childThread = !threadId.equals(snapshot.thread().rootThreadId());
+    ThreadSnapshot rootSnapshot =
+        childThread ? runtime.getThreadSnapshot(snapshot.thread().rootThreadId()) : null;
     String rootEnvironmentName =
-        childThread
-            ? runtime
-                .getThreadSnapshot(snapshot.thread().rootThreadId())
-                .requireFullPath()
-                .baseSettings()
-                .environmentName()
-            : null;
+        rootSnapshot == null
+            ? null
+            : rootSnapshot.requireFullPath().baseSettings().environmentName();
+    UUID rootSessionId =
+        rootSnapshot == null ? snapshot.thread().sessionId() : rootSnapshot.thread().sessionId();
     EntryPath candidatePath =
         runtime.previewInputCandidatePath(
             threadId,
@@ -151,7 +151,7 @@ public final class ProviderRequestPreviewService {
             childThread,
             rootEnvironmentName);
     return planAndEncode(
-        turnResolver.planLive(threadId, candidatePath, now),
+        turnResolver.planLive(threadId, rootSessionId, candidatePath),
         candidatePath,
         now,
         snapshot.entryState().head().id(),
@@ -193,7 +193,7 @@ public final class ProviderRequestPreviewService {
           "provider request preview is only supported for builtin execution driver");
     }
     return planAndEncode(
-        turnResolver.planLive(candidateThreadId, candidatePath, now),
+        turnResolver.planLive(candidateThreadId, sessionId, candidatePath),
         candidatePath,
         now,
         source.id(),
@@ -235,7 +235,7 @@ public final class ProviderRequestPreviewService {
     // 历史路径可能不属于任何一个现存 Thread；规划本身不回查 Thread 归属，因此这里同样只给 candidate id。
     UUID candidateThreadId = UUID.randomUUID();
     return planAndEncode(
-        turnResolver.planHistorical(candidateThreadId, requestPath, recordedAt),
+        turnResolver.planHistorical(candidateThreadId, sessionId, requestPath),
         requestPath,
         recordedAt,
         requestHeadEntryId,
@@ -326,7 +326,7 @@ public final class ProviderRequestPreviewService {
     // 子响应只接受携带 assistantMetadata 的真实模型输出；其请求前缀就是这个输出的 parent。
     Instant recordedAt = finalAnswer.createdAt();
     LiveTurnPlan plan =
-        turnResolver.planHistorical(frozen.childThreadId(), requestPath, recordedAt);
+        turnResolver.planHistorical(frozen.childThreadId(), parentSessionId, requestPath);
     if (plan instanceof LiveTurnPlan.Planned planned) {
       plan =
           new LiveTurnPlan.Planned(

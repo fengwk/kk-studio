@@ -726,7 +726,7 @@ class HarnessRuntimeDtoContractTest {
     for (String fieldName : List.of("filterReason")) {
       assertRequiredNullable(HarnessModelRequestDebugDTO.ToolDTO.class, fieldName);
     }
-    for (String fieldName : List.of("headCommit", "installedSha256")) {
+    for (String fieldName : List.of("headCommit", "installedSha256", "promptXml")) {
       assertRequiredNullable(HarnessModelRequestDebugDTO.SkillDTO.class, fieldName);
     }
     assertRequiredNullable(HarnessModelRequestDebugDTO.CacheControlDTO.class, "key");

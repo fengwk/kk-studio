@@ -247,7 +247,8 @@ class ExecutionExitSettlementTest {
                 new DriverRegistry(
                     List.of(
                         HarnessRuntimeTestSupport.driver(
-                            fixture.store, (threadId, candidatePath, preparation) -> null))),
+                            fixture.store,
+                            (threadId, rootSessionId, candidatePath, preparation) -> null))),
                 () -> CompactionConfig.DEFAULT,
                 ignored -> {},
                 processor::cancel);
@@ -381,7 +382,7 @@ class ExecutionExitSettlementTest {
         new DriverRegistry(
             List.of(
                 HarnessRuntimeTestSupport.driver(
-                    fixture.store, (threadId, path, preparation) -> null))),
+                    fixture.store, (threadId, rootSessionId, path, preparation) -> null))),
         () -> CompactionConfig.DEFAULT,
         ignored -> {},
         fixture.processor::cancel);
@@ -441,7 +442,7 @@ class ExecutionExitSettlementTest {
             new DriverRegistry(
                 List.of(
                     HarnessRuntimeTestSupport.driver(
-                        fixture.store, (threadId1, path, preparation) -> null))),
+                        fixture.store, (threadId1, rootSessionId, path, preparation) -> null))),
             new ThreadProcessorConfig(Duration.ofSeconds(1), () -> CompactionConfig.DEFAULT));
     ClaimedWork claim = ThreadProcessorTestSupport.claimThreadWork(fixture.store, threadId, NOW);
     assertEquals(ThreadProcessResult.COMPLETED, processor.process(claim));

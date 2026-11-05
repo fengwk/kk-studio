@@ -297,7 +297,8 @@ public class StudioMcpRuntimeToolIntegrationTest extends WebPostgresTestSupport 
     EntryPath entryPath = new EntryPath(List.of(rootEntry));
 
     UUID threadId = UUID.randomUUID();
-    TurnResolver.Result resolverResult = databaseTurnResolver.resolve(threadId, entryPath, null);
+    TurnResolver.Result resolverResult =
+        databaseTurnResolver.resolve(threadId, sessionId, entryPath, null);
     TurnResolver.Resolved resolved = assertInstanceOf(TurnResolver.Resolved.class, resolverResult);
     ModelRequestSpec spec = resolved.spec();
     assertNotNull(spec);

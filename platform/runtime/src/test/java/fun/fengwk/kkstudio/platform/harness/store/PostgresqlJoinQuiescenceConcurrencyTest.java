@@ -108,7 +108,7 @@ class PostgresqlJoinQuiescenceConcurrencyTest {
     runtime =
         new HarnessRuntime(
             store,
-            builtinRegistry(store, (threadId, path, preparation) -> null),
+            builtinRegistry(store, (threadId, rootSessionId, path, preparation) -> null),
             () -> CompactionConfig.DEFAULT);
   }
 
@@ -293,7 +293,7 @@ class PostgresqlJoinQuiescenceConcurrencyTest {
   private ThreadProcessor processor(
       HarnessStore targetStore, Instant now, ScheduledExecutorService scheduler) {
     TurnResolver resolver =
-        (threadId, path, preparation) ->
+        (threadId, rootSessionId, path, preparation) ->
             new TurnResolver.Rejected(
                 new AssistantError("RESOLVER_REJECT", "no continuation in test"));
     return processor(targetStore, now, scheduler, resolver);
@@ -371,7 +371,7 @@ class PostgresqlJoinQuiescenceConcurrencyTest {
               store,
               T1,
               scheduler,
-              (threadId, path, preparation) ->
+              (threadId, rootSessionId, path, preparation) ->
                   new TurnResolver.Resolved(succeededRequest(), 100_000, 16_384));
       if (parentFirst) {
         assertEquals(ThreadProcessResult.COMPLETED, processor.process(bClaim));

@@ -18,7 +18,7 @@ The environment is the machine where commands run and host files live. The user 
   <description>Linux environment.</description>
   <os>linux</os>
   <user>fengwk</user>
-  <home>/home/fengwk</home>
+  <home>/home/dev</home>
   <temp_dir>/tmp</temp_dir>
   <session_dir>vfs:/sessions/00000000-0000-0000-0000-0000000000a1/</session_dir>
   <thread_dir>vfs:/sessions/00000000-0000-0000-0000-0000000000a1/threads/00000000-0000-0000-0000-0000000000b2/</thread_dir>

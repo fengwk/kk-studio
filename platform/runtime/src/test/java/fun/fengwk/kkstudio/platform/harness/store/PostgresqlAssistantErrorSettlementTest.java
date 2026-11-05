@@ -116,7 +116,7 @@ class PostgresqlAssistantErrorSettlementTest {
 
     AtomicBoolean resolved = new AtomicBoolean(false);
     TurnResolver resolver =
-        (threadId, path, preparation) -> {
+        (threadId, rootSessionId, path, preparation) -> {
           resolved.set(true);
           return new TurnResolver.Rejected(
               new AssistantError("TEST_REJECTED", "must not resolve on terminal settlement"));

@@ -165,7 +165,7 @@ public final class BuiltinAgentDriver implements AgentDriver {
       CompactionPreparation preparation) {
     TurnResolver.Result result;
     try {
-      result = resolver.resolve(thread.id(), candidatePath, preparation);
+      result = resolver.resolve(thread.id(), rootSessionId(tx, thread), candidatePath, preparation);
     } catch (TurnResolveTransientException transientFailure) {
       throw transientFailure;
     }
@@ -183,6 +183,23 @@ public final class BuiltinAgentDriver implements AgentDriver {
               resolved.childSettings()));
       case TurnResolver.Resolved resolved -> accepted(thread, candidatePath, resolved);
     };
+  }
+
+  /**
+   * 执行根会话与 ToolProcessor 的 execution scope 同源：根 Thread 自身即其会话；子 Thread 从不可变 rootThreadId 读取根 Thread
+   * 行，缺失时显式失败，绝不按当前 Thread 的会话合成。
+   */
+  private static UUID rootSessionId(HarnessStore.Transaction tx, ThreadState thread) {
+    if (thread.rootThreadId().equals(thread.id())) {
+      return thread.sessionId();
+    }
+    return tx.threads()
+        .find(thread.rootThreadId())
+        .orElseThrow(
+            () ->
+                new IllegalStateException(
+                    "thread " + thread.id() + " lost its execution root " + thread.rootThreadId()))
+        .sessionId();
   }
 
   private TurnResolution accepted(

@@ -286,7 +286,7 @@ class ProviderRequestPreviewIntegrationTest extends WebPostgresTestSupport {
             .get(0)
             .path("content")
             .asText()
-            .startsWith(previousPrompt),
+            .contains(previousPrompt),
         "历史 turn 必须实际使用变更前的 system prompt");
 
     acceptanceService.acceptOnThread(
@@ -345,9 +345,9 @@ class ProviderRequestPreviewIntegrationTest extends WebPostgresTestSupport {
     JsonNode previewBody = objectMapper.readTree(preview.getBodyJson());
     assertAssistantReasoning(previewBody, List.of(cannedReasoning(1), cannedReasoning(2)));
     assertEquals("system", previewBody.path("messages").get(0).path("role").asText());
-    // 生产 prompt composer 还会附加环境/工具说明，因此检查 agent prompt 前缀而非整个复合 prompt。
+    // 生产 prompt composer 在 agent prompt 前附加固定段落标题，因此检查内容包含当前配置。
     assertTrue(
-        previewBody.path("messages").get(0).path("content").asText().startsWith(currentPrompt));
+        previewBody.path("messages").get(0).path("content").asText().contains(currentPrompt));
     assertTrue(!preview.getBodyJson().contains(previousPrompt), "旧 system prompt 不得覆盖当前配置");
     assertEquals("acceptance-stub", preview.getModelName());
 
@@ -611,7 +611,7 @@ class ProviderRequestPreviewIntegrationTest extends WebPostgresTestSupport {
             Instant.now(clock),
             false,
             null);
-    LiveTurnPlan plan = turnResolver.planLive(fixture.threadId(), path);
+    LiveTurnPlan plan = turnResolver.planLive(fixture.threadId(), fixture.sessionId(), path);
     ModelRequestSpec spec = assertInstanceOf(LiveTurnPlan.Planned.class, plan).spec();
     ProviderRequest request = new ModelRequestMaterializer().materialize(path, spec);
     ProviderResolutionService.ResolvedExecution resolved =

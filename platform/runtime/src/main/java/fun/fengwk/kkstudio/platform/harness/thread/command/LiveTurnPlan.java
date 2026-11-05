@@ -156,6 +156,11 @@ public sealed interface LiveTurnPlan permits LiveTurnPlan.Planned, LiveTurnPlan.
       }
     }
 
+    /** 仅当该 Skill 实际进入 system prompt 时返回 true。 */
+    public boolean promptVisible(boolean environmentSelected) {
+      return !environmentSelected || delivery == SkillPromptResolution.Delivery.LOCAL;
+    }
+
     /** 仅供 Prompt 渲染的三元组：与交付事实同源，因此 Prompt XML 与结构化投影不可能漂移。 */
     public SkillPromptEntry promptEntry() {
       return new SkillPromptEntry(name, description, path);

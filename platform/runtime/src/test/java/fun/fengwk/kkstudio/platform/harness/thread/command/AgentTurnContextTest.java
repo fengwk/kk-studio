@@ -10,8 +10,6 @@ import fun.fengwk.kkstudio.platform.harness.task.CurrentEnvironmentContext;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionType;
 
-import java.time.Instant;
-import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -20,8 +18,7 @@ class AgentTurnContextTest {
 
   @Test
   void rejectsMissingFactsAndCopiesCollections() {
-    CurrentEnvironmentContext environment =
-        CurrentEnvironmentContext.none(Instant.parse("2026-04-01T00:00:00Z"), ZoneOffset.UTC);
+    CurrentEnvironmentContext environment = CurrentEnvironmentContext.none();
     assertThrows(
         NullPointerException.class,
         () ->

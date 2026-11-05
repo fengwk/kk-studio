@@ -322,7 +322,7 @@ class ModelProcessorTest {
               new DriverRegistry(
                   List.of(
                       HarnessRuntimeTestSupport.driver(
-                          fixture.store, (threadId, path, preparation) -> null))),
+                          fixture.store, (threadId, rootSessionId, path, preparation) -> null))),
               new ThreadProcessorConfig(Duration.ofSeconds(1), () -> CompactionConfig.DEFAULT));
       assertEquals(
           ThreadProcessResult.COMPLETED,
@@ -429,7 +429,8 @@ class ModelProcessorTest {
             new DriverRegistry(
                 List.of(
                     HarnessRuntimeTestSupport.driver(
-                        fixture.store, (threadId, candidatePath, preparation) -> null))),
+                        fixture.store,
+                        (threadId, rootSessionId, candidatePath, preparation) -> null))),
             () -> CompactionConfig.DEFAULT,
             processor::cancel,
             mock(ToolProcessor.class)::cancel);

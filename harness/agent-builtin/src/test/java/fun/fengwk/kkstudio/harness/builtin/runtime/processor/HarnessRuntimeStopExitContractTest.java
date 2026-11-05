@@ -108,7 +108,8 @@ class HarnessRuntimeStopExitContractTest {
                 new DriverRegistry(
                     List.of(
                         HarnessRuntimeTestSupport.driver(
-                            fixture.store, (threadId, candidatePath, preparation) -> null))),
+                            fixture.store,
+                            (threadId, rootSessionId, candidatePath, preparation) -> null))),
                 () -> CompactionConfig.DEFAULT,
                 ignored -> {},
                 fixture.processor::cancel);
@@ -286,7 +287,8 @@ class HarnessRuntimeStopExitContractTest {
                 new DriverRegistry(
                     List.of(
                         HarnessRuntimeTestSupport.driver(
-                            fixture.store, (threadId, candidatePath, preparation) -> null))),
+                            fixture.store,
+                            (threadId, rootSessionId, candidatePath, preparation) -> null))),
                 () -> CompactionConfig.DEFAULT,
                 ignored -> {},
                 fixture.processor::cancel);

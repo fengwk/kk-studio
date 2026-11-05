@@ -52,9 +52,9 @@ class TurnResolverTest {
   @Test
   void resolveIsASynchronousNoSideEffectContractMethod() {
     TurnResolver resolver =
-        (threadId, path, preparation) ->
+        (threadId, rootSessionId, path, preparation) ->
             new TurnResolver.Rejected(new AssistantError("PLANNING_FAILED", "rejected"));
-    TurnResolver.Result result = resolver.resolve(id(1L), null, null);
+    TurnResolver.Result result = resolver.resolve(id(1L), id(2L), null, null);
     assertTrue(result instanceof TurnResolver.Rejected);
     assertEquals("rejected", ((TurnResolver.Rejected) result).error().message());
   }

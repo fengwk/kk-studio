@@ -348,8 +348,10 @@ Package 名和 Skill 名均为 1–64 个小写字母或数字，以单个连字
 Git cache 由 Catalog 拥有，根目录通过 `kk-studio.catalog.skill.cache-root` 配置，
 默认是进程当前目录下的 `.kkstudio/skills`。
 发布后的通知唤醒各节点回读、补齐 exact commit cache，并同步本节点在线 Daemon；
-listener 建连/重连全量对账。Daemon installed commit 与 current commit 一致时，Prompt
-使用其本地稳定路径，否则使用 Platform URI。
+listener 建连/重连全量对账。执行根未选择 Environment 时，Prompt 使用
+`vfs:/skills/<package>/<skill>/SKILL.md`；已选择 Environment 且 Daemon 安装摘要与
+current artifact 完全一致时使用其本地稳定路径，否则该技能不进入 system prompt，
+由对话界面另行提示未安装、版本不一致或安装失败。
 
 ### MCP server 与运行时工具目录
 
@@ -426,7 +428,9 @@ Environment 或注入工具——Issue Run 的 `SET_AGENT` / `SET_EXECUTION` / `
 并在 `TURN_START.fallbackModel` 记录实际型号供界面提示与计价；branch 设置本身不被改写，默认模型也不可用时拒绝本回合。
 设置的 variant 已从模型中移除时，同一模型改用自身默认 variant。Agent 与 Environment 失效一律停止，不做回退。
 `NONE`、`ROUTED` 工具保留，未选环境时只过滤 `REQUIRED`；配置 Skill 时加入统一 `read`，
-subagent allowlist 非空时加入内部 `task`。Prompt 的 Skill 三元组冻结在 system instruction 中。规划期同时按 live provider 配置冻结 `ProviderCacheControl`（retention 与会话 UUID key，压缩回合固定 `none()`），执行期不再按当前 capability 重新规范化。
+subagent allowlist 非空时加入内部 `task`。System prompt 按实际工具、Environment、Skill 与
+subagent 生成；执行根已选 Environment 时只有精确安装的技能进入 `[skills]`，未安装或安装失败
+只保留结构化事实、不进入 prompt。规划期同时按 live provider 配置冻结 `ProviderCacheControl`（retention 与会话 UUID key，压缩回合固定 `none()`），执行期不再按当前 capability 重新规范化。
 输出预算所需的请求输入 token 估算只经内核端口 [`spi.compaction.RequestTokenEstimator`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/compaction/RequestTokenEstimator.java) 注入；[`HarnessCompactionConfiguration`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/configuration/HarnessCompactionConfiguration.java)
 作为组合根把端口绑定到内核 `runtime.compaction.TokenEstimator` 的正式实现，因此解析器不 import runtime 实现类型，也不需要 `HarnessRuntime` bean，platform 独立测试上下文与 web 组合根都不会出现装配环或缺失 bean。
 资源输出外置与媒体后置的模型说明保存在本模块的

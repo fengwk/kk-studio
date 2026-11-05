@@ -69,7 +69,8 @@ class BuiltinAgentDriverContractTest {
       "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
   /** 本测试不解析 turn：resolver 永不参与锁定路径。 */
-  private static final TurnResolver UNUSED_RESOLVER = (threadId, path, preparation) -> null;
+  private static final TurnResolver UNUSED_RESOLVER =
+      (threadId, rootSessionId, path, preparation) -> null;
 
   private InMemoryBuiltinHarnessStore store;
   private BuiltinAgentDriver driver;
