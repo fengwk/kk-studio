@@ -4,6 +4,7 @@ import type { EnvironmentCardDTO } from '@/shared/api/generated/contracts'
 const HARNESS_URL = '/browser-tests/ide-overlay-harness.html'
 const SESSION_KEY = 'kk-studio.tab-state:ide'
 const LAST_KEY = 'kk-studio.last-state:ide'
+const RECENT_KEY = 'kk-studio.recent-directories:ide'
 const ENV_A = 'a1000000-0000-4000-8000-000000000001'
 const ENV_B = 'a1000000-0000-4000-8000-000000000002'
 const DIRECTORY_A = '/workspace/a'
@@ -405,6 +406,28 @@ test.describe('tab-global IDE panel', () => {
     expect(state.iframeRequests[viewId]).toBe(2)
     expect(await page.evaluate((key) => localStorage.getItem(key), LAST_KEY)).toBe(localBefore)
     expect((await session(page)).recoveryByEnvironment[ENV_A]?.viewId).toBe(viewId)
+  })
+
+  test('opens a new view in the environment last confirmed directory', async ({ page }) => {
+    // 无视图时优先使用最近确认目录；没有记录时首屏请求不带 directory，由 Daemon 使用宿主主目录。
+    const state = createState()
+    const recent = `${DIRECTORY_A}/projects`
+    await installTransport(page, state)
+    await page.addInitScript(({ key, value }) => {
+      localStorage.setItem(key, value)
+    }, {
+      key: RECENT_KEY,
+      value: JSON.stringify({ byEnvironment: { [ENV_A]: [recent] } }),
+    })
+    await page.goto(HARNESS_URL)
+    await expect(page.getByTestId('harness-event-status')).toHaveAttribute('data-connected', 'true')
+
+    await openEnvironment(page, 'A')
+    await expect.poll(() => state.openCalls.length).toBe(1)
+    expect(state.openCalls[0]!.body).toMatchObject({
+      mode: 'create',
+      directory: recent,
+    })
   })
 
   test('keeps both environment iframes mounted and switches visibility without recreating views', async ({ page }) => {

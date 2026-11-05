@@ -16,6 +16,7 @@ import { createUuid, isCanonicalUuid } from '@/shared/lib/uuid'
 import type { IdeEnvironmentInfo } from '@/features/environment/ide/ide-panel-context'
 import { validateIdeEntryUrl } from '@/features/environment/ide/ide-url'
 import {
+  readRecentDirectories,
   saveIdeSession,
   type IdePresentation,
   type IdeRecovery,
@@ -656,7 +657,8 @@ export function useIdeClaimReconciliation({
     }
     const ready = environment?.ready ?? envMap.get(environmentId)?.ready
     if (ready === true) {
-      startCreate(environmentId)
+      // 无视图时沿用该 Environment 最近一次确认打开的目录；没有记录则省略，由 Daemon 使用宿主主目录。
+      startCreate(environmentId, readRecentDirectories(environmentId, storage)[0])
     }
   }
 
