@@ -21,7 +21,8 @@ import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
 import { mcpServerService } from '@/features/catalog/mcp-server-service'
 import { AiNavigation } from '@/app/ai-console/AiNavigation'
 import { queryKeys } from '@/shared/lib/query-keys'
-import { useI18n, type AppLocale } from '@/shared/i18n'
+import { useI18n } from '@/shared/i18n'
+import { formatDateTime24 } from '@/shared/lib/date-format'
 import {
   DEFAULT_TIMEOUT_MILLIS,
   hasUnsavedChanges,
@@ -32,18 +33,6 @@ import {
 } from './mcp-utils'
 import './mcp-servers.css'
 import type { McpServerDTO } from '@/shared/api/generated/contracts'
-
-function formatDateTime24(date: Date, locale: AppLocale): string {
-  return date.toLocaleString(locale, {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  })
-}
 
 interface CreateModalState {
   name: string

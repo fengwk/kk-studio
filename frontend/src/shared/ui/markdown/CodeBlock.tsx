@@ -8,37 +8,8 @@ import {
   type ReactNode,
 } from 'react'
 import { useI18n } from '@/shared/i18n'
+import { copyTextToClipboard } from '@/shared/lib/clipboard'
 import './code-block.css'
-
-async function copyText(text: string, isActive: () => boolean): Promise<boolean> {
-  try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text)
-      return true
-    }
-  } catch {
-    // 失败则继续走兜底逻辑（fall through）
-  }
-  // 复制过程中卸载后不再插入 DOM 或选中文本，避免从新视图抢走焦点。
-  if (!isActive()) {
-    return false
-  }
-  let area: HTMLTextAreaElement | null = null
-  try {
-    area = document.createElement('textarea')
-    area.value = text
-    area.setAttribute('readonly', '')
-    area.style.position = 'fixed'
-    area.style.left = '-9999px'
-    document.body.appendChild(area)
-    area.select()
-    return document.execCommand('copy')
-  } catch {
-    return false
-  } finally {
-    area?.remove()
-  }
-}
 
 export type CopyButtonProps = {
   source: string
@@ -87,7 +58,7 @@ export const CopyButton = memo(function CopyButton({
       window.clearTimeout(resetTimerRef.current)
       resetTimerRef.current = null
     }
-    const ok = await copyText(source, () => mountedRef.current)
+    const ok = await copyTextToClipboard(source, { shouldFallback: () => mountedRef.current })
     copyingRef.current = false
     if (!mountedRef.current) {
       return

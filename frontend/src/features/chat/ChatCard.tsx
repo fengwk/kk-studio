@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import { ChevronRight, MessageSquare, Pencil, Trash2 } from 'lucide-react'
 import { useNavigate } from 'react-router'
-import { formatBackendDate } from '@/features/chat/chat-utils'
+import { formatBackendDate } from '@/shared/lib/date-format'
 import { useI18n } from '@/shared/i18n'
 import { ResourceCard } from '@/shared/ui/cards/ResourceCard'
 import { Button } from '@/shared/ui/controls/Button'

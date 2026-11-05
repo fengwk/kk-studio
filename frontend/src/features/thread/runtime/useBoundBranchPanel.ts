@@ -24,6 +24,7 @@ import { createBuiltinExecution } from '@/shared/api/contracts/ai-runtime'
 import { harnessService } from '@/shared/api/harness-service'
 import { isConflictReason } from '@/shared/api/client'
 import { queryKeys } from '@/shared/lib/query-keys'
+import { errorDetailMessage } from '@/shared/lib/user-facing-error'
 import { translate } from '@/shared/i18n'
 import { mergeThreadSnapshotCache } from '@/features/thread/runtime/thread-snapshot-cache'
 import {
@@ -94,13 +95,7 @@ function mergeQueuedCommands(
 
 /** 请求失败时把原始错误映射为可读 message（与 controller 同风格）。 */
 function errorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim()) {
-    return error.message
-  }
-  if (typeof error === 'string' && error.trim()) {
-    return error
-  }
-  return translate('ai.runtime.action.updateYoloFailed')
+  return errorDetailMessage(error) ?? translate('ai.runtime.action.updateYoloFailed')
 }
 
 /**

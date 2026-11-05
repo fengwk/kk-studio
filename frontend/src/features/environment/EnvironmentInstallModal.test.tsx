@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { setLocale } from '@/shared/i18n'
 import { EnvironmentInstallModal } from './EnvironmentInstallModal'
 import { environmentService } from '@/features/environment/environment-service'
-import { copyTextToClipboard } from './clipboard'
+import { copyTextToClipboard } from '@/shared/lib/clipboard'
 import { ApiError } from '@/shared/api/client'
 import { chooseSelectOption } from '@/test-support/chooseSelectOption'
 import type {
@@ -22,7 +22,7 @@ vi.mock('@/features/environment/environment-service', () => ({
     createInstallCode: vi.fn(),
   },
 }))
-vi.mock('./clipboard', () => ({ copyTextToClipboard: vi.fn() }))
+vi.mock('@/shared/lib/clipboard', () => ({ copyTextToClipboard: vi.fn() }))
 
 const saved: EnvironmentInstallConfigDTO = {
   operatingSystem: 'windows',

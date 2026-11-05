@@ -27,7 +27,7 @@ export const CANONICAL_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9
 
 export type CanonicalUuidString = `${string}-${string}-${string}-${string}-${string}`
 
-/** shape 校验通过后把字符串收窄为规范 UUID 字符串类型。 */
-export function isCanonicalUuid<T extends string = CanonicalUuidString>(value: string): value is T {
-  return CANONICAL_UUID_PATTERN.test(value)
+/** shape 校验（含未知输入）通过后把字符串收窄为规范 UUID 字符串类型。 */
+export function isCanonicalUuid<T extends string = CanonicalUuidString>(value: unknown): value is T {
+  return typeof value === 'string' && CANONICAL_UUID_PATTERN.test(value)
 }

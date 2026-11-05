@@ -12,7 +12,8 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import { useState } from 'react'
-import { formatFileSize, mediaKindOf } from '@/shared/lib/upload-file'
+import { formatByteCount } from '@/shared/lib/format-bytes'
+import { mediaKindOf } from '@/shared/lib/upload-file'
 import {
   uploadOccurrence,
   type AttachmentUpload,
@@ -82,7 +83,7 @@ export function AttachmentStrip({
             ? `${t('ai.runtime.composer.uploading')} ${progress}%`
             : upload.status === 'complete_unknown'
               ? t('ai.runtime.composer.completeUnknown')
-              : formatFileSize(upload.sizeBytes)
+              : formatByteCount(upload.sizeBytes)
         const isImage = mediaKindOf(upload.mediaType) === 'image'
         return (
           <div

@@ -7,8 +7,8 @@ import {
   formatTimestamp,
   isEnvironmentRuntimeUnavailableError,
   presentUpdateProgress,
-  timestampMillis,
 } from '@/features/environment/environment-utils'
+import { timestampMillis } from '@/shared/lib/date-format'
 import { EnvironmentInstallModal } from '@/features/environment/EnvironmentInstallModal'
 import { EnvironmentManagementModal } from '@/features/environment/EnvironmentManagementModal'
 import { CreateCard } from '@/shared/ui/feedback/CreateCard'

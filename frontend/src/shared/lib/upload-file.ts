@@ -1,4 +1,5 @@
 import { translate } from '@/shared/i18n'
+import { formatByteCount } from '@/shared/lib/format-bytes'
 import { createUuid } from '@/shared/lib/uuid'
 import type { StorageMediaKind } from '@/shared/api/contracts/storage'
 
@@ -24,17 +25,11 @@ export function mediaKindOf(mediaType: string): StorageMediaKind {
   return 'file'
 }
 
-export function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}
-
 /** 校验文件大小；超限返回可展示的错误信息。 */
 export function validateUploadFile(file: File): string | null {
   const limit = UPLOAD_LIMITS[mediaKindOf(file.type)]
   if (file.size > limit) {
-    return translate('ai.runtime.composer.fileTooLarge', { name: file.name, limit: formatFileSize(limit) })
+    return translate('ai.runtime.composer.fileTooLarge', { name: file.name, limit: formatByteCount(limit) })
   }
   return null
 }

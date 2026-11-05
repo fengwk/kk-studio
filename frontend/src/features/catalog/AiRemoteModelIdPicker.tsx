@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { agentService } from '@/shared/api/agent-service'
-import { ApiError } from '@/shared/api/client'
+import { ApiError, apiErrorDetail } from '@/shared/api/client'
+import { errorDetailMessage } from '@/shared/lib/user-facing-error'
 import { Button } from '@/shared/ui/controls/Button'
 import { useI18n } from '@/shared/i18n'
 import './ai-remote-model-id-picker.css'
@@ -12,10 +13,11 @@ type LoadState =
   | { status: 'failed'; providerName: string; message: string }
 
 function failureMessage(error: unknown): string {
-  if (error instanceof ApiError && typeof error.errors?.detail === 'string') {
-    return `${error.message} ${error.errors.detail}`
+  if (error instanceof ApiError) {
+    const detail = apiErrorDetail(error)
+    return detail == null ? error.message : `${error.message} ${detail}`
   }
-  return error instanceof Error ? error.message : String(error)
+  return errorDetailMessage(error) ?? String(error)
 }
 
 /**

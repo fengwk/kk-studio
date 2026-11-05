@@ -1,4 +1,5 @@
 import type { PaneTarget } from '@/features/thread/runtime/agent-pane'
+import { errorDetailMessage } from '@/shared/lib/user-facing-error'
 
 export type PaneInteraction =
   | 'subagent'
@@ -63,8 +64,5 @@ export interface PaneReport {
 }
 
 export function errorMessage(error: unknown, fallback: string): string {
-  if (error instanceof Error && error.message.trim()) {
-    return error.message
-  }
-  return fallback
+  return errorDetailMessage(error) ?? fallback
 }

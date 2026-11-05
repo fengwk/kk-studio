@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import {
   appendUniqueChats,
   filterChats,
-  formatBackendDate,
   mergeChatIntoList,
   mergeChatPage,
   preferNewerChat,
@@ -164,24 +163,3 @@ describe('filterChats', () => {
   })
 })
 
-describe('formatBackendDate', () => {
-  it('returns a placeholder for non-finite values without throwing', () => {
-    expect(formatBackendDate(Number.NaN)).toBe('-')
-    expect(formatBackendDate(Number.POSITIVE_INFINITY)).toBe('-')
-    expect(formatBackendDate(1e20)).toBe('-')
-  })
-
-  it('formats epoch seconds in local time independently of the host timezone', () => {
-    // Intl is an independent local-time oracle; fixed timezone browser cases cover the wire paths.
-    const milliseconds = Date.parse('2026-10-08T13:15:00Z')
-    const parts = new Intl.DateTimeFormat('en-CA', {
-      year: 'numeric', month: '2-digit', day: '2-digit',
-      hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
-    }).formatToParts(milliseconds)
-    const fields = Object.fromEntries(parts.map(({ type, value }) => [type, value]))
-    const expected = `${fields.year}-${fields.month}-${fields.day} ${fields.hour}:${fields.minute}`
-    expect(formatBackendDate(milliseconds / 1000)).toBe(expected)
-    // fractional seconds keep the same minute
-    expect(formatBackendDate(milliseconds / 1000 + 0.25)).toBe(expected)
-  })
-})

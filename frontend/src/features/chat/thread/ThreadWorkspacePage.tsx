@@ -10,6 +10,7 @@ import { agentService } from '@/shared/api/agent-service'
 import { environmentService } from '@/features/environment/environment-service'
 import { fetchThreadSnapshot } from '@/features/thread/runtime/thread-snapshot-cache'
 import { queryKeys } from '@/shared/lib/query-keys'
+import { isCanonicalUuid } from '@/shared/lib/uuid'
 import { useI18n } from '@/shared/i18n'
 import { shouldDeferToBlockingModal } from '@/shared/ui/blocking-overlay'
 import '@/features/chat/chat-workspace.css'
@@ -20,15 +21,13 @@ import type {
   HarnessThreadDTO,
 } from '@/shared/api/generated/contracts'
 
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-
 export function ThreadWorkspacePage() {
   const { threadId = '' } = useParams<{ threadId: string }>()
   const navigate = useNavigate()
   const { t } = useI18n()
   const queryClient = useQueryClient()
 
-  const isValidUuid = Boolean(threadId) && UUID_PATTERN.test(threadId)
+  const isValidUuid = Boolean(threadId) && isCanonicalUuid(threadId)
 
   const threadQuery = useQuery({
     queryKey: queryKeys.threads.snapshot(threadId),

@@ -1,4 +1,4 @@
-import { CANONICAL_UUID_PATTERN } from '@/shared/lib/uuid'
+import { isCanonicalUuid } from '@/shared/lib/uuid'
 
 /** 每个浏览器 tab 唯一一份 IDE 呈现状态；新 tab 可继承同 scope 的最后状态。 */
 export interface IdePresentation {
@@ -78,10 +78,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
   const keys = Object.keys(value)
   return keys.length === expected.length && keys.every((key) => expected.includes(key))
-}
-
-function isCanonicalUuid(value: unknown): value is string {
-  return typeof value === 'string' && CANONICAL_UUID_PATTERN.test(value)
 }
 
 function parsePresentation(value: unknown): IdePresentation | null {

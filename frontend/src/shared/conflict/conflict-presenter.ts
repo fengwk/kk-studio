@@ -1,4 +1,4 @@
-import { ApiError, isConflictError } from '@/shared/api/client'
+import { ApiError, apiErrorDetail, isConflictError } from '@/shared/api/client'
 import { translate } from '@/shared/i18n'
 
 export interface ConflictPresentation {
@@ -18,10 +18,7 @@ export function presentConflict(error: unknown): ConflictPresentation | null {
         ? error.code
         : 'CONFLICT'
   const detail =
-    error instanceof ApiError && typeof error.errors?.detail === 'string'
-      ? error.errors.detail
-      : error instanceof Error
-        ? error.message
-        : translate('shared.requestFailed')
+    apiErrorDetail(error)
+    ?? (error instanceof Error ? error.message : translate('shared.requestFailed'))
   return { reason, detail }
 }

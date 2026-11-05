@@ -1,4 +1,4 @@
-import { ApiError, isNotFoundError } from '@/shared/api/client'
+import { ApiError, apiErrorDetail, isNotFoundError } from '@/shared/api/client'
 import type {
   EnvironmentIdeOpenViewDTO,
   EnvironmentIdeViewDTO,
@@ -64,16 +64,7 @@ export function ideErrorText(error: unknown): string {
 }
 
 export function ideErrorDetail(error: unknown): string {
-  if (error instanceof ApiError) {
-    const detail = error.errors?.detail
-    if (typeof detail === 'string' && detail.length > 0) {
-      return detail
-    }
-  }
-  if (error instanceof Error) {
-    return error.message
-  }
-  return ''
+  return apiErrorDetail(error) ?? (error instanceof Error ? error.message : '')
 }
 
 export function containsSensitivePath(value: string): boolean {

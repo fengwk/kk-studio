@@ -1,4 +1,23 @@
 import { translate, type TranslationKey } from '@/shared/i18n'
+import { apiErrorDetail } from '@/shared/api/client'
+
+/**
+ * 从任意错误中取出可展示的失败详情：后端去敏 detail 优先，其次 Error/字符串文本。
+ * 没有任何可展示文本时返回 null，由调用方决定兜底文案。
+ */
+export function errorDetailMessage(error: unknown): string | null {
+  const detail = apiErrorDetail(error)
+  if (detail != null) {
+    return detail
+  }
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return error.message
+  }
+  if (typeof error === 'string' && error.trim().length > 0) {
+    return error
+  }
+  return null
+}
 
 /** 将底层英文/技术错误转成用户可读文案。 */
 export function toUserFacingErrorMessage(error: unknown): string {

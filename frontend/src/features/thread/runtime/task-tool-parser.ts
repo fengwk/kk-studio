@@ -1,3 +1,5 @@
+import { isCanonicalUuid } from '@/shared/lib/uuid'
+
 export interface TaskToolArguments {
   subagentType: string | null
   prompt: string | null
@@ -9,9 +11,6 @@ export interface TaskToolReceipt {
   status: 'accepted'
   threadId: string
 }
-
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 /**
  * 解析 task 调用参数 JSON（后端 TaskTool.parseArguments 的只读投影）：
@@ -51,7 +50,7 @@ export function parseTaskReceipt(value: unknown): TaskToolReceipt | null {
     return null
   }
   const threadId = value.thread_id.trim()
-  if (!UUID_PATTERN.test(threadId)) {
+  if (!isCanonicalUuid(threadId)) {
     return null
   }
   return {

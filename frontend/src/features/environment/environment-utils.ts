@@ -1,5 +1,7 @@
 import { includesSearch, naturalNameCompare } from '@/shared/lib/search-utils'
 import { ApiError } from '@/shared/api/client'
+import { formatDateTime24 } from '@/shared/lib/date-format'
+import { formatByteCount } from '@/shared/lib/format-bytes'
 import type { AppLocale } from '@/shared/i18n'
 import type {
   EnvironmentCardDTO,
@@ -21,23 +23,6 @@ export function environmentEventLevelClass(level: string): string {
   return `is-${level.toLowerCase()}`
 }
 
-export function formatDateTime24(date: Date, locale: AppLocale): string {
-  return date.toLocaleString(locale, {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  })
-}
-
-/** 服务端 Instant 是 epoch 秒（可带小数，如 `1791332559.229`）；转为毫秒，空值为 null。 */
-export function timestampMillis(value: number | null | undefined): number | null {
-  return value == null ? null : value * 1000
-}
-
 export function formatTimestamp(value: number | null | undefined, locale: AppLocale): string {
   return value == null ? '' : formatDateTime24(new Date(value * 1000), locale)
 }
@@ -49,27 +34,6 @@ export function isEnvironmentRuntimeUnavailableError(error: unknown): boolean {
     error.status === 409 &&
     error.code === 'environment_unavailable'
   )
-}
-
-const BYTE_UNITS = ['B', 'KB', 'MB', 'GB', 'TB'] as const
-
-/**
- * 字节计数在 wire 中是十进制字符串。展示时按 1024 进制缩放并保留一位小数；
- * 非法或不安全整数保持原文，避免把未知值伪装成具体容量。
- */
-export function formatByteCount(value: string): string {
-  const bytes = Number(value)
-  if (!Number.isSafeInteger(bytes) || bytes < 0) {
-    return value
-  }
-  let amount = bytes
-  let unit = 0
-  while (amount >= 1024 && unit < BYTE_UNITS.length - 1) {
-    amount /= 1024
-    unit += 1
-  }
-  const text = unit === 0 ? String(amount) : amount.toFixed(1).replace(/\.0$/u, '')
-  return `${text} ${BYTE_UNITS[unit]}`
 }
 
 /**

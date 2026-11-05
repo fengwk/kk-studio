@@ -678,7 +678,7 @@ describe('ThreadComposer and commands', () => {
       await user.click(retryBtn)
 
       expect(fakeStorage.completeUpload).toHaveBeenCalledWith('upload-id-same-123')
-      expect(await screen.findByText('2.0 KB')).toBeInTheDocument()
+      expect(await screen.findByText('2 KB')).toBeInTheDocument()
     })
 
     it('fails closed in ThreadComposer when Storage quota is exceeded, calling completeUpload 0 times', async () => {
@@ -2372,17 +2372,17 @@ describe('ThreadComposer attachment pills', () => {
 
     const bigVideo = new File([new Uint8Array(100 * 1024 * 1024 + 1)], 'huge.mp4', { type: 'video/mp4' })
     fireEvent.paste(editor, { clipboardData: { files: [bigVideo], getData: () => '' } })
-    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('huge.mp4 上传失败：huge.mp4 超过 100.0 MB 上传限制'))
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('huge.mp4 上传失败：huge.mp4 超过 100 MB 上传限制'))
     expect(document.querySelectorAll('.composer-pill')).toHaveLength(0)
 
     const bigAudio = new File([new Uint8Array(15 * 1024 * 1024 + 1)], 'huge.mp3', { type: 'audio/mpeg' })
     fireEvent.paste(editor, { clipboardData: { files: [bigAudio], getData: () => '' } })
-    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('huge.mp3 上传失败：huge.mp3 超过 15.0 MB 上传限制'))
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('huge.mp3 上传失败：huge.mp3 超过 15 MB 上传限制'))
     expect(document.querySelectorAll('.composer-pill')).toHaveLength(0)
 
     const bigFile = new File([new Uint8Array(30 * 1024 * 1024 + 1)], 'huge.bin', { type: 'application/octet-stream' })
     fireEvent.paste(editor, { clipboardData: { files: [bigFile], getData: () => '' } })
-    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('huge.bin 上传失败：huge.bin 超过 30.0 MB 上传限制'))
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('huge.bin 上传失败：huge.bin 超过 30 MB 上传限制'))
     expect(document.querySelectorAll('.composer-pill')).toHaveLength(0)
   })
 
