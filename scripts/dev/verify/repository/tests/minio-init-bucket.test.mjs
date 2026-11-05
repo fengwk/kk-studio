@@ -45,13 +45,18 @@ function runScript(sandbox, { env = {}, unset = [] } = {}) {
   writeFileSync(sandbox.log, '')
   const childEnv = {
     ...process.env,
+  }
+  for (const name of ['MINIO_ALIAS', 'MINIO_ENDPOINT', 'FAKE_MC_FAIL_ON']) {
+    delete childEnv[name]
+  }
+  Object.assign(childEnv, {
     PATH: `${sandbox.directory}:${process.env.PATH}`,
     FAKE_MC_CALL_LOG: sandbox.log,
     MINIO_ROOT_USER: USER,
     MINIO_ROOT_PASSWORD: PASSWORD,
     MINIO_BUCKET: BUCKET,
     ...env,
-  }
+  })
   for (const name of unset) {
     delete childEnv[name]
   }
@@ -73,6 +78,24 @@ test('the bootstrap runs alias set, mb, anonymous none and stat in that exact or
       `mb --ignore-existing local/${BUCKET}`,
       `anonymous set none local/${BUCKET}`,
       `stat local/${BUCKET}`,
+    ])
+  } finally {
+    rmSync(sandbox.directory, { recursive: true, force: true })
+  }
+})
+
+test('explicit alias and endpoint let host-side callers reuse the bootstrap', () => {
+  const sandbox = createSandbox()
+  try {
+    const run = runScript(sandbox, {
+      env: { MINIO_ALIAS: 'e2e-local', MINIO_ENDPOINT: 'http://127.0.0.1:9000' },
+    })
+    assert.equal(run.status, 0)
+    assert.deepEqual(run.calls, [
+      `alias set e2e-local http://127.0.0.1:9000 ${USER} ${PASSWORD}`,
+      `mb --ignore-existing e2e-local/${BUCKET}`,
+      `anonymous set none e2e-local/${BUCKET}`,
+      `stat e2e-local/${BUCKET}`,
     ])
   } finally {
     rmSync(sandbox.directory, { recursive: true, force: true })
