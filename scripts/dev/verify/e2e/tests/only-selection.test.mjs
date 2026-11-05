@@ -8,7 +8,7 @@ import test from 'node:test'
 import { REPOSITORY_ROOT } from '../../../tests/support/shell.mjs'
 
 // 在隔离的 shell fixture 中记录两个 runner 的实参，不启动服务或触碰真实报告。
-function runEntry(args) {
+function runEntry(args, matrixExit = 0) {
   const root = mkdtempSync(path.join(tmpdir(), 'e2e-selection-'))
   try {
     const entry = path.join(root, 'run.sh')
@@ -29,6 +29,7 @@ node() {
       printf '%s\\n' "$@" > "$STUB_ROOT/api-args"
       mkdir -p "$STUB_ROOT/reports/e2e/latest"
       printf 'API report\\n' > "$STUB_ROOT/reports/e2e/latest/report.md"
+      return "$STUB_MATRIX_EXIT"
       ;;
     */ui-smoke.mjs)
       printf '%s\\n' "$@" > "$STUB_ROOT/ui-args"
@@ -38,7 +39,7 @@ node() {
 }
 `)
     const result = spawnSync('bash', [entry, ...args], {
-      env: { ...process.env, STUB_ROOT: root },
+      env: { ...process.env, STUB_ROOT: root, STUB_MATRIX_EXIT: String(matrixExit) },
       encoding: 'utf8',
     })
     const readArgs = (name) => {
@@ -87,6 +88,13 @@ test('UI selection without --ui fails before startup', () => {
   assert.equal(result.ui, null)
 })
 
+test('a matrix selection error does not attach UI results to an old report', () => {
+  // API 选择或启动失败时不能继续写入可能属于上一次运行的报告。
+  const result = runEntry(['--ui', '--only', 'ui.agents.page_loads'], 2)
+  assert.equal(result.status, 2)
+  assert.equal(result.ui, null)
+})
+
 test('API runner permits an empty selection only for explicitly selected UI cases', () => {
   const runner = path.join(REPOSITORY_ROOT, 'scripts/dev/verify/e2e/run-matrix.mjs')
   for (const args of [
@@ -98,4 +106,10 @@ test('API runner permits an empty selection only for explicitly selected UI case
     assert.notEqual(result.status, 0, args.join(' '))
     assert.match(result.stderr, /No cases selected|--ui-only requires only UI case ids/)
   }
+  // 混选时即使另一个 API ID 有效，也不能静默忽略拼错的 ID。
+  const mixed = spawnSync(process.execPath, [
+    runner, '--only', 'canvas.function_fake_runtime', '--only', 'not-an-api-case', '--only', 'ui.agents.page_loads',
+  ], { encoding: 'utf8' })
+  assert.notEqual(mixed.status, 0)
+  assert.match(mixed.stderr, /unknown API case id: not-an-api-case/)
 })

@@ -230,6 +230,11 @@ node "$SCRIPT_DIR/run-matrix.mjs" "${MATRIX_ARGS[@]}"
 MATRIX_RC=$?
 set -e
 
+# 选择/启动错误不会生成新报告，不能把 UI 结果附加到上一次运行。
+if [ "$MATRIX_RC" -eq 2 ]; then
+  exit "$MATRIX_RC"
+fi
+
 # UI E2E 复用 latest 报告目录，把截图并入同一 run
 if [ "$WITH_UI" = "true" ] && { [ ${#ONLY_ARGS[@]} -eq 0 ] || [ ${#UI_ONLY_ARGS[@]} -gt 0 ]; }; then
   LATEST_DIR="$REPO_ROOT/reports/e2e/latest"

@@ -495,6 +495,12 @@ async function main(argv) {
     return 0
   }
 
+  const unknownApiIds = args.only.filter(
+    (id) => !id.startsWith('ui.') && !ALL_CASES.some((c) => c.id === id),
+  )
+  if (unknownApiIds.length) {
+    throw new Error(`unknown API case id: ${unknownApiIds.join(', ')}`)
+  }
   const selected = ALL_CASES.filter((c) => caseEnabled(c, args))
   if (!selected.length && !args.uiOnly) {
     console.error('No cases selected')

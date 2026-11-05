@@ -876,8 +876,8 @@ async function main(argv) {
       const nodeElement = (nodeId) => page.locator(`.react-flow__node[data-id="${nodeId}"]`)
       const panel = page.locator('.generation-panel')
       const promptInput = panel.locator('textarea.generation-prompt-input')
-      const modelSelect = panel.locator('select[aria-label="模型"], select[aria-label="Model"]')
-      const ratioSelect = panel.locator('select[aria-label="ratio"]')
+      const modelSelect = panel.getByRole('button', { name: /^(模型|Model)$/ })
+      const ratioSelect = panel.getByRole('button', { name: 'ratio', exact: true })
 
       const addImageFunctionNode = async (expectedNodes) => {
         await page.locator('.canvas-tool-rail .dock-add').click()
@@ -925,6 +925,9 @@ async function main(argv) {
       {
         await goto('/canvas')
         await page.getByRole('button', { name: /^(Create a new canvas|Create new canvas|创建新画布)$/ }).click()
+        const dialog = page.getByRole('dialog', { name: /^(Create new canvas|创建新画布)$/ })
+        await dialog.getByRole('textbox', { name: /^(Canvas name|画布名称)$/ }).fill(`E2E function ${flowStamp}`)
+        await dialog.getByRole('button', { name: /^(Create and open|创建并进入)$/ }).click()
         await page.locator('#canvasStage').waitFor({ state: 'visible', timeout: 15_000 })
         canvasId = new URL(page.url()).pathname.split('/').pop()
         assert(
@@ -938,13 +941,13 @@ async function main(argv) {
         const nodeAId = snap.nodes[0].id
         const nodeAName = snap.nodes[0].name
         await selectNode(nodeAId)
-        assert(await modelSelect.inputValue() === 'fake-image', 'Canvas image node must bind fake-image')
+        assert(await modelSelect.getAttribute('data-value') === 'fake-image', 'Canvas image node must bind fake-image')
         assert(nodeById(snap, nodeAId).function.name === 'fake-image', JSON.stringify(nodeById(snap, nodeAId).function))
 
         // 2. 编辑 prompt/ratio 并等待自动保存落库。
         const promptText = `e2e-canvas-prompt-${flowStamp}`
         await promptInput.fill(promptText)
-        await ratioSelect.selectOption('16:9')
+        await selectCustomOption(page, ratioSelect, '16:9')
         await page.waitForFunction(
           (text) => document.querySelector('#saveState')?.textContent?.trim() !== '保存中…',
           promptText,
@@ -972,7 +975,7 @@ async function main(argv) {
         await page.locator('#canvasStage').waitFor({ state: 'visible', timeout: 15_000 })
         await selectNode(nodeAId)
         assert(await promptInput.inputValue() === promptText, 'prompt did not survive reload')
-        assert(await ratioSelect.inputValue() === '16:9', 'ratio did not survive reload')
+        assert(await ratioSelect.getAttribute('data-value') === '16:9', 'ratio did not survive reload')
 
         // 4. 运行首个节点并验证成功资源。
         await runNode(nodeAId)
@@ -1120,7 +1123,10 @@ async function main(argv) {
     await page.getByRole('button', { name: `编辑 ${modelRef}` }).click()
     await page.getByRole('textbox', { name: 'Description', exact: true }).fill('updated by UI E2E')
     await page.getByRole('button', { name: '保存修改' }).click()
+    await page.getByRole('dialog').waitFor({ state: 'hidden', timeout: 20_000 })
     const updatedModelRef = await resourceCardTitle(page, name)
+    await page.locator('.resource-card').filter({ hasText: updatedModelRef })
+      .getByText('updated by UI E2E', { exact: true }).waitFor({ state: 'visible', timeout: 20_000 })
     await shot(caseArt, 'model-updated')
 
     // 删除确认
@@ -1188,7 +1194,7 @@ async function main(argv) {
     await page.locator('.resource-grid').getByText('新建 Provider', { exact: true }).click()
     await page.getByRole('textbox', { name: 'Name', exact: true }).fill(name)
     await page.getByLabel('Base URL').fill('https://example.com/v1')
-    await page.getByLabel('API Key', { exact: true }).fill('sk-e2e-ui-test')
+    await page.getByRole('dialog').getByLabel('API Key').fill('sk-e2e-ui-test')
     await page.getByRole('button', { name: '确认创建' }).click()
     await page.getByText(name, { exact: true }).first().waitFor({ state: 'visible', timeout: 20_000 })
     await shot(caseArt, 'provider-created')
@@ -1197,7 +1203,11 @@ async function main(argv) {
     await page.getByLabel('Base URL').fill('https://example.com/v2')
     // 编辑时不改 key（空 credential 保留）
     await page.getByRole('button', { name: '保存修改' }).click()
-    await page.getByText(name, { exact: true }).first().waitFor({ state: 'visible', timeout: 20_000 })
+    await page.getByRole('dialog').waitFor({ state: 'hidden', timeout: 20_000 })
+    const providerCard = page.locator('.resource-card').filter({ hasText: name })
+    await providerCard.getByText('https://example.com/v2', { exact: true }).first()
+      .waitFor({ state: 'visible', timeout: 20_000 })
+    await providerCard.getByText('已配置', { exact: true }).waitFor({ state: 'visible', timeout: 20_000 })
     await shot(caseArt, 'provider-updated')
 
     await page.getByRole('button', { name: `删除 ${name}` }).click()
