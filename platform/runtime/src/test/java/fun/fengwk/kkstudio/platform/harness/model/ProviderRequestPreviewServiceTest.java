@@ -85,6 +85,8 @@ import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
@@ -513,10 +515,27 @@ class ProviderRequestPreviewServiceTest {
                     userMessage("hello"))));
   }
 
-  /** 组预览按首个实际成员物化，但对外仍保留逻辑模型组名称。 */
+  /** 组预览按首个实际成员及其 variants 解释历史，但对外仍保留逻辑模型组名称。 */
   @Test
   void groupPreviewMaterializesTheFirstActualMember() {
-    EntryPath idle = closedTurnPath(BELOW_THRESHOLD_USAGE);
+    List<Entry> history = new ArrayList<>(closedTurnPath(BELOW_THRESHOLD_USAGE).entries());
+    history.set(
+        3,
+        new Entry(
+            TURN_ONE_ASSISTANT_ID,
+            SESSION_ID,
+            TURN_ONE_USER_ID,
+            assistantWithModel("history assistant " + "a".repeat(50_000), "group", "other"),
+            NOW));
+    history.set(
+        history.size() - 2,
+        new Entry(
+            TURN_TWO_ASSISTANT_ID,
+            SESSION_ID,
+            TURN_TWO_USER_ID,
+            assistantWithModel("second assistant", "model", "other"),
+            NOW));
+    EntryPath idle = new EntryPath(history);
     when(runtime.getThreadSnapshot(THREAD_ID))
         .thenReturn(snapshot(thread(TURN_TWO_END_ID, 3L), idle, List.of()));
     ModelRequestSpec base = spec();
@@ -543,7 +562,7 @@ class ProviderRequestPreviewServiceTest {
             GENERATION_ID,
             logical,
             base.variant(),
-            member.modelVariants(),
+            List.of(base.variant(), new ModelVariant("other", "low")),
             base.outputTokens(),
             base.systemInstruction(),
             base.toolBindings(),
@@ -570,6 +589,13 @@ class ProviderRequestPreviewServiceTest {
     verify(providerResolution)
         .resolve(eq(ProviderType.OPENAI), eq(GENERATION_ID), request.capture());
     assertEquals("model", request.getValue().model().modelName());
+    List<ProviderMessage> assistants =
+        request.getValue().messages().stream()
+            .filter(message -> message.role() == ProviderMessageRole.ASSISTANT)
+            .toList();
+    assertEquals(2, assistants.size());
+    assertNull(assistants.get(0).reasoningEffort());
+    assertEquals("max", assistants.get(1).reasoningEffort());
     assertEquals("group", dto.getModelName());
   }
 
@@ -1137,7 +1163,7 @@ class ProviderRequestPreviewServiceTest {
     assertEquals(COMPACTION_OUTPUT_BUDGET / 2, requestCaptor.getValue().outputTokens());
   }
 
-  /** 测试意图：压缩历史预览在应用 child 约束时保留模型组与完整 variants，并按首个实际成员物化。 */
+  /** 测试意图：压缩历史预览在应用 child 约束时保留模型组，并按首个实际成员物化。 */
   @Test
   void compactionPreviewRetainsGroupAndVariantsUnderConstraints() {
     ModelRequestSpec base =
@@ -1795,6 +1821,19 @@ class ProviderRequestPreviewServiceTest {
     return new MessagePayload(
         new AgentMessage(AgentMessageRole.ASSISTANT, List.of(new TextMessageContent(text))),
         new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage, null),
+        null);
+  }
+
+  private static MessagePayload assistantWithModel(String text, String model, String variant) {
+    return new MessagePayload(
+        new AgentMessage(AgentMessageRole.ASSISTANT, List.of(new TextMessageContent(text))),
+        new AssistantMessageMetadata(
+            GenerationStopReason.COMPLETE,
+            BELOW_THRESHOLD_USAGE,
+            null,
+            ModelSelection.model(model, variant),
+            null,
+            null),
         null);
   }
 
