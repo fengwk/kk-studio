@@ -16,10 +16,7 @@ import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwner;
 import fun.fengwk.kkstudio.platform.vfs.SessionFileQueryService;
-import fun.fengwk.kkstudio.platform.vfs.SessionFileQueryService.SessionFileAccessException;
-import fun.fengwk.kkstudio.platform.vfs.SessionFileQueryService.SessionFileContentException;
 import fun.fengwk.kkstudio.platform.vfs.SessionFileQueryService.SessionFileDownload;
-import fun.fengwk.kkstudio.platform.vfs.SessionFileQueryService.SessionFileNotFoundException;
 import fun.fengwk.kkstudio.share.runtime.HarnessSessionFileContentDTO;
 import fun.fengwk.kkstudio.share.runtime.HarnessSessionFileListDTO;
 
@@ -77,36 +74,21 @@ public class StudioSessionFileController {
       @RequestParam String ownerKind,
       @RequestParam String ownerId,
       @RequestParam String path) {
-    try {
-      SessionFileDownload download =
-          queryService.download(owner(ownerKind, ownerId), id(sessionId), path);
-      return ResponseEntity.ok()
-          .contentType(MediaType.parseMediaType(download.mediaType()))
-          .header(
-              HttpHeaders.CONTENT_DISPOSITION,
-              ContentDisposition.attachment()
-                  .filename(download.fileName(), StandardCharsets.UTF_8)
-                  .build()
-                  .toString())
-          .body(download.bytes());
-    } catch (SessionFileNotFoundException | SessionFileAccessException notFound) {
-      throw notFound(notFound);
-    }
+    SessionFileDownload download =
+        queryService.download(owner(ownerKind, ownerId), id(sessionId), path);
+    return ResponseEntity.ok()
+        .contentType(MediaType.parseMediaType(download.mediaType()))
+        .header(
+            HttpHeaders.CONTENT_DISPOSITION,
+            ContentDisposition.attachment()
+                .filename(download.fileName(), StandardCharsets.UTF_8)
+                .build()
+                .toString())
+        .body(download.bytes());
   }
 
   private static <T> ApiResponse<T> translate(Supplier<T> action) {
-    try {
-      return ApiResponse.ok(action.get());
-    } catch (SessionFileNotFoundException | SessionFileAccessException notFound) {
-      throw notFound(notFound);
-    } catch (SessionFileContentException unreadable) {
-      throw new ResponseStatusException(
-          HttpStatus.UNPROCESSABLE_CONTENT, unreadable.getMessage(), unreadable);
-    }
-  }
-
-  private static ResponseStatusException notFound(RuntimeException error) {
-    return new ResponseStatusException(HttpStatus.NOT_FOUND, error.getMessage(), error);
+    return ApiResponse.ok(action.get());
   }
 
   /** owner 参数格式非法（空白等）与越权不可区分：统一返回 404 而不是 500。 */

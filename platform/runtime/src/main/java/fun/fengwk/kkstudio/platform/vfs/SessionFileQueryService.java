@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.platform.vfs;
 
 import org.springframework.stereotype.Service;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.harness.read.PlatformReadException;
 import fun.fengwk.kkstudio.platform.harness.read.TextReadWindow;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwner;
@@ -88,18 +89,18 @@ public class SessionFileQueryService {
     SessionFile file =
         fileStore
             .find(sessionId, relative)
-            .orElseThrow(() -> new SessionFileNotFoundException(sessionPath(sessionId, relative)));
+            .orElseThrow(() -> fileNotFound(sessionPath(sessionId, relative)));
     byte[] bytes =
         fileStore
             .read(sessionId, relative)
-            .orElseThrow(() -> new SessionFileNotFoundException(sessionPath(sessionId, relative)));
+            .orElseThrow(() -> fileNotFound(sessionPath(sessionId, relative)));
     String text;
     try {
       text =
           TextReadWindow.format(
               bytes, offset, limit, columnOffset, sessionPath(sessionId, relative), deadline());
     } catch (PlatformReadException invalid) {
-      throw new SessionFileContentException(invalid.getMessage());
+      throw DomainException.validation("session_file", invalid.getMessage(), invalid);
     }
     HarnessSessionFileContentDTO dto = new HarnessSessionFileContentDTO();
     dto.setSessionId(sessionId.toString());
@@ -118,11 +119,11 @@ public class SessionFileQueryService {
     SessionFile file =
         fileStore
             .find(sessionId, relative)
-            .orElseThrow(() -> new SessionFileNotFoundException(sessionPath(sessionId, relative)));
+            .orElseThrow(() -> fileNotFound(sessionPath(sessionId, relative)));
     byte[] bytes =
         fileStore
             .read(sessionId, relative)
-            .orElseThrow(() -> new SessionFileNotFoundException(sessionPath(sessionId, relative)));
+            .orElseThrow(() -> fileNotFound(sessionPath(sessionId, relative)));
     StorageBlob blob = blobManager.getBlob(file.blobId());
     String mediaType =
         blob == null || blob.getMediaType() == null || blob.getMediaType().isBlank()
@@ -142,17 +143,16 @@ public class SessionFileQueryService {
         ownerships.stream()
             .filter(candidate -> owner.kind().equals(candidate.kind()))
             .findFirst()
-            .orElseThrow(
-                () -> new SessionFileAccessException("unknown session owner: " + owner.kind()));
+            .orElseThrow(() -> accessDenied("unknown session owner: " + owner.kind()));
     boolean owned;
     try {
       owned = ownership.ownsSession(owner, sessionId);
     } catch (IllegalArgumentException malformedOwner) {
       // owner id 格式非法与「不属于该 owner」在面板 API 上不可区分：统一按不存在处理，不泄漏解析细节。
-      throw new SessionFileAccessException("session is not owned by the given owner");
+      throw accessDenied("session is not owned by the given owner");
     }
     if (!owned) {
-      throw new SessionFileAccessException("session is not owned by the given owner");
+      throw accessDenied("session is not owned by the given owner");
     }
   }
 
@@ -167,11 +167,11 @@ public class SessionFileQueryService {
   /** 文件参数：必须是本会话下的文件路径。 */
   private static String relativeFile(UUID sessionId, String path) {
     if (path == null || path.isBlank()) {
-      throw new SessionFileAccessException("file path is required");
+      throw accessDenied("file path is required");
     }
     String relative = relativePath(sessionId, path);
     if (relative.isEmpty()) {
-      throw new SessionFileAccessException("file path must point to a file");
+      throw accessDenied("file path must point to a file");
     }
     return relative;
   }
@@ -181,13 +181,13 @@ public class SessionFileQueryService {
     try {
       target = VfsPath.parse(path);
     } catch (IllegalArgumentException invalid) {
-      throw new SessionFileAccessException(invalid.getMessage());
+      throw accessDenied(invalid.getMessage());
     }
     if (target.kind() != VfsPath.Kind.SESSION_DIR && target.kind() != VfsPath.Kind.SESSION_FILE) {
-      throw new SessionFileAccessException("path must be inside the session directory: " + path);
+      throw accessDenied("path must be inside the session directory: " + path);
     }
     if (!sessionId.equals(target.sessionId())) {
-      throw new SessionFileAccessException("path does not belong to the requested session");
+      throw accessDenied("path does not belong to the requested session");
     }
     return target.sessionPath();
   }
@@ -226,27 +226,11 @@ public class SessionFileQueryService {
     return ReadDeadline.after(READ_TIMEOUT);
   }
 
-  /** 会话文件面板请求被确定性拒绝：越权、未知 owner 或路径不属于该会话。 */
-  public static final class SessionFileAccessException extends RuntimeException {
-
-    public SessionFileAccessException(String message) {
-      super(message);
-    }
+  private static DomainException accessDenied(String message) {
+    return DomainException.notFound("session_file", message);
   }
 
-  /** 会话文件不存在。 */
-  public static final class SessionFileNotFoundException extends RuntimeException {
-
-    public SessionFileNotFoundException(String path) {
-      super("No such file: " + path);
-    }
-  }
-
-  /** 会话文件内容无法作为文本返回（例如二进制或超预算）。 */
-  public static final class SessionFileContentException extends RuntimeException {
-
-    public SessionFileContentException(String message) {
-      super(message);
-    }
+  private static DomainException fileNotFound(String path) {
+    return DomainException.notFound("session_file", "No such file: " + path);
   }
 }

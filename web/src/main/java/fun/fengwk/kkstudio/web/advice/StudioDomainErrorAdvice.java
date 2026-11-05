@@ -22,6 +22,7 @@ import fun.fengwk.kkstudio.web.controller.StudioAgentProviderController;
 import fun.fengwk.kkstudio.web.controller.StudioConfigSyncController;
 import fun.fengwk.kkstudio.web.controller.StudioEnvironmentController;
 import fun.fengwk.kkstudio.web.controller.StudioMcpServerController;
+import fun.fengwk.kkstudio.web.controller.StudioSessionFileController;
 import fun.fengwk.kkstudio.web.controller.StudioSkillCatalogController;
 import fun.fengwk.kkstudio.web.controller.StudioSystemSettingsController;
 import fun.fengwk.kkstudio.web.plugin.StudioPluginController;
@@ -47,6 +48,7 @@ import java.util.Map;
       CanvasResourceController.class,
       ChatController.class,
       StudioMcpServerController.class,
+      StudioSessionFileController.class,
       StudioEnvironmentController.class,
       StudioSkillCatalogController.class,
       StudioConfigSyncController.class,
