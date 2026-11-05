@@ -252,7 +252,7 @@ async function selectCustomOption(page, trigger, optionName) {
 }
 
 async function resourceCardTitle(page, name) {
-  const title = page.locator('.info-card h3').filter({ hasText: name }).first()
+  const title = page.locator('.resource-card h3').filter({ hasText: name }).first()
   await title.waitFor({ state: 'visible', timeout: 20_000 })
   const text = (await title.textContent())?.trim()
   assert(text, `resource card title is empty for ${name}`)
@@ -498,7 +498,7 @@ async function main(argv) {
     await expectVisibleText(page, '新建 Agent')
     await expectVisibleText(page, 'default-assistant')
     await page.getByRole('button', { name: '编辑 default-assistant' }).click()
-    const agentModal = page.locator('form.resource-modal-card')
+    const agentModal = page.getByRole('dialog')
     await agentModal.waitFor({ state: 'visible', timeout: 10_000 })
     const detailedOptions = agentModal.locator('.capability-option-detailed')
     await detailedOptions.first().waitFor({ state: 'visible', timeout: 10_000 })
@@ -565,12 +565,13 @@ async function main(argv) {
     assert(await environmentCards.count() > 0, 'environments page has no cards')
     for (const card of await environmentCards.all()) {
       const actions = card.locator('.resource-card-actions button')
-      // 环境卡能力集：安装/覆盖、卸载、管理、重新生成 Token、删除，卡内动作不得缺失或重复。
-      assert(await actions.count() === 5, 'environment card must expose Install, Uninstall, Manage, Rotate Token and Delete')
+      // 环境卡能力集不得缺失或重复。
+      assert(await actions.count() === 6, 'environment card must expose Install, Uninstall, Manage, Update Daemon, Rotate Token and Delete')
       for (const [name, pattern] of [
         ['Install', /安装|Install/],
         ['Uninstall', /卸载|Uninstall/],
         ['Manage', /管理|Manage/],
+        ['Update Daemon', /更新 Daemon|Update Daemon/],
         ['Rotate Token', /重新生成 Token|Rotate Token/],
         ['Delete', /删除|Delete/],
       ]) {
@@ -858,9 +859,8 @@ async function main(argv) {
       )
       // 目录必须暴露完整版本身份；前端把它作为 start 的 expectedVersion 回传。
       assert(
-        typeof fakeImage.version?.catalogEpoch === 'string'
-          && /^(0|[1-9][0-9]*)$/.test(fakeImage.version.catalogEpoch)
-          && typeof fakeImage.version?.definitionFingerprint === 'string'
+        fakeImage.version && Object.keys(fakeImage.version).length === 1
+          && typeof fakeImage.version.definitionFingerprint === 'string'
           && /^[0-9a-f]{64}$/.test(fakeImage.version.definitionFingerprint),
         `fake-image must expose a canonical version: ${JSON.stringify(fakeImage.version)}`,
       )
@@ -1111,7 +1111,7 @@ async function main(argv) {
     await goto('/models')
     await page.getByText('新建 Model', { exact: true }).click()
     await page.getByRole('textbox', { name: 'Name', exact: true }).fill(name)
-    await page.getByRole('textbox', { name: 'Model ID', exact: true }).fill(name)
+    await page.getByLabel('Model ID', { exact: true }).fill(name)
     await page.getByRole('button', { name: '确认创建' }).click()
     const modelRef = await resourceCardTitle(page, name)
     await shot(caseArt, 'model-created')
@@ -1168,18 +1168,16 @@ async function main(argv) {
     // 关闭可能残留的模态
     await page.keyboard.press('Escape')
     await page.waitForTimeout(200)
-    await page.locator('.cards-grid').getByText('新建 Model', { exact: true }).click()
+    await page.locator('.resource-grid').getByText('新建 Model', { exact: true }).click()
     await page.locator('form.modal-card, .modal-card').first().waitFor({ state: 'visible', timeout: 10_000 })
     const nameInput = page.getByRole('textbox', { name: 'Name', exact: true })
     await nameInput.fill('')
     await page.getByRole('button', { name: '确认创建' }).click()
     await page.waitForTimeout(400)
     await shot(caseArt, 'model-name-error')
-    const hasError =
-      (await page.locator('.field-error').count()) > 0 ||
-      (await page.locator('label.form-group.is-error').count()) > 0 ||
-      (await page.locator('.modal-card .is-error, .modal-error, .state-block').count()) > 0
-    assert(hasError, 'expected field/modal error for empty model name')
+    const nameError = nameInput.locator('xpath=ancestor::label').locator('.field-error')
+    await nameError.waitFor({ state: 'visible', timeout: 10_000 })
+    assert((await nameError.innerText()).trim().length > 0, 'expected a field error for empty model name')
     expectNoFatal(pageErrors, consoleErrors)
   })
 
@@ -1187,10 +1185,10 @@ async function main(argv) {
     const name = `e2e-ui-provider-${stamp}`
     await goto('/providers')
     await page.keyboard.press('Escape')
-    await page.locator('.cards-grid').getByText('新建 Provider', { exact: true }).click()
+    await page.locator('.resource-grid').getByText('新建 Provider', { exact: true }).click()
     await page.getByRole('textbox', { name: 'Name', exact: true }).fill(name)
     await page.getByLabel('Base URL').fill('https://example.com/v1')
-    await page.getByLabel('API Key（可选）').fill('sk-e2e-ui-test')
+    await page.getByLabel('API Key', { exact: true }).fill('sk-e2e-ui-test')
     await page.getByRole('button', { name: '确认创建' }).click()
     await page.getByText(name, { exact: true }).first().waitFor({ state: 'visible', timeout: 20_000 })
     await shot(caseArt, 'provider-created')

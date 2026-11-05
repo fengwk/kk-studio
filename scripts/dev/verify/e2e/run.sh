@@ -43,6 +43,8 @@ DISTRIBUTED=false
 LIST_ONLY=false
 DOCS_ONLY=false
 ONLY_ARGS=()
+UI_ONLY_ARGS=()
+API_ONLY_COUNT=0
 LEVEL_ARGS=()
 
 usage() {
@@ -94,7 +96,15 @@ while [ $# -gt 0 ]; do
       ;;
     --ui) WITH_UI=true; shift ;;
     --distributed) DISTRIBUTED=true; shift ;;
-    --only) ONLY_ARGS+=(--only "$2"); shift 2 ;;
+    --only)
+      ONLY_ARGS+=(--only "$2")
+      if [[ "$2" == ui.* ]]; then
+        UI_ONLY_ARGS+=(--only "$2")
+      else
+        API_ONLY_COUNT=$((API_ONLY_COUNT + 1))
+      fi
+      shift 2
+      ;;
     --level) LEVEL_ARGS+=(--level "$2"); shift 2 ;;
     --list) LIST_ONLY=true; shift ;;
     --docs) DOCS_ONLY=true; shift ;;
@@ -102,6 +112,10 @@ while [ $# -gt 0 ]; do
     *) die "unknown arg: $1" ;;
   esac
 done
+
+if [ ${#UI_ONLY_ARGS[@]} -gt 0 ] && [ "$WITH_UI" != "true" ]; then
+  die "UI case selection requires --ui"
+fi
 
 if [ "$LIST_ONLY" = "true" ]; then
   node "$SCRIPT_DIR/run-matrix.mjs" --list
@@ -205,6 +219,10 @@ if [ "$WITH_CANVAS_STORAGE" = "true" ]; then MATRIX_ARGS+=(--with-canvas-storage
 if [ "$WITH_CANVAS_FUNCTION" = "true" ]; then MATRIX_ARGS+=(--with-canvas-function); fi
 MATRIX_ARGS+=("${ONLY_ARGS[@]}")
 MATRIX_ARGS+=("${LEVEL_ARGS[@]}")
+if [ ${#UI_ONLY_ARGS[@]} -gt 0 ] && [ "$API_ONLY_COUNT" -eq 0 ]; then
+  # 仍由 API runner 建立本次报告，但不能把空的 API 选择误当作未知 API case。
+  MATRIX_ARGS+=(--ui-only)
+fi
 
 step "Running matrix"
 set +e
@@ -213,7 +231,7 @@ MATRIX_RC=$?
 set -e
 
 # UI E2E 复用 latest 报告目录，把截图并入同一 run
-if [ "$WITH_UI" = "true" ]; then
+if [ "$WITH_UI" = "true" ] && { [ ${#ONLY_ARGS[@]} -eq 0 ] || [ ${#UI_ONLY_ARGS[@]} -gt 0 ]; }; then
   LATEST_DIR="$REPO_ROOT/reports/e2e/latest"
   if [ ! -d "$LATEST_DIR" ]; then
     die "matrix report latest dir missing; cannot attach UI artifacts"
@@ -234,6 +252,7 @@ if [ "$WITH_UI" = "true" ]; then
   if [ "$WITH_CANVAS_FUNCTION" = "true" ]; then
     UI_ARGS+=(--with-canvas-function)
   fi
+  UI_ARGS+=("${UI_ONLY_ARGS[@]}")
   node "$SCRIPT_DIR/ui-smoke.mjs" "${UI_ARGS[@]}"
   UI_RC=$?
   set -e

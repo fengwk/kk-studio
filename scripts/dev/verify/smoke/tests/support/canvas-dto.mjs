@@ -47,9 +47,9 @@ export function runDto(nodeId, requestId, { status = 'SUCCEEDED', error = null, 
   }
 }
 
-/** 目录项版本身份：canonical 非负十进制 epoch + 该函数定义的 lowercase SHA-256。 */
+/** 目录项版本身份：该函数定义的 lowercase SHA-256。 */
 export function functionVersion(name) {
-  return { catalogEpoch: '7', definitionFingerprint: createHash('sha256').update(name).digest('hex') }
+  return { definitionFingerprint: createHash('sha256').update(name).digest('hex') }
 }
 
 /** CanvasFunctionDefinitionDTO 列表：name + 严格 object schema + 目录版本。 */

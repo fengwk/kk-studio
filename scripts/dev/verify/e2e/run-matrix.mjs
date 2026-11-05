@@ -353,6 +353,7 @@ function parseArgs(argv) {
     withCanvasFunction: false,
     distributed: false,
     only: [],
+    uiOnly: false,
     level: [],
     list: false,
     docs: false,
@@ -398,6 +399,9 @@ function parseArgs(argv) {
       case '--only':
         args.only.push(next())
         break
+      case '--ui-only':
+        args.uiOnly = true
+        break
       case '--level':
         args.level.push(next())
         break
@@ -427,6 +431,9 @@ function parseArgs(argv) {
   }
   if (!args.distributed && args.baseUrlB) {
     throw new Error('--base-url-b requires --distributed')
+  }
+  if (args.uiOnly && (!args.only.length || !args.only.every((id) => id.startsWith('ui.')))) {
+    throw new Error('--ui-only requires only UI case ids')
   }
   return args
 }
@@ -489,7 +496,7 @@ async function main(argv) {
   }
 
   const selected = ALL_CASES.filter((c) => caseEnabled(c, args))
-  if (!selected.length) {
+  if (!selected.length && !args.uiOnly) {
     console.error('No cases selected')
     return 2
   }
