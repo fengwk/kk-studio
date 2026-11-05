@@ -891,7 +891,7 @@ describe('AgentPane orchestration', () => {
   it('restores the frozen request on a definite 409 and presents its reason', async () => {
     const user = userEvent.setup()
     vi.mocked(harnessService.acceptCommandBatch).mockRejectedValueOnce(
-      new ApiError('entry changed', 409, 'CONFLICT', { reason: 'STALE_COMMAND_CURSOR' }),
+      new ApiError('entry changed', 409, 'conflict', undefined, 'STALE_COMMAND_CURSOR'),
     )
     renderPane({ kind: 'CHAT', id: CHAT_ID })
     const composer = await screen.findByLabelText('给 AI 发送消息')
@@ -961,7 +961,7 @@ describe('AgentPane orchestration', () => {
       JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
     )
     vi.mocked(harnessService.acceptThreadCommandBatch).mockRejectedValueOnce(
-      new ApiError('state changed', 409, 'CONFLICT', { reason: 'STALE_COMMAND_CURSOR' }),
+      new ApiError('state changed', 409, 'conflict', undefined, 'STALE_COMMAND_CURSOR'),
     )
     renderPane({ kind: 'CHAT', id: CHAT_ID })
     const composer = await screen.findByLabelText('给 AI 发送消息')
@@ -983,7 +983,7 @@ describe('AgentPane orchestration', () => {
       JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
     )
     vi.mocked(harnessService.setThreadYolo).mockRejectedValueOnce(
-      new ApiError('yolo state changed', 409, 'CONFLICT', { reason: 'STALE_VERSION' }),
+      new ApiError('yolo state changed', 409, 'conflict', undefined, 'STALE_VERSION'),
     )
     renderPane({ kind: 'CHAT', id: CHAT_ID })
     const composer = await screen.findByLabelText('给 AI 发送消息')

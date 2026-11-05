@@ -298,9 +298,8 @@ describe('AgentPane acceptance pipeline', () => {
     expect(sameFrozenRequest(plan, plan)).toBe(true)
     expect(sameFrozenRequest(plan, { ...plan, request: { ...plan.request, commands: [] } }))
       .toBe(false)
-    expect(acceptanceConflictReason(new ApiError('conflict', 409, undefined, {
-      reason: 'STALE_COMMAND_CURSOR',
-    }))).toBe('STALE_COMMAND_CURSOR')
+    // 测试意图：acceptanceConflictReason 从顶层 reason 读取冲突分类，缺失时兜底为 CONFLICT
+    expect(acceptanceConflictReason(new ApiError('conflict', 409, 'conflict', undefined, 'STALE_COMMAND_CURSOR'))).toBe('STALE_COMMAND_CURSOR')
     expect(acceptanceConflictReason(new ApiError('conflict', 409))).toBe('CONFLICT')
     expect(acceptanceConflictReason(new ApiError('not conflict', 400))).toBeNull()
     expect(shouldRefreshAfterAcceptanceFailure(new ApiError('conflict', 409))).toBe(true)

@@ -57,11 +57,9 @@ describe('ide-claim-reducer helpers', () => {
     expect(ideErrorText(new Error('plain error'))).toBe('plain error')
     expect(ideErrorText('raw string')).toBe('raw string')
 
-    const apiErrorWithDetails = new ApiError('Failed to connect', 500, 'IDE_FAILED', {
-      detail: 'Connection refused',
-      extra: 'Port 8080 unreachable',
-    })
-    expect(ideErrorText(apiErrorWithDetails)).toContain('IDE_FAILED')
+    const apiErrorWithDetails = new ApiError('Failed to connect', 500, 'internal',
+      { extra: 'Port 8080 unreachable' }, undefined, 'Connection refused')
+    expect(ideErrorText(apiErrorWithDetails)).toContain('internal')
     expect(ideErrorText(apiErrorWithDetails)).toContain('Failed to connect')
     expect(ideErrorText(apiErrorWithDetails)).toContain('Connection refused')
 
@@ -81,12 +79,12 @@ describe('ide-claim-reducer helpers', () => {
     expect(containsSensitivePath('d:\\projects')).toBe(true)
     expect(containsSensitivePath('workspace/repo')).toBe(false)
 
-    const sensitiveErr = new ApiError('fail', 400, 'ERR', { detail: '/home/user/error.log not found' })
+    const sensitiveErr = new ApiError('fail', 400, 'validation', undefined, undefined, '/home/user/error.log not found')
     expect(safeIdeError(sensitiveErr)).toBe('')
     const emptyErr = new Error('')
     expect(safeIdeError(emptyErr)).toBe('')
 
-    const safeErr = new ApiError('fail', 400, 'ERR', { detail: 'Service unavailable' })
+    const safeErr = new ApiError('fail', 400, 'validation', undefined, undefined, 'Service unavailable')
     expect(safeIdeError(safeErr)).toBe('Service unavailable')
     expect(safeIdeError(new Error('generic'))).toBe('generic')
   })
@@ -351,7 +349,7 @@ describe('ideClaimReducer actions', () => {
       environmentId: ENV_1,
       attempt: 2,
       mode: 'create',
-      error: new ApiError('Unavailable', 503, 'IDE_UNAVAILABLE', { detail: 'Daemon down' }),
+      error: new ApiError('Unavailable', 409, 'unavailable', undefined, 'IDE_UNAVAILABLE', 'Daemon down'),
     })
     expect(unknown[ENV_1].status).toBe('unknown')
     expect(unknown[ENV_1].errorMessage).toBe('Daemon down')
@@ -362,7 +360,7 @@ describe('ideClaimReducer actions', () => {
       environmentId: ENV_1,
       attempt: 2,
       mode: 'create',
-      error: new ApiError('Invalid', 400, 'BAD_CONFIG', { detail: 'Config bad' }),
+      error: new ApiError('Invalid', 400, 'validation', undefined, undefined, 'Config bad'),
     })
     expect(generic[ENV_1].status).toBe('error')
     expect(generic[ENV_1].errorMessage).toBe('Config bad')

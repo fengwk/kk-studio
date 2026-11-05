@@ -1,11 +1,3 @@
-export interface ResultEnvelope<T> {
-  status: number
-  code: string
-  message: string
-  data: T
-  errors?: Record<string, unknown> | null
-}
-
 /** convention4j 分页结果；Java long 的 totalCount 在 wire 上是十进制字符串。 */
 export interface PageResult<T> {
   pageNumber: number
