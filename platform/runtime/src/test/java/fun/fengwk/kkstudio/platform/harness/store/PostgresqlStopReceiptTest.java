@@ -29,6 +29,7 @@ import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport;
+import fun.fengwk.kkstudio.harness.spi.driver.DriverThreadDeletion;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.spi.store.UuidOrder;
 
@@ -454,7 +455,10 @@ class PostgresqlStopReceiptTest {
           tx.threads().lockTree(tree.rootThreadId());
           tx.threads().lock(tree.childThreadId()).orElseThrow();
           tx.threads().lock(tree.grandChildThreadId()).orElseThrow();
-          tx.threads().delete(List.of(tree.childThreadId(), tree.grandChildThreadId()));
+          tx.threads()
+              .delete(
+                  List.of(tree.childThreadId(), tree.grandChildThreadId()),
+                  DriverThreadDeletion.NONE);
         });
     assertEquals(
         List.of(rootReceipt),
@@ -467,7 +471,7 @@ class PostgresqlStopReceiptTest {
         tx -> {
           tx.threads().lockTree(tree.rootThreadId());
           tx.threads().lock(tree.rootThreadId()).orElseThrow();
-          tx.threads().delete(List.of(tree.rootThreadId()));
+          tx.threads().delete(List.of(tree.rootThreadId()), DriverThreadDeletion.NONE);
         });
     Integer remaining =
         jdbcTemplate.queryForObject(

@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.platform.harness.store;
 
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtin;
+import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtinRegistry;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.askUserRequest;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.askUserResponse;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.mappedAssistant;
@@ -264,7 +265,9 @@ class PostgresqlHarnessTransactionNotificationTest {
                 tx.threads().lock(childChain.threadId()).orElseThrow();
                 tx.threads().lock(grandChildChain.threadId()).orElseThrow();
                 return tx.threads()
-                    .delete(List.of(childChain.threadId(), grandChildChain.threadId()));
+                    .delete(
+                        List.of(childChain.threadId(), grandChildChain.threadId()),
+                        builtinRegistry(store, (threadId, path, preparation) -> null));
               });
       assertEquals(2, deletedChildren);
       listener.expectExactly(treeNotification(rootChain.threadId()));
@@ -275,7 +278,10 @@ class PostgresqlHarnessTransactionNotificationTest {
               tx -> {
                 tx.threads().lockTree(rootChain.threadId());
                 tx.threads().lock(rootChain.threadId()).orElseThrow();
-                return tx.threads().delete(List.of(rootChain.threadId()));
+                return tx.threads()
+                    .delete(
+                        List.of(rootChain.threadId()),
+                        builtinRegistry(store, (threadId, path, preparation) -> null));
               });
       assertEquals(1, deletedRoot);
       listener.expectExactly(treeNotification(rootChain.threadId()));

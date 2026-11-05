@@ -28,6 +28,7 @@ import fun.fengwk.kkstudio.harness.runtime.execution.FileExecutionExitJournal;
 import fun.fengwk.kkstudio.harness.runtime.execution.TestExecutionExitConfirmer;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
+import fun.fengwk.kkstudio.harness.spi.driver.DriverThreadDeletion;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 
 import java.io.IOException;
@@ -204,7 +205,7 @@ class ExecutionExitConfirmerGovernanceTest {
           tx -> {
             tx.threads().lockTree(fixture.baseline.threadId());
             tx.threads().lock(fixture.baseline.threadId());
-            tx.threads().delete(List.of(fixture.baseline.threadId()));
+            tx.threads().delete(List.of(fixture.baseline.threadId()), DriverThreadDeletion.NONE);
             return null;
           });
       fixture.clock.advance(Duration.ofSeconds(30));

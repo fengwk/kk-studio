@@ -14,19 +14,11 @@ import java.util.TreeSet;
 import java.util.UUID;
 import java.util.function.Consumer;
 
-/** 会话删除闭包与规范锁序；产品清理回调在同一事务内执行。 */
+/** 会话删除闭包与规范锁序；产品清理回调与 Driver 生命周期在同一事务内执行。 */
 final class SessionDeletion {
   private SessionDeletion() {}
 
-  /** 无 Driver 私有状态的删除；仅用于不持有 Driver 私有行的调用方与测试。 */
-  static void delete(
-      HarnessStore.Transaction tx,
-      List<UUID> sessionIds,
-      Consumer<List<UUID>> deleteRelations,
-      Consumer<List<UUID>> releaseRefs) {
-    delete(tx, sessionIds, deleteRelations, releaseRefs, DriverThreadDeletion.NONE);
-  }
-
+  /** 删除闭包：Driver 私有行必须由显式生命周期在 Thread 行之前清理。 */
   static void delete(
       HarnessStore.Transaction tx,
       List<UUID> sessionIds,

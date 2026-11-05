@@ -252,7 +252,7 @@ Driver 的 Work 处理器在事务外认领并执行，可复用 [`ClaimedExecut
 
 1. **模块**：新建 `harness/agent-<id>`，包根 `fun.fengwk.kkstudio.harness.<id>` 只属于该模块；只依赖 `harness-runtime` 的公开 API，需要 Environment 时再依赖 `harness-environment`。在根 POM 登记模块，在仓库检查 [`check.mjs`](../../scripts/dev/verify/repository/check.mjs) 中登记该模块允许的内部依赖与模块文档。
 2. **持久化与执行**：私有 Store 视图与表由 `platform-runtime` 的对应 Driver 适配包实现；Work 处理器复用 `ClaimedExecutionSupport`，通过 `AgentDriver#works()` 注册；本地取消与活跃检查实现 `cancelWork` / `hasActiveWork`。
-3. **Thread 深删**：实现 `lockThreadStateForDeletion` / `deleteLockedThreadState`，由 `DriverRegistry` 在两阶段生命周期中调用；平台 `PostgresqlThreadStore` 只负责通用锁序、Work/Tool 删除与 Thread 行，不引用具体 Driver 表。
+3. **Thread 深删**：实现 `lockThreadStateForDeletion` / `deleteLockedThreadState`，由 `DriverRegistry` 在两阶段生命周期中调用；Runtime 的 Session 深删必须传入同一注册表，不存在省略 Driver 生命周期的删除入口；平台 `PostgresqlThreadStore` 只负责通用锁序、Work/Tool 删除与 Thread 行，不引用具体 Driver 表。
 4. **装配**：在 Web 组合根注册 `AgentDriver` bean（由 `DriverRegistry` 收集）；Dispatcher 从 `DriverRegistry` 取得 Work 处理器，`HarnessRuntime` 与 `HarnessRuntimeLifecycle` 使用同一注册表完成本地取消与活跃检查；在 `scripts/dev/verify/repository/check.mjs` 中按文件放行装配所需的导入。
 5. **测试**：复用 `harness-runtime` 的 test-jar：内存 Store、Store 契约基类与 `FakeAgentDriver`。
 

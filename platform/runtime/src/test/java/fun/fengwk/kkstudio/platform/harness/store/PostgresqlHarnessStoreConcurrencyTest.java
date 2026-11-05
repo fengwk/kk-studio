@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.platform.harness.store;
 
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtin;
+import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtinRegistry;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.mappedAssistant;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.modelInvocation;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.succeededRequest;
@@ -490,7 +491,11 @@ class PostgresqlHarnessStoreConcurrencyTest {
                       tx -> {
                         tx.threads().lockTree(baseline.threadId());
                         tx.threads().lock(baseline.threadId()).orElseThrow();
-                        return tx.threads().delete(List.of(baseline.threadId())) == 1;
+                        return tx.threads()
+                                .delete(
+                                    List.of(baseline.threadId()),
+                                    builtinRegistry(store, (threadId, path, preparation) -> null))
+                            == 1;
                       }));
       try {
         assertThrows(TimeoutException.class, () -> deletion.get(200, TimeUnit.MILLISECONDS));

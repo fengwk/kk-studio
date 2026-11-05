@@ -19,6 +19,7 @@ import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.Baseline;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
+import fun.fengwk.kkstudio.harness.spi.driver.DriverThreadDeletion;
 import fun.fengwk.kkstudio.harness.spi.store.EntryStore;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.spi.store.JoinStore;
@@ -96,7 +97,8 @@ class SessionDeletionTest {
               recording(tx, events, null),
               List.of(owned.sessionId()),
               deleteRelations,
-              releaseRefs);
+              releaseRefs,
+              DriverThreadDeletion.NONE);
           return null;
         });
 
@@ -159,7 +161,8 @@ class SessionDeletionTest {
                           ids -> {
                             throw new AssertionError(
                                 "releaseRefs must not run when relations fail");
-                          });
+                          },
+                          DriverThreadDeletion.NONE);
                       return null;
                     }));
 
@@ -192,7 +195,8 @@ class SessionDeletionTest {
                             if (ids.contains(child.sessionId())) {
                               throw new IllegalStateException("blob ref release failed");
                             }
-                          });
+                          },
+                          DriverThreadDeletion.NONE);
                       return null;
                     }));
 
@@ -227,7 +231,8 @@ class SessionDeletionTest {
                           ids -> {
                             throw new AssertionError(
                                 "releaseRefs must not run after closure drift");
-                          });
+                          },
+                          DriverThreadDeletion.NONE);
                       return null;
                     }));
 
@@ -266,7 +271,8 @@ class SessionDeletionTest {
                           tx,
                           List.of(owned.sessionId(), id(999L)),
                           ids -> received.add(ids),
-                          ids -> received.add(ids));
+                          ids -> received.add(ids),
+                          DriverThreadDeletion.NONE);
                       return null;
                     }));
 
@@ -290,7 +296,8 @@ class SessionDeletionTest {
               tx,
               List.of(owned.sessionId(), owned.sessionId()),
               ids -> received.add(ids),
-              ids -> received.add(ids));
+              ids -> received.add(ids),
+              DriverThreadDeletion.NONE);
           return null;
         });
 
@@ -314,7 +321,11 @@ class SessionDeletionTest {
         tx -> {
           handles.add(tx);
           SessionDeletion.delete(
-              tx, List.of(owned.sessionId()), ids -> received.add(ids), ids -> received.add(ids));
+              tx,
+              List.of(owned.sessionId()),
+              ids -> received.add(ids),
+              ids -> received.add(ids),
+              DriverThreadDeletion.NONE);
           return null;
         });
 

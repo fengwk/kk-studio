@@ -13,6 +13,7 @@ import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.seedThreadBaseline;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.turnStartEntry;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.userMessagePayload;
+import static fun.fengwk.kkstudio.harness.spi.driver.DriverThreadDeletion.NONE;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -1073,7 +1074,7 @@ public abstract class HarnessStoreJoinContract {
                 tx -> {
                   tx.threads().lockTree(baseline.threadId());
                   tx.threads().lock(childId);
-                  tx.threads().delete(List.of(childId));
+                  tx.threads().delete(List.of(childId), NONE);
                 }));
 
     // 直接尝试 deleteThreads 删除 parent 线程也抛异常
@@ -1085,7 +1086,7 @@ public abstract class HarnessStoreJoinContract {
                 tx -> {
                   tx.threads().lockTree(baseline.threadId());
                   tx.threads().lock(baseline.threadId());
-                  tx.threads().delete(List.of(baseline.threadId()));
+                  tx.threads().delete(List.of(baseline.threadId()), NONE);
                 }));
 
     // 匹配并交付 Join
@@ -1106,7 +1107,7 @@ public abstract class HarnessStoreJoinContract {
                 tx -> {
                   tx.threads().lockTree(baseline.threadId());
                   tx.threads().lock(childId);
-                  tx.threads().delete(List.of(childId));
+                  tx.threads().delete(List.of(childId), NONE);
                 }));
 
     // 显式清理 Join 后，deleteThreads 成功删除 childId，父线程保留
@@ -1116,7 +1117,7 @@ public abstract class HarnessStoreJoinContract {
           tx.threads().lockTree(baseline.threadId());
           tx.threads().lock(childId);
           tx.joins().deleteByChild(childId);
-          tx.threads().delete(List.of(childId));
+          tx.threads().delete(List.of(childId), NONE);
         });
 
     assertTrue(store.transaction(tx -> tx.threads().find(childId)).isEmpty());
@@ -1263,7 +1264,7 @@ public abstract class HarnessStoreJoinContract {
                 tx -> {
                   tx.threads().lockTree(rootId);
                   tx.threads().lock(rootId);
-                  tx.threads().delete(List.of(rootId));
+                  tx.threads().delete(List.of(rootId), NONE);
                 }));
 
     assertTrue(store.transaction(tx -> tx.threads().find(rootId)).isPresent());
@@ -1275,7 +1276,7 @@ public abstract class HarnessStoreJoinContract {
         tx -> {
           tx.threads().lockTree(rootId);
           tx.threads().lock(childId);
-          tx.threads().delete(List.of(childId));
+          tx.threads().delete(List.of(childId), NONE);
         });
     assertTrue(store.transaction(tx -> tx.threads().find(childId)).isEmpty());
     assertTrue(store.transaction(tx -> tx.threads().find(rootId)).isPresent());
@@ -1285,7 +1286,7 @@ public abstract class HarnessStoreJoinContract {
         tx -> {
           tx.threads().lockTree(rootId);
           tx.threads().lock(rootId);
-          tx.threads().delete(List.of(rootId));
+          tx.threads().delete(List.of(rootId), NONE);
         });
     assertTrue(store.transaction(tx -> tx.threads().find(rootId)).isEmpty());
   }
@@ -1729,7 +1730,7 @@ public abstract class HarnessStoreJoinContract {
         tx -> {
           tx.threads().lockTree(threadId);
           tx.threads().lock(threadId);
-          assertEquals(1, tx.threads().delete(List.of(threadId)));
+          assertEquals(1, tx.threads().delete(List.of(threadId), NONE));
           return null;
         });
     assertTrue(store.transaction(tx -> tx.exits().find(local.executionId())).isEmpty());
@@ -1979,7 +1980,7 @@ public abstract class HarnessStoreJoinContract {
               for (UUID threadId : allHierarchyThreads) {
                 tx.threads().lock(threadId);
               }
-              return tx.threads().delete(List.of(rootId, childId, grandChildId));
+              return tx.threads().delete(List.of(rootId, childId, grandChildId), NONE);
             });
     assertEquals(3, deleted);
 
@@ -2052,10 +2053,10 @@ public abstract class HarnessStoreJoinContract {
           assertEquals(1, tx.joins().deleteByChild(childA2));
 
           // 删除子线程
-          assertEquals(2, tx.threads().delete(List.of(childA1, childA2)));
+          assertEquals(2, tx.threads().delete(List.of(childA1, childA2), NONE));
 
           // 删除父线程
-          assertEquals(1, tx.threads().delete(List.of(rootA)));
+          assertEquals(1, tx.threads().delete(List.of(rootA), NONE));
 
           // 删除 Session A 的 entries
           assertTrue(tx.entries().delete(sessionA) > 0);
@@ -2684,7 +2685,7 @@ public abstract class HarnessStoreJoinContract {
                 store,
                 tx -> {
                   tx.threads().lock(childA);
-                  tx.threads().delete(List.of(childA));
+                  tx.threads().delete(List.of(childA), NONE);
                 }));
 
     // 2. 持有错误 tree 的 lock（rootB 而非 rootA）：抛出 IllegalStateException
@@ -2696,7 +2697,7 @@ public abstract class HarnessStoreJoinContract {
                 tx -> {
                   tx.threads().lockTree(rootB);
                   tx.threads().lock(childA);
-                  tx.threads().delete(List.of(childA));
+                  tx.threads().delete(List.of(childA), NONE);
                 }));
 
     // 3. 正确持有 rootA 的 tree lock：成功删除 childA
@@ -2705,7 +2706,7 @@ public abstract class HarnessStoreJoinContract {
             tx -> {
               tx.threads().lockTree(rootA);
               tx.threads().lock(childA);
-              return tx.threads().delete(List.of(childA));
+              return tx.threads().delete(List.of(childA), NONE);
             });
     assertEquals(1, deleted);
     assertTrue(store.transaction(tx -> tx.threads().find(childA)).isEmpty());
@@ -2732,7 +2733,7 @@ public abstract class HarnessStoreJoinContract {
                   tx.threads().lockTree(smallerRoot);
                   tx.threads().lock(smallerRoot);
                   tx.threads().lock(largerRoot);
-                  tx.threads().delete(List.of(smallerRoot, largerRoot));
+                  tx.threads().delete(List.of(smallerRoot, largerRoot), NONE);
                 }));
 
     // 2. 跨树批次按 UuidOrder 锁定两棵树及两个线程：成功删除 2 个根线程
@@ -2743,7 +2744,7 @@ public abstract class HarnessStoreJoinContract {
               tx.threads().lockTree(largerRoot);
               tx.threads().lock(smallerRoot);
               tx.threads().lock(largerRoot);
-              return tx.threads().delete(List.of(smallerRoot, largerRoot));
+              return tx.threads().delete(List.of(smallerRoot, largerRoot), NONE);
             });
     assertEquals(2, deleted);
     assertTrue(store.transaction(tx -> tx.threads().find(rootA)).isEmpty());

@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.ThreadLifecycleCoordinator;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.Baseline;
+import fun.fengwk.kkstudio.harness.spi.driver.DriverThreadDeletion;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 
 import java.util.List;
@@ -82,7 +83,7 @@ class PostgresqlHarnessConcurrencyIntegrationTest {
           tx.threads().lockTree(baseline.threadId());
           tx.sessions().lockForUpdate(baseline.sessionId()).orElseThrow();
           tx.threads().lock(baseline.threadId()).orElseThrow();
-          tx.threads().delete(List.of(baseline.threadId()));
+          tx.threads().delete(List.of(baseline.threadId()), DriverThreadDeletion.NONE);
           tx.entries().delete(baseline.sessionId());
           tx.sessions().delete(baseline.sessionId());
           return null;
