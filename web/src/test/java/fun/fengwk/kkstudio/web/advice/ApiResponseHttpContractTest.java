@@ -3,6 +3,8 @@ package fun.fengwk.kkstudio.web.advice;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -23,6 +25,7 @@ import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBo
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Map;
 
 /** 通过真实 MVC 响应链锁定过渡期成功响应的状态和资源体。 */
 class ApiResponseHttpContractTest {
@@ -55,12 +58,22 @@ class ApiResponseHttpContractTest {
     mockMvc
         .perform(get("/probe/entity-created"))
         .andExpect(status().isCreated())
+        .andExpect(header().string("Cache-Control", "no-store"))
         .andExpect(content().json("\"entity-created\""));
   }
 
   @Test
   void responseEntityApiResponseKeepsExplicitNoContentStatus() throws Exception {
     mockMvc.perform(get("/probe/entity-no-content")).andExpect(status().isNoContent());
+  }
+
+  @Test
+  void legacyErrorEnvelopeIsNotDiscardedDuringMigration() throws Exception {
+    mockMvc
+        .perform(get("/probe/entity-error"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("validation"))
+        .andExpect(jsonPath("$.errors.detail").value("rejected"));
   }
 
   @Test
@@ -72,6 +85,10 @@ class ApiResponseHttpContractTest {
     mockMvc
         .perform(get("/probe/accepted"))
         .andExpect(status().isAccepted())
+        .andExpect(content().string(""));
+    mockMvc
+        .perform(get("/probe/entity-empty"))
+        .andExpect(status().isNoContent())
         .andExpect(content().string(""));
   }
 
@@ -129,7 +146,9 @@ class ApiResponseHttpContractTest {
 
     @GetMapping("/probe/entity-created")
     ResponseEntity<ApiResponse<String>> entityCreated() {
-      return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.created("entity-created"));
+      return ResponseEntity.status(HttpStatus.CREATED)
+          .header("Cache-Control", "no-store")
+          .body(ApiResponse.created("entity-created"));
     }
 
     @GetMapping("/probe/entity-no-content")
@@ -137,9 +156,22 @@ class ApiResponseHttpContractTest {
       return ResponseEntity.status(HttpStatus.NO_CONTENT).body(ApiResponse.noContent());
     }
 
+    @GetMapping("/probe/entity-error")
+    ResponseEntity<ApiResponse<Void>> entityError() {
+      return ResponseEntity.badRequest()
+          .body(
+              ApiResponse.error(
+                  HttpStatus.BAD_REQUEST, "validation", "invalid", Map.of("detail", "rejected")));
+    }
+
     @GetMapping("/probe/empty")
     ApiResponse<Void> empty() {
       return ApiResponse.ok();
+    }
+
+    @GetMapping("/probe/entity-empty")
+    ResponseEntity<ApiResponse<Void>> entityEmpty() {
+      return ResponseEntity.ok(ApiResponse.ok());
     }
 
     @GetMapping("/probe/accepted")
