@@ -462,6 +462,30 @@ export const chatCatalog = {
     'en-US': 'The switch also applies to running subagents',
     'zh-CN': '切换对正在运行的子 Agent 同样生效',
   },
+  'ai.runtime.skillAvailability.title': {
+    'en-US': 'Skills unavailable in the current environment',
+    'zh-CN': '以下技能在当前环境不可用',
+  },
+  'ai.runtime.skillAvailability.description': {
+    'en-US': 'They are not installed at the current version, so they stay out of the system prompt. Switch environments or finish the install to clear this.',
+    'zh-CN': '它们没有安装为当前版本，因此不会进入 system prompt；切换环境或完成安装后提示自动消失。',
+  },
+  'ai.runtime.skillAvailability.skillLabel': {
+    'en-US': '{{package}} / {{skill}}',
+    'zh-CN': '{{package}} / {{skill}}',
+  },
+  'ai.runtime.skillAvailability.reason.NOT_INSTALLED': {
+    'en-US': 'Not installed',
+    'zh-CN': '未安装',
+  },
+  'ai.runtime.skillAvailability.reason.VERSION_MISMATCH': {
+    'en-US': 'Version mismatch',
+    'zh-CN': '版本不一致',
+  },
+  'ai.runtime.skillAvailability.reason.INSTALL_FAILED': {
+    'en-US': 'Install failed',
+    'zh-CN': '安装失败',
+  },
   'ai.runtime.composer.model': {
     'en-US': 'Model',
     'zh-CN': 'Model',

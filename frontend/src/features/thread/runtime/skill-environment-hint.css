@@ -1,0 +1,57 @@
+/* 执行根技能可用性提示：只影响 pane 输入区上方的提示，不改动全局 styles.css。 */
+.thread-skill-hint {
+  flex-shrink: 0;
+  margin: 0 20px 8px;
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid var(--warning-border);
+  border-radius: 10px;
+  background: var(--warning-soft);
+}
+
+.thread-skill-hint-title {
+  margin: 0;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: var(--warning);
+}
+
+.thread-skill-hint-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.thread-skill-hint-item {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: var(--font-size-xs);
+  line-height: 1.5;
+}
+
+.thread-skill-hint-skill {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg);
+}
+
+.thread-skill-hint-reason {
+  flex-shrink: 0;
+  color: var(--fg-muted);
+}
+
+.thread-skill-hint-description {
+  margin: 0;
+  font-size: var(--font-size-xs);
+  line-height: 1.5;
+  color: var(--fg-muted);
+}

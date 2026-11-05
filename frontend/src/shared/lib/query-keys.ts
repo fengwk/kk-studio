@@ -19,6 +19,10 @@ export const queryKeys = {
     all: ['skills'] as const,
     list: ['skills', 'list'] as const,
     packages: ['skills', 'packages'] as const,
+    /** 全部 Package 的 Environment 安装摘要集合；前缀本身用于环境推送后的整体回读。 */
+    environmentSync: ['skills', 'environment-sync'] as const,
+    packageEnvironmentSync: (packageName: string) =>
+      ['skills', 'environment-sync', packageName] as const,
   },
   plugins: {
     all: ['plugins'] as const,
