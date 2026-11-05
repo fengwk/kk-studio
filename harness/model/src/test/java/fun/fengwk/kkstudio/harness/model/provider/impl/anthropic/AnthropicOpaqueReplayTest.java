@@ -231,8 +231,8 @@ class AnthropicOpaqueReplayTest {
   }
 
   /**
-   * 测试意图：亲和性失配时不再 fail closed，而是按 durable 语义回退：citations 等官方附加字段与 tool_use 的额外成员都随 payload
-   * 一并丢弃，wire 完全由 durable 内容重建，绝不因为存在 replay 而拒绝请求。
+   * 测试意图：亲和性失配时按 durable 语义回退：citations 等官方附加字段与 tool_use 的额外成员都随 payload 一并丢弃，wire 完全由 durable
+   * 内容重建，绝不因为存在 replay 而拒绝请求。
    */
   @Test
   void fallsBackToDurableBlocksWhenAffinityMismatches() throws IOException {
@@ -329,8 +329,8 @@ class AnthropicOpaqueReplayTest {
   }
 
   /**
-   * 测试意图：已知 block 的官方附加字段不被剥离。带 citations 与额外官方字段的 text block 仍通过 shape 与 durable
-   * 校验（旧行为按精确字段数拒绝），并在下一轮 wire 中原样回放。
+   * 测试意图：已知 block 的官方附加字段不被剥离。带 citations 与额外官方字段的 text block 仍通过 shape 与 durable 校验，并在下一轮 wire
+   * 中原样回放。
    */
   @Test
   void preservesExtraOfficialFieldsOnKnownReplayBlocks() throws IOException {

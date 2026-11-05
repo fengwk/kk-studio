@@ -349,10 +349,10 @@ Package 名和 Skill 名均为 1–64 个小写字母或数字，以单个连字
 检查失败保留已发布内容。状态由观察事实派生为 `UNCHECKED`、`UP_TO_DATE`、
 `UPDATE_AVAILABLE` 或 `CHECK_FAILED`。
 
-稳定路径为 `vfs:/skills/<package>/<skill>/...`，每次读取 Package 当前 commit。
-Git cache 由 Catalog 拥有，根目录通过 `kk-studio.catalog.skill.cache-root` 配置，
-默认是进程当前目录下的 `.kkstudio/skills`。
-发布后的通知唤醒各节点回读、补齐 exact commit cache，并同步本节点在线 Daemon；
+稳定路径为 `vfs:/skills/<package>/<skill>/...`，每次读取 Package 当前版本归档中的内容。
+发布时使用临时 bare 仓库浅拉取目标 commit 并生成 Skill 归档，完成后立即清理临时仓库，
+平台服务端不保留本地 Git 缓存。
+发布后的通知唤醒各节点并同步本节点在线 Daemon；
 listener 建连/重连全量对账。执行根未选择 Environment 时，Prompt 使用
 `vfs:/skills/<package>/<skill>/SKILL.md`；已选择 Environment 且 Daemon 安装摘要与
 current artifact 完全一致时使用其本地稳定路径，否则该技能不进入 system prompt，

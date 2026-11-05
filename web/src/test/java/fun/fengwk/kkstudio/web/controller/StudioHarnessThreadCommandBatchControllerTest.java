@@ -250,11 +250,11 @@ class StudioHarnessThreadCommandBatchControllerTest {
     verifyNoInteractions(acceptanceService, runtime);
   }
 
-  /** 内部命令与已删除的命令在产品 HTTP surface 均返回 400。 */
+  /** 内部命令与未知 discriminator 在产品 HTTP surface 均返回 400。 */
   @Test
-  void rejectsInternalAndRemovedCommandTypesBeforeTouchingAcceptanceServiceOrRuntime()
+  void rejectsInternalAndUnknownCommandTypesBeforeTouchingAcceptanceServiceOrRuntime()
       throws Exception {
-    for (String type : List.of("CUSTOM_MESSAGE", "NOTIFICATION", "SET_CONTRIBUTOR_STATE")) {
+    for (String type : List.of("CUSTOM_MESSAGE", "NOTIFICATION", "UNKNOWN")) {
       String commands =
           """
           [{

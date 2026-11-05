@@ -21,7 +21,7 @@ public record ModelCost(
     BigDecimal total) {
 
   /** 本版本唯一计价币种。 */
-  public static final String USD = "USD";
+  private static final String USD = "USD";
 
   private static final BigDecimal ONE_MILLION = BigDecimal.valueOf(1_000_000L);
 

@@ -90,9 +90,9 @@ class ConfigSyncExporterTest {
     assertFalse(providers.get(0).containsKey("modelHttpRetryStatusCodes"));
   }
 
-  /** 导出使用嵌套 execution 并保留 variant，不产生旧的顶层模型字段。 */
+  /** 导出使用嵌套 execution 并保留 variant。 */
   @Test
-  void agentExportCarriesExecutionWithoutLegacyFields() {
+  void agentExportCarriesExecution() {
     var configured =
         agent("a", "m", agentConfig(List.of(), List.of(), List.of())).toBuilder()
             .execution(BuiltinExecution.of(new ModelSelection("m", "default")))
@@ -108,8 +108,7 @@ class ConfigSyncExporterTest {
     assertEquals(
         Map.of("driver", "builtin", "settings", Map.of("modelName", "m", "variant", "default")),
         agents.get(0).get("execution"));
-    assertFalse(agents.get(0).containsKey("model"));
-    assertFalse(agents.get(0).containsKey("variant"));
+    assertEquals(Set.of("name", "execution", "config"), agents.get(0).keySet());
   }
 
   @Test

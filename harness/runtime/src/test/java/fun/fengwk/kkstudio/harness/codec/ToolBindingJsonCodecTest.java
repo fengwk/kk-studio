@@ -178,13 +178,6 @@ class ToolBindingJsonCodecTest {
         IllegalArgumentException.class,
         () -> codec.decode(valid.substring(0, valid.length() - 1) + ",\"extra\":true}"));
 
-    // 旧字段 environmentRequired 被严格拒绝
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            codec.decode(
-                valid.substring(0, valid.length() - 1) + ",\"environmentRequired\":true}"));
-
     // 缺少必要字段
     assertThrows(
         IllegalArgumentException.class,

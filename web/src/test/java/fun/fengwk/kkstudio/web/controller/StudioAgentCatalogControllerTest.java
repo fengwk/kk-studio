@@ -521,17 +521,14 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
     idBasedAgent.setName("id-based-agent-" + suffix);
     idBasedAgent.setExecution(execution("acceptance-stub"));
     idBasedAgent.setConfig(config);
-    // 旧字段即使与合法 execution 同时出现，也必须被 HTTP 边界拒绝。
-    for (String legacy : List.of("model", "variant")) {
-      ObjectNode legacyBody = objectMapper.valueToTree(idBasedAgent);
-      legacyBody.put(legacy, "default");
-      mockMvc
-          .perform(
-              post("/api/agents")
-                  .contentType(MediaType.APPLICATION_JSON)
-                  .content(legacyBody.toString()))
-          .andExpect(status().isBadRequest());
-    }
+    ObjectNode unknownAgentBody = objectMapper.valueToTree(idBasedAgent);
+    unknownAgentBody.put("unknownField", "1");
+    mockMvc
+        .perform(
+            post("/api/agents")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(unknownAgentBody.toString()))
+        .andExpect(status().isBadRequest());
     ObjectNode idBasedAgentBody = objectMapper.valueToTree(idBasedAgent);
     idBasedAgentBody.put("modelId", "1");
     mockMvc

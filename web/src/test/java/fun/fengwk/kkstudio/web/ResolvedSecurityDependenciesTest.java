@@ -39,7 +39,7 @@ class ResolvedSecurityDependenciesTest {
     assertFalse(
         versions.keySet().stream()
             .anyMatch(coordinate -> coordinate.startsWith("org.apache.opennlp:")),
-        "removed MCP NLP dependencies must not return to the runtime classpath");
+        "OpenNLP dependencies must not enter the runtime classpath");
     for (String coordinate : versions.keySet()) {
       if (coordinate.startsWith("com.fasterxml.jackson.")) {
         // Jackson 3 只共享 annotations；Jackson 2 的 JSON 实现不得重新进入 classpath。
@@ -65,13 +65,13 @@ class ResolvedSecurityDependenciesTest {
     }
   }
 
-  /** 测试意图：BOM 必须收敛实际 Kotlin runtime，stdlib 已包含 common metadata，不能再引入 legacy JAR。 */
+  /** 测试意图：BOM 必须收敛实际 Kotlin runtime，stdlib 已包含 common metadata，不得引入独立 common metadata。 */
   @Test
   void kotlinRuntimeHasNoMixedVersions() throws Exception {
     Map<String, Set<String>> versions = readArtifactVersions();
     assertFalse(
         versions.containsKey("org.jetbrains.kotlin:kotlin-stdlib-common"),
-        "legacy common metadata must not enter the runtime classpath");
+        "kotlin-stdlib-common must not enter the runtime classpath");
     assertFamily(versions, "org.jetbrains.kotlin:", "2.4.20");
   }
 

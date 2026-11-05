@@ -232,7 +232,7 @@ class BuiltinHarnessContributorTest {
   /**
    * 验证内置 contributor 的模型工具面恰好是 5 个文件工具加 4 个环境专用工具，不泄漏任何 MCP 身份。
    *
-   * <p>文件工具不再固定绑定环境能力实现：它们按每次调用的路径在 Platform VFS 与 BoundEnvironment 之间路由。
+   * <p>文件工具按每次调用的路径在 Platform VFS 与 BoundEnvironment 之间路由。
    */
   @Test
   void builtinToolsAreExactlyTheFiveFileToolsPlusFourHostCapabilities() {
@@ -444,7 +444,7 @@ class BuiltinHarnessContributorTest {
   /**
    * bash 提示词必须描述宿主配置的 shell（{@code bash -lc <command>}），不得残留未渲染的模板占位符。
    *
-   * <p>回归点：{@code bash.md} 曾经携带 ${shell} 占位符，不得以字面量进入模型指令。
+   * <p>提示词中的占位符必须完全渲染，不得以字面量进入模型指令。
    */
   @Test
   void bashPromptDescribesConfiguredShellWithoutTemplatePlaceholders() {

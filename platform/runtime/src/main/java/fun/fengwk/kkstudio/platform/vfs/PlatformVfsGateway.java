@@ -48,7 +48,7 @@ import java.util.regex.PatternSyntaxException;
 /**
  * Platform VFS 的文件工具执行实现。
  *
- * <p>命名空间与语义见重构方案 3.1：{@code vfs:/sessions/<执行根会话>/} 可读写，{@code vfs:/resources/<资源 ID>} 与 {@code
+ * <p>VFS 命名空间与语义：{@code vfs:/sessions/<执行根会话>/} 可读写，{@code vfs:/resources/<资源 ID>} 与 {@code
  * vfs:/skills/...} 只读。会话目录内的文件存于 {@code session_file} 与全局 Blob，目录由路径推导；写入先落新 Blob、再按 revision 条件更新
  * 元数据，最后释放旧 Blob。
  *

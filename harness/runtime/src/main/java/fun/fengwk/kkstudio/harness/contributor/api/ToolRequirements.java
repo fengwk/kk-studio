@@ -9,8 +9,7 @@ import java.util.Set;
  * 工具执行所需的执行位置与状态访问声明。
  *
  * <p>只声明 Tool 与 Environment 的关系级别：文件工具声明 {@link EnvironmentSupport#ROUTED}，每次调用的执行位置由调用参数决定；只有
- * {@code bash}、LSP 这类只能在环境上运行的工具声明 {@link EnvironmentSupport#REQUIRED}。固定要求某个 Environment 身份的做法已删除：
- * 没有任何工具需要它。
+ * {@code bash}、LSP 这类只能在环境上运行的工具声明 {@link EnvironmentSupport#REQUIRED}。
  *
  * @param environmentSupport 该工具与 Environment 的关系级别
  * @param stateAccesses 声明的 branch custom state 访问集合

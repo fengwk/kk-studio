@@ -262,9 +262,9 @@ class StudioHarnessCommandBatchControllerTest {
   }
 
   @Test
-  void rejectsInternalAndRemovedCommandTypesFromProductHttpSurface() throws Exception {
-    // 内部命令与已删除的命令在产品 HTTP 请求中均返回 400。
-    for (String type : List.of("CUSTOM_MESSAGE", "NOTIFICATION", "SET_CONTRIBUTOR_STATE")) {
+  void rejectsInternalAndUnknownCommandTypesFromProductHttpSurface() throws Exception {
+    // 内部命令与未知 discriminator 在产品 HTTP 请求中均返回 400。
+    for (String type : List.of("CUSTOM_MESSAGE", "NOTIFICATION", "UNKNOWN")) {
       String internalOnly =
           batchWithCommands(
               newThreadTarget(),

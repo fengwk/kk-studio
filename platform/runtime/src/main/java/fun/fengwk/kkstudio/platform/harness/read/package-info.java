@@ -3,7 +3,7 @@
  *
  * <ul>
  *   <li>{@link fun.fengwk.kkstudio.platform.harness.read.PlatformSkillContentReader}：按 {@code
- *       vfs:/skills/<package>/<skill>/...} 读取 Platform bare Git cache 中的已发布 Skill 内容；
+ *       vfs:/skills/<package>/<skill>/...} 读取已发布 Skill 归档中的内容；
  *   <li>{@link fun.fengwk.kkstudio.platform.harness.read.PlatformResourceContentReader}：按 {@code
  *       vfs:/resources/<blobId>} 读取当前会话授权的 Blob 内容；
  *   <li>{@link fun.fengwk.kkstudio.platform.harness.read.TextReadWindow}：文本窗口读取和格式化工具，复刻与 daemon

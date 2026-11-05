@@ -917,7 +917,7 @@ class ThreadContextClassifierTest {
   }
 
   /**
-   * 构造旧 ModelInvocation 形状的 Driver 状态替身。
+   * 构造基于 ModelInvocation 的 Driver 状态替身。
    *
    * <p>替身只承载模型身份；它是否与本次分类输入的 (Thread, open turn) 一致，由 {@link #classify} 在进入分类器前 显式校验（见 {@link
    * TestLockedState#requireLockedFor}），因此跨 Thread/跨 turn 的模型永远到不了分类器。
@@ -971,7 +971,7 @@ class ThreadContextClassifierTest {
     return new TestLockedState(model, cancelsToolBatch);
   }
 
-  /** 旧 ModelInvocation 形状的 Driver 状态：只暴露中立的 activity 与身份。 */
+  /** 基于 ModelInvocation 的 Driver 状态替身：只暴露中立的 activity 与身份。 */
   private static final class TestLockedState implements LockedDriverState {
 
     private final ModelInvocation model;

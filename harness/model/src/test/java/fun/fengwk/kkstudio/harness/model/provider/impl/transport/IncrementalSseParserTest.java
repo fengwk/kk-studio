@@ -438,7 +438,7 @@ class IncrementalSseParserTest {
     assertEquals(List.of(new ServerSentEvent(null, expectedData)), parseChunked(input, 1));
   }
 
-  /** 测试意图：空 event（有无冒号）覆盖本事件的旧名称，且不泄漏到下一事件。 */
+  /** 测试意图：空 event（有无冒号）覆盖当前事件先前设置的名称，且不泄漏到下一事件。 */
   @ParameterizedTest
   @ValueSource(strings = {"event", "event:", "event: "})
   void empty_event_overrides_previous_name(String emptyEvent) {

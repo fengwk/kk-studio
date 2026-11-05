@@ -62,7 +62,7 @@ class AgentModelRuntimeConfigParserTest {
         assertThrows(IllegalArgumentException.class, () -> parser.parse(config)).getMessage());
   }
 
-  /** 定价段落按完整定义解析：基础费率与 TTL 价格精确保留，不再存在旧 6 个扁平价格字段。 */
+  /** 定价段落按完整定义解析：基础费率与 TTL 价格精确保留。 */
   @Test
   void parsesCompleteRuntimeModelWithoutTokenBasedPriceInference() {
     var parsed = parser.parse(validConfig());

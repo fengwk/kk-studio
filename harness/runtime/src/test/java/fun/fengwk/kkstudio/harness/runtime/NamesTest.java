@@ -53,7 +53,7 @@ class NamesTest {
 
   @Test
   void rootThreadNameIsStable() {
-    // NEW_SESSION 创建的 ROOT Thread 固定名 main；分支 Thread 名称改由调用方显式给出，不再有 branch-<uuid> 回退名。
+    // NEW_SESSION 创建的 ROOT Thread 固定名 main；分支 Thread 名称由调用方显式给出。
     assertEquals("main", Names.rootThreadName());
   }
 

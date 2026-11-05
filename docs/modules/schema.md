@@ -75,8 +75,7 @@ project
 ```
 
 Canvas Resource 与 pin 使用同画布外键，Run 固定 requestId 与 lease；Project Run 通过
-复合外键关联同 Issue 的 Thread 和同阶段预算，Entry 坐标是应用维护的历史引用，不再有指向
-`harness_entry` 的外键。
+复合外键关联同 Issue 的 Thread 和同阶段预算，Entry 坐标是应用维护的历史引用。
 父链区间、权限、workflow 合法性和输出完整性由应用验证。表、列的准确清单与约束名直接查 V1。
 约束行为由 schema 模块的 fresh-install 探针在真实 PostgreSQL 上逐条验证。
 V1 的 Platform Driver 分段声明 `builtin_model_invocation`；`durable_work.target_type` 只校验

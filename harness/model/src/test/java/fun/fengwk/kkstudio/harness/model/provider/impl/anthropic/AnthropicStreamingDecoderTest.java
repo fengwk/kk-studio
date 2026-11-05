@@ -187,10 +187,7 @@ class AnthropicStreamingDecoderTest {
     assertEquals(15, usage.categorizedTokens());
   }
 
-  /**
-   * 测试意图：未知 block 收到不可安全组装的 delta 时，解析器必须显式失败而不是把 delta 猜测性合并进 raw block（旧行为会把字段 label/tags/meta
-   * 等静默拼接或覆写），也不允许静默丢弃该 delta。
-   */
+  /** 测试意图：未知 block 收到不可安全组装的 delta 时，解析器必须显式失败而不是把 delta 猜测性合并进 raw block， 也不允许静默丢弃该 delta。 */
   @Test
   void should_reject_unassemblable_delta_for_unknown_block_instead_of_merging() {
     List<ProviderStreamEvent> events = new ArrayList<>();

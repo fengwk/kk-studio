@@ -359,14 +359,14 @@ ToolOutcome execute(ToolExecutionRequest request, Consumer<ToolResult> progress)
 
 进入 `execute` 前调用状态已持久化为 RUNNING：返回即终态，业务失败返回 error 结果，运行时异常收敛为结果不确定；取消、Stop 与租约丢失都表现为 interrupt，实现必须响应中断并释放资源。`resolveTimeout` 是执行前唯一的超时解析点，非法的参数级超时抛 `IllegalArgumentException`，由网关收敛为确定性拒绝。[`ToolExecutionRequest`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolExecutionRequest.java) 携带已归一化的调用、已解析的超时与可选执行上下文，不携带 workdir。[`ToolHistoryRenderer`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolHistoryRenderer.java) 是可选纯函数，在原生 Tool 历史无法交给 Provider 时把调用渲染为自然语言动作。
 
-[`ToolRequirements`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolRequirements.java) 冻结三项声明：
+[`ToolRequirements`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolRequirements.java) 冻结两项声明：
 
 ```text
 environmentSupport       NONE / ROUTED / REQUIRED
 stateAccesses[]          访问的分支自定义状态及 READ / WRITE 意图
 ```
 
-`ROUTED` 是逐调用路由的文件工具（`read`、`write`、`edit`、`grep`、`find`）：工具层面不固定执行位置，每次调用按 `path` 走 Platform VFS 或绑定的 Environment；`REQUIRED` 才表示只能在环境上执行，未选择环境时从模型工具面过滤。固定要求某个 Environment 身份的声明已删除。
+`ROUTED` 是逐调用路由的文件工具（`read`、`write`、`edit`、`grep`、`find`）：工具层面不固定执行位置，每次调用按 `path` 走 Platform VFS 或绑定的 Environment；`REQUIRED` 才表示只能在环境上执行，未选择环境时从模型工具面过滤。
 
 `REQUIRED` 工具只在分支已选择 Environment 时进入模型工具面，执行时经 [`BoundEnvironment`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/BoundEnvironment.java) 阻塞调用一个能力，发送确定性由异常类型表达（Busy/Unavailable 确定未执行，SendUncertain 可能已被接受）。分支状态只经声明修改：[`BranchView`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/BranchView.java) 只读当前 Contributor 在当前分支上的自定义状态与用户 Goal；[`ToolOutcome`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolOutcome.java) 携带结果与有序的 [`AppendCustomEntry`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/AppendCustomEntry.java)（错误结果不得携带），与 Tool 结果在同一事务追加。同一 Assistant 的工具共享冻结快照，因此某状态已被先前 sibling 声明 WRITE 时，后续访问在派发前被确定性拒绝。
 
