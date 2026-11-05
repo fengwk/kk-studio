@@ -187,7 +187,7 @@ frontend ──REST / WebSocket──▶ web（组合根，装配下列全部模
 | 包 | 内容 |
 | --- | --- |
 | `platform.daemon` | 与 Daemon 共享的值对象：能力快照、运行时状态、更新命令、IDE 租约、官方发行信息 |
-| `protocol` | [`control.proto`](../platform/daemon-server/src/main/protocol/control.proto) 与 `ControlProtocolCodec`：二进制编解码、应用层校验、golden 夹具 |
+| `protocol` | [`control.proto`](../platform/daemon-server/src/main/protocol/control.proto)、`ControlProtocolCodec` 与 `ControlProtocolValidator`：二进制编解码、领域映射、应用层语义校验、golden 夹具 |
 | `server` | `EnvironmentDaemonServer`、会话准入与租约、在途调用追踪、IDE 协调、资源票据、更新协调 |
 | `transport` | Jetty 12 上的控制通道与 HTTP/2 会话管道 |
 | `tunnel` | 传输无关的数据面隧道端口 |

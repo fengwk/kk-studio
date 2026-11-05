@@ -230,7 +230,7 @@ subscriber 独立围栏保证关闭后不再回调，用户回调在全局锁外
 | 包路径 | 职责与边界 |
 | --- | --- |
 | `fun.fengwk.kkstudio.platform.daemon` | wire 值与 codec、资源票据、远端 workdir 词法校验；不拥有连接、租约或执行状态 |
-| `fun.fengwk.kkstudio.platform.daemon.protocol` | protobuf binary：单一 `control.proto` 生成类型、四字节成帧与应用层校验；覆盖 SETTINGS（含资源预算）、调用、恢复、上传、更新、IDE 元数据与 426 `UpgradeRequired` 载荷 |
+| `fun.fengwk.kkstudio.platform.daemon.protocol` | protobuf binary：单一 `control.proto` 生成类型、四字节成帧、领域映射与 `ControlProtocolValidator` 应用层语义校验；覆盖 SETTINGS（含资源预算）、调用、恢复、上传、更新、IDE 元数据与 426 `UpgradeRequired` 载荷 |
 | `fun.fengwk.kkstudio.platform.daemon.server` | 会话、调用、transfer、IDE 通道与围栏裁决；外部 I/O 通过 transport、lease、registration、ticket 端口接入，不引入产品 DTO 或框架 |
 | `fun.fengwk.kkstudio.platform.daemon.tunnel` | 本节点隧道、HTTP 交换与 WebSocket 隧道（RFC 8441 extended CONNECT）端口及值对象；不选择传输引擎。测试 fake 使用零缓冲 rendezvous 与 16KiB 分段，通过 daemon-server test-jar 复用 |
 | `fun.fengwk.kkstudio.platform.daemon.transport` | 基于 Jetty 12 的传输实现：`WebSocketEndPoint`（单槽 demand 驱动 backpressure、flush 模式缓冲维护）、`DaemonHttp2ClientSession`（HTTP/2 会话生命周期、15s PING/30s ACK 超时、GOAWAY 状态与优雅终止）、`DaemonControlStream`（`POST /control` 封帧、256 帧/16 MiB 预算与 BUSY 背压、10s 超时）、`DaemonEnvironmentTunnel`（流式 HTTP 交换与 RFC 8441 扩展 CONNECT 双向字节管道） |
