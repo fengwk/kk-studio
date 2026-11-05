@@ -7,9 +7,12 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import com.google.protobuf.UnknownFieldSet;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.common.resource.ResourceRef;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
 import fun.fengwk.kkstudio.platform.daemon.DaemonSkillPackage;
 import fun.fengwk.kkstudio.platform.daemon.DaemonSkillStatePackage;
 import fun.fengwk.kkstudio.platform.daemon.DaemonUpdateCommand;
+import fun.fengwk.kkstudio.platform.daemon.DaemonUpdateProgress;
 
 import java.io.IOException;
 import java.util.List;
@@ -261,18 +264,19 @@ class ControlProtocolCodecTest {
         result.toBuilder().setIdeResult(IdeResult.newBuilder().setOk(true)).build());
 
     UpgradeRequired upgrade = UpgradeRequired.newBuilder().setTargetVersion("1.2.3").build();
-    ControlProtocolCodec.validateUpgrade(upgrade);
+    ControlProtocolValidator.validateUpgrade(upgrade);
     assertThrows(
         ControlProtocolException.class,
-        () -> ControlProtocolCodec.validateUpgrade(UpgradeRequired.getDefaultInstance()));
-    assertThrows(
-        ControlProtocolException.class,
-        () ->
-            ControlProtocolCodec.validateUpgrade(upgrade.toBuilder().clearTargetVersion().build()));
+        () -> ControlProtocolValidator.validateUpgrade(UpgradeRequired.getDefaultInstance()));
     assertThrows(
         ControlProtocolException.class,
         () ->
-            ControlProtocolCodec.validateUpgrade(
+            ControlProtocolValidator.validateUpgrade(
+                upgrade.toBuilder().clearTargetVersion().build()));
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolValidator.validateUpgrade(
                 upgrade.toBuilder().setTargetVersion("bad version").build()));
 
     Envelope update =
@@ -465,7 +469,7 @@ class ControlProtocolCodecTest {
             ControlProtocolCodec.encodeBinary(
                 error.toBuilder().setError(error.getError().toBuilder().setMessage("")).build()));
 
-    assertThrows(ControlProtocolException.class, () -> ControlProtocolCodec.validate(null));
+    assertThrows(ControlProtocolException.class, () -> ControlProtocolValidator.validate(null));
     assertThrows(
         ControlProtocolException.class, () -> ControlProtocolCodec.decodeBinary(new byte[0]));
     assertThrows(
@@ -551,14 +555,18 @@ class ControlProtocolCodecTest {
     assertEquals(2, update.getAllFields().size());
     assertThrows(
         ControlProtocolException.class,
-        () -> ControlProtocolCodec.validateUpdate(update.toBuilder().clearOperationId().build()));
+        () ->
+            ControlProtocolValidator.validateUpdate(update.toBuilder().clearOperationId().build()));
     assertThrows(
         ControlProtocolException.class,
         () ->
-            ControlProtocolCodec.validateUpdate(update.toBuilder().setOperationId("bad").build()));
+            ControlProtocolValidator.validateUpdate(
+                update.toBuilder().setOperationId("bad").build()));
     assertThrows(
         ControlProtocolException.class,
-        () -> ControlProtocolCodec.validateUpdate(update.toBuilder().clearTargetVersion().build()));
+        () ->
+            ControlProtocolValidator.validateUpdate(
+                update.toBuilder().clearTargetVersion().build()));
     assertThrows(IllegalArgumentException.class, () -> new DaemonUpdateCommand("bad", "1.0.9"));
     assertThrows(
         IllegalArgumentException.class,
@@ -570,9 +578,9 @@ class ControlProtocolCodecTest {
               .build();
       Update invalid = update.toBuilder().mergeUnknownFields(unknown).build();
       assertThrows(
-          ControlProtocolException.class, () -> ControlProtocolCodec.validateUpdate(invalid));
-      assertThrows(
-          ControlProtocolException.class, () -> ControlProtocolCodec.toDomainUpdate(invalid));
+          ControlProtocolException.class, () -> ControlProtocolValidator.validateUpdate(invalid));
+      // 映射只读取已校验 proto 的已知字段；未知字段由 wire 边界拒绝。
+      assertEquals(command, ControlProtocolCodec.toDomainUpdate(invalid));
       Envelope envelope =
           Envelope.newBuilder()
               .setMessageType(MessageType.UPDATE)
@@ -677,7 +685,7 @@ class ControlProtocolCodecTest {
         ControlProtocolFixtures.invokeEnvelope().toBuilder()
             .setInvoke(
                 ControlProtocolFixtures.invokeEnvelope().getInvoke().toBuilder()
-                    .setTimeoutMillis(ControlProtocolCodec.MAX_SAFE_INTEGER + 1))
+                    .setTimeoutMillis(DaemonUpdateProgress.MAX_SAFE_BYTE_COUNT + 1))
             .build();
     assertThrows(
         ControlProtocolException.class, () -> ControlProtocolCodec.encodeBinary(unsafeTimeout));
@@ -695,7 +703,7 @@ class ControlProtocolCodecTest {
                                 ControlProtocolFixtures.resource(
                                     "7c9e6679-7425-40de-944b-e07fc1f90ae7",
                                     "text/plain",
-                                    "x".repeat(ControlProtocolCodec.MAX_NAME_UTF8_BYTES + 1),
+                                    "x".repeat(ResourceRef.MAX_NAME_UTF8_BYTES + 1),
                                     0,
                                     "b".repeat(64),
                                     null))))
@@ -775,7 +783,7 @@ class ControlProtocolCodecTest {
             .setCallId(ControlProtocolFixtures.CALL_ID)
             .setError(false)
             .setDetailsJson("{}");
-    for (int index = 0; index <= ControlProtocolCodec.MAX_CONTENT_ITEMS; index++) {
+    for (int index = 0; index <= EnvironmentCapabilityResult.MAX_CONTENT_ITEMS; index++) {
       result.addContents(ControlProtocolFixtures.text("x"));
     }
     Envelope tooManyContents =
@@ -1202,7 +1210,7 @@ class ControlProtocolCodecTest {
                     .build()));
 
     String oversizedDetails =
-        "{\"a\":\"" + "x".repeat(ControlProtocolCodec.MAX_DETAILS_JSON_UTF8_BYTES) + "\"}";
+        "{\"a\":\"" + "x".repeat(EnvironmentCapabilityResult.MAX_DETAILS_JSON_UTF8_BYTES) + "\"}";
     assertThrows(
         ControlProtocolException.class,
         () ->

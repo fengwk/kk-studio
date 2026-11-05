@@ -14,6 +14,8 @@ import fun.fengwk.kkstudio.platform.daemon.protocol.ResourceUploadRequest;
 import fun.fengwk.kkstudio.platform.daemon.protocol.ResourceUploadTicket;
 import fun.fengwk.kkstudio.platform.daemon.protocol.TicketState;
 
+import java.lang.System.Logger;
+import java.lang.System.Logger.Level;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -24,6 +26,8 @@ import java.util.UUID;
 
 /** 资源上传控制面协调器：处理调用范围内的资源传输申请、提交、票据推进与释放。 */
 final class DaemonTransferCoordinator {
+
+  private static final Logger LOG = System.getLogger(DaemonTransferCoordinator.class.getName());
 
   static final int MAX_TRANSFERS_PER_INVOCATION = 16;
   static final String TRANSFER_FAILURE_MESSAGE = "resource upload is unavailable";
@@ -292,7 +296,17 @@ final class DaemonTransferCoordinator {
     }
     try {
       ticketService.release(active.environmentId, active.invocationId.toString(), uploadId);
-    } catch (RuntimeException ignored) {
+    } catch (RuntimeException error) {
+      LOG.log(
+          Level.WARNING,
+          "failed to release upload "
+              + uploadId
+              + " for invocation "
+              + active.invocationId
+              + " on "
+              + active.environmentId
+              + ": "
+              + error.getClass().getSimpleName());
     }
   }
 }

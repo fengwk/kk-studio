@@ -114,7 +114,7 @@ Daemon Runtime 的唯一 invoke timer 通过 `context.signal` 区分 `TIMED_OUT`
 
 ## daemon wire 协议会话与消息流
 
-控制协议基于单一 Protobuf 定义 [`control.proto`](../../platform/daemon-server/src/main/protocol/control.proto)，传输层由 [`ControlProtocolCodec`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/protocol/ControlProtocolCodec.java) 进行 4 字节大端长度前缀成帧与单阶段应用层 wire 校验。消息集合包括：
+控制协议基于单一 Protobuf 定义 [`control.proto`](../../platform/daemon-server/src/main/protocol/control.proto)，传输层由 [`ControlProtocolCodec`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/protocol/ControlProtocolCodec.java) 进行 4 字节大端长度前缀成帧与 protobuf 解析/领域映射，[`ControlProtocolValidator`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/protocol/ControlProtocolValidator.java) 施加单阶段应用层语义校验。消息集合包括：
 
 ```text
 SETTINGS / READY / HEARTBEAT / RUNTIME_STATUS
@@ -173,7 +173,7 @@ Studio -> IDE_LEASE(round, bindings)
 
 ## 载荷与编解码
 
-控制协议各帧的载荷均为 Protobuf 强类型消息，集中定义于 `control.proto`。传输层入站解码由 `ControlProtocolCodec.decodeFrame` 完成单一阶段 wire 校验；服务端核心 `DaemonSession.receive` 假定输入帧已通过 wire 校验，只执行会话语义与状态机校验（如 `READY` 仅允许一次、环境标识匹配等）。
+控制协议各帧的载荷均为 Protobuf 强类型消息，集中定义于 `control.proto`。传输层入站解码由 `ControlProtocolCodec.decodeFrame` 完成成帧与 protobuf 解析，并调用 `ControlProtocolValidator` 施加一次性的应用层语义校验；服务端核心 `DaemonSession.receive` 假定输入帧已通过 wire 校验，只执行会话语义与状态机校验（如 `READY` 仅允许一次、环境标识匹配等）。
 
 宿主环境元数据持久化：[`DaemonCapabilitiesCodec`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/DaemonCapabilitiesCodec.java) 编解码宿主侧环境元数据，由 Server 持久化到 `runtime_info`。当前运行状态仅保存在连接会话内存中，不持久化。`environment_connection` 保留：
 - `runtime_info`：最后接受的 READY 宿主 metadata，断线保留。实际 Daemon 版本只取此上报事实。
@@ -209,7 +209,7 @@ runtimeStatus: {
 - **背压与并发**：流式数据传输直接受两端 TCP 与 HTTP/2 流控协议的背压约束，流量在两端原生背压控制下流转，不进行私有二进制切帧封装。物理连接失联时中止所有活跃交换。
 - **非 owner 转发**：浏览器不要求粘性路由；非 owner 节点 B 收到 IDE 流量时，从 `environment_connection` 和 `cluster_node` 找到 owner 节点 A，通过内部单跳代理转发给 A，只有 owner 节点直接操作环境隧道。owner 变化或内部转发失败时终结请求，不改投另一节点重放副作用。
 
-`transferId` 是同一 invocation 内一次资源传输的稳定关联键。控制面只承载元数据：单条控制消息至多 16 KiB 字符，FAILED 说明至多 512 字符。[`DaemonPresignedPut`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/DaemonPresignedPut.java) 限制方法只能是 `PUT`、URL 至多 4096 字符、header 至多 16 条且名与值各至多 1024 字符；过期时刻的规范 `Instant` 文本由 codec 校验。codec 两端都拒绝未知/缺失/重复字段、尾随 JSON、非 canonical UUID/Instant、非法摘要与互相矛盾的 ticket 状态。
+`transferId` 是同一 invocation 内一次资源传输的稳定关联键。控制面只承载元数据：单条控制消息至多 16 KiB 字符，FAILED 说明至多 512 字符。[`DaemonPresignedPut`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/DaemonPresignedPut.java) 限制方法只能是 `PUT`、URL 至多 4096 字符、header 至多 16 条且名与值各至多 1024 字符；过期时刻的规范 `Instant` 文本由 `ControlProtocolValidator` 校验。协议两端都拒绝未知/缺失/重复字段、尾随 JSON、非 canonical UUID/Instant、非法摘要与互相矛盾的 ticket 状态。
 
 二进制字节不进入 WebSocket：控制面只描述 transfer、预签名 PUT 与终态 upload 元数据，实际 PUT 由 Daemon 直接请求对象存储。所有能力统一通过通用 INVOKE 与结果协议交互。
 
@@ -385,7 +385,7 @@ listener 在锁外收到 `onDaemonInstanceReplaced(previous)`，宿主据此关�
 
 ## 源码与测试
 
-主要源码入口：[`EnvironmentId.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/EnvironmentId.java)、[`EnvironmentCapabilityCatalog.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityCatalog.java)、[`EnvironmentCapabilityTransport.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityTransport.java)、[`ControlProtocolCodec.java`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/protocol/ControlProtocolCodec.java)、[`DaemonSessions.java`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/server/DaemonSessions.java)、[`DaemonSession.java`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/server/DaemonSession.java)、[`EnvironmentDaemonServer.java`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/server/EnvironmentDaemonServer.java)、[`DaemonConnectionSession.java`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/server/DaemonConnectionSession.java)、[`DaemonCapabilitiesCodec.java`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/DaemonCapabilitiesCodec.java)。
+主要源码入口：[`EnvironmentId.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/EnvironmentId.java)、[`EnvironmentCapabilityCatalog.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityCatalog.java)、[`EnvironmentCapabilityTransport.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityTransport.java)、[`ControlProtocolCodec.java`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/protocol/ControlProtocolCodec.java)、[`ControlProtocolValidator.java`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/protocol/ControlProtocolValidator.java)、[`DaemonSessions.java`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/server/DaemonSessions.java)、[`DaemonSession.java`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/server/DaemonSession.java)、[`EnvironmentDaemonServer.java`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/server/EnvironmentDaemonServer.java)、[`DaemonConnectionSession.java`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/server/DaemonConnectionSession.java)、[`DaemonCapabilitiesCodec.java`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/DaemonCapabilitiesCodec.java)。
 
 测试守卫：
 
