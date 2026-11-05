@@ -17,6 +17,11 @@ import { repositoryRoot } from '../../../lib/repo-root.mjs'
 
 const REPOSITORY_ROOT = repositoryRoot()
 const SCRIPT = path.join(REPOSITORY_ROOT, 'scripts/dev/verify/supply-chain/run.sh')
+const SUPPLY_CHAIN_SOURCES = readdirSync(path.dirname(SCRIPT))
+    .filter(name => name.endsWith('.sh'))
+    .sort()
+    .map(name => readFileSync(path.join(path.dirname(SCRIPT), name), 'utf8'))
+    .join('\n')
 const POM = path.join(REPOSITORY_ROOT, 'pom.xml')
 const CANVAS_RUNTIME_POM = path.join(REPOSITORY_ROOT, 'apps/canvas/runtime/pom.xml')
 const PLATFORM_POM = path.join(REPOSITORY_ROOT, 'platform/runtime/pom.xml')
@@ -380,7 +385,7 @@ test('locks tool versions, policy thresholds, and secret indirection', () => {
     const canvasRuntimePom = readFileSync(CANVAS_RUNTIME_POM, 'utf8')
     const platformPom = readFileSync(PLATFORM_POM, 'utf8')
     const webPom = readFileSync(WEB_POM, 'utf8')
-    const script = readFileSync(SCRIPT, 'utf8')
+    const script = SUPPLY_CHAIN_SOURCES
     assert.match(pom, /<spring-boot\.version>4\.0\.8<\/spring-boot\.version>/)
     assert.match(pom, /<jackson\.version>2\.22\.3<\/jackson\.version>/)
     assert.match(pom, /<jackson3\.version>3\.1\.7<\/jackson3\.version>/)
