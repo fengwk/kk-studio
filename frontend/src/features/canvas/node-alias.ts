@@ -16,7 +16,7 @@ export function uniqueNodeAlias(
   }
 }
 
-export function canonicalNodeAlias(value: string): string {
+function canonicalNodeAlias(value: string): string {
   return value.normalize('NFKC').trim().slice(0, 256)
 }
 

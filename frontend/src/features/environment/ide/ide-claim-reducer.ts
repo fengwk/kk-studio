@@ -10,8 +10,6 @@ import type {
   IdeRecovery,
 } from '@/features/environment/ide/ide-tab-state'
 
-export type IdeActionMode = 'files' | 'shell'
-
 export type IdeViewStatus =
   | 'pending'
   | 'registering'

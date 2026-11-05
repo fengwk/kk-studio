@@ -1,12 +1,10 @@
 import { isCanonicalUuid } from '@/shared/lib/uuid'
 import {
-  getString,
-  isNonBlankString,
   isPositiveInteger,
-  isRecord,
   stringifyJson,
   toEpochMillis,
 } from '@/features/thread/runtime/thread-realtime/realtime-values'
+import { getString, isRecord, nonBlank as isNonBlankString } from '@/shared/lib/value'
 import type { ToolInvocationDTO } from '@/shared/api/generated/contracts'
 
 export interface RealtimeToolPartial {

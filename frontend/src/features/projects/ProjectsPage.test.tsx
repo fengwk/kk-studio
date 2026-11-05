@@ -385,7 +385,7 @@ describe('ProjectsPage', () => {
   })
 
   it('reloads project list when a project change is broadcast', async () => {
-    // 测试意图：全局发布项目变更通知时重新加载列表（不再提供手工刷新按钮）
+    // 测试意图：全局发布项目变更通知时重新加载列表。
     const api = createMockApi()
     const { queryClient } = renderProjectsPage(<ProjectsPage api={api} />)
 

@@ -5,7 +5,7 @@ import { TextInput } from '@/shared/ui/controls/TextInput'
 import { TextArea } from '@/shared/ui/controls/TextArea'
 import { Plus, Trash2 } from 'lucide-react'
 import type { VariantDraft } from '@/features/catalog/ai-console-types'
-import { blankVariant } from '@/features/catalog/ai-resource-form-drafts'
+import { newVariantDraft } from '@/features/catalog/ai-resource-draft-primitives'
 import { useI18n } from '@/shared/i18n'
 import './catalog-form-layout.css'
 
@@ -45,7 +45,7 @@ export function VariantListEditor({
       suffix += 1
       id = `variant-${suffix}`
     }
-    onChange([...variants, blankVariant(id)])
+    onChange([...variants, newVariantDraft({ id })])
   }
 
   function removeVariant(index: number) {

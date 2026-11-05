@@ -1,4 +1,5 @@
-import { asRecord, getRecordList, getString, parsePayload } from '@/features/thread/runtime/payload-json'
+import { asRecord, getRecordList, parsePayload } from '@/features/thread/runtime/payload-json'
+import { getString } from '@/shared/lib/value'
 import type {
   RealtimeModelStream,
 } from '@/features/thread/runtime/thread-realtime/model-stream'

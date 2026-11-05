@@ -27,7 +27,7 @@ vi.mock('@/features/canvas/canvas-api', () => ({
   cancelCanvasFunctionRun: vi.fn(),
 }))
 
-/** 真实画布文档：wire 上只有 revision；不携带 version/threadId 等旧字段。 */
+/** 真实画布文档：wire 上使用 revision。 */
 const documentFixture: CanvasDocumentDTO = {
   id: CANVAS_ID,
   title: 'Research board',

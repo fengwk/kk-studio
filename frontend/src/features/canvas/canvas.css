@@ -26,9 +26,7 @@
   box-sizing: border-box;
 }
 
-/* Canvas 原生按钮/输入基线：菜单、缩放、节点与媒体控件继续复用同一基线，
-   但写成零特异度选择器，使共享 Button/IconButton/TextInput 的类规则可以覆盖，
-   feature 不再用通用 `button` 规则重置共享控件外观。 */
+/* Canvas 原生按钮/输入使用零特异度基线，共享控件类规则可覆盖该基线。 */
 :where(.canvas-feature) :where(button, input, textarea, select) {
   font: inherit;
 }

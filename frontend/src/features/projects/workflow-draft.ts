@@ -48,7 +48,7 @@ export interface WorkflowDraftState {
 
 let localKeySeq = 0
 
-export function nextDraftKey(): string {
+function nextDraftKey(): string {
   localKeySeq += 1
   return `wf-${localKeySeq}`
 }

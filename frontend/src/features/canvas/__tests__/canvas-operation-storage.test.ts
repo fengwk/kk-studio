@@ -76,7 +76,7 @@ describe('Canvas 待确认操作持久化 (operation store)', () => {
     expect(loaded[0]?.ack).toEqual([{ nodeId: NODE_ID, field: 'text', generation: 1 }])
   })
 
-  it('删除单个待确认操作后不再被恢复', async () => {
+  it('删除单个待确认操作后恢复结果为空', async () => {
     const idbFactory = createMockIDBFactory()
     const saved = operation(1, KEY_1, 'first')
     await saveCanvasOperation(saved, { idbFactory, userId: 'user-1', editingSessionId: 'tab-1' })
@@ -270,7 +270,7 @@ describe('Canvas 待确认操作持久化 (operation store)', () => {
   })
 
   it('I10: sessionReloading 期间 operation store 各入口（save/remove/list）全部 fail-closed 拒写，且不污染已持久化的其他 session 记录', async () => {
-    // 测试意图：验证当 bfcache 导致 sessionReloading 为 true 时，待确认操作存储的所有入口（save/remove/list）全部拒绝抛出 CanvasStorageUnavailableError，且旧 session 已存记录完好无损未被篡改
+    // 测试意图：bfcache 重载时存储入口全部拒绝，并保留原会话已存记录。
     resetEditingSessionForTests()
     const idbFactory = createMockIDBFactory()
     const validOp = operation(1, KEY_PERSISTED_1, 'initial-state', 'tab-1')

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { utf8ByteLength } from '@/shared/lib/value'
 import {
   appendStrictJsonArrayItem,
   getNodeSafeValue,
@@ -11,7 +12,6 @@ import {
   parseStrictJsonObject,
   removeStrictJsonNode,
   updateStrictJsonField,
-  utf8ByteLength,
 } from './plugin-config-json'
 import { findNodeAtLocation } from 'jsonc-parser'
 

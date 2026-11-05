@@ -1,4 +1,5 @@
 import { ApiError } from '@/shared/api/client'
+import { isRecord, nonBlank } from '@/shared/lib/value'
 
 const STORAGE_PREFIX = 'kk-studio.projects.pending-action:'
 
@@ -403,12 +404,4 @@ export function validAction(value: unknown, expectedIssueId?: string): value is 
     default:
       return false
   }
-}
-
-function nonBlank(value: unknown): value is string {
-  return typeof value === 'string' && value.trim() !== ''
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value != null && typeof value === 'object' && !Array.isArray(value)
 }

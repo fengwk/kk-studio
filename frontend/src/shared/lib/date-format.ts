@@ -6,6 +6,11 @@ export function formatBackendDate(value: number): string {
   if (!Number.isFinite(date.getTime())) {
     return '-'
   }
+  return formatLocalDateMinutes(date)
+}
+
+/** 本地日期时间，精确到分钟。调用方须传入有效日期。 */
+export function formatLocalDateMinutes(date: Date): string {
   return `${String(date.getFullYear()).padStart(4, '0')}-${String(
     date.getMonth() + 1,
   ).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')} ${String(

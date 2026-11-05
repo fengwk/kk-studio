@@ -1585,7 +1585,7 @@ async function deleteCatalogResource(apiCtx, requestPath) {
 
 async function clearBrowserFixtureState(page, fixture) {
   if (!fixture.chat?.id) return
-  await clearChatPaneState(page, fixture.chat.id).catch(() => undefined)
+  await clearChatPaneState(page, fixture.chat.id)
   await page.evaluate(
     ({ blankDraftKey, threadDraftKey }) => {
       localStorage.removeItem(blankDraftKey)

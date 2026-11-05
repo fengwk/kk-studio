@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
   formatModelLabel,
-  isGroupModel,
   toAgentModelViews,
 } from '@/features/catalog/AgentModelView'
 import type { AgentModelConfigDTO, AgentModelDTO } from '@/shared/api/generated/contracts'
@@ -50,11 +49,5 @@ describe('AgentModelView', () => {
     expect(formatModelLabel('MiniMax-M2.7', '   ')).toBe('MiniMax-M2.7')
     expect(formatModelLabel('', 'v1')).toBe('v1')
     expect(formatModelLabel('', '')).toBe('unknown-model')
-  })
-
-  it('recognizes groups without requiring a fabricated variant', () => {
-    expect(isGroupModel(model())).toBe(false)
-    expect(isGroupModel({ ...model('group'), kind: 'GROUP' })).toBe(true)
-    expect(isGroupModel(null)).toBe(false)
   })
 })

@@ -26,10 +26,6 @@ export function formatExecutionModelLabel(execution: HarnessExecutionSelectionDT
   return formatModelLabel(model?.modelName, model?.variant)
 }
 
-export function isGroupModel(model?: AgentModelView | null): boolean {
-  return model?.kind === 'GROUP'
-}
-
 export function toAgentModelViews(models: AgentModelDTO[]): AgentModelView[] {
   return models.map((model) => ({ ...model }))
 }

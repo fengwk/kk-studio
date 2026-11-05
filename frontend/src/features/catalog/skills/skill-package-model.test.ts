@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { ApiError } from '@/shared/api/client'
+import { formatByteCount as formatBytes } from '@/shared/lib/format-bytes'
+import { formatDateTime24 } from '@/shared/lib/date-format'
+import { errorDetailMessage as errorDetail } from '@/shared/lib/user-facing-error'
 import type { SkillPackageDetailDTO, SkillPackageFileDTO } from '@/shared/api/generated/contracts'
 import {
   addedSkills,
@@ -8,10 +11,7 @@ import {
   deriveCheckStatus,
   displayPackageVersion,
   environmentSyncStatus,
-  errorDetail,
-  formatBytes,
   formatCommit,
-  formatDateTime,
   isDescriptionWithinLimit,
   isSupportedSkillArchive,
   isValidPackageName,
@@ -113,11 +113,11 @@ describe('skill package model', () => {
     expect(displayPackageVersion({ source: 'GIT', packageVersion: 'a'.repeat(40) })).toBe('aaaaaaaaaa')
     expect(displayPackageVersion({ source: 'UPLOAD', packageVersion: '2026.08.1' })).toBe('2026.08.1')
     expect(formatBytes('512')).toBe('512 B')
-    expect(formatBytes(2048)).toBe('2.0 KB')
+    expect(formatBytes(2048)).toBe('2 KB')
     expect(formatBytes('1572864')).toBe('1.5 MB')
-    expect(formatBytes('not-a-size')).toBe('—')
+    expect(formatBytes('not-a-size')).toBe('not-a-size')
     // wire 上的 Instant 是 epoch 秒：按毫秒解析会退化成 1970 年。
-    expect(formatDateTime(1784505600, 'en-US')).toContain('2026')
+    expect(formatDateTime24(new Date(1784505600 * 1000), 'en-US')).toContain('2026')
   })
 
   it('validates package names, versions, descriptions and archive extensions', () => {

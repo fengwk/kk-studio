@@ -11,6 +11,7 @@ import { Dialog } from '@/shared/ui/overlays/Dialog'
 import { pluginsService } from '@/features/extensions/plugins-service'
 import { isConflictError } from '@/shared/api/client'
 import { useI18n } from '@/shared/i18n'
+import { utf8ByteLength } from '@/shared/lib/value'
 import type { PluginSecretPatchOperation } from '@/shared/api/contracts/ai-plugin'
 import {
   appendStrictJsonArrayItem,
@@ -21,7 +22,6 @@ import {
   parseStrictJsonObject,
   removeStrictJsonNode,
   updateStrictJsonField,
-  utf8ByteLength,
 } from './plugin-config-json'
 import { isDraftKeyUnderPath, withoutStaleDrafts } from './plugin-draft-keys'
 import { parsePluginValuesSchema } from './plugin-schema'

@@ -54,8 +54,7 @@ Thread panel 消费 timeline presentation 类型，宿主负责 API、realtime �
 [`write.sh`](../../scripts/dev/verify/generated-contracts/write.sh)。
 
 [`contracts`](../../frontend/src/shared/api/contracts) 只保留生成契约无法表达的封闭取值与前端细化
-（Harness 命令、上传、技能与 Canvas 资源/运行状态等），不再为 Interaction、Plugin、Project 或 Canvas 手写运行时 decoder；
-这些 HTTP 响应直接消费生成契约，在真正使用点做 `type` / `status` 分支。
+（Harness 命令、上传、技能与 Canvas 资源/运行状态等）；Interaction、Plugin、Project 与 Canvas 的 HTTP 响应直接消费生成契约，在使用点做 `type` / `status` 分支。
 浏览器本地存储与应用事件 WebSocket 不经生成契约约束，仍保留结构校验。
 service 按职责归属：Chat、Environment、Extensions、Catalog、Settings 的接口客户端位于各自 feature；
 `shared/api` 只保留 HTTP client、生成契约和 Harness/Agent/Storage/Interaction 平台客户端。

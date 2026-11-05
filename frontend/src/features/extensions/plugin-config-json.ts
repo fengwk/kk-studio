@@ -145,13 +145,6 @@ const DEFAULT_FORMATTING = {
  */
 export const MAX_PLUGIN_VALUES_UTF8_BYTES = 64 * 1024
 
-const UTF8_ENCODER = new TextEncoder()
-
-/** 文本的 UTF-8 字节数；预算门禁与后端同一口径。 */
-export function utf8ByteLength(text: string): number {
-  return UTF8_ENCODER.encode(text).length
-}
-
 /**
  * 校验给定的字符串是否符合严格的 JSON 数字格式（支持大整数、高精度小数、指数）。
  */

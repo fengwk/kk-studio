@@ -76,7 +76,7 @@ describe('harnessService', () => {
   })
 
   /**
-   * 测试意图：验证 Session 级线程与条目列表查询路由迁移至 /sessions/{id}/{threads|entries}，
+   * 测试意图：验证 Session 级线程与条目列表查询路由 /sessions/{id}/{threads|entries}，
    * 入口参数被安全转义；Entry 列表按 keyset 游标与 limit 请求，缺省游标不写入查询参数。
    */
   it('queries session threads and paged entries via /sessions/{id}/{threads|entries}', async () => {
@@ -233,8 +233,7 @@ describe('harnessService', () => {
   })
 
   /**
-   * 测试意图：验证 Tool approval 提交由 POST 迁移为 PUT /threads/{threadId}/tool-invocations/{invocationId}/approval，
-   * 确保 HTTP 方法和路径严格符合最新后端契约。
+   * 测试意图：验证 Tool approval 提交使用 PUT /threads/{threadId}/tool-invocations/{invocationId}/approval。
    */
   it('submits tool approval decisions via PUT /threads/{threadId}/tool-invocations/{invocationId}/approval', async () => {
     const http = createClient()

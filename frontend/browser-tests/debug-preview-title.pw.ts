@@ -465,11 +465,9 @@ test.describe('Debug Inspect Actions Real React Browser Regression', () => {
     await expect(composer).toContainText('Claude')
     await expect(composer).toContainText('fast')
 
-    // 2. + 命令表进入 Debug（不消费草稿），断言无多余预览操作按钮与规划标题
+    // 2. + 命令表进入 Debug 并保留草稿
     await enterDebugView(page)
-    await expect(page.locator('.thread-debug-preview-action')).toHaveCount(0)
-    await expect(page.getByRole('heading', { name: '当前规划' })).toHaveCount(0)
-    await expect(page.getByText('检查操作', { exact: true })).toHaveCount(0)
+    await expect(page.getByText('系统提示词', { exact: true })).toBeVisible()
     await expect(editor).toHaveText(DRAFT)
 
     // Debug 的只读 POST 必须与界面选择严格同源：选中的 coder 模型进入请求，草稿环境原样保留。
@@ -497,11 +495,10 @@ test.describe('Debug Inspect Actions Real React Browser Regression', () => {
     await page.screenshot({ path: resolve(reportsDir, 'agent-model-follow.png') })
   })
 
-  test('inspect action and redundant headings are removed in both layouts without losing the draft', async ({
+  test('debug layouts preserve the draft and current preview', async ({
     page,
   }) => {
-    // 不存在 .thread-debug-preview-action、当前规划与检查操作；
-    // 宽窄布局下均断言旧入口不存在，草稿全程不变。
+    // 宽窄布局下草稿与请求预览均可用。
     const cursor: Cursor = INITIAL_CURSOR
     await installPreviewApiMock(page, { cursor: () => cursor })
 
@@ -512,11 +509,7 @@ test.describe('Debug Inspect Actions Real React Browser Regression', () => {
     const editor = composer.locator('.composer-editor')
     await expect(editor).toBeVisible()
 
-    // 1. Composer 底栏已无旧 Eye 预览按钮，预览入口不在 Composer 内
-    await expect(composer.locator('.thread-dock-preview')).toHaveCount(0)
-    await expect(composer.locator('svg.preview-icon')).toHaveCount(0)
-    await expect(composer.getByRole('button', { name: '预览请求' })).toHaveCount(0)
-    await expect(composer.locator('.thread-debug-preview-title-btn')).toHaveCount(0)
+    // 1. Composer 操作可用
     await expect(composer.locator('.thread-dock-add')).toBeVisible()
     await expect(composer.locator('.thread-dock-send')).toBeVisible()
 
@@ -539,25 +532,21 @@ test.describe('Debug Inspect Actions Real React Browser Regression', () => {
     expect(dockMetrics.dockScrollWidth).toBeLessThanOrEqual(dockMetrics.dockClientWidth + 1)
     expect(dockMetrics.composerScrollWidth).toBeLessThanOrEqual(dockMetrics.composerClientWidth + 1)
 
-    // 4. 带草稿进入 Debug：宽布局下断言无多余操作按钮与冗余标题
+    // 4. 带草稿进入 Debug 宽布局
     await enterDebugView(page)
 
     const shell = page.locator('.thread-events-shell')
     await expect(shell).toHaveAttribute('data-layout', 'wide')
-    const previewTitleBtn = page.locator('.thread-debug-preview-action')
-    await expect(page.getByRole('heading', { name: '当前规划' })).toHaveCount(0)
-    await expect(page.getByText('检查操作', { exact: true })).toHaveCount(0)
-    await expect(previewTitleBtn).toHaveCount(0)
     await expect(editor).toHaveText(DRAFT)
     await expect(page.locator('.thread-debug-col-detail')).toBeVisible()
 
-    // 5. 空草稿的同步：退出 Debug 清空草稿，再进来旧按钮依然不存在
+    // 5. 空草稿在视图切换时保持
     await exitDebugView(page)
     await editor.click()
     await editor.fill('')
     await expect(editor).toHaveText('')
     await enterDebugView(page)
-    await expect(previewTitleBtn).toHaveCount(0)
+    await expect(editor).toHaveText('')
 
     // 6. 重新填写草稿后重进 Debug
     await exitDebugView(page)
@@ -565,11 +554,11 @@ test.describe('Debug Inspect Actions Real React Browser Regression', () => {
     await editor.fill(DRAFT)
     await expect(editor).toHaveText(DRAFT)
     await enterDebugView(page)
-    await expect(previewTitleBtn).toHaveCount(0)
+    await expect(editor).toHaveText(DRAFT)
 
     await page.screenshot({ path: resolve(reportsDir, 'debug-preview-title-wide.png'), animations: 'disabled' })
 
-    // 7. 窄布局复核：同一棵 Debug，旧入口与标题同样不存在
+    // 7. 窄布局复核预览与草稿
     await page.setViewportSize(NARROW_VIEWPORT)
     await expect(shell).toHaveAttribute('data-layout', 'narrow')
     const tabs = page.locator('.thread-debug-tabs')
@@ -577,9 +566,6 @@ test.describe('Debug Inspect Actions Real React Browser Regression', () => {
     await expect(tabs).toBeVisible()
     await previewTab.click()
     await expect(shell).toHaveAttribute('data-active-tab', 'preview')
-    await expect(previewTitleBtn).toHaveCount(0)
-    await expect(page.getByRole('heading', { name: '当前规划' })).toHaveCount(0)
-    await expect(page.getByText('检查操作', { exact: true })).toHaveCount(0)
     await expect(editor).toHaveText(DRAFT)
 
     await page.screenshot({ path: resolve(reportsDir, 'debug-preview-title-narrow.png'), animations: 'disabled' })

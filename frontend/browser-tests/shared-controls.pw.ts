@@ -4,7 +4,7 @@ import { tokenColor } from './fixture'
 /**
  * 共享表单控件在真实 .form-group / .modal-body 上下文中的实测：
  * 32px 几何（compact 28px）、焦点环、校验失败的 danger 边框与禁用色的颜色与光标，
- * 以及旧 .form-group 规则不会改写共享控件。
+ * 以及 .form-group 规则与共享控件的样式隔离。
  */
 
 const DANGER = 'rgb(240, 133, 133)'
@@ -69,8 +69,7 @@ test.describe('shared form controls in real form contexts', () => {
       await expectHeight(page.locator(selector).first(), expected)
     }
 
-    // 共享搜索框输入：不套用旧表单控件的表面/边框/内边距，只贴合 32px 外框。
-    // 必须取 .form-group 内的实例（页级工具条上的搜索框不受旧规则影响，会掩盖缺陷）。
+    // 共享搜索框输入贴合 32px 外框；在 .form-group 内检查样式隔离。
     const searchInput = page.locator('.form-group .searchbox .ui-search-input').first()
     await expect(searchInput).toHaveCSS('border-top-width', '0px')
     await expect(searchInput).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
@@ -108,7 +107,7 @@ test.describe('shared form controls in real form contexts', () => {
     const checkboxBox = page.locator('.control-checkbox .ui-checkbox-box').first()
     await targetFocusRing(page, checkboxInput, checkboxBox, GREEN)
 
-    // 校验失败：danger 边框，且不被旧 .form-group.is-error 硬编码色改写。
+    // 校验失败：共享控件保持 danger 边框。
     for (const selector of [
       '.control-text-invalid',
       '.control-select-invalid .ui-select-trigger',
@@ -122,7 +121,7 @@ test.describe('shared form controls in real form contexts', () => {
       DANGER,
     )
 
-    // 旧 .form-group.is-error 用 !important + 硬编码色，不得改写共享控件。
+    // .form-group.is-error 的规则不得改写共享控件。
     await expect(page.locator('.control-text-error-context')).toHaveCSS('border-color', DANGER)
     await expect(page.locator('.control-number-error-context')).toHaveCSS('border-color', DANGER)
     for (const selector of ['.control-text-error-context', '.control-number-error-context']) {
@@ -134,7 +133,7 @@ test.describe('shared form controls in real form contexts', () => {
     }
   })
 
-  // 普通（非共享）控件的旧表单规则仍按 32px 节奏生效：证明选择器列表合法且未被整体丢弃。
+  // 普通（非共享）控件的表单规则按 32px 节奏生效。
   test('applies the shared 32px rhythm to plain .form-group controls', async ({ page }) => {
     const plain = await page.evaluate(() => {
       const wrapper = document.createElement('div')

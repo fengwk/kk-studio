@@ -58,7 +58,7 @@ it('renders and submits a long questionnaire without truncating questions, optio
     </QueryClientProvider>,
   )
 
-  // 超过旧业务上限的题数与文本都完整渲染：每题一个自定义输入，问题原文逐字保留。
+  // 长问卷的题数与文本完整渲染：每题一个自定义输入，问题原文逐字保留。
   const longQuestion = LONG_QUESTIONNAIRE.questions[0].question
   const inputs = screen.getAllByPlaceholderText('输入自定义回答')
   expect(screen.getAllByText(longQuestion)).toHaveLength(LONG_QUESTION_COUNT)

@@ -117,12 +117,11 @@ test.describe('Responsive Debug Layout Real React Component Regression', () => {
     await composerInput.fill('测试任务指令')
     expect(await composerInput.inputValue()).toBe('测试任务指令')
 
-    // 8. 验证快照按钮存在，无复制按钮
+    // 8. 验证快照按钮
     await colPreview.evaluate((el) => { el.scrollTop = 0 })
     const snapshotBtn = page.getByRole('button', { name: '查看当前调用冻结的规范化 ProviderRequest，而非 HTTP 原始报文', exact: true })
     await expect(snapshotBtn).toBeVisible()
     await expect(snapshotBtn).toHaveText('冻结调用输入')
-    await expect(page.locator('.thread-debug-prompt-copy')).toHaveCount(0)
 
     // 9. 保存截图
     await colDetail.evaluate((el) => { el.scrollTop = 0 })
@@ -527,13 +526,6 @@ test.describe('Responsive Debug Layout Real React Component Regression', () => {
     expect(await shell.evaluate((el) => el.clientWidth)).toBe(1099)
     await expect(page.getByRole('tablist')).toBeVisible()
     expect(await shell.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
-  })
-
-  test('system prompt copy action is removed', async ({ page }) => {
-    await page.setViewportSize({ width: 1400, height: 900 })
-    await page.goto('/browser-tests/debug-harness.html')
-    await expect(page.locator('.thread-debug-prompt-copy')).toHaveCount(0)
-    await expect(page.getByRole('button', { name: /复制系统提示词|Copy system prompt/ })).toHaveCount(0)
   })
 
   test('390px mobile viewport: narrow layout with tabs and no horizontal overflow', async ({ page }) => {

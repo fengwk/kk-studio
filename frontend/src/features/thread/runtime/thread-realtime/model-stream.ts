@@ -1,12 +1,11 @@
 import {
   hasOnlyFields,
-  isNonBlankString,
   isNonNegativeInteger,
   isPositiveInteger,
-  isRecord,
   nullableString,
   toEpochMillis,
 } from '@/features/thread/runtime/thread-realtime/realtime-values'
+import { isRecord, nonBlank as isNonBlankString } from '@/shared/lib/value'
 import type {
   HarnessActiveAssistantOutputDTO,
   HarnessGenerationFailureDTO,

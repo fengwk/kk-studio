@@ -5,6 +5,7 @@ import {
   type ComposerPart,
   type ImageInputTier,
 } from '@/features/thread/composer/composer-parts'
+import { hasExactKeys, isRecord } from '@/shared/lib/value'
 
 const STORAGE_PREFIX = 'kk-studio.composer-draft:'
 
@@ -147,14 +148,6 @@ function parseStoredDraft(raw: string): ComposerPart[] {
     }
     throw new Error('unknown composer draft part')
   })
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value != null && typeof value === 'object' && !Array.isArray(value)
-}
-
-function hasExactKeys(record: Record<string, unknown>, keys: string[]): boolean {
-  return Object.keys(record).length === keys.length && hasOnlyKeys(record, keys)
 }
 
 function hasOnlyKeys(record: Record<string, unknown>, keys: string[]): boolean {

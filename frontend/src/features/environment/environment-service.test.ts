@@ -15,7 +15,7 @@ describe('environmentService', () => {
     expect(client.put).toHaveBeenCalledWith('/environments/env%2Fa/install-config', { expectedVersion: '8', installConfig: config })
   })
   /**
-   * 测试意图：验证 Environment 列表查询端点已迁移至 /environments。
+   * 测试意图：验证 Environment 列表查询端点为 /environments。
    */
   it('lists environments from GET /environments', async () => {
     const client = createMockHttpClient()

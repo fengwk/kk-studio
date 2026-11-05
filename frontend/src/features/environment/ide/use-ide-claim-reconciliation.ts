@@ -13,7 +13,7 @@ import type {
   EnvironmentIdeViewDTO,
 } from '@/shared/api/generated/contracts'
 import { createUuid, isCanonicalUuid } from '@/shared/lib/uuid'
-import type { IdeEnvironmentInfo } from '@/features/environment/ide/ide-panel-context'
+import type { IdeActionMode, IdeEnvironmentInfo } from '@/features/environment/ide/ide-panel-context'
 import { validateIdeEntryUrl } from '@/features/environment/ide/ide-url'
 import {
   readRecentDirectories,
@@ -33,7 +33,6 @@ import {
   POSITIVE_DECIMAL,
   recoveryFromViews,
   safeIdeError,
-  type IdeActionMode,
   type IdeClaimAction,
   type IdeViewState,
 } from '@/features/environment/ide/ide-claim-reducer'

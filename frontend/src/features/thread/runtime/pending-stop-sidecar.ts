@@ -1,3 +1,5 @@
+import { isRecord, nonBlank } from '@/shared/lib/value'
+
 const STORAGE_PREFIX = 'kk-studio.pending-stop:'
 
 /**
@@ -85,12 +87,4 @@ function validOperation(value: unknown): value is PendingStopOperation {
     && nonBlank(value.requestHeadEntryId)
     && nonBlank(value.basisVersion)
   )
-}
-
-function nonBlank(value: unknown): value is string {
-  return typeof value === 'string' && value.trim() !== ''
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value != null && typeof value === 'object' && !Array.isArray(value)
 }

@@ -319,6 +319,13 @@ describe('ThreadWorkspacePage', () => {
     expect(chatService.getChat).not.toHaveBeenCalled()
   })
 
+  it('rejects an uppercase UUID in the thread route without fetching a snapshot', () => {
+    // 路由参数必须符合服务端的小写规范形式。
+    renderPage('/threads/8D3B8A2E-4B9F-4C5D-9E6F-1A2B3C4D5E6F')
+    expect(screen.getByText('无效的 Thread ID')).toBeInTheDocument()
+    expect(harnessService.getThreadSnapshot).not.toHaveBeenCalled()
+  })
+
   it('uses actual identity for a default-main child and clears its actions immediately on route change', async () => {
     // 真实只读组件与延迟下一条路由快照共同锁定：旧查看层不能借新地址继续显示/接收动作。
     const user = userEvent.setup()
