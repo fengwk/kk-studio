@@ -9,25 +9,9 @@ export const projectsCatalog = {
     'zh-CN': '新建项目',
     'en-US': 'New Project',
   },
-  'projects.edit': {
-    'zh-CN': '编辑项目',
-    'en-US': 'Edit Project',
-  },
-  'projects.delete': {
-    'zh-CN': '删除项目',
-    'en-US': 'Delete Project',
-  },
-  'projects.archive': {
-    'zh-CN': '归档项目',
-    'en-US': 'Archive Project',
-  },
   'projects.unarchive': {
     'zh-CN': '取消归档',
     'en-US': 'Unarchive Project',
-  },
-  'projects.workflow': {
-    'zh-CN': '工作流配置',
-    'en-US': 'Workflow Config',
   },
   'projects.workflowSave': {
     'zh-CN': '保存工作流',
@@ -49,53 +33,21 @@ export const projectsCatalog = {
     'zh-CN': '新建 Issue',
     'en-US': 'New Issue',
   },
-  'projects.issue.edit': {
-    'zh-CN': '编辑 Issue',
-    'en-US': 'Edit Issue',
-  },
   'projects.issue.delete': {
     'zh-CN': '删除 Issue',
     'en-US': 'Delete Issue',
-  },
-  'projects.issue.transition': {
-    'zh-CN': '流转状态',
-    'en-US': 'Transition State',
-  },
-  'projects.issue.block': {
-    'zh-CN': '阻塞 Issue',
-    'en-US': 'Block Issue',
-  },
-  'projects.issue.recover': {
-    'zh-CN': '恢复 Issue',
-    'en-US': 'Recover Issue',
   },
   'projects.issue.pause': {
     'zh-CN': '暂停执行',
     'en-US': 'Pause Execution',
   },
-  'projects.issue.stop': {
-    'zh-CN': '终止运行',
-    'en-US': 'Stop Execution',
-  },
   'projects.issue.reopen': {
     'zh-CN': '重新打开',
     'en-US': 'Reopen',
   },
-  'projects.issue.resetBudget': {
-    'zh-CN': '重置预算',
-    'en-US': 'Reset Budget',
-  },
   'projects.issue.comment': {
     'zh-CN': '发表评论',
     'en-US': 'Post Comment',
-  },
-  'projects.issue.instruction': {
-    'zh-CN': '下达指令',
-    'en-US': 'Send Instruction',
-  },
-  'projects.issue.uploadEvidence': {
-    'zh-CN': '上传证据',
-    'en-US': 'Upload Evidence',
   },
   'projects.saveBasic': {
     'zh-CN': '保存基础信息',
@@ -724,10 +676,6 @@ export const projectsCatalog = {
   'projects.delete.confirm': {
     'zh-CN': '确认删除',
     'en-US': 'Delete',
-  },
-  'projects.delete.deleting': {
-    'zh-CN': '删除中...',
-    'en-US': 'Deleting…',
   },
   'projects.detail.archiveAction': {
     'zh-CN': '归档',
