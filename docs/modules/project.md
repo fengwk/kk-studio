@@ -142,8 +142,8 @@ Run 计数，失败和取消也消耗一次；额度只限制**新 Run**，不�
 | 工具等待输入或审批 | Harness ToolInvocation | 在 Pane 或待处理入口回答/决定 |
 | 新 Run 额度耗尽 | 阶段预算与 Run 历史计算 | 人工授权或重置 |
 
-同一 Issue 只有一个 RUNNING/WAITING 主 Run。门禁关闭后停止新派发，在途调用按原 Run
-身份收尾，到安全点才置 WAITING。回答问卷后，业务 BLOCKED 或人工暂停仍需各自恢复。
+同一 Issue 只有一个 RUNNING/WAITING 主 Run。业务阻塞后停止新派发，在途调用按原 Run
+身份继续，到安全点才置 WAITING；控制暂停在活动 Run 收尾后设置并阻止新派发。回答问卷后，业务 BLOCKED 仍需显式恢复。
 输入等待恢复沿用原 Run，即使新 Run 额度已经用尽也可继续。
 
 人工停止通过 STOP 操作发起，继续执行通过显式 resume 解除暂停门禁；执行失败也可产生 ERROR 暂停。
@@ -194,7 +194,7 @@ Issue 工具说明、交接回执与当前 Run 的任务消息使用本模块的
 终态必须冻结区间、FAILED 必须给出原因等不变量由 `project_issue_run` 的检查约束与
 部分唯一索引最终保证；Entry 父链、跨表外键与锁序校验由 service 与 Runtime 负责，领域层不重复实现。
 
-Run 的预算、等待与停止政策只消费 Runtime 投影的统一执行事实 [`ThreadExecutionFacts`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/thread/ThreadExecutionFacts.java)：存在在途工作（排队命令 / 合法本地 Model / `READY`、`RUNNING` 工具 / owned continuation）时 `reconcile` 只延后重检，绝不投递指示或收尾；只有 `WAITING_APPROVAL` / `WAITING_INPUT` 才把 Run 转入等待；`UNKNOWN` 工具是已收敛的模型反馈，不作为人工核查门禁。人工停止时仍有在途工作或结果未定则收敛为 FAILED 和 ERROR 暂停。Project 通过 `ThreadExecutionFacts` 统一判断「在途」。
+Run 的预算、等待与停止政策只消费 Runtime 投影的统一执行事实 [`ThreadExecutionFacts`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/thread/ThreadExecutionFacts.java)：存在在途工作（排队命令 / 合法本地 Model / `READY`、`RUNNING` 工具 / owned continuation）时 `reconcile` 只延后重检，绝不投递指示或收尾；只有 `WAITING_APPROVAL` / `WAITING_INPUT` 才把 Run 转入等待；`UNKNOWN` 工具是已收敛的模型反馈。人工停止时仍有在途工作或结果未定则收敛为 FAILED 和 ERROR 暂停。Project 通过 `ThreadExecutionFacts` 统一判断「在途」。
 
 Project 的 `yoloEnabled` 只在首次创建该 `Issue + Agent` 执行根时初始化其
 YOLO 开关；修改项目开关不改写既有 Thread。该根委派的后代读取根的开关，
@@ -211,8 +211,7 @@ Run/Issue/阶段/版本与调用 Thread 身份，并要求本次调用的 assist
 其所属 TURN_START 由该 Thread 创建且严格晚于活动 Run 的 `startEntryId`：旧 Run 的迟到调用、同 Thread 后续 Run 期间的旧 Turn、兄弟分支与
 fork 都不获权。Run 完成只认本次
 root Join 冻结的 `terminalEntryId` / `finalAnswerEntryId`（`COMPLETED` / `ERROR` / `CANCELLED` 分别
-完成 / 失败 / 取消），既不按快照最新 head 猜测，也不等待永久子树 idle；工具 UNKNOWN 只作为模型反馈，
-不升级为人工核查暂停。
+完成 / 失败 / 取消），既不按快照最新 head 猜测，也不等待永久子树 idle；工具 UNKNOWN 作为模型反馈。
 
 ## 用例事务与持久化
 

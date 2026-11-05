@@ -84,7 +84,7 @@ const ACTIVITY_FIELDS = [
   'createdAt',
 ]
 
-/** ProjectSnapshotDTO / ProjectIssueSnapshotDTO 精确字段集合：快照不聚合依赖图。 */
+/** ProjectSnapshotDTO / ProjectIssueSnapshotDTO 精确字段集合。 */
 const SNAPSHOT_FIELDS = ['project', 'issues', 'referencedStateCodes']
 const SNAPSHOT_ISSUE_FIELDS = ['issue', 'currentOrLatestRun']
 
@@ -187,7 +187,7 @@ registerCase({
   level: 'L1',
   title: 'Project workflow/Issue 状态机与 Activity 事实流',
   docs:
-    '免费 L1：UUID/版本严格 canonical（大写 UUID 与带空白版本返回 400）；Project 默认 workflow（INIT→WORK 人工阶段→DONE，含保留 BLOCKED）、设置 CAS（标题/描述与 YOLO 各自独立更新）、workflow JSON 整体替换与非法配置拒绝；Issue 从 INIT 起按 workflow next 白名单 transition（工作流外目标、保留状态与未声明状态一律拒绝）、BLOCKED 由专用 block/recover 进出并记录原阶段与原因、空闲 STOP 产生 USER 暂停门禁并阻止流转，显式 resume 解除；/pause 和 /resolve-unknown 端点已移除并返回 404；无活动 Run 时 INSTRUCTION 明确拒绝、COMMENT 幂等重放；Activity 有界窗口分页（nextActivityCursor 语义）与 snapshot 投影（referencedStateCodes 聚合全部未归档及归档 Issue 的当前状态与阻塞恢复目标，归档不可丢引用）；旧七态/依赖/Run 控制端点（/status、/cancel、/inputs、/dependencies）已不存在',
+    '免费 L1：UUID/版本严格 canonical（大写 UUID 与带空白版本返回 400）；Project 默认 workflow（INIT→WORK 人工阶段→DONE，含保留 BLOCKED）、设置 CAS（标题/描述与 YOLO 各自独立更新）、workflow JSON 整体替换与非法配置拒绝；Issue 从 INIT 起按 workflow next 白名单 transition（工作流外目标、保留状态与未声明状态一律拒绝）、BLOCKED 由专用 block/recover 进出并记录原阶段与原因、空闲 STOP 产生 USER 暂停门禁并阻止流转，显式 resume 解除；无活动 Run 时 INSTRUCTION 明确拒绝、COMMENT 幂等重放；Activity 有界窗口分页（nextActivityCursor 语义）与 snapshot 投影（referencedStateCodes 聚合全部未归档及归档 Issue 的当前状态与阻塞恢复目标，归档不可丢引用）',
   async run(ctx) {
     const suffix = cid().slice(0, 8)
     let project = null
@@ -379,9 +379,9 @@ registerCase({
       assertWorkflow(workflowUnchanged.workflow, renamedStages)
       assert(workflowUnchanged.version === '3', JSON.stringify(workflowUnchanged))
 
-      const dependency = await createIssue(ctx, project.id, {
-        title: 'Stale residue',
-        description: 'Kept as legacy issue fact',
+      const secondaryIssue = await createIssue(ctx, project.id, {
+        title: 'Secondary task',
+        description: 'Another project issue',
       })
       const issue = await createIssue(ctx, project.id, {
         title: 'Primary task',
@@ -398,8 +398,8 @@ registerCase({
           && issue.pauseReason === null
           && issue.pauseDetail === null
           && issue.archivedAt === null
-          && dependency.number === '1',
-        JSON.stringify({ issue, dependency }),
+          && secondaryIssue.number === '1',
+        JSON.stringify({ issue, secondaryIssue }),
       )
 
       // 编号由 Project 单调分配且不改 Project CAS 版本。
@@ -407,20 +407,6 @@ registerCase({
       assert(
         numbered.nextIssueNumber === '3' && numbered.version === '3',
         JSON.stringify(numbered),
-      )
-
-      // 旧七态/依赖/Run 控制端点已从公开面移除。
-      for (const [method, requestPath, body] of [
-        ['POST', `/api/issues/${issue.id}/status`, { expectedVersion: '0', status: 'DONE' }],
-        ['POST', `/api/issues/${issue.id}/inputs`, { kind: 'HUMAN', body: 'legacy' }],
-        ['POST', `/api/issues/${issue.id}/cancel`, { expectedVersion: '0' }],
-        ['POST', `/api/issues/${issue.id}/dependencies`, { dependsOnIssueId: dependency.id }],
-      ]) {
-        await expectHttpError(() => ctx.call(method, requestPath, body), { status: 404 })
-      }
-      await expectHttpError(
-        () => ctx.call('DELETE', `/api/issues/${issue.id}/dependencies/${dependency.id}`),
-        { status: 404 },
       )
 
       let detail = await readIssueDetail(ctx, issue.id)
@@ -612,7 +598,7 @@ registerCase({
           && current.version === '7',
         JSON.stringify(current),
       )
-      // 阻塞期间快照 refs：全部 Issue 的当前状态与阻塞恢复目标去重自然排序（primary BLOCKED from WORK + dependency INIT）。
+      // 阻塞期间快照 refs：全部 Issue 的当前状态与阻塞恢复目标去重自然排序（primary BLOCKED from WORK + secondary INIT）。
       const blockedSnapshot = envelopeData(
         (await ctx.call('GET', `/api/projects/${project.id}/snapshot`)).json,
       )
@@ -660,27 +646,6 @@ registerCase({
         { status: 400 },
       )
 
-      // 独立软暂停入口已移除；空闲时只能通过 STOP 设置 USER 门禁。
-      await expectHttpError(
-        () =>
-          ctx.call('POST', `/api/issues/${issue.id}/pause`, {
-            expectedVersion: current.version,
-            requestKey: `e2e-pause-removed-${cid()}`,
-            reason: 'USER',
-            detail: 'removed endpoint',
-          }),
-        { status: 404 },
-      )
-      // UNKNOWN 人工核查门禁已并入 FAILED + ERROR：旧的 resolve-unknown 端点整体移除。
-      await expectHttpError(
-        () =>
-          ctx.call('POST', `/api/issues/${issue.id}/resolve-unknown`, {
-            expectedVersion: current.version,
-            requestKey: `e2e-resolve-removed-${cid()}`,
-            verification: 'checked the provider console: nothing was dispatched',
-          }),
-        { status: 404 },
-      )
       // 人工终止：没有活动 Run 时只保留 USER 门禁，不伪造 Run 事实。
       current = await verifyIssueStopResume(ctx, current)
 
@@ -716,7 +681,7 @@ registerCase({
           === 'INIT->WORK,WORK->DONE,DONE->INIT,INIT->WORK',
         JSON.stringify(transitions.map((activity) => activity.data)),
       )
-      // STOP 以 HUMAN/USER 留痕，且绝不出现已移除的 UNKNOWN 核查事实。
+      // STOP 以 HUMAN/USER 留痕。
       const controlFacts = facts.filter((activity) => activity.kind === 'CONTROL')
       assert(
         controlFacts.map((activity) => activity.data?.action).join(',')
@@ -725,9 +690,7 @@ registerCase({
       )
       const stopFact = controlFacts.find((activity) => activity.data?.action === 'STOP')
       assert(
-        stopFact?.actorType === 'HUMAN'
-          && stopFact.data?.reason === 'USER'
-          && !facts.some((activity) => activity.data?.action === 'RESOLVE_UNKNOWN'),
+        stopFact?.actorType === 'HUMAN' && stopFact.data?.reason === 'USER',
         JSON.stringify(stopFact),
       )
       await expectHttpError(() => ctx.call('GET', `/api/issues/${issue.id}?limit=0`), { status: 400 })
@@ -735,12 +698,11 @@ registerCase({
         status: 400,
       })
 
-      // Snapshot：只聚合 Project 真相与每个 Issue 的当前/最近 Run，不携带依赖图。
+      // Snapshot 聚合 Project 与每个 Issue 的当前/最近 Run。
       const snapshot = envelopeData(
         (await ctx.call('GET', `/api/projects/${project.id}/snapshot`)).json,
       )
       assertExactFields(snapshot, SNAPSHOT_FIELDS, 'project snapshot')
-      assert(!('dependencies' in snapshot), JSON.stringify(snapshot))
       const snapshotIssue = snapshot.issues.find((candidate) => candidate.issue.id === issue.id)
       assertExactFields(snapshotIssue, SNAPSHOT_ISSUE_FIELDS, 'project snapshot issue')
       assertExactFields(snapshotIssue.issue, ISSUE_FIELDS, 'snapshot issue')
@@ -751,13 +713,13 @@ registerCase({
           && snapshotIssue.currentOrLatestRun === null,
         JSON.stringify(snapshot),
       )
-      // 恢复后的快照引用：primary WORK 与 dependency INIT，去重自然排序。
+      // 恢复后的快照引用：primary WORK 与 secondary INIT，去重自然排序。
       assert(
         JSON.stringify(snapshot.referencedStateCodes) === JSON.stringify(['INIT', 'WORK']),
         JSON.stringify(snapshot.referencedStateCodes),
       )
 
-      // 归档保留历史与状态引用，但快照只展示未归档 Issue；删除后不存在。
+      // 归档保留历史与状态引用，快照只展示未归档 Issue。
       current = envelopeData(
         (
           await ctx.call('POST', `/api/issues/${issue.id}/archive`, {
@@ -773,7 +735,7 @@ registerCase({
       assertExactFields(archivedSnapshot, SNAPSHOT_FIELDS, 'archived project snapshot')
       assert(
         archivedSnapshot.issues.length === 1
-          && archivedSnapshot.issues[0].issue.id === dependency.id,
+          && archivedSnapshot.issues[0].issue.id === secondaryIssue.id,
         JSON.stringify(archivedSnapshot.issues),
       )
       assert(
@@ -796,10 +758,10 @@ registerCase({
       )
       assertExactFields(remaining, SNAPSHOT_FIELDS, 'remaining project snapshot')
       assert(
-        remaining.issues.length === 1 && remaining.issues[0].issue.id === dependency.id,
+        remaining.issues.length === 1 && remaining.issues[0].issue.id === secondaryIssue.id,
         JSON.stringify(remaining.issues),
       )
-      // 删除 primary 后只剩 dependency：引用集合收敛为其当前状态 INIT。
+      // 删除 primary 后只剩 secondary：引用集合收敛为其当前状态 INIT。
       assert(
         JSON.stringify(remaining.referencedStateCodes) === JSON.stringify(['INIT']),
         JSON.stringify(remaining.referencedStateCodes),

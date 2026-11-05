@@ -66,7 +66,6 @@ import fun.fengwk.kkstudio.harness.spi.store.ThreadStore;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.project.model.Issue;
-import fun.fengwk.kkstudio.project.model.PauseReason;
 import fun.fengwk.kkstudio.project.model.Project;
 import fun.fengwk.kkstudio.project.repo.IssueActivityRepository;
 import fun.fengwk.kkstudio.project.service.IssueEditingService;
@@ -89,8 +88,8 @@ import java.util.function.Function;
 /**
  * 目标 Project/Issue/Run 持久化与用例的集成测试基座（真实 PostgreSQL Testcontainers）。
  *
- * <p>直接经 mapper/JDBC 构造 catalog fixture（agent provider/model/definition），业务事实通常经目标服务写入；仅门禁守卫测试使用
- * {@link #seedPauseGate} 合成在途 Run 与暂停共存的状态。每个测试前由 {@link PostgresSpringTestSupport} 重置并重新迁移 schema。
+ * <p>直接经 mapper/JDBC 构造 catalog fixture（agent provider/model/definition），业务事实经目标服务写入；每个测试前由 {@link
+ * PostgresSpringTestSupport} 重置并重新迁移 schema。
  *
  * <p>platform 不是 Harness 组合根：生产 {@link HarnessRuntime} 与 {@code HarnessStore} 由 web 组合根创建，platform
  * 测试上下文没有它们。 本基座因此装配一个 {@link HarnessRuntimeTestConfiguration 受控假件}，它用调用方给出的 Session/Thread
@@ -196,15 +195,6 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
 
   protected Issue createIssue(UUID projectId) {
     return issueEditingService.createIssue(projectId, "Issue " + UUID.randomUUID(), "需求描述");
-  }
-
-  /** 直接种入暂停门禁：STOP 会收尾活动 Run，无法用于覆盖“在途 Run 仍保留时门禁关闭”的调谐分支；本夹具只改门禁列，不推进 Issue 版本。 */
-  protected void seedPauseGate(Issue issue, PauseReason reason, String detail) {
-    jdbc.update(
-        "update project_issue set pause_reason = ?, pause_detail = ? where id = ?",
-        reason.name(),
-        detail,
-        issue.getId());
   }
 
   /** 当前 Thread head Entry：终态收尾必须冻结一个真实属于本 Session 的 Entry。 */

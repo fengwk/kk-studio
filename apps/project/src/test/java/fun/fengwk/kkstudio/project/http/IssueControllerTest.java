@@ -61,7 +61,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
-/** 验证 IssueController 的全部 16 个 REST 接口端点与 CAS 409 处理。 */
+/** 验证 IssueController 的 REST 接口与 CAS 409 处理。 */
 class IssueControllerTest {
 
   private IssueEditingService issueEditingService;
@@ -330,17 +330,6 @@ class IssueControllerTest {
                 .content(objectMapper.writeValueAsString(req)))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.state").value("WORK"));
-  }
-
-  /** 测试意图：删除的软暂停端点不可再调用，显式恢复入口仍单独提供。 */
-  @Test
-  void pauseEndpointIsNotAvailable() throws Exception {
-    mockMvc
-        .perform(
-            post("/api/issues/" + issueId + "/pause")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{}"))
-        .andExpect(status().isNotFound());
   }
 
   @Test

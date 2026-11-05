@@ -18,7 +18,6 @@ import fun.fengwk.kkstudio.project.error.ProjectValidationException;
 import fun.fengwk.kkstudio.project.error.ProjectVersionConflictException;
 import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.IssueRun;
-import fun.fengwk.kkstudio.project.model.PauseReason;
 import fun.fengwk.kkstudio.project.model.Project;
 
 import java.nio.charset.StandardCharsets;
@@ -236,12 +235,20 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
     String acceptKey = key("accept");
     IssueRun accepted = issueRunService.acceptRun(issue.getId(), acceptKey);
     Issue inDesign = issueEditingService.getIssue(issue.getId());
-    seedPauseGate(inDesign, PauseReason.USER, "人工暂停");
+    Issue stopped =
+        issueLifecycleService.stopIssue(
+            inDesign.getId(), inDesign.getVersion(), key("stop"), "人工终止");
+    assertEquals("USER", stopped.getPauseReason());
+    assertEquals(IssueRunStatus.CANCELLED, issueRunService.getRun(accepted.getId()).getStatus());
 
-    assertEquals(accepted.getId(), issueRunService.acceptRun(issue.getId(), acceptKey).getId());
-    assertThrows(
-        ProjectValidationException.class,
-        () -> issueRunService.acceptRun(issue.getId(), key("accept")));
+    IssueRun replayed = issueRunService.acceptRun(issue.getId(), acceptKey);
+    assertEquals(accepted.getId(), replayed.getId());
+    assertEquals(IssueRunStatus.CANCELLED, replayed.getStatus());
+    ProjectValidationException rejected =
+        assertThrows(
+            ProjectValidationException.class,
+            () -> issueRunService.acceptRun(issue.getId(), key("accept")));
+    assertTrue(rejected.getMessage().contains("gate is closed"), rejected.getMessage());
     assertEquals(
         1L, count("select count(*) from project_issue_run where issue_id = ?", issue.getId()));
   }
@@ -918,9 +925,9 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
     assertEquals(1L, budgetUsed(issue.getId()));
   }
 
-  /** 暂停门禁关闭时不得恢复 Run：恢复不消耗阶段额度，但必须等门禁真正打开。 */
+  /** 业务阻塞时不得恢复 Run；恢复阻塞后继续同一 Run，不消耗新额度。 */
   @Test
-  void resumeRunRejectedWhileIssuePauseGateClosed() {
+  void resumeRunRejectedWhileIssueBlocked() {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("门禁恢复", agent, agent, 3);
     Issue issue = createIssue(projectId);
@@ -928,19 +935,26 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
     IssueRun waiting = issueRunService.waitRun(run.getId(), run.getVersion());
     Issue waitingIssue = issueEditingService.getIssue(issue.getId());
-    seedPauseGate(
-        waitingIssue,
-        PauseReason.ERROR,
-        "Run stopped with in-flight side effects; outcome unknown");
+    Issue blocked =
+        issueLifecycleService.blockIssue(
+            waitingIssue.getId(), waitingIssue.getVersion(), key("block"), "等待外部依赖");
 
-    assertThrows(
-        ProjectValidationException.class,
-        () -> issueRunService.resumeRun(waiting.getId(), waiting.getVersion()));
+    ProjectValidationException rejected =
+        assertThrows(
+            ProjectValidationException.class,
+            () -> issueRunService.resumeRun(waiting.getId(), waiting.getVersion()));
+    assertTrue(rejected.getMessage().contains("gate is closed"), rejected.getMessage());
 
     IssueRun unchanged = issueRunService.getRun(waiting.getId());
     assertEquals(IssueRunStatus.WAITING, unchanged.getStatus());
     assertNull(unchanged.getActiveSince());
-    assertEquals("ERROR", issueEditingService.getIssue(issue.getId()).getPauseReason());
+    assertTrue(issueEditingService.getIssue(issue.getId()).isBlocked());
+    assertEquals(1L, budgetUsed(issue.getId()));
+
+    issueLifecycleService.recoverIssue(blocked.getId(), blocked.getVersion(), key("recover"));
+    IssueRun resumed = issueRunService.resumeRun(unchanged.getId(), unchanged.getVersion());
+    assertEquals(IssueRunStatus.RUNNING, resumed.getStatus());
+    assertEquals(run.getId(), resumed.getId());
     assertEquals(1L, budgetUsed(issue.getId()));
   }
 

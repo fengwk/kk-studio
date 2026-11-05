@@ -49,7 +49,6 @@ import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
 import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.IssueRun;
-import fun.fengwk.kkstudio.project.model.PauseReason;
 import fun.fengwk.kkstudio.project.model.Project;
 import fun.fengwk.kkstudio.project.reconcile.IssueReconcileOutcome;
 import fun.fengwk.kkstudio.project.reconcile.IssueReconciler;
@@ -1002,82 +1001,34 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
             run.getId()));
   }
 
-  /** 测试意图：合成 RUNNING Run 与暂停门禁共存时，调谐不自动 stop 或复活执行，静止的 Run 保持原状延后。 */
+  /** 测试意图：活动 Run 在业务阻塞后进入安全等待，恢复阻塞后继续同一 Run，不调用 Stop。 */
   @Test
-  void activeRunRunningAndIssuePausedStaysRunningWithoutStop() {
+  void blockedRunningRunWaitsAndRecoversWithoutStop() {
     String agent = createAgent();
-    UUID projectId = createProjectWithStages("运行中遇到暂停", agent, agent, 3);
+    UUID projectId = createProjectWithStages("运行中遇到阻塞", agent, agent, 3);
     Issue issue = createIssue(projectId);
     issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
     issue = issueEditingService.getIssue(issue.getId());
-    seedPauseGate(issue, PauseReason.USER, "人工暂停");
-
-    WorkClaim claim = claimWork(issue.getId());
-    IssueReconcileOutcome outcome = reconciler.reconcile(claim);
-
-    assertEquals(IssueReconcileOutcome.DEFERRED_IDLE, outcome);
-    verify(harnessRuntime, never()).stop(any(StopCommand.class));
-    assertEquals(
-        1L,
-        count(
-            "select count(*) from project_issue_run where id = ? and status = 'RUNNING' and"
-                + " active_since is not null",
-            run.getId()));
-    assertEquals(
-        1L,
-        count(
-            "select count(*) from durable_work where target_type = 'ISSUE' and target_id = ?",
-            issue.getId()));
-  }
-
-  /** 测试意图：合成 WAITING Run 与暂停门禁共存时，reconcile 返回 WAITING_FOR_GATE 并继续延后检查。 */
-  @Test
-  void activeRunWaitingAndIssueStillPausedWaitsForGate() {
-    String agent = createAgent();
-    UUID projectId = createProjectWithStages("等待中仍暂停", agent, agent, 3);
-    Issue issue = createIssue(projectId);
-    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
-    IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
-    issue = issueEditingService.getIssue(issue.getId());
-    seedPauseGate(issue, PauseReason.USER, "人工暂停");
-    issueRunService.waitRun(run.getId(), run.getVersion());
+    Issue blocked =
+        issueLifecycleService.blockIssue(issue.getId(), issue.getVersion(), key("block"), "等待外部依赖");
 
     WorkClaim claim = claimWork(issue.getId());
     IssueReconcileOutcome outcome = reconciler.reconcile(claim);
 
     assertEquals(IssueReconcileOutcome.WAITING_FOR_GATE, outcome);
-    assertEquals(
-        1L,
-        count(
-            "select count(*) from project_issue_run where id = ? and status = 'WAITING'",
-            run.getId()));
-  }
+    verify(harnessRuntime, never()).stop(any(StopCommand.class));
+    IssueRun waiting = issueRunService.getRun(run.getId());
+    assertEquals(IssueRunStatus.WAITING, waiting.getStatus());
+    assertNull(waiting.getActiveSince());
 
-  /** 测试意图：合成 WAITING Run 与暂停门禁共存时，显式解除后 Run 恢复为 RUNNING，不消耗新的阶段额度。 */
-  @Test
-  void activeRunWaitingAndIssueResumedResumesRun() {
-    String agent = createAgent();
-    UUID projectId = createProjectWithStages("等待中恢复", agent, agent, 3);
-    Issue issue = createIssue(projectId);
-    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
-    IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
-    issue = issueEditingService.getIssue(issue.getId());
-    seedPauseGate(issue, PauseReason.USER, "人工暂停");
-    issueRunService.waitRun(run.getId(), run.getVersion());
-    issue = issueEditingService.getIssue(issue.getId());
-    issueLifecycleService.resumeIssue(issue.getId(), issue.getVersion(), key("resume"));
-
-    WorkClaim claim = claimWork(issue.getId());
-    IssueReconcileOutcome outcome = reconciler.reconcile(claim);
-
-    assertEquals(IssueReconcileOutcome.RUN_RESUMED, outcome);
-    assertEquals(
-        1L,
-        count(
-            "select count(*) from project_issue_run where id = ? and status = 'RUNNING' and"
-                + " active_since is not null",
-            run.getId()));
+    issueLifecycleService.recoverIssue(blocked.getId(), blocked.getVersion(), key("recover"));
+    assertEquals(IssueReconcileOutcome.RUN_RESUMED, reconciler.reconcile(claimWork(issue.getId())));
+    IssueRun resumed = issueRunService.getRun(run.getId());
+    assertEquals(run.getId(), resumed.getId());
+    assertEquals(IssueRunStatus.RUNNING, resumed.getStatus());
+    assertNotNull(resumed.getActiveSince());
+    verify(harnessRuntime, never()).stop(any(StopCommand.class));
   }
 
   /** 测试意图：在完全静止点有历史产出但无交接意图的 Run，reconcile 将其正常收尾为 COMPLETED，Issue 保持当前阶段。 */

@@ -169,7 +169,7 @@ Snapshot 不携带手动压缩可用性：`GET /api/threads/{threadId}/compactio
 规划详情、连接凭据与异常原因链不进入错误响应；请求形状或归属错误仍为 400，缺失 Thread 为 404。
 
 Canvas commands 返回 patch，Function start 返回 202。
-UNKNOWN resolve 要求 resolution 与非空 verification。Issue 没有 UNKNOWN 终态/暂停原因：结果未定的停止按 FAILED 收尾并以
+Canvas Function 的 UNKNOWN resolve 要求 resolution 与非空 verification。Issue 结果未定的停止按 FAILED 收尾并以
 ERROR 暂停，`error`/`pauseDetail` 明确说明结果未知，只能由显式 resume 继续。
 Evidence 接收 READY uploadId，在事务内转移引用并返回规范资源标识，展示名取权威上传行。
 
