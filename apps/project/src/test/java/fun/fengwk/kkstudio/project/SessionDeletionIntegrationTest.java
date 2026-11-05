@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.project;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -14,9 +13,6 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
-import fun.fengwk.kkstudio.chat.Chat;
-import fun.fengwk.kkstudio.chat.ChatRepository;
-import fun.fengwk.kkstudio.chat.ChatSessionRepository;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionConfig;
@@ -59,18 +55,15 @@ import java.util.UUID;
 import java.util.stream.Stream;
 
 /**
- * owner 深删除在真实 PostgreSQL 与外键约束下的契约：跨 Session 执行树整体删除、pending join 一并回收、生存者零伤害。
+ * Issue+Agent owner 深删除在真实 PostgreSQL 与外键约束下的契约：归属行与绑定先于 harness Thread/Session 删除，Issue/Project
+ * 事实保持完整，外键冲突时整体回滚。
  *
  * <p>测试意图（断言真实 store 中的行数，不依赖 mock 调用顺序）：
  *
  * <ul>
- *   <li>归属 owner 的所有 Session/Thread（含 ACTIVE 与已停下的 IDLE）随 task 子 Session 与共享 Session 内的无父 fork
- *       一起删除；未匹配的 pending join 与「已匹配未交付」的 join 因父子两端都在删除集合内而一并删除；
- *   <li>不属于该 owner 的 Session/Thread/Join/Command 完全不受影响（防全量删除破坏生存者）；
- *   <li>闭包被截断（待删 Thread 的执行父仍在生存 Session 中）时必须整体回滚，绝不留下悬挂 join 或半删子树；
- *   <li>owner 未持有任何 Thread 的空 Session 同样可被深删除；
  *   <li>Issue+Agent 归属：Session 由稳定绑定 Thread 解析，归属行（FK RESTRICT）先于 harness Thread/Session 删除，Issue
- *       自身不受影响。
+ *       自身不受影响；
+ *   <li>Run 引用回滚：存在 Run 引用阻止绑定删除时，产品归属和 runtime 事实在同一事务中保留并回滚。
  * </ul>
  *
  * <p>本测试用真实 {@link PostgresqlHarnessStore} 与真实 PostgreSQL 外键路径驱动编排器：不覆盖任何全局 store bean（platform
@@ -88,8 +81,6 @@ class SessionDeletionIntegrationTest extends OwnerTestSupport {
 
   @Autowired private DataSource dataSource;
   @Autowired private PlatformTransactionManager transactionManager;
-  @Autowired private ChatSessionRepository chatSessionRepository;
-  @Autowired private ChatRepository chatRepository;
   @Autowired private IssueAgentThreadRepository issueAgentThreadRepository;
   @Autowired private List<SessionOwnership> ownerships;
   @Autowired private SessionBlobRefManager refManager;
@@ -110,104 +101,6 @@ class SessionDeletionIntegrationTest extends OwnerTestSupport {
     orchestrator =
         new SessionDeletionOrchestrator(ownerships, runtimes, refManager, sessionFileRepository);
     transactions = new TransactionTemplate(transactionManager);
-  }
-
-  @Test
-  void deletesWholeExecutionTreeAcrossSessionsAndKeepsUnrelatedOwnerIntact() {
-    UUID owner = chatOwner();
-    UUID otherOwner = chatOwner();
-    UUID ownedSession = ownedSession("owned", owner);
-    UUID ownedRoot = seedRootThread(ownedSession, ThreadExecutionControl.RUNNABLE);
-    UUID sameSessionChild =
-        seedChildThread(ownedSession, ownedRoot, ThreadExecutionControl.RUNNABLE);
-    UUID childSession = seedSession("task-child");
-    UUID childSessionRoot = seedRootEntry(childSession);
-    UUID crossSessionChild =
-        seedThreadIn(childSession, childSessionRoot, ownedRoot, ThreadExecutionControl.RUNNABLE);
-    // 同一 Session 内由另一入口建立的无父 fork：只有「以 Session 为单位」推进闭包才会把它一并删除。
-    UUID childSessionFork =
-        seedThreadIn(childSession, childSessionRoot, null, ThreadExecutionControl.RUNNABLE);
-    UUID emptySession = ownedSession("owned-empty", owner);
-    // pending join（未匹配）：逐 child 删除会拒绝，闭包内两端同删必须允许。
-    UUID pendingJoin = seedJoin(sameSessionChild, ownedRoot, 1L, null, null);
-    // 已匹配未交付：父仍在删除集合内，同样一并回收。
-    UUID matchedPendingDelivery =
-        seedJoin(sameSessionChild, ownedRoot, 2L, headEntryOf(ownedSession), null);
-    // 跨 Session 子线程持有的 pending join：其 Session 由后代闭包覆盖。
-    UUID crossSessionJoin = seedJoin(crossSessionChild, ownedRoot, 1L, null, null);
-
-    // 生存者：另一个 owner 的 Session + root + child + pending join。
-    UUID survivorSession = ownedSession("survivor", otherOwner);
-    UUID survivorRoot = seedRootThread(survivorSession, ThreadExecutionControl.RUNNABLE);
-    UUID survivorChild =
-        seedChildThread(survivorSession, survivorRoot, ThreadExecutionControl.RUNNABLE);
-    UUID survivorJoin = seedJoin(survivorChild, survivorRoot, 1L, null, null);
-
-    deleteSessions(new SessionOwner("CHAT", owner.toString()));
-
-    assertEquals(0L, sessionRows(ownedSession));
-    assertEquals(0L, sessionRows(childSession));
-    assertEquals(0L, sessionRows(emptySession));
-    assertEquals(0L, entryRows(ownedSession));
-    assertEquals(0L, entryRows(childSession));
-    for (UUID threadId :
-        List.of(ownedRoot, sameSessionChild, crossSessionChild, childSessionFork)) {
-      assertEquals(0L, threadRows(threadId), "thread " + threadId + " must be deleted");
-      assertEquals(0L, commandRows(threadId), "commands of " + threadId + " must be deleted");
-    }
-    assertEquals(0L, joinRows(pendingJoin));
-    assertEquals(0L, joinRows(matchedPendingDelivery));
-    assertEquals(0L, joinRows(crossSessionJoin));
-    assertEquals(0L, count("select count(*) from chat_session where chat_id = ?", owner));
-
-    // 生存侧：无关 owner 的整棵树（含 pending join 与命令）逐行保留。
-    assertEquals(1L, sessionRows(survivorSession));
-    assertEquals(1L, threadRows(survivorRoot));
-    assertEquals(1L, threadRows(survivorChild));
-    assertEquals(1L, joinRows(survivorJoin));
-    assertEquals(1L, commandRows(survivorChild));
-    assertEquals(1L, count("select count(*) from chat_session where chat_id = ?", otherOwner));
-  }
-
-  @Test
-  void truncatedClosureRollsBackWithoutTouchingSurvivors() {
-    UUID owner = chatOwner();
-    UUID otherOwner = chatOwner();
-    UUID survivorSession = ownedSession("survivor", otherOwner);
-    UUID survivorRoot = seedRootThread(survivorSession, ThreadExecutionControl.RUNNABLE);
-    UUID ownedSession = ownedSession("owned", owner);
-    // 该 Session 内的线程指向生存者 Session 的父：闭包只能是它自己，父不在删除集合内。
-    UUID strandedChild =
-        seedThreadIn(
-            ownedSession,
-            seedRootEntry(ownedSession),
-            survivorRoot,
-            ThreadExecutionControl.RUNNABLE);
-    UUID strandedJoin = seedJoin(strandedChild, survivorRoot, 1L, null, null);
-
-    assertThrows(
-        IllegalStateException.class,
-        () -> deleteSessions(new SessionOwner("CHAT", owner.toString())));
-
-    // 全部回滚：归属行、Session、Thread、Join 都与删除前一致。
-    assertEquals(1L, sessionRows(ownedSession));
-    assertEquals(1L, threadRows(strandedChild));
-    assertEquals(1L, joinRows(strandedJoin));
-    assertEquals(1L, sessionRows(survivorSession));
-    assertEquals(1L, threadRows(survivorRoot));
-    assertEquals(1L, count("select count(*) from chat_session where chat_id = ?", owner));
-  }
-
-  @Test
-  void deletesOwnedSessionWithoutThreads() {
-    UUID owner = chatOwner();
-    UUID emptySession = ownedSession("owned-empty", owner);
-
-    deleteSessions(new SessionOwner("CHAT", owner.toString()));
-
-    assertEquals(0L, sessionRows(emptySession));
-    assertEquals(0L, entryRows(emptySession));
-    assertEquals(0L, count("select count(*) from chat_session where chat_id = ?", owner));
   }
 
   @Test
@@ -276,25 +169,6 @@ class SessionDeletionIntegrationTest extends OwnerTestSupport {
   }
 
   // ---------- fixtures ----------
-
-  /** 建一个 Chat owner 行并返回 id。 */
-  private UUID chatOwner() {
-    UUID id = UUID.randomUUID();
-    Chat chat = new Chat();
-    chat.setId(id);
-    chat.setTitle("owner-" + id);
-    chat.setAgentName("schema-agent");
-    chat.setVersion(0L);
-    assertTrue(chatRepository.create(chat));
-    return id;
-  }
-
-  /** owner 持有的 Session：harness_session 行 + chat_session 归属行。 */
-  private UUID ownedSession(String name, UUID owner) {
-    UUID sessionId = seedSession(name);
-    chatSessionRepository.insert(sessionId, owner);
-    return sessionId;
-  }
 
   private UUID seedSession(String name) {
     return store.transaction(
@@ -445,10 +319,6 @@ class SessionDeletionIntegrationTest extends OwnerTestSupport {
 
   private long threadRows(UUID threadId) {
     return count("select count(*) from harness_thread where id = ?", threadId);
-  }
-
-  private long commandRows(UUID threadId) {
-    return count("select count(*) from harness_thread_command where thread_id = ?", threadId);
   }
 
   private long joinRows(UUID invocationId) {
