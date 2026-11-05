@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.harness.model;
 
+import static fun.fengwk.kkstudio.harness.model.ProviderProtocolOptions.InvalidReason.MALFORMED;
+import static fun.fengwk.kkstudio.harness.model.ProviderProtocolOptions.InvalidReason.TOO_LARGE;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -8,9 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 
 /**
  * {@link ProviderProtocolOptions} 契约：null/空白归一化为空 object、canonical 化、严格拒绝与脱敏错误消息。
@@ -25,7 +25,6 @@ class ProviderProtocolOptionsTest {
   void normalizesNullAndBlankToEmptyObject() {
     assertTrue(new ProviderProtocolOptions(null).isEmpty());
     assertTrue(new ProviderProtocolOptions("   ").isEmpty());
-    assertTrue(ProviderProtocolOptions.of(null).isEmpty());
     assertEquals(ProviderProtocolOptions.EMPTY, new ProviderProtocolOptions("{}"));
     assertEquals(ProviderProtocolOptions.EMPTY, new ProviderProtocolOptions(" \n { } \t "));
     assertEquals("{}", ProviderProtocolOptions.EMPTY.canonicalJson());
@@ -43,45 +42,38 @@ class ProviderProtocolOptionsTest {
     assertEquals("{\"thinking\":{\"budget_tokens\":4096},\"ratio\":1.1}", options.canonicalJson());
   }
 
-  /** 从已解析的 JSON object 构造时必须保持数值语义：Long 不得被本地 Long 字符串化约定改写。 */
-  @Test
-  void keepsIntegerAndDoubleValuesNumericWhenBuiltFromParsedObject() {
-    Map<String, Object> raw = new LinkedHashMap<>();
-    raw.put("revision", 1758880000000L);
-    raw.put("budget", 4096);
-    raw.put("ratio", 0.5d);
-    raw.put("nested", Map.of("flags", List.of(true, false)));
-
-    assertEquals(
-        "{\"revision\":1758880000000,\"budget\":4096,\"ratio\":0.5,"
-            + "\"nested\":{\"flags\":[true,false]}}",
-        ProviderProtocolOptions.of(raw).canonicalJson());
-  }
-
   /** 非 object、严格 JSON 语法错误、重复键、trailing token 都明确失败，且消息不回显 payload。 */
   @Test
   void rejectsNonObjectsDuplicatesTrailingTokensAndMalformedJsonWithoutEchoingPayload() {
     for (String notObject : List.of("[]", "\"text\"", "42", "true", "null")) {
-      IllegalArgumentException error =
+      ProviderProtocolOptions.InvalidOptionsException error =
           assertThrows(
-              IllegalArgumentException.class, () -> new ProviderProtocolOptions(notObject));
+              ProviderProtocolOptions.InvalidOptionsException.class,
+              () -> new ProviderProtocolOptions(notObject));
       assertEquals("protocolOptions must be a strict JSON object", error.getMessage());
+      assertEquals(MALFORMED, error.reason());
     }
 
-    IllegalArgumentException duplicate =
+    ProviderProtocolOptions.InvalidOptionsException duplicate =
         assertThrows(
-            IllegalArgumentException.class,
+            ProviderProtocolOptions.InvalidOptionsException.class,
             () -> new ProviderProtocolOptions("{\"sensitiveField\":1,\"sensitiveField\":2}"));
     assertEquals("protocolOptions must be a strict JSON object", duplicate.getMessage());
+    assertEquals(MALFORMED, duplicate.reason());
 
-    IllegalArgumentException trailing =
+    ProviderProtocolOptions.InvalidOptionsException trailing =
         assertThrows(
-            IllegalArgumentException.class,
+            ProviderProtocolOptions.InvalidOptionsException.class,
             () -> new ProviderProtocolOptions("{\"a\":{\"secret\":\"top-secret\"}} {\"b\":2}"));
     assertEquals("protocolOptions must be a strict JSON object", trailing.getMessage());
+    assertEquals(MALFORMED, trailing.reason());
 
-    assertThrows(IllegalArgumentException.class, () -> new ProviderProtocolOptions("{"));
-    assertThrows(IllegalArgumentException.class, () -> new ProviderProtocolOptions("{\"a\":}"));
+    assertThrows(
+        ProviderProtocolOptions.InvalidOptionsException.class,
+        () -> new ProviderProtocolOptions("{"));
+    assertThrows(
+        ProviderProtocolOptions.InvalidOptionsException.class,
+        () -> new ProviderProtocolOptions("{\"a\":}"));
   }
 
   /** 超限 payload 必须在构造期失败，消息只含上限本身，绝不回显超限内容。 */
@@ -91,24 +83,22 @@ class ProviderProtocolOptionsTest {
     String oversized =
         "{\"a\":\"" + marker + "b".repeat(ProviderProtocolOptions.MAX_UTF8_BYTES) + "\"}";
 
-    IllegalArgumentException error =
-        assertThrows(IllegalArgumentException.class, () -> new ProviderProtocolOptions(oversized));
+    ProviderProtocolOptions.InvalidOptionsException error =
+        assertThrows(
+            ProviderProtocolOptions.InvalidOptionsException.class,
+            () -> new ProviderProtocolOptions(oversized));
 
     assertFalse(error.getMessage().contains(marker));
     assertTrue(error.getMessage().contains(String.valueOf(ProviderProtocolOptions.MAX_UTF8_BYTES)));
+    assertEquals(TOO_LARGE, error.reason());
 
     // 多字节字符按 UTF-8 字节数计上界，而不是字符数。
     String multiByte =
         "{\"a\":\"" + "中".repeat(ProviderProtocolOptions.MAX_UTF8_BYTES / 3 + 1) + "\"}";
-    assertThrows(IllegalArgumentException.class, () -> new ProviderProtocolOptions(multiByte));
-  }
-
-  /** 无法序列化为 JSON 的值必须明确失败，而不是被静默丢弃或转义成字符串。 */
-  @Test
-  void rejectsNonJsonValuesWhenBuiltFromParsedObject() {
-    Map<String, Object> raw = new LinkedHashMap<>();
-    raw.put("bad", new Object());
-
-    assertThrows(IllegalArgumentException.class, () -> ProviderProtocolOptions.of(raw));
+    ProviderProtocolOptions.InvalidOptionsException multiByteError =
+        assertThrows(
+            ProviderProtocolOptions.InvalidOptionsException.class,
+            () -> new ProviderProtocolOptions(multiByte));
+    assertEquals(TOO_LARGE, multiByteError.reason());
   }
 }

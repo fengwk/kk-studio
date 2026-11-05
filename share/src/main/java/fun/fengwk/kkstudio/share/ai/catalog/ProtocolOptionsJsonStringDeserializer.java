@@ -7,7 +7,12 @@ import tools.jackson.databind.DatabindException;
 import tools.jackson.databind.DeserializationContext;
 import tools.jackson.databind.ValueDeserializer;
 
-/** 局部禁用 Jackson 对字符串字段的标量强制转换，不影响 catalog 其他字段。 */
+/**
+ * `protocolOptionsJson` 的 wire 形状检查：只拒绝非 JSON string token，内容原样交给调用方。
+ *
+ * <p>本类不解析选项内容。严格 object 语法、64 KiB UTF-8 上限与 canonical 化由 harness-model 的 {@code
+ * ProviderProtocolOptions} 在配置解析时统一执行；share 不能反向依赖 harness-model，也不复制这些规则。
+ */
 public final class ProtocolOptionsJsonStringDeserializer extends ValueDeserializer<String> {
 
   @Override

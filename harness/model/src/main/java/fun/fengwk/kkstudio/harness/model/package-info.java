@@ -14,6 +14,9 @@
  *       fun.fengwk.kkstudio.harness.model.ModelUsage} 与 {@link
  *       fun.fengwk.kkstudio.harness.model.ModelInputModality} 描述一个 model、其 modality、其 usage/cost
  *       accounting 与 variant。
+ *   <li>{@link fun.fengwk.kkstudio.harness.model.ProviderProtocolOptions} 是 variant
+ *       原生协议选项的唯一解析与规范化入口； 配置 parser、descriptor codec 与 share DTO 只负责提取文本或检查 wire
+ *       token，不复制严格语法、字节上限与 canonical 规则。
  *   <li>{@link fun.fengwk.kkstudio.harness.model.cache}: prompt-cache 的 policy、capability、
  *       mode、retention 与 provider control 值对象。Policy/capability 由调用方显式传入且永不持久化； 只有最终派生的 {@code
  *       ProviderCacheControl} 随请求保存。

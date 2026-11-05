@@ -8,6 +8,8 @@ DTO 表达 HTTP 请求与投影。Canvas 与 Project 的领域到 DTO 转换分�
 
 需要严格解码的 DTO 通过自己的 `@JsonAnySetter` 拒绝未知字段，不依赖全局 Jackson 默认：请求 DTO 的 `rejectUnknownField` 抛 `IllegalArgumentException("unknown field: <字段名>")`，Project 等响应 DTO 抛 `Unknown response field`。纯响应投影如 Canvas Snapshot 不重复声明该检查，具体区分见下文。多态 command 由 Jackson 的 `type` discriminator 解码：
 
+`AgentModelVariantDTO.protocolOptionsJson` 只要求 JSON string token，share 不解析其内容；严格 object、64 KiB UTF-8 上限与 canonical 化由 harness-model 的 `ProviderProtocolOptions` 在平台解析配置时统一执行。
+
 ```json
 { "type": "CREATE_NODE", "nodeId": "...", "name": "说明", "transform": { "x": 0, "y": 0, "width": 200, "height": 100 }, "function": null, "resources": [{ "kind": "TEXT", "name": "说明.txt", "textContent": "内容" }] }
 ```
