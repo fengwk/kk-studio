@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.share.runtime;
 
 import lombok.Data;
+import org.jspecify.annotations.Nullable;
 
 /**
  * 提交 Agent 任务的请求体：用指定 Agent 执行一段提示词，任务以独立的执行根运行，结果经返回的票据观察。
@@ -20,5 +21,5 @@ public class AgentTaskSubmitDTO {
   private String prompt;
 
   /** 可选：软 turn 预算（正整数）。 */
-  private Integer maxTurns;
+  private @Nullable Integer maxTurns;
 }

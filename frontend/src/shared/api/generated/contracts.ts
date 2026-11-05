@@ -309,7 +309,7 @@ export interface AgentTaskSubmitDTO {
   ticketId: string
   agent: string
   prompt: string
-  maxTurns: number
+  maxTurns?: number | null
 }
 
 /** Java：fun.fengwk.kkstudio.project.dto.AppendIssueActivityRequestDTO */
@@ -768,7 +768,7 @@ export interface ConfigSyncImportCheckRequestDTO {
 /** Java：fun.fengwk.kkstudio.share.configsync.ConfigSyncImportRequestDTO */
 export interface ConfigSyncImportRequestDTO {
   yaml: string
-  allowPartial: boolean
+  allowPartial?: boolean | null
 }
 
 /** Java：fun.fengwk.kkstudio.share.configsync.ConfigSyncImportResultDTO */

@@ -11,7 +11,7 @@ public class ConfigSyncImportRequestDTO {
   private String yaml;
 
   /** 只有用户明确接受跳过项时才允许部分导入，缺省为 false。 */
-  private @Nullable boolean allowPartial;
+  private @Nullable Boolean allowPartial;
 
   @JsonAnySetter
   public void rejectUnknownField(String fieldName, Object ignoredValue) {

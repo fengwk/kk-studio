@@ -6,7 +6,7 @@ DTO 表达 HTTP 请求与投影。Canvas 与 Project 的领域到 DTO 转换分�
 
 ## 严格 JSON 边界
 
-需要严格解码的 DTO 通过自己的 `@JsonAnySetter` 拒绝未知字段，不依赖全局 Jackson 默认：请求 DTO 的 `rejectUnknownField` 抛 `IllegalArgumentException("unknown field: <字段名>")`，Project 等响应 DTO 抛 `Unknown response field`。纯响应投影如 Canvas Snapshot 不重复声明该检查，具体区分见下文。多态 command 由 Jackson 的 `type` discriminator 解码：
+HTTP 请求由消息转换器统一严格解码，拒绝未知字段、标量强转、基本类型 null、重复键与尾随内容；请求属性未标注 `@Nullable` 时必须存在且非 null。部分 DTO 仍以 `@JsonAnySetter` 等注解自行检查 wire 形状。多态 command 由 Jackson 的 `type` discriminator 解码：
 
 `AgentModelVariantDTO.protocolOptionsJson` 只要求 JSON string token，share 不解析其内容；严格 object、64 KiB UTF-8 上限与 canonical 化由 harness-model 的 `ProviderProtocolOptions` 在平台解析配置时统一执行。
 
@@ -16,7 +16,7 @@ DTO 表达 HTTP 请求与投影。Canvas 与 Project 的领域到 DTO 转换分�
 
 [`CanvasCommandDTO`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/dto/CanvasCommandDTO.java) 的 11 个子类型与 [Canvas](canvas.md#typed-command-与并发语义) 的 `CanvasCommand` 一一对应：`CREATE_NODE`、`RENAME_NODE`、`SET_NODE_RESOURCES`、`SET_NODE_FUNCTION`、`SET_NODE_GROUP`、`DELETE_NODE`、`UPDATE_NODE_TRANSFORM`、`CREATE_GROUP`、`RENAME_GROUP`、`UPDATE_GROUP_TRANSFORM`、`DELETE_GROUP`。每条命令只修改一个语义组，前置条件携带编辑起点的旧值（旧名称、旧资源 id 列表、旧 Function `{name,args}` 或旧几何基线）。Patch 用 `op` discriminator 表达 `UPSERT` / `REMOVE`，节点与分组实体各自独立，整图只前进一个被接受的 `revision`。
 
-字符串到 UUID 与数字的解析属于 HTTP 边界，并且都是严格 canonical：UUID 只使用 [`Uuids.parseCanonical`](../../common/src/main/java/fun/fengwk/kkstudio/common/id/Uuids.java)，必须与 `UUID.toString()` 往返一致，拒绝大写、前后空白和其它非 canonical 形状；非负与正数十进制只使用 [`DecimalLongs`](../../common/src/main/java/fun/fengwk/kkstudio/common/number/DecimalLongs.java)（`0|[1-9]\d*` 与 `[1-9]\d*`，且必须放进 `long`），同样拒绝前后空白、符号和前导零。Project、Harness 与 Environment 路径都直接复用这两个算法，严格校验大小写与空白，拒绝非规范输入；可选字段缺省仍表示未提供，不把缺省本身当非法。共享层只承载解析后的值，整数形态的实体 id 在 wire 上永远不出现。
+字符串到 UUID 与数字的解析属于 HTTP 边界，并且都是严格 canonical：请求体的 UUID 以及 UUID 类型的路径和查询参数统一使用 [`Uuids.parseCanonical`](../../common/src/main/java/fun/fengwk/kkstudio/common/id/Uuids.java)，必须与 `UUID.toString()` 往返一致，拒绝大写、前后空白和其它非 canonical 形状；非负与正数十进制只使用 [`DecimalLongs`](../../common/src/main/java/fun/fengwk/kkstudio/common/number/DecimalLongs.java)（`0|[1-9]\d*` 与 `[1-9]\d*`，且必须放进 `long`），同样拒绝前后空白、符号和前导零。Project、Harness 与 Environment 路径都直接复用这两个算法，严格校验大小写与空白，拒绝非规范输入；可选字段缺省仍表示未提供，不把缺省本身当非法。共享层只承载解析后的值，整数形态的实体 id 在 wire 上永远不出现。
 
 durable 游标在 wire 上保持十进字符串：Canvas 的 revision、Harness Thread 的 sequence、Project/Issue 的 version、nextIssueNumber、number、sequence、nextActivityCursor、ordinal、budgetAfterOrdinal、usedRuns、remainingRuns、observedActivitySequence、remainingExecutionMs 及请求 expectedVersion 均为 String，以保持 JS 端整数精度。[`CanvasDtoContractTest`](../../apps/canvas/runtime/src/test/java/fun/fengwk/kkstudio/canvas/dto/CanvasDtoContractTest.java) 与 [`ProjectDtoContractTest`](../../apps/project/src/test/java/fun/fengwk/kkstudio/project/dto/ProjectDtoContractTest.java) 反射验证字段类型。
 

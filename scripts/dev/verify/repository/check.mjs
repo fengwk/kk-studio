@@ -1057,6 +1057,7 @@ const platformDomainRoots = [
   'orchestration',
   'persistence',
   'pluginhost',
+  'secret',
   'settings',
   'storage',
   'vfs',
