@@ -371,6 +371,8 @@ COMPLETED
 在每次 READY 后于锁外唤醒宿主；生产组合 listener 同时唤醒 Harness Work dispatcher 与
 异步 Skill Package 对账，两者失败彼此隔离，也不回滚已经成立的 READY 会话。另一个 Daemon 实例在本节点接管某个 Environment 时，
 listener 在锁外收到 `onDaemonInstanceReplaced(previous)`，宿主据此关闭旧实例的 IDE 代际；同一实例断线重连不触发该回调。
+生产组合 listener 的 READY、心跳与 Skill 状态宿主动作独立隔离失败；失败时以 WARN 记录 Environment ID、
+动作名与异常类型，不输出异常正文。租约断开与释放的数据库写入失败按未成功处理，同时记录操作与 Environment ID。
 
 持久化实现（连接注册、租约、上传行与对象存储）与 WebSocket 传输实现在 `platform-runtime` 与 `web` 模块完成适配；`platform-daemon-server` 只定义窄端口语义，不感知 SQL、bucket、对象 key 或 Spring。
 

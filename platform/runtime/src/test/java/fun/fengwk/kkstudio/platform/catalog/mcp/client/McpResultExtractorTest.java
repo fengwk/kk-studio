@@ -3,8 +3,13 @@ package fun.fengwk.kkstudio.platform.catalog.mcp.client;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import io.modelcontextprotocol.spec.McpSchema;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 
 import fun.fengwk.kkstudio.common.result.BinaryResultContent;
 import fun.fengwk.kkstudio.common.result.JsonResultContent;
@@ -149,6 +154,35 @@ class McpResultExtractorTest {
     assertThat(mapped.error()).isFalse();
     assertThat(mapped.contents()).containsExactly(new TextResultContent("hello"));
     assertThat(mapped.detailsJson()).isEqualTo("{\"traceId\":\"t-1\"}");
+  }
+
+  /** 无法编码的业务元数据仍回退为空对象，但告警不能包含其内容。 */
+  @Test
+  void reportsUnencodableDetailsWithoutLeakingMetadata() {
+    McpSchema.CallToolResult result =
+        McpSchema.CallToolResult.builder()
+            .addTextContent("hello")
+            .meta(Map.of("private-key", new Object()))
+            .build();
+    Logger logger = (Logger) LoggerFactory.getLogger(McpResultExtractor.class);
+    ListAppender<ILoggingEvent> logs = new ListAppender<>();
+    logs.start();
+    logger.addAppender(logs);
+    try {
+      McpToolCallResult mapped = extractor.extract(result);
+      assertThat(mapped.error()).isFalse();
+      assertThat(mapped.contents()).containsExactly(new TextResultContent("hello"));
+      assertThat(mapped.detailsJson()).isEqualTo("{}");
+      assertThat(logs.list).hasSize(1);
+      ILoggingEvent event = logs.list.getFirst();
+      assertThat(event.getLevel()).isEqualTo(Level.WARN);
+      assertThat(event.getFormattedMessage()).contains("MCP result details");
+      assertThat(event.getFormattedMessage()).doesNotContain("private-key");
+      assertThat(event.getThrowableProxy()).isNull();
+    } finally {
+      logger.detachAppender(logs);
+      logs.stop();
+    }
   }
 
   /** content 为空时才使用结构化结果，并把它写成可读 JSON 文本。 */

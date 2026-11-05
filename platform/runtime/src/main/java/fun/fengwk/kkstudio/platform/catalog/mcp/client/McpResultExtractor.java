@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.platform.catalog.mcp.client;
 
 import io.modelcontextprotocol.spec.McpSchema;
+import lombok.extern.slf4j.Slf4j;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.ObjectWriter;
@@ -39,6 +40,7 @@ import java.util.Map;
  * MiB）。该数字对齐既有 terminal 工具产物硬上限的数量级（daemon multiline 扫描与 terminal 结果尺寸检查使用的 64 MiB），不是新的调用配置：MCP
  * client 没有独立的结果预算配置项。
  */
+@Slf4j
 public final class McpResultExtractor {
 
   /**
@@ -267,7 +269,9 @@ public final class McpResultExtractor {
     }
     try {
       return OBJECT_MAPPER.writeValueAsString(details);
-    } catch (JacksonException ignored) {
+    } catch (JacksonException failure) {
+      // MCP 元数据可能包含敏感内容，只记录编码阶段和异常类型。
+      log.warn("cannot encode MCP result details: {}", failure.getClass().getSimpleName());
       return "{}";
     }
   }

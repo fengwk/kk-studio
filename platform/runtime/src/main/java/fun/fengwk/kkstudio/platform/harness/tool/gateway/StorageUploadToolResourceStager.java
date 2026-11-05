@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.platform.harness.tool.gateway;
 
+import lombok.extern.slf4j.Slf4j;
+
 import fun.fengwk.kkstudio.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 
@@ -7,6 +9,7 @@ import java.io.ByteArrayInputStream;
 import java.util.Objects;
 
 /** 通过统一 storage upload staging 生命周期准备工具资源。 */
+@Slf4j
 public final class StorageUploadToolResourceStager implements ToolResourceStager {
 
   private final StorageUploadService uploadService;
@@ -37,8 +40,12 @@ public final class StorageUploadToolResourceStager implements ToolResourceStager
     }
     try {
       uploadService.delete(resource.blobUploadId());
-    } catch (RuntimeException ignored) {
+    } catch (RuntimeException failure) {
       // READY upload 仍由 expiration 回收；放弃路径不能覆盖原始终态化结果。
+      log.warn(
+          "cannot discard staged tool resource upload {}: {}",
+          resource.blobUploadId(),
+          failure.getClass().getSimpleName());
     }
   }
 }

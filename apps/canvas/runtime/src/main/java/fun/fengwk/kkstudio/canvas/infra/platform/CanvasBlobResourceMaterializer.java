@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.canvas.infra.platform;
 
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.canvas.CanvasFunctionResourcePin;
@@ -29,6 +30,7 @@ import java.util.UUID;
  * <p>调用方使用 Run 启动时预分配并冻结的 resourceId。旧 owner 即便同 request 也不得发布或消费输出，新 owner 可幂等消费既有资源。 Function
  * success 事务再按冻结顺序把全部输出资源原子挂接到节点。
  */
+@Slf4j
 public class CanvasBlobResourceMaterializer {
 
   private static final long MAX_MATERIALIZE_SIZE = 512L * 1024 * 1024;
@@ -214,8 +216,12 @@ public class CanvasBlobResourceMaterializer {
   private void discardBestEffort(UUID uploadId) {
     try {
       uploadService.delete(uploadId);
-    } catch (RuntimeException ignored) {
+    } catch (RuntimeException failure) {
       // Durable upload expiry remains the fallback.
+      log.warn(
+          "cannot discard canvas resource upload {}: {}",
+          uploadId,
+          failure.getClass().getSimpleName());
     }
   }
 }

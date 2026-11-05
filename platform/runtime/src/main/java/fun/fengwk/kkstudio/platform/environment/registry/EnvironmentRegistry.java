@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.platform.environment.registry;
 
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.RowMapper;
@@ -44,6 +45,7 @@ import java.util.function.Supplier;
  * <p>状态、宿主信息、Skill 投影或运维事件的围栏写与 {@code environment_changed} 在同一事务提交；0 行围栏与拒绝结果静默，
  * 发布失败会回滚围栏写。HEARTBEAT 只续租，不发布通知。内存运行状态变化时先更新快照，再在 READY 租约围栏下发布失效提示。 自然到期没有数据库写事件，仍由读取时判定与截止点对账处理。
  */
+@Slf4j
 @Component
 public class EnvironmentRegistry implements DaemonLeaseStore {
 
@@ -508,8 +510,12 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
                   .param("ownerNodeId", ownerNodeId)
                   .param("leaseToken", leaseToken)
                   .update());
-    } catch (DataAccessException ignored) {
+    } catch (DataAccessException failure) {
       // 捕获在事务边界之外：失败时围栏写已随短事务回滚，绝不留下「租约已提交、通知失败」的中间态。
+      log.warn(
+          "cannot persist environment disconnect for {}: {}",
+          environmentId,
+          failure.getClass().getSimpleName());
       return false;
     }
   }
@@ -542,7 +548,12 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
                   .param("ownerNodeId", ownerNodeId)
                   .param("leaseToken", leaseToken)
                   .update());
-    } catch (DataAccessException ignored) {
+    } catch (DataAccessException failure) {
+      // 围栏写失败按未释放处理；记录异常类型而不回显 SQL。
+      log.warn(
+          "cannot persist environment release for {}: {}",
+          environmentId,
+          failure.getClass().getSimpleName());
       return false;
     }
   }

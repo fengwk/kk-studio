@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.platform.harness.tool.gateway;
 
+import lombok.extern.slf4j.Slf4j;
+
 import fun.fengwk.kkstudio.common.hash.Sha256;
 import fun.fengwk.kkstudio.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.common.result.BinaryResultContent;
@@ -49,6 +51,7 @@ import java.util.regex.Pattern;
  *   <li>存储失败或契约违反收敛为 {@code UNKNOWN / RESOURCE_STORE_FAILED}。
  * </ul>
  */
+@Slf4j
 public final class ToolResultFinalizer {
 
   /** terminal textual projection 的完整内联字节上限（50 KiB）。 */
@@ -160,10 +163,15 @@ public final class ToolResultFinalizer {
 
   private void discard(List<ResourceRef> resources) {
     for (int index = resources.size() - 1; index >= 0; index--) {
+      ResourceRef resource = resources.get(index);
       try {
-        resourceStager.discard(resources.get(index));
-      } catch (RuntimeException ignored) {
+        resourceStager.discard(resource);
+      } catch (RuntimeException failure) {
         // Staged uploads also have durable expiry; cleanup failure must not mask UNKNOWN.
+        log.warn(
+            "cannot discard staged tool resource upload {}: {}",
+            resource.blobUploadId(),
+            failure.getClass().getSimpleName());
       }
     }
   }

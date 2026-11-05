@@ -1,6 +1,8 @@
 package fun.fengwk.kkstudio.canvas.infra.platform;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -12,8 +14,13 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.support.TransactionCallback;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -210,12 +217,28 @@ class CanvasBlobResourceMaterializerTest {
   void postStageFenceFailureDiscardsBestEffort() {
     when(runRepository.ownsRunningRequest(canvasId, nodeId, requestId, LEASE))
         .thenReturn(true, false);
-    doThrow(new IllegalStateException("cleanup failed")).when(uploadService).delete(uploadId);
-    IllegalStateException failure = assertThrows(IllegalStateException.class, this::materialize);
-    assertTrue(failure.getMessage().contains("live lease owner"));
-    verify(resourceRepository, never()).addIfAbsent(any());
-    verify(pinRepository, never()).addAll(any());
-    verify(blobManager, never()).retain(any());
+    doThrow(new IllegalStateException("private detail")).when(uploadService).delete(uploadId);
+    Logger logger = (Logger) LoggerFactory.getLogger(CanvasBlobResourceMaterializer.class);
+    ListAppender<ILoggingEvent> logs = new ListAppender<>();
+    logs.start();
+    logger.addAppender(logs);
+    try {
+      IllegalStateException failure = assertThrows(IllegalStateException.class, this::materialize);
+      assertTrue(failure.getMessage().contains("live lease owner"));
+      verify(resourceRepository, never()).addIfAbsent(any());
+      verify(pinRepository, never()).addAll(any());
+      verify(blobManager, never()).retain(any());
+      assertEquals(1, logs.list.size());
+      ILoggingEvent event = logs.list.getFirst();
+      assertEquals(Level.WARN, event.getLevel());
+      assertTrue(event.getFormattedMessage().contains(uploadId.toString()));
+      assertTrue(event.getFormattedMessage().contains("IllegalStateException"));
+      assertFalse(event.getFormattedMessage().contains("private detail"));
+      assertNull(event.getThrowableProxy());
+    } finally {
+      logger.detachAppender(logs);
+      logs.stop();
+    }
   }
 
   /** TEXT 边界校验不触碰 DB；insert 冲突只使用真实 winner，无 winner 则回滚失败。 */
