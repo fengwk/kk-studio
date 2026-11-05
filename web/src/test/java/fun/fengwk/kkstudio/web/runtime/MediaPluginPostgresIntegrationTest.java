@@ -134,7 +134,7 @@ class MediaPluginPostgresIntegrationTest {
                 assertTrue(registered.enabled());
                 assertEquals(MEDIA_FUNCTION_ADAPTER, registered.adapter().getClass().getName());
               }
-              assertEquals(3L, configurationRepository.find(PLUGIN_ID).orElseThrow().revision());
+              assertEquals(3L, configurationRepository.find(PLUGIN_ID).orElseThrow().version());
             });
   }
 

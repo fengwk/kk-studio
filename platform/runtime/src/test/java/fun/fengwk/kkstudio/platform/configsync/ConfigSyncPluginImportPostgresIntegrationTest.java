@@ -223,7 +223,7 @@ class ConfigSyncPluginImportPostgresIntegrationTest {
     assertEquals(null, error.getCause(), "the recheck must not leak a cause");
     assertEquals(
         0L, count("select count(*) from agent_provider where name = '" + PROVIDER_NAME + "'"));
-    assertEquals(1L, configurationRepository.find(DEPENDENT_PLUGIN_ID).orElseThrow().revision());
+    assertEquals(1L, configurationRepository.find(DEPENDENT_PLUGIN_ID).orElseThrow().version());
     assertEquals(0, dispatcherWakes.get());
     assertEquals(0, catalogWakes.get(), "a rolled back import must not notify the catalog");
   }
@@ -267,7 +267,7 @@ class ConfigSyncPluginImportPostgresIntegrationTest {
     assertEquals(dispatcherWakesBeforeImport + 1, dispatcherWakes.get());
     assertTrue(credentialRepository.find(STATIC_PLUGIN_ID).isEmpty());
     PluginConfigurationRow current = configurationRepository.find(STATIC_PLUGIN_ID).orElseThrow();
-    assertEquals(3L, current.revision());
+    assertEquals(3L, current.version());
     assertEquals(VALUES_V2, current.valuesJson());
   }
 

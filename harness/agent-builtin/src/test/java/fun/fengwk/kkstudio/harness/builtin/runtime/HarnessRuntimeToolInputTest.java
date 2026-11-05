@@ -511,18 +511,20 @@ class HarnessRuntimeToolInputTest {
         store.transaction(
             tx ->
                 tx.work()
-                    .claimNext(BuiltinWorkType.MODEL, "probe-model", Duration.between(T5, T6)));
+                    .claimNext(BuiltinWorkType.MODEL, UUID.randomUUID(), Duration.between(T5, T6)));
     assertTrue(modelWork.isEmpty());
     Optional<ClaimedWork> toolWork =
         store.transaction(
-            tx -> tx.work().claimNext(WorkTargetType.TOOL, "probe-tool", Duration.between(T5, T6)));
+            tx ->
+                tx.work()
+                    .claimNext(WorkTargetType.TOOL, UUID.randomUUID(), Duration.between(T5, T6)));
     assertTrue(toolWork.isEmpty());
     // THREAD 的工作认领存在且指向该 thread
     Optional<ClaimedWork> threadWork =
         store.transaction(
             tx ->
                 tx.work()
-                    .claimNext(WorkTargetType.THREAD, "probe-thread", Duration.between(T5, T6)));
+                    .claimNext(WorkTargetType.THREAD, UUID.randomUUID(), Duration.between(T5, T6)));
     assertTrue(threadWork.isPresent());
     assertEquals(
         new WorkTarget(WorkTargetType.THREAD, baseline.threadId()), threadWork.get().target());

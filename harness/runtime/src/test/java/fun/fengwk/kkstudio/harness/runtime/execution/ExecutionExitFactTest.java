@@ -19,7 +19,6 @@ import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitState;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 
 import java.time.Instant;
-import java.util.List;
 import java.util.UUID;
 import java.util.stream.Stream;
 
@@ -35,8 +34,8 @@ class ExecutionExitFactTest {
   private static final UUID OTHER_THREAD_ID = new UUID(0L, 202L);
   private static final UUID INVOCATION_ID = new UUID(0L, 301L);
   private static final UUID OTHER_INVOCATION_ID = new UUID(0L, 302L);
-  private static final String LEASE = "lease-1";
-  private static final String OTHER_LEASE = "lease-2";
+  private static final UUID LEASE = UUID.randomUUID();
+  private static final UUID OTHER_LEASE = UUID.randomUUID();
   private static final EnvironmentId ENV = EnvironmentId.of(new UUID(0L, 501L));
   private static final EnvironmentId OTHER_ENV = EnvironmentId.of(new UUID(0L, 502L));
   private static final Instant REGISTERED_AT = Instant.parse("2026-07-01T00:00:00.123Z");
@@ -362,20 +361,18 @@ class ExecutionExitFactTest {
   }
 
   @Test
-  void rejectsNonCanonicalLeaseAndNonPositiveAttempt() {
-    for (String lease : List.of("", " lease-1", "lease-1 ", "a".repeat(129))) {
-      assertThrows(
-          IllegalArgumentException.class,
-          () ->
-              unconfirmed(
-                  TOOL_EXECUTION_ID,
-                  THREAD_ID,
-                  INVOCATION_ID,
-                  1,
-                  lease,
-                  ExecutionExitKind.TOOL,
-                  null));
-    }
+  void rejectsMissingLeaseAndNonPositiveAttempt() {
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            unconfirmed(
+                TOOL_EXECUTION_ID,
+                THREAD_ID,
+                INVOCATION_ID,
+                1,
+                null,
+                ExecutionExitKind.TOOL,
+                null));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -467,7 +464,7 @@ class ExecutionExitFactTest {
       UUID threadId,
       UUID invocationId,
       int attempt,
-      String ownerLeaseToken,
+      UUID ownerLeaseToken,
       ExecutionExitKind kind,
       UUID parentExecutionId) {
     return unconfirmed(
@@ -486,7 +483,7 @@ class ExecutionExitFactTest {
       UUID threadId,
       UUID invocationId,
       int attempt,
-      String ownerLeaseToken,
+      UUID ownerLeaseToken,
       ExecutionExitKind kind,
       UUID parentExecutionId,
       EnvironmentId environmentId) {
@@ -509,7 +506,7 @@ class ExecutionExitFactTest {
       UUID threadId,
       UUID invocationId,
       int attempt,
-      String ownerLeaseToken,
+      UUID ownerLeaseToken,
       ExecutionExitKind kind,
       UUID parentExecutionId,
       ExecutionExitState state,
@@ -534,7 +531,7 @@ class ExecutionExitFactTest {
       UUID threadId,
       UUID invocationId,
       int attempt,
-      String ownerLeaseToken,
+      UUID ownerLeaseToken,
       ExecutionExitKind kind,
       UUID parentExecutionId,
       EnvironmentId environmentId,

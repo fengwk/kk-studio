@@ -85,7 +85,7 @@ class DurableWorkStoreIntegrationTest {
     assertEquals(1, first.wakeVersion());
     assertEquals(2, merged.wakeVersion());
     assertTrue(merged.availableAt().isBefore(first.availableAt().plusSeconds(300)));
-    assertEquals(2L, issues.claimNext("second", LEASE).orElseThrow().claimedWakeVersion());
+    assertEquals(2L, issues.claimNext(UUID.randomUUID(), LEASE).orElseThrow().claimedWakeVersion());
     assertTrue(canvasRuns.find(id).isEmpty());
     assertEquals("ISSUE", issues.targetType());
   }
@@ -99,10 +99,10 @@ class DurableWorkStoreIntegrationTest {
     issues.request(second);
     canvasRuns.request(UUID.randomUUID());
 
-    WorkClaim claim = issues.claimNext("a", LEASE).orElseThrow();
+    WorkClaim claim = issues.claimNext(UUID.randomUUID(), LEASE).orElseThrow();
     assertEquals(first, claim.targetId());
-    assertEquals(second, issues.claimNext("b", LEASE).orElseThrow().targetId());
-    assertTrue(issues.claimNext("c", LEASE).isEmpty());
+    assertEquals(second, issues.claimNext(UUID.randomUUID(), LEASE).orElseThrow().targetId());
+    assertTrue(issues.claimNext(UUID.randomUUID(), LEASE).isEmpty());
 
     issues.request(first);
     assertTrue(issues.isOwned(claim));
@@ -110,7 +110,7 @@ class DurableWorkStoreIntegrationTest {
     assertTrue(issues.find(first).orElseThrow().leaseUntil().isAfter(claim.leaseUntil()));
     assertThrows(
         IllegalArgumentException.class,
-        () -> issues.renew(new WorkClaim(first, 1, "intruder", claim.leaseUntil()), LEASE));
+        () -> issues.renew(new WorkClaim(first, 1, UUID.randomUUID(), claim.leaseUntil()), LEASE));
   }
 
   /** 完成匹配当前 wake 时删除；处理期间到达的新 wake 让行释放租约并立即可再领取。 */
@@ -118,14 +118,14 @@ class DurableWorkStoreIntegrationTest {
   void completeDeletesOrReleasesForANewerWake() {
     UUID id = UUID.randomUUID();
     issues.request(id);
-    WorkClaim stale = issues.claimNext("first", LEASE).orElseThrow();
+    WorkClaim stale = issues.claimNext(UUID.randomUUID(), LEASE).orElseThrow();
     issues.request(id);
 
     assertTrue(issues.complete(stale).isPresent());
     DurableWork released = issues.find(id).orElseThrow();
     assertNull(released.leaseToken());
 
-    WorkClaim current = issues.claimNext("second", LEASE).orElseThrow();
+    WorkClaim current = issues.claimNext(UUID.randomUUID(), LEASE).orElseThrow();
     assertEquals(2, current.claimedWakeVersion());
     assertTrue(issues.complete(current).isEmpty());
     assertTrue(issues.find(id).isEmpty());
@@ -137,15 +137,15 @@ class DurableWorkStoreIntegrationTest {
   void rescheduleDefersOrKeepsTheNewerWake() {
     UUID id = UUID.randomUUID();
     issues.request(id);
-    WorkClaim claim = issues.claimNext("lease", LEASE).orElseThrow();
+    WorkClaim claim = issues.claimNext(UUID.randomUUID(), LEASE).orElseThrow();
     issues.reschedule(claim, Duration.ofMinutes(10));
-    assertTrue(issues.claimNext("next", LEASE).isEmpty());
+    assertTrue(issues.claimNext(UUID.randomUUID(), LEASE).isEmpty());
     assertFalse(issues.isOwned(claim));
     assertThrows(IllegalArgumentException.class, () -> issues.reschedule(claim, Duration.ZERO));
 
     UUID woken = UUID.randomUUID();
     issues.request(woken);
-    WorkClaim busy = issues.claimNext("busy", LEASE).orElseThrow();
+    WorkClaim busy = issues.claimNext(UUID.randomUUID(), LEASE).orElseThrow();
     DurableWork wake = issues.request(woken);
     issues.reschedule(busy, Duration.ofMinutes(10));
     assertEquals(wake.availableAt(), issues.find(woken).orElseThrow().availableAt());
@@ -156,10 +156,10 @@ class DurableWorkStoreIntegrationTest {
   void expiredLeaseIsReclaimedAndFencesTheOldOwner() {
     UUID id = UUID.randomUUID();
     issues.request(id);
-    WorkClaim old = issues.claimNext("old", Duration.ofMillis(1)).orElseThrow();
+    WorkClaim old = issues.claimNext(UUID.randomUUID(), Duration.ofMillis(1)).orElseThrow();
     jdbc.sql("select pg_sleep(0.01)").query(String.class).list();
 
-    WorkClaim next = issues.claimNext("new", LEASE).orElseThrow();
+    WorkClaim next = issues.claimNext(UUID.randomUUID(), LEASE).orElseThrow();
     assertNotEquals(old.leaseToken(), next.leaseToken());
     assertFalse(issues.isOwned(old));
     assertThrows(IllegalArgumentException.class, () -> issues.renew(old, LEASE));
@@ -173,18 +173,22 @@ class DurableWorkStoreIntegrationTest {
   void releaseMakesWorkImmediatelyClaimableAndRejectsStaleClaims() {
     UUID id = UUID.randomUUID();
     issues.request(id);
-    WorkClaim claim = issues.claimNext("owner", LEASE).orElseThrow();
+    WorkClaim claim = issues.claimNext(UUID.randomUUID(), LEASE).orElseThrow();
     assertEquals(1L, claim.claimedWakeVersion());
 
     // 伪造 token 释放返回 false
     assertFalse(
-        issues.release(new WorkClaim(id, claim.claimedWakeVersion(), "wrong", claim.leaseUntil())));
+        issues.release(
+            new WorkClaim(id, claim.claimedWakeVersion(), UUID.randomUUID(), claim.leaseUntil())));
 
     // 行不存在释放返回 false
     assertFalse(
         issues.release(
             new WorkClaim(
-                UUID.randomUUID(), claim.claimedWakeVersion(), "owner", claim.leaseUntil())));
+                UUID.randomUUID(),
+                claim.claimedWakeVersion(),
+                UUID.randomUUID(),
+                claim.leaseUntil())));
 
     // 有效持有释放成功
     assertTrue(issues.release(claim));
@@ -193,10 +197,11 @@ class DurableWorkStoreIntegrationTest {
     assertFalse(issues.release(claim));
 
     // 释放后其他 worker 立即可以领取，wakeVersion 依然是 1
-    WorkClaim next = issues.claimNext("new-owner", LEASE).orElseThrow();
+    UUID newOwner = UUID.randomUUID();
+    WorkClaim next = issues.claimNext(newOwner, LEASE).orElseThrow();
     assertEquals(id, next.targetId());
     assertEquals(1L, next.claimedWakeVersion());
-    assertEquals("new-owner", next.leaseToken());
+    assertEquals(newOwner, next.leaseToken());
 
     // 过期后释放返回 false
     jdbc.sql(
@@ -211,7 +216,7 @@ class DurableWorkStoreIntegrationTest {
   void lockRequiresTransactionAndRejectsWrongOrExpiredOwner() {
     UUID id = UUID.randomUUID();
     issues.request(id);
-    WorkClaim claim = issues.claimNext("owner", LEASE).orElseThrow();
+    WorkClaim claim = issues.claimNext(UUID.randomUUID(), LEASE).orElseThrow();
     assertThrows(IllegalStateException.class, () -> issues.lock(id));
     assertThrows(IllegalStateException.class, () -> issues.lockClaimed(claim));
     TransactionTemplate tx = new TransactionTemplate(transactions);
@@ -220,7 +225,8 @@ class DurableWorkStoreIntegrationTest {
           assertFalse(
               issues
                   .lockClaimed(
-                      new WorkClaim(id, claim.claimedWakeVersion(), "wrong", claim.leaseUntil()))
+                      new WorkClaim(
+                          id, claim.claimedWakeVersion(), UUID.randomUUID(), claim.leaseUntil()))
                   .isPresent());
           assertTrue(issues.lockClaimed(claim).isPresent());
           assertTrue(issues.lock(id).isPresent());
@@ -237,7 +243,7 @@ class DurableWorkStoreIntegrationTest {
   void lockHoldsRowUntilTransactionCompletes() throws SQLException {
     UUID id = UUID.randomUUID();
     issues.request(id);
-    WorkClaim claim = issues.claimNext("owner", LEASE).orElseThrow();
+    WorkClaim claim = issues.claimNext(UUID.randomUUID(), LEASE).orElseThrow();
     try (Connection competitor =
             DriverManager.getConnection(
                 POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
@@ -261,7 +267,7 @@ class DurableWorkStoreIntegrationTest {
                                 POSTGRES.getUsername(),
                                 POSTGRES.getPassword())),
                         transactions);
-                assertTrue(competingStore.claimNext("competitor", LEASE).isEmpty());
+                assertTrue(competingStore.claimNext(UUID.randomUUID(), LEASE).isEmpty());
               });
       try (var result = statement.executeQuery(lock)) {
         assertTrue(result.next(), "commit must release the ownership lock");
@@ -278,14 +284,14 @@ class DurableWorkStoreIntegrationTest {
     seedEnvironment(environmentId);
     tools.request(targetId, environmentId);
 
-    assertTrue(tools.claimNext("no-node", LEASE).isEmpty());
-    assertTrue(tools.claimNext("wrong-node", LEASE, UUID.randomUUID()).isEmpty());
+    assertTrue(tools.claimNext(UUID.randomUUID(), LEASE).isEmpty());
+    assertTrue(tools.claimNext(UUID.randomUUID(), LEASE, UUID.randomUUID()).isEmpty());
 
     seedConnection(environmentId, owner, "CONNECTING");
-    assertTrue(tools.claimNext("connecting", LEASE, owner).isEmpty());
+    assertTrue(tools.claimNext(UUID.randomUUID(), LEASE, owner).isEmpty());
 
     seedConnection(environmentId, owner, "READY");
-    assertTrue(tools.claimNext("wrong-owner", LEASE, UUID.randomUUID()).isEmpty());
+    assertTrue(tools.claimNext(UUID.randomUUID(), LEASE, UUID.randomUUID()).isEmpty());
 
     jdbc.sql(
             "update environment_connection set last_seen_at = statement_timestamp() - interval '2 hours',"
@@ -293,10 +299,10 @@ class DurableWorkStoreIntegrationTest {
                 + " where environment_id = :id")
         .param("id", environmentId)
         .update();
-    assertTrue(tools.claimNext("expired", LEASE, owner).isEmpty());
+    assertTrue(tools.claimNext(UUID.randomUUID(), LEASE, owner).isEmpty());
 
     seedConnection(environmentId, owner, "READY");
-    WorkClaim claimed = tools.claimNext("ready", LEASE, owner).orElseThrow();
+    WorkClaim claimed = tools.claimNext(UUID.randomUUID(), LEASE, owner).orElseThrow();
     assertEquals(targetId, claimed.targetId());
     assertEquals(environmentId, claimed.requiredEnvironmentId());
   }
@@ -312,18 +318,18 @@ class DurableWorkStoreIntegrationTest {
       issues.request(UUID.randomUUID());
       assertEquals(List.of("ISSUE"), notifications(listener));
 
-      WorkClaim claim = issues.claimNext("lease", LEASE).orElseThrow();
+      WorkClaim claim = issues.claimNext(UUID.randomUUID(), LEASE).orElseThrow();
       issues.request(id);
       assertEquals(List.of("ISSUE"), notifications(listener));
 
       assertTrue(issues.complete(claim).isPresent());
       assertEquals(List.of("ISSUE"), notifications(listener));
 
-      WorkClaim current = issues.claimNext("next", LEASE).orElseThrow();
+      WorkClaim current = issues.claimNext(UUID.randomUUID(), LEASE).orElseThrow();
       issues.reschedule(current, Duration.ZERO);
       assertEquals(List.of("ISSUE"), notifications(listener));
 
-      WorkClaim last = issues.claimNext("last", LEASE).orElseThrow();
+      WorkClaim last = issues.claimNext(UUID.randomUUID(), LEASE).orElseThrow();
       assertTrue(issues.complete(last).isEmpty());
       assertEquals(List.of(), notifications(listener));
     }
@@ -382,11 +388,10 @@ class DurableWorkStoreIntegrationTest {
     assertEquals(
         "CUSTOM_DRIVER", new DurableWorkStore("CUSTOM_DRIVER", jdbc, transactions).targetType());
     assertThrows(NullPointerException.class, () -> issues.request(null));
-    assertThrows(IllegalArgumentException.class, () -> issues.claimNext("lease", Duration.ZERO));
-    assertThrows(IllegalArgumentException.class, () -> issues.claimNext(" ", LEASE));
-    assertThrows(IllegalArgumentException.class, () -> issues.claimNext(null, LEASE));
-    assertThrows(IllegalArgumentException.class, () -> issues.claimNext("x".repeat(129), LEASE));
-    WorkClaim claim = new WorkClaim(id, 1L, "lease", Instant.now().plusSeconds(30));
+    assertThrows(
+        IllegalArgumentException.class, () -> issues.claimNext(UUID.randomUUID(), Duration.ZERO));
+    assertThrows(NullPointerException.class, () -> issues.claimNext(null, LEASE));
+    WorkClaim claim = new WorkClaim(id, 1L, UUID.randomUUID(), Instant.now().plusSeconds(30));
     assertThrows(
         IllegalArgumentException.class, () -> issues.reschedule(claim, Duration.ofMillis(-1)));
     assertThrows(

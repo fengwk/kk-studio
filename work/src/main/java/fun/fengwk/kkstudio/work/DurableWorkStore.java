@@ -44,7 +44,7 @@ public final class DurableWorkStore {
               new WorkState(
                   instant(resultSet.getTimestamp("available_at")),
                   resultSet.getLong("wake_version"),
-                  resultSet.getString("lease_token"),
+                  resultSet.getObject("lease_token", UUID.class),
                   instant(resultSet.getTimestamp("lease_until")),
                   resultSet.getObject("required_environment_id", UUID.class)));
 
@@ -56,7 +56,7 @@ public final class DurableWorkStore {
                   new WorkState(
                       instant(resultSet.getTimestamp("available_at")),
                       resultSet.getLong("wake_version"),
-                      resultSet.getString("lease_token"),
+                      resultSet.getObject("lease_token", UUID.class),
                       instant(resultSet.getTimestamp("lease_until")),
                       resultSet.getObject("required_environment_id", UUID.class))),
               instant(resultSet.getTimestamp("database_now")));
@@ -238,14 +238,14 @@ public final class DurableWorkStore {
   }
 
   /** 领取下一条到期且无有效租约的 Work（无节点路由围栏）。 */
-  public Optional<WorkClaim> claimNext(String leaseToken, Duration leaseDuration) {
+  public Optional<WorkClaim> claimNext(UUID leaseToken, Duration leaseDuration) {
     return claimNext(leaseToken, leaseDuration, null);
   }
 
   /** 领取下一条到期且无有效租约的 Work；带环境亲和性的行只由 {@code nodeInstanceId} 持有 READY 路由租约时可见。 */
   public Optional<WorkClaim> claimNext(
-      String leaseToken, Duration leaseDuration, UUID nodeInstanceId) {
-    String token = WorkState.requireLeaseToken(leaseToken);
+      UUID leaseToken, Duration leaseDuration, UUID nodeInstanceId) {
+    UUID token = WorkState.requireLeaseToken(leaseToken);
     Duration lease = requirePositiveWholeMillis(leaseDuration, "leaseDuration");
     return jdbc.inTransaction(
         () -> {

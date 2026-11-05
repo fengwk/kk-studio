@@ -163,7 +163,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
   private WorkClaim claimWork(UUID issueId) {
     issueWorkQueue.request(issueId, Duration.ZERO);
     return issueWorkQueue
-        .claimNext(key("lease"), Duration.ofSeconds(30))
+        .claimNext(UUID.randomUUID(), Duration.ofSeconds(30))
         .orElseThrow(() -> new IllegalStateException("Failed to claim work for issue " + issueId));
   }
 
@@ -272,13 +272,13 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     assertThrows(NullPointerException.class, () -> reconciler.reconcile(null));
     assertThrows(
         NullPointerException.class,
-        () -> reconciler.reconcile(new WorkClaim(null, 1L, "token", Instant.now())));
+        () -> reconciler.reconcile(new WorkClaim(null, 1L, UUID.randomUUID(), Instant.now())));
     assertThrows(
-        IllegalArgumentException.class,
+        NullPointerException.class,
         () -> reconciler.reconcile(new WorkClaim(UUID.randomUUID(), 1L, null, Instant.now())));
     assertThrows(
         NullPointerException.class,
-        () -> reconciler.reconcile(new WorkClaim(UUID.randomUUID(), 1L, "token", null)));
+        () -> reconciler.reconcile(new WorkClaim(UUID.randomUUID(), 1L, UUID.randomUUID(), null)));
   }
 
   /** 测试意图：已归档的 Issue 不会继续派发执行，reconcile 返回 CONVERGED_ARCHIVED 并清除 mailbox 工作行。 */
@@ -1282,7 +1282,8 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
 
     issueWorkQueue.request(issue.getId(), Duration.ZERO);
-    WorkClaim claim = issueWorkQueue.claimNext(key("lease"), Duration.ofSeconds(5)).orElseThrow();
+    WorkClaim claim =
+        issueWorkQueue.claimNext(UUID.randomUUID(), Duration.ofSeconds(5)).orElseThrow();
 
     IssueReconcileOutcome outcome = reconciler.reconcile(claim);
 
@@ -1304,7 +1305,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
 
     // 不存在的 Issue 触发 lockIssue == null 路径，并经 finish(completeWork) 安全处理
     WorkClaim nonExistentClaim =
-        new WorkClaim(UUID.randomUUID(), 1L, key("token"), Instant.now().plusSeconds(30));
+        new WorkClaim(UUID.randomUUID(), 1L, UUID.randomUUID(), Instant.now().plusSeconds(30));
     IssueReconcileOutcome outcome = reconciler.reconcile(nonExistentClaim);
     assertEquals(IssueReconcileOutcome.CONVERGED_ARCHIVED, outcome);
   }

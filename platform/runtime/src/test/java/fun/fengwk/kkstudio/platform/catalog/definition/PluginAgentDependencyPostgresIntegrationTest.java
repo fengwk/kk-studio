@@ -456,7 +456,7 @@ class PluginAgentDependencyPostgresIntegrationTest {
   }
 
   private long currentRevision() {
-    return configurationRepository.find(DECLARING_PLUGIN_ID).orElseThrow().revision();
+    return configurationRepository.find(DECLARING_PLUGIN_ID).orElseThrow().version();
   }
 
   private String currentValues() {

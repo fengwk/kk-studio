@@ -18,6 +18,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
+import fun.fengwk.kkstudio.platform.settings.SystemSettingsTestFixture;
 import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageUploadRepository;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
@@ -66,7 +67,7 @@ class StorageUploadTtlPolicyIntegrationTest extends PostgresSpringTestSupport {
   @BeforeEach
   void setUpStorage() {
     s3Storage.clear();
-    settingsSnapshot.replace(SystemSettings.DEFAULT);
+    settingsSnapshot.replace(SystemSettingsTestFixture.DEFAULT);
     storage = new StorageIntegrationSupport(uploadService, s3Storage, jdbc);
     tx = new TransactionTemplate(transactionManager);
   }
@@ -74,7 +75,7 @@ class StorageUploadTtlPolicyIntegrationTest extends PostgresSpringTestSupport {
   @AfterEach
   void restoreDefaultSettings() {
     // snapshot 是类级共享 bean：每个测试后恢复默认，避免 TTL 热更新泄漏到其它用例。
-    settingsSnapshot.replace(SystemSettings.DEFAULT);
+    settingsSnapshot.replace(SystemSettingsTestFixture.DEFAULT);
   }
 
   /** 缩短 TTL：存量未 claim 上传在下一次判断立即过期，complete 拒绝且后台清理删除对象与行。 */
@@ -152,8 +153,7 @@ class StorageUploadTtlPolicyIntegrationTest extends PostgresSpringTestSupport {
     backdateCreatedAt(uploadId, 5L);
     Instant now = Instant.now();
     tx.execute(
-        status ->
-            uploadRepository.claimById(uploadId, now, now.plusMillis(1), "interrupted-owner"));
+        status -> uploadRepository.claimById(uploadId, now, now.plusMillis(1), UUID.randomUUID()));
     jdbc.update(
         "update storage_upload set cleanup_until = current_timestamp - interval '1 second' where id = ?",
         uploadId);
@@ -215,10 +215,10 @@ class StorageUploadTtlPolicyIntegrationTest extends PostgresSpringTestSupport {
     SystemSettings.StorageMedia base = settingsSnapshot.get().storageMedia();
     settingsSnapshot.replace(
         new SystemSettings(
-            SystemSettings.DEFAULT.tool(),
-            SystemSettings.DEFAULT.aiRuntime(),
-            SystemSettings.DEFAULT.environment(),
-            SystemSettings.DEFAULT.network(),
+            SystemSettingsTestFixture.DEFAULT.tool(),
+            SystemSettingsTestFixture.DEFAULT.aiRuntime(),
+            SystemSettingsTestFixture.DEFAULT.environment(),
+            SystemSettingsTestFixture.DEFAULT.network(),
             new SystemSettings.StorageMedia(
                 ttlSeconds,
                 base.s3PresignDefaultExpiresSeconds(),
@@ -228,7 +228,7 @@ class StorageUploadTtlPolicyIntegrationTest extends PostgresSpringTestSupport {
                 base.thumbnailQuality(),
                 base.temporaryResourceTtlSeconds(),
                 base.temporaryResourceCleanupIntervalSeconds()),
-            SystemSettings.DEFAULT.advanced()));
+            SystemSettingsTestFixture.DEFAULT.advanced()));
   }
 
   private void backdateCreatedAt(UUID uploadId, long secondsAgo) {

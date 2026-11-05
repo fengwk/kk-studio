@@ -162,7 +162,7 @@ class OpenCliPluginPostgresIntegrationTest {
                   assertNotNull(fn.unavailableReason());
                 }
               }
-              assertEquals(1L, configurationRepository.find(PLUGIN_ID).orElseThrow().revision());
+              assertEquals(1L, configurationRepository.find(PLUGIN_ID).orElseThrow().version());
               assertTrue(credentialRepository.find(PLUGIN_ID).isEmpty());
             });
   }

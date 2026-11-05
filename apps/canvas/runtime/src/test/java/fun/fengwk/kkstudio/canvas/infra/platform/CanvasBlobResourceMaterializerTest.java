@@ -38,6 +38,8 @@ import java.util.UUID;
 
 class CanvasBlobResourceMaterializerTest {
 
+  private static final UUID LEASE = UUID.randomUUID();
+
   private final StorageUploadService uploadService = mock(StorageUploadService.class);
   private final StorageBlobManager blobManager = mock(StorageBlobManager.class);
   private final PostgresqlCanvasStore canvasStore = mock(PostgresqlCanvasStore.class);
@@ -84,8 +86,7 @@ class CanvasBlobResourceMaterializerTest {
             Instant.now(),
             Instant.now());
     when(runRepository.findByNodeIdForUpdate(nodeId)).thenReturn(Optional.of(run));
-    when(runRepository.ownsRunningRequest(canvasId, nodeId, requestId, "lease-token-1"))
-        .thenReturn(true);
+    when(runRepository.ownsRunningRequest(canvasId, nodeId, requestId, LEASE)).thenReturn(true);
     when(uploadService.lockReady(uploadId))
         .thenReturn(new StorageUploadService.ReadyUpload(blobId, "stored.bin"));
     when(resourceRepository.addIfAbsent(any())).thenReturn(true);
@@ -160,7 +161,7 @@ class CanvasBlobResourceMaterializerTest {
   void materializesInlineTextWithoutBlobOrStaging() {
     CanvasResource resource =
         materializer.materializeText(
-            canvasId, nodeId, requestId, "lease-token-1", resourceId, "report.txt", "summary text");
+            canvasId, nodeId, requestId, LEASE, resourceId, "report.txt", "summary text");
 
     assertEquals("summary text", resource.textContent());
     assertTrue(resource.isText());
@@ -188,7 +189,7 @@ class CanvasBlobResourceMaterializerTest {
     assertSame(
         existing,
         materializer.materializeText(
-            canvasId, nodeId, requestId, "lease-token-1", resourceId, "report.txt", "cached"));
+            canvasId, nodeId, requestId, LEASE, resourceId, "report.txt", "cached"));
     verify(resourceRepository, never()).addIfAbsent(any());
   }
 
@@ -207,7 +208,7 @@ class CanvasBlobResourceMaterializerTest {
   /** 围栏在 stage 后失败时必清理；清理失败不能掩盖原始 ownership 异常。 */
   @Test
   void postStageFenceFailureDiscardsBestEffort() {
-    when(runRepository.ownsRunningRequest(canvasId, nodeId, requestId, "lease-token-1"))
+    when(runRepository.ownsRunningRequest(canvasId, nodeId, requestId, LEASE))
         .thenReturn(true, false);
     doThrow(new IllegalStateException("cleanup failed")).when(uploadService).delete(uploadId);
     IllegalStateException failure = assertThrows(IllegalStateException.class, this::materialize);
@@ -224,7 +225,7 @@ class CanvasBlobResourceMaterializerTest {
         IllegalArgumentException.class,
         () ->
             materializer.materializeText(
-                canvasId, nodeId, requestId, "lease-token-1", resourceId, "text", null));
+                canvasId, nodeId, requestId, LEASE, resourceId, "text", null));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -232,7 +233,7 @@ class CanvasBlobResourceMaterializerTest {
                 canvasId,
                 nodeId,
                 requestId,
-                "lease-token-1",
+                LEASE,
                 resourceId,
                 "text",
                 "x".repeat(1024 * 1024 + 1)));
@@ -243,14 +244,13 @@ class CanvasBlobResourceMaterializerTest {
         .thenReturn(Optional.empty(), Optional.of(winner));
     assertSame(
         winner,
-        materializer.materializeText(
-            canvasId, nodeId, requestId, "lease-token-1", resourceId, "text", ""));
+        materializer.materializeText(canvasId, nodeId, requestId, LEASE, resourceId, "text", ""));
     when(resourceRepository.findById(canvasId, resourceId)).thenReturn(Optional.empty());
     assertThrows(
         IllegalStateException.class,
         () ->
             materializer.materializeText(
-                canvasId, nodeId, requestId, "lease-token-1", resourceId, "text", ""));
+                canvasId, nodeId, requestId, LEASE, resourceId, "text", ""));
   }
 
   private CanvasResource materialize() {
@@ -258,7 +258,7 @@ class CanvasBlobResourceMaterializerTest {
         canvasId,
         nodeId,
         requestId,
-        "lease-token-1",
+        LEASE,
         resourceId,
         "output.bin",
         new ByteArrayInputStream(new byte[] {1}));

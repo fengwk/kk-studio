@@ -43,7 +43,7 @@ class CanvasFunctionSubmitRecoveryTest extends CanvasFunctionRuntimeTestSupport 
     assertEquals(1, pinRepository.findByRun(canvasId, targetNodeId, ready.requestId()).size());
 
     // 2. Worker 认领 Run
-    ClaimedRun claim = workStore.claimNext(Duration.ofSeconds(30), "worker-1").orElseThrow();
+    ClaimedRun claim = workStore.claimNext(Duration.ofSeconds(30), UUID.randomUUID()).orElseThrow();
     CanvasFunctionFrozenRun frozen = decode(claim.run());
 
     // 3. beginSubmit 持久化提交意图 (SUBMITTING)
@@ -93,7 +93,7 @@ class CanvasFunctionSubmitRecoveryTest extends CanvasFunctionRuntimeTestSupport 
     UUID targetNodeId = addFunctionNode(canvasId, "target", configWithReference(sourceNodeId));
     addBlobResource(canvasId, sourceNodeId, 0, UUID.randomUUID());
 
-    ClaimedRun claim = claimStartedRun(canvasId, targetNodeId, REQUEST_1, "worker-submitting");
+    ClaimedRun claim = claimStartedRun(canvasId, targetNodeId, REQUEST_1, UUID.randomUUID());
     CanvasFunctionFrozenRun frozen = decode(claim.run());
     CanvasResource target =
         materializeTarget(canvasId, targetNodeId, frozen.requestId(), frozen.output(0));
@@ -153,7 +153,7 @@ class CanvasFunctionSubmitRecoveryTest extends CanvasFunctionRuntimeTestSupport 
 
     // 再次领取执行：已处于 SUBMITTED，直接 execute 物化并 completeSuccess
     ClaimedRun resumedClaim =
-        workStore.claimNext(Duration.ofSeconds(30), "worker-resumed").orElseThrow();
+        workStore.claimNext(Duration.ofSeconds(30), UUID.randomUUID()).orElseThrow();
     assertTrue(
         runtimeTransactions.completeSuccess(
             decode(resumedClaim.run()),
@@ -174,7 +174,7 @@ class CanvasFunctionSubmitRecoveryTest extends CanvasFunctionRuntimeTestSupport 
     addBlobResource(canvasId, sourceNodeId, 0, UUID.randomUUID());
 
     // 1. 测试 UNKNOWN -> FAILED
-    ClaimedRun claim1 = claimStartedRun(canvasId, targetNodeId, REQUEST_1, "worker-failed");
+    ClaimedRun claim1 = claimStartedRun(canvasId, targetNodeId, REQUEST_1, UUID.randomUUID());
     CanvasFunctionFrozenRun frozen1 = decode(claim1.run());
     CanvasResource target1 =
         materializeTarget(canvasId, targetNodeId, frozen1.requestId(), frozen1.output(0));
@@ -211,7 +211,7 @@ class CanvasFunctionSubmitRecoveryTest extends CanvasFunctionRuntimeTestSupport 
     // 2. 测试 UNKNOWN -> CANCELLED
     CanvasFunctionRun replacement = startRun(canvasId, targetNodeId, REQUEST_2).run();
     ClaimedRun claim2 =
-        workStore.claimNext(Duration.ofSeconds(30), "worker-cancelled").orElseThrow();
+        workStore.claimNext(Duration.ofSeconds(30), UUID.randomUUID()).orElseThrow();
     CanvasFunctionFrozenRun frozen2 = decode(claim2.run());
     CanvasResource target2 =
         materializeTarget(canvasId, targetNodeId, frozen2.requestId(), frozen2.output(0));
@@ -249,7 +249,7 @@ class CanvasFunctionSubmitRecoveryTest extends CanvasFunctionRuntimeTestSupport 
   void checkpointRollbackLeavesRunAndVersionUntouched() {
     UUID canvasId = addDocument();
     UUID nodeId = addFunctionNode(canvasId, "output", configWithoutReferences());
-    ClaimedRun claim = claimStartedRun(canvasId, nodeId, REQUEST_1, "foundation-rollback");
+    ClaimedRun claim = claimStartedRun(canvasId, nodeId, REQUEST_1, UUID.randomUUID());
     long versionAfterStart = version(canvasId);
 
     TransactionTemplate template = new TransactionTemplate(transactionManager);
@@ -279,7 +279,7 @@ class CanvasFunctionSubmitRecoveryTest extends CanvasFunctionRuntimeTestSupport 
   void checkpointAndFailureRequireTheCurrentLease() {
     UUID canvasId = addDocument();
     UUID nodeId = addFunctionNode(canvasId, "output", configWithoutReferences());
-    ClaimedRun claim = claimStartedRun(canvasId, nodeId, REQUEST_1, "foundation-fencing");
+    ClaimedRun claim = claimStartedRun(canvasId, nodeId, REQUEST_1, UUID.randomUUID());
 
     runtimeTransactions.checkpoint(
         canvasId, nodeId, REQUEST_1, claim.leaseToken(), "SUBMITTED", Map.of("jobId", "job"));
@@ -288,8 +288,10 @@ class CanvasFunctionSubmitRecoveryTest extends CanvasFunctionRuntimeTestSupport 
     assertThrows(
         CanvasFunctionInternalCancellation.class,
         () ->
-            runtimeTransactions.checkpoint(canvasId, nodeId, REQUEST_1, "stale", "LATE", Map.of()));
-    assertFalse(runtimeTransactions.failIfRunning(nodeId, REQUEST_1, "stale", "ignored failure"));
+            runtimeTransactions.checkpoint(
+                canvasId, nodeId, REQUEST_1, UUID.randomUUID(), "LATE", Map.of()));
+    assertFalse(
+        runtimeTransactions.failIfRunning(nodeId, REQUEST_1, UUID.randomUUID(), "ignored failure"));
     assertTrue(
         runtimeTransactions.failIfRunning(nodeId, REQUEST_1, claim.leaseToken(), "safe failure"));
     CanvasFunctionRun failed = runRepository.findByNodeId(nodeId).orElseThrow();
@@ -304,7 +306,7 @@ class CanvasFunctionSubmitRecoveryTest extends CanvasFunctionRuntimeTestSupport 
   void checkpointCancelsAfterAggregateDisappears() {
     UUID canvasId = addDocument();
     UUID nodeId = addFunctionNode(canvasId, "output", configWithoutReferences());
-    ClaimedRun claim = claimStartedRun(canvasId, nodeId, REQUEST_1, "foundation-delete-fence");
+    ClaimedRun claim = claimStartedRun(canvasId, nodeId, REQUEST_1, UUID.randomUUID());
     jdbc.update("delete from canvas_function_resource_pin where node_id = ?", nodeId);
     jdbc.update("delete from canvas_function_run where node_id = ?", nodeId);
     jdbc.update("delete from canvas_node where id = ?", nodeId);

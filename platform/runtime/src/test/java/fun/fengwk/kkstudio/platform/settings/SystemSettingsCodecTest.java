@@ -34,9 +34,9 @@ class SystemSettingsCodecTest {
 
   @Test
   void canonicalRoundTripIsIdentity() {
-    String canonical = codec.encode(SystemSettings.DEFAULT);
+    String canonical = codec.encode(SystemSettingsTestFixture.DEFAULT);
     SystemSettings decoded = codec.decode(canonical);
-    assertEquals(SystemSettings.DEFAULT, decoded);
+    assertEquals(SystemSettingsTestFixture.DEFAULT, decoded);
     // canonical 编码是幂等的：重新编码已解码的聚合产出相同字节。
     assertEquals(canonical, codec.encode(decoded));
   }
@@ -44,17 +44,17 @@ class SystemSettingsCodecTest {
   @Test
   void networkRoundTripsAndRejectsIncompleteOrNonTextCanonicalFields() throws Exception {
     // proxyUrl 可省略/null；noProxyHosts 必须存在且为字符串，空字符串保留。
-    SystemSettingsSectionsDTO dto = codec.toSections(SystemSettings.DEFAULT);
+    SystemSettingsSectionsDTO dto = codec.toSections(SystemSettingsTestFixture.DEFAULT);
     dto.getNetwork().setProxyUrl("http://proxy:3128");
     dto.getNetwork().setNoProxyHosts("");
     SystemSettings settings = codec.fromDto(dto);
     assertEquals(dto, codec.toSections(codec.decode(codec.encode(settings))));
     assertEquals("", settings.network().noProxyHosts());
 
-    ObjectNode root = (ObjectNode) mapper.readTree(codec.encode(SystemSettings.DEFAULT));
+    ObjectNode root = (ObjectNode) mapper.readTree(codec.encode(SystemSettingsTestFixture.DEFAULT));
     ObjectNode network = (ObjectNode) root.get("network");
     network.putNull("proxyUrl");
-    assertEquals(SystemSettings.DEFAULT, codec.decode(root.toString()));
+    assertEquals(SystemSettingsTestFixture.DEFAULT, codec.decode(root.toString()));
     network.remove("noProxyHosts");
     assertThrows(IllegalStateException.class, () -> codec.decode(root.toString()));
     network.putNull("noProxyHosts");
@@ -76,7 +76,7 @@ class SystemSettingsCodecTest {
   @Test
   void networkDtoRequiresSectionAndBypassWithoutDefaulting() {
     // 完整 PUT 不接受缺 section / 缺 required text；proxyUrl null 与 noProxyHosts 空串合法。
-    SystemSettingsSectionsDTO dto = codec.toSections(SystemSettings.DEFAULT);
+    SystemSettingsSectionsDTO dto = codec.toSections(SystemSettingsTestFixture.DEFAULT);
     dto.getNetwork().setNoProxyHosts(null);
     assertEquals(
         "network.noProxyHosts is required",
@@ -89,7 +89,7 @@ class SystemSettingsCodecTest {
 
   @Test
   void canonicalJsonIsSortedAndOmitsNulls() {
-    String canonical = codec.encode(SystemSettings.DEFAULT);
+    String canonical = codec.encode(SystemSettingsTestFixture.DEFAULT);
     // 六个 section 按字母序输出。
     int advanced = canonical.indexOf("\"advanced\"");
     int aiRuntime = canonical.indexOf("\"aiRuntime\"");
@@ -113,10 +113,10 @@ class SystemSettingsCodecTest {
 
   @Test
   void decodingDoesNotDependOnObjectKeyOrdering() throws Exception {
-    String canonical = codec.encode(SystemSettings.DEFAULT);
+    String canonical = codec.encode(SystemSettingsTestFixture.DEFAULT);
     // 反转六个 section 的声明顺序，解码结果必须与顺序无关。
     String reordered = reverseTopLevelKeys(canonical);
-    assertEquals(SystemSettings.DEFAULT, codec.decode(reordered));
+    assertEquals(SystemSettingsTestFixture.DEFAULT, codec.decode(reordered));
   }
 
   @Test
@@ -152,7 +152,7 @@ class SystemSettingsCodecTest {
 
   @Test
   void rejectsUnknownFieldsAndInvalidShapesInStoredJson() {
-    String canonical = codec.encode(SystemSettings.DEFAULT);
+    String canonical = codec.encode(SystemSettingsTestFixture.DEFAULT);
     assertThrows(
         IllegalStateException.class,
         () -> codec.decode(canonical.replace(",\"aiRuntime\"", ",\"unknown\":1,\"aiRuntime\"")),
@@ -188,7 +188,7 @@ class SystemSettingsCodecTest {
   @Test
   void rejectsDuplicateFieldsInStoredJson() {
     // 存储边界自身拒绝重复字段：同一字段出现两次时无法判断哪份值生效，属损坏数据；不依赖 Web 请求解析器的严格性。
-    String canonical = codec.encode(SystemSettings.DEFAULT);
+    String canonical = codec.encode(SystemSettingsTestFixture.DEFAULT);
     assertThrows(
         IllegalStateException.class,
         () -> codec.decode(canonical.replace("\"aiRuntime\"", "\"aiRuntime\":{},\"aiRuntime\"")),
@@ -205,7 +205,7 @@ class SystemSettingsCodecTest {
   @Test
   void rejectsMissingRequiredPrimitiveCreatorProperties() throws Exception {
     // canonical 中删除 required primitive 后解码必须失败，而不是静默回退到 false/0（损坏 JSON 的典型形态）。
-    String canonical = codec.encode(SystemSettings.DEFAULT);
+    String canonical = codec.encode(SystemSettingsTestFixture.DEFAULT);
     assertThrows(
         IllegalStateException.class,
         () -> codec.decode(withoutAiRuntimeField(canonical, "compactionKeepRecentTokens")),
@@ -219,7 +219,7 @@ class SystemSettingsCodecTest {
   @Test
   void rejectsNullRequiredPrimitiveCreatorProperties() throws Exception {
     // 显式 null 的 required primitive 解码必须失败；null 引用字段是合法省略/未配置语义，保持可解码。
-    String canonical = codec.encode(SystemSettings.DEFAULT);
+    String canonical = codec.encode(SystemSettingsTestFixture.DEFAULT);
     assertThrows(
         IllegalStateException.class,
         () ->
@@ -235,7 +235,7 @@ class SystemSettingsCodecTest {
   @Test
   void rejectsScalarCoercionFromStringFloatAndBooleanInStoredJson() throws Exception {
     // 数值字段只接受对应 JSON 数值：string/浮点/布尔标量（jackson 默认强制转换）在存储层一律拒绝。
-    String canonical = codec.encode(SystemSettings.DEFAULT);
+    String canonical = codec.encode(SystemSettingsTestFixture.DEFAULT);
     assertThrows(
         IllegalStateException.class,
         () ->
@@ -265,12 +265,12 @@ class SystemSettingsCodecTest {
     // 且重编码保持幂等。
     SystemSettings settings =
         new SystemSettings(
-            SystemSettings.DEFAULT.tool(),
-            SystemSettings.DEFAULT.aiRuntime(),
-            SystemSettings.DEFAULT.environment(),
+            SystemSettingsTestFixture.DEFAULT.tool(),
+            SystemSettingsTestFixture.DEFAULT.aiRuntime(),
+            SystemSettingsTestFixture.DEFAULT.environment(),
             new SystemSettings.Network(null, "localhost,127.*,::1"),
-            SystemSettings.DEFAULT.storageMedia(),
-            SystemSettings.DEFAULT.advanced());
+            SystemSettingsTestFixture.DEFAULT.storageMedia(),
+            SystemSettingsTestFixture.DEFAULT.advanced());
     String canonical = codec.encode(settings);
     assertTrue(!canonical.contains("proxyUrl"), canonical);
     assertEquals(settings, codec.decode(canonical));
@@ -280,21 +280,22 @@ class SystemSettingsCodecTest {
   @Test
   void explicitNullNullableReferencesStillDecode() throws Exception {
     // 显式 null 的 nullable 引用（语义等于 canonical 省略）必须仍可解码为同一聚合。
-    ObjectNode root = (ObjectNode) mapper.readTree(codec.encode(SystemSettings.DEFAULT));
+    ObjectNode root = (ObjectNode) mapper.readTree(codec.encode(SystemSettingsTestFixture.DEFAULT));
     ((ObjectNode) root.get("network")).set("proxyUrl", mapper.nullNode());
-    assertEquals(SystemSettings.DEFAULT, codec.decode(mapper.writeValueAsString(root)));
+    assertEquals(SystemSettingsTestFixture.DEFAULT, codec.decode(mapper.writeValueAsString(root)));
   }
 
   @Test
   void rejectsNonCanonicalEnumValues() throws Exception {
-    ObjectNode invalidStrategy = (ObjectNode) mapper.readTree(codec.encode(SystemSettings.DEFAULT));
+    ObjectNode invalidStrategy =
+        (ObjectNode) mapper.readTree(codec.encode(SystemSettingsTestFixture.DEFAULT));
     ((ObjectNode) invalidStrategy.get("aiRuntime")).put("retryBackoffStrategy", "exponential");
     assertThrows(
         IllegalStateException.class,
         () -> codec.decode(mapper.writeValueAsString(invalidStrategy)));
 
     ObjectNode invalidPermission =
-        (ObjectNode) mapper.readTree(codec.encode(SystemSettings.DEFAULT));
+        (ObjectNode) mapper.readTree(codec.encode(SystemSettingsTestFixture.DEFAULT));
     ObjectNode firstRule =
         (ObjectNode) invalidPermission.path("tool").path("permission").path("write").get(0);
     firstRule.put("action", "ASK");
@@ -306,7 +307,7 @@ class SystemSettingsCodecTest {
   @Test
   void rejectsForbiddenPermissionPatternsAtSaveValidation() {
     // 领域构造（fromDto 的必经路径）在持久化前拒绝 negation 形态；已构造的合法聚合不可能携带非法 pattern。
-    SystemSettingsSectionsDTO sections = codec.toSections(SystemSettings.DEFAULT);
+    SystemSettingsSectionsDTO sections = codec.toSections(SystemSettingsTestFixture.DEFAULT);
     sections
         .getTool()
         .getPermission()
@@ -325,7 +326,7 @@ class SystemSettingsCodecTest {
   @Test
   void acceptsExactWildcardAndValidToolNamesAtDtoBoundary() {
     // DTO 允许精确 wildcard 与合法模型可见工具名（含大小写混合，与 ToolDescriptor.isValidName 完全一致）。
-    SystemSettingsSectionsDTO sections = codec.toSections(SystemSettings.DEFAULT);
+    SystemSettingsSectionsDTO sections = codec.toSections(SystemSettingsTestFixture.DEFAULT);
     for (String key : List.of("*", "read", "mcp_server_echo", "Write")) {
       SystemSettingsToolDTO.PermissionRuleDTO rule = new SystemSettingsToolDTO.PermissionRuleDTO();
       rule.setPattern("*");
@@ -339,7 +340,7 @@ class SystemSettingsCodecTest {
   void rejectsNonCanonicalPermissionKeysAtDtoBoundary() {
     // DTO 仍使用 String key，但保存边界必须只接受精确 wildcard 或合法模型可见工具名。
     for (String key : List.of("1write", "_write", " write", "write ")) {
-      SystemSettingsSectionsDTO sections = codec.toSections(SystemSettings.DEFAULT);
+      SystemSettingsSectionsDTO sections = codec.toSections(SystemSettingsTestFixture.DEFAULT);
       SystemSettingsToolDTO.PermissionRuleDTO rule = new SystemSettingsToolDTO.PermissionRuleDTO();
       rule.setPattern("*");
       rule.setAction("ask");
@@ -347,7 +348,7 @@ class SystemSettingsCodecTest {
       assertThrows(IllegalArgumentException.class, () -> codec.fromDto(sections), key);
     }
 
-    SystemSettingsSectionsDTO sections = codec.toSections(SystemSettings.DEFAULT);
+    SystemSettingsSectionsDTO sections = codec.toSections(SystemSettingsTestFixture.DEFAULT);
     sections
         .getTool()
         .getPermission()
@@ -360,9 +361,9 @@ class SystemSettingsCodecTest {
 
   @Test
   void fromDtoRequiresEverySectionAndField() {
-    SystemSettingsSectionsDTO sections = codec.toSections(SystemSettings.DEFAULT);
+    SystemSettingsSectionsDTO sections = codec.toSections(SystemSettingsTestFixture.DEFAULT);
     SystemSettingsToolDTO tool = sections.getTool();
-    assertEquals(SystemSettings.DEFAULT, codec.fromDto(sections));
+    assertEquals(SystemSettingsTestFixture.DEFAULT, codec.fromDto(sections));
 
     sections.setTool(null);
     assertThrows(IllegalArgumentException.class, () -> codec.fromDto(sections));
@@ -384,12 +385,12 @@ class SystemSettingsCodecTest {
         missingSection.getMessage().contains("network is required"), missingSection.getMessage());
     sections.setNetwork(network);
     assertThrows(IllegalArgumentException.class, () -> codec.fromDto(null));
-    assertEquals(SystemSettings.DEFAULT, codec.fromDto(sections));
+    assertEquals(SystemSettingsTestFixture.DEFAULT, codec.fromDto(sections));
   }
 
   @Test
   void fromDtoRejectsInvalidValuesWithFieldQualifiedMessages() {
-    SystemSettingsSectionsDTO sections = codec.toSections(SystemSettings.DEFAULT);
+    SystemSettingsSectionsDTO sections = codec.toSections(SystemSettingsTestFixture.DEFAULT);
     sections.getAdvanced().setProcessorHeartbeatIntervalMillis(60_000L);
     IllegalArgumentException error =
         assertThrows(IllegalArgumentException.class, () -> codec.fromDto(sections));
@@ -397,15 +398,15 @@ class SystemSettingsCodecTest {
   }
 
   private SystemSettings withToolPermission(Map<String, List<PermissionRule>> permission) {
-    SystemSettings.Tool base = SystemSettings.DEFAULT.tool();
+    SystemSettings.Tool base = SystemSettingsTestFixture.DEFAULT.tool();
     return new SystemSettings(
         new SystemSettings.Tool(
             permission, base.modelGatewayBusyRetryMillis(), base.toolGatewayOverloadRetryMillis()),
-        SystemSettings.DEFAULT.aiRuntime(),
-        SystemSettings.DEFAULT.environment(),
-        SystemSettings.DEFAULT.network(),
-        SystemSettings.DEFAULT.storageMedia(),
-        SystemSettings.DEFAULT.advanced());
+        SystemSettingsTestFixture.DEFAULT.aiRuntime(),
+        SystemSettingsTestFixture.DEFAULT.environment(),
+        SystemSettingsTestFixture.DEFAULT.network(),
+        SystemSettingsTestFixture.DEFAULT.storageMedia(),
+        SystemSettingsTestFixture.DEFAULT.advanced());
   }
 
   /** 反转顶层七个 section 的声明顺序（保持 JSON 合法），验证解码不依赖键序。 */
@@ -449,7 +450,7 @@ class SystemSettingsCodecTest {
    */
   @Test
   void canonicalProfileKeepsDurationsNumericAndStillRejectsStringCoercion() throws Exception {
-    String canonical = codec.encode(SystemSettings.DEFAULT);
+    String canonical = codec.encode(SystemSettingsTestFixture.DEFAULT);
     assertFalse(canonical.contains("\"modelGatewayBusyRetryMillis\":\""));
     JsonNode tool = mapper.readTree(canonical).get("tool");
     assertTrue(tool.get("modelGatewayBusyRetryMillis").isIntegralNumber());

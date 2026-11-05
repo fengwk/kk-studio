@@ -25,7 +25,7 @@ class SystemSettingsTest {
 
   @Test
   void defaultsMatchTheSpecification() {
-    SystemSettings defaults = SystemSettings.DEFAULT;
+    SystemSettings defaults = SystemSettingsTestFixture.DEFAULT;
 
     assertEquals(
         List.of(new PermissionRule("*", PermissionAction.ASK)),
@@ -126,7 +126,7 @@ class SystemSettingsTest {
 
   @Test
   void rejectsRetryMaxDelayBelowBaseDelay() {
-    SystemSettings.AiRuntime base = SystemSettings.DEFAULT.aiRuntime();
+    SystemSettings.AiRuntime base = SystemSettingsTestFixture.DEFAULT.aiRuntime();
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -145,7 +145,7 @@ class SystemSettingsTest {
 
   @Test
   void rejectsInvalidSubagentBudgets() {
-    SystemSettings.AiRuntime base = SystemSettings.DEFAULT.aiRuntime();
+    SystemSettings.AiRuntime base = SystemSettingsTestFixture.DEFAULT.aiRuntime();
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -194,12 +194,12 @@ class SystemSettingsTest {
   void defaultHttpRetryListMatchesDocumentedDefault() {
     assertEquals(
         List.of(408, 429, 500, 502, 503, 504),
-        SystemSettings.AiRuntime.DEFAULT.modelHttpRetryStatusCodes());
+        SystemSettingsTestFixture.AI_RUNTIME.modelHttpRetryStatusCodes());
   }
 
   @Test
   void rejectsInvalidHttpRetryStatusList() {
-    SystemSettings.AiRuntime base = SystemSettings.DEFAULT.aiRuntime();
+    SystemSettings.AiRuntime base = SystemSettingsTestFixture.DEFAULT.aiRuntime();
     // 空列表合法：明确表示不自动重试任何 HTTP 错误。
     assertEquals(
         List.of(),
@@ -236,7 +236,7 @@ class SystemSettingsTest {
 
   @Test
   void rejectsProcessorHeartbeatNotBelowLease() {
-    SystemSettings.Advanced base = SystemSettings.DEFAULT.advanced();
+    SystemSettings.Advanced base = SystemSettingsTestFixture.DEFAULT.advanced();
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -258,7 +258,7 @@ class SystemSettingsTest {
 
   @Test
   void rejectsS3DefaultExpiryAboveMaxAndOutOfRangeMediaBudget() {
-    SystemSettings.StorageMedia base = SystemSettings.DEFAULT.storageMedia();
+    SystemSettings.StorageMedia base = SystemSettingsTestFixture.DEFAULT.storageMedia();
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -299,7 +299,7 @@ class SystemSettingsTest {
 
   @Test
   void rejectsNonPositiveTemporaryResourcePolicy() {
-    SystemSettings.StorageMedia base = SystemSettings.DEFAULT.storageMedia();
+    SystemSettings.StorageMedia base = SystemSettingsTestFixture.DEFAULT.storageMedia();
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -387,7 +387,7 @@ class SystemSettingsTest {
   private static SystemSettings.Tool toolWithRules(String toolId, PermissionRule... rules) {
     Map<String, List<PermissionRule>> permission = new LinkedHashMap<>();
     permission.put(toolId, List.of(rules));
-    SystemSettings.Tool base = SystemSettings.DEFAULT.tool();
+    SystemSettings.Tool base = SystemSettingsTestFixture.DEFAULT.tool();
     return new SystemSettings.Tool(
         permission, base.modelGatewayBusyRetryMillis(), base.toolGatewayOverloadRetryMillis());
   }

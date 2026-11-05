@@ -9,8 +9,8 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import fun.fengwk.kkstudio.harness.spi.ToolResultHistoryMaterializer;
 import fun.fengwk.kkstudio.platform.harness.model.ProviderResourceMaterializer;
 import fun.fengwk.kkstudio.platform.harness.tool.gateway.GlobalStorageToolResultHistoryMaterializer;
-import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
+import fun.fengwk.kkstudio.platform.settings.SystemSettingsTestFixture;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
@@ -28,7 +28,8 @@ class HarnessResourceConfigurationTest {
         .withBean(StorageUploadService.class, () -> mock(StorageUploadService.class))
         .withBean(SessionBlobRefManager.class, () -> mock(SessionBlobRefManager.class))
         .withBean(
-            SystemSettingsSnapshot.class, () -> new SystemSettingsSnapshot(SystemSettings.DEFAULT))
+            SystemSettingsSnapshot.class,
+            () -> new SystemSettingsSnapshot(SystemSettingsTestFixture.DEFAULT))
         .run(
             context -> {
               assertThat(context)

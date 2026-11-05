@@ -223,7 +223,7 @@ class PostgresqlExecutionExitStopReceiptTest {
               targetThreadId,
               tx.nextId(),
               1,
-              "late-exit-lease",
+              UUID.randomUUID(),
               ExecutionExitKind.DRIVER,
               null);
           return new Tree(sessionId, parentThreadId, targetThreadId, joinId, executionId);

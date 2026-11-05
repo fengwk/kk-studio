@@ -17,7 +17,7 @@ public record ExecutionExitFact(
     UUID threadId,
     UUID invocationId,
     int attempt,
-    String ownerLeaseToken,
+    UUID ownerLeaseToken,
     ExecutionExitKind kind,
     UUID parentExecutionId,
     EnvironmentId environmentId,
@@ -180,11 +180,7 @@ public record ExecutionExitFact(
         abandonedAt);
   }
 
-  private static String requireLeaseToken(String token) {
-    Objects.requireNonNull(token, "ownerLeaseToken");
-    if (token.isBlank() || !token.equals(token.strip()) || token.length() > 128) {
-      throw new IllegalArgumentException("ownerLeaseToken must be a canonical lease token");
-    }
-    return token;
+  private static UUID requireLeaseToken(UUID token) {
+    return Objects.requireNonNull(token, "ownerLeaseToken");
   }
 }

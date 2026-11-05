@@ -23,6 +23,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessExecutionAdmissionProperties;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
+import fun.fengwk.kkstudio.platform.settings.SystemSettingsTestFixture;
 
 import java.time.Duration;
 import java.util.List;
@@ -40,16 +41,16 @@ class BuiltinHarnessContributorConfigurationTest {
     // 使用互不相同的非默认值，确保 per-parent 与 total 上限不会在装配时丢失或互换。
     SystemSettings.AiRuntime aiRuntime =
         new SystemSettings.AiRuntime(
-            SystemSettings.AiRuntime.DEFAULT.retryMaxRetries(),
-            SystemSettings.AiRuntime.DEFAULT.retryBackoffStrategy(),
-            SystemSettings.AiRuntime.DEFAULT.retryBaseDelayMillis(),
-            SystemSettings.AiRuntime.DEFAULT.retryMaxDelayMillis(),
-            SystemSettings.AiRuntime.DEFAULT.compactionKeepRecentTokens(),
+            SystemSettingsTestFixture.AI_RUNTIME.retryMaxRetries(),
+            SystemSettingsTestFixture.AI_RUNTIME.retryBackoffStrategy(),
+            SystemSettingsTestFixture.AI_RUNTIME.retryBaseDelayMillis(),
+            SystemSettingsTestFixture.AI_RUNTIME.retryMaxDelayMillis(),
+            SystemSettingsTestFixture.AI_RUNTIME.compactionKeepRecentTokens(),
             4,
             7,
             13,
             89,
-            SystemSettings.AiRuntime.DEFAULT.modelHttpRetryStatusCodes());
+            SystemSettingsTestFixture.AI_RUNTIME.modelHttpRetryStatusCodes());
 
     SubagentConfig config =
         new BuiltinHarnessContributorConfiguration()
@@ -116,11 +117,11 @@ class BuiltinHarnessContributorConfigurationTest {
 
   private static SystemSettings customSettings(SystemSettings.AiRuntime aiRuntime) {
     return new SystemSettings(
-        SystemSettings.Tool.DEFAULT,
+        SystemSettingsTestFixture.TOOL,
         aiRuntime,
-        SystemSettings.Environment.DEFAULT,
-        SystemSettings.Network.DEFAULT,
-        SystemSettings.StorageMedia.DEFAULT,
-        SystemSettings.Advanced.DEFAULT);
+        SystemSettingsTestFixture.ENVIRONMENT,
+        SystemSettingsTestFixture.NETWORK,
+        SystemSettingsTestFixture.STORAGE_MEDIA,
+        SystemSettingsTestFixture.ADVANCED);
   }
 }

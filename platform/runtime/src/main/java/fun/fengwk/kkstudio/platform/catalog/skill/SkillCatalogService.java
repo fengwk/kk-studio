@@ -203,8 +203,8 @@ public class SkillCatalogService {
                     created.skills(),
                     created.publishedAt(),
                     created.version(),
-                    created.createTime(),
-                    created.updateTime(),
+                    created.createdAt(),
+                    created.updatedAt(),
                     created.gitSource());
             try {
               if (!skillPackageRepository.insertPackage(withArtifact)) {
@@ -309,8 +309,8 @@ public class SkillCatalogService {
                     archive.skills(),
                     Instant.now(),
                     locked.version(),
-                    locked.createTime(),
-                    locked.updateTime(),
+                    locked.createdAt(),
+                    locked.updatedAt(),
                     locked.gitSource());
             if (!skillPackageRepository.updatePublication(published, expected)) {
               throw conflictOrMissing(packageName, rawExpected);
@@ -508,8 +508,8 @@ public class SkillCatalogService {
                       skills,
                       Instant.now(),
                       locked.version(),
-                      locked.createTime(),
-                      locked.updateTime(),
+                      locked.createdAt(),
+                      locked.updatedAt(),
                       null);
               if (!skillPackageRepository.updatePublication(published, expected)) {
                 throw conflictOrMissing(packageName, rawExpected);
@@ -604,8 +604,8 @@ public class SkillCatalogService {
                       archive.skills(),
                       Instant.now(),
                       current.version(),
-                      current.createTime(),
-                      current.updateTime(),
+                      current.createdAt(),
+                      current.updatedAt(),
                       current.gitSource());
               if (!skillPackageRepository.updatePublication(published, current.version())) {
                 throw conflictOrMissing(name, CatalogVersions.format(current.version()));
@@ -1002,8 +1002,8 @@ public class SkillCatalogService {
     dto.setSource(skillPackage.isGit() ? SOURCE_GIT : SOURCE_UPLOAD);
     dto.setUpdateAvailable(updateAvailable(skillPackage));
     dto.setVersion(CatalogVersions.format(skillPackage.version()));
-    dto.setCreateTime(skillPackage.createTime());
-    dto.setUpdateTime(skillPackage.updateTime());
+    dto.setCreateTime(skillPackage.createdAt());
+    dto.setUpdateTime(skillPackage.updatedAt());
     return dto;
   }
 
@@ -1039,8 +1039,8 @@ public class SkillCatalogService {
     dto.setArtifactSha256(artifact.getSha256());
     dto.setArtifactSizeBytes(artifact.getSizeBytes());
     dto.setVersion(CatalogVersions.format(skillPackage.version()));
-    dto.setCreateTime(skillPackage.createTime());
-    dto.setUpdateTime(skillPackage.updateTime());
+    dto.setCreateTime(skillPackage.createdAt());
+    dto.setUpdateTime(skillPackage.updatedAt());
     return dto;
   }
 

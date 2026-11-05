@@ -4,6 +4,7 @@ import fun.fengwk.kkstudio.platform.plugin.PluginCredentialStatus;
 
 import java.time.Instant;
 import java.util.Objects;
+import java.util.UUID;
 
 /** {@code plugin_credential} 的一行；{@code payloadJson} 是秘密，任何投影都不得返回。 */
 public record PluginCredentialRow(
@@ -15,7 +16,7 @@ public record PluginCredentialRow(
     PluginCredentialStatus status,
     Instant lastRefreshedAt,
     String lastRefreshError,
-    String refreshLeaseToken,
+    UUID refreshLeaseToken,
     Instant refreshLeaseUntil,
     long version) {
 

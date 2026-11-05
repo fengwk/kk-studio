@@ -41,6 +41,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -90,7 +91,7 @@ class ToolProcessorPreflightTest {
             fixture.store,
             fixture.toolInvocationId,
             fixture.clock.instant(),
-            "token-A",
+            token("A"),
             Duration.ofSeconds(60));
     AtomicReference<ProcessResult> result = new AtomicReference<>();
     Thread threadA = new Thread(() -> result.set(processor.process(claimA)));
@@ -104,7 +105,7 @@ class ToolProcessorPreflightTest {
               fixture.store,
               fixture.toolInvocationId,
               fixture.clock.instant(),
-              "token-B",
+              token("B"),
               Duration.ofSeconds(60));
       fixture.gateway.queuePreflightAllow();
       ToolProcessorTestSupport.FakeRun run =
@@ -182,7 +183,7 @@ class ToolProcessorPreflightTest {
     assertTrue(fixture.processor.hasActiveExecution());
     Work toolWork = ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId);
     assertNotNull(toolWork);
-    assertEquals("token-" + fixture.toolInvocationId, toolWork.leaseToken());
+    assertEquals(ToolProcessorTestSupport.token(fixture.toolInvocationId), toolWork.leaseToken());
   }
 
   /**
@@ -539,7 +540,7 @@ class ToolProcessorPreflightTest {
             fixture.store,
             fixture.toolInvocationId,
             ToolProcessorTestSupport.NOW,
-            "token",
+            token("claim"),
             Duration.ofSeconds(5));
 
     AtomicReference<ProcessResult> result = new AtomicReference<>();
@@ -569,7 +570,7 @@ class ToolProcessorPreflightTest {
             fixture.store,
             fixture.toolInvocationId,
             ToolProcessorTestSupport.NOW,
-            "near-expiry",
+            token("near-expiry"),
             Duration.ofSeconds(1));
     fixture.gateway.queuePreflightAllow();
     fixture.gateway.queueRun(progress -> ToolProcessorTestSupport.blockUntilInterrupted());
@@ -578,7 +579,7 @@ class ToolProcessorPreflightTest {
 
     Work toolWork = ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId);
     assertEquals(ToolProcessorTestSupport.NOW.plusSeconds(30), toolWork.leaseUntil());
-    assertEquals("near-expiry", toolWork.leaseToken());
+    assertEquals(token("near-expiry"), toolWork.leaseToken());
   }
 
   /**
@@ -620,7 +621,7 @@ class ToolProcessorPreflightTest {
     assertFalse(fixture.processor.hasActiveExecution());
     Work toolWork = ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId);
     assertNotNull(toolWork);
-    assertEquals("token-" + fixture.toolInvocationId, toolWork.leaseToken());
+    assertEquals(ToolProcessorTestSupport.token(fixture.toolInvocationId), toolWork.leaseToken());
   }
 
   /** YOLO=true 不改变 WAITING_APPROVAL：已进入审批的 Tool 保留原审批请求，不因打开 YOLO 自动放行（不执行、不 bump version）。 */
@@ -1246,7 +1247,7 @@ class ToolProcessorPreflightTest {
             fixture.store,
             toolInvocationId,
             ToolProcessorTestSupport.NOW,
-            "token-failed",
+            token("failed"),
             Duration.ofSeconds(10));
 
     try {
@@ -1267,7 +1268,7 @@ class ToolProcessorPreflightTest {
       assertEquals(0, thread.version());
       Work claimedWork = ToolProcessorTestSupport.toolWork(fixture.store, toolInvocationId);
       assertNotNull(claimedWork);
-      assertEquals("token-failed", claimedWork.leaseToken());
+      assertEquals(token("failed"), claimedWork.leaseToken());
 
       // 时钟推进到租约过期，验证 Work 可被正常重新 claim
       fixture.clock.advance(Duration.ofSeconds(35));
@@ -1275,7 +1276,7 @@ class ToolProcessorPreflightTest {
           fixture.store.transaction(
               tx ->
                   tx.work()
-                      .claimNext(WorkTargetType.TOOL, "token-new", Duration.ofSeconds(30))
+                      .claimNext(WorkTargetType.TOOL, UUID.randomUUID(), Duration.ofSeconds(30))
                       .isPresent());
       assertTrue(
           reclaimable, "abandoned execution must allow Work to be reclaimed after lease expiry");
@@ -1357,5 +1358,9 @@ class ToolProcessorPreflightTest {
     } catch (IllegalAccessException error) {
       throw new IllegalStateException(error);
     }
+  }
+
+  private static UUID token(String suffix) {
+    return UUID.nameUUIDFromBytes(("tool-preflight-" + suffix).getBytes(StandardCharsets.UTF_8));
   }
 }

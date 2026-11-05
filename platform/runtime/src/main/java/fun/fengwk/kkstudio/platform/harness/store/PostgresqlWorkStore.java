@@ -126,7 +126,7 @@ final class PostgresqlWorkStore implements WorkStore {
 
   @Override
   public Optional<ClaimedWork> claimNext(
-      WorkTargetType targetType, String leaseToken, Duration leaseDuration) {
+      WorkTargetType targetType, UUID leaseToken, Duration leaseDuration) {
     return claimNext(targetType, leaseToken, leaseDuration, null);
   }
 
@@ -137,7 +137,7 @@ final class PostgresqlWorkStore implements WorkStore {
    */
   @Override
   public Optional<ClaimedWork> claimNext(
-      WorkTargetType targetType, String leaseToken, Duration leaseDuration, UUID nodeInstanceId) {
+      WorkTargetType targetType, UUID leaseToken, Duration leaseDuration, UUID nodeInstanceId) {
     tx.checkOpen();
     Objects.requireNonNull(targetType, "targetType");
     HarnessStoreTime.requireWholeMillisecondDuration(leaseDuration, "leaseDuration");

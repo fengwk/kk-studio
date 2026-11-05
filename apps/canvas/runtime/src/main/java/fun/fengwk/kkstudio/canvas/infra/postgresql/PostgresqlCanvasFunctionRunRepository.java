@@ -50,12 +50,12 @@ public class PostgresqlCanvasFunctionRunRepository {
    * 在已持有 document → run 行锁的短事务内检查输出 ownership，包含节点所属 canvas、request、RUNNING 与该 token 的执行租约。
    * 租约必须使用数据库当前时间判定；不得缓存结果或使用事务开始时间。
    */
-  public boolean ownsRunningRequest(UUID canvasId, UUID nodeId, UUID requestId, String leaseToken) {
+  public boolean ownsRunningRequest(UUID canvasId, UUID nodeId, UUID requestId, UUID leaseToken) {
     return runStore.ownsRunningRequest(canvasId, nodeId, requestId, leaseToken);
   }
 
   /** 以数据库时钟判断 {@code leaseToken} 是否仍持有该节点 Run 的执行租约。 */
-  public boolean holdsLease(UUID nodeId, String leaseToken) {
+  public boolean holdsLease(UUID nodeId, UUID leaseToken) {
     return runStore.holdsLease(nodeId, leaseToken);
   }
 
@@ -89,7 +89,7 @@ public class PostgresqlCanvasFunctionRunRepository {
   public boolean checkpoint(
       UUID nodeId,
       UUID requestId,
-      String leaseToken,
+      UUID leaseToken,
       String stateJson,
       String stage,
       Instant updatedAt) {
@@ -106,7 +106,7 @@ public class PostgresqlCanvasFunctionRunRepository {
   }
 
   @Transactional
-  public boolean transitionTerminal(CanvasFunctionRun run, String leaseToken) {
+  public boolean transitionTerminal(CanvasFunctionRun run, UUID leaseToken) {
     if (run.status() == CanvasFunctionRunStatus.READY
         || run.status() == CanvasFunctionRunStatus.RUNNING) {
       throw new IllegalArgumentException("terminal transition requires terminal status");
@@ -120,7 +120,7 @@ public class PostgresqlCanvasFunctionRunRepository {
    * <p>CAS 同时要求 {@code request_id}、{@code status='RUNNING'} 与该 lease token 仍持有未过期的执行租约。
    */
   @Transactional
-  public boolean markUnknown(CanvasFunctionRun run, String leaseToken) {
+  public boolean markUnknown(CanvasFunctionRun run, UUID leaseToken) {
     requireStatus(run, CanvasFunctionRunStatus.UNKNOWN);
     return finishOwned(run.nodeId(), runStore.markUnknown(toData(run), leaseToken));
   }

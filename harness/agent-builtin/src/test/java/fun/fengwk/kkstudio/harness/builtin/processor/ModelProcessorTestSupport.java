@@ -91,6 +91,7 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -808,11 +809,20 @@ abstract class ModelProcessorTestSupport {
         });
   }
 
-  static ClaimedWork claim(HarnessStore store, UUID invocationId) {
-    return claim(store, invocationId, "token-" + invocationId);
+  static UUID token(UUID invocationId) {
+    return token(invocationId, "default");
   }
 
-  static ClaimedWork claim(HarnessStore store, UUID invocationId, String token) {
+  static UUID token(UUID invocationId, String suffix) {
+    return UUID.nameUUIDFromBytes(
+        ("model-" + invocationId + "-" + suffix).getBytes(StandardCharsets.UTF_8));
+  }
+
+  static ClaimedWork claim(HarnessStore store, UUID invocationId) {
+    return claim(store, invocationId, token(invocationId));
+  }
+
+  static ClaimedWork claim(HarnessStore store, UUID invocationId, UUID token) {
     return store
         .transaction(
             tx -> tx.work().claimNext(BuiltinWorkType.MODEL, token, Duration.ofSeconds(60)))

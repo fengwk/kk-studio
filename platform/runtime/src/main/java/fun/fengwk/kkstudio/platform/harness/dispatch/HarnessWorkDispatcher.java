@@ -166,7 +166,7 @@ public final class HarnessWorkDispatcher implements AutoCloseable {
   }
 
   private ClaimedWork claimNext(WorkTargetType type) {
-    String token = UUID.randomUUID().toString();
+    UUID token = UUID.randomUUID();
     return store.transaction(
         tx ->
             tx.work().claimNext(type, token, config.leaseDuration(), nodeInstanceId).orElse(null));

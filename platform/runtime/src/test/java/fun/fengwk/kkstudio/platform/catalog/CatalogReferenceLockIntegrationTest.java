@@ -572,8 +572,8 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
                   skills,
                   Instant.now(),
                   current.version(),
-                  current.createTime(),
-                  current.updateTime(),
+                  current.createdAt(),
+                  current.updatedAt(),
                   current.gitSource());
           assertTrue(skillPackages.updatePublication(updated, current.version()));
         });

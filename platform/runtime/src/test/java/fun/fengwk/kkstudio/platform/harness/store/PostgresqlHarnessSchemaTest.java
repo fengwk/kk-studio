@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.platform.harness.store;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -12,7 +11,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 
-import java.sql.SQLException;
 import java.util.List;
 import java.util.UUID;
 
@@ -134,55 +132,19 @@ class PostgresqlHarnessSchemaTest {
     assertEquals(
         List.of(
             "ck_harness_execution_exit_kind",
-            "ck_harness_execution_exit_kind_state",
             "ck_harness_execution_exit_state",
-            "ck_harness_execution_exit_time",
-            "ck_harness_execution_exit_token"),
+            "ck_harness_execution_exit_time"),
         checks);
 
     UUID executionId = UUID.randomUUID();
     jdbc.update(
         "insert into harness_execution_exit (execution_id, thread_id, invocation_id, attempt,"
             + " owner_lease_token, kind, parent_execution_id, state, registered_at, confirmed_at,"
-            + " abandoned_at) values (?, ?, ?, 1, 'lease-1', 'TOOL', null, 'UNCONFIRMED',"
+            + " abandoned_at) values (?, ?, ?, 1, '00000000-0000-0000-0000-0000000000a3', 'TOOL', null, 'UNCONFIRMED',"
             + " timestamp with time zone '2026-01-01 00:00:00.123+00', null, null)",
         executionId,
         threadId,
         UUID.randomUUID());
-    DataIntegrityViolationException unconfirmedAbandonment =
-        assertThrows(
-            DataIntegrityViolationException.class,
-            () ->
-                jdbc.update(
-                    "update harness_execution_exit set abandoned_at = registered_at"
-                        + " where execution_id = ?",
-                    executionId));
-    assertTrue(unconfirmedAbandonment.getMessage().contains("ck_harness_execution_exit_state"));
-    assertThrows(
-        DataIntegrityViolationException.class,
-        () ->
-            jdbc.update(
-                "update harness_execution_exit set state = 'ABANDONED' where execution_id = ?",
-                executionId));
-
-    jdbc.update(
-        "update harness_execution_exit set state = 'ABANDONED',"
-            + " abandoned_at = registered_at + interval '2 milliseconds' where execution_id = ?",
-        executionId);
-    jdbc.update(
-        "update harness_execution_exit set state = 'STUDIO_EXITED',"
-            + " confirmed_at = registered_at + interval '1 millisecond' where execution_id = ?",
-        executionId);
-    assertTrue(
-        jdbc.queryForObject(
-            """
-            select state = 'STUDIO_EXITED'
-                   and confirmed_at = registered_at + interval '1 millisecond'
-                   and abandoned_at = registered_at + interval '2 milliseconds'
-            from harness_execution_exit where execution_id = ?
-            """,
-            Boolean.class,
-            executionId));
     DataIntegrityViolationException beforeRegistration =
         assertThrows(
             DataIntegrityViolationException.class,
@@ -193,6 +155,15 @@ class PostgresqlHarnessSchemaTest {
                         + " where execution_id = ?",
                     executionId));
     assertTrue(beforeRegistration.getMessage().contains("ck_harness_execution_exit_time"));
+
+    DataIntegrityViolationException unknownKind =
+        assertThrows(
+            DataIntegrityViolationException.class,
+            () ->
+                jdbc.update(
+                    "update harness_execution_exit set kind = 'BOGUS' where execution_id = ?",
+                    executionId));
+    assertTrue(unknownKind.getMessage().contains("ck_harness_execution_exit_kind"));
   }
 
   @Test
@@ -205,40 +176,17 @@ class PostgresqlHarnessSchemaTest {
     jdbc.update(
         "insert into harness_execution_exit (execution_id, thread_id, invocation_id, attempt,"
             + " owner_lease_token, kind, parent_execution_id, state, registered_at, confirmed_at,"
-            + " abandoned_at) values (?, ?, ?, 1, 'lease-agent', 'DRIVER', null, 'UNCONFIRMED',"
+            + " abandoned_at) values (?, ?, ?, 1, '00000000-0000-0000-0000-0000000000a1', 'DRIVER', null, 'UNCONFIRMED',"
             + " timestamp with time zone '2026-01-01 00:00:00.000+00', null, null)",
         agentExecutionId,
         threadId,
         invocationId);
 
-    // DRIVER 支持 STUDIO_EXITED
+    // 数据库只约束 kind/state 枚举与时间顺序；kind/state 配对由应用维护。
     jdbc.update(
         "update harness_execution_exit set state = 'STUDIO_EXITED', confirmed_at = registered_at"
             + " where execution_id = ?",
         agentExecutionId);
-
-    // DRIVER 不支持 REMOTE_ACKNOWLEDGED
-    DataIntegrityViolationException agentAck =
-        assertThrows(
-            DataIntegrityViolationException.class,
-            () ->
-                jdbc.update(
-                    "update harness_execution_exit set state = 'REMOTE_ACKNOWLEDGED'"
-                        + " where execution_id = ?",
-                    agentExecutionId));
-    assertTrue(agentAck.getMessage().contains("ck_harness_execution_exit_kind_state"));
-
-    // DRIVER 不能有 parent_execution_id
-    DataIntegrityViolationException agentWithParent =
-        assertThrows(
-            DataIntegrityViolationException.class,
-            () ->
-                jdbc.update(
-                    "update harness_execution_exit set parent_execution_id = ?"
-                        + " where execution_id = ?",
-                    agentExecutionId,
-                    agentExecutionId));
-    assertTrue(agentWithParent.getMessage().contains("ck_harness_execution_exit_kind"));
 
     // 2. REMOTE 可以以 DRIVER 执行代次为 parent_execution
     UUID envId = UUID.randomUUID();
@@ -251,7 +199,7 @@ class PostgresqlHarnessSchemaTest {
     jdbc.update(
         "insert into harness_execution_exit (execution_id, thread_id, invocation_id, attempt,"
             + " owner_lease_token, kind, parent_execution_id, environment_id, state, registered_at,"
-            + " confirmed_at, abandoned_at) values (?, ?, ?, 1, 'lease-remote', 'REMOTE', ?, ?,"
+            + " confirmed_at, abandoned_at) values (?, ?, ?, 1, '00000000-0000-0000-0000-0000000000a2', 'REMOTE', ?, ?,"
             + " 'REMOTE_ACKNOWLEDGED', timestamp with time zone '2026-01-01 00:00:00.000+00',"
             + " timestamp with time zone '2026-01-01 00:00:00.100+00', null)",
         remoteExecutionId,
@@ -344,8 +292,7 @@ class PostgresqlHarnessSchemaTest {
 
   @Test
   void threadStopReceiptTableStoresRootedReceiptSetOnly() {
-    // 测试意图：验证 harness_thread_stop_receipt 列、集合身份 (root_thread_id, root_stop_request_id) 与 FK
-    // 严格与契约对齐。
+    // 测试意图：验证 harness_thread_stop_receipt 只持久化身份与停止边界，root_stop_request_id 仅用于归组。
     List<String> columns =
         jdbc.queryForList(
             """
@@ -357,16 +304,13 @@ class PostgresqlHarnessSchemaTest {
             String.class);
     assertEquals(
         List.of(
-            "root_thread_id",
             "thread_id",
             "stop_request_id",
             "root_stop_request_id",
             "stopped_turn_end_entry_id",
-            "cancelled_command_count",
-            "cancelled_inputs",
             "created_at"),
         columns);
-    // 根 Thread 与所属 Thread 都必须受 harness_thread 外键约束，terminal Entry 受 harness_entry 外键约束。
+    // 回执只持久化身份与停止边界；root_stop_request_id 只是归组键，没有 root Thread 外键。
     List<String> foreignKeys =
         jdbc.queryForList(
             """
@@ -378,10 +322,7 @@ class PostgresqlHarnessSchemaTest {
             """,
             String.class);
     assertEquals(
-        List.of(
-            "fk_harness_thread_stop_receipt_root_thread",
-            "fk_harness_thread_stop_receipt_thread",
-            "fk_harness_thread_stop_receipt_turn_end"),
+        List.of("fk_harness_thread_stop_receipt_thread", "fk_harness_thread_stop_receipt_turn_end"),
         foreignKeys);
   }
 
@@ -412,7 +353,6 @@ class PostgresqlHarnessSchemaTest {
             "harness_entry.provider_replay_state",
             "harness_thread.constraints",
             "harness_thread_command.payload",
-            "harness_thread_stop_receipt.cancelled_inputs",
             "harness_tool_invocation.approval",
             "harness_tool_invocation.binding",
             "harness_tool_invocation.call",
@@ -440,6 +380,7 @@ class PostgresqlHarnessSchemaTest {
         List.of(
             "idx_harness_entry_parent",
             "idx_harness_entry_session_seq",
+            "idx_harness_execution_exit_invocation",
             "idx_harness_execution_exit_parent",
             "idx_harness_execution_exit_thread",
             "idx_harness_execution_exit_thread_unconfirmed",
@@ -450,7 +391,7 @@ class PostgresqlHarnessSchemaTest {
             "idx_harness_thread_parent",
             "idx_harness_thread_root",
             "idx_harness_thread_session",
-            "idx_harness_thread_stop_receipt_root",
+            "idx_harness_thread_stop_receipt_root_request",
             "idx_harness_tool_invocation_pending",
             "idx_harness_tool_invocation_thread_nonterminal",
             "pk_harness_thread_stop_receipt",
@@ -499,9 +440,12 @@ class PostgresqlHarnessSchemaTest {
     String exitParent = indexDefinition("idx_harness_execution_exit_parent");
     assertTrue(exitParent.contains("(parent_execution_id)"));
     assertTrue(exitParent.contains("WHERE (parent_execution_id IS NOT NULL)"));
-    // Stop 回执集合索引必须按 (root_thread_id, root_stop_request_id) 建键，隔离不同树复用同一请求 UUID。
-    String stopReceiptRoot = indexDefinition("idx_harness_thread_stop_receipt_root");
-    assertTrue(stopReceiptRoot.contains("(root_thread_id, root_stop_request_id)"));
+    // Stop 回执只按 root_stop_request_id 检索；不同树复用同一请求 UUID 由根行 thread_id 隔离。
+    String stopReceiptRoot = indexDefinition("idx_harness_thread_stop_receipt_root_request");
+    assertTrue(stopReceiptRoot.contains("(root_stop_request_id, thread_id)"));
+    assertTrue(
+        indexDefinition("idx_harness_execution_exit_invocation")
+            .contains("(invocation_id, attempt)"));
     // 未收尾 ToolInvocation 的公共查找路径必须只覆盖全部非终态（含人工输入等待），且按 thread_id 建键。
     assertTrue(toolNonterminal.contains("(thread_id)"));
     for (String nonterminal :
@@ -521,20 +465,14 @@ class PostgresqlHarnessSchemaTest {
     }
   }
 
-  /**
-   * 测试意图：真实 PostgreSQL 约束 ck_harness_tool_waiting_input / ck_harness_tool_input_receipt 物理门禁验证。
-   *
-   * <p>台账层的安全边界：等待人工输入必须有 binding 且无 result/error；回答回执只能与 SUCCEEDED + result 同存，且必须是携带非空
-   * submissionId/actor/acceptedAt 的 JSON object。问答与审批互不代替在物理层表现为回执与 approval 是两列。
-   */
+  /** 测试意图：tool 回执只保留 JSON object 形状约束；状态与回执的耦合由应用维护。 */
   @Test
-  void harnessToolInputReceiptConstraintCouplesReceiptToAnsweredSuccessOnly() {
+  void harnessToolInputReceiptKeepsOnlyJsonObjectShape() {
     UUID sessionId = UUID.fromString("00000000-0000-0000-0000-000000000030");
     UUID rootEntryId = UUID.fromString("00000000-0000-0000-0000-000000000031");
     UUID turnStartEntryId = UUID.fromString("00000000-0000-0000-0000-000000000032");
     UUID threadId = UUID.fromString("00000000-0000-0000-0000-000000000033");
     UUID assistantEntryId = UUID.fromString("00000000-0000-0000-0000-000000000034");
-    UUID modelId = UUID.fromString("00000000-0000-0000-0000-000000000035");
     jdbc.update(
         "insert into harness_session (id, name, created_at) values (?, 'session-demo', statement_timestamp())",
         sessionId);
@@ -550,160 +488,40 @@ class PostgresqlHarnessSchemaTest {
         sessionId,
         rootEntryId);
     jdbc.update(
-        "insert into harness_thread (id, session_id, head_entry_id, creation_request_hash, name, root_thread_id, yolo_enabled, spawn_trigger, constraints, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
-            + " values (?, ?, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'thread-demo', ?, false, 'MODEL_TOOL', '{\"maxOutputTokens\":null,\"promptCacheDisabled\":false,\"allowAutoCompaction\":true}'::jsonb, 'RUNNABLE', 0, 1, 0, statement_timestamp(), statement_timestamp())",
+        "insert into harness_thread (id, session_id, head_entry_id, creation_request_hash, name,"
+            + " root_thread_id, yolo_enabled, spawn_trigger, constraints, execution_control,"
+            + " input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+            + " values (?, ?, ?,"
+            + " '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',"
+            + " 'thread-demo', ?, false, 'MODEL_TOOL',"
+            + " '{\"maxOutputTokens\":null,\"promptCacheDisabled\":false,"
+            + "\"allowAutoCompaction\":true}'::jsonb, 'RUNNABLE', 0, 1, 0,"
+            + " statement_timestamp(), statement_timestamp())",
         threadId,
         sessionId,
         turnStartEntryId,
         threadId);
     jdbc.update(
-        "insert into builtin_model_invocation (id, thread_id, turn_start_entry_id, request_head_entry_id, request_spec,"
-            + " status, attempt, result, error, result_entry_id, failed_attempts, created_at, updated_at)"
-            + " values (?, ?, ?, ?, '{}'::jsonb, 'READY', 0, null, null, null, '[]'::jsonb, statement_timestamp(), statement_timestamp())",
-        modelId,
-        threadId,
-        turnStartEntryId,
-        turnStartEntryId);
-    jdbc.update(
         "insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload, created_at)"
-            + " values (?, ?, ?, 'MESSAGE', '{\"message\":{\"role\":\"ASSISTANT\",\"contents\":[]}}'::jsonb, statement_timestamp())",
+            + " values (?, ?, ?, 'MESSAGE',"
+            + " '{\"message\":{\"role\":\"ASSISTANT\",\"contents\":[]}}'::jsonb,"
+            + " statement_timestamp())",
         assistantEntryId,
         sessionId,
         turnStartEntryId);
 
-    String bindingJson = "{\"descriptor\":{\"name\":\"ask_user\"}}";
     String callJson = "{\"id\":\"call-1\",\"toolName\":\"ask_user\",\"argumentsJson\":\"{}\"}";
+    String bindingJson = "{\"descriptor\":{\"name\":\"ask_user\"}}";
     String resultJson =
         "{\"toolCallId\":\"call-1\",\"contents\":[],\"error\":false,\"detailsJson\":\"{}\"}";
-    String receiptJson =
-        "{\"submissionId\":\"11111111-1111-1111-1111-111111111111\",\"actor\":\"alice\","
-            + "\"acceptedAt\":\"2026-09-27T00:00:00Z\"}";
 
-    // 1. WAITING_INPUT 必须携带 binding（通用 ck_harness_tool_invocation_binding 先生效）
-    DataIntegrityViolationException exNoBinding =
-        assertThrows(
-            DataIntegrityViolationException.class,
-            () ->
-                insertToolInvocation(
-                    UUID.randomUUID(),
-                    0,
-                    threadId,
-                    turnStartEntryId,
-                    assistantEntryId,
-                    callJson,
-                    null,
-                    "WAITING_INPUT",
-                    null,
-                    null,
-                    null),
-            "WAITING_INPUT without binding must be rejected");
-    assertTrue(
-        exNoBinding.getMessage().contains("ck_harness_tool_invocation_binding"),
-        "expected violation of ck_harness_tool_invocation_binding but got: "
-            + exNoBinding.getMessage());
-    // 2. WAITING_INPUT 不得携带 result（等待尚未产生业务结果）
+    // 回执列仍是 JSON object 形状；缺字段或非对象不是数据库拒绝范围，只有数组/标量被拒绝。
     assertThrows(
         DataIntegrityViolationException.class,
         () ->
             insertToolInvocation(
                 UUID.randomUUID(),
                 0,
-                threadId,
-                turnStartEntryId,
-                assistantEntryId,
-                callJson,
-                bindingJson,
-                "WAITING_INPUT",
-                resultJson,
-                null,
-                null),
-        "WAITING_INPUT with result must be rejected");
-    // 3. 正向：可回答的等待形状
-    assertDoesNotThrow(
-        () ->
-            insertToolInvocation(
-                UUID.randomUUID(),
-                0,
-                threadId,
-                turnStartEntryId,
-                assistantEntryId,
-                callJson,
-                bindingJson,
-                "WAITING_INPUT",
-                null,
-                null,
-                null));
-    // 4. 回执不得出现在非 SUCCEEDED 行（ck_harness_tool_input_receipt）
-    DataIntegrityViolationException exReadyReceipt =
-        assertThrows(
-            DataIntegrityViolationException.class,
-            () ->
-                insertToolInvocation(
-                    UUID.randomUUID(),
-                    1,
-                    threadId,
-                    turnStartEntryId,
-                    assistantEntryId,
-                    callJson,
-                    bindingJson,
-                    "READY",
-                    null,
-                    null,
-                    receiptJson),
-            "a receipt on READY must be rejected");
-    assertTrue(
-        exReadyReceipt.getMessage().contains("ck_harness_tool_input_receipt"),
-        "expected violation of ck_harness_tool_input_receipt but got: "
-            + exReadyReceipt.getMessage());
-    // 5. SUCCEEDED 缺 result 时不得携带回执
-    assertThrows(
-        DataIntegrityViolationException.class,
-        () ->
-            insertToolInvocation(
-                UUID.randomUUID(),
-                1,
-                threadId,
-                turnStartEntryId,
-                assistantEntryId,
-                callJson,
-                bindingJson,
-                "SUCCEEDED",
-                null,
-                null,
-                receiptJson),
-        "SUCCEEDED without result must be rejected");
-    // 6. 回执字段必须齐备且非空白
-    for (String incomplete :
-        List.of(
-            "{\"actor\":\"alice\",\"acceptedAt\":\"2026-09-27T00:00:00Z\"}",
-            "{\"submissionId\":\"   \",\"actor\":\"alice\",\"acceptedAt\":\"2026-09-27T00:00:00Z\"}",
-            "{\"submissionId\":\"11111111-1111-1111-1111-111111111111\",\"actor\":\"\","
-                + "\"acceptedAt\":\"2026-09-27T00:00:00Z\"}",
-            "{\"submissionId\":\"11111111-1111-1111-1111-111111111111\",\"actor\":\"alice\"}",
-            "[\"not_an_object\"]")) {
-      assertThrows(
-          DataIntegrityViolationException.class,
-          () ->
-              insertToolInvocation(
-                  UUID.randomUUID(),
-                  1,
-                  threadId,
-                  turnStartEntryId,
-                  assistantEntryId,
-                  callJson,
-                  bindingJson,
-                  "SUCCEEDED",
-                  resultJson,
-                  null,
-                  incomplete),
-          "incomplete receipt must be rejected: " + incomplete);
-    }
-    // 7. 正向：已回答成功的形状（结果 + 回执同存，无 approval）
-    assertDoesNotThrow(
-        () ->
-            insertToolInvocation(
-                UUID.randomUUID(),
-                1,
                 threadId,
                 turnStartEntryId,
                 assistantEntryId,
@@ -712,103 +530,8 @@ class PostgresqlHarnessSchemaTest {
                 "SUCCEEDED",
                 resultJson,
                 null,
-                receiptJson));
-  }
-
-  /** 测试意图：真实 PostgreSQL 约束 ck_harness_tool_invocation_waiting_request 物理门禁验证。 */
-  @Test
-  void harnessToolInvocationWaitingRequestConstraintRequiresBindingAndNoTerminalFactsOrApproval() {
-    UUID sessionId = UUID.fromString("00000000-0000-0000-0000-000000000040");
-    UUID rootEntryId = UUID.fromString("00000000-0000-0000-0000-000000000041");
-    UUID turnStartEntryId = UUID.fromString("00000000-0000-0000-0000-000000000042");
-    UUID threadId = UUID.fromString("00000000-0000-0000-0000-000000000043");
-    UUID assistantEntryId = UUID.fromString("00000000-0000-0000-0000-000000000044");
-    jdbc.update(
-        "insert into harness_session (id, name, created_at) values (?, 'session-waiting-req', statement_timestamp())",
-        sessionId);
-    jdbc.update(
-        "insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload, created_at)"
-            + " values (?, ?, null, 'ROOT', '{\"title\":\"root\"}'::jsonb, statement_timestamp())",
-        rootEntryId,
-        sessionId);
-    jdbc.update(
-        "insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload, created_at)"
-            + " values (?, ?, ?, 'TURN_START', '{\"reason\":\"INPUT\"}'::jsonb, statement_timestamp())",
-        turnStartEntryId,
-        sessionId,
-        rootEntryId);
-    jdbc.update(
-        "insert into harness_thread (id, session_id, head_entry_id, creation_request_hash, name, root_thread_id, yolo_enabled, spawn_trigger, constraints, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
-            + " values (?, ?, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'thread-demo', ?, false, 'MODEL_TOOL', '{\"maxOutputTokens\":null,\"promptCacheDisabled\":false,\"allowAutoCompaction\":true}'::jsonb, 'RUNNABLE', 0, 1, 0, statement_timestamp(), statement_timestamp())",
-        threadId,
-        sessionId,
-        turnStartEntryId,
-        threadId);
-    jdbc.update(
-        "insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload, created_at)"
-            + " values (?, ?, ?, 'MESSAGE', '{\"message\":{\"role\":\"ASSISTANT\"}}'::jsonb, statement_timestamp())",
-        assistantEntryId,
-        sessionId,
-        turnStartEntryId);
-
-    String callJson = "{\"id\":\"call-req\",\"toolName\":\"bash\",\"argumentsJson\":\"{}\"}";
-    String bindingJson = "{\"tool\":{\"descriptor\":{\"name\":\"bash\"}}}";
-    String resultJson =
-        "{\"toolCallId\":\"call-req\",\"contents\":[],\"error\":false,\"details\":{}}";
-    String approvalJson = "{\"decision\":\"ALLOWED\"}";
-
-    // 1. 无 binding 插入 WAITING_REQUEST 报错
-    assertThrows(
-        DataIntegrityViolationException.class,
-        () ->
-            insertToolInvocation(
-                UUID.randomUUID(),
-                0,
-                threadId,
-                turnStartEntryId,
-                assistantEntryId,
-                callJson,
-                null,
-                "WAITING_REQUEST",
-                null,
-                null,
-                null));
-
-    // 2. 带 approval 插入 WAITING_REQUEST 报错
-    assertThrows(
-        DataIntegrityViolationException.class,
-        () ->
-            insertToolInvocation(
-                UUID.randomUUID(),
-                0,
-                threadId,
-                turnStartEntryId,
-                assistantEntryId,
-                callJson,
-                bindingJson,
-                "WAITING_REQUEST",
-                approvalJson,
-                null,
-                null));
-
-    // 3. 带 result 插入 WAITING_REQUEST 报错
-    assertThrows(
-        DataIntegrityViolationException.class,
-        () ->
-            insertToolInvocation(
-                UUID.randomUUID(),
-                0,
-                threadId,
-                turnStartEntryId,
-                assistantEntryId,
-                callJson,
-                bindingJson,
-                "WAITING_REQUEST",
-                null,
-                resultJson,
-                null));
-
-    // 4. 正向：合法 WAITING_REQUEST 成功插入
+                "[\"not_an_object\"]"),
+        "a non-object input receipt must be rejected");
     assertDoesNotThrow(
         () ->
             insertToolInvocation(
@@ -819,10 +542,11 @@ class PostgresqlHarnessSchemaTest {
                 assistantEntryId,
                 callJson,
                 bindingJson,
-                "WAITING_REQUEST",
+                "SUCCEEDED",
+                resultJson,
                 null,
-                null,
-                null));
+                "{\"submissionId\":\"11111111-1111-1111-1111-111111111111\","
+                    + "\"actor\":\"alice\",\"acceptedAt\":\"2026-09-27T00:00:00Z\"}"));
   }
 
   private void insertToolInvocation(
@@ -841,7 +565,6 @@ class PostgresqlHarnessSchemaTest {
         "insert into harness_tool_invocation (id, thread_id, turn_start_entry_id, assistant_entry_id, call_index, call, binding,"
             + " status, attempt, approval, result, effects, error, created_at, updated_at, input_receipt)"
             + " values (?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, 0, ?::jsonb, ?::jsonb,"
-            // 非 SUCCEEDED 行的 effects 必须是空批（ck_harness_tool_invocation_effects_status）。
             + " '{\"customEntries\":[]}'::jsonb, null,"
             + " statement_timestamp(), statement_timestamp(), ?::jsonb)",
         id,
@@ -865,13 +588,10 @@ class PostgresqlHarnessSchemaTest {
   }
 
   @Test
-  void harnessEntryProviderReplayStateConstraintEnforcesAssistantMessageAndJsonObject() {
-    // 测试意图：真实 PostgreSQL CHECK 约束 ck_harness_entry_provider_replay_state 物理门禁验证。
-    // 规定 provider_replay_state 仅允许 ASSISTANT MESSAGE，且必须是 JSON object。
-    // 验证至少拒绝 USER MESSAGE、非 MESSAGE Entry、JSON 非 object；且合法的 ASSISTANT MESSAGE object 允许写入。
+  void harnessEntryProviderReplayStateKeepsOnlyJsonObjectShape() {
+    // provider_replay_state 的适用 Entry 类型由应用维护；数据库只拒绝非 object JSON。
     UUID sessionId = UUID.fromString("00000000-0000-0000-0000-000000000001");
     UUID rootEntryId = UUID.fromString("00000000-0000-0000-0000-000000000002");
-
     jdbc.update(
         "insert into harness_session (id, name, created_at) values (?, 'session-demo', statement_timestamp())",
         sessionId);
@@ -880,111 +600,40 @@ class PostgresqlHarnessSchemaTest {
             + " values (?, ?, null, 'ROOT', '{\"title\":\"root\"}'::jsonb, statement_timestamp())",
         rootEntryId,
         sessionId);
+    String replayJson =
+        "{\"format\":\"openai_responses\",\"affinity\":{},\"sourcePrefixHash\":"
+            + "\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\",\"payload\":{}}";
 
-    String validReplayJson =
-        "{\"format\":\"openai_responses\",\"affinity\":{},\"sourcePrefixHash\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\",\"payload\":{}}";
-
-    // 1. 拒绝 USER MESSAGE 携带 provider_replay_state
-    DataIntegrityViolationException exUser =
-        assertThrows(
-            DataIntegrityViolationException.class,
-            () ->
-                jdbc.update(
-                    "insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload, created_at, provider_replay_state)"
-                        + " values (?, ?, ?, 'MESSAGE', '{\"message\":{\"role\":\"USER\",\"contents\":[{\"type\":\"text\",\"text\":\"hi\"}]}}'::jsonb,"
-                        + " statement_timestamp(), ?::jsonb)",
-                    UUID.randomUUID(),
-                    sessionId,
-                    rootEntryId,
-                    validReplayJson),
-            "ck_harness_entry_provider_replay_state must reject USER MESSAGE");
-    assertTrue(
-        exUser.getMessage().contains("ck_harness_entry_provider_replay_state"),
-        "expected violation of ck_harness_entry_provider_replay_state but got: "
-            + exUser.getMessage());
-
-    // 2. 拒绝非 MESSAGE Entry（如 TURN_START）携带 provider_replay_state
-    DataIntegrityViolationException exNonMessage =
-        assertThrows(
-            DataIntegrityViolationException.class,
-            () ->
-                jdbc.update(
-                    "insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload, created_at, provider_replay_state)"
-                        + " values (?, ?, ?, 'TURN_START', '{\"reason\":\"INPUT\"}'::jsonb,"
-                        + " statement_timestamp(), ?::jsonb)",
-                    UUID.randomUUID(),
-                    sessionId,
-                    rootEntryId,
-                    validReplayJson),
-            "ck_harness_entry_provider_replay_state must reject non-MESSAGE entry");
-    assertTrue(
-        exNonMessage.getMessage().contains("ck_harness_entry_provider_replay_state"),
-        "expected violation of ck_harness_entry_provider_replay_state but got: "
-            + exNonMessage.getMessage());
-
-    // 3. 拒绝 JSON 非 object（如 array）
-    DataIntegrityViolationException exNonObjectArray =
-        assertThrows(
-            DataIntegrityViolationException.class,
-            () ->
-                jdbc.update(
-                    "insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload, created_at, provider_replay_state)"
-                        + " values (?, ?, ?, 'MESSAGE', '{\"message\":{\"role\":\"ASSISTANT\",\"contents\":[{\"type\":\"text\",\"text\":\"ok\"}]}}'::jsonb,"
-                        + " statement_timestamp(), '[\"not_an_object\"]'::jsonb)",
-                    UUID.randomUUID(),
-                    sessionId,
-                    rootEntryId),
-            "ck_harness_entry_provider_replay_state must reject non-object JSON array");
-    assertTrue(
-        exNonObjectArray.getMessage().contains("ck_harness_entry_provider_replay_state"),
-        "expected violation of ck_harness_entry_provider_replay_state but got: "
-            + exNonObjectArray.getMessage());
-
-    // 4. 拒绝 JSON 非 object（如 scalar string）
-    DataIntegrityViolationException exNonObjectScalar =
-        assertThrows(
-            DataIntegrityViolationException.class,
-            () ->
-                jdbc.update(
-                    "insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload, created_at, provider_replay_state)"
-                        + " values (?, ?, ?, 'MESSAGE', '{\"message\":{\"role\":\"ASSISTANT\",\"contents\":[{\"type\":\"text\",\"text\":\"ok\"}]}}'::jsonb,"
-                        + " statement_timestamp(), '\"string_scalar\"'::jsonb)",
-                    UUID.randomUUID(),
-                    sessionId,
-                    rootEntryId),
-            "ck_harness_entry_provider_replay_state must reject scalar JSON");
-    assertTrue(
-        exNonObjectScalar.getMessage().contains("ck_harness_entry_provider_replay_state"),
-        "expected violation of ck_harness_entry_provider_replay_state but got: "
-            + exNonObjectScalar.getMessage());
-
-    // 5. 正向验证：合法的 ASSISTANT MESSAGE + JSON object 正常持久化
+    assertThrows(
+        DataIntegrityViolationException.class,
+        () ->
+            jdbc.update(
+                "insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload, created_at, provider_replay_state)"
+                    + " values (?, ?, ?, 'MESSAGE', '{\"message\":{\"role\":\"ASSISTANT\"}}'::jsonb,"
+                    + " statement_timestamp(), '[\"not_an_object\"]'::jsonb)",
+                UUID.randomUUID(),
+                sessionId,
+                rootEntryId),
+        "a non-object provider replay state must be rejected");
     assertDoesNotThrow(
         () ->
             jdbc.update(
                 "insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload, created_at, provider_replay_state)"
-                    + " values (?, ?, ?, 'MESSAGE', '{\"message\":{\"role\":\"ASSISTANT\",\"contents\":[{\"type\":\"text\",\"text\":\"ok\"}]}}'::jsonb,"
+                    + " values (?, ?, ?, 'MESSAGE', '{\"message\":{\"role\":\"ASSISTANT\"}}'::jsonb,"
                     + " statement_timestamp(), ?::jsonb)",
                 UUID.randomUUID(),
                 sessionId,
                 rootEntryId,
-                validReplayJson),
-        "valid ASSISTANT MESSAGE with object replay state must succeed");
+                replayJson));
   }
 
   @Test
-  void builtinModelInvocationProviderReplayStateConstraintEnforcesSucceededResultAndJsonObject() {
-    // 测试意图：真实 PostgreSQL CHECK 约束 ck_builtin_model_invocation_provider_replay_state 物理门禁验证。
-    // 规定 provider_replay_state 仅允许 SUCCEEDED + result 非 null + result_entry_id null，且必须是 JSON
-    // object。
-    // 验证至少分别拒绝 RUNNING、SUCCEEDED/result null、SUCCEEDED/result_entry_id 非 null、JSON 非 object；
-    // 且合法的 SUCCEEDED 未物化结果 invocation 允许写入。
+  void builtinModelInvocationProviderReplayStateKeepsOnlyJsonObjectShape() {
+    // 适用状态与 result 的关联由应用维护；数据库只拒绝非 object JSON。
     UUID sessionId = UUID.fromString("00000000-0000-0000-0000-000000000010");
     UUID rootEntryId = UUID.fromString("00000000-0000-0000-0000-000000000011");
     UUID turnStartEntryId = UUID.fromString("00000000-0000-0000-0000-000000000012");
-    UUID assistantEntryId = UUID.fromString("00000000-0000-0000-0000-000000000013");
     UUID threadId = UUID.fromString("00000000-0000-0000-0000-000000000014");
-
     jdbc.update(
         "insert into harness_session (id, name, created_at) values (?, 'session-demo', statement_timestamp())",
         sessionId);
@@ -1000,121 +649,48 @@ class PostgresqlHarnessSchemaTest {
         sessionId,
         rootEntryId);
     jdbc.update(
-        "insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload, created_at)"
-            + " values (?, ?, ?, 'MESSAGE', '{\"message\":{\"role\":\"ASSISTANT\",\"contents\":[{\"type\":\"text\",\"text\":\"ok\"}]}}'::jsonb, statement_timestamp())",
-        assistantEntryId,
-        sessionId,
-        turnStartEntryId);
-    jdbc.update(
-        "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, root_thread_id, yolo_enabled, spawn_trigger, constraints, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
-            + " values (?, ?, null, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'thread-demo', ?, false, 'USER', '{\"maxOutputTokens\":null,\"promptCacheDisabled\":false,\"allowAutoCompaction\":true}'::jsonb, 'RUNNABLE', 0, 1, 0, statement_timestamp(), statement_timestamp())",
+        "insert into harness_thread (id, session_id, head_entry_id, creation_request_hash, name,"
+            + " root_thread_id, yolo_enabled, spawn_trigger, constraints, execution_control,"
+            + " input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+            + " values (?, ?, ?,"
+            + " '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',"
+            + " 'thread-demo', ?, false, 'USER',"
+            + " '{\"maxOutputTokens\":null,\"promptCacheDisabled\":false,"
+            + "\"allowAutoCompaction\":true}'::jsonb, 'RUNNABLE', 0, 1, 0,"
+            + " statement_timestamp(), statement_timestamp())",
         threadId,
         sessionId,
         turnStartEntryId,
         threadId);
+    String replayJson =
+        "{\"format\":\"openai_responses\",\"affinity\":{},\"sourcePrefixHash\":"
+            + "\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\",\"payload\":{}}";
 
-    String validReplayJson =
-        "{\"format\":\"openai_responses\",\"affinity\":{},\"sourcePrefixHash\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\",\"payload\":{}}";
-    String validResultJson = "{\"id\":\"resp-1\",\"text\":\"ok\",\"stopReason\":\"COMPLETE\"}";
-
-    // 1. 拒绝 RUNNING 状态携带 provider_replay_state
-    DataIntegrityViolationException exRunning =
-        assertThrows(
-            DataIntegrityViolationException.class,
-            () ->
-                jdbc.update(
-                    "insert into builtin_model_invocation (id, thread_id, turn_start_entry_id, request_head_entry_id, request_spec,"
-                        + " status, attempt, result, error, result_entry_id, failed_attempts, created_at, updated_at, provider_replay_state)"
-                        + " values (?, ?, ?, ?, '{}'::jsonb, 'RUNNING', 0, null, null, null, '[]'::jsonb, statement_timestamp(), statement_timestamp(), ?::jsonb)",
-                    UUID.randomUUID(),
-                    threadId,
-                    turnStartEntryId,
-                    turnStartEntryId,
-                    validReplayJson),
-            "ck_builtin_model_invocation_provider_replay_state must reject RUNNING");
-    assertTrue(
-        exRunning.getMessage().contains("ck_builtin_model_invocation_provider_replay_state"),
-        "expected violation of ck_builtin_model_invocation_provider_replay_state but got: "
-            + exRunning.getMessage());
-
-    // 2. 拒绝 SUCCEEDED 但 result 为 null 携带 provider_replay_state
-    DataIntegrityViolationException exResultNull =
-        assertThrows(
-            DataIntegrityViolationException.class,
-            () ->
-                jdbc.update(
-                    "insert into builtin_model_invocation (id, thread_id, turn_start_entry_id, request_head_entry_id, request_spec,"
-                        + " status, attempt, result, error, result_entry_id, failed_attempts, created_at, updated_at, provider_replay_state)"
-                        + " values (?, ?, ?, ?, '{}'::jsonb, 'SUCCEEDED', 0, null, null, null, '[]'::jsonb, statement_timestamp(), statement_timestamp(), ?::jsonb)",
-                    UUID.randomUUID(),
-                    threadId,
-                    turnStartEntryId,
-                    turnStartEntryId,
-                    validReplayJson),
-            "ck_builtin_model_invocation_provider_replay_state must reject SUCCEEDED with null result");
-    assertTrue(
-        exResultNull.getMessage().contains("ck_builtin_model_invocation_provider_replay_state"),
-        "expected violation of ck_builtin_model_invocation_provider_replay_state but got: "
-            + exResultNull.getMessage());
-
-    // 3. 拒绝 SUCCEEDED 但 result_entry_id 非 null（已物化落地）携带 provider_replay_state
-    DataIntegrityViolationException exResultEntryNotNull =
-        assertThrows(
-            DataIntegrityViolationException.class,
-            () ->
-                jdbc.update(
-                    "insert into builtin_model_invocation (id, thread_id, turn_start_entry_id, request_head_entry_id, request_spec,"
-                        + " status, attempt, result, error, result_entry_id, failed_attempts, created_at, updated_at, provider_replay_state)"
-                        + " values (?, ?, ?, ?, '{}'::jsonb, 'SUCCEEDED', 0, ?::jsonb, null, ?, '[]'::jsonb, statement_timestamp(), statement_timestamp(), ?::jsonb)",
-                    UUID.randomUUID(),
-                    threadId,
-                    turnStartEntryId,
-                    turnStartEntryId,
-                    validResultJson,
-                    assistantEntryId,
-                    validReplayJson),
-            "ck_builtin_model_invocation_provider_replay_state must reject attached result_entry_id");
-    assertTrue(
-        exResultEntryNotNull
-            .getMessage()
-            .contains("ck_builtin_model_invocation_provider_replay_state"),
-        "expected violation of ck_builtin_model_invocation_provider_replay_state but got: "
-            + exResultEntryNotNull.getMessage());
-
-    // 4. 拒绝 JSON 非 object（如 array）
-    DataIntegrityViolationException exNonObject =
-        assertThrows(
-            DataIntegrityViolationException.class,
-            () ->
-                jdbc.update(
-                    "insert into builtin_model_invocation (id, thread_id, turn_start_entry_id, request_head_entry_id, request_spec,"
-                        + " status, attempt, result, error, result_entry_id, failed_attempts, created_at, updated_at, provider_replay_state)"
-                        + " values (?, ?, ?, ?, '{}'::jsonb, 'SUCCEEDED', 0, ?::jsonb, null, null, '[]'::jsonb, statement_timestamp(), statement_timestamp(), '[\"not_object\"]'::jsonb)",
-                    UUID.randomUUID(),
-                    threadId,
-                    turnStartEntryId,
-                    turnStartEntryId,
-                    validResultJson),
-            "ck_builtin_model_invocation_provider_replay_state must reject non-object JSON");
-    assertTrue(
-        exNonObject.getMessage().contains("ck_builtin_model_invocation_provider_replay_state"),
-        "expected violation of ck_builtin_model_invocation_provider_replay_state but got: "
-            + exNonObject.getMessage());
-
-    // 5. 正向验证：SUCCEEDED + result 非 null + result_entry_id 为 null + JSON object 正常插入
+    assertThrows(
+        DataIntegrityViolationException.class,
+        () ->
+            jdbc.update(
+                "insert into builtin_model_invocation (id, thread_id, turn_start_entry_id, request_head_entry_id, request_spec,"
+                    + " status, attempt, result, error, result_entry_id, failed_attempts, created_at, updated_at, provider_replay_state)"
+                    + " values (?, ?, ?, ?, '{}'::jsonb, 'RUNNING', 0, null, null, null, '[]'::jsonb,"
+                    + " statement_timestamp(), statement_timestamp(), '[\"not_object\"]'::jsonb)",
+                UUID.randomUUID(),
+                threadId,
+                turnStartEntryId,
+                turnStartEntryId),
+        "a non-object provider replay state must be rejected");
     assertDoesNotThrow(
         () ->
             jdbc.update(
                 "insert into builtin_model_invocation (id, thread_id, turn_start_entry_id, request_head_entry_id, request_spec,"
                     + " status, attempt, result, error, result_entry_id, failed_attempts, created_at, updated_at, provider_replay_state)"
-                    + " values (?, ?, ?, ?, '{}'::jsonb, 'SUCCEEDED', 0, ?::jsonb, null, null, '[]'::jsonb, statement_timestamp(), statement_timestamp(), ?::jsonb)",
+                    + " values (?, ?, ?, ?, '{}'::jsonb, 'RUNNING', 0, null, null, null, '[]'::jsonb,"
+                    + " statement_timestamp(), statement_timestamp(), ?::jsonb)",
                 UUID.randomUUID(),
                 threadId,
                 turnStartEntryId,
                 turnStartEntryId,
-                validResultJson,
-                validReplayJson),
-        "valid SUCCEEDED model invocation with replay state must succeed");
+                replayJson));
   }
 
   @Test
@@ -1324,10 +900,8 @@ class PostgresqlHarnessSchemaTest {
   }
 
   @Test
-  void harnessThreadJoinFinalAnswerRequiresTerminalAndForeignKeys() {
-    // 测试意图：真实 PostgreSQL CHECK 与 FK 约束验证 ck_harness_thread_join_final_answer（final answer 必须已有
-    // terminal）
-    // 以及 terminal_entry_id / final_answer_entry_id 的外键门禁。
+  void harnessThreadJoinEntryReferencesUseForeignKeys() {
+    // 测试意图：terminal_entry_id / final_answer_entry_id 的外键门禁；两者与 delivery 的状态关联由应用维护。
     UUID sessionId = UUID.fromString("00000000-0000-0000-0000-000000000040");
     UUID rootEntryId = UUID.fromString("00000000-0000-0000-0000-000000000041");
     UUID turnStartEntryId = UUID.fromString("00000000-0000-0000-0000-000000000042");
@@ -1385,21 +959,6 @@ class PostgresqlHarnessSchemaTest {
         childThreadId,
         UUID.randomUUID());
 
-    // 1. final_answer 非空但 terminal 为空 → 违反 ck_harness_thread_join_final_answer
-    DataIntegrityViolationException exFinalAnswer =
-        assertThrows(
-            DataIntegrityViolationException.class,
-            () ->
-                jdbc.update(
-                    "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, agent, max_turns, reminder_turn, terminal_entry_id, final_answer_entry_id, delivery_command_sequence, created_at, updated_at, delivery)"
-                        + " values (?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', ?, ?, 1, 'subagent', 10, 0, null, ?, null, statement_timestamp(), statement_timestamp(), 'NOTIFY_PARENT')",
-                    UUID.randomUUID(),
-                    parentThreadId,
-                    childThreadId,
-                    finalAnswerEntryId),
-            "ck_harness_thread_join_final_answer must reject final answer without terminal");
-    assertTrue(exFinalAnswer.getMessage().contains("ck_harness_thread_join_final_answer"));
-
     // 2. terminal Entry 不存在 → 违反 fk_harness_thread_join_terminal_entry
     DataIntegrityViolationException exTerminalFk =
         assertThrows(
@@ -1430,31 +989,11 @@ class PostgresqlHarnessSchemaTest {
                     UUID.fromString("00000000-0000-0000-0000-000000000098")),
             "fk_harness_thread_join_final_answer_entry must reject non-existent entry");
     assertTrue(exFinalAnswerFk.getMessage().contains("fk_harness_thread_join_final_answer_entry"));
-
-    // 4. matched 但未交付的 NOTIFY_PARENT 被 ck_harness_thread_join_delivery 严禁
-    DataIntegrityViolationException exMatchedUndelivered =
-        assertThrows(
-            DataIntegrityViolationException.class,
-            () ->
-                jdbc.update(
-                    "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, agent, max_turns, reminder_turn, terminal_entry_id, final_answer_entry_id, delivery_command_sequence, created_at, updated_at, delivery)"
-                        + " values (?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', ?, ?, 1, 'subagent', 10, 0, ?, ?, null, statement_timestamp(), statement_timestamp(), 'NOTIFY_PARENT')",
-                    UUID.randomUUID(),
-                    parentThreadId,
-                    childThreadId,
-                    terminalEntryId,
-                    finalAnswerEntryId));
-    assertEquals(
-        "23514",
-        assertInstanceOf(SQLException.class, exMatchedUndelivered.getMostSpecificCause())
-            .getSQLState());
-    assertTrue(exMatchedUndelivered.getMessage().contains("ck_harness_thread_join_delivery"));
   }
 
   @Test
-  void harnessThreadJoinDeliveryRequiresTerminalAndParent() {
-    // 测试意图：真实 PostgreSQL CHECK 与 FK 约束验证 ck_harness_thread_join_delivery（交付必须已 matched 且父非空）
-    // 以及交付命令的外键 fk_harness_thread_join_delivery_command。
+  void harnessThreadJoinDeliveryCommandUsesForeignKey() {
+    // 测试意图：交付命令的外键 fk_harness_thread_join_delivery_command；交付与 matched/parent 的关联由应用维护。
     UUID sessionId = UUID.fromString("00000000-0000-0000-0000-000000000050");
     UUID rootEntryId = UUID.fromString("00000000-0000-0000-0000-000000000051");
     UUID turnStartEntryId = UUID.fromString("00000000-0000-0000-0000-000000000052");
@@ -1509,34 +1048,6 @@ class PostgresqlHarnessSchemaTest {
             + " values (?, 1, 'CUSTOM_MESSAGE', '{\"text\":\"delivered\"}'::jsonb, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', statement_timestamp())",
         parentThreadId,
         UUID.randomUUID());
-
-    // 1. terminal 为空时设置 delivery_command_sequence → 拒绝
-    DataIntegrityViolationException exDeliveryUnmatched =
-        assertThrows(
-            DataIntegrityViolationException.class,
-            () ->
-                jdbc.update(
-                    "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, agent, max_turns, reminder_turn, terminal_entry_id, final_answer_entry_id, delivery_command_sequence, created_at, updated_at, delivery)"
-                        + " values (?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', ?, ?, 1, 'subagent', 10, 0, null, null, 1, statement_timestamp(), statement_timestamp(), 'NOTIFY_PARENT')",
-                    UUID.randomUUID(),
-                    parentThreadId,
-                    childThreadId),
-            "ck_harness_thread_join_delivery must reject delivery when terminal is null");
-    assertTrue(exDeliveryUnmatched.getMessage().contains("ck_harness_thread_join_delivery"));
-
-    // 2. parent_thread_id 为空（root one-shot）时设置 delivery_command_sequence → 拒绝
-    DataIntegrityViolationException exDeliveryRoot =
-        assertThrows(
-            DataIntegrityViolationException.class,
-            () ->
-                jdbc.update(
-                    "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, agent, max_turns, reminder_turn, terminal_entry_id, final_answer_entry_id, delivery_command_sequence, created_at, updated_at, delivery)"
-                        + " values (?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', null, ?, 1, 'subagent', 10, 0, ?, null, 1, statement_timestamp(), statement_timestamp(), 'RECEIPT_ONLY')",
-                    UUID.randomUUID(),
-                    childThreadId,
-                    terminalEntryId),
-            "ck_harness_thread_join_delivery must reject delivery when parent_thread_id is null");
-    assertTrue(exDeliveryRoot.getMessage().contains("ck_harness_thread_join_delivery"));
 
     // 3. 不存在的 delivery_command_sequence → 违反 fk_harness_thread_join_delivery_command
     DataIntegrityViolationException exDeliveryFk =
@@ -1631,9 +1142,8 @@ class PostgresqlHarnessSchemaTest {
   }
 
   @Test
-  void harnessThreadJoinDeliveryAndSupersededContract() {
-    // 测试意图：真实 PostgreSQL 约束验证 delivery 枚举、计额与 parent 的联动约束以及 superseded 自引用契约：
-    // 被取代的 join 必须未 matched，且 superseded_by 必须指向同一表真实存在的 invocation。
+  void harnessThreadJoinDeliveryEnumAndSupersededForeignKey() {
+    // 测试意图：delivery 枚举与 superseded_by 自引用外键；被取代 join 的 matched 状态由应用维护。
     UUID sessionId = UUID.fromString("00000000-0000-0000-0000-000000000070");
     UUID rootEntryId = UUID.fromString("00000000-0000-0000-0000-000000000071");
     UUID parentThreadId = UUID.fromString("00000000-0000-0000-0000-000000000072");
@@ -1709,69 +1219,6 @@ class PostgresqlHarnessSchemaTest {
                     childThreadId),
             "unknown delivery must be rejected");
     assertTrue(exDelivery.getMessage().contains("ck_harness_thread_join_delivery_kind"));
-
-    // 1b. RECEIPT_ONLY 必须无父。
-    assertThrows(
-        DataIntegrityViolationException.class,
-        () ->
-            jdbc.update(
-                "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, agent, delivery, max_turns, reminder_turn, created_at, updated_at)"
-                    + " values (?, ?, ?, ?, 1, 'subagent', 'RECEIPT_ONLY', 10, 0, statement_timestamp(), statement_timestamp())",
-                UUID.randomUUID(),
-                hash,
-                parentThreadId,
-                childThreadId));
-    DataIntegrityViolationException exMatchedUndelivered =
-        assertThrows(
-            DataIntegrityViolationException.class,
-            () ->
-                jdbc.update(
-                    "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, agent, delivery, max_turns, reminder_turn, terminal_entry_id, created_at, updated_at)"
-                        + " values (?, ?, ?, ?, 1, 'subagent', 'NOTIFY_PARENT', 10, 0, ?, statement_timestamp(), statement_timestamp())",
-                    UUID.randomUUID(),
-                    hash,
-                    parentThreadId,
-                    childThreadId,
-                    terminalEntryId));
-    assertEquals(
-        "23514",
-        assertInstanceOf(SQLException.class, exMatchedUndelivered.getMostSpecificCause())
-            .getSQLState());
-    assertTrue(exMatchedUndelivered.getMessage().contains("ck_harness_thread_join_delivery"));
-
-    // 2. superseded_by 指向自身 → ck_harness_thread_join_superseded
-    UUID selfSuperseded = UUID.randomUUID();
-    DataIntegrityViolationException exSelf =
-        assertThrows(
-            DataIntegrityViolationException.class,
-            () ->
-                jdbc.update(
-                    "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, agent, max_turns, reminder_turn, superseded_by_invocation_id, created_at, updated_at, delivery)"
-                        + " values (?, ?, ?, ?, 1, 'subagent', 10, 0, ?, statement_timestamp(), statement_timestamp(), 'NOTIFY_PARENT')",
-                    selfSuperseded,
-                    hash,
-                    parentThreadId,
-                    childThreadId,
-                    selfSuperseded),
-            "a join cannot supersede itself");
-    assertTrue(exSelf.getMessage().contains("ck_harness_thread_join_superseded"));
-
-    // 3. 已 matched 的 join 不得被取代 → ck_harness_thread_join_superseded
-    DataIntegrityViolationException exMatched =
-        assertThrows(
-            DataIntegrityViolationException.class,
-            () ->
-                jdbc.update(
-                    "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, agent, max_turns, reminder_turn, terminal_entry_id, delivery_command_sequence, superseded_by_invocation_id, created_at, updated_at, delivery)"
-                        + " values (?, ?, ?, ?, 1, 'subagent', 10, 0, ?, 1, ?, statement_timestamp(), statement_timestamp(), 'NOTIFY_PARENT')",
-                    UUID.randomUUID(),
-                    hash,
-                    parentThreadId,
-                    childThreadId,
-                    terminalEntryId,
-                    pendingInvocation),
-            "a matched join must not be superseded");
-    assertTrue(exMatched.getMessage().contains("ck_harness_thread_join_superseded"));
 
     // 4. superseded_by 指向不存在的 invocation → fk_harness_thread_join_superseded_by
     DataIntegrityViolationException exFk =

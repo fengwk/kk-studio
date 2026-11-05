@@ -38,9 +38,9 @@ import fun.fengwk.kkstudio.platform.environment.EnvironmentService;
 import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.pluginhost.service.PluginAgentDependencies;
 import fun.fengwk.kkstudio.platform.pluginhost.service.PluginConfigurationService;
-import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsCodec;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsService;
+import fun.fengwk.kkstudio.platform.settings.SystemSettingsTestFixture;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionEditablePropertiesDTO;
@@ -250,7 +250,7 @@ class ConfigSyncApplierTest {
   @Test
   void settingsUpdateUsesPlanVersionInsteadOfReadingNewVersion() {
     SystemSettingsSectionsDTO sections =
-        new SystemSettingsCodec().toSections(SystemSettings.DEFAULT);
+        new SystemSettingsCodec().toSections(SystemSettingsTestFixture.DEFAULT);
     sections.getNetwork().setProxyUrl("http://127.0.0.1:9");
     sections.getNetwork().setNoProxyHosts("localhost,127.0.0.1");
     ConfigSyncPlan.SettingsUpdate update = new ConfigSyncPlan.SettingsUpdate(sections, "9");

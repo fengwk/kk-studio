@@ -51,7 +51,7 @@ class PostgresqlWorkTest extends HarnessStoreWorkContract {
     forceWorkAvailableAfter(new WorkTarget(WorkTargetType.TOOL, leased), Duration.ofMinutes(15));
     jdbc.update(
         """
-        update durable_work set lease_token = 'projection-lease',
+        update durable_work set lease_token = '00000000-0000-0000-0000-0000000000b1',
             lease_until = statement_timestamp() + interval '10 minutes'
         where target_type = 'TOOL' and target_id = ?
         """,
@@ -226,7 +226,8 @@ class PostgresqlWorkTest extends HarnessStoreWorkContract {
 
     ClaimedWork claimed =
         store
-            .transaction(tx -> tx.work().claimNext(WorkTargetType.TOOL, "token", LEASE_30S, node))
+            .transaction(
+                tx -> tx.work().claimNext(WorkTargetType.TOOL, UUID.randomUUID(), LEASE_30S, node))
             .orElseThrow();
     assertEquals(toolTarget, claimed.target());
     assertEquals(env, claimed.requiredEnvironmentId());
@@ -339,27 +340,27 @@ class PostgresqlWorkTest extends HarnessStoreWorkContract {
     // 1. Node3 (无 route): 只能 claim 到 tool5 (null affinity)
     Optional<ClaimedWork> claimNode3 =
         store.transaction(
-            tx -> tx.work().claimNext(WorkTargetType.TOOL, "token-node3", LEASE_30S, node3));
+            tx -> tx.work().claimNext(WorkTargetType.TOOL, UUID.randomUUID(), LEASE_30S, node3));
     assertTrue(claimNode3.isPresent());
     assertEquals(toolSeed5.toolId(), claimNode3.get().target().id());
 
     // 2. Node3 再次 claim: 无法 claim 任何剩余 tool work
     Optional<ClaimedWork> emptyForNode3 =
         store.transaction(
-            tx -> tx.work().claimNext(WorkTargetType.TOOL, "token-node3-2", LEASE_30S, node3));
+            tx -> tx.work().claimNext(WorkTargetType.TOOL, UUID.randomUUID(), LEASE_30S, node3));
     assertTrue(emptyForNode3.isEmpty());
 
     // 3. Node2 (持有 env-2 READY 路由): 只能 claim 到 tool2 (env-2)
     Optional<ClaimedWork> claimNode2 =
         store.transaction(
-            tx -> tx.work().claimNext(WorkTargetType.TOOL, "token-node2", LEASE_30S, node2));
+            tx -> tx.work().claimNext(WorkTargetType.TOOL, UUID.randomUUID(), LEASE_30S, node2));
     assertTrue(claimNode2.isPresent());
     assertEquals(toolSeed2.toolId(), claimNode2.get().target().id());
 
     // 4. Node1 (持有 env-1 READY 路由): 只能 claim 到 tool1 (env-1)
     Optional<ClaimedWork> claimNode1 =
         store.transaction(
-            tx -> tx.work().claimNext(WorkTargetType.TOOL, "token-node1", LEASE_30S, node1));
+            tx -> tx.work().claimNext(WorkTargetType.TOOL, UUID.randomUUID(), LEASE_30S, node1));
     assertTrue(claimNode1.isPresent());
     assertEquals(toolSeed1.toolId(), claimNode1.get().target().id());
 
@@ -367,12 +368,12 @@ class PostgresqlWorkTest extends HarnessStoreWorkContract {
     assertTrue(
         store
             .transaction(
-                tx -> tx.work().claimNext(WorkTargetType.TOOL, "token-node1-2", LEASE_30S, node1))
+                tx -> tx.work().claimNext(WorkTargetType.TOOL, UUID.randomUUID(), LEASE_30S, node1))
             .isEmpty());
     assertTrue(
         store
             .transaction(
-                tx -> tx.work().claimNext(WorkTargetType.TOOL, "token-node2-2", LEASE_30S, node2))
+                tx -> tx.work().claimNext(WorkTargetType.TOOL, UUID.randomUUID(), LEASE_30S, node2))
             .isEmpty());
   }
 
@@ -401,7 +402,7 @@ class PostgresqlWorkTest extends HarnessStoreWorkContract {
     // JVM 超前 2x：claim 仍成功，deadline 只由数据库时间决定（≈ lease，而不是 lease + 2x skew）
     ClaimedWork claimed =
         store
-            .transaction(tx -> tx.work().claimNext(WorkTargetType.THREAD, "token", lease))
+            .transaction(tx -> tx.work().claimNext(WorkTargetType.THREAD, UUID.randomUUID(), lease))
             .orElseThrow();
     assertEquals(lease.toMillis(), remainingLeaseMillis(jdbc, target.id()), 5_000L);
 
@@ -449,7 +450,8 @@ class PostgresqlWorkTest extends HarnessStoreWorkContract {
     assertEquals(0L, remainingDueWaitMillis(jdbc, target.id()), 1_000L);
     ClaimedWork claim =
         store
-            .transaction(tx -> tx.work().claimNext(WorkTargetType.THREAD, "token", CLAIM_LEASE))
+            .transaction(
+                tx -> tx.work().claimNext(WorkTargetType.THREAD, UUID.randomUUID(), CLAIM_LEASE))
             .orElseThrow();
 
     // JVM 滞后 2x：retry 的数据库 due 恰为 delay（而不是 delay ± skew），且此刻尚未到期。
@@ -457,7 +459,8 @@ class PostgresqlWorkTest extends HarnessStoreWorkContract {
     assertEquals(retryDelay.toMillis(), remainingDueWaitMillis(jdbc, target.id()), 1_000L);
     assertTrue(
         store
-            .transaction(tx -> tx.work().claimNext(WorkTargetType.THREAD, "token-2", CLAIM_LEASE))
+            .transaction(
+                tx -> tx.work().claimNext(WorkTargetType.THREAD, UUID.randomUUID(), CLAIM_LEASE))
             .isEmpty());
   }
 
@@ -503,16 +506,18 @@ class PostgresqlWorkTest extends HarnessStoreWorkContract {
           return null;
         });
 
+    UUID leaseNode1 = UUID.randomUUID();
+    UUID leaseNode2 = UUID.randomUUID();
     Optional<ClaimedWork> claimOpt =
         store.transaction(
-            tx -> tx.work().claimNext(WorkTargetType.THREAD, "lease-node-1", CLAIM_LEASE));
+            tx -> tx.work().claimNext(WorkTargetType.THREAD, leaseNode1, CLAIM_LEASE));
     ClaimedWork claim = claimOpt.orElseThrow();
     assertEquals(target, claim.target());
-    assertEquals("lease-node-1", claim.leaseToken());
+    assertEquals(leaseNode1, claim.leaseToken());
 
     Optional<ClaimedWork> anotherClaimBeforeRelease =
         store.transaction(
-            tx -> tx.work().claimNext(WorkTargetType.THREAD, "lease-node-2", CLAIM_LEASE));
+            tx -> tx.work().claimNext(WorkTargetType.THREAD, leaseNode2, CLAIM_LEASE));
     assertTrue(anotherClaimBeforeRelease.isEmpty());
 
     store.transaction(
@@ -523,10 +528,10 @@ class PostgresqlWorkTest extends HarnessStoreWorkContract {
 
     Optional<ClaimedWork> newClaimOpt =
         store.transaction(
-            tx -> tx.work().claimNext(WorkTargetType.THREAD, "lease-node-2", CLAIM_LEASE));
+            tx -> tx.work().claimNext(WorkTargetType.THREAD, leaseNode2, CLAIM_LEASE));
     ClaimedWork newClaim = newClaimOpt.orElseThrow();
     assertEquals(target, newClaim.target());
-    assertEquals("lease-node-2", newClaim.leaseToken());
+    assertEquals(leaseNode2, newClaim.leaseToken());
     assertEquals(claim.claimedWakeVersion(), newClaim.claimedWakeVersion());
   }
 
@@ -549,13 +554,15 @@ class PostgresqlWorkTest extends HarnessStoreWorkContract {
           return null;
         });
 
+    UUID leaseToken1 = UUID.randomUUID();
+    UUID leaseToken2 = UUID.randomUUID();
     ClaimedWork claim =
         store
             .transaction(
-                tx -> tx.work().claimNext(WorkTargetType.TOOL, "lease-token-1", LEASE_30S, node1))
+                tx -> tx.work().claimNext(WorkTargetType.TOOL, leaseToken1, LEASE_30S, node1))
             .orElseThrow();
     assertEquals(target, claim.target());
-    assertEquals("lease-token-1", claim.leaseToken());
+    assertEquals(leaseToken1, claim.leaseToken());
 
     // 守护进程在排空期间重新连接到 node2
     seedEnvironmentConnection(jdbc, env, "daemon-2", node2, "READY");
@@ -564,7 +571,7 @@ class PostgresqlWorkTest extends HarnessStoreWorkContract {
     assertTrue(
         store
             .transaction(
-                tx -> tx.work().claimNext(WorkTargetType.TOOL, "lease-token-2", LEASE_30S, node2))
+                tx -> tx.work().claimNext(WorkTargetType.TOOL, UUID.randomUUID(), LEASE_30S, node2))
             .isEmpty());
 
     // node1 移交并释放 claim
@@ -578,10 +585,10 @@ class PostgresqlWorkTest extends HarnessStoreWorkContract {
     ClaimedWork reClaim =
         store
             .transaction(
-                tx -> tx.work().claimNext(WorkTargetType.TOOL, "lease-token-2", LEASE_30S, node2))
+                tx -> tx.work().claimNext(WorkTargetType.TOOL, leaseToken2, LEASE_30S, node2))
             .orElseThrow();
     assertEquals(target, reClaim.target());
-    assertEquals("lease-token-2", reClaim.leaseToken());
+    assertEquals(leaseToken2, reClaim.leaseToken());
     assertEquals(env, reClaim.requiredEnvironmentId());
   }
 

@@ -21,7 +21,7 @@ public class PluginAuthAttemptRepository {
           new PluginAuthAttemptRow(
               rs.getString("plugin_id"),
               rs.getString("nonce_hash"),
-              rs.getLong("config_revision"),
+              rs.getLong("config_version"),
               rs.getString("region"),
               toInstant(rs.getObject("expires_at", OffsetDateTime.class)));
 
@@ -36,16 +36,16 @@ public class PluginAuthAttemptRepository {
     jdbc.sql(
             """
             insert into plugin_auth_attempt (
-                plugin_id, nonce_hash, config_revision, region, expires_at)
-            values (:pluginId, :nonceHash, :configRevision, :region, :expiresAt)
+                plugin_id, nonce_hash, config_version, region, expires_at)
+            values (:pluginId, :nonceHash, :configVersion, :region, :expiresAt)
             on conflict (plugin_id) do update
-            set nonce_hash = excluded.nonce_hash, config_revision = excluded.config_revision,
+            set nonce_hash = excluded.nonce_hash, config_version = excluded.config_version,
                 region = excluded.region, expires_at = excluded.expires_at,
                 created_at = current_timestamp
             """)
         .param("pluginId", attempt.pluginId())
         .param("nonceHash", attempt.nonceHash())
-        .param("configRevision", attempt.configRevision())
+        .param("configVersion", attempt.configVersion())
         .param("region", attempt.region())
         .param("expiresAt", toOffsetDateTime(attempt.expiresAt()))
         .update();
@@ -64,7 +64,7 @@ public class PluginAuthAttemptRepository {
             where attempt.plugin_id = :pluginId and attempt.nonce_hash = :nonceHash
               and attempt.expires_at > :now
               and configuration.plugin_id = attempt.plugin_id
-              and configuration.revision = attempt.config_revision
+              and configuration.version = attempt.config_version
             returning attempt.*
             """)
         .param("pluginId", pluginId)

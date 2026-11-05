@@ -1,24 +1,20 @@
 package fun.fengwk.kkstudio.platform.harness.store;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
-import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.cfg.JsonNodeFeature;
-import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.api.CancelledThreadInput;
 import fun.fengwk.kkstudio.harness.api.StoppedThreadReceipt;
 import fun.fengwk.kkstudio.harness.api.command.GoalCommandPayload;
-import fun.fengwk.kkstudio.harness.api.command.SetExecutionCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.SetAgentCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
+import fun.fengwk.kkstudio.harness.api.command.ThreadCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
-import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.api.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.api.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.api.history.AssistantError;
@@ -36,11 +32,12 @@ import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.spi.store.UuidOrder;
 
-import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 /**
@@ -63,9 +60,6 @@ class PostgresqlStopReceiptTest {
 
   private static final String HASH =
       "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-
-  private static final JsonMapper FIXTURE_MAPPER =
-      JsonMapper.builder().enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS).build();
 
   private HarnessStore store;
   private JdbcTemplate jdbcTemplate;
@@ -161,8 +155,56 @@ class PostgresqlStopReceiptTest {
           for (UUID threadId : threadIds) {
             tx.threads().lock(threadId).orElseThrow();
           }
+          seedCancelledCommands(tx, receipts);
           tx.stops().insertReceipts(rootThreadId, rootStopRequestId, receipts);
         });
+  }
+
+  /** 回执的取消计数与输入只从 command 行读取；测试先把同一 Stop 的取消事实写入 command 表，再插入回执。 */
+  private static void seedCancelledCommands(
+      HarnessStore.Transaction tx, List<StoppedThreadReceipt> receipts) {
+    for (StoppedThreadReceipt receipt : receipts) {
+      Set<Long> inputSequences =
+          receipt.cancelledInputs().stream()
+              .map(CancelledThreadInput::sequence)
+              .collect(Collectors.toSet());
+      List<ThreadCommand> commands = new ArrayList<>();
+      for (CancelledThreadInput input : receipt.cancelledInputs()) {
+        commands.add(
+            queuedCommand(
+                receipt.threadId(), input.sequence(), input.idempotencyKey(), input.payload()));
+      }
+      long sequence = 1;
+      for (int index = receipt.cancelledInputs().size();
+          index < receipt.cancelledCommandCount();
+          index++) {
+        while (inputSequences.contains(sequence)) {
+          sequence++;
+        }
+        commands.add(
+            queuedCommand(
+                receipt.threadId(),
+                sequence++,
+                UUID.randomUUID(),
+                new SetAgentCommandPayload("ignored-cancelled-command")));
+      }
+      tx.commands().insert(commands);
+      List<ThreadCommand> cancelled = new ArrayList<>(commands.size());
+      for (ThreadCommand command : commands) {
+        ThreadCommand stored =
+            tx.commands()
+                .find(command.threadId(), command.sequence())
+                .orElseThrow(() -> new IllegalStateException("inserted command is missing"));
+        cancelled.add(stored.cancel(receipt.stopRequestId(), StoreTestSupport.T0));
+      }
+      tx.commands().update(cancelled);
+    }
+  }
+
+  private static ThreadCommand queuedCommand(
+      UUID threadId, long sequence, UUID idempotencyKey, ThreadCommandPayload payload) {
+    return new ThreadCommand(
+        threadId, sequence, payload, idempotencyKey, HASH, null, null, null, StoreTestSupport.T0);
   }
 
   @Test
@@ -377,20 +419,18 @@ class PostgresqlStopReceiptTest {
         IllegalArgumentException.class,
         () -> insertReceipts(tree.rootThreadId(), rootStopRequestId, List.of(rootReceipt)));
 
-    // 直接写库验证 root_thread_id 外键门禁。
-    DataIntegrityViolationException rootFk =
-        assertThrows(
-            DataIntegrityViolationException.class,
-            () ->
-                jdbcTemplate.update(
-                    "insert into harness_thread_stop_receipt (root_thread_id, thread_id, stop_request_id,"
-                        + " root_stop_request_id, cancelled_command_count, cancelled_inputs, created_at)"
-                        + " values (?, ?, ?, ?, 0, '[]'::jsonb, statement_timestamp())",
-                    UUID.randomUUID(),
-                    tree.grandChildThreadId(),
-                    UUID.randomUUID(),
-                    UUID.randomUUID()));
-    assertTrue(rootFk.getMessage().contains("fk_harness_thread_stop_receipt_root_thread"));
+    // root_stop_request_id 只是归组键：根身份由 stop_request_id = root_stop_request_id 的行表达，没有 root 外键。
+    assertEquals(
+        List.of("fk_harness_thread_stop_receipt_thread", "fk_harness_thread_stop_receipt_turn_end"),
+        jdbcTemplate.queryForList(
+            """
+            select constraint_name
+            from information_schema.table_constraints
+            where table_schema = 'public' and table_name = 'harness_thread_stop_receipt'
+              and constraint_type = 'FOREIGN KEY'
+            order by constraint_name
+            """,
+            String.class));
   }
 
   @Test
@@ -421,7 +461,7 @@ class PostgresqlStopReceiptTest {
         store.transaction(
             tx -> tx.stops().loadByRootRequest(tree.rootThreadId(), rootStopRequestId)));
 
-    // 删除根 Thread（连同其回执）不再违反 root_thread_id 外键。
+    // 删除根 Thread（连同其回执）不会留下任何 root 外键残留。
     StoreTestSupport.inTransaction(
         store,
         tx -> {
@@ -676,61 +716,5 @@ class PostgresqlStopReceiptTest {
                       StoreTestSupport.T1));
           return turnEndId;
         });
-  }
-
-  /**
-   * 测试意图：cancelledInputs 的 execution.settings 自由 JSON 数值必须经真实 jsonb 存取后精确还原； 1e309/1e-324 与高精度小数不得在
-   * store 编解码中退化为 double 的 Infinity / 0。
-   *
-   * <p>PostgreSQL jsonb 会按自身规则规范化极端量级的数字文本（{@code 1E+309} 展开为等值全数字），因此这里断言数值精确相等 且原始列不出现 {@code
-   * Infinity}，而不是要求逐字相同的数字文本。
-   */
-  @Test
-  void stopReceiptRoundTripPreservesCancelledInputNumberPrecision() {
-    Tree tree = seedTree("precision");
-    UUID rootStopRequestId = UUID.randomUUID();
-    String dataJson = "{\"big\":1E+309,\"tiny\":1E-324,\"exact\":0.1234567890123456789012345678}";
-    CancelledThreadInput cancelled =
-        new CancelledThreadInput(
-            1,
-            UUID.randomUUID(),
-            new SetExecutionCommandPayload(new ExecutionSelection("builtin", dataJson)));
-    StoppedThreadReceipt rootReceipt =
-        new StoppedThreadReceipt(
-            tree.rootThreadId(), rootStopRequestId, null, 1, List.of(cancelled));
-
-    insertReceipts(tree.rootThreadId(), rootStopRequestId, List.of(rootReceipt));
-
-    StoppedThreadReceipt loaded =
-        store
-            .transaction(tx -> tx.stops().findReceipt(tree.rootThreadId(), rootStopRequestId))
-            .orElseThrow();
-    assertEquals(1, loaded.cancelledInputs().size());
-    CancelledThreadInput loadedInput = loaded.cancelledInputs().getFirst();
-    assertEquals(cancelled.sequence(), loadedInput.sequence());
-    assertEquals(cancelled.idempotencyKey(), loadedInput.idempotencyKey());
-    String loadedDataJson =
-        ((SetExecutionCommandPayload) loadedInput.payload()).execution().settingsJson();
-    JsonNode loadedData = FIXTURE_MAPPER.readTree(loadedDataJson);
-    // 类型必须仍是 JSON number（而不是被改写成 "Infinity" 字符串），数值必须按 BigDecimal 精确相等。
-    for (String field : List.of("big", "tiny", "exact")) {
-      assertTrue(
-          loadedData.get(field).isNumber(), field + " must stay a JSON number: " + loadedData);
-    }
-    assertEquals(0, loadedData.get("big").decimalValue().compareTo(new BigDecimal("1e309")));
-    assertEquals(0, loadedData.get("tiny").decimalValue().compareTo(new BigDecimal("1e-324")));
-    assertEquals(
-        0,
-        loadedData
-            .get("exact")
-            .decimalValue()
-            .compareTo(new BigDecimal("0.1234567890123456789012345678")));
-
-    String raw =
-        jdbcTemplate.queryForObject(
-            "select cancelled_inputs::text from harness_thread_stop_receipt where thread_id = ?",
-            String.class,
-            tree.rootThreadId());
-    assertFalse(raw.contains("Infinity"), raw);
   }
 }

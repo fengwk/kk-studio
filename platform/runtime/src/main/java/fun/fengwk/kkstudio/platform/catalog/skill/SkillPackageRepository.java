@@ -43,7 +43,7 @@ public class SkillPackageRepository {
 
   private static final String COLUMNS =
       "p.package_name, p.description, p.package_version, p.artifact_blob_id, p.manifest,"
-          + " p.published_at, p.version, p.create_time, p.update_time, g.repository_url,"
+          + " p.published_at, p.version, p.created_at, p.updated_at, g.repository_url,"
           + " g.branch, g.token, g.head_commit, g.checked_at, g.check_error";
 
   private static final String FROM =
@@ -71,8 +71,8 @@ public class SkillPackageRepository {
             decodeManifest(rs.getString("manifest")),
             PostgresJdbcTypes.toInstant(rs.getObject("published_at", OffsetDateTime.class)),
             rs.getLong("version"),
-            PostgresJdbcTypes.toInstant(rs.getObject("create_time", OffsetDateTime.class)),
-            PostgresJdbcTypes.toInstant(rs.getObject("update_time", OffsetDateTime.class)),
+            PostgresJdbcTypes.toInstant(rs.getObject("created_at", OffsetDateTime.class)),
+            PostgresJdbcTypes.toInstant(rs.getObject("updated_at", OffsetDateTime.class)),
             gitSource);
       };
 
@@ -124,7 +124,7 @@ public class SkillPackageRepository {
                 """
                 insert into skill_package (
                     package_name, description, package_version, artifact_blob_id, manifest,
-                    published_at, version, create_time, update_time
+                    published_at, version, created_at, updated_at
                 ) values (
                     :packageName, :description, :packageVersion, :artifactBlobId,
                     cast(:manifestJson as jsonb), :publishedAt, :version,
@@ -167,7 +167,7 @@ public class SkillPackageRepository {
                     manifest = cast(:manifestJson as jsonb),
                     published_at = :publishedAt,
                     version = version + 1,
-                    update_time = greatest(update_time, current_timestamp)
+                    updated_at = greatest(updated_at, current_timestamp)
                 where package_name = :packageName and version = :expectedVersion
                 """)
             .param("packageVersion", published.packageVersion())
@@ -194,7 +194,7 @@ public class SkillPackageRepository {
                 update skill_package
                 set description = :description,
                     version = version + 1,
-                    update_time = greatest(update_time, current_timestamp)
+                    updated_at = greatest(updated_at, current_timestamp)
                 where package_name = :packageName and version = :expectedVersion
                 """)
             .param("description", description)

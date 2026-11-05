@@ -348,7 +348,8 @@ class PostgresqlHarnessTransactionNotificationTest {
               .transaction(
                   tx ->
                       tx.work()
-                          .claimNext(WorkTargetType.TOOL, "lease-1", Duration.ofSeconds(60), node))
+                          .claimNext(
+                              WorkTargetType.TOOL, UUID.randomUUID(), Duration.ofSeconds(60), node))
               .orElseThrow();
       listener.expectExactly(interactionNotification(chain.threadId()));
 
@@ -361,7 +362,8 @@ class PostgresqlHarnessTransactionNotificationTest {
               .transaction(
                   tx ->
                       tx.work()
-                          .claimNext(WorkTargetType.TOOL, "lease-2", Duration.ofSeconds(60), node))
+                          .claimNext(
+                              WorkTargetType.TOOL, UUID.randomUUID(), Duration.ofSeconds(60), node))
               .orElseThrow();
       listener.expectExactly(interactionNotification(chain.threadId()));
 
@@ -402,7 +404,10 @@ class PostgresqlHarnessTransactionNotificationTest {
       ClaimedWork claim =
           store
               .transaction(
-                  tx -> tx.work().claimNext(WorkTargetType.TOOL, "lease-1", Duration.ofSeconds(60)))
+                  tx ->
+                      tx.work()
+                          .claimNext(
+                              WorkTargetType.TOOL, UUID.randomUUID(), Duration.ofSeconds(60)))
               .orElseThrow();
       listener.assertSilent();
 
@@ -434,7 +439,8 @@ class PostgresqlHarnessTransactionNotificationTest {
               .transaction(
                   tx ->
                       tx.work()
-                          .claimNext(WorkTargetType.TOOL, "lease-1", Duration.ofSeconds(60), node))
+                          .claimNext(
+                              WorkTargetType.TOOL, UUID.randomUUID(), Duration.ofSeconds(60), node))
               .orElseThrow();
       listener.expectExactly(interactionNotification(chain.threadId()));
 

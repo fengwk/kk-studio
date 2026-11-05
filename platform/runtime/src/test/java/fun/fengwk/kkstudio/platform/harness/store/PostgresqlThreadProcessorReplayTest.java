@@ -133,7 +133,9 @@ class PostgresqlThreadProcessorReplayTest {
     assertTrue(
         store
             .transaction(
-                tx -> tx.work().claimNext(WorkTargetType.TOOL, "test", Duration.ofSeconds(30)))
+                tx ->
+                    tx.work()
+                        .claimNext(WorkTargetType.TOOL, UUID.randomUUID(), Duration.ofSeconds(30)))
             .isEmpty());
   }
 
@@ -297,7 +299,8 @@ class PostgresqlThreadProcessorReplayTest {
               .transaction(
                   tx ->
                       tx.work()
-                          .claimNext(WorkTargetType.THREAD, "first-claim", Duration.ofSeconds(30)))
+                          .claimNext(
+                              WorkTargetType.THREAD, UUID.randomUUID(), Duration.ofSeconds(30)))
               .orElseThrow();
       assertEquals(ThreadProcessResult.COMPLETED, processor.process(first));
       var applied =
@@ -331,7 +334,7 @@ class PostgresqlThreadProcessorReplayTest {
                   tx ->
                       tx.work()
                           .claimNext(
-                              WorkTargetType.THREAD, "continuation-claim", Duration.ofSeconds(30)))
+                              WorkTargetType.THREAD, UUID.randomUUID(), Duration.ofSeconds(30)))
               .orElseThrow();
       assertEquals(ThreadProcessResult.COMPLETED, processor.process(second));
       var continued =

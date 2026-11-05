@@ -348,7 +348,7 @@ class CanvasFunctionStartTest extends CanvasFunctionRuntimeTestSupport {
     UUID targetNodeId = addFunctionNode(canvasId, "target", configWithReference(sourceNodeId));
     CanvasResource source = addBlobResource(canvasId, sourceNodeId, 0, UUID.randomUUID());
 
-    ClaimedRun claim = claimStartedRun(canvasId, targetNodeId, REQUEST_1, "foundation-success");
+    ClaimedRun claim = claimStartedRun(canvasId, targetNodeId, REQUEST_1, UUID.randomUUID());
     CanvasFunctionFrozenRun frozen = decode(claim.run());
     assertEquals(source.blobId(), frozen.manifest().get(0).blobId());
     assertEquals(3L, frozen.manifest().get(0).sizeBytes());

@@ -85,7 +85,7 @@ public class CanvasFunctionRunJdbcStore {
         .optional();
   }
 
-  public boolean ownsRunningRequest(UUID canvasId, UUID nodeId, UUID requestId, String leaseToken) {
+  public boolean ownsRunningRequest(UUID canvasId, UUID nodeId, UUID requestId, UUID leaseToken) {
     return jdbc.sql(
             """
             select exists (
@@ -108,7 +108,7 @@ public class CanvasFunctionRunJdbcStore {
   }
 
   /** 以数据库时钟判断 {@code leaseToken} 是否仍持有该 Run 的 CANVAS_RUN Work 租约。 */
-  public boolean holdsLease(UUID nodeId, String leaseToken) {
+  public boolean holdsLease(UUID nodeId, UUID leaseToken) {
     return jdbc.sql(
             "select exists (select 1 from canvas_function_run where node_id = :nodeId and "
                 + OWNED
@@ -155,7 +155,7 @@ public class CanvasFunctionRunJdbcStore {
   }
 
   public int checkpoint(
-      UUID nodeId, UUID requestId, String leaseToken, String stateJson, OffsetDateTime updatedAt) {
+      UUID nodeId, UUID requestId, UUID leaseToken, String stateJson, OffsetDateTime updatedAt) {
     return jdbc.sql(
             """
             update canvas_function_run
@@ -173,7 +173,7 @@ public class CanvasFunctionRunJdbcStore {
         .update();
   }
 
-  public int transitionTerminal(CanvasFunctionRunDO run, String leaseToken) {
+  public int transitionTerminal(CanvasFunctionRunDO run, UUID leaseToken) {
     return jdbc.sql(
             """
             update canvas_function_run
@@ -194,7 +194,7 @@ public class CanvasFunctionRunJdbcStore {
         .update();
   }
 
-  public int markUnknown(CanvasFunctionRunDO run, String leaseToken) {
+  public int markUnknown(CanvasFunctionRunDO run, UUID leaseToken) {
     return jdbc.sql(
             """
             update canvas_function_run
@@ -287,7 +287,7 @@ public class CanvasFunctionRunJdbcStore {
   }
 
   /** 持有者归还 claim 时把 RUNNING 退回 READY，等待下一次领取。 */
-  public int returnToReady(UUID nodeId, String leaseToken, OffsetDateTime updatedAt) {
+  public int returnToReady(UUID nodeId, UUID leaseToken, OffsetDateTime updatedAt) {
     return jdbc.sql(
             """
             update canvas_function_run

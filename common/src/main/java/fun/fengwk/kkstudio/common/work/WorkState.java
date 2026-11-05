@@ -17,11 +17,9 @@ import java.util.UUID;
 public record WorkState(
     Instant availableAt,
     long wakeVersion,
-    String leaseToken,
+    UUID leaseToken,
     Instant leaseUntil,
     UUID requiredEnvironmentId) {
-
-  private static final int MAX_LEASE_TOKEN_LENGTH = 128;
 
   public WorkState {
     availableAt = Objects.requireNonNull(availableAt, "availableAt");
@@ -68,10 +66,10 @@ public record WorkState(
    * 使用新 token 将 work claim 到 {@code until}。仅当 due 已到且不存在有效 lease，并且 {@code until} 严格晚于 {@code now}
    * 时允许。
    */
-  public WorkState claim(Instant now, String token, Instant until) {
+  public WorkState claim(Instant now, UUID token, Instant until) {
     Objects.requireNonNull(now, "now");
     Objects.requireNonNull(until, "until");
-    String canonicalToken = requireLeaseToken(token);
+    UUID canonicalToken = requireLeaseToken(token);
     if (availableAt.isAfter(now)) {
       throw new IllegalArgumentException("work is not available yet");
     }
@@ -85,7 +83,7 @@ public record WorkState(
   }
 
   /** 在 lease 仍有效时延长它；{@code until} 必须严格晚于当前 {@code leaseUntil}。过期 lease 或 token 不匹配都被拒绝。 */
-  public WorkState renew(String token, Instant now, Instant until) {
+  public WorkState renew(UUID token, Instant now, Instant until) {
     Objects.requireNonNull(now, "now");
     Objects.requireNonNull(until, "until");
     requireActiveLease(token, now);
@@ -96,7 +94,7 @@ public record WorkState(
   }
 
   /** 在 lease 仍有效时完成 {@code claimedWakeVersion}：版本相同返回空（删除行）；处理期间出现更新的 wake 时只清除 lease，保留行与 due。 */
-  public Optional<WorkState> complete(String token, long claimedWakeVersion, Instant now) {
+  public Optional<WorkState> complete(UUID token, long claimedWakeVersion, Instant now) {
     Objects.requireNonNull(now, "now");
     requireActiveLease(token, now);
     requireClaimedWakeVersion(claimedWakeVersion);
@@ -111,7 +109,7 @@ public record WorkState(
    * due。 lease 总是被清除，保留环境亲和性。
    */
   public WorkState reschedule(
-      String token, long claimedWakeVersion, Instant now, Instant availableAt) {
+      UUID token, long claimedWakeVersion, Instant now, Instant availableAt) {
     Objects.requireNonNull(now, "now");
     Objects.requireNonNull(availableAt, "availableAt");
     requireActiveLease(token, now);
@@ -126,7 +124,7 @@ public record WorkState(
   }
 
   /** 在 lease 仍有效时主动释放 claim：清除 lease，使 work 立即可被认领；不改变 wakeVersion 与环境亲和性。 */
-  public WorkState release(String token, Instant now) {
+  public WorkState release(UUID token, Instant now) {
     Objects.requireNonNull(now, "now");
     requireActiveLease(token, now);
     Instant nextAvailableAt = availableAt.isAfter(now) ? now : availableAt;
@@ -139,7 +137,7 @@ public record WorkState(
   }
 
   /** 校验 token 匹配且 lease 在 {@code now} 仍有效；失败表示丢失所有权。 */
-  public void requireActiveLease(String token, Instant now) {
+  public void requireActiveLease(UUID token, Instant now) {
     Objects.requireNonNull(token, "token");
     Objects.requireNonNull(now, "now");
     if (leaseToken == null || !leaseToken.equals(token)) {
@@ -150,18 +148,9 @@ public record WorkState(
     }
   }
 
-  /** 校验 canonical lease token：非空白、无首尾空白且不超过 128 个字符。 */
-  public static String requireLeaseToken(String token) {
-    if (token == null || token.isBlank()) {
-      throw new IllegalArgumentException("lease token must not be blank");
-    }
-    if (!token.equals(token.strip())) {
-      throw new IllegalArgumentException("lease token must not contain surrounding whitespace");
-    }
-    if (token.length() > MAX_LEASE_TOKEN_LENGTH) {
-      throw new IllegalArgumentException("lease token must be <= 128 characters");
-    }
-    return token;
+  /** lease token 是全局唯一 UUID，不接受其它文本形态。 */
+  public static UUID requireLeaseToken(UUID token) {
+    return Objects.requireNonNull(token, "lease token");
   }
 
   private void requireClaimedWakeVersion(long claimedWakeVersion) {

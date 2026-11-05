@@ -15,8 +15,8 @@ import fun.fengwk.kkstudio.harness.spi.ToolInvocationRequest;
 import fun.fengwk.kkstudio.platform.harness.tool.gateway.HarnessToolGatewayConfiguration;
 import fun.fengwk.kkstudio.platform.harness.tool.gateway.ToolExecutionGateway;
 import fun.fengwk.kkstudio.platform.settings.HttpProxySelector;
-import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
+import fun.fengwk.kkstudio.platform.settings.SystemSettingsTestFixture;
 
 import java.net.ProxySelector;
 import java.time.Duration;
@@ -33,7 +33,7 @@ class GatewayConfigurationConditionalTest {
               "systemProxySelector", ProxySelector.class, () -> HttpProxySelector.fixed(null, ""))
           .withBean(
               SystemSettingsSnapshot.class,
-              () -> new SystemSettingsSnapshot(SystemSettings.DEFAULT));
+              () -> new SystemSettingsSnapshot(SystemSettingsTestFixture.DEFAULT));
 
   @Test
   void modelGatewayDefaultBeanIsSuppressedByAnyPortImplementation() {

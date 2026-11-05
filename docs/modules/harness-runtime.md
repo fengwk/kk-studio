@@ -286,7 +286,7 @@ manualMinimum    = min(keepRecentTokens*2, C/2)
 
 Stop 在 tree 锁内校验目标 version 与 `stopRequestId`，按 `parentThreadId` 停止目标及全部后代（目标已空闲或已停止时仍覆盖后代）。事务先物化已提交的 Model/Tool 结果，再闭合在途回合，按类型 rank 顺序锁定并清理 THREAD、Driver 声明的 Work 与 TOOL；只有退出事实与直接子 Join 已收敛时才冻结 Join 结果，否则保留未完成 Join，由后续退出 ACK 推进。无 open 回合时追加 `TURN_START(STOP) → ASSISTANT_ERROR(CANCELLED) → TURN_END(STOPPED)` 屏障；已有 open 回合时按真实结果闭合，必要时补齐未知工具结果，绝不嵌套回合或伪造成功。
 
-[`StopResult`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/StopResult.java) 返回完整受影响集合；每个 [`StoppedThreadReceipt`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/StoppedThreadReceipt.java) 记录停止边界、取消数量与被退回的人工输入（`USER_MESSAGE` / `GOAL`）。`CUSTOM_MESSAGE` 与设置命令被取消但不退回；`NOTIFICATION` 不取消，而是物化进历史、同步推进 `inputThroughSequence` 且不唤醒模型。整次 Stop 按 `(root_thread_id, root_stop_request_id)` 持久化：精确重放返回原集合、不重停新工作，后代的派生身份被当作新请求复用时为 `STOP_REQUEST_ID_REUSED`。
+[`StopResult`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/StopResult.java) 返回完整受影响集合；每个 [`StoppedThreadReceipt`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/StoppedThreadReceipt.java) 记录停止边界、取消数量与被退回的人工输入（`USER_MESSAGE` / `GOAL`）。`CUSTOM_MESSAGE` 与设置命令被取消但不退回；`NOTIFICATION` 不取消，而是物化进历史、同步推进 `inputThroughSequence` 且不唤醒模型。整次 Stop 只持久化每个 Thread 的 `(thread_id, stop_request_id)` 身份与停止边界，按 `root_stop_request_id` 归组；精确重放返回原集合、不重停新工作，后代的派生身份被当作新请求复用时为 `STOP_REQUEST_ID_REUSED`。
 
 显式新输入恢复 STOPPED 目标前，必须已无 `UNCONFIRMED` 执行，且没有未完成的直接 `NOTIFY_PARENT` 或 `SETTLE_OWNER_TURN` 子 Join；`ABANDONED` 或已确认执行不阻塞恢复。设置类维护输入不触发恢复，因此不受此限制。已收敛后代的退出 ACK 可递归完成祖先的 Join 结算，不依赖祖先重新启动。
 

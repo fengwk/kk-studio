@@ -5,7 +5,6 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doAnswer;
@@ -65,7 +64,7 @@ class CanvasFunctionRuntimeConfigurationTest {
     CanvasFunctionWorker worker = mock(CanvasFunctionWorker.class);
     ClaimedRun first = claim("first");
     ClaimedRun second = claim("second");
-    when(store.claimNext(any(), anyString()))
+    when(store.claimNext(any(), any(UUID.class)))
         .thenReturn(Optional.of(first), Optional.of(second), Optional.empty());
     CountDownLatch entered = new CountDownLatch(1);
     CountDownLatch release = new CountDownLatch(1);
@@ -102,7 +101,7 @@ class CanvasFunctionRuntimeConfigurationTest {
     CanvasFunctionWorker worker = mock(CanvasFunctionWorker.class);
     ClaimedRun first = claim("fatal");
     ClaimedRun second = claim("after-fatal");
-    when(store.claimNext(any(), anyString()))
+    when(store.claimNext(any(), any(UUID.class)))
         .thenReturn(Optional.of(first), Optional.of(second), Optional.empty());
     OutOfMemoryError fatal = new OutOfMemoryError("simulated fatal error");
     doThrow(fatal).when(worker).run(first);
@@ -145,7 +144,7 @@ class CanvasFunctionRuntimeConfigurationTest {
     CanvasFunctionWorker worker = mock(CanvasFunctionWorker.class);
     ClaimedRun first = claim("executor-rejected");
     ClaimedRun second = claim("after-executor-error");
-    when(store.claimNext(any(), anyString()))
+    when(store.claimNext(any(), any(UUID.class)))
         .thenReturn(Optional.of(first), Optional.of(second), Optional.empty());
     AssertionError fatal = new AssertionError("worker executor failed before accepting the task");
     AtomicBoolean rejectFirst = new AtomicBoolean(true);
@@ -178,7 +177,7 @@ class CanvasFunctionRuntimeConfigurationTest {
     CanvasFunctionWorkStore store = mock(CanvasFunctionWorkStore.class);
     CanvasFunctionWorker worker = mock(CanvasFunctionWorker.class);
     ClaimedRun claim = claim("rejected");
-    when(store.claimNext(any(), anyString())).thenReturn(Optional.of(claim));
+    when(store.claimNext(any(), any(UUID.class))).thenReturn(Optional.of(claim));
     Executor rejecting =
         task -> {
           throw new RejectedExecutionException("full");
@@ -192,7 +191,7 @@ class CanvasFunctionRuntimeConfigurationTest {
           verify(store).reschedule(any(), any());
           return true;
         });
-    verify(store).claimNext(any(), anyString());
+    verify(store).claimNext(any(), any(UUID.class));
     dispatcher.stop();
   }
 
@@ -202,7 +201,7 @@ class CanvasFunctionRuntimeConfigurationTest {
     CanvasFunctionWorkStore store = mock(CanvasFunctionWorkStore.class);
     CanvasFunctionWorker worker = mock(CanvasFunctionWorker.class);
     ClaimedRun delayed = claim("poll");
-    when(store.claimNext(any(), anyString()))
+    when(store.claimNext(any(), any(UUID.class)))
         .thenReturn(Optional.empty(), Optional.of(delayed), Optional.empty());
     BoundedWorkDispatcher<ClaimedRun> dispatcher =
         dispatcher(store, worker, workerExecutor, properties(20));
@@ -215,7 +214,7 @@ class CanvasFunctionRuntimeConfigurationTest {
         });
     dispatcher.stop();
     assertFalse(dispatcher.isRunning());
-    verify(store, atLeastOnce()).claimNext(any(), anyString());
+    verify(store, atLeastOnce()).claimNext(any(), any(UUID.class));
   }
 
   /** 调度器在 start 前与 stop 后都不触库，且 stop 后禁止重启。 */
@@ -223,12 +222,12 @@ class CanvasFunctionRuntimeConfigurationTest {
   void stoppedDispatcherDoesNotClaim() {
     CanvasFunctionWorkStore store = mock(CanvasFunctionWorkStore.class);
     CanvasFunctionWorker worker = mock(CanvasFunctionWorker.class);
-    when(store.claimNext(any(), anyString())).thenReturn(Optional.empty());
+    when(store.claimNext(any(), any(UUID.class))).thenReturn(Optional.empty());
     BoundedWorkDispatcher<ClaimedRun> dispatcher =
         dispatcher(store, worker, workerExecutor, properties(1_000));
 
     dispatcher.wake();
-    verify(store, never()).claimNext(any(), anyString());
+    verify(store, never()).claimNext(any(), any(UUID.class));
     dispatcher.start();
     dispatcher.stop();
     dispatcher.wake();
@@ -250,10 +249,10 @@ class CanvasFunctionRuntimeConfigurationTest {
         dispatcher(store, worker, rejectingDrain, workerExecutor, properties(1_000));
     rejected.start();
     rejected.wake();
-    verify(store, never()).claimNext(any(), anyString());
+    verify(store, never()).claimNext(any(), any(UUID.class));
     rejected.stop();
 
-    when(store.claimNext(any(), anyString()))
+    when(store.claimNext(any(), any(UUID.class)))
         .thenThrow(new IllegalStateException("database unavailable"))
         .thenReturn(Optional.empty());
     BoundedWorkDispatcher<ClaimedRun> retryable =
@@ -261,7 +260,7 @@ class CanvasFunctionRuntimeConfigurationTest {
     retryable.start();
     await(
         () -> {
-          verify(store, atLeastOnce()).claimNext(any(), anyString());
+          verify(store, atLeastOnce()).claimNext(any(), any(UUID.class));
           return true;
         });
     retryable.wake();
@@ -309,7 +308,7 @@ class CanvasFunctionRuntimeConfigurationTest {
             NOW,
             NOW);
     return new ClaimedRun(
-        run, new WorkClaim(run.nodeId(), 1L, "lease", Instant.EPOCH.plusSeconds(30)));
+        run, new WorkClaim(run.nodeId(), 1L, UUID.randomUUID(), Instant.EPOCH.plusSeconds(30)));
   }
 
   private static void await(Check check) throws Exception {

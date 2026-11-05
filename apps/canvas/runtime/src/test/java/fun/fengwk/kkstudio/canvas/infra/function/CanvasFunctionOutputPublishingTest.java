@@ -39,7 +39,7 @@ class CanvasFunctionOutputPublishingTest extends CanvasFunctionRuntimeTestSuppor
         addFunctionNode(
             canvasId, "multi-media-node", MULTI_MEDIA_DEFINITION.name(), configWithoutReferences());
 
-    ClaimedRun claim = claimStartedRun(canvasId, nodeId, REQUEST_1, "worker-two-media");
+    ClaimedRun claim = claimStartedRun(canvasId, nodeId, REQUEST_1, UUID.randomUUID());
     CanvasFunctionFrozenRun frozen = decode(claim.run());
     assertEquals(2, frozen.outputs().size());
     CanvasFunctionFrozenOutput slot0 = frozen.output(0);
@@ -89,7 +89,7 @@ class CanvasFunctionOutputPublishingTest extends CanvasFunctionRuntimeTestSuppor
         addFunctionNode(
             canvasId, "text-image-node", TEXT_IMAGE_DEFINITION.name(), configWithoutReferences());
 
-    ClaimedRun claim = claimStartedRun(canvasId, nodeId, REQUEST_1, "worker-text-image");
+    ClaimedRun claim = claimStartedRun(canvasId, nodeId, REQUEST_1, UUID.randomUUID());
     CanvasFunctionFrozenRun frozen = decode(claim.run());
     assertEquals(2, frozen.outputs().size());
     CanvasFunctionFrozenOutput slot0Text = frozen.output(0);
@@ -158,7 +158,7 @@ class CanvasFunctionOutputPublishingTest extends CanvasFunctionRuntimeTestSuppor
             configWithoutReferences());
 
     // 1. Worker 1 认领并推进提交确认
-    ClaimedRun claim1 = claimStartedRun(canvasId, nodeId, REQUEST_1, "worker-1-crash");
+    ClaimedRun claim1 = claimStartedRun(canvasId, nodeId, REQUEST_1, UUID.randomUUID());
     CanvasFunctionFrozenRun initialFrozen = decode(claim1.run());
     CanvasFunctionFrozenRun submittingFrozen =
         runtimeTransactions.beginSubmit(initialFrozen, claim1.leaseToken());
@@ -198,7 +198,7 @@ class CanvasFunctionOutputPublishingTest extends CanvasFunctionRuntimeTestSuppor
 
     // 3. Worker 2 重新认领
     ClaimedRun claim2 =
-        workStore.claimNext(Duration.ofSeconds(30), "worker-2-recovered").orElseThrow();
+        workStore.claimNext(Duration.ofSeconds(30), UUID.randomUUID()).orElseThrow();
     assertEquals(nodeId, claim2.nodeId());
     assertEquals(REQUEST_1, claim2.requestId().toString());
     CanvasFunctionFrozenRun frozen2 = decode(claim2.run());
@@ -237,7 +237,7 @@ class CanvasFunctionOutputPublishingTest extends CanvasFunctionRuntimeTestSuppor
         addFunctionNode(
             canvasId, "dup-mat-node", TWO_IMAGES_DEFINITION.name(), configWithoutReferences());
 
-    ClaimedRun claim = claimStartedRun(canvasId, nodeId, REQUEST_1, "worker-dup-mat");
+    ClaimedRun claim = claimStartedRun(canvasId, nodeId, REQUEST_1, UUID.randomUUID());
     CanvasFunctionFrozenRun frozen = decode(claim.run());
     CanvasFunctionFrozenOutput slot0 = frozen.output(0);
 
@@ -268,7 +268,7 @@ class CanvasFunctionOutputPublishingTest extends CanvasFunctionRuntimeTestSuppor
             TWO_IMAGES_DEFINITION.name(),
             configWithoutReferences());
 
-    ClaimedRun claim = claimStartedRun(canvasId, nodeId, REQUEST_1, "worker-missing-output");
+    ClaimedRun claim = claimStartedRun(canvasId, nodeId, REQUEST_1, UUID.randomUUID());
     CanvasFunctionFrozenRun frozen = decode(claim.run());
     CanvasFunctionFrozenOutput slot0 = frozen.output(0);
 

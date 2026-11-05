@@ -92,7 +92,7 @@ class JdbcClusterNodeRegistryIntegrationTest extends PostgresSchemaSupport {
   private void seedNode(UUID nodeInstanceId, String internalUrl, Instant leaseUntil) {
     jdbcClient
         .sql(
-            "insert into cluster_node (instance_id, internal_url, lease_until, last_seen)"
+            "insert into cluster_node (instance_id, internal_url, lease_until, last_seen_at)"
                 + " values (?, ?, ?, ?)")
         .params(
             nodeInstanceId,
@@ -192,7 +192,7 @@ class JdbcClusterNodeRegistryIntegrationTest extends PostgresSchemaSupport {
     jdbcClient
         .sql(
             """
-            insert into cluster_node (instance_id, internal_url, lease_until, last_seen)
+            insert into cluster_node (instance_id, internal_url, lease_until, last_seen_at)
             values (?, ?, statement_timestamp() + interval '1 hour', statement_timestamp())
             """)
         .params(NODE_B, NODE_B_URL)
@@ -202,11 +202,11 @@ class JdbcClusterNodeRegistryIntegrationTest extends PostgresSchemaSupport {
     assertTrue(route.isPresent());
     assertFalse(route.get().local());
 
-    // 注册行由数据库现在时判定过期：last_seen 同步后移以满足 lease_until > last_seen 约束。
+    // 注册行由数据库现在时判定过期：last_seen_at 同步后移以满足 lease_until > last_seen_at 约束。
     jdbcClient
         .sql(
             "update cluster_node set lease_until = statement_timestamp() - interval '1 hour',"
-                + " last_seen = statement_timestamp() - interval '2 hour' where instance_id = ?")
+                + " last_seen_at = statement_timestamp() - interval '2 hour' where instance_id = ?")
         .params(NODE_B)
         .update();
     assertTrue(registry(NODE_A, SECRET).route(ENV).isEmpty());

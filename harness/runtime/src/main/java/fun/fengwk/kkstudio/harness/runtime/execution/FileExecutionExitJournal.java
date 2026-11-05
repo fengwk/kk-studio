@@ -324,7 +324,7 @@ public final class FileExecutionExitJournal implements ExecutionExitJournal {
     node.put("threadId", record.threadId().toString());
     node.put("invocationId", record.invocationId().toString());
     node.put("attempt", record.attempt());
-    node.put("ownerLeaseToken", record.ownerLeaseToken());
+    node.put("ownerLeaseToken", record.ownerLeaseToken().toString());
     node.put("kind", record.kind().name());
     if (record.parentExecutionId() == null) {
       node.putNull("parentExecutionId");
@@ -375,7 +375,7 @@ public final class FileExecutionExitJournal implements ExecutionExitJournal {
         uuid(node.get("threadId"), "threadId"),
         uuid(node.get("invocationId"), "invocationId"),
         attemptNode.intValue(),
-        text(node.get("ownerLeaseToken"), "ownerLeaseToken"),
+        uuid(node.get("ownerLeaseToken"), "ownerLeaseToken"),
         ExecutionExitKind.valueOf(text(node.get("kind"), "kind")),
         parent,
         environmentId,

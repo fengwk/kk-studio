@@ -14,6 +14,7 @@ import static fun.fengwk.kkstudio.platform.harness.dispatch.DispatcherTestSuppor
 import static fun.fengwk.kkstudio.platform.harness.dispatch.DispatcherTestSupport.work;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -185,7 +186,7 @@ class HarnessWorkDispatcherHandoffTest {
     awaitTrue(() -> claims.size() == 3);
     for (ClaimedWork claim : claims) {
       assertEquals(NOW.plus(LEASE), claim.leaseUntil());
-      assertTrue(isUuidToken(claim.leaseToken()));
+      assertNotNull(claim.leaseToken());
     }
 
     // 同一目标再次 claim 必须拿到新 token。
@@ -845,10 +846,6 @@ class HarnessWorkDispatcherHandoffTest {
   private static void detachListAppender(Class<?> type, ListAppender<ILoggingEvent> appender) {
     ((Logger) LoggerFactory.getLogger(type)).detachAppender(appender);
     appender.stop();
-  }
-
-  private static boolean isUuidToken(String token) {
-    return token.matches("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}");
   }
 
   private static final class FakeModelGateway extends SingleModelGateway {

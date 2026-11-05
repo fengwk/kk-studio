@@ -93,8 +93,8 @@ public final class PluginConfigurationService {
     }
     PluginConfigurationRow current =
         configurations.find(pluginId).orElseThrow(() -> DomainException.notFound(RESOURCE));
-    if (current.revision() != expectedRevision) {
-      throw conflict(expectedRevision, current.revision());
+    if (current.version() != expectedRevision) {
+      throw conflict(expectedRevision, current.version());
     }
     Optional<PluginCredentialRow> existing = credentials.find(pluginId);
     CredentialChange change = credentialChange(plugin, current, resolved, patch, existing);
@@ -103,8 +103,7 @@ public final class PluginConfigurationService {
         status -> {
           agentDependencies.requireDeclaredAgents(pluginId, expectedRevision + 1, resolved);
           if (!configurations.update(pluginId, expectedRevision, resolved)) {
-            throw conflict(
-                expectedRevision, configurations.find(pluginId).orElseThrow().revision());
+            throw conflict(expectedRevision, configurations.find(pluginId).orElseThrow().version());
           }
           switch (change.action()) {
             case WRITE -> credentials.upsertConnected(

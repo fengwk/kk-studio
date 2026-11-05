@@ -166,7 +166,7 @@ class RealtimeSubscriptionServiceIntegrationTest extends PostgresSchemaSupport {
 
   private void expireNodeLease() {
     jdbc.sql(
-            "update cluster_node set last_seen = statement_timestamp() - interval '2 minutes',"
+            "update cluster_node set last_seen_at = statement_timestamp() - interval '2 minutes',"
                 + " lease_until = statement_timestamp() - interval '1 second' where instance_id = ?")
         .param(NODE_A)
         .update();
@@ -175,7 +175,7 @@ class RealtimeSubscriptionServiceIntegrationTest extends PostgresSchemaSupport {
   private void seedNode(UUID nodeInstanceId, long leaseMillis) {
     jdbc.sql(
             """
-            insert into cluster_node (instance_id, internal_url, lease_until, last_seen)
+            insert into cluster_node (instance_id, internal_url, lease_until, last_seen_at)
             values (?, ?,
                 statement_timestamp() + (? * interval '1 millisecond'),
                 statement_timestamp())

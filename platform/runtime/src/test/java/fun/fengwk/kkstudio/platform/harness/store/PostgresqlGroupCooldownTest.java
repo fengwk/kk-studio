@@ -196,7 +196,9 @@ class PostgresqlGroupCooldownTest {
     var claim =
         store
             .transaction(
-                tx -> tx.work().claimNext(BuiltinWorkType.MODEL, "rollback", Duration.ofMinutes(1)))
+                tx ->
+                    tx.work()
+                        .claimNext(BuiltinWorkType.MODEL, UUID.randomUUID(), Duration.ofMinutes(1)))
             .orElseThrow();
     var before = store.transaction(tx -> tx.work().find(target).orElseThrow());
     assertThrows(

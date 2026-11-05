@@ -29,6 +29,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.function.Function;
@@ -125,15 +126,16 @@ class ToolProcessorExecutionScopeTest {
             true);
     ToolProcessorTestSupport.toRunning(
         fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW);
+    UUID oldLease = UUID.randomUUID();
     ExecutionExitFact oldToolFact =
         ToolProcessorTestSupport.registerOldToolExit(
-            fixture.store, fixture.baseline.threadId(), fixture.toolInvocationId, 1, "old-token");
+            fixture.store, fixture.baseline.threadId(), fixture.toolInvocationId, 1, oldLease);
     ToolProcessorTestSupport.registerRemoteExit(
         fixture.store,
         fixture.baseline.threadId(),
         fixture.toolInvocationId,
         1,
-        "old-token",
+        oldLease,
         oldToolFact.executionId(),
         ToolProcessorTestSupport.ENV_ID);
     ToolProcessorTestSupport.claim(

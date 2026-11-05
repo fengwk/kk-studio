@@ -197,7 +197,7 @@ abstract class CanvasFunctionRuntimeTestSupport extends PostgresCanvasInfraTestS
   }
 
   /** start 提交的 availableAt 是 claim 的权威时间；不能用独立 wall clock 跨过同一事务的时间边界。 */
-  ClaimedRun claimStartedRun(UUID canvasId, UUID nodeId, String requestId, String ownerToken) {
+  ClaimedRun claimStartedRun(UUID canvasId, UUID nodeId, String requestId, UUID ownerToken) {
     CanvasFunctionRun started = startRun(canvasId, nodeId, requestId).run();
     ClaimedRun claim = workStore.claimNext(Duration.ofSeconds(30), ownerToken).orElseThrow();
     assertEquals(nodeId, claim.nodeId(), "claim must correspond to the started node");

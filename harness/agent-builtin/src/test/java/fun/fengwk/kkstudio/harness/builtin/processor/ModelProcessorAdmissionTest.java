@@ -91,7 +91,10 @@ class ModelProcessorAdmissionTest extends ModelProcessorTestSupport {
             .<Optional<ClaimedWork>>transaction(
                 tx ->
                     tx.work()
-                        .claimNext(WorkTargetType.THREAD, "thread-token", Duration.ofSeconds(60)))
+                        .claimNext(
+                            WorkTargetType.THREAD,
+                            token(fixture.invocationId, "thread"),
+                            Duration.ofSeconds(60)))
             .orElseThrow();
     assertThrows(IllegalArgumentException.class, () -> fixture.processor.process(threadClaim));
   }
@@ -122,7 +125,7 @@ class ModelProcessorAdmissionTest extends ModelProcessorTestSupport {
     Work modelWork =
         work(fixture.store, new WorkTarget(BuiltinWorkType.MODEL, fixture.invocationId));
     assertNotNull(modelWork);
-    assertEquals("token-" + fixture.invocationId, modelWork.leaseToken());
+    assertEquals(token(fixture.invocationId), modelWork.leaseToken());
   }
 
   /**
@@ -297,7 +300,8 @@ class ModelProcessorAdmissionTest extends ModelProcessorTestSupport {
             new DriverRegistry(
                 List.of(
                     HarnessRuntimeTestSupport.driver(
-                        fixture.store, (threadId, rootSessionId, candidatePath, preparation) -> null))),
+                        fixture.store,
+                        (threadId, rootSessionId, candidatePath, preparation) -> null))),
             () -> CompactionConfig.DEFAULT,
             processor::cancel,
             mock(ToolProcessor.class)::cancel);

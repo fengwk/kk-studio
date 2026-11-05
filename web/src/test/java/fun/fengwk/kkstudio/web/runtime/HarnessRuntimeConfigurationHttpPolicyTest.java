@@ -16,6 +16,7 @@ import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderConfigurationC
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderRepository;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
+import fun.fengwk.kkstudio.platform.settings.SystemSettingsTestFixture;
 
 import java.util.HashMap;
 import java.util.List;
@@ -87,9 +88,9 @@ class HarnessRuntimeConfigurationHttpPolicyTest {
   }
 
   private static SystemSettings settingsWithRetryList(List<Integer> retryStatusCodes) {
-    SystemSettings.AiRuntime ai = SystemSettings.DEFAULT.aiRuntime();
+    SystemSettings.AiRuntime ai = SystemSettingsTestFixture.DEFAULT.aiRuntime();
     return new SystemSettings(
-        SystemSettings.DEFAULT.tool(),
+        SystemSettingsTestFixture.DEFAULT.tool(),
         new SystemSettings.AiRuntime(
             ai.retryMaxRetries(),
             ai.retryBackoffStrategy(),
@@ -101,10 +102,10 @@ class HarnessRuntimeConfigurationHttpPolicyTest {
             ai.subagentMaxTotalConcurrency(),
             ai.subagentMaxTurns(),
             retryStatusCodes),
-        SystemSettings.DEFAULT.environment(),
-        SystemSettings.DEFAULT.network(),
-        SystemSettings.DEFAULT.storageMedia(),
-        SystemSettings.DEFAULT.advanced());
+        SystemSettingsTestFixture.DEFAULT.environment(),
+        SystemSettingsTestFixture.DEFAULT.network(),
+        SystemSettingsTestFixture.DEFAULT.storageMedia(),
+        SystemSettingsTestFixture.DEFAULT.advanced());
   }
 
   private static AgentProvider provider(String name, String configJson) {

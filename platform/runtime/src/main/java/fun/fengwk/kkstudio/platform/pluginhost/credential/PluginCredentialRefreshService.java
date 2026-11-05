@@ -76,9 +76,7 @@ public final class PluginCredentialRefreshService {
     for (int pass = 0; pass < MAX_REFRESH_PASSES; pass++) {
       Optional<PluginCredentialRow> claimed =
           repository.claimDue(
-              refreshable,
-              properties.getRefresh().getLeaseDuration(),
-              UUID.randomUUID().toString());
+              refreshable, properties.getRefresh().getLeaseDuration(), UUID.randomUUID());
       if (claimed.isEmpty() || !refreshClaimed(claimed.get())) {
         return finalized;
       }

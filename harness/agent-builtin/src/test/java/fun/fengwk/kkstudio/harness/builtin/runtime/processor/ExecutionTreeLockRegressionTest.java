@@ -119,7 +119,8 @@ class ExecutionTreeLockRegressionTest {
             .transaction(
                 tx ->
                     tx.work()
-                        .claimNext(BuiltinWorkType.MODEL, "token-model-1", Duration.ofSeconds(60)))
+                        .claimNext(
+                            BuiltinWorkType.MODEL, UUID.randomUUID(), Duration.ofSeconds(60)))
             .orElseThrow();
 
     ModelExecution execution =
@@ -221,7 +222,8 @@ class ExecutionTreeLockRegressionTest {
             .transaction(
                 tx ->
                     tx.work()
-                        .claimNext(BuiltinWorkType.MODEL, "token-model-2", Duration.ofSeconds(60)))
+                        .claimNext(
+                            BuiltinWorkType.MODEL, UUID.randomUUID(), Duration.ofSeconds(60)))
             .orElseThrow();
 
     ModelStreamConfig flushConfig =

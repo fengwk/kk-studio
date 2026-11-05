@@ -167,7 +167,7 @@ class ComfyuiPluginPostgresIntegrationTest {
                     IllegalArgumentException.class,
                     () -> PluginCanvasFunctionCatalog.of(snapshot).catalog().require(FUNCTION));
               }
-              assertEquals(1L, repository.find(COMFYUI).orElseThrow().revision());
+              assertEquals(1L, repository.find(COMFYUI).orElseThrow().version());
             });
   }
 
@@ -215,7 +215,7 @@ class ComfyuiPluginPostgresIntegrationTest {
                       configuration.configure(
                           COMFYUI, 1L, enabledValues("not-json", "1", "value", "2"), Map.of()));
 
-              assertEquals(1L, repository.find(COMFYUI).orElseThrow().revision());
+              assertEquals(1L, repository.find(COMFYUI).orElseThrow().version());
               try (PluginCatalogRuntime.Lease lease = runtime.acquire()) {
                 assertTrue(
                     PluginCanvasFunctionCatalog.of(lease.snapshot()).catalog().list().isEmpty());

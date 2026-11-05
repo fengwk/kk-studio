@@ -147,13 +147,13 @@ final class InMemoryWorkStore implements WorkStore {
 
   @Override
   public Optional<ClaimedWork> claimNext(
-      WorkTargetType targetType, String leaseToken, Duration leaseDuration) {
+      WorkTargetType targetType, UUID leaseToken, Duration leaseDuration) {
     return claimNext(targetType, leaseToken, leaseDuration, null);
   }
 
   @Override
   public Optional<ClaimedWork> claimNext(
-      WorkTargetType targetType, String leaseToken, Duration leaseDuration, UUID nodeInstanceId) {
+      WorkTargetType targetType, UUID leaseToken, Duration leaseDuration, UUID nodeInstanceId) {
     tx.checkOpen();
     Instant now = tx.now();
     Objects.requireNonNull(targetType, "targetType");

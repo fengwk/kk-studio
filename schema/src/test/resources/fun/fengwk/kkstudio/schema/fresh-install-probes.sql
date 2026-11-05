@@ -125,13 +125,13 @@ select pg_temp.assert_true('environment install code clears to SQL NULL',
     (select install_code is null from environment where id = pg_temp.uid(9000)));
 
 -- cluster_node: node registry carries only reachability origin + lease metadata, not liveness bytes.
-insert into cluster_node (instance_id, internal_url, lease_until, last_seen)
+insert into cluster_node (instance_id, internal_url, lease_until, last_seen_at)
     values (pg_temp.uid(9200), 'https://node-a.internal:8443',
         now() + interval '1 minute', now());
 select pg_temp.assert_true('cluster node registry accepts a fresh node lease',
-    (select lease_until > last_seen from cluster_node where instance_id = pg_temp.uid(9200)));
-select pg_temp.rejects('cluster node lease must be after last_seen',
-    $$insert into cluster_node (instance_id, internal_url, lease_until, last_seen)
+    (select lease_until > last_seen_at from cluster_node where instance_id = pg_temp.uid(9200)));
+select pg_temp.rejects('cluster node lease must be after last_seen_at',
+    $$insert into cluster_node (instance_id, internal_url, lease_until, last_seen_at)
         values (pg_temp.uid(9201), 'https://node-b.internal:8443',
             now(), now() + interval '1 minute')$$,
     '23514', 'ck_cluster_node_lease');
@@ -180,9 +180,6 @@ select pg_temp.rejects('execution requires object settings',
     $$insert into agent_definition(name,type,execution,config)
       values('probe-invalid','BUILTIN','{"driver":"x","settings":null}','{}')$$,
     '23514', 'ck_agent_definition_execution_shape');
-select pg_temp.rejects('user agent requires execution',
-    $$insert into agent_definition(name,type,config) values('probe-user','USER','{}')$$,
-    '23514', 'ck_agent_definition_user_requires_execution');
 select pg_temp.rejects('execution rejects extra fields',
     $$insert into agent_definition(name,execution,config)
       values('probe-extra','{"driver":"x","settings":{},"extra":true}','{}')$$,
@@ -386,19 +383,6 @@ select pg_temp.rejects('Issue state must be an uppercase code',
 update project_issue set state='ORPHAN_CODE' where id = pg_temp.uid(12);
 select pg_temp.assert_true('workflow membership is application-validated, not a DB FK/CHECK',
     (select state = 'ORPHAN_CODE' from project_issue where id = pg_temp.uid(12)));
-select pg_temp.rejects('BLOCKED without a recovery point or reason',
-    $$update project_issue set state='BLOCKED' where id=pg_temp.uid(10)$$, '23514');
-select pg_temp.rejects('BLOCKED cannot recover to BLOCKED',
-    $$update project_issue set state='BLOCKED',blocked_from_state='BLOCKED',block_reason='x' where id=pg_temp.uid(10)$$, '23514');
-select pg_temp.rejects('a recovery state uses the same code charset',
-    $$update project_issue set state='BLOCKED',blocked_from_state='work',block_reason='x' where id=pg_temp.uid(10)$$, '23514');
-update project_issue set state='BLOCKED', blocked_from_state='WORK', block_reason='external prerequisite incomplete'
-    where id = pg_temp.uid(10);
-select pg_temp.assert_true('BLOCKED records its recovery point',
-    (select state = 'BLOCKED' and blocked_from_state = 'WORK' from project_issue where id = pg_temp.uid(10)));
-select pg_temp.rejects('a non-BLOCKED Issue cannot keep a block reason',
-    $$update project_issue set state='WORK' where id=pg_temp.uid(10)$$, '23514');
-update project_issue set state='WORK', blocked_from_state=null, block_reason=null where id = pg_temp.uid(10);
 select pg_temp.rejects('pause reason without detail',
     $$update project_issue set pause_reason='ERROR' where id=pg_temp.uid(10)$$, '23514');
 select pg_temp.rejects('pause reason must be USER/ERROR',
@@ -437,12 +421,6 @@ select pg_temp.assert_true('Harness may hold an unbound sibling Thread in the sa
 -- ---------------------------------------------------------------------------
 -- Stage budget: one grant per Issue work state, never per Agent.
 -- ---------------------------------------------------------------------------
-select pg_temp.rejects('reserved states have no stage budget',
-    $$insert into project_issue_stage_budget(issue_id,state,max_runs)
-      values(pg_temp.uid(11),'INIT',1)$$, '23514', 'ck_project_issue_stage_budget_work_stage');
-select pg_temp.rejects('a DONE stage has no budget either',
-    $$insert into project_issue_stage_budget(issue_id,state,max_runs)
-      values(pg_temp.uid(11),'DONE',1)$$, '23514', 'ck_project_issue_stage_budget_work_stage');
 select pg_temp.rejects('a budget state uses the state charset',
     $$insert into project_issue_stage_budget(issue_id,state,max_runs)
       values(pg_temp.uid(11),'review',1)$$, '23514', 'ck_project_issue_stage_budget_state');
@@ -455,7 +433,7 @@ select pg_temp.rejects('a budget high-water mark is non-negative',
     'ck_project_issue_stage_budget_after_ordinal');
 
 -- ---------------------------------------------------------------------------
--- Run: frozen coordinates, lifecycle shape, single active Run.
+-- Run: frozen coordinates, product references, single active Run.
 -- ---------------------------------------------------------------------------
 select pg_temp.rejects('a Run state must have a stage budget',
     $$insert into project_issue_run(id,issue_id,ordinal,state,session_id,thread_id,status,
@@ -475,67 +453,21 @@ select pg_temp.rejects('a Run Session must be the Thread Session',
       values(pg_temp.uid(408),pg_temp.uid(13),2,'WORK',pg_temp.uid(100),pg_temp.uid(305),
         'CANCELLED',pg_temp.uid(200),pg_temp.uid(200),1000,now())$$, '23503',
     'fk_project_issue_run_thread_session');
-select pg_temp.rejects('a Run start Entry must belong to its Session',
-    $$update project_issue_run set start_entry_id=pg_temp.uid(201) where id=pg_temp.uid(400)$$,
-    '23503', 'fk_project_issue_run_start_entry');
 select pg_temp.rejects('one active main Run per Issue',
     $$insert into project_issue_run(id,issue_id,ordinal,state,session_id,thread_id,status,start_entry_id,remaining_execution_ms,active_since)
       values(pg_temp.uid(403),pg_temp.uid(10),2,'WORK',pg_temp.uid(100),pg_temp.uid(300),'RUNNING',pg_temp.uid(200),1000,now())$$, '23505');
-select pg_temp.rejects('RUNNING needs an active interval',
-    $$update project_issue_run set active_since=null where id=pg_temp.uid(400)$$, '23514',
-    'ck_project_issue_run_clock');
-select pg_temp.rejects('RUNNING needs a positive remaining budget',
-    $$update project_issue_run set remaining_execution_ms=0 where id=pg_temp.uid(400)$$, '23514',
-    'ck_project_issue_run_clock');
-select pg_temp.rejects('an active Run has no frozen end',
-    $$update project_issue_run set end_entry_id=pg_temp.uid(206) where id=pg_temp.uid(400)$$, '23514',
-    'ck_project_issue_run_terminal_shape');
-select pg_temp.rejects('an active Run carries no error',
-    $$update project_issue_run set error='boom' where id=pg_temp.uid(400)$$, '23514',
-    'ck_project_issue_run_terminal_shape');
 update project_issue_run set status='WAITING', active_since=null where id = pg_temp.uid(400);
 select pg_temp.assert_true('WAITING pauses the active clock on the same Run',
     (select status = 'WAITING' and active_since is null from project_issue_run where id = pg_temp.uid(400)));
-select pg_temp.rejects('WAITING cannot still hold an active interval',
-    $$update project_issue_run set status='WAITING',active_since=now() where id=pg_temp.uid(400)$$, '23514',
-    'ck_project_issue_run_clock');
 update project_issue_run set status='RUNNING', active_since=now() where id = pg_temp.uid(400);
-select pg_temp.rejects('a handoff target cannot be the current state',
-    $$update project_issue_run set next_state='WORK' where id=pg_temp.uid(400)$$, '23514',
-    'ck_project_issue_run_next_state');
-select pg_temp.rejects('a handoff target cannot be BLOCKED',
-    $$update project_issue_run set next_state='BLOCKED' where id=pg_temp.uid(400)$$, '23514',
-    'ck_project_issue_run_next_state');
-select pg_temp.rejects('a handoff target must be an uppercase code',
-    $$update project_issue_run set next_state='review' where id=pg_temp.uid(400)$$, '23514',
-    'ck_project_issue_run_next_state');
-update project_issue_run set next_state='REVIEW' where id = pg_temp.uid(400);
-select pg_temp.assert_true('a legal handoff target is accepted',
-    (select next_state = 'REVIEW' from project_issue_run where id = pg_temp.uid(400)));
-update project_issue_run set next_state=null where id = pg_temp.uid(400);
 
 -- Terminal history keeps its interval and report references.
 update project_issue_run set status='COMPLETED', active_since=null, end_entry_id=pg_temp.uid(206),
     final_answer_entry_id=pg_temp.uid(205), ended_at=now() where id = pg_temp.uid(400);
-select pg_temp.rejects('a final answer Entry must belong to the Run Session',
-    $$update project_issue_run set final_answer_entry_id=pg_temp.uid(201) where id=pg_temp.uid(400)$$,
-    '23503', 'fk_project_issue_run_final_answer');
-select pg_temp.rejects('a frozen end Entry must belong to the Run Session',
-    $$update project_issue_run set end_entry_id=pg_temp.uid(201) where id=pg_temp.uid(400)$$,
-    '23503', 'fk_project_issue_run_end_entry');
 -- Run status has no separate "outcome unknown" state: an undetermined stop is a
 -- FAILED Run whose reason says the outcome is unknown.
 select pg_temp.rejects('Run status has no UNKNOWN terminal',
     $$update project_issue_run set status='UNKNOWN' where id=pg_temp.uid(400)$$, '23514');
-select pg_temp.rejects('FAILED requires a reason on a fully terminal Run',
-    $$update project_issue_run set status='FAILED', error=null where id=pg_temp.uid(400)$$, '23514',
-    'ck_project_issue_run_error_reason');
-select pg_temp.rejects('COMPLETED cannot carry an error',
-    $$update project_issue_run set error='x' where id=pg_temp.uid(400)$$, '23514',
-    'ck_project_issue_run_completed_error');
-select pg_temp.rejects('a terminal Run requires the frozen end',
-    $$update project_issue_run set status='COMPLETED',active_since=null where id=pg_temp.uid(401)$$, '23514',
-    'ck_project_issue_run_terminal_shape');
 select pg_temp.rejects('Run ordinal is unique per Issue',
     $$insert into project_issue_run(id,issue_id,ordinal,state,session_id,thread_id,status,
         start_entry_id,end_entry_id,remaining_execution_ms,ended_at)
@@ -595,20 +527,9 @@ insert into project_issue_activity (issue_id, sequence, kind, actor_type, run_id
 select pg_temp.rejects('one RUN presentation per Run',
     $$insert into project_issue_activity(issue_id,sequence,kind,actor_type,run_id,idempotency_key,request_hash)
       values(pg_temp.uid(10),2,'RUN','SYSTEM',pg_temp.uid(400),'run-400b',repeat('b',64))$$, '23505');
-select pg_temp.rejects('a RUN activity copies no report body',
-    $$update project_issue_activity set body='copy' where sequence=1$$, '23514');
 insert into project_issue_activity (issue_id, sequence, kind, actor_type, run_id, body, idempotency_key, request_hash) values
     (pg_temp.uid(10), 2, 'COMMENT', 'HUMAN', pg_temp.uid(400), 'note', 'comment-2', repeat('c', 64)),
     (pg_temp.uid(10), 3, 'INSTRUCTION', 'HUMAN', pg_temp.uid(405), 'do it', 'instruction-3', repeat('d', 64));
-select pg_temp.rejects('a COMMENT requires a body',
-    $$insert into project_issue_activity(issue_id,sequence,kind,actor_type,body,idempotency_key,request_hash)
-      values(pg_temp.uid(10),4,'COMMENT','HUMAN',null,'comment-4',repeat('e',64))$$, '23514');
-select pg_temp.rejects('a COMMENT requires empty typed data',
-    $$insert into project_issue_activity(issue_id,sequence,kind,actor_type,body,data,idempotency_key,request_hash)
-      values(pg_temp.uid(10),4,'COMMENT','HUMAN','x','{"a":1}','comment-4',repeat('e',64))$$, '23514');
-select pg_temp.rejects('an INSTRUCTION must target a Run',
-    $$insert into project_issue_activity(issue_id,sequence,kind,actor_type,body,idempotency_key,request_hash)
-      values(pg_temp.uid(10),4,'INSTRUCTION','HUMAN','x','instruction-4',repeat('e',64))$$, '23514');
 select pg_temp.rejects('the QUESTION kind is gone',
     $$insert into project_issue_activity(issue_id,sequence,kind,actor_type,idempotency_key,request_hash)
       values(pg_temp.uid(10),5,'QUESTION','SYSTEM','question-5',repeat('e',64))$$, '23514');
@@ -624,8 +545,6 @@ insert into project_issue_activity (issue_id, sequence, kind, actor_type, data, 
         '{"from":"WORK","to":"REVIEW"}'::jsonb, 'state-4', repeat('f', 64));
 select pg_temp.assert_true('a typed event is the single content copy',
     (select data ->> 'to' = 'REVIEW' from project_issue_activity where sequence = 4));
-select pg_temp.rejects('an event carries no text body',
-    $$update project_issue_activity set body='x' where sequence=4$$, '23514');
 select pg_temp.rejects('event data must be a JSON object',
     $$update project_issue_activity set data='[]'::jsonb where sequence=4$$, '23514');
 select pg_temp.rejects('AGENT actor requires an Agent identity',
@@ -816,7 +735,7 @@ insert into canvas_function_run (node_id, request_id, status, state_json)
     values (pg_temp.uid(700), pg_temp.uid(1000), 'READY', '{"plan":[]}');
 select pg_temp.rejects('a work lease token and its deadline are stored together',
     $$insert into durable_work (target_type, target_id, available_at, wake_version, lease_token)
-      values ('CANVAS_RUN', pg_temp.uid(700), now(), 1, 'fixture')$$, '23514',
+      values ('CANVAS_RUN', pg_temp.uid(700), now(), 1, '00000000-0000-0000-0000-000000000002')$$, '23514',
     'ck_durable_work_lease_pair');
 select pg_temp.rejects('work type must start with an uppercase letter',
     $$insert into durable_work (target_type, target_id, available_at, wake_version,
@@ -838,9 +757,7 @@ select pg_temp.rejects('a pin cannot cross canvases',
     $$insert into canvas_function_resource_pin(canvas_id,node_id,request_id,role,resource_id)
       values(pg_temp.uid(800),pg_temp.uid(700),pg_temp.uid(1000),'OUTPUT',pg_temp.uid(950))$$, '23503',
     'fk_canvas_pin_resource');
-select pg_temp.rejects('a pinned Run cannot be silently replaced',
-    $$update canvas_function_run set request_id=pg_temp.uid(1001) where node_id=pg_temp.uid(700)$$, '23503',
-    'fk_canvas_pin_run');
+-- Pin 以 node_id 引用 Run；request_id 是应用维护的冻结坐标，不是数据库外键键。
 select pg_temp.rejects('a pinned Resource cannot be deleted',
     $$delete from canvas_resource where id=pg_temp.uid(900)$$, '23503', 'fk_canvas_pin_resource');
 -- Canvas UNKNOWN stays a terminal, lease-free shape whose failure reason is
@@ -945,10 +862,6 @@ select pg_temp.rejects('a Tool cannot reference a missing Assistant',
     $$insert into harness_tool_invocation(id,thread_id,turn_start_entry_id,assistant_entry_id,call_index,call,binding,status,attempt,effects,created_at,updated_at)
       values(pg_temp.uid(1205),pg_temp.uid(302),pg_temp.uid(210),pg_temp.uid(9997),5,'{}','{}','READY',0,'{"customEntries":[]}',now(),now())$$,
     '23503', 'fk_harness_tool_invocation_assistant');
-select pg_temp.rejects('a nonterminal Tool requires a frozen binding',
-    $$insert into harness_tool_invocation(id,thread_id,turn_start_entry_id,assistant_entry_id,call_index,call,status,attempt,effects,created_at,updated_at)
-      values(pg_temp.uid(1206),pg_temp.uid(302),pg_temp.uid(210),pg_temp.uid(211),6,'{}','READY',0,'{"customEntries":[]}',now(),now())$$,
-    '23514', 'ck_harness_tool_invocation_binding');
 insert into harness_tool_invocation (id, thread_id, turn_start_entry_id, assistant_entry_id,
     call_index, call, status, attempt, effects, error, created_at, updated_at)
     values (pg_temp.uid(1207), pg_temp.uid(302), pg_temp.uid(210), pg_temp.uid(211), 7,
@@ -957,23 +870,6 @@ insert into harness_tool_invocation (id, thread_id, turn_start_entry_id, assista
 select pg_temp.assert_true('a terminal unknown Tool may have no binding',
     (select binding is null and status = 'FAILED'
         from harness_tool_invocation where id = pg_temp.uid(1207)));
--- The bad calls stay in their real Session: the assistant Entry belongs to the
--- same Thread/Session as the model invocation, so only the tested shape fails.
-select pg_temp.rejects('WAITING_INPUT cannot lack a frozen binding',
-    $$insert into harness_tool_invocation(id,thread_id,turn_start_entry_id,assistant_entry_id,call_index,call,status,attempt,effects,created_at,updated_at)
-      values(pg_temp.uid(1201),pg_temp.uid(302),pg_temp.uid(210),pg_temp.uid(211),1,'{}','WAITING_INPUT',0,'{"customEntries":[]}',now(),now())$$,
-    '23514', 'ck_harness_tool_invocation_binding');
-select pg_temp.rejects('WAITING_INPUT cannot carry a terminal result',
-    $$insert into harness_tool_invocation(id,thread_id,turn_start_entry_id,assistant_entry_id,call_index,call,binding,result,status,attempt,effects,created_at,updated_at)
-      values(pg_temp.uid(1202),pg_temp.uid(302),pg_temp.uid(210),pg_temp.uid(211),2,'{}','{}','{"ok":true}','WAITING_INPUT',0,'{"customEntries":[]}',now(),now())$$,
-    '23514', 'ck_harness_tool_waiting_input');
-select pg_temp.rejects('WAITING_INPUT cannot carry a terminal error',
-    $$update harness_tool_invocation set error='{"message":"x"}' where id=pg_temp.uid(1200)$$, '23514',
-    'ck_harness_tool_waiting_input');
-select pg_temp.rejects('an unanswered invocation cannot have an input receipt',
-    $$update harness_tool_invocation set input_receipt='{"submissionId":"s","actor":"user","acceptedAt":"2026-09-27T00:00:00Z"}'
-      where id=pg_temp.uid(1200)$$, '23514', 'ck_harness_tool_input_receipt');
-
 -- Input receipts remain durable before history batch apply; they are not kept
 -- in a live promise or a separate Question table.
 update harness_tool_invocation set status='SUCCEEDED',
@@ -988,18 +884,9 @@ select pg_temp.assert_true('an accepted answer disappears from pending queries w
     (select count(*)=0 from harness_tool_invocation
         where id=pg_temp.uid(1200) and status in ('WAITING_INPUT','WAITING_APPROVAL'))
     and exists(select 1 from harness_tool_invocation where id=pg_temp.uid(1200)));
-select pg_temp.rejects('input receipt requires its result',
-    $$update harness_tool_invocation set result=null where id=pg_temp.uid(1200)$$, '23514',
-    'ck_harness_tool_input_receipt');
 select pg_temp.rejects('a JSON null input receipt is not a bypass',
     $$update harness_tool_invocation set input_receipt='null'::jsonb where id=pg_temp.uid(1200)$$, '23514',
     'ck_harness_tool_input_receipt');
-select pg_temp.rejects('input receipt requires submission identity',
-    $$update harness_tool_invocation set input_receipt='{"actor":"user","acceptedAt":"2026-09-27T00:00:00Z"}'
-      where id=pg_temp.uid(1200)$$, '23514', 'ck_harness_tool_input_receipt');
-select pg_temp.rejects('input receipt requires a nonblank actor',
-    $$update harness_tool_invocation set input_receipt='{"submissionId":"s","actor":"","acceptedAt":"2026-09-27T00:00:00Z"}'
-      where id=pg_temp.uid(1200)$$, '23514', 'ck_harness_tool_input_receipt');
 
 -- ---------------------------------------------------------------------------
 -- Chat: direct Session association.
@@ -1045,15 +932,6 @@ select pg_temp.assert_true('a child Thread records its real execution root',
         from harness_thread where id = pg_temp.uid(312)));
 select pg_temp.rejects('Thread root_thread_id cannot be null',
     $$update harness_thread set root_thread_id = null where id = pg_temp.uid(310)$$, '23502');
-select pg_temp.rejects('an execution root points at itself',
-    $$update harness_thread set root_thread_id = pg_temp.uid(305) where id = pg_temp.uid(310)$$,
-    '23514', 'ck_harness_thread_root');
-select pg_temp.rejects('a child Thread cannot be its own execution root',
-    $$update harness_thread set root_thread_id = pg_temp.uid(312) where id = pg_temp.uid(312)$$,
-    '23514', 'ck_harness_thread_root');
-select pg_temp.rejects('only an execution root carries the YOLO switch',
-    $$update harness_thread set yolo_enabled = true where id = pg_temp.uid(312)$$,
-    '23514', 'ck_harness_thread_yolo_root_only');
 select pg_temp.rejects('the execution root must be a real Thread',
     $$update harness_thread set root_thread_id = pg_temp.uid(399) where id = pg_temp.uid(312)$$,
     '23503', 'fk_harness_thread_root');
@@ -1122,23 +1000,9 @@ select pg_temp.rejects('a join must reference a real source command',
         source_command_sequence,agent,max_turns,reminder_turn,created_at,updated_at,delivery)
       values(pg_temp.uid(1503),repeat('7',64),null,pg_temp.uid(310),99,'designer',10,0,now(),now(),'RECEIPT_ONLY')$$,
     '23503', 'fk_harness_thread_join_source_command');
-select pg_temp.rejects('a final answer entry requires a terminal entry',
-    $$insert into harness_thread_join(invocation_id,request_hash,parent_thread_id,child_thread_id,
-        source_command_sequence,agent,max_turns,reminder_turn,terminal_entry_id,final_answer_entry_id,
-        created_at,updated_at,delivery)
-      values(pg_temp.uid(1504),repeat('7',64),null,pg_temp.uid(310),1,'designer',10,0,null,
-        pg_temp.uid(202),now(),now(),'RECEIPT_ONLY')$$,
-    '23514', 'ck_harness_thread_join_final_answer');
 select pg_temp.rejects('input through sequence must be less than next command sequence',
     $$update harness_thread set input_through_sequence = 2 where id = pg_temp.uid(310)$$,
     '23514', 'ck_harness_thread_input_through');
-select pg_temp.rejects('delivery requires a matched join with a parent Thread',
-    $$insert into harness_thread_join(invocation_id,request_hash,parent_thread_id,child_thread_id,
-        source_command_sequence,agent,max_turns,reminder_turn,delivery_command_sequence,
-        created_at,updated_at,delivery)
-      values(pg_temp.uid(1506),repeat('7',64),pg_temp.uid(311),pg_temp.uid(310),1,'designer',10,0,1,
-        now(),now(),'NOTIFY_PARENT')$$,
-    '23514', 'ck_harness_thread_join_delivery');
 select pg_temp.rejects('the delivery command must exist on the parent Thread',
     $$insert into harness_thread_join(invocation_id,request_hash,parent_thread_id,child_thread_id,
         source_command_sequence,agent,max_turns,reminder_turn,terminal_entry_id,
@@ -1168,51 +1032,20 @@ select pg_temp.rejects('an unknown join delivery is rejected',
       values(pg_temp.uid(1510),repeat('7',64),null,pg_temp.uid(310),1,'designer',10,0,now(),now(),
         'other')$$,
     '23514', 'ck_harness_thread_join_delivery_kind');
-select pg_temp.rejects('only a parentless join is receipt-only',
-    $$insert into harness_thread_join(invocation_id,request_hash,parent_thread_id,child_thread_id,
-        source_command_sequence,agent,max_turns,reminder_turn,created_at,updated_at,delivery)
-      values(pg_temp.uid(1513),repeat('7',64),pg_temp.uid(311),pg_temp.uid(310),1,'designer',10,0,
-        now(),now(),'RECEIPT_ONLY')$$,
-    '23514', 'ck_harness_thread_join_delivery_kind');
-select pg_temp.rejects('a matched NOTIFY_PARENT join requires a delivery sequence',
-    $$insert into harness_thread_join(invocation_id,request_hash,parent_thread_id,child_thread_id,
-        source_command_sequence,agent,max_turns,reminder_turn,terminal_entry_id,
-        delivery_command_sequence,created_at,updated_at,delivery)
-      values(pg_temp.uid(1514),repeat('7',64),pg_temp.uid(311),pg_temp.uid(310),1,'designer',10,0,
-        pg_temp.uid(202),null,now(),now(),'NOTIFY_PARENT')$$,
-    '23514', 'ck_harness_thread_join_delivery');
 select pg_temp.rejects('a thread needs a known spawn trigger',
     $$update harness_thread set spawn_trigger = 'OTHER' where id = pg_temp.uid(310)$$,
-    '23514', 'ck_harness_thread_spawn_trigger');
-select pg_temp.rejects('a user-created thread cannot have a parent',
-    $$update harness_thread set spawn_trigger = 'USER' where id = pg_temp.uid(312)$$,
     '23514', 'ck_harness_thread_spawn_trigger');
 select pg_temp.rejects('thread constraints are a json object',
     $$update harness_thread set constraints = '[]'::jsonb where id = pg_temp.uid(310)$$,
     '23514', 'ck_harness_thread_constraints');
-select pg_temp.rejects('a join cannot supersede itself',
-    $$insert into harness_thread_join(invocation_id,request_hash,parent_thread_id,child_thread_id,
-        source_command_sequence,agent,max_turns,reminder_turn,superseded_by_invocation_id,
-        created_at,updated_at,delivery)
-      values(pg_temp.uid(1511),repeat('7',64),null,pg_temp.uid(310),1,'designer',10,0,
-        pg_temp.uid(1511),now(),now(),'RECEIPT_ONLY')$$,
-    '23514', 'ck_harness_thread_join_superseded');
-select pg_temp.rejects('a matched join cannot be superseded',
-    $$insert into harness_thread_join(invocation_id,request_hash,parent_thread_id,child_thread_id,
-        source_command_sequence,agent,max_turns,reminder_turn,terminal_entry_id,
-        delivery_command_sequence,superseded_by_invocation_id,created_at,updated_at,delivery)
-      values(pg_temp.uid(1512),repeat('7',64),pg_temp.uid(311),pg_temp.uid(310),1,'designer',10,0,
-        pg_temp.uid(202),1,pg_temp.uid(1500),now(),now(),'NOTIFY_PARENT')$$,
-    '23514', 'ck_harness_thread_join_superseded');
 
 -- ---------------------------------------------------------------------------
--- Execution exit evidence: abandonment is a separate, nullable timestamp and
--- never masquerades as a real exit. Real evidence may replace abandonment while
--- preserving it, and neither timestamp may precede registration.
+-- Execution exit evidence: enum/JSON shape and timestamps are database facts;
+-- kind/state pairing and abandonment semantics are application-validated.
 -- ---------------------------------------------------------------------------
 insert into harness_execution_exit (execution_id, thread_id, invocation_id, attempt,
     owner_lease_token, kind, parent_execution_id, state, registered_at, confirmed_at, abandoned_at)
-    values (pg_temp.uid(1700), pg_temp.uid(310), pg_temp.uid(1701), 1, 'lease-1', 'TOOL',
+    values (pg_temp.uid(1700), pg_temp.uid(310), pg_temp.uid(1701), 1, '00000000-0000-0000-0000-000000000001', 'TOOL',
         null, 'UNCONFIRMED', '2026-01-01 00:00:00.123+00', null, null);
 select pg_temp.rejects('BOGUS is not an execution exit kind',
     $$update harness_execution_exit set kind='BOGUS' where execution_id=pg_temp.uid(1700)$$,
@@ -1222,24 +1055,12 @@ select pg_temp.assert_true('execution exit stores an optional millisecond abando
         and datetime_precision = 3
         from information_schema.columns
         where table_name = 'harness_execution_exit' and column_name = 'abandoned_at'));
-select pg_temp.rejects('an unconfirmed execution cannot carry abandonment time',
-    $$update harness_execution_exit set abandoned_at = registered_at
-      where execution_id = pg_temp.uid(1700)$$,
-    '23514', 'ck_harness_execution_exit_state');
-select pg_temp.rejects('an abandoned execution requires abandonment time',
-    $$update harness_execution_exit set state = 'ABANDONED'
-      where execution_id = pg_temp.uid(1700)$$,
-    '23514', 'ck_harness_execution_exit_state');
 update harness_execution_exit
     set state = 'ABANDONED', abandoned_at = registered_at + interval '2 milliseconds'
     where execution_id = pg_temp.uid(1700);
 select pg_temp.assert_true('abandonment is durable without fabricating a confirmation',
     (select state = 'ABANDONED' and confirmed_at is null and abandoned_at is not null
         from harness_execution_exit where execution_id = pg_temp.uid(1700)));
-select pg_temp.rejects('an abandoned execution cannot also carry confirmation',
-    $$update harness_execution_exit set confirmed_at = registered_at + interval '3 milliseconds'
-      where execution_id = pg_temp.uid(1700)$$,
-    '23514', 'ck_harness_execution_exit_state');
 update harness_execution_exit
     set state = 'STUDIO_EXITED', confirmed_at = registered_at + interval '1 millisecond'
     where execution_id = pg_temp.uid(1700);
@@ -1256,21 +1077,9 @@ select pg_temp.rejects('abandonment cannot precede registration',
     $$update harness_execution_exit set abandoned_at = registered_at - interval '1 millisecond'
       where execution_id = pg_temp.uid(1700)$$,
     '23514', 'ck_harness_execution_exit_time');
-select pg_temp.rejects('a local TOOL execution cannot specify an environment_id',
-    $$insert into harness_execution_exit (execution_id, thread_id, invocation_id, attempt,
-        owner_lease_token, kind, parent_execution_id, environment_id, state, registered_at, confirmed_at, abandoned_at)
-        values (pg_temp.uid(1702), pg_temp.uid(310), pg_temp.uid(1701), 2, 'lease-1', 'TOOL',
-            null, pg_temp.uid(901), 'UNCONFIRMED', '2026-01-01 00:00:00.123+00', null, null)$$,
-    '23514', 'ck_harness_execution_exit_kind');
-select pg_temp.rejects('a REMOTE execution must specify an environment_id',
-    $$insert into harness_execution_exit (execution_id, thread_id, invocation_id, attempt,
-        owner_lease_token, kind, parent_execution_id, environment_id, state, registered_at, confirmed_at, abandoned_at)
-        values (pg_temp.uid(1703), pg_temp.uid(310), pg_temp.uid(1701), 1, 'lease-1', 'REMOTE',
-            pg_temp.uid(1700), null, 'UNCONFIRMED', '2026-01-01 00:00:00.123+00', null, null)$$,
-    '23514', 'ck_harness_execution_exit_kind');
 insert into harness_execution_exit (execution_id, thread_id, invocation_id, attempt,
     owner_lease_token, kind, parent_execution_id, environment_id, state, registered_at, confirmed_at, abandoned_at)
-    values (pg_temp.uid(1704), pg_temp.uid(310), pg_temp.uid(1701), 1, 'lease-1', 'REMOTE',
+    values (pg_temp.uid(1704), pg_temp.uid(310), pg_temp.uid(1701), 1, '00000000-0000-0000-0000-000000000001', 'REMOTE',
         pg_temp.uid(1700), pg_temp.uid(901), 'UNCONFIRMED', '2026-01-01 00:00:00.123+00', null, null);
 select pg_temp.assert_true('remote execution exit fact records environment_id and parent',
     (select kind = 'REMOTE' and parent_execution_id = pg_temp.uid(1700) and environment_id = pg_temp.uid(901)
@@ -1279,6 +1088,11 @@ select pg_temp.assert_true('unconfirmed remote execution partial index exists',
     exists(select 1 from pg_indexes where schemaname = 'public'
         and tablename = 'harness_execution_exit'
         and indexname = 'idx_harness_execution_exit_unconfirmed_remote'));
+select pg_temp.assert_true('execution exit invocation and attempt index exists',
+    exists(select 1 from pg_indexes where schemaname = 'public'
+        and tablename = 'harness_execution_exit'
+        and indexname = 'idx_harness_execution_exit_invocation'
+        and strpos(indexdef, '(invocation_id, attempt)') > 0));
 
 -- ---------------------------------------------------------------------------
 -- Storage/Skills/Environment-update baseline changes: removed persisted upload

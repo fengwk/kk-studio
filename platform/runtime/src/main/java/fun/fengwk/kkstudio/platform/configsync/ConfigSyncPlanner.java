@@ -507,7 +507,7 @@ public final class ConfigSyncPlanner {
     List<ConfigSyncPlan.PluginImport> pluginImports = new ArrayList<>();
     Map<String, Long> pluginRevisions = new LinkedHashMap<>();
     for (PluginConfigurationRow row : snapshot.plugins()) {
-      pluginRevisions.put(row.pluginId(), row.revision());
+      pluginRevisions.put(row.pluginId(), row.version());
     }
     for (ConfigSyncParser.PluginSpec spec : document.plugins()) {
       Long revision = pluginRevisions.get(spec.pluginId());

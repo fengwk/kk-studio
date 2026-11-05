@@ -46,11 +46,11 @@ class SystemSettingsSnapshotTest {
     when(repository.get()).thenReturn(record(VERSION_TWO, 2));
     SystemSettingsSnapshot snapshot = new SystemSettingsSnapshot(repository);
 
-    snapshot.replace(SystemSettings.DEFAULT);
+    snapshot.replace(SystemSettingsTestFixture.DEFAULT);
 
-    assertEquals(SystemSettings.DEFAULT, snapshot.get());
+    assertEquals(SystemSettingsTestFixture.DEFAULT, snapshot.get());
     assertFalse(snapshot.replaceIfNotOlder(record(VERSION_ONE, 1)));
-    assertEquals(SystemSettings.DEFAULT, snapshot.get());
+    assertEquals(SystemSettingsTestFixture.DEFAULT, snapshot.get());
   }
 
   private static SystemSettingsRepository.SystemSettingsRecord record(
@@ -60,21 +60,21 @@ class SystemSettingsSnapshotTest {
 
   private static SystemSettings settingsWithRetryMaxRetries(int retryMaxRetries) {
     return new SystemSettings(
-        SystemSettings.Tool.DEFAULT,
+        SystemSettingsTestFixture.TOOL,
         new SystemSettings.AiRuntime(
             retryMaxRetries,
-            SystemSettings.AiRuntime.DEFAULT.retryBackoffStrategy(),
-            SystemSettings.AiRuntime.DEFAULT.retryBaseDelayMillis(),
-            SystemSettings.AiRuntime.DEFAULT.retryMaxDelayMillis(),
-            SystemSettings.AiRuntime.DEFAULT.compactionKeepRecentTokens(),
-            SystemSettings.AiRuntime.DEFAULT.subagentMaxDepth(),
-            SystemSettings.AiRuntime.DEFAULT.subagentMaxConcurrency(),
-            SystemSettings.AiRuntime.DEFAULT.subagentMaxTotalConcurrency(),
-            SystemSettings.AiRuntime.DEFAULT.subagentMaxTurns(),
-            SystemSettings.AiRuntime.DEFAULT.modelHttpRetryStatusCodes()),
-        SystemSettings.Environment.DEFAULT,
-        SystemSettings.Network.DEFAULT,
-        SystemSettings.StorageMedia.DEFAULT,
-        SystemSettings.Advanced.DEFAULT);
+            SystemSettingsTestFixture.AI_RUNTIME.retryBackoffStrategy(),
+            SystemSettingsTestFixture.AI_RUNTIME.retryBaseDelayMillis(),
+            SystemSettingsTestFixture.AI_RUNTIME.retryMaxDelayMillis(),
+            SystemSettingsTestFixture.AI_RUNTIME.compactionKeepRecentTokens(),
+            SystemSettingsTestFixture.AI_RUNTIME.subagentMaxDepth(),
+            SystemSettingsTestFixture.AI_RUNTIME.subagentMaxConcurrency(),
+            SystemSettingsTestFixture.AI_RUNTIME.subagentMaxTotalConcurrency(),
+            SystemSettingsTestFixture.AI_RUNTIME.subagentMaxTurns(),
+            SystemSettingsTestFixture.AI_RUNTIME.modelHttpRetryStatusCodes()),
+        SystemSettingsTestFixture.ENVIRONMENT,
+        SystemSettingsTestFixture.NETWORK,
+        SystemSettingsTestFixture.STORAGE_MEDIA,
+        SystemSettingsTestFixture.ADVANCED);
   }
 }

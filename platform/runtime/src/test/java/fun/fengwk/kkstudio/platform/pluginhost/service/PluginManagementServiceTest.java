@@ -257,7 +257,7 @@ class PluginManagementServiceTest {
         ArgumentCaptor.forClass(PluginAuthAttemptRow.class);
     verify(authAttempts).replace(attempt.capture());
     assertEquals(PluginAuthNonce.hash(prepared.getAuthAttemptId()), attempt.getValue().nonceHash());
-    assertEquals(1L, attempt.getValue().configRevision());
+    assertEquals(1L, attempt.getValue().configVersion());
     assertEquals(NOW.plus(Duration.ofMinutes(10)), attempt.getValue().expiresAt());
   }
 

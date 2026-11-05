@@ -12,15 +12,15 @@ import java.util.concurrent.ConcurrentHashMap;
  * 或取消任何对象。迟到 release 只删除仍由该 token 持有的槽位。
  */
 final class ThreadAdmissionGuard {
-  private final ConcurrentHashMap<UUID, String> activeClaims = new ConcurrentHashMap<>();
+  private final ConcurrentHashMap<UUID, UUID> activeClaims = new ConcurrentHashMap<>();
 
-  boolean tryAdmit(UUID threadId, String token) {
+  boolean tryAdmit(UUID threadId, UUID token) {
     Objects.requireNonNull(threadId, "threadId");
     Objects.requireNonNull(token, "token");
     return activeClaims.putIfAbsent(threadId, token) == null;
   }
 
-  void release(UUID threadId, String token) {
+  void release(UUID threadId, UUID token) {
     if (threadId != null && token != null) {
       activeClaims.remove(threadId, token);
     }

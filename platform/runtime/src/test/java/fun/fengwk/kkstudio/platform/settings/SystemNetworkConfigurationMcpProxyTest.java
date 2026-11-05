@@ -107,7 +107,7 @@ class SystemNetworkConfigurationMcpProxyTest {
   }
 
   private static SystemSettings settings(String proxyUrl) {
-    SystemSettings defaults = SystemSettings.DEFAULT;
+    SystemSettings defaults = SystemSettingsTestFixture.DEFAULT;
     return new SystemSettings(
         defaults.tool(),
         defaults.aiRuntime(),

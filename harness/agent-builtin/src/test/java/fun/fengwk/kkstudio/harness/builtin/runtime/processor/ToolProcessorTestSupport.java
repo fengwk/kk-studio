@@ -83,6 +83,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.harness.tool.TurnMediaCapabilities;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -754,12 +755,16 @@ public final class ToolProcessorTestSupport {
         });
   }
 
+  static UUID token(UUID toolInvocationId) {
+    return UUID.nameUUIDFromBytes(("tool-" + toolInvocationId).getBytes(StandardCharsets.UTF_8));
+  }
+
   static ClaimedWork claim(InMemoryBuiltinHarnessStore store, UUID toolInvocationId, Instant now) {
-    return claim(store, toolInvocationId, now, "token-" + toolInvocationId);
+    return claim(store, toolInvocationId, now, token(toolInvocationId));
   }
 
   static ClaimedWork claim(
-      InMemoryBuiltinHarnessStore store, UUID toolInvocationId, Instant now, String token) {
+      InMemoryBuiltinHarnessStore store, UUID toolInvocationId, Instant now, UUID token) {
     return claim(store, toolInvocationId, now, token, Duration.ofSeconds(60));
   }
 
@@ -767,7 +772,7 @@ public final class ToolProcessorTestSupport {
       InMemoryBuiltinHarnessStore store,
       UUID toolInvocationId,
       Instant now,
-      String token,
+      UUID token,
       Duration leaseDuration) {
     return store
         .transaction(tx -> tx.work().claimNext(WorkTargetType.TOOL, token, leaseDuration))
@@ -902,7 +907,7 @@ public final class ToolProcessorTestSupport {
       UUID threadId,
       UUID invocationId,
       int attempt,
-      String ownerLeaseToken) {
+      UUID ownerLeaseToken) {
     return store.transaction(
         tx -> {
           tx.threads().lock(threadId).orElseThrow();
@@ -923,7 +928,7 @@ public final class ToolProcessorTestSupport {
       UUID threadId,
       UUID invocationId,
       int attempt,
-      String ownerLeaseToken,
+      UUID ownerLeaseToken,
       UUID parentExecutionId,
       EnvironmentId environmentId) {
     return store.transaction(

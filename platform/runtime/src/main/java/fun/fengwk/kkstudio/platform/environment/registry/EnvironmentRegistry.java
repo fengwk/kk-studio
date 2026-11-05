@@ -436,7 +436,7 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
   }
 
   /**
-   * 只刷新路由租约的 last_seen 与 lease_until，不发布环境变化通知。
+   * 只刷新路由租约的 last_seen_at 与 lease_until，不发布环境变化通知。
    *
    * @return 围栏校验成功且更新 1 行返回 true；若租约已被夺取（0 行）返回 false
    */

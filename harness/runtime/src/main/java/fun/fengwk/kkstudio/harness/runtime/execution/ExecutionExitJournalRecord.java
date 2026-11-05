@@ -20,7 +20,7 @@ public record ExecutionExitJournalRecord(
     UUID threadId,
     UUID invocationId,
     int attempt,
-    String ownerLeaseToken,
+    UUID ownerLeaseToken,
     ExecutionExitKind kind,
     UUID parentExecutionId,
     EnvironmentId environmentId,
@@ -35,11 +35,6 @@ public record ExecutionExitJournalRecord(
       throw new IllegalArgumentException("attempt must be positive");
     }
     ownerLeaseToken = Objects.requireNonNull(ownerLeaseToken, "ownerLeaseToken");
-    if (ownerLeaseToken.isBlank()
-        || !ownerLeaseToken.equals(ownerLeaseToken.strip())
-        || ownerLeaseToken.length() > 128) {
-      throw new IllegalArgumentException("ownerLeaseToken must be a canonical lease token");
-    }
     kind = Objects.requireNonNull(kind, "kind");
     if (kind == ExecutionExitKind.REMOTE) {
       parentExecutionId = Objects.requireNonNull(parentExecutionId, "parentExecutionId");

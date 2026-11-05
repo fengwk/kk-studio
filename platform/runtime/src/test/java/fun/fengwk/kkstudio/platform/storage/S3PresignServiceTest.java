@@ -16,6 +16,7 @@ import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
+import fun.fengwk.kkstudio.platform.settings.SystemSettingsTestFixture;
 import fun.fengwk.kkstudio.platform.storage.configuration.S3StorageProperties;
 import fun.fengwk.kkstudio.platform.storage.s3.S3ObjectKeyNormalizer;
 
@@ -130,7 +131,7 @@ public class S3PresignServiceTest {
   @Test
   public void testPresignFallsBackToEndpointWhenPublicEndpointBlank() {
     S3StorageProperties props = newS3Properties(PUBLIC_ENDPOINT, /*publicEndpointBlank*/ true);
-    try (TestContext ctx = new TestContext(props, SystemSettings.StorageMedia.DEFAULT)) {
+    try (TestContext ctx = new TestContext(props, SystemSettingsTestFixture.STORAGE_MEDIA)) {
       S3PresignedUrl resp = ctx.service.presignDownload("docs/readme.md", null);
       URI uri = URI.create(resp.getUrl());
       assertEquals("minio.example.local", uri.getHost());
@@ -146,7 +147,7 @@ public class S3PresignServiceTest {
       S3PresignedUrl resp = context.service.presignDownload("docs/readme.md", null);
       long delta = Instant.parse(resp.getExpiresAt()).toEpochMilli() - before;
       long defaultExpiresMillis =
-          SystemSettings.StorageMedia.DEFAULT.s3PresignDefaultExpiresSeconds() * 1000L;
+          SystemSettingsTestFixture.STORAGE_MEDIA.s3PresignDefaultExpiresSeconds() * 1000L;
       // SDK 签名窗口存在数秒抖动，给一个 30s 的余量
       assertTrue(
           delta >= defaultExpiresMillis - 30_000L && delta <= defaultExpiresMillis + 30_000L,
@@ -158,7 +159,7 @@ public class S3PresignServiceTest {
   @Test
   public void testPresignReadsLiveSnapshotOnEverySigning() {
     S3StorageProperties props = newS3Properties(PUBLIC_ENDPOINT, false);
-    SystemSettingsSnapshot snapshot = snapshotWith(SystemSettings.StorageMedia.DEFAULT);
+    SystemSettingsSnapshot snapshot = snapshotWith(SystemSettingsTestFixture.STORAGE_MEDIA);
     try (TestContext context = new TestContext(props, snapshot)) {
       long before = System.currentTimeMillis();
       S3PresignedUrl first = context.service.presignDownload("docs/live.md", null);
@@ -327,7 +328,7 @@ public class S3PresignServiceTest {
 
   private TestContext newTestContext() {
     return new TestContext(
-        newS3Properties(PUBLIC_ENDPOINT, false), SystemSettings.StorageMedia.DEFAULT);
+        newS3Properties(PUBLIC_ENDPOINT, false), SystemSettingsTestFixture.STORAGE_MEDIA);
   }
 
   private static SystemSettingsSnapshot snapshotWith(SystemSettings.StorageMedia storageMedia) {
@@ -336,12 +337,12 @@ public class S3PresignServiceTest {
 
   private static SystemSettings settingsWith(SystemSettings.StorageMedia storageMedia) {
     return new SystemSettings(
-        SystemSettings.DEFAULT.tool(),
-        SystemSettings.DEFAULT.aiRuntime(),
-        SystemSettings.DEFAULT.environment(),
-        SystemSettings.DEFAULT.network(),
+        SystemSettingsTestFixture.DEFAULT.tool(),
+        SystemSettingsTestFixture.DEFAULT.aiRuntime(),
+        SystemSettingsTestFixture.DEFAULT.environment(),
+        SystemSettingsTestFixture.DEFAULT.network(),
         storageMedia,
-        SystemSettings.DEFAULT.advanced());
+        SystemSettingsTestFixture.DEFAULT.advanced());
   }
 
   private static S3StorageProperties newS3Properties(

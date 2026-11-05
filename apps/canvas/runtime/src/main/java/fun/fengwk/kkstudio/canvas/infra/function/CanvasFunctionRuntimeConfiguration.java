@@ -113,8 +113,7 @@ public class CanvasFunctionRuntimeConfiguration {
   private static ClaimedRun claimNext(
       CanvasFunctionWorkStore workStore, CanvasFunctionRuntimeProperties properties) {
     return workStore
-        .claimNext(
-            Duration.ofMillis(properties.getLeaseDurationMillis()), UUID.randomUUID().toString())
+        .claimNext(Duration.ofMillis(properties.getLeaseDurationMillis()), UUID.randomUUID())
         .orElse(null);
   }
 

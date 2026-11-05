@@ -112,10 +112,7 @@ class InMemoryWorkTest extends HarnessStoreWorkContract {
                 tx ->
                     tx.work()
                         .claimNext(
-                            WorkTargetType.TOOL,
-                            "projection-lease",
-                            CLAIM_LEASE,
-                            UUID.randomUUID()))
+                            WorkTargetType.TOOL, UUID.randomUUID(), CLAIM_LEASE, UUID.randomUUID()))
             .orElseThrow();
     expireReadyEnvironmentLease(environment);
     Instant nextDue = due.plusSeconds(120);
@@ -159,7 +156,8 @@ class InMemoryWorkTest extends HarnessStoreWorkContract {
     memory.setNow(T1);
     ClaimedWork claim =
         store
-            .transaction(tx -> tx.work().claimNext(WorkTargetType.THREAD, "token", claimLease))
+            .transaction(
+                tx -> tx.work().claimNext(WorkTargetType.THREAD, UUID.randomUUID(), claimLease))
             .orElseThrow();
     assertEquals(T1.plus(claimLease), claim.leaseUntil());
 

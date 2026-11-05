@@ -1,40 +1,122 @@
--- Flyway PostgreSQL baseline schema for kk-studio.
---
--- Applied by Flyway to an empty database as version 1.
--- Each table is created without `IF NOT EXISTS` so schema drift fails loudly.
--- Time fields use `timestamptz(3)` (millisecond precision, with time zone).
--- Structured payloads use `jsonb`; flags use `boolean`; file blobs are never
--- stored in the database.
--- `updated_at` is application-managed; PostgreSQL never emulates MySQL's
--- ON UPDATE CURRENT_TIMESTAMP.
---
--- Harness execution state is the exact infra protocol: section 2 below
--- (the harness_* tables and their indexes) is the single authoritative definition of
--- the durable Harness protocol schema. There is no separate infra
--- schema file; this block is the only copy. HarnessRuntime owns every execution
--- id via the injected Supplier<UUID> (production: UUID::randomUUID) and owns
--- `version`; the database never mutates them. Application-owned relation tables
--- and NOTIFY hints surround this protocol without duplicating its state machine.
---
--- Product facts live in one flat model: Canvas keeps a single node shape with
--- immutable content and a replaceable current Resource[]; Project keeps one
--- strict workflow JSON with Issue Runs, one ordered Activity timeline, explicit
--- published Evidence and a per-Issue work mailbox; Chat holds multiple Sessions
--- through the direct `chat_session` association. Every product id is an
--- application-allocated UUID (client for node/group/request/command ids, server
--- for document/resource/run ids): there are no id sequences. `revision` (Canvas)
--- and `version` (Project) are application-owned cursors; the owning Java write
--- paths write durable facts and publish NOTIFY hints in the same transaction
--- (visible after commit). Notifications never advance a version themselves. Resource blobs
--- are owned by the global `storage_blob` refcount lifecycle; product rows only
--- reference them (RESTRICT).
---
--- DDL is grouped so cycle-closing and forward foreign keys are appended only
--- after both target tables exist.
+-- kk-studio PostgreSQL baseline schema for Flyway V1.
+-- All ids are application-allocated UUIDs; timestamps use millisecond precision timestamptz(3).
+-- Tables are grouped by owning module; blob content lives only in object storage.
 
-------------------------------------------------------------------------------
--- 1. Business tables (no mutual dependencies)
-------------------------------------------------------------------------------
+-- 1. Shared foundation: global blob storage
+
+create table storage_blob (
+    id            uuid           primary key,
+    sha256        char(64)       not null,
+    size_bytes    bigint         not null,
+    media_type    varchar(256)   not null,
+    width         integer,
+    height        integer,
+    duration_ms   bigint,
+    archive_index jsonb,
+    ref_count     bigint         not null default 0,
+    state         varchar(16)    not null default 'ACTIVE',
+    created_at    timestamptz(3) not null default current_timestamp,
+    updated_at    timestamptz(3) not null default current_timestamp,
+    constraint ck_storage_blob_sha256 check (sha256 ~ '^[0-9a-f]{64}$'),
+    constraint ck_storage_blob_size_nonneg check (size_bytes >= 0),
+    constraint ck_storage_blob_media_type_nonblank check (btrim(media_type) <> ''),
+    constraint ck_storage_blob_dimensions_pair check ((width is null) = (height is null)),
+    constraint ck_storage_blob_dimensions_positive check (
+        width is null or (width > 0 and height > 0)
+    ),
+    constraint ck_storage_blob_duration_positive check (duration_ms is null or duration_ms > 0),
+    constraint ck_storage_blob_archive_index check (
+        archive_index is null or jsonb_typeof(archive_index) = 'object'
+    ),
+    constraint ck_storage_blob_state_ref_count check (
+        (state = 'ACTIVE' and ref_count > 0) or (state = 'DELETING' and ref_count = 0)
+    )
+);
+
+create unique index uk_storage_blob_active_hash
+    on storage_blob (sha256, size_bytes)
+    where state = 'ACTIVE';
+
+comment on column storage_blob.archive_index is '服务端校验过的 ZIP 归档条目索引（{entries:[{path,size,dataOffset,compressedSize,crc32}]}）；null 表示不是服务端生成的归档';
+
+create table storage_upload (
+    id                  uuid           primary key,
+    candidate_blob_id   uuid           not null,
+    blob_id             uuid,
+    filename            varchar(512)   not null,
+    declared_media_type varchar(256)   not null,
+    declared_size       bigint         not null,
+    declared_sha256     char(64)       not null,
+    cleanup_requested_at timestamptz(3),
+    cleanup_token       uuid,
+    cleanup_until       timestamptz(3),
+    created_at          timestamptz(3) not null default current_timestamp,
+    constraint uk_storage_upload_candidate unique (candidate_blob_id),
+    constraint ck_storage_upload_filename_nonblank check (btrim(filename) <> ''),
+    constraint ck_storage_upload_media_type_nonblank check (btrim(declared_media_type) <> ''),
+    constraint ck_storage_upload_size_nonneg check (declared_size >= 0),
+    constraint ck_storage_upload_sha256 check (declared_sha256 ~ '^[0-9a-f]{64}$'),
+    constraint ck_storage_upload_cleanup_pair check (
+        (cleanup_token is null) = (cleanup_until is null)
+    ),
+    constraint fk_storage_upload_blob foreign key (blob_id)
+        references storage_blob (id) on delete restrict
+);
+
+create index idx_storage_upload_cleanup_claim
+    on storage_upload (cleanup_requested_at, created_at, cleanup_until, id);
+
+comment on table storage_blob is 'Deduplicated immutable content address of the global blob storage: one ACTIVE row per (sha256, size_bytes) content, with immutable media facts and a counted reference lifecycle ACTIVE -> DELETING -> row removal.';
+
+comment on column storage_blob.id is 'Blob id (uuid): deterministic S3 keys are derived from it (blobs/{id}/original, blobs/{id}/preview.webp), never persisted.';
+comment on column storage_blob.sha256 is 'Lowercase hex SHA-256 of the original content (64 chars).';
+comment on column storage_blob.size_bytes is 'Original content size in bytes (non-negative).';
+comment on column storage_blob.media_type is 'Canonical media type probed at complete time (not the client declaration).';
+comment on column storage_blob.width is 'Immutable pixel width probed at complete time; null when not probed.';
+comment on column storage_blob.height is 'Immutable pixel height probed at complete time; null when not probed.';
+comment on column storage_blob.duration_ms is 'Immutable media duration in milliseconds probed at complete time; null for still media.';
+comment on column storage_blob.ref_count is 'Live owner reference count: READY uploads and later application and Harness consumers.';
+comment on column storage_blob.state is 'Lifecycle state: ACTIVE (ref_count > 0) or DELETING (terminal, ref_count = 0).';
+comment on column storage_blob.created_at is 'Row creation time (timestamptz, millisecond precision).';
+comment on column storage_blob.updated_at is 'Application-managed last write time (timestamptz, millisecond precision).';
+
+comment on index uk_storage_blob_active_hash is 'Content dedup: at most one ACTIVE blob row per (sha256, size_bytes); DELETING rows stay outside the key so a new upload of the same content can proceed.';
+
+comment on table storage_upload is 'Per-upload contract: blob_id NULL = PENDING (client PUTs to uploads/{uploadId}/original), non-NULL = READY (blob is retained for this upload). Expiry is created_at + current upload TTL for unclaimed uploads.';
+
+comment on column storage_upload.id is 'Upload id (uuid): the deterministic temp key uploads/{id}/original is derived from it.';
+comment on column storage_upload.candidate_blob_id is 'Server-pre-assigned blob id for the PENDING->READY transition (no FK: the blob row is created at complete time).';
+comment on column storage_upload.blob_id is 'Referenced blob while READY (FK RESTRICT); NULL while PENDING. The READY upload holds exactly one reference to this blob.';
+comment on column storage_upload.filename is 'Client-declared original filename (non-blank, <= 512 chars).';
+comment on column storage_upload.declared_media_type is 'Client-declared media type (non-blank, <= 256 chars).';
+comment on column storage_upload.declared_size is 'Client-declared content size in bytes (non-negative).';
+comment on column storage_upload.declared_sha256 is 'Client-declared lowercase hex SHA-256 (64 chars).';
+comment on column storage_upload.cleanup_requested_at is 'Durable explicit cleanup request; NULL for active uploads and retained until maintenance removes the upload row.';
+comment on column storage_upload.cleanup_token is 'Cleanup ownership token UUID; NULL when unclaimed and fenced on finalize/release.';
+comment on column storage_upload.cleanup_until is 'Cleanup lease deadline paired with cleanup_token; an expired lease is reclaimable.';
+comment on column storage_upload.created_at is 'Row creation time (timestamptz, millisecond precision). Unclaimed uploads expire at created_at + current upload TTL; there is no persisted expiry column.';
+
+comment on index uk_storage_upload_candidate is 'Every upload pre-assigns a distinct candidate blob id so PENDING rows can never collide on the future blob identity.';
+comment on index idx_storage_upload_cleanup_claim is 'Storage Maintenance claim scan: requested, claimed or expired uploads with absent/expired leases; expiry compares created_at against now minus current TTL.';
+
+create table storage_object_cleanup (
+    key              varchar(512)   not null,
+    next_attempt_at  timestamptz(3) not null,
+    constraint pk_storage_object_cleanup primary key (key),
+    constraint ck_storage_object_cleanup_key_nonblank check (btrim(key) <> '')
+);
+
+create index idx_storage_object_cleanup_due
+    on storage_object_cleanup (next_attempt_at, key);
+
+comment on table storage_object_cleanup is 'Durable object-key tombstone: a key whose last database fact was removed is deleted again whenever a late PUT/COPY recreates it. Records are permanent (never removed by TTL); each sweep claims the next due batch, advances next_attempt_at before doing object I/O and backs off failures.';
+
+comment on column storage_object_cleanup.key is 'Object storage key (uploads/{id}/original, blobs/{id}/original or blobs/{id}/preview.webp); primary key, so enqueueing is idempotent.';
+comment on column storage_object_cleanup.next_attempt_at is 'Next sweep deadline: driven by database time so every node claims with the same clock; advanced far on claim and set back on object deletion failure.';
+
+comment on index idx_storage_object_cleanup_due is 'Storage Maintenance tombstone scan: due keys in next_attempt_at order.';
+
+-- 2. Platform kernel storage: environments, Harness protocol and session blobs
 
 create table environment (
     id                  uuid          primary key,
@@ -97,6 +179,673 @@ comment on column environment.version is 'CAS 乐观锁版本：非负，从 0 �
 create index idx_environment_updated
     on environment (updated_at, id);
 
+create table environment_connection (
+    environment_id  uuid           primary key,
+    owner_node_id   uuid           not null,
+    lease_token     uuid           not null,
+    status          varchar(32)    not null,
+    runtime_info    jsonb,
+    skill_state     jsonb          not null default '[]'::jsonb,
+    recent_events   jsonb          not null default '[]'::jsonb,
+    last_seen_at    timestamptz(3) not null,
+    lease_until     timestamptz(3) not null,
+    constraint fk_environment_connection_environment foreign key (environment_id)
+        references environment (id) on delete cascade,
+    constraint ck_environment_connection_status check (
+        status in ('CONNECTING', 'READY')
+    ),
+    constraint ck_environment_connection_runtime_info check (
+        runtime_info is null or jsonb_typeof(runtime_info) = 'object'
+    ),
+    constraint ck_environment_connection_skill_state check (
+        jsonb_typeof(skill_state) = 'array'
+    ),
+    constraint ck_environment_connection_recent_events check (
+        jsonb_typeof(recent_events) = 'array'
+    ),
+    constraint ck_environment_connection_lease check (
+        lease_until > last_seen_at
+    )
+);
+
+comment on table environment_connection is 'Environment 的 daemon 连接租约：每个 Environment 由持有租约的节点独占路由（fencing 见 lease_token）';
+comment on column environment_connection.environment_id is 'Environment 的全局唯一 UUID（PK，FK cascade）';
+comment on column environment_connection.owner_node_id is '当前持有该连接路由的 App 节点实例 UUID';
+comment on column environment_connection.lease_token is '当前路由租约代币 UUID（每次接管/重绑生成新 token，fence 旧持有者）';
+comment on column environment_connection.status is '路由状态：CONNECTING / READY';
+comment on column environment_connection.runtime_info is '最近一次被接受的 READY 宿主 metadata（JSON object）；断线或重新 CONNECTING 时保留，从未 READY 时为 null';
+comment on column environment_connection.skill_state is '当前 Daemon 对各 Skill Package 的可重建安装投影（JSON array，元素为 {packageName, installedSha256, localPath, error}）；连线就绪后先清空再由全量对账回填，写回必须命中 owner/lease fence';
+comment on column environment_connection.recent_events is '最近 200 条连接与 Skill 同步运维事件（JSON array，元素只有时间、级别、类型与去敏消息）；不保存 stdout、凭据、Git URL userinfo 或签名地址';
+comment on column environment_connection.last_seen_at is '最后活跃时间（毫秒精度）';
+comment on column environment_connection.lease_until is '租约到期时间（毫秒精度），必须晚于 last_seen_at';
+
+create index idx_environment_connection_lease_until
+    on environment_connection (lease_until);
+
+create index idx_environment_connection_owner
+    on environment_connection (owner_node_id);
+
+create table cluster_node (
+    instance_id  uuid           primary key,
+    internal_url varchar(512)   not null,
+    lease_until  timestamptz(3) not null,
+    last_seen_at timestamptz(3) not null,
+    constraint ck_cluster_node_lease check (
+        lease_until > last_seen_at
+    )
+);
+
+comment on table cluster_node is 'App 节点内部 IDE 路由注册表：节点可达 HTTP(S) origin 与心跳租约，只承载控制元数据，不保存环境存活字节';
+comment on column cluster_node.instance_id is '节点实例 UUID（PK），与 environment_connection.owner_node_id 对应';
+comment on column cluster_node.internal_url is '该节点对外可达的 HTTP(S) origin，仅用于内部单跳转发';
+comment on column cluster_node.lease_until is '注册租约到期时间（毫秒精度），过期节点的路由不被选中';
+comment on column cluster_node.last_seen_at is '最后一次心跳时间（毫秒精度），必须早于 lease_until';
+
+create table system_setting (
+    id         bigint         primary key,
+    config     jsonb          not null,
+    version    bigint         not null default 0,
+    created_at timestamptz(3) not null default current_timestamp,
+    updated_at timestamptz(3) not null default current_timestamp,
+    constraint ck_system_setting_id check (id = 1),
+    constraint ck_system_setting_config_object check (jsonb_typeof(config) = 'object'),
+    constraint ck_system_setting_version_nonneg check (version >= 0)
+);
+
+comment on table system_setting is '全局 system settings 单行聚合（id=1）：config 为强类型 canonical JSON，version 为 CAS 乐观锁版本';
+comment on column system_setting.id is '恒为 1：全局配置恰好一行';
+comment on column system_setting.config is '六个 section（tool/aiRuntime/environment/network/storageMedia/advanced）的完整强类型 canonical JSON，必须为 object';
+comment on column system_setting.version is '乐观锁行版本：非负，从 0 开始，每次写操作 +1';
+comment on column system_setting.created_at is '创建时间（毫秒精度）';
+comment on column system_setting.updated_at is '最后更新时间（毫秒精度），应用侧维护';
+
+insert into system_setting (id, config) values (
+    1,
+    '{
+      "advanced":{"applicationEventHeartbeatIntervalMillis":20000,"applicationEventMaxBytes":2097152,"applicationEventQueueCapacity":512,"applicationEventSendTimeoutMillis":10000,"modelDispatchBusyFallbackDelayMillis":1000,"postgresqlWorkNotificationPollMillis":5000,"postgresqlWorkReconnectBackoffMillis":1000,"processorHeartbeatIntervalMillis":10000,"processorLeaseDurationMillis":30000,"resourceMaxBytes":16777216,"threadResolveFailureDelayMillis":1000,"toolDispatchBusyFallbackDelayMillis":1000,"toolPreflightFailureDelayMillis":1000},
+      "aiRuntime":{"compactionKeepRecentTokens":20000,"modelHttpRetryStatusCodes":[408,429,500,502,503,504],"retryBackoffStrategy":"EXPONENTIAL","retryBaseDelayMillis":2000,"retryMaxDelayMillis":60000,"retryMaxRetries":3,"subagentMaxConcurrency":10,"subagentMaxDepth":2,"subagentMaxTotalConcurrency":0,"subagentMaxTurns":50},
+      "environment":{"heartbeatTimeoutMillis":60000,"maxResourceBytes":16777216},
+      "network":{"noProxyHosts":"localhost,127.*,::1"},
+      "storageMedia":{"canvasMediaProcessTimeoutMillis":30000,"s3PresignDefaultExpiresSeconds":1800,"s3PresignMaxExpiresSeconds":3600,"temporaryResourceCleanupIntervalSeconds":1800,"temporaryResourceTtlSeconds":259200,"thumbnailMaxDimension":512,"thumbnailQuality":80,"uploadExpiresSeconds":86400},
+      "tool":{"modelGatewayBusyRetryMillis":5000,"permission":{"bash":[{"action":"ask","pattern":"*"}],"edit":[{"action":"ask","pattern":"*"}],"write":[{"action":"ask","pattern":"*"}]},"toolGatewayOverloadRetryMillis":5000}
+    }'::jsonb
+);
+
+create table harness_session (
+    id uuid primary key,
+    name varchar(256) not null,
+    created_at timestamptz(3) not null,
+    constraint ck_harness_session_name check (
+        btrim(name) <> ''
+    )
+);
+
+comment on table harness_session is 'Session 聚合边界：组织一份 append-only Entry Tree，不拥有 Thread；只记录自身 id、显示名称与创建时间';
+comment on column harness_session.id is 'Session 的全局唯一 UUID（创建后不可变）';
+comment on column harness_session.name is 'Session 显示名称：应用保证非空、单行且至多 256 个 Unicode 码点，并由应用生成默认名或手动重命名（check 只防御空白串）';
+comment on column harness_session.created_at is 'Session 创建时间（毫秒精度，创建后不可变）';
+
+create table harness_entry (
+    id uuid primary key,
+    session_id uuid not null,
+    parent_entry_id uuid,
+    entry_type varchar(32) not null,
+    payload jsonb not null check (jsonb_typeof(payload) = 'object'),
+    created_at timestamptz(3) not null,
+    entry_seq bigint generated always as identity,
+    provider_replay_state jsonb,
+    constraint uk_harness_entry_session_id unique (session_id, id),
+    constraint fk_harness_entry_session foreign key (session_id)
+        references harness_session (id),
+    constraint fk_harness_entry_parent foreign key (session_id, parent_entry_id)
+        references harness_entry (session_id, id),
+    constraint ck_harness_entry_type check (
+        entry_type in (
+            'ROOT',
+            'TURN_START',
+            'MESSAGE',
+            'CUSTOM',
+            'MODEL_ATTEMPT_FAILURE',
+            'NATIVE_COMPACTION',
+            'CUSTOM_MESSAGE',
+            'ASSISTANT_ERROR',
+            'ASSISTANT_ABORTED',
+            'COMPACTION',
+            'TURN_END',
+            'NOTIFICATION',
+            'SETTINGS',
+            'FORK'
+        )
+    ),
+    constraint ck_harness_entry_parent_shape check (
+        (entry_type = 'ROOT' and parent_entry_id is null)
+        or (entry_type <> 'ROOT' and parent_entry_id is not null)
+    ),
+    constraint ck_harness_entry_parent_not_self check (
+        parent_entry_id is null or parent_entry_id <> id
+    ),
+    constraint ck_harness_entry_provider_replay_state check (
+        provider_replay_state is null
+        or jsonb_typeof(provider_replay_state) = 'object'
+    )
+);
+
+comment on table harness_entry is '不可变 Entry：append-only 树节点，ROOT 必须先于其他 Entry，parent 链必须连续且同 Session';
+comment on column harness_entry.id is 'Entry 的全局唯一 UUID';
+comment on column harness_entry.session_id is '所属 Session';
+comment on column harness_entry.parent_entry_id is '父 Entry；ROOT 为 null，其余必须非 null 且不能指向自身';
+comment on column harness_entry.entry_type is 'Entry 类型（ROOT/TURN_START/MESSAGE/CUSTOM/MODEL_ATTEMPT_FAILURE/NATIVE_COMPACTION/CUSTOM_MESSAGE/ASSISTANT_ERROR/ASSISTANT_ABORTED/COMPACTION/TURN_END/NOTIFICATION/SETTINGS/FORK）';
+comment on column harness_entry.payload is '按 entry_type 编码的不可变 payload（JSON object）';
+comment on column harness_entry.created_at is 'Entry 创建时间（毫秒精度，不承担排序）';
+comment on column harness_entry.entry_seq is '数据库分配的追加序号：同一 Session 内严格递增且父先于子，只用于创建序读取与 keyset 分页';
+comment on column harness_entry.provider_replay_state is 'Provider native terminal replay 状态（JSON object，可空）；适用状态与 payload 关联由应用维护';
+
+create unique index uk_harness_entry_single_root
+    on harness_entry (session_id)
+    where entry_type = 'ROOT';
+
+create index idx_harness_entry_parent
+    on harness_entry (session_id, parent_entry_id);
+
+create index idx_harness_entry_session_seq
+    on harness_entry (session_id, entry_seq);
+
+comment on index uk_harness_entry_single_root is '每个 Session 至多一个 ROOT Entry';
+comment on index idx_harness_entry_parent is 'parent 回溯与同 Session 树遍历索引';
+comment on index idx_harness_entry_session_seq is 'Session 内按创建顺序读取与 keyset 分页索引';
+
+create table harness_thread (
+    id uuid primary key,
+    session_id uuid not null,
+    parent_thread_id uuid,
+    head_entry_id uuid not null,
+    creation_request_hash char(64) not null,
+    name varchar(256) not null,
+    root_thread_id uuid not null,
+    yolo_enabled boolean not null default false,
+    spawn_trigger varchar(16) not null,
+    constraints jsonb not null,
+    execution_control varchar(16) not null,
+    input_through_sequence bigint not null default 0 check (input_through_sequence >= 0),
+    next_command_sequence bigint not null check (next_command_sequence >= 1),
+    version bigint not null check (version >= 0),
+    created_at timestamptz(3) not null,
+    updated_at timestamptz(3) not null,
+    constraint fk_harness_thread_session foreign key (session_id)
+        references harness_session (id),
+    constraint fk_harness_thread_parent foreign key (parent_thread_id)
+        references harness_thread (id),
+    constraint fk_harness_thread_root foreign key (root_thread_id)
+        references harness_thread (id),
+    constraint fk_harness_thread_head foreign key (session_id, head_entry_id)
+        references harness_entry (session_id, id),
+    -- 同 Session 复合引用目标：上层表用 (session_id, id) 把
+    -- Thread 与 Session 一起冻结，无法配错 Session。
+    constraint uk_harness_thread_session unique (session_id, id),
+    constraint ck_harness_thread_parent_not_self check (
+        parent_thread_id is null or parent_thread_id <> id
+    ),
+    constraint ck_harness_thread_spawn_trigger check (
+        spawn_trigger in ('USER', 'MODEL_TOOL', 'RUNTIME', 'CONTROLLER', 'PLUGIN')
+    ),
+    constraint ck_harness_thread_constraints check (
+        jsonb_typeof(constraints) = 'object'
+    ),
+    constraint ck_harness_thread_creation_request_hash check (
+        creation_request_hash ~ '^[0-9a-f]{64}$'
+    ),
+    constraint ck_harness_thread_name check (
+        btrim(name) <> ''
+    ),
+    constraint ck_harness_thread_execution_control check (
+        execution_control in ('RUNNABLE', 'STOPPED')
+    ),
+    constraint ck_harness_thread_input_through check (
+        input_through_sequence < next_command_sequence
+    )
+);
+
+comment on table harness_thread is 'Thread：指向 head Entry 的游标状态机，version 随每次对外字段变化精确 +1；session_id 与 creation_request_hash 创建后不可变，head 必须与 session 同 Session；parent_thread_id 记录不可变执行父关系，root_thread_id 记录不可变执行根，yolo_enabled 是执行根的 YOLO 开关，spawn_trigger 与 constraints 是创建时冻结的来源与执行约束，execution_control 区分 RUNNABLE/STOPPED；input_through_sequence 记录已接纳的水位；(session_id, id) 唯一供同 Session 复合引用';
+comment on column harness_thread.id is 'Thread 的全局唯一 UUID';
+comment on column harness_thread.session_id is '所属 Session（创建后不可变）';
+comment on column harness_thread.parent_thread_id is '不可变父 Thread UUID（无父/根 Thread 为 null，禁止指向自身）';
+comment on column harness_thread.head_entry_id is '当前 head Entry（必须存在且属于 thread.session_id 的 Session）';
+comment on column harness_thread.creation_request_hash is 'NEW_SESSION/NEW_THREAD 初始创建请求指纹：服务端 64 位小写 SHA-256 身份键（创建后不可变，不对产品 DTO 暴露）';
+comment on column harness_thread.name is 'Thread 显示名称：应用保证非空、单行且至多 256 个 Unicode 码点，并由应用生成默认名或手动重命名（check 只防御空白串）';
+comment on column harness_thread.root_thread_id is '不可变执行根 UUID（根 Thread 指向自身），供树锁与整树读取';
+comment on column harness_thread.yolo_enabled is '执行根的 YOLO 开关；子代理恒为 false，有效值取自执行根';
+comment on column harness_thread.spawn_trigger is '不可变创建来源：USER / MODEL_TOOL / RUNTIME / CONTROLLER / PLUGIN';
+comment on column harness_thread.constraints is '不可变执行约束 JSON：maxOutputTokens（可空）、promptCacheDisabled、allowAutoCompaction；子 Thread 为请求约束与父约束合并后的有效值';
+comment on column harness_thread.execution_control is '持久执行控制状态（RUNNABLE/STOPPED）';
+comment on column harness_thread.input_through_sequence is '已被普通 INPUT 接纳或确定性拒绝的输入序号水位（>= 0，初值 0，< next_command_sequence）';
+comment on column harness_thread.next_command_sequence is '下一条 Command 的 sequence（从 1 递增）';
+comment on column harness_thread.version is '并发控制版本：任何对外字段变化必须 +1';
+comment on column harness_thread.created_at is 'Thread 创建时间（毫秒精度）';
+comment on column harness_thread.updated_at is 'Thread 最后更新时间（毫秒精度）';
+
+create index idx_harness_thread_parent
+    on harness_thread (parent_thread_id);
+
+create index idx_harness_thread_session
+    on harness_thread (session_id, created_at, id);
+
+create index idx_harness_thread_root
+    on harness_thread (root_thread_id);
+
+comment on index idx_harness_thread_parent is 'parent 回溯与子 Thread 树遍历索引';
+comment on index idx_harness_thread_root is '按执行根读取整棵执行树';
+comment on index idx_harness_thread_session is 'listThreadsBySession 按 (session_id, created_at, id) 读取 Session 的 Thread 列表';
+
+create unique index uk_harness_thread_root_name
+    on harness_thread (session_id, name)
+    where parent_thread_id is null;
+
+comment on index uk_harness_thread_root_name is '同一 Session 内执行根名称唯一（partial unique：仅约束 parent_thread_id is null 的根行）';
+
+create table realtime_subscription (
+    thread_id        uuid           not null,
+    node_instance_id uuid           not null,
+    lease_until      timestamptz(3) not null,
+    constraint pk_realtime_subscription primary key (thread_id, node_instance_id),
+    constraint fk_realtime_subscription_thread foreign key (thread_id)
+        references harness_thread (id) on delete cascade
+);
+
+comment on table realtime_subscription is '跨节点 realtime 订阅租约：按 (Thread, 节点实例) 唯一，随节点心跳续租，Thread 删除时级联清理';
+comment on column realtime_subscription.thread_id is '被订阅的 Thread UUID（复合 PK 前缀，FK cascade）';
+comment on column realtime_subscription.node_instance_id is '订阅方节点实例 UUID；不设 FK，读取时连接 cluster_node 校验租约';
+comment on column realtime_subscription.lease_until is '订阅租约到期时间（毫秒精度），由节点心跳按 45 秒节奏续租';
+
+create index idx_realtime_subscription_node
+    on realtime_subscription (node_instance_id);
+
+comment on index idx_realtime_subscription_node is '节点退出时按 node_instance_id 清理本节点全部订阅';
+
+create table harness_thread_command (
+    thread_id uuid not null,
+    sequence bigint not null check (sequence > 0),
+    command_type varchar(32) not null,
+    payload jsonb not null check (jsonb_typeof(payload) = 'object'),
+    idempotency_key uuid not null,
+    request_hash char(64) not null,
+    applied_entry_id uuid,
+    stop_request_id uuid,
+    cancelled_at timestamptz(3),
+    created_at timestamptz(3) not null,
+    primary key (thread_id, sequence),
+    constraint fk_harness_thread_command_thread foreign key (thread_id)
+        references harness_thread (id),
+    constraint fk_harness_thread_command_applied foreign key (applied_entry_id)
+        references harness_entry (id),
+    constraint uk_harness_thread_command_idempotency unique (thread_id, idempotency_key),
+    constraint ck_harness_thread_command_type check (
+        command_type in (
+            'USER_MESSAGE',
+            'GOAL',
+            'CUSTOM_MESSAGE',
+            'SET_AGENT',
+            'SET_EXECUTION',
+            'SET_ENVIRONMENT',
+            'NOTIFICATION'
+        )
+    ),
+    constraint ck_harness_thread_command_request_hash check (
+        request_hash ~ '^[0-9a-f]{64}$'
+    ),
+    constraint ck_harness_thread_command_cancel_pair check (
+        (stop_request_id is null and cancelled_at is null)
+        or (stop_request_id is not null and cancelled_at is not null)
+    )
+);
+
+comment on table harness_thread_command is 'ThreadCommand：无代理主键，身份为 (thread_id, sequence)；QUEUED 只能推进为 APPLIED 或 CANCELLED，CANCELLED 必须 stop_request_id 与 cancelled_at 成对';
+comment on column harness_thread_command.thread_id is '所属 Thread';
+comment on column harness_thread_command.sequence is 'Thread 内单调递增序号（与身份一起构成主键）';
+comment on column harness_thread_command.command_type is 'Command payload 类型';
+comment on column harness_thread_command.payload is '按 command_type 编码的 payload（JSON object）';
+comment on column harness_thread_command.idempotency_key is '客户端幂等键（UUID），同一 Thread 内唯一';
+comment on column harness_thread_command.request_hash is '客户端 raw 命令（含 ordered contents 与 uploadId）的 canonical SHA-256（64 小写 hex）；同 idempotencyKey 重放必须精确匹配';
+comment on column harness_thread_command.applied_entry_id is 'APPLIED 时应用的 Entry；与 cancelled_at 互斥';
+comment on column harness_thread_command.stop_request_id is 'CANCELLED 时取消它的 Stop stopRequestId（queued-only receipt 幂等键）；与 cancelled_at 成对';
+comment on column harness_thread_command.cancelled_at is 'CANCELLED 时间';
+comment on column harness_thread_command.created_at is 'Command 创建时间（毫秒精度）';
+
+create index idx_harness_thread_command_queued
+    on harness_thread_command (thread_id, sequence)
+    where applied_entry_id is null and cancelled_at is null;
+
+comment on index idx_harness_thread_command_queued is '按 sequence 升序读取 QUEUED Command（for update 锁序）';
+
+create index idx_harness_thread_command_stop_request
+    on harness_thread_command (thread_id, stop_request_id, sequence)
+    where stop_request_id is not null;
+
+comment on index idx_harness_thread_command_stop_request is 'Stop 幂等键：(thread_id, stop_request_id) 按 sequence 升序汇总被该 stopRequestId 取消的 Command';
+
+create table harness_tool_invocation (
+    id uuid primary key,
+    thread_id uuid not null,
+    turn_start_entry_id uuid not null,
+    assistant_entry_id uuid not null,
+    call_index integer not null check (call_index >= 0),
+    call jsonb not null check (jsonb_typeof(call) = 'object'),
+    binding jsonb check (binding is null or jsonb_typeof(binding) = 'object'),
+    status varchar(32) not null,
+    attempt integer not null check (attempt >= 0),
+    approval jsonb check (approval is null or jsonb_typeof(approval) = 'object'),
+    result jsonb check (result is null or jsonb_typeof(result) = 'object'),
+    effects jsonb not null check (jsonb_typeof(effects) = 'object'),
+    error jsonb check (error is null or jsonb_typeof(error) = 'object'),
+    created_at timestamptz(3) not null,
+    updated_at timestamptz(3) not null,
+    input_receipt jsonb,
+    constraint fk_harness_tool_invocation_thread foreign key (thread_id)
+        references harness_thread (id),
+    constraint fk_harness_tool_invocation_turn_start foreign key (turn_start_entry_id)
+        references harness_entry (id),
+    constraint fk_harness_tool_invocation_assistant foreign key (assistant_entry_id)
+        references harness_entry (id),
+    constraint uk_harness_tool_invocation_call_index unique (assistant_entry_id, call_index),
+    constraint ck_harness_tool_invocation_status check (
+        status in (
+            'WAITING_APPROVAL',
+            'WAITING_INPUT',
+            'WAITING_REQUEST',
+            'READY',
+            'RUNNING',
+            'SUCCEEDED',
+            'FAILED',
+            'CANCELLED',
+            'UNKNOWN'
+        )
+    ),
+    constraint ck_harness_tool_invocation_terminal_facts check (
+        result is null or error is null
+    ),
+    constraint ck_harness_tool_input_receipt check (
+        input_receipt is null or jsonb_typeof(input_receipt) = 'object'
+    )
+);
+
+comment on table harness_tool_invocation is 'ToolInvocation：一次 tool 调用的 durable 生命周期记录，按 (thread_id, turn_start_entry_id, assistant_entry_id, call_index) 对齐；WAITING_INPUT 冻结 binding 等待人输入，batch apply 后行被物理删除';
+comment on column harness_tool_invocation.id is 'ToolInvocation 的全局唯一 UUID';
+comment on column harness_tool_invocation.thread_id is '公共归属 ThreadId；工具能力从该 Thread 的 turn_start_entry_id 冻结快照读取，不依赖 ModelInvocation';
+comment on column harness_tool_invocation.turn_start_entry_id is '公共归属 TurnStart；必须属于 thread_id 且是 assistant_entry_id 所在分支的 open turn';
+comment on column harness_tool_invocation.assistant_entry_id is '携带对应 ToolCall 的 Assistant MESSAGE Entry，必须位于同一 Thread/Session 与 Turn 分支';
+comment on column harness_tool_invocation.call_index is 'assistant 消息内 tool call 的下标（从 0 递增）';
+comment on column harness_tool_invocation.call is '冻结的 ToolCall（JSON object）';
+comment on column harness_tool_invocation.binding is '冻结的 tool binding（JSON object，仅在 immediate FAILED attempt=0 槽位可空）';
+comment on column harness_tool_invocation.status is '生命周期状态（含 WAITING_REQUEST、WAITING_APPROVAL 与 WAITING_INPUT）';
+comment on column harness_tool_invocation.attempt is '已确认的 start 尝试次数（从 0 递增）';
+comment on column harness_tool_invocation.approval is '审批记录（JSON object，可空）';
+comment on column harness_tool_invocation.result is 'terminal 成功结果（JSON object，与 error 互斥）';
+comment on column harness_tool_invocation.effects is '副作用批（JSON object）；空批与 status 的关联由应用维护';
+comment on column harness_tool_invocation.error is 'terminal 失败错误（JSON object，与 result 互斥）';
+comment on column harness_tool_invocation.created_at is '创建时间（毫秒精度）';
+comment on column harness_tool_invocation.updated_at is '最后更新时间（毫秒精度）';
+comment on column harness_tool_invocation.input_receipt is '交互回执（JSON object，可空）：submissionId/actor/acceptedAt 的存在与终态关联由应用维护';
+
+create index idx_harness_tool_invocation_thread_nonterminal
+    on harness_tool_invocation (thread_id)
+    where status in ('WAITING_APPROVAL', 'WAITING_INPUT', 'WAITING_REQUEST', 'READY', 'RUNNING');
+
+comment on index idx_harness_tool_invocation_thread_nonterminal is '未收尾 ToolInvocation 按公共 Thread 归属的查找路径（已终态行在 batch apply 后物理删除，不需要覆盖）';
+
+create index idx_harness_tool_invocation_pending
+    on harness_tool_invocation (created_at, id)
+    where status in ('WAITING_APPROVAL', 'WAITING_INPUT');
+
+comment on index idx_harness_tool_invocation_pending is '待处理（审批与人工输入）统一按 (created_at, id) 稳定分页，不按状态拆成两次查询';
+
+create table durable_work (
+    target_type varchar(16) not null,
+    target_id uuid not null,
+    available_at timestamptz(3) not null,
+    wake_version bigint not null check (wake_version > 0),
+    lease_token uuid,
+    lease_until timestamptz(3),
+    required_environment_id uuid,
+    primary key (target_type, target_id),
+    constraint fk_durable_work_environment foreign key (required_environment_id)
+        references environment (id) on delete restrict,
+    constraint ck_durable_work_target_type check (
+        target_type ~ '^[A-Z][A-Z0-9_]{0,15}$'
+    ),
+    constraint ck_durable_work_lease_pair check (
+        (lease_token is null) = (lease_until is null)
+    )
+);
+
+comment on table durable_work is 'Durable Work：一个调度 target 的 mailbox 状态；wake_version 递增防止旧 worker 完成时吞掉新的 wake';
+comment on column durable_work.target_type is '模块定义的 target 类型，1–16 个大写字母、数字或下划线，首字符为字母';
+comment on column durable_work.target_id is 'target 实体的 UUID（与 target_type 构成主键）';
+comment on column durable_work.available_at is '最早可被 claim 的时间（毫秒精度）';
+comment on column durable_work.wake_version is 'wake 计数（从 1 递增）';
+comment on column durable_work.lease_token is '当前 lease token UUID（与 lease_until 同时存在或同时缺失）';
+comment on column durable_work.lease_until is '当前 lease 到期时间（毫秒精度）';
+comment on column durable_work.required_environment_id is '执行该 Work 所需 Environment 的全局唯一 UUID；非空时仅持有该 environment READY 连接租约的节点可 claim';
+
+create index idx_durable_work_available
+    on durable_work (available_at, target_type, target_id);
+
+create index idx_durable_work_lease_until
+    on durable_work (lease_until, target_type, target_id)
+    where lease_until is not null;
+
+comment on index idx_durable_work_available is 'claim 按 (available_at, target_type, target_id) 选取候选';
+comment on index idx_durable_work_lease_until is '过期 lease 扫描索引';
+
+create table harness_thread_join (
+    invocation_id uuid primary key,
+    request_hash char(64) not null,
+    parent_thread_id uuid,
+    child_thread_id uuid not null,
+    source_command_sequence bigint not null check (source_command_sequence > 0),
+    agent varchar(256) not null,
+    delivery varchar(32) not null,
+    superseded_by_invocation_id uuid,
+    max_turns integer,
+    reminder_turn bigint not null default 0,
+    terminal_entry_id uuid,
+    final_answer_entry_id uuid,
+    delivery_command_sequence bigint,
+    created_at timestamptz(3) not null,
+    updated_at timestamptz(3) not null,
+    constraint fk_harness_thread_join_child_thread foreign key (child_thread_id)
+        references harness_thread (id),
+    constraint fk_harness_thread_join_parent_thread foreign key (parent_thread_id)
+        references harness_thread (id),
+    constraint fk_harness_thread_join_source_command foreign key (child_thread_id, source_command_sequence)
+        references harness_thread_command (thread_id, sequence),
+    constraint fk_harness_thread_join_terminal_entry foreign key (terminal_entry_id)
+        references harness_entry (id),
+    constraint fk_harness_thread_join_final_answer_entry foreign key (final_answer_entry_id)
+        references harness_entry (id),
+    constraint fk_harness_thread_join_delivery_command foreign key (parent_thread_id, delivery_command_sequence)
+        references harness_thread_command (thread_id, sequence),
+    constraint fk_harness_thread_join_superseded_by foreign key (superseded_by_invocation_id)
+        references harness_thread_join (invocation_id),
+    constraint ck_harness_thread_join_delivery_kind check (
+        delivery in ('NOTIFY_PARENT', 'SETTLE_OWNER_TURN', 'RECEIPT_ONLY')
+    ),
+    constraint ck_harness_thread_join_request_hash check (
+        request_hash ~ '^[0-9a-f]{64}$'
+    ),
+    constraint ck_harness_thread_join_parent_not_child check (
+        parent_thread_id is null or parent_thread_id <> child_thread_id
+    ),
+    constraint ck_harness_thread_join_agent check (
+        btrim(agent) <> ''
+    ),
+    constraint ck_harness_thread_join_max_turns check (
+        max_turns is null or max_turns > 0
+    ),
+    constraint ck_harness_thread_join_reminder_turn check (
+        reminder_turn >= 0
+    )
+);
+
+comment on table harness_thread_join is 'Thread Join 契约记录：以 invocation_id 为主键记录原子源 prompt 接受与 join 契约、子 Thread 终止边界、匹配的 terminal/final_answer Entry、以及交付给父 Thread 的命令序列；无独立状态枚举，无 prompt/report 冗余复制';
+comment on column harness_thread_join.invocation_id is 'Join 的全局唯一 UUID（主键，与发起调用的 Tool/Ticket invocation 对齐）';
+comment on column harness_thread_join.request_hash is '创建请求指纹（64 位小写 SHA-256）';
+comment on column harness_thread_join.parent_thread_id is '父 Thread UUID（可空，空表示 root one-shot completion ticket，不投递父消息）';
+comment on column harness_thread_join.child_thread_id is '目标子 Thread UUID';
+comment on column harness_thread_join.source_command_sequence is '子 Thread 接受源 prompt 的 command sequence';
+comment on column harness_thread_join.agent is '本次执行的 Agent 名';
+comment on column harness_thread_join.delivery is '结算后的交付方式：NOTIFY_PARENT 投递父通知；SETTLE_OWNER_TURN 冻结结果并唤醒父 Thread 的开放 Turn owner；RECEIPT_ONLY 只冻结结果（无父 Thread）';
+comment on column harness_thread_join.superseded_by_invocation_id is '接管本未完成 join 的后续 invocation UUID；被取代的 join 保留源命令与身份，不再占配额或交付';
+comment on column harness_thread_join.max_turns is '软预算最大 turn 数（可空）';
+comment on column harness_thread_join.reminder_turn is '已发出的 max_turns 软提醒轮次计数';
+comment on column harness_thread_join.terminal_entry_id is '冻结的 terminal Entry UUID（可空，非空表示 matched）';
+comment on column harness_thread_join.final_answer_entry_id is '可空的最终回答 Entry UUID（仅 terminal_entry_id 非空时可非空）';
+comment on column harness_thread_join.delivery_command_sequence is '向父 Thread 投递结果 NOTIFICATION 的 command sequence（非空必须已 matched 且 parent_thread_id 非空）';
+comment on column harness_thread_join.created_at is '创建时间（毫秒精度）';
+comment on column harness_thread_join.updated_at is '最后更新时间（毫秒精度）';
+
+create index idx_harness_thread_join_child_pending
+    on harness_thread_join (child_thread_id)
+    where terminal_entry_id is null and superseded_by_invocation_id is null;
+
+comment on index idx_harness_thread_join_child_pending is '子 Thread 变为空闲或执行结束时检索等待匹配的 pending join';
+
+create table harness_thread_stop_receipt (
+    thread_id uuid not null,
+    stop_request_id uuid not null,
+    root_stop_request_id uuid not null,
+    stopped_turn_end_entry_id uuid,
+    created_at timestamptz(3) not null,
+    constraint pk_harness_thread_stop_receipt primary key (thread_id, stop_request_id),
+    constraint fk_harness_thread_stop_receipt_thread foreign key (thread_id)
+        references harness_thread (id),
+    constraint fk_harness_thread_stop_receipt_turn_end foreign key (stopped_turn_end_entry_id)
+        references harness_entry (id)
+);
+
+comment on table harness_thread_stop_receipt is 'Stop 回执：一次 Stop 在单个 Thread 上留下的持久身份与停止边界；集合由 root_stop_request_id 归组，被取消的输入从 command 表读取';
+comment on column harness_thread_stop_receipt.thread_id is '所属 Thread';
+comment on column harness_thread_stop_receipt.stop_request_id is '本次 Stop 在该 Thread 上的请求 ID；根 Thread 行与 root_stop_request_id 相等';
+comment on column harness_thread_stop_receipt.root_stop_request_id is '本次 Stop 的根请求 ID；同一次 Stop 的全部回执共享它';
+comment on column harness_thread_stop_receipt.stopped_turn_end_entry_id is '本次 Stop 关闭活跃 turn 时产生的 TURN_END Entry（若有）';
+comment on column harness_thread_stop_receipt.created_at is '回执创建时间（毫秒精度）';
+
+create index idx_harness_thread_stop_receipt_root_request
+    on harness_thread_stop_receipt (root_stop_request_id, thread_id);
+
+comment on index idx_harness_thread_stop_receipt_root_request is '按 root_stop_request_id 检索一次 Stop 产生的全部回执';
+
+create table harness_execution_exit (
+    execution_id uuid primary key,
+    thread_id uuid not null,
+    invocation_id uuid not null,
+    attempt integer not null check (attempt >= 1),
+    owner_lease_token uuid not null,
+    kind varchar(16) not null,
+    parent_execution_id uuid,
+    environment_id uuid,
+    state varchar(32) not null,
+    registered_at timestamptz(3) not null,
+    confirmed_at timestamptz(3),
+    abandoned_at timestamptz(3),
+    constraint fk_harness_execution_exit_thread foreign key (thread_id) references harness_thread (id),
+    constraint fk_harness_execution_exit_parent foreign key (parent_execution_id)
+        references harness_execution_exit (execution_id),
+    constraint ck_harness_execution_exit_kind check (
+        kind in ('DRIVER', 'TOOL', 'REMOTE')
+    ),
+    constraint ck_harness_execution_exit_state check (
+        state in ('UNCONFIRMED', 'STUDIO_EXITED', 'REMOTE_ACKNOWLEDGED', 'NOT_STARTED', 'ABANDONED')
+    ),
+    constraint ck_harness_execution_exit_time check (
+        (confirmed_at is null or confirmed_at >= registered_at)
+        and (abandoned_at is null or abandoned_at >= registered_at)
+    )
+);
+
+comment on table harness_execution_exit is '具体执行代次的退出证据。独立于逻辑 Invocation 生命周期，不以 Invocation 外键跟随逻辑删除';
+comment on column harness_execution_exit.execution_id is '这一具体执行代次的不可变身份';
+comment on column harness_execution_exit.thread_id is '所属 Thread；按 Thread 查询，不依赖 open turn';
+comment on column harness_execution_exit.invocation_id is '关联的逻辑 Driver 或 Tool invocation';
+comment on column harness_execution_exit.attempt is '该 invocation 的具体执行代次，从 1 开始';
+comment on column harness_execution_exit.owner_lease_token is '登记时持有的 Work lease token UUID';
+comment on column harness_execution_exit.kind is 'DRIVER、TOOL 或挂在本地 TOOL/DRIVER 代次上的 REMOTE';
+comment on column harness_execution_exit.parent_execution_id is 'REMOTE 关联的本地 TOOL 或 DRIVER 执行代次；本地执行为空';
+comment on column harness_execution_exit.environment_id is 'REMOTE 执行关联的远端 Environment 标识；本地执行为空';
+comment on column harness_execution_exit.state is '退出证据：未确认、Studio 退出、远端 ACK、确定未启动，或用户显式放弃（ABANDONED 不代表物理退出）';
+comment on column harness_execution_exit.registered_at is '登记时间（毫秒精度）';
+comment on column harness_execution_exit.confirmed_at is '真实退出证据确认时间（毫秒精度）；未确认或放弃时为空';
+comment on column harness_execution_exit.abandoned_at is '用户显式放弃确认的时间（毫秒精度）；只有 ABANDONED 必填，后续真实确认保留';
+
+create index idx_harness_execution_exit_thread_unconfirmed
+    on harness_execution_exit (thread_id, registered_at, execution_id)
+    where state = 'UNCONFIRMED';
+
+comment on index idx_harness_execution_exit_thread_unconfirmed is '按 Thread 读取尚未确认退出的执行代次';
+
+create index idx_harness_execution_exit_thread
+    on harness_execution_exit (thread_id);
+
+create index idx_harness_execution_exit_parent
+    on harness_execution_exit (parent_execution_id)
+    where parent_execution_id is not null;
+
+create index idx_harness_execution_exit_invocation
+    on harness_execution_exit (invocation_id, attempt);
+
+create index idx_harness_execution_exit_unconfirmed_remote
+    on harness_execution_exit (environment_id)
+    where kind = 'REMOTE' and state = 'UNCONFIRMED';
+
+comment on index idx_harness_execution_exit_thread is 'Thread 深删按 thread_id 删除执行代次，并服务删除 Thread 时的外键检查';
+comment on index idx_harness_execution_exit_parent is '删除执行代次时服务 REMOTE 指向本地 TOOL 代次的自引用外键检查';
+comment on index idx_harness_execution_exit_unconfirmed_remote is '按 Environment 读取尚未确认退出的远端执行代次';
+
+create table session_blob_ref (
+    session_id  uuid          not null,
+    blob_id     uuid          not null,
+    created_at  timestamptz(3) not null default current_timestamp,
+    constraint pk_session_blob_ref primary key (session_id, blob_id),
+    constraint fk_session_blob_ref_session foreign key (session_id)
+        references harness_session (id) on delete restrict,
+    constraint fk_session_blob_ref_blob foreign key (blob_id)
+        references storage_blob (id) on delete restrict
+);
+
+create index idx_session_blob_ref_blob
+    on session_blob_ref (blob_id, session_id);
+
+comment on table session_blob_ref is 'Session 与 storage_blob 的显式引用边：每行恰好对应一次 blob retain，删除时由应用层逐行 release；FK 均为 RESTRICT，深删除必须先删本表';
+comment on column session_blob_ref.session_id is '所属 Harness Session（RESTRICT FK）';
+comment on column session_blob_ref.blob_id is '被引用的全局 blob（RESTRICT FK，ACTIVE 行）';
+comment on column session_blob_ref.created_at is '引用创建时间（timestamptz，毫秒精度）';
+
+comment on index idx_session_blob_ref_blob is '按 blob 反向枚举持有它的 Session（深删除与对账）';
+
+create table session_file (
+    session_id uuid not null,
+    path       text not null,
+    blob_id    uuid not null,
+    revision   integer not null,
+    updated_at timestamptz(3) not null default current_timestamp,
+    constraint pk_session_file primary key (session_id, path),
+    constraint fk_session_file_session foreign key (session_id) references harness_session (id) on delete restrict,
+    constraint fk_session_file_blob foreign key (blob_id) references storage_blob (id) on delete restrict,
+    constraint ck_session_file_path check (path <> '' and path = btrim(path) and path !~ '^/'
+        and path !~ '(^|/)\.\.?(/|$)' and path !~ '[\u0001-\u001F\u007F-\u009F]'),
+    constraint ck_session_file_revision check (revision > 0)
+);
+
+create index idx_session_file_blob on session_file (blob_id, session_id);
+
+comment on table session_file is 'Session 虚拟文件存储：(session_id, path) 唯一确定一个文件版本及引用的全局 blob';
+comment on column session_file.session_id is '所属 Harness Session（RESTRICT FK）';
+comment on column session_file.path is 'Session 空间相对路径（非空、无首尾空白、无前导斜杠、无 .. 段）';
+comment on column session_file.blob_id is '文件内容引用的全局 blob（RESTRICT FK，ACTIVE 行）';
+comment on column session_file.revision is '乐观锁版本号（严格大于 0）';
+comment on column session_file.updated_at is '最后更新时间戳（毫秒精度）';
+comment on index idx_session_file_blob is '按 blob 反向枚举引用它的 Session 文件（CAS 释放前引用判断与对账）';
+
+-- 3. Platform Driver storage: catalogs, plugins, MCP and Builtin model invocations
+
 create table agent_provider (
     name            varchar(64)   primary key,
     description     text,
@@ -120,7 +869,6 @@ create table agent_provider (
     constraint ck_agent_provider_version_nonneg check (version >= 0)
 );
 
--- 单 Model 与 Model Group 共享唯一逻辑名称空间：name 是全局主键，kind 决定其余列的形状。
 create table agent_model (
     name            varchar(128)  primary key,
     kind            varchar(16)   not null,
@@ -165,14 +913,10 @@ create table agent_model (
     constraint ck_agent_model_version_nonneg check (version >= 0)
 );
 
-comment on column agent_model.name is
-    '全局唯一逻辑模型名；单 Model 与 Model Group 共用同一名称空间';
-comment on column agent_model.kind is
-    'MODEL 或 GROUP；决定 provider/model/config 与 group_config 的互斥形状';
-comment on column agent_model.model_id is
-    'MODEL 发往上游 Provider 的真实 wire 模型标识：非空白、无环绕空白、≤256；与逻辑 name 独立且不唯一；GROUP 为 null';
-comment on column agent_model.group_config is
-    'GROUP 的有序成员、立即降级 HTTP 状态码与固定冷却秒数；MODEL 为 null';
+comment on column agent_model.name is '全局唯一逻辑模型名；单 Model 与 Model Group 共用同一名称空间';
+comment on column agent_model.kind is 'MODEL 或 GROUP；决定 provider/model/config 与 group_config 的互斥形状';
+comment on column agent_model.model_id is 'MODEL 发往上游 Provider 的真实 wire 模型标识：非空白、无环绕空白、≤256；与逻辑 name 独立且不唯一；GROUP 为 null';
+comment on column agent_model.group_config is 'GROUP 的有序成员、立即降级 HTTP 状态码与固定冷却秒数；MODEL 为 null';
 
 create table agent_definition (
     name            varchar(64)   primary key,
@@ -199,9 +943,6 @@ create table agent_definition (
             and length(btrim(execution ->> 'driver')) > 0
             and jsonb_typeof(execution -> 'settings') = 'object', false) else false end
     ),
-    constraint ck_agent_definition_user_requires_execution check (
-        type = 'BUILTIN' or execution is not null
-    ),
     constraint ck_agent_definition_version_nonneg check (version >= 0)
 );
 
@@ -209,7 +950,6 @@ create index idx_agent_definition_model
     on agent_definition ((execution -> 'settings' ->> 'modelName'))
     where execution ->> 'driver' = 'builtin';
 
--- 组内成员冷却：只按 (组, 成员引用) 隔离；group_version 使旧配置的冷却与旧在途 callback 失效。
 create table agent_model_group_cooldown (
     group_name          varchar(128)  not null,
     member_model_name   varchar(128)  not null,
@@ -223,27 +963,15 @@ create table agent_model_group_cooldown (
     constraint fk_agent_model_group_cooldown_group foreign key (group_name)
         references agent_model (name) on update cascade on delete cascade,
     constraint fk_agent_model_group_cooldown_member foreign key (member_model_name)
-        references agent_model (name) on update cascade,
+        references agent_model (name) on update cascade on delete cascade,
     constraint ck_agent_model_group_cooldown_variant check (
         member_variant = btrim(member_variant) and char_length(member_variant) > 0
     ),
     constraint ck_agent_model_group_cooldown_version_nonneg check (group_version >= 0)
 );
 
-comment on table agent_model_group_cooldown is
-    'Model Group 组内成员固定冷却截止时间；PostgreSQL 共享、按组配置版本隔离，到期自然失效';
-comment on column agent_model_group_cooldown.group_version is
-    '写入时冻结的组配置版本；组配置变更后旧版本冷却不再参与选择';
-
--- -----------------------------------------------------------------------------
--- Platform 全局 Skill Package
---
--- 技能包是「名称 + 当前版本」：当前版本 = 版本号 + 一份服务端规范化归档 + 从归档读出的
--- Skill 清单。每个包只保留当前版本；发布是短事务内的 CAS 切换，旧归档的引用在同一事务
--- 内释放。Git 渠道的仓库事实单独一行；上传渠道的包没有 Git 事实行。
---
--- Package 名与 SkillNames 共用 Agent Skills 短名规则。
--- -----------------------------------------------------------------------------
+comment on table agent_model_group_cooldown is 'Model Group 组内成员固定冷却截止时间；PostgreSQL 共享、按组配置版本隔离，到期自然失效';
+comment on column agent_model_group_cooldown.group_version is '写入时冻结的组配置版本；组配置变更后旧版本冷却不再参与选择';
 
 create table skill_package (
     package_name     varchar(64)    not null,
@@ -253,8 +981,8 @@ create table skill_package (
     manifest         jsonb          not null,
     published_at     timestamptz(3) not null,
     version          bigint         not null default 0,
-    create_time      timestamptz(3) not null default current_timestamp,
-    update_time      timestamptz(3) not null default current_timestamp,
+    created_at       timestamptz(3) not null default current_timestamp,
+    updated_at       timestamptz(3) not null default current_timestamp,
     constraint pk_skill_package primary key (package_name),
     constraint ck_skill_package_name check (
         package_name collate "C" ~ '^[a-z0-9]+(-[a-z0-9]+)*$'
@@ -275,7 +1003,7 @@ create table skill_package (
     constraint ck_skill_package_manifest check (jsonb_typeof(manifest) = 'object'),
     constraint ck_skill_package_published_at check (published_at is not null),
     constraint ck_skill_package_version check (version >= 0),
-    constraint ck_skill_package_time_order check (update_time >= create_time)
+    constraint ck_skill_package_time_order check (updated_at >= created_at)
 );
 
 comment on table skill_package is 'Platform 全局 Skill Package 当前版本：每个 packageName 恰一行，保存当前版本号、规范化 ZIP 归档引用、从归档读出的 Skill 清单与发布时刻；不保留历史版本';
@@ -286,8 +1014,8 @@ comment on column skill_package.artifact_blob_id is '当前版本规范化 ZIP �
 comment on column skill_package.manifest is '从最终 ZIP 读出的 Skill 清单（JSON object {skills:[{name,description}]}，按 name 排序）；不信任客户端提交的结构';
 comment on column skill_package.published_at is '当前版本发布时间（毫秒精度）';
 comment on column skill_package.version is 'CAS 乐观锁版本：非负，从 0 开始，实际事实变化时 +1';
-comment on column skill_package.create_time is '创建时间（毫秒精度）';
-comment on column skill_package.update_time is '最后更新时间（毫秒精度），应用侧维护';
+comment on column skill_package.created_at is '创建时间（毫秒精度）';
+comment on column skill_package.updated_at is '最后更新时间（毫秒精度），应用侧维护';
 
 create table skill_package_git_source (
     package_name   varchar(64)   not null,
@@ -341,24 +1069,16 @@ comment on column skill_package_git_source.head_commit is '最近一次检查到
 comment on column skill_package_git_source.checked_at is '最近一次检查时间（毫秒精度）';
 comment on column skill_package_git_source.check_error is '最近一次检查的有界错误摘要（非空、无环绕空白、≤4096 字节）；检查成功时为 null';
 
--- -----------------------------------------------------------------------------
--- 构建期 Plugin 的普通配置与凭据
---
--- plugin_configuration 每个已安装 Plugin 一行当前普通配置；revision 每次保存 +1，供写入 CAS。
--- plugin_credential 每个已认证 Plugin 一行凭据（静态密钥或交互凭据），未认证时无行，断连即删除。
--- 凭据载荷按可信单用户部署模型明文保存；管理查询永不返回 payload_json。
--- -----------------------------------------------------------------------------
-
 create table plugin_configuration (
     plugin_id   varchar(64)    primary key,
-    revision    bigint         not null,
+    version     bigint         not null,
     values_json text           not null,
     created_at  timestamptz(3) not null default current_timestamp,
     updated_at  timestamptz(3) not null default current_timestamp,
     constraint ck_plugin_configuration_plugin_id check (
         plugin_id ~ '^[a-z0-9]+([.-][a-z0-9]+)*$'
     ),
-    constraint ck_plugin_configuration_revision check (revision > 0),
+    constraint ck_plugin_configuration_version check (version > 0),
     constraint ck_plugin_configuration_values_object check (
         values_json is json object with unique keys
     ),
@@ -370,7 +1090,7 @@ create table plugin_configuration (
 
 comment on table plugin_configuration is '已安装 Plugin 的当前普通配置：每个 Plugin 一行，秘密不进入本表';
 comment on column plugin_configuration.plugin_id is 'Plugin 安装身份，与 classpath 中的 StudioPlugin.pluginId 对齐';
-comment on column plugin_configuration.revision is '配置修订：首次写入为 1，每次保存 +1，写入以它做 CAS';
+comment on column plugin_configuration.version is '配置修订：首次写入为 1，每次保存 +1，写入以它做 CAS';
 comment on column plugin_configuration.values_json is '按插件 Schema 归一化后的严格 JSON object 文本（≤64 KiB）';
 
 create table plugin_credential (
@@ -382,7 +1102,7 @@ create table plugin_credential (
     status              varchar(32)    not null,
     last_refreshed_at   timestamptz(3),
     last_refresh_error  text,
-    refresh_lease_token varchar(128),
+    refresh_lease_token uuid,
     refresh_lease_until timestamptz(3),
     version             bigint         not null default 0,
     created_at          timestamptz(3) not null default current_timestamp,
@@ -419,28 +1139,24 @@ comment on column plugin_credential.region is '交互凭据的 region 路由元�
 comment on column plugin_credential.expires_at is '交互凭据的本地失效时刻；静态密钥为 null';
 comment on column plugin_credential.next_refresh_at is '下一次刷新时刻；静态密钥为 null，因此永不被领取';
 comment on column plugin_credential.status is '状态：CONNECTED, REFRESH_FAILED, REFRESH_UNCERTAIN, REAUTH_REQUIRED';
-comment on column plugin_credential.refresh_lease_token is '跨节点刷新租约令牌，与 refresh_lease_until 成对';
+comment on column plugin_credential.refresh_lease_token is '跨节点刷新租约令牌 UUID，与 refresh_lease_until 成对';
 comment on column plugin_credential.version is 'CAS 版本：每次写入 +1；调用期拒绝与刷新终结都匹配它';
 
 create index idx_plugin_credential_refresh_due
     on plugin_credential (next_refresh_at);
 
--- Plugin 交互式认证的待完成 attempt：每个 Plugin 至多一个，新的 prepare 直接替换旧的。
--- 只存 nonce 的 SHA-256 摘要与 prepare 时的配置修订；complete 以单条条件删除原子消费。
 create table plugin_auth_attempt (
     plugin_id       varchar(64)    primary key,
     nonce_hash      char(64)       not null,
-    config_revision bigint         not null,
+    config_version  bigint         not null,
     region          varchar(64)    not null,
     expires_at      timestamptz(3) not null,
     created_at      timestamptz(3) not null default current_timestamp,
     constraint ck_plugin_auth_attempt_nonce_hash check (nonce_hash ~ '^[0-9a-f]{64}$'),
-    constraint ck_plugin_auth_attempt_config_revision check (config_revision > 0),
+    constraint ck_plugin_auth_attempt_config_version check (config_version > 0),
     constraint ck_plugin_auth_attempt_region check (char_length(region) between 1 and 64)
 );
 
--- Platform MCP Server 配置：name 是主键与唯一路由身份，创建后不可变。Backend 只通过
--- Streamable HTTP 连接 Server；请求 header 可能内嵌凭据，绝不进入列表投影与日志。
 create table mcp_server (
     name              varchar(32)    primary key,
     url               varchar(2048)  not null,
@@ -477,7 +1193,6 @@ comment on column mcp_server.created_at is '创建时间（毫秒精度）';
 comment on column mcp_server.updated_at is '最后更新时间（毫秒精度），应用侧维护';
 comment on column mcp_server.version is '乐观锁行版本：非负，从 0 开始，每次写操作 +1；CAS 更新依据';
 
--- MCP Server 当前发现结果的工具行：成功发现整体物理替换，不存在 tombstone 或修订版本。
 create table mcp_tool (
     name           varchar(64)   primary key,
     server_name    varchar(32)   not null,
@@ -506,12 +1221,86 @@ comment on column mcp_tool.source_name is 'MCP 工具原始名（同一 Server �
 comment on column mcp_tool.description is '工具描述（非空白），冻结进 ToolDescriptor';
 comment on column mcp_tool.input_schema is '工具 JSON input schema（JSON object），冻结进 ToolDescriptor';
 
--- Canvas 领域：一个节点模型、不可变内容与可替换的当前 Resource[]。
---
--- `revision` 只是同步位置坐标（命令批与旧 ACK 的比较基准），绝不作为整图 CAS
--- 前提。全部 ownership 外键都是 ON DELETE RESTRICT：删除顺序由应用显式编排
--- （pins -> runs -> resources -> nodes -> groups -> dedup -> document），
--- CASCADE 会绕过全局 storage_blob 引用计数，因此一律不用。
+create table builtin_model_invocation (
+    id uuid primary key,
+    thread_id uuid not null,
+    turn_start_entry_id uuid not null,
+    request_head_entry_id uuid not null,
+    request_spec jsonb not null check (jsonb_typeof(request_spec) = 'object'),
+    status varchar(16) not null,
+    attempt integer not null check (attempt >= 0),
+    stream_checkpoint jsonb check (
+        stream_checkpoint is null or jsonb_typeof(stream_checkpoint) = 'object'
+    ),
+    result jsonb check (result is null or jsonb_typeof(result) = 'object'),
+    error jsonb check (error is null or jsonb_typeof(error) = 'object'),
+    result_entry_id uuid,
+    failed_attempts jsonb not null check (jsonb_typeof(failed_attempts) = 'array'),
+    group_execution jsonb check (
+        group_execution is null or jsonb_typeof(group_execution) = 'object'
+    ),
+    requested_at timestamptz(3),
+    created_at timestamptz(3) not null,
+    updated_at timestamptz(3) not null,
+    provider_replay_state jsonb,
+    constraint fk_builtin_model_invocation_thread foreign key (thread_id)
+        references harness_thread (id),
+    constraint fk_builtin_model_invocation_turn_start foreign key (turn_start_entry_id)
+        references harness_entry (id),
+    constraint fk_builtin_model_invocation_request_head foreign key (request_head_entry_id)
+        references harness_entry (id),
+    constraint fk_builtin_model_invocation_result foreign key (result_entry_id)
+        references harness_entry (id),
+    constraint uk_builtin_model_invocation_turn unique (thread_id, turn_start_entry_id),
+    constraint ck_builtin_model_invocation_status check (
+        status in (
+            'READY',
+            'RUNNING',
+            'SUCCEEDED',
+            'FAILED',
+            'CANCELLED',
+            'UNKNOWN'
+        )
+    ),
+    constraint ck_builtin_model_invocation_terminal_facts check (
+        result is null or error is null
+    ),
+    constraint ck_builtin_model_invocation_provider_replay_state check (
+        provider_replay_state is null
+        or jsonb_typeof(provider_replay_state) = 'object'
+    )
+);
+
+comment on table builtin_model_invocation is 'ModelInvocation：一次 model turn 的 durable 生命周期记录（READY/RUNNING 与四个 terminal）';
+comment on column builtin_model_invocation.id is 'ModelInvocation 的全局唯一 UUID';
+comment on column builtin_model_invocation.thread_id is '所属 Thread';
+comment on column builtin_model_invocation.turn_start_entry_id is '本次 turn 的 TURN_START Entry';
+comment on column builtin_model_invocation.request_head_entry_id is '创建时的 Thread head（request 头 Entry CAS 快照）';
+comment on column builtin_model_invocation.request_spec is '冻结的 model 请求规格（JSON object）';
+comment on column builtin_model_invocation.status is '生命周期状态';
+comment on column builtin_model_invocation.attempt is '已持久化 RUNNING 的执行次数（从 0 递增，先于请求发出）';
+comment on column builtin_model_invocation.stream_checkpoint is 'RUNNING 流式断点（JSON object，可空）';
+comment on column builtin_model_invocation.result is 'terminal 成功结果（JSON object，与 error 互斥）';
+comment on column builtin_model_invocation.error is 'terminal 失败错误（JSON object，与 result 互斥）';
+comment on column builtin_model_invocation.result_entry_id is '结果 Entry（Assistant/AssistantError/AssistantAborted/COMPACTION），全局唯一';
+comment on column builtin_model_invocation.failed_attempts is '由 retry policy 驱动的 append-only TRANSIENT 失败 attempt 历史（JSON array）';
+comment on column builtin_model_invocation.group_execution is 'Model Group 当前成员游标与该成员普通重试计数（JSON object，单 Model 为 null）';
+comment on column builtin_model_invocation.requested_at is '当前已确认 Provider 调用的发起时间；成功历史 metadata 记录实际请求时刻';
+comment on column builtin_model_invocation.created_at is '创建时间（毫秒精度）';
+comment on column builtin_model_invocation.updated_at is '最后更新时间（毫秒精度）';
+comment on column builtin_model_invocation.provider_replay_state is 'Provider native terminal replay 状态（JSON object，可空）；适用状态与 result 关联由应用维护';
+
+create unique index uk_builtin_model_invocation_result
+    on builtin_model_invocation (result_entry_id)
+    where result_entry_id is not null;
+
+comment on index uk_builtin_model_invocation_result is 'resultEntryId 全局唯一（非 null 时）';
+
+alter table skill_package
+    add constraint fk_skill_package_artifact
+        foreign key (artifact_blob_id) references storage_blob (id) on delete restrict;
+
+-- 4. Product tables: Canvas, Chat and Project
 
 create table canvas_document (
     id uuid primary key,
@@ -608,8 +1397,6 @@ comment on column canvas_node."function" is 'Function 配置 {name,args}（可�
 
 create index idx_canvas_node_group on canvas_node (canvas_id, group_id) where group_id is not null;
 
--- 不可变内容行：blob_id 与 text_content 恰好一个；行可以在只被活跃 Run pin 时
--- 暂时无 owner。blob_id 的 storage_blob 外键在存储区之后追加。
 create table canvas_resource (
     id uuid primary key,
     canvas_id uuid not null references canvas_document (id) on delete restrict,
@@ -641,8 +1428,6 @@ comment on column canvas_resource.created_at is '创建时间（毫秒精度）'
 create index idx_canvas_resource_blob on canvas_resource (blob_id) where blob_id is not null;
 create index idx_canvas_resource_created on canvas_resource (canvas_id, created_at, id);
 
--- 每个 Function 节点只有一行当前/最后一次 Run；结构化列服务 status/claim 查询，
--- state_json 只保存冻结计划与 checkpoint。
 create table canvas_function_run (
     node_id uuid primary key references canvas_node (id) on delete restrict,
     request_id uuid not null,
@@ -652,23 +1437,19 @@ create table canvas_function_run (
     error text,
     created_at timestamptz(3) not null default current_timestamp,
     updated_at timestamptz(3) not null default current_timestamp,
-    unique (node_id, request_id),
-    check (status in ('READY', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED', 'UNKNOWN')),
-    check (status not in ('FAILED', 'UNKNOWN') or (error is not null and btrim(error) <> ''))
+    check (status in ('READY', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED', 'UNKNOWN'))
 );
 
-comment on table canvas_function_run is 'Function 节点当前/最后一次 Run：PK 为 node_id，request_id 全 UUID 且 (node_id, request_id) 唯一；调度与执行租约在 durable_work（CANVAS_RUN）';
+comment on table canvas_function_run is 'Function 节点当前/最后一次 Run：PK 为 node_id，request_id 是客户端幂等键；调度与执行租约在 durable_work（CANVAS_RUN）';
 comment on column canvas_function_run.node_id is 'Function 节点（一个节点同时至多一个 Run 行）';
 comment on column canvas_function_run.request_id is 'Run 请求 UUID（客户端生成，幂等键）';
 comment on column canvas_function_run.status is '生命周期：READY / RUNNING / SUCCEEDED / FAILED / CANCELLED / UNKNOWN';
 comment on column canvas_function_run.attempt is '成功 claim 次数；首次 claim 从 0 增加为 1';
 comment on column canvas_function_run.state_json is 'typed/versioned 冻结计划与 checkpoint（JSON object）';
-comment on column canvas_function_run.error is '公开错误信息（FAILED/UNKNOWN 时非空）';
+comment on column canvas_function_run.error is '公开错误信息；失败原因形状由应用维护';
 comment on column canvas_function_run.created_at is '当前 request 创建时间（毫秒精度）';
 comment on column canvas_function_run.updated_at is '最后更新时间（毫秒精度）';
 
--- Pin 只引用真实存在的 Resource：计划中的 OUTPUT id 在 Resource 行与 OUTPUT pin
--- 同一事务写入前只存在于 state_json，真实外键保证 pin 不会比 Resource 存活更久。
 create table canvas_function_resource_pin (
     canvas_id uuid not null,
     node_id uuid not null,
@@ -678,8 +1459,8 @@ create table canvas_function_resource_pin (
     primary key (canvas_id, node_id, request_id, role, resource_id),
     constraint fk_canvas_pin_node foreign key (canvas_id, node_id)
         references canvas_node (canvas_id, id) on delete restrict,
-    constraint fk_canvas_pin_run foreign key (node_id, request_id)
-        references canvas_function_run (node_id, request_id) on delete restrict,
+    constraint fk_canvas_pin_run foreign key (node_id)
+        references canvas_function_run (node_id) on delete restrict,
     constraint fk_canvas_pin_resource foreign key (canvas_id, resource_id)
         references canvas_resource (canvas_id, id) on delete restrict
 );
@@ -693,8 +1474,6 @@ comment on column canvas_function_resource_pin.resource_id is '被 pin 的资源
 
 create index idx_canvas_function_pin_resource on canvas_function_resource_pin (canvas_id, resource_id);
 
--- 每次 Canvas 写入准入（含 Function start）都记一行；accepted_revision 记录请求
--- 首次定位的位置，不是完整响应。
 create table canvas_command_dedup (
     canvas_id uuid not null references canvas_document (id) on delete restrict,
     idempotency_key uuid not null,
@@ -710,6 +1489,9 @@ comment on column canvas_command_dedup.idempotency_key is '客户端整批命令
 comment on column canvas_command_dedup.request_hash is '整批命令的 SHA-256（64 位小写十六进制）';
 comment on column canvas_command_dedup.accepted_revision is '首次接受时的 revision 位置（非负）；重放不改变它';
 
+alter table canvas_resource
+    add constraint fk_canvas_resource_blob foreign key (blob_id)
+    references storage_blob (id) on delete restrict;
 create table chat (
     id                  uuid          primary key,
     title               varchar(256),
@@ -728,855 +1510,24 @@ create table chat (
 
 create index idx_chat_modified on chat (updated_at, created_at);
 
-------------------------------------------------------------------------------
--- 1b. Environment connections and operations
-------------------------------------------------------------------------------
-
-create table environment_connection (
-    environment_id  uuid           primary key,
-    owner_node_id   uuid           not null,
-    lease_token     uuid           not null,
-    status          varchar(32)    not null,
-    runtime_info    jsonb,
-    skill_state     jsonb          not null default '[]'::jsonb,
-    recent_events   jsonb          not null default '[]'::jsonb,
-    last_seen_at    timestamptz(3) not null,
-    lease_until     timestamptz(3) not null,
-    constraint fk_environment_connection_environment foreign key (environment_id)
-        references environment (id) on delete cascade,
-    constraint ck_environment_connection_status check (
-        status in ('CONNECTING', 'READY')
-    ),
-    constraint ck_environment_connection_runtime_info check (
-        runtime_info is null or jsonb_typeof(runtime_info) = 'object'
-    ),
-    constraint ck_environment_connection_ready_runtime_info check (
-        status <> 'READY' or (runtime_info is not null and jsonb_typeof(runtime_info) = 'object')
-    ),
-    constraint ck_environment_connection_skill_state check (
-        jsonb_typeof(skill_state) = 'array'
-    ),
-    constraint ck_environment_connection_recent_events check (
-        jsonb_typeof(recent_events) = 'array'
-    ),
-    constraint ck_environment_connection_lease check (
-        lease_until > last_seen_at
-    )
-);
-
-comment on table environment_connection is 'Environment 的 daemon 连接租约：每个 Environment 由持有租约的节点独占路由（fencing 见 lease_token）';
-comment on column environment_connection.environment_id is 'Environment 的全局唯一 UUID（PK，FK cascade）';
-comment on column environment_connection.owner_node_id is '当前持有该连接路由的 App 节点实例 UUID';
-comment on column environment_connection.lease_token is '当前路由租约代币 UUID（每次接管/重绑生成新 token，fence 旧持有者）';
-comment on column environment_connection.status is '路由状态：CONNECTING / READY';
-comment on column environment_connection.runtime_info is '最近一次被接受的 READY 宿主 metadata（JSON object）；断线或重新 CONNECTING 时保留，从未 READY 时为 null';
-comment on column environment_connection.skill_state is '当前 Daemon 对各 Skill Package 的可重建安装投影（JSON array，元素为 {packageName, installedSha256, localPath, error}）；连线就绪后先清空再由全量对账回填，写回必须命中 owner/lease fence';
-comment on column environment_connection.recent_events is '最近 200 条连接与 Skill 同步运维事件（JSON array，元素只有时间、级别、类型与去敏消息）；不保存 stdout、凭据、Git URL userinfo 或签名地址';
-comment on column environment_connection.last_seen_at is '最后活跃时间（毫秒精度）';
-comment on column environment_connection.lease_until is '租约到期时间（毫秒精度），必须晚于 last_seen_at';
-
-create index idx_environment_connection_lease_until
-    on environment_connection (lease_until);
-
-create index idx_environment_connection_owner
-    on environment_connection (owner_node_id);
-
-create table cluster_node (
-    instance_id  uuid           primary key,
-    internal_url varchar(512)   not null,
-    lease_until  timestamptz(3) not null,
-    last_seen    timestamptz(3) not null,
-    constraint ck_cluster_node_lease check (
-        lease_until > last_seen
-    )
-);
-
-comment on table cluster_node is 'App 节点内部 IDE 路由注册表：节点可达 HTTP(S) origin 与心跳租约，只承载控制元数据，不保存环境存活字节';
-comment on column cluster_node.instance_id is '节点实例 UUID（PK），与 environment_connection.owner_node_id 对应';
-comment on column cluster_node.internal_url is '该节点对外可达的 HTTP(S) origin，仅用于内部单跳转发';
-comment on column cluster_node.lease_until is '注册租约到期时间（毫秒精度），过期节点的路由不被选中';
-comment on column cluster_node.last_seen is '最后一次心跳时间（毫秒精度），必须早于 lease_until';
-
-------------------------------------------------------------------------------
--- 1c. Singleton system settings (id=1)
---
--- system_setting 是全局强类型配置聚合的权威存储：恒为一行（id=1），config 保存完整
--- SystemSettings 七个 section 的 canonical JSON（写路径只接受强类型 DTO，绝无任意 JSON
--- 写接口），version 是乐观锁 CAS 令牌（非负，每次更新 +1），时间字段毫秒精度。
--- 默认行插入安全默认聚合：tool.permission 默认 write/edit/bash 各 `* -> ask`。
-------------------------------------------------------------------------------
-
-create table system_setting (
-    id         bigint         primary key,
-    config     jsonb          not null,
-    version    bigint         not null default 0,
+create table chat_session (
+    session_id uuid,
+    chat_id uuid not null,
     created_at timestamptz(3) not null default current_timestamp,
-    updated_at timestamptz(3) not null default current_timestamp,
-    constraint ck_system_setting_id check (id = 1),
-    constraint ck_system_setting_config_object check (jsonb_typeof(config) = 'object'),
-    constraint ck_system_setting_version_nonneg check (version >= 0)
+    constraint pk_chat_session primary key (session_id),
+    constraint fk_chat_session_session foreign key (session_id)
+        references harness_session (id) on delete restrict,
+    constraint fk_chat_session_chat foreign key (chat_id)
+        references chat (id) on delete restrict
 );
 
-comment on table system_setting is '全局 system settings 单行聚合（id=1）：config 为强类型 canonical JSON，version 为 CAS 乐观锁版本';
-comment on column system_setting.id is '恒为 1：全局配置恰好一行';
-comment on column system_setting.config is '六个 section（tool/aiRuntime/environment/network/storageMedia/advanced）的完整强类型 canonical JSON，必须为 object';
-comment on column system_setting.version is '乐观锁行版本：非负，从 0 开始，每次写操作 +1';
-comment on column system_setting.created_at is '创建时间（毫秒精度）';
-comment on column system_setting.updated_at is '最后更新时间（毫秒精度），应用侧维护';
+comment on table chat_session is 'Chat 与 Harness Session 的直接关联：一个 Session 至多属于一个 Chat，删除任一侧前必须先删本行';
+comment on column chat_session.session_id is '该 Chat 持有的 Harness Session（主键，RESTRICT FK）';
+comment on column chat_session.chat_id is '所属 Chat（RESTRICT FK）';
+comment on column chat_session.created_at is '关联建立时间（毫秒精度）';
 
-insert into system_setting (id, config) values (
-    1,
-    '{
-      "advanced":{"applicationEventHeartbeatIntervalMillis":20000,"applicationEventMaxBytes":2097152,"applicationEventQueueCapacity":512,"applicationEventSendTimeoutMillis":10000,"modelDispatchBusyFallbackDelayMillis":1000,"postgresqlWorkNotificationPollMillis":5000,"postgresqlWorkReconnectBackoffMillis":1000,"processorHeartbeatIntervalMillis":10000,"processorLeaseDurationMillis":30000,"resourceMaxBytes":16777216,"threadResolveFailureDelayMillis":1000,"toolDispatchBusyFallbackDelayMillis":1000,"toolPreflightFailureDelayMillis":1000},
-      "aiRuntime":{"compactionKeepRecentTokens":20000,"modelHttpRetryStatusCodes":[408,429,500,502,503,504],"retryBackoffStrategy":"EXPONENTIAL","retryBaseDelayMillis":2000,"retryMaxDelayMillis":60000,"retryMaxRetries":3,"subagentMaxConcurrency":10,"subagentMaxDepth":2,"subagentMaxTotalConcurrency":0,"subagentMaxTurns":50},
-      "environment":{"heartbeatTimeoutMillis":60000,"maxResourceBytes":16777216},
-      "network":{"noProxyHosts":"localhost,127.*,::1"},
-      "storageMedia":{"canvasMediaProcessTimeoutMillis":30000,"s3PresignDefaultExpiresSeconds":1800,"s3PresignMaxExpiresSeconds":3600,"temporaryResourceCleanupIntervalSeconds":1800,"temporaryResourceTtlSeconds":259200,"thumbnailMaxDimension":512,"thumbnailQuality":80,"uploadExpiresSeconds":86400},
-      "tool":{"modelGatewayBusyRetryMillis":5000,"permission":{"bash":[{"action":"ask","pattern":"*"}],"edit":[{"action":"ask","pattern":"*"}],"write":[{"action":"ask","pattern":"*"}]},"toolGatewayOverloadRetryMillis":5000}
-    }'::jsonb
-);
+create index idx_chat_session_chat on chat_session (chat_id, created_at, session_id);
 
-------------------------------------------------------------------------------
--- 2. Harness runtime execution protocol
---
--- The block below (the harness_* tables and their indexes, including comments) is the
--- single authoritative definition of the durable Harness protocol schema.
--- Columns, checks, FKs and indexes must never drift; HarnessRuntime allocates
--- ids via the injected Supplier<UUID> (production: UUID::randomUUID) and
--- inserts them explicitly (no column defaults). ThreadCommand has no surrogate
--- primary key: identity is (thread_id, sequence).
-------------------------------------------------------------------------------
-
--- Harness Runtime durable schema.
---
--- 所有持久实体 ID（Session / Entry / Thread / ThreadCommand client id / Builtin ModelInvocation /
--- ToolInvocation / WorkTarget）均为 PostgreSQL uuid，由 HarnessStore 注入的 Supplier<UUID> 生成（生产：
--- UUID::randomUUID）。除 harness_entry.entry_seq 的追加序号外，本 schema 不提供任何实体 id 序列；
--- entry_seq 只表达数据库接收追加的先后，不是业务身份。ThreadCommand 无代理主键，身份为 (thread_id, sequence)。
--- 时间列统一使用毫秒精度 timestamptz(3)，与 HarnessStore 的时间精度契约一致。
-
-create table harness_session (
-    id uuid primary key,
-    name varchar(256) not null,
-    created_at timestamptz(3) not null,
-    constraint ck_harness_session_name check (
-        btrim(name) <> ''
-    )
-);
-
-comment on table harness_session is 'Session 聚合边界：组织一份 append-only Entry Tree，不拥有 Thread；只记录自身 id、显示名称与创建时间';
-comment on column harness_session.id is 'Session 的全局唯一 UUID（创建后不可变）';
-comment on column harness_session.name is 'Session 显示名称：应用保证非空、单行且至多 256 个 Unicode 码点，并由应用生成默认名或手动重命名（check 只防御空白串）';
-comment on column harness_session.created_at is 'Session 创建时间（毫秒精度，创建后不可变）';
-
-create table harness_entry (
-    id uuid primary key,
-    session_id uuid not null,
-    parent_entry_id uuid,
-    entry_type varchar(32) not null,
-    payload jsonb not null check (jsonb_typeof(payload) = 'object'),
-    created_at timestamptz(3) not null,
-    entry_seq bigint generated always as identity,
-    provider_replay_state jsonb,
-    constraint uk_harness_entry_session_id unique (session_id, id),
-    constraint fk_harness_entry_session foreign key (session_id)
-        references harness_session (id),
-    constraint fk_harness_entry_parent foreign key (session_id, parent_entry_id)
-        references harness_entry (session_id, id),
-    constraint ck_harness_entry_type check (
-        entry_type in (
-            'ROOT',
-            'TURN_START',
-            'MESSAGE',
-            'CUSTOM',
-            'MODEL_ATTEMPT_FAILURE',
-            'NATIVE_COMPACTION',
-            'CUSTOM_MESSAGE',
-            'ASSISTANT_ERROR',
-            'ASSISTANT_ABORTED',
-            'COMPACTION',
-            'TURN_END',
-            'NOTIFICATION',
-            'SETTINGS',
-            'FORK'
-        )
-    ),
-    constraint ck_harness_entry_parent_shape check (
-        (entry_type = 'ROOT' and parent_entry_id is null)
-        or (entry_type <> 'ROOT' and parent_entry_id is not null)
-    ),
-    constraint ck_harness_entry_parent_not_self check (
-        parent_entry_id is null or parent_entry_id <> id
-    ),
-    constraint ck_harness_entry_provider_replay_state check (
-        provider_replay_state is null
-        or (
-            jsonb_typeof(provider_replay_state) = 'object'
-            and entry_type = 'MESSAGE'
-            and payload->'message'->>'role' = 'ASSISTANT'
-        )
-    )
-);
-
-comment on table harness_entry is '不可变 Entry：append-only 树节点，ROOT 必须先于其他 Entry，parent 链必须连续且同 Session';
-comment on column harness_entry.id is 'Entry 的全局唯一 UUID';
-comment on column harness_entry.session_id is '所属 Session';
-comment on column harness_entry.parent_entry_id is '父 Entry；ROOT 为 null，其余必须非 null 且不能指向自身';
-comment on column harness_entry.entry_type is 'Entry 类型（ROOT/TURN_START/MESSAGE/CUSTOM/MODEL_ATTEMPT_FAILURE/NATIVE_COMPACTION/CUSTOM_MESSAGE/ASSISTANT_ERROR/ASSISTANT_ABORTED/COMPACTION/TURN_END/NOTIFICATION/SETTINGS/FORK）';
-comment on column harness_entry.payload is '按 entry_type 编码的不可变 payload（JSON object）';
-comment on column harness_entry.created_at is 'Entry 创建时间（毫秒精度，不承担排序）';
-comment on column harness_entry.entry_seq is '数据库分配的追加序号：同一 Session 内严格递增且父先于子，只用于创建序读取与 keyset 分页';
-comment on column harness_entry.provider_replay_state is 'Provider native terminal replay 状态（JSON object，仅 ASSISTANT MESSAGE，可空）';
-
-create unique index uk_harness_entry_single_root
-    on harness_entry (session_id)
-    where entry_type = 'ROOT';
-
-create index idx_harness_entry_parent
-    on harness_entry (session_id, parent_entry_id);
-
-create index idx_harness_entry_session_seq
-    on harness_entry (session_id, entry_seq);
-
-comment on index uk_harness_entry_single_root is '每个 Session 至多一个 ROOT Entry';
-comment on index idx_harness_entry_parent is 'parent 回溯与同 Session 树遍历索引';
-comment on index idx_harness_entry_session_seq is 'Session 内按创建顺序读取与 keyset 分页索引';
-
-create table harness_thread (
-    id uuid primary key,
-    session_id uuid not null,
-    parent_thread_id uuid,
-    head_entry_id uuid not null,
-    creation_request_hash char(64) not null,
-    name varchar(256) not null,
-    root_thread_id uuid not null,
-    yolo_enabled boolean not null default false,
-    spawn_trigger varchar(16) not null,
-    constraints jsonb not null,
-    execution_control varchar(16) not null,
-    input_through_sequence bigint not null default 0 check (input_through_sequence >= 0),
-    next_command_sequence bigint not null check (next_command_sequence >= 1),
-    version bigint not null check (version >= 0),
-    created_at timestamptz(3) not null,
-    updated_at timestamptz(3) not null,
-    constraint fk_harness_thread_session foreign key (session_id)
-        references harness_session (id),
-    constraint fk_harness_thread_parent foreign key (parent_thread_id)
-        references harness_thread (id),
-    constraint fk_harness_thread_root foreign key (root_thread_id)
-        references harness_thread (id),
-    constraint fk_harness_thread_head foreign key (session_id, head_entry_id)
-        references harness_entry (session_id, id),
-    -- 同 Session 复合引用目标：上层表用 (session_id, id) 把
-    -- Thread 与 Session 一起冻结，无法配错 Session。
-    constraint uk_harness_thread_session unique (session_id, id),
-    constraint ck_harness_thread_parent_not_self check (
-        parent_thread_id is null or parent_thread_id <> id
-    ),
-    -- 只有无父 Thread 是自身的执行根；YOLO 开关只属于执行根。
-    constraint ck_harness_thread_root check (
-        (parent_thread_id is null) = (root_thread_id = id)
-    ),
-    constraint ck_harness_thread_yolo_root_only check (
-        not yolo_enabled or parent_thread_id is null
-    ),
-    -- 用户只直接创建执行根；子代理总有其它来源。
-    constraint ck_harness_thread_spawn_trigger check (
-        spawn_trigger in ('USER', 'MODEL_TOOL', 'RUNTIME', 'CONTROLLER', 'PLUGIN')
-        and (spawn_trigger <> 'USER' or parent_thread_id is null)
-    ),
-    constraint ck_harness_thread_constraints check (
-        jsonb_typeof(constraints) = 'object'
-    ),
-    constraint ck_harness_thread_creation_request_hash check (
-        creation_request_hash ~ '^[0-9a-f]{64}$'
-    ),
-    constraint ck_harness_thread_name check (
-        btrim(name) <> ''
-    ),
-    constraint ck_harness_thread_execution_control check (
-        execution_control in ('RUNNABLE', 'STOPPED')
-    ),
-    constraint ck_harness_thread_input_through check (
-        input_through_sequence < next_command_sequence
-    )
-);
-
-comment on table harness_thread is 'Thread：指向 head Entry 的游标状态机，version 随每次对外字段变化精确 +1；session_id 与 creation_request_hash 创建后不可变，head 必须与 session 同 Session；parent_thread_id 记录不可变执行父关系，root_thread_id 记录不可变执行根，yolo_enabled 是执行根的 YOLO 开关，spawn_trigger 与 constraints 是创建时冻结的来源与执行约束，execution_control 区分 RUNNABLE/STOPPED；input_through_sequence 记录已接纳的水位；(session_id, id) 唯一供同 Session 复合引用';
-comment on column harness_thread.id is 'Thread 的全局唯一 UUID';
-comment on column harness_thread.session_id is '所属 Session（创建后不可变）';
-comment on column harness_thread.parent_thread_id is '不可变父 Thread UUID（无父/根 Thread 为 null，禁止指向自身）';
-comment on column harness_thread.head_entry_id is '当前 head Entry（必须存在且属于 thread.session_id 的 Session）';
-comment on column harness_thread.creation_request_hash is 'NEW_SESSION/NEW_THREAD 初始创建请求指纹：服务端 64 位小写 SHA-256 身份键（创建后不可变，不对产品 DTO 暴露）';
-comment on column harness_thread.name is 'Thread 显示名称：应用保证非空、单行且至多 256 个 Unicode 码点，并由应用生成默认名或手动重命名（check 只防御空白串）';
-comment on column harness_thread.root_thread_id is '不可变执行根 UUID（根 Thread 指向自身），供树锁与整树读取';
-comment on column harness_thread.yolo_enabled is '执行根的 YOLO 开关；子代理恒为 false，有效值取自执行根';
-comment on column harness_thread.spawn_trigger is '不可变创建来源：USER / MODEL_TOOL / RUNTIME / CONTROLLER / PLUGIN';
-comment on column harness_thread.constraints is '不可变执行约束 JSON：maxOutputTokens（可空）、promptCacheDisabled、allowAutoCompaction；子 Thread 为请求约束与父约束合并后的有效值';
-comment on column harness_thread.execution_control is '持久执行控制状态（RUNNABLE/STOPPED）';
-comment on column harness_thread.input_through_sequence is '已被普通 INPUT 接纳或确定性拒绝的输入序号水位（>= 0，初值 0，< next_command_sequence）';
-comment on column harness_thread.next_command_sequence is '下一条 Command 的 sequence（从 1 递增）';
-comment on column harness_thread.version is '并发控制版本：任何对外字段变化必须 +1';
-comment on column harness_thread.created_at is 'Thread 创建时间（毫秒精度）';
-comment on column harness_thread.updated_at is 'Thread 最后更新时间（毫秒精度）';
-
-create index idx_harness_thread_parent
-    on harness_thread (parent_thread_id);
-
-create index idx_harness_thread_session
-    on harness_thread (session_id, created_at, id);
-
-create index idx_harness_thread_root
-    on harness_thread (root_thread_id);
-
-comment on index idx_harness_thread_parent is 'parent 回溯与子 Thread 树遍历索引';
-comment on index idx_harness_thread_root is '按执行根读取整棵执行树';
-comment on index idx_harness_thread_session is 'listThreadsBySession 按 (session_id, created_at, id) 读取 Session 的 Thread 列表';
-
--- 同一 Session 内执行根（parent_thread_id 为 null）名称唯一；子代理与跨 Session 同名不受限。
--- name 由应用拥有（默认名或手动重命名），冲突在服务端映射为类型化 409，不静默改动名称。
-create unique index uk_harness_thread_root_name
-    on harness_thread (session_id, name)
-    where parent_thread_id is null;
-
-comment on index uk_harness_thread_root_name is '同一 Session 内执行根名称唯一（partial unique：仅约束 parent_thread_id is null 的根行）';
-
--- 跨节点 realtime 订阅：只有某 Thread 在其它节点仍有未过期订阅且该节点 cluster_node 租约有效时，
--- 本节点才为该 Thread 发布 NOTIFY。节点 ID 不设 FK，节点有效性统一以 cluster_node 租约为准；
--- Thread 删除时级联清理订阅，避免遗留指向已删除 Thread 的租约行。
-create table realtime_subscription (
-    thread_id        uuid           not null,
-    node_instance_id uuid           not null,
-    lease_until      timestamptz(3) not null,
-    constraint pk_realtime_subscription primary key (thread_id, node_instance_id),
-    constraint fk_realtime_subscription_thread foreign key (thread_id)
-        references harness_thread (id) on delete cascade
-);
-
-comment on table realtime_subscription is '跨节点 realtime 订阅租约：按 (Thread, 节点实例) 唯一，随节点心跳续租，Thread 删除时级联清理';
-comment on column realtime_subscription.thread_id is '被订阅的 Thread UUID（复合 PK 前缀，FK cascade）';
-comment on column realtime_subscription.node_instance_id is '订阅方节点实例 UUID；不设 FK，读取时连接 cluster_node 校验租约';
-comment on column realtime_subscription.lease_until is '订阅租约到期时间（毫秒精度），由节点心跳按 45 秒节奏续租';
-
-create index idx_realtime_subscription_node
-    on realtime_subscription (node_instance_id);
-
-comment on index idx_realtime_subscription_node is '节点退出时按 node_instance_id 清理本节点全部订阅';
-
-create table harness_thread_command (
-    thread_id uuid not null,
-    sequence bigint not null check (sequence > 0),
-    command_type varchar(32) not null,
-    payload jsonb not null check (jsonb_typeof(payload) = 'object'),
-    idempotency_key uuid not null,
-    request_hash char(64) not null,
-    applied_entry_id uuid,
-    stop_request_id uuid,
-    cancelled_at timestamptz(3),
-    created_at timestamptz(3) not null,
-    primary key (thread_id, sequence),
-    constraint fk_harness_thread_command_thread foreign key (thread_id)
-        references harness_thread (id),
-    constraint fk_harness_thread_command_applied foreign key (applied_entry_id)
-        references harness_entry (id),
-    constraint uk_harness_thread_command_idempotency unique (thread_id, idempotency_key),
-    constraint ck_harness_thread_command_type check (
-        command_type in (
-            'USER_MESSAGE',
-            'GOAL',
-            'CUSTOM_MESSAGE',
-            'SET_AGENT',
-            'SET_EXECUTION',
-            'SET_ENVIRONMENT',
-            'NOTIFICATION'
-        )
-    ),
-    constraint ck_harness_thread_command_request_hash check (
-        request_hash ~ '^[0-9a-f]{64}$'
-    ),
-    constraint ck_harness_thread_command_terminal check (
-        applied_entry_id is null or cancelled_at is null
-    ),
-    constraint ck_harness_thread_command_cancel_pair check (
-        (stop_request_id is null and cancelled_at is null)
-        or (stop_request_id is not null and cancelled_at is not null)
-    )
-);
-
-comment on table harness_thread_command is 'ThreadCommand：无代理主键，身份为 (thread_id, sequence)；QUEUED 只能推进为 APPLIED 或 CANCELLED，CANCELLED 必须 stop_request_id 与 cancelled_at 成对';
-comment on column harness_thread_command.thread_id is '所属 Thread';
-comment on column harness_thread_command.sequence is 'Thread 内单调递增序号（与身份一起构成主键）';
-comment on column harness_thread_command.command_type is 'Command payload 类型';
-comment on column harness_thread_command.payload is '按 command_type 编码的 payload（JSON object）';
-comment on column harness_thread_command.idempotency_key is '客户端幂等键（UUID），同一 Thread 内唯一';
-comment on column harness_thread_command.request_hash is '客户端 raw 命令（含 ordered contents 与 uploadId）的 canonical SHA-256（64 小写 hex）；同 idempotencyKey 重放必须精确匹配';
-comment on column harness_thread_command.applied_entry_id is 'APPLIED 时应用的 Entry；与 cancelled_at 互斥';
-comment on column harness_thread_command.stop_request_id is 'CANCELLED 时取消它的 Stop stopRequestId（queued-only receipt 幂等键）；与 cancelled_at 成对';
-comment on column harness_thread_command.cancelled_at is 'CANCELLED 时间';
-comment on column harness_thread_command.created_at is 'Command 创建时间（毫秒精度）';
-
-create index idx_harness_thread_command_queued
-    on harness_thread_command (thread_id, sequence)
-    where applied_entry_id is null and cancelled_at is null;
-
-comment on index idx_harness_thread_command_queued is '按 sequence 升序读取 QUEUED Command（for update 锁序）';
-
-create index idx_harness_thread_command_stop_request
-    on harness_thread_command (thread_id, stop_request_id, sequence)
-    where stop_request_id is not null;
-
-comment on index idx_harness_thread_command_stop_request is 'Stop 幂等键：(thread_id, stop_request_id) 按 sequence 升序汇总被该 stopRequestId 取消的 Command';
-
-------------------------------------------------------------------------------
--- 2a. Platform Builtin model invocation (depends on Harness Thread and Entry)
-------------------------------------------------------------------------------
-create table builtin_model_invocation (
-    id uuid primary key,
-    thread_id uuid not null,
-    turn_start_entry_id uuid not null,
-    request_head_entry_id uuid not null,
-    request_spec jsonb not null check (jsonb_typeof(request_spec) = 'object'),
-    status varchar(16) not null,
-    attempt integer not null check (attempt >= 0),
-    stream_checkpoint jsonb check (
-        stream_checkpoint is null or jsonb_typeof(stream_checkpoint) = 'object'
-    ),
-    result jsonb check (result is null or jsonb_typeof(result) = 'object'),
-    error jsonb check (error is null or jsonb_typeof(error) = 'object'),
-    result_entry_id uuid,
-    failed_attempts jsonb not null check (jsonb_typeof(failed_attempts) = 'array'),
-    group_execution jsonb check (
-        group_execution is null or jsonb_typeof(group_execution) = 'object'
-    ),
-    requested_at timestamptz(3),
-    created_at timestamptz(3) not null,
-    updated_at timestamptz(3) not null,
-    provider_replay_state jsonb,
-    constraint fk_builtin_model_invocation_thread foreign key (thread_id)
-        references harness_thread (id),
-    constraint fk_builtin_model_invocation_turn_start foreign key (turn_start_entry_id)
-        references harness_entry (id),
-    constraint fk_builtin_model_invocation_request_head foreign key (request_head_entry_id)
-        references harness_entry (id),
-    constraint fk_builtin_model_invocation_result foreign key (result_entry_id)
-        references harness_entry (id),
-    constraint uk_builtin_model_invocation_turn unique (thread_id, turn_start_entry_id),
-    constraint ck_builtin_model_invocation_status check (
-        status in (
-            'READY',
-            'RUNNING',
-            'SUCCEEDED',
-            'FAILED',
-            'CANCELLED',
-            'UNKNOWN'
-        )
-    ),
-    constraint ck_builtin_model_invocation_terminal_facts check (
-        result is null or error is null
-    ),
-    constraint ck_builtin_model_invocation_provider_replay_state check (
-        provider_replay_state is null
-        or (
-            jsonb_typeof(provider_replay_state) = 'object'
-            and status = 'SUCCEEDED'
-            and result is not null
-            and result_entry_id is null
-        )
-    )
-);
-
-comment on table builtin_model_invocation is 'ModelInvocation：一次 model turn 的 durable 生命周期记录（READY/RUNNING 与四个 terminal）';
-comment on column builtin_model_invocation.id is 'ModelInvocation 的全局唯一 UUID';
-comment on column builtin_model_invocation.thread_id is '所属 Thread';
-comment on column builtin_model_invocation.turn_start_entry_id is '本次 turn 的 TURN_START Entry';
-comment on column builtin_model_invocation.request_head_entry_id is '创建时的 Thread head（request 头 Entry CAS 快照）';
-comment on column builtin_model_invocation.request_spec is '冻结的 model 请求规格（JSON object）';
-comment on column builtin_model_invocation.status is '生命周期状态';
-comment on column builtin_model_invocation.attempt is '已持久化 RUNNING 的执行次数（从 0 递增，先于请求发出）';
-comment on column builtin_model_invocation.stream_checkpoint is 'RUNNING 流式断点（JSON object，可空）';
-comment on column builtin_model_invocation.result is 'terminal 成功结果（JSON object，与 error 互斥）';
-comment on column builtin_model_invocation.error is 'terminal 失败错误（JSON object，与 result 互斥）';
-comment on column builtin_model_invocation.result_entry_id is '结果 Entry（Assistant/AssistantError/AssistantAborted/COMPACTION），全局唯一';
-comment on column builtin_model_invocation.failed_attempts is '由 retry policy 驱动的 append-only TRANSIENT 失败 attempt 历史（JSON array）';
-comment on column builtin_model_invocation.group_execution is 'Model Group 当前成员游标与该成员普通重试计数（JSON object，单 Model 为 null）';
-comment on column builtin_model_invocation.requested_at is '当前已确认 Provider 调用的发起时间；成功历史 metadata 记录实际请求时刻';
-comment on column builtin_model_invocation.created_at is '创建时间（毫秒精度）';
-comment on column builtin_model_invocation.updated_at is '最后更新时间（毫秒精度）';
-comment on column builtin_model_invocation.provider_replay_state is 'Provider native terminal replay 状态（JSON object，仅未物化结果的 SUCCEEDED 状态，可空）';
-
-create unique index uk_builtin_model_invocation_result
-    on builtin_model_invocation (result_entry_id)
-    where result_entry_id is not null;
-
-comment on index uk_builtin_model_invocation_result is 'resultEntryId 全局唯一（非 null 时）';
-
-------------------------------------------------------------------------------
--- 2b. Harness runtime execution protocol (continued)
-------------------------------------------------------------------------------
-create table harness_tool_invocation (
-    id uuid primary key,
-    thread_id uuid not null,
-    turn_start_entry_id uuid not null,
-    assistant_entry_id uuid not null,
-    call_index integer not null check (call_index >= 0),
-    call jsonb not null check (jsonb_typeof(call) = 'object'),
-    binding jsonb check (binding is null or jsonb_typeof(binding) = 'object'),
-    status varchar(32) not null,
-    attempt integer not null check (attempt >= 0),
-    approval jsonb check (approval is null or jsonb_typeof(approval) = 'object'),
-    result jsonb check (result is null or jsonb_typeof(result) = 'object'),
-    effects jsonb not null check (jsonb_typeof(effects) = 'object'),
-    error jsonb check (error is null or jsonb_typeof(error) = 'object'),
-    created_at timestamptz(3) not null,
-    updated_at timestamptz(3) not null,
-    input_receipt jsonb,
-    constraint fk_harness_tool_invocation_thread foreign key (thread_id)
-        references harness_thread (id),
-    constraint fk_harness_tool_invocation_turn_start foreign key (turn_start_entry_id)
-        references harness_entry (id),
-    constraint fk_harness_tool_invocation_assistant foreign key (assistant_entry_id)
-        references harness_entry (id),
-    constraint uk_harness_tool_invocation_call_index unique (assistant_entry_id, call_index),
-    constraint ck_harness_tool_invocation_binding check (
-        binding is not null or status in ('FAILED', 'CANCELLED', 'UNKNOWN')
-    ),
-    constraint ck_harness_tool_invocation_waiting_request check (
-        status <> 'WAITING_REQUEST' or (binding is not null and approval is null and result is null and error is null)
-    ),
-    constraint ck_harness_tool_invocation_status check (
-        status in (
-            'WAITING_APPROVAL',
-            'WAITING_INPUT',
-            'WAITING_REQUEST',
-            'READY',
-            'RUNNING',
-            'SUCCEEDED',
-            'FAILED',
-            'CANCELLED',
-            'UNKNOWN'
-        )
-    ),
-    -- Human input is not a tool permission approval: WAITING_INPUT freezes a
-    -- binding and carries no result/error until the user answers.
-    constraint ck_harness_tool_waiting_input check (
-        status <> 'WAITING_INPUT'
-        or (binding is not null and result is null and error is null)
-    ),
-    -- Runtime-owned receipt until the ToolResult and its metadata enter Entry
-    -- history atomically. Questionnaire answers themselves remain in result.
-    constraint ck_harness_tool_input_receipt check (
-        input_receipt is null or (
-            status = 'SUCCEEDED' and result is not null
-            and jsonb_typeof(input_receipt) = 'object'
-            and coalesce(jsonb_typeof(input_receipt -> 'submissionId'), '') = 'string'
-            and coalesce(btrim(input_receipt ->> 'submissionId'), '') <> ''
-            and coalesce(jsonb_typeof(input_receipt -> 'actor'), '') = 'string'
-            and coalesce(btrim(input_receipt ->> 'actor'), '') <> ''
-            and coalesce(jsonb_typeof(input_receipt -> 'acceptedAt'), '') = 'string'
-            and coalesce(btrim(input_receipt ->> 'acceptedAt'), '') <> ''
-        )
-    ),
-    constraint ck_harness_tool_invocation_terminal_facts check (
-        result is null or error is null
-    ),
-    constraint ck_harness_tool_invocation_effects_status check (
-        status = 'SUCCEEDED'
-        or effects = '{"customEntries": []}'::jsonb
-    )
-);
-
-comment on table harness_tool_invocation is 'ToolInvocation：一次 tool 调用的 durable 生命周期记录，按 (thread_id, turn_start_entry_id, assistant_entry_id, call_index) 对齐；WAITING_INPUT 冻结 binding 等待人输入，batch apply 后行被物理删除';
-comment on column harness_tool_invocation.id is 'ToolInvocation 的全局唯一 UUID';
-comment on column harness_tool_invocation.thread_id is '公共归属 ThreadId；工具能力从该 Thread 的 turn_start_entry_id 冻结快照读取，不依赖 ModelInvocation';
-comment on column harness_tool_invocation.turn_start_entry_id is '公共归属 TurnStart；必须属于 thread_id 且是 assistant_entry_id 所在分支的 open turn';
-comment on column harness_tool_invocation.assistant_entry_id is '携带对应 ToolCall 的 Assistant MESSAGE Entry，必须位于同一 Thread/Session 与 Turn 分支';
-comment on column harness_tool_invocation.call_index is 'assistant 消息内 tool call 的下标（从 0 递增）';
-comment on column harness_tool_invocation.call is '冻结的 ToolCall（JSON object）';
-comment on column harness_tool_invocation.binding is '冻结的 tool binding（JSON object，仅在 immediate FAILED attempt=0 槽位可空）';
-comment on column harness_tool_invocation.status is '生命周期状态（含 WAITING_REQUEST、WAITING_APPROVAL 与 WAITING_INPUT）';
-comment on column harness_tool_invocation.attempt is '已确认的 start 尝试次数（从 0 递增）';
-comment on column harness_tool_invocation.approval is '审批记录（JSON object，可空）';
-comment on column harness_tool_invocation.result is 'terminal 成功结果（JSON object，与 error 互斥）';
-comment on column harness_tool_invocation.effects is '副作用批（JSON object；非 SUCCEEDED 时必须为空批）';
-comment on column harness_tool_invocation.error is 'terminal 失败错误（JSON object，与 result 互斥）';
-comment on column harness_tool_invocation.created_at is '创建时间（毫秒精度）';
-comment on column harness_tool_invocation.updated_at is '最后更新时间（毫秒精度）';
-comment on column harness_tool_invocation.input_receipt is '交互回执（JSON object，可空）：仅在 SUCCEEDED 且 result 非空时存在，携带 submissionId/actor/acceptedAt，历史物化前由 runtime 持有';
-
-create index idx_harness_tool_invocation_thread_nonterminal
-    on harness_tool_invocation (thread_id)
-    where status in ('WAITING_APPROVAL', 'WAITING_INPUT', 'WAITING_REQUEST', 'READY', 'RUNNING');
-
-comment on index idx_harness_tool_invocation_thread_nonterminal is '未收尾 ToolInvocation 按公共 Thread 归属的查找路径（已终态行在 batch apply 后物理删除，不需要覆盖）';
-
--- Pending input/approval paging uses one stable ordinal, not two status queries.
-create index idx_harness_tool_invocation_pending
-    on harness_tool_invocation (created_at, id)
-    where status in ('WAITING_APPROVAL', 'WAITING_INPUT');
-
-comment on index idx_harness_tool_invocation_pending is '待处理（审批与人工输入）统一按 (created_at, id) 稳定分页，不按状态拆成两次查询';
-
--- Durable Work：全部后台调度共用的唯一 mailbox 表。各模块定义自己的 target_type；
--- due、租约与 wake 围栏一律以数据库时钟判定。
-create table durable_work (
-    target_type varchar(16) not null,
-    target_id uuid not null,
-    available_at timestamptz(3) not null,
-    wake_version bigint not null check (wake_version > 0),
-    lease_token varchar(128),
-    lease_until timestamptz(3),
-    required_environment_id uuid,
-    primary key (target_type, target_id),
-    constraint fk_durable_work_environment foreign key (required_environment_id)
-        references environment (id) on delete restrict,
-    constraint ck_durable_work_target_type check (
-        target_type ~ '^[A-Z][A-Z0-9_]{0,15}$'
-    ),
-    constraint ck_durable_work_lease_pair check (
-        (lease_token is null) = (lease_until is null)
-    ),
-    constraint ck_durable_work_lease_token check (
-        lease_token is null
-        or (length(lease_token) > 0 and btrim(lease_token) = lease_token)
-    )
-);
-
-comment on table durable_work is 'Durable Work：一个调度 target 的 mailbox 状态；wake_version 递增防止旧 worker 完成时吞掉新的 wake';
-comment on column durable_work.target_type is '模块定义的 target 类型，1–16 个大写字母、数字或下划线，首字符为字母';
-comment on column durable_work.target_id is 'target 实体的 UUID（与 target_type 构成主键）';
-comment on column durable_work.available_at is '最早可被 claim 的时间（毫秒精度）';
-comment on column durable_work.wake_version is 'wake 计数（从 1 递增）';
-comment on column durable_work.lease_token is '当前 lease token（与 lease_until 同时存在或同时缺失）';
-comment on column durable_work.lease_until is '当前 lease 到期时间（毫秒精度）';
-comment on column durable_work.required_environment_id is '执行该 Work 所需 Environment 的全局唯一 UUID；非空时仅持有该 environment READY 连接租约的节点可 claim';
-
-create index idx_durable_work_available
-    on durable_work (available_at, target_type, target_id);
-
-create index idx_durable_work_lease_until
-    on durable_work (lease_until, target_type, target_id)
-    where lease_until is not null;
-
-comment on index idx_durable_work_available is 'claim 按 (available_at, target_type, target_id) 选取候选';
-comment on index idx_durable_work_lease_until is '过期 lease 扫描索引';
-
--- Thread Join 契约记录：以 invocation_id 为主键记录原子源 prompt 接受与 join 契约、
--- 子 Thread 终止边界（terminal_entry_id/final_answer_entry_id）、以及交付给父
--- Thread 的命令序列。无独立状态枚举，无 prompt/report 冗余复制。
-create table harness_thread_join (
-    invocation_id uuid primary key,
-    request_hash char(64) not null,
-    parent_thread_id uuid,
-    child_thread_id uuid not null,
-    source_command_sequence bigint not null check (source_command_sequence > 0),
-    agent varchar(256) not null,
-    delivery varchar(32) not null,
-    superseded_by_invocation_id uuid,
-    max_turns integer,
-    reminder_turn bigint not null default 0,
-    terminal_entry_id uuid,
-    final_answer_entry_id uuid,
-    delivery_command_sequence bigint,
-    created_at timestamptz(3) not null,
-    updated_at timestamptz(3) not null,
-    constraint fk_harness_thread_join_child_thread foreign key (child_thread_id)
-        references harness_thread (id),
-    constraint fk_harness_thread_join_parent_thread foreign key (parent_thread_id)
-        references harness_thread (id),
-    constraint fk_harness_thread_join_source_command foreign key (child_thread_id, source_command_sequence)
-        references harness_thread_command (thread_id, sequence),
-    constraint fk_harness_thread_join_terminal_entry foreign key (terminal_entry_id)
-        references harness_entry (id),
-    constraint fk_harness_thread_join_final_answer_entry foreign key (final_answer_entry_id)
-        references harness_entry (id),
-    constraint fk_harness_thread_join_delivery_command foreign key (parent_thread_id, delivery_command_sequence)
-        references harness_thread_command (thread_id, sequence),
-    constraint fk_harness_thread_join_superseded_by foreign key (superseded_by_invocation_id)
-        references harness_thread_join (invocation_id),
-    constraint ck_harness_thread_join_delivery_kind check (
-        delivery in ('NOTIFY_PARENT', 'SETTLE_OWNER_TURN', 'RECEIPT_ONLY')
-        and ((delivery = 'RECEIPT_ONLY') = (parent_thread_id is null))
-    ),
-    constraint ck_harness_thread_join_superseded check (
-        superseded_by_invocation_id is null
-        or (superseded_by_invocation_id <> invocation_id and terminal_entry_id is null)
-    ),
-    constraint ck_harness_thread_join_request_hash check (
-        request_hash ~ '^[0-9a-f]{64}$'
-    ),
-    constraint ck_harness_thread_join_parent_not_child check (
-        parent_thread_id is null or parent_thread_id <> child_thread_id
-    ),
-    constraint ck_harness_thread_join_agent check (
-        btrim(agent) <> ''
-    ),
-    constraint ck_harness_thread_join_max_turns check (
-        max_turns is null or max_turns > 0
-    ),
-    constraint ck_harness_thread_join_reminder_turn check (
-        reminder_turn >= 0
-    ),
-    constraint ck_harness_thread_join_final_answer check (
-        final_answer_entry_id is null or terminal_entry_id is not null
-    ),
-    constraint ck_harness_thread_join_delivery check (
-        case
-            when delivery = 'NOTIFY_PARENT' then (
-                (terminal_entry_id is null and delivery_command_sequence is null)
-                or (
-                    terminal_entry_id is not null
-                    and delivery_command_sequence is not null
-                    and delivery_command_sequence > 0
-                    and parent_thread_id is not null
-                )
-            )
-            else (delivery_command_sequence is null)
-        end
-    )
-);
-
-comment on table harness_thread_join is 'Thread Join 契约记录：以 invocation_id 为主键记录原子源 prompt 接受与 join 契约、子 Thread 终止边界、匹配的 terminal/final_answer Entry、以及交付给父 Thread 的命令序列；无独立状态枚举，无 prompt/report 冗余复制';
-comment on column harness_thread_join.invocation_id is 'Join 的全局唯一 UUID（主键，与发起调用的 Tool/Ticket invocation 对齐）';
-comment on column harness_thread_join.request_hash is '创建请求指纹（64 位小写 SHA-256）';
-comment on column harness_thread_join.parent_thread_id is '父 Thread UUID（可空，空表示 root one-shot completion ticket，不投递父消息）';
-comment on column harness_thread_join.child_thread_id is '目标子 Thread UUID';
-comment on column harness_thread_join.source_command_sequence is '子 Thread 接受源 prompt 的 command sequence';
-comment on column harness_thread_join.agent is '本次执行的 Agent 名';
-comment on column harness_thread_join.delivery is '结算后的交付方式：NOTIFY_PARENT 投递父通知；SETTLE_OWNER_TURN 冻结结果并唤醒父 Thread 的开放 Turn owner；RECEIPT_ONLY 只冻结结果（无父 Thread）';
-comment on column harness_thread_join.superseded_by_invocation_id is '接管本未完成 join 的后续 invocation UUID；被取代的 join 保留源命令与身份，不再占配额或交付';
-comment on column harness_thread_join.max_turns is '软预算最大 turn 数（可空）';
-comment on column harness_thread_join.reminder_turn is '已发出的 max_turns 软提醒轮次计数';
-comment on column harness_thread_join.terminal_entry_id is '冻结的 terminal Entry UUID（可空，非空表示 matched）';
-comment on column harness_thread_join.final_answer_entry_id is '可空的最终回答 Entry UUID（仅 terminal_entry_id 非空时可非空）';
-comment on column harness_thread_join.delivery_command_sequence is '向父 Thread 投递结果 NOTIFICATION 的 command sequence（非空必须已 matched 且 parent_thread_id 非空）';
-comment on column harness_thread_join.created_at is '创建时间（毫秒精度）';
-comment on column harness_thread_join.updated_at is '最后更新时间（毫秒精度）';
-
-create index idx_harness_thread_join_child_pending
-    on harness_thread_join (child_thread_id)
-    where terminal_entry_id is null and superseded_by_invocation_id is null;
-
-comment on index idx_harness_thread_join_child_pending is '子 Thread 变为空闲或执行结束时检索等待匹配的 pending join';
-
-create table harness_thread_stop_receipt (
-    root_thread_id uuid not null,
-    thread_id uuid not null,
-    stop_request_id uuid not null,
-    root_stop_request_id uuid not null,
-    stopped_turn_end_entry_id uuid,
-    cancelled_command_count integer not null check (cancelled_command_count >= 0),
-    cancelled_inputs jsonb not null check (jsonb_typeof(cancelled_inputs) = 'array'),
-    created_at timestamptz(3) not null,
-    constraint pk_harness_thread_stop_receipt primary key (thread_id, stop_request_id),
-    constraint fk_harness_thread_stop_receipt_root_thread foreign key (root_thread_id)
-        references harness_thread (id),
-    constraint fk_harness_thread_stop_receipt_thread foreign key (thread_id)
-        references harness_thread (id),
-    constraint fk_harness_thread_stop_receipt_turn_end foreign key (stopped_turn_end_entry_id)
-        references harness_entry (id)
-);
-
-comment on table harness_thread_stop_receipt is 'Stop 回执：一次 Stop 操作在单个 Thread 上留下的持久回执；(thread_id, stop_request_id) 唯一；集合身份为 (root_thread_id, root_stop_request_id)';
-comment on column harness_thread_stop_receipt.root_thread_id is '本次 Stop 请求的目标根 Thread（集合身份的一部分，隔离不同树复用同一请求 UUID）';
-comment on column harness_thread_stop_receipt.thread_id is '所属 Thread';
-comment on column harness_thread_stop_receipt.stop_request_id is '本次 Stop 在该 Thread 上的请求 ID';
-comment on column harness_thread_stop_receipt.root_stop_request_id is '本次 Stop 的根请求 ID';
-comment on column harness_thread_stop_receipt.stopped_turn_end_entry_id is '本次 Stop 关闭活跃 turn 时产生的 TURN_END Entry（若有）';
-comment on column harness_thread_stop_receipt.cancelled_command_count is '本次 Stop 取消的 command 数量';
-comment on column harness_thread_stop_receipt.cancelled_inputs is '退回给用户的已取消输入列表（canonical JSON array of {sequence,idempotencyKey,type,payload}）';
-comment on column harness_thread_stop_receipt.created_at is '回执创建时间（毫秒精度）';
-
-create index idx_harness_thread_stop_receipt_root
-    on harness_thread_stop_receipt (root_thread_id, root_stop_request_id);
-
-comment on index idx_harness_thread_stop_receipt_root is '按 (root_thread_id, root_stop_request_id) 检索一次 Stop 产生的全部回执';
-
-create table harness_execution_exit (
-    execution_id uuid primary key,
-    thread_id uuid not null,
-    invocation_id uuid not null,
-    attempt integer not null check (attempt >= 1),
-    owner_lease_token varchar(128) not null,
-    kind varchar(16) not null,
-    parent_execution_id uuid,
-    environment_id uuid,
-    state varchar(32) not null,
-    registered_at timestamptz(3) not null,
-    confirmed_at timestamptz(3),
-    abandoned_at timestamptz(3),
-    constraint fk_harness_execution_exit_thread foreign key (thread_id) references harness_thread (id),
-    constraint fk_harness_execution_exit_parent foreign key (parent_execution_id)
-        references harness_execution_exit (execution_id),
-    constraint ck_harness_execution_exit_token check (
-        char_length(owner_lease_token) > 0 and owner_lease_token = btrim(owner_lease_token)
-    ),
-    constraint ck_harness_execution_exit_kind check (
-        (kind in ('DRIVER', 'TOOL') and parent_execution_id is null and environment_id is null)
-        or (kind = 'REMOTE' and parent_execution_id is not null and parent_execution_id <> execution_id and environment_id is not null)
-    ),
-    constraint ck_harness_execution_exit_state check (
-        (state = 'UNCONFIRMED' and confirmed_at is null and abandoned_at is null)
-        or (state = 'ABANDONED' and confirmed_at is null and abandoned_at is not null)
-        or (state in ('STUDIO_EXITED', 'REMOTE_ACKNOWLEDGED', 'NOT_STARTED') and confirmed_at is not null)
-    ),
-    constraint ck_harness_execution_exit_kind_state check (
-        state in ('UNCONFIRMED', 'NOT_STARTED', 'ABANDONED')
-        or (kind in ('DRIVER', 'TOOL') and state = 'STUDIO_EXITED')
-        or (kind = 'REMOTE' and state = 'REMOTE_ACKNOWLEDGED')
-    ),
-    constraint ck_harness_execution_exit_time check (
-        (confirmed_at is null or confirmed_at >= registered_at)
-        and (abandoned_at is null or abandoned_at >= registered_at)
-    )
-);
-
-comment on table harness_execution_exit is '具体执行代次的退出证据。独立于逻辑 Invocation 生命周期，不以 Invocation 外键跟随逻辑删除';
-comment on column harness_execution_exit.execution_id is '这一具体执行代次的不可变身份';
-comment on column harness_execution_exit.thread_id is '所属 Thread；按 Thread 查询，不依赖 open turn';
-comment on column harness_execution_exit.invocation_id is '关联的逻辑 Driver 或 Tool invocation';
-comment on column harness_execution_exit.attempt is '该 invocation 的具体执行代次，从 1 开始';
-comment on column harness_execution_exit.owner_lease_token is '登记时持有的 Work lease token';
-comment on column harness_execution_exit.kind is 'DRIVER、TOOL 或挂在本地 TOOL/DRIVER 代次上的 REMOTE';
-comment on column harness_execution_exit.parent_execution_id is 'REMOTE 关联的本地 TOOL 或 DRIVER 执行代次；本地执行为空';
-comment on column harness_execution_exit.environment_id is 'REMOTE 执行关联的远端 Environment 标识；本地执行为空';
-comment on column harness_execution_exit.state is '退出证据：未确认、Studio 退出、远端 ACK、确定未启动，或用户显式放弃（ABANDONED 不代表物理退出）';
-comment on column harness_execution_exit.registered_at is '登记时间（毫秒精度）';
-comment on column harness_execution_exit.confirmed_at is '真实退出证据确认时间（毫秒精度）；未确认或放弃时为空';
-comment on column harness_execution_exit.abandoned_at is '用户显式放弃确认的时间（毫秒精度）；只有 ABANDONED 必填，后续真实确认保留';
-
-create index idx_harness_execution_exit_thread_unconfirmed
-    on harness_execution_exit (thread_id, registered_at, execution_id)
-    where state = 'UNCONFIRMED';
-
-comment on index idx_harness_execution_exit_thread_unconfirmed is '按 Thread 读取尚未确认退出的执行代次';
-
-create index idx_harness_execution_exit_thread
-    on harness_execution_exit (thread_id);
-
-create index idx_harness_execution_exit_parent
-    on harness_execution_exit (parent_execution_id)
-    where parent_execution_id is not null;
-
-create index idx_harness_execution_exit_unconfirmed_remote
-    on harness_execution_exit (environment_id)
-    where kind = 'REMOTE' and state = 'UNCONFIRMED';
-
-comment on index idx_harness_execution_exit_thread is 'Thread 深删按 thread_id 删除执行代次，并服务删除 Thread 时的外键检查';
-comment on index idx_harness_execution_exit_parent is '删除执行代次时服务 REMOTE 指向本地 TOOL 代次的自引用外键检查';
-comment on index idx_harness_execution_exit_unconfirmed_remote is '按 Environment 读取尚未确认退出的远端执行代次';
-
-------------------------------------------------------------------------------
--- 3. Project / Issue business facts
---
--- Project 只是容器与项目级设置：工作流是一条严格 JSON 配置，而不是关系化的
--- states/transitions/dependencies；它拥有的下级表统一使用 project_ 前缀。Run 冻结
--- 自己的 Issue/state/Session/Thread 坐标，Evidence 是 Issue 自有的 Blob owner
--- edge；Issue+Agent 的 Harness Session 归属由 project_issue_agent_thread 直接
--- 持有，没有独立的归属排他表，也没有归属变更触发器。
-------------------------------------------------------------------------------
-
--- Project 的工作流是一条严格 JSON 配置，不是关系化的 states/transitions/
--- dependencies。charset 正则之外的 state 合法性由应用校验。
 create table project (
     id uuid primary key,
     title varchar(256) not null check (btrim(title) <> '' and title = btrim(title)),
@@ -1626,12 +1577,6 @@ create table project_issue (
     updated_at timestamptz(3) not null default current_timestamp,
     unique (project_id, number),
     check (
-        (state = 'BLOCKED' and blocked_from_state is not null
-            and blocked_from_state not in ('BLOCKED', 'DONE')
-            and block_reason is not null and btrim(block_reason) <> '')
-        or (state <> 'BLOCKED' and blocked_from_state is null and block_reason is null)
-    ),
-    check (
         (pause_reason is null and pause_detail is null)
         or (pause_reason is not null and pause_reason in ('USER', 'ERROR')
             and pause_detail is not null and btrim(pause_detail) <> '')
@@ -1642,10 +1587,9 @@ comment on table project_issue is 'Issue 核心实体：工作流 state、阻塞
 comment on column project_issue.id is 'Issue UUID 主键（应用生成）';
 comment on column project_issue.project_id is '归属项目 UUID（RESTRICT）';
 comment on column project_issue.number is '项目内单调递增编号，>= 1';
-comment on column project_issue.state is
-    'Workflow-scoped natural code; the DB only checks the charset, membership in project.workflow is application-validated';
-comment on column project_issue.blocked_from_state is 'BLOCKED 的恢复目标（不得是 BLOCKED/DONE，也不能在非 BLOCKED 状态保留）';
-comment on column project_issue.block_reason is 'BLOCKED 的原因（非空白，且非 BLOCKED 时必须为空）';
+comment on column project_issue.state is 'Workflow-scoped natural code; the DB only checks the charset, membership in project.workflow is application-validated';
+comment on column project_issue.blocked_from_state is 'BLOCKED 的恢复目标；是否与 state 配对由应用维护';
+comment on column project_issue.block_reason is 'BLOCKED 的原因；是否与 state 配对由应用维护';
 comment on column project_issue.pause_reason is '控制暂停原因：USER / ERROR（与 pause_detail 成对）';
 comment on column project_issue.pause_detail is '控制暂停详情（非空白，且与 pause_reason 成对）';
 comment on column project_issue.next_run_ordinal is '下一个 Run ordinal 分配器，>= 1';
@@ -1655,9 +1599,6 @@ comment on column project_issue.archived_at is '归档时间戳，为空表示�
 
 create index idx_project_issue_board on project_issue (project_id, state, number) where archived_at is null;
 
--- 稳定的 Issue+Agent Thread 归属：(issue_id, agent_name) -> 一条 Harness Thread。
--- 每个 Agent Thread 由服务受控创建自己的 Harness Session，绝不跨 Agent、Issue 或
--- 产品复用；Session 与 Thread 一致性由复合外键保证。
 create table project_issue_agent_thread (
     issue_id uuid not null,
     agent_name varchar(64) not null,
@@ -1675,14 +1616,11 @@ create table project_issue_agent_thread (
         references harness_thread (session_id, id) on delete restrict
 );
 
-comment on table project_issue_agent_thread is
-    'Issue+Agent 稳定 Thread 归属：Session 与 Thread 由复合外键保证一致';
+comment on table project_issue_agent_thread is 'Issue+Agent 稳定 Thread 归属：Session 与 Thread 由复合外键保证一致';
 
 create index idx_project_issue_agent_thread_session
     on project_issue_agent_thread (session_id);
 
--- 每个 Issue 工作阶段一份预算，按 (issue_id,state) 对每个 Agent 的 Run 计数；切换
--- Agent 既不重置也不拆分额度；保留态（INIT/BLOCKED/DONE）没有预算行。
 create table project_issue_stage_budget (
     issue_id uuid not null,
     state varchar(64) not null,
@@ -1694,20 +1632,15 @@ create table project_issue_stage_budget (
     constraint fk_project_issue_stage_budget_issue foreign key (issue_id)
         references project_issue (id) on delete restrict,
     constraint ck_project_issue_stage_budget_state check (state ~ '^[A-Z][A-Z0-9_]{0,63}$'),
-    constraint ck_project_issue_stage_budget_work_stage check (state not in ('INIT', 'BLOCKED', 'DONE')),
     constraint ck_project_issue_stage_budget_max_runs check (max_runs > 0),
     constraint ck_project_issue_stage_budget_after_ordinal check (budget_after_ordinal >= 0)
 );
 
 comment on table project_issue_stage_budget is 'Issue 工作阶段额度：每 Issue+state 一份，max_runs 为正，budget_after_ordinal 是重置高水位';
-comment on column project_issue_stage_budget.state is '工作阶段 state（保留态 INIT/BLOCKED/DONE 不允许建预算行）';
+comment on column project_issue_stage_budget.state is '工作阶段 state；哪些阶段可建预算行由应用维护';
 comment on column project_issue_stage_budget.max_runs is '本阶段允许的 Run 数上限（正整数）';
-comment on column project_issue_stage_budget.budget_after_ordinal is
-    'Reset high-water mark; consumed = this Issue+state Runs with a greater ordinal, all statuses, never filtered by Agent';
+comment on column project_issue_stage_budget.budget_after_ordinal is 'Reset high-water mark; consumed = this Issue+state Runs with a greater ordinal, all statuses, never filtered by Agent';
 
--- 一条 Run 冻结自己的 Issue/state/Session/Thread 坐标。预算外键只用
--- (issue_id,state)，归属外键只用 (issue_id,thread_id)，因此切换 Agent 既不会重写
--- 旧 Run，旧 Run 也不依赖今天工作流选了哪个 Agent。
 create table project_issue_run (
     id uuid primary key,
     issue_id uuid not null,
@@ -1735,34 +1668,12 @@ create table project_issue_run (
         references project_issue_agent_thread (issue_id, thread_id) on delete restrict,
     constraint fk_project_issue_run_thread_session foreign key (session_id, thread_id)
         references harness_thread (session_id, id) on delete restrict,
-    constraint fk_project_issue_run_start_entry foreign key (session_id, start_entry_id)
-        references harness_entry (session_id, id) on delete restrict,
-    constraint fk_project_issue_run_end_entry foreign key (session_id, end_entry_id)
-        references harness_entry (session_id, id) on delete restrict,
-    constraint fk_project_issue_run_final_answer foreign key (session_id, final_answer_entry_id)
-        references harness_entry (session_id, id) on delete restrict,
     constraint ck_project_issue_run_status check (
         status in ('RUNNING', 'WAITING', 'COMPLETED', 'FAILED', 'CANCELLED')
     ),
     constraint ck_project_issue_run_next_state check (
-        next_state is null
-        or (next_state ~ '^[A-Z][A-Z0-9_]{0,63}$' and next_state <> state and next_state <> 'BLOCKED')
-    ),
-    constraint ck_project_issue_run_clock check (
-        (status = 'RUNNING' and active_since is not null and remaining_execution_ms > 0)
-        or (status = 'WAITING' and active_since is null and remaining_execution_ms > 0)
-        or (status in ('COMPLETED', 'FAILED', 'CANCELLED') and active_since is null)
-    ),
-    constraint ck_project_issue_run_terminal_shape check (
-        (status in ('RUNNING', 'WAITING') and ended_at is null and end_entry_id is null
-            and final_answer_entry_id is null and error is null)
-        or (status in ('COMPLETED', 'FAILED', 'CANCELLED')
-            and ended_at is not null and ended_at >= started_at and end_entry_id is not null)
-    ),
-    constraint ck_project_issue_run_error_reason check (
-        status <> 'FAILED' or (error is not null and btrim(error) <> '')
-    ),
-    constraint ck_project_issue_run_completed_error check (status <> 'COMPLETED' or error is null)
+        next_state is null or next_state ~ '^[A-Z][A-Z0-9_]{0,63}$'
+    )
 );
 
 comment on table project_issue_run is 'Issue 运行实体：冻结的 Issue/state/Session/Thread 坐标、剩余执行预算与终态收尾';
@@ -1773,27 +1684,23 @@ comment on column project_issue_run.state is '运行时冻结的工作阶段 sta
 comment on column project_issue_run.session_id is '冻结的 Agent 私有 Harness Session';
 comment on column project_issue_run.thread_id is '冻结的 Issue+Agent 工作 Thread（必须已绑定且属于该 Session）';
 comment on column project_issue_run.status is '状态：RUNNING, WAITING, COMPLETED, FAILED, CANCELLED';
-comment on column project_issue_run.start_entry_id is 'Run 起始 Entry（必须属于本 Session）';
-comment on column project_issue_run.end_entry_id is '终态冻结的结束 Entry（活跃 Run 必须为空）';
-comment on column project_issue_run.final_answer_entry_id is '终态最终答复 Entry（可空，必须属于本 Session）';
-comment on column project_issue_run.next_state is
-    'Accepted handoff target; only a successful Run close commits it to Issue.state';
-comment on column project_issue_run.observed_activity_sequence is
-    'Delivery cursor in the Issue activity stream, not an Entry boundary';
-comment on column project_issue_run.remaining_execution_ms is '剩余执行预算（非负）；活跃与等待 Run 必须为正';
-comment on column project_issue_run.active_since is 'RUNNING 活跃区间起点（WAITING 与终态必须为空）';
-comment on column project_issue_run.error is 'FAILED 的失败原因（非空白；结果未定时明确说明结果未知；COMPLETED 必须为空）';
+comment on column project_issue_run.start_entry_id is 'Run 起始 Entry（应用保证属于本 Session）';
+comment on column project_issue_run.end_entry_id is '终态冻结的结束 Entry（应用保证终态非空、活跃为空）';
+comment on column project_issue_run.final_answer_entry_id is '终态最终答复 Entry（应用保证属于本 Session）';
+comment on column project_issue_run.next_state is 'Accepted handoff target; only a successful Run close commits it to Issue.state; 合法性由应用维护';
+comment on column project_issue_run.observed_activity_sequence is 'Delivery cursor in the Issue activity stream, not an Entry boundary';
+comment on column project_issue_run.remaining_execution_ms is '剩余执行预算（非负）；何时必须为正由应用维护';
+comment on column project_issue_run.active_since is 'RUNNING 活跃区间起点；与 status 的关联由应用维护';
+comment on column project_issue_run.error is 'FAILED 的失败原因；结果未定时由应用明确说明结果未知，COMPLETED 时的形状由应用维护';
 comment on column project_issue_run.version is '乐观锁行版本，>= 0';
 comment on column project_issue_run.started_at is 'Run 创建时间（毫秒精度）';
-comment on column project_issue_run.ended_at is '终态时间（毫秒精度，不得早于 started_at；活跃 Run 为空）';
+comment on column project_issue_run.ended_at is '终态时间（毫秒精度）；与 status 的关联由应用维护';
 
 create unique index uk_project_issue_run_active on project_issue_run (issue_id)
     where status in ('RUNNING', 'WAITING');
 create index idx_project_issue_run_budget on project_issue_run (issue_id, state, ordinal);
 create index idx_project_issue_run_session on project_issue_run (session_id, thread_id);
 
--- 一条有序、幂等的 Issue 时间线：RUN 只引用自己的 Run 而不复制正文；文本类
--- 携带 body；事件类只携带 typed data。
 create table project_issue_activity (
     issue_id uuid not null,
     sequence bigint not null check (sequence >= 1),
@@ -1819,14 +1726,6 @@ create table project_issue_activity (
         or (actor_type in ('HUMAN', 'SYSTEM') and actor_agent_name is null)
     ),
     check (kind in ('COMMENT', 'RUN', 'INSTRUCTION', 'SPEC_CHANGE', 'STATE_CHANGE', 'CONTROL')),
-    check (
-        (kind = 'RUN' and run_id is not null and actor_type = 'SYSTEM'
-            and body is null and data = '{}'::jsonb)
-        or (kind = 'COMMENT' and body is not null and btrim(body) <> '' and data = '{}'::jsonb)
-        or (kind = 'INSTRUCTION' and run_id is not null
-            and body is not null and btrim(body) <> '' and data = '{}'::jsonb)
-        or (kind in ('SPEC_CHANGE', 'STATE_CHANGE', 'CONTROL') and body is null)
-    ),
     check (body is null or octet_length(body) <= 1048576)
 );
 
@@ -1836,9 +1735,9 @@ comment on column project_issue_activity.sequence is 'Issue 内单调递增序�
 comment on column project_issue_activity.kind is '类型：COMMENT, RUN, INSTRUCTION, SPEC_CHANGE, STATE_CHANGE, CONTROL';
 comment on column project_issue_activity.actor_type is '操作者类型：HUMAN, AGENT, SYSTEM';
 comment on column project_issue_activity.actor_agent_name is '操作者 Agent 身份（AGENT 必填，HUMAN/SYSTEM 必须为空）';
-comment on column project_issue_activity.run_id is '相关 Run（必须属于同一 Issue；RUN/INSTRUCTION 必填）';
-comment on column project_issue_activity.body is '文本正文（最大 1 MiB；事件类必须为空）';
-comment on column project_issue_activity.data is '事件 typed data（JSON object；文本类必须为空对象）';
+comment on column project_issue_activity.run_id is '相关 Run（应用保证属于同一 Issue；kind 与 run_id 的关联由应用维护）';
+comment on column project_issue_activity.body is '文本正文（最大 1 MiB）；是否允许由 kind 决定，应用维护';
+comment on column project_issue_activity.data is '事件 typed data（JSON object）；是否为空对象由 kind 决定，应用维护';
 comment on column project_issue_activity.idempotency_key is '同 Issue 幂等键（非空白），重放同一动作不产生新记录';
 comment on column project_issue_activity.request_hash is '请求正文的 SHA-256（64 位小写十六进制）';
 
@@ -1846,293 +1745,6 @@ create unique index uk_project_activity_run on project_issue_activity (issue_id,
     where kind = 'RUN';
 create index idx_project_activity_run on project_issue_activity (run_id) where run_id is not null;
 
--- 每个 Issue 至多一行的调度邮箱：确定性 wake/lease 围栏，是 Issue 恢复的唯一
--- durable 入口。
-
-------------------------------------------------------------------------------
--- 4. Chat Session association
---
--- Chat 通过直接关联表持有多个 Session：Chat 创建复用 Harness NEW_SESSION 的
--- request-hash 重放，因此不需要产品级幂等列；主键保证一个 Session 至多属于一个
--- Chat，删除任一侧前必须先删除本行。
-------------------------------------------------------------------------------
-
-create table chat_session (
-    session_id uuid,
-    chat_id uuid not null,
-    created_at timestamptz(3) not null default current_timestamp,
-    constraint pk_chat_session primary key (session_id),
-    constraint fk_chat_session_session foreign key (session_id)
-        references harness_session (id) on delete restrict,
-    constraint fk_chat_session_chat foreign key (chat_id)
-        references chat (id) on delete restrict
-);
-
-comment on table chat_session is 'Chat 与 Harness Session 的直接关联：一个 Session 至多属于一个 Chat，删除任一侧前必须先删本行';
-comment on column chat_session.session_id is '该 Chat 持有的 Harness Session（主键，RESTRICT FK）';
-comment on column chat_session.chat_id is '所属 Chat（RESTRICT FK）';
-comment on column chat_session.created_at is '关联建立时间（毫秒精度）';
-
-create index idx_chat_session_chat on chat_session (chat_id, created_at, session_id);
-
--- 5. Global blob storage
---
--- storage_blob is the deduplicated immutable content address of the global
--- storage foundation. sha256+size_bytes uniquely identify one content in the
--- ACTIVE state (partial unique index); width/height/duration_ms are immutable
--- media facts written once at complete time (nullable until probed). ref_count
--- counts live owner references (a READY upload plus later application and Harness
--- consumers): ACTIVE rows always hold ref_count > 0, DELETING is terminal with
--- ref_count = 0 and keeps the row as cleanup evidence until its S3 objects are
--- removed and the row is conditionally deleted.
---
--- storage_upload is the per-upload contract between the browser and the
--- server: blob_id NULL means PENDING (the client must PUT the content to the
--- deterministic key uploads/{uploadId}/original), non-NULL means READY.
--- candidate_blob_id is the server-pre-assigned blob id for the PENDING->READY
--- transition; it deliberately has no FK because the blob row is only created
--- at complete time. The only FK (blob_id -> storage_blob) is ON DELETE
--- RESTRICT: counted references must never be removed by a CASCADE.
---
--- storage_object_cleanup is the durable tombstone for object keys that must
--- never be re-bound to a live row. A key is enqueued in the same transaction
--- that removes (or claims for removal) its last database fact, so a late PUT
--- or server-side COPY that lands after the fact is gone is still deleted by
--- the background sweep. Records are never deleted by time: each sweep claims
--- the next due batch, pushes next_attempt_at far into the future before doing
--- any object I/O, and moves a failed key back to a short retry deadline.
-------------------------------------------------------------------------------
-
-create table storage_blob (
-    id            uuid           primary key,
-    sha256        char(64)       not null,
-    size_bytes    bigint         not null,
-    media_type    varchar(256)   not null,
-    width         integer,
-    height        integer,
-    duration_ms   bigint,
-    archive_index jsonb,
-    ref_count     bigint         not null default 0,
-    state         varchar(16)    not null default 'ACTIVE',
-    created_at    timestamptz(3) not null default current_timestamp,
-    updated_at    timestamptz(3) not null default current_timestamp,
-    constraint ck_storage_blob_sha256 check (sha256 ~ '^[0-9a-f]{64}$'),
-    constraint ck_storage_blob_size_nonneg check (size_bytes >= 0),
-    constraint ck_storage_blob_media_type_nonblank check (btrim(media_type) <> ''),
-    constraint ck_storage_blob_dimensions_pair check ((width is null) = (height is null)),
-    constraint ck_storage_blob_dimensions_positive check (
-        width is null or (width > 0 and height > 0)
-    ),
-    constraint ck_storage_blob_duration_positive check (duration_ms is null or duration_ms > 0),
-    constraint ck_storage_blob_archive_index check (
-        archive_index is null or jsonb_typeof(archive_index) = 'object'
-    ),
-    constraint ck_storage_blob_state_ref_count check (
-        (state = 'ACTIVE' and ref_count > 0) or (state = 'DELETING' and ref_count = 0)
-    )
-);
-
-create unique index uk_storage_blob_active_hash
-    on storage_blob (sha256, size_bytes)
-    where state = 'ACTIVE';
-
-comment on column storage_blob.archive_index is
-    '服务端校验过的 ZIP 归档条目索引（{entries:[{path,size,dataOffset,compressedSize,crc32}]}）；null 表示不是服务端生成的归档';
-
-alter table skill_package
-    add constraint fk_skill_package_artifact
-        foreign key (artifact_blob_id) references storage_blob (id) on delete restrict;
-
-create table storage_upload (
-    id                  uuid           primary key,
-    candidate_blob_id   uuid           not null,
-    blob_id             uuid,
-    filename            varchar(512)   not null,
-    declared_media_type varchar(256)   not null,
-    declared_size       bigint         not null,
-    declared_sha256     char(64)       not null,
-    cleanup_requested_at timestamptz(3),
-    cleanup_token       varchar(128),
-    cleanup_until       timestamptz(3),
-    created_at          timestamptz(3) not null default current_timestamp,
-    constraint uk_storage_upload_candidate unique (candidate_blob_id),
-    constraint ck_storage_upload_filename_nonblank check (btrim(filename) <> ''),
-    constraint ck_storage_upload_media_type_nonblank check (btrim(declared_media_type) <> ''),
-    constraint ck_storage_upload_size_nonneg check (declared_size >= 0),
-    constraint ck_storage_upload_sha256 check (declared_sha256 ~ '^[0-9a-f]{64}$'),
-    constraint ck_storage_upload_cleanup_pair check (
-        (cleanup_token is null) = (cleanup_until is null)
-    ),
-    constraint ck_storage_upload_cleanup_token check (
-        cleanup_token is null or (
-            btrim(cleanup_token) <> ''
-            and cleanup_token = btrim(cleanup_token)
-            and char_length(cleanup_token) <= 128
-        )
-    ),
-    constraint fk_storage_upload_blob foreign key (blob_id)
-        references storage_blob (id) on delete restrict
-);
-
-create index idx_storage_upload_cleanup_claim
-    on storage_upload (cleanup_requested_at, created_at, cleanup_until, id);
-
-comment on table storage_blob is
-    'Deduplicated immutable content address of the global blob storage: one'
-    ' ACTIVE row per (sha256, size_bytes) content, with immutable media facts'
-    ' and a counted reference lifecycle ACTIVE -> DELETING -> row removal.';
-
-comment on column storage_blob.id is
-    'Blob id (uuid): deterministic S3 keys are derived from it'
-    ' (blobs/{id}/original, blobs/{id}/preview.webp), never persisted.';
-comment on column storage_blob.sha256 is 'Lowercase hex SHA-256 of the original content (64 chars).';
-comment on column storage_blob.size_bytes is 'Original content size in bytes (non-negative).';
-comment on column storage_blob.media_type is
-    'Canonical media type probed at complete time (not the client declaration).';
-comment on column storage_blob.width is
-    'Immutable pixel width probed at complete time; null when not probed.';
-comment on column storage_blob.height is
-    'Immutable pixel height probed at complete time; null when not probed.';
-comment on column storage_blob.duration_ms is
-    'Immutable media duration in milliseconds probed at complete time; null for still media.';
-comment on column storage_blob.ref_count is
-    'Live owner reference count: READY uploads and later application and Harness consumers.';
-comment on column storage_blob.state is
-    'Lifecycle state: ACTIVE (ref_count > 0) or DELETING (terminal, ref_count = 0).';
-comment on column storage_blob.created_at is 'Row creation time (timestamptz, millisecond precision).';
-comment on column storage_blob.updated_at is
-    'Application-managed last write time (timestamptz, millisecond precision).';
-
-comment on index uk_storage_blob_active_hash is
-    'Content dedup: at most one ACTIVE blob row per (sha256, size_bytes);'
-    ' DELETING rows stay outside the key so a new upload of the same content can proceed.';
-
-comment on table storage_upload is
-    'Per-upload contract: blob_id NULL = PENDING (client PUTs to'
-    ' uploads/{uploadId}/original), non-NULL = READY (blob is retained for this upload).'
-    ' Expiry is created_at + current upload TTL for unclaimed uploads.';
-
-comment on column storage_upload.id is
-    'Upload id (uuid): the deterministic temp key uploads/{id}/original is derived from it.';
-comment on column storage_upload.candidate_blob_id is
-    'Server-pre-assigned blob id for the PENDING->READY transition (no FK: the'
-    ' blob row is created at complete time).';
-comment on column storage_upload.blob_id is
-    'Referenced blob while READY (FK RESTRICT); NULL while PENDING. The READY'
-    ' upload holds exactly one reference to this blob.';
-comment on column storage_upload.filename is 'Client-declared original filename (non-blank, <= 512 chars).';
-comment on column storage_upload.declared_media_type is 'Client-declared media type (non-blank, <= 256 chars).';
-comment on column storage_upload.declared_size is 'Client-declared content size in bytes (non-negative).';
-comment on column storage_upload.declared_sha256 is 'Client-declared lowercase hex SHA-256 (64 chars).';
-comment on column storage_upload.cleanup_requested_at is
-    'Durable explicit cleanup request; NULL for active uploads and retained until'
-    ' maintenance removes the upload row.';
-comment on column storage_upload.cleanup_token is
-    'Opaque cleanup ownership token; NULL when unclaimed and fenced on finalize/release.';
-comment on column storage_upload.cleanup_until is
-    'Cleanup lease deadline paired with cleanup_token; an expired lease is reclaimable.';
-comment on column storage_upload.created_at is
-    'Row creation time (timestamptz, millisecond precision). Unclaimed uploads expire'
-    ' at created_at + current upload TTL; there is no persisted expiry column.';
-
-comment on index uk_storage_upload_candidate is
-    'Every upload pre-assigns a distinct candidate blob id so PENDING rows can'
-    ' never collide on the future blob identity.';
-comment on index idx_storage_upload_cleanup_claim is
-    'Storage Maintenance claim scan: requested, claimed or expired uploads with'
-    ' absent/expired leases; expiry compares created_at against now minus current TTL.';
-
-create table storage_object_cleanup (
-    key              varchar(512)   not null,
-    next_attempt_at  timestamptz(3) not null,
-    constraint pk_storage_object_cleanup primary key (key),
-    constraint ck_storage_object_cleanup_key_nonblank check (btrim(key) <> '')
-);
-
-create index idx_storage_object_cleanup_due
-    on storage_object_cleanup (next_attempt_at, key);
-
-comment on table storage_object_cleanup is
-    'Durable object-key tombstone: a key whose last database fact was removed is'
-    ' deleted again whenever a late PUT/COPY recreates it. Records are permanent'
-    ' (never removed by TTL); each sweep claims the next due batch, advances'
-    ' next_attempt_at before doing object I/O and backs off failures.';
-
-comment on column storage_object_cleanup.key is
-    'Object storage key (uploads/{id}/original, blobs/{id}/original or'
-    ' blobs/{id}/preview.webp); primary key, so enqueueing is idempotent.';
-comment on column storage_object_cleanup.next_attempt_at is
-    'Next sweep deadline: driven by database time so every node claims with the'
-    ' same clock; advanced far on claim and set back on object deletion failure.';
-
-comment on index idx_storage_object_cleanup_due is
-    'Storage Maintenance tombstone scan: due keys in next_attempt_at order.';
-
--- Session 级 Blob 引用：Session 的持久化 message（USER/RESOURCE 与 TOOL 结果）通过本表持有 storage_blob 的
--- 活跃引用。ref_count 维护完全由应用层 SessionBlobRefManager 显式执行（insert+retain / delete+release 成对），
--- 绝不依赖 ON DELETE CASCADE 或触发器；两个 FK 都是 RESTRICT，删除 Session / blob 前必须先删除本表对应行。
--- 本表属于应用层业务（非 Harness runtime 协议），因此不使用 harness_ 前缀。
-create table session_blob_ref (
-    session_id  uuid          not null,
-    blob_id     uuid          not null,
-    created_at  timestamptz(3) not null default current_timestamp,
-    constraint pk_session_blob_ref primary key (session_id, blob_id),
-    constraint fk_session_blob_ref_session foreign key (session_id)
-        references harness_session (id) on delete restrict,
-    constraint fk_session_blob_ref_blob foreign key (blob_id)
-        references storage_blob (id) on delete restrict
-);
-
-create index idx_session_blob_ref_blob
-    on session_blob_ref (blob_id, session_id);
-
-comment on table session_blob_ref is
-    'Session 与 storage_blob 的显式引用边：每行恰好对应一次 blob retain，删除时由应用层逐行 release；'
-    'FK 均为 RESTRICT，深删除必须先删本表';
-comment on column session_blob_ref.session_id is '所属 Harness Session（RESTRICT FK）';
-comment on column session_blob_ref.blob_id is '被引用的全局 blob（RESTRICT FK，ACTIVE 行）';
-comment on column session_blob_ref.created_at is '引用创建时间（timestamptz，毫秒精度）';
-
-comment on index idx_session_blob_ref_blob is '按 blob 反向枚举持有它的 Session（深删除与对账）';
-
--- Session 级文件元数据：(session_id, path) 唯一确定一个文件版本及引用的全局 blob。
-create table session_file (
-    session_id uuid not null,
-    path       text not null,
-    blob_id    uuid not null,
-    revision   integer not null,
-    updated_at timestamptz(3) not null default current_timestamp,
-    constraint pk_session_file primary key (session_id, path),
-    constraint fk_session_file_session foreign key (session_id) references harness_session (id) on delete restrict,
-    constraint fk_session_file_blob foreign key (blob_id) references storage_blob (id) on delete restrict,
-    constraint ck_session_file_path check (path <> '' and path = btrim(path) and path !~ '^/'
-        and path !~ '(^|/)\.\.?(/|$)' and path !~ '[\u0001-\u001F\u007F-\u009F]'),
-    constraint ck_session_file_revision check (revision > 0)
-);
-
-create index idx_session_file_blob on session_file (blob_id, session_id);
-
-comment on table session_file is
-    'Session 虚拟文件存储：(session_id, path) 唯一确定一个文件版本及引用的全局 blob';
-comment on column session_file.session_id is '所属 Harness Session（RESTRICT FK）';
-comment on column session_file.path is 'Session 空间相对路径（非空、无首尾空白、无前导斜杠、无 .. 段）';
-comment on column session_file.blob_id is '文件内容引用的全局 blob（RESTRICT FK，ACTIVE 行）';
-comment on column session_file.revision is '乐观锁版本号（严格大于 0）';
-comment on column session_file.updated_at is '最后更新时间戳（毫秒精度）';
-comment on index idx_session_file_blob is '按 blob 反向枚举引用它的 Session 文件（CAS 释放前引用判断与对账）';
-
-------------------------------------------------------------------------------
--- 6. Issue published evidence
---
--- 一条记录是 Issue 显式持有的一个已发布 Blob 引用：只有执行者最终答复明确引用且来源 Run
--- 的 Session 在提交时确实持有该引用的产物，以及人经 Issue 入口上传的附件，才成为公开
--- 证据；其余附件保持私有。主键即“同 Issue 同 Blob 至多一条”的幂等键，重复发布不新增行
--- 也不重复 retain。
---
--- 本表是 Issue 自有的 owner edge，与 Session 无关：删除 Session 不释放这里的引用，只有
--- Issue/Project 深删除才逐行 release。三个 FK 都是 RESTRICT，行必须早于 project_issue_run
--- 删除；ref_count 变更完全由应用事务完成，不依赖 cascade 或触发器。
-------------------------------------------------------------------------------
 create table project_issue_evidence (
     issue_id uuid not null,
     blob_id uuid not null,
@@ -2155,23 +1767,12 @@ create table project_issue_evidence (
 create index idx_project_issue_evidence_blob
     on project_issue_evidence (blob_id);
 
-comment on table project_issue_evidence is
-    'Explicit published Blob references independent of Session lifetime; application retains/releases once';
+comment on table project_issue_evidence is 'Explicit published Blob references independent of Session lifetime; application retains/releases once';
 comment on column project_issue_evidence.issue_id is '所属 Issue UUID（复合主键）';
 comment on column project_issue_evidence.blob_id is '已发布 Blob UUID（复合主键，RESTRICT FK，ACTIVE 行）';
 comment on column project_issue_evidence.actor_agent_name is '发布者 Agent 身份（作者归属，RESTRICT FK，可空）';
-comment on column project_issue_evidence.run_id is
-    '来源 Run（同 Issue 复合 FK，可空）；非空时必须同时给出 actor_agent_name';
-comment on column project_issue_evidence.name is
-    '权威展示名（varchar(512)，非空且无首尾空白）：人工上传取自上传行，执行者发布由服务端从规范 URI 派生，不接受客户端可伪造文件名';
+comment on column project_issue_evidence.run_id is '来源 Run（同 Issue 复合 FK，可空）；非空时必须同时给出 actor_agent_name';
+comment on column project_issue_evidence.name is '权威展示名（varchar(512)，非空且无首尾空白）：人工上传取自上传行，执行者发布由服务端从规范 URI 派生，不接受客户端可伪造文件名';
 comment on column project_issue_evidence.created_at is '发布时间戳（毫秒精度）';
 
 comment on index idx_project_issue_evidence_blob is '按 blob 反向枚举引用它的 Issue（对账与深删除）';
-
-------------------------------------------------------------------------------
--- 7. Canvas resource blob FK (must follow the global blob storage section)
-------------------------------------------------------------------------------
-
-alter table canvas_resource
-    add constraint fk_canvas_resource_blob foreign key (blob_id)
-    references storage_blob (id) on delete restrict;

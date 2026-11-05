@@ -676,7 +676,7 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
   }
 
   private WorkClaim claimWork() {
-    String leaseToken = UUID.randomUUID().toString();
+    UUID leaseToken = UUID.randomUUID();
     return issueWorkQueue.claimNext(leaseToken, Duration.ofMinutes(1)).orElse(null);
   }
 

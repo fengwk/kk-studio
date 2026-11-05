@@ -27,6 +27,7 @@ import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.ZoneOffset;
+import java.util.UUID;
 
 /** Stop 删除已 claim 的 Work，使迟到的 Model/Tool callback 立即失去 ownership。 */
 class HarnessRuntimeStopCallbackFenceTest {
@@ -42,7 +43,7 @@ class HarnessRuntimeStopCallbackFenceTest {
         store.transaction(
             tx ->
                 tx.work()
-                    .claimNext(BuiltinWorkType.MODEL, "model-lease", Duration.between(T3, T6))
+                    .claimNext(BuiltinWorkType.MODEL, UUID.randomUUID(), Duration.between(T3, T6))
                     .orElseThrow());
 
     runtime(store, Clock.fixed(T5, ZoneOffset.UTC))
@@ -68,7 +69,7 @@ class HarnessRuntimeStopCallbackFenceTest {
         store.transaction(
             tx ->
                 tx.work()
-                    .claimNext(WorkTargetType.TOOL, "tool-lease", Duration.between(T3, T6))
+                    .claimNext(WorkTargetType.TOOL, UUID.randomUUID(), Duration.between(T3, T6))
                     .orElseThrow());
 
     runtime(store, Clock.fixed(T5, ZoneOffset.UTC))

@@ -586,7 +586,7 @@ class WorkHeartbeatTest {
                   tx ->
                       tx.work()
                           .claimNext(
-                              WorkTargetType.THREAD, "token-" + threadId, Duration.ofSeconds(15)))
+                              WorkTargetType.THREAD, UUID.randomUUID(), Duration.ofSeconds(15)))
               .orElseThrow();
       this.heartbeat = new WorkHeartbeat(store, scheduler, Runnable::run, LEASE_CONFIG, () -> {});
     }

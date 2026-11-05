@@ -17,6 +17,7 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.UUID;
 
 /**
  * Canvas Function 的调度适配：在共享 CANVAS_RUN Work 之上领取、续租与归还 Run。
@@ -49,7 +50,7 @@ public class CanvasFunctionWorkStore {
     this.clock = Clock.tick(Objects.requireNonNull(clock, "clock"), Duration.ofMillis(1));
   }
 
-  public Optional<ClaimedRun> claimNext(Duration leaseDuration, String ownerToken) {
+  public Optional<ClaimedRun> claimNext(Duration leaseDuration, UUID ownerToken) {
     while (true) {
       Optional<WorkClaim> work = canvasRunWorkQueue.claimNext(ownerToken, leaseDuration);
       if (work.isEmpty()) {

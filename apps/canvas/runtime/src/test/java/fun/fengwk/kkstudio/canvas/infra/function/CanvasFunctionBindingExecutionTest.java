@@ -61,7 +61,8 @@ class CanvasFunctionBindingExecutionTest {
     CanvasFunctionRun claimRun = runningRun();
     ClaimedRun claim =
         new ClaimedRun(
-            claimRun, new WorkClaim(claimRun.nodeId(), 1L, "lease", Instant.EPOCH.plusSeconds(30)));
+            claimRun,
+            new WorkClaim(claimRun.nodeId(), 1L, UUID.randomUUID(), Instant.EPOCH.plusSeconds(30)));
     CanvasFunctionRunStateCodec stateCodec = mock(CanvasFunctionRunStateCodec.class);
     when(stateCodec.decode(claimRun.stateJson())).thenReturn(frozen);
     CanvasFunctionRunTransactions transactions = mock(CanvasFunctionRunTransactions.class);
@@ -93,7 +94,8 @@ class CanvasFunctionBindingExecutionTest {
     CanvasFunctionRun claimRun = runningRun();
     ClaimedRun claim =
         new ClaimedRun(
-            claimRun, new WorkClaim(claimRun.nodeId(), 1L, "lease", Instant.EPOCH.plusSeconds(30)));
+            claimRun,
+            new WorkClaim(claimRun.nodeId(), 1L, UUID.randomUUID(), Instant.EPOCH.plusSeconds(30)));
     CanvasFunctionRunStateCodec stateCodec = mock(CanvasFunctionRunStateCodec.class);
     when(stateCodec.decode(claimRun.stateJson())).thenReturn(frozen);
     CanvasFunctionRunTransactions transactions = mock(CanvasFunctionRunTransactions.class);
@@ -123,7 +125,8 @@ class CanvasFunctionBindingExecutionTest {
     CanvasFunctionRun claimRun = runningRun();
     ClaimedRun claim =
         new ClaimedRun(
-            claimRun, new WorkClaim(claimRun.nodeId(), 1L, "lease", Instant.EPOCH.plusSeconds(30)));
+            claimRun,
+            new WorkClaim(claimRun.nodeId(), 1L, UUID.randomUUID(), Instant.EPOCH.plusSeconds(30)));
     CanvasFunctionRunStateCodec stateCodec = mock(CanvasFunctionRunStateCodec.class);
     when(stateCodec.decode(claimRun.stateJson())).thenReturn(frozen);
     CanvasFunctionRunTransactions transactions = mock(CanvasFunctionRunTransactions.class);

@@ -118,9 +118,9 @@ class PostgresqlHarnessStoreConcurrencyTest {
     CountDownLatch start = new CountDownLatch(1);
     try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
       Future<Optional<ClaimedWork>> first =
-          executor.submit(() -> claimAfterBarrier("lease-a", ready, start));
+          executor.submit(() -> claimAfterBarrier(UUID.randomUUID(), ready, start));
       Future<Optional<ClaimedWork>> second =
-          executor.submit(() -> claimAfterBarrier("lease-b", ready, start));
+          executor.submit(() -> claimAfterBarrier(UUID.randomUUID(), ready, start));
       assertTrue(ready.await(10, TimeUnit.SECONDS));
       start.countDown();
 
@@ -182,7 +182,9 @@ class PostgresqlHarnessStoreConcurrencyTest {
                       tx ->
                           tx.work()
                               .claimNext(
-                                  WorkTargetType.THREAD, "lease-next", Duration.ofSeconds(60))));
+                                  WorkTargetType.THREAD,
+                                  UUID.randomUUID(),
+                                  Duration.ofSeconds(60))));
       try {
         ClaimedWork claimed = claimer.get(3, TimeUnit.SECONDS).orElseThrow();
         assertEquals(secondTarget, claimed.target());
@@ -339,7 +341,9 @@ class PostgresqlHarnessStoreConcurrencyTest {
         store
             .transaction(
                 tx ->
-                    tx.work().claimNext(WorkTargetType.THREAD, "lease-old", Duration.ofSeconds(60)))
+                    tx.work()
+                        .claimNext(
+                            WorkTargetType.THREAD, UUID.randomUUID(), Duration.ofSeconds(60)))
             .orElseThrow();
 
     CountDownLatch wakeWritten = new CountDownLatch(1);
@@ -460,7 +464,8 @@ class PostgresqlHarnessStoreConcurrencyTest {
             .transaction(
                 tx ->
                     tx.work()
-                        .claimNext(BuiltinWorkType.MODEL, "lease-delete", Duration.ofSeconds(60)))
+                        .claimNext(
+                            BuiltinWorkType.MODEL, UUID.randomUUID(), Duration.ofSeconds(60)))
             .orElseThrow();
 
     CountDownLatch modelLocked = new CountDownLatch(1);
@@ -615,7 +620,7 @@ class PostgresqlHarnessStoreConcurrencyTest {
   }
 
   private Optional<ClaimedWork> claimAfterBarrier(
-      String token, CountDownLatch ready, CountDownLatch start) {
+      UUID token, CountDownLatch ready, CountDownLatch start) {
     ready.countDown();
     await(start);
     return store.transaction(

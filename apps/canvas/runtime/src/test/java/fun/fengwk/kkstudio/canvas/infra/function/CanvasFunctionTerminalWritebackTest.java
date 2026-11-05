@@ -27,7 +27,7 @@ class CanvasFunctionTerminalWritebackTest extends CanvasFunctionRuntimeTestSuppo
   void completeSuccessRejectsMismatchAndStaleTokens() {
     UUID canvasId = addDocument();
     UUID nodeId = addFunctionNode(canvasId, "output", configWithoutReferences());
-    ClaimedRun claim = claimStartedRun(canvasId, nodeId, REQUEST_1, "worker-fencing");
+    ClaimedRun claim = claimStartedRun(canvasId, nodeId, REQUEST_1, UUID.randomUUID());
     CanvasFunctionFrozenRun frozen = decode(claim.run());
     CanvasResource target =
         materializeTarget(canvasId, nodeId, frozen.requestId(), frozen.output(0));
@@ -55,11 +55,10 @@ class CanvasFunctionTerminalWritebackTest extends CanvasFunctionRuntimeTestSuppo
 
     // 失效租约写回返回 false，状态保持 RUNNING
     assertFalse(
-        runtimeTransactions.completeSuccess(
-            frozen, "stale-lease-token", frozen.outputResourceIds()));
+        runtimeTransactions.completeSuccess(frozen, UUID.randomUUID(), frozen.outputResourceIds()));
     assertFalse(
         runtimeTransactions.markUnknown(
-            nodeId, REQUEST_1, "stale-lease-token", "stale unknown reason"));
+            nodeId, REQUEST_1, UUID.randomUUID(), "stale unknown reason"));
 
     CanvasFunctionRun runInDb = runRepository.findByNodeId(nodeId).orElseThrow();
     assertEquals(CanvasFunctionRunStatus.RUNNING, runInDb.status());
@@ -75,12 +74,13 @@ class CanvasFunctionTerminalWritebackTest extends CanvasFunctionRuntimeTestSuppo
   void completeSuccessWithStaleLeaseIsANoOp() {
     UUID canvasId = addDocument();
     UUID nodeId = addFunctionNode(canvasId, "output", configWithoutReferences());
-    ClaimedRun claim = claimStartedRun(canvasId, nodeId, REQUEST_1, "foundation-success-fence");
+    ClaimedRun claim = claimStartedRun(canvasId, nodeId, REQUEST_1, UUID.randomUUID());
     CanvasFunctionFrozenRun frozen = decode(claim.run());
     CanvasResource target =
         materializeTarget(canvasId, nodeId, frozen.requestId(), frozen.output(0));
 
-    assertFalse(runtimeTransactions.completeSuccess(frozen, "stale", frozen.outputResourceIds()));
+    assertFalse(
+        runtimeTransactions.completeSuccess(frozen, UUID.randomUUID(), frozen.outputResourceIds()));
     CanvasFunctionRun current = runRepository.findByNodeId(nodeId).orElseThrow();
     assertEquals(CanvasFunctionRunStatus.RUNNING, current.status());
     assertTrue(runRepository.holdsLease(current.nodeId(), claim.leaseToken()));
@@ -93,7 +93,7 @@ class CanvasFunctionTerminalWritebackTest extends CanvasFunctionRuntimeTestSuppo
   void terminalWritebacksStopAfterNodeIsNoLongerAFunction() {
     UUID canvasId = addDocument();
     UUID nodeId = addFunctionNode(canvasId, "output", configWithoutReferences());
-    ClaimedRun claim = claimStartedRun(canvasId, nodeId, REQUEST_1, "foundation-node-fence");
+    ClaimedRun claim = claimStartedRun(canvasId, nodeId, REQUEST_1, UUID.randomUUID());
     CanvasFunctionFrozenRun frozen = decode(claim.run());
     jdbc.update("update canvas_node set \"function\" = null where id = ?", nodeId);
 
@@ -113,7 +113,7 @@ class CanvasFunctionTerminalWritebackTest extends CanvasFunctionRuntimeTestSuppo
   void completeSuccessRejectsInvalidOrUnmaterializedTarget() {
     UUID canvasId = addDocument();
     UUID nodeId = addFunctionNode(canvasId, "output", configWithoutReferences());
-    ClaimedRun claim = claimStartedRun(canvasId, nodeId, REQUEST_1, "foundation-invalid-success");
+    ClaimedRun claim = claimStartedRun(canvasId, nodeId, REQUEST_1, UUID.randomUUID());
     CanvasFunctionFrozenRun frozen = decode(claim.run());
 
     assertThrows(
@@ -153,13 +153,13 @@ class CanvasFunctionTerminalWritebackTest extends CanvasFunctionRuntimeTestSuppo
     UUID node1 =
         addFunctionNode(
             canvasId, "node-1", TWO_IMAGES_DEFINITION.name(), configWithReference(sharedNodeId));
-    ClaimedRun claim1 = claimStartedRun(canvasId, node1, REQUEST_1, "worker-run-1");
+    ClaimedRun claim1 = claimStartedRun(canvasId, node1, REQUEST_1, UUID.randomUUID());
     CanvasFunctionFrozenRun frozen1 = decode(claim1.run());
 
     // 节点 2：另一个函数也启动并引用 sharedResource
     UUID node2 =
         addFunctionNode(canvasId, "node-2", DEFINITION.name(), configWithReference(sharedNodeId));
-    claimStartedRun(canvasId, node2, REQUEST_2, "worker-run-2");
+    claimStartedRun(canvasId, node2, REQUEST_2, UUID.randomUUID());
 
     // 部分物化 node1 的 slot 0
     CanvasResource slot0Res =
@@ -168,10 +168,10 @@ class CanvasFunctionTerminalWritebackTest extends CanvasFunctionRuntimeTestSuppo
     // (a) 过期租约调用 completeSuccess / markUnknown 返回 false
     assertFalse(
         runtimeTransactions.completeSuccess(
-            frozen1, "stale-lease-token", frozen1.outputResourceIds()));
+            frozen1, UUID.randomUUID(), frozen1.outputResourceIds()));
     assertFalse(
         runtimeTransactions.markUnknown(
-            node1, REQUEST_1, "stale-lease-token", "stale unknown reason"));
+            node1, REQUEST_1, UUID.randomUUID(), "stale unknown reason"));
 
     CanvasFunctionRun run1InDb = runRepository.findByNodeId(node1).orElseThrow();
     assertEquals(CanvasFunctionRunStatus.RUNNING, run1InDb.status());
@@ -199,7 +199,7 @@ class CanvasFunctionTerminalWritebackTest extends CanvasFunctionRuntimeTestSuppo
         addFunctionNode(
             canvasId, "node-3", TWO_IMAGES_DEFINITION.name(), configWithoutReferences());
     String request3 = "00000000-0000-0000-0000-000000000103";
-    ClaimedRun claim3 = claimStartedRun(canvasId, node3, request3, "worker-run-3");
+    ClaimedRun claim3 = claimStartedRun(canvasId, node3, request3, UUID.randomUUID());
     CanvasFunctionFrozenRun frozen3 = decode(claim3.run());
     CanvasResource slot0Res3 =
         materializeBlobOutput(canvasId, node3, frozen3.requestId(), frozen3.output(0));

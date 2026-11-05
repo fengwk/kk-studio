@@ -455,7 +455,9 @@ class HarnessRuntimeStopModelTest {
     assertTrue(
         store
             .transaction(
-                tx -> tx.work().claimNext(WorkTargetType.TOOL, "test", Duration.ofMinutes(1)))
+                tx ->
+                    tx.work()
+                        .claimNext(WorkTargetType.TOOL, UUID.randomUUID(), Duration.ofMinutes(1)))
             .isEmpty());
     TurnEndPayload end = (TurnEndPayload) path.head().payload();
     assertEquals(TurnEndOutcome.STOPPED, end.outcome());

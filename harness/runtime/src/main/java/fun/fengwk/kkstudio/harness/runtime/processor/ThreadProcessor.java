@@ -167,7 +167,7 @@ public final class ThreadProcessor {
           "ThreadProcessor requires a THREAD work claim, got " + claim.target());
     }
     UUID threadId = claim.target().id();
-    String token = claim.leaseToken();
+    UUID token = claim.leaseToken();
     if (!claimOwned(claim)) {
       return ThreadProcessResult.LOST_OWNERSHIP;
     }

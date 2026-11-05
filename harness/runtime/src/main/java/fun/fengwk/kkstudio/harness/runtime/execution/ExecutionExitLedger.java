@@ -48,7 +48,7 @@ public final class ExecutionExitLedger {
       UUID threadId,
       UUID invocationId,
       int attempt,
-      String ownerLeaseToken,
+      UUID ownerLeaseToken,
       ExecutionExitKind kind,
       UUID parentExecutionId) {
     return register(
@@ -70,7 +70,7 @@ public final class ExecutionExitLedger {
       UUID threadId,
       UUID invocationId,
       int attempt,
-      String ownerLeaseToken,
+      UUID ownerLeaseToken,
       ExecutionExitKind kind,
       UUID parentExecutionId,
       EnvironmentId environmentId) {

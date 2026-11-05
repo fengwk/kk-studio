@@ -4,7 +4,6 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
@@ -51,7 +50,7 @@ class IssueReconcileRuntimeConfigurationCallbacksTest {
     DurableWorkStore workStore = mock(DurableWorkStore.class);
     IssueReconciler reconciler = mock(IssueReconciler.class);
     WorkClaim work = claim();
-    when(workStore.claimNext(anyString(), any(Duration.class)))
+    when(workStore.claimNext(any(UUID.class), any(Duration.class)))
         .thenReturn(Optional.of(work), Optional.empty());
     BoundedWorkDispatcher<WorkClaim> dispatcher =
         dispatcher(workStore, reconciler, properties(), Runnable::run, Runnable::run);
@@ -71,7 +70,7 @@ class IssueReconcileRuntimeConfigurationCallbacksTest {
     IssueReconcileProperties properties = properties();
     properties.setRetryDelay(Duration.ofSeconds(7));
     WorkClaim work = claim();
-    when(workStore.claimNext(anyString(), any(Duration.class)))
+    when(workStore.claimNext(any(UUID.class), any(Duration.class)))
         .thenReturn(Optional.of(work), Optional.empty());
     when(workStore.lockClaimed(work)).thenReturn(Optional.of(mock(DurableWork.class)));
     when(reconciler.reconcile(work)).thenThrow(new RuntimeException("reconcile failed"));
@@ -99,12 +98,12 @@ class IssueReconcileRuntimeConfigurationCallbacksTest {
         dispatcher(workStore, reconciler, properties, Runnable::run, rejectingWorker);
 
     WorkClaim work = claim();
-    when(workStore.claimNext(anyString(), any(Duration.class))).thenReturn(Optional.of(work));
+    when(workStore.claimNext(any(UUID.class), any(Duration.class))).thenReturn(Optional.of(work));
     when(workStore.lockClaimed(work)).thenReturn(Optional.of(mock(DurableWork.class)));
 
     dispatcher.start();
 
-    verify(workStore, times(1)).claimNext(anyString(), any(Duration.class));
+    verify(workStore, times(1)).claimNext(any(UUID.class), any(Duration.class));
     verify(workStore).reschedule(eq(work), eq(Duration.ofSeconds(3)));
     verifyNoInteractions(reconciler);
     dispatcher.stop();
@@ -124,7 +123,8 @@ class IssueReconcileRuntimeConfigurationCallbacksTest {
             task -> {
               throw new RejectedExecutionException("worker pool saturated");
             });
-    when(workStore.claimNext(anyString(), any(Duration.class))).thenReturn(Optional.of(claim()));
+    when(workStore.claimNext(any(UUID.class), any(Duration.class)))
+        .thenReturn(Optional.of(claim()));
     when(workStore.lockClaimed(any())).thenReturn(Optional.empty());
 
     dispatcher.start();
@@ -144,7 +144,7 @@ class IssueReconcileRuntimeConfigurationCallbacksTest {
         dispatcher(workStore, reconciler, properties, Runnable::run, Runnable::run);
 
     WorkClaim work = claim();
-    when(workStore.claimNext(anyString(), any(Duration.class)))
+    when(workStore.claimNext(any(UUID.class), any(Duration.class)))
         .thenReturn(Optional.of(work), Optional.empty());
     when(workStore.lockClaimed(work)).thenReturn(Optional.of(mock(DurableWork.class)));
     when(reconciler.reconcile(work))
@@ -170,7 +170,7 @@ class IssueReconcileRuntimeConfigurationCallbacksTest {
         dispatcher(workStore, reconciler, properties, Runnable::run, Runnable::run);
 
     WorkClaim work = claim();
-    when(workStore.claimNext(anyString(), any(Duration.class)))
+    when(workStore.claimNext(any(UUID.class), any(Duration.class)))
         .thenAnswer(
             invocation -> {
               dispatcher.stop();
@@ -199,7 +199,7 @@ class IssueReconcileRuntimeConfigurationCallbacksTest {
               throw new AssertionError("worker executor assertion error");
             });
     WorkClaim work = claim();
-    when(workStore.claimNext(anyString(), any(Duration.class))).thenReturn(Optional.of(work));
+    when(workStore.claimNext(any(UUID.class), any(Duration.class))).thenReturn(Optional.of(work));
     when(workStore.lockClaimed(work)).thenReturn(Optional.of(mock(DurableWork.class)));
 
     assertThrows(AssertionError.class, dispatcher::start);
@@ -220,7 +220,8 @@ class IssueReconcileRuntimeConfigurationCallbacksTest {
             task -> {
               throw new RejectedExecutionException("worker pool saturated");
             });
-    when(workStore.claimNext(anyString(), any(Duration.class))).thenReturn(Optional.of(claim()));
+    when(workStore.claimNext(any(UUID.class), any(Duration.class)))
+        .thenReturn(Optional.of(claim()));
     when(workStore.lockClaimed(any())).thenThrow(new RuntimeException("lock failed"));
 
     assertDoesNotThrow(dispatcher::start);
@@ -271,6 +272,6 @@ class IssueReconcileRuntimeConfigurationCallbacksTest {
   }
 
   private static WorkClaim claim() {
-    return new WorkClaim(UUID.randomUUID(), 1L, "lease", LEASE_UNTIL);
+    return new WorkClaim(UUID.randomUUID(), 1L, UUID.randomUUID(), LEASE_UNTIL);
   }
 }

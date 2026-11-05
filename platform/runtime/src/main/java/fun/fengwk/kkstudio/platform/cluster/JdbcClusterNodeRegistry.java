@@ -50,14 +50,14 @@ public class JdbcClusterNodeRegistry implements ClusterNodeRegistry {
   /** 本节点注册/续约：同一 instanceId upsert，internal_url 与租约一起刷新。 */
   private static final String REGISTER_SQL =
       """
-      insert into cluster_node (instance_id, internal_url, lease_until, last_seen)
+      insert into cluster_node (instance_id, internal_url, lease_until, last_seen_at)
       values (:instanceId, :internalUrl,
           statement_timestamp() + (:leaseMillis * interval '1 millisecond'),
           statement_timestamp())
       on conflict (instance_id) do update
       set internal_url = excluded.internal_url,
           lease_until = excluded.lease_until,
-          last_seen = excluded.last_seen
+          last_seen_at = excluded.last_seen_at
       """;
 
   /** 指定节点仍有效租约时返回其注册的内部 origin；过期、缺失或未配置共享秘密都不可用。 */
@@ -69,11 +69,11 @@ public class JdbcClusterNodeRegistry implements ClusterNodeRegistry {
         and lease_until > statement_timestamp()
       """;
 
-  /** 仅推进本节点注册行的 last_seen 与 lease_until，不改动 origin。 */
+  /** 仅推进本节点注册行的 last_seen_at 与 lease_until，不改动 origin。 */
   private static final String HEARTBEAT_SQL =
       """
       update cluster_node
-      set last_seen = statement_timestamp(),
+      set last_seen_at = statement_timestamp(),
           lease_until = statement_timestamp() + (:leaseMillis * interval '1 millisecond')
       where instance_id = :instanceId
       """;

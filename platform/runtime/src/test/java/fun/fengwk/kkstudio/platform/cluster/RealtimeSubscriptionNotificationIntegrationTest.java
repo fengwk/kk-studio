@@ -213,7 +213,7 @@ class RealtimeSubscriptionNotificationIntegrationTest extends PostgresSchemaSupp
   private void expireNodeLease() {
     jdbcClient
         .sql(
-            "update cluster_node set last_seen = statement_timestamp() - interval '2 minutes',"
+            "update cluster_node set last_seen_at = statement_timestamp() - interval '2 minutes',"
                 + " lease_until = statement_timestamp() - interval '1 second' where instance_id = ?")
         .param(NODE_B)
         .update();
@@ -223,14 +223,14 @@ class RealtimeSubscriptionNotificationIntegrationTest extends PostgresSchemaSupp
     jdbcClient
         .sql(
             """
-            insert into cluster_node (instance_id, internal_url, lease_until, last_seen)
+            insert into cluster_node (instance_id, internal_url, lease_until, last_seen_at)
             values (?, ?,
                 statement_timestamp() + (? * interval '1 millisecond'),
                 statement_timestamp())
             on conflict (instance_id) do update
             set internal_url = excluded.internal_url,
                 lease_until = excluded.lease_until,
-                last_seen = excluded.last_seen
+                last_seen_at = excluded.last_seen_at
             """)
         .params(nodeInstanceId, "http://" + nodeInstanceId + ".internal:8080", LEASE.toMillis())
         .update();

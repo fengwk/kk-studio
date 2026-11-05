@@ -87,6 +87,8 @@ import java.util.function.Function;
  */
 class PostgresqlToolLeaseRecoveryContinuationTest {
 
+  private static final UUID OLD_LEASE = UUID.randomUUID();
+
   private static final Duration LEASE = Duration.ofSeconds(30);
 
   private HarnessStore store;
@@ -126,7 +128,7 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
     ToolProcessor toolProcessor = newToolProcessor();
     assertEquals(
         ProcessResult.TERMINATED,
-        toolProcessor.process(claim(WorkTargetType.TOOL, "tool-a").orElseThrow()));
+        toolProcessor.process(claim(WorkTargetType.TOOL, UUID.randomUUID()).orElseThrow()));
 
     ToolInvocation recovered = findTool(toolId);
     assertEquals(ToolInvocationStatus.UNKNOWN, recovered.status());
@@ -141,7 +143,7 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
     ThreadProcessor threadProcessor = newThreadProcessor();
     assertEquals(
         ThreadProcessResult.COMPLETED,
-        threadProcessor.process(claim(WorkTargetType.THREAD, "batch").orElseThrow()));
+        threadProcessor.process(claim(WorkTargetType.THREAD, UUID.randomUUID()).orElseThrow()));
 
     EntryPath applied = loadPath(threadHead(turn.threadId()));
     List<MessagePayload> toolResults =
@@ -174,7 +176,7 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
     // 下一个 claim 真正创建下一轮 ModelInvocation（而不是只留下 TURN_END）。
     assertEquals(
         ThreadProcessResult.COMPLETED,
-        threadProcessor.process(claim(WorkTargetType.THREAD, "continuation").orElseThrow()));
+        threadProcessor.process(claim(WorkTargetType.THREAD, UUID.randomUUID()).orElseThrow()));
     UUID continuationEntryId = threadHead(turn.threadId());
     ModelInvocation continuation =
         store
@@ -245,7 +247,7 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
                       turn.threadId(),
                       toolId,
                       1,
-                      "old-token",
+                      OLD_LEASE,
                       ExecutionExitKind.TOOL,
                       null)
                   .executionId();
@@ -260,7 +262,7 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
                       turn.threadId(),
                       toolId,
                       1,
-                      "old-token",
+                      OLD_LEASE,
                       ExecutionExitKind.REMOTE,
                       oldToolExecutionId,
                       ENV_ID)
@@ -280,7 +282,7 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
     ToolProcessor toolProcessor = newToolProcessor();
     assertEquals(
         ProcessResult.STARTED,
-        toolProcessor.process(claim(WorkTargetType.TOOL, "tool-recoverer").orElseThrow()));
+        toolProcessor.process(claim(WorkTargetType.TOOL, UUID.randomUUID()).orElseThrow()));
 
     awaitTrue(
         () -> findTool(toolId).status() == ToolInvocationStatus.SUCCEEDED, Duration.ofSeconds(5));
@@ -313,7 +315,7 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
     ThreadProcessor threadProcessor = newThreadProcessor();
     assertEquals(
         ThreadProcessResult.COMPLETED,
-        threadProcessor.process(claim(WorkTargetType.THREAD, "batch").orElseThrow()));
+        threadProcessor.process(claim(WorkTargetType.THREAD, UUID.randomUUID()).orElseThrow()));
 
     EntryPath applied = loadPath(threadHead(turn.threadId()));
     List<MessagePayload> toolResults =
@@ -340,7 +342,7 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
     // 下一个 claim 真正创建下一轮 ModelInvocation
     assertEquals(
         ThreadProcessResult.COMPLETED,
-        threadProcessor.process(claim(WorkTargetType.THREAD, "continuation").orElseThrow()));
+        threadProcessor.process(claim(WorkTargetType.THREAD, UUID.randomUUID()).orElseThrow()));
     UUID continuationEntryId = threadHead(turn.threadId());
     ModelInvocation continuation =
         store
@@ -580,7 +582,7 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
     return modelId;
   }
 
-  private Optional<ClaimedWork> claim(WorkTargetType type, String token) {
+  private Optional<ClaimedWork> claim(WorkTargetType type, UUID token) {
     return store.transaction(tx -> tx.work().claimNext(type, token, LEASE));
   }
 

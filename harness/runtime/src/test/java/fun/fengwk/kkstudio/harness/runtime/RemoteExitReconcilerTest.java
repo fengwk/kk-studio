@@ -59,7 +59,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 class RemoteExitReconcilerTest {
 
   private static final EnvironmentId ENV_ID = EnvironmentId.of(UUID.randomUUID());
-  private static final String OWNER_LEASE = "lease-token-1";
+  private static final UUID OWNER_LEASE = UUID.randomUUID();
 
   private InMemoryHarnessStore store;
   private ExecutionExitConfirmer confirmer;

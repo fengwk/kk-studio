@@ -140,16 +140,8 @@ class PostgresqlStorageSchemaTest extends PostgresSchemaSupport {
           () ->
               execute(
                   conn,
-                  "update storage_upload set cleanup_token = 'token'"
-                      + " where filename = 'lease.png'"));
-      assertTransactionConstraintViolation(
-          conn,
-          "ck_storage_upload_cleanup_token",
-          () ->
-              execute(
-                  conn,
-                  "update storage_upload set cleanup_token = ' bad ',"
-                      + " cleanup_until = current_timestamp + interval '1 minute'"
+                  "update storage_upload set cleanup_token ="
+                      + " '00000000-0000-0000-0000-0000000000c1'"
                       + " where filename = 'lease.png'"));
     }
   }
@@ -215,7 +207,7 @@ class PostgresqlStorageSchemaTest extends PostgresSchemaSupport {
           queryLong(conn, commentCount("storage_blob", 0)),
           "storage_blob table comment is missing");
       assertEquals(
-          11L,
+          12L,
           queryLong(conn, commentCount("storage_blob", 1)),
           "every storage_blob column must be commented");
       assertEquals(
