@@ -1,7 +1,7 @@
 import { fileURLToPath } from 'node:url'
 import { expect, test, type Page } from './fixture'
 
-/** 截图保存到本切片的 workspace 记录目录，不进入产物仓库。 */
+/** 截图保存到 workspace 记录目录，不进入产物仓库。 */
 const SHOTS = fileURLToPath(new URL('../../../screenshots', import.meta.url))
 
 const archive = {
