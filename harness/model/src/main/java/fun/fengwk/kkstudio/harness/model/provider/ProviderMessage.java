@@ -9,7 +9,8 @@ import java.util.Objects;
 public record ProviderMessage(
     ProviderMessageRole role,
     List<ProviderContentBlock> contents,
-    @JsonIgnore ProviderReplayState replayState) {
+    @JsonIgnore ProviderReplayState replayState,
+    String reasoningEffort) {
 
   public ProviderMessage {
     role = Objects.requireNonNull(role, "role");
@@ -20,11 +21,21 @@ public record ProviderMessage(
     if (replayState != null && role != ProviderMessageRole.ASSISTANT) {
       throw new IllegalArgumentException("replayState is only allowed for ASSISTANT messages");
     }
+    if (reasoningEffort != null && role != ProviderMessageRole.ASSISTANT) {
+      throw new IllegalArgumentException("reasoningEffort is only allowed for ASSISTANT messages");
+    }
     validateRoleContents(role, contents);
   }
 
   public ProviderMessage(ProviderMessageRole role, List<ProviderContentBlock> contents) {
-    this(role, contents, null);
+    this(role, contents, null, null);
+  }
+
+  public ProviderMessage(
+      ProviderMessageRole role,
+      List<ProviderContentBlock> contents,
+      ProviderReplayState replayState) {
+    this(role, contents, replayState, null);
   }
 
   public boolean hasReplayState() {

@@ -4,6 +4,7 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.harness.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.model.codec.ModelDescriptorJsonCodec;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.model.provider.codec.ProviderRequestJsonCodec;
@@ -37,6 +38,7 @@ public final class ModelRequestSpecJsonCodec {
     node.put("providerConnectionGenerationId", spec.providerConnectionGenerationId().toString());
     node.set("model", MODEL_CODEC.encodeDescriptorNode(spec.model()));
     node.set("variant", MODEL_CODEC.encodeVariantNode(spec.variant()));
+    encodeVariants(node, spec.modelVariants());
     node.put("outputTokens", spec.outputTokens());
     node.put("systemInstruction", spec.systemInstruction());
     ArrayNode tools = node.putArray("toolBindings");
@@ -69,6 +71,7 @@ public final class ModelRequestSpecJsonCodec {
               "providerConnectionGenerationId",
               "model",
               "variant",
+              "modelVariants",
               "outputTokens",
               "systemInstruction",
               "toolBindings",
@@ -81,6 +84,7 @@ public final class ModelRequestSpecJsonCodec {
               "providerConnectionGenerationId",
               "model",
               "variant",
+              "modelVariants",
               "outputTokens",
               "systemInstruction",
               "toolBindings",
@@ -106,6 +110,7 @@ public final class ModelRequestSpecJsonCodec {
         InvocationJsonSupport.requiredUuid(node, "providerConnectionGenerationId", CONTEXT),
         MODEL_CODEC.decodeDescriptorNode(InvocationJsonSupport.required(node, "model", CONTEXT)),
         MODEL_CODEC.decodeVariantNode(InvocationJsonSupport.required(node, "variant", CONTEXT)),
+        decodeVariants(node, CONTEXT),
         InvocationJsonSupport.positiveInt(node, "outputTokens", CONTEXT),
         InvocationJsonSupport.text(node, "systemInstruction", CONTEXT),
         toolBindings,
@@ -130,6 +135,7 @@ public final class ModelRequestSpecJsonCodec {
           "providerConnectionGenerationId", member.providerConnectionGenerationId().toString());
       memberNode.set("model", MODEL_CODEC.encodeDescriptorNode(member.model()));
       memberNode.set("variant", MODEL_CODEC.encodeVariantNode(member.variant()));
+      encodeVariants(memberNode, member.modelVariants());
     }
     return node;
   }
@@ -170,7 +176,8 @@ public final class ModelRequestSpecJsonCodec {
           "providerType",
           "providerConnectionGenerationId",
           "model",
-          "variant");
+          "variant",
+          "modelVariants");
       members.add(
           new ModelGroupMemberExecution(
               InvocationJsonSupport.requiredEnum(
@@ -181,7 +188,8 @@ public final class ModelRequestSpecJsonCodec {
                   InvocationJsonSupport.required(memberNode, "model", "groupExecution.members[]")),
               MODEL_CODEC.decodeVariantNode(
                   InvocationJsonSupport.required(
-                      memberNode, "variant", "groupExecution.members[]"))));
+                      memberNode, "variant", "groupExecution.members[]")),
+              decodeVariants(memberNode, "groupExecution.members[]")));
     }
     return new ModelGroupExecution(
         InvocationJsonSupport.text(node, "groupName", "groupExecution"),
@@ -189,6 +197,25 @@ public final class ModelRequestSpecJsonCodec {
         members,
         codes,
         InvocationJsonSupport.nonNegativeInt(node, "cooldownSeconds", "groupExecution"));
+  }
+
+  private static void encodeVariants(ObjectNode node, List<ModelVariant> variants) {
+    ArrayNode values = node.putArray("modelVariants");
+    for (ModelVariant variant : variants) {
+      values.add(MODEL_CODEC.encodeVariantNode(variant));
+    }
+  }
+
+  private static List<ModelVariant> decodeVariants(ObjectNode node, String context) {
+    ArrayNode values =
+        InvocationJsonSupport.array(
+            InvocationJsonSupport.required(node, "modelVariants", context),
+            context + ".modelVariants");
+    List<ModelVariant> variants = new ArrayList<>(values.size());
+    for (JsonNode value : values) {
+      variants.add(MODEL_CODEC.decodeVariantNode(value));
+    }
+    return variants;
   }
 
   private static ObjectNode encodeSubagent(SubagentBinding subagent) {

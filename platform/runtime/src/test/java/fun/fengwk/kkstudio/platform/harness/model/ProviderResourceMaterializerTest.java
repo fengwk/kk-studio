@@ -396,13 +396,14 @@ class ProviderResourceMaterializerTest {
     List<ProviderMessage> materialized =
         materializer(blobManager, contentService)
             .materialize(
-                List.of(new ProviderMessage(role, List.of(IMAGE_RESOURCE))),
+                List.of(new ProviderMessage(role, List.of(IMAGE_RESOURCE), null, "max")),
                 Set.of(ModelInputModality.IMAGE),
                 ALL_MEDIA);
 
     ProviderTextBlock fallback =
         assertInstanceOf(ProviderTextBlock.class, materialized.get(0).contents().get(0));
     assertTrue(fallback.text().contains("[Resource: scan.png]"), fallback.text());
+    assertEquals("max", materialized.get(0).reasoningEffort());
     verify(contentService, never()).readBlobContent(any(), anyLong());
     verify(blobManager, never()).presignOriginalUrl(any());
   }

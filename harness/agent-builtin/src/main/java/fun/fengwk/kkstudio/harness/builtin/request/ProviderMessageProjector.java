@@ -80,20 +80,25 @@ public final class ProviderMessageProjector {
     }
   }
 
-  public record ProjectedMessage(AgentMessage message, ProviderReplayState replayState) {
+  public record ProjectedMessage(
+      AgentMessage message, ProviderReplayState replayState, String reasoningEffort) {
     public ProjectedMessage {
       Objects.requireNonNull(message, "message");
       if (replayState != null && message.role() != AgentMessageRole.ASSISTANT) {
         throw new IllegalArgumentException("replayState is only allowed for ASSISTANT messages");
       }
+      if (reasoningEffort != null && message.role() != AgentMessageRole.ASSISTANT) {
+        throw new IllegalArgumentException(
+            "reasoningEffort is only allowed for ASSISTANT messages");
+      }
     }
 
     public static ProjectedMessage of(AgentMessage message) {
-      return new ProjectedMessage(message, null);
+      return new ProjectedMessage(message, null, null);
     }
 
     public static ProjectedMessage of(AgentMessage message, ProviderReplayState replayState) {
-      return new ProjectedMessage(message, replayState);
+      return new ProjectedMessage(message, replayState, null);
     }
   }
 
@@ -130,7 +135,7 @@ public final class ProviderMessageProjector {
       }
       batch.flush(result);
       if (message.role() == AgentMessageRole.ASSISTANT) {
-        projectAssistant(message, source.replayState(), batch, result);
+        projectAssistant(message, source.replayState(), source.reasoningEffort(), batch, result);
         continue;
       }
       result.add(
@@ -150,6 +155,7 @@ public final class ProviderMessageProjector {
   private void projectAssistant(
       AgentMessage message,
       ProviderReplayState replayState,
+      String reasoningEffort,
       Batch batch,
       List<ProviderMessage> result) {
     ProviderReplayState effectiveReplayState = replayState;
@@ -174,7 +180,9 @@ public final class ProviderMessageProjector {
     if (contents.isEmpty()) {
       return;
     }
-    result.add(new ProviderMessage(ProviderMessageRole.ASSISTANT, contents, effectiveReplayState));
+    result.add(
+        new ProviderMessage(
+            ProviderMessageRole.ASSISTANT, contents, effectiveReplayState, reasoningEffort));
   }
 
   private boolean hasNonNativeCall(AgentMessage message) {

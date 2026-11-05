@@ -443,11 +443,13 @@ public final class ProviderRequestPreviewService {
         spec.providerConnectionGenerationId(),
         spec.model(),
         spec.variant(),
+        spec.modelVariants(),
         outputTokens,
         spec.systemInstruction(),
         spec.toolBindings(),
         spec.subagentBindings(),
-        constraints.promptCacheDisabled() ? ProviderCacheControl.none() : spec.cacheControl());
+        constraints.promptCacheDisabled() ? ProviderCacheControl.none() : spec.cacheControl(),
+        spec.groupExecution());
   }
 
   private static ProviderRequestPreviewUnavailableException frozenCompactionUnavailable(
@@ -475,8 +477,9 @@ public final class ProviderRequestPreviewService {
           Reason.PREVIEW_PLANNING_FAILED, "request cannot be planned for preview");
     }
     ModelRequestSpec spec = ((LiveTurnPlan.Planned) plan).spec();
-    ProviderRequest request = materializer.materialize(candidatePath, spec);
-    byte[] body = encodeRequestBody(spec.providerType(), spec, request);
+    ModelRequestSpec execution = spec.groupExecution() == null ? spec : spec.forMember(0);
+    ProviderRequest request = materializer.materialize(candidatePath, execution);
+    byte[] body = encodeRequestBody(execution.providerType(), execution, request);
 
     HarnessProviderRequestPreviewDTO dto = new HarnessProviderRequestPreviewDTO();
     dto.setKind(kind);

@@ -22,6 +22,8 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
+import fun.fengwk.kkstudio.harness.builtin.model.ModelGroupExecution;
+import fun.fengwk.kkstudio.harness.builtin.model.ModelGroupMemberExecution;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
@@ -446,6 +448,66 @@ class ProviderRequestPreviewServiceTest {
     assertEquals(Reason.PREVIEW_PLANNING_FAILED, planning.reason());
     assertEquals("request cannot be planned for preview", planning.getMessage());
     assertFalse(planning.getMessage().contains("leaked"));
+  }
+
+  /** 组预览按首个实际成员物化，但对外仍保留逻辑模型组名称。 */
+  @Test
+  void groupPreviewMaterializesTheFirstActualMember() {
+    EntryPath idle = closedTurnPath(BELOW_THRESHOLD_USAGE);
+    when(runtime.getThreadSnapshot(THREAD_ID))
+        .thenReturn(snapshot(thread(TURN_TWO_END_ID, 3L), idle, List.of()));
+    ModelRequestSpec base = spec();
+    ModelDescriptor actual = base.model();
+    ModelDescriptor logical =
+        new ModelDescriptor(
+            actual.providerName(),
+            "group",
+            actual.modelId(),
+            actual.inputModalities(),
+            actual.tools(),
+            actual.reasoning());
+    var member =
+        new ModelGroupMemberExecution(
+            base.providerType(),
+            GENERATION_ID,
+            actual,
+            base.variant(),
+            List.of(base.variant(), new ModelVariant("other", "max")));
+    var group = new ModelGroupExecution("group", 1L, List.of(member), Set.of(429), 0);
+    var groupSpec =
+        new ModelRequestSpec(
+            base.providerType(),
+            GENERATION_ID,
+            logical,
+            base.variant(),
+            member.modelVariants(),
+            base.outputTokens(),
+            base.systemInstruction(),
+            base.toolBindings(),
+            base.subagentBindings(),
+            base.cacheControl(),
+            group);
+    when(turnResolver.planLive(eq(THREAD_ID), any(), eq(NOW)))
+        .thenReturn(new LiveTurnPlan.Planned(groupSpec, CONTEXT_WINDOW, List.of(), List.of()));
+    when(providerResolution.resolve(eq(ProviderType.OPENAI), eq(GENERATION_ID), any()))
+        .thenAnswer(
+            invocation ->
+                new ResolvedExecution(
+                    invocation.getArgument(2),
+                    new ModelCallTimeoutPolicy(Duration.ofSeconds(5), Duration.ofSeconds(1)),
+                    policy -> null,
+                    request -> BODY));
+    var dto =
+        service.preview(
+            THREAD_ID,
+            command(
+                new AcceptCommandsTarget.Thread(THREAD_ID, TURN_TWO_END_ID, 3L),
+                userMessage("hi")));
+    ArgumentCaptor<ProviderRequest> request = ArgumentCaptor.forClass(ProviderRequest.class);
+    verify(providerResolution)
+        .resolve(eq(ProviderType.OPENAI), eq(GENERATION_ID), request.capture());
+    assertEquals("model", request.getValue().model().modelName());
+    assertEquals("group", dto.getModelName());
   }
 
   /**

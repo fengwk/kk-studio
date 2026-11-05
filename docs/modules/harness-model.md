@@ -135,6 +135,8 @@ OpenAI Chat 的 `reasoning_content` 与 `reasoning_details` 随 replay payload �
 
 Anthropic 每次最多放置 **4 个**断点：最后一个合格 tool、最后一个合格 system block，其余按最新优先分配给最近的会话请求端点。断点只添加到支持的非空 text、image、document、tool_use、tool_result 块，thinking、redacted thinking 与 compaction 等块保留但不新增标记。compaction 块回放时清空此前累积的消息与端点，使该 assistant 消息成为首条；标记只在原生校验完成后注入。
 
+在 `anthropicBetaFeatures` 显式配置 `per-turn-control-2026-07-01`，且模型支持推理、ADAPTIVE 模式选中非 null / 非 `off` effort 时，启用消息级 effort。请求顶层仍发送当前 effort；最终保留的历史中未知等级从后向前继承，在连续 USER/TOOL 结果段之后仅首次或等级变化时插入 `role: system`、空 content 与 `output_config.effort`，当前尾部使用当前 effort。自动补齐并去重 `mid-conversation-system-2026-04-07` 与 `effort-2025-11-24` beta；空控制消息不是缓存断点。未启用、BUDGET、off 或原生默认模式不插入控制消息。内部消息元数据不由其他 Provider 写入 wire。
+
 缓存字段由运行时独占：原生顶层 `cache_control` 与工具直属的 `protocolOptions.tools[].cache_control`（包括显式 `null`）都在编码前以 `INVALID_REQUEST` 拒绝，即使 retention 为 NONE 也不允许透传；工具 schema 内同名业务属性不受影响。
 
 **OpenAI Chat Completions**（[`OpenAiChatProviderAdapter`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/provider/openai/chat/OpenAiChatProviderAdapter.java)）。端点去尾斜杠后追加 `/chat/completions`。图片使用 image_url.url 的 data URI；音频只接收 Base64 wav/mp3。媒体准入由 adapter schema 能力与模型 inputModalities 共同决定。[`OpenAiChatConfiguration`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/provider/openai/chat/OpenAiChatConfiguration.java) 支持 `openAiChatRequireDone`、`promptCacheRetention`（`NONE` / `SHORT` / `LONG`，缺省 `NONE`）与 `openAiChatThinkingFormat`（`STANDARD` / `DEEPSEEK`）。成功响应必须携带完整 usage，因此编码器对每个流式请求无条件发送 `stream_options.include_usage: true`，该字段不是配置项。推理模型的 DEEPSEEK 关闭态写 thinking disabled 并省略 reasoning_effort，开启态写 thinking enabled 与 reasoning_effort；STANDARD 关闭值为 reasoning_effort none。非推理模型省去运行时推理字段。

@@ -84,6 +84,110 @@ class ModelRequestMaterializerTest {
   private static final ModelRequestMaterializer MATERIALIZER = new ModelRequestMaterializer();
   private static final ModelRequestSpecJsonCodec CODEC = new ModelRequestSpecJsonCodec();
 
+  /** 只用当前实际模型的冻结 variants 重新解释历史；缺失、外模型和 null effort 均未知。 */
+  @Test
+  void resolvesRetainedAssistantEffortFromFrozenCurrentModelVariants() {
+    ModelRequestSpec base = liveSpec(bashBinding());
+    ModelVariant current = new ModelVariant("v1", "max");
+    ModelRequestSpec spec =
+        new ModelRequestSpec(
+            base.providerType(),
+            base.providerConnectionGenerationId(),
+            base.model(),
+            current,
+            List.of(current, new ModelVariant("old", "high"), new ModelVariant("unset")),
+            base.outputTokens(),
+            base.systemInstruction(),
+            base.toolBindings(),
+            base.subagentBindings(),
+            base.cacheControl());
+    List<Entry> entries = new ArrayList<>();
+    entries.add(entry(1, 0, new RootPayload(SETTINGS)));
+    List<MessagePayload> replies =
+        List.of(
+            assistantWithModel("model", "old"),
+            assistantWithModel("other", "old"),
+            assistantWithModel("model", "missing"),
+            assistantWithModel("model", "unset"),
+            assistant("unknown"));
+    long previous = 1;
+    for (int i = 0; i < replies.size(); i++) {
+      long start = 2 + 4L * i;
+      entries.add(entry(start, previous, resolvedStart(TurnStartReason.INPUT, null)));
+      entries.add(entry(start + 1, start, user("input")));
+      entries.add(entry(start + 2, start + 1, replies.get(i)));
+      entries.add(
+          entry(
+              start + 3,
+              start + 2,
+              new TurnEndPayload(id(start), TurnEndOutcome.COMPLETED, false, null, null)));
+      previous = start + 3;
+    }
+    List<ProviderMessage> messages =
+        MATERIALIZER.materialize(new EntryPath(entries), spec).messages();
+    assertEquals("high", messages.get(1).reasoningEffort());
+    assertTrue(messages.subList(2, 10).stream().allMatch(m -> m.reasoningEffort() == null));
+  }
+
+  private static MessagePayload assistantWithModel(String model, String variant) {
+    return new MessagePayload(
+        new AgentMessage(AgentMessageRole.ASSISTANT, List.of(new TextMessageContent("answer"))),
+        new AssistantMessageMetadata(
+            GenerationStopReason.COMPLETE,
+            new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L),
+            null,
+            ModelSelection.model(model, variant),
+            null,
+            null),
+        null);
+  }
+
+  /** 语义压缩先裁剪历史，再解析保留 assistant 的 effort，旧等级不能残留。 */
+  @Test
+  void compactionDiscardsOldEffortWithTheRemovedAssistant() {
+    ModelRequestSpec base = liveSpec(bashBinding());
+    ModelVariant current = new ModelVariant("v1", "max");
+    ModelRequestSpec spec =
+        new ModelRequestSpec(
+            base.providerType(),
+            base.providerConnectionGenerationId(),
+            base.model(),
+            current,
+            List.of(current, new ModelVariant("old", "high")),
+            base.outputTokens(),
+            base.systemInstruction(),
+            base.toolBindings(),
+            base.subagentBindings(),
+            base.cacheControl());
+    CompactionStart compact =
+        CompactionStart.pending(
+            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, id(7L), null, null);
+    EntryPath path =
+        new EntryPath(
+            List.of(
+                entry(1, 0, new RootPayload(SETTINGS)),
+                entry(2, 1, resolvedStart(TurnStartReason.INPUT, null)),
+                entry(3, 2, user("removed")),
+                entry(4, 3, assistantWithModel("model", "old")),
+                entry(
+                    5, 4, new TurnEndPayload(id(2L), TurnEndOutcome.COMPLETED, false, null, null)),
+                entry(6, 5, resolvedStart(TurnStartReason.INPUT, null)),
+                entry(7, 6, user("retained")),
+                entry(8, 7, assistantWithModel("model", "v1")),
+                entry(
+                    9, 8, new TurnEndPayload(id(6L), TurnEndOutcome.COMPLETED, false, null, null)),
+                entry(10, 9, resolvedStart(TurnStartReason.COMPACTION, compact)),
+                entry(11, 10, new CompactionPayload("summary", null)),
+                entry(
+                    12,
+                    11,
+                    new TurnEndPayload(id(10L), TurnEndOutcome.COMPLETED, false, null, null))));
+    List<ProviderMessage> messages = MATERIALIZER.materialize(path, spec).messages();
+    assertTrue(messages.stream().noneMatch(m -> "high".equals(m.reasoningEffort())));
+    assertEquals("max", messages.getLast().reasoningEffort());
+    assertTrue(messages.stream().noneMatch(m -> textOf(m).equals("removed")));
+  }
+
   @Test
   void rematerializesTheSameLogicalRequestAfterCodecRoundTrip() {
     EntryPath path = conversationPath(2);

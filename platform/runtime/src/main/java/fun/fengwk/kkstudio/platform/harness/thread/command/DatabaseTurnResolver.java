@@ -238,6 +238,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
             first.providerConnectionGenerationId(),
             resolved.descriptor(),
             first.variant(),
+            first.parsed().variants(),
             outputTokens,
             systemInstruction,
             context.toolBindings(),
@@ -332,7 +333,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
               runtime.providerType(),
               runtime.providerConnectionGenerationId(),
               runtime.descriptor(),
-              runtime.variant()));
+              runtime.variant(),
+              runtime.parsed().variants()));
       if (modalities == null) {
         modalities = new LinkedHashSet<>(runtime.descriptor().inputModalities());
       } else {

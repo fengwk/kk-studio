@@ -143,6 +143,7 @@ public final class BuiltinAgentDriver implements AgentDriver {
               spec.providerConnectionGenerationId(),
               spec.model(),
               spec.variant(),
+              spec.modelVariants(),
               cap == null ? spec.outputTokens() : Math.min(spec.outputTokens(), cap),
               spec.systemInstruction(),
               spec.toolBindings(),

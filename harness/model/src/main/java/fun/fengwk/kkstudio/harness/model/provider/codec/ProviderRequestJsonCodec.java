@@ -79,7 +79,8 @@ public final class ProviderRequestJsonCodec {
           "tools",
           "cacheControl");
   private static final Set<String> CACHE_CONTROL_FIELDS = orderedSet("retention", "key");
-  private static final Set<String> MESSAGE_FIELDS = orderedSet("role", "contents");
+  private static final Set<String> MESSAGE_FIELDS =
+      orderedSet("role", "contents", "reasoningEffort");
   private static final Set<String> TOOL_DEFINITION_FIELDS =
       orderedSet("name", "description", "inputSchemaJson");
   private static final Set<String> TOOL_CALL_FIELDS = orderedSet("id", "name", "argumentsJson");
@@ -210,6 +211,11 @@ public final class ProviderRequestJsonCodec {
     for (ProviderContentBlock content : message.contents()) {
       contents.add(encodeContentBlock(content));
     }
+    if (message.reasoningEffort() == null) {
+      node.putNull("reasoningEffort");
+    } else {
+      node.put("reasoningEffort", message.reasoningEffort());
+    }
     return node;
   }
 
@@ -227,7 +233,7 @@ public final class ProviderRequestJsonCodec {
     for (JsonNode item : contents) {
       list.add(decodeContentBlock(item));
     }
-    return new ProviderMessage(role, list);
+    return new ProviderMessage(role, list, null, decodeNullableText(node, "reasoningEffort"));
   }
 
   // ---------- ProviderToolDefinition ----------
