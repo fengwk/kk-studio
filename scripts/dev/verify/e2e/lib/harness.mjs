@@ -629,13 +629,37 @@ function assertSessionSummary(item) {
   return item
 }
 
+/** 读取 Chat 的 keyset 分页，保留服务端顺序。 */
+async function listChatPages(ctx, path, validateItem = () => {}) {
+  const items = []
+  let cursor = null
+  do {
+    const query = cursor == null ? '' : `?cursor=${encodeURIComponent(cursor)}`
+    const { status, json } = await ctx.call('GET', `${path}${query}`)
+    assert(status === 200, `Chat page status ${status}: ${JSON.stringify(json)}`)
+    const page = envelopeData(json)
+    assert(Array.isArray(page?.items), `expected Chat page: ${JSON.stringify(json)}`)
+    assert(
+      Object.hasOwn(page, 'nextCursor')
+        && (page.nextCursor === null || (typeof page.nextCursor === 'string' && page.nextCursor.length > 0)),
+      `invalid Chat page cursor: ${JSON.stringify(json)}`,
+    )
+    for (const item of page.items) {
+      validateItem(item)
+      items.push(item)
+    }
+    cursor = page.nextCursor
+  } while (cursor !== null)
+  return items
+}
+
+export async function listChats(ctx) {
+  return listChatPages(ctx, '/api/chats')
+}
+
 /** Chat owner 的 Session 摘要数组（归属时间新到旧）。 */
 export async function listChatSessions(ctx, chatId) {
-  const { json } = await ctx.call('GET', `/api/chats/${encodeURIComponent(chatId)}/sessions`)
-  const sessions = envelopeData(json)
-  assert(Array.isArray(sessions), `expected Session summary array: ${JSON.stringify(json)}`)
-  for (const item of sessions) assertSessionSummary(item)
-  return sessions
+  return listChatPages(ctx, `/api/chats/${encodeURIComponent(chatId)}/sessions`, assertSessionSummary)
 }
 
 /** Session 下的 Thread 摘要数组（runtime 确定性顺序）。 */
