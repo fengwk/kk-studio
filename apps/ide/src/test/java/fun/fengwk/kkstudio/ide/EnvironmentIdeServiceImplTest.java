@@ -26,8 +26,8 @@ import fun.fengwk.kkstudio.platform.daemon.protocol.IdeViewState;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeViewSummary;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
 import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer;
-import fun.fengwk.kkstudio.platform.error.AiEnvironmentIdeUnavailableException;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.platform.error.DomainErrorCode;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 
 import java.time.Duration;
 import java.util.ArrayDeque;
@@ -130,8 +130,7 @@ class EnvironmentIdeServiceImplTest {
   void openViewFailsClosedWithoutExactBrowserIntent() {
     browserUse.matched = false;
 
-    assertThrows(
-        AiEnvironmentIdeUnavailableException.class, () -> service.openView(ENV, openRequest(null)));
+    assertThrows(DomainException.class, () -> service.openView(ENV, openRequest(null)));
 
     assertTrue(transport.commands.isEmpty());
     assertTrue(authorization.opened.isEmpty());
@@ -144,8 +143,7 @@ class EnvironmentIdeServiceImplTest {
     transport.replies.add(
         openReply(VIEW, DOCUMENT, EVENT_NODE, CONNECTION, CLAIM, 7L, "/daemon/dir", "/daemon/ws"));
 
-    assertThrows(
-        AiEnvironmentIdeUnavailableException.class, () -> service.openView(ENV, openRequest(null)));
+    assertThrows(DomainException.class, () -> service.openView(ENV, openRequest(null)));
     assertEquals(0, tickets.pendingCount());
     assertTrue(authorization.opened.isEmpty());
 
@@ -167,8 +165,7 @@ class EnvironmentIdeServiceImplTest {
 
     transport.replies.add(viewsReply(orphan));
     assertThrows(
-        AiEnvironmentIdeUnavailableException.class,
-        () -> service.focusTerminal(ENV, VIEW.toString(), binding(7L)));
+        DomainException.class, () -> service.focusTerminal(ENV, VIEW.toString(), binding(7L)));
     assertEquals(IdeAction.LIST_VIEWS, transport.commands.getLast().getAction());
   }
 
@@ -185,8 +182,7 @@ class EnvironmentIdeServiceImplTest {
             "/daemon/dir",
             "/daemon/ws"));
 
-    assertThrows(
-        AiEnvironmentIdeUnavailableException.class, () -> service.openView(ENV, openRequest(null)));
+    assertThrows(DomainException.class, () -> service.openView(ENV, openRequest(null)));
 
     assertTrue(authorization.opened.isEmpty());
     assertEquals(0, tickets.pendingCount());
@@ -218,9 +214,7 @@ class EnvironmentIdeServiceImplTest {
 
     int before = transport.commands.size();
     transport.replies.add(viewsReply(List.of()));
-    assertThrows(
-        AiEnvironmentIdeUnavailableException.class,
-        () -> service.focusTerminal(ENV, VIEW.toString(), binding));
+    assertThrows(DomainException.class, () -> service.focusTerminal(ENV, VIEW.toString(), binding));
     assertEquals(before + 1, transport.commands.size());
     assertEquals(IdeAction.LIST_VIEWS, transport.commands.getLast().getAction());
   }
@@ -235,9 +229,8 @@ class EnvironmentIdeServiceImplTest {
     request.setDiscard(false);
     transport.replies.add(
         IdeResult.newBuilder().setOk(false).setCode("CANCELLED").setMessage("cancelled").build());
-    AiValidationException error =
-        assertThrows(
-            AiValidationException.class, () -> service.closeView(ENV, VIEW.toString(), request));
+    DomainException error =
+        assertThrows(DomainException.class, () -> service.closeView(ENV, VIEW.toString(), request));
     assertEquals("ide_close_cancelled", error.resource());
     assertTrue(bindings.find(ENV, VIEW).isPresent());
     assertTrue(authorization.closed.isEmpty());
@@ -250,8 +243,7 @@ class EnvironmentIdeServiceImplTest {
     request.setDocumentId(DOCUMENT.toString());
     request.setBindingEpoch("7");
 
-    assertThrows(
-        AiValidationException.class, () -> service.closeView(ENV, VIEW.toString(), request));
+    assertThrows(DomainException.class, () -> service.closeView(ENV, VIEW.toString(), request));
     assertTrue(
         transport.commands.stream()
             .noneMatch(command -> command.getAction() == IdeAction.CLOSE_VIEW));
@@ -263,9 +255,7 @@ class EnvironmentIdeServiceImplTest {
             .setCode("VIEW_GONE")
             .setMessage("view is gone")
             .build());
-    assertThrows(
-        AiEnvironmentIdeUnavailableException.class,
-        () -> service.closeView(ENV, VIEW.toString(), request));
+    assertThrows(DomainException.class, () -> service.closeView(ENV, VIEW.toString(), request));
 
     assertTrue(authorization.closed.contains(new Closed(VIEW, 7L)));
     assertEquals(0, tickets.pendingCount());
@@ -277,7 +267,7 @@ class EnvironmentIdeServiceImplTest {
     int beforeInvalidView = transport.commands.size();
     // 测试意图：请求体本身合法时，大写 viewId 仍必须在发命令前按校验错误拒绝。
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () -> service.closeView(ENV, "AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE", canonical));
     assertEquals(beforeInvalidView, transport.commands.size());
   }
@@ -344,8 +334,7 @@ class EnvironmentIdeServiceImplTest {
                     "/daemon/ws",
                     IdeViewState.OPEN))));
     assertThrows(
-        AiEnvironmentIdeUnavailableException.class,
-        () -> service.focusTerminal(ENV, VIEW.toString(), binding(7L)));
+        DomainException.class, () -> service.focusTerminal(ENV, VIEW.toString(), binding(7L)));
     assertEquals(IdeAction.LIST_VIEWS, transport.commands.getLast().getAction());
     assertTrue(
         transport.commands.stream()
@@ -417,10 +406,9 @@ class EnvironmentIdeServiceImplTest {
                 .build())) {
       transport.replies.add(reply);
       int before = transport.commands.size();
-      AiEnvironmentIdeUnavailableException error =
+      DomainException error =
           assertThrows(
-              AiEnvironmentIdeUnavailableException.class,
-              () -> service.changeDirectory(ENV, VIEW.toString(), request));
+              DomainException.class, () -> service.changeDirectory(ENV, VIEW.toString(), request));
       assertFalse(error.getMessage().contains(request.getDirectory()));
       assertEquals(before + 1, transport.commands.size(), "no automatic command retry");
       assertTrue(bindings.find(ENV, VIEW).orElseThrow().matches(DOCUMENT, 7L));
@@ -428,10 +416,9 @@ class EnvironmentIdeServiceImplTest {
     // No directory in reply fails validation.
     transport.replies.add(IdeResult.newBuilder().setOk(true).setViewId(VIEW.toString()).build());
     int before = transport.commands.size();
-    AiEnvironmentIdeUnavailableException error =
+    DomainException error =
         assertThrows(
-            AiEnvironmentIdeUnavailableException.class,
-            () -> service.changeDirectory(ENV, VIEW.toString(), request));
+            DomainException.class, () -> service.changeDirectory(ENV, VIEW.toString(), request));
     assertFalse(error.getMessage().contains(request.getDirectory()));
     assertEquals(before + 1, transport.commands.size(), "no automatic command retry");
     assertTrue(bindings.find(ENV, VIEW).orElseThrow().matches(DOCUMENT, 7L));
@@ -466,8 +453,7 @@ class EnvironmentIdeServiceImplTest {
                     IdeViewState.OPEN))));
 
     assertThrows(
-        AiEnvironmentIdeUnavailableException.class,
-        () -> service.changeDirectory(ENV, VIEW.toString(), request));
+        DomainException.class, () -> service.changeDirectory(ENV, VIEW.toString(), request));
     assertTrue(bindings.find(ENV, VIEW).orElseThrow().matches(DOCUMENT, 8L));
   }
 
@@ -502,8 +488,7 @@ class EnvironmentIdeServiceImplTest {
     transport.replies.add(viewsReply(List.of()));
 
     assertThrows(
-        AiEnvironmentIdeUnavailableException.class,
-        () -> service.focusTerminal(ENV, VIEW.toString(), binding(7L)));
+        DomainException.class, () -> service.focusTerminal(ENV, VIEW.toString(), binding(7L)));
 
     assertEquals(IdeAction.LIST_VIEWS, transport.commands.getLast().getAction());
     assertTrue(
@@ -515,8 +500,7 @@ class EnvironmentIdeServiceImplTest {
   void unknownOutcomeIsNotReplayed() {
     transport.neverCompletes.set(true);
 
-    assertThrows(
-        AiEnvironmentIdeUnavailableException.class, () -> service.openView(ENV, openRequest(null)));
+    assertThrows(DomainException.class, () -> service.openView(ENV, openRequest(null)));
 
     // 原 claim 超时后只追加一次 LIST_VIEWS 对账，不重发 OPEN_VIEW；对账也超时则保持不可用。
     assertEquals(List.of(IdeAction.OPEN_VIEW, IdeAction.LIST_VIEWS), actions());
@@ -568,8 +552,7 @@ class EnvironmentIdeServiceImplTest {
                     "/daemon/ws",
                     IdeViewState.OPEN))));
 
-    assertThrows(
-        AiEnvironmentIdeUnavailableException.class, () -> service.openView(ENV, openRequest(null)));
+    assertThrows(DomainException.class, () -> service.openView(ENV, openRequest(null)));
 
     assertEquals(List.of(IdeAction.OPEN_VIEW, IdeAction.LIST_VIEWS), actions());
     assertEquals(0, tickets.pendingCount());
@@ -581,8 +564,7 @@ class EnvironmentIdeServiceImplTest {
     open();
     transport.failNext.set(IdeAction.FOCUS_TERMINAL);
     assertThrows(
-        AiEnvironmentIdeUnavailableException.class,
-        () -> service.focusTerminal(ENV, VIEW.toString(), binding(7L)));
+        DomainException.class, () -> service.focusTerminal(ENV, VIEW.toString(), binding(7L)));
     assertEquals(IdeAction.FOCUS_TERMINAL, transport.commands.getLast().getAction());
     assertEquals(2, transport.commands.size());
 
@@ -592,8 +574,7 @@ class EnvironmentIdeServiceImplTest {
     request.setDirectory("/next");
     transport.failNext.set(IdeAction.CHANGE_DIRECTORY);
     assertThrows(
-        AiEnvironmentIdeUnavailableException.class,
-        () -> service.changeDirectory(ENV, VIEW.toString(), request));
+        DomainException.class, () -> service.changeDirectory(ENV, VIEW.toString(), request));
     assertEquals(IdeAction.CHANGE_DIRECTORY, transport.commands.getLast().getAction());
     assertEquals(3, transport.commands.size());
     assertEquals(IdeAction.OPEN_VIEW, transport.commands.getFirst().getAction());
@@ -605,15 +586,12 @@ class EnvironmentIdeServiceImplTest {
     open();
     transport.neverCompletes.set(true);
     assertThrows(
-        AiEnvironmentIdeUnavailableException.class,
-        () -> service.focusTerminal(ENV, VIEW.toString(), binding(7L)));
+        DomainException.class, () -> service.focusTerminal(ENV, VIEW.toString(), binding(7L)));
     EnvironmentIdeCloseViewDTO close = new EnvironmentIdeCloseViewDTO();
     close.setDocumentId(DOCUMENT.toString());
     close.setBindingEpoch("7");
     close.setDiscard(true);
-    assertThrows(
-        AiEnvironmentIdeUnavailableException.class,
-        () -> service.closeView(ENV, VIEW.toString(), close));
+    assertThrows(DomainException.class, () -> service.closeView(ENV, VIEW.toString(), close));
     assertEquals(2, transport.abandoned);
     close.setDiscard(false);
     transport.pendingStarted = new CountDownLatch(1);
@@ -659,7 +637,9 @@ class EnvironmentIdeServiceImplTest {
       worker.interrupt();
       worker.join(2000);
       assertFalse(worker.isAlive());
-      assertTrue(failure.get() instanceof AiEnvironmentIdeUnavailableException);
+      assertTrue(
+          failure.get() instanceof DomainException error
+              && error.code() == DomainErrorCode.IDE_UNAVAILABLE);
       assertTrue(interrupted.get());
       assertEquals(1, transport.abandoned);
     } finally {

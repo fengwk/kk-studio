@@ -11,7 +11,7 @@ import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelGroupConfigC
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
 import fun.fengwk.kkstudio.platform.environment.Environment;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.harness.builtin.BuiltinConfigSyncAdapter;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRow;
 import fun.fengwk.kkstudio.platform.pluginhost.service.PluginAgentDependencies;
@@ -138,12 +138,12 @@ public final class ConfigSyncGraph {
    */
   public List<ConfigSyncRef> expand(Graph graph, List<ConfigSyncRef> selected) {
     if (selected == null || selected.isEmpty()) {
-      throw new AiValidationException(RESOURCE, "export requires at least one config item");
+      throw DomainException.validation(RESOURCE, "export requires at least one config item");
     }
     Set<ConfigSyncRef> ordered = new LinkedHashSet<>();
     for (ConfigSyncRef ref : selected) {
       if (ref == null || !graph.present().contains(ref)) {
-        throw new AiValidationException(RESOURCE, "export references an unknown config item");
+        throw DomainException.validation(RESOURCE, "export references an unknown config item");
       }
       ordered.add(ref);
       ordered.addAll(strictClosure(graph, ref));
@@ -162,7 +162,7 @@ public final class ConfigSyncGraph {
       ConfigSyncRef current = queue.poll();
       for (ConfigSyncRef dependency : graph.edges().getOrDefault(current, List.of())) {
         if (!graph.present().contains(dependency)) {
-          throw new AiValidationException(
+          throw DomainException.validation(
               RESOURCE, "export item has a missing dependency: " + dependency.getName());
         }
         if (!visited.add(dependency)) {

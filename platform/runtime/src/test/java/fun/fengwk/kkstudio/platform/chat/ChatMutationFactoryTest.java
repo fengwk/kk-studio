@@ -10,7 +10,7 @@ import org.junit.jupiter.api.Test;
 import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.share.ai.chat.ChatCreateDTO;
 import fun.fengwk.kkstudio.share.ai.chat.ChatUpdateDTO;
 
@@ -24,7 +24,7 @@ class ChatMutationFactoryTest {
     ChatCreateDTO create = new ChatCreateDTO();
     create.setTitle("t".repeat(256));
     create.setAgentName("\u2003assistant\u2003");
-    assertThrows(AiValidationException.class, () -> factory.newChat(create));
+    assertThrows(DomainException.class, () -> factory.newChat(create));
 
     create.setAgentName("assistant");
     Chat chat = factory.newChat(create);
@@ -56,11 +56,11 @@ class ChatMutationFactoryTest {
     ChatCreateDTO oversized = new ChatCreateDTO();
     oversized.setTitle("t".repeat(257));
     oversized.setAgentName("assistant");
-    assertThrows(AiValidationException.class, () -> factory.newChat(oversized));
+    assertThrows(DomainException.class, () -> factory.newChat(oversized));
 
     ChatUpdateDTO update = new ChatUpdateDTO();
     update.setTitle("t".repeat(257));
-    assertThrows(AiValidationException.class, () -> factory.apply(chat, update));
+    assertThrows(DomainException.class, () -> factory.apply(chat, update));
 
     ChatUpdateDTO clear = new ChatUpdateDTO();
     clear.setYoloEnabled(true);
@@ -77,7 +77,7 @@ class ChatMutationFactoryTest {
     for (String invalid : List.of("", "  ", " env", "env ", "a/b", "e".repeat(65))) {
       ChatUpdateDTO update = new ChatUpdateDTO();
       update.setEnvironmentName(invalid);
-      assertThrows(AiValidationException.class, () -> factory.apply(chat, update), invalid);
+      assertThrows(DomainException.class, () -> factory.apply(chat, update), invalid);
     }
 
     chat.setEnvironmentName("env-a");
@@ -103,7 +103,7 @@ class ChatMutationFactoryTest {
 
     ChatUpdateDTO nullYolo = new ChatUpdateDTO();
     nullYolo.setYoloEnabled(null);
-    assertThrows(AiValidationException.class, () -> factory.apply(chat, nullYolo));
+    assertThrows(DomainException.class, () -> factory.apply(chat, nullYolo));
 
     ChatUpdateDTO nullEnvironment = new ChatUpdateDTO();
     nullEnvironment.setEnvironmentName(null);

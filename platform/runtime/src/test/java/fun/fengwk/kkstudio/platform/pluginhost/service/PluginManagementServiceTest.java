@@ -19,9 +19,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
-import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
-import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthHandler;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthSpec;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfig;
@@ -169,7 +167,7 @@ class PluginManagementServiceTest {
     assertEquals(new PluginAuthKindDTO.DeepLink(List.of("CN", "US")), deepLink.getAuthKind());
     assertEquals("NOT_CONNECTED", deepLink.getStatus());
     assertNull(service.getPlugin(NONE_ID).getAuthKind());
-    assertThrows(AiResourceNotFoundException.class, () -> service.getPlugin("ghost"));
+    assertThrows(DomainException.class, () -> service.getPlugin("ghost"));
   }
 
   /** 静态密钥字段未录入时显示未连接；已保存但本节点尚未应用时给出待应用说明。 */
@@ -231,9 +229,9 @@ class PluginManagementServiceTest {
             Map.of("apiKey", patch("KEEP", secret)),
             Map.of("apiKey", patch("CLEAR", secret)),
             Map.of("apiKey", patch("SET", " *** ")))) {
-      AiValidationException error =
+      DomainException error =
           assertThrows(
-              AiValidationException.class,
+              DomainException.class,
               () -> service.updateConfiguration(STATIC_ID, 2L, "{}", invalid));
       assertFalse(error.toString().contains(secret));
       assertFalse(error.toString().contains("***"));
@@ -266,12 +264,12 @@ class PluginManagementServiceTest {
   /** 非交互 Plugin、未声明 region、插件拒绝 region 或不给登录地址都拒绝 prepare。 */
   @Test
   void prepareAuthRejectsInvalidRequests() {
-    assertThrows(AiValidationException.class, () -> service.prepareAuth(STATIC_ID, "CN"));
-    assertThrows(AiValidationException.class, () -> service.prepareAuth(DEEPLINK_ID, "EU"));
+    assertThrows(DomainException.class, () -> service.prepareAuth(STATIC_ID, "CN"));
+    assertThrows(DomainException.class, () -> service.prepareAuth(DEEPLINK_ID, "EU"));
     when(authHandler.loginUrl("CN")).thenThrow(new IllegalStateException("no"));
-    assertThrows(AiValidationException.class, () -> service.prepareAuth(DEEPLINK_ID, "CN"));
+    assertThrows(DomainException.class, () -> service.prepareAuth(DEEPLINK_ID, "CN"));
     when(authHandler.loginUrl("US")).thenReturn(" ");
-    assertThrows(AiValidationException.class, () -> service.prepareAuth(DEEPLINK_ID, "US"));
+    assertThrows(DomainException.class, () -> service.prepareAuth(DEEPLINK_ID, "US"));
     verify(authAttempts, never()).replace(any());
   }
 
@@ -292,24 +290,22 @@ class PluginManagementServiceTest {
   @Test
   void completeAuthRejectsInvalidCallbacks() {
     String handle = PluginAuthNonce.issue();
-    assertThrows(
-        AiValidationException.class, () -> service.completeAuth(DEEPLINK_ID, "bad", "app://cb"));
-    assertThrows(AiValidationException.class, () -> service.completeAuth(DEEPLINK_ID, handle, " "));
+    assertThrows(DomainException.class, () -> service.completeAuth(DEEPLINK_ID, "bad", "app://cb"));
+    assertThrows(DomainException.class, () -> service.completeAuth(DEEPLINK_ID, handle, " "));
     when(authAttempts.consume(eq(DEEPLINK_ID), anyString(), eq(NOW))).thenReturn(Optional.empty());
     assertThrows(
-        AiValidationException.class, () -> service.completeAuth(DEEPLINK_ID, handle, "app://cb"));
+        DomainException.class, () -> service.completeAuth(DEEPLINK_ID, handle, "app://cb"));
 
     attempt(handle, "CN");
     when(authHandler.complete("app://cb")).thenThrow(new IllegalStateException("bad callback"));
     assertThrows(
-        AiValidationException.class, () -> service.completeAuth(DEEPLINK_ID, handle, "app://cb"));
+        DomainException.class, () -> service.completeAuth(DEEPLINK_ID, handle, "app://cb"));
     for (PluginCredentialMaterial material :
         List.of(material("US", NOW.plusSeconds(3600)), material("CN", NOW))) {
       attempt(handle, "CN");
       when(authHandler.complete("app://other")).thenReturn(material);
       assertThrows(
-          AiValidationException.class,
-          () -> service.completeAuth(DEEPLINK_ID, handle, "app://other"));
+          DomainException.class, () -> service.completeAuth(DEEPLINK_ID, handle, "app://other"));
     }
     verify(configurationService, never()).completeAuth(anyString(), any());
   }
@@ -336,8 +332,8 @@ class PluginManagementServiceTest {
     assertEquals("2", result.getAppliedRevision());
     assertEquals(NOW, result.getCheckedAt());
     assertEquals(PluginConnectionCheckDTO.Reachability.REACHABLE, result.getReachability());
-    assertThrows(AiVersionConflictException.class, () -> service.checkConnection(STATIC_ID, 1L));
-    assertThrows(AiValidationException.class, () -> service.checkConnection(NONE_ID, 1L));
+    assertThrows(DomainException.class, () -> service.checkConnection(STATIC_ID, 1L));
+    assertThrows(DomainException.class, () -> service.checkConnection(NONE_ID, 1L));
   }
 
   private void stored(String pluginId, long revision) {

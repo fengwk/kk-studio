@@ -37,11 +37,7 @@ import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelDefaultVariantResolver;
 import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.platform.catalog.tool.TestRuntimeToolCatalogSource;
-import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
-import fun.fengwk.kkstudio.platform.error.AiInUseException;
-import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
-import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.pluginhost.service.PluginAgentDependencies;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionCreateDTO;
@@ -159,9 +155,9 @@ class AgentDefinitionServiceUnitTest {
   /** 非 canonical 能力名、缺字段与超限输入在写入前确定性拒绝；description 为 text 不截断。 */
   @Test
   void rejectsNonCanonicalOrIncompleteInput() {
-    AiValidationException duplicate =
+    DomainException duplicate =
         assertThrows(
-            AiValidationException.class,
+            DomainException.class,
             () ->
                 service.validateImport(
                     "agent",
@@ -175,9 +171,9 @@ class AgentDefinitionServiceUnitTest {
     assertEquals(
         "agent definition config skills must not contain duplicates: tools/java",
         duplicate.getMessage());
-    AiValidationException tool =
+    DomainException tool =
         assertThrows(
-            AiValidationException.class,
+            DomainException.class,
             () ->
                 service.validateImport(
                     "agent", create("agent", "model", config(List.of(" read "), List.of()), null)));
@@ -187,26 +183,26 @@ class AgentDefinitionServiceUnitTest {
 
     for (String invalidName : List.of(" ", " agent ", "n".repeat(65), "agent/name")) {
       assertThrows(
-          AiValidationException.class,
+          DomainException.class,
           () ->
               service.validateImport(
                   invalidName, create(invalidName, "model", emptyConfig(), null)));
     }
-    assertThrows(AiValidationException.class, () -> service.validateImport("agent", null));
+    assertThrows(DomainException.class, () -> service.validateImport("agent", null));
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () -> service.validateImport(null, create(null, "model", emptyConfig(), null)));
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () -> service.validateImport("agent", create("agent", null, emptyConfig(), null)));
     for (String invalidModel : List.of(" model ", " model", "model ", "m".repeat(129))) {
       assertThrows(
-          AiValidationException.class,
+          DomainException.class,
           () ->
               service.validateImport("agent", create("agent", invalidModel, emptyConfig(), null)));
     }
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () -> service.validateImport("agent", create("agent", "model", null, null)));
 
     AgentDefinitionCreateDTO longDescription = create("agent", "model", emptyConfig(), null);
@@ -220,27 +216,27 @@ class AgentDefinitionServiceUnitTest {
   @Test
   void wrapsInvalidReferencesAsValidationErrors() {
     AgentDefinitionCreateDTO badRef = create("agent", " model", emptyConfig(), null);
-    assertThrows(AiValidationException.class, () -> service.createAgent(badRef));
-    assertThrows(AiValidationException.class, () -> service.createAgent(null));
+    assertThrows(DomainException.class, () -> service.createAgent(badRef));
+    assertThrows(DomainException.class, () -> service.createAgent(null));
 
     when(variants.resolve("model", "bad-variant"))
         .thenThrow(new IllegalArgumentException("unknown variant: bad-variant"));
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () -> service.createAgent(create("agent", "model", emptyConfig(), "bad-variant")));
 
     when(modelRepository.getByNameForUpdate("group"))
         .thenReturn(model("group", AgentModelKind.GROUP));
-    AiValidationException groupVariant =
+    DomainException groupVariant =
         assertThrows(
-            AiValidationException.class,
+            DomainException.class,
             () -> service.createAgent(create("agent", "group", emptyConfig(), "default")));
     assertEquals(
         "variant must be blank when the selected model is a GROUP", groupVariant.getMessage());
     verify(variants, never()).resolve(eq("group"), any());
 
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () ->
             service.createAgent(
                 create("agent", "model", config(List.of("no-such-tool"), List.of()), null)));
@@ -273,7 +269,7 @@ class AgentDefinitionServiceUnitTest {
     when(repository.create(any())).thenReturn(false);
     assertThrows(IllegalStateException.class, () -> service.createAgent(create));
     when(repository.create(any())).thenThrow(new DuplicateKeyException("duplicate"));
-    assertThrows(AiDuplicateException.class, () -> service.createAgent(create));
+    assertThrows(DomainException.class, () -> service.createAgent(create));
     DataIntegrityViolationException foreignKey = integrityFailure("23503");
     doThrow(foreignKey).when(repository).create(any());
     assertSame(
@@ -285,19 +281,17 @@ class AgentDefinitionServiceUnitTest {
         nonForeignKey,
         assertThrows(DataIntegrityViolationException.class, () -> service.createAgent(create)));
 
-    assertThrows(AiValidationException.class, () -> service.updateAgent("agent", null));
+    assertThrows(DomainException.class, () -> service.updateAgent("agent", null));
     assertThrows(
-        AiValidationException.class,
-        () -> service.updateAgent("agent", new AgentDefinitionUpdateDTO()));
+        DomainException.class, () -> service.updateAgent("agent", new AgentDefinitionUpdateDTO()));
     AgentDefinition current = definition();
     when(resolver.requireAgent("agent")).thenReturn(current);
     when(resolver.requireAgentAndSubagentsForUpdate("agent", List.of())).thenReturn(current);
     when(repository.updateByName(any(), eq(0L))).thenReturn(false);
     when(repository.getByName("agent")).thenReturn(null);
-    assertThrows(
-        AiResourceNotFoundException.class, () -> service.updateAgent("agent", update("0")));
+    assertThrows(DomainException.class, () -> service.updateAgent("agent", update("0")));
     when(repository.getByName("agent")).thenReturn(current.toBuilder().version(7L).build());
-    assertThrows(AiVersionConflictException.class, () -> service.updateAgent("agent", update("0")));
+    assertThrows(DomainException.class, () -> service.updateAgent("agent", update("0")));
     doThrow(foreignKey).when(repository).updateByName(any(), eq(0L));
     assertSame(
         foreignKey,
@@ -316,7 +310,7 @@ class AgentDefinitionServiceUnitTest {
   @Test
   void staleVersionWinsOverModelValidation() {
     when(resolver.requireAgent("agent")).thenReturn(definition().toBuilder().version(1L).build());
-    assertThrows(AiVersionConflictException.class, () -> service.updateAgent("agent", update("0")));
+    assertThrows(DomainException.class, () -> service.updateAgent("agent", update("0")));
     verify(modelRepository, never()).getByNameForUpdate(any());
     verify(repository, never()).updateByName(any(), anyLong());
   }
@@ -328,13 +322,13 @@ class AgentDefinitionServiceUnitTest {
     when(resolver.requireAgentForUpdate("agent")).thenReturn(current);
     when(repository.deleteByName("agent", 3L)).thenReturn(false);
     when(repository.getByName("agent")).thenReturn(null);
-    assertThrows(AiResourceNotFoundException.class, () -> service.deleteAgent("agent", "3"));
+    assertThrows(DomainException.class, () -> service.deleteAgent("agent", "3"));
     when(repository.getByName("agent")).thenReturn(current.toBuilder().version(7L).build());
-    assertThrows(AiVersionConflictException.class, () -> service.deleteAgent("agent", "3"));
+    assertThrows(DomainException.class, () -> service.deleteAgent("agent", "3"));
 
     when(repository.deleteByName("agent", 3L)).thenReturn(true);
     service.deleteAgent("agent", "3");
-    assertThrows(AiVersionConflictException.class, () -> service.deleteAgent("agent", "0"));
+    assertThrows(DomainException.class, () -> service.deleteAgent("agent", "0"));
     verify(repository, never()).deleteByName("agent", 0L);
   }
 
@@ -343,13 +337,13 @@ class AgentDefinitionServiceUnitTest {
   void deleteRejectsReferencedAgents() {
     when(resolver.requireAgentForUpdate("agent")).thenReturn(definition());
     when(pluginAgentDependencies.pluginsDeclaringAgent("agent")).thenReturn(Set.of("acme.plugin"));
-    AiInUseException plugin =
-        assertThrows(AiInUseException.class, () -> service.deleteAgent("agent", "0"));
+    DomainException plugin =
+        assertThrows(DomainException.class, () -> service.deleteAgent("agent", "0"));
     assertTrue(plugin.getMessage().contains("referenced by plugin configuration"));
 
     when(otherProductReference.isReferenced("agent")).thenReturn(true);
-    AiInUseException product =
-        assertThrows(AiInUseException.class, () -> service.deleteAgent("agent", "0"));
+    DomainException product =
+        assertThrows(DomainException.class, () -> service.deleteAgent("agent", "0"));
     assertTrue(product.getMessage().contains("referenced by a product"));
     verify(productReference, atLeastOnce()).isReferenced("agent");
     verify(otherProductReference, atLeastOnce()).isReferenced("agent");
@@ -361,13 +355,13 @@ class AgentDefinitionServiceUnitTest {
   void builtinAgentsKeepSystemOwnedIdentity() {
     AgentDefinitionCreateDTO reserved =
         create(BuiltinAgentDefinitions.COMPACTION_NAME, "model", emptyConfig(), null);
-    assertThrows(AiDuplicateException.class, () -> service.createAgent(reserved));
+    assertThrows(DomainException.class, () -> service.createAgent(reserved));
     verify(repository, never()).create(any());
 
     AgentDefinition builtin =
         definition().toBuilder().type(AgentDefinitionType.BUILTIN).execution(null).build();
     when(resolver.requireAgentForUpdate("agent")).thenReturn(builtin);
-    assertThrows(AiInUseException.class, () -> service.deleteAgent("agent", "0"));
+    assertThrows(DomainException.class, () -> service.deleteAgent("agent", "0"));
     verify(repository, never()).deleteByName(any(), anyLong());
 
     when(resolver.requireAgent("agent")).thenReturn(builtin);
@@ -384,7 +378,7 @@ class AgentDefinitionServiceUnitTest {
     HarnessExecutionSelectionDTO malformed = execution("model", "default");
     malformed.getSettings().put("modelName", null);
     unconfigured.setExecution(malformed);
-    assertThrows(AiValidationException.class, () -> service.updateAgent("agent", unconfigured));
+    assertThrows(DomainException.class, () -> service.updateAgent("agent", unconfigured));
   }
 
   /** 用户 Agent 的更新仍必须有 execution（显式未配置只对内置 Agent 合法）。 */
@@ -393,7 +387,7 @@ class AgentDefinitionServiceUnitTest {
     when(resolver.requireAgent("agent")).thenReturn(definition());
     AgentDefinitionUpdateDTO update = update("0");
     update.setExecution(null);
-    assertThrows(AiValidationException.class, () -> service.updateAgent("agent", update));
+    assertThrows(DomainException.class, () -> service.updateAgent("agent", update));
     verify(modelRepository, never()).getByNameForUpdate(any());
     verify(repository, never()).updateByName(any(), anyLong());
   }
@@ -433,29 +427,29 @@ class AgentDefinitionServiceUnitTest {
     selection.setDriver("missing");
     selection.setSettings(Map.of("endpoint", "local"));
     create.setExecution(selection);
-    AiValidationException missing =
-        assertThrows(AiValidationException.class, () -> service.createAgent(create));
+    DomainException missing =
+        assertThrows(DomainException.class, () -> service.createAgent(create));
     assertTrue(missing.getMessage().contains("driver is not installed: missing"));
 
     selection.setDriver("Bad Driver");
-    assertThrows(AiValidationException.class, () -> service.createAgent(create));
+    assertThrows(DomainException.class, () -> service.createAgent(create));
     selection.setDriver(null);
-    assertThrows(AiValidationException.class, () -> service.createAgent(create));
+    assertThrows(DomainException.class, () -> service.createAgent(create));
     selection.setDriver("fake");
     selection.setSettings(null);
-    assertThrows(AiValidationException.class, () -> service.createAgent(create));
+    assertThrows(DomainException.class, () -> service.createAgent(create));
     selection.setSettings(Map.of("endpoint", "other"));
-    AiValidationException invalidSettings =
-        assertThrows(AiValidationException.class, () -> service.createAgent(create));
+    DomainException invalidSettings =
+        assertThrows(DomainException.class, () -> service.createAgent(create));
     assertTrue(invalidSettings.getMessage().contains("invalid fake settings"));
 
     HarnessExecutionSelectionDTO malformedBuiltin = execution("model", null);
     malformedBuiltin.getSettings().remove("variant");
     create.setExecution(malformedBuiltin);
-    assertThrows(AiValidationException.class, () -> service.createAgent(create));
+    assertThrows(DomainException.class, () -> service.createAgent(create));
     malformedBuiltin.getSettings().put("variant", null);
     malformedBuiltin.getSettings().put("unexpected", true);
-    assertThrows(AiValidationException.class, () -> service.createAgent(create));
+    assertThrows(DomainException.class, () -> service.createAgent(create));
     verify(repository, never()).create(any());
     verify(modelRepository, never()).getByNameForUpdate(any());
   }
@@ -464,8 +458,8 @@ class AgentDefinitionServiceUnitTest {
   @Test
   void rejectsOversizedBuiltinVariant() {
     AgentDefinitionCreateDTO create = create("agent", "model", emptyConfig(), "v".repeat(65));
-    assertThrows(AiValidationException.class, () -> service.createAgent(create));
-    assertThrows(AiValidationException.class, () -> service.validateImport("agent", create));
+    assertThrows(DomainException.class, () -> service.createAgent(create));
+    assertThrows(DomainException.class, () -> service.validateImport("agent", create));
     verify(repository, never()).create(any());
   }
 

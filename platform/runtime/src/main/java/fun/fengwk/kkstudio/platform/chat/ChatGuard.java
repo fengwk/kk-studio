@@ -4,8 +4,7 @@ import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentRepository;
-import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 
 import java.util.UUID;
 
@@ -34,7 +33,7 @@ public class ChatGuard {
     UUID parsed = ChatIds.parseUuid(id, "id");
     Chat chat = chatRepository.getById(parsed);
     if (chat == null) {
-      throw new AiResourceNotFoundException(RESOURCE);
+      throw DomainException.notFound(RESOURCE);
     }
     return chat;
   }
@@ -42,7 +41,7 @@ public class ChatGuard {
   public Chat requireChat(UUID id) {
     Chat chat = chatRepository.getById(id);
     if (chat == null) {
-      throw new AiResourceNotFoundException(RESOURCE);
+      throw DomainException.notFound(RESOURCE);
     }
     return chat;
   }
@@ -50,10 +49,10 @@ public class ChatGuard {
   /** 对照当前 catalog 校验可见的 Agent 名。 */
   public void ensureAgentExists(String agentName) {
     if (agentName == null || agentName.isBlank()) {
-      throw new AiValidationException(RESOURCE, "agentName must not be blank");
+      throw DomainException.validation(RESOURCE, "agentName must not be blank");
     }
     if (agentDefinitionRepository.getByName(agentName) == null) {
-      throw new AiValidationException(
+      throw DomainException.validation(
           AGENT_RESOURCE, "unknown " + AGENT_RESOURCE + ": " + agentName);
     }
   }
@@ -64,7 +63,7 @@ public class ChatGuard {
       return;
     }
     if (!environmentRepository.existsByName(environmentName)) {
-      throw new AiValidationException(
+      throw DomainException.validation(
           ENVIRONMENT_RESOURCE, "unknown " + ENVIRONMENT_RESOURCE + ": " + environmentName);
     }
   }

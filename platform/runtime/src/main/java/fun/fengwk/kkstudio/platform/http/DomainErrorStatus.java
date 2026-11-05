@@ -2,8 +2,8 @@ package fun.fengwk.kkstudio.platform.http;
 
 import org.springframework.http.HttpStatus;
 
-import fun.fengwk.kkstudio.platform.error.AiDomainException;
 import fun.fengwk.kkstudio.platform.error.DomainErrorCode;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 
 /**
  * 领域错误码到 HTTP 状态的唯一映射。
@@ -16,7 +16,7 @@ public final class DomainErrorStatus {
   private DomainErrorStatus() {}
 
   /** 取领域失败对应的 HTTP 状态。 */
-  public static HttpStatus of(AiDomainException error) {
+  public static HttpStatus of(DomainException error) {
     return of(error.code());
   }
 

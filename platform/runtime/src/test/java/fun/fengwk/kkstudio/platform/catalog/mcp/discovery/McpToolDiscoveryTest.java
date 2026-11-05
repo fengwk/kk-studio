@@ -12,7 +12,7 @@ import fun.fengwk.kkstudio.platform.catalog.mcp.McpServer;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpTool;
 import fun.fengwk.kkstudio.platform.catalog.mcp.client.McpClientFactory;
 import fun.fengwk.kkstudio.platform.catalog.mcp.test.FakeStreamableHttpMcpServer;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 
 import java.io.IOException;
 import java.util.List;
@@ -74,43 +74,43 @@ class McpToolDiscoveryTest {
     // 意图：同一 server 内重复 source name 或规范化后同名都确定性拒绝，绝不追加 hash 去重
     fakeServer.addTool("read_file", "First", "{}");
     fakeServer.addTool("read_file", "Second", "{}");
-    assertThrows(AiValidationException.class, () -> realDiscovery().discover(server(5000L)));
+    assertThrows(DomainException.class, () -> realDiscovery().discover(server(5000L)));
 
     fakeServer.clearTools();
     fakeServer.addTool("read-file", "Dashed", "{}");
     fakeServer.addTool("read.file", "Dotted", "{}");
-    assertThrows(AiValidationException.class, () -> realDiscovery().discover(server(5000L)));
+    assertThrows(DomainException.class, () -> realDiscovery().discover(server(5000L)));
   }
 
   @Test
   void rejectsBlankDescriptionAndBlankSourceName() {
     // 意图：描述与工具名必须非空白，非法远端数据不得进入目录
     fakeServer.addTool("edge", "   ", "{}");
-    assertThrows(AiValidationException.class, () -> realDiscovery().discover(server(5000L)));
+    assertThrows(DomainException.class, () -> realDiscovery().discover(server(5000L)));
 
     fakeServer.clearTools();
     fakeServer.addTool("", "desc", "{}");
-    assertThrows(AiValidationException.class, () -> realDiscovery().discover(server(5000L)));
+    assertThrows(DomainException.class, () -> realDiscovery().discover(server(5000L)));
   }
 
   @Test
   void rejectsOverlongSourceNameAndNormalizedName() {
     // 意图：source name 超过 128 字符、或模型可见 name 超过 64 字符时拒绝
     fakeServer.addTool("a".repeat(McpToolDiscovery.SOURCE_NAME_MAX_LENGTH + 1), "desc", "{}");
-    assertThrows(AiValidationException.class, () -> realDiscovery().discover(server(5000L)));
+    assertThrows(DomainException.class, () -> realDiscovery().discover(server(5000L)));
 
     fakeServer.clearTools();
     // 规范化后总长超过 ToolDescriptor name 上限
     fakeServer.addTool("b".repeat(60), "desc", "{}");
-    assertThrows(AiValidationException.class, () -> realDiscovery().discover(server(5000L)));
+    assertThrows(DomainException.class, () -> realDiscovery().discover(server(5000L)));
   }
 
   @Test
   void rejectsNonObjectInputSchemaAtTheProtocolBoundary() {
     // MCP inputSchema 必须是 object；非法协议数据不能被伪装成无参数工具。
     fakeServer.addTool("array_schema", "desc", "[\"a\",\"b\"]");
-    AiValidationException error =
-        assertThrows(AiValidationException.class, () -> realDiscovery().discover(server(5000L)));
+    DomainException error =
+        assertThrows(DomainException.class, () -> realDiscovery().discover(server(5000L)));
     assertEquals("MCP server discovery failed.", error.getMessage());
   }
 
@@ -159,8 +159,8 @@ class McpToolDiscoveryTest {
     McpServer server =
         server(5000L).toBuilder().url("https://sensitive-marker.example/mcp").build();
 
-    AiValidationException error =
-        assertThrows(AiValidationException.class, () -> realDiscovery().discover(server));
+    DomainException error =
+        assertThrows(DomainException.class, () -> realDiscovery().discover(server));
     assertTrue(error.getMessage().contains("discovery failed"));
     assertTrue(
         error.toString().lines().findFirst().orElse("").length() < 200,

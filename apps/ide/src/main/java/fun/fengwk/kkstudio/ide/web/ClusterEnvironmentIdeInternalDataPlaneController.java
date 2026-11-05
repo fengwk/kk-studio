@@ -22,8 +22,7 @@ import fun.fengwk.kkstudio.platform.cluster.ClusterInternalErrors;
 import fun.fengwk.kkstudio.platform.cluster.ClusterInternalRequests;
 import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
-import fun.fengwk.kkstudio.platform.error.AiDomainException;
-import fun.fengwk.kkstudio.platform.error.AiEnvironmentIdeUnavailableException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
 import fun.fengwk.kkstudio.platform.http.RequestParameters;
 
@@ -92,7 +91,7 @@ public class ClusterEnvironmentIdeInternalDataPlaneController {
     EnvironmentId envId = RequestParameters.environmentId(environmentId);
     boolean local = clusterNodeRegistry.route(envId).filter(ClusterOwnerRoute::local).isPresent();
     if (!local) {
-      throw new AiEnvironmentIdeUnavailableException(
+      throw DomainException.ideUnavailable(
           "internal IDE data request does not match this node's READY owner route");
     }
     return envId;
@@ -105,8 +104,8 @@ public class ClusterEnvironmentIdeInternalDataPlaneController {
     return ClusterInternalErrors.unauthorized();
   }
 
-  @ExceptionHandler(AiDomainException.class)
-  public ResponseEntity<ApiResponse<Void>> handleDomain(AiDomainException error) {
+  @ExceptionHandler(DomainException.class)
+  public ResponseEntity<ApiResponse<Void>> handleDomain(DomainException error) {
     return ClusterInternalErrors.domain(error);
   }
 }

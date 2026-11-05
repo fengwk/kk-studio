@@ -6,7 +6,8 @@ import org.springframework.stereotype.Component;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServer;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpTool;
 import fun.fengwk.kkstudio.platform.catalog.mcp.discovery.McpToolDiscovery;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.platform.error.DomainErrorCode;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 
 import java.util.List;
 import java.util.Objects;
@@ -36,7 +37,10 @@ public class ConfigSyncMcpDiscovery {
   public List<McpTool> discoverOrNull(McpServer server) {
     try {
       return discovery.discover(server);
-    } catch (AiValidationException error) {
+    } catch (DomainException error) {
+      if (error.code() != DomainErrorCode.VALIDATION) {
+        throw error;
+      }
       return null;
     }
   }

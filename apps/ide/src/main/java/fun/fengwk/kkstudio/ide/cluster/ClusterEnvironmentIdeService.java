@@ -13,8 +13,7 @@ import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewsDTO;
 import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
-import fun.fengwk.kkstudio.platform.error.AiEnvironmentIdeUnavailableException;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 
 import java.util.Objects;
 import java.util.function.Consumer;
@@ -121,9 +120,7 @@ public final class ClusterEnvironmentIdeService implements EnvironmentIdeService
         registry
             .route(environmentId)
             .orElseThrow(
-                () ->
-                    new AiEnvironmentIdeUnavailableException(
-                        "environment IDE owner route is unavailable"));
+                () -> DomainException.ideUnavailable("environment IDE owner route is unavailable"));
     return owner.local() ? localCall.get() : remoteCall.apply(owner);
   }
 
@@ -145,7 +142,7 @@ public final class ClusterEnvironmentIdeService implements EnvironmentIdeService
     try {
       return Uuids.parseCanonical(viewId, "viewId").toString();
     } catch (IllegalArgumentException | NullPointerException error) {
-      throw new AiValidationException("environment", "viewId must be a canonical UUID");
+      throw DomainException.validation("environment", "viewId must be a canonical UUID");
     }
   }
 }

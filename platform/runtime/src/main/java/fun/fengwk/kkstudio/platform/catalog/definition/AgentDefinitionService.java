@@ -12,12 +12,8 @@ import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgentDefinitions;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
 import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
-import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
-import fun.fengwk.kkstudio.platform.error.AiInUseException;
-import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
-import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
 import fun.fengwk.kkstudio.platform.error.CatalogVersions;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.pluginhost.service.PluginAgentDependencies;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionCreateDTO;
@@ -98,7 +94,7 @@ public class AgentDefinitionService {
         throw new IllegalStateException("create agent definition failed");
       }
     } catch (DuplicateKeyException error) {
-      throw new AiDuplicateException(
+      throw DomainException.duplicate(
           RESOURCE, "agent definition name already exists: " + definition.name(), error);
     }
     return toDto(repository.getByName(definition.name()));
@@ -108,7 +104,7 @@ public class AgentDefinitionService {
   public AgentDefinitionDTO updateAgent(String name, AgentDefinitionUpdateDTO updateDTO) {
     String rawExpected = updateDTO == null ? null : updateDTO.getExpectedVersion();
     if (rawExpected == null) {
-      throw new AiValidationException(RESOURCE, "expectedVersion is required");
+      throw DomainException.validation(RESOURCE, "expectedVersion is required");
     }
     long expected = CatalogVersions.parse(rawExpected, "expectedVersion");
     AgentDefinition current = referenceResolver.requireAgent(name);
@@ -127,9 +123,9 @@ public class AgentDefinitionService {
     if (!repository.updateByName(definition, expected)) {
       AgentDefinition reread = repository.getByName(name);
       if (reread == null) {
-        throw new AiResourceNotFoundException(RESOURCE);
+        throw DomainException.notFound(RESOURCE);
       }
-      throw new AiVersionConflictException(
+      throw DomainException.versionConflict(
           RESOURCE, rawExpected, CatalogVersions.format(reread.version()));
     }
     return toDto(repository.getByName(name));
@@ -141,27 +137,27 @@ public class AgentDefinitionService {
     AgentDefinition definition = referenceResolver.requireAgentForUpdate(name);
     if (definition.type() == AgentDefinitionType.BUILTIN) {
       // 内置 Agent 的名称与存在性由系统持有，用户不能删除。
-      throw new AiInUseException(RESOURCE, "built-in agent cannot be deleted: " + name);
+      throw DomainException.inUse(RESOURCE, "built-in agent cannot be deleted: " + name);
     }
     ensureExpectedVersion(definition, expectedVersion, expected);
     referenceResolver.ensureNotReferencedAsSubagent(name);
     for (AgentReferenceCheck reference : productReferences) {
       if (reference.isReferenced(name)) {
-        throw new AiInUseException(RESOURCE, RESOURCE + " is referenced by a product: " + name);
+        throw DomainException.inUse(RESOURCE, RESOURCE + " is referenced by a product: " + name);
       }
     }
     // 权威 desired manifest 中任一已安装插件的普通配置声明引用该 Agent 即不可删除：删除先持自身行锁，引用方保存先持同锁，
     // 因此并发两侧最多一方成功；只读 desired 事实，不读取已应用状态、不解密秘密、不猜字段。
     if (!pluginAgentDependencies.pluginsDeclaringAgent(name).isEmpty()) {
-      throw new AiInUseException(
+      throw DomainException.inUse(
           RESOURCE, RESOURCE + " is referenced by plugin configuration: " + name);
     }
     if (!repository.deleteByName(name, expected)) {
       AgentDefinition reread = repository.getByName(name);
       if (reread == null) {
-        throw new AiResourceNotFoundException(RESOURCE);
+        throw DomainException.notFound(RESOURCE);
       }
-      throw new AiVersionConflictException(
+      throw DomainException.versionConflict(
           RESOURCE, expectedVersion, CatalogVersions.format(reread.version()));
     }
   }
@@ -189,7 +185,7 @@ public class AgentDefinitionService {
   private static void ensureExpectedVersion(
       AgentDefinition definition, String expectedVersion, long expected) {
     if (definition.version() != expected) {
-      throw new AiVersionConflictException(
+      throw DomainException.versionConflict(
           RESOURCE, expectedVersion, CatalogVersions.format(definition.version()));
     }
   }
@@ -201,7 +197,7 @@ public class AgentDefinitionService {
     String normalized = name.strip();
     if (BuiltinAgentDefinitions.isReservedName(normalized)) {
       // 内置 Agent 的身份由系统持有：用户不能以同名创建自己的 Agent 覆盖它。
-      throw new AiDuplicateException(
+      throw DomainException.duplicate(
           RESOURCE, "agent definition name is reserved for a built-in agent: " + normalized);
     }
   }
@@ -210,28 +206,28 @@ public class AgentDefinitionService {
     try {
       configValidator.validate(config);
     } catch (IllegalArgumentException error) {
-      throw new AiValidationException(RESOURCE, error.getMessage(), error);
+      throw DomainException.validation(RESOURCE, error.getMessage(), error);
     }
   }
 
   private Mutation mutation(
       String name, AgentDefinitionEditablePropertiesDTO properties, boolean executionRequired) {
     if (properties == null) {
-      throw new AiValidationException(RESOURCE, RESOURCE + " body must not be null");
+      throw DomainException.validation(RESOURCE, RESOURCE + " body must not be null");
     }
     if (name == null) {
-      throw new AiValidationException(RESOURCE, RESOURCE + " name must not be blank");
+      throw DomainException.validation(RESOURCE, RESOURCE + " name must not be blank");
     }
     String normalizedName = name.strip();
     if (normalizedName.isEmpty()) {
-      throw new AiValidationException(RESOURCE, RESOURCE + " name must not be blank");
+      throw DomainException.validation(RESOURCE, RESOURCE + " name must not be blank");
     }
     if (!name.equals(normalizedName)) {
-      throw new AiValidationException(
+      throw DomainException.validation(
           RESOURCE, RESOURCE + " name must not contain surrounding whitespace");
     }
     if (normalizedName.indexOf('/') >= 0) {
-      throw new AiValidationException(RESOURCE, RESOURCE + " name must not contain '/'");
+      throw DomainException.validation(RESOURCE, RESOURCE + " name must not contain '/'");
     }
     ExecutionSelection execution = parseExecution(properties.getExecution(), executionRequired);
     String description = editableSupport.trimToNull(properties.getDescription());
@@ -239,13 +235,13 @@ public class AgentDefinitionService {
     editableSupport.validateMaxLength(RESOURCE, "name", normalizedName, NAME_MAX_LENGTH);
     AgentDefinitionConfigDTO config = properties.getConfig();
     if (config == null) {
-      throw new AiValidationException(RESOURCE, RESOURCE + " config must not be null");
+      throw DomainException.validation(RESOURCE, RESOURCE + " config must not be null");
     }
     String configJson;
     try {
       configJson = configCodec.encode(config);
     } catch (IllegalArgumentException error) {
-      throw new AiValidationException(RESOURCE, error.getMessage(), error);
+      throw DomainException.validation(RESOURCE, error.getMessage(), error);
     }
     return new Mutation(normalizedName, description, systemPrompt, execution, configJson);
   }
@@ -253,12 +249,12 @@ public class AgentDefinitionService {
   private ExecutionSelection parseExecution(HarnessExecutionSelectionDTO dto, boolean required) {
     if (dto == null) {
       if (required) {
-        throw new AiValidationException(RESOURCE, "execution is required");
+        throw DomainException.validation(RESOURCE, "execution is required");
       }
       return null;
     }
     if (dto.getDriver() == null || dto.getSettings() == null) {
-      throw new AiValidationException(RESOURCE, "execution driver and settings are required");
+      throw DomainException.validation(RESOURCE, "execution driver and settings are required");
     }
     ExecutionSelection selection;
     try {
@@ -267,7 +263,7 @@ public class AgentDefinitionService {
               dto.getDriver(), JSON.write(dto.getSettings(), "execution.settings"));
       driverRegistry.validate(selection);
     } catch (IllegalArgumentException | IllegalStateException error) {
-      throw new AiValidationException(RESOURCE, error.getMessage(), error);
+      throw DomainException.validation(RESOURCE, error.getMessage(), error);
     }
     builtinExecutionValidator.validateShape(selection);
     return selection;

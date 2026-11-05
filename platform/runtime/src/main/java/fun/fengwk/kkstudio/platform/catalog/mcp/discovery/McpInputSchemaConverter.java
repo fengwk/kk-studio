@@ -13,7 +13,7 @@ import fun.fengwk.kkstudio.common.schema.ObjectSchema;
 import fun.fengwk.kkstudio.common.schema.SchemaElement;
 import fun.fengwk.kkstudio.common.schema.SchemaJsonCodec;
 import fun.fengwk.kkstudio.common.schema.StringSchema;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -38,7 +38,7 @@ public final class McpInputSchemaConverter {
 
   public static String toCanonicalJson(JsonNode root) {
     if (root == null || !root.isObject()) {
-      throw new AiValidationException("mcp_server", "input schema must be a JSON object");
+      throw DomainException.validation("mcp_server", "input schema must be a JSON object");
     }
     return SCHEMA_CODEC.encode(convertObject(root, "mcp_server"));
   }
@@ -46,17 +46,18 @@ public final class McpInputSchemaConverter {
   /**
    * 把远端 input schema JSON 文本转换为 canonical input schema JSON；输入必须是 JSON object。
    *
-   * @throws AiValidationException 输入非法（非 JSON object 或不可解析）
+   * @throws DomainException 输入非法（非 JSON object 或不可解析）
    */
   public static String toCanonicalJson(String inputSchemaJson, String context) {
     JsonNode root;
     try {
       root = JsonValues.readTree(inputSchemaJson);
     } catch (IllegalArgumentException error) {
-      throw new AiValidationException(context, context + " input schema must be valid JSON", error);
+      throw DomainException.validation(
+          context, context + " input schema must be valid JSON", error);
     }
     if (root == null || !root.isObject()) {
-      throw new AiValidationException(context, context + " input schema must be a JSON object");
+      throw DomainException.validation(context, context + " input schema must be a JSON object");
     }
     return SCHEMA_CODEC.encode(convertObject(root, context));
   }
@@ -96,7 +97,7 @@ public final class McpInputSchemaConverter {
     try {
       return new InputSchema(description, properties, required, additionalProperties);
     } catch (IllegalArgumentException error) {
-      throw new AiValidationException(
+      throw DomainException.validation(
           context, context + " input schema is invalid: " + error.getMessage(), error);
     }
   }

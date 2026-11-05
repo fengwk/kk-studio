@@ -19,8 +19,7 @@ import fun.fengwk.kkstudio.platform.cluster.ClusterInternalRequests;
 import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
 import fun.fengwk.kkstudio.platform.environment.update.EnvironmentUpdateService;
-import fun.fengwk.kkstudio.platform.error.AiDomainException;
-import fun.fengwk.kkstudio.platform.error.AiEnvironmentUnavailableException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
 import fun.fengwk.kkstudio.platform.http.RequestParameters;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRuntimeStatusDTO;
@@ -72,7 +71,7 @@ public class ClusterEnvironmentRuntimeInternalController {
     boolean local =
         clusterNodeRegistry.route(environment).filter(ClusterOwnerRoute::local).isPresent();
     if (!local) {
-      throw new AiEnvironmentUnavailableException(
+      throw DomainException.environmentUnavailable(
           "internal runtime request does not match this node's READY owner route");
     }
     return environment;
@@ -85,8 +84,8 @@ public class ClusterEnvironmentRuntimeInternalController {
     return ClusterInternalErrors.unauthorized();
   }
 
-  @ExceptionHandler(AiDomainException.class)
-  public ResponseEntity<ApiResponse<Void>> handleDomain(AiDomainException error) {
+  @ExceptionHandler(DomainException.class)
+  public ResponseEntity<ApiResponse<Void>> handleDomain(DomainException error) {
     return ClusterInternalErrors.domain(error);
   }
 }

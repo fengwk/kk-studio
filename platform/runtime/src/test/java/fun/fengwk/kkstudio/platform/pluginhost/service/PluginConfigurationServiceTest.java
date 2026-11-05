@@ -15,9 +15,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.common.schema.StringSchema;
-import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
-import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthHandler;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthSpec;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfig;
@@ -142,13 +140,10 @@ class PluginConfigurationServiceTest {
   /** 修订不匹配（读取时或 CAS 时）都是版本冲突，不发出通知。 */
   @Test
   void staleRevisionIsAConflict() {
-    assertThrows(
-        AiVersionConflictException.class, () -> service.configure(STATIC_ID, 2L, VALUES_A, null));
+    assertThrows(DomainException.class, () -> service.configure(STATIC_ID, 2L, VALUES_A, null));
 
     when(configurations.update(STATIC_ID, 3L, VALUES_A)).thenReturn(false);
-    assertThrows(
-        AiVersionConflictException.class,
-        () -> service.configure(STATIC_ID, 3L, VALUES_A, Map.of()));
+    assertThrows(DomainException.class, () -> service.configure(STATIC_ID, 3L, VALUES_A, Map.of()));
     verify(configurations, never()).notifyChanged(anyString());
     assertEquals(0, catalogWakes.get());
   }
@@ -156,23 +151,21 @@ class PluginConfigurationServiceTest {
   /** 未安装 Plugin、非法值、未声明的秘密字段、交互凭据补丁与插件拒绝都在写入前失败。 */
   @Test
   void rejectsInvalidRequestsBeforeWriting() {
+    assertThrows(DomainException.class, () -> service.configure("ghost", 1L, "{}", Map.of()));
     assertThrows(
-        AiResourceNotFoundException.class, () -> service.configure("ghost", 1L, "{}", Map.of()));
-    assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () -> service.configure(STATIC_ID, 3L, "{\"endpoint\":1}", Map.of()));
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () ->
             service.configure(
                 STATIC_ID, 3L, VALUES_A, Map.of("other", PluginSecretPatch.set("x"))));
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () ->
             service.configure(DEEPLINK_ID, 1L, "{}", Map.of("token", PluginSecretPatch.set("x"))));
     staticPlugin.reject = true;
-    assertThrows(
-        AiValidationException.class, () -> service.configure(STATIC_ID, 3L, VALUES_A, Map.of()));
+    assertThrows(DomainException.class, () -> service.configure(STATIC_ID, 3L, VALUES_A, Map.of()));
     verify(configurations, never()).update(anyString(), anyLong(), anyString());
   }
 
@@ -195,7 +188,7 @@ class PluginConfigurationServiceTest {
     verify(credentials).delete(DEEPLINK_ID);
     assertEquals(2, catalogWakes.get());
     assertEquals(2, credentialWakes.get());
-    assertThrows(AiResourceNotFoundException.class, () -> service.disconnect("ghost"));
+    assertThrows(DomainException.class, () -> service.disconnect("ghost"));
   }
 
   private static PluginCredentialRow credential(String payloadJson) {

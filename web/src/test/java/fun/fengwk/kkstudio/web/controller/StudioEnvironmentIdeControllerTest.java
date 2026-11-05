@@ -49,8 +49,7 @@ import fun.fengwk.kkstudio.platform.daemon.protocol.IdeCommand;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeResult;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
 import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer;
-import fun.fengwk.kkstudio.platform.error.AiEnvironmentIdeUnavailableException;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
 import fun.fengwk.kkstudio.web.advice.StudioDomainErrorAdvice;
@@ -156,7 +155,7 @@ class StudioEnvironmentIdeControllerTest {
   @Test
   void changeDirectoryKeepsDirtyRejectionAsBadRequestValidation() throws Exception {
     when(environmentIdeService.changeDirectory(eq(EnvironmentId.of(ENV_ID)), eq(VIEW_ID), any()))
-        .thenThrow(new AiValidationException("environment", DIRTY_REJECTION));
+        .thenThrow(DomainException.validation("environment", DIRTY_REJECTION));
 
     mockMvc
         .perform(
@@ -213,7 +212,7 @@ class StudioEnvironmentIdeControllerTest {
   void ideChannelFailuresReturnTypedConflictInRequestLocale(
       String languageTag, String expectedMessage) throws Exception {
     when(environmentIdeService.changeDirectory(eq(EnvironmentId.of(ENV_ID)), eq(VIEW_ID), any()))
-        .thenThrow(new AiEnvironmentIdeUnavailableException("environment IDE command timed out"));
+        .thenThrow(DomainException.ideUnavailable("environment IDE command timed out"));
 
     mockMvc
         .perform(

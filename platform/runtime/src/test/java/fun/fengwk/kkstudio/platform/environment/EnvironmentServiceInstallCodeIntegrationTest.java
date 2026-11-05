@@ -17,8 +17,8 @@ import org.springframework.transaction.interceptor.TransactionInterceptor;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
-import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
+import fun.fengwk.kkstudio.platform.error.DomainErrorCode;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.share.ai.environment.DaemonConfiguration;
@@ -67,18 +67,16 @@ class EnvironmentServiceInstallCodeIntegrationTest extends PostgresSpringTestSup
     // 导出/数据库可见的凭证摘要不是安装授权。
     String exposedHash = environmentRepository.getById(envId.value()).getRegistrationTokenHash();
     assertThrows(
-        AiValidationException.class,
-        () -> environmentService.installationScript(envId, exposedHash));
+        DomainException.class, () -> environmentService.installationScript(envId, exposedHash));
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () ->
             environmentService.installationScript(
                 envId, EnvironmentInstallCodes.hash(exposedHash)));
     String tamperedCode = (originalCode.charAt(0) == 'A' ? "B" : "A") + originalCode.substring(1);
 
     assertThrows(
-        AiValidationException.class,
-        () -> environmentService.installationScript(envId, tamperedCode));
+        DomainException.class, () -> environmentService.installationScript(envId, tamperedCode));
 
     // 伪造失败后真实记录完整无损，正品 code 成功核销
     assertThat(countInstallCodes(envId)).isEqualTo(1L);
@@ -98,7 +96,7 @@ class EnvironmentServiceInstallCodeIntegrationTest extends PostgresSpringTestSup
     assertThat(countInstallCodes(envB)).isZero();
 
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () -> environmentService.installationScript(envB, issuedA.getCode()));
 
     assertThat(countInstallCodes(envA)).isEqualTo(1L);
@@ -121,7 +119,7 @@ class EnvironmentServiceInstallCodeIntegrationTest extends PostgresSpringTestSup
     assertThat(countInstallCodes(envId)).isZero();
 
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () -> environmentService.installationScript(envId, issued.getCode()));
   }
 
@@ -137,8 +135,7 @@ class EnvironmentServiceInstallCodeIntegrationTest extends PostgresSpringTestSup
 
     // 旧 code 消费失败
     assertThrows(
-        AiValidationException.class,
-        () -> environmentService.installationScript(envId, first.getCode()));
+        DomainException.class, () -> environmentService.installationScript(envId, first.getCode()));
     assertThat(countInstallCodes(envId)).isEqualTo(1L);
 
     // 新 code 消费成功
@@ -156,8 +153,7 @@ class EnvironmentServiceInstallCodeIntegrationTest extends PostgresSpringTestSup
     assertThat(environmentService.get(envId).getVersion()).isEqualTo("1");
     assertThat(countInstallCodes(envId)).isEqualTo(1L);
 
-    assertThrows(
-        AiVersionConflictException.class, () -> environmentService.issueInstallCode(envId, "0"));
+    assertThrows(DomainException.class, () -> environmentService.issueInstallCode(envId, "0"));
     assertThat(countInstallCodes(envId)).isEqualTo(1L);
 
     assertThat(environmentService.installationScript(envId, issued.getCode())).isNotBlank();
@@ -183,7 +179,7 @@ class EnvironmentServiceInstallCodeIntegrationTest extends PostgresSpringTestSup
         .update();
 
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () -> environmentService.installationScript(envId, issued.getCode()));
     assertThat(countInstallCodes(envId)).isEqualTo(1L);
     assertThat(environmentService.get(envId).getVersion()).isEqualTo("1");
@@ -201,7 +197,7 @@ class EnvironmentServiceInstallCodeIntegrationTest extends PostgresSpringTestSup
     assertThat(countInstallCodes(envId)).isZero();
 
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () -> environmentService.installationScript(envId, issued.getCode()));
   }
 
@@ -217,7 +213,7 @@ class EnvironmentServiceInstallCodeIntegrationTest extends PostgresSpringTestSup
     assertThat(countInstallCodes(envId)).isZero();
 
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () -> environmentService.installationScript(envId, issued.getCode()));
   }
 
@@ -245,8 +241,7 @@ class EnvironmentServiceInstallCodeIntegrationTest extends PostgresSpringTestSup
 
     // 再次在第一个实例尝试兑换失败
     assertThrows(
-        AiValidationException.class,
-        () -> serviceInstance1.installationScript(envId, issued.getCode()));
+        DomainException.class, () -> serviceInstance1.installationScript(envId, issued.getCode()));
   }
 
   /** 测试意图：多线程并发核销同一安装 code，数据库行锁与原子消费保证严格只有一次成功，其余全被拒绝。 */
@@ -272,8 +267,12 @@ class EnvironmentServiceInstallCodeIntegrationTest extends PostgresSpringTestSup
                   startGate.await();
                   environmentService.installationScript(envId, issued.getCode());
                   successes.incrementAndGet();
-                } catch (AiValidationException error) {
-                  validationExceptions.incrementAndGet();
+                } catch (DomainException error) {
+                  if (error.code() == DomainErrorCode.VALIDATION) {
+                    validationExceptions.incrementAndGet();
+                  } else {
+                    otherErrors.incrementAndGet();
+                  }
                 } catch (Throwable error) {
                   otherErrors.incrementAndGet();
                 } finally {

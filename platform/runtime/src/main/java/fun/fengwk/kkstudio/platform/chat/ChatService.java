@@ -3,10 +3,8 @@ package fun.fengwk.kkstudio.platform.chat;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
-import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
 import fun.fengwk.kkstudio.platform.error.CatalogVersions;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.orchestration.SessionDeletionOrchestrator;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwner;
 import fun.fengwk.kkstudio.share.ai.chat.ChatCreateDTO;
@@ -67,7 +65,7 @@ public class ChatService {
   public ChatDTO updateChat(String id, ChatUpdateDTO updateDTO) {
     String rawExpected = updateDTO == null ? null : updateDTO.getExpectedVersion();
     if (rawExpected == null) {
-      throw new AiValidationException(RESOURCE, "expectedVersion is required");
+      throw DomainException.validation(RESOURCE, "expectedVersion is required");
     }
     long expected = CatalogVersions.parse(rawExpected, "expectedVersion");
     Chat existing = guard.requireChat(id);
@@ -84,9 +82,9 @@ public class ChatService {
     if (!repository.updateById(existing, expected)) {
       Chat reread = repository.getById(existing.getId());
       if (reread == null) {
-        throw new AiResourceNotFoundException(RESOURCE);
+        throw DomainException.notFound(RESOURCE);
       }
-      throw new AiVersionConflictException(
+      throw DomainException.versionConflict(
           RESOURCE, rawExpected, CatalogVersions.format(reread.getVersion()));
     }
     return convert(repository.getById(existing.getId()));
@@ -103,7 +101,7 @@ public class ChatService {
     UUID parsed = ChatIds.parseUuid(id, "id");
     Chat locked = repository.lockById(parsed);
     if (locked == null) {
-      throw new AiResourceNotFoundException(RESOURCE);
+      throw DomainException.notFound(RESOURCE);
     }
     ensureExpectedVersion(locked, id, expectedVersion, expected);
     sessionDeletionService.deleteSessionsByOwner(
@@ -132,7 +130,7 @@ public class ChatService {
   private static void ensureExpectedVersion(
       Chat chat, String id, String expectedVersion, long expected) {
     if (chat.getVersion() != expected) {
-      throw new AiVersionConflictException(
+      throw DomainException.versionConflict(
           RESOURCE, expectedVersion, CatalogVersions.format(chat.getVersion()));
     }
   }

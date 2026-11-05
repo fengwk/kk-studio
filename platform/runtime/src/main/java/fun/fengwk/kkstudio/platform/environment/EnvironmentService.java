@@ -11,12 +11,8 @@ import fun.fengwk.kkstudio.platform.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentEvent;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
-import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
-import fun.fengwk.kkstudio.platform.error.AiInUseException;
-import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
-import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
 import fun.fengwk.kkstudio.platform.error.CatalogVersions;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCardDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCreateDTO;
@@ -53,11 +49,11 @@ public class EnvironmentService {
   @Transactional
   public EnvironmentCardDTO create(EnvironmentCreateDTO dto) {
     if (dto == null) {
-      throw new AiValidationException(RESOURCE, "request body must not be null");
+      throw DomainException.validation(RESOURCE, "request body must not be null");
     }
     String name = validateName(dto.getName());
     if (environmentRepository.existsByName(name)) {
-      throw new AiDuplicateException(RESOURCE, "environment name already exists: " + name);
+      throw DomainException.duplicate(RESOURCE, "environment name already exists: " + name);
     }
     Environment env = new Environment();
     env.setId(UUID.randomUUID());
@@ -69,7 +65,7 @@ public class EnvironmentService {
         throw new IllegalStateException("create environment failed");
       }
     } catch (DuplicateKeyException error) {
-      throw new AiDuplicateException(RESOURCE, "environment name already exists: " + name, error);
+      throw DomainException.duplicate(RESOURCE, "environment name already exists: " + name, error);
     }
     Environment created = environmentRepository.getById(env.getId());
     return toCardDto(created, token);
@@ -79,7 +75,7 @@ public class EnvironmentService {
     Objects.requireNonNull(id, "id");
     Environment env = environmentRepository.getById(id.value());
     if (env == null) {
-      throw new AiResourceNotFoundException(RESOURCE);
+      throw DomainException.notFound(RESOURCE);
     }
     return toCardDto(env, null);
   }
@@ -116,10 +112,11 @@ public class EnvironmentService {
     EnvironmentInstallConfigDTO config =
         installConfig == null ? null : EnvironmentInstallConfigs.validate(installConfig);
     if (environmentRepository.existsByName(canonicalName)) {
-      throw new AiDuplicateException(RESOURCE, "environment name already exists: " + canonicalName);
+      throw DomainException.duplicate(
+          RESOURCE, "environment name already exists: " + canonicalName);
     }
     if (environmentRepository.getByRegistrationTokenHash(tokenHash) != null) {
-      throw new AiDuplicateException(RESOURCE, "environment registrationToken already in use");
+      throw DomainException.duplicate(RESOURCE, "environment registrationToken already in use");
     }
     Environment env = new Environment();
     env.setId(UUID.randomUUID());
@@ -131,7 +128,7 @@ public class EnvironmentService {
         throw new IllegalStateException("create environment failed");
       }
     } catch (DuplicateKeyException error) {
-      throw new AiDuplicateException(
+      throw DomainException.duplicate(
           RESOURCE, "environment name or registrationToken already exists", error);
     }
     Environment created = environmentRepository.getById(env.getId());
@@ -151,10 +148,10 @@ public class EnvironmentService {
     long expected = CatalogVersions.parse(expectedVersion, "expectedVersion");
     Environment env = environmentRepository.lockById(id.value());
     if (env == null) {
-      throw new AiResourceNotFoundException(RESOURCE);
+      throw DomainException.notFound(RESOURCE);
     }
     if (env.getVersion() != expected) {
-      throw new AiVersionConflictException(
+      throw DomainException.versionConflict(
           RESOURCE, expectedVersion, CatalogVersions.format(env.getVersion()));
     }
     if (tokenHash.equals(env.getRegistrationTokenHash())
@@ -167,13 +164,13 @@ public class EnvironmentService {
       if (!environmentRepository.updateById(env, expected)) {
         Environment reread = environmentRepository.getById(id.value());
         if (reread == null) {
-          throw new AiResourceNotFoundException(RESOURCE);
+          throw DomainException.notFound(RESOURCE);
         }
-        throw new AiVersionConflictException(
+        throw DomainException.versionConflict(
             RESOURCE, expectedVersion, CatalogVersions.format(reread.getVersion()));
       }
     } catch (DuplicateKeyException error) {
-      throw new AiDuplicateException(
+      throw DomainException.duplicate(
           RESOURCE, "environment registrationToken already in use", error);
     }
     Environment updated = environmentRepository.getById(id.value());
@@ -185,17 +182,17 @@ public class EnvironmentService {
       EnvironmentId id, EnvironmentInstallConfigUpdateDTO request) {
     Objects.requireNonNull(id, "id");
     if (request == null) {
-      throw new AiValidationException(RESOURCE, "request body must not be null");
+      throw DomainException.validation(RESOURCE, "request body must not be null");
     }
     EnvironmentInstallConfigDTO config =
         EnvironmentInstallConfigs.validate(request.getInstallConfig());
     long expected = CatalogVersions.parse(request.getExpectedVersion(), "expectedVersion");
     Environment env = environmentRepository.lockById(id.value());
     if (env == null) {
-      throw new AiResourceNotFoundException(RESOURCE);
+      throw DomainException.notFound(RESOURCE);
     }
     if (env.getVersion() != expected) {
-      throw new AiVersionConflictException(
+      throw DomainException.versionConflict(
           RESOURCE, request.getExpectedVersion(), CatalogVersions.format(env.getVersion()));
     }
     if (Objects.equals(config, env.getInstallConfig())) {
@@ -205,9 +202,9 @@ public class EnvironmentService {
     if (!environmentRepository.updateById(env, expected)) {
       Environment reread = environmentRepository.getById(id.value());
       if (reread == null) {
-        throw new AiResourceNotFoundException(RESOURCE);
+        throw DomainException.notFound(RESOURCE);
       }
-      throw new AiVersionConflictException(
+      throw DomainException.versionConflict(
           RESOURCE, request.getExpectedVersion(), CatalogVersions.format(reread.getVersion()));
     }
     return toCardDto(environmentRepository.getById(id.value()), null);
@@ -216,7 +213,7 @@ public class EnvironmentService {
   public List<EnvironmentEventDTO> listEvents(EnvironmentId id) {
     Objects.requireNonNull(id, "id");
     if (environmentRepository.getById(id.value()) == null) {
-      throw new AiResourceNotFoundException(RESOURCE);
+      throw DomainException.notFound(RESOURCE);
     }
     // 事件是连接行保留的可重建投影：从未连接的 Environment 没有事件。
     EnvironmentConnection connection = environmentRegistry.find(id).orElse(null);
@@ -255,10 +252,10 @@ public class EnvironmentService {
     Objects.requireNonNull(id, "id");
     Environment env = environmentRepository.lockById(id.value());
     if (env == null || env.getInstallConfig() == null) {
-      throw new AiResourceNotFoundException(RESOURCE);
+      throw DomainException.notFound(RESOURCE);
     }
     if (code == null) {
-      throw new AiValidationException(RESOURCE, "invalid or expired install code");
+      throw DomainException.validation(RESOURCE, "invalid or expired install code");
     }
     String token = RegistrationTokens.generate();
     if (!environmentRepository.redeemInstallCode(
@@ -266,7 +263,7 @@ public class EnvironmentService {
         env.getVersion(),
         EnvironmentInstallCodes.hash(code),
         RegistrationTokens.hash(token))) {
-      throw new AiValidationException(RESOURCE, "invalid or expired install code");
+      throw DomainException.validation(RESOURCE, "invalid or expired install code");
     }
     return EnvironmentInstallScripts.install(
         env.getInstallConfig(), token, snapshot.get().network());
@@ -277,10 +274,10 @@ public class EnvironmentService {
     Objects.requireNonNull(id, "id");
     Environment env = environmentRepository.lockById(id.value());
     if (env == null || env.getInstallConfig() == null) {
-      throw new AiResourceNotFoundException(RESOURCE);
+      throw DomainException.notFound(RESOURCE);
     }
     if (env.getVersion() != CatalogVersions.parse(expectedVersion, "expectedVersion")) {
-      throw new AiVersionConflictException(
+      throw DomainException.versionConflict(
           RESOURCE, expectedVersion, CatalogVersions.format(env.getVersion()));
     }
     return env;
@@ -296,10 +293,10 @@ public class EnvironmentService {
     long expected = CatalogVersions.parse(expectedVersion, "expectedVersion");
     Environment env = environmentRepository.lockById(id.value());
     if (env == null) {
-      throw new AiResourceNotFoundException(RESOURCE);
+      throw DomainException.notFound(RESOURCE);
     }
     if (env.getVersion() != expected) {
-      throw new AiVersionConflictException(
+      throw DomainException.versionConflict(
           RESOURCE, expectedVersion, CatalogVersions.format(env.getVersion()));
     }
     String token = RegistrationTokens.generate();
@@ -307,9 +304,9 @@ public class EnvironmentService {
     if (!environmentRepository.updateById(env, expected)) {
       Environment reread = environmentRepository.getById(id.value());
       if (reread == null) {
-        throw new AiResourceNotFoundException(RESOURCE);
+        throw DomainException.notFound(RESOURCE);
       }
-      throw new AiVersionConflictException(
+      throw DomainException.versionConflict(
           RESOURCE, expectedVersion, CatalogVersions.format(reread.getVersion()));
     }
     Environment updated = environmentRepository.getById(id.value());
@@ -322,31 +319,31 @@ public class EnvironmentService {
     long expected = CatalogVersions.parse(expectedVersion, "expectedVersion");
     Environment env = environmentRepository.lockById(id.value());
     if (env == null) {
-      throw new AiResourceNotFoundException(RESOURCE);
+      throw DomainException.notFound(RESOURCE);
     }
     if (env.getVersion() != expected) {
-      throw new AiVersionConflictException(
+      throw DomainException.versionConflict(
           RESOURCE, expectedVersion, CatalogVersions.format(env.getVersion()));
     }
     if (environmentRegistry.hasActiveLease(id)) {
-      throw new AiInUseException(
+      throw DomainException.inUse(
           RESOURCE, "cannot delete environment with an active connection lease");
     }
     if (hasActiveWork(id)) {
-      throw new AiInUseException(
+      throw DomainException.inUse(
           RESOURCE, "cannot delete environment required by active harness work");
     }
     try {
       if (!environmentRepository.deleteById(id.value(), expected)) {
         Environment reread = environmentRepository.getById(id.value());
         if (reread == null) {
-          throw new AiResourceNotFoundException(RESOURCE);
+          throw DomainException.notFound(RESOURCE);
         }
-        throw new AiVersionConflictException(
+        throw DomainException.versionConflict(
             RESOURCE, expectedVersion, CatalogVersions.format(reread.getVersion()));
       }
     } catch (DataIntegrityViolationException error) {
-      throw new AiInUseException(
+      throw DomainException.inUse(
           RESOURCE, "cannot delete environment due to existing references", error);
     }
   }
@@ -367,21 +364,21 @@ public class EnvironmentService {
   /** CRUD 与配置同步共用的纯输入校验。 */
   public static String validateName(String raw) {
     if (raw == null) {
-      throw new AiValidationException(RESOURCE, "environment name must not be blank");
+      throw DomainException.validation(RESOURCE, "environment name must not be blank");
     }
     String trimmed = raw.strip();
     if (trimmed.isEmpty()) {
-      throw new AiValidationException(RESOURCE, "environment name must not be blank");
+      throw DomainException.validation(RESOURCE, "environment name must not be blank");
     }
     if (!raw.equals(trimmed)) {
-      throw new AiValidationException(
+      throw DomainException.validation(
           RESOURCE, "environment name must not contain surrounding whitespace");
     }
     if (trimmed.indexOf('/') >= 0) {
-      throw new AiValidationException(RESOURCE, "environment name must not contain '/'");
+      throw DomainException.validation(RESOURCE, "environment name must not contain '/'");
     }
     if (trimmed.length() > 64) {
-      throw new AiValidationException(RESOURCE, "environment name must be <= 64 characters");
+      throw DomainException.validation(RESOURCE, "environment name must be <= 64 characters");
     }
     return trimmed;
   }
@@ -389,7 +386,7 @@ public class EnvironmentService {
   /** 导入的凭证摘要必须是规范 SHA-256（64 位小写十六进制）。 */
   public static String validateRegistrationTokenHash(String raw) {
     if (!RegistrationTokens.isHash(raw)) {
-      throw new AiValidationException(
+      throw DomainException.validation(
           RESOURCE, "registrationTokenHash must be a lowercase hex SHA-256 digest");
     }
     return raw;

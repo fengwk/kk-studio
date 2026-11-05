@@ -35,8 +35,7 @@ import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogService;
 import fun.fengwk.kkstudio.platform.environment.Environment;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentService;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
-import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.pluginhost.service.PluginAgentDependencies;
 import fun.fengwk.kkstudio.platform.pluginhost.service.PluginConfigurationService;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
@@ -315,10 +314,10 @@ class ConfigSyncApplierTest {
   @Test
   void pluginCommitFailurePropagatesWithoutSecretPatch() {
     when(pluginConfigurationService.configure(anyString(), anyLong(), anyString(), any()))
-        .thenThrow(new AiVersionConflictException("plugin", "revision=1", "revision=2"));
+        .thenThrow(DomainException.versionConflict("plugin", "revision=1", "revision=2"));
 
     assertThrows(
-        AiVersionConflictException.class,
+        DomainException.class,
         () ->
             applier.apply(
                 planWithPlugins(
@@ -343,9 +342,9 @@ class ConfigSyncApplierTest {
     String values = "{\"promptAgentName\":\"dep-agent\"}";
     when(definitionRepository.getByNameForUpdate("dep-agent")).thenReturn(null);
 
-    AiValidationException error =
+    DomainException error =
         assertThrows(
-            AiValidationException.class,
+            DomainException.class,
             () ->
                 applier.apply(
                     planWithPlugins(
@@ -428,9 +427,9 @@ class ConfigSyncApplierTest {
   void pluginDeclarationInputErrorBecomesSafeValidationFailure() {
     String values = "{\"promptAgentName\":\"!secret-marker\"}";
 
-    AiValidationException error =
+    DomainException error =
         assertThrows(
-            AiValidationException.class,
+            DomainException.class,
             () ->
                 applier.apply(
                     planWithPlugins(
@@ -512,12 +511,12 @@ class ConfigSyncApplierTest {
   void skillImportFailureBubblesUpAsValidationError() {
     ConfigSyncPlan.SkillImport skill =
         new ConfigSyncPlan.SkillImport("pkg", "d", "https://example.com/pkg.git", "main", null);
-    doThrow(new AiValidationException("skill_package", "git failure"))
+    doThrow(DomainException.validation("skill_package", "git failure"))
         .when(skillCatalogService)
         .importGitPackage("pkg", "d", "https://example.com/pkg.git", "main", null);
 
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () ->
             applier.apply(
                 plan(List.of(), List.of(), List.of(skill), List.of(), List.of(), List.of(), null)));

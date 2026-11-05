@@ -5,7 +5,7 @@ import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.settings.HttpProxySelector;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.share.ai.environment.DaemonConfiguration;
@@ -47,7 +47,7 @@ public final class EnvironmentInstallScripts {
 
   public static String uninstall(String operatingSystem, SystemSettings.Network network) {
     if (!Set.of("linux", "macos", "windows").contains(operatingSystem)) {
-      throw new AiValidationException(
+      throw DomainException.validation(
           "operatingSystem", "operatingSystem must be linux, macos or windows");
     }
     return render("windows".equals(operatingSystem), "uninstall", "", "", network);
@@ -143,7 +143,7 @@ public final class EnvironmentInstallScripts {
         || value.codePoints().anyMatch(Character::isISOControl)
         || value.indexOf('\u2028') >= 0
         || value.indexOf('\u2029') >= 0) {
-      throw new AiValidationException(field, field + " must be text without control characters");
+      throw DomainException.validation(field, field + " must be text without control characters");
     }
   }
 

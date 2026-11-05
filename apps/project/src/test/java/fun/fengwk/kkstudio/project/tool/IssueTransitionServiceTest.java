@@ -31,8 +31,7 @@ import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionFacts;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
-import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
 import fun.fengwk.kkstudio.project.model.Issue;
@@ -210,7 +209,7 @@ class IssueTransitionServiceTest {
   private void assertRejected(
       UUID threadId, UUID assistantEntryId, String toState, String expected) {
     Runnable call = () -> service.accept(threadId, assistantEntryId, toState);
-    AiValidationException rejected = assertThrows(AiValidationException.class, call::run);
+    DomainException rejected = assertThrows(DomainException.class, call::run);
     assertTrue(rejected.getMessage().contains(expected), rejected.getMessage());
   }
 
@@ -398,10 +397,9 @@ class IssueTransitionServiceTest {
   void failsWhenVersionCasLoses() {
     when(runs.updateById(any(), anyLong())).thenReturn(false);
 
-    AiVersionConflictException conflict =
+    DomainException conflict =
         assertThrows(
-            AiVersionConflictException.class,
-            () -> service.accept(THREAD_ID, ASSISTANT_ENTRY_ID, "REVIEW"));
+            DomainException.class, () -> service.accept(THREAD_ID, ASSISTANT_ENTRY_ID, "REVIEW"));
     assertEquals("issue_run", conflict.resource());
   }
 

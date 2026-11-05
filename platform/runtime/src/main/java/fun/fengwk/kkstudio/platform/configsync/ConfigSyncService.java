@@ -5,7 +5,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.platform.error.DomainErrorCode;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncExportDTO;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncExportRequestDTO;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncImportCheckDTO;
@@ -85,17 +86,20 @@ public class ConfigSyncService {
     ConfigSyncParser.ParsedDocument document = parser.parse(yaml);
     ConfigSyncPlan plan = planner.plan(document);
     if (!plan.skipped().isEmpty() && !request.isAllowPartial()) {
-      throw new AiValidationException(RESOURCE, "partial import requires explicit confirmation");
+      throw DomainException.validation(RESOURCE, "partial import requires explicit confirmation");
     }
     if (plan.imported().isEmpty()) {
       return new ConfigSyncImportResultDTO(plan.imported(), plan.skipped());
     }
     try {
       applier.apply(plan);
-    } catch (AiValidationException error) {
+    } catch (DomainException error) {
+      if (error.code() != DomainErrorCode.VALIDATION) {
+        throw error;
+      }
       // 已知校验失败：不透传可能包含真实值的下游 DTO/服务错误文本（尤其凭据片段），只给安全导入错误；
       // unexpected 异常与数据库 cause 不回显，也不被吞。
-      throw new AiValidationException(RESOURCE, "config import is invalid");
+      throw DomainException.validation(RESOURCE, "config import is invalid");
     }
     return new ConfigSyncImportResultDTO(plan.imported(), plan.skipped());
   }

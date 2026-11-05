@@ -17,7 +17,7 @@ import fun.fengwk.kkstudio.common.schema.IntegerSchema;
 import fun.fengwk.kkstudio.common.schema.NumberSchema;
 import fun.fengwk.kkstudio.common.schema.ObjectSchema;
 import fun.fengwk.kkstudio.common.schema.StringSchema;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 
 import java.util.List;
 import java.util.Set;
@@ -139,17 +139,17 @@ class McpInputSchemaConverterTest {
 
   @Test
   void rejectsInvalidJsonOrNonObjectRoot() {
-    // 意图：验证非法 JSON 格式或顶层为非 object（如 array/string）时抛出 AiValidationException
+    // 意图：验证非法 JSON 格式或顶层为非 object（如 array/string）时抛出 DomainException
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () -> McpInputSchemaConverter.toCanonicalJson("not valid json", "bad"));
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () -> McpInputSchemaConverter.toCanonicalJson("[\"array\", \"root\"]", "bad"));
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () -> McpInputSchemaConverter.toCanonicalJson("\"string root\"", "bad"));
     assertThrows(
-        AiValidationException.class, () -> McpInputSchemaConverter.toCanonicalJson("123", "bad"));
+        DomainException.class, () -> McpInputSchemaConverter.toCanonicalJson("123", "bad"));
   }
 }

@@ -32,11 +32,7 @@ import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentEvent;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
-import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
-import fun.fengwk.kkstudio.platform.error.AiInUseException;
-import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
-import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.share.ai.environment.DaemonConfiguration;
@@ -380,8 +376,7 @@ class EnvironmentServiceTest {
             });
 
     assertThrows(
-        AiVersionConflictException.class,
-        () -> service.issueInstallCode(EnvironmentId.of(ENV_ID), "3"));
+        DomainException.class, () -> service.issueInstallCode(EnvironmentId.of(ENV_ID), "3"));
     EnvironmentInstallCodeDTO issued = service.issueInstallCode(EnvironmentId.of(ENV_ID), "4");
     assertEquals(NOW.plus(Duration.ofMinutes(5)), issued.getExpiresAt());
     verify(repo)
@@ -394,7 +389,7 @@ class EnvironmentServiceTest {
     String tampered =
         (issued.getCode().charAt(0) == 'A' ? "B" : "A") + issued.getCode().substring(1);
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () -> service.installationScript(EnvironmentId.of(ENV_ID), tampered));
 
     String script = service.installationScript(EnvironmentId.of(ENV_ID), issued.getCode());
@@ -412,19 +407,17 @@ class EnvironmentServiceTest {
         script.contains(tokenFor(savedTokenHash.get(), script)),
         "the script carries the plaintext whose hash is now stored");
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () -> service.installationScript(EnvironmentId.of(ENV_ID), issued.getCode()),
         "a redeemed code cannot be reused");
     verify(repo, never()).updateById(any(), anyLong());
     verify(repo, never()).getByRegistrationTokenHash(any());
     assertThrows(
-        AiValidationException.class,
-        () -> service.installationScript(EnvironmentId.of(ENV_ID), null));
+        DomainException.class, () -> service.installationScript(EnvironmentId.of(ENV_ID), null));
     assertThrows(
-        AiValidationException.class,
-        () -> service.issueInstallCode(EnvironmentId.of(ENV_ID), null));
+        DomainException.class, () -> service.issueInstallCode(EnvironmentId.of(ENV_ID), null));
     assertThrows(
-        AiValidationException.class, () -> service.issueInstallCode(EnvironmentId.of(ENV_ID), " "));
+        DomainException.class, () -> service.issueInstallCode(EnvironmentId.of(ENV_ID), " "));
   }
 
   /** 测试意图：未知身份或缺少已保存安装设置都不能返回可执行的成功空脚本。 */
@@ -434,14 +427,12 @@ class EnvironmentServiceTest {
     EnvironmentService service = service(repo);
     when(repo.lockById(ENV_ID)).thenReturn(null);
     assertThrows(
-        AiResourceNotFoundException.class,
-        () -> service.installationScript(EnvironmentId.of(ENV_ID), "1.bad"));
+        DomainException.class, () -> service.installationScript(EnvironmentId.of(ENV_ID), "1.bad"));
 
     Environment env = environment("saved", 1L);
     when(repo.lockById(ENV_ID)).thenReturn(env);
     assertThrows(
-        AiResourceNotFoundException.class,
-        () -> service.installationScript(EnvironmentId.of(ENV_ID), "1.bad"));
+        DomainException.class, () -> service.installationScript(EnvironmentId.of(ENV_ID), "1.bad"));
     verify(repo, never()).updateById(any(), anyLong());
   }
 
@@ -452,7 +443,7 @@ class EnvironmentServiceTest {
     EnvironmentService service = service(repo);
 
     assertTrue(service.uninstallationScript("macos").contains("uninstall"));
-    assertThrows(AiValidationException.class, () -> service.uninstallationScript("unknown"));
+    assertThrows(DomainException.class, () -> service.uninstallationScript("unknown"));
     verify(repo, never()).getByRegistrationTokenHash(any());
   }
 
@@ -517,12 +508,12 @@ class EnvironmentServiceTest {
 
     // 1. Active lease in DB -> rejects
     when(registry.hasActiveLease(EnvironmentId.of(ENV_ID))).thenReturn(true);
-    assertThrows(AiInUseException.class, () -> service.delete(EnvironmentId.of(ENV_ID), "0"));
+    assertThrows(DomainException.class, () -> service.delete(EnvironmentId.of(ENV_ID), "0"));
 
     // 2. Offline, but active work in durable_work -> rejects
     when(registry.hasActiveLease(EnvironmentId.of(ENV_ID))).thenReturn(false);
     when(repo.hasActiveWork(ENV_ID)).thenReturn(true);
-    assertThrows(AiInUseException.class, () -> service.delete(EnvironmentId.of(ENV_ID), "0"));
+    assertThrows(DomainException.class, () -> service.delete(EnvironmentId.of(ENV_ID), "0"));
 
     // 3. All clear -> succeeds
     when(repo.hasActiveWork(ENV_ID)).thenReturn(false);
@@ -623,8 +614,7 @@ class EnvironmentServiceTest {
 
     // 未知 Environment 与详情查询一样是 404 语义错误。
     when(repo.getById(ENV_ID)).thenReturn(null);
-    assertThrows(
-        AiResourceNotFoundException.class, () -> service.listEvents(EnvironmentId.of(ENV_ID)));
+    assertThrows(DomainException.class, () -> service.listEvents(EnvironmentId.of(ENV_ID)));
   }
 
   /** 意图：导入新 Environment 使用新 UUID 并保留导出的凭证摘要；导入不产生可回显的明文。 */
@@ -666,8 +656,7 @@ class EnvironmentServiceTest {
         new EnvironmentService(
             repo, mock(EnvironmentRegistry.class), mock(SystemSettingsSnapshot.class), CLOCK);
 
-    assertThrows(
-        AiDuplicateException.class, () -> service.importEnvironment("dup", h("token"), null));
+    assertThrows(DomainException.class, () -> service.importEnvironment("dup", h("token"), null));
   }
 
   /** 意图：registrationToken 已被占用时拒绝，且错误文本不回显 token 值。 */
@@ -680,9 +669,9 @@ class EnvironmentServiceTest {
         new EnvironmentService(
             repo, mock(EnvironmentRegistry.class), mock(SystemSettingsSnapshot.class), CLOCK);
 
-    AiDuplicateException error =
+    DomainException error =
         assertThrows(
-            AiDuplicateException.class,
+            DomainException.class,
             () -> service.importEnvironment("fresh", h("secret-token"), null));
 
     assertFalse(error.getMessage().contains("secret-token"));
@@ -730,7 +719,7 @@ class EnvironmentServiceTest {
     stale.setVersion(2L);
     when(repo.lockById(ENV_ID)).thenReturn(stale);
     assertThrows(
-        AiVersionConflictException.class,
+        DomainException.class,
         () ->
             service.updateImportedEnvironment(
                 EnvironmentId.of(ENV_ID), h("other-token"), null, "0"));
@@ -764,8 +753,7 @@ class EnvironmentServiceTest {
             repo, mock(EnvironmentRegistry.class), mock(SystemSettingsSnapshot.class), CLOCK);
 
     assertThrows(
-        AiDuplicateException.class,
-        () -> service.importEnvironment("imported", h("token-1"), null));
+        DomainException.class, () -> service.importEnvironment("imported", h("token-1"), null));
   }
 
   /** 意图：目标行不存在时 lockById 返回 null 必须 404。 */
@@ -778,7 +766,7 @@ class EnvironmentServiceTest {
             repo, mock(EnvironmentRegistry.class), mock(SystemSettingsSnapshot.class), CLOCK);
 
     assertThrows(
-        AiResourceNotFoundException.class,
+        DomainException.class,
         () ->
             service.updateImportedEnvironment(EnvironmentId.of(ENV_ID), h("new-token"), null, "0"));
   }
@@ -812,7 +800,7 @@ class EnvironmentServiceTest {
             repo, mock(EnvironmentRegistry.class), mock(SystemSettingsSnapshot.class), CLOCK);
 
     assertThrows(
-        AiResourceNotFoundException.class,
+        DomainException.class,
         () ->
             service.updateImportedEnvironment(EnvironmentId.of(ENV_ID), h("new-token"), null, "0"));
   }
@@ -830,7 +818,7 @@ class EnvironmentServiceTest {
             repo, mock(EnvironmentRegistry.class), mock(SystemSettingsSnapshot.class), CLOCK);
 
     assertThrows(
-        AiVersionConflictException.class,
+        DomainException.class,
         () ->
             service.updateImportedEnvironment(EnvironmentId.of(ENV_ID), h("new-token"), null, "0"));
   }
@@ -847,7 +835,7 @@ class EnvironmentServiceTest {
             repo, mock(EnvironmentRegistry.class), mock(SystemSettingsSnapshot.class), CLOCK);
 
     assertThrows(
-        AiDuplicateException.class,
+        DomainException.class,
         () ->
             service.updateImportedEnvironment(EnvironmentId.of(ENV_ID), h("new-token"), null, "0"));
   }
@@ -856,13 +844,12 @@ class EnvironmentServiceTest {
   @Test
   void staticValidatorsRejectEveryInvalidShape() {
     for (String invalid : new String[] {null, "", "   ", " x", "x ", "a/b", "x".repeat(65)}) {
-      assertThrows(AiValidationException.class, () -> EnvironmentService.validateName(invalid));
+      assertThrows(DomainException.class, () -> EnvironmentService.validateName(invalid));
     }
     assertEquals("ok", EnvironmentService.validateName("ok"));
     for (String invalid : new String[] {null, "", "token", "A".repeat(64), "a".repeat(63)}) {
       assertThrows(
-          AiValidationException.class,
-          () -> EnvironmentService.validateRegistrationTokenHash(invalid));
+          DomainException.class, () -> EnvironmentService.validateRegistrationTokenHash(invalid));
     }
     assertEquals(h("t"), EnvironmentService.validateRegistrationTokenHash(h("t")));
   }
@@ -876,18 +863,18 @@ class EnvironmentServiceTest {
     EnvironmentService service =
         new EnvironmentService(repo, mock(EnvironmentRegistry.class), snapshot, CLOCK);
 
-    assertThrows(AiValidationException.class, () -> service.create(null));
+    assertThrows(DomainException.class, () -> service.create(null));
 
     when(repo.existsByName("dup")).thenReturn(true);
     EnvironmentCreateDTO duplicate = new EnvironmentCreateDTO();
     duplicate.setName("dup");
-    assertThrows(AiDuplicateException.class, () -> service.create(duplicate));
+    assertThrows(DomainException.class, () -> service.create(duplicate));
 
     when(repo.existsByName("fresh")).thenReturn(false);
     when(repo.create(any())).thenThrow(new DuplicateKeyException("dup"));
     EnvironmentCreateDTO fresh = new EnvironmentCreateDTO();
     fresh.setName("fresh");
-    assertThrows(AiDuplicateException.class, () -> service.create(fresh));
+    assertThrows(DomainException.class, () -> service.create(fresh));
   }
 
   /** 意图：详情查询未知 id 必须 404。 */
@@ -898,7 +885,7 @@ class EnvironmentServiceTest {
         new EnvironmentService(
             repo, mock(EnvironmentRegistry.class), mock(SystemSettingsSnapshot.class), CLOCK);
 
-    assertThrows(AiResourceNotFoundException.class, () -> service.get(EnvironmentId.of(ENV_ID)));
+    assertThrows(DomainException.class, () -> service.get(EnvironmentId.of(ENV_ID)));
   }
 
   /** 意图：rotateToken 覆盖缺失行、过期版本与 CAS 丢失（行消失/版本前进）三条失败路径。 */
@@ -909,24 +896,18 @@ class EnvironmentServiceTest {
         new EnvironmentService(
             repo, mock(EnvironmentRegistry.class), mock(SystemSettingsSnapshot.class), CLOCK);
 
-    assertThrows(
-        AiResourceNotFoundException.class,
-        () -> service.rotateToken(EnvironmentId.of(ENV_ID), "0"));
+    assertThrows(DomainException.class, () -> service.rotateToken(EnvironmentId.of(ENV_ID), "0"));
 
     when(repo.lockById(ENV_ID)).thenReturn(environment("old", 2L));
-    assertThrows(
-        AiVersionConflictException.class, () -> service.rotateToken(EnvironmentId.of(ENV_ID), "0"));
+    assertThrows(DomainException.class, () -> service.rotateToken(EnvironmentId.of(ENV_ID), "0"));
 
     when(repo.lockById(ENV_ID)).thenReturn(environment("old", 0L));
     when(repo.updateById(any(), eq(0L))).thenReturn(false);
     when(repo.getById(ENV_ID)).thenReturn(null);
-    assertThrows(
-        AiResourceNotFoundException.class,
-        () -> service.rotateToken(EnvironmentId.of(ENV_ID), "0"));
+    assertThrows(DomainException.class, () -> service.rotateToken(EnvironmentId.of(ENV_ID), "0"));
 
     when(repo.getById(ENV_ID)).thenReturn(environment("newer", 3L));
-    assertThrows(
-        AiVersionConflictException.class, () -> service.rotateToken(EnvironmentId.of(ENV_ID), "0"));
+    assertThrows(DomainException.class, () -> service.rotateToken(EnvironmentId.of(ENV_ID), "0"));
   }
 
   /** 意图：delete 覆盖缺失行、过期版本、CAS 丢失与引用完整性冲突的拒绝路径。 */
@@ -937,12 +918,10 @@ class EnvironmentServiceTest {
     EnvironmentService service =
         new EnvironmentService(repo, registry, mock(SystemSettingsSnapshot.class), CLOCK);
 
-    assertThrows(
-        AiResourceNotFoundException.class, () -> service.delete(EnvironmentId.of(ENV_ID), "0"));
+    assertThrows(DomainException.class, () -> service.delete(EnvironmentId.of(ENV_ID), "0"));
 
     when(repo.lockById(ENV_ID)).thenReturn(environment("token", 2L));
-    assertThrows(
-        AiVersionConflictException.class, () -> service.delete(EnvironmentId.of(ENV_ID), "0"));
+    assertThrows(DomainException.class, () -> service.delete(EnvironmentId.of(ENV_ID), "0"));
 
     when(repo.lockById(ENV_ID)).thenReturn(environment("token", 0L));
     when(registry.hasActiveLease(EnvironmentId.of(ENV_ID))).thenReturn(false);
@@ -950,15 +929,13 @@ class EnvironmentServiceTest {
 
     when(repo.deleteById(ENV_ID, 0L)).thenReturn(false);
     when(repo.getById(ENV_ID)).thenReturn(null);
-    assertThrows(
-        AiResourceNotFoundException.class, () -> service.delete(EnvironmentId.of(ENV_ID), "0"));
+    assertThrows(DomainException.class, () -> service.delete(EnvironmentId.of(ENV_ID), "0"));
 
     when(repo.getById(ENV_ID)).thenReturn(environment("token", 5L));
-    assertThrows(
-        AiVersionConflictException.class, () -> service.delete(EnvironmentId.of(ENV_ID), "0"));
+    assertThrows(DomainException.class, () -> service.delete(EnvironmentId.of(ENV_ID), "0"));
 
     when(repo.deleteById(ENV_ID, 0L)).thenThrow(new DataIntegrityViolationException("ref"));
-    assertThrows(AiInUseException.class, () -> service.delete(EnvironmentId.of(ENV_ID), "0"));
+    assertThrows(DomainException.class, () -> service.delete(EnvironmentId.of(ENV_ID), "0"));
   }
 
   /** 测试意图：租约/心跳窗口已过期的连接用同一时钟派生为 OFFLINE，并且不再对外暴露可用能力。 */

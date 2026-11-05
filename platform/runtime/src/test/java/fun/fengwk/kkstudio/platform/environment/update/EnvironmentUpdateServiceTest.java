@@ -40,8 +40,7 @@ import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentEvent;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
-import fun.fengwk.kkstudio.platform.error.AiEnvironmentUnavailableException;
-import fun.fengwk.kkstudio.platform.error.AiInUseException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentUpdateStartDTO;
@@ -148,7 +147,7 @@ class EnvironmentUpdateServiceTest {
     when(server.runtimeStatus(ENV))
         .thenReturn(Optional.of(snapshot(CURRENT, new DaemonUpdateProgress("1.0.7", 1, 2L))));
 
-    AiInUseException error = assertThrows(AiInUseException.class, () -> service.startUpdate(ENV));
+    DomainException error = assertThrows(DomainException.class, () -> service.startUpdate(ENV));
 
     assertTrue(error.getMessage().contains("1.0.7"), error.getMessage());
     verify(server, never()).beginUpdate(any(), any());
@@ -158,7 +157,7 @@ class EnvironmentUpdateServiceTest {
   void rejectsWhenInvocationsAreInFlight() {
     when(server.activeInvocationCount(ENV)).thenReturn(2);
 
-    assertThrows(AiInUseException.class, () -> service.startUpdate(ENV));
+    assertThrows(DomainException.class, () -> service.startUpdate(ENV));
 
     verify(server, never()).beginUpdate(any(), any());
   }
@@ -167,7 +166,7 @@ class EnvironmentUpdateServiceTest {
   void rejectsWhenDurableWorkRequiresEnvironment() {
     when(environmentRepository.hasActiveWork(ENV.value())).thenReturn(true);
 
-    assertThrows(AiInUseException.class, () -> service.startUpdate(ENV));
+    assertThrows(DomainException.class, () -> service.startUpdate(ENV));
 
     verify(server, never()).beginUpdate(any(), any());
   }
@@ -176,7 +175,7 @@ class EnvironmentUpdateServiceTest {
   void rejectsWhenRuntimeSnapshotIsUnavailable() {
     when(server.runtimeStatus(ENV)).thenReturn(Optional.empty());
 
-    assertThrows(AiEnvironmentUnavailableException.class, () -> service.startUpdate(ENV));
+    assertThrows(DomainException.class, () -> service.startUpdate(ENV));
 
     verify(server, never()).beginUpdate(any(), any());
   }
@@ -185,7 +184,7 @@ class EnvironmentUpdateServiceTest {
   void rejectsWhenEnvironmentIsNotReady() {
     when(registry.find(ENV)).thenReturn(Optional.empty());
 
-    assertThrows(AiEnvironmentUnavailableException.class, () -> service.startUpdate(ENV));
+    assertThrows(DomainException.class, () -> service.startUpdate(ENV));
 
     verify(server, never()).beginUpdate(any(), any());
   }
@@ -195,7 +194,7 @@ class EnvironmentUpdateServiceTest {
     releaseProvider = (operatingSystem, architecture) -> Optional.empty();
     service = newService();
 
-    assertThrows(AiInUseException.class, () -> service.startUpdate(ENV));
+    assertThrows(DomainException.class, () -> service.startUpdate(ENV));
 
     verify(server, never()).beginUpdate(any(), any());
   }
@@ -208,7 +207,7 @@ class EnvironmentUpdateServiceTest {
                 connection(
                     CURRENT, DaemonOperatingSystem.WINDOWS, DaemonArchitecture.ARM64.wireValue())));
 
-    AiInUseException error = assertThrows(AiInUseException.class, () -> service.startUpdate(ENV));
+    DomainException error = assertThrows(DomainException.class, () -> service.startUpdate(ENV));
 
     assertTrue(error.getMessage().contains("windows-arm64"), error.getMessage());
     verify(server, never()).beginUpdate(any(), any());
@@ -220,7 +219,7 @@ class EnvironmentUpdateServiceTest {
       when(registry.find(ENV))
           .thenReturn(Optional.of(connection(CURRENT, DaemonOperatingSystem.LINUX, reported)));
 
-      AiInUseException error = assertThrows(AiInUseException.class, () -> service.startUpdate(ENV));
+      DomainException error = assertThrows(DomainException.class, () -> service.startUpdate(ENV));
 
       assertFalse(error.getMessage().contains("x86_64"), error.getMessage());
     }
@@ -258,7 +257,7 @@ class EnvironmentUpdateServiceTest {
         .when(server)
         .beginUpdate(eq(ENV), any());
 
-    assertThrows(AiInUseException.class, () -> service.startUpdate(ENV));
+    assertThrows(DomainException.class, () -> service.startUpdate(ENV));
 
     verify(server, never()).sendUpdate(any(), any());
     verify(server, never()).endUpdate(any(), any());
@@ -270,7 +269,7 @@ class EnvironmentUpdateServiceTest {
         .when(server)
         .sendUpdate(eq(ENV), any());
 
-    assertThrows(AiInUseException.class, () -> service.startUpdate(ENV));
+    assertThrows(DomainException.class, () -> service.startUpdate(ENV));
 
     verify(server).beginUpdate(eq(ENV), any());
     verify(server).endUpdate(eq(ENV), any());
@@ -283,7 +282,7 @@ class EnvironmentUpdateServiceTest {
         .when(server)
         .sendUpdate(eq(ENV), any());
 
-    assertThrows(AiEnvironmentUnavailableException.class, () -> service.startUpdate(ENV));
+    assertThrows(DomainException.class, () -> service.startUpdate(ENV));
 
     verify(server).beginUpdate(eq(ENV), any());
     verify(server).endUpdate(eq(ENV), any());

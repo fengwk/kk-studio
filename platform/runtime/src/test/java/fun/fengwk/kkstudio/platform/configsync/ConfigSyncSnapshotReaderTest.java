@@ -26,7 +26,7 @@ import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderRepository;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageRepository;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentRepository;
-import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRepository;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRow;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsRepository;
@@ -150,6 +150,6 @@ class ConfigSyncSnapshotReaderTest {
   @Test
   void missingSettingsRowIsAResourceError() {
     when(systemSettingsRepository.get()).thenReturn(null);
-    assertThrows(AiResourceNotFoundException.class, () -> reader.read());
+    assertThrows(DomainException.class, () -> reader.read());
   }
 }

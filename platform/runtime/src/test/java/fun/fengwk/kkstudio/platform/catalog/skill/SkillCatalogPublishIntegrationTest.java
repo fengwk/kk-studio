@@ -15,7 +15,8 @@ import fun.fengwk.kkstudio.platform.catalog.skill.archive.SkillArchiveBuilder.In
 import fun.fengwk.kkstudio.platform.catalog.skill.archive.SkillArchiveBuilder.Type;
 import fun.fengwk.kkstudio.platform.catalog.skill.archive.SkillArchiveIndex;
 import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitRepository;
-import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
+import fun.fengwk.kkstudio.platform.error.DomainErrorCode;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.platform.storage.StorageS3TestConfiguration;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageBlobRepository;
@@ -125,7 +126,8 @@ class SkillCatalogPublishIntegrationTest extends PostgresSpringTestSupport {
           assertNotNull(result);
           successCount++;
         } catch (ExecutionException e) {
-          if (e.getCause() instanceof AiVersionConflictException) {
+          if (e.getCause() instanceof DomainException domain
+              && domain.code() == DomainErrorCode.VERSION_CONFLICT) {
             conflictCount++;
           } else {
             throw e;
@@ -134,7 +136,7 @@ class SkillCatalogPublishIntegrationTest extends PostgresSpringTestSupport {
       }
 
       assertEquals(1, successCount, "exactly one concurrent publish should succeed");
-      assertEquals(1, conflictCount, "the loser must receive AiVersionConflictException");
+      assertEquals(1, conflictCount, "the loser must receive DomainException");
 
       SkillPackage after = skillPackageRepository.getPackage(PACKAGE);
       assertEquals(1L, after.version(), "package version must be incremented to 1");

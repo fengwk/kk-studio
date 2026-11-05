@@ -39,7 +39,7 @@ import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
-import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionSummaryDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadSummaryDTO;
 
@@ -162,8 +162,8 @@ class HarnessOwnerQueryServiceTest {
   @Test
   void missingChatPropagatesSpiError() {
     SessionOwner owner = new SessionOwner("CHAT", id(1).toString());
-    when(ownership.listSessions(owner)).thenThrow(new AiResourceNotFoundException("chat"));
-    assertThrows(AiResourceNotFoundException.class, () -> service.listSessions(owner));
+    when(ownership.listSessions(owner)).thenThrow(DomainException.notFound("chat"));
+    assertThrows(DomainException.class, () -> service.listSessions(owner));
     verifyNoInteractions(runtime);
   }
 

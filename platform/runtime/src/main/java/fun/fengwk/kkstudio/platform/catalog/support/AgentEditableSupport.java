@@ -4,7 +4,7 @@ import org.springframework.stereotype.Component;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 
 /**
  * AgentEditableSupport 负责标准化 agent 管理面的字符串与 JSON 可编辑字段。
@@ -47,7 +47,7 @@ public final class AgentEditableSupport {
   /** 拒绝规范化后超出当前 PostgreSQL schema 列宽限制的值。 */
   public void validateMaxLength(String resource, String field, String value, int maxLength) {
     if (value != null && value.codePointCount(0, value.length()) > maxLength) {
-      throw new AiValidationException(
+      throw DomainException.validation(
           resource, field + " must not exceed " + maxLength + " characters");
     }
   }

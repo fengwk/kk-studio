@@ -34,9 +34,7 @@ import fun.fengwk.kkstudio.platform.cluster.ClusterInternalErrors;
 import fun.fengwk.kkstudio.platform.cluster.ClusterInternalRequests;
 import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
-import fun.fengwk.kkstudio.platform.error.AiDomainException;
-import fun.fengwk.kkstudio.platform.error.AiEnvironmentIdeUnavailableException;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
 import fun.fengwk.kkstudio.platform.http.RequestParameters;
 
@@ -156,7 +154,7 @@ public class ClusterEnvironmentIdeInternalController {
     try {
       return strictMapper.readValue(payload, type);
     } catch (JacksonException error) {
-      throw new AiValidationException("environment", "internal IDE request body is invalid");
+      throw DomainException.validation("environment", "internal IDE request body is invalid");
     }
   }
 
@@ -169,7 +167,7 @@ public class ClusterEnvironmentIdeInternalController {
       }
       return data;
     } catch (IOException error) {
-      throw new AiValidationException("environment", "internal IDE request body is unreadable");
+      throw DomainException.validation("environment", "internal IDE request body is unreadable");
     }
   }
 
@@ -177,7 +175,7 @@ public class ClusterEnvironmentIdeInternalController {
     boolean local =
         clusterNodeRegistry.route(environmentId).filter(ClusterOwnerRoute::local).isPresent();
     if (!local) {
-      throw new AiEnvironmentIdeUnavailableException(
+      throw DomainException.ideUnavailable(
           "internal IDE request does not match this node's READY owner route");
     }
   }
@@ -195,8 +193,8 @@ public class ClusterEnvironmentIdeInternalController {
     return ClusterInternalErrors.payloadTooLarge("internal IDE request body is too large");
   }
 
-  @ExceptionHandler(AiDomainException.class)
-  public ResponseEntity<ApiResponse<Void>> handleDomain(AiDomainException error) {
+  @ExceptionHandler(DomainException.class)
+  public ResponseEntity<ApiResponse<Void>> handleDomain(DomainException error) {
     return ClusterInternalErrors.domain(error);
   }
 

@@ -24,9 +24,8 @@ import fun.fengwk.kkstudio.platform.catalog.skill.SkillManifestEntry;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageGitSource;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageRepository;
-import fun.fengwk.kkstudio.platform.error.AiInUseException;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
-import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
+import fun.fengwk.kkstudio.platform.error.DomainErrorCode;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionCreateDTO;
@@ -105,7 +104,7 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
       assertNotNull(skillPackages.getPackage(packageName));
       definitionService.deleteAgent(created.value().getName(), created.value().getVersion());
     } else {
-      assertTrue(created.error() instanceof AiValidationException);
+      assertTrue(domainFailure(created.error(), DomainErrorCode.VALIDATION));
       if (persisted != null) {
         definitionService.deleteAgent(persisted.name(), String.valueOf(persisted.version()));
       }
@@ -142,7 +141,8 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
     if (referencesReview) {
       assertNotNull(skillPackages.getPackage(packageName).findSkill("review"));
     }
-    assertTrue(updated.value() != null || updated.error() instanceof AiValidationException);
+    assertTrue(
+        updated.value() != null || domainFailure(updated.error(), DomainErrorCode.VALIDATION));
     definitionService.deleteAgent(persisted.name(), String.valueOf(persisted.version()));
     if (skillPackages.getPackage(packageName) != null) {
       deletePackage(packageName, skillPackages.getPackage(packageName).version());
@@ -175,7 +175,8 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
     if (persisted != null && persisted.configJson().contains("\"name\": \"zeta\"")) {
       assertNotNull(skillPackages.getPackage(packageName).findSkill("zeta"));
     }
-    assertTrue(created.value() != null || created.error() instanceof AiValidationException);
+    assertTrue(
+        created.value() != null || domainFailure(created.error(), DomainErrorCode.VALIDATION));
     if (persisted != null) {
       definitionService.deleteAgent(persisted.name(), String.valueOf(persisted.version()));
     }
@@ -218,7 +219,7 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
     }
     assertTrue(
         created.value() != null
-            || created.error() instanceof AiValidationException
+            || domainFailure(created.error(), DomainErrorCode.VALIDATION)
             || persisted == null);
     mcpServerService.deleteServer(server.getName(), currentServerVersion(server.getName()));
     model.delete();
@@ -254,7 +255,7 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
     }
     assertTrue(
         created.value() != null
-            || created.error() instanceof AiValidationException
+            || domainFailure(created.error(), DomainErrorCode.VALIDATION)
             || persisted == null);
     if (persisted != null) {
       definitionService.deleteAgent(persisted.name(), String.valueOf(persisted.version()));
@@ -315,7 +316,10 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
             () -> {
               try {
                 mcpServerService.deleteServer(server.getName(), server.getVersion());
-              } catch (AiInUseException ignored) {
+              } catch (DomainException error) {
+                if (error.code() != DomainErrorCode.IN_USE) {
+                  throw error;
+                }
                 // Agent 已经在共享锁内写入引用：删除必须失败并保留 server。
               }
               return null;
@@ -328,7 +332,8 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
       definitionService.deleteAgent(persisted.name(), String.valueOf(persisted.version()));
       mcpServerService.deleteServer(server.getName(), currentServerVersion(server.getName()));
     } else {
-      assertTrue(updated.error() instanceof AiValidationException || updated.value() != null);
+      assertTrue(
+          domainFailure(updated.error(), DomainErrorCode.VALIDATION) || updated.value() != null);
       definitionService.deleteAgent(persisted.name(), String.valueOf(persisted.version()));
       if (mcpServers.getByName(server.getName()).isPresent()) {
         mcpServerService.deleteServer(server.getName(), currentServerVersion(server.getName()));
@@ -385,7 +390,12 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
           results::toString);
       assertEquals(
           1,
-          results.stream().filter(AiVersionConflictException.class::isInstance).count(),
+          results.stream()
+              .filter(
+                  error ->
+                      error instanceof DomainException domain
+                          && domain.code() == DomainErrorCode.VERSION_CONFLICT)
+              .count(),
           results::toString);
       AgentDefinition persisted = definitionRepository.getByName(created.getName());
       definitionService.deleteAgent(persisted.name(), String.valueOf(persisted.version()));
@@ -647,6 +657,10 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
 
   private static String suffix() {
     return Long.toString(System.nanoTime(), 36);
+  }
+
+  private static boolean domainFailure(Throwable error, DomainErrorCode code) {
+    return error instanceof DomainException domain && domain.code() == code;
   }
 
   private static void await(CountDownLatch latch) {

@@ -15,7 +15,7 @@ import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogService;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillSyncOrchestrator;
-import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
 import fun.fengwk.kkstudio.share.ai.skill.SkillArchiveDownloadDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillEnvironmentSyncDTO;
@@ -126,7 +126,7 @@ public class StudioSkillCatalogController {
   public ApiResponse<Void> resyncEnvironment(@PathVariable("environmentId") String environmentId) {
     EnvironmentId id = EnvironmentId.parse(environmentId);
     if (environmentRegistry.find(id).isEmpty()) {
-      throw new AiResourceNotFoundException("environment");
+      throw DomainException.notFound("environment");
     }
     skillSyncOrchestrator.onEnvironmentReady(id);
     return ApiResponse.noContent();

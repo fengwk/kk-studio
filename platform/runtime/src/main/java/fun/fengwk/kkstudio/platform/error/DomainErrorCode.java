@@ -1,9 +1,9 @@
 package fun.fengwk.kkstudio.platform.error;
 
 /**
- * AI catalog 领域失败的稳定机器可读错误码。
+ * 领域失败的稳定机器可读错误码。
  *
- * <p>这些错误码属于 HTTP 契约的一部分：客户端用它们分支处理重试/刷新行为，而无需解析消息。 可以新增错误码；既有错误码冻结不变。
+ * <p>这些错误码属于 HTTP 契约的一部分：客户端用它们分支处理重试/刷新行为，而无需解析消息。可以新增错误码；既有错误码冻结不变。
  */
 public enum DomainErrorCode {
 

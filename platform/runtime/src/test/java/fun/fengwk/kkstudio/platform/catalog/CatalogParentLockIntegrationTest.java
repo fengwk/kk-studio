@@ -17,7 +17,7 @@ import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModelService;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderRepository;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderService;
-import fun.fengwk.kkstudio.platform.error.AiInUseException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionCreateDTO;
@@ -79,7 +79,7 @@ class CatalogParentLockIntegrationTest extends PostgresSpringTestSupport {
               () -> {
                 deleteStarted.countDown();
                 assertThrows(
-                    AiInUseException.class,
+                    DomainException.class,
                     () ->
                         providerService.deleteProvider(provider.getName(), provider.getVersion()));
                 return null;
@@ -132,7 +132,7 @@ class CatalogParentLockIntegrationTest extends PostgresSpringTestSupport {
               () -> {
                 deleteStarted.countDown();
                 assertThrows(
-                    AiInUseException.class,
+                    DomainException.class,
                     () -> modelService.deleteModel(model.getName(), model.getVersion()));
                 return null;
               });

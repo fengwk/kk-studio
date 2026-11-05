@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.platform.catalog.mcp;
 
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -35,14 +35,14 @@ public final class McpConfigParser {
   /** 校验 Server 名：{@code ^[a-z][a-z0-9_]*$}，不超过 32 个字符。 */
   public static String requireName(String name) {
     if (name == null || name.isBlank()) {
-      throw new AiValidationException(RESOURCE, RESOURCE + " name must not be blank");
+      throw DomainException.validation(RESOURCE, RESOURCE + " name must not be blank");
     }
     if (!NAME_PATTERN.matcher(name).matches()) {
-      throw new AiValidationException(
+      throw DomainException.validation(
           RESOURCE, RESOURCE + " name must match ^[a-z][a-z0-9_]*$: " + name);
     }
     if (name.length() > NAME_MAX_LENGTH) {
-      throw new AiValidationException(
+      throw DomainException.validation(
           RESOURCE, RESOURCE + " name must not exceed " + NAME_MAX_LENGTH + " characters");
     }
     return name;
@@ -71,34 +71,34 @@ public final class McpConfigParser {
   /** 校验并规范化 endpoint URL：必须是绝对 http/https 地址且不含 user-info 凭据。 */
   public static String requireUrl(String url) {
     if (url == null || url.isBlank()) {
-      throw new AiValidationException(RESOURCE, "url must not be blank");
+      throw DomainException.validation(RESOURCE, "url must not be blank");
     }
     String trimmed = url.strip();
     if (!url.equals(trimmed)) {
-      throw new AiValidationException(RESOURCE, "url must not contain surrounding whitespace");
+      throw DomainException.validation(RESOURCE, "url must not contain surrounding whitespace");
     }
     if (trimmed.length() > URL_MAX_LENGTH) {
-      throw new AiValidationException(
+      throw DomainException.validation(
           RESOURCE, "url must not exceed " + URL_MAX_LENGTH + " characters");
     }
     try {
       URI uri = new URI(trimmed);
       if (!uri.isAbsolute()) {
-        throw new AiValidationException(RESOURCE, "url must be an absolute http or https URL");
+        throw DomainException.validation(RESOURCE, "url must be an absolute http or https URL");
       }
       String scheme = uri.getScheme();
       if (scheme == null
           || (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme))) {
-        throw new AiValidationException(RESOURCE, "url scheme must be http or https");
+        throw DomainException.validation(RESOURCE, "url scheme must be http or https");
       }
       if (uri.getHost() == null || uri.getHost().isBlank()) {
-        throw new AiValidationException(RESOURCE, "url must contain a valid host");
+        throw DomainException.validation(RESOURCE, "url must contain a valid host");
       }
       if (uri.getUserInfo() != null || uri.getRawUserInfo() != null) {
-        throw new AiValidationException(RESOURCE, "url must not contain user-info credentials");
+        throw DomainException.validation(RESOURCE, "url must not contain user-info credentials");
       }
     } catch (URISyntaxException error) {
-      throw new AiValidationException(RESOURCE, "url format is invalid");
+      throw DomainException.validation(RESOURCE, "url format is invalid");
     }
     return trimmed;
   }
@@ -112,25 +112,25 @@ public final class McpConfigParser {
     for (Map.Entry<String, String> entry : headers.entrySet()) {
       String key = entry.getKey();
       if (key == null || key.isBlank()) {
-        throw new AiValidationException(RESOURCE, "header names must not be blank");
+        throw DomainException.validation(RESOURCE, "header names must not be blank");
       }
       if (key.length() > HEADER_NAME_MAX_LENGTH) {
-        throw new AiValidationException(
+        throw DomainException.validation(
             RESOURCE, "header name must not exceed " + HEADER_NAME_MAX_LENGTH + " characters");
       }
       if (key.codePoints().anyMatch(Character::isISOControl)) {
-        throw new AiValidationException(RESOURCE, "header names must not contain control chars");
+        throw DomainException.validation(RESOURCE, "header names must not contain control chars");
       }
       String value = entry.getValue();
       if (value == null) {
         value = "";
       }
       if (value.length() > HEADER_VALUE_MAX_LENGTH) {
-        throw new AiValidationException(
+        throw DomainException.validation(
             RESOURCE, "header value must not exceed " + HEADER_VALUE_MAX_LENGTH + " characters");
       }
       if (value.codePoints().anyMatch(Character::isISOControl)) {
-        throw new AiValidationException(RESOURCE, "header values must not contain control chars");
+        throw DomainException.validation(RESOURCE, "header values must not contain control chars");
       }
       normalized.put(key, value);
     }
@@ -143,7 +143,8 @@ public final class McpConfigParser {
       return DEFAULT_TIMEOUT_MILLIS;
     }
     if (timeoutMillis <= 0) {
-      throw new AiValidationException(RESOURCE, "timeoutMillis must be positive: " + timeoutMillis);
+      throw DomainException.validation(
+          RESOURCE, "timeoutMillis must be positive: " + timeoutMillis);
     }
     return timeoutMillis;
   }
@@ -165,7 +166,7 @@ public final class McpConfigParser {
           String varName = matcher.group(1);
           String resolvedVal = envProvider.apply(varName);
           if (resolvedVal == null || resolvedVal.isBlank()) {
-            throw new AiValidationException(
+            throw DomainException.validation(
                 RESOURCE, "required environment variable not found: " + varName);
           }
           resolved.put(key, resolvedVal);

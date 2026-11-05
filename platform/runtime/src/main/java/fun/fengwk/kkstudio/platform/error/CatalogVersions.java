@@ -16,7 +16,7 @@ public final class CatalogVersions {
     try {
       return DecimalLongs.parseNonNegative(value, field);
     } catch (IllegalArgumentException error) {
-      throw new AiValidationException(field, error.getMessage(), error);
+      throw DomainException.validation(field, error.getMessage(), error);
     }
   }
 

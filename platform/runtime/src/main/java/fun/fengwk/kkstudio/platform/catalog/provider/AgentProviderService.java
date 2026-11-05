@@ -9,13 +9,8 @@ import fun.fengwk.kkstudio.common.page.PageQuery;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.model.provider.impl.ProviderModelDiscovery;
 import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
-import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
-import fun.fengwk.kkstudio.platform.error.AiInUseException;
-import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
-import fun.fengwk.kkstudio.platform.error.AiUpstreamException;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
-import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
 import fun.fengwk.kkstudio.platform.error.CatalogVersions;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderEditablePropertiesDTO;
@@ -65,13 +60,13 @@ public class AgentProviderService {
 
   /**
    * 基于 (name, {@code updateDTO.expectedVersion}) 的原子 CAS 更新。null/空白凭据视为保留原值；过期版本抛 {@link
-   * AiVersionConflictException}。
+   * DomainException}。
    */
   @Transactional
   public AgentProviderDTO updateProvider(String name, AgentProviderUpdateDTO updateDTO) {
     String rawExpected = updateDTO == null ? null : updateDTO.getExpectedVersion();
     if (rawExpected == null) {
-      throw new AiValidationException(RESOURCE, "expectedVersion is required");
+      throw DomainException.validation(RESOURCE, "expectedVersion is required");
     }
     long expected = CatalogVersions.parse(rawExpected, "expectedVersion");
     AgentProvider provider = requireProvider(name);
@@ -109,11 +104,11 @@ public class AgentProviderService {
     long expected = CatalogVersions.parse(expectedVersion, "expectedVersion");
     AgentProvider provider = repository.getByNameForUpdate(name);
     if (provider == null) {
-      throw new AiResourceNotFoundException(RESOURCE);
+      throw DomainException.notFound(RESOURCE);
     }
     ensureExpectedVersion(provider, expectedVersion, expected);
     if (repository.hasModels(name)) {
-      throw new AiInUseException(RESOURCE, RESOURCE + " in use by models: " + name);
+      throw DomainException.inUse(RESOURCE, RESOURCE + " in use by models: " + name);
     }
     if (!repository.deleteByName(name, expected)) {
       throw casFailure(name, expectedVersion);
@@ -127,9 +122,9 @@ public class AgentProviderService {
       return modelDiscovery.listModelIds(
           provider.providerType(), provider.baseUrl(), provider.credential());
     } catch (IllegalArgumentException invalid) {
-      throw new AiValidationException(RESOURCE, invalid.getMessage());
+      throw DomainException.validation(RESOURCE, invalid.getMessage());
     } catch (ProviderModelDiscovery.Failure failure) {
-      throw new AiUpstreamException(RESOURCE, failure.getMessage());
+      throw DomainException.upstream(RESOURCE, failure.getMessage());
     }
   }
 
@@ -152,7 +147,7 @@ public class AgentProviderService {
       }
     } catch (DuplicateKeyException error) {
       // 创建直接依赖 name 主键的唯一约束；同名已存在时数据库拒绝，不预先查询。
-      throw new AiDuplicateException(
+      throw DomainException.duplicate(
           RESOURCE, "agent provider name already exists: " + provider.name(), error);
     }
     return toDto(repository.getByName(provider.name()));
@@ -170,16 +165,16 @@ public class AgentProviderService {
   private RuntimeException casFailure(String name, String rawExpected) {
     AgentProvider reread = repository.getByName(name);
     if (reread == null) {
-      return new AiResourceNotFoundException(RESOURCE);
+      return DomainException.notFound(RESOURCE);
     }
-    return new AiVersionConflictException(
+    return DomainException.versionConflict(
         RESOURCE, rawExpected, CatalogVersions.format(reread.version()));
   }
 
   private AgentProvider requireProvider(String name) {
     AgentProvider provider = repository.getByName(name);
     if (provider == null) {
-      throw new AiResourceNotFoundException(RESOURCE);
+      throw DomainException.notFound(RESOURCE);
     }
     return provider;
   }
@@ -187,7 +182,7 @@ public class AgentProviderService {
   private static void ensureExpectedVersion(
       AgentProvider provider, String expectedVersion, long expected) {
     if (provider.version() != expected) {
-      throw new AiVersionConflictException(
+      throw DomainException.versionConflict(
           RESOURCE, expectedVersion, CatalogVersions.format(provider.version()));
     }
   }
@@ -231,12 +226,12 @@ public class AgentProviderService {
       String existingConfigJson,
       boolean preserveMissingEdits) {
     if (properties == null) {
-      throw new AiValidationException(RESOURCE, RESOURCE + " body must not be null");
+      throw DomainException.validation(RESOURCE, RESOURCE + " body must not be null");
     }
     String name = requireName(canonicalName);
     String providerType = properties.getProviderType();
     if (providerType == null || providerType.isBlank()) {
-      throw new AiValidationException(RESOURCE, RESOURCE + " providerType must not be blank");
+      throw DomainException.validation(RESOURCE, RESOURCE + " providerType must not be blank");
     }
     String credential = editableSupport.trimToNull(properties.getCredential());
     if (preserveMissingEdits && credential == null) {
@@ -266,24 +261,24 @@ public class AgentProviderService {
           credential,
           configJson);
     } catch (IllegalArgumentException error) {
-      throw new AiValidationException(RESOURCE, error.getMessage());
+      throw DomainException.validation(RESOURCE, error.getMessage());
     }
   }
 
   private String requireName(String name) {
     if (name == null) {
-      throw new AiValidationException(RESOURCE, RESOURCE + " name must not be blank");
+      throw DomainException.validation(RESOURCE, RESOURCE + " name must not be blank");
     }
     String canonical = name.strip();
     if (canonical.isEmpty()) {
-      throw new AiValidationException(RESOURCE, RESOURCE + " name must not be blank");
+      throw DomainException.validation(RESOURCE, RESOURCE + " name must not be blank");
     }
     if (!name.equals(canonical)) {
-      throw new AiValidationException(
+      throw DomainException.validation(
           RESOURCE, RESOURCE + " name must not contain surrounding whitespace");
     }
     if (canonical.indexOf('/') >= 0) {
-      throw new AiValidationException(RESOURCE, RESOURCE + " name must not contain '/'");
+      throw DomainException.validation(RESOURCE, RESOURCE + " name must not contain '/'");
     }
     editableSupport.validateMaxLength(RESOURCE, "name", canonical, NAME_MAX_LENGTH);
     return canonical;

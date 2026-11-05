@@ -6,9 +6,7 @@ import tools.jackson.databind.JsonNode;
 import fun.fengwk.kkstudio.common.json.JsonValues;
 import fun.fengwk.kkstudio.common.schema.SchemaJsonCodec;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
-import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
-import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthHandler;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthSpec;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfigSchema;
@@ -140,15 +138,15 @@ public final class PluginManagementService {
     for (Map.Entry<String, PluginSecretPatchDTO> entry : secretPatch.entrySet()) {
       String field = entry.getKey();
       if (field == null || field.isBlank() || !field.equals(field.strip())) {
-        throw new AiValidationException(RESOURCE, "secretPatch must use canonical field names");
+        throw DomainException.validation(RESOURCE, "secretPatch must use canonical field names");
       }
       PluginSecretPatchDTO dto = entry.getValue();
       if (dto == null || dto.getOperation() == null) {
-        throw new AiValidationException(RESOURCE, "secretPatch must declare an operation");
+        throw DomainException.validation(RESOURCE, "secretPatch must declare an operation");
       }
       String operation = dto.getOperation();
       if (("KEEP".equals(operation) || "CLEAR".equals(operation)) && dto.getValue() != null) {
-        throw new AiValidationException(RESOURCE, operation + " must not carry a value");
+        throw DomainException.validation(RESOURCE, operation + " must not carry a value");
       }
       try {
         mapped.put(
@@ -157,11 +155,11 @@ public final class PluginManagementService {
               case "KEEP" -> PluginSecretPatch.keep();
               case "SET" -> PluginSecretPatch.set(dto.getValue());
               case "CLEAR" -> PluginSecretPatch.clear();
-              default -> throw new AiValidationException(
+              default -> throw DomainException.validation(
                   RESOURCE, "secretPatch operation must be KEEP, SET or CLEAR");
             });
       } catch (IllegalArgumentException error) {
-        throw new AiValidationException(RESOURCE, "secretPatch value is invalid");
+        throw DomainException.validation(RESOURCE, "secretPatch value is invalid");
       }
     }
     return mapped;
@@ -173,7 +171,7 @@ public final class PluginManagementService {
     PluginAuthSpec.DeepLink deepLink = requireDeepLink(plugin);
     PluginAuthHandler handler = requireAuthHandler(plugin);
     if (!deepLink.acceptsRegion(region)) {
-      throw new AiValidationException(RESOURCE, "region must be one of the declared candidates");
+      throw DomainException.validation(RESOURCE, "region must be one of the declared candidates");
     }
     String loginUrl;
     try {
@@ -181,10 +179,10 @@ public final class PluginManagementService {
     } catch (RuntimeException error) {
       log.debug(
           "Plugin {} rejected the selected region: {}", pluginId, error.getClass().getSimpleName());
-      throw new AiValidationException(RESOURCE, "plugin rejected the selected region");
+      throw DomainException.validation(RESOURCE, "plugin rejected the selected region");
     }
     if (loginUrl == null || loginUrl.isBlank()) {
-      throw new AiValidationException(RESOURCE, "plugin did not provide a login url");
+      throw DomainException.validation(RESOURCE, "plugin did not provide a login url");
     }
     String authAttemptId = PluginAuthNonce.issue();
     authAttempts.replace(
@@ -206,10 +204,11 @@ public final class PluginManagementService {
     PluginAuthSpec.DeepLink deepLink = requireDeepLink(plugin);
     PluginAuthHandler handler = requireAuthHandler(plugin);
     if (!PluginAuthNonce.isValidHandle(authAttemptId)) {
-      throw new AiValidationException(RESOURCE, "authAttemptId must be a canonical attempt handle");
+      throw DomainException.validation(
+          RESOURCE, "authAttemptId must be a canonical attempt handle");
     }
     if (callbackUrl == null || callbackUrl.isBlank()) {
-      throw new AiValidationException(RESOURCE, "callbackUrl must not be blank");
+      throw DomainException.validation(RESOURCE, "callbackUrl must not be blank");
     }
     Instant now = clock.instant();
     PluginAuthAttemptRow attempt =
@@ -217,7 +216,7 @@ public final class PluginManagementService {
             .consume(pluginId, PluginAuthNonce.hash(authAttemptId), now)
             .orElseThrow(
                 () ->
-                    new AiValidationException(
+                    DomainException.validation(
                         RESOURCE, "auth attempt is unknown, expired, superseded or stale"));
     PluginCredentialMaterial material;
     try {
@@ -225,17 +224,17 @@ public final class PluginManagementService {
     } catch (RuntimeException error) {
       log.debug(
           "Plugin {} rejected the auth callback: {}", pluginId, error.getClass().getSimpleName());
-      throw new AiValidationException(RESOURCE, "plugin rejected the auth callback");
+      throw DomainException.validation(RESOURCE, "plugin rejected the auth callback");
     }
     if (material == null
         || !material.interactive()
         || !attempt.region().equals(material.region())
         || !deepLink.acceptsRegion(material.region())) {
-      throw new AiValidationException(
+      throw DomainException.validation(
           RESOURCE, "plugin returned a credential outside the prepared region");
     }
     if (!material.expiresAt().isAfter(now) || material.nextRefreshAt().isBefore(now)) {
-      throw new AiValidationException(RESOURCE, "plugin returned an unusable credential lifetime");
+      throw DomainException.validation(RESOURCE, "plugin returned an unusable credential lifetime");
     }
     configurationService.completeAuth(pluginId, material);
     return describe(plugin);
@@ -253,7 +252,7 @@ public final class PluginManagementService {
           applied(lease.snapshot(), pluginId).orElseThrow();
       long appliedRevision = configured.config().revision();
       if (expectedRevision != appliedRevision) {
-        throw new AiVersionConflictException(
+        throw DomainException.versionConflict(
             RESOURCE, "revision=" + expectedRevision, "revision=" + appliedRevision);
       }
       PluginConnectionCheck connectionCheck =
@@ -262,7 +261,7 @@ public final class PluginManagementService {
               .connectionCheck()
               .orElseThrow(
                   () ->
-                      new AiValidationException(
+                      DomainException.validation(
                           RESOURCE, "plugin does not support connection checks"));
       PluginConnectionCheckResult result = connectionCheck.check();
       PluginConnectionCheckDTO dto = new PluginConnectionCheckDTO();
@@ -394,13 +393,11 @@ public final class PluginManagementService {
   }
 
   private PluginConfigurationRow requireConfiguration(String pluginId) {
-    return configurations
-        .find(pluginId)
-        .orElseThrow(() -> new AiResourceNotFoundException(RESOURCE));
+    return configurations.find(pluginId).orElseThrow(() -> DomainException.notFound(RESOURCE));
   }
 
   private StudioPlugin requirePlugin(String pluginId) {
-    return registry.find(pluginId).orElseThrow(() -> new AiResourceNotFoundException(RESOURCE));
+    return registry.find(pluginId).orElseThrow(() -> DomainException.notFound(RESOURCE));
   }
 
   private static PluginAuthHandler requireAuthHandler(StudioPlugin plugin) {
@@ -408,7 +405,7 @@ public final class PluginManagementService {
         .authHandler()
         .orElseThrow(
             () ->
-                new AiValidationException(
+                DomainException.validation(
                     RESOURCE, "plugin does not provide interactive authentication"));
   }
 
@@ -416,7 +413,8 @@ public final class PluginManagementService {
     if (plugin.authenticationSpec() instanceof PluginAuthSpec.DeepLink deepLink) {
       return deepLink;
     }
-    throw new AiValidationException(RESOURCE, "plugin does not provide interactive authentication");
+    throw DomainException.validation(
+        RESOURCE, "plugin does not provide interactive authentication");
   }
 
   private static PluginAuthKindDTO authKindOf(PluginAuthSpec authSpec) {

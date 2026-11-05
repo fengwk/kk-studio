@@ -136,10 +136,19 @@ public class StudioMessageService {
   private String httpMessage(int status, String part) {
     HttpStatus resolved = HttpStatus.resolve(status);
     if (resolved == null) {
-      return message(HTTP_PREFIX + "unknown." + part, Map.of("status", status));
+      return unknownHttpMessage(status, part);
     }
     String key = HTTP_PREFIX + resolved.name().toLowerCase(Locale.ROOT) + "." + part;
-    return message(key, Collections.emptyMap());
+    try {
+      return message(key, Collections.emptyMap());
+    } catch (MissingResourceException missing) {
+      // 已识别但未登记文案的状态（如 418）与未知状态使用同一兜底；调用方不再各自 try/catch。
+      return unknownHttpMessage(status, part);
+    }
+  }
+
+  private String unknownHttpMessage(int status, String part) {
+    return message(HTTP_PREFIX + "unknown." + part, Map.of("status", status));
   }
 
   private static ResourceBundle createBundle(Locale locale, ClassLoader classLoader) {

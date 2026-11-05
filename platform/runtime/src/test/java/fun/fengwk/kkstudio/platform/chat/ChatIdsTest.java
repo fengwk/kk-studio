@@ -6,7 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 
 import java.util.UUID;
 
@@ -24,19 +24,19 @@ class ChatIdsTest {
   void parseUuidRejectsLeadingOrTrailingWhitespace() {
     // 测试意图：收紧行为：带首尾空白的 UUID 必须被严格拒绝，不得做隐式 trim
     UUID id = UUID.randomUUID();
-    assertThrows(AiValidationException.class, () -> ChatIds.parseUuid(" " + id, "chatId"));
-    assertThrows(AiValidationException.class, () -> ChatIds.parseUuid(id + " ", "chatId"));
-    assertThrows(AiValidationException.class, () -> ChatIds.parseUuid(" " + id + " ", "chatId"));
+    assertThrows(DomainException.class, () -> ChatIds.parseUuid(" " + id, "chatId"));
+    assertThrows(DomainException.class, () -> ChatIds.parseUuid(id + " ", "chatId"));
+    assertThrows(DomainException.class, () -> ChatIds.parseUuid(" " + id + " ", "chatId"));
   }
 
   @Test
   void parseUuidRejectsNullOrBlankOrMalformed() {
-    // 测试意图：null、空串及畸形格式均转为 AiValidationException
-    assertThrows(AiValidationException.class, () -> ChatIds.parseUuid(null, "chatId"));
-    assertThrows(AiValidationException.class, () -> ChatIds.parseUuid("", "chatId"));
-    assertThrows(AiValidationException.class, () -> ChatIds.parseUuid("not-a-uuid", "chatId"));
+    // 测试意图：null、空串及畸形格式均转为 DomainException
+    assertThrows(DomainException.class, () -> ChatIds.parseUuid(null, "chatId"));
+    assertThrows(DomainException.class, () -> ChatIds.parseUuid("", "chatId"));
+    assertThrows(DomainException.class, () -> ChatIds.parseUuid("not-a-uuid", "chatId"));
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () -> ChatIds.parseUuid(UUID.randomUUID().toString().toUpperCase(), "chatId"));
   }
 

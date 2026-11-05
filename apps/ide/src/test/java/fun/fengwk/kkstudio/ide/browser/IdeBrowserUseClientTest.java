@@ -20,7 +20,7 @@ import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.platform.cluster.ClusterInternalAuthentication;
 import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.cluster.HmacClusterInternalAuthentication;
-import fun.fengwk.kkstudio.platform.error.AiEnvironmentIdeUnavailableException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -121,7 +121,7 @@ class IdeBrowserUseClientTest {
     IdeBrowserUseClient client = client(registry, nodes, authentication(LOCAL_NODE));
 
     assertThrows(
-        AiEnvironmentIdeUnavailableException.class,
+        DomainException.class,
         () -> client.findExactIntent(IDENTITY_REMOTE, DOCUMENT, ENVIRONMENT, VIEW, CLAIM));
   }
 
@@ -139,9 +139,7 @@ class IdeBrowserUseClientTest {
     when(nodes.liveInternalOrigin(REMOTE_NODE)).thenReturn(Optional.of(origin()));
     IdeBrowserUseClient client = client(registry, nodes, authentication(REMOTE_NODE));
 
-    assertThrows(
-        AiEnvironmentIdeUnavailableException.class,
-        () -> client.activeBoundProofs(IDENTITY_REMOTE, DOCUMENT));
+    assertThrows(DomainException.class, () -> client.activeBoundProofs(IDENTITY_REMOTE, DOCUMENT));
     assertEquals(1, requests.get());
   }
 
@@ -166,9 +164,7 @@ class IdeBrowserUseClientTest {
     when(nodes.liveInternalOrigin(REMOTE_NODE)).thenReturn(Optional.of(origin()));
     IdeBrowserUseClient client = client(registry, nodes, authentication(REMOTE_NODE));
 
-    assertThrows(
-        AiEnvironmentIdeUnavailableException.class,
-        () -> client.activeBoundProofs(IDENTITY_REMOTE, DOCUMENT));
+    assertThrows(DomainException.class, () -> client.activeBoundProofs(IDENTITY_REMOTE, DOCUMENT));
   }
 
   @Test

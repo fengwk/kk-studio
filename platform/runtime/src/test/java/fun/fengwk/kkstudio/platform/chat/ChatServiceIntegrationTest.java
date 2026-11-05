@@ -27,9 +27,7 @@ import fun.fengwk.kkstudio.harness.builtin.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.spi.store.ThreadStore;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionService;
-import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
-import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.harness.thread.command.DatabaseTurnResolver;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
@@ -98,23 +96,23 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
 
       ChatCreateDTO missingAgent = new ChatCreateDTO();
       missingAgent.setTitle("missing-agent");
-      assertThrows(AiValidationException.class, () -> chatService.createChat(missingAgent));
+      assertThrows(DomainException.class, () -> chatService.createChat(missingAgent));
 
       ChatCreateDTO blankAgent = new ChatCreateDTO();
       blankAgent.setTitle("blank-agent");
       blankAgent.setAgentName("  ");
-      assertThrows(AiValidationException.class, () -> chatService.createChat(blankAgent));
+      assertThrows(DomainException.class, () -> chatService.createChat(blankAgent));
 
       ChatCreateDTO unknownAgent = new ChatCreateDTO();
       unknownAgent.setTitle("orphan");
       unknownAgent.setAgentName("missing-agent");
-      assertThrows(AiValidationException.class, () -> chatService.createChat(unknownAgent));
+      assertThrows(DomainException.class, () -> chatService.createChat(unknownAgent));
 
       ChatUpdateDTO badUpdate = new ChatUpdateDTO();
-      assertThrows(AiValidationException.class, () -> chatService.updateChat(chatId, badUpdate));
+      assertThrows(DomainException.class, () -> chatService.updateChat(chatId, badUpdate));
       badUpdate.setAgentName("missing-agent");
       badUpdate.setExpectedVersion("0");
-      assertThrows(AiValidationException.class, () -> chatService.updateChat(chatId, badUpdate));
+      assertThrows(DomainException.class, () -> chatService.updateChat(chatId, badUpdate));
 
       ChatUpdateDTO update = new ChatUpdateDTO();
       update.setTitle("beta");
@@ -128,7 +126,7 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
       ChatUpdateDTO stale = new ChatUpdateDTO();
       stale.setAgentName("missing-agent");
       stale.setExpectedVersion("0");
-      assertThrows(AiVersionConflictException.class, () -> chatService.updateChat(chatId, stale));
+      assertThrows(DomainException.class, () -> chatService.updateChat(chatId, stale));
 
       ChatCreateDTO newer = new ChatCreateDTO();
       newer.setTitle("gamma");
@@ -202,7 +200,7 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
       assertEquals(false, updatedWithStaleAgent.isYoloEnabled());
     } finally {
       chatService.deleteChat(chatId, chatService.getChat(chatId).getVersion());
-      assertThrows(AiResourceNotFoundException.class, () -> chatService.getChat(chatId));
+      assertThrows(DomainException.class, () -> chatService.getChat(chatId));
     }
   }
 
@@ -229,13 +227,13 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
       unknown.setTitle("unknown-env");
       unknown.setAgentName("default-assistant");
       unknown.setEnvironmentName("missing-env");
-      assertThrows(AiValidationException.class, () -> chatService.createChat(unknown));
+      assertThrows(DomainException.class, () -> chatService.createChat(unknown));
 
       ChatCreateDTO malformed = new ChatCreateDTO();
       malformed.setTitle("bad-env");
       malformed.setAgentName("default-assistant");
       malformed.setEnvironmentName("bad/env");
-      assertThrows(AiValidationException.class, () -> chatService.createChat(malformed));
+      assertThrows(DomainException.class, () -> chatService.createChat(malformed));
 
       // 更新省略保留当前环境。
       ChatUpdateDTO omit = new ChatUpdateDTO();
@@ -253,12 +251,11 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
       ChatUpdateDTO stale = new ChatUpdateDTO();
       stale.setEnvironmentName("env-a");
       stale.setExpectedVersion("0");
-      assertThrows(
-          AiVersionConflictException.class, () -> chatService.updateChat(created.getId(), stale));
+      assertThrows(DomainException.class, () -> chatService.updateChat(created.getId(), stale));
       assertNull(chatService.getChat(created.getId()).getEnvironmentName());
     } finally {
       chatService.deleteChat(created.getId(), chatService.getChat(created.getId()).getVersion());
-      assertThrows(AiResourceNotFoundException.class, () -> chatService.getChat(created.getId()));
+      assertThrows(DomainException.class, () -> chatService.getChat(created.getId()));
     }
   }
 

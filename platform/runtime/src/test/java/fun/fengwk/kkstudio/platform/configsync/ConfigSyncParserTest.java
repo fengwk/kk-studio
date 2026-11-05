@@ -10,7 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncSkipped;
 
 import java.util.List;
@@ -61,7 +61,7 @@ class ConfigSyncParserTest {
       // 每个 mutation 都必须真正改动 fixture，否则断言会退化为对同一份合法文档的重复解析。
       assertNotEquals(valid, invalid, () -> "mutation must change the fixture: " + invalid);
       assertThrows(
-          AiValidationException.class,
+          DomainException.class,
           () ->
               parser.parse(
                   invalid.replace("    installConfig:", "    bogus: true\n    installConfig:")));
@@ -98,7 +98,7 @@ class ConfigSyncParserTest {
   @Test
   void providerWithInvalidHttpRetryOverrideIsHardRejected() {
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () ->
             parser.parse(
                 "providers:\n"
@@ -106,7 +106,7 @@ class ConfigSyncParserTest {
                     + "    providerType: openai\n"
                     + "    modelHttpRetryStatusCodes: [600]\n"));
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () ->
             parser.parse(
                 "providers:\n"
@@ -114,7 +114,7 @@ class ConfigSyncParserTest {
                     + "    providerType: openai\n"
                     + "    modelHttpRetryStatusCodes: [429, 429]\n"));
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () ->
             parser.parse(
                 "providers:\n"
@@ -127,7 +127,7 @@ class ConfigSyncParserTest {
   void paddedNamesCannotBypassDuplicateIdentityValidation() {
     // 目录服务会 strip 名称；文件不能用带空白的别名绕过同名条目的硬错误。
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () -> parser.parse("providers:\n" + provider("p", "openai") + provider("' p '", "openai")));
   }
 
@@ -141,9 +141,8 @@ class ConfigSyncParserTest {
                 .get("cases");
     for (Object value : cases) {
       Map<?, ?> fixture = (Map<?, ?>) value;
-      AiValidationException error =
-          assertThrows(
-              AiValidationException.class, () -> parser.parse((String) fixture.get("yaml")));
+      DomainException error =
+          assertThrows(DomainException.class, () -> parser.parse((String) fixture.get("yaml")));
       assertTrue(
           error.getMessage().contains(fixture.get("path") + " must be non-blank and unpadded"));
     }
@@ -256,7 +255,7 @@ class ConfigSyncParserTest {
   @Test
   void duplicateNameIsRejectedEvenWhenFirstEntryIsSkipped() {
     String yaml = "providers:\n" + provider("p", "unknown_protocol") + provider("p", "openai");
-    assertThrows(AiValidationException.class, () -> parser.parse(yaml));
+    assertThrows(DomainException.class, () -> parser.parse(yaml));
   }
 
   @Test
@@ -273,13 +272,13 @@ class ConfigSyncParserTest {
             + "    name: m\n"
             + "    modelId: gpt2\n"
             + VALID_MODEL_CONFIG;
-    assertThrows(AiValidationException.class, () -> parser.parse(yaml));
+    assertThrows(DomainException.class, () -> parser.parse(yaml));
   }
 
   @Test
   void presentButNullCategoryIsATypeError() {
-    assertThrows(AiValidationException.class, () -> parser.parse("providers:\n"));
-    assertThrows(AiValidationException.class, () -> parser.parse("settings:\n"));
+    assertThrows(DomainException.class, () -> parser.parse("providers:\n"));
+    assertThrows(DomainException.class, () -> parser.parse("settings:\n"));
   }
 
   @Test
@@ -301,7 +300,7 @@ class ConfigSyncParserTest {
   @Test
   void wrongProviderTypeValueTypeIsAHardError() {
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () -> parser.parse("providers:\n  - name: p\n    providerType: 7\n"));
   }
 
@@ -312,13 +311,13 @@ class ConfigSyncParserTest {
             + "  - packageName: skill\n"
             + "    repositoryUrl: not-a-valid-url\n"
             + "    branch: main\n";
-    assertThrows(AiValidationException.class, () -> parser.parse(yaml));
+    assertThrows(DomainException.class, () -> parser.parse(yaml));
   }
 
   @Test
   void missingRequiredFieldIsAHardError() {
     assertThrows(
-        AiValidationException.class, () -> parser.parse("providers:\n  - providerType: openai\n"));
+        DomainException.class, () -> parser.parse("providers:\n  - providerType: openai\n"));
   }
 
   @Test
@@ -342,8 +341,8 @@ class ConfigSyncParserTest {
   /** 意图：类别不是 list、条目不是 map 都属于结构错误而非条目 skip。 */
   @Test
   void nonListCategoryAndNonMapEntryAreHardErrors() {
-    assertThrows(AiValidationException.class, () -> parser.parse("providers: {}\n"));
-    assertThrows(AiValidationException.class, () -> parser.parse("providers:\n  - 1\n"));
+    assertThrows(DomainException.class, () -> parser.parse("providers: {}\n"));
+    assertThrows(DomainException.class, () -> parser.parse("providers:\n  - 1\n"));
   }
 
   /** 意图：每个类别的条目级未声明顶层字段都整体 skip（不静默丢弃字段继续导入）。 */
@@ -428,22 +427,22 @@ class ConfigSyncParserTest {
             + "    modelId: gpt\n"
             + "    config:\n"
             + "      obsolete: 1\n";
-    assertThrows(AiValidationException.class, () -> parser.parse(yaml));
+    assertThrows(DomainException.class, () -> parser.parse(yaml));
   }
 
   /** 未知条目字段不能掩盖 known 非法值/缺必填：环境空 token、MCP 非法 url、model 空 modelId 都必须硬拒绝。 */
   @Test
   void unknownEntryFieldWithKnownInvalidValueIsRejected() {
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () ->
             parser.parse(
                 "environments:\n  - name: env\n    registrationTokenHash: ''\n    bogus: 1\n"));
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () -> parser.parse("mcpServers:\n  - name: mcp\n    url: not-a-url\n    bogus: 1\n"));
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () ->
             parser.parse(
                 "providers:\n"
@@ -480,18 +479,18 @@ class ConfigSyncParserTest {
         "    execution: {driver: builtin, settings: {modelName: m, variant: null}}\n";
     for (String legacy : List.of("    model: m\n", "    variant: default\n")) {
       assertThrows(
-          AiValidationException.class,
+          DomainException.class,
           () -> parser.parse("agents:\n  - name: a\n" + execution + legacy + "    config: {}\n"));
     }
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () -> parser.parse("agents:\n  - name: a\n    model: m\n    config: {}\n"));
   }
 
   @Test
   void agentConfigMustBeAnObject() {
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () ->
             parser.parse(
                 "agents:\n  - name: a\n"
@@ -503,7 +502,7 @@ class ConfigSyncParserTest {
   @Test
   void agentNameReservedForBuiltinIsAHardError() {
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () ->
             parser.parse(
                 "agents:\n"
@@ -534,19 +533,19 @@ class ConfigSyncParserTest {
 
   @Test
   void settingsMustBeAnObject() {
-    assertThrows(AiValidationException.class, () -> parser.parse("settings:\n  - 1\n"));
+    assertThrows(DomainException.class, () -> parser.parse("settings:\n  - 1\n"));
   }
 
   /** 意图：optLong 只接受精确整数——小数、超 64 位大整数与字符串都必须拒绝，合法整数正常读取。 */
   @Test
   void optLongRejectsDecimalOversizedAndStringValues() {
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () ->
             parser.parse(
                 "providers:\n  - name: p\n    providerType: openai\n    modelCallTimeoutMillis: 1.5\n"));
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () ->
             parser.parse(
                 "providers:\n"
@@ -554,7 +553,7 @@ class ConfigSyncParserTest {
                     + "    providerType: openai\n"
                     + "    modelCallTimeoutMillis: 99999999999999999999999999\n"));
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () ->
             parser.parse(
                 "providers:\n  - name: p\n    providerType: openai\n    modelCallTimeoutMillis: abc\n"));
@@ -568,7 +567,7 @@ class ConfigSyncParserTest {
   @Test
   void optBooleanRejectsNonBooleanValue() {
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () ->
             parser.parse(
                 "mcpServers:\n  - name: mcp\n    url: https://mcp.example.com/mcp\n    enabled: 1\n"));
@@ -591,12 +590,12 @@ class ConfigSyncParserTest {
     assertEquals("", headers.get("X-Null"));
 
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () ->
             parser.parse(
                 "mcpServers:\n  - name: mcp\n    url: https://mcp.example.com/mcp\n    headers: 5\n"));
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () ->
             parser.parse(
                 "mcpServers:\n"
@@ -643,10 +642,10 @@ class ConfigSyncParserTest {
   @Test
   void pluginEntryRejectsWrongFieldType() {
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () -> pluginParser().parse(pluginYaml("    valuesJson: '{\"promptAgentName\":5}'\n")));
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () ->
             pluginParser()
                 .parse(pluginYaml("    revision: 5\n    valuesJson: '{\"promptAgentName\":5}'\n")));
@@ -656,9 +655,9 @@ class ConfigSyncParserTest {
   @Test
   void pluginEntryRejectsSecretLikeFieldWithoutEchoingValue() {
     String sentinel = "sk-sentinel-13579";
-    AiValidationException error =
+    DomainException error =
         assertThrows(
-            AiValidationException.class,
+            DomainException.class,
             () ->
                 pluginParser()
                     .parse(pluginYaml("    valuesJson: '{\"apiKey\":\"" + sentinel + "\"}'\n")));
@@ -669,14 +668,13 @@ class ConfigSyncParserTest {
   @Test
   void pluginEntryRejectsMalformedOrOversizedValues() {
     assertThrows(
-        AiValidationException.class,
-        () -> pluginParser().parse(pluginYaml("    valuesJson: '[1,2]'\n")));
+        DomainException.class, () -> pluginParser().parse(pluginYaml("    valuesJson: '[1,2]'\n")));
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () -> pluginParser().parse(pluginYaml("    valuesJson: '{\"promptAgentName\":1}'\n")));
     String oversized = "x".repeat(66 * 1024);
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () ->
             pluginParser()
                 .parse(
@@ -687,7 +685,7 @@ class ConfigSyncParserTest {
   @Test
   void duplicatePluginIdIsRejected() {
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () ->
             pluginParser()
                 .parse(
@@ -704,12 +702,11 @@ class ConfigSyncParserTest {
   @Test
   void pluginEntryRequiresStrictFields() {
     assertThrows(
-        AiValidationException.class,
-        () -> pluginParser().parse("plugins:\n  - valuesJson: '{}'\n"));
+        DomainException.class, () -> pluginParser().parse("plugins:\n  - valuesJson: '{}'\n"));
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () -> pluginParser().parse("plugins:\n  - pluginId: " + PLUGIN_ID + "\n"));
     assertThrows(
-        AiValidationException.class, () -> pluginParser().parse(pluginYaml("    valuesJson: 5\n")));
+        DomainException.class, () -> pluginParser().parse(pluginYaml("    valuesJson: 5\n")));
   }
 }

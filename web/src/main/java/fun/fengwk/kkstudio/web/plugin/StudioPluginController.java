@@ -13,8 +13,9 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.error.CatalogVersions;
+import fun.fengwk.kkstudio.platform.error.DomainErrorCode;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
 import fun.fengwk.kkstudio.platform.pluginhost.service.PluginManagementService;
 import fun.fengwk.kkstudio.share.ai.plugin.PluginAuthCompleteRequestDTO;
@@ -122,8 +123,11 @@ public class StudioPluginController {
   private static long parseCoordinate(String value, String field) {
     try {
       return CatalogVersions.parse(value, field);
-    } catch (AiValidationException error) {
-      throw new AiValidationException(
+    } catch (DomainException error) {
+      if (error.code() != DomainErrorCode.VALIDATION) {
+        throw error;
+      }
+      throw DomainException.validation(
           RESOURCE, field + " must be a canonical non-negative decimal string");
     }
   }

@@ -4,7 +4,7 @@ import lombok.AllArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 
-import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwner;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwnerDisplay;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwnership;
@@ -49,7 +49,7 @@ public class ChatSessionOwnership implements SessionOwnership {
   @Override
   public void lockForAcceptance(SessionOwner owner, UUID newRootThreadId) {
     if (chats.lockForKeyShare(id(owner)) == null) {
-      throw new AiResourceNotFoundException("chat");
+      throw DomainException.notFound("chat");
     }
   }
 
@@ -75,7 +75,7 @@ public class ChatSessionOwnership implements SessionOwnership {
   public List<UUID> listSessions(SessionOwner owner) {
     UUID chatId = id(owner);
     if (chats.getById(chatId) == null) {
-      throw new AiResourceNotFoundException("chat");
+      throw DomainException.notFound("chat");
     }
     return sessions.listSessionIds(chatId);
   }

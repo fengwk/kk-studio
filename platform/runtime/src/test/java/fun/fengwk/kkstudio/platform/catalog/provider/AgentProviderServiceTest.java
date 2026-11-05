@@ -12,10 +12,8 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.common.page.PageQuery;
-import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
-import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
-import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
+import fun.fengwk.kkstudio.platform.error.DomainErrorCode;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderDTO;
@@ -46,7 +44,7 @@ public class AgentProviderServiceTest extends PostgresSpringTestSupport {
     assertEquals("openai", provider.getProviderType());
     assertEquals("0", provider.getVersion());
     assertThrows(
-        AiDuplicateException.class,
+        DomainException.class,
         () -> agentProviderService.createProvider(provider(name, "another")));
     assertTrue(
         agentProviderService.pageProviders(new PageQuery(1, 100)).getResults().stream()
@@ -61,14 +59,12 @@ public class AgentProviderServiceTest extends PostgresSpringTestSupport {
     assertEquals("openai", updated.getProviderType());
     assertTrue(updated.isConfigured());
     assertEquals("1", updated.getVersion());
-    assertThrows(
-        AiVersionConflictException.class, () -> agentProviderService.updateProvider(name, update));
+    assertThrows(DomainException.class, () -> agentProviderService.updateProvider(name, update));
 
     AgentProviderUpdateDTO badUpdate = new AgentProviderUpdateDTO();
+    assertThrows(DomainException.class, () -> agentProviderService.updateProvider(name, badUpdate));
     assertThrows(
-        AiValidationException.class, () -> agentProviderService.updateProvider(name, badUpdate));
-    assertThrows(
-        AiResourceNotFoundException.class,
+        DomainException.class,
         () -> agentProviderService.updateProvider("missing-" + name, update));
 
     // 硬删除：行物理消失且同名立即可重建。
@@ -80,8 +76,7 @@ public class AgentProviderServiceTest extends PostgresSpringTestSupport {
     AgentProviderDTO recreated = agentProviderService.createProvider(provider(name, "replacement"));
     assertEquals(name, recreated.getName());
     agentProviderService.deleteProvider(name, recreated.getVersion());
-    assertThrows(
-        AiResourceNotFoundException.class, () -> agentProviderService.deleteProvider(name, "0"));
+    assertThrows(DomainException.class, () -> agentProviderService.deleteProvider(name, "0"));
   }
 
   @Test
@@ -124,7 +119,9 @@ public class AgentProviderServiceTest extends PostgresSpringTestSupport {
           successes++;
           currentVersion = updated.getVersion();
         } catch (ExecutionException error) {
-          assertTrue(error.getCause() instanceof AiVersionConflictException);
+          assertTrue(
+              error.getCause() instanceof DomainException conflict
+                  && conflict.code() == DomainErrorCode.VERSION_CONFLICT);
         }
       }
       assertEquals(1, successes);

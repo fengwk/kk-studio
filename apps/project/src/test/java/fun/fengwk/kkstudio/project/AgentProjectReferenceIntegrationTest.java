@@ -8,7 +8,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionService;
-import fun.fengwk.kkstudio.platform.error.AiInUseException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.project.model.Project;
 
 import java.util.UUID;
@@ -25,7 +25,7 @@ class AgentProjectReferenceIntegrationTest extends ProjectTestSupport {
     UUID projectId = createProjectWithStages("AgentReferenceProj", agent, agent, 3);
 
     assertThrows(
-        AiInUseException.class,
+        DomainException.class,
         () -> agentDefinitionService.deleteAgent(agent, currentVersion(agent)));
 
     Project project = projectService.getProject(projectId);

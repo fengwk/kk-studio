@@ -49,7 +49,7 @@ import fun.fengwk.kkstudio.canvas.function.CanvasResourceKind;
 import fun.fengwk.kkstudio.canvas.infra.platform.PluginCanvasFunctionCatalog;
 import fun.fengwk.kkstudio.common.json.JsonValues;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
 import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialStore;
@@ -210,7 +210,7 @@ class ComfyuiPluginPostgresIntegrationTest {
               PluginConfigurationService configuration = configurationService(context, runtime);
 
               assertThrows(
-                  AiValidationException.class,
+                  DomainException.class,
                   () ->
                       configuration.configure(
                           COMFYUI, 1L, enabledValues("not-json", "1", "value", "2"), Map.of()));

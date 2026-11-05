@@ -10,7 +10,7 @@ import fun.fengwk.kkstudio.platform.catalog.mcp.client.McpClientFactory;
 import fun.fengwk.kkstudio.platform.catalog.mcp.client.McpDeadline;
 import fun.fengwk.kkstudio.platform.catalog.mcp.client.McpToolDefinition;
 import fun.fengwk.kkstudio.platform.catalog.mcp.client.RemoteMcpConfig;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -59,12 +59,12 @@ public final class McpToolDiscovery {
     for (McpToolDefinition remote : remoteTools) {
       String sourceName = validateSourceName(remote.name());
       if (!seenSourceNames.add(sourceName)) {
-        throw new AiValidationException(
+        throw DomainException.validation(
             RESOURCE, "mcp server returned duplicate tools for source name: " + sourceName);
       }
       String toolName = requireToolName(server, sourceName);
       if (!seenToolNames.add(toolName)) {
-        throw new AiValidationException(
+        throw DomainException.validation(
             RESOURCE,
             "mcp server returns tools that normalize to the same model name: " + toolName);
       }
@@ -94,16 +94,16 @@ public final class McpToolDiscovery {
       List<McpToolDefinition> tools = client.listTools(deadline, token);
       return tools == null ? List.of() : tools;
     } catch (RuntimeException error) {
-      throw new AiValidationException(RESOURCE, "MCP server discovery failed.");
+      throw DomainException.validation(RESOURCE, "MCP server discovery failed.");
     }
   }
 
   private static String validateSourceName(String rawName) {
     if (rawName == null || rawName.isBlank()) {
-      throw new AiValidationException(RESOURCE, "mcp tool source name must not be blank");
+      throw DomainException.validation(RESOURCE, "mcp tool source name must not be blank");
     }
     if (rawName.length() > SOURCE_NAME_MAX_LENGTH) {
-      throw new AiValidationException(
+      throw DomainException.validation(
           RESOURCE,
           "mcp tool source name exceeds " + SOURCE_NAME_MAX_LENGTH + " characters: " + rawName);
     }
@@ -112,7 +112,7 @@ public final class McpToolDiscovery {
 
   private static String requireDescription(String description, String sourceName) {
     if (description == null || description.isBlank()) {
-      throw new AiValidationException(
+      throw DomainException.validation(
           RESOURCE, "mcp tool description must not be blank: " + sourceName);
     }
     return description.strip();
@@ -123,7 +123,7 @@ public final class McpToolDiscovery {
       // 复用带 object 校验的入口：数组/标量等非 object root 必须确定性拒绝。
       return McpInputSchemaConverter.toCanonicalJson(inputSchemaJson, RESOURCE);
     } catch (IllegalArgumentException error) {
-      throw new AiValidationException(RESOURCE, "mcp tool input schema is invalid: " + sourceName);
+      throw DomainException.validation(RESOURCE, "mcp tool input schema is invalid: " + sourceName);
     }
   }
 
@@ -131,7 +131,7 @@ public final class McpToolDiscovery {
     try {
       return McpToolNameNormalizer.requireModelToolName(server.name(), sourceName);
     } catch (IllegalArgumentException error) {
-      throw new AiValidationException(RESOURCE, error.getMessage());
+      throw DomainException.validation(RESOURCE, error.getMessage());
     }
   }
 }

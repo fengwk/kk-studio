@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.web.advice;
 
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -10,16 +9,9 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import fun.fengwk.kkstudio.ide.web.StudioEnvironmentIdeController;
-import fun.fengwk.kkstudio.platform.error.AiDomainException;
-import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
-import fun.fengwk.kkstudio.platform.error.AiEnvironmentIdeUnavailableException;
-import fun.fengwk.kkstudio.platform.error.AiEnvironmentUnavailableException;
-import fun.fengwk.kkstudio.platform.error.AiInUseException;
-import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
-import fun.fengwk.kkstudio.platform.error.AiUpstreamException;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
-import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
+import fun.fengwk.kkstudio.platform.http.DomainErrorResponses;
 import fun.fengwk.kkstudio.platform.http.DomainErrorStatus;
 import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.web.controller.StudioAgentDefinitionController;
@@ -30,28 +22,19 @@ import fun.fengwk.kkstudio.web.controller.StudioConfigSyncController;
 import fun.fengwk.kkstudio.web.controller.StudioEnvironmentController;
 import fun.fengwk.kkstudio.web.controller.StudioMcpServerController;
 import fun.fengwk.kkstudio.web.controller.StudioSkillCatalogController;
+import fun.fengwk.kkstudio.web.plugin.StudioPluginController;
 
-import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * AI Catalog、Chat、MCP 与 Environment domain 错误模型的 Web 层统一翻译器。
+ * AI Catalog、Chat、MCP、Environment 与 Plugin 领域错误的 Web 层统一翻译器。
  *
- * <p>每个 handler 都返回项目 {@link ApiResponse} 信封，其中包含由类型化错误的 {@link
- * fun.fengwk.kkstudio.platform.error.DomainErrorCode} 派生的稳定机器可读 {@code code}。HTTP 状态遵循以下语义：
- *
- * <ul>
- *   <li>{@link AiValidationException}, {@link MissingServletRequestParameterException}, {@link
- *       MethodArgumentTypeMismatchException} → 400
- *   <li>{@link AiResourceNotFoundException} → 404
- *   <li>{@link AiVersionConflictException}, {@link AiDuplicateException}, {@link AiInUseException},
- *       {@link AiEnvironmentIdeUnavailableException}, {@link AiEnvironmentUnavailableException} →
- *       409
- *   <li>{@link AiUpstreamException} → 502
- * </ul>
+ * <p>所有领域失败都由同一种 {@link DomainException} 表达；handler 只把错误码、资源与 detail 交给 {@link
+ * DomainErrorResponses}，HTTP 状态统一取自 {@link DomainErrorStatus}。用户可见 {@code message} 按请求 locale 从
+ * {@code studio.error.domain.<code>.message} 解析，版本冲突额外保留 expected/actual。
  *
  * <p>数据库唯一性 / 完整性竞争条件有意不在此处翻译：相关服务自行包装 {@link org.springframework.dao.DuplicateKeyException}
- * 并上报类型化错误，因此全局 advice 不会影响无关 controller。
+ * 并上报领域错误，因此全局 advice 不会影响无关 controller。
  */
 @Order(Ordered.HIGHEST_PRECEDENCE)
 @RestControllerAdvice(
@@ -64,7 +47,8 @@ import java.util.Map;
       StudioEnvironmentController.class,
       StudioSkillCatalogController.class,
       StudioConfigSyncController.class,
-      StudioEnvironmentIdeController.class
+      StudioEnvironmentIdeController.class,
+      StudioPluginController.class
     })
 public class StudioDomainErrorAdvice {
 
@@ -74,88 +58,31 @@ public class StudioDomainErrorAdvice {
     this.messageService = messageService;
   }
 
-  @ExceptionHandler(AiValidationException.class)
-  public ResponseEntity<ApiResponse<Void>> handleValidation(AiValidationException error) {
-    return build(error);
-  }
-
-  @ExceptionHandler(AiResourceNotFoundException.class)
-  public ResponseEntity<ApiResponse<Void>> handleNotFound(AiResourceNotFoundException error) {
-    return build(error);
-  }
-
-  @ExceptionHandler(AiVersionConflictException.class)
-  public ResponseEntity<ApiResponse<Void>> handleVersionConflict(AiVersionConflictException error) {
-    return build(error);
-  }
-
-  @ExceptionHandler(AiDuplicateException.class)
-  public ResponseEntity<ApiResponse<Void>> handleDuplicate(AiDuplicateException error) {
-    return build(error);
-  }
-
-  @ExceptionHandler(AiInUseException.class)
-  public ResponseEntity<ApiResponse<Void>> handleInUse(AiInUseException error) {
-    return build(error);
-  }
-
-  @ExceptionHandler(AiEnvironmentIdeUnavailableException.class)
-  public ResponseEntity<ApiResponse<Void>> handleIdeUnavailable(
-      AiEnvironmentIdeUnavailableException error) {
-    return build(error);
-  }
-
-  @ExceptionHandler(AiEnvironmentUnavailableException.class)
-  public ResponseEntity<ApiResponse<Void>> handleEnvironmentUnavailable(
-      AiEnvironmentUnavailableException error) {
-    return build(error);
-  }
-
-  @ExceptionHandler(AiUpstreamException.class)
-  public ResponseEntity<ApiResponse<Void>> handleUpstream(AiUpstreamException error) {
-    return build(error);
+  @ExceptionHandler(DomainException.class)
+  public ResponseEntity<ApiResponse<Void>> handle(DomainException error) {
+    return DomainErrorResponses.of(
+        error,
+        messageService.domainMessage(error.code(), Map.of("resource", error.resource())),
+        error.getMessage());
   }
 
   @ExceptionHandler(MissingServletRequestParameterException.class)
   public ResponseEntity<ApiResponse<Void>> handleMissingParam(
       MissingServletRequestParameterException error) {
-    AiValidationException wrapped =
-        new AiValidationException(
+    DomainException wrapped =
+        DomainException.validation(
             error.getParameterName(), error.getParameterName() + " is required");
-    return build(
-        HttpStatus.BAD_REQUEST,
-        wrapped,
-        messageService.validationRequired(error.getParameterName()));
+    return DomainErrorResponses.of(
+        wrapped, messageService.validationRequired(error.getParameterName()), wrapped.getMessage());
   }
 
   @ExceptionHandler(MethodArgumentTypeMismatchException.class)
   public ResponseEntity<ApiResponse<Void>> handleTypeMismatch(
       MethodArgumentTypeMismatchException error) {
-    AiValidationException wrapped =
-        new AiValidationException(
+    DomainException wrapped =
+        DomainException.validation(
             error.getName(), error.getName() + " has invalid value: " + error.getValue());
-    return build(
-        HttpStatus.BAD_REQUEST, wrapped, messageService.validationTypeMismatch(error.getName()));
-  }
-
-  /** 状态统一取自 {@link DomainErrorStatus}：与集群内部端点共用同一张映射表。 */
-  private ResponseEntity<ApiResponse<Void>> build(AiDomainException error) {
-    return build(
-        DomainErrorStatus.of(error),
-        error,
-        messageService.domainMessage(error.code(), Map.of("resource", error.resource())));
-  }
-
-  private ResponseEntity<ApiResponse<Void>> build(
-      HttpStatus status, AiDomainException error, String message) {
-    Map<String, Object> errorContext = new LinkedHashMap<>();
-    errorContext.put("resource", error.resource());
-    if (error instanceof AiVersionConflictException versionConflict) {
-      errorContext.put("expectedVersion", versionConflict.expectedVersion());
-      errorContext.put("actualVersion", versionConflict.actualVersion());
-    }
-    errorContext.put("detail", error.getMessage());
-    return ResponseEntity.status(status)
-        .body(ApiResponse.error(status, error.code().code(), message, errorContext));
+    return DomainErrorResponses.of(
+        wrapped, messageService.validationTypeMismatch(error.getName()), wrapped.getMessage());
   }
 }

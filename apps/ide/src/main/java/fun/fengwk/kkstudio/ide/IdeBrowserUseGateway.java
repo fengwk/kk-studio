@@ -5,7 +5,8 @@ import fun.fengwk.kkstudio.ide.browser.ConnectionIdentity;
 import fun.fengwk.kkstudio.ide.browser.IdeBrowserUse;
 import fun.fengwk.kkstudio.ide.browser.IdeBrowserUseClient;
 import fun.fengwk.kkstudio.ide.browser.IdeBrowserUseView;
-import fun.fengwk.kkstudio.platform.error.AiEnvironmentIdeUnavailableException;
+import fun.fengwk.kkstudio.platform.error.DomainErrorCode;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -48,8 +49,11 @@ public class IdeBrowserUseGateway {
           environmentId,
           viewId,
           claimId);
-    } catch (AiEnvironmentIdeUnavailableException error) {
-      throw error;
+    } catch (DomainException error) {
+      if (error.code() == DomainErrorCode.IDE_UNAVAILABLE) {
+        throw error;
+      }
+      throw unavailable("browser IDE usage intent is unavailable", error);
     } catch (RuntimeException error) {
       throw unavailable("browser IDE usage intent is unavailable", error);
     }
@@ -64,8 +68,11 @@ public class IdeBrowserUseGateway {
       Optional<IdeBrowserUse> usage =
           client.activeBoundProofs(new ConnectionIdentity(eventNodeId, connectionId), documentId);
       return usage.map(value -> toProofs(documentId, value));
-    } catch (AiEnvironmentIdeUnavailableException error) {
-      throw error;
+    } catch (DomainException error) {
+      if (error.code() == DomainErrorCode.IDE_UNAVAILABLE) {
+        throw error;
+      }
+      throw unavailable("browser IDE usage proofs are unavailable", error);
     } catch (RuntimeException error) {
       throw unavailable("browser IDE usage proofs are unavailable", error);
     }
@@ -89,10 +96,10 @@ public class IdeBrowserUseGateway {
     return new Proofs(usage.documentId(), usage.revision(), proofs);
   }
 
-  private static AiEnvironmentIdeUnavailableException unavailable(String message, Throwable cause) {
+  private static DomainException unavailable(String message, Throwable cause) {
     return cause == null
-        ? new AiEnvironmentIdeUnavailableException(message)
-        : new AiEnvironmentIdeUnavailableException(message, cause);
+        ? DomainException.ideUnavailable(message)
+        : DomainException.ideUnavailable(message, cause);
   }
 
   /** 一个 document 当前带 epoch 的绑定列表（可能包含其它 Environment；调用方按 environment 过滤）。 */

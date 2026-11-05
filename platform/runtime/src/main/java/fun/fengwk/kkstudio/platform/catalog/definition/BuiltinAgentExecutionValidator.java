@@ -8,8 +8,7 @@ import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelDefaultVariantResolver;
-import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelKind;
 
 import java.util.Objects;
@@ -43,20 +42,20 @@ public final class BuiltinAgentExecutionValidator {
     ModelSelection selection = model(execution);
     AgentModel model = modelRepository.getByNameForUpdate(selection.modelName());
     if (model == null) {
-      throw new AiResourceNotFoundException("agent_model");
+      throw DomainException.notFound("agent_model");
     }
     String variant = selection.variant();
     if (variant == null) {
       return;
     }
     if (model.kind() == AgentModelKind.GROUP) {
-      throw new AiValidationException(
+      throw DomainException.validation(
           RESOURCE, "variant must be blank when the selected model is a GROUP");
     }
     try {
       variantResolver.resolve(model.name(), variant);
     } catch (IllegalArgumentException error) {
-      throw new AiValidationException(RESOURCE, error.getMessage(), error);
+      throw DomainException.validation(RESOURCE, error.getMessage(), error);
     }
   }
 
@@ -68,7 +67,7 @@ public final class BuiltinAgentExecutionValidator {
       }
       return selection;
     } catch (IllegalArgumentException error) {
-      throw new AiValidationException(RESOURCE, error.getMessage(), error);
+      throw DomainException.validation(RESOURCE, error.getMessage(), error);
     }
   }
 }

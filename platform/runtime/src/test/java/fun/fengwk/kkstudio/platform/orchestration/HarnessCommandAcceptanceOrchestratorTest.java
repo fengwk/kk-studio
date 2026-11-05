@@ -55,7 +55,7 @@ import fun.fengwk.kkstudio.platform.chat.ChatRepository;
 import fun.fengwk.kkstudio.platform.chat.ChatSession;
 import fun.fengwk.kkstudio.platform.chat.ChatSessionOwnership;
 import fun.fengwk.kkstudio.platform.chat.ChatSessionRepository;
-import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
@@ -285,7 +285,7 @@ class HarnessCommandAcceptanceOrchestratorTest {
     AcceptCommandsCommand command = newSession(THREAD_ID, user(new TextMessageContent("denied")));
 
     when(chatRepository.lockForKeyShare(CHAT_ID)).thenReturn(null);
-    assertThrows(AiResourceNotFoundException.class, () -> service.accept(CHAT_OWNER, command));
+    assertThrows(DomainException.class, () -> service.accept(CHAT_OWNER, command));
     assertThrows(
         DirectCommandsNotAllowedException.class, () -> service.accept(ISSUE_AGENT_OWNER, command));
     verify(issueAgentOwnership, never()).lockForAcceptance(any(), any());

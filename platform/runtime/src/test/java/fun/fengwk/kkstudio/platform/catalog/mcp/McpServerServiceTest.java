@@ -15,11 +15,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import fun.fengwk.kkstudio.common.page.Page;
 import fun.fengwk.kkstudio.common.page.PageQuery;
 import fun.fengwk.kkstudio.platform.catalog.mcp.test.FakeStreamableHttpMcpServer;
-import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
-import fun.fengwk.kkstudio.platform.error.AiInUseException;
-import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
-import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.share.ai.mcp.McpServerConfigDTO;
 import fun.fengwk.kkstudio.share.ai.mcp.McpServerCreateDTO;
@@ -99,29 +95,28 @@ public class McpServerServiceTest extends PostgresSpringTestSupport {
         declaredFieldNames());
 
     // name 不可重复
-    assertThrows(AiDuplicateException.class, () -> mcpServerService.createServer(createDTO));
+    assertThrows(DomainException.class, () -> mcpServerService.createServer(createDTO));
   }
 
   @Test
   public void rejectsInvalidNameAndUrlBeforeAnyPersistence() {
     // 意图：缺失请求体、name 正则、URL 绝对地址与 user-info 凭据约束在落库前确定性拒绝
-    assertThrows(AiValidationException.class, () -> mcpServerService.createServer(null));
+    assertThrows(DomainException.class, () -> mcpServerService.createServer(null));
+    assertThrows(DomainException.class, () -> mcpServerService.updateServer("github_core", null));
     assertThrows(
-        AiValidationException.class, () -> mcpServerService.updateServer("github_core", null));
-    assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () ->
             mcpServerService.createServer(
                 createDto("BadName", fakeServer.endpointUrl(), Map.of(), null)));
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () -> mcpServerService.createServer(createDto("bad_url", "not-a-url", Map.of(), null)));
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () ->
             mcpServerService.createServer(
                 createDto("bad_cred", "http://user:pw@example.com/mcp", Map.of(), null)));
-    assertThrows(AiValidationException.class, () -> mcpServerService.getServer("Missing"));
+    assertThrows(DomainException.class, () -> mcpServerService.getServer("Missing"));
 
     assertEquals(0, countServers());
   }
@@ -168,15 +163,14 @@ public class McpServerServiceTest extends PostgresSpringTestSupport {
 
   @Test
   public void discoveryFailureKeepsExistingSnapshotAndStatusUnchanged() {
-    // 意图：发现网络失败时抛 AiValidationException，既有工具行与状态保持原样，不被清空
+    // 意图：发现网络失败时抛 DomainException，既有工具行与状态保持原样，不被清空
     fakeServer.addTool("stable", "Stable tool", "{\"type\":\"object\"}");
     mcpServerService.createServer(createDto("failing", fakeServer.endpointUrl(), Map.of(), 5000L));
     mcpServerService.discoverServer("failing", "0");
     assertEquals(1, repository.listTools("failing").size());
 
     fakeServer.setFailDiscovery(true);
-    assertThrows(
-        AiValidationException.class, () -> mcpServerService.discoverServer("failing", "0"));
+    assertThrows(DomainException.class, () -> mcpServerService.discoverServer("failing", "0"));
 
     assertEquals(1, repository.listTools("failing").size());
     assertEquals("AVAILABLE", mcpServerService.getServer("failing").getDiscoveryStatus());
@@ -204,16 +198,11 @@ public class McpServerServiceTest extends PostgresSpringTestSupport {
     assertEquals("UNVERIFIED", updated.getDiscoveryStatus());
 
     // 同一 expectedVersion 再次提交必须冲突
-    assertThrows(
-        AiVersionConflictException.class,
-        () -> mcpServerService.updateServer("update_test", update));
+    assertThrows(DomainException.class, () -> mcpServerService.updateServer("update_test", update));
 
     // discover 与 delete 也必须校验版本
-    assertThrows(
-        AiVersionConflictException.class,
-        () -> mcpServerService.discoverServer("update_test", "0"));
-    assertThrows(
-        AiVersionConflictException.class, () -> mcpServerService.deleteServer("update_test", "0"));
+    assertThrows(DomainException.class, () -> mcpServerService.discoverServer("update_test", "0"));
+    assertThrows(DomainException.class, () -> mcpServerService.deleteServer("update_test", "0"));
   }
 
   @Test
@@ -237,7 +226,7 @@ public class McpServerServiceTest extends PostgresSpringTestSupport {
     fakeServer.clearTools();
     fakeServer.addTool("removable_tool", "Removable", "{}");
 
-    assertThrows(AiInUseException.class, () -> mcpServerService.discoverServer("inuse_test", "0"));
+    assertThrows(DomainException.class, () -> mcpServerService.discoverServer("inuse_test", "0"));
 
     List<McpTool> preserved = repository.listTools("inuse_test");
     assertEquals(2, preserved.size());
@@ -256,7 +245,7 @@ public class McpServerServiceTest extends PostgresSpringTestSupport {
     String referencedName = repository.listTools("delete_guard").get(0).name();
     insertFakeAgentDefinitionReferencingTool(referencedName);
 
-    assertThrows(AiInUseException.class, () -> mcpServerService.deleteServer("delete_guard", "0"));
+    assertThrows(DomainException.class, () -> mcpServerService.deleteServer("delete_guard", "0"));
     assertEquals(1, repository.listTools("delete_guard").size());
 
     jdbc.update("delete from agent_definition where name = 'test_agent_mcp'");
@@ -264,8 +253,7 @@ public class McpServerServiceTest extends PostgresSpringTestSupport {
 
     assertEquals(0, countServers());
     assertEquals(0, repository.listTools("delete_guard").size());
-    assertThrows(
-        AiResourceNotFoundException.class, () -> mcpServerService.getServer("delete_guard"));
+    assertThrows(DomainException.class, () -> mcpServerService.getServer("delete_guard"));
   }
 
   @Test
@@ -278,8 +266,7 @@ public class McpServerServiceTest extends PostgresSpringTestSupport {
     assertEquals("page_test", retrieved.getName());
     assertEquals("UNVERIFIED", retrieved.getDiscoveryStatus());
 
-    assertThrows(
-        AiResourceNotFoundException.class, () -> mcpServerService.getServer("no_such_server"));
+    assertThrows(DomainException.class, () -> mcpServerService.getServer("no_such_server"));
 
     Page<McpServerDTO> page = mcpServerService.pageServers(new PageQuery(1, 10));
     assertNotNull(page);

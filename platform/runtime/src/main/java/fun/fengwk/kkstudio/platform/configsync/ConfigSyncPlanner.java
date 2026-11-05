@@ -17,7 +17,7 @@ import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalog;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.environment.Environment;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.harness.builtin.BuiltinConfigSyncAdapter;
 import fun.fengwk.kkstudio.platform.harness.builtin.BuiltinConfigSyncAdapter.VariantIssue;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRow;
@@ -282,12 +282,12 @@ public final class ConfigSyncPlanner {
       SkillPackage existing = existingPackages.get(spec.packageName());
       if (existing != null) {
         if (!existing.isGit()) {
-          throw new AiValidationException(
+          throw DomainException.validation(
               RESOURCE,
               "uploaded skill package cannot be replaced by a Git import: " + spec.packageName());
         }
         if (!spec.repositoryUrl().equals(existing.gitSource().repositoryUrl())) {
-          throw new AiValidationException(
+          throw DomainException.validation(
               RESOURCE, "skill package repositoryUrl is immutable: " + spec.packageName());
         }
       }
@@ -406,7 +406,7 @@ public final class ConfigSyncPlanner {
             .toList();
     if (!blocked.isEmpty()) {
       // 移除仍被引用的 MCP 工具是硬冲突，不能通过部分导入规避。
-      throw new AiValidationException(
+      throw DomainException.validation(
           RESOURCE, "mcp server would remove referenced tools: " + spec.name());
     }
     ConfigSyncPlan.McpImport mcpImport =
@@ -513,7 +513,7 @@ public final class ConfigSyncPlanner {
       Long revision = pluginRevisions.get(spec.pluginId());
       if (revision == null) {
         // 权威目录与安装集合必须一致：解析期已确认安装，却没有任何目录坐标意味着目录被篡改，绝不静默导入。
-        throw new AiValidationException(
+        throw DomainException.validation(
             RESOURCE, "plugin catalog is inconsistent: " + spec.pluginId());
       }
       String reason = pluginUnsatisfiedReason(spec, revision, agentPool);
@@ -583,11 +583,11 @@ public final class ConfigSyncPlanner {
       VariantIssue issue =
           BuiltinConfigSyncAdapter.variantIssue(selection, model.kind(), model.config());
       if (issue == VariantIssue.GROUP_VARIANT) {
-        throw new AiValidationException(
+        throw DomainException.validation(
             RESOURCE, "agent references a model group with variant: " + spec.name());
       }
       if (issue == VariantIssue.UNKNOWN_VARIANT) {
-        throw new AiValidationException(
+        throw DomainException.validation(
             RESOURCE, "agent references unknown model variant: " + spec.name());
       }
     }
@@ -728,13 +728,13 @@ public final class ConfigSyncPlanner {
     for (ConfigSyncParser.EnvironmentSpec spec : specs) {
       String owner = ownerByToken.putIfAbsent(spec.registrationTokenHash(), spec.name());
       if (owner != null && !owner.equals(spec.name())) {
-        throw new AiValidationException(
+        throw DomainException.validation(
             RESOURCE, "environment registrationToken is used by multiple entries");
       }
       for (Environment existing : snapshot.environments()) {
         if (spec.registrationTokenHash().equals(existing.getRegistrationTokenHash())
             && !spec.name().equals(existing.getName())) {
-          throw new AiValidationException(
+          throw DomainException.validation(
               RESOURCE, "environment registrationToken is already in use");
         }
       }

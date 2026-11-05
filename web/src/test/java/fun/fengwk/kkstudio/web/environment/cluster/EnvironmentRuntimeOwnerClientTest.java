@@ -15,8 +15,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.platform.cluster.ClusterInternalAuthentication;
 import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
-import fun.fengwk.kkstudio.platform.error.AiEnvironmentUnavailableException;
-import fun.fengwk.kkstudio.platform.error.AiInUseException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentUpdateStartDTO;
 
 import java.io.IOException;
@@ -113,7 +112,7 @@ class EnvironmentRuntimeOwnerClientTest {
     server.createContext(
         "/internal/environments/" + ENV + "/update",
         exchange -> respond(exchange, 409, "{\"code\":\"in_use\",\"message\":\"busy\"}"));
-    assertThrows(AiInUseException.class, () -> client.startUpdate(remote(), ENV));
+    assertThrows(DomainException.class, () -> client.startUpdate(remote(), ENV));
 
     server.removeContext("/internal/environments/" + ENV + "/update");
     server.createContext(
@@ -123,22 +122,19 @@ class EnvironmentRuntimeOwnerClientTest {
                 exchange,
                 409,
                 "{\"code\":\"environment_unavailable\",\"message\":\"unavailable\"}"));
-    assertThrows(
-        AiEnvironmentUnavailableException.class, () -> client.runtimeStatus(remote(), ENV));
+    assertThrows(DomainException.class, () -> client.runtimeStatus(remote(), ENV));
   }
 
   @Test
   void rejectsUntrustedOriginAndMalformedSuccess() {
     ClusterOwnerRoute withPath =
         ClusterOwnerRoute.remote(UUID.randomUUID(), URI.create(origin + "/unsafe"));
-    assertThrows(
-        AiEnvironmentUnavailableException.class, () -> client.runtimeStatus(withPath, ENV));
+    assertThrows(DomainException.class, () -> client.runtimeStatus(withPath, ENV));
 
     server.createContext(
         "/internal/environments/" + ENV + "/runtime",
         exchange -> respond(exchange, 200, "{\"revision\":\"7\",\"status\":{\"extra\":true}}"));
-    assertThrows(
-        AiEnvironmentUnavailableException.class, () -> client.runtimeStatus(remote(), ENV));
+    assertThrows(DomainException.class, () -> client.runtimeStatus(remote(), ENV));
   }
 
   @Test
@@ -154,8 +150,7 @@ class EnvironmentRuntimeOwnerClientTest {
                     + "x".repeat(EnvironmentRuntimeOwnerClient.MAX_RESPONSE_BYTES)
                     + "\"}"));
 
-    assertThrows(
-        AiEnvironmentUnavailableException.class, () -> client.runtimeStatus(remote(), ENV));
+    assertThrows(DomainException.class, () -> client.runtimeStatus(remote(), ENV));
   }
 
   @Test
@@ -174,9 +169,7 @@ class EnvironmentRuntimeOwnerClientTest {
           respond(exchange, 200, "{}");
         });
 
-    assertThrows(
-        AiEnvironmentUnavailableException.class,
-        () -> shortTimeoutClient.runtimeStatus(remote(), ENV));
+    assertThrows(DomainException.class, () -> shortTimeoutClient.runtimeStatus(remote(), ENV));
   }
 
   private ClusterOwnerRoute remote() {

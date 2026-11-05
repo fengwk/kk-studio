@@ -22,8 +22,7 @@ import fun.fengwk.kkstudio.platform.catalog.skill.SkillManifestEntry;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageRepository;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalog;
-import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.testing.TestCatalogSources;
 import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
 
@@ -40,7 +39,7 @@ class AgentDefinitionReferenceResolverTest {
   void rejectsMissingAgentReference() {
     AgentDefinitionReferenceResolver resolver = resolver();
 
-    assertThrows(AiResourceNotFoundException.class, () -> resolver.requireAgent("missing"));
+    assertThrows(DomainException.class, () -> resolver.requireAgent("missing"));
   }
 
   @Test
@@ -104,14 +103,14 @@ class AgentDefinitionReferenceResolverTest {
 
     // 缺少 skill
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () ->
             resolver.requireReferencedLifecycles(
                 List.of(skillRef("tools", "missing"), skillRef("tools", "dev")), List.of()));
 
     // 缺少 package
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () ->
             resolver.requireReferencedLifecycles(
                 List.of(skillRef("missing-pkg", "dev")), List.of()));
@@ -198,7 +197,7 @@ class AgentDefinitionReferenceResolverTest {
             TestCatalogSources.singleLease(tools));
 
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () -> resolver.requireReferencedLifecycles(List.of(), List.of("mcp_alpha_fetch")));
   }
 
@@ -218,7 +217,7 @@ class AgentDefinitionReferenceResolverTest {
             TestCatalogSources.singleLease(mock(RuntimeToolCatalog.class)));
 
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () ->
             resolver.requireReferencedLifecycles(
                 List.of(skillRef("tools", "alpha"), skillRef("tools", "zeta")), List.of()));
@@ -247,7 +246,7 @@ class AgentDefinitionReferenceResolverTest {
             TestCatalogSources.singleLease(tools));
 
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () -> resolver.requireReferencedLifecycles(List.of(), List.of("mcp_alpha", "mcp_zeta")));
   }
 
@@ -269,7 +268,7 @@ class AgentDefinitionReferenceResolverTest {
             TestCatalogSources.singleLease(tools));
 
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () -> resolver.requireReferencedLifecycles(List.of(), List.of("mcp_alpha_fetch")));
     verify(servers).lockForShare("alpha");
   }

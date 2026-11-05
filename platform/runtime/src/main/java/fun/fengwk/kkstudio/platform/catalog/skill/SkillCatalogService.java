@@ -15,12 +15,8 @@ import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentSkillState;
-import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
-import fun.fengwk.kkstudio.platform.error.AiInUseException;
-import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
-import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
 import fun.fengwk.kkstudio.platform.error.CatalogVersions;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageBlobRepository;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
@@ -167,7 +163,7 @@ public class SkillCatalogService {
   @Transactional(propagation = Propagation.NOT_SUPPORTED)
   public SkillPackageDetailDTO createGitPackage(SkillPackageGitCreateDTO createDTO) {
     if (createDTO == null) {
-      throw new AiValidationException(RESOURCE, "request body must not be null");
+      throw DomainException.validation(RESOURCE, "request body must not be null");
     }
     String packageName = requirePackageName(createDTO.getPackageName());
     String description = requireDescription(createDTO.getDescription());
@@ -175,7 +171,7 @@ public class SkillCatalogService {
     String branch = requireBranch(createDTO.getBranch());
     String token = requireTokenOrNull(createDTO.getToken());
     if (skillPackageRepository.getPackage(packageName) != null) {
-      throw new AiDuplicateException(RESOURCE, "skill package already exists: " + packageName);
+      throw DomainException.duplicate(RESOURCE, "skill package already exists: " + packageName);
     }
     String commit = git(() -> skillGitRepository.resolveBranchHead(repositoryUrl, branch, token));
     SkillArchiveBuilder.Result archive =
@@ -215,7 +211,7 @@ public class SkillCatalogService {
                 throw new IllegalStateException("create skill package failed");
               }
             } catch (DuplicateKeyException error) {
-              throw new AiDuplicateException(
+              throw DomainException.duplicate(
                   RESOURCE, "skill package already exists: " + packageName, error);
             }
             return getPackage(packageName);
@@ -230,7 +226,7 @@ public class SkillCatalogService {
   @Transactional(propagation = Propagation.NOT_SUPPORTED)
   public SkillPackageDetailDTO checkGitPackage(String packageName, SkillPackageCheckDTO checkDTO) {
     if (checkDTO == null) {
-      throw new AiValidationException(RESOURCE, "request body must not be null");
+      throw DomainException.validation(RESOURCE, "request body must not be null");
     }
     String rawExpected = checkDTO.getExpectedVersion();
     long expected = requireExpectedVersion(rawExpected);
@@ -261,7 +257,7 @@ public class SkillCatalogService {
               || !Objects.equals(preparedError, locked.gitSource().checkError())) {
             if (!skillPackageRepository.updateGitObservation(
                 packageName, preparedHead, checkedAt, preparedError)) {
-              throw new AiResourceNotFoundException(RESOURCE);
+              throw DomainException.notFound(RESOURCE);
             }
           }
           return getPackage(packageName);
@@ -273,7 +269,7 @@ public class SkillCatalogService {
   public SkillPackageDetailDTO publishGitPackage(
       String packageName, SkillPackageGitPublishDTO publishDTO) {
     if (publishDTO == null) {
-      throw new AiValidationException(RESOURCE, "request body must not be null");
+      throw DomainException.validation(RESOURCE, "request body must not be null");
     }
     String rawExpected = publishDTO.getExpectedVersion();
     long expected = requireExpectedVersion(rawExpected);
@@ -281,7 +277,7 @@ public class SkillCatalogService {
     SkillPackage current = requireGitPackage(packageName);
     requireCurrentVersion(current, rawExpected, expected);
     if (!targetCommit.equals(current.gitSource().headCommit())) {
-      throw new AiValidationException(
+      throw DomainException.validation(
           RESOURCE,
           "targetCommit must equal the checked branch head of this package: "
               + current.gitSource().headCommit());
@@ -299,7 +295,7 @@ public class SkillCatalogService {
             SkillPackage locked = requireGitPackageForUpdate(packageName);
             requireCurrentVersion(locked, rawExpected, expected);
             if (!targetCommit.equals(locked.gitSource().headCommit())) {
-              throw new AiVersionConflictException(
+              throw DomainException.versionConflict(
                   RESOURCE, rawExpected, CatalogVersions.format(locked.version()));
             }
             ensureSkillsRemovable(packageName, removedSkillNames(locked, archive.skills()));
@@ -321,7 +317,7 @@ public class SkillCatalogService {
             }
             if (!skillPackageRepository.updateGitObservation(
                 packageName, targetCommit, Instant.now(), null)) {
-              throw new AiResourceNotFoundException(RESOURCE);
+              throw DomainException.notFound(RESOURCE);
             }
             releaseArtifact(locked);
             return getPackage(packageName);
@@ -350,7 +346,7 @@ public class SkillCatalogService {
   @Transactional
   public SkillPackageDetailDTO editPackage(String packageName, SkillPackageEditDTO editDTO) {
     if (editDTO == null) {
-      throw new AiValidationException(RESOURCE, "request body must not be null");
+      throw DomainException.validation(RESOURCE, "request body must not be null");
     }
     String rawExpected = editDTO.getExpectedVersion();
     long expected = requireExpectedVersion(rawExpected);
@@ -359,7 +355,7 @@ public class SkillCatalogService {
     String description = requireDescription(editDTO.getDescription());
     if (!current.isGit()) {
       if (editDTO.getBranch() != null || editDTO.isTokenProvided()) {
-        throw new AiValidationException(
+        throw DomainException.validation(
             RESOURCE, "branch and token are only valid for Git packages");
       }
       if (!Objects.equals(description, current.description())) {
@@ -392,7 +388,7 @@ public class SkillCatalogService {
     }
     if (!Objects.equals(branch, current.gitSource().branch()) || tokenChanged) {
       if (!skillPackageRepository.updateGitSettings(packageName, branch, storedToken)) {
-        throw new AiResourceNotFoundException(RESOURCE);
+        throw DomainException.notFound(RESOURCE);
       }
     }
     return getPackage(packageName);
@@ -402,7 +398,7 @@ public class SkillCatalogService {
   @Transactional(propagation = Propagation.NOT_SUPPORTED)
   public SkillPackagePreviewDTO previewUpload(SkillPackageUploadPreviewDTO previewDTO) {
     if (previewDTO == null) {
-      throw new AiValidationException(RESOURCE, "request body must not be null");
+      throw DomainException.validation(RESOURCE, "request body must not be null");
     }
     String packageName = requirePackageName(previewDTO.getPackageName());
     String packageVersion = requireVersionText(previewDTO.getPackageVersion());
@@ -414,7 +410,7 @@ public class SkillCatalogService {
       content =
           blobContentService.readBlobContent(ready.blobId(), SkillArchiveBuilder.MAX_ARCHIVE_BYTES);
     } catch (IllegalArgumentException error) {
-      throw new AiValidationException(
+      throw DomainException.validation(
           RESOURCE, "uploaded archive exceeds the size limit: " + error.getMessage(), error);
     }
     SkillArchiveBuilder.Result archive = build(ready.filename(), content.getBytes());
@@ -445,7 +441,7 @@ public class SkillCatalogService {
   @Transactional(propagation = Propagation.NOT_SUPPORTED)
   public SkillPackageDetailDTO publishUpload(SkillPackageUploadPublishDTO publishDTO) {
     if (publishDTO == null) {
-      throw new AiValidationException(RESOURCE, "request body must not be null");
+      throw DomainException.validation(RESOURCE, "request body must not be null");
     }
     String packageName = requirePackageName(publishDTO.getPackageName());
     String packageVersion = requireVersionText(publishDTO.getPackageVersion());
@@ -454,14 +450,14 @@ public class SkillCatalogService {
     UUID stagingUploadId = requireUploadId(publishDTO.getStagingUploadId(), "stagingUploadId");
     SkillPackage existing = skillPackageRepository.getPackage(packageName);
     if (existing != null && existing.isGit()) {
-      throw new AiValidationException(
+      throw DomainException.validation(
           RESOURCE, "skill package is a Git package and cannot be replaced by an upload");
     }
     if (existing == null && rawExpected != null) {
-      throw new AiVersionConflictException(RESOURCE, rawExpected, "0");
+      throw DomainException.versionConflict(RESOURCE, rawExpected, "0");
     }
     if (existing != null && rawExpected == null) {
-      throw new AiValidationException(
+      throw DomainException.validation(
           RESOURCE, "expectedVersion is required for an existing package");
     }
     long expected = rawExpected == null ? 0L : requireExpectedVersion(rawExpected);
@@ -499,7 +495,7 @@ public class SkillCatalogService {
                   throw new IllegalStateException("create skill package failed");
                 }
               } catch (DuplicateKeyException error) {
-                throw new AiDuplicateException(
+                throw DomainException.duplicate(
                     RESOURCE, "skill package already exists: " + packageName, error);
               }
             } else {
@@ -570,11 +566,11 @@ public class SkillCatalogService {
           () -> {
             SkillPackage current = requirePackageForUpdateOrNull(name);
             if (current != null && !current.isGit()) {
-              throw new AiValidationException(
+              throw DomainException.validation(
                   RESOURCE, "uploaded skill package cannot be replaced by a Git import: " + name);
             }
             if (current != null && !url.equals(current.gitSource().repositoryUrl())) {
-              throw new AiValidationException(
+              throw DomainException.validation(
                   RESOURCE, "skill package repositoryUrl is immutable: " + name);
             }
             if (current != null) {
@@ -617,7 +613,7 @@ public class SkillCatalogService {
               if (!skillPackageRepository.updateGitSettings(name, canonicalBranch, canonicalToken)
                   || !skillPackageRepository.updateGitObservation(
                       name, commit, Instant.now(), null)) {
-                throw new AiResourceNotFoundException(RESOURCE);
+                throw DomainException.notFound(RESOURCE);
               }
               releaseArtifact(current);
             }
@@ -646,7 +642,7 @@ public class SkillCatalogService {
     StorageUploadService.ReadyUpload ready = uploadService.peekReady(stagingUploadId);
     StorageBlob blob = requireActiveBlob(ready.blobId());
     if (blob.getArchiveIndex() == null) {
-      throw new AiValidationException(RESOURCE, "staged archive has no server index");
+      throw DomainException.validation(RESOURCE, "staged archive has no server index");
     }
     StorageBlobContent content =
         blobContentService.readBlobContent(blob.getId(), SkillArchiveBuilder.MAX_ARCHIVE_BYTES);
@@ -687,7 +683,7 @@ public class SkillCatalogService {
           ? builder.fromTarGz(new ByteArrayInputStream(bytes))
           : builder.fromZip(new ByteArrayInputStream(bytes));
     } catch (IOException error) {
-      throw new AiValidationException(
+      throw DomainException.validation(
           RESOURCE,
           "invalid skill archive "
               + (filename == null ? "" : filename + " ")
@@ -715,7 +711,7 @@ public class SkillCatalogService {
   private SkillPackage requirePackage(String packageName) {
     SkillPackage current = skillPackageRepository.getPackage(packageName);
     if (current == null) {
-      throw new AiResourceNotFoundException(RESOURCE);
+      throw DomainException.notFound(RESOURCE);
     }
     return current;
   }
@@ -723,7 +719,7 @@ public class SkillCatalogService {
   private SkillPackage requireGitPackage(String packageName) {
     SkillPackage current = requirePackage(packageName);
     if (!current.isGit()) {
-      throw new AiValidationException(
+      throw DomainException.validation(
           RESOURCE, "skill package is not a Git package: " + packageName);
     }
     return current;
@@ -732,7 +728,7 @@ public class SkillCatalogService {
   private SkillPackage requirePackageForUpdate(String packageName) {
     SkillPackage current = skillPackageRepository.lockPackage(packageName);
     if (current == null) {
-      throw new AiResourceNotFoundException(RESOURCE);
+      throw DomainException.notFound(RESOURCE);
     }
     return current;
   }
@@ -744,7 +740,7 @@ public class SkillCatalogService {
   private SkillPackage requireGitPackageForUpdate(String packageName) {
     SkillPackage current = requirePackageForUpdate(packageName);
     if (!current.isGit()) {
-      throw new AiValidationException(
+      throw DomainException.validation(
           RESOURCE, "skill package is not a Git package: " + packageName);
     }
     return current;
@@ -753,7 +749,7 @@ public class SkillCatalogService {
   private StorageBlob requireArtifact(SkillPackage skillPackage) {
     StorageBlob blob = blobManager.getBlob(skillPackage.artifactBlobId());
     if (blob == null) {
-      throw new AiResourceNotFoundException(RESOURCE);
+      throw DomainException.notFound(RESOURCE);
     }
     return blob;
   }
@@ -766,7 +762,7 @@ public class SkillCatalogService {
   private StorageBlob requireActiveBlob(UUID blobId) {
     StorageBlob blob = blobManager.getBlob(blobId);
     if (blob == null) {
-      throw new AiResourceNotFoundException("storage_blob");
+      throw DomainException.notFound("storage_blob");
     }
     return blob;
   }
@@ -779,7 +775,7 @@ public class SkillCatalogService {
             .sorted()
             .toList();
     if (!referenced.isEmpty()) {
-      throw new AiInUseException(
+      throw DomainException.inUse(
           RESOURCE,
           "skills are still referenced by agents: "
               + packageName
@@ -804,16 +800,16 @@ public class SkillCatalogService {
   private RuntimeException conflictOrMissing(String packageName, String expectedVersion) {
     SkillPackage reread = skillPackageRepository.getPackage(packageName);
     if (reread == null) {
-      return new AiResourceNotFoundException(RESOURCE);
+      return DomainException.notFound(RESOURCE);
     }
-    return new AiVersionConflictException(
+    return DomainException.versionConflict(
         RESOURCE, expectedVersion, CatalogVersions.format(reread.version()));
   }
 
   private static void requireCurrentVersion(
       SkillPackage skillPackage, String rawExpected, long expected) {
     if (skillPackage.version() != expected) {
-      throw new AiVersionConflictException(
+      throw DomainException.versionConflict(
           RESOURCE, rawExpected, CatalogVersions.format(skillPackage.version()));
     }
   }
@@ -824,12 +820,12 @@ public class SkillCatalogService {
     } catch (SkillGitException error) {
       if (error.authenticationFailed()) {
         // 权限失败给出明确指导，且不回显 URL、令牌或远端自由文本；绝不静默尝试公共访问。
-        throw new AiValidationException(
+        throw DomainException.validation(
             RESOURCE,
             "repository authentication failed; verify the repository URL and, for a private repository, configure a valid access token",
             error);
       }
-      throw new AiValidationException(
+      throw DomainException.validation(
           RESOURCE, "cannot build the skill archive: " + error.getMessage(), error);
     }
   }
@@ -841,10 +837,10 @@ public class SkillCatalogService {
   private static String requireToken(String raw) {
     String token = raw == null ? null : raw.strip();
     if (token == null || token.isEmpty()) {
-      throw new AiValidationException(RESOURCE, "token must be a non-blank string when provided");
+      throw DomainException.validation(RESOURCE, "token must be a non-blank string when provided");
     }
     if (token.codePoints().anyMatch(Character::isISOControl)) {
-      throw new AiValidationException(RESOURCE, "token must not contain control characters");
+      throw DomainException.validation(RESOURCE, "token must not contain control characters");
     }
     return token;
   }
@@ -859,7 +855,7 @@ public class SkillCatalogService {
 
   private static long requireExpectedVersion(String raw) {
     if (raw == null) {
-      throw new AiValidationException(RESOURCE, "expectedVersion is required");
+      throw DomainException.validation(RESOURCE, "expectedVersion is required");
     }
     return CatalogVersions.parse(raw, "expectedVersion");
   }
@@ -868,7 +864,7 @@ public class SkillCatalogService {
     try {
       return UUID.fromString(raw);
     } catch (RuntimeException error) {
-      throw new AiValidationException(RESOURCE, field + " must be a UUID", error);
+      throw DomainException.validation(RESOURCE, field + " must be a UUID", error);
     }
   }
 
@@ -876,7 +872,7 @@ public class SkillCatalogService {
     try {
       return SkillNames.canonicalPackageName(raw);
     } catch (IllegalArgumentException error) {
-      throw new AiValidationException(
+      throw DomainException.validation(
           RESOURCE, "invalid package name: " + error.getMessage(), error);
     }
   }
@@ -889,7 +885,7 @@ public class SkillCatalogService {
     try {
       return SkillNames.canonicalDescription(description);
     } catch (IllegalArgumentException error) {
-      throw new AiValidationException(
+      throw DomainException.validation(
           RESOURCE, "invalid description: " + error.getMessage(), error);
     }
   }
@@ -898,11 +894,11 @@ public class SkillCatalogService {
   private static String requireVersionText(String raw) {
     String version = raw == null ? null : raw.strip();
     if (version == null || version.isEmpty()) {
-      throw new AiValidationException(RESOURCE, "packageVersion must not be blank");
+      throw DomainException.validation(RESOURCE, "packageVersion must not be blank");
     }
     if (version.length() > MAX_VERSION_CHARS
         || version.codePoints().anyMatch(Character::isISOControl)) {
-      throw new AiValidationException(
+      throw DomainException.validation(
           RESOURCE,
           "packageVersion must be at most "
               + MAX_VERSION_CHARS
@@ -913,13 +909,13 @@ public class SkillCatalogService {
 
   private static String requireRepositoryUrl(String raw) {
     if (raw == null || raw.isBlank() || !raw.equals(raw.strip())) {
-      throw new AiValidationException(RESOURCE, "repositoryUrl must be a non-blank, unpadded URL");
+      throw DomainException.validation(RESOURCE, "repositoryUrl must be a non-blank, unpadded URL");
     }
     if (raw.length() > MAX_REPOSITORY_URL_CHARS
         || !(REPOSITORY_URL.matcher(raw).matches() || FILE_URL.matcher(raw).matches())
         || USERINFO.matcher(raw).find()
         || raw.codePoints().anyMatch(Character::isISOControl)) {
-      throw new AiValidationException(
+      throw DomainException.validation(
           RESOURCE,
           "repositoryUrl must be a supported http/https/file URL without userinfo and be at most "
               + MAX_REPOSITORY_URL_CHARS
@@ -927,7 +923,7 @@ public class SkillCatalogService {
     }
     String scheme = schemeOf(raw);
     if (!SUPPORTED_REPOSITORY_SCHEMES.contains(scheme)) {
-      throw new AiValidationException(RESOURCE, "unsupported repositoryUrl scheme: " + scheme);
+      throw DomainException.validation(RESOURCE, "unsupported repositoryUrl scheme: " + scheme);
     }
     return raw;
   }
@@ -939,10 +935,10 @@ public class SkillCatalogService {
 
   private static String requireBranch(String raw) {
     if (raw == null || raw.isBlank() || !raw.equals(raw.strip())) {
-      throw new AiValidationException(RESOURCE, "branch must be a non-blank, unpadded name");
+      throw DomainException.validation(RESOURCE, "branch must be a non-blank, unpadded name");
     }
     if (raw.length() > MAX_BRANCH_CHARS || raw.codePoints().anyMatch(Character::isISOControl)) {
-      throw new AiValidationException(
+      throw DomainException.validation(
           RESOURCE,
           "branch must not contain control characters and be at most "
               + MAX_BRANCH_CHARS
@@ -953,7 +949,7 @@ public class SkillCatalogService {
 
   private static String requireCommit(String raw, String field) {
     if (raw == null || !COMMIT.matcher(raw).matches()) {
-      throw new AiValidationException(
+      throw DomainException.validation(
           RESOURCE, field + " must be a 40 or 64 characters long lowercase hex object id");
     }
     return raw;
