@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { IssueDetailModal } from './IssueDetailModal'
 import type { ProjectsApi } from '../projects-api'
@@ -7,6 +7,7 @@ import type { StorageService } from '@/shared/api/storage-service'
 import type { StorageUploadDTO } from '@/shared/api/contracts/storage'
 import { ApiError } from '@/shared/api/client'
 import { LOCALE_STORAGE_KEY, setLocale } from '@/shared/i18n'
+import { queryKeys } from '@/shared/lib/query-keys'
 import {
   loadPendingAction,
   pendingActionStorageKey,
@@ -127,6 +128,7 @@ describe('IssueDetailModal', () => {
     blockIssue: vi.fn().mockResolvedValue(mockActiveIssueDetail.issue),
     recoverIssue: vi.fn().mockResolvedValue(mockActiveIssueDetail.issue),
     reopenIssue: vi.fn().mockResolvedValue(mockActiveIssueDetail.issue),
+    resumeIssue: vi.fn().mockResolvedValue(mockActiveIssueDetail.issue),
     stopIssue: vi.fn().mockResolvedValue(mockActiveIssueDetail.issue),
     resetStageBudget: vi.fn().mockResolvedValue(mockActiveIssueDetail.issue),
     appendIssueActivity: vi.fn().mockResolvedValue(mockActiveIssueDetail.activities[0]),
@@ -184,6 +186,7 @@ describe('IssueDetailModal', () => {
     expect(screen.getByText(/Run 报告/)).toBeInTheDocument()
     expect(screen.getByText(/阶段预算/)).toBeInTheDocument()
     expect(screen.getByText(/Agent 线程/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '继续' })).toBeNull()
   })
 
   it('posts COMMENT activity with frozen requestKey', async () => {
@@ -407,6 +410,253 @@ describe('IssueDetailModal', () => {
     expect(await screen.findByText('ERROR')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '人工核查' })).toBeNull()
     expect(screen.queryByRole('heading', { name: /解除 UNKNOWN/ })).toBeNull()
+  })
+
+  it('resumes a USER paused issue directly with the current version and request identity', async () => {
+    // 测试意图：USER 暂停直接继续，不弹确认；成功后按新版本刷新 Issue，继续入口随暂停解除而消失。
+    const pausedDetail: IssueDetailDTO = {
+      ...mockActiveIssueDetail,
+      issue: {
+        ...mockActiveIssueDetail.issue,
+        pauseReason: 'USER',
+        pauseDetail: 'Stopped by user',
+      },
+    }
+    const resumedDetail: IssueDetailDTO = {
+      ...mockActiveIssueDetail,
+      issue: {
+        ...mockActiveIssueDetail.issue,
+        pauseReason: null,
+        pauseDetail: null,
+        version: '4',
+      },
+    }
+    const api = createMockApi({
+      getIssue: vi
+        .fn()
+        .mockResolvedValueOnce(pausedDetail)
+        .mockResolvedValueOnce(resumedDetail),
+    })
+
+    renderModal(
+      <IssueDetailModal
+        isOpen={true}
+        issueId={issueId}
+        onClose={vi.fn()}
+        onIssueUpdated={vi.fn()}
+        api={api}
+        storageService={createMockStorageService()}
+      />,
+    )
+
+    await screen.findByLabelText('Issue #12 详情')
+    fireEvent.click(screen.getByRole('button', { name: '继续' }))
+
+    expect(screen.queryByRole('dialog', { name: '继续执行' })).toBeNull()
+    await waitFor(() => {
+      expect(api.resumeIssue).toHaveBeenCalledWith(issueId, {
+        expectedVersion: '3',
+        requestKey: expect.any(String),
+      })
+    })
+    await waitFor(() => {
+      expect(api.getIssue).toHaveBeenCalledTimes(2)
+      expect(screen.queryByRole('button', { name: '继续' })).toBeNull()
+    })
+  })
+
+  it('confirms an ERROR pause with the pause detail before resuming', async () => {
+    // 测试意图：ERROR 暂停先弹确认，正文展示 pauseDetail 并提醒核查外部副作用，确认后才发送 resume。
+    const api = createMockApi({
+      getIssue: vi.fn().mockResolvedValue({
+        ...mockActiveIssueDetail,
+        issue: {
+          ...mockActiveIssueDetail.issue,
+          pauseReason: 'ERROR',
+          pauseDetail: 'Run stopped with in-flight side effects; outcome unknown',
+        },
+      }),
+    })
+
+    renderModal(
+      <IssueDetailModal
+        isOpen={true}
+        issueId={issueId}
+        onClose={vi.fn()}
+        onIssueUpdated={vi.fn()}
+        api={api}
+        storageService={createMockStorageService()}
+      />,
+    )
+
+    await screen.findByLabelText('Issue #12 详情')
+    fireEvent.click(screen.getByRole('button', { name: '继续' }))
+
+    const confirmDialog = screen.getByRole('dialog', { name: '继续执行' })
+    expect(confirmDialog).toHaveTextContent(
+      'Run stopped with in-flight side effects; outcome unknown',
+    )
+    expect(confirmDialog).toHaveTextContent('请先核查外部副作用及其结果')
+    expect(api.resumeIssue).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: '确认继续' }))
+    expect(screen.queryByRole('dialog', { name: '继续执行' })).toBeNull()
+
+    await waitFor(() => {
+      expect(api.resumeIssue).toHaveBeenCalledWith(issueId, {
+        expectedVersion: '3',
+        requestKey: expect.any(String),
+      })
+    })
+  })
+
+  it('exposes the conflict after an ERROR resume is rejected with 409', async () => {
+    // 测试意图：ERROR 确认后发生版本冲突，确认框不遮挡冲突与刷新入口，明确拒绝会清理侧车。
+    const api = createMockApi({
+      getIssue: vi.fn().mockResolvedValue({
+        ...mockActiveIssueDetail,
+        issue: { ...mockActiveIssueDetail.issue, pauseReason: 'ERROR', pauseDetail: '执行失败' },
+      }),
+      resumeIssue: vi.fn().mockRejectedValue(new ApiError('Version conflict', 409)),
+    })
+
+    renderModal(
+      <IssueDetailModal
+        isOpen={true}
+        issueId={issueId}
+        onClose={vi.fn()}
+        onIssueUpdated={vi.fn()}
+        api={api}
+        storageService={createMockStorageService()}
+      />,
+    )
+
+    await screen.findByLabelText('Issue #12 详情')
+    fireEvent.click(screen.getByRole('button', { name: '继续' }))
+
+    fireEvent.click(screen.getByRole('button', { name: '确认继续' }))
+    expect(await screen.findByText(/版本冲突/i)).toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: '继续执行' })).toBeNull()
+    expect(screen.getByRole('button', { name: '刷新并保留草稿' })).toBeEnabled()
+    expect(screen.queryByText(/检测到未确认结果的写操作/i)).toBeNull()
+    expect(loadPendingAction(issueId)).toEqual({ type: 'NONE' })
+  })
+
+  it('shows a business error after an ERROR resume is rejected', async () => {
+    // 测试意图：确认框关闭后，服务端明确业务错误在 Issue 详情中可见。
+    const api = createMockApi({
+      getIssue: vi.fn().mockResolvedValue({
+        ...mockActiveIssueDetail,
+        issue: { ...mockActiveIssueDetail.issue, pauseReason: 'ERROR', pauseDetail: '执行失败' },
+      }),
+      resumeIssue: vi.fn().mockRejectedValue(new ApiError('Resume denied', 403)),
+    })
+    renderModal(
+      <IssueDetailModal isOpen issueId={issueId} onClose={vi.fn()} api={api} />,
+    )
+
+    await screen.findByLabelText('Issue #12 详情')
+    fireEvent.click(screen.getByRole('button', { name: '继续' }))
+    fireEvent.click(screen.getByRole('button', { name: '确认继续' }))
+
+    expect(await screen.findByText('Resume denied')).toBeVisible()
+    expect(screen.queryByRole('dialog', { name: '继续执行' })).toBeNull()
+    expect(loadPendingAction(issueId)).toEqual({ type: 'NONE' })
+  })
+
+  it('requires a fresh confirmation if the issue changes while the ERROR dialog is open', async () => {
+    // 测试意图：确认基于用户看到的版本和详情，后台更新不得静默换用新版本继续执行。
+    const pausedDetail: IssueDetailDTO = {
+      ...mockActiveIssueDetail,
+      issue: { ...mockActiveIssueDetail.issue, pauseReason: 'ERROR', pauseDetail: '原暂停详情' },
+    }
+    const api = createMockApi({ getIssue: vi.fn().mockResolvedValue(pausedDetail) })
+    const { queryClient } = renderModal(
+      <IssueDetailModal isOpen issueId={issueId} projectId={projectId} onClose={vi.fn()} api={api} />,
+    )
+
+    await screen.findByLabelText('Issue #12 详情')
+    fireEvent.click(screen.getByRole('button', { name: '继续' }))
+    act(() => {
+      queryClient.setQueryData(queryKeys.projects.issue(projectId, issueId), {
+        ...pausedDetail,
+        issue: { ...pausedDetail.issue, version: '4', pauseDetail: '新的暂停详情' },
+      })
+    })
+    await waitFor(() => expect(screen.getByText('4')).toBeInTheDocument())
+    expect(screen.getByRole('dialog', { name: '继续执行' })).toHaveTextContent('原暂停详情')
+
+    fireEvent.click(screen.getByRole('button', { name: '确认继续' }))
+    expect(api.resumeIssue).not.toHaveBeenCalled()
+    expect(screen.getByText('Issue 已更新，请重新检查暂停详情后再继续。')).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: '继续' }))
+    expect(screen.getByRole('dialog', { name: '继续执行' })).toHaveTextContent('新的暂停详情')
+  })
+
+  it('restores an unknown ERROR resume and retries its frozen identity', async () => {
+    // 测试意图：ERROR 确认后网络结果未知，关闭重开仍显示未决记录，精确重试沿用原 requestKey 与版本。
+    let calls = 0
+    let recordedRequestKey = ''
+    const pausedDetail: IssueDetailDTO = {
+      ...mockActiveIssueDetail,
+      issue: { ...mockActiveIssueDetail.issue, pauseReason: 'ERROR', pauseDetail: '执行失败' },
+    }
+    const api = createMockApi({
+      getIssue: vi.fn().mockResolvedValue(pausedDetail),
+      resumeIssue: vi.fn().mockImplementation((_id, req) => {
+        calls += 1
+        if (calls === 1) {
+          recordedRequestKey = req.requestKey
+          return Promise.reject(new Error('Network offline'))
+        }
+        return Promise.resolve({ ...pausedDetail.issue, pauseReason: null, version: '4' })
+      }),
+    })
+
+    const { unmount } = renderModal(
+      <IssueDetailModal
+        isOpen={true}
+        issueId={issueId}
+        onClose={vi.fn()}
+        onIssueUpdated={vi.fn()}
+        api={api}
+        storageService={createMockStorageService()}
+      />,
+    )
+
+    await screen.findByLabelText('Issue #12 详情')
+    fireEvent.click(screen.getByRole('button', { name: '继续' }))
+    fireEvent.click(screen.getByRole('button', { name: '确认继续' }))
+
+    const warningTitle = await screen.findByText(/检测到未确认结果的写操作/i)
+    expect(warningTitle.closest('[role="alert"]')).toHaveTextContent('RESUME')
+    expect(screen.queryByRole('dialog', { name: '继续执行' })).toBeNull()
+    expect(screen.getByRole('button', { name: '继续' })).toBeDisabled()
+    const sidecar = loadPendingAction(issueId)
+    expect(sidecar.type).toBe('VALID')
+    if (sidecar.type === 'VALID') {
+      expect(sidecar.action.kind).toBe('RESUME')
+      expect(sidecar.action.payload).toEqual({})
+      expect(sidecar.action.requestKey).toBe(recordedRequestKey)
+      expect(sidecar.action.expectedVersion).toBe('3')
+    }
+
+    unmount()
+    renderModal(
+      <IssueDetailModal isOpen issueId={issueId} onClose={vi.fn()} api={api} />,
+    )
+    await screen.findByText(/检测到未确认结果的写操作/i)
+    await screen.findByLabelText('Issue #12 详情')
+    fireEvent.click(screen.getByRole('button', { name: '重试原操作' }))
+
+    await waitFor(() => {
+      expect(calls).toBe(2)
+      expect(api.resumeIssue).toHaveBeenLastCalledWith(issueId, {
+        expectedVersion: '3',
+        requestKey: recordedRequestKey,
+      })
+      expect(loadPendingAction(issueId)).toEqual({ type: 'NONE' })
+    })
   })
 
   it('deletes issue with expectedVersion', async () => {

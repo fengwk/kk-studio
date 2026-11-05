@@ -6,6 +6,7 @@ export type IssueActionKind =
   | 'TRANSITION'
   | 'RECOVER'
   | 'REOPEN'
+  | 'RESUME'
   | 'BLOCK'
   | 'STOP'
   | 'RESET_BUDGET'
@@ -16,6 +17,7 @@ export interface IssueActionPayloads {
   TRANSITION: { toState: string }
   RECOVER: Record<string, never>
   REOPEN: Record<string, never>
+  RESUME: Record<string, never>
   BLOCK: { reason: string }
   STOP: { detail: string | null }
   RESET_BUDGET: { state: string; maxRuns: number }
@@ -380,6 +382,7 @@ export function validAction(value: unknown, expectedIssueId?: string): value is 
       return nonBlank(p.toState)
     case 'RECOVER':
     case 'REOPEN':
+    case 'RESUME':
       return true
     case 'BLOCK':
       return nonBlank(p.reason)

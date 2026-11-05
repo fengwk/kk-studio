@@ -190,6 +190,9 @@ export function useIssueActionRunner({
         case 'REOPEN':
           await api.reopenIssue(issue.id, { expectedVersion, requestKey })
           break
+        case 'RESUME':
+          await api.resumeIssue(issue.id, { expectedVersion, requestKey })
+          break
         case 'BLOCK':
           await api.blockIssue(issue.id, {
             expectedVersion,

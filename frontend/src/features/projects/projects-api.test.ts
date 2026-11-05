@@ -257,6 +257,23 @@ describe('projectsApi', () => {
     })
   })
 
+  it('resumeIssue should post to /issues/:id/resume', async () => {
+    // 测试意图：验证 resumeIssue 只提交 expectedVersion 与 requestKey，解除暂停
+    vi.mocked(mockClient.post).mockResolvedValueOnce({
+      ...mockIssue,
+      pauseReason: null,
+      pauseDetail: null,
+    })
+    await api.resumeIssue(mockIssue.id, {
+      expectedVersion: '6',
+      requestKey: 'k-resume',
+    })
+    expect(mockClient.post).toHaveBeenCalledWith(`/issues/${mockIssue.id}/resume`, {
+      expectedVersion: '6',
+      requestKey: 'k-resume',
+    })
+  })
+
   it('deleteIssue should delete with query param expectedVersion', async () => {
     // 测试意图：验证 deleteIssue 发送 DELETE
     vi.mocked(mockClient.delete).mockResolvedValueOnce(undefined)

@@ -156,6 +156,18 @@ describe('pending-action-sidecar', () => {
       payload: { state: 'DESIGN', maxRuns: -1 },
     }
     expect(validAction(invalidBudget, issueId)).toBe(false)
+
+    // resume 与 reopen/recover 一样只带空 payload
+    const resumeAction: PendingIssueAction = {
+      issueId,
+      kind: 'RESUME',
+      requestKey: 'req-resume-1',
+      expectedVersion: '1',
+      payload: {},
+      createdAt: '2026-09-29T10:00:00Z',
+      isUnknown: false,
+    }
+    expect(validAction(resumeAction, issueId)).toBe(true)
   })
 
   it('handles corrupt storage records by returning CORRUPT and preserving evidence without silent deletion', () => {
