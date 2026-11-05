@@ -235,6 +235,13 @@ Snapshot、Debug、用量并展示真实身份，并在顶部提供返回直属�
 子线程只读视图在顶部显示“环境：<名称> · 跟随主对话”：环境名取该 Thread Snapshot 冻结的值，
 即规划该回合时执行根已生效的环境；执行根此后切换环境不会改写既有快照，子线程下一回合才使用新环境。
 执行根没有环境时显示“环境：未选择 · 跟随主对话”，执行根自身不显示该行。
+执行根已选择环境时，[`SkillEnvironmentHint`](../../frontend/src/features/thread/runtime/SkillEnvironmentHint.tsx)
+在输入区上方列出该环境拿不到当前版本的技能与原因：未安装、版本不一致、安装失败。
+两类事实只读既有契约：Agent 的 `config.skills` 与 `GET /skill-packages/{name}/environments` 的
+`installedSha256` / `error` / `upToDate`；判定与 system prompt 的技能路径同源，安装失败优先于
+版本判断，缺少环境行按未安装处理。任一 Package 摘要尚未就绪或读取失败时不提示，不推断安装状态。
+未选择环境时不出现提示，技能走 `vfs:` 路径。提示跟随执行根生效的 Agent 与环境草稿：
+切换环境立即重算，环境的 `changed` 推送只回读安装摘要，安装完成后提示随之消失。
 子代理观察面板从已有 Snapshot 展示 QUEUED CUSTOM_MESSAGE 的“待处理补充要求”，
 保留命令 sequence、稳定身份和真实正文；独立于人工输入队列，不提供编辑、删除或重排。
 应用后随 Snapshot 更新移出待处理区，历史只展示持久 Entry，不复制待处理记录。

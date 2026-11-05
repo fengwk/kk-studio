@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Skill Hint Real React Browser Harness</title>
+    <style>
+      * { box-sizing: border-box; }
+      html, body, #root {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        background: #101412;
+        color: #edf2ed;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      }
+      /* 基座把 pane 铺满视口：提示与 Composer 的相对位置与真实工作区一致。 */
+      .skill-hint-harness-frame {
+        display: flex;
+        width: 100vw;
+        height: 100vh;
+      }
+      .skill-hint-harness-frame > .chat-pane {
+        flex: 1 1 auto;
+        min-width: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./skill-hint-harness.tsx"></script>
+  </body>
+</html>
