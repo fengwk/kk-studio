@@ -218,7 +218,10 @@ public final class ModelDescriptorJsonCodec {
    */
   private static ProviderProtocolOptions readProtocolOptions(ObjectNode node) {
     ObjectNode options = object(node.get("protocolOptions"), "protocolOptions");
-    return new ProviderProtocolOptions(
-        JsonCodecSupport.write(MAPPER, options, "cannot encode model JSON"));
+    try {
+      return new ProviderProtocolOptions(MAPPER.writeValueAsString(options));
+    } catch (JacksonException error) {
+      throw new IllegalArgumentException("protocolOptions must contain JSON values only", error);
+    }
   }
 }
