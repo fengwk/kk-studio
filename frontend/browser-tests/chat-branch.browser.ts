@@ -563,6 +563,39 @@ async function bindFirstPaneToBranchDraft(page: Page, startEntryId: string) {
   })
 }
 
+test('E2E split fixture restores both pane targets and clears both storage sources', async ({ page }) => {
+  // 加载实际 E2E JS 辅助函数，而不是在测试中重新实现其存储格式。
+  const helperPath = '../../scripts/dev/verify/e2e/ui/chat-pane-storage.mjs'
+  const { seedSplitChatPanes, clearChatPaneState } = await import(helperPath)
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installChatApi(page)
+  await page.goto(HARNESS_URL)
+  await seedSplitChatPanes(page, CHAT_ID, THREAD_ID, CHILD_ID)
+  await page.reload()
+
+  const first = page.locator('[data-pane-id="pane-1"]')
+  const second = page.locator('[data-pane-id="pane-2"]')
+  await expect(page.locator('.chat-pane-grid.layout-split-2')).toBeVisible()
+  await expect(first.getByText('Real selected ancestor', { exact: true })).toBeVisible()
+  await expect(second.getByText('Real selected ancestor', { exact: true })).toBeVisible()
+  expect(await readPaneTarget(page, 'pane-1')).toEqual({ kind: 'BOUND_THREAD', threadId: THREAD_ID })
+  expect(await readPaneTarget(page, 'pane-2')).toEqual({ kind: 'BOUND_THREAD', threadId: CHILD_ID })
+  expect(await readPaneTarget(page, 'pane-2', 'local')).toEqual({ kind: 'BOUND_THREAD', threadId: CHILD_ID })
+
+  // 本 tab 索引缺失时从 last-state 恢复；清理必须使两个来源均失效。
+  await page.evaluate((key) => sessionStorage.removeItem(key), `kk-studio.tab-state:chat:${CHAT_ID}`)
+  await page.reload()
+  await expect(page.locator('.chat-pane-grid.layout-split-2')).toBeVisible()
+  await expect(second.getByText('Real selected ancestor', { exact: true })).toBeVisible()
+  await clearChatPaneState(page, CHAT_ID)
+  expect(await readPaneTarget(page, 'pane-1')).toBeNull()
+  expect(await readPaneTarget(page, 'pane-1', 'local')).toBeNull()
+  await page.reload()
+  await expect(page.locator('.chat-pane-grid.layout-single')).toBeVisible()
+  await expect(second).toBeHidden()
+  expect(await readPaneTarget(page, 'pane-1')).toEqual({ kind: 'NEW_SESSION_DRAFT' })
+})
+
 /**
  * 本地分支草稿的 Debug 视图：整 pane 只读覆盖 + 可见退出，不渲染草稿预览动作，
  * 且绝不向后端发出写请求或会话级草稿预览请求。
