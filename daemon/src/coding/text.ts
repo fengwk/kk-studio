@@ -4,8 +4,9 @@ import { ToolRunFailureError } from './support.js'
 /**
  * 文本读取与编码共享边界：前缀探测、严格解码、逐行扫描与有界读取窗口。
  *
- * <p>与 Java 参考实现（{@code TextStreams}/{@code TextReadWindow}/{@code TextFileCodec}）逐条对齐：LF、CRLF 与孤立 CR
- * 都是行边界；正文最多 {@link MAX_BODY_CODE_POINTS} 个 Unicode 码点；单行长度不截断；非法 UTF-8、NUL 与孤立代理项一律以明确的
+ * <p>分页与平台 TextReadWindow 遵循同一契约：offset 与 column_offset 从 1 起，正文至多 2000 行且不超过
+ * MAX_BODY_CODE_POINTS 个 Unicode 码点（不计行号、元数据与行分隔符）；LF、CRLF 与孤立 CR 都是行边界；
+ * 单行长度不截断；扫描到 EOF 才给出截断结论，但只保留窗口正文；非法 UTF-8、NUL 与孤立代理项一律以明确的
  * “看似二进制”失败，绝不静默替换成替换字符。
  */
 

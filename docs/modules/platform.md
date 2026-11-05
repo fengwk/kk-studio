@@ -459,7 +459,7 @@ Environment 管理调用，不写 Thread Tool 执行账本。
 类型与字节不符直接失败。媒体模态在 TOOL 与 USER 位置都不支持时对全部模态显式失败；仅 USER 普通内容位置的非图片保留说明文本回退。
 原生推理回放与协议请求上限见 [Harness Model](harness-model.md)。
 
-统一 `read` 按 path 路由。受管 Blob 必须由执行上下文中的 Session 持有引用；权威 MIME 为 `image/*`/`audio/*`/`video/*`/`application/pdf` 时走媒体路径：在读取任何内容前，用 `TURN_START` 冻结的消费者媒体能力与 MIME 及内联预算校验，不支持则明确失败；通过后返回指向同一已授权 Blob 的真实媒体（不是上传成功文本），由 Provider 物化进模型。读取预算覆盖 S3 握手和响应体。本地文件与受管 Blob 共用 [`TextReadWindow`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/read/TextReadWindow.java)：`offset` 与 `column_offset` 从 1 起，至多 2000 行、60000 个码点，扫描到 EOF 以给出准确的截断结论，但只保留窗口正文；NUL、畸形代理对与解码错误按看似二进制拒绝。本地路径交给 BoundEnvironment，URI 路径拒绝 workdir。
+统一 `read` 按 path 路由。受管 Blob 必须由执行上下文中的 Session 持有引用；权威 MIME 为 `image/*`/`audio/*`/`video/*`/`application/pdf` 时走媒体路径：在读取任何内容前，用 `TURN_START` 冻结的消费者媒体能力与 MIME 及内联预算校验，不支持则明确失败；通过后返回指向同一已授权 Blob 的真实媒体（不是上传成功文本），由 Provider 物化进模型。读取预算覆盖 S3 握手和响应体。本地文件与受管 Blob 共用 [`TextReadWindow`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/read/TextReadWindow.java)：`offset` 与 `column_offset` 从 1 起，至多 2000 行、60000 个码点，扫描到 EOF 以给出准确的截断结论，但只保留窗口正文；NUL、畸形代理对与解码错误按看似二进制拒绝；Daemon 侧的本地实现是 [`daemon/src/coding/text.ts`](../../daemon/src/coding/text.ts)。本地路径交给 BoundEnvironment，URI 路径拒绝 workdir。
 
 结构化 Debug 区分 `NEXT_REQUEST_PREVIEW` 与活动 `FROZEN_INVOCATION`，排除 credential
 与 Base64 正文。请求预览有三个只读入口（既有 Thread 续写、本地分支草稿、历史模型输出），
