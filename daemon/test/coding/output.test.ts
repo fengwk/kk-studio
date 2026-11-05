@@ -38,9 +38,11 @@ describe('OutputSpool', () => {
     const spool = new OutputSpool(store, 'c1')
     await spool.write(utf8('hi\n'))
     const result = await spool.finish(false)
-    expect(spool.isSpilled()).toBe(false)
-    expect(textOf(result)).toBe('hi\n')
+    expect(result.details.textOutput).toBeUndefined()
     expect(result.details).toEqual({})
+    expect(textOf(result)).toBe('hi\n')
+    expect(await store.publishedFiles()).toEqual([])
+    expect(await store.partialFiles()).toEqual([])
   })
 
   it('跨阈值落盘并原子发布 durable 全文', async () => {
@@ -48,9 +50,15 @@ describe('OutputSpool', () => {
     const store = await openTestStore(dir)
     const spool = new OutputSpool(store, 'c2', 10, 5, store.captureBudgetBytes())
     await spool.write(utf8('x'.repeat(100)))
-    expect(spool.isSpilled()).toBe(true)
     const result = await spool.finish(false)
-    const textOutput = result.details.textOutput as { totalBytes: number; path: string }
+    const textOutput = result.details.textOutput as {
+      totalBytes: number
+      path: string
+      captureTruncated: boolean
+      captureFailed: boolean
+    }
+    expect(textOutput).toBeDefined()
+    expect(textOutput.captureFailed).toBe(false)
     expect(textOutput.totalBytes).toBe(100)
     expect(await readFile(textOutput.path, 'utf8')).toBe('x'.repeat(100))
     expect(await store.partialFiles()).toEqual([])
@@ -63,9 +71,17 @@ describe('OutputSpool', () => {
     const spool = new OutputSpool(store, 'c3', 10, 5, 50)
     await spool.write(utf8('y'.repeat(200)))
     expect(spool.isCaptureTruncated()).toBe(true)
-    expect(spool.capturedBytes()).toBe(50)
     const result = await spool.finish(false)
-    expect((result.details.textOutput as { captureTruncated: boolean }).captureTruncated).toBe(true)
+    const textOutput = result.details.textOutput as {
+      captureTruncated: boolean
+      capturedBytes: number
+      totalBytes: number
+      path: string
+    }
+    expect(textOutput.captureTruncated).toBe(true)
+    expect(textOutput.capturedBytes).toBe(50)
+    expect(textOutput.totalBytes).toBe(200)
+    expect(await readFile(textOutput.path, 'utf8')).toBe('y'.repeat(50))
     expect(textOf(result)).toContain('Capture stopped at the local 50-byte daemon budget')
   })
 

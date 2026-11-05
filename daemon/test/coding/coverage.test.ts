@@ -5,9 +5,7 @@ import { join } from 'node:path'
 import {
   OutputSpool,
   TextOutputStore,
-  TemporaryResourceStore,
   alignToCharacterBoundary,
-  leadingCharacterBoundary,
 } from '../../src/coding/output.js'
 import { fileCapabilities } from '../../src/coding/files.js'
 import { searchCapabilities } from '../../src/coding/search.js'
@@ -60,10 +58,24 @@ describe('OutputSpool 分支', () => {
     const store = await openTestStore(dir)
     const spool = new OutputSpool(store, 'c', 5, 2000, 10)
     await spool.write(utf8('x'.repeat(50)))
-    const before = spool.capturedBytes()
-    await spool.write(utf8('y'.repeat(50)))
-    expect(spool.capturedBytes()).toBe(before)
     expect(spool.isCaptureTruncated()).toBe(true)
+    await spool.write(utf8('y'.repeat(50)))
+    const result = await spool.finish(false)
+    const textOutput = (
+      result.details as {
+        textOutput?: {
+          capturedBytes?: number
+          totalBytes?: number
+          captureTruncated?: boolean
+          path?: string
+        }
+      }
+    ).textOutput
+    expect(textOutput?.captureTruncated).toBe(true)
+    expect(textOutput?.capturedBytes).toBe(10)
+    expect(textOutput?.totalBytes).toBe(100)
+    expect(await readFile(textOutput!.path!, 'utf8')).toBe('x'.repeat(10))
+    await spool.close()
   })
 
   it('落盘失败时只降级为有界预览并明确说明', async () => {
@@ -77,8 +89,17 @@ describe('OutputSpool 分支', () => {
     const store = await TextOutputStore.open(dir, undefined, undefined, failing)
     const spool = new OutputSpool(store, 'c', 5, 2000, store.captureBudgetBytes())
     await spool.write(utf8('z'.repeat(100)))
-    expect(spool.isCaptureFailed()).toBe(true)
     const result = await spool.finish(false)
+    const textOutput = (
+      result.details as {
+        textOutput?: {
+          captureFailed?: boolean
+          path?: string
+        }
+      }
+    ).textOutput
+    expect(textOutput?.captureFailed).toBe(true)
+    expect(textOutput?.path).toBeUndefined()
     expect(textOf(result)).toContain('could not be saved to local storage')
     await spool.close()
   })
@@ -146,26 +167,46 @@ describe('TemporaryResourceStore 分支', () => {
     expect(await store.sweep(10)).toBe(1)
   })
 
-  it('UTF-8 边界辅助覆盖 2/3/4 字节序列', () => {
+  it('UTF-8 边界辅助覆盖 2/3/4 字节序列', async () => {
     expect(alignToCharacterBoundary(new Uint8Array([0xc3, 0xa9]), 1)).toBe(0)
     expect(alignToCharacterBoundary(new Uint8Array([0xf0, 0x9f, 0x98]), 3)).toBe(0)
     expect(alignToCharacterBoundary(new Uint8Array([0x80]), 1)).toBe(0)
     expect(alignToCharacterBoundary(new Uint8Array([0x41]), 0)).toBe(0)
-    expect(leadingCharacterBoundary(new Uint8Array([0x80, 0x80]))).toBe(2)
+
+    // 生产边界验证：tailBuffer 前导包含连续 0x80 续字节时被跳过
+    const dir = await tempDir()
+    const store = await openTestStore(dir)
+    const spool = new OutputSpool(store, 'c', 10, 2000, 100)
+    await spool.write(utf8('a'.repeat(100)))
+    await spool.write(new Uint8Array([0x80, 0x80]))
+    await spool.write(utf8('b'.repeat(8190)))
+    const tail = spool.captureTruncatedTailPreview()
+    expect(tail).toBe('b'.repeat(8190))
+    expect(tail).not.toContain('\ufffd')
+    await spool.close()
   })
 
-  it('Workspace.close 幂等：double close 只释放一次租约', async () => {
+  it('租约释放幂等：多次 close/清理只释放一次租约', async () => {
     const dir = await tempDir()
     let now = 1000
-    const resources = await TemporaryResourceStore.open(dir, () => now)
-    const workspace = await resources.create()
-    expect(resources.hasActiveLeases()).toBe(true)
-    workspace.close()
-    workspace.close()
-    expect(resources.hasActiveLeases()).toBe(false)
+    const store = await openTestStore(dir, undefined, () => now)
+    const staging = await store.createStagingFile('call')
+    const published = await store.publish(staging)
+    const lease = await store.acquire(published)
+    expect(store.hasActiveLeases()).toBe(true)
+    lease.close()
+    lease.close()
+    expect(store.hasActiveLeases()).toBe(false)
     now += 100
     // 释放后即可被 TTL 清扫，且不会因为第二次 close 而影响其它租约。
-    expect(await resources.sweep(10)).toBe(1)
+    expect(await store.sweep(10)).toBe(1)
+
+    // 中转 staging 清理同样幂等
+    const staging2 = await store.createStagingFile('call2')
+    expect(store.hasActiveLeases()).toBe(true)
+    await store.deleteStagingQuietly(staging2)
+    await store.deleteStagingQuietly(staging2)
+    expect(store.hasActiveLeases()).toBe(false)
   })
 
   it('writeAll 补齐短写并拒绝无进展', async () => {

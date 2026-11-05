@@ -26,7 +26,7 @@ const PREVIEW_TAIL_MAX_BYTES = 8 * 1024
 const DEFAULT_CAPTURE_BUDGET_BYTES = 1024 * 1024 * 1024
 
 /** 固定容量的字节尾部缓冲：只保留最近写入的 {@code capacity} 字节。 */
-export class ByteTailBuffer {
+class ByteTailBuffer {
   private readonly ring: Uint8Array
   private written = 0
 
@@ -93,7 +93,7 @@ export function alignToCharacterBoundary(bytes: Uint8Array, limit: number): numb
 }
 
 /** 返回首个完整字符的起始下标；缓冲从字符内部开始时跳过前导续字节。 */
-export function leadingCharacterBoundary(bytes: Uint8Array): number {
+function leadingCharacterBoundary(bytes: Uint8Array): number {
   let index = 0
   while (index < bytes.length && isContinuation(bytes[index] as number)) {
     index++
@@ -176,7 +176,7 @@ const nativePrivateFs: PrivateFs = {
 const defaultNow = (): number => Math.floor(Date.now() / 1000)
 
 /** 受控临时 workspace 的创建登记、in-use 租约与清扫。 */
-export class TemporaryResourceStore {
+class TemporaryResourceStore {
   private readonly rootDir: string
   private readonly now: () => number
   private readonly privateFs: PrivateFs
@@ -627,20 +627,8 @@ export class OutputSpool {
     return this.lineBreaks + (endsWithTerminator ? 0 : 1)
   }
 
-  isSpilled(): boolean {
-    return this.spilled
-  }
-
   isCaptureTruncated(): boolean {
     return this.captureTruncated
-  }
-
-  isCaptureFailed(): boolean {
-    return this.captureFailed
-  }
-
-  capturedBytes(): number {
-    return this.capturedByteCount
   }
 
   /** 构造终态结果。 */
