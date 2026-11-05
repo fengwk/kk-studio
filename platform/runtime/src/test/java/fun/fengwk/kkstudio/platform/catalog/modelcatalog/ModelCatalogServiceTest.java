@@ -7,7 +7,12 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 
 import fun.fengwk.kkstudio.share.ai.catalog.ModelCatalogPageDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.ModelDefaultCandidateDTO;
@@ -171,6 +176,34 @@ class ModelCatalogServiceTest {
     assertEquals(List.of(), modelIds(page));
     assertTrue(page.getError().contains("v2 unavailable"));
     assertEquals(1, calls.get());
+  }
+
+  /** 异常完成不改写现有页面结果，但不能误称后台任务已成功记录目录错误。 */
+  @Test
+  void reportsUnexpectedLoadCompletion() {
+    ModelCatalogService service =
+        service(
+            () -> {
+              throw new AssertionError("private detail");
+            });
+    Logger logger = (Logger) LoggerFactory.getLogger(ModelCatalogService.class);
+    ListAppender<ILoggingEvent> logs = new ListAppender<>();
+    logs.start();
+    logger.addAppender(logs);
+    try {
+      ModelCatalogPageDTO page = service.page(null, null, 20);
+      assertEquals(List.of(), modelIds(page));
+      assertEquals(1, logs.list.size());
+      ILoggingEvent event = logs.list.getFirst();
+      assertEquals(Level.WARN, event.getLevel());
+      assertTrue(event.getFormattedMessage().contains("model catalog load 1"));
+      assertTrue(event.getFormattedMessage().contains("AssertionError"));
+      assertFalse(event.getFormattedMessage().contains("private detail"));
+      assertNull(event.getThrowableProxy());
+    } finally {
+      logger.detachAppender(logs);
+      logs.stop();
+    }
   }
 
   private ModelCatalogService service(ModelCatalogTransport transport) {

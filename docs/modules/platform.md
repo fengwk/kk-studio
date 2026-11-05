@@ -400,6 +400,7 @@ URL 与 headers 仅在显式配置查询中以 `no-store` 返回，变量占位�
 [`McpResultExtractor`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog/mcp/client/McpResultExtractor.java)
 把官方 SDK 的 MCP content 映射为 Common 的内容单元，统一使用 Jackson 3；普通 content 优先，仅在 content 为空时把结构化结果写成可读 JSON，`_meta` 中的业务详情单独保留，
 文本与二进制内容共享单次响应 64 MiB 累计预算，结构化内容另受单条 JSON 上限约束。传输报文预算容纳内容最坏六倍 JSON 转义和单条 JSON 大小的信封余量，JSON 字符串读取上限与报文预算对齐，不用 SDK 的默认限制缩小内容预算。
+业务详情无法编码时回退为空对象并记录告警，只输出阶段与异常类型，不记录元数据内容。
 入参要求严格 JSON object，重复键或尾随内容在本地拒绝，不交给服务端偶然实现；远端工具的 `inputSchema` 也必须是 JSON object，非法形状使发现失败，不归一化为无参数工具。
 [`RemoteMcpConfig`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog/mcp/client/RemoteMcpConfig.java)
 的 `toString` 只输出 URL 长度与 header 数量，因为 URL 可能内嵌凭证。
@@ -504,6 +505,8 @@ retain/release 加入调用方事务；引用减至零时切为 DELETING，后�
 
 Tool 结果先经过无副作用 plan 与硬限校验，再外部化 Binary/Resource。
 普通文本内联预算 50 KiB / 2000 行，可信内置 read 为 320 KiB / 2020 行。
+结果暂存失败时尽力清理已准备的 upload；清理失败记录 upload ID 与异常类型，不覆盖结果，
+未清理的 upload 仍由过期清理兜底。
 history materializer 在 mandatory transaction 中锁 READY upload、复验权威媒体事实、
 retain Session 引用并删除 upload owner，整体回滚保留可回收上传。
 Daemon 字节走对象存储直传，控制协议见 [Harness Environment](harness-environment.md)。

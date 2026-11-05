@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.platform.catalog.modelcatalog;
 
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
@@ -25,6 +26,7 @@ import java.util.concurrent.atomic.AtomicLong;
  *
  * <p>刷新失败保留上次成功候选和真实 fetchedAt，只记录错误；成功才更新时间。
  */
+@Slf4j
 @Component
 public class ModelCatalogService {
 
@@ -66,8 +68,13 @@ public class ModelCatalogService {
     if (load != null) {
       try {
         load.future().join();
-      } catch (CompletionException ignored) {
-        // 错误已记录在目录状态中，上次成功的快照保持不变。
+      } catch (CompletionException failure) {
+        // 预期的刷新异常已写入目录状态；异常完成代表后台任务未能正常收敛。
+        Throwable cause = failure.getCause();
+        log.warn(
+            "model catalog load {} ended unexpectedly: {}",
+            load.generation(),
+            (cause == null ? failure : cause).getClass().getSimpleName());
       }
     }
     synchronized (lock) {
