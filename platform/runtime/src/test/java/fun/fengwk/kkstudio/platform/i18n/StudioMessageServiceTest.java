@@ -144,9 +144,13 @@ class StudioMessageServiceTest {
             DomainErrorCode.VALIDATION, "Invalid agent request.",
             DomainErrorCode.NOT_FOUND, "The agent was not found.",
             DomainErrorCode.VERSION_CONFLICT, "The agent was modified by another request.",
+            DomainErrorCode.CONFLICT, "The request conflicts with the current resource state.",
             DomainErrorCode.DUPLICATE, "The agent already exists.",
             DomainErrorCode.IN_USE, "The agent is still in use.",
-            DomainErrorCode.UNAVAILABLE, "The service is temporarily unavailable.");
+            DomainErrorCode.UNAVAILABLE, "The service is temporarily unavailable.",
+            DomainErrorCode.UPSTREAM_FAILED, "The agent service request failed.",
+            DomainErrorCode.UNAUTHORIZED, "The request is not authorized.",
+            DomainErrorCode.INTERNAL, "The server encountered an unexpected error.");
 
     LocaleContextHolder.setLocale(Locale.US);
     for (Map.Entry<DomainErrorCode, String> entry : expected.entrySet()) {
@@ -170,5 +174,25 @@ class StudioMessageServiceTest {
         "环境 IDE 当前不可用，请稍后重试。",
         messageService.domainMessage(
             DomainErrorCode.UNAVAILABLE, "IDE_UNAVAILABLE", Map.of("resource", "environment")));
+  }
+
+  @Test
+  void localizesEnvironmentUnavailableAndFallsBackForOtherReasons() {
+    // 环境和 IDE 的不可用提示必须可区分，未知原因使用通用提示。
+    LocaleContextHolder.setLocale(Locale.US);
+    assertEquals(
+        "The environment runtime is unavailable. Try again later.",
+        messageService.domainMessage(
+            DomainErrorCode.UNAVAILABLE, "ENVIRONMENT_UNAVAILABLE", Map.of()));
+    assertEquals(
+        "The service is temporarily unavailable.",
+        messageService.domainMessage(DomainErrorCode.UNAVAILABLE, "OTHER", Map.of()));
+    LocaleContextHolder.setLocale(Locale.SIMPLIFIED_CHINESE);
+    assertEquals(
+        "环境运行时状态当前不可用，请稍后重试。",
+        messageService.domainMessage(
+            DomainErrorCode.UNAVAILABLE, "ENVIRONMENT_UNAVAILABLE", Map.of()));
+    assertEquals(
+        "服务暂时不可用。", messageService.domainMessage(DomainErrorCode.UNAVAILABLE, "OTHER", Map.of()));
   }
 }
