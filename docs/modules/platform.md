@@ -732,7 +732,7 @@ null 表示强制直连；`noProxyHosts` 为逗号分隔绕过规则，默认 `l
 ## 测试入口
 
 [`platform/runtime/src/test`](../../platform/runtime/src/test/java/fun/fengwk/kkstudio/platform) 按上述子域组织：
-架构测试检查依赖方向，Catalog/Settings 检查 CAS 与 codec，
+依赖方向与表归属由 [`check.mjs`](../../scripts/dev/verify/repository/check.mjs) 统一检查，Catalog/Settings 检查 CAS 与 codec，
 orchestration 检查 owner 事务与锁序，gateway 检查 admission、门控和终态，
 storage 检查引用转移、对象清理与回滚，environment 检查路由围栏与同步。
 Harness 的定向入口：

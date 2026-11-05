@@ -27,7 +27,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 
 /** 验证 Anthropic 组件的 toString 与异常脱敏安全约束。 */
-class AnthropicSecurityAndArchitectureTest {
+class AnthropicSecurityTest {
 
   private HttpClient httpClient;
   private ExecutorService workerExecutor;

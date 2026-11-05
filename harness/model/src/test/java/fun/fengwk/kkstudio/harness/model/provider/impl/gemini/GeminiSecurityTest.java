@@ -37,7 +37,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 
 /** 验证 Gemini 组件的 toString、架构无外部 SDK 依赖与凭据安全约束。 */
-class GeminiSecurityAndArchitectureTest {
+class GeminiSecurityTest {
 
   private HttpClient httpClient;
   private ExecutorService workerExecutor;
@@ -153,28 +153,6 @@ class GeminiSecurityAndArchitectureTest {
 
     GeminiProviderAdapter singleParamAdapter = new GeminiProviderAdapter(transport);
     assertEquals(ProviderType.GOOGLE, singleParamAdapter.providerType());
-  }
-
-  @Test
-  void architectureConstraints_noSpringOrGoogleSdkImports() throws Exception {
-    Class<?>[] classes =
-        new Class<?>[] {
-          GeminiEndpoints.class,
-          GeminiProviderAdapter.class,
-          GeminiModelProvider.class,
-          GeminiRequestEncoder.class,
-          GeminiStreamAccumulator.class,
-          GeminiEncodedRequest.class,
-          GeminiErrorMapper.class
-        };
-
-    for (Class<?> clazz : classes) {
-      // 验证没有加载任何 org.springframework 或 com.google 类
-      for (Class<?> iface : clazz.getInterfaces()) {
-        assertFalse(iface.getName().startsWith("org.springframework"));
-        assertFalse(iface.getName().startsWith("com.google"));
-      }
-    }
   }
 
   private static ModelDescriptor dummyModel() {

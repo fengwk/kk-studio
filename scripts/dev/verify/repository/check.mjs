@@ -1560,7 +1560,9 @@ function checkPackageInfo() {
 }
 
 /** 源码、配置与文档中不得出现会话过程用语；AGENTS.md 是 Agent 工作规则，不在此列。 */
-const sessionArtifactTerms = [['本', '切片'].join(''), ['Branch', 'B'].join(' ')]
+const sessionArtifactTerms = ['本切片', 'Branch B']
+const sessionArtifactExcludedPaths = new Set(['scripts/dev/verify/repository/check.mjs'])
+const sessionArtifactExcludedPrefixes = ['scripts/dev/verify/repository/tests/']
 const sessionArtifactExtensions = new Set([
   '.java', '.ts', '.tsx', '.js', '.mjs', '.cjs', '.yml', '.yaml', '.properties', '.sql', '.sh', '.ps1', '.txt',
 ])
@@ -1593,6 +1595,12 @@ function checkNoSessionArtifacts() {
   }
   for (const file of sourceFiles(repositoryRoot)) {
     const relativePath = relativeFromRoot(file)
+    if (
+      sessionArtifactExcludedPaths.has(relativePath) ||
+      sessionArtifactExcludedPrefixes.some((prefix) => relativePath.startsWith(prefix))
+    ) {
+      continue
+    }
     read(relativePath)
       .split('\n')
       .forEach((line, index) => {

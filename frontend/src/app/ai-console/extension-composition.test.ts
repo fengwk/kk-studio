@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { applicationContributions } from '@/app/application-contributions'
 import { aiExtension } from '@/app/ai-console/ai-extension.definition'
@@ -6,7 +5,7 @@ import { canvasExtension } from '@/features/canvas/extensions/canvas-extension'
 import { projectsExtension } from '@/features/projects/extensions/projects-extension.definition'
 import { settingsExtension } from '@/features/settings/settings-extension'
 
-describe('AI extension composition architecture', () => {
+describe('AI extension composition', () => {
   it('registers default and lazy feature routes through independent extensions', () => {
     expect(aiExtension.pages?.map((page) => [page.id, page.path])).toEqual([
       ['ai.chats', 'chats'],
@@ -61,7 +60,9 @@ describe('AI extension composition architecture', () => {
     expect(applicationContributions.dialogs.map((dialog) => dialog.id)).toEqual(
       aiExtension.dialogs!.map((dialog) => dialog.id),
     )
-    expect(applicationContributions.overlays.map((overlay) => overlay.id)).toEqual(['projects.invalidation'])
+    expect(applicationContributions.overlays.map((overlay) => overlay.id)).toEqual([
+      'projects.invalidation',
+    ])
     expect(applicationContributions.toolRenderers.get('task')?.component).toBe(
       aiExtension.toolRenderers?.[0].component,
     )
@@ -75,46 +76,4 @@ describe('AI extension composition architecture', () => {
       settingsExtension.pages?.[0].component,
     )
   })
-
-  it('keeps global dialog hooks context-only and feature controllers outside the default path', () => {
-    const chatController = source('../../features/chat/useChatPageController.ts')
-    const chatContext = source('../../features/chat/ChatRuntimeContext.ts')
-    const catalogContext = source('../../features/catalog/CatalogRuntimeContext.ts')
-    const aiExtensionSource = source('./ai-extension.tsx')
-    const aiDefinitionSource = source('./ai-extension.definition.ts')
-    const createChatDialogSource = source('./CreateChatDialog.tsx')
-    const taskRendererSource = source('./TaskToolRendererLazy.tsx')
-
-    expect(chatController).not.toContain('@/features/catalog')
-    expect(chatController).toContain('@/shared/api/agent-service')
-    expect(chatContext).toContain(
-      "import type { ChatPageController } from '@/features/chat/useChatPageController'",
-    )
-    expect(catalogContext).toContain(
-      "import type { CatalogPageController } from '@/features/catalog/useCatalogPageController'",
-    )
-    expect(createChatDialogSource).toContain(
-      "from '@/features/chat/ChatRuntimeContext'",
-    )
-    expect(aiExtensionSource).toContain(
-      "from '@/features/catalog/CatalogRuntimeContext'",
-    )
-    expect(aiExtensionSource).toContain("import('@/features/chat/ChatsRoute')")
-    expect(aiExtensionSource).toContain("import('@/features/chat/ChatWorkspaceRoute')")
-    expect(aiExtensionSource).toContain("import('@/features/chat/thread/ThreadWorkspaceRoute')")
-    expect(aiDefinitionSource).not.toContain(
-      "@/features/thread/runtime/thread-panel/messages/TaskToolRenderer'",
-    )
-    expect(aiDefinitionSource).toContain(
-      "from '@/app/ai-console/TaskToolRendererLazy'",
-    )
-    expect(taskRendererSource).toContain(
-      "import('@/features/thread/runtime/thread-panel/messages/TaskToolRenderer')",
-    )
-    expect(aiExtensionSource).not.toContain('useCatalogPageController')
-  })
 })
-
-function source(relativePath: string) {
-  return readFileSync(new URL(relativePath, import.meta.url), 'utf8')
-}

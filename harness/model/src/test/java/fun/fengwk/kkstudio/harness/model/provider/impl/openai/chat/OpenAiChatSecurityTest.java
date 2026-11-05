@@ -31,7 +31,7 @@ import java.util.concurrent.ScheduledExecutorService;
  * 测试意图：验证 OpenAI Chat 实现的安全防泄漏（禁止 credential、configJson、replay 泄露到异常与 toString） 以及 Spring-free
  * 架构纯洁性。
  */
-class OpenAiChatSecurityAndArchitectureTest {
+class OpenAiChatSecurityTest {
 
   private HttpClient httpClient;
   private ExecutorService workerExecutor;
