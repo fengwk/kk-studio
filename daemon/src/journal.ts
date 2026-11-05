@@ -156,5 +156,4 @@ export class InMemoryInvocationJournal implements InvocationJournal {
       }
     }
   }
-
 }

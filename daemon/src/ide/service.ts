@@ -445,7 +445,6 @@ export async function createIdeService(
     }
   }
 
-
   const { openView, requireBoundView, dropClaimsForView } = createViewRegistry({
     paths, views, reservations, claims, scheduler, bridge, manager, maxViews,
     proofExclusivityMillis: IDE_PROOF_EXCLUSIVITY_MILLIS, closeBudgetMillis: IDE_CLOSE_BUDGET_MILLIS,

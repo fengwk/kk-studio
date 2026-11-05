@@ -94,5 +94,4 @@ describe('posix session primitives respect platform availability', () => {
       expect(membersSnapshot(1, -1)).toBeNull()
     })
   })
-
 })

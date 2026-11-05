@@ -623,5 +623,4 @@ export class LspClientPool {
       retirement.resolve()
     }
   }
-
 }
