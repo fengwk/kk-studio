@@ -134,6 +134,7 @@
                                     <element>CLASS</element>
                                     <includes>
                                         <include>fun.fengwk.kkstudio.platform.daemon.protocol.ControlProtocolCodec</include>
+                                        <include>fun.fengwk.kkstudio.platform.daemon.protocol.ControlProtocolValidator</include>
                                         <include>fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer</include>
                                         <include>fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionSession</include>
                                         <include>fun.fengwk.kkstudio.platform.daemon.server.DaemonInvocationTracker</include>

@@ -41,6 +41,14 @@ class DaemonControlStreamTest {
       new DaemonConnectionIdentity(
           EnvironmentId.parse("3f2a9c1e-7b4d-4e2a-9c6f-1a2b3c4d5e6f"), "inst-1");
 
+  private static final String INVOCATION_1 = "00000000-0000-4000-8000-000000000001";
+  private static final String INVOCATION_2 = "00000000-0000-4000-8000-000000000002";
+  private static final String INVOCATION_TIMEOUT = "00000000-0000-4000-8000-000000000003";
+  private static final String INVOCATION_END = "00000000-0000-4000-8000-000000000004";
+  private static final String INVOCATION_CLOSED = "00000000-0000-4000-8000-000000000005";
+  private static final String INVOCATION_BUSY = "00000000-0000-4000-8000-000000000006";
+  private static final String INVOCATION_RESET = "00000000-0000-4000-8000-000000000007";
+
   private TestStream stream;
   private TestScheduler scheduler;
   private AtomicBoolean sessionClosed;
@@ -87,8 +95,8 @@ class DaemonControlStreamTest {
   void incrementallyParsesFragmentedFramesAndDispatchesOutOfLock() {
     controlStream.bindSession(daemonSession);
 
-    Envelope env1 = createCancelEnvelope("inv-1");
-    Envelope env2 = createCancelEnvelope("inv-2");
+    Envelope env1 = createCancelEnvelope(INVOCATION_1);
+    Envelope env2 = createCancelEnvelope(INVOCATION_2);
 
     byte[] frame1 = ControlProtocolCodec.encodeFrame(env1);
     byte[] frame2 = ControlProtocolCodec.encodeFrame(env2);
@@ -116,20 +124,20 @@ class DaemonControlStreamTest {
     controlStream.listener().onDataAvailable(stream);
     // 第一帧完整了
     assertEquals(1, daemonSession.received.size());
-    assertEquals("inv-1", daemonSession.received.get(0).getInvocationId());
+    assertEquals(INVOCATION_1, daemonSession.received.get(0).getInvocationId());
 
     stream.inboundDataQueue.add(new TestData(ByteBuffer.wrap(part3), false));
     controlStream.listener().onDataAvailable(stream);
     // 第二帧完整了，按到达顺序交付
     assertEquals(2, daemonSession.received.size());
-    assertEquals("inv-2", daemonSession.received.get(1).getInvocationId());
+    assertEquals(INVOCATION_2, daemonSession.received.get(1).getInvocationId());
   }
 
   @Test
   void triggersWriteTimeoutViaSchedulerWhenUnacknowledged() {
     controlStream.bindSession(daemonSession);
 
-    Envelope env = createCancelEnvelope("inv-timeout");
+    Envelope env = createCancelEnvelope(INVOCATION_TIMEOUT);
 
     assertEquals(DaemonOfferResult.ACCEPTED, controlStream.offer(env));
     assertEquals(1, stream.sentFrames.size());
@@ -148,7 +156,7 @@ class DaemonControlStreamTest {
   void closeAfterFlushWaitsForEndStreamCallback() {
     controlStream.bindSession(daemonSession);
 
-    Envelope env = createCancelEnvelope("inv-end");
+    Envelope env = createCancelEnvelope(INVOCATION_END);
     controlStream.offer(env);
     controlStream.closeAfterFlush();
 
@@ -193,13 +201,14 @@ class DaemonControlStreamTest {
     controlStream.bindSession(daemonSession);
     controlStream.close();
     assertFalse(controlStream.isOpen());
-    assertEquals(DaemonOfferResult.CLOSED, controlStream.offer(createCancelEnvelope("inv-closed")));
+    assertEquals(
+        DaemonOfferResult.CLOSED, controlStream.offer(createCancelEnvelope(INVOCATION_CLOSED)));
   }
 
   @Test
   void offerRejectsWithBusyWhenPendingBudgetExceeded() {
     controlStream.bindSession(daemonSession);
-    Envelope env = createCancelEnvelope("inv-busy");
+    Envelope env = createCancelEnvelope(INVOCATION_BUSY);
     for (int i = 0; i <= DaemonControlStream.MAX_PENDING_FRAMES; i++) {
       assertEquals(DaemonOfferResult.ACCEPTED, controlStream.offer(env));
     }
@@ -209,7 +218,7 @@ class DaemonControlStreamTest {
   @Test
   void closeImmediatelyResetsStreamAndNotifiesSessionCloser() {
     controlStream.bindSession(daemonSession);
-    controlStream.offer(createCancelEnvelope("inv-reset"));
+    controlStream.offer(createCancelEnvelope(INVOCATION_RESET));
     controlStream.close();
     assertFalse(controlStream.isOpen());
     assertTrue(daemonSession.closed);
