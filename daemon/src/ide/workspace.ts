@@ -3,14 +3,14 @@ import { opendir, readdir, readFile, stat, realpath } from 'node:fs/promises'
 import { dirname, isAbsolute, join } from 'node:path'
 import type { DaemonConfig, IdeReply } from '../contracts.js'
 import { ensurePrivateDirectory, writePrivateFile } from '../native/index.js'
+import { isCanonicalUuid } from '../protocol/uuid.js'
 import { IdeError } from './errors.js'
 
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const EPOCH_PATTERN = /^[1-9][0-9]*$/
 export const LONG_MAX = 9_223_372_036_854_775_807n
 
 export function validateUuid(value: string, field = 'id'): string {
-  if (typeof value !== 'string' || !UUID_PATTERN.test(value)) {
+  if (!isCanonicalUuid(value)) {
     throw new IdeError(`${field} must be a canonical lowercase UUID`, 'UNAVAILABLE')
   }
   return value

@@ -2,11 +2,11 @@ import {
   parseStrictJson as strictParseJson,
   utf8ByteLength as strictUtf8ByteLength,
 } from '../strict-json.js'
+import { isCanonicalUuid } from '../uuid.js'
 
 export const MAX_MESSAGE_BYTES = 16 * 1024 * 1024
 export const MAX_SAFE_BIGINT = 9007199254740991n
 
-export const CANONICAL_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const SHA256_PATTERN = /^[0-9a-f]{64}$/
 const MEDIA_TYPE_PATTERN = /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/
 
@@ -38,7 +38,7 @@ export function requireText(value: unknown, name: string, options: TextOptions =
 }
 
 export function requireUuid(value: unknown, name: string): string {
-  if (typeof value !== 'string' || !CANONICAL_UUID_PATTERN.test(value)) {
+  if (!isCanonicalUuid(value)) {
     throw new Error(`${name} must be a canonical lowercase UUID`)
   }
   return value

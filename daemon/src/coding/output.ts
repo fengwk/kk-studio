@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto'
 import type { CapabilityResult, ResultContent } from '../contracts.js'
 import { ensurePrivateDirectory, writePrivateFile } from '../native/index.js'
 import { writeAll as writeAllBytes } from '../native/write-all.js'
+import { isCanonicalUuid } from '../protocol/uuid.js'
 
 /**
  * 有界输出捕获与受控临时产物：内联小输出，本地落盘大文本，从不因为输出体积终止进程。
@@ -257,7 +258,7 @@ export class TemporaryResourceStore {
     const relative = normalized.slice(this.rootDir.length).replace(/^[\\/]+/, '')
     const first = relative.split(/[\\/]/)[0] as string
     const workspace = join(this.rootDir, first)
-    if (!isUuid(first)) {
+    if (!isCanonicalUuid(first)) {
       return NONE_LEASE
     }
     return this.mutex.runExclusive(async () => {
@@ -350,7 +351,7 @@ export class TemporaryResourceStore {
     if (!isRealDirectory(info)) {
       return false
     }
-    if (!isUuid(entry.slice(entry.lastIndexOf(sep) + 1))) {
+    if (!isCanonicalUuid(entry.slice(entry.lastIndexOf(sep) + 1))) {
       return false
     }
     return (await readCreatedAt(entry)) !== null
@@ -416,12 +417,6 @@ async function deleteTree(directory: string): Promise<boolean> {
 
 async function deleteTreeQuietly(directory: string): Promise<void> {
   await deleteTree(directory)
-}
-
-function isUuid(value: string): boolean {
-  return /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(
-    value,
-  )
 }
 
 function isWithin(parent: string, candidate: string): boolean {

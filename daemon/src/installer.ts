@@ -10,7 +10,7 @@ import type { DaemonConfig } from './contracts.js'
 import { getOutboundNetwork, subprocessEnvironment, type OutboundNetwork } from './network.js'
 import { ensurePrivateDirectory, writePrivateFile } from './native/index.js'
 import { DAEMON_VERSION_PATTERN, currentPlatformKey } from './release.js'
-import { CANONICAL_UUID_PATTERN } from './protocol/control/runtime.js'
+import { isCanonicalUuid } from './protocol/uuid.js'
 import type { UpdateOutcomeLike } from './runtime-ports.js'
 
 const exec = promisify(execFile)
@@ -65,7 +65,7 @@ export async function prepareInstaller(
 ): Promise<UpdateOutcomeLike> {
   const { operationId, targetVersion } = command
   if (Object.keys(command).some(key => key !== 'operationId' && key !== 'targetVersion') ||
-      typeof operationId !== 'string' || !CANONICAL_UUID_PATTERN.test(operationId) ||
+      !isCanonicalUuid(operationId) ||
       typeof targetVersion !== 'string' || !DAEMON_VERSION_PATTERN.test(targetVersion)) {
     throw new Error('invalid update command')
   }
