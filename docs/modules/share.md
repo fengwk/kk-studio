@@ -16,7 +16,7 @@ DTO 表达 HTTP 请求与投影。Canvas 与 Project 的领域到 DTO 转换分�
 
 [`CanvasCommandDTO`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/dto/CanvasCommandDTO.java) 的 11 个子类型与 [Canvas](canvas.md#typed-command-与并发语义) 的 `CanvasCommand` 一一对应：`CREATE_NODE`、`RENAME_NODE`、`SET_NODE_RESOURCES`、`SET_NODE_FUNCTION`、`SET_NODE_GROUP`、`DELETE_NODE`、`UPDATE_NODE_TRANSFORM`、`CREATE_GROUP`、`RENAME_GROUP`、`UPDATE_GROUP_TRANSFORM`、`DELETE_GROUP`。每条命令只修改一个语义组，前置条件携带编辑起点的旧值（旧名称、旧资源 id 列表、旧 Function `{name,args}` 或旧几何基线）。Patch 用 `op` discriminator 表达 `UPSERT` / `REMOVE`，节点与分组实体各自独立，整图只前进一个被接受的 `revision`。
 
-字符串到 UUID 与数字的解析属于 HTTP 边界，并且都是严格 canonical：UUID 只使用 [`Uuids.parseCanonical`](../../common/src/main/java/fun/fengwk/kkstudio/common/id/Uuids.java)，必须与 `UUID.toString()` 往返一致，拒绝大写、前后空白和其它非 canonical 形状；非负与正数十进制只使用 [`DecimalLongs`](../../common/src/main/java/fun/fengwk/kkstudio/common/number/DecimalLongs.java)（`0|[1-9]\d*` 与 `[1-9]\d*`，且必须放进 `long`），同样拒绝前后空白、符号和前导零。Project、Harness 与 Environment 路径都直接复用这两个算法，不再把大小写或空白归一成合法输入；可选字段缺省仍表示未提供，不把缺省本身当非法。共享层只承载解析后的值，整数形态的实体 id 在 wire 上永远不出现。
+字符串到 UUID 与数字的解析属于 HTTP 边界，并且都是严格 canonical：UUID 只使用 [`Uuids.parseCanonical`](../../common/src/main/java/fun/fengwk/kkstudio/common/id/Uuids.java)，必须与 `UUID.toString()` 往返一致，拒绝大写、前后空白和其它非 canonical 形状；非负与正数十进制只使用 [`DecimalLongs`](../../common/src/main/java/fun/fengwk/kkstudio/common/number/DecimalLongs.java)（`0|[1-9]\d*` 与 `[1-9]\d*`，且必须放进 `long`），同样拒绝前后空白、符号和前导零。Project、Harness 与 Environment 路径都直接复用这两个算法，严格校验大小写与空白，拒绝非规范输入；可选字段缺省仍表示未提供，不把缺省本身当非法。共享层只承载解析后的值，整数形态的实体 id 在 wire 上永远不出现。
 
 durable 游标在 wire 上保持十进字符串：Canvas 的 revision、Harness Thread 的 sequence、Project/Issue 的 version、nextIssueNumber、number、sequence、nextActivityCursor、ordinal、budgetAfterOrdinal、usedRuns、remainingRuns、observedActivitySequence、remainingExecutionMs 及请求 expectedVersion 均为 String，以保持 JS 端整数精度。[`CanvasDtoContractTest`](../../apps/canvas/runtime/src/test/java/fun/fengwk/kkstudio/canvas/dto/CanvasDtoContractTest.java) 与 [`ProjectDtoContractTest`](../../apps/project/src/test/java/fun/fengwk/kkstudio/project/dto/ProjectDtoContractTest.java) 反射验证字段类型。
 
@@ -85,8 +85,8 @@ Thread Debug 使用结构化 `HarnessModelRequestDebugDTO`，携带下一次请�
 Work 冻结路由，`requiredEnvironmentName` 沿此身份读取环境目录，不取 Thread 当前选择。
 `waitingForEnvironment` 表达读取时是否待环境；`environmentWaitFreshnessAt` 是该 READY
 环境调用未来有效 READY 连接租约、Work 可领取时间、执行租约的最小边界。
-非 READY、server-side 或没有未来边界时为 null；日期沿用 HTTP mapper 的既有 Instant
-语义。这些字段可在同一 Thread version 下因时间推移而变化，重新 GET 不产生持久写入。
+非 READY、server-side 或没有未来边界时为 null；日期遵循 HTTP mapper 的 Instant
+序列化规范。这些字段可在同一 Thread version 下因时间推移而变化，重新 GET 不产生持久写入。
 
 `ProjectSnapshotDTO.referencedStateCodes` 是非 null 的去重、有序阶段集合，
 包含活动及归档 Issue 的 `state` 与非 null `blockedFromState`。引用集合不改变正常 Issue 列表，
