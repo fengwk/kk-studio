@@ -212,9 +212,13 @@ public final class ModelDescriptorJsonCodec {
     return protocolOptions.copyOptions();
   }
 
-  /** 读取必填的 protocolOptions object；缺失、null 与非 object 都拒绝。 */
+  /**
+   * 读取必填的 protocolOptions object；缺失、null 与非 object 都拒绝。内容解析与规范化唯一委派给 {@link
+   * ProviderProtocolOptions}，本 codec 只负责提取字段并把节点转成文本。
+   */
   private static ProviderProtocolOptions readProtocolOptions(ObjectNode node) {
-    return ProviderProtocolOptions.fromJsonNode(
-        object(node.get("protocolOptions"), "protocolOptions"));
+    ObjectNode options = object(node.get("protocolOptions"), "protocolOptions");
+    return new ProviderProtocolOptions(
+        JsonCodecSupport.write(MAPPER, options, "cannot encode model JSON"));
   }
 }

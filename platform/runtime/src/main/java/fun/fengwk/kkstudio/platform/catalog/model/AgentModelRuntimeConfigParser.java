@@ -15,6 +15,8 @@ import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.model.ProviderProtocolOptions;
+import fun.fengwk.kkstudio.harness.model.ProviderProtocolOptions.InvalidOptionsException;
+import fun.fengwk.kkstudio.harness.model.ProviderProtocolOptions.InvalidReason;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelAbilitiesDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelInputModality;
@@ -233,7 +235,7 @@ public final class AgentModelRuntimeConfigParser {
         variant.setReasoningEffort(variant.getReasoningEffort().trim());
       }
       String json = variant.getProtocolOptionsJson();
-      ProviderProtocolOptions parsed = parseProtocolOptions(json, path);
+      ProviderProtocolOptions parsed = toProtocolOptions(json, path);
       variant.setProtocolOptionsJson(parsed.isEmpty() ? "{}" : json.trim());
       options.add(parsed);
     }
@@ -267,14 +269,13 @@ public final class AgentModelRuntimeConfigParser {
     }
   }
 
-  /** 严格校验选项；调用方保留用户的内部数值文本。 */
-  private static ProviderProtocolOptions parseProtocolOptions(String json, String path) {
+  /** 内容解析与规范化唯一委派给 {@link ProviderProtocolOptions}；这里只映射 config 路径语义。 */
+  private static ProviderProtocolOptions toProtocolOptions(String json, String path) {
     try {
       return new ProviderProtocolOptions(json);
-    } catch (IllegalArgumentException error) {
+    } catch (InvalidOptionsException error) {
       // 丢弃 cause：底层异常可能包含原始输入，HTTP 和日志不能泄露选项值。
-      if (error.getMessage() != null
-          && error.getMessage().startsWith("protocolOptions must not exceed ")) {
+      if (error.reason() == InvalidReason.TOO_LARGE) {
         throw invalid(
             path
                 + ".protocolOptionsJson must not exceed "

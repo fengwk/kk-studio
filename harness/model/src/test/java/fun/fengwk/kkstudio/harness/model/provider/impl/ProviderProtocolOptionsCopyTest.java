@@ -2,11 +2,9 @@ package fun.fengwk.kkstudio.harness.model.provider.impl;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
-import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
@@ -97,24 +95,5 @@ class ProviderProtocolOptionsCopyTest {
     assertEquals(
         "catalog",
         variant.protocolOptions().copyOptions().path("metadata").path("source").asString(""));
-  }
-
-  /** fromJsonNode 直接消费已解析树，并保持同样的 canonical 语义。 */
-  @Test
-  void constructsFromParsedNodeWithoutChangingNumbers() {
-    ObjectNode parsed = JsonNodeFactory.instance.objectNode();
-    parsed.put("ratio", new BigDecimal("1.10"));
-    parsed.put("revision", 1758880000000L);
-
-    ProviderProtocolOptions options = ProviderProtocolOptions.fromJsonNode(parsed);
-
-    assertEquals("{\"ratio\":1.1,\"revision\":1758880000000}", options.canonicalJson());
-    assertEquals(new BigDecimal("1.1"), options.copyOptions().path("ratio").decimalValue());
-  }
-
-  /** 已解析节点不可为 null：调用方必须显式处理空选项，而不是静默退化为空 object。 */
-  @Test
-  void rejectsNullParsedNode() {
-    assertThrows(NullPointerException.class, () -> ProviderProtocolOptions.fromJsonNode(null));
   }
 }

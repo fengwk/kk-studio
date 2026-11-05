@@ -12,9 +12,10 @@ import tools.jackson.databind.annotation.JsonDeserialize;
  * / {@code xhigh} 等）；{@code off} 表示显式关闭推理，{@code null} 表示不下发该字段、由协议默认决定。两者语义不同，绝不互相静默映射。 非 null 的
  * reasoningEffort 只去除首尾空白并保留原始大小写，禁止空白且长度不能超过 64 个字符。
  *
- * <p>{@code protocolOptionsJson} 可空：JSON object 文本形态的厂商原生请求选项，{@code null} 与 {@code {}} 等价，非 object
- * 一律拒绝；数字文本绝不经由前端浮点解析。选项只允许官方协议的非传输字段，Provider 凭据、endpoint、 传输模式与 runtime
- * 冻结事实不允许被覆盖，具体合并规则由各协议编码器负责。
+ * <p>{@code protocolOptionsJson} 可空：JSON object 文本形态的厂商原生请求选项，{@code null} 与 {@code {}} 等价。本 DTO
+ * 及其反序列化器只保证 wire token 是 JSON string；严格 object 语法、64 KiB UTF-8 上限与 canonical 化由 harness 的 {@code
+ * ProviderProtocolOptions} 在平台解析配置时统一执行。数字文本绝不经由前端浮点解析。选项只允许官方协议的非传输字段， Provider 凭据、endpoint、传输模式与
+ * runtime 冻结事实不允许被覆盖，具体合并规则由各协议编码器负责。
  */
 @Data
 public class AgentModelVariantDTO {

@@ -6,8 +6,6 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ObjectNode;
 
 import java.nio.charset.StandardCharsets;
-import java.util.Map;
-import java.util.Objects;
 
 /**
  * 单个 model variant 携带的厂商原生协议请求选项。
@@ -15,6 +13,11 @@ import java.util.Objects;
  * <p>值对象只持有 canonical JSON object 文本：输入必须是严格 JSON object（重复键、trailing token、非 object 一律拒绝），
  * 并被规范化为无多余空白的紧凑文本；{@code null} 与空白等价于空 object（{@link #EMPTY}），因此「未声明选项」与「声明了空 object」是同一语义。输入的
  * UTF-8 字节数受 {@link #MAX_UTF8_BYTES} 限制，避免 variant 变成无限 payload 的载体。
+ *
+ * <p>本类的 canonical 构造器是 {@code protocolOptions} 唯一的解析与规范化入口：API/durable config 的 JSON string 与
+ * descriptor 中的嵌套 object 都先转成文本再进入这里；其他位置只提取输入并把失败映射成自己的领域错误，不复制严格语法、字节上限或 canonical 规则。拒绝时抛出
+ * {@link InvalidOptionsException}（仍是 {@link IllegalArgumentException}），调用方按 {@link InvalidReason}
+ * 区分失败语义，不解析消息文本。
  *
  * <p>规范化使用不做本地约定的独立 mapper：本地 JSON 约定（{@code Long} 字符串化、null 省略等）只描述本项目自己的 wire
  * 形态，绝不能改写厂商原生事实；整数与小数保持 JSON 数值类型且不经过二进制浮点数，但无语义意义的小数尾零可能被移除。
@@ -32,30 +35,31 @@ public record ProviderProtocolOptions(String canonicalJson) {
   /** 空 object：未声明任何原生协议选项。 */
   public static final ProviderProtocolOptions EMPTY = new ProviderProtocolOptions(EMPTY_JSON);
 
+  /** 拒绝原因：调用方按语义映射错误，不依赖消息文本。 */
+  public enum InvalidReason {
+    /** 非严格 JSON object：语法错误、重复键、尾随 token 或根节点不是 object。 */
+    MALFORMED,
+    /** 输入的 UTF-8 字节数超过 {@link ProviderProtocolOptions#MAX_UTF8_BYTES}。 */
+    TOO_LARGE
+  }
+
+  /** 唯一解析入口拒绝输入时抛出的异常；保持 {@link IllegalArgumentException} 以便现有调用方捕获。 */
+  public static final class InvalidOptionsException extends IllegalArgumentException {
+
+    private final InvalidReason reason;
+
+    private InvalidOptionsException(InvalidReason reason, String message) {
+      super(message);
+      this.reason = reason;
+    }
+
+    public InvalidReason reason() {
+      return reason;
+    }
+  }
+
   public ProviderProtocolOptions {
     canonicalJson = canonicalize(canonicalJson);
-  }
-
-  /** 从已解析的 JSON object 构造；{@code null} 等价于空 object，非 JSON 值抛 {@link IllegalArgumentException}。 */
-  public static ProviderProtocolOptions of(Map<String, Object> options) {
-    if (options == null) {
-      return EMPTY;
-    }
-    try {
-      return new ProviderProtocolOptions(STRICT_MAPPER.writeValueAsString(options));
-    } catch (JacksonException error) {
-      throw new IllegalArgumentException("protocolOptions must contain JSON values only");
-    }
-  }
-
-  /** 从已解析的 JSON object 构造，避免调用方序列化后再解析一次。 */
-  public static ProviderProtocolOptions fromJsonNode(ObjectNode options) {
-    Objects.requireNonNull(options, "options");
-    try {
-      return new ProviderProtocolOptions(STRICT_MAPPER.writeValueAsString(options));
-    } catch (JacksonException error) {
-      throw new IllegalArgumentException("protocolOptions must contain JSON values only");
-    }
   }
 
   /** 返回 canonical JSON 的独立可变副本；每次调用互不影响。 */
@@ -81,23 +85,29 @@ public record ProviderProtocolOptions(String canonicalJson) {
     try {
       node = STRICT_MAPPER.readTree(json);
     } catch (JacksonException error) {
-      throw new IllegalArgumentException("protocolOptions must be a strict JSON object");
+      throw malformed();
     }
     if (!node.isObject()) {
-      throw new IllegalArgumentException("protocolOptions must be a strict JSON object");
+      throw malformed();
     }
     try {
       return STRICT_MAPPER.writeValueAsString(node);
     } catch (JacksonException error) {
-      throw new IllegalArgumentException("protocolOptions must be a strict JSON object");
+      throw malformed();
     }
+  }
+
+  private static InvalidOptionsException malformed() {
+    return new InvalidOptionsException(
+        InvalidReason.MALFORMED, "protocolOptions must be a strict JSON object");
   }
 
   /** UTF-8 字节数不小于 UTF-16 字符数，因此先用字符数做零成本预筛，再按真实字节数判定。 */
   private static void requireWithinByteLimit(String json) {
     if (json.length() > MAX_UTF8_BYTES
         || json.getBytes(StandardCharsets.UTF_8).length > MAX_UTF8_BYTES) {
-      throw new IllegalArgumentException(
+      throw new InvalidOptionsException(
+          InvalidReason.TOO_LARGE,
           "protocolOptions must not exceed " + MAX_UTF8_BYTES + " UTF-8 bytes");
     }
   }
