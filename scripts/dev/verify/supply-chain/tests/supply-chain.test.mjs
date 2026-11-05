@@ -474,6 +474,49 @@ test('locks tool versions, policy thresholds, and secret indirection', () => {
     assert.doesNotMatch(script, /echo\s+["']?\$NVD_API_KEY/)
 })
 
+test('runs sbom, audit, and image into one report for all', () => {
+    // Intent: `all` is one process, one RUN_DIR and one failure list; no per-subcommand report is published separately.
+    const toolchain = createFakeToolchain()
+    const dockerToolchain = createFakeDockerToolchain()
+    const reportRoot = path.join(toolchain.root, 'all-reports')
+    try {
+        const result = runScript(['all'], {
+            ...toolchain.env,
+            ...dockerToolchain.env,
+            PATH: [
+                path.join(toolchain.root, 'bin'),
+                path.join(dockerToolchain.root, 'bin'),
+                process.env.PATH ?? '',
+            ].join(path.delimiter),
+            SUPPLY_CHAIN_REPORT_ROOT: reportRoot,
+            HTTP_PROXY: '',
+            HTTPS_PROXY: '',
+            ALL_PROXY: '',
+            NO_PROXY: '',
+            http_proxy: '',
+            https_proxy: '',
+            all_proxy: '',
+            no_proxy: '',
+        })
+        assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`)
+
+        const summary = JSON.parse(readFileSync(path.join(reportRoot, 'latest/summary.json'), 'utf8'))
+        assert.equal(summary.mode, 'all')
+        assert.equal(summary.status, 'PASS')
+        assert.equal(summary.checks.length, 12)
+        for (const check of summary.checks) {
+            assert.equal(check.status, 'PASS', check.name)
+        }
+        assert.equal(existsSync(path.join(reportRoot, 'latest/backend-sbom/bom.json')), true)
+        assert.equal(existsSync(path.join(reportRoot, 'latest/image/app.json')), true)
+        const summaryMarkdown = readFileSync(path.join(reportRoot, 'latest/summary.md'), 'utf8')
+        assert.match(summaryMarkdown, /All requested checks completed successfully/)
+    } finally {
+        rmSync(toolchain.root, { recursive: true, force: true })
+        rmSync(dockerToolchain.root, { recursive: true, force: true })
+    }
+})
+
 test('honors a custom report root and publishes timestamped and latest reports', () => {
     // Intent: callers must be able to isolate reports while retaining the repository's latest-report workflow.
     const toolchain = createFakeToolchain()
