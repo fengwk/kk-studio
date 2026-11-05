@@ -598,11 +598,6 @@
   line-height: 1.4;
 }
 
-.ui-tag-item.is-invalid {
-  border-color: var(--danger);
-  color: var(--danger);
-}
-
 .ui-tag-remove {
   display: inline-flex;
   align-items: center;

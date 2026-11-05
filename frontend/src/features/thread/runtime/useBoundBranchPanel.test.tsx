@@ -405,7 +405,7 @@ describe('useBoundBranchPanel', () => {
     expect(batchThreadId).toBe(THREAD_ID)
     expect(request).not.toHaveProperty('expectedHeadEntryId')
     expect(request).not.toHaveProperty('expectedNextCommandSequence')
-    // 已迁移到 owner-free 契约：请求体不再伪造 owner/target。
+    // 既有 Thread 的命令批次由路径定位，请求体不携带 owner 或 target。
     expect(request).not.toHaveProperty('owner')
     expect(request).not.toHaveProperty('target')
     // 投影后 effectiveBase === draft：最小 diff 只含 USER_MESSAGE，无 SET_AGENT reversal。

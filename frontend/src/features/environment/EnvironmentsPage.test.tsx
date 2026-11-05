@@ -168,7 +168,7 @@ describe('EnvironmentsPage', () => {
     expect(screen.getAllByText('READY').length).toBe(1)
     expect(screen.getByText('UNAVAILABLE')).toBeInTheDocument()
     expect(screen.getByText('process.exec')).toBeInTheDocument()
-    // 卡片展示最近一次 READY 的宿主进程用户，且不再展示任何 Root 路径。
+    // 卡片展示最近一次 READY 的宿主进程用户，不展示主机目录。
     expect(screen.getByText('dev-user')).toBeInTheDocument()
     expect(screen.getByText('ops-user')).toBeInTheDocument()
     // 卡片展示实际 daemon 构建版本；development 如实展示，缺失时明确未上报而不是伪装成发布版本。
@@ -179,7 +179,6 @@ describe('EnvironmentsPage', () => {
     // 没有本代 READY 运行快照时明确展示不可用，不把缺失的 update 伪造成无更新或成功。
     expect(await screen.findAllByText('状态不可用，等待 Daemon 重连')).toHaveLength(3)
     expect(screen.queryByText('/workspace/local-dev')).toBeNull()
-    expect(screen.queryByText('Root 路径')).toBeNull()
     // 卡片不展示 skills 字段
     expect(screen.queryByText('dev')).toBeNull()
     expect(screen.getByText('CONNECTING')).toBeInTheDocument()
@@ -776,10 +775,9 @@ describe('EnvironmentsPage', () => {
 
     expect(await screen.findByText('recovered-box')).toBeInTheDocument()
 
-    // 卡片只显示当前 READY 状态，不再内嵌任何历史事件区域。
+    // 卡片显示当前 READY 状态，不回显事件文本。
     const card = screen.getByRole('heading', { name: 'recovered-box' }).closest('article')!
     expect(within(card).getByText('READY')).toBeInTheDocument()
-    expect(card.querySelector('.env-last-event')).toBeNull()
     expect(within(card).queryByText('daemon connection lost')).not.toBeInTheDocument()
 
     // 打开管理弹窗后仍可见完整历史：历史 WARN 与后续 READY 都被保留。

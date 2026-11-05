@@ -47,10 +47,6 @@
   align-items: center;
 }
 
-.editor-row.single {
-  grid-template-columns: minmax(0, 1fr) 32px;
-}
-
 .variant-editor {
   display: flex;
   flex-direction: column;

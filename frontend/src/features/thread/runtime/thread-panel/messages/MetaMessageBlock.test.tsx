@@ -40,7 +40,7 @@ describe('MetaMessageBlock', () => {
     expect(title).toContain('12 tokens')
     expect(title).toContain('4100 tokens')
     expect(title).toContain('$0.003')
-    // 不再把紧凑缩写图例当作 hover 内容。
+    // 紧凑缩写图例不参与 hover 读数。
     expect(title).not.toContain('↑')
     expect(title.split('\n')).toHaveLength(3)
   })

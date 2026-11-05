@@ -5,7 +5,7 @@ import { expect, test, type Page } from './fixture'
 const SHOTS = fileURLToPath(new URL('../../../screenshots', import.meta.url))
 
 const archive = {
-  name: 'legacy-pack.zip',
+  name: 'upload-pack.zip',
   mimeType: 'application/zip',
   buffer: Buffer.from('PK\x05\x06' + '\0'.repeat(18), 'binary'),
 }
@@ -56,10 +56,10 @@ test.describe('Skill Packages real browser verification', () => {
     await page.getByRole('button', { name: '创建技能包' }).click()
     const dialog = page.getByRole('dialog', { name: '创建技能包' })
     await dialog.getByRole('tab', { name: '上传压缩包' }).click()
-    await dialog.getByPlaceholder('my-skills').fill('legacy-pack')
+    await dialog.getByPlaceholder('my-skills').fill('upload-pack')
     await dialog.getByPlaceholder('1.0.0').fill('2026.09.1')
     await dialog.getByLabel('技能包压缩包').setInputFiles(archive)
-    await expect(dialog.getByText('legacy-pack.zip · 22 B')).toBeVisible()
+    await expect(dialog.getByText('upload-pack.zip · 22 B')).toBeVisible()
 
     await dialog.getByRole('button', { name: '解析预览' }).click()
 
@@ -79,9 +79,9 @@ test.describe('Skill Packages real browser verification', () => {
     await expect(preview.getByText('解压后大小')).toBeVisible()
     await expect(preview).toContainText('browser automation')
     await expect(preview).toContainText('未打包目录：docs')
-    // 变化摘要：新增 browser，移除的 legacy 仍被 Agent 引用。
+    // 变化摘要：新增 browser，移除的 dropped 仍被 Agent 引用。
     await expect(preview).toContainText('browser')
-    await expect(preview.getByText('legacy').first()).toBeVisible()
+    await expect(preview.getByText('dropped').first()).toBeVisible()
     await expect(preview).toContainText('仍有 Agent 引用这些技能时发布会失败，请先调整对应 Agent。')
     // 预览区没有第二个 footer，发布只有一处入口。
     expect(await preview.getByRole('button', { name: '发布', exact: true }).count()).toBe(1)
@@ -90,8 +90,8 @@ test.describe('Skill Packages real browser verification', () => {
     await preview.getByRole('button', { name: '发布', exact: true }).click()
 
     await expect(page.getByRole('dialog', { name: '预览并发布' })).toHaveCount(0)
-    await expect(card(page, 'legacy-pack')).toContainText('上传压缩包')
-    await expect(card(page, 'legacy-pack')).toContainText('2026.09.1')
+    await expect(card(page, 'upload-pack')).toContainText('上传压缩包')
+    await expect(card(page, 'upload-pack')).toContainText('2026.09.1')
     await page.screenshot({ path: `${SHOTS}/skill-packages-published-desktop-1280.png`, fullPage: true })
   })
 
@@ -99,13 +99,13 @@ test.describe('Skill Packages real browser verification', () => {
     await page.setViewportSize({ width: 1280, height: 900 })
     await page.goto('/browser-tests/skill-packages-harness.html')
 
-    await card(page, 'legacy-pack').getByRole('button', { name: '详情 legacy-pack' }).click()
-    const detail = page.getByRole('dialog', { name: /详情: legacy-pack/ })
+    await card(page, 'upload-pack').getByRole('button', { name: '详情 upload-pack' }).click()
+    const detail = page.getByRole('dialog', { name: /详情: upload-pack/ })
     await expect(detail).toBeVisible()
 
     // 文件树来自服务端归档索引：目录层级、文件名与解压后文件数都是真实路径。
     await expect(detail.getByText('SKILL.md')).toHaveCount(2)
-    await expect(detail.locator('.skill-tree-name', { hasText: 'legacy' }).first()).toBeVisible()
+    await expect(detail.locator('.skill-tree-name', { hasText: 'dropped' }).first()).toBeVisible()
     await expect(detail).toContainText('共 2 个文件')
 
     // 各环境同步状态：已同步、同步失败、待同步。

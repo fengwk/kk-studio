@@ -52,7 +52,7 @@ const HARNESS_AGENT: AgentDefinitionDTO = {
       { packageName: 'dev-tools', name: 'dev' },
       { packageName: 'docs-tools', name: 'docs' },
       { packageName: 'ops', name: 'deploy' },
-      { packageName: 'legacy', name: 'migrate' },
+      { packageName: 'release-tools', name: 'migrate' },
     ],
     subagents: [],
   },

@@ -207,7 +207,7 @@ describe('AgentForm current contracts', () => {
     function Harness() {
       const [draft, setDraft] = useState<AgentDraft>({
         ...emptyAgentDraft(modelWithVariants()),
-        skills: [{ packageName: 'legacy', name: 'orphan-skill' }],
+        skills: [{ packageName: 'orphan-pkg', name: 'orphan-skill' }],
       })
       const skills = [skillPackage('core', [{ name: 'live-skill', description: 'live' }])]
       return (
@@ -225,7 +225,7 @@ describe('AgentForm current contracts', () => {
     }
     render(<Harness />)
 
-    const orphanCheckbox = screen.getByLabelText(/legacy \/ orphan-skill/)
+    const orphanCheckbox = screen.getByLabelText(/orphan-pkg \/ orphan-skill/)
     expect(orphanCheckbox).toBeChecked()
 
     // Uncheck orphan skill

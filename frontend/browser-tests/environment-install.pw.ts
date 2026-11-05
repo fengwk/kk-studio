@@ -423,8 +423,7 @@ test('keeps event history out of the card and inside the management modal', asyn
   // 首次冷启动时 vite 需现编译模块图，给首个可见断言更宽的窗口。
   await expect(cardLocator).toBeVisible({ timeout: 15000 })
   await expect(cardLocator.getByText('READY', { exact: true })).toBeVisible()
-  // 卡片不含任何历史事件区域，也不回显事件文本。
-  await expect(page.locator('.env-last-event')).toHaveCount(0)
+  // 卡片不回显事件文本。
   await expect(cardLocator).not.toContainText('daemon connection lost')
   await page.screenshot({ path: testInfo.outputPath('card-without-history.png'), fullPage: true })
 

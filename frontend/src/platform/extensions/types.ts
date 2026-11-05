@@ -76,7 +76,7 @@ export interface ToolRendererProps {
 
 /**
  * id 必须与后端 ToolDescriptor 冻结的 rendererKey 精确相同；未注册时由宿主回退到默认 renderer。
- * 展开/收起由宿主按有序内容统一裁决，contribution 不再声明可展开性。
+ * 展开/收起由宿主按有序内容统一裁决，contribution 只提供 renderer 与 id。
  */
 export interface ToolRendererContribution {
   id: string
@@ -95,7 +95,7 @@ export interface TrustedReactExtension {
   toolRenderers?: ToolRendererContribution[]
 }
 
-/** 应用组合根一次性产出的只读 contribution 表；运行时不再注册、覆盖或订阅。 */
+/** 应用组合根一次性产出的只读 contribution 表。 */
 export interface ApplicationContributions {
   readonly pages: readonly PageContribution[]
   readonly dialogs: readonly DialogContribution[]

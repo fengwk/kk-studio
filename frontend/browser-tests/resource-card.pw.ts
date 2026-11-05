@@ -107,7 +107,7 @@ test.describe('Shared resource card foundation', () => {
     const minimalHeight = (await minimal.boundingBox())!.height
     const longHeight = (await long.boundingBox())!.height
 
-    // 旧 .info-card 固定 220px；共享卡按内容生长。
+    // 共享卡按内容生长，不预留固定卡高。
     expect(minimalHeight).toBeLessThan(150)
     expect(longHeight).toBeGreaterThan(minimalHeight)
   })

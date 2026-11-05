@@ -40,7 +40,7 @@ const agent: AgentDefinitionDTO = {
       { packageName: 'dev-tools', name: 'dev' },
       { packageName: 'docs-tools', name: 'docs' },
       { packageName: 'ops', name: 'deploy' },
-      { packageName: 'legacy', name: 'migrate' },
+      { packageName: 'release-tools', name: 'migrate' },
     ],
     subagents: [],
   },
@@ -77,13 +77,13 @@ function sync(overrides: Partial<SkillEnvironmentSyncDTO> = {}): SkillEnvironmen
   }
 }
 
-/** NAS 上已安装当前版本的 dev-tools、安装失败的 ops、版本不一致的 docs；legacy 从未上报。 */
+/** NAS 上已安装当前版本的 dev-tools、安装失败的 ops、版本不一致的 docs；release-tools 从未上报。 */
 function nasSummaries(): Record<string, SkillEnvironmentSyncDTO[]> {
   return {
     'dev-tools': [sync()],
     'docs-tools': [sync({ installedSha256: PREVIOUS_SHA, upToDate: false })],
     ops: [sync({ error: 'git fetch failed' })],
-    legacy: [sync({ environmentId: BUILDER_ID })],
+    'release-tools': [sync({ environmentId: BUILDER_ID })],
   }
 }
 
@@ -129,7 +129,7 @@ describe('SkillEnvironmentHint', () => {
     expect(within(hint).getByText('版本不一致')).toBeInTheDocument()
     expect(within(hint).getByText('ops / deploy')).toBeInTheDocument()
     expect(within(hint).getByText('安装失败')).toBeInTheDocument()
-    expect(within(hint).getByText('legacy / migrate')).toBeInTheDocument()
+    expect(within(hint).getByText('release-tools / migrate')).toBeInTheDocument()
     expect(within(hint).getByText('未安装')).toBeInTheDocument()
     // 已安装当前版本的技能不进入提示。
     expect(within(hint).queryByText('dev-tools / dev')).not.toBeInTheDocument()
@@ -172,7 +172,7 @@ describe('SkillEnvironmentHint', () => {
       'dev-tools': [sync()],
       'docs-tools': [sync()],
       ops: [sync()],
-      legacy: [sync()],
+      'release-tools': [sync()],
     })
     const socket = sockets.openLatest()
     act(() => {
@@ -196,7 +196,7 @@ describe('SkillEnvironmentHint', () => {
       'dev-tools': [sync()],
       'docs-tools': [sync({ environmentId: BUILDER_ID })],
       ops: [sync({ environmentId: BUILDER_ID })],
-      legacy: [sync({ environmentId: BUILDER_ID })],
+      'release-tools': [sync({ environmentId: BUILDER_ID })],
     })
     renderHint('builder')
 

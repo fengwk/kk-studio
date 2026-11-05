@@ -203,7 +203,7 @@ describe('PluginConfigModal', () => {
     const unset = screen.getByRole('button', { name: '未设置 mode' })
     await user.click(unset)
     expect(screen.getByRole('button', { name: 'mode' })).toHaveAttribute('data-value', '')
-    // 省略后字段不存在，因此不再提供无意义的省略入口。
+    // 省略后字段不存在，省略入口随之消失。
     expect(screen.queryByRole('button', { name: '未设置 mode' })).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: '保存配置' }))

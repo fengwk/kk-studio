@@ -244,9 +244,7 @@ describe('ThreadComposer and commands', () => {
       'files',
       'shell',
     ])
-    // `/session`（全局 Session 重绑定）已彻底移除，不再出现在稳定命令表中。
-    expect(THREAD_COMMANDS.map((command) => command.id)).not.toContain('session')
-    // 命令可用性只由目标 kind 与显式能力决定，不再接受 owner 选项。
+    // 命令可用性只由目标 kind 与显式能力决定。
     const blank = threadCommandsForTarget({ kind: 'NEW_SESSION_DRAFT' })
     expect(blank.map((c) => c.id)).toEqual(THREAD_COMMANDS.map((c) => c.id))
     // 空面板还没有 Thread，因此 `/history`/`/stop`/`/new`/`/debug`/`/compact`

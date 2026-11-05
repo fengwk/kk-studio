@@ -1,4 +1,4 @@
-/** 子代理回执信封的固定标签与属性；只解析当前协议，不做历史或通用 XML 兼容。 */
+/** 子代理回执信封的固定标签与属性；只解析当前协议约定的信封形状。 */
 const ENVELOPE_TAG = 'subagent_result'
 const ALLOWED_ATTRIBUTES = ['thread_id', 'agent', 'state']
 const ALLOWED_CHILDREN = ['task', 'result', 'error', 'partial_result']

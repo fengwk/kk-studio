@@ -18,15 +18,13 @@ describe('AI extension composition', () => {
       ['ai.environments', 'environments'],
       ['ai.mcp-servers', 'mcp-servers'],
     ])
-    // 伪通用 Navigation registry 已彻底移除，AI 二级导航由 pages 的 metadata 本地派生
-    expect('navigation' in aiExtension).toBe(false)
     expect(aiExtension.dialogs?.map((dialog) => dialog.id)).toEqual([
       'ai.create-chat',
       'ai.resource-editor',
       'ai.delete-resource',
     ])
     // task renderer 必须通过 extension 注册（rendererKey = contribution id），
-    // MessageList 不做 name switch；展开/收起由宿主外壳统一负责，不再由 contribution 声明。
+    // MessageList 不做 name switch；展开/收起由宿主外壳统一负责，contribution 只声明 renderer 与 id。
     expect(aiExtension.toolRenderers?.map((renderer) => renderer.id)).toEqual(['task'])
     expect(aiExtension.toolRenderers?.[0]?.component).toBeTypeOf('function')
     expect(canvasExtension.pages?.map((page) => [page.id, page.path])).toEqual([

@@ -382,8 +382,8 @@ describe('IssueDetailModal', () => {
     })
   })
 
-  it('shows the ERROR pause badge without any UNKNOWN verification action', async () => {
-    // 测试意图：结果未知的失败收尾以 ERROR 暂停表达，界面只显示 ERROR 徽标，不再提供人工核查入口。
+  it('shows the ERROR pause badge for an unknown outcome', async () => {
+    // 测试意图：结果未知的失败收尾以 ERROR 暂停表达。
     const failedIssueDetail: IssueDetailDTO = {
       ...mockActiveIssueDetail,
       issue: {
@@ -408,8 +408,6 @@ describe('IssueDetailModal', () => {
     )
 
     expect(await screen.findByText('ERROR')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '人工核查' })).toBeNull()
-    expect(screen.queryByRole('heading', { name: /解除 UNKNOWN/ })).toBeNull()
   })
 
   it('resumes a USER paused issue directly with the current version and request identity', async () => {

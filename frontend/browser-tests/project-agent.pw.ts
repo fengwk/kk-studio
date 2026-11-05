@@ -159,7 +159,7 @@ test.describe('Project Agent Real Browser Wiring & Control Gatekeeping', () => {
     page,
   }) => {
     // 测试意图：真实浏览器中 Issue 只是组织容器。打开 Agent 线程后，消息走 per-thread
-    // 命令批次（不再被劫持成 Issue INSTRUCTION）、Stop 走 per-thread Stop（不再 stopIssue）、
+    // 命令批次、Stop 走 per-thread Stop、
     // Goal 面板可用；三者请求体都不带产品 owner/target，且绝不触发 Issue 动作接口。
     const commandBatches: Array<Record<string, unknown>> = []
     const stopRequests: Array<Record<string, unknown>> = []
@@ -340,7 +340,7 @@ test.describe('Project Agent Real Browser Wiring & Control Gatekeeping', () => {
     await expect(dock.getByText('配置快照不可解析')).toHaveCount(0)
     await expect(dock.getByText('待处理交互加载失败', { exact: true })).toHaveCount(0)
 
-    // 6. 通用输入：消息走 per-thread 命令批次，不再变成 Issue INSTRUCTION
+    // 6. 通用输入：消息走 per-thread 命令批次
     const composer = dock.getByLabel('给 AI 发送消息')
     await expect(composer).toBeVisible()
     await composer.click()
@@ -361,7 +361,7 @@ test.describe('Project Agent Real Browser Wiring & Control Gatekeeping', () => {
     expect(dock.getByRole('button', { name: '预览请求' })).toHaveCount(0)
     await page.screenshot({ path: resolve(reportsDir, 'project-agent-owner-free.png') })
 
-    // 7. Goal：容器不再封锁 Goal 面板，设置目标同样走 owner-free 命令批次
+    // 7. Goal：Goal 面板可用，设置目标走 owner-free 命令批次
     await composer.click()
     await composer.fill('/goal')
     const palette = dock.locator('.thread-command-palette')
@@ -380,7 +380,7 @@ test.describe('Project Agent Real Browser Wiring & Control Gatekeeping', () => {
       expect.objectContaining({ type: 'GOAL', text: '交付可回滚的迁移方案' }),
     ])
 
-    // 8. Stop：走 per-thread Stop（不再 stopIssue），并把未消费输入退回可见草稿
+    // 8. Stop：走 per-thread Stop，并把未消费输入退回可见草稿
     await composer.click()
     await composer.fill('/stop')
     await palette.locator('button', { hasText: 'stop' }).click()

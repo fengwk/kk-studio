@@ -119,7 +119,7 @@ test.describe('Compaction summary system card', () => {
         modifiedStartTop: firstLineTop(spans[1]),
       }
     })
-    // 行内规则不再给 Markdown 块之间引入多余空隙（pre-wrap 修复前约 47px）。
+    // 行内规则不给 Markdown 块之间引入多余空隙。
     expect(layout.gap).toBeGreaterThan(0)
     expect(layout.gap).toBeLessThan(25)
     // 两个保留标签块各自独占行，不被折到同一行。

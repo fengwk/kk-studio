@@ -253,8 +253,7 @@
   color: var(--warning);
 }
 
-.ide-panel-state.is-error,
-.ide-panel-state.error {
+.ide-panel-state.is-error {
   color: var(--danger);
 }
 

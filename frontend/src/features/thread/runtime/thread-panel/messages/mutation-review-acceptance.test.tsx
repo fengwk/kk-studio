@@ -812,14 +812,14 @@ describe('真实 AgentMessageJsonCodec 历史生命周期与真实组件验收�
     expect(screen.getByText(errorMsg)).toBeInTheDocument()
   })
 
-  it('旧缺扩展：历史无 editReview（旧数据/detailsJson为空对象），不假造 diff 也不进入转圈状态', () => {
-    const asstEntry = createEntry('asst-legacy', 'MESSAGE', {
+  it('缺少 editReview 扩展时不假造 diff 也不进入转圈状态', () => {
+    const asstEntry = createEntry('asst-no-review', 'MESSAGE', {
       message: {
         role: 'ASSISTANT',
         contents: [
           {
             type: 'tool_call',
-            toolCallId: 'call-legacy',
+            toolCallId: 'call-no-review',
             toolName: 'edit',
             rendererKey: 'edit',
             argumentsJson: '{"path":"/workspace/src/App.tsx"}',
@@ -828,13 +828,13 @@ describe('真实 AgentMessageJsonCodec 历史生命周期与真实组件验收�
       },
     })
 
-    const toolResultEntry = createEntry('result-legacy', 'MESSAGE', {
+    const toolResultEntry = createEntry('result-no-review', 'MESSAGE', {
       message: {
         role: 'TOOL',
         contents: [
           {
             type: 'tool_result',
-            toolCallId: 'call-legacy',
+            toolCallId: 'call-no-review',
             toolName: 'edit',
             rendererKey: 'edit',
             contents: [{ type: 'text', text: 'File updated.' }],
@@ -844,7 +844,7 @@ describe('真实 AgentMessageJsonCodec 历史生命周期与真实组件验收�
         ],
       },
       toolResultMetadata: {
-        assistantEntryId: 'asst-legacy',
+        assistantEntryId: 'asst-no-review',
         callIndex: 0,
       },
     })
@@ -1026,7 +1026,7 @@ describe('真实 AgentMessageJsonCodec 历史生命周期与真实组件验收�
             rendererKey: 'edit',
             contents: [{ type: 'text', text: 'Edited' }],
             error: false,
-            // 违规/旧对象直接放在 content.details，无 detailsJson
+            // 非契约对象直接放在 content.details，无 detailsJson
             details: { editReview: validReview },
           },
         ],
@@ -1039,7 +1039,7 @@ describe('真实 AgentMessageJsonCodec 历史生命周期与真实组件验收�
 
     const timeline = buildThreadTimeline([asstEntry, toolResultEntry], [], [])
     const { container } = renderTimelineTool(timeline.messages)
-    // 严格禁止多形状兼容：没有 detailsJson 时 details 为 undefined，不恢复 review
+    // 只认 detailsJson：没有 detailsJson 时 details 为 undefined，不恢复 review
     expect(container.querySelector('.thread-tool-preview-body.is-edit')).toBeNull()
   })
 

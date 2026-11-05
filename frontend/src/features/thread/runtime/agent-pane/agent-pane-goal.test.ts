@@ -48,7 +48,7 @@ const mockThread: HarnessThreadDTO = {
 describe('AgentPane Goal pipeline and owner-free command availability', () => {
   describe('owner-free command availability', () => {
     it('exposes the full BOUND_THREAD command set without any owner option', () => {
-      // owner 不再参与既有 Thread 的命令裁剪：无 owner 选项时仍是完整命令集。
+      // 既有 Thread 的命令裁剪与 owner 无关：无 owner 选项时仍是完整命令集。
       const commands = threadCommandsForTarget({ kind: 'BOUND_THREAD', threadId: 't-1' })
       expect(commands.map((command) => command.id)).toEqual(
         THREAD_COMMANDS.map((command) => command.id),
@@ -59,7 +59,7 @@ describe('AgentPane Goal pipeline and owner-free command availability', () => {
 
     it('keeps goal available on a bound thread regardless of explicit capability options', () => {
       // 命令可用性只由目标 kind 与显式能力选项决定；owner（如受控 Issue Agent）
-      // 不再隐藏 goal，只有对应能力选项才禁用对应命令。
+      // 不隐藏 goal，只有对应能力选项才禁用对应命令。
       const plain = threadCommandsForTarget({ kind: 'BOUND_THREAD', threadId: 't-1' })
       const noBranching = threadCommandsForTarget(
         { kind: 'BOUND_THREAD', threadId: 't-1' },

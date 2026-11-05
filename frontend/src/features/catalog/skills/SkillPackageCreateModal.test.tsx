@@ -36,7 +36,7 @@ function detail(overrides: Partial<SkillPackageDetailDTO> = {}): SkillPackageDet
     publishedAt: 1784505600,
     skills: [
       { name: 'dev', description: 'developer workflow' },
-      { name: 'legacy', description: 'legacy skill' },
+      { name: 'dropped-skill', description: 'skill removed by the upload' },
     ],
     source: 'UPLOAD',
     git: null,
@@ -243,7 +243,7 @@ describe('SkillPackageCreateModal', () => {
       pageNumber: 1,
       pageSize: 100,
       totalCount: '1',
-      results: [agent('reviewer', [{ packageName: 'core-tools', name: 'legacy' }])],
+      results: [agent('reviewer', [{ packageName: 'core-tools', name: 'dropped-skill' }])],
     })
     renderModal()
 
@@ -256,7 +256,7 @@ describe('SkillPackageCreateModal', () => {
 
     const previewDialog = await screen.findByRole('dialog', { name: /预览并发布/ })
     // 被移除的技能同时出现在“移除的技能”与“仍被 Agent 引用的技能”两处。
-    await waitFor(() => expect(within(previewDialog).getAllByText('legacy')).toHaveLength(2))
+    await waitFor(() => expect(within(previewDialog).getAllByText('dropped-skill')).toHaveLength(2))
     expect(
       within(previewDialog).getByText('仍有 Agent 引用这些技能时发布会失败，请先调整对应 Agent。'),
     ).toBeInTheDocument()

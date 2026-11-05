@@ -176,7 +176,7 @@ describe('AgentPane acceptance pipeline', () => {
       'USER_MESSAGE',
     ])
 
-    // 既有 Thread 不再伪造创建批次，必须走无 owner/target 的 thread command batch 契约。
+    // 既有 Thread 必须走无 owner/target 的 thread command batch 契约。
     expect(() => buildAcceptanceRequest({
       owner: { kind: 'CHAT', id: 'chat-1' },
       target: { kind: 'BOUND_THREAD', threadId: thread.threadId },

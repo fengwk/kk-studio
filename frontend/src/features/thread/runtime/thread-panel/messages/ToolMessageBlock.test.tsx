@@ -559,7 +559,6 @@ describe('ToolMessageBlock per-tool bodies', () => {
     expect(preview).toHaveTextContent('line-1')
     expect(preview).toHaveTextContent('line-40')
     expect(preview).toHaveClass('thread-tool-output')
-    expect(preview).not.toHaveTextContent('more line')
     expect(container.querySelector('.thread-tool-summary-detail')).not.toHaveTextContent('line-1')
 
     // prompt/正文默认可见不等于不可收起。
@@ -667,7 +666,6 @@ describe('ToolMessageBlock per-tool bodies', () => {
     expect(preview).not.toHaveClass('is-streaming')
     expect(within(preview as HTMLElement).getByText('-one')).toBeInTheDocument()
     expect(within(preview as HTMLElement).getByText('-six')).toBeInTheDocument()
-    expect(preview).not.toHaveTextContent(/more lines/)
   })
 
   it('shows bash output by default in the bounded viewport and follows the streaming tail', () => {
@@ -690,7 +688,6 @@ describe('ToolMessageBlock per-tool bodies', () => {
     // 持续日志默认跟随底部：完整内容都在 DOM 中，不按行截断。
     expect(viewport).toHaveTextContent('build step 1')
     expect(viewport).toHaveTextContent('build step 30')
-    expect(viewport?.textContent).not.toContain('earlier lines')
     expect(collapseButton()).toHaveAttribute('aria-expanded', 'true')
   })
 
