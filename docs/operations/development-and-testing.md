@@ -211,8 +211,10 @@ env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -pl <changed-module> spotless:apply '-
 ### Checkstyle
 
 `validate` 阶段执行 Checkstyle `3.3.0`，读取根目录 [checkstyle.xml](../../checkstyle.xml)，包含
-test source 且 `failsOnError=true`。规则集中在两类：代码体内使用 import 而不是全限定类名；
-`if`、`else`、`for`、`while`、`do` 等控制流必须带 braces。
+test source 且 `failsOnError=true`。扫描范围限定为模块的 `src/main/java` 与 `src/test/java`；
+`target/generated-sources` 下的 protobuf 等生成代码不参与，避免生成物导致同一命令在重复运行时失败。
+规则集中在两类：代码体内使用 import 而不是全限定类名；`if`、`else`、`for`、`while`、`do`
+等控制流必须带 braces。
 
 ```bash
 env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp checkstyle:check
@@ -333,7 +335,11 @@ git diff --check
 ```
 
 [scripts/dev/verify/repository/check.mjs](../../scripts/dev/verify/repository/check.mjs) 负责固定文档布局、Markdown 链接、H1、源码
-路径和旧词守卫。[check-sensitive-data.mjs](../../scripts/dev/verify/repository/check-sensitive-data.mjs) 扫描
+路径和旧词守卫，并统一执行架构边界：平台业务包、apps 与 plugins 只可使用公开的 Harness 包，`spi.store` 与
+Builtin 存储端口只对平台引擎适配包和组合根开放；Java 源码 SQL 中的表名按唯一前缀映射校验归属；平台组合根、
+MCP 客户端、执行准入、无 Redis 与无 LangChain4j 等约束也在同一入口维护。规则的拒绝与放行由
+[repository tests](../../scripts/dev/verify/repository/tests/) 覆盖，模块内不再重复手写架构清单。
+[check-sensitive-data.mjs](../../scripts/dev/verify/repository/check-sensitive-data.mjs) 扫描
 tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook、个人绝对路径和已知私有环境标识；
 命中时只输出规则与 `path:line`，不要回显完整敏感值。该入口不扫描 Git 历史，历史审计是公开策略中
 的独立步骤。

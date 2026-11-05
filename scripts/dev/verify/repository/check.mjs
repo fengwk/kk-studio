@@ -119,6 +119,19 @@ function walkDirectories(directory) {
   })
 }
 
+function walkRepositoryFiles(directory) {
+  if (!existsSync(directory)) {
+    return []
+  }
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    if (['.git', '.workspace', 'node_modules', 'target', 'dist', 'coverage', 'reports'].includes(entry.name)) {
+      return []
+    }
+    const absolutePath = path.join(directory, entry.name)
+    return entry.isDirectory() ? walkRepositoryFiles(absolutePath) : [absolutePath]
+  })
+}
+
 function outsideFencedCode(source) {
   let fence = null
   const lines = []
@@ -443,14 +456,29 @@ function pomDependencies(pomRelativePath) {
   })
 }
 
+function lineNumberAt(source, index) {
+  return source.slice(0, index).split('\n').length
+}
+
+function javaImportsForFile(relativePath) {
+  const source = read(relativePath)
+  return [...source.matchAll(/^\s*import\s+(?:static\s+)?([\w.*]+)\s*;/gmu)].map((match) => ({
+    file: relativePath,
+    imported: match[1],
+    line: lineNumberAt(source, match.index),
+  }))
+}
+
 function javaImports(directory) {
   return walkFiles(directory)
     .filter((filePath) => filePath.endsWith('.java'))
-    .flatMap((filePath) =>
-      [...read(relativeFromRoot(filePath)).matchAll(/^\s*import\s+(?:static\s+)?([\w.*]+)\s*;/gmu)].map(
-        (match) => ({ file: relativeFromRoot(filePath), imported: match[1] }),
-      ),
-    )
+    .flatMap((filePath) => javaImportsForFile(relativeFromRoot(filePath)))
+}
+
+function fileLines(relativePath) {
+  return read(relativePath)
+    .split(/\r?\n/u)
+    .map((line, index) => ({ line: index + 1, text: line }))
 }
 
 function checkModuleBoundaries() {
@@ -730,6 +758,653 @@ function checkWebArchitecture() {
   }
 }
 
+
+/**
+ * Harness 的内部实现不是上层契约：平台业务包、apps 与 plugins 只可使用 api/spi 与文档声明的公开包；
+ * 存储端口只供平台引擎适配包与 web 组合根使用，Builtin 存储端口只供 platform.harness.builtin 使用。
+ */
+const mainJavaRoots = ['apps', 'plugins', 'platform', 'web']
+const harnessPublicPrefixes = [
+  'fun.fengwk.kkstudio.harness.api.',
+  'fun.fengwk.kkstudio.harness.spi.',
+  'fun.fengwk.kkstudio.harness.codec.',
+  'fun.fengwk.kkstudio.harness.contributor.api.',
+  'fun.fengwk.kkstudio.harness.contributor.builtin.',
+  'fun.fengwk.kkstudio.harness.tool.',
+  'fun.fengwk.kkstudio.harness.prompt.',
+  'fun.fengwk.kkstudio.harness.environment.',
+  'fun.fengwk.kkstudio.harness.model.',
+  'fun.fengwk.kkstudio.harness.runtime.HarnessRuntime',
+]
+const harnessPublicValueImports = new Set([
+  'fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry',
+  'fun.fengwk.kkstudio.harness.spi.store.UuidOrder',
+])
+const harnessBuiltinPublicPrefixes = [
+  'fun.fengwk.kkstudio.harness.builtin.driver.',
+  'fun.fengwk.kkstudio.harness.builtin.port.',
+]
+const platformHarnessRoot =
+  'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/'
+const platformHarnessBuiltinRoot = `${platformHarnessRoot}builtin/`
+const harnessStoreRoots = [
+  'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/store/',
+  'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/builtin/store/',
+  'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/dispatch/',
+  'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/model/',
+]
+const harnessStoreFiles = new Set([
+  'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/package-info.java',
+  'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog/model/GroupCooldownRepository.java',
+])
+const webHarnessStoreCompositionFiles = new Set([
+  'web/src/main/java/fun/fengwk/kkstudio/web/runtime/HarnessEnvironmentConfiguration.java',
+  'web/src/main/java/fun/fengwk/kkstudio/web/runtime/HarnessProcessorConfiguration.java',
+  'web/src/main/java/fun/fengwk/kkstudio/web/runtime/HarnessRuntimeConfiguration.java',
+])
+
+function isWithin(relativePath, root) {
+  const normalized = root.endsWith('/') ? root.slice(0, -1) : root
+  return relativePath === normalized || relativePath.startsWith(`${normalized}/`)
+}
+
+function mainJavaFiles() {
+  return mainJavaRoots.flatMap((root) =>
+    walkFiles(path.join(repositoryRoot, root))
+      .filter((filePath) => filePath.endsWith('.java'))
+      .map((filePath) => relativeFromRoot(filePath))
+      .filter((relativePath) => relativePath.includes('/src/main/java/')),
+  )
+}
+
+function harnessStoreAllowed(relativePath) {
+  return (
+    harnessStoreRoots.some((root) => isWithin(relativePath, root)) ||
+    harnessStoreFiles.has(relativePath) ||
+    webHarnessStoreCompositionFiles.has(relativePath)
+  )
+}
+
+function checkHarnessPackageAccess() {
+  for (const relativePath of mainJavaFiles()) {
+    if (relativePath.startsWith('web/')) {
+      continue
+    }
+    const isPlatform = relativePath.startsWith('platform/')
+    const isPlatformHarness = isWithin(relativePath, platformHarnessRoot)
+    const isBuiltinAdapter = isWithin(relativePath, platformHarnessBuiltinRoot)
+    for (const { imported, line } of javaImportsForFile(relativePath)) {
+      if (!imported.startsWith('fun.fengwk.kkstudio.harness.')) {
+        continue
+      }
+      if (imported.startsWith('fun.fengwk.kkstudio.harness.spi.store.')) {
+        if (
+          imported === 'fun.fengwk.kkstudio.harness.spi.store.UuidOrder' ||
+          harnessStoreAllowed(relativePath)
+        ) {
+          continue
+        }
+        addError(
+          `${relativePath}:${line}: only platform engine adapters may use harness.spi.store (${imported})`,
+        )
+        continue
+      }
+      if (imported.startsWith('fun.fengwk.kkstudio.harness.builtin.port.store.')) {
+        if (!isPlatformHarness) {
+          addError(
+            `${relativePath}:${line}: Builtin storage contracts are limited to platform.harness.* (${imported})`,
+          )
+        }
+        if (
+          imported === 'fun.fengwk.kkstudio.harness.builtin.port.store.BuiltinStore' &&
+          !isBuiltinAdapter
+        ) {
+          addError(
+            `${relativePath}:${line}: Builtin storage port is limited to platform.harness.builtin (${imported})`,
+          )
+        }
+        continue
+      }
+      if (imported.startsWith('fun.fengwk.kkstudio.harness.builtin.')) {
+        if (
+          isBuiltinAdapter ||
+          (isPlatform &&
+            harnessBuiltinPublicPrefixes.some((prefix) => imported.startsWith(prefix)))
+        ) {
+          continue
+        }
+        addError(
+          `${relativePath}:${line}: Builtin Driver internals are limited to platform.harness.builtin (${imported})`,
+        )
+        continue
+      }
+      if (imported.startsWith('fun.fengwk.kkstudio.harness.runtime.')) {
+        if (
+          harnessPublicValueImports.has(imported) ||
+          harnessPublicPrefixes.some((prefix) => imported.startsWith(prefix)) ||
+          isPlatformHarness
+        ) {
+          continue
+        }
+        addError(
+          `${relativePath}:${line}: runtime internals are limited to HarnessRuntime and platform engine adapters (${imported})`,
+        )
+        continue
+      }
+      if (harnessPublicPrefixes.some((prefix) => imported.startsWith(prefix))) {
+        continue
+      }
+      addError(`${relativePath}:${line}: outside the public Harness boundary (${imported})`)
+    }
+  }
+}
+
+/**
+ * 表只由归属模块或职责包的 SQL 访问；唯一例外是依赖 work 的模块只读 join durable_work。
+ * 前缀映射只有这一份，schema 中的每张表都必须能命中。
+ */
+const tableOwners = [
+  ['agent_', 'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog'],
+  ['builtin_model_', 'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/builtin'],
+  ['canvas_', 'apps/canvas'],
+  ['chat', 'apps/chat'],
+  ['cluster_', 'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/cluster'],
+  ['durable_work', 'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness'],
+  ['environment', 'platform/runtime'],
+  ['harness_', 'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness'],
+  ['mcp_', 'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog'],
+  ['plugin_', 'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/pluginhost'],
+  ['project', 'apps/project'],
+  ['realtime_', 'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/cluster'],
+  ['session_', 'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/storage'],
+  ['skill_', 'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog'],
+  ['storage_', 'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/storage'],
+  ['system_setting', 'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/settings'],
+]
+const sqlTableReference =
+  /\b(from|join|update|insert\s+into|delete\s+from)\s+([a-z_][a-z0-9_]*)\b/gi
+
+function tableOwner(table) {
+  return tableOwners.find(([prefix]) => table === prefix || table.startsWith(prefix))?.[1]
+}
+
+function javaStringLiterals(source) {
+  const literals = []
+  let index = 0
+  while (index < source.length) {
+    if (source.startsWith('"""', index)) {
+      const end = source.indexOf('"""', index + 3)
+      if (end < 0) {
+        break
+      }
+      let contentStart = index + 3
+      if (source[contentStart] === '\r') {
+        contentStart++
+      }
+      if (source[contentStart] === '\n') {
+        contentStart++
+      }
+      literals.push({
+        text: source.slice(contentStart, end),
+        line: lineNumberAt(source, contentStart),
+      })
+      index = end + 3
+    } else if (source[index] === '"') {
+      let cursor = index + 1
+      while (cursor < source.length && source[cursor] !== '"') {
+        if (source[cursor] === '\\') {
+          cursor++
+        }
+        cursor++
+      }
+      literals.push({ text: source.slice(index + 1, cursor), line: lineNumberAt(source, index) })
+      index = cursor + 1
+    } else {
+      index++
+    }
+  }
+  return literals
+}
+
+function modulePathFor(relativePath) {
+  let match = null
+  for (const modulePath of Object.keys(moduleDependencies)) {
+    if (isWithin(relativePath, modulePath) && (!match || modulePath.length > match.length)) {
+      match = modulePath
+    }
+  }
+  return match
+}
+
+function checkTableOwnership() {
+  const schemaPath = 'schema/src/main/resources/db/migration/V1__schema.sql'
+  const schema = read(schemaPath)
+  if (!schema) {
+    addError(`missing schema: ${schemaPath}`)
+  }
+  for (const match of schema.matchAll(
+    /create\s+table\s+(?:if\s+not\s+exists\s+)?([a-z_][a-z0-9_]*)/giu,
+  )) {
+    const table = match[1].toLowerCase()
+    if (!tableOwner(table)) {
+      addError(`schema table has no owner in tableOwners: ${table}`)
+    }
+  }
+
+  for (const relativePath of mainJavaFiles()) {
+    const source = read(relativePath)
+    const modulePath = modulePathFor(relativePath)
+    const dependsOnWork =
+      Array.isArray(moduleDependencies[modulePath]) && moduleDependencies[modulePath].includes('work')
+    for (const literal of javaStringLiterals(source)) {
+      for (const match of literal.text.matchAll(sqlTableReference)) {
+        const operation = match[1].toLowerCase().replace(/\s+/gu, ' ')
+        const table = match[2].toLowerCase()
+        const owner = tableOwner(table)
+        if (!owner || isWithin(relativePath, owner)) {
+          continue
+        }
+        const readOnly = operation === 'from' || operation === 'join'
+        if (table === 'durable_work' && readOnly && dependsOnWork) {
+          continue
+        }
+        const line = literal.line + literal.text.slice(0, match.index).split('\n').length - 1
+        addError(
+          `${relativePath}:${line}: ${table} is owned by ${owner} and cannot be used here (${operation})`,
+        )
+      }
+    }
+  }
+}
+
+
+/** 内核只保留纯引擎：不引用 JGit，手动压缩控制不穿透到 processor 实现。 */
+function checkKernelBoundary() {
+  const manualCompaction =
+    'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/ManualCompactionControl.java'
+  if (!existsSync(path.join(repositoryRoot, manualCompaction))) {
+    addError(`missing manual compaction control: ${manualCompaction}`)
+  }
+  for (const { line, text } of fileLines(manualCompaction)) {
+    if (text.includes('fun.fengwk.kkstudio.harness.runtime.processor.')) {
+      addError(
+        `${manualCompaction}:${line}: ManualCompactionControl must not depend on processor internals`,
+      )
+    }
+  }
+  for (const { file, imported, line } of javaImports(
+    path.join(repositoryRoot, 'harness/runtime/src/main/java'),
+  )) {
+    if (imported.startsWith('org.eclipse.jgit.')) {
+      addError(`${file}:${line}: Harness runtime must not import JGit (${imported})`)
+    }
+  }
+}
+
+const platformDomainRoots = [
+  'agenttask',
+  'catalog',
+  'cluster',
+  'configsync',
+  'environment',
+  'error',
+  'events',
+  'harness',
+  'http',
+  'i18n',
+  'interaction',
+  'notification',
+  'orchestration',
+  'persistence',
+  'pluginhost',
+  'settings',
+  'storage',
+  'vfs',
+]
+const shareDomainRoots = ['ai', 'configsync', 'storage', 'systemsettings']
+
+/** 平台与共享契约的子域根保持精确，新增子域必须显式更新这里。 */
+function checkPackageRoots() {
+  for (const [relativePath, expected] of [
+    ['platform/runtime/src/main/java/fun/fengwk/kkstudio/platform', platformDomainRoots],
+    ['share/src/main/java/fun/fengwk/kkstudio/share', shareDomainRoots],
+  ]) {
+    const absolutePath = path.join(repositoryRoot, relativePath)
+    if (!existsSync(absolutePath)) {
+      addError(`missing package root: ${relativePath}`)
+      continue
+    }
+    const actual = readdirSync(absolutePath, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .sort()
+    if (JSON.stringify(actual) !== JSON.stringify([...expected].sort())) {
+      addError(
+        `${relativePath}: unexpected domain roots; expected [${[...expected].sort().join(', ')}], found [${actual.join(', ')}]`,
+      )
+    }
+  }
+}
+
+/** ProviderType 只有 harness/model 一份，share/platform 不得恢复旧枚举或映射适配器。 */
+function checkProviderTypeSingleSource() {
+  if (
+    !existsSync(
+      path.join(
+        repositoryRoot,
+        'harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/provider/ProviderType.java',
+      ),
+    )
+  ) {
+    addError('missing harness/model ProviderType')
+  }
+  if (
+    existsSync(
+      path.join(
+        repositoryRoot,
+        'share/src/main/java/fun/fengwk/kkstudio/share/ai/catalog/AgentProviderType.java',
+      ),
+    )
+  ) {
+    addError('share must not reintroduce AgentProviderType')
+  }
+  for (const root of ['share/src/main/java', 'platform/runtime/src/main/java', 'platform/plugin-api/src/main/java']) {
+    for (const filePath of walkFiles(path.join(repositoryRoot, root)).filter((file) =>
+      file.endsWith('.java'),
+    )) {
+      const relativePath = relativeFromRoot(filePath)
+      for (const { line, text } of fileLines(relativePath)) {
+        if (text.includes('AgentProviderType') || text.includes('toProviderType(')) {
+          addError(`${relativePath}:${line}: use harness/model ProviderType directly`)
+        }
+      }
+    }
+  }
+}
+
+/** MCP client 只依赖 JDK、官方 SDK、Jackson 3 与 common。 */
+function checkMcpClientBoundary() {
+  const allowedPrefixes = [
+    'java.',
+    'javax.',
+    'io.modelcontextprotocol.',
+    'com.fasterxml.jackson.annotation.',
+    'tools.jackson.',
+    'fun.fengwk.kkstudio.common.',
+    'fun.fengwk.kkstudio.platform.catalog.mcp.client.',
+  ]
+  const clientRoot =
+    'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog/mcp/client'
+  if (!existsSync(path.join(repositoryRoot, clientRoot))) {
+    addError(`missing MCP client package: ${clientRoot}`)
+    return
+  }
+  for (const { file, imported, line } of javaImports(path.join(repositoryRoot, clientRoot))) {
+    if (!allowedPrefixes.some((prefix) => imported.startsWith(prefix))) {
+      addError(
+        `${file}:${line}: MCP client imports must stay on JDK, official SDK, Jackson 3 and common (${imported})`,
+      )
+    }
+  }
+}
+
+const harnessCatalogImport = 'fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog'
+const harnessCatalogImporters = new Set([
+  'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog/tool/PluginRuntimeToolCatalogSource.java',
+  'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog/tool/RuntimeToolCatalogSource.java',
+  'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/gateway/GatewayRun.java',
+  'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/pluginhost/catalog/PluginCatalogSnapshot.java',
+])
+const harnessCatalogConsumers = [
+  'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/thread/command/DatabaseAgentTurnContextResolver.java',
+  'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/gateway/ToolExecutionGateway.java',
+  'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog/definition/AgentDefinitionConfigValidator.java',
+  'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog/tool/ToolCatalogQueryService.java',
+]
+const harnessCatalogGatewayRun =
+  'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/gateway/GatewayRun.java'
+
+/** HarnessCatalog 只用于目录构建、装配与元数据校验，工具查找统一走 RuntimeToolCatalog。 */
+function checkHarnessCatalogBoundary() {
+  const platformMain = 'platform/runtime/src/main/java'
+  for (const { file, imported, line } of javaImports(path.join(repositoryRoot, platformMain))) {
+    if (imported === harnessCatalogImport && !harnessCatalogImporters.has(file)) {
+      addError(`${file}:${line}: HarnessCatalog imports are limited to catalog builders and wiring`)
+    }
+  }
+  for (const relativePath of harnessCatalogConsumers) {
+    if (!existsSync(path.join(repositoryRoot, relativePath))) {
+      addError(`missing HarnessCatalog consumer: ${relativePath}`)
+      continue
+    }
+    const source = read(relativePath)
+    if (!source.includes('RuntimeToolCatalog')) {
+      addError(`${relativePath}: HarnessCatalog consumer must use RuntimeToolCatalog`)
+    }
+    if (
+      relativePath.endsWith('DatabaseAgentTurnContextResolver.java') ||
+      relativePath.endsWith('ToolExecutionGateway.java') ||
+      relativePath.endsWith('AgentDefinitionConfigValidator.java')
+    ) {
+      if (!source.includes('import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalogSource;')) {
+        addError(`${relativePath}: must import RuntimeToolCatalogSource`)
+      }
+    }
+    if (
+      !relativePath.endsWith('ToolExecutionGateway.java') &&
+      source.includes('HarnessCatalog')
+    ) {
+      addError(`${relativePath}: must not reference HarnessCatalog`)
+    }
+  }
+  const gatewayRun = read(harnessCatalogGatewayRun)
+  if (!gatewayRun.includes(`import ${harnessCatalogImport};`)) {
+    addError(`${harnessCatalogGatewayRun}: must import HarnessCatalog for metadata`)
+  }
+  if (!/harnessCatalog\s*\.\s*findCustomEntryType/u.test(gatewayRun)) {
+    addError(`${harnessCatalogGatewayRun}: must validate custom entry types via HarnessCatalog`)
+  }
+  for (const token of [
+    'harnessCatalog.findTool',
+    'harnessCatalog.selectableTools',
+    'harnessCatalog.tools()',
+  ]) {
+    if (gatewayRun.includes(token)) {
+      addError(`${harnessCatalogGatewayRun}: must not look up tools via ${token}`)
+    }
+  }
+  const gateway = read(harnessCatalogConsumers[1])
+  if (!gateway.includes('toolCatalogSource.acquire')) {
+    addError(`${harnessCatalogConsumers[1]}: must acquire the catalog epoch before tool access`)
+  }
+}
+
+/** 阻塞执行必须经过显式准入；无界 per-task executor 只属于 Model 网关。 */
+function checkExecutionAdmissionBoundary() {
+  const platformMain = path.join(repositoryRoot, 'platform/runtime/src/main/java')
+  for (const filePath of walkFiles(platformMain).filter((file) => file.endsWith('.java'))) {
+    const relativePath = relativeFromRoot(filePath)
+    for (const { line, text } of fileLines(relativePath)) {
+      if (
+        (text.includes('newVirtualThreadPerTaskExecutor') ||
+          text.includes('newThreadPerTaskExecutor')) &&
+        path.basename(relativePath) !== 'ModelExecutionConfiguration.java'
+      ) {
+        addError(`${relativePath}:${line}: unbounded per-task executor bypasses admission`)
+      }
+    }
+  }
+  for (const [relativePath, tokens] of [
+    [
+      'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/model/ModelExecutionConfiguration.java',
+      ['ConcurrencyAdmission', 'modelExecutionAdmission'],
+    ],
+    [
+      'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/gateway/HarnessToolGatewayConfiguration.java',
+      ['ConcurrencyAdmission', 'toolExecutionAdmission'],
+    ],
+  ]) {
+    const source = read(relativePath)
+    for (const token of tokens) {
+      if (!source.includes(token)) {
+        addError(`${relativePath}: missing explicit admission token '${token}'`)
+      }
+    }
+  }
+}
+
+const platformCompositionForbiddenTokens = [
+  'TrustedJarContributorLoader',
+  'URLClassLoader',
+  'ServiceLoader',
+  'kk-studio.harness.contributors.directory',
+  'KK_STUDIO_TRUSTED_CONTRIBUTOR_DIRECTORY',
+]
+
+/** platform 不是组合根，且全仓不接受 LangChain4j；环境网关只实现能力传输。 */
+function checkPlatformCompositionBoundary() {
+  const platformMain = path.join(repositoryRoot, 'platform/runtime/src/main/java')
+  for (const filePath of walkFiles(platformMain).filter((file) => file.endsWith('.java'))) {
+    const relativePath = relativeFromRoot(filePath)
+    for (const { line, text } of fileLines(relativePath)) {
+      const trimmed = text.trim()
+      if (trimmed.startsWith('@SpringBootApplication') || trimmed.startsWith('SpringApplication.run(')) {
+        addError(`${relativePath}:${line}: platform must not be the Spring Boot entry point`)
+      }
+      for (const token of platformCompositionForbiddenTokens) {
+        if (text.includes(token)) {
+          addError(`${relativePath}:${line}: platform must not load trusted contributor JARs (${token})`)
+        }
+      }
+    }
+  }
+
+  const environmentGateway =
+    'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/environment/gateway/EnvironmentDaemonGateway.java'
+  if (!existsSync(path.join(repositoryRoot, environmentGateway))) {
+    addError(`missing environment gateway: ${environmentGateway}`)
+  } else {
+    const source = read(environmentGateway)
+    for (const token of ['fun.fengwk.kkstudio.harness.tool.', 'RemoteTool']) {
+      if (source.includes(token)) {
+        addError(`${environmentGateway}: environment gateway must use capability terminology, found ${token}`)
+      }
+    }
+  }
+
+  for (const filePath of walkRepositoryFiles(repositoryRoot)) {
+    const relativePath = relativeFromRoot(filePath)
+    if (path.basename(relativePath) === 'pom.xml') {
+      for (const { line, text } of fileLines(relativePath)) {
+        if (text.toLowerCase().includes('langchain4j')) {
+          addError(`${relativePath}:${line}: LangChain4j must not return`)
+        }
+      }
+    }
+  }
+  for (const relativePath of mainJavaFiles()) {
+    for (const { line, text } of fileLines(relativePath)) {
+      if (
+        text.trim().startsWith('import dev.langchain4j.') ||
+        text.trim().startsWith('import io.github.langchain4j.')
+      ) {
+        addError(`${relativePath}:${line}: production sources must not import LangChain4j`)
+      }
+    }
+  }
+}
+
+const redisJavaPackages = [
+  'io.lettuce.',
+  'org.redisson.',
+  'org.springframework.boot.autoconfigure.data.redis.',
+  'org.springframework.data.redis.',
+  'redis.clients.',
+]
+const redisJavaType = /\b(?:Jedis|Lettuce|Redis|Redisson)[A-Za-z0-9_]*\b/u
+const redisPomGroup = /<groupId>\s*(?:io\.lettuce|org\.redisson|redis\.clients)\s*<\/groupId>/iu
+const redisPomArtifact =
+  /<artifactId>\s*[^<]*(?:jedis|lettuce|redis|redisson)[^<]*<\/artifactId>/iu
+const redisConfiguration = /(?:jedis|lettuce|redis|redisson)/iu
+
+function stripJavaComments(source) {
+  const lines = source.split(/\r?\n/u)
+  let inBlockComment = false
+  return lines.map((line) => {
+    let code = ''
+    for (let cursor = 0; cursor < line.length; ) {
+      if (inBlockComment) {
+        const end = line.indexOf('*/', cursor)
+        if (end < 0) {
+          cursor = line.length
+        } else {
+          inBlockComment = false
+          cursor = end + 2
+        }
+      } else if (line.startsWith('//', cursor)) {
+        cursor = line.length
+      } else if (line.startsWith('/*', cursor)) {
+        inBlockComment = true
+        cursor += 2
+      } else {
+        code += line[cursor]
+        cursor++
+      }
+    }
+    return code
+  })
+}
+
+function isRedisConfiguration(relativePath) {
+  const lower = relativePath.toLowerCase()
+  const filename = path.basename(relativePath).toLowerCase()
+  return (
+    lower.endsWith('.yml') ||
+    lower.endsWith('.yaml') ||
+    lower.endsWith('.properties') ||
+    filename.startsWith('.env') ||
+    filename.endsWith('.env') ||
+    filename.includes('dockerfile')
+  )
+}
+
+/** Git 管理的后端生产代码、依赖与部署配置不得恢复 Redis 栈。 */
+function checkNoRedis() {
+  for (const filePath of walkRepositoryFiles(repositoryRoot)) {
+    const relativePath = relativeFromRoot(filePath)
+    if (
+      relativePath.startsWith('frontend/') ||
+      relativePath.startsWith('docs/') ||
+      relativePath.startsWith('scripts/')
+    ) {
+      continue
+    }
+    if (relativePath.endsWith('.java') && relativePath.includes('/src/main/java/')) {
+      const codeLines = stripJavaComments(read(relativePath))
+      codeLines.forEach((text, index) => {
+        if (
+          redisJavaPackages.some((value) => text.includes(value)) ||
+          redisJavaType.test(text)
+        ) {
+          addError(`${relativePath}:${index + 1}: Redis stack must be absent (${text.trim()})`)
+        }
+      })
+    } else if (path.basename(relativePath) === 'pom.xml') {
+      for (const { line, text } of fileLines(relativePath)) {
+        if (redisPomGroup.test(text) || redisPomArtifact.test(text)) {
+          addError(`${relativePath}:${line}: Redis dependency must be absent (${text.trim()})`)
+        }
+      }
+    } else if (isRedisConfiguration(relativePath)) {
+      for (const { line, text } of fileLines(relativePath)) {
+        if (redisConfiguration.test(text)) {
+          addError(`${relativePath}:${line}: Redis configuration must be absent (${text.trim()})`)
+        }
+      }
+    }
+  }
+}
+
 function checkNoHarnessModuleDocs() {
   const harnessRoot = path.join(repositoryRoot, 'harness')
   if (!existsSync(harnessRoot)) {
@@ -900,7 +1575,9 @@ function checkPackageInfo() {
 }
 
 /** 源码、配置与文档中不得出现会话过程用语；AGENTS.md 是 Agent 工作规则，不在此列。 */
-const sessionArtifactTerms = [['本', '切片'].join(''), ['Branch', 'B'].join(' ')]
+const sessionArtifactTerms = ['本切片', 'Branch B']
+const sessionArtifactExcludedPaths = new Set(['scripts/dev/verify/repository/check.mjs'])
+const sessionArtifactExcludedPrefixes = ['scripts/dev/verify/repository/tests/']
 const sessionArtifactExtensions = new Set([
   '.java', '.ts', '.tsx', '.js', '.mjs', '.cjs', '.yml', '.yaml', '.properties', '.sql', '.sh', '.ps1', '.txt',
 ])
@@ -933,6 +1610,12 @@ function checkNoSessionArtifacts() {
   }
   for (const file of sourceFiles(repositoryRoot)) {
     const relativePath = relativeFromRoot(file)
+    if (
+      sessionArtifactExcludedPaths.has(relativePath) ||
+      sessionArtifactExcludedPrefixes.some((prefix) => relativePath.startsWith(prefix))
+    ) {
+      continue
+    }
     read(relativePath)
       .split('\n')
       .forEach((line, index) => {
@@ -951,6 +1634,16 @@ checkLinks()
 checkInlineSourcePaths()
 checkModuleBoundaries()
 checkWebArchitecture()
+checkHarnessPackageAccess()
+checkTableOwnership()
+checkKernelBoundary()
+checkPackageRoots()
+checkProviderTypeSingleSource()
+checkMcpClientBoundary()
+checkHarnessCatalogBoundary()
+checkExecutionAdmissionBoundary()
+checkPlatformCompositionBoundary()
+checkNoRedis()
 checkUniquePackages()
 checkNoHarnessModuleDocs()
 checkPackageInfo()

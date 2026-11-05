@@ -12,11 +12,10 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.model.provider.impl.transport.TransportErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.impl.transport.TransportException;
 
-import java.lang.annotation.Annotation;
 import java.nio.charset.StandardCharsets;
 
-/** 验证 OpenAI Responses 提供方的安全防护规则与无 Spring 架构边界隔离。 */
-class OpenAiResponsesSecurityAndArchitectureTest {
+/** 验证 OpenAI Responses 提供方的安全防护规则。 */
+class OpenAiResponsesSecurityTest {
 
   /** 验证异常映射完整保留上游响应体，且绝不泄漏内部 transport message、请求凭证或底层 cause。 */
   @Test
@@ -47,29 +46,5 @@ class OpenAiResponsesSecurityAndArchitectureTest {
     assertTrue(pe.getMessage().contains(fakeToken));
     assertFalse(pe.getMessage().contains("internal auth failure details"));
     assertNull(pe.getCause());
-  }
-
-  /** 验证提供方包完全无 Spring 框架依赖与注解，保持纯净轻量。 */
-  @Test
-  void test_springFreeArchitecture() {
-    Class<?>[] classes = {
-      OpenAiResponsesConfig.class,
-      OpenAiResponsesEndpoints.class,
-      OpenAiResponsesEncodedRequest.class,
-      OpenAiResponsesErrorMapper.class,
-      OpenAiResponsesModelProvider.class,
-      OpenAiResponsesProviderAdapter.class,
-      OpenAiResponsesRequestEncoder.class,
-      OpenAiResponsesStreamAccumulator.class
-    };
-
-    for (Class<?> clazz : classes) {
-      for (Annotation anno : clazz.getAnnotations()) {
-        String annoName = anno.annotationType().getName();
-        assertFalse(
-            annoName.startsWith("org.springframework"),
-            clazz.getSimpleName() + " must not contain Spring annotation: " + annoName);
-      }
-    }
   }
 }

@@ -496,8 +496,8 @@ test('repository check rejects prohibited session artifacts with file and line n
   const mirrorRoot = createRepositoryMirror()
   try {
     const testFile = path.join(mirrorRoot, 'harness/test-session-artifact.txt')
-    const badTermSlice = ['本', '切片'].join('')
-    const badTermBranch = ['Branch', 'B'].join(' ')
+    const badTermSlice = '本切片'
+    const badTermBranch = 'Branch B'
     writeFileSync(
       testFile,
       `line 1\nline 2 with ${badTermSlice}\nline 3\nline 4 with ${badTermBranch}\n`,
@@ -531,8 +531,8 @@ test('documentation rejects session artifacts but permits historical names and f
   const relativePath = 'docs/modules/common.md'
   const docPath = path.join(mirrorRoot, relativePath)
   const original = readFileSync(docPath, 'utf8')
-  const slice = ['本', '切片'].join('')
-  const branch = ['Branch', 'B'].join(' ')
+  const slice = '本切片'
+  const branch = 'Branch B'
   const workspace = 'workspace notes'
   const check = () =>
     execFileSync('node', [CHECK_SCRIPT, '--root', mirrorRoot], {
