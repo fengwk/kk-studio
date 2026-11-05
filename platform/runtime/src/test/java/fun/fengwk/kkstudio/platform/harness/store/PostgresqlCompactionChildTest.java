@@ -444,7 +444,7 @@ class PostgresqlCompactionChildTest {
     Clock clock = Clock.fixed(T1, ZoneOffset.UTC);
     scheduler = Executors.newSingleThreadScheduledExecutor();
     resolver =
-        (threadId, path, preparation) -> {
+        (threadId, rootSessionId, path, preparation) -> {
           if (preparation != null) {
             ModelSelection compactorModel = ModelSelection.model("compactor-model", "v1");
             return new TurnResolver.CompactionResolved(

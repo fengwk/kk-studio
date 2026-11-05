@@ -143,11 +143,8 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentModelGroupMemberDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelKind;
 import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
 
-import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.time.ZoneId;
-import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -155,7 +152,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -379,52 +375,53 @@ class DatabaseTurnResolverTest {
         List.of(),
         requestSpec.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
     assertFalse(requestSpec.systemInstruction().contains("<available_skills>"));
-    assertTrue(requestSpec.systemInstruction().contains("date:"));
+    assertTrue(requestSpec.systemInstruction().contains("[harness]"));
+    assertFalse(requestSpec.systemInstruction().contains("date"));
   }
 
   @Test
-  void alwaysProjectsNoneCurrentEnvironmentIntoProviderRequest() {
+  void rendersHarnessOnlyWithoutEnvironmentWhenNoToolsAreInjected() {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
 
     ModelRequestSpec requestSpec = fixture.resolved(fixture.path(unboundSettings("default")));
 
-    // 未选择 Environment：只输出 name: none 与 Platform 日期，没有任何宿主事实或路径默认值。
+    // 无工具时不出现 paths/environment；没有 Environment 也不注入任何路径或日期事实。
     assertEquals(
-        "agent system prompt\n\n"
-            + "<current_environment>\n"
-            + "- name: none\n"
-            + "- date: 2026-08-02\n"
-            + "</current_environment>",
+        "[agent]\n"
+            + "agent system prompt\n\n"
+            + "[harness]\n"
+            + "You are working in the KK Studio harness. A session is a tree of messages; you are a"
+            + " thread working on one branch of it. Subagents run in their own threads: they share"
+            + " the environment and session files with you, but not messages, and see only the task"
+            + " prompt they are given.",
         instructionText(requestSpec));
   }
 
   @Test
-  void noLiveMetadataUsesServiceClockZoneForNoneAndUnreportedEnvironment() {
-    Clock serviceClock = Clock.fixed(NOW, ZoneId.of("America/Los_Angeles"));
-    Fixture fixture = new Fixture(List.of(), List.of(), List.of(), serviceClock);
+  void environmentFactsShowUnknownWithoutLiveMetadataAndNeverIncludeDate() {
+    Fixture fixture = new Fixture(List.of("read"), List.of(), List.of());
 
-    // 未选择 Environment：环境块只有 name: none 与服务端时钟派生的日期。
+    // 未选择 Environment：只出现 none 与会话目录，不出现宿主事实或日期。
     String none = instructionText(fixture.resolved(fixture.path(unboundSettings("default"))));
-    assertTrue(none.contains("- name: none"), none);
-    assertFalse(none.contains("- system:"), none);
-    assertFalse(none.contains("- user:"), none);
-    assertFalse(none.contains("- home:"), none);
-    assertTrue(none.contains("- date: 2026-08-01"), none);
-    assertFalse(none.contains("- note:"), none);
+    assertTrue(none.contains("<name>none</name>"), none);
+    assertTrue(none.contains("No environment is selected now."), none);
+    assertFalse(none.contains("<os>"), none);
+    assertFalse(none.contains("<user>"), none);
+    assertFalse(none.contains("<home>"), none);
+    assertFalse(none.contains("date"), none);
 
-    // 已选择 Environment 但既无 live daemon 也无持久报告：只输出 name 与回退到服务端时钟的日期，绝不伪造 user/home。
+    // 已选择 Environment 但既无 live daemon 也无持久报告：宿主事实显示 unknown，绝不伪造。
     String unreported = instructionText(fixture.resolved(fixture.path(settings("default"))));
-    assertTrue(unreported.contains("- name: " + ENV_A_NAME), unreported);
-    assertFalse(unreported.contains("- system:"), unreported);
-    assertFalse(unreported.contains("- user:"), unreported);
-    assertFalse(unreported.contains("- home:"), unreported);
-    assertTrue(unreported.contains("- date: 2026-08-01"), unreported);
-    assertFalse(unreported.contains("- note:"), unreported);
+    assertTrue(unreported.contains("<name>" + ENV_A_NAME + "</name>"), unreported);
+    assertTrue(unreported.contains("<os>unknown</os>"), unreported);
+    assertTrue(unreported.contains("<user>unknown</user>"), unreported);
+    assertTrue(unreported.contains("<home>unknown</home>"), unreported);
+    assertFalse(unreported.contains("date"), unreported);
   }
 
   @Test
   void readyCurrentEnvironmentUsesDaemonMetadataAndTimeZone() {
-    Fixture fixture = new Fixture(List.of(), List.of(), List.of());
+    Fixture fixture = new Fixture(List.of("read"), List.of(), List.of());
     fixture.readyEnvironment(
         ENV_A,
         List.of(),
@@ -440,26 +437,27 @@ class DatabaseTurnResolverTest {
     ModelRequestSpec requestSpec = fixture.resolved(fixture.path(settings("default")));
     String prompt = instructionText(requestSpec);
 
-    assertTrue(prompt.contains("- name: " + ENV_A_NAME), prompt);
-    assertTrue(prompt.contains("- system: linux"), prompt);
-    assertTrue(prompt.contains("- user: dev-user"), prompt);
-    assertTrue(prompt.contains("- home: /home/dev"), prompt);
-    assertTrue(prompt.contains("- date: 2026-08-01"), prompt);
-    assertTrue(prompt.contains("- note: Custom &lt;Linux&gt; &amp; tools."), prompt);
+    assertTrue(prompt.contains("<name>" + ENV_A_NAME + "</name>"), prompt);
+    assertTrue(prompt.contains("<os>linux</os>"), prompt);
+    assertTrue(prompt.contains("<user>dev-user</user>"), prompt);
+    assertTrue(prompt.contains("<home>/home/dev</home>"), prompt);
+    assertTrue(
+        prompt.contains("<description>Custom &lt;Linux&gt; &amp; tools.</description>"), prompt);
+    assertFalse(prompt.contains("date"), prompt);
   }
 
   @Test
   void selectedEnvironmentUsesMetadataRegardlessOfHeartbeatReadiness() {
-    Fixture fixture = new Fixture(List.of(), List.of(), List.of());
+    Fixture fixture = new Fixture(List.of("read"), List.of(), List.of());
     fixture.connectingEnvironment(ENV_A);
 
     String withoutMetadata = instructionText(fixture.resolved(fixture.path(settings("default"))));
-    assertTrue(withoutMetadata.contains("- name: " + ENV_A_NAME), withoutMetadata);
-    assertFalse(withoutMetadata.contains("- system:"), withoutMetadata);
-    assertFalse(withoutMetadata.contains("- user:"), withoutMetadata);
-    assertFalse(withoutMetadata.contains("- home:"), withoutMetadata);
-    assertTrue(withoutMetadata.contains("- date: 2026-08-02"), withoutMetadata);
-    assertFalse(withoutMetadata.contains("- note:"), withoutMetadata);
+    assertTrue(withoutMetadata.contains("<name>" + ENV_A_NAME + "</name>"), withoutMetadata);
+    assertTrue(withoutMetadata.contains("<os>unknown</os>"), withoutMetadata);
+    assertTrue(withoutMetadata.contains("<user>unknown</user>"), withoutMetadata);
+    assertTrue(withoutMetadata.contains("<home>unknown</home>"), withoutMetadata);
+    assertTrue(withoutMetadata.contains("<description>none</description>"), withoutMetadata);
+    assertFalse(withoutMetadata.contains("date"), withoutMetadata);
 
     DaemonEnvironmentInfo environmentInfo =
         new DaemonEnvironmentInfo(
@@ -470,47 +468,51 @@ class DatabaseTurnResolverTest {
             "Stable WSL environment.",
             "/tmp/kk-studio",
             "amd64");
-    Fixture readyFixture = new Fixture(List.of(), List.of(), List.of());
+    Fixture readyFixture = new Fixture(List.of("read"), List.of(), List.of());
     readyFixture.readyEnvironment(ENV_A, List.of(), environmentInfo);
     String ready = instructionText(readyFixture.resolved(readyFixture.path(settings("default"))));
-    Fixture staleFixture = new Fixture(List.of(), List.of(), List.of());
+    Fixture staleFixture = new Fixture(List.of("read"), List.of(), List.of());
     staleFixture.staleEnvironment(ENV_A, environmentInfo);
     String stale = instructionText(staleFixture.resolved(staleFixture.path(settings("default"))));
     assertEquals(ready, stale);
-    assertTrue(stale.contains("- name: " + ENV_A_NAME), stale);
-    assertTrue(stale.contains("- system: wsl"), stale);
-    assertTrue(stale.contains("- user: dev-user"), stale);
-    assertTrue(stale.contains("- home: /home/dev"), stale);
-    assertTrue(stale.contains("- date: 2026-08-02"), stale);
-    assertTrue(stale.contains("- note: Stable WSL environment."), stale);
+    assertTrue(stale.contains("<name>" + ENV_A_NAME + "</name>"), stale);
+    assertTrue(stale.contains("<os>wsl</os>"), stale);
+    assertTrue(stale.contains("<user>dev-user</user>"), stale);
+    assertTrue(stale.contains("<home>/home/dev</home>"), stale);
+    assertTrue(stale.contains("<description>Stable WSL environment.</description>"), stale);
+    assertFalse(stale.contains("date"), stale);
   }
 
+  /** 子 Agent 的会话目录必须按执行根会话生成，而不是按当前子会话生成。 */
   @Test
-  void ordinaryResolutionReadsClockInstantExactlyOnce() {
-    AtomicInteger calls = new AtomicInteger();
-    Clock countingClock =
-        new Clock() {
-          @Override
-          public ZoneId getZone() {
-            return ZoneOffset.UTC;
-          }
+  void systemPromptSessionDirectoriesUseExecutionRootSession() {
+    UUID childSessionId = new UUID(0L, 200L);
+    UUID executionRootSessionId = new UUID(0L, 300L);
+    EntryPath childPath =
+        new EntryPath(
+            List.of(
+                new Entry(id(1), childSessionId, null, new RootPayload(settings("default")), NOW)));
+    Fixture fixture = new Fixture(List.of("read"), List.of(), List.of());
 
-          @Override
-          public Clock withZone(ZoneId zone) {
-            return this;
-          }
+    TurnResolver.Resolved resolved =
+        assertInstanceOf(
+            TurnResolver.Resolved.class,
+            fixture.resolver.resolve(THREAD_ID, executionRootSessionId, childPath, null));
+    String instruction = resolved.spec().systemInstruction();
 
-          @Override
-          public Instant instant() {
-            calls.incrementAndGet();
-            return NOW;
-          }
-        };
-    Fixture fixture = new Fixture(List.of(), List.of(), List.of(), countingClock);
-
-    fixture.resolved(fixture.path(settings("default")));
-
-    assertEquals(1, calls.get());
+    assertTrue(
+        instruction.contains(
+            "<session_dir>vfs:/sessions/" + executionRootSessionId + "/</session_dir>"),
+        instruction);
+    assertTrue(
+        instruction.contains(
+            "<thread_dir>vfs:/sessions/"
+                + executionRootSessionId
+                + "/threads/"
+                + THREAD_ID
+                + "/</thread_dir>"),
+        instruction);
+    assertFalse(instruction.contains(childSessionId.toString()), instruction);
   }
 
   @Test
@@ -694,69 +696,68 @@ class DatabaseTurnResolverTest {
             .message());
   }
 
-  /** 测试意图：即使 Daemon 离线（无 live connection），全局目录 Skill 仍能完成规划并渲染进 prompt；环境块只按连接行保留事实渲染。 */
+  /** 测试意图：即使 Daemon 离线，全局目录 Skill 仍能完成结构化规划并保留交付事实；选定 Environment 无法确认精确安装时不得进入 prompt。 */
   @Test
-  void skillsPlanningSucceedsFromGlobalCatalogWhenDaemonIsOffline() {
-    Fixture fixture =
-        new Fixture(List.of(), List.of("dev"), List.of(), Clock.fixed(NOW, ZoneOffset.UTC));
+  void skillFactsRemainPlannedFromGlobalCatalogWhenDaemonIsOfflineButPromptOmitsThem() {
+    Fixture fixture = new Fixture(List.of(), List.of("dev"), List.of());
 
     fixture.publishEnvironment(ENV_A);
     when(fixture.environmentRegistry.find(ENV_A)).thenReturn(Optional.empty());
     when(fixture.environmentRegistry.hasReadyLease(ENV_A)).thenReturn(false);
 
-    ModelRequestSpec requestSpec = fixture.resolved(fixture.path(settings("default")));
-    assertTrue(requestSpec.systemInstruction().contains("<available_skills>"));
-    assertTrue(
-        requestSpec
-            .systemInstruction()
-            .contains("<path>vfs:/skills/test-package/dev/SKILL.md</path>"));
-    assertFalse(instructionText(requestSpec).contains("- system:"));
+    EntryPath path = fixture.path(settings("default"));
+    LiveTurnPlan.Planned planned = fixture.planned(path);
+    assertEquals("dev", planned.skills().getFirst().name());
+    assertFalse(planned.spec().systemInstruction().contains("<available_skills>"));
+    assertFalse(instructionText(planned.spec()).contains("<os>linux</os>"));
   }
 
   /** 测试意图：环境块只取自选中的 Environment 与连接行保留的宿主 metadata；无连接行时不伪造 user/home/OS/note。 */
   @Test
   void environmentContextComesOnlyFromRetainedHostMetadata() {
-    Fixture live = new Fixture(List.of(), List.of(), List.of(), Clock.fixed(NOW, ZoneOffset.UTC));
+    Fixture live = new Fixture(List.of("read"), List.of(), List.of());
     live.readyEnvironment(ENV_A);
     ModelRequestSpec liveSpec = live.resolved(live.path(settings("default")));
-    assertTrue(instructionText(liveSpec).contains("- name: " + ENV_A_NAME));
-    assertTrue(instructionText(liveSpec).contains("- system: linux"));
-    assertTrue(instructionText(liveSpec).contains("- user: dev-user"));
-    assertTrue(instructionText(liveSpec).contains("- home: /home/dev"));
+    assertTrue(instructionText(liveSpec).contains("<name>" + ENV_A_NAME + "</name>"));
+    assertTrue(instructionText(liveSpec).contains("<os>linux</os>"));
+    assertTrue(instructionText(liveSpec).contains("<user>dev-user</user>"));
+    assertTrue(instructionText(liveSpec).contains("<home>/home/dev</home>"));
 
-    Fixture offline =
-        new Fixture(List.of(), List.of(), List.of(), Clock.fixed(NOW, ZoneOffset.UTC));
+    Fixture offline = new Fixture(List.of("read"), List.of(), List.of());
     offline.connectingEnvironment(ENV_A);
     ModelRequestSpec offlineSpec = offline.resolved(offline.path(settings("default")));
-    assertTrue(instructionText(offlineSpec).contains("- name: " + ENV_A_NAME));
-    assertFalse(instructionText(offlineSpec).contains("- system:"));
-    assertFalse(instructionText(offlineSpec).contains("- user:"));
-    assertFalse(instructionText(offlineSpec).contains("- home:"));
-    assertFalse(instructionText(offlineSpec).contains("- note:"));
+    assertTrue(instructionText(offlineSpec).contains("<name>" + ENV_A_NAME + "</name>"));
+    assertTrue(instructionText(offlineSpec).contains("<os>unknown</os>"));
+    assertTrue(instructionText(offlineSpec).contains("<user>unknown</user>"));
+    assertTrue(instructionText(offlineSpec).contains("<home>unknown</home>"));
+    assertTrue(instructionText(offlineSpec).contains("<description>none</description>"));
   }
 
   /** 测试意图：CONNECTING 连接行保留的最近一次 READY 宿主 metadata 仍进入环境块（断线不清空）。 */
   @Test
   void connectingEnvironmentStillProjectsRetainedHostMetadata() {
-    Fixture fixture =
-        new Fixture(List.of(), List.of(), List.of(), Clock.fixed(NOW, ZoneOffset.UTC));
+    Fixture fixture = new Fixture(List.of("read"), List.of(), List.of());
     fixture.connectingEnvironmentWithRetainedMetadata(ENV_A);
 
     ModelRequestSpec requestSpec = fixture.resolved(fixture.path(settings("default")));
 
-    assertTrue(instructionText(requestSpec).contains("- name: " + ENV_A_NAME));
-    assertTrue(instructionText(requestSpec).contains("- system: wsl"));
-    assertTrue(instructionText(requestSpec).contains("- user: dev-user"));
-    assertTrue(instructionText(requestSpec).contains("- home: /home/dev"));
-    assertTrue(instructionText(requestSpec).contains("- note: Retained note"));
+    assertTrue(instructionText(requestSpec).contains("<name>" + ENV_A_NAME + "</name>"));
+    assertTrue(instructionText(requestSpec).contains("<os>wsl</os>"));
+    assertTrue(instructionText(requestSpec).contains("<user>dev-user</user>"));
+    assertTrue(instructionText(requestSpec).contains("<home>/home/dev</home>"));
+    assertTrue(instructionText(requestSpec).contains("<description>Retained note</description>"));
   }
 
   @Test
   void routesByExactEnvironmentIdAndNeverFallsBack() {
     // 两个独立不可变 name；branch 只认 settings 中那一个 name，绝不回看更旧 settings 或 fallback。
+    String localPath = "/home/dev/.kkstudio/skills/test-package";
     Fixture fixture = new Fixture(List.of("bash"), List.of("dev-b"), List.of());
     fixture.readyEnvironment(ENV_A, List.of("dev-a"));
     fixture.readyEnvironment(ENV_B, List.of("dev-b"));
+    fixture.readyEnvironmentWithSkillState(
+        ENV_B,
+        List.of(EnvironmentSkillState.installed("test-package", ARTIFACT_SHA256, localPath)));
     BranchSettings settings =
         new BranchSettings(
             "assistant", BuiltinExecution.of(new ModelSelection("model", "default")), ENV_B_NAME);
@@ -771,9 +772,7 @@ class DatabaseTurnResolverTest {
     assertEquals(ENV_B, boundRoutes.get(0));
     assertEquals(ENV_B, boundRoutes.get(1));
     assertTrue(
-        requestSpec
-            .systemInstruction()
-            .contains("<path>vfs:/skills/test-package/dev-b/SKILL.md</path>"));
+        requestSpec.systemInstruction().contains("<path>" + localPath + "/dev-b/SKILL.md</path>"));
   }
 
   @Test
@@ -837,8 +836,12 @@ class DatabaseTurnResolverTest {
 
   @Test
   void derivesReadToolFromLatestAgentSkills() {
+    String localPath = "/home/dev/.kkstudio/skills/test-package";
     Fixture fixture = new Fixture(List.of(), List.of("dev"), List.of());
     fixture.readyEnvironment(ENV_A, List.of("dev"));
+    fixture.readyEnvironmentWithSkillState(
+        ENV_A,
+        List.of(EnvironmentSkillState.installed("test-package", ARTIFACT_SHA256, localPath)));
 
     ModelRequestSpec requestSpec = fixture.resolved(fixture.path(settings("default")));
 
@@ -846,15 +849,17 @@ class DatabaseTurnResolverTest {
         List.of("read"),
         requestSpec.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
     assertTrue(
-        requestSpec
-            .systemInstruction()
-            .contains("<path>vfs:/skills/test-package/dev/SKILL.md</path>"));
+        requestSpec.systemInstruction().contains("<path>" + localPath + "/dev/SKILL.md</path>"));
   }
 
   @Test
   void bindsSkillsExactlyFromSelectedEnvironment() {
+    String localPath = "/home/dev/.kkstudio/skills/test-package";
     Fixture fixture = new Fixture(List.of(), List.of("dev"), List.of());
     fixture.readyEnvironment(ENV_A, List.of("dev"));
+    fixture.readyEnvironmentWithSkillState(
+        ENV_A,
+        List.of(EnvironmentSkillState.installed("test-package", ARTIFACT_SHA256, localPath)));
 
     ModelRequestSpec requestSpec = fixture.resolved(fixture.path(settings("default")));
 
@@ -866,9 +871,7 @@ class DatabaseTurnResolverTest {
     assertEquals(ENV_A, requestSpec.toolBindings().getFirst().environmentId());
     assertEquals(ENV_A_NAME, requestSpec.toolBindings().getFirst().environmentName());
     assertTrue(
-        requestSpec
-            .systemInstruction()
-            .contains("<path>vfs:/skills/test-package/dev/SKILL.md</path>"));
+        requestSpec.systemInstruction().contains("<path>" + localPath + "/dev/SKILL.md</path>"));
 
     // 全局目录缺少该 Package：不静默丢弃，typed 拒绝；缺失形态统一为同一条不含目录内部细节的消息。
     fixture = new Fixture(List.of(), List.of("dev"), List.of());
@@ -1064,8 +1067,12 @@ class DatabaseTurnResolverTest {
 
   @Test
   void projectsSemanticMessagesInRootToHeadOrderIgnoringBoundariesAndErrors() {
+    String localPath = "/home/dev/.kkstudio/skills/test-package";
     Fixture fixture = new Fixture(List.of(), List.of("dev"), List.of());
     fixture.readyEnvironment(ENV_A, List.of("dev"));
+    fixture.readyEnvironmentWithSkillState(
+        ENV_A,
+        List.of(EnvironmentSkillState.installed("test-package", ARTIFACT_SHA256, localPath)));
     BranchSettings settings = settings("default");
 
     EntryPath path = multiTurnPath(settings);
@@ -1073,18 +1080,19 @@ class DatabaseTurnResolverTest {
 
     // 系统指令不再以 SYSTEM 消息进入会话投影：它只在 systemInstruction 中，messages 只含对话。
     String instruction = requestSpec.systemInstruction();
-    assertTrue(instruction.startsWith("agent system prompt"), instruction);
-    // 确定性空行拼接顺序：Agent 正文 → Environment → Skills，段间恰为空行分隔。
-    int environmentAt = instruction.indexOf("<current_environment>");
-    int skillsAt = instruction.indexOf("<available_skills>");
-    assertTrue(environmentAt > "agent system prompt".length(), instruction);
+    assertTrue(instruction.startsWith("[agent]\nagent system prompt"), instruction);
+    // 固定顺序：Agent 正文 → harness → paths → environment → skills，段间恰为空行分隔。
+    int harnessAt = instruction.indexOf("[harness]");
+    int pathsAt = instruction.indexOf("[paths]");
+    int environmentAt = instruction.indexOf("[environment]");
+    int skillsAt = instruction.indexOf("[skills]");
+    assertTrue(harnessAt > "agent system prompt".length(), instruction);
+    assertTrue(pathsAt > harnessAt, instruction);
+    assertTrue(environmentAt > pathsAt, instruction);
     assertTrue(skillsAt > environmentAt, instruction);
-    assertTrue(
-        instruction.contains("</current_environment>\n\nThe following skills provide"),
-        instruction);
+    assertTrue(instruction.contains("</current_environment>\n\n[skills]"), instruction);
     assertTrue(instruction.contains("<name>dev</name>"), instruction);
-    assertTrue(
-        instruction.contains("<path>vfs:/skills/test-package/dev/SKILL.md</path>"), instruction);
+    assertTrue(instruction.contains("<path>" + localPath + "/dev/SKILL.md</path>"), instruction);
 
     List<ProviderMessage> messages = materialized(path, requestSpec);
     assertEquals(3, messages.size());
@@ -1164,8 +1172,7 @@ class DatabaseTurnResolverTest {
             PromptCacheRetention.NONE,
             true,
             catalog,
-            toolCatalogSource,
-            Clock.fixed(NOW, ZoneOffset.UTC));
+            toolCatalogSource);
 
     EntryPath path = fixture.path(settings("default"));
     ModelRequestSpec spec = fixture.resolved(path);
@@ -1225,8 +1232,7 @@ class DatabaseTurnResolverTest {
                 PromptCacheRetention.NONE,
                 true,
                 staticCatalog,
-                toolCatalogSource,
-                Clock.fixed(NOW, ZoneOffset.UTC));
+                toolCatalogSource);
         fixture.readyEnvironment(ENV_A);
 
         ModelRequestSpec spec = fixture.resolved(fixture.path(settings("default")));
@@ -1261,8 +1267,7 @@ class DatabaseTurnResolverTest {
             PromptCacheRetention.NONE,
             true,
             staticCatalog,
-            missingToolSource,
-            Clock.fixed(NOW, ZoneOffset.UTC));
+            missingToolSource);
     missingToolFixture.readyEnvironment(ENV_A);
     assertEquals(
         "tool not found: mcp_srv_echo",
@@ -1301,31 +1306,35 @@ class DatabaseTurnResolverTest {
 
   @Test
   void escapesXmlInAvailableSkillsSection() {
+    String localPath = "/home/dev/.kkstudio/skills/test-package";
     Fixture fixture = new Fixture(List.of(), List.of("a&b<c>"), List.of());
     fixture.readyEnvironmentWithSkills(ENV_A, List.of(skillName("a&b<c>", "d&e")));
+    fixture.readyEnvironmentWithSkillState(
+        ENV_A,
+        List.of(EnvironmentSkillState.installed("test-package", ARTIFACT_SHA256, localPath)));
 
     ModelRequestSpec requestSpec = fixture.resolved(fixture.path(settings("default")));
 
     String system = instructionText(requestSpec);
     assertTrue(system.contains("<name>a&amp;b&lt;c&gt;</name>"));
     assertTrue(system.contains("<description>d&amp;e</description>"));
-    assertTrue(system.contains("<path>vfs:/skills/test-package/a&amp;b&lt;c&gt;/SKILL.md</path>"));
+    assertTrue(system.contains("<path>" + localPath + "/a&amp;b&lt;c&gt;/SKILL.md</path>"), system);
   }
 
   /**
-   * 测试意图：只有选定 Environment 的同步投影精确记录该 package 的 artifactSha256 已安装时，prompt 才注入 Daemon
-   * 本地稳定路径；摘要不一致或同步失败都必须回退 platform URI。
+   * 测试意图：选定 Environment 时只有精确安装当前工件摘要才把 Skill 注入 prompt 并使用 Daemon 本地稳定路径；未安装、摘要不一致或同步失败都必须 不列出该
+   * Skill。未选 Environment 的 platform URI 路径由其它用例覆盖。
    */
   @Test
-  void usesLocalStableSkillPathOnlyForExactlyInstalledCommit() {
-    String installedSha = "a".repeat(64);
+  void usesLocalStableSkillPathOnlyForExactlyInstalledArtifact() {
     String otherSha = "b".repeat(64);
     String localPath = "/home/dev/.kkstudio/skills/test-package";
 
     Fixture installed = new Fixture(List.of(), List.of("dev"), List.of());
     installed.readyEnvironment(ENV_A, List.of("dev"));
     installed.readyEnvironmentWithSkillState(
-        ENV_A, List.of(EnvironmentSkillState.installed("test-package", installedSha, localPath)));
+        ENV_A,
+        List.of(EnvironmentSkillState.installed("test-package", ARTIFACT_SHA256, localPath)));
 
     assertTrue(
         instructionText(installed.resolved(installed.path(settings("default"))))
@@ -1335,9 +1344,12 @@ class DatabaseTurnResolverTest {
     mismatched.readyEnvironment(ENV_A, List.of("dev"));
     mismatched.readyEnvironmentWithSkillState(
         ENV_A, List.of(EnvironmentSkillState.installed("test-package", otherSha, localPath)));
-    assertTrue(
-        instructionText(mismatched.resolved(mismatched.path(settings("default"))))
-            .contains("<path>vfs:/skills/test-package/dev/SKILL.md</path>"));
+    String mismatchedInstruction =
+        instructionText(mismatched.resolved(mismatched.path(settings("default"))));
+    assertFalse(mismatchedInstruction.contains("<available_skills>"), mismatchedInstruction);
+    assertFalse(
+        mismatchedInstruction.contains("vfs:/skills/test-package/dev/SKILL.md"),
+        mismatchedInstruction);
 
     Fixture failed = new Fixture(List.of(), List.of("dev"), List.of());
     failed.readyEnvironment(ENV_A, List.of("dev"));
@@ -1346,11 +1358,18 @@ class DatabaseTurnResolverTest {
         List.of(
             EnvironmentSkillState.failed(
                 "test-package",
-                EnvironmentSkillState.installed("test-package", installedSha, localPath),
+                EnvironmentSkillState.installed("test-package", ARTIFACT_SHA256, localPath),
                 "skill package sync failed: COMMIT_NOT_FOUND")));
-    assertTrue(
-        instructionText(failed.resolved(failed.path(settings("default"))))
-            .contains("<path>vfs:/skills/test-package/dev/SKILL.md</path>"));
+    String failedInstruction = instructionText(failed.resolved(failed.path(settings("default"))));
+    assertFalse(failedInstruction.contains("<available_skills>"), failedInstruction);
+    assertFalse(
+        failedInstruction.contains("vfs:/skills/test-package/dev/SKILL.md"), failedInstruction);
+
+    Fixture neverSynced = new Fixture(List.of(), List.of("dev"), List.of());
+    neverSynced.readyEnvironment(ENV_A, List.of("dev"));
+    String neverSyncedInstruction =
+        instructionText(neverSynced.resolved(neverSynced.path(settings("default"))));
+    assertFalse(neverSyncedInstruction.contains("<available_skills>"), neverSyncedInstruction);
   }
 
   /**
@@ -1444,21 +1463,19 @@ class DatabaseTurnResolverTest {
   }
 
   /**
-   * 测试意图：结构化 Skill 事实把「交付方式」与「已安装工件摘要」分开投影——只有精确安装 artifactSha256 才是 LOCAL； 摘要不一致或同步失败仍如实暴露实际
-   * installedSha256，但交付方式必须是 PLATFORM；headCommit 来自 Package 自身； promptXml 与真正进入 systemInstruction
-   * 的片段逐字相同。
+   * 测试意图：结构化 Skill 事实把「交付方式」与「已安装工件摘要」分开投影——未选 Environment 是 PLATFORM/URI，精确安装是 LOCAL/本地路径；
+   * 已选但摘要不一致或同步失败仍暴露事实，却不进入 system prompt。headCommit 来自 Package 自身；进入 prompt 的 XML 与事实同源。
    */
   @Test
-  void previewPlanProjectsSkillDeliveryCommitsAndExactPromptXml() {
+  void previewPlanProjectsSkillDeliveryCommitsAndPromptVisibility() {
     String otherSha = "b".repeat(64);
     String observedHead = "abcdef0123456789abcdef0123456789abcdef01";
     String localPath = "/home/dev/.kkstudio/skills/test-package";
 
     Fixture platformOnly = new Fixture(List.of(), List.of("dev"), List.of());
-    platformOnly.readyEnvironment(ENV_A, List.of("dev"));
     platformOnly.observedHeadCommit(observedHead);
     LiveTurnPlan.Planned platformPlan =
-        platformOnly.planned(platformOnly.path(settings("default")));
+        platformOnly.planned(platformOnly.path(unboundSettings("default")));
     LiveTurnPlan.PlannedSkill platformSkill = platformPlan.skills().getFirst();
 
     assertEquals("test-package", platformSkill.packageName());
@@ -1504,12 +1521,13 @@ class DatabaseTurnResolverTest {
                 "test-package",
                 EnvironmentSkillState.installed("test-package", otherSha, localPath),
                 "skill package sync failed: COMMIT_NOT_FOUND")));
-    LiveTurnPlan.PlannedSkill failedSkill =
-        failedSync.planned(failedSync.path(settings("default"))).skills().getFirst();
+    LiveTurnPlan.Planned failedPlan = failedSync.planned(failedSync.path(settings("default")));
+    LiveTurnPlan.PlannedSkill failedSkill = failedPlan.skills().getFirst();
     assertEquals(SkillPromptResolution.Delivery.PLATFORM, failedSkill.delivery());
     assertEquals(otherSha, failedSkill.installedSha256());
     assertEquals(ARTIFACT_SHA256, failedSkill.artifactSha256());
     assertEquals("vfs:/skills/test-package/dev/SKILL.md", failedSkill.path());
+    assertFalse(failedPlan.spec().systemInstruction().contains("<available_skills>"));
   }
 
   /**
@@ -1797,7 +1815,8 @@ class DatabaseTurnResolverTest {
     assertThrows(
         IllegalStateException.class,
         () ->
-            missingAgent.resolver.resolve(THREAD_ID, missingAgent.path(settings("default")), null));
+            missingAgent.resolver.resolve(
+                THREAD_ID, SESSION_ID, missingAgent.path(settings("default")), null));
 
     Fixture missingProvider = new Fixture(List.of(), List.of(), List.of());
     missingProvider.failProviderLookup(new RuntimeException("db down"));
@@ -1805,14 +1824,15 @@ class DatabaseTurnResolverTest {
         RuntimeException.class,
         () ->
             missingProvider.resolver.resolve(
-                THREAD_ID, missingProvider.path(settings("default")), null));
+                THREAD_ID, SESSION_ID, missingProvider.path(settings("default")), null));
 
     Fixture missingModel = new Fixture(List.of(), List.of(), List.of());
     missingModel.failModelLookup(new RuntimeException("db down"));
     assertThrows(
         RuntimeException.class,
         () ->
-            missingModel.resolver.resolve(THREAD_ID, missingModel.path(settings("default")), null));
+            missingModel.resolver.resolve(
+                THREAD_ID, SESSION_ID, missingModel.path(settings("default")), null));
   }
 
   /**
@@ -1833,7 +1853,9 @@ class DatabaseTurnResolverTest {
       TurnResolveTransientException transientFailure =
           assertThrows(
               TurnResolveTransientException.class,
-              () -> fixture.resolver.resolve(THREAD_ID, fixture.path(settings("default")), null));
+              () ->
+                  fixture.resolver.resolve(
+                      THREAD_ID, SESSION_ID, fixture.path(settings("default")), null));
       assertSame(failure, transientFailure.getCause());
       assertEquals("turn resolution infrastructure unavailable", transientFailure.getMessage());
     }
@@ -2259,7 +2281,7 @@ class DatabaseTurnResolverTest {
             123L);
 
     TurnResolver.Result result =
-        fixture.resolver.resolve(THREAD_ID, fixture.path(settings), preparation);
+        fixture.resolver.resolve(THREAD_ID, SESSION_ID, fixture.path(settings), preparation);
     TurnResolver.Rejected rejected = assertInstanceOf(TurnResolver.Rejected.class, result);
     assertEquals("compaction agent has no configured model", rejected.error().message());
 
@@ -2268,7 +2290,7 @@ class DatabaseTurnResolverTest {
     TurnResolver.Rejected rejectedMissing =
         assertInstanceOf(
             TurnResolver.Rejected.class,
-            fixture.resolver.resolve(THREAD_ID, fixture.path(settings), preparation));
+            fixture.resolver.resolve(THREAD_ID, SESSION_ID, fixture.path(settings), preparation));
     assertTrue(rejectedMissing.error().message().contains("Compaction"));
   }
 
@@ -2424,8 +2446,8 @@ class DatabaseTurnResolverTest {
             LiveTurnPlan.Rejected.class,
             fixture.resolver.planHistorical(
                 THREAD_ID,
-                compactionRequestPath(BuiltinExecution.model(settings("default").execution())),
-                NOW));
+                SESSION_ID,
+                compactionRequestPath(BuiltinExecution.model(settings("default").execution()))));
 
     assertEquals(DatabaseTurnResolver.REJECTION_CODE, rejected.errorCode());
     assertTrue(rejected.detail().contains("compaction child thread"), rejected.detail());
@@ -2440,7 +2462,8 @@ class DatabaseTurnResolverTest {
     LiveTurnPlan.Planned live = fixture.planned(path);
     LiveTurnPlan.Planned historical =
         assertInstanceOf(
-            LiveTurnPlan.Planned.class, fixture.resolver.planHistorical(THREAD_ID, path, NOW));
+            LiveTurnPlan.Planned.class,
+            fixture.resolver.planHistorical(THREAD_ID, SESSION_ID, path));
 
     assertEquals(live.spec(), historical.spec());
     assertEquals(live.contextWindow(), historical.contextWindow());
@@ -2471,7 +2494,7 @@ class DatabaseTurnResolverTest {
     ModelRequestSpec requestSpec = fixture.resolved(path);
 
     // 系统指令不再作为 SYSTEM 消息出现在投影首位；summary wrapper 是第一条 USER，随后是冻结压缩边界的 Goal 背景。
-    assertTrue(requestSpec.systemInstruction().startsWith("agent system prompt"));
+    assertTrue(requestSpec.systemInstruction().startsWith("[agent]\nagent system prompt"));
     List<ProviderMessage> messages = materialized(path, requestSpec);
     assertEquals(5, messages.size());
     assertEquals(ProviderMessageRole.USER, messages.get(0).role());
@@ -2863,7 +2886,7 @@ class DatabaseTurnResolverTest {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
     assertThrows(
         NullPointerException.class,
-        () -> fixture.resolver.resolve(null, fixture.path(settings("default")), null));
+        () -> fixture.resolver.resolve(null, SESSION_ID, fixture.path(settings("default")), null));
   }
 
   /** 完整压缩投影路径：ROOT + 两个关闭 turn，中间夹一个完成压缩 turn。 */
@@ -3069,24 +3092,7 @@ class DatabaseTurnResolverTest {
         List<String> tools,
         List<String> skills,
         List<ToolDescriptor> hostDescriptors,
-        Clock clock) {
-      this(tools, skills, hostDescriptors, (HarnessCatalog) null, clock);
-    }
-
-    private Fixture(
-        List<String> tools,
-        List<String> skills,
-        List<ToolDescriptor> hostDescriptors,
         HarnessCatalog catalog) {
-      this(tools, skills, hostDescriptors, catalog, Clock.fixed(NOW, ZoneOffset.UTC));
-    }
-
-    private Fixture(
-        List<String> tools,
-        List<String> skills,
-        List<ToolDescriptor> hostDescriptors,
-        HarnessCatalog catalog,
-        Clock clock) {
       this(
           tools,
           skills,
@@ -3096,8 +3102,7 @@ class DatabaseTurnResolverTest {
           ProviderType.OPENAI,
           PromptCacheRetention.NONE,
           true,
-          catalog,
-          clock);
+          catalog);
     }
 
     private Fixture(
@@ -3130,31 +3135,7 @@ class DatabaseTurnResolverTest {
         ProviderType factoryType,
         PromptCacheRetention promptCacheRetention,
         boolean includeProviderFactory,
-        HarnessCatalog catalog) {
-      this(
-          tools,
-          skills,
-          hostDescriptors,
-          internalHostToolNames,
-          persistedProviderType,
-          factoryType,
-          promptCacheRetention,
-          includeProviderFactory,
-          catalog,
-          Clock.fixed(NOW, ZoneOffset.UTC));
-    }
-
-    private Fixture(
-        List<String> tools,
-        List<String> skills,
-        List<ToolDescriptor> hostDescriptors,
-        Set<String> internalHostToolNames,
-        ProviderType persistedProviderType,
-        ProviderType factoryType,
-        PromptCacheRetention promptCacheRetention,
-        boolean includeProviderFactory,
-        HarnessCatalog providedCatalog,
-        Clock clock) {
+        HarnessCatalog providedCatalog) {
       this(
           tools,
           skills,
@@ -3165,8 +3146,7 @@ class DatabaseTurnResolverTest {
           promptCacheRetention,
           includeProviderFactory,
           providedCatalog,
-          null,
-          clock);
+          null);
     }
 
     private Fixture(
@@ -3179,8 +3159,7 @@ class DatabaseTurnResolverTest {
         PromptCacheRetention promptCacheRetention,
         boolean includeProviderFactory,
         HarnessCatalog providedCatalog,
-        RuntimeToolCatalogSource providedToolCatalogSource,
-        Clock clock) {
+        RuntimeToolCatalogSource providedToolCatalogSource) {
       agent =
           AgentDefinition.builder()
               .name("assistant")
@@ -3331,8 +3310,7 @@ class DatabaseTurnResolverTest {
               skillPackageRepository,
               skillPromptPathResolver,
               blobManager,
-              new AgentPromptComposer(() -> subagentConfig),
-              clock);
+              new AgentPromptComposer(() -> subagentConfig));
 
       resolver =
           new DatabaseTurnResolver(
@@ -3347,8 +3325,7 @@ class DatabaseTurnResolverTest {
                           ProviderFactory::providerType, Function.identity())),
               () -> new CompactionConfig(20_000),
               contextResolver,
-              TokenEstimator::estimateRequestTokens,
-              clock);
+              TokenEstimator::estimateRequestTokens);
     }
 
     /** 把 branch 可见的不可变 Environment name 注册为内部路由身份。 */
@@ -3522,12 +3499,13 @@ class DatabaseTurnResolverTest {
     }
 
     private LiveTurnPlan planLive(EntryPath path) {
-      return resolver.planLive(THREAD_ID, path);
+      return resolver.planLive(THREAD_ID, SESSION_ID, path);
     }
 
     private LiveTurnPlan.Planned plannedWithSettings(EntryPath path, BranchSettings settings) {
       return assertInstanceOf(
-          LiveTurnPlan.Planned.class, resolver.planLiveWithSettings(THREAD_ID, path, settings));
+          LiveTurnPlan.Planned.class,
+          resolver.planLiveWithSettings(THREAD_ID, SESSION_ID, path, settings));
     }
 
     private LiveTurnPlan.Planned planned(EntryPath path) {
@@ -3557,18 +3535,18 @@ class DatabaseTurnResolverTest {
 
     private TurnResolver.CompactionResolved resolvedCompaction(
         EntryPath path, CompactionPreparation preparation) {
-      TurnResolver.Result result = resolver.resolve(THREAD_ID, path, preparation);
+      TurnResolver.Result result = resolver.resolve(THREAD_ID, SESSION_ID, path, preparation);
       return assertInstanceOf(TurnResolver.CompactionResolved.class, result);
     }
 
     private TurnResolver.Resolved resolvedResult(
         EntryPath path, CompactionPreparation preparation) {
-      TurnResolver.Result result = resolver.resolve(THREAD_ID, path, preparation);
+      TurnResolver.Result result = resolver.resolve(THREAD_ID, SESSION_ID, path, preparation);
       return assertInstanceOf(TurnResolver.Resolved.class, result);
     }
 
     private TurnResolver.Rejected rejected(EntryPath path) {
-      TurnResolver.Result result = resolver.resolve(THREAD_ID, path, null);
+      TurnResolver.Result result = resolver.resolve(THREAD_ID, SESSION_ID, path, null);
       return assertInstanceOf(TurnResolver.Rejected.class, result);
     }
 

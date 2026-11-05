@@ -121,8 +121,9 @@ public class HarnessModelRequestDebugDTO {
     @JsonInclude(JsonInclude.Include.ALWAYS)
     private @Nullable String installedSha256;
 
-    /** 实际进入 systemInstruction 的 Skill XML 片段。 */
-    private String promptXml;
+    /** 实际进入 systemInstruction 的 Skill XML 片段；该 Skill 未进入 Prompt 时为 null（required-nullable）。 */
+    @JsonInclude(JsonInclude.Include.ALWAYS)
+    private @Nullable String promptXml;
   }
 
   /**

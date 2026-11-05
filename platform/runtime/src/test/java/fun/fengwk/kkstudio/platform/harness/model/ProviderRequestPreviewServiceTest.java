@@ -15,6 +15,7 @@ import static org.mockito.Mockito.atLeast;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
@@ -449,7 +450,7 @@ class ProviderRequestPreviewServiceTest {
     when(runtime.getThreadSnapshot(THREAD_ID))
         .thenReturn(snapshot(thread, closedTurnPath(BELOW_THRESHOLD_USAGE), List.of()));
     when(runtime.prepareAutomaticCompaction(eq(thread), any(), any(), eq(true))).thenReturn(null);
-    when(turnResolver.planLive(eq(THREAD_ID), any(), eq(NOW)))
+    when(turnResolver.planLive(eq(THREAD_ID), eq(SESSION_ID), any()))
         .thenReturn(new LiveTurnPlan.Rejected("PLANNING_FAILED", "provider detail leaked"));
     ProviderRequestPreviewUnavailableException planning =
         assertThrows(
@@ -483,7 +484,7 @@ class ProviderRequestPreviewServiceTest {
         .thenReturn(snapshot(childThread(CHILD_LATER_END_ID), childPath, List.of()));
     when(runtime.getThreadSnapshot(THREAD_ID))
         .thenReturn(snapshot(thread(ROOT_ID, 1L), rootPath, List.of()));
-    when(turnResolver.planLive(eq(CHILD_THREAD_ID), any(), eq(NOW)))
+    when(turnResolver.planLive(eq(CHILD_THREAD_ID), eq(SESSION_ID), any()))
         .thenReturn(new LiveTurnPlan.Planned(spec(), CONTEXT_WINDOW, List.of(), List.of()));
     when(providerResolution.resolve(eq(ProviderType.OPENAI), eq(GENERATION_ID), any()))
         .thenAnswer(
@@ -497,7 +498,7 @@ class ProviderRequestPreviewServiceTest {
         new AcceptCommandsTarget.Thread(CHILD_THREAD_ID, CHILD_LATER_END_ID, 2L);
     service.preview(CHILD_THREAD_ID, command(target, userMessage("hello")));
     ArgumentCaptor<EntryPath> path = ArgumentCaptor.forClass(EntryPath.class);
-    verify(turnResolver).planLive(eq(CHILD_THREAD_ID), path.capture(), eq(NOW));
+    verify(turnResolver).planLive(eq(CHILD_THREAD_ID), eq(SESSION_ID), path.capture());
     assertEquals("current-root", path.getValue().baseSettings().environmentName());
     assertThrows(
         IllegalArgumentException.class,
@@ -523,7 +524,7 @@ class ProviderRequestPreviewServiceTest {
         .thenReturn(new StorageUploadService.ReadyUpload(ATTACHMENT_BLOB_ID, "authoritative.png"));
     when(refManager.contains(SESSION_ID, OWNED_BLOB_ID)).thenReturn(true);
     ModelRequestSpec spec = spec();
-    when(turnResolver.planLive(eq(THREAD_ID), any(), eq(NOW)))
+    when(turnResolver.planLive(eq(THREAD_ID), eq(SESSION_ID), any()))
         .thenReturn(new LiveTurnPlan.Planned(spec, CONTEXT_WINDOW, List.of(), List.of()));
     when(providerResolution.resolve(eq(ProviderType.OPENAI), eq(GENERATION_ID), any()))
         .thenAnswer(
@@ -563,7 +564,7 @@ class ProviderRequestPreviewServiceTest {
 
     // 候选历史由同一 transform 构造：新 USER 消息同时携带文本、权威附件事实与已持有 RESOURCE，且顺序不变。
     ArgumentCaptor<EntryPath> pathCaptor = ArgumentCaptor.forClass(EntryPath.class);
-    verify(turnResolver).planLive(eq(THREAD_ID), pathCaptor.capture(), eq(NOW));
+    verify(turnResolver).planLive(eq(THREAD_ID), eq(SESSION_ID), pathCaptor.capture());
     MessagePayload frozen = lastUserMessage(pathCaptor.getValue());
     List<AgentMessageContent> contents = frozen.message().contents();
     assertEquals(3, contents.size());
@@ -659,7 +660,7 @@ class ProviderRequestPreviewServiceTest {
                     }))
         .when(providerResolution)
         .resolve(any(), any(), any());
-    when(turnResolver.planLive(eq(THREAD_ID), any(), eq(NOW)))
+    when(turnResolver.planLive(eq(THREAD_ID), eq(SESSION_ID), any()))
         .thenReturn(new LiveTurnPlan.Planned(spec(), CONTEXT_WINDOW, List.of(), List.of()));
     ProviderRequestPreviewUnavailableException unsupported =
         assertThrows(
@@ -697,7 +698,7 @@ class ProviderRequestPreviewServiceTest {
         .thenReturn(
             snapshot(
                 thread(TURN_TWO_END_ID, 1L), closedTurnPath(BELOW_THRESHOLD_USAGE), List.of()));
-    when(turnResolver.planLive(eq(THREAD_ID), any(), eq(NOW)))
+    when(turnResolver.planLive(eq(THREAD_ID), eq(SESSION_ID), any()))
         .thenReturn(new LiveTurnPlan.Planned(spec(), CONTEXT_WINDOW, List.of(), List.of()));
     when(providerResolution.resolve(any(), any(), any()))
         .thenThrow(new IllegalArgumentException("provider connection generation drift"));
@@ -725,7 +726,7 @@ class ProviderRequestPreviewServiceTest {
     when(runtime.getSessionEntries(SESSION_ID)).thenReturn(sessionTree.entries());
     when(uploadService.peekReady(UPLOAD_ID))
         .thenReturn(new StorageUploadService.ReadyUpload(ATTACHMENT_BLOB_ID, "draft.png"));
-    when(turnResolver.planLive(any(), any(), eq(NOW)))
+    when(turnResolver.planLive(any(), eq(SESSION_ID), any()))
         .thenReturn(new LiveTurnPlan.Planned(spec(), CONTEXT_WINDOW, List.of(), List.of()));
     when(providerResolution.resolve(eq(ProviderType.OPENAI), eq(GENERATION_ID), any()))
         .thenAnswer(
@@ -761,7 +762,7 @@ class ProviderRequestPreviewServiceTest {
     assertEquals(TURN_TWO_END_ID.toString(), dto.getSourceHeadEntryId());
 
     ArgumentCaptor<EntryPath> pathCaptor = ArgumentCaptor.forClass(EntryPath.class);
-    verify(turnResolver).planLive(any(), pathCaptor.capture(), eq(NOW));
+    verify(turnResolver).planLive(any(), eq(SESSION_ID), pathCaptor.capture());
     EntryPath candidate = pathCaptor.getValue();
     assertEquals(
         sessionTree.entries(), candidate.entries().subList(0, sessionTree.entries().size()));
@@ -800,7 +801,7 @@ class ProviderRequestPreviewServiceTest {
         new EntryPath(
             List.of(new Entry(ROOT_ID, SESSION_ID, null, new RootPayload(SETTINGS), NOW)));
     when(runtime.getSessionEntries(SESSION_ID)).thenReturn(emptySession.entries());
-    when(turnResolver.planLive(any(), any(), eq(NOW)))
+    when(turnResolver.planLive(any(), eq(SESSION_ID), any()))
         .thenReturn(new LiveTurnPlan.Planned(spec(), CONTEXT_WINDOW, List.of(), List.of()));
     when(providerResolution.resolve(eq(ProviderType.OPENAI), eq(GENERATION_ID), any()))
         .thenAnswer(
@@ -816,7 +817,7 @@ class ProviderRequestPreviewServiceTest {
 
     assertEquals(ROOT_ID.toString(), dto.getSourceHeadEntryId());
     ArgumentCaptor<EntryPath> pathCaptor = ArgumentCaptor.forClass(EntryPath.class);
-    verify(turnResolver).planLive(any(), pathCaptor.capture(), eq(NOW));
+    verify(turnResolver).planLive(any(), eq(SESSION_ID), pathCaptor.capture());
     EntryPath candidate = pathCaptor.getValue();
     assertEquals(ROOT_ID, candidate.root().id());
     assertEquals(ROOT_ID, candidate.entries().get(1).parentEntryId());
@@ -882,13 +883,10 @@ class ProviderRequestPreviewServiceTest {
     assertEquals(TURN_TWO_START_ID.toString(), finalDto.getSourceHeadEntryId());
     assertEquals(TURN_TWO_ASSISTANT_TIME, finalDto.getGeneratedAt());
 
-    ArgumentCaptor<EntryPath> toolCallPath = ArgumentCaptor.forClass(EntryPath.class);
-    verify(turnResolver).planHistorical(any(), toolCallPath.capture(), eq(TOOL_CALL_TIME));
-    assertEquals(
-        List.of(ROOT_ID, TURN_ONE_START_ID, TURN_ONE_USER_ID), ids(toolCallPath.getValue()));
-
-    ArgumentCaptor<EntryPath> finalPath = ArgumentCaptor.forClass(EntryPath.class);
-    verify(turnResolver).planHistorical(any(), finalPath.capture(), eq(TURN_TWO_ASSISTANT_TIME));
+    ArgumentCaptor<EntryPath> pathCaptor = ArgumentCaptor.forClass(EntryPath.class);
+    verify(turnResolver, times(2)).planHistorical(any(), eq(SESSION_ID), pathCaptor.capture());
+    List<EntryPath> paths = pathCaptor.getAllValues();
+    assertEquals(List.of(ROOT_ID, TURN_ONE_START_ID, TURN_ONE_USER_ID), ids(paths.get(0)));
     assertEquals(
         List.of(
             ROOT_ID,
@@ -898,10 +896,10 @@ class ProviderRequestPreviewServiceTest {
             TOOL_RESULT_ID,
             TURN_ONE_END_ID,
             TURN_TWO_START_ID),
-        ids(finalPath.getValue()));
+        ids(paths.get(1)));
     // 反向断言：被预览的输出及其后的历史（含未来回合）绝不进入它自己的请求前缀。
     assertFalse(
-        ids(finalPath.getValue()).contains(TURN_TWO_ASSISTANT_ID),
+        ids(paths.get(1)).contains(TURN_TWO_ASSISTANT_ID),
         "the previewed output must not enter its own request prefix");
 
     // 历史预览只读 Session 全树，也不需要任何 Thread。
@@ -922,7 +920,7 @@ class ProviderRequestPreviewServiceTest {
     when(runtime.getThreadSnapshot(CHILD_THREAD_ID))
         .thenReturn(snapshot(childThread(CHILD_LATER_END_ID), childPath, List.of()));
     when(runtime.getSessionEntries(CHILD_SESSION_ID)).thenReturn(childPath.entries());
-    when(turnResolver.planHistorical(eq(CHILD_THREAD_ID), any(), eq(CHILD_FINAL_ANSWER_TIME)))
+    when(turnResolver.planHistorical(eq(CHILD_THREAD_ID), eq(SESSION_ID), any()))
         .thenReturn(
             new LiveTurnPlan.Planned(
                 spec(
@@ -950,8 +948,7 @@ class ProviderRequestPreviewServiceTest {
     assertEquals(new String(BODY, StandardCharsets.UTF_8), dto.getBodyJson());
 
     ArgumentCaptor<EntryPath> pathCaptor = ArgumentCaptor.forClass(EntryPath.class);
-    verify(turnResolver)
-        .planHistorical(eq(CHILD_THREAD_ID), pathCaptor.capture(), eq(CHILD_FINAL_ANSWER_TIME));
+    verify(turnResolver).planHistorical(eq(CHILD_THREAD_ID), eq(SESSION_ID), pathCaptor.capture());
     assertEquals(
         List.of(
             CHILD_ROOT_ID,
@@ -1088,7 +1085,7 @@ class ProviderRequestPreviewServiceTest {
             snapshot(
                 childThread(CHILD_LATER_END_ID, constraints), compactionChildPath(), List.of()));
     when(runtime.getSessionEntries(CHILD_SESSION_ID)).thenReturn(entries);
-    when(turnResolver.planHistorical(eq(CHILD_THREAD_ID), any(), eq(CHILD_FINAL_ANSWER_TIME)))
+    when(turnResolver.planHistorical(eq(CHILD_THREAD_ID), eq(SESSION_ID), any()))
         .thenReturn(
             new LiveTurnPlan.Planned(
                 spec(

@@ -1,4 +1,4 @@
   <subagent>
     <name>{{name}}</name>
-    <description>{{description}}</description>
+    <description>{{#hasDescription}}{{description}}{{/hasDescription}}{{^hasDescription}}(no description){{/hasDescription}}</description>
   </subagent>

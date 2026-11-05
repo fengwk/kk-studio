@@ -393,6 +393,12 @@ Goal 正文由用户经 typed `GOAL` 命令写入 branch settings，Agent 只能
 
 [`PromptRenderer`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/prompt/PromptRenderer.java) 从 classpath 读取 UTF-8 Markdown，以 JMustache 编译并缓存模板；变量或条件缺失时失败。双花括号默认执行 XML 转义，三花括号显式插入原文，插入的值不会再次执行。工具 JSON schema 作为资源原样读取，不作为模板执行。Harness 的模板按 system、tools、messages、compaction 分目录；Platform 和 Project 的消息资源由各模块持有。Agent 用户正文不作为模板执行。
 
+System prompt 固定按 `[agent]` → `[harness]` → `[paths]` → `[environment]` → `[skills]` → `[subagents]` 排列，段间空一行。文案只存在于 Markdown 模板中，Platform 的 composer 只准备视图数据：`[agent]` 在 Agent 正文非空时出现；`[harness]` 始终出现；`[paths]`、`[environment]` 与其中的记忆、绝对路径、VFS 路径、可写和宿主字段说明按本轮实际注入的工具生成，无环境时不出现 bash/LSP 说明；`[skills]` 与 `[subagents]` 分别只在有可注入技能或已配置子 Agent 时出现。Prompt 不含日期或上层产品上下文，Issue 等任务内容只进入任务消息。
+
+`session_dir` 固定使用执行根所在会话，`thread_dir` 在同一会话下使用当前 Thread；子 Agent 不会因为自身运行在独立会话而得到不同的 VFS 根。执行根会话由 Builtin Driver 在调用 `TurnResolver` 前从根 Thread 行解析并作为显式参数传入，preview 与 debug 规划复用同一入口。
+
+当执行根未选择 Environment 时，`[skills]` 使用 `vfs:/skills/<package>/<skill>/SKILL.md`。当已选择 Environment 时，只有同步投影证明该 Package 的当前工件摘要已精确安装，技能才进入 prompt 并使用 Daemon 本地稳定路径；未安装、摘要不一致或安装失败时该技能不写入 system prompt，结构化交付事实仍保留给界面解释。
+
 ## 严格 JSON 契约
 
 持久状态与 wire 载荷由各自的 Jackson 3 codec 校验：拒绝重复键、尾随内容，以及未声明、缺失或类型错误的字段；自由 JSON 子树（厂商选项、Contributor state、CUSTOM payload、native replay、工具详情）允许自有字段，并以 `BigDecimal` 搬运，`1e309` 与高精度小数不会经 double 丢失数量级或有效位。以字符串保存的 `argumentsJson`、`detailsJson`、`rawUsageJson` 保留原文；厂商选项的 canonical 编码移除无意义的尾零，无法映射为 JSON 的输入明确拒绝。

@@ -1212,7 +1212,7 @@ export interface HarnessModelRequestDebugSkillDTO {
   headCommit: string | null
   artifactSha256: string
   installedSha256: string | null
-  promptXml: string
+  promptXml: string | null
 }
 
 /** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessModelRequestDebugDTO.SubagentDTO */

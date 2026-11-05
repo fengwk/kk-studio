@@ -201,14 +201,16 @@ export function ThreadDebugInspector({
             <KeyValueRow label={t('ai.runtime.debug.inspector.artifactSha256')}><Mono>{selection.skill.artifactSha256}</Mono></KeyValueRow>
             <KeyValueRow label={t('ai.runtime.debug.inspector.daemonInstalledSha256')}><Mono>{selection.skill.installedSha256 || '—'}</Mono></KeyValueRow>
           </KeyValue>
-          <div className="thread-debug-payload-section">
-            <span className="thread-debug-payload-title">
-              {t('ai.runtime.debug.inspector.promptXml')}
-            </span>
-            <Code className="thread-event-detail-payload" tabIndex={0}>
-              {selection.skill.promptXml}
-            </Code>
-          </div>
+          {selection.skill.promptXml !== null && (
+            <div className="thread-debug-payload-section">
+              <span className="thread-debug-payload-title">
+                {t('ai.runtime.debug.inspector.promptXml')}
+              </span>
+              <Code className="thread-event-detail-payload" tabIndex={0}>
+                {selection.skill.promptXml}
+              </Code>
+            </div>
+          )}
         </div>
       )}
 

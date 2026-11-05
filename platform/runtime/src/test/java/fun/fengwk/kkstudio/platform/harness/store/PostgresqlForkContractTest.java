@@ -64,7 +64,7 @@ class PostgresqlForkContractTest {
     runtime =
         new HarnessRuntime(
             store,
-            builtinRegistry(store, (threadId, path, preparation) -> null),
+            builtinRegistry(store, (threadId, rootSessionId, path, preparation) -> null),
             () -> CompactionConfig.DEFAULT);
   }
 

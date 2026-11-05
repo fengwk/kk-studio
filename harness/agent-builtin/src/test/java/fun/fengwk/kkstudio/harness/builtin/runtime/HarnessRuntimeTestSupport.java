@@ -108,7 +108,8 @@ import java.util.function.Function;
  */
 public final class HarnessRuntimeTestSupport {
 
-  static final TurnResolver UNUSED_RESOLVER = (threadId, candidatePath, preparation) -> null;
+  static final TurnResolver UNUSED_RESOLVER =
+      (threadId, rootSessionId, candidatePath, preparation) -> null;
   static final CompactionConfigProvider DEFAULT_COMPACTION_PROVIDER =
       () -> CompactionConfig.DEFAULT;
 

@@ -425,7 +425,8 @@ class ManualCompactionLifecycleRegressionTest {
 
   private static final class FakeTurnResolver implements TurnResolver {
     @Override
-    public Result resolve(UUID threadId, EntryPath path, CompactionPreparation preparation) {
+    public Result resolve(
+        UUID threadId, UUID rootSessionId, EntryPath path, CompactionPreparation preparation) {
       return new CompactionResolved(
           HarnessRuntimeTestSupport.executionSelection(),
           4096L,

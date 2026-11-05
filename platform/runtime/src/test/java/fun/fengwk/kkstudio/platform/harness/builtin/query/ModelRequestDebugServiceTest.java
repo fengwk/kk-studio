@@ -149,11 +149,47 @@ class ModelRequestDebugServiceTest {
     when(builtinRequestQuery.findCurrent(THREAD_ID)).thenReturn(Optional.empty());
   }
 
+  /** 未进入 system prompt 的结构化 Skill 事实必须保留，但调试片段 promptXml 为 null 且显式发射。 */
+  @Test
+  void omitsPromptXmlForSkillThatDidNotEnterSystemPrompt() throws Exception {
+    ThreadSnapshot snapshot = idleSnapshot();
+    when(runtime.getThreadSnapshot(THREAD_ID)).thenReturn(snapshot);
+    LiveTurnPlan.PlannedSkill hiddenSkill =
+        new LiveTurnPlan.PlannedSkill(
+            "test-package",
+            "dev",
+            "dev description",
+            "vfs:/skills/test-package/dev/SKILL.md",
+            SkillPromptResolution.Delivery.PLATFORM,
+            CURRENT_COMMIT,
+            "observed-head",
+            ARTIFACT_SHA256,
+            null);
+    when(turnResolver.planLiveWithSettings(
+            eq(THREAD_ID), eq(SESSION_ID), eq(snapshot.requireFullPath()), any()))
+        .thenReturn(successfulPlanWithSkills(List.of(hiddenSkill)));
+    stubCoderDefinition();
+
+    HarnessModelRequestDebugDTO debug =
+        service.getModelRequestDebug(THREAD_ID, DRAFT_MODEL, DRAFT_ENV);
+
+    HarnessModelRequestDebugDTO.SkillDTO skill = debug.getSkills().getFirst();
+    assertEquals("test-package", skill.getPackageName());
+    assertEquals("dev", skill.getName());
+    assertEquals("PLATFORM", skill.getDelivery());
+    assertEquals("vfs:/skills/test-package/dev/SKILL.md", skill.getPath());
+    assertEquals(ARTIFACT_SHA256, skill.getArtifactSha256());
+    assertNull(skill.getInstalledSha256());
+    assertNull(skill.getPromptXml());
+    assertTrue(JSON.writeValueAsString(skill).contains("\"promptXml\":null"));
+  }
+
   @Test
   void projectsTheSharedPlanIntoTheStructuredContract() {
     ThreadSnapshot snapshot = idleSnapshot();
     when(runtime.getThreadSnapshot(THREAD_ID)).thenReturn(snapshot);
-    when(turnResolver.planLiveWithSettings(eq(THREAD_ID), eq(snapshot.requireFullPath()), any()))
+    when(turnResolver.planLiveWithSettings(
+            eq(THREAD_ID), eq(SESSION_ID), eq(snapshot.requireFullPath()), any()))
         .thenReturn(successfulPlan());
     stubCoderDefinition();
 
@@ -223,7 +259,8 @@ class ModelRequestDebugServiceTest {
   void forwardsDraftSelectionToTheSharedPlannerWithoutMutatingThePath() {
     ThreadSnapshot snapshot = idleSnapshot();
     when(runtime.getThreadSnapshot(THREAD_ID)).thenReturn(snapshot);
-    when(turnResolver.planLiveWithSettings(eq(THREAD_ID), eq(snapshot.requireFullPath()), any()))
+    when(turnResolver.planLiveWithSettings(
+            eq(THREAD_ID), eq(SESSION_ID), eq(snapshot.requireFullPath()), any()))
         .thenReturn(successfulPlan());
     stubCoderDefinition();
 
@@ -235,7 +272,10 @@ class ModelRequestDebugServiceTest {
     ArgumentCaptor<BranchSettings> settingsCaptor = ArgumentCaptor.forClass(BranchSettings.class);
     verify(turnResolver)
         .planLiveWithSettings(
-            eq(THREAD_ID), eq(snapshot.requireFullPath()), settingsCaptor.capture());
+            eq(THREAD_ID),
+            eq(SESSION_ID),
+            eq(snapshot.requireFullPath()),
+            settingsCaptor.capture());
     // 只调用一次规划：不入队、不 CAS、不发布 Package、不触发 Daemon sync、不发请求。
     verifyNoMoreInteractions(turnResolver);
 
@@ -306,7 +346,7 @@ class ModelRequestDebugServiceTest {
     when(root.entryState()).thenReturn(EntryCurrentState.from(rootPath));
     when(runtime.getThreadSnapshot(childId)).thenReturn(snapshot);
     when(runtime.getThreadSnapshot(THREAD_ID)).thenReturn(root);
-    when(turnResolver.planLiveWithSettings(eq(childId), eq(path), any()))
+    when(turnResolver.planLiveWithSettings(eq(childId), eq(SESSION_ID), eq(path), any()))
         .thenReturn(successfulPlan());
     stubCoderDefinition();
 
@@ -317,6 +357,7 @@ class ModelRequestDebugServiceTest {
     verify(turnResolver)
         .planLiveWithSettings(
             childId,
+            SESSION_ID,
             path,
             branchSettings()
                 .withExecution(BuiltinExecution.of(DRAFT_MODEL))
@@ -335,7 +376,8 @@ class ModelRequestDebugServiceTest {
   void forwardsEnvironmentSelectionPerCall() {
     ThreadSnapshot snapshot = idleSnapshot();
     when(runtime.getThreadSnapshot(THREAD_ID)).thenReturn(snapshot);
-    when(turnResolver.planLiveWithSettings(eq(THREAD_ID), eq(snapshot.requireFullPath()), any()))
+    when(turnResolver.planLiveWithSettings(
+            eq(THREAD_ID), eq(SESSION_ID), eq(snapshot.requireFullPath()), any()))
         .thenReturn(successfulPlan());
     stubCoderDefinition();
 
@@ -346,7 +388,10 @@ class ModelRequestDebugServiceTest {
     ArgumentCaptor<BranchSettings> settingsCaptor = ArgumentCaptor.forClass(BranchSettings.class);
     verify(turnResolver, times(3))
         .planLiveWithSettings(
-            eq(THREAD_ID), eq(snapshot.requireFullPath()), settingsCaptor.capture());
+            eq(THREAD_ID),
+            eq(SESSION_ID),
+            eq(snapshot.requireFullPath()),
+            settingsCaptor.capture());
     List<BranchSettings> drafts = settingsCaptor.getAllValues();
     assertNull(drafts.get(0).environmentName());
     assertEquals(DRAFT_ENV, drafts.get(1).environmentName());
@@ -358,7 +403,8 @@ class ModelRequestDebugServiceTest {
   void projectsDeterministicRejectionAsStableCodeAndSafeEmptyProjection() throws IOException {
     ThreadSnapshot snapshot = idleSnapshot();
     when(runtime.getThreadSnapshot(THREAD_ID)).thenReturn(snapshot);
-    when(turnResolver.planLiveWithSettings(eq(THREAD_ID), eq(snapshot.requireFullPath()), any()))
+    when(turnResolver.planLiveWithSettings(
+            eq(THREAD_ID), eq(SESSION_ID), eq(snapshot.requireFullPath()), any()))
         .thenReturn(
             new LiveTurnPlan.Rejected(
                 DatabaseTurnResolver.REJECTION_CODE, "agent not found: ghost"));
@@ -394,7 +440,8 @@ class ModelRequestDebugServiceTest {
   void exposesBuiltinFrozenRequestSpecInsteadOfMaterializingToolContext() {
     ThreadSnapshot snapshot = toolContextSnapshot(USER_ENTRY_ID);
     when(runtime.getThreadSnapshot(THREAD_ID)).thenReturn(snapshot);
-    when(turnResolver.planLiveWithSettings(eq(THREAD_ID), eq(snapshot.requireFullPath()), any()))
+    when(turnResolver.planLiveWithSettings(
+            eq(THREAD_ID), eq(SESSION_ID), eq(snapshot.requireFullPath()), any()))
         .thenReturn(successfulPlan());
     when(builtinRequestQuery.findCurrent(THREAD_ID))
         .thenReturn(Optional.of(builtinRequestView(BUILTIN_GENERATION_ID, 2)));
@@ -422,7 +469,8 @@ class ModelRequestDebugServiceTest {
   void keepsFrozenInvocationStableAcrossDraftSelectionsAndWhenPreviewRejects() throws IOException {
     ThreadSnapshot snapshot = toolContextSnapshot(USER_ENTRY_ID);
     when(runtime.getThreadSnapshot(THREAD_ID)).thenReturn(snapshot);
-    when(turnResolver.planLiveWithSettings(eq(THREAD_ID), eq(snapshot.requireFullPath()), any()))
+    when(turnResolver.planLiveWithSettings(
+            eq(THREAD_ID), eq(SESSION_ID), eq(snapshot.requireFullPath()), any()))
         .thenReturn(successfulPlan());
     when(builtinRequestQuery.findCurrent(THREAD_ID))
         .thenReturn(Optional.of(builtinRequestView(BUILTIN_GENERATION_ID, 2)));
@@ -443,7 +491,8 @@ class ModelRequestDebugServiceTest {
     assertEquals(frozenRequestSpecJson(), firstFrozen);
 
     // 预览被拒绝：冻结事实仍然成立。
-    when(turnResolver.planLiveWithSettings(eq(THREAD_ID), eq(snapshot.requireFullPath()), any()))
+    when(turnResolver.planLiveWithSettings(
+            eq(THREAD_ID), eq(SESSION_ID), eq(snapshot.requireFullPath()), any()))
         .thenReturn(
             new LiveTurnPlan.Rejected(DatabaseTurnResolver.REJECTION_CODE, "agent not found"));
     HarnessModelRequestDebugDTO rejected =
@@ -454,7 +503,8 @@ class ModelRequestDebugServiceTest {
     // 没有 Builtin 当前 generation：冻结视图必须缺席。
     ThreadSnapshot idle = idleSnapshot();
     when(runtime.getThreadSnapshot(THREAD_ID)).thenReturn(idle);
-    when(turnResolver.planLiveWithSettings(eq(THREAD_ID), eq(idle.requireFullPath()), any()))
+    when(turnResolver.planLiveWithSettings(
+            eq(THREAD_ID), eq(SESSION_ID), eq(idle.requireFullPath()), any()))
         .thenReturn(
             new LiveTurnPlan.Rejected(DatabaseTurnResolver.REJECTION_CODE, "agent not found"));
     when(builtinRequestQuery.findCurrent(THREAD_ID)).thenReturn(Optional.empty());
@@ -467,7 +517,8 @@ class ModelRequestDebugServiceTest {
   void projectsSubagentConfigurationWithoutRecursionOrCredentials() {
     ThreadSnapshot snapshot = idleSnapshot();
     when(runtime.getThreadSnapshot(THREAD_ID)).thenReturn(snapshot);
-    when(turnResolver.planLiveWithSettings(eq(THREAD_ID), eq(snapshot.requireFullPath()), any()))
+    when(turnResolver.planLiveWithSettings(
+            eq(THREAD_ID), eq(SESSION_ID), eq(snapshot.requireFullPath()), any()))
         .thenReturn(successfulPlan());
     stubCoderDefinition();
 
@@ -494,7 +545,8 @@ class ModelRequestDebugServiceTest {
   void rejectsMissingOrInvalidSubagentDefinitionInsteadOfReturningEmptyConfiguration() {
     ThreadSnapshot snapshot = idleSnapshot();
     when(runtime.getThreadSnapshot(THREAD_ID)).thenReturn(snapshot);
-    when(turnResolver.planLiveWithSettings(eq(THREAD_ID), eq(snapshot.requireFullPath()), any()))
+    when(turnResolver.planLiveWithSettings(
+            eq(THREAD_ID), eq(SESSION_ID), eq(snapshot.requireFullPath()), any()))
         .thenReturn(successfulPlan());
 
     // 同名 definition 缺失。
@@ -524,7 +576,8 @@ class ModelRequestDebugServiceTest {
   void readsFrozenInvocationFromBuiltinQueryIndependentlyOfSnapshotGeneration() {
     ThreadSnapshot snapshot = toolContextSnapshot(USER_ENTRY_ID);
     when(runtime.getThreadSnapshot(THREAD_ID)).thenReturn(snapshot);
-    when(turnResolver.planLiveWithSettings(eq(THREAD_ID), eq(snapshot.requireFullPath()), any()))
+    when(turnResolver.planLiveWithSettings(
+            eq(THREAD_ID), eq(SESSION_ID), eq(snapshot.requireFullPath()), any()))
         .thenReturn(successfulPlan());
     UUID queriedGenerationId = new UUID(0L, 51L);
     when(builtinRequestQuery.findCurrent(THREAD_ID))
@@ -544,7 +597,8 @@ class ModelRequestDebugServiceTest {
   void propagatesInfrastructureFailuresInsteadOfProjectingPlanningFailure() {
     ThreadSnapshot snapshot = idleSnapshot();
     when(runtime.getThreadSnapshot(THREAD_ID)).thenReturn(snapshot);
-    when(turnResolver.planLiveWithSettings(eq(THREAD_ID), eq(snapshot.requireFullPath()), any()))
+    when(turnResolver.planLiveWithSettings(
+            eq(THREAD_ID), eq(SESSION_ID), eq(snapshot.requireFullPath()), any()))
         .thenThrow(new IllegalStateException("catalog is down"));
 
     assertThrows(
@@ -715,6 +769,13 @@ class ModelRequestDebugServiceTest {
                 "observed-head",
                 ARTIFACT_SHA256,
                 ARTIFACT_SHA256)));
+  }
+
+  private static LiveTurnPlan.Planned successfulPlanWithSkills(
+      List<LiveTurnPlan.PlannedSkill> skills) {
+    LiveTurnPlan.Planned base = successfulPlan();
+    return new LiveTurnPlan.Planned(
+        base.spec(), base.contextWindow(), base.candidateTools(), skills);
   }
 
   private static ModelRequestSpec requestSpec() {

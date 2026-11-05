@@ -259,7 +259,8 @@ vfs:/
   发布或删除、通知重建与手动重新同步都会触发，同一环境运行期间的新触发合并为结束后再跑一次。平台不轮询，也不在
   组装 Prompt 时等待安装。
 - Daemon 回报 `{packageName, installedSha256, localPath, error}`，平台把它写回该连接的 `skill_state` 投影。
-- Prompt 路径：执行根的环境已安装当前归档摘要时给出本地绝对路径，否则给出 `vfs:` 路径；没有环境时一律用 VFS。
+- Prompt 路径：执行根未选择 Environment 时使用 `vfs:` 路径；已选择 Environment 且 Daemon 安装摘要与当前
+  artifact 一致时给出本地绝对路径，否则该 Skill 不进入 system prompt。
 
 ## 产品纵向切片
 

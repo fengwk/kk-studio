@@ -334,6 +334,6 @@ public abstract class HarnessStoreDeletionContract {
 
   /** 经 Driver 生命周期清理 Builtin 私有行；契约测试不依赖 Runtime 的 SessionDeletion 闭包。 */
   private static DriverThreadDeletion threadDeletion(HarnessStore store) {
-    return builtinRegistry(store, (threadId, path, preparation) -> null);
+    return builtinRegistry(store, (threadId, rootSessionId, path, preparation) -> null);
   }
 }

@@ -158,7 +158,7 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
                                   ModelSelection.model("acceptance-stub", "default")),
                               null)),
                       Instant.parse("2026-08-02T00:00:00Z"))));
-      TurnResolver.Result resolution = turnResolver.resolve(THREAD_ID, path, null);
+      TurnResolver.Result resolution = turnResolver.resolve(THREAD_ID, SESSION_ID, path, null);
       TurnResolver.Rejected rejected = assertInstanceOf(TurnResolver.Rejected.class, resolution);
       assertEquals(DatabaseTurnResolver.REJECTION_CODE, rejected.error().code());
       assertEquals("agent not found: default-assistant", rejected.error().message());
@@ -179,7 +179,8 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
       rebound.setSystemPrompt(reboundSystemPrompt);
       AgentDefinitionDTO reboundAgent = agentDefinitionService.createAgent(rebound);
       try {
-        TurnResolver.Result reboundResolution = turnResolver.resolve(THREAD_ID, path, null);
+        TurnResolver.Result reboundResolution =
+            turnResolver.resolve(THREAD_ID, SESSION_ID, path, null);
         TurnResolver.Resolved resolved =
             assertInstanceOf(TurnResolver.Resolved.class, reboundResolution);
         // 系统指令是唯一字符串：同名重建后的当前行 systemPrompt 必须出现在其中，绝不再有 leading SYSTEM 消息。

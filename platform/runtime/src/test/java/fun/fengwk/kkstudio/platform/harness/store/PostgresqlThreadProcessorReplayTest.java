@@ -105,7 +105,7 @@ class PostgresqlThreadProcessorReplayTest {
     var runtime =
         new HarnessRuntime(
             store,
-            builtinRegistry(store, (id, path, preparation) -> null),
+            builtinRegistry(store, (id, rootSessionId, path, preparation) -> null),
             () -> new CompactionConfig(20_000));
     var result =
         runtime.stop(new StopCommand(baseline.threadId(), UUID.randomUUID(), before.version()));
@@ -282,7 +282,7 @@ class PostgresqlThreadProcessorReplayTest {
             tx -> tx.entries().find(assistantId).orElseThrow().providerReplayState()));
 
     TurnResolver resolver =
-        (threadId, path, preparation) ->
+        (threadId, rootSessionId, path, preparation) ->
             new TurnResolver.Rejected(
                 new AssistantError("TEST_REJECTED", "stop after continuation"));
     ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();

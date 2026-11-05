@@ -377,7 +377,7 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
 
   private ThreadProcessor newThreadProcessor() {
     TurnResolver resolver =
-        (threadId, path, preparation) ->
+        (threadId, rootSessionId, path, preparation) ->
             new TurnResolver.Resolved(succeededRequest(), 100_000, 16_384);
     return new ThreadProcessor(
         store,

@@ -1,3 +1,4 @@
+[subagents]
 {{{taskInstructions}}}
 
 <available_subagents>

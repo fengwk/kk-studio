@@ -28,8 +28,12 @@ import java.util.UUID;
  */
 public interface TurnResolver {
 
-  /** 解析一次 turn；临时基础设施失败必须抛出 {@link TurnResolveTransientException}，由调用方 reschedule。 */
-  Result resolve(UUID threadId, EntryPath path, CompactionPreparation compactionPreparation);
+  /** 解析一次 turn；{@code rootSessionId} 是该 Thread 不可变执行根所在会话。 */
+  Result resolve(
+      UUID threadId,
+      UUID rootSessionId,
+      EntryPath path,
+      CompactionPreparation compactionPreparation);
 
   /** 解析结果：冻结请求或确定性拒绝。 */
   sealed interface Result

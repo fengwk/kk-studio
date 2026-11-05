@@ -586,6 +586,33 @@ describe('ThreadModelRequestDebug & Inspector', () => {
       expect(screen.getByTitle('平台独立 · NONE')).toBeInTheDocument()
     })
 
+    it('does not render prompt xml section when the skill did not enter the system prompt', () => {
+      render(
+        <ThreadDebugInspector
+          selection={{
+            type: 'skill',
+            skill: {
+              packageName: 'platform-pkg',
+              name: 'hidden-skill',
+              description: 'not installed',
+              path: 'vfs:/skills/platform-pkg/hidden-skill/SKILL.md',
+              delivery: 'PLATFORM',
+              packageVersion: '222',
+              headCommit: '222',
+              artifactSha256: 'sha-222',
+              installedSha256: null,
+              promptXml: null,
+            },
+          }}
+          debug={sampleDebug()}
+          onClose={() => {}}
+        />,
+      )
+
+      expect(screen.getAllByText('hidden-skill').length).toBeGreaterThan(0)
+      expect(screen.queryByText('提示词 XML：')).not.toBeInTheDocument()
+    })
+
     it('handles PLATFORM skill delivery, routed environment support, and container fallback focus in inspector', () => {
       render(
         <ThreadDebugInspector

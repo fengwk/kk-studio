@@ -404,7 +404,8 @@ class ToolOutcomeQueryTest {
         store,
         new DriverRegistry(
             List.of(
-                HarnessRuntimeTestSupport.driver(store, (threadId, path, preparation) -> null))),
+                HarnessRuntimeTestSupport.driver(
+                    store, (threadId, rootSessionId, path, preparation) -> null))),
         () -> CompactionConfig.DEFAULT);
   }
 }

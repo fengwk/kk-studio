@@ -152,7 +152,8 @@ class HarnessRuntimeStopModelTest {
     // 真实 Builtin 活动状态加一个不提供 barrier 的 Driver，验证不能把缺失结果当作可复用结果。
     HarnessRuntimeTestSupport.ModelBaseline baseline =
         seedModel(store, ModelInvocationStatus.RUNNING);
-    AgentDriver delegate = new BuiltinAgentDriver(store, (threadId, path, preparation) -> null);
+    AgentDriver delegate =
+        new BuiltinAgentDriver(store, (threadId, rootSessionId, path, preparation) -> null);
     AgentDriver driver =
         (AgentDriver)
             Proxy.newProxyInstance(
@@ -284,7 +285,8 @@ class HarnessRuntimeStopModelTest {
     var baseline = HarnessRuntimeTestSupport.seedToolBaseline(store, 1);
     UUID tool = baseline.toolIds().getFirst();
     HarnessRuntimeTestSupport.seedToolWork(store, tool);
-    AgentDriver delegate = new BuiltinAgentDriver(store, (threadId, path, preparation) -> null);
+    AgentDriver delegate =
+        new BuiltinAgentDriver(store, (threadId, rootSessionId, path, preparation) -> null);
     AgentDriver failing =
         (AgentDriver)
             Proxy.newProxyInstance(

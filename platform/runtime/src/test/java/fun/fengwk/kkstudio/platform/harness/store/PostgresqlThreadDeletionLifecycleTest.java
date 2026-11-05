@@ -95,7 +95,9 @@ class PostgresqlThreadDeletionLifecycleTest {
 
     DriverRegistry registry =
         new DriverRegistry(
-            List.of(new BuiltinAgentDriver(builtin, (threadId, path, preparation) -> null)));
+            List.of(
+                new BuiltinAgentDriver(
+                    builtin, (threadId, rootSessionId, path, preparation) -> null)));
     AtomicBoolean driverDeleteCalled = new AtomicBoolean();
     DriverThreadDeletion deletion =
         new DriverThreadDeletion() {

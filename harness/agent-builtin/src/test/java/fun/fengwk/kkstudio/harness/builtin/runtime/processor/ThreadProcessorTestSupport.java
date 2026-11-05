@@ -1278,7 +1278,8 @@ public final class ThreadProcessorTestSupport {
     int calls;
 
     @Override
-    public Result resolve(UUID threadId, EntryPath path, CompactionPreparation preparation) {
+    public Result resolve(
+        UUID threadId, UUID rootSessionId, EntryPath path, CompactionPreparation preparation) {
       calls++;
       lastThreadId = threadId;
       lastPath = path;
