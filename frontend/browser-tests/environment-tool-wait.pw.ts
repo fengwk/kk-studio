@@ -98,11 +98,10 @@ for (const scenario of ['pane-root', 'pane-child']) {
     await expect(page.locator('.thread-status-footer')).not.toContainText('等待环境')
     if (scenario === 'pane-root') {
       const approval = page.locator('.interaction-feed-item')
-      await expect(approval.locator('.interaction-source-link')).toContainText(`查看 subagent ${CHILD} 的执行`)
-      await expect(approval.locator('.interaction-source-link')).toContainText('worker')
-      await expect(approval.locator('.interaction-source-link')).toHaveAttribute('href', `/threads/${CHILD}`)
-      await expect(approval.locator('.interaction-source-link'))
-        .toHaveAttribute('title', `查看 subagent ${CHILD} 的执行`)
+      // 归属来源按会话归属契约显示“类型 · 标题”；宿主未给标题时只显示类型，导航入口保留。
+      const source = approval.getByRole('button', { name: 'Chat', exact: true })
+      await expect(source).toBeVisible()
+      await expect(source).toHaveAttribute('title', '查看来源')
       await expect(approval.locator('.interaction-deny-btn')).toHaveClass(/btn-primary danger/)
       await expect(approval.locator('pre')).toHaveCount(1)
       await expect(approval.locator('pre')).toHaveText('{"command":"deploy --dry-run","workdir":"/srv/approval-workdir"}')
@@ -142,7 +141,11 @@ for (const scenario of ['pane-root', 'pane-child']) {
     await expect(card).toHaveAttribute('aria-busy', 'true')
     await expect(card.locator('.animate-spin, .thread-tool-tail > svg')).toHaveCount(0)
     await expect(card.locator('.thread-tool-summary')).not.toContainText('等待环境')
-    expect(writes).toEqual([])
     await page.screenshot({ path: `../reports/layout/environment-tool-${scenario}.png`, fullPage: true })
+    if (scenario === 'pane-root') {
+      await page.locator('.interaction-feed-item').getByRole('button', { name: 'Chat', exact: true }).click()
+      await expect(page).toHaveURL(`/chats/chat-wait?thread=${ROOT}`)
+    }
+    expect(writes).toEqual([])
   })
 }

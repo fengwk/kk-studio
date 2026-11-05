@@ -196,17 +196,21 @@ async function installChatApi(
       return
     }
     if (path === `/api/chats/${CHAT_ID}/sessions`) {
+      // 归属 Session 摘要按 keyset 分页返回（ChatSessionPageDTO），首屏无下一页。
       await route.fulfill({
         json: {
           status: 200,
-          data: [{
-            sessionId: SESSION_ID,
-            name: 'Session One',
-            createdAt: null,
-            lastActivityAt: null,
-            firstMessagePreview: null,
-            threadCount: 1,
-          }],
+          data: {
+            items: [{
+              sessionId: SESSION_ID,
+              name: 'Session One',
+              createdAt: null,
+              lastActivityAt: null,
+              firstMessagePreview: null,
+              threadCount: 1,
+            }],
+            nextCursor: null,
+          },
         },
       })
       return
