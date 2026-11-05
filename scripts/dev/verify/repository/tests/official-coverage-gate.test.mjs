@@ -15,7 +15,7 @@ const REPOSITORY_ROOT = repositoryRoot()
 const RUNTIME_MODULE = 'harness/runtime'
 const BUILTIN_MODULE = 'harness/agent-builtin'
 
-/** 35 个关键类按物理源码归属拆分：runtime 30 项，builtin 5 项。 */
+/** 38 个关键类按物理源码归属拆分：runtime 30 项，builtin 8 项。 */
 const RUNTIME_CRITICAL_CLASSES = [
   'fun.fengwk.kkstudio.harness.runtime.ManualCompactionControl',
   'fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot',
@@ -52,6 +52,9 @@ const RUNTIME_CRITICAL_CLASSES = [
 const BUILTIN_CRITICAL_CLASSES = [
   'fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation',
   'fun.fengwk.kkstudio.harness.builtin.processor.ModelExecution',
+  'fun.fengwk.kkstudio.harness.builtin.processor.ModelStreamPublisher',
+  'fun.fengwk.kkstudio.harness.builtin.processor.ModelCheckpointCommitter',
+  'fun.fengwk.kkstudio.harness.builtin.processor.ModelTerminalCommitter',
   'fun.fengwk.kkstudio.harness.builtin.compaction.AutomaticCompactionPlanner',
   'fun.fengwk.kkstudio.harness.builtin.request.ResolvedRequestValidator',
   'fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec',
@@ -249,11 +252,11 @@ function withFixture(options, assertions) {
   }
 }
 
-test('the 35 critical classes are split into runtime 30 and builtin 5 without overlap', () => {
+test('the 38 critical classes are split into runtime 30 and builtin 8 without overlap', () => {
   assert.equal(RUNTIME_CRITICAL_CLASSES.length, 30)
-  assert.equal(BUILTIN_CRITICAL_CLASSES.length, 5)
+  assert.equal(BUILTIN_CRITICAL_CLASSES.length, 8)
   const all = [...RUNTIME_CRITICAL_CLASSES, ...BUILTIN_CRITICAL_CLASSES]
-  assert.equal(new Set(all).size, 35)
+  assert.equal(new Set(all).size, 38)
   assert.equal(
     RUNTIME_CRITICAL_CLASSES.filter((name) => BUILTIN_CRITICAL_CLASSES.includes(name)).length,
     0,
