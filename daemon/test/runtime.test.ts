@@ -40,6 +40,9 @@ import {
   ResourceContentSchema,
   ResourceUploadTicketSchema,
   SettingsSchema,
+  SkillPackageSchema,
+  SkillPackageStateSchema,
+  SkillSyncSchema,
   TemporaryResourcePolicySchema,
   TextContentSchema,
   UpdatePhase,
@@ -48,8 +51,10 @@ import {
   UpdateResultSchema,
   type Content,
   type Envelope,
+  type SkillPackage,
 } from '../src/generated/control_pb.js'
-import { Runtime, type TemporaryResourceSweeper, type UpdatePort, type UpdateProgressReporter } from '../src/runtime.js'
+import { Runtime } from '../src/runtime.js'
+import type { TemporaryResourceSweeper, UpdatePort, UpdateProgressReporter } from '../src/runtime-ports.js'
 import { fileCapabilities } from '../src/coding/files.js'
 import { processCapabilities } from '../src/coding/process.js'
 import {
@@ -240,6 +245,11 @@ function sent(transport: FakeTransport): DecodedSentEnvelope[] {
       raw: env,
     }
   })
+}
+
+function lastErrorMessage(transport: FakeTransport): string | undefined {
+  const error = sent(transport).filter((envelope) => envelope.messageType === 'ERROR').at(-1)
+  return (error?.payload as { message?: string } | undefined)?.message
 }
 
 function invokePayload(capabilityId = 'fs.read', timeoutMillis = 0, args: Record<string, unknown> = {}): Record<string, unknown> {
@@ -545,6 +555,46 @@ describe('runtime handshake', () => {
     const setup = buildRuntime({ heartbeatIntervalMillis: 20 })
     await handshake(setup)
     await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'HEARTBEAT'))
+    setup.runtime.close()
+  })
+
+  /** 没有环境标识的 SETTINGS 无法定向回 ERROR，只能关闭本次握手并重连重新取设置。 */
+  it('retries the handshake when the initial SETTINGS declares no environment', async () => {
+    const setup = buildRuntime()
+    setup.runtime.start()
+    await waitFor(() => setup.transport.connection !== null)
+    setup.transport.receive(
+      create(EnvelopeSchema, {
+        messageType: MessageType.SETTINGS,
+        payload: { case: 'settings', value: create(SettingsSchema, { noProxyHosts: '' }) },
+      }),
+    )
+    await waitFor(() => setup.transport.connectCount >= 2)
+    expect(sent(setup.transport).some((envelope) => envelope.messageType === 'ERROR')).toBe(false)
+    setup.runtime.close()
+  })
+
+  it('fails the initial SETTINGS without noProxyHosts and retries the handshake', async () => {
+    const setup = buildRuntime()
+    setup.runtime.start()
+    await waitFor(() => setup.transport.connection !== null)
+    setup.transport.receive(
+      create(EnvelopeSchema, {
+        messageType: MessageType.SETTINGS,
+        environmentId: ENV,
+        payload: { case: 'settings', value: create(SettingsSchema, {}) },
+      }),
+    )
+    await waitFor(() => lastErrorMessage(setup.transport)?.includes('settings.noProxyHosts is required') === true)
+    await waitFor(() => setup.transport.connectCount >= 2)
+    setup.runtime.close()
+  })
+
+  it('rejects SETTINGS that change the bound environment', async () => {
+    const setup = buildRuntime()
+    await handshake(setup)
+    setup.transport.receive(serverMessage('SETTINGS', { environmentId: OTHER_ENV }))
+    await waitFor(() => lastErrorMessage(setup.transport)?.includes('SETTINGS environmentId does not match daemon') === true)
     setup.runtime.close()
   })
 
@@ -2134,6 +2184,66 @@ describe('runtime update handling', () => {
     await tick()
     setup.runtime.close()
   })
+
+  /** 更新器拉取进度失败只留下诊断，不改变已准入更新的状态快照。 */
+  it('keeps the update snapshot when the progress pull fails', async () => {
+    const setup = buildRuntime({
+      update: {
+        async handleUpdate() {
+          return { phase: 'PREPARED' }
+        },
+        getProgress() {
+          throw new Error('progress unavailable')
+        },
+      },
+    })
+    await handshake(setup)
+    setup.transport.receive(serverMessage('UPDATE', { environmentId: ENV, payload: command }))
+    await waitFor(
+      () =>
+        sent(setup.transport).some(
+          (envelope) => envelope.messageType === 'UPDATE_RESULT' && (envelope.payload as { phase: string }).phase === 'PREPARED',
+        ),
+    )
+    expect(setup.runtime.getRuntimeStatus().status.update?.targetVersion).toBe(UPDATE_TARGET_VERSION)
+    expect(setup.runtime.getShutdownFailures()).toEqual([])
+    setup.runtime.close()
+  })
+
+  it('rejects UPDATE while an IDE command is in flight', async () => {
+    let updateCalls = 0
+    const setup = buildRuntime({
+      ideCommandTimeoutMillis: 60_000,
+      ide: ideService({
+        async handle(_command, signal) {
+          await new Promise<void>((resolve) => signal.addEventListener('abort', () => resolve(), { once: true }))
+          return { ok: false, code: 'BUSY', message: 'aborted' }
+        },
+      }),
+      update: {
+        async handleUpdate() {
+          updateCalls++
+          return { phase: 'PREPARED' }
+        },
+      },
+    })
+    await handshake(setup)
+    setup.transport.receive(
+      serverMessage('IDE_COMMAND', { environmentId: ENV, invocationId: 'ide-busy', payload: { action: 'LIST_VIEWS' } }),
+    )
+    await tick()
+    setup.transport.receive(serverMessage('UPDATE', { environmentId: ENV, payload: command }))
+    await waitFor(
+      () =>
+        sent(setup.transport).some(
+          (envelope) =>
+            envelope.messageType === 'UPDATE_RESULT' &&
+            String((envelope.payload as { message?: string }).message ?? '').includes('IDE command is in progress'),
+        ),
+    )
+    expect(updateCalls).toBe(0)
+    setup.runtime.close()
+  })
 })
 
 describe('runtime extension handlers', () => {
@@ -2175,6 +2285,38 @@ describe('runtime extension handlers', () => {
     setup.runtime.close()
   })
 
+  it('reports an asynchronous IDE_LEASE handler failure as an extension error', async () => {
+    const setup = buildRuntime({
+      ideLease: {
+        hasActiveViews: () => true,
+        async apply() {
+          throw new Error('lease apply failed')
+        },
+        getViewState: () => null,
+      },
+    })
+    await handshake(setup)
+    const internals = setup.runtime as unknown as { session: { sendHeartbeat(): void } }
+    internals.session.sendHeartbeat()
+
+    setup.transport.receive(serverMessage('IDE_LEASE', { environmentId: ENV, payload: lease }))
+    await waitFor(
+      () => lastErrorMessage(setup.transport)?.includes('IDE_LEASE handler failed: lease apply failed') === true,
+    )
+    setup.runtime.close()
+  })
+
+  it('rejects IDE_LEASE before the session is READY', async () => {
+    const setup = buildRuntime()
+    setup.runtime.start()
+    await waitFor(() => setup.transport.connection !== null)
+    setup.transport.receive(serverMessage('IDE_LEASE', { environmentId: ENV, payload: lease }))
+    await waitFor(
+      () => lastErrorMessage(setup.transport)?.includes('IDE_LEASE requires a READY bound connection') === true,
+    )
+    setup.runtime.close()
+  })
+
   it('issues one-use, expiring IDE lease rounds only while views are active', async () => {
     let activeViews = false
     let now = 0
@@ -2192,8 +2334,8 @@ describe('runtime extension handlers', () => {
     await handshake(setup)
 
     const heartbeat = (): ReturnType<typeof decodeHeartbeat> => {
-      const internals = setup.runtime as unknown as { sendHeartbeat(): void }
-      internals.sendHeartbeat()
+      const internals = setup.runtime as unknown as { session: { sendHeartbeat(): void } }
+      internals.session.sendHeartbeat()
       const latest = sent(setup.transport)
         .filter((envelope) => envelope.messageType === 'HEARTBEAT')
         .at(-1)
@@ -2660,6 +2802,62 @@ describe('runtime protocol version and scope', () => {
     expect(setup.runtime.getJournal()).toBeDefined()
     setup.runtime.close()
     expect(setup.runtime.getState()).toBe('STOPPED')
+  })
+
+  it('rejects envelopes bound to another environment', async () => {
+    const setup = buildRuntime()
+    await handshake(setup)
+    setup.transport.receive(serverMessage('CANCEL', { environmentId: OTHER_ENV, invocationId: 'inv-scope' }))
+    await waitFor(() => lastErrorMessage(setup.transport)?.includes('does not match daemon') === true)
+    setup.runtime.close()
+  })
+
+  /** SKILL_STATE 是在线状态帧：只有 READY 且已绑定时才有明确的接收环境。 */
+  it('sends SKILL_STATE only while a READY bound connection exists', async () => {
+    const setup = buildRuntime()
+    const packages = [create(SkillPackageStateSchema, { packageName: 'demo' })]
+    expect(setup.runtime.sendSkillState(packages)).toBe(false)
+    await handshake(setup)
+    expect(setup.runtime.sendSkillState(packages)).toBe(true)
+    const state = setup.transport.sent.filter((envelope) => envelope.messageType === MessageType.SKILL_STATE).at(-1)
+    expect(state?.environmentId).toBe(ENV)
+    expect(state?.payload.case === 'skillState' ? state.payload.value.packages[0]?.packageName : undefined).toBe('demo')
+
+    setup.transport.disconnect()
+    await waitFor(() => setup.runtime.getState() === 'DISCONNECTED')
+    expect(setup.runtime.sendSkillState(packages)).toBe(false)
+    setup.runtime.close()
+  })
+
+  it('routes SKILL_SYNC to the reconciler only on a READY bound connection', async () => {
+    const setup = buildRuntime()
+    const desired: SkillPackage[][] = []
+    setup.runtime.setSkillReconciler({
+      onDesiredSet(packages) {
+        desired.push(packages)
+      },
+    })
+    const syncEnvelope = (packages: SkillPackage[]): Envelope =>
+      create(EnvelopeSchema, {
+        messageType: MessageType.SKILL_SYNC,
+        environmentId: ENV,
+        payload: { case: 'skillSync', value: create(SkillSyncSchema, { packages }) },
+      })
+
+    setup.runtime.start()
+    await waitFor(() => setup.transport.connection !== null)
+    setup.transport.receive(syncEnvelope([]))
+    await waitFor(
+      () => lastErrorMessage(setup.transport)?.includes('SKILL_SYNC requires a READY bound connection') === true,
+    )
+
+    setup.transport.receive(serverMessage('SETTINGS', {}))
+    await waitFor(() => setup.runtime.getState() === 'READY')
+    const pkg = create(SkillPackageSchema, { packageName: 'demo', sha256: 'a'.repeat(64) })
+    setup.transport.receive(syncEnvelope([pkg]))
+    await waitFor(() => desired.length === 1)
+    expect(desired[0]).toEqual([pkg])
+    setup.runtime.close()
   })
 })
 

@@ -4,24 +4,15 @@ import type { ControlConnection, ControlTransport, ControlTransportListener } fr
 
 export type RuntimeState = 'STOPPED' | 'DISCONNECTED' | 'CONNECTING' | 'READY' | 'FAILED'
 
-/** 一条已建立的控制连接及其连接代际；settings 只接受一次。 */
+/** 一条已建立的控制连接及其连接代际；握手就绪只由生命周期推进。 */
 export class ActiveConnection {
   ready = false
   readonly abort = new AbortController()
-  private settingsReceived = false
 
   constructor(
     readonly generation: number,
     readonly connection: ControlConnection,
   ) {}
-
-  markSettingsReceived(): boolean {
-    if (this.settingsReceived) {
-      return false
-    }
-    this.settingsReceived = true
-    return true
-  }
 }
 
 export interface ConnectionLifecycleCallbacks {

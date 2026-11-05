@@ -36,16 +36,16 @@ POSIX 目录权限为 0700、敏感文件为 0600。`tmp/workspaces` 是 Daemon 
 - 语言服务：`lsp.goto-definition`、`lsp.workspace-symbols`、`lsp.java-decompile`；
 - 受管服务：技能状态对账（`SKILL_SYNC` / `SKILL_STATE` 控制信封）以及受管 IDE 服务（code-server：`IDE_COMMAND` / `IDE_RESULT` 承载视图生命周期，`IDE_LEASE` 承载使用证明）。
 
-运行时 [`Runtime`](../../daemon/src/runtime.ts) 负责控制连接、会话与消息调度，底层使用统一传输层 [`DaemonTransport`](../../daemon/src/transport/daemon-transport.ts)。连接代际与重连在 [`runtime-connection.ts`](../../daemon/src/runtime-connection.ts)，IDE 命令准入、在途去重、deadline 与使用证明映射在 [`runtime-ide.ts`](../../daemon/src/runtime-ide.ts)，能力结果编码在 [`runtime-encoding.ts`](../../daemon/src/runtime-encoding.ts)；`runtime.ts` 只编排这些组件与会话事实：
+运行时 [`Runtime`](../../daemon/src/runtime.ts) 只做装配与调用编排，底层使用统一传输层 [`DaemonTransport`](../../daemon/src/transport/daemon-transport.ts)。连接代际与重连在 [`runtime-connection.ts`](../../daemon/src/runtime-connection.ts)，控制会话（环境绑定、SETTINGS/READY 握手、心跳与入站信封分发）在 [`runtime-session.ts`](../../daemon/src/runtime-session.ts)，环境绑定的出站信封构造在 [`runtime-outbound.ts`](../../daemon/src/runtime-outbound.ts)，journal 去重/回放、执行、超时与退出确认在 [`runtime-invocations.ts`](../../daemon/src/runtime-invocations.ts)，受管更新准入与回执在 [`runtime-update.ts`](../../daemon/src/runtime-update.ts)，运行状态快照在 [`runtime-status.ts`](../../daemon/src/runtime-status.ts)，IDE 命令准入、在途去重、deadline 与使用证明映射在 [`runtime-ide.ts`](../../daemon/src/runtime-ide.ts)，能力结果编码在 [`runtime-encoding.ts`](../../daemon/src/runtime-encoding.ts)，停机收敛与失败聚合在 [`runtime-shutdown.ts`](../../daemon/src/runtime-shutdown.ts)：
 - 统一传输管道：在单一 WSS 连接上运行标准 HTTP/2 协议。Stream 1 为双向控制流，传输基于 Protobuf 编码的 [`Envelope`](../../daemon/src/generated/control_pb.ts) 信封；IDE HTTP 与 WebSocket 隧道在同一连接上通过 HTTP/2 流多路复用。
 - 握手流程：连接建立后服务端首先在 Stream 1 发送 `SETTINGS` 帧下发环境标识、资源配额与网络设置，Daemon 确认后向服务端回送 `READY` 帧公布实例与能力状态，随后进入就绪状态。设置变更使用后续 `SETTINGS` 更新代理，不重复发送 READY；控制 WSS 始终直连。
 - 故障恢复与重连：连接断开时按重连策略重试（1 秒至 30 秒）；首条 `SETTINGS` 中的网络设置无效时断开握手并重试。重连后重新进行 `SETTINGS` / `READY` 协商，不改变进程内已有执行事实。无效的在线网络更新不会覆盖当前设置，可通过后续更新修正。
 - 运行状态：`READY` 携带必需的 `runtimeStatus`，`HEARTBEAT` 固定携带 `{runtimeStatus, ideLeaseRound}`，状态关键变更时触发发送 `RUNTIME_STATUS`（[`runtime-status.ts`](../../daemon/src/runtime-status.ts)）。`runtimeStatus` 是 `{revision, status}`，`status` 固定 `{daemonVersion, update}`；`update` 为 null 或 `{targetVersion, downloadedBytes, totalBytes}`。revision 仅在状态内容变化时推进递增，心跳重发同一内容沿用同一 revision。
 - IDE 使用证明：有活跃视图时心跳递增 `ideLeaseRound` 并与本轮发出时的本机单调时间记录；无活跃视图时该轮次为空。Daemon 只接受当前未过期轮次的 `IDE_LEASE` 批次；证明只为已有视图续期，不创建视图。
 - 任务调用与幂等恢复：`INVOKE` 经 Protobuf 解码后，以 [`Journal`](../../daemon/src/journal.ts) 的 `start(invocationId)` 原子去重。已有条目直接重放：RUNNING 状态重放 `STARTED(replayed=true)`，已完成条目重放冻结终态，副作用不再重复执行。重连后服务端发送 `RECOVER` 查询在途调用，未命中记录时回复 `RECOVER_NOT_FOUND`，命中时重放最新状态。
-- 超时与取消：Runtime 维护唯一的 invoke timer（`timeout === 0` 表示不设时限），超时或取消时通过同一 `context.signal` 请求停止，不提前抢占终态；由具体执行器在 cleanup 后交付真实结果。
-- 退出确认：能力在确知管理范围完全收敛时调用 `confirmExecutionExit()`，Runtime 随终态或独立发送 `EXECUTION_EXITED` 报文作为范围退出的正向事实证据。
-- 关停顺序：逆序释放连接与在途调用、能力资源、受控临时存储与目录锁。关停中发生的异常通过 `AggregateError` 聚合抛出，不吞掉清理错误。
+- 超时与取消：invocation 运行时维护唯一的 invoke timer（`timeout === 0` 表示不设时限），超时或取消时通过同一 `context.signal` 请求停止，不提前抢占终态；由具体执行器在 cleanup 后交付真实结果。
+- 退出确认：能力在确知管理范围完全收敛时调用 `confirmExecutionExit()`，invocation 运行时随终态或独立发送 `EXECUTION_EXITED` 报文作为范围退出的正向事实证据。
+- 关停顺序：`Runtime` 依次停止定时器，逆序释放连接与在途调用、能力资源、受控临时存储与目录锁；[`runtime-shutdown.ts`](../../daemon/src/runtime-shutdown.ts) 收敛全部在途执行，独立释放步骤的异常通过 `AggregateError` 聚合抛出，不吞掉清理错误。
 
 ## 本地存储与文本输出
 
