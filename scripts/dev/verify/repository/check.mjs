@@ -787,8 +787,16 @@ const harnessBuiltinPublicPrefixes = [
 const platformHarnessRoot =
   'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/'
 const platformHarnessBuiltinRoot = `${platformHarnessRoot}builtin/`
-const platformCatalogModelRoot =
-  'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog/model/'
+const harnessStoreRoots = [
+  'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/store/',
+  'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/builtin/store/',
+  'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/dispatch/',
+  'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/model/',
+]
+const harnessStoreFiles = new Set([
+  'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/package-info.java',
+  'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog/model/GroupCooldownRepository.java',
+])
 const webHarnessStoreCompositionFiles = new Set([
   'web/src/main/java/fun/fengwk/kkstudio/web/runtime/HarnessEnvironmentConfiguration.java',
   'web/src/main/java/fun/fengwk/kkstudio/web/runtime/HarnessProcessorConfiguration.java',
@@ -811,8 +819,8 @@ function mainJavaFiles() {
 
 function harnessStoreAllowed(relativePath) {
   return (
-    isWithin(relativePath, platformHarnessRoot) ||
-    isWithin(relativePath, platformCatalogModelRoot) ||
+    harnessStoreRoots.some((root) => isWithin(relativePath, root)) ||
+    harnessStoreFiles.has(relativePath) ||
     webHarnessStoreCompositionFiles.has(relativePath)
   )
 }
