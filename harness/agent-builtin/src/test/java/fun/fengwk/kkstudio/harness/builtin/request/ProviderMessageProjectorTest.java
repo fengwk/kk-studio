@@ -322,11 +322,12 @@ class ProviderMessageProjectorTest {
     List<ProviderMessage> projected =
         projector.projectSources(
             List.of(
-                ProviderMessageProjector.ProjectedMessage.of(
+                new ProviderMessageProjector.ProjectedMessage(
                     new AgentMessage(
                         AgentMessageRole.ASSISTANT,
                         List.of(toolCall("call-1", "bash", "bash", "{\"secret\":1}", null, null))),
-                    replayState)));
+                    replayState,
+                    "max")));
 
     // 全部调用降级后 assistant 不再输出，其语义完整进入 USER 上下文；replay 被放弃而非拒绝请求。
     assertEquals(
@@ -345,14 +346,15 @@ class ProviderMessageProjectorTest {
     List<ProviderMessage> projected =
         projector.projectSources(
             List.of(
-                ProviderMessageProjector.ProjectedMessage.of(
+                new ProviderMessageProjector.ProjectedMessage(
                     new AgentMessage(
                         AgentMessageRole.ASSISTANT,
                         List.of(
                             new TextMessageContent("answer"),
                             toolCall(
                                 "call-1", "bash", "bash", "{\"secret\":1}", "run bash", null))),
-                    replayState)));
+                    replayState,
+                    "max")));
 
     assertEquals(
         List.of(ProviderMessageRole.ASSISTANT, ProviderMessageRole.USER),
@@ -360,6 +362,7 @@ class ProviderMessageProjectorTest {
     assertEquals(List.of(new ProviderTextBlock("answer")), projected.get(0).contents());
     assertNull(projected.get(0).replayState());
     // 有冻结 action 的降级调用不再回显逐字 arguments，只以 action 行 + 结果表达。
+    assertEquals("max", projected.get(0).reasoningEffort());
     assertEquals(CONTEXT_HEADER + "\nrun bash:\nNo result provided", textOf(projected.get(1)));
   }
 

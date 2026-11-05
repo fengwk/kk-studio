@@ -81,6 +81,47 @@ class OpenAiChatRequestEncoderTest {
     defaultVariant = new ModelVariant("default");
   }
 
+  /** 内部历史 effort 不改变 OpenAI Chat 的任何 wire 字段。 */
+  @Test
+  void ignoresAssistantHistoryEffortOnWire() {
+    List<ProviderMessage> plain =
+        List.of(
+            new ProviderMessage(
+                ProviderMessageRole.ASSISTANT, List.of(new ProviderTextBlock("answer"))));
+    List<ProviderMessage> tagged =
+        List.of(
+            new ProviderMessage(
+                ProviderMessageRole.ASSISTANT,
+                List.of(new ProviderTextBlock("answer")),
+                null,
+                "max"));
+    ProviderRequest first =
+        new ProviderRequest(
+            modelDesc,
+            defaultVariant,
+            1024,
+            "system",
+            plain,
+            List.of(),
+            ProviderCacheControl.none());
+    ProviderRequest second =
+        new ProviderRequest(
+            modelDesc,
+            defaultVariant,
+            1024,
+            "system",
+            tagged,
+            List.of(),
+            ProviderCacheControl.none());
+    assertEquals(
+        MAPPER.readTree(
+            encoder.encode(first, descriptor, OpenAiChatConfiguration.defaults()).bodyUtf8Bytes()),
+        MAPPER.readTree(
+            encoder
+                .encode(second, descriptor, OpenAiChatConfiguration.defaults())
+                .bodyUtf8Bytes()));
+  }
+
   @Test
   @DisplayName("标准请求 Golden 结构：model, stream=true, stream_options.include_usage=true")
   void testGoldenRequestStructure() throws Exception {

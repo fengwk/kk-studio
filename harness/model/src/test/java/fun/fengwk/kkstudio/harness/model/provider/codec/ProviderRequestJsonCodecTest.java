@@ -70,6 +70,34 @@ class ProviderRequestJsonCodecTest {
 
   private final ProviderRequestJsonCodec codec = new ProviderRequestJsonCodec();
 
+  /** 消息字段严格必填、只允许 assistant 携带，往返不丢失。 */
+  @Test
+  void preservesAndValidatesMessageEffort() {
+    ProviderRequest base = canonicalRequest();
+    ProviderMessage assistant =
+        new ProviderMessage(
+            ProviderMessageRole.ASSISTANT, List.of(new ProviderTextBlock("answer")), null, "max");
+    ProviderRequest request =
+        new ProviderRequest(
+            base.model(),
+            base.variant(),
+            base.outputTokens(),
+            base.systemInstruction(),
+            List.of(assistant),
+            base.tools(),
+            base.cacheControl());
+    assertEquals(request, codec.decode(codec.encode(request)));
+    ObjectNode missing = (ObjectNode) codec.encodeNode(request);
+    ((ObjectNode) missing.path("messages").get(0)).remove("reasoningEffort");
+    assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(missing));
+    ObjectNode invalid = (ObjectNode) codec.encodeNode(request);
+    ((ObjectNode) invalid.path("messages").get(0)).put("reasoningEffort", 1);
+    assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(invalid));
+    ObjectNode wrongRole = (ObjectNode) codec.encodeNode(request);
+    ((ObjectNode) wrongRole.path("messages").get(0)).put("role", "USER");
+    assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(wrongRole));
+  }
+
   /** 规范 fixture 覆盖完整的 request graph，并对比 deterministic wire 输出，包含 enum-name 顺序与 raw JSON 字符串。 */
   @Test
   void roundTripsCompleteRequestAndMatchesCanonicalFixture() {

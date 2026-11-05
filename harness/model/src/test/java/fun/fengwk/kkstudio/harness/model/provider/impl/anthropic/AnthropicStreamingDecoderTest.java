@@ -651,7 +651,7 @@ class AnthropicStreamingDecoderTest {
    * <ul>
    *   <li>baseUrl 若包含 user-info、query 或 fragment，必须 fail-closed 拦截拒绝；合法 baseUrl 严格挂载 /messages
    *   <li>x-api-key、Authorization: Bearer、anthropic-version、content-type、accept 请求头齐全且正确
-   *   <li>不发送 MiniMax Anthropic-compatible endpoint 不接受的 anthropic-beta 请求头
+   *   <li>未指定 effort 且未配置 beta 时不发送 anthropic-beta 请求头
    *   <li>POST body 满足 stream=true、messages 结构合规且不超过 32MiB
    * </ul>
    */

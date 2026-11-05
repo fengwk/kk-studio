@@ -6,7 +6,7 @@ public enum AnthropicThinkingMode {
    * 自适应思考模式（Claude 原生行为）。
    *
    * <p>编码 {@code thinking:{type:"adaptive",display:"summarized"}} 与 {@code
-   * output_config:{effort:...}}，不发送 {@code anthropic-beta}。
+   * output_config:{effort:...}}，显式 effort 时自动发送消息级控制及其所需的 beta。
    */
   ADAPTIVE,
 

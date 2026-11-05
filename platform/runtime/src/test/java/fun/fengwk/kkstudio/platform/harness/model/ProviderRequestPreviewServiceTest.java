@@ -72,6 +72,8 @@ import fun.fengwk.kkstudio.harness.api.thread.ThreadLiveState;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
+import fun.fengwk.kkstudio.harness.builtin.port.store.ModelGroupExecution;
+import fun.fengwk.kkstudio.harness.builtin.port.store.ModelGroupMemberExecution;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
@@ -509,6 +511,66 @@ class ProviderRequestPreviewServiceTest {
                     target,
                     new NewThreadCommand(new SetEnvironmentCommandPayload("other"), id(203L)),
                     userMessage("hello"))));
+  }
+
+  /** 组预览按首个实际成员物化，但对外仍保留逻辑模型组名称。 */
+  @Test
+  void groupPreviewMaterializesTheFirstActualMember() {
+    EntryPath idle = closedTurnPath(BELOW_THRESHOLD_USAGE);
+    when(runtime.getThreadSnapshot(THREAD_ID))
+        .thenReturn(snapshot(thread(TURN_TWO_END_ID, 3L), idle, List.of()));
+    ModelRequestSpec base = spec();
+    ModelDescriptor actual = base.model();
+    ModelDescriptor logical =
+        new ModelDescriptor(
+            actual.providerName(),
+            "group",
+            actual.modelId(),
+            actual.inputModalities(),
+            actual.tools(),
+            actual.reasoning());
+    var member =
+        new ModelGroupMemberExecution(
+            base.providerType(),
+            GENERATION_ID,
+            actual,
+            base.variant(),
+            List.of(base.variant(), new ModelVariant("other", "max")));
+    var group = new ModelGroupExecution("group", 1L, List.of(member), Set.of(429), 0);
+    var groupSpec =
+        new ModelRequestSpec(
+            base.providerType(),
+            GENERATION_ID,
+            logical,
+            base.variant(),
+            member.modelVariants(),
+            base.outputTokens(),
+            base.systemInstruction(),
+            base.toolBindings(),
+            base.subagentBindings(),
+            base.cacheControl(),
+            group);
+    when(turnResolver.planLive(eq(THREAD_ID), eq(SESSION_ID), any()))
+        .thenReturn(new LiveTurnPlan.Planned(groupSpec, CONTEXT_WINDOW, List.of(), List.of()));
+    when(providerResolution.resolve(eq(ProviderType.OPENAI), eq(GENERATION_ID), any()))
+        .thenAnswer(
+            invocation ->
+                new ResolvedExecution(
+                    invocation.getArgument(2),
+                    new ModelCallTimeoutPolicy(Duration.ofSeconds(5), Duration.ofSeconds(1)),
+                    policy -> null,
+                    request -> BODY));
+    var dto =
+        service.preview(
+            THREAD_ID,
+            command(
+                new AcceptCommandsTarget.Thread(THREAD_ID, TURN_TWO_END_ID, 3L),
+                userMessage("hi")));
+    ArgumentCaptor<ProviderRequest> request = ArgumentCaptor.forClass(ProviderRequest.class);
+    verify(providerResolution)
+        .resolve(eq(ProviderType.OPENAI), eq(GENERATION_ID), request.capture());
+    assertEquals("model", request.getValue().model().modelName());
+    assertEquals("group", dto.getModelName());
   }
 
   /**
@@ -1073,6 +1135,76 @@ class ProviderRequestPreviewServiceTest {
     verify(providerResolution)
         .resolve(eq(ProviderType.OPENAI), eq(GENERATION_ID), requestCaptor.capture());
     assertEquals(COMPACTION_OUTPUT_BUDGET / 2, requestCaptor.getValue().outputTokens());
+  }
+
+  /** 测试意图：压缩历史预览在应用 child 约束时保留模型组与完整 variants，并按首个实际成员物化。 */
+  @Test
+  void compactionPreviewRetainsGroupAndVariantsUnderConstraints() {
+    ModelRequestSpec base =
+        spec(8_192, ProviderCacheControl.session(PromptCacheRetention.SHORT, "child-session"));
+    ModelDescriptor actual = base.model();
+    ModelDescriptor logical =
+        new ModelDescriptor(
+            actual.providerName(),
+            "group",
+            actual.modelId(),
+            actual.inputModalities(),
+            actual.tools(),
+            actual.reasoning());
+    var member =
+        new ModelGroupMemberExecution(
+            base.providerType(),
+            GENERATION_ID,
+            actual,
+            base.variant(),
+            List.of(base.variant(), new ModelVariant("other", "max")));
+    var group = new ModelGroupExecution("group", 1L, List.of(member), Set.of(429), 0);
+    var groupSpec =
+        new ModelRequestSpec(
+            base.providerType(),
+            GENERATION_ID,
+            logical,
+            base.variant(),
+            member.modelVariants(),
+            base.outputTokens(),
+            base.systemInstruction(),
+            base.toolBindings(),
+            base.subagentBindings(),
+            base.cacheControl(),
+            group);
+
+    when(runtime.getSessionEntries(SESSION_ID)).thenReturn(compactionOutputPath().entries());
+    when(runtime.findJoin(COMPACTION_JOIN_ID))
+        .thenReturn(Optional.of(compactionJoin(CHILD_THREAD_ID)));
+    when(runtime.getThreadSnapshot(CHILD_THREAD_ID))
+        .thenReturn(
+            snapshot(
+                childThread(
+                    CHILD_LATER_END_ID,
+                    new ThreadConstraints(COMPACTION_OUTPUT_BUDGET / 2, true, false)),
+                compactionChildPath(),
+                List.of()));
+    when(runtime.getSessionEntries(CHILD_SESSION_ID)).thenReturn(childEntries());
+    when(turnResolver.planHistorical(eq(CHILD_THREAD_ID), eq(SESSION_ID), any()))
+        .thenReturn(new LiveTurnPlan.Planned(groupSpec, CONTEXT_WINDOW, List.of(), List.of()));
+    when(providerResolution.resolve(eq(ProviderType.OPENAI), eq(GENERATION_ID), any()))
+        .thenAnswer(
+            invocation ->
+                new ResolvedExecution(
+                    invocation.getArgument(2),
+                    new ModelCallTimeoutPolicy(Duration.ofSeconds(5), Duration.ofSeconds(1)),
+                    policy -> null,
+                    request -> BODY));
+
+    var dto = service.previewHistorical(SESSION_ID, COMPACTION_ENTRY_ID);
+
+    ArgumentCaptor<ProviderRequest> requestCaptor = ArgumentCaptor.forClass(ProviderRequest.class);
+    verify(providerResolution)
+        .resolve(eq(ProviderType.OPENAI), eq(GENERATION_ID), requestCaptor.capture());
+    assertEquals(COMPACTION_OUTPUT_BUDGET / 2, requestCaptor.getValue().outputTokens());
+    assertEquals(ProviderCacheControl.none(), requestCaptor.getValue().cacheControl());
+    assertEquals("model", requestCaptor.getValue().model().modelName());
+    assertEquals("group", dto.getModelName());
   }
 
   private void stubPreviewableCompactionChild(

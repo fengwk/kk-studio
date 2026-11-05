@@ -152,9 +152,9 @@ class AnthropicBetaFeaturesTest {
     assertEquals(ProviderErrorKind.INVALID_REQUEST, programmatic.kind());
   }
 
-  /** 测试意图：未启用 BUDGET 思考（ADAPTIVE / 未启用推理）时，只发送配置能力，绝不附加 interleaved beta。 */
+  /** 测试意图：ADAPTIVE 自动追加消息控制能力，未启用推理则仅发送配置的能力。 */
   @Test
-  void sendsOnlyConfiguredBetaFeaturesWhenBudgetThinkingInactive() {
+  void resolvesAdaptiveAndInactiveBetaFeatures() {
     AnthropicConfiguration config =
         new AnthropicConfiguration(
             AnthropicThinkingMode.ADAPTIVE, List.of("prompt-caching-2024-07-31"));
@@ -167,7 +167,13 @@ class AnthropicBetaFeaturesTest {
     // 2. ADAPTIVE 模式即使启用推理也不附加 interleaved beta
     AnthropicEncodedRequest adaptive =
         encoder.encode(request(reasoningModel(), new ModelVariant("v", "high")), descriptor);
-    assertEquals(List.of("prompt-caching-2024-07-31"), adaptive.betaFeatures());
+    assertEquals(
+        List.of(
+            "prompt-caching-2024-07-31",
+            "mid-conversation-system-2026-04-07",
+            "per-turn-control-2026-07-01",
+            "effort-2025-11-24"),
+        adaptive.betaFeatures());
 
     // 3. BUDGET 模式但推理显式关闭（effort=off）同样不附加
     AnthropicRequestEncoder budgetEncoder =
