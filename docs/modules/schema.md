@@ -27,7 +27,7 @@ V1 的 `system_setting` seed 行是默认聚合的唯一事实源；测试用 `S
 | --- | --- | --- |
 | 1 共享基础 | storage_blob、storage_upload、storage_object_cleanup：全局内容寻址、上传契约与对象删除墓碑 | [Storage](platform.md#storageblob-与-resource) |
 | 2 平台内核存储 | environment、environment_connection、cluster_node、system_setting；harness_session/entry/thread/thread_command/realtime_subscription/tool_invocation/execution_exit/thread_join/thread_stop_receipt；durable_work；session_blob_ref、session_file | [Environment](harness-environment.md)、[Harness Runtime](harness-runtime.md)、[Durable Work](work.md)、[Storage](platform.md#storageblob-与-resource) |
-| 3 平台 Driver 存储 | agent_provider、agent_model（MODEL/GROUP 共用名称空间）、agent_model_group_cooldown、agent_definition、skill_package + Git source；plugin_configuration/credential/auth_attempt；mcp_server/tool；builtin_model_invocation | [Platform Catalog](platform.md#catalog)、[Plugin 配置存储](platform.md#plugin-配置存储)、[Platform MCP](platform.md#mcp-server-与运行时工具目录) |
+| 3 平台 Driver 存储 | agent_provider、agent_model（MODEL/GROUP 共用名称空间）、agent_model_group_cooldown、agent_definition、skill_package、skill_package_git_source；plugin_configuration、plugin_credential、plugin_auth_attempt；mcp_server、mcp_tool；builtin_model_invocation | [Platform Catalog](platform.md#catalog)、[Plugin 配置存储](platform.md#plugin-配置存储)、[Platform MCP](platform.md#mcp-server-与运行时工具目录) |
 | 4 产品 | Canvas：canvas_document/group/node/resource/function_run/function_resource_pin/command_dedup；Chat：chat、chat_session；Project：project、project_issue 与 agent_thread/stage_budget/run/activity/evidence | [Canvas](canvas.md)、[Project](project.md) |
 
 ```text
@@ -123,8 +123,7 @@ UTC 失效时间（对象只有 `codeHash` 与 `expiresAt` 两个键），null �
 CHECK 只兜底对象形状、摘要格式与时间格式。签发按版本 CAS 覆盖旧值且不推进版本；
 兑换要求注册凭证代际一致、摘要匹配且严格未过期，成功后原子清空该列并推进版本；
 任何注册凭证变更在同一条 UPDATE 中清空它。该列不参与配置导出，不保存 code 明文。
-Environment 的当前运行状态与更新进度不入库：只存在于 Daemon 内存与 Server 当前控制代际的缓存，
-没有更新历史表，也没有历史查询接口。
+Environment 的当前运行状态与更新进度不入库：只存在于 Daemon 内存与 Server 当前控制代际的缓存，不持久化更新历史与历史查询。
 
 ACTIVE Blob 必须有正引用，DELETING 必须零引用，ACTIVE 内容以 hash/size 部分唯一。
 PENDING upload 的 candidate id 在 complete 创建 Blob 后才绑定真实外键。

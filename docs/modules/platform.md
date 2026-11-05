@@ -51,7 +51,7 @@ Environment、Settings 与 Catalog 的实体仓库直接以 `JdbcClient` 承担 
 | [cluster](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/cluster) | 跨节点内部基础设施：`cluster_node` 注册与心跳租约、内部 HMAC 请求认证、内部端点共用的路径/请求取值/错误信封约定，以及实时订阅判定与 oversize payload 回拉 |
 | [pluginhost](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/pluginhost) | 插件宿主：PluginProperties、安全管理面、凭据存储/刷新与资源传输实现；纯 SPI 契约在 [Platform Plugin API](platform-plugin-api.md)，与宿主包名隔离 |
 | [settings](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/settings) | 全局设置、严格 codec、编辑 schema、版本快照与运行时现读的全局代理装配 |
-| [configsync](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/configsync) | 具体的 `ConfigSyncService` 编排八类配置的 YAML 读写、依赖闭包与原子导入 |
+| [configsync](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/configsync) | `ConfigSyncService` 编排八类配置的 YAML 读写、依赖闭包与导入 |
 | [events](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/events) | 各模块共享的进程内订阅原语：`SubscriptionFanOut` 的 UUID 定点/全局注册、幂等注销与消费者隔离投递，`SourceSubscribed` 的 ack 游标与释放句柄；不含领域事件语义、持久化或 LISTEN |
 | [http](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/http) | 各模块共享的 HTTP 边界约定：响应信封 `ApiResponse`、路径与分页参数的共同翻译 `RequestParameters`、领域错误到状态的唯一映射 `DomainErrorStatus` 与统一响应构造 `DomainErrorResponses`；只依赖 spring-web 的状态类型，不含 advice、MVC 装配或容器 |
 | [i18n](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/i18n) | 请求 locale 的用户可见消息解析 `StudioMessageService`；资源包随本模块发布，中英文缺键回退固定 |
@@ -272,10 +272,9 @@ durable 快照，到期后同 version 重新 GET 会自然变化，无额外持�
 定义，写侧在同一事务内投递。连接认领、READY（包括宿主信息与
 Skill 投影重建）、断线、释放及运维事件等事实变更仍在写事务内发布；围栏失败不发布，
 发布失败回滚对应状态写。心跳仅在既有 owner/token/有效期围栏下持久续租 `last_seen_at`
-和 `lease_until`，不再因续租发布通知。心跳中若携带实质变化的运行态，或独立运行态消息
+和 `lease_until`，纯续租不产生即时失效提示。心跳中若携带实质变化的运行态，或独立运行态消息
 改变该状态，会先更新会话快照，再在有效 READY 租约的行锁下发布通知；重复、过期或仅
 revision 不同但状态内容相同的快照不发布。发布失败或围栏失效使会话关闭，不静默忽略。
-这改变了依赖心跳通知刷新租约时间的消费者：续租本身不再产生即时失效提示。
 
 租约自然过期没有数据库写事件，因此交互页附带 `freshnessAt`：未来 READY 环境租约、
 可领取时间或 Work 执行租约可能改变等待投影的最早时刻。前端在此时刻加 250ms 宽限后
@@ -417,7 +416,7 @@ URL 与 headers 仅在显式配置查询中以 `no-store` 返回，变量占位�
 - Project：`project_issue_agent_thread` 维护 `(issueId, agentName) -> thread/session` 稳定绑定；接受与交互锁 `Project SHARE -> Issue UPDATE`，不允许分叉或通用命令直写，删除 Session 前先删绑定行。
 
 `findOwner(rootThreadId, rootSessionId)` 返回展示用 `{kind, id, title, link}`；交互查询只按真实执行根调用各实现，多个实现同时认领同一根时失败关闭。命令接受、Session 查询、深删除与交互待办/查询都只调用该 SPI，不按产品类型分支；未知或重复的 kind 在进入 Runtime 前拒绝。
-Agent 删除前由 [`AgentReferenceCheck`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog/definition/AgentReferenceCheck.java) SPI 询问各产品；Project 检查未归档项目的工作流阶段，平台不再用 SQL 读取 `project` 表。
+Agent 删除前由 [`AgentReferenceCheck`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog/definition/AgentReferenceCheck.java) SPI 询问各产品；Project 检查未归档项目的工作流阶段。
 
 Issue+Agent 的命令由 Issue 业务工作流拥有，SPI 声明通用命令直写为禁止，公共 batch 端点据此拒绝 `ISSUE_AGENT` owner。Run 接受时显式提交 `SET_AGENT` / `SET_EXECUTION` / `SET_ENVIRONMENT` 与末尾任务输入，不写 Project contributor state。`issue_transition` 根据调用 Thread 的稳定绑定定位活动 Run，在业务锁内校验阶段与身份，并验证当前路径上 assistant 所属的 Turn 起点严格晚于 Run 起点。问卷和审批复用 Runtime 的等待行，由 Interaction service 加入产品来源与人工操作者。
 
@@ -572,10 +571,10 @@ Skill 同步结果按 owner/lease fence 写回，运维窗口保存有界、去�
 
 ### Plugin 配置存储
 
-每个已安装 Plugin 在 `plugin_configuration` 中有一行当前普通配置（`revision` + `values_json`）。
+每个已安装 Plugin 在 `plugin_configuration` 中有一行当前普通配置（`version` + `values_json`）。
 普通值以受 64 KiB UTF-8 预算约束的严格 JSON 文本保存，数据库同时拒绝非对象与重复键；
 不经 jsonb 数值展开，精度、scale 与指数表示保持可恢复。秘密不进入普通配置。
-启动时为新安装的 Plugin 写入 Schema 默认值（revision 1），已有行保持不变；已卸载 Plugin 的残留行被忽略。
+启动时为新安装的 Plugin 写入 Schema 默认值（version 1），已有行保持不变；已卸载 Plugin 的残留行被忽略。
 
 [`PluginConfigurationService`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/pluginhost/service/PluginConfigurationService.java)
 是普通配置与凭据的唯一写入口。保存以 expectedRevision 做 CAS：先按 Schema 归一普通值，
@@ -680,22 +679,23 @@ Skill Package 私有仓库访问令牌与 Provider 凭据采用同一策略：�
 Environment 令牌摘要冲突、Skill 仓库身份变化和移除仍被引用的 Skill/MCP 工具整份拒绝。
 Environment 的 `installConfig` 在未知字段跳过判断之前就用同一 codec 深度校验，已知非法设置不会被
 条目级跳过；条目省略该键表示清空现有安装设置。
-Agent 使用 `execution: {driver, settings}` 往返，不接受旧的顶层 `model` / `variant`。
+Agent 使用 `execution: {driver, settings}` 往返，不接受顶层 `model` / `variant`。
 Builtin Agent 的依赖边与显式 Variant 按导入后将生效的 Model 配置检查，文件内同名 Model
 优先；未知 Variant 整份拒绝。其他 Driver 的 settings 不被解释为模型引用。
-Skill exact commit 获取、manifest 扫描和 MCP 发现先在写事务外完成。
+MCP 发现由计划阶段执行；Git Skill 在导入执行时解析分支当前 HEAD 并构建归档。
 
 执行重新生成计划，按名称新增或更新，不删除文件外配置；有跳过项而未显式 `allowPartial=true`
 时拒绝写入。Environment 的注册令牌摘要与安装设置在同一次 CAS 更新中生效，同名更新保持其 UUID 身份。
 预览不冻结状态，执行时同名配置以文件为准，不维护跨步骤检查状态。
-可恢复配置在一个事务中写入，复用现有校验、引用保护和 CAS；循环 Agent 用同事务两阶段写入。
+导入复用现有校验、引用保护和 CAS；循环 Agent 用同事务两阶段写入。
+Git Skill 的归档准备在外层事务之外执行，发布使用独立短事务；后续步骤失败时，已发布的 Skill 不随外层事务回滚。
 插件是第八类：条目只含 `pluginId` 与普通值文本，秘密与配置修订都不进入文件。
 导出只覆盖已安装插件，并按插件在代码里声明的所需 Agent 补齐插件→Agent 闭包，缺失 Agent 时拒绝导出，
 内置 Agent 只满足依赖、从不作为条目导出；导入时未安装的 id 按条目级跳过，已安装插件按本插件的
 configurationSchema 归一化普通值，非法值整份拒绝。普通值可随文件往返，秘密与受保护身份不进入文件，
 导入后仍需在 Plugin Secret API 或登录流程录入。
 插件写入复用唯一写入口：计划期的各插件修订作为导入事务内的 CAS 坐标，
-秘密补丁恒为 KEEP，因此导入既不创建也不恢复任何凭据；任一条目（含插件与其它类别）失败都整份回滚。
+秘密补丁恒为 KEEP，因此导入既不创建也不恢复任何凭据；插件写入参与外层导入事务。
 系统设置按当前完整六节契约直接校验，不合并局部字段；文件里的未知设置字段
 被移除并作为跳过项列出，不做别名或双读，其余六节按 `allowPartial` 语义导入；以执行准备时版本 CAS，
 提交后沿现有通知刷新快照。
@@ -727,8 +727,8 @@ null 表示强制直连；`noProxyHosts` 为逗号分隔绕过规则，默认 `l
 | `kk-studio.harness.dispatcher` | claim/handoff 容量、lease、poll 与拒绝 |
 | `kk-studio.harness.execution-admission` | model/tool/skill-sync 本机并发 |
 | `kk-studio.harness.runtime` | worker 开关 |
-| `kk-studio.catalog.skill` | Git Skill cache 根（`cache-root`） |
-| `kk-studio.storage` | S3 端点/凭据/bucket、maintenance 与对象清理 |
+| `kk-studio.storage.s3` | S3 端点/凭据/bucket 与公网 endpoint 映射 |
+| `kk-studio.storage.maintenance` | 后台轮询与过期上传对象清理 lease |
 | `kk-studio.storage.media` | ffprobe/ffmpeg 可执行文件与临时目录 |
 | `kk-studio.plugins` | 认证尝试有效期、refresh 与远端媒体预算 |
 | `kk-studio.cluster` | 节点注册与节点间内部认证 |

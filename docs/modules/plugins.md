@@ -23,7 +23,7 @@
 | 插件 ID | 插件名称 | 认证模式 | Harness Contributor | Canvas Function Adapter | 领域职责 |
 | --- | --- | --- | --- | --- | --- |
 | `comfyui` | ComfyUI | StaticKey | 无 | 有 | 驱动 ComfyUI 工作流，提供基于 MiniMax H3 的视频生成节点 |
-| `media` | Media | None | 无 | 有 | 提供纯媒体处理与格式转换的 Canvas Function |
+| `media` | Media | None | 无 | 有 | 提供本地图像裁剪（image.crop）Canvas Function，固定输出 PNG |
 | `minimax-mavis` | MiniMax Mavis | DeepLink | 有（15 个模型工具） | 无 | MiniMax Mavis 网关工具集（搜索、多模态理解、语音与媒体生成） |
 | `opencli` | OpenCLI | StaticKey | 无 | 有（2 个图形适配器） | 桥接 OpenCLI Hub，提供 ChatGPT 图像生成与即梦视频生成节点 |
 
@@ -36,9 +36,11 @@
 - **类与包**：[`fun.fengwk.kkstudio.plugin.comfyui`](../../plugins/comfyui/src/main/java/fun/fengwk/kkstudio/plugin/comfyui/)，安装定义为 [`ComfyuiPlugin`](../../plugins/comfyui/src/main/java/fun/fengwk/kkstudio/plugin/comfyui/ComfyuiPlugin.java)，自动配置为 [`ComfyuiAutoConfiguration`](../../plugins/comfyui/src/main/java/fun/fengwk/kkstudio/plugin/comfyui/ComfyuiAutoConfiguration.java)。
 - **认证契约**：静态密钥认证（`apiKey`），当配置中的 `baseUrl` 或 `authMode`（`NONE` / `BEARER`）发生变化时，旧凭据失效以推进认证代际。
 - **配置项**：
-  - `baseUrl`：ComfyUI 服务的 HTTP(S) 地址；
-  - `authMode`：认证头模式（`NONE` 或 `BEARER`）；
-  - `connectTimeoutMillis`、`readTimeoutMillis`、`pollIntervalMillis`、`maxWaitMillis`：连接、读取与轮询超时控制；
+  - `enabled`：是否启用 ComfyUI 插件（布尔值，默认 `false`）；
+  - `baseUrl`：ComfyUI 服务的 HTTP(S) 地址（默认 `http://127.0.0.1:8188`）；
+  - `authMode`：认证头模式（`NONE` 或 `BEARER`，默认 `NONE`）；
+  - `connectTimeoutMillis`、`requestTimeoutMillis`、`pollIntervalMillis`、`maxWaitMillis`：连接、请求与轮询超时控制；
+  - `promptAgentName`、`promptMaxWaitMillis`：H3 策略依赖的 Prompt Agent 名称与等待超时；
   - `workflows`：受控 ComfyUI 工作流定义列表，默认包含内置的 MiniMax H3 视频生成工作流。
 - **内置 H3 视频生成**：
   - 内置工作流模板：[`minimax-h3-ref2va-workflow.json`](../../plugins/comfyui/src/main/resources/fun/fengwk/kkstudio/plugin/comfyui/minimax-h3-ref2va-workflow.json)，基于 MiniMax H3 架构实现参考图加音频生成视频；
@@ -54,7 +56,7 @@
 - **类与包**：[`fun.fengwk.kkstudio.plugin.media`](../../plugins/media/src/main/java/fun/fengwk/kkstudio/plugin/media/)，安装定义为 [`MediaPlugin`](../../plugins/media/src/main/java/fun/fengwk/kkstudio/plugin/media/MediaPlugin.java)，自动配置为 [`MediaAutoConfiguration`](../../plugins/media/src/main/java/fun/fengwk/kkstudio/plugin/media/MediaAutoConfiguration.java)。
 - **认证契约**：`PluginAuthSpec.None`，无需认证，不持有凭据，配置与执行均不联网。
 - **配置项**：`enabled`（布尔值，默认 `true`）。停用时实例贡献的 Canvas 函数目录为空。
-- **Canvas 适配器**：[`MediaFunctionAdapter`](../../plugins/media/src/main/java/fun/fengwk/kkstudio/plugin/media/MediaFunctionAdapter.java)，在 Canvas 域注册基础媒体工具，负责纯媒体处理与格式转换。
+- **Canvas 适配器**：[`MediaFunctionAdapter`](../../plugins/media/src/main/java/fun/fengwk/kkstudio/plugin/media/MediaFunctionAdapter.java)，在 Canvas 域仅注册单个 `image.crop` 函数，执行本地无模型依赖的矩形裁剪并输出 PNG 格式图像。
 
 ---
 
@@ -63,31 +65,31 @@
 [`plugins/minimax-mavis`](../../plugins/minimax-mavis/pom.xml) 接入 MiniMax Mavis 私有网关，为 Harness Agent 提供全套多模态感知与生成工具。
 
 - **类与包**：[`fun.fengwk.kkstudio.plugin.minimaxmavis`](../../plugins/minimax-mavis/src/main/java/fun/fengwk/kkstudio/plugin/minimaxmavis/)，安装定义为 [`MiniMaxMavisPlugin`](../../plugins/minimax-mavis/src/main/java/fun/fengwk/kkstudio/plugin/minimaxmavis/MiniMaxMavisPlugin.java)，自动配置为 [`MiniMaxMavisAutoConfiguration`](../../plugins/minimax-mavis/src/main/java/fun/fengwk/kkstudio/plugin/minimaxmavis/MiniMaxMavisAutoConfiguration.java)。
-- **认证契约**：`DeepLink` 认证，固定候选区域为 `cn`（中国大陆）与 `global`（国际区）。
+- **认证契约**：`DeepLink` 认证，固定候选区域为 `CN`（中国大陆）与 `EN`（国际区）。
   - Prepare 阶段返回官方登录链接与单次 `authAttemptId`；
   - Complete 阶段接收回调换取 JWT 凭据并持久化；
   - 自动续期：实现 [`PluginCredentialRefresher`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/PluginCredentialRefresher.java)，由 [`MiniMaxMavisCredentialRefresher`](../../plugins/minimax-mavis/src/main/java/fun/fengwk/kkstudio/plugin/minimaxmavis/MiniMaxMavisCredentialRefresher.java) 在凭据即将过期且租约有效时自动向网关续期。
-- **配置项**：`enabled`（布尔值，默认 `false`）、`connectTimeoutMillis`、`readTimeoutMillis` 等传输控制项。
+- **配置项**：`enabled`（布尔值，默认 `true`）；受控配置 Schema 仅有此开关，传输超时与 endpoint 由内部常量固定。
 - **Harness Contributor 工具集**：
-  由 [`MiniMaxMavisHarnessContributor`](../../plugins/minimax-mavis/src/main/java/fun/fengwk/kkstudio/plugin/minimaxmavis/MiniMaxMavisHarnessContributor.java) 注册 15 项模型工具：
+  由 [`MiniMaxMavisHarnessContributor`](../../plugins/minimax-mavis/src/main/java/fun/fengwk/kkstudio/plugin/minimaxmavis/MiniMaxMavisHarnessContributor.java) 注册 15 项模型工具（本地贡献标识为 kebab-case，面向模型的工具名均统一冠以 `mavis_` 前缀并使用下划线）：
   - **搜索与提取**：
-    - `web-search`：公共互联网网页搜索；
-    - `extract-web`：网页全文正文与结构化提取；
-    - `image-search`：图片关键词搜索；
-    - `reverse-image`：以图搜图（图片反向搜索）。
+    - `mavis_web_search`（能力 `web-search`）：公共互联网网页搜索；
+    - `mavis_extract_web`（能力 `extract-web`）：网页全文正文与结构化提取；
+    - `mavis_image_search`（能力 `image-search`）：图片关键词搜索；
+    - `mavis_reverse_image`（能力 `reverse-image`）：以图搜图（图片反向搜索）。
   - **多模态理解**：
-    - `understand-image`：图片问答与视觉理解；
-    - `understand-audio`：音频文件内容理解与分析；
-    - `understand-video`：视频内容多模态分析。
+    - `mavis_understand_image`（能力 `understand-image`）：图片问答与视觉理解；
+    - `mavis_understand_audio`（能力 `understand-audio`）：音频文件内容理解与分析；
+    - `mavis_understand_video`（能力 `understand-video`）：视频内容多模态分析。
   - **语音与音色**：
-    - `asr`：自动语音识别；
-    - `tts`：单句文本转语音；
-    - `tts-batch`：长文本/多段批量语音合成；
-    - `list-voices`：枚举网关支持的音色列表。
+    - `mavis_asr`（能力 `asr`）：自动语音识别；
+    - `mavis_tts`（能力 `tts`）：单句文本转语音；
+    - `mavis_tts_batch`（能力 `tts-batch`）：长文本/多段批量语音合成；
+    - `mavis_list_voices`（能力 `list-voices`）：枚举网关支持的音色列表。
   - **生成类**：
-    - `generate-image`：文本生成图片；
-    - `generate-music`：音乐生成；
-    - `submit-video` 与 `query-video`：异步视频生成任务提交与轮询查询。
+    - `mavis_generate_image`（能力 `generate-image`）：文本生成图片；
+    - `mavis_generate_music`（能力 `generate-music`）：音乐生成；
+    - `mavis_submit_video` 与 `mavis_query_video`（能力 `submit-video` 与 `query-video`）：异步视频生成任务提交与轮询查询。
 
 ---
 
@@ -100,7 +102,8 @@
 - **配置项**：
   - 核心连接与超时：`enabled`（默认 `false`）、`baseUrl`、`connectTimeoutMillis`、`requestTimeoutMillis`、`longPollTimeoutMillis`；响应及输出大小限制由客户端固定控制；
   - `gptImage2` 子配置：`paidEnabled`、`askTimeoutSeconds`、`hubExecutionTimeoutMillis`、`maxWaitMillis`；
-  - `seedance` 子配置：`enabled`、`retry`、`hubExecutionTimeoutMillis`、`statusPollIntervalMillis`、`maxWaitMillis`。
+  - `seedance` 子配置：`enabled`、可选 `workspaceId`、`retry`、`hubExecutionTimeoutMillis`、`statusPollIntervalMillis`、`maxWaitMillis`。
+- **连接检查能力**：实现 [`PluginConnectionCheck`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/PluginConnectionCheck.java)（[`OpenCliConnectionCheck`](../../plugins/opencli/src/main/java/fun/fengwk/kkstudio/plugin/opencli/OpenCliConnectionCheck.java)），通过 `probeConnection()` 进行用户触发的只读连通性探测，并将类型化结果投影为 `Reachability`、`Authentication` 与 `BrowserSession` 三个维度。
 - **Canvas 适配器**：
   提供两个独立的 Canvas 函数适配器：
   - [`GptImage2CanvasFunctionAdapter`](../../plugins/opencli/src/main/java/fun/fengwk/kkstudio/plugin/opencli/GptImage2CanvasFunctionAdapter.java)：适配 ChatGPT 图像生成，通过 OpenCLI Hub 提交 Prompt，等待执行并收集输出图像写入 Storage；

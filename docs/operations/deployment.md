@@ -111,9 +111,9 @@ curl -fsS http://127.0.0.1:8080/actuator/health
 不要把真实密码直接写进 shell 历史或可见的命令参数。独立 `docker run` 没有 Compose 的等待链，
 PostgreSQL 与已配置 bucket 必须先可达，启动失败先诊断连接而不是重建数据面。
 
-- `KK_STUDIO_STORAGE_S3_ENDPOINT` 是服务端读写地址；`KK_STUDIO_STORAGE_S3_PUBLIC_ENDPOINT` 是
-  返回给浏览器的预签名直传/直下地址，必须是浏览器可访问的 origin，服务端 `PUT`/`GET`/
-  `HEAD`/`COPY`/`DELETE` 始终使用前者。
+- `KK_STUDIO_STORAGE_S3_ENDPOINT` 是服务端读写地址；`KK_STUDIO_STORAGE_S3_PUBLIC_ENDPOINT` 可选，
+  面向浏览器预签名直传/直下地址（缺省或留空时回退到 `KK_STUDIO_STORAGE_S3_ENDPOINT`），
+  配置时必须是浏览器可访问的 origin，服务端 `PUT`/`GET`/`HEAD`/`COPY`/`DELETE` 读写始终使用前者。
 - `KK_STUDIO_EXIT_CONFIRMATION_DIRECTORY` 指向本机退出确认 journal；必须挂载持久卷，并由单个
   Studio 实例独占（默认 `/app/.kkstudio/execution-exits`，镜像示例使用 `/app/execution-exits`）。
   在 POSIX 卷上，挂载后的目录及其中既有的 `.lock` 文件必须归应用 UID `10001` 所有，并允许应用
@@ -124,8 +124,9 @@ PostgreSQL 与已配置 bucket 必须先可达，启动失败先诊断连接而�
   [`V1__schema.sql`](../../schema/src/main/resources/db/migration/V1__schema.sql) 建立，migration
   只由唯一 Flyway owner 执行。
 - `prod` profile 的数据源只来自 `KK_STUDIO_DB_URL`/`KK_STUDIO_DB_USER`/`KK_STUDIO_DB_PASSWORD`，
-  没有默认值，缺失时启动失败而不是回退到开发数据库；`SPRING_PROFILES_ACTIVE` 与全部
-  `KK_STUDIO_STORAGE_S3_*` 同样必须显式提供。
+  没有默认值，缺失时启动失败而不是回退到开发数据库；`SPRING_PROFILES_ACTIVE` 与
+  `KK_STUDIO_STORAGE_S3_*` 核心连接属性（endpoint、region、bucket、accessKey、secretKey）同样必须显式提供，
+  `KK_STUDIO_STORAGE_S3_PUBLIC_ENDPOINT` 为可选配置（缺省回退到服务端 endpoint）。
 
 ### 退出确认 journal 故障恢复
 
@@ -155,12 +156,12 @@ journal 写入是数据库退出确认的前置条件。磁盘满、只读或某
 ## 运行配置
 
 生产 App 使用 `SPRING_PROFILES_ACTIVE=prod`，通过 `KK_STUDIO_DB_*` 连接 PostgreSQL，
-通过 `KK_STUDIO_STORAGE_S3_*` 连接对象存储。服务端 endpoint 用于读写对象，public endpoint
-用于浏览器预签名上传/下载；两者都须可达，bucket 在 App 启动前准备好。
+通过 `KK_STUDIO_STORAGE_S3_*` 连接对象存储。服务端 endpoint 用于读写对象，可选的 public endpoint
+用于浏览器预签名上传/下载（缺省回退到服务端 endpoint）；两者对外暴露时均须可达，bucket 在 App 启动前准备好。
 空库初始化只由一个 Flyway owner 执行，Worker、Plugin 集合与密钥在节点间保持一致。
 
 真实连接与凭据由仓库外 owner-only 文件或编排 secret 注入。
-Dispatcher、admission、gateway 上限属于启动配置，subagent 预算由运行时 SystemSettings 管理。
+Dispatcher 与 admission 上限属于启动配置，subagent 预算由运行时 SystemSettings 管理。
 完整变量分类与凭据文件要求见[运行配置与凭据](#运行配置与凭据)，
 对外入口要求见[生产部署与反向代理](#生产部署与反向代理)。
 
@@ -170,12 +171,20 @@ Dispatcher、admission、gateway 上限属于启动配置，subagent 预算由�
 保存当前镜像标识、运行配置与可恢复的数据备份。镜像构建成功只证明产物生成，
 发布前的验证入口见[开发与测试](development-and-testing.md)。
 
+KK Studio 2.0.0 与 1.x 不兼容。升级前先备份，并按 V1 重建或新建数据库；不要在现有库上强行重放 V1。升级步骤如下：
+
+1. **导出配置**：在 1.x 运行中部署的“设置 → 同步”导出 YAML 配置文件。另存当前运行配置、密钥文件、全库 dump 与 S3 业务对象备份；确认备份可恢复后保留原库。
+2. **备份并按 V1 重建数据库**：妥善保存现有数据库备份后，在安全边界按当前基线新建全新的空 PostgreSQL 17/UTF8 数据库，由唯一 Flyway owner 应用当前发行物的 [`V1__schema.sql`](../../schema/src/main/resources/db/migration/V1__schema.sql) 初始化 Schema。严禁直接在现有库上运行破坏性改动或强行重放。
+3. **导入配置**：部署 2.0.0 App 并指向新数据库。在“设置 → 同步”选择导出的 YAML 检查；格式或字段错误时按报错调整，有可跳过条目时可选择“仅导入可用配置”。Git 渠道技能包在执行时按分支当前 HEAD 重新构建，需确认仓库可访问和内容符合预期。若导入失败，检查已经发布的技能包：它们在独立事务中提交。导入后核对 Provider 凭据、Environment 注册令牌摘要与安装设置。
+4. **重新安装各环境 Daemon 并在平台配置全局代理**：在每台主机通过 Studio 的 Environment 卡片打开安装弹窗，重新复制安装命令并执行覆盖安装，使 Daemon 升级至与 2.0.0 匹配的版本并重新达到 `READY`；在 Studio“系统设置 → 网络”配置全局代理（HTTP 代理地址及绕过规则）。
+5. **重新上传上传渠道技能包**：配置同步导出仅包含 Git 渠道技能包，上传渠道的本地归档技能包不进入配置导出，升级后须在平台“技能包”页面重新上传发布。
+
 模型调用要求上游返回对应协议的完整 usage；缺少整份 usage 或必需计数会以
 `INVALID_RESPONSE` 失败，不会按零用量继续。发布前必须逐个核对将在生产中使用的 Provider，
 脱敏 fixture 与历史探针只证明已覆盖样本，不构成对其余上游、代理或模型组合的兼容承诺。协议字段清单见 [Harness Model](../modules/harness-model.md#原生事件与流式聚合)
 与[Harness Model：用量与计价](../modules/harness-model.md#协议来源)。
 
-兼容的数据面继续复用，App 节点可以逐个替换。节点收到 SIGTERM 后自动排空（停止领取新 Work，在 `KK_STUDIO_HARNESS_RUNTIME_DRAIN_TIMEOUT` 内等待本机执行，然后让 Daemon 重连到其它节点，接手节点通过重新挂接在途远端调用（不重发 INVOKE、在 reattach 窗口内等待终态，详见 [Harness Runtime](../modules/harness-runtime.md#toolprocessor-执行)）继续等待结果；单节点重启时由新进程接手）。容器或进程管理器的停止宽限期需大于“排空超时 + dispatcher 租约时长（`KK_STUDIO_HARNESS_DISPATCHER_LEASE_DURATION`，默认 30s）”并留出余量，默认配置下建议设为 120s（例如 Docker Compose 的 `stop_grace_period: 120s`）；否则排空会被强制终止，在途执行按崩溃恢复处理。由唯一 Flyway owner 完成 schema 校验/初始化，再恢复其它节点。检查健康、关键业务操作和 Daemon 重连后才结束窗口。改变 Tool catalog 时整体切换 Worker，避免不同 Plugin 集合混跑。
+同版本日常升级且数据面兼容时，App 节点可以逐个替换。节点收到 SIGTERM 后自动排空（停止领取新 Work，在 `KK_STUDIO_HARNESS_RUNTIME_DRAIN_TIMEOUT` 内等待本机执行，然后让 Daemon 重连到其它节点，接手节点通过重新挂接在途远端调用（不重发 INVOKE、在 reattach 窗口内等待终态，详见 [Harness Runtime](../modules/harness-runtime.md#toolprocessor-执行)）继续等待结果；单节点重启时由新进程接手）。容器或进程管理器的停止宽限期需大于“排空超时 + dispatcher 租约时长（`KK_STUDIO_HARNESS_DISPATCHER_LEASE_DURATION`，默认 30s）”并留出余量，默认配置下建议设为 120s（例如 Docker Compose 的 `stop_grace_period: 120s`）；否则排空会被强制终止，在途执行按崩溃恢复处理。由唯一 Flyway owner 完成 schema 校验/初始化，再恢复其它节点。检查健康、关键业务操作和 Daemon 重连后才结束窗口。改变 Tool catalog 时整体切换 Worker，避免不同 Plugin 集合混跑。
 
 Flyway 校验失败时停止切换并查明差异；修改 `flyway_schema_history` 或用 `repair` 伪造 checksum
 会破坏校验依据。有数据的数据库不能重放 V1。需要空库时走独立的[共享数据库重建](development-and-testing.md#共享数据库重建)，
@@ -191,8 +200,8 @@ Flyway 只接受 V1 与当前基线一致的数据库；V1 校验不同的数据
 
 1. 在运行中的部署“设置 → 同步”导出配置 YAML，另存 App/Daemon 镜像、运行配置与密钥文件、
    全库 dump 与 S3 业务对象；确认备份可恢复后保留原库。
-2. 新建全新的空 PostgreSQL 17/UTF8 数据库，由唯一 Flyway owner 用当前发行物初始化当前 Schema。同时清空各 App 实例的 `KK_STUDIO_EXIT_CONFIRMATION_DIRECTORY` journal 卷，journal 记录包含固定的 `environmentId` 等字段，不混用不同代际的未确认文件。
-3. 部署对应版本 App 与同版本 Daemon 并指向新库。在每台主机通过 Environment 安装弹窗执行安装命令。运行中协议版本不一致时，准入端点返回 HTTP 426 + protobuf `UpgradeRequired`（含目标 Daemon 版本），Daemon 据此执行本机受管更新；无法受管更新时需重新覆盖安装。通过产品导入校验写入配置 YAML；Provider 凭据、Environment 注册令牌与
+2. 在安全边界新建全新的空 PostgreSQL 17/UTF8 数据库，由唯一 Flyway owner 用当前发行物初始化当前 Schema。
+3. 部署对应版本 App 与同版本 Daemon 并指向新库。在每台主机通过 Environment 安装弹窗执行安装命令。运行中协议版本不一致时，准入端点返回 HTTP 426 + protobuf `UpgradeRequired`（含目标 Daemon 版本），Daemon 据此执行本机受管更新；无法受管更新时需重新覆盖安装。通过产品导入校验写入配置 YAML，注意核对导入预检报错与跳过项处置；Provider 凭据、Environment 注册令牌与
    安装设置逐项核对。会话、项目、画布、运行历史与 Blob 引用保留在原库和备份中。
 4. 验收健康、关键业务操作、Environment `READY` 与 Daemon 重连后再切换入口；原库、备份与镜像
    按保留策略冻结，便于回退。
@@ -236,8 +245,8 @@ Studio 当前没有内置登录鉴权。向局域网或公网暴露前，必须�
 `prod` profile 启用 `server.forward-headers-strategy=framework`，因此代理必须正确设置
 `X-Forwarded-Proto`/`X-Forwarded-Host`，否则重定向与 cookies 会指向内部地址。
 
-预签名 URL 与 WebSocket 是部署时最容易出错的两处：前者要求
-`KK_STUDIO_STORAGE_S3_PUBLIC_ENDPOINT` 使用浏览器可达的 origin；后者要求终止浏览器侧 WebSocket
+预签名 URL 与 WebSocket 是部署时最容易出错的两处：前者要求浏览器可访问实际预签名地址（若配置了
+`KK_STUDIO_STORAGE_S3_PUBLIC_ENDPOINT` 则使用该 origin，缺省时回退到 `KK_STUDIO_STORAGE_S3_ENDPOINT`）；后者要求终止浏览器侧 WebSocket
 （`/api/events` 与 IDE 视图）的代理层启用 `permessage-deflate` 压缩扩展，而 Daemon 与 Studio 之间的
 WSS 传输不协商压缩扩展（见 [Environment Daemon 安装与运行](environment-daemon.md)）。
 
@@ -365,7 +374,8 @@ PI_BASE_ANCHOR=/path/to/pi-base \
 | local/test/reliability/distributed/NAS App | execution-exit journal | `KK_STUDIO_EXIT_CONFIRMATION_DIRECTORY`（每个 App 实例独立持久卷） |
 | NAS App 节点 | prod 数据面与异步执行 | `KK_STUDIO_DB_*`、`KK_STUDIO_STORAGE_S3_*` |
 | 本机 preview | 外部数据面配置文件 | `SHARED_PREVIEW_ENV_FILE` 指向的文件内的同一组 `KK_STUDIO_DB_*` / `KK_STUDIO_STORAGE_S3_*` |
-| local/reliability | admission/gateway | `KK_STUDIO_MODEL_MAX_CONCURRENCY`、`KK_STUDIO_TOOL_MAX_CONCURRENCY`、`KK_STUDIO_ENVIRONMENT_GATEWAY_*`（subagent 并发上限不经环境变量配置，只由运行时 SystemSettings 的 `aiRuntime.subagent*` 持有） |
+| local App | admission | `KK_STUDIO_MODEL_MAX_CONCURRENCY`、`KK_STUDIO_TOOL_MAX_CONCURRENCY`；Compose 传入容器，默认分别为 16、64 |
+| App 自定义部署 | admission | `KK_STUDIO_MODEL_MAX_CONCURRENCY`、`KK_STUDIO_TOOL_MAX_CONCURRENCY`、`KK_STUDIO_SKILL_SYNC_MAX_CONCURRENCY`；subagent 并发上限由运行时 SystemSettings 的 `aiRuntime.subagent*` 持有 |
 | production with authenticated Plugin | resource staging bounds | `KK_STUDIO_PLUGINS_RESOURCE_CONNECT_TIMEOUT`、`KK_STUDIO_PLUGINS_RESOURCE_REQUEST_TIMEOUT`、`KK_STUDIO_PLUGINS_RESOURCE_UPLOAD_TIMEOUT`、`KK_STUDIO_PLUGINS_RESOURCE_MAX_BYTES`、`KK_STUDIO_PLUGINS_RESOURCE_TEMP_DIRECTORY` |
 | test | ports/build/mock | `CANVAS_TEST_*` |
 | test | S3/media/fake runtime | `KK_STUDIO_STORAGE_S3_*`、`KK_STUDIO_STORAGE_MEDIA_*`、`KK_STUDIO_CANVAS_FUNCTION_FAKE_ENABLED`（仅测试栈使用；生产部署不得设置） |
@@ -376,7 +386,7 @@ PI_BASE_ANCHOR=/path/to/pi-base \
 | reliability Agent 矩阵 | 仅宿主 credential 同步 | `TEST_MINIMAX_BASE_URL`、`TEST_MINIMAX_API_KEY` |
 | 显式 Seedance prepare-only | 确认与外部 Hub/workspace | `RUN_REAL_SEEDANCE_PREPARE_SMOKE=1`、`OPENCLI_HUB_BASE_URL`、`SEEDANCE_WORKSPACE_ID`、`OPENCLI_API_KEY`、可选 `OPENCLI_HUB_INSTANCE_ID` / `SEEDANCE_PREPARE_SMOKE_PROMPT`；另需唯一参数 `--confirm-prepare-only`，见 [deploy/test](../../deploy/test/README.md#真实-seedance-prepare-only-边界) |
 
-Dispatcher、Admission 和 gateway frame/queue 上限是启动配置，不由 SystemSettings editor 修改。
+Dispatcher 与 Admission 上限是启动配置，不由 SystemSettings editor 修改。
 Canvas Function runtime 变量也只在启动期读取。
 
 凭据边界：
@@ -395,8 +405,8 @@ Canvas Function runtime 变量也只在启动期读取。
 - 各测试栈的 registration token 是栈内隔离配置；`NVD_API_KEY` 只由供应链脚本写入临时
   mode `600` 的 Maven settings，二者都不进 command line、POM、image 或报告。
 - Plugin 凭据、Provider 密钥与 Skill 仓库令牌以明文保存在数据库中，其保护依赖数据库本身的访问控制与备份加密；
-  它们绝不出现在 API 响应、日志或模型上下文中。配置同步导出会携带 Provider 凭据、Skill 令牌与 registration token
-  原值（Plugin 秘密不导出），导出文件必须按秘密保管。
+  它们绝不出现在 API 响应、日志或模型上下文中。配置同步导出会携带 Provider 凭据与 Skill 仓库令牌原值、
+  Environment registration token 摘要（hash）（Plugin 秘密不导出），导出文件必须按秘密保管。
 - Plugin 资源端口只在需要时接受外部内容：会话资源下载以调用方的 Harness Thread 归属授权，
   远端媒体暂存只允许公网 HTTPS 目标（私网/保留/环回等地址一律拒绝，因此节点必须能对目标
   主机做正向解析）、受默认 `256MiB` 与 `1GiB` 硬上限的字节预算约束，并在成功后立即删除

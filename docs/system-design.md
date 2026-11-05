@@ -1,6 +1,6 @@
 # 系统设计
 
-`kk-studio` 是面向可信单用户部署的自托管 AI 工作台。浏览器是工作台前端，Studio 节点由
+`kk-studio` 2.0.0 是面向可信单用户部署的自托管 AI 工作台。浏览器是工作台前端，Studio 节点由
 [`web`](../web/pom.xml) 装配的 Spring Boot 应用承担目录、持久执行与宿主集成，Environment Daemon 把指定主机的
 文件、命令与 LSP 能力接入 Agent，code-server 由 Daemon 托管。
 
@@ -15,7 +15,7 @@ harness 只提供执行引擎与能力契约，平台实现持久化与宿主适
 | 层 | 模块 | 职责 |
 | --- | --- | --- |
 | L5 组合根 | [`web`](../web/pom.xml) | 装配全部模块与插件；平台与 harness 的 HTTP 接口、浏览器事件通道、Daemon 接入、错误映射、SPA 与链路追踪 |
-| L4 产品 | apps/chat | Chat 列表与会话归属；自带的 HTTP 接口与 DTO；拥有 `chat`、`chat_session` |
+| L4 产品 | [`apps/chat`](../apps/chat/pom.xml) | Chat 列表与会话归属；自带的 HTTP 接口与 DTO；拥有 `chat`、`chat_session` |
 | L4 产品 | [`apps/project`](../apps/project/pom.xml) | Project 与 Issue 工作流、调度、Issue 工具；自带的 HTTP 接口与 DTO；拥有 `project_*` |
 | L4 产品 | [`apps/canvas/spi`](../apps/canvas/spi/pom.xml) | 画布函数 SPI，插件只依赖它 |
 | L4 产品 | [`apps/canvas/runtime`](../apps/canvas/runtime/pom.xml) | 画布领域、typed command、持久化、Function Run、HTTP 接口、DTO 与版本通知 |
@@ -34,6 +34,8 @@ harness 只提供执行引擎与能力契约，平台实现持久化与宿主适
 | L1 共享 | [`schema`](../schema/pom.xml) | 唯一的 [`V1__schema.sql`](../schema/src/main/resources/db/migration/V1__schema.sql)，按归属模块分段 |
 | 宿主 | [`daemon`](../daemon/package.json) | 文件、进程、LSP、技能安装与 IDE 服务；代理由平台下发；在线更新调用官方安装器 |
 | 前端 | [`frontend`](../frontend/package.json) | `app` → `platform`、`features` → `shared` 的浏览器工作台 |
+
+`share` 的平台与 Harness HTTP DTO 使用 `fun.fengwk.kkstudio.share.<领域>` 包名；产品 DTO 归各自产品模块。
 
 依赖只能向下，模块依赖由 [`check.mjs`](../scripts/dev/verify/repository/check.mjs) 守护：
 
@@ -174,8 +176,8 @@ LangChain4j 约束。各模块的契约与实现细节见[文档导航](README.m
 （`{kind, id, title, link}`），产品实现归属事实。每个实现回答：类型、是否允许分叉与通用直写、接受前的锁、是否拥有
 某个 Session、创建与列举 Session、删除前的锁与清理钩子、按根线程与根会话解析展示信息、交互判定前的锁。
 
-- 消费者是平台编排，不是产品：命令接受、会话删除、交互查询与交互裁决、会话查询只调用这个 SPI，不再按产品类型
-  分支。Chat 的实现允许分叉与直写；Project 的实现不允许，删除前必须解除 Issue 与 Agent 的绑定。
+- 消费者是平台编排，不是产品：命令接受、会话删除、交互查询与交互裁决、会话查询统一通过这个 SPI 交互，避免按
+  具体产品类型分支。Chat 的实现允许分叉与直写；Project 的实现不允许，删除前必须解除 Issue 与 Agent 的绑定。
 - Agent 引用检查同属这一类：`AgentReferenceCheck` 由 Project 实现（工作流阶段引用 Agent），平台删除 Agent 前
   逐实现询问，不用 SQL 读产品表。
 - 跨模块传输只携带不透明的 `{kind, id, title?, link?}`：`HarnessCommandOwnerDTO` 与 `InteractionOwnerDTO`
@@ -223,9 +225,11 @@ vfs:/
 - 访问范围只按执行根会话解析：其他会话 ID 与不存在的路径一样返回「不存在」，`threads/<线程 ID>/` 只接受本对话
   中存在的线程，`vfs:/sessions` 只列出执行根会话。子 Agent 运行在独立会话中，但 VFS 始终解析到执行根会话。
 - `skills` 与 `resources` 只读：写入在工具预检与执行两处都以固定文案拒绝并提示写入会话目录；列目录标出
-  `read-only` 与 `read-write`。技能根目录不提供列举，直接按 `vfs:/skills/<包>/<技能>/<文件>` 读取。
-- 操作只有 `read`、`write`、`edit`、`find`、`grep`：目录用 `read` 列举，`find` 只匹配路径，`grep` 在有文件
-  数、字节数、结果数与截止时间的扫描预算内执行，超出时明确返回未完成。
+  `read-only` 与 `read-write`。技能按只读层级目录列举（`vfs:/skills` 列出技能包，`<包>/` 列出技能，`<技能>/`
+  列出文件及大小），按 `vfs:/skills/<包>/<技能>/<相对路径>` 读取文件；资源根目录不提供条目列举，直接按
+  `vfs:/resources/<资源 ID>` 读取。
+- 操作只有 `read`、`write`、`edit`、`find`、`grep`：目录用 `read` 列举；`find` 与 `grep` 仅在会话目录内检索，
+  `find` 只匹配路径，`grep` 在有文件数、字节数、结果数与截止时间的扫描预算内执行，超出时明确返回未完成。
 - 存储是 `session_file` 与全局 `storage_blob`：`(session_id, path)` 确定一个文件版本，写入先上传新 Blob，再按
   `revision` 条件更新，最后一个引用释放时回收旧 Blob。目录由路径推导，不单独存储；会话删除先删文件行，再释放
   Blob 引用。
@@ -234,7 +238,7 @@ vfs:/
 - 限制按会话计：文件数、单文件大小与总量都有上限；目录响应、`find` 结果与 `grep` 预算各自有界。
 - `VfsGateway` 是 harness 定义、平台实现的窄端口，只回答一次文件工具调用；实现负责命名空间、只读前缀、会话
   归属、revision 与预算，harness 只按参数路由并保留错误文案。
-- 文件工具从工具执行上下文取执行根线程、执行根会话与当前会话，平台不再为读取会话历史或资源反查引擎存储。
+- 文件工具从工具执行上下文直接获取执行根线程、执行根会话与当前会话，由调用方在装配时注入所需上下文，无需反查引擎存储。
 - 工具层面的亲和性因此分三类：`read`、`write`、`edit`、`find`、`grep` 按每次调用的 `path` 路由；`bash` 与
   LSP 工具只能在环境执行，没有环境时从工具声明中隐藏；`task`、`ask_user`、Goal、MCP、插件与产品工具始终在
   Studio 执行。没有环境时传入绝对路径得到「未执行」并提示改用 `vfs:` 路径。
@@ -270,7 +274,7 @@ vfs:/
 
 | 产品 | 模块 | 拥有 | 实现的平台 SPI |
 | --- | --- | --- | --- |
-| Chat | apps/chat | `chat`、`chat_session`；`ChatController` 与模块内 DTO | 会话归属 `CHAT` |
+| Chat | [`apps/chat`](../apps/chat/pom.xml) | `chat`、`chat_session`；`ChatController` 与模块内 DTO | 会话归属 `CHAT` |
 | Project | [`apps/project`](../apps/project/pom.xml) | `project_*`；`ProjectController`、`IssueController`、`ProjectErrorAdvice` 与模块内 DTO | 会话归属 `ISSUE_AGENT`、Agent 引用检查 |
 | Canvas | [`apps/canvas/runtime`](../apps/canvas/runtime/pom.xml) | `canvas_*`；三个控制器与模块内 DTO | 无（不参与会话归属） |
 | IDE | [`apps/ide`](../apps/ide/pom.xml) | 视图与数据面状态；IDE 控制器、过滤器与模块内 DTO | 无（读取平台环境与租约） |
@@ -314,7 +318,7 @@ command 与幂等键、资源 pin、`CANVAS_RUN` Work 与版本通知，并按�
 
 ### 控制面与主机能力
 
-Studio 与每个 Daemon 之间只有一条 WSS 连接承载 HTTP/2：stream 1 是控制流，其他流是 IDE 数据面。控制流使用 Protobuf
+Studio 与每个 Daemon 之间只有一条 WSS 连接承载 HTTP/2：`POST /control` 建立控制流，IDE 数据面使用独立流。控制流使用 Protobuf
 Envelope 成帧，消息类型覆盖 `READY`、`HEARTBEAT`、`INVOKE`、`STARTED`、`PROGRESS`、`COMPLETED`、`FAILED`、
 `CANCEL`、`CANCELLED`、`RECOVER`、`RECOVER_NOT_FOUND`、`EXECUTION_EXITED`、资源上传三段式
 （`RESOURCE_UPLOAD_REQUEST`、`RESOURCE_UPLOAD_TICKET`、`RESOURCE_UPLOAD_COMMIT`）、`TEMPORARY_RESOURCE_POLICY`、
@@ -452,15 +456,10 @@ subscribe -> 注册资源 -> 读取 durable cursor -> subscribed(cursor) -> even
 
 | 段 | 内容 |
 | --- | --- |
-| 1 | 业务表：环境、目录（Provider、Model、Agent、模型组冷却、技能包、MCP）、插件配置与凭据、Canvas、Chat |
-| 1b | `environment_connection`、`cluster_node` |
-| 1c | 单行 `system_setting` |
-| 2 | harness 执行协议：Session、Entry、Thread、命令、`builtin_model_invocation`、工具调用、`durable_work`、Join、停止回执、执行退出、实时订阅 |
-| 3 | Project 与 Issue 业务事实 |
-| 4 | `chat_session` |
-| 5 | 全局 Blob：`storage_blob`（含 `archive_index`）、上传、对象清理、Session 引用边与 `session_file` |
-| 6 | Issue 发布证据 |
-| 7 | Canvas 资源到 Blob 的外键 |
+| 1 | 共享基础：全局 Blob（`storage_blob` 含 `archive_index`）、上传（`storage_upload`）与对象清理（`storage_object_cleanup`） |
+| 2 | 平台内核存储：环境（`environment`、`environment_connection`、`cluster_node`）、单行 `system_setting`、Harness 执行协议（`harness_session`、`harness_entry`、`harness_thread`、`realtime_subscription`、`harness_thread_command`、`harness_tool_invocation`、`durable_work`、`harness_thread_join`、`harness_thread_stop_receipt`、`harness_execution_exit`）与 Session 引用（`session_blob_ref`、`session_file`） |
+| 3 | 平台 Driver 存储：目录（`agent_provider`、`agent_model`、`agent_definition`、`agent_model_group_cooldown`）、技能包（`skill_package`、`skill_package_git_source`）、插件（`plugin_configuration`、`plugin_credential`、`plugin_auth_attempt`）、MCP（`mcp_server`、`mcp_tool`）与 `builtin_model_invocation` |
+| 4 | 产品表：Canvas（`canvas_*`）、Chat（`chat`、`chat_session`）与 Project（`project_*`） |
 
 - 表与 SQL 只由归属模块访问：产品表由产品模块维护，目录、设置、存储、环境与插件由平台维护，`harness_*` 由平台的
   内核存储适配包维护，`builtin_model_invocation` 由平台的 Builtin 适配包维护。

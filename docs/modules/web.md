@@ -80,11 +80,6 @@ health、资源下载和 WebSocket 使用各自传输形式。公开路由如下
 | Interaction | `/api/interactions` | 等待分页（`total` 是同一过滤条件下真实可见的待处理计数）与 `/{interactionId}/input` 人工提交 |
 | Canvas | `/api/canvases` | 创建、列表、Snapshot、commands、resource download/preview URL、节点 Function Run |
 | Function catalog | `/api/canvas-functions` | 函数 schema、输出计划、可用性 |
-
-Agent 的创建、完整 PUT 和读取使用 `execution: {driver, settings}`。用户 Agent 必须配置，
-内置 Agent 可显式为 null；当前 `builtin` 的 settings 为 `{modelName, variant}`。旧的顶层
-`model` / `variant` 不属于请求契约。Driver、模型与 Variant 的校验和引用事务见
-[Platform Catalog](platform.md#catalog)。
 | Storage | `/api/storage/uploads`、`/api/storage/blobs/{blobId}` | reserve/complete/delete 与短期 download/preview URL |
 | Project | `/api/projects` | CRUD、workflow/yolo、archive/unarchive、Snapshot、Issue 创建（控制器在 [apps/project](project.md)） |
 | Issue | `/api/issues/{issueId}` | CRUD、活动/证据、流转、阻塞/恢复、stop/继续、额度重置、重开、归档（控制器在 [apps/project](project.md)） |
@@ -93,6 +88,10 @@ Agent 的创建、完整 PUT 和读取使用 `execution: {driver, settings}`。�
 | Environment | `/api/environments`、`/{id}/runtime`、`/{id}/install`、`/{id}/update`、`/uninstall/{os}` | Card、当前运行状态快照、注册令牌轮换（明文只在创建与轮换响应中返回一次）、安装设置保存、安装命令与一次性安装码、卸载脚本、受管二进制在线更新（POST 发起并返回当前运行快照）、运维 events |
 | Environment IDE | `/api/environments/{id}/ide/views`、`/environment-ide/{environmentId}/{viewId}/` | 打开/关闭视图、切换目录与终端；同源 IDE 固定入口、bootstrap 票据与 HTTP/WebSocket 数据面 |
 | Environment Daemon | `/api/harness/environment-daemon` | Daemon 准入裁决与 WebSocket 升级端点，承载控制与数据传输 |
+
+Agent 的创建、完整 PUT 和读取使用 `execution: {driver, settings}`。用户 Agent 必须配置，
+内置 Agent 可显式为 null；当前 `builtin` 的 settings 为 `{modelName, variant}`。
+Driver、模型与 Variant 的校验和引用事务见 [Platform Catalog](platform.md#catalog)。
 
 `POST /api/chats` 与 `PUT /api/chats/{chatId}` 的字段语义见 [Chat](chat.md)。
 
@@ -303,7 +302,7 @@ Oversize realtime 事件不在通知里携带正文：owner 把完整 canonical 
 
 准入阶段在升级前严格校验握手：
 - 缺失或非 `websocket` 升级头：HTTP 400 Bad Request 或 426 Upgrade Required。
-- `KK-Daemon-Protocol` 低于 1：HTTP 426 Upgrade Required，body 为 protobuf 序列化的 `UpgradeRequired`，携带匹配请求平台的目标 Daemon 版本；无法解析发布目标时 body 为空，Daemon 转入失败终止。
+- `KK-Daemon-Protocol` 不等于 1：HTTP 426 Upgrade Required，body 为 protobuf 序列化的 `UpgradeRequired`，携带匹配请求平台的目标 Daemon 版本；无法解析发布目标时 body 为空，Daemon 转入失败终止。
 - `Authorization: Bearer <token>`：缺失或校验失败返回 HTTP 401 Unauthorized；token 绝不记录入日志或回显到错误响应中。
 - `KK-Daemon-Instance` 必须为规范小写 UUID 格式；非法或畸变参数返回 HTTP 400 Bad Request。
 - 准入成功后返回 HTTP 101 Switching Protocols，并在锁外注册 10 秒超时定时器：若 Daemon 未在 10 秒内发起 HTTP/2 连接并成功建立控制通道，连接自动抛弃释放。

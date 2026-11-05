@@ -15,8 +15,8 @@ name: kk-studio-distributed
 #
 # 身份变量（固定默认值，可由宿主环境覆盖；scripts/dev/verify/e2e/distributed.sh 导出同一组
 # 默认值）：
-#   DISTRIBUTED_ENV_A_NAME / DISTRIBUTED_ENV_B_NAME daemon 对应的 environment name
-#   DISTRIBUTED_DAEMON_A_REGISTRATION_TOKEN / DISTRIBUTED_DAEMON_B_REGISTRATION_TOKEN
+#   DISTRIBUTED_ENV_A_NAME / DISTRIBUTED_ENV_B_NAME / DISTRIBUTED_ENV_C_NAME daemon 对应的 environment name
+#   DISTRIBUTED_DAEMON_A_REGISTRATION_TOKEN / DISTRIBUTED_DAEMON_B_REGISTRATION_TOKEN / DISTRIBUTED_DAEMON_C_REGISTRATION_TOKEN
 #   DISTRIBUTED_APP_A_PORT / DISTRIBUTED_APP_B_PORT 宿主 app 端口
 #
 # 全部凭据是固定、可丢弃的测试值；宿主 MiniMax 凭据不会被本栈读取，

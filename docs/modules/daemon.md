@@ -2,7 +2,7 @@
 
 Environment Daemon 是目标宿主上的独立 Node.js 进程，把 Platform 的原子能力调用落到文件系统、进程与本地工具链。网络连接只是消息管道：同一 Daemon 进程断线重连，不会重启已受理的执行。安装与三平台管理见 [Environment Daemon 安装与运行](../operations/environment-daemon.md)；能力契约与 Platform 连接服务的协议和会话见 [Harness Environment](harness-environment.md)。
 
-模块运行在 Node.js 24 运行时之上，依赖 `@bufbuild/protobuf`、`@vscode/ripgrep`、`diff`、`koffi`、`undici`、`vscode-jsonrpc`、`ws`、`yauzl` 等生产依赖。官方发行归档内置冻结的 code-server 运行时（Node 24.x 与 code-server）及对应平台的 ripgrep，不依赖宿主全局安装 Node、JDK 或 ripgrep；外部语言服务器与 Bash 由宿主提供。构建发行归档时使用开发依赖 `tar` 校验 code-server 归档。
+模块运行在 Node.js 24 运行时之上，依赖 `@bufbuild/protobuf`、`@vscode/ripgrep`、`diff`、`jsonc-parser`、`koffi`、`undici`、`vscode-jsonrpc`、`ws`、`yauzl` 等生产依赖。官方发行归档内置冻结的 code-server 运行时（Node 24.x 与 code-server）及对应平台的 ripgrep，不依赖宿主全局安装 Node、JDK 或 ripgrep；外部语言服务器与 Bash 由宿主提供。构建发行归档时使用开发依赖 `tar` 校验 code-server 归档。
 
 ## 启动与本地状态
 
@@ -22,12 +22,12 @@ Environment Daemon 是目标宿主上的独立 Node.js 进程，把 Platform 的
   daemon.lock                # 内核独占建议锁（0600）
   tmp/workspaces/<uuid>/     # 受控临时 workspace（*.part 中转 → 原子发布 *.log）
   skills/<package>/          # 已安装技能包
-  skill-work/staging/        # 技能安装暂存
-  skill-work/backup/         # 技能替换备份
+  skills/.staging-<uuid>/    # 技能安装暂存
+  skills/.old-<uuid>/        # 技能替换备份
   updates/<operation-id>-*/  # 受管在线更新工作目录（安装脚本、许可和日志）
 ```
 
-POSIX 目录权限为 0700、敏感文件为 0600。`tmp/workspaces` 是 Daemon 自身大文本输出与中转文件的受控根，由受控临时存储按 TTL 自动清扫；上报给平台与模型的临时目录是宿主操作系统临时目录，Agent 写在那里的暂存文件由宿主清理策略负责。技能安装器负责恢复或清理 staging/backup；已发布技能包不随服务卸载自动删除。更新目录保存安装脚本、许可与日志，不承载凭据。
+POSIX 目录权限为 0700、敏感文件为 0600。`tmp/workspaces` 是 Daemon 自身大文本输出与中转文件的受控根，由受控临时存储按 TTL 自动清扫；上报给平台与模型的临时目录是宿主操作系统临时目录，Agent 写在那里的暂存文件由宿主清理策略负责。技能安装器在启动与安装时负责恢复或清理 `.staging-*` 与 `.old-*` 暂存与备份；已发布技能包不随服务卸载自动删除。更新目录保存安装脚本、许可与日志，不承载凭据。
 
 ## 能力装配与运行时调度
 
@@ -37,8 +37,8 @@ POSIX 目录权限为 0700、敏感文件为 0600。`tmp/workspaces` 是 Daemon 
 - 受管服务：技能状态对账（`SKILL_SYNC` / `SKILL_STATE` 控制信封）以及受管 IDE 服务（code-server：`IDE_COMMAND` / `IDE_RESULT` 承载视图生命周期，`IDE_LEASE` 承载使用证明）。
 
 运行时 [`Runtime`](../../daemon/src/runtime.ts) 只做装配与调用编排，底层使用统一传输层 [`DaemonTransport`](../../daemon/src/transport/daemon-transport.ts)。连接代际与重连在 [`runtime-connection.ts`](../../daemon/src/runtime-connection.ts)，控制会话（环境绑定、SETTINGS/READY 握手、心跳与入站信封分发）在 [`runtime-session.ts`](../../daemon/src/runtime-session.ts)，环境绑定的出站信封构造在 [`runtime-outbound.ts`](../../daemon/src/runtime-outbound.ts)，journal 去重/回放、执行、超时与退出确认在 [`runtime-invocations.ts`](../../daemon/src/runtime-invocations.ts)，受管更新准入与回执在 [`runtime-update.ts`](../../daemon/src/runtime-update.ts)，运行状态快照在 [`runtime-status.ts`](../../daemon/src/runtime-status.ts)，IDE 命令准入、在途去重、deadline 与使用证明映射在 [`runtime-ide.ts`](../../daemon/src/runtime-ide.ts)，能力结果编码在 [`runtime-encoding.ts`](../../daemon/src/runtime-encoding.ts)，停机收敛与失败聚合在 [`runtime-shutdown.ts`](../../daemon/src/runtime-shutdown.ts)：
-- 统一传输管道：在单一 WSS 连接上运行标准 HTTP/2 协议。Stream 1 为双向控制流，传输基于 Protobuf 编码的 [`Envelope`](../../daemon/src/generated/control_pb.ts) 信封；IDE HTTP 与 WebSocket 隧道在同一连接上通过 HTTP/2 流多路复用。
-- 握手流程：连接建立后服务端首先在 Stream 1 发送 `SETTINGS` 帧下发环境标识、资源配额与网络设置，Daemon 确认后向服务端回送 `READY` 帧公布实例与能力状态，随后进入就绪状态。设置变更使用后续 `SETTINGS` 更新代理，不重复发送 READY；控制 WSS 始终直连。
+- 统一传输管道：在单一 WSS 连接上运行标准 HTTP/2 协议。服务端通过 `POST /control` 请求建立双向控制流，传输基于 Protobuf 编码的 [`Envelope`](../../daemon/src/generated/control_pb.ts) 信封；IDE HTTP 与 WebSocket 隧道在同一连接上通过 HTTP/2 流多路复用。
+- 握手流程：连接建立后服务端首先在控制流发送 Protobuf `SETTINGS` 控制信封（下发环境标识、包含最大资源字节数与临时资源 TTL/清理间隔的 `resource_budgets`，以及网络设置），Daemon 确认后向服务端回送 `READY` 控制信封公布实例与能力状态，随后进入就绪状态。应用设置不使用 HTTP/2 原生 SETTINGS 帧表达。设置变更使用后续 `SETTINGS` 信封更新代理，不重复发送 READY；控制 WSS 始终直连。
 - 故障恢复与重连：连接断开时按重连策略重试（1 秒至 30 秒）；首条 `SETTINGS` 中的网络设置无效时断开握手并重试。重连后重新进行 `SETTINGS` / `READY` 协商，不改变进程内已有执行事实。无效的在线网络更新不会覆盖当前设置，可通过后续更新修正。
 - 运行状态：`READY` 携带必需的 `runtimeStatus`，`HEARTBEAT` 固定携带 `{runtimeStatus, ideLeaseRound}`，状态关键变更时触发发送 `RUNTIME_STATUS`（[`runtime-status.ts`](../../daemon/src/runtime-status.ts)）。`runtimeStatus` 是 `{revision, status}`，`status` 固定 `{daemonVersion, update}`；`update` 为 null 或 `{targetVersion, downloadedBytes, totalBytes}`。revision 仅在状态内容变化时推进递增，心跳重发同一内容沿用同一 revision。
 - IDE 使用证明：有活跃视图时心跳递增 `ideLeaseRound` 并与本轮发出时的本机单调时间记录；无活跃视图时该轮次为空。Daemon 只接受当前未过期轮次的 `IDE_LEASE` 批次；证明只为已有视图续期，不创建视图。
@@ -128,7 +128,7 @@ Git 不设置覆盖值，保留原生自动仓库发现。文件树、编辑、�
 
 ### Agent LSP
 
-LSP 组（[`lsp.ts`](../../daemon/src/coding/lsp.ts)）从配置中的 `lsp.servers` 初始化，按扩展名匹配语言服务器，并在目标文件所属项目根下复用 stdio JSON-RPC 连接。启动时允许丢弃首个 `Content-Length` 之前最多 8 KiB 的非协议横幅，超过即失败关闭。三项能力默认超时 180 秒覆盖启动等待、initialize 与 query 全程，统一消费 `context.signal`；共享池初始化默认 180 秒独立生命周期，单个 waiter 停止不影响其他等待者，最后退出等待 cleanup；闲置 5 分钟自动回收客户端与 1 秒 shutdown 机制保持不变；反编译能力（`lsp.java-decompile`）仅在匹配到 jdtls 服务器时可用。语言服务器的 `ManagedProcess.exit` 可能早于受管范围收尾（命令退出或 helper fallback）；已发出请求收到退出报告后等待同一 `stop` 成功再确认，正常服务端 RPC 响应不经停止路径。
+LSP 组（[`lsp.ts`](../../daemon/src/coding/lsp.ts)）从配置中的 `lsp.servers` 初始化，按扩展名匹配语言服务器，并在目标文件所属项目根下复用 stdio JSON-RPC 连接。启动时允许丢弃首个 `Content-Length` 之前最多 8 KiB 的非协议横幅，超过即失败关闭。三项能力默认超时 180 秒覆盖启动等待、initialize 与 query 全程，统一消费 `context.signal`；共享池初始化默认 180 秒独立生命周期，单个 waiter 停止不影响其他等待者，最后退出等待 cleanup；闲置 5 分钟自动回收客户端，支持 1 秒优雅 shutdown；反编译能力（`lsp.java-decompile`）仅在匹配到 jdtls 服务器时可用。语言服务器的 `ManagedProcess.exit` 可能早于受管范围收尾（命令退出或 helper fallback）；已发出请求收到退出报告后等待同一 `stop` 成功再确认，正常服务端 RPC 响应不经停止路径。
 
 退出确认覆盖本次目标 RPC，不代表共享语言服务器整体退出。参数、租约或发送前失败确认的是目标 RPC 未发出，不能据此推断服务器未启动、初始化未进入或启动资源已收敛；正常 RPC 响应同样不要求停止共享服务器。
 
