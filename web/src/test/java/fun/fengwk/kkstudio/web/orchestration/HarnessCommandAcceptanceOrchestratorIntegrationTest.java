@@ -99,7 +99,7 @@ class HarnessCommandAcceptanceOrchestratorIntegrationTest extends WebPostgresTes
     assertEquals(1, count("durable_work", "target_id", chatThreadId));
   }
 
-  /** 既有 Thread 的继续写入不再经 owner 授权，但必须保持产品合法的 SET_* 前缀与末尾用户消息。 */
+  /** 既有 Thread 的继续写入不经 owner 授权，但必须保持产品合法的 SET_* 前缀与末尾用户消息。 */
   @Test
   void threadTargetContinuationPreservesCommandPrefix() {
     UUID chatId = createChat("thread-target");

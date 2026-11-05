@@ -534,7 +534,7 @@ class ToolResultFinalizerTest {
     assertEquals("read", FileTool.READ_NAME);
   }
 
-  /** read 契约上限（2000 行、60000 code point 正文）加行号/header 后仍完整内联，不再被 50 KiB 二次外化。 */
+  /** read 契约上限（2000 行、60000 code point 正文）加行号/header 后仍完整内联，不被 50 KiB 二次外化。 */
   @Test
   void inlinesBuiltinReadMaxWindowWithEmojiBodyAndLineNumbers() {
     RecordingStager store = new RecordingStager();
@@ -564,7 +564,7 @@ class ToolResultFinalizerTest {
     assertEquals(payload, ((TextResultContent) success.result().contents().getFirst()).text());
   }
 
-  /** ASCII 与 CJK 正文同样按 read 加宽预算内联：60 KiB ASCII 文本不再触发 20 行 / 2 KiB 预览外化。 */
+  /** ASCII 与 CJK 正文同样按 read 加宽预算内联：60 KiB ASCII 文本不触发 20 行 / 2 KiB 预览外化。 */
   @Test
   void inlinesBuiltinReadAsciiAndCjkWindows() {
     String ascii = readWindow(numberedWindow(2000, "a", 30));
@@ -702,7 +702,7 @@ class ToolResultFinalizerTest {
     assertTrue(store.puts.isEmpty());
   }
 
-  /** read 的图片/二进制内容仍走原 Resource 外化分支，不参与文本内联阈值。 */
+  /** read 的图片/二进制内容走 Resource 外化分支，不参与文本内联阈值。 */
   @Test
   void builtinReadBinaryContentStillUsesResourceBranch() {
     RecordingStager store = new RecordingStager();

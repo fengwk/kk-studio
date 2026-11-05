@@ -20,7 +20,7 @@ class HarnessResourceConfigurationTest {
 
   @Test
   void wiresExactlyOneMaterializerForEachBoundary() {
-    // 意图：迁移组合根后仍无条件暴露原有 bean 名称、具体类型和运行时端口，不引入重复或缺失装配。
+    // 意图：验证组合根装配各边界单一 bean、具体类型和运行时端口，不引入重复或缺失装配。
     new ApplicationContextRunner()
         .withUserConfiguration(HarnessResourceConfiguration.class)
         .withBean(StorageBlobManager.class, () -> mock(StorageBlobManager.class))

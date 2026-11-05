@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.project;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -142,8 +141,13 @@ class IssueAgentThreadRepositoryIntegrationTest extends OwnerTestSupport {
             () ->
                 issueAgentThreadRepository.insert(
                     new IssueAgentThread(issueId, agentName, sessionId, threadId))));
-    assertTrue(issueAgentThreadRepository.existsBySessionId(sessionId));
-    assertFalse(issueAgentThreadRepository.existsBySessionId(otherSession));
+    assertEquals(
+        1L,
+        count("select count(*) from project_issue_agent_thread where session_id = ?", sessionId));
+    assertEquals(
+        0L,
+        count(
+            "select count(*) from project_issue_agent_thread where session_id = ?", otherSession));
   }
 
   /** 稳定身份不可重绑：同一 (issue, agent) 只有一条绑定，同一 Thread 也只能被一个 Agent/Issue 持有。 */

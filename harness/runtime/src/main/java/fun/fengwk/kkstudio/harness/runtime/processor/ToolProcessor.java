@@ -59,8 +59,8 @@ import java.util.concurrent.ScheduledExecutorService;
  * complete）；preflight 抛异常保持 READY / approval null / version 不变，按 {@code preflightFailureDelay}
  * reschedule。READY prepare 内读取执行上下文事实（会话 / 执行根 / 分支视图 / 冻结媒体能力）抛出异常时事务完整回滚，工具保持 READY 并按 {@code
  * admitFailureDelay} 有界重排。READY + completed approval 直接进入执行。WAITING_APPROVAL 只 complete TOOL
- * Work；RUNNING 旧 lease 恢复为 UNKNOWN（attempt 保留）+ version+1 + THREAD wake + complete，绝不重放
- * Tool；terminal 行只确保 THREAD Work 后 complete，不重复 bump version。
+ * Work；RUNNING 过期租约恢复为 UNKNOWN（attempt 保留）+ version+1 + THREAD wake + complete，绝不重放 Tool；terminal
+ * 行只确保 THREAD Work 后 complete，不重复 bump version。
  *
  * <p>执行：{@link ToolGateway#admit} 做纯本地 admission（Busy 按 retryAfter reschedule、Rejected 转
  * FAILED，两者都肯定无副作用，attempt 不变）， Admitted 后在任何副作用之前持久化 {@code READY -> RUNNING}，再由 {@link
@@ -122,7 +122,7 @@ public final class ToolProcessor implements AutoCloseable {
       try {
         prepare = store.transaction(tx -> prepareLocked(tx, claim, tx.now()));
       } catch (ExecutionScopeReadFailure failure) {
-        // 事务已完整回滚：工具未执行、也没有任何外部副作用，按旧 admission 失败路径有界重排。
+        // 事务已完整回滚：工具未执行、也没有任何外部副作用，按 admission 失败路径有界重排。
         return rescheduleScopeReadFailure(claim, failure);
       }
       return switch (prepare) {
@@ -243,11 +243,11 @@ public final class ToolProcessor implements AutoCloseable {
    * 冻结本次执行的上下文事实：Thread 自身会话、不可变执行根与其会话、该调用的 assistant 分支入口、该 Contributor 在该 assistant
    * 分支上的只读视图，以及该调用 TURN_START 已冻结的消费者媒体能力。
    *
-   * <p>事实全部来自当前已锁定 Thread 与该调用 assistant path 的同一事务读取，因此 admission 与工具执行都不再查询 Harness 存储。执行根会话
+   * <p>事实全部来自当前已锁定 Thread 与该调用 assistant path 的同一事务读取，因此 admission 与工具执行无需查询 Harness 存储。执行根会话
    * 从真实执行根 Thread 行读取，缺失时显式失败，绝不按当前 Thread 合成。
    *
    * <p>任一读取抛出 {@link RuntimeException} 时包装为 {@link ExecutionScopeReadFailure} 重抛，使 prepare
-   * 事务完整回滚，再由 {@link #process} 按旧 admission 失败路径有界重排；事实本身绝不回落默认值。
+   * 事务完整回滚，再由 {@link #process} 按 admission 失败路径有界重排；事实本身绝不回落默认值。
    */
   private static ExecutionScope executionScope(
       HarnessStore.Transaction tx, ThreadState thread, ToolInvocation tool) {
@@ -356,9 +356,7 @@ public final class ToolProcessor implements AutoCloseable {
     return recoverUnknown(tx, claim, thread, tool, now);
   }
 
-  /**
-   * 旧 lease 过期恢复：执行持有者已失效，绝不重放 Tool。RUNNING 表示可能已产生副作用；如实给出中断原因与最后已知状态，并明确外部效果未知， 交给下一轮模型自行决定查询或重试。
-   */
+  /** 过期租约恢复：执行持有者已失效，绝不重放 Tool。RUNNING 表示可能已产生副作用；如实给出中断原因与最后已知状态，并明确外部效果未知， 交给下一轮模型自行决定查询或重试。 */
   private Prepare recoverUnknown(
       HarnessStore.Transaction tx,
       ClaimedWork claim,
@@ -709,11 +707,11 @@ public final class ToolProcessor implements AutoCloseable {
   }
 
   /**
-   * 执行上下文事实读取失败（例如分支 / TURN_START 查询异常）：prepare 事务已完整回滚，工具未执行、也没有任何外部副作用。沿用引入 scope 之前的 admission
-   * 失败语义，按 {@code admitFailureDelay} 有界重排；锁后重新校验 claim + Thread + READY + attempt， 任一不再成立即完整
-   * no-op（绝不写入、绝不改 attempt）。
+   * 执行上下文事实读取失败（例如分支 / TURN_START 查询异常）：prepare 事务已完整回滚，工具未执行、也没有任何外部副作用。按 {@code
+   * admitFailureDelay} 有界重排；锁后重新校验 claim + Thread + READY + attempt，任一条件不满足即完整 no-op（绝不写入、绝不改
+   * attempt）。
    *
-   * <p>只处理新增 scope 读取的失败：其它 prepare 错误保持原样抛出，绝不被这里捕获或重排。
+   * <p>只处理 scope 读取的失败：其它 prepare 错误保持原样抛出，绝不被这里捕获或重排。
    */
   private ProcessResult rescheduleScopeReadFailure(
       ClaimedWork claim, ExecutionScopeReadFailure failure) {
@@ -960,8 +958,8 @@ public final class ToolProcessor implements AutoCloseable {
   /**
    * 执行上下文事实（会话 / 执行根 / 分支视图 / 冻结媒体能力）在 prepare 事务内读取失败的回滚信号。
    *
-   * <p>只在 {@link #executionScope} 内产生：携带已锁定的 Thread 与 attempt，使 {@link #process} 能在事务回滚后按旧
-   * admission 失败 路径锁后重新校验并重排；它不表达持久事实，原始失败保留为 cause，绝不被吞掉。
+   * <p>只在 {@link #executionScope} 内产生：携带已锁定的 Thread 与 attempt，使 {@link #process} 能在事务回滚后按 admission
+   * 失败路径锁后重新校验并重排；它不表达持久事实，原始失败保留为 cause，绝不被吞掉。
    */
   private static final class ExecutionScopeReadFailure extends RuntimeException {
 
@@ -994,7 +992,7 @@ public final class ToolProcessor implements AutoCloseable {
 
     record Lost() implements Prepare {}
 
-    /** 内部人工输入工具：READY 边界已冻结为 WAITING_INPUT，不再进入 preflight / gateway。 */
+    /** 内部人工输入工具：READY 边界已冻结为 WAITING_INPUT，不进入 preflight / gateway。 */
     record Input(UUID threadId) implements Prepare {}
 
     /** 普通 gateway preflight（锁内 YOLO 快照为 false）。 */

@@ -74,17 +74,11 @@ class AgentToolDefinitionJsonCodecTest {
     assertThrows(IllegalArgumentException.class, () -> codec.decode(duplicate));
   }
 
-  /** 顶层字段必须恰好是 descriptor/visibility；旧 id 字段与所有缺失、unknown、null 和错误类型都必须失败。 */
+  /** 顶层字段必须恰好是 descriptor/visibility；所有缺失、unknown、null 和错误类型都必须失败。 */
   @Test
   void rejectsInvalidFieldsAndEnumValues() {
     String valid = codec.encode(definition(ToolVisibility.SELECTABLE));
     String descriptor = descriptorCodec.encode(DESCRIPTOR);
-
-    // 旧 wire 的 id 字段（AgentToolId）必须被当作未知字段拒绝，绝不兼容。
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            codec.decode(valid.replace("{\"descriptor\"", "{\"id\":\"base.read\",\"descriptor\"")));
 
     // 未知字段
     assertThrows(

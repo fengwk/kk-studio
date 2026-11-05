@@ -340,7 +340,7 @@ class IssueTransitionServiceTest {
     verify(runs, never()).updateById(any(), anyLong());
   }
 
-  /** 测试意图：锁内发现活动 Run 已闭合（并发收尾获胜）时按"没有活动 Run"拒绝，不再继续写交接。 */
+  /** 测试意图：锁内发现活动 Run 已闭合（并发收尾获胜）时按"没有活动 Run"拒绝，不继续写入交接。 */
   @Test
   void rejectsRunClosedBetweenLookupAndLock() {
     IssueRun terminal = activeRun(null);

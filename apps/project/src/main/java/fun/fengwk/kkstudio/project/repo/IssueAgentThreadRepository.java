@@ -121,16 +121,4 @@ public class IssueAgentThreadRepository {
     }
     return changed;
   }
-
-  /** 判定 Session 是否存在 Issue+Agent 稳定归属。 */
-  public boolean existsBySessionId(UUID sessionId) {
-    Objects.requireNonNull(sessionId, "sessionId");
-    return jdbc.sql(
-            "select exists("
-                + " select 1"
-                + " from project_issue_agent_thread where session_id = :sessionId)")
-        .param("sessionId", sessionId)
-        .query((resultSet, rowNumber) -> resultSet.getBoolean(1))
-        .single();
-  }
 }

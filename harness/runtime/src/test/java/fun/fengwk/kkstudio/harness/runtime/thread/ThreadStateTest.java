@@ -321,7 +321,7 @@ class ThreadStateTest {
   void advanceHeadPreservesRootAndYoloAndBumpsVersionByOne() {
     ThreadState stored =
         state(id(7), id(100), id(42), true, ThreadExecutionControl.RUNNABLE, 3L, 5L, CREATED);
-    // head 推进恒保留当前 yolo policy（不再接受外部传入值，杜绝 terminal / resolver 路径写回过期策略），仅 bump 一次 version。
+    // head 推进恒保留当前 yolo policy（不接受外部传入值，杜绝 terminal / resolver 路径写回过期策略），仅 bump 一次 version。
     ThreadState head = stored.advanceHead(id(99), CREATED.plusSeconds(2));
     assertEquals(id(99), head.headEntryId());
     // 推进 head 必须完整保留执行根。

@@ -266,7 +266,7 @@ public final class ExecutionExitLedger {
     return true;
   }
 
-  public static void settleStoppedAncestors(HarnessStore.Transaction tx, UUID threadId) {
+  private static void settleStoppedAncestors(HarnessStore.Transaction tx, UUID threadId) {
     Objects.requireNonNull(tx, "tx");
     Objects.requireNonNull(threadId, "threadId");
     for (UUID ancestorId : tx.threads().findAncestorChain(threadId)) {

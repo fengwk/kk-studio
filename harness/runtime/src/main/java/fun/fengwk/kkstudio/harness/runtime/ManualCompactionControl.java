@@ -200,7 +200,7 @@ final class ManualCompactionControl {
             : ManualCompactionAvailability.DisabledReason.NO_RESOLVED_CONTEXT);
   }
 
-  /** 在当前已锁定事务中原子提交压缩 Turn 及其 Model Work 或失败终态；不再重验 version / head / Command 快照。 */
+  /** 在当前已锁定事务中原子提交压缩 Turn 及其 Model Work 或失败终态。 */
   private CompactThreadResult commitManual(
       HarnessStore.Transaction tx, ManualPlan plan, TurnResolution result) {
     Instant now = tx.now();

@@ -240,7 +240,7 @@ class CommandHarvestReducerTest {
     assertNull(result.environmentName());
   }
 
-  /** 测试意图：相同文本的再次设置仍是新目标（新 id，旧报告因此失效），清除把 Goal 置回 null；两者都只改 settings。 */
+  /** 测试意图：相同文本的再次设置仍是新目标（新 id，先前报告因此失效），清除把 Goal 置回 null；两者都只改 settings。 */
   @Test
   void repeatedGoalTextGetsFreshIdAndClearDropsGoal() {
     BranchSettings first =

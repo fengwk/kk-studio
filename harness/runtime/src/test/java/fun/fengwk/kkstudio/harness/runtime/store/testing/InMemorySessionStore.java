@@ -51,7 +51,7 @@ final class InMemorySessionStore implements SessionStore {
   @Override
   public Optional<Session> lockForKeyShare(UUID id) {
     tx.checkOpen();
-    // 已持有的行锁重复获取不改变加锁顺序，因此不再做 rank 回退检查（幂等重锁）。
+    // 已持有的行锁重复获取不改变加锁顺序，因此不做 rank 回退检查（幂等重锁）。
     InMemoryHarnessLocks.LockKey lockKey = InMemoryHarnessLocks.LockKey.session(id);
     if (!tx.locks().isLocked(lockKey)) {
       tx.locks().requireCanLockRank(InMemoryHarnessLocks.LockRank.SESSION);

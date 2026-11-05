@@ -1,8 +1,6 @@
 package fun.fengwk.kkstudio.plugin.minimaxmavis;
 
 import java.time.Duration;
-import java.util.Locale;
-import java.util.Optional;
 
 /**
  * MiniMax Mavis 的 15 项模型能力与网关 MCP endpoint 的稳定映射。
@@ -59,19 +57,5 @@ public enum MavisCapability {
   /** 单次请求超时。 */
   public Duration requestTimeout() {
     return requestTimeout;
-  }
-
-  /** 按工具名查找能力；未知名返回空。 */
-  public static Optional<MavisCapability> fromToolName(String toolName) {
-    if (toolName == null || toolName.isBlank()) {
-      return Optional.empty();
-    }
-    String normalized = toolName.trim().toLowerCase(Locale.ROOT);
-    for (MavisCapability capability : values()) {
-      if (capability.toolName().equals(normalized)) {
-        return Optional.of(capability);
-      }
-    }
-    return Optional.empty();
   }
 }

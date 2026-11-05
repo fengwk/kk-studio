@@ -172,7 +172,7 @@ class MiniMaxMavisToolExecutionTest {
         arguments, invokeRequest.body(), "MCP request body must match input arguments JSON");
 
     // 校验结果内容形态
-    if (MiniMaxMavisTool.stagesMedia(capability)) {
+    if (stagesMedia(capability)) {
       assertFalse(result.contents().isEmpty(), "Media capability must produce contents");
       for (var content : result.contents()) {
         assertInstanceOf(
@@ -257,6 +257,19 @@ class MiniMaxMavisToolExecutionTest {
       case GENERATE_MUSIC -> "{\"prompt\":\"A soft jazz tune\"}";
       case SUBMIT_VIDEO -> "{\"duration\":5,\"model\":\"MiniMax-H3\",\"prompt\":\"sunset over ocean\"}";
       case QUERY_VIDEO -> "{\"model\":\"MiniMax-H3\",\"task_id\":\"task-abc-123\"}";
+    };
+  }
+
+  private static boolean stagesMedia(MavisCapability capability) {
+    return switch (capability) {
+      case TTS,
+          TTS_BATCH,
+          GENERATE_IMAGE,
+          GENERATE_MUSIC,
+          IMAGE_SEARCH,
+          REVERSE_IMAGE,
+          QUERY_VIDEO -> true;
+      default -> false;
     };
   }
 

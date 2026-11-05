@@ -173,8 +173,8 @@ public record ThreadState(
   }
 
   /**
-   * 在一个原子步骤中推进 head Entry cursor，恒保留当前冻结的 YOLO runtime policy 与输入水位（不再接受外部传入值，杜绝 terminal /
-   * resolver 提交路径写入过期策略）；{@code version} 严格 +1。
+   * 在一个原子步骤中推进 head Entry cursor，恒保留当前冻结的 YOLO runtime policy 与输入水位（不接受外部传入值，杜绝 terminal / resolver
+   * 提交路径写入过期策略）；{@code version} 严格 +1。
    */
   public ThreadState advanceHead(UUID headEntryId, Instant now) {
     return copy(

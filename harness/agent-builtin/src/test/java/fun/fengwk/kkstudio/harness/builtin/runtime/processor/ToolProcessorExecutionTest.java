@@ -912,7 +912,7 @@ class ToolProcessorExecutionTest {
         materializer);
   }
 
-  /** cancel 之后到达的 partial 直接丢弃：执行体已 abandon，实时投影不再发布。 */
+  /** cancel 之后到达的 partial 直接丢弃：执行体已 abandon，实时投影不发布。 */
   @Test
   void partialAfterCancelIsDropped() throws Exception {
     Fixture fixture = approvedFixture();

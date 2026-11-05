@@ -239,7 +239,8 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
         issueLifecycleService.stopIssue(
             inDesign.getId(), inDesign.getVersion(), key("stop"), "人工终止");
     assertEquals("USER", stopped.getPauseReason());
-    assertEquals(IssueRunStatus.CANCELLED, issueRunService.getRun(accepted.getId()).getStatus());
+    assertEquals(
+        IssueRunStatus.CANCELLED, issueRunRepository.getById(accepted.getId()).getStatus());
 
     IssueRun replayed = issueRunService.acceptRun(issue.getId(), acceptKey);
     assertEquals(accepted.getId(), replayed.getId());
@@ -268,7 +269,7 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
             () -> issueRunService.acceptRun(issue.getId(), key("accept")));
 
     assertTrue(rejected.getMessage().contains("active run"), rejected.getMessage());
-    assertEquals(active.getId(), issueRunService.getActiveRun(issue.getId()).getId());
+    assertEquals(active.getId(), issueRunRepository.getActiveByIssueId(issue.getId()).getId());
     assertEquals(
         1L, count("select count(*) from project_issue_run where issue_id = ?", issue.getId()));
     assertEquals(1L, count("select count(*) from harness_session"));
@@ -630,7 +631,7 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
                 null,
                 null));
 
-    IssueRun stored = issueRunService.getRun(run.getId());
+    IssueRun stored = issueRunRepository.getById(run.getId());
     assertEquals(IssueRunStatus.COMPLETED, stored.getStatus());
     assertEquals(firstEnd, stored.getEndEntryId());
     assertEquals(
@@ -680,7 +681,7 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
         () ->
             issueRunService.finishRun(
                 run.getId(), stale, key("fail"), IssueRunStatus.FAILED, end, null, null, "失败"));
-    assertEquals(IssueRunStatus.WAITING, issueRunService.getRun(run.getId()).getStatus());
+    assertEquals(IssueRunStatus.WAITING, issueRunRepository.getById(run.getId()).getStatus());
   }
 
   /**
@@ -723,7 +724,7 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
                 "REVIEW",
                 null));
 
-    IssueRun unchanged = issueRunService.getRun(run.getId());
+    IssueRun unchanged = issueRunRepository.getById(run.getId());
     assertEquals(IssueRunStatus.RUNNING, unchanged.getStatus());
     assertNull(unchanged.getEndEntryId());
     assertEquals("DESIGN", issueEditingService.getIssue(issue.getId()).getState());
@@ -752,7 +753,7 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
                 run.getStartEntryId(),
                 "REVIEW",
                 null));
-    assertEquals(IssueRunStatus.RUNNING, issueRunService.getRun(run.getId()).getStatus());
+    assertEquals(IssueRunStatus.RUNNING, issueRunRepository.getById(run.getId()).getStatus());
   }
 
   /** 失败允许空区间（接受后还没有任何产出就要能安全停止），并与 ERROR 暂停门禁同事务写入；恢复必须显式。 */
@@ -898,7 +899,7 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
     }
   }
 
-  /** WAITING/RUNNING 的重复置位是空重放：丢响应后的旧版本重试不再冲突，也不重复消耗额度或推进 Run 版本。 */
+  /** WAITING/RUNNING 的重复置位是空重放：丢响应后的重试不冲突，也不重复消耗额度或推进 Run 版本。 */
   @Test
   void waitAndResumeAreIdempotentOnLostResponseRetry() {
     String agent = createAgent();
@@ -945,7 +946,7 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
             () -> issueRunService.resumeRun(waiting.getId(), waiting.getVersion()));
     assertTrue(rejected.getMessage().contains("gate is closed"), rejected.getMessage());
 
-    IssueRun unchanged = issueRunService.getRun(waiting.getId());
+    IssueRun unchanged = issueRunRepository.getById(waiting.getId());
     assertEquals(IssueRunStatus.WAITING, unchanged.getStatus());
     assertNull(unchanged.getActiveSince());
     assertTrue(issueEditingService.getIssue(issue.getId()).isBlocked());

@@ -37,7 +37,7 @@ public record CanvasFunctionFrozenRun(
   public CanvasFunctionFrozenRun {
     Objects.requireNonNull(canvasId, "canvasId");
     Objects.requireNonNull(nodeId, "nodeId");
-    requireText(nodeName, "nodeName");
+    CanvasFunctionFrozenSupport.requireText(nodeName, "nodeName");
     Objects.requireNonNull(requestId, "requestId");
     Objects.requireNonNull(binding, "binding");
     CanvasFunctionDefinition definition = binding.definition();
@@ -63,7 +63,7 @@ public record CanvasFunctionFrozenRun(
       }
     }
     Objects.requireNonNull(submitState, "submitState");
-    requireText(stage, "stage");
+    CanvasFunctionFrozenSupport.requireText(stage, "stage");
     adapterState =
         Collections.unmodifiableMap(
             new LinkedHashMap<>(Objects.requireNonNull(adapterState, "adapterState")));
@@ -90,11 +90,5 @@ public record CanvasFunctionFrozenRun(
       throw new IllegalArgumentException("output index is outside the frozen output plan");
     }
     return outputs.get(index);
-  }
-
-  private static void requireText(String value, String field) {
-    if (value == null || value.isBlank()) {
-      throw new IllegalArgumentException(field + " must not be blank");
-    }
   }
 }

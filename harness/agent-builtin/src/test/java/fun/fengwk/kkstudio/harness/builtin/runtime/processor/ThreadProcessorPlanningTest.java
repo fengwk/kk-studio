@@ -107,7 +107,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
     assertEquals(ThreadProcessResult.COMPLETED, processor.process(claim));
   }
 
-  /** 测试意图：INPUT 收获快照内全部 queued Command（不再在首条 user-like 后截断），按 sequence 有序物化，且顺序稳定。 */
+  /** 测试意图：INPUT 收获快照内全部 queued Command，按 sequence 有序物化，且顺序稳定。 */
   @Test
   void inputConsumesWholeQueuedSnapshotInOrder() {
     Fixture fixture = fixture();
@@ -821,7 +821,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
         ThreadCommandState.QUEUED,
         command(fixture.store, baseline.threadId(), settingsCommand).state());
 
-    // 2. 将 allowsQueuedInputHarvest 改为 true，再次请求并处理
+    // 2. 将 allowsQueuedInputHarvest 设置为 true，再次请求并处理
     fakeDriver.withAllowsQueuedInputHarvest(true);
     requestThreadWork(fixture.store, baseline.threadId());
     ClaimedWork claim2 = claimThreadWork(fixture.store, baseline.threadId());

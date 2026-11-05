@@ -151,7 +151,7 @@ class HarnessNamesTest {
 
   @Test
   void sessionNameIsDerivedFromFinalCustomUserMessage() {
-    // USER CUSTOM_MESSAGE 同样是合法的末尾 USER 消息，其文本参与命名（contributor 注入的用户消息不再被忽略）。
+    // USER CUSTOM_MESSAGE 同样是合法的末尾 USER 消息，其文本参与命名。
     UUID sessionId = TestIds.id(111);
     UUID threadId = TestIds.id(112);
     runtime.acceptCommands(

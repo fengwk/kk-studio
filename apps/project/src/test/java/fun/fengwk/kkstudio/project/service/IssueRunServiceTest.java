@@ -60,7 +60,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * 显式 Run 接受：每次 Run 先分配 runId 并作为 root Join ticket 的 invocationId，命令批按固定顺序显式设置
  * Agent/Execution/Environment，最后以恰一条 CUSTOM_MESSAGE 启动任务。
  *
- * <p>测试意图：断言接受方提交的 Harness 契约形状（只有通用命令与一条渲染好的 Markdown 任务消息、Join 身份、历史起点），并断言收尾不再写任何 Harness 状态；Run
+ * <p>测试意图：断言接受方提交的 Harness 契约形状（只有通用命令与一条渲染好的 Markdown 任务消息、Join 身份、历史起点），并断言收尾不向 Harness 写入状态；Run
  * 记录、Join 与命令的原子性由平台集成测试覆盖。
  */
 class IssueRunServiceTest {
@@ -246,7 +246,7 @@ class IssueRunServiceTest {
     verify(issueRunRepository, never()).insert(any());
   }
 
-  /** 测试意图：Run 收尾只收敛 Project 自己的行，不再向 Harness 接受任何状态写入（旧实现的 scope 闭合批次彻底消失）。 */
+  /** 测试意图：Run 收尾只收敛 Project 自己的行，不向 Harness 写入任何状态。 */
   @Test
   void completeRunWritesNoHarnessState() {
     UUID threadId = UUID.randomUUID();

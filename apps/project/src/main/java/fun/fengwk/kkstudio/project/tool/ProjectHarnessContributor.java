@@ -12,7 +12,7 @@ import java.util.Set;
 /**
  * 注册 Issue 交接工具的 Harness Contributor。
  *
- * <p>{@code issue_transition} 是 SELECTABLE 工具：由 Issue Agent 的配置显式声明，运行时不再按 Thread owner 注入。本
+ * <p>{@code issue_transition} 是 SELECTABLE 工具：由 Issue Agent 的配置显式声明，运行时不按 Thread owner 隐式注入。本
  * contributor 不注册任何 custom entry type 或上下文投影器——Issue 的运行上下文只由接受 Run 时的 Markdown 任务消息承载，交接授权只来自
  * Project 自己的 Run 记录。
  */

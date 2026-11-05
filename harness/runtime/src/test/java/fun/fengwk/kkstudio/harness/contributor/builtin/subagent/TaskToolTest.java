@@ -38,7 +38,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * TaskTool 薄适配器的严格参数解析、持久接受委托与错误降级测试。
  *
  * <p>异步契约下 TaskTool 只有「持久接受」一个阶段：接受成功即回一次英文自然语言接受正文（首行 {@code Task accepted. thread_id: <uuid>.}）的
- * tool_result，不等待终态、不返回可取消句柄；busy follow-up 时正文额外说明已取代旧的 pending wait，只会有一份汇总结果。
+ * tool_result，不等待终态、不返回可取消句柄；busy follow-up 时正文额外说明已取代先前 pending wait，只会有一份汇总结果。
  */
 class TaskToolTest {
 
@@ -209,7 +209,7 @@ class TaskToolTest {
     assertTrue(result.detailsJson().contains("\"replayed\":true"));
   }
 
-  /** busy follow-up：Runner 报告取代了旧未完成委派时，回执正文明确只会有最新一次的一份汇总结果。 */
+  /** busy follow-up：Runner 报告取代了先前未完成委派时，回执正文明确只会有最新一次的一份汇总结果。 */
   @Test
   void reportsReplacedPendingWaitOnContinuation() throws Exception {
     TaskTool tool = new TaskTool(request -> replacedAcceptance());

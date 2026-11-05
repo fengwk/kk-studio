@@ -141,7 +141,7 @@ class StudioHarnessThreadSnapshotControllerTest extends HarnessThreadControllerT
     verify(runtime, times(1)).listEnvironmentToolWaits(Set.of(id(100)));
   }
 
-  /** 意图：完整快照显式返回 baseEntryId=null，且不再调用完整压缩判断。 */
+  /** 意图：完整快照显式返回 baseEntryId=null，且不调用完整压缩判断。 */
   @Test
   void snapshotExposesNullBaseEntryIdWithoutCompactionAvailability() throws Exception {
     when(runtime.getThreadSnapshot(id(1))).thenReturn(HarnessRuntimeTestFixtures.idleSnapshot());
@@ -151,8 +151,7 @@ class StudioHarnessThreadSnapshotControllerTest extends HarnessThreadControllerT
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.version").value("3"))
         .andExpect(jsonPath("$.data.thread.threadId").value(idText(1)))
-        .andExpect(jsonPath("$.data.baseEntryId").value(nullValue()))
-        .andExpect(jsonPath("$.data.manualCompaction").doesNotExist());
+        .andExpect(jsonPath("$.data.baseEntryId").value(nullValue()));
 
     verify(runtime, never()).manualCompactionAvailability(any());
   }

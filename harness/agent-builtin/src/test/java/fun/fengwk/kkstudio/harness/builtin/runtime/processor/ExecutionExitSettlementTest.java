@@ -460,7 +460,7 @@ class ExecutionExitSettlementTest {
    * 为子 Thread 插入一个已应用源命令与指向直接父的 NOTIFY_PARENT Join；源身份取自该 Thread 当前路径上的真实 TURN_START 与 USER 消息。
    *
    * <p>路径从 Thread 当前 head 回溯：叶子 Thread 的 head 是 assistant 结果，祖先 Thread 的 head 停在 USER 消息；两种形状都自带自有
-   * TURN_START 与真实输入，因此这里不再按 assistant 结果回退 head。
+   * TURN_START 与真实输入，因此无需按 assistant 结果回退 head。
    */
   private static void insertAppliedJoin(HarnessStore store, UUID childId, UUID joinId) {
     store.transaction(

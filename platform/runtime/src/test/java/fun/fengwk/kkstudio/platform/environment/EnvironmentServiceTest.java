@@ -454,7 +454,7 @@ class EnvironmentServiceTest {
     return new EnvironmentService(repo, mock(EnvironmentRegistry.class), snapshot, CLOCK);
   }
 
-  /** 测试意图：在线轮换必须被允许——不再查询/拒绝活跃 lease，既有连接不被主动断开；轮换只改变 token 并推进版本。 */
+  /** 测试意图：在线轮换被允许且不要求离线，既有连接不被主动断开；轮换只改变 token 并推进版本。 */
   @Test
   void rotateTokenAllowedWhileLeaseIsActive() {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
@@ -523,7 +523,7 @@ class EnvironmentServiceTest {
   }
 
   /**
-   * 测试意图：Card 不再内嵌历史事件；有历史 WARN 且当前 READY 时只暴露当前 READY 状态， 而完整历史（历史 WARN 与后续 READY）仍由 events
+   * 测试意图：Card 不内嵌历史事件；有历史 WARN 且当前 READY 时只暴露当前 READY 状态，而完整历史（历史 WARN 与后续 READY）仍由 events
    * 端点按时间正序保留，不以删除事件让卡片干净。
    */
   @Test
@@ -939,7 +939,7 @@ class EnvironmentServiceTest {
     assertThrows(DomainException.class, () -> service.delete(EnvironmentId.of(ENV_ID), "0"));
   }
 
-  /** 测试意图：租约/心跳窗口已过期的连接用同一时钟派生为 OFFLINE，并且不再对外暴露可用能力。 */
+  /** 测试意图：租约/心跳窗口已过期的连接用同一时钟派生为 OFFLINE，不对外暴露可用能力。 */
   @Test
   void expiredConnectionReadsAsOfflineWithoutUsableCapabilities() {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);

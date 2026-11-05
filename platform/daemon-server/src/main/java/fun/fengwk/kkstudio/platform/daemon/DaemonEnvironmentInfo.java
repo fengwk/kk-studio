@@ -41,7 +41,7 @@ public record DaemonEnvironmentInfo(
    *
    * <p>该值来自 Daemon 真实采集的宿主事实（{@code os.arch}）；未知事实用 {@code null} 表达，不填造取值。
    */
-  public static String validateArchitecture(String value) {
+  private static String validateArchitecture(String value) {
     if (value == null) {
       return null;
     }

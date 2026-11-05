@@ -68,6 +68,7 @@ import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.Project;
 import fun.fengwk.kkstudio.project.repo.IssueActivityRepository;
+import fun.fengwk.kkstudio.project.repo.IssueRunRepository;
 import fun.fengwk.kkstudio.project.service.IssueEditingService;
 import fun.fengwk.kkstudio.project.service.IssueLifecycleService;
 import fun.fengwk.kkstudio.project.service.IssueRunService;
@@ -118,6 +119,7 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
   @Autowired protected IssueLifecycleService issueLifecycleService;
   @Autowired protected IssueStageBudgetService issueStageBudgetService;
   @Autowired protected IssueRunService issueRunService;
+  @Autowired protected IssueRunRepository issueRunRepository;
 
   /**
    * 用于把并发重放用例的第二个请求精确停在锁前 receipt 检查，构造确定性的「旧快照 → 并发提交 → receipt 命中」交错。

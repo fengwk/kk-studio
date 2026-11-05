@@ -92,7 +92,7 @@ class TurnPlanTest {
             TurnStartReason.CONTINUATION,
             null);
     assertTrue(withDeferred.hasDeferredUserMessages());
-    // 同一命令已被消费 -> 不再需要 wake。
+    // 同一命令已被消费 -> 不需要 wake。
     TurnPlan consumed =
         new TurnPlan(
             baseline.threadId(),

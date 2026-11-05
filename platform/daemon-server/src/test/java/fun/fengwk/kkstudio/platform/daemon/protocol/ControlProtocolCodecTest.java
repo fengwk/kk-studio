@@ -343,7 +343,7 @@ class ControlProtocolCodecTest {
                     .setDocumentId(open.getDocumentId())
                     .setBindingEpoch(1))
             .build());
-    // DETACH_VIEW 已无生产调用方：控制平面不再接受该动作，即使字段形状与其它 bound 动作一致。
+    // 未声明的枚举值必须被拒绝，即使其它字段形状与 bound 动作一致。
     assertThrows(
         ControlProtocolException.class,
         () ->
@@ -351,12 +351,12 @@ class ControlProtocolCodecTest {
                 command.toBuilder()
                     .setIdeCommand(
                         IdeCommand.newBuilder()
-                            .setActionValue(5)
+                            .setActionValue(999)
                             .setViewId(open.getViewId())
                             .setDocumentId(open.getDocumentId())
                             .setBindingEpoch(1))
                     .build()),
-        "DETACH_VIEW is retired; raw value 5 must be rejected");
+        "undeclared action value 999 must be rejected");
     ControlProtocolCodec.encodeBinary(
         command.toBuilder()
             .setIdeCommand(IdeCommand.newBuilder().setAction(IdeAction.LIST_VIEWS))

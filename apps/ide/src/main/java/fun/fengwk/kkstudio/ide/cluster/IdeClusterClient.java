@@ -35,11 +35,10 @@ import java.util.concurrent.TimeoutException;
 /**
  * 跨节点 IDE 元数据命令的简洁 HTTP 客户端：只承载小 metadata JSON（view 命令与 ViewDTO 回执），绝不传输环境字节。
  *
- * <p>每次调用最多一次认证 HTTP 请求，失败即上抛，绝不自动重放。响应体不再用 {@code readNBytes} 读取返回的 {@code InputStream}（{@code
- * HttpRequest.timeout} 不覆盖响应体读取，可在返回响应头后无限阻塞），而是交给一个私有的有界 {@link
- * HttpResponse.BodySubscriber}：按到达字节数真正计数，一旦超过上限就 {@code subscription.cancel()} 并让 completion 异常完成，
- * 除等待用户确认的普通关闭外，以 {@code requestTimeout} 作为覆盖响应体的硬截止，取消订阅并关闭连接，绝不整包无界读取。大字节数据面（HTTP/WS 逐 exchange）由
- * gateway 宿主复用 {@link #signHeaders} 与既有流式客户端实现，不经过本类。
+ * <p>每次调用最多一次认证 HTTP 请求，失败即上抛，绝不自动重放。响应体交给私有的有界 {@link HttpResponse.BodySubscriber}
+ * 读取：按到达字节数真正计数，一旦超过上限就 {@code subscription.cancel()} 并让 completion 异常完成， 除等待用户确认的普通关闭外，以 {@code
+ * requestTimeout} 作为覆盖响应体的硬截止，取消订阅并关闭连接，绝不整包无界读取。大字节数据面（HTTP/WS 逐 exchange）由 gateway 宿主复用 {@link
+ * #signHeaders} 与既有流式客户端实现，不经过本类。
  */
 public class IdeClusterClient {
 

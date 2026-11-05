@@ -359,7 +359,7 @@ class PostgresqlHarnessStoreTransactionTest {
     assertEquals(2, executions.get(), "each registered action must run exactly once after commit");
   }
 
-  /** 测试意图：外层 Spring 事务 rollback 时 afterCommit 一次都不执行，durable 写入也保持回滚（不再出现“DB 未提交、进程内已取消”的分裂）。 */
+  /** 测试意图：外层 Spring 事务 rollback 时 afterCommit 一次都不执行，durable 写入也保持回滚，防范“DB 未提交、进程内已取消”的分裂。 */
   @Test
   void afterCommitDoesNotRunWhenTheOuterSpringTransactionRollsBack() {
     TransactionTemplate outer = outerTemplate();

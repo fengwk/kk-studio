@@ -108,6 +108,8 @@ class CanvasDtoMapperTest {
 
     when(blobManager.getBlob(blobId)).thenReturn(blob("audio/mpeg", 1L, null, null, 20L));
     assertEquals("AUDIO", mapper.toDto(video).getKind());
+    when(blobManager.getBlob(blobId)).thenReturn(blob("image/png", 1L, null, null, null));
+    assertEquals("IMAGE", mapper.toDto(video).getKind());
     when(blobManager.getBlob(blobId)).thenReturn(blob("text/plain", 1L, null, null, null));
     assertEquals("TEXT", mapper.toDto(video).getKind());
     when(blobManager.getBlob(blobId)).thenReturn(blob("application/pdf", 1L, null, null, null));

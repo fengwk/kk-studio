@@ -94,7 +94,7 @@ class CanvasJsonTest {
     }
   }
 
-  /** 非法 golden 样本：这些历史非法输入继续被严格拒绝，不做静默兜底。 */
+  /** 非法 golden 样本：非法输入被严格拒绝，不做静默兜底。 */
   @Test
   void rejectsGoldenInvalidSamples() throws IOException {
     for (CanvasJson item : fixtureArray("rejections").values()) {
@@ -103,7 +103,7 @@ class CanvasJsonTest {
     }
   }
 
-  /** B06：短指数输入展开后超过预算时必须在分配前拒绝（解析与手工构造一致），不依赖 Jackson 的 scale 限制。 */
+  /** 短指数输入展开后超过预算时必须在分配前拒绝（解析与手工构造一致），不依赖 Jackson 的 scale 限制。 */
   @Test
   void rejectsNumberExpansionBeyondLengthBudget() {
     assertThrows(IllegalArgumentException.class, () -> CanvasJson.parse("1e65536"));
@@ -119,7 +119,7 @@ class CanvasJsonTest {
                 .write());
   }
 
-  /** B06：不再受 Jackson plain BigDecimal 的 ±9999 scale 限制，正负大指数在预算内仍可写回并回读。 */
+  /** 正负大指数在预算内可写回并回读，不设 ±9999 scale 限制。 */
   @Test
   void acceptsLargeExponentWithinLengthBudget() {
     assertRoundTrip("1e10000", 10_001);
@@ -128,7 +128,7 @@ class CanvasJsonTest {
     assertRoundTrip("1e-65534", CanvasJson.MAX_LENGTH);
   }
 
-  /** B06：容器结构开销计入同一预算，单值恰好等于预算的容器结构仍可写回。 */
+  /** 容器结构开销计入同一预算，单值恰好等于预算的容器结构仍可写回。 */
   @Test
   void containerBudgetIncludesStructuralCharacters() {
     CanvasJson value = CanvasJson.parse("{\"n\":1e-65528}");
@@ -138,7 +138,7 @@ class CanvasJsonTest {
     assertEquals(value, CanvasJson.parse(canonical));
   }
 
-  /** B06：多个仍在单值预算内的数值累计越界时必须整体拒绝，累计边界两侧都要准确。 */
+  /** 多个仍在单值预算内的数值累计越界时必须整体拒绝，累计边界两侧都要准确。 */
   @Test
   void rejectsAccumulatedNumberExpansion() {
     // 单值明文各 33000 字符，对象累计 66011 > 预算。
@@ -159,7 +159,7 @@ class CanvasJsonTest {
                 .write());
   }
 
-  /** B06：长转义串不会放大 canonical，接近预算的合法串仍能稳定写回并回读。 */
+  /** 长转义串不会放大 canonical，接近预算的合法串仍能稳定写回并回读。 */
   @Test
   void longEscapedStringStaysWithinBudgetAndRoundTrips() {
     String input = "{\"s\":\"" + "\\u0001".repeat(10_000) + "\"}";
@@ -198,7 +198,7 @@ class CanvasJsonTest {
     assertThrows(IllegalArgumentException.class, tooDeep::write);
   }
 
-  /** 控制字符与对象键统一按小写 hex 转义，保留历史 canonical 字面与命令指纹。 */
+  /** 控制字符与对象键统一按小写 hex 转义，保持规范化 canonical 字面与命令指纹的一致性。 */
   @Test
   void escapesControlCharactersAsLowercaseHexInValuesAndKeys() {
     StringBuilder control = new StringBuilder();

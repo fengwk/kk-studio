@@ -36,9 +36,9 @@ import java.util.function.Function;
 
 /**
  * Tool admission 的冻结执行上下文事实：会话、执行根与其会话、该调用的 assistant 入口、assistant 分支视图与 TURN_START 冻结的消费者媒体能力都来自
- * Processor 已锁定的 Thread 与该调用的 assistant path，平台不再为此查询 Harness 存储。
+ * Processor 已锁定的 Thread 与该调用的 assistant path，平台无需为此查询 Harness 存储。
  *
- * <p>同时钉住两条恢复语义：远端重新挂接只连接既有远端执行、不读取这些事实；READY prepare 内读取这些事实失败时事务完整回滚并按旧 admission 失败路径有界重排。
+ * <p>同时钉住两条恢复语义：远端重新挂接只连接既有远端执行、不读取这些事实；READY prepare 内读取这些事实失败时事务完整回滚并按 admission 失败路径有界重排。
  */
 class ToolProcessorExecutionScopeTest {
 
@@ -179,7 +179,7 @@ class ToolProcessorExecutionScopeTest {
   }
 
   /**
-   * READY prepare 内分支读取抛异常：事务完整回滚，工具未执行，按旧 admission 失败路径（admitFailureDelay）重排，claim / READY /
+   * READY prepare 内分支读取抛异常：事务完整回滚，工具未执行，按 admission 失败路径（admitFailureDelay）重排，claim / READY /
    * attempt / Thread version 与状态都不变。
    */
   @Test

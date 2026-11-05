@@ -510,7 +510,7 @@ final class ConfigSyncFixtures {
     return new ArrayList<>(Arrays.asList(values));
   }
 
-  /** 读取与本 fixture 同包的测试 YAML 资源；长 YAML 不再以字符串拼接内联。 */
+  /** 读取与本 fixture 同包的测试 YAML 资源。 */
   static String resourceYaml(String name) {
     try (InputStream in = ConfigSyncFixtures.class.getResourceAsStream(name)) {
       if (in == null) {

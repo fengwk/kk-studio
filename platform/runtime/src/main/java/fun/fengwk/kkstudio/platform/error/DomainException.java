@@ -4,7 +4,7 @@ package fun.fengwk.kkstudio.platform.error;
  * 带稳定错误码的领域异常。
  *
  * <p>全仓领域失败只使用这一种异常。{@link DomainErrorCode} 属于 HTTP 契约；{@code resource} 是稳定的内部资源标识； {@code message}
- * 只描述失败本身，不回显底层异常文本。错误码、固定消息与可选版本坐标由命名工厂构造，调用方不再为每种错误码引入独立类型。
+ * 只描述失败本身，不回显底层异常文本。错误码、固定消息与可选版本坐标由命名工厂构造，统一定义领域失败契约。
  */
 public class DomainException extends RuntimeException {
 

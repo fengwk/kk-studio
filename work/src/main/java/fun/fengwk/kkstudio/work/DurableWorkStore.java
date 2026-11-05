@@ -150,10 +150,6 @@ public final class DurableWorkStore {
     this.jdbc = Objects.requireNonNull(jdbc, "jdbc");
   }
 
-  public String targetType() {
-    return targetType;
-  }
-
   /** 请求一次立即 wake：新行 wakeVersion=1；已有行递增 wakeVersion、due 取更早值并保留当前租约。 */
   public DurableWork request(UUID targetId) {
     return request(targetId, Duration.ZERO, null);
@@ -374,20 +370,6 @@ public final class DurableWorkStore {
               notifyIfClaimable(claim.targetId());
               return true;
             }));
-  }
-
-  /** 以数据库时钟判断 claim 是否仍持有有效租约。 */
-  public boolean isOwned(WorkClaim claim) {
-    Objects.requireNonNull(claim, "claim");
-    return Boolean.TRUE.equals(
-        jdbc.queryOne(
-                "select exists (select 1 from durable_work where target_type = ? and target_id = ?"
-                    + " and lease_token = ? and lease_until > statement_timestamp()) as owned",
-                (resultSet, rowNumber) -> resultSet.getBoolean("owned"),
-                targetType,
-                claim.targetId(),
-                claim.leaseToken())
-            .orElse(false));
   }
 
   /** 无条件删除 target 的 mailbox 行；返回是否实际删除。 */

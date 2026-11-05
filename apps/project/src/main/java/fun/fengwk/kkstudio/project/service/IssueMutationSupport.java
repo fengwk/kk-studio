@@ -192,7 +192,11 @@ final class IssueMutationSupport {
     return objectMapper.createObjectNode();
   }
 
-  private String writeJson(ObjectNode node) {
+  String writeJson(ObjectNode node) {
+    return writeJson(objectMapper, node);
+  }
+
+  static String writeJson(ObjectMapper objectMapper, ObjectNode node) {
     try {
       return objectMapper.writeValueAsString(node);
     } catch (JacksonException error) {

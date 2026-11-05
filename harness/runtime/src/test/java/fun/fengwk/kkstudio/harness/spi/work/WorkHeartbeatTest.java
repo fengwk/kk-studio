@@ -114,7 +114,7 @@ class WorkHeartbeatTest {
 
   /**
    * beat 与 stop 同锁互斥：在途 renew 事务（已获取 renewalLock 并进入 store 事务）执行期间， stop() 必须阻塞等待该事务完成释放锁；事务释放后
-   * stop() 顺利返回； stop() 返回后手动触发 tick 也绝不再开始任何 renewal 事务。
+   * stop() 顺利返回； stop() 返回后手动触发 tick 亦不开始任何 renewal 事务。
    */
   @Test
   void stopWaitsForInFlightBeatAndNoRenewAfterStopReturns() throws Exception {
@@ -221,7 +221,7 @@ class WorkHeartbeatTest {
 
     assertEquals(1, notifications.get());
     assertTrue(fixture.scheduler.scheduled.get(0).isCancelled());
-    // 已标记停止：再次触发不再 renew（也不再通知）。
+    // 已标记停止：再次触发不 renew（也不重复通知）。
     beat.run();
     assertEquals(1, notifications.get());
   }
@@ -342,7 +342,7 @@ class WorkHeartbeatTest {
     assertTrue(lostLatch.await(5, TimeUnit.SECONDS));
     assertEquals(1, notifications.get());
 
-    // 再次 start 仍返回 false，且不再重复通知
+    // 再次 start 仍返回 false，且不重复通知
     assertFalse(heartbeat.start(fixture.claimed));
     assertEquals(1, notifications.get());
   }
@@ -380,7 +380,7 @@ class WorkHeartbeatTest {
     assertTrue(
         fixture.scheduler.scheduled.get(0).isCancelled(), "future must be cancelled on rejection");
 
-    // 再次触发 tick 为 no-op，不再重复通知
+    // 再次触发 tick 为 no-op，不重复通知
     tick.run();
     assertEquals(1, notifications.get());
   }

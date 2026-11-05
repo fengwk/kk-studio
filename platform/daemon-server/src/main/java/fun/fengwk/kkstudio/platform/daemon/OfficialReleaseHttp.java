@@ -27,13 +27,13 @@ import java.util.Optional;
 public final class OfficialReleaseHttp {
 
   /** 允许的重定向跳数上界。 */
-  public static final int MAX_REDIRECTS = 5;
+  private static final int MAX_REDIRECTS = 5;
 
   /** 校验文件/元数据这类小正文的上界。 */
   public static final int MAX_TEXT_BODY_BYTES = 512 * 1024;
 
   /** 制品下载上界；与 Daemon JAR 的量级一致，避免无界磁盘占用。 */
-  public static final long MAX_ARTIFACT_BYTES = 256L * 1024 * 1024;
+  private static final long MAX_ARTIFACT_BYTES = 256L * 1024 * 1024;
 
   private static final String USER_AGENT = "kk-studio-official-release";
 

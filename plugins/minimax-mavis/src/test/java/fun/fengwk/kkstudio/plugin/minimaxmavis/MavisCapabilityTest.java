@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.plugin.minimaxmavis;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -94,18 +93,5 @@ class MavisCapabilityTest {
     assertEquals(Duration.ofSeconds(300), MavisCapability.UNDERSTAND_VIDEO.requestTimeout());
     assertEquals(Duration.ofSeconds(120), MavisCapability.WEB_SEARCH.requestTimeout());
     assertEquals(Duration.ofSeconds(120), MavisCapability.QUERY_VIDEO.requestTimeout());
-  }
-
-  /** 工具名可以反查回能力，未知名字返回空。 */
-  @Test
-  void resolvesCapabilityByToolName() {
-    assertEquals(
-        MavisCapability.UNDERSTAND_IMAGE,
-        MavisCapability.fromToolName("mavis_understand_image").orElseThrow());
-    assertEquals(
-        MavisCapability.WEB_SEARCH,
-        MavisCapability.fromToolName(" MAVIS_WEB_SEARCH ").orElseThrow());
-    assertFalse(MavisCapability.fromToolName("mavis_unknown").isPresent());
-    assertFalse(MavisCapability.fromToolName(null).isPresent());
   }
 }

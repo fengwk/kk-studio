@@ -88,7 +88,7 @@ class ToolExecutionGatewayAdmitTest {
     assertTrue(transport.invocations.isEmpty());
   }
 
-  /** 超时只在 admission 解析一次：该精确 Duration 原样交给工具实现，执行阶段不再二次解析。 */
+  /** 超时只在 admission 解析一次：该精确 Duration 原样交给工具实现，执行阶段不二次解析。 */
   @Test
   void timeoutIsResolvedExactlyOnceAtAdmission() throws Exception {
     ToolGatewayTestSupport.FakeTool tool = new ToolGatewayTestSupport.FakeTool(DESCRIPTOR);

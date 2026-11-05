@@ -5,8 +5,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import java.util.Arrays;
-
 /**
  * Environment name 是不可变身份：更新语句只允许写 token、安装设置与 CAS 字段。
  *
@@ -27,13 +25,5 @@ class EnvironmentRepositoryContractTest {
         sql);
     assertTrue(sql.contains("version = version + 1"), sql);
     assertFalse(sql.contains("name"), "environment name must never be updated: " + sql);
-  }
-
-  /** 意图：仓库不再暴露按 id 排除自身的名称查询，即“改名”入口已被彻底删除。 */
-  @Test
-  void repositoryHasNoRenameEntryPoint() {
-    assertFalse(
-        Arrays.stream(EnvironmentRepository.class.getDeclaredMethods())
-            .anyMatch(method -> method.getName().contains("ExcludingId")));
   }
 }

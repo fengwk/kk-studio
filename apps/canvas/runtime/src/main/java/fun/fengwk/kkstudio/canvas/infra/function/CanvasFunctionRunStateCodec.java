@@ -42,7 +42,7 @@ import java.util.regex.Pattern;
 @Component
 public final class CanvasFunctionRunStateCodec {
 
-  public static final int MAX_ADAPTER_STATE_BYTES = 64 * 1024;
+  private static final int MAX_ADAPTER_STATE_BYTES = 64 * 1024;
 
   private static final Pattern STAGE = Pattern.compile("[A-Z][A-Z0-9_]{0,63}");
   private static final Set<String> ROOT_FIELDS = Set.of("plan", "stage", "adapterState");
@@ -403,7 +403,7 @@ public final class CanvasFunctionRunStateCodec {
     return List.copyOf(outputs);
   }
 
-  public static void validateStage(String stage) {
+  private static void validateStage(String stage) {
     if (stage == null || !STAGE.matcher(stage).matches()) {
       throw invalid("stage must match " + STAGE.pattern());
     }

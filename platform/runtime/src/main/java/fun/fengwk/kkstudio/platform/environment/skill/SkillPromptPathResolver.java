@@ -77,7 +77,7 @@ public class SkillPromptPathResolver {
   }
 
   /** platform 托管的稳定 skill 资源路径。 */
-  public static String platformPath(String packageName, String skillName) {
+  private static String platformPath(String packageName, String skillName) {
     return PLATFORM_SKILLS_PREFIX + packageName + "/" + skillName + "/SKILL.md";
   }
 }

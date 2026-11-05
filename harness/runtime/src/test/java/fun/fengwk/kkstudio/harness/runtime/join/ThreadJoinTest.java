@@ -1398,7 +1398,7 @@ class ThreadJoinTest {
 
   @Test
   void supersededRecordsSuccessorAndKeepsIdentityAndQueuedPrompt() {
-    // 测试意图：supersede 只记录接管身份并保留 invocation identity / 排队源命令事实，且不再 matched。
+    // 测试意图：supersede 只记录接管身份并保留 invocation identity / 排队源命令事实，且不能 matched。
     ThreadJoin old = initialJoin(id(1), id(2), id(3));
     ThreadJoin once = old.superseded(id(9), T1);
 

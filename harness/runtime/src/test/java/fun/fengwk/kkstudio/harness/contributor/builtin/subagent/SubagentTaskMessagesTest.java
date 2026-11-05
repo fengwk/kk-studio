@@ -26,7 +26,7 @@ class SubagentTaskMessagesTest {
 
   @Test
   void replacedAcceptanceExplainsSingleConsolidatedResult() {
-    // 测试意图：busy follow-up 取代旧 pending wait 时，回执必须说明只会有最新一次的一份汇总结果。
+    // 测试意图：busy follow-up 取代先前 pending wait 时，回执必须说明只会有最新一次的一份汇总结果。
     UUID threadId = new UUID(0L, 2L);
     String message = SubagentTaskMessages.accepted(threadId, true);
     assertTrue(message.contains("replaces the previous pending wait"), message);

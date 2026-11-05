@@ -64,11 +64,8 @@ class MavisToolDefinitionsTest {
   /** 15 项能力全部有工具定义，名称与枚举派生一致且是合法模型工具名。 */
   @Test
   void loadsEveryCapabilityWithStableToolName() {
-    Map<MavisCapability, MavisToolDefinition> definitions = MavisToolDefinitions.loadAll();
-
-    assertEquals(MavisCapability.values().length, definitions.size());
     for (MavisCapability capability : MavisCapability.values()) {
-      MavisToolDefinition definition = definitions.get(capability);
+      MavisToolDefinition definition = MavisToolDefinitions.load(capability);
       assertEquals(capability, definition.capability());
       assertEquals(capability.toolName(), definition.name());
       assertTrue(ToolDescriptor.isValidName(definition.name()));

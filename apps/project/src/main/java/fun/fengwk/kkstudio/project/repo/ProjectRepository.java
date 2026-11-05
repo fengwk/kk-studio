@@ -182,12 +182,6 @@ public class ProjectRepository {
     return allocated;
   }
 
-  public List<Project> listAll() {
-    return jdbc.sql("select " + COLUMNS + " from project order by updated_at desc, id asc")
-        .query(ROW_MAPPER)
-        .list();
-  }
-
   public List<Project> listByArchived(boolean archived) {
     return jdbc.sql(
             "select "

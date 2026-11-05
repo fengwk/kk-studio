@@ -710,7 +710,7 @@ class PostgresqlJoinAcceptanceRollbackTest {
           store.transaction(tx -> tx.joins().find(joinInvocationId).orElseThrow());
       assertTrue(joinInPg.matched(), "Join must be matched in PostgreSQL");
       assertNotNull(joinInPg.terminalEntryId(), "Join must freeze a terminal entry");
-      // 子线程执行终止后持久执行控制保持 RUNNABLE（Join 配额按未完成 Join 计数，不再依赖递归 IDLE）
+      // 子线程执行终止后持久执行控制保持 RUNNABLE（Join 配额按未完成 Join 计数，不依赖递归 IDLE）
       ThreadState finalChildState =
           store.transaction(tx -> tx.threads().find(childThreadId).orElseThrow());
       assertEquals(ThreadExecutionControl.RUNNABLE, finalChildState.executionControl());

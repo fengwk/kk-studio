@@ -195,20 +195,6 @@ public class IssueRunRepository {
     return changed;
   }
 
-  public boolean deleteById(UUID id, long expectedVersion) {
-    IssueRun run = getById(id);
-    boolean changed =
-        jdbc.sql("delete from project_issue_run where id = :id and version = :expectedVersion")
-                .param("id", id)
-                .param("expectedVersion", expectedVersion)
-                .update()
-            == 1;
-    if (changed) {
-      notifier.issueChanged(run.getIssueId());
-    }
-    return changed;
-  }
-
   public int deleteByIssueId(UUID issueId) {
     int changed =
         jdbc.sql("delete from project_issue_run where issue_id = :issueId")

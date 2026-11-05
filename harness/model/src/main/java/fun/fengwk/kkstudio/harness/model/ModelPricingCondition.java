@@ -126,11 +126,11 @@ public record ModelPricingCondition(
    */
   public record RequestBody(String path, ScalarType type, String canonicalValue) {
 
-    public static final int MAX_PATH_BYTES = 512;
-    public static final int MAX_PATH_SEGMENTS = 16;
-    public static final int MAX_STRING_BYTES = 1024;
-    public static final int MAX_NUMBER_PRECISION = 64;
-    public static final int MAX_NUMBER_SCALE = 18;
+    private static final int MAX_PATH_BYTES = 512;
+    private static final int MAX_PATH_SEGMENTS = 16;
+    private static final int MAX_STRING_BYTES = 1024;
+    private static final int MAX_NUMBER_PRECISION = 64;
+    private static final int MAX_NUMBER_SCALE = 18;
 
     private static final Pattern JSON_NUMBER =
         Pattern.compile("-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?");

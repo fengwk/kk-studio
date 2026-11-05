@@ -128,13 +128,6 @@ public class IssueActivityRepository {
         .list();
   }
 
-  public long countByIssueId(UUID issueId) {
-    return jdbc.sql("select count(*) from project_issue_activity where issue_id = :issueId")
-        .param("issueId", issueId)
-        .query((resultSet, rowNumber) -> resultSet.getLong(1))
-        .single();
-  }
-
   public int deleteByIssueId(UUID issueId) {
     int changed =
         jdbc.sql("delete from project_issue_activity where issue_id = :issueId")

@@ -54,7 +54,7 @@ class ModelsDevCatalogParserTest {
     assertDecimal("0.4", pricing.getBase().getCacheRead());
     assertDecimal("5", pricing.getBase().getCacheWrite());
 
-    // input/output 各自保留原顺序，不再按条件合并。
+    // input/output 各自保留原顺序，不按条件合并。
     assertEquals(2, pricing.getOverrides().size());
     AgentModelPricingOverrideDTO input = pricing.getOverrides().get(0);
     assertEquals(272000, input.getWhen().getContext().getGt());
@@ -176,7 +176,7 @@ class ModelsDevCatalogParserTest {
     assertDecimal("0", costStandard.reasoning());
     assertDecimal("35.4", costStandard.total());
 
-    // fast 仍对所有文本与 TTL 缓存费率生效（x2），不再额外乘 region 1.1。
+    // fast 对所有文本与 TTL 缓存费率生效（x2），不额外乘 region 1.1。
     ModelCost costFast = ModelCost.calculate(modelPricing, usage, requestedAt, "fast");
     assertNotNull(costFast);
     assertDecimal("8", costFast.input());
@@ -309,7 +309,7 @@ class ModelsDevCatalogParserTest {
     assertEquals("override-1", pricing.getOverrides().get(1).getId());
     assertEquals("override-2", pricing.getOverrides().get(2).getId());
 
-    // 相同条件不再合并：第三条只补 cacheRead，不能清空前一条已应用的 input。
+    // 相同条件不合并：第三条只补 cacheRead，不影响前一条已应用的 input。
     assertEquals(100, pricing.getOverrides().get(0).getWhen().getContext().getGt());
     assertDecimal("1", pricing.getOverrides().get(0).getRates().getInput());
     assertNull(pricing.getOverrides().get(0).getRates().getCacheRead());

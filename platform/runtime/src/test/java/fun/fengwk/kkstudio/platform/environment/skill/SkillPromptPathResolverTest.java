@@ -144,8 +144,7 @@ class SkillPromptPathResolverTest {
   /** 测试意图：platform URI 是稳定的托管路径，与 registry 状态无关。 */
   @Test
   void platformPathIsStable() {
-    assertEquals(
-        "vfs:/skills/pkg/dev/SKILL.md", SkillPromptPathResolver.platformPath("pkg", "dev"));
+    assertEquals("vfs:/skills/pkg/dev/SKILL.md", resolver.resolve(null, "pkg", "dev", null));
   }
 
   /** 测试意图：package 与 skill 名是必填事实，缺失时立即失败而不是产生含糊路径。 */

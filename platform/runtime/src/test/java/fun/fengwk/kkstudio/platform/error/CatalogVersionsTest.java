@@ -10,7 +10,7 @@ class CatalogVersionsTest {
 
   @Test
   void rejectsNonCanonicalValuesAndNegativeInternalVersions() {
-    // 测试意图：领域异常只转发共同解析器的真实文案，不再按旧文案分支重写。
+    // 测试意图：领域异常直接转发共同解析器的真实文案。
     DomainException padded =
         assertThrows(DomainException.class, () -> CatalogVersions.parse(" 1", "expectedVersion"));
     assertEquals(

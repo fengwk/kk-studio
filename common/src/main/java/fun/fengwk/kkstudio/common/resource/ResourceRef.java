@@ -47,7 +47,7 @@ public record ResourceRef(String uri, String mediaType, String name, Long size, 
   private static final Pattern SHA256_PATTERN = Pattern.compile("[0-9a-f]{64}");
 
   /** {@code blob-upload} scheme 名。 */
-  public static final String BLOB_UPLOAD_SCHEME = "blob-upload";
+  private static final String BLOB_UPLOAD_SCHEME = "blob-upload";
 
   /** 完整 {@code blob-upload:<uploadId>} 形态：scheme + 规范小写 UUID，无任何其它成分。 */
   private static final Pattern BLOB_UPLOAD_PATTERN =
@@ -58,7 +58,7 @@ public record ResourceRef(String uri, String mediaType, String name, Long size, 
   public static final String SESSION_RESOURCE_SCHEME = "vfs";
 
   /** 规范 Session 资源前缀。 */
-  public static final String SESSION_RESOURCE_URI_PREFIX = "vfs:/resources/";
+  private static final String SESSION_RESOURCE_URI_PREFIX = "vfs:/resources/";
 
   /** 完整 {@code vfs:/resources/<canonical-uuid>} 形态：固定前缀加规范小写 UUID，无任何其它成分。 */
   private static final Pattern SESSION_RESOURCE_PATTERN =

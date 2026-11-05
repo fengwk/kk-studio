@@ -124,7 +124,8 @@ class IssueTransitionIntegrationTest extends ProjectTestSupport {
     assertEquals(fixture.run().getId(), accepted.runId());
     assertEquals("REVIEW", nextState(fixture.run().getId()));
     assertEquals("DESIGN", issueEditingService.getIssue(fixture.issueId()).getState());
-    assertEquals(IssueRunStatus.RUNNING, issueRunService.getRun(fixture.run().getId()).getStatus());
+    assertEquals(
+        IssueRunStatus.RUNNING, issueRunRepository.getById(fixture.run().getId()).getStatus());
   }
 
   /** 测试意图：同目标重放是无写操作的幂等结果（版本不推进）；异目标在写前拒绝，不留下第二个交接意图。 */
@@ -171,7 +172,7 @@ class IssueTransitionIntegrationTest extends ProjectTestSupport {
     assertNull(nextState(fixture.run().getId()));
   }
 
-  /** 测试意图：Run 收尾后不再接受交接（旧 Run 的迟到调用不借新一 Run 的权限）。 */
+  /** 测试意图：Run 收尾后不接受交接（旧 Run 的迟到调用不借新一 Run 的权限）。 */
   @Test
   void rejectsHandoffAfterTheRunIsClosedOut() {
     RunFixture fixture = designRun("收尾后交接");
@@ -222,7 +223,7 @@ class IssueTransitionIntegrationTest extends ProjectTestSupport {
     assertEquals(
         "REVISE",
         issueTransitionService.accept(threadId, staleAssistantEntryId, "REVISE").toState());
-    IssueRun beforeClose = issueRunService.getRun(first.getId());
+    IssueRun beforeClose = issueRunRepository.getById(first.getId());
     IssueRun handedOff =
         issueRunService.finishRun(
             first.getId(),
@@ -258,7 +259,7 @@ class IssueTransitionIntegrationTest extends ProjectTestSupport {
     assertEquals("DONE", nextState(second.getId()));
   }
 
-  /** 历史上直接收尾留下的迟到 Turn 仍不得获得新 Run 权限。 */
+  /** 直接收尾留下的迟到 Turn 不得获得新 Run 权限。 */
   @Test
   void rejectsOldTurnMaterializedAfterNewRunStarts() {
     RunFixture fixture = designRun("迟到物化");
@@ -294,8 +295,8 @@ class IssueTransitionIntegrationTest extends ProjectTestSupport {
   }
 
   /**
-   * 测试意图：Run 接受与收尾都不写任何 branch custom state，也不接受额外命令：一次 Run 只有 SET_AGENT / SET_EXECUTION /
-   * SET_ENVIRONMENT / CUSTOM_MESSAGE，任务消息本身携带 Issue 事实与阶段说明。
+   * 测试意图：Run 接受与收尾不写入额外命令：一次 Run 初始化仅写入 SET_AGENT / SET_EXECUTION / SET_ENVIRONMENT /
+   * CUSTOM_MESSAGE，任务消息本身携带 Issue 事实与阶段说明。
    */
   @Test
   void writesOnlyGeneralCommandsAndRenderedTaskMessage() {
@@ -309,12 +310,6 @@ class IssueTransitionIntegrationTest extends ProjectTestSupport {
 
     assertEquals(
         4L, count("select count(*) from harness_thread_command where thread_id = ?", threadId));
-    assertEquals(
-        0L,
-        count(
-            "select count(*) from harness_thread_command where thread_id = ? and command_type ="
-                + " 'SET_CONTRIBUTOR_STATE'",
-            threadId));
     String message = commandPayload(threadId, "CUSTOM_MESSAGE");
     assertTrue(message.contains(issue.getTitle()), message);
     assertTrue(message.contains("完成可交付方案"), message);

@@ -25,8 +25,8 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 /**
- * {@code storage_blob} 可空列（{@code width}/{@code height}/{@code duration_ms}）在真实 PostgreSQL 上的映射回归：旧
- * MyBatis {@code LongTypeHandler} 把 NULL 原样映射为 null，迁移到 JDBC 后必须保持该语义而不是通过 {@code getLong} 退化为 0。
+ * {@code storage_blob} 可空列（{@code width}/{@code height}/{@code duration_ms}）在真实 PostgreSQL
+ * 上的映射回归：可空列必须保持 NULL 语义，不能通过 {@code getLong} 退化为 0。
  *
  * <p>直接驱动仓库的 {@code JdbcClient} 语句而不加载 Spring 上下文，因此该回归只依赖被测 SQL 与行映射本身。
  */

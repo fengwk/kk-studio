@@ -82,14 +82,29 @@ class MavisStatusTest {
   void rendersOnlyBoundedNumericCodes() {
     JsonNode container = json("{\"nested\":true}");
     assertFalse(MavisStatus.isAuthCode(container));
-    assertEquals("unexpected-status", MavisStatus.render(container));
-    assertEquals("", MavisStatus.render(json("null")));
-    assertEquals("402", MavisStatus.render(json("402")));
-    assertEquals("1004", MavisStatus.render(json("\"1004\"")));
+    MavisBusinessException containerError =
+        assertInstanceOf(
+            MavisBusinessException.class, MavisStatus.raise(container, "ctx", "detail"));
+    assertEquals("unexpected-status", containerError.code());
+
+    MavisBusinessException nullError =
+        assertInstanceOf(
+            MavisBusinessException.class, MavisStatus.raise(json("null"), "ctx", "detail"));
+    assertEquals("", nullError.code());
+
+    MavisBusinessException quotaError =
+        assertInstanceOf(
+            MavisBusinessException.class, MavisStatus.raise(json("402"), "ctx", "detail"));
+    assertEquals("402", quotaError.code());
+
+    MavisBusinessException textCodeError =
+        assertInstanceOf(
+            MavisBusinessException.class, MavisStatus.raise(json("\"2001\""), "ctx", "detail"));
+    assertEquals("2001", textCodeError.code());
+    assertTrue(MavisStatus.isAuthCode(json("\"1004\"")));
 
     String secret = "header.payload.signature";
     JsonNode echoed = json("\"" + secret + "\"");
-    assertEquals("unexpected-status", MavisStatus.render(echoed));
     assertFalse(MavisStatus.isAuthCode(echoed));
     MavisBusinessException error =
         assertInstanceOf(MavisBusinessException.class, MavisStatus.raise(echoed, "ctx", "detail"));

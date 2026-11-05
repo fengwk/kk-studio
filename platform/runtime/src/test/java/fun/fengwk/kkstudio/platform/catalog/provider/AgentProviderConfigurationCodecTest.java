@@ -125,9 +125,9 @@ class AgentProviderConfigurationCodecTest {
         codec.isProtocolConfigEqual(
             "{\"ratio\":0.12345678901234567890123456789}",
             "{\"ratio\":0.12345678901234567890123456789}"));
-    // 同值不同 scale 仍是同一数值：等价判断沿用迁移前的数值语义（规范化尾零后比较）。
+    // 同值不同 scale 仍是同一数值：规范化尾零后比较数值等价性。
     assertTrue(codec.isProtocolConfigEqual("{\"ratio\":1.0}", "{\"ratio\":1.00}"));
-    // 但标量类型不同（整数 token 与小数 token）依旧不等，与迁移前一致。
+    // 标量类型不同（整数 token 与小数 token）判定为不相等。
     assertFalse(codec.isProtocolConfigEqual("{\"ratio\":1.0}", "{\"ratio\":1}"));
   }
 

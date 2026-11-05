@@ -83,7 +83,7 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
         IllegalStateException.class,
         () ->
             issueLifecycleService.stopIssue(issue.getId(), before.getVersion(), key("stop"), null));
-    assertEquals(IssueRunStatus.RUNNING, issueRunService.getRun(run.getId()).getStatus());
+    assertEquals(IssueRunStatus.RUNNING, issueRunRepository.getById(run.getId()).getStatus());
     assertEquals(before.getVersion(), issueEditingService.getIssue(issue.getId()).getVersion());
     assertEquals(activities, activityCount(issue.getId()));
   }
@@ -139,7 +139,7 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
             fresh.getId(), fresh.getVersion(), stopKey, "Stop the current run");
     assertEquals(PauseReason.USER.name(), stopped.getPauseReason());
 
-    IssueRun cancelledRun = issueRunService.getRun(activeRun.getId());
+    IssueRun cancelledRun = issueRunRepository.getById(activeRun.getId());
     assertEquals(IssueRunStatus.CANCELLED, cancelledRun.getStatus());
     assertNotNull(cancelledRun.getEndedAt());
     assertNotEquals(beforeHead, cancelledRun.getEndEntryId());
@@ -153,7 +153,8 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
     assertEquals(PauseReason.USER.name(), replayed.getPauseReason());
     assertEquals(stopped.getVersion(), replayed.getVersion());
     assertEquals(activityCount, activityCount(issue.getId()));
-    assertEquals(IssueRunStatus.CANCELLED, issueRunService.getRun(activeRun.getId()).getStatus());
+    assertEquals(
+        IssueRunStatus.CANCELLED, issueRunRepository.getById(activeRun.getId()).getStatus());
     UUID expectedStopId =
         UUID.nameUUIDFromBytes(
             ("issue-run-user-stop:" + activeRun.getId()).getBytes(StandardCharsets.UTF_8));
@@ -193,7 +194,7 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
     assertEquals(PauseReason.ERROR.name(), stopped.getPauseReason());
     assertTrue(stopped.getPauseDetail().contains("outcome unknown"), stopped.getPauseDetail());
 
-    IssueRun failedRun = issueRunService.getRun(activeRun.getId());
+    IssueRun failedRun = issueRunRepository.getById(activeRun.getId());
     assertEquals(IssueRunStatus.FAILED, failedRun.getStatus());
     assertTrue(failedRun.getError().contains("outcome unknown"), failedRun.getError());
     assertNotNull(failedRun.getEndedAt());
@@ -221,7 +222,7 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
     assertEquals(stopped.getPauseDetail(), replayed.getPauseDetail());
     assertEquals(stopped.getVersion(), replayed.getVersion());
     assertEquals(activityCount, activityCount(issue.getId()));
-    assertEquals(IssueRunStatus.FAILED, issueRunService.getRun(activeRun.getId()).getStatus());
+    assertEquals(IssueRunStatus.FAILED, issueRunRepository.getById(activeRun.getId()).getStatus());
   }
 
   /** 测试意图：验证结果未知的 ERROR 暂停只阻止新派发与流转，不自动重试，显式 resume 后才允许接受新 Run。 */

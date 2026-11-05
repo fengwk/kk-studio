@@ -45,7 +45,7 @@ class StudioHarnessThreadApprovalControllerTest extends HarnessThreadControllerT
   /**
    * 测试意图：审批请求体只接受 {decision, decisionId, reason}，未知字段拒绝与合法请求成功必须成对验证——携带 reason 的合法 请求必须成功并把 reason
    * 原样交给交互服务，而多带一个未知字段（非 actor 的任意字段同样如此）的请求必须在 DTO 的 @JsonAnySetter 处 400，detail
-   * 精确回传拒绝原因，且不再触达交互服务。
+   * 精确回传拒绝原因，且不触达交互服务。
    */
   @Test
   void approvalRejectsUnknownNonActorFieldWhileValidPayloadStillSucceeds() throws Exception {
@@ -126,7 +126,7 @@ class StudioHarnessThreadApprovalControllerTest extends HarnessThreadControllerT
     ArgumentCaptor<ToolApprovalCommand> captor = ArgumentCaptor.forClass(ToolApprovalCommand.class);
     verify(interactionService).decideApproval(captor.capture());
     assertEquals(ToolApprovalDecision.ALLOWED, captor.getValue().decision());
-    // 审批 actor 只能来自认证主体，请求体不再携带身份。
+    // 审批 actor 只能来自认证主体，请求体不携带身份。
     assertEquals("alice", captor.getValue().actor());
   }
 

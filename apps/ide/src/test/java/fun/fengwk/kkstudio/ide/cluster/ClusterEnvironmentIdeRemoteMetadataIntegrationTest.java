@@ -292,7 +292,7 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
 
   /** 等待时间无限不意味着响应体大小无限。 */
   @Test
-  void normalRemoteCloseStillRejectsOversizedBody() throws Exception {
+  void normalRemoteCloseRejectsOversizedBody() throws Exception {
     HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
     server.createContext(
         "/internal/environment-ide/", exchange -> respond(exchange, 200, "x".repeat(2048)));
@@ -317,9 +317,9 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
     }
   }
 
-  /** discard 关闭仍有超时，不能随普通关闭一同变成无限等待。 */
+  /** discard 关闭保持超时限制，不进行无限等待。 */
   @Test
-  void remoteDiscardCloseStillTimesOut() throws Exception {
+  void remoteDiscardCloseTimesOut() throws Exception {
     CountDownLatch release = new CountDownLatch(1);
     HttpServer delayed = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
     delayed.createContext(

@@ -7,7 +7,7 @@ import fun.fengwk.kkstudio.harness.api.session.AssistantMessageMetadata;
  *
  * <p>{@code summaryText} 必须非空：phase / trigger / cut / complete / execution model 全部从 enclosing
  * TURN_START（{@link TurnStartPayload#compaction()}）与紧邻完成的 TURN_END 派生——{@code complete = phase !=
- * HISTORY && TurnEnd COMPLETED}。不再持久化 tokensBefore / firstKeptEntryId / complete。
+ * HISTORY && TurnEnd COMPLETED}。
  *
  * <p>{@code assistantMetadata} 是这次压缩模型调用的原始 provider 元数据（stopReason / usage /
  * decodeDuration）：只有正式模型输出才携带，纯摘要组装显式传 null。null 表示没有真实模型用量事实，读取侧绝不据此伪造 0 用量；cost / pricing /

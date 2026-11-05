@@ -123,7 +123,7 @@ public final class RemoteMcpExecutableTool implements Tool {
     }
 
     // MCP 工具没有 arguments 级超时契约：有效超时即 definition 默认值（Server timeout 配置），
-    // 已由 Tool SPI 在执行前解析一次；这里不再与 DB 当前值做二次 min clamp。
+    // 已由 Tool SPI 在执行前解析，直接使用请求携带的超时值。
     McpDeadline deadline = McpDeadline.of(request.timeout());
     McpCancellationToken token = new McpCancellationToken();
     try {

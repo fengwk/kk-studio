@@ -35,7 +35,7 @@ import java.util.regex.Pattern;
 /**
  * Terminal {@link ToolResult} 的结果级统一终态化器（{@code ToolResultFinalizer}）。
  *
- * <p>替换原有的 per-content 双截断 externalizer：
+ * <p>统一终态化处理规则：
  *
  * <ul>
  *   <li>按原始 content 顺序用两个换行（{@code \n\n}）拼接所有 Text/Json 内容，形成唯一 canonical textual projection；

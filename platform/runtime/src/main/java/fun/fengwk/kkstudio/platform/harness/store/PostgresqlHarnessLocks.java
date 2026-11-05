@@ -55,7 +55,7 @@ final class PostgresqlHarnessLocks {
     return !lockedTrees.isEmpty();
   }
 
-  /** 新子 Thread 在已持有同树锁的插入路径上直接纳入树锁，不再触发 UUID 顺序检查。 */
+  /** 新子 Thread 在已持有同树锁的插入路径上直接纳入树锁，无需触发 UUID 顺序检查。 */
   void recordJoinedChildThreadLock(UUID threadId) {
     locked.add(LockKey.thread(threadId));
     if (highestThreadId == null || UuidOrder.COMPARATOR.compare(threadId, highestThreadId) > 0) {

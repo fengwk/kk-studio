@@ -45,7 +45,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * ToolProcessor 恢复与生命周期行为：旧 lease 恢复（RUNNING）、WAITING_APPROVAL / terminal 清理、伪造 token、duplicate /
+ * ToolProcessor 恢复与生命周期行为：过期租约恢复（RUNNING）、WAITING_APPROVAL / terminal 清理、伪造 token、duplicate /
  * concurrent process、close / cancel / heartbeat 竞态、wrong target、config 校验。
  */
 class ToolProcessorRecoveryTest {
@@ -75,10 +75,7 @@ class ToolProcessorRecoveryTest {
     assertThrows(IllegalArgumentException.class, () -> fixture.processor.process(threadClaim));
   }
 
-  /**
-   * 新 claim 遇到旧 lease 过期的 RUNNING：UNKNOWN 保留 attempt + version+1 + THREAD wake + complete，绝不重放
-   * Tool。
-   */
+  /** 新 claim 遇到租约过期的 RUNNING：UNKNOWN 保留 attempt + version+1 + THREAD wake + complete，绝不重放 Tool。 */
   @Test
   void staleRunningLeaseRecoveryTerminatesUnknownWithoutGateway() throws Exception {
     ToolProcessorTestSupport.Fixture fixture = ToolProcessorTestSupport.fixture();
@@ -224,7 +221,7 @@ class ToolProcessorRecoveryTest {
             .wakeVersion());
   }
 
-  /** 同一 JVM 内 recovery：新 token supersede 旧本地 execution 后按 durable RUNNING 恢复 UNKNOWN。 */
+  /** 同一 JVM 内 recovery：新 token supersede 先前本地 execution 后按 durable RUNNING 恢复 UNKNOWN。 */
   @Test
   void sameJvmRecoverySupersedesStaleLocalExecution() throws Exception {
     ToolProcessorTestSupport.Fixture fixture = ToolProcessorTestSupport.fixture();
@@ -400,7 +397,7 @@ class ToolProcessorRecoveryTest {
     assertEquals(1L, run.exited.getCount(), "body must not be interrupted");
   }
 
-  /** 并发不同 token：新 claim 抢占 guard 并 supersede 正在 admission 的旧 execution；旧 run 被释放且从不执行。 */
+  /** 并发不同 token：新 claim 抢占 guard 并 supersede 正在 admission 的先前 execution；先前 run 被释放且从不执行。 */
   @Test
   void concurrentNewTokenSupersedesTheAdmittingExecution() throws Exception {
     ToolProcessorTestSupport.Fixture fixture = ToolProcessorTestSupport.fixture();
@@ -1082,7 +1079,7 @@ class ToolProcessorRecoveryTest {
     assertNull(ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId));
   }
 
-  /** abandon 幂等：第二次调用不再 interrupt、不再通知 owner。 */
+  /** abandon 幂等：第二次调用不重复 interrupt、不重复通知 owner。 */
   @Test
   void abandonIsIdempotentAndReleasesOwnerOnce() throws Exception {
     ToolProcessorTestSupport.Fixture fixture = ToolProcessorTestSupport.fixture();

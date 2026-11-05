@@ -26,7 +26,7 @@ public final class SubagentTaskMessages {
    * task 被持久接受后的即时回执正文。
    *
    * @param childThreadId 子 Thread UUID
-   * @param replaced 本次续接是否取代了同一子线程上尚未完成的旧委派等待；为 true 时明确说明只会有最新一次的一份汇总结果
+   * @param replaced 本次续接是否取代了同一子线程上尚未完成的先前委派等待；为 true 时明确说明只会有最新一次的一份汇总结果
    */
   public static String accepted(UUID childThreadId, boolean replaced) {
     Objects.requireNonNull(childThreadId, "childThreadId");

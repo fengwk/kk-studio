@@ -77,7 +77,7 @@ class ClusterEnvironmentIdeInternalDataPlaneControllerTest {
     verify(dataPlane).handleInternalDataPlane(eq(ENV), eq(VIEW), eq("/ws"), any(), eq(res));
   }
 
-  /** 非 owner 不再直接写容器错误页：抛出领域错误，由统一内部错误信封映射为 409。 */
+  /** 非 owner 抛出领域错误，由统一内部错误信封映射为 409。 */
   @Test
   void nonOwnerFailsWithIdeUnavailableBeforeForwarding() throws Exception {
     IdeGatewayDataPlane dataPlane = mock(IdeGatewayDataPlane.class);

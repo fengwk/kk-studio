@@ -82,7 +82,7 @@ class PostgresqlEntrySliceQueryTest {
         () -> "递归只能读取 head、user 和游标三个节点，不能读到 ROOT：\n" + slicePlan.get());
   }
 
-  /** 测试意图：同事务已有完整路径时直接截取，不再查询；随后冷事务的部分结果不能冒充完整路径缓存。 */
+  /** 测试意图：同事务已有完整路径时直接截取，无需查询；随后冷事务的部分结果不能冒充完整路径缓存。 */
   @Test
   void warmPathIsSlicedWithoutQueryAndPartialResultDoesNotFillPathCache() {
     Chain chain = seedChain();

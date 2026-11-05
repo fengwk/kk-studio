@@ -9,7 +9,7 @@ package fun.fengwk.kkstudio.harness.environment.capability;
 public final class EnvironmentCapabilityResultCodes {
 
   /** 错误码的字符数上限。 */
-  public static final int MAX_CODE_CHARS = 64;
+  private static final int MAX_CODE_CHARS = 64;
 
   private EnvironmentCapabilityResultCodes() {}
 

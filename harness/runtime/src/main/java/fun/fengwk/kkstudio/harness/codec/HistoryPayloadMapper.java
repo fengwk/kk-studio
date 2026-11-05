@@ -43,7 +43,7 @@ import java.util.UUID;
 public final class HistoryPayloadMapper {
 
   /** Synthetic history-cut ToolResult 的稳定错误内容。 */
-  public static final String HISTORY_CUT_RESULT_TEXT = "No result provided";
+  private static final String HISTORY_CUT_RESULT_TEXT = "No result provided";
 
   /** 无 frozen binding（unknown tool / 输出截断）槽位的 durable renderer fallback。 */
   public static final String UNBOUND_RENDERER_KEY = "tool";
@@ -143,8 +143,7 @@ public final class HistoryPayloadMapper {
   }
 
   /**
-   * 稳定 Resource 直接映射为 durable 消息内容：文本工件保留字节/行数事实，普通媒体按平台默认图片档位冻结。此处绝不再消费 upload 或执行 metadata-only
-   * 降级。
+   * 稳定 Resource 直接映射为 durable 消息内容：文本工件保留字节/行数事实，普通媒体按平台默认图片档位冻结。此处不消费 upload 或执行 metadata-only 降级。
    */
   private static ResourceMessageContent stableResourceContent(ResourceResultContent content) {
     var resource = content.resource();

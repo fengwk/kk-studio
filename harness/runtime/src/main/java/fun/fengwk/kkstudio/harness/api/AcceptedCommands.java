@@ -17,8 +17,8 @@ import java.util.Objects;
  * version； 否则为新接受（THREAD Work 已请求、version/next sequence 已推进）。acceptedCommands 非空且全部属于返回 Thread；
  * rootEntry 必为 Session ROOT。
  *
- * <p>{@code joinReplaced=true} 表示本次接受在同一父/子对上 supersede 了一个既有未完成 join：新 join 上位，旧 join 保留
- * invocation identity 与源命令，但不再产生独立交付。非 join 接受路径恒为 false。
+ * <p>{@code joinReplaced=true} 表示本次接受在同一父/子对上 supersede 了一个既有未完成 join：新 join 上位，先前 join 保留
+ * invocation identity 与源命令，但不产生独立交付。非 join 接受路径恒为 false。
  */
 public record AcceptedCommands(
     Session session,

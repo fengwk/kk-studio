@@ -92,7 +92,7 @@ public final class ThreadCommandPayloadJsonCodec {
   }
 
   /** 编码 request hash 的 canonical 信封节点：{@code type}（command discriminator）+ {@code payload}。 */
-  public static ObjectNode encodeRequestEnvelopeNode(ThreadCommandPayload payload) {
+  private static ObjectNode encodeRequestEnvelopeNode(ThreadCommandPayload payload) {
     Objects.requireNonNull(payload, "payload");
     ObjectNode envelope = NODES.objectNode();
     envelope.put("type", payload.type().name());

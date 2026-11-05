@@ -26,9 +26,9 @@ import java.util.Objects;
 @Component
 public final class AgentProviderConfigurationCodec {
 
-  public static final String MODEL_CALL_TIMEOUT_MILLIS = "modelCallTimeoutMillis";
-  public static final String MODEL_CALL_IDLE_TIMEOUT_MILLIS = "modelCallIdleTimeoutMillis";
-  public static final String MODEL_HTTP_RETRY_STATUS_CODES = "modelHttpRetryStatusCodes";
+  private static final String MODEL_CALL_TIMEOUT_MILLIS = "modelCallTimeoutMillis";
+  private static final String MODEL_CALL_IDLE_TIMEOUT_MILLIS = "modelCallIdleTimeoutMillis";
+  private static final String MODEL_HTTP_RETRY_STATUS_CODES = "modelHttpRetryStatusCodes";
 
   private final ObjectMapper objectMapper;
   private final ObjectReader configReader;

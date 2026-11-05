@@ -403,7 +403,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
   void unknownFieldsDoNotBypassKnownValidation() throws Exception {
     String suffix = unique();
 
-    // 未知 nested config 字段 + 缺当前必填（config 只有 obsolete，缺 limit/abilities/pricing/variants）。
+    // 未知 nested config 字段 + 缺当前必填（config 只有 unknownField，缺 limit/abilities/pricing/variants）。
     String nestedMissingProvider = "uvn_provider_" + suffix;
     String nestedMissing =
         "providers:\n  - name: "
@@ -412,7 +412,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
             + "models:\n  - providerName: "
             + nestedMissingProvider
             + "\n    name: m\n"
-            + "    modelId: gpt\n    config:\n      obsolete: 1\n";
+            + "    modelId: gpt\n    config:\n      unknownField: 1\n";
     checkRejected(nestedMissing);
     importRejected(nestedMissing, true);
     assertNull(findProvider(nestedMissingProvider), "rejected import must not write provider");

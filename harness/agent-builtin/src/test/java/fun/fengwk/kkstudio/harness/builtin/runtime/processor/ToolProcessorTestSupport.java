@@ -1223,7 +1223,7 @@ public final class ToolProcessorTestSupport {
     return new ToolGateway.Unknown(new ToolInvocationError("TIMEOUT", "never interrupted"));
   }
 
-  /** 测试用稳定物化器：Text/JSON 原样通过，已稳定 Session 资源原样通过；临时 upload 明确失败，避免测试静默走旧 batch 物化语义。 */
+  /** 测试用稳定物化器：Text/JSON 原样通过，已稳定 Session 资源原样通过；临时 upload 明确失败。 */
   static final ToolResultHistoryMaterializer STABLE_MATERIALIZER =
       (sessionId, toolName, result) -> {
         for (ResultContent content : result.contents()) {

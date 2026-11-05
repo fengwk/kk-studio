@@ -15,7 +15,7 @@ import java.util.regex.Pattern;
 public final class PluginAuthNonce {
 
   /** 一次性 nonce 的原始熵（字节）。 */
-  public static final int NONCE_BYTES = 32;
+  private static final int NONCE_BYTES = 32;
 
   /** 句柄的固定长度：32 字节 base64url 无填充。 */
   private static final int HANDLE_LENGTH = 43;

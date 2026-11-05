@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.project.service;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -12,7 +13,10 @@ import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
 import fun.fengwk.kkstudio.project.error.ProjectNotFoundException;
@@ -95,5 +99,20 @@ class IssueMutationSupportTest {
     assertThrows(ProjectVersionConflictException.class, () -> support.persist(locked, 4));
     verify(issues).updateById(issue, 4);
     verify(issues, never()).getById(any());
+  }
+
+  /** writeJson 正常序列化并在 Jackson 异常时包装为 IllegalStateException。 */
+  @Test
+  void writeJsonSerializesAndWrapsJacksonException() {
+    ObjectNode node = support.newData();
+    node.put("key", "value");
+    assertEquals("{\"key\":\"value\"}", support.writeJson(node));
+
+    ObjectMapper failingMapper = mock(ObjectMapper.class);
+    when(failingMapper.writeValueAsString(any())).thenThrow(mock(JacksonException.class));
+    IllegalStateException error =
+        assertThrows(
+            IllegalStateException.class, () -> IssueMutationSupport.writeJson(failingMapper, node));
+    assertEquals("failed to encode activity data", error.getMessage());
   }
 }

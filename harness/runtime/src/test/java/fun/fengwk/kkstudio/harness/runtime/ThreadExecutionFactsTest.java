@@ -99,7 +99,7 @@ class ThreadExecutionFactsTest {
 
   @Test
   void responsePendingDriverStateIsNotWork() {
-    // 测试意图：终态但结果尚未物化的 Driver generation 属于正常待 apply 状态，不再构成工作。
+    // 测试意图：终态但结果尚未物化的 Driver generation 属于正常待 apply 状态，不构成工作。
     HarnessRuntimeTestSupport.TurnBaseline baseline = seedOpenTurn(store);
     HarnessRuntime pending = runtimeWithActivity(baseline, DriverActivity.RESPONSE_PENDING);
     assertEquals(

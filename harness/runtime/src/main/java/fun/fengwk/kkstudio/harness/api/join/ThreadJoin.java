@@ -6,14 +6,14 @@ import java.util.UUID;
 import java.util.regex.Pattern;
 
 /**
- * 一次源命令接受后的不可变 join 凭据。执行终止边界冻结一次结果；父交付引用其 command sequence，不能从后续的子 Thread head 重新推导旧结果。
+ * 一次源命令接受后的不可变 join 凭据。执行终止边界冻结一次结果；父交付引用其 command sequence，不能从后续的子 Thread head 重新推导先前结果。
  *
  * <p>{@code terminalEntryId} 是本次执行终止时冻结的 terminal Entry（首次最终回答、不可继续失败/Stop 的收尾）；{@code
  * finalAnswerEntryId} 是可空的最终回答入口，绝不借用源输入应用之前的回答。{@code matched()} 由 {@code terminalEntryId} 判定。
  *
  * <p>{@code delivery} 决定结算后的交付方式，额度直接由 delivery 为 {@link JoinDelivery#NOTIFY_PARENT} 决定；{@code
- * supersededByInvocationId} 是同一父/子对上后续续接 join 的 invocation identity：同一父子对至多有一个有效未完成 join，旧 join
- * 被新续接原子 supersede 后保留原 invocation identity 与排队 prompt，但不再占用活跃额度、不再产生重复交付。已匹配结果不可变，也绝不被 supersede。
+ * supersededByInvocationId} 是同一父/子对上后续续接 join 的 invocation identity：同一父子对至多有一个有效未完成 join，先前 join
+ * 被新续接原子 supersede 后保留原 invocation identity 与排队 prompt，但不占用活跃额度、不产生重复交付。已匹配结果不可变，也绝不被 supersede。
  */
 public record ThreadJoin(
     UUID invocationId,

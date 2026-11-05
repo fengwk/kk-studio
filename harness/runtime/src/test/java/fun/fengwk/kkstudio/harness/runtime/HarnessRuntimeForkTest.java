@@ -191,7 +191,7 @@ class HarnessRuntimeForkTest {
       assertFalse(sourceIds.contains(copied.id()));
       assertEquals(newSessionId, copied.sessionId());
     }
-    // tool pair 保留：复制后的 tool result 引用复制后的 assistant Entry，绝不复用旧身份。
+    // tool pair 保留：复制后的 tool result 引用复制后的 assistant Entry，不复用源身份。
     Entry copiedAssistant = singleRole(entries, AgentMessageRole.ASSISTANT);
     Entry copiedToolResult = singleRole(entries, AgentMessageRole.TOOL);
     ToolResultMetadata metadata =
@@ -502,7 +502,7 @@ class HarnessRuntimeForkTest {
 
   // ---------------------------------------------------------------- 会话 fork：幂等
 
-  /** preflight 只收到复制后的历史；失败回滚，精确 replay 不再次调用。 */
+  /** preflight 只收到复制后的历史；失败回滚，精确 replay 不重复调用。 */
   @Test
   void forkPreflightReceivesCopiedEntriesAndRollsBackOnFailure() {
     HistorySeed source = seedHistory(store, false);

@@ -48,7 +48,7 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * 终止边界 Join 结算的收敛判据与交付幂等：源输入应用前旧结果不得结算新 Join；普通终止只在没有未完成的直接子 Join、没有待处理输入时结算；Stop
+ * 终止边界 Join 结算的收敛判据与交付幂等：源输入应用前不得提前结算 Join；普通终止只在没有未完成的直接子 Join、没有待处理输入时结算；Stop
  * 只放宽未应用源输入，仍要求同一收敛事实；交付后不重投。
  */
 class ThreadLifecycleCoordinatorJoinTest {

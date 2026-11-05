@@ -32,7 +32,7 @@ public final class ProjectValidationUtils {
   public static final int MAX_LARGE_TEXT_BYTES = 1048576;
 
   /** 幂等请求键的字符上限。 */
-  public static final int MAX_REQUEST_KEY_LENGTH = 128;
+  private static final int MAX_REQUEST_KEY_LENGTH = 128;
 
   private ProjectValidationUtils() {}
 

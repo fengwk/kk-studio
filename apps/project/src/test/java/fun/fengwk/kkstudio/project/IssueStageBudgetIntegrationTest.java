@@ -37,7 +37,7 @@ class IssueStageBudgetIntegrationTest extends ProjectTestSupport {
     assertEquals(1L, first.getOrdinal());
     assertEquals("DESIGN", first.getState());
     UUID firstThread = first.getThreadId();
-    assertEquals(firstThread, issueRunService.getRun(first.getId()).getThreadId());
+    assertEquals(firstThread, issueRunRepository.getById(first.getId()).getThreadId());
     long endEntry =
         count(
             "select count(*) from harness_entry where session_id = ? and id = ?",

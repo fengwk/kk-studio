@@ -51,8 +51,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
 /**
- * 回归测试：验证 ModelExecution 与 ToolExecution 的业务回写事务只锁本 Thread 的 Thread/Model 或 Tool/Work，
- * 不再获取执行树锁；同时验证 checkpoint 仍只锁 Model 与 Work。退出确认单独获取树与祖先锁，以便原子推进 Join。
+ * 验证 ModelExecution 与 ToolExecution 的业务回写事务只锁本 Thread 的 Thread/Model 或 Tool/Work， 不获取执行树锁；同时验证
+ * checkpoint 只锁 Model 与 Work。退出确认单独获取树与祖先锁，以便原子推进 Join。
  */
 class ExecutionTreeLockRegressionTest {
 

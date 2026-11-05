@@ -17,12 +17,6 @@ final class OpenCliSettingsValidation {
     }
   }
 
-  static void requireBounded(int value, int minimum, int maximum, String field) {
-    if (value < minimum || value > maximum) {
-      throw new IllegalArgumentException(field + " must be between " + minimum + " and " + maximum);
-    }
-  }
-
   static String requireHttpOrigin(String value, String field) {
     if (value == null || value.isBlank()) {
       return null;

@@ -176,7 +176,7 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
     TextMessageContent reminderText = (TextMessageContent) reminder.message().contents().get(0);
     assertTrue(reminderText.text().contains("reached its suggested turn budget"));
 
-    // Turn 3: 提醒已在历史中作为上下文；后续继续边界不再重复物化，reminderTurn 不倒退。
+    // Turn 3: 提醒已在历史中作为上下文；后续继续边界不重复物化，reminderTurn 不倒退。
     fixture.resolver.results.add(
         new TurnResolver.Resolved(tooledRequest(List.of("bash")), 100_000, 16_384));
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(childId));
@@ -198,7 +198,7 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
     assertEquals(1, countReminders(path(fixture.store, childId)));
   }
 
-  /** 测试意图：同一 join 达到预算后只物化一条稳定提醒；后续继续边界不再重复物化，reminderTurn 保持不倒退。 */
+  /** 测试意图：同一 join 达到预算后只物化一条稳定提醒；后续继续边界不重复物化，reminderTurn 保持不倒退。 */
   @Test
   void oneJoinMaterializesOnlyOneReminderAcrossLaterContinuationBoundaries() {
     Fixture fixture = fixture();
@@ -220,7 +220,7 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
     assertTrue(reminderTurn > 0);
     assertEquals(1, countReminders(path(fixture.store, childId)));
 
-    // 后续继续边界：提醒已在历史中，不再物化第二条。
+    // 后续继续边界：提醒已在历史中，不物化第二条。
     fixture.resolver.results.add(
         new TurnResolver.Resolved(tooledRequest(List.of("bash")), 100_000, 16_384));
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(childId));
@@ -833,7 +833,7 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
     assertEquals(childId, reminder.sourceThreadId());
   }
 
-  /** 测试意图：同一子线程上不同 invocation 的 Join 各自独立；旧 Join 已提醒过，新 Join 达到预算仍会物化自己的提醒。 */
+  /** 测试意图：同一子线程上不同 invocation 的 Join 各自独立；先前 Join 已提醒过，新 Join 达到预算仍会物化自己的提醒。 */
   @Test
   void resumedJoinCanRemindAgain() {
     Fixture fixture = fixture();

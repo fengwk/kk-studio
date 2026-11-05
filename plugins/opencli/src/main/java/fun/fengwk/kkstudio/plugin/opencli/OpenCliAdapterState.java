@@ -1,8 +1,11 @@
 package fun.fengwk.kkstudio.plugin.opencli;
 
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionExecutionContext;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
 import fun.fengwk.kkstudio.common.id.Uuids;
+import fun.fengwk.kkstudio.plugin.opencli.OpenCliHubClient.Execution;
 
-import java.net.URI;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -52,7 +55,7 @@ final class OpenCliAdapterState {
       Object resourcePath = map.get("resourcePath");
       if (!(resourceId instanceof String idText)
           || !(resourcePath instanceof String path)
-          || !isCanonicalResourcePath(path)) {
+          || !OpenCliHubClient.isCanonicalResourcePath(path)) {
         throw new IllegalArgumentException(
             "adapterState.uploads contains an invalid resourceId/resourcePath");
       }
@@ -73,26 +76,38 @@ final class OpenCliAdapterState {
     state.put(UPLOADS, encoded);
   }
 
-  private static boolean isCanonicalResourcePath(String path) {
-    if (!path.matches("/resources/[A-Za-z0-9._~!$&'()+,;=:@%/-]+")) {
-      return false;
+  static void requireCompleteUploads(CanvasFunctionFrozenRun run, List<UploadedInput> uploads) {
+    if (uploads.size() != run.manifest().size()) {
+      throw new IllegalArgumentException("checkpoint uploads do not cover frozen manifest");
     }
-    try {
-      URI parsed = URI.create(path);
-      if (parsed.getQuery() != null
-          || parsed.getFragment() != null
-          || !parsed.normalize().getPath().startsWith("/resources/")) {
-        return false;
+    for (int index = 0; index < uploads.size(); index++) {
+      if (!uploads.get(index).resourceId().equals(run.manifest().get(index).resourceId())) {
+        throw new IllegalArgumentException("checkpoint uploads do not match frozen manifest");
       }
-      for (String segment : parsed.getPath().split("/", -1)) {
-        if (".".equals(segment) || "..".equals(segment)) {
-          return false;
-        }
-      }
-      return true;
-    } catch (IllegalArgumentException exception) {
-      return false;
     }
+  }
+
+  static Execution awaitTerminal(
+      OpenCliHubClient client,
+      CanvasFunctionExecutionContext context,
+      String executionId,
+      Duration maxWait,
+      String errorPrefix) {
+    long deadline = System.nanoTime() + maxWait.toNanos();
+    Execution execution = client.getExecution(executionId, 0);
+    while (!execution.status().terminal()) {
+      if (!context.isRunning()) {
+        throw new IllegalStateException("Canvas Function run is no longer running");
+      }
+      long remainingNanos = deadline - System.nanoTime();
+      if (remainingNanos <= 0L) {
+        throw new OpenCliHubException(errorPrefix + " Hub execution exceeded maximum wait");
+      }
+      int waitSeconds =
+          (int) Math.max(1L, Math.min(120L, Duration.ofNanos(remainingNanos).toSeconds()));
+      execution = client.getExecution(executionId, waitSeconds);
+    }
+    return execution;
   }
 
   record UploadedInput(UUID resourceId, String resourcePath) {}

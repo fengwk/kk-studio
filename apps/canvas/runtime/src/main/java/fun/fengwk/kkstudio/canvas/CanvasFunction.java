@@ -23,7 +23,7 @@ import java.util.UUID;
 public record CanvasFunction(String name, CanvasJson.JsonObject args) {
 
   /** 单个节点 args 允许声明的不同引用数量上限。 */
-  public static final int MAX_REFERENCES = 32;
+  private static final int MAX_REFERENCES = 32;
 
   private static final String REFERENCE_TYPE = "resource";
   private static final Set<String> REFERENCE_FIELDS = Set.of("type", "nodeId", "index");

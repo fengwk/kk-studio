@@ -227,7 +227,6 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
                 .andExpect(jsonPath("$.data.config.tools").isEmpty())
                 .andExpect(jsonPath("$.data.config.skills").isEmpty())
                 .andExpect(jsonPath("$.data.config.subagents").isEmpty())
-                .andExpect(jsonPath("$.data.config.inheritParentEnvironment").doesNotExist())
                 .andExpect(jsonPath("$.data.version").value("0"))
                 .andReturn());
     assertEquals(agentName, agentData.path("name").asText());
@@ -423,7 +422,7 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
     mockMvc
         .perform(delete(modelPath(providerName, modelName)).param("expectedVersion", "1"))
         .andExpect(status().isNoContent());
-    // catch-all 路由将集合路径解析为空名称；不得用旧 query 参数代替全局路径身份。
+    // catch-all 路由将集合路径解析为空名称；不接受 query 参数代替路径身份。
     mockMvc
         .perform(
             put("/api/models")

@@ -320,7 +320,7 @@ class ProjectControllerTest {
 
   @Test
   void rejectsUppercaseProjectIdAndPaddedVersionBeforeService() throws Exception {
-    // 测试意图：HTTP UUID 与 version 都是严格 canonical，大写和前后空白不再归一后进入服务。
+    // 测试意图：HTTP UUID 与 version 都是严格 canonical，不接受大写和前后空白。
     mockMvc
         .perform(get("/api/projects/AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE"))
         .andExpect(status().isBadRequest());

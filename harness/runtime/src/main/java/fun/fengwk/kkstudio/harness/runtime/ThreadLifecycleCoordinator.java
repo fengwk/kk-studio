@@ -37,9 +37,9 @@ import java.util.UUID;
 /**
  * 执行终止边界上的 Join 冻结与父 Thread 通知交付，以及短预算提醒物化。
  *
- * <p>本类不再维护递归空闲生命周期，也不再按 Thread version 匹配 Join：普通终止（最终回答 / 不可继续失败）只有在源输入已应用、且本 Thread 收敛（无未完成的直接子
- * Join、无待处理输入、无未确认执行）时才冻结 Join；Stop 结算允许纳入尚未应用的源命令，但仍要求同一收敛事实。冻结结果与父通知在同一事务提交；终态 Entry
- * 已先物化时，可在最后一次退出确认的事务中补结算。父 Thread 为 STOPPED 时通知直接固化到历史而不唤醒模型。
+ * <p>普通终止（最终回答 / 不可继续失败）只有在源输入已应用、且本 Thread 收敛（无未完成的直接子 Join、无待处理输入、无未确认执行）时才冻结 Join；Stop
+ * 结算允许纳入尚未应用的源命令，但仍要求同一收敛事实。冻结结果与父通知在同一事务提交；终态 Entry 已先物化时，可在最后一次退出确认的事务中补结算。父 Thread 为 STOPPED
+ * 时通知直接固化到历史而不唤醒模型。
  */
 public final class ThreadLifecycleCoordinator {
 
@@ -148,7 +148,7 @@ public final class ThreadLifecycleCoordinator {
         ThreadCommand source =
             tx.commands().find(join.childThreadId(), join.sourceCommandSequence()).orElse(null);
         if (source == null || source.appliedEntryId() == null) {
-          // 输入尚未应用时，旧回合完成不能结算新 Join。
+          // 输入尚未应用时，回合完成不能结算该 Join。
           continue;
         }
       }

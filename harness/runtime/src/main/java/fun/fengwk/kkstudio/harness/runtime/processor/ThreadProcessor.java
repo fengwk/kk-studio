@@ -83,7 +83,7 @@ import java.util.UUID;
  * 产出的 Assistant Entry、且其 Tool siblings 全部 terminal 时按 callIndex 原子 apply；(c) GENERATION_ACTIVE /
  * TOOL_ACTIVE —— 当前 applicable generation/tool 非 terminal 时完成 claim；(d) CONTINUATION_DUE —— HISTORY
  * phase gap 启动 TURN_PREFIX，其它 continuation obligation 启动 CONTINUATION；(e) queued
- * USER_MESSAGE/CUSTOM_MESSAGE 存在时启动 INPUT Turn（IDLE_OR_HISTORICAL）；(f) 否则完成 claim。旧 / 历史 open Turn
+ * USER_MESSAGE/CUSTOM_MESSAGE 存在时启动 INPUT Turn（IDLE_OR_HISTORICAL）；(f) 否则完成 claim。未闭合 open Turn
  * 只在启动新 INPUT Turn 时被 normalization，绝不恢复 / 复用。不变量被破坏的形状由分类器以 ISE 拒绝，绝不降级为业务上下文。
  *
  * <p>Turn 启动在单个 store transaction 内完成：按 Session KEY SHARE -&gt; Thread 顺序加锁、读取 queued Command 快照与
@@ -154,7 +154,7 @@ public final class ThreadProcessor {
    * 处理一次 dispatcher 已 claim 的 THREAD Work（single-action 持久化 reducer）。
    *
    * <p>先用 Work-only 短事务验证 claim 当前真实 owned，再进 per-thread admission guard（同一 claim 重复 / 并发投递一律 LOST
-   * no-op；不同 token 在旧 action 尚未结束时同样 LOST，不抢占 guard）。随后恰执行一次持久化 action：分类、构造 candidate turn
+   * no-op；不同 token 在前序 action 尚未结束时同样 LOST，不抢占 guard）。随后恰执行一次持久化 action：分类、构造 candidate turn
    * plan、同事务 resolve 与提交都在同一个 store transaction 内完成。action 在事务内完成当前 claim；下一 action 已确定时先 {@code
    * requestWork(THREAD)} 再 complete。事务内最终所有权围栏（final fence）失败抛出的 {@link ClaimLostSignal}
    * 在事务完整回滚后在此捕获并映射为 LOST_OWNERSHIP；显式 typed {@link TurnResolveTransientException} 同样在事务回滚后按既有语义
@@ -734,7 +734,7 @@ public final class ThreadProcessor {
               + thread.id());
     }
     List<ThreadCommand> queued = tx.commands().loadQueued(thread.id());
-    // claim 已在 process 入口用 Work-only 事务验证；本事务不再提前锁 Work（否则会在低序 Entry / Driver 私有行之前
+    // claim 已在 process 入口用 Work-only 事务验证；本事务不提前锁 Work（否则会在低序 Entry / Driver 私有行之前
     // 取得高序 WORK 锁并破坏锁序）。最终 commit fence 在全部低序 mutation 后校验所有权，失败即整体回滚。
     // 最小事实：INPUT 可以没有任何 queued 输入，只要本 Thread 有尚未接纳的已物化通知；这些通知已在历史里，不重复写 entry。
     boolean pendingNotificationInput =

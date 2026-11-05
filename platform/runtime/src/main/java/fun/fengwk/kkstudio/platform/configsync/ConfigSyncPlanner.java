@@ -538,7 +538,7 @@ public final class ConfigSyncPlanner {
     if (sections == null) {
       return null;
     }
-    // 完整六节契约已在解析期校验；设置自身不再持有任何 Agent 引用，因此没有额外依赖判定。
+    // 完整契约已在解析期校验；设置自身不持有任何 Agent 引用，因此没有额外依赖判定。
     // 携带计划期读到的版本：apply 时以 CAS 写入，中间若有并发修改会正常冲突并整体回滚。
     ConfigSyncPlan.SettingsUpdate settingsUpdate =
         new ConfigSyncPlan.SettingsUpdate(

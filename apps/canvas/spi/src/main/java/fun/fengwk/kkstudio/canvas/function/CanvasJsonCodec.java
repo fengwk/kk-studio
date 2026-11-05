@@ -27,15 +27,15 @@ import java.util.Map;
 /**
  * {@link CanvasJson} 基于 Jackson 3 core/stream 的严格解析与规范序列化。
  *
- * <p>词法与转义统一交给 Jackson token 流：重复键、尾随内容、非法数值/转义、控制字符与超深嵌套由解析器直接拒绝，不再自写字符级状态机。对象/数组按容器计嵌套深度，控制字符固定小写
- * hex 转义。解析成功即保证规范化文本也落在 {@link CanvasJson#MAX_LENGTH} 预算内，因此接受的值一定能写回并再次解析。
+ * <p>词法与转义统一交给 Jackson token 流：重复键、尾随内容、非法数值/转义、控制字符与超深嵌套由解析器直接拒绝。对象/数组按容器计嵌套深度，控制字符固定小写 hex
+ * 转义。解析成功即保证规范化文本也落在 {@link CanvasJson#MAX_LENGTH} 预算内，因此接受的值一定能写回并再次解析。
  */
 final class CanvasJsonCodec {
 
   private static final JsonFactory FACTORY =
       JsonFactory.builder()
           .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
-          // 规范转义固定小写 hex，与历史 canonical 文本和命令指纹保持一致。
+          // 规范转义固定小写 hex，保持 canonical 文本和命令指纹的一致性。
           .disable(JsonWriteFeature.WRITE_HEX_UPPER_CASE)
           .streamReadConstraints(
               StreamReadConstraints.builder()

@@ -15,8 +15,8 @@ import java.util.UUID;
 /** IDE 数据面路径规则与重定位。 */
 public final class IdeDataPaths {
 
-  public static final String DATA_HTTP_SUFFIX = "/data-http";
-  public static final String DATA_WS_SUFFIX = "/data-ws";
+  private static final String DATA_HTTP_SUFFIX = "/data-http";
+  private static final String DATA_WS_SUFFIX = "/data-ws";
   public static final String VIEW_ID_PARAMETER = "viewId";
   public static final String PATH_PARAMETER = "path";
 

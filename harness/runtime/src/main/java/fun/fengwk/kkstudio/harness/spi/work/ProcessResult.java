@@ -11,6 +11,6 @@ public enum ProcessResult {
   /** 本次处理未留下活跃本地 execution，Work 已按延迟重排以继续重试。 */
   RESCHEDULED,
 
-  /** 当前处理不再持有可继续执行的 Claim，后续不得据此推进。 */
+  /** 当前处理不持有可继续执行的 Claim，后续不得据此推进。 */
   LOST_OWNERSHIP
 }

@@ -61,7 +61,7 @@ class InMemoryBuiltinHarnessStoreContractTest {
     String secondMember = "model";
     String secondVariant = "2:v";
 
-    // 旧字符串键都会拼成 group:1:model:2:v；typed key 下 freeze A 不得让 B 冷却。
+    // typed key 下 freeze A 不得让 B 冷却（避免 key 拼接冲突）。
     freeze(groupName, groupVersion, firstMember, firstVariant, T1);
     assertTrue(cooling(groupName, groupVersion, firstMember, firstVariant));
     assertFalse(cooling(groupName, groupVersion, secondMember, secondVariant));
@@ -110,7 +110,7 @@ class InMemoryBuiltinHarnessStoreContractTest {
     assertFalse(cooling(groupName, groupVersion, "model-b", "v1"));
   }
 
-  /** 切换目录版本后，旧结果不能冻结新版本，且版本变化自身也随事务回滚。 */
+  /** 切换目录版本后，先前版本的结果不能冻结新版本，且版本变化自身也随事务回滚。 */
   @Test
   void staleCooldownWritesAreRejectedAfterGroupVersionChanges() {
     store.setNow(T0);

@@ -122,7 +122,7 @@ public final class IdeDataHeaderPolicy {
     return HOP_BY_HOP.contains(name.toLowerCase(Locale.ROOT));
   }
 
-  public static boolean isNeverForwarded(String lowerName, boolean webSocket) {
+  private static boolean isNeverForwarded(String lowerName, boolean webSocket) {
     if (HOP_BY_HOP.contains(lowerName) || DROPPED_REQUEST_HEADERS.contains(lowerName)) {
       return true;
     }
@@ -146,7 +146,7 @@ public final class IdeDataHeaderPolicy {
         && !("sec-websocket-protocol".equals(lowerName) && !webSocket);
   }
 
-  public static Set<String> connectionTokens(HttpServletRequest request) {
+  private static Set<String> connectionTokens(HttpServletRequest request) {
     Set<String> tokens = new LinkedHashSet<>();
     Enumeration<String> values = request.getHeaders("Connection");
     if (values == null) {

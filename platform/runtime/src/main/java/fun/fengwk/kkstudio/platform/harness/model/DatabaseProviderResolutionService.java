@@ -26,7 +26,7 @@ import java.util.UUID;
  * generation，使既有 invocation 确定性拒绝；不轮换 generation 的 timeout-only 更新保持 attempt-time live，删除后确定性 not
  * found。
  *
- * <p>持久 request 中已有的 cache control（retention 与 session key）在规划期冻结，执行期原样沿用，不再按当前 {@code
+ * <p>持久 request 中已有的 cache control（retention 与 session key）在规划期冻结，执行期原样沿用，不按当前 {@code
  * provider.configJson} 重新规范化；具体到各协议的 cache 参数映射由 Adapter 完成。
  */
 @Component
@@ -126,7 +126,7 @@ public final class DatabaseProviderResolutionService implements ProviderResoluti
             resourceMaterializer.materialize(
                 request.messages(), request.model().inputModalities(), adapter.mediaCapabilities()),
             request.tools(),
-            // cache control 已在规划期冻结（retention + session key）；执行期不再按当前 capability 重新规范化。
+            // cache control 已在规划期冻结（retention + session key）；执行期不按当前 capability 重新规范化。
             request.cacheControl());
     return new ResolvedExecution(
         effectiveRequest,

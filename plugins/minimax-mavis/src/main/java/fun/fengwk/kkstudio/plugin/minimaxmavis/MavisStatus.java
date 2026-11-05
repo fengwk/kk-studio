@@ -63,7 +63,7 @@ public final class MavisStatus {
    *
    * <p>远端只能影响一个短数值：文本必须是规范十进制整数，数值也受长度约束。其他取值退化为固定文本，避免把服务端原文（可能含凭据）带进错误消息。
    */
-  public static String render(JsonNode code) {
+  private static String render(JsonNode code) {
     if (code == null || code.isNull()) {
       return "";
     }

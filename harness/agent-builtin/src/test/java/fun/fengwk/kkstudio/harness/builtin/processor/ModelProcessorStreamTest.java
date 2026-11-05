@@ -394,7 +394,7 @@ class ModelProcessorStreamTest extends ModelProcessorTestSupport {
     assertNull(failed.resultEntryId());
   }
 
-  /** 配置了 tools 的压缩子合法 tool 回合（COMPLETE + tool calls）按普通 Runtime 推进，且不再抑制 replay 与实时 delta 发布。 */
+  /** 配置了 tools 的压缩子合法 tool 回合（COMPLETE + tool calls）按普通 Runtime 推进，且正常执行 replay 与实时 delta 发布。 */
   @Test
   void compactionChildToolTurnProceedsLikeOrdinaryRuntimeAndPublishesDeltas() {
     Fixture fixture = compactionFixture(NO_RETRY, IMMEDIATE_STREAM);
@@ -754,7 +754,7 @@ class ModelProcessorStreamTest extends ModelProcessorTestSupport {
   }
 
   /**
-   * 未声明（unknown）工具调用不再是 canonical 校验错误：validator 不做 binding 可见性校验，响应合法并 SUCCEEDED； unknown tool 由
+   * 未声明（unknown）工具调用不是 canonical 校验错误：validator 不做 binding 可见性校验，响应合法并 SUCCEEDED； unknown tool 由
    * {@link ModelResponsePlanner} 在 Thread 边界规划为 FAILED(UNKNOWN_TOOL) 槽位（见 ThreadProcessor 测试）。
    */
   @Test
@@ -1018,16 +1018,16 @@ class ModelProcessorStreamTest extends ModelProcessorTestSupport {
   }
 
   /**
-   * 同一 JVM 内旧 lease 过期后新 claim（不同 token）：supersede 本地旧 execution，按既有重试策略恢复 durable RUNNING（保留已确认
-   * attempt / 取消旧 handle / 绝不重放 Provider）；无重试预算时如实终止 FAILED。
+   * 同一 JVM 内过期租约后新 claim（不同 token）：supersede 本地先前 execution，按既有重试策略恢复 durable RUNNING（保留已确认 attempt
+   * / 取消先前 handle / 绝不重放 Provider）；无重试预算时如实终止 FAILED。
    *
-   * <p>{@code process} 返回 STARTED 只表示已把运行交给执行线程，不保证 body 已进入。必须先等待旧 body 真正进入再推进 clock / reclaim；否则
-   * supersede 可能发生在 runner 登记之前，退出观察没有可 join 的旧线程。
+   * <p>{@code process} 返回 STARTED 只表示已把运行交给执行线程，不保证 body 已进入。必须先等待先前 body 真正进入再推进 clock /
+   * reclaim；否则 supersede 可能发生在 runner 登记之前，退出观察没有可 join 的先前线程。
    */
 
   /**
-   * 意图：方案 B 的推送与落库解耦——safe delta 立即作为 realtime overlay 推送，但 checkpoint 不会逐 delta 落库；只有追帧请求
-   * 显式触发时才持久化完整 safe 前缀，且 CHECKPOINT 事件严格晚于提交（此前零 checkpoint 事件）。
+   * 意图：推送与落库解耦——safe delta 立即作为 realtime overlay 推送，但 checkpoint 不会逐 delta 落库；只有追帧请求 显式触发时才持久化完整
+   * safe 前缀，且 CHECKPOINT 事件严格晚于提交（此前零 checkpoint 事件）。
    */
   @Test
   void safeDeltasArePushedBeforeCheckpointAndCatchUpPublishesOnlyAfterCommit() {

@@ -143,7 +143,7 @@ class HarnessRuntimeApprovalTest {
     assertEquals(T5, replay.approval().decidedAt());
     ThreadState thread =
         store.transaction(tx -> tx.threads().find(baseline.threadId()).orElseThrow());
-    // 一次真实决定（fixture head advance + decision）= 2；replay 不再 bump。
+    // 一次真实决定（fixture head advance + decision）= 2；replay 不 bump。
     assertEquals(2L, thread.version());
     Work toolWork =
         store.transaction(
@@ -270,7 +270,7 @@ class HarnessRuntimeApprovalTest {
   void undecidedApprovalOutsideTheCurrentContextIsNotApplicable() {
     HarnessRuntimeTestSupport.ToolBaseline baseline = seedToolBaseline(store);
     setWaitingApproval(store, baseline);
-    // head 移回 ROOT 后 WAITING_APPROVAL 不再属于当前 TOOL_ACTIVE 上下文。
+    // head 移回 ROOT 后 WAITING_APPROVAL 不属于当前 TOOL_ACTIVE 上下文。
     store.transaction(
         tx -> {
           ThreadState thread = tx.threads().lock(baseline.threadId()).orElseThrow();

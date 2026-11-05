@@ -132,7 +132,7 @@ public class CanvasDtoMapper {
       return dto;
     }
     StorageBlob blob = blob(resource.blobId());
-    dto.setKind(kindOf(blob.getMediaType()).name());
+    dto.setKind(CanvasResourceKind.fromMediaType(blob.getMediaType()).name());
     dto.setMediaType(blob.getMediaType());
     dto.setSizeBytes(blob.getSizeBytes());
     dto.setWidth(blob.getWidth() == null ? null : blob.getWidth().intValue());
@@ -515,24 +515,5 @@ public class CanvasDtoMapper {
       throw new IllegalStateException("resource blob is missing: " + blobId);
     }
     return blob;
-  }
-
-  private static CanvasResourceKind kindOf(String mediaType) {
-    if (mediaType == null) {
-      throw new IllegalArgumentException("blob mediaType must not be null");
-    }
-    if (mediaType.startsWith("image/")) {
-      return CanvasResourceKind.IMAGE;
-    }
-    if (mediaType.startsWith("video/")) {
-      return CanvasResourceKind.VIDEO;
-    }
-    if (mediaType.startsWith("audio/")) {
-      return CanvasResourceKind.AUDIO;
-    }
-    if (mediaType.startsWith("text/")) {
-      return CanvasResourceKind.TEXT;
-    }
-    throw new IllegalArgumentException("unsupported blob mediaType: " + mediaType);
   }
 }

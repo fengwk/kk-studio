@@ -243,7 +243,7 @@ class GeminiModelProviderUnitTest {
 
   /**
    * 验证带有凭据时设置 x-goog-api-key header，并且空凭据时以匿名方式请求（不添加 header）；请求 URL 完全由 descriptor endpoint 与
-   * model id 解析，构造参数不再携带 URL。
+   * model id 解析。
    */
   @Test
   void passesApiKeyHeaderWhenCredentialProvided() {

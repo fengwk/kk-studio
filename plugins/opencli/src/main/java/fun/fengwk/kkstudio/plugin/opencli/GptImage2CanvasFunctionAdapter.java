@@ -166,7 +166,7 @@ public class GptImage2CanvasFunctionAdapter implements CanvasFunctionAdapter {
     }
 
     List<OpenCliAdapterState.UploadedInput> uploads = OpenCliAdapterState.uploads(state);
-    requireCompleteUploads(run, uploads);
+    OpenCliAdapterState.requireCompleteUploads(run, uploads);
 
     Execution execution =
         awaitTerminal(
@@ -203,7 +203,7 @@ public class GptImage2CanvasFunctionAdapter implements CanvasFunctionAdapter {
 
   private List<String> buildArgv(
       CanvasFunctionFrozenRun run, List<OpenCliAdapterState.UploadedInput> uploads) {
-    requireCompleteUploads(run, uploads);
+    OpenCliAdapterState.requireCompleteUploads(run, uploads);
     String ratio = extractText(run.args(), "ratio", "auto");
     String prompt = extractText(run.args(), "prompt");
     String instruction =
@@ -235,32 +235,6 @@ public class GptImage2CanvasFunctionAdapter implements CanvasFunctionAdapter {
 
   private Execution awaitTerminal(
       CanvasFunctionExecutionContext context, String executionId, Duration maxWait) {
-    long deadline = System.nanoTime() + maxWait.toNanos();
-    Execution execution = client.getExecution(executionId, 0);
-    while (!execution.status().terminal()) {
-      if (!context.isRunning()) {
-        throw new IllegalStateException("Canvas Function run is no longer running");
-      }
-      long remainingNanos = deadline - System.nanoTime();
-      if (remainingNanos <= 0L) {
-        throw new OpenCliHubException("GPT Image Hub execution exceeded maximum wait");
-      }
-      int waitSeconds =
-          (int) Math.max(1L, Math.min(120L, Duration.ofNanos(remainingNanos).toSeconds()));
-      execution = client.getExecution(executionId, waitSeconds);
-    }
-    return execution;
-  }
-
-  private static void requireCompleteUploads(
-      CanvasFunctionFrozenRun run, List<OpenCliAdapterState.UploadedInput> uploads) {
-    if (uploads.size() != run.manifest().size()) {
-      throw new IllegalArgumentException("checkpoint uploads do not cover frozen manifest");
-    }
-    for (int index = 0; index < uploads.size(); index++) {
-      if (!uploads.get(index).resourceId().equals(run.manifest().get(index).resourceId())) {
-        throw new IllegalArgumentException("checkpoint uploads do not match frozen manifest");
-      }
-    }
+    return OpenCliAdapterState.awaitTerminal(client, context, executionId, maxWait, "GPT Image");
   }
 }

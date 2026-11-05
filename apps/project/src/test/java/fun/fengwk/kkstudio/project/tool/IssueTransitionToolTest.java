@@ -90,7 +90,7 @@ class IssueTransitionToolTest {
     assertEquals(Set.of("to_state"), tool.descriptor().inputSchema().required());
   }
 
-  /** 测试意图：被接受的交接返回可读回执，并提示模型收尾（不再发起新的业务写）。 */
+  /** 测试意图：被接受的交接返回可读回执，并提示模型收尾（不发起新的业务写）。 */
   @Test
   void returnsAcceptedHandoffReceipt() {
     when(service.accept(THREAD_ID, ASSISTANT_ENTRY_ID, "REVIEW"))

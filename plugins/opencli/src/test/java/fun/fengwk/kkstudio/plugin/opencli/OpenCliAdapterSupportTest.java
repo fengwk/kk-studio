@@ -1,9 +1,13 @@
 package fun.fengwk.kkstudio.plugin.opencli;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
@@ -21,12 +25,14 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionResourceStream;
 import fun.fengwk.kkstudio.canvas.function.CanvasResourceKind;
 import fun.fengwk.kkstudio.plugin.opencli.OpenCliAdapterState.UploadedInput;
+import fun.fengwk.kkstudio.plugin.opencli.OpenCliHubClient.Execution;
 import fun.fengwk.kkstudio.plugin.opencli.OpenCliHubClient.UploadedResource;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
+import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -161,6 +167,103 @@ class OpenCliAdapterSupportTest {
     assertThrows(
         UncheckedIOException.class,
         () -> uploader.uploadAll(closeFailureContext, run, new LinkedHashMap<>()));
+  }
+
+  /** 验证已上传引用的完整性校验必须完全覆盖 frozen manifest 且 ID 一致。 */
+  @Test
+  void requireCompleteUploadsValidatesManifestCoverageAndOrder() {
+    CanvasFunctionFrozenRun run = mock(CanvasFunctionFrozenRun.class);
+    when(run.manifest()).thenReturn(List.of(image(100L, "first.png"), image(101L, "second.png")));
+
+    // 上传数量不足时报错
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            OpenCliAdapterState.requireCompleteUploads(
+                run, List.of(new UploadedInput(RESOURCE_100, "/resources/first.png"))));
+
+    // 上传 resourceId 与 manifest 不匹配时报错
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            OpenCliAdapterState.requireCompleteUploads(
+                run,
+                List.of(
+                    new UploadedInput(RESOURCE_101, "/resources/second.png"),
+                    new UploadedInput(RESOURCE_100, "/resources/first.png"))));
+
+    // 匹配时正常通过
+    assertDoesNotThrow(
+        () ->
+            OpenCliAdapterState.requireCompleteUploads(
+                run,
+                List.of(
+                    new UploadedInput(RESOURCE_100, "/resources/first.png"),
+                    new UploadedInput(RESOURCE_101, "/resources/second.png"))));
+  }
+
+  /** 验证 Hub 执行等待轮询逻辑，确保正常完成、运行终止中断以及携带前缀的超时异常正确抛出。 */
+  @Test
+  void awaitTerminalPollsUntilCompletionOrThrowsPrefixTimeout() {
+    OpenCliHubClient client = mock(OpenCliHubClient.class);
+    CanvasFunctionExecutionContext context = mock(CanvasFunctionExecutionContext.class);
+    when(context.isRunning()).thenReturn(true);
+
+    Execution running =
+        new Execution("exec-1", OpenCliHubClient.ExecutionStatus.RUNNING, "", "", List.of());
+    Execution succeeded =
+        new Execution("exec-1", OpenCliHubClient.ExecutionStatus.SUCCEEDED, "ok", "", List.of());
+    when(client.getExecution(anyString(), anyInt())).thenReturn(running, succeeded);
+
+    // 成功轮询完成
+    Execution result =
+        OpenCliAdapterState.awaitTerminal(
+            client, context, "exec-1", Duration.ofMinutes(5), "TestPrefix");
+    assertEquals(succeeded, result);
+    verify(client).getExecution("exec-1", 120);
+
+    // 超时抛出带有指定前缀的 OpenCliHubException
+    when(client.getExecution("exec-timeout", 0)).thenReturn(running);
+    when(client.getExecution("exec-timeout", 1)).thenReturn(running);
+    OpenCliHubException timeoutEx =
+        assertThrows(
+            OpenCliHubException.class,
+            () ->
+                OpenCliAdapterState.awaitTerminal(
+                    client, context, "exec-timeout", Duration.ZERO, "CustomService"));
+    assertEquals("CustomService Hub execution exceeded maximum wait", timeoutEx.getMessage());
+
+    // 运行态中止抛出 IllegalStateException
+    when(client.getExecution("exec-stopped", 0)).thenReturn(running);
+    CanvasFunctionExecutionContext stoppedContext = mock(CanvasFunctionExecutionContext.class);
+    when(stoppedContext.isRunning()).thenReturn(false);
+    IllegalStateException stoppedEx =
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                OpenCliAdapterState.awaitTerminal(
+                    client,
+                    stoppedContext,
+                    "exec-stopped",
+                    Duration.ofMinutes(1),
+                    "CustomService"));
+    assertEquals("Canvas Function run is no longer running", stoppedEx.getMessage());
+  }
+
+  /** 验证规范虚拟资源路径谓词对合法格式与非法格式的判定。 */
+  @Test
+  void canonicalResourcePathValidatesVirtualPathCorrectly() {
+    assertTrue(OpenCliHubClient.isCanonicalResourcePath("/resources/2026-08-10/a.png"));
+    assertTrue(OpenCliHubClient.isCanonicalResourcePath("/resources/sub/dir/res.bin"));
+
+    assertFalse(OpenCliHubClient.isCanonicalResourcePath(null));
+    assertFalse(OpenCliHubClient.isCanonicalResourcePath(""));
+    assertFalse(OpenCliHubClient.isCanonicalResourcePath("/api/resources/a.png"));
+    assertFalse(OpenCliHubClient.isCanonicalResourcePath("/resources/a.png?query=1"));
+    assertFalse(OpenCliHubClient.isCanonicalResourcePath("/resources/a.png#fragment"));
+    assertFalse(OpenCliHubClient.isCanonicalResourcePath("/resources/../outside.png"));
+    assertFalse(OpenCliHubClient.isCanonicalResourcePath("/resources/./inside.png"));
+    assertFalse(OpenCliHubClient.isCanonicalResourcePath("/resources/%zz"));
   }
 
   private static CanvasFunctionFrozenReference image(long resourceId, String name) {

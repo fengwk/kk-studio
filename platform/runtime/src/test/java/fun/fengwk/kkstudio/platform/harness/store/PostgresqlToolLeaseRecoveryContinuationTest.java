@@ -82,7 +82,7 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 
 /**
- * 真实 PostgreSQL 上的 Tool 租约失联恢复与模型循环续跑验收：失联工具不再执行，只生成如实的错误 tool_result；ThreadProcessor 应用该 batch 并要求
+ * 真实 PostgreSQL 上的 Tool 租约失联恢复与模型循环续跑验收：失联工具不执行，只生成如实的错误 tool_result；ThreadProcessor 应用该 batch 并要求
  * {@code continueModel = true}；下一个 claim 真正创建下一轮 ModelInvocation。
  */
 class PostgresqlToolLeaseRecoveryContinuationTest {

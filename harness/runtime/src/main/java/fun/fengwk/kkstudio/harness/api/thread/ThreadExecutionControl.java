@@ -9,7 +9,7 @@ package fun.fengwk.kkstudio.harness.api.thread;
 public enum ThreadExecutionControl {
   /** 可接受的输入会驱动模型 Loop；运行阶段由本地上下文投影。 */
   RUNNABLE,
-  /** 已显式停止：不再启动模型执行；迟到的系统结果只固化到历史。 */
+  /** 已显式停止：不启动模型执行；迟到的系统结果只固化到历史。 */
   STOPPED;
 
   /** 是否处于可执行状态。 */

@@ -208,7 +208,7 @@ class PluginAgentDependencyPostgresIntegrationTest {
     assertEquals(2L, currentRevision());
   }
 
-  /** 移除引用后允许删除：当前配置不再声明即不再保护该 Agent。 */
+  /** 移除引用后允许删除：当前配置未声明时不保护该 Agent。 */
   @Test
   void deleteSucceedsAfterTheDeclaringConfigurationIsRemoved() {
     seedAgentModel();

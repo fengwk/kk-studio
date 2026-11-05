@@ -25,7 +25,7 @@ import java.util.Set;
  */
 public final class ProviderToolCallDiagnosticJsonCodec {
 
-  public static final String TYPE_TAG = "tool_call_diagnostic";
+  private static final String TYPE_TAG = "tool_call_diagnostic";
 
   private static final ObjectMapper OBJECT_MAPPER = HarnessJson.STRICT;
 
