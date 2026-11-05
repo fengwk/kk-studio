@@ -10,7 +10,7 @@ set -Eeuo pipefail
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 source "$SCRIPT_DIR/../../lib/repo-root.sh"
 resolve_repo_root "$SCRIPT_DIR"
-source "$SCRIPT_DIR/../../lib/test-stack.sh"
+source "$SCRIPT_DIR/../../lib/compose-stack.sh"
 COMPOSE_FILE="$REPO_ROOT/deploy/test/compose.yaml"
 APP_IMAGE=${CANVAS_TEST_APP_IMAGE:-kk-studio-app:performance-baseline}
 DURATION_SECONDS=10
@@ -115,9 +115,7 @@ while (($#)); do
 done
 
 command -v node >/dev/null 2>&1 || die "node is required"
-command -v docker >/dev/null 2>&1 || die "docker is required"
-docker info >/dev/null 2>&1 || die "Docker daemon is not available"
-docker compose version >/dev/null 2>&1 || die "docker compose is required"
+stack_require_docker
 
 cd "$REPO_ROOT"
 validate_report_root
@@ -140,7 +138,7 @@ cleanup() {
     printf '\n==> Performance baseline failed; collecting compose diagnostics\n' >&2
   fi
   printf '\n==> Cleaning isolated performance stack\n' >&2
-  cleanup_test_stack "$status"
+  cleanup_compose_stack "$status" true --profile app
 }
 
 on_signal() {
@@ -156,10 +154,10 @@ trap cleanup EXIT
 trap on_signal INT TERM
 
 printf '\n==> Validating isolated compose configuration\n'
-"${COMPOSE[@]}" --profile app config --quiet
+stack_config_quiet --profile app
 
 printf '\n==> Resetting isolated performance stack\n'
-"${COMPOSE[@]}" --profile app down --volumes --remove-orphans
+stack_down true --profile app
 
 if [[ "$SKIP_BUILD" != "true" ]]; then
   BUILD_HTTP_PROXY=${CANVAS_TEST_BUILD_HTTP_PROXY:-${HTTP_PROXY:-${http_proxy:-}}}
@@ -193,7 +191,7 @@ printf '\n==> Building shared MinIO client image\n'
 "${COMPOSE[@]}" build minio-init
 
 printf '\n==> Starting isolated PostgreSQL/MinIO/mock/app stack\n'
-"${COMPOSE[@]}" --profile app up -d --wait --no-build
+stack_up_wait --profile app
 
 printf '\n==> Running Node performance baseline\n'
 RUNNER_ARGS=(

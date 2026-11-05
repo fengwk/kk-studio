@@ -19,7 +19,7 @@ set -euo pipefail
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 source "$SCRIPT_DIR/../../lib/repo-root.sh"
 resolve_repo_root "$SCRIPT_DIR"
-source "$SCRIPT_DIR/../../lib/http-wait.sh"
+source "$SCRIPT_DIR/../../lib/compose-stack.sh"
 # Compose 与运行时资产属于 deploy/；本脚本只做宿主生命周期编排。
 COMPOSE_FILE="$REPO_ROOT/deploy/distributed/compose.yaml"
 COMPOSE=(docker compose -f "$COMPOSE_FILE")
@@ -77,12 +77,6 @@ die() {
   exit 1
 }
 
-require_docker() {
-  command -v docker >/dev/null 2>&1 || die "docker is required"
-  docker info >/dev/null 2>&1 || die "Docker daemon is not available"
-  docker compose version >/dev/null 2>&1 || die "docker compose is required"
-}
-
 build_images() {
   step "Building app image"
   docker build \
@@ -103,8 +97,7 @@ build_images() {
 wait_http() {
   local url=$1
   local name=$2
-  poll_http "$url" "${DISTRIBUTED_WAIT_ATTEMPTS:-120}" && return 0
-  die "timed out waiting for $name: $url"
+  stack_wait_http "$url" "$name" "${DISTRIBUTED_WAIT_ATTEMPTS:-120}"
 }
 
 environment_status() {
@@ -117,17 +110,14 @@ wait_environment_ready() {
   local app_url=$1
   local env_name=$2
   local node_label=$3
-  local status=""
-  local attempt
-  for attempt in $(seq 1 "${DISTRIBUTED_WAIT_ATTEMPTS:-120}"); do
-    status=$(environment_status "$app_url" "$env_name")
-    if [ "$status" = "READY" ]; then
-      step "node $node_label environment $env_name READY"
-      return 0
-    fi
-    sleep 1
-  done
-  die "node $node_label environment $env_name not READY (last status='$status')"
+  stack_wait_environment \
+    "$app_url" \
+    "$env_name" \
+    "$SCRIPT_DIR/lib/json-probe.mjs" \
+    "node $node_label environment $env_name" \
+    "${DISTRIBUTED_WAIT_ATTEMPTS:-120}" \
+    1
+  step "node $node_label environment $env_name READY"
 }
 
 cmd_up() {
@@ -138,9 +128,9 @@ cmd_up() {
     usage >&2
     die "unknown up argument: $1"
   fi
-  require_docker
+  stack_require_docker
   step "Validating Compose configuration"
-  "${COMPOSE[@]}" config --quiet
+  stack_config_quiet
 
   if [ "$skip_build" = "false" ]; then
     build_images
@@ -152,7 +142,7 @@ cmd_up() {
   "${COMPOSE[@]}" build minio-init
 
   step "Starting distributed stack"
-  "${COMPOSE[@]}" up -d --wait --no-build
+  stack_up_wait
   wait_http "$APP_A_URL/actuator/health" "app-a health"
   wait_http "$APP_B_URL/actuator/health" "app-b health"
   wait_environment_ready "$APP_A_URL" "$DISTRIBUTED_ENV_A_NAME" a
@@ -163,7 +153,7 @@ cmd_up() {
 }
 
 cmd_status() {
-  require_docker
+  stack_require_docker
   "${COMPOSE[@]}" ps --format 'table {{.Service}}\t{{.State}}\t{{.Status}}' || true
   local label url env_name status
   for label in a b; do
@@ -184,7 +174,7 @@ cmd_status() {
 }
 
 cmd_logs() {
-  require_docker
+  stack_require_docker
   local tail=${DISTRIBUTED_LOG_TAIL:-200}
   if [ "$#" -gt 0 ]; then
     "${COMPOSE[@]}" logs --tail "$tail" "$@"
@@ -201,7 +191,7 @@ app_a_db_disconnect_state() {
 }
 
 cmd_disconnect_db_a() {
-  require_docker
+  stack_require_docker
   if [ -n "$(app_a_db_disconnect_state)" ]; then
     step "Disconnecting $APP_A_CONTAINER from $NODE_A_DB_NETWORK"
     docker network disconnect "$NODE_A_DB_NETWORK" "$APP_A_CONTAINER"
@@ -211,7 +201,7 @@ cmd_disconnect_db_a() {
 }
 
 cmd_reconnect_db_a() {
-  require_docker
+  stack_require_docker
   if [ -z "$(app_a_db_disconnect_state)" ]; then
     step "Reconnecting $APP_A_CONTAINER to $NODE_A_DB_NETWORK"
     docker network connect "$NODE_A_DB_NETWORK" "$APP_A_CONTAINER"
@@ -221,66 +211,66 @@ cmd_reconnect_db_a() {
 }
 
 cmd_stop_app_a() {
-  require_docker
+  stack_require_docker
   step "Stopping app-a"
   "${COMPOSE[@]}" stop app-a
 }
 
 cmd_stop_app_b() {
-  require_docker
+  stack_require_docker
   step "Stopping app-b"
   "${COMPOSE[@]}" stop app-b
 }
 
 cmd_start_app_a() {
-  require_docker
+  stack_require_docker
   step "Starting app-a"
   "${COMPOSE[@]}" start app-a
   wait_http "$APP_A_URL/actuator/health" "app-a health"
 }
 
 cmd_start_app_b() {
-  require_docker
+  stack_require_docker
   step "Starting app-b"
   "${COMPOSE[@]}" start app-b
   wait_http "$APP_B_URL/actuator/health" "app-b health"
 }
 
 cmd_kill_app_a() {
-  require_docker
+  stack_require_docker
   step "Killing app-a"
   "${COMPOSE[@]}" kill app-a
 }
 
 cmd_kill_app_b() {
-  require_docker
+  stack_require_docker
   step "Killing app-b"
   "${COMPOSE[@]}" kill app-b
 }
 
 cmd_restart_daemon_c() {
-  require_docker
+  stack_require_docker
   step "Restarting daemon-c"
   "${COMPOSE[@]}" restart daemon-c
 }
 
 cmd_down() {
-  require_docker
-  local -a volumes=()
+  stack_require_docker
+  local remove_volumes=false
   if [ "${1:-}" = "--volumes" ]; then
-    volumes=(--volumes)
+    remove_volumes=true
   elif [ -n "${1:-}" ]; then
     usage >&2
     die "unknown down argument: $1"
   fi
   step "Removing distributed stack"
-  "${COMPOSE[@]}" down --remove-orphans "${volumes[@]}"
+  stack_down "$remove_volumes"
 }
 
 cmd_verify() {
-  require_docker
+  stack_require_docker
   step "Validating Compose configuration"
-  "${COMPOSE[@]}" config --quiet
+  stack_config_quiet
   step "Validating network invariants"
   node "$SCRIPT_DIR/validate-distributed.mjs" --compose-file "$COMPOSE_FILE"
   step "Compose config and topology invariants verified"

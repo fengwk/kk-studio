@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 source "$SCRIPT_DIR/../../lib/repo-root.sh"
 resolve_repo_root "$SCRIPT_DIR"
-source "$SCRIPT_DIR/../../lib/test-stack.sh"
+source "$SCRIPT_DIR/../../lib/compose-stack.sh"
 # Compose、Dockerfile 与 mock 运行时资产属于 deploy/；本脚本只做宿主 smoke 编排。
 COMPOSE_FILE="$REPO_ROOT/deploy/test/compose.yaml"
 export COMPOSE_PROFILES=canvas-test
@@ -90,9 +90,7 @@ while (($#)); do
   shift
 done
 
-command -v docker >/dev/null 2>&1 || die "docker is required"
-docker info >/dev/null 2>&1 || die "Docker daemon is not available"
-docker compose version >/dev/null 2>&1 || die "docker compose is required"
+stack_require_docker
 if [[ "$WITH_APP" == "true" ]]; then
   command -v node >/dev/null 2>&1 || die "node is required for the Canvas API smoke"
 fi
@@ -106,16 +104,16 @@ cleanup() {
   fi
 
   step "Cleaning isolated test stack"
-  cleanup_test_stack "$status"
+  cleanup_compose_stack "$status" true --profile app
 }
 trap cleanup EXIT
 
 step "Validating Compose configuration"
-"${COMPOSE[@]}" config --quiet
-"${COMPOSE[@]}" --profile app config --quiet
+stack_config_quiet
+stack_config_quiet --profile app
 
 step "Resetting isolated test stack"
-"${COMPOSE[@]}" --profile app down --volumes --remove-orphans
+stack_down true --profile app
 
 step "Building the current application Dockerfile"
 docker build \
@@ -134,7 +132,7 @@ step "Building the shared MinIO client image"
 step "Starting isolated dependencies and waiting for health checks"
 if [[ "$WITH_APP" == "true" ]]; then
   # app 以 service_completed_successfully 等待一次性的 minio-init，因此 --wait 能收敛。
-  "${COMPOSE[@]}" --profile app up -d --wait --no-build
+  stack_up_wait --profile app
 else
   # 未启用 app 时没有任何服务以 service_completed_successfully 依赖 minio-init，
   # compose up --wait 会把已成功退出的一次性容器当作失败；这里只等待常驻依赖健康，

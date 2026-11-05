@@ -5,9 +5,10 @@ set -euo pipefail
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 source "$SCRIPT_DIR/../../lib/repo-root.sh"
 resolve_repo_root "$SCRIPT_DIR"
-source "$SCRIPT_DIR/../../lib/http-wait.sh"
+source "$SCRIPT_DIR/../../lib/compose-stack.sh"
 COMPOSE_FILE="$REPO_ROOT/deploy/test/compose.yaml"
 PROJECT_NAME=kk-studio-reliability
+COMPOSE=(docker compose --project-name "$PROJECT_NAME" --file "$COMPOSE_FILE")
 RELIABILITY_APP_PORT=${RELIABILITY_APP_PORT:-18091}
 RELIABILITY_MINIO_PORT=${RELIABILITY_MINIO_PORT:-19002}
 RELIABILITY_ENV_NAME=${RELIABILITY_ENV_NAME:-docker-reliability}
@@ -40,7 +41,7 @@ require_cmd() {
 }
 
 compose() {
-  docker compose --project-name "$PROJECT_NAME" --file "$COMPOSE_FILE" "$@"
+  "${COMPOSE[@]}" "$@"
 }
 
 usage() {
@@ -94,13 +95,8 @@ daemon_container_id() {
 }
 
 wait_app() {
-  poll_http "$APP_URL/actuator/health" 180 || die "timed out waiting for app health at $APP_URL"
+  stack_wait_http "$APP_URL/actuator/health" "app health" 180
   step "app healthy at $APP_URL"
-}
-
-environment_is_ready() {
-  curl -fsS "$APP_URL/api/environments" 2>/dev/null \
-    | node "$REPO_ROOT/scripts/dev/verify/reliability/stack-probe.mjs" environment-ready "$RELIABILITY_ENV_NAME"
 }
 
 print_environment_status() {
@@ -109,22 +105,22 @@ print_environment_status() {
 }
 
 wait_environment() {
-  local attempt
-  for attempt in $(seq 1 180); do
-    if environment_is_ready; then
-      print_environment_status
-      return
-    fi
-    sleep 1
-  done
-  die "timed out waiting for Environment READY: $RELIABILITY_ENV_NAME"
+  stack_wait_environment \
+    "$APP_URL" \
+    "$RELIABILITY_ENV_NAME" \
+    "$REPO_ROOT/scripts/dev/verify/reliability/stack-probe.mjs" \
+    "Environment READY: $RELIABILITY_ENV_NAME" \
+    180 \
+    1
+  print_environment_status
 }
 
 up_stack() {
-  require_cmd docker
+  stack_require_docker
   require_cmd curl
   require_cmd node
   assert_safe_config
+  # 长期手工栈：由 Compose 构建 app/daemon，只有显式 down 才销毁；不套用一次性栈的删卷清理。
   step "building and starting Compose project $PROJECT_NAME"
   compose up --detach --build
   wait_app
@@ -443,13 +439,14 @@ logs_stack() {
 }
 
 down_stack() {
+  # 与 up 不同，down 只要求 docker CLI：不为单条清理命令额外探测 daemon/Compose 状态。
   require_cmd docker
   case "${1-}" in
     "")
-      compose down --remove-orphans
+      stack_down false
       ;;
     --volumes)
-      compose down --remove-orphans --volumes
+      stack_down true
       ;;
     *)
       die "down accepts only optional --volumes"
