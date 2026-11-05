@@ -9,6 +9,7 @@ import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
@@ -403,25 +404,19 @@ public final class AgentMessageJsonCodec {
     return value.stringValue();
   }
 
-  /** 必填 canonical UUID 文本字段（{@code UUID.fromString} 往返一致）。 */
+  /** 必填 canonical UUID 文本字段。 */
   private static UUID canonicalUuid(ObjectNode node, String field, String context) {
     JsonNode value = node.get(field);
     if (!value.isString()) {
       throw new IllegalArgumentException(context + "." + field + " must be text");
     }
     String text = value.stringValue();
-    UUID parsed;
     try {
-      parsed = UUID.fromString(text);
+      return Uuids.parseCanonical(text, context + "." + field);
     } catch (IllegalArgumentException error) {
       throw new IllegalArgumentException(
           context + "." + field + " must be a canonical UUID: " + text, error);
     }
-    if (!parsed.toString().equals(text)) {
-      throw new IllegalArgumentException(
-          context + "." + field + " must be a canonical UUID: " + text);
-    }
-    return parsed;
   }
 
   private static void putNullableText(ObjectNode node, String field, String value) {

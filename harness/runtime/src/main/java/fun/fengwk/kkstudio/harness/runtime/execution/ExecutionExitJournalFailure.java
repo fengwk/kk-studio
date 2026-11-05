@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.execution;
 
+import fun.fengwk.kkstudio.common.id.Uuids;
+
 import java.util.Objects;
 import java.util.UUID;
 
@@ -26,8 +28,7 @@ public record ExecutionExitJournalFailure(String fileName, Reason reason, Throwa
     }
     String text = fileName.substring(0, fileName.length() - suffix.length());
     try {
-      UUID executionId = UUID.fromString(text);
-      return executionId.toString().equals(text) ? executionId : null;
+      return Uuids.parseCanonical(text, "executionId");
     } catch (IllegalArgumentException ignored) {
       return null;
     }

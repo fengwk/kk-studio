@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.project.service;
 import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Service;
 
+import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwner;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwnerDisplay;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwnership;
@@ -46,9 +47,14 @@ public class ProjectSessionOwnership implements SessionOwnership {
       throw new IllegalArgumentException("Invalid issue agent owner");
     }
     String issueId = owner.id().substring(0, separator);
-    UUID parsed = UUID.fromString(issueId);
+    UUID parsed;
+    try {
+      parsed = Uuids.parseCanonical(issueId, "issueId");
+    } catch (IllegalArgumentException error) {
+      throw new IllegalArgumentException("Invalid issue agent owner", error);
+    }
     String agent = owner.id().substring(separator + 1);
-    if (!parsed.toString().equals(issueId) || agent.isBlank()) {
+    if (agent.isBlank()) {
       throw new IllegalArgumentException("Invalid issue agent owner");
     }
     return new Key(parsed, agent);

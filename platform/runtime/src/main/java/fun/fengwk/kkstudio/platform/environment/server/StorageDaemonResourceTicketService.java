@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.platform.environment.server;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.platform.daemon.DaemonPresignedPut;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonResourceTicketService;
@@ -150,11 +151,11 @@ public class StorageDaemonResourceTicketService implements DaemonResourceTicketS
 
   private static UUID parseCanonicalUuid(String value, String field) {
     Objects.requireNonNull(value, field);
-    UUID parsed = UUID.fromString(value);
-    if (!parsed.toString().equals(value)) {
-      throw new IllegalStateException(field + " must be a canonical UUID");
+    try {
+      return Uuids.parseCanonical(value, field);
+    } catch (IllegalArgumentException error) {
+      throw new IllegalStateException(field + " must be a canonical UUID", error);
     }
-    return parsed;
   }
 
   private static Ticket failed() {

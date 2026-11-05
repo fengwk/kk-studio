@@ -6,6 +6,7 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
@@ -152,16 +153,11 @@ public final class TaskTool implements Tool {
       throw reject(field + " must be a canonical UUID string");
     }
     String raw = value.stringValue();
-    UUID parsed;
     try {
-      parsed = UUID.fromString(raw);
+      return Uuids.parseCanonical(raw, field);
     } catch (IllegalArgumentException error) {
       throw reject(field + " must be a canonical UUID string");
     }
-    if (!parsed.toString().equals(raw)) {
-      throw reject(field + " must be a canonical UUID string");
-    }
-    return parsed;
   }
 
   private static String requiredText(ObjectNode node, String field) {

@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.platform.plugin.resource;
 
+import fun.fengwk.kkstudio.common.id.Uuids;
+
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
@@ -55,14 +57,11 @@ public final class SessionResourceUri {
       return Optional.empty();
     }
     String candidate = value.substring(PREFIX.length());
-    if (!CANONICAL_UUID.matcher(candidate).matches()) {
+    try {
+      return Optional.of(Uuids.parseCanonical(candidate, "blobId"));
+    } catch (IllegalArgumentException error) {
       return Optional.empty();
     }
-    UUID blobId = UUID.fromString(candidate);
-    if (!blobId.toString().equals(candidate)) {
-      return Optional.empty();
-    }
-    return Optional.of(blobId);
   }
 
   /** 规范 URI 形态（由 blob id 派生，绝不持久化）。 */

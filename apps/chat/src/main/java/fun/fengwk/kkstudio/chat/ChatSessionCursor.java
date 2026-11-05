@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.chat;
 
+import fun.fengwk.kkstudio.common.id.Uuids;
+
 import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
@@ -39,16 +41,12 @@ record ChatSessionCursor(Instant createTime, UUID sessionId) {
       throw new IllegalArgumentException("cursor must be <epochMilli>:<uuid>");
     }
     String idText = cursor.substring(separator + 1);
-    UUID id;
     try {
-      id = UUID.fromString(idText);
+      return new ChatSessionCursor(
+          Instant.ofEpochMilli(epochMilli), Uuids.parseCanonical(idText, "cursor"));
     } catch (IllegalArgumentException error) {
       throw new IllegalArgumentException("cursor must be <epochMilli>:<uuid>", error);
     }
-    if (!id.toString().equals(idText)) {
-      throw new IllegalArgumentException("cursor must be <epochMilli>:<uuid>");
-    }
-    return new ChatSessionCursor(Instant.ofEpochMilli(epochMilli), id);
   }
 
   String encode() {

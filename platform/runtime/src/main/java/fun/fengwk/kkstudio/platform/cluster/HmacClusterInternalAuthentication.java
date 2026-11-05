@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.platform.cluster;
 
+import fun.fengwk.kkstudio.common.id.Uuids;
+
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 
@@ -153,11 +155,7 @@ public final class HmacClusterInternalAuthentication implements ClusterInternalA
 
   private static UUID parseCanonicalUuid(String value, String failureMessage) {
     try {
-      UUID parsed = UUID.fromString(value);
-      if (!parsed.toString().equals(value)) {
-        throw authFailure(failureMessage);
-      }
-      return parsed;
+      return Uuids.parseCanonical(value, "internal authentication");
     } catch (IllegalArgumentException error) {
       throw authFailure(failureMessage);
     }

@@ -15,6 +15,7 @@ import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.harness.model.HarnessJson;
 import fun.fengwk.kkstudio.harness.model.ImageInputTier;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
@@ -398,19 +399,14 @@ public final class ProviderRequestJsonCodec {
     return text(node, field);
   }
 
-  /** 必填 canonical UUID 文本字段（{@code UUID.fromString} 往返一致）。 */
+  /** 必填 canonical UUID 文本字段。 */
   private static UUID canonicalUuid(ObjectNode node, String field) {
     String value = text(node, field);
-    UUID parsed;
     try {
-      parsed = UUID.fromString(value);
+      return Uuids.parseCanonical(value, field);
     } catch (IllegalArgumentException error) {
       throw new IllegalArgumentException(field + " must be a canonical UUID: " + value, error);
     }
-    if (!parsed.toString().equals(value)) {
-      throw new IllegalArgumentException(field + " must be a canonical UUID: " + value);
-    }
-    return parsed;
   }
 
   private static Long decodeNullableLong(ObjectNode node, String field) {

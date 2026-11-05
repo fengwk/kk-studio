@@ -4,6 +4,7 @@ import lombok.AllArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 
+import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwner;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwnerDisplay;
@@ -39,11 +40,11 @@ public class ChatSessionOwnership implements SessionOwnership {
     if (!kind().equals(owner.kind())) {
       throw new IllegalArgumentException("Invalid owner kind");
     }
-    UUID id = UUID.fromString(owner.id());
-    if (!id.toString().equals(owner.id())) {
-      throw new IllegalArgumentException("Chat id must be a canonical UUID");
+    try {
+      return Uuids.parseCanonical(owner.id(), "Chat id");
+    } catch (IllegalArgumentException error) {
+      throw new IllegalArgumentException("Chat id must be a canonical UUID", error);
     }
-    return id;
   }
 
   @Override

@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.platform.interaction;
 
+import fun.fengwk.kkstudio.common.id.Uuids;
+
 import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
@@ -44,16 +46,12 @@ final class InteractionCursor {
       throw new IllegalArgumentException("cursor must be <epochMilli>:<uuid>");
     }
     String idText = cursor.substring(separator + 1);
-    UUID id;
     try {
-      id = UUID.fromString(idText);
+      return new InteractionCursor(
+          Instant.ofEpochMilli(epochMilli), Uuids.parseCanonical(idText, "cursor"));
     } catch (IllegalArgumentException error) {
       throw new IllegalArgumentException("cursor must be <epochMilli>:<uuid>", error);
     }
-    if (!id.toString().equals(idText)) {
-      throw new IllegalArgumentException("cursor must be <epochMilli>:<uuid>");
-    }
-    return new InteractionCursor(Instant.ofEpochMilli(epochMilli), id);
   }
 
   static String encode(Instant createdAt, UUID id) {

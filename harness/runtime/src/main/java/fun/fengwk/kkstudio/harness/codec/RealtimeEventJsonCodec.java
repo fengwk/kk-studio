@@ -6,6 +6,7 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.harness.api.realtime.RealtimeEvent;
 import fun.fengwk.kkstudio.harness.api.realtime.RealtimeEventType;
 import fun.fengwk.kkstudio.harness.model.HarnessJson;
@@ -340,19 +341,12 @@ public final class RealtimeEventJsonCodec {
           context + "." + field + " must be a canonical UUID string");
     }
     String text = value.stringValue();
-    UUID uuid;
     try {
-      uuid = UUID.fromString(text);
+      return Uuids.parseCanonical(text, context + "." + field);
     } catch (IllegalArgumentException error) {
       throw new IllegalArgumentException(
           context + "." + field + " must be a canonical UUID string", error);
     }
-    // UUID.fromString 也接受缺组或大写/混合大小写变体；wire 只允许唯一的 canonical 文本表示。
-    if (!uuid.toString().equals(text)) {
-      throw new IllegalArgumentException(
-          context + "." + field + " must be a canonical UUID string");
-    }
-    return uuid;
   }
 
   private static long requiredPositiveIntegralLong(ObjectNode node, String field, String context) {

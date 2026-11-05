@@ -6,6 +6,8 @@ import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.common.id.Uuids;
+
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -205,11 +207,7 @@ public record H3AdapterState(
     }
     String raw = value.textValue();
     try {
-      UUID parsed = UUID.fromString(raw);
-      if (!parsed.toString().equals(raw)) {
-        throw new IllegalArgumentException(field + " must be a canonical UUID string");
-      }
-      return parsed;
+      return Uuids.parseCanonical(raw, field);
     } catch (IllegalArgumentException error) {
       throw new IllegalArgumentException(field + " must be a canonical UUID string", error);
     }

@@ -10,6 +10,7 @@ import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.harness.api.realtime.RealtimeEvent;
 import fun.fengwk.kkstudio.harness.codec.RealtimeEventJsonCodec;
 
@@ -168,16 +169,12 @@ public final class RealtimeNotificationCodec {
 
   private static UUID requiredCanonicalUuid(ObjectNode node, String field, String path) {
     String text = requiredText(node, field, path);
-    UUID value;
     try {
-      value = UUID.fromString(text);
+      return Uuids.parseCanonical(text, path + "." + field);
     } catch (IllegalArgumentException error) {
-      throw new IllegalArgumentException(path + "." + field + " must be a UUID string", error);
+      throw new IllegalArgumentException(
+          path + "." + field + " must use canonical UUID text", error);
     }
-    if (!value.toString().equals(text)) {
-      throw new IllegalArgumentException(path + "." + field + " must use canonical UUID text");
-    }
-    return value;
   }
 
   private static Kind readKind(String value) {
