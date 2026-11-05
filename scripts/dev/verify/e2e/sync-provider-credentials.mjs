@@ -11,6 +11,9 @@
  *     minimax-anthropic: TEST_ANTHROPIC_BASE_URL / TEST_ANTHROPIC_API_KEY
  *     deepseek:          TEST_OPENAI_BASE_URL / TEST_OPENAI_API_KEY
  *
+ * The reliability matrix's host-only MiniMax pair is declared in the same inventory as
+ * RELIABILITY_PROVIDER_SPECS; it is not part of the E2E four-provider list or `--list-env`.
+ *
  * When all credential pairs are absent, the script skips without contacting the backend.
  * When any provider has an incomplete (half) pair, it throws a ValidationError before any HTTP request.
  * Preconditions (database seed row, non-empty version, matching providerType) for all configured
@@ -32,6 +35,8 @@ export const TEST_ANTHROPIC_BASE_URL = 'TEST_ANTHROPIC_BASE_URL'
 export const TEST_ANTHROPIC_API_KEY = 'TEST_ANTHROPIC_API_KEY'
 export const TEST_OPENAI_BASE_URL = 'TEST_OPENAI_BASE_URL'
 export const TEST_OPENAI_API_KEY = 'TEST_OPENAI_API_KEY'
+export const TEST_MINIMAX_BASE_URL = 'TEST_MINIMAX_BASE_URL'
+export const TEST_MINIMAX_API_KEY = 'TEST_MINIMAX_API_KEY'
 
 export const PROVIDER_SPECS = [
   {
@@ -65,6 +70,22 @@ export const PROVIDER_SPECS = [
     apiKeyEnv: TEST_OPENAI_API_KEY,
     requiresV1Suffix: true,
     defaultDescription: 'DeepSeek (OpenAI Chat Completions).',
+  },
+]
+
+/**
+ * Reliability matrix credentials target its own isolated `minimax` row. They stay in this
+ * inventory so every provider credential environment name is declared exactly once, while
+ * the E2E synchronizer continues to consume only PROVIDER_SPECS.
+ */
+export const RELIABILITY_PROVIDER_SPECS = [
+  {
+    name: 'minimax',
+    providerType: 'openai_responses',
+    baseUrlEnv: TEST_MINIMAX_BASE_URL,
+    apiKeyEnv: TEST_MINIMAX_API_KEY,
+    requiresV1Suffix: true,
+    defaultDescription: 'MiniMax.',
   },
 ]
 

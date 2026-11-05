@@ -420,7 +420,9 @@ runner 会复用已有服务，或杀掉上述端口监听后启动服务；执�
 E2E runner 拥有专用的独立数据库（默认 `127.0.0.1:5432/kk_studio_e2e_matrix`）与专用存储桶；
 连接本地 MinIO（127.0.0.1/localhost:9000）时存储桶固定为专用名 `kk-studio-e2e-matrix`（忽略外部环境变量覆盖），
 runner 启动后端时会自动重建该专用空库（由 Flyway 初始化当前 Schema 与种子）并清空该专用存储桶，
-严格与开发应用隔离。连接外部 S3 endpoint 时允许覆盖 bucket 名但绝不清理。重置工具优先使用宿主 `psql`，
+严格与开发应用隔离。本地桶的创建与私有化复用
+`deploy/dependencies/minio-client/init-bucket.sh`，runner 在其后清空对象。
+连接外部 S3 endpoint 时允许覆盖 bucket 名但绝不清理。重置工具优先使用宿主 `psql`，
 其次使用本地 compose 的 postgres 容器；环境缺少工具或重置失败时明确报错停止。
 Backend 启动要求有效的 `KK_STUDIO_STORAGE_S3_*` 配置及可达的 bucket；即使只跑免费 L1 API
 矩阵，也需要独立的 S3/MinIO 环境。不能用共享或生产存储桶充当测试基础设施。
@@ -438,6 +440,9 @@ E2E 矩阵只有 `--real` 会读取并同步宿主凭据，且必须提供四组
 - `TEST_OPENAI_RESPONSES_BASE_URL` + `TEST_OPENAI_RESPONSES_API_KEY`
 - `TEST_ANTHROPIC_BASE_URL` + `TEST_ANTHROPIC_API_KEY`
 - `TEST_OPENAI_BASE_URL` + `TEST_OPENAI_API_KEY`
+
+变量名以 `node scripts/dev/verify/e2e/sync-provider-credentials.mjs --list-env` 的输出为唯一来源；
+脚本与 usage 不再各自维护清单。
 
 变量按协议区分：`TEST_OPENAI_RESPONSES_*` 写入 `openai` Responses Provider，
 `TEST_OPENAI_*` 写入 `deepseek` Chat Completions Provider；Provider 名称与模型身份不变。
@@ -468,7 +473,8 @@ SQL/resource、Compose、Dockerfile、image layer、backend/Daemon environment �
 矩阵运行，因此复用曾执行真实 E2E 的 database 会失败，需要改用全新未配置的 E2E database。
 
 真实 Agent 可靠性矩阵使用独立的 `TEST_MINIMAX_BASE_URL` + `TEST_MINIMAX_API_KEY`，只更新其隔离
-database 中的 `minimax` Responses Provider。
+database 中的 `minimax` Responses Provider。该 pair 与 E2E 四组凭据同处
+`sync-provider-credentials.mjs` 的统一清单，可靠性入口只通过 `--list-env` 读取名称。
 
 四种协议的文本缓存验收已注册为 `real.text_cache.*`，可由矩阵自动执行，不需要另加手工探针。
 取得付费授权、提供上述四组凭据后，必须使用隔离的新 DB、S3 与后端，不复用开发或生产环境。

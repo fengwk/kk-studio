@@ -67,11 +67,9 @@ Options:
 Env:
   BACKEND_PORT=18081
   FRONTEND_PORT=5173
-  TEST_GOOGLE_BASE_URL / TEST_GOOGLE_API_KEY
-  TEST_OPENAI_RESPONSES_BASE_URL / TEST_OPENAI_RESPONSES_API_KEY
-  TEST_ANTHROPIC_BASE_URL / TEST_ANTHROPIC_API_KEY
-  TEST_OPENAI_BASE_URL / TEST_OPENAI_API_KEY
-  # consumed only with --real: free modes never synchronize host credentials, and --real validates each pair non-empty before startup
+  # Real provider credential pairs are declared once by the synchronizer:
+  #   node scripts/dev/verify/e2e/sync-provider-credentials.mjs --list-env
+  # --real requires every printed name to be set non-empty before startup.
   JAVA_HOME_21=...
   E2E_MAVEN_OFFLINE=true  # opt into Maven -o; default is online
   E2E_WORK_DIR=...        # default: $REPO_ROOT/runtime/e2e
