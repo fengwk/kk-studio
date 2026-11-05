@@ -21,6 +21,7 @@ import tools.jackson.databind.cfg.CoercionAction;
 import tools.jackson.databind.cfg.CoercionInputShape;
 import tools.jackson.databind.cfg.EnumFeature;
 import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.module.SimpleModule;
 import tools.jackson.databind.type.LogicalType;
 
 import fun.fengwk.kkstudio.common.id.Uuids;
@@ -84,6 +85,9 @@ public class HttpBoundaryConfiguration implements WebMvcConfigurer {
                 c.setCoercion(CoercionInputShape.Integer, CoercionAction.Fail)
                     .setCoercion(CoercionInputShape.Float, CoercionAction.Fail)
                     .setCoercion(CoercionInputShape.Boolean, CoercionAction.Fail))
+        .addModule(
+            new SimpleModule("CanonicalHttpUuid")
+                .addDeserializer(UUID.class, new CanonicalUuidDeserializer()))
         // Settings 的 Long wire 本就明确为十进制字符串，而不是 JSON 数字。
         .addMixIn(SystemSettingsToolDTO.class, SettingsToolMixin.class)
         .addMixIn(SystemSettingsAiRuntimeDTO.class, SettingsAiRuntimeMixin.class)
@@ -91,6 +95,20 @@ public class HttpBoundaryConfiguration implements WebMvcConfigurer {
         .addMixIn(SystemSettingsStorageMediaDTO.class, SettingsStorageMediaMixin.class)
         .addMixIn(SystemSettingsAdvancedDTO.class, SettingsAdvancedMixin.class)
         .build();
+  }
+
+  static class CanonicalUuidDeserializer extends ValueDeserializer<UUID> {
+    @Override
+    public UUID deserialize(JsonParser parser, DeserializationContext context) {
+      if (parser.currentToken() != JsonToken.VALUE_STRING) {
+        throw DatabindException.from(parser, "UUID must be a canonical lowercase string");
+      }
+      try {
+        return Uuids.parseCanonical(parser.getString(), "UUID");
+      } catch (IllegalArgumentException error) {
+        throw DatabindException.from(parser, "UUID must be a canonical lowercase string");
+      }
+    }
   }
 
   static class DecimalStringLong extends ValueDeserializer<Long> {

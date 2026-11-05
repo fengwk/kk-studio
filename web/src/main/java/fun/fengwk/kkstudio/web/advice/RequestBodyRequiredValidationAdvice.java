@@ -20,26 +20,24 @@ import tools.jackson.databind.JavaType;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.introspect.AnnotatedField;
-import tools.jackson.databind.introspect.AnnotatedMember;
 import tools.jackson.databind.introspect.AnnotatedParameter;
 import tools.jackson.databind.introspect.BeanPropertyDefinition;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.lang.reflect.AnnotatedArrayType;
 import java.lang.reflect.AnnotatedParameterizedType;
 import java.lang.reflect.AnnotatedType;
-import java.lang.reflect.Array;
 import java.lang.reflect.Field;
 import java.lang.reflect.RecordComponent;
 import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
-/** 请求反序列化成功后，以字段或 record 组件的类型注解校验必填属性。 */
+/** 在 JSON 树中以字段或 record 组件的类型注解校验必填属性。 */
 @ControllerAdvice
 public class RequestBodyRequiredValidationAdvice extends RequestBodyAdviceAdapter {
 
@@ -73,36 +71,26 @@ public class RequestBodyRequiredValidationAdvice extends RequestBodyAdviceAdapte
     } catch (JacksonException error) {
       throw new HttpMessageNotReadableException("Invalid JSON request", error, input);
     }
-    // 构造器和自定义 setter 可能先于 afterBodyRead 拒绝 null；先确保错误仍包含属性路径。
-    validatePresence(tree, mapper.constructType(targetType), "");
-    return new CapturedInput(input.getHeaders(), bytes, tree);
+    // 构造器和自定义 setter 可能先拒绝 null；先确保错误包含属性路径。
+    validatePresence(
+        tree, mapper.constructType(targetType), parameter.getParameter().getAnnotatedType(), "");
+    return new CapturedInput(input.getHeaders(), bytes);
   }
 
-  @Override
-  public Object afterBodyRead(
-      Object body,
-      HttpInputMessage input,
-      MethodParameter parameter,
-      Type targetType,
-      Class<? extends HttpMessageConverter<?>> converterType) {
-    // 原始树区分缺失与 primitive/有默认值的字段；解析错误由消息转换器处理。
-    JsonNode tree = ((CapturedInput) input).tree();
-    validate(
-        body,
-        tree,
-        "",
-        mapper.constructType(targetType),
-        parameter.getParameter().getAnnotatedType());
-    return body;
-  }
-
-  private void validatePresence(JsonNode node, JavaType type, String path) {
+  private void validatePresence(
+      JsonNode node, JavaType type, @Nullable AnnotatedType annotated, String path) {
     if (node == null || node.isNull() || type == null) {
       return;
     }
     if (node.isArray() && type.getContentType() != null) {
+      AnnotatedType element =
+          annotated instanceof AnnotatedArrayType array
+              ? array.getAnnotatedGenericComponentType()
+              : typeArgument(annotated, 0);
       for (int i = 0; i < node.size(); i++) {
-        validatePresence(node.get(i), type.getContentType(), path + "[" + i + "]");
+        String child = path + "[" + i + "]";
+        requireElement(node.get(i), type.getContentType(), element, child);
+        validatePresence(node.get(i), type.getContentType(), element, child);
       }
       return;
     }
@@ -111,13 +99,14 @@ public class RequestBodyRequiredValidationAdvice extends RequestBodyAdviceAdapte
     }
     if (type.isMapLikeType()) {
       if (type.getContentType() != null && type.getContentType().getRawClass() != Object.class) {
+        AnnotatedType element = typeArgument(annotated, 1);
         node.properties()
             .forEach(
-                entry ->
-                    validatePresence(
-                        entry.getValue(),
-                        type.getContentType(),
-                        path.isEmpty() ? entry.getKey() : path + "." + entry.getKey()));
+                entry -> {
+                  String child = path.isEmpty() ? entry.getKey() : path + "." + entry.getKey();
+                  requireElement(entry.getValue(), type.getContentType(), element, child);
+                  validatePresence(entry.getValue(), type.getContentType(), element, child);
+                });
       }
       return;
     }
@@ -133,7 +122,7 @@ public class RequestBodyRequiredValidationAdvice extends RequestBodyAdviceAdapte
       if (!property.nullable() && (childNode == null || childNode.isNull())) {
         throw required(child);
       }
-      validatePresence(childNode, property.type(), child);
+      validatePresence(childNode, property.type(), property.annotated(), child);
     }
   }
 
@@ -156,77 +145,6 @@ public class RequestBodyRequiredValidationAdvice extends RequestBodyAdviceAdapte
     return raw;
   }
 
-  private void validate(
-      Object value,
-      JsonNode node,
-      String path,
-      JavaType declared,
-      @Nullable AnnotatedType annotated) {
-    if (value == null || declared.getRawClass() == Object.class) {
-      return;
-    }
-    if (value instanceof Map<?, ?> map) {
-      JavaType content = declared.getContentType();
-      if (content == null || content.getRawClass() == Object.class) {
-        return;
-      }
-      AnnotatedType element = typeArgument(annotated, 1);
-      for (var entry : map.entrySet()) {
-        String key = entry.getKey().toString();
-        String child = path.isEmpty() ? key : path + "." + key;
-        requireElement(entry.getValue(), element, child);
-        validate(entry.getValue(), node.get(key), child, content, element);
-      }
-      return;
-    }
-    if (value instanceof Iterable<?> values) {
-      JavaType content = declared.getContentType();
-      if (content == null || content.getRawClass() == Object.class) {
-        return;
-      }
-      AnnotatedType element = typeArgument(annotated, 0);
-      int index = 0;
-      for (Object item : values) {
-        String child = path + "[" + index + "]";
-        requireElement(item, element, child);
-        validate(item, node.get(index++), child, content, element);
-      }
-      return;
-    }
-    if (value.getClass().isArray()) {
-      JavaType content = declared.getContentType();
-      for (int i = 0; i < Array.getLength(value); i++) {
-        Object item = Array.get(value, i);
-        String child = path + "[" + i + "]";
-        requireElement(item, null, child);
-        validate(item, node.get(i), child, content, null);
-      }
-      return;
-    }
-    Class<?> type = value.getClass();
-    if (type.isEnum() || type.getPackageName().startsWith("java.") || value instanceof JsonNode) {
-      return;
-    }
-    for (Property property : metadata.computeIfAbsent(type, this::introspect)) {
-      String child = path.isEmpty() ? property.name() : path + "." + property.name();
-      JsonNode childNode = node.get(property.name());
-      if (childNode == null || childNode.isNull()) {
-        if (!property.nullable()) {
-          throw required(child);
-        }
-        continue;
-      }
-      Object childValue = property.accessor().getValue(value);
-      if (childValue == null) {
-        if (!property.nullable()) {
-          throw required(child);
-        }
-      } else {
-        validate(childValue, childNode, child, property.type(), property.annotated());
-      }
-    }
-  }
-
   private List<Property> introspect(Class<?> type) {
     JavaType javaType = mapper.constructType(type);
     var introspector = mapper.deserializationConfig().classIntrospectorInstance();
@@ -241,12 +159,6 @@ public class RequestBodyRequiredValidationAdvice extends RequestBodyAdviceAdapte
       AnnotatedField field = property.getField();
       JavaType declared = field == null ? property.getPrimaryType() : field.getType();
       AnnotatedType annotated = annotatedType(property);
-      AnnotatedMember accessor = property.getAccessor();
-      if (accessor == null) {
-        throw new IllegalStateException(
-            "No readable field for " + type.getName() + "." + property.getName());
-      }
-      accessor.fixAccess(true);
       properties.add(
           new Property(
               property.getName(),
@@ -254,8 +166,7 @@ public class RequestBodyRequiredValidationAdvice extends RequestBodyAdviceAdapte
                   && annotated != null
                   && annotated.isAnnotationPresent(Nullable.class),
               declared,
-              annotated,
-              accessor));
+              annotated));
     }
     return List.copyOf(properties);
   }
@@ -279,13 +190,17 @@ public class RequestBodyRequiredValidationAdvice extends RequestBodyAdviceAdapte
 
   private static @Nullable AnnotatedType typeArgument(@Nullable AnnotatedType type, int index) {
     if (type instanceof AnnotatedParameterizedType parameterized) {
-      return parameterized.getAnnotatedActualTypeArguments()[index];
+      AnnotatedType[] arguments = parameterized.getAnnotatedActualTypeArguments();
+      return index < arguments.length ? arguments[index] : null;
     }
     return null;
   }
 
-  private static void requireElement(Object value, @Nullable AnnotatedType type, String path) {
-    if (value == null && (type == null || !type.isAnnotationPresent(Nullable.class))) {
+  private static void requireElement(
+      JsonNode value, JavaType type, @Nullable AnnotatedType annotated, String path) {
+    if (value.isNull()
+        && type.getRawClass() != Object.class
+        && (annotated == null || !annotated.isAnnotationPresent(Nullable.class))) {
       throw required(path);
     }
   }
@@ -295,14 +210,9 @@ public class RequestBodyRequiredValidationAdvice extends RequestBodyAdviceAdapte
   }
 
   private record Property(
-      String name,
-      boolean nullable,
-      JavaType type,
-      @Nullable AnnotatedType annotated,
-      AnnotatedMember accessor) {}
+      String name, boolean nullable, JavaType type, @Nullable AnnotatedType annotated) {}
 
-  private record CapturedInput(HttpHeaders headers, byte[] bytes, JsonNode tree)
-      implements HttpInputMessage {
+  private record CapturedInput(HttpHeaders headers, byte[] bytes) implements HttpInputMessage {
     @Override
     public HttpHeaders getHeaders() {
       return headers;

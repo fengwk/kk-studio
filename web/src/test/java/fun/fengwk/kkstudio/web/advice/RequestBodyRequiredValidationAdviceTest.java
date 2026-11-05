@@ -20,6 +20,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.canvas.dto.ApplyCanvasCommandsRequestDTO;
 import fun.fengwk.kkstudio.share.plugin.PluginConfigurationUpdateRequestDTO;
@@ -35,7 +36,7 @@ import java.util.Map;
  *
  * <ul>
  *   <li>缺失与显式 null 必填属性校验。
- *   <li>原始 JSON 树与 Java 对象结合检测 primitive 缺失与默认值缺失。
+ *   <li>原始 JSON 树检测 primitive 缺失与默认值缺失。
  *   <li>{@link Nullable} 属性省略与显式 null。
  *   <li>嵌套 DTO、集合元素、Map 键值的递归校验。
  *   <li>开放 JSON Map（{@code Map<String, Object>}）允许其值为 null，且不触发 DTO 自省。
@@ -49,13 +50,13 @@ class RequestBodyRequiredValidationAdviceTest {
 
   @BeforeEach
   void setUp() {
-    RequestBodyRequiredValidationAdvice advice =
-        new RequestBodyRequiredValidationAdvice(StrictHttpJsonMapperTestSupport.get());
+    JsonMapper mapper = StrictHttpJsonMapperTestSupport.get();
+    RequestBodyRequiredValidationAdvice advice = new RequestBodyRequiredValidationAdvice(mapper);
     TestProbeController controller = new TestProbeController();
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
             .setMessageConverters(
-                new JacksonJsonHttpMessageConverter(StrictHttpJsonMapperTestSupport.get()))
+                new JacksonJsonHttpMessageConverter(StrictHttpJsonMapperTestSupport.strictHttp()))
             .setControllerAdvice(advice)
             .build();
   }
@@ -337,6 +338,26 @@ class RequestBodyRequiredValidationAdviceTest {
   }
 
   @Test
+  void nestedMapsAndNullableMapValuesUseTheirElementAnnotations() throws Exception {
+    // 值的 @Nullable 与深层集合里的必填元素不能互相覆盖。
+    mockMvc
+        .perform(
+            post("/test/nested-map")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"items\":{\"optional\":null,\"present\":[{\"code\":\"ok\"}]}}"))
+        .andExpect(status().isOk());
+    MvcResult missing =
+        mockMvc
+            .perform(
+                post("/test/nested-map")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"items\":{\"present\":[null]}}"))
+            .andExpect(status().isBadRequest())
+            .andReturn();
+    assertBadRequestDetail(missing, "items.present[0] is required");
+  }
+
+  @Test
   void openJsonMapAllowsNullAndAvoidsDtoIntrospection() throws Exception {
     // 必填开放 Map 缺失
     MvcResult missingResult =
@@ -412,6 +433,85 @@ class RequestBodyRequiredValidationAdviceTest {
             .andExpect(status().isBadRequest())
             .andReturn();
     assertBadRequestDetail(result, "commands[0].transform.height is required");
+  }
+
+  @Test
+  void nestedResourceDiscriminatorUsesItsOwnSubtypeAndPath() throws Exception {
+    // Canvas 请求中 type 和 kind 是两个独立的 NAME/PROPERTY union。
+    String prefix =
+        "{\"idempotencyKey\":\"id\",\"commands\":[{\"type\":\"CREATE_NODE\","
+            + "\"nodeId\":\"node\",\"name\":\"n\","
+            + "\"transform\":{\"x\":0,\"y\":0,\"width\":10,\"height\":10},\"resources\":[";
+    String suffix = "]}]}";
+    for (var entry :
+        Map.of(
+                "{\"kind\":\"KEEP\"}", "resourceId",
+                "{\"kind\":\"TEXT\",\"name\":\"n\"}", "textContent",
+                "{\"kind\":\"BLOB\",\"name\":\"n\"}", "blobId")
+            .entrySet()) {
+      MvcResult result =
+          mockMvc
+              .perform(
+                  post("/test/canvas")
+                      .contentType(MediaType.APPLICATION_JSON)
+                      .content(prefix + entry.getKey() + suffix))
+              .andExpect(status().isBadRequest())
+              .andReturn();
+      assertBadRequestDetail(
+          result, "commands[0].resources[0]." + entry.getValue() + " is required");
+    }
+    mockMvc
+        .perform(
+            post("/test/canvas")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    prefix
+                        + "{\"kind\":\"TEXT\",\"name\":\"n\",\"textContent\":\"body\"}"
+                        + suffix))
+        .andExpect(status().isOk());
+  }
+
+  @Test
+  void everyCanvasCommandSubtypeValidatesItsOwnRequiredField() throws Exception {
+    // type 的 11 个命令均须在构造 record 前产生各自路径。
+    for (String type :
+        List.of(
+            "CREATE_NODE",
+            "RENAME_NODE",
+            "SET_NODE_RESOURCES",
+            "SET_NODE_FUNCTION",
+            "SET_NODE_GROUP",
+            "DELETE_NODE",
+            "UPDATE_NODE_TRANSFORM",
+            "CREATE_GROUP",
+            "RENAME_GROUP",
+            "UPDATE_GROUP_TRANSFORM",
+            "DELETE_GROUP")) {
+      String field =
+          type.contains("GROUP") && !type.equals("SET_NODE_GROUP") ? "groupId" : "nodeId";
+      MvcResult result =
+          mockMvc
+              .perform(
+                  post("/test/canvas")
+                      .contentType(MediaType.APPLICATION_JSON)
+                      .content(
+                          "{\"idempotencyKey\":\"id\",\"commands\":[{\"type\":\"" + type + "\"}]}"))
+              .andExpect(status().isBadRequest())
+              .andReturn();
+      assertBadRequestDetail(result, "commands[0]." + field + " is required");
+    }
+    // 可空子类型字段允许缺失及显式 null。
+    for (String command :
+        List.of(
+            "{\"type\":\"SET_NODE_FUNCTION\",\"nodeId\":\"id\"}",
+            "{\"type\":\"SET_NODE_FUNCTION\",\"nodeId\":\"id\",\"function\":null}")) {
+      mockMvc
+          .perform(
+              post("/test/canvas")
+                  .contentType(MediaType.APPLICATION_JSON)
+                  .content("{\"idempotencyKey\":\"id\",\"commands\":[" + command + "]}"))
+          .andExpect(status().isOk());
+    }
   }
 
   @Test
@@ -592,9 +692,14 @@ class RequestBodyRequiredValidationAdviceTest {
 
     @PostMapping("/test/array")
     public void array(@RequestBody ArrayDTO body) {}
+
+    @PostMapping("/test/nested-map")
+    public void nestedMap(@RequestBody NestedMapDTO body) {}
   }
 
   record ArrayDTO(ListItemDTO[] items) {}
+
+  record NestedMapDTO(Map<String, @Nullable List<ListItemDTO>> items) {}
 
   static class BasicDTO {
     private String name;
