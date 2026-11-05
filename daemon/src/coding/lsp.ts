@@ -16,12 +16,6 @@ import { LspService } from './lsp-service.js'
 import { ToolInputRejectedError, resolveExistingPath } from './support.js'
 import { isAbortError } from '../native/abort.js'
 
-export { LspDiscovery, type LspSupport } from './lsp-discovery.js'
-export { LspError, LspTimeoutError } from './lsp-error.js'
-export { LspService } from './lsp-service.js'
-export { LspClient } from './lsp-client.js'
-export { LspClientPool } from './lsp-pool.js'
-
 export interface LspCapabilityGroup extends CapabilityGroup {
   support(file: string): LspSupport
   fileChanged(file: string): void

@@ -428,7 +428,7 @@ export class LspClient {
     return !this.stopped && !this.hasExited
   }
 
-  supports(method: string): boolean {
+  private supports(method: string): boolean {
     if (!this.capabilities) {
       return false
     }
@@ -446,7 +446,7 @@ export class LspClient {
     }
   }
 
-  sync(filePath: string): void {
+  private sync(filePath: string): void {
     this.requireRunning()
     const target = path.resolve(filePath)
     let stat: fs.Stats
