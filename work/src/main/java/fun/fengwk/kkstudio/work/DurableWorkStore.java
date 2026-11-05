@@ -4,6 +4,7 @@ import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.PlatformTransactionManager;
 
+import fun.fengwk.kkstudio.common.time.HarnessStoreTime;
 import fun.fengwk.kkstudio.common.work.WorkState;
 
 import java.sql.Timestamp;
@@ -459,23 +460,11 @@ public final class DurableWorkStore {
   }
 
   private static Duration requirePositiveWholeMillis(Duration duration, String name) {
-    Duration value = requireNonNegativeWholeMillis(duration, name);
-    if (value.isZero()) {
-      throw new IllegalArgumentException(name + " must be at least 1ms");
-    }
-    return value;
+    return HarnessStoreTime.requireWholeMillisecondDuration(duration, name);
   }
 
   private static Duration requireNonNegativeWholeMillis(Duration duration, String name) {
-    Objects.requireNonNull(duration, name);
-    long millis = duration.toMillis();
-    if (duration.isNegative()) {
-      throw new IllegalArgumentException(name + " must not be negative");
-    }
-    if (!duration.equals(Duration.ofMillis(millis))) {
-      throw new IllegalArgumentException(name + " must be a whole number of milliseconds");
-    }
-    return duration;
+    return HarnessStoreTime.requireNonNegativeWholeMillisecondDuration(duration, name);
   }
 
   private static Instant instant(Timestamp value) {

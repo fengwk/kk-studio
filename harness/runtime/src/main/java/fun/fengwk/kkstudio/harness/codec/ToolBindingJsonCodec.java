@@ -10,6 +10,7 @@ import fun.fengwk.kkstudio.harness.api.tool.ContributorStateAccessMode;
 import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.codec.AgentToolDefinitionJsonCodec;
 
@@ -88,7 +89,7 @@ public final class ToolBindingJsonCodec {
     InvocationJsonSupport.requireFields(
         node, context, "contributorId", "localName", "stateAccesses");
     ArrayNode accesses =
-        InvocationJsonSupport.array(
+        JsonCodecSupport.array(
             InvocationJsonSupport.required(node, "stateAccesses", context),
             context + ".stateAccesses");
     List<ContributorStateAccess> decoded = new ArrayList<>(accesses.size());

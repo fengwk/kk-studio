@@ -1,13 +1,13 @@
 package fun.fengwk.kkstudio.platform.harness.builtin.realtime;
 
 import tools.jackson.core.JacksonException;
-import tools.jackson.core.StreamReadFeature;
-import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
-import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
+
+import fun.fengwk.kkstudio.common.id.Uuids;
+import fun.fengwk.kkstudio.harness.model.HarnessJson;
 
 import java.util.Iterator;
 import java.util.LinkedHashSet;
@@ -24,11 +24,7 @@ import java.util.UUID;
  */
 public final class HarnessStreamCatchupNotificationCodec {
 
-  private static final ObjectMapper MAPPER =
-      JsonMapper.builder()
-          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
-          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
-          .build();
+  private static final ObjectMapper MAPPER = HarnessJson.STRICT;
 
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
   private static final Set<String> FIELDS =
@@ -99,18 +95,12 @@ public final class HarnessStreamCatchupNotificationCodec {
 
   private static UUID requiredCanonicalUuid(ObjectNode node, String field) {
     String text = requiredText(node, field);
-    UUID value;
     try {
-      value = UUID.fromString(text);
+      return Uuids.parseCanonical(text, "stream catchup notification." + field);
     } catch (IllegalArgumentException error) {
       throw new IllegalArgumentException(
-          "stream catchup notification." + field + " must be a UUID string", error);
+          "stream catchup notification." + field + " must use canonical UUID text", error);
     }
-    if (!value.toString().equals(text)) {
-      throw new IllegalArgumentException(
-          "stream catchup notification." + field + " must use canonical UUID text");
-    }
-    return value;
   }
 
   private static int requiredPositiveInt(ObjectNode node, String field) {

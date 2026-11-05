@@ -5,6 +5,7 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 import fun.fengwk.kkstudio.harness.model.HarnessJson;
+import fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
 
@@ -50,10 +51,10 @@ public final class ProviderJsonHelper {
     }
     try (JsonParser parser = OBJECT_MAPPER.createParser(json)) {
       JsonNode node = OBJECT_MAPPER.readTree(parser);
-      if (node == null || (requireObject && !node.isObject()) || parser.nextToken() != null) {
+      if (node == null || parser.nextToken() != null) {
         throw new ProviderException(ProviderErrorKind.INVALID_REQUEST, errorMessage);
       }
-      return node;
+      return requireObject ? JsonCodecSupport.objectNode(node, errorMessage) : node;
     } catch (Exception e) {
       throw new ProviderException(ProviderErrorKind.INVALID_REQUEST, errorMessage);
     }
@@ -70,8 +71,7 @@ public final class ProviderJsonHelper {
       return null;
     }
     try {
-      JsonNode node = OBJECT_MAPPER.readTree(text);
-      return node != null && node.isObject() ? node : null;
+      return JsonCodecSupport.objectNode(OBJECT_MAPPER.readTree(text), "json");
     } catch (Exception ignored) {
       // 宽容解析：调用方只在能得到对象时使用结果，其余情况按“无对象”继续。
       return null;

@@ -1,13 +1,12 @@
 package fun.fengwk.kkstudio.platform.environment.registry;
 
 import tools.jackson.core.JacksonException;
-import tools.jackson.core.StreamReadFeature;
-import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
-import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
+
+import fun.fengwk.kkstudio.harness.model.HarnessJson;
 
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
@@ -23,11 +22,7 @@ import java.util.Set;
  */
 public final class EnvironmentStateCodec {
 
-  private static final ObjectMapper MAPPER =
-      JsonMapper.builder()
-          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
-          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
-          .build();
+  private static final ObjectMapper MAPPER = HarnessJson.STRICT;
 
   private static final Set<String> SKILL_STATE_FIELDS =
       Set.of("packageName", "installedSha256", "localPath", "error");

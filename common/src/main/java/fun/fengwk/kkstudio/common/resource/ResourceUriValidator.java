@@ -1,12 +1,12 @@
 package fun.fengwk.kkstudio.common.resource;
 
 import fun.fengwk.kkstudio.common.hash.Sha256;
+import fun.fengwk.kkstudio.common.id.Uuids;
 
 import java.io.ByteArrayOutputStream;
 import java.net.URI;
 import java.util.Base64;
 import java.util.Locale;
-import java.util.UUID;
 import java.util.regex.Pattern;
 
 /**
@@ -182,14 +182,10 @@ final class ResourceUriValidator {
       throw new IllegalArgumentException("blob-upload uri must not carry authority/query/fragment");
     }
     String uploadId = parsed.getRawSchemeSpecificPart();
-    UUID parsedUploadId;
     try {
-      parsedUploadId = UUID.fromString(uploadId);
+      Uuids.parseCanonical(uploadId, "blob-upload");
     } catch (IllegalArgumentException error) {
       throw new IllegalArgumentException("blob-upload uri must carry a canonical UUID", error);
-    }
-    if (!parsedUploadId.toString().equals(uploadId)) {
-      throw new IllegalArgumentException("blob-upload uri must carry a canonical UUID");
     }
   }
 

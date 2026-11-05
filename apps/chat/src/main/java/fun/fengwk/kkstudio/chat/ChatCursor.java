@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.chat;
 
+import fun.fengwk.kkstudio.common.id.Uuids;
+
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Base64;
@@ -96,15 +98,10 @@ record ChatCursor(Instant updatedAt, Instant createdAt, String title, UUID id) {
   }
 
   private static UUID parseId(String text) {
-    UUID id;
     try {
-      id = UUID.fromString(text);
+      return Uuids.parseCanonical(text, "cursor");
     } catch (IllegalArgumentException error) {
       throw new IllegalArgumentException("cursor must end with a canonical UUID", error);
     }
-    if (!id.toString().equals(text)) {
-      throw new IllegalArgumentException("cursor must end with a canonical UUID");
-    }
-    return id;
   }
 }

@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.platform.vfs;
 
+import fun.fengwk.kkstudio.common.id.Uuids;
+
 import java.util.Objects;
 import java.util.UUID;
 import java.util.regex.Pattern;
@@ -360,19 +362,11 @@ public final class VfsPath {
   }
 
   private static UUID parseCanonicalUuid(String str) {
-    if (str == null || str.length() != 36) {
-      throw new IllegalArgumentException("invalid canonical UUID: " + str);
-    }
-    UUID uuid;
     try {
-      uuid = UUID.fromString(str);
-    } catch (IllegalArgumentException e) {
-      throw new IllegalArgumentException("invalid canonical UUID: " + str);
+      return Uuids.parseCanonical(str, "uuid");
+    } catch (IllegalArgumentException error) {
+      throw new IllegalArgumentException("invalid canonical UUID: " + str, error);
     }
-    if (!uuid.toString().equals(str)) {
-      throw new IllegalArgumentException("invalid canonical UUID: " + str);
-    }
-    return uuid;
   }
 
   private static UUID extractThreadId(String sessionRel) {
@@ -382,10 +376,7 @@ public final class VfsPath {
       String threadStr = slash < 0 ? after : after.substring(0, slash);
       if (threadStr.length() == 36) {
         try {
-          UUID candidate = UUID.fromString(threadStr);
-          if (candidate.toString().equals(threadStr)) {
-            return candidate;
-          }
+          return Uuids.parseCanonical(threadStr, "threadId");
         } catch (IllegalArgumentException ignored) {
           // not a canonical UUID
         }

@@ -1,7 +1,8 @@
 package fun.fengwk.kkstudio.platform.daemon;
 
+import fun.fengwk.kkstudio.common.id.Uuids;
+
 import java.util.Objects;
-import java.util.UUID;
 
 /**
  * 一条受管更新命令：Platform 在专用管理通道上向 Daemon 下发唯一更新目标。
@@ -22,15 +23,10 @@ public record DaemonUpdateCommand(String operationId, String targetVersion) {
    */
   public static String validateOperationId(String value) {
     Objects.requireNonNull(value, "operationId");
-    UUID parsed;
     try {
-      parsed = UUID.fromString(value);
+      Uuids.parseCanonical(value, "operationId");
     } catch (IllegalArgumentException error) {
-      throw new IllegalArgumentException("operationId must be a canonical UUID");
-    }
-    String canonical = parsed.toString();
-    if (!canonical.equals(value)) {
-      throw new IllegalArgumentException("operationId must be a canonical lowercase UUID");
+      throw new IllegalArgumentException("operationId must be a canonical lowercase UUID", error);
     }
     return value;
   }

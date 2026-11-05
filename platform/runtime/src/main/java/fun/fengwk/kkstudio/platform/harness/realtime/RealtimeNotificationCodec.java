@@ -1,17 +1,15 @@
 package fun.fengwk.kkstudio.platform.harness.realtime;
 
 import tools.jackson.core.JacksonException;
-import tools.jackson.core.StreamReadFeature;
-import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
-import tools.jackson.databind.cfg.JsonNodeFeature;
-import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.harness.api.realtime.RealtimeEvent;
 import fun.fengwk.kkstudio.harness.codec.RealtimeEventJsonCodec;
+import fun.fengwk.kkstudio.harness.model.HarnessJson;
 
 import java.util.Iterator;
 import java.util.LinkedHashSet;
@@ -22,13 +20,7 @@ import java.util.UUID;
 /** PostgreSQL realtime NOTIFY envelope 的严格 deterministic JSON codec。 */
 public final class RealtimeNotificationCodec {
 
-  private static final ObjectMapper MAPPER =
-      JsonMapper.builder()
-          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
-          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
-          // 自由 JSON number 以 BigDecimal 读回，避免 1e309 -> "Infinity"、1e-324 -> 0.0 的精度/类型失真。
-          .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
-          .build();
+  private static final ObjectMapper MAPPER = HarnessJson.STRICT_DECIMAL;
 
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
   private static final Set<String> EVENT_FIELDS = orderedSet("kind", "originNodeId", "event");
@@ -168,16 +160,12 @@ public final class RealtimeNotificationCodec {
 
   private static UUID requiredCanonicalUuid(ObjectNode node, String field, String path) {
     String text = requiredText(node, field, path);
-    UUID value;
     try {
-      value = UUID.fromString(text);
+      return Uuids.parseCanonical(text, path + "." + field);
     } catch (IllegalArgumentException error) {
-      throw new IllegalArgumentException(path + "." + field + " must be a UUID string", error);
+      throw new IllegalArgumentException(
+          path + "." + field + " must use canonical UUID text", error);
     }
-    if (!value.toString().equals(text)) {
-      throw new IllegalArgumentException(path + "." + field + " must use canonical UUID text");
-    }
-    return value;
   }
 
   private static Kind readKind(String value) {
