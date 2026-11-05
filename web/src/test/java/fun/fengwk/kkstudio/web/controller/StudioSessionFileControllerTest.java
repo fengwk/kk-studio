@@ -63,13 +63,13 @@ class StudioSessionFileControllerTest {
                 .param("ownerKind", "CHAT")
                 .param("ownerId", "chat-1"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.entries[0].name").value("MEMORY.md"))
-        .andExpect(jsonPath("$.data.entries[0].directory").value(false))
-        .andExpect(jsonPath("$.data.entries[0].revision").value(2))
-        .andExpect(jsonPath("$.data.entries[0].sizeBytes").value(12))
-        .andExpect(jsonPath("$.data.entries[1].name").value("tmp/"))
-        .andExpect(jsonPath("$.data.entries[1].directory").value(true))
-        .andExpect(jsonPath("$.data.entries[1].sizeBytes").doesNotExist());
+        .andExpect(jsonPath("$.entries[0].name").value("MEMORY.md"))
+        .andExpect(jsonPath("$.entries[0].directory").value(false))
+        .andExpect(jsonPath("$.entries[0].revision").value(2))
+        .andExpect(jsonPath("$.entries[0].sizeBytes").value(12))
+        .andExpect(jsonPath("$.entries[1].name").value("tmp/"))
+        .andExpect(jsonPath("$.entries[1].directory").value(true))
+        .andExpect(jsonPath("$.entries[1].sizeBytes").doesNotExist());
   }
 
   @Test
@@ -99,9 +99,9 @@ class StudioSessionFileControllerTest {
                 .param("offset", "1")
                 .param("limit", "20"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.revision").value(3))
-        .andExpect(jsonPath("$.data.sizeBytes").value(6))
-        .andExpect(jsonPath("$.data.text").value("path: vfs:/sessions/x/notes.txt\n\n1|hello"));
+        .andExpect(jsonPath("$.revision").value(3))
+        .andExpect(jsonPath("$.sizeBytes").value(6))
+        .andExpect(jsonPath("$.text").value("path: vfs:/sessions/x/notes.txt\n\n1|hello"));
   }
 
   @Test
