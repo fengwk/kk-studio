@@ -90,7 +90,7 @@ public class ConfigSyncService {
     String yaml = request == null ? null : request.getYaml();
     ConfigSyncParser.ParsedDocument document = parser.parse(yaml);
     ConfigSyncPlan plan = planner.plan(document);
-    if (!plan.skipped().isEmpty() && !request.isAllowPartial()) {
+    if (!plan.skipped().isEmpty() && !Boolean.TRUE.equals(request.getAllowPartial())) {
       throw DomainException.validation(RESOURCE, "partial import requires explicit confirmation");
     }
     if (plan.imported().isEmpty()) {
