@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.work;
 
+import fun.fengwk.kkstudio.common.time.HarnessStoreTime;
+
 import java.lang.System.Logger;
 import java.lang.System.Logger.Level;
 import java.time.Duration;
@@ -274,13 +276,7 @@ public final class BoundedWorkDispatcher<T> implements AutoCloseable {
   }
 
   private static Duration requirePositiveWholeMillis(Duration value, String name, String role) {
-    Objects.requireNonNull(value, role);
-    long millis = value.toMillis();
-    if (millis <= 0 || !value.equals(Duration.ofMillis(millis))) {
-      throw new IllegalArgumentException(
-          name + " " + role + " must be a positive whole number of milliseconds");
-    }
-    return value;
+    return HarnessStoreTime.requireWholeMillisecondDuration(value, name + " " + role);
   }
 
   private static Executor requireFailFastExecutor(Executor executor, String name, String role) {
