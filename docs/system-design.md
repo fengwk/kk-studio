@@ -54,16 +54,61 @@ harness 只提供执行引擎与能力契约，平台实现持久化与宿主适
    的公开身份（Session、Thread）。
 7. `web` 是唯一组合根，装配各层实现不算越层；SPA、错误映射、浏览器事件通道与 Daemon 传输只在这里。
 
+方框是 Maven 模块（省略 `kk-studio-` 前缀），箭头指向被依赖的模块：
+
 ```text
-frontend ──REST / WebSocket──▶ web（组合根，装配下列全部模块）
-  web ──▶ apps/chat、apps/project、apps/canvas/runtime、apps/ide、plugins
-  web ──▶ platform/runtime、platform/daemon-server
-  apps/* ──▶ platform/runtime ──▶ harness/runtime ──▶ harness/environment、harness/model
-  platform/runtime ──▶ harness/agent-builtin ──▶ harness/runtime、harness/model
-  platform/runtime ──▶ platform/plugin-api
-  platform/daemon-server ──▶ harness/environment
-  daemon ──单条 WSS 上的 HTTP/2──▶ platform/daemon-server
+                                         ┌─────┐
+L5                                       │ web │
+                                         └──┬──┘
+        ┌────────────┬───────────┬──────────┴───┬────────────────────────────┐
+        ▼            ▼           ▼              ▼                            ▼
+    ┌────────┐  ┌─────────┐  ┌───────┐  ┌────────────────┐   ┌────────────────────────────────┐
+L4  │  chat  │  │ project │  │  ide  │  │ canvas-runtime │   │ plugins: comfyui media opencli │
+    └───┬────┘  └────┬────┘  └───┬───┘  └────┬───────┬───┘   │          minimax-mavis         │
+        │            │           │           │       ▼       └────┬──────────┬────────────────┘
+        └────────────┴───────────┴───────────┤ ┌────────────┐     │          │
+                                             │ │ canvas-spi │◀────┘          │
+                                             ▼ └────────────┘                ▼
+    ┌────────────────────────┐    ┌────────────────────┐          ┌─────────────────────┐
+L3  │ platform-daemon-server │◀───│  platform-runtime  │─────────▶│ platform-plugin-api │
+    └────────────┬───────────┘    └──────────┬─────────┘          └──────────┬──────────┘
+                 │                           │                               │
+                 │                           ▼                               │
+                 │               ┌───────────────────────┐                   │
+                 │               │ harness-agent-builtin │                   │
+                 │               └───────────┬───────────┘                   │
+                 │                           │                               │
+                 │                           ▼                               │
+                 │                  ┌─────────────────┐                      │
+L2               │                  │ harness-runtime │◀─────────────────────┘
+                 │                  └───┬─────────┬───┘
+                 │                      │         │
+                 ▼                      │         ▼
+      ┌─────────────────────┐           │ ┌───────────────┐
+      │ harness-environment │◀──────────┘ │ harness-model │
+      └──────────┬──────────┘             └───────────────┘
+                 ▼
+            ┌────────┐    ┌──────┐   ┌───────┐   ┌────────┐
+L1          │ common │◀───│ work │   │ share │   │ schema │
+            └────────┘    └──────┘   └───────┘   └────────┘
 ```
+
+图中只画不能由其他路径推出的直接依赖。没有画出的边：`platform-runtime` 依赖 `share` 与 `work`；`canvas-spi`
+与多数模块直接依赖 `common`；`web` 以 runtime 范围依赖四个插件与 `schema`。插件中只有 `minimax-mavis` 不依赖
+`canvas-spi`；`harness-model` 不依赖任何内部模块。测试只复用下层模块的测试夹具（test-jar）与 `schema`。
+
+Maven 之外的连接：
+
+```text
+frontend ──REST 与 /api/events WebSocket──▶ web
+daemon ──每台主机一条 WSS，承载 HTTP/2 的控制流与 IDE 数据流──▶ platform/daemon-server
+daemon ──托管──▶ code-server（版本与摘要由 daemon/runtime-manifest.json 固定）
+```
+
+构建期生成物各有唯一来源：`web` 测试源码中的契约生成器产出前端的
+[`contracts.ts`](../frontend/src/shared/api/generated/contracts.ts)；
+[`control.proto`](../platform/daemon-server/src/main/protocol/control.proto) 生成 Daemon 的协议代码；
+`harness/environment` 的能力 Schema 同步到 `daemon/resources/capabilities`。
 
 `check.mjs` 同时守护聚合 POM 的模块清单、插件只 import 插件 SPI 与产品 SPI、内核契约包不反向依赖 runtime
 内部实现、Harness 公开包访问边界、按表名前缀的表归属、Java 包跨模块唯一，以及平台组合根与无 Redis /

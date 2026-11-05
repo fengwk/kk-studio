@@ -247,7 +247,7 @@ describe('system settings schema renderer', () => {
     const switchRow = screen
       .getByRole('switch', { name: '代理地址' })
       .closest('.settings-row')!
-    expect(switchRow).toHaveTextContent('Backend 全局默认 HTTP 代理')
+    expect(switchRow).toHaveTextContent('Backend 与所有在线 Daemon 共用的 HTTP 代理')
   })
 
   it('fail-closes on a duplicate field path', () => {
