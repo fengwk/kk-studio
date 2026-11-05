@@ -11,6 +11,7 @@ import { MAX_SKILL_PACKAGE_NAME_CHARS, SHA256_LOWER_PATTERN, SKILL_PACKAGE_NAME_
 import { SkillPackageStateSchema, type SkillPackageState } from '../generated/control_pb.js'
 import {
   type DirectoryMover,
+  type InstalledSkillPackage,
   type PrivateFs,
   type SkillPackageInstallerOptions,
 } from './types.js'
@@ -127,11 +128,9 @@ export class SkillPackageInstaller {
     }
   }
 
-  async listInstalledPackages(): Promise<
-    Array<{ packageName: string; installedSha256: string; localPath: string }>
-  > {
+  async listInstalledPackages(): Promise<InstalledSkillPackage[]> {
     await this.ensureInitialized()
-    const results: Array<{ packageName: string; installedSha256: string; localPath: string }> = []
+    const results: InstalledSkillPackage[] = []
     try {
       const entries = await fs.promises.readdir(this._skillsRoot, { withFileTypes: true })
       for (const entry of entries) {

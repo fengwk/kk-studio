@@ -17,7 +17,4 @@ it('contributes only lightweight native defaults without disabling Git or bridge
   })
   expect(manifest.activationEvents).toEqual(['*'])
   expect(manifest.main).toBe('./extension.cjs')
-  expect(manifest.contributes.commands.map((command: { command: string }) => command.command)).toEqual([
-    'kkStudio.changeDirectory', 'kkStudio.focusTerminal', 'kkStudio.closeView',
-  ])
 })

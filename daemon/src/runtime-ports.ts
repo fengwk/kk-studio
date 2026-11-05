@@ -18,7 +18,7 @@ export interface TemporaryResourceSweeper {
   sweep(ttlSeconds: number): Promise<void>
 }
 
-/** 受管更新端口；由 {@code src/installer} 提供。UPDATE 结果只暴露运行时用于编码 UPDATE_RESULT 的窄结构。 */
+/** 释放已交接更新的许可。 */
 export type ReleasePermit = () => Promise<void>
 
 /** 安装器交接后仍可观察到失败；返回停止观察的函数。 */
@@ -40,6 +40,7 @@ export interface UpdateOutcomeLike {
  */
 export type UpdateProgressReporter = (progress: UpdateByteProgress) => void
 
+/** 受管更新端口；由 src/installer 提供，结果只暴露运行时编码 UPDATE_RESULT 所需的结构。 */
 export interface UpdatePort {
   handleUpdate(
     command: Record<string, unknown>,

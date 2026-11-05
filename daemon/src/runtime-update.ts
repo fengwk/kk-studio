@@ -12,6 +12,7 @@ import {
   type UpdateResult,
 } from './generated/control_pb.js'
 import type { OutboundControl } from './runtime-outbound.js'
+import { safeMessage } from './runtime-encoding.js'
 import {
   RuntimeStatusTracker,
   type RuntimeStatus,
@@ -26,7 +27,7 @@ import type {
 } from './runtime-ports.js'
 
 /** 内存中保留的受管更新回执条数上界：足够覆盖少量重发与重连重放，不无界累积。 */
-export const MAX_TRACKED_UPDATE_OPERATIONS = 8
+const MAX_TRACKED_UPDATE_OPERATIONS = 8
 
 /**
  * 一个已准入的更新：从 ACCEPTED 起持有到明确失败或进程退出。
@@ -54,7 +55,7 @@ export interface UpdateReceipt {
   releasePermit?: ReleasePermit
 }
 
-export type UpdateDecision =
+type UpdateDecision =
   | { kind: 'replay-active'; active: ActiveUpdate }
   | { kind: 'status' }
   | { kind: 'replay-cached'; receipt: UpdateReceipt }
@@ -109,16 +110,9 @@ export function executionFailureReceipt(
     result: create(UpdateResultSchema, {
       operationId: command.operationId,
       phase: UpdatePhase.UPDATE_FAILED,
-      message: messageOf(failure ?? new Error('update failed')),
+      message: safeMessage(failure ?? new Error('update failed')),
     }),
   }
-}
-
-function messageOf(error: unknown): string {
-  if (error instanceof Error && error.message.trim() !== '') {
-    return error.message
-  }
-  return 'capability execution failed'
 }
 
 /**

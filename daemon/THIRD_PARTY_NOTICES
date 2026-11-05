@@ -11,6 +11,7 @@ inside the archive. Direct runtime dependencies:
 | Component | License |
 | --- | --- |
 | `@vscode/ripgrep` and its platform-specific binary packages, `jsonc-parser`, `koffi`, `undici`, `vscode-jsonrpc`, `ws`, `yauzl` | MIT License |
+| `@bufbuild/protobuf` | Apache License 2.0 and BSD 3-Clause License |
 | `diff` | BSD 3-Clause License |
 | `code-server` (fengwk/code-server, managed fork of coder/code-server) | MIT License |
 | Node.js (bundled inside the code-server standalone runtime) | MIT License |

@@ -5,7 +5,6 @@ import {
   createResourceTransferClient,
   type PresignedPutSender,
   type ResourceControlSender,
-  type ResourceTransferClient,
 } from './transport/resources.js'
 
 /**
@@ -15,7 +14,6 @@ import {
  */
 export interface ResourceRuntime {
   readonly uploader: ResourceUploader | null
-  readonly client: ResourceTransferClient | null
   onConnectionLost(): void
   onConnectionReady(): void
   onTicket(invocationId: string, ticket: ResourceUploadTicket): void
@@ -30,7 +28,6 @@ export function createResourceRuntime(options: {
   if (options.resources !== undefined) {
     return {
       uploader: options.resources,
-      client: null,
       onConnectionLost(): void {},
       onConnectionReady(): void {},
       onTicket(): void {},
@@ -43,7 +40,6 @@ export function createResourceRuntime(options: {
   })
   return {
     uploader: client,
-    client,
     onConnectionLost(): void {
       client.onConnectionLost()
     },

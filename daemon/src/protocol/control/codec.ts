@@ -1,13 +1,11 @@
 import { fromBinary, toBinary } from '@bufbuild/protobuf'
 
 import {
-  Architecture,
   EnvelopeSchema,
   IdeAction,
   IdeOpenMode,
   IdeViewState,
   MessageType,
-  OperatingSystem,
   TicketState,
   UpdatePhase,
   type CapabilityResult,
@@ -29,8 +27,6 @@ import {
   type ResourceUploadTicket,
   type RuntimeSnapshot,
   type Settings,
-  type SkillPackage,
-  type SkillPackageState,
   type SkillState,
   type SkillSync,
   type Started,
@@ -72,7 +68,6 @@ export const MAX_IDE_PATH_CHARS = 4096
 export const MAX_LISTED_IDE_VIEWS = 64
 export const MAX_IDE_LEASE_BINDINGS = 64
 export const MAX_NOTE_CHARS = 512
-export const MAX_DAEMON_VERSION_CHARS = 64
 export const MAX_UPDATE_MESSAGE_CHARS = 500
 export const MAX_PRESIGNED_URL_CHARS = 4096
 export const MAX_PRESIGNED_HEADERS = 16
@@ -833,7 +828,7 @@ function validateError(error: ProtocolErrorMessage): void {
   requireMessage(error.message, 'error.message')
 }
 
-export function validateSkillSync(sync: SkillSync): void {
+function validateSkillSync(sync: SkillSync): void {
   assertNoUnknown(sync, 'skillSync')
   if (sync.packages.length > MAX_SKILL_PACKAGES) {
     throw new Error('skillSync.packages exceeds the entry limit')
@@ -855,7 +850,7 @@ export function validateSkillSync(sync: SkillSync): void {
   })
 }
 
-export function validateSkillState(state: SkillState): void {
+function validateSkillState(state: SkillState): void {
   assertNoUnknown(state, 'skillState')
   if (state.packages.length > MAX_SKILL_PACKAGES) {
     throw new Error('skillState.packages exceeds the entry limit')
