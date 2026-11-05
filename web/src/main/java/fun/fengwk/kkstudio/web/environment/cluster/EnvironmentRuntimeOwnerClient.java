@@ -163,7 +163,7 @@ public class EnvironmentRuntimeOwnerClient {
     if (status == 409 && "in_use".equals(code)) {
       return DomainException.inUse("environment", "environment runtime operation is busy");
     }
-    if (status == 409 && "environment_unavailable".equals(code)) {
+    if (status == 409 && "unavailable".equals(code)) {
       return DomainException.unavailable(
           "ENVIRONMENT_UNAVAILABLE", "environment runtime is unavailable");
     }

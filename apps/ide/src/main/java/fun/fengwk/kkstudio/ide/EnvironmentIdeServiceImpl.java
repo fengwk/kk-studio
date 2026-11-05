@@ -631,7 +631,7 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     }
     String code = reply.hasCode() ? reply.getCode() : "";
     if ("CANCELLED".equals(code)) {
-      return DomainException.validationReason("IDE_CLOSE_CANCELLED", message);
+      return DomainException.validation("ide_close_cancelled", message);
     }
     if ("VIEW_IN_USE".equals(code)
         || "BUSY".equals(code)

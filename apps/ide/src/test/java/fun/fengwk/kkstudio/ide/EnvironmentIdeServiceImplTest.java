@@ -231,7 +231,7 @@ class EnvironmentIdeServiceImplTest {
         IdeResult.newBuilder().setOk(false).setCode("CANCELLED").setMessage("cancelled").build());
     DomainException error =
         assertThrows(DomainException.class, () -> service.closeView(ENV, VIEW.toString(), request));
-    assertEquals("IDE_CLOSE_CANCELLED", error.reason());
+    assertEquals("ide_close_cancelled", error.resource());
     assertTrue(bindings.find(ENV, VIEW).isPresent());
     assertTrue(authorization.closed.isEmpty());
   }

@@ -118,11 +118,11 @@ class EnvironmentRuntimeOwnerClientTest {
     server.createContext(
         "/internal/environments/" + ENV + "/runtime",
         exchange ->
-            respond(
-                exchange,
-                409,
-                "{\"code\":\"environment_unavailable\",\"message\":\"unavailable\"}"));
-    assertThrows(DomainException.class, () -> client.runtimeStatus(remote(), ENV));
+            respond(exchange, 409, "{\"code\":\"unavailable\",\"message\":\"unavailable\"}"));
+    DomainException unavailable =
+        assertThrows(DomainException.class, () -> client.runtimeStatus(remote(), ENV));
+    assertEquals("ENVIRONMENT_UNAVAILABLE", unavailable.reason());
+    assertEquals("environment runtime is unavailable", unavailable.getMessage());
   }
 
   @Test
