@@ -11,10 +11,10 @@ import { MAX_SKILL_PACKAGE_NAME_CHARS, SHA256_LOWER_PATTERN, SKILL_PACKAGE_NAME_
 import { SkillPackageStateSchema, type SkillPackageState } from '../generated/control_pb.js'
 import {
   type DirectoryMover,
-  type PrivateFs,
+  type InstalledSkillPackage,
   type SkillPackageInstallerOptions,
 } from './types.js'
-import { ensurePrivateDirectory, isRealDirectory, isRealFile, writePrivateFile } from '../native/index.js'
+import { ensurePrivateDirectory, isRealDirectory, isRealFile, writePrivateFile, type PrivateFs } from '../native/index.js'
 
 export const MARKER_FILENAME = '.kkstudio-sha256'
 export const MAX_ZIP_ENTRIES = 5000
@@ -127,11 +127,9 @@ export class SkillPackageInstaller {
     }
   }
 
-  async listInstalledPackages(): Promise<
-    Array<{ packageName: string; installedSha256: string; localPath: string }>
-  > {
+  async listInstalledPackages(): Promise<InstalledSkillPackage[]> {
     await this.ensureInitialized()
-    const results: Array<{ packageName: string; installedSha256: string; localPath: string }> = []
+    const results: InstalledSkillPackage[] = []
     try {
       const entries = await fs.promises.readdir(this._skillsRoot, { withFileTypes: true })
       for (const entry of entries) {

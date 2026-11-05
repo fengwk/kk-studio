@@ -16,7 +16,7 @@ export function joinCommandLine(argumentsList: readonly string[]): string {
 }
 
 /** 按 MSVC 规则引用一个参数；空参数必须写成一对空引号，否则会被当成「没有这个参数」。 */
-export function quoteArgument(argument: string): string {
+function quoteArgument(argument: string): string {
   if (argument.length === 0 || requiresQuoting(argument)) {
     let target = '"'
     let backslashes = 0

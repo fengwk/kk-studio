@@ -1,7 +1,4 @@
-export interface PrivateFs {
-  ensurePrivateDirectory(path: string): Promise<string>
-  writePrivateFile(path: string, data: string | Uint8Array): Promise<void>
-}
+import type { PrivateFs } from '../native/index.js'
 
 export interface InstalledSkillPackage {
   packageName: string

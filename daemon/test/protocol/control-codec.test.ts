@@ -61,13 +61,12 @@ import {
   UpdateSchema,
   UpgradeRequiredSchema,
   type CapabilityResult,
+  type Envelope,
   type Invoke,
   type ResourceContent,
 } from '../../src/generated/control_pb.js'
 import {
-  decodeBinary,
   decodeFrame,
-  encodeBinary,
   encodeFrame,
   validate,
   validateUpgrade,
@@ -99,6 +98,15 @@ import {
 const GOLDEN = fileURLToPath(
   new URL('../../../platform/daemon-server/src/main/protocol/golden/', import.meta.url),
 )
+
+// Golden fixtures contain the protobuf payload; production transport uses framed messages.
+function encodeBinary(envelope: Envelope): Uint8Array {
+  return unframe(encodeFrame(envelope))
+}
+
+function decodeBinary(bytes: Uint8Array): Envelope {
+  return decodeFrame(frame(bytes))
+}
 
 function readGolden(name: string): Uint8Array {
   return new Uint8Array(readFileSync(join(GOLDEN, name)))
@@ -143,7 +151,7 @@ function validInvoke() {
 
 describe('control binary codec', () => {
   it('roundtrips directory listing and mobile actions with their payloads', () => {
-    // Verify the new fields survive validation and binary serialization.
+    // Verify the action fields survive validation and binary serialization.
     for (const action of [IdeAction.LIST_DIRECTORIES, IdeAction.COLLAPSE_MOBILE]) {
       const command = create(EnvelopeSchema, {
         messageType: MessageType.IDE_COMMAND, environmentId: ENVIRONMENT_ID, invocationId: INVOCATION_ID,

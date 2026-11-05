@@ -198,8 +198,12 @@ describe('LspClient Protocol & Handshake', () => {
     )
 
     const noCaps = await startClient('no-capabilities')
-    expect(noCaps.client.supports('textDocument/definition')).toBe(false)
-    expect(noCaps.client.supports('workspace/symbol')).toBe(false)
+    await expect(noCaps.client.definition(file, 1, 0)).rejects.toThrow(
+      /does not advertise go-to-definition support/,
+    )
+    await expect(noCaps.client.workspaceSymbols('q', 10)).rejects.toThrow(
+      /does not advertise workspace symbol support/,
+    )
   })
 
   it('handles position encoding boundaries for CRLF, utf-8, utf-16, utf-32 and beyond-line errors', async () => {
@@ -976,8 +980,8 @@ describe('LspClient Protocol & Handshake', () => {
     const file = path.join(tempDir, 'custom.unknownext')
     fs.writeFileSync(file, 'content\n')
 
-    // Test sync with unknown extension
-    client.sync(file)
+    // Test sync with unknown extension via definition request
+    await client.definition(file, 1, 0)
     const openEvent = await awaitEvent(
       transcript,
       (e) => e.event === 'recv' && e.message?.method === 'textDocument/didOpen',
@@ -999,14 +1003,18 @@ describe('LspClient Protocol & Handshake', () => {
   it('sync rejects missing file and binary file, and requests reject after client is stopped', async () => {
     const { client } = await startClient('normal')
     const missingFile = path.join(tempDir, 'missing.java')
-    expect(() => client.sync(missingFile)).toThrow('LSP request failed: the source file could not be read')
+    await expect(client.definition(missingFile, 1, 0)).rejects.toThrow(
+      'LSP request failed: the source file could not be read',
+    )
 
     const binaryFile = path.join(tempDir, 'binary.java')
     fs.writeFileSync(binaryFile, Buffer.from([0x00, 0x01, 0x02]))
-    expect(() => client.sync(binaryFile)).toThrow('LSP request failed: the source file is not valid text')
+    await expect(client.definition(binaryFile, 1, 0)).rejects.toThrow(
+      'LSP request failed: the source file is not valid text',
+    )
 
     await client.stop(500)
-    expect(() => client.sync(binaryFile)).toThrow('LSP client stopped')
+    await expect(client.definition(binaryFile, 1, 0)).rejects.toThrow('LSP client stopped')
     const file = path.join(tempDir, 'App.java')
     fs.writeFileSync(file, 'class App {}\n')
     await expect(client.definition(file, 1, 0)).rejects.toThrow('LSP client stopped')

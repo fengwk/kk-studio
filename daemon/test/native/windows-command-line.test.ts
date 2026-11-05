@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { joinCommandLine, quoteArgument } from '../../src/native/windows-command-line.js'
+import { joinCommandLine } from '../../src/native/windows-command-line.js'
 
 // Windows 没有原生 argv：子进程按 MSVC/CommandLineToArgvW 重新切分命令行。纯字符串变换，可在任意平台验证。
 describe('windows command line quoting', () => {
@@ -33,6 +33,6 @@ describe('windows command line quoting', () => {
   })
 
   test('a single argument is quoted exactly like the joined form', () => {
-    expect(quoteArgument('needs quote')).toBe('"needs quote"')
+    expect(joinCommandLine(['needs quote'])).toBe('"needs quote"')
   })
 })

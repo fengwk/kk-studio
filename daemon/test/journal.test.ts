@@ -25,7 +25,7 @@ describe('InMemoryInvocationJournal', () => {
     const first = journal.start('inv-1')
     expect(first.created).toBe(true)
     expect(first.entry.state).toBe('RUNNING')
-    expect(journal.size()).toBe(1)
+    expect(journal.find('inv-1')).toBe(first.entry)
     const second = journal.start('inv-1')
     expect(second.created).toBe(false)
     expect(second.entry).toBe(first.entry)

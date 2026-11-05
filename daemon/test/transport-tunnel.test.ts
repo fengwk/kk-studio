@@ -10,8 +10,6 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   handleIdeConnectRequest,
   handleIdeHttpRequest,
-  parseIdePath,
-  validateUpstream,
 } from '../src/transport/ide-tunnel.js'
 import { IdeError } from '../src/ide/errors.js'
 import type { IdeService, IdeStreamUpstream } from '../src/contracts.js'
@@ -96,87 +94,209 @@ function makeRawWebSocketServer(extraHead = ''): Promise<{ port: number; close: 
 }
 
 describe('ide-tunnel unit tests', () => {
-  describe('validateUpstream', () => {
-    it('rejects non-object or null upstream', () => {
-      expect(() => validateUpstream(null as any)).toThrow(/resolved upstream is required/)
-      expect(() => validateUpstream(undefined as any)).toThrow(/resolved upstream is required/)
-      expect(() => validateUpstream('bad' as any)).toThrow(/resolved upstream is required/)
+  describe('upstream validation at request handler boundary', () => {
+    const validPath = '/ide/11111111-1111-4111-8111-111111111111/1/view'
+
+    async function assertUpstreamRejected(invalidUpstream: any): Promise<void> {
+      for (const handler of [handleIdeHttpRequest, handleIdeConnectRequest]) {
+        let released = false
+        const ide = {
+          resolveView: vi.fn(async () => {
+            if (invalidUpstream && typeof invalidUpstream === 'object') {
+              return {
+                ...invalidUpstream,
+                release: () => {
+                  released = true
+                  if (typeof invalidUpstream.release === 'function') {
+                    invalidUpstream.release()
+                  }
+                },
+              }
+            }
+            return invalidUpstream
+          }),
+        } as unknown as IdeService
+
+        const stream = new MockServerHttp2Stream()
+        await handler(stream as any, { ':path': validPath } as any, ide)
+        expect(stream.respondedHeaders?.[HTTP2_HEADER_STATUS]).toBe(503)
+        expect(released).toBe(false)
+      }
+    }
+
+    async function assertUpstreamAccepted(target: Partial<IdeStreamUpstream>): Promise<void> {
+      for (const handler of [handleIdeHttpRequest, handleIdeConnectRequest]) {
+        let released = false
+        const ide = {
+          resolveView: vi.fn(async () =>
+            makeValidUpstream({
+              ...target,
+              release: () => {
+                released = true
+              },
+            }),
+          ),
+        } as unknown as IdeService
+
+        const stream = new MockServerHttp2Stream()
+        stream.closed = true
+        await handler(stream as any, { ':path': validPath } as any, ide)
+        expect(released).toBe(true)
+        expect(stream.respondedHeaders?.[HTTP2_HEADER_STATUS]).toBeUndefined()
+      }
+    }
+
+    it('rejects non-object or null upstream', async () => {
+      await assertUpstreamRejected(null)
+      await assertUpstreamRejected(undefined)
+      await assertUpstreamRejected('bad')
+      await assertUpstreamRejected(123)
     })
 
-    it('validates host numeric loopback', () => {
-      expect(() => validateUpstream(makeValidUpstream({ host: 123 as any }))).toThrow(/numeric loopback host/)
-      expect(() => validateUpstream(makeValidUpstream({ host: '192.168.1.1' }))).toThrow(/numeric loopback host/)
-      expect(() => validateUpstream(makeValidUpstream({ host: 'example.com' }))).toThrow(/numeric loopback host/)
-      expect(() => validateUpstream(makeValidUpstream({ host: '10.0.0.1' }))).toThrow(/numeric loopback host/)
+    it('validates host numeric loopback', async () => {
+      await assertUpstreamRejected(makeValidUpstream({ host: 123 as any }))
+      await assertUpstreamRejected(makeValidUpstream({ host: '192.168.1.1' }))
+      await assertUpstreamRejected(makeValidUpstream({ host: 'example.com' }))
+      await assertUpstreamRejected(makeValidUpstream({ host: '10.0.0.1' }))
 
-      // 有效的 loopback
-      expect(validateUpstream(makeValidUpstream({ host: '127.0.0.1' })).host).toBe('127.0.0.1')
-      expect(validateUpstream(makeValidUpstream({ host: '127.1.2.3' })).host).toBe('127.1.2.3')
-      expect(validateUpstream(makeValidUpstream({ host: '::1' })).host).toBe('::1')
-      expect(validateUpstream(makeValidUpstream({ host: '[::1]' })).host).toBe('[::1]')
+      // 有效的 loopback 语法准入（通过 closed 流观察 resolver 返回后 release 被调用，无需 OS 网络接口支持）
+      for (const host of ['127.0.0.1', '127.1.2.3', '::1', '[::1]']) {
+        await assertUpstreamAccepted({ host })
+      }
     })
 
-    it('validates port range', () => {
-      expect(() => validateUpstream(makeValidUpstream({ port: 0 }))).toThrow(/port is invalid/)
-      expect(() => validateUpstream(makeValidUpstream({ port: 65536 }))).toThrow(/port is invalid/)
-      expect(() => validateUpstream(makeValidUpstream({ port: -1 }))).toThrow(/port is invalid/)
-      expect(() => validateUpstream(makeValidUpstream({ port: 1.5 }))).toThrow(/port is invalid/)
-      expect(() => validateUpstream(makeValidUpstream({ port: NaN }))).toThrow(/port is invalid/)
-      expect(validateUpstream(makeValidUpstream({ port: 80 })).port).toBe(80)
+    it('validates port range', async () => {
+      await assertUpstreamRejected(makeValidUpstream({ port: 0 }))
+      await assertUpstreamRejected(makeValidUpstream({ port: 65536 }))
+      await assertUpstreamRejected(makeValidUpstream({ port: -1 }))
+      await assertUpstreamRejected(makeValidUpstream({ port: 1.5 }))
+      await assertUpstreamRejected(makeValidUpstream({ port: NaN }))
+      await assertUpstreamAccepted({ port: 80 })
     })
 
-    it('validates path format', () => {
-      expect(() => validateUpstream(makeValidUpstream({ path: 'no-leading-slash' }))).toThrow(/path is invalid/)
-      expect(() => validateUpstream(makeValidUpstream({ path: '//double-slash' }))).toThrow(/path is invalid/)
-      expect(() => validateUpstream(makeValidUpstream({ path: '/bad\x00char' }))).toThrow(/path is invalid/)
-      expect(() => validateUpstream(makeValidUpstream({ path: 123 as any }))).toThrow(/path is invalid/)
-      expect(validateUpstream(makeValidUpstream({ path: '/ok/path' })).path).toBe('/ok/path')
+    it('validates path format', async () => {
+      await assertUpstreamRejected(makeValidUpstream({ path: 'no-leading-slash' }))
+      await assertUpstreamRejected(makeValidUpstream({ path: '//double-slash' }))
+      await assertUpstreamRejected(makeValidUpstream({ path: '/bad\x00char' }))
+      await assertUpstreamRejected(makeValidUpstream({ path: 123 as any }))
+      await assertUpstreamAccepted({ path: '/ok/path' })
     })
 
-    it('validates headers array format', () => {
-      expect(() => validateUpstream(makeValidUpstream({ headers: 'not-array' as any }))).toThrow(/headers are invalid/)
-      expect(() => validateUpstream(makeValidUpstream({ headers: ['not-pair' as any] }))).toThrow(/headers are invalid/)
-      expect(() => validateUpstream(makeValidUpstream({ headers: [['bad header name!', 'val']] }))).toThrow(/headers are invalid/)
-      expect(() => validateUpstream(makeValidUpstream({ headers: [['valid-name', 'bad\x00val']] }))).toThrow(/headers are invalid/)
-      expect(validateUpstream(makeValidUpstream({ headers: [['valid-name', 'valid-val']] }))).toBeDefined()
+    it('validates headers array format', async () => {
+      await assertUpstreamRejected(makeValidUpstream({ headers: 'not-array' as any }))
+      await assertUpstreamRejected(makeValidUpstream({ headers: ['not-pair' as any] }))
+      await assertUpstreamRejected(makeValidUpstream({ headers: [['bad header name!', 'val']] }))
+      await assertUpstreamRejected(makeValidUpstream({ headers: [['valid-name', 'bad\x00val']] }))
+      await assertUpstreamAccepted({ headers: [['valid-name', 'valid-val']] })
     })
 
-    it('validates cookie format', () => {
-      expect(() => validateUpstream(makeValidUpstream({ cookie: 123 as any }))).toThrow(/cookie is invalid/)
-      expect(() => validateUpstream(makeValidUpstream({ cookie: 'bad\x00cookie' }))).toThrow(/cookie is invalid/)
-      expect(validateUpstream(makeValidUpstream({ cookie: 'valid=cookie' })).cookie).toBe('valid=cookie')
+    it('validates cookie format', async () => {
+      await assertUpstreamRejected(makeValidUpstream({ cookie: 123 as any }))
+      await assertUpstreamRejected(makeValidUpstream({ cookie: 'bad\x00cookie' }))
+      await assertUpstreamAccepted({ cookie: 'valid=cookie' })
     })
 
-    it('validates protocols format', () => {
-      expect(() => validateUpstream(makeValidUpstream({ protocols: 'not-array' as any }))).toThrow(/protocols are invalid/)
-      expect(() => validateUpstream(makeValidUpstream({ protocols: ['invalid protocol!'] }))).toThrow(/protocols are invalid/)
-      expect(validateUpstream(makeValidUpstream({ protocols: ['valid-protocol'] })).protocols).toEqual(['valid-protocol'])
+    it('validates protocols format', async () => {
+      await assertUpstreamRejected(makeValidUpstream({ protocols: 'not-array' as any }))
+      await assertUpstreamRejected(makeValidUpstream({ protocols: ['invalid protocol!'] }))
+      await assertUpstreamAccepted({ protocols: ['valid-protocol'] })
     })
 
-    it('validates signal and release lifecycle', () => {
-      expect(() => validateUpstream(makeValidUpstream({ signal: null as any }))).toThrow(/lifecycle is invalid/)
-      expect(() => validateUpstream(makeValidUpstream({ release: null as any }))).toThrow(/lifecycle is invalid/)
+    it('validates signal and release lifecycle', async () => {
+      for (const handler of [handleIdeHttpRequest, handleIdeConnectRequest]) {
+        const ideSignal = {
+          resolveView: vi.fn(async () => makeValidUpstream({ signal: null as any })),
+        } as unknown as IdeService
+        const streamSignal = new MockServerHttp2Stream()
+        await handler(streamSignal as any, { ':path': validPath } as any, ideSignal)
+        expect(streamSignal.respondedHeaders?.[HTTP2_HEADER_STATUS]).toBe(503)
+
+        const ideRelease = {
+          resolveView: vi.fn(async () => makeValidUpstream({ release: null as any })),
+        } as unknown as IdeService
+        const streamRelease = new MockServerHttp2Stream()
+        await handler(streamRelease as any, { ':path': validPath } as any, ideRelease)
+        expect(streamRelease.respondedHeaders?.[HTTP2_HEADER_STATUS]).toBe(503)
+      }
+    })
+
+    it('forwards request to loopback upstream on 127.0.0.1', async () => {
+      let serverReceivedHeaders: http.IncomingHttpHeaders | null = null
+      let serverReceivedUrl: string | null = null
+      const server = http.createServer((req, res) => {
+        serverReceivedHeaders = req.headers
+        serverReceivedUrl = req.url ?? null
+        res.writeHead(200, { 'x-upstream-response': 'ok' })
+        res.end('ok')
+      })
+      const port = await new Promise<number>((resolve) => {
+        server.listen(0, '127.0.0.1', () => resolve((server.address() as net.AddressInfo).port))
+      })
+
+      try {
+        let released = false
+        const ide = {
+          resolveView: vi.fn(async () =>
+            makeValidUpstream({
+              host: '127.0.0.1',
+              port,
+              path: '/ok/path',
+              headers: [['x-custom-req', 'custom-val']],
+              cookie: 'valid=cookie',
+              release: () => {
+                released = true
+              },
+            }),
+          ),
+        } as unknown as IdeService
+
+        const stream = new MockServerHttp2Stream()
+        stream.end()
+        await handleIdeHttpRequest(stream as any, { ':path': validPath } as any, ide)
+
+        await vi.waitFor(() => {
+          expect(stream.respondedHeaders?.[HTTP2_HEADER_STATUS]).toBe(200)
+          expect(stream.respondedHeaders?.['x-upstream-response']).toBe('ok')
+          expect(released).toBe(true)
+        })
+        expect(serverReceivedUrl).toBe('/ok/path')
+        expect(serverReceivedHeaders?.['host']).toBe(`127.0.0.1:${port}`)
+        expect(serverReceivedHeaders?.['x-custom-req']).toBe('custom-val')
+        expect(serverReceivedHeaders?.['cookie']).toBe('valid=cookie')
+      } finally {
+        await new Promise<void>((r) => server.close(() => r()))
+      }
     })
   })
 
-  describe('parseIdePath', () => {
-    it('returns null on invalid inputs', () => {
-      expect(parseIdePath(undefined)).toBeNull()
-      expect(parseIdePath(null as any)).toBeNull()
-      expect(parseIdePath(123 as any)).toBeNull()
-      expect(parseIdePath('/not-ide/path')).toBeNull()
-      expect(parseIdePath('/ide/not-a-uuid/1/path')).toBeNull()
-      expect(parseIdePath('/ide/11111111-1111-4111-8111-111111111111/0/path')).toBeNull() // epoch 必须为非零正整数
-      expect(parseIdePath('/ide/11111111-1111-4111-8111-111111111111/1')).toBeNull() // 缺少 viewPath 开头斜线
+  describe('IDE path validation', () => {
+    it('rejects invalid paths before resolving the view for HTTP and CONNECT', async () => {
+      const resolveView = vi.fn()
+      const ide = { resolveView } as unknown as IdeService
+      for (const handler of [handleIdeHttpRequest, handleIdeConnectRequest]) {
+        for (const path of [
+          undefined, null, 123, '/not-ide/path', '/ide/not-a-uuid/1/path',
+          '/ide/11111111-1111-4111-8111-111111111111/0/path',
+          '/ide/11111111-1111-4111-8111-111111111111/1',
+        ]) {
+          const stream = new MockServerHttp2Stream()
+          await handler(stream as any, { ':path': path } as any, ide)
+          expect(stream.respondedHeaders?.[HTTP2_HEADER_STATUS]).toBe(400)
+        }
+      }
+      expect(resolveView).not.toHaveBeenCalled()
     })
 
-    it('parses valid paths', () => {
-      const parsed = parseIdePath('/ide/11111111-1111-4111-8111-111111111111/42/sub/path?query=1')
-      expect(parsed).toEqual({
-        viewId: '11111111-1111-4111-8111-111111111111',
-        bindingEpoch: '42',
-        viewPath: '/sub/path?query=1',
-      })
+    it('passes the parsed identity and path to the view resolver', async () => {
+      const resolveView = vi.fn(async () => { throw new IdeError('unavailable') })
+      const stream = new MockServerHttp2Stream()
+      await handleIdeHttpRequest(stream as any, {
+        ':path': '/ide/11111111-1111-4111-8111-111111111111/42/sub/path?query=1',
+      }, { resolveView } as unknown as IdeService)
+      expect(resolveView).toHaveBeenCalledWith(
+        '11111111-1111-4111-8111-111111111111', '42',
+        expect.objectContaining({ mode: 'HTTP', path: '/sub/path?query=1' }),
+      )
     })
   })
 

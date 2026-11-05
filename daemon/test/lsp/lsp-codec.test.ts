@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { TextFileCodec } from '../../src/coding/lsp-codec.js'
 import { LspError } from '../../src/coding/lsp-error.js'
+import { decodeText } from '../../src/coding/text.js'
 
 describe('TextFileCodec', () => {
   it('decodes plain UTF-8 text', () => {
@@ -17,6 +18,13 @@ describe('TextFileCodec', () => {
     expect(decoded.text).toBe('with bom')
     expect(decoded.charset).toBe('utf-8')
     expect(decoded.bomLength).toBe(3)
+  })
+
+  it('retains the distinct TextDecoder behavior for a second leading BOM', () => {
+    // LSP follows TextDecoder; file editing retains the second BOM as content.
+    const bytes = Buffer.from([0xef, 0xbb, 0xbf, 0xef, 0xbb, 0xbf, 0x61])
+    expect(TextFileCodec.decode(bytes).text).toBe('a')
+    expect(decodeText(bytes).text).toBe('\ufeffa')
   })
 
   it('decodes UTF-16LE with BOM', () => {
@@ -48,9 +56,13 @@ describe('TextFileCodec', () => {
   })
 
   it('detects invalid text encoding', () => {
-    // 0xff 0xff is not a valid BOM and 0xff is invalid UTF-8 byte
+    // Continuation bytes cannot appear without a leading byte.
     const invalidUtf8 = Buffer.from([0x30, 0x80, 0xbf])
     expect(() => TextFileCodec.decode(invalidUtf8)).toThrow(/invalid text encoding/)
+    // LSP collapses malformed sequences to its own invalid-encoding error.
+    expect(() => TextFileCodec.decode(Buffer.from([0xe0, 0x81, 0x81]))).toThrowError(
+      new LspError('file appears to be binary: invalid text encoding'),
+    )
   })
 
   it('detects NUL characters inside BOM-decoded text', () => {

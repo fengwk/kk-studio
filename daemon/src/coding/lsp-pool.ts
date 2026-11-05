@@ -172,7 +172,7 @@ export class LspClientPool {
       server = this.discovery.requireServer(file)
       executable = this.discovery.requireExecutable(server)
       root = this.discovery.workspaceRoot(server, file)
-      key = this.key(root, server)
+      key = poolKey(root, server)
     } catch (error) {
       // 还没进入启动路径，本次调用没有遗留范围。
       notifyBootstrapExit()
@@ -310,7 +310,7 @@ export class LspClientPool {
       return undefined
     }
     const root = this.discovery.workspaceRoot(server, file)
-    const key = this.key(root, server)
+    const key = poolKey(root, server)
     const entry = this.clients.get(key)
     if (entry && entry.client.isAlive()) {
       return entry.client
@@ -622,9 +622,5 @@ export class LspClientPool {
       // 等待者必须被唤醒：它们随后看到失败的登记并以同一条失败终止，而不是重新启动一个服务器。
       retirement.resolve()
     }
-  }
-
-  private key(root: string, server: ResolvedServerConfig): string {
-    return poolKey(root, server)
   }
 }

@@ -66,7 +66,7 @@ export interface InvocationJournal {
 }
 
 /** 内存 journal 默认保留的终态条目上界。 */
-export const DEFAULT_MAX_JOURNAL_ENTRIES = 1024
+const DEFAULT_MAX_JOURNAL_ENTRIES = 1024
 
 export function isTerminalState(state: InvocationState): boolean {
   return state !== 'RUNNING'
@@ -155,10 +155,5 @@ export class InMemoryInvocationJournal implements InvocationJournal {
         return
       }
     }
-  }
-
-  /** 当前条目数，供测试断言上界。 */
-  size(): number {
-    return this.entries.size
   }
 }

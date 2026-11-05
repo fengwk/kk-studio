@@ -1,13 +1,11 @@
 import { fromBinary, toBinary } from '@bufbuild/protobuf'
 
 import {
-  Architecture,
   EnvelopeSchema,
   IdeAction,
   IdeOpenMode,
   IdeViewState,
   MessageType,
-  OperatingSystem,
   TicketState,
   UpdatePhase,
   type CapabilityResult,
@@ -29,8 +27,6 @@ import {
   type ResourceUploadTicket,
   type RuntimeSnapshot,
   type Settings,
-  type SkillPackage,
-  type SkillPackageState,
   type SkillState,
   type SkillSync,
   type Started,
@@ -56,31 +52,30 @@ import {
 } from './runtime.js'
 
 export const PROTOCOL_VERSION = 1
-export const MAX_INVOCATION_ID_CHARS = 256
-export const MAX_CALL_ID_CHARS = 256
+const MAX_INVOCATION_ID_CHARS = 256
+const MAX_CALL_ID_CHARS = 256
 export const MAX_ARGUMENTS_JSON_UTF8_BYTES = MAX_MESSAGE_BYTES
 export const MAX_DETAILS_JSON_UTF8_BYTES = 1024 * 1024
-export const MAX_JSON_CONTENT_UTF8_BYTES = 1024 * 1024
-export const MAX_CONTENT_ITEMS = 64
-export const MAX_MEDIA_TYPE_ASCII_BYTES = 255
-export const MAX_NAME_UTF8_BYTES = 512
-export const MAX_PREVIEW_UTF8_BYTES = 16 * 1024
-export const MAX_FAILURE_MESSAGE_CHARS = 512
-export const MAX_DISPLAY_NAME_CHARS = 256
-export const MAX_ERROR_MESSAGE_CHARS = 4096
-export const MAX_IDE_PATH_CHARS = 4096
-export const MAX_LISTED_IDE_VIEWS = 64
-export const MAX_IDE_LEASE_BINDINGS = 64
+const MAX_JSON_CONTENT_UTF8_BYTES = 1024 * 1024
+const MAX_CONTENT_ITEMS = 64
+const MAX_MEDIA_TYPE_ASCII_BYTES = 255
+const MAX_NAME_UTF8_BYTES = 512
+const MAX_PREVIEW_UTF8_BYTES = 16 * 1024
+const MAX_FAILURE_MESSAGE_CHARS = 512
+const MAX_DISPLAY_NAME_CHARS = 256
+const MAX_ERROR_MESSAGE_CHARS = 4096
+const MAX_IDE_PATH_CHARS = 4096
+const MAX_LISTED_IDE_VIEWS = 64
+const MAX_IDE_LEASE_BINDINGS = 64
 export const MAX_NOTE_CHARS = 512
-export const MAX_DAEMON_VERSION_CHARS = 64
-export const MAX_UPDATE_MESSAGE_CHARS = 500
-export const MAX_PRESIGNED_URL_CHARS = 4096
-export const MAX_PRESIGNED_HEADERS = 16
-export const MAX_PRESIGNED_HEADER_CHARS = 1024
-export const MAX_SKILL_PACKAGES = 512
-export const MAX_SKILL_DOWNLOAD_URL_CHARS = 4096
-export const MAX_SKILL_LOCAL_PATH_CHARS = 4096
-export const MAX_SKILL_ERROR_CHARS = 512
+const MAX_UPDATE_MESSAGE_CHARS = 500
+const MAX_PRESIGNED_URL_CHARS = 4096
+const MAX_PRESIGNED_HEADERS = 16
+const MAX_PRESIGNED_HEADER_CHARS = 1024
+const MAX_SKILL_PACKAGES = 512
+const MAX_SKILL_DOWNLOAD_URL_CHARS = 4096
+const MAX_SKILL_LOCAL_PATH_CHARS = 4096
+const MAX_SKILL_ERROR_CHARS = 512
 
 const CAPABILITY_ID_PATTERN = /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/
 const IDE_CODE_PATTERN = /^[A-Z][A-Z0-9_]{0,63}$/
@@ -151,13 +146,13 @@ interface UnknownCarrier {
 }
 
 /** Decodes one bare protobuf message and applies all application-level checks. */
-export function decodeBinary(bytes: Uint8Array): Envelope {
+function decodeBinary(bytes: Uint8Array): Envelope {
   requireMessageLength(bytes.length)
   return validate(fromBinary(EnvelopeSchema, bytes, { readUnknownFields: true }))
 }
 
 /** Validates and encodes one bare protobuf message. */
-export function encodeBinary(envelope: Envelope): Uint8Array {
+function encodeBinary(envelope: Envelope): Uint8Array {
   validate(envelope)
   const bytes = toBinary(EnvelopeSchema, envelope)
   requireMessageLength(bytes.length)
@@ -833,7 +828,7 @@ function validateError(error: ProtocolErrorMessage): void {
   requireMessage(error.message, 'error.message')
 }
 
-export function validateSkillSync(sync: SkillSync): void {
+function validateSkillSync(sync: SkillSync): void {
   assertNoUnknown(sync, 'skillSync')
   if (sync.packages.length > MAX_SKILL_PACKAGES) {
     throw new Error('skillSync.packages exceeds the entry limit')
@@ -855,7 +850,7 @@ export function validateSkillSync(sync: SkillSync): void {
   })
 }
 
-export function validateSkillState(state: SkillState): void {
+function validateSkillState(state: SkillState): void {
   assertNoUnknown(state, 'skillState')
   if (state.packages.length > MAX_SKILL_PACKAGES) {
     throw new Error('skillState.packages exceeds the entry limit')

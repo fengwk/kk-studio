@@ -17,12 +17,12 @@ import type { IdeReply } from './contracts.js'
 import { safeMessage } from './runtime-encoding.js'
 
 /** 在途 IDE 请求条数上界，防止无界 map 与资源耗尽。 */
-export const MAX_IN_FLIGHT_IDE_COMMANDS = 256
+const MAX_IN_FLIGHT_IDE_COMMANDS = 256
 
-export const IDE_BUSY_MESSAGE = 'too many in-flight IDE commands'
+const IDE_BUSY_MESSAGE = 'too many in-flight IDE commands'
 
 /** IDE_LEASE 轮次在下一心跳或 15 秒后失效，二者先到为准。 */
-export const IDE_LEASE_ROUND_TTL_MILLIS = 15_000
+const IDE_LEASE_ROUND_TTL_MILLIS = 15_000
 
 export interface ActiveIdeLeaseRound {
   round: bigint
@@ -30,7 +30,7 @@ export interface ActiveIdeLeaseRound {
   consumed: boolean
 }
 
-export type IdeCommandAdmission =
+type IdeCommandAdmission =
   | { kind: 'ignore' }
   | { kind: 'reply'; reply: IdeResult }
   | { kind: 'run'; controller: AbortController }
@@ -40,7 +40,7 @@ export type IdeCommandAdmission =
  *
  * <p>同连接重复请求不再执行；更新门闩只拒绝 OPEN_VIEW；硬上限在去重之后判定。
  */
-export function admitIdeCommand(input: {
+function admitIdeCommand(input: {
   invocationId: string
   command: IdeCommand
   inFlight: ReadonlyMap<string, AbortController>
@@ -71,7 +71,7 @@ export function admitIdeCommand(input: {
   return { kind: 'run', controller: new AbortController() }
 }
 
-export function ideLeaseFresh(active: ActiveIdeLeaseRound | null, round: bigint, now: number): boolean {
+function ideLeaseFresh(active: ActiveIdeLeaseRound | null, round: bigint, now: number): boolean {
   return (
     active !== null &&
     !active.consumed &&
@@ -88,7 +88,7 @@ export function requireFreshIdeLease(active: ActiveIdeLeaseRound | null, round: 
 }
 
 /** IDE 管理命令失败回执：取消用 BUSY，其余用 UNAVAILABLE。 */
-export function ideFailureReply(error: unknown, message: string): IdeResult {
+function ideFailureReply(error: unknown, message: string): IdeResult {
   return create(IdeResultSchema, {
     ok: false,
     code: error instanceof Error && error.name === 'AbortError' ? 'BUSY' : 'UNAVAILABLE',
@@ -169,7 +169,7 @@ function toIdeMode(mode: IdeOpenMode | undefined): IdeCommand['mode'] | undefine
 }
 
 /** 把 wire 命令映射为 IDE 服务契约；未知动作在这里失败关闭。 */
-export function toIdeCommand(protoCmd: ProtoIdeCommand): IdeCommand {
+function toIdeCommand(protoCmd: ProtoIdeCommand): IdeCommand {
   return {
     action: toIdeAction(protoCmd.action),
     viewId: protoCmd.viewId ?? undefined,

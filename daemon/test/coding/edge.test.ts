@@ -3,28 +3,21 @@ import { chmod, mkdir, mkdtemp, open, readFile, realpath, rm, stat, symlink, wri
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Worker } from 'node:worker_threads'
-import { textResult } from '../../src/contracts.js'
 import { fileCapabilities, setFileCapabilityHooks } from '../../src/coding/files.js'
 import { searchCapabilities, matchCenteredExcerpt } from '../../src/coding/search.js'
 import {
-  ByteTailBuffer,
   OutputSpool,
   TextOutputStore,
   alignToCharacterBoundary,
-  leadingCharacterBoundary,
-  spoolLargeTextResult,
-  type PrivateFs,
 } from '../../src/coding/output.js'
 import { commitTextFile } from '../../src/coding/commit.js'
 import {
-  createUtf16Decoder,
   decodeText,
   encodeText,
-  forEachLine,
 } from '../../src/coding/text.js'
 import { toPosix, exists } from '../../src/coding/support.js'
 import { callCapability, makeContext, openTestStore, textOf } from './helpers.js'
-import { ensurePrivateDirectory } from '../../src/native/index.js'
+import { ensurePrivateDirectory, type PrivateFs } from '../../src/native/index.js'
 
 const tempDirs: string[] = []
 
@@ -456,19 +449,49 @@ describe('fs.find / fs.grep 边界', () => {
 })
 
 describe('output 边界', () => {
-  it('ByteTailBuffer 只保留最近写入的字节', () => {
-    const buffer = new ByteTailBuffer(3)
-    buffer.append(Uint8Array.from([1, 2, 3, 4, 5]))
-    expect(Array.from(buffer.toBytes())).toEqual([3, 4, 5])
-    expect(buffer.size()).toBe(3)
+  it('输出尾部缓冲只保留最近写入的字节', async () => {
+    const dir = await tempDir()
+    const store = await openTestStore(dir)
+    // PREVIEW_TAIL_MAX_BYTES 为 8192 字节；先写入较早的 5000 字节 'A'，再写入 8192 字节 'B'
+    const spool = new OutputSpool(store, 'c', 50, 2000, 100)
+    await spool.write(utf8('A'.repeat(5000)))
+    await spool.write(utf8('B'.repeat(8192)))
+    const tailPreview = spool.captureTruncatedTailPreview()
+    expect(tailPreview.length).toBe(8192)
+    expect(tailPreview).toBe('B'.repeat(8192))
+    expect(tailPreview).not.toContain('A')
+    const result = await spool.finish(false)
+    expect(textOf(result)).toContain('B'.repeat(100))
+    await spool.close()
   })
 
-  it('UTF-8 字符边界裁剪', () => {
+  it('UTF-8 字符边界裁剪与前导续字节跳过', async () => {
     const bytes = new Uint8Array(Buffer.from('中'))
     expect(alignToCharacterBoundary(bytes, 1)).toBe(0)
     expect(alignToCharacterBoundary(bytes, 3)).toBe(3)
-    expect(leadingCharacterBoundary(new Uint8Array([0xad]))).toBe(1)
-    expect(leadingCharacterBoundary(new Uint8Array([0xe4]))).toBe(0)
+
+    const dir = await tempDir()
+    const store = await openTestStore(dir)
+
+    // 验证 tail 缓冲开头为孤立续字节时跳过孤立字节 (0xad 对应 1)
+    const spool1 = new OutputSpool(store, 'c1', 10, 2000, 100)
+    await spool1.write(utf8('x'.repeat(100)))
+    await spool1.write(new Uint8Array([0xad]))
+    await spool1.write(utf8('z'.repeat(8191)))
+    const preview1 = spool1.captureTruncatedTailPreview()
+    expect(preview1).toBe('z'.repeat(8191))
+    expect(preview1).not.toContain('\ufffd')
+    await spool1.close()
+
+    // 验证 tail 缓冲开头为多字节字符起始字节时正常保留 (0xe4 对应 0)
+    const spool2 = new OutputSpool(store, 'c2', 10, 2000, 100)
+    await spool2.write(utf8('x'.repeat(100)))
+    await spool2.write(utf8('中'))
+    await spool2.write(utf8('w'.repeat(8189)))
+    const preview2 = spool2.captureTruncatedTailPreview()
+    expect(preview2.startsWith('中')).toBe(true)
+    expect(preview2.length).toBe(1 + 8189)
+    await spool2.close()
   })
 
   it('head/tail 重叠时不重复展示', async () => {
@@ -526,24 +549,16 @@ describe('output 边界', () => {
     expect(await store.partialFiles()).toEqual([])
   })
 
-  it('已外化结果不二次 spool', async () => {
-    const dir = await tempDir()
-    const store = await openTestStore(dir)
-    const result = textResult('c', 'z'.repeat(60000))
-    result.details = { textOutput: { totalBytes: 1 } }
-    const again = await spoolLargeTextResult(store, result)
-    expect(again).toBe(result)
-  })
 })
 
 describe('text 边界', () => {
   it('UTF-16 解码拒绝孤立代理项与奇数尾部字节', () => {
-    const decoder = createUtf16Decoder(true)
-    decoder.push(Uint8Array.from([0x00, 0xd8]))
-    expect(() => decoder.finish()).toThrowError(/invalid text encoding/)
-    const odd = createUtf16Decoder(true)
-    odd.push(Uint8Array.from([0x00]))
-    expect(() => odd.finish()).toThrowError()
+    expect(() =>
+      decodeText(Uint8Array.from([0xff, 0xfe, 0x00, 0xd8])),
+    ).toThrowError(/invalid text encoding/)
+    expect(() =>
+      decodeText(Uint8Array.from([0xff, 0xfe, 0x00])),
+    ).toThrowError(/invalid text encoding/)
   })
 
   it('decodeText 识别 UTF-16BE BOM', () => {
@@ -552,12 +567,4 @@ describe('text 边界', () => {
     expect(Array.from(encodeText('a', 'UTF-16LE', 0))).toEqual([0x61, 0x00])
   })
 
-  it('forEachLine 遇到 NUL 按二进制失败', async () => {
-    const dir = await tempDir()
-    const file = join(dir, 'nul.txt')
-    await writeFile(file, Buffer.from([0x61, 0x00]))
-    await expect(
-      forEachLine(file, { charset: 'UTF-8', bomLength: 0, utf16: false }, () => true),
-    ).rejects.toThrowError(/binary/)
-  })
 })

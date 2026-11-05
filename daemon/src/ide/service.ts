@@ -18,7 +18,7 @@ import {
   type CodeServerManager,
   type CodeServerSession,
 } from './codeServer.js'
-import { IdeError, failureReply } from './errors.js'
+import { abortError, IdeError, failureReply } from './errors.js'
 import { createClosePath } from './serviceClose.js'
 import { createCommandHandler } from './serviceCommands.js'
 import { createViewLease } from './serviceLease.js'
@@ -43,12 +43,12 @@ import {
  * at which the lease round was sent; old binding epochs cannot be renewed.
  */
 
-export const IDE_MAX_VIEWS = 64
+const IDE_MAX_VIEWS = 64
 export const IDE_PROOF_EXCLUSIVITY_MILLIS = 45_000
 export const IDE_VIEW_EXPIRY_MILLIS = 600_000
 export const IDE_IDLE_STOP_MILLIS = 60_000
-export const IDE_CLOSE_BUDGET_MILLIS = 10_000
-export const DEFAULT_RECOVERY_QUOTA_BYTES = 16 * 1024 * 1024
+const IDE_CLOSE_BUDGET_MILLIS = 10_000
+const DEFAULT_RECOVERY_QUOTA_BYTES = 16 * 1024 * 1024
 const MAX_COMMAND_TEXT_CHARS = 4096
 const MAX_STREAM_PATH_BYTES = 8192
 const MAX_STREAM_HEADERS = 100
@@ -100,12 +100,6 @@ const systemScheduler: IdeScheduler = {
   now: () => performance.now(),
   setTimeout: (callback, delayMillis) => setTimeout(callback, delayMillis),
   clearTimeout: (handle) => clearTimeout(handle as NodeJS.Timeout),
-}
-
-function abortError(): Error {
-  const error = new Error('ide request was cancelled')
-  error.name = 'AbortError'
-  return error
 }
 
 function waitWithSignal<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
@@ -451,8 +445,6 @@ export async function createIdeService(
     }
   }
 
-  const mergeSummary = (view: ViewRecord): IdeViewSummary => summary(view)
-
   const { openView, requireBoundView, dropClaimsForView } = createViewRegistry({
     paths, views, reservations, claims, scheduler, bridge, manager, maxViews,
     proofExclusivityMillis: IDE_PROOF_EXCLUSIVITY_MILLIS, closeBudgetMillis: IDE_CLOSE_BUDGET_MILLIS,
@@ -553,7 +545,7 @@ export async function createIdeService(
   }
 
   const listViews = (): IdeReply => {
-    const values = [...views.values()].map(mergeSummary)
+    const values = [...views.values()].map(summary)
     return { ok: true, views: values }
   }
 

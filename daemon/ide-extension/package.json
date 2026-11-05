@@ -21,11 +21,6 @@
       "npm.autoDetect": "off",
       "npm.fetchOnlinePackageInfo": false,
       "typescript.disableAutomaticTypeAcquisition": true
-    },
-    "commands": [
-      { "command": "kkStudio.changeDirectory", "title": "KK Studio: Change Workspace Directory" },
-      { "command": "kkStudio.focusTerminal", "title": "KK Studio: Focus Terminal" },
-      { "command": "kkStudio.closeView", "title": "KK Studio: Close View" }
-    ]
+    }
   }
 }

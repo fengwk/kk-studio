@@ -17,6 +17,13 @@ export class IdeError extends Error {
   }
 }
 
+/** Cancellation uses the standard AbortError name. */
+export function abortError(): Error {
+  const error = new Error('ide request was cancelled')
+  error.name = 'AbortError'
+  return error
+}
+
 export function safeMessage(error: unknown): string {
   if (error instanceof IdeError) {
     return error.message

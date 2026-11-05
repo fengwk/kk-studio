@@ -1141,7 +1141,7 @@ describe('managed IDE claim and tenant lifecycle', () => {
     }
   })
 
-  it('waits beyond both former close budgets for native confirmation', async () => {
+  it('keeps the native close prompt pending while awaiting confirmation', async () => {
     const { service, bridge, manager, scheduler, project } = await setup()
     const viewId = randomUUID()
     const documentId = randomUUID()
@@ -1155,7 +1155,7 @@ describe('managed IDE claim and tenant lifecycle', () => {
       return result
     })
     await flush()
-    // Neither the 20s bridge budget nor 30s service budget may end the prompt.
+    // The native prompt is not subject to the bridge or service command budgets.
     await scheduler.advance(31_000)
     expect(settled).toBe(false)
     expect(manager.closes).toHaveLength(0)

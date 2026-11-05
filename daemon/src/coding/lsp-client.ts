@@ -79,7 +79,7 @@ export class GarbageBannerFilter extends Transform {
   }
 }
 
-export function isJdtlsExecutable(value: string): boolean {
+function isJdtlsExecutable(value: string): boolean {
   let name = value.replaceAll('\\', '/')
   const slash = name.lastIndexOf('/')
   if (slash >= 0) {
@@ -428,7 +428,7 @@ export class LspClient {
     return !this.stopped && !this.hasExited
   }
 
-  supports(method: string): boolean {
+  private supports(method: string): boolean {
     if (!this.capabilities) {
       return false
     }
@@ -446,7 +446,7 @@ export class LspClient {
     }
   }
 
-  sync(filePath: string): void {
+  private sync(filePath: string): void {
     this.requireRunning()
     const target = path.resolve(filePath)
     let stat: fs.Stats
@@ -961,12 +961,7 @@ export class LspClient {
         throw new LspError('invalid class target URI: ' + target)
       }
     }
-    let candidate: string
-    try {
-      candidate = trimmed
-    } catch {
-      throw new LspError('invalid class target: ' + target)
-    }
+    const candidate = trimmed
     if (!path.isAbsolute(candidate)) {
       throw new LspError('target must be an absolute class path, a file: URI, or a jdt:// URI: ' + target)
     }

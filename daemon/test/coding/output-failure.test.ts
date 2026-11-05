@@ -70,7 +70,6 @@ describe('输出落盘失败', () => {
     const store = fakeStagingStore('/dev/full', published)
     const spool = new OutputSpool(store, 'c', 5, 2000, 1_000_000)
     await spool.write(utf8('x'.repeat(100)))
-    expect(spool.isCaptureFailed()).toBe(true)
     const result = await spool.finish(false)
     expect(published).toEqual([])
     expect(textOutputOf(result).captureFailed).toBe(true)

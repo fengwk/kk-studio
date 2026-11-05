@@ -491,9 +491,8 @@ exports.activate = async () => {
   })
 
 // Public-boundary evidence: a real child exits while a tracked grandchild keeps stdout
-// open. The ACK instrument proves the holder is alive, so 'close' cannot have fired only
-// because time passed. The old policy joined at 'exit'; the assertion below is what turns
-// red under that policy, while the new path must wait for the actual 'close' event.
+// open. The ACK instrument proves the holder is alive, so cleanup must wait for the
+// actual stdio 'close' event rather than the child process 'exit'.
 test('cleanup joins stdio close rather than child exit', { timeout: 30_000 }, async () => {
   let root
   let gate

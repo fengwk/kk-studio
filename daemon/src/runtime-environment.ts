@@ -27,7 +27,7 @@ export function detectEnvironmentInfo(config: DaemonConfig): EnvironmentInfo {
 }
 
 /** 把 Node 的 process.arch 归一到发行架构枚举；不支持的架构失败关闭，绝不猜测。 */
-export function detectArchitecture(): Architecture {
+function detectArchitecture(): Architecture {
   switch (process.arch) {
     case 'x64':
       return Architecture.AMD64
@@ -38,7 +38,7 @@ export function detectArchitecture(): Architecture {
   }
 }
 
-export function detectOperatingSystem(): OperatingSystem {
+function detectOperatingSystem(): OperatingSystem {
   const name = platform()
   if (name === 'win32') {
     return OperatingSystem.WINDOWS

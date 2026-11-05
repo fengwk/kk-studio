@@ -32,16 +32,10 @@ import {
 import { Runtime } from '../src/runtime.js'
 import {
   defaultNote,
-  detectArchitecture,
   detectEnvironmentInfo,
 } from '../src/runtime-environment.js'
 import type { RuntimeOptions, TemporaryResourceSweeper, UpdatePort } from '../src/runtime-ports.js'
-import {
-  collectDiagnosticFailure,
-  describeFailureType,
-  recordShutdownFailure,
-  releaseStep,
-} from '../src/runtime-shutdown.js'
+import { ShutdownRuntime } from '../src/runtime-shutdown.js'
 import { FakeConnection, FakeTransport, fakeProcessSupervisor, testConfig, tick, waitFor } from './helpers.js'
 
 const UPDATE_TARGET_VERSION = '1.1.1'
@@ -769,11 +763,13 @@ describe('environment detection helpers', () => {
   })
 
   it('maps process.arch to the release architecture and fails closed otherwise', () => {
-    expect([Architecture.AMD64, Architecture.ARM64]).toContain(detectArchitecture())
+    expect([Architecture.AMD64, Architecture.ARM64]).toContain(
+      detectEnvironmentInfo(testConfig()).architecture,
+    )
     const original = Object.getOwnPropertyDescriptor(process, 'arch')
     Object.defineProperty(process, 'arch', { value: 'ia32', configurable: true })
     try {
-      expect(() => detectArchitecture()).toThrow(/unsupported daemon architecture/)
+      expect(() => detectEnvironmentInfo(testConfig())).toThrow(/unsupported daemon architecture/)
     } finally {
       if (original !== undefined) {
         Object.defineProperty(process, 'arch', original)
@@ -794,36 +790,56 @@ describe('environment detection helpers', () => {
   })
 
   it('validates runtime shutdown helper failure types and release step diagnostics', async () => {
-    expect(describeFailureType(new TypeError('type err'))).toBe('TypeError')
-    expect(describeFailureType(new RangeError('range err'))).toBe('RangeError')
-    expect(describeFailureType('string err')).toBe('UnknownError')
-    expect(describeFailureType(new Error('err'))).toBe('Error')
+    const stderrLines: string[] = []
+    const origStderrWrite = process.stderr.write
+    process.stderr.write = ((chunk: string | Uint8Array) => {
+      stderrLines.push(String(chunk))
+      return true
+    }) as any
+    try {
+      const shutdown = new ShutdownRuntime()
+      shutdown.record('type-phase', new TypeError('type err'))
+      shutdown.record('range-phase', new RangeError('range err'))
+      shutdown.record('unknown-phase', 'string err')
+      shutdown.record('error-phase', new Error('err'))
 
-    const failures: unknown[] = []
-    releaseStep(failures, 'async-phase', () => Promise.reject(new Error('async fail')))
+      expect(stderrLines).toContain('daemon type-phase failed: TypeError\n')
+      expect(stderrLines).toContain('daemon range-phase failed: RangeError\n')
+      expect(stderrLines).toContain('daemon unknown-phase failed: UnknownError\n')
+      expect(stderrLines).toContain('daemon error-phase failed: Error\n')
+      expect(stderrLines.join('')).not.toContain('type err')
+      expect(stderrLines.join('')).not.toContain('range err')
+      expect(stderrLines.join('')).not.toContain('string err')
+    } finally {
+      process.stderr.write = origStderrWrite
+    }
+
+    const shutdown = new ShutdownRuntime()
+    shutdown.release('async-phase', () => Promise.reject(new Error('async fail')))
     await vi.waitFor(() => {
-      expect(failures.length).toBe(1)
+      expect(shutdown.failures.length).toBe(1)
     })
 
-    releaseStep(failures, 'sync-phase', () => {
+    shutdown.release('sync-phase', () => {
       throw new Error('sync fail')
     })
-    expect(failures.length).toBe(2)
+    expect(shutdown.failures.length).toBe(2)
 
-    collectDiagnosticFailure(failures, 'diag', new Error('diagnostic error'))
+    shutdown.collect('diag', new Error('diagnostic error'))
+    expect(shutdown.failures.length).toBe(2)
 
     const origWrite = process.stderr.write
     try {
       process.stderr.write = (() => {
         throw new Error('stderr error')
       }) as any
-      const diagFailures: unknown[] = []
-      recordShutdownFailure(diagFailures, 'phase', new Error('err'))
-      expect(diagFailures.length).toBe(2)
+      const diagShutdown = new ShutdownRuntime()
+      diagShutdown.record('phase', new Error('err'))
+      expect(diagShutdown.failures.length).toBe(2)
 
-      const collectFailures: unknown[] = []
-      collectDiagnosticFailure(collectFailures, 'phase', new Error('err'))
-      expect(collectFailures.length).toBe(1)
+      const collectShutdown = new ShutdownRuntime()
+      collectShutdown.collect('phase', new Error('err'))
+      expect(collectShutdown.failures.length).toBe(1)
     } finally {
       process.stderr.write = origWrite
     }

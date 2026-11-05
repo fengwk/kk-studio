@@ -23,7 +23,7 @@ import { delay } from '../delay.js'
  * <p>「不可判定」与「没有成员」必须严格区分：只要有一个已确认属于本会话、仍活着的成员读不到身份，整次枚举就返回 `null`
  * （不可判定）。把这种情况过滤成空列表会把「查不到」谎报成「已经收敛」。
  *
- * <p>本模块只依赖 Node 内建模块与 Koffi，不引用同目录模块：helper 以 `.ts` 源码直接运行时相对 import 的 `.js` 无法解析。
+ * <p>父进程和编译后的 helper 共用这些会话原语。
  */
 
 /** 温和终止信号。 */
@@ -133,7 +133,7 @@ function libproc(): Libproc {
 }
 
 /** 本平台是否提供真实会话成员查询；不提供时所有枚举返回「不可判定」。 */
-export function supportsSessionEnumeration(): boolean {
+function supportsSessionEnumeration(): boolean {
   return process.platform === 'linux' || process.platform === 'darwin'
 }
 
@@ -154,12 +154,12 @@ export function establishSession(): number {
 }
 
 /** 当前进程的会话 id。 */
-export function currentSession(): number {
+function currentSession(): number {
   return libc().getsid(0) >>> 0
 }
 
 /** 当前进程组 id。 */
-export function currentGroup(): number {
+function currentGroup(): number {
   return libc().getpgrp() >>> 0
 }
 
@@ -210,7 +210,7 @@ export function membersSnapshot(session: number, excludedPid: number): SessionMe
  *
  * <p>不可判定（没有真实枚举能力、扫描失败或身份读不到）必须表现为「还有成员」：谎称已经收敛会让收尾跳过强杀阶段。
  */
-export function hasLiveMember(session: number, excludedPid: number): boolean {
+function hasLiveMember(session: number, excludedPid: number): boolean {
   const members = membersSnapshot(session, excludedPid)
   return members === null || members.length > 0
 }
@@ -277,7 +277,7 @@ export function becomeChildSubreaper(): boolean {
  *
  * <p>调用方必须等用户命令自己的退出码已经被 Node 回收之后再调用：`waitpid(-1)` 会回收任意子进程，过早调用会偷走命令的退出码。
  */
-export function reapOrphans(): void {
+function reapOrphans(): void {
   if (process.platform !== 'linux') {
     return
   }
@@ -377,7 +377,7 @@ export async function convergeAdoptedChildren(ownerPid: number, graceMillis: num
 }
 
 /** 回收一个**已经确认是自己子进程**的 pid 的僵尸；不是自己的孩子时内核返回 ECHILD，无副作用。 */
-export function reapSpecific(pid: number): void {
+function reapSpecific(pid: number): void {
   if (process.platform !== 'linux') {
     return
   }
@@ -425,6 +425,8 @@ async function sessionGone(session: number, excludedPid: number, budgetMillis: n
  * 把成员快照重排成「父进程先于子进程」的顺序。
  *
  * <p>这是纯粹的拓扑排序；顺序完全由父子拓扑决定，绝不按 PID 数值排。PID 重复或父指针成环时整份快照无法消歧，返回 `null`。
+ *
+ * <p>保留导出以验证真实内核无法稳定构造的歧义快照和信号顺序。
  */
 export function parentsBeforeChildren(members: SessionMember[]): SessionMember[] | null {
   if (members.length === 0) {

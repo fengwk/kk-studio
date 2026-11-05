@@ -27,8 +27,8 @@ import type { ActiveConnection, ConnectionLifecycle } from './runtime-connection
 /**
  * 控制面出站。
  *
- * <p>这里持有当前绑定的 environmentId，并集中构造必须携带它的信封。绑定只由控制会话在握手成功、断线或停机时改变；
- * 未 READY 或未绑定时不构造无主信封，调用方只会得到 false，绝不发出缺环境标识的报文。
+ * <p>这里持有当前绑定的 environmentId，并集中构造必须携带它的信封。绑定由控制会话在握手成功或断线时改变；
+ * 需要绑定的帧在未绑定时返回 false，部分帧还要求连接处于 READY；READY 握手帧不要求已有绑定。
  */
 export class OutboundControl {
   private boundEnvironmentId: string | null = null
@@ -48,7 +48,7 @@ export class OutboundControl {
     return this.connection.getState() === 'READY'
   }
 
-  /** READY 且已绑定：所有普通出站帧的前提。 */
+  /** READY 且已绑定：需要就绪状态的出站帧使用的门禁。 */
   get canSend(): boolean {
     return this.isReady && this.boundEnvironmentId !== null
   }

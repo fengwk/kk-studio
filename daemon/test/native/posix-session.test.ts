@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process'
+import { fork, spawn } from 'node:child_process'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -7,18 +7,16 @@ import {
   SIGKILL,
   SIGTERM,
   becomeChildSubreaper,
+  convergeAdoptedChildren,
   convergeSession,
   directChildren,
-  hasLiveMember,
   isDescendantOf,
   membersSnapshot,
   parentsBeforeChildren,
   processIdentity,
-  reapOrphans,
-  reapSpecific,
   sessionOf,
   signalMembers,
-  supportsSessionEnumeration,
+  startOrphanReaper,
   type SessionMember,
 } from '../../src/native/posix-session.js'
 import { awaitGone, fixturePath, isAlive, waitForFile, waitForPid } from './process-test-util.js'
@@ -47,8 +45,19 @@ describe.skipIf(process.platform === 'win32')('native posix session primitives',
     rmSync(workdir, { recursive: true, force: true })
   })
 
-  test('the platform exposes real session enumeration', () => {
-    expect(supportsSessionEnumeration()).toBe(true)
+  test('the platform exposes real session enumeration and establishes a session leader', async () => {
+    const moduleUrl = new URL('../../dist/native/posix-session.js', import.meta.url).href
+    const child = fork(
+      '-e',
+      [
+        `import { establishSession } from '${moduleUrl}'
+const sid = establishSession()
+process.exit(sid === process.pid ? 0 : 1)`,
+      ],
+      { eval: true, stdio: 'ignore' },
+    )
+    const code = await new Promise((resolve) => child.on('close', resolve))
+    expect(code).toBe(0)
   })
 
   test('parentsBeforeChildren orders by topology, not by pid', () => {
@@ -138,22 +147,18 @@ describe.skipIf(process.platform === 'win32')('native posix session primitives',
     child.unref()
   }, TEST_TIMEOUT)
 
-  test('an unknown session is decidable and has no members', () => {
+  test('an unknown session is decidable and has no members', async () => {
     expect(membersSnapshot(2_000_000_000, -1)).toEqual([])
-    expect(hasLiveMember(2_000_000_000, -1)).toBe(false)
     expect(signalMembers(2_000_000_000, SIGKILL, -1)).toBe(false)
+    // 无活成员时 convergeSession 通过内部 hasLiveMember 确认空会话并立即成功收敛
+    await expect(convergeSession(2_000_000_000, -1, 50)).resolves.toBe(true)
   })
 
   test('child subreaper and orphan reaping are available on Linux', () => {
     expect(becomeChildSubreaper()).toBe(process.platform === 'linux')
-    expect(() => reapOrphans()).not.toThrow()
-  })
-
-  test('the orphan reaper can be started and stopped', async () => {
-    const { startOrphanReaper } = await import('../../src/native/posix-session.js')
     const stop = startOrphanReaper(20)
     expect(typeof stop).toBe('function')
-    stop()
+    expect(() => stop()).not.toThrow()
   })
 
   test('session and identity are undefined for a vanished pid', () => {
@@ -161,9 +166,9 @@ describe.skipIf(process.platform === 'win32')('native posix session primitives',
     expect(processIdentity(2_000_000_000)).toBeNull()
   })
 
-  test('reapSpecific is a no-op for a pid that is not our child', () => {
-    // 内核返回 ECHILD：回收自己孩子之外的 pid 绝不能有副作用。
-    expect(() => reapSpecific(1)).not.toThrow()
+  test('convergeAdoptedChildren is a safe no-op when there are no adopted children', async () => {
+    // 不存在的 owner 没有可收敛的子进程。
+    await expect(convergeAdoptedChildren(2_000_000_000, 50, [])).resolves.toBe(true)
   })
 
   test('isDescendantOf walks the real parent chain', async () => {
