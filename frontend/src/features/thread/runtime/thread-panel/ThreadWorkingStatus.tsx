@@ -1,4 +1,5 @@
 import { useI18n } from '@/shared/i18n'
+import '@/features/thread/runtime/thread-panel/thread-widgets.css'
 
 /** Pi 风格的工作条，位于对话与输入框之间（statusContainer）。 */
 export function ThreadWorkingStatus({

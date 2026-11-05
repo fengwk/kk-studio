@@ -3,6 +3,8 @@ import type { AgentModelPricingConditionDTO } from '@/shared/api/generated/contr
 import { describeCondition } from '@/features/catalog/ai-model-pricing-codec'
 import { Button } from '@/shared/ui/controls/Button'
 import { useI18n } from '@/shared/i18n'
+import './catalog-form-layout.css'
+import './ai-pricing.css'
 
 export interface PricingRuleItem {
   id: string

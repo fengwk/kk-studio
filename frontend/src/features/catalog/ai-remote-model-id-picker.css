@@ -1,0 +1,7 @@
+/* 远端模型 id 选择器。 */
+.remote-model-ids {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}

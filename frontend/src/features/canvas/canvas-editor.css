@@ -1,0 +1,31 @@
+/* Canvas 编辑器的侧栏图标按钮。 */
+.sidebar-icon-btn {
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--fg-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.sidebar-icon-btn:hover {
+  color: var(--fg);
+  border-color: var(--border-hover);
+}
+
+.sidebar-icon-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+@media (max-width: 860px) {
+  .sidebar-icon-btn {
+    width: 32px;
+    height: 32px;
+  }
+}

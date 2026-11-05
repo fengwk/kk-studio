@@ -1,0 +1,93 @@
+/* 消息中的资源附件与媒体预览。 */
+.thread-user-attachments {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.resource-attachment-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  color: var(--fg-muted);
+  font-size: var(--font-size-xs);
+}
+
+.resource-attachment-download {
+  color: var(--info);
+  font-family: var(--mono);
+  overflow-wrap: anywhere;
+}
+
+.resource-attachment-fallback {
+  color: var(--fg-muted);
+  font-family: var(--mono);
+}
+
+.resource-attachment-failed {
+  color: var(--danger);
+}
+
+.resource-media-preview {
+  width: fit-content;
+  max-width: min(100%, 760px);
+  margin: 0;
+  overflow: hidden;
+  border-radius: 12px;
+  background: var(--scrim);
+}
+
+.resource-media-preview-trigger {
+  position: relative;
+  display: block;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: zoom-in;
+  overflow: hidden;
+}
+
+.resource-media-preview-trigger:disabled {
+  cursor: default;
+}
+
+.resource-media-preview img,
+.resource-media-preview video {
+  display: block;
+  /* 使用媒体固有尺寸，只有容器或视口不足时缩小，避免放大缩略图。 */
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: min(70vh, 680px);
+  object-fit: contain;
+  background: var(--scrim);
+}
+
+.resource-media-preview-name {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  max-width: calc(100% - 20px);
+  padding: 5px 9px;
+  border-radius: 7px;
+  color: var(--fg);
+  background: var(--scrim-soft);
+  font-size: var(--font-size-xs);
+  line-height: 1.3;
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: opacity var(--duration-base), transform var(--duration-base);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  backdrop-filter: blur(10px);
+}
+
+.resource-media-preview:hover .resource-media-preview-name,
+.resource-media-preview-trigger:focus-visible .resource-media-preview-name {
+  opacity: 1;
+  transform: translateY(0);
+}

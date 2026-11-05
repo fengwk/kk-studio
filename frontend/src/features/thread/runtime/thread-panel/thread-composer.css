@@ -1,0 +1,146 @@
+/* Thread Composer：输入容器、dock、toast 与发送按钮。 */
+.thread-composer {
+  position: relative;
+  flex-shrink: 0;
+  padding: 8px 16px 10px;
+  background: var(--stage-bg);
+  container-type: inline-size;
+}
+
+.thread-dock {
+  position: relative;
+  width: 100%;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  padding: 8px;
+  border: 1px solid var(--stage-dot);
+  border-radius: 18px;
+  background: var(--surface-overlay);
+  box-shadow: none;
+  backdrop-filter: blur(18px);
+}
+
+.thread-dock-controls {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  min-height: 34px;
+  align-items: center;
+  gap: 6px;
+  padding-top: 4px;
+}
+
+.thread-dock-controls-spacer {
+  min-width: 0;
+  flex: 1;
+}
+
+.thread-dock-add {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  place-items: center;
+  border-radius: 50%;
+  border: 0;
+  cursor: pointer;
+  color: var(--fg-muted);
+  background: transparent;
+  transition: background-color var(--duration-fast), color var(--duration-fast), transform var(--duration-fast);
+}
+
+.thread-dock-add:hover:not(:disabled),
+.thread-dock-add[aria-expanded='true'] {
+  background: var(--stage-dot);
+  color: var(--fg);
+}
+
+.thread-dock-add:hover:not(:disabled) {
+  transform: scale(1.04);
+}
+
+.thread-dock-add:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.thread-dock-add svg {
+  width: 20px;
+  height: 20px;
+}
+
+.composer-file-input-hidden {
+  display: none !important;
+}
+
+.composer-toast {
+  position: absolute;
+  top: -6px;
+  left: 16px;
+  right: 16px;
+  transform: translateY(-100%);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--danger-border);
+  background: var(--surface-active);
+  color: var(--danger);
+  font-size: var(--font-size-sm);
+  line-height: 1.4;
+  box-shadow: var(--shadow-sm);
+  z-index: var(--z-raised);
+}
+
+.composer-toast-message {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.icon-button.composer-toast-dismiss {
+  width: 20px;
+  height: 20px;
+  flex-basis: 20px;
+  border-radius: var(--radius-xs);
+}
+
+.composer-toast-dismiss svg {
+  width: 14px;
+  height: 14px;
+}
+
+.thread-dock-send {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  place-items: center;
+  border-radius: var(--radius-pill);
+  border: 0;
+  cursor: pointer;
+  transition: background-color var(--duration-fast), color var(--duration-fast);
+  color: var(--stage-bg);
+  background: var(--fg);
+}
+
+.thread-dock-send:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.thread-dock-send:hover:not(:disabled) {
+  background: var(--fg-muted);
+}
+
+.thread-dock-send svg {
+  width: 14px;
+  height: 14px;
+}

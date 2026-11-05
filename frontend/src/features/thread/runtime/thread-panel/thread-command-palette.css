@@ -1,0 +1,77 @@
+/* Thread 命令面板。 */
+.thread-command-palette {
+  width: 100%;
+  margin: 0 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-overlay);
+  overflow: hidden;
+}
+
+.thread-command-list {
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  max-height: min(420px, 55vh);
+  overflow-y: auto;
+}
+
+.thread-command-list button {
+  width: 100%;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--fg);
+  text-align: left;
+  cursor: pointer;
+}
+
+.thread-command-list button.active,
+.thread-command-list button:hover:not(:disabled) {
+  background: var(--surface-active);
+}
+
+.thread-command-list button.is-disabled,
+.thread-command-list button:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+  color: var(--fg-muted);
+}
+
+.thread-command-list button.is-disabled .thread-command-label,
+.thread-command-list button:disabled .thread-command-label,
+.thread-command-list button.is-disabled .thread-command-desc,
+.thread-command-list button:disabled .thread-command-desc {
+  color: var(--fg-muted);
+}
+
+.thread-command-label {
+  flex: 0 0 auto;
+  min-width: 88px;
+  color: var(--fg);
+  font-size: var(--font-size-sm);
+}
+
+.thread-command-desc {
+  flex: 1;
+  color: var(--fg-muted);
+  font-size: var(--font-size-xs);
+}
+
+.thread-command-empty {
+  padding: 12px;
+  color: var(--fg-muted);
+  font-size: var(--font-size-xs);
+}
+
+.thread-command-meta {
+  padding: 6px 12px;
+  border-top: 1px solid var(--border);
+  color: var(--fg-muted);
+  font-size: var(--font-size-xs);
+}

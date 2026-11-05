@@ -37,6 +37,7 @@ import { ThreadPresentationActions } from '@/features/thread/runtime/ThreadPrese
 import type { ThreadPresentation } from '@/features/thread/runtime/thread-presentation'
 import { shouldDeferToBlockingModal } from '@/shared/ui/blocking-overlay'
 import '@/features/chat/chat-workspace.css'
+import '@/features/thread/thread-state.css'
 import type {
   AgentDefinitionDTO,
   ChatDTO,

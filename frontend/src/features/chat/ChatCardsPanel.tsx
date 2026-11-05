@@ -4,6 +4,7 @@ import { ResourceGrid } from '@/shared/ui/cards/ResourceGrid'
 import { useI18n } from '@/shared/i18n'
 import { CatalogSetupGuide } from '@/features/chat/CatalogSetupGuide'
 import { isCatalogSetupComplete, type CatalogSetupState } from '@/features/chat/catalog-setup'
+import './chat-cards.css'
 import type { AgentDefinitionDTO, ChatDTO } from '@/shared/api/generated/contracts'
 
 export function ChatCardsPanel({

@@ -5,6 +5,7 @@ import { useI18n } from '@/shared/i18n'
 import { normalizeThreadName } from '@/features/thread/thread-name'
 import { Button } from '@/shared/ui/controls/Button'
 import { TextInput } from '@/shared/ui/controls/TextInput'
+import './name-rename-panel.css'
 
 /**
  * 持久 Session/Thread 实体的单输入重命名面板。

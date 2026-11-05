@@ -3,6 +3,7 @@ import { ThreadWorkingStatus } from '@/features/thread/runtime/thread-panel/Thre
 import type { QueuedThreadMessage } from '@/features/thread/runtime/thread-timeline-types'
 import type { QueuedCustomMessage } from '@/features/thread/runtime/queued-custom-messages'
 import { useI18n } from '@/shared/i18n'
+import '@/features/thread/runtime/thread-panel/thread-widgets.css'
 
 /**
  * 对话 transcript 下方的小部件区域。

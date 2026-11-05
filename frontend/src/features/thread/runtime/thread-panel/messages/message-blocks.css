@@ -1,0 +1,107 @@
+/* Thread 消息块：助手正文外壳、流式提示与模型重试失败。 */
+
+/* 助手正文外壳：悬停显示「复制全文」 */
+.thread-assistant-shell {
+  position: relative;
+}
+
+.thread-assistant-shell > .thread-assistant-copy {
+  top: 6px;
+  right: 6px;
+  z-index: 2;
+}
+
+.thread-assistant-shell:hover > .thread-assistant-copy,
+.thread-assistant-shell:focus-within > .thread-assistant-copy {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/*
+ * 冲突处理：鼠标在内部 ``` / mermaid 上时，隐藏外层「复制全文」，
+ * 只保留代码块自己的复制按钮。
+ */
+.thread-assistant-shell:has(.md-code-shell:hover) > .thread-assistant-copy,
+.thread-assistant-shell:has(.md-code-shell:focus-within) > .thread-assistant-copy {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+/* 与代码块同理：进入表格复制时隐藏外层「复制全文」，避免叠两枚按钮 */
+.thread-assistant-shell:has(.md-table-shell:hover) > .thread-assistant-copy,
+.thread-assistant-shell:has(.md-table-shell:focus-within) > .thread-assistant-copy {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+.thread-streaming-hint {
+  color: var(--fg-muted);
+}
+
+.thread-error-raw {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--danger);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  font-size: var(--font-size-xs);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.thread-block-model-attempt-failure-status {
+  padding: 4px 12px;
+  color: var(--fg-muted);
+  font-size: var(--font-size-xs);
+}
+
+.thread-block-model-attempt-failure-status .thread-block-body {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: var(--font-size-xs);
+  line-height: 1.5;
+}
+
+.thread-attempt-failure-title {
+  color: var(--fg-muted);
+  font-weight: 600;
+}
+
+.thread-attempt-failure-number,
+.thread-block-model-attempt-failure-error code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--stage-dot);
+  color: var(--fg-muted);
+  font-family: var(--mono);
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+.thread-attempt-failure-retry {
+  color: var(--fg-muted);
+}
+
+.thread-block-model-attempt-failure-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 12px;
+  border-left: 2px solid var(--danger-border);
+  background: transparent;
+}
+
+.thread-block-model-attempt-failure-error code {
+  flex: 0 0 auto;
+  color: var(--danger);
+}
+
+.thread-block-model-attempt-failure-error .thread-error-raw {
+  min-width: 0;
+  flex: 1;
+  color: var(--fg-muted);
+}

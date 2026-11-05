@@ -1,0 +1,99 @@
+/* Catalog 表单版式：结构化分组、行/网格与变体编辑器。 */
+.structured-section.is-error {
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  box-shadow: 0 0 0 1px var(--danger-soft);
+}
+
+.structured-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--wash-1);
+}
+
+.structured-section-head,
+.structured-section-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.structured-section-head {
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.structured-section-head strong {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+
+.editor-stack,
+.variant-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.editor-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 32px;
+  gap: 8px;
+  align-items: center;
+}
+
+.editor-row.single {
+  grid-template-columns: minmax(0, 1fr) 32px;
+}
+
+.variant-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--wash-3);
+}
+
+.variant-editor:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.editor-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.editor-grid-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@media (max-width: 860px) {
+  .editor-grid,
+  .editor-grid-2,
+  .editor-row {
+    grid-template-columns: 1fr;
+  }
+
+  .editor-row.single {
+    grid-template-columns: 1fr 32px;
+  }
+}
+
+.form-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+@media (max-width: 960px) {
+  .form-grid-2 {
+    grid-template-columns: 1fr;
+  }
+}

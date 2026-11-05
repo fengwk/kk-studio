@@ -12,6 +12,8 @@ import { Checkbox } from '@/shared/ui/controls/Checkbox'
 import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
 import { TextInput } from '@/shared/ui/controls/TextInput'
 import { useI18n } from '@/shared/i18n'
+import './catalog-form-layout.css'
+import './ai-pricing.css'
 
 const BASE_FIELDS = [
   { field: 'input', labelKey: 'ai.catalog.form.inputPrice' },

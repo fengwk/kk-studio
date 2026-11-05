@@ -11,6 +11,7 @@ import { MarkdownSegmentSourceContext } from '@/shared/ui/markdown/markdownTable
 import { splitMarkdownSegments } from '@/shared/ui/markdown/splitMarkdownSegments'
 import 'katex/dist/katex.min.css'
 import 'highlight.js/styles/github-dark.min.css'
+import './markdown.css'
 
 export type MarkdownTone = 'default' | 'muted'
 

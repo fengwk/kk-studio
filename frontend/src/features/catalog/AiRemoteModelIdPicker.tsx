@@ -3,6 +3,7 @@ import { agentService } from '@/shared/api/agent-service'
 import { ApiError } from '@/shared/api/client'
 import { Button } from '@/shared/ui/controls/Button'
 import { useI18n } from '@/shared/i18n'
+import './ai-remote-model-id-picker.css'
 
 type LoadState =
   | { status: 'idle' }

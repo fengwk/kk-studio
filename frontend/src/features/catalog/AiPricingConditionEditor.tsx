@@ -12,6 +12,8 @@ import { NumberInput } from '@/shared/ui/controls/NumberInput'
 import { Select } from '@/shared/ui/controls/Select'
 import { TextInput } from '@/shared/ui/controls/TextInput'
 import { useI18n, type TranslationKey } from '@/shared/i18n'
+import './catalog-form-layout.css'
+import './ai-pricing-condition-editor.css'
 
 type ConditionKey = 'context' | 'serviceTier' | 'date' | 'time' | 'requestBody' | 'all' | 'any' | 'not'
 

@@ -30,6 +30,7 @@ import {
   validateMcpUrl,
   validateTimeoutMillis,
 } from './mcp-utils'
+import './mcp-servers.css'
 import type { McpServerDTO } from '@/shared/api/generated/contracts'
 
 function formatDateTime24(date: Date, locale: AppLocale): string {

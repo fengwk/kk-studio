@@ -1,0 +1,370 @@
+/* 应用外壳：顶栏、主导航、品牌与移动端导航收起。 */
+.app-frame {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky);
+  height: 58px;
+  gap: 24px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  justify-content: flex-start;
+  align-items: stretch;
+  padding: 0 clamp(16px, 3vw, 28px);
+  background: var(--topbar-bg);
+  backdrop-filter: blur(14px);
+  flex-shrink: 0;
+}
+
+.topbar-left {
+  flex: 0 0 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+
+.topbar-center {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: stretch;
+}
+
+.topbar-right {
+  flex: 0 0 auto;
+  margin-left: auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  font-size: var(--font-size-md);
+  font-weight: 720;
+  letter-spacing: -0.025em;
+  white-space: nowrap;
+}
+
+.brand-mark {
+  display: grid;
+  width: 23px;
+  height: 23px;
+  place-items: center;
+  flex-shrink: 0;
+  overflow: hidden;
+  border-radius: 7px 7px 7px 2px;
+  user-select: none;
+}
+
+.brand-mark img {
+  width: 23px;
+  height: 23px;
+  display: block;
+}
+
+.topnav {
+  display: flex;
+  align-self: stretch;
+  align-items: stretch;
+  gap: 3px;
+  height: auto;
+  min-height: 100%;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+
+.topnav a,
+.topnav button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  /* opencli-hub：内容左起排布，下划线与左右 padding 对齐，视觉更居中 */
+  justify-content: flex-start;
+  gap: 7px;
+  height: auto;
+  min-height: 100%;
+  padding: 0 10px;
+  color: var(--fg-muted);
+  border-radius: 0;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  box-shadow: none;
+  text-decoration: none;
+  transition: color var(--duration-base), background var(--duration-base);
+}
+
+.topnav a:hover,
+.topnav button:hover:not(:disabled) {
+  color: var(--fg);
+  background: var(--wash-2);
+}
+
+.topnav a.active {
+  background: transparent;
+  color: var(--fg);
+  /* 与未选中保持同字重，避免切换时文字变宽导致整排跳动 */
+  font-weight: 500;
+  box-shadow: none;
+}
+
+/* 下划线 inset 与 padding 同为 10px，贴齐内容盒左右 */
+.topnav a.active::after {
+  position: absolute;
+  right: 10px;
+  bottom: 0;
+  left: 10px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+  box-shadow: var(--glow-accent);
+  content: "";
+}
+
+.topnav-user {
+  display: none;
+}
+
+.topnav-user .avatar {
+  width: 28px;
+  height: 28px;
+}
+
+.topnav button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.topnav svg {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+}
+
+/* opencli-hub 同款双语副标：中文主标 + 英文小写技术名 */
+.topnav a small {
+  color: var(--fg-muted);
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  line-height: 1;
+}
+
+html[lang="en-US"] .topnav a small {
+  display: none;
+}
+
+.icon-button.nav-toggle {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  flex-basis: 34px;
+  margin: auto 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.nav-toggle svg {
+  width: 18px;
+  height: 18px;
+}
+
+.avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--accent-border);
+  border: 1px solid transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg);
+}
+
+.avatar svg {
+  width: 14px;
+  height: 14px;
+}
+
+@media (max-width: 860px) {
+  .topbar {
+    gap: 12px;
+    height: 56px;
+    padding: 0 14px;
+  }
+
+  .brand {
+    font-size: var(--font-size-sm);
+  }
+
+  .icon-button.nav-toggle {
+    display: inline-flex;
+    order: 3;
+    width: 38px;
+    height: 38px;
+    margin-left: auto;
+  }
+
+  .topbar-center {
+    flex: 0 0 auto;
+  }
+
+  /* 收起时：右侧 avatar 进汉堡菜单，顶栏不再单独占位 */
+  .topbar-right {
+    display: none;
+  }
+
+  /* 移动端：折叠为下拉面板（对齐 opencli-hub） */
+  .topnav {
+    position: fixed;
+    top: 56px;
+    right: 12px;
+    left: 12px;
+    z-index: var(--z-dropdown);
+    display: grid;
+    align-self: auto;
+    gap: 3px;
+    height: auto;
+    min-height: 0;
+    padding: 7px;
+    visibility: hidden;
+    border: 1px solid var(--border-hover);
+    border-radius: 10px;
+    background: var(--surface-raised);
+    box-shadow: var(--shadow-lg);
+    transform: translateY(-12px);
+    opacity: 0;
+    pointer-events: none;
+    transition: transform var(--duration-base), opacity var(--duration-base), visibility var(--duration-base);
+  }
+
+  .app-frame[data-nav-open='true'] .topnav {
+    visibility: visible;
+    transform: translateY(0);
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .topnav a,
+.topnav button {
+    justify-content: flex-start;
+    min-height: 42px;
+    min-width: 0;
+    height: auto;
+    padding: 0 12px;
+    border-radius: 7px;
+    font-size: var(--font-size-sm);
+  }
+
+  /* 汉堡下拉内保留英文小字副标（桌面顶栏同款双语） */
+  .topnav a small {
+    display: inline;
+    margin-left: 2px;
+  }
+
+  .topnav a.active::after {
+    display: none;
+  }
+
+  .topnav a.active {
+    background: var(--surface-active);
+    color: var(--fg);
+  }
+
+  .topnav-user {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 42px;
+    margin-top: 4px;
+    padding: 0 12px;
+    border-top: 1px solid var(--wash-3);
+    border-radius: 0 0 7px 7px;
+    color: var(--fg-muted);
+    font-size: var(--font-size-sm);
+  }
+
+}
+
+/* 工作区通用沉浸壳：隐藏全局顶栏后让 stage 占满可见区。
+   对话/画布的业务几何各自在 feature 局部样式里表达，不在这里叠加皮肤。 */
+.workspace-immersive .stage {
+  min-height: 100%;
+}
+
+.topnav .locale-selector {
+  display: none;
+}
+
+@media (max-width: 860px) {
+  .topbar-right .locale-selector {
+    display: none;
+  }
+
+  .topnav .locale-selector {
+    display: block;
+    width: 100%;
+    margin-top: 4px;
+    padding-top: 7px;
+    border-top: 1px solid var(--wash-3);
+  }
+
+  .topnav .locale-selector .ui-select-trigger {
+    display: flex;
+    width: 100%;
+    min-height: 42px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: 0 0 7px 7px;
+    background: transparent;
+    font-size: var(--font-size-sm);
+  }
+
+  .ui-select-menu.locale-selector {
+    width: var(--ui-select-trigger-width);
+    min-width: var(--ui-select-trigger-width);
+    max-width: none;
+  }
+
+  .ui-select-menu.locale-selector .ui-select-option {
+    min-height: 38px;
+    padding: 0 12px;
+    font-size: var(--font-size-sm);
+  }
+}
+
+/* 交互待办数量：顶栏导航上的未处理计数。 */
+.nav-pending-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  margin-left: 6px;
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  line-height: 1;
+  color: var(--bg);
+  background: var(--danger);
+  border-radius: var(--radius-pill);
+}

@@ -7,6 +7,7 @@ import { Plus, Trash2 } from 'lucide-react'
 import type { VariantDraft } from '@/features/catalog/ai-console-types'
 import { blankVariant } from '@/features/catalog/ai-resource-form-drafts'
 import { useI18n } from '@/shared/i18n'
+import './catalog-form-layout.css'
 
 export function VariantListEditor({
   label,

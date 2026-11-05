@@ -1,0 +1,28 @@
+/* Catalog 资源编辑器弹窗的类型切换。 */
+
+/* Model / Model Group 创建与目录参数：全部为本次功能新增的 scoped 样式。 */
+.model-kind-tabs {
+  display: inline-flex;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--wash-1);
+  align-self: flex-start;
+}
+
+.model-kind-tabs button {
+  border: 0;
+  border-radius: calc(var(--radius-md) - 2px);
+  padding: 6px 12px;
+  background: transparent;
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+}
+
+.model-kind-tabs button.is-selected {
+  background: var(--wash-3);
+  color: var(--fg);
+}

@@ -13,6 +13,7 @@ import { useI18n } from '@/shared/i18n'
 import { LocaleSelector } from '@/shared/i18n/LocaleSelector'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useReadModelFreshnessRecheck } from '@/shared/lib/useReadModelFreshnessRecheck'
+import '@/platform/shell/app-shell.css'
 
 const PENDING_INTERACTIONS_LIMIT = 50
 

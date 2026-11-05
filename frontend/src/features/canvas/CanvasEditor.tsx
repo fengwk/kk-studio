@@ -5,6 +5,7 @@ import { CanvasStage } from '@/features/canvas/CanvasStage'
 import { useI18n } from '@/shared/i18n'
 import { Button } from '@/shared/ui/controls/Button'
 import { StateBlock } from '@/shared/ui/feedback/StateBlock'
+import './canvas-editor.css'
 
 export function CanvasEditor() {
   const { state, snapshot, snapshotQuery } = useCanvasRuntime()

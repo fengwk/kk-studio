@@ -1,0 +1,34 @@
+/* Chat / Thread 通用的加载、错误与空状态块。 */
+.thread-state,
+.thread-empty {
+  margin: auto;
+  text-align: center;
+  color: var(--fg-muted);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  min-height: 40vh;
+  justify-content: center;
+}
+
+.thread-state.danger {
+  color: var(--danger);
+}
+
+.thread-empty svg {
+  width: 36px;
+  height: 36px;
+  opacity: 0.4;
+}
+
+.thread-empty p {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: var(--font-size-sm);
+}
+
+.thread-empty small {
+  color: var(--fg-muted);
+  font-size: var(--font-size-xs);
+}

@@ -14,6 +14,7 @@ import type {
   ToolContent,
 } from '@/features/thread/runtime/thread-timeline-types'
 import { useI18n } from '@/shared/i18n'
+import './resource-attachments.css'
 
 /**
  * 有序结果内容的只读渲染：Text 忠实展示、JSON 格式化、Resource 按权威 MIME 渲染。

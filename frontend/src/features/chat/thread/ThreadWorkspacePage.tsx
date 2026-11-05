@@ -13,6 +13,7 @@ import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n } from '@/shared/i18n'
 import { shouldDeferToBlockingModal } from '@/shared/ui/blocking-overlay'
 import '@/features/chat/chat-workspace.css'
+import '@/features/thread/thread-state.css'
 import type {
   AgentDefinitionDTO,
   EnvironmentCardDTO,

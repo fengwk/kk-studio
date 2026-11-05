@@ -9,6 +9,7 @@ import { Check, ChevronDown, ChevronLeft } from 'lucide-react'
 import { formatModelLabel } from '@/features/catalog'
 import type { AgentModelKind } from '@/shared/api/generated/contracts'
 import { useI18n } from '@/shared/i18n'
+import './thread-composer-controls.css'
 
 export interface ThreadComposerModelSelection {
   /** 全局唯一逻辑模型名（单 Model 或组）。 */

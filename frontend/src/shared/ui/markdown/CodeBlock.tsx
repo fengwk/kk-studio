@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from 'react'
 import { useI18n } from '@/shared/i18n'
+import './code-block.css'
 
 async function copyText(text: string, isActive: () => boolean): Promise<boolean> {
   try {

@@ -1,7 +1,7 @@
 import { Link } from 'react-router'
 import { useI18n } from '@/shared/i18n'
 import type { CatalogSetupState } from '@/features/chat/catalog-setup'
-
+import './chat-cards.css'
 
 /**
  * 新库的首次使用引导：按 Provider → Model → Agent → Chat 顺序展示进度并突出下一步。

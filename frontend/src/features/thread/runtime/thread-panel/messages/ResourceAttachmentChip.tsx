@@ -6,6 +6,7 @@ import {
   type ResourceBlobUrls,
 } from '@/features/thread/runtime/thread-panel/messages/ResourceBlobUrlContext'
 import { useI18n } from '@/shared/i18n'
+import './resource-attachments.css'
 
 /**
  * durable RESOURCE 展示：图片/视频优先使用轻量预览 + hover 名称，点击后以原件打开 Lightbox；

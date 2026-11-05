@@ -1,0 +1,13 @@
+/* Model 资源表单中的目录入口与能力开关。 */
+.ability-toggle-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px 24px;
+}
+
+.catalog-picker-launcher {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}

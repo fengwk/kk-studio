@@ -1,0 +1,188 @@
+/* Thread Composer 控件条：模型/环境/权限下拉与状态。 */
+.thread-composer-controls {
+  position: relative;
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.thread-composer-controls-left,
+.thread-composer-controls-right {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.thread-composer-controls-right {
+  flex: 1;
+  justify-content: flex-end;
+}
+
+.thread-composer-control {
+  min-width: 0;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+
+.thread-composer-control:hover:not(:disabled),
+.thread-composer-control[aria-expanded='true'] {
+  background: var(--stage-dot);
+  color: var(--fg);
+}
+
+.thread-composer-control:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.thread-composer-control > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thread-composer-control > svg {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 13px;
+}
+
+.thread-composer-environment-control {
+  max-width: min(100%, 200px);
+}
+
+.thread-composer-settings-status {
+  flex: 0 0 auto;
+  padding: 0 6px;
+  font-size: var(--font-size-xs);
+  line-height: 18px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  color: var(--fg-muted);
+  white-space: nowrap;
+  cursor: default;
+}
+
+.thread-composer-settings-status[data-settings-status='pending'] {
+  border-color: var(--border-hover);
+  color: var(--fg);
+}
+
+.thread-composer-model-control {
+  max-width: min(100%, 420px);
+}
+
+.thread-composer-menu {
+  position: absolute;
+  z-index: var(--z-raised);
+  bottom: calc(100% + 8px);
+  min-width: 180px;
+  max-width: min(420px, calc(100vw - 48px));
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-overlay);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+
+.thread-composer-menu.permission,
+.thread-composer-menu.environment {
+  left: 0;
+}
+
+.thread-composer-menu.model {
+  right: 0;
+  min-width: min(340px, calc(100vw - 48px));
+}
+
+.thread-composer-menu-search {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 8px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  color: var(--fg);
+  font-size: var(--font-size-xs);
+  outline: 0;
+}
+
+.thread-composer-menu ul {
+  max-height: min(340px, 48vh);
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+  outline: 0;
+  list-style: none;
+}
+
+.thread-composer-menu li > button,
+.thread-composer-menu-back {
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--fg);
+  font-size: var(--font-size-xs);
+  text-align: left;
+  cursor: pointer;
+}
+
+.thread-composer-menu li > button.active,
+.thread-composer-menu li > button:hover,
+.thread-composer-menu-back:hover {
+  background: var(--surface-active);
+}
+
+.thread-composer-menu li > button > span,
+.thread-composer-menu-back {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thread-composer-menu li > button > svg,
+.thread-composer-menu-back > svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+  color: var(--accent);
+}
+
+.thread-composer-menu-back {
+  justify-content: flex-start;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  color: var(--fg-muted);
+}
+
+.thread-composer-menu-back > svg {
+  color: currentColor;
+}
+
+@container (max-width: 520px) {
+  .thread-composer-model-control {
+    max-width: 220px;
+  }
+}

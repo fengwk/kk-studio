@@ -15,6 +15,9 @@ import { Select } from '@/shared/ui/controls/Select'
 import { useI18n } from '@/shared/i18n'
 import { RemoteModelIdPicker } from '@/features/catalog/AiRemoteModelIdPicker'
 import type { AgentModelInputModality, AgentProviderDTO } from '@/shared/api/generated/contracts'
+import './capability-picker.css'
+import './catalog-form-layout.css'
+import './ai-model-resource-form.css'
 
 const AGENT_MODEL_INPUT_MODALITIES: AgentModelInputModality[] = [
   'TEXT',

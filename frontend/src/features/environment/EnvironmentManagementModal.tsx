@@ -12,6 +12,7 @@ import {
 import { EnvironmentHostSection } from '@/features/environment/EnvironmentHostSection'
 import { StateBlock } from '@/shared/ui/feedback/StateBlock'
 import type { EnvironmentCardDTO } from '@/shared/api/generated/contracts'
+import './environment-management.css'
 
 export interface EnvironmentManagementModalProps {
   environment: EnvironmentCardDTO
