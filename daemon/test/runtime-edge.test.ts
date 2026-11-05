@@ -29,15 +29,13 @@ import {
   type Settings,
   type UpdateResult,
 } from '../src/generated/control_pb.js'
+import { Runtime } from '../src/runtime.js'
 import {
-  Runtime,
   defaultNote,
   detectArchitecture,
   detectEnvironmentInfo,
-  type RuntimeOptions,
-  type TemporaryResourceSweeper,
-  type UpdatePort,
-} from '../src/runtime.js'
+} from '../src/runtime-environment.js'
+import type { RuntimeOptions, TemporaryResourceSweeper, UpdatePort } from '../src/runtime-ports.js'
 import {
   collectDiagnosticFailure,
   describeFailureType,

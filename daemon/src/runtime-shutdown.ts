@@ -70,3 +70,72 @@ export function collectDiagnosticFailure(failures: unknown[], phase: string, err
     failures.push(diagnosticFailure)
   }
 }
+
+/**
+ * 停机收敛：跟踪所有已登记的在途执行，逆序释放中的独立失败只记录不阻断，最后等全部在途执行真正结束才发布终止。
+ *
+ * <p>普通执行与受管更新都计入 in-flight；受管更新准入需额外等待「受保护执行」（普通/恢复执行及其上传收尾）全部结束。
+ * 终态发布由装配层在 finalize 回调里完成，本类不解析连接状态。
+ */
+export class ShutdownRuntime {
+  private readonly inFlight = new Set<Promise<void>>()
+  private readonly protectedExecutions = new Set<Promise<void>>()
+  private readonly shutdownFailures: unknown[] = []
+
+  get failures(): readonly unknown[] {
+    return this.shutdownFailures
+  }
+
+  /** 是否仍有受保护执行及其拥有的上传收尾未结束。 */
+  get hasProtectedExecutions(): boolean {
+    return this.protectedExecutions.size > 0
+  }
+
+  track(promise: Promise<void>): Promise<void> {
+    return this.trackIn(null, promise)
+  }
+
+  trackProtected(promise: Promise<void>): Promise<void> {
+    return this.trackIn(this.protectedExecutions, promise)
+  }
+
+  release(phase: string, action: () => void): void {
+    releaseStep(this.shutdownFailures, phase, action)
+  }
+
+  record(phase: string, error: unknown): void {
+    recordShutdownFailure(this.shutdownFailures, phase, error)
+  }
+
+  /** 只留下诊断，不升级为停机失败。 */
+  collect(phase: string, error: unknown): void {
+    collectDiagnosticFailure(this.shutdownFailures, phase, error)
+  }
+
+  /** 释放传输并等待全部在途执行收敛，随后由装配层发布终止；释放失败全部进入聚合。 */
+  async finalize(closeTransport: () => Promise<void>, resolveTermination: () => void): Promise<void> {
+    try {
+      await closeTransport()
+    } catch (error) {
+      this.record('transport close', error)
+    }
+    const settled = await Promise.allSettled([...this.inFlight])
+    for (const outcome of settled) {
+      if (outcome.status === 'rejected') {
+        this.record('in-flight execution did not converge', outcome.reason)
+      }
+    }
+    resolveTermination()
+  }
+
+  private trackIn(group: Set<Promise<void>> | null, promise: Promise<void>): Promise<void> {
+    this.inFlight.add(promise)
+    group?.add(promise)
+    const remove = (): void => {
+      this.inFlight.delete(promise)
+      group?.delete(promise)
+    }
+    promise.then(remove, remove)
+    return promise
+  }
+}
