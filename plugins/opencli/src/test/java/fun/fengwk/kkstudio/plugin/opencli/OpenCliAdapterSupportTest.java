@@ -70,6 +70,12 @@ class OpenCliAdapterSupportTest {
             List.of(
                 Map.of(
                     "resourceId",
+                    "00000000-0000-0000-0000-00000000000A",
+                    "resourcePath",
+                    "/resources/a.png")),
+            List.of(
+                Map.of(
+                    "resourceId",
                     "999999999999999999999999",
                     "resourcePath",
                     "/resources/a.png")))) {

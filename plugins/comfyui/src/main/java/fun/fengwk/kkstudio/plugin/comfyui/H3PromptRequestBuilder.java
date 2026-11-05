@@ -1,10 +1,11 @@
 package fun.fengwk.kkstudio.plugin.comfyui;
 
+import static fun.fengwk.kkstudio.canvas.function.CanvasArguments.extractText;
+
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
 import fun.fengwk.kkstudio.canvas.function.CanvasJson;
 import fun.fengwk.kkstudio.canvas.function.CanvasJson.JsonNumber;
 import fun.fengwk.kkstudio.canvas.function.CanvasJson.JsonObject;
-import fun.fengwk.kkstudio.canvas.function.CanvasJson.JsonText;
 import fun.fengwk.kkstudio.canvas.function.CanvasResourceKind;
 import fun.fengwk.kkstudio.platform.plugin.prompt.PluginPromptContent;
 
@@ -32,7 +33,7 @@ public final class H3PromptRequestBuilder {
   }
 
   H3PromptRequestBuilder(String systemPrompt) {
-    this.systemPrompt = requireText(systemPrompt, "systemPrompt");
+    this.systemPrompt = ComfyuiTexts.requireText(systemPrompt, "systemPrompt");
   }
 
   public String systemPrompt() {
@@ -107,32 +108,6 @@ public final class H3PromptRequestBuilder {
     } catch (IOException error) {
       throw new UncheckedIOException("cannot read H3 system prompt", error);
     }
-  }
-
-  private static String requireText(String value, String field) {
-    if (value == null || value.isBlank()) {
-      throw new IllegalArgumentException(field + " must not be blank");
-    }
-    return value;
-  }
-
-  private static String extractText(JsonObject args, String field) {
-    CanvasJson json = args.values().get(field);
-    if (json instanceof JsonText text) {
-      return text.value();
-    }
-    throw new IllegalArgumentException(field + " must be a string");
-  }
-
-  private static String extractText(JsonObject args, String field, String defaultValue) {
-    CanvasJson json = args.values().get(field);
-    if (json instanceof JsonText text) {
-      return text.value();
-    }
-    if (json == null) {
-      return defaultValue;
-    }
-    throw new IllegalArgumentException(field + " must be a string");
   }
 
   private static int extractInt(JsonObject args, String field, int defaultValue) {

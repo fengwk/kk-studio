@@ -36,6 +36,7 @@ import fun.fengwk.kkstudio.canvas.infra.postgresql.PostgresqlCanvasFunctionResou
 import fun.fengwk.kkstudio.canvas.infra.postgresql.PostgresqlCanvasFunctionRunRepository;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.PostgresqlCanvasResourceRepository;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.PostgresqlCanvasStore;
+import fun.fengwk.kkstudio.common.id.Uuids;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -157,12 +158,13 @@ public class CanvasFunctionRunTransactions {
         freezeManifest(
             canvasId, nodeId, node.function().name(), args, definition.referencePolicy());
     List<CanvasFunctionFrozenOutput> outputs = freezeOutputs(node.name(), definition);
+    UUID requestIdUuid = Uuids.parseCanonical(validatedRequestId, "requestId");
     CanvasFunctionFrozenRun frozen =
         new CanvasFunctionFrozenRun(
             canvasId,
             nodeId,
             node.name(),
-            UUID.fromString(validatedRequestId),
+            requestIdUuid,
             binding,
             args,
             manifest,
@@ -176,7 +178,7 @@ public class CanvasFunctionRunTransactions {
     CanvasFunctionRun ready =
         new CanvasFunctionRun(
             nodeId,
-            UUID.fromString(validatedRequestId),
+            requestIdUuid,
             CanvasFunctionRunStatus.READY,
             0,
             frozen.stage(),

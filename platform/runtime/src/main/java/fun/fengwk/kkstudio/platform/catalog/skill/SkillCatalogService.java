@@ -6,6 +6,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
+import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.skill.archive.SkillArchiveBuilder;
 import fun.fengwk.kkstudio.platform.catalog.skill.archive.SkillArchiveIndex;
@@ -862,9 +863,9 @@ public class SkillCatalogService {
 
   private static UUID requireUploadId(String raw, String field) {
     try {
-      return UUID.fromString(raw);
-    } catch (RuntimeException error) {
-      throw DomainException.validation(RESOURCE, field + " must be a UUID", error);
+      return Uuids.parseCanonical(raw, field);
+    } catch (IllegalArgumentException error) {
+      throw DomainException.validation(RESOURCE, field + " must be a canonical UUID", error);
     }
   }
 

@@ -42,14 +42,14 @@ public record H3AdapterState(
       throw new IllegalArgumentException("seed must be nonnegative");
     }
     if (enhancedPrompt != null) {
-      enhancedPrompt = requireText(enhancedPrompt, "enhancedPrompt");
+      enhancedPrompt = ComfyuiTexts.requireText(enhancedPrompt, "enhancedPrompt");
       if (enhancedPrompt.getBytes(StandardCharsets.UTF_8).length > MAX_ENHANCED_PROMPT_BYTES) {
         throw new IllegalArgumentException(
             "enhancedPrompt must be at most " + MAX_ENHANCED_PROMPT_BYTES + " UTF-8 bytes");
       }
     }
     uploads = Map.copyOf(new LinkedHashMap<>(uploads == null ? Map.of() : uploads));
-    promptId = promptId == null ? null : requireText(promptId, "promptId");
+    promptId = promptId == null ? null : ComfyuiTexts.requireText(promptId, "promptId");
     outputs = outputs == null ? null : List.copyOf(outputs);
   }
 
@@ -147,13 +147,7 @@ public record H3AdapterState(
     }
     Map<UUID, H3UploadedFile> uploads = new LinkedHashMap<>();
     for (Map.Entry<String, JsonNode> entry : object.properties()) {
-      UUID resourceId;
-      try {
-        resourceId = UUID.fromString(entry.getKey());
-      } catch (IllegalArgumentException error) {
-        throw new IllegalArgumentException(
-            "uploads key must be a canonical UUID Resource id", error);
-      }
+      UUID resourceId = Uuids.parseCanonical(entry.getKey(), "uploads key");
       ObjectNode file = object(entry.getValue(), "uploads." + entry.getKey());
       requireExact(file, Set.of("name", "subfolder", "type"), "uploads." + entry.getKey());
       uploads.put(
@@ -256,12 +250,5 @@ public record H3AdapterState(
     if (value != null) {
       map.put(key, value instanceof UUID ? value.toString() : value);
     }
-  }
-
-  private static String requireText(String value, String field) {
-    if (value == null || value.isBlank()) {
-      throw new IllegalArgumentException(field + " must not be blank");
-    }
-    return value;
   }
 }

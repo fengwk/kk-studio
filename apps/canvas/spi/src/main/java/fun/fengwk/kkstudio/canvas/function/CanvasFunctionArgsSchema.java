@@ -5,6 +5,7 @@ import fun.fengwk.kkstudio.canvas.function.CanvasJson.JsonBool;
 import fun.fengwk.kkstudio.canvas.function.CanvasJson.JsonNumber;
 import fun.fengwk.kkstudio.canvas.function.CanvasJson.JsonObject;
 import fun.fengwk.kkstudio.canvas.function.CanvasJson.JsonText;
+import fun.fengwk.kkstudio.common.id.Uuids;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -14,7 +15,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.UUID;
 
 /**
  * Canvas Function args 的严格 JSON Schema 子集。
@@ -303,13 +303,9 @@ public final class CanvasFunctionArgsSchema {
     }
     CanvasJson nodeId = reference.values().get("nodeId");
     if (!(nodeId instanceof JsonText nodeIdText)) {
-      throw new IllegalArgumentException(path + ".nodeId must be a UUID string");
+      throw new IllegalArgumentException(path + ".nodeId must be a canonical UUID string");
     }
-    try {
-      UUID.fromString(nodeIdText.value());
-    } catch (IllegalArgumentException error) {
-      throw new IllegalArgumentException(path + ".nodeId must be a UUID string");
-    }
+    Uuids.parseCanonical(nodeIdText.value(), path + ".nodeId");
     BigDecimal index = number(reference.values().get("index"), path + ".index");
     try {
       if (index.intValueExact() < 0) {

@@ -18,6 +18,7 @@ import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeOpenViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewBindingDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewsDTO;
+import fun.fengwk.kkstudio.ide.gateway.IdeGatewayConstants;
 import fun.fengwk.kkstudio.platform.daemon.DaemonIdeLease;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeAction;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeCommand;
@@ -98,12 +99,11 @@ class EnvironmentIdeServiceImplTest {
     assertTrue(
         dto.getEntryUrl()
             .startsWith(
-                EnvironmentIdeServiceImpl.IDE_ROUTE_PREFIX
+                IdeGatewayConstants.ROUTE_PREFIX
                     + ENV
                     + "/"
                     + VIEW
-                    + "/"
-                    + EnvironmentIdeServiceImpl.BOOTSTRAP_PATH
+                    + IdeGatewayConstants.BOOTSTRAP_ENDPOINT
                     + "?token="),
         () -> "entry URL must be view scoped: " + dto.getEntryUrl());
 

@@ -127,6 +127,15 @@ class H3AdapterStateTest {
                 Map.of(
                     "uploads",
                     Map.of(
+                        "00000000-0000-0000-0000-00000000000A",
+                        Map.of("name", "a", "subfolder", "b", "type", "input")))));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            H3AdapterState.decode(
+                Map.of(
+                    "uploads",
+                    Map.of(
                         "999999999999999999999999",
                         Map.of("name", "a", "subfolder", "b", "type", "input")))));
     assertThrows(
