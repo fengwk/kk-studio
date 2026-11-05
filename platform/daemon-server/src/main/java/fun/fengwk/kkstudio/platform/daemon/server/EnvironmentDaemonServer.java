@@ -108,8 +108,8 @@ public final class EnvironmentDaemonServer
     if (draining) {
       return new DaemonAdmission.RetryLater(Duration.ofSeconds(5));
     }
-    String token = requireNonBlank(handshake.registrationToken(), "registrationToken");
-    String instanceId = requireNonBlank(handshake.daemonInstanceId(), "daemonInstanceId");
+    String token = handshake.registrationToken();
+    String instanceId = handshake.daemonInstanceId();
 
     Optional<DaemonRegistration> registrationOpt =
         registrationDirectory.findByRegistrationToken(token);
@@ -120,7 +120,7 @@ public final class EnvironmentDaemonServer
     EnvironmentId environmentId = registration.environmentId();
 
     DaemonConnectionSession existing = sessionOf(environmentId);
-    if (existing != null && existing.leaseToken() != null && existing.isReady()) {
+    if (existing != null && existing.isReady()) {
       boolean activeToken;
       try {
         activeToken = leaseStore.hasActiveLeaseToken(environmentId, existing.leaseToken());
@@ -154,7 +154,15 @@ public final class EnvironmentDaemonServer
                       "Environment daemon instance changed for "
                           + environmentId
                           + "; capability invocation outcome is uncertain."));
-            } catch (Throwable ignored) {
+            } catch (RuntimeException error) {
+              LOG.log(
+                  Level.WARNING,
+                  "failed to notify abandoned invocation "
+                      + active.invocationId
+                      + " on "
+                      + environmentId
+                      + ": "
+                      + error.getClass().getSimpleName());
             }
             transferCoordinator.releaseAllTransfers(active, ticketService);
           }
@@ -181,7 +189,13 @@ public final class EnvironmentDaemonServer
     if (pending != null) {
       try {
         leaseStore.disconnect(admitted.environmentId(), pending.leaseToken, Duration.ZERO);
-      } catch (RuntimeException ignored) {
+      } catch (RuntimeException error) {
+        LOG.log(
+            Level.WARNING,
+            "failed to disconnect abandoned admission for "
+                + admitted.environmentId()
+                + ": "
+                + error.getClass().getSimpleName());
       }
     }
   }
@@ -400,9 +414,6 @@ public final class EnvironmentDaemonServer
       throw unavailable(environmentId, "invocation " + invocationId);
     }
     UUID leaseToken = session.leaseToken();
-    if (leaseToken == null) {
-      throw unavailable(environmentId, "invocation " + invocationId);
-    }
     boolean holdsReady;
     try {
       holdsReady = leaseStore.holdsReadyLease(environmentId, leaseToken);
@@ -511,9 +522,6 @@ public final class EnvironmentDaemonServer
       return false;
     }
     UUID leaseToken = session.leaseToken();
-    if (leaseToken == null) {
-      return false;
-    }
     try {
       return leaseStore.holdsReadyLease(environmentId, leaseToken);
     } catch (RuntimeException error) {
@@ -528,9 +536,6 @@ public final class EnvironmentDaemonServer
       return Optional.empty();
     }
     UUID leaseToken = session.leaseToken();
-    if (leaseToken == null) {
-      return Optional.empty();
-    }
     try {
       if (!leaseStore.holdsReadyLease(environmentId, leaseToken)) {
         return Optional.empty();
@@ -689,11 +694,6 @@ public final class EnvironmentDaemonServer
     }
     JsonNode arguments = JsonValues.readTree(call.argumentsJson());
     JsonNode workdir = arguments.get("workdir");
-    if (operatingSystem == null) {
-      throw new EnvironmentCapabilityUnavailableException(
-          "target daemon operating system is not known; cannot validate workdir for "
-              + descriptor.id().value());
-    }
     try {
       DaemonWorkdirSyntax.requireAbsolute(
           workdir == null || !workdir.isString() ? null : workdir.stringValue(), operatingSystem);
@@ -708,12 +708,5 @@ public final class EnvironmentDaemonServer
       EnvironmentId environmentId, String capabilityId) {
     return new EnvironmentCapabilityUnavailableException(
         environmentId + " is unavailable; " + capabilityId + " cannot be executed");
-  }
-
-  private static String requireNonBlank(String value, String name) {
-    if (value == null || value.isBlank()) {
-      throw new IllegalArgumentException(name + " must not be blank");
-    }
-    return value;
   }
 }

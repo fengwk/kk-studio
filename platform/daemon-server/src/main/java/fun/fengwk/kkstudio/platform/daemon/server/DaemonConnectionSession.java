@@ -183,7 +183,7 @@ final class DaemonConnectionSession implements DaemonSession {
   DaemonOfferResult offerResult(Envelope envelope) {
     DaemonOfferResult outcome;
     synchronized (stateLock) {
-      if (cleaned || leaseToken == null) {
+      if (cleaned) {
         return DaemonOfferResult.CLOSED;
       }
       outcome = control.offer(envelope);
@@ -580,9 +580,8 @@ final class DaemonConnectionSession implements DaemonSession {
           () -> {
             try {
               listener.onExitConfirmed();
-            } catch (RuntimeException | Error failure) {
+            } catch (RuntimeException failure) {
               logFailure("execution exit confirmation", failure);
-              throw failure;
             }
           });
       return;
@@ -741,7 +740,8 @@ final class DaemonConnectionSession implements DaemonSession {
           closeAfterFlush = true;
         }
       }
-    } catch (RuntimeException ignored) {
+    } catch (RuntimeException notificationFailure) {
+      logFailure("protocol error notification for " + environmentId, notificationFailure);
     }
     close();
   }
@@ -806,7 +806,8 @@ final class DaemonConnectionSession implements DaemonSession {
       for (Runnable callback : batch) {
         try {
           callback.run();
-        } catch (Throwable ignored) {
+        } catch (RuntimeException error) {
+          logFailure("callback for " + environmentId, error);
         }
       }
     }

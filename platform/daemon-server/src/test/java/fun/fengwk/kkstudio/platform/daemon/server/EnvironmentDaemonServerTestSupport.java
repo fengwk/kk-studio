@@ -506,6 +506,7 @@ final class EnvironmentDaemonServerTestSupport {
     Throwable readyNotificationFailure;
     Throwable updateNotificationFailure;
     Throwable replacedNotificationFailure;
+    RuntimeException settingsFailure;
 
     Fixture() {
       this.server =
@@ -557,7 +558,12 @@ final class EnvironmentDaemonServerTestSupport {
                 updateResults.add(result);
               },
               ticketService,
-              settings::get);
+              () -> {
+                if (settingsFailure != null) {
+                  throw settingsFailure;
+                }
+                return settings.get();
+              });
     }
 
     void updateSettings(long ttlSeconds, long cleanupIntervalSeconds) {
@@ -990,6 +996,7 @@ final class EnvironmentDaemonServerTestSupport {
     boolean failNextReserve;
     boolean pendingReserve;
     UUID pendingUploadId;
+    RuntimeException releaseFailure;
 
     @Override
     public Ticket reserve(
@@ -1019,6 +1026,9 @@ final class EnvironmentDaemonServerTestSupport {
 
     @Override
     public void release(EnvironmentId environmentId, String invocationId, UUID uploadId) {
+      if (releaseFailure != null) {
+        throw releaseFailure;
+      }
       if (uploadId != null) {
         releases.add(uploadId);
       }

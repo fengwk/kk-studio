@@ -58,9 +58,11 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityU
 import fun.fengwk.kkstudio.harness.environment.capability.ExpectedFile;
 import fun.fengwk.kkstudio.platform.daemon.DaemonRuntimeSnapshot;
 import fun.fengwk.kkstudio.platform.daemon.DaemonRuntimeStatus;
+import fun.fengwk.kkstudio.platform.daemon.DaemonSkillPackage;
 import fun.fengwk.kkstudio.platform.daemon.DaemonUpdateCommand;
 import fun.fengwk.kkstudio.platform.daemon.DaemonUpdatePhase;
 import fun.fengwk.kkstudio.platform.daemon.DaemonUpdateProgress;
+import fun.fengwk.kkstudio.platform.daemon.protocol.ControlProtocolException;
 import fun.fengwk.kkstudio.platform.daemon.protocol.Envelope;
 import fun.fengwk.kkstudio.platform.daemon.protocol.ExecutionExited;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeAction;
@@ -3752,6 +3754,228 @@ class EnvironmentDaemonServerTest {
                 ENVIRONMENT_ID, capabilityRequest(CALL_ONE), new RecordingListener()));
 
     assertDoesNotThrow(() -> fixture.server.drain());
+  }
+
+  /** 准入时查询现有租约失败必须 fail-closed 为协议错误，不得误判为可接管。 */
+  @Test
+  void admitFailsClosedWhenActiveLeaseLookupFails() {
+    Fixture fixture = new Fixture();
+    fixture.connectReady("channel-admit-active-lease-failure");
+    fixture.leaseStore.databaseUnavailable = true;
+
+    ControlProtocolException error =
+        assertThrows(
+            ControlProtocolException.class,
+            () -> fixture.server.admit(new DaemonHandshake(TOKEN, OTHER_INSTANCE_ID)));
+    assertTrue(error.getMessage().contains("database unavailable"));
+  }
+
+  /** abandon 的租约断开是清理动作：失败只记录诊断，不向准入调用方传播。 */
+  @Test
+  void abandonIsolatesLeaseDisconnectFailure() {
+    Fixture fixture = new Fixture();
+    DaemonAdmission.Admitted admitted =
+        assertInstanceOf(
+            DaemonAdmission.Admitted.class,
+            fixture.server.admit(new DaemonHandshake(TOKEN, INSTANCE_ID)));
+    fixture.leaseStore.disconnectFailure = new IllegalStateException("disconnect failed");
+
+    assertDoesNotThrow(() -> fixture.server.abandon(admitted));
+    assertFalse(fixture.leaseStore.disconnected);
+  }
+
+  /** 广播网络设置时读取 settings 失败只影响该次通知，其他连接仍可继续收敛。 */
+  @Test
+  void reconcileNetworkSettingsIsolatesSettingsSupplierFailure() {
+    Fixture fixture = new Fixture();
+    FakeControlChannel channel = fixture.connectReady("network-settings-failure");
+    fixture.settingsFailure = new IllegalStateException("settings unavailable");
+
+    assertDoesNotThrow(fixture.server::reconcileNetworkSettings);
+    assertFalse(channel.closed());
+
+    fixture.settingsFailure = null;
+    fixture.settings.set(
+        new EnvironmentServerSettings(
+            Duration.ofSeconds(60),
+            16L * 1024 * 1024,
+            259200L,
+            1800L,
+            "http://proxy.invalid:8080",
+            ""));
+    fixture.server.reconcileNetworkSettings();
+    assertEquals("http://proxy.invalid:8080", channel.lastEnvelope().getSettings().getProxyUrl());
+  }
+
+  /** drain 对传输 drain 与租约释放的失败都保持隔离，继续完成其余清理。 */
+  @Test
+  void drainIsolatesTransportAndLeaseReleaseFailures() {
+    Fixture transportFailure = new Fixture();
+    FakeControlChannel transportChannel =
+        transportFailure.connectReady("channel-drain-transport-failure");
+    transportChannel.closeFailure = new IllegalStateException("drain failed");
+    assertDoesNotThrow(transportFailure.server::drain);
+    assertTrue(transportFailure.leaseStore.released);
+
+    Fixture releaseFailure = new Fixture();
+    releaseFailure.connectReady("channel-drain-release-failure");
+    releaseFailure.leaseStore.databaseUnavailable = true;
+    assertDoesNotThrow(releaseFailure.server::drain);
+    assertFalse(releaseFailure.leaseStore.released);
+  }
+
+  /** RECOVER 发送抛异常或返回 BUSY 时 attach 关闭连接并返回句柄，调用方无需重试同一连接。 */
+  @Test
+  void attachClosesSessionWhenRecoverCannotBeDelivered() {
+    Fixture failed = new Fixture();
+    FakeControlChannel failedChannel = failed.connectReady("channel-attach-send-failure");
+    failedChannel.failNextOffer = true;
+
+    assertNotNull(failed.server.attach(ENVIRONMENT_ID, UUID.randomUUID(), new RecordingListener()));
+    assertTrue(failedChannel.closed());
+
+    Fixture busy = new Fixture();
+    FakeControlChannel busyChannel = busy.connectReady("channel-attach-send-busy");
+    busyChannel.busyNextOffer = true;
+
+    assertNotNull(busy.server.attach(ENVIRONMENT_ID, UUID.randomUUID(), new RecordingListener()));
+    assertTrue(busyChannel.closed());
+  }
+
+  /** attach 存活租约查询失败必须 fail-closed，不发送 RECOVER。 */
+  @Test
+  void attachFailsClosedWhenLeaseStoreIsUnavailable() {
+    Fixture fixture = new Fixture();
+    FakeControlChannel channel = fixture.connectReady("channel-attach-db-down");
+    fixture.leaseStore.databaseUnavailable = true;
+
+    assertThrows(
+        EnvironmentCapabilityUnavailableException.class,
+        () -> fixture.server.attach(ENVIRONMENT_ID, UUID.randomUUID(), new RecordingListener()));
+    assertEquals(List.of(MessageType.SETTINGS), channel.messageTypes());
+  }
+
+  /** SKILL_SYNC 全量快照覆盖未就绪、更新中、BUSY、CLOSED 与成功发送路径。 */
+  @Test
+  void sendSkillSyncCoversReadinessUpdatingBusyAndClosedOutcomes() {
+    DaemonSkillPackage pkg =
+        new DaemonSkillPackage("pkg-a", "a".repeat(64), 1L, "https://storage.invalid/a");
+
+    Fixture missing = new Fixture();
+    assertThrows(
+        EnvironmentCapabilityUnavailableException.class,
+        () -> missing.server.sendSkillSync(ENVIRONMENT_ID, List.of(pkg)));
+
+    Fixture notReady = new Fixture();
+    notReady.openSession("skill-sync-not-ready");
+    assertThrows(
+        EnvironmentCapabilityUnavailableException.class,
+        () -> notReady.server.sendSkillSync(ENVIRONMENT_ID, List.of(pkg)));
+
+    Fixture ready = new Fixture();
+    FakeControlChannel readyChannel = ready.connectReady("skill-sync-ready");
+    ready.server.sendSkillSync(ENVIRONMENT_ID, List.of(pkg));
+    assertEquals(1, readyChannel.countOf(MessageType.SKILL_SYNC));
+    assertEquals(
+        "pkg-a", readyChannel.lastEnvelope().getSkillSync().getPackages(0).getPackageName());
+
+    Fixture updating = new Fixture();
+    updating.connectReady("skill-sync-updating");
+    updating.server.beginUpdate(ENVIRONMENT_ID, UUID.randomUUID().toString());
+    assertThrows(
+        EnvironmentCapabilityBusyException.class,
+        () -> updating.server.sendSkillSync(ENVIRONMENT_ID, List.of(pkg)));
+
+    Fixture busy = new Fixture();
+    FakeControlChannel busyChannel = busy.connectReady("skill-sync-busy");
+    busyChannel.busyNextOffer = true;
+    assertThrows(
+        EnvironmentCapabilityBusyException.class,
+        () -> busy.server.sendSkillSync(ENVIRONMENT_ID, List.of(pkg)));
+
+    Fixture closed = new Fixture();
+    FakeControlChannel closedChannel = closed.connectReady("skill-sync-closed");
+    closedChannel.close();
+    assertThrows(
+        EnvironmentCapabilityUnavailableException.class,
+        () -> closed.server.sendSkillSync(ENVIRONMENT_ID, List.of(pkg)));
+  }
+
+  /** 计数器只反映当前在途调用，终态后归零。 */
+  @Test
+  void activeInvocationCountTracksTrackedInvocations() {
+    Fixture fixture = new Fixture();
+    FakeControlChannel channel = fixture.connectReady("channel-active-count");
+    assertEquals(0, fixture.server.activeInvocationCount(ENVIRONMENT_ID));
+
+    fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), new RecordingListener());
+    assertEquals(1, fixture.server.activeInvocationCount(ENVIRONMENT_ID));
+
+    fixture.receive(channel, completedEnvelope(CALL_ONE.toString(), "done"));
+    assertEquals(0, fixture.server.activeInvocationCount(ENVIRONMENT_ID));
+  }
+
+  /** 实例接管时个别 listener 抛异常只记录诊断，不得阻断其余在途调用的终结与新连接建立。 */
+  @Test
+  void takeoverIsolatesAbandonedListenerFailure() {
+    Fixture fixture = new Fixture();
+    fixture.connectReady("channel-takeover-listener-old");
+    EnvironmentCapabilityExecutionListener throwingListener =
+        new EnvironmentCapabilityExecutionListener() {
+          @Override
+          public void onPartial(EnvironmentCapabilityResult partial) {}
+
+          @Override
+          public void onComplete(EnvironmentCapabilityResult result) {}
+
+          @Override
+          public void onError(Throwable error) {
+            throw new IllegalStateException("listener failed");
+          }
+
+          @Override
+          public void onExitConfirmed() {}
+        };
+    fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), throwingListener);
+    fixture.close("channel-takeover-listener-old");
+
+    FakeControlChannel replacement =
+        fixture.connectReady("channel-takeover-listener-new", OTHER_INSTANCE_ID);
+    assertTrue(replacement.isOpen());
+    assertTrue(fixture.server.isReady(ENVIRONMENT_ID));
+  }
+
+  /** 票据释放失败属于 best-effort 清理，不阻断调用终态收敛。 */
+  @Test
+  void transferReleaseFailureIsIsolated() {
+    Fixture fixture = new Fixture();
+    FakeControlChannel channel = fixture.connectReady("channel-transfer-release-failure");
+    EnvironmentCapabilityExecutionHandle handle =
+        fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), new RecordingListener());
+    fixture.receive(
+        channel,
+        resourceUploadRequestEnvelope(
+            CALL_ONE.toString(), TRANSFER_ONE, "text/plain", "a.txt", 3L, SHA_A));
+    uploadIdOfTicket(ticketEnvelope(channel));
+    fixture.ticketService.releaseFailure = new IllegalStateException("release failed");
+
+    assertDoesNotThrow(() -> fixture.server.expire(handle));
+    assertTrue(fixture.ticketService.releases.isEmpty());
+  }
+
+  /** 协议错误 ERROR 帧发送失败时仍必须关闭连接，避免半开连接继续接收。 */
+  @Test
+  void protocolErrorOfferFailureStillCloses() {
+    Fixture fixture = new Fixture();
+    FakeControlChannel channel = fixture.connectReady("channel-error-offer-failure");
+    channel.failNextOffer = true;
+
+    fixture.receive(
+        channel,
+        heartbeatEnvelope(
+            OTHER_ENVIRONMENT_ID, 1L, DaemonRuntimeStatus.running(DAEMON_VERSION), null));
+
+    assertTrue(channel.closed());
   }
 
   private static final class ThrowingLogHandler implements AutoCloseable {
