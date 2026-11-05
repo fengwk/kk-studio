@@ -38,7 +38,7 @@ test('environment install-config case exercises PUT CAS persistence, no-op and h
   const ctx = {
     async call(method, path, body) {
       if (method === 'POST' && path === '/api/environments') {
-        return { json: { data: { id: environmentId, name: body.name, installConfig: null, version } } }
+        return { json: { id: environmentId, name: body.name, installConfig: null, version } }
       }
       if (method === 'PUT' && path === `/api/environments/${environmentId}/install-config`) {
         if (body.expectedVersion !== version) {
@@ -55,14 +55,14 @@ test('environment install-config case exercises PUT CAS persistence, no-op and h
           throw new HttpError(400, 'environment installConfig is invalid', path)
         }
         if (saved && JSON.stringify(saved) === JSON.stringify(config)) {
-          return { json: { data: { id: environmentId, installConfig: saved, version } } }
+          return { json: { id: environmentId, installConfig: saved, version } }
         }
         saved = config
         version = String(Number(version) + 1)
-        return { json: { data: { id: environmentId, installConfig: saved, version } } }
+        return { json: { id: environmentId, installConfig: saved, version } }
       }
       if (method === 'GET' && path === `/api/environments/${environmentId}`) {
-        return { json: { data: { id: environmentId, installConfig: saved, version } } }
+        return { json: { id: environmentId, installConfig: saved, version } }
       }
       if (method === 'DELETE' && path.startsWith(`/api/environments/${environmentId}`)) {
         assert.ok(path.includes(`expectedVersion=${version}`), `delete must use current version: ${path}`)
@@ -142,13 +142,11 @@ test('environment install-script case checks code, headers and rotation without 
       if (method === 'POST' && path === '/api/environments') {
         return {
           json: {
-            data: {
-              id: environmentId,
-              name: body.name,
-              registrationToken: token,
-              installConfig: null,
-              version,
-            },
+            id: environmentId,
+            name: body.name,
+            registrationToken: token,
+            installConfig: null,
+            version,
           },
         }
       }
@@ -156,7 +154,7 @@ test('environment install-script case checks code, headers and rotation without 
         if (body.expectedVersion !== version) throw new HttpError(409, 'version conflict', path)
         saved = body.installConfig
         version = String(Number(version) + 1)
-        return { json: { data: { id: environmentId, installConfig: saved, version } } }
+        return { json: { id: environmentId, installConfig: saved, version } }
       }
       if (method === 'POST' && path === `/api/environments/${environmentId}/install-code`) {
         if (body.expectedVersion !== version) throw new HttpError(409, 'version conflict', path)
@@ -164,17 +162,15 @@ test('environment install-script case checks code, headers and rotation without 
         activeCode = `opaque-code-${++issueSequence}`
         return {
           json: {
-            data: {
-              code: activeCode,
-              // 真实 wire：全局 Jackson 把 Instant 序列化为 epoch seconds 数字（此处带小数毫秒）。
-              expiresAt: (Date.now() + 5 * 60 * 1000) / 1000,
-            },
+            code: activeCode,
+            // 真实 wire：全局 Jackson 把 Instant 序列化为 epoch seconds 数字（此处带小数毫秒）。
+            expiresAt: (Date.now() + 5 * 60 * 1000) / 1000,
           },
           headers: new Headers({ 'cache-control': 'no-store' }),
         }
       }
       if (method === 'GET' && path === `/api/environments/${environmentId}`) {
-        return { json: { data: { id: environmentId, installConfig: saved, version } } }
+        return { json: { id: environmentId, installConfig: saved, version } }
       }
       if (method === 'GET' && path.startsWith(`/api/environments/${environmentId}/install`)) {
         const code = new URL(path, 'http://matrix.local').searchParams.get('code')
@@ -201,9 +197,7 @@ test('environment install-script case checks code, headers and rotation without 
         activeCode = null
         version = String(Number(version) + 1)
         return {
-          json: {
-            data: { id: environmentId, registrationToken: token, installConfig: saved, version },
-          },
+          json: { id: environmentId, registrationToken: token, installConfig: saved, version },
           headers: new Headers({ 'cache-control': 'no-store' }),
         }
       }
@@ -260,21 +254,21 @@ for (const failure of ['http', 'timeout']) {
     const ctx = {
       async call(method, path, body) {
         if (method === 'POST' && path === '/api/environments') {
-          return { json: { data: { ...card, registrationToken: token } } }
+          return { json: { ...card, registrationToken: token } }
         }
         if (method === 'PUT' && path === `${cardPath}/install-config`) {
           card.version = '1'
           card.installConfig = linuxInstallConfig()
-          return { json: { data: card } }
+          return { json: card }
         }
         if (method === 'POST' && path === `${cardPath}/install-code`) {
           if (body.expectedVersion !== card.version) throw new HttpError(409, 'version conflict', path)
           return {
-            json: { data: { code, expiresAt: (Date.now() + 300_000) / 1000 } },
+            json: { code, expiresAt: (Date.now() + 300_000) / 1000 },
             headers: new Headers({ 'cache-control': 'no-store' }),
           }
         }
-        if (method === 'GET' && path === cardPath) return { json: { data: card } }
+        if (method === 'GET' && path === cardPath) return { json: card }
         if (method === 'GET' && path.startsWith(`${cardPath}/install?`)) {
           if (failure === 'http') throw new HttpError(500, token, path)
           throw new Error(`timeout GET ${path}`)

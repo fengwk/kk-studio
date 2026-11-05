@@ -1,4 +1,4 @@
-import { assert, envelopeData, expectHttpError, HttpError, cid } from '../lib/http.mjs'
+import { assert, expectHttpError, HttpError, cid } from '../lib/http.mjs'
 import { createCaseAdder } from '../lib/registry.mjs'
 
 export const cases = []
@@ -61,7 +61,7 @@ registerCase({
   async run(ctx) {
     const name = `e2e-install-cfg-${cid().slice(0, 8)}`
     const { json: createJson } = await ctx.call('POST', '/api/environments', { name })
-    const created = envelopeData(createJson)
+    const created = createJson
     const environmentId = created.id
     assert(environmentId, `created environment must have id: ${JSON.stringify(createJson)}`)
     assert(
@@ -82,7 +82,7 @@ registerCase({
         expectedVersion: version,
         installConfig: linuxInstallConfig(),
       })
-      const saved = envelopeData(putJson)
+      const saved = putJson
       assertInstallConfig(saved.installConfig)
       assert(
         String(saved.version) !== version,
@@ -95,7 +95,7 @@ registerCase({
         expectedVersion: version,
         installConfig: linuxInstallConfig(),
       })
-      const noop = envelopeData(noopJson)
+      const noop = noopJson
       assertInstallConfig(noop.installConfig)
       assert(
         String(noop.version) === version,
@@ -106,7 +106,7 @@ registerCase({
         'GET',
         `/api/environments/${encodeURIComponent(environmentId)}`,
       )
-      assertInstallConfig(envelopeData(getJson).installConfig)
+      assertInstallConfig(getJson.installConfig)
 
       const invalidBodies = [
         { expectedVersion: version, installConfig: { operatingSystem: 'linux', daemon: { studioUrl: 'ftp://nope' } } },
@@ -135,7 +135,7 @@ registerCase({
         'GET',
         `/api/environments/${encodeURIComponent(environmentId)}`,
       )
-      const after = envelopeData(afterJson)
+      const after = afterJson
       assert(
         String(after.version) === version,
         `invalid PUT must not advance version (was ${version}, got ${after.version})`,
@@ -152,7 +152,7 @@ registerCase({
         'GET',
         `/api/environments/${encodeURIComponent(environmentId)}`,
       )
-      const current = envelopeData(json)
+      const current = json
       await ctx.call(
         'DELETE',
         `/api/environments/${encodeURIComponent(environmentId)}?expectedVersion=${encodeURIComponent(String(current.version))}`,
@@ -267,7 +267,7 @@ registerCase({
   async run(ctx) {
     const name = `e2e-install-code-${cid().slice(0, 8)}`
     const { json: createJson } = await ctx.call('POST', '/api/environments', { name })
-    const created = envelopeData(createJson)
+    const created = createJson
     const environmentId = created.id
     const token = created.registrationToken
     assert(environmentId, 'created environment must have id')
@@ -281,7 +281,7 @@ registerCase({
         expectedVersion: version,
         installConfig: config,
       })
-      const saved = envelopeData(putJson)
+      const saved = putJson
       assertInstallConfig(saved.installConfig)
       assert(String(saved.version) !== version, 'persisting config must advance version')
       assert(!Object.hasOwn(saved, 'registrationToken'), 'install-config response must not carry registrationToken')
@@ -297,7 +297,7 @@ registerCase({
         expectedVersion: version,
       })
       assertNoStore(codeHeaders, 'install code')
-      const issued = envelopeData(codeJson)
+      const issued = codeJson
       assert(
         issued && typeof issued === 'object' && !Array.isArray(issued),
         'install code response must be an object',
@@ -308,7 +308,7 @@ registerCase({
       assertExpiresNearFiveMinutes(issued.expiresAt, issuedAtMs)
 
       const { json: afterIssueJson } = await ctx.call('GET', cardPath)
-      const afterIssue = envelopeData(afterIssueJson)
+      const afterIssue = afterIssueJson
       assert(String(afterIssue.version) === version, 'issuing a code must not advance version')
       assertInstallConfig(afterIssue.installConfig)
       assert(
@@ -337,7 +337,7 @@ registerCase({
       const downloadedToken = assertInstallScript(script, { previousTokens: [token], config })
       const checkRedemption = async () => {
         const { json } = await ctx.call('GET', cardPath)
-        const detail = envelopeData(json)
+        const detail = json
         assert(BigInt(detail.version) === BigInt(version) + 1n, 'redemption must advance version once')
         assertInstallConfig(detail.installConfig)
         assert(!Object.hasOwn(detail, 'registrationToken'), 'detail must not carry registrationToken')
@@ -358,7 +358,7 @@ registerCase({
       const issueCode = async () => {
         const { json, headers } = await ctx.call('POST', `${cardPath}/install-code`, { expectedVersion: version })
         assertNoStore(headers, 'install code')
-        const issued = envelopeData(json)
+        const issued = json
         assert(typeof issued.code === 'string' && issued.code.length > 0, 'install code must be non-empty')
         assertExpiresNearFiveMinutes(issued.expiresAt, Date.now())
         return issued.code
@@ -374,7 +374,7 @@ registerCase({
         { expectedVersion: version },
       )
       assertNoStore(rotatedHeaders, 'registration token rotation')
-      const rotated = envelopeData(rotatedJson)
+      const rotated = rotatedJson
       const rotatedToken = rotated.registrationToken
       assert(rotated.id === environmentId, 'token rotation must keep the environment id')
       assert(typeof rotatedToken === 'string' && rotatedToken.length > 0 && rotatedToken !== token, 'rotation must return a new token')
@@ -393,7 +393,7 @@ registerCase({
         { expectedVersion: version },
       )
       assertNoStore(refreshedHeaders, 'refreshed install code')
-      const refreshed = envelopeData(refreshedJson)
+      const refreshed = refreshedJson
       const refreshedCode = refreshed.code
       assert(typeof refreshedCode === 'string' && refreshedCode.length > 0 && refreshedCode !== code, 'rotation must require a new install code')
       assertExpiresNearFiveMinutes(refreshed.expiresAt, Date.now())
@@ -439,7 +439,7 @@ registerCase({
       )
     } finally {
       const { json } = await ctx.call('GET', cardPath)
-      const current = envelopeData(json)
+      const current = json
       await ctx.call(
         'DELETE',
         `${cardPath}?expectedVersion=${encodeURIComponent(String(current.version))}`,
