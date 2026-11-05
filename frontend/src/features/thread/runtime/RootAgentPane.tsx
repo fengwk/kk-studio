@@ -4,7 +4,7 @@ import {
   ThreadPanel,
   ThreadShortcutsPanel,
   ThreadStatusFooter,
-} from '@/features/thread/runtime'
+} from '@/features/thread/runtime/thread-panel'
 import { ThreadPane } from '@/features/thread/runtime/ThreadPane'
 import { RootThreadControlArea } from '@/features/thread/runtime/RootThreadControlArea'
 import { ActiveThreadTree } from '@/features/thread/runtime/ActiveThreadTree'

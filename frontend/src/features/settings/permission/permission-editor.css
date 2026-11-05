@@ -1,0 +1,107 @@
+/* 保序 Permission 规则编辑器：tool 分组 + 组内有序规则行，随组件按需加载。 */
+.permission-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.permission-group {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--wash-1);
+}
+
+.permission-group:has(.ui-select.is-open) {
+  z-index: 3;
+}
+
+.permission-group-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.permission-tool-name-wrap {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.permission-tool-label {
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: var(--fg-muted);
+}
+
+.permission-rule-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.permission-rule {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: start;
+  overflow: visible;
+}
+
+.permission-rule:has(.ui-select.is-open) {
+  z-index: 3;
+}
+
+.permission-rule-pattern {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.permission-pattern-input {
+  font-family: var(--mono);
+}
+
+.permission-action-select {
+  width: max-content;
+  min-width: 7.25rem;
+}
+
+.permission-action-select .ui-select-value {
+  overflow: visible;
+}
+
+.permission-remove-tool {
+  flex: 0 0 auto;
+  align-self: flex-end;
+  white-space: nowrap;
+}
+
+.permission-rule-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.permission-error {
+  font-size: var(--font-size-xs);
+  line-height: 1.4;
+  color: var(--danger);
+}
+
+@media (max-width: 720px) {
+  .permission-rule {
+    grid-template-columns: minmax(0, 1fr) 96px;
+  }
+
+  .permission-rule-actions {
+    grid-column: 1 / -1;
+  }
+}

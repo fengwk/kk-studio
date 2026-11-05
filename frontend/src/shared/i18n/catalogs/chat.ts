@@ -6,10 +6,6 @@ export const chatCatalog = {
     'en-US': 'This tool call requires approval:',
     'zh-CN': '此工具调用需要审批：',
   },
-  'ai.runtime.approval.allow': {
-    'en-US': 'Allow',
-    'zh-CN': '允许',
-  },
   'ai.runtime.approval.allowed': {
     'en-US': 'Allowed',
     'zh-CN': '已允许',
@@ -57,10 +53,6 @@ export const chatCatalog = {
   'ai.chat.agent': {
     'en-US': 'Agent',
     'zh-CN': 'Agent',
-  },
-  'ai.chat.environment': {
-    'en-US': 'Environment',
-    'zh-CN': '环境',
   },
   'ai.chat.defaultEnvironment': {
     'en-US': 'Default Environment',
@@ -1916,10 +1908,6 @@ export const chatCatalog = {
   'ai.runtime.event.detail.realtime': {
     'en-US': 'Realtime stream',
     'zh-CN': '实时流',
-  },
-  'ai.runtime.event.detail.checkpoint': {
-    'en-US': 'Checkpoint',
-    'zh-CN': '检查点',
   },
   'ai.runtime.event.detail.partialText': {
     'en-US': 'Partial output',
