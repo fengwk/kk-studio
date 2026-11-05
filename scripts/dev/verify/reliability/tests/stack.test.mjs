@@ -75,7 +75,7 @@ test('reliability commands target only their project and preserve volume cleanup
     }
     assert.match(calls[1], /logs .*reliability-postgres reliability-app$/)
     assert.match(calls[3], /down --remove-orphans$/)
-    assert.match(calls[5], /down --remove-orphans --volumes$/)
+    assert.match(calls[5], /down --volumes --remove-orphans$/)
   } finally {
     rmSync(directory, { recursive: true, force: true })
   }

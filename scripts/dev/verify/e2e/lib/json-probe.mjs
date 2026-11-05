@@ -5,6 +5,7 @@
  *   json-probe.mjs model-config-print          assert + print the model config default variant
  *   json-probe.mjs model-config-check          exit 0 when the first model carries a structured config
  *   json-probe.mjs environment-status NAME     print the status of the named environment ("" if absent)
+ *   json-probe.mjs environment-ready NAME      exit 0 only when the named environment is READY
  *   json-probe.mjs providers-ready             print "ok" or "missing:<names>" for the four real providers
  */
 
@@ -29,6 +30,10 @@ const commands = {
   'model-config-check'() {
     const model = firstModel()
     process.exitCode = model && isObject(model.config) ? 0 : 1
+  },
+  'environment-ready'(name) {
+    const match = (document?.data ?? []).find((row) => row?.name === name)
+    process.exitCode = match && match.status === 'READY' ? 0 : 1
   },
   'environment-status'(name) {
     const match = (document?.data ?? []).find((row) => row?.name === name)

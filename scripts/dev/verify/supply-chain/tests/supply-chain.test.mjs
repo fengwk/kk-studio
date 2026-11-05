@@ -17,6 +17,11 @@ import { repositoryRoot } from '../../../lib/repo-root.mjs'
 
 const REPOSITORY_ROOT = repositoryRoot()
 const SCRIPT = path.join(REPOSITORY_ROOT, 'scripts/dev/verify/supply-chain/run.sh')
+const SUPPLY_CHAIN_SOURCES = readdirSync(path.dirname(SCRIPT))
+    .filter(name => name.endsWith('.sh'))
+    .sort()
+    .map(name => readFileSync(path.join(path.dirname(SCRIPT), name), 'utf8'))
+    .join('\n')
 const POM = path.join(REPOSITORY_ROOT, 'pom.xml')
 const CANVAS_RUNTIME_POM = path.join(REPOSITORY_ROOT, 'apps/canvas/runtime/pom.xml')
 const PLATFORM_POM = path.join(REPOSITORY_ROOT, 'platform/runtime/pom.xml')
@@ -380,7 +385,7 @@ test('locks tool versions, policy thresholds, and secret indirection', () => {
     const canvasRuntimePom = readFileSync(CANVAS_RUNTIME_POM, 'utf8')
     const platformPom = readFileSync(PLATFORM_POM, 'utf8')
     const webPom = readFileSync(WEB_POM, 'utf8')
-    const script = readFileSync(SCRIPT, 'utf8')
+    const script = SUPPLY_CHAIN_SOURCES
     assert.match(pom, /<spring-boot\.version>4\.0\.8<\/spring-boot\.version>/)
     assert.match(pom, /<jackson\.version>2\.22\.3<\/jackson\.version>/)
     assert.match(pom, /<jackson3\.version>3\.1\.7<\/jackson3\.version>/)
@@ -467,6 +472,49 @@ test('locks tool versions, policy thresholds, and secret indirection', () => {
     assert.match(script, /nvd\.nist\.gov\/feeds\/json\/cve\/2\.0\/nvdcve-2\.0-\{0\}\.json\.gz/)
     assert.doesNotMatch(script, /-DnvdApiKey(?:=|\s)/)
     assert.doesNotMatch(script, /echo\s+["']?\$NVD_API_KEY/)
+})
+
+test('runs sbom, audit, and image into one report for all', () => {
+    // Intent: `all` is one process, one RUN_DIR and one failure list; no per-subcommand report is published separately.
+    const toolchain = createFakeToolchain()
+    const dockerToolchain = createFakeDockerToolchain()
+    const reportRoot = path.join(toolchain.root, 'all-reports')
+    try {
+        const result = runScript(['all'], {
+            ...toolchain.env,
+            ...dockerToolchain.env,
+            PATH: [
+                path.join(toolchain.root, 'bin'),
+                path.join(dockerToolchain.root, 'bin'),
+                process.env.PATH ?? '',
+            ].join(path.delimiter),
+            SUPPLY_CHAIN_REPORT_ROOT: reportRoot,
+            HTTP_PROXY: '',
+            HTTPS_PROXY: '',
+            ALL_PROXY: '',
+            NO_PROXY: '',
+            http_proxy: '',
+            https_proxy: '',
+            all_proxy: '',
+            no_proxy: '',
+        })
+        assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`)
+
+        const summary = JSON.parse(readFileSync(path.join(reportRoot, 'latest/summary.json'), 'utf8'))
+        assert.equal(summary.mode, 'all')
+        assert.equal(summary.status, 'PASS')
+        assert.equal(summary.checks.length, 12)
+        for (const check of summary.checks) {
+            assert.equal(check.status, 'PASS', check.name)
+        }
+        assert.equal(existsSync(path.join(reportRoot, 'latest/backend-sbom/bom.json')), true)
+        assert.equal(existsSync(path.join(reportRoot, 'latest/image/app.json')), true)
+        const summaryMarkdown = readFileSync(path.join(reportRoot, 'latest/summary.md'), 'utf8')
+        assert.match(summaryMarkdown, /All requested checks completed successfully/)
+    } finally {
+        rmSync(toolchain.root, { recursive: true, force: true })
+        rmSync(dockerToolchain.root, { recursive: true, force: true })
+    }
 })
 
 test('honors a custom report root and publishes timestamped and latest reports', () => {
