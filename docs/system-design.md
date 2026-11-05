@@ -64,7 +64,8 @@ frontend ──REST / WebSocket──▶ web（组合根，装配下列全部模
 ```
 
 `check.mjs` 同时守护聚合 POM 的模块清单、插件只 import 插件 SPI 与产品 SPI、内核契约包不反向依赖 runtime
-内部实现、Java 包跨模块唯一。各模块的契约与实现细节见[文档导航](README.md#按代码区域理解系统)。
+内部实现、Harness 公开包访问边界、按表名前缀的表归属、Java 包跨模块唯一，以及平台组合根与无 Redis /
+LangChain4j 约束。各模块的契约与实现细节见[文档导航](README.md#按代码区域理解系统)。
 
 ## Harness 引擎
 
