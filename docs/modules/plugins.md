@@ -44,7 +44,7 @@
   - `workflows`：受控 ComfyUI 工作流定义列表，默认包含内置的 MiniMax H3 视频生成工作流。
 - **内置 H3 视频生成**：
   - 内置工作流模板：[`minimax-h3-ref2va-workflow.json`](../../plugins/comfyui/src/main/resources/fun/fengwk/kkstudio/plugin/comfyui/minimax-h3-ref2va-workflow.json)，基于 MiniMax H3 架构实现参考图加音频生成视频；
-  - 执行流程：由 [`ComfyuiCanvasFunctionAdapter`](../../plugins/comfyui/src/main/java/fun/fengwk/kkstudio/plugin/comfyui/ComfyuiCanvasFunctionAdapter.java) 校验入参，前置下载或读取引用的图像/音频资源，通过 [`StandardComfyuiClient`](../../plugins/comfyui/src/main/java/fun/fengwk/kkstudio/plugin/comfyui/StandardComfyuiClient.java) 上传素材至 ComfyUI 输入目录，提交 Prompt 队列并通过 WebSocket / `/history` 轮询结果；
+  - 执行流程：由 [`ComfyuiCanvasFunctionAdapter`](../../plugins/comfyui/src/main/java/fun/fengwk/kkstudio/plugin/comfyui/ComfyuiCanvasFunctionAdapter.java) 校验入参，前置下载或读取引用的图像/音频资源，通过 [`StandardComfyuiClient`](../../plugins/comfyui/src/main/java/fun/fengwk/kkstudio/plugin/comfyui/StandardComfyuiClient.java) 上传素材至 ComfyUI 输入目录，提交 Prompt 队列并通过 `/history/{promptId}` 轮询结果；
   - 产物物化：解析输出节点中的视频文件，下载并写入 Storage 形成不可变 `Blob`，返回 Canvas 节点执行结果。
 
 ---
@@ -71,7 +71,7 @@
   - 自动续期：实现 [`PluginCredentialRefresher`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/PluginCredentialRefresher.java)，由 [`MiniMaxMavisCredentialRefresher`](../../plugins/minimax-mavis/src/main/java/fun/fengwk/kkstudio/plugin/minimaxmavis/MiniMaxMavisCredentialRefresher.java) 在凭据即将过期且租约有效时自动向网关续期。
 - **配置项**：`enabled`（布尔值，默认 `true`）；受控配置 Schema 仅有此开关，传输超时与 endpoint 由内部常量固定。
 - **Harness Contributor 工具集**：
-  由 [`MiniMaxMavisHarnessContributor`](../../plugins/minimax-mavis/src/main/java/fun/fengwk/kkstudio/plugin/minimaxmavis/MiniMaxMavisHarnessContributor.java) 注册 15 项模型工具（本地贡献标识为 kebab-case，面向模型的工具名均统一冠以 `mavis_` 前缀并使用下划线）：
+  由 [`MiniMaxMavisHarnessContributor`](../../plugins/minimax-mavis/src/main/java/fun/fengwk/kkstudio/plugin/minimaxmavis/MiniMaxMavisHarnessContributor.java) 注册 15 项模型工具（能力标识为 kebab-case，面向模型的工具名均统一冠以 `mavis_` 前缀并使用下划线）：
   - **搜索与提取**：
     - `mavis_web_search`（能力 `web-search`）：公共互联网网页搜索；
     - `mavis_extract_web`（能力 `extract-web`）：网页全文正文与结构化提取；

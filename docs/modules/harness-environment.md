@@ -339,7 +339,7 @@ COMPLETED
 
 [`DaemonControlChannel`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/server/DaemonControlChannel.java) 的 `drain()` 由传输层实现，依次使隧道拒绝新流、向对端发送 `NO_ERROR` 的 HTTP/2 `GOAWAY`、并执行控制流 `closeAfterFlush`，已建立的在途流可正常完成。
 
-[`EnvironmentDaemonServer`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/server/EnvironmentDaemonServer.java) 的 `drain()` 编排节点退出：对当前全部活动会话调用 `control.drain()`，并以各自的 `leaseToken` 调用 [`DaemonLeaseStore.release(...)`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/server/DaemonLeaseStore.java) 主动释放路由租约，供新节点接管；排空开始后，准入请求返回 `RetryLater`，`attach` 判定环境不可用；`invoke` 校验会话状态与 READY 租约。调用方放弃在途执行时（`expire`）只做本地退场与释放 transfer，不向 Daemon 发送 `CANCEL` 帧，远端调用留给下一个 owner 重新挂接。
+[`EnvironmentDaemonServer`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/server/EnvironmentDaemonServer.java) 的 `drain()` 编排节点退出：对当前全部活动会话调用 `control.drain()`，并以各自的 `leaseToken` 调用 [`DaemonLeaseStore.release(...)`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/server/DaemonLeaseStore.java) 主动释放路由租约，供新节点接管；排空开始后，准入请求返回 `RetryLater`，`attach` 判定环境不可用；`invoke` 校验会话状态与 READY 租约。排空期间调用方放弃在途执行时（`expire`）只做本地退场与释放 transfer，不向 Daemon 发送 `CANCEL` 帧，远端调用留给下一个 owner 重新挂接。
 
 #### 回调顺序与背压上界
 

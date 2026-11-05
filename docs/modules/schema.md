@@ -74,7 +74,7 @@ project
           +--< project_issue_evidence >-- storage_blob / project_issue_run
 ```
 
-Canvas Resource 与 pin 使用同画布外键，Run 固定 requestId 与 lease；Project Run 通过
+Canvas Resource 与 pin 使用同画布外键，Run 保存 requestId，调度与租约保存在 `durable_work`；Project Run 通过
 复合外键关联同 Issue 的 Thread 和同阶段预算，Entry 坐标是应用维护的历史引用。
 父链区间、权限、workflow 合法性和输出完整性由应用验证。表、列的准确清单与约束名直接查 V1。
 约束行为由 schema 模块的 fresh-install 探针在真实 PostgreSQL 上逐条验证。
@@ -101,7 +101,8 @@ Plugin 配置每个 pluginId 一行，`version` 为正并以 CAS 推进。`value
 其每次写入推进 `version`。`plugin_auth_attempt` 只保存 nonce 摘要与 prepare 时的 `config_version`。
 
 Canvas Resource 的 blob/text 恰好一个非空，owner/index 成对且槽位唯一。
-Run 以 node_id 保存当前/最后执行，状态与 lease/available/error 字段组合匹配；
+Run 以 node_id 保存当前/最后执行，数据库约束状态枚举；状态与错误字段的组合由应用校验，
+调度与租约由 `durable_work` 持有；
 INPUT/OUTPUT pin 保护执行资源生命周期。UNKNOWN 保留资源并等待核查，具体恢复见 Canvas Infra。
 引用连线从 Function args 投影。
 

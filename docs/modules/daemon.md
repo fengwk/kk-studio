@@ -89,7 +89,7 @@ Daemon 受管运行内置的 code-server，响应控制通道的 `IDE_COMMAND` �
 数据通道与控制通道在单一物理连接上通过 HTTP/2 多路复用（[`daemon-transport.ts`](../../daemon/src/transport/daemon-transport.ts) 与 [`ide-tunnel.ts`](../../daemon/src/transport/ide-tunnel.ts)）：
 - 普通 HTTP 请求（静态资产、页面和 REST API）作为标准 HTTP/2 数据流透传至本地 code-server；
 - WebSocket 连接通过 RFC 8441 Extended CONNECT 隧道建立，双向数据流直接穿透映射至本地 code-server 的 WebSocket 端口；
-- 每条请求校验有效绑定的 `viewId` 与 `bindingEpoch`，Daemon 只访问该视图作用域的私有 code-server 路径 `/__kk/ide/view/{viewId}/{bindingEpoch}`。
+- 数据流以 `/ide/{viewId}/{bindingEpoch}/...` 进入 Daemon，校验有效视图绑定后转发到本地 code-server 的私有路径 `/__kk/ide/view/{viewId}/{bindingEpoch}/...`。
 
 视图权威在 Daemon 进程内（[`service.ts`](../../daemon/src/ide/service.ts)）：每个 Environment 最多 64 个视图，
 OPEN/CLOSING/创建预留都由本进程裁决；claim 在任何进程或文件系统工作之前占用额度。绑定身份是
