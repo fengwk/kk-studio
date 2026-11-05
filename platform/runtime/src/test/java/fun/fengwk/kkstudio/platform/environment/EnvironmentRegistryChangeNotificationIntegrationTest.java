@@ -180,7 +180,7 @@ class EnvironmentRegistryChangeNotificationIntegrationTest
       List<EnvironmentSkillState> installed =
           List.of(
               EnvironmentSkillState.installed(
-                  "dev", "0123456789abcdef0123456789abcdef01234567", "/home/dev/skills/dev"));
+                  "dev", "0123456789abcdef".repeat(4), "/home/dev/skills/dev"));
       assertTrue(environmentRegistry.replaceSkillState(DEV, token, installed, skillEvent));
       listener.assertNotification(DEV.toString());
       assertEquals(installed, environmentRegistry.find(DEV).orElseThrow().skillState());
