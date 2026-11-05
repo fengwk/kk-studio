@@ -5,6 +5,7 @@ import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageRepository;
 import fun.fengwk.kkstudio.platform.catalog.skill.archive.SkillArchiveFileReader;
 
+import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 
@@ -59,6 +60,43 @@ public class PlatformSkillContentReader {
     }
     return pkg.skills() == null ? List.of() : List.copyOf(pkg.skills());
   }
+
+  /**
+   * 列出某个技能归档内的文件；条目只来自服务端生成的 {@code storage_blob.archive_index}，不访问 Git 或对象存储。
+   *
+   * @param packageName 包名
+   * @param skillName 技能名
+   * @return 相对技能目录的路径与解压后字节数，按路径升序
+   * @throws PlatformReadException 包或技能不存在，或归档没有服务端索引
+   */
+  public List<SkillFileEntry> listSkillFiles(String packageName, String skillName) {
+    if (packageName == null || packageName.isBlank()) {
+      throw new PlatformReadException("packageName must not be blank");
+    }
+    if (skillName == null || skillName.isBlank()) {
+      throw new PlatformReadException("skillName must not be blank");
+    }
+    SkillPackage pkg = skillPackageRepository.getPackage(packageName);
+    if (pkg == null) {
+      throw new PlatformReadException("skill package not found: " + packageName);
+    }
+    if (pkg.findSkill(skillName) == null) {
+      throw new PlatformReadException("skill not found: " + packageName + "/" + skillName);
+    }
+    String prefix = skillName + "/";
+    try {
+      return archiveFileReader.listEntries(pkg.artifactBlobId()).stream()
+          .filter(entry -> entry.path().startsWith(prefix))
+          .map(entry -> new SkillFileEntry(entry.path().substring(prefix.length()), entry.size()))
+          .sorted(Comparator.comparing(SkillFileEntry::path))
+          .toList();
+    } catch (RuntimeException e) {
+      throw new PlatformReadException("failed to list skill files: " + e.getMessage(), e);
+    }
+  }
+
+  /** 技能目录内的单个文件：相对技能根目录的路径与解压后字节数。 */
+  public record SkillFileEntry(String path, long size) {}
 
   /** 目录展示用的包摘要：只有包名、描述与技能清单，不含任何凭据。 */
   public record PackageSummary(

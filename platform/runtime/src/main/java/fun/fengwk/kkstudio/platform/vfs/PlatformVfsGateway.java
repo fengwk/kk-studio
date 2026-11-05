@@ -526,17 +526,14 @@ public final class PlatformVfsGateway implements VfsGateway, VfsEditReviewSource
             offset,
             limit);
       case SKILLS_SKILL:
-        return text(
+        return listing(
             callId,
-            "path: "
-                + target.normalizedPath()
-                + "\nkind: directory (read-only)\n\n[File listing is unavailable: this deployment serves"
-                + " skill content from its Git source and has no server-side archive index. Read known"
-                + " paths directly, e.g. vfs:/skills/"
-                + target.skillPackage()
-                + "/"
-                + target.skillName()
-                + "/SKILL.md.]");
+            target.normalizedPath(),
+            skillReader.listSkillFiles(target.skillPackage(), target.skillName()).stream()
+                .map(file -> file.path() + " (read-only, " + file.size() + " bytes)")
+                .toList(),
+            offset,
+            limit);
       case SKILLS_PATH:
         return readSkill(callId, target, offset, limit, columnOffset, deadline);
       case RESOURCE:

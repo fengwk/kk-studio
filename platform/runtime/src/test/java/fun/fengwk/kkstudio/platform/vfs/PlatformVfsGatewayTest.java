@@ -400,16 +400,23 @@ class PlatformVfsGatewayTest {
     verify(skillReader).listSkills("dev-tools");
   }
 
-  /** 技能目录没有服务端归档索引：明确说明不可列出文件，而不是返回伪造清单。 */
+  /** 技能目录的文件清单只来自服务端归档索引，并逐项标注 read-only。 */
   @Test
-  void skillDirectoryExplainsThatFileListingIsUnavailableWithoutAnArchiveIndex() throws Exception {
+  void skillDirectoryListsFilesFromTheServerArchiveIndex() throws Exception {
+    when(skillReader.listSkillFiles("dev-tools", "review"))
+        .thenReturn(
+            List.of(
+                new PlatformSkillContentReader.SkillFileEntry("SKILL.md", 900L),
+                new PlatformSkillContentReader.SkillFileEntry("references/rules.md", 12L)));
+
     ToolResult result =
         gateway.read(
             request(FS_READ, "read", "{\"path\":\"vfs:/skills/dev-tools/review/\"}"),
             partial -> {});
     assertFalse(result.error());
-    assertTrue(text(result).contains("kind: directory (read-only)"), text(result));
-    assertTrue(text(result).contains("no server-side archive index"), text(result));
+    assertTrue(text(result).contains("kind: directory"), text(result));
+    assertTrue(text(result).contains("SKILL.md (read-only, 900 bytes)"), text(result));
+    assertTrue(text(result).contains("references/rules.md (read-only, 12 bytes)"), text(result));
     verify(skillReader, never()).readSkillFile(any(), any(), any());
   }
 
