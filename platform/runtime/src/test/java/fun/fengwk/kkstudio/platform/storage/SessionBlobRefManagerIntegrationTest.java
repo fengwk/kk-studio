@@ -13,6 +13,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.TestPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.IllegalTransactionStateException;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -55,6 +56,9 @@ class SessionBlobRefManagerIntegrationTest extends PostgresSpringTestSupport {
   @Autowired private InMemoryS3StorageService s3Storage;
   @Autowired private JdbcTemplate jdbc;
   @Autowired private PlatformTransactionManager transactionManager;
+
+  // 本类手动驱动回收，避免后台维护线程先认领或删除同一上传及 blob。
+  @MockitoBean private StorageMaintenance storageMaintenance;
 
   private TransactionTemplate tx;
   private StorageIntegrationSupport storage;
@@ -153,7 +157,11 @@ class SessionBlobRefManagerIntegrationTest extends PostgresSpringTestSupport {
             "zero.bin", "application/octet-stream", content.length, storage.sha256Hex(content));
     storage.putUploadContent(pending.getId(), content, "application/octet-stream");
     StorageUploadDTO ready = storageUploadService.complete(UUID.fromString(pending.getId()));
+    UUID uploadUuid = UUID.fromString(ready.getId());
     UUID blobUuid = UUID.fromString(ready.getBlobId());
+    s3Storage.putDirect(StorageObjectKeys.blobPreview(blobUuid), content, "image/webp");
+    assertTrue(s3Storage.hasObject(StorageObjectKeys.blobOriginal(blobUuid)));
+    assertTrue(s3Storage.hasObject(StorageObjectKeys.blobPreview(blobUuid)));
     tx.execute(
         status -> {
           refManager.retainRef(SESSION_A, blobUuid);
@@ -161,15 +169,31 @@ class SessionBlobRefManagerIntegrationTest extends PostgresSpringTestSupport {
         });
     assertEquals(2L, storage.blobRefCount(ready.getBlobId()));
 
-    // 生产顺序：owner（upload 行）先删除，再释放最后一个引用（FK RESTRICT 禁止反向顺序）。
-    storageUploadService.delete(UUID.fromString(ready.getId()));
+    // delete 只标记 upload 清理并释放它的 owner；行仍保留到异步 finalize。
+    storageUploadService.delete(uploadUuid);
+    assertEquals(1L, storage.blobRefCount(ready.getBlobId()));
+    assertEquals(
+        1,
+        jdbc.queryForObject(
+            "select count(*) from storage_upload where id = ? and cleanup_requested_at is not null",
+            Integer.class,
+            uploadUuid));
+    // Session 引用行先删再 release；upload 的 FK 仍在，blob 行只能在 upload finalize 后删除。
     tx.execute(
         status -> {
           refManager.releaseRef(SESSION_A, blobUuid);
           return null;
         });
+    assertEquals(0L, storage.blobRefCount(ready.getBlobId()));
+    assertEquals(
+        "DELETING",
+        jdbc.queryForObject("select state from storage_blob where id = ?", String.class, blobUuid));
     assertEquals(1, storageUploadService.expireOnce(), "upload cleanup must precede blob sweep");
-    storageBlobManager.sweepDeleting();
+    assertEquals(
+        0,
+        jdbc.queryForObject(
+            "select count(*) from storage_upload where id = ?", Integer.class, uploadUuid));
+    assertEquals(1, storageBlobManager.sweepDeleting());
 
     assertEquals(
         0,
@@ -177,6 +201,7 @@ class SessionBlobRefManagerIntegrationTest extends PostgresSpringTestSupport {
             "select count(*) from storage_blob where id = ?", Integer.class, blobUuid),
         "release to zero must delete the DELETING row after commit");
     assertFalse(s3Storage.hasObject(StorageObjectKeys.blobOriginal(blobUuid)));
+    assertFalse(s3Storage.hasObject(StorageObjectKeys.blobPreview(blobUuid)));
     assertEquals(0, jdbc.queryForObject("select count(*) from session_blob_ref", Integer.class));
   }
 
