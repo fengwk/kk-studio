@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.web.advice;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
@@ -17,28 +18,37 @@ import org.springframework.http.server.ServerHttpResponse;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
 
 import java.lang.reflect.Method;
-import java.util.Map;
 
 class ApiResponseStatusAdviceTest {
 
   private final ApiResponseStatusAdvice advice = new ApiResponseStatusAdvice();
 
   @Test
-  void supportsOnlyDirectApiResponseReturnTypes() throws Exception {
+  void supportsDirectAndResponseEntityApiResponseReturnTypes() throws Exception {
     assertTrue(advice.supports(parameter("direct"), null));
-    assertFalse(advice.supports(parameter("entity"), null));
+    assertTrue(advice.supports(parameter("entity"), null));
     assertFalse(advice.supports(parameter("raw"), null));
   }
 
   @Test
-  void copiesBodyStatusToResponseWithoutReplacingBody() {
-    ApiResponse<Void> body =
-        ApiResponse.error(HttpStatus.CONFLICT, "CONFLICT", "conflict", Map.of());
+  void unwrapsDataAndCopiesStatus() {
+    Object data = new Object();
+    ApiResponse<Object> body = ApiResponse.created(data);
     ServerHttpResponse response = mock(ServerHttpResponse.class);
 
-    assertSame(body, advice.beforeBodyWrite(body, null, null, null, null, response));
+    assertSame(data, advice.beforeBodyWrite(body, null, null, null, null, response));
 
-    verify(response).setStatusCode(HttpStatusCode.valueOf(409));
+    verify(response).setStatusCode(HttpStatusCode.valueOf(201));
+  }
+
+  @Test
+  void emptySuccessUsesNoContentExceptForExplicitStatus() {
+    ServerHttpResponse response = mock(ServerHttpResponse.class);
+    assertNull(advice.beforeBodyWrite(ApiResponse.ok(), null, null, null, null, response));
+    verify(response).setStatusCode(HttpStatus.NO_CONTENT);
+    ServerHttpResponse accepted = mock(ServerHttpResponse.class);
+    assertNull(advice.beforeBodyWrite(ApiResponse.accepted(), null, null, null, null, accepted));
+    verify(accepted).setStatusCode(HttpStatus.ACCEPTED);
   }
 
   @Test

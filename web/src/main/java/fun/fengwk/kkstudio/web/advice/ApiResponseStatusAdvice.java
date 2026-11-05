@@ -1,8 +1,11 @@
 package fun.fengwk.kkstudio.web.advice;
 
 import org.springframework.core.MethodParameter;
+import org.springframework.core.ResolvableType;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageConverter;
 import org.springframework.http.server.ServerHttpRequest;
 import org.springframework.http.server.ServerHttpResponse;
@@ -12,30 +15,43 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseBodyAdvice;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
 
 /**
- * 将显式 {@link ApiResponse} 的业务 status 同步为 HTTP status。
+ * 过渡期将显式 {@link ApiResponse} 翻译为资源响应。
  *
- * <p>本 advice 只匹配直接返回 {@code ApiResponse} 的 handler；不匹配 {@code
- * ResponseEntity}、下载、HTML、裸流或任意其它响应，也不构造或替换响应体。
+ * <p>同时处理直接返回和 {@code ResponseEntity<ApiResponse<?>>}，保留后者的响应头；其他响应不受影响。
  */
 @RestControllerAdvice
-public class ApiResponseStatusAdvice implements ResponseBodyAdvice<ApiResponse<?>> {
+public class ApiResponseStatusAdvice implements ResponseBodyAdvice<Object> {
 
   @Override
   public boolean supports(
       MethodParameter returnType, Class<? extends HttpMessageConverter<?>> converterType) {
-    return ApiResponse.class.isAssignableFrom(returnType.getParameterType());
+    Class<?> type = returnType.getParameterType();
+    if (ApiResponse.class.isAssignableFrom(type)) {
+      return true;
+    }
+    return ResponseEntity.class.isAssignableFrom(type)
+        && ApiResponse.class.isAssignableFrom(
+            ResolvableType.forMethodParameter(returnType)
+                .as(ResponseEntity.class)
+                .getGeneric(0)
+                .resolve(Object.class));
   }
 
   @Override
-  public ApiResponse<?> beforeBodyWrite(
-      ApiResponse<?> body,
+  public Object beforeBodyWrite(
+      Object body,
       MethodParameter returnType,
       MediaType selectedContentType,
       Class<? extends HttpMessageConverter<?>> selectedConverterType,
       ServerHttpRequest request,
       ServerHttpResponse response) {
-    if (body != null) {
-      response.setStatusCode(HttpStatusCode.valueOf(body.getStatus()));
+    if (body instanceof ApiResponse<?> envelope) {
+      int status = envelope.getStatus();
+      Object data = envelope.getData();
+      response.setStatusCode(
+          HttpStatusCode.valueOf(
+              data == null && status == 200 ? HttpStatus.NO_CONTENT.value() : status));
+      return data;
     }
     return body;
   }

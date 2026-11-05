@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.web.advice;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -17,18 +16,15 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
-import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
 
 import java.nio.charset.StandardCharsets;
-import java.util.Map;
 
-/** 通过真实 MVC 响应链锁定 API 信封的 HTTP 状态，而不是只直接调用 advice 方法。 */
+/** 通过真实 MVC 响应链锁定过渡期成功响应的状态和资源体。 */
 class ApiResponseHttpContractTest {
 
   private MockMvc mockMvc;
@@ -37,19 +33,16 @@ class ApiResponseHttpContractTest {
   void setUp() {
     mockMvc =
         MockMvcBuilders.standaloneSetup(new ProbeController())
-            .setControllerAdvice(new ApiResponseStatusAdvice(), new ProbeErrorAdvice())
+            .setControllerAdvice(new ApiResponseStatusAdvice())
             .build();
   }
 
   @Test
-  void directCreatedEnvelopeProducesHttp201AndSuccessWireFlag() throws Exception {
+  void directCreatedEnvelopeProducesHttp201AndResource() throws Exception {
     mockMvc
         .perform(get("/probe/created"))
         .andExpect(status().isCreated())
-        .andExpect(jsonPath("$.status").value(201))
-        .andExpect(jsonPath("$.code").value("CREATED"))
-        .andExpect(jsonPath("$.success").value(true))
-        .andExpect(jsonPath("$.data").value("created"));
+        .andExpect(content().json("\"created\""));
   }
 
   @Test
@@ -62,9 +55,7 @@ class ApiResponseHttpContractTest {
     mockMvc
         .perform(get("/probe/entity-created"))
         .andExpect(status().isCreated())
-        .andExpect(jsonPath("$.status").value(201))
-        .andExpect(jsonPath("$.success").value(true))
-        .andExpect(jsonPath("$.data").value("entity-created"));
+        .andExpect(content().json("\"entity-created\""));
   }
 
   @Test
@@ -73,33 +64,15 @@ class ApiResponseHttpContractTest {
   }
 
   @Test
-  void responseEntityApiResponseKeepsExplicitErrorStatus() throws Exception {
+  void nullDataUses204For200AndPreserves202() throws Exception {
     mockMvc
-        .perform(get("/probe/entity-error"))
-        .andExpect(status().isUnprocessableEntity())
-        .andExpect(jsonPath("$.status").value(422))
-        .andExpect(jsonPath("$.code").value("PROBE_UNPROCESSABLE"))
-        .andExpect(jsonPath("$.success").value(false));
-  }
-
-  @Test
-  void errorAdviceResponseEntityIsNotRewrittenByStatusAdvice() throws Exception {
+        .perform(get("/probe/empty"))
+        .andExpect(status().isNoContent())
+        .andExpect(content().string(""));
     mockMvc
-        .perform(get("/probe/fail"))
-        .andExpect(status().isBadRequest())
-        .andExpect(jsonPath("$.status").value(400))
-        .andExpect(jsonPath("$.code").value("PROBE_INVALID"))
-        .andExpect(jsonPath("$.success").value(false))
-        .andExpect(jsonPath("$.errors.detail").value("probe rejected"));
-  }
-
-  @Test
-  void directErrorEnvelopeProducesItsHttpStatus() throws Exception {
-    mockMvc
-        .perform(get("/probe/error"))
-        .andExpect(status().isUnprocessableEntity())
-        .andExpect(jsonPath("$.status").value(422))
-        .andExpect(jsonPath("$.success").value(false));
+        .perform(get("/probe/accepted"))
+        .andExpect(status().isAccepted())
+        .andExpect(content().string(""));
   }
 
   @Test
@@ -164,29 +137,14 @@ class ApiResponseHttpContractTest {
       return ResponseEntity.status(HttpStatus.NO_CONTENT).body(ApiResponse.noContent());
     }
 
-    @GetMapping("/probe/entity-error")
-    ResponseEntity<ApiResponse<Void>> entityError() {
-      return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
-          .body(
-              ApiResponse.error(
-                  HttpStatus.UNPROCESSABLE_ENTITY,
-                  "PROBE_UNPROCESSABLE",
-                  "probe cannot be processed",
-                  Map.of("detail", "probe rejected")));
+    @GetMapping("/probe/empty")
+    ApiResponse<Void> empty() {
+      return ApiResponse.ok();
     }
 
-    @GetMapping("/probe/fail")
-    String fail() {
-      throw new ProbeException();
-    }
-
-    @GetMapping("/probe/error")
-    ApiResponse<Void> error() {
-      return ApiResponse.error(
-          HttpStatus.UNPROCESSABLE_ENTITY,
-          "PROBE_UNPROCESSABLE",
-          "probe cannot be processed",
-          Map.of("detail", "probe rejected"));
+    @GetMapping("/probe/accepted")
+    ApiResponse<Void> accepted() {
+      return ApiResponse.accepted();
     }
 
     @GetMapping(value = "/probe/raw", produces = MediaType.TEXT_PLAIN_VALUE)
@@ -211,23 +169,6 @@ class ApiResponseHttpContractTest {
       return ResponseEntity.ok()
           .contentType(MediaType.APPLICATION_OCTET_STREAM)
           .body(output -> output.write("stream".getBytes(StandardCharsets.UTF_8)));
-    }
-  }
-
-  static final class ProbeException extends RuntimeException {}
-
-  @RestControllerAdvice(assignableTypes = ProbeController.class)
-  static class ProbeErrorAdvice {
-
-    @ExceptionHandler(ProbeException.class)
-    ResponseEntity<ApiResponse<Void>> handle(ProbeException error) {
-      return ResponseEntity.badRequest()
-          .body(
-              ApiResponse.error(
-                  HttpStatus.BAD_REQUEST,
-                  "PROBE_INVALID",
-                  "probe is invalid",
-                  Map.of("detail", "probe rejected")));
     }
   }
 }
