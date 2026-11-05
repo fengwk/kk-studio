@@ -67,25 +67,25 @@ export function useThreadDraftRecord({
   const [draftRestoreError, setDraftRestoreError] = useState<string | null>(null)
 
   useEffect(() => {
-    if (initializedThreadRef.current === threadId) {
-      return
+    if (initializedThreadRef.current !== threadId) {
+      initializedThreadRef.current = threadId
+
+      // 重绑必须丢弃上一 Thread 的全部本地草稿状态：草稿、Goal 文本、编辑修订与回执重试记录。
+      draftRef.current = initialPartsRef.current
+      setDraftState(initialPartsRef.current)
+      goalDraftRef.current = null
+      setGoalDraftState(null)
+      draftRevisionRef.current = 0
+      failedReceiptsRef.current = []
+      appliedReceiptKeysRef.current = new Set()
+      observedStopRequestIdsRef.current = []
+      partsWriteRef.current = { token: 0, dirty: false }
+      goalWriteRef.current = { token: 0, dirty: false }
+      attemptedReceiptSignatureRef.current = null
+      setDraftRestoreError(null)
     }
-    initializedThreadRef.current = threadId
 
-    // 重绑必须丢弃上一 Thread 的全部本地草稿状态：草稿、Goal 文本、编辑修订与回执重试记录。
-    draftRef.current = initialPartsRef.current
-    setDraftState(initialPartsRef.current)
-    goalDraftRef.current = null
-    setGoalDraftState(null)
-    draftRevisionRef.current = 0
-    failedReceiptsRef.current = []
-    appliedReceiptKeysRef.current = new Set()
-    observedStopRequestIdsRef.current = []
-    partsWriteRef.current = { token: 0, dirty: false }
-    goalWriteRef.current = { token: 0, dirty: false }
-    attemptedReceiptSignatureRef.current = null
-    setDraftRestoreError(null)
-
+    // StrictMode 重放 effect 时第一次读取已被清理：即使身份未变也须重新读取。
     // 记录尚未到达前保留初始值，且绝不覆盖用户已经开始编辑的内容。
     let active = true
     void loadThreadDraft(threadId)
