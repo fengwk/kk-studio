@@ -153,6 +153,8 @@ Thread 异步操作按 `(threadId, binding epoch)` 隔离；即使 A → B → A
 
 Session 的完整 Entry 历史是一棵树，Thread 只是树上一条已命名的分支；pane 自身只保存
 view 绑定（PaneTarget）与布局，不复制 Thread、draft 或执行状态。
+Entry 列表按 keyset 分页传输；控制层在打开历史树或草稿历史时逐页排空并累积完整历史，
+历史树与草稿路径的渲染、搜索与分叉交互仍以完整视图为准。
 `/history` 打开当前 Session 的历史树：每个真实 Entry 恰好一行，按 Git commit lanes 画节点与连线，
 线性链始终留在同一列，只有真实 sibling 分叉才开新列；只有 ROOT 与已关闭 TURN_END 是可手工
 分叉的边界。搜索只调暗未命中行并高亮命中片段，不隐藏行、不改图形，也不写任何 Thread 状态。
@@ -171,7 +173,7 @@ view 绑定（PaneTarget）与布局，不复制 Thread、draft 或执行状态�
 去除首尾 ASCII 空格，最多 256 码点；大小写与兼容字符保持原值。读取失败留在弹窗中供重试，
 关闭、修改名称/目标或来源/目标变化会作废旧检查，等待期间的新输入不能被旧返回覆盖。
 
-草稿复用完整 Session Entries，只沿 parentEntryId 显示 ROOT 到 startEntryId 的闭合祖先路径；
+草稿复用按页排空后的完整 Session Entries，只沿 parentEntryId 显示 ROOT 到 startEntryId 的闭合祖先路径；
 设置回放、Conversation 与 Debug events 消费同一路径，不混入兄弟、后续消息或源 Thread 的
 queued/live invocation。缺节点、循环、跨 Session 和非 ROOT 终点明确失败，提供加载重试，
 并禁止首次发送与预览；从 ROOT 打开的草稿有明确空态。

@@ -851,7 +851,8 @@ insert into system_setting (id, config) values (
 --
 -- 所有持久实体 ID（Session / Entry / Thread / ThreadCommand client id / Builtin ModelInvocation /
 -- ToolInvocation / WorkTarget）均为 PostgreSQL uuid，由 HarnessStore 注入的 Supplier<UUID> 生成（生产：
--- UUID::randomUUID），本 schema 不提供任何序列。ThreadCommand 无代理主键，身份为 (thread_id, sequence)。
+-- UUID::randomUUID）。除 harness_entry.entry_seq 的追加序号外，本 schema 不提供任何实体 id 序列；
+-- entry_seq 只表达数据库接收追加的先后，不是业务身份。ThreadCommand 无代理主键，身份为 (thread_id, sequence)。
 -- 时间列统一使用毫秒精度 timestamptz(3)，与 HarnessStore 的时间精度契约一致。
 
 create table harness_session (
@@ -875,6 +876,7 @@ create table harness_entry (
     entry_type varchar(32) not null,
     payload jsonb not null check (jsonb_typeof(payload) = 'object'),
     created_at timestamptz(3) not null,
+    entry_seq bigint generated always as identity,
     provider_replay_state jsonb,
     constraint uk_harness_entry_session_id unique (session_id, id),
     constraint fk_harness_entry_session foreign key (session_id)
@@ -922,7 +924,8 @@ comment on column harness_entry.session_id is '所属 Session';
 comment on column harness_entry.parent_entry_id is '父 Entry；ROOT 为 null，其余必须非 null 且不能指向自身';
 comment on column harness_entry.entry_type is 'Entry 类型（ROOT/TURN_START/MESSAGE/CUSTOM/MODEL_ATTEMPT_FAILURE/NATIVE_COMPACTION/CUSTOM_MESSAGE/ASSISTANT_ERROR/ASSISTANT_ABORTED/COMPACTION/TURN_END/NOTIFICATION/SETTINGS/FORK）';
 comment on column harness_entry.payload is '按 entry_type 编码的不可变 payload（JSON object）';
-comment on column harness_entry.created_at is 'Entry 创建时间（毫秒精度）';
+comment on column harness_entry.created_at is 'Entry 创建时间（毫秒精度，不承担排序）';
+comment on column harness_entry.entry_seq is '数据库分配的追加序号：同一 Session 内严格递增且父先于子，只用于创建序读取与 keyset 分页';
 comment on column harness_entry.provider_replay_state is 'Provider native terminal replay 状态（JSON object，仅 ASSISTANT MESSAGE，可空）';
 
 create unique index uk_harness_entry_single_root
@@ -932,8 +935,12 @@ create unique index uk_harness_entry_single_root
 create index idx_harness_entry_parent
     on harness_entry (session_id, parent_entry_id);
 
+create index idx_harness_entry_session_seq
+    on harness_entry (session_id, entry_seq);
+
 comment on index uk_harness_entry_single_root is '每个 Session 至多一个 ROOT Entry';
 comment on index idx_harness_entry_parent is 'parent 回溯与同 Session 树遍历索引';
+comment on index idx_harness_entry_session_seq is 'Session 内按创建顺序读取与 keyset 分页索引';
 
 create table harness_thread (
     id uuid primary key,

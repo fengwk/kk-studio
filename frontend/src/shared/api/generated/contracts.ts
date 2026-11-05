@@ -1277,6 +1277,12 @@ export interface HarnessSessionEntryDTO {
   usageCost: HarnessUsageCostDTO | null
 }
 
+/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionEntryPageDTO */
+export interface HarnessSessionEntryPageDTO {
+  items: HarnessSessionEntryDTO[]
+  nextCursor: string | null
+}
+
 /** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionFileContentDTO */
 export interface HarnessSessionFileContentDTO {
   sessionId: string

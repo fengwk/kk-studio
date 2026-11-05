@@ -29,6 +29,10 @@ public final class InMemoryState {
 
   final Map<UUID, Session> sessions = new HashMap<>();
   final Map<UUID, Entry> entries = new HashMap<>();
+
+  /** Entry 追加序号：与 PostgreSQL identity 列一致，只表达写入先后。 */
+  final Map<UUID, Long> entrySequences = new HashMap<>();
+
   final Map<UUID, ThreadState> threads = new HashMap<>();
   final Map<CommandKey, ThreadCommand> commands = new HashMap<>();
 
@@ -44,6 +48,7 @@ public final class InMemoryState {
   final Map<WorkTarget, Work> works = new HashMap<>();
   final Map<UUID, ExecutionExitFact> executions = new HashMap<>();
   long nextId;
+  long nextEntrySequence;
 
   InMemoryState() {}
 
@@ -51,6 +56,7 @@ public final class InMemoryState {
     InMemoryState copy = new InMemoryState();
     copy.sessions.putAll(source.sessions);
     copy.entries.putAll(source.entries);
+    copy.entrySequences.putAll(source.entrySequences);
     copy.threads.putAll(source.threads);
     copy.commands.putAll(source.commands);
     copy.driverRows.putAll(source.driverRows);
@@ -63,6 +69,7 @@ public final class InMemoryState {
     copy.works.putAll(source.works);
     copy.executions.putAll(source.executions);
     copy.nextId = source.nextId;
+    copy.nextEntrySequence = source.nextEntrySequence;
     return copy;
   }
 

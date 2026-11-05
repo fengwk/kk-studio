@@ -27,6 +27,7 @@ import {
   createBuiltinExecution,
 } from '@/shared/api/contracts/ai-runtime'
 import { setLocale } from '@/shared/i18n'
+import { entryPage } from '@/test-support/session-entry-page'
 import type {
   AgentDefinitionDTO,
   AgentModelDTO,
@@ -227,7 +228,7 @@ beforeEach(() => {
     ...snapshot(),
     thread: { ...snapshot().thread, threadId },
   }))
-  vi.mocked(harnessService.listSessionEntries).mockReset().mockResolvedValue([])
+  vi.mocked(harnessService.listSessionEntries).mockReset().mockResolvedValue(entryPage([]))
   vi.mocked(harnessService.listSessionThreads).mockReset().mockResolvedValue([])
   vi.mocked(harnessService.acceptCommandBatch).mockResolvedValue(acceptedResponse())
   vi.mocked(harnessService.acceptThreadCommandBatch).mockResolvedValue(acceptedResponse())
@@ -743,7 +744,7 @@ describe('ChatWorkspacePage 新建分支路由', () => {
       thread: { ...snapshot().thread, threadId, headEntryId, sessionId: 'session-1' },
       entries,
     }))
-    vi.mocked(harnessService.listSessionEntries).mockResolvedValue(entries)
+    vi.mocked(harnessService.listSessionEntries).mockResolvedValue(entryPage(entries))
   }
 
   async function openBranchDialogFromTree(user: ReturnType<typeof userEvent.setup>, paneIndex = 0) {
@@ -1022,7 +1023,7 @@ describe('ChatWorkspacePage 新建分支路由', () => {
         kind: 'NEW_THREAD_DRAFT', sessionId: 'session-1', startEntryId: 'entry-1', threadName: 'original',
       },
     })
-    vi.mocked(harnessService.listSessionEntries).mockResolvedValue([ROOT_ENTRY])
+    vi.mocked(harnessService.listSessionEntries).mockResolvedValue(entryPage([ROOT_ENTRY]))
     if (scenario === 'local' || scenario === 'cross-session') {
       seedPaneTargets({
         'pane-9': {

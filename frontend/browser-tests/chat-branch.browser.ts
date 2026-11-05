@@ -298,7 +298,27 @@ async function installChatApi(
       return
     }
     if (path === `/api/sessions/${SESSION_ID}/entries`) {
-      await route.fulfill({ json: { status: 200, data: entryList } })
+      // 每页 2 条模拟真实 keyset 分页：历史树必须逐页累积后才能得到完整行数。
+      const cursor = new URL(request.url()).searchParams.get('cursor')
+      const cursorIndex = cursor == null
+        ? -1
+        : entryList.findIndex((entry) => entry.entryId === cursor)
+      if (cursor != null && cursorIndex < 0) {
+        await route.fulfill({ json: { status: 400, message: `unknown cursor ${cursor}` } })
+        return
+      }
+      const start = cursorIndex + 1
+      const items = entryList.slice(start, start + 2)
+      const nextIndex = start + items.length
+      await route.fulfill({
+        json: {
+          status: 200,
+          data: {
+            items,
+            nextCursor: nextIndex < entryList.length ? items.at(-1)!.entryId : null,
+          },
+        },
+      })
       return
     }
     if (path === `/api/sessions/${SESSION_ID}/threads`) {

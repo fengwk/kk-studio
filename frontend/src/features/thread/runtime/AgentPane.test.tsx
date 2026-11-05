@@ -62,6 +62,7 @@ import {
 import { queryKeys } from '@/shared/lib/query-keys'
 import { setLocale } from '@/shared/i18n'
 import { createMockIDBFactory } from '@/features/canvas/__tests__/mock-idb'
+import { entryPage } from '@/test-support/session-entry-page'
 import type {
   AgentDefinitionDTO,
   AgentModelDTO,
@@ -536,7 +537,7 @@ beforeEach(() => {
   vi.mocked(harnessService.getModelRequestDebug)
     .mockReset()
     .mockRejectedValue(new Error('Debug fixture unavailable'))
-  vi.mocked(harnessService.listSessionEntries).mockResolvedValue([])
+  vi.mocked(harnessService.listSessionEntries).mockResolvedValue(entryPage([]))
   // 无活跃后代仍返回真实根；空数组不符合执行树读取契约。
   vi.mocked(harnessService.getThreadTree).mockImplementation(async (threadId) => [
     treeNode(threadId, null, 'thread-name', false),
@@ -631,7 +632,7 @@ describe('AgentPane orchestration', () => {
     localStorage.setItem(`kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`, JSON.stringify({
       kind: 'NEW_THREAD_DRAFT', sessionId: 'session-1', startEntryId, threadName: 'draft-name',
     }))
-    vi.mocked(harnessService.listSessionEntries).mockResolvedValue(historyEntries)
+    vi.mocked(harnessService.listSessionEntries).mockResolvedValue(entryPage(historyEntries))
   }
 
   it('renders the complete selected prefix, including Debug events, without any command writes', async () => {
@@ -813,11 +814,11 @@ describe('AgentPane orchestration', () => {
 
   it('sends a NEW_THREAD target with zero settings writes when the draft is unchanged', async () => {
     const user = userEvent.setup()
-    vi.mocked(harnessService.listSessionEntries).mockResolvedValue([{
+    vi.mocked(harnessService.listSessionEntries).mockResolvedValue(entryPage([{
       entryId: 'entry-1', sessionId: 'session-1', parentEntryId: null,
       entryType: 'ROOT', payloadJson: '{}', createTime: 0,
       usageCost: null,
-    }])
+    }]))
     localStorage.setItem(
       `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
       JSON.stringify({
@@ -1214,7 +1215,7 @@ describe('AgentPane orchestration', () => {
       }),
     )
     const targetKey = `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`
-    vi.mocked(harnessService.listSessionEntries).mockResolvedValue([
+    vi.mocked(harnessService.listSessionEntries).mockResolvedValue(entryPage([
       {
         entryId: 'entry-1',
         sessionId: 'session-1',
@@ -1242,7 +1243,7 @@ describe('AgentPane orchestration', () => {
         createTime: 0,
         usageCost: null,
       },
-    ])
+    ]))
     const before = localStorage.getItem(targetKey)
     renderPane({ kind: 'CHAT', id: CHAT_ID })
     const composer = await screen.findByLabelText('给 AI 发送消息')
@@ -1286,7 +1287,10 @@ describe('AgentPane orchestration', () => {
     await user.click(composer)
     await user.keyboard('/history{Enter}')
     await waitFor(() => expect(document.querySelector('.history-tree-panel')).not.toBeNull())
-    expect(harnessService.listSessionEntries).toHaveBeenCalledWith('session-1')
+    expect(harnessService.listSessionEntries).toHaveBeenCalledWith(
+      'session-1',
+      { cursor: null, signal: expect.anything() },
+    )
   })
 
   it('blocks target navigation while an exact Stop replay is pending', async () => {
@@ -1968,7 +1972,7 @@ describe('AgentPane orchestration', () => {
         threadName: 'branch-1',
       }),
     )
-    vi.mocked(harnessService.listSessionEntries).mockResolvedValue([{
+    vi.mocked(harnessService.listSessionEntries).mockResolvedValue(entryPage([{
       entryId: 'entry-1',
       sessionId: 'session-1',
       parentEntryId: null,
@@ -1976,7 +1980,7 @@ describe('AgentPane orchestration', () => {
       payloadJson: '{}',
       createTime: 0,
       usageCost: null,
-    }])
+    }]))
     loadSessionsMock.mockResolvedValue([{
       sessionId: 'session-1',
       name: 'original session',
@@ -2972,7 +2976,7 @@ describe('TURN_END 绑定与 Debug 只读退出', () => {
   it('opens a local FORK_SESSION_DRAFT from a closed boundary in HistoryTree and submits NEW_FORKED_SESSION idempotently across retries', async () => {
     const user = userEvent.setup()
     bindPaneTarget()
-    vi.mocked(harnessService.listSessionEntries).mockResolvedValue([
+    vi.mocked(harnessService.listSessionEntries).mockResolvedValue(entryPage([
       {
         entryId: 'entry-root',
         sessionId: 'session-1',
@@ -3008,7 +3012,7 @@ describe('TURN_END 绑定与 Debug 只读退出', () => {
         createTime: 0,
         usageCost: null,
       },
-    ])
+    ]))
     renderPane()
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await user.click(composer)
@@ -3376,7 +3380,7 @@ function previewResponse(overrides: Partial<HarnessProviderRequestPreviewDTO> = 
 
     /** 用真实的 /debug 斜杠命令进入本地分支草稿的 Debug 视图。 */
     async function openBranchDraftDebugView(user: ReturnType<typeof userEvent.setup>) {
-      vi.mocked(harnessService.listSessionEntries).mockResolvedValue(branchEntries())
+      vi.mocked(harnessService.listSessionEntries).mockResolvedValue(entryPage(branchEntries()))
       renderPane({ kind: 'CHAT', id: CHAT_ID })
       const composer = await screen.findByLabelText('给 AI 发送消息')
       await user.click(composer)
@@ -3443,7 +3447,7 @@ function previewResponse(overrides: Partial<HarnessProviderRequestPreviewDTO> = 
       // 测试意图：草稿 A 的 Debug 模式、滚动与预览检查器都属于 A 的目标身份；预览成功后
       // 换绑到另一份草稿或新建 Session，必须整体回到会话视图（composer 可见），
       // 绝不残留 A 的预览，也不让不支持 Debug 的新建 Session 保持隐藏 composer。
-      vi.mocked(harnessService.listSessionEntries).mockResolvedValue(branchEntries())
+      vi.mocked(harnessService.listSessionEntries).mockResolvedValue(entryPage(branchEntries()))
       const { result } = renderSwitchablePane({
         kind: 'NEW_THREAD_DRAFT',
         sessionId: 'session-1',
@@ -3485,7 +3489,7 @@ function previewResponse(overrides: Partial<HarnessProviderRequestPreviewDTO> = 
     it('keeps the Debug view while the target identity is unchanged', async () => {
       // 测试意图：同身份的重复上报（例如分支草稿设置变化引起的重渲染）不能把 Debug
       // 视图和预览检查器清掉，否则刚生成的预览会被自己的重渲染抹掉。
-      vi.mocked(harnessService.listSessionEntries).mockResolvedValue(branchEntries())
+      vi.mocked(harnessService.listSessionEntries).mockResolvedValue(entryPage(branchEntries()))
       const target = {
         kind: 'NEW_THREAD_DRAFT' as const,
         sessionId: 'session-1',
@@ -5091,7 +5095,7 @@ describe('AgentPane root control mounting', () => {
       startEntryId: 'entry-1',
       threadName: 'branch-1',
     })
-    vi.mocked(harnessService.listSessionEntries).mockResolvedValue([{
+    vi.mocked(harnessService.listSessionEntries).mockResolvedValue(entryPage([{
       entryId: 'entry-1',
       sessionId: 'session-1',
       parentEntryId: null,
@@ -5099,7 +5103,7 @@ describe('AgentPane root control mounting', () => {
       payloadJson: '{}',
       createTime: 0,
       usageCost: null,
-    }])
+    }]))
     vi.mocked(harnessService.acceptCommandBatch).mockResolvedValue(
       acceptedResponse(threadFixture(NEW_ROOT_ID, { name: '新分支根' })),
     )

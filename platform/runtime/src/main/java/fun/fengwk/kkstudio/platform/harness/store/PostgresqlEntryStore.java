@@ -641,10 +641,64 @@ final class PostgresqlEntryStore implements EntryStore {
         select *
         from harness_entry
         where session_id = ?
-        order by created_at, id
+        order by entry_seq
         """,
         PostgresqlHarnessRows.ENTRY,
         sessionId);
+  }
+
+  @Override
+  public List<Entry> loadPageBySession(UUID sessionId, UUID afterEntryId, int limit) {
+    tx.checkOpen();
+    Objects.requireNonNull(sessionId, "sessionId");
+    if (limit <= 0) {
+      throw new IllegalArgumentException("limit must be positive");
+    }
+    if (tx.sessions().find(sessionId).isEmpty()) {
+      throw new IllegalArgumentException("session " + sessionId + " does not exist");
+    }
+    if (afterEntryId == null) {
+      return tx.queryList(
+          """
+          select *
+          from harness_entry
+          where session_id = ?
+          order by entry_seq
+          limit ?
+          """,
+          PostgresqlHarnessRows.ENTRY,
+          sessionId,
+          limit);
+    }
+    long afterSequence =
+        tx.queryOne(
+                """
+                select entry_seq
+                from harness_entry
+                where session_id = ? and id = ?
+                """,
+                (resultSet, rowNumber) -> resultSet.getLong(1),
+                sessionId,
+                afterEntryId)
+            .orElseThrow(
+                () ->
+                    new IllegalArgumentException(
+                        "cursor entry "
+                            + afterEntryId
+                            + " does not belong to session "
+                            + sessionId));
+    return tx.queryList(
+        """
+        select *
+        from harness_entry
+        where session_id = ? and entry_seq > ?
+        order by entry_seq
+        limit ?
+        """,
+        PostgresqlHarnessRows.ENTRY,
+        sessionId,
+        afterSequence,
+        limit);
   }
 
   @Override

@@ -77,13 +77,15 @@ describe('harnessService', () => {
 
   /**
    * 测试意图：验证 Session 级线程与条目列表查询路由迁移至 /sessions/{id}/{threads|entries}，
-   * 确保参数被安全转义且路径符合新契约。
+   * 入口参数被安全转义；Entry 列表按 keyset 游标与 limit 请求，缺省游标不写入查询参数。
    */
-  it('queries session threads and entries via /sessions/{id}/{threads|entries}', async () => {
+  it('queries session threads and paged entries via /sessions/{id}/{threads|entries}', async () => {
     const http = createClient()
     const service = createHarnessService(http)
+    const signal = new AbortController().signal
     await service.listSessionThreads('session /1')
     await service.listSessionEntries('session /1')
+    await service.listSessionEntries('session /2', { cursor: 'cursor-1', limit: 25, signal })
 
     expect(http.get).toHaveBeenNthCalledWith(
       1,
@@ -92,6 +94,12 @@ describe('harnessService', () => {
     expect(http.get).toHaveBeenNthCalledWith(
       2,
       '/sessions/session%20%2F1/entries',
+      { params: {}, signal: undefined },
+    )
+    expect(http.get).toHaveBeenNthCalledWith(
+      3,
+      '/sessions/session%20%2F2/entries',
+      { params: { cursor: 'cursor-1', limit: 25 }, signal },
     )
   })
 

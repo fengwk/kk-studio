@@ -31,6 +31,7 @@ import fun.fengwk.kkstudio.harness.api.history.EntryCurrentState;
 import fun.fengwk.kkstudio.harness.api.history.EntryPath;
 import fun.fengwk.kkstudio.harness.api.history.EntryPathMetrics;
 import fun.fengwk.kkstudio.harness.api.history.EntrySlice;
+import fun.fengwk.kkstudio.harness.api.history.SessionEntryPage;
 import fun.fengwk.kkstudio.harness.api.interaction.EnvironmentToolWait;
 import fun.fengwk.kkstudio.harness.api.interaction.PendingEnvironmentWait;
 import fun.fengwk.kkstudio.harness.api.interaction.PendingEnvironmentWaitPage;
@@ -819,6 +820,29 @@ public final class HarnessRuntime {
             throw new HarnessRuntimeNotFoundException("session " + sessionId + " does not exist");
           }
           return tx.entries().loadBySession(sessionId);
+        });
+  }
+
+  /**
+   * 在单个短事务内按存储追加顺序读取一页 Session Entry（含非当前 head 路径上的历史分支）。
+   *
+   * <p>{@code afterEntryId} 可为 null；非 null 时必须属于该 Session。Session 不存在抛 NotFound，游标非法抛 {@link
+   * IllegalArgumentException}。父节点先于子节点写入，因此分页不会让子节点先于父节点出现。
+   */
+  public SessionEntryPage listSessionEntryPage(UUID sessionId, UUID afterEntryId, int limit) {
+    Objects.requireNonNull(sessionId, "sessionId");
+    if (limit <= 0) {
+      throw new IllegalArgumentException("limit must be positive");
+    }
+    int probeSize = limit == Integer.MAX_VALUE ? limit : limit + 1;
+    return store.transaction(
+        tx -> {
+          if (tx.sessions().find(sessionId).isEmpty()) {
+            throw new HarnessRuntimeNotFoundException("session " + sessionId + " does not exist");
+          }
+          List<Entry> rows = tx.entries().loadPageBySession(sessionId, afterEntryId, probeSize);
+          boolean hasMore = rows.size() > limit;
+          return new SessionEntryPage(hasMore ? rows.subList(0, limit) : rows, hasMore);
         });
   }
 

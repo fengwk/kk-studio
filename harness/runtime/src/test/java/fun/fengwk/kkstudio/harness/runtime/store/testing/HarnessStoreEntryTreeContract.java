@@ -638,7 +638,7 @@ public abstract class HarnessStoreEntryTreeContract {
     inTransaction(
         store,
         tx -> {
-          // 同 createdAt 先写入较大 UUID，再写入较小 UUID，证明排序不是插入序。
+          // 同 createdAt 先写入较大 UUID，再写入较小 UUID，证明顺序按追加先后而不是 UUID。
           tx.entries()
               .insert(
                   new Entry(
@@ -661,7 +661,7 @@ public abstract class HarnessStoreEntryTreeContract {
         tx -> {
           List<Entry> entries = tx.entries().loadBySession(baseline.sessionId());
           assertEquals(
-              List.of(baseline.rootEntryId(), laterTurnStartId, sameTimeSmall, sameTimeLarge),
+              List.of(baseline.rootEntryId(), laterTurnStartId, sameTimeLarge, sameTimeSmall),
               entries.stream().map(Entry::id).toList());
           assertThrows(UnsupportedOperationException.class, () -> entries.add(null));
           assertEquals(
@@ -671,6 +671,88 @@ public abstract class HarnessStoreEntryTreeContract {
     assertThrows(
         IllegalArgumentException.class,
         () -> inTransaction(store, tx -> tx.entries().loadBySession(TestIds.id(999))));
+  }
+
+  @Test
+  void loadPageBySessionUsesCreationKeysetAndNeverPutsChildBeforeParent() {
+    Baseline baseline = seedThreadBaseline(store);
+    UUID otherSessionId =
+        store.transaction(
+            tx -> {
+              UUID sessionId = tx.nextId();
+              UUID rootId = tx.nextId();
+              tx.sessions().insert(session(sessionId));
+              tx.entries().insert(rootEntry(rootId, sessionId));
+              return sessionId;
+            });
+    // 父 Entry 的 UUID 大于子 Entry，且两者 createdAt 相同：只有按追加序号读取才能保证父先出现。
+    UUID parentId = new UUID(0x8000000000000000L, 2L);
+    UUID childId = new UUID(0x8000000000000000L, 1L);
+    UUID replyId = new UUID(0x8000000000000000L, 3L);
+    inTransaction(
+        store,
+        tx -> {
+          tx.entries()
+              .insert(turnStartEntry(parentId, baseline.sessionId(), baseline.rootEntryId(), T1));
+          tx.entries()
+              .insert(new Entry(childId, baseline.sessionId(), parentId, userMessagePayload(), T1));
+          tx.entries()
+              .insert(new Entry(replyId, baseline.sessionId(), childId, assistantPayload(), T2));
+        });
+
+    store.transaction(
+        tx -> {
+          List<Entry> first = tx.entries().loadPageBySession(baseline.sessionId(), null, 2);
+          assertEquals(
+              List.of(baseline.rootEntryId(), parentId), first.stream().map(Entry::id).toList());
+          assertThrows(UnsupportedOperationException.class, () -> first.add(null));
+
+          List<Entry> second =
+              tx.entries().loadPageBySession(baseline.sessionId(), first.getLast().id(), 2);
+          assertEquals(List.of(childId, replyId), second.stream().map(Entry::id).toList());
+
+          assertTrue(
+              tx.entries().loadPageBySession(baseline.sessionId(), replyId, 2).isEmpty(),
+              "cursor at the last entry yields an empty page");
+          assertEquals(
+              1,
+              tx.entries().loadPageBySession(baseline.sessionId(), null, 1).size(),
+              "limit caps the page");
+          assertEquals(
+              4,
+              tx.entries().loadPageBySession(baseline.sessionId(), null, 10).size(),
+              "limit larger than the remaining rows returns every row");
+          assertEquals(
+              1,
+              tx.entries().loadPageBySession(otherSessionId, null, 10).size(),
+              "must filter by session");
+          return null;
+        });
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx -> tx.entries().loadPageBySession(baseline.sessionId(), TestIds.id(999), 2)));
+    UUID otherRootId =
+        store.transaction(tx -> tx.entries().findRoot(otherSessionId).orElseThrow().id());
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store, tx -> tx.entries().loadPageBySession(baseline.sessionId(), otherRootId, 2)));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> inTransaction(store, tx -> tx.entries().loadPageBySession(TestIds.id(999), null, 2)));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store, tx -> tx.entries().loadPageBySession(baseline.sessionId(), null, 0)));
+    assertThrows(
+        NullPointerException.class,
+        () -> inTransaction(store, tx -> tx.entries().loadPageBySession(null, null, 2)));
   }
 
   @Test

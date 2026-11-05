@@ -8,6 +8,7 @@ import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.api.history.CustomMessagePayload;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
+import fun.fengwk.kkstudio.harness.api.history.SessionEntryPage;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
@@ -70,10 +71,10 @@ public class HarnessOwnerQueryService {
     return List.copyOf(summaries);
   }
 
-  /** 返回完整 Session Entry tree；Entry DTO 的 wire 编码由 web runtime mapper 负责。 */
-  public List<Entry> listSessionEntries(UUID sessionId) {
+  /** 按存储创建顺序返回一页 Session Entry；Entry DTO 的 wire 编码由 web runtime mapper 负责。 */
+  public SessionEntryPage listSessionEntries(UUID sessionId, UUID afterEntryId, int limit) {
     Objects.requireNonNull(sessionId, "sessionId");
-    return List.copyOf(requireRuntime().getSessionEntries(sessionId));
+    return requireRuntime().listSessionEntryPage(sessionId, afterEntryId, limit);
   }
 
   /**
@@ -215,6 +216,10 @@ public class HarnessOwnerQueryService {
     return null;
   }
 
+  /**
+   * 摘要只读取时间事实与首条 USER 文本，不依赖树的父先于子关系；保留既有 {@code (createdAt, id)} tie-break， 避免改变 Chat
+   * 列表在毫秒同刻消息上的既有预览顺序。
+   */
   private static List<Entry> orderedEntries(List<Entry> entries) {
     Objects.requireNonNull(entries, "entries");
     return entries.stream()
