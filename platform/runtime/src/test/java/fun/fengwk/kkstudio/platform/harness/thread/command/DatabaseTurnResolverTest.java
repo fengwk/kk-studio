@@ -1042,6 +1042,7 @@ class DatabaseTurnResolverTest {
 
     ModelRequestSpec requestSpec = fixture.resolved(fixture.path(settings("custom")));
     assertEquals("custom", requestSpec.variant().id());
+    assertEquals(Fixture.parsedModel().variants(), requestSpec.modelVariants());
     // 所选 catalog variant 的 reasoningEffort 原样生效，不存在运行时 override。
     assertEquals("medium", requestSpec.variant().reasoningEffort());
     // variant 只承载 reasoning effort：输出预算由 model 级 limit.output 决定。
@@ -2747,6 +2748,15 @@ class DatabaseTurnResolverTest {
     assertEquals(
         List.of("custom", "fast"),
         group.members().stream().map(member -> member.variant().id()).toList());
+    // 每个成员连同完整 variants 冻结，切换后使用该成员自己的列表。
+    assertEquals(
+        List.of(new ModelVariant("custom", "medium"), new ModelVariant("deep", "max")),
+        group.members().get(0).modelVariants());
+    assertEquals(
+        List.of(new ModelVariant("fast"), new ModelVariant("careful", "high")),
+        group.members().get(1).modelVariants());
+    assertEquals(
+        group.members().get(1).modelVariants(), resolved.spec().forMember(1).modelVariants());
     assertEquals(Set.of(ModelInputModality.TEXT), resolved.spec().model().inputModalities());
     assertEquals(
         List.of("provider", "second-provider"),
@@ -2827,7 +2837,7 @@ class DatabaseTurnResolverTest {
                 Set.of(ModelInputModality.TEXT, ModelInputModality.IMAGE),
                 true,
                 true,
-                List.of(new ModelVariant("custom", "medium")),
+                List.of(new ModelVariant("custom", "medium"), new ModelVariant("deep", "max")),
                 "custom",
                 pricing()));
     fixture.addModel(
@@ -2839,7 +2849,7 @@ class DatabaseTurnResolverTest {
             secondModalities,
             true,
             true,
-            List.of(new ModelVariant("fast")),
+            List.of(new ModelVariant("fast"), new ModelVariant("careful", "high")),
             "fast",
             pricing()));
     AgentModel group =

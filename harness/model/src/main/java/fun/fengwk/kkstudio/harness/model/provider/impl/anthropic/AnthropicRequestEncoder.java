@@ -49,8 +49,8 @@ import java.util.Set;
  * max_tokens}/{@code stream}/{@code messages}/{@code system}/{@code cache_control}） 冲突显式失败，{@code
  * tools} 保留 native 条目后追加 runtime 工具，其余官方顶层字段无损保留；cache marker 与请求体大小均基于最终合并结果。
  *
- * <p>{@code anthropic-beta} 能力是「配置列表 + 运行时强制能力」的有序并集：配置的 {@code anthropicBetaFeatures} 原样在前，BUDGET
- * 思考实际启用时追加 {@code interleaved-thinking-2025-05-14}，并集为空则不发送该头。
+ * <p>{@code anthropic-beta} 能力是「配置列表 + 运行时强制能力」的有序并集：配置的 {@code anthropicBetaFeatures} 原样在前；实际启用
+ * BUDGET 思考时追加 interleaved thinking，显式 ADAPTIVE effort 时追加消息级 effort 所需的三个 beta。
  *
  * <p>{@code cacheControl} 只表达留存档位：{@code retention != NONE} 时在 tools/system/历史边界写入固定的原生 {@code
  * cache_control} ephemeral 标记，{@code LONG} 额外携带 {@code ttl:"1h"}；会话 {@code key} 不属于 Anthropic
@@ -80,6 +80,9 @@ public final class AnthropicRequestEncoder {
 
   private static final int MAX_CACHE_BREAKPOINTS = 4;
   private static final int MAX_REQUEST_BODY_BYTES = 32 * 1024 * 1024;
+  private static final String PER_TURN_BETA = "per-turn-control-2026-07-01";
+  private static final String MID_CONVERSATION_BETA = "mid-conversation-system-2026-04-07";
+  private static final String EFFORT_BETA = "effort-2025-11-24";
 
   private final AnthropicConfiguration configuration;
 
@@ -118,8 +121,14 @@ public final class AnthropicRequestEncoder {
     boolean requiresInterleavedThinkingBeta =
         applyReasoningParameters(root, request, config, maxTokens);
 
-    // beta 能力并集依赖推理参数结论：配置顺序在前，运行时强制的 interleaved thinking 追加在后
-    List<String> betaFeatures = resolveBetaFeatures(config, requiresInterleavedThinkingBeta);
+    boolean perTurnEffort =
+        config.anthropicThinkingMode() == AnthropicThinkingMode.ADAPTIVE
+            && request.model().reasoning()
+            && request.variant() != null
+            && request.variant().reasoningEffort() != null
+            && !request.variant().reasoningOff();
+    List<String> betaFeatures =
+        resolveBetaFeatures(config, requiresInterleavedThinkingBeta, perTurnEffort);
 
     ArrayNode toolsArray = mergeTools(root, request.tools());
 
@@ -132,6 +141,7 @@ public final class AnthropicRequestEncoder {
 
     // 从左到右构建 wire messages，并记录可用于缓存标记的消息端点
     ArrayNode wireMessagesArray = NODES.arrayNode();
+    List<String> messageEfforts = new ArrayList<>();
     List<ObjectNode> cacheEndpoints = new ArrayList<>();
     ObjectNode lastEligible = null;
     for (ProviderMessage msg : request.messages()) {
@@ -144,6 +154,7 @@ public final class AnthropicRequestEncoder {
         // 使 compaction assistant message 成为首条消息、被摘要历史整体省略。
         if (assistant.resetsHistory()) {
           wireMessagesArray.removeAll();
+          messageEfforts.clear();
           cacheEndpoints.clear();
           lastEligible = null;
         }
@@ -156,6 +167,7 @@ public final class AnthropicRequestEncoder {
         throw new ProviderException(
             ProviderErrorKind.INVALID_REQUEST, "unexpected message role: " + msg.role());
       }
+      messageEfforts.add(msg.reasoningEffort());
       ObjectNode messageEndpoint =
           latestEligibleBlock(wireMessagesArray.get(wireMessagesArray.size() - 1).path("content"));
       if (messageEndpoint != null) {
@@ -166,6 +178,11 @@ public final class AnthropicRequestEncoder {
 
     // 注入 cache marker
     applyCacheMarkers(request.cacheControl(), toolsArray, unmarkedSystemArray, cacheEndpoints);
+    if (perTurnEffort) {
+      wireMessagesArray =
+          applyPerTurnEffort(
+              wireMessagesArray, messageEfforts, request.variant().reasoningEffort());
+    }
 
     if (!toolsArray.isEmpty()) {
       root.set("tools", toolsArray);
@@ -190,17 +207,78 @@ public final class AnthropicRequestEncoder {
     return new AnthropicEncodedRequest(utf8Bytes, betaFeatures);
   }
 
-  /** 求出本条请求实际发送的有序 beta 能力标识：配置列表原样在前，运行时强制的 interleaved thinking 仅在 BUDGET 思考实际启用时追加在后，已配置则不重复。 */
+  /** 配置列表在前，按实际启用的推理模式追加所需 beta，已配置则不重复。 */
   private static List<String> resolveBetaFeatures(
-      AnthropicConfiguration config, boolean requiresInterleavedThinkingBeta) {
-    List<String> configured = config.anthropicBetaFeatures();
-    if (!requiresInterleavedThinkingBeta
-        || configured.contains(AnthropicConfiguration.INTERLEAVED_THINKING_BETA)) {
-      return configured;
+      AnthropicConfiguration config,
+      boolean requiresInterleavedThinkingBeta,
+      boolean perTurnEffort) {
+    List<String> union = new ArrayList<>(config.anthropicBetaFeatures());
+    if (requiresInterleavedThinkingBeta
+        && !union.contains(AnthropicConfiguration.INTERLEAVED_THINKING_BETA)) {
+      union.add(AnthropicConfiguration.INTERLEAVED_THINKING_BETA);
     }
-    List<String> union = new ArrayList<>(configured);
-    union.add(AnthropicConfiguration.INTERLEAVED_THINKING_BETA);
+    if (perTurnEffort) {
+      for (String beta : List.of(MID_CONVERSATION_BETA, PER_TURN_BETA, EFFORT_BETA)) {
+        if (!union.contains(beta)) {
+          union.add(beta);
+        }
+      }
+    }
     return List.copyOf(union);
+  }
+
+  /** 从最终保留的消息反向补齐未知等级，再在连续 user/tool 消息之后声明变化。 */
+  static ArrayNode applyPerTurnEffort(
+      ArrayNode messages, List<String> efforts, String currentEffort) {
+    String[] levels = new String[messages.size()];
+    String carry = currentEffort;
+    for (int i = messages.size() - 1; i >= 0; i--) {
+      String effort = efforts.get(i);
+      if ("assistant".equals(messages.get(i).path("role").asString())
+          && effort != null
+          && !effort.equals("off")
+          && !effort.isBlank()) {
+        carry = effort;
+      }
+      levels[i] = carry;
+    }
+    ArrayNode result = NODES.arrayNode();
+    String declared = null;
+    String pending = null;
+    for (int i = 0; i < messages.size(); i++) {
+      ObjectNode message = (ObjectNode) messages.get(i);
+      String role = message.path("role").asString();
+      if (pending != null && !role.equals("user")) {
+        declared = pending;
+        if (role.equals("system")) {
+          JsonNode existing = message.get("output_config");
+          ObjectNode outputConfig =
+              existing instanceof ObjectNode object ? object : message.putObject("output_config");
+          outputConfig.put("effort", pending);
+          result.add(message);
+          pending = null;
+          continue;
+        }
+        result.add(effortControl(pending));
+        pending = null;
+      }
+      result.add(message);
+      if (role.equals("user")) {
+        pending = Objects.equals(levels[i], declared) ? null : levels[i];
+      }
+    }
+    if (pending != null) {
+      result.add(effortControl(pending));
+    }
+    return result;
+  }
+
+  private static ObjectNode effortControl(String effort) {
+    ObjectNode node = NODES.objectNode();
+    node.put("role", "system");
+    node.putArray("content");
+    node.putObject("output_config").put("effort", effort);
+    return node;
   }
 
   /**

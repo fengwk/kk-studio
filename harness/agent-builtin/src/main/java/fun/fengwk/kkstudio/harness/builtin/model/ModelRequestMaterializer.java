@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.builtin.model;
 
 import fun.fengwk.kkstudio.common.schema.SchemaJsonCodec;
 import fun.fengwk.kkstudio.harness.api.entry.GoalSetting;
+import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.api.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.api.history.AssistantAbortedPayload;
 import fun.fengwk.kkstudio.harness.api.history.CustomMessagePayload;
@@ -20,6 +21,7 @@ import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.builtin.request.ProviderMessageProjector;
+import fun.fengwk.kkstudio.harness.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolDefinition;
@@ -72,7 +74,7 @@ public final class ModelRequestMaterializer {
   private ProviderRequest materializeLive(EntryPath path, ModelRequestSpec spec) {
     List<ProviderToolDefinition> tools = providerTools(spec.toolBindings());
     List<ProviderMessageProjector.ProjectedMessage> projectedMessages = new ArrayList<>();
-    appendHistory(path, projectedMessages);
+    appendHistory(path, spec, projectedMessages);
     return new ProviderRequest(
         spec.model(),
         spec.variant(),
@@ -99,7 +101,9 @@ public final class ModelRequestMaterializer {
    * messages。
    */
   private static void appendHistory(
-      EntryPath path, List<ProviderMessageProjector.ProjectedMessage> projectedMessages) {
+      EntryPath path,
+      ModelRequestSpec spec,
+      List<ProviderMessageProjector.ProjectedMessage> projectedMessages) {
     List<Entry> entries = path.entries();
     int walkStart = 0;
     int compactionResultIndex = -1;
@@ -142,7 +146,8 @@ public final class ModelRequestMaterializer {
 
       if (payload instanceof MessagePayload message) {
         projectedMessages.add(
-            ProviderMessageProjector.ProjectedMessage.of(message.message(), replayState));
+            new ProviderMessageProjector.ProjectedMessage(
+                message.message(), replayState, reasoningEffort(message, spec)));
       } else if (payload instanceof CustomMessagePayload message) {
         projectedMessages.add(ProviderMessageProjector.ProjectedMessage.of(message.message()));
       } else if (payload instanceof NotificationPayload notification) {
@@ -156,6 +161,22 @@ public final class ModelRequestMaterializer {
         projectedMessages.add(ProviderMessageProjector.ProjectedMessage.of(message.message()));
       }
     }
+  }
+
+  private static String reasoningEffort(MessagePayload message, ModelRequestSpec spec) {
+    if (message.assistantMetadata() == null) {
+      return null;
+    }
+    ModelSelection model = message.assistantMetadata().model();
+    if (model == null || !spec.model().modelName().equals(model.modelName())) {
+      return null;
+    }
+    for (ModelVariant variant : spec.modelVariants()) {
+      if (variant.id().equals(model.variant())) {
+        return variant.reasoningEffort();
+      }
+    }
+    return null;
   }
 
   /**

@@ -1,0 +1,6 @@
+{
+  "root_output_config": {"effort": "max"},
+  "messages_output_config_entries": [
+    {"index": 1, "role": "system", "output_config_raw": {"effort": "max"}}
+  ]
+}

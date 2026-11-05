@@ -156,7 +156,8 @@ public final class ProviderResourceMaterializer {
     if (contents.equals(message.contents())) {
       return message;
     }
-    return new ProviderMessage(message.role(), List.copyOf(contents), message.replayState());
+    return new ProviderMessage(
+        message.role(), List.copyOf(contents), message.replayState(), message.reasoningEffort());
   }
 
   private ProviderContentBlock materializePlainBlock(
@@ -246,7 +247,8 @@ public final class ProviderResourceMaterializer {
     if (contents.equals(message.contents())) {
       return message;
     }
-    return new ProviderMessage(message.role(), List.copyOf(contents), message.replayState());
+    return new ProviderMessage(
+        message.role(), List.copyOf(contents), message.replayState(), message.reasoningEffort());
   }
 
   private ProviderContentBlock materializeToolResultBlock(

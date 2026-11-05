@@ -26,15 +26,15 @@
       {"type": "resource", "blobId": "0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01", "name": "scan.png", "totalBytes": null, "totalLines": null, "preview": "tiny preview", "imageTier": null},
       {"type": "thinking", "thinking": "the user asks geography"},
       {"type": "json", "json": "{\n  \"hint\":\"capital\"\n}"}
-    ]},
+    ], "reasoningEffort": null},
     {"role": "ASSISTANT", "contents": [
       {"type": "tool_call", "toolCall": {"id": "call-1", "name": "lookup", "argumentsJson": "{\n  \"q\":\"paris\"\n}"}},
       {"type": "text", "text": "Let me look that up."}
-    ]},
+    ], "reasoningEffort": null},
     {"role": "TOOL", "contents": [
       {"type": "tool_result", "toolCallId": "call-1", "toolName": "lookup", "contents": [{"type": "text", "text": "Paris"}], "error": false, "detailsJson": "{\n  \"lat\":48.85\n}"}
-    ]},
-    {"role": "ASSISTANT", "contents": [{"type": "text", "text": "The capital of France is Paris."}]}
+    ], "reasoningEffort": null},
+    {"role": "ASSISTANT", "contents": [{"type": "text", "text": "The capital of France is Paris."}], "reasoningEffort": null}
   ],
   "tools": [
     {
