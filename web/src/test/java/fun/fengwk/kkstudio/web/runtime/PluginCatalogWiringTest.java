@@ -90,7 +90,8 @@ class PluginCatalogWiringTest {
         assertTrue(catalog.descriptors().isEmpty());
         assertTrue(catalog.tools().isEmpty());
         assertTrue(catalog.selectableTools().isEmpty());
-        assertTrue(catalog.customEntryTypes().isEmpty());
+        assertTrue(
+            catalog.findCustomEntryType(new ContributorId("first"), "custom.first").isEmpty());
       }
     }
   }

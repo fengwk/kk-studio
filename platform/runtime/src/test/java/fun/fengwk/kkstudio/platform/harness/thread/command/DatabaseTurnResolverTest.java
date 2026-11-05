@@ -703,7 +703,6 @@ class DatabaseTurnResolverTest {
 
     fixture.publishEnvironment(ENV_A);
     when(fixture.environmentRegistry.find(ENV_A)).thenReturn(Optional.empty());
-    when(fixture.environmentRegistry.hasReadyLease(ENV_A)).thenReturn(false);
 
     EntryPath path = fixture.path(settings("default"));
     LiveTurnPlan.Planned planned = fixture.planned(path);
@@ -3560,7 +3559,6 @@ class DatabaseTurnResolverTest {
               NOW,
               NOW.plusSeconds(60));
       when(environmentRegistry.find(environmentId)).thenReturn(Optional.of(env));
-      when(environmentRegistry.hasReadyLease(environmentId)).thenReturn(false);
     }
 
     /** CONNECTING 但保留最近一次 READY 宿主 metadata：证明断线后环境块仍按保留事实渲染。 */
@@ -3586,7 +3584,6 @@ class DatabaseTurnResolverTest {
               NOW,
               NOW.plusSeconds(60));
       when(environmentRegistry.find(environmentId)).thenReturn(Optional.of(env));
-      when(environmentRegistry.hasReadyLease(environmentId)).thenReturn(false);
     }
 
     private void readyEnvironment(EnvironmentId environmentId) {
@@ -3645,7 +3642,6 @@ class DatabaseTurnResolverTest {
               NOW,
               NOW.plusSeconds(60));
       when(environmentRegistry.find(environmentId)).thenReturn(Optional.of(env));
-      when(environmentRegistry.hasReadyLease(environmentId)).thenReturn(true);
     }
 
     private void readyEnvironmentWithSkills(EnvironmentId environmentId, List<SkillName> skills) {
@@ -3680,7 +3676,6 @@ class DatabaseTurnResolverTest {
     private void staleEnvironment(
         EnvironmentId environmentId, DaemonEnvironmentInfo environmentInfo) {
       readyEnvironmentWithSkills(environmentId, environmentInfo, NOW.minus(Duration.ofSeconds(61)));
-      when(environmentRegistry.hasReadyLease(environmentId)).thenReturn(false);
     }
 
     private void readyEnvironmentWithSkills(
@@ -3697,7 +3692,6 @@ class DatabaseTurnResolverTest {
               lastSeenAt,
               lastSeenAt.plusSeconds(60));
       when(environmentRegistry.find(environmentId)).thenReturn(Optional.of(env));
-      when(environmentRegistry.hasReadyLease(environmentId)).thenReturn(true);
     }
 
     /** 只发布名称的全局目录条目，描述固定为 {@code <name> description}。 */

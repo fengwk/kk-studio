@@ -551,12 +551,6 @@ class ToolInvocationTransitionTest {
     assertEquals(0, request.attempt());
     assertNull(request.approval());
 
-    ToolInvocation activated = request.activateRequest(T1);
-    assertEquals(ToolInvocationStatus.READY, activated.status());
-    assertEquals(0, activated.attempt());
-    assertNull(activated.approval());
-    assertEquals(T1, activated.updatedAt());
-
     ToolInvocation failed = request.fail(error(), T1);
     assertEquals(ToolInvocationStatus.FAILED, failed.status());
     assertEquals(error(), failed.error());
@@ -564,7 +558,6 @@ class ToolInvocationTransitionTest {
     ToolInvocation cancelled = request.cancel(error(), T1);
     assertEquals(ToolInvocationStatus.CANCELLED, cancelled.status());
 
-    assertThrows(IllegalArgumentException.class, () -> ready(0, null).activateRequest(T1));
     assertThrows(
         IllegalArgumentException.class,
         () ->

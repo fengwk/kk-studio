@@ -433,18 +433,6 @@ public record ToolInvocation(
   }
 
   /**
-   * WAITING_REQUEST -&gt; READY：原生 Agent 适配器已按业务调用身份与冻结参数确认声明。该转换不经过审批，也不消耗 attempt；后续执行仍由公共
-   * ToolProcessor 接管。
-   */
-  public ToolInvocation activateRequest(Instant now) {
-    if (status != ToolInvocationStatus.WAITING_REQUEST) {
-      throw new IllegalArgumentException("activateRequest requires WAITING_REQUEST status");
-    }
-    return withState(
-        ToolInvocationStatus.READY, attempt, null, null, ToolEffectBatch.EMPTY, null, now);
-  }
-
-  /**
    * READY -&gt; RUNNING：本地 admission 已通过，副作用之前持久化执行意图；要求预检 approval 已完成（非 null 且为 not-required 或
    * ALLOWED）；attempt 恰好 +1。
    */

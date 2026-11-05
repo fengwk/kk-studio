@@ -21,7 +21,7 @@ Join                         一次子执行委派的票据，只记凭据与冻
 
 ## 同步入口与事务边界
 
-[`HarnessRuntime`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/HarnessRuntime.java) 是外部与内核交互的唯一同步入口，覆盖命令接受与 spawn、Stop、审批与人工输入、YOLO 与重命名、手工压缩，以及快照、执行树与 Join 查询。
+[`HarnessRuntime`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/HarnessRuntime.java) 是外部与内核交互的同步命令与控制入口，覆盖命令接受与 spawn、Stop、审批与人工输入、YOLO 与重命名、手工压缩，以及快照、执行树与 Join 查询。
 
 同一个门面还承担只读规划事实，调用方无需接触实现类：`previewInputCandidatePath` 用正式规划装配尚未落库命令 batch 的 candidate 路径，`findCompactionTurnStart` 按结果 Entry 返回已关闭压缩 turn 冻结的元数据（缺失即 fail closed）。两者都是纯委托，不写 durable 状态，也不复制算法。请求输入 token 估算不经过门面：算法作为 [`runtime.compaction.TokenEstimator`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/compaction/TokenEstimator.java) 留在实现层，内核外部只经 [`spi.compaction.RequestTokenEstimator`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/compaction/RequestTokenEstimator.java) 端口消费，端口实现由组合根以方法引用绑定，因此既没有第二份口径，也不需要任何 Runtime bean 参与装配。
 
@@ -105,14 +105,14 @@ tree 锁只用于结构或跨 Thread 的写操作（spawn、Stop、删除、fork
 [`ToolInvocation`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/tool/ToolInvocation.java) 记录冻结的 `ToolCall`、[`ToolBinding`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/tool/ToolBinding.java)、所属 Assistant 与 `callIndex`、审批记录、结果与副作用批次：
 
 ```text
-WAITING_REQUEST  -> READY（activateRequest 激活）/ FAILED / CANCELLED
+WAITING_REQUEST  -> READY / FAILED / CANCELLED
 READY            -> WAITING_INPUT（ask_user）/ WAITING_APPROVAL（Ask）/ RUNNING（Allow 且准入通过）/ FAILED / CANCELLED
 WAITING_APPROVAL -> READY（Allowed）/ FAILED（Denied）/ CANCELLED
 WAITING_INPUT    -> SUCCEEDED（已作答或明确拒答）/ CANCELLED
 RUNNING          -> SUCCEEDED / FAILED / CANCELLED / UNKNOWN / READY（重试）
 ```
 
-`attempt` 同样在副作用之前持久化；RUNNING 工具的旧租约恢复绝不重放，只在能够重新挂接在途远端调用时继续等待结果，否则收敛为 `UNKNOWN`（见下文）。`WAITING_INPUT` 与 `WAITING_APPROVAL` 刻意分离：问卷不能授权工具，审批也不能代替回答，两者都只占 durable 行，不占 Worker。面向进程外 Agent Driver 的工具桥接通过 [`AssistantHistoryAppender`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/driver/AssistantHistoryAppender.java) 原子追加携带 `ToolCall` 的 ASSISTANT 消息与对应的 `ToolSlot` 槽位（状态限定为 `WAITING_REQUEST`、`READY` 或 immediate `FAILED`）。处于 `WAITING_REQUEST` 的工具调用冻结 binding 等待外部激活，通过 `activateRequest` 转为 `READY` 并触发调度；若在激活前收到停止或失败信号，可直接转为 `CANCELLED` 或 `FAILED`。`ToolBinding` 冻结工具定义、Contributor 归属、环境支持级别与 Environment id/name；无环境选择的 `REQUIRED` 工具在规划时已被过滤，网关对已移除或定义已变化的 binding 返回确定性失败。执行端不写 Store：[`ToolEffectBatch`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/tool/ToolEffectBatch.java) 只在成功时携带至多 16 条 CUSTOM 副作用，由 ThreadProcessor 在同一事务把结果与副作用物化为 Entry 并删除临时行；真实工具的所有终态都把原 binding 写入结果元数据，删除临时行或 fork 不会丢失原定义。
+`attempt` 同样在副作用之前持久化；RUNNING 工具的旧租约恢复绝不重放，只在能够重新挂接在途远端调用时继续等待结果，否则收敛为 `UNKNOWN`（见下文）。`WAITING_INPUT` 与 `WAITING_APPROVAL` 刻意分离：问卷不能授权工具，审批也不能代替回答，两者都只占 durable 行，不占 Worker。处于 `WAITING_REQUEST` 的工具调用冻结 binding，当前没有公开的 READY 激活入口；收到停止或失败信号时可直接转为 `CANCELLED` 或 `FAILED`。`ToolBinding` 冻结工具定义、Contributor 归属、环境支持级别与 Environment id/name；无环境选择的 `REQUIRED` 工具在规划时已被过滤，网关对已移除或定义已变化的 binding 返回确定性失败。执行端不写 Store：[`ToolEffectBatch`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/tool/ToolEffectBatch.java) 只在成功时携带至多 16 条 CUSTOM 副作用，由 ThreadProcessor 在同一事务把结果与副作用物化为 Entry 并删除临时行；真实工具的所有终态都把原 binding 写入结果元数据，删除临时行或 fork 不会丢失原定义。
 
 [`ToolOutcomeQuery`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/ToolOutcomeQuery.java) 按 Thread 和 invocation 身份查询稳定终态：调用行仍在时读取 terminal Invocation，物化后从当前路径的 ToolResult Entry 读取，并校验所属 Thread 与 Turn。返回的 [`ToolOutcomeView`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/ToolOutcomeView.java) 保留调用身份、终态与稳定内容；`resultError` 是模型可见的业务错误标志，与生命周期 `status` 正交，执行 `SUCCEEDED` 也可能携带业务错误。
 
@@ -242,7 +242,6 @@ Driver 的 Work 处理器在事务外认领并执行，可复用 [`ClaimedExecut
 
 ### 进程外 Driver 的公共构件
 
-- **工具桥**：外部 Agent 声明工具调用时，Driver 经 [`AssistantHistoryAppender`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/driver/AssistantHistoryAppender.java) 原子写入 Assistant 消息与工具槽位（`WAITING_REQUEST`、`READY` 或直接 `FAILED`）并推进 head。外部 Agent 真正发起某个调用时，Driver 用 `ToolInvocation.activateRequest` 把该槽位改为 `READY`（attempt 不变），此后由 ToolProcessor 照常审批与执行；结果经 [`ToolOutcomeQuery`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/ToolOutcomeQuery.java) 读取。Stop 会取消仍处于 `WAITING_REQUEST` 的槽位。
 - **`NATIVE_COMPACTION`**：Driver 报告的原生上下文压缩审计记录，对路径透明：不消费输入、不开关回合、不改写历史。
 - **`TurnEndReason.EXECUTION_FAILED`**：完整的公开结果已经提交之后外部执行才失败时，以该原因关闭回合，保留已提交的结果，不再追加 AssistantError。
 

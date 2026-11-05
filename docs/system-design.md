@@ -135,9 +135,9 @@ LangChain4j 约束。各模块的契约与实现细节见[文档导航](README.m
 `spi.store` 只供引擎消费、平台的引擎存储适配包实现、`web` 装配；平台业务服务、产品与插件只使用其余公开面与
 `contributor.api`、`tool`，不绕过引擎读写引擎状态。
 
-`HarnessRuntime` 是唯一的同步命令、控制与查询入口：接受命令与 spawn，停止与放弃执行，提交工具输入与审批决定，
+`HarnessRuntime` 是同步命令与控制入口：接受命令与 spawn，停止与放弃执行，提交工具输入与审批决定，
 设置 YOLO，重命名 Thread 与 Session，手动压缩，读取 Session、Thread 快照、执行树、历史与命令回执，列出待处理
-交互、环境等待候选与可执行环境，读取 Join 与工具结果。
+交互、环境等待候选与可执行环境，读取 Join。工具终态结果由 `ToolOutcomeQuery` 查询。
 
 删除会话是 `deleteSessions(sessionIds, deleteRelations, releaseRefs)`：调用方必须持有产品 owner 锁，两个回调
 与删除加入同一物理事务，线程树、命令、调用、Join、执行退出与产品关系一起收敛。
