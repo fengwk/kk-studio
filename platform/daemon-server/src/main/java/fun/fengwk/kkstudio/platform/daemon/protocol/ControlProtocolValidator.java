@@ -136,23 +136,6 @@ public final class ControlProtocolValidator {
 
   private ControlProtocolValidator() {}
 
-  /** 校验 426 升级拒绝载荷。它不是控制流 envelope。 */
-  public static UpgradeRequired validateUpgrade(UpgradeRequired upgrade) {
-    if (upgrade == null) {
-      throw new ControlProtocolException("upgradeRequired must not be null");
-    }
-    requireNoUnknown(upgrade, "upgradeRequired");
-    if (!upgrade.hasTargetVersion()) {
-      throw new ControlProtocolException("upgradeRequired.targetVersion is required");
-    }
-    try {
-      DaemonCapabilities.validateDaemonVersion(upgrade.getTargetVersion());
-    } catch (IllegalArgumentException error) {
-      throw new ControlProtocolException("upgradeRequired.targetVersion is invalid", error);
-    }
-    return upgrade;
-  }
-
   /** 校验 envelope 的类型、scope、payload 一致性与全部业务必填/限额。 */
   public static Envelope validate(Envelope envelope) {
     if (envelope == null) {

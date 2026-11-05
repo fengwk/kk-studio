@@ -84,7 +84,7 @@ public class ProjectDtoMapper {
     return new ProjectWorkflow(states);
   }
 
-  public ProjectWorkflowDTO toWorkflowDto(ProjectWorkflow workflow) {
+  ProjectWorkflowDTO toWorkflowDto(ProjectWorkflow workflow) {
     if (workflow == null) {
       return null;
     }

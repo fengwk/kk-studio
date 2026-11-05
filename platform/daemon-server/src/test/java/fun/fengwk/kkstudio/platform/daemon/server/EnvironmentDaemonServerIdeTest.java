@@ -268,7 +268,7 @@ class EnvironmentDaemonServerIdeTest {
         channel,
         EnvironmentDaemonServerTestSupport.heartbeatEnvelope(
             2L,
-            DaemonRuntimeStatus.running(EnvironmentDaemonServerTestSupport.DAEMON_VERSION),
+            new DaemonRuntimeStatus(EnvironmentDaemonServerTestSupport.DAEMON_VERSION, null),
             7L));
 
     assertEquals(
@@ -285,7 +285,7 @@ class EnvironmentDaemonServerIdeTest {
         channel,
         EnvironmentDaemonServerTestSupport.heartbeatEnvelope(
             3L,
-            DaemonRuntimeStatus.running(EnvironmentDaemonServerTestSupport.DAEMON_VERSION),
+            new DaemonRuntimeStatus(EnvironmentDaemonServerTestSupport.DAEMON_VERSION, null),
             8L));
 
     assertEquals(1, fixture.heartbeatNotifications.size());

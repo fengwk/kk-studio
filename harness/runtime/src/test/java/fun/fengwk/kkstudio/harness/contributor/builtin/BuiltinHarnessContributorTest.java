@@ -124,7 +124,7 @@ class BuiltinHarnessContributorTest {
     // Descriptors
     assertEquals(1, catalog.descriptors().size());
     assertEquals(contributor.descriptor(), catalog.descriptors().get(0));
-    assertTrue(catalog.findDescriptor(new ContributorId("builtin")).isPresent());
+    assertEquals(new ContributorId("builtin"), catalog.descriptors().get(0).id());
 
     // Tools inventory: exactly 13 tools（Goal 正文由用户维护，没有 create_goal；含 1 个人工输入工具）
     List<ToolContribution> tools = catalog.tools();
@@ -366,7 +366,7 @@ class BuiltinHarnessContributorTest {
     assertEquals(sideEffect, descriptor.sideEffect());
     assertEquals(defaultTimeout, descriptor.defaultTimeout());
     assertFalse(descriptor.description().isBlank());
-    if (EnvironmentCapabilityCatalog.requiresWorkdir(capabilityId)) {
+    if (capability.inputSchema().required().contains("workdir")) {
       // 模型提示词必须与 schema 的必填绝对 workdir 契约一致，避免生成必然被服务端拒绝的相对或缺省目录调用。
       assertTrue(descriptor.description().contains("Every call must include `workdir`"));
       assertTrue(descriptor.description().contains("expanded absolute directory"));

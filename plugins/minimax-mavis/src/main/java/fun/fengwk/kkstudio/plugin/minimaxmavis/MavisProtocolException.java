@@ -6,8 +6,4 @@ public class MavisProtocolException extends MavisException {
   public MavisProtocolException(String message) {
     super(message);
   }
-
-  public MavisProtocolException(String message, Throwable cause) {
-    super(message, cause);
-  }
 }

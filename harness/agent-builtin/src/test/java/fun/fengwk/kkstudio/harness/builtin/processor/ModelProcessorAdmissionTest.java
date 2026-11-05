@@ -461,7 +461,8 @@ class ModelProcessorAdmissionTest extends ModelProcessorTestSupport {
           tx.commands().insert(List.of(source));
           tx.commands().update(List.of(source.markApplied(turnStartEntryId)));
           child = tx.threads().lock(child.id()).orElseThrow();
-          tx.threads().update(child.advanceInputThroughSequence(1L, NOW));
+          tx.threads()
+              .update(child.advanceHeadAndInputThroughSequence(child.headEntryId(), 1L, NOW));
           tx.joins()
               .insert(
                   new ThreadJoin(

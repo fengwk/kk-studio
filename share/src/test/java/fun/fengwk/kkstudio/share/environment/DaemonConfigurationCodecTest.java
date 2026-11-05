@@ -109,10 +109,11 @@ class DaemonConfigurationCodecTest {
                 "{\"studioUrl\":\"http://host\",\"note\":null,\"bashExecutable\":null,\"lsp\":null}"));
     assertNull(config.getNote());
     assertNull(config.getLsp());
-    var lsp =
-        DaemonConfigurationCodec.parseLsp(
+    DaemonConfiguration configWithLsp =
+        DaemonConfigurationCodec.parse(
             MAPPER.readTree(
-                "{\"servers\":{\"java\":{\"command\":[\"jdtls\"],\"extensions\":[\".java\"]}}}"));
+                "{\"studioUrl\":\"http://host\",\"lsp\":{\"servers\":{\"java\":{\"command\":[\"jdtls\"],\"extensions\":[\".java\"]}}}}"));
+    var lsp = configWithLsp.getLsp();
     assertEquals(List.of(), lsp.getServers().get("java").getRootMarkers());
     assertEquals(List.of(), lsp.getServers().get("java").getFirstMatchMarkers());
     assertThrows(IllegalArgumentException.class, () -> DaemonConfigurationCodec.validate(null));
@@ -201,8 +202,8 @@ class DaemonConfigurationCodecTest {
         "{\"servers\":{\"java\":{\"command\":[\"jdtls\"],\"extensions\":[\".java\"],\"requestTimeoutMs\":1}}}"
       })
   void rejectsInvalidServers(String json) throws Exception {
-    var node = MAPPER.readTree(json);
-    assertThrows(IllegalArgumentException.class, () -> DaemonConfigurationCodec.parseLsp(node));
+    var node = MAPPER.readTree("{\"studioUrl\":\"http://host\",\"lsp\":" + json + "}");
+    assertThrows(IllegalArgumentException.class, () -> DaemonConfigurationCodec.parse(node));
   }
 
   @Test

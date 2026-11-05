@@ -47,10 +47,6 @@ public class OpenCliHubException extends RuntimeException {
     this(DEFAULT_KIND, message, null);
   }
 
-  public OpenCliHubException(String message, Throwable cause) {
-    this(DEFAULT_KIND, message, cause);
-  }
-
   public OpenCliHubException(Kind kind, String message) {
     this(kind, message, null);
   }

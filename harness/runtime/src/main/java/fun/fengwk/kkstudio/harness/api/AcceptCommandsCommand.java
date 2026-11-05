@@ -47,9 +47,4 @@ public record AcceptCommandsCommand(AcceptCommandsTarget target, List<NewThreadC
     return commands.size() == 1
         && commands.getFirst().payload() instanceof UserMessageCommandPayload;
   }
-
-  /** 该批次是否必须携带精确 head / next-sequence cursor。 */
-  public boolean requiresThreadCursor() {
-    return !isPureUserMessageBatch(commands);
-  }
 }

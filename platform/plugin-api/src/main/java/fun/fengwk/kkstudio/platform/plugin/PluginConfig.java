@@ -29,11 +29,6 @@ public record PluginConfig(long revision, String valuesJson) {
     requireObjectNode(valuesJson, "valuesJson");
   }
 
-  /** 该 Plugin schema 的初始默认配置：revision=0，values 为 schema 声明的默认值。 */
-  public static PluginConfig initial(PluginConfigSchema schema) {
-    return new PluginConfig(0, schema.defaultsJson());
-  }
-
   /**
    * 非空且 UTF-8 不超过 64 KiB 的文本门禁。
    *

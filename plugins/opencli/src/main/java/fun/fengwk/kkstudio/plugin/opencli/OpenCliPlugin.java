@@ -64,7 +64,7 @@ public final class OpenCliPlugin implements StudioPlugin {
 
   private final ObjectMapper mapper;
 
-  public OpenCliPlugin() {
+  OpenCliPlugin() {
     this(JsonMapper.builder().build());
   }
 

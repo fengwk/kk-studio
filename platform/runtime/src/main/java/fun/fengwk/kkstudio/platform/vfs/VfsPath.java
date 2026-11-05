@@ -328,10 +328,6 @@ public final class VfsPath {
     return trailingSlash;
   }
 
-  public boolean isReadOnly() {
-    return kind != Kind.SESSION_FILE;
-  }
-
   public boolean isUnderSkillsRoot() {
     return kind == Kind.SKILLS
         || kind == Kind.SKILLS_PACKAGE

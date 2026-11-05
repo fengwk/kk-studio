@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.platform.environment.registry;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
@@ -47,24 +46,24 @@ class EnvironmentStateCodecTest {
   @Test
   void emptyArraysRoundTrip() {
     assertEquals(List.of(), codec.decodeSkillState(codec.encodeSkillState(List.of())));
-    assertEquals(List.of(), codec.decodeEvents(codec.encodeEvents(List.of())));
+    assertEquals(List.of(), codec.decodeEvents("[]"));
   }
 
-  /** 测试意图：事件往返保留时间、级别、类型与去敏消息。 */
+  /** 测试意图：单条事件编码结果可在事件数组中正确解码，并保留时间、级别、类型与去敏消息。 */
   @Test
   void eventsRoundTrip() {
-    List<EnvironmentEvent> events =
-        List.of(
-            new EnvironmentEvent(
-                NOW, EnvironmentEvent.LEVEL_INFO, EnvironmentEvent.TYPE_CONNECTING, "accepted"),
-            new EnvironmentEvent(
-                NOW.plusSeconds(1),
-                EnvironmentEvent.LEVEL_WARN,
-                EnvironmentEvent.TYPE_DISCONNECTED,
-                "daemon connection lost"));
+    EnvironmentEvent event1 =
+        new EnvironmentEvent(
+            NOW, EnvironmentEvent.LEVEL_INFO, EnvironmentEvent.TYPE_CONNECTING, "accepted");
+    EnvironmentEvent event2 =
+        new EnvironmentEvent(
+            NOW.plusSeconds(1),
+            EnvironmentEvent.LEVEL_WARN,
+            EnvironmentEvent.TYPE_DISCONNECTED,
+            "daemon connection lost");
+    String json = "[" + codec.encodeEvent(event1) + "," + codec.encodeEvent(event2) + "]";
 
-    assertEquals(events, codec.decodeEvents(codec.encodeEvents(events)));
-    assertTrue(codec.decodeEvents(codec.encodeEvents(events)).get(1).isAlert());
+    assertEquals(List.of(event1, event2), codec.decodeEvents(json));
   }
 
   /** 测试意图：未知字段、错误类型、非法取值与非数组内容一律 fail-closed。 */

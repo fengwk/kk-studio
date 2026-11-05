@@ -66,11 +66,7 @@ public final class ComfyuiPlugin implements StudioPlugin {
   private final ObjectMapper mapper;
 
   public ComfyuiPlugin() {
-    this(JsonMapper.builder().build());
-  }
-
-  public ComfyuiPlugin(ObjectMapper mapper) {
-    this.mapper = Objects.requireNonNull(mapper, "mapper");
+    this.mapper = JsonMapper.builder().build();
   }
 
   @Override

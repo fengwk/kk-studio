@@ -52,7 +52,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.math.BigDecimal;
-import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -121,10 +120,6 @@ class OpenCliCanvasFunctionAdaptersTest {
     SeedanceCanvasFunctionAdapter twoArgSeedance =
         new SeedanceCanvasFunctionAdapter(OpenCliTestSettings.defaults(), client);
     assertFalse(twoArgSeedance.enabled());
-    SeedanceCanvasFunctionAdapter fourArgSeedance =
-        new SeedanceCanvasFunctionAdapter(
-            OpenCliTestSettings.defaults(), client, MAPPER, Clock.systemUTC());
-    assertFalse(fourArgSeedance.enabled());
   }
 
   @Test

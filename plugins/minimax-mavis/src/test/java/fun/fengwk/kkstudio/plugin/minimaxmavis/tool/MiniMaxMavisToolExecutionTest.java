@@ -122,7 +122,7 @@ class MiniMaxMavisToolExecutionTest {
             new MiniMaxMavisHarnessContributor.ToolDependencies(
                 credentialAccess, client, cache, access, executor));
 
-    assertEquals(15, freshContributor.toolCount());
+    assertEquals(15, freshContributor.tools().size());
     assertTrue(
         freshTransport.requests().isEmpty(),
         "Plugin and tool initialization must not make any network transport calls");

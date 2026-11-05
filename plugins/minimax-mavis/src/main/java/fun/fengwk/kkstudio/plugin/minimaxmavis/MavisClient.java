@@ -55,8 +55,7 @@ public final class MavisClient {
     this(transport, Clock.systemDefaultZone(), MavisDesktopEnvironment.session());
   }
 
-  public MavisClient(
-      MavisHttpTransport transport, Clock clock, MavisDesktopEnvironment environment) {
+  MavisClient(MavisHttpTransport transport, Clock clock, MavisDesktopEnvironment environment) {
     this.transport = Objects.requireNonNull(transport, "transport");
     this.clock = Objects.requireNonNull(clock, "clock");
     this.environment = Objects.requireNonNull(environment, "environment");

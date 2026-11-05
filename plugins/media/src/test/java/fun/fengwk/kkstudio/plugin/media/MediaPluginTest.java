@@ -70,7 +70,7 @@ class MediaPluginTest {
   @Test
   void defaultConfigurationProducesEnabledInstance() {
     PluginInstance instance =
-        plugin.configure(PluginConfig.initial(plugin.configurationSchema()), CONTEXT);
+        plugin.configure(new PluginConfig(0, plugin.configurationSchema().defaultsJson()), CONTEXT);
     assertEquals(1, instance.contributions(CanvasFunctionAdapter.class).size(), "默认必须启用并贡献函数");
     instance.close();
   }

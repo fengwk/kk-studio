@@ -307,7 +307,8 @@ class ThreadLifecycleCoordinatorJoinTest {
         tx -> {
           tx.threads().lock(childId);
           ThreadState child = tx.threads().find(childId).orElseThrow();
-          tx.threads().update(child.advanceInputThroughSequence(2L, T1));
+          tx.threads()
+              .update(child.advanceHeadAndInputThroughSequence(child.headEntryId(), 2L, T1));
           return null;
         });
     matchTerminal(false);

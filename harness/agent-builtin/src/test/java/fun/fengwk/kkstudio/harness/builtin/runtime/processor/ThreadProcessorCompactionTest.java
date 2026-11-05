@@ -2144,8 +2144,23 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
           ThreadState thread = tx.threads().lock(threadId).orElseThrow();
           tx.threads()
               .update(
-                  thread.changeExecutionControl(
-                      ThreadExecutionControl.STOPPED, thread.updatedAt()));
+                  new ThreadState(
+                      thread.id(),
+                      thread.sessionId(),
+                      thread.parentThreadId(),
+                      thread.headEntryId(),
+                      thread.creationRequestHash(),
+                      thread.name(),
+                      thread.rootThreadId(),
+                      thread.yoloEnabled(),
+                      thread.spawnTrigger(),
+                      thread.constraints(),
+                      ThreadExecutionControl.STOPPED,
+                      thread.inputThroughSequence(),
+                      thread.nextCommandSequence(),
+                      thread.version() + 1,
+                      thread.createdAt(),
+                      thread.updatedAt()));
           return null;
         });
   }

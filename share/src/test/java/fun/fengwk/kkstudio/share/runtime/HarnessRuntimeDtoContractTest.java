@@ -104,7 +104,6 @@ class HarnessRuntimeDtoContractTest {
     target.setThreadName("branch");
     target.setYoloEnabled(false);
 
-    assertTrue(target.hasSessionIdField());
     assertTrue(target.hasThreadNameField());
     assertNull(target.getSessionId());
     assertEquals("NEW_THREAD", target.getType());

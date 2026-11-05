@@ -10,9 +10,6 @@ import fun.fengwk.kkstudio.common.work.WorkState;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -375,24 +372,6 @@ public final class DurableWorkStore {
   /** 无条件删除 target 的 mailbox 行；返回是否实际删除。 */
   public boolean delete(UUID targetId) {
     return jdbc.update(DELETE_WORK, targetType, Objects.requireNonNull(targetId, "targetId")) == 1;
-  }
-
-  /** 批量删除 target 的 mailbox 行；返回实际删除数。 */
-  public int deleteAll(Collection<UUID> targetIds) {
-    Objects.requireNonNull(targetIds, "targetIds");
-    if (targetIds.isEmpty()) {
-      return 0;
-    }
-    List<UUID> ids = List.copyOf(targetIds);
-    String placeholders = String.join(", ", Collections.nCopies(ids.size(), "?"));
-    Object[] arguments = new Object[ids.size() + 1];
-    arguments[0] = targetType;
-    for (int index = 0; index < ids.size(); index++) {
-      arguments[index + 1] = ids.get(index);
-    }
-    return jdbc.update(
-        "delete from durable_work where target_type = ? and target_id in (" + placeholders + ")",
-        arguments);
   }
 
   private Row lockRow(UUID targetId) {

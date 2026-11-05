@@ -201,12 +201,6 @@ public final class IdeBrowserSessionRegistry implements IdeViewAuthorizationList
     }
   }
 
-  public int size() {
-    synchronized (lock) {
-      return sessions.size();
-    }
-  }
-
   private void removeSessionsForView(
       EnvironmentId environmentId, String viewId, long keepBindingEpoch) {
     sessions

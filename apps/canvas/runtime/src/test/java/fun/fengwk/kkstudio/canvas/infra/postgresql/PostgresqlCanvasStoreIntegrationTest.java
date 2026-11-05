@@ -37,8 +37,6 @@ class PostgresqlCanvasStoreIntegrationTest extends PostgresCanvasInfraTestSuppor
     UUID canvasId = UUID.randomUUID();
     assertTrue(canvasStore.findDocument(canvasId).isEmpty());
     assertTrue(canvasStore.lockDocument(canvasId).isEmpty());
-    assertTrue(canvasStore.lockDocumentForKeyShare(canvasId).isEmpty());
-    assertFalse(canvasStore.deleteDocument(canvasId));
 
     CanvasDocument created = canvasStore.addDocument(canvasId, "canvas");
     assertEquals(0L, created.revision());
@@ -46,17 +44,11 @@ class PostgresqlCanvasStoreIntegrationTest extends PostgresCanvasInfraTestSuppor
     assertEquals(List.of(created), canvasStore.listDocuments());
     assertEquals(
         created, transactions.execute(status -> canvasStore.lockDocument(canvasId).orElseThrow()));
-    assertEquals(
-        created,
-        transactions.execute(
-            status -> canvasStore.lockDocumentForKeyShare(canvasId).orElseThrow()));
 
     assertFalse(canvasStore.advanceRevision(canvasId, 1L, 2L));
     assertTrue(canvasStore.advanceRevision(canvasId, 0L, 1L));
     assertFalse(canvasStore.advanceRevision(canvasId, 0L, 2L));
     assertEquals(1L, canvasStore.findDocument(canvasId).orElseThrow().revision());
-    assertTrue(canvasStore.deleteDocument(canvasId));
-    assertTrue(canvasStore.findDocument(canvasId).isEmpty());
   }
 
   /** FOR UPDATE 必须真实持有行锁：另一连接的 CAS 在 PostgreSQL {@code lock_timeout} 下被确定性拒绝，而不是由进程内 mock 模拟。 */
@@ -148,14 +140,12 @@ class PostgresqlCanvasStoreIntegrationTest extends PostgresCanvasInfraTestSuppor
         new CanvasGroup(groupId, canvasId, "group", new CanvasTransform(0, 0, 10, 10));
     canvasStore.addGroup(group);
 
-    assertEquals(group, canvasStore.findGroup(canvasId, groupId).orElseThrow());
     assertEquals(List.of(group), canvasStore.listGroups(canvasId));
-    assertTrue(canvasStore.findGroup(UUID.randomUUID(), groupId).isEmpty());
 
     CanvasGroup renamed =
         new CanvasGroup(groupId, canvasId, "renamed", new CanvasTransform(5, 5, 20, 20));
     assertTrue(canvasStore.updateGroup(renamed));
-    assertEquals(renamed, canvasStore.findGroup(canvasId, groupId).orElseThrow());
+    assertEquals(List.of(renamed), canvasStore.listGroups(canvasId));
 
     assertTrue(canvasStore.updateNode(node.record(groupId, null)));
     assertEquals(groupId, canvasStore.findNode(canvasId, node.nodeId).orElseThrow().groupId());
@@ -166,7 +156,7 @@ class PostgresqlCanvasStoreIntegrationTest extends PostgresCanvasInfraTestSuppor
     assertTrue(canvasStore.listGroups(canvasId).isEmpty());
   }
 
-  /** 去重行记录请求指纹与首次接受位置，按画布整体清理。 */
+  /** 去重行记录请求指纹与首次接受位置。 */
   @Test
   void commandDedupRecordsAcceptedRevision() {
     UUID canvasId = addDocument();
@@ -177,7 +167,5 @@ class PostgresqlCanvasStoreIntegrationTest extends PostgresCanvasInfraTestSuppor
     canvasStore.addCommandDedup(dedup);
     assertEquals(dedup, canvasStore.findCommandDedup(canvasId, idempotencyKey).orElseThrow());
     assertTrue(canvasStore.findCommandDedup(UUID.randomUUID(), idempotencyKey).isEmpty());
-    assertEquals(1, canvasStore.deleteCommandDedupByCanvas(canvasId));
-    assertTrue(canvasStore.findCommandDedup(canvasId, idempotencyKey).isEmpty());
   }
 }

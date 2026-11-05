@@ -348,7 +348,25 @@ class ExecutionExitSettlementTest {
       fixture.store.transaction(
           tx -> {
             ThreadState parent = tx.threads().lock(parentId).orElseThrow();
-            tx.threads().update(parent.changeExecutionControl(ThreadExecutionControl.STOPPED, NOW));
+            tx.threads()
+                .update(
+                    new ThreadState(
+                        parent.id(),
+                        parent.sessionId(),
+                        parent.parentThreadId(),
+                        parent.headEntryId(),
+                        parent.creationRequestHash(),
+                        parent.name(),
+                        parent.rootThreadId(),
+                        parent.yoloEnabled(),
+                        parent.spawnTrigger(),
+                        parent.constraints(),
+                        ThreadExecutionControl.STOPPED,
+                        parent.inputThroughSequence(),
+                        parent.nextCommandSequence(),
+                        parent.version() + 1,
+                        parent.createdAt(),
+                        NOW));
             return null;
           });
       AcceptCommandsCommand resume =
@@ -505,7 +523,8 @@ class ExecutionExitSettlementTest {
           tx.commands().insert(List.of(source));
           tx.commands().update(List.of(source.markApplied(start.id())));
           child = tx.threads().lock(child.id()).orElseThrow();
-          tx.threads().update(child.advanceInputThroughSequence(1L, NOW));
+          tx.threads()
+              .update(child.advanceHeadAndInputThroughSequence(child.headEntryId(), 1L, NOW));
           tx.joins()
               .insert(
                   new ThreadJoin(

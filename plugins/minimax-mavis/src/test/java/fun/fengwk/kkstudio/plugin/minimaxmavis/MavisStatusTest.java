@@ -73,7 +73,7 @@ class MavisStatusTest {
         assertInstanceOf(MavisBusinessException.class, insufficientCredits);
     assertEquals("402", business.code());
     assertEquals("web_search", business.context());
-    assertEquals("quota exhausted", business.serverMessage());
+    assertTrue(business.getMessage().contains("quota exhausted"));
     assertTrue(business.getMessage().contains("Do not retry until credits are available."));
   }
 

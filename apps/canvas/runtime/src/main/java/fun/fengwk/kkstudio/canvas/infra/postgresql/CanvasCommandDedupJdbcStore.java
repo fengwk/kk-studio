@@ -54,10 +54,4 @@ public class CanvasCommandDedupJdbcStore {
         .query(ROW_MAPPER)
         .optional();
   }
-
-  public int deleteByCanvas(UUID canvasId) {
-    return jdbc.sql("delete from canvas_command_dedup where canvas_id = :canvasId")
-        .param("canvasId", canvasId)
-        .update();
-  }
 }

@@ -379,7 +379,7 @@ class MavisClientTest {
     assertEquals("500", leaked.code());
     assertFalse(leaked.getMessage().contains(credential.token()));
     assertFalse(leaked.getMessage().contains("?token="));
-    assertEquals("token [REDACTED] see https://agent.minimaxi.com/x", leaked.serverMessage());
+    assertTrue(leaked.getMessage().contains("token [REDACTED] see https://agent.minimaxi.com/x"));
   }
 
   /** 业务状态码也可能是任意远端文本，异常消息与结构化字段都不得回显其中可能的凭据。 */

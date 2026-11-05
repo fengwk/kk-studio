@@ -36,11 +36,6 @@ public enum MavisRegion {
     return baseUrl;
   }
 
-  /** 该 region 登录回调使用的 deep-link scheme。 */
-  public String callbackScheme() {
-    return callbackScheme;
-  }
-
   /** 用户需要打开的官方 SSO 登录链接。 */
   public String loginUrl() {
     return baseUrl + LOGIN_PATH;

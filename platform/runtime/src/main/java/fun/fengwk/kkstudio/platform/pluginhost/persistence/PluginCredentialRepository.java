@@ -214,22 +214,6 @@ public class PluginCredentialRepository {
         == 1;
   }
 
-  public boolean releaseLease(PluginCredentialRow claimed) {
-    return jdbc.sql(
-                """
-                update plugin_credential
-                set refresh_lease_token = null, refresh_lease_until = null,
-                    version = version + 1, updated_at = current_timestamp
-                where plugin_id = :pluginId and refresh_lease_token = :leaseToken
-                  and version = :version
-                """)
-            .param("pluginId", claimed.pluginId())
-            .param("leaseToken", claimed.refreshLeaseToken())
-            .param("version", claimed.version())
-            .update()
-        == 1;
-  }
-
   /** 刷新器发出请求前确认租约仍属于自己且未过期。 */
   public boolean ownsUnexpiredLease(PluginCredentialRow claimed) {
     return jdbc.sql(

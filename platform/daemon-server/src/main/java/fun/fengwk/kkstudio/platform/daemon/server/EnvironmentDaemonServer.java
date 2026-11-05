@@ -38,12 +38,10 @@ import java.lang.System.Logger.Level;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
@@ -54,9 +52,6 @@ public final class EnvironmentDaemonServer
     implements DaemonSessions, EnvironmentTunnels, EnvironmentCapabilityTransport {
 
   private static final Logger LOG = System.getLogger(EnvironmentDaemonServer.class.getName());
-
-  public static final int MAX_INVOCATION_TOMBSTONES =
-      DaemonInvocationTracker.MAX_INVOCATION_TOMBSTONES;
 
   private record PendingAdmission(UUID leaseToken, String registrationToken, String displayName) {}
 
@@ -544,18 +539,6 @@ public final class EnvironmentDaemonServer
       return Optional.empty();
     }
     return session.runtimeStatus();
-  }
-
-  public Set<EnvironmentId> readyEnvironments() {
-    Set<EnvironmentId> ready = new HashSet<>();
-    synchronized (inventory) {
-      for (Map.Entry<EnvironmentId, DaemonConnectionSession> entry : sessions.entrySet()) {
-        if (entry.getValue().isReady()) {
-          ready.add(entry.getKey());
-        }
-      }
-    }
-    return ready;
   }
 
   public Optional<DaemonConnectionIdentity> connectionIdentity(EnvironmentId environmentId) {

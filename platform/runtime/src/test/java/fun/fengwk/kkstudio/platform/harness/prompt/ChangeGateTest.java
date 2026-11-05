@@ -51,9 +51,6 @@ class ChangeGateTest {
   void awaitChangeWakesOnAnyCategoryAndMergesSignals() throws Exception {
     ChangeGate gate = new ChangeGate();
     ChangeGate.State since = gate.snapshot();
-    gate.descendants();
-    assertTrue(gate.awaitChange(since, 0L), "descendants signal must wake");
-    since = gate.snapshot();
     gate.cancel();
     assertTrue(gate.awaitChange(since, 0L), "cancel signal must wake");
   }

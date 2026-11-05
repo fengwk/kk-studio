@@ -17,8 +17,8 @@ public final class IdeDataPaths {
 
   private static final String DATA_HTTP_SUFFIX = "/data-http";
   private static final String DATA_WS_SUFFIX = "/data-ws";
-  public static final String VIEW_ID_PARAMETER = "viewId";
-  public static final String PATH_PARAMETER = "path";
+  static final String VIEW_ID_PARAMETER = "viewId";
+  static final String PATH_PARAMETER = "path";
 
   private IdeDataPaths() {}
 

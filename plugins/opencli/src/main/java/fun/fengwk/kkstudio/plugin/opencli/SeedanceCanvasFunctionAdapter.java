@@ -115,11 +115,6 @@ public class SeedanceCanvasFunctionAdapter implements CanvasFunctionAdapter {
     this(settings, client, JsonMapper.builder().build(), Clock.systemUTC(), Thread::sleep);
   }
 
-  public SeedanceCanvasFunctionAdapter(
-      OpenCliSettings settings, OpenCliHubClient client, ObjectMapper objectMapper, Clock clock) {
-    this(settings, client, objectMapper, clock, Thread::sleep);
-  }
-
   SeedanceCanvasFunctionAdapter(
       OpenCliSettings settings,
       OpenCliHubClient client,

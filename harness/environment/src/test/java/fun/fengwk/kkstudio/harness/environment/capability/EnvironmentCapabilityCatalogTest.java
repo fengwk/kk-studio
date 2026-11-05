@@ -69,15 +69,14 @@ class EnvironmentCapabilityCatalogTest {
     assertEquals(
         List.of(EnvironmentCapabilityIds.PROCESS_EXEC),
         EnvironmentCapabilityCatalog.descriptors().stream()
+            .filter(descriptor -> descriptor.inputSchema().required().contains("workdir"))
             .map(EnvironmentCapabilityDescriptor::id)
-            .filter(EnvironmentCapabilityCatalog::requiresWorkdir)
             .toList());
-    assertFalse(EnvironmentCapabilityCatalog.requiresWorkdir(EnvironmentCapabilityIds.FS_READ));
-    for (EnvironmentCapabilityDescriptor descriptor : EnvironmentCapabilityCatalog.descriptors()) {
-      assertEquals(
-          descriptor.inputSchema().required().contains("workdir"),
-          EnvironmentCapabilityCatalog.requiresWorkdir(descriptor.id()));
-    }
+    assertFalse(
+        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_READ)
+            .inputSchema()
+            .required()
+            .contains("workdir"));
     assertEquals(
         Set.of("path"),
         EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_READ)

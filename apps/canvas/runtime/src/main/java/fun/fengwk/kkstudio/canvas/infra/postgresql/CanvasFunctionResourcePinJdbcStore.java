@@ -143,10 +143,4 @@ public class CanvasFunctionResourcePinJdbcStore {
         .param("nodeId", nodeId)
         .update();
   }
-
-  public int deleteByCanvas(UUID canvasId) {
-    return jdbc.sql("delete from canvas_function_resource_pin where canvas_id = :canvasId")
-        .param("canvasId", canvasId)
-        .update();
-  }
 }

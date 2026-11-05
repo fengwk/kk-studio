@@ -18,6 +18,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.platform.daemon.protocol.Cancel;
+import fun.fengwk.kkstudio.platform.daemon.protocol.ControlFraming;
 import fun.fengwk.kkstudio.platform.daemon.protocol.ControlProtocolCodec;
 import fun.fengwk.kkstudio.platform.daemon.protocol.Envelope;
 import fun.fengwk.kkstudio.platform.daemon.protocol.MessageType;
@@ -191,7 +192,7 @@ class DaemonControlStreamTest {
     DataFrame errorDataFrame = stream.sentFrames.get(0);
     byte[] errorBytes = new byte[errorDataFrame.getByteBuffer().remaining()];
     errorDataFrame.getByteBuffer().get(errorBytes);
-    Envelope errEnv = ControlProtocolCodec.decodeFrame(errorBytes);
+    Envelope errEnv = ControlProtocolCodec.decodeBinary(ControlFraming.unframe(errorBytes));
     assertTrue(errEnv.hasError());
     assertTrue(errEnv.getError().getMessage().contains("invalid inbound frame length"));
   }

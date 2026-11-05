@@ -74,17 +74,6 @@ public class IdeRemoteDataPlaneForwarder {
     forwardHttp(request, response, owner, environmentId, viewId, rawPathAndQuery, true);
   }
 
-  public void forwardHttp(
-      HttpServletRequest request,
-      HttpServletResponse response,
-      ClusterOwnerRoute owner,
-      EnvironmentId environmentId,
-      UUID viewId,
-      String rawPathAndQuery)
-      throws IOException {
-    forwardDataHttp(request, response, owner, environmentId, viewId, rawPathAndQuery);
-  }
-
   private void forwardHttp(
       HttpServletRequest request,
       HttpServletResponse response,
@@ -315,10 +304,9 @@ public class IdeRemoteDataPlaneForwarder {
     }
   }
 
-  public record HttpResponseHeader(
-      int status, Map<String, List<String>> headers, byte[] remainingBytes) {}
+  record HttpResponseHeader(int status, Map<String, List<String>> headers, byte[] remainingBytes) {}
 
-  public static HttpResponseHeader readHeaderBlock(
+  static HttpResponseHeader readHeaderBlock(
       AsynchronousSocketChannel channel, int maxBytes, long timeoutMillis) throws Exception {
     ByteBuffer buffer = ByteBuffer.allocate(Math.min(maxBytes, 8192));
     ByteArrayOutputStream headerBytes = new ByteArrayOutputStream();

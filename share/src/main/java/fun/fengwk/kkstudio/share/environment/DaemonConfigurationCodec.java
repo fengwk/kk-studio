@@ -55,10 +55,6 @@ public final class DaemonConfigurationCodec {
     return validate(config);
   }
 
-  public static DaemonLspConfiguration parseLsp(JsonNode node) {
-    return validateLsp(parseLspNode(node));
-  }
-
   private static DaemonLspConfiguration parseLspNode(JsonNode node) {
     object(node, "daemon.lsp", Set.of("servers"));
     JsonNode servers = node.get("servers");

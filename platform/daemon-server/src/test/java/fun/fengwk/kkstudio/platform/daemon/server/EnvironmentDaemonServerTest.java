@@ -40,7 +40,6 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.common.result.TextResultContent;
-import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityBusyException;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCall;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCancelledException;
@@ -90,7 +89,6 @@ import java.util.Collections;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Objects;
-import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.BrokenBarrierException;
 import java.util.concurrent.CountDownLatch;
@@ -508,7 +506,7 @@ class EnvironmentDaemonServerTest {
     assertTrue(first.closed());
     assertNull(listener.error);
     assertNull(listener.completed);
-    assertEquals(Set.of(), fixture.server.readyEnvironments());
+    assertFalse(fixture.server.isReady(ENVIRONMENT_ID));
 
     FakeControlChannel second = fixture.connectReady("channel-instance-b");
     assertEquals(List.of(MessageType.SETTINGS, MessageType.RECOVER), second.messageTypes());
@@ -1070,7 +1068,7 @@ class EnvironmentDaemonServerTest {
         .invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), oldest)
         .terminate(EnvironmentCapabilityTerminationCause.CANCELLED);
 
-    for (int index = 0; index < EnvironmentDaemonServer.MAX_INVOCATION_TOMBSTONES; index++) {
+    for (int index = 0; index < DaemonInvocationTracker.MAX_INVOCATION_TOMBSTONES; index++) {
       fixture
           .server
           .invoke(
@@ -1083,7 +1081,7 @@ class EnvironmentDaemonServerTest {
     fixture.close(channel.connectionId());
     FakeControlChannel afterEvict = fixture.connectReady("channel-exit-evicted-retry");
     assertEquals(
-        EnvironmentDaemonServer.MAX_INVOCATION_TOMBSTONES,
+        DaemonInvocationTracker.MAX_INVOCATION_TOMBSTONES,
         afterEvict.countOf(MessageType.CANCEL),
         "仍保留的未确认 tombstone 各重放一次 CANCEL");
     assertTrue(
@@ -1110,7 +1108,7 @@ class EnvironmentDaemonServerTest {
         .server
         .invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), awaiting)
         .terminate(EnvironmentCapabilityTerminationCause.CANCELLED);
-    for (int index = 0; index < EnvironmentDaemonServer.MAX_INVOCATION_TOMBSTONES; index++) {
+    for (int index = 0; index < DaemonInvocationTracker.MAX_INVOCATION_TOMBSTONES; index++) {
       UUID callId = new UUID(0L, 30_000L + index);
       fixture
           .server
@@ -1865,8 +1863,8 @@ class EnvironmentDaemonServerTest {
       Future<?> first = executor.submit(fixture.server::reconcileNetworkSettings);
       assertTrue(channel.awaitOfferEntered());
       try {
-        Future<Set<EnvironmentId>> ready = executor.submit(fixture.server::readyEnvironments);
-        assertEquals(Set.of(ENVIRONMENT_ID), ready.get(2, TimeUnit.SECONDS));
+        Future<Boolean> ready = executor.submit(() -> fixture.server.isReady(ENVIRONMENT_ID));
+        assertTrue(ready.get(2, TimeUnit.SECONDS));
 
         fixture.settings.set(
             new EnvironmentServerSettings(
@@ -2170,7 +2168,7 @@ class EnvironmentDaemonServerTest {
     assertThrows(
         IllegalStateException.class,
         () -> fixture.server.admit(new DaemonHandshake(TOKEN, INSTANCE_ID)));
-    assertEquals(Set.of(), fixture.server.readyEnvironments());
+    assertFalse(fixture.server.isReady(ENVIRONMENT_ID));
   }
 
   /** 测试意图：READY 之前的心跳属于协议违规，必须以协议错误关闭连接。 */
@@ -2179,7 +2177,7 @@ class EnvironmentDaemonServerTest {
     Fixture heartbeatFirst = new Fixture();
     FakeControlChannel heartbeatChannel = heartbeatFirst.openSession("channel-heartbeat-first");
     heartbeatFirst.receive(
-        heartbeatChannel, heartbeatEnvelope(1L, DaemonRuntimeStatus.running(DAEMON_VERSION)));
+        heartbeatChannel, heartbeatEnvelope(1L, new DaemonRuntimeStatus(DAEMON_VERSION, null)));
     assertTrue(heartbeatChannel.closed());
   }
 
@@ -2211,7 +2209,7 @@ class EnvironmentDaemonServerTest {
     mismatched.receive(
         mismatchedChannel,
         heartbeatEnvelope(
-            OTHER_ENVIRONMENT_ID, 1L, DaemonRuntimeStatus.running(DAEMON_VERSION), null));
+            OTHER_ENVIRONMENT_ID, 1L, new DaemonRuntimeStatus(DAEMON_VERSION, null), null));
     assertTrue(mismatchedChannel.closed());
 
     // 方向错误：daemon 不得向服务端发送 INVOKE。
@@ -2235,13 +2233,13 @@ class EnvironmentDaemonServerTest {
     heartbeatExtra.receive(
         extraChannel,
         heartbeatEnvelope(
-            OTHER_ENVIRONMENT_ID, 1L, DaemonRuntimeStatus.running(DAEMON_VERSION), null));
+            OTHER_ENVIRONMENT_ID, 1L, new DaemonRuntimeStatus(DAEMON_VERSION, null), null));
     assertTrue(extraChannel.closed());
 
     Fixture duplicateReady = new Fixture();
     FakeControlChannel invocationChannel = duplicateReady.connectReady("channel-ready-duplicate");
     duplicateReady.receive(
-        invocationChannel, readyEnvelope(1L, DaemonRuntimeStatus.running(DAEMON_VERSION)));
+        invocationChannel, readyEnvelope(1L, new DaemonRuntimeStatus(DAEMON_VERSION, null)));
     assertTrue(invocationChannel.closed());
   }
 
@@ -2412,7 +2410,6 @@ class EnvironmentDaemonServerTest {
         EnvironmentDaemonServerTestSupport.CAPABILITIES, fixture.leaseStore.readyCapabilities);
     assertEquals(List.of(ENVIRONMENT_ID), fixture.readyNotifications);
     assertTrue(fixture.server.isReady(ENVIRONMENT_ID));
-    assertEquals(Set.of(ENVIRONMENT_ID), fixture.server.readyEnvironments());
     assertEquals(beforeReady, channel.envelopes().size());
   }
 
@@ -2446,7 +2443,7 @@ class EnvironmentDaemonServerTest {
 
     assertTrue(channel.closed());
     assertFalse(fixture.leaseStore.disconnected);
-    assertEquals(Set.of(), fixture.server.readyEnvironments());
+    assertFalse(fixture.server.isReady(ENVIRONMENT_ID));
   }
 
   /** 测试意图：协议错误走 close-after-flush 语义，保证已入队的 ERROR 帧先被送出。 */
@@ -2457,7 +2454,7 @@ class EnvironmentDaemonServerTest {
     fixture.receive(
         channel,
         heartbeatEnvelope(
-            OTHER_ENVIRONMENT_ID, 1L, DaemonRuntimeStatus.running(DAEMON_VERSION), null));
+            OTHER_ENVIRONMENT_ID, 1L, new DaemonRuntimeStatus(DAEMON_VERSION, null), null));
 
     assertEquals(1, channel.closeAfterFlushCount());
     assertEquals(MessageType.ERROR, channel.lastEnvelope().getMessageType());
@@ -2519,16 +2516,16 @@ class EnvironmentDaemonServerTest {
     assertFalse(fixture.server.holdsReadyLease(ENVIRONMENT_ID));
   }
 
-  /** 测试意图：READY 快照只包含当前活跃 READY 代际；连接关闭后立即为空（Platform 用它决定是否本地派发目录查询）。 */
+  /** 测试意图：READY 状态跟随当前活跃连接生命周期；连接关闭后立即为 false。 */
   @Test
-  void readyEnvironmentsSnapshotTracksConnectionLifecycle() {
+  void readyStateTracksConnectionLifecycle() {
     Fixture fixture = new Fixture();
     FakeControlChannel channel = fixture.connectReady("channel-ready-snapshot");
-    assertEquals(Set.of(ENVIRONMENT_ID), fixture.server.readyEnvironments());
+    assertTrue(fixture.server.isReady(ENVIRONMENT_ID));
 
     fixture.close(channel.connectionId());
 
-    assertEquals(Set.of(), fixture.server.readyEnvironments());
+    assertFalse(fixture.server.isReady(ENVIRONMENT_ID));
   }
 
   /** 测试意图：连接收尾的租约解绑与传输关闭互不跳过；首个 Error 保持对象身份抛出、后到的 Error 不遮蔽首个；安全日志只含固定阶段与异常类名。 */
@@ -2555,7 +2552,7 @@ class EnvironmentDaemonServerTest {
         thrown.getSuppressed(),
         "a later Error must be retained without masking the first");
     assertTrue(channel.closed(), "the transport close must run even when the lease release fails");
-    assertEquals(Set.of(), fixture.server.readyEnvironments());
+    assertFalse(fixture.server.isReady(ENVIRONMENT_ID));
   }
 
   /** 测试意图：先到的普通异常不吞掉后到的 Error：Error 以原身份传播，收尾不因前序失败而跳过。 */
@@ -2600,7 +2597,7 @@ class EnvironmentDaemonServerTest {
 
     assertSame(diagnosticFailure, thrown, "the diagnostic failure must keep its identity");
     assertTrue(channel.closed(), "the transport close must run even when diagnostics fail");
-    assertEquals(Set.of(), fixture.server.readyEnvironments());
+    assertFalse(fixture.server.isReady(ENVIRONMENT_ID));
   }
 
   /** 测试意图：业务 Error 之后诊断后端再失败时，仍抛同一个业务 Error；诊断失败作为 suppressed 保留而非遮蔽原错误。 */
@@ -2643,7 +2640,7 @@ class EnvironmentDaemonServerTest {
 
     assertTrue(channel.closed(), "a failed lease release must not skip the transport close");
     assertFalse(fixture.leaseStore.disconnected);
-    assertEquals(Set.of(), fixture.server.readyEnvironments());
+    assertFalse(fixture.server.isReady(ENVIRONMENT_ID));
   }
 
   /** 测试意图：租约解绑注入 Error 时收尾不跳过——在途 IDE 命令仍按结果不确定终结、Error 以原身份抛出，且只记录固定阶段与异常类名。 */
@@ -3459,7 +3456,7 @@ class EnvironmentDaemonServerTest {
   void runtimeStatusNotificationsFollowActualChangesFromBothMessages() {
     Fixture fixture = new Fixture();
     FakeControlChannel channel = fixture.connectReady("channel-runtime-notifications");
-    DaemonRuntimeStatus running = DaemonRuntimeStatus.running(DAEMON_VERSION);
+    DaemonRuntimeStatus running = new DaemonRuntimeStatus(DAEMON_VERSION, null);
     DaemonRuntimeStatus updating =
         new DaemonRuntimeStatus(DAEMON_VERSION, new DaemonUpdateProgress("1.0.10", 10L, null));
 
@@ -3973,7 +3970,7 @@ class EnvironmentDaemonServerTest {
     fixture.receive(
         channel,
         heartbeatEnvelope(
-            OTHER_ENVIRONMENT_ID, 1L, DaemonRuntimeStatus.running(DAEMON_VERSION), null));
+            OTHER_ENVIRONMENT_ID, 1L, new DaemonRuntimeStatus(DAEMON_VERSION, null), null));
 
     assertTrue(channel.closed());
   }

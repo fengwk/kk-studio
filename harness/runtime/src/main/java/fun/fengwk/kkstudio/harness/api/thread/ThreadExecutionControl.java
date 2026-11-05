@@ -12,11 +12,6 @@ public enum ThreadExecutionControl {
   /** 已显式停止：不启动模型执行；迟到的系统结果只固化到历史。 */
   STOPPED;
 
-  /** 是否处于可执行状态。 */
-  public boolean isRunnable() {
-    return this == RUNNABLE;
-  }
-
   /** 是否处于停止状态。 */
   public boolean isStopped() {
     return this == STOPPED;

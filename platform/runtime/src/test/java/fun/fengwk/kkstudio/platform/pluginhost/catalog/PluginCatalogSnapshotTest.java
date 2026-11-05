@@ -96,12 +96,11 @@ class PluginCatalogSnapshotTest {
     assertEquals(
         List.of(PLUGIN_ALPHA, PLUGIN_BETA),
         snapshot.configuredPlugins().stream().map(c -> c.descriptor().pluginId()).toList());
-    assertTrue(
-        snapshot.harnessCatalog().findDescriptor(new ContributorId("alpha.contrib")).isPresent());
-    assertTrue(
-        snapshot.harnessCatalog().findDescriptor(new ContributorId("beta.contrib")).isPresent());
-    assertTrue(
-        snapshot.harnessCatalog().findDescriptor(new ContributorId("builtin.contrib")).isPresent());
+    List<ContributorId> contributorIds =
+        snapshot.harnessCatalog().descriptors().stream().map(ContributorDescriptor::id).toList();
+    assertTrue(contributorIds.contains(new ContributorId("alpha.contrib")));
+    assertTrue(contributorIds.contains(new ContributorId("beta.contrib")));
+    assertTrue(contributorIds.contains(new ContributorId("builtin.contrib")));
     // 产品目录按插件归属冻结，内置 Harness 贡献不进入产品目录。
     assertEquals(
         List.of("alpha.run", "beta.run"),
@@ -161,7 +160,7 @@ class PluginCatalogSnapshotTest {
             () ->
                 PluginCatalogSnapshot.build(
                     registry,
-                    Map.of(PLUGIN_ALPHA, PluginConfig.initial(SCHEMA)),
+                    Map.of(PLUGIN_ALPHA, new PluginConfig(0, SCHEMA.defaultsJson())),
                     PluginCatalogSnapshotTest::contexts,
                     List.of(),
                     PRODUCT_CATALOG));
@@ -375,7 +374,8 @@ class PluginCatalogSnapshotTest {
     Map<String, PluginConfig> configurations = new LinkedHashMap<>();
     for (StudioPlugin plugin : registry.plugins()) {
       String pluginId = plugin.descriptor().pluginId();
-      configurations.put(pluginId, PluginConfig.initial(plugin.configurationSchema()));
+      configurations.put(
+          pluginId, new PluginConfig(0, plugin.configurationSchema().defaultsJson()));
     }
     return configurations;
   }

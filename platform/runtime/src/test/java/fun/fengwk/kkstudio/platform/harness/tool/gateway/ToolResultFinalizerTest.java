@@ -55,6 +55,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 class ToolResultFinalizerTest {
 
   private static final String TOOL_NAME = "demo_tool";
+  private static final int DEFAULT_RESOURCE_MAX_BYTES = 16 * 1024 * 1024;
 
   @Test
   void countPhysicalLinesMatchesSpec() {
@@ -294,7 +295,7 @@ class ToolResultFinalizerTest {
                 (mediaType, name, content) -> {
                   throw new IllegalStateException("disk full");
                 }),
-            ToolResultFinalizer.DEFAULT_RESOURCE_MAX_BYTES);
+            DEFAULT_RESOURCE_MAX_BYTES);
 
     String largeText = "x".repeat(ToolResultFinalizer.INLINE_MAX_UTF8_BYTES + 1);
     ToolResult result =
@@ -746,7 +747,7 @@ class ToolResultFinalizerTest {
   }
 
   private static ToolResultFinalizer finalizer(RecordingStager store) {
-    return finalizer(store, ToolResultFinalizer.DEFAULT_RESOURCE_MAX_BYTES);
+    return finalizer(store, DEFAULT_RESOURCE_MAX_BYTES);
   }
 
   private static ToolResultFinalizer finalizer(RecordingStager store, int resourceMaxBytes) {
@@ -779,8 +780,7 @@ class ToolResultFinalizerTest {
                   (long) content.length,
                   sha256Hex(content));
             });
-    ToolResultFinalizer finalizer =
-        new ToolResultFinalizer(stager, ToolResultFinalizer.DEFAULT_RESOURCE_MAX_BYTES);
+    ToolResultFinalizer finalizer = new ToolResultFinalizer(stager, DEFAULT_RESOURCE_MAX_BYTES);
 
     ToolResultFinalizer.Outcome outcome =
         finalizer.finalizeResult(
@@ -827,8 +827,7 @@ class ToolResultFinalizerTest {
             discarded.add(resource);
           }
         };
-    ToolResultFinalizer finalizer =
-        new ToolResultFinalizer(stager, ToolResultFinalizer.DEFAULT_RESOURCE_MAX_BYTES);
+    ToolResultFinalizer finalizer = new ToolResultFinalizer(stager, DEFAULT_RESOURCE_MAX_BYTES);
 
     ToolResultFinalizer.Outcome outcome =
         finalizer.finalizeResult(
@@ -883,7 +882,7 @@ class ToolResultFinalizerTest {
     logger.addAppender(logs);
     try {
       ToolResultFinalizer.Outcome outcome =
-          new ToolResultFinalizer(stager, ToolResultFinalizer.DEFAULT_RESOURCE_MAX_BYTES)
+          new ToolResultFinalizer(stager, DEFAULT_RESOURCE_MAX_BYTES)
               .finalizeResult(
                   TOOL_NAME,
                   new ToolResult(

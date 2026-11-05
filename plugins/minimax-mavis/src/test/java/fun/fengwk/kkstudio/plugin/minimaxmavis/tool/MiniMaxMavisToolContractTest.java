@@ -103,7 +103,6 @@ class MiniMaxMavisToolContractTest {
   @Test
   void exactlyFifteenUniqueToolsAreContributed() {
     assertEquals(15, tools.size(), "MiniMax Mavis contributor must provide exactly 15 tools");
-    assertEquals(15, contributor.toolCount(), "Tool count helper must return 15");
 
     Set<String> uniqueToolNames = new HashSet<>();
     for (Tool tool : tools.values()) {

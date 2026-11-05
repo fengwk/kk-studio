@@ -6,7 +6,6 @@ import org.springframework.stereotype.Repository;
 
 import java.util.List;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.UUID;
 
 /** {@code canvas_group} 的原子 SQL 入口。 */
@@ -56,15 +55,6 @@ public class CanvasGroupJdbcStore {
         .param("canvasId", canvasId)
         .query(ROW_MAPPER)
         .list();
-  }
-
-  public Optional<CanvasGroupDO> findById(UUID canvasId, UUID id) {
-    return jdbc.sql(
-            "select " + COLUMNS + " from canvas_group where id = :id and canvas_id = :canvasId")
-        .param("canvasId", canvasId)
-        .param("id", id)
-        .query(ROW_MAPPER)
-        .optional();
   }
 
   public int update(CanvasGroupDO group) {

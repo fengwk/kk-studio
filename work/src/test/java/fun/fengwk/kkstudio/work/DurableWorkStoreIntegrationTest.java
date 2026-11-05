@@ -351,23 +351,6 @@ class DurableWorkStoreIntegrationTest {
     }
   }
 
-  /** 批量删除只影响当前 target type。 */
-  @Test
-  void deleteAllRemovesOnlyMatchingTargetTypeRows() {
-    UUID first = UUID.randomUUID();
-    UUID second = UUID.randomUUID();
-    UUID other = UUID.randomUUID();
-    issues.request(first);
-    issues.request(second);
-    canvasRuns.request(other);
-
-    assertEquals(2, issues.deleteAll(List.of(first, second)));
-    assertTrue(issues.find(first).isEmpty());
-    assertTrue(issues.find(second).isEmpty());
-    assertTrue(canvasRuns.find(other).isPresent());
-    assertEquals(0, issues.deleteAll(List.of()));
-  }
-
   @Test
   void rejectsInvalidArguments() {
     UUID id = UUID.randomUUID();

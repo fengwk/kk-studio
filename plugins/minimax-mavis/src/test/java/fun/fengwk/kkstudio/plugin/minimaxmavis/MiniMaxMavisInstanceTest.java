@@ -48,7 +48,7 @@ class MiniMaxMavisInstanceTest {
         new PluginContext(credentialAccess, Optional.empty(), Optional.empty(), Optional.empty());
 
     PluginInstance instance =
-        plugin.configure(PluginConfig.initial(plugin.configurationSchema()), context);
+        plugin.configure(new PluginConfig(0, plugin.configurationSchema().defaultsJson()), context);
 
     assertEquals(
         1, instance.harnessContributors().size(), "enabled instance contributes one contributor");
@@ -57,7 +57,7 @@ class MiniMaxMavisInstanceTest {
         "MiniMax Mavis contributes no product domain");
     MiniMaxMavisHarnessContributor contributor =
         (MiniMaxMavisHarnessContributor) instance.harnessContributors().get(0);
-    assertEquals(15, contributor.toolCount(), "must expose all 15 tools");
+    assertEquals(15, contributor.tools().size(), "must expose all 15 tools");
     assertEquals(
         plugin.descriptor().version(),
         contributor.descriptor().version(),

@@ -302,35 +302,9 @@ public class CanvasFunctionRunJdbcStore {
         .update();
   }
 
-  /** 同一 Canvas 下全部 Run 的节点 id；调用方用它删除对应调度行，本类不写 {@code durable_work}。 */
-  public List<UUID> listNodeIdsByCanvas(UUID canvasId) {
-    return jdbc.sql(
-            """
-            select r.node_id
-            from canvas_function_run r
-            join canvas_node n on n.id = r.node_id
-            where n.canvas_id = :canvasId
-            order by r.node_id
-            """)
-        .param("canvasId", canvasId)
-        .query((resultSet, rowNumber) -> resultSet.getObject("node_id", UUID.class))
-        .list();
-  }
-
   public int deleteByNodeId(UUID nodeId) {
     return jdbc.sql("delete from canvas_function_run where node_id = :nodeId")
         .param("nodeId", nodeId)
-        .update();
-  }
-
-  public int deleteByCanvas(UUID canvasId) {
-    return jdbc.sql(
-            """
-            delete from canvas_function_run r
-            using canvas_node n
-            where r.node_id = n.id and n.canvas_id = :canvasId
-            """)
-        .param("canvasId", canvasId)
         .update();
   }
 }

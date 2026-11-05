@@ -190,21 +190,6 @@ public class StorageUploadRepository {
         == 1;
   }
 
-  /** token-fenced 主动释放 cleanup lease。 */
-  public boolean releaseCleanupClaim(UUID id, UUID cleanupToken) {
-    return jdbcClient
-            .sql(
-                """
-                update storage_upload
-                set cleanup_token = null, cleanup_until = null
-                where id = :id and cleanup_token = :cleanupToken
-                """)
-            .param("id", id)
-            .param("cleanupToken", cleanupToken)
-            .update()
-        == 1;
-  }
-
   private StorageUpload findOne(String sql, UUID id) {
     return jdbcClient.sql(sql).param("id", id).query(ROW_MAPPER).optional().orElse(null);
   }

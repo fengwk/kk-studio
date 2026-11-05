@@ -14,8 +14,4 @@ public class MavisAuthException extends MavisException {
   public MavisAuthException(String message) {
     super(message);
   }
-
-  public MavisAuthException(String message, Throwable cause) {
-    super(message, cause);
-  }
 }

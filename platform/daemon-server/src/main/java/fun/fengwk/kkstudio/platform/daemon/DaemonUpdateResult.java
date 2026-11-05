@@ -22,14 +22,6 @@ public record DaemonUpdateResult(String operationId, DaemonUpdatePhase phase, St
     message = validateMessage(message);
   }
 
-  public static DaemonUpdateResult accepted(String operationId) {
-    return new DaemonUpdateResult(operationId, DaemonUpdatePhase.ACCEPTED, null);
-  }
-
-  public static DaemonUpdateResult prepared(String operationId) {
-    return new DaemonUpdateResult(operationId, DaemonUpdatePhase.PREPARED, null);
-  }
-
   public static DaemonUpdateResult failed(String operationId, String message) {
     return new DaemonUpdateResult(operationId, DaemonUpdatePhase.FAILED, message);
   }

@@ -189,7 +189,6 @@ class ModelContractTest {
 
     assertEquals(14, usage.categorizedTokens());
     assertEquals(100L, usage.providerTotalTokens());
-    assertEquals(0, usage.nonReasoningOutputTokens());
     assertEquals(86L, usage.providerTotalTokens() - usage.categorizedTokens());
   }
 
@@ -199,13 +198,6 @@ class ModelContractTest {
     ModelUsage usage = new ModelUsage(Long.MAX_VALUE, 1, 0, 0, Map.of(), 0L, 1L);
 
     assertThrows(ArithmeticException.class, usage::categorizedTokens);
-  }
-
-  /** cacheHit 只看 cacheReadTokens 是否大于 0，不在本 domain 计算命中率。 */
-  @Test
-  void cacheHitReturnsBooleanFromCacheReadTokens() {
-    assertFalse(new ModelUsage(1, 1, 0, 1, Map.of(), 0L, 3L).cacheHit());
-    assertTrue(new ModelUsage(1, 1, 1, 1, Map.of(), 0L, 4L).cacheHit());
   }
 
   /** multiplier 在指定分项上独立应用并全链路精确计算；total 恒等于精确分项之和。 */

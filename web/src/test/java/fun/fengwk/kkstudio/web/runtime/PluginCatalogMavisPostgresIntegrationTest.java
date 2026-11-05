@@ -156,7 +156,7 @@ class PluginCatalogMavisPostgresIntegrationTest {
 
   private List<String> storedRows() {
     return JdbcClient.create(dataSource)
-        .sql("select revision || ':' || values_json from plugin_configuration order by plugin_id")
+        .sql("select version || ':' || values_json from plugin_configuration order by plugin_id")
         .query(String.class)
         .list();
   }

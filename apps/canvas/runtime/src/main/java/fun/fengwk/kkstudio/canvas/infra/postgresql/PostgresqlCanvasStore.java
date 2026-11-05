@@ -18,8 +18,8 @@ import java.util.UUID;
 /**
  * Canvas document 可变行状态（document/node/group/dedup）的 PostgreSQL 持久化。
  *
- * <p>锁语义是跨域事务协议的一部分：命令、Function Run 与 owner 删除先锁 document，Function Run 再锁 node。保留 PostgreSQL 的
- * {@code FOR UPDATE}/{@code FOR KEY SHARE} 行为。引用连线是 args 的读取投影，因此这里没有 link 行。
+ * <p>锁语义是跨域事务协议的一部分：命令与 Function Run 先锁 document，Function Run 再锁 node。保留 PostgreSQL 的 {@code FOR
+ * UPDATE} 行为。引用连线是 args 的读取投影，因此这里没有 link 行。
  */
 @Repository
 public class PostgresqlCanvasStore {
@@ -62,10 +62,6 @@ public class PostgresqlCanvasStore {
     return documentStore.findByIdForUpdate(canvasId).map(PostgresqlCanvasStore::toDomain);
   }
 
-  public Optional<CanvasDocument> lockDocumentForKeyShare(UUID canvasId) {
-    return documentStore.findByIdForKeyShare(canvasId).map(PostgresqlCanvasStore::toDomain);
-  }
-
   public List<CanvasDocument> listDocuments() {
     List<CanvasDocument> documents = new ArrayList<>();
     for (CanvasDocumentDO document : documentStore.listAll()) {
@@ -85,10 +81,6 @@ public class PostgresqlCanvasStore {
       notifier.revisionChanged(canvasId, newRevision);
     }
     return true;
-  }
-
-  public boolean deleteDocument(UUID canvasId) {
-    return documentStore.deleteById(canvasId) == 1;
   }
 
   public void addNode(NodeRecord node) {
@@ -128,10 +120,6 @@ public class PostgresqlCanvasStore {
     }
   }
 
-  public Optional<CanvasGroup> findGroup(UUID canvasId, UUID groupId) {
-    return groupStore.findById(canvasId, groupId).map(PostgresqlCanvasStore::toDomain);
-  }
-
   public List<CanvasGroup> listGroups(UUID canvasId) {
     List<CanvasGroup> groups = new ArrayList<>();
     for (CanvasGroupDO group : groupStore.listByCanvas(canvasId)) {
@@ -158,10 +146,6 @@ public class PostgresqlCanvasStore {
     if (commandDedupStore.insert(toData(commandDedup)) != 1) {
       throw new IllegalStateException("insert canvas command dedup failed");
     }
-  }
-
-  public int deleteCommandDedupByCanvas(UUID canvasId) {
-    return commandDedupStore.deleteByCanvas(canvasId);
   }
 
   private static CanvasDocument toDomain(CanvasDocumentDO document) {

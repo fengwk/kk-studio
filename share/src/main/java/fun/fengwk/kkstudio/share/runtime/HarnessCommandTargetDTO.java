@@ -36,15 +36,7 @@ public class HarnessCommandTargetDTO {
 
   @Getter(AccessLevel.NONE)
   @Setter(AccessLevel.NONE)
-  private boolean sessionIdFieldPresent;
-
-  @Getter(AccessLevel.NONE)
-  @Setter(AccessLevel.NONE)
   private boolean startEntryIdFieldPresent;
-
-  @Getter(AccessLevel.NONE)
-  @Setter(AccessLevel.NONE)
-  private boolean threadIdFieldPresent;
 
   @Getter(AccessLevel.NONE)
   @Setter(AccessLevel.NONE)
@@ -58,10 +50,6 @@ public class HarnessCommandTargetDTO {
   @Setter(AccessLevel.NONE)
   private boolean rootSettingsFieldPresent;
 
-  @Getter(AccessLevel.NONE)
-  @Setter(AccessLevel.NONE)
-  private boolean yoloEnabledFieldPresent;
-
   @JsonSetter("type")
   public void setType(Object value) {
     this.type = HarnessRuntimeDtoSupport.requireJsonString(value, "target.type");
@@ -70,7 +58,6 @@ public class HarnessCommandTargetDTO {
   @JsonSetter("sessionId")
   public void setSessionId(Object value) {
     this.sessionId = HarnessRuntimeDtoSupport.requireJsonString(value, "target.sessionId");
-    this.sessionIdFieldPresent = true;
   }
 
   @JsonSetter("startEntryId")
@@ -82,7 +69,6 @@ public class HarnessCommandTargetDTO {
   @JsonSetter("threadId")
   public void setThreadId(Object value) {
     this.threadId = HarnessRuntimeDtoSupport.requireJsonString(value, "target.threadId");
-    this.threadIdFieldPresent = true;
   }
 
   @JsonSetter("threadName")
@@ -107,22 +93,11 @@ public class HarnessCommandTargetDTO {
   @JsonSetter("yoloEnabled")
   public void setYoloEnabled(Object value) {
     this.yoloEnabled = HarnessRuntimeDtoSupport.requireJsonBoolean(value, "target.yoloEnabled");
-    this.yoloEnabledFieldPresent = true;
-  }
-
-  @JsonIgnore
-  public boolean hasSessionIdField() {
-    return sessionIdFieldPresent;
   }
 
   @JsonIgnore
   public boolean hasStartEntryIdField() {
     return startEntryIdFieldPresent;
-  }
-
-  @JsonIgnore
-  public boolean hasThreadIdField() {
-    return threadIdFieldPresent;
   }
 
   @JsonIgnore
@@ -138,11 +113,6 @@ public class HarnessCommandTargetDTO {
   @JsonIgnore
   public boolean hasRootSettingsField() {
     return rootSettingsFieldPresent;
-  }
-
-  @JsonIgnore
-  public boolean hasYoloEnabledField() {
-    return yoloEnabledFieldPresent;
   }
 
   @JsonAnySetter

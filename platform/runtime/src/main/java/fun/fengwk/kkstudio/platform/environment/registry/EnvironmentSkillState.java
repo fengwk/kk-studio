@@ -14,9 +14,6 @@ import java.util.regex.Pattern;
 public record EnvironmentSkillState(
     String packageName, String installedSha256, String localPath, String error) {
 
-  /** 归档摘要的字符数。 */
-  public static final int SHA256_CHARS = 64;
-
   /** 错误摘要的字符上限；摘要必须去敏，绝不承载 stdout、凭据或带 userinfo 的 Git URL。 */
   public static final int MAX_ERROR_CHARS = 512;
 

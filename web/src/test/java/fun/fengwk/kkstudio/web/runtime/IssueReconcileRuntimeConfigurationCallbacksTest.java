@@ -1,8 +1,9 @@
 package fun.fengwk.kkstudio.web.runtime;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
@@ -225,8 +226,10 @@ class IssueReconcileRuntimeConfigurationCallbacksTest {
     when(workStore.lockClaimed(any())).thenThrow(new RuntimeException("lock failed"));
 
     assertDoesNotThrow(dispatcher::start);
-    assertEquals(0, dispatcher.inFlightCount());
-    dispatcher.stop();
+    assertTrue(dispatcher.isRunning());
+    assertDoesNotThrow(dispatcher::stop);
+    assertFalse(dispatcher.isRunning());
+    verifyNoInteractions(reconciler);
   }
 
   private static BoundedWorkDispatcher<WorkClaim> dispatcher(

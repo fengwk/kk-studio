@@ -289,7 +289,25 @@ class ThreadExecutionFactsTest {
     store.transaction(
         tx -> {
           ThreadState thread = tx.threads().lock(threadId).orElseThrow();
-          tx.threads().update(thread.changeExecutionControl(control, T5));
+          tx.threads()
+              .update(
+                  new ThreadState(
+                      thread.id(),
+                      thread.sessionId(),
+                      thread.parentThreadId(),
+                      thread.headEntryId(),
+                      thread.creationRequestHash(),
+                      thread.name(),
+                      thread.rootThreadId(),
+                      thread.yoloEnabled(),
+                      thread.spawnTrigger(),
+                      thread.constraints(),
+                      control,
+                      thread.inputThroughSequence(),
+                      thread.nextCommandSequence(),
+                      thread.version() + 1,
+                      thread.createdAt(),
+                      T5));
           return null;
         });
   }

@@ -199,17 +199,6 @@ public final class CanvasFunctionRunStateCodec {
     }
   }
 
-  public String functionName(String json) {
-    try {
-      ObjectNode root = object(MAPPER.readTree(json), "state");
-      ObjectNode plan = object(required(root, "plan"), "state.plan");
-      ObjectNode definition = object(required(plan, "definition"), "state.plan.definition");
-      return text(definition, "name");
-    } catch (JacksonException exception) {
-      throw invalid("FunctionRun stateJson must be valid typed JSON", exception);
-    }
-  }
-
   /** 外部提交事实只能由 Runtime 推进，合法性由调用方事务与状态机保证。 */
   public CanvasFunctionFrozenRun transition(
       CanvasFunctionFrozenRun run,

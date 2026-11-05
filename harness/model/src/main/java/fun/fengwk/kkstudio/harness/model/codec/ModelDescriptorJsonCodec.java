@@ -83,16 +83,6 @@ public final class ModelDescriptorJsonCodec {
     return writeDescriptor(descriptor);
   }
 
-  /** 解码单个 canonical descriptor JSON 文本。 */
-  public ModelDescriptor decodeDescriptor(String json) {
-    Objects.requireNonNull(json, "json");
-    try {
-      return decodeDescriptorNode(MAPPER.readTree(json));
-    } catch (JacksonException exception) {
-      throw new IllegalArgumentException("malformed model descriptor JSON", exception);
-    }
-  }
-
   /** 从任意 {@link JsonNode} 解码 descriptor；非对象节点抛 {@link IllegalArgumentException}。 */
   public ModelDescriptor decodeDescriptorNode(JsonNode value) {
     Objects.requireNonNull(value, "value");
@@ -109,16 +99,6 @@ public final class ModelDescriptorJsonCodec {
   public ObjectNode encodeVariantNode(ModelVariant variant) {
     Objects.requireNonNull(variant, "variant");
     return writeVariant(variant);
-  }
-
-  /** 解码单个 canonical variant JSON 文本。 */
-  public ModelVariant decodeVariant(String json) {
-    Objects.requireNonNull(json, "json");
-    try {
-      return decodeVariantNode(MAPPER.readTree(json));
-    } catch (JacksonException exception) {
-      throw new IllegalArgumentException("malformed model variant JSON", exception);
-    }
   }
 
   /** 从任意 {@link JsonNode} 解码 variant。 */

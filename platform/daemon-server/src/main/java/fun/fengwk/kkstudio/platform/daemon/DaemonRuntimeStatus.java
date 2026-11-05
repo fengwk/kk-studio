@@ -10,9 +10,4 @@ public record DaemonRuntimeStatus(String daemonVersion, DaemonUpdateProgress upd
   public DaemonRuntimeStatus {
     daemonVersion = DaemonCapabilities.validateDaemonVersion(daemonVersion);
   }
-
-  /** 无更新时的显式状态。 */
-  public static DaemonRuntimeStatus running(String daemonVersion) {
-    return new DaemonRuntimeStatus(daemonVersion, null);
-  }
 }

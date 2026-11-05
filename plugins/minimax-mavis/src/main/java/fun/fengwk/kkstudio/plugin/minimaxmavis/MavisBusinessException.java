@@ -9,7 +9,6 @@ public class MavisBusinessException extends MavisException {
 
   private final String context;
   private final String code;
-  private final String serverMessage;
 
   public MavisBusinessException(String context, String code, String serverMessage) {
     super(
@@ -21,7 +20,6 @@ public class MavisBusinessException extends MavisException {
             + ("402".equals(code) ? " Do not retry until credits are available." : ""));
     this.context = context;
     this.code = code;
-    this.serverMessage = serverMessage;
   }
 
   /** 出错的 Mavis 操作名，例如 MCP endpoint 名。 */
@@ -32,10 +30,5 @@ public class MavisBusinessException extends MavisException {
   /** 服务端业务状态码文本。 */
   public String code() {
     return code;
-  }
-
-  /** 去敏并截断后的服务端消息。 */
-  public String serverMessage() {
-    return serverMessage;
   }
 }

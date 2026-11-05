@@ -135,7 +135,7 @@ final class EnvironmentDaemonServerTestSupport {
   }
 
   static Envelope heartbeatEnvelope() {
-    return heartbeatEnvelope(1L, DaemonRuntimeStatus.running(DAEMON_VERSION));
+    return heartbeatEnvelope(1L, new DaemonRuntimeStatus(DAEMON_VERSION, null));
   }
 
   static Envelope heartbeatEnvelope(long revision, DaemonRuntimeStatus status) {
@@ -628,7 +628,7 @@ final class EnvironmentDaemonServerTestSupport {
       DaemonSession session = server.open(admitted, channel, channel.tunnel);
       sessions.put(channel, session);
       session.receive(
-          readyEnvelope(environmentId, 1L, DaemonRuntimeStatus.running(DAEMON_VERSION)));
+          readyEnvelope(environmentId, 1L, new DaemonRuntimeStatus(DAEMON_VERSION, null)));
       return channel;
     }
 
@@ -645,7 +645,7 @@ final class EnvironmentDaemonServerTestSupport {
     }
 
     void receiveReady(FakeControlChannel channel) {
-      receiveReady(channel, 1L, DaemonRuntimeStatus.running(DAEMON_VERSION));
+      receiveReady(channel, 1L, new DaemonRuntimeStatus(DAEMON_VERSION, null));
     }
 
     void receiveReady(FakeControlChannel channel, long revision, DaemonRuntimeStatus status) {

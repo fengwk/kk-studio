@@ -82,10 +82,6 @@ public class PostgresqlCanvasResourceRepository {
     return resourceStore.deleteByOwnerNode(canvasId, nodeId);
   }
 
-  public int deleteByCanvas(UUID canvasId) {
-    return resourceStore.deleteByCanvas(canvasId);
-  }
-
   private static CanvasResource toDomain(CanvasResourceDO resource) {
     return new CanvasResource(
         resource.getId(),

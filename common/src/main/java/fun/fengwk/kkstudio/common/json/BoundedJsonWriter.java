@@ -31,26 +31,16 @@ public final class BoundedJsonWriter {
    * @throws IllegalArgumentException maxBytes 非正数或序列化失败时
    */
   public static String write(JsonNode node, int maxBytes) {
-    BoundedOutputStream out = serialize(node, maxBytes, true);
+    BoundedOutputStream out = serialize(node, maxBytes);
     return out == null ? null : out.toUtf8String();
   }
 
-  /**
-   * 判断 {@link JsonNode} 的 UTF-8 JSON 输出是否不超过上限，不保留序列化字节。
-   *
-   * @param node 待序列化节点，不能为 null
-   * @param maxBytes 正数 UTF-8 字节上限
-   */
-  public static boolean fits(JsonNode node, int maxBytes) {
-    return serialize(node, maxBytes, false) != null;
-  }
-
-  private static BoundedOutputStream serialize(JsonNode node, int maxBytes, boolean retainBytes) {
+  private static BoundedOutputStream serialize(JsonNode node, int maxBytes) {
     Objects.requireNonNull(node, "node");
     if (maxBytes <= 0) {
       throw new IllegalArgumentException("maxBytes must be positive");
     }
-    BoundedOutputStream out = new BoundedOutputStream(maxBytes, retainBytes);
+    BoundedOutputStream out = new BoundedOutputStream(maxBytes, true);
     try {
       OBJECT_MAPPER.writeValue(out, node);
     } catch (JacksonException error) {
