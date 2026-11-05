@@ -34,7 +34,7 @@ const MAX_TRACKED_UPDATE_OPERATIONS = 8
  *
  * <p>PREPARED 只表示独立更新器已接受交接，因此 controller 可以结束，但准入门闩与目标快照必须继续保留。
  */
-export interface ActiveUpdate {
+interface ActiveUpdate {
   operationId: string
   commandKey: string
   targetVersion: string
@@ -49,7 +49,7 @@ export interface ActiveUpdate {
  *
  * <p>重放与重连重发只需要这一份事实：不再准备、下载或启动，但仍幂等重试许可释放。
  */
-export interface UpdateReceipt {
+interface UpdateReceipt {
   commandKey: string
   result: UpdateResult
   releasePermit?: ReleasePermit
@@ -63,11 +63,11 @@ type UpdateDecision =
   | { kind: 'admit'; active: ActiveUpdate; command: Update }
 
 /** 幂等身份只比较命令参数；operationId 是请求关联键，不是参数的一部分。 */
-export function updateCommandKey(command: Update): string {
+function updateCommandKey(command: Update): string {
   return JSON.stringify([command.targetVersion])
 }
 
-export function acceptedReceipt(command: Update): UpdateReceipt {
+function acceptedReceipt(command: Update): UpdateReceipt {
   return {
     commandKey: updateCommandKey(command),
     result: create(UpdateResultSchema, {
@@ -77,7 +77,7 @@ export function acceptedReceipt(command: Update): UpdateReceipt {
   }
 }
 
-export function failedReceipt(command: Update, message: string): UpdateReceipt {
+function failedReceipt(command: Update, message: string): UpdateReceipt {
   return {
     commandKey: updateCommandKey(command),
     result: create(UpdateResultSchema, {
@@ -88,7 +88,7 @@ export function failedReceipt(command: Update, message: string): UpdateReceipt {
   }
 }
 
-export function preparedReceipt(active: ActiveUpdate, command: Update, prepared: UpdateOutcomeLike): UpdateReceipt {
+function preparedReceipt(active: ActiveUpdate, command: Update, prepared: UpdateOutcomeLike): UpdateReceipt {
   return {
     commandKey: active.commandKey,
     result: create(UpdateResultSchema, {
@@ -100,7 +100,7 @@ export function preparedReceipt(active: ActiveUpdate, command: Update, prepared:
   }
 }
 
-export function executionFailureReceipt(
+function executionFailureReceipt(
   active: ActiveUpdate,
   command: Update,
   failure: Error | null,
@@ -120,7 +120,7 @@ export function executionFailureReceipt(
  *
  * <p>同 operation 参数漂移直接抛协议错误；同目标的新请求与已经是目标版本都只刷新状态，不重复执行。
  */
-export function decideUpdate(input: {
+function decideUpdate(input: {
   command: Update
   active: ActiveUpdate | null
   cached: UpdateReceipt | undefined
@@ -176,7 +176,7 @@ export function decideUpdate(input: {
   }
 }
 
-export function rememberUpdateResult(
+function rememberUpdateResult(
   results: Map<string, UpdateReceipt>,
   operationId: string,
   receipt: UpdateReceipt,
@@ -193,7 +193,7 @@ export function rememberUpdateResult(
 }
 
 /** 重连后优先重发仍在门闩中的回执，否则重发最近一条已完成回执。 */
-export function receiptToResend(active: ActiveUpdate | null, results: Map<string, UpdateReceipt>): UpdateReceipt | null {
+function receiptToResend(active: ActiveUpdate | null, results: Map<string, UpdateReceipt>): UpdateReceipt | null {
   if (active !== null) {
     return active.receipt
   }
@@ -212,7 +212,7 @@ interface UpdateExecution {
 /**
  * 在已经建立的门闩上执行一次更新：先停 IDE，再交给更新器。
  */
-export async function executeUpdateAttempt(
+async function executeUpdateAttempt(
   active: ActiveUpdate,
   command: Update,
   update: UpdatePort,
