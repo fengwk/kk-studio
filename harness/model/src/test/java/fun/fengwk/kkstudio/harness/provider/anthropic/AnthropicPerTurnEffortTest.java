@@ -68,7 +68,22 @@ class AnthropicPerTurnEffortTest {
     }
   }
 
-  // 反向补齐、首次声明、等级变化和当前尾部必须一起遵守 .280 的顺序。
+  // 首轮已有 max 声明；后续不变时重传同一前缀，不追加重复声明。
+  @Test
+  void keepsTheFirstDeclarationStableAcrossUnchangedTurns() {
+    JsonNode first = body(encode(ENABLED, "max", List.of(user("u1"))));
+    JsonNode second =
+        body(encode(ENABLED, "max", List.of(user("u1"), assistant("max"), user("u2"))));
+    assertEquals("max", first.path("output_config").path("effort").asString());
+    assertEquals("max", second.path("output_config").path("effort").asString());
+    assertEquals(List.of("user", "system:max"), describe(first.path("messages")));
+    assertEquals(
+        List.of("user", "system:max", "assistant", "user"), describe(second.path("messages")));
+    assertEquals(first.path("messages").get(0), second.path("messages").get(0));
+    assertEquals(first.path("messages").get(1), second.path("messages").get(1));
+  }
+
+  // 缺失值夹在 max/high 之间时必须继承后面的 high，不能错误地继承前面的 max。
   @Test
   void declaresOnlyChangesAndBackfillsUnknown() {
     var encoded =
@@ -77,9 +92,9 @@ class AnthropicPerTurnEffortTest {
             "max",
             List.of(
                 user("u1"),
-                assistant(null),
-                user("u2"),
                 assistant("max"),
+                user("u2"),
+                assistant(null),
                 user("u3"),
                 assistant("high"),
                 user("u4")));
@@ -91,9 +106,9 @@ class AnthropicPerTurnEffortTest {
             "system:max",
             "assistant",
             "user",
+            "system:high",
             "assistant",
             "user",
-            "system:high",
             "assistant",
             "user",
             "system:max"),

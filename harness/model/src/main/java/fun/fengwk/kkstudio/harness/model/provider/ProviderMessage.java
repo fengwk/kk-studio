@@ -5,7 +5,12 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 import java.util.List;
 import java.util.Objects;
 
-/** 已完成语义消息到 Provider 请求消息的无损、Provider 无关表示。 */
+/**
+ * 已完成语义消息到 Provider 请求消息的无损、Provider 无关表示。
+ *
+ * <p>{@code reasoningEffort} 是本次请求重建时解析出的历史 assistant 推理级别；null 表示未知。不直接作为消息字段发送给
+ * Provider，是否使用及如何编码由各协议决定。
+ */
 public record ProviderMessage(
     ProviderMessageRole role,
     List<ProviderContentBlock> contents,
