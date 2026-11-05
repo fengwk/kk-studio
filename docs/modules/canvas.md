@@ -5,7 +5,7 @@ Canvas 是建立在平台之上的图形编辑应用：用户在画布上摆放�
 | 模块 | 职责 | 依赖 |
 | --- | --- | --- |
 | [`apps/canvas/spi`](../../apps/canvas/spi/) | Canvas Function 能力 SPI：adapter、函数定义与参数 schema、冻结运行计划、执行上下文与严格 JSON 模型 | [Common](common.md)、Jackson 3 流式 API |
-| [`apps/canvas/runtime`](../../apps/canvas/runtime/) | graph、typed command、领域端口、PostgreSQL 持久化、Function Run 运行时、目录冻结与投影、revision 通知纵向切片、HTTP 边界、DTO 映射与平台适配 | [Canvas SPI](#canvas-function-spi)、[Common](common.md)、[Platform Plugin API](platform-plugin-api.md)、[Share](share.md)、[Platform](platform.md)、[Durable Work](work.md)、Spring JDBC、Spring Web |
+| [`apps/canvas/runtime`](../../apps/canvas/runtime/) | graph、typed command、领域模型、PostgreSQL 持久化、Function Run 运行时、目录冻结与投影、revision 通知纵向切片、HTTP 边界、DTO 映射与平台适配 | [Canvas SPI](#canvas-function-spi)、[Common](common.md)、[Platform Plugin API](platform-plugin-api.md)、[Share](share.md)、[Platform](platform.md)、[Durable Work](work.md)、Spring JDBC、Spring Web |
 
 平台从不依赖 Canvas：Canvas 经平台的公开服务使用全局 Blob 与插件快照。[Canvas DTO](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/dto/) 和领域间的映射在 [`CanvasDtoMapper`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/dto/CanvasDtoMapper.java)，由 [`CanvasPlatformAutoConfiguration`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/platform/CanvasPlatformAutoConfiguration.java) 使用平台 Storage 显式装配；独立 Canvas 运行时不加载它。[Web](web.md) 是组合根，Canvas 自己的 [`CanvasHttpAutoConfiguration`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/http/CanvasHttpAutoConfiguration.java) 把控制器注册进宿主的 MVC。Canvas 与 Project 并列存在，各自拥有领域数据，跨域数据约束与 ER 关系见 [Schema](schema.md)。
 
@@ -92,11 +92,11 @@ Function 保存为 `{name, args}`，具体函数声明参数 Schema、输入限�
 
 ## 持久化与读模型
 
-持久化适配使用 `JdbcClient`：[`PostgresqlCanvasStore`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/PostgresqlCanvasStore.java) 聚合 document、node、group 与幂等记账的行操作，[`PostgresqlCanvasCommandService`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/PostgresqlCanvasCommandService.java) 执行上面的写协议，资源与 pin 由各自的 Repository 写入。`canvas_*` 的外键全部 RESTRICT，删除顺序由代码显式保证，不依赖 cascade。
+持久化适配使用 `JdbcClient`：[`PostgresqlCanvasStore`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/PostgresqlCanvasStore.java) 聚合 document、node、group 与幂等记账的行操作，[`CanvasCommandService`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/CanvasCommandService.java) 执行上面的写协议，资源与 pin 由各自的 Repository 写入。`canvas_*` 的外键全部 RESTRICT，删除顺序由代码显式保证，不依赖 cascade。
 
 HTTP 不提供画布删除入口。删除节点或资源时，无 pin 的资源行会被删除并释放其全局 Blob 引用；解除挂接后仍被 Run pin 的资源继续保留。Blob 引用释放失败使整个事务回滚。
 
-[`PostgresqlCanvasQueryService.findSnapshot`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/PostgresqlCanvasQueryService.java) 装配 document、runs、按 owner 分组的资源、node、group 与 references，并在返回前重读对比 document 与 runs：读取窗口内有并发提交就重新读取，保证 graph 与 Run 投影属于同一代次。单资源读取由 [`CanvasQueryService.findResource`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/CanvasQueryService.java) 直接按 `(canvasId, resourceId)` 查询已挂载资源（`ownerNodeId != null`），供 [`CanvasResourceUrlService`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/platform/CanvasResourceUrlService.java) 定位资源并签发下载或预览 URL，无需全量加载画布快照。
+[`CanvasQueryService.findSnapshot`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/CanvasQueryService.java) 装配 document、runs、按 owner 分组的资源、node、group 与 references，并在返回前重读对比 document 与 runs：读取窗口内有并发提交就重新读取，保证 graph 与 Run 投影属于同一代次。单资源读取由 [`CanvasQueryService.findResource`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/CanvasQueryService.java) 直接按 `(canvasId, resourceId)` 查询已挂载资源（`ownerNodeId != null`），供 [`CanvasResourceUrlService`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/platform/CanvasResourceUrlService.java) 定位资源并签发下载或预览 URL，无需全量加载画布快照。
 
 ## Revision 通知
 
@@ -108,7 +108,7 @@ Canvas 独占 `canvas_revision` 通知通道：通道常量、revision 事件源
   [`PostgresqlCanvasChangeNotifier`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/PostgresqlCanvasChangeNotifier.java)
   在同一事务内用该常量 `pg_notify`，宿主的 LISTEN 注册也取同一常量，因此不存在第二处通道定义。
 - 注册、cursor 与 fan-out 复用 `platform.notification` 的 `VersionNotificationHub`：本类只经
-  [`CanvasQueryService.findDocument`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/CanvasQueryService.java) 读权威
+  [`CanvasQueryService.findDocument`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/CanvasQueryService.java) 读权威
   `revision` 并映射 revision 事件。`subscribe` 先注册 consumer 再读当前 revision 返回 ack cursor，返回的 cursor 之后的变化保证送达；
   畸形 payload 与 LISTEN 建连/重连退化为全量 resync；退订幂等，已关闭的订阅者不再收到投递。查询失败释放刚建立的注册并保留原始异常。
   本类不持有 LISTEN 连接，也不认识浏览器传输。
@@ -182,7 +182,7 @@ heartbeat 按固定间隔续租，不触碰业务事实；续租失败即停止�
 
 - **成功**要求输出计划的每个槽位都已物化且与槽位一一对应：媒体槽位是同画布、无 owner、有 blob 且 MIME 与 kind 匹配的资源，`TEXT` 槽位只有文本；随后整组替换节点当前资源，Run 置为 `SUCCEEDED` 并释放 pin。绝不发布半成品数组。
 - **失败与取消**先写终态，再释放 pin，最后丢弃无 owner 的计划输出；取消来自客户端，CAS 只要求 Run 活跃，不需要租约。
-- **人工决议**由 [`CanvasFunctionService`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/CanvasFunctionService.java) 接收：必须给出核对说明，[`CanvasFunctionUnknownResolution`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/CanvasFunctionUnknownResolution.java) 的 `RESUME` 把 Run 还回 `READY`（只重新查询，不重新提交），`FAILED` / `CANCELLED` 释放 pin 与未挂接输出。取消与 `resolve(CANCELLED)` 在事务完成后 best-effort 调用 adapter 的 `cancel`。UNKNOWN 的取消与删除要求先完成核实；租约围栏防止旧 Worker 发布结果，外部是否执行由查询或人工核查确认，取消请求的接受与外部取消成功分别判断。
+- **人工决议**由 [`CanvasFunctionService`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/function/CanvasFunctionService.java) 接收：必须给出核对说明，[`CanvasFunctionUnknownResolution`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/CanvasFunctionUnknownResolution.java) 的 `RESUME` 把 Run 还回 `READY`（只重新查询，不重新提交），`FAILED` / `CANCELLED` 释放 pin 与未挂接输出。取消与 `resolve(CANCELLED)` 在事务完成后 best-effort 调用 adapter 的 `cancel`。UNKNOWN 的取消与删除要求先完成核实；租约围栏防止旧 Worker 发布结果，外部是否执行由查询或人工核查确认，取消请求的接受与外部取消成功分别判断。
 
 同一槽位重复物化返回既有 Resource 行，不新增行、不重复 pin，因此部分物化后崩溃的 Run 恢复后只补齐缺失槽位。
 
@@ -233,7 +233,7 @@ pollIntervalMillis      = 1000     rejectionDelayMillis    = 1000
 
 ## 从哪里改
 
-- 领域与命令：[`CanvasCommandPlanner.java`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/CanvasCommandPlanner.java) 与同包的领域值、端口。
+- 领域与命令：[`CanvasCommandPlanner.java`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/CanvasCommandPlanner.java) 与同包的领域值。
 - HTTP 边界：[`http`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/http/) 包只做适配，新增或修改端点先改领域服务，再同步控制器与其 standalone MockMvc 测试。
 - SQL：先看 [`V1__schema.sql`](../../schema/src/main/resources/db/migration/V1__schema.sql) 的 canvas 段与 [Schema](schema.md) 的重建规则，再改 [`postgresql`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/) 下对应的 JdbcStore 与集成测试。
 - Function 运行时：[`function`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/function/) 目录下的 dispatcher、worker、transactions、codec 是一个整体，改所有权语义时同步检查 `CanvasFunctionRunJdbcStore` 的租约围栏与锁序。

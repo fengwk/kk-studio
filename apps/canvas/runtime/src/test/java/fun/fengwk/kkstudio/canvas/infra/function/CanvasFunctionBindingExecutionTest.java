@@ -162,8 +162,8 @@ class CanvasFunctionBindingExecutionTest {
     when(stateCodec.decode(cancelled.stateJson())).thenReturn(frozen);
     CanvasFunctionRunTransactions transactions = mock(CanvasFunctionRunTransactions.class);
     when(transactions.cancel(CANVAS, NODE, REQUEST.toString())).thenReturn(cancelled);
-    CanvasFunctionRuntimeService service =
-        new CanvasFunctionRuntimeService(
+    CanvasFunctionService service =
+        new CanvasFunctionService(
             mock(PostgresqlCanvasStore.class),
             mock(PostgresqlCanvasFunctionRunRepository.class),
             transactions,

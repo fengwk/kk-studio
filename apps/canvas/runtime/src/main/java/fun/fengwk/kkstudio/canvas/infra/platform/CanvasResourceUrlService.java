@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.canvas.infra.platform;
 
-import fun.fengwk.kkstudio.canvas.CanvasQueryService;
 import fun.fengwk.kkstudio.canvas.CanvasResource;
+import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasQueryService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.share.storage.StoragePresignedUrlDTO;
 

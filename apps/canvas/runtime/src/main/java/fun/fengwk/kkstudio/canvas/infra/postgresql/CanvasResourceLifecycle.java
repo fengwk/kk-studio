@@ -4,7 +4,6 @@ import org.springframework.stereotype.Repository;
 
 import fun.fengwk.kkstudio.canvas.CanvasFunctionResourcePin;
 import fun.fengwk.kkstudio.canvas.CanvasResource;
-import fun.fengwk.kkstudio.canvas.CanvasResourceLifecycle;
 import fun.fengwk.kkstudio.canvas.infra.platform.CanvasBlobReleaser;
 
 import java.util.ArrayList;
@@ -22,13 +21,13 @@ import java.util.UUID;
  * 是否保留，不额外修改引用计数。宿主 Storage 的 Blob 引用释放通过 {@link CanvasBlobReleaser} 注入，因此本类不需要了解对象存储。
  */
 @Repository
-public class PostgresqlCanvasResourceLifecycle implements CanvasResourceLifecycle {
+public class CanvasResourceLifecycle {
 
   private final PostgresqlCanvasResourceRepository resourceRepository;
   private final PostgresqlCanvasFunctionResourcePinRepository pinRepository;
   private final CanvasBlobReleaser blobReleaser;
 
-  public PostgresqlCanvasResourceLifecycle(
+  public CanvasResourceLifecycle(
       PostgresqlCanvasResourceRepository resourceRepository,
       PostgresqlCanvasFunctionResourcePinRepository pinRepository,
       CanvasBlobReleaser blobReleaser) {
@@ -37,21 +36,18 @@ public class PostgresqlCanvasResourceLifecycle implements CanvasResourceLifecycl
     this.blobReleaser = Objects.requireNonNull(blobReleaser, "blobReleaser");
   }
 
-  @Override
   public void releaseRunPins(UUID canvasId, UUID nodeId, UUID requestId) {
     List<CanvasFunctionResourcePin> pins = pinRepository.findByRun(canvasId, nodeId, requestId);
     pinRepository.deleteByRun(canvasId, nodeId, requestId);
     collectUnowned(canvasId, pins);
   }
 
-  @Override
   public void releaseNodePins(UUID canvasId, UUID nodeId) {
     List<CanvasFunctionResourcePin> pins = pinRepository.findByNode(canvasId, nodeId);
     pinRepository.deleteByNode(canvasId, nodeId);
     collectUnowned(canvasId, pins);
   }
 
-  @Override
   public List<CanvasResource> replaceOwnedWithTargets(
       UUID canvasId, UUID nodeId, List<UUID> orderedTargetResourceIds) {
     Objects.requireNonNull(orderedTargetResourceIds, "orderedTargetResourceIds");
@@ -95,7 +91,6 @@ public class PostgresqlCanvasResourceLifecycle implements CanvasResourceLifecycl
     return List.copyOf(attached);
   }
 
-  @Override
   public void discardUnownedTargets(UUID canvasId, Collection<UUID> targetResourceIds) {
     Objects.requireNonNull(targetResourceIds, "targetResourceIds");
     for (UUID resourceId : new LinkedHashSet<>(targetResourceIds)) {
@@ -109,7 +104,6 @@ public class PostgresqlCanvasResourceLifecycle implements CanvasResourceLifecycl
     }
   }
 
-  @Override
   public void discardResource(UUID canvasId, UUID resourceId) {
     CanvasResource resource =
         resourceRepository.findByIdForUpdate(canvasId, resourceId).orElse(null);

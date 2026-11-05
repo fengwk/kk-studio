@@ -26,7 +26,6 @@ import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.canvas.CanvasCommand;
 import fun.fengwk.kkstudio.canvas.CanvasCommandResult;
-import fun.fengwk.kkstudio.canvas.CanvasCommandService;
 import fun.fengwk.kkstudio.canvas.CanvasConflict;
 import fun.fengwk.kkstudio.canvas.CanvasConflictException;
 import fun.fengwk.kkstudio.canvas.CanvasDocument;
@@ -37,7 +36,6 @@ import fun.fengwk.kkstudio.canvas.CanvasGroup;
 import fun.fengwk.kkstudio.canvas.CanvasGroupPatch;
 import fun.fengwk.kkstudio.canvas.CanvasNodePatch;
 import fun.fengwk.kkstudio.canvas.CanvasPatch;
-import fun.fengwk.kkstudio.canvas.CanvasQueryService;
 import fun.fengwk.kkstudio.canvas.CanvasReference;
 import fun.fengwk.kkstudio.canvas.CanvasResource;
 import fun.fengwk.kkstudio.canvas.CanvasResourceInput;
@@ -52,6 +50,8 @@ import fun.fengwk.kkstudio.canvas.dto.CanvasTransformDTO;
 import fun.fengwk.kkstudio.canvas.dto.CreateCanvasRequestDTO;
 import fun.fengwk.kkstudio.canvas.function.CanvasJson;
 import fun.fengwk.kkstudio.canvas.infra.dto.CanvasDtoMapper;
+import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasCommandService;
+import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasQueryService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 

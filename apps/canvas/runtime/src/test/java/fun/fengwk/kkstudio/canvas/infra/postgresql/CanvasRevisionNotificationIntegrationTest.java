@@ -12,7 +12,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 
 import fun.fengwk.kkstudio.canvas.CanvasCommand;
 import fun.fengwk.kkstudio.canvas.CanvasCommandResult.Accepted;
-import fun.fengwk.kkstudio.canvas.CanvasCommandService;
 import fun.fengwk.kkstudio.canvas.CanvasDocument;
 import fun.fengwk.kkstudio.canvas.CanvasResourceInput;
 import fun.fengwk.kkstudio.canvas.CanvasTransform;

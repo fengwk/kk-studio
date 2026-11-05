@@ -38,7 +38,7 @@ import java.util.Set;
 import java.util.UUID;
 
 /** API orchestration 只提交 durable READY；查询、取消与人工解除保持原协议和 adapter best-effort hook。 */
-class CanvasFunctionRuntimeServiceTest {
+class CanvasFunctionServiceTest {
 
   private static final UUID CANVAS = UUID.randomUUID();
   private static final UUID NODE = UUID.randomUUID();
@@ -263,7 +263,7 @@ class CanvasFunctionRuntimeServiceTest {
     private final CanvasFunctionRunTransactions transactions =
         mock(CanvasFunctionRunTransactions.class);
     private final CanvasFunctionRunStateCodec stateCodec = mock(CanvasFunctionRunStateCodec.class);
-    private final CanvasFunctionRuntimeService service;
+    private final CanvasFunctionService service;
 
     private Fixture() {
       this(
@@ -273,7 +273,7 @@ class CanvasFunctionRuntimeServiceTest {
 
     private Fixture(PluginCanvasFunctionCatalogSource catalogSource) {
       service =
-          new CanvasFunctionRuntimeService(
+          new CanvasFunctionService(
               canvasStore, runRepository, transactions, catalogSource, stateCodec);
     }
 

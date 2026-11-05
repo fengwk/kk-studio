@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.canvas.infra.postgresql;
 import org.springframework.stereotype.Repository;
 
 import fun.fengwk.kkstudio.canvas.CanvasResource;
-import fun.fengwk.kkstudio.canvas.CanvasResourceLifecycle;
 
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;

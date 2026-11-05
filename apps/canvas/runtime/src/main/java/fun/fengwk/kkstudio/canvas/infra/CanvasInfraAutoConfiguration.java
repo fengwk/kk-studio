@@ -8,8 +8,8 @@ import org.springframework.context.annotation.ComponentScan.Filter;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.FilterType;
 
-import fun.fengwk.kkstudio.canvas.CanvasQueryService;
 import fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionRuntimeProperties;
+import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasQueryService;
 import fun.fengwk.kkstudio.canvas.notification.CanvasVersionNotifications;
 
 /**

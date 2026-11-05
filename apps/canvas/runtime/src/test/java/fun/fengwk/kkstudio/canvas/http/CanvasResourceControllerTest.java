@@ -15,9 +15,9 @@ import org.junit.jupiter.api.Test;
 import org.springframework.test.web.servlet.MockMvc;
 
 import fun.fengwk.kkstudio.canvas.CanvasDocument;
-import fun.fengwk.kkstudio.canvas.CanvasQueryService;
 import fun.fengwk.kkstudio.canvas.CanvasResource;
 import fun.fengwk.kkstudio.canvas.infra.platform.CanvasResourceUrlService;
+import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasQueryService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.share.storage.StoragePresignedUrlDTO;
 

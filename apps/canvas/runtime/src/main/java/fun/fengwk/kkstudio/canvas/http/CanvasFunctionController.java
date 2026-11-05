@@ -10,7 +10,6 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRunException;
-import fun.fengwk.kkstudio.canvas.CanvasFunctionService;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionUnknownResolution;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionVersion;
 import fun.fengwk.kkstudio.canvas.dto.CanvasFunctionCancelRequestDTO;
@@ -19,6 +18,7 @@ import fun.fengwk.kkstudio.canvas.dto.CanvasFunctionRunDTO;
 import fun.fengwk.kkstudio.canvas.dto.CanvasFunctionRunRequestDTO;
 import fun.fengwk.kkstudio.canvas.dto.CanvasFunctionUnknownResolutionDTO;
 import fun.fengwk.kkstudio.canvas.infra.dto.CanvasDtoMapper;
+import fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionService;
 import fun.fengwk.kkstudio.canvas.infra.platform.PluginCanvasFunctionCatalogSource;
 import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
