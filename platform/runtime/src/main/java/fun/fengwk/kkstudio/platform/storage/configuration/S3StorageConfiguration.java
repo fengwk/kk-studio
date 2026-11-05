@@ -21,6 +21,7 @@ import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.platform.storage.StorageMaintenance;
 import fun.fengwk.kkstudio.platform.storage.StorageMaintenanceWakeup;
+import fun.fengwk.kkstudio.platform.storage.media.FfmpegStorageMediaProbe;
 import fun.fengwk.kkstudio.platform.storage.persistence.SessionBlobRefRepository;
 import fun.fengwk.kkstudio.platform.storage.persistence.SessionFileRepository;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageBlobRepository;
@@ -29,14 +30,12 @@ import fun.fengwk.kkstudio.platform.storage.persistence.StorageUploadRepository;
 import fun.fengwk.kkstudio.platform.storage.s3.S3PresignService;
 import fun.fengwk.kkstudio.platform.storage.s3.S3ReadinessProbe;
 import fun.fengwk.kkstudio.platform.storage.s3.S3StorageService;
-import fun.fengwk.kkstudio.platform.storage.service.HeadOnlyStorageMediaProbe;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.SessionFileLimits;
 import fun.fengwk.kkstudio.platform.storage.service.SessionFileStore;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobPreviewService;
-import fun.fengwk.kkstudio.platform.storage.service.StorageMediaProbe;
 import fun.fengwk.kkstudio.platform.storage.service.StorageObjectCleanupService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadOperationLock;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
@@ -132,12 +131,6 @@ public class S3StorageConfiguration {
     return new S3PresignService(properties, s3Presigner, snapshot);
   }
 
-  /** 默认媒体事实探针：只记录 HEAD 元数据；后续 Canvas 媒体集成可替换为 Ffmpeg 实现。 */
-  @Bean
-  public StorageMediaProbe storageMediaProbe() {
-    return new HeadOnlyStorageMediaProbe();
-  }
-
   /** blob 生命周期管理器：retain/release 为 MANDATORY 事务方法，零引用后 afterCommit 只唤醒后台维护。 */
   @Bean
   public StorageBlobManager storageBlobManager(
@@ -205,7 +198,7 @@ public class S3StorageConfiguration {
       StorageBlobManager blobManager,
       S3StorageService s3StorageService,
       S3PresignService s3PresignService,
-      StorageMediaProbe mediaProbe,
+      FfmpegStorageMediaProbe mediaProbe,
       StorageBlobPreviewService blobPreviewService,
       StorageObjectCleanupService storageObjectCleanupService,
       StorageUploadOperationLock storageUploadOperationLock,

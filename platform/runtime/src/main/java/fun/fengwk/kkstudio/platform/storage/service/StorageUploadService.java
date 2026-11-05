@@ -25,6 +25,7 @@ import fun.fengwk.kkstudio.platform.storage.configuration.S3StorageProperties;
 import fun.fengwk.kkstudio.platform.storage.configuration.StorageMaintenanceProperties;
 import fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;
+import fun.fengwk.kkstudio.platform.storage.media.FfmpegStorageMediaProbe;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageBlobRepository;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageUploadRepository;
 import fun.fengwk.kkstudio.platform.storage.s3.S3ObjectMetadata;
@@ -86,7 +87,7 @@ public class StorageUploadService {
   private final StorageBlobManager blobManager;
   private final S3StorageService s3StorageService;
   private final S3PresignService s3PresignService;
-  private final StorageMediaProbe mediaProbe;
+  private final FfmpegStorageMediaProbe mediaProbe;
   private final StorageBlobPreviewService blobPreviewService;
   private final StorageUploadOperationLock operationLock;
   private final ObjectProvider<StorageMaintenanceWakeup> maintenanceWakeups;
@@ -103,7 +104,7 @@ public class StorageUploadService {
       StorageBlobManager blobManager,
       S3StorageService s3StorageService,
       S3PresignService s3PresignService,
-      StorageMediaProbe mediaProbe,
+      FfmpegStorageMediaProbe mediaProbe,
       StorageBlobPreviewService blobPreviewService,
       StorageObjectCleanupService objectCleanupService,
       StorageUploadOperationLock operationLock,

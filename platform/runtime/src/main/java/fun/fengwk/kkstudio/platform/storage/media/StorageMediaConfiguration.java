@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.platform.storage.media;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.context.annotation.Primary;
 import tools.jackson.databind.ObjectMapper;
 
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
@@ -15,8 +14,8 @@ import fun.fengwk.kkstudio.platform.storage.service.StorageBlobPreviewService;
 @EnableConfigurationProperties(StorageMediaProperties.class)
 public class StorageMediaConfiguration {
 
+  /** 唯一媒体事实探针：ffprobe 不可用或探测失败时自身回退到 HEAD 元数据。 */
   @Bean
-  @Primary
   public FfmpegStorageMediaProbe ffmpegStorageMediaProbe(
       StorageMediaProperties properties,
       SystemSettingsSnapshot snapshot,
