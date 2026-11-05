@@ -100,7 +100,7 @@ class DaemonCrossLanguageIntegrationTest {
       EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
   private static final String VALID_TOKEN = "valid-registration-token-123456";
   private static final String INVALID_TOKEN = "invalid-registration-token-999999";
-  private static final String DAEMON_VERSION = "1.0.0";
+  private static final String DAEMON_VERSION = "2.0.0";
   private static final Duration TIMEOUT = Duration.ofSeconds(20);
 
   private Server server;
