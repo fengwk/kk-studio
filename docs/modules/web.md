@@ -211,7 +211,8 @@ JSON API 显式返回共享的
 启用重复键检测、Long 字符串序列化和 DTO 声明顺序，默认省略 null。
 全仓仅装配官方 Jackson 3 mapper，classpath 无 Jackson 2 databind；
 自有代码只解析到该 Jackson 3 mapper；Share DTO 的严格字段规则直接由 Jackson 3 注解声明
-（例如 `protocolOptionsJson` 与网络文本字段只接受 JSON 字符串 token）。
+（例如 `protocolOptionsJson` 与网络文本字段只接受 JSON 字符串 token）。`protocolOptionsJson` 的内容语法、64 KiB 上限与 canonical 化
+由 harness-model 的 `ProviderProtocolOptions` 在平台解析配置时统一执行，HTTP mapper 只检查 wire 形状，不重复解析选项。
 required-nullable 字段由 DTO 显式 ALWAYS。未知字段由 DTO 的 JsonAnySetter 控制，
 领域 codec 另有严格语法校验；HTTP mapper 的 trailing-token 行为保持 Jackson 配置本身的边界。
 
