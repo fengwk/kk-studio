@@ -184,10 +184,6 @@ public record ToolInvocation(
           case WAITING_INPUT -> next == ToolInvocationStatus.WAITING_INPUT
               || next == ToolInvocationStatus.SUCCEEDED
               || next == ToolInvocationStatus.CANCELLED;
-          case WAITING_REQUEST -> next == ToolInvocationStatus.WAITING_REQUEST
-              || next == ToolInvocationStatus.READY
-              || next == ToolInvocationStatus.FAILED
-              || next == ToolInvocationStatus.CANCELLED;
           case READY -> next == ToolInvocationStatus.READY
               || next == ToolInvocationStatus.WAITING_APPROVAL
               || next == ToolInvocationStatus.WAITING_INPUT
@@ -473,25 +469,22 @@ public record ToolInvocation(
   }
 
   /**
-   * WAITING_REQUEST / READY / RUNNING -&gt; FAILED，并附带一个 terminal error；attempt 不变。WAITING_APPROVAL
-   * 被拒绝： undecided approval 只能通过已决定的 DENIED 决策来拒绝，或被作为 CANCELLED 终止。
+   * READY / RUNNING -&gt; FAILED，并附带一个 terminal error；attempt 不变。WAITING_APPROVAL 被拒绝：undecided
+   * approval 只能通过已决定的 DENIED 决策来拒绝，或被作为 CANCELLED 终止。
    */
   public ToolInvocation fail(ToolInvocationError error, Instant now) {
     Objects.requireNonNull(error, "error");
-    if (status != ToolInvocationStatus.WAITING_REQUEST
-        && status != ToolInvocationStatus.READY
-        && status != ToolInvocationStatus.RUNNING) {
+    if (status != ToolInvocationStatus.READY && status != ToolInvocationStatus.RUNNING) {
       throw new IllegalArgumentException(
-          "fail requires WAITING_REQUEST, READY or RUNNING status; WAITING_APPROVAL must be"
-              + " decided or stopped");
+          "fail requires READY or RUNNING status; WAITING_APPROVAL must be decided or stopped");
     }
     return withState(
         ToolInvocationStatus.FAILED, attempt, approval, null, ToolEffectBatch.EMPTY, error, now);
   }
 
   /**
-   * WAITING_APPROVAL / WAITING_REQUEST / READY / RUNNING -&gt; CANCELLED，并附带一个 terminal
-   * error；attempt 不变。
+   * WAITING_APPROVAL / WAITING_INPUT / READY / RUNNING -&gt; CANCELLED，并附带一个 terminal error；attempt
+   * 不变。
    */
   public ToolInvocation cancel(ToolInvocationError error, Instant now) {
     Objects.requireNonNull(error, "error");
@@ -616,15 +609,6 @@ public record ToolInvocation(
       if (approval != null) {
         throw new IllegalArgumentException(
             "WAITING_INPUT must not carry an approval: a questionnaire never authorizes a tool");
-      }
-      requireNoTerminalFacts(status, result, effects, error);
-      requireNoInputReceipt(status, inputReceipt);
-    } else if (status == ToolInvocationStatus.WAITING_REQUEST) {
-      if (attempt != 0) {
-        throw new IllegalArgumentException("WAITING_REQUEST requires attempt 0");
-      }
-      if (approval != null) {
-        throw new IllegalArgumentException("WAITING_REQUEST must not carry an approval");
       }
       requireNoTerminalFacts(status, result, effects, error);
       requireNoInputReceipt(status, inputReceipt);

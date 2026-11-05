@@ -13,13 +13,6 @@ public enum ToolInvocationStatus {
    */
   WAITING_INPUT,
 
-  /**
-   * 工具调用已完整声明但等待外部请求确认。
-   *
-   * <p>该状态不是可执行的公共 Tool Work：在保持该状态时，任何执行器都不得运行它。
-   */
-  WAITING_REQUEST,
-
   /** 工具调用已就绪，等待分派执行。 */
   READY,
 

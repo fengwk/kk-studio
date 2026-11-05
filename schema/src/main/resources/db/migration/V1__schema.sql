@@ -550,7 +550,6 @@ create table harness_tool_invocation (
         status in (
             'WAITING_APPROVAL',
             'WAITING_INPUT',
-            'WAITING_REQUEST',
             'READY',
             'RUNNING',
             'SUCCEEDED',
@@ -575,7 +574,7 @@ comment on column harness_tool_invocation.assistant_entry_id is '携带对应 To
 comment on column harness_tool_invocation.call_index is 'assistant 消息内 tool call 的下标（从 0 递增）';
 comment on column harness_tool_invocation.call is '冻结的 ToolCall（JSON object）';
 comment on column harness_tool_invocation.binding is '冻结的 tool binding（JSON object，仅在 immediate FAILED attempt=0 槽位可空）';
-comment on column harness_tool_invocation.status is '生命周期状态（含 WAITING_REQUEST、WAITING_APPROVAL 与 WAITING_INPUT）';
+comment on column harness_tool_invocation.status is '生命周期状态（含 WAITING_APPROVAL 与 WAITING_INPUT）';
 comment on column harness_tool_invocation.attempt is '已确认的 start 尝试次数（从 0 递增）';
 comment on column harness_tool_invocation.approval is '审批记录（JSON object，可空）';
 comment on column harness_tool_invocation.result is 'terminal 成功结果（JSON object，与 error 互斥）';
@@ -587,7 +586,7 @@ comment on column harness_tool_invocation.input_receipt is '交互回执（JSON 
 
 create index idx_harness_tool_invocation_thread_nonterminal
     on harness_tool_invocation (thread_id)
-    where status in ('WAITING_APPROVAL', 'WAITING_INPUT', 'WAITING_REQUEST', 'READY', 'RUNNING');
+    where status in ('WAITING_APPROVAL', 'WAITING_INPUT', 'READY', 'RUNNING');
 
 comment on index idx_harness_tool_invocation_thread_nonterminal is '未收尾 ToolInvocation 按公共 Thread 归属的查找路径（已终态行在 batch apply 后物理删除，不需要覆盖）';
 

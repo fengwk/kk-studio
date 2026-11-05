@@ -289,12 +289,10 @@ final class PostgresqlToolStore implements ToolStore {
       }
       boolean allowedStatus =
           invocation.status() == ToolInvocationStatus.READY
-              || invocation.status() == ToolInvocationStatus.FAILED
-              || (invocation.status() == ToolInvocationStatus.WAITING_REQUEST
-                  && invocation.binding() != null);
+              || invocation.status() == ToolInvocationStatus.FAILED;
       if (!allowedStatus || invocation.attempt() != 0 || invocation.approval() != null) {
         throw new IllegalArgumentException(
-            "new tool invocations must be READY, bound WAITING_REQUEST, or unattached FAILED with attempt 0 and no approval");
+            "new tool invocations must be READY or FAILED with attempt 0 and no approval");
       }
       requireUniqueToolCallIndex(invocation);
       requireValidToolReferences(invocation);

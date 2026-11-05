@@ -1020,26 +1020,6 @@ class ToolProcessorExecutionTest {
     }
   }
 
-  /** WAITING_REQUEST 工具认领时直接完成 Work，不调网关、不唤醒 Thread。 */
-  @Test
-  void waitingRequestToolCompletesWorkWithoutGatewayOrThreadWake() throws Exception {
-    Fixture fixture = ToolProcessorTestSupport.waitingRequestFixture();
-
-    int initialAdmitCalls = fixture.gateway.admitCalls;
-    Work initialThreadWork =
-        ToolProcessorTestSupport.threadWork(fixture.store, fixture.baseline.threadId());
-
-    // 认领 TOOL Work 并处理
-    assertEquals(ProcessResult.TERMINATED, fixture.processor.process(claim(fixture)));
-
-    // 网关未调用，TOOL Work 已完成，Thread 未唤醒
-    assertEquals(initialAdmitCalls, fixture.gateway.admitCalls);
-    assertNull(ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId));
-    Work currentThreadWork =
-        ToolProcessorTestSupport.threadWork(fixture.store, fixture.baseline.threadId());
-    assertEquals(initialThreadWork.wakeVersion(), currentThreadWork.wakeVersion());
-  }
-
   /** READY 工具认领后经网关正常执行为 SUCCEEDED，且 ToolOutcomeQuery.find 可读到该终态。 */
   @Test
   void readyToolRunsSuccessfullyAndOutcomeCanBeQueried() throws Exception {
