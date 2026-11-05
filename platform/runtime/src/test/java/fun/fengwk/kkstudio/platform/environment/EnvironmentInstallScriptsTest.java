@@ -15,7 +15,7 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInstallConfigDTO;
 
@@ -260,18 +260,18 @@ class EnvironmentInstallScriptsTest {
   void rejectsBlankTokenControlCharactersAndUnknownOperatingSystem() {
     EnvironmentInstallConfigDTO config = config("linux");
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () -> EnvironmentInstallScripts.install(config, " \n", SystemSettings.Network.DEFAULT));
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () ->
             EnvironmentInstallScripts.install(
                 config, "token\u2028", SystemSettings.Network.DEFAULT));
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () -> EnvironmentInstallScripts.uninstall("solaris", SystemSettings.Network.DEFAULT));
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () -> EnvironmentInstallScripts.install(null, "token", SystemSettings.Network.DEFAULT));
   }
 

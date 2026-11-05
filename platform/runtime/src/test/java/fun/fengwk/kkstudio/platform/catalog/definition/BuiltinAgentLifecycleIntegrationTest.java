@@ -13,10 +13,8 @@ import fun.fengwk.kkstudio.common.page.PageQuery;
 import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgentDefinitions;
 import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgentInitializer;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
-import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
-import fun.fengwk.kkstudio.platform.error.AiInUseException;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.error.CatalogVersions;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionCreateDTO;
@@ -87,7 +85,7 @@ public class BuiltinAgentLifecycleIntegrationTest extends PostgresSpringTestSupp
     initializer.afterPropertiesSet();
     AgentDefinition compaction = definitionRepository.getByName(COMPACTION);
     assertThrows(
-        AiInUseException.class,
+        DomainException.class,
         () ->
             definitionService.deleteAgent(
                 COMPACTION, CatalogVersions.format(compaction.version())));
@@ -101,7 +99,7 @@ public class BuiltinAgentLifecycleIntegrationTest extends PostgresSpringTestSupp
     assertTrue(definitionRepository.create(synthetic));
     AgentDefinition stored = definitionRepository.getByName("synthetic-builtin");
     assertThrows(
-        AiInUseException.class,
+        DomainException.class,
         () ->
             definitionService.deleteAgent(
                 "synthetic-builtin", CatalogVersions.format(stored.version())));
@@ -115,7 +113,7 @@ public class BuiltinAgentLifecycleIntegrationTest extends PostgresSpringTestSupp
     create.setName(COMPACTION);
     create.setExecution(null);
     create.setConfig(emptyConfig());
-    assertThrows(AiDuplicateException.class, () -> definitionService.createAgent(create));
+    assertThrows(DomainException.class, () -> definitionService.createAgent(create));
   }
 
   /** 内置 Agent 支持显式未配置 execution；用户创建仍要求 execution。 */
@@ -128,7 +126,7 @@ public class BuiltinAgentLifecycleIntegrationTest extends PostgresSpringTestSupp
     user.setName("user-agent-without-model");
     user.setExecution(null);
     user.setConfig(emptyConfig());
-    assertThrows(AiValidationException.class, () -> definitionService.createAgent(user));
+    assertThrows(DomainException.class, () -> definitionService.createAgent(user));
   }
 
   private AgentDefinitionDTO findPage(String name) {

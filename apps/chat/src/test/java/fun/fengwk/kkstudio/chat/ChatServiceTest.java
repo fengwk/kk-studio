@@ -13,7 +13,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.chat.dto.ChatDTO;
 import fun.fengwk.kkstudio.chat.dto.ChatPageDTO;
 import fun.fengwk.kkstudio.chat.dto.ChatSessionPageDTO;
-import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessOwnerQueryService;
 import fun.fengwk.kkstudio.platform.orchestration.SessionDeletionOrchestrator;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionSummaryDTO;
@@ -122,12 +122,12 @@ class ChatServiceTest {
     UUID sessionId = id(21);
     when(sessions.findBySessionId(sessionId)).thenReturn(null);
     assertThrows(
-        AiResourceNotFoundException.class,
+        DomainException.class,
         () -> service.getSession(chatId.toString(), sessionId.toString()));
 
     when(sessions.findBySessionId(sessionId)).thenReturn(new ChatSession(sessionId, id(8)));
     assertThrows(
-        AiResourceNotFoundException.class,
+        DomainException.class,
         () -> service.getSession(chatId.toString(), sessionId.toString()));
 
     when(sessions.findBySessionId(sessionId)).thenReturn(new ChatSession(sessionId, chatId));

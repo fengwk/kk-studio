@@ -25,12 +25,7 @@ import tools.jackson.databind.json.JsonMapper;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.model.provider.impl.ProviderModelDiscovery;
 import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
-import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
-import fun.fengwk.kkstudio.platform.error.AiInUseException;
-import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
-import fun.fengwk.kkstudio.platform.error.AiUpstreamException;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
-import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderEditablePropertiesDTO;
@@ -60,21 +55,21 @@ public class AgentProviderServiceUnitTest {
 
   @Test
   public void shouldRejectInvalidProviderConfiguration() {
-    assertThrows(AiValidationException.class, () -> service.createProvider(null));
-    assertThrows(AiValidationException.class, () -> service.createProvider(provider(" ", null)));
+    assertThrows(DomainException.class, () -> service.createProvider(null));
+    assertThrows(DomainException.class, () -> service.createProvider(provider(" ", null)));
 
     AgentProviderCreateDTO unsupported = provider("provider", null);
     unsupported.setProviderType("missing");
-    assertThrows(AiValidationException.class, () -> service.createProvider(unsupported));
+    assertThrows(DomainException.class, () -> service.createProvider(unsupported));
     // Provider wire 值不接受大小写变化或首尾空白，避免本地规范化掩盖非法 catalog 数据。
     unsupported.setProviderType("OPENAI");
-    assertThrows(AiValidationException.class, () -> service.createProvider(unsupported));
+    assertThrows(DomainException.class, () -> service.createProvider(unsupported));
     unsupported.setProviderType("openai ");
-    assertThrows(AiValidationException.class, () -> service.createProvider(unsupported));
+    assertThrows(DomainException.class, () -> service.createProvider(unsupported));
 
     AgentProviderCreateDTO invalidTimeout = provider("provider", null);
     invalidTimeout.setModelCallIdleTimeoutMillis(0L);
-    assertThrows(AiValidationException.class, () -> service.createProvider(invalidTimeout));
+    assertThrows(DomainException.class, () -> service.createProvider(invalidTimeout));
     verify(repository, never()).create(any());
   }
 
@@ -82,7 +77,7 @@ public class AgentProviderServiceUnitTest {
   @Test
   public void shouldEnforceProviderSchemaStringLimitsAfterNormalization() {
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () -> service.createProvider(provider(" provider ", "c".repeat(512))));
 
     AgentProviderCreateDTO accepted = provider("n".repeat(64), "c".repeat(512));
@@ -92,15 +87,14 @@ public class AgentProviderServiceUnitTest {
     assertEquals("d".repeat(4096), created(accepted).description());
 
     assertThrows(
-        AiValidationException.class, () -> service.createProvider(provider("n".repeat(65), null)));
+        DomainException.class, () -> service.createProvider(provider("n".repeat(65), null)));
     assertThrows(
-        AiValidationException.class, () -> service.createProvider(provider("provider/name", null)));
+        DomainException.class, () -> service.createProvider(provider("provider/name", null)));
     assertThrows(
-        AiValidationException.class,
-        () -> service.createProvider(provider("provider", "c".repeat(513))));
+        DomainException.class, () -> service.createProvider(provider("provider", "c".repeat(513))));
     AgentProviderCreateDTO oversizedBaseUrl = provider("provider", "c".repeat(512));
     oversizedBaseUrl.setBaseUrl("u".repeat(513));
-    assertThrows(AiValidationException.class, () -> service.createProvider(oversizedBaseUrl));
+    assertThrows(DomainException.class, () -> service.createProvider(oversizedBaseUrl));
   }
 
   @Test
@@ -118,9 +112,9 @@ public class AgentProviderServiceUnitTest {
     when(repository.create(any())).thenReturn(false);
     assertThrows(IllegalStateException.class, () -> service.createProvider(create));
 
-    // 创建直接依赖主键唯一约束：数据库重复键映射为 AiDuplicateException。
+    // 创建直接依赖主键唯一约束：数据库重复键映射为 DomainException。
     when(repository.create(any())).thenThrow(new DuplicateKeyException("dup"));
-    assertThrows(AiDuplicateException.class, () -> service.createProvider(create));
+    assertThrows(DomainException.class, () -> service.createProvider(create));
   }
 
   // ---- 更新、凭据补丁与连接世代 ----
@@ -158,9 +152,8 @@ public class AgentProviderServiceUnitTest {
     AgentProvider provider = existing("initial-secret", "{\"credential\":\"sensitive-value\"");
     when(repository.getByName("provider")).thenReturn(provider);
 
-    AiValidationException error =
-        assertThrows(
-            AiValidationException.class, () -> service.updateProvider("provider", update(null)));
+    DomainException error =
+        assertThrows(DomainException.class, () -> service.updateProvider("provider", update(null)));
 
     assertFalse(error.getMessage().contains("sensitive-value"));
     assertNull(error.getCause());
@@ -216,12 +209,12 @@ public class AgentProviderServiceUnitTest {
   @Test
   public void updateRejectsMissingOrStaleExpectedVersionBeforeMutating() {
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () -> service.updateProvider("provider", new AgentProviderUpdateDTO()));
 
     when(repository.getByName("provider")).thenReturn(existing(null, "{}", 1L));
     assertThrows(
-        AiVersionConflictException.class,
+        DomainException.class,
         () -> service.updateProvider("provider", versioned(update(null), "0")));
     verify(repository, never()).updateByName(any(), anyLong());
   }
@@ -233,19 +226,17 @@ public class AgentProviderServiceUnitTest {
     AgentProviderUpdateDTO update = versioned(update(null), "0");
 
     when(repository.getByName("provider")).thenReturn(existing(null, "{}"), (AgentProvider) null);
-    assertThrows(
-        AiResourceNotFoundException.class, () -> service.updateProvider("provider", update));
+    assertThrows(DomainException.class, () -> service.updateProvider("provider", update));
 
     when(repository.getByName("provider"))
         .thenReturn(existing(null, "{}"), existing(null, "{}", 5L));
-    assertThrows(
-        AiVersionConflictException.class, () -> service.updateProvider("provider", update));
+    assertThrows(DomainException.class, () -> service.updateProvider("provider", update));
   }
 
   @Test
   public void updateOfMissingProviderIsNotFound() {
     assertThrows(
-        AiResourceNotFoundException.class,
+        DomainException.class,
         () -> service.updateProvider("missing", versioned(update(null), "0")));
   }
 
@@ -307,13 +298,11 @@ public class AgentProviderServiceUnitTest {
 
     when(repository.getByName("provider"))
         .thenReturn(existing(null, "{}", 3L), (AgentProvider) null);
-    assertThrows(
-        AiResourceNotFoundException.class, () -> service.importProvider("provider", properties));
+    assertThrows(DomainException.class, () -> service.importProvider("provider", properties));
 
     when(repository.getByName("provider"))
         .thenReturn(existing(null, "{}", 3L), existing(null, "{}", 4L));
-    assertThrows(
-        AiVersionConflictException.class, () -> service.importProvider("provider", properties));
+    assertThrows(DomainException.class, () -> service.importProvider("provider", properties));
   }
 
   /** 导入创建遇到唯一约束竞争时映射为重复业务错误。 */
@@ -323,7 +312,7 @@ public class AgentProviderServiceUnitTest {
     when(repository.create(any())).thenThrow(new DuplicateKeyException("dup"));
 
     assertThrows(
-        AiDuplicateException.class,
+        DomainException.class,
         () -> service.importProvider("provider", properties("openai", null)));
   }
 
@@ -331,10 +320,10 @@ public class AgentProviderServiceUnitTest {
   public void validateImportAppliesCreationRulesWithoutPersisting() {
     service.validateImport("provider", properties("openai", null));
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () -> service.validateImport("provider", properties("missing", null)));
     assertThrows(
-        AiValidationException.class, () -> service.validateImport(" ", properties("openai", null)));
+        DomainException.class, () -> service.validateImport(" ", properties("openai", null)));
     verify(repository, never()).create(any());
   }
 
@@ -342,24 +331,24 @@ public class AgentProviderServiceUnitTest {
 
   @Test
   public void deleteChecksVersionBeforeReferencesAndMapsCasFailure() {
-    assertThrows(AiResourceNotFoundException.class, () -> service.deleteProvider("provider", "0"));
+    assertThrows(DomainException.class, () -> service.deleteProvider("provider", "0"));
 
     AgentProvider provider = existing(null, "{}", 1L);
     when(repository.getByNameForUpdate("provider")).thenReturn(provider);
     // 版本过期优先于引用检查。
     when(repository.hasModels("provider")).thenReturn(true);
-    assertThrows(AiVersionConflictException.class, () -> service.deleteProvider("provider", "0"));
+    assertThrows(DomainException.class, () -> service.deleteProvider("provider", "0"));
     verify(repository, never()).hasModels("provider");
 
-    assertThrows(AiInUseException.class, () -> service.deleteProvider("provider", "1"));
+    assertThrows(DomainException.class, () -> service.deleteProvider("provider", "1"));
     verify(repository, never()).deleteByName(any(), anyLong());
 
     when(repository.hasModels("provider")).thenReturn(false);
     when(repository.deleteByName("provider", 1L)).thenReturn(false);
     when(repository.getByName("provider")).thenReturn(null);
-    assertThrows(AiResourceNotFoundException.class, () -> service.deleteProvider("provider", "1"));
+    assertThrows(DomainException.class, () -> service.deleteProvider("provider", "1"));
     when(repository.getByName("provider")).thenReturn(existing(null, "{}", 5L));
-    assertThrows(AiVersionConflictException.class, () -> service.deleteProvider("provider", "1"));
+    assertThrows(DomainException.class, () -> service.deleteProvider("provider", "1"));
   }
 
   // ---- 远端模型发现 ----
@@ -378,7 +367,7 @@ public class AgentProviderServiceUnitTest {
         .thenThrow(new IllegalArgumentException("bad url"));
     assertEquals(
         "bad url",
-        assertThrows(AiValidationException.class, () -> service.listRemoteModelIds("provider"))
+        assertThrows(DomainException.class, () -> service.listRemoteModelIds("provider"))
             .getMessage());
 
     doThrow(new ProviderModelDiscovery.Failure("HTTP 401"))
@@ -386,7 +375,7 @@ public class AgentProviderServiceUnitTest {
         .listModelIds(ProviderType.OPENAI, "https://h/v1", "k");
     assertEquals(
         "HTTP 401",
-        assertThrows(AiUpstreamException.class, () -> service.listRemoteModelIds("provider"))
+        assertThrows(DomainException.class, () -> service.listRemoteModelIds("provider"))
             .getMessage());
   }
 

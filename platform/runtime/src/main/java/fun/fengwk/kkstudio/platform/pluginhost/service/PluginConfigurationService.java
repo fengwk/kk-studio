@@ -11,9 +11,7 @@ import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.common.json.BoundedJsonWriter;
 import fun.fengwk.kkstudio.common.json.JsonValues;
-import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
-import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthSpec;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfig;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialMaterial;
@@ -91,10 +89,10 @@ public final class PluginConfigurationService {
     try {
       resolved = plugin.configurationSchema().resolveValues(valuesJson);
     } catch (IllegalArgumentException error) {
-      throw new AiValidationException(RESOURCE, "valuesJson must match the plugin schema");
+      throw DomainException.validation(RESOURCE, "valuesJson must match the plugin schema");
     }
     PluginConfigurationRow current =
-        configurations.find(pluginId).orElseThrow(() -> new AiResourceNotFoundException(RESOURCE));
+        configurations.find(pluginId).orElseThrow(() -> DomainException.notFound(RESOURCE));
     if (current.revision() != expectedRevision) {
       throw conflict(expectedRevision, current.revision());
     }
@@ -183,7 +181,7 @@ public final class PluginConfigurationService {
     String payloadJson =
         BoundedJsonWriter.write(payload, PluginCredentialMaterial.MAX_PAYLOAD_UTF8_BYTES);
     if (payloadJson == null) {
-      throw new AiValidationException(
+      throw DomainException.validation(
           RESOURCE, "secret patch payload must not exceed the credential budget");
     }
     return new CredentialChange(CredentialAction.WRITE, payloadJson);
@@ -234,7 +232,7 @@ public final class PluginConfigurationService {
           "Plugin {} rejected the candidate configuration: {}",
           pluginId,
           error.getClass().getSimpleName());
-      throw new AiValidationException(RESOURCE, "plugin rejected the configuration");
+      throw DomainException.validation(RESOURCE, "plugin rejected the configuration");
     }
   }
 
@@ -261,11 +259,12 @@ public final class PluginConfigurationService {
     for (Map.Entry<String, PluginSecretPatch> entry : secretPatch.entrySet()) {
       if (!plugin.configurationSchema().secrets().containsKey(entry.getKey())) {
         // 字段名来自请求体，绝不回显。
-        throw new AiValidationException(RESOURCE, "secret patch must name a declared secret field");
+        throw DomainException.validation(
+            RESOURCE, "secret patch must name a declared secret field");
       }
       PluginSecretPatch operation = Objects.requireNonNull(entry.getValue(), "secretPatch value");
       if (interactive && operation.operation() != PluginSecretPatch.Operation.KEEP) {
-        throw new AiValidationException(
+        throw DomainException.validation(
             RESOURCE, "interactive credentials are replaced by login completion");
       }
       patch.put(entry.getKey(), operation);
@@ -288,11 +287,11 @@ public final class PluginConfigurationService {
   }
 
   private StudioPlugin requirePlugin(String pluginId) {
-    return registry.find(pluginId).orElseThrow(() -> new AiResourceNotFoundException(RESOURCE));
+    return registry.find(pluginId).orElseThrow(() -> DomainException.notFound(RESOURCE));
   }
 
-  private static AiVersionConflictException conflict(long expected, long actual) {
-    return new AiVersionConflictException(RESOURCE, "revision=" + expected, "revision=" + actual);
+  private static DomainException conflict(long expected, long actual) {
+    return DomainException.versionConflict(RESOURCE, "revision=" + expected, "revision=" + actual);
   }
 
   private enum CredentialAction {

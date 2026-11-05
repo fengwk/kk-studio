@@ -30,8 +30,7 @@ import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentService;
 import fun.fengwk.kkstudio.platform.environment.update.EnvironmentUpdateService;
-import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCardDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCreateDTO;
@@ -117,13 +116,13 @@ class StudioEnvironmentControllerTest {
   }
 
   /**
-   * 意图：验证当服务层抛出 AiResourceNotFoundException 时，由统一 StudioDomainErrorAdvice 映射为 HTTP 404 与
-   * RESOURCE_NOT_FOUND (code="resource_not_found") 错误信封，而不是泄露为 500。
+   * 意图：验证当服务层抛出 DomainException 时，由统一 StudioDomainErrorAdvice 映射为 HTTP 404 与 RESOURCE_NOT_FOUND
+   * (code="resource_not_found") 错误信封，而不是泄露为 500。
    */
   @Test
   void getMissingEnvironmentReturnsNotFound() throws Exception {
     when(environmentService.get(eq(EnvironmentId.of(ENV_ID))))
-        .thenThrow(new AiResourceNotFoundException("environment"));
+        .thenThrow(DomainException.notFound("environment"));
 
     mockMvc
         .perform(get("/api/environments/" + ENV_ID))
@@ -184,7 +183,7 @@ class StudioEnvironmentControllerTest {
   @Test
   void listEnvironmentEventsReturnsNotFoundForMissingEnvironment() throws Exception {
     when(environmentService.listEvents(eq(EnvironmentId.of(ENV_ID))))
-        .thenThrow(new AiResourceNotFoundException("environment"));
+        .thenThrow(DomainException.notFound("environment"));
 
     mockMvc
         .perform(get("/api/environments/" + ENV_ID + "/events"))
@@ -319,7 +318,7 @@ class StudioEnvironmentControllerTest {
   void invalidInstallCodeReturnsValidationError() throws Exception {
     when(environmentService.installationScript(EnvironmentId.of(ENV_ID), "expired-code"))
         .thenThrow(
-            new AiValidationException("code", "install code is missing, expired or invalid"));
+            DomainException.validation("code", "install code is missing, expired or invalid"));
 
     mockMvc
         .perform(get("/api/environments/" + ENV_ID + "/install").param("code", "expired-code"))
@@ -354,10 +353,10 @@ class StudioEnvironmentControllerTest {
   @Test
   void installAndUninstallFailuresDoNotEchoCredentials() throws Exception {
     when(environmentService.installationScript(eq(EnvironmentId.of(ENV_ID)), eq("bad-code")))
-        .thenThrow(new AiResourceNotFoundException("environment"));
+        .thenThrow(DomainException.notFound("environment"));
     when(environmentService.uninstallationScript("bad"))
         .thenThrow(
-            new AiValidationException(
+            DomainException.validation(
                 "operatingSystem", "operatingSystem must be linux, macos or windows"));
 
     mockMvc

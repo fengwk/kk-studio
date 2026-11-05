@@ -32,7 +32,7 @@ import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderService;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogService;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentService;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchemaSupport;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthSpec;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfig;
@@ -217,8 +217,7 @@ class ConfigSyncPluginImportPostgresIntegrationTest {
     // 计划与写入之间删除依赖：插件配置修订不变，CAS 无法发现它。
     assertTrue(definitionRepository.deleteByName(DEPENDENCY_AGENT, 0L));
 
-    AiValidationException error =
-        assertThrows(AiValidationException.class, () -> applyInTransaction(plan));
+    DomainException error = assertThrows(DomainException.class, () -> applyInTransaction(plan));
 
     assertEquals("plugins reference a missing agent", error.getMessage());
     assertEquals(null, error.getCause(), "the recheck must not leak a cause");

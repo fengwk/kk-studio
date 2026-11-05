@@ -4,7 +4,6 @@ import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -31,9 +30,6 @@ import fun.fengwk.kkstudio.web.controller.StudioHarnessThreadCommandBatchControl
 import fun.fengwk.kkstudio.web.controller.StudioHarnessThreadController;
 import fun.fengwk.kkstudio.web.controller.StudioHarnessThreadStreamCatchupController;
 import fun.fengwk.kkstudio.web.controller.StudioInteractionController;
-
-import java.util.LinkedHashMap;
-import java.util.Map;
 
 /** 对 controller 抛出的 {@link ResponseStatusException} 以及请求体反序列化异常做请求级 locale 的统一包装。 */
 @Order(Ordered.HIGHEST_PRECEDENCE)
@@ -75,14 +71,15 @@ public class StudioResponseStatusErrorAdvice {
     } else if (error.getCause() instanceof ProviderRequestPreviewUnavailableException preview) {
       reason = preview.reason().name();
     }
-    return buildResponse(status, error.getReason(), reason);
+    return ProblemErrorResponses.of(messageService, status, error.getReason(), reason);
   }
 
   @ExceptionHandler(HttpMessageNotReadableException.class)
   public ResponseEntity<ApiResponse<Void>> handle(
       HttpMessageNotReadableException error, HttpServletRequest request) {
     int status = HttpStatus.BAD_REQUEST.value();
-    return buildResponse(status, extractHarnessFormatDetail(error), null);
+    return ProblemErrorResponses.of(
+        messageService, status, extractHarnessFormatDetail(error), null);
   }
 
   private static String extractHarnessFormatDetail(HttpMessageNotReadableException error) {
@@ -95,23 +92,5 @@ public class StudioResponseStatusErrorAdvice {
       }
     }
     return DEFAULT_READABLE_ERROR_DETAIL;
-  }
-
-  private ResponseEntity<ApiResponse<Void>> buildResponse(
-      int status, String detail, String reason) {
-    Map<String, Object> errorContext = new LinkedHashMap<>();
-    errorContext.put("type", "about:blank");
-    errorContext.put("title", messageService.httpTitle(status));
-    errorContext.put("detail", detail);
-    if (reason != null) {
-      errorContext.put("reason", reason);
-    }
-    return ResponseEntity.status(status)
-        .body(
-            ApiResponse.error(
-                HttpStatusCode.valueOf(status),
-                messageService.httpCode(status),
-                messageService.httpMessage(status),
-                errorContext));
   }
 }

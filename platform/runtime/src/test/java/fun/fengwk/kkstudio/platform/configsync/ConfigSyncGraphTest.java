@@ -20,7 +20,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncKind;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncRef;
 
@@ -152,15 +152,15 @@ class ConfigSyncGraphTest {
   @Test
   void expandRejectsEmptySelection() {
     ConfigSyncGraph.Graph prepared = graph.graph(richSnapshot());
-    assertThrows(AiValidationException.class, () -> graph.expand(prepared, List.of()));
-    assertThrows(AiValidationException.class, () -> graph.expand(prepared, null));
+    assertThrows(DomainException.class, () -> graph.expand(prepared, List.of()));
+    assertThrows(DomainException.class, () -> graph.expand(prepared, null));
   }
 
   @Test
   void expandRejectsUnknownReference() {
     ConfigSyncGraph.Graph prepared = graph.graph(richSnapshot());
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () -> graph.expand(prepared, List.of(new ConfigSyncRef(ConfigSyncKind.AGENTS, "missing"))));
   }
 
@@ -178,7 +178,7 @@ class ConfigSyncGraphTest {
             List.of());
     ConfigSyncGraph.Graph prepared = graph.graph(snapshot);
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () -> graph.expand(prepared, List.of(new ConfigSyncRef(ConfigSyncKind.AGENTS, "a"))));
   }
 
@@ -226,7 +226,7 @@ class ConfigSyncGraphTest {
     ConfigSyncGraph.Graph prepared = pluginGraph.graph(pluginSnapshot("ghost", false));
 
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () ->
             pluginGraph.expand(
                 prepared, List.of(new ConfigSyncRef(ConfigSyncKind.PLUGINS, PLUGIN_ID))));
@@ -299,7 +299,7 @@ class ConfigSyncGraphTest {
     ConfigSyncGraph.Graph prepared = graph.graph(snapshot);
 
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () -> graph.expand(prepared, List.of(new ConfigSyncRef(ConfigSyncKind.AGENTS, "a"))));
   }
 
@@ -313,7 +313,7 @@ class ConfigSyncGraphTest {
     assertFalse(
         prepared.allRefs().contains(new ConfigSyncRef(ConfigSyncKind.AGENTS, BUILTIN_AGENT)));
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () ->
             graph.expand(
                 prepared, List.of(new ConfigSyncRef(ConfigSyncKind.AGENTS, BUILTIN_AGENT))));
@@ -324,9 +324,9 @@ class ConfigSyncGraphTest {
   void pluginDeclarationInputErrorIsDesensitized() {
     ConfigSyncGraph pluginGraph = pluginGraph();
 
-    AiValidationException error =
+    DomainException error =
         assertThrows(
-            AiValidationException.class, () -> pluginGraph.graph(pluginSnapshot("!secret", false)));
+            DomainException.class, () -> pluginGraph.graph(pluginSnapshot("!secret", false)));
 
     assertEquals("plugin configuration is invalid: " + PLUGIN_ID, error.getMessage());
     assertTrue(error.getCause() == null);

@@ -26,11 +26,7 @@ import tools.jackson.databind.json.JsonMapper;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderRepository;
 import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
-import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
-import fun.fengwk.kkstudio.platform.error.AiInUseException;
-import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
-import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelDTO;
@@ -76,22 +72,22 @@ class AgentModelServiceUnitTest {
   void createRequiresExecutableConfigurationAndKeepsIdentity() {
     AgentModelCreateDTO create = create("model", null);
     create.setConfig(null);
-    assertThrows(AiValidationException.class, () -> service.createModel(create));
+    assertThrows(DomainException.class, () -> service.createModel(create));
 
     create.setConfig(
         AgentModelTestData.buildConfig(
             32768, 4096, true, false, "standard", "v1", List.of(), "missing"));
-    assertThrows(AiValidationException.class, () -> service.createModel(create));
-    assertThrows(AiValidationException.class, () -> service.createModel(null));
+    assertThrows(DomainException.class, () -> service.createModel(create));
+    assertThrows(DomainException.class, () -> service.createModel(null));
     create.setConfig(validConfig());
     create.setProviderName(" ");
-    assertThrows(AiValidationException.class, () -> service.createModel(create));
+    assertThrows(DomainException.class, () -> service.createModel(create));
     AgentModelCreateDTO missingKind = create("model", null);
     missingKind.setKind(null);
-    assertThrows(AiValidationException.class, () -> service.createModel(missingKind));
+    assertThrows(DomainException.class, () -> service.createModel(missingKind));
     AgentModelCreateDTO modelWithGroup = create("model", null);
     modelWithGroup.setGroup(group(member("member", "default")));
-    assertThrows(AiValidationException.class, () -> service.createModel(modelWithGroup));
+    assertThrows(DomainException.class, () -> service.createModel(modelWithGroup));
 
     AgentModel created = createAndCapture(create("model", null));
     assertEquals(AgentModelKind.MODEL, created.kind());
@@ -106,7 +102,7 @@ class AgentModelServiceUnitTest {
   void createRejectsMissingProvider() {
     AgentModelCreateDTO create = create("model", null);
     create.setProviderName("ghost");
-    assertThrows(AiResourceNotFoundException.class, () -> service.createModel(create));
+    assertThrows(DomainException.class, () -> service.createModel(create));
     verify(repository, never()).create(any());
   }
 
@@ -152,13 +148,12 @@ class AgentModelServiceUnitTest {
     assertEquals("n".repeat(128), accepted.name());
     assertEquals("d".repeat(4096), accepted.description());
 
-    assertThrows(AiValidationException.class, () -> service.createModel(create(" model ", null)));
-    assertThrows(AiValidationException.class, () -> service.createModel(create(" model ", null)));
-    assertThrows(
-        AiValidationException.class, () -> service.createModel(create("n".repeat(129), null)));
+    assertThrows(DomainException.class, () -> service.createModel(create(" model ", null)));
+    assertThrows(DomainException.class, () -> service.createModel(create(" model ", null)));
+    assertThrows(DomainException.class, () -> service.createModel(create("n".repeat(129), null)));
     AgentModelCreateDTO oversizedModelId = create("model", null);
     oversizedModelId.setModelId("m".repeat(257));
-    assertThrows(AiValidationException.class, () -> service.createModel(oversizedModelId));
+    assertThrows(DomainException.class, () -> service.createModel(oversizedModelId));
   }
 
   /** 改名走 rename 并校验目标名；非法目标名与 kind 变化在写入前拒绝。 */
@@ -176,15 +171,15 @@ class AgentModelServiceUnitTest {
 
     for (String invalid : List.of("   ", " padded-name ", "n".repeat(129))) {
       assertThrows(
-          AiValidationException.class, () -> service.updateModel("old-name", update(invalid, "0")));
+          DomainException.class, () -> service.updateModel("old-name", update(invalid, "0")));
     }
     AgentModelUpdateDTO toGroup = new AgentModelUpdateDTO();
     toGroup.setName("old-name");
     toGroup.setKind(AgentModelKind.GROUP);
     toGroup.setGroup(group(member("member", "default")));
     toGroup.setExpectedVersion("0");
-    AiValidationException error =
-        assertThrows(AiValidationException.class, () -> service.updateModel("old-name", toGroup));
+    DomainException error =
+        assertThrows(DomainException.class, () -> service.updateModel("old-name", toGroup));
     assertEquals("model kind cannot be changed", error.getMessage());
   }
 
@@ -208,9 +203,9 @@ class AgentModelServiceUnitTest {
     when(repository.getByNameForUpdate("model")).thenReturn(existing);
     when(repository.hasVariantReferences("model", "fast")).thenReturn(true);
 
-    AiInUseException error =
+    DomainException error =
         assertThrows(
-            AiInUseException.class, () -> service.updateModel("model", update("model", "0")));
+            DomainException.class, () -> service.updateModel("model", update("model", "0")));
     assertEquals("model variant is still referenced: model variant=fast", error.getMessage());
     verify(repository, never()).updateByName(any(), anyLong());
   }
@@ -222,9 +217,9 @@ class AgentModelServiceUnitTest {
     when(repository.create(any())).thenReturn(false);
     assertThrows(IllegalStateException.class, () -> service.createModel(create));
     when(repository.create(any())).thenThrow(new DuplicateKeyException("dup"));
-    assertThrows(AiDuplicateException.class, () -> service.createModel(create));
+    assertThrows(DomainException.class, () -> service.createModel(create));
     doThrow(integrityFailure("23503")).when(repository).create(any());
-    assertThrows(AiResourceNotFoundException.class, () -> service.createModel(create));
+    assertThrows(DomainException.class, () -> service.createModel(create));
     DataIntegrityViolationException nonForeignKey = integrityFailure("22001");
     doThrow(nonForeignKey).when(repository).create(any());
     assertSame(
@@ -233,33 +228,28 @@ class AgentModelServiceUnitTest {
 
     AgentModel model = existing("model", 0L);
     AgentModelUpdateDTO missing = new AgentModelUpdateDTO();
-    assertThrows(AiValidationException.class, () -> service.updateModel("model", missing));
+    assertThrows(DomainException.class, () -> service.updateModel("model", missing));
     when(repository.getByNameForUpdate("model")).thenReturn(model);
     when(repository.updateByName(any(), eq(0L))).thenReturn(false);
     when(repository.getByName("model")).thenReturn(null);
-    assertThrows(
-        AiResourceNotFoundException.class,
-        () -> service.updateModel("model", update("model", "0")));
+    assertThrows(DomainException.class, () -> service.updateModel("model", update("model", "0")));
     AgentModel reread = existing("model", 3L);
     when(repository.getByName("model")).thenReturn(reread);
-    assertThrows(
-        AiVersionConflictException.class, () -> service.updateModel("model", update("model", "0")));
+    assertThrows(DomainException.class, () -> service.updateModel("model", update("model", "0")));
     when(repository.updateByName(any(), eq(0L))).thenThrow(new DuplicateKeyException("dup"));
-    assertThrows(
-        AiDuplicateException.class, () -> service.updateModel("model", update("model", "0")));
+    assertThrows(DomainException.class, () -> service.updateModel("model", update("model", "0")));
     doThrow(new DuplicateKeyException("dup")).when(repository).rename(eq("model"), any(), eq(0L));
     assertThrows(
-        AiDuplicateException.class,
-        () -> service.updateModel("model", update("renamed-model", "0")));
+        DomainException.class, () -> service.updateModel("model", update("renamed-model", "0")));
 
     when(repository.deleteByName(eq("model"), anyLong())).thenReturn(false);
     when(repository.getByName("model")).thenReturn(null);
-    assertThrows(AiResourceNotFoundException.class, () -> service.deleteModel("model", "0"));
+    assertThrows(DomainException.class, () -> service.deleteModel("model", "0"));
     when(repository.getByName("model")).thenReturn(reread);
-    assertThrows(AiVersionConflictException.class, () -> service.deleteModel("model", "0"));
+    assertThrows(DomainException.class, () -> service.deleteModel("model", "0"));
     verify(repository, atLeastOnce()).getByNameForUpdate("model");
     when(repository.getByNameForUpdate("ghost")).thenReturn(null);
-    assertThrows(AiResourceNotFoundException.class, () -> service.deleteModel("ghost", "0"));
+    assertThrows(DomainException.class, () -> service.deleteModel("ghost", "0"));
   }
 
   /** 版本过期优先于删除引用检查；仍被 Agent 或模型组引用的模型拒绝删除。 */
@@ -268,16 +258,15 @@ class AgentModelServiceUnitTest {
     when(repository.getByNameForUpdate("model")).thenReturn(existing("model", 1L));
     when(repository.hasAgents("model")).thenReturn(true);
 
-    assertThrows(
-        AiVersionConflictException.class, () -> service.updateModel("model", update("model", "0")));
+    assertThrows(DomainException.class, () -> service.updateModel("model", update("model", "0")));
     verify(repository, never()).updateByName(any(), anyLong());
-    assertThrows(AiVersionConflictException.class, () -> service.deleteModel("model", "0"));
+    assertThrows(DomainException.class, () -> service.deleteModel("model", "0"));
     verify(repository, never()).hasAgents("model");
 
-    assertThrows(AiInUseException.class, () -> service.deleteModel("model", "1"));
+    assertThrows(DomainException.class, () -> service.deleteModel("model", "1"));
     when(repository.hasAgents("model")).thenReturn(false);
     when(repository.hasGroupsReferencing("model")).thenReturn(true);
-    assertThrows(AiInUseException.class, () -> service.deleteModel("model", "1"));
+    assertThrows(DomainException.class, () -> service.deleteModel("model", "1"));
     verify(repository, never()).deleteByName(any(), anyLong());
   }
 
@@ -294,27 +283,27 @@ class AgentModelServiceUnitTest {
 
     when(repository.getByNameForUpdate("group")).thenReturn(created);
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () -> service.createModel(groupCreate("nested", member("group", "default"))));
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () -> service.createModel(groupCreate("missing-variant", member("member", "absent"))));
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () -> service.createModel(groupCreate("unknown", member("ghost", "default"))));
     AgentModelCreateDTO groupWithProvider =
         groupCreate("with-provider", member("member", "default"));
     groupWithProvider.setProviderName("provider");
-    assertThrows(AiValidationException.class, () -> service.createModel(groupWithProvider));
+    assertThrows(DomainException.class, () -> service.createModel(groupWithProvider));
 
     AgentModelConfigDTO imageConfig = validConfig();
     imageConfig.getAbilities().setInputModalities(List.of(AgentModelInputModality.IMAGE));
     AgentModel imageOnly =
         existing("image-member", 0L).toBuilder().configJson(parser.encode(imageConfig)).build();
     when(repository.getByNameForUpdate("image-member")).thenReturn(imageOnly);
-    AiValidationException error =
+    DomainException error =
         assertThrows(
-            AiValidationException.class,
+            DomainException.class,
             () ->
                 service.createModel(
                     groupCreate(
@@ -328,7 +317,7 @@ class AgentModelServiceUnitTest {
   @Test
   void dtoRequiresStoredConfig() {
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () -> service.toDto(existing("model", 0L).toBuilder().configJson(" ").build()));
     assertEquals("model", service.toDto(existing("model", 0L)).getName());
 
@@ -339,7 +328,7 @@ class AgentModelServiceUnitTest {
     assertEquals(32768, dto.getConfig().getLimit().getContext());
     assertEquals("member", dto.getGroup().getMembers().getFirst().getModelName());
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () -> service.toDto(group.toBuilder().groupConfigJson(null).version(0L).build()));
   }
 

@@ -23,7 +23,7 @@ import tools.jackson.databind.introspect.ClassIntrospector;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.type.LogicalType;
 
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -96,25 +96,25 @@ public final class ConfigSyncYaml {
   @SuppressWarnings("unchecked")
   public Map<String, Object> parse(String yaml) {
     if (yaml == null || yaml.isBlank()) {
-      throw new AiValidationException(RESOURCE, "config yaml must not be blank");
+      throw DomainException.validation(RESOURCE, "config yaml must not be blank");
     }
     if (yaml.length() > MAX_CODE_POINTS) {
-      throw new AiValidationException(RESOURCE, "config yaml is too large");
+      throw DomainException.validation(RESOURCE, "config yaml is too large");
     }
     Object root;
     try {
       root = newReader().load(yaml);
     } catch (RuntimeException error) {
       // 不回显 SnakeYAML 的错误文本：其中可能包含 YAML 片段或键值。
-      throw new AiValidationException(RESOURCE, "config yaml is not a valid YAML document");
+      throw DomainException.validation(RESOURCE, "config yaml is not a valid YAML document");
     }
     if (!(root instanceof Map<?, ?> rawMap) || rawMap.isEmpty()) {
-      throw new AiValidationException(RESOURCE, "config yaml root must be a non-empty object");
+      throw DomainException.validation(RESOURCE, "config yaml root must be a non-empty object");
     }
     Map<String, Object> document = new LinkedHashMap<>();
     for (Map.Entry<?, ?> entry : rawMap.entrySet()) {
       if (!(entry.getKey() instanceof String key)) {
-        throw new AiValidationException(RESOURCE, "config yaml keys must be strings");
+        throw DomainException.validation(RESOURCE, "config yaml keys must be strings");
       }
       document.put(key, normalize(entry.getValue(), key));
     }
@@ -129,12 +129,12 @@ public final class ConfigSyncYaml {
   /** 把已解析的纯结构节点转换为强类型 DTO；失败信息只包含路径，不回显值。 */
   public <T> T convert(Object node, Class<T> type, String path) {
     if (node == null) {
-      throw new AiValidationException(RESOURCE, path + " must not be null");
+      throw DomainException.validation(RESOURCE, path + " must not be null");
     }
     try {
       return strictMapper.convertValue(node, type);
     } catch (IllegalArgumentException | JacksonException error) {
-      throw new AiValidationException(RESOURCE, path + " is not a valid value");
+      throw DomainException.validation(RESOURCE, path + " is not a valid value");
     }
   }
 
@@ -189,7 +189,7 @@ public final class ConfigSyncYaml {
       Map<String, Object> normalized = new LinkedHashMap<>();
       for (Map.Entry<?, ?> entry : rawMap.entrySet()) {
         if (!(entry.getKey() instanceof String key)) {
-          throw new AiValidationException(RESOURCE, path + " keys must be strings");
+          throw DomainException.validation(RESOURCE, path + " keys must be strings");
         }
         normalized.put(key, normalize(entry.getValue(), path + "." + key));
       }
@@ -203,7 +203,7 @@ public final class ConfigSyncYaml {
       return normalized;
     }
     // SafeConstructor 理论上不会产生其它类型；出现即视为非法输入。
-    throw new AiValidationException(RESOURCE, path + " has an unsupported YAML value");
+    throw DomainException.validation(RESOURCE, path + " has an unsupported YAML value");
   }
 
   private Object clean(JavaType type, Object node, String path, List<String> removed) {

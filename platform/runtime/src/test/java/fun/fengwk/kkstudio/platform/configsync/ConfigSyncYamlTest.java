@@ -9,7 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelInputModality;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsToolDTO;
@@ -86,67 +86,67 @@ class ConfigSyncYamlTest {
 
   @Test
   void duplicateKeysAreRejected() {
-    assertThrows(AiValidationException.class, () -> yaml.parse("providers: []\nproviders: []\n"));
+    assertThrows(DomainException.class, () -> yaml.parse("providers: []\nproviders: []\n"));
   }
 
   @Test
   void javaSpecificTagIsRejected() {
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () -> yaml.parse("value: !!" + Date.class.getName() + " '2020-01-01'\n"));
   }
 
   @Test
   void nonObjectRootAndNonStringKeysAreRejected() {
-    assertThrows(AiValidationException.class, () -> yaml.parse("- a\n- b\n"));
-    assertThrows(AiValidationException.class, () -> yaml.parse("1: a\n"));
+    assertThrows(DomainException.class, () -> yaml.parse("- a\n- b\n"));
+    assertThrows(DomainException.class, () -> yaml.parse("1: a\n"));
   }
 
   @Test
   void collectionAliasIsRejected() {
     // 集合别名可构造递归结构导致 StackOverflow，必须在解析期安全拒绝。
-    assertThrows(AiValidationException.class, () -> yaml.parse("providers: &x []\nmodels: *x\n"));
+    assertThrows(DomainException.class, () -> yaml.parse("providers: &x []\nmodels: *x\n"));
   }
 
   @Test
   void recursiveAliasIsRejected() {
-    assertThrows(AiValidationException.class, () -> yaml.parse("root: &x\n  self: *x\n"));
+    assertThrows(DomainException.class, () -> yaml.parse("root: &x\n  self: *x\n"));
   }
 
   @Test
   void nonFiniteFloatIsRejected() {
-    assertThrows(AiValidationException.class, () -> yaml.parse("ratio: .inf\n"));
-    assertThrows(AiValidationException.class, () -> yaml.parse("ratio: .nan\n"));
+    assertThrows(DomainException.class, () -> yaml.parse("ratio: .inf\n"));
+    assertThrows(DomainException.class, () -> yaml.parse("ratio: .nan\n"));
   }
 
   @Test
   void oversizedInputIsRejectedBeforeParsing() {
     String huge = "providers: " + "[x]".repeat(8 * 1024 * 1024);
-    assertThrows(AiValidationException.class, () -> yaml.parse(huge));
+    assertThrows(DomainException.class, () -> yaml.parse(huge));
   }
 
   @Test
   void stringIsNotCoercedToNumber() {
     Map<String, Object> node = Map.of("count", "5");
-    assertThrows(AiValidationException.class, () -> yaml.convert(node, Sample.class, "sample"));
+    assertThrows(DomainException.class, () -> yaml.convert(node, Sample.class, "sample"));
   }
 
   @Test
   void decimalStringIsNotCoercedToDecimal() {
     Map<String, Object> node = Map.of("ratio", "1.5");
-    assertThrows(AiValidationException.class, () -> yaml.convert(node, Sample.class, "sample"));
+    assertThrows(DomainException.class, () -> yaml.convert(node, Sample.class, "sample"));
   }
 
   @Test
   void numberIsNotCoercedToString() {
     Map<String, Object> node = Map.of("name", 7);
-    assertThrows(AiValidationException.class, () -> yaml.convert(node, Sample.class, "sample"));
+    assertThrows(DomainException.class, () -> yaml.convert(node, Sample.class, "sample"));
   }
 
   @Test
   void stringIsNotCoercedToBoolean() {
     Map<String, Object> node = Map.of("enabled", "true");
-    assertThrows(AiValidationException.class, () -> yaml.convert(node, Sample.class, "sample"));
+    assertThrows(DomainException.class, () -> yaml.convert(node, Sample.class, "sample"));
   }
 
   @Test
@@ -155,7 +155,7 @@ class ConfigSyncYamlTest {
     for (String field : List.of("count", "ratio", "enabled")) {
       for (String value : List.of("", " ")) {
         assertThrows(
-            AiValidationException.class,
+            DomainException.class,
             () -> yaml.convert(Map.of(field, value), Sample.class, "sample"),
             field);
       }
@@ -165,7 +165,7 @@ class ConfigSyncYamlTest {
   @Test
   void enumOrdinalIsRejected() {
     Map<String, Object> node = Map.of("modality", 0);
-    assertThrows(AiValidationException.class, () -> yaml.convert(node, Sample.class, "sample"));
+    assertThrows(DomainException.class, () -> yaml.convert(node, Sample.class, "sample"));
   }
 
   @Test
@@ -232,21 +232,21 @@ class ConfigSyncYamlTest {
   /** 意图：空白输入与 null 节点是边界错误，不能进入解析或强类型转换路径。 */
   @Test
   void blankYamlAndNullConversionAreRejected() {
-    assertThrows(AiValidationException.class, () -> yaml.parse(null));
-    assertThrows(AiValidationException.class, () -> yaml.parse("   "));
-    assertThrows(AiValidationException.class, () -> yaml.convert(null, Sample.class, "sample"));
+    assertThrows(DomainException.class, () -> yaml.parse(null));
+    assertThrows(DomainException.class, () -> yaml.parse("   "));
+    assertThrows(DomainException.class, () -> yaml.convert(null, Sample.class, "sample"));
   }
 
   /** 意图：嵌套 map 的非字符串键在解析期即被拒绝，不能进入强类型转换。 */
   @Test
   void nestedNonStringKeyIsRejected() {
-    assertThrows(AiValidationException.class, () -> yaml.parse("providers:\n  - 1: a\n"));
+    assertThrows(DomainException.class, () -> yaml.parse("providers:\n  - 1: a\n"));
   }
 
   /** 意图：六十进制浮点虽被 SnakeYAML 识别为 float，但 BigDecimal 无法表达，必须作为非法 YAML 拒绝而非静默失真。 */
   @Test
   void sexagesimalFloatIsRejected() {
-    assertThrows(AiValidationException.class, () -> yaml.parse("ratio: 1:20:30.5\n"));
+    assertThrows(DomainException.class, () -> yaml.parse("ratio: 1:20:30.5\n"));
   }
 
   /** 严格类型测试用的最小 DTO：公开字段足以让 Jackson introspection 识别。 */

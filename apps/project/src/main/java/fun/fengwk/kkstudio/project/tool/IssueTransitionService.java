@@ -8,8 +8,7 @@ import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
-import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.project.domain.IssueStateTransitions;
 import fun.fengwk.kkstudio.project.domain.ProjectStateCode;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflow;
@@ -82,7 +81,7 @@ public class IssueTransitionService {
 
     IssueAgentThread binding = issueAgentThreadRepository.findByThreadId(callingThreadId);
     if (binding == null) {
-      throw new AiValidationException(
+      throw DomainException.validation(
           "issue_run", "issue_transition is only available on a thread bound to an Issue agent");
     }
     IssueRun activePeek = issueRunRepository.getActiveByIssueId(binding.issueId());
@@ -109,10 +108,10 @@ public class IssueTransitionService {
       throw noActiveRun();
     }
     if (!run.getThreadId().equals(callingThreadId)) {
-      throw new AiValidationException("issue_run", "the active run belongs to a different thread");
+      throw DomainException.validation("issue_run", "the active run belongs to a different thread");
     }
     if (issue.isArchived()) {
-      throw new AiValidationException("issue", "Issue is archived");
+      throw DomainException.validation("issue", "Issue is archived");
     }
     requireAssistantTurnOfActiveRun(run, callingThreadId, assistantEntryId);
 
@@ -124,15 +123,15 @@ public class IssueTransitionService {
       from = ProjectStateCode.of(issue.getState());
       source = workflow.find(from).orElse(null);
     } catch (IllegalArgumentException error) {
-      throw new AiValidationException(
+      throw DomainException.validation(
           "project", "invalid project workflow or issue state: " + issue.getState());
     }
     if (source == null || ProjectWorkflowReservedState.isReserved(from)) {
-      throw new AiValidationException(
+      throw DomainException.validation(
           "issue_run", "Issue is not in an executable work stage: " + issue.getState());
     }
     if (!run.getState().equals(issue.getState())) {
-      throw new AiValidationException(
+      throw DomainException.validation(
           "issue_run",
           "the active run stage "
               + run.getState()
@@ -146,13 +145,13 @@ public class IssueTransitionService {
         return new IssueTransitionResult(run.getState(), run.getNextState(), run.getId(), true);
       }
       // 已接受交接后不再接受第二个目标：先把"已经登记过别的目标"如实告知，而不是把它当成一次普通的非法边。
-      throw new AiValidationException(
+      throw DomainException.validation(
           "issue_run", "a different handoff target is already accepted: " + run.getNextState());
     }
 
     IssueStateTransitions transitions = new IssueStateTransitions(workflow);
     if (!transitions.canTransition(from, target)) {
-      throw new AiValidationException(
+      throw DomainException.validation(
           "issue_run",
           "state "
               + from
@@ -165,7 +164,7 @@ public class IssueTransitionService {
     long expectedVersion = run.getVersion();
     run.setNextState(target.value());
     if (!issueRunRepository.updateById(run, expectedVersion)) {
-      throw new AiVersionConflictException(
+      throw DomainException.versionConflict(
           "issue_run", Long.toString(expectedVersion), Long.toString(run.getVersion()));
     }
     return new IssueTransitionResult(from.value(), target.value(), run.getId(), false);
@@ -202,23 +201,23 @@ public class IssueTransitionService {
         }
       }
     }
-    throw new AiValidationException(
+    throw DomainException.validation(
         "issue_run", "issue_transition must be called from the assistant turn of the active run");
   }
 
-  private static AiValidationException noActiveRun() {
-    return new AiValidationException(
+  private static DomainException noActiveRun() {
+    return DomainException.validation(
         "issue_run", "Issue has no active run; a handoff cannot be accepted");
   }
 
   private static ProjectStateCode requireTarget(String toState) {
     if (toState == null || toState.isBlank() || !toState.equals(toState.strip())) {
-      throw new AiValidationException("issue_run", "to_state must be a non-blank state code");
+      throw DomainException.validation("issue_run", "to_state must be a non-blank state code");
     }
     try {
       return ProjectStateCode.of(toState);
     } catch (IllegalArgumentException error) {
-      throw new AiValidationException("issue_run", "invalid to_state: " + toState);
+      throw DomainException.validation("issue_run", "invalid to_state: " + toState);
     }
   }
 

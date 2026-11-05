@@ -9,12 +9,8 @@ import fun.fengwk.kkstudio.common.page.Page;
 import fun.fengwk.kkstudio.common.page.PageQuery;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderRepository;
 import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
-import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
-import fun.fengwk.kkstudio.platform.error.AiInUseException;
-import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
-import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
 import fun.fengwk.kkstudio.platform.error.CatalogVersions;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.persistence.PostgresqlIntegrityViolationClassifier;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelCreateDTO;
@@ -93,11 +89,11 @@ public class AgentModelService {
         throw new IllegalStateException("create agent model failed");
       }
     } catch (DuplicateKeyException error) {
-      throw new AiDuplicateException(
+      throw DomainException.duplicate(
           RESOURCE, RESOURCE + " name already exists: " + model.name(), error);
     } catch (DataIntegrityViolationException error) {
       if (PostgresqlIntegrityViolationClassifier.isForeignKeyViolation(error)) {
-        throw new AiResourceNotFoundException(PROVIDER_RESOURCE);
+        throw DomainException.notFound(PROVIDER_RESOURCE);
       }
       throw error;
     }
@@ -108,7 +104,7 @@ public class AgentModelService {
   public AgentModelDTO updateModel(String modelName, AgentModelUpdateDTO updateDTO) {
     String rawExpected = updateDTO == null ? null : updateDTO.getExpectedVersion();
     if (rawExpected == null) {
-      throw new AiValidationException(RESOURCE, "expectedVersion is required");
+      throw DomainException.validation(RESOURCE, "expectedVersion is required");
     }
     long expected = CatalogVersions.parse(rawExpected, "expectedVersion");
     String name = canonicalName(modelName);
@@ -124,7 +120,7 @@ public class AgentModelService {
       requireProviderForUpdate(mutation.providerName());
       for (String removedVariant : removedVariants(current.configJson(), mutation.configJson())) {
         if (repository.hasVariantReferences(name, removedVariant)) {
-          throw new AiInUseException(
+          throw DomainException.inUse(
               RESOURCE,
               "model variant is still referenced: " + name + " variant=" + removedVariant);
         }
@@ -147,17 +143,17 @@ public class AgentModelService {
       } else if (!repository.updateByName(model, expected)) {
         AgentModel reread = repository.getByName(name);
         if (reread == null) {
-          throw new AiResourceNotFoundException(RESOURCE);
+          throw DomainException.notFound(RESOURCE);
         }
-        throw new AiVersionConflictException(
+        throw DomainException.versionConflict(
             RESOURCE, rawExpected, CatalogVersions.format(reread.version()));
       }
     } catch (DuplicateKeyException error) {
-      throw new AiDuplicateException(
+      throw DomainException.duplicate(
           RESOURCE, RESOURCE + " name already exists: " + model.name(), error);
     } catch (DataIntegrityViolationException error) {
       if (PostgresqlIntegrityViolationClassifier.isForeignKeyViolation(error)) {
-        throw new AiResourceNotFoundException(PROVIDER_RESOURCE);
+        throw DomainException.notFound(PROVIDER_RESOURCE);
       }
       throw error;
     }
@@ -171,17 +167,17 @@ public class AgentModelService {
     AgentModel model = requireModelForUpdate(name);
     ensureExpectedVersion(model, expectedVersion, expected);
     if (repository.hasAgents(name)) {
-      throw new AiInUseException(RESOURCE, RESOURCE + " in use by agents: " + name);
+      throw DomainException.inUse(RESOURCE, RESOURCE + " in use by agents: " + name);
     }
     if (repository.hasGroupsReferencing(name)) {
-      throw new AiInUseException(RESOURCE, RESOURCE + " in use by model groups: " + name);
+      throw DomainException.inUse(RESOURCE, RESOURCE + " in use by model groups: " + name);
     }
     if (!repository.deleteByName(name, expected)) {
       AgentModel reread = repository.getByName(name);
       if (reread == null) {
-        throw new AiResourceNotFoundException(RESOURCE);
+        throw DomainException.notFound(RESOURCE);
       }
-      throw new AiVersionConflictException(
+      throw DomainException.versionConflict(
           RESOURCE, expectedVersion, CatalogVersions.format(reread.version()));
     }
   }
@@ -215,14 +211,14 @@ public class AgentModelService {
   private AgentModel requireModelForUpdate(String name) {
     AgentModel model = repository.getByNameForUpdate(name);
     if (model == null) {
-      throw new AiResourceNotFoundException(RESOURCE);
+      throw DomainException.notFound(RESOURCE);
     }
     return model;
   }
 
   private void requireProviderForUpdate(String providerName) {
     if (providerRepository.getByNameForUpdate(providerName) == null) {
-      throw new AiResourceNotFoundException(PROVIDER_RESOURCE);
+      throw DomainException.notFound(PROVIDER_RESOURCE);
     }
   }
 
@@ -236,7 +232,7 @@ public class AgentModelService {
     try {
       groupCodec.validateShape(properties.getGroup());
     } catch (IllegalArgumentException error) {
-      throw new AiValidationException(RESOURCE, error.getMessage(), error);
+      throw DomainException.validation(RESOURCE, error.getMessage(), error);
     }
     Set<String> names = new TreeSet<>();
     if (existing.groupConfigJson() != null) {
@@ -262,25 +258,25 @@ public class AgentModelService {
       String path = "group.members[" + index + "]";
       AgentModel model = repository.getByNameForUpdate(member.getModelName());
       if (model == null) {
-        throw new AiValidationException(
+        throw DomainException.validation(
             RESOURCE, path + ".modelName references an unknown model: " + member.getModelName());
       }
       if (model.kind() != AgentModelKind.MODEL) {
-        throw new AiValidationException(
+        throw DomainException.validation(
             RESOURCE, path + ".modelName must reference a MODEL, not a GROUP");
       }
       AgentModelConfigDTO config;
       try {
         config = runtimeConfigParser.decode(model.configJson());
       } catch (IllegalArgumentException error) {
-        throw new AiValidationException(
+        throw DomainException.validation(
             RESOURCE, path + ".modelName has an invalid config: " + error.getMessage(), error);
       }
       boolean declared =
           config.getVariants().stream()
               .anyMatch(variant -> variant.getId().equals(member.getVariant()));
       if (!declared) {
-        throw new AiValidationException(
+        throw DomainException.validation(
             RESOURCE,
             path
                 + ".variant is not declared by model "
@@ -293,7 +289,7 @@ public class AgentModelService {
     try {
       AgentModelGroupConfigDerivation.derive(memberConfigs);
     } catch (IllegalArgumentException error) {
-      throw new AiValidationException(RESOURCE, error.getMessage(), error);
+      throw DomainException.validation(RESOURCE, error.getMessage(), error);
     }
   }
 
@@ -315,14 +311,14 @@ public class AgentModelService {
 
   private AgentModelConfigDTO decodeConfig(AgentModel model) {
     if (model.configJson() == null || model.configJson().isBlank()) {
-      throw new AiValidationException(RESOURCE, "agent model config is required: " + model.name());
+      throw DomainException.validation(RESOURCE, "agent model config is required: " + model.name());
     }
     return runtimeConfigParser.decode(model.configJson());
   }
 
   private AgentModelGroupDTO decodeGroup(AgentModel model) {
     if (model.groupConfigJson() == null || model.groupConfigJson().isBlank()) {
-      throw new AiValidationException(RESOURCE, "model group config is required: " + model.name());
+      throw DomainException.validation(RESOURCE, "model group config is required: " + model.name());
     }
     return groupCodec.decode(model.groupConfigJson());
   }
@@ -332,7 +328,7 @@ public class AgentModelService {
     for (AgentModelGroupMemberDTO member : group.getMembers()) {
       AgentModel memberModel = repository.getByName(member.getModelName());
       if (memberModel == null || memberModel.kind() != AgentModelKind.MODEL) {
-        throw new AiValidationException(
+        throw DomainException.validation(
             RESOURCE, "group member model is missing: " + member.getModelName());
       }
       members.add(decodeConfig(memberModel));
@@ -340,14 +336,14 @@ public class AgentModelService {
     try {
       return AgentModelGroupConfigDerivation.derive(members);
     } catch (IllegalArgumentException error) {
-      throw new AiValidationException(RESOURCE, error.getMessage(), error);
+      throw DomainException.validation(RESOURCE, error.getMessage(), error);
     }
   }
 
   private static void ensureExpectedVersion(
       AgentModel model, String expectedVersion, long expected) {
     if (model.version() != expected) {
-      throw new AiVersionConflictException(
+      throw DomainException.versionConflict(
           RESOURCE, expectedVersion, CatalogVersions.format(model.version()));
     }
   }
@@ -355,16 +351,16 @@ public class AgentModelService {
   private Mutation mutation(
       String name, AgentModelEditablePropertiesDTO properties, AgentModel existing) {
     if (properties == null) {
-      throw new AiValidationException(RESOURCE, RESOURCE + " body must not be null");
+      throw DomainException.validation(RESOURCE, RESOURCE + " body must not be null");
     }
     String normalizedName = canonicalName(name);
     editableSupport.validateMaxLength(RESOURCE, "name", normalizedName, NAME_MAX_LENGTH);
     AgentModelKind kind = properties.getKind();
     if (kind == null) {
-      throw new AiValidationException(RESOURCE, RESOURCE + " kind is required");
+      throw DomainException.validation(RESOURCE, RESOURCE + " kind is required");
     }
     if (existing != null && existing.kind() != kind) {
-      throw new AiValidationException(RESOURCE, "model kind cannot be changed");
+      throw DomainException.validation(RESOURCE, "model kind cannot be changed");
     }
     String description = editableSupport.trimToNull(properties.getDescription());
     return switch (kind) {
@@ -376,34 +372,34 @@ public class AgentModelService {
   private Mutation modelMutation(
       String name, String description, AgentModelEditablePropertiesDTO properties) {
     if (properties.getGroup() != null) {
-      throw new AiValidationException(RESOURCE, "MODEL must not carry group config");
+      throw DomainException.validation(RESOURCE, "MODEL must not carry group config");
     }
     String providerName = properties.getProviderName();
     if (providerName == null || providerName.isBlank()) {
-      throw new AiValidationException(RESOURCE, "providerName must not be blank");
+      throw DomainException.validation(RESOURCE, "providerName must not be blank");
     }
     if (!providerName.equals(providerName.strip())) {
-      throw new AiValidationException(
+      throw DomainException.validation(
           RESOURCE, "providerName must not contain surrounding whitespace");
     }
     String modelId = editableSupport.trimToNull(properties.getModelId());
     if (modelId == null) {
-      throw new AiValidationException(RESOURCE, RESOURCE + " modelId must not be blank");
+      throw DomainException.validation(RESOURCE, RESOURCE + " modelId must not be blank");
     }
     if (!properties.getModelId().equals(modelId)) {
-      throw new AiValidationException(
+      throw DomainException.validation(
           RESOURCE, RESOURCE + " modelId must not contain surrounding whitespace");
     }
     editableSupport.validateMaxLength(RESOURCE, "modelId", modelId, MODEL_ID_MAX_LENGTH);
     AgentModelConfigDTO config = properties.getConfig();
     if (config == null) {
-      throw new AiValidationException(RESOURCE, RESOURCE + " config must not be null");
+      throw DomainException.validation(RESOURCE, RESOURCE + " config must not be null");
     }
     String configJson;
     try {
       configJson = runtimeConfigParser.encode(config);
     } catch (IllegalArgumentException error) {
-      throw new AiValidationException(RESOURCE, error.getMessage(), error);
+      throw DomainException.validation(RESOURCE, error.getMessage(), error);
     }
     return new Mutation(
         name, AgentModelKind.MODEL, providerName, modelId, description, configJson, null);
@@ -414,28 +410,28 @@ public class AgentModelService {
     if (properties.getProviderName() != null
         || properties.getModelId() != null
         || properties.getConfig() != null) {
-      throw new AiValidationException(
+      throw DomainException.validation(
           RESOURCE, "GROUP must not carry providerName, modelId or model config");
     }
     AgentModelGroupDTO group = properties.getGroup();
     if (group == null) {
-      throw new AiValidationException(RESOURCE, RESOURCE + " group must not be null");
+      throw DomainException.validation(RESOURCE, RESOURCE + " group must not be null");
     }
     String groupConfigJson;
     try {
       groupConfigJson = groupCodec.encode(group);
     } catch (IllegalArgumentException error) {
-      throw new AiValidationException(RESOURCE, error.getMessage(), error);
+      throw DomainException.validation(RESOURCE, error.getMessage(), error);
     }
     return new Mutation(name, AgentModelKind.GROUP, null, null, description, null, groupConfigJson);
   }
 
   private static String canonicalName(String name) {
     if (name == null || name.isBlank()) {
-      throw new AiValidationException(RESOURCE, RESOURCE + " name must not be blank");
+      throw DomainException.validation(RESOURCE, RESOURCE + " name must not be blank");
     }
     if (!name.equals(name.strip())) {
-      throw new AiValidationException(
+      throw DomainException.validation(
           RESOURCE, RESOURCE + " name must not contain surrounding whitespace");
     }
     return name;

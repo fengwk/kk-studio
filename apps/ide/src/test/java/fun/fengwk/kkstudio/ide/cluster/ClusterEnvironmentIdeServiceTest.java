@@ -36,8 +36,7 @@ import fun.fengwk.kkstudio.platform.daemon.protocol.IdeCommand;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeResult;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
 import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer;
-import fun.fengwk.kkstudio.platform.error.AiEnvironmentIdeUnavailableException;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -138,8 +137,7 @@ class ClusterEnvironmentIdeServiceTest {
   void missingRouteFailsClosedBeforeAnyDelivery() {
     registry.current = Optional.empty();
 
-    assertThrows(
-        AiEnvironmentIdeUnavailableException.class, () -> service.openView(ENV, openViewRequest()));
+    assertThrows(DomainException.class, () -> service.openView(ENV, openViewRequest()));
     assertTrue(client.calls.isEmpty());
     assertTrue(localTransport.commands.isEmpty());
   }
@@ -149,8 +147,7 @@ class ClusterEnvironmentIdeServiceTest {
     EnvironmentIdeChangeDirectoryDTO request = new EnvironmentIdeChangeDirectoryDTO();
     request.setDirectory("/tmp");
 
-    assertThrows(
-        AiValidationException.class, () -> service.changeDirectory(ENV, "not-a-uuid", request));
+    assertThrows(DomainException.class, () -> service.changeDirectory(ENV, "not-a-uuid", request));
     assertEquals(0, registry.calls);
     assertTrue(client.calls.isEmpty());
   }

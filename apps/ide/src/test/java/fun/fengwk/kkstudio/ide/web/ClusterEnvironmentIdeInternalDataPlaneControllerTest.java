@@ -19,7 +19,7 @@ import fun.fengwk.kkstudio.platform.cluster.ClusterInternalAuthentication;
 import fun.fengwk.kkstudio.platform.cluster.ClusterInternalAuthenticationException;
 import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
-import fun.fengwk.kkstudio.platform.error.AiEnvironmentIdeUnavailableException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 
 import java.net.URI;
 import java.util.Optional;
@@ -98,7 +98,7 @@ class ClusterEnvironmentIdeInternalDataPlaneControllerTest {
     HttpServletResponse res = mock(HttpServletResponse.class);
 
     assertThrows(
-        AiEnvironmentIdeUnavailableException.class,
+        DomainException.class,
         () -> controller.dataHttp(ENV.toString(), VIEW.toString(), "/path", req, res));
     verifyNoInteractions(dataPlane);
   }

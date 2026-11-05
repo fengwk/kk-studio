@@ -22,9 +22,7 @@ import fun.fengwk.kkstudio.platform.environment.gateway.EnvironmentDaemonGateway
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentEvent;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
-import fun.fengwk.kkstudio.platform.error.AiEnvironmentUnavailableException;
-import fun.fengwk.kkstudio.platform.error.AiInUseException;
-import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRuntimeDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRuntimeStatusDTO;
@@ -95,15 +93,15 @@ public class EnvironmentUpdateService implements EnvironmentUpdateListener {
    *
    * <p>当前已是目标版本或同一目标正在更新时返回当前快照，不重复下发；不同目标、在途调用或 durable work 明确 busy。
    *
-   * @throws AiResourceNotFoundException 目标不存在
-   * @throws AiEnvironmentUnavailableException 目标没有当前 READY 运行快照
-   * @throws AiInUseException 目标已有其它更新、存在在途调用/工作，或官方发布不可用
+   * @throws DomainException 目标不存在
+   * @throws DomainException 目标没有当前 READY 运行快照
+   * @throws DomainException 目标已有其它更新、存在在途调用/工作，或官方发布不可用
    */
   public EnvironmentUpdateStartDTO startUpdate(EnvironmentId environmentId) {
     Objects.requireNonNull(environmentId, "environmentId");
     Environment environment = environmentRepository.getById(environmentId.value());
     if (environment == null) {
-      throw new AiResourceNotFoundException(RESOURCE);
+      throw DomainException.notFound(RESOURCE);
     }
     EnvironmentConnection connection = requireReadyConnection(environmentId);
     EnvironmentRuntimeStatusDTO current = runtimeStatus(environmentId);
@@ -112,7 +110,7 @@ public class EnvironmentUpdateService implements EnvironmentUpdateListener {
     DaemonOperatingSystem operatingSystem = host.operatingSystem();
     DaemonArchitecture architecture = canonicalArchitecture(host.architecture());
     if (!DaemonUpdateArtifact.isSupported(operatingSystem, architecture)) {
-      throw new AiInUseException(
+      throw DomainException.inUse(
           RESOURCE,
           "no official daemon release for "
               + DaemonUpdateArtifact.osSegment(operatingSystem)
@@ -124,7 +122,8 @@ public class EnvironmentUpdateService implements EnvironmentUpdateListener {
             .resolveTarget(operatingSystem, architecture)
             .orElseThrow(
                 () ->
-                    new AiInUseException(RESOURCE, "the official daemon release is not available"));
+                    DomainException.inUse(
+                        RESOURCE, "the official daemon release is not available"));
 
     if (target.targetVersion().equals(current.getStatus().getDaemonVersion())) {
       return startResult(EnvironmentUpdateStartDTO.CURRENT, current);
@@ -134,14 +133,14 @@ public class EnvironmentUpdateService implements EnvironmentUpdateListener {
       if (target.targetVersion().equals(progress.targetVersion())) {
         return startResult(EnvironmentUpdateStartDTO.IN_PROGRESS, current);
       }
-      throw new AiInUseException(
+      throw DomainException.inUse(
           RESOURCE, "an update to " + progress.targetVersion() + " is already in progress");
     }
     if (gateway.server().activeInvocationCount(environmentId) > 0) {
-      throw new AiInUseException(RESOURCE, "cannot update environment with in-flight invocations");
+      throw DomainException.inUse(RESOURCE, "cannot update environment with in-flight invocations");
     }
     if (hasActiveWork(environmentId)) {
-      throw new AiInUseException(
+      throw DomainException.inUse(
           RESOURCE, "cannot update environment required by active harness work");
     }
 
@@ -149,7 +148,8 @@ public class EnvironmentUpdateService implements EnvironmentUpdateListener {
     try {
       gateway.server().beginUpdate(environmentId, operationId);
     } catch (EnvironmentCapabilityBusyException error) {
-      throw new AiInUseException(RESOURCE, "an update is already in progress for this environment");
+      throw DomainException.inUse(
+          RESOURCE, "an update is already in progress for this environment");
     } catch (EnvironmentCapabilityUnavailableException error) {
       throw unavailable();
     }
@@ -161,13 +161,13 @@ public class EnvironmentUpdateService implements EnvironmentUpdateListener {
           EnvironmentUpdateStartDTO.SENT_UNCONFIRMED, runtimeStatusOr(environmentId, current));
     } catch (EnvironmentCapabilityBusyException error) {
       recordUpdateFailure(environmentId);
-      throw new AiInUseException(RESOURCE, "daemon is not ready to accept the update command");
+      throw DomainException.inUse(RESOURCE, "daemon is not ready to accept the update command");
     } catch (EnvironmentCapabilityUnavailableException error) {
       recordUpdateFailure(environmentId);
       throw unavailable();
     } catch (RuntimeException error) {
       recordUpdateFailure(environmentId);
-      throw new AiInUseException(
+      throw DomainException.inUse(
           RESOURCE, "the update command could not be delivered with a confirmed outcome");
     } finally {
       // Daemon 持有最终本机互斥；Server 的准入只覆盖命令下发的瞬时窗口。
@@ -270,12 +270,12 @@ public class EnvironmentUpdateService implements EnvironmentUpdateListener {
    */
   private static DaemonArchitecture canonicalArchitecture(String architecture) {
     if (architecture == null) {
-      throw new AiInUseException(RESOURCE, "host architecture is unknown for update");
+      throw DomainException.inUse(RESOURCE, "host architecture is unknown for update");
     }
     try {
       return DaemonArchitecture.fromWireValue(architecture);
     } catch (IllegalArgumentException error) {
-      throw new AiInUseException(RESOURCE, "unsupported host architecture for update");
+      throw DomainException.inUse(RESOURCE, "unsupported host architecture for update");
     }
   }
 
@@ -283,8 +283,8 @@ public class EnvironmentUpdateService implements EnvironmentUpdateListener {
     return environmentRepository.hasActiveWork(environmentId.value());
   }
 
-  private static AiEnvironmentUnavailableException unavailable() {
-    return new AiEnvironmentUnavailableException(
+  private static DomainException unavailable() {
+    return DomainException.environmentUnavailable(
         "environment runtime snapshot is unavailable; wait for READY or reconnect");
   }
 }

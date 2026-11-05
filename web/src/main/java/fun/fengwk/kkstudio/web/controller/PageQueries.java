@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.web.controller;
 
 import fun.fengwk.kkstudio.common.page.PageQuery;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 
 /** 将分页值对象的边界错误收口为可翻译的请求参数校验错误。 */
 final class PageQueries {
@@ -14,7 +14,7 @@ final class PageQueries {
     try {
       return new PageQuery(pageNumber, pageSize);
     } catch (IllegalArgumentException error) {
-      throw new AiValidationException(RESOURCE, error.getMessage(), error);
+      throw DomainException.validation(RESOURCE, error.getMessage(), error);
     }
   }
 }

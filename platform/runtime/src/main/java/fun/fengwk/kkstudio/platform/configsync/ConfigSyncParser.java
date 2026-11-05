@@ -12,7 +12,8 @@ import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderService;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogService;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentInstallConfigs;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentService;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.platform.error.DomainErrorCode;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.harness.builtin.BuiltinConfigSyncAdapter;
 import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
 import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
@@ -194,17 +195,17 @@ public final class ConfigSyncParser {
     }
     Object node = document.get(key);
     if (node == null) {
-      throw new AiValidationException(RESOURCE, key + " must be a list");
+      throw DomainException.validation(RESOURCE, key + " must be a list");
     }
     if (!(node instanceof List<?> list)) {
-      throw new AiValidationException(RESOURCE, key + " must be a list");
+      throw DomainException.validation(RESOURCE, key + " must be a list");
     }
     List<Entry> entries = new ArrayList<>(list.size());
     for (int index = 0; index < list.size(); index++) {
       Object element = list.get(index);
       String path = key + "[" + index + "]";
       if (!(element instanceof Map<?, ?> map)) {
-        throw new AiValidationException(RESOURCE, path + " must be an object");
+        throw DomainException.validation(RESOURCE, path + " must be an object");
       }
       Map<String, Object> raw = new LinkedHashMap<>();
       for (Map.Entry<?, ?> e : map.entrySet()) {
@@ -221,7 +222,7 @@ public final class ConfigSyncParser {
     declared.add(name);
     String providerType = entry.reqString("providerType");
     if (providerType.isBlank()) {
-      throw new AiValidationException(RESOURCE, entry.path + ".providerType is required");
+      throw DomainException.validation(RESOURCE, entry.path + ".providerType is required");
     }
     ProviderType type;
     try {
@@ -258,7 +259,7 @@ public final class ConfigSyncParser {
     try {
       kind = AgentModelKind.valueOf(kindText);
     } catch (IllegalArgumentException error) {
-      throw new AiValidationException(RESOURCE, entry.path + ".kind must be MODEL or GROUP");
+      throw DomainException.validation(RESOURCE, entry.path + ".kind must be MODEL or GROUP");
     }
     AgentModelEditablePropertiesDTO properties = new AgentModelEditablePropertiesDTO();
     properties.setName(name);
@@ -298,19 +299,19 @@ public final class ConfigSyncParser {
     String name = entry.reqName("name");
     if (BuiltinAgentDefinitions.isReservedName(name)) {
       // 内置 Agent 身份由系统持有：文件声明同名条目是硬冲突，不能通过导入覆盖或降级内置定义。
-      throw new AiValidationException(
+      throw DomainException.validation(
           RESOURCE, "agent name is reserved for a built-in agent: " + name);
     }
     declared.add(name);
     String description = entry.optString("description");
     String systemPrompt = entry.optString("systemPrompt");
     if (entry.raw.containsKey("model") || entry.raw.containsKey("variant")) {
-      throw new AiValidationException(RESOURCE, entry.path + " contains legacy agent fields");
+      throw DomainException.validation(RESOURCE, entry.path + " contains legacy agent fields");
     }
     Object executionNode = requireObject(entry, "execution");
     Map<?, ?> executionMap = (Map<?, ?>) executionNode;
     if (!executionMap.keySet().equals(Set.of("driver", "settings"))) {
-      throw new AiValidationException(RESOURCE, entry.path + ".execution has invalid fields");
+      throw DomainException.validation(RESOURCE, entry.path + ".execution has invalid fields");
     }
     Object configNode = requireObject(entry, "config");
     List<String> removed = new ArrayList<>();
@@ -398,9 +399,12 @@ public final class ConfigSyncParser {
       String name, String url, Map<String, String> headers, Boolean enabled, Long timeoutMillis) {
     try {
       return McpConfigParser.normalizeHttpConfig(url, headers, enabled, timeoutMillis);
-    } catch (AiValidationException error) {
+    } catch (DomainException error) {
+      if (error.code() != DomainErrorCode.VALIDATION) {
+        throw error;
+      }
       // 底层消息可能含 URL 或 header 值，统一替换为安全的类别与条目名，不携带 cause。
-      throw new AiValidationException(
+      throw DomainException.validation(
           RESOURCE, "mcp server " + name + " has an invalid url, headers or timeout");
     }
   }
@@ -418,7 +422,7 @@ public final class ConfigSyncParser {
         resolvedValues = plugin.get().configurationSchema().resolveValues(valuesJson);
       } catch (IllegalArgumentException error) {
         // 底层消息可能含用户值，统一替换为安全的类别与条目名；秘密字段名不得借插件条目夹带。
-        throw new AiValidationException(RESOURCE, "plugins entry is invalid: " + pluginId);
+        throw DomainException.validation(RESOURCE, "plugins entry is invalid: " + pluginId);
       }
     }
     if (skipUnknown(entry, ConfigSyncKind.PLUGINS, pluginId, skipped)) {
@@ -442,7 +446,7 @@ public final class ConfigSyncParser {
     }
     Object node = document.get(key);
     if (!(node instanceof Map<?, ?> rawMap)) {
-      throw new AiValidationException(RESOURCE, "settings must be an object");
+      throw DomainException.validation(RESOURCE, "settings must be an object");
     }
     Map<String, Object> raw = new LinkedHashMap<>();
     for (Map.Entry<?, ?> entry : rawMap.entrySet()) {
@@ -460,7 +464,7 @@ public final class ConfigSyncParser {
     try {
       systemSettingsCodec.fromDto(sections);
     } catch (IllegalArgumentException error) {
-      throw new AiValidationException(RESOURCE, "settings are invalid");
+      throw DomainException.validation(RESOURCE, "settings are invalid");
     }
     return sections;
   }
@@ -468,7 +472,7 @@ public final class ConfigSyncParser {
   private Object requireObject(Entry entry, String key) {
     Object node = entry.node(key);
     if (!(node instanceof Map<?, ?>)) {
-      throw new AiValidationException(RESOURCE, entry.path + "." + key + " must be an object");
+      throw DomainException.validation(RESOURCE, entry.path + "." + key + " must be an object");
     }
     return node;
   }
@@ -501,8 +505,11 @@ public final class ConfigSyncParser {
   private static void validateEntry(ConfigSyncKind kind, String name, Runnable validation) {
     try {
       validation.run();
-    } catch (AiValidationException error) {
-      throw new AiValidationException(RESOURCE, kind.wireValue() + " entry is invalid: " + name);
+    } catch (DomainException error) {
+      if (error.code() != DomainErrorCode.VALIDATION) {
+        throw error;
+      }
+      throw DomainException.validation(RESOURCE, kind.wireValue() + " entry is invalid: " + name);
     }
   }
 
@@ -510,7 +517,7 @@ public final class ConfigSyncParser {
     Set<String> seen = new HashSet<>();
     for (String name : names) {
       if (!seen.add(name)) {
-        throw new AiValidationException(
+        throw DomainException.validation(
             RESOURCE, "duplicate " + kind.wireValue() + " entry in file: " + name);
       }
     }
@@ -570,7 +577,7 @@ public final class ConfigSyncParser {
     String reqString(String key) {
       String value = optString(key);
       if (value == null) {
-        throw new AiValidationException(RESOURCE, path + "." + key + " is required");
+        throw DomainException.validation(RESOURCE, path + "." + key + " is required");
       }
       return value;
     }
@@ -578,7 +585,7 @@ public final class ConfigSyncParser {
     String reqName(String key) {
       String value = reqString(key);
       if (value.isBlank() || !value.equals(value.strip())) {
-        throw new AiValidationException(
+        throw DomainException.validation(
             RESOURCE, path + "." + key + " must be non-blank and unpadded");
       }
       return value;
@@ -591,7 +598,7 @@ public final class ConfigSyncParser {
         return null;
       }
       if (!(value instanceof String text)) {
-        throw new AiValidationException(RESOURCE, path + "." + key + " must be a string");
+        throw DomainException.validation(RESOURCE, path + "." + key + " must be a string");
       }
       return text;
     }
@@ -603,18 +610,18 @@ public final class ConfigSyncParser {
         return null;
       }
       if (value instanceof BigDecimal || value instanceof Float || value instanceof Double) {
-        throw new AiValidationException(RESOURCE, path + "." + key + " must be an integer");
+        throw DomainException.validation(RESOURCE, path + "." + key + " must be an integer");
       }
       if (value instanceof BigInteger bigInteger) {
         if (bigInteger.bitLength() > 63) {
-          throw new AiValidationException(RESOURCE, path + "." + key + " must be an integer");
+          throw DomainException.validation(RESOURCE, path + "." + key + " must be an integer");
         }
         return bigInteger.longValue();
       }
       if (value instanceof Number number) {
         return number.longValue();
       }
-      throw new AiValidationException(RESOURCE, path + "." + key + " must be an integer");
+      throw DomainException.validation(RESOURCE, path + "." + key + " must be an integer");
     }
 
     List<Integer> optIntegerList(String key) {
@@ -624,7 +631,8 @@ public final class ConfigSyncParser {
         return null;
       }
       if (!(value instanceof List<?> list)) {
-        throw new AiValidationException(RESOURCE, path + "." + key + " must be a list of integers");
+        throw DomainException.validation(
+            RESOURCE, path + "." + key + " must be a list of integers");
       }
       List<Integer> result = new ArrayList<>(list.size());
       for (Object item : list) {
@@ -638,22 +646,25 @@ public final class ConfigSyncParser {
           || value instanceof BigDecimal
           || value instanceof Float
           || value instanceof Double) {
-        throw new AiValidationException(RESOURCE, path + "." + key + " must contain only integers");
+        throw DomainException.validation(
+            RESOURCE, path + "." + key + " must contain only integers");
       }
       long longValue;
       if (value instanceof BigInteger bigInteger) {
         if (bigInteger.bitLength() > 63) {
-          throw new AiValidationException(
+          throw DomainException.validation(
               RESOURCE, path + "." + key + " must contain only integers");
         }
         longValue = bigInteger.longValue();
       } else if (value instanceof Number number) {
         longValue = number.longValue();
       } else {
-        throw new AiValidationException(RESOURCE, path + "." + key + " must contain only integers");
+        throw DomainException.validation(
+            RESOURCE, path + "." + key + " must contain only integers");
       }
       if (longValue < Integer.MIN_VALUE || longValue > Integer.MAX_VALUE) {
-        throw new AiValidationException(RESOURCE, path + "." + key + " must contain only integers");
+        throw DomainException.validation(
+            RESOURCE, path + "." + key + " must contain only integers");
       }
       return (int) longValue;
     }
@@ -665,7 +676,7 @@ public final class ConfigSyncParser {
         return null;
       }
       if (!(value instanceof Boolean bool)) {
-        throw new AiValidationException(RESOURCE, path + "." + key + " must be a boolean");
+        throw DomainException.validation(RESOURCE, path + "." + key + " must be a boolean");
       }
       return bool;
     }
@@ -677,16 +688,16 @@ public final class ConfigSyncParser {
         return null;
       }
       if (!(value instanceof Map<?, ?> map)) {
-        throw new AiValidationException(RESOURCE, path + "." + key + " must be an object");
+        throw DomainException.validation(RESOURCE, path + "." + key + " must be an object");
       }
       Map<String, String> result = new LinkedHashMap<>();
       for (Map.Entry<?, ?> entry : map.entrySet()) {
         if (!(entry.getKey() instanceof String mapKey)) {
-          throw new AiValidationException(RESOURCE, path + "." + key + " keys must be strings");
+          throw DomainException.validation(RESOURCE, path + "." + key + " keys must be strings");
         }
         Object mapValue = entry.getValue();
         if (mapValue != null && !(mapValue instanceof String)) {
-          throw new AiValidationException(RESOURCE, path + "." + key + " values must be strings");
+          throw DomainException.validation(RESOURCE, path + "." + key + " values must be strings");
         }
         result.put(mapKey, (String) mapValue);
       }

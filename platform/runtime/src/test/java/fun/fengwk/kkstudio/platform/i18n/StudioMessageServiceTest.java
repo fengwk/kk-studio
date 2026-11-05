@@ -111,6 +111,11 @@ class StudioMessageServiceTest {
     assertEquals("HTTP error (status 599).", messageService.httpMessage(599));
     assertEquals("HTTP Error", messageService.httpTitle(599));
     assertFalse(messageService.httpMessage(599).isBlank());
+
+    // 已识别但未登记文案的状态与未知状态使用同一兜底，advice 不再各自捕获 MissingResourceException。
+    assertEquals("I_AM_A_TEAPOT", messageService.httpCode(418));
+    assertEquals("HTTP error (status 418).", messageService.httpMessage(418));
+    assertEquals("HTTP Error", messageService.httpTitle(418));
   }
 
   /** 展示层按请求 locale 解析 resource 名称；未登记标识回退为下划线分隔的可读形式，空值原样返回。 */

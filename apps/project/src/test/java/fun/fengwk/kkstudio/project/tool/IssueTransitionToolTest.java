@@ -19,7 +19,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.TurnMediaCapabilities;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -132,7 +132,7 @@ class IssueTransitionToolTest {
   void returnsValidationMessageFromService() {
     when(service.accept(eq(THREAD_ID), eq(ASSISTANT_ENTRY_ID), anyString()))
         .thenThrow(
-            new AiValidationException("issue_run", "state DESIGN cannot transition to DONE"));
+            DomainException.validation("issue_run", "state DESIGN cannot transition to DONE"));
 
     ToolResult result = execute("{\"to_state\":\"DONE\"}", context(THREAD_ID));
 

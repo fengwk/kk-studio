@@ -31,10 +31,7 @@ import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentSkillState;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
-import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
-import fun.fengwk.kkstudio.platform.error.AiInUseException;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
-import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageBlobRepository;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
@@ -181,10 +178,10 @@ class SkillCatalogServiceTest {
     when(packageRepository.lockPackage(PACKAGE)).thenReturn(uploadPackage(3));
     SkillPackageEditDTO branchEdit = editDTO("3", "updated");
     branchEdit.setBranch("main");
-    assertThrows(AiValidationException.class, () -> service.editPackage(PACKAGE, branchEdit));
+    assertThrows(DomainException.class, () -> service.editPackage(PACKAGE, branchEdit));
     SkillPackageEditDTO tokenEdit = editDTO("3", "updated");
     tokenEdit.applyToken(null);
-    assertThrows(AiValidationException.class, () -> service.editPackage(PACKAGE, tokenEdit));
+    assertThrows(DomainException.class, () -> service.editPackage(PACKAGE, tokenEdit));
     verify(packageRepository, never()).updateDescription(any(), any(), anyLong());
   }
 
@@ -193,9 +190,7 @@ class SkillCatalogServiceTest {
     // 意图：统一编辑沿用 CAS version，陈旧卡片不会改写描述或 Git 设置。
     when(packageRepository.lockPackage(PACKAGE)).thenReturn(gitPackage(2, HEAD, HEAD));
 
-    assertThrows(
-        AiVersionConflictException.class,
-        () -> service.editPackage(PACKAGE, editDTO("1", "stale")));
+    assertThrows(DomainException.class, () -> service.editPackage(PACKAGE, editDTO("1", "stale")));
     verify(packageRepository, never()).updateDescription(any(), any(), anyLong());
     verify(packageRepository, never()).updateGitSettings(any(), any(), any());
   }
@@ -246,7 +241,7 @@ class SkillCatalogServiceTest {
   void createGitPackageRejectsAnExistingName() {
     when(packageRepository.getPackage(PACKAGE)).thenReturn(uploadPackage(3));
 
-    assertThrows(AiDuplicateException.class, () -> service.createGitPackage(createDTO(null)));
+    assertThrows(DomainException.class, () -> service.createGitPackage(createDTO(null)));
     verify(gitRepository, never()).resolveBranchHead(anyString(), anyString(), any());
   }
 
@@ -273,8 +268,7 @@ class SkillCatalogServiceTest {
   void checkGitPackageRejectsAStaleVersion() {
     when(packageRepository.getPackage(PACKAGE)).thenReturn(gitPackage(5, HEAD, HEAD));
 
-    assertThrows(
-        AiVersionConflictException.class, () -> service.checkGitPackage(PACKAGE, checkDTO("4")));
+    assertThrows(DomainException.class, () -> service.checkGitPackage(PACKAGE, checkDTO("4")));
   }
 
   @Test
@@ -282,8 +276,7 @@ class SkillCatalogServiceTest {
     when(packageRepository.getPackage(PACKAGE)).thenReturn(gitPackage(1, HEAD, OLD_HEAD));
 
     assertThrows(
-        AiValidationException.class,
-        () -> service.publishGitPackage(PACKAGE, publishDTO("1", HEAD)));
+        DomainException.class, () -> service.publishGitPackage(PACKAGE, publishDTO("1", HEAD)));
     verify(gitRepository, never()).buildArchive(anyString(), anyString(), any());
   }
 
@@ -338,8 +331,7 @@ class SkillCatalogServiceTest {
     when(packageRepository.updatePublication(any(), eq(2L))).thenReturn(false);
 
     assertThrows(
-        AiVersionConflictException.class,
-        () -> service.publishGitPackage(PACKAGE, publishDTO("2", HEAD)));
+        DomainException.class, () -> service.publishGitPackage(PACKAGE, publishDTO("2", HEAD)));
 
     verify(blobManager, never()).release(current.artifactBlobId());
     // 冲突后暂存对象被取消，不会留下无主归档。
@@ -352,7 +344,7 @@ class SkillCatalogServiceTest {
     when(packageRepository.lockPackage(PACKAGE)).thenReturn(current);
     when(agentDefinitionRepository.existsReferencingSkill(PACKAGE, "dev")).thenReturn(true);
 
-    assertThrows(AiInUseException.class, () -> service.deletePackage(PACKAGE, "1"));
+    assertThrows(DomainException.class, () -> service.deletePackage(PACKAGE, "1"));
     verify(packageRepository, never()).deletePackage(anyString(), anyLong());
   }
 
@@ -395,8 +387,7 @@ class SkillCatalogServiceTest {
     when(contentService.readBlobContent(rawBlobId, SkillArchiveBuilder.MAX_ARCHIVE_BYTES))
         .thenReturn(content(rawBlobId, "not a zip".getBytes(StandardCharsets.UTF_8)));
 
-    assertThrows(
-        AiValidationException.class, () -> service.previewUpload(uploadPreviewDTO(rawUploadId)));
+    assertThrows(DomainException.class, () -> service.previewUpload(uploadPreviewDTO(rawUploadId)));
     verify(uploadService, never()).stage(anyString(), anyString(), any(), anyLong());
   }
 
@@ -437,7 +428,7 @@ class SkillCatalogServiceTest {
     when(packageRepository.getPackage(PACKAGE)).thenReturn(gitPackage(1, HEAD, HEAD));
 
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () -> service.publishUpload(uploadPublishDTO(UUID.randomUUID(), "1")));
   }
 

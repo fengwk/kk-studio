@@ -27,7 +27,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerRepository;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpTool;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalog;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.testing.TestCatalogSources;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncKind;
@@ -215,7 +215,7 @@ class ConfigSyncPlannerTest {
             + "  - packageName: bad/name\n"
             + "    repositoryUrl: https://example.com/x.git\n"
             + "    branch: main\n";
-    assertThrows(AiValidationException.class, () -> plan(yamlText));
+    assertThrows(DomainException.class, () -> plan(yamlText));
   }
 
   @Test
@@ -237,7 +237,7 @@ class ConfigSyncPlannerTest {
             + "  - packageName: pkg\n"
             + "    repositoryUrl: https://example.com/pkg.git\n"
             + "    branch: main\n";
-    AiValidationException error = assertThrows(AiValidationException.class, () -> plan(yamlText));
+    DomainException error = assertThrows(DomainException.class, () -> plan(yamlText));
     assertTrue(
         error.getMessage().contains("uploaded skill package cannot be replaced by a Git import"));
   }
@@ -299,7 +299,7 @@ class ConfigSyncPlannerTest {
             + "  - packageName: pkg\n"
             + "    repositoryUrl: https://example.com/other.git\n"
             + "    branch: main\n";
-    AiValidationException error = assertThrows(AiValidationException.class, () -> plan(yamlText));
+    DomainException error = assertThrows(DomainException.class, () -> plan(yamlText));
 
     assertFalse(error.getMessage().contains("other.git"));
   }
@@ -331,7 +331,7 @@ class ConfigSyncPlannerTest {
     when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
 
     String yamlText = "mcpServers:\n" + "  - name: mcp\n" + "    url: not-a-url\n";
-    assertThrows(AiValidationException.class, () -> plan(yamlText));
+    assertThrows(DomainException.class, () -> plan(yamlText));
     verify(mcpDiscovery, never()).discoverOrNull(any());
   }
 
@@ -390,7 +390,7 @@ class ConfigSyncPlannerTest {
             + "agents:\n"
             + agent(
                 "a", "m", "      tools: []\n      skills:\n        - null\n      subagents: []\n");
-    assertThrows(AiValidationException.class, () -> plan(yamlText));
+    assertThrows(DomainException.class, () -> plan(yamlText));
   }
 
   @Test
@@ -515,7 +515,7 @@ class ConfigSyncPlannerTest {
     SystemSettingsSectionsDTO sections = ConfigSyncFixtures.defaultSettings();
     sections.getAiRuntime().setRetryBackoffStrategy("BOGUS");
     String yamlText = ConfigSyncFixtures.settingsYaml(sections);
-    assertThrows(AiValidationException.class, () -> plan(yamlText));
+    assertThrows(DomainException.class, () -> plan(yamlText));
   }
 
   @Test
@@ -536,7 +536,7 @@ class ConfigSyncPlannerTest {
 
     String yamlText =
         "mcpServers:\n" + "  - name: mcp\n" + "    url: https://mcp.example.com/mcp\n";
-    assertThrows(AiValidationException.class, () -> plan(yamlText));
+    assertThrows(DomainException.class, () -> plan(yamlText));
   }
 
   @Test
@@ -586,9 +586,8 @@ class ConfigSyncPlannerTest {
                 "m",
                 "raw-variant-xyz",
                 ConfigSyncFixtures.agentConfig(List.of(), List.of(), List.of())));
-    AiValidationException error =
-        assertThrows(
-            AiValidationException.class, () -> plan(ConfigSyncFixtures.documentYaml(unknown)));
+    DomainException error =
+        assertThrows(DomainException.class, () -> plan(ConfigSyncFixtures.documentYaml(unknown)));
     assertTrue(error.getMessage().contains("unknown model variant"));
     assertTrue(error.getMessage().contains("a"));
     assertFalse(error.getMessage().contains("raw-variant-xyz"));
@@ -626,7 +625,7 @@ class ConfigSyncPlannerTest {
         plan(ConfigSyncFixtures.documentYaml(document(agent("no_variant", "m", null, config))));
     assertTrue(plan.imported().contains(new ConfigSyncRef(ConfigSyncKind.AGENTS, "no_variant")));
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () ->
             plan(
                 ConfigSyncFixtures.documentYaml(
@@ -686,9 +685,8 @@ class ConfigSyncPlannerTest {
         "agents",
         List.of(
             agent("group-agent", "g", "default", agentConfig(List.of(), List.of(), List.of()))));
-    AiValidationException error =
-        assertThrows(
-            AiValidationException.class, () -> plan(ConfigSyncFixtures.documentYaml(document)));
+    DomainException error =
+        assertThrows(DomainException.class, () -> plan(ConfigSyncFixtures.documentYaml(document)));
     assertTrue(error.getMessage().contains("model group with variant"));
   }
 
@@ -738,7 +736,7 @@ class ConfigSyncPlannerTest {
             fileModel,
             agent(
                 "a", "m", "old", ConfigSyncFixtures.agentConfig(List.of(), List.of(), List.of())));
-    assertThrows(AiValidationException.class, () -> plan(ConfigSyncFixtures.documentYaml(withOld)));
+    assertThrows(DomainException.class, () -> plan(ConfigSyncFixtures.documentYaml(withOld)));
   }
 
   private static Map<String, Object> document(Map<String, Object> agent) {
@@ -946,9 +944,9 @@ class ConfigSyncPlannerTest {
                     ConfigSyncFixtures.pluginRow(PLUGIN_ID, 7L, "{\"promptAgentName\":\"h3\"}"))));
     when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
 
-    AiValidationException error =
+    DomainException error =
         assertThrows(
-            AiValidationException.class,
+            DomainException.class,
             () -> pluginPlanner().plan(pluginParser().parse(pluginEntry("!secret-marker"))));
 
     assertEquals("plugin configuration is invalid: " + PLUGIN_ID, error.getMessage());

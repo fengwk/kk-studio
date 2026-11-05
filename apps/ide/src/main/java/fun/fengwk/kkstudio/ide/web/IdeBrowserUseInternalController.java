@@ -27,7 +27,7 @@ import fun.fengwk.kkstudio.platform.cluster.ClusterInternalAuthentication;
 import fun.fengwk.kkstudio.platform.cluster.ClusterInternalAuthenticationException;
 import fun.fengwk.kkstudio.platform.cluster.ClusterInternalErrors;
 import fun.fengwk.kkstudio.platform.cluster.ClusterInternalRequests;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
 
 import java.io.IOException;
@@ -71,7 +71,7 @@ public class IdeBrowserUseInternalController {
   public IdeBrowserUseIntentReply findExactIntent(HttpServletRequest request) {
     authenticate(request);
     if (request.getQueryString() != null) {
-      throw new AiValidationException("browserUse", "browser-use query is invalid");
+      throw DomainException.validation("browserUse", "browser-use query is invalid");
     }
     IdeBrowserUseIntentQuery query = readBody(request, IdeBrowserUseIntentQuery.class);
     try {
@@ -86,7 +86,7 @@ public class IdeBrowserUseInternalController {
               .isPresent();
       return new IdeBrowserUseIntentReply(matched);
     } catch (RuntimeException error) {
-      throw new AiValidationException("browserUse", "browser-use query is invalid");
+      throw DomainException.validation("browserUse", "browser-use query is invalid");
     }
   }
 
@@ -107,7 +107,7 @@ public class IdeBrowserUseInternalController {
       documentId =
           Uuids.parseCanonical(requireSingleParameter(parameters, "documentId"), "documentId");
     } catch (RuntimeException error) {
-      throw new AiValidationException("browserUse", "browser-use query is invalid");
+      throw DomainException.validation("browserUse", "browser-use query is invalid");
     }
     Optional<IdeBrowserUse> proofs = registry.activeBoundProofs(identity, documentId);
     return proofs
@@ -136,7 +136,7 @@ public class IdeBrowserUseInternalController {
     try {
       return strictMapper.readValue(payload, type);
     } catch (JacksonException error) {
-      throw new AiValidationException("browserUse", "browser-use request body is invalid");
+      throw DomainException.validation("browserUse", "browser-use request body is invalid");
     }
   }
 
@@ -148,7 +148,7 @@ public class IdeBrowserUseInternalController {
       }
       return data;
     } catch (IOException error) {
-      throw new AiValidationException("browserUse", "browser-use request body is unreadable");
+      throw DomainException.validation("browserUse", "browser-use request body is unreadable");
     }
   }
 
@@ -159,8 +159,8 @@ public class IdeBrowserUseInternalController {
     return ClusterInternalErrors.unauthorized();
   }
 
-  @ExceptionHandler(AiValidationException.class)
-  public ResponseEntity<ApiResponse<Void>> handleValidation(AiValidationException error) {
+  @ExceptionHandler(DomainException.class)
+  public ResponseEntity<ApiResponse<Void>> handleDomain(DomainException error) {
     return ClusterInternalErrors.domain(error);
   }
 

@@ -14,9 +14,7 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.transaction.PlatformTransactionManager;
 
 import fun.fengwk.kkstudio.platform.catalog.mcp.discovery.McpToolDiscovery;
-import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
-import fun.fengwk.kkstudio.platform.error.AiInUseException;
-import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.share.ai.mcp.McpServerDTO;
 
 import java.util.List;
@@ -89,7 +87,7 @@ class McpServerServiceImportTest {
     when(repository.create(any())).thenThrow(new DuplicateKeyException("duplicate"));
 
     assertThrows(
-        AiDuplicateException.class,
+        DomainException.class,
         () -> service.importServer("mcp", URL, Map.of(), Boolean.TRUE, 30_000L, null));
   }
 
@@ -100,7 +98,7 @@ class McpServerServiceImportTest {
     when(repository.update(any(), eq(0L))).thenReturn(false);
 
     assertThrows(
-        AiVersionConflictException.class,
+        DomainException.class,
         () -> service.importServer("mcp", URL, Map.of(), Boolean.TRUE, 30_000L, null));
   }
 
@@ -113,7 +111,7 @@ class McpServerServiceImportTest {
     when(repository.selectReferencedToolNames()).thenReturn(List.of("mcp_mcp_keep"));
 
     assertThrows(
-        AiInUseException.class,
+        DomainException.class,
         () ->
             service.importServer(
                 "mcp", URL, Map.of(), Boolean.TRUE, 30_000L, List.of(tool("mcp_mcp_next"))));
@@ -137,7 +135,7 @@ class McpServerServiceImportTest {
         .thenReturn(false);
 
     assertThrows(
-        AiVersionConflictException.class,
+        DomainException.class,
         () ->
             service.importServer(
                 "mcp", URL, Map.of(), Boolean.TRUE, 30_000L, List.of(tool("mcp_mcp_echo"))));
@@ -167,7 +165,7 @@ class McpServerServiceImportTest {
         .thenReturn(false);
 
     assertThrows(
-        AiVersionConflictException.class,
+        DomainException.class,
         () ->
             service.importServer(
                 "mcp", URL, Map.of(), Boolean.TRUE, 30_000L, List.of(tool("mcp_mcp_new"))));

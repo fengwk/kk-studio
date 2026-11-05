@@ -6,7 +6,7 @@ import static org.mockito.Mockito.*;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DuplicateKeyException;
 
-import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwner;
 
 import java.util.List;
@@ -49,7 +49,7 @@ class ChatSessionOwnershipTest {
     ChatSessionOwnership spi = new ChatSessionOwnership(chats, sessions);
     UUID id = UUID.randomUUID(), session = UUID.randomUUID();
     SessionOwner owner = new SessionOwner("CHAT", id.toString());
-    assertThrows(AiResourceNotFoundException.class, () -> spi.listSessions(owner));
+    assertThrows(DomainException.class, () -> spi.listSessions(owner));
     assertThrows(
         IllegalArgumentException.class,
         () -> spi.lockForAcceptance(new SessionOwner("CHAT", "1-1-1-1-1"), null));
@@ -67,7 +67,7 @@ class ChatSessionOwnershipTest {
     UUID id = UUID.randomUUID(), session = UUID.randomUUID(), thread = UUID.randomUUID();
     SessionOwner owner = new SessionOwner("CHAT", id.toString());
     assertEquals("CHAT", spi.kind());
-    assertThrows(AiResourceNotFoundException.class, () -> spi.lockForAcceptance(owner, null));
+    assertThrows(DomainException.class, () -> spi.lockForAcceptance(owner, null));
     assertEquals(List.of(), spi.lockForDeletion(owner));
     assertTrue(spi.findOwner(thread, session).isEmpty());
     spi.lockForInteraction(thread, session);

@@ -8,7 +8,7 @@ import org.junit.jupiter.api.Test;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.share.ai.environment.DaemonConfiguration;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInstallConfigDTO;
 
@@ -41,7 +41,7 @@ class EnvironmentInstallConfigsTest {
   @Test
   void rejectsUnknownFieldsInvalidOperatingSystemAndNull() {
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () ->
             EnvironmentInstallConfigs.parse(
                 json.valueToTree(
@@ -54,7 +54,7 @@ class EnvironmentInstallConfigsTest {
                         Map.of("studioUrl", "https://studio.example.com")))));
     for (Object os : List.of("wsl", "", 123, true)) {
       assertThrows(
-          AiValidationException.class,
+          DomainException.class,
           () ->
               EnvironmentInstallConfigs.parse(
                   json.valueToTree(
@@ -64,7 +64,7 @@ class EnvironmentInstallConfigsTest {
                           "daemon",
                           Map.of("studioUrl", "https://studio.example.com")))));
     }
-    assertThrows(AiValidationException.class, () -> EnvironmentInstallConfigs.validate(null));
+    assertThrows(DomainException.class, () -> EnvironmentInstallConfigs.validate(null));
   }
 
   @Test
@@ -80,8 +80,7 @@ class EnvironmentInstallConfigsTest {
             "{\"expectedVersion\":\"0\",\"installConfig\":{\"operatingSystem\":\"linux\",\"daemon\":{\"studioUrl\":\"https://studio.example.com/path\"}}}",
             "{\"expectedVersion\":\"0\",\"installConfig\":{\"operatingSystem\":\"linux\",\"daemon\":{\"studioUrl\":\"https://studio.example.com\",\"lsp\":{\"servers\":{}}}}}")) {
       assertThrows(
-          AiValidationException.class,
-          () -> EnvironmentInstallConfigs.parseUpdate(json.readTree(raw)));
+          DomainException.class, () -> EnvironmentInstallConfigs.parseUpdate(json.readTree(raw)));
     }
   }
 
@@ -104,8 +103,7 @@ class EnvironmentInstallConfigsTest {
             "{\"expectedVersion\":\"0\",\"installConfig\":{\"operatingSystem\":\"linux\",\"daemon\":{\"studioUrl\":\"https://studio.example.com\",\"lsp\":{\"servers\":[]}}}}",
             "{\"expectedVersion\":\"0\",\"installConfig\":{\"operatingSystem\":\"linux\",\"daemon\":{\"studioUrl\":\"https://studio.example.com\",\"note\":42}}}")) {
       assertThrows(
-          AiValidationException.class,
-          () -> EnvironmentInstallConfigs.parseUpdate(json.readTree(raw)));
+          DomainException.class, () -> EnvironmentInstallConfigs.parseUpdate(json.readTree(raw)));
     }
   }
 
@@ -113,14 +111,14 @@ class EnvironmentInstallConfigsTest {
   @Test
   void validateRejectsProgrammaticModelAndReadRejectsCorruptPersistedJson() {
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () -> EnvironmentInstallConfigs.validate(new EnvironmentInstallConfigDTO()));
     DaemonConfiguration invalidDaemon = new DaemonConfiguration();
     invalidDaemon.setStudioUrl("not-an-origin");
     EnvironmentInstallConfigDTO bad = new EnvironmentInstallConfigDTO();
     bad.setOperatingSystem("linux");
     bad.setDaemon(invalidDaemon);
-    assertThrows(AiValidationException.class, () -> EnvironmentInstallConfigs.validate(bad));
+    assertThrows(DomainException.class, () -> EnvironmentInstallConfigs.validate(bad));
     assertThrows(IllegalStateException.class, () -> EnvironmentInstallConfigs.read("not json"));
   }
 }

@@ -22,7 +22,7 @@ import fun.fengwk.kkstudio.ide.browser.IdeBrowserUseRegistry;
 import fun.fengwk.kkstudio.ide.browser.IdeBrowserUseView;
 import fun.fengwk.kkstudio.platform.cluster.ClusterInternalAuthentication;
 import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
-import fun.fengwk.kkstudio.platform.error.AiEnvironmentIdeUnavailableException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 
 import java.net.http.HttpClient;
 import java.util.List;
@@ -97,7 +97,7 @@ class IdeBrowserUseGatewayTest {
     when(nodes.liveInternalOrigin(REMOTE_NODE)).thenReturn(Optional.empty());
 
     assertThrows(
-        AiEnvironmentIdeUnavailableException.class,
+        DomainException.class,
         () -> gateway.findExactIntent(REMOTE_NODE, CONNECTION, DOCUMENT, ENV, VIEW, CLAIM));
     verify(nodes).liveInternalOrigin(REMOTE_NODE);
     verifyNoMoreInteractions(nodes);
@@ -108,9 +108,9 @@ class IdeBrowserUseGatewayTest {
     IllegalStateException failure = new IllegalStateException("cluster registry unavailable");
     when(nodes.liveInternalOrigin(REMOTE_NODE)).thenThrow(failure);
 
-    AiEnvironmentIdeUnavailableException error =
+    DomainException error =
         assertThrows(
-            AiEnvironmentIdeUnavailableException.class,
+            DomainException.class,
             () -> gateway.activeBoundProofs(REMOTE_NODE, CONNECTION, DOCUMENT));
 
     assertInstanceOf(IllegalStateException.class, error.getCause());

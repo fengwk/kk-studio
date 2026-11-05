@@ -11,12 +11,8 @@ import fun.fengwk.kkstudio.common.page.Page;
 import fun.fengwk.kkstudio.common.page.PageQuery;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpConfigParser.HttpConfig;
 import fun.fengwk.kkstudio.platform.catalog.mcp.discovery.McpToolDiscovery;
-import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
-import fun.fengwk.kkstudio.platform.error.AiInUseException;
-import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
-import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
 import fun.fengwk.kkstudio.platform.error.CatalogVersions;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.share.ai.mcp.McpServerConfigDTO;
 import fun.fengwk.kkstudio.share.ai.mcp.McpServerCreateDTO;
 import fun.fengwk.kkstudio.share.ai.mcp.McpServerDTO;
@@ -87,7 +83,7 @@ public class McpServerService {
   /** 创建 Server 配置：仅校验并持久化为 UNVERIFIED，不发起任何网络 I/O。 */
   public McpServerDTO createServer(McpServerCreateDTO createDTO) {
     if (createDTO == null) {
-      throw new AiValidationException(RESOURCE, RESOURCE + " body must not be null");
+      throw DomainException.validation(RESOURCE, RESOURCE + " body must not be null");
     }
     String name = McpConfigParser.requireName(createDTO.getName());
     HttpConfig config =
@@ -97,7 +93,7 @@ public class McpServerService {
             createDTO.getEnabled(),
             createDTO.getTimeoutMillis());
     if (repository.getByName(name).isPresent()) {
-      throw new AiDuplicateException(RESOURCE, "mcp server name already exists: " + name);
+      throw DomainException.duplicate(RESOURCE, "mcp server name already exists: " + name);
     }
     McpServer server = insert(name, config);
     return toDto(server, 0);
@@ -107,7 +103,7 @@ public class McpServerService {
   public McpServerDTO updateServer(String name, McpServerUpdateDTO updateDTO) {
     McpConfigParser.requireName(name);
     if (updateDTO == null || updateDTO.getExpectedVersion() == null) {
-      throw new AiValidationException(RESOURCE, "expectedVersion must not be null");
+      throw DomainException.validation(RESOURCE, "expectedVersion must not be null");
     }
     String rawExpectedVersion = updateDTO.getExpectedVersion();
     long expectedVersion = CatalogVersions.parse(rawExpectedVersion, "expectedVersion");
@@ -125,7 +121,7 @@ public class McpServerService {
               requireVersion(locked, expectedVersion, rawExpectedVersion);
               McpServer updated = withConfig(locked, config);
               if (!repository.update(updated, expectedVersion)) {
-                throw new AiVersionConflictException(
+                throw DomainException.versionConflict(
                     RESOURCE, rawExpectedVersion, CatalogVersions.format(locked.version()));
               }
               return updated.toBuilder().version(expectedVersion + 1).build();
@@ -177,7 +173,7 @@ public class McpServerService {
       long expected = existing.version();
       server = withConfig(existing, config);
       if (!repository.update(server, expected)) {
-        throw new AiVersionConflictException(
+        throw DomainException.versionConflict(
             RESOURCE, CatalogVersions.format(expected), CatalogVersions.format(expected));
       }
       server = server.toBuilder().version(expected + 1).build();
@@ -203,12 +199,12 @@ public class McpServerService {
           List<String> referenced = repository.selectReferencedToolNames();
           for (McpTool tool : repository.listTools(name)) {
             if (referenced.contains(tool.name())) {
-              throw new AiInUseException(
+              throw DomainException.inUse(
                   RESOURCE, "mcp tool " + tool.name() + " is currently referenced by an agent");
             }
           }
           if (!repository.delete(name, expectedVersion)) {
-            throw new AiVersionConflictException(
+            throw DomainException.versionConflict(
                 RESOURCE, rawExpectedVersion, CatalogVersions.format(locked.version()));
           }
           return null;
@@ -222,7 +218,7 @@ public class McpServerService {
     Set<String> referencedNames = new HashSet<>(repository.selectReferencedToolNames());
     for (McpTool current : repository.listTools(name)) {
       if (!nextNames.contains(current.name()) && referencedNames.contains(current.name())) {
-        throw new AiInUseException(
+        throw DomainException.inUse(
             RESOURCE,
             "mcp tool "
                 + current.name()
@@ -234,7 +230,7 @@ public class McpServerService {
       repository.insertTool(tool);
     }
     if (!repository.updateDiscoveryStatus(name, locked.version(), McpDiscoveryStatus.AVAILABLE)) {
-      throw new AiVersionConflictException(
+      throw DomainException.versionConflict(
           RESOURCE,
           CatalogVersions.format(locked.version()),
           CatalogVersions.format(locked.version()));
@@ -248,7 +244,7 @@ public class McpServerService {
         throw new IllegalStateException("Failed to insert MCP server");
       }
     } catch (DuplicateKeyException error) {
-      throw new AiDuplicateException(RESOURCE, "mcp server name already exists: " + name, error);
+      throw DomainException.duplicate(RESOURCE, "mcp server name already exists: " + name, error);
     }
     return server;
   }
@@ -266,18 +262,17 @@ public class McpServerService {
 
   private McpServer requireServer(String name) {
     McpConfigParser.requireName(name);
-    return repository.getByName(name).orElseThrow(() -> new AiResourceNotFoundException(RESOURCE));
+    return repository.getByName(name).orElseThrow(() -> DomainException.notFound(RESOURCE));
   }
 
   private McpServer requireServerForUpdate(String name) {
-    return repository
-        .getForUpdate(name)
-        .orElseThrow(() -> new AiResourceNotFoundException(RESOURCE));
+    return repository.getForUpdate(name).orElseThrow(() -> DomainException.notFound(RESOURCE));
   }
 
   private static void requireVersion(McpServer server, long expectedVersion, String raw) {
     if (server.version() != expectedVersion) {
-      throw new AiVersionConflictException(RESOURCE, raw, CatalogVersions.format(server.version()));
+      throw DomainException.versionConflict(
+          RESOURCE, raw, CatalogVersions.format(server.version()));
     }
   }
 

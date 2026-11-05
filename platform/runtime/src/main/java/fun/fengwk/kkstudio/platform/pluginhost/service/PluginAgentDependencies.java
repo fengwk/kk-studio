@@ -4,7 +4,7 @@ import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfig;
 import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
 import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
@@ -26,7 +26,7 @@ import java.util.TreeSet;
  * Schema 归一化，只有安装目录中的插件才可解析（权威目录与安装集合本应一致，漂移即失败）。声明解析是纯解析：不访问数据库、不读取秘密、不访问外部资源。
  *
  * <p>插件拒绝自身普通配置时抛出的 {@link IllegalArgumentException} 是已知的输入边界：统一收敛为固定去敏的 {@link
- * AiValidationException}，不串联 cause、不回显配置值。其它异常（含未知运行时错误与致命错误）照常上抛，绝不伪装成校验失败。
+ * DomainException}，不串联 cause、不回显配置值。其它异常（含未知运行时错误与致命错误）照常上抛，绝不伪装成校验失败。
  *
  * <p>锁序固定为 Agent 行锁 → catalog/credential：需要引用 Agent 的保存先按稳定顺序对声明去重后的 Agent 取 {@code for update}
  * 行锁，删 Agent 先取自身行锁再读权威声明，因此并发两侧最多一方成功，绝不提交悬空引用。
@@ -61,7 +61,7 @@ public class PluginAgentDependencies {
    *
    * <p>返回有序集合，使「缺失的第一个声明」在依赖图、计划与写入核验里都是稳定的，异常与跳过原因不随哈希顺序漂移。
    *
-   * @throws AiValidationException 普通值不符合插件 Schema，或插件拒绝该配置（已知输入边界）
+   * @throws DomainException 普通值不符合插件 Schema，或插件拒绝该配置（已知输入边界）
    * @throws IllegalStateException 插件未安装（目录与安装集合漂移）
    */
   public Set<String> declaredAgentNames(String pluginId, long revision, String valuesJson) {
@@ -82,7 +82,7 @@ public class PluginAgentDependencies {
   /**
    * 事务内核验一个插件声明的 Agent 依赖仍存在：按稳定顺序对去重后的 Agent 取行锁，锁一直持有到事务结束。
    *
-   * @throws AiValidationException 声明无效或引用的 Agent 不存在（固定去敏 400）
+   * @throws DomainException 声明无效或引用的 Agent 不存在（固定去敏 400）
    */
   public void requireDeclaredAgents(String pluginId, long revision, String valuesJson) {
     requireDeclaredAgents(List.of(new Declaration(pluginId, revision, valuesJson)));
@@ -91,7 +91,7 @@ public class PluginAgentDependencies {
   /**
    * 事务内批量预锁入口：先解析全部声明，再对合并去重后的 Agent 按稳定顺序逐个加锁，因此开始任何写入前全部引用都已确认存在。
    *
-   * @throws AiValidationException 任一声明无效或引用的 Agent 不存在（固定去敏 400）
+   * @throws DomainException 任一声明无效或引用的 Agent 不存在（固定去敏 400）
    */
   public void requireDeclaredAgents(List<Declaration> declarations) {
     Collection<String> required = new TreeSet<>();
@@ -102,7 +102,7 @@ public class PluginAgentDependencies {
     }
     for (String agent : required) {
       if (definitionRepository.getByNameForUpdate(agent) == null) {
-        throw new AiValidationException(RESOURCE, MISSING_AGENT);
+        throw DomainException.validation(RESOURCE, MISSING_AGENT);
       }
     }
   }
@@ -133,7 +133,7 @@ public class PluginAgentDependencies {
         .orElseThrow(() -> new IllegalStateException("plugin is not installed: " + pluginId));
   }
 
-  private static AiValidationException invalidConfiguration(String pluginId) {
-    return new AiValidationException(RESOURCE, INVALID_CONFIGURATION + pluginId);
+  private static DomainException invalidConfiguration(String pluginId) {
+    return DomainException.validation(RESOURCE, INVALID_CONFIGURATION + pluginId);
   }
 }

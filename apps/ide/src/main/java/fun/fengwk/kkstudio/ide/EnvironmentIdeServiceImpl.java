@@ -22,9 +22,8 @@ import fun.fengwk.kkstudio.platform.daemon.protocol.IdeResult;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeViewState;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeViewSummary;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
-import fun.fengwk.kkstudio.platform.error.AiDomainException;
-import fun.fengwk.kkstudio.platform.error.AiEnvironmentIdeUnavailableException;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.platform.error.DomainErrorCode;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -157,7 +156,7 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
       current = loadViews(environmentId);
     } catch (RuntimeException error) {
       unknown.addSuppressed(error);
-      throw unknown;
+      throw DomainException.ideUnavailable(unknown.getMessage(), unknown);
     }
     ViewSnapshot view =
         current.stream()
@@ -167,7 +166,7 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
             .filter(candidate -> candidate.binding().connectionId().equals(connectionId))
             .filter(candidate -> candidate.binding().claimId().equals(claimId))
             .findFirst()
-            .orElseThrow(() -> unknown);
+            .orElseThrow(() -> DomainException.ideUnavailable(unknown.getMessage(), unknown));
     requireIntent(eventNodeId, connectionId, documentId, environmentId, viewId, claimId);
     return publishOpen(view);
   }
@@ -190,7 +189,7 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     } catch (RuntimeException error) {
       // 出票失败时回滚本地授权/路由；Daemon 视图留给其正常过期回收，不伪造成功入口。
       revokeLocal(binding);
-      throw new AiEnvironmentIdeUnavailableException(
+      throw DomainException.ideUnavailable(
           "environment IDE bootstrap ticket could not be issued", error);
     }
     EnvironmentIdeViewDTO dto = toDto(view);
@@ -217,8 +216,7 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
             binding.bindingEpoch(),
             view.workspacePath());
       } catch (IllegalStateException error) {
-        throw new AiEnvironmentIdeUnavailableException(
-            "environment IDE view capacity is exhausted", error);
+        throw DomainException.ideUnavailable("environment IDE view capacity is exhausted", error);
       }
     }
     bindings.record(binding);
@@ -234,7 +232,7 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     long bindingEpoch = parseEpoch(request.getBindingEpoch());
     String directory = parseDirectory(request.getDirectory());
     if (directory == null) {
-      throw new AiValidationException("environment", "directory must not be blank");
+      throw DomainException.validation("environment", "directory must not be blank");
     }
     IdeViewBindingRegistry.Binding binding =
         requireBinding(environmentId, parsedViewId, documentId, bindingEpoch);
@@ -246,7 +244,7 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
             .setBindingEpoch(bindingEpoch)
             .setDirectory(directory)
             .build();
-    IdeCall result = call(environmentId, command);
+    IdeCall result = callConfirmed(environmentId, command);
     if (!result.reply().getOk()) {
       throw rejection(result.reply());
     }
@@ -309,7 +307,7 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
             .setDocumentId(documentId.toString())
             .setBindingEpoch(bindingEpoch)
             .build();
-    IdeCall result = call(environmentId, command);
+    IdeCall result = callConfirmed(environmentId, command);
     if (!result.reply().getOk()) {
       throw rejection(result.reply());
     }
@@ -335,7 +333,7 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
             .setBindingEpoch(bindingEpoch)
             .setDiscard(discard)
             .build();
-    IdeCall result = call(environmentId, command);
+    IdeCall result = callConfirmed(environmentId, command);
     if (!result.reply().getOk()) {
       if (isViewGone(result.reply())) {
         revokeLocal(binding);
@@ -355,7 +353,7 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     if (directory != null) {
       command.setDirectory(directory);
     }
-    IdeResult reply = call(environmentId, command.build()).reply();
+    IdeResult reply = callConfirmed(environmentId, command.build()).reply();
     if (!reply.getOk()) {
       throw rejection(reply);
     }
@@ -392,7 +390,7 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
 
   private List<ViewSnapshot> loadViews(EnvironmentId environmentId) {
     IdeCommand command = IdeCommand.newBuilder().setAction(IdeAction.LIST_VIEWS).build();
-    IdeCall result = call(environmentId, command);
+    IdeCall result = callConfirmed(environmentId, command);
     if (!result.reply().getOk()) {
       throw rejection(result.reply());
     }
@@ -501,11 +499,13 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
       matched =
           browserUse.findExactIntent(
               eventNodeId, connectionId, documentId, environmentId, viewId, claimId);
-    } catch (AiEnvironmentIdeUnavailableException error) {
-      throw error;
+    } catch (DomainException error) {
+      if (error.code() == DomainErrorCode.IDE_UNAVAILABLE) {
+        throw error;
+      }
+      throw DomainException.ideUnavailable("browser IDE usage intent is unavailable", error);
     } catch (RuntimeException error) {
-      throw new AiEnvironmentIdeUnavailableException(
-          "browser IDE usage intent is unavailable", error);
+      throw DomainException.ideUnavailable("browser IDE usage intent is unavailable", error);
     }
     if (!matched) {
       throw viewGone();
@@ -519,8 +519,7 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     try {
       viewAuthorization.ensureViewCapacity(environmentId);
     } catch (IllegalStateException error) {
-      throw new AiEnvironmentIdeUnavailableException(
-          "environment IDE view capacity is exhausted", error);
+      throw DomainException.ideUnavailable("environment IDE view capacity is exhausted", error);
     }
   }
 
@@ -549,8 +548,7 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     } catch (EnvironmentCapabilitySendUncertainException error) {
       throw new IdeOutcomeUnknownException("environment IDE command outcome is uncertain", error);
     } catch (EnvironmentCapabilityUnavailableException | EnvironmentCapabilityBusyException error) {
-      throw new AiEnvironmentIdeUnavailableException(
-          "environment IDE channel is unavailable", error);
+      throw DomainException.ideUnavailable("environment IDE channel is unavailable", error);
     }
     IdeResult reply;
     try {
@@ -572,6 +570,14 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
           "environment IDE command failed without a confirmed outcome", error.getCause());
     }
     return new IdeCall(reply, request.identity());
+  }
+
+  private IdeCall callConfirmed(EnvironmentId environmentId, IdeCommand command) {
+    try {
+      return call(environmentId, command);
+    } catch (IdeOutcomeUnknownException error) {
+      throw DomainException.ideUnavailable(error.getMessage(), error);
+    }
   }
 
   private static void requireMatchingIdentity(
@@ -612,7 +618,7 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     return reply.hasCode() && "VIEW_GONE".equals(reply.getCode());
   }
 
-  private static AiDomainException rejection(IdeResult reply) {
+  private static DomainException rejection(IdeResult reply) {
     String message =
         !reply.hasMessage() || reply.getMessage().isBlank()
             ? "IDE command was rejected"
@@ -622,25 +628,24 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     }
     String code = reply.hasCode() ? reply.getCode() : "";
     if ("CANCELLED".equals(code)) {
-      return new AiValidationException("ide_close_cancelled", message);
+      return DomainException.validation("ide_close_cancelled", message);
     }
     if ("VIEW_IN_USE".equals(code)
         || "BUSY".equals(code)
         || "CLAIM_CONFLICT".equals(code)
         || "UNAVAILABLE".equals(code)
         || "CLEANUP_FAILED".equals(code)) {
-      return new AiEnvironmentIdeUnavailableException(message);
+      return DomainException.ideUnavailable(message);
     }
-    return new AiValidationException("environment", message);
+    return DomainException.validation("environment", message);
   }
 
-  private static AiEnvironmentIdeUnavailableException viewGone() {
-    return new AiEnvironmentIdeUnavailableException(
-        "IDE view is gone; open a new view before retrying");
+  private static DomainException viewGone() {
+    return DomainException.ideUnavailable("IDE view is gone; open a new view before retrying");
   }
 
-  private static AiEnvironmentIdeUnavailableException protocolFailure(String message) {
-    return new AiEnvironmentIdeUnavailableException(message);
+  private static DomainException protocolFailure(String message) {
+    return DomainException.ideUnavailable(message);
   }
 
   private static EnvironmentIdeViewDTO toDto(ViewSnapshot view) {
@@ -669,7 +674,7 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     try {
       return Uuids.parseCanonical(value, field);
     } catch (IllegalArgumentException error) {
-      throw new AiValidationException("environment", field + " must be a canonical UUID");
+      throw DomainException.validation("environment", field + " must be a canonical UUID");
     }
   }
 
@@ -681,7 +686,7 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     try {
       return DecimalLongs.parsePositive(value, "bindingEpoch");
     } catch (IllegalArgumentException error) {
-      throw new AiValidationException(
+      throw DomainException.validation(
           "environment", "bindingEpoch must be a canonical positive decimal");
     }
   }
@@ -695,7 +700,7 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
         return IdeOpenMode.RESUME;
       }
     }
-    throw new AiValidationException("environment", "mode must be create or resume");
+    throw DomainException.validation("environment", "mode must be create or resume");
   }
 
   public static String parseDirectory(String value) {
@@ -703,15 +708,15 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
       return null;
     }
     if (value.isBlank()) {
-      throw new AiValidationException("environment", "directory must not be blank when present");
+      throw DomainException.validation("environment", "directory must not be blank when present");
     }
     if (value.length() > 4096) {
-      throw new AiValidationException("environment", "directory exceeds 4096 characters");
+      throw DomainException.validation("environment", "directory exceeds 4096 characters");
     }
     for (int i = 0; i < value.length(); i++) {
       char c = value.charAt(i);
       if (c < 0x20 || c == 0x7F) {
-        throw new AiValidationException(
+        throw DomainException.validation(
             "environment", "directory must not contain control characters");
       }
     }
@@ -720,7 +725,7 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
 
   private static boolean requireDiscard(Boolean value) {
     if (value == null) {
-      throw new AiValidationException("environment", "discard is required");
+      throw DomainException.validation("environment", "discard is required");
     }
     return value;
   }
@@ -735,8 +740,7 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
       IdeViewState state) {}
 
   /** 命令可能已到达 Daemon 但未收到确定回执；只允许 claim 按原身份对账，其它副作用不得重放。 */
-  private static final class IdeOutcomeUnknownException
-      extends AiEnvironmentIdeUnavailableException {
+  private static final class IdeOutcomeUnknownException extends RuntimeException {
 
     private IdeOutcomeUnknownException(String message, Throwable cause) {
       super(message, cause);

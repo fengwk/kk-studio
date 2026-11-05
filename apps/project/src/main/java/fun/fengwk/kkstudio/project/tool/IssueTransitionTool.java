@@ -15,7 +15,7 @@ import fun.fengwk.kkstudio.harness.prompt.PromptRenderer;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
-import fun.fengwk.kkstudio.platform.error.AiDomainException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 
 import java.time.Duration;
 import java.util.List;
@@ -128,7 +128,7 @@ public final class IssueTransitionTool implements Tool {
 
   /** 只透出确定性业务拒绝与参数错误的文本，模型才能据此修正目标；基础设施级异常（数据不一致、事务冲突、连接失败等）一律收敛为通用错误，绝不回显 内部细节。 */
   private static String message(RuntimeException error) {
-    if (error instanceof AiDomainException || error instanceof IllegalArgumentException) {
+    if (error instanceof DomainException || error instanceof IllegalArgumentException) {
       String detail = error.getMessage();
       return detail == null || detail.isBlank() ? "issue_transition was rejected" : detail;
     }

@@ -10,13 +10,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
-import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
-import fun.fengwk.kkstudio.platform.error.AiEnvironmentIdeUnavailableException;
-import fun.fengwk.kkstudio.platform.error.AiInUseException;
-import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
-import fun.fengwk.kkstudio.platform.error.AiUpstreamException;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
-import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
 import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
 
@@ -36,7 +30,7 @@ class StudioDomainErrorAdviceTest {
 
     LocaleContextHolder.setLocale(Locale.US);
     ResponseEntity<ApiResponse<Void>> validation =
-        advice.handleValidation(new AiValidationException("agent_provider", "invalid provider"));
+        advice.handle(DomainException.validation("agent_provider", "invalid provider"));
     assertEquals(400, validation.getStatusCode().value());
     assertNotNull(validation.getBody());
     ApiResponse<Void> validationBody = validation.getBody();
@@ -48,7 +42,7 @@ class StudioDomainErrorAdviceTest {
 
     LocaleContextHolder.setLocale(Locale.SIMPLIFIED_CHINESE);
     ResponseEntity<ApiResponse<Void>> conflict =
-        advice.handleVersionConflict(new AiVersionConflictException("agent_model", "3", "4"));
+        advice.handle(DomainException.versionConflict("agent_model", "3", "4"));
     assertEquals(409, conflict.getStatusCode().value());
     assertNotNull(conflict.getBody());
     ApiResponse<Void> conflictBody = conflict.getBody();
@@ -92,21 +86,21 @@ class StudioDomainErrorAdviceTest {
     LocaleContextHolder.setLocale(Locale.US);
 
     assertError(
-        advice.handleNotFound(new AiResourceNotFoundException("agent")),
+        advice.handle(DomainException.notFound("agent")),
         404,
         "resource_not_found",
         "The agent was not found.",
         "agent",
         "agent not found");
     assertError(
-        advice.handleDuplicate(new AiDuplicateException("model", "duplicate model")),
+        advice.handle(DomainException.duplicate("model", "duplicate model")),
         409,
         "duplicate",
         "The model already exists.",
         "model",
         "duplicate model");
     assertError(
-        advice.handleInUse(new AiInUseException("provider", "provider in use")),
+        advice.handle(DomainException.inUse("provider", "provider in use")),
         409,
         "in_use",
         "The provider is still in use.",
@@ -120,16 +114,22 @@ class StudioDomainErrorAdviceTest {
         "cursor",
         "cursor is required");
     assertError(
-        advice.handleIdeUnavailable(
-            new AiEnvironmentIdeUnavailableException("environment IDE command timed out")),
+        advice.handle(DomainException.ideUnavailable("environment IDE command timed out")),
         409,
         "ide_unavailable",
         "The environment IDE is unavailable. Try again later.",
         "environment",
         "environment IDE command timed out");
     assertError(
-        advice.handleUpstream(
-            new AiUpstreamException("agent_provider", "Provider model list returned HTTP 401")),
+        advice.handle(DomainException.environmentUnavailable("environment runtime is unavailable")),
+        409,
+        "environment_unavailable",
+        "The environment runtime is unavailable. Try again later.",
+        "environment",
+        "environment runtime is unavailable");
+    assertError(
+        advice.handle(
+            DomainException.upstream("agent_provider", "Provider model list returned HTTP 401")),
         502,
         "upstream_failed",
         "The agent provider service request failed.",

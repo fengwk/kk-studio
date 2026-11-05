@@ -26,7 +26,7 @@ import fun.fengwk.kkstudio.platform.configsync.ConfigSyncPlan;
 import fun.fengwk.kkstudio.platform.configsync.ConfigSyncPlanner;
 import fun.fengwk.kkstudio.platform.configsync.ConfigSyncSnapshot;
 import fun.fengwk.kkstudio.platform.configsync.ConfigSyncSnapshotReader;
-import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRow;
 import fun.fengwk.kkstudio.platform.pluginhost.service.PluginManagementService;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
@@ -145,7 +145,7 @@ class PluginConfigSyncIntegrationTest extends ConfigSyncTestSupport {
         withStalePlugin(planFor(ROLLBACK_PROVIDER, List.of(first, second)), second);
     ConfigSyncSnapshot before = snapshotReader.read();
 
-    assertThrows(AiVersionConflictException.class, () -> applier.apply(tampered));
+    assertThrows(DomainException.class, () -> applier.apply(tampered));
 
     ConfigSyncSnapshot after = snapshotReader.read();
     assertEquals(
@@ -169,7 +169,7 @@ class PluginConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     pluginManagementService.updateConfiguration(
         pluginId, row.revision(), row.valuesJson(), Map.of());
 
-    assertThrows(AiVersionConflictException.class, () -> applier.apply(plan));
+    assertThrows(DomainException.class, () -> applier.apply(plan));
 
     ConfigSyncSnapshot after = snapshotReader.read();
     assertEquals(row.revision() + 1, pluginRow(after, pluginId).revision());

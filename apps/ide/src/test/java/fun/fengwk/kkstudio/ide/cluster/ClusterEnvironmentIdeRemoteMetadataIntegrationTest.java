@@ -39,8 +39,7 @@ import fun.fengwk.kkstudio.platform.daemon.protocol.IdeDirectoryListing;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeResult;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
 import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer;
-import fun.fengwk.kkstudio.platform.error.AiEnvironmentIdeUnavailableException;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -173,8 +172,7 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
     nodeAService.collapseMobile(ENV, VIEW, binding("7"));
     assertEquals(IdeAction.COLLAPSE_MOBILE, transportB.commands.getLast().getAction());
     assertEquals(3, received.get());
-    assertThrows(
-        AiValidationException.class, () -> nodeAService.listDirectories(ENV, "x".repeat(4097)));
+    assertThrows(DomainException.class, () -> nodeAService.listDirectories(ENV, "x".repeat(4097)));
     assertEquals(3, received.get());
   }
 
@@ -182,9 +180,7 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
   void unavailableRouteFailsClosedWithoutContactingTheRemoteOwner() {
     registryA.current = Optional.empty();
 
-    assertThrows(
-        AiEnvironmentIdeUnavailableException.class,
-        () -> nodeAService.openView(ENV, openViewRequest(null)));
+    assertThrows(DomainException.class, () -> nodeAService.openView(ENV, openViewRequest(null)));
 
     assertEquals(0, received.get());
     assertTrue(localTransportA.commands.isEmpty());
@@ -194,8 +190,7 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
   void invalidSignatureIsRejectedBeforeTheOwnerExecutes() {
     ClusterEnvironmentIdeService bad = serviceWithSecret("wrong-cluster-secret-0123456789abcdef");
 
-    assertThrows(
-        AiEnvironmentIdeUnavailableException.class, () -> bad.openView(ENV, openViewRequest(null)));
+    assertThrows(DomainException.class, () -> bad.openView(ENV, openViewRequest(null)));
 
     assertEquals(1, received.get());
     assertTrue(transportB.commands.isEmpty());
@@ -235,9 +230,7 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
       ClusterEnvironmentIdeService service =
           new ClusterEnvironmentIdeService(registry, smallClient, localService());
 
-      assertThrows(
-          AiEnvironmentIdeUnavailableException.class,
-          () -> service.openView(ENV, openViewRequest(null)));
+      assertThrows(DomainException.class, () -> service.openView(ENV, openViewRequest(null)));
     } finally {
       oversizeServer.stop(0);
     }
@@ -318,9 +311,7 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
               NODE_B, URI.create("http://127.0.0.1:" + server.getAddress().getPort()));
       EnvironmentIdeCloseViewDTO close = new EnvironmentIdeCloseViewDTO();
       close.setDiscard(false);
-      assertThrows(
-          AiEnvironmentIdeUnavailableException.class,
-          () -> client.closeView(ENV, owner, VIEW, close));
+      assertThrows(DomainException.class, () -> client.closeView(ENV, owner, VIEW, close));
     } finally {
       server.stop(0);
     }
@@ -357,9 +348,7 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
               NODE_B, URI.create("http://127.0.0.1:" + delayed.getAddress().getPort()));
       EnvironmentIdeCloseViewDTO close = new EnvironmentIdeCloseViewDTO();
       close.setDiscard(true);
-      assertThrows(
-          AiEnvironmentIdeUnavailableException.class,
-          () -> client.closeView(ENV, owner, VIEW, close));
+      assertThrows(DomainException.class, () -> client.closeView(ENV, owner, VIEW, close));
     } finally {
       release.countDown();
       delayed.stop(0);
@@ -402,9 +391,7 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
           new ClusterEnvironmentIdeService(registry, shortDeadlineClient, localService());
 
       long start = System.nanoTime();
-      assertThrows(
-          AiEnvironmentIdeUnavailableException.class,
-          () -> service.openView(ENV, openViewRequest(null)));
+      assertThrows(DomainException.class, () -> service.openView(ENV, openViewRequest(null)));
       long elapsedMillis = (System.nanoTime() - start) / 1_000_000;
       assertTrue(
           elapsedMillis < 2_000,
@@ -420,7 +407,7 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
     EnvironmentIdeOpenViewDTO request = openViewRequest(null);
     request.setDirectory("x".repeat(20 * 1024));
 
-    assertThrows(AiValidationException.class, () -> nodeAService.openView(ENV, request));
+    assertThrows(DomainException.class, () -> nodeAService.openView(ENV, request));
     assertEquals(0, received.get());
   }
 

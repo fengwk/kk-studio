@@ -2,7 +2,7 @@ package fun.fengwk.kkstudio.platform.http;
 
 import fun.fengwk.kkstudio.common.number.DecimalLongs;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 
 /** HTTP 边界的共享参数适配：只翻译共同解析器的拒绝，不复制值算法。 */
 public final class RequestParameters {
@@ -14,7 +14,7 @@ public final class RequestParameters {
     try {
       return EnvironmentId.parse(text);
     } catch (IllegalArgumentException error) {
-      throw new AiValidationException("environmentId", "environmentId must be a canonical UUID");
+      throw DomainException.validation("environmentId", "environmentId must be a canonical UUID");
     }
   }
 

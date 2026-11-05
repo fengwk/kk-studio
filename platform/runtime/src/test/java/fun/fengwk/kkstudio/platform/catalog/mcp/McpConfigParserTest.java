@@ -11,7 +11,7 @@ import org.junit.jupiter.params.provider.NullSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpConfigParser.HttpConfig;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.share.ai.mcp.McpServerCreateDTO;
 
 import java.util.LinkedHashMap;
@@ -67,7 +67,7 @@ class McpConfigParserTest {
     dto.setName(invalidName);
     dto.setUrl("https://a.example.com/mcp");
 
-    assertThrows(AiValidationException.class, () -> normalizeCreate(dto));
+    assertThrows(DomainException.class, () -> normalizeCreate(dto));
   }
 
   @Test
@@ -77,7 +77,7 @@ class McpConfigParserTest {
     dto.setName("a".repeat(33));
     dto.setUrl("https://a.example.com/mcp");
 
-    assertThrows(AiValidationException.class, () -> normalizeCreate(dto));
+    assertThrows(DomainException.class, () -> normalizeCreate(dto));
     assertEquals("a".repeat(32), McpConfigParser.requireName("a".repeat(32)));
   }
 
@@ -99,7 +99,7 @@ class McpConfigParserTest {
     dto.setName("valid_name");
     dto.setUrl(invalidUrl);
 
-    assertThrows(AiValidationException.class, () -> normalizeCreate(dto));
+    assertThrows(DomainException.class, () -> normalizeCreate(dto));
   }
 
   @Test
@@ -109,7 +109,7 @@ class McpConfigParserTest {
     dto.setName("valid_name");
     dto.setUrl("https://a.example.com/" + "x".repeat(McpConfigParser.URL_MAX_LENGTH));
 
-    assertThrows(AiValidationException.class, () -> normalizeCreate(dto));
+    assertThrows(DomainException.class, () -> normalizeCreate(dto));
   }
 
   @Test
@@ -127,16 +127,16 @@ class McpConfigParserTest {
     Map<String, String> blankName = new LinkedHashMap<>();
     blankName.put("  ", "value");
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () -> McpConfigParser.normalizeHttpConfig("https://a.example.com", blankName, true, 1000L));
 
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () ->
             McpConfigParser.normalizeHttpConfig(
                 "https://a.example.com", Map.of("X-Bad", "value\r\ninjected"), true, 1000L));
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () ->
             McpConfigParser.normalizeHttpConfig(
                 "https://a.example.com", Map.of("X\u0000", "value"), true, 1000L));
@@ -146,10 +146,10 @@ class McpConfigParserTest {
   void rejectsNonPositiveTimeout() {
     // 意图：timeout 必须为正整数毫秒
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () -> McpConfigParser.normalizeHttpConfig("https://a.example.com", Map.of(), true, 0L));
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () -> McpConfigParser.normalizeHttpConfig("https://a.example.com", Map.of(), true, -1L));
   }
 
@@ -168,7 +168,7 @@ class McpConfigParserTest {
     assertEquals("plain", resolved.get("X-Plain"));
 
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () -> McpConfigParser.resolveHeaders(Map.of("Authorization", "${MISSING}"), name -> null));
   }
 

@@ -36,8 +36,7 @@ import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO;
 import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
 import fun.fengwk.kkstudio.platform.cluster.HmacClusterInternalAuthentication;
-import fun.fengwk.kkstudio.platform.error.AiEnvironmentIdeUnavailableException;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -167,9 +166,9 @@ class ClusterEnvironmentIdeInternalControllerTest {
   @Test
   void cancellationResourceSurvivesControllerJsonAndClusterClient() throws Exception {
     when(clusterNodeRegistry.route(ENV)).thenReturn(Optional.of(ClusterOwnerRoute.local(NODE_B)));
-    doThrow(new AiValidationException("ide_close_cancelled", "cancelled"))
-        .doThrow(new AiValidationException("other_resource", "cancelled"))
-        .doThrow(new AiEnvironmentIdeUnavailableException("cancelled"))
+    doThrow(DomainException.validation("ide_close_cancelled", "cancelled"))
+        .doThrow(DomainException.validation("other_resource", "cancelled"))
+        .doThrow(DomainException.ideUnavailable("cancelled"))
         .when(localEnvironmentIdeService)
         .closeView(eq(ENV), eq(VIEW), any());
     HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
@@ -213,17 +212,13 @@ class ClusterEnvironmentIdeInternalControllerTest {
       request.setDocumentId("11111111-1111-1111-1111-111111111111");
       request.setBindingEpoch("1");
       request.setDiscard(false);
-      AiValidationException cancelled =
-          assertThrows(
-              AiValidationException.class, () -> client.closeView(ENV, owner, VIEW, request));
+      DomainException cancelled =
+          assertThrows(DomainException.class, () -> client.closeView(ENV, owner, VIEW, request));
       assertEquals("ide_close_cancelled", cancelled.resource());
-      AiValidationException other =
-          assertThrows(
-              AiValidationException.class, () -> client.closeView(ENV, owner, VIEW, request));
+      DomainException other =
+          assertThrows(DomainException.class, () -> client.closeView(ENV, owner, VIEW, request));
       assertEquals("environment", other.resource());
-      assertThrows(
-          AiEnvironmentIdeUnavailableException.class,
-          () -> client.closeView(ENV, owner, VIEW, request));
+      assertThrows(DomainException.class, () -> client.closeView(ENV, owner, VIEW, request));
     } finally {
       server.stop(0);
     }

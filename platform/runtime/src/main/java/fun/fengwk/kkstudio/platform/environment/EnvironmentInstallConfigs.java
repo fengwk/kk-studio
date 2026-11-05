@@ -5,7 +5,7 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.share.ai.environment.DaemonConfigurationCodec;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInstallConfigDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInstallConfigUpdateDTO;
@@ -110,7 +110,7 @@ public final class EnvironmentInstallConfigs {
     return node.textValue();
   }
 
-  private static AiValidationException invalid(String message) {
-    return new AiValidationException("environment", message);
+  private static DomainException invalid(String message) {
+    return DomainException.validation("environment", message);
   }
 }

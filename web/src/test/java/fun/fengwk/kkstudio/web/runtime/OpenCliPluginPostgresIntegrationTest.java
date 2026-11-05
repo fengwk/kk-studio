@@ -47,7 +47,7 @@ import fun.fengwk.kkstudio.canvas.function.CanvasJson.JsonText;
 import fun.fengwk.kkstudio.canvas.infra.platform.PluginCanvasFunctionCatalog;
 import fun.fengwk.kkstudio.common.json.JsonValues;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
-import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialStatus;
 import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
 import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
@@ -320,14 +320,10 @@ class OpenCliPluginPostgresIntegrationTest {
 
               pending.configure(
                   PLUGIN_ID, 1L, values, Map.of("apiKey", PluginSecretPatch.set("check-key")));
-              assertThrows(
-                  AiVersionConflictException.class,
-                  () -> management.checkConnection(PLUGIN_ID, 2L));
+              assertThrows(DomainException.class, () -> management.checkConnection(PLUGIN_ID, 2L));
 
               runtime.refresh();
-              assertThrows(
-                  AiVersionConflictException.class,
-                  () -> management.checkConnection(PLUGIN_ID, 1L));
+              assertThrows(DomainException.class, () -> management.checkConnection(PLUGIN_ID, 1L));
               assertEquals(
                   0, requests.size(), "unapplied or mismatched revisions must not reach out");
 

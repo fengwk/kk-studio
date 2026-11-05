@@ -15,7 +15,7 @@ import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.project.ProjectTestSupport;
 import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
 import fun.fengwk.kkstudio.project.model.Issue;
@@ -88,7 +88,7 @@ class IssueTransitionIntegrationTest extends ProjectTestSupport {
   private void assertRejected(
       UUID threadId, UUID assistantEntryId, String toState, String expected) {
     Runnable call = () -> issueTransitionService.accept(threadId, assistantEntryId, toState);
-    AiValidationException rejected = assertThrows(AiValidationException.class, call::run);
+    DomainException rejected = assertThrows(DomainException.class, call::run);
     assertTrue(rejected.getMessage().contains(expected), rejected.getMessage());
   }
 

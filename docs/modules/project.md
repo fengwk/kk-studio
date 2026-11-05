@@ -284,7 +284,8 @@ Harness 的调度时间域见 [Platform](platform.md#work-的-claim--lease--wake
 [`ProjectErrorAdvice`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/http/ProjectErrorAdvice.java)
 统一映射：validation 400、not found 404、version/duplicate/runtime conflict 409、
 `IllegalStateException` 500，并输出稳定的 `PROJECT_*` 错误码。在 Agent 工具边界由
-[`tool`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/tool) 包译成 `AiValidationException` / `AiVersionConflictException` 等平台错误类型。
+[`tool`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/tool) 包译成
+`DomainException` 的 validation / version conflict 等错误码。
 
 ## 测试与验证
 

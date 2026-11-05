@@ -30,8 +30,8 @@ import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerRepository;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageRepository;
 import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.platform.catalog.tool.TestRuntimeToolCatalogSource;
-import fun.fengwk.kkstudio.platform.error.AiInUseException;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.platform.error.DomainErrorCode;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchemaSupport;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthSpec;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfig;
@@ -165,9 +165,9 @@ class PluginAgentDependencyPostgresIntegrationTest {
   /** 缺 Agent 的保存：固定去敏 400，修订、凭据与 afterCommit 通知一概不变。 */
   @Test
   void configureRejectsAMissingDeclaredAgentWithoutAnyWrite() {
-    AiValidationException error =
+    DomainException error =
         assertThrows(
-            AiValidationException.class,
+            DomainException.class,
             () ->
                 configurationService.configure(
                     DECLARING_PLUGIN_ID, 1L, VALUES_DECLARING_GHOST, Map.of()));
@@ -200,8 +200,8 @@ class PluginAgentDependencyPostgresIntegrationTest {
     assertTrue(definitionRepository.create(agentDefinition(DECLARED_AGENT)));
     configurationService.configure(DECLARING_PLUGIN_ID, 1L, VALUES_DECLARING, Map.of());
 
-    AiInUseException error =
-        assertThrows(AiInUseException.class, () -> deleteInTransaction(DECLARED_AGENT, 0L));
+    DomainException error =
+        assertThrows(DomainException.class, () -> deleteInTransaction(DECLARED_AGENT, 0L));
 
     assertTrue(error.getMessage().contains("referenced by plugin configuration"));
     assertNotNull(definitionRepository.getByName(DECLARED_AGENT), "the agent must survive");
@@ -245,13 +245,13 @@ class PluginAgentDependencyPostgresIntegrationTest {
                       .configure(DECLARING_PLUGIN_ID, 1L, VALUES_DECLARING, Map.of()));
       awaitLatch(saveLockHeld, "the save must reach the Agent row lock before the delete starts");
 
-      Future<AiInUseException> delete =
+      Future<DomainException> delete =
           executor.submit(
               () -> {
                 try {
                   deleteInTransaction(DECLARED_AGENT, 0L);
                   return null;
-                } catch (AiInUseException error) {
+                } catch (DomainException error) {
                   return error;
                 }
               });
@@ -260,8 +260,9 @@ class PluginAgentDependencyPostgresIntegrationTest {
 
       releaseSave.countDown();
       assertEquals(2L, save.get(30, TimeUnit.SECONDS));
-      AiInUseException rejection = delete.get(30, TimeUnit.SECONDS);
+      DomainException rejection = delete.get(30, TimeUnit.SECONDS);
       assertNotNull(rejection, "the delete must reject an agent the committed save references");
+      assertEquals(DomainErrorCode.IN_USE, rejection.code());
       assertTrue(rejection.getMessage().contains("referenced by plugin configuration"));
     } finally {
       releaseSave.countDown();
@@ -299,14 +300,14 @@ class PluginAgentDependencyPostgresIntegrationTest {
                           }));
       awaitLatch(deleteLockHeld, "the delete must hold the Agent row lock before the save starts");
 
-      Future<AiValidationException> save =
+      Future<DomainException> save =
           executor.submit(
               () -> {
                 try {
                   configurationService.configure(
                       DECLARING_PLUGIN_ID, 1L, VALUES_DECLARING, Map.of());
                   return null;
-                } catch (AiValidationException error) {
+                } catch (DomainException error) {
                   return error;
                 }
               });
@@ -315,8 +316,9 @@ class PluginAgentDependencyPostgresIntegrationTest {
 
       releaseDelete.countDown();
       delete.get(30, TimeUnit.SECONDS);
-      AiValidationException rejection = save.get(30, TimeUnit.SECONDS);
+      DomainException rejection = save.get(30, TimeUnit.SECONDS);
       assertNotNull(rejection, "the save must fail once the agent was deleted");
+      assertEquals(DomainErrorCode.VALIDATION, rejection.code());
       assertEquals("plugins reference a missing agent", rejection.getMessage());
       assertTrue(rejection.getCause() == null, "the dependency failure must not carry a cause");
     } finally {

@@ -19,11 +19,8 @@ import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionService;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderService;
 import fun.fengwk.kkstudio.platform.configsync.ConfigSyncService;
-import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
-import fun.fengwk.kkstudio.platform.error.AiInUseException;
-import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
-import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
+import fun.fengwk.kkstudio.platform.error.DomainErrorCode;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionCreateDTO;
@@ -87,7 +84,7 @@ public class AgentModelServiceTest extends PostgresSpringTestSupport {
         other,
         "other",
         original);
-    assertThrows(AiInUseException.class, () -> agentModelService.deleteModel(original, "0"));
+    assertThrows(DomainException.class, () -> agentModelService.deleteModel(original, "0"));
     assertTrue(agentModelRepository.hasVariantReferences(original, "default"));
     assertFalse(agentModelRepository.hasVariantReferences(original, "other"));
     AgentModelDTO result =
@@ -117,7 +114,7 @@ public class AgentModelServiceTest extends PostgresSpringTestSupport {
     AgentModelDTO recreated = agentModelService.createModel(model(providerName, original));
     agentModelService.deleteModel(original, recreated.getVersion());
     assertThrows(
-        AiInUseException.class, () -> agentModelService.deleteModel(renamed, result.getVersion()));
+        DomainException.class, () -> agentModelService.deleteModel(renamed, result.getVersion()));
     jdbc.update("delete from agent_definition where name = ?", builtin);
     agentModelService.deleteModel(renamed, result.getVersion());
   }
@@ -134,21 +131,21 @@ public class AgentModelServiceTest extends PostgresSpringTestSupport {
     assertEquals(AgentModelKind.MODEL, model.getKind());
     assertEquals("0", model.getVersion());
     assertThrows(
-        AiDuplicateException.class,
+        DomainException.class,
         () -> agentModelService.createModel(model(provider.getName(), modelName)));
     // 同一逻辑名称即使换 Provider 也不可重复。
     assertThrows(
-        AiDuplicateException.class,
+        DomainException.class,
         () -> agentModelService.createModel(model(otherProvider.getName(), modelName)));
 
     assertThrows(
-        AiResourceNotFoundException.class,
+        DomainException.class,
         () -> agentModelService.createModel(model("missing-" + suffix, "missing-" + suffix)));
     assertThrows(
-        AiValidationException.class,
+        DomainException.class,
         () -> agentModelService.createModel(model(" ", "invalid-" + suffix)));
     assertThrows(
-        AiInUseException.class,
+        DomainException.class,
         () -> agentProviderService.deleteProvider(provider.getName(), provider.getVersion()));
 
     AgentModelUpdateDTO update = modelUpdate(model, modelName, "updated");
@@ -161,12 +158,10 @@ public class AgentModelServiceTest extends PostgresSpringTestSupport {
 
     AgentModelUpdateDTO stale = modelUpdate(model, modelName, "stale");
     stale.setExpectedVersion(model.getVersion());
-    assertThrows(
-        AiVersionConflictException.class, () -> agentModelService.updateModel(modelName, stale));
+    assertThrows(DomainException.class, () -> agentModelService.updateModel(modelName, stale));
 
     agentModelService.deleteModel(modelName, updated.getVersion());
-    assertThrows(
-        AiResourceNotFoundException.class, () -> agentModelService.deleteModel(modelName, "0"));
+    assertThrows(DomainException.class, () -> agentModelService.deleteModel(modelName, "0"));
     // 硬删除：同名立即可重建，重建后解析到新行。
     AgentModelDTO recreated = agentModelService.createModel(model(provider.getName(), modelName));
     assertEquals("0", recreated.getVersion());
@@ -205,8 +200,7 @@ public class AgentModelServiceTest extends PostgresSpringTestSupport {
     assertEquals(origDto.getCreateTime(), renamedDto.getCreateTime());
 
     assertThrows(
-        AiResourceNotFoundException.class,
-        () -> agentModelService.updateModel(originalModel, renameReq));
+        DomainException.class, () -> agentModelService.updateModel(originalModel, renameReq));
 
     AgentDefinitionDTO updatedAgent =
         agentDefinitionService.pageAgents(new PageQuery(1, 100)).getResults().stream()
@@ -232,8 +226,7 @@ public class AgentModelServiceTest extends PostgresSpringTestSupport {
 
     AgentModelUpdateDTO collisionReq = modelUpdate(renamedDto, existingModel, null);
     assertThrows(
-        AiDuplicateException.class,
-        () -> agentModelService.updateModel(renamedModel, collisionReq));
+        DomainException.class, () -> agentModelService.updateModel(renamedModel, collisionReq));
     AgentModelDTO unchanged =
         agentModelService.pageModels(new PageQuery(1, 100)).getResults().stream()
             .filter(candidate -> candidate.getName().equals(renamedModel))
@@ -244,7 +237,7 @@ public class AgentModelServiceTest extends PostgresSpringTestSupport {
 
     // 组仍引用单 Model 时不可删除；删除组后引用消失。
     assertThrows(
-        AiInUseException.class,
+        DomainException.class,
         () -> agentModelService.deleteModel(renamedModel, unchanged.getVersion()));
     agentModelService.deleteModel(renamedGroup.getName(), renamedGroup.getVersion());
     AgentDefinitionDTO agentAfterCollision =
@@ -253,7 +246,7 @@ public class AgentModelServiceTest extends PostgresSpringTestSupport {
             .findFirst()
             .orElseThrow();
     assertThrows(
-        AiInUseException.class,
+        DomainException.class,
         () -> agentModelService.deleteModel(renamedModel, unchanged.getVersion()));
     agentDefinitionService.deleteAgent(agentName, agentAfterCollision.getVersion());
     agentModelService.deleteModel(renamedModel, unchanged.getVersion());
@@ -289,12 +282,11 @@ public class AgentModelServiceTest extends PostgresSpringTestSupport {
     removeVariant.setConfig(
         buildConfig(32768, 4096, true, false, "standard", "v1", List.of("default"), "default"));
     assertThrows(
-        AiInUseException.class,
-        () -> agentModelService.updateModel(model.getName(), removeVariant));
+        DomainException.class, () -> agentModelService.updateModel(model.getName(), removeVariant));
 
     AgentModelCreateDTO invalidGroup = group("invalid-group-" + suffix, model.getName(), "fast");
     invalidGroup.setProviderName(providerName);
-    assertThrows(AiValidationException.class, () -> agentModelService.createModel(invalidGroup));
+    assertThrows(DomainException.class, () -> agentModelService.createModel(invalidGroup));
 
     agentModelService.deleteModel(group.getName(), group.getVersion());
     agentModelService.deleteModel(model.getName(), model.getVersion());
@@ -526,7 +518,7 @@ public class AgentModelServiceTest extends PostgresSpringTestSupport {
     }
 
     private boolean duplicate() {
-      return error instanceof AiDuplicateException;
+      return error instanceof DomainException domain && domain.code() == DomainErrorCode.DUPLICATE;
     }
   }
 

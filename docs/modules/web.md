@@ -192,11 +192,15 @@ JSON API 显式返回共享的
 信封本身属于 Platform 的共享 HTTP 模型，拥有 HTTP 边界的应用模块（例如 Canvas）与控制器的归属包无关，
 都以同一类型返回；Web 仍是唯一的组合根与 advice 归属。
 
-集群内部端点（`/internal/**`）与浏览器 API 共用同一个信封和同一张领域错误到状态映射
-（[`DomainErrorStatus`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/http/DomainErrorStatus.java)）：
-认证失败固定 401 且 `code` 为 `UNAUTHORIZED`、不回显原因；领域失败保留 `code` 与 `errors.resource`/`errors.detail`；
-请求体超限为 413。内部端点没有请求 locale，`message` 与 `errors.detail` 使用固定的英文去敏文案，
-不把用户输入渲染进错误响应。
+集群内部端点（`/internal/**`）与浏览器 API 共用同一个信封、同一个领域异常
+（[`DomainException`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/error/DomainException.java)）、
+同一张错误码到状态映射
+（[`DomainErrorStatus`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/http/DomainErrorStatus.java)）
+和同一个响应构造
+（[`DomainErrorResponses`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/http/DomainErrorResponses.java)）：
+认证失败固定 401 且 `code` 为 `UNAUTHORIZED`、不回显原因；领域失败保留 `errors.resource`/`errors.detail`，
+版本冲突另带 expected/actual；请求体超限为 413。内部端点没有请求 locale，`message` 与 `errors.detail`
+使用固定的英文去敏文案，不把用户输入渲染进错误响应。
 
 [`StrictJacksonConfiguration`](../../web/src/main/java/fun/fengwk/kkstudio/web/StrictJacksonConfiguration.java)
 定制 Boot4 装配的唯一 Jackson 3 `JsonMapper`（它与其父类型 `ObjectMapper` 是同一 bean）：
@@ -207,8 +211,12 @@ JSON API 显式返回共享的
 required-nullable 字段由 DTO 显式 ALWAYS。未知字段由 DTO 的 JsonAnySetter 控制，
 领域 codec 另有严格语法校验；HTTP mapper 的 trailing-token 行为保持 Jackson 配置本身的边界。
 
-advice 按 Controller 范围映射 validation 400、not found 404、version/duplicate/in-use 409，
-以及设施不可用/不变量异常；Project 不变量异常为 500。
+领域失败统一表示为 [`DomainException`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/error/DomainException.java)：
+稳定 `DomainErrorCode` 决定 HTTP 状态，`resource` 与 `detail` 进入 `errors`，版本冲突额外携带
+`expectedVersion`/`actualVersion`。全局 [`StudioDomainErrorAdvice`](../../web/src/main/java/fun/fengwk/kkstudio/web/advice/StudioDomainErrorAdvice.java)
+只保留一个领域 handler；Plugin advice 只保留请求体安全解析，Project advice 只映射产品与 harness
+运行时的特有错误。按状态翻译的 advice 共用 [`ProblemErrorResponses`](../../web/src/main/java/fun/fengwk/kkstudio/web/advice/ProblemErrorResponses.java)，
+未知或未登记文案的状态统一由 `StudioMessageService` 回退为数字 code 与英文兜底；Project 不变量异常为 500。
 locale 支持 en-US/zh-CN，其他回退英文。字段契约见 [Share](share.md)。
 Canvas 控制器由 `kk-studio-canvas-runtime` 的自动配置注册，仍显式列在这些 advice 的 `assignableTypes` 中，
 因此 Controller 归属模块变化不改变错误 envelope 的形状。

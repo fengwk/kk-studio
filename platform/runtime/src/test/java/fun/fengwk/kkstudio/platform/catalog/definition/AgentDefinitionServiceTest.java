@@ -13,11 +13,7 @@ import fun.fengwk.kkstudio.common.page.PageQuery;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModelService;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderService;
-import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
-import fun.fengwk.kkstudio.platform.error.AiInUseException;
-import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
-import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionCreateDTO;
@@ -58,9 +54,8 @@ public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
     assertEquals(List.of(), definition.getConfig().getSubagents());
     assertEquals("0", definition.getVersion());
     assertThrows(
-        AiDuplicateException.class,
-        () -> agentDefinitionService.createAgent(agent(modelRef, name)));
-    assertThrows(AiInUseException.class, () -> agentModelService.deleteModel(model.getName(), "0"));
+        DomainException.class, () -> agentDefinitionService.createAgent(agent(modelRef, name)));
+    assertThrows(DomainException.class, () -> agentModelService.deleteModel(model.getName(), "0"));
 
     AgentDefinitionUpdateDTO update = new AgentDefinitionUpdateDTO();
     update.setDescription("updated");
@@ -82,16 +77,14 @@ public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
     stale.setExecution(definition.getExecution());
     stale.setConfig(definition.getConfig());
     stale.setExpectedVersion(definition.getVersion());
-    assertThrows(
-        AiVersionConflictException.class, () -> agentDefinitionService.updateAgent(name, stale));
+    assertThrows(DomainException.class, () -> agentDefinitionService.updateAgent(name, stale));
 
     agentDefinitionService.deleteAgent(name, updated.getVersion());
     // 硬删除：同名立即可重建。
     AgentDefinitionDTO recreated = agentDefinitionService.createAgent(agent(modelRef, name));
     assertEquals("0", recreated.getVersion());
     agentDefinitionService.deleteAgent(name, recreated.getVersion());
-    assertThrows(
-        AiResourceNotFoundException.class, () -> agentDefinitionService.deleteAgent(name, "0"));
+    assertThrows(DomainException.class, () -> agentDefinitionService.deleteAgent(name, "0"));
     agentModelService.deleteModel(model.getName(), model.getVersion());
     agentProviderService.deleteProvider(provider.getName(), provider.getVersion());
   }
@@ -110,13 +103,12 @@ public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
     try {
       assertEquals(List.of(child.getName()), parent.getConfig().getSubagents());
       assertThrows(
-          AiInUseException.class,
+          DomainException.class,
           () -> agentDefinitionService.deleteAgent(child.getName(), child.getVersion()));
 
       AgentDefinitionCreateDTO missing = agent(modelRef, "subagent-missing-" + suffix);
       missing.getConfig().setSubagents(List.of("missing-" + suffix));
-      assertThrows(
-          AiResourceNotFoundException.class, () -> agentDefinitionService.createAgent(missing));
+      assertThrows(DomainException.class, () -> agentDefinitionService.createAgent(missing));
 
       AgentDefinitionUpdateDTO removeReference = new AgentDefinitionUpdateDTO();
       removeReference.setDescription(parent.getDescription());
@@ -178,7 +170,7 @@ public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
     assertEquals(List.of(leftName), right.getConfig().getSubagents());
 
     assertThrows(
-        AiInUseException.class,
+        DomainException.class,
         () -> agentDefinitionService.deleteAgent(rightName, right.getVersion()));
 
     AgentDefinitionUpdateDTO openCycle = new AgentDefinitionUpdateDTO();
@@ -205,7 +197,7 @@ public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
     AgentDefinitionCreateDTO invalid = agent(modelRef, "agent-invalid-variant-" + suffix);
     invalid.setExecution(execution(modelRef, "missing"));
 
-    assertThrows(AiValidationException.class, () -> agentDefinitionService.createAgent(invalid));
+    assertThrows(DomainException.class, () -> agentDefinitionService.createAgent(invalid));
 
     AgentDefinitionCreateDTO valid = agent(modelRef, "agent-valid-variant-" + suffix);
     valid.setExecution(execution(modelRef, null));
@@ -218,7 +210,7 @@ public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
       invalidUpdate.setConfig(created.getConfig());
       invalidUpdate.setExpectedVersion(created.getVersion());
       assertThrows(
-          AiValidationException.class,
+          DomainException.class,
           () -> agentDefinitionService.updateAgent(created.getName(), invalidUpdate));
     } finally {
       agentDefinitionService.deleteAgent(created.getName(), created.getVersion());
@@ -254,7 +246,7 @@ public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
       missing.setConfig(updated.getConfig());
       missing.setExpectedVersion(updated.getVersion());
       assertThrows(
-          AiResourceNotFoundException.class,
+          DomainException.class,
           () -> agentDefinitionService.updateAgent(updated.getName(), missing));
       definition = updated;
     } finally {

@@ -20,7 +20,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerRepository;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalog;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsCodec;
 import fun.fengwk.kkstudio.platform.testing.TestCatalogSources;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncExportRequestDTO;
@@ -135,9 +135,8 @@ class ConfigSyncServiceTest {
   void exportWithoutSelectionIsRejected() {
     when(snapshotReader.read()).thenReturn(richSnapshot());
 
-    assertThrows(
-        AiValidationException.class, () -> service.export(new ConfigSyncExportRequestDTO()));
-    assertThrows(AiValidationException.class, () -> service.export(null));
+    assertThrows(DomainException.class, () -> service.export(new ConfigSyncExportRequestDTO()));
+    assertThrows(DomainException.class, () -> service.export(null));
   }
 
   @Test
@@ -160,8 +159,8 @@ class ConfigSyncServiceTest {
     ConfigSyncImportRequestDTO request = new ConfigSyncImportRequestDTO();
     request.setYaml("providers: [not-an-object]\n");
 
-    assertThrows(AiValidationException.class, () -> service.importYaml(request));
-    assertThrows(AiValidationException.class, () -> service.importYaml(null));
+    assertThrows(DomainException.class, () -> service.importYaml(request));
+    assertThrows(DomainException.class, () -> service.importYaml(null));
   }
 
   @Test
@@ -202,7 +201,7 @@ class ConfigSyncServiceTest {
     ConfigSyncImportRequestDTO request = new ConfigSyncImportRequestDTO();
     request.setYaml("unknownThing: []\n");
 
-    assertThrows(AiValidationException.class, () -> service.importYaml(request));
+    assertThrows(DomainException.class, () -> service.importYaml(request));
     verify(applier, never()).apply(any());
 
     request.setAllowPartial(true);
@@ -217,14 +216,13 @@ class ConfigSyncServiceTest {
   void downstreamValidationErrorIsReplacedWithSafeMessage() {
     when(snapshotReader.read()).thenReturn(richSnapshot());
     when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
-    doThrow(new AiValidationException("config_sync", "leaked-secret-value"))
+    doThrow(DomainException.validation("config_sync", "leaked-secret-value"))
         .when(applier)
         .apply(any());
     ConfigSyncImportRequestDTO request = new ConfigSyncImportRequestDTO();
     request.setYaml(ConfigSyncFixtures.providerAndModelYaml());
 
-    AiValidationException error =
-        assertThrows(AiValidationException.class, () -> service.importYaml(request));
+    DomainException error = assertThrows(DomainException.class, () -> service.importYaml(request));
 
     assertEquals("config import is invalid", error.getMessage());
     assertFalse(error.getMessage().contains("leaked-secret-value"));

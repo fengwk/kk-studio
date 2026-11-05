@@ -15,8 +15,7 @@ import fun.fengwk.kkstudio.platform.cluster.BoundedBodySubscriber;
 import fun.fengwk.kkstudio.platform.cluster.ClusterInternalAuthentication;
 import fun.fengwk.kkstudio.platform.cluster.ClusterInternalPaths;
 import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
-import fun.fengwk.kkstudio.platform.error.AiEnvironmentUnavailableException;
-import fun.fengwk.kkstudio.platform.error.AiInUseException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRuntimeStatusDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentUpdateStartDTO;
 
@@ -115,7 +114,7 @@ public class EnvironmentRuntimeOwnerClient {
         new BoundedBodySubscriber(
             MAX_RESPONSE_BYTES,
             () ->
-                new AiEnvironmentUnavailableException(
+                DomainException.environmentUnavailable(
                     "environment owner response exceeds the internal limit"));
     CompletableFuture<HttpResponse<byte[]>> responseFuture =
         httpClient.sendAsync(builder.build(), responseInfo -> subscriber);
@@ -128,17 +127,17 @@ public class EnvironmentRuntimeOwnerClient {
       }
       throw mapFailure(response.statusCode(), body);
     } catch (TimeoutException error) {
-      throw new AiEnvironmentUnavailableException("environment owner request timed out", error);
+      throw DomainException.environmentUnavailable("environment owner request timed out", error);
     } catch (InterruptedException error) {
       Thread.currentThread().interrupt();
-      throw new AiEnvironmentUnavailableException(
+      throw DomainException.environmentUnavailable(
           "environment owner request was interrupted", error);
     } catch (ExecutionException error) {
       Throwable cause = error.getCause();
       if (cause instanceof RuntimeException runtime) {
         throw runtime;
       }
-      throw new AiEnvironmentUnavailableException("environment owner is unavailable", cause);
+      throw DomainException.environmentUnavailable("environment owner is unavailable", cause);
     } finally {
       responseFuture.cancel(true);
       subscriber.cancel();
@@ -149,7 +148,7 @@ public class EnvironmentRuntimeOwnerClient {
     try {
       return MAPPER.readValue(body, responseType);
     } catch (JacksonException error) {
-      throw new AiEnvironmentUnavailableException(
+      throw DomainException.environmentUnavailable(
           "environment owner returned a malformed runtime snapshot", error);
     }
   }
@@ -157,12 +156,12 @@ public class EnvironmentRuntimeOwnerClient {
   private static RuntimeException mapFailure(int status, byte[] body) {
     String code = errorCode(body);
     if (status == 409 && "in_use".equals(code)) {
-      return new AiInUseException("environment", "environment runtime operation is busy");
+      return DomainException.inUse("environment", "environment runtime operation is busy");
     }
     if (status == 409 && "environment_unavailable".equals(code)) {
-      return new AiEnvironmentUnavailableException("environment runtime is unavailable");
+      return DomainException.environmentUnavailable("environment runtime is unavailable");
     }
-    return new AiEnvironmentUnavailableException("environment owner returned status " + status);
+    return DomainException.environmentUnavailable("environment owner returned status " + status);
   }
 
   private static String errorCode(byte[] body) {
@@ -178,7 +177,7 @@ public class EnvironmentRuntimeOwnerClient {
   /** origin 必须已经是裸 http(s) origin；解析后的 authority/path 也必须是固定内部路径。 */
   private static URI resolveStrictly(URI origin, String path) {
     if (origin == null) {
-      throw new AiEnvironmentUnavailableException("environment owner has no internal origin");
+      throw DomainException.environmentUnavailable("environment owner has no internal origin");
     }
     String scheme = origin.getScheme();
     if (scheme == null
@@ -190,7 +189,7 @@ public class EnvironmentRuntimeOwnerClient {
         || (origin.getPath() != null
             && !origin.getPath().isEmpty()
             && !origin.getPath().equals("/"))) {
-      throw new AiEnvironmentUnavailableException("environment owner origin is not trusted");
+      throw DomainException.environmentUnavailable("environment owner origin is not trusted");
     }
     URI resolved = origin.resolve(path);
     if (!scheme.equalsIgnoreCase(resolved.getScheme())
@@ -198,7 +197,7 @@ public class EnvironmentRuntimeOwnerClient {
         || !path.equals(resolved.getRawPath())
         || resolved.getRawQuery() != null
         || resolved.getRawFragment() != null) {
-      throw new AiEnvironmentUnavailableException("environment owner request path is invalid");
+      throw DomainException.environmentUnavailable("environment owner request path is invalid");
     }
     return resolved;
   }

@@ -26,9 +26,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
-import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
-import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.platform.pluginhost.service.PluginManagementService;
 import fun.fengwk.kkstudio.share.ai.plugin.PluginAuthKindDTO;
@@ -36,12 +34,13 @@ import fun.fengwk.kkstudio.share.ai.plugin.PluginAuthPrepareDTO;
 import fun.fengwk.kkstudio.share.ai.plugin.PluginConnectionCheckDTO;
 import fun.fengwk.kkstudio.share.ai.plugin.PluginDTO;
 import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
+import fun.fengwk.kkstudio.web.advice.StudioDomainErrorAdvice;
 
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
-/** {@link StudioPluginController} 与 {@link StudioPluginErrorAdvice} 独立 MockMvc 契约与错误翻译测试。 */
+/** {@link StudioPluginController} 与插件 advice 独立 MockMvc 契约与错误翻译测试。 */
 class StudioPluginControllerTest {
 
   private PluginManagementService pluginManagementService;
@@ -51,10 +50,12 @@ class StudioPluginControllerTest {
   void setUp() {
     pluginManagementService = mock(PluginManagementService.class);
     StudioPluginController controller = new StudioPluginController(pluginManagementService);
-    StudioPluginErrorAdvice errorAdvice = new StudioPluginErrorAdvice(new StudioMessageService());
+    StudioMessageService messageService = new StudioMessageService();
+    StudioPluginErrorAdvice errorAdvice = new StudioPluginErrorAdvice(messageService);
+    StudioDomainErrorAdvice domainErrorAdvice = new StudioDomainErrorAdvice(messageService);
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
-            .setControllerAdvice(new ApiResponseStatusAdvice(), errorAdvice)
+            .setControllerAdvice(new ApiResponseStatusAdvice(), errorAdvice, domainErrorAdvice)
             .build();
   }
 
@@ -116,7 +117,7 @@ class StudioPluginControllerTest {
   @Test
   void getPluginNonExistentIdReturnsNotFound() throws Exception {
     when(pluginManagementService.getPlugin("unknown-plugin"))
-        .thenThrow(new AiResourceNotFoundException("plugin"));
+        .thenThrow(DomainException.notFound("plugin"));
 
     mockMvc
         .perform(get("/api/plugins/unknown-plugin"))
@@ -198,13 +199,13 @@ class StudioPluginControllerTest {
   }
 
   /**
-   * 测试意图：验证 POST /api/plugins/{pluginId}/auth/complete 当底层插件拒绝回调抛出 AiValidationException 时返回 400
-   * Bad Request 且 code 为 validation。
+   * 测试意图：验证 POST /api/plugins/{pluginId}/auth/complete 当底层插件拒绝回调抛出 DomainException 时返回 400 Bad
+   * Request 且 code 为 validation。
    */
   @Test
   void completeAuthCallbackRejectedReturnsBadRequest() throws Exception {
     when(pluginManagementService.completeAuth(eq("my-plugin"), eq("attempt-handle-1"), any()))
-        .thenThrow(new AiValidationException("plugin", "plugin rejected the auth callback"));
+        .thenThrow(DomainException.validation("plugin", "plugin rejected the auth callback"));
 
     mockMvc
         .perform(
@@ -238,7 +239,7 @@ class StudioPluginControllerTest {
   void updateConfigurationVersionConflictReturnsConflict() throws Exception {
     String secretMarker = "SECRET_PATCH_VALUE_ABC123456";
     when(pluginManagementService.updateConfiguration(eq("my-plugin"), eq(7L), any(), any()))
-        .thenThrow(new AiVersionConflictException("plugin", "revision=7", "revision=8"));
+        .thenThrow(DomainException.versionConflict("plugin", "revision=7", "revision=8"));
 
     mockMvc
         .perform(
@@ -391,9 +392,10 @@ class StudioPluginControllerTest {
 
     // 同一调用的连续三次失败：按顺序消费，避免重复 `when()` 在既有异常桩上再次求值。
     when(pluginManagementService.checkConnection("my-plugin", 8L))
-        .thenThrow(new AiVersionConflictException("plugin", "revision=8", "revision=7"))
-        .thenThrow(new AiValidationException("plugin", "plugin does not support connection checks"))
-        .thenThrow(new AiResourceNotFoundException("plugin"));
+        .thenThrow(DomainException.versionConflict("plugin", "revision=8", "revision=7"))
+        .thenThrow(
+            DomainException.validation("plugin", "plugin does not support connection checks"))
+        .thenThrow(DomainException.notFound("plugin"));
 
     mockMvc
         .perform(

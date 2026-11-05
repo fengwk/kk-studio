@@ -14,9 +14,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
-import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
-import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.share.ai.environment.DaemonConfiguration;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInstallConfigDTO;
@@ -64,37 +62,32 @@ class EnvironmentInstallConfigServiceTest {
     verify(repo, never()).updateById(any(), anyLong());
     env.setVersion(1L);
     assertThrows(
-        AiVersionConflictException.class,
-        () -> service.updateInstallConfig(EnvironmentId.of(id), request()));
+        DomainException.class, () -> service.updateInstallConfig(EnvironmentId.of(id), request()));
     verify(repo, never()).updateById(any(), anyLong());
   }
 
   @Test
   void invalidRequestFailsBeforeRepositoryAccess() {
     assertThrows(
-        AiValidationException.class, () -> service.updateInstallConfig(EnvironmentId.of(id), null));
+        DomainException.class, () -> service.updateInstallConfig(EnvironmentId.of(id), null));
     var empty = new EnvironmentInstallConfigUpdateDTO();
     empty.setExpectedVersion("0");
     assertThrows(
-        AiValidationException.class,
-        () -> service.updateInstallConfig(EnvironmentId.of(id), empty));
+        DomainException.class, () -> service.updateInstallConfig(EnvironmentId.of(id), empty));
     verify(repo, never()).lockById(any());
   }
 
   @Test
   void missingAndCasLossAreReportedWithoutFalseSuccess() {
     assertThrows(
-        AiResourceNotFoundException.class,
-        () -> service.updateInstallConfig(EnvironmentId.of(id), request()));
+        DomainException.class, () -> service.updateInstallConfig(EnvironmentId.of(id), request()));
     when(repo.lockById(id)).thenReturn(environment(0));
     assertThrows(
-        AiResourceNotFoundException.class,
-        () -> service.updateInstallConfig(EnvironmentId.of(id), request()));
+        DomainException.class, () -> service.updateInstallConfig(EnvironmentId.of(id), request()));
     when(repo.lockById(id)).thenReturn(environment(0));
     when(repo.getById(id)).thenReturn(environment(2));
     assertThrows(
-        AiVersionConflictException.class,
-        () -> service.updateInstallConfig(EnvironmentId.of(id), request()));
+        DomainException.class, () -> service.updateInstallConfig(EnvironmentId.of(id), request()));
   }
 
   private Environment environment(long version) {

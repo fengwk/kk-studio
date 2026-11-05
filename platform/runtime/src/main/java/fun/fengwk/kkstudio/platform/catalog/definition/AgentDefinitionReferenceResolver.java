@@ -13,9 +13,7 @@ import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageRepository;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalog;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalogSource;
-import fun.fengwk.kkstudio.platform.error.AiInUseException;
-import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
 
 import java.util.ArrayList;
@@ -47,7 +45,7 @@ public final class AgentDefinitionReferenceResolver {
   AgentDefinition requireAgent(String name) {
     AgentDefinition definition = agentDefinitionRepository.getByName(name);
     if (definition == null) {
-      throw new AiResourceNotFoundException(DEFINITION_RESOURCE);
+      throw DomainException.notFound(DEFINITION_RESOURCE);
     }
     return definition;
   }
@@ -55,7 +53,7 @@ public final class AgentDefinitionReferenceResolver {
   AgentDefinition requireAgentForUpdate(String name) {
     AgentDefinition definition = agentDefinitionRepository.getByNameForUpdate(name);
     if (definition == null) {
-      throw new AiResourceNotFoundException(DEFINITION_RESOURCE);
+      throw DomainException.notFound(DEFINITION_RESOURCE);
     }
     return definition;
   }
@@ -77,7 +75,7 @@ public final class AgentDefinitionReferenceResolver {
         SkillPackage locked = skillPackageRepository.lockPackageForShare(packageName);
         for (String skillName : skillNames.get(packageName)) {
           if (locked == null || locked.findSkill(skillName) == null) {
-            throw new AiValidationException(
+            throw DomainException.validation(
                 SKILL_RESOURCE, "unknown agent skills: " + packageName + "/" + skillName);
           }
         }
@@ -88,7 +86,7 @@ public final class AgentDefinitionReferenceResolver {
                 .lockForShare(serverName)
                 .orElseThrow(
                     () ->
-                        new AiValidationException(
+                        DomainException.validation(
                             TOOL_RESOURCE,
                             "unknown agent tool: " + mcpServers.get(serverName).first()));
         for (String toolName : mcpServers.get(serverName)) {
@@ -102,7 +100,7 @@ public final class AgentDefinitionReferenceResolver {
               || !MCP_CONTRIBUTOR.equals(contribution.id().contributorId())
               || tool == null
               || !serverName.equals(locked.name())) {
-            throw new AiValidationException(TOOL_RESOURCE, "unknown agent tool: " + toolName);
+            throw DomainException.validation(TOOL_RESOURCE, "unknown agent tool: " + toolName);
           }
         }
       }
@@ -129,7 +127,7 @@ public final class AgentDefinitionReferenceResolver {
     }
     if (!missing.isEmpty()) {
       missing.sort(String::compareTo);
-      throw new AiValidationException(
+      throw DomainException.validation(
           SKILL_RESOURCE, "unknown agent skills: " + String.join(", ", missing));
     }
     return names;
@@ -144,14 +142,14 @@ public final class AgentDefinitionReferenceResolver {
     for (String toolName : toolNames) {
       ToolContribution contribution = toolCatalog.findTool(toolName).orElse(null);
       if (contribution == null) {
-        throw new AiValidationException(TOOL_RESOURCE, "unknown agent tool: " + toolName);
+        throw DomainException.validation(TOOL_RESOURCE, "unknown agent tool: " + toolName);
       }
       if (!MCP_CONTRIBUTOR.equals(contribution.id().contributorId())) {
         continue;
       }
       McpTool tool = mcpServerRepository.getTool(toolName).orElse(null);
       if (tool == null || tool.serverName() == null) {
-        throw new AiValidationException(TOOL_RESOURCE, "unknown agent tool: " + toolName);
+        throw DomainException.validation(TOOL_RESOURCE, "unknown agent tool: " + toolName);
       }
       servers.computeIfAbsent(tool.serverName(), ignored -> new TreeSet<>()).add(toolName);
     }
@@ -191,7 +189,7 @@ public final class AgentDefinitionReferenceResolver {
 
   void ensureNotReferencedAsSubagent(String name) {
     if (agentDefinitionRepository.existsReferencingSubagent(name)) {
-      throw new AiInUseException(
+      throw DomainException.inUse(
           DEFINITION_RESOURCE,
           DEFINITION_RESOURCE + " is referenced by another agent subagents allowlist: " + name);
     }

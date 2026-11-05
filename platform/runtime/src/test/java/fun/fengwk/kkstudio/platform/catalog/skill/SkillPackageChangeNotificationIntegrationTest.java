@@ -25,7 +25,7 @@ import fun.fengwk.kkstudio.platform.catalog.skill.archive.SkillArchiveBuilder.In
 import fun.fengwk.kkstudio.platform.catalog.skill.archive.SkillArchiveBuilder.Type;
 import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitRepository;
 import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillSyncOrchestrator;
-import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
+import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.platform.storage.StorageS3TestConfiguration;
 import fun.fengwk.kkstudio.share.ai.skill.SkillPackageEditDTO;
@@ -159,8 +159,7 @@ class SkillPackageChangeNotificationIntegrationTest extends PostgresSpringTestSu
       stale.setExpectedVersion("9");
       stale.setDescription("changed");
       stale.setBranch("release");
-      assertThrows(
-          AiVersionConflictException.class, () -> skillCatalogService.editPackage(PACKAGE, stale));
+      assertThrows(DomainException.class, () -> skillCatalogService.editPackage(PACKAGE, stale));
       assertNoNotification(pg);
       assertEquals(0L, skillPackageRepository.getPackage(PACKAGE).version());
     }
