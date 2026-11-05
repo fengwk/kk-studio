@@ -137,7 +137,7 @@ const packages = new Map<string, FakePackage>([
         {
           environmentId: 'env-nas',
           installedSha256: 'a'.repeat(64),
-          localPath: '/home/skills/legacy-pack',
+          localPath: '/opt/skills/legacy-pack',
           error: null,
           upToDate: true,
         },
@@ -386,7 +386,7 @@ agentService.publishSkillPackageUpload = async (payload: SkillPackageUploadPubli
       {
         environmentId: 'env-nas',
         installedSha256: 'c'.repeat(64),
-        localPath: '/home/skills/browser',
+        localPath: '/opt/skills/browser',
         error: null,
         upToDate: true,
       },
