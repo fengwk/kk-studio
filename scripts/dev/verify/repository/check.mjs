@@ -609,6 +609,14 @@ const webForbiddenImportPrefixes = [
   'fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection',
   'fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry',
 ]
+
+/** 精确按文件放行 base4 已有的技能目录读模型；不为其它 controller 开通配。 */
+const webForbiddenImportAllowlist = new Map([
+  [
+    'fun/fengwk/kkstudio/web/controller/StudioSkillCatalogController.java',
+    ['fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry'],
+  ],
+])
 const webPluginImportPrefix = 'fun.fengwk.kkstudio.plugin.'
 const webControllerSourcePrefix = 'web/src/main/java/fun/fengwk/kkstudio/web/controller/'
 const webHarnessProcessorPrefix = 'fun.fengwk.kkstudio.harness.runtime.processor.'
@@ -644,8 +652,8 @@ function checkWebArchitecture() {
   }
 
   for (const { file, imported } of javaImports(webMainRoot)) {
+    const relativeFile = path.relative(webMainRoot, path.join(repositoryRoot, file)).split(path.sep).join('/')
     if (imported.startsWith('fun.fengwk.kkstudio.harness.')) {
-      const relativeFile = path.relative(webMainRoot, path.join(repositoryRoot, file)).split(path.sep).join('/')
       const allowed =
         webHarnessAllowedPrefixes.some((prefix) => imported.startsWith(prefix)) ||
         webHarnessValueImports.has(imported) ||
@@ -655,7 +663,10 @@ function checkWebArchitecture() {
       }
     }
     for (const prefix of webForbiddenImportPrefixes) {
-      if (imported.startsWith(prefix)) {
+      if (
+        imported.startsWith(prefix) &&
+        !(webForbiddenImportAllowlist.get(relativeFile) ?? []).includes(imported)
+      ) {
         addError(`${file}: web must not reference internal implementation (${imported})`)
       }
     }
