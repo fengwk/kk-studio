@@ -183,7 +183,7 @@
 }
 
 @media (max-width: 860px) {
-  /* 由各业务弹窗显式启用，避免改变尚在独立迁移的 IDE、项目与目录弹窗。 */
+  /* 各业务弹窗显式启用触屏安全边距。 */
   .modal-backdrop:has(> .modal-touch-target) {
     padding: calc(12px + env(safe-area-inset-top, 0px))
       calc(12px + env(safe-area-inset-right, 0px))

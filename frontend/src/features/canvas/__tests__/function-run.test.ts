@@ -404,7 +404,7 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
     expect(loadPendingFunctionRun(canvasId, nodeId)).toBeNull()
   })
 
-  it('严格 Schema 校验：非法记录必须 throw（含旧缓存缺 expectedVersion 与坏版本），合法记录才可解析', () => {
+  it('严格 Schema 校验：缺少或非法版本的记录必须 throw，合法记录才可解析', () => {
     cleanupTestStorage()
     const storageKey = `kk-studio.canvas.pending-run:${canvasId}:${nodeId}`
     const validRequest = { requestId: crypto.randomUUID(), expectedVersion: FUNCTION_VERSION_A }
@@ -432,12 +432,12 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
     write({ ...validRequest, extra: 123 })
     expect(() => loadPendingFunctionRun(canvasId, nodeId)).toThrow(/schema validation failed/)
 
-    // 4. 旧缓存缺少 expectedVersion -> 必须 throw（绝不被当作可重放请求）
+    // 4. 缺少 expectedVersion -> 必须 throw（绝不被当作可重放请求）
     write({ requestId: crypto.randomUUID() })
     expect(() => loadPendingFunctionRun(canvasId, nodeId)).toThrow(/schema validation failed/)
 
-    // 5. expectedVersion 含未知字段（例如旧缓存的 catalogEpoch）-> 必须 throw
-    write({ ...validRequest, expectedVersion: { ...FUNCTION_VERSION_A, catalogEpoch: 1 } })
+    // 5. expectedVersion 含未知字段 -> 必须 throw
+    write({ ...validRequest, expectedVersion: { ...FUNCTION_VERSION_A, unexpected: 1 } })
     expect(() => loadPendingFunctionRun(canvasId, nodeId)).toThrow(/schema validation failed/)
 
     // 8. expectedVersion.definitionFingerprint 大写/长度不足 -> 必须 throw
@@ -484,7 +484,7 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
     expect(loadPendingFunctionRun(canvasId, nodeId)?.request.requestId).toBe(nonV4RequestId)
   })
 
-  it('坏缓存明确丢弃：损坏记录/旧缓存使本次点击 0 flush 0 POST，并清掉该记录，下一次显式点击才新建请求', async () => {
+  it('坏缓存明确丢弃：损坏记录使本次点击 0 flush 0 POST，下一次显式点击才新建请求', async () => {
     cleanupTestStorage()
     const storageKey = `kk-studio.canvas.pending-run:${canvasId}:${nodeId}`
     window.localStorage.setItem(storageKey, 'corrupt-raw-attempt-data')
@@ -514,14 +514,14 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
     expect(flushFunctionConfig).toHaveBeenCalledTimes(1)
   })
 
-  it('旧缓存（有 requestId 但缺 expectedVersion）同样丢弃且本次点击 0 POST', async () => {
+  it('缺 expectedVersion 的记录被丢弃且本次点击 0 POST', async () => {
     cleanupTestStorage()
     const storageKey = `kk-studio.canvas.pending-run:${canvasId}:${nodeId}`
-    const legacyRequestId = crypto.randomUUID()
+    const requestId = crypto.randomUUID()
     window.localStorage.setItem(storageKey, JSON.stringify({
       canvasId,
       nodeId,
-      request: { requestId: legacyRequestId },
+      request: { requestId },
       basisRequestId: null,
       createdAt: Date.now(),
     }))

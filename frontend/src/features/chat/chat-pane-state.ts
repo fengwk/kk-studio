@@ -8,7 +8,7 @@ import { hasExactKeys, isRecord } from '@/shared/lib/value'
 import {
   loadTabSnapshot, resolveTabStorage, serializeTabSnapshot, writeTabSnapshot,
   TAB_LAST_PREFIX, TAB_SESSION_PREFIX, TAB_STATE_MAX_BYTES,
-  type TabStorage, type TabStorageArea,
+  type TabStorage,
 } from '@/shared/lib/tab-storage'
 
 export type ChatLayout =
@@ -44,12 +44,9 @@ export interface ChatPaneLoadResult {
   saved: boolean
 }
 
-export type ChatTabStorageArea = TabStorageArea
 export type ChatTabStorage = TabStorage
 
 export const CHAT_TAB_STATE_MAX_BYTES = TAB_STATE_MAX_BYTES
-export const CHAT_TAB_SESSION_PREFIX = TAB_SESSION_PREFIX
-export const CHAT_TAB_LAST_PREFIX = TAB_LAST_PREFIX
 
 export const CHAT_LAYOUT_CAPACITY: Record<ChatLayout, number> = {
   single: 1,
@@ -66,11 +63,11 @@ export const CHAT_LAYOUT_CAPACITY: Record<ChatLayout, number> = {
 const CHAT_PANE_COUNT = 9
 
 export function chatTabSessionStorageKey(chatId: string): string {
-  return `${CHAT_TAB_SESSION_PREFIX}chat:${chatId}`
+  return `${TAB_SESSION_PREFIX}chat:${chatId}`
 }
 
 export function chatTabLastStorageKey(chatId: string): string {
-  return `${CHAT_TAB_LAST_PREFIX}chat:${chatId}`
+  return `${TAB_LAST_PREFIX}chat:${chatId}`
 }
 
 function createPaneId(index: number): string {

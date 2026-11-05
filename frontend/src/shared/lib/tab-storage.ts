@@ -28,7 +28,7 @@ export function resolveTabStorage(storage?: TabStorage): {
   }
 }
 
-export function parseTabSnapshot<T>(raw: string | null, parse: (value: unknown) => T | null): T | null {
+function parseTabSnapshot<T>(raw: string | null, parse: (value: unknown) => T | null): T | null {
   if (raw == null || utf8ByteLength(raw) > TAB_STATE_MAX_BYTES) return null
   try {
     return parse(JSON.parse(raw) as unknown)
@@ -42,7 +42,7 @@ export function serializeTabSnapshot<T>(value: unknown, parse: (value: unknown) 
   return parseTabSnapshot(raw, parse) == null ? null : raw
 }
 
-export function readTabSnapshot<T>(
+function readTabSnapshot<T>(
   storage: TabStorageArea | null, key: string, parse: (value: unknown) => T | null,
 ): T | null {
   if (storage == null) return null

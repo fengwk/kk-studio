@@ -288,7 +288,7 @@ describe('ProjectDetailPage', () => {
   })
 
   it('reloads the snapshot when a project change is broadcast', async () => {
-    // 测试意图：接收 SSE invalidation 时重新获取快照（不再提供手工刷新按钮）
+    // 测试意图：接收 SSE invalidation 时重新获取快照。
     const api = createMockApi()
     const { queryClient } = renderPage(<ProjectDetailPage projectId={projectId} onBack={vi.fn()} api={api} />)
 
@@ -325,10 +325,10 @@ describe('ProjectDetailPage', () => {
     expect(capturedPaneProps?.owner).toBeUndefined()
     expect(capturedPaneProps?.onSubmitInstruction).toBeUndefined()
     expect(capturedPaneProps?.onStop).toBeUndefined()
-    // 容器能力只保留「不创建 Session / 不分叉」，不再有 Agent 切换与通用 Chat 门禁
+    // 容器禁止创建 Session 和分叉。
     expect(capturedPaneProps?.capabilities).toEqual({ allowNewSession: false, allowBranching: false })
 
-    // 宿主不再把输入劫持成 Issue 活动，也不再把 Stop 劫持成 stopIssue
+    // 挂载时不发送 Issue 活动或 Stop 请求。
     expect(api.appendIssueActivity).not.toHaveBeenCalled()
     expect(api.stopIssue).not.toHaveBeenCalled()
   })
@@ -430,7 +430,7 @@ describe('ProjectDetailPage', () => {
   })
 
   it('keeps a board transition in the sidecar after an unknown network failure and replays the frozen request on remount', async () => {
-    // 测试意图：看板动作与旧受控入口共用同一侧车执行器；网络未知失败必须保留完全相同的 requestKey/expectedVersion 供刷新后重试
+    // 测试意图：网络未知失败保留相同的 requestKey/expectedVersion 供刷新后重试。
     const targetIssue = mockSnapshot.issues[0].issue
     clearPendingAction(targetIssue.id)
 
@@ -577,7 +577,7 @@ describe('ProjectDetailPage', () => {
       expect(screen.queryByLabelText('Issue #1 详情')).not.toBeInTheDocument()
     })
 
-    // 真实浏览器前进：回到 Dock 页，Dock 存在但旧 manual modal 绝不复活
+    // 前进回到 Dock 页时保持详情弹窗关闭。
     act(() => {
       getNav().navigate(1)
     })

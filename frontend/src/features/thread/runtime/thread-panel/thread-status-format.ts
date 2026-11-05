@@ -1,6 +1,7 @@
 import {
   calculateCacheHitRate,
   calculateDecodeTokensPerSecond,
+  formatCompactTokens,
   formatTurnUsageText,
   formatUsageCost,
 } from '@/features/thread/runtime/thread-timeline/content-utils'
@@ -88,8 +89,8 @@ export function buildThreadStatusModel(
     segments.push({
       key: 'context',
       text: t('ai.runtime.status.contextText', {
-        used: hasContext ? formatCompactNumber(usedContext) : t('ai.runtime.status.noData'),
-        total: formatCompactNumber(contextWindow),
+        used: hasContext ? formatCompactTokens(usedContext) : t('ai.runtime.status.noData'),
+        total: formatCompactTokens(contextWindow),
       }),
       title: hasContext
         ? t('ai.runtime.status.contextUsageTitleKnown', {
@@ -150,19 +151,6 @@ const EMPTY_USAGE: TurnUsage = {
   reasoning: null,
   providerTotal: null,
   cost: null,
-}
-
-function formatCompactNumber(value: number): string {
-  if (value < 1_000) {
-    return String(Math.round(value))
-  }
-  if (value < 10_000) {
-    return `${(value / 1_000).toFixed(1)}k`
-  }
-  if (value < 1_000_000) {
-    return `${Math.round(value / 1_000)}k`
-  }
-  return `${(value / 1_000_000).toFixed(1)}M`
 }
 
 function positiveFinite(value: number | undefined): number | null {

@@ -6,6 +6,7 @@ import { agentService } from '@/shared/api/agent-service'
 import { environmentService } from '@/features/environment/environment-service'
 import type { SkillPackageDetailDTO } from '@/shared/api/generated/contracts'
 import { queryKeys } from '@/shared/lib/query-keys'
+import { errorDetailMessage as errorDetail } from '@/shared/lib/user-facing-error'
 import { useI18n, type TranslationKey } from '@/shared/i18n'
 import { Badge, type BadgeTone } from '@/shared/ui/data/Badge'
 import { Button } from '@/shared/ui/controls/Button'
@@ -19,7 +20,6 @@ import {
   deriveCheckStatus,
   displayPackageVersion,
   environmentSyncStatus,
-  errorDetail,
   formatCommit,
   isGitPackage,
   skillPackageQueryKeys,

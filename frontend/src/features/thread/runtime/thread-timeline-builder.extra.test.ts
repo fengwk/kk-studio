@@ -781,7 +781,7 @@ describe('thread timeline edge branches', () => {
     const withRole = buildThreadTimeline(
       [
         entry('weird', 'MESSAGE', { message: { role: 'HUMAN', contents: [{ type: 'text', text: 'x' }] } }),
-        entry('legacy-system', 'MESSAGE', {
+        entry('system-role', 'MESSAGE', {
           message: { role: 'SYSTEM', contents: [{ type: 'text', text: 'y' }] },
         }),
       ],
@@ -800,7 +800,7 @@ describe('thread timeline edge branches', () => {
         kind: 'unsupported_message',
         title: '无法识别消息',
         text: '暂不支持的消息角色：SYSTEM。',
-        subjectEntryId: 'legacy-system',
+        subjectEntryId: 'system-role',
       },
     ])
     const withoutRole = buildThreadTimeline(

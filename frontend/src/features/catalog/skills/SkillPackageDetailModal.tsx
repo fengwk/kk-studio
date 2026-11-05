@@ -4,6 +4,9 @@ import { Download, Trash2 } from 'lucide-react'
 import { agentService } from '@/shared/api/agent-service'
 import { environmentService } from '@/features/environment/environment-service'
 import { queryKeys } from '@/shared/lib/query-keys'
+import { formatByteCount as formatBytes } from '@/shared/lib/format-bytes'
+import { formatDateTime24 } from '@/shared/lib/date-format'
+import { errorDetailMessage as errorDetail } from '@/shared/lib/user-facing-error'
 import { useI18n, type TranslationKey } from '@/shared/i18n'
 import { Badge, type BadgeTone } from '@/shared/ui/data/Badge'
 import { Button } from '@/shared/ui/controls/Button'
@@ -13,10 +16,7 @@ import {
   buildFileTree,
   displayPackageVersion,
   environmentSyncStatus,
-  errorDetail,
-  formatBytes,
   formatCommit,
-  formatDateTime,
   isGitPackage,
   skillPackageQueryKeys,
   triggerDownload,
@@ -138,7 +138,7 @@ export function SkillPackageDetailModal({
                 </div>
                 <div>
                   <dt>{t('ai.skillPackages.publishedAt')}</dt>
-                  <dd>{formatDateTime(detail.publishedAt, locale)}</dd>
+                  <dd>{formatDateTime24(new Date(detail.publishedAt * 1000), locale)}</dd>
                 </div>
                 <div>
                   <dt>{t('ai.skillPackages.skillsCount')}</dt>

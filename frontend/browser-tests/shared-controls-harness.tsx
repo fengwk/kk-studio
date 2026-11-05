@@ -15,7 +15,7 @@ const OPTIONS = [
   { value: 'beta', label: '选项 B' },
 ]
 
-/** 复刻真实表单的 .form-group 包裹（label + 控件），用于验证共享控件不被旧表单规则改写。 */
+/** 复刻真实表单的 .form-group 包裹（label + 控件），验证共享控件的样式隔离。 */
 function Field({
   label,
   children,
@@ -23,7 +23,7 @@ function Field({
 }: {
   label: string
   children: ReactNode
-  /** 复刻旧表单的 .form-group.is-error 包裹，验证共享控件不被其 !important 规则改写。 */
+  /** 复刻 .form-group.is-error 包裹，验证共享控件的样式隔离。 */
   error?: boolean
 }) {
   return (
@@ -36,7 +36,7 @@ function Field({
 
 /**
  * 真实上下文中的共享表单控件：正常 / 校验失败 / 禁用 三种状态。
- * 这里刻意放进 .form-group（以及弹层的 .modal-body），因为旧表单规则正作用在这些祖先上。
+ * 使用 .form-group（以及弹层的 .modal-body）验证实际表单上下文。
  */
 function FormControls({ scope }: { scope: string }) {
   const [name, setName] = useState('资源名称')
@@ -191,19 +191,19 @@ function FormControls({ scope }: { scope: string }) {
           onChange={(event) => setNote(event.target.value)}
         />
       </Field>
-      <Field label={`${scope} 旧式错误包裹（文本）`} error>
+      <Field label={`${scope} 错误包裹（文本）`} error>
         <TextInput
           className="control-text-error-context"
-          aria-label={`${scope} 旧式错误包裹文本`}
+          aria-label={`${scope} 错误包裹文本`}
           invalid
           value=""
           onChange={() => undefined}
         />
       </Field>
-      <Field label={`${scope} 旧式错误包裹（数值）`} error>
+      <Field label={`${scope} 错误包裹（数值）`} error>
         <NumberInput
           className="control-number-error-context"
-          aria-label={`${scope} 旧式错误包裹数值`}
+          aria-label={`${scope} 错误包裹数值`}
           invalid
           value="0"
           onChange={() => undefined}

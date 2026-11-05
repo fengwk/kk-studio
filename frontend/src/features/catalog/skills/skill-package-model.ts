@@ -1,4 +1,3 @@
-import { ApiError } from '@/shared/api/client'
 import type {
   SkillEnvironmentSyncDTO,
   SkillManifestEntryDTO,
@@ -7,7 +6,6 @@ import type {
   SkillPackageSummaryDTO,
 } from '@/shared/api/generated/contracts'
 import { queryKeys } from '@/shared/lib/query-keys'
-import type { AppLocale } from '@/shared/i18n'
 
 /** 技能包相关查询统一挂在 skills.packages 下，写入后一次失效即可回读列表、详情与环境状态。 */
 export const skillPackageQueryKeys = {
@@ -57,48 +55,6 @@ export function displayPackageVersion(
 
 export function isGitPackage(pkg: Pick<SkillPackageSummaryDTO, 'source'>): boolean {
   return pkg.source === 'GIT'
-}
-
-/** wire 上的 Instant 以 epoch 秒表示，展示时只做本地化格式化。 */
-export function formatDateTime(timestamp: number, locale: AppLocale): string {
-  return new Date(timestamp * 1000).toLocaleString(locale, {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  })
-}
-
-/** 字节数来自 Java long 的十进制字符串；展示时只做可读换算，不参与业务判断。 */
-export function formatBytes(value: string | number): string {
-  const bytes = typeof value === 'number' ? value : Number(value)
-  if (!Number.isFinite(bytes) || bytes < 0) {
-    return '—'
-  }
-  if (bytes < 1024) {
-    return `${bytes} B`
-  }
-  if (bytes < 1024 * 1024) {
-    return `${(bytes / 1024).toFixed(1)} KB`
-  }
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}
-
-/** 统一展示后端错误上下文中的 errors.detail；没有 detail 时才退回传输层 message。 */
-export function errorDetail(error: unknown): string {
-  if (error instanceof ApiError) {
-    const detail = error.errors?.detail
-    if (typeof detail === 'string' && detail.trim()) {
-      return detail
-    }
-    return error.message
-  }
-  if (error instanceof Error) {
-    return error.message
-  }
-  return String(error)
 }
 
 const PACKAGE_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/

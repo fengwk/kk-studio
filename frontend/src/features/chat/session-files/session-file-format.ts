@@ -1,4 +1,5 @@
 /** 会话文件面板的纯展示逻辑：vfs 路径、文本窗口解析与文件类型判断。 */
+import { formatLocalDateMinutes } from '@/shared/lib/date-format'
 
 /** 文本窗口每页行数；服务端上限 2000，较小分页便于逐页回看。 */
 export const SESSION_FILE_TEXT_PAGE_LINES = 500
@@ -94,7 +95,5 @@ export function formatSessionFileTime(value: string | null | undefined): string 
   if (!Number.isFinite(date.getTime())) {
     return null
   }
-  return `${String(date.getFullYear()).padStart(4, '0')}-${String(date.getMonth() + 1).padStart(2, '0')}`
-    + `-${String(date.getDate()).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}`
-    + `:${String(date.getMinutes()).padStart(2, '0')}`
+  return formatLocalDateMinutes(date)
 }

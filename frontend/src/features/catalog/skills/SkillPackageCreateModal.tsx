@@ -11,6 +11,8 @@ import type {
   SkillPackageUploadPublishDTO,
 } from '@/shared/api/generated/contracts'
 import { useI18n, type TranslationKey } from '@/shared/i18n'
+import { formatByteCount as formatBytes } from '@/shared/lib/format-bytes'
+import { errorDetailMessage as errorDetail } from '@/shared/lib/user-facing-error'
 import { skillPackageQueryKeys } from './skill-package-model'
 import { Badge } from '@/shared/ui/data/Badge'
 import { Button } from '@/shared/ui/controls/Button'
@@ -24,8 +26,6 @@ import { Dialog } from '@/shared/ui/overlays/Dialog'
 import {
   addedSkills,
   buildPreviewTree,
-  errorDetail,
-  formatBytes,
   formatCommit,
   isDescriptionWithinLimit,
   isSupportedSkillArchive,

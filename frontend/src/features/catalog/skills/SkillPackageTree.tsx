@@ -1,7 +1,8 @@
 import { FileArchive, FileText, FolderTree } from 'lucide-react'
 import { useI18n } from '@/shared/i18n'
 import { Badge } from '@/shared/ui/data/Badge'
-import { formatBytes, type SkillTreeNode } from './skill-package-model'
+import { formatByteCount as formatBytes } from '@/shared/lib/format-bytes'
+import type { SkillTreeNode } from './skill-package-model'
 import './skill-packages.css'
 
 /** 归档目录树；被忽略的目录标记出来，文件展示解压后大小。 */

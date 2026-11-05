@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { agentService } from '@/shared/api/agent-service'
 import type { SkillPackageDetailDTO, SkillPackageEditDTO } from '@/shared/api/generated/contracts'
 import { useI18n } from '@/shared/i18n'
+import { errorDetailMessage as errorDetail } from '@/shared/lib/user-facing-error'
 import { Button } from '@/shared/ui/controls/Button'
 import { Checkbox } from '@/shared/ui/controls/Checkbox'
 import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
@@ -10,7 +11,6 @@ import { TextArea } from '@/shared/ui/controls/TextArea'
 import { TextInput } from '@/shared/ui/controls/TextInput'
 import { Dialog } from '@/shared/ui/overlays/Dialog'
 import {
-  errorDetail,
   isDescriptionWithinLimit,
   isGitPackage,
   normalizeDescription,

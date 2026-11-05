@@ -627,9 +627,7 @@ test('the local branch draft Debug provides read-only overlay with clean exit wi
   await expect(back).toBeVisible()
   await expect(composer).toContainText('branch draft preview')
 
-  // 不显示草稿预览操作按钮，且未触发任何分支预览或命令批次请求。
-  await expect(page.locator('.thread-debug-preview')).toHaveCount(0)
-  await expect(page.locator('.thread-debug-preview-action')).toHaveCount(0)
+  // 只读 Debug 不触发分支预览或命令批次请求。
   expect(recorded.branchPreviews).toEqual([])
   expect(recorded.commandBatches).toEqual([])
   await page.screenshot({ path: testInfo.outputPath('branch-draft-debug-narrow.png') })

@@ -20,7 +20,7 @@ export type PricingScalar = string | boolean | null | ExactJsonNumber
 
 export type PricingScalarKind = 'string' | 'number' | 'boolean' | 'null'
 
-/** 条件值类型；number 同时接受已解析的 JS number（仅用于可信测试/旧数据）与精确原文。 */
+/** 条件值类型；number 接受已解析的 JS number 与精确原文。 */
 export function scalarKind(value: unknown): PricingScalarKind | undefined {
   if (value === null) return 'null'
   if (typeof value === 'string') return 'string'
