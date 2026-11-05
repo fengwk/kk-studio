@@ -17,11 +17,11 @@ import software.amazon.awssdk.core.exception.AbortedException;
 import software.amazon.awssdk.core.exception.ApiCallTimeoutException;
 
 import fun.fengwk.kkstudio.platform.storage.ReadDeadline;
-import fun.fengwk.kkstudio.platform.storage.S3ObjectMetadata;
-import fun.fengwk.kkstudio.platform.storage.S3ObjectStream;
-import fun.fengwk.kkstudio.platform.storage.S3StorageService;
 import fun.fengwk.kkstudio.platform.storage.error.StorageReadInterruptedException;
 import fun.fengwk.kkstudio.platform.storage.error.StorageReadTimeoutException;
+import fun.fengwk.kkstudio.platform.storage.s3.S3ObjectMetadata;
+import fun.fengwk.kkstudio.platform.storage.s3.S3ObjectStream;
+import fun.fengwk.kkstudio.platform.storage.s3.S3StorageService;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;

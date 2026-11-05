@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.storage;
+package fun.fengwk.kkstudio.platform.storage.s3;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;

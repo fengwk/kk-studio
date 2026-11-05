@@ -18,6 +18,8 @@ import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageBlobRepository;
+import fun.fengwk.kkstudio.platform.storage.s3.S3PresignService;
+import fun.fengwk.kkstudio.platform.storage.s3.S3StorageService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageObjectCleanupService;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;

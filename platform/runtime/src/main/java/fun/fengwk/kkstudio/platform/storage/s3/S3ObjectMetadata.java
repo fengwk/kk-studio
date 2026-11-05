@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.storage;
+package fun.fengwk.kkstudio.platform.storage.s3;
 
 /**
  * 固定 bucket 中对象的服务端元数据。

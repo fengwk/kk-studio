@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.storage;
+package fun.fengwk.kkstudio.platform.storage.s3;
 
 import org.springframework.util.Assert;
 import org.springframework.util.StringUtils;
@@ -18,9 +18,9 @@ import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.model.PutObjectResponse;
 
+import fun.fengwk.kkstudio.platform.storage.ReadDeadline;
 import fun.fengwk.kkstudio.platform.storage.configuration.S3StorageProperties;
 import fun.fengwk.kkstudio.platform.storage.error.StorageReadTimeoutException;
-import fun.fengwk.kkstudio.platform.storage.s3.S3ObjectKeyNormalizer;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;

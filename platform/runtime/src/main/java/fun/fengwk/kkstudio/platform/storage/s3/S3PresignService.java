@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.storage;
+package fun.fengwk.kkstudio.platform.storage.s3;
 
 import org.springframework.util.Assert;
 import org.springframework.util.MimeTypeUtils;
@@ -15,7 +15,6 @@ import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignReques
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.platform.storage.configuration.S3StorageProperties;
-import fun.fengwk.kkstudio.platform.storage.s3.S3ObjectKeyNormalizer;
 
 import java.time.Duration;
 import java.util.Base64;

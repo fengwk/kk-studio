@@ -15,14 +15,12 @@ import fun.fengwk.kkstudio.canvas.CanvasCommand;
 import fun.fengwk.kkstudio.canvas.CanvasCommandResult;
 import fun.fengwk.kkstudio.canvas.CanvasCommandResult.Accepted;
 import fun.fengwk.kkstudio.canvas.CanvasCommandResult.Conflicted;
-import fun.fengwk.kkstudio.canvas.CanvasCommandService;
 import fun.fengwk.kkstudio.canvas.CanvasConflict;
 import fun.fengwk.kkstudio.canvas.CanvasConflictException;
 import fun.fengwk.kkstudio.canvas.CanvasDocument;
 import fun.fengwk.kkstudio.canvas.CanvasFunction;
 import fun.fengwk.kkstudio.canvas.CanvasGroupPatch;
 import fun.fengwk.kkstudio.canvas.CanvasNodePatch;
-import fun.fengwk.kkstudio.canvas.CanvasQueryService;
 import fun.fengwk.kkstudio.canvas.CanvasResource;
 import fun.fengwk.kkstudio.canvas.CanvasResourceInput;
 import fun.fengwk.kkstudio.canvas.CanvasResourceNode;
@@ -39,7 +37,7 @@ import java.util.UUID;
  *
  * <p>断言都落在真实数据库行上，因此“拒绝不留部分写入”“接受恰好前进一次 revision”“重复请求只返回当时的接受位置”等事实不由 mock 声称，而由提交后的行状态证明。
  */
-class PostgresqlCanvasCommandServiceIntegrationTest extends PostgresCanvasInfraTestSupport {
+class CanvasCommandServiceIntegrationTest extends PostgresCanvasInfraTestSupport {
 
   private static final CanvasTransform TRANSFORM = new CanvasTransform(0, 0, 10, 10);
 

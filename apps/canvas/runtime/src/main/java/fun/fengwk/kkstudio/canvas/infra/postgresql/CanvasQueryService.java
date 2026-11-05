@@ -5,7 +5,6 @@ import org.springframework.stereotype.Repository;
 import fun.fengwk.kkstudio.canvas.CanvasDocument;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRun;
 import fun.fengwk.kkstudio.canvas.CanvasGroup;
-import fun.fengwk.kkstudio.canvas.CanvasQueryService;
 import fun.fengwk.kkstudio.canvas.CanvasReference;
 import fun.fengwk.kkstudio.canvas.CanvasResource;
 import fun.fengwk.kkstudio.canvas.CanvasResourceNode;
@@ -30,13 +29,13 @@ import java.util.UUID;
  * 发生变化时重读，避免返回跨越并发提交的混合状态。
  */
 @Repository
-public class PostgresqlCanvasQueryService implements CanvasQueryService {
+public class CanvasQueryService {
 
   private final PostgresqlCanvasStore canvasStore;
   private final PostgresqlCanvasResourceRepository resourceRepository;
   private final PostgresqlCanvasFunctionRunRepository runRepository;
 
-  public PostgresqlCanvasQueryService(
+  public CanvasQueryService(
       PostgresqlCanvasStore canvasStore,
       PostgresqlCanvasResourceRepository resourceRepository,
       PostgresqlCanvasFunctionRunRepository runRepository) {
@@ -45,7 +44,6 @@ public class PostgresqlCanvasQueryService implements CanvasQueryService {
     this.runRepository = Objects.requireNonNull(runRepository, "runRepository");
   }
 
-  @Override
   public Optional<CanvasSnapshot> findSnapshot(UUID canvasId) {
     Objects.requireNonNull(canvasId, "canvasId");
     while (true) {
@@ -63,13 +61,11 @@ public class PostgresqlCanvasQueryService implements CanvasQueryService {
     }
   }
 
-  @Override
   public Optional<CanvasDocument> findDocument(UUID canvasId) {
     Objects.requireNonNull(canvasId, "canvasId");
     return canvasStore.findDocument(canvasId);
   }
 
-  @Override
   public Optional<CanvasResource> findResource(UUID canvasId, UUID resourceId) {
     Objects.requireNonNull(canvasId, "canvasId");
     Objects.requireNonNull(resourceId, "resourceId");
@@ -81,7 +77,6 @@ public class PostgresqlCanvasQueryService implements CanvasQueryService {
         .filter(resource -> resource.ownerNodeId() != null);
   }
 
-  @Override
   public List<CanvasDocument> listDocuments() {
     return canvasStore.listDocuments();
   }

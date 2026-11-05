@@ -10,7 +10,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import fun.fengwk.kkstudio.canvas.CanvasDocument;
 import fun.fengwk.kkstudio.canvas.CanvasFunction;
 import fun.fengwk.kkstudio.canvas.CanvasGroup;
-import fun.fengwk.kkstudio.canvas.CanvasQueryService;
 import fun.fengwk.kkstudio.canvas.CanvasReference;
 import fun.fengwk.kkstudio.canvas.CanvasResource;
 import fun.fengwk.kkstudio.canvas.CanvasResourceNode;
@@ -21,8 +20,8 @@ import fun.fengwk.kkstudio.canvas.function.CanvasJson;
 import java.util.List;
 import java.util.UUID;
 
-/** {@link PostgresqlCanvasQueryService} 的快照与引用投影在真实 PostgreSQL 上的契约。 */
-class PostgresqlCanvasQueryServiceIntegrationTest extends PostgresCanvasInfraTestSupport {
+/** {@link CanvasQueryService} 的快照与引用投影在真实 PostgreSQL 上的契约。 */
+class CanvasQueryServiceIntegrationTest extends PostgresCanvasInfraTestSupport {
 
   @Autowired private CanvasQueryService queryService;
 

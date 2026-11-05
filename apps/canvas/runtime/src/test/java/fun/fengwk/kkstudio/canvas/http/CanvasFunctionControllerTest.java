@@ -26,7 +26,6 @@ import tools.jackson.databind.json.JsonMapper;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRun;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRunException;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRunStatus;
-import fun.fengwk.kkstudio.canvas.CanvasFunctionService;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionUnknownResolution;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionVersion;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
@@ -39,6 +38,7 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionReferencePolicy;
 import fun.fengwk.kkstudio.canvas.function.CanvasJson;
 import fun.fengwk.kkstudio.canvas.function.CanvasResourceKind;
 import fun.fengwk.kkstudio.canvas.infra.dto.CanvasDtoMapper;
+import fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionService;
 import fun.fengwk.kkstudio.canvas.testing.TestCanvasFunctionCatalogSource;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 

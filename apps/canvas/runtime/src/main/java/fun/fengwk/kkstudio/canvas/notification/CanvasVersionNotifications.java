@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.canvas.notification;
 
 import fun.fengwk.kkstudio.canvas.CanvasDocument;
-import fun.fengwk.kkstudio.canvas.CanvasQueryService;
+import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasQueryService;
 import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.common.number.DecimalLongs;
 import fun.fengwk.kkstudio.platform.events.SourceSubscribed;

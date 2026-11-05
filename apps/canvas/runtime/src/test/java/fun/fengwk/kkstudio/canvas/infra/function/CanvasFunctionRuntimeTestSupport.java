@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.canvas.infra.function;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.Mockito.mock;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -28,8 +29,10 @@ import fun.fengwk.kkstudio.canvas.function.CanvasJson;
 import fun.fengwk.kkstudio.canvas.function.CanvasJson.JsonObject;
 import fun.fengwk.kkstudio.canvas.function.CanvasResourceKind;
 import fun.fengwk.kkstudio.canvas.infra.TestBlobAccess;
+import fun.fengwk.kkstudio.canvas.infra.platform.CanvasBlobReleaser;
 import fun.fengwk.kkstudio.canvas.infra.platform.PluginCanvasFunctionCatalogSource;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasFunctionWorkStore;
+import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasResourceLifecycle;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.PostgresCanvasInfraTestSupport;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.PostgresqlCanvasFunctionResourcePinRepository;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.PostgresqlCanvasFunctionRunRepository;
@@ -115,13 +118,13 @@ abstract class CanvasFunctionRuntimeTestSupport extends PostgresCanvasInfraTestS
 
   protected CanvasFunctionRunTransactions runtimeTransactions;
 
-  /** Runtime foundation 使用模块内的忠实 pin/owner 双替身，避免与实际 Blob ref_count 端口耦合。 */
+  /** Runtime foundation 使用真实 pin/owner 生命周期，只把 Blob ref_count 释放替换为无副作用替身。 */
   @BeforeEach
   void buildRuntimeTransactions() {
     runtimeTransactions = transactionsFor(catalogSource.source());
   }
 
-  /** 用给定 source 构造 Runtime transactions，复用真实 store/仓库与测试 pin/owner 双替身。 */
+  /** 用给定 source 构造 Runtime transactions，复用真实 store/仓库与不触及 Blob ref_count 的释放替身。 */
   CanvasFunctionRunTransactions transactionsFor(PluginCanvasFunctionCatalogSource catalogSource) {
     return new CanvasFunctionRunTransactions(
         canvasStore,
@@ -131,7 +134,8 @@ abstract class CanvasFunctionRuntimeTestSupport extends PostgresCanvasInfraTestS
         catalogSource,
         argsCodec,
         stateCodec,
-        new TestCanvasResourceLifecycle(resourceRepository, pinRepository),
+        new CanvasResourceLifecycle(
+            resourceRepository, pinRepository, mock(CanvasBlobReleaser.class)),
         blobAccess.access(),
         clock);
   }

@@ -7,10 +7,9 @@ import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
-import fun.fengwk.kkstudio.platform.storage.S3ObjectMetadata;
-import fun.fengwk.kkstudio.platform.storage.S3ObjectStream;
-import fun.fengwk.kkstudio.platform.storage.S3StorageService;
-import fun.fengwk.kkstudio.platform.storage.service.StorageMediaProbe;
+import fun.fengwk.kkstudio.platform.storage.s3.S3ObjectMetadata;
+import fun.fengwk.kkstudio.platform.storage.s3.S3ObjectStream;
+import fun.fengwk.kkstudio.platform.storage.s3.S3StorageService;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageMediaFacts;
 
 import java.io.IOException;
@@ -35,7 +34,7 @@ import java.util.Set;
  * HEAD 元数据（mediaType + 空尺寸），保证全局上传契约对非媒体内容依旧可用 —— Canvas 资源 DTO 的媒体事实列可空。
  */
 @Slf4j
-public class FfmpegStorageMediaProbe implements StorageMediaProbe {
+public class FfmpegStorageMediaProbe {
 
   private static final String FALLBACK_MEDIA_TYPE = "application/octet-stream";
   private static final Set<String> JPEG_CODECS = Set.of("mjpeg");
@@ -61,7 +60,6 @@ public class FfmpegStorageMediaProbe implements StorageMediaProbe {
     this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
   }
 
-  @Override
   public StorageMediaFacts probe(String s3Key, S3ObjectMetadata headMetadata) {
     Objects.requireNonNull(s3Key, "s3Key");
     Objects.requireNonNull(headMetadata, "headMetadata");

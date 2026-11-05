@@ -7,7 +7,6 @@ import org.springframework.stereotype.Service;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRun;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRunException;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRunStatus;
-import fun.fengwk.kkstudio.canvas.CanvasFunctionService;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionUnknownResolution;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionVersion;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
@@ -22,7 +21,7 @@ import java.util.UUID;
 @Service
 @RequiredArgsConstructor
 @Slf4j
-public class CanvasFunctionRuntimeService implements CanvasFunctionService {
+public class CanvasFunctionService {
 
   private final PostgresqlCanvasStore canvasStore;
   private final PostgresqlCanvasFunctionRunRepository runRepository;
@@ -30,7 +29,6 @@ public class CanvasFunctionRuntimeService implements CanvasFunctionService {
   private final PluginCanvasFunctionCatalogSource catalogSource;
   private final CanvasFunctionRunStateCodec stateCodec;
 
-  @Override
   public CanvasFunctionRun start(
       UUID canvasId, UUID nodeId, String requestId, CanvasFunctionVersion expectedVersion) {
     Objects.requireNonNull(canvasId, "canvasId");
@@ -41,7 +39,6 @@ public class CanvasFunctionRuntimeService implements CanvasFunctionService {
     return result.run();
   }
 
-  @Override
   public CanvasFunctionRun get(UUID canvasId, UUID nodeId) {
     requireNode(canvasId, nodeId);
     return runRepository
@@ -49,7 +46,6 @@ public class CanvasFunctionRuntimeService implements CanvasFunctionService {
         .orElseThrow(() -> notFound("Canvas Function run not found"));
   }
 
-  @Override
   public CanvasFunctionRun cancel(UUID canvasId, UUID nodeId, String requestId) {
     CanvasFunctionRun result = transactions.cancel(canvasId, nodeId, requestId);
     if (result.status() == CanvasFunctionRunStatus.CANCELLED) {
@@ -58,7 +54,6 @@ public class CanvasFunctionRuntimeService implements CanvasFunctionService {
     return result;
   }
 
-  @Override
   public CanvasFunctionRun resolve(
       UUID canvasId,
       UUID nodeId,

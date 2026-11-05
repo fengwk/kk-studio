@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.storage;
+package fun.fengwk.kkstudio.platform.storage.s3;
 
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.util.Assert;

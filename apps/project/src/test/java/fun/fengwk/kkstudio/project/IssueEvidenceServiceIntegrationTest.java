@@ -18,17 +18,17 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsTestFixture;
-import fun.fengwk.kkstudio.platform.storage.S3PresignService;
-import fun.fengwk.kkstudio.platform.storage.S3StorageService;
 import fun.fengwk.kkstudio.platform.storage.StorageMaintenanceWakeup;
 import fun.fengwk.kkstudio.platform.storage.configuration.S3StorageProperties;
 import fun.fengwk.kkstudio.platform.storage.configuration.StorageMaintenanceProperties;
 import fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException;
+import fun.fengwk.kkstudio.platform.storage.media.FfmpegStorageMediaProbe;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageBlobRepository;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageUploadRepository;
+import fun.fengwk.kkstudio.platform.storage.s3.S3PresignService;
+import fun.fengwk.kkstudio.platform.storage.s3.S3StorageService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobPreviewService;
-import fun.fengwk.kkstudio.platform.storage.service.StorageMediaProbe;
 import fun.fengwk.kkstudio.platform.storage.service.StorageObjectCleanupService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadOperationLock;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
@@ -592,7 +592,7 @@ class IssueEvidenceServiceIntegrationTest extends ProjectTestSupport {
           mock(StorageBlobManager.class),
           mock(S3StorageService.class),
           mock(S3PresignService.class),
-          mock(StorageMediaProbe.class),
+          mock(FfmpegStorageMediaProbe.class),
           mock(StorageBlobPreviewService.class),
           mock(StorageObjectCleanupService.class),
           mock(StorageUploadOperationLock.class),

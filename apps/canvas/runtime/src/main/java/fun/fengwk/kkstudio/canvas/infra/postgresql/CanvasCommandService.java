@@ -10,7 +10,6 @@ import fun.fengwk.kkstudio.canvas.CanvasCommandPlanner;
 import fun.fengwk.kkstudio.canvas.CanvasCommandResult;
 import fun.fengwk.kkstudio.canvas.CanvasCommandResult.Accepted;
 import fun.fengwk.kkstudio.canvas.CanvasCommandResult.Conflicted;
-import fun.fengwk.kkstudio.canvas.CanvasCommandService;
 import fun.fengwk.kkstudio.canvas.CanvasConflictException;
 import fun.fengwk.kkstudio.canvas.CanvasDocument;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionResourcePin;
@@ -19,7 +18,6 @@ import fun.fengwk.kkstudio.canvas.CanvasGraph;
 import fun.fengwk.kkstudio.canvas.CanvasMutation;
 import fun.fengwk.kkstudio.canvas.CanvasPatch;
 import fun.fengwk.kkstudio.canvas.CanvasResource;
-import fun.fengwk.kkstudio.canvas.CanvasResourceLifecycle;
 import fun.fengwk.kkstudio.canvas.CanvasResourceNode;
 import fun.fengwk.kkstudio.canvas.CanvasValidationException;
 import fun.fengwk.kkstudio.canvas.CommandDedup;
@@ -42,7 +40,7 @@ import java.util.UUID;
  * 行锁串行提交：幂等判定、语义组前置条件校验、行级落库与 revision 前进要么整体成功，要么整体回滚。冲突不写入任何行，也不返回新基线。
  */
 @Repository
-public class PostgresqlCanvasCommandService implements CanvasCommandService {
+public class CanvasCommandService {
 
   /** 与 {@code canvas_document.title} 列宽一致的标题上限。 */
   private static final int MAX_TITLE_LENGTH = 256;
@@ -54,7 +52,7 @@ public class PostgresqlCanvasCommandService implements CanvasCommandService {
   private final CanvasResourceLifecycle resourceLifecycle;
   private final CanvasCommandPlanner planner;
 
-  public PostgresqlCanvasCommandService(
+  public CanvasCommandService(
       PostgresqlCanvasStore canvasStore,
       PostgresqlCanvasResourceRepository resourceRepository,
       PostgresqlCanvasFunctionResourcePinRepository pinRepository,
@@ -69,7 +67,6 @@ public class PostgresqlCanvasCommandService implements CanvasCommandService {
     this.planner = Objects.requireNonNull(planner, "planner");
   }
 
-  @Override
   @Transactional
   public CanvasDocument createCanvas(String title) {
     if (title == null) {
@@ -91,7 +88,6 @@ public class PostgresqlCanvasCommandService implements CanvasCommandService {
     return canvasStore.addDocument(UUID.randomUUID(), validated);
   }
 
-  @Override
   @Transactional
   public CanvasCommandResult applyCommands(
       UUID canvasId, UUID idempotencyKey, List<CanvasCommand> commands) {

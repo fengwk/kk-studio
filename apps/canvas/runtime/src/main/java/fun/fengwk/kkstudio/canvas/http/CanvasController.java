@@ -11,9 +11,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 import fun.fengwk.kkstudio.canvas.CanvasCommandResult;
-import fun.fengwk.kkstudio.canvas.CanvasCommandService;
 import fun.fengwk.kkstudio.canvas.CanvasConflictException;
-import fun.fengwk.kkstudio.canvas.CanvasQueryService;
 import fun.fengwk.kkstudio.canvas.dto.ApplyCanvasCommandsRequestDTO;
 import fun.fengwk.kkstudio.canvas.dto.CanvasConflictDTO;
 import fun.fengwk.kkstudio.canvas.dto.CanvasDocumentDTO;
@@ -21,6 +19,8 @@ import fun.fengwk.kkstudio.canvas.dto.CanvasPatchDTO;
 import fun.fengwk.kkstudio.canvas.dto.CanvasSnapshotDTO;
 import fun.fengwk.kkstudio.canvas.dto.CreateCanvasRequestDTO;
 import fun.fengwk.kkstudio.canvas.infra.dto.CanvasDtoMapper;
+import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasCommandService;
+import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasQueryService;
 import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
 

@@ -19,18 +19,19 @@ import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
 import fun.fengwk.kkstudio.common.hash.Sha256;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
-import fun.fengwk.kkstudio.platform.storage.S3ObjectMetadata;
-import fun.fengwk.kkstudio.platform.storage.S3PresignService;
-import fun.fengwk.kkstudio.platform.storage.S3PresignedUrl;
-import fun.fengwk.kkstudio.platform.storage.S3StorageService;
 import fun.fengwk.kkstudio.platform.storage.StorageMaintenanceWakeup;
 import fun.fengwk.kkstudio.platform.storage.StorageObjectKeys;
 import fun.fengwk.kkstudio.platform.storage.configuration.S3StorageProperties;
 import fun.fengwk.kkstudio.platform.storage.configuration.StorageMaintenanceProperties;
 import fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;
+import fun.fengwk.kkstudio.platform.storage.media.FfmpegStorageMediaProbe;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageBlobRepository;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageUploadRepository;
+import fun.fengwk.kkstudio.platform.storage.s3.S3ObjectMetadata;
+import fun.fengwk.kkstudio.platform.storage.s3.S3PresignService;
+import fun.fengwk.kkstudio.platform.storage.s3.S3PresignedUrl;
+import fun.fengwk.kkstudio.platform.storage.s3.S3StorageService;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobState;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageMediaFacts;
@@ -86,7 +87,7 @@ public class StorageUploadService {
   private final StorageBlobManager blobManager;
   private final S3StorageService s3StorageService;
   private final S3PresignService s3PresignService;
-  private final StorageMediaProbe mediaProbe;
+  private final FfmpegStorageMediaProbe mediaProbe;
   private final StorageBlobPreviewService blobPreviewService;
   private final StorageUploadOperationLock operationLock;
   private final ObjectProvider<StorageMaintenanceWakeup> maintenanceWakeups;
@@ -103,7 +104,7 @@ public class StorageUploadService {
       StorageBlobManager blobManager,
       S3StorageService s3StorageService,
       S3PresignService s3PresignService,
-      StorageMediaProbe mediaProbe,
+      FfmpegStorageMediaProbe mediaProbe,
       StorageBlobPreviewService blobPreviewService,
       StorageObjectCleanupService objectCleanupService,
       StorageUploadOperationLock operationLock,
