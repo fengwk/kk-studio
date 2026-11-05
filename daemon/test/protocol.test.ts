@@ -36,7 +36,7 @@ describe('protocol.ts pure unit tests', () => {
     })
 
     it('rejects duplicate object keys', () => {
-      expect(() => parseStrictJson('{"a":1,"a":2}', 'test', limits)).toThrow(/duplicate key "a"/)
+      expect(() => parseStrictJson('{"a":1,"a":2}', 'test', limits)).toThrow(/contains duplicate field: a/)
     })
 
     it('rejects nesting depth exceeding limit in objects and arrays', () => {

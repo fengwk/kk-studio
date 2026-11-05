@@ -1,7 +1,6 @@
 import {
-  scanStrictJson,
+  parseStrictJson as strictParseJson,
   utf8ByteLength as strictUtf8ByteLength,
-  type StrictJsonViolation,
 } from '../strict-json.js'
 
 export const MAX_MESSAGE_BYTES = 16 * 1024 * 1024
@@ -18,16 +17,11 @@ export interface TextOptions {
   pattern?: RegExp
 }
 
-/** Counts UTF-8 bytes and rejects unpaired surrogates instead of replacing them. */
-function utf8ByteLength(value: string, name: string): number {
-  return strictUtf8ByteLength(value, name)
-}
-
 export function requireText(value: unknown, name: string, options: TextOptions = {}): string {
   if (typeof value !== 'string') {
     throw new Error(`${name} must be a string`)
   }
-  const bytes = utf8ByteLength(value, name)
+  const bytes = strictUtf8ByteLength(value, name)
   if (options.nonBlank && value.trim() === '') {
     throw new Error(`${name} must not be blank`)
   }
@@ -82,51 +76,15 @@ export function requireSafeLong(
 
 /** Strictly validates opaque JSON object text and returns the original bytes as a string. */
 export function parseJsonObject(value: unknown, name: string, maxBytes: number): string {
-  const text = requireJsonText(value, name, maxBytes)
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(text)
-  } catch {
-    throw new Error(`${name} must be valid JSON`)
-  }
+  const parsed = strictParseJson(value, name, { maxBytes, requireContent: true })
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
     throw new Error(`${name} must be a JSON object`)
   }
-  return text
+  return value as string
 }
 
 /** Strictly validates opaque JSON text (including JSON null) and returns it unchanged. */
 export function parseJsonValue(value: unknown, name: string, maxBytes: number): string {
-  const text = requireJsonText(value, name, maxBytes)
-  try {
-    JSON.parse(text)
-  } catch {
-    throw new Error(`${name} must be valid JSON`)
-  }
-  return text
-}
-
-function requireJsonText(value: unknown, name: string, maxBytes: number): string {
-  const text = requireText(value, name, { maxBytes })
-  if (text.trim() === '') {
-    throw new Error(`${name} is required`)
-  }
-  const violation = scanStrictJson(text)
-  if (violation !== null) {
-    throw new Error(`${name} ${violationMessage(violation)}`)
-  }
-  return text
-}
-
-function violationMessage(violation: StrictJsonViolation): string {
-  switch (violation.kind) {
-    case 'duplicate':
-      return `contains duplicate field: ${violation.key}`
-    case 'nesting':
-      return `exceeds maximum nesting depth ${violation.limit}`
-    case 'numberLength':
-      return `number exceeds ${violation.limit} characters`
-    case 'syntax':
-      return 'must be valid JSON'
-  }
+  strictParseJson(value, name, { maxBytes, requireContent: true })
+  return value as string
 }

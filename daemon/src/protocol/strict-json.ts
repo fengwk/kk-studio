@@ -6,6 +6,15 @@ export interface StrictJsonLimits {
   maxNumberLength?: number
 }
 
+/** 严格解析选项：整体字节上限、空文本文案与错误类型由调用方决定。 */
+export interface StrictJsonParseOptions extends StrictJsonLimits {
+  maxBytes: number
+  /** 空或纯空白文本报 “is required”，而不是交给 JSON.parse 报语法错误。 */
+  requireContent?: boolean
+  /** 调用方的错误类型；默认普通 Error。 */
+  makeError?: (message: string) => Error
+}
+
 /** 扫描到的第一个结构违规；调用方决定错误类型与文案。 */
 export type StrictJsonViolation =
   | { kind: 'duplicate'; key: string }
@@ -102,4 +111,50 @@ export function scanStrictJson(text: string, limits: StrictJsonLimits = {}): Str
     { disallowComments: true, allowTrailingComma: false, allowEmptyContent: false },
   )
   return violation
+}
+
+/**
+ * 严格解析一段 JSON 文本。
+ *
+ * <p>JSON.parse 保证语法正确；共享扫描额外检测重复对象键并施加嵌套深度、数字长度与整体字节上限，弥补 JSON.parse 默认吞重复键的
+ * 缺口。控制流与 Daemon 配置共用这一份实现，只由调用方决定错误类型与空文本文案。
+ */
+export function parseStrictJson(
+  text: unknown,
+  name: string,
+  options: StrictJsonParseOptions,
+): unknown {
+  const makeError = options.makeError ?? ((message: string) => new Error(message))
+  if (typeof text !== 'string') {
+    throw makeError(`${name} must be a string`)
+  }
+  if (utf8ByteLength(text, name, makeError) > options.maxBytes) {
+    throw makeError(`${name} exceeds ${options.maxBytes} UTF-8 bytes`)
+  }
+  if (options.requireContent === true && text.trim() === '') {
+    throw makeError(`${name} is required`)
+  }
+  const violation = scanStrictJson(text, options)
+  if (violation !== null) {
+    throw makeError(`${name} ${strictJsonViolationMessage(violation)}`)
+  }
+  try {
+    return JSON.parse(text)
+  } catch {
+    throw makeError(`${name} must be valid JSON`)
+  }
+}
+
+/** 结构违规的统一文案；控制流把它直接追加在字段名之后对外报告。 */
+export function strictJsonViolationMessage(violation: StrictJsonViolation): string {
+  switch (violation.kind) {
+    case 'duplicate':
+      return `contains duplicate field: ${violation.key}`
+    case 'nesting':
+      return `exceeds maximum nesting depth ${violation.limit}`
+    case 'numberLength':
+      return `number exceeds ${violation.limit} characters`
+    case 'syntax':
+      return 'must be valid JSON'
+  }
 }
