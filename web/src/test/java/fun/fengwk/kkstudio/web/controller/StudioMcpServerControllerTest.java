@@ -22,8 +22,8 @@ import org.springframework.test.web.servlet.MvcResult;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
-import fun.fengwk.kkstudio.share.ai.mcp.McpServerCreateDTO;
-import fun.fengwk.kkstudio.share.ai.mcp.McpServerUpdateDTO;
+import fun.fengwk.kkstudio.share.mcp.McpServerCreateDTO;
+import fun.fengwk.kkstudio.share.mcp.McpServerUpdateDTO;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
 import java.io.IOException;

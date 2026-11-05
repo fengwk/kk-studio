@@ -25,8 +25,8 @@ import fun.fengwk.kkstudio.harness.api.thread.ThreadRuntimeStatus;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadTreeNodeDTO;
+import fun.fengwk.kkstudio.share.runtime.HarnessThreadDTO;
+import fun.fengwk.kkstudio.share.runtime.HarnessThreadTreeNodeDTO;
 
 import java.util.LinkedHashMap;
 import java.util.List;

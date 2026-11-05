@@ -73,7 +73,7 @@ import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
 import fun.fengwk.kkstudio.platform.harness.dispatch.HarnessWorkDispatcher;
 import fun.fengwk.kkstudio.platform.harness.dispatch.HarnessWorkDispatcherConfig;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadDTO;
+import fun.fengwk.kkstudio.share.runtime.HarnessThreadDTO;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
 import javax.xml.parsers.DocumentBuilderFactory;

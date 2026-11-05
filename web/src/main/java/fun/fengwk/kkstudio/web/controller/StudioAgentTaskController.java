@@ -9,8 +9,8 @@ import org.springframework.web.bind.annotation.RestController;
 
 import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
-import fun.fengwk.kkstudio.share.ai.runtime.AgentTaskDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.AgentTaskSubmitDTO;
+import fun.fengwk.kkstudio.share.runtime.AgentTaskDTO;
+import fun.fengwk.kkstudio.share.runtime.AgentTaskSubmitDTO;
 import fun.fengwk.kkstudio.web.harness.AgentTaskSubmissionService;
 
 import java.util.Objects;

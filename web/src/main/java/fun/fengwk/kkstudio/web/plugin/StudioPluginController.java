@@ -18,13 +18,13 @@ import fun.fengwk.kkstudio.platform.error.DomainErrorCode;
 import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
 import fun.fengwk.kkstudio.platform.pluginhost.service.PluginManagementService;
-import fun.fengwk.kkstudio.share.ai.plugin.PluginAuthCompleteRequestDTO;
-import fun.fengwk.kkstudio.share.ai.plugin.PluginAuthPrepareDTO;
-import fun.fengwk.kkstudio.share.ai.plugin.PluginAuthPrepareRequestDTO;
-import fun.fengwk.kkstudio.share.ai.plugin.PluginConfigurationUpdateRequestDTO;
-import fun.fengwk.kkstudio.share.ai.plugin.PluginConnectionCheckDTO;
-import fun.fengwk.kkstudio.share.ai.plugin.PluginConnectionCheckRequestDTO;
-import fun.fengwk.kkstudio.share.ai.plugin.PluginDTO;
+import fun.fengwk.kkstudio.share.plugin.PluginAuthCompleteRequestDTO;
+import fun.fengwk.kkstudio.share.plugin.PluginAuthPrepareDTO;
+import fun.fengwk.kkstudio.share.plugin.PluginAuthPrepareRequestDTO;
+import fun.fengwk.kkstudio.share.plugin.PluginConfigurationUpdateRequestDTO;
+import fun.fengwk.kkstudio.share.plugin.PluginConnectionCheckDTO;
+import fun.fengwk.kkstudio.share.plugin.PluginConnectionCheckRequestDTO;
+import fun.fengwk.kkstudio.share.plugin.PluginDTO;
 
 import java.util.List;
 

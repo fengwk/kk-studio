@@ -21,8 +21,8 @@ import tools.jackson.databind.introspect.BeanPropertyDefinition;
 import tools.jackson.databind.introspect.ClassIntrospector;
 import tools.jackson.databind.json.JsonMapper;
 
-import fun.fengwk.kkstudio.share.ai.catalog.AgentModelRatePatchDTOSerializer;
-import fun.fengwk.kkstudio.share.ai.catalog.DecimalStringSerializer;
+import fun.fengwk.kkstudio.share.catalog.AgentModelRatePatchDTOSerializer;
+import fun.fengwk.kkstudio.share.catalog.DecimalStringSerializer;
 
 import java.lang.annotation.Annotation;
 import java.lang.reflect.AnnotatedType;

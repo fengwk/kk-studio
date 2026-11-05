@@ -4,8 +4,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
-import fun.fengwk.kkstudio.share.ai.catalog.ModelCatalogPageDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.ModelDefaultCandidateDTO;
+import fun.fengwk.kkstudio.share.catalog.ModelCatalogPageDTO;
+import fun.fengwk.kkstudio.share.catalog.ModelDefaultCandidateDTO;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;

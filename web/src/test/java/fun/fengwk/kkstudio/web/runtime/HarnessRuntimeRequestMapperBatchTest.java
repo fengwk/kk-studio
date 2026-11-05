@@ -21,8 +21,8 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommandType;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandCreateDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadCommandBatchDTO;
+import fun.fengwk.kkstudio.share.runtime.HarnessCommandCreateDTO;
+import fun.fengwk.kkstudio.share.runtime.HarnessThreadCommandBatchDTO;
 
 import java.util.List;
 

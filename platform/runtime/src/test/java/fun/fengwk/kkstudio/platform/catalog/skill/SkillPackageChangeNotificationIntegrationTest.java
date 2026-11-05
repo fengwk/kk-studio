@@ -28,8 +28,8 @@ import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillSyncOrches
 import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.platform.storage.StorageS3TestConfiguration;
-import fun.fengwk.kkstudio.share.ai.skill.SkillPackageEditDTO;
-import fun.fengwk.kkstudio.share.ai.skill.SkillPackageGitCreateDTO;
+import fun.fengwk.kkstudio.share.skill.SkillPackageEditDTO;
+import fun.fengwk.kkstudio.share.skill.SkillPackageGitCreateDTO;
 
 import java.nio.charset.StandardCharsets;
 import java.sql.Connection;

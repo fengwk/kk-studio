@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.platform.catalog.modelcatalog;
 
-import fun.fengwk.kkstudio.share.ai.catalog.ModelDefaultCandidateDTO;
+import fun.fengwk.kkstudio.share.catalog.ModelDefaultCandidateDTO;
 
 import java.io.IOException;
 import java.io.InputStream;

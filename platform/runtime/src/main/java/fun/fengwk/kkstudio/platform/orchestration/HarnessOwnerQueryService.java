@@ -21,9 +21,9 @@ import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.spi.store.UuidOrder;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessExecutionSelectionDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionSummaryDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadSummaryDTO;
+import fun.fengwk.kkstudio.share.runtime.HarnessExecutionSelectionDTO;
+import fun.fengwk.kkstudio.share.runtime.HarnessSessionSummaryDTO;
+import fun.fengwk.kkstudio.share.runtime.HarnessThreadSummaryDTO;
 
 import java.time.Instant;
 import java.util.ArrayList;

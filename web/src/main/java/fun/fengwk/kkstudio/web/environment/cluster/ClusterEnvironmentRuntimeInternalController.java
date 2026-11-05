@@ -22,8 +22,8 @@ import fun.fengwk.kkstudio.platform.environment.update.EnvironmentUpdateService;
 import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
 import fun.fengwk.kkstudio.platform.http.RequestParameters;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRuntimeStatusDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentUpdateStartDTO;
+import fun.fengwk.kkstudio.share.environment.EnvironmentRuntimeStatusDTO;
+import fun.fengwk.kkstudio.share.environment.EnvironmentUpdateStartDTO;
 
 /**
  * 跨节点 Environment runtime/update 的内部 REST 入口。

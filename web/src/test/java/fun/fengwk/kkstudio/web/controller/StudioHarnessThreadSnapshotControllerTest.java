@@ -27,7 +27,7 @@ import fun.fengwk.kkstudio.harness.api.thread.ThreadLiveState;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.api.tool.ToolApprovalDecision;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessUsageCostDTO;
+import fun.fengwk.kkstudio.share.runtime.HarnessUsageCostDTO;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeTestFixtures;
 
 import java.time.Instant;

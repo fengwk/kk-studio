@@ -26,9 +26,9 @@ import fun.fengwk.kkstudio.harness.api.tool.ToolInputReceipt;
 import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.platform.interaction.InteractionQueryService;
 import fun.fengwk.kkstudio.platform.interaction.InteractionService;
-import fun.fengwk.kkstudio.share.ai.interaction.InteractionDTO;
-import fun.fengwk.kkstudio.share.ai.interaction.InteractionOwnerDTO;
-import fun.fengwk.kkstudio.share.ai.interaction.InteractionPageDTO;
+import fun.fengwk.kkstudio.share.interaction.InteractionDTO;
+import fun.fengwk.kkstudio.share.interaction.InteractionOwnerDTO;
+import fun.fengwk.kkstudio.share.interaction.InteractionPageDTO;
 import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
 import fun.fengwk.kkstudio.web.advice.StudioResponseStatusErrorAdvice;
 

@@ -12,7 +12,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpConfigParser.HttpConfig;
 import fun.fengwk.kkstudio.platform.error.DomainException;
-import fun.fengwk.kkstudio.share.ai.mcp.McpServerCreateDTO;
+import fun.fengwk.kkstudio.share.mcp.McpServerCreateDTO;
 
 import java.util.LinkedHashMap;
 import java.util.Map;

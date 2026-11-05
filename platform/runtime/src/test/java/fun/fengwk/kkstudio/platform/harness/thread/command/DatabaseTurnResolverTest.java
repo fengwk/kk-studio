@@ -137,11 +137,11 @@ import fun.fengwk.kkstudio.platform.harness.tool.BuiltinFileToolsTestSupport;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentModelGroupDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentModelGroupMemberDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentModelKind;
-import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
+import fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO;
+import fun.fengwk.kkstudio.share.catalog.AgentModelGroupDTO;
+import fun.fengwk.kkstudio.share.catalog.AgentModelGroupMemberDTO;
+import fun.fengwk.kkstudio.share.catalog.AgentModelKind;
+import fun.fengwk.kkstudio.share.skill.SkillRefDTO;
 
 import java.time.Duration;
 import java.time.Instant;

@@ -14,10 +14,10 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessBranchSettingsDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandTargetDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelRequestDebugRequestDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelSelectionDTO;
+import fun.fengwk.kkstudio.share.runtime.HarnessBranchSettingsDTO;
+import fun.fengwk.kkstudio.share.runtime.HarnessCommandTargetDTO;
+import fun.fengwk.kkstudio.share.runtime.HarnessModelRequestDebugRequestDTO;
+import fun.fengwk.kkstudio.share.runtime.HarnessModelSelectionDTO;
 
 class HarnessRuntimeRequestMapperSettingsTest {
 

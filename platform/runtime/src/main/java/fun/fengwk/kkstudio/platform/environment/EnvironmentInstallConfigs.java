@@ -6,9 +6,9 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.platform.error.DomainException;
-import fun.fengwk.kkstudio.share.ai.environment.DaemonConfigurationCodec;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInstallConfigDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInstallConfigUpdateDTO;
+import fun.fengwk.kkstudio.share.environment.DaemonConfigurationCodec;
+import fun.fengwk.kkstudio.share.environment.EnvironmentInstallConfigDTO;
+import fun.fengwk.kkstudio.share.environment.EnvironmentInstallConfigUpdateDTO;
 
 import java.util.Set;
 

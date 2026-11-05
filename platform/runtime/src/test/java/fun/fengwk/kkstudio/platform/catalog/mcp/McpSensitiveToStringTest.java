@@ -5,8 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.share.ai.mcp.McpServerConfigDTO;
-import fun.fengwk.kkstudio.share.ai.mcp.McpServerDTO;
+import fun.fengwk.kkstudio.share.mcp.McpServerConfigDTO;
+import fun.fengwk.kkstudio.share.mcp.McpServerDTO;
 
 import java.util.Map;
 

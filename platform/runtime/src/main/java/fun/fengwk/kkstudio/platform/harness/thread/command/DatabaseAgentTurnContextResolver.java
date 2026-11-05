@@ -37,8 +37,8 @@ import fun.fengwk.kkstudio.platform.harness.task.CurrentEnvironmentContext;
 import fun.fengwk.kkstudio.platform.harness.task.SkillPromptEntry;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
-import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
+import fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO;
+import fun.fengwk.kkstudio.share.skill.SkillRefDTO;
 
 import java.util.ArrayList;
 import java.util.LinkedHashSet;

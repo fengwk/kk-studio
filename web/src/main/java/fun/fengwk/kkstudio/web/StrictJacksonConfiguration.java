@@ -18,7 +18,7 @@ import tools.jackson.databind.module.SimpleModule;
 import tools.jackson.databind.ser.std.ToStringSerializer;
 
 import fun.fengwk.kkstudio.harness.api.retry.ModelHttpErrorPolicy;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderEditablePropertiesDTO;
+import fun.fengwk.kkstudio.share.catalog.AgentProviderEditablePropertiesDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsAiRuntimeDTO;
 
 import java.util.ArrayList;

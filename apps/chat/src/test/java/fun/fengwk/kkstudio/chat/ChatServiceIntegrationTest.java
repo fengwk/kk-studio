@@ -33,10 +33,10 @@ import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionService;
 import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.harness.thread.command.DatabaseTurnResolver;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionCreateDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessExecutionSelectionDTO;
+import fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO;
+import fun.fengwk.kkstudio.share.catalog.AgentDefinitionCreateDTO;
+import fun.fengwk.kkstudio.share.catalog.AgentDefinitionDTO;
+import fun.fengwk.kkstudio.share.runtime.HarnessExecutionSelectionDTO;
 
 import java.sql.Connection;
 import java.sql.Statement;

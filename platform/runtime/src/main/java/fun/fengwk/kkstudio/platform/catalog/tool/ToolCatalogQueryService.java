@@ -5,8 +5,8 @@ import org.springframework.stereotype.Service;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
-import fun.fengwk.kkstudio.share.ai.catalog.EnvironmentSupportDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.ToolCatalogEntryDTO;
+import fun.fengwk.kkstudio.share.catalog.EnvironmentSupportDTO;
+import fun.fengwk.kkstudio.share.catalog.ToolCatalogEntryDTO;
 
 import java.util.List;
 import java.util.Objects;

@@ -20,8 +20,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.platform.daemon.server.LeaseBindResult;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCardDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCreateDTO;
+import fun.fengwk.kkstudio.share.environment.EnvironmentCardDTO;
+import fun.fengwk.kkstudio.share.environment.EnvironmentCreateDTO;
 
 import java.time.Duration;
 import java.util.UUID;

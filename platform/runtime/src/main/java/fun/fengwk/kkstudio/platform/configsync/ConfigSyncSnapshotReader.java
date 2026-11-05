@@ -16,7 +16,7 @@ import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRepository;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRow;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsRepository;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionType;
+import fun.fengwk.kkstudio.share.catalog.AgentDefinitionType;
 
 import java.util.ArrayList;
 import java.util.Comparator;

@@ -229,8 +229,8 @@ class BoundaryProbe {}
 test('ported architecture guards reject stale provider enums and Redis configuration', () => {
   // Test intent: removed handwritten tests keep their behavioral constraints in the repository check.
   const root = createRoot({
-    'share/src/main/java/fun/fengwk/kkstudio/share/ai/catalog/AgentProviderType.java':
-      'package fun.fengwk.kkstudio.share.ai.catalog;\nclass AgentProviderType {}\n',
+    'share/src/main/java/fun/fengwk/kkstudio/share/catalog/AgentProviderType.java':
+      'package fun.fengwk.kkstudio.share.catalog;\nclass AgentProviderType {}\n',
     'web/src/main/resources/application.yml': 'redis:\n  url: redis://localhost:6379\n',
   })
   try {

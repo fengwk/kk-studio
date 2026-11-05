@@ -9,8 +9,8 @@ import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.ObjectReader;
 
-import fun.fengwk.kkstudio.share.ai.catalog.AgentModelGroupDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentModelGroupMemberDTO;
+import fun.fengwk.kkstudio.share.catalog.AgentModelGroupDTO;
+import fun.fengwk.kkstudio.share.catalog.AgentModelGroupMemberDTO;
 
 import java.util.ArrayList;
 import java.util.HashSet;

@@ -9,8 +9,8 @@ import static org.mockito.Mockito.when;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.json.JsonMapper;
 
-import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentModelKind;
+import fun.fengwk.kkstudio.share.catalog.AgentModelConfigDTO;
+import fun.fengwk.kkstudio.share.catalog.AgentModelKind;
 
 /** Model Variant 覆盖必须引用当前全局逻辑 Model 名称。 */
 class AgentModelDefaultVariantResolverTest {

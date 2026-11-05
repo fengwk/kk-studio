@@ -17,7 +17,7 @@ import java.util.UUID;
 /**
  * Issue 公开证据 web 集成测试的共享辅助：可控上传、blob 账本与行计数。
  *
- * <p>上传路径与 {@code ChatIntegrationSupport} 同构（真实 reserve/complete 校验 + 内存 S3 直传对象），使证据测试不复制生产逻辑。
+ * <p>上传路径与 {@code StorageUploadTestSupport} 同构（真实 reserve/complete 校验 + 内存 S3 直传对象），使证据测试不复制生产逻辑。
  */
 public class IssueEvidenceTestSupport {
 

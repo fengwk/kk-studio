@@ -10,7 +10,7 @@ import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrchestrator;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwner;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessAcceptedCommandsDTO;
+import fun.fengwk.kkstudio.share.runtime.HarnessAcceptedCommandsDTO;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeResponseMapper;
 
 /**

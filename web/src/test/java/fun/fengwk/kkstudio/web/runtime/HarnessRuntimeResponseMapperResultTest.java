@@ -26,12 +26,12 @@ import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.api.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadLiveState;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessAcceptedCommandsDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessManualCompactionDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessStoppedThreadReceiptDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadCompactResultDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadSnapshotDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadStopResultDTO;
+import fun.fengwk.kkstudio.share.runtime.HarnessAcceptedCommandsDTO;
+import fun.fengwk.kkstudio.share.runtime.HarnessManualCompactionDTO;
+import fun.fengwk.kkstudio.share.runtime.HarnessStoppedThreadReceiptDTO;
+import fun.fengwk.kkstudio.share.runtime.HarnessThreadCompactResultDTO;
+import fun.fengwk.kkstudio.share.runtime.HarnessThreadSnapshotDTO;
+import fun.fengwk.kkstudio.share.runtime.HarnessThreadStopResultDTO;
 
 import java.util.List;
 import java.util.Map;

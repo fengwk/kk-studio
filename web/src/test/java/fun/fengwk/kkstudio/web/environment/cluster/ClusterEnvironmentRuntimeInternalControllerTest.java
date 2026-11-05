@@ -19,9 +19,9 @@ import fun.fengwk.kkstudio.platform.cluster.ClusterInternalAuthenticationExcepti
 import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
 import fun.fengwk.kkstudio.platform.environment.update.EnvironmentUpdateService;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRuntimeDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRuntimeStatusDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentUpdateStartDTO;
+import fun.fengwk.kkstudio.share.environment.EnvironmentRuntimeDTO;
+import fun.fengwk.kkstudio.share.environment.EnvironmentRuntimeStatusDTO;
+import fun.fengwk.kkstudio.share.environment.EnvironmentUpdateStartDTO;
 
 import java.net.URI;
 import java.util.Optional;

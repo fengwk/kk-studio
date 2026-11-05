@@ -25,14 +25,14 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
-import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionCreateDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessExecutionSelectionDTO;
-import fun.fengwk.kkstudio.share.ai.skill.SkillPackageCheckDTO;
-import fun.fengwk.kkstudio.share.ai.skill.SkillPackageEditDTO;
-import fun.fengwk.kkstudio.share.ai.skill.SkillPackageGitCreateDTO;
-import fun.fengwk.kkstudio.share.ai.skill.SkillPackageGitPublishDTO;
-import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
+import fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO;
+import fun.fengwk.kkstudio.share.catalog.AgentDefinitionCreateDTO;
+import fun.fengwk.kkstudio.share.runtime.HarnessExecutionSelectionDTO;
+import fun.fengwk.kkstudio.share.skill.SkillPackageCheckDTO;
+import fun.fengwk.kkstudio.share.skill.SkillPackageEditDTO;
+import fun.fengwk.kkstudio.share.skill.SkillPackageGitCreateDTO;
+import fun.fengwk.kkstudio.share.skill.SkillPackageGitPublishDTO;
+import fun.fengwk.kkstudio.share.skill.SkillRefDTO;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 import fun.fengwk.kkstudio.web.storage.WebStorageS3TestConfiguration;
 

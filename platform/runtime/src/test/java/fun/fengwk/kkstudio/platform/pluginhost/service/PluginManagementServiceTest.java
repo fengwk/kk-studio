@@ -43,11 +43,11 @@ import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRo
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginCredentialRepository;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginCredentialRow;
 import fun.fengwk.kkstudio.platform.pluginhost.testing.TestPluginFixtures;
-import fun.fengwk.kkstudio.share.ai.plugin.PluginAuthKindDTO;
-import fun.fengwk.kkstudio.share.ai.plugin.PluginAuthPrepareDTO;
-import fun.fengwk.kkstudio.share.ai.plugin.PluginConnectionCheckDTO;
-import fun.fengwk.kkstudio.share.ai.plugin.PluginDTO;
-import fun.fengwk.kkstudio.share.ai.plugin.PluginSecretPatchDTO;
+import fun.fengwk.kkstudio.share.plugin.PluginAuthKindDTO;
+import fun.fengwk.kkstudio.share.plugin.PluginAuthPrepareDTO;
+import fun.fengwk.kkstudio.share.plugin.PluginConnectionCheckDTO;
+import fun.fengwk.kkstudio.share.plugin.PluginDTO;
+import fun.fengwk.kkstudio.share.plugin.PluginSecretPatchDTO;
 
 import java.time.Clock;
 import java.time.Duration;

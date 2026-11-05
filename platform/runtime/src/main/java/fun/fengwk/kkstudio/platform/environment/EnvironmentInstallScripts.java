@@ -8,8 +8,8 @@ import tools.jackson.databind.json.JsonMapper;
 import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.settings.HttpProxySelector;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
-import fun.fengwk.kkstudio.share.ai.environment.DaemonConfiguration;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInstallConfigDTO;
+import fun.fengwk.kkstudio.share.environment.DaemonConfiguration;
+import fun.fengwk.kkstudio.share.environment.EnvironmentInstallConfigDTO;
 
 import java.io.IOException;
 import java.io.InputStream;

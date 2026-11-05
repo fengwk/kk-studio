@@ -24,7 +24,7 @@ import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRuntimeConfigParser;
 import fun.fengwk.kkstudio.platform.harness.builtin.BuiltinAgentExecutionMaterializer;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentModelKind;
+import fun.fengwk.kkstudio.share.catalog.AgentModelKind;
 
 /** 按最新 Agent/Model catalog 为子 Agent 物化 branch settings。 */
 class AgentBranchSettingsMaterializerTest {

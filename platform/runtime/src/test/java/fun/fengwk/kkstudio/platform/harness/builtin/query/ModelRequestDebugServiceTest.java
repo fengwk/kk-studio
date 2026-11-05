@@ -69,8 +69,8 @@ import fun.fengwk.kkstudio.platform.harness.task.AgentPromptComposer;
 import fun.fengwk.kkstudio.platform.harness.task.SkillPromptEntry;
 import fun.fengwk.kkstudio.platform.harness.thread.command.DatabaseTurnResolver;
 import fun.fengwk.kkstudio.platform.harness.thread.command.LiveTurnPlan;
-import fun.fengwk.kkstudio.share.ai.catalog.EnvironmentSupportDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelRequestDebugDTO;
+import fun.fengwk.kkstudio.share.catalog.EnvironmentSupportDTO;
+import fun.fengwk.kkstudio.share.runtime.HarnessModelRequestDebugDTO;
 
 import java.io.IOException;
 import java.time.Clock;

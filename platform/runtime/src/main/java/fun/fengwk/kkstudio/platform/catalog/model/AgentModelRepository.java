@@ -7,7 +7,7 @@ import org.springframework.stereotype.Repository;
 import fun.fengwk.kkstudio.common.page.Page;
 import fun.fengwk.kkstudio.common.page.PageQuery;
 import fun.fengwk.kkstudio.platform.persistence.PostgresJdbcTypes;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentModelKind;
+import fun.fengwk.kkstudio.share.catalog.AgentModelKind;
 
 import java.time.OffsetDateTime;
 import java.util.List;

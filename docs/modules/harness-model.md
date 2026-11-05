@@ -47,7 +47,7 @@
 
 | 来源 | 输入 | 边界职责 |
 | --- | --- | --- |
-| Catalog HTTP DTO | `AgentModelVariantDTO.protocolOptionsJson` | [`ProtocolOptionsJsonStringDeserializer`](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/catalog/ProtocolOptionsJsonStringDeserializer.java) 只拒绝非 JSON string token，内容原样保留 |
+| Catalog HTTP DTO | `AgentModelVariantDTO.protocolOptionsJson` | [`ProtocolOptionsJsonStringDeserializer`](../../share/src/main/java/fun/fengwk/kkstudio/share/catalog/ProtocolOptionsJsonStringDeserializer.java) 只拒绝非 JSON string token，内容原样保留 |
 | API / durable model config | 上述字符串 | [`AgentModelRuntimeConfigParser`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog/model/AgentModelRuntimeConfigParser.java) 只映射 config 路径错误；空值落为 `{}`，非空保留用户的内部数值文本 |
 | Durable descriptor / request | 嵌套 `variant.protocolOptions` object | [`ModelDescriptorJsonCodec`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/codec/ModelDescriptorJsonCodec.java) 只提取必填 object 并转成文本；`ProviderRequestJsonCodec` 与 `ModelRequestSpecJsonCodec` 复用该 variant 子树 |
 | Provider encoder | canonical 文本 | `copyOptions()` 返回独立 object；协议编码器只做字段所有权与 merge policy |

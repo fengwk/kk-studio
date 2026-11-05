@@ -28,16 +28,16 @@ import tools.jackson.databind.cfg.JsonNodeFeature;
 
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.platform.pluginhost.credential.PluginCredentialRefreshDispatcher;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentModelAbilitiesDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentModelInputModality;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentModelLimitDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentModelRateSetDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentModelVariantDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessExecutionSelectionDTO;
-import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
+import fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO;
+import fun.fengwk.kkstudio.share.catalog.AgentModelAbilitiesDTO;
+import fun.fengwk.kkstudio.share.catalog.AgentModelConfigDTO;
+import fun.fengwk.kkstudio.share.catalog.AgentModelInputModality;
+import fun.fengwk.kkstudio.share.catalog.AgentModelLimitDTO;
+import fun.fengwk.kkstudio.share.catalog.AgentModelPricingDTO;
+import fun.fengwk.kkstudio.share.catalog.AgentModelRateSetDTO;
+import fun.fengwk.kkstudio.share.catalog.AgentModelVariantDTO;
+import fun.fengwk.kkstudio.share.runtime.HarnessExecutionSelectionDTO;
+import fun.fengwk.kkstudio.share.skill.SkillRefDTO;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
 import java.io.IOException;

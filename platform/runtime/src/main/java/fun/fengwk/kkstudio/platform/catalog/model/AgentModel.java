@@ -2,7 +2,7 @@ package fun.fengwk.kkstudio.platform.catalog.model;
 
 import lombok.Builder;
 
-import fun.fengwk.kkstudio.share.ai.catalog.AgentModelKind;
+import fun.fengwk.kkstudio.share.catalog.AgentModelKind;
 
 import java.time.Instant;
 

@@ -17,12 +17,12 @@ import fun.fengwk.kkstudio.platform.harness.thread.query.UsageCostProjectionServ
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
 import fun.fengwk.kkstudio.platform.http.RequestParameters;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessOwnerQueryService;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessNameUpdateDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionEntryDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionEntryPageDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadSummaryDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessUsageCostDTO;
+import fun.fengwk.kkstudio.share.runtime.HarnessNameUpdateDTO;
+import fun.fengwk.kkstudio.share.runtime.HarnessSessionDTO;
+import fun.fengwk.kkstudio.share.runtime.HarnessSessionEntryDTO;
+import fun.fengwk.kkstudio.share.runtime.HarnessSessionEntryPageDTO;
+import fun.fengwk.kkstudio.share.runtime.HarnessThreadSummaryDTO;
+import fun.fengwk.kkstudio.share.runtime.HarnessUsageCostDTO;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeRequestMapper;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeResponseMapper;
 

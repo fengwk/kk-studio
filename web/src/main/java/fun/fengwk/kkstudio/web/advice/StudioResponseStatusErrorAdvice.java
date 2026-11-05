@@ -19,7 +19,7 @@ import fun.fengwk.kkstudio.ide.web.StudioEnvironmentIdeController;
 import fun.fengwk.kkstudio.platform.harness.builtin.query.ProviderRequestPreviewUnavailableException;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
 import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessRequestFormatException;
+import fun.fengwk.kkstudio.share.runtime.HarnessRequestFormatException;
 import fun.fengwk.kkstudio.web.controller.StudioAgentTaskController;
 import fun.fengwk.kkstudio.web.controller.StudioConfigSyncController;
 import fun.fengwk.kkstudio.web.controller.StudioHarnessCommandBatchController;

@@ -19,9 +19,9 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwner;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandOwnerDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandTargetDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadCompactDTO;
+import fun.fengwk.kkstudio.share.runtime.HarnessCommandOwnerDTO;
+import fun.fengwk.kkstudio.share.runtime.HarnessCommandTargetDTO;
+import fun.fengwk.kkstudio.share.runtime.HarnessThreadCompactDTO;
 
 class HarnessRuntimeRequestMapperTargetTest {
 

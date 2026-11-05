@@ -29,9 +29,9 @@ import fun.fengwk.kkstudio.platform.configsync.ConfigSyncSnapshotReader;
 import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRow;
 import fun.fengwk.kkstudio.platform.pluginhost.service.PluginManagementService;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionCreateDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionType;
+import fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO;
+import fun.fengwk.kkstudio.share.catalog.AgentDefinitionCreateDTO;
+import fun.fengwk.kkstudio.share.catalog.AgentDefinitionType;
 
 import javax.sql.DataSource;
 

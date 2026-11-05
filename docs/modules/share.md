@@ -41,22 +41,22 @@ Web 的 HTTP mapper 全局默认是 `NON_NULL` 与 `STRICT_DUPLICATE_DETECTION`�
 | [`IssueRunDTO`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/dto/IssueRunDTO.java) | `agentName`、`endEntryId`、`finalAnswerEntryId`、`nextState`、`error`、`endedAt` |
 | [`IssueRunSummaryDTO`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/dto/IssueRunSummaryDTO.java) | `agentName`、`endedAt` |
 | [`IssueEvidenceDTO`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/dto/IssueEvidenceDTO.java) | `actorAgentName`、`runId` |
-| [`HarnessThreadDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/runtime/HarnessThreadDTO.java) | `parentThreadId` |
-| [`HarnessThreadSummaryDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/runtime/HarnessThreadSummaryDTO.java) | `parentThreadId`、`headMessagePreview` |
-| [`HarnessThreadSnapshotDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/runtime/HarnessThreadSnapshotDTO.java) | `baseEntryId`、`activeAssistantOutput` |
-| [`HarnessManualCompactionDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/runtime/HarnessManualCompactionDTO.java) | `disabledReason` |
-| [`ToolInvocationDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/runtime/ToolInvocationDTO.java) | `environmentId`、`requiredEnvironmentId`、`requiredEnvironmentName`、`environmentWaitFreshnessAt`、`approvalJson`、`resultJson`、`errorJson` |
-| [`HarnessStoppedThreadReceiptDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/runtime/HarnessStoppedThreadReceiptDTO.java) | `stoppedTurnEndEntryId` |
-| [`HarnessSessionEntryDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/runtime/HarnessSessionEntryDTO.java) | `usageCost` |
-| [`EnvironmentCardDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/environment/EnvironmentCardDTO.java) | `statusExpiresAt` |
+| [`HarnessThreadDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/runtime/HarnessThreadDTO.java) | `parentThreadId` |
+| [`HarnessThreadSummaryDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/runtime/HarnessThreadSummaryDTO.java) | `parentThreadId`、`headMessagePreview` |
+| [`HarnessThreadSnapshotDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/runtime/HarnessThreadSnapshotDTO.java) | `baseEntryId`、`activeAssistantOutput` |
+| [`HarnessManualCompactionDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/runtime/HarnessManualCompactionDTO.java) | `disabledReason` |
+| [`ToolInvocationDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/runtime/ToolInvocationDTO.java) | `environmentId`、`requiredEnvironmentId`、`requiredEnvironmentName`、`environmentWaitFreshnessAt`、`approvalJson`、`resultJson`、`errorJson` |
+| [`HarnessStoppedThreadReceiptDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/runtime/HarnessStoppedThreadReceiptDTO.java) | `stoppedTurnEndEntryId` |
+| [`HarnessSessionEntryDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/runtime/HarnessSessionEntryDTO.java) | `usageCost` |
+| [`EnvironmentCardDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/environment/EnvironmentCardDTO.java) | `statusExpiresAt` |
 
 请求 DTO 同受这条规则约束：[`CreateProjectRequestDTO`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/dto/CreateProjectRequestDTO.java) 的 `description`/`yoloEnabled`、[`UpdateProjectRequestDTO`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/dto/UpdateProjectRequestDTO.java) 的 `title`/`description`、[`CreateIssueRequestDTO`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/dto/CreateIssueRequestDTO.java) 与 [`UpdateIssueRequestDTO`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/dto/UpdateIssueRequestDTO.java) 的可空字段、[`StopIssueRequestDTO`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/dto/StopIssueRequestDTO.java) 的 `detail` 与 [`AppendIssueActivityRequestDTO`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/dto/AppendIssueActivityRequestDTO.java) 的 `kind` 都用 `@JsonInclude(ALWAYS)` 显式发 null。
 
-Storage DTO 不提供独立的 S3 bucket 与对象 key 配置字段，只给 `url`、`method`、必须原样回传的 `headers` 与 `expiresAt`，Canvas 的预签名端点同理；客户端按签发 URL 访问，不自行拼接存储地址。凭证类字段走 `WRITE_ONLY`（[`AgentProviderEditablePropertiesDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/catalog/AgentProviderEditablePropertiesDTO.java) 的 `credential`），只写不读；Environment 注册令牌只在创建与轮换的 Card 响应中携带一次明文（列表与详情始终为空），服务端只保存摘要，响应禁止缓存。
+Storage DTO 不提供独立的 S3 bucket 与对象 key 配置字段，只给 `url`、`method`、必须原样回传的 `headers` 与 `expiresAt`，Canvas 的预签名端点同理；客户端按签发 URL 访问，不自行拼接存储地址。凭证类字段走 `WRITE_ONLY`（[`AgentProviderEditablePropertiesDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/catalog/AgentProviderEditablePropertiesDTO.java) 的 `credential`），只写不读；Environment 注册令牌只在创建与轮换的 Card 响应中携带一次明文（列表与详情始终为空），服务端只保存摘要，响应禁止缓存。
 
 [`SystemSettingsDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/systemsettings/SystemSettingsDtoContractTest.java) 用反射扫描 `systemsettings` DTO 的字段名，拒绝 secret / bootstrap 名称（`token`、`credential`、`secret`、`apikey`、`accesskey`、`secretkey`、`bearer`、`instanceId`、`endpoint`、`region`、`bucket`、`workdir`、`environmentRoot`、`tempDir`、`binary`、`prefix`、`username`、`password`）；以 `tokens` 结尾的预算计数字段（如 `compactionKeepRecentTokens`）不受 `token` 规则约束。
 
-Plugin 投影遵循同一边界：`PluginDTO` 只有安装元数据、region、状态、到期/刷新时间和有界错误；[`PluginAuthCompleteRequestDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/plugin/PluginAuthCompleteRequestDTO.java) 的 `callbackUrl` 是 `WRITE_ONLY`，不出现在任何响应、`toString` 或通用日志。`PluginAuthPrepareDTO.loginUrl` 只能是 Plugin 声明的固定公开 origin。认证交互只允许 sealed `DEEP_LINK` 类型及固定的 `{region}` / `{callbackUrl}` DTO，不承载任意 Plugin schema；所有 auth 响应由 Web 额外设置 `Cache-Control: no-store`。
+Plugin 投影遵循同一边界：`PluginDTO` 只有安装元数据、region、状态、到期/刷新时间和有界错误；[`PluginAuthCompleteRequestDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/plugin/PluginAuthCompleteRequestDTO.java) 的 `callbackUrl` 是 `WRITE_ONLY`，不出现在任何响应、`toString` 或通用日志。`PluginAuthPrepareDTO.loginUrl` 只能是 Plugin 声明的固定公开 origin。认证交互只允许 sealed `DEEP_LINK` 类型及固定的 `{region}` / `{callbackUrl}` DTO，不承载任意 Plugin schema；所有 auth 响应由 Web 额外设置 `Cache-Control: no-store`。
 
 ## DTO 组织
 
@@ -64,13 +64,13 @@ Plugin 投影遵循同一边界：`PluginDTO` 只有安装元数据、region、�
 
 | 包 | 当前 wire |
 | --- | --- |
-| [ai.catalog](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/catalog/) | Provider、MODEL/GROUP、Agent、Tool catalog |
-| [ai.skill](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/skill/) | Git Skill Package、branch 更新检查、exact commit 发布与派生 Skill 列表 |
-| [ai.mcp](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/mcp/) | MCP Server 安全投影、显式配置 DTO 与显式 HTTP 创建/更新请求 |
-| [ai.plugin](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/plugin/) | 已安装构建期 Plugin、安全认证状态、续期运维投影与 prepare/complete 请求和响应 |
-| [ai.environment](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/environment/) | Environment Card CRUD、registration token、保存的安装设置（`installConfig` 与共享 Daemon 配置模型）、最近一次 READY 的 OS/user/HOME 投影与有界运维事件 |
-| [ai.interaction](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/interaction/) | 统一交互（问卷等待与工具审批等待）DTO、不透明交互 owner `{kind,id,title,link}`、分页与人工输入提交回执 |
-| [ai.runtime](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/runtime/) | Session、Entry 与读取时 `usageCost`、Thread Snapshot、Command batch（创建型与 owner-free Thread 续写）、请求预览（草稿与历史）、Invocation、approval、Stop 回执、compaction |
+| [catalog](../../share/src/main/java/fun/fengwk/kkstudio/share/catalog/) | Provider、MODEL/GROUP、Agent、Tool catalog |
+| [skill](../../share/src/main/java/fun/fengwk/kkstudio/share/skill/) | Git Skill Package、branch 更新检查、exact commit 发布与派生 Skill 列表 |
+| [mcp](../../share/src/main/java/fun/fengwk/kkstudio/share/mcp/) | MCP Server 安全投影、显式配置 DTO 与显式 HTTP 创建/更新请求 |
+| [plugin](../../share/src/main/java/fun/fengwk/kkstudio/share/plugin/) | 已安装构建期 Plugin、安全认证状态、续期运维投影与 prepare/complete 请求和响应 |
+| [environment](../../share/src/main/java/fun/fengwk/kkstudio/share/environment/) | Environment Card CRUD、registration token、保存的安装设置（`installConfig` 与共享 Daemon 配置模型）、最近一次 READY 的 OS/user/HOME 投影与有界运维事件 |
+| [interaction](../../share/src/main/java/fun/fengwk/kkstudio/share/interaction/) | 统一交互（问卷等待与工具审批等待）DTO、不透明交互 owner `{kind,id,title,link}`、分页与人工输入提交回执 |
+| [runtime](../../share/src/main/java/fun/fengwk/kkstudio/share/runtime/) | Session、Entry 与读取时 `usageCost`、Thread Snapshot、Command batch（创建型与 owner-free Thread 续写）、请求预览（草稿与历史）、Invocation、approval、Stop 回执、compaction |
 | [canvas.dto](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/dto/) | Canvas document、Snapshot、Patch、typed command、Resource 输入、Function 定义/运行/未决决议、冲突与引用投影 |
 | [project/dto](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/dto/) | Project/Issue Snapshot、Issue 详情、工作流配置、阶段预算、Agent Thread、Run、时间线 Activity、公开 Evidence 与操作请求 |
 | [storage](../../share/src/main/java/fun/fengwk/kkstudio/share/storage/) | Upload、Blob signed URL、S3 presign |
@@ -119,18 +119,18 @@ Work 冻结路由，`requiredEnvironmentName` 沿此身份读取环境目录，�
 - 改某个领域的输出去敏或字段可见性：先在对应 DTO 上加注解，再补该领域的 `*DtoContractTest`；`SystemSettingsDtoContractTest`、`CanvasDtoContractTest` 与 `ProjectDtoContractTest` 的字段清单是这类改动的直接守卫。
 - 判断一个字段该不该进 DTO：它是否出现在 HTTP 请求/响应上。领域内部的值、数据库列、S3 key 一律不进。
 
-测试入口（全部是纯 Jackson/反射单元测试，不需要 Spring 或 PostgreSQL），测试目录按上面的 DTO 包组织；`ai/interaction` 不单独建包级契约测试，其 wire 由 platform 的交互服务测试与 web 的 Controller 测试共同覆盖：
+测试入口（全部是纯 Jackson/反射单元测试，不需要 Spring 或 PostgreSQL），测试目录按上面的 DTO 包组织；`interaction` 不单独建包级契约测试，其 wire 由 platform 的交互服务测试与 web 的 Controller 测试共同覆盖：
 
 | 领域 | 测试目录 | 代表测试 |
 | --- | --- | --- |
 | Canvas | [canvas/dto/](../../apps/canvas/runtime/src/test/java/fun/fengwk/kkstudio/canvas/dto/) | [`CanvasDtoContractTest.java`](../../apps/canvas/runtime/src/test/java/fun/fengwk/kkstudio/canvas/dto/CanvasDtoContractTest.java)：十进 revision、required-nullable 发射、独立 document 字段、派生引用投影，以及与领域命令一致的 11 个 typed command |
-| Harness Runtime | [ai/runtime/](../../share/src/test/java/fun/fengwk/kkstudio/share/ai/runtime/) | [`HarnessRuntimeDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/ai/runtime/HarnessRuntimeDtoContractTest.java)：严格字段、字符串游标与 nullable 发射 |
+| Harness Runtime | [runtime/](../../share/src/test/java/fun/fengwk/kkstudio/share/runtime/) | [`HarnessRuntimeDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/runtime/HarnessRuntimeDtoContractTest.java)：严格字段、字符串游标与 nullable 发射 |
 | Project | [project/dto/](../../apps/project/src/test/java/fun/fengwk/kkstudio/project/dto/) | [`ProjectDtoContractTest.java`](../../apps/project/src/test/java/fun/fengwk/kkstudio/project/dto/ProjectDtoContractTest.java)：Project/Issue wire 的严格字段、decimal version 与全包 33 个 DTO 字段集合精确匹配 |
-| Catalog | [ai/catalog/](../../share/src/test/java/fun/fengwk/kkstudio/share/ai/catalog/) | [`AgentModelPricingDtoJsonTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/ai/catalog/AgentModelPricingDtoJsonTest.java)：pricing 十进制 wire；[`ToolCatalogDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/ai/catalog/ToolCatalogDtoContractTest.java)：工具目录契约 |
+| Catalog | [catalog/](../../share/src/test/java/fun/fengwk/kkstudio/share/catalog/) | [`AgentModelPricingDtoJsonTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/catalog/AgentModelPricingDtoJsonTest.java)：pricing 十进制 wire；[`ToolCatalogDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/catalog/ToolCatalogDtoContractTest.java)：工具目录契约 |
 | Storage | [storage/](../../share/src/test/java/fun/fengwk/kkstudio/share/storage/) | [`StorageDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/storage/StorageDtoContractTest.java)：upload/presign 的 nullable 字段与请求侧 `sizeBytes` 类型 |
 | Settings | [systemsettings/](../../share/src/test/java/fun/fengwk/kkstudio/share/systemsettings/) | [`SystemSettingsDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/systemsettings/SystemSettingsDtoContractTest.java)：每一层嵌套的未知字段拒绝与秘密字段扫描 |
 | Chat | [chat/](../../apps/chat/src/test/java/fun/fengwk/kkstudio/chat/) | [`ChatDtoContractTest.java`](../../apps/chat/src/test/java/fun/fengwk/kkstudio/chat/ChatDtoContractTest.java)：Chat 与 Session 分页 wire 的严格字段 |
-| MCP、Environment、Plugin | [ai/mcp/](../../share/src/test/java/fun/fengwk/kkstudio/share/ai/mcp/)、[ai/environment/](../../share/src/test/java/fun/fengwk/kkstudio/share/ai/environment/)、[ai/plugin/](../../share/src/test/java/fun/fengwk/kkstudio/share/ai/plugin/) | [`McpServerDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/ai/mcp/McpServerDtoContractTest.java)、[`EnvironmentDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/ai/environment/EnvironmentDtoContractTest.java)、[`PluginDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/ai/plugin/PluginDtoContractTest.java) |
+| MCP、Environment、Plugin | [mcp/](../../share/src/test/java/fun/fengwk/kkstudio/share/mcp/)、[environment/](../../share/src/test/java/fun/fengwk/kkstudio/share/environment/)、[plugin/](../../share/src/test/java/fun/fengwk/kkstudio/share/plugin/) | [`McpServerDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/mcp/McpServerDtoContractTest.java)、[`EnvironmentDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/environment/EnvironmentDtoContractTest.java)、[`PluginDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/plugin/PluginDtoContractTest.java) |
 
 ---
 

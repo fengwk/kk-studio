@@ -9,7 +9,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import fun.fengwk.kkstudio.platform.catalog.modelcatalog.ModelCatalogService;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
-import fun.fengwk.kkstudio.share.ai.catalog.ModelCatalogPageDTO;
+import fun.fengwk.kkstudio.share.catalog.ModelCatalogPageDTO;
 
 /** 外部模型目录候选 API；不提供“选候选即保存模型”。 */
 @AllArgsConstructor

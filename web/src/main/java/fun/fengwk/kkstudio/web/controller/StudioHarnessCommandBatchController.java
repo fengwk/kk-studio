@@ -11,8 +11,8 @@ import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
 import fun.fengwk.kkstudio.platform.orchestration.DirectCommandsNotAllowedException;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwner;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessAcceptedCommandsDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandBatchDTO;
+import fun.fengwk.kkstudio.share.runtime.HarnessAcceptedCommandsDTO;
+import fun.fengwk.kkstudio.share.runtime.HarnessCommandBatchDTO;
 import fun.fengwk.kkstudio.web.harness.HarnessCommandBatchService;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeRequestMapper;
 

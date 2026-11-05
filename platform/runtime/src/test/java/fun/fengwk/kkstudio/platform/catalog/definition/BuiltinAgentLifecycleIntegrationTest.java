@@ -12,16 +12,16 @@ import org.springframework.beans.factory.annotation.Autowired;
 import fun.fengwk.kkstudio.common.page.PageQuery;
 import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgentDefinitions;
 import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgentInitializer;
+import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgentPrompts;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
 import fun.fengwk.kkstudio.platform.error.CatalogVersions;
 import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionCreateDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionType;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionUpdateDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.BuiltinAgentPrompts;
+import fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO;
+import fun.fengwk.kkstudio.share.catalog.AgentDefinitionCreateDTO;
+import fun.fengwk.kkstudio.share.catalog.AgentDefinitionDTO;
+import fun.fengwk.kkstudio.share.catalog.AgentDefinitionType;
+import fun.fengwk.kkstudio.share.catalog.AgentDefinitionUpdateDTO;
 
 import java.util.List;
 

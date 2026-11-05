@@ -18,7 +18,7 @@ import tools.jackson.databind.json.JsonMapper;
 import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsTestFixture;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInstallConfigDTO;
+import fun.fengwk.kkstudio.share.environment.EnvironmentInstallConfigDTO;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;

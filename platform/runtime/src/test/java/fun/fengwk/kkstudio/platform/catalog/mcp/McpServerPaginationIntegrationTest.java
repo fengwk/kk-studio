@@ -19,7 +19,7 @@ import org.springframework.jdbc.datasource.SimpleDriverDataSource;
 import fun.fengwk.kkstudio.common.page.Page;
 import fun.fengwk.kkstudio.common.page.PageQuery;
 import fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchemaSupport;
-import fun.fengwk.kkstudio.share.ai.mcp.McpServerDTO;
+import fun.fengwk.kkstudio.share.mcp.McpServerDTO;
 
 import java.sql.Connection;
 import java.sql.SQLException;

@@ -24,10 +24,10 @@ import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentEvent;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRuntimeDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRuntimeStatusDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentUpdateProgressDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentUpdateStartDTO;
+import fun.fengwk.kkstudio.share.environment.EnvironmentRuntimeDTO;
+import fun.fengwk.kkstudio.share.environment.EnvironmentRuntimeStatusDTO;
+import fun.fengwk.kkstudio.share.environment.EnvironmentUpdateProgressDTO;
+import fun.fengwk.kkstudio.share.environment.EnvironmentUpdateStartDTO;
 
 import java.time.Clock;
 import java.time.Duration;

@@ -1,0 +1,110 @@
+package fun.fengwk.kkstudio.share.catalog;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import org.junit.jupiter.api.Test;
+import tools.jackson.databind.DatabindException;
+import tools.jackson.databind.json.JsonMapper;
+
+import fun.fengwk.kkstudio.share.skill.SkillRefDTO;
+
+import java.lang.reflect.Field;
+import java.lang.reflect.ParameterizedType;
+import java.util.List;
+
+/** Tool catalog 与 Agent 配置的 wire 契约：三态 EnvironmentSupport 与结构化 Skill 引用。 */
+class ToolCatalogDtoContractTest {
+
+  private static final JsonMapper MAPPER = JsonMapper.builder().build();
+
+  @Test
+  void toolCatalogEntryExposesEnvironmentSupportAndRequiredEnvironmentId() throws Exception {
+    // 意图：ToolCatalogEntryDTO 只包含三态环境支持枚举，没有固定环境身份字段。
+    assertEquals(
+        EnvironmentSupportDTO.class,
+        ToolCatalogEntryDTO.class.getDeclaredField("environmentSupport").getType());
+
+    ToolCatalogEntryDTO dto = new ToolCatalogEntryDTO();
+    dto.setName("read");
+    dto.setDescription("Read a file.");
+    dto.setEnvironmentSupport(EnvironmentSupportDTO.ROUTED);
+
+    String json = MAPPER.writeValueAsString(dto);
+    assertTrue(json.contains("\"environmentSupport\":\"ROUTED\""), json);
+  }
+
+  @Test
+  void environmentSupportIsTheSameThreeStateEnumAsDebugProjection() {
+    // 意图：catalog 与 Debug 共用同一个枚举，客户端只需实现一次三态语义。
+    assertEquals(3, EnvironmentSupportDTO.values().length);
+    assertEquals("NONE", EnvironmentSupportDTO.NONE.name());
+    assertEquals("ROUTED", EnvironmentSupportDTO.ROUTED.name());
+    assertEquals("REQUIRED", EnvironmentSupportDTO.REQUIRED.name());
+  }
+
+  @Test
+  void agentDefinitionConfigSkillsAreStructuredRefs() throws Exception {
+    // 意图：Agent 配置的 skills 是有序 SkillRefDTO 列表。
+    Field skills = AgentDefinitionConfigDTO.class.getDeclaredField("skills");
+    assertEquals(List.class, skills.getType());
+    assertEquals(
+        SkillRefDTO.class,
+        ((ParameterizedType) skills.getGenericType()).getActualTypeArguments()[0]);
+
+    String configTemplate = """
+        {"tools":[],"skills":%s,"subagents":[]}
+        """;
+    AgentDefinitionConfigDTO dto =
+        MAPPER.readValue(
+            configTemplate.formatted("[{\"packageName\":\"dev-tools\",\"name\":\"dev\"}]"),
+            AgentDefinitionConfigDTO.class);
+    assertEquals("dev-tools", dto.getSkills().get(0).getPackageName());
+    assertEquals("dev", dto.getSkills().get(0).getName());
+
+    assertThrows(
+        Exception.class,
+        () ->
+            MAPPER.readValue(
+                configTemplate.formatted("[\"dev\"]"), AgentDefinitionConfigDTO.class));
+    assertThrows(
+        Exception.class,
+        () ->
+            MAPPER.readValue(
+                configTemplate.formatted(
+                    "[{\"packageName\":\"dev-tools\",\"name\":\"dev\",\"unknownField\":\"value\"}]"),
+                AgentDefinitionConfigDTO.class));
+  }
+
+  /** protocolOptionsJson 的 Jackson3 严格 String 反序列化器：真实往返只接受 JSON 字符串，标量/容器 token 一律拒绝。 */
+  @Test
+  void agentModelVariantProtocolOptionsJsonOnlyAcceptsJsonStrings() throws Exception {
+    AgentModelVariantDTO variant =
+        MAPPER.readValue(
+            "{\"id\":\"v1\",\"protocolOptionsJson\":\"{\\\"temperature\\\":0}\"}",
+            AgentModelVariantDTO.class);
+    assertEquals("{\"temperature\":0}", variant.getProtocolOptionsJson());
+
+    AgentModelVariantDTO nulls =
+        MAPPER.readValue(
+            "{\"id\":\"v1\",\"protocolOptionsJson\":null}", AgentModelVariantDTO.class);
+    assertNull(nulls.getProtocolOptionsJson());
+
+    for (String token : List.of("0", "1.5", "true", "[]", "{}")) {
+      assertThrows(
+          DatabindException.class,
+          () ->
+              MAPPER.readValue(
+                  "{\"id\":\"v1\",\"protocolOptionsJson\":" + token + "}",
+                  AgentModelVariantDTO.class),
+          token);
+    }
+
+    // 未知字段继续由 DTO 自身的 @JsonAnySetter fail-closed。
+    assertThrows(
+        DatabindException.class,
+        () -> MAPPER.readValue("{\"id\":\"v1\",\"unknown\":1}", AgentModelVariantDTO.class));
+  }
+}

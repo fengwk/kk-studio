@@ -21,12 +21,12 @@ import fun.fengwk.kkstudio.platform.error.DomainErrorCode;
 import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
-import fun.fengwk.kkstudio.share.ai.environment.DaemonConfiguration;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCardDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCreateDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInstallCodeDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInstallConfigDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInstallConfigUpdateDTO;
+import fun.fengwk.kkstudio.share.environment.DaemonConfiguration;
+import fun.fengwk.kkstudio.share.environment.EnvironmentCardDTO;
+import fun.fengwk.kkstudio.share.environment.EnvironmentCreateDTO;
+import fun.fengwk.kkstudio.share.environment.EnvironmentInstallCodeDTO;
+import fun.fengwk.kkstudio.share.environment.EnvironmentInstallConfigDTO;
+import fun.fengwk.kkstudio.share.environment.EnvironmentInstallConfigUpdateDTO;
 
 import java.time.Clock;
 import java.time.Instant;

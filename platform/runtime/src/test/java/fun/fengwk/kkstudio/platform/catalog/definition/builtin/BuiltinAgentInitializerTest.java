@@ -17,9 +17,8 @@ import tools.jackson.databind.json.JsonMapper;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionType;
-import fun.fengwk.kkstudio.share.ai.catalog.BuiltinAgentPrompts;
+import fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO;
+import fun.fengwk.kkstudio.share.catalog.AgentDefinitionType;
 
 /** 测试意图：内置 Agent 初始化 add-if-missing、幂等、不覆盖既有定义，并以真实主键冲突收敛多实例并发。 */
 class BuiltinAgentInitializerTest {

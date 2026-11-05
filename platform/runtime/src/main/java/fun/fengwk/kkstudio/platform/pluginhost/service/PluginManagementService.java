@@ -27,16 +27,16 @@ import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRe
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRow;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginCredentialRepository;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginCredentialRow;
-import fun.fengwk.kkstudio.share.ai.plugin.PluginAuthKindDTO;
-import fun.fengwk.kkstudio.share.ai.plugin.PluginAuthPrepareDTO;
-import fun.fengwk.kkstudio.share.ai.plugin.PluginConfigurationDTO;
-import fun.fengwk.kkstudio.share.ai.plugin.PluginConnectionCheckDTO;
-import fun.fengwk.kkstudio.share.ai.plugin.PluginConnectionCheckDTO.Authentication;
-import fun.fengwk.kkstudio.share.ai.plugin.PluginConnectionCheckDTO.BrowserSession;
-import fun.fengwk.kkstudio.share.ai.plugin.PluginConnectionCheckDTO.Reachability;
-import fun.fengwk.kkstudio.share.ai.plugin.PluginDTO;
-import fun.fengwk.kkstudio.share.ai.plugin.PluginSecretPatchDTO;
-import fun.fengwk.kkstudio.share.ai.plugin.PluginSecretProjectionDTO;
+import fun.fengwk.kkstudio.share.plugin.PluginAuthKindDTO;
+import fun.fengwk.kkstudio.share.plugin.PluginAuthPrepareDTO;
+import fun.fengwk.kkstudio.share.plugin.PluginConfigurationDTO;
+import fun.fengwk.kkstudio.share.plugin.PluginConnectionCheckDTO;
+import fun.fengwk.kkstudio.share.plugin.PluginConnectionCheckDTO.Authentication;
+import fun.fengwk.kkstudio.share.plugin.PluginConnectionCheckDTO.BrowserSession;
+import fun.fengwk.kkstudio.share.plugin.PluginConnectionCheckDTO.Reachability;
+import fun.fengwk.kkstudio.share.plugin.PluginDTO;
+import fun.fengwk.kkstudio.share.plugin.PluginSecretPatchDTO;
+import fun.fengwk.kkstudio.share.plugin.PluginSecretProjectionDTO;
 
 import java.time.Clock;
 import java.time.Duration;
