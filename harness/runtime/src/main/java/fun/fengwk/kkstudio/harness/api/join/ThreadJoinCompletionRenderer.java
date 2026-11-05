@@ -22,7 +22,7 @@ import java.util.UUID;
 public final class ThreadJoinCompletionRenderer {
 
   /** 失败/取消 error 详情在模型可见消息中允许的最大 Unicode code point 数（含截断标记）。 */
-  public static final int MAX_ERROR_CODE_POINTS = 1000;
+  private static final int MAX_ERROR_CODE_POINTS = 1000;
 
   /** 英文截断标记；计入 {@link #MAX_ERROR_CODE_POINTS}。 */
   public static final String TRUNCATION_MARKER = " [TRUNCATED]";
@@ -99,12 +99,12 @@ public final class ThreadJoinCompletionRenderer {
   }
 
   /** 完成报告缺失或全空白时的明确占位，避免静默空白。 */
-  public static String reportOrPlaceholder(String report) {
+  private static String reportOrPlaceholder(String report) {
     return report == null || report.isBlank() ? "(no textual report produced)" : report;
   }
 
   /** 失败原因缺失或全空白时的明确占位，避免静默空白。 */
-  public static String errorOrPlaceholder(String error) {
+  private static String errorOrPlaceholder(String error) {
     return error == null || error.isBlank() ? "(no failure detail produced)" : error;
   }
 
@@ -131,7 +131,7 @@ public final class ThreadJoinCompletionRenderer {
    *
    * <p>XML 解析器会把正文中的字面 CR 规范化为 LF，只有字符引用能逐字保留，长 prompt 与结果因此可往返解析。
    */
-  public static String escapeText(String value) {
+  private static String escapeText(String value) {
     Objects.requireNonNull(value, "value");
     StringBuilder escaped = new StringBuilder(value.length());
     for (int i = 0; i < value.length(); i++) {
@@ -150,7 +150,7 @@ public final class ThreadJoinCompletionRenderer {
   }
 
   /** 属性值转义：在正文转义基础上编码换行与制表符，避免属性值规范化把空白折叠为空格。 */
-  public static String escapeAttribute(String value) {
+  private static String escapeAttribute(String value) {
     Objects.requireNonNull(value, "value");
     StringBuilder escaped = new StringBuilder(value.length());
     for (int i = 0; i < value.length(); i++) {

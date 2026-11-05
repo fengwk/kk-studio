@@ -31,9 +31,7 @@ class BranchSettingsTest {
     assertEquals("local", new BranchSettings("coding", EXECUTION, "local").environmentName());
   }
 
-  /**
-   * 目录不再属于 branch 历史：record 组件固定为 agentName/execution/environmentName/goal，任何 workspace 字段都不允许回归。
-   */
+  /** record 组件固定为 agentName/execution/environmentName/goal。 */
   @Test
   void exposesNoWorkspaceState() {
     assertEquals(

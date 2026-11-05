@@ -71,7 +71,6 @@ class StudioPluginRegistryTest {
     assertEquals(0, registry.size());
     assertTrue(registry.plugins().isEmpty());
     assertTrue(registry.pluginIds().isEmpty());
-    assertTrue(registry.descriptors().isEmpty());
     assertTrue(registry.find("any-plugin").isEmpty());
     assertTrue(registry.find(null).isEmpty());
   }
@@ -113,10 +112,6 @@ class StudioPluginRegistryTest {
     StudioPluginRegistry registry = new StudioPluginRegistry(plugins);
 
     assertEquals(expected, registry.pluginIds(), "pluginIds() must be ascending by pluginId");
-    assertEquals(
-        expected,
-        registry.descriptors().stream().map(PluginDescriptor::pluginId).toList(),
-        "descriptors() must follow pluginIds() order");
     assertEquals(
         expected,
         registry.plugins().stream().map(plugin -> plugin.descriptor().pluginId()).toList(),

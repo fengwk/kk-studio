@@ -105,7 +105,7 @@ class ProjectWorkflowJsonTest {
         () -> codec.decode("{\"states\":[{\"state\":\"INIT\",\"state\":\"DONE\"}]}"));
   }
 
-  /** 未知、缺失、null 与错误类型字段都必须失败：workflow 是严格配置，不做宽容解析或兼容别名。 */
+  /** 未知、缺失、null 与错误类型字段都必须失败：workflow 是严格配置，采用严格模式解析。 */
   @Test
   void rejectsUnknownMissingAndWrongTypedFields() {
     assertThrows(

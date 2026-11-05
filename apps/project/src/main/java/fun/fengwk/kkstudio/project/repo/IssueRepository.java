@@ -97,18 +97,6 @@ public class IssueRepository {
         .orElse(null);
   }
 
-  public Issue getByProjectAndNumber(UUID projectId, long number) {
-    return jdbc.sql(
-            "select "
-                + COLUMNS
-                + " from project_issue where project_id = :projectId and number = :number")
-        .param("projectId", projectId)
-        .param("number", number)
-        .query(ROW_MAPPER)
-        .optional()
-        .orElse(null);
-  }
-
   public List<Issue> listByProjectId(UUID projectId) {
     return jdbc.sql(
             "select "

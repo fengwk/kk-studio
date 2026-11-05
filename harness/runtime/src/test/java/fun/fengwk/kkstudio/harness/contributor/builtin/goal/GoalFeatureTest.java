@@ -129,12 +129,12 @@ class GoalFeatureTest {
     String text = textContent(outcome.result());
     assertTrue(text.contains("Ship and verify"));
     assertTrue(text.contains(GOAL_ID.toString()));
-    // 只呈现当前 goalId 的报告：旧 id 的 complete 声明不得冒充当前进度。
+    // 只呈现当前 goalId 的报告：先前 id 的 complete 声明不得冒充当前进度。
     assertTrue(text.contains("blocked"));
     assertTrue(text.contains("needs input"));
     assertFalse(text.contains("old"));
 
-    // 用户清除后：明确没有用户设定 Goal，且不再暴露任何进度。
+    // 用户清除后：明确没有用户设定 Goal，且不暴露任何进度。
     ToolOutcome cleared = executeTool(new GetGoalTool(), new SimpleBranchView(), T2, "get-2", "{}");
     assertFalse(cleared.result().error());
     assertTrue(textContent(cleared.result()).contains("There is no user-set goal on this branch."));
@@ -167,7 +167,7 @@ class GoalFeatureTest {
     assertFalse(textContent(outcome.result()).contains("Ship and verify"));
   }
 
-  /** 陈旧报告拒绝：当前 Goal 已经有终态声明时再次声明被拒（重复/迟到报告不得覆盖当前进度），没有 Goal 时同样拒绝。 */
+  /** 过期报告拒绝：当前 Goal 已经有终态声明时再次声明被拒（重复/迟到报告不得覆盖当前进度），没有 Goal 时同样拒绝。 */
   @Test
   void updateGoalRejectsStaleReportAndMissingGoal() {
     GoalProgress reported = new GoalProgress(GOAL_ID, GoalStatus.COMPLETE, "done", T1);

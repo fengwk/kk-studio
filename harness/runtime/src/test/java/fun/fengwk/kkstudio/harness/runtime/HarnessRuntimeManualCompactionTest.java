@@ -206,10 +206,7 @@ class HarnessRuntimeManualCompactionTest {
         () -> fixture.runtime.compactThread(new CompactThreadCommand(missing, 0)));
   }
 
-  /**
-   * Stop 后 Thread 仍是完整历史，旧实现会把它当作可手动压缩：availability 返回 enabled，compactThread 还会写 COMPACTION Turn
-   * 并调用 resolver。真实 Stop 路径的回归必须证明守卫发生在 resolve/写入之前，且重放 Stop 不改变结论。
-   */
+  /** Stop 后 Thread 拒绝手动压缩：守卫发生在 resolve/写入之前，且重放 Stop 不改变结论。 */
   @Test
   void stoppedThreadRejectsManualCompactionBeforeResolveOrWrites() {
     Fixture fixture = fixture();

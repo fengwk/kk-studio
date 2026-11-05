@@ -43,7 +43,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * 既有 Thread 的唯一通用命令写入口 HTTP 契约：path 定位 Thread、请求体只携带精确 cursor 与有序命令，不再携带 owner/target；202 只表示
+ * 既有 Thread 的唯一通用命令写入口 HTTP 契约：path 定位 Thread、请求体只携带精确 cursor 与有序命令，不携带 owner/target；202 只表示
  * durable acceptance 已提交，响应回读接受后的权威 Thread snapshot。
  */
 class StudioHarnessThreadCommandBatchControllerTest {
@@ -158,7 +158,7 @@ class StudioHarnessThreadCommandBatchControllerTest {
     postBatch(THREAD_ID, batch(userMessageCommand(COMMAND_KEY))).andExpect(status().isBadRequest());
   }
 
-  /** 请求体必须完全 owner-free：多携带历史 owner / target 字段即未知字段，400 且不触达 acceptance service 与 runtime。 */
+  /** 请求体必须完全 owner-free：携带 owner / target 字段即未知字段，400 且不触达 acceptance service 与 runtime。 */
   @Test
   void rejectsOwnerOrTargetFieldInBodyBeforeTouchingAcceptanceServiceOrRuntime() throws Exception {
     String ownerField =

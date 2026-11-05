@@ -37,11 +37,6 @@ public record CanvasResource(
     Objects.requireNonNull(createdAt, "createdAt");
   }
 
-  /** 内容是否为 Storage blob。 */
-  public boolean isBlob() {
-    return blobId != null;
-  }
-
   /** 内容是否为内联文本。 */
   public boolean isText() {
     return textContent != null;

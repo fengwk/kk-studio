@@ -75,7 +75,7 @@ public final class IdeOriginPolicy {
   }
 
   /** Origin 头是否与本请求的 scheme/host/effective port 精确一致。 */
-  public static boolean sameOriginExact(String origin, HttpServletRequest request) {
+  private static boolean sameOriginExact(String origin, HttpServletRequest request) {
     URI uri;
     try {
       uri = new URI(origin);

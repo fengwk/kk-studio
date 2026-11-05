@@ -9,19 +9,17 @@ import org.junit.jupiter.api.Test;
 /** region 的固定 origin、登录链接与 deep-link scheme 映射。 */
 class MavisRegionTest {
 
-  /** 两个 region 的 origin、登录链接与 scheme 是固定协议事实，不接受自定义 base URL。 */
+  /** 两个 region 的 origin 与登录链接是固定协议事实，不接受自定义 base URL。 */
   @Test
   void fixesOfficialOriginsAndLoginUrls() {
     assertEquals("https://agent.minimaxi.com", MavisRegion.CN.baseUrl());
     assertEquals(
         "https://agent.minimaxi.com/login?sso=1&download_source=default",
         MavisRegion.CN.loginUrl());
-    assertEquals("minimax-cn", MavisRegion.CN.callbackScheme());
 
     assertEquals("https://agent.minimax.io", MavisRegion.EN.baseUrl());
     assertEquals(
         "https://agent.minimax.io/login?sso=1&download_source=default", MavisRegion.EN.loginUrl());
-    assertEquals("minimax", MavisRegion.EN.callbackScheme());
   }
 
   /** region 标识严格按 cn/en 解析，大小写与空白被归一化，其他取值不回退。 */

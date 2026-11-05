@@ -161,7 +161,7 @@ class HarnessRuntimeJoinAcceptanceTest {
 
   @Test
   void stoppedParentMaterializesChildResultWithoutQueueingDelivery() {
-    // 测试意图：真实 Stop 把父线程（连同子树）置为 STOPPED 后，子线程在执行终止边界冻结的 Join 结果不再等待父线程的下一次用户输入，
+    // 测试意图：真实 Stop 把父线程（连同子树）置为 STOPPED 后，子线程在执行终止边界冻结的 Join 结果不等待父线程的下一次用户输入，
     // 而是把 NOTIFICATION 直接物化进父线程历史：父线程既没有排队交付命令，也不会被请求 THREAD Work。
     AcceptedCommands root =
         runtime.acceptCommands(session(40, 41, null), AcceptancePreflight.IDENTITY);
@@ -171,7 +171,7 @@ class HarnessRuntimeJoinAcceptanceTest {
         acceptAndJoin(runtime, child(43, 44, parentId), joinReq, AcceptancePreflight.IDENTITY);
     UUID childId = child.thread().id();
 
-    // 真实 Stop 才使目标与完整子树 STOPPED（仅推进 head 的 seed 不再代表暂停语义）。
+    // 真实 Stop 使目标与完整子树处于 STOPPED。
     long parentVersion =
         store.transaction(tx -> tx.threads().find(parentId).orElseThrow().version());
     StopResult stopResult = runtime.stop(new StopCommand(parentId, TestIds.id(45), parentVersion));
@@ -180,7 +180,7 @@ class HarnessRuntimeJoinAcceptanceTest {
         ThreadExecutionControl.STOPPED,
         store.transaction(tx -> tx.threads().find(childId).orElseThrow().executionControl()));
 
-    // 子 Join 在停止边界冻结并已写入交付引用，不再滞留为未交付状态。
+    // 子 Join 在停止边界冻结并已写入交付引用，不滞留为未交付状态。
     ThreadJoin settled = runtime.findJoin(joinReq.invocationId()).orElseThrow();
     assertTrue(settled.matched());
     assertNotNull(settled.deliveryCommandSequence());
@@ -491,7 +491,7 @@ class HarnessRuntimeJoinAcceptanceTest {
             acceptAndJoin(
                 runtime, child(98, 99, parentId), wrongHead, AcceptancePreflight.IDENTITY));
 
-    // 4. parent 被真实 Stop 置为 STOPPED -> 拒绝新子任务（STOPPED 是持久条件，不再依赖 head 形态）
+    // 4. parent 被真实 Stop 置为 STOPPED -> 拒绝新子任务（STOPPED 是持久拒绝条件）
     long parentVersion =
         store.transaction(tx -> tx.threads().find(parentId).orElseThrow().version());
     runtime.stop(new StopCommand(parentId, TestIds.id(100), parentVersion));
@@ -599,7 +599,7 @@ class HarnessRuntimeJoinAcceptanceTest {
     assertStoppedParentResumeOutcome(3010, List.of(new GoalCommandPayload("resume goal")), true);
     assertStoppedParentResumeOutcome(
         3020, List.of(new CustomMessageCommandPayload(AgentMessage.user("plain custom"))), true);
-    // 所有 CUSTOM 都是可信输入，不再按 <system-reminder> 文本标签区分特权来源；系统通知只经 NOTIFICATION Command。
+    // 所有 CUSTOM 都是可信输入；系统通知只经 NOTIFICATION Command。
     assertStoppedParentResumeOutcome(
         3030,
         List.of(new CustomMessageCommandPayload(SystemReminder.message("soft budget nudge"))),

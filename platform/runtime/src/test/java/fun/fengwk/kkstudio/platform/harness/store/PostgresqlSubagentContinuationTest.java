@@ -244,7 +244,7 @@ class PostgresqlSubagentContinuationTest {
 
     ThreadJoin first = join(delegation.firstJoin());
     ThreadJoin second = join(secondJoin);
-    // 续接在同一父/子对上 supersede 旧未完成 join：旧 join 保留 invocation identity 与源命令，但不再产生独立交付；
+    // 续接在同一父/子对上 supersede 旧未完成 join：旧 join 保留 invocation identity 与源命令，不产生独立交付；
     // busy follow-up 只交付最新一次的一份汇总结果。
     assertFalse(first.matched());
     assertEquals(secondJoin, first.supersededByInvocationId());
@@ -400,7 +400,7 @@ class PostgresqlSubagentContinuationTest {
     assertEquals("env-a", snapshot(parentId).entryState().baseSettings().environmentName());
     processNext(parentId);
     assertEquals("env-b", snapshot(parentId).entryState().baseSettings().environmentName());
-    processNext(parentId); // 应用设置后的根唤醒不再产生回合。
+    processNext(parentId); // 应用设置后的根唤醒不产生回合。
     assertEquals(firstStart, snapshot(childId).requireFullPath().openTurnStart().orElseThrow());
     assertEquals(List.of("env-a"), resolverEnvironments.get(childId));
 

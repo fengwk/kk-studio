@@ -145,7 +145,7 @@ class PostgresqlGroupCooldownTest {
     assertEquals(now.plusSeconds(30), cooldownUntil());
   }
 
-  /** 冷却存储在 PostgreSQL 而非进程内：新 store 实例读到同一冻结事实，过期截止时间不再冷却。 */
+  /** 冷却存储在 PostgreSQL 而非进程内：新 store 实例读到同一冻结事实，已过截止时间不处于冷却状态。 */
   @Test
   void restartedStoreReadsSharedCooldown() {
     freeze("model", now.plusSeconds(30));

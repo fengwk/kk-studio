@@ -5,8 +5,7 @@ import java.util.Objects;
 /**
  * 自动对话压缩的部署级配置。
  *
- * <p>{@code keepRecentTokens} 是压缩后保留最近上下文的 token 上限（默认 20_000）。压缩执行使用独立的压缩 Agent 配置（普通 Agent
- * 目录项），因此这里不再持有任何模型或 Agent 选择器。不持久化 enabled / reserve / maxRecent。
+ * <p>{@code keepRecentTokens} 是压缩后保留最近上下文的 token 上限（默认 20_000）。压缩执行使用独立的压缩 Agent 配置（普通 Agent 目录项）。
  *
  * <ul>
  *   <li>{@code effectiveKeep = min(keepRecentTokens, C / 2)}——C 为触发 turn 的冻结 contextWindow。

@@ -37,15 +37,15 @@ public class ProjectDtoMapper {
     this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
   }
 
-  public static String formatUuid(UUID uuid) {
+  private static String formatUuid(UUID uuid) {
     return uuid == null ? null : uuid.toString().toLowerCase();
   }
 
-  public static String formatLong(Long value) {
+  private static String formatLong(Long value) {
     return value == null ? null : String.valueOf(value);
   }
 
-  public static String formatInstant(Instant instant) {
+  private static String formatInstant(Instant instant) {
     return instant == null ? null : instant.toString();
   }
 
@@ -84,7 +84,7 @@ public class ProjectDtoMapper {
     return new ProjectWorkflow(states);
   }
 
-  public ProjectWorkflowDTO toWorkflowDto(ProjectWorkflow workflow) {
+  ProjectWorkflowDTO toWorkflowDto(ProjectWorkflow workflow) {
     if (workflow == null) {
       return null;
     }

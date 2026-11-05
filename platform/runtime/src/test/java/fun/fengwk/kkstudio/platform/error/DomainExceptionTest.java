@@ -6,7 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 
 import org.junit.jupiter.api.Test;
 
-/** 单一领域异常保留原 8 种错误的 code、resource、固定消息与版本坐标。 */
+/** 单一领域异常包含各类错误码、resource、固定消息与版本坐标。 */
 class DomainExceptionTest {
 
   @Test

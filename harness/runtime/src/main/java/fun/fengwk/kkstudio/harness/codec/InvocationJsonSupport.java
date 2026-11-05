@@ -73,7 +73,7 @@ public final class InvocationJsonSupport {
     return value;
   }
 
-  public static JsonNode declared(ObjectNode node, String field, String context) {
+  private static JsonNode declared(ObjectNode node, String field, String context) {
     JsonNode value = node.get(field);
     if (value == null) {
       throw new IllegalArgumentException(context + " must declare " + field);

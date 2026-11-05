@@ -115,11 +115,6 @@ public class SeedanceCanvasFunctionAdapter implements CanvasFunctionAdapter {
     this(settings, client, JsonMapper.builder().build(), Clock.systemUTC(), Thread::sleep);
   }
 
-  public SeedanceCanvasFunctionAdapter(
-      OpenCliSettings settings, OpenCliHubClient client, ObjectMapper objectMapper, Clock clock) {
-    this(settings, client, objectMapper, clock, Thread::sleep);
-  }
-
   SeedanceCanvasFunctionAdapter(
       OpenCliSettings settings,
       OpenCliHubClient client,
@@ -253,7 +248,7 @@ public class SeedanceCanvasFunctionAdapter implements CanvasFunctionAdapter {
       context.checkpoint("SEEDANCE_SUBMISSION_POLLING", state);
     } else {
       uploads = OpenCliAdapterState.uploads(state);
-      requireCompleteUploads(run, uploads);
+      OpenCliAdapterState.requireCompleteUploads(run, uploads);
     }
     Execution submission = awaitHubExecution(context, executionId, seedanceHubExecutionTimeout());
     if (submission.status() != ExecutionStatus.SUCCEEDED) {
@@ -369,7 +364,7 @@ public class SeedanceCanvasFunctionAdapter implements CanvasFunctionAdapter {
 
   private List<String> buildSubmitArgv(
       CanvasFunctionFrozenRun run, List<OpenCliAdapterState.UploadedInput> uploads) {
-    requireCompleteUploads(run, uploads);
+    OpenCliAdapterState.requireCompleteUploads(run, uploads);
     String ratio = extractText(run.args(), "ratio", "16:9");
     int duration = extractInt(run.args(), "duration", 5);
     String prompt = extractText(run.args(), "prompt");
@@ -419,21 +414,7 @@ public class SeedanceCanvasFunctionAdapter implements CanvasFunctionAdapter {
 
   private Execution awaitHubExecution(
       CanvasFunctionExecutionContext context, String executionId, Duration maxWait) {
-    long deadline = System.nanoTime() + maxWait.toNanos();
-    Execution execution = client.getExecution(executionId, 0);
-    while (!execution.status().terminal()) {
-      if (!context.isRunning()) {
-        throw new IllegalStateException("Canvas Function run is no longer running");
-      }
-      long remainingNanos = deadline - System.nanoTime();
-      if (remainingNanos <= 0L) {
-        throw new OpenCliHubException("Seedance Hub execution exceeded maximum wait");
-      }
-      int waitSeconds =
-          (int) Math.max(1L, Math.min(120L, Duration.ofNanos(remainingNanos).toSeconds()));
-      execution = client.getExecution(executionId, waitSeconds);
-    }
-    return execution;
+    return OpenCliAdapterState.awaitTerminal(client, context, executionId, maxWait, "Seedance");
   }
 
   private JsonNode singleStdoutObject(String stdout) {
@@ -509,18 +490,6 @@ public class SeedanceCanvasFunctionAdapter implements CanvasFunctionAdapter {
       case AUDIO -> "--audio";
       case TEXT -> throw new IllegalArgumentException("TEXT cannot be a Seedance reference");
     };
-  }
-
-  private static void requireCompleteUploads(
-      CanvasFunctionFrozenRun run, List<OpenCliAdapterState.UploadedInput> uploads) {
-    if (uploads.size() != run.manifest().size()) {
-      throw new IllegalArgumentException("checkpoint uploads do not cover frozen manifest");
-    }
-    for (int index = 0; index < uploads.size(); index++) {
-      if (!uploads.get(index).resourceId().equals(run.manifest().get(index).resourceId())) {
-        throw new IllegalArgumentException("checkpoint uploads do not match frozen manifest");
-      }
-    }
   }
 
   private static void validateDuration(long durationMs, String kind) {

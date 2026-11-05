@@ -185,36 +185,6 @@ class StorageUploadCleanupLeaseIntegrationTest extends PostgresSpringTestSupport
   }
 
   @Test
-  void cleanupClaimReleaseIsTokenFenced() {
-    StorageUploadDTO pending =
-        storage.reserve(
-            "release.bin", "application/octet-stream", 1, storage.sha256Hex(new byte[] {2}));
-    UUID uploadId = UUID.fromString(pending.getId());
-    Instant now = Instant.now();
-    StorageUpload claimed =
-        tx.execute(
-            status ->
-                uploadRepository.claimById(
-                    uploadId, now, now.plusSeconds(30), token("release-owner")));
-    assertNotNull(claimed);
-
-    assertFalse(
-        Boolean.TRUE.equals(
-            tx.execute(
-                status -> uploadRepository.releaseCleanupClaim(uploadId, token("wrong-owner")))));
-    assertTrue(
-        Boolean.TRUE.equals(
-            tx.execute(
-                status -> uploadRepository.releaseCleanupClaim(uploadId, token("release-owner")))));
-    assertEquals(
-        0,
-        jdbc.queryForObject(
-            "select count(*) from storage_upload where id = ? and cleanup_token is not null",
-            Integer.class,
-            uploadId));
-  }
-
-  @Test
   void objectFailureKeepsLeaseAndRetriesAfterExpiry() {
     byte[] content = new byte[] {7};
     StorageUploadDTO pending =

@@ -151,7 +151,7 @@ class FlywayAutoConfigurationIntegrationTest {
             chatSessionForeignKeys.getLong(1),
             "the chat_session association keeps the Harness Session FK and Chat FK");
       }
-      // 安装授权合入 environment，更新状态不建历史表；与当前 V1 的业务表清单保持一致。
+      // 业务表清单与当前 V1 的结构保持一致。
       try (ResultSet businessTables =
           st.executeQuery(
               "select count(*) from information_schema.tables"

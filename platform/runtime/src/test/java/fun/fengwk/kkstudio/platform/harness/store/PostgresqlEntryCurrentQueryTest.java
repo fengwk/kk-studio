@@ -116,7 +116,7 @@ class PostgresqlEntryCurrentQueryTest {
           tx.entries().loadPath(head);
           EntryCurrentState warm = tx.entries().loadCurrent(head);
           assertEquals(applied, warm.baseSettings());
-          assertEquals(1, fullPathCounter.get(), "已缓存完整路径直接派生，不再查询");
+          assertEquals(1, fullPathCounter.get(), "已缓存完整路径直接派生，无需重复查询");
           return null;
         });
     fullPathCounter.set(0);

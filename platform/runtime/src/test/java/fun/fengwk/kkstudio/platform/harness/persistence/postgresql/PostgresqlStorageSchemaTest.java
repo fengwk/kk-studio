@@ -364,7 +364,7 @@ class PostgresqlStorageSchemaTest extends PostgresSchemaSupport {
       String sha256,
       UUID blobId)
       throws SQLException {
-    // 过期事实是 created_at + 当前 upload TTL，不再是持久列；因此这里只写声明字段与 created_at。
+    // 过期事实是 created_at + 当前 upload TTL，非持久列；因此这里只写声明字段与 created_at。
     try (PreparedStatement ps =
         conn.prepareStatement(
             "insert into storage_upload (id, candidate_blob_id, blob_id, filename,"

@@ -63,7 +63,7 @@ import java.util.function.Consumer;
  * 通知交付，以及最终的 Work fencing。
  *
  * <p>Stop 把目标 Thread 与完整父子后代一次性置为 {@link ThreadExecutionControl#STOPPED}，为每个受影响节点持久保存 {@link
- * StoppedThreadReceipt}。旧 stopRequestId 的重放直接返回持久保存的整批回执，不以当前树重算旧范围、不停止之后启动的新工作。被取消的人类输入写入回执；
+ * StoppedThreadReceipt}。已持久保存的 stopRequestId 重放直接返回整批回执，不以当前树重算、不停止之后启动的新工作。被取消的人类输入写入回执；
  * 已排队的系统通知物化为历史并同步推进输入水位。
  */
 final class StopControl {
@@ -145,7 +145,7 @@ final class StopControl {
 
     ThreadState lockedTarget = lockedThreads.get(command.threadId());
 
-    // durable receipt replay 先于 version CAS：按 (rootThreadId, rootStopRequestId) 返回持久保存的旧范围，不以当前树重算，
+    // durable receipt replay 先于 version CAS：按 (rootThreadId, rootStopRequestId) 返回持久保存的记录，不以当前树重算，
     // 也不停止其后启动的新工作。
     List<StoppedThreadReceipt> stored =
         tx.stops().loadByRootRequest(command.threadId(), command.stopRequestId());
@@ -256,7 +256,7 @@ final class StopControl {
 
     // Stage 8: 自底向上收敛。每节点重新读取最新 ThreadState 并按最新事实分类（子节点收敛不改动父节点自身
     // Turn，但重新读取可保证只基于 tx 内最新状态 mutation）；必要时先物化已提交的 terminal generation / Tool batch
-    // 结果，再取消 Commands、写自有边界、置 STOPPED、固化排队通知。所需行锁均已在 Stage 4-7 取得，遍历中不再新增锁。
+    // 结果，再取消 Commands、写自有边界、置 STOPPED、固化排队通知。所需行锁均已在 Stage 4-7 取得，遍历中不新增锁。
     Set<UUID> driverExecutionIds = new LinkedHashSet<>();
     Set<UUID> toolExecutionIds = new LinkedHashSet<>();
     List<StoppedThreadReceipt> receipts = new ArrayList<>();

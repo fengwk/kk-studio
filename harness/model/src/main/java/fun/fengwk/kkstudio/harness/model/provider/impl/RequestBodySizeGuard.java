@@ -33,11 +33,6 @@ public final class RequestBodySizeGuard {
     this.limitBytes = limitBytes;
   }
 
-  /** 当前生效的字节上限。 */
-  public long limitBytes() {
-    return limitBytes;
-  }
-
   /**
    * 校验最终 UTF-8 请求体长度；超限即抛出脱敏的 {@link ProviderException}。
    *

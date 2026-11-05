@@ -55,7 +55,8 @@ public record AgentTaskRequest(
    * 规范计算外部任务身份的 canonical JSON 文本：严格覆盖 {@code ticketId}、{@code agent}、{@code prompt} 与 nullable 的
    * {@code maxTurns}。与内部 settings 或运行时配置无关。
    */
-  public static String canonicalJson(UUID ticketId, String agent, String prompt, Integer maxTurns) {
+  private static String canonicalJson(
+      UUID ticketId, String agent, String prompt, Integer maxTurns) {
     Objects.requireNonNull(ticketId, "ticketId");
     if (agent == null || agent.isBlank()) {
       throw new IllegalArgumentException("agent must not be blank");

@@ -63,16 +63,6 @@ public final class EnvironmentStateCodec {
     return write(eventNode(event), "recent_events");
   }
 
-  public String encodeEvents(List<EnvironmentEvent> events) {
-    Objects.requireNonNull(events, "events");
-    ArrayNode root = MAPPER.createArrayNode();
-    for (EnvironmentEvent event : events) {
-      Objects.requireNonNull(event, "events[]");
-      root.add(eventNode(event));
-    }
-    return write(root, "recent_events");
-  }
-
   private static ObjectNode eventNode(EnvironmentEvent event) {
     ObjectNode node = MAPPER.createObjectNode();
     node.put("time", event.time().toString());

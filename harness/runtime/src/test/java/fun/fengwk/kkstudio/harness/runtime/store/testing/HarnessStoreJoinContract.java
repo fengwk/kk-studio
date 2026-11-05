@@ -1859,7 +1859,7 @@ public abstract class HarnessStoreJoinContract {
         store.transaction(tx -> tx.exits().loadUnconfirmedRemote(ENV_1));
     assertEquals(List.of(remoteEnv1Early, remoteEnv1Late), env1Facts);
 
-    // 确认一条后，loadUnconfirmedRemote 不再返回该事实
+    // 确认一条后，loadUnconfirmedRemote 不返回该事实
     store.transaction(
         tx -> {
           tx.threads().lock(threadId);
@@ -2312,7 +2312,7 @@ public abstract class HarnessStoreJoinContract {
           return null;
         });
 
-    // 冻结结果后不再构成未完成义务。
+    // 冻结结果后不构成未完成义务。
     inTransaction(
         store,
         tx -> {
@@ -2330,7 +2330,7 @@ public abstract class HarnessStoreJoinContract {
           return null;
         });
 
-    // 新的未匹配义务可见；被后续续接 supersede 后不再计入。
+    // 新的未匹配义务可见；被后续续接 supersede 后不计入。
     inTransaction(
         store,
         tx -> {

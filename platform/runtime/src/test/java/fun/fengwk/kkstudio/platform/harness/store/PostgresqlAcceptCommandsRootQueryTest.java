@@ -39,7 +39,7 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * 守护 PostgreSQL 适配下具有非 ROOT head（非空历史）Thread 的命令接受与 exact ordered replay 不再执行 recursive entry_path
+ * 守护 PostgreSQL 适配下具有非 ROOT head（非空历史）Thread 的命令接受与 exact ordered replay 不执行 recursive entry_path
  * CTE，且执行开销与 Entry 树深度无关。
  */
 class PostgresqlAcceptCommandsRootQueryTest {

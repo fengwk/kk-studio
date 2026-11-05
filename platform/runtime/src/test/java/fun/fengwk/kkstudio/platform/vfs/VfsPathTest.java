@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.platform.vfs;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -42,7 +41,6 @@ class VfsPathTest {
     VfsPath file = VfsPath.parse("vfs:/sessions/" + SESSION_ID + "/tmp/notes.txt");
     assertEquals(Kind.SESSION_FILE, file.kind());
     assertEquals("tmp/notes.txt", file.sessionPath());
-    assertFalse(file.isReadOnly());
     assertTrue(file.isThreadScoped() == false);
   }
 
@@ -51,7 +49,6 @@ class VfsPathTest {
     VfsPath resource = VfsPath.parse("vfs:/resources/" + BLOB_ID);
     assertEquals(Kind.RESOURCE, resource.kind());
     assertEquals(UUID.fromString(BLOB_ID), resource.blobId());
-    assertTrue(resource.isReadOnly());
     assertTrue(resource.isUnderResourcesRoot());
 
     VfsPath skill = VfsPath.parse("vfs:/skills/dev-tools/review/SKILL.md");
@@ -59,7 +56,6 @@ class VfsPathTest {
     assertEquals("dev-tools", skill.skillPackage());
     assertEquals("review", skill.skillName());
     assertEquals("SKILL.md", skill.skillRelativePath());
-    assertTrue(skill.isReadOnly());
     assertTrue(skill.isUnderSkillsRoot());
   }
 
@@ -70,7 +66,6 @@ class VfsPathTest {
     assertEquals(Kind.SKILLS_PACKAGE, packageDir.kind());
     assertEquals("dev-tools", packageDir.skillPackage());
     assertNull(packageDir.skillName());
-    assertTrue(packageDir.isReadOnly());
     assertTrue(packageDir.isUnderSkillsRoot());
     assertEquals("vfs:/skills/dev-tools", packageDir.normalizedPath());
 
@@ -79,7 +74,6 @@ class VfsPathTest {
     assertEquals("dev-tools", skillDir.skillPackage());
     assertEquals("review", skillDir.skillName());
     assertNull(skillDir.skillRelativePath());
-    assertTrue(skillDir.isReadOnly());
 
     assertThrows(
         IllegalArgumentException.class, () -> VfsPath.parse("vfs:/skills/dev-tools//review"));

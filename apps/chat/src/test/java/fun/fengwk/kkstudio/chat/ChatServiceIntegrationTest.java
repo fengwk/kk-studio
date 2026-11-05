@@ -183,7 +183,7 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
             turnResolver.resolve(THREAD_ID, SESSION_ID, path, null);
         TurnResolver.Resolved resolved =
             assertInstanceOf(TurnResolver.Resolved.class, reboundResolution);
-        // 系统指令是唯一字符串：同名重建后的当前行 systemPrompt 必须出现在其中，绝不再有 leading SYSTEM 消息。
+        // 系统指令是唯一字符串：同名重建后的当前行 systemPrompt 必须出现在其中，不包含 leading SYSTEM 消息。
         assertTrue(
             resolved.spec().systemInstruction().contains(reboundSystemPrompt),
             "同名重建后的当前行 systemPrompt 必须出现在有效请求的唯一 systemInstruction 中");

@@ -80,7 +80,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
-/** 准入、请求物化与 stale lease 恢复：READY 准入结果、materialization 围栏、旧 RUNNING 重试与 terminal cleanup。 */
+/** 准入、请求物化与 stale lease 恢复：READY 准入结果、materialization 围栏、过期 RUNNING 重试与 terminal cleanup。 */
 class ModelProcessorAdmissionTest extends ModelProcessorTestSupport {
   @Test
   void rejectsNonModelClaim() {
@@ -461,7 +461,8 @@ class ModelProcessorAdmissionTest extends ModelProcessorTestSupport {
           tx.commands().insert(List.of(source));
           tx.commands().update(List.of(source.markApplied(turnStartEntryId)));
           child = tx.threads().lock(child.id()).orElseThrow();
-          tx.threads().update(child.advanceInputThroughSequence(1L, NOW));
+          tx.threads()
+              .update(child.advanceHeadAndInputThroughSequence(child.headEntryId(), 1L, NOW));
           tx.joins()
               .insert(
                   new ThreadJoin(
@@ -566,7 +567,7 @@ class ModelProcessorAdmissionTest extends ModelProcessorTestSupport {
     ModelGateway.Execution execution = gateway.executions.get(0);
     assertEquals(invocationId, execution.invocationId());
     assertEquals(1, execution.proposedAttempt());
-    // 降级语义投影：保留 assistant 文本，原 bash 调用并入 USER 上下文并逐字保留 arguments，不再有 native replay。
+    // 降级语义投影：保留 assistant 文本，原 bash 调用并入 USER 上下文并逐字保留 arguments，无 native replay。
     List<ProviderMessage> messages = execution.request().messages();
     assertEquals(3, messages.size());
     assertEquals(
@@ -652,8 +653,8 @@ class ModelProcessorAdmissionTest extends ModelProcessorTestSupport {
   // ---------------------------------------------------------------------------------------------
 
   /**
-   * 新 claim 遇到旧 lease 过期的 RUNNING：接入既有重试策略记录一次失败 attempt 后回到 READY 并按策略延迟重排 MODEL Work，attempt
-   * 保持已确认值、旧 partial 只留作尝试审计，绝不调用 Gateway，也不 request THREAD wake。
+   * 新 claim 遇到租约过期的 RUNNING：接入既有重试策略记录一次失败 attempt 后回到 READY 并按策略延迟重排 MODEL Work，attempt 保持已确认值、先前
+   * partial 只留作尝试审计，绝不调用 Gateway，也不 request THREAD wake。
    */
   @Test
   void staleRunningLeaseRecoveryRetriesWithExistingPolicy() {
@@ -701,7 +702,7 @@ class ModelProcessorAdmissionTest extends ModelProcessorTestSupport {
   }
 
   /**
-   * 新 claim 遇到旧 lease 过期的 RUNNING 且重试预算耗尽：FAILED 保留已确认 attempt，唤醒 THREAD 并 complete MODEL
+   * 新 claim 遇到租约过期的 RUNNING 且重试预算耗尽：FAILED 保留已确认 attempt，唤醒 THREAD 并 complete MODEL
    * Work，明确报告失败而不是无限重试。
    */
   @Test
@@ -810,7 +811,7 @@ class ModelProcessorAdmissionTest extends ModelProcessorTestSupport {
     assertEquals(0, fixture.gateway.admitCalls);
   }
 
-  /** terminal 行且 resultEntryId 已链接：只 complete MODEL Work，不再请求 THREAD wake。 */
+  /** terminal 行且 resultEntryId 已链接：只 complete MODEL Work，不请求 THREAD wake。 */
   @Test
   void terminalCleanupSkipsThreadWakeWhenResultEntryIsLinked() {
     Fixture fixture = fixture();

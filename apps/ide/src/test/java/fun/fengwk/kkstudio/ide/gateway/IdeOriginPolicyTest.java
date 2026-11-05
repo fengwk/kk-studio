@@ -70,20 +70,26 @@ class IdeOriginPolicyTest {
 
   @Test
   void sameOriginExactValidations() {
+    assertTrue(isOriginAllowed("https://studio.internal"));
+    assertTrue(isOriginAllowed("https://studio.internal:443"));
+    assertFalse(isOriginAllowed("http://studio.internal:443"));
+    assertFalse(isOriginAllowed("https://studio.internal:8443"));
+    assertFalse(isOriginAllowed("https://other.internal"));
+    assertFalse(isOriginAllowed("https://user@studio.internal"));
+    assertFalse(isOriginAllowed("https://studio.internal/path"));
+    assertFalse(isOriginAllowed("https://studio.internal?q=1"));
+    assertFalse(isOriginAllowed("not a valid uri"));
+  }
+
+  private static boolean isOriginAllowed(String origin) {
     HttpServletRequest req = mock(HttpServletRequest.class);
+    when(req.getMethod()).thenReturn("GET");
+    when(req.getHeader("Sec-Fetch-Site")).thenReturn("same-origin");
+    when(req.getHeader("Origin")).thenReturn(origin);
     when(req.getScheme()).thenReturn("https");
     when(req.getServerName()).thenReturn("studio.internal");
     when(req.getServerPort()).thenReturn(443);
-
-    assertTrue(IdeOriginPolicy.sameOriginExact("https://studio.internal", req));
-    assertTrue(IdeOriginPolicy.sameOriginExact("https://studio.internal:443", req));
-    assertFalse(IdeOriginPolicy.sameOriginExact("http://studio.internal:443", req));
-    assertFalse(IdeOriginPolicy.sameOriginExact("https://studio.internal:8443", req));
-    assertFalse(IdeOriginPolicy.sameOriginExact("https://other.internal", req));
-    assertFalse(IdeOriginPolicy.sameOriginExact("https://user@studio.internal", req));
-    assertFalse(IdeOriginPolicy.sameOriginExact("https://studio.internal/path", req));
-    assertFalse(IdeOriginPolicy.sameOriginExact("https://studio.internal?q=1", req));
-    assertFalse(IdeOriginPolicy.sameOriginExact("not a valid uri", req));
+    return IdeOriginPolicy.httpRequestAllowed(req);
   }
 
   @Test

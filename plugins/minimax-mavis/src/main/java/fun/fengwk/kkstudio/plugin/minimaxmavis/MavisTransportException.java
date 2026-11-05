@@ -10,8 +10,4 @@ public class MavisTransportException extends MavisException {
   public MavisTransportException(String message) {
     super(message);
   }
-
-  public MavisTransportException(String message, Throwable cause) {
-    super(message, cause);
-  }
 }

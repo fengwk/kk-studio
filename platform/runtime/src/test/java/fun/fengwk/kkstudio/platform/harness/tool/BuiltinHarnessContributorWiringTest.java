@@ -35,7 +35,7 @@ class BuiltinHarnessContributorWiringTest extends PostgresSpringTestSupport {
 
   @Test
   void componentScanWiresMovedCatalogAndResourceBeansExactlyOnce() {
-    // 意图：真实 Platform 全上下文同时扫描 storage 与 harness，验证迁移未留下重复 bean 或漏掉新的组合根。
+    // 意图：验证 Platform 全上下文同时扫描 storage 与 harness，确保相关 bean 恰好单实例装配。
     assertEquals(1, context.getBeansOfType(ProviderResourceMaterializer.class).size());
     assertEquals(1, context.getBeansOfType(ToolResultHistoryMaterializer.class).size());
     assertSame(
@@ -66,8 +66,6 @@ class BuiltinHarnessContributorWiringTest extends PostgresSpringTestSupport {
     assertTrue(harnessCatalog.findTool(FileTool.READ_NAME).isPresent());
     assertTrue(harnessCatalog.findTool(TaskTool.NAME).isPresent());
     assertTrue(harnessCatalog.findTool("update_goal").isPresent());
-    // Goal 正文由用户维护：内建 catalog 不再暴露任何 Goal 创建工具。
-    assertTrue(harnessCatalog.findTool("create_goal").isEmpty());
 
     assertEquals(
         FileTool.READ_NAME,

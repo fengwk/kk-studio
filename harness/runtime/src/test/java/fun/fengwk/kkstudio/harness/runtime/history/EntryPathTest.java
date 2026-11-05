@@ -131,7 +131,7 @@ class EntryPathTest {
   @Test
   void baseSettingsReturnsExactLatestSnapshotWhenEnvironmentAndAgentChanged() {
     // 多个关闭 Turn 之间 environment/agent 都变化过，最新快照的 environment 为 null：
-    // baseSettings() 必须返回最新 ROOT/TURN_START 的完整快照，绝不回看更旧的非 null environment/agent。
+    // baseSettings() 必须返回最新 ROOT/TURN_START 的完整快照，不回看更早的非 null environment/agent。
     BranchSettings rootSettings = settings("root-agent");
     BranchSettings firstTurn =
         settings("first-agent")

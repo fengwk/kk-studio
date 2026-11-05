@@ -55,6 +55,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 class ToolResultFinalizerTest {
 
   private static final String TOOL_NAME = "demo_tool";
+  private static final int DEFAULT_RESOURCE_MAX_BYTES = 16 * 1024 * 1024;
 
   @Test
   void countPhysicalLinesMatchesSpec() {
@@ -294,7 +295,7 @@ class ToolResultFinalizerTest {
                 (mediaType, name, content) -> {
                   throw new IllegalStateException("disk full");
                 }),
-            ToolResultFinalizer.DEFAULT_RESOURCE_MAX_BYTES);
+            DEFAULT_RESOURCE_MAX_BYTES);
 
     String largeText = "x".repeat(ToolResultFinalizer.INLINE_MAX_UTF8_BYTES + 1);
     ToolResult result =
@@ -534,7 +535,7 @@ class ToolResultFinalizerTest {
     assertEquals("read", FileTool.READ_NAME);
   }
 
-  /** read 契约上限（2000 行、60000 code point 正文）加行号/header 后仍完整内联，不再被 50 KiB 二次外化。 */
+  /** read 契约上限（2000 行、60000 code point 正文）加行号/header 后仍完整内联，不被 50 KiB 二次外化。 */
   @Test
   void inlinesBuiltinReadMaxWindowWithEmojiBodyAndLineNumbers() {
     RecordingStager store = new RecordingStager();
@@ -564,7 +565,7 @@ class ToolResultFinalizerTest {
     assertEquals(payload, ((TextResultContent) success.result().contents().getFirst()).text());
   }
 
-  /** ASCII 与 CJK 正文同样按 read 加宽预算内联：60 KiB ASCII 文本不再触发 20 行 / 2 KiB 预览外化。 */
+  /** ASCII 与 CJK 正文同样按 read 加宽预算内联：60 KiB ASCII 文本不触发 20 行 / 2 KiB 预览外化。 */
   @Test
   void inlinesBuiltinReadAsciiAndCjkWindows() {
     String ascii = readWindow(numberedWindow(2000, "a", 30));
@@ -702,7 +703,7 @@ class ToolResultFinalizerTest {
     assertTrue(store.puts.isEmpty());
   }
 
-  /** read 的图片/二进制内容仍走原 Resource 外化分支，不参与文本内联阈值。 */
+  /** read 的图片/二进制内容走 Resource 外化分支，不参与文本内联阈值。 */
   @Test
   void builtinReadBinaryContentStillUsesResourceBranch() {
     RecordingStager store = new RecordingStager();
@@ -746,7 +747,7 @@ class ToolResultFinalizerTest {
   }
 
   private static ToolResultFinalizer finalizer(RecordingStager store) {
-    return finalizer(store, ToolResultFinalizer.DEFAULT_RESOURCE_MAX_BYTES);
+    return finalizer(store, DEFAULT_RESOURCE_MAX_BYTES);
   }
 
   private static ToolResultFinalizer finalizer(RecordingStager store, int resourceMaxBytes) {
@@ -779,8 +780,7 @@ class ToolResultFinalizerTest {
                   (long) content.length,
                   sha256Hex(content));
             });
-    ToolResultFinalizer finalizer =
-        new ToolResultFinalizer(stager, ToolResultFinalizer.DEFAULT_RESOURCE_MAX_BYTES);
+    ToolResultFinalizer finalizer = new ToolResultFinalizer(stager, DEFAULT_RESOURCE_MAX_BYTES);
 
     ToolResultFinalizer.Outcome outcome =
         finalizer.finalizeResult(
@@ -827,8 +827,7 @@ class ToolResultFinalizerTest {
             discarded.add(resource);
           }
         };
-    ToolResultFinalizer finalizer =
-        new ToolResultFinalizer(stager, ToolResultFinalizer.DEFAULT_RESOURCE_MAX_BYTES);
+    ToolResultFinalizer finalizer = new ToolResultFinalizer(stager, DEFAULT_RESOURCE_MAX_BYTES);
 
     ToolResultFinalizer.Outcome outcome =
         finalizer.finalizeResult(
@@ -883,7 +882,7 @@ class ToolResultFinalizerTest {
     logger.addAppender(logs);
     try {
       ToolResultFinalizer.Outcome outcome =
-          new ToolResultFinalizer(stager, ToolResultFinalizer.DEFAULT_RESOURCE_MAX_BYTES)
+          new ToolResultFinalizer(stager, DEFAULT_RESOURCE_MAX_BYTES)
               .finalizeResult(
                   TOOL_NAME,
                   new ToolResult(

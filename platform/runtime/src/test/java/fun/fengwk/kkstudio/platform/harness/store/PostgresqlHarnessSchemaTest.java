@@ -260,7 +260,7 @@ class PostgresqlHarnessSchemaTest {
 
   @Test
   void threadJoinTableStoresOnlyItsOwnedDurableState() {
-    // 测试意图：验证 harness_thread_join 表列定义严格与契约对齐，无历史多余状态枚举或 prompt/report 冗余复制。
+    // 测试意图：验证 harness_thread_join 表列定义严格与契约对齐，无多余状态枚举或 prompt/report 冗余复制。
     List<String> columns =
         jdbc.queryForList(
             """

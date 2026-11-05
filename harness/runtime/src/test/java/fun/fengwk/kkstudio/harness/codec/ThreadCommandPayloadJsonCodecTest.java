@@ -266,9 +266,6 @@ class ThreadCommandPayloadJsonCodecTest {
     assertFalse(json.contains("\"type\":\"NOTIFICATION\""));
     assertEquals(ThreadCommandType.NOTIFICATION, payload.type());
     assertEquals(payload, codec.decode(ThreadCommandType.NOTIFICATION, json));
-    // request 形态与 durable 形态一致：可信内部入口不经 HTTP 请求编码。
-    assertEquals(
-        payload, codec.decode(ThreadCommandType.NOTIFICATION, codec.encodeRequest(payload)));
     assertEquals(
         ThreadCommandPayloadJsonCodec.requestHash(payload),
         ThreadCommandPayloadJsonCodec.requestHash(payload));

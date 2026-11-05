@@ -617,7 +617,7 @@ class ModelAttemptMaterializationTest {
     }
   }
 
-  /** attach 转换的普通成功结果不再直接 return：必须完整等于 mapper 重放的 assistant payload。 */
+  /** attach 转换的普通成功结果必须完整等于 mapper 重放的 assistant payload。 */
   @Test
   void acceptsExactSuccessResultAndRejectsDrift() {
     ModelInvocation stored =

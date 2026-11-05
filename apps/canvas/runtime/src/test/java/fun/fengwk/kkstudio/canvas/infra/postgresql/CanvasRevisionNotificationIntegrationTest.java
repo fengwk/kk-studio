@@ -69,7 +69,7 @@ class CanvasRevisionNotificationIntegrationTest extends PostgresCanvasInfraTestS
   void documentDeletionDoesNotFabricateRevision() throws Exception {
     UUID canvasId = addDocument();
     try (Connection listener = listenOn(CanvasVersionNotifications.CHANNEL)) {
-      assertTrue(canvasStore.deleteDocument(canvasId));
+      assertEquals(1, jdbc.update("delete from canvas_document where id = ?", canvasId));
       assertNoNotification(listener);
     }
   }

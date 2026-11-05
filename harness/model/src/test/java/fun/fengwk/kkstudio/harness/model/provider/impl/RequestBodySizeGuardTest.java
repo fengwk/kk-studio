@@ -18,9 +18,7 @@ class RequestBodySizeGuardTest {
   @Test
   void defaultGuardUsesApplicationWideLimit() {
     assertEquals(192L * 1024 * 1024, RequestBodySizeGuard.MAX_REQUEST_BODY_BYTES);
-    assertEquals(192L * 1024 * 1024, RequestBodySizeGuard.DEFAULT.limitBytes());
-    assertEquals(
-        RequestBodySizeGuard.MAX_REQUEST_BODY_BYTES, RequestBodySizeGuard.DEFAULT.limitBytes());
+    assertNotNull(RequestBodySizeGuard.DEFAULT);
   }
 
   @Test
@@ -52,7 +50,9 @@ class RequestBodySizeGuardTest {
     // 可注入的小阈值绝不影响共享默认实例，避免测试阈值泄漏到生产路径
     RequestBodySizeGuard tiny = new RequestBodySizeGuard(1);
     assertNotNull(RequestBodySizeGuard.DEFAULT);
-    assertEquals(192L * 1024 * 1024, RequestBodySizeGuard.DEFAULT.limitBytes());
-    assertEquals(1, tiny.limitBytes());
+    tiny.enforce(new byte[1]);
+    assertThrows(ProviderException.class, () -> tiny.enforce(new byte[2]));
+    // DEFAULT 实例不受 tiny 实例影响
+    RequestBodySizeGuard.DEFAULT.enforce(new byte[2]);
   }
 }

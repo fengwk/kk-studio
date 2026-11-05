@@ -37,9 +37,4 @@ public record TurnMediaCapabilities(
   public boolean acceptsProtocolPosition(ModelInputModality modality) {
     return toolResultModalities.contains(modality) || userModalities.contains(modality);
   }
-
-  /** 工具结果媒体是否可由当前已冻结消费者送达。 */
-  public boolean supportsToolResult(ModelInputModality modality) {
-    return declares(modality) && acceptsProtocolPosition(modality);
-  }
 }

@@ -465,7 +465,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
         usage());
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
 
-    // 完整压缩后的下一个 claim：此前保留的 queued USER 启动 INPUT（不再触发压缩）。
+    // 完整压缩后的下一个 claim：此前保留的 queued USER 启动 INPUT（不触发压缩）。
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
     EntryPath inputPlanned = path(fixture.store, baseline.threadId());
     Entry inputTurnStart = inputPlanned.entries().get(12);
@@ -671,7 +671,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     assertEquals(id(4L), nextStart.compaction().turnPrefixStartEntryId());
   }
 
-  /** OVERFLOW 压缩：claim2 应用 continueModel=true，claim3 偿还原有 CONTINUATION 义务。 */
+  /** OVERFLOW 压缩：claim2 应用 continueModel=true，claim3 偿还 CONTINUATION 义务。 */
   @Test
   void overflowCompactionAppliesContinueModelTrueThenNextProcessingCreatesContinuation() {
     Fixture fixture = fixture();
@@ -1005,7 +1005,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
     assertNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId())));
 
-    // 下一条 user demand 到达后直接启动 INPUT；旧 usage 未越阈，不制造无意义压缩。
+    // 下一条 user demand 到达后直接启动 INPUT；先前 usage 未越阈，不制造无意义压缩。
     seedCommand(
         fixture.store,
         baseline.threadId(),
@@ -2144,8 +2144,23 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
           ThreadState thread = tx.threads().lock(threadId).orElseThrow();
           tx.threads()
               .update(
-                  thread.changeExecutionControl(
-                      ThreadExecutionControl.STOPPED, thread.updatedAt()));
+                  new ThreadState(
+                      thread.id(),
+                      thread.sessionId(),
+                      thread.parentThreadId(),
+                      thread.headEntryId(),
+                      thread.creationRequestHash(),
+                      thread.name(),
+                      thread.rootThreadId(),
+                      thread.yoloEnabled(),
+                      thread.spawnTrigger(),
+                      thread.constraints(),
+                      ThreadExecutionControl.STOPPED,
+                      thread.inputThroughSequence(),
+                      thread.nextCommandSequence(),
+                      thread.version() + 1,
+                      thread.createdAt(),
+                      thread.updatedAt()));
           return null;
         });
   }

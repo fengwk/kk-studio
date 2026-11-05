@@ -177,7 +177,7 @@ Studio -> IDE_LEASE(round, bindings)
 
 ## 载荷与编解码
 
-控制协议各帧的载荷均为 Protobuf 强类型消息，集中定义于 `control.proto`。传输层入站解码由 `ControlProtocolCodec.decodeFrame` 完成成帧与 protobuf 解析，并调用 `ControlProtocolValidator` 施加一次性的应用层语义校验；服务端核心 `DaemonSession.receive` 假定输入帧已通过 wire 校验，只执行会话语义与状态机校验（如 `READY` 仅允许一次、环境标识匹配等）。
+控制协议各帧的载荷均为 Protobuf 强类型消息，集中定义于 `control.proto`。传输层入站解码由 `ControlFraming` 处理成帧，`ControlProtocolCodec.decodeBinary` 解析 protobuf 并调用 `ControlProtocolValidator` 施加一次性的应用层语义校验；服务端核心 `DaemonSession.receive` 假定输入帧已通过 wire 校验，只执行会话语义与状态机校验（如 `READY` 仅允许一次、环境标识匹配等）。
 
 宿主环境元数据持久化：[`DaemonCapabilitiesCodec`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/DaemonCapabilitiesCodec.java) 编解码宿主侧环境元数据，由 Server 持久化到 `runtime_info`。当前运行状态仅保存在连接会话内存中，不持久化。`environment_connection` 保留：
 - `runtime_info`：最后接受的 READY 宿主 metadata，断线保留。实际 Daemon 版本只取此上报事实。

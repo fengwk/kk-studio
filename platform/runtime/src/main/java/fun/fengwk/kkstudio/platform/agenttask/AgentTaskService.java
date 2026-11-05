@@ -125,7 +125,7 @@ public class AgentTaskService {
   }
 
   /** 票据的固定凭据；不存在返回空。 */
-  public Optional<ThreadJoin> findTicket(UUID ticketId) {
+  private Optional<ThreadJoin> findTicket(UUID ticketId) {
     return requireRuntime().findJoin(Objects.requireNonNull(ticketId, "ticketId"));
   }
 

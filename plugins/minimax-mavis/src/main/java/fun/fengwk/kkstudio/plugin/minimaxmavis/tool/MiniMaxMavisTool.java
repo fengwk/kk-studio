@@ -139,7 +139,7 @@ public final class MiniMaxMavisTool implements Tool {
   }
 
   /** 能力到 side effect 的固定映射：搜索、提取、理解、ASR、音色列表与视频查询是只读；生成类是非幂等，断连或超时不得自动重放。 */
-  public static ToolSideEffect sideEffectOf(MavisCapability capability) {
+  private static ToolSideEffect sideEffectOf(MavisCapability capability) {
     return switch (capability) {
       case WEB_SEARCH,
           EXTRACT_WEB,
@@ -157,7 +157,7 @@ public final class MiniMaxMavisTool implements Tool {
   }
 
   /** 该能力的响应是否承载媒体：生成类与下载/查询类都会把第三方临时地址暂存为 Blob 引用，纯文本能力直接返回有界 JSON。 */
-  public static boolean stagesMedia(MavisCapability capability) {
+  private static boolean stagesMedia(MavisCapability capability) {
     return switch (capability) {
       case TTS,
           TTS_BATCH,
@@ -171,7 +171,7 @@ public final class MiniMaxMavisTool implements Tool {
   }
 
   /** 该能力是否必须在发送前就要求资源网关存在：非幂等生成调用一旦发出就可能消费额度，因此宁可确定性失败也不在拿到结果后才失败。 */
-  public static boolean requiresGatewayBeforeSend(MavisCapability capability) {
+  private static boolean requiresGatewayBeforeSend(MavisCapability capability) {
     return switch (capability) {
       case TTS, TTS_BATCH, GENERATE_IMAGE, GENERATE_MUSIC -> true;
       default -> false;

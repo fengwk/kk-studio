@@ -15,7 +15,7 @@ import java.util.UUID;
  * 边界，并在两者之间做无损映射。环境亲和性冻结该 Work 必须路由的环境 id；仅允许 targetType 声明 {@link
  * WorkTargetType#environmentAffinity()} 时非空，server-side TOOL 可为空。
  *
- * <p>每次 request 时 {@code wakeVersion} 递增，从而阻止旧的 Processor 完成删除一个更新的 wake； {@code leaseToken} /
+ * <p>每次 request 时 {@code wakeVersion} 递增，从而阻止过期的 Processor 完成删除一个更新的 wake； {@code leaseToken} /
  * {@code leaseUntil} 形成所有权围栏拦截过期的 worker，且两者总是同时存在或同时缺失。
  */
 public record Work(
@@ -145,7 +145,7 @@ public record Work(
         && leaseUntil.isAfter(now);
   }
 
-  /** 映射到公共状态机；Harness 不再维护第二套跃迁实现。 */
+  /** 映射到公共状态机。 */
   public WorkState state() {
     return new WorkState(
         availableAt,

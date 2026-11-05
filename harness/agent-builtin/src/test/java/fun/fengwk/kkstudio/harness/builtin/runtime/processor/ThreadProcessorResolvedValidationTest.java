@@ -64,7 +64,7 @@ class ThreadProcessorResolvedValidationTest extends ThreadProcessorTestBase {
 
   @Test
   void environmentBoundToolBindsDirectEnvironmentIdOnBranchWithoutDirectory() {
-    // branch 不再持有目录：environment-required tool 的 environmentId 与 branch 事实不构成冲突，正常落库。
+    // environment-required tool 的 environmentId 与 branch 事实不构成冲突，正常落库。
     Fixture fixture = fixture();
     var baseline = seedBaseline(fixture.store);
     seedCommand(
@@ -75,7 +75,7 @@ class ThreadProcessorResolvedValidationTest extends ThreadProcessorTestBase {
     ClaimedWork claim = claimThreadWork(fixture.store, baseline.threadId());
 
     assertEquals(ThreadProcessResult.COMPLETED, fixture.processor.process(claim));
-    // 基线 ROOT + 本轮 TURN_START + USER = 3：environment-required tool 不再引入任何目录事实。
+    // 基线 ROOT + 本轮 TURN_START + USER = 3：environment-required tool 不引入额外目录事实。
     assertEquals(3, path(fixture.store, baseline.threadId()).entries().size());
   }
 

@@ -10,18 +10,16 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
 
-/** {@link ThreadExecutionControl} 两个持久状态与 {@code isRunnable}/{@code isStopped} 全分支。 */
+/** {@link ThreadExecutionControl} 两个持久状态与 {@code isStopped} 全分支。 */
 class ThreadExecutionControlTest {
 
   @Test
   void runnableIsNeitherStoppedNorResumedByAccident() {
-    assertTrue(ThreadExecutionControl.RUNNABLE.isRunnable());
     assertFalse(ThreadExecutionControl.RUNNABLE.isStopped());
   }
 
   @Test
-  void stoppedIsPersistentlyNotRunnable() {
-    assertFalse(ThreadExecutionControl.STOPPED.isRunnable());
+  void stoppedIsPersistentlyStopped() {
     assertTrue(ThreadExecutionControl.STOPPED.isStopped());
   }
 

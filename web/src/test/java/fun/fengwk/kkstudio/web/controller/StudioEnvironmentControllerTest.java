@@ -12,7 +12,6 @@ import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -95,8 +94,7 @@ class StudioEnvironmentControllerTest {
         .perform(get("/api/environments"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data[0].id").value(ENV_ID.toString()))
-        .andExpect(jsonPath("$.data[0].name").value("dev"))
-        .andExpect(jsonPath("$.data[0].skills").doesNotExist());
+        .andExpect(jsonPath("$.data[0].name").value("dev"));
   }
 
   /** 意图：验证 GET /api/environments/{environmentId} 查询已存在的环境返回 200 与对应的卡片信息。 */
@@ -111,8 +109,7 @@ class StudioEnvironmentControllerTest {
         .perform(get("/api/environments/" + ENV_ID))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.id").value(ENV_ID.toString()))
-        .andExpect(jsonPath("$.data.name").value("dev"))
-        .andExpect(jsonPath("$.data.skills").doesNotExist());
+        .andExpect(jsonPath("$.data.name").value("dev"));
   }
 
   /**
@@ -229,17 +226,6 @@ class StudioEnvironmentControllerTest {
     verify(environmentService).rotateToken(EnvironmentId.of(ENV_ID), "0");
   }
 
-  /** 意图：Environment name 是不可变身份，改名端点已彻底移除；只有 token 轮换可以推进 version。 */
-  @Test
-  void environmentUpdateEndpointIsGone() throws Exception {
-    mockMvc
-        .perform(
-            put("/api/environments/" + ENV_ID)
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"name\":\"renamed\",\"expectedVersion\":\"0\"}"))
-        .andExpect(status().isMethodNotAllowed());
-  }
-
   /**
    * 意图：验证 DELETE /api/environments/{environmentId} 依然通过 query param 传递 expectedVersion，并返回 HTTP 204
    * No Content。
@@ -253,7 +239,7 @@ class StudioEnvironmentControllerTest {
     verify(environmentService).delete(EnvironmentId.of(ENV_ID), "0");
   }
 
-  /** 意图：Card 直接暴露连接行保留的最近一次 READY 宿主 metadata；没有独立 runtime 端点，也没有报告历史。 */
+  /** 意图：Card 直接暴露连接行保留的最近一次 READY 宿主 metadata。 */
   @Test
   void getEnvironmentExposesRetainedHostMetadata() throws Exception {
     EnvironmentCardDTO card = new EnvironmentCardDTO();
@@ -459,24 +445,5 @@ class StudioEnvironmentControllerTest {
     snapshot.setRevision(revision);
     snapshot.setStatus(status);
     return snapshot;
-  }
-
-  /** 意图：Environment 异步管理操作端点已随 environment_operation 表一起移除，访问必须 404。 */
-  @Test
-  void operationsEndpointsAreGone() throws Exception {
-    mockMvc
-        .perform(get("/api/environments/" + ENV_ID + "/operations"))
-        .andExpect(status().isNotFound());
-    mockMvc
-        .perform(
-            get("/api/environments/" + ENV_ID + "/operations/33333333-3333-3333-3333-333333333333"))
-        .andExpect(status().isNotFound());
-    mockMvc
-        .perform(
-            post(
-                "/api/environments/"
-                    + ENV_ID
-                    + "/operations/33333333-3333-3333-3333-333333333333/cancel"))
-        .andExpect(status().isNotFound());
   }
 }

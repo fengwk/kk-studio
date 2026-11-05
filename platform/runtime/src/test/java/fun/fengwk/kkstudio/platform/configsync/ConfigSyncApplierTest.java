@@ -214,7 +214,7 @@ class ConfigSyncApplierTest {
             List.of(),
             null));
 
-    // 导入使用显式 upsert 命令恢复文件事实，不再区分 create/update，也不再读取 repository 判断存在性。
+    // 导入使用显式 upsert 命令恢复文件事实，不区分 create/update，不读取 repository 判断存在性。
     verify(providerService).importProvider("new", created.properties());
     verify(providerService).importProvider("old", existing.properties());
     verify(providerService, never()).createProvider(any());

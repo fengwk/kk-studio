@@ -42,10 +42,6 @@ public final class IdeBrowserSessionRegistry implements IdeViewAuthorizationList
     public EnvironmentId environmentId() {
       return identity.environmentId();
     }
-
-    public boolean authorizesWorkspace(String candidate) {
-      return candidate != null && workspacePath.equals(candidate);
-    }
   }
 
   private static final int TOKEN_BYTES = 32;
@@ -138,23 +134,6 @@ public final class IdeBrowserSessionRegistry implements IdeViewAuthorizationList
     }
   }
 
-  public void closeGeneration(DaemonConnectionIdentity identity) {
-    Objects.requireNonNull(identity, "identity");
-    synchronized (lock) {
-      generations.remove(new Generation(identity));
-      sessions
-          .entrySet()
-          .removeIf(
-              entry -> {
-                boolean matches = entry.getValue().identity.equals(identity);
-                if (matches) {
-                  tokenBySessionKey.remove(entry.getValue().key());
-                }
-                return matches;
-              });
-    }
-  }
-
   @Override
   public void ensureViewCapacity(EnvironmentId environmentId) {
     Objects.requireNonNull(environmentId, "environmentId");
@@ -219,32 +198,6 @@ public final class IdeBrowserSessionRegistry implements IdeViewAuthorizationList
       }
       state.views.remove(viewId);
       removeAllSessionsForView(identity.environmentId(), viewId);
-    }
-  }
-
-  public int size() {
-    synchronized (lock) {
-      return sessions.size();
-    }
-  }
-
-  public int viewCount(DaemonConnectionIdentity identity) {
-    Objects.requireNonNull(identity, "identity");
-    synchronized (lock) {
-      GenerationState state = generations.get(new Generation(identity));
-      return state == null ? 0 : state.views.size();
-    }
-  }
-
-  public int sessionCount(EnvironmentId environmentId, String viewId) {
-    synchronized (lock) {
-      return (int)
-          sessions.values().stream()
-              .filter(
-                  session ->
-                      session.identity.environmentId().equals(environmentId)
-                          && session.viewId.equals(viewId))
-              .count();
     }
   }
 

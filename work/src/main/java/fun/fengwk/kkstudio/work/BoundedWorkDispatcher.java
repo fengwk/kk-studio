@@ -150,11 +150,6 @@ public final class BoundedWorkDispatcher<T> implements AutoCloseable {
     return started;
   }
 
-  /** 当前已接受、尚未收尾的 worker task 数，用于容量观测。 */
-  public int inFlightCount() {
-    return inFlight.get();
-  }
-
   private void submitDrain() {
     AtomicBoolean taskStarted = new AtomicBoolean();
     try {

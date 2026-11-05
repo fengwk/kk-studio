@@ -100,7 +100,7 @@ public final class StoreTestSupport {
   /**
    * 测试专用：按 Thread 的 {@code nextCommandSequence} 逐条读取历史 Command，保持 sequence 升序。
    *
-   * <p>生产 store 不再暴露全历史查询；测试只依赖已分配的 sequence 区间与单条读取。Thread 不存在时与旧查询一致返回空列表。
+   * <p>测试依赖已分配的 sequence 区间与单条读取。Thread 不存在时返回空列表。
    */
   public static List<ThreadCommand> loadCommandsByThread(
       HarnessStore.Transaction tx, UUID threadId) {
@@ -461,8 +461,8 @@ public final class StoreTestSupport {
   }
 
   /**
-   * 命令 helper：ThreadCommand 不再携带代理 id，签名仅为 {@code (threadId, sequence, idempotencyKey)}。
-   * idempotencyKey 必须为非空 UUID。
+   * 命令 helper：构造签名为 {@code (threadId, sequence, idempotencyKey)} 的 ThreadCommand。 idempotencyKey
+   * 必须为非空 UUID。
    */
   public static ThreadCommand command(UUID threadId, long sequence, UUID idempotencyKey) {
     UserMessageCommandPayload payload =
@@ -552,9 +552,7 @@ public final class StoreTestSupport {
         command.createdAt());
   }
 
-  /**
-   * READY（非 terminal）或 CANCELLED（terminal）的 tool invocation；不再持有 resultEntryId（batch apply 后行物理删除）。
-   */
+  /** READY（非 terminal）或 CANCELLED（terminal）的 tool invocation。 */
   public static ToolInvocation toolInvocation(
       UUID id,
       UUID threadId,

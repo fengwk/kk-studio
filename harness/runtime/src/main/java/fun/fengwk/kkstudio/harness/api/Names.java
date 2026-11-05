@@ -21,7 +21,7 @@ public final class Names {
   public static final int MAX_CODE_POINTS = 256;
 
   /** Session 默认名派生时使用的文本码点上限（前 40 个码点，无省略号）。 */
-  public static final int SESSION_NAME_TEXT_CODE_POINTS = 40;
+  private static final int SESSION_NAME_TEXT_CODE_POINTS = 40;
 
   /** 规范 UUID 文本（含连字符）的前缀截取长度，用于「session-/branch- + UUID 前 8 位」回退名。 */
   private static final int UUID_PREFIX_LENGTH = 8;

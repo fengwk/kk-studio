@@ -36,7 +36,7 @@ import java.util.function.Supplier;
 public final class CanvasCommandPlanner {
 
   /** 单个节点当前资源数组的长度上限，限制资源数量与 patch 体积。 */
-  public static final int MAX_RESOURCES_PER_NODE = 32;
+  static final int MAX_RESOURCES_PER_NODE = 32;
 
   private final Clock clock;
   private final Supplier<UUID> resourceIds;

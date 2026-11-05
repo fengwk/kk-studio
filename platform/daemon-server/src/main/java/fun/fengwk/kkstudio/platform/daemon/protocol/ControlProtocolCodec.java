@@ -4,7 +4,6 @@ import com.google.protobuf.InvalidProtocolBufferException;
 
 import fun.fengwk.kkstudio.platform.daemon.DaemonSkillPackage;
 import fun.fengwk.kkstudio.platform.daemon.DaemonSkillStatePackage;
-import fun.fengwk.kkstudio.platform.daemon.DaemonUpdateCommand;
 
 import java.util.List;
 import java.util.Objects;
@@ -43,28 +42,9 @@ public final class ControlProtocolCodec {
     return envelope.toByteArray();
   }
 
-  /** 解码一条带四字节长度前缀的帧。 */
-  public static Envelope decodeFrame(byte[] frame) {
-    return decodeBinary(ControlFraming.unframe(frame));
-  }
-
   /** 校验后编码为一条带四字节长度前缀的帧。 */
   public static byte[] encodeFrame(Envelope envelope) {
     return ControlFraming.frame(encodeBinary(envelope));
-  }
-
-  public static Update toProtoUpdate(DaemonUpdateCommand command) {
-    Objects.requireNonNull(command, "command");
-    return Update.newBuilder()
-        .setOperationId(command.operationId())
-        .setTargetVersion(command.targetVersion())
-        .build();
-  }
-
-  /** 把已校验的 UPDATE proto 转换为领域命令。 */
-  public static DaemonUpdateCommand toDomainUpdate(Update proto) {
-    Objects.requireNonNull(proto, "proto");
-    return new DaemonUpdateCommand(proto.getOperationId(), proto.getTargetVersion());
   }
 
   /** 构建一条完整的期望技能集合；编码边界负责施加协议校验。 */
@@ -85,20 +65,6 @@ public final class ControlProtocolCodec {
     return proto;
   }
 
-  /** 把已校验的期望集合 proto 转换为领域集合。 */
-  public static List<DaemonSkillPackage> toDomainSkillSync(SkillSync proto) {
-    Objects.requireNonNull(proto, "proto");
-    return proto.getPackagesList().stream()
-        .map(
-            skillPackage ->
-                new DaemonSkillPackage(
-                    skillPackage.getPackageName(),
-                    skillPackage.getSha256(),
-                    skillPackage.getSizeBytes(),
-                    skillPackage.getDownloadUrl()))
-        .toList();
-  }
-
   /** 把已校验的状态上报 proto 转换为领域集合。 */
   public static List<DaemonSkillStatePackage> toDomainSkillState(SkillState proto) {
     Objects.requireNonNull(proto, "proto");
@@ -111,29 +77,6 @@ public final class ControlProtocolCodec {
                     state.hasLocalPath() ? state.getLocalPath() : null,
                     state.hasError() ? state.getError() : null))
         .toList();
-  }
-
-  /** 构建一轮完整状态上报；测试与跨语言 fixture 共用同一形状。 */
-  public static SkillState toProtoSkillState(List<DaemonSkillStatePackage> packages) {
-    Objects.requireNonNull(packages, "packages");
-    SkillState.Builder state = SkillState.newBuilder();
-    for (DaemonSkillStatePackage skillPackage : packages) {
-      Objects.requireNonNull(skillPackage, "packages[]");
-      SkillPackageState.Builder entry =
-          SkillPackageState.newBuilder().setPackageName(skillPackage.packageName());
-      if (skillPackage.installedSha256() != null) {
-        entry.setInstalledSha256(skillPackage.installedSha256());
-      }
-      if (skillPackage.localPath() != null) {
-        entry.setLocalPath(skillPackage.localPath());
-      }
-      if (skillPackage.error() != null) {
-        entry.setError(skillPackage.error());
-      }
-      state.addPackages(entry.build());
-    }
-    SkillState proto = state.build();
-    return proto;
   }
 
   private static void requireMessageLength(byte[] bytes) {

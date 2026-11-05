@@ -30,26 +30,18 @@ import java.util.function.Function;
 public final class HarnessCatalog {
 
   private final List<ContributorDescriptor> descriptors;
-  private final Map<ContributorId, ContributorDescriptor> descriptorsById;
   private final List<ToolContribution> tools;
   private final List<ToolContribution> selectableTools;
   private final Map<String, ToolContribution> toolsByName;
   private final Map<ContributionId, ToolContribution> toolsById;
   private final List<CustomEntryTypeContribution> customEntryTypes;
   private final Map<CustomTypeKey, CustomEntryTypeContribution> customEntryTypesByKey;
-  private final Map<ContributorId, Set<ContributorId>> transitiveRequirementsById;
 
   private HarnessCatalog(
       List<ContributorDescriptor> descriptors,
       List<ToolContribution> tools,
-      List<CustomEntryTypeContribution> customEntryTypes,
-      Map<ContributorId, Set<ContributorId>> transitiveRequirementsById) {
+      List<CustomEntryTypeContribution> customEntryTypes) {
     this.descriptors = List.copyOf(descriptors);
-    Map<ContributorId, ContributorDescriptor> descriptorIndex = new LinkedHashMap<>();
-    for (ContributorDescriptor descriptor : descriptors) {
-      descriptorIndex.put(descriptor.id(), descriptor);
-    }
-    this.descriptorsById = Map.copyOf(descriptorIndex);
     this.tools = List.copyOf(tools);
     List<ToolContribution> selectables = new ArrayList<>();
     Map<String, ToolContribution> byName = new LinkedHashMap<>();
@@ -75,12 +67,6 @@ public final class HarnessCatalog {
           contribution);
     }
     this.customEntryTypesByKey = Map.copyOf(customEntryTypeIndex);
-    Map<ContributorId, Set<ContributorId>> immutableRequirements = new LinkedHashMap<>();
-    transitiveRequirementsById.forEach(
-        (contributorId, requirements) ->
-            immutableRequirements.put(
-                contributorId, Collections.unmodifiableSet(new LinkedHashSet<>(requirements))));
-    this.transitiveRequirementsById = Map.copyOf(immutableRequirements);
   }
 
   /** 从 contributor 集合构建冻结 catalog；输入顺序不会影响最终顺序。 */
@@ -108,18 +94,6 @@ public final class HarnessCatalog {
   /** 返回冻结的 SELECTABLE Tool 列表。 */
   public List<ToolContribution> selectableTools() {
     return selectableTools;
-  }
-
-  /** 按 contributor id 查找冻结 descriptor。 */
-  public Optional<ContributorDescriptor> findDescriptor(ContributorId contributorId) {
-    return Optional.ofNullable(
-        descriptorsById.get(Objects.requireNonNull(contributorId, "contributorId")));
-  }
-
-  /** 按 contributor id 返回已冻结的全部传递 requires；未知 contributor 返回空集合。 */
-  public Set<ContributorId> transitiveRequires(ContributorId contributorId) {
-    return transitiveRequirementsById.getOrDefault(
-        Objects.requireNonNull(contributorId, "contributorId"), Set.of());
   }
 
   /** 按 model-visible Tool name 查找 Tool 贡献。 */
@@ -210,8 +184,7 @@ public final class HarnessCatalog {
               new ArrayList<>(customEntryTypes.values()),
               CustomEntryTypeContribution::id,
               CustomEntryTypeContribution::priority,
-              transitiveRequirements),
-          transitiveRequirements);
+              transitiveRequirements));
     }
 
     @Override

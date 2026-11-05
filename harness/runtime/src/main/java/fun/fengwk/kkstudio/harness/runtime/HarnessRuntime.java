@@ -355,19 +355,6 @@ public final class HarnessRuntime {
                             "session " + sessionId + " does not exist")));
   }
 
-  /** 按 Thread + idempotencyKey 读取 durable command，用于应用层精确重放校验。 */
-  public Optional<ThreadCommand> findThreadCommand(UUID threadId, UUID idempotencyKey) {
-    Objects.requireNonNull(threadId, "threadId");
-    Objects.requireNonNull(idempotencyKey, "idempotencyKey");
-    return store.transaction(
-        tx -> {
-          if (tx.threads().find(threadId).isEmpty()) {
-            throw new HarnessRuntimeNotFoundException("thread " + threadId + " does not exist");
-          }
-          return tx.commands().findByIdempotencyKey(threadId, idempotencyKey);
-        });
-  }
-
   /**
    * 在单个短 transaction 内重命名 Session：先 FOR UPDATE 锁 Session 行，name 规范化为非空单行后与当前值比较，同名即按原样返回 （网络重试
    * no-op）；否则仅替换显示名称，id / createdAt 不可变。本操作不触碰任何 Thread / Command / Entry / Work， 并发重命名为

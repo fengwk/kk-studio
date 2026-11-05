@@ -188,11 +188,8 @@ class PluginCatalogWiringTest {
                 assertEquals(
                     15, lease.snapshot().harnessCatalog().tools().size(), "Mavis tools are frozen");
                 assertTrue(
-                    lease
-                        .snapshot()
-                        .harnessCatalog()
-                        .findDescriptor(new ContributorId("minimax-mavis"))
-                        .isPresent());
+                    lease.snapshot().harnessCatalog().descriptors().stream()
+                        .anyMatch(d -> d.id().equals(new ContributorId("minimax-mavis"))));
                 assertTrue(
                     PluginCanvasFunctionCatalog.of(lease.snapshot()).catalog().list().isEmpty());
               }

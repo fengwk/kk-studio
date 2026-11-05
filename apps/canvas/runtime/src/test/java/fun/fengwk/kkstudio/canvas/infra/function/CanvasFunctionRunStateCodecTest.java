@@ -124,7 +124,7 @@ class CanvasFunctionRunStateCodecTest {
             Map.of("jobId", "job-1", "attempt", 1));
   }
 
-  /** round-trip 编解码完整定义与冻结计划，并覆盖 stage/functionName/transition。 */
+  /** round-trip 编解码完整定义与冻结计划，并覆盖 stage/transition。 */
   @Test
   void roundTripsTheTypedFrozenPlan() {
     String json = codec.encode(run);
@@ -133,7 +133,6 @@ class CanvasFunctionRunStateCodecTest {
     assertEquals(run, decoded);
     assertEquals(definition, decoded.definition());
     assertEquals("SUBMITTED", codec.stage(json));
-    assertEquals("test.video", codec.functionName(json));
     assertEquals(json, codec.initial(run));
     assertEquals("POLLING", codec.checkpoint(run, "POLLING", Map.of("jobId", "job-1")).stage());
     assertEquals(
@@ -263,7 +262,6 @@ class CanvasFunctionRunStateCodecTest {
     String duplicate = codec.encode(run).replaceFirst("\\{\"plan\":", "{\"stage\":\"X\",\"plan\":");
     assertThrows(IllegalArgumentException.class, () -> codec.decode(duplicate));
     assertThrows(IllegalArgumentException.class, () -> codec.stage("{"));
-    assertThrows(IllegalArgumentException.class, () -> codec.functionName("{}"));
 
     // adapterState 超过 64KB 限制
     Map<String, Object> oversized = Map.of("large", "x".repeat(65 * 1024));
@@ -289,7 +287,6 @@ class CanvasFunctionRunStateCodecTest {
     for (String blank : List.of("", "   ", "\n\t")) {
       assertThrows(IllegalArgumentException.class, () -> codec.decode(blank));
       assertThrows(IllegalArgumentException.class, () -> codec.stage(blank));
-      assertThrows(IllegalArgumentException.class, () -> codec.functionName(blank));
     }
     // JSON 字面量 null 解析为 NullNode 而非 MissingNode，同样不是合法 state。
     assertThrows(IllegalArgumentException.class, () -> codec.decode("null"));
@@ -339,7 +336,7 @@ class CanvasFunctionRunStateCodecTest {
     assertThrows(IllegalArgumentException.class, () -> codec.decode(nonPositiveWidth));
   }
 
-  /** 拒绝缺失 plan 字段、空白文本、decode 侧超限 adapterState、超深 args 以及非法 stage/functionName JSON。 */
+  /** 拒绝缺失 plan 字段、空白文本、decode 侧超限 adapterState、超深 args 以及非法 stage JSON。 */
   @Test
   void rejectsMissingFieldsBlankTextOversizedAdapterStateAndDeepArgs() {
     ObjectNode root = encodedRoot();
@@ -371,8 +368,6 @@ class CanvasFunctionRunStateCodecTest {
         .set("argsSchema", nestedObject(CanvasJson.MAX_DEPTH + 1));
     String deepSchema = root.toString();
     assertThrows(IllegalArgumentException.class, () -> codec.decode(deepSchema));
-
-    assertThrows(IllegalArgumentException.class, () -> codec.functionName("{"));
   }
 
   /**

@@ -62,10 +62,10 @@ import java.util.UUID;
  * <ol>
  *   <li>未匹配的 ThreadJoin 返回 empty；
  *   <li>已匹配的 ThreadJoin 严格以其冻结的 terminalEntryId 为 head 加载路径；
- *   <li>执行切片从源命令的 appliedEntryId 起算，绝不取切片之前的旧助手输出；
+ *   <li>执行切片从源命令的 appliedEntryId 起算，不取切片之前的助手输出；
  *   <li>执行前被取消（未产生 turnStart 或已被取消）结算为 CANCELLED 且 partial/report 为空；
  *   <li>COMPLETED、FAILED、STOPPED、CANCELLED 四种终态的 report/partial/error 映射与契约完全一致；
- *   <li>多轮次/多命令时，后续轮次的推进不影响旧 Join 的固定凭据（fixed head snapshot）。
+ *   <li>多轮次/多命令时，后续轮次的推进不影响先前 Join 的固定凭据（fixed head snapshot）。
  * </ol>
  */
 class ThreadJoinProjectorTest {
@@ -454,9 +454,7 @@ class ThreadJoinProjectorTest {
         });
   }
 
-  /**
-   * 测试意图：COMPLETED 但 join 未冻结 finalAnswerEntryId 时 report 必须为 null，绝不借用切片内更早的助手文本（旧答案不 得冒充最终答复）。
-   */
+  /** 测试意图：COMPLETED 但 join 未冻结 finalAnswerEntryId 时 report 必须为 null，不借用切片内更早的助手文本。 */
   @Test
   void completedWithoutFrozenFinalAnswerDoesNotBorrowEarlierAssistantText() {
     UUID turnStart = id(320);
@@ -1113,7 +1111,7 @@ class ThreadJoinProjectorTest {
 
   @Test
   void sourceRangeSlicingIgnoresOlderTurns() {
-    // 测试意图：验证同一子线程多轮执行时，第 2 轮 Join 仅切片第 2 轮条目，完全隔离第 1 轮的旧助手回复。
+    // 测试意图：验证同一子线程多轮执行时，第 2 轮 Join 仅切片第 2 轮条目，完全隔离第 1 轮助手回复。
     UUID turnStart1 = id(700);
     UUID user1 = id(701);
     UUID assistant1 = id(702);

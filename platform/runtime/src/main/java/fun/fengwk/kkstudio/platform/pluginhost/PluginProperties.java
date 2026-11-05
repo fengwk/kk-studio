@@ -19,10 +19,10 @@ import java.time.Duration;
 public class PluginProperties {
 
   /** 单次暂存的默认字节上限：256 MiB。 */
-  public static final long DEFAULT_MAX_BYTES = 256L * 1024L * 1024L;
+  private static final long DEFAULT_MAX_BYTES = 256L * 1024L * 1024L;
 
   /** 单次暂存的硬上限：1 GiB。超过它的配置被拒绝，避免把部署变成无界磁盘写入。 */
-  public static final long MAX_BYTES_LIMIT = 1024L * 1024L * 1024L;
+  private static final long MAX_BYTES_LIMIT = 1024L * 1024L * 1024L;
 
   /** 凭据刷新扫描与互斥 lease。 */
   private Refresh refresh = new Refresh();

@@ -555,7 +555,7 @@ public class CanvasFunctionRunTransactions {
               reference.index(),
               resource.id(),
               resource.blobId(),
-              kindOf(blob.mediaType()),
+              CanvasResourceKind.fromMediaType(blob.mediaType()),
               resource.name(),
               blob.mediaType(),
               blob.sizeBytes(),
@@ -610,7 +610,7 @@ public class CanvasFunctionRunTransactions {
     }
   }
 
-  /** 只从持久 state 解码冻结计划；恢复不再重查当前目录，避免按名字重新解释旧任务。 */
+  /** 只从持久 state 解码冻结计划；恢复时不重新查询当前目录，避免按名称重新解析已冻结的任务。 */
   private CanvasFunctionFrozenRun decode(CanvasFunctionRun run) {
     return stateCodec.decode(run.stateJson());
   }
@@ -721,25 +721,6 @@ public class CanvasFunctionRunTransactions {
     return builder.toString().strip();
   }
 
-  private static CanvasResourceKind kindOf(String mediaType) {
-    if (mediaType == null) {
-      throw new IllegalArgumentException("blob mediaType must not be null");
-    }
-    if (mediaType.startsWith("image/")) {
-      return CanvasResourceKind.IMAGE;
-    }
-    if (mediaType.startsWith("video/")) {
-      return CanvasResourceKind.VIDEO;
-    }
-    if (mediaType.startsWith("audio/")) {
-      return CanvasResourceKind.AUDIO;
-    }
-    if (mediaType.startsWith("text/")) {
-      return CanvasResourceKind.TEXT;
-    }
-    throw new IllegalArgumentException("unsupported blob mediaType: " + mediaType);
-  }
-
   private boolean matchesClaim(CanvasFunctionRun run, String requestId, UUID leaseToken) {
     return run != null
         && run.status() == CanvasFunctionRunStatus.RUNNING
@@ -790,7 +771,8 @@ public class CanvasFunctionRunTransactions {
           "media output slot must be materialized as a blob Resource");
     }
     BlobFacts outputBlob = blobAccess.findFacts(output.blobId()).orElse(null);
-    if (outputBlob == null || kindOf(outputBlob.mediaType()) != planned.kind()) {
+    if (outputBlob == null
+        || CanvasResourceKind.fromMediaType(outputBlob.mediaType()) != planned.kind()) {
       throw new IllegalArgumentException(
           "output blob kind must match the frozen Function output slot kind");
     }

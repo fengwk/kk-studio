@@ -1,9 +1,11 @@
 package fun.fengwk.kkstudio.web.runtime;
 
+import static org.mockito.Mockito.mock;
+
+import org.mockito.Answers;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
-import java.lang.reflect.Proxy;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /** 从运行期 JAR 装配 Mavis，并以禁止出网的传输验证启动和恢复，不建立编译期插件依赖。 */
@@ -29,17 +31,12 @@ final class RuntimeMavisTestSupport {
       Class<?> configuration = Class.forName(prefix + "minimaxmavis.MiniMaxMavisAutoConfiguration");
       Class<?> transportType = Class.forName(prefix + "minimaxmavis.MavisHttpTransport");
       Object transport =
-          Proxy.newProxyInstance(
-              transportType.getClassLoader(),
-              new Class<?>[] {transportType},
-              (proxy, method, args) ->
-                  switch (method.getName()) {
-                    case "send" -> handler.send(args[0]);
-                    case "toString" -> "offline Mavis transport";
-                    case "hashCode" -> System.identityHashCode(proxy);
-                    case "equals" -> proxy == args[0];
-                    default -> throw new UnsupportedOperationException(method.getName());
-                  });
+          mock(
+              transportType,
+              invocation ->
+                  invocation.getMethod().getName().equals("send")
+                      ? handler.send(invocation.getArgument(0))
+                      : Answers.RETURNS_DEFAULTS.answer(invocation));
       return runner
           .withInitializer(
               context ->

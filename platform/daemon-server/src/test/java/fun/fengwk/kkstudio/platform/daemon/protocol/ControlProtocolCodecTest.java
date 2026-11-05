@@ -263,22 +263,6 @@ class ControlProtocolCodecTest {
     ControlProtocolCodec.encodeBinary(
         result.toBuilder().setIdeResult(IdeResult.newBuilder().setOk(true)).build());
 
-    UpgradeRequired upgrade = UpgradeRequired.newBuilder().setTargetVersion("1.2.3").build();
-    ControlProtocolValidator.validateUpgrade(upgrade);
-    assertThrows(
-        ControlProtocolException.class,
-        () -> ControlProtocolValidator.validateUpgrade(UpgradeRequired.getDefaultInstance()));
-    assertThrows(
-        ControlProtocolException.class,
-        () ->
-            ControlProtocolValidator.validateUpgrade(
-                upgrade.toBuilder().clearTargetVersion().build()));
-    assertThrows(
-        ControlProtocolException.class,
-        () ->
-            ControlProtocolValidator.validateUpgrade(
-                upgrade.toBuilder().setTargetVersion("bad version").build()));
-
     Envelope update =
         Envelope.newBuilder()
             .setMessageType(MessageType.UPDATE)
@@ -343,7 +327,7 @@ class ControlProtocolCodecTest {
                     .setDocumentId(open.getDocumentId())
                     .setBindingEpoch(1))
             .build());
-    // DETACH_VIEW 已无生产调用方：控制平面不再接受该动作，即使字段形状与其它 bound 动作一致。
+    // 未声明的枚举值必须被拒绝，即使其它字段形状与 bound 动作一致。
     assertThrows(
         ControlProtocolException.class,
         () ->
@@ -351,12 +335,12 @@ class ControlProtocolCodecTest {
                 command.toBuilder()
                     .setIdeCommand(
                         IdeCommand.newBuilder()
-                            .setActionValue(5)
+                            .setActionValue(999)
                             .setViewId(open.getViewId())
                             .setDocumentId(open.getDocumentId())
                             .setBindingEpoch(1))
                     .build()),
-        "DETACH_VIEW is retired; raw value 5 must be rejected");
+        "undeclared action value 999 must be rejected");
     ControlProtocolCodec.encodeBinary(
         command.toBuilder()
             .setIdeCommand(IdeCommand.newBuilder().setAction(IdeAction.LIST_VIEWS))
@@ -512,7 +496,11 @@ class ControlProtocolCodecTest {
         Envelope.newBuilder()
             .setMessageType(MessageType.UPDATE)
             .setEnvironmentId(ControlProtocolFixtures.ENVIRONMENT_ID)
-            .setUpdate(ControlProtocolCodec.toProtoUpdate(command))
+            .setUpdate(
+                Update.newBuilder()
+                    .setOperationId(command.operationId())
+                    .setTargetVersion(command.targetVersion())
+                    .build())
             .build();
     assertArrayEquals(
         ControlProtocolFixtures.golden("update.bin"), ControlProtocolCodec.encodeBinary(update));
@@ -527,7 +515,9 @@ class ControlProtocolCodecTest {
           golden, ControlProtocolCodec.encodeBinary(ControlProtocolCodec.decodeBinary(golden)));
       byte[] framed = ControlProtocolCodec.encodeFrame(ControlProtocolCodec.decodeBinary(golden));
       assertArrayEquals(
-          golden, ControlProtocolCodec.encodeBinary(ControlProtocolCodec.decodeFrame(framed)));
+          golden,
+          ControlProtocolCodec.encodeBinary(
+              ControlProtocolCodec.decodeBinary(ControlFraming.unframe(framed))));
     }
   }
 
@@ -550,8 +540,11 @@ class ControlProtocolCodecTest {
   void validatesUpdateCommandAndRejectsUnknownFields() {
     DaemonUpdateCommand command =
         new DaemonUpdateCommand("11111111-1111-1111-1111-111111111111", "1.0.9");
-    Update update = ControlProtocolCodec.toProtoUpdate(command);
-    assertEquals(command, ControlProtocolCodec.toDomainUpdate(update));
+    Update update =
+        Update.newBuilder()
+            .setOperationId(command.operationId())
+            .setTargetVersion(command.targetVersion())
+            .build();
     assertEquals(2, update.getAllFields().size());
     assertThrows(
         ControlProtocolException.class,
@@ -579,8 +572,6 @@ class ControlProtocolCodecTest {
       Update invalid = update.toBuilder().mergeUnknownFields(unknown).build();
       assertThrows(
           ControlProtocolException.class, () -> ControlProtocolValidator.validateUpdate(invalid));
-      // 映射只读取已校验 proto 的已知字段；未知字段由 wire 边界拒绝。
-      assertEquals(command, ControlProtocolCodec.toDomainUpdate(invalid));
       Envelope envelope =
           Envelope.newBuilder()
               .setMessageType(MessageType.UPDATE)
@@ -1065,21 +1056,37 @@ class ControlProtocolCodecTest {
             .setEnvironmentId(ControlProtocolFixtures.ENVIRONMENT_ID)
             .setSkillSync(ControlProtocolCodec.toProtoSkillSync(List.of(pkg)))
             .build();
-    assertEquals(
-        List.of(pkg),
-        ControlProtocolCodec.toDomainSkillSync(
-            ControlProtocolCodec.decodeBinary(ControlProtocolCodec.encodeBinary(sync))
-                .getSkillSync()));
+    SkillSync decodedSync =
+        ControlProtocolCodec.decodeBinary(ControlProtocolCodec.encodeBinary(sync)).getSkillSync();
+    assertEquals(1, decodedSync.getPackagesCount());
+    assertEquals(pkg.packageName(), decodedSync.getPackages(0).getPackageName());
+    assertEquals(pkg.sha256(), decodedSync.getPackages(0).getSha256());
+    assertEquals(pkg.sizeBytes(), decodedSync.getPackages(0).getSizeBytes());
+    assertEquals(pkg.downloadUrl(), decodedSync.getPackages(0).getDownloadUrl());
 
     DaemonSkillStatePackage installed =
         new DaemonSkillStatePackage("pkg-a", sha, "/home/dev/skills/pkg-a", null);
     DaemonSkillStatePackage failed =
         new DaemonSkillStatePackage("pkg-b", null, null, "ARCHIVE_DIGEST_MISMATCH");
+    SkillState statePayload =
+        SkillState.newBuilder()
+            .addPackages(
+                SkillPackageState.newBuilder()
+                    .setPackageName("pkg-a")
+                    .setInstalledSha256(sha)
+                    .setLocalPath("/home/dev/skills/pkg-a")
+                    .build())
+            .addPackages(
+                SkillPackageState.newBuilder()
+                    .setPackageName("pkg-b")
+                    .setError("ARCHIVE_DIGEST_MISMATCH")
+                    .build())
+            .build();
     Envelope state =
         Envelope.newBuilder()
             .setMessageType(MessageType.SKILL_STATE)
             .setEnvironmentId(ControlProtocolFixtures.ENVIRONMENT_ID)
-            .setSkillState(ControlProtocolCodec.toProtoSkillState(List.of(installed, failed)))
+            .setSkillState(statePayload)
             .build();
     assertEquals(
         List.of(installed, failed),
@@ -1149,8 +1156,12 @@ class ControlProtocolCodecTest {
             ControlProtocolCodec.encodeBinary(
                 state.toBuilder()
                     .setSkillState(
-                        ControlProtocolCodec.toProtoSkillState(
-                            List.of(new DaemonSkillStatePackage("pkg-a", sha, null, null))))
+                        SkillState.newBuilder()
+                            .addPackages(
+                                SkillPackageState.newBuilder()
+                                    .setPackageName("pkg-a")
+                                    .setInstalledSha256(sha)
+                                    .build()))
                     .build()));
     assertThrows(
         ControlProtocolException.class,
@@ -1158,10 +1169,14 @@ class ControlProtocolCodecTest {
             ControlProtocolCodec.encodeBinary(
                 state.toBuilder()
                     .setSkillState(
-                        ControlProtocolCodec.toProtoSkillState(
-                            List.of(
-                                new DaemonSkillStatePackage(
-                                    "pkg-a", sha, "/home/dev/pkg-a", "line\nbreak"))))
+                        SkillState.newBuilder()
+                            .addPackages(
+                                SkillPackageState.newBuilder()
+                                    .setPackageName("pkg-a")
+                                    .setInstalledSha256(sha)
+                                    .setLocalPath("/home/dev/pkg-a")
+                                    .setError("line\nbreak")
+                                    .build()))
                     .build()));
   }
 

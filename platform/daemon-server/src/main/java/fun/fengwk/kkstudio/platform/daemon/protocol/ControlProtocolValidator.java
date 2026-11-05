@@ -35,22 +35,22 @@ import java.util.regex.Pattern;
 public final class ControlProtocolValidator {
 
   /** callId 的字符上限。 */
-  public static final int MAX_CALL_ID_CHARS = 256;
+  private static final int MAX_CALL_ID_CHARS = 256;
 
   /** 上传票据失败说明的字符上限。 */
-  public static final int MAX_FAILURE_MESSAGE_CHARS = 512;
+  private static final int MAX_FAILURE_MESSAGE_CHARS = 512;
 
   /** 展示名的字符上限。 */
-  public static final int MAX_DISPLAY_NAME_CHARS = 256;
+  private static final int MAX_DISPLAY_NAME_CHARS = 256;
 
   /** FAILED / ERROR message 的字符上限。 */
-  public static final int MAX_ERROR_MESSAGE_CHARS = 4096;
+  private static final int MAX_ERROR_MESSAGE_CHARS = 4096;
 
   /** IDE 路径的字符上限。 */
-  public static final int MAX_IDE_PATH_CHARS = 4096;
+  private static final int MAX_IDE_PATH_CHARS = 4096;
 
   /** IDE 列表视图上限。 */
-  public static final int MAX_LISTED_IDE_VIEWS = 64;
+  private static final int MAX_LISTED_IDE_VIEWS = 64;
 
   private static final Pattern SHA256_LOWER_PATTERN = Pattern.compile("^[0-9a-f]{64}$");
   private static final Pattern MEDIA_TYPE_PATTERN =
@@ -60,19 +60,19 @@ public final class ControlProtocolValidator {
       Pattern.compile("^[a-z0-9]+(-[a-z0-9]+)*$");
 
   /** 单轮期望集合与状态上报的包数上限。 */
-  public static final int MAX_SKILL_PACKAGES = 512;
+  private static final int MAX_SKILL_PACKAGES = 512;
 
   /** 技能包下载地址的字符上限。 */
-  public static final int MAX_SKILL_DOWNLOAD_URL_CHARS = 4096;
+  private static final int MAX_SKILL_DOWNLOAD_URL_CHARS = 4096;
 
   /** 技能包本地安装根的字符上限。 */
-  public static final int MAX_SKILL_LOCAL_PATH_CHARS = 4096;
+  private static final int MAX_SKILL_LOCAL_PATH_CHARS = 4096;
 
   /** 技能包安装错误的字符上限。 */
-  public static final int MAX_SKILL_ERROR_CHARS = 512;
+  private static final int MAX_SKILL_ERROR_CHARS = 512;
 
   /** 技能包名与包版本的字符上限。 */
-  public static final int MAX_SKILL_PACKAGE_NAME_CHARS = 64;
+  private static final int MAX_SKILL_PACKAGE_NAME_CHARS = 64;
 
   private static final Set<MessageType> BOUND =
       Set.of(
@@ -135,23 +135,6 @@ public final class ControlProtocolValidator {
           MessageType.SKILL_STATE);
 
   private ControlProtocolValidator() {}
-
-  /** 校验 426 升级拒绝载荷。它不是控制流 envelope。 */
-  public static UpgradeRequired validateUpgrade(UpgradeRequired upgrade) {
-    if (upgrade == null) {
-      throw new ControlProtocolException("upgradeRequired must not be null");
-    }
-    requireNoUnknown(upgrade, "upgradeRequired");
-    if (!upgrade.hasTargetVersion()) {
-      throw new ControlProtocolException("upgradeRequired.targetVersion is required");
-    }
-    try {
-      DaemonCapabilities.validateDaemonVersion(upgrade.getTargetVersion());
-    } catch (IllegalArgumentException error) {
-      throw new ControlProtocolException("upgradeRequired.targetVersion is invalid", error);
-    }
-    return upgrade;
-  }
 
   /** 校验 envelope 的类型、scope、payload 一致性与全部业务必填/限额。 */
   public static Envelope validate(Envelope envelope) {
@@ -655,7 +638,7 @@ public final class ControlProtocolValidator {
   }
 
   /** 期望集合：包名唯一，摘要、大小与预签名地址必须完整。 */
-  public static void validateSkillSync(SkillSync sync) {
+  private static void validateSkillSync(SkillSync sync) {
     requireNoUnknown(sync, "skillSync");
     if (sync.getPackagesCount() > MAX_SKILL_PACKAGES) {
       throw new ControlProtocolException("skillSync.packages exceeds the entry limit");
@@ -682,7 +665,7 @@ public final class ControlProtocolValidator {
   }
 
   /** 状态上报：包名唯一，摘要与本地路径成对，错误有界且去敏。 */
-  public static void validateSkillState(SkillState state) {
+  private static void validateSkillState(SkillState state) {
     requireNoUnknown(state, "skillState");
     if (state.getPackagesCount() > MAX_SKILL_PACKAGES) {
       throw new ControlProtocolException("skillState.packages exceeds the entry limit");

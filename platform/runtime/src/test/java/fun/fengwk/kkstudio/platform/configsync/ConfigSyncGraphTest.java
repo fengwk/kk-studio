@@ -358,7 +358,7 @@ class ConfigSyncGraphTest {
         List.of());
   }
 
-  /** 六节 settings 不再持有任何 Agent 引用：它仍是可同步条目，但依赖闭包为空、不反向扩展 Agent。 */
+  /** settings 不持有任何 Agent 引用：它仍是可同步条目，但依赖闭包为空、不反向扩展 Agent。 */
   @Test
   void settingsCarriesNoAgentReference() {
     ConfigSyncSnapshot snapshot =

@@ -33,7 +33,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import java.util.List;
 import java.util.UUID;
 
-/** ToolOutcomeAppender 只把已稳定的 terminal 结果映射成 history Entry，不再消费 upload 或二次物化。 */
+/** ToolOutcomeAppender 只把已稳定的 terminal 结果映射成 history Entry，不消费 upload 或二次物化。 */
 class ToolOutcomeAppenderTest {
 
   private static final HistoryPayloadMapper PAYLOAD_MAPPER = new HistoryPayloadMapper();

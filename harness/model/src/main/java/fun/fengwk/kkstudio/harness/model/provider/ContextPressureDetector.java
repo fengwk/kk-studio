@@ -132,8 +132,8 @@ public final class ContextPressureDetector {
             && promptTokens(usage) >= (long) Math.ceil(contextWindow * 0.99d));
   }
 
-  /** rate limit / throttling 永不为 context pressure；adapter classify 与 future ThreadProcessor 共用。 */
-  public static boolean isRateLimited(ContextPressureFacts facts) {
+  /** rate limit / throttling 永不为 context pressure。 */
+  private static boolean isRateLimited(ContextPressureFacts facts) {
     Objects.requireNonNull(facts, "facts");
     if (facts.httpStatus() != null && facts.httpStatus() == 429) {
       return true;

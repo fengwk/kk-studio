@@ -19,7 +19,7 @@ import java.util.UUID;
 /**
  * Stop 回执组装：把每个节点收敛后的停止边界与被取消命令固化为 {@link StoppedThreadReceipt}，并组装最终 {@link StopResult} 与本地取消集合。
  *
- * <p>首次 Stop 的回执按 Thread UuidOrder 排序；replay 直接返回持久保存的旧集合与顺序，不以当前树重算。人工输入 {@code USER_MESSAGE} /
+ * <p>首次 Stop 的回执按 Thread UuidOrder 排序；replay 直接返回持久保存的集合与顺序，不以当前树重算。人工输入 {@code USER_MESSAGE} /
  * {@code GOAL} 额外进入草稿恢复列表，系统通知、CUSTOM_MESSAGE 与 SET_* 只计入取消数量。
  */
 final class StopReceipts {
@@ -67,7 +67,7 @@ final class StopReceipts {
         List.copyOf(Objects.requireNonNull(toolExecutionIds, "toolExecutionIds")));
   }
 
-  /** 旧 stopRequestId 的重放：返回持久保存的整批回执，不排序、不重算、不登记本地取消。 */
+  /** 既有 stopRequestId 的重放：返回持久保存的整批回执，不排序、不重算、不登记本地取消。 */
   static StopControl.Commit replay(ThreadState target, List<StoppedThreadReceipt> stored) {
     return new StopControl.Commit(new StopResult(true, target, stored), List.of(), List.of());
   }

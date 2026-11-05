@@ -20,8 +20,6 @@ import java.sql.Connection;
 import java.sql.SQLException;
 import java.time.Duration;
 import java.time.Instant;
-import java.time.OffsetDateTime;
-import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Optional;
@@ -118,7 +116,7 @@ class PluginPersistencePostgresIntegrationTest {
     assertTrue(credentials.find(PLUGIN).isEmpty());
   }
 
-  /** 领取只取列出的到期行并签发租约；终结与释放都要求同一租约与版本。 */
+  /** 领取只取列出的到期行并签发租约；终结要求同一租约与版本。 */
   @Test
   void refreshLeaseLifecycle() {
     credentials.upsertConnected(PLUGIN, "{\"token\":\"a\"}", "CN", at(60), at(-1));
@@ -148,14 +146,6 @@ class PluginPersistencePostgresIntegrationTest {
             other, PluginCredentialStatus.REFRESH_FAILED, at(3600), "offline"));
     assertEquals(
         PluginCredentialStatus.REFRESH_FAILED, credentials.find(OTHER).orElseThrow().status());
-
-    jdbc.sql("update plugin_credential set next_refresh_at = ? where plugin_id = ?")
-        .params(OffsetDateTime.ofInstant(NOW, ZoneOffset.UTC), OTHER)
-        .update();
-    PluginCredentialRow again =
-        credentials.claimDue(List.of(OTHER), LEASE, lease("4")).orElseThrow();
-    assertTrue(credentials.releaseLease(again));
-    assertFalse(credentials.releaseLease(again));
   }
 
   /** 过期租约收敛为结果未知，之后不再被领取。 */

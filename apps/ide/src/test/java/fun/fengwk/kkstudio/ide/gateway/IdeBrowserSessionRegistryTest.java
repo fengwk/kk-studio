@@ -57,25 +57,19 @@ class IdeBrowserSessionRegistryTest {
 
     String token = registry.open(IDENTITY, viewId, 1L, "/workspace");
     assertNotNull(token);
-    assertEquals(1, registry.size());
-    assertEquals(1, registry.viewCount(IDENTITY));
-    assertEquals(1, registry.sessionCount(ENV, viewId));
 
     Optional<IdeBrowserSessionRegistry.Session> session = registry.lookup(token, ENV, viewId);
     assertTrue(session.isPresent());
     assertEquals(ENV, session.get().environmentId());
     assertEquals("/workspace", session.get().workspacePath());
-    assertTrue(session.get().authorizesWorkspace("/workspace"));
-    assertFalse(session.get().authorizesWorkspace("/other"));
 
     // Expiration
     now.set(now.get().plus(Duration.ofHours(2)));
     assertFalse(registry.lookup(token, ENV, viewId).isPresent());
-    assertEquals(0, registry.size());
   }
 
   @Test
-  void viewClosedAndCloseGeneration() {
+  void viewClosed() {
     IdeBrowserSessionRegistry registry = new IdeBrowserSessionRegistry();
     String viewId = UUID.randomUUID().toString();
     registry.viewOpened(IDENTITY, viewId, 1L, "/workspace");
@@ -83,13 +77,6 @@ class IdeBrowserSessionRegistryTest {
 
     registry.viewClosed(IDENTITY, viewId, 1L);
     assertFalse(registry.lookup(token, ENV, viewId).isPresent());
-
-    registry.viewOpened(IDENTITY, viewId, 2L, "/workspace");
-    String token2 = registry.open(IDENTITY, viewId, 2L, "/workspace");
-    assertTrue(registry.lookup(token2, ENV, viewId).isPresent());
-
-    registry.closeGeneration(IDENTITY);
-    assertFalse(registry.lookup(token2, ENV, viewId).isPresent());
   }
 
   @Test
@@ -206,8 +193,8 @@ class IdeBrowserSessionRegistryTest {
 
     String viewId = UUID.randomUUID().toString();
     registry.viewOpened(IDENTITY, viewId, 1L, "/workspace");
-    registry.open(IDENTITY, viewId, 1L, "/workspace");
-    assertEquals(1, registry.size());
+    String token1 = registry.open(IDENTITY, viewId, 1L, "/workspace");
+    assertTrue(registry.lookup(token1, ENV, viewId).isPresent());
 
     // Multi-environment capacity check (tests loop continue branch)
     EnvironmentId otherEnv = EnvironmentId.parse("33333333-3333-3333-3333-333333333333");
@@ -217,6 +204,6 @@ class IdeBrowserSessionRegistryTest {
     now.set(now.get().plus(Duration.ofHours(1)));
     String token2 = registry.open(IDENTITY, viewId, 1L, "/workspace");
     assertNotNull(token2);
-    assertEquals(1, registry.size());
+    assertTrue(registry.lookup(token2, ENV, viewId).isPresent());
   }
 }

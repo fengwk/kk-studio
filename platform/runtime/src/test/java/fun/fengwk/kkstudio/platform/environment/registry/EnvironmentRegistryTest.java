@@ -384,7 +384,9 @@ class EnvironmentRegistryTest extends PostgresSchemaSupport {
     assertNotNull(offline.daemonCapabilities());
     assertEquals(1, offline.skillState().size());
     assertEquals("/home/dev/skills/dev", offline.installedSkillRoot("dev", COMMIT).orElseThrow());
-    assertTrue(offline.recentEvents().stream().anyMatch(EnvironmentEvent::isAlert));
+    assertTrue(
+        offline.recentEvents().stream()
+            .anyMatch(e -> EnvironmentEvent.LEVEL_WARN.equals(e.level())));
   }
 
   /**

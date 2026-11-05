@@ -30,8 +30,8 @@ public record CanvasFunctionFrozenReference(
     Objects.requireNonNull(resourceId, "resourceId");
     Objects.requireNonNull(blobId, "blobId");
     Objects.requireNonNull(kind, "kind");
-    requireText(name, "name");
-    requireText(mediaType, "mediaType");
+    CanvasFunctionFrozenSupport.requireText(name, "name");
+    CanvasFunctionFrozenSupport.requireText(mediaType, "mediaType");
     if (sizeBytes < 0L) {
       throw new IllegalArgumentException("sizeBytes must be >= 0");
     }
@@ -43,12 +43,6 @@ public record CanvasFunctionFrozenReference(
     }
     if (durationMs != null && durationMs <= 0) {
       throw new IllegalArgumentException("durationMs must be positive when set");
-    }
-  }
-
-  private static void requireText(String value, String field) {
-    if (value == null || value.isBlank()) {
-      throw new IllegalArgumentException(field + " must not be blank");
     }
   }
 }

@@ -81,7 +81,7 @@ class OpenCliPluginTest {
     PluginContext context =
         new PluginContext(credentialAccess, Optional.empty(), Optional.empty(), Optional.empty());
 
-    PluginConfig config = PluginConfig.initial(plugin.configurationSchema());
+    PluginConfig config = new PluginConfig(0, plugin.configurationSchema().defaultsJson());
     PluginInstance instance = plugin.configure(config, context);
 
     assertNotNull(instance);
@@ -99,7 +99,7 @@ class OpenCliPluginTest {
     PluginCredentialAccess credentialAccess = mock(PluginCredentialAccess.class);
     PluginContext context =
         new PluginContext(credentialAccess, Optional.empty(), Optional.empty(), Optional.empty());
-    PluginConfig validConfig = PluginConfig.initial(plugin.configurationSchema());
+    PluginConfig validConfig = new PluginConfig(0, plugin.configurationSchema().defaultsJson());
 
     assertThatThrownBy(() -> plugin.configure(null, context))
         .isInstanceOf(NullPointerException.class)

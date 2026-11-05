@@ -43,11 +43,6 @@ public final class StudioPluginRegistry {
     this.pluginsById = Collections.unmodifiableMap(indexed);
   }
 
-  /** 已安装 Plugin 的 descriptor，按 {@code pluginId} 升序冻结。 */
-  public List<PluginDescriptor> descriptors() {
-    return pluginsById.values().stream().map(StudioPlugin::descriptor).toList();
-  }
-
   /** 已安装 Plugin 的不可变快照，按 {@code pluginId} 升序。 */
   public List<StudioPlugin> plugins() {
     return List.copyOf(pluginsById.values());

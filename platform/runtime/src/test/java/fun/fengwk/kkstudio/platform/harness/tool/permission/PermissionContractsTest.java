@@ -149,7 +149,7 @@ class PermissionContractsTest {
     assertThrows(
         NullPointerException.class,
         () -> new PermissionEvaluationContext(null, "{}", ToolSettings.DEFAULT));
-    // workdir 不再参与 path 解析：相对 path 回落 wildcard，非法 workdir 仍原样进入 preview。
+    // workdir 不参与 path 解析：相对 path 回落 wildcard，非法 workdir 原样进入 preview。
     PermissionEvaluationContext relativePath =
         new PermissionEvaluationContext(
             WRITE, "{\"path\":\"x\",\"workdir\":\"@\"}", ToolSettings.DEFAULT);

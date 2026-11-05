@@ -626,7 +626,7 @@ class HistoryEntryPayloadJsonCodecTest {
             CODEC.decode(
                 EntryType.COMPACTION,
                 "{\"summaryText\":\"a\",\"summaryText\":\"b\",\"assistantMetadata\":null}"));
-    // 最终 shape 必须显式声明 assistantMetadata：缺失即旧/损坏数据，确定性拒绝而不是猜测。
+    // 必须显式声明 assistantMetadata：缺失即损坏数据，确定性拒绝。
     assertThrows(
         IllegalArgumentException.class,
         () -> CODEC.decode(EntryType.COMPACTION, "{\"summaryText\":\"summary\"}"));
@@ -713,7 +713,7 @@ class HistoryEntryPayloadJsonCodecTest {
     String base =
         "\"agentName\":\"a\",\"model\":{\"modelName\":\"m\","
             + "\"variant\":\"v\"},\"environmentName\":null";
-    // 缺失 goal 字段（旧 shape）拒绝。
+    // 缺失 goal 字段拒绝。
     assertThrows(
         IllegalArgumentException.class,
         () -> CODEC.decode(EntryType.ROOT, "{\"settings\":{" + base + "}}"));
@@ -775,13 +775,13 @@ class HistoryEntryPayloadJsonCodecTest {
                 "{\"reason\":\"INPUT\",\"settings\":{\"agentName\":5,"
                     + "\"model\":{"
                     + "\"modelName\":\"m\",\"variant\":\"v\"}}"));
-    // 旧 workspacePath 字段已整体删除：携带它（无论字符串还是数字）一律严格拒绝。
+    // 未知字段严格拒绝
     assertThrows(
         IllegalArgumentException.class,
         () ->
             CODEC.decode(
                 EntryType.TURN_START,
-                "{\"reason\":\"INPUT\",\"settings\":{\"workspacePath\":\"../outside\","
+                "{\"reason\":\"INPUT\",\"settings\":{\"unknownField\":\"../outside\","
                     + "\"agentName\":\"a\",\"model\":{\"modelName\":\"m\","
                     + "\"variant\":\"v\"}}"));
     assertThrows(
@@ -789,7 +789,7 @@ class HistoryEntryPayloadJsonCodecTest {
         () ->
             CODEC.decode(
                 EntryType.TURN_START,
-                "{\"reason\":\"INPUT\",\"settings\":{\"workspacePath\":5,"
+                "{\"reason\":\"INPUT\",\"settings\":{\"unknownField\":5,"
                     + "\"agentName\":\"a\","
                     + "\"model\":{\"modelName\":\"m\",\"variant\":\"v\"}}"));
     assertThrows(

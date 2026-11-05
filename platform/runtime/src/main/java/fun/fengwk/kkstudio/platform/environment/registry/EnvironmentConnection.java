@@ -87,9 +87,4 @@ public record EnvironmentConnection(
         && leaseUntil.isAfter(current)
         && (heartbeatTimeout == null || lastSeenAt.isAfter(current.minus(heartbeatTimeout)));
   }
-
-  public boolean isOnline(Instant now) {
-    Instant current = now != null ? now : Instant.now();
-    return leaseUntil.isAfter(current);
-  }
 }

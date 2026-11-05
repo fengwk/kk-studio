@@ -24,18 +24,6 @@ public record McpToolCallResult(boolean error, List<ResultContent> contents, Str
     detailsJson = JsonValues.requireJsonObject(detailsJson, "detailsJson");
   }
 
-  public static McpToolCallResult success(List<ResultContent> contents, String detailsJson) {
-    return new McpToolCallResult(false, contents, detailsJson);
-  }
-
-  public static McpToolCallResult error(List<ResultContent> contents, String detailsJson) {
-    return new McpToolCallResult(true, contents, detailsJson);
-  }
-
-  public static McpToolCallResult text(String text) {
-    return new McpToolCallResult(false, List.of(new TextResultContent(text)), "{}");
-  }
-
   public static McpToolCallResult errorText(String errorText) {
     return new McpToolCallResult(true, List.of(new TextResultContent(errorText)), "{}");
   }

@@ -810,7 +810,7 @@ class OpenAiResponsesRequestEncoderTest {
         assertThrows(ProviderException.class, () -> encoder.encode(request(List.of(msg2)), desc));
     assertEquals(ProviderErrorKind.INVALID_REQUEST, ex2.kind());
 
-    // 3. output 数组内的已知 item 允许携带官方额外字段（如 message 的 status，不再按白名单拒绝），
+    // 3. output 数组内的已知 item 允许携带官方额外字段（如 message 的 status），
     //    但 durable 语义所必需的结构仍然严格：message 的 content 必须是数组
     ObjectNode malformedPayload3 = MAPPER.createObjectNode();
     ArrayNode outArr3 = malformedPayload3.putArray("output");

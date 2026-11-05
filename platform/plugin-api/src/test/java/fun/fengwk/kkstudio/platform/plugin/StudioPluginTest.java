@@ -88,7 +88,7 @@ class StudioPluginTest {
     assertTrue(plugin.refresher().isEmpty());
     assertEquals(new PluginAuthSpec.None(), plugin.authenticationSpec());
     assertSame(SCHEMA, plugin.configurationSchema());
-    assertEquals(Set.of(), plugin.requiredAgentNames(PluginConfig.initial(SCHEMA)));
+    assertEquals(Set.of(), plugin.requiredAgentNames(new PluginConfig(0, SCHEMA.defaultsJson())));
   }
 
   /** configure 产出的实例是可关闭的，且未贡献任何能力。 */
@@ -100,7 +100,7 @@ class StudioPluginTest {
             new NoopCredentialAccess(), Optional.empty(), Optional.empty(), Optional.empty());
 
     EmptyInstance instance =
-        (EmptyInstance) plugin.configure(PluginConfig.initial(SCHEMA), context);
+        (EmptyInstance) plugin.configure(new PluginConfig(0, SCHEMA.defaultsJson()), context);
 
     assertTrue(instance.harnessContributors().isEmpty());
     assertTrue(instance.contributions(Object.class).isEmpty());

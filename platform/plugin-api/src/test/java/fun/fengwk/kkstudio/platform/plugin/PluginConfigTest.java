@@ -6,23 +6,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.common.schema.BooleanSchema;
-import fun.fengwk.kkstudio.common.schema.InputSchema;
-
 import java.nio.charset.StandardCharsets;
-import java.util.Map;
-import java.util.Set;
 
 /** PluginConfig 只承载非负 revision 与严格 JSON object 文本，并有 UTF-8 64 KiB 上限。 */
 class PluginConfigTest {
 
   private static final int LIMIT = PluginConfig.MAX_VALUES_UTF8_BYTES;
-
-  private static final PluginConfigSchema SCHEMA =
-      new PluginConfigSchema(
-          new InputSchema(null, Map.of("enabled", new BooleanSchema(null)), Set.of(), false),
-          "{\"enabled\":true}",
-          Map.of());
 
   @Test
   void acceptsStrictObjectAndExposesComponents() {
@@ -86,13 +75,5 @@ class PluginConfigTest {
         assertThrows(
             IllegalArgumentException.class, () -> new PluginConfig(0, "a".repeat(LIMIT + 1)));
     assertTrue(error.getMessage().contains("must not exceed"));
-  }
-
-  @Test
-  void initialConfigUsesSchemaDefaultsAtRevisionZero() {
-    PluginConfig config = PluginConfig.initial(SCHEMA);
-
-    assertEquals(0, config.revision());
-    assertEquals(SCHEMA.defaultsJson(), config.valuesJson());
   }
 }

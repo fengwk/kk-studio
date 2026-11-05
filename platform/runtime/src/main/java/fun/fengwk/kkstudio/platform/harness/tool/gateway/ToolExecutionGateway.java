@@ -322,7 +322,7 @@ public final class ToolExecutionGateway implements ToolGateway {
               scope.mediaCapabilities(),
               scope.branch(),
               Optional.ofNullable(boundEnvironment));
-      // 超时在执行前只解析一次：解析结果原样进入请求，下游不再回落默认值或施加任何上限。
+      // 超时在执行前只解析一次：解析结果原样进入请求，下游直接使用该超时值，不施加额外上限。
       ToolExecutionRequest toolRequest;
       try {
         toolRequest =

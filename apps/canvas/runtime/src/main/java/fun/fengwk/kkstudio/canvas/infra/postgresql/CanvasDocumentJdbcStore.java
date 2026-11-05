@@ -58,14 +58,6 @@ public class CanvasDocumentJdbcStore {
         .optional();
   }
 
-  /** 归属/授权路径的轻量锁：KEY SHARE 阻止 owner 删除，但不串行化同 Canvas 的并发命令与接受。 */
-  public Optional<CanvasDocumentDO> findByIdForKeyShare(UUID id) {
-    return jdbc.sql("select " + COLUMNS + " from canvas_document where id = :id for key share")
-        .param("id", id)
-        .query(ROW_MAPPER)
-        .optional();
-  }
-
   public List<CanvasDocumentDO> listAll() {
     return jdbc.sql("select " + COLUMNS + " from canvas_document order by updated_at desc, id desc")
         .query(ROW_MAPPER)
@@ -84,9 +76,5 @@ public class CanvasDocumentJdbcStore {
         .param("expectedRevision", expectedRevision)
         .param("newRevision", newRevision)
         .update();
-  }
-
-  public int deleteById(UUID id) {
-    return jdbc.sql("delete from canvas_document where id = :id").param("id", id).update();
   }
 }

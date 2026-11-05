@@ -122,7 +122,7 @@ class GeminiModelProviderIntegrationTest {
 
   /**
    * 验证端到端真实 SSE 流式传输，请求头携带 x-goog-api-key，事件逐步送达，最终成功交付；同时经 adapter 真实入口验证请求 URL 完全由 descriptor
-   * endpoint 与 model id 解析而来（构造参数不再携带 URL）。
+   * endpoint 与 model id 解析而来。
    */
   @Test
   void streamsRealSseResponseOverLocalHttpServer() throws Exception {

@@ -887,7 +887,7 @@ class CompactionPlannerTest {
     path.completedCompaction(fullStart(id(8L)), "previous context");
     path.turn("latest request");
 
-    // 已由 complete 摘要替代的前缀不再进入模型投影，不能反向阻止当前可见尾部的切分。
+    // 已由 complete 摘要替代的前缀不进入模型投影，不反向阻止当前可见尾部的切分。
     CompactionPreparation preparation = plan(path, 20L).orElseThrow();
     assertEquals(id(14L), preparation.cutEntryId());
     assertFalse(

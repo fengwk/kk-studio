@@ -12,9 +12,9 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 @ConfigurationProperties(prefix = "kk-studio.harness.execution-admission")
 public class HarnessExecutionAdmissionProperties {
 
-  public static final int DEFAULT_MODEL = 16;
-  public static final int DEFAULT_TOOL = 64;
-  public static final int DEFAULT_SKILL_SYNC = 8;
+  private static final int DEFAULT_MODEL = 16;
+  private static final int DEFAULT_TOOL = 64;
+  private static final int DEFAULT_SKILL_SYNC = 8;
 
   private int model = DEFAULT_MODEL;
   private int tool = DEFAULT_TOOL;

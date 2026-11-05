@@ -47,16 +47,6 @@ public record ModelUsage(
     return Math.addExact(sum, cacheWriteTokens);
   }
 
-  /** 非 reasoning 输出 token；reasoning 未知时返回 null。 */
-  public Long nonReasoningOutputTokens() {
-    return reasoningTokens == null ? null : outputTokens - reasoningTokens;
-  }
-
-  /** 表示本次请求至少命中了一次缓存。 */
-  public boolean cacheHit() {
-    return cacheReadTokens > 0;
-  }
-
   private static Map<Long, Long> copyTtlTokens(Map<Long, Long> source, long total) {
     if (source == null || source.isEmpty()) {
       return Map.of();

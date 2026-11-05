@@ -70,11 +70,6 @@ public final class EnvironmentCapabilityCatalog {
     return new EnvironmentCapabilityDescriptor(id, loadSchema(id), defaultTimeout);
   }
 
-  /** 该能力是否要求 arguments 携带目标 Daemon 上的显式绝对 workdir。 */
-  public static boolean requiresWorkdir(EnvironmentCapabilityId id) {
-    return require(id).inputSchema().required().contains("workdir");
-  }
-
   private static InputSchema loadSchema(EnvironmentCapabilityId id) {
     return CODEC.decode(loadText(id.value() + ".schema.json"));
   }

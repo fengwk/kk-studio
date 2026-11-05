@@ -713,13 +713,6 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
             run.getId(),
             terminal));
     assertEquals("REVIEW", issueEditingService.getIssue(issue.getId()).getState());
-    // 收尾不再向 Harness 写任何 branch custom state：Run 的业务事实只保留在 Project 自己的行里。
-    assertEquals(
-        0L,
-        count(
-            "select count(*) from harness_thread_command where thread_id = ? and command_type ="
-                + " 'SET_CONTRIBUTOR_STATE'",
-            run.getThreadId()));
   }
 
   /** 测试意图：root Join outcome=ERROR 的 Run 只做失败收尾，即使已登记交接意图也绝不按完成推进阶段。 */
@@ -747,12 +740,6 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
             terminal));
     // 失败不推进阶段：Issue 仍停在本阶段，交接意图不生效。
     assertEquals("DESIGN", issueEditingService.getIssue(issue.getId()).getState());
-    assertEquals(
-        0L,
-        count(
-            "select count(*) from harness_thread_command where thread_id = ? and command_type ="
-                + " 'SET_CONTRIBUTOR_STATE'",
-            run.getThreadId()));
   }
 
   /** 测试意图：root Join outcome=CANCELLED 的 Run 只做取消收尾，绝不按完成提交阶段推进。 */
@@ -777,12 +764,6 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
             run.getId(),
             terminal));
     assertEquals("DESIGN", issueEditingService.getIssue(issue.getId()).getState());
-    assertEquals(
-        0L,
-        count(
-            "select count(*) from harness_thread_command where thread_id = ? and command_type ="
-                + " 'SET_CONTRIBUTOR_STATE'",
-            run.getThreadId()));
   }
 
   /** 测试意图：匹配 root Join 先收尾时，未在安全点投递的人工指示不能被吞，游标保持原位置并由下一个 Run 投递。 */
@@ -822,7 +803,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     // 下一个 Run 沿用既有活动事实游标，在安全点把该指示作为 USER_MESSAGE 投递。
     assertEquals(
         IssueReconcileOutcome.RUN_ACCEPTED, reconciler.reconcile(claimWork(issue.getId())));
-    IssueRun second = issueRunService.getActiveRun(issue.getId());
+    IssueRun second = issueRunRepository.getActiveByIssueId(issue.getId());
     assertNotNull(second);
     assertEquals(
         IssueReconcileOutcome.INSTRUCTION_DELIVERED,
@@ -1018,13 +999,13 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
 
     assertEquals(IssueReconcileOutcome.WAITING_FOR_GATE, outcome);
     verify(harnessRuntime, never()).stop(any(StopCommand.class));
-    IssueRun waiting = issueRunService.getRun(run.getId());
+    IssueRun waiting = issueRunRepository.getById(run.getId());
     assertEquals(IssueRunStatus.WAITING, waiting.getStatus());
     assertNull(waiting.getActiveSince());
 
     issueLifecycleService.recoverIssue(blocked.getId(), blocked.getVersion(), key("recover"));
     assertEquals(IssueReconcileOutcome.RUN_RESUMED, reconciler.reconcile(claimWork(issue.getId())));
-    IssueRun resumed = issueRunService.getRun(run.getId());
+    IssueRun resumed = issueRunRepository.getById(run.getId());
     assertEquals(run.getId(), resumed.getId());
     assertEquals(IssueRunStatus.RUNNING, resumed.getStatus());
     assertNotNull(resumed.getActiveSince());
@@ -1082,8 +1063,8 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
   }
 
   /**
-   * 测试意图：Run 收尾只取决于本次 root Join 是否已冻结结果，不再等待委派子树静止；即使存在未静止的委派子 Thread， 只要 root Join 匹配，Run
-   * 就必须立即正常收尾为 COMPLETED。
+   * 测试意图：Run 收尾只取决于本次 root Join 是否已冻结结果，不等待委派子树静止；即使存在未静止的委派子 Thread，只要 root Join 匹配，Run 就必须立即正常收尾为
+   * COMPLETED。
    */
   @Test
   void delegatedChildThreadDoesNotBlockRunCompletion() {
@@ -1093,7 +1074,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
     UUID newHead = appendHistoryEntry(run.getThreadId());
-    // 未静止的委派子树不再参与 Run 收尾判定。
+    // 未静止的委派子树不参与 Run 收尾判定。
     insertDelegatedChildThread(run.getThreadId());
 
     matchRunJoin(run.getId(), newHead);
@@ -1108,7 +1089,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
             newHead));
   }
 
-  /** 建一个归入父执行子树的委派子 Thread（独立 Session 与 ROOT Entry）：委派子树的存在不再改写父 Thread 的执行控制状态， 也不再参与 Run 收尾判定。 */
+  /** 建一个归入父执行子树的委派子 Thread（独立 Session 与 ROOT Entry）：委派子树的存在不改写父 Thread 的执行控制状态，也不参与 Run 收尾判定。 */
   private UUID insertDelegatedChildThread(UUID parentThreadId) {
     UUID sessionId = UUID.randomUUID();
     UUID rootEntryId = UUID.randomUUID();
@@ -1280,7 +1261,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     IssueReconcileOutcome outcome = reconciler.reconcile(claim);
 
     assertEquals(IssueReconcileOutcome.WAITING_FOR_GATE, outcome);
-    IssueRun waitingRun = issueRunService.getRun(run.getId());
+    IssueRun waitingRun = issueRunRepository.getById(run.getId());
     assertEquals(IssueRunStatus.WAITING, waitingRun.getStatus());
     assertNull(waitingRun.getActiveSince());
     long remainingBudget = waitingRun.getRemainingExecutionMs();
@@ -1289,7 +1270,8 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     WorkClaim secondClaim = claimWork(issue.getId());
     IssueReconcileOutcome secondOutcome = reconciler.reconcile(secondClaim);
     assertEquals(IssueReconcileOutcome.WAITING_FOR_GATE, secondOutcome);
-    assertEquals(remainingBudget, issueRunService.getRun(run.getId()).getRemainingExecutionMs());
+    assertEquals(
+        remainingBudget, issueRunRepository.getById(run.getId()).getRemainingExecutionMs());
 
     // 工具回答完成，进入普通静止点
     ThreadSnapshot settled = createSnapshot(run.getThreadId());
@@ -1297,7 +1279,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     WorkClaim resumeClaim = claimWork(issue.getId());
     IssueReconcileOutcome resumeOutcome = reconciler.reconcile(resumeClaim);
     assertEquals(IssueReconcileOutcome.RUN_RESUMED, resumeOutcome);
-    IssueRun resumedRun = issueRunService.getRun(run.getId());
+    IssueRun resumedRun = issueRunRepository.getById(run.getId());
     assertEquals(IssueRunStatus.RUNNING, resumedRun.getStatus());
     assertNotNull(resumedRun.getActiveSince());
     assertEquals(run.getId(), resumedRun.getId());
@@ -1323,7 +1305,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     IssueReconcileOutcome outcome = reconciler.reconcile(claim);
 
     assertEquals(IssueReconcileOutcome.RUN_RESUMED, outcome);
-    IssueRun resumed = issueRunService.getRun(run.getId());
+    IssueRun resumed = issueRunRepository.getById(run.getId());
     assertEquals(IssueRunStatus.RUNNING, resumed.getStatus());
     assertEquals(run.getId(), resumed.getId());
     assertEquals(
@@ -1352,7 +1334,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     WorkClaim claim = claimWork(issue.getId());
     IssueReconcileOutcome outcome = reconciler.reconcile(claim);
     assertEquals(IssueReconcileOutcome.WAITING_FOR_GATE, outcome);
-    assertEquals(IssueRunStatus.WAITING, issueRunService.getRun(run.getId()).getStatus());
+    assertEquals(IssueRunStatus.WAITING, issueRunRepository.getById(run.getId()).getStatus());
 
     // 显式恢复业务阻塞
     issue = issueEditingService.getIssue(issue.getId());
@@ -1363,7 +1345,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     WorkClaim resumeClaim = claimWork(issue.getId());
     IssueReconcileOutcome resumeOutcome = reconciler.reconcile(resumeClaim);
     assertEquals(IssueReconcileOutcome.RUN_RESUMED, resumeOutcome);
-    assertEquals(IssueRunStatus.RUNNING, issueRunService.getRun(run.getId()).getStatus());
+    assertEquals(IssueRunStatus.RUNNING, issueRunRepository.getById(run.getId()).getStatus());
   }
 
   /** 测试意图：处于 BLOCKED 状态且无活动 Run 的 Issue，reconcileIdle 判定为 CONVERGED_UNDISPATCHABLE 并收敛。 */
@@ -1418,7 +1400,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     // 模拟 Agent 发起交接请求（assistant turn 已落库）
     issueTransitionService.accept(
         run.getThreadId(), appendHandoffAssistant(run.getThreadId()), "REVIEW");
-    run = issueRunService.getRun(run.getId());
+    run = issueRunRepository.getById(run.getId());
     assertEquals("REVIEW", run.getNextState());
 
     // 调谐：必须优先投递指示，绝不能直接交接收尾！
@@ -1434,7 +1416,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
             run.getId()));
     // Issue 状态依然为 DESIGN，交接尚未提交
     assertEquals("DESIGN", issueEditingService.getIssue(issue.getId()).getState());
-    assertEquals(IssueRunStatus.RUNNING, issueRunService.getRun(run.getId()).getStatus());
+    assertEquals(IssueRunStatus.RUNNING, issueRunRepository.getById(run.getId()).getStatus());
 
     // 指示投递后，模拟生成产出并完全静止
     UUID newHead = appendHistoryEntry(run.getThreadId());
@@ -1445,7 +1427,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     // 此时才安全交接
     assertEquals(IssueReconcileOutcome.RUN_HANDED_OFF, secondOutcome);
     assertEquals("REVIEW", issueEditingService.getIssue(issue.getId()).getState());
-    assertEquals(IssueRunStatus.COMPLETED, issueRunService.getRun(run.getId()).getStatus());
+    assertEquals(IssueRunStatus.COMPLETED, issueRunRepository.getById(run.getId()).getStatus());
   }
 
   /**
@@ -1476,7 +1458,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     IssueReconcileOutcome outcome = reconciler.reconcile(claim);
 
     assertEquals(IssueReconcileOutcome.RUN_COMPLETED, outcome);
-    IssueRun completed = issueRunService.getRun(run.getId());
+    IssueRun completed = issueRunRepository.getById(run.getId());
     assertEquals(IssueRunStatus.COMPLETED, completed.getStatus());
     assertEquals(assistantEntryId, completed.getFinalAnswerEntryId());
     assertEquals(assistantEntryId, completed.getEndEntryId());
@@ -1494,8 +1476,8 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
   }
 
   /**
-   * E01：工具 UNKNOWN 已收敛为模型反馈，不再由 IssueReconciler 升级为人工核查门禁。存在在途命令时只延后；一旦只剩结果未定的工具，同样不构成 静止点或故障，Run
-   * 保持 RUNNING 并返回 DEFERRED_IDLE，不自动完成、交接或发布证据，Issue 既不暂停也不推进阶段。
+   * 工具 UNKNOWN 收敛为模型反馈，不作为人工核查门禁。存在在途命令时只延后；一旦只剩结果未定的工具，同样不构成静止点或故障，Run 保持 RUNNING 并返回
+   * DEFERRED_IDLE，不自动完成、交接或发布证据，Issue 既不暂停也不推进阶段。
    */
   @Test
   void unknownToolIsModelFeedbackNotAHumanGate() {
@@ -1534,7 +1516,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
 
     IssueReconcileOutcome deferred = reconciler.reconcile(claimWork(issue.getId()));
     assertEquals(IssueReconcileOutcome.DEFERRED_PROCESSING, deferred);
-    assertEquals(IssueRunStatus.RUNNING, issueRunService.getRun(run.getId()).getStatus());
+    assertEquals(IssueRunStatus.RUNNING, issueRunRepository.getById(run.getId()).getStatus());
     assertEquals("DESIGN", issueEditingService.getIssue(issue.getId()).getState());
 
     ThreadSnapshot unknownSnapshot = withTools(run.getThreadId(), unknownTools);
@@ -1543,7 +1525,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
 
     // UNKNOWN 工具是已收敛的模型反馈：不构成门禁，Run 保持运行并延后重检。
     assertEquals(IssueReconcileOutcome.DEFERRED_IDLE, outcome);
-    assertEquals(IssueRunStatus.RUNNING, issueRunService.getRun(run.getId()).getStatus());
+    assertEquals(IssueRunStatus.RUNNING, issueRunRepository.getById(run.getId()).getStatus());
     assertEquals("DESIGN", issueEditingService.getIssue(issue.getId()).getState());
     assertNull(issueEditingService.getIssue(issue.getId()).getPauseReason());
     assertEquals(
@@ -1560,8 +1542,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
   }
 
   /**
-   * E01 边界：UNKNOWN 不再优先于审批/输入等待。UNKNOWN 只是已收敛的模型反馈，不构成门禁；同一快照中仍有等待审批的工具时，Run 安全停在该
-   * 等待点上，既不升级为人工核查，也不被提前收尾。
+   * UNKNOWN 不优先于审批/输入等待。UNKNOWN 是已收敛的模型反馈，不构成门禁；同一快照中仍有等待审批的工具时，Run 安全停在该 等待点上，既不升级为人工核查，也不被提前收尾。
    */
   @Test
   void unknownToolDoesNotOutrankApprovalWaiting() {
@@ -1582,13 +1563,13 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     IssueReconcileOutcome outcome = reconciler.reconcile(claimWork(issue.getId()));
 
     assertEquals(IssueReconcileOutcome.WAITING_FOR_GATE, outcome);
-    assertEquals(IssueRunStatus.WAITING, issueRunService.getRun(run.getId()).getStatus());
+    assertEquals(IssueRunStatus.WAITING, issueRunRepository.getById(run.getId()).getStatus());
     assertNull(issueEditingService.getIssue(issue.getId()).getPauseReason());
   }
 
   /**
-   * E01 边界：迟到（阶段或归属已不匹配）的旧 Run 只持有结果未定的工具时，UNKNOWN 不再构成人工核查门禁，也不构成安全静止点；既然没有本次 root Join 冻结的结果，旧
-   * Run 必须失败关闭并暂停 Issue 等待人工介入，绝不推进当前阶段。
+   * 迟到（阶段或归属已不匹配）的旧 Run 只持有结果未定的工具时，UNKNOWN 不构成人工核查门禁，也不构成安全静止点；既然没有本次 root Join 冻结的结果，旧 Run
+   * 必须失败关闭并暂停 Issue 等待人工介入，绝不推进当前阶段。
    */
   @Test
   void staleRunWithUnknownToolFailsClosedWithoutMatchedJoin() {
@@ -1669,7 +1650,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     matchRunJoin(run.getId(), finalId);
     IssueReconcileOutcome outcome = reconciler.reconcile(claimWork(issue.getId()));
     assertEquals(IssueReconcileOutcome.RUN_COMPLETED, outcome);
-    assertEquals(finalId, issueRunService.getRun(run.getId()).getFinalAnswerEntryId());
+    assertEquals(finalId, issueRunRepository.getById(run.getId()).getFinalAnswerEntryId());
     assertEquals(
         1L,
         count(
@@ -1687,8 +1668,8 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
   }
 
   /**
-   * 缺陷 6 测试意图：迟到（stale）的旧 Run 在处于在途执行时不得强制收尾，必须挂起等待（DEFERRED_PROCESSING）； 静止后安全收尾为
-   * COMPLETED，且其原本携带的 next_state 绝对不得推进当前 Issue 的阶段。
+   * 测试意图：迟到（stale）的旧 Run 在处于在途执行时不得强制收尾，必须挂起等待（DEFERRED_PROCESSING）； 静止后安全收尾为 COMPLETED，且其原本携带的
+   * next_state 绝对不得推进当前 Issue 的阶段。
    */
   @Test
   void staleInFlightRunDefersAndDoesNotAdvanceIssueStage() {
@@ -1716,7 +1697,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
 
     // 1. 在途时不收尾，返回 DEFERRED_PROCESSING
     assertEquals(IssueReconcileOutcome.DEFERRED_PROCESSING, outcome);
-    assertEquals(IssueRunStatus.RUNNING, issueRunService.getRun(run.getId()).getStatus());
+    assertEquals(IssueRunStatus.RUNNING, issueRunRepository.getById(run.getId()).getStatus());
     assertEquals("REVIEW", issueEditingService.getIssue(issue.getId()).getState());
 
     // 2. 执行静止且有进展
@@ -1729,7 +1710,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
 
     // 3. 静止后安全收尾，next_state 被丢弃，Issue 状态依然保持在 REVIEW（未被推进到 DONE）
     assertEquals(IssueReconcileOutcome.STALE_RUN_CLOSED, secondOutcome);
-    IssueRun closedRun = issueRunService.getRun(run.getId());
+    IssueRun closedRun = issueRunRepository.getById(run.getId());
     assertEquals(IssueRunStatus.COMPLETED, closedRun.getStatus());
     assertNull(closedRun.getNextState());
     assertEquals(newHead, closedRun.getEndEntryId());
@@ -1796,7 +1777,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
   }
 
   /**
-   * 缺陷 5/7 增强测试意图：当 Run 产出的历史消息中包含不可用/不存在（或未处于 ACTIVE 状态）的 Resource Blob 引用时，
+   * 测试意图：当 Run 产出的历史消息中包含不可用/不存在（或未处于 ACTIVE 状态）的 Resource Blob 引用时，
    * 调谐器通过预校验安全跳过证据发布，绝不调用可能抛出异常的参与事务方法，不导致物理事务被标记为 rollback-only（不会产生 UnexpectedRollbackException）；
    * Run 确定性收尾为 COMPLETED，无该未发布证据行，mailbox 正常收敛，后续再次调谐不报错。
    */
@@ -1824,7 +1805,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     IssueReconcileOutcome outcome = reconciler.reconcile(claim);
 
     assertEquals(IssueReconcileOutcome.RUN_COMPLETED, outcome);
-    IssueRun completed = issueRunService.getRun(run.getId());
+    IssueRun completed = issueRunRepository.getById(run.getId());
     assertEquals(IssueRunStatus.COMPLETED, completed.getStatus());
     assertEquals(assistantEntryId, completed.getFinalAnswerEntryId());
     assertEquals(assistantEntryId, completed.getEndEntryId());

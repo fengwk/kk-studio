@@ -145,7 +145,7 @@ public class DaemonHttp2ClientSession implements AutoCloseable {
     return tunnel;
   }
 
-  public CompletableFuture<DaemonSession> whenSessionEstablished() {
+  CompletableFuture<DaemonSession> whenSessionEstablished() {
     return sessionEstablished;
   }
 

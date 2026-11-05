@@ -295,7 +295,7 @@ class HistoryPayloadMapperTest {
     assertEquals("token expired", payload.error().message());
   }
 
-  /** HTTP 错误正文含超长 / 换行 / 首尾空白时，必须原样映射为 AssistantError，不再触发无依据的 message 限制。 */
+  /** HTTP 错误正文含超长 / 换行 / 首尾空白时，原样映射为 AssistantError。 */
   @Test
   void assistantErrorPayloadPreservesFullUpstreamErrorBody() {
     String body = "\n<html>\n  <body>" + "x".repeat(2049) + "</body>\n</html>\n";

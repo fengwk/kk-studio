@@ -22,7 +22,7 @@ public final class OpenAiChatConfiguration {
 
   private static final ObjectMapper OBJECT_MAPPER = HarnessJson.STRICT_DECIMAL;
 
-  public static final String FIELD_REQUIRE_DONE = "openAiChatRequireDone";
+  private static final String FIELD_REQUIRE_DONE = "openAiChatRequireDone";
   public static final String FIELD_PROMPT_CACHE_RETENTION = "promptCacheRetention";
   public static final String FIELD_THINKING_FORMAT = "openAiChatThinkingFormat";
 

@@ -12,6 +12,7 @@ import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.harness.model.HarnessJson;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
@@ -45,6 +46,28 @@ class ModelDescriptorJsonCodecTest {
   private final ModelDescriptorJsonCodec codec = new ModelDescriptorJsonCodec();
   private final ProviderRequestJsonCodec providerCodec = new ProviderRequestJsonCodec();
 
+  private ModelDescriptor decodeDescriptor(String json) {
+    if (json == null) {
+      throw new NullPointerException("json");
+    }
+    try {
+      return codec.decodeDescriptorNode(HarnessJson.STRICT_CANONICAL.readTree(json));
+    } catch (JacksonException exception) {
+      throw new IllegalArgumentException("malformed model descriptor JSON", exception);
+    }
+  }
+
+  private ModelVariant decodeVariant(String json) {
+    if (json == null) {
+      throw new NullPointerException("json");
+    }
+    try {
+      return codec.decodeVariantNode(HarnessJson.STRICT_CANONICAL.readTree(json));
+    } catch (JacksonException exception) {
+      throw new IllegalArgumentException("malformed model variant JSON", exception);
+    }
+  }
+
   // ---------- 往返 ----------
 
   /** 完整 ModelDescriptor 走完 codec 后必须等价。 */
@@ -52,7 +75,7 @@ class ModelDescriptorJsonCodecTest {
   void roundTripsFullDescriptor() {
     ModelDescriptor descriptor = canonicalDescriptor();
     String json = codec.encodeDescriptor(descriptor);
-    ModelDescriptor decoded = codec.decodeDescriptor(json);
+    ModelDescriptor decoded = decodeDescriptor(json);
     assertEquals(descriptor, decoded);
     assertEquals(json, codec.encodeDescriptor(decoded));
   }
@@ -62,7 +85,7 @@ class ModelDescriptorJsonCodecTest {
   void roundTripsVariantWithAllNullables() {
     ModelVariant variant = new ModelVariant("id");
     String json = codec.encodeVariant(variant);
-    ModelVariant decoded = codec.decodeVariant(json);
+    ModelVariant decoded = decodeVariant(json);
     assertEquals(variant, decoded);
   }
 
@@ -71,7 +94,7 @@ class ModelDescriptorJsonCodecTest {
   void roundTripsVariantWithFilledNullables() {
     ModelVariant variant = new ModelVariant("id", "high");
     String json = codec.encodeVariant(variant);
-    ModelVariant decoded = codec.decodeVariant(json);
+    ModelVariant decoded = decodeVariant(json);
     assertEquals(variant, decoded);
   }
 
@@ -79,30 +102,27 @@ class ModelDescriptorJsonCodecTest {
   @Test
   void roundTripsVariantWithCustomReasoningEfforts() {
     ModelVariant max = new ModelVariant("id", "MAX");
-    assertEquals(max, codec.decodeVariant(codec.encodeVariant(max)));
+    assertEquals(max, decodeVariant(codec.encodeVariant(max)));
 
     ModelVariant xhigh = new ModelVariant("id", "xHigh");
-    assertEquals(xhigh, codec.decodeVariant(codec.encodeVariant(xhigh)));
+    assertEquals(xhigh, decodeVariant(codec.encodeVariant(xhigh)));
 
     ModelVariant mixed = new ModelVariant("id", "HiGh");
-    assertEquals(mixed, codec.decodeVariant(codec.encodeVariant(mixed)));
+    assertEquals(mixed, decodeVariant(codec.encodeVariant(mixed)));
 
     // 外层空白在解码时被去除，大小写保持原值
     ModelVariant decodedFromTrimmed =
-        codec.decodeVariant(
-            "{\"id\":\"id\",\"reasoningEffort\":\"  MAX \",\"protocolOptions\":{}}");
+        decodeVariant("{\"id\":\"id\",\"reasoningEffort\":\"  MAX \",\"protocolOptions\":{}}");
     assertEquals("MAX", decodedFromTrimmed.reasoningEffort());
 
     // 空白与超长 reasoningEffort 必须在解码时被拒绝
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            codec.decodeVariant(
-                "{\"id\":\"id\",\"reasoningEffort\":\"   \",\"protocolOptions\":{}}"));
+        () -> decodeVariant("{\"id\":\"id\",\"reasoningEffort\":\"   \",\"protocolOptions\":{}}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            codec.decodeVariant(
+            decodeVariant(
                 "{\"id\":\"id\",\"reasoningEffort\":\""
                     + "a".repeat(65)
                     + "\",\"protocolOptions\":{}}"));
@@ -115,7 +135,7 @@ class ModelDescriptorJsonCodecTest {
         new ModelVariant("id", "high", new ProviderProtocolOptions(CANONICAL_VARIANT_OPTIONS_JSON));
 
     String json = codec.encodeVariant(variant);
-    ModelVariant decoded = codec.decodeVariant(json);
+    ModelVariant decoded = decodeVariant(json);
 
     assertEquals(variant, decoded);
     assertEquals(json, codec.encodeVariant(decoded));
@@ -139,21 +159,19 @@ class ModelDescriptorJsonCodecTest {
   void rejectsInvalidVariantProtocolOptions() {
     assertThrows(
         IllegalArgumentException.class,
-        () -> codec.decodeVariant("{\"id\":\"id\",\"reasoningEffort\":null}"));
+        () -> decodeVariant("{\"id\":\"id\",\"reasoningEffort\":null}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> decodeVariant("{\"id\":\"id\",\"reasoningEffort\":null,\"protocolOptions\":null}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            codec.decodeVariant(
-                "{\"id\":\"id\",\"reasoningEffort\":null,\"protocolOptions\":null}"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            codec.decodeVariant(
+            decodeVariant(
                 "{\"id\":\"id\",\"reasoningEffort\":null,\"protocolOptions\":[{\"a\":1}]}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            codec.decodeVariant(
+            decodeVariant(
                 "{\"id\":\"id\",\"reasoningEffort\":null,\"protocolOptions\":{\"a\":1,\"a\":2}}"));
   }
 
@@ -230,18 +248,18 @@ class ModelDescriptorJsonCodecTest {
   /** 顶层不是 object 必须拒绝。 */
   @Test
   void rejectsNonObjectRoot() {
-    assertThrows(IllegalArgumentException.class, () -> codec.decodeDescriptor("[]"));
-    assertThrows(IllegalArgumentException.class, () -> codec.decodeDescriptor("\"x\""));
-    assertThrows(IllegalArgumentException.class, () -> codec.decodeDescriptor("42"));
-    assertThrows(IllegalArgumentException.class, () -> codec.decodeDescriptor(""));
-    assertThrows(IllegalArgumentException.class, () -> codec.decodeDescriptor("{"));
-    assertThrows(NullPointerException.class, () -> codec.decodeDescriptor(null));
+    assertThrows(
+        IllegalArgumentException.class, () -> codec.decodeDescriptorNode(NODES.arrayNode()));
+    assertThrows(
+        IllegalArgumentException.class, () -> codec.decodeDescriptorNode(NODES.textNode("x")));
+    assertThrows(
+        IllegalArgumentException.class, () -> codec.decodeDescriptorNode(NODES.numberNode(42)));
     assertThrows(NullPointerException.class, () -> codec.decodeDescriptorNode(null));
     assertThrows(NullPointerException.class, () -> codec.encodeDescriptor(null));
     assertThrows(NullPointerException.class, () -> codec.encodeDescriptorNode(null));
     assertThrows(NullPointerException.class, () -> codec.encodeVariant(null));
     assertThrows(NullPointerException.class, () -> codec.encodeVariantNode(null));
-    assertThrows(NullPointerException.class, () -> codec.decodeVariant(null));
+    assertThrows(IllegalArgumentException.class, () -> codec.decodeVariantNode(NODES.arrayNode()));
     assertThrows(NullPointerException.class, () -> codec.decodeVariantNode(null));
   }
 
@@ -250,7 +268,7 @@ class ModelDescriptorJsonCodecTest {
   void rejectsTrailingTokens() throws Exception {
     ObjectNode node = canonicalDescriptorNode();
     String json = OBJECT_MAPPER.writeValueAsString(node) + " {}";
-    assertThrows(IllegalArgumentException.class, () -> codec.decodeDescriptor(json));
+    assertThrows(IllegalArgumentException.class, () -> decodeDescriptor(json));
   }
 
   /** duplicate field 拒绝。 */
@@ -263,7 +281,7 @@ class ModelDescriptorJsonCodecTest {
             + "\"inputModalities\":[\"TEXT\"],"
             + "\"tools\":false,\"reasoning\":false"
             + "}";
-    assertThrows(IllegalArgumentException.class, () -> codec.decodeDescriptor(json));
+    assertThrows(IllegalArgumentException.class, () -> decodeDescriptor(json));
   }
 
   /** inputModalities 必须是非空、无重复的合法 enum 字符串数组。 */

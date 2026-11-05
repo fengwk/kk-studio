@@ -34,8 +34,6 @@ class HarnessCatalogTest {
     assertTrue(catalog.tools().isEmpty());
     assertTrue(catalog.selectableTools().isEmpty());
     assertTrue(catalog.customEntryTypes().isEmpty());
-    assertTrue(catalog.findDescriptor(new ContributorId("core")).isEmpty());
-    assertTrue(catalog.transitiveRequires(new ContributorId("core")).isEmpty());
     assertTrue(catalog.findTool("bash").isEmpty());
     assertTrue(catalog.findTool(new ContributionId(new ContributorId("core"), "bash")).isEmpty());
   }
@@ -61,16 +59,11 @@ class HarnessCatalogTest {
     assertEquals(
         List.of(new ContributorId("a"), new ContributorId("b"), new ContributorId("c")),
         catalog.descriptors().stream().map(ContributorDescriptor::id).toList());
-
-    assertEquals(
-        Set.of(new ContributorId("a")), catalog.transitiveRequires(new ContributorId("c")));
-    assertEquals(Set.of(), catalog.transitiveRequires(new ContributorId("a")));
-    assertEquals(Set.of(), catalog.transitiveRequires(new ContributorId("b")));
   }
 
-  /** 验证传递依赖闭包正确汇总。 */
+  /** 验证多层传递依赖拓扑排序确定性（c -> b -> a）。 */
   @Test
-  void computesTransitiveRequiresClosure() {
+  void ordersTransitiveRequiresClosure() {
     ContributorDescriptor aDesc =
         new ContributorDescriptor(new ContributorId("a"), "A", "1.0", Set.of());
     ContributorDescriptor bDesc =
@@ -88,8 +81,8 @@ class HarnessCatalogTest {
                 HarnessContributor.of(cDesc, r -> {})));
 
     assertEquals(
-        Set.of(new ContributorId("a"), new ContributorId("b")),
-        catalog.transitiveRequires(new ContributorId("c")));
+        List.of(new ContributorId("a"), new ContributorId("b"), new ContributorId("c")),
+        catalog.descriptors().stream().map(ContributorDescriptor::id).toList());
   }
 
   /** 验证检测 requires 图中的循环依赖。 */
@@ -165,8 +158,8 @@ class HarnessCatalogTest {
 
     HarnessCatalog catalog = HarnessCatalog.from(List.of(contributor));
 
-    // 验证 descriptor 查询
-    assertTrue(catalog.findDescriptor(new ContributorId("core")).isPresent());
+    // 验证 descriptor 列表
+    assertEquals(List.of(desc), catalog.descriptors());
 
     // 验证 tools 查询与列表（两个 SELECTABLE，一个 INTERNAL）
     assertEquals(3, catalog.tools().size());

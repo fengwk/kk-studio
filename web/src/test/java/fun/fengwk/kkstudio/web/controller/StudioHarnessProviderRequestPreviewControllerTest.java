@@ -211,7 +211,7 @@ class StudioHarnessProviderRequestPreviewControllerTest extends ProviderRequestP
         .formatted(setExecutionCommand(), USER_MESSAGE_KEY, UPLOAD_ID, BLOB_ID);
   }
 
-  /** 预览请求体与既有 Thread 发送完全同源：只携带 path Thread 的 cursor 与命令，不再携带 owner/target。 */
+  /** 预览请求体与既有 Thread 发送完全同源：只携带 path Thread 的 cursor 与命令，不携带 owner/target。 */
   private static String batch(String commands) {
     return """
         {

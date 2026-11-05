@@ -50,9 +50,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 
 /**
- * 回归：持根树锁的合法并发深删除在 Model/Tool 执行取得本 Thread 行锁之前提交时，进程内执行必须映射 {@link
- * ProcessResult#LOST_OWNERSHIP}——不把合法缺失当作结构漂移抛出，不留下 durable 写入或实时事件，并释放本地执行资源。 单 Thread
- * 状态提交不再取执行树锁，因此删除点收敛到 own Thread 行锁。
+ * 持根树锁的合法并发深删除在 Model/Tool 执行取得本 Thread 行锁之前提交时，进程内执行必须映射 {@link
+ * ProcessResult#LOST_OWNERSHIP}——不把合法缺失当作结构漂移抛出，不留下 durable 写入或实时事件，并释放本地执行资源。单 Thread
+ * 状态提交不取执行树锁，因此删除点收敛到 own Thread 行锁。
  */
 class ExecutionConcurrentDeletionTest {
 

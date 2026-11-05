@@ -156,7 +156,7 @@ class HarnessRuntimeThreadSemanticsScenarioTest {
     assertTrue(noQueuedCommands);
   }
 
-  /** N1：物化通知与输入水位一致；显式新输入只恢复目标线程，历史通知不重复且不再触发第二次交付。 */
+  /** N1：物化通知与输入水位一致；显式新输入只恢复目标线程，历史通知不重复且不触发第二次交付。 */
   @Test
   void materializedNotificationStaysConsistentWithInputThroughSequenceAcrossResume() {
     HarnessRuntimeTestSupport.Baseline root = seedBaseline(store);
@@ -169,7 +169,7 @@ class HarnessRuntimeThreadSemanticsScenarioTest {
     runtime.stop(new StopCommand(root.threadId(), TestIds.id(14), 0L));
     ThreadState stopped = thread(root.threadId());
     assertEquals(ThreadExecutionControl.STOPPED, stopped.executionControl());
-    // Stop 物化通知时同步推进输入水位，已消费通知不再表现为待处理输入。
+    // Stop 物化通知时同步推进输入水位，已消费通知不表现为待处理输入。
     assertEquals(1L, stopped.inputThroughSequence());
     assertEquals(1, notificationCount(root.threadId()));
 

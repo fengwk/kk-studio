@@ -173,8 +173,8 @@ public record ThreadState(
   }
 
   /**
-   * 在一个原子步骤中推进 head Entry cursor，恒保留当前冻结的 YOLO runtime policy 与输入水位（不再接受外部传入值，杜绝 terminal /
-   * resolver 提交路径写入过期策略）；{@code version} 严格 +1。
+   * 在一个原子步骤中推进 head Entry cursor，恒保留当前冻结的 YOLO runtime policy 与输入水位（不接受外部传入值，杜绝 terminal / resolver
+   * 提交路径写入过期策略）；{@code version} 严格 +1。
    */
   public ThreadState advanceHead(UUID headEntryId, Instant now) {
     return copy(
@@ -202,14 +202,6 @@ public record ThreadState(
         now);
   }
 
-  /** 仅推进输入水位（确定性拒绝或纯配置推进），{@code version} 严格 +1。 */
-  public ThreadState advanceInputThroughSequence(long inputThroughSequence, Instant now) {
-    if (inputThroughSequence < this.inputThroughSequence) {
-      throw new IllegalArgumentException("inputThroughSequence must not regress");
-    }
-    return copy(headEntryId, executionControl, inputThroughSequence, nextCommandSequence, now);
-  }
-
   /** 停止父线程固化通知：同一 version 内预留序号、推进 head，并把输入水位覆盖到这些已物化通知。水位不得回退。 */
   public ThreadState reserveCommandSequencesAdvanceHeadAndInput(
       int count, UUID headEntryId, long inputThroughSequence, Instant now) {
@@ -224,19 +216,6 @@ public record ThreadState(
         executionControl,
         inputThroughSequence,
         Math.addExact(nextCommandSequence, (long) count),
-        now);
-  }
-
-  /**
-   * 直接控制面更新执行控制（{@link ThreadExecutionControl}）：head / 水位 / nextCommandSequence / YOLO 开关 / name /
-   * parentThreadId 不变，{@code version} 严格 +1。调用方负责在 version CAS 之前先做「状态相同即 no-op」判断。
-   */
-  public ThreadState changeExecutionControl(ThreadExecutionControl executionControl, Instant now) {
-    return copy(
-        headEntryId,
-        Objects.requireNonNull(executionControl, "executionControl"),
-        inputThroughSequence,
-        nextCommandSequence,
         now);
   }
 

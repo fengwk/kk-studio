@@ -51,11 +51,6 @@ public record EnvironmentEvent(Instant time, String level, String type, String m
     message = requireMessage(message);
   }
 
-  /** 该事件是否应在 Environment Card 上作为最近异常暴露。 */
-  public boolean isAlert() {
-    return LEVEL_WARN.equals(level) || LEVEL_ERROR.equals(level);
-  }
-
   private static String requireMessage(String value) {
     if (value == null) {
       throw new IllegalArgumentException("message must not be null");

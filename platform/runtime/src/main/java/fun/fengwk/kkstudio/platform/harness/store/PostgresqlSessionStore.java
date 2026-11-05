@@ -56,7 +56,7 @@ final class PostgresqlSessionStore implements SessionStore {
   @Override
   public Optional<Session> lockForKeyShare(UUID id) {
     tx.checkOpen();
-    // 已持有的行锁重复获取不改变加锁顺序，因此不再做 rank 回退检查（幂等重锁）。
+    // 已持有的行锁重复获取不改变加锁顺序，直接允许幂等重锁而无需检查 rank。
     if (!tx.isLocked(LockKey.session(id))) {
       tx.requireCanLockRank(LockRank.SESSION);
     }

@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.work;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -87,7 +88,6 @@ class DurableWorkStoreIntegrationTest {
     assertTrue(merged.availableAt().isBefore(first.availableAt().plusSeconds(300)));
     assertEquals(2L, issues.claimNext(UUID.randomUUID(), LEASE).orElseThrow().claimedWakeVersion());
     assertTrue(canvasRuns.find(id).isEmpty());
-    assertEquals("ISSUE", issues.targetType());
   }
 
   /** 已到期行只能被一个 worker 领取；租约有效期间新 wake 不影响所有权，续租按数据库时间延长。 */
@@ -105,7 +105,6 @@ class DurableWorkStoreIntegrationTest {
     assertTrue(issues.claimNext(UUID.randomUUID(), LEASE).isEmpty());
 
     issues.request(first);
-    assertTrue(issues.isOwned(claim));
     assertTrue(issues.renew(claim, Duration.ofMinutes(5)));
     assertTrue(issues.find(first).orElseThrow().leaseUntil().isAfter(claim.leaseUntil()));
     assertThrows(
@@ -140,7 +139,6 @@ class DurableWorkStoreIntegrationTest {
     WorkClaim claim = issues.claimNext(UUID.randomUUID(), LEASE).orElseThrow();
     issues.reschedule(claim, Duration.ofMinutes(10));
     assertTrue(issues.claimNext(UUID.randomUUID(), LEASE).isEmpty());
-    assertFalse(issues.isOwned(claim));
     assertThrows(IllegalArgumentException.class, () -> issues.reschedule(claim, Duration.ZERO));
 
     UUID woken = UUID.randomUUID();
@@ -161,7 +159,6 @@ class DurableWorkStoreIntegrationTest {
 
     WorkClaim next = issues.claimNext(UUID.randomUUID(), LEASE).orElseThrow();
     assertNotEquals(old.leaseToken(), next.leaseToken());
-    assertFalse(issues.isOwned(old));
     assertThrows(IllegalArgumentException.class, () -> issues.renew(old, LEASE));
     assertThrows(IllegalArgumentException.class, () -> issues.complete(old));
     issues.delete(id);
@@ -354,23 +351,6 @@ class DurableWorkStoreIntegrationTest {
     }
   }
 
-  /** 批量删除只影响当前 target type。 */
-  @Test
-  void deleteAllRemovesOnlyMatchingTargetTypeRows() {
-    UUID first = UUID.randomUUID();
-    UUID second = UUID.randomUUID();
-    UUID other = UUID.randomUUID();
-    issues.request(first);
-    issues.request(second);
-    canvasRuns.request(other);
-
-    assertEquals(2, issues.deleteAll(List.of(first, second)));
-    assertTrue(issues.find(first).isEmpty());
-    assertTrue(issues.find(second).isEmpty());
-    assertTrue(canvasRuns.find(other).isPresent());
-    assertEquals(0, issues.deleteAll(List.of()));
-  }
-
   @Test
   void rejectsInvalidArguments() {
     UUID id = UUID.randomUUID();
@@ -385,8 +365,7 @@ class DurableWorkStoreIntegrationTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> new DurableWorkStore("A".repeat(17), jdbc, transactions));
-    assertEquals(
-        "CUSTOM_DRIVER", new DurableWorkStore("CUSTOM_DRIVER", jdbc, transactions).targetType());
+    assertDoesNotThrow(() -> new DurableWorkStore("CUSTOM_DRIVER", jdbc, transactions));
     assertThrows(NullPointerException.class, () -> issues.request(null));
     assertThrows(
         IllegalArgumentException.class, () -> issues.claimNext(UUID.randomUUID(), Duration.ZERO));

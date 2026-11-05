@@ -14,7 +14,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-/** 函数定义以 name/description/argsSchema/outputs 为身份，不再假设 model、provider 或 prompt 参数存在。 */
+/** 函数定义以 name/description/argsSchema/outputs 为身份。 */
 class CanvasFunctionDefinitionTest {
 
   @Test

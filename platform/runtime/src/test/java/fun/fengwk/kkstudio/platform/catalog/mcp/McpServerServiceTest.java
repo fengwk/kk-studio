@@ -222,7 +222,7 @@ public class McpServerServiceTest extends PostgresSpringTestSupport {
             .name();
     insertFakeAgentDefinitionReferencingTool(referencedName);
 
-    // 远端不再提供 critical_tool：引用保护必须阻止整次替换
+    // 远端未提供 critical_tool：引用保护必须阻止整次替换
     fakeServer.clearTools();
     fakeServer.addTool("removable_tool", "Removable", "{}");
 

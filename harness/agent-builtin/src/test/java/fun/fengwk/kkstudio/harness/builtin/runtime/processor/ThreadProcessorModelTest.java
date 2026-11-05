@@ -516,7 +516,7 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
             plainRequest(),
             successResponse(List.of(), "bash"),
             null);
-    // head relocation 回 TURN_START：open turn 仍在但 head != requestHead（USER），model 不再 applicable。
+    // head relocation 回 TURN_START：open turn 仍在但 head != requestHead（USER），model 不 applicable。
     inTx(
         fixture,
         tx -> {
@@ -547,7 +547,7 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
             plainRequest(),
             successResponse(List.of(), "bash"),
             null);
-    // head relocation 到 requestHead 的 descendant（独立 ASSISTANT Entry）：model 仍 terminal 未挂结果但不再
+    // head relocation 到 requestHead 的 descendant（独立 ASSISTANT Entry）：model 仍 terminal 未挂结果但不
     // applicable。
     insertAssistantWithCalls(fixture.store, baseline, List.of());
     seedCommand(

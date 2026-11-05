@@ -69,18 +69,8 @@ public final class ThreadCommandPayloadJsonCodec {
   }
 
   /**
-   * 把 {@link ThreadCommandPayload} 编码为 client command 请求的 canonical JSON 文本：与 {@link #encode} 相同， 但
-   * USER message 内容允许瞬时 {@code attachment} 单元（含 ordered uploadId）。CUSTOM_MESSAGE 永远使用 durable
-   * 形态（attachment / media 内容确定性拒绝）。请求 hash 只基于该形态计算。
-   */
-  public String encodeRequest(ThreadCommandPayload payload) {
-    Objects.requireNonNull(payload, "payload");
-    return write(encodeRequestNode(payload));
-  }
-
-  /**
    * 计算 client command 的 canonical request hash：SHA-256（小写 hex，64 字符）作用于显式 canonical 信封 {@code
-   * {"type":<ThreadCommandType>,"payload":<encodeRequest>}}。
+   * {"type":<ThreadCommandType>,"payload":<request payload>}}。
    *
    * <p>信封同时包含 command type 与 raw 请求 payload（含 ordered contents 与 uploadId），因此不同 type 的 payload 即使
    * JSON 形状相同也不会碰撞；同一 raw 请求永远得到同一 hash；durable 表示（如附件已物化为 RESOURCE）不影响 hash。
@@ -92,7 +82,7 @@ public final class ThreadCommandPayloadJsonCodec {
   }
 
   /** 编码 request hash 的 canonical 信封节点：{@code type}（command discriminator）+ {@code payload}。 */
-  public static ObjectNode encodeRequestEnvelopeNode(ThreadCommandPayload payload) {
+  private static ObjectNode encodeRequestEnvelopeNode(ThreadCommandPayload payload) {
     Objects.requireNonNull(payload, "payload");
     ObjectNode envelope = NODES.objectNode();
     envelope.put("type", payload.type().name());

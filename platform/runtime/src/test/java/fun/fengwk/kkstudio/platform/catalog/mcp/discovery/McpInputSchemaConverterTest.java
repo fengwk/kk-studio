@@ -16,6 +16,7 @@ import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.common.schema.IntegerSchema;
 import fun.fengwk.kkstudio.common.schema.NumberSchema;
 import fun.fengwk.kkstudio.common.schema.ObjectSchema;
+import fun.fengwk.kkstudio.common.schema.SchemaJsonCodec;
 import fun.fengwk.kkstudio.common.schema.StringSchema;
 import fun.fengwk.kkstudio.platform.error.DomainException;
 
@@ -29,6 +30,12 @@ import java.util.Set;
  * 的无损映射，以及非法 schema 时的异常防护。
  */
 class McpInputSchemaConverterTest {
+
+  private static final SchemaJsonCodec SCHEMA_CODEC = new SchemaJsonCodec();
+
+  private static InputSchema toCanonicalSchema(String inputSchemaJson, String context) {
+    return SCHEMA_CODEC.decode(McpInputSchemaConverter.toCanonicalJson(inputSchemaJson, context));
+  }
 
   @Test
   void convertsCompleteStandardSchema() {
@@ -58,7 +65,7 @@ class McpInputSchemaConverterTest {
         }
         """;
 
-    InputSchema schema = McpInputSchemaConverter.toCanonicalSchema(json, "testTool");
+    InputSchema schema = toCanonicalSchema(json, "testTool");
     assertNotNull(schema);
     assertEquals("Tool parameters", schema.description());
     assertFalse(schema.additionalProperties());
@@ -89,7 +96,7 @@ class McpInputSchemaConverterTest {
   void handlesEmptyOrMinimalSchema() {
     // 意图：验证空 schema {} 转换为合法的空 Object schema，默认 additionalProperties=true
     String json = "{}";
-    InputSchema schema = McpInputSchemaConverter.toCanonicalSchema(json, "emptyTool");
+    InputSchema schema = toCanonicalSchema(json, "emptyTool");
     assertNotNull(schema);
     assertTrue(schema.properties().isEmpty());
     assertTrue(schema.required().isEmpty());
@@ -110,7 +117,7 @@ class McpInputSchemaConverterTest {
         }
         """;
 
-    InputSchema schema = McpInputSchemaConverter.toCanonicalSchema(json, "customTool");
+    InputSchema schema = toCanonicalSchema(json, "customTool");
     assertInstanceOf(StringSchema.class, schema.properties().get("unknownTypeField"));
     assertEquals("Custom field", schema.properties().get("unknownTypeField").description());
 

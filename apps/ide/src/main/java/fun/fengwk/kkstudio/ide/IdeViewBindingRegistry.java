@@ -85,12 +85,6 @@ public final class IdeViewBindingRegistry {
     return bindings.remove(key, current);
   }
 
-  /** 某个 Daemon 代际结束时清除其全部路由；同一实例断线重连不清。 */
-  public void clearGeneration(DaemonConnectionIdentity identity) {
-    Objects.requireNonNull(identity, "identity");
-    bindings.entrySet().removeIf(entry -> entry.getValue().daemonIdentity().equals(identity));
-  }
-
   /** 用权威 LIST_VIEWS 快照替换该 Environment 的本地缓存，并返回已记录的绑定。 */
   public List<Binding> replaceEnvironment(EnvironmentId environmentId, List<Binding> current) {
     Objects.requireNonNull(environmentId, "environmentId");

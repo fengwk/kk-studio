@@ -32,10 +32,6 @@ public final class H3PromptRequestBuilder {
     systemPrompt = readSystemPrompt();
   }
 
-  H3PromptRequestBuilder(String systemPrompt) {
-    this.systemPrompt = ComfyuiTexts.requireText(systemPrompt, "systemPrompt");
-  }
-
   public String systemPrompt() {
     return systemPrompt;
   }

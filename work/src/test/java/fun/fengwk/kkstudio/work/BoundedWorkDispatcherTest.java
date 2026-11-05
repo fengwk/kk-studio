@@ -192,12 +192,11 @@ class BoundedWorkDispatcherTest {
     drain.runNext();
     assertEquals(1, worker.size());
     assertTrue(executed.isEmpty());
-    assertEquals(1, dispatcher.inFlightCount());
 
     // worker 收尾释放容量并再 wake。
     worker.runNext();
     assertEquals(List.of("a"), executed);
-    assertEquals(0, dispatcher.inFlightCount());
+    assertEquals(0, worker.size());
 
     dispatcher.stop();
     dispatcher.stop();
@@ -395,7 +394,7 @@ class BoundedWorkDispatcherTest {
 
     assertEquals(List.of("a"), returned);
     assertTrue(executed.isEmpty());
-    assertEquals(0, dispatcher.inFlightCount());
+    assertEquals(0, worker.size());
     assertEquals(1, claimCalls.get());
   }
 
@@ -426,7 +425,7 @@ class BoundedWorkDispatcherTest {
 
     assertEquals(List.of("a"), returned);
     assertTrue(executed.isEmpty());
-    assertEquals(0, dispatcher.inFlightCount());
+    assertEquals(0, worker.size());
   }
 
   /** worker 已同步开始后 execute 抛 RuntimeException：不得当作 reject 二次归还或二次减容量；诊断后终止本轮 drain。 */
@@ -435,6 +434,8 @@ class BoundedWorkDispatcherTest {
     ManualExecutor drain = new ManualExecutor();
     Deque<String> claims = new ArrayDeque<>(List.of("a"));
     List<String> returned = new ArrayList<>();
+    List<String> executed = new ArrayList<>();
+    AtomicInteger attempts = new AtomicInteger();
     BoundedWorkDispatcher<String> dispatcher =
         new BoundedWorkDispatcher<>(
             "test",
@@ -445,14 +446,23 @@ class BoundedWorkDispatcherTest {
             new FakeScheduler(),
             claims::poll,
             value -> {
-              throw new IllegalStateException("handler boom");
+              if (attempts.getAndIncrement() == 0) {
+                throw new IllegalStateException("handler boom");
+              }
+              executed.add(value);
             },
             returned::add);
 
     dispatcher.start();
     assertDoesNotThrow(drain::runNext);
     assertTrue(returned.isEmpty());
-    assertEquals(0, dispatcher.inFlightCount());
+
+    // 容量已正常释放：后续 claim 可继续在容量上限内正常调度执行。
+    claims.add("b");
+    dispatcher.wake();
+    drain.runNext();
+    assertEquals(List.of("b"), executed);
+    assertTrue(returned.isEmpty());
   }
 
   /** worker 已同步开始后 execute 抛 Error：不归还 claim，先释放容量再把 Error 原样抛出。 */
@@ -461,7 +471,9 @@ class BoundedWorkDispatcherTest {
     ManualExecutor drain = new ManualExecutor();
     Deque<String> claims = new ArrayDeque<>(List.of("a"));
     List<String> returned = new ArrayList<>();
+    List<String> executed = new ArrayList<>();
     AssertionError boom = new AssertionError("handler boom");
+    AtomicInteger attempts = new AtomicInteger();
     BoundedWorkDispatcher<String> dispatcher =
         new BoundedWorkDispatcher<>(
             "test",
@@ -472,14 +484,23 @@ class BoundedWorkDispatcherTest {
             new FakeScheduler(),
             claims::poll,
             value -> {
-              throw boom;
+              if (attempts.getAndIncrement() == 0) {
+                throw boom;
+              }
+              executed.add(value);
             },
             returned::add);
 
     dispatcher.start();
     assertSame(boom, assertThrows(AssertionError.class, drain::runNext));
     assertTrue(returned.isEmpty());
-    assertEquals(0, dispatcher.inFlightCount());
+
+    // Error 传播后容量已正常释放：后续 claim 可继续在容量上限内正常调度执行。
+    claims.add("b");
+    dispatcher.wake();
+    drain.runNext();
+    assertEquals(List.of("b"), executed);
+    assertTrue(returned.isEmpty());
   }
 
   /** 容量约束在途 worker task 数；收尾释放一个 slot 后由 wake 继续 claim 后续 due。 */
@@ -503,21 +524,20 @@ class BoundedWorkDispatcherTest {
 
     dispatcher.start();
     drain.runNext();
-    assertEquals(2, dispatcher.inFlightCount());
     assertEquals(2, worker.size());
     assertEquals(1, claims.size());
 
     // c 只有在某个 worker 收尾释放 slot 后才会被 claim。
     worker.runNext();
-    assertEquals(1, dispatcher.inFlightCount());
+    assertEquals(1, worker.size());
     drain.runNext();
     assertEquals(0, claims.size());
-    assertEquals(2, dispatcher.inFlightCount());
+    assertEquals(2, worker.size());
 
     worker.runNext();
     worker.runNext();
     assertEquals(List.of("a", "b", "c"), executed);
-    assertEquals(0, dispatcher.inFlightCount());
+    assertEquals(0, worker.size());
   }
 
   /** stop 赢得 claim 与 handoff 之间：已 claim 的 item 由 returnUnstartedClaim 归还，且不再有新的 claim iteration。 */

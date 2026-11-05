@@ -163,12 +163,6 @@ public class PostgresqlCanvasFunctionRunRepository {
     return runStore.deleteByNodeId(nodeId) >= 0;
   }
 
-  @Transactional
-  public boolean deleteByCanvasId(UUID canvasId) {
-    canvasRunWorkQueue.deleteAll(runStore.listNodeIdsByCanvas(canvasId));
-    return runStore.deleteByCanvas(canvasId) >= 0;
-  }
-
   /** 持有者的 CAS 成功即证明它仍持有租约：Run 不再可执行，同一事务内删除它的 Work 行。 */
   private boolean finishOwned(UUID nodeId, int updated) {
     if (updated != 1) {

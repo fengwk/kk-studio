@@ -11,18 +11,11 @@ package fun.fengwk.kkstudio.platform.harness.prompt;
 public final class ChangeGate {
 
   private long version;
-  private long descendants;
   private long cancel;
 
   /** durable version / resync 唤醒。 */
   public synchronized void version() {
     version++;
-    notifyAll();
-  }
-
-  /** registry descendant status 变化唤醒。 */
-  public synchronized void descendants() {
-    descendants++;
     notifyAll();
   }
 
@@ -33,7 +26,7 @@ public final class ChangeGate {
   }
 
   public synchronized State snapshot() {
-    return new State(version, descendants, cancel);
+    return new State(version, cancel);
   }
 
   /**
@@ -62,8 +55,8 @@ public final class ChangeGate {
   }
 
   private boolean changed(State since) {
-    return version != since.version || descendants != since.descendants || cancel != since.cancel;
+    return version != since.version || cancel != since.cancel;
   }
 
-  public record State(long version, long descendants, long cancel) {}
+  public record State(long version, long cancel) {}
 }

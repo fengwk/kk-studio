@@ -37,7 +37,7 @@ public final class MiniMaxMavisHarnessContributor implements HarnessContributor 
 
   private final Map<MavisCapability, Tool> toolsByCapability;
 
-  public MiniMaxMavisHarnessContributor(Map<MavisCapability, Tool> toolsByCapability) {
+  private MiniMaxMavisHarnessContributor(Map<MavisCapability, Tool> toolsByCapability) {
     Objects.requireNonNull(toolsByCapability, "toolsByCapability");
     Map<MavisCapability, Tool> indexed = new EnumMap<>(MavisCapability.class);
     for (MavisCapability capability : MavisCapability.values()) {
@@ -72,11 +72,6 @@ public final class MiniMaxMavisHarnessContributor implements HarnessContributor 
   /** 按能力暴露已注册的工具，便于装配与测试断言一一对应。 */
   public Map<MavisCapability, Tool> tools() {
     return toolsByCapability;
-  }
-
-  /** 已注册的模型可见工具数；必须始终等于能力总数。 */
-  public int toolCount() {
-    return toolsByCapability.size();
   }
 
   /** 组装 15 个工具时的共享依赖（凭据访问是绑定本安装 pluginId 的 scoped 视图）。 */

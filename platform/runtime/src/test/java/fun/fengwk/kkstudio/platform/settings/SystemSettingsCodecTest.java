@@ -446,7 +446,7 @@ class SystemSettingsCodecTest {
 
   /**
    * 持久化 codec 使用独立 plain mapper：HTTP/convention 的 Long→十进制字符串不泄漏进 canonical JSON，时长仍是 JSON 数值
-   * token；同时严格解码继续拒绝字符串→整数的隐式强制转换，证明迁移后 profile 未被削弱。
+   * token；同时严格解码拒绝字符串→整数的隐式强制转换，保证严格 profile 校验。
    */
   @Test
   void canonicalProfileKeepsDurationsNumericAndStillRejectsStringCoercion() throws Exception {

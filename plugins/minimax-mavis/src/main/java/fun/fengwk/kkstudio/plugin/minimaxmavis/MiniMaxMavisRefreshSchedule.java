@@ -14,7 +14,7 @@ import java.time.Instant;
 public final class MiniMaxMavisRefreshSchedule {
 
   /** 刷新间隔的固定上限。 */
-  public static final Duration MAX_INTERVAL = Duration.ofDays(7);
+  private static final Duration MAX_INTERVAL = Duration.ofDays(7);
 
   private MiniMaxMavisRefreshSchedule() {}
 

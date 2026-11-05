@@ -5,7 +5,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.common.result.ResultContent;
 import fun.fengwk.kkstudio.common.result.TextResultContent;
 
 import java.util.List;
@@ -18,23 +17,13 @@ import java.util.Map;
  */
 class McpValueModelTest {
 
-  /** success/error/text/errorText 各工厂必须产出与自身语义一致的 error 标记，避免调用方按错误的极性分支。 */
+  /** errorText 工厂必须产出 error=true 与空对象 detailsJson，保证错误结果契约稳定。 */
   @Test
-  void factoryMethodsProduceConsistentErrorFlags() {
-    List<ResultContent> contents = List.of(new TextResultContent("payload"));
-
-    assertThat(McpToolCallResult.success(contents, "{\"a\":1}").error()).isFalse();
-    assertThat(McpToolCallResult.error(contents, "{\"a\":1}").error()).isTrue();
-    assertThat(McpToolCallResult.text("ok").error()).isFalse();
+  void errorTextFactoryProducesConsistentErrorFlag() {
     assertThat(McpToolCallResult.errorText("boom").error()).isTrue();
-
-    assertThat(McpToolCallResult.text("ok").contents())
-        .containsExactly(new TextResultContent("ok"));
     assertThat(McpToolCallResult.errorText("boom").contents())
         .containsExactly(new TextResultContent("boom"));
     assertThat(McpToolCallResult.errorText("boom").detailsJson()).isEqualTo("{}");
-    assertThat(McpToolCallResult.success(contents, "{\"a\":1}").contents())
-        .containsExactly(new TextResultContent("payload"));
   }
 
   /** detailsJson 必须是合法 JSON object：非 object 与畸形文本都在构造时拒绝，缺失则规范化为空对象。 */

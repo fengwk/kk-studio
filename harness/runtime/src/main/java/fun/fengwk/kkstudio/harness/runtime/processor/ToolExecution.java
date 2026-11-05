@@ -359,7 +359,7 @@ public final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution
     try {
       ExecutionExitConfirmer.Result result = exitConfirmer.confirm(local, state);
       if (result.outcome() == ExecutionExitConfirmer.Outcome.THREAD_MISSING) {
-        // 合法深删已先提交，不再回写该 Thread；缺失本身不构成退出证据。
+        // 合法深删已先提交，不回写该 Thread；缺失本身不构成退出证据。
         return;
       }
     } catch (RuntimeException failure) {
@@ -708,7 +708,7 @@ public final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution
     }
   }
 
-  /** 稳定结果再校验：同一调用、仅 Text/JSON/Session Resource，且绝不再含 inline binary 或瞬时 upload。 */
+  /** 稳定结果再校验：同一调用、仅 Text/JSON/Session Resource，且不含 inline binary 或瞬时 upload。 */
   private static void requireStableResult(ToolResult result, String toolCallId) {
     if (result == null) {
       throw new ToolOutcomeMaterializationException("stable tool outcome must not be null");

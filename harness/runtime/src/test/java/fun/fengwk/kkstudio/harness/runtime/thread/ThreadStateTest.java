@@ -45,7 +45,6 @@ class ThreadStateTest {
     assertEquals(CREATED, rootState.updatedAt());
 
     assertEquals(0L, rootState.inputThroughSequence());
-    assertTrue(rootState.executionControl().isRunnable());
     assertFalse(rootState.executionControl().isStopped());
 
     ThreadState childState =
@@ -62,7 +61,6 @@ class ThreadStateTest {
     // 子线程没有独立开关，因此 yoloEnabled 为 false。
     assertFalse(childState.yoloEnabled());
     assertEquals(ThreadExecutionControl.RUNNABLE, childState.executionControl());
-    assertTrue(childState.executionControl().isRunnable());
   }
 
   @Test
@@ -251,40 +249,6 @@ class ThreadStateTest {
   }
 
   @Test
-  void changeLifecycleStatusBumpsVersionByOneAndPreservesFields() {
-    // 测试意图：验证 changeLifecycleStatus 转换方法将 status 更新、version 严格 +1、并完整保留 parent 与其他 durable 字段。
-    ThreadState stored =
-        state(id(7), id(100), id(42), false, ThreadExecutionControl.RUNNABLE, 3L, 5L, CREATED);
-
-    ThreadState idle =
-        stored.changeExecutionControl(ThreadExecutionControl.RUNNABLE, CREATED.plusSeconds(1));
-    assertEquals(ThreadExecutionControl.RUNNABLE, idle.executionControl());
-    assertEquals(6L, idle.version());
-    assertEquals(stored.id(), idle.id());
-    assertEquals(stored.sessionId(), idle.sessionId());
-    assertEquals(id(100), idle.parentThreadId());
-    assertEquals(stored.headEntryId(), idle.headEntryId());
-    assertEquals(stored.creationRequestHash(), idle.creationRequestHash());
-    assertEquals(stored.name(), idle.name());
-    assertEquals(stored.rootThreadId(), idle.rootThreadId());
-    assertEquals(stored.yoloEnabled(), idle.yoloEnabled());
-    assertEquals(stored.nextCommandSequence(), idle.nextCommandSequence());
-    assertEquals(stored.createdAt(), idle.createdAt());
-    assertEquals(CREATED.plusSeconds(1), idle.updatedAt());
-
-    ThreadState stopped =
-        idle.changeExecutionControl(ThreadExecutionControl.STOPPED, CREATED.plusSeconds(2));
-    assertEquals(ThreadExecutionControl.STOPPED, stopped.executionControl());
-    assertEquals(7L, stopped.version());
-    assertEquals(id(100), stopped.parentThreadId());
-
-    // 拒绝传入 null status
-    assertThrows(
-        NullPointerException.class,
-        () -> stored.changeExecutionControl(null, CREATED.plusSeconds(1)));
-  }
-
-  @Test
   void reserveCommandSequencesAdvancesBatchAndVersionByOne() {
     ThreadState stored =
         state(id(7), id(100), id(42), false, ThreadExecutionControl.RUNNABLE, 3L, 5L, CREATED);
@@ -321,7 +285,7 @@ class ThreadStateTest {
   void advanceHeadPreservesRootAndYoloAndBumpsVersionByOne() {
     ThreadState stored =
         state(id(7), id(100), id(42), true, ThreadExecutionControl.RUNNABLE, 3L, 5L, CREATED);
-    // head 推进恒保留当前 yolo policy（不再接受外部传入值，杜绝 terminal / resolver 路径写回过期策略），仅 bump 一次 version。
+    // head 推进恒保留当前 yolo policy（不接受外部传入值，杜绝 terminal / resolver 路径写回过期策略），仅 bump 一次 version。
     ThreadState head = stored.advanceHead(id(99), CREATED.plusSeconds(2));
     assertEquals(id(99), head.headEntryId());
     // 推进 head 必须完整保留执行根。
@@ -879,12 +843,6 @@ class ThreadStateTest {
         IllegalArgumentException.class,
         () -> stored.advanceHeadAndInputThroughSequence(id(43), -1L, CREATED));
 
-    ThreadState inputAdvanced = stored.advanceInputThroughSequence(2L, CREATED);
-    assertEquals(2L, inputAdvanced.inputThroughSequence());
-    assertEquals(6L, inputAdvanced.version());
-    assertThrows(
-        IllegalArgumentException.class, () -> stored.advanceInputThroughSequence(-1L, CREATED));
-
     ThreadState reservedHeadAndInput =
         stored.reserveCommandSequencesAdvanceHeadAndInput(1, id(43), 1L, CREATED);
     assertEquals(4L, reservedHeadAndInput.nextCommandSequence());
@@ -903,7 +861,7 @@ class ThreadStateTest {
   void transitionRejectsInputWatermarkRegression() {
     ThreadState stored =
         state(id(7), null, id(42), false, ThreadExecutionControl.RUNNABLE, 3L, 5L, CREATED)
-            .advanceInputThroughSequence(2L, CREATED);
+            .advanceHeadAndInputThroughSequence(id(42), 2L, CREATED);
     ThreadState regressed =
         new ThreadState(
             stored.id(),

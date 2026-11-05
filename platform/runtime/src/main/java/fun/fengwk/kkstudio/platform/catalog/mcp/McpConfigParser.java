@@ -24,8 +24,8 @@ public final class McpConfigParser {
   private static final Pattern NAME_PATTERN = Pattern.compile("^[a-z][a-z0-9_]*$");
   public static final long DEFAULT_TIMEOUT_MILLIS = 60_000L;
   public static final int URL_MAX_LENGTH = 2048;
-  public static final int HEADER_NAME_MAX_LENGTH = 256;
-  public static final int HEADER_VALUE_MAX_LENGTH = 8192;
+  private static final int HEADER_NAME_MAX_LENGTH = 256;
+  private static final int HEADER_VALUE_MAX_LENGTH = 8192;
 
   private static final Pattern WHOLE_VAR_PATTERN =
       Pattern.compile("^\\$\\{([a-zA-Z_][a-zA-Z0-9_]*)\\}$");
@@ -69,7 +69,7 @@ public final class McpConfigParser {
   }
 
   /** 校验并规范化 endpoint URL：必须是绝对 http/https 地址且不含 user-info 凭据。 */
-  public static String requireUrl(String url) {
+  private static String requireUrl(String url) {
     if (url == null || url.isBlank()) {
       throw DomainException.validation(RESOURCE, "url must not be blank");
     }
@@ -104,7 +104,7 @@ public final class McpConfigParser {
   }
 
   /** 校验并规范化自定义 header 映射；{@code null} 归一化为空映射。 */
-  public static Map<String, String> normalizeHeaders(Map<String, String> headers) {
+  private static Map<String, String> normalizeHeaders(Map<String, String> headers) {
     if (headers == null || headers.isEmpty()) {
       return Map.of();
     }
@@ -138,7 +138,7 @@ public final class McpConfigParser {
   }
 
   /** 校验正整数毫秒超时；{@code null} 归一化为 {@link #DEFAULT_TIMEOUT_MILLIS}。 */
-  public static long normalizeTimeoutMillis(Long timeoutMillis) {
+  private static long normalizeTimeoutMillis(Long timeoutMillis) {
     if (timeoutMillis == null) {
       return DEFAULT_TIMEOUT_MILLIS;
     }

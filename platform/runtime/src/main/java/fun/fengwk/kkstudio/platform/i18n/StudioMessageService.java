@@ -142,7 +142,7 @@ public class StudioMessageService {
     try {
       return message(key, Collections.emptyMap());
     } catch (MissingResourceException missing) {
-      // 已识别但未登记文案的状态（如 418）与未知状态使用同一兜底；调用方不再各自 try/catch。
+      // 已识别但未登记文案的状态（如 418）与未知状态使用同一兜底，对调用方屏蔽内部异常。
       return unknownHttpMessage(status, part);
     }
   }

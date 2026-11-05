@@ -80,8 +80,8 @@ class AgentModelRuntimeConfigParserTest {
     assertEquals(new BigDecimal("2.2"), pricing.base().output());
     assertEquals(new BigDecimal("0.3"), pricing.base().cacheRead());
     assertEquals(new BigDecimal("0.4"), pricing.base().cacheWrite());
-    assertEquals(new BigDecimal("0.5"), pricing.base().cacheWriteRate(300));
-    assertEquals(new BigDecimal("0.4"), pricing.base().cacheWriteRate(3600));
+    assertEquals(new BigDecimal("0.5"), pricing.base().cacheWriteByTtl().get(300L));
+    assertFalse(pricing.base().cacheWriteByTtl().containsKey(3600L));
     assertEquals(new BigDecimal("3.6"), pricing.base().reasoning());
     assertEquals(List.of(), pricing.overrides());
     assertEquals(List.of(), pricing.multipliers());

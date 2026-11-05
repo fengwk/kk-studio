@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.platform.catalog.mcp;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -112,20 +111,5 @@ class McpToolNameNormalizerTest {
             IllegalArgumentException.class,
             () -> McpToolNameNormalizer.requireModelToolName(server, over57));
     assertTrue(ex.getMessage().contains("exceeds 64 characters"));
-  }
-
-  @Test
-  void validatesToolDescriptorNameSyntax() {
-    // 意图：验证 ToolDescriptor name 语法（字母开头，仅字母数字_-）
-    assertTrue(McpToolNameNormalizer.isValidToolDescriptorName("mcp_server_tool"));
-    assertTrue(McpToolNameNormalizer.isValidToolDescriptorName("Tool_1"));
-    assertTrue(McpToolNameNormalizer.isValidToolDescriptorName("a-b_c"));
-
-    assertFalse(McpToolNameNormalizer.isValidToolDescriptorName(null));
-    assertFalse(McpToolNameNormalizer.isValidToolDescriptorName(""));
-    assertFalse(McpToolNameNormalizer.isValidToolDescriptorName("123tool"));
-    assertFalse(McpToolNameNormalizer.isValidToolDescriptorName("_tool"));
-    assertFalse(McpToolNameNormalizer.isValidToolDescriptorName("-tool"));
-    assertFalse(McpToolNameNormalizer.isValidToolDescriptorName("tool@name"));
   }
 }

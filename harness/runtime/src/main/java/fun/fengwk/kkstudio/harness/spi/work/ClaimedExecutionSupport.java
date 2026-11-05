@@ -94,7 +94,7 @@ public final class ClaimedExecutionSupport<E extends ClaimAdmissionGuard.Guarded
     guard.close();
   }
 
-  /** 是否已关闭：关闭后不再准入新 claim。 */
+  /** 是否已关闭：关闭后不准入新 claim。 */
   public boolean isClosed() {
     return guard.isClosed();
   }

@@ -4,7 +4,6 @@ import lombok.AllArgsConstructor;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ObjectNode;
 
@@ -261,29 +260,6 @@ public class IssueRunService {
     IssueRun run = issueRunRepository.getById(applied.getRunId());
     if (run == null) {
       throw new IllegalStateException("accepted run does not exist");
-    }
-    return run;
-  }
-
-  public IssueRun getRun(UUID runId) {
-    Objects.requireNonNull(runId, "runId");
-    return requireRun(runId);
-  }
-
-  public IssueRun getActiveRun(UUID issueId) {
-    Objects.requireNonNull(issueId, "issueId");
-    IssueRun run = issueRunRepository.getActiveByIssueId(issueId);
-    if (run == null) {
-      throw new ProjectNotFoundException("issue_run");
-    }
-    return run;
-  }
-
-  public IssueRun getLatestRun(UUID issueId) {
-    Objects.requireNonNull(issueId, "issueId");
-    IssueRun run = issueRunRepository.getLatestByIssueId(issueId);
-    if (run == null) {
-      throw new ProjectNotFoundException("issue_run");
     }
     return run;
   }
@@ -613,8 +589,8 @@ public class IssueRunService {
    * <p>Environment 取当前 stage 的显式选择（含 null 清除），而不是 Agent 默认 settings 的 environmentName，否则工作流里配置的
    * stage 环境会被 Agent 默认值悄悄覆盖；Agent 与 Model 仍以本 Run 明确物化的 run 配置为准。
    *
-   * <p>任务消息是本次 Run 唯一的业务上下文来源：它在接受时由 Project 自己的模板渲染成 Markdown，不写任何 branch custom state，也不依赖
-   * Harness 侧的历史状态投影。
+   * <p>任务消息是本次 Run 唯一的业务上下文来源：它在接受时由 Project 自己的模板渲染成 Markdown，不写入 branch custom state，不依赖 Harness
+   * 状态投影。
    */
   private List<NewThreadCommand> buildRunCommands(
       BranchSettings settings, Issue issue, ProjectWorkflowState stage, UUID runId) {
@@ -690,7 +666,7 @@ public class IssueRunService {
             .actorAgentName(agentName)
             .runId(runId)
             .body(body)
-            .data(writeJson(data))
+            .data(IssueMutationSupport.writeJson(objectMapper, data))
             .idempotencyKey(identity.key())
             .requestHash(identity.requestHash())
             .build();
@@ -698,14 +674,6 @@ public class IssueRunService {
       throw new IllegalStateException("failed to insert issue activity");
     }
     issue.setNextActivitySequence(sequence + 1);
-  }
-
-  private String writeJson(ObjectNode node) {
-    try {
-      return objectMapper.writeValueAsString(node);
-    } catch (JacksonException error) {
-      throw new IllegalStateException("failed to encode activity data", error);
-    }
   }
 
   private IssueThreadExecution requireThreadExecution() {

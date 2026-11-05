@@ -149,8 +149,8 @@ class RemoteMcpExecutableToolTest {
   @Test
   void failsClosedAtInvocationWhenServerOrToolIsMissingDisabledOrUnavailable() throws Exception {
     // 意图：发送前重新读取 DB，server 缺失/禁用/非 AVAILABLE 时返回脱敏失败且不发起网络调用。
-    // 这里同时覆盖目录查找不再按可用性过滤后的反例：即使 tool 行已由 McpToolCatalog.findTool 解析出来，
-    // 调用期仍必须按当前 DB 行 fail closed。
+    // 调用期按当前 DB 行执行 fail closed：即使 tool 行已由 McpToolCatalog.findTool 解析出来，
+    // 调用时若 server/tool 状态不符仍终止。
     ToolDescriptor descriptor = SampleDescriptors.tool(TOOL_NAME);
     RemoteMcpExecutableTool tool =
         new RemoteMcpExecutableTool(descriptor, SERVER_NAME, TOOL_NAME, "echo", repository);

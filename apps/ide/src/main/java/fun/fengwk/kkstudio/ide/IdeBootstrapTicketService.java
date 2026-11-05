@@ -29,12 +29,6 @@ public final class IdeBootstrapTicketService {
     return store.consume(ticket);
   }
 
-  /** 撤销某代际尚未消费的票据（另一个 Daemon 实例接管时调用）。 */
-  public void revoke(DaemonConnectionIdentity identity) {
-    Objects.requireNonNull(identity, "identity");
-    store.revoke(ticket -> ticket.identity().equals(identity));
-  }
-
   /** 撤销某视图全部尚未消费的入口票据（关闭、恢复换代时调用）。 */
   public void revokeView(EnvironmentId environmentId, String viewId) {
     Objects.requireNonNull(environmentId, "environmentId");
@@ -45,7 +39,7 @@ public final class IdeBootstrapTicketService {
                 && ticket.viewId().equals(viewId));
   }
 
-  public int pendingCount() {
+  int pendingCount() {
     return store.pendingCount();
   }
 

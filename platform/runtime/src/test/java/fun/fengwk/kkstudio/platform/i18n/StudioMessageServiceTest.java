@@ -112,7 +112,7 @@ class StudioMessageServiceTest {
     assertEquals("HTTP Error", messageService.httpTitle(599));
     assertFalse(messageService.httpMessage(599).isBlank());
 
-    // 已识别但未登记文案的状态与未知状态使用同一兜底，advice 不再各自捕获 MissingResourceException。
+    // 已识别但未登记文案的状态与未知状态使用同一兜底，直接返回统一的未知状态文案。
     assertEquals("I_AM_A_TEAPOT", messageService.httpCode(418));
     assertEquals("HTTP error (status 418).", messageService.httpMessage(418));
     assertEquals("HTTP Error", messageService.httpTitle(418));
@@ -157,7 +157,7 @@ class StudioMessageServiceTest {
     }
   }
 
-  /** IDE 通道不可用是新增 domain 码：两种受支持语言都必须提供该 key，缺失会导致运行期解析失败。 */
+  /** IDE 通道不可用 domain 码：两种受支持语言都必须提供该 key，缺失会导致运行期解析失败。 */
   @Test
   void localizesIdeUnavailableDomainMessageInBothLocales() {
     LocaleContextHolder.setLocale(Locale.US);

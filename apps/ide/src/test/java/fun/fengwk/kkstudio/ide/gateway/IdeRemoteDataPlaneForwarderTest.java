@@ -103,7 +103,7 @@ class IdeRemoteDataPlaneForwarderTest {
   }
 
   @Test
-  void forwardHttpFiltersDisallowedJdkHeaders() throws Exception {
+  void forwardDataHttpFiltersDisallowedJdkHeaders() throws Exception {
     HttpClient httpClient = mock(HttpClient.class);
     IdeClusterClient clusterClient = mock(IdeClusterClient.class);
     ClusterOwnerRoute owner =
@@ -168,7 +168,7 @@ class IdeRemoteDataPlaneForwarderTest {
         };
     when(res.getOutputStream()).thenReturn(servletOut);
 
-    forwarder.forwardHttp(req, res, owner, ENV, VIEW, "/src/main.ts");
+    forwarder.forwardDataHttp(req, res, owner, ENV, VIEW, "/src/main.ts");
 
     HttpRequest sentRequest = captor.getValue();
     HttpHeaders sentHeaders = sentRequest.headers();
@@ -275,7 +275,7 @@ class IdeRemoteDataPlaneForwarderTest {
   }
 
   @Test
-  void forwardHttpErrorHandling() throws Exception {
+  void forwardDataHttpErrorHandling() throws Exception {
     HttpClient httpClient = mock(HttpClient.class);
     IdeClusterClient clusterClient = mock(IdeClusterClient.class);
     ClusterOwnerRoute owner =
@@ -292,7 +292,7 @@ class IdeRemoteDataPlaneForwarderTest {
     HttpServletResponse res = mock(HttpServletResponse.class);
     when(res.isCommitted()).thenReturn(false);
 
-    forwarder.forwardHttp(req, res, owner, ENV, VIEW, "/test");
+    forwarder.forwardDataHttp(req, res, owner, ENV, VIEW, "/test");
     verify(res).sendError(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
   }
 

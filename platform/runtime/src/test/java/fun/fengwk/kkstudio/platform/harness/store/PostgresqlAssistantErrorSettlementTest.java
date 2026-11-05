@@ -154,7 +154,7 @@ class PostgresqlAssistantErrorSettlementTest {
       assertEquals("INVALID_REQUEST", errorPayload.error().code());
       assertEquals(message, errorPayload.error().message());
 
-      // durable 状态经既有 snapshot 投影读到 IDLE（不再 RUNNABLE/挂起）。
+      // durable 状态经既有 snapshot 投影读到 IDLE。
       HarnessRuntime snapshotRuntime =
           new HarnessRuntime(
               store, builtinRegistry(store, resolver), () -> new CompactionConfig(20_000));

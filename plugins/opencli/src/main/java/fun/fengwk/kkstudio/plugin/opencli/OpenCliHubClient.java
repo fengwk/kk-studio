@@ -702,18 +702,30 @@ public class OpenCliHubClient implements AutoCloseable {
     return normalized;
   }
 
-  private static void validateVirtualResourcePath(String resourcePath) {
+  static boolean isCanonicalResourcePath(String resourcePath) {
+    if (resourcePath == null || !VIRTUAL_RESOURCE_PATH.matcher(resourcePath).matches()) {
+      return false;
+    }
     URI parsed;
     try {
       parsed = URI.create(resourcePath);
     } catch (IllegalArgumentException exception) {
+      return false;
+    }
+    return parsed.getQuery() == null
+        && parsed.getFragment() == null
+        && !hasDotSegment(parsed.getPath())
+        && parsed.normalize().getPath() != null
+        && parsed.normalize().getPath().startsWith("/resources/");
+  }
+
+  private static void validateVirtualResourcePath(String resourcePath) {
+    try {
+      URI.create(resourcePath);
+    } catch (IllegalArgumentException exception) {
       throw malformed("upload resourcePath must be a canonical /resources/ path", exception);
     }
-    if (!VIRTUAL_RESOURCE_PATH.matcher(resourcePath).matches()
-        || parsed.getQuery() != null
-        || parsed.getFragment() != null
-        || hasDotSegment(parsed.getPath())
-        || !parsed.normalize().getPath().startsWith("/resources/")) {
+    if (!isCanonicalResourcePath(resourcePath)) {
       throw malformed("upload resourcePath must be a canonical /resources/ path");
     }
   }

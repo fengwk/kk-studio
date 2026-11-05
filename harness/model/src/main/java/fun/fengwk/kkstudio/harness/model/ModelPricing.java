@@ -53,11 +53,6 @@ public record ModelPricing(RateSet base, List<Override> overrides, List<Multipli
       reasoning = reasoning == null ? null : requireNonNegative(reasoning, "reasoning");
     }
 
-    /** TTL 精确覆盖通用写价；没有覆盖时返回通用 cacheWrite。 */
-    public BigDecimal cacheWriteRate(long ttlSeconds) {
-      return cacheWriteByTtl.getOrDefault(ttlSeconds, cacheWrite);
-    }
-
     /** reasoning 是否配置了独立单价；false 表示继承最终 output 价。 */
     public boolean independentReasoning() {
       return reasoning != null;

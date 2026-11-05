@@ -35,7 +35,7 @@ import java.util.regex.Pattern;
 /**
  * Terminal {@link ToolResult} 的结果级统一终态化器（{@code ToolResultFinalizer}）。
  *
- * <p>替换原有的 per-content 双截断 externalizer：
+ * <p>统一终态化处理规则：
  *
  * <ul>
  *   <li>按原始 content 顺序用两个换行（{@code \n\n}）拼接所有 Text/Json 内容，形成唯一 canonical textual projection；
@@ -78,9 +78,6 @@ public final class ToolResultFinalizer {
 
   /** 大输出 raw preview 的物理行数上限（20 行）。 */
   public static final int TRUNCATED_PREVIEW_MAX_LINES = 20;
-
-  /** 单次可持久化 Tool Artifact 的默认硬上限（16 MiB）。 */
-  public static final int DEFAULT_RESOURCE_MAX_BYTES = 16 * 1024 * 1024;
 
   /** 外部化后的 canonical ToolResult JSON 上限（1 MiB）。 */
   public static final int MAX_TERMINAL_RESULT_UTF8_BYTES =

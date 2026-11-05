@@ -6,7 +6,6 @@ import fun.fengwk.kkstudio.harness.api.history.EntryPath;
 import fun.fengwk.kkstudio.harness.api.history.ModelAttemptSnapshot;
 import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnEndReason;
-import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.api.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.api.tool.ContributorStateAccess;
 import fun.fengwk.kkstudio.harness.api.tool.ContributorStateAccessMode;
@@ -16,12 +15,10 @@ import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.history.BuiltinHistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.builtin.port.store.BuiltinStore;
-import fun.fengwk.kkstudio.harness.builtin.port.store.ModelAttemptMaterialization;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.history.FinalAnswerEntry;
-import fun.fengwk.kkstudio.harness.spi.driver.ToolOutcomeAppender;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -32,14 +29,15 @@ import java.util.Objects;
 import java.util.UUID;
 
 /**
- * terminal ModelInvocation 与 Tool sibling batch 的历史结果物化器。
+ * terminal ModelInvocation 的历史结果物化器。
  *
- * <p>只负责把已提交的 terminal 执行结果按既有 appender 落成不可变历史 Entry（ASSISTANT 结果 / COMPACTION 结果 / ToolResult +
- * TURN_END）并维护 Invocation 行的 attach-then-delete；返回落库事实供调用方决定下一步。绝不推进 Thread head、绝不 requestWork、绝不
- * complete Claim，也不参与 Stop 控制：这些仍由各自调用方（{@link ThreadProcessor} 的 claim 调度、Stop 的 收敛）掌握。
+ * <p>只负责把已提交的 terminal 执行结果按既有 appender 落成不可变历史 Entry（ASSISTANT 结果 / 失败 attempt / TURN_END，或在
+ * active Tool phase 仅插入 Tool siblings）并维护 Invocation 行的 attach-then-delete；返回落库事实供调用方决定下一步。绝不推进
+ * Thread head、绝不 requestWork、绝不 complete Claim，也不参与 Stop 控制：这些仍由各自调用方（{@link ThreadProcessor} 的
+ * claim 调度、Stop 的 收敛）掌握。
  *
  * <p>{@link #appendModel} 覆盖非 compaction turn 的 terminal Model（Complete / Continue / Failed /
- * ToolBatch / 非成功）；{@link #appendToolBatch} 覆盖已物化 assistant + 全部 terminal sibling 的批量结果落库。
+ * ToolBatch / 非成功）。
  */
 public final class ModelOutcomeAppender {
 
@@ -178,88 +176,6 @@ public final class ModelOutcomeAppender {
         yield new Applied(resultEntryId, null, false, false, true, null, invocations);
       }
     };
-  }
-
-  /**
-   * 已物化 assistant + 全部 terminal sibling 的批量结果：按 callIndex 落 ToolResult 与 COMPLETED
-   * TURN_END(continueModel)。
-   *
-   * <p>{@code model} 仅用于 Builtin 路径的附加一致性校验与同事务删除；公共工具批次不依赖它。siblings 的 Thread / TurnStart /
-   * Assistant 归属与 open Turn 必须一致。
-   */
-  public Applied appendToolBatch(
-      BuiltinStore.Transaction tx,
-      EntryPath path,
-      ModelInvocation model,
-      List<ToolInvocation> siblings,
-      Instant mutationNow) {
-    Objects.requireNonNull(tx, "tx");
-    Objects.requireNonNull(path, "path");
-    Objects.requireNonNull(siblings, "siblings");
-    Entry turnStart =
-        path.openTurnStart()
-            .orElseThrow(() -> new IllegalStateException("tool batch requires an open TURN_START"));
-    if (!(turnStart.payload() instanceof TurnStartPayload start)) {
-      throw new IllegalStateException("open turn start has an invalid payload");
-    }
-    if (!siblings.isEmpty() && !siblings.get(0).turnStartEntryId().equals(turnStart.id())) {
-      throw new IllegalStateException(
-          "tool siblings must belong to the open turn start " + turnStart.id());
-    }
-    if (!siblings.isEmpty() && !siblings.get(0).assistantEntryId().equals(path.head().id())) {
-      throw new IllegalStateException("tool siblings must belong to the current assistant head");
-    }
-    for (ToolInvocation sibling : siblings) {
-      if (!sibling.threadId().equals(start.ownerThreadId())
-          || !sibling.turnStartEntryId().equals(turnStart.id())
-          || !sibling.assistantEntryId().equals(path.head().id())) {
-        throw new IllegalStateException(
-            "tool sibling " + sibling.id() + " does not belong to this thread turn");
-      }
-      if (sibling.binding() == null) {
-        if (!sibling.status().isTerminal()) {
-          throw new IllegalStateException(
-              "unbound tool sibling " + sibling.id() + " must be a terminal failure slot");
-        }
-      } else if (start.capabilities() == null
-          || !start.capabilities().toolBindings().contains(sibling.binding())) {
-        throw new IllegalStateException(
-            "tool sibling "
-                + sibling.id()
-                + " binding was not frozen in the open turn capabilities");
-      }
-    }
-    if (model != null) {
-      if (!model.threadId().equals(start.ownerThreadId())
-          || !model.turnStartEntryId().equals(turnStart.id())) {
-        throw new IllegalStateException("model does not belong to the open turn");
-      }
-      // 删除 parent 前的严格物化校验：attached Assistant/result 与已物化失败 attempt 前缀必须与 immutable 事实一致。
-      ModelAttemptMaterialization.validateAttached(model, path);
-    }
-    UUID sessionId = path.root().sessionId();
-    UUID parentId = path.head().id();
-    for (ToolInvocation sibling : siblings) {
-      ToolOutcomeAppender.Applied applied =
-          ToolOutcomeAppender.append(tx, sessionId, parentId, sibling, mutationNow);
-      parentId = applied.headEntryId();
-    }
-    UUID turnEndId =
-        appendTurnEnd(
-            tx,
-            sessionId,
-            parentId,
-            turnStart.id(),
-            TurnEndOutcome.COMPLETED,
-            true,
-            null,
-            mutationNow);
-    // children 先于 parent 删除（FK 顺序）。
-    tx.tools().deleteByIds(siblings.stream().map(ToolInvocation::id).toList());
-    if (model != null) {
-      tx.deleteModelInvocation(model.id());
-    }
-    return new Applied(turnEndId, null, false, true, false, TurnEndOutcome.COMPLETED, List.of());
   }
 
   private List<ToolInvocation> materializeSiblings(

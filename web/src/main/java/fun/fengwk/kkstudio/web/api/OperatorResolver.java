@@ -12,7 +12,7 @@ import java.security.Principal;
 public final class OperatorResolver {
 
   /** 单用户部署边界下没有认证主体时使用的固定操作者。 */
-  public static final String LOCAL_OPERATOR = "local-user";
+  private static final String LOCAL_OPERATOR = "local-user";
 
   private OperatorResolver() {}
 

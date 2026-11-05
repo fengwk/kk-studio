@@ -85,7 +85,7 @@ class TurnPlanBuilderGoalTest {
   }
 
   /**
-   * 测试意图：相同文本的再次设置也必须得到新的 goal id（旧进度声明因此失效），清除则回到无 Goal 并产生明确的取消 USER 消息； 后继 turn 的 settings 从候选
+   * 测试意图：相同文本的再次设置也必须得到新的 goal id（先前进度声明因此失效），清除则回到无 Goal 并产生明确的取消 USER 消息； 后继 turn 的 settings 从候选
    * path 自然继承。
    */
   @Test

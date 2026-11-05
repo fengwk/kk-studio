@@ -90,7 +90,7 @@ class McpToolCatalogTest {
 
   @Test
   void findToolResolvesPersistedDefinitionOfDisabledUnverifiedAndFailedServers() {
-    // 意图：规划/查找面只要求持久化定义存在。server 被禁用、未验证或发现失败都不再让已持久化工具变成 tool-not-found，
+    // 意图：规划/查找面只要求持久化定义存在。server 被禁用、未验证或发现失败时不让已持久化工具变成 tool-not-found，
     // 可用性由调用期的 RemoteMcpExecutableTool 按同一 DB 行 fail closed。
     for (McpDiscoveryStatus status : McpDiscoveryStatus.values()) {
       for (boolean enabled : List.of(true, false)) {

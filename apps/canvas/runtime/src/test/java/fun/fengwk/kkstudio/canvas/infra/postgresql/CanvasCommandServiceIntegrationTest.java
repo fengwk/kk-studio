@@ -392,12 +392,12 @@ class CanvasCommandServiceIntegrationTest extends PostgresCanvasInfraTestSupport
             Conflicted.class,
             apply(canvasId, List.of(new CanvasCommand.DeleteGroup(groupId, List.of()))));
     assertInstanceOf(CanvasConflict.StaleNode.class, stale.conflicts().get(0));
-    assertNotNull(canvasStore.findGroup(canvasId, groupId).orElse(null));
+    assertTrue(findSnapshot(canvasId).groups().stream().anyMatch(g -> g.id().equals(groupId)));
 
     assertInstanceOf(
         Accepted.class,
         apply(canvasId, List.of(new CanvasCommand.DeleteGroup(groupId, List.of(node.nodeId)))));
-    assertTrue(canvasStore.findGroup(canvasId, groupId).isEmpty());
+    assertTrue(findSnapshot(canvasId).groups().stream().noneMatch(g -> g.id().equals(groupId)));
     assertNull(canvasStore.findNode(canvasId, node.nodeId).orElseThrow().groupId());
   }
 

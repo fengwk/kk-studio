@@ -57,10 +57,6 @@ public class PostgresqlCanvasFunctionResourcePinRepository {
     return pinStore.deleteByNode(canvasId, nodeId);
   }
 
-  public int deleteByCanvas(UUID canvasId) {
-    return pinStore.deleteByCanvas(canvasId);
-  }
-
   private static List<CanvasFunctionResourcePin> toDomain(List<CanvasFunctionResourcePinDO> refs) {
     List<CanvasFunctionResourcePin> pins = new ArrayList<>(refs.size());
     for (CanvasFunctionResourcePinDO ref : refs) {

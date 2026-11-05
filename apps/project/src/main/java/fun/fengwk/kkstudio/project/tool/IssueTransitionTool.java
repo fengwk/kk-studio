@@ -27,7 +27,7 @@ import java.util.function.Consumer;
 /**
  * {@code issue_transition}：Issue Agent 唯一显式选择的业务写工具，用于请求把当前阶段交接到 workflow 声明的下一阶段。
  *
- * <p>工具是 SELECTABLE 贡献：由 Issue Agent 的配置显式声明，不再由运行时按 Thread owner 注入。执行身份只来自 durable {@link
+ * <p>工具是 SELECTABLE 贡献：由 Issue Agent 的配置显式声明，不按 Thread owner 隐式注入。执行身份只来自 durable {@link
  * fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionContext}：调用 Thread 与该调用的 assistant 入口都由
  * Harness 冻结，模型参数里没有、也不接受任何 Run 身份。全部授权、合法边与调用归属校验都在 {@link IssueTransitionService} 的事务内按当前活动 Run
  * 重新核验，工具本身不做任何状态判断。

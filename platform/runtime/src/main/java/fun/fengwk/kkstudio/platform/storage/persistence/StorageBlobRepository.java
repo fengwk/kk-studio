@@ -43,18 +43,6 @@ public class StorageBlobRepository {
       returning id
       """;
 
-  private static final String INSERT_DELETING_SQL =
-      """
-      insert into storage_blob (
-          id, sha256, size_bytes, media_type, width, height, duration_ms,
-          ref_count, state, created_at, updated_at
-      ) values (
-          :id, :sha256, :sizeBytes, :mediaType, :width, :height, :durationMs,
-          0, 'DELETING', current_timestamp, current_timestamp
-      )
-      on conflict (id) do nothing
-      """;
-
   private static final RowMapper<StorageBlob> ROW_MAPPER = StorageBlobRepository::mapRow;
 
   private final JdbcClient jdbcClient;
@@ -88,12 +76,7 @@ public class StorageBlobRepository {
 
   /** 原子插入候选或 retain 同内容的 ACTIVE 行，返回实际取得引用的 blob id。 */
   public UUID retainOrInsertActive(StorageBlob blob) {
-    return bindBlob(jdbcClient.sql(INSERT_ACTIVE_SQL), blob, true).query(UUID.class).single();
-  }
-
-  /** 为事务失败/去重落败后已存在的候选对象记录 DELETING 清理事实。 */
-  public boolean insertDeletingCandidate(StorageBlob blob) {
-    return bindBlob(jdbcClient.sql(INSERT_DELETING_SQL), blob, false).update() == 1;
+    return bindBlob(jdbcClient.sql(INSERT_ACTIVE_SQL), blob).query(UUID.class).single();
   }
 
   /** 原子 retain：仅当行仍为 ACTIVE 时 {@code ref_count + 1}，否则返回 false。 */
@@ -164,22 +147,17 @@ public class StorageBlobRepository {
         .list();
   }
 
-  private JdbcClient.StatementSpec bindBlob(
-      JdbcClient.StatementSpec statement, StorageBlob blob, boolean withRefCount) {
-    statement =
-        statement
-            .param("id", blob.getId())
-            .param("sha256", blob.getSha256())
-            .param("sizeBytes", blob.getSizeBytes())
-            .param("mediaType", blob.getMediaType())
-            .param("width", blob.getWidth())
-            .param("height", blob.getHeight())
-            .param("durationMs", blob.getDurationMs())
-            .param("archiveIndex", blob.getArchiveIndex());
-    if (withRefCount) {
-      statement = statement.param("refCount", blob.getRefCount());
-    }
-    return statement;
+  private JdbcClient.StatementSpec bindBlob(JdbcClient.StatementSpec statement, StorageBlob blob) {
+    return statement
+        .param("id", blob.getId())
+        .param("sha256", blob.getSha256())
+        .param("sizeBytes", blob.getSizeBytes())
+        .param("mediaType", blob.getMediaType())
+        .param("width", blob.getWidth())
+        .param("height", blob.getHeight())
+        .param("durationMs", blob.getDurationMs())
+        .param("archiveIndex", blob.getArchiveIndex())
+        .param("refCount", blob.getRefCount());
   }
 
   private static StorageBlob mapRow(ResultSet rs, int rowNum) throws SQLException {

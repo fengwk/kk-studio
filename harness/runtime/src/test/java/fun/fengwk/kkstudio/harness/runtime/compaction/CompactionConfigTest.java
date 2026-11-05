@@ -13,7 +13,7 @@ class CompactionConfigTest {
 
   @Test
   void defaultsExposeOnlyKeep() {
-    // 部署配置不再持久化 enabled/reserve/maxRecent/模型选择等重复策略字段。
+    // 部署配置仅暴露 keepRecentTokens。
     assertEquals(20_000, CompactionConfig.DEFAULT.keepRecentTokens());
   }
 

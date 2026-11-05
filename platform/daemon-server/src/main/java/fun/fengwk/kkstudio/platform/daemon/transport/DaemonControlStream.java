@@ -44,7 +44,7 @@ public class DaemonControlStream implements DaemonControlChannel {
   private static final Logger log = LoggerFactory.getLogger(DaemonControlStream.class);
 
   public static final int MAX_PENDING_FRAMES = 256;
-  public static final int MAX_PENDING_BYTES = 16 * 1024 * 1024;
+  private static final int MAX_PENDING_BYTES = 16 * 1024 * 1024;
   public static final Duration WRITE_DEADLINE = Duration.ofSeconds(10);
 
   private final DaemonConnectionIdentity identity;

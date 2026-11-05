@@ -226,7 +226,7 @@ public final class BashSurfaceAnalyzer {
     return unique(candidates);
   }
 
-  public List<String> tokenize(String segment) {
+  List<String> tokenize(String segment) {
     String input = normalize(segment);
     List<String> tokens = new ArrayList<>();
     StringBuilder current = new StringBuilder();
@@ -710,11 +710,11 @@ public final class BashSurfaceAnalyzer {
       segments = List.copyOf(segments);
     }
 
-    public static Analysis supported(List<String> segments) {
+    static Analysis supported(List<String> segments) {
       return new Analysis(true, null, segments);
     }
 
-    public static Analysis unsupported(String reason, List<String> segments) {
+    static Analysis unsupported(String reason, List<String> segments) {
       return new Analysis(false, reason, segments);
     }
   }

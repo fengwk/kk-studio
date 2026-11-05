@@ -13,8 +13,6 @@ import fun.fengwk.kkstudio.plugin.minimaxmavis.MavisCapability;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
-import java.util.EnumMap;
-import java.util.Map;
 import java.util.Set;
 
 /**
@@ -52,15 +50,6 @@ public final class MavisToolDefinitions {
           "cannot read MiniMax Mavis tool resource: " + resource, error);
     }
     return decode(capability, content, resource);
-  }
-
-  /** 按能力枚举顺序加载全部 15 项工具定义。 */
-  public static Map<MavisCapability, MavisToolDefinition> loadAll() {
-    Map<MavisCapability, MavisToolDefinition> definitions = new EnumMap<>(MavisCapability.class);
-    for (MavisCapability capability : MavisCapability.values()) {
-      definitions.put(capability, load(capability));
-    }
-    return definitions;
   }
 
   /** 校验一份工具资源内容；{@code context} 只用于定位出错的资源。 */

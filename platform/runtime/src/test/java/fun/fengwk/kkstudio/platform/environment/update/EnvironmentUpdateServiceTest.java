@@ -30,6 +30,7 @@ import fun.fengwk.kkstudio.platform.daemon.DaemonRuntimeSnapshot;
 import fun.fengwk.kkstudio.platform.daemon.DaemonRuntimeStatus;
 import fun.fengwk.kkstudio.platform.daemon.DaemonUpdateArtifact;
 import fun.fengwk.kkstudio.platform.daemon.DaemonUpdateCommand;
+import fun.fengwk.kkstudio.platform.daemon.DaemonUpdatePhase;
 import fun.fengwk.kkstudio.platform.daemon.DaemonUpdateProgress;
 import fun.fengwk.kkstudio.platform.daemon.DaemonUpdateResult;
 import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer;
@@ -246,7 +247,9 @@ class EnvironmentUpdateServiceTest {
   void preparedReceiptIsBoundedAndCreatesNoEventOrTaskState() {
     service.startUpdate(ENV);
 
-    service.onUpdateResult(ENV, DaemonUpdateResult.prepared(UUID.randomUUID().toString()));
+    service.onUpdateResult(
+        ENV,
+        new DaemonUpdateResult(UUID.randomUUID().toString(), DaemonUpdatePhase.PREPARED, null));
 
     verify(registry, never()).recordEvent(any(), any(), any());
   }

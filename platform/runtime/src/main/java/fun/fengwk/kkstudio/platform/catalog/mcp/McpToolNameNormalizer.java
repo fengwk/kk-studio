@@ -18,7 +18,6 @@ public final class McpToolNameNormalizer {
 
   private static final String PREFIX = "mcp_";
   private static final Pattern SERVER_NAME = Pattern.compile("^[a-z][a-z0-9_]*$");
-  private static final Pattern VALID_MODEL_NAME = Pattern.compile("[A-Za-z][A-Za-z0-9_-]*");
 
   private McpToolNameNormalizer() {}
 
@@ -65,11 +64,6 @@ public final class McpToolNameNormalizer {
               + modelName);
     }
     return modelName;
-  }
-
-  /** 是否满足 ToolDescriptor name 语法（字母开头，仅字母、数字、_、-）。 */
-  public static boolean isValidToolDescriptorName(String modelName) {
-    return modelName != null && VALID_MODEL_NAME.matcher(modelName).matches();
   }
 
   private static String trimUnderscores(String value) {
