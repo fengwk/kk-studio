@@ -18,21 +18,22 @@ const IDE_CONNECTION_ID = '44444444-4444-4444-8444-444444444444'
 const IDE_CLAIM_ID = '55555555-5555-4555-8555-555555555555'
 
 /**
- * canonical 错误信封断言：HTTP 状态、稳定机器码与“不得携带成功负载”必须同时成立。
+ * canonical problem 断言：HTTP 状态、稳定类别与原因必须同时成立。
  *
  * <p>只看状态码不足以证明契约：同一个 409 既可能是 IDE 通道不可用，也可能是其它领域冲突；机器码才是分支依据。
  */
-function assertCanonicalError(error, { status, code }) {
+function assertCanonicalError(error, { status, code, reason }) {
   let body = null
   try {
     body = JSON.parse(error.body)
   } catch {
     body = null
   }
-  assert(body && typeof body === 'object', `error body must be a JSON envelope: ${error.body}`)
+  assert(body && typeof body === 'object', `error body must be a problem object: ${error.body}`)
+  assert(body.type === 'about:blank' && typeof body.title === 'string', `invalid problem metadata: ${error.body}`)
   assert(body.status === status, `error status must be ${status}: ${error.body}`)
   assert(body.code === code, `error code must be ${code}: ${error.body}`)
-  assert(body.data == null, `error must not carry a success payload: ${error.body}`)
+  if (reason !== undefined) assert(body.reason === reason, `error reason must be ${reason}: ${error.body}`)
   return body
 }
 
@@ -40,7 +41,7 @@ registerCase({
   id: 'environment.runtime_absent_unavailable',
   level: 'L1',
   title: 'Environment 运行快照缺失时明确 unavailable，不伪造空快照',
-  docs: 'GET /api/environments/{id}/runtime 在没有本代 READY 快照（无 READY owner 路由）时返回 409 + canonical code environment_unavailable，响应不含 revision/status/daemonVersion/update 任何运行快照字段，绝不伪造 update=null 的假快照；非 canonical environmentId 返回 400 validation；用例创建的 Environment 在结束时按权威 version 清理',
+  docs: 'GET /api/environments/{id}/runtime 在没有本代 READY 快照（无 READY owner 路由）时返回 409 unavailable + ENVIRONMENT_UNAVAILABLE，响应不含 revision/daemonVersion/update 等运行快照字段，绝不伪造 update=null 的假快照；非 canonical environmentId 返回 400 validation；用例创建的 Environment 在结束时按权威 version 清理',
   async run(ctx) {
     const card = await createEnvironmentFixture(ctx, `e2e-runtime-absent-${cid().slice(0, 8)}`)
 
@@ -49,7 +50,7 @@ registerCase({
         () => ctx.call('GET', `/api/environments/${encodeURIComponent(card.id)}/runtime`),
         { status: 409 },
       )
-      assertCanonicalError(error, { status: 409, code: 'environment_unavailable' })
+      assertCanonicalError(error, { status: 409, code: 'unavailable', reason: 'ENVIRONMENT_UNAVAILABLE' })
       assert(
         !/"revision"\s*:/.test(error.body),
         `runtime absence must not fabricate a revision: ${error.body}`,
@@ -79,7 +80,7 @@ registerCase({
   id: 'environment.ide_view_no_ready_owner_rejected',
   level: 'L1',
   title: 'IDE 视图在没有 READY owner 时明确拒绝，不伪造绑定',
-  docs: '在新建且没有 READY owner 的 Environment 上，IDE 打开、列举目录、切换目录、终端、移动布局和关闭返回 409 ide_unavailable，且不伪造绑定；非 canonical environmentId 返回 400 validation；结束时按权威 version 清理。本用例只证明无 owner 路由拒绝，不证明 exact-intent 强制校验；READY owner 下的精确意图校验需单独验收，此处未验证',
+  docs: '在新建且没有 READY owner 的 Environment 上，IDE 打开、列举目录、切换目录、终端、移动布局和关闭返回 409 unavailable + IDE_UNAVAILABLE，且不伪造绑定；非 canonical environmentId 返回 400 validation；结束时按权威 version 清理。本用例只证明无 owner 路由拒绝，不证明 exact-intent 强制校验；READY owner 下的精确意图校验需单独验收，此处未验证',
   async run(ctx) {
     const card = await createEnvironmentFixture(ctx, `e2e-ide-no-owner-${cid().slice(0, 8)}`)
     const viewsPath = `/api/environments/${encodeURIComponent(card.id)}/ide/views`
@@ -98,7 +99,7 @@ registerCase({
         () => ctx.call('POST', viewsPath, openBody),
         { status: 409 },
       )
-      assertCanonicalError(openError, { status: 409, code: 'ide_unavailable' })
+      assertCanonicalError(openError, { status: 409, code: 'unavailable', reason: 'IDE_UNAVAILABLE' })
       assert(
         !/"entryUrl"\s*:/.test(openError.body) && !/"bindingEpoch"\s*:/.test(openError.body),
         `rejected open must not fabricate a view binding: ${openError.body}`,
@@ -114,7 +115,7 @@ registerCase({
           }),
         { status: 409 },
       )
-      assertCanonicalError(directoryError, { status: 409, code: 'ide_unavailable' })
+      assertCanonicalError(directoryError, { status: 409, code: 'unavailable', reason: 'IDE_UNAVAILABLE' })
 
       const terminalError = await expectHttpError(
         () =>
@@ -124,13 +125,13 @@ registerCase({
           }),
         { status: 409 },
       )
-      assertCanonicalError(terminalError, { status: 409, code: 'ide_unavailable' })
+      assertCanonicalError(terminalError, { status: 409, code: 'unavailable', reason: 'IDE_UNAVAILABLE' })
 
       const listError = await expectHttpError(
         () => ctx.call('GET', `/api/environments/${encodeURIComponent(card.id)}/ide/directories`),
         { status: 409 },
       )
-      assertCanonicalError(listError, { status: 409, code: 'ide_unavailable' })
+      assertCanonicalError(listError, { status: 409, code: 'unavailable', reason: 'IDE_UNAVAILABLE' })
       const mobileError = await expectHttpError(
         () => ctx.call('POST', `${viewsPath}/${IDE_VIEW_ID}/mobile-layout`, {
           documentId: IDE_DOCUMENT_ID,
@@ -138,7 +139,7 @@ registerCase({
         }),
         { status: 409 },
       )
-      assertCanonicalError(mobileError, { status: 409, code: 'ide_unavailable' })
+      assertCanonicalError(mobileError, { status: 409, code: 'unavailable', reason: 'IDE_UNAVAILABLE' })
 
       const closeError = await expectHttpError(
         () =>
@@ -149,7 +150,7 @@ registerCase({
           }),
         { status: 409 },
       )
-      assertCanonicalError(closeError, { status: 409, code: 'ide_unavailable' })
+      assertCanonicalError(closeError, { status: 409, code: 'unavailable', reason: 'IDE_UNAVAILABLE' })
 
       // 非 canonical environmentId 在进入路由判定之前即被拒绝。
       const invalid = await expectHttpError(

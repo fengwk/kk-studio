@@ -1,6 +1,6 @@
 /** 可复用的合法请求体与配置矩阵行定义。 */
 
-import { assert, envelopeData, HttpError } from './http.mjs'
+import { assert, HttpError } from './http.mjs'
 
 /**
  * 把 Model 逻辑名编码为 catalog 路径 tail：按 `/` 分段编码，保留逻辑名中的路径层级。
@@ -472,7 +472,7 @@ export function providerUpdateBody(overrides = {}) {
  */
 export async function createEnvironmentFixture(ctx, name) {
   const { json } = await ctx.call('POST', '/api/environments', { name })
-  const card = envelopeData(json)
+  const card = json
   assert(
     card && typeof card === 'object' && card.id && card.version != null,
     'created environment must expose id and version',
@@ -490,7 +490,7 @@ export async function deleteEnvironmentFixture(ctx, environmentId) {
   let card
   try {
     const { json } = await ctx.call('GET', path)
-    card = envelopeData(json)
+    card = json
   } catch (error) {
     if (error instanceof HttpError && error.status === 404) {
       return
