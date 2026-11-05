@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.canvas.infra.platform;
 
 import fun.fengwk.kkstudio.canvas.CanvasResource;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasQueryService;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.share.storage.StoragePresignedUrlDTO;
 
@@ -26,19 +27,14 @@ public class CanvasResourceUrlService {
             .orElseThrow(
                 () ->
                     queryService.findDocument(canvasId).isEmpty()
-                        ? new ResourceNotFoundException("unknown canvas: " + canvasId)
-                        : new ResourceNotFoundException("unknown resource: " + resourceId));
+                        ? DomainException.notFound("canvas", "unknown canvas: " + canvasId)
+                        : DomainException.notFound(
+                            "canvas_resource", "unknown resource: " + resourceId));
     if (resource.isText()) {
       throw new IllegalArgumentException("TEXT resource has no blob content");
     }
     return original
         ? blobManager.presignOriginalUrl(resource.blobId())
         : blobManager.presignPreviewUrl(resource.blobId());
-  }
-
-  public static class ResourceNotFoundException extends RuntimeException {
-    public ResourceNotFoundException(String message) {
-      super(message);
-    }
   }
 }

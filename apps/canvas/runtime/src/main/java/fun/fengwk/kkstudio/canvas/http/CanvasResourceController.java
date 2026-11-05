@@ -10,7 +10,6 @@ import org.springframework.web.server.ResponseStatusException;
 import fun.fengwk.kkstudio.canvas.dto.CanvasPresignedUrlDTO;
 import fun.fengwk.kkstudio.canvas.infra.dto.CanvasDtoMapper;
 import fun.fengwk.kkstudio.canvas.infra.platform.CanvasResourceUrlService;
-import fun.fengwk.kkstudio.canvas.infra.platform.CanvasResourceUrlService.ResourceNotFoundException;
 import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
 
@@ -54,8 +53,6 @@ public class CanvasResourceController {
       return ApiResponse.ok(
           CanvasDtoMapper.toPresignedUrlDto(
               resourceUrlService.presign(canvasId, resourceId, original)));
-    } catch (ResourceNotFoundException ex) {
-      throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage(), ex);
     } catch (IllegalArgumentException ex) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
     }

@@ -12,12 +12,18 @@ import static org.springframework.test.web.servlet.setup.MockMvcBuilders.standal
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.ResponseEntity;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import fun.fengwk.kkstudio.canvas.CanvasDocument;
 import fun.fengwk.kkstudio.canvas.CanvasResource;
 import fun.fengwk.kkstudio.canvas.infra.platform.CanvasResourceUrlService;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasQueryService;
+import fun.fengwk.kkstudio.common.error.DomainException;
+import fun.fengwk.kkstudio.platform.http.ApiResponse;
+import fun.fengwk.kkstudio.platform.http.DomainErrorResponses;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.share.storage.StoragePresignedUrlDTO;
 
@@ -55,6 +61,7 @@ class CanvasResourceControllerTest {
                 new CanvasResourceController(
                     new CanvasResourceUrlService(queryService, blobManager)))
             .setMessageConverters(CanvasHttpJsonTestSupport.converter())
+            .setControllerAdvice(new TestDomainAdvice())
             .build();
     CanvasResource media =
         new CanvasResource(MEDIA_RESOURCE, CANVAS, NODE, 0, BLOB, "a.png", null, NOW);
@@ -117,5 +124,14 @@ class CanvasResourceControllerTest {
         .perform(post("/api/canvases/not-a-uuid/resources/" + MEDIA_RESOURCE + "/download-url"))
         .andExpect(status().isBadRequest());
     verify(blobManager, never()).presignOriginalUrl(any());
+  }
+
+  /** 模块单测模拟 Web 组合根的领域异常映射。 */
+  @RestControllerAdvice
+  static class TestDomainAdvice {
+    @ExceptionHandler(DomainException.class)
+    ResponseEntity<ApiResponse<Void>> handle(DomainException error) {
+      return DomainErrorResponses.of(error, "not found", error.getMessage());
+    }
   }
 }
