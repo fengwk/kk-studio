@@ -7,6 +7,7 @@ import tools.jackson.databind.node.ObjectNode;
 import fun.fengwk.kkstudio.harness.api.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.api.history.EntryType;
 import fun.fengwk.kkstudio.harness.api.tool.ToolEffectBatch;
+import fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -41,7 +42,7 @@ public final class ToolEffectBatchJsonCodec {
     ObjectNode node = InvocationJsonSupport.object(value, CONTEXT);
     InvocationJsonSupport.requireFields(node, CONTEXT, "customEntries");
     ArrayNode entries =
-        InvocationJsonSupport.array(
+        JsonCodecSupport.array(
             InvocationJsonSupport.required(node, "customEntries", CONTEXT),
             CONTEXT + ".customEntries");
     List<CustomEntryPayload> payloads = new ArrayList<>(entries.size());

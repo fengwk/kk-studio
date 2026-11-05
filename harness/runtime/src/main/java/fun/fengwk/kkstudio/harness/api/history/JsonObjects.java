@@ -5,6 +5,7 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 import fun.fengwk.kkstudio.harness.model.HarnessJson;
+import fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport;
 
 /**
  * history 的严格 canonical JSON object 工具：{@link CustomEntryPayload} / {@link CustomMessagePayload}
@@ -24,12 +25,7 @@ public final class JsonObjects {
       throw new IllegalArgumentException(name + " must not exceed " + maxChars + " chars");
     }
     JsonNode node = parseObject(raw, name);
-    String canonical;
-    try {
-      canonical = MAPPER.writeValueAsString(node);
-    } catch (JacksonException error) {
-      throw new IllegalStateException("cannot canonicalize " + name, error);
-    }
+    String canonical = JsonCodecSupport.write(MAPPER, node, "cannot canonicalize " + name);
     if (!canonical.equals(raw)) {
       throw new IllegalArgumentException(name + " must be canonical JSON");
     }
@@ -43,18 +39,11 @@ public final class JsonObjects {
     } catch (JacksonException error) {
       throw new IllegalArgumentException(name + " must contain JSON", error);
     }
-    if (node == null || !node.isObject()) {
-      throw new IllegalArgumentException(name + " must be a JSON object");
-    }
-    return node;
+    return JsonCodecSupport.objectNode(node, name);
   }
 
   /** 用共享严格 mapper 序列化为 canonical JSON 文本。 */
   public static String write(JsonNode node) {
-    try {
-      return MAPPER.writeValueAsString(node);
-    } catch (JacksonException error) {
-      throw new IllegalStateException("cannot encode JSON", error);
-    }
+    return JsonCodecSupport.write(MAPPER, node, "cannot encode JSON");
   }
 }

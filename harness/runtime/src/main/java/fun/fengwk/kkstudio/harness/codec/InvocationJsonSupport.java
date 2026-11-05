@@ -3,12 +3,12 @@ package fun.fengwk.kkstudio.harness.codec;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
-import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.model.HarnessJson;
+import fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport;
 
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
@@ -45,26 +45,12 @@ public final class InvocationJsonSupport {
   }
 
   public static String write(JsonNode node, String context) {
-    try {
-      return MAPPER.writeValueAsString(node);
-    } catch (JacksonException error) {
-      throw new IllegalStateException("cannot encode " + context + " JSON", error);
-    }
+    return JsonCodecSupport.write(MAPPER, node, "cannot encode " + context + " JSON");
   }
 
   public static ObjectNode object(JsonNode value, String context) {
     Objects.requireNonNull(value, "value");
-    if (!(value instanceof ObjectNode object)) {
-      throw new IllegalArgumentException(context + " must be an object");
-    }
-    return object;
-  }
-
-  public static ArrayNode array(JsonNode value, String field) {
-    if (!(value instanceof ArrayNode array)) {
-      throw new IllegalArgumentException(field + " must be an array");
-    }
-    return array;
+    return JsonCodecSupport.object(value, context);
   }
 
   public static void requireFields(ObjectNode node, String context, String... names) {

@@ -8,6 +8,7 @@ import fun.fengwk.kkstudio.harness.api.history.SubagentBinding;
 import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.codec.InvocationJsonSupport;
 import fun.fengwk.kkstudio.harness.codec.ToolBindingJsonCodec;
+import fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport;
 import fun.fengwk.kkstudio.harness.model.codec.ModelDescriptorJsonCodec;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.model.provider.codec.ProviderRequestJsonCodec;
@@ -88,14 +89,14 @@ public final class ModelRequestSpecJsonCodec {
               "cacheControl"
             });
     ArrayNode toolNodes =
-        InvocationJsonSupport.array(
+        JsonCodecSupport.array(
             InvocationJsonSupport.required(node, "toolBindings", CONTEXT), "toolBindings");
     List<ToolBinding> toolBindings = new ArrayList<>(toolNodes.size());
     for (JsonNode toolNode : toolNodes) {
       toolBindings.add(BINDING_CODEC.decodeNode(toolNode));
     }
     ArrayNode subagentNodes =
-        InvocationJsonSupport.array(
+        JsonCodecSupport.array(
             InvocationJsonSupport.required(node, "subagentBindings", CONTEXT), "subagentBindings");
     List<SubagentBinding> subagentBindings = new ArrayList<>(subagentNodes.size());
     for (JsonNode subagentNode : subagentNodes) {
@@ -145,7 +146,7 @@ public final class ModelRequestSpecJsonCodec {
         "cooldownSeconds",
         "members");
     ArrayNode codeNodes =
-        InvocationJsonSupport.array(
+        JsonCodecSupport.array(
             InvocationJsonSupport.required(node, "fallbackStatusCodes", "groupExecution"),
             "groupExecution.fallbackStatusCodes");
     Set<Integer> codes = new HashSet<>();
@@ -157,7 +158,7 @@ public final class ModelRequestSpecJsonCodec {
       codes.add(code.intValue());
     }
     ArrayNode memberNodes =
-        InvocationJsonSupport.array(
+        JsonCodecSupport.array(
             InvocationJsonSupport.required(node, "members", "groupExecution"),
             "groupExecution.members");
     List<ModelGroupMemberExecution> members = new ArrayList<>();
