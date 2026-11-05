@@ -6,7 +6,7 @@ import type {
 } from '@/features/thread/runtime/thread-timeline-types'
 
 /** 权威 MIME 是否为图片；绝不用扩展名或 URL 猜测。 */
-export function isImageMime(mime: string | null | undefined): boolean {
+function isImageMime(mime: string | null | undefined): boolean {
   return typeof mime === 'string' && mime.trim().toLowerCase().startsWith('image/')
 }
 

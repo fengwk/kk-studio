@@ -218,34 +218,6 @@ pre.thread-system-prompt-body {
   overflow: visible;
 }
 
-.thread-debug-section-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  text-transform: none;
-}
-
-.thread-debug-copy-feedback {
-  font-size: var(--font-size-xs);
-  line-height: 1;
-}
-
-.thread-debug-copy-feedback.is-error {
-  color: var(--danger);
-}
-
-.thread-debug-section-actions .thread-debug-prompt-copy {
-  position: static;
-  opacity: 1;
-  pointer-events: auto;
-  flex-shrink: 0;
-}
-
-.thread-debug-section-actions .thread-debug-prompt-copy:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
 .thread-debug-environment {
   padding-top: 8px;
   border-top: 1px solid var(--border);

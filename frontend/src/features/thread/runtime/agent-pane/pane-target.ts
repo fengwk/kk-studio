@@ -74,7 +74,7 @@ function isGoalSetting(value: unknown): value is HarnessGoalSettingDTO {
     && nonBlank(value.text)
 }
 
-export function isCanonicalGoalText(text: unknown): text is string {
+function isCanonicalGoalText(text: unknown): text is string {
   if (typeof text !== 'string') return false
   if (text.trim().length === 0) return false
   if (text !== text.trim()) return false

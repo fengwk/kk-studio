@@ -1,28 +1,6 @@
 import { includesSearch } from '@/shared/lib/search-utils'
-import type { CatalogVersion } from '@/shared/api/contracts/base'
+import { compareCatalogVersions } from '@/shared/lib/catalog-version'
 import type { ChatDTO, ChatPageDTO } from '@/shared/api/generated/contracts'
-
-function catalogVersionValue(version: CatalogVersion): bigint {
-  try {
-    return BigInt(version)
-  } catch {
-    return 0n
-  }
-}
-
-export function compareCatalogVersions(
-  left: CatalogVersion,
-  right: CatalogVersion,
-): number {
-  const delta = catalogVersionValue(left) - catalogVersionValue(right)
-  if (delta < 0n) {
-    return -1
-  }
-  if (delta > 0n) {
-    return 1
-  }
-  return 0
-}
 
 export function preferNewerChat(
   current: ChatDTO | undefined,

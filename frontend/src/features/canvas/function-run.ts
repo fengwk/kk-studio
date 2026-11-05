@@ -18,10 +18,6 @@ import type {
 
 const PENDING_RUN_STORAGE_PREFIX = 'kk-studio.canvas.pending-run:'
 
-export function isCanonicalUUID(value: unknown): value is string {
-  return typeof value === 'string' && value === value.toLowerCase() && isCanonicalUuid(value)
-}
-
 const DEFINITION_FINGERPRINT = /^[0-9a-f]{64}$/
 
 /**
@@ -47,7 +43,7 @@ export class PendingRunStorageError extends Error {
 }
 
 /**
- * 存在但结构非法（含缺少合法 expectedVersion 的旧记录）：调用方必须明确丢弃该坏缓存。
+ * 存在但结构非法（含缺少合法 expectedVersion 的记录）：调用方必须明确丢弃该坏缓存。
  *
  * raw 是本次 load 实际读到的原始字符串：丢弃必须按同一份 raw 确认（复用
  * discardPendingFunctionRun），绝不按 key 盲目删除——记录可能已被其它标签页替换。
@@ -95,7 +91,7 @@ function isValidPendingRequest(value: unknown): value is CanvasFunctionRunReques
   return keys.length === 2
     && keys.includes('requestId')
     && keys.includes('expectedVersion')
-    && isCanonicalUUID(request.requestId)
+    && isCanonicalUuid(request.requestId)
     && isValidCanvasFunctionVersion(request.expectedVersion)
 }
 
@@ -133,16 +129,16 @@ export function loadPendingFunctionRun(canvasId: string, nodeId: string): Pendin
     || typeof parsed !== 'object'
     || Array.isArray(parsed)
     || !hasExactFields(parsed as Record<string, unknown>, PENDING_ATTEMPT_FIELDS)
-    || !isCanonicalUUID((parsed as Partial<PendingFunctionRunAttempt>).canvasId)
+    || !isCanonicalUuid((parsed as Partial<PendingFunctionRunAttempt>).canvasId)
     || (parsed as Partial<PendingFunctionRunAttempt>).canvasId !== canvasId
-    || !isCanonicalUUID((parsed as Partial<PendingFunctionRunAttempt>).nodeId)
+    || !isCanonicalUuid((parsed as Partial<PendingFunctionRunAttempt>).nodeId)
     || (parsed as Partial<PendingFunctionRunAttempt>).nodeId !== nodeId
     || !isValidPendingRequest((parsed as Partial<PendingFunctionRunAttempt>).request)
     || typeof (parsed as Partial<PendingFunctionRunAttempt>).createdAt !== 'number'
     || !Number.isFinite((parsed as Partial<PendingFunctionRunAttempt>).createdAt)
     || ((parsed as Partial<PendingFunctionRunAttempt>).createdAt ?? 0) <= 0
     || ((parsed as Partial<PendingFunctionRunAttempt>).basisRequestId !== null
-      && !isCanonicalUUID((parsed as Partial<PendingFunctionRunAttempt>).basisRequestId))
+      && !isCanonicalUuid((parsed as Partial<PendingFunctionRunAttempt>).basisRequestId))
   ) {
     throw new PendingRunCorruptError('Corrupted pending function run attempt (schema validation failed)', raw)
   }
@@ -156,10 +152,10 @@ export function savePendingFunctionRun(attempt: PendingFunctionRunAttempt): void
   }
   if (
     !hasExactFields(attempt as unknown as Record<string, unknown>, PENDING_ATTEMPT_FIELDS)
-    || !isCanonicalUUID(attempt.canvasId)
-    || !isCanonicalUUID(attempt.nodeId)
+    || !isCanonicalUuid(attempt.canvasId)
+    || !isCanonicalUuid(attempt.nodeId)
     || !isValidPendingRequest(attempt.request)
-    || (attempt.basisRequestId !== null && !isCanonicalUUID(attempt.basisRequestId))
+    || (attempt.basisRequestId !== null && !isCanonicalUuid(attempt.basisRequestId))
     || typeof attempt.createdAt !== 'number'
     || !Number.isFinite(attempt.createdAt)
     || attempt.createdAt <= 0
@@ -198,7 +194,7 @@ export function clearPendingFunctionRun(
   nodeId: string,
   expectedRequestId: string,
 ): void {
-  if (!isCanonicalUUID(expectedRequestId)) {
+  if (!isCanonicalUuid(expectedRequestId)) {
     return
   }
   const storage = getLocalStorageSafe()

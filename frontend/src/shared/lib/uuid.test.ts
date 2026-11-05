@@ -3,8 +3,9 @@ import {
   CANONICAL_UUID_PATTERN,
   createUuid,
   isCanonicalUuid,
-  UUID_PATTERN,
 } from '@/shared/lib/uuid'
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 
 describe('createUuid', () => {
   afterEach(() => {
@@ -31,13 +32,13 @@ describe('createUuid', () => {
 })
 
 describe('isCanonicalUuid', () => {
-  it('accepts lowercase and uppercase canonical UUIDs', () => {
+  it('accepts lowercase canonical UUIDs', () => {
     expect(isCanonicalUuid('8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f')).toBe(true)
-    expect(isCanonicalUuid('8D3B8A2E-4B9F-4C5D-9E6F-1A2B3C4D5E6F')).toBe(true)
     expect(isCanonicalUuid('123e4567-e89b-12d3-a456-426614174000')).toBe(true)
   })
 
   it('rejects malformed or non-canonical strings', () => {
+    expect(isCanonicalUuid('8D3B8A2E-4B9F-4C5D-9E6F-1A2B3C4D5E6F')).toBe(false)
     expect(isCanonicalUuid('')).toBe(false)
     expect(isCanonicalUuid('not-a-uuid')).toBe(false)
     expect(isCanonicalUuid('8d3b8a2e4b9f4c5d9e6f1a2b3c4d5e6f')).toBe(false)
