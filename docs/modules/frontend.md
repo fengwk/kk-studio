@@ -429,7 +429,7 @@ IDE 使用列表，再以同一身份 claim 视图；服务端核对 environment
 恢复身份只保存在 sessionStorage：`viewId`、`daemonInstanceId` 与目录；
 epoch、claimId、iframe 与票据不持久化。localStorage 只保存最后展示意图（面板是否展开、当前选定与
 已打开环境），供新 tab 继承同一 scope 的最后状态，不提供 `viewId` 或任何运行身份。
-固定键前缀为 `kk-studio.tab-state.v1:`（sessionStorage）与 `kk-studio.last-state.v1:`（localStorage），后缀为 `chat:<chatId>` 或 `ide`，单 scope 文档限制 64 KiB 并严格校验。
+固定键前缀为 `kk-studio.tab-state:`（sessionStorage）与 `kk-studio.last-state:`（localStorage），后缀为 `chat:<chatId>` 或 `ide`，单 scope 文档限制 64 KiB 并严格校验。
 副作用恢复记录（`PendingAcceptance`、`BoundPendingMessage`、Stop 重试身份）独立持有原始请求身份，不复制进 session/local 默认快照，不因初始化或切换重新提交操作。
 页面触发 `pagehide` 时只撤回使用证明，不删除视图；bfcache 恢复后重新登记，视图由 Daemon 按租约回收。仅切换到后台或收起面板不撤回证明。
 

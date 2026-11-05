@@ -24,8 +24,7 @@ import {
   envelopeData,
   sleep,
 } from '../lib/http.mjs'
-
-const CHAT_PANE_STORAGE_PREFIX = 'kk-studio.chat-pane.'
+import { seedSplitChatPanes } from './chat-pane-storage.mjs'
 
 export async function runWorkspaceContractMatrix(ui) {
   const {
@@ -711,27 +710,7 @@ export async function runWorkspaceContractMatrix(ui) {
 
 async function bindSplitThreads(page, goto, chatId, firstThreadId, secondThreadId) {
   await goto('/chats')
-  await page.evaluate(
-    ({ key, first, second }) => {
-      localStorage.setItem(
-        key,
-        JSON.stringify({
-          layout: 'split-2',
-          focusedPaneId: 'pane-1',
-          panes: Array.from({ length: 8 }, (_, index) => ({
-            id: `pane-${index + 1}`,
-            threadId: index === 0 ? first : index === 1 ? second : null,
-          })),
-          threadSort: 'recent',
-        }),
-      )
-    },
-    {
-      key: `${CHAT_PANE_STORAGE_PREFIX}${chatId}`,
-      first: firstThreadId,
-      second: secondThreadId,
-    },
-  )
+  await seedSplitChatPanes(page, chatId, firstThreadId, secondThreadId)
   await goto(`/chats/${encodeURIComponent(chatId)}`)
 }
 

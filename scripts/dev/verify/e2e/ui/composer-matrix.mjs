@@ -12,6 +12,7 @@ import {
 } from '../lib/http.mjs'
 import { REPO_ROOT } from '../../../lib/repo-root.mjs'
 import { assertReadOnlyZeroFooter } from './assertions.mjs'
+import { clearChatPaneState } from './chat-pane-storage.mjs'
 import { runWorkspaceContractMatrix } from './workspace-contracts.mjs'
 import {
   acceptCommandBatch,
@@ -30,7 +31,6 @@ import {
   waitForQuiescentThread,
 } from '../lib/harness.mjs'
 
-const CHAT_PANE_STORAGE_PREFIX = 'kk-studio.chat-pane.'
 const COMPOSER_DRAFT_STORAGE_PREFIX = 'kk-studio.composer-draft:'
 const TINY_IMAGE = readFileSync(
   path.join(
@@ -1585,16 +1585,15 @@ async function deleteCatalogResource(apiCtx, requestPath) {
 
 async function clearBrowserFixtureState(page, fixture) {
   if (!fixture.chat?.id) return
+  await clearChatPaneState(page, fixture.chat.id).catch(() => undefined)
   await page.evaluate(
-    ({ paneKey, blankDraftKey, threadDraftKey }) => {
-      localStorage.removeItem(paneKey)
+    ({ blankDraftKey, threadDraftKey }) => {
       localStorage.removeItem(blankDraftKey)
       if (threadDraftKey) {
         localStorage.removeItem(threadDraftKey)
       }
     },
     {
-      paneKey: `${CHAT_PANE_STORAGE_PREFIX}${fixture.chat.id}`,
       blankDraftKey: composerDraftStorageKey(
         `agent-pane:CHAT:${fixture.chat.id}:pane-1`,
       ),
@@ -1732,10 +1731,7 @@ async function openFixtureThreadPanel(page, fixture) {
 
 async function bindBlankComposer(page, goto, fixture) {
   await goto('/chats')
-  await page.evaluate(
-    (paneKey) => localStorage.removeItem(paneKey),
-    `${CHAT_PANE_STORAGE_PREFIX}${fixture.chat.id}`,
-  )
+  await clearChatPaneState(page, fixture.chat.id)
   await goto(`/chats/${encodeURIComponent(fixture.chat.id)}`)
   return waitForComposer(page)
 }
