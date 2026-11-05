@@ -1,5 +1,4 @@
 import fs from 'node:fs'
-import path from 'node:path'
 import {
   errorResult,
   textResult,
@@ -14,6 +13,7 @@ import { LspDiscovery, type LspSupport } from './lsp-discovery.js'
 import { LspError, LspTimeoutError } from './lsp-error.js'
 import type { LspPoolOptions } from './lsp-pool.js'
 import { LspService } from './lsp-service.js'
+import { ToolInputRejectedError, resolveExistingPath } from './support.js'
 import { isAbortError } from '../native/abort.js'
 
 export { LspDiscovery, type LspSupport } from './lsp-discovery.js'
@@ -31,25 +31,18 @@ function isTimeout(error: unknown, signal?: AbortSignal): boolean {
   return signal?.reason === 'TIMED_OUT' || error instanceof LspTimeoutError
 }
 
-function validatePath(rawPath: unknown): string {
+/** 目标文件必须存在且是绝对路径；判定与解析复用文件能力的共享实现。 */
+async function validatePath(rawPath: unknown): Promise<string> {
   if (rawPath === undefined || rawPath === null || typeof rawPath !== 'string') {
     throw new LspError('path is required and must be a string')
   }
-  if (rawPath.trim().length === 0) {
-    throw new LspError('path is required')
-  }
-  if (!path.isAbsolute(rawPath)) {
-    throw new LspError(
-      'path must be an absolute path (a relative or non-absolute value was given)',
-    )
-  }
-  if (!fs.existsSync(rawPath)) {
-    throw new LspError('path does not exist: ' + rawPath)
-  }
   try {
-    return fs.realpathSync(rawPath)
-  } catch {
-    throw new LspError('path must exist: ' + rawPath)
+    return await resolveExistingPath(rawPath)
+  } catch (error) {
+    if (error instanceof ToolInputRejectedError) {
+      throw new LspError(error.message)
+    }
+    throw error
   }
 }
 
@@ -82,7 +75,7 @@ export function createLspCapabilities(
         return errorResult(callId, 'tool arguments must be an object')
       }
 
-      const realPath = validatePath(args['path'])
+      const realPath = await validatePath(args['path'])
       let stat: fs.Stats
       try {
         stat = fs.statSync(realPath)
@@ -165,7 +158,7 @@ export function createLspCapabilities(
         return errorResult(callId, 'tool arguments must be an object')
       }
 
-      const realPath = validatePath(args['path'])
+      const realPath = await validatePath(args['path'])
       const rawQuery = args['query']
       if (rawQuery === undefined || rawQuery === null || typeof rawQuery !== 'string') {
         throw new LspError('query is required and must be a string')
@@ -237,7 +230,7 @@ export function createLspCapabilities(
         return errorResult(callId, 'tool arguments must be an object')
       }
 
-      const realPath = validatePath(args['path'])
+      const realPath = await validatePath(args['path'])
       const rawTarget = args['target']
       if (rawTarget === undefined || rawTarget === null || typeof rawTarget !== 'string') {
         throw new LspError('target is required and must be a string')

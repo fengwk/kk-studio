@@ -3,6 +3,7 @@ import { delimiter, dirname, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import type { DaemonConfig, LspServerConfig } from './contracts.js'
+import { isRealFile } from './native/fs-kind.js'
 import { isWindows } from './native/host.js'
 import { ProtocolError, parseStrictJson } from './protocol.js'
 import { MAX_NOTE_CHARS } from './protocol/control/codec.js'
@@ -343,7 +344,7 @@ function validateTokenFile(tokenPath: string): string {
   } catch {
     throw invalid('daemon.token', 'must be an existing regular file')
   }
-  if (stats.isSymbolicLink() || !stats.isFile()) {
+  if (!isRealFile(stats)) {
     throw invalid('daemon.token', 'must be a regular file, not a link or directory')
   }
   if (!isWindows()) {

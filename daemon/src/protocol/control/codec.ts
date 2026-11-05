@@ -41,7 +41,7 @@ import {
   type UpgradeRequired,
 } from '../../generated/control_pb.js'
 import { DAEMON_VERSION_PATTERN } from '../../release.js'
-import { frame, unframe } from './framing.js'
+import { frame, requireMessageLength, unframe } from './framing.js'
 import {
   MAX_MESSAGE_BYTES,
   MAX_SAFE_BIGINT,
@@ -154,7 +154,7 @@ interface UnknownCarrier {
 
 /** Decodes one bare protobuf message and applies all application-level checks. */
 export function decodeBinary(bytes: Uint8Array): Envelope {
-  requireMessageLength(bytes)
+  requireMessageLength(bytes.length)
   return validate(fromBinary(EnvelopeSchema, bytes, { readUnknownFields: true }))
 }
 
@@ -162,7 +162,7 @@ export function decodeBinary(bytes: Uint8Array): Envelope {
 export function encodeBinary(envelope: Envelope): Uint8Array {
   validate(envelope)
   const bytes = toBinary(EnvelopeSchema, envelope)
-  requireMessageLength(bytes)
+  requireMessageLength(bytes.length)
   return bytes
 }
 
@@ -922,12 +922,6 @@ function requireCase(envelope: Envelope, expected: string, messageType: string):
   assertNoUnknown(envelope.payload.value as UnknownCarrier, `envelope.${expected}`)
   if (envelope.payload.case !== expected) {
     throw new Error(`${messageType} envelope must carry the matching payload`)
-  }
-}
-
-function requireMessageLength(bytes: Uint8Array): void {
-  if (bytes.length === 0 || bytes.length > MAX_MESSAGE_BYTES) {
-    throw new Error(`control message length must be in 1..${MAX_MESSAGE_BYTES} bytes`)
   }
 }
 

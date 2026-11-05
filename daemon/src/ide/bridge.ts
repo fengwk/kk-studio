@@ -3,6 +3,7 @@ import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import type { AddressInfo } from 'node:net'
 import { isAbsolute, resolve as resolvePath } from 'node:path'
 import { pathKeysIgnoreCase } from '../native/host.js'
+import { isCanonicalUuid } from '../protocol/uuid.js'
 import { IdeError } from './errors.js'
 
 /**
@@ -75,7 +76,6 @@ const MAX_SNAPSHOT_DOCUMENTS = 256
 const MAX_SNAPSHOT_PATH_CHARS = 4096
 const MAX_COMMAND_DOCUMENTS = 256
 const MAX_VIEW_HOSTS = 256
-const HOST_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const COMMAND_TIMEOUT_MILLIS = 20_000
 
 function pathKey(path: string): string {
@@ -288,7 +288,7 @@ export async function createIdeBridge(): Promise<IdeBridge> {
     }
     const hostIds = url.searchParams.getAll('hostId')
     const hostId = hostIds[0]
-    if (hostIds.length !== 1 || hostId === undefined || !HOST_ID_PATTERN.test(hostId)) {
+    if (hostIds.length !== 1 || !isCanonicalUuid(hostId)) {
       respond(response, 400, 'hostId must be a canonical lowercase UUID')
       return
     }
