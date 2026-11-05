@@ -1,4 +1,3 @@
-import { Buffer } from 'node:buffer'
 import http, { type IncomingHttpHeaders } from 'node:http'
 import { constants as h2constants, type ServerHttp2Stream } from 'node:http2'
 import net from 'node:net'
@@ -160,13 +159,29 @@ function extractRequestHeaders(headers: IncomingHttpHeaders): [string, string][]
   return result
 }
 
-/**
- * 处理 IDE HTTP 流式请求（X-DESIGN §3.2）。
- */
+/** 处理 IDE HTTP 流式请求。 */
 export async function handleIdeHttpRequest(
   stream: ServerHttp2Stream,
   headers: IncomingHttpHeaders,
   ide: IdeService,
+): Promise<void> {
+  return handleIdeRequest(stream, headers, ide, 'HTTP')
+}
+
+/** 处理 IDE extended CONNECT 请求（RFC 8441）。 */
+export async function handleIdeConnectRequest(
+  stream: ServerHttp2Stream,
+  headers: IncomingHttpHeaders,
+  ide: IdeService,
+): Promise<void> {
+  return handleIdeRequest(stream, headers, ide, 'WS')
+}
+
+async function handleIdeRequest(
+  stream: ServerHttp2Stream,
+  headers: IncomingHttpHeaders,
+  ide: IdeService,
+  mode: 'HTTP' | 'WS',
 ): Promise<void> {
   const parsed = parseIdePath(headers[':path'] as string | undefined)
   if (parsed === null) {
@@ -176,10 +191,10 @@ export async function handleIdeHttpRequest(
     return
   }
 
-  const method = (headers[':method'] as string) || 'GET'
+  const method = mode === 'WS' ? 'GET' : (headers[':method'] as string) || 'GET'
   const streamHeaders = extractRequestHeaders(headers)
   const ideRequest: IdeStreamRequest = {
-    mode: 'HTTP',
+    mode,
     method,
     path: parsed.viewPath,
     headers: streamHeaders,
@@ -216,8 +231,20 @@ export async function handleIdeHttpRequest(
     reqHeaders[name.toLowerCase()] = val
   }
   reqHeaders['host'] = upstreamAuthority(upstream)
+  if (mode === 'WS') {
+    reqHeaders['connection'] = 'Upgrade'
+    reqHeaders['upgrade'] = 'websocket'
+  }
   if (upstream.cookie) {
     reqHeaders['cookie'] = upstream.cookie
+  }
+  if (mode === 'WS') {
+    for (const key of ['sec-websocket-key', 'sec-websocket-version', 'sec-websocket-protocol', 'sec-websocket-extensions']) {
+      const val = headers[key]
+      if (val !== undefined) {
+        reqHeaders[key] = val
+      }
+    }
   }
 
   const upstreamReq = http.request({
@@ -270,7 +297,7 @@ export async function handleIdeHttpRequest(
     const filtered = filterResponseHeaders(upstreamRes.headers)
     try {
       stream.respond({
-        [HTTP2_HEADER_STATUS]: upstreamRes.statusCode ?? 200,
+        [HTTP2_HEADER_STATUS]: upstreamRes.statusCode ?? (mode === 'HTTP' ? 200 : 502),
         ...filtered,
       })
     } catch {
@@ -293,150 +320,12 @@ export async function handleIdeHttpRequest(
     })
   })
 
-  stream.pipe(upstreamReq)
-}
-
-/**
- * 处理 IDE extended CONNECT 请求（X-DESIGN §3.3 / RFC 8441）。
- */
-export async function handleIdeConnectRequest(
-  stream: ServerHttp2Stream,
-  headers: IncomingHttpHeaders,
-  ide: IdeService,
-): Promise<void> {
-  const parsed = parseIdePath(headers[':path'] as string | undefined)
-  if (parsed === null) {
-    if (!stream.closed && !stream.destroyed) {
-      stream.respond({ [HTTP2_HEADER_STATUS]: 400 }, { endStream: true })
-    }
+  if (mode === 'HTTP') {
+    stream.pipe(upstreamReq)
     return
   }
 
-  const streamHeaders = extractRequestHeaders(headers)
-  const ideRequest: IdeStreamRequest = {
-    mode: 'WS',
-    method: 'GET',
-    path: parsed.viewPath,
-    headers: streamHeaders,
-  }
-
-  let upstream: IdeStreamUpstream
-  try {
-    upstream = validateUpstream(await ide.resolveView(parsed.viewId, parsed.bindingEpoch, ideRequest))
-  } catch (error) {
-    const status = mapResolveErrorToStatus(error)
-    if (!stream.closed && !stream.destroyed) {
-      stream.respond({ [HTTP2_HEADER_STATUS]: status }, { endStream: true })
-    }
-    return
-  }
-
-  let released = false
-  const releaseUpstream = (): void => {
-    if (!released) {
-      released = true
-      try {
-        upstream.release()
-      } catch {}
-    }
-  }
-
-  if (stream.closed || stream.destroyed) {
-    releaseUpstream()
-    return
-  }
-
-  const reqHeaders: Record<string, string | string[]> = {}
-  for (const [name, val] of upstream.headers) {
-    reqHeaders[name.toLowerCase()] = val
-  }
-  reqHeaders['host'] = upstreamAuthority(upstream)
-  reqHeaders['connection'] = 'Upgrade'
-  reqHeaders['upgrade'] = 'websocket'
-
-  if (upstream.cookie) {
-    reqHeaders['cookie'] = upstream.cookie
-  }
-
-  for (const key of ['sec-websocket-key', 'sec-websocket-version', 'sec-websocket-protocol', 'sec-websocket-extensions']) {
-    const val = headers[key]
-    if (val !== undefined) {
-      reqHeaders[key] = val
-    }
-  }
-
-  const upgradeReq = http.request({
-    host: upstream.host,
-    port: upstream.port,
-    path: upstream.path,
-    method: 'GET',
-    headers: reqHeaders,
-  })
-
-  const onStreamAbort = (): void => {
-    upgradeReq.destroy()
-    releaseUpstream()
-  }
-
-  const onServiceAbort = (): void => {
-    upgradeReq.destroy()
-    if (!stream.closed && !stream.destroyed) {
-      try {
-        stream.close(NGHTTP2_INTERNAL_ERROR)
-      } catch {}
-    }
-    releaseUpstream()
-  }
-
-  stream.on('error', onStreamAbort)
-  stream.on('close', onStreamAbort)
-  upstream.signal.addEventListener('abort', onServiceAbort, { once: true })
-
-  upgradeReq.on('error', () => {
-    if (!stream.headersSent && !stream.closed && !stream.destroyed) {
-      try {
-        stream.respond({ [HTTP2_HEADER_STATUS]: 502 }, { endStream: true })
-      } catch {}
-    } else if (!stream.closed && !stream.destroyed) {
-      try {
-        stream.close(NGHTTP2_INTERNAL_ERROR)
-      } catch {}
-    }
-    releaseUpstream()
-  })
-
-  upgradeReq.on('response', (upstreamRes) => {
-    if (stream.closed || stream.destroyed) {
-      upstreamRes.destroy()
-      releaseUpstream()
-      return
-    }
-
-    const filtered = filterResponseHeaders(upstreamRes.headers)
-    try {
-      stream.respond({
-        [HTTP2_HEADER_STATUS]: upstreamRes.statusCode ?? 502,
-        ...filtered,
-      })
-    } catch {
-      upstreamRes.destroy()
-      releaseUpstream()
-      return
-    }
-
-    upstreamRes.pipe(stream)
-    upstreamRes.on('end', () => releaseUpstream())
-    upstreamRes.on('error', () => {
-      if (!stream.closed && !stream.destroyed) {
-        try {
-          stream.close(NGHTTP2_INTERNAL_ERROR)
-        } catch {}
-      }
-      releaseUpstream()
-    })
-  })
-
-  upgradeReq.on('upgrade', (upstreamRes, upstreamSocket, head) => {
+  upstreamReq.on('upgrade', (upstreamRes, upstreamSocket, head) => {
     if (stream.closed || stream.destroyed) {
       upstreamSocket.destroy()
       releaseUpstream()
@@ -512,5 +401,5 @@ export async function handleIdeConnectRequest(
     })
   })
 
-  upgradeReq.end()
+  upstreamReq.end()
 }
