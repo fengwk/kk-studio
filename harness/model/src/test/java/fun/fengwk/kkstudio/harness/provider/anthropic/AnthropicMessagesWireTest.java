@@ -342,12 +342,9 @@ class AnthropicMessagesWireTest {
     assertFalse(bodyJson.has("output_config"), "BUDGET mode must omit output_config");
   }
 
-  /**
-   * 验证在 ADAPTIVE 思考模式下即使启用推理，线缆请求也不发送 anthropic-beta，且 body 中 thinking 包含 display=summarized 与
-   * output_config.effort。
-   */
+  /** 验证 ADAPTIVE 显式 effort 的本地 HTTP 请求自动发送所需 beta 和消息级控制，且保留 thinking 与顶层 effort。 */
   @Test
-  void should_not_send_anthropic_beta_header_when_adaptive_thinking_enabled() throws Exception {
+  void should_send_per_turn_beta_header_when_adaptive_thinking_enabled() throws Exception {
     AtomicReference<RecordedRequest> recorded = new AtomicReference<>();
     CountDownLatch serverLatch = new CountDownLatch(1);
 
@@ -380,14 +377,19 @@ class AnthropicMessagesWireTest {
     assertTrue(serverLatch.await(5, TimeUnit.SECONDS), "server should receive request");
     RecordedRequest req = recorded.get();
     assertNotNull(req);
-    assertNull(
+    assertEquals(
+        "mid-conversation-system-2026-04-07,per-turn-control-2026-07-01,effort-2025-11-24",
         req.firstHeader("anthropic-beta"),
-        "ADAPTIVE mode must omit anthropic-beta header even when reasoning is enabled");
+        "ADAPTIVE effort must send the required per-turn beta headers");
 
     JsonNode bodyJson = mapper.readTree(req.bodyBytes);
     assertEquals("adaptive", bodyJson.path("thinking").path("type").asString(""));
     assertEquals("summarized", bodyJson.path("thinking").path("display").asString(""));
     assertEquals("low", bodyJson.path("output_config").path("effort").asString(""));
+    assertEquals(
+        mapper.readTree(
+            "{\"role\":\"system\",\"content\":[],\"output_config\":{\"effort\":\"low\"}}"),
+        bodyJson.path("messages").get(1));
   }
 
   /** 验证配置的 beta 能力在单个 anthropic-beta 头内按声明顺序以逗号连接发送。 */
@@ -734,7 +736,12 @@ class AnthropicMessagesWireTest {
     assertEquals("adaptive", root.path("thinking").path("type").asString(""));
     assertEquals("summarized", root.path("thinking").path("display").asString(""));
     assertEquals("low", root.path("output_config").path("effort").asString(""));
-    assertEquals(List.of(), encoded.betaFeatures());
+    assertEquals(
+        List.of(
+            "mid-conversation-system-2026-04-07",
+            "per-turn-control-2026-07-01",
+            "effort-2025-11-24"),
+        encoded.betaFeatures());
   }
 
   /** 验证通用请求参数中的 outputTokens 能够正常透传至线缆。 */

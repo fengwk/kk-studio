@@ -542,7 +542,12 @@ class AnthropicRequestEncoderTest {
     assertEquals("adaptive", root.path("thinking").path("type").asString(""));
     assertEquals("summarized", root.path("thinking").path("display").asString(""));
     assertEquals("high", root.path("output_config").path("effort").asString(""));
-    assertEquals(List.of(), encoded.betaFeatures());
+    assertEquals(
+        List.of(
+            "mid-conversation-system-2026-04-07",
+            "per-turn-control-2026-07-01",
+            "effort-2025-11-24"),
+        encoded.betaFeatures());
   }
 
   @Test
@@ -853,7 +858,12 @@ class AnthropicRequestEncoderTest {
     assertEquals("high", root.path("output_config").path("effort").asString(""));
     assertEquals(512, root.path("max_tokens").asInt(0));
     assertFalse(root.path("thinking").has("budget_tokens"));
-    assertEquals(List.of(), encoded.betaFeatures());
+    assertEquals(
+        List.of(
+            "mid-conversation-system-2026-04-07",
+            "per-turn-control-2026-07-01",
+            "effort-2025-11-24"),
+        encoded.betaFeatures());
   }
 
   @Test

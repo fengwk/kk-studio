@@ -53,8 +53,8 @@ import java.util.Set;
  * cache_control}） 冲突显式失败，{@code tools} 保留 native 条目后追加 runtime 工具，其余官方顶层字段无损保留；cache marker
  * 与请求体大小均基于最终合并结果。
  *
- * <p>{@code anthropic-beta} 能力是「配置列表 + 运行时强制能力」的有序并集：配置的 {@code anthropicBetaFeatures} 原样在前，BUDGET
- * 思考实际启用时追加 {@code interleaved-thinking-2025-05-14}，并集为空则不发送该头。
+ * <p>{@code anthropic-beta} 能力是「配置列表 + 运行时强制能力」的有序并集：配置的 {@code anthropicBetaFeatures} 原样在前；实际启用
+ * BUDGET 思考时追加 interleaved thinking，显式 ADAPTIVE effort 时追加消息级 effort 所需的三个 beta。
  *
  * <p>{@code cacheControl} 只表达留存档位：{@code retention != NONE} 时在 tools/system/历史边界写入固定的原生 {@code
  * cache_control} ephemeral 标记，{@code LONG} 额外携带 {@code ttl:"1h"}；会话 {@code key} 不属于 Anthropic
@@ -131,8 +131,7 @@ public final class AnthropicRequestEncoder {
         applyReasoningParameters(root, request, config, maxTokens);
 
     boolean perTurnEffort =
-        config.anthropicBetaFeatures().contains(PER_TURN_BETA)
-            && config.anthropicThinkingMode() == AnthropicThinkingMode.ADAPTIVE
+        config.anthropicThinkingMode() == AnthropicThinkingMode.ADAPTIVE
             && request.model().reasoning()
             && request.variant() != null
             && request.variant().reasoningEffort() != null
