@@ -23,7 +23,7 @@ import java.util.Set;
 /** 固定 atomic capability ID 与 descriptor 顺序的契约测试。 */
 class EnvironmentCapabilityCatalogTest {
 
-  /** 11 个 ID 必须按 wire/执行契约固定顺序出现且全局唯一。 */
+  /** 能力 ID 必须按 wire/执行契约固定顺序出现且全局唯一。 */
   @Test
   void exposesStableIdsInFixedOrder() {
     List<EnvironmentCapabilityId> expected =

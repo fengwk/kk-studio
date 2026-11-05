@@ -109,7 +109,7 @@ describe('system settings server editor', () => {
     expect(within(panel).queryByRole('switch')).not.toBeInTheDocument()
     expect(within(panel).getByText('新发起请求生效')).toBeInTheDocument()
     expect(within(panel).getByText(/HTTPS 目标通过 CONNECT/)).toHaveTextContent(
-      '保存后新发起的 HTTP 请求使用该代理，正在执行的请求不受影响；不控制 daemon、浏览器或 Hub 等服务内部请求。',
+      '保存后新发起的 HTTP 请求使用该代理，正在执行的请求不受影响；Daemon 与 Studio 的控制连接始终直连，浏览器及 Hub 等服务的内部请求不受此设置影响。',
     )
     const proxy = within(panel).getByLabelText('代理地址')
     const bypass = within(panel).getByLabelText('代理绕过规则')

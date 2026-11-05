@@ -495,24 +495,24 @@ export const settingsCatalog = {
     'zh-CN': '网络',
   },
   'settings.section.network.description': {
-    'en-US': 'Configure the single global default HTTP proxy for Backend.',
-    'zh-CN': '配置 Backend 单一全局默认 HTTP 代理。',
+    'en-US': 'Configure the global HTTP proxy shared by the backend and all online daemons.',
+    'zh-CN': '配置 Backend 与所有在线 Daemon 共用的全局 HTTP 代理。',
   },
   'settings.section.network.proxy.title': {
     'en-US': 'Global HTTP proxy',
     'zh-CN': '全局 HTTP 代理',
   },
   'settings.section.network.proxy.description': {
-    'en-US': 'New HTTP requests use the saved proxy; in-flight requests are unaffected. This does not control daemon, browser, or internal requests of services such as Hub.',
-    'zh-CN': '保存后新发起的 HTTP 请求使用该代理，正在执行的请求不受影响；不控制 daemon、浏览器或 Hub 等服务内部请求。',
+    'en-US': 'New HTTP requests use the saved proxy; in-flight requests are unaffected. The daemon control connection to Studio is always direct, and browser requests and internal requests of services such as Hub are not affected.',
+    'zh-CN': '保存后新发起的 HTTP 请求使用该代理，正在执行的请求不受影响；Daemon 与 Studio 的控制连接始终直连，浏览器及 Hub 等服务的内部请求不受此设置影响。',
   },
   'settings.field.network.proxyUrl': {
     'en-US': 'Proxy URL',
     'zh-CN': '代理地址',
   },
   'settings.field.network.proxyUrl.hint': {
-    'en-US': 'Backend global default HTTP proxy. Supports http://host:port without authentication; HTTPS targets use CONNECT. Leave blank to force direct connections. New HTTP requests use the saved proxy while in-flight requests continue unaffected; this does not control daemon, browser, or internal requests of services such as Hub.',
-    'zh-CN': 'Backend 全局默认 HTTP 代理，支持无认证的 http://host:port，HTTPS 目标通过 CONNECT；留空强制直连。保存后新发起的 HTTP 请求使用该代理，正在执行的请求不受影响；不控制 daemon、浏览器或 Hub 等服务内部请求。',
+    'en-US': 'HTTP proxy shared by the backend and all online daemons. Supports http://host:port without authentication; HTTPS targets use CONNECT. Leave blank to force direct connections. New HTTP requests use the saved proxy while in-flight requests continue unaffected; the daemon control connection to Studio is always direct, and browser requests and internal requests of services such as Hub are not affected.',
+    'zh-CN': 'Backend 与所有在线 Daemon 共用的 HTTP 代理，支持无认证的 http://host:port，HTTPS 目标通过 CONNECT；留空强制直连。保存后新发起的 HTTP 请求使用该代理，正在执行的请求不受影响；Daemon 与 Studio 的控制连接始终直连，浏览器及 Hub 等服务的内部请求不受此设置影响。',
   },
   'settings.field.network.noProxyHosts': {
     'en-US': 'Proxy bypass rules',
