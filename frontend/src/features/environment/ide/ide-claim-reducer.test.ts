@@ -103,7 +103,7 @@ describe('ide-claim-reducer helpers', () => {
     expect(isUnknownIdeFailure(server500)).toBe(true)
     const noStatus = new ApiError('No status', undefined, 'NO_STATUS')
     expect(isUnknownIdeFailure(noStatus)).toBe(true)
-    const unavail = new ApiError('Unavail', 503, 'IDE_UNAVAILABLE', {})
+    const unavail = new ApiError('Unavail', 503, 'unavailable')
     expect(isUnknownIdeFailure(unavail)).toBe(true)
     const badReq = new ApiError('Invalid param', 400, 'BAD_REQUEST', {})
     expect(isUnknownIdeFailure(badReq)).toBe(false)

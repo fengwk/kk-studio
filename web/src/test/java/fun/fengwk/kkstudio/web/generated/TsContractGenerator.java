@@ -66,9 +66,9 @@ import java.util.regex.Pattern;
 /**
  * 从 Web 控制器签名与生产 HTTP Jackson 3 mapper 生成全部传输契约的 TypeScript 类型。
  *
- * <p>根类型取自控制器处理方法的 {@code @RequestBody} 参数（请求方向）与返回值（响应方向），再加上嵌在错误响应上下文里的结构化载荷； 从根出发沿属性闭包收集契约包（生产为
- * {@code fun.fengwk.kkstudio.share} 与 {@code fun.fengwk.kkstudio.canvas.dto}）下的 DTO 与枚举。属性名与顺序来自真实
- * mapper 的 introspection，枚举 wire 值由 mapper 序列化每个常量得到，标量映射在构造时用探针核验。presence 规则：
+ * <p>根类型取自控制器处理方法的 {@code @RequestBody}、路径及查询参数（请求方向）与返回值（响应方向），再加上嵌在错误响应上下文里的结构化载荷；
+ * 从根出发沿属性闭包收集契约包（生产为 {@code fun.fengwk.kkstudio}）下的 DTO 与枚举。属性名与顺序来自真实 mapper 的 introspection，枚举
+ * wire 值由 mapper 序列化每个常量得到，标量映射在构造时用探针核验。presence 规则：
  *
  * <ul>
  *   <li>未标 {@link Nullable} 的属性必填且非空；原始类型同理。

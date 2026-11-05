@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ApiError, apiClient, apiErrorDetail, isConflictReason, request, url } from './client'
+import {
+  ApiError, apiClient, apiErrorDetail, isConflictError, isConflictReason, isNotFoundError, request, url,
+} from './client'
 import { setLocale } from '@/shared/i18n'
 
 afterEach(() => {
@@ -96,6 +98,22 @@ describe('HTTP client', () => {
     })
   })
 
+  // 状态分类仅接受对应 HTTP 状态的 ApiError，不把普通错误或相似对象当作服务端回执。
+  it('classifies conflict and not-found errors by status', () => {
+    const conflict = new ApiError('conflict', 409, 'conflict')
+    const notFound = new ApiError('missing', 404, 'not_found')
+    expect(isConflictError(conflict)).toBe(true)
+    expect(isConflictError(notFound)).toBe(false)
+    expect(isNotFoundError(notFound)).toBe(true)
+    expect(isNotFoundError(conflict)).toBe(false)
+    expect(isConflictError(new ApiError('network'))).toBe(false)
+    expect(isNotFoundError(new ApiError('network'))).toBe(false)
+    expect(isConflictError({ status: 409 })).toBe(false)
+    expect(isNotFoundError({ status: 404 })).toBe(false)
+    expect(isConflictError(new Error('conflict'))).toBe(false)
+    expect(isNotFoundError(null)).toBe(false)
+  })
+
   // 解析器接受原始文本，下载与脚本通过媒体类型区分。
   it('handles custom JSON, text and binary responses', async () => {
     vi.stubGlobal('fetch', vi.fn()
@@ -137,8 +155,8 @@ describe('HTTP client', () => {
       .rejects.toMatchObject({ status: 404, code: 'not_found' })
   })
 
-  // 过渡外观保留二进制与原始文本传输，不误用 JSON.stringify。
-  it('preserves non-object bodies and text responses in the facade', async () => {
+  // 过渡外观保留二进制传输，不误用 JSON.stringify。
+  it('preserves binary bodies and text responses in the facade', async () => {
     const transport = vi.fn(async (_url: string, _init: RequestInit) =>
       new Response('plain', { headers: { 'Content-Type': 'text/plain' } }))
     vi.stubGlobal('fetch', transport)
@@ -146,13 +164,10 @@ describe('HTTP client', () => {
     form.set('field', 'value')
     await expect(apiClient.post('/form', form)).resolves.toBe('plain')
     expect(transport.mock.calls[0]![1].body).toBe(form)
-    await apiClient.put('/raw', '{"n":1}')
-    expect(transport.mock.calls[1]![1].body).toBe('{"n":1}')
-    expect(transport.mock.calls[1]![1].headers).toMatchObject({ 'Content-Type': 'application/json' })
     await apiClient.post('/blob', new Blob(['data']))
     await apiClient.post('/buffer', new ArrayBuffer(2))
     await apiClient.post('/form-url', new URLSearchParams({ a: 'b' }))
-    expect(transport.mock.calls[4]![1].body).toBeInstanceOf(URLSearchParams)
+    expect(transport.mock.calls[3]![1].body).toBeInstanceOf(URLSearchParams)
   })
 
   // 本地取消在 fetch 前生效；缺省 problem 成员从状态回退。

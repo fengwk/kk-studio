@@ -229,13 +229,8 @@ export async function executeFetch<T = unknown>(
 
   let bodyPayload: BodyInit | undefined
   if (config.body !== undefined) {
-    if (isBinaryBody(config.body)) {
+    if (typeof config.body === 'string' || isBinaryBody(config.body)) {
       bodyPayload = config.body as BodyInit
-    } else if (typeof config.body === 'string') {
-      bodyPayload = config.body
-      if (!Object.keys(headers).some((k) => k.toLowerCase() === 'content-type')) {
-        headers['Content-Type'] = 'application/json'
-      }
     } else {
       bodyPayload = JSON.stringify(config.body)
       if (!Object.keys(headers).some((k) => k.toLowerCase() === 'content-type')) {
