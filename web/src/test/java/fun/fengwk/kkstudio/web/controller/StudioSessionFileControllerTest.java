@@ -14,16 +14,16 @@ import org.junit.jupiter.api.Test;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
+import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwner;
 import fun.fengwk.kkstudio.platform.vfs.SessionFileQueryService;
-import fun.fengwk.kkstudio.platform.vfs.SessionFileQueryService.SessionFileAccessException;
-import fun.fengwk.kkstudio.platform.vfs.SessionFileQueryService.SessionFileContentException;
 import fun.fengwk.kkstudio.platform.vfs.SessionFileQueryService.SessionFileDownload;
-import fun.fengwk.kkstudio.platform.vfs.SessionFileQueryService.SessionFileNotFoundException;
 import fun.fengwk.kkstudio.share.runtime.HarnessSessionFileContentDTO;
 import fun.fengwk.kkstudio.share.runtime.HarnessSessionFileEntryDTO;
 import fun.fengwk.kkstudio.share.runtime.HarnessSessionFileListDTO;
 import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
+import fun.fengwk.kkstudio.web.advice.StudioDomainErrorAdvice;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -43,7 +43,9 @@ class StudioSessionFileControllerTest {
     queryService = mock(SessionFileQueryService.class);
     mockMvc =
         MockMvcBuilders.standaloneSetup(new StudioSessionFileController(queryService))
-            .setControllerAdvice(new ApiResponseStatusAdvice())
+            .setControllerAdvice(
+                new ApiResponseStatusAdvice(),
+                new StudioDomainErrorAdvice(new StudioMessageService()))
             .build();
   }
 
@@ -124,7 +126,8 @@ class StudioSessionFileControllerTest {
   @Test
   void ownershipAndMissingFilesAreIndistinguishable() throws Exception {
     when(queryService.list(eq(OWNER), eq(SESSION_ID), eq(null)))
-        .thenThrow(new SessionFileAccessException("session is not owned by the given owner"));
+        .thenThrow(
+            DomainException.notFound("session_file", "session is not owned by the given owner"));
 
     mockMvc
         .perform(
@@ -134,7 +137,8 @@ class StudioSessionFileControllerTest {
         .andExpect(status().isNotFound());
 
     when(queryService.download(eq(OWNER), eq(SESSION_ID), eq("vfs:/sessions/x/missing.txt")))
-        .thenThrow(new SessionFileNotFoundException("vfs:/sessions/x/missing.txt"));
+        .thenThrow(
+            DomainException.notFound("session_file", "No such file: vfs:/sessions/x/missing.txt"));
 
     mockMvc
         .perform(
@@ -156,7 +160,7 @@ class StudioSessionFileControllerTest {
         .andExpect(status().isNotFound());
   }
 
-  /** 二进制或超预算内容明确 422，不返回伪文本。 */
+  /** 二进制或超预算内容返回 validation，不返回伪文本。 */
   @Test
   void unreadableContentIsRejected() throws Exception {
     when(queryService.readText(
@@ -166,7 +170,7 @@ class StudioSessionFileControllerTest {
             eq(null),
             eq(null),
             eq(null)))
-        .thenThrow(new SessionFileContentException("content is not valid UTF-8 text"));
+        .thenThrow(DomainException.validation("session_file", "content is not valid UTF-8 text"));
 
     mockMvc
         .perform(
@@ -174,7 +178,8 @@ class StudioSessionFileControllerTest {
                 .param("ownerKind", "CHAT")
                 .param("ownerId", "chat-1")
                 .param("path", "vfs:/sessions/x/blob.bin"))
-        .andExpect(status().isUnprocessableEntity());
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("validation"));
   }
 
   @Test
