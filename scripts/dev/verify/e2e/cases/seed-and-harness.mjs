@@ -6,7 +6,6 @@ import { isDeepStrictEqual } from 'node:util'
 import {
   assert,
   assertExactFields,
-  envelopeData,
   expectHttpError,
   httpJson,
   pageResults,
@@ -205,7 +204,7 @@ registerCase({
   title: '内部 HOST Tool 不进入 Agent 可选目录',
   docs: 'GET /api/tools 只返回 SELECTABLE Tool；load_skill/task 由 skills/subagents 派生激活，不能直接写入 Agent config.tools；Goal contributor 只贡献 get_goal/update_goal（目标正文由用户维护，无创建工具）',
   async run(ctx) {
-    const tools = envelopeData((await ctx.call('GET', '/api/tools')).json)
+    const tools = (await ctx.call('GET', '/api/tools')).json
     assert(Array.isArray(tools), JSON.stringify(tools))
     const names = tools.map((tool) => String(tool.name))
     assert(!names.includes('load_skill'), `load_skill must be internal: ${JSON.stringify(names)}`)
@@ -381,7 +380,7 @@ registerCase({
         modelCallTimeoutMillis: 30_000,
         modelCallIdleTimeoutMillis: 10_000,
       })
-      provider = envelopeData(providerResponse.json)
+      provider = providerResponse.json
       assert(provider?.name && provider?.version, JSON.stringify(providerResponse.json))
 
       const modelResponse = await ctx.call('POST', '/api/models', {
@@ -392,7 +391,7 @@ registerCase({
         description: 'Local readonly preview E2E model.',
         config: baseModelConfig({ limit: { context: 4096, output: 128 } }),
       })
-      model = envelopeData(modelResponse.json)
+      model = modelResponse.json
       assert(
         model?.providerName === provider.name && model?.name,
         JSON.stringify(modelResponse.json),
@@ -405,7 +404,7 @@ registerCase({
         execution: { driver: 'builtin', settings: { modelName: model.name, variant: 'default' } },
         config: { tools: [], skills: [], subagents: [] },
       })
-      agent = envelopeData(agentResponse.json)
+      agent = agentResponse.json
       assert(
         agent?.name && agent.execution?.driver === 'builtin' && agent.execution.settings?.modelName === model.name,
         JSON.stringify(agentResponse.json),
@@ -486,7 +485,7 @@ registerCase({
           baseUrl: trap.baseUrl('/v1'),
         },
       )
-      provider = envelopeData(providerUpdate.json)
+      provider = providerUpdate.json
       assert(provider?.name && provider?.version, JSON.stringify(providerUpdate.json))
 
       // 正向：以 ROOT 与已闭合 TURN_END 为起点都能得到只读草稿预览（预览绝不创建 Thread）。
@@ -683,7 +682,7 @@ registerCase({
         environmentName: null,
       })
       assert(status === 200, `model-request-debug status ${status}: ${JSON.stringify(json)}`)
-      const debug = envelopeData(json)
+      const debug = json
       assert(debug?.kind === 'NEXT_REQUEST_PREVIEW', JSON.stringify(debug))
       // 草稿选择原样回显：model 是本次请求的草稿，environmentName 显式为 null（required-nullable）。
       assert(isDeepStrictEqual(debug.model, target.model), JSON.stringify(debug.model))
@@ -2361,7 +2360,7 @@ registerCase({
       await waitForQuiescentThread(ctx, threadId, { timeoutMs: 60_000, intervalMs: 100 })
       const before = await getThreadSnapshot(ctx, threadId)
       const { json } = await ctx.call('GET', `/api/threads/${threadId}/tree`)
-      const nodes = envelopeData(json)
+      const nodes = json
       assert(Array.isArray(nodes) && nodes.length === 1, JSON.stringify(nodes))
       const root = nodes[0]
       assertExactFields(
@@ -2462,7 +2461,7 @@ registerCase({
       const rootId = full.entries[0].entryId
       assert(full.entries.length > 1, 'quiescent thread must have entries after ROOT')
       const { json: afterRootJson } = await ctx.call('GET', `/api/threads/${threadId}?afterEntryId=${rootId}`)
-      const afterRootData = envelopeData(afterRootJson)
+      const afterRootData = afterRootJson
       assert(afterRootData.baseEntryId === rootId, 'ancestor cursor must be echoed as baseEntryId')
       assert(
         isDeepStrictEqual(
@@ -2474,14 +2473,14 @@ registerCase({
 
       // 3. cursor=head -> 空 delta，baseEntryId=head
       const { json: atHeadJson } = await ctx.call('GET', `/api/threads/${threadId}?afterEntryId=${headId}`)
-      const atHeadData = envelopeData(atHeadJson)
+      const atHeadData = atHeadJson
       assert(atHeadData.baseEntryId === headId, 'cursor at head must return baseEntryId as head')
       assert(atHeadData.entries.length === 0, 'cursor at head must return empty entries list')
 
       // 4. 非祖先游标 -> 回退全量，baseEntryId=null
       const nonAncestorId = '00000000-0000-0000-0000-000000000999'
       const { json: nonAncestorJson } = await ctx.call('GET', `/api/threads/${threadId}?afterEntryId=${nonAncestorId}`)
-      const nonAncestorData = envelopeData(nonAncestorJson)
+      const nonAncestorData = nonAncestorJson
       assert(nonAncestorData.baseEntryId === null, 'non-ancestor cursor must fallback to full snapshot with null baseEntryId')
       assert(nonAncestorData.entries.length === full.entries.length, 'fallback full snapshot must have same entry count')
     } finally {

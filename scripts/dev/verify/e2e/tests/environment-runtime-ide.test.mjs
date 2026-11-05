@@ -198,7 +198,7 @@ test('environment fixture cleanup uses the authoritative version and tolerates a
       deleteEnvironmentFixture(
         {
           async call() {
-            throw new HttpError(409, '{"code":"version_conflict"}', '/api/environments/conflict')
+            throw new HttpError(409, canonicalErrorBody(409, 'version_conflict', 'version conflict'), '/api/environments/conflict')
           },
         },
         ENVIRONMENT_ID,

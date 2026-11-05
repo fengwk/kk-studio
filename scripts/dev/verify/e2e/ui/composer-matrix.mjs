@@ -6,7 +6,6 @@ import { baseModelConfig, encodePathTail } from '../lib/fixtures.mjs'
 import {
   assert,
   cid,
-  envelopeData,
   HttpError,
   sleep,
 } from '../lib/http.mjs'
@@ -1363,7 +1362,7 @@ async function createHoldingQueueFixture(
       providerResponse.status === 201,
       `create hold provider: ${JSON.stringify(providerResponse)}`,
     )
-    state.provider = envelopeData(providerResponse.json)
+    state.provider = providerResponse.json
 
     const modelResponse = await apiCtx.call(
       'POST',
@@ -1389,7 +1388,7 @@ async function createHoldingQueueFixture(
       modelResponse.status === 201,
       `create hold model: ${JSON.stringify(modelResponse)}`,
     )
-    state.model = envelopeData(modelResponse.json)
+    state.model = modelResponse.json
 
     const agentResponse = await apiCtx.call(
       'POST',
@@ -1406,7 +1405,7 @@ async function createHoldingQueueFixture(
       agentResponse.status === 201,
       `create hold agent: ${JSON.stringify(agentResponse)}`,
     )
-    state.agent = envelopeData(agentResponse.json)
+    state.agent = agentResponse.json
 
     state.chat = await createChat(apiCtx, {
       title,
@@ -1565,7 +1564,7 @@ async function deleteChat(apiCtx, chat) {
     currentResponse.status === 200,
     `read Chat for cleanup: ${JSON.stringify(currentResponse)}`,
   )
-  const current = envelopeData(currentResponse.json)
+  const current = currentResponse.json
   const response = await apiCtx.call(
     'DELETE',
     `/api/chats/${encodeURIComponent(chat.id)}`
@@ -1854,15 +1853,15 @@ function createReadyUploadRoute() {
       const blobId = `00000000-0000-4000-9000-${suffix}`
       blobs.set(id, blobId)
       await route.fulfill({
-        status: 200,
+        status: 201,
         contentType: 'application/json',
-        body: JSON.stringify(okEnvelope({
+        body: JSON.stringify({
           id,
           state: 'READY',
           blobId,
           presignedPut: null,
           expiresAt: null,
-        })),
+        }),
       })
       return
     }
@@ -1871,31 +1870,25 @@ function createReadyUploadRoute() {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify(okEnvelope({
+        body: JSON.stringify({
           id,
           state: 'READY',
           blobId: blobs.get(id) ?? null,
           presignedPut: null,
           expiresAt: null,
-        })),
+        }),
       })
       return
     }
     if (request.method() === 'DELETE' && deleteMatch) {
       blobs.delete(decodeURIComponent(deleteMatch[1]))
       await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify(okEnvelope(null)),
+        status: 204,
       })
       return
     }
     await route.fallback()
   }
-}
-
-function okEnvelope(data) {
-  return { status: 200, code: 'OK', message: 'OK', data }
 }
 
 async function waitForPlaceholder(composer, visible) {

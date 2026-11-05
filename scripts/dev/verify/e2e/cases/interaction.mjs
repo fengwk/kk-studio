@@ -7,7 +7,7 @@
  */
 import { createServer } from 'node:http'
 
-import { assert, assertExactFields, cid, envelopeData, expectHttpError, sleep } from '../lib/http.mjs'
+import { assert, assertExactFields, cid, expectHttpError, sleep } from '../lib/http.mjs'
 import {
   branchSettingsOf,
   chatOwner,
@@ -122,7 +122,7 @@ async function collectInteractions(ctx, { pageSize = 100, maxPages = 20, rootThr
   for (let page = 0; page < maxPages; page++) {
     const filter = rootThreadId ? `&rootThreadId=${encodeURIComponent(rootThreadId)}` : ''
     const query = `?limit=${pageSize}${filter}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`
-    const page$ = envelopeData((await ctx.call('GET', `/api/interactions${query}`)).json)
+    const page$ = (await ctx.call('GET', `/api/interactions${query}`)).json
     assertExactFields(page$, INTERACTION_PAGE_FIELDS, 'interaction page')
     // freshnessAt 是 required-nullable 的权威回读时刻：无时间驱动变更时为 null，有值必须是合法服务端时刻。
     if (page$.freshnessAt !== null) {
@@ -249,7 +249,7 @@ registerCase({
         modelCallTimeoutMillis: 30_000,
         modelCallIdleTimeoutMillis: 10_000,
       })
-      provider = envelopeData(providerResponse.json)
+      provider = providerResponse.json
       assert(provider?.name && provider?.version, JSON.stringify(providerResponse.json))
 
       const modelResponse = await ctx.call('POST', '/api/models', {
@@ -264,7 +264,7 @@ registerCase({
           variants: [{ id: 'default' }],
         }),
       })
-      model = envelopeData(modelResponse.json)
+      model = modelResponse.json
       assert(model?.providerName === provider.name, JSON.stringify(modelResponse.json))
 
       const agentResponse = await ctx.call('POST', '/api/agents', {
@@ -275,7 +275,7 @@ registerCase({
         // ask_user 是内置 SELECTABLE 工具：只有显式声明的 Agent 才把问卷工具暴露给模型。
         config: { tools: ['ask_user'], skills: [], subagents: [] },
       })
-      agent = envelopeData(agentResponse.json)
+      agent = agentResponse.json
       assert(agent?.name, JSON.stringify(agentResponse.json))
 
       chat = await createChat(ctx, {
@@ -321,14 +321,12 @@ registerCase({
       )
 
       // rootThreadId 过滤：按执行根返回该根（含后代）的待办，响应项仍保留来源 threadId/sessionId。
-      const filtered = envelopeData(
-        (
+      const filtered = (
           await ctx.call(
             'GET',
             `/api/interactions?limit=100&rootThreadId=${encodeURIComponent(threadId)}`,
           )
-        ).json,
-      )
+        ).json
       assertExactFields(filtered, INTERACTION_PAGE_FIELDS, 'root-filtered interaction page')
       // 本 case 的等待全部来自本地 ask_user，没有任何 Environment Tool 等待，因此不存在时间驱动的环境等待变更时刻。
       assert(filtered.freshnessAt === null, JSON.stringify(filtered.freshnessAt))
@@ -399,7 +397,7 @@ registerCase({
         answers: [[chosenAnswer]],
       })
       assert(accepted.status === 200, `submit input status ${accepted.status}`)
-      const receipt = envelopeData(accepted.json)
+      const receipt = accepted.json
       assertExactFields(receipt, RECEIPT_FIELDS, 'input receipt')
       assert(
         receipt.threadId === threadId
@@ -420,16 +418,14 @@ registerCase({
         timeoutMs: 60_000,
         intervalMs: 200,
       })
-      const replayed = envelopeData(
-        (
+      const replayed = (
           await ctx.call('POST', inputPath, {
             threadId,
             submissionId,
             declined: false,
             answers: [[chosenAnswer]],
           })
-        ).json,
-      )
+        ).json
       assertExactFields(replayed, RECEIPT_FIELDS, 'replayed receipt')
       assert(
         replayed.submissionId === submissionId

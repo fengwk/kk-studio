@@ -18,7 +18,7 @@ function mockContext(def, { hitAt = 2, fault } = {}) {
   let entries = []
   let requestCount = 0
   let snapshotReads = 0
-  const response = (data, status = 200) => ({ status, json: { data } })
+  const response = (json, status = 200) => ({ status, json })
   const entry = (entryType, payload) => ({
     entryId: randomUUID(), entryType, payloadJson: JSON.stringify(payload),
   })
@@ -32,15 +32,15 @@ function mockContext(def, { hitAt = 2, fault } = {}) {
     async call(method, url, body) {
       if (method === 'DELETE') {
         deleted.push(url)
-        return response(null)
+        return response(null, 204)
       }
       if (url.startsWith('/api/providers?')) {
-        return response([{ name: def.providerName, providerType: def.providerType,
-          configured: true, baseUrl: 'https://mock.invalid', config: { private: 'excluded' } }])
+        return response({ results: [{ name: def.providerName, providerType: def.providerType,
+          configured: true, baseUrl: 'https://mock.invalid', config: { private: 'excluded' } }] })
       }
       if (url.startsWith('/api/models?')) {
-        return response([{ providerName: def.providerName, name: def.modelName,
-          config: { variants: def.variants.map((id) => ({ id })), private: 'excluded' } }])
+        return response({ results: [{ providerName: def.providerName, name: def.modelName,
+          config: { variants: def.variants.map((id) => ({ id })), private: 'excluded' } }] })
       }
       if (method === 'POST' && url === '/api/agents') {
         assert.deepEqual(body.config.tools, [])

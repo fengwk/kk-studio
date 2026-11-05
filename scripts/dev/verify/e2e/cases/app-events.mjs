@@ -1,4 +1,4 @@
-import { assert, cid, envelopeData, sleep } from '../lib/http.mjs'
+import { assert, cid, sleep } from '../lib/http.mjs'
 import { createCaseAdder } from '../lib/registry.mjs'
 
 export const cases = []
@@ -67,14 +67,12 @@ registerCase({
       )
       assertGlobalSubscriptionAck(projectsAck, 'projects')
 
-      project = envelopeData(
-        (
+      project = (
           await ctx.call('POST', '/api/projects', {
             title: `Event Project ${cid().slice(0, 8)}`,
             description: 'Database notification E2E',
           })
-        ).json,
-      )
+        ).json
       const projectEvent = await takeFrame(
         frames,
         (frame) =>
@@ -96,9 +94,7 @@ registerCase({
       socket.removeEventListener('message', collect)
       socket.close(1000, 'E2E complete')
       if (project?.id) {
-        const current = envelopeData(
-          (await ctx.call('GET', `/api/projects/${project.id}`)).json,
-        )
+        const current = (await ctx.call('GET', `/api/projects/${project.id}`)).json
         await ctx.call(
           'DELETE',
           `/api/projects/${project.id}?expectedVersion=${encodeURIComponent(current.version)}`,

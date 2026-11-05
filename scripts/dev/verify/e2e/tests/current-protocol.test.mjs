@@ -60,7 +60,7 @@ const card = {
 test('daemon.ready accepts valid capability catalog including internal preview and rejects incomplete catalog', async () => {
   const run = (environment) => getCase('daemon.ready').run({
     daemonEnv: 'fixture', vars: {},
-    call: async () => ({ json: { data: [environment] } }),
+    call: async () => ({ json: [environment] }),
   })
   await run(card)
   await assert.rejects(run({
@@ -99,8 +99,7 @@ test('distributed lease projection requires complete capability catalog across b
   const run = (caps) => getCase('distributed.lease_routing').run({
     baseUrls: { a: 'http://127.0.0.1:1', b: 'http://127.0.0.1:2' },
     callNode: async (_node, _method, path) => ({
-      json: { data: { ...card, id: path.split('/').at(-1),
-        capabilities: caps } },
+      json: { ...card, id: path.split('/').at(-1), capabilities: caps },
     }),
     writeArtifact() {},
   })

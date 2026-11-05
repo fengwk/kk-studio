@@ -3,7 +3,6 @@ import path from 'node:path'
 import {
   assert,
   assertExactFields,
-  envelopeData,
   expectHttpError,
   pageResults,
   sleep,
@@ -578,7 +577,7 @@ for (const def of REAL_MODEL_DEFINITIONS) {
           execution: { driver: 'builtin', settings: { modelName: resolved.modelName, variant: resolved.variant } },
           config: { tools: [], skills: [], subagents: [] },
         })
-        agent = envelopeData(agentJson)
+        agent = agentJson
         chat = await createChat(ctx, {
           title: `e2e-chat-${def.idSuffix}-${suffix}`,
           agentName: agent.name,
@@ -777,7 +776,7 @@ export async function runRealReasoningLevelsSmoke(ctx, def) {
         execution: { driver: 'builtin', settings: { modelName: resolved.modelName, variant } },
         config: { tools: [], skills: [], subagents: [] },
       })
-      varAgent = envelopeData(varAgentJson)
+      varAgent = varAgentJson
       varChat = await createChat(ctx, {
         title: `e2e-reason-chat-${def.idSuffix}-${variant}-${varSuffix}`,
         agentName: varAgent.name,
@@ -914,7 +913,7 @@ for (const def of REAL_MODEL_DEFINITIONS) {
             subagents: [],
           },
         })
-        agent = envelopeData(agentJson)
+        agent = agentJson
         chat = await createChat(ctx, {
           title: `e2e-tool-chat-${def.idSuffix}-${suffix}`,
           agentName: agent.name,
@@ -1148,8 +1147,7 @@ registerCase({
     let chat = null
     let parentThreadId = null
     try {
-      childAgent = envelopeData(
-        (
+      childAgent = (
           await ctx.call('POST', '/api/agents', {
             name: `e2e-task-child-${suffix}`,
             description: 'Return the requested marker without using tools.',
@@ -1158,10 +1156,8 @@ registerCase({
             execution: { driver: 'builtin', settings: { modelName: model.modelName, variant: model.variant } },
             config: { tools: [], skills: [], subagents: [] },
           })
-        ).json,
-      )
-      parentAgent = envelopeData(
-        (
+        ).json
+      parentAgent = (
           await ctx.call('POST', '/api/agents', {
             name: `e2e-task-parent-${suffix}`,
             description: 'Always delegates once to the configured child.',
@@ -1179,8 +1175,7 @@ registerCase({
               subagents: [childAgent.name],
             },
           })
-        ).json,
-      )
+        ).json
       assert(
         JSON.stringify(parentAgent.config?.subagents) === JSON.stringify([childAgent.name]),
         safeDiagnosticJson(parentAgent),
@@ -1342,7 +1337,7 @@ registerCase({
         execution: { driver: 'builtin', settings: { modelName: minimaxModel.modelName, variant: minimaxModel.variant } },
         config: { tools: [], skills: [], subagents: [] },
       })
-      tempAgent = envelopeData(agentJson)
+      tempAgent = agentJson
 
       chat = await createChat(ctx, {
         title: `e2e-stop-partial-${suffix}`,
@@ -1586,7 +1581,7 @@ registerCase({
         execution: { driver: 'builtin', settings: { modelName: minimaxModel.modelName, variant: minimaxModel.variant } },
         config: { tools: [], skills: [], subagents: [] },
       })
-      agent = envelopeData(agentJson)
+      agent = agentJson
       chat = await createChat(ctx, {
         title: `e2e-branch-chat-${suffix}`,
         agentName: agent.name,
@@ -1800,7 +1795,7 @@ registerCase({
         subagents: [],
       },
     })
-    const toolAgent = envelopeData(agentJson)
+    const toolAgent = agentJson
     assert(toolAgent?.name, safeDiagnosticJson(agentJson))
     // Environment 不是 Agent 的字段：请求体或响应出现 environmentId 都说明契约漂移。
     assertExactFields(

@@ -114,7 +114,7 @@ registerCase({
   level: 'L1',
   title: 'Canvas typed command、revision 坐标与 patch 变化集',
   docs:
-    '免费 L1：POST /api/canvases 的 document 只携带 revision（canonical 十进制字符串，HTTP 200 + code CREATED，无 version/threadId）；POST /api/canvases/{id}/commands 接受 11 种 typed command，前置条件是各语义组旧值而非整图版本；有实际变化的批让 revision 精确 +1 并返回该批完整变化集（UPSERT 全投影 / REMOVE 只带身份），纯 no-op 批与同幂等键精确回放都不推进 revision 且返回空变化集；snapshot 读模型无 links、由 Function args 投影 references',
+    '免费 L1：POST /api/canvases 的 document 只携带 revision（canonical 十进制字符串，HTTP 201，无 version/threadId）；POST /api/canvases/{id}/commands 接受 11 种 typed command，前置条件是各语义组旧值而非整图版本；有实际变化的批让 revision 精确 +1 并返回该批完整变化集（UPSERT 全投影 / REMOVE 只带身份），纯 no-op 批与同幂等键精确回放都不推进 revision 且返回空变化集；snapshot 读模型无 links、由 Function args 投影 references',
   async run(ctx) {
     const canvas = await createCanvas(ctx, `e2e-canvas-contract-${cid().slice(0, 8)}`)
     const nodeId = cid()

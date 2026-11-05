@@ -2,7 +2,6 @@ import {
   HttpError,
   assert,
   assertDecimalVersion,
-  envelopeData,
   expectHttpError,
 } from '../lib/http.mjs'
 import { createCaseAdder } from '../lib/registry.mjs'
@@ -63,7 +62,7 @@ registerCase({
   async run(ctx) {
     const readSettings = async () => {
       const { json } = await ctx.call('GET', '/api/settings')
-      return envelopeData(json)
+      return json
     }
 
     const before = await readSettings()
@@ -112,7 +111,7 @@ registerCase({
       // 仅保存重启生效配置，不连接代理、不更改运行期客户端。
       update.network = { proxyUrl: 'http://proxy.example.test:3128', noProxyHosts: '' }
       const { json } = await ctx.call('PUT', '/api/settings', update)
-      const saved = envelopeData(json)
+      const saved = json
       assertDecimalVersion(saved.version, 'saved system settings version')
       assert(saved.version !== before.version, 'SystemSettings CAS PUT must advance version')
       assert(

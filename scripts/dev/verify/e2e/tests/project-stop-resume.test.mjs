@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { verifyIssueStopResume } from '../cases/project.mjs'
-import { HttpError } from '../lib/http.mjs'
+import { problemError } from './fixtures/problem.mjs'
 
 /** 只模拟空闲 Issue 的版本和门禁；没有活动 Run，不伪造 Run 收尾。 */
 function issueFixture({ allowTransition = false } = {}) {
@@ -28,8 +28,8 @@ function issueFixture({ allowTransition = false } = {}) {
       }
     } else if (path === `/api/issues/${issue.id}/transition`) {
       assert.equal(body.toState, 'DONE')
-      if (issue.pauseReason && !allowTransition) throw new HttpError(400, 'paused', path)
-      return { status: 200, json: { data: issue } }
+      if (issue.pauseReason && !allowTransition) throw problemError(400, 'validation', 'paused', path)
+      return { status: 200, json: issue }
     } else if (path === `/api/issues/${issue.id}/resume`) {
       issue = {
         ...issue,
@@ -40,7 +40,7 @@ function issueFixture({ allowTransition = false } = {}) {
     } else {
       throw new Error(`unexpected call ${method} ${path}`)
     }
-    return { status: 200, json: { data: { ...issue } } }
+    return { status: 200, json: { ...issue } }
   }
   return { initial: { ...issue }, ctx: { call }, requests }
 }

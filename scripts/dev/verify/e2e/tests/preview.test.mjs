@@ -4,6 +4,7 @@ import test from 'node:test'
 import { ProviderPreviewTrap } from '../cases/seed-and-harness.mjs'
 import { getCase } from '../run-matrix.mjs'
 import { HttpError } from '../lib/http.mjs'
+import { problemError } from './fixtures/problem.mjs'
 
 const id = (n) => `00000000-0000-0000-0000-${String(n).padStart(12, '0')}`
 
@@ -28,7 +29,7 @@ test('seed case reads the execution contract, including a null builtin variant',
     async call(method, path) {
       assert.equal(method, 'GET')
       const results = path.startsWith('/api/agents') ? [agent] : providers
-      return { json: { data: { results } } }
+      return { json: { results } }
     },
   }
   await getCase('seed.agent_and_provider').run(ctx)
@@ -50,7 +51,7 @@ function fixture(reasons = ['PREVIEW_STALE_CURSOR', 'PREVIEW_PLANNING_FAILED'], 
     },
     async call(method, path, body) {
       if (method === 'POST' && path === '/api/chats') {
-        return { status: 201, json: { data: { id: id(1), agentName: body.agentName, environmentName: body.environmentName ?? null } } }
+        return { status: 201, json: { id: id(1), agentName: body.agentName, environmentName: body.environmentName ?? null } }
       }
       if (method === 'POST' && path === '/api/command-batches') {
         assert.match(body.target.rootSettings.agentName, /^e2e-preview-missing-/)
@@ -61,7 +62,7 @@ function fixture(reasons = ['PREVIEW_STALE_CURSOR', 'PREVIEW_PLANNING_FAILED'], 
           executionControl: 'RUNNABLE',
           rootThreadId: threadId, yoloEnabled: false,
         }
-        return { status: 202, json: { data: {
+        return { status: 202, json: {
           session: { sessionId, name: 'fixture' },
           rootEntry: { entryId: id(2), entryType: 'ROOT', sessionId },
           thread, replayed: false,
@@ -69,12 +70,12 @@ function fixture(reasons = ['PREVIEW_STALE_CURSOR', 'PREVIEW_PLANNING_FAILED'], 
             type: command.type, idempotencyKey: command.idempotencyKey,
             threadId, sequence: String(i + 1),
           })),
-        } } }
+        } }
       }
       if (method === 'GET' && path === `/api/threads/${thread.threadId}`) {
-        return { status: 200, json: { data: {
+        return { status: 200, json: {
           thread, queuedCommands: [], activeAssistantOutput: null, toolInvocations: [],
-        } } }
+        } }
       }
       if (method === 'POST' && path.endsWith('/provider-request-preview')) {
         // owner-free 预览 body：cursor 直接挂在顶层，不携带 owner/target。
@@ -138,7 +139,7 @@ test('readonly preview builds its local model config and cleans up a failed fixt
   const ctx = {
     async call(method, path, body) {
       if (method === 'POST' && path === '/api/providers') {
-        return { json: { data: { name: body.name, version: '1' } } }
+        return { json: { name: body.name, version: '1' } }
       }
       if (method === 'POST' && path === '/api/models') {
         config = body.config
@@ -184,10 +185,10 @@ function modelRequestDebugFixture() {
     requests.push({ method, path, body })
     const pathname = new URL(path, 'http://fixture.local').pathname
     if (method === 'GET' && pathname === '/api/agents') {
-      return { status: 200, json: { data: { results: [agent] } } }
+      return { status: 200, json: { results: [agent] } }
     }
     if (method === 'GET' && pathname === '/api/models') {
-      return { status: 200, json: { data: { results: [model] } } }
+      return { status: 200, json: { results: [model] } }
     }
     if (method === 'POST' && pathname === '/api/chats') {
       chat = {
@@ -198,7 +199,7 @@ function modelRequestDebugFixture() {
         yoloEnabled: body.yoloEnabled === true,
         version: '0',
       }
-      return { status: 201, json: { data: { ...chat } } }
+      return { status: 201, json: { ...chat } }
     }
     if (method === 'POST' && pathname === '/api/command-batches') {
       assert.match(body.target.rootSettings.agentName, /^missing-debug-agent-/)
@@ -218,18 +219,16 @@ function modelRequestDebugFixture() {
       return {
         status: 202,
         json: {
-          data: {
-            session: { sessionId, name: 'fixture' },
-            rootEntry: { entryId: id(2), entryType: 'ROOT', sessionId },
-            thread,
-            replayed: false,
-            acceptedCommands: body.commands.map((command, index) => ({
-              type: command.type,
-              idempotencyKey: command.idempotencyKey,
-              threadId,
-              sequence: String(index + 1),
-            })),
-          },
+          session: { sessionId, name: 'fixture' },
+          rootEntry: { entryId: id(2), entryType: 'ROOT', sessionId },
+          thread,
+          replayed: false,
+          acceptedCommands: body.commands.map((command, index) => ({
+            type: command.type,
+            idempotencyKey: command.idempotencyKey,
+            threadId,
+            sequence: String(index + 1),
+          })),
         },
       }
     }
@@ -237,49 +236,46 @@ function modelRequestDebugFixture() {
       return {
         status: 200,
         json: {
-          data: {
-            thread: { ...thread },
-            entries: [],
-            queuedCommands: [],
-            activeAssistantOutput: null,
-            toolInvocations: [],
-            generationFailures: [],
-            stopReceipts: [],
-          },
+          thread: { ...thread },
+          entries: [],
+          queuedCommands: [],
+          activeAssistantOutput: null,
+          toolInvocations: [],
+          generationFailures: [],
+          stopReceipts: [],
         },
       }
     }
     if (pathname === `/api/threads/${thread.threadId}/model-request-debug`) {
       if (method === 'GET') {
-        throw new HttpError(405, JSON.stringify({ message: 'Method Not Allowed' }), pathname)
+        throw problemError(405, 'validation', 'Method Not Allowed', pathname)
       }
       assert.equal(method, 'POST')
       if (body.model == null) {
-        throw new HttpError(400, JSON.stringify({ message: 'model must not be null' }), pathname)
+        throw problemError(400, 'validation', 'model must not be null', pathname)
       }
       if (body.environmentName != null && String(body.environmentName).includes('/')) {
-        throw new HttpError(
+        throw problemError(
           400,
-          JSON.stringify({ message: "environmentName must not contain '/'" }),
+          'validation',
+          "environmentName must not contain '/'",
           pathname,
         )
       }
       return {
         status: 200,
         json: {
-          data: {
-            kind: 'NEXT_REQUEST_PREVIEW',
-            generatedAt: '2026-10-02T00:00:00Z',
-            model: body.model,
-            environmentName: body.environmentName ?? null,
-            systemInstruction: '',
-            tools: [],
-            skills: [],
-            subagents: [],
-            cacheControl: null,
-            planningError: 'PLANNING_FAILED',
-            frozenInvocation: null,
-          },
+          kind: 'NEXT_REQUEST_PREVIEW',
+          generatedAt: '2026-10-02T00:00:00Z',
+          model: body.model,
+          environmentName: body.environmentName ?? null,
+          systemInstruction: '',
+          tools: [],
+          skills: [],
+          subagents: [],
+          cacheControl: null,
+          planningError: 'PLANNING_FAILED',
+          frozenInvocation: null,
         },
       }
     }
