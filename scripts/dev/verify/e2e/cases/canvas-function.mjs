@@ -1,4 +1,4 @@
-import { assert, assertDecimalVersion, assertExactFields, cid, differentDecimalLong, envelopeData, expectHttpError, sleep } from '../lib/http.mjs'
+import { assert, assertDecimalVersion, assertExactFields, cid, envelopeData, expectHttpError, sleep } from '../lib/http.mjs'
 import { createCaseAdder } from '../lib/registry.mjs'
 
 export const cases = []
@@ -21,10 +21,9 @@ const DEFINITION_FIELDS = [
 /** CanvasFunctionRunDTO 精确字段集合：stateJson 等后端执行细节绝不外泄。 */
 const RUN_FIELDS = ['nodeId', 'requestId', 'status', 'stage', 'error', 'updatedAt']
 
-/** 目录项版本身份必须恰好是 canonical 非负十进制 epoch + lowercase SHA-256 fingerprint。 */
+/** 目录项版本身份必须恰好是 lowercase SHA-256 fingerprint。 */
 function assertVersion(version, label) {
-  assertExactFields(version, ['catalogEpoch', 'definitionFingerprint'], label)
-  assertDecimalVersion(version.catalogEpoch, `${label}.catalogEpoch`)
+  assertExactFields(version, ['definitionFingerprint'], label)
   assert(
     typeof version.definitionFingerprint === 'string'
       && /^[0-9a-f]{64}$/.test(version.definitionFingerprint),
@@ -47,7 +46,7 @@ registerCase({
   requires: ['canvas-function'],
   title: 'Canvas Function 目录与免费 fake 运行链路',
   docs:
-    '需 backend 启用 S3 与 kk-studio.canvas.function.fake-enabled；GET /api/canvas-functions 只暴露函数名/说明/严格 args schema/有界输出/引用限制与目录版本（available + required-nullable unavailableReason + version{catalogEpoch,definitionFingerprint}）；typed SET_NODE_FUNCTION 冻结函数配置，POST function-run 的 expectedVersion 必填且形状严格（缺失/前导零 epoch/非法 fingerprint 400），目录已变化（epoch 或同 epoch 定义 fingerprint 不匹配；stale epoch 用 BigInt 精确构造并保持在合法 long 范围）返回 409 且不写 Run/pin，精确 requestId 重放优先于版本校验，返回 202 且只在 nodeId/requestId/status/stage/error/updatedAt 上表达运行状态（无 stateJson），非 Function 节点 400、无运行 404；RUNNING->SUCCEEDED 后快照按输出槽位替换 Resource（IMAGE+blobId），resource preview-url 可直读 WEBP；resolve 只对 UNKNOWN 有效（非 UNKNOWN 409、非法 resolution/空 verification 400），cancel 幂等',
+    '需 backend 启用 S3 与 kk-studio.canvas.function.fake-enabled；GET /api/canvas-functions 只暴露函数名/说明/严格 args schema/有界输出/引用限制与目录版本（available + required-nullable unavailableReason + version{definitionFingerprint}）；typed SET_NODE_FUNCTION 冻结函数配置，POST function-run 的 expectedVersion 必填且形状严格（缺失/未知字段/非法 fingerprint 400），目录定义 fingerprint 不匹配返回 409 且不写 Run/pin，精确 requestId 重放优先于版本校验，返回 202 且只在 nodeId/requestId/status/stage/error/updatedAt 上表达运行状态（无 stateJson），非 Function 节点 400、无运行 404；RUNNING->SUCCEEDED 后快照按输出槽位替换 Resource（IMAGE+blobId），resource preview-url 可直读 WEBP；resolve 只对 UNKNOWN 有效（非 UNKNOWN 409、非法 resolution/空 verification 400），cancel 幂等',
   async run(ctx) {
     const definitions = envelopeData((await ctx.call('GET', '/api/canvas-functions')).json)
     assert(Array.isArray(definitions) && definitions.length > 0, JSON.stringify(definitions))
@@ -169,46 +168,37 @@ registerCase({
       { requestId: cid() },
       { requestId: cid(), expectedVersion: null },
       { requestId: cid(), expectedVersion: { catalogEpoch: '01', definitionFingerprint: imageVersion.definitionFingerprint } },
-      { requestId: cid(), expectedVersion: { catalogEpoch: imageVersion.catalogEpoch, definitionFingerprint: imageVersion.definitionFingerprint.toUpperCase() } },
-      { requestId: cid(), expectedVersion: { catalogEpoch: imageVersion.catalogEpoch, definitionFingerprint: 'abc' } },
+      { requestId: cid(), expectedVersion: { definitionFingerprint: imageVersion.definitionFingerprint.toUpperCase() } },
+      { requestId: cid(), expectedVersion: { definitionFingerprint: 'abc' } },
     ]) {
       await expectHttpError(
         () => ctx.call('POST', functionById(canvas.id, functionNodeId).runPath, invalid),
         { status: 400 },
       )
     }
-    // stale epoch 必须真实待在合法 long 范围内且不等于当前 epoch：用 BigInt 精确构造，避免 Number 丢精度或造出越界值。
+    // 构造合法但不同的 fingerprint，确保命中版本围栏而非输入校验。
     const staleVersion = {
-      catalogEpoch: differentDecimalLong(imageVersion.catalogEpoch, 'fake-image version.catalogEpoch'),
-      definitionFingerprint: imageVersion.definitionFingerprint,
-    }
-    // 构造出的 stale 版本自身也必须是合法 wire 版本（canonical 且不越 long 上界），否则它会先撞 400 而不是围栏 409。
-    assertVersion(staleVersion, 'stale expectedVersion')
-    // 保证与真实 fingerprint 不同，避免理论上的偶然相等掩盖围栏。
-    const mismatchedVersion = {
-      catalogEpoch: imageVersion.catalogEpoch,
       definitionFingerprint:
         (imageVersion.definitionFingerprint[0] === '0' ? '1' : '0')
         + imageVersion.definitionFingerprint.slice(1),
     }
-    for (const stale of [staleVersion, mismatchedVersion]) {
-      const conflict = await expectHttpError(
-        () =>
-          ctx.call('POST', functionById(canvas.id, functionNodeId).runPath, {
-            requestId: cid(),
-            expectedVersion: stale,
-          }),
-        { status: 409 },
-      )
-      assert(
-        !/stateJson/.test(conflict.body),
-        `version conflict must not leak run internals: ${conflict.body}`,
-      )
-      // 拒绝后没有产生任何 Run 事实：查询仍是「无运行」404，快照也没有新增 run 投影。
-      await expectHttpError(() => ctx.call('GET', functionById(canvas.id, functionNodeId).runPath), {
-        status: 404,
-      })
-    }
+    assertVersion(staleVersion, 'stale expectedVersion')
+    const conflict = await expectHttpError(
+      () =>
+        ctx.call('POST', functionById(canvas.id, functionNodeId).runPath, {
+          requestId: cid(),
+          expectedVersion: staleVersion,
+        }),
+      { status: 409 },
+    )
+    assert(
+      !/stateJson/.test(conflict.body),
+      `version conflict must not leak run internals: ${conflict.body}`,
+    )
+    // 拒绝后没有产生任何 Run 事实：查询仍是「无运行」404，快照也没有新增 run 投影。
+    await expectHttpError(() => ctx.call('GET', functionById(canvas.id, functionNodeId).runPath), {
+      status: 404,
+    })
     const unchanged = envelopeData((await ctx.call('GET', `/api/canvases/${canvas.id}`)).json)
     assert(
       unchanged.document.revision === revisionAfterDeclare

@@ -13,6 +13,7 @@ import {
   assertPatch,
   assertRunRevision,
   decimalRevision,
+  definitionVersion,
   documentRevision,
   functionBatch,
   resourceBatch,
@@ -150,6 +151,24 @@ test('test intent: run revisions count the lifecycle advances and the durable ch
 
 test('test intent: available definitions use name and a strict schema', () => {
   assert.equal(assertFunctionDefinitions(functionDefinitions()), undefined)
+})
+
+test('test intent: function versions contain only a canonical fingerprint', () => {
+  // 额外字段及非法 fingerprint 都不能作为启动请求的版本身份。
+  const definitions = functionDefinitions()
+  const version = definitionVersion(definitions, 'fake-image')
+  assert.deepEqual(Object.keys(version), ['definitionFingerprint'])
+  for (const invalid of [
+    { ...version, catalogEpoch: '7' },
+    {},
+    { definitionFingerprint: version.definitionFingerprint.toUpperCase() },
+    { definitionFingerprint: 'abc' },
+  ]) {
+    const altered = functionDefinitions()
+    altered[0].version = invalid
+    assert.throws(() => definitionVersion(altered, 'fake-image'))
+    assert.throws(() => assertFunctionDefinitions(altered))
+  }
 })
 
 test('test intent: non-strict, unavailable, or missing definitions fail the smoke', () => {

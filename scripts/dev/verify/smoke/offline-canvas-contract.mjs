@@ -67,18 +67,17 @@ export function functionBatch(nodeId, name, functionName, args, idempotencyKey) 
   }
 }
 
-/**
- * 取某个函数目录项暴露的版本身份，作为 start 的 expectedVersion。
- *
- * 客户端看到的版本只能来自真实目录项，绝不硬编码 epoch 或 fingerprint。
- */
+function assertFunctionVersion(version) {
+  assertKeys(version, ['definitionFingerprint'])
+  assert.ok(typeof version.definitionFingerprint === 'string' && FINGERPRINT.test(version.definitionFingerprint), JSON.stringify(version))
+}
+
+/** 从真实目录项取版本身份作为 start 的 expectedVersion，不硬编码 fingerprint。 */
 export function definitionVersion(definitions, name) {
   const definition = definitions.find((item) => item.name === name)
   assert.ok(definition, `function definition not found: ${name}`)
   const { version } = definition
-  assertKeys(version, ['catalogEpoch', 'definitionFingerprint'])
-  assert.ok(DECIMAL.test(version.catalogEpoch), JSON.stringify(version))
-  assert.ok(FINGERPRINT.test(version.definitionFingerprint), JSON.stringify(version))
+  assertFunctionVersion(version)
   return version
 }
 
@@ -107,8 +106,7 @@ export function assertFunctionDefinitions(definitions) {
     assertKeys(definition, fields)
     assert.equal(definition.argsSchema.type, 'object', JSON.stringify(definition))
     assert.equal(definition.argsSchema.additionalProperties, false, JSON.stringify(definition))
-    assert.ok(DECIMAL.test(definition.version.catalogEpoch), JSON.stringify(definition))
-    assert.ok(FINGERPRINT.test(definition.version.definitionFingerprint), JSON.stringify(definition))
+    assertFunctionVersion(definition.version)
   }
   for (const name of REQUIRED_FUNCTIONS) {
     const definition = definitions.find((item) => item.name === name)
