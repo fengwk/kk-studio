@@ -72,7 +72,7 @@ export async function runComposerMatrix(ui) {
         async (fixture) => {
           const composer = await bindThreadComposer(page, goto, fixture)
           const draft = `local draft ${stamp}`
-          const draftKey = composerDraftStorageKey(`thread:${fixture.threadId}`)
+          const draftKey = { threadId: fixture.threadId }
           await composer.fill(draft)
           await expectStorage(page, draftKey, draft)
 
@@ -243,7 +243,7 @@ export async function runComposerMatrix(ui) {
         }),
         async (fixture) => {
           let composer = await bindThreadComposer(page, goto, fixture)
-          const draftKey = composerDraftStorageKey(`thread:${fixture.threadId}`)
+          const draftKey = { threadId: fixture.threadId }
           await composer.fill(originalDraft)
           await composer.press('ArrowUp')
           await expectComposerText(page, historicalMessage)
@@ -258,8 +258,8 @@ export async function runComposerMatrix(ui) {
 
           await page.reload({ waitUntil: 'networkidle', timeout: 30_000 })
           composer = await waitForComposer(page)
-          await expectComposerText(page, editedDraft)
           await expectStorage(page, draftKey, editedDraft)
+          await expectComposerText(page, editedDraft)
           await shot(caseArt, 'composer-history-edited-recalled')
           expectNoFatal(pageErrors, consoleErrors)
         },
@@ -326,7 +326,7 @@ export async function runComposerMatrix(ui) {
         async (fixture) => {
           const composer = await bindThreadComposer(page, goto, fixture)
           const draft = `palette scratch ${stamp}`
-          const draftKey = composerDraftStorageKey(`thread:${fixture.threadId}`)
+          const draftKey = { threadId: fixture.threadId }
           await composer.fill(draft)
           await page.getByRole('button', { name: '打开命令表' }).click()
           const palette = page.getByRole('listbox', { name: '命令表' })
@@ -386,7 +386,7 @@ export async function runComposerMatrix(ui) {
         }),
         async (fixture) => {
           const composer = await bindThreadComposer(page, goto, fixture)
-          const draftKey = composerDraftStorageKey(`thread:${fixture.threadId}`)
+          const draftKey = { threadId: fixture.threadId }
           await composer.fill(draft)
           await page.getByRole('button', { name: '打开命令表' }).click()
           await page.getByRole('option', { name: /^thread/ }).click()
@@ -517,8 +517,8 @@ export async function runComposerMatrix(ui) {
           await expectStorage(page, draftKey, draft)
 
           await page.getByRole('button', { name: '打开命令表' }).click()
-          await page.getByRole('option', { name: /^tree/ }).click()
-          const historyPanel = page.getByRole('region', { name: '历史分支' })
+          await page.getByRole('option', { name: /^history/ }).click()
+          const historyPanel = page.getByRole('region', { name: '历史树' })
           await historyPanel.waitFor({ state: 'visible', timeout: 10_000 })
           assert(
             await page.locator('.modal-backdrop').count() === 0,
@@ -540,21 +540,22 @@ export async function runComposerMatrix(ui) {
               viewport,
             })}`,
           )
-          const selectedHistoryRow = historyPanel.locator('.history-branch-entry[aria-pressed="true"]')
+          const selectedHistoryRow = historyPanel.locator('.history-tree-entry[aria-pressed="true"]')
           const selectedPrefix = await selectedHistoryRow.evaluate((element) => ({
             classes: [...element.children].slice(0, 3).map((child) => child.className),
-            path: element.querySelector('.history-branch-entry-path')?.textContent ?? '',
-            cursor: element.querySelector('.history-branch-entry-cursor')?.textContent ?? '',
+            path: element.querySelector('.history-tree-entry-path')?.textContent ?? '',
+            cursor: element.querySelector('.history-tree-entry-cursor')?.textContent ?? '',
           }))
           assert(
-            selectedPrefix.classes[0] === 'history-branch-entry-cursor'
-            && selectedPrefix.classes.includes('history-branch-entry-path')
+            selectedPrefix.classes[0] === 'history-tree-entry-cursor'
+            && selectedPrefix.classes.includes('history-tree-entry-lane')
+            && selectedPrefix.classes.includes('history-tree-entry-path')
             && selectedPrefix.path === '•'
             && selectedPrefix.cursor === '›',
-            `history row does not use the pi tree cursor/path grammar: ${JSON.stringify(selectedPrefix)}`,
+            `history row does not expose its cursor, lane and active path: ${JSON.stringify(selectedPrefix)}`,
           )
-          const treeRows = historyPanel.locator('.history-branch-entry')
-          assert(await treeRows.count() === 4, `branched history row count: ${await treeRows.count()}`)
+          const treeRows = historyPanel.locator('.history-tree-entry')
+          assert(await treeRows.count() >= 4, `branched history row count: ${await treeRows.count()}`)
           const originalBranchRow = historyPanel.getByRole('button', {
             name: new RegExp(`selection original branch ${stamp}`),
           })
@@ -564,33 +565,35 @@ export async function runComposerMatrix(ui) {
           const alternateBranchRow = historyPanel.getByRole('button', {
             name: new RegExp(`selection alternate branch ${stamp}`),
           })
+          assert(await originalBranchRow.count() === 1 && await originalDescendantRow.count() === 1
+            && await alternateBranchRow.count() === 1, 'history tree omitted a branch message')
+          assert(await historyPanel.locator('.history-tree-entry[data-fork="true"]').count() > 0,
+            'branched history lacks a fork marker')
           assert(
-            (await originalBranchRow.locator('.history-branch-entry-glyphs').textContent()) === '├─ ',
-            'first branch did not render a fork connector',
-          )
-          assert(
-            (await originalDescendantRow.locator('.history-branch-entry-glyphs').textContent())?.startsWith('│  '),
-            'branch descendant did not preserve the vertical ancestor gutter',
-          )
-          assert(
-            (await alternateBranchRow.locator('.history-branch-entry-glyphs').textContent()) === '└─ ',
-            'last branch did not render an elbow connector',
+            await originalBranchRow.getAttribute('data-lane') === await originalDescendantRow.getAttribute('data-lane')
+              && await originalBranchRow.getAttribute('data-lane') !== await alternateBranchRow.getAttribute('data-lane'),
+            'history tree did not preserve branch lanes',
           )
           const selectedBeforeTreeMove = await selectedHistoryRow.getAttribute('aria-label')
+          const previousRow = await selectedHistoryRow.evaluate((selected) => {
+            const rows = [...selected.closest('.history-tree-list').querySelectorAll('.history-tree-entry')]
+            return rows[rows.indexOf(selected) - 1]?.getAttribute('aria-label') ?? null
+          })
+          assert(previousRow != null, 'history head has no previous row')
           await historySearch.press('ArrowUp')
           await page.waitForFunction(
             ({ panelLabel, previous }) => {
               const region = [...document.querySelectorAll('[role="region"]')]
                 .find((element) => element.getAttribute('aria-label') === panelLabel)
-              const selected = region?.querySelector('.history-branch-entry[aria-pressed="true"]')
+              const selected = region?.querySelector('.history-tree-entry[aria-pressed="true"]')
               return selected?.getAttribute('aria-label') !== previous
             },
-            { panelLabel: '历史分支', previous: selectedBeforeTreeMove },
+            { panelLabel: '历史树', previous: selectedBeforeTreeMove },
             { timeout: 10_000 },
           )
           assert(
-            await originalBranchRow.getAttribute('aria-pressed') === 'true',
-            'ArrowUp did not move the tree selection to the previous visible row',
+            await selectedHistoryRow.getAttribute('aria-label') === previousRow,
+            'ArrowUp did not select the immediately preceding history entry',
           )
           await shot(caseArt, 'history-panel-keyboard-mode')
           await page.waitForFunction(
@@ -627,7 +630,7 @@ export async function runComposerMatrix(ui) {
         }),
         async (fixture) => {
           const composer = await bindThreadComposer(page, goto, fixture)
-          const draftKey = composerDraftStorageKey(`thread:${fixture.threadId}`)
+          const draftKey = { threadId: fixture.threadId }
           await composer.fill(draft)
           await expectStorage(page, draftKey, draft)
 
@@ -673,7 +676,7 @@ export async function runComposerMatrix(ui) {
 
   await run(
     'ui.chat.composer.submit_clears_draft',
-    '提交后立即清除 Composer 与 localStorage，并在 timeline 中保留用户消息',
+    '提交后清除 Composer 与 Thread 持久草稿，并在 timeline 中保留用户消息',
     async (caseArt) => {
       const submitted = `submitted composer message ${stamp}`
       await withUiFixture(
@@ -684,7 +687,7 @@ export async function runComposerMatrix(ui) {
         }),
         async (fixture) => {
           const composer = await bindThreadComposer(page, goto, fixture)
-          const draftKey = composerDraftStorageKey(`thread:${fixture.threadId}`)
+          const draftKey = { threadId: fixture.threadId }
           await composer.fill(submitted)
           await expectStorage(page, draftKey, submitted)
           await page.getByRole('button', { name: '发送消息' }).click()
@@ -779,10 +782,10 @@ export async function runComposerMatrix(ui) {
 
             await shot(caseArt, 'composer-attachment-previews')
             await imageItem.locator('button.attachment-reference-preview').click()
-            const lightbox = page.locator('.resource-media-lightbox')
+            const lightbox = page.getByRole('dialog', { name: `预览 ${imageName}` })
             await lightbox.waitFor({ state: 'visible', timeout: 5_000 })
             assert(
-              await lightbox.locator('.resource-media-lightbox-content img').count() === 1,
+              await lightbox.locator('.media-lightbox-content img').count() === 1,
               'image attachment lightbox lacks the full image',
             )
             await shot(caseArt, 'composer-attachment-lightbox')
@@ -811,7 +814,7 @@ export async function runComposerMatrix(ui) {
         async (fixture) => {
           const composer = await bindThreadComposer(page, goto, fixture)
           const draft = `debug draft ${stamp}`
-          const draftKey = composerDraftStorageKey(`thread:${fixture.threadId}`)
+          const draftKey = { threadId: fixture.threadId }
 
           // plus 命令保留已写草稿；Debug 中 Composer 挂载但完全失活。
           await composer.fill(draft)
@@ -827,7 +830,8 @@ export async function runComposerMatrix(ui) {
           const optionCount = await listbox.getByRole('option').count()
           assert(optionCount >= 2, `debug list is too short: ${optionCount}`)
 
-          assert((await composer.count()) === 1 && !(await composer.isVisible()), 'debug composer is not mounted and hidden')
+          const hiddenComposer = page.locator('.composer-editor')
+          assert((await hiddenComposer.count()) === 1 && !(await hiddenComposer.isVisible()), 'debug composer is not mounted and hidden')
           assert(!(await page.locator('#chat-layout-select').isVisible()), 'debug exposes the layout selector')
           assert((await page.getByRole('button', { name: '关闭 Debug', exact: true }).count()) === 1, 'debug must have one header exit')
           await expectStorage(page, draftKey, draft)
@@ -1587,20 +1591,8 @@ async function clearBrowserFixtureState(page, fixture) {
   if (!fixture.chat?.id) return
   await clearChatPaneState(page, fixture.chat.id)
   await page.evaluate(
-    ({ blankDraftKey, threadDraftKey }) => {
-      localStorage.removeItem(blankDraftKey)
-      if (threadDraftKey) {
-        localStorage.removeItem(threadDraftKey)
-      }
-    },
-    {
-      blankDraftKey: composerDraftStorageKey(
-        `agent-pane:CHAT:${fixture.chat.id}:pane-1`,
-      ),
-      threadDraftKey: fixture.threadId
-        ? composerDraftStorageKey(`thread:${fixture.threadId}`)
-        : null,
-    },
+    (draftKey) => localStorage.removeItem(draftKey),
+    chatPaneDraftKey(fixture),
   ).catch(() => undefined)
 }
 
@@ -1759,6 +1751,10 @@ async function expectComposerText(page, expected) {
 }
 
 export async function expectStorage(page, key, expected) {
+  if (typeof key === 'object') {
+    await expectThreadDraft(page, key.threadId, expected)
+    return
+  }
   let actual = null
   try {
     if (expected === null) {
@@ -1813,6 +1809,34 @@ export async function expectStorage(page, key, expected) {
         + ` got ${JSON.stringify(actual)}`,
     )
   }
+}
+
+async function expectThreadDraft(page, threadId, expected) {
+  // 已绑定 Thread 的草稿与 Stop 回执原子保存在 IndexedDB，而非空 pane 的 localStorage。
+  await page.waitForFunction(async ({ id, text }) => {
+    const db = await new Promise((resolve, reject) => {
+      const request = indexedDB.open('kk-studio.thread-drafts', 1)
+      request.onsuccess = () => resolve(request.result)
+      request.onerror = () => reject(request.error)
+    })
+    try {
+      const record = await new Promise((resolve, reject) => {
+        const request = db.transaction('threadDrafts', 'readonly').objectStore('threadDrafts').get(id)
+        request.onsuccess = () => resolve(request.result)
+        request.onerror = () => reject(request.error)
+      })
+      if (!record || record.threadId !== id || !Array.isArray(record.parts)
+        || !Array.isArray(record.appliedStopRequestIds)) return false
+      if (text === null) return record.parts.length === 0
+      return record.parts.length === 1
+        && record.parts[0].type === 'text'
+        && typeof record.parts[0].partId === 'string'
+        && Object.keys(record.parts[0]).sort().join(',') === 'partId,text,type'
+        && record.parts[0].text === text
+    } finally {
+      db.close()
+    }
+  }, { id: threadId, text: expected }, { timeout: 10_000 })
 }
 
 function createReadyUploadRoute() {
@@ -1886,6 +1910,10 @@ async function waitForPlaceholder(composer, visible) {
 
 function composerDraftStorageKey(scope) {
   return `${COMPOSER_DRAFT_STORAGE_PREFIX}${scope}`
+}
+
+function chatPaneDraftKey(fixture) {
+  return composerDraftStorageKey(`agent-pane:CHAT:${fixture.chat.id}:pane-1`)
 }
 
 async function setCaretOffset(composer, targetOffset) {

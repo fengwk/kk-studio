@@ -430,6 +430,16 @@ async function resetControllerTestEnvironment() {
 describe('useAgentThreadController', () => {
   beforeEach(resetControllerTestEnvironment)
 
+  it('restores the saved Thread draft when StrictMode replays the mount effect', async () => {
+    // StrictMode 清理第一次读取后仍须重新读取，才能在刷新后恢复已保存的输入。
+    await saveThreadDraftParts(THREAD_ID, [createTextPart('saved draft')], [])
+    const { result } = renderHook(() => useTestController(THREAD_ID), {
+      wrapper,
+      reactStrictMode: true,
+    })
+    await waitFor(() => expect(partsToText(result.current.draft)).toBe('saved draft'))
+  })
+
   it('submits a USER_MESSAGE plus a SET_* diff batch via the snapshot CAS cursors', async () => {
     const currentThread = threadFixture({
       branchSettings: branchSettings({ agentName: 'assistant' }),

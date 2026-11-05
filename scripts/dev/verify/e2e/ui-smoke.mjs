@@ -25,6 +25,7 @@ import { missingUiCapabilities } from './lib/ui-capabilities.mjs'
 import { MINIMAX_ANTHROPIC_M3 } from './lib/real-models.mjs'
 import { createDurationTimer } from './lib/time.mjs'
 import { encodePathTail } from './lib/fixtures.mjs'
+import { listChats } from './lib/harness.mjs'
 import {
   assertReadOnlyZeroFooter,
   waitForSettledAssistantText,
@@ -97,9 +98,9 @@ async function apiJson(backendUrl, method, requestPath, body) {
 
 async function apiDeleteByName(backendUrl, resource, name) {
   const resourcePath = resource === 'chats' ? '/api/chats' : `/api/${resource}`
-  const listPath = resource === 'chats' ? resourcePath : `${resourcePath}?pageNumber=1&pageSize=100`
-  const { json } = await apiJson(backendUrl, 'GET', listPath)
-  const list = json?.data?.results || json?.data || []
+  const list = resource === 'chats'
+    ? await listChats({ call: (method, requestPath) => apiJson(backendUrl, method, requestPath) })
+    : (await apiJson(backendUrl, 'GET', `${resourcePath}?pageNumber=1&pageSize=100`)).json?.data?.results || []
   const key = resource === 'chats' ? 'title' : 'name'
   const hit = list.find((item) => item[key] === name)
   if (!hit) return false
@@ -1327,9 +1328,9 @@ async function main(argv) {
         )
 
         // Chat 持久化显式投影 required-nullable environmentName（未选择时为 null）。
-        const { json } = await apiJson(args.backendUrl, 'GET', '/api/chats')
-        const created = (json?.data || []).find((chat) => chat.title === title)
-        assert(created != null, `Create Chat did not persist the chat: ${JSON.stringify(json)}`)
+        const chats = await listChats(apiCtx)
+        const created = chats.find((chat) => chat.title === title)
+        assert(created != null, `Create Chat did not persist the chat: ${JSON.stringify(chats)}`)
         assert(
           Object.hasOwn(created, 'environmentName') && created.environmentName === null,
           `Chat must project required-nullable environmentName:null when no default Environment: ${JSON.stringify(created)}`,
