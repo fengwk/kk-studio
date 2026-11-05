@@ -5,7 +5,11 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import java.util.List;
 import java.util.Objects;
 
-/** Builtin execution 中的模型引用；调用方须先在事务中锁定模型行。 */
+/**
+ * Builtin execution 中的模型引用。
+ *
+ * <p>改名在调用方已锁定模型行的同一事务内先按 name 锁定引用 Agent，再以一条 UPDATE 同步全部引用；存在性检查只读，不加行锁。
+ */
 public final class BuiltinAgentModelReferences {
   private final JdbcClient jdbcClient;
 
@@ -13,6 +17,7 @@ public final class BuiltinAgentModelReferences {
     this.jdbcClient = Objects.requireNonNull(jdbcClient, "jdbcClient");
   }
 
+  /** 按 name 升序锁定引用该模型的 Builtin Agent，直到外层事务结束。 */
   public List<String> lockAgents(String modelName) {
     return jdbcClient
         .sql(
@@ -23,35 +28,44 @@ public final class BuiltinAgentModelReferences {
         .list();
   }
 
+  /** 一条 UPDATE 改写全部已锁定 Agent 的模型引用，并各自递增版本。 */
   public void renameLockedAgents(List<String> agents, String modelName) {
-    for (String agent : agents) {
-      jdbcClient
-          .sql(
-              "update agent_definition set execution = jsonb_set(execution,"
-                  + " '{settings,modelName}', to_jsonb(cast(:modelName as text))),"
-                  + " version = version + 1,"
-                  + " updated_at = greatest(updated_at, current_timestamp) where name = :name")
-          .param("modelName", modelName)
-          .param("name", agent)
-          .update();
+    if (agents.isEmpty()) {
+      return;
     }
+    jdbcClient
+        .sql(
+            "update agent_definition set execution = jsonb_set(execution,"
+                + " '{settings,modelName}', to_jsonb(cast(:modelName as text))),"
+                + " version = version + 1,"
+                + " updated_at = greatest(updated_at, current_timestamp)"
+                + " where name in (:agentNames)")
+        .param("modelName", modelName)
+        .param("agentNames", agents)
+        .update();
   }
 
   public boolean hasAgents(String modelName) {
-    return !lockAgents(modelName).isEmpty();
+    return jdbcClient
+        .sql(
+            "select exists (select 1 from agent_definition"
+                + " where execution ->> 'driver' = 'builtin'"
+                + " and execution -> 'settings' ->> 'modelName' = :name)")
+        .param("name", modelName)
+        .query(Boolean.class)
+        .single();
   }
 
   public boolean hasVariant(String modelName, String variant) {
-    return !jdbcClient
+    return jdbcClient
         .sql(
-            "select name from agent_definition where execution ->> 'driver' = 'builtin'"
+            "select exists (select 1 from agent_definition"
+                + " where execution ->> 'driver' = 'builtin'"
                 + " and execution -> 'settings' ->> 'modelName' = :name"
-                + " and execution -> 'settings' ->> 'variant' = :variant"
-                + " order by name for update")
+                + " and execution -> 'settings' ->> 'variant' = :variant)")
         .param("name", modelName)
         .param("variant", variant)
-        .query(String.class)
-        .list()
-        .isEmpty();
+        .query(Boolean.class)
+        .single();
   }
 }
