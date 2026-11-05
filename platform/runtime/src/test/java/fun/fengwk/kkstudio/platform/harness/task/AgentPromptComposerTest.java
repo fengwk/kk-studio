@@ -9,305 +9,191 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.api.history.SubagentBinding;
 import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.SubagentConfig;
-import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.prompt.PromptRenderer;
 import fun.fengwk.kkstudio.platform.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.platform.testing.TestEnvironments;
 
+import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicReference;
+import java.util.UUID;
 
-/** Agent 正文 + current environment + skills + subagents 唯一 system prompt 边界的组合语义。 */
+/** 实际能力驱动 system prompt 的段落顺序、出现条件与黄金文件测试。 */
 class AgentPromptComposerTest {
 
   private static final int DEFAULT_MAX_TURNS = 7;
+  private static final UUID ROOT_SESSION = UUID.fromString("00000000-0000-0000-0000-0000000000a1");
+  private static final UUID THREAD = UUID.fromString("00000000-0000-0000-0000-0000000000b2");
+  private static final String GOLDEN_ROOT = "fun/fengwk/kkstudio/platform/harness/task/prompts/";
 
   private final AgentPromptComposer composer =
       new AgentPromptComposer(() -> new SubagentConfig(2, 10, 0, DEFAULT_MAX_TURNS));
 
-  private static SkillPromptEntry skill(String name, String description) {
-    return new SkillPromptEntry(
-        name, description, "vfs:/skills/test-package/" + name + "/SKILL.md");
+  /** 有环境且注入 read/edit/grep/bash：绝对路径行、vfs 行、环境事实、技能与子 Agent 全部出现。 */
+  @Test
+  void rendersEnvironmentWithAllTools() {
+    AgentPromptInput input =
+        input(
+            "You are a senior engineer.",
+            environment(),
+            List.of("read", "edit", "grep", "bash"),
+            List.of(skill("dev", "Development conventions.")),
+            List.of(new SubagentBinding("explorer", "Read-only repository exploration.")));
+
+    assertGolden("environment-all-tools.golden", input);
   }
 
-  /** 无 Environment 时只渲染 name: none 与 date；绝不出现任何宿主事实或 root/workspace/cwd 语义。 */
+  /** 无环境时只出现 vfs 路径行；环境段使用 none、会话 tmp 与会话目录。 */
   @Test
-  void rendersNoneEnvironmentNameAndPlatformDate() {
-    String expected =
-        "<current_environment>\n"
-            + "- name: none\n"
-            + "- date: 2026-08-09\n"
-            + "</current_environment>";
+  void rendersWithoutEnvironment() {
+    AgentPromptInput input =
+        input(null, none(), List.of("read", "write", "grep"), List.of(), List.of());
 
-    String rendered = composer.compose(null, none(), List.of(), List.of());
-    assertEquals(expected, rendered);
-    assertEquals(expected, composer.compose("   ", none(), List.of(), List.of()));
-    assertFalse(rendered.contains("- system:"), rendered);
-    assertFalse(rendered.contains("- user:"), rendered);
-    assertFalse(rendered.contains("- home:"), rendered);
-    assertFalse(rendered.contains("- temp:"), rendered);
-    assertFalse(rendered.contains("- note:"), rendered);
-    assertFalse(rendered.contains("root"), rendered);
-    assertFalse(rendered.contains("workspace"), rendered);
-    assertFalse(rendered.contains("cwd"), rendered);
+    assertGolden("no-environment.golden", input);
   }
 
-  /** Environment 宿主事实严格按 name、system、user、home、temp、date、note 顺序渲染。 */
+  /** 只读 Agent：记忆段不出现 Keep them short，vfs 行不出现 Only session_dir is writable，且无 temp_dir。 */
   @Test
-  void rendersEnvironmentFactsInStableOrder() {
-    CurrentEnvironmentContext environment =
-        new CurrentEnvironmentContext(
-            TestEnvironments.environmentId("env-1"),
-            "nas-dev",
-            DaemonOperatingSystem.LINUX,
-            "dev-user",
-            "/home/dev",
-            "/tmp/kk-studio",
-            LocalDate.of(2026, 8, 9),
-            "Linux environment.");
+  void rendersReadOnlyAgentWithoutWriteInstructions() {
+    AgentPromptInput input =
+        input(null, environment(), List.of("read", "grep"), List.of(), List.of());
 
-    String rendered = composer.compose(null, environment, List.of(), List.of());
-
-    assertEquals(
-        "<current_environment>\n"
-            + "- name: nas-dev\n"
-            + "- system: linux\n"
-            + "- user: dev-user\n"
-            + "- home: /home/dev\n"
-            + "- temp: /tmp/kk-studio\n"
-            + "- date: 2026-08-09\n"
-            + "- note: Linux environment.\n"
-            + "</current_environment>",
-        rendered);
+    String rendered = assertGolden("read-only.golden", input);
+    assertFalse(rendered.contains("Keep them short and current"), rendered);
+    assertFalse(rendered.contains("Only session_dir is writable"), rendered);
+    assertFalse(rendered.contains("<temp_dir>"), rendered);
   }
 
-  /** Windows homeDirectory 保持宿主原生绝对路径语法；它是事实展示，不得按 Platform 文件系统重新解释。 */
+  /** 无工具 Agent（例如压缩）：只有 harness 段，不出现 paths/environment/skills/subagents。 */
   @Test
-  void rendersWindowsHomeDirectoryVerbatim() {
-    CurrentEnvironmentContext environment =
-        new CurrentEnvironmentContext(
-            TestEnvironments.environmentId("env-windows"),
-            "windows-dev",
-            DaemonOperatingSystem.WINDOWS,
-            "dev",
-            "C:\\Users\\dev",
-            "C:\\Users\\dev\\AppData\\Local\\Temp",
-            LocalDate.of(2026, 8, 9),
-            null);
+  void rendersOnlyHarnessForAgentWithoutTools() {
+    AgentPromptInput input = input(null, none(), List.of(), List.of(), List.of());
 
-    String rendered = composer.compose(null, environment, List.of(), List.of());
-
-    assertTrue(rendered.contains("- system: windows\n"), rendered);
-    assertTrue(rendered.contains("- home: C:\\Users\\dev\n"), rendered);
-    assertTrue(rendered.contains("- temp: C:\\Users\\dev\\AppData\\Local\\Temp\n"), rendered);
+    String rendered = assertGolden("no-tools.golden", input);
+    assertEquals("[harness]", rendered.lines().findFirst().orElseThrow());
+    assertFalse(rendered.contains("[paths]"), rendered);
+    assertFalse(rendered.contains("[environment]"), rendered);
   }
 
-  /** 可选宿主事实缺失时整行省略，但 name 与 date 始终存在。 */
+  /** 无环境但有技能与子 Agent：技能路径保持 vfs:/skills，委派说明与清单出现。 */
   @Test
-  void omitsUnavailableHostFacts() {
-    CurrentEnvironmentContext environment =
-        new CurrentEnvironmentContext(
-            TestEnvironments.environmentId("env-1"),
-            "nas-dev",
+  void rendersSkillsAndSubagentsWithoutEnvironment() {
+    AgentPromptInput input =
+        input(
             null,
-            null,
-            null,
-            null,
-            LocalDate.of(2026, 8, 9),
-            null);
-
-    String rendered = composer.compose(null, environment, List.of(), List.of());
-
-    assertEquals(
-        "<current_environment>\n"
-            + "- name: nas-dev\n"
-            + "- date: 2026-08-09\n"
-            + "</current_environment>",
-        rendered);
-  }
-
-  /** 宿主事实即使字面等于 none 也是合法取值，必须原样渲染，绝不与未选择环境的 name: none 哨兵混淆。 */
-  @Test
-  void rendersFactualNoneValues() {
-    CurrentEnvironmentContext environment =
-        new CurrentEnvironmentContext(
-            TestEnvironments.environmentId("env-1"),
-            "nas-dev",
-            null,
-            "none",
-            "/srv/none",
-            "/srv/none",
-            LocalDate.of(2026, 8, 9),
-            "none");
-
-    String rendered = composer.compose(null, environment, List.of(), List.of());
-
-    assertEquals(
-        "<current_environment>\n"
-            + "- name: nas-dev\n"
-            + "- user: none\n"
-            + "- home: /srv/none\n"
-            + "- temp: /srv/none\n"
-            + "- date: 2026-08-09\n"
-            + "- note: none\n"
-            + "</current_environment>",
-        rendered);
-  }
-
-  /** 正文、current environment、skills、subagents 严格按固定顺序拼接，并来自真实 classpath 模板。 */
-  @Test
-  void keepsStrictSectionOrder() {
-    String result =
-        composer.compose(
-            "You are the planner.",
             none(),
-            List.of(skill("math", "Do math.")),
-            List.of(new SubagentBinding("researcher", "Do research.")));
+            List.of("read"),
+            List.of(skill("dev", "Development conventions.")),
+            List.of(new SubagentBinding("explorer", "Read-only repository exploration.")));
 
-    int body = result.indexOf("You are the planner.");
-    int currentEnvironment = result.indexOf("<current_environment>");
-    int skills = result.indexOf("<available_skills>");
-    int subagents = result.indexOf("<available_subagents>");
-    assertTrue(
-        body >= 0 && currentEnvironment > body && skills > currentEnvironment && subagents > skills,
-        result);
-    assertTrue(result.contains("read"), result);
-    assertFalse(result.contains("${skills}"), result);
-    assertFalse(result.contains("${subagents}"), result);
+    String rendered = assertGolden("skills-subagents.golden", input);
+    assertTrue(rendered.contains("<path>vfs:/skills/agent-tools/dev/SKILL.md</path>"), rendered);
+    assertTrue(rendered.contains("The default is `" + DEFAULT_MAX_TURNS + "`"), rendered);
   }
 
-  /** Environment、skill 与 subagent 动态值在进入 XML 模板前全部转义。 */
+  /** 特殊字符：XML 字段转义；MEMORY-<环境名>.md 在正文里保持环境名原样。 */
   @Test
-  void escapesXmlInDynamicValues() {
+  void escapesXmlFieldsAndKeepsEnvironmentMemoryNameVerbatim() {
     CurrentEnvironmentContext environment =
         new CurrentEnvironmentContext(
-            TestEnvironments.environmentId("env-1"),
-            "env-1<&>",
+            TestEnvironments.environmentId("env-special"),
+            "nas<&>",
             DaemonOperatingSystem.WSL,
             "dev&user",
             "/home/<dev>",
             "/tmp/<dev>",
             LocalDate.of(2026, 8, 9),
             "Use <mount> & \"commands\" from 'Windows'.");
-
-    String result =
-        composer.compose(
+    AgentPromptInput input =
+        input(
             null,
             environment,
+            List.of("read"),
             List.of(skill("a&b", "uses <angle> and \"quotes\" and 'apos'")),
             List.of(new SubagentBinding("x<y>", "desc & more")));
 
-    assertTrue(result.contains("- name: env-1&lt;&amp;&gt;"), result);
-    assertTrue(result.contains("- user: dev&amp;user"), result);
-    assertTrue(result.contains("- home: /home/&lt;dev&gt;"), result);
-    assertTrue(result.contains("- temp: /tmp/&lt;dev&gt;"), result);
-    assertTrue(
-        result.contains(
-            "- note: Use &lt;mount&gt; &amp; &quot;commands&quot; from &apos;Windows&apos;."),
-        result);
-    assertTrue(result.contains("<name>a&amp;b</name>"), result);
-    assertTrue(
-        result.contains(
-            "<description>uses &lt;angle&gt; and &quot;quotes&quot; and &apos;apos&apos;</description>"),
-        result);
-    assertTrue(result.contains("<path>vfs:/skills/test-package/a&amp;b/SKILL.md</path>"), result);
-    assertTrue(result.contains("<name>x&lt;y&gt;</name>"), result);
-    assertTrue(result.contains("<description>desc &amp; more</description>"), result);
+    String rendered = assertGolden("special-characters.golden", input);
+    assertTrue(rendered.contains("MEMORY-nas<&>.md"), rendered);
+    assertTrue(rendered.contains("<name>nas&lt;&amp;&gt;</name>"), rendered);
+    assertTrue(rendered.contains("<user>dev&amp;user</user>"), rendered);
+    assertTrue(rendered.contains("<home>/home/&lt;dev&gt;</home>"), rendered);
+    assertTrue(rendered.contains("<name>a&amp;b</name>"), rendered);
+    assertTrue(rendered.contains("<name>x&lt;y&gt;</name>"), rendered);
   }
 
-  /** 空白正文不产生空段落；skills/subagents 各自由 classpath 模板渲染。 */
+  /** Agent 正文原样插入：不执行 ${date}、{{...}} 或 XML 转义。 */
   @Test
-  void skipsBlankBodyButRendersCapabilities() {
-    String result =
-        composer.compose(
-            "   ",
+  void insertsAgentBodyVerbatim() {
+    AgentPromptInput input =
+        input(
+            "Today is ${date}. Keep {{not_a_template}} and <&> as written.",
             none(),
-            List.of(skill("math", "Do math.")),
-            List.of(new SubagentBinding("researcher", "Do research.")));
+            List.of(),
+            List.of(),
+            List.of());
 
-    assertFalse(result.startsWith("   "), result);
-    assertTrue(result.contains("  <skill>\n    <name>math</name>"), result);
-    assertTrue(result.contains("  <subagent>\n    <name>researcher</name>"), result);
-  }
-
-  /** 空 subagent description 回退为占位文案。 */
-  @Test
-  void fallsBackForBlankSubagentDescription() {
-    String result =
-        composer.compose(null, none(), List.of(), List.of(new SubagentBinding("mute", "  ")));
-
-    assertTrue(result.contains("<description>(no description)</description>"), result);
-  }
-
-  /** task 委派指令中的默认 maxTurns 来自 SubagentConfig。 */
-  @Test
-  void rendersTaskInstructionsWithConfiguredDefaultMaxTurns() {
-    String result =
-        composer.compose(
-            "body", none(), List.of(), List.of(new SubagentBinding("researcher", "Do research.")));
-
-    assertTrue(result.contains("The default is `" + DEFAULT_MAX_TURNS + "`"), result);
-    assertFalse(result.contains("${defaultMaxTurns}"), result);
-  }
-
-  /** system prompt 每次组合都读取最新 policy，不能复用 descriptor 的冻结 schema 快照。 */
-  @Test
-  void rendersLiveDefaultMaxTurnsInTaskInstructions() {
-    AtomicReference<SubagentConfig> liveConfig =
-        new AtomicReference<>(new SubagentConfig(2, 10, 0, DEFAULT_MAX_TURNS));
-    AgentPromptComposer liveComposer = new AgentPromptComposer(liveConfig::get);
-    List<SubagentBinding> subagents = List.of(new SubagentBinding("researcher", "Do research."));
-
-    String initial = liveComposer.compose("body", none(), List.of(), subagents);
-    liveConfig.set(new SubagentConfig(2, 10, 0, 13));
-    String updated = liveComposer.compose("body", none(), List.of(), subagents);
-
-    assertTrue(initial.contains("The default is `" + DEFAULT_MAX_TURNS + "`"), initial);
-    assertTrue(updated.contains("The default is `13`"), updated);
-    assertFalse(updated.contains("The default is `" + DEFAULT_MAX_TURNS + "`"), updated);
-  }
-
-  /** Agent 正文只替换 date/workspace/cwd；未知或未闭合占位符原文保留，不把 shell 示例打成规划失败。 */
-  @Test
-  void rendersDeclaredAgentBodyVariablesOnly() {
-    // ${workspace}/${cwd} 已不再是可替换变量：它们必须与其它未知占位符一样保持原文。
-    String withBoth = "Today is ${date} in ${workspace}.";
-    String bodyOnly = "No placeholders here.";
-    String dateOnly = "Today is ${date}.";
-    String mixed = "cwd=${cwd} keep ${JAVA_HOME} and ${unterminated";
-    EnvironmentId binding = TestEnvironments.environmentId("env");
-    CurrentEnvironmentContext selected =
-        new CurrentEnvironmentContext(
-            binding, "env", null, null, null, null, LocalDate.of(2026, 8, 9), null);
-
-    String rendered = composer.compose(withBoth, selected, List.of(), List.of());
-    assertTrue(rendered.startsWith("Today is 2026-08-09 in ${workspace}."), rendered);
-    assertFalse(rendered.contains(".${workspace}"), rendered);
-
-    String unselectedDate = composer.compose(dateOnly, none(), List.of(), List.of());
-    assertTrue(unselectedDate.startsWith("Today is 2026-08-09."), unselectedDate);
-
-    String renderedBodyOnly = composer.compose(bodyOnly, none(), List.of(), List.of());
-    assertTrue(renderedBodyOnly.startsWith("No placeholders here."), renderedBodyOnly);
-
-    String renderedMixed = composer.compose(mixed, selected, List.of(), List.of());
+    String rendered = assertGolden("agent-body.golden", input);
     assertTrue(
-        renderedMixed.startsWith("cwd=${cwd} keep ${JAVA_HOME} and ${unterminated"), renderedMixed);
+        rendered.contains("Today is ${date}. Keep {{not_a_template}} and <&> as written."),
+        rendered);
   }
 
-  /** skills/subagents 列表不可为空引用。 */
+  /** 子 Agent 的 session_dir/thread_dir 必须按执行根会话生成。 */
   @Test
-  void rejectsNullLists() {
-    assertThrows(
-        NullPointerException.class, () -> composer.compose("body", null, List.of(), List.of()));
-    assertThrows(
-        NullPointerException.class, () -> composer.compose("body", none(), null, List.of()));
-    assertThrows(
-        NullPointerException.class, () -> composer.compose("body", none(), List.of(), null));
+  void usesExecutionRootSessionForDirectories() {
+    AgentPromptInput input = input(null, none(), List.of("read"), List.of(), List.of());
+
+    String rendered = composer.compose(input);
+    assertTrue(rendered.contains("<session_dir>vfs:/sessions/" + ROOT_SESSION + "/</session_dir>"));
+    assertTrue(
+        rendered.contains(
+            "<thread_dir>vfs:/sessions/" + ROOT_SESSION + "/threads/" + THREAD + "/</thread_dir>"));
+  }
+
+  /** 工具名与列表不可为空引用。 */
+  @Test
+  void rejectsNullInput() {
+    assertThrows(NullPointerException.class, () -> composer.compose(null));
+  }
+
+  private static AgentPromptInput input(
+      String agentInstructions,
+      CurrentEnvironmentContext environment,
+      List<String> toolNames,
+      List<SkillPromptEntry> skills,
+      List<SubagentBinding> subagents) {
+    return new AgentPromptInput(
+        agentInstructions, environment, ROOT_SESSION, THREAD, toolNames, skills, subagents);
   }
 
   private static CurrentEnvironmentContext none() {
+    return CurrentEnvironmentContext.none(Instant.parse("2026-08-09T00:00:00Z"), ZoneOffset.UTC);
+  }
+
+  private static CurrentEnvironmentContext environment() {
     return new CurrentEnvironmentContext(
-        null, null, null, null, null, null, LocalDate.of(2026, 8, 9), null);
+        TestEnvironments.environmentId("env-1"),
+        "NAS",
+        DaemonOperatingSystem.LINUX,
+        "fengwk",
+        "/home/fengwk",
+        "/tmp",
+        LocalDate.of(2026, 8, 9),
+        "Linux environment.");
+  }
+
+  private static SkillPromptEntry skill(String name, String description) {
+    return new SkillPromptEntry(name, description, "vfs:/skills/agent-tools/" + name + "/SKILL.md");
+  }
+
+  private String assertGolden(String name, AgentPromptInput input) {
+    String rendered = composer.compose(input);
+    assertEquals(golden(name), rendered);
+    return rendered;
+  }
+
+  private static String golden(String name) {
+    return PromptRenderer.read(GOLDEN_ROOT + name).stripTrailing();
   }
 }

@@ -123,7 +123,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
         return resolveCompaction(compactionPreparation);
       }
       Objects.requireNonNull(threadId, "threadId");
-      return resolved(plan(path, path.baseSettings(), clock.instant()));
+      return resolved(plan(threadId, path, path.baseSettings(), clock.instant()));
     } catch (Rejection | AgentTurnContextException rejection) {
       // 只把显式构造的确定性拒绝转为 typed Rejected；repository/registry 等基础设施异常按类型分别处理。
       return rejected(rejection.getMessage());
@@ -171,7 +171,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
     Objects.requireNonNull(settings, "settings");
     Objects.requireNonNull(now, "now");
     try {
-      return plan(path, settings, now);
+      return plan(threadId, path, settings, now);
     } catch (Rejection | AgentTurnContextException rejection) {
       return new LiveTurnPlan.Rejected(REJECTION_CODE, rejection.getMessage());
     }
@@ -206,11 +206,12 @@ public final class DatabaseTurnResolver implements TurnResolver {
     return new TurnResolver.Resolved(plan.spec(), plan.contextWindow(), plan.spec().outputTokens());
   }
 
-  private LiveTurnPlan.Planned plan(EntryPath path, BranchSettings settings, Instant now) {
+  private LiveTurnPlan.Planned plan(
+      UUID threadId, EntryPath path, BranchSettings settings, Instant now) {
     UUID sessionId = path.root().sessionId();
 
     // 一次上下文解析租用一份 catalog 快照：Agent/Environment/tools/skills/subagents/prompt 同源。
-    AgentTurnContext context = contextResolver.resolve(path, settings, now);
+    AgentTurnContext context = contextResolver.resolve(threadId, path, settings, now);
     ResolvedSelection resolved =
         resolveSelection(BuiltinExecution.model(settings.execution()), context.agent());
     MemberRuntime first = resolved.members().getFirst();

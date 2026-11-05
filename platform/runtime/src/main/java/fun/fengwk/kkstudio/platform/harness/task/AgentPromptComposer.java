@@ -7,19 +7,29 @@ import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.SubagentConfigPr
 import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.SubagentPrompts;
 import fun.fengwk.kkstudio.harness.prompt.PromptRenderer;
 
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
+import java.util.UUID;
+import java.util.stream.Collectors;
 
-/** 组合 Agent 正文、当前 Environment、可用 Skills 与 task/subagent 指令的唯一 system prompt 边界。 */
+/** 只按实际注入能力组合 system prompt 各段落；全部文案来自 Markdown 模板。 */
 @Component
 public final class AgentPromptComposer {
 
-  private static final DateTimeFormatter DATE_FORMAT =
-      DateTimeFormatter.ofPattern("yyyy-MM-dd", Locale.ROOT);
+  private static final String SYSTEM = "fun/fengwk/kkstudio/harness/prompts/system/";
+
+  /** 与 BuiltinHarnessContributor 注册的模型可见文件工具名一致，并按稳定顺序排列。 */
+  private static final List<String> FILE_TOOL_ORDER =
+      List.of("read", "write", "edit", "find", "grep");
+
+  private static final String READ_TOOL = "read";
+  private static final String WRITE_TOOL = "write";
+  private static final String EDIT_TOOL = "edit";
+  private static final String BASH_TOOL = "bash";
 
   private final SubagentConfigProvider configProvider;
 
@@ -27,141 +37,225 @@ public final class AgentPromptComposer {
     this.configProvider = Objects.requireNonNull(configProvider, "configProvider");
   }
 
-  public String compose(
-      String systemPrompt,
-      CurrentEnvironmentContext currentEnvironment,
-      List<SkillPromptEntry> skills,
-      List<SubagentBinding> subagents) {
-    Objects.requireNonNull(currentEnvironment, "currentEnvironment");
-    Objects.requireNonNull(skills, "skills");
-    Objects.requireNonNull(subagents, "subagents");
+  /**
+   * 按固定顺序组合 {@code [agent] -> [harness] -> [paths] -> [environment] -> [skills] -> [subagents]}。
+   *
+   * <p>段落与句子只由实际注入的工具、Environment、Skills 与子 Agent 决定；空段落整段省略，段间保留一个空行。
+   */
+  public String compose(AgentPromptInput input) {
+    Objects.requireNonNull(input, "input");
+    Capabilities capabilities = Capabilities.of(input.toolNames());
     List<String> sections = new ArrayList<>();
-    if (systemPrompt != null && !systemPrompt.isBlank()) {
-      sections.add(renderAgentBody(systemPrompt, currentEnvironment));
+    if (hasText(input.agentInstructions())) {
+      sections.add(render("agent.md", Map.of("agent", input.agentInstructions())));
     }
-    // current_environment 段始终存在：未选择 Environment 时渲染 name: none 与 Platform 日期。
-    sections.add(currentEnvironment(currentEnvironment));
-    if (!skills.isEmpty()) {
-      sections.add(SubagentPrompts.agentSkills(skillEntries(skills)));
+    sections.add(render("harness.md", harnessValues(input.currentEnvironment(), capabilities)));
+    if (hasPaths(input.currentEnvironment(), capabilities)) {
+      sections.add(render("paths.md", pathsValues(input.currentEnvironment(), capabilities)));
     }
-    if (!subagents.isEmpty()) {
+    if (capabilities.hasEnvironmentTools()) {
+      sections.add(render("environment.md", environmentValues(input, capabilities)));
+    }
+    if (!input.skills().isEmpty()) {
+      sections.add(render("skills.md", Map.of("skills", skillEntries(input.skills()))));
+    }
+    if (!input.subagents().isEmpty()) {
       sections.add(
-          SubagentPrompts.agentSubagents(
-              SubagentPrompts.systemInstructions(configProvider.subagentConfig().maxTurns()),
-              subagentEntries(subagents)));
+          render(
+              "subagents.md",
+              Map.of(
+                  "taskInstructions",
+                  SubagentPrompts.systemInstructions(configProvider.subagentConfig().maxTurns())
+                      .stripTrailing(),
+                  "subagents",
+                  subagentEntries(input.subagents()))));
     }
     return String.join("\n\n", sections);
   }
 
-  /**
-   * Agent 正文只替换已知 {@code date}；其它 {@code ${...}} 与未闭合占位符保持原文，避免把 shell/文档示例打成规划失败。
-   *
-   * <p>目录由每次工具调用显式提供，Agent 之间不做目录继承。
-   */
-  private static String renderAgentBody(String systemPrompt, CurrentEnvironmentContext context) {
-    return substituteKnown(systemPrompt, Map.of("date", DATE_FORMAT.format(context.currentDate())));
+  /** 渲染单个 Skill 在 {@code <available_skills>} 段中的精确 XML 片段（含段内缩进，不含尾部换行）。 */
+  public static String skillFragment(SkillPromptEntry skill) {
+    Objects.requireNonNull(skill, "skill");
+    return render(
+        "skill.md",
+        Map.of("name", skill.name(), "description", skill.description(), "path", skill.path()));
   }
 
-  private static String substituteKnown(String raw, Map<String, String> known) {
-    StringBuilder result = new StringBuilder(raw.length());
-    int cursor = 0;
-    while (true) {
-      int open = raw.indexOf("${", cursor);
-      if (open < 0) {
-        result.append(raw, cursor, raw.length());
-        return result.toString();
-      }
-      int close = raw.indexOf('}', open + 2);
-      if (close < 0) {
-        result.append(raw, cursor, raw.length());
-        return result.toString();
-      }
-      String name = raw.substring(open + 2, close);
-      result.append(raw, cursor, open);
-      if (known.containsKey(name)) {
-        result.append(known.get(name));
-      } else {
-        result.append(raw, open, close + 1);
-      }
-      cursor = close + 1;
-    }
+  private static Map<String, Object> harnessValues(
+      CurrentEnvironmentContext environment, Capabilities capabilities) {
+    boolean hasEnvironment = environment.environmentId() != null;
+    String environmentMemoryFile =
+        hasEnvironment
+            ? "MEMORY-" + environment.environmentName() + ".md"
+            : "MEMORY-<environment name>.md";
+    return Map.of(
+        "memory",
+        capabilities.read(),
+        "canWrite",
+        capabilities.canWrite(),
+        "hasEnvironment",
+        hasEnvironment,
+        "environmentMemoryFile",
+        environmentMemoryFile);
   }
 
-  /**
-   * 宿主事实按稳定顺序渲染：name、system、user、home、temp、date、note；不可用的可选事实整行省略。
-   *
-   * <p>未选择 Environment 时只渲染 {@code name: none} 与 Platform 当前日期。这里的 name/user/home/temp
-   * 只是展示事实，绝不参与路径默认值： 不存在 workspace、cwd 或任何根目录语义。
-   */
-  private static String currentEnvironment(CurrentEnvironmentContext context) {
-    List<String> fields = new ArrayList<>();
-    fields.add(
-        "- name: "
-            + escapeXml(context.environmentName() == null ? "none" : context.environmentName()));
-    if (context.operatingSystem() != null) {
-      addEnvironmentField(fields, "system", context.operatingSystem().wireValue());
-    }
-    addEnvironmentField(fields, "user", context.userName());
-    addEnvironmentField(fields, "home", context.homeDirectory());
-    addEnvironmentField(fields, "temp", context.tempDirectory());
-    addEnvironmentField(fields, "date", DATE_FORMAT.format(context.currentDate()));
-    addEnvironmentField(fields, "note", context.note());
-    return SubagentPrompts.currentEnvironment(String.join("\n", fields)).stripTrailing();
+  private static boolean hasPaths(
+      CurrentEnvironmentContext environment, Capabilities capabilities) {
+    return (environment.environmentId() != null && !capabilities.hostTools().isEmpty())
+        || !capabilities.vfsTools().isEmpty();
   }
 
-  /**
-   * 只省略 null/空白事实：宿主事实即使字面等于 {@code none} 也是合法取值，必须原样渲染，避免与未选择 Environment 的 {@code name: none}
-   * 哨兵混淆。
-   */
-  private static void addEnvironmentField(List<String> fields, String name, String value) {
-    if (value == null || value.isBlank()) {
-      return;
+  private static Map<String, Object> pathsValues(
+      CurrentEnvironmentContext environment, Capabilities capabilities) {
+    boolean hasAbsolute =
+        environment.environmentId() != null && !capabilities.hostTools().isEmpty();
+    boolean hasVfs = !capabilities.vfsTools().isEmpty();
+    Map<String, Object> values = new LinkedHashMap<>();
+    values.put("hasAbsolute", hasAbsolute);
+    values.put("absoluteTools", hasAbsolute ? toolList(capabilities.hostTools()) : "");
+    values.put("hasVfs", hasVfs);
+    values.put("vfsTools", hasVfs ? toolList(capabilities.vfsTools()) : "");
+    values.put("hasBash", capabilities.bash());
+    values.put("canWrite", capabilities.canWrite());
+    return values;
+  }
+
+  private static Map<String, Object> environmentValues(
+      AgentPromptInput input, Capabilities capabilities) {
+    CurrentEnvironmentContext environment = input.currentEnvironment();
+    boolean hasEnvironment = environment.environmentId() != null;
+    boolean commands = capabilities.bash() || capabilities.lsp();
+    String sessionDirectory = sessionDirectory(input.rootSessionId());
+    String tempDirectory = null;
+    if (hasEnvironment && (capabilities.write() || capabilities.bash())) {
+      tempDirectory = environment.tempDirectory() == null ? "unknown" : environment.tempDirectory();
+    } else if (!hasEnvironment && capabilities.write()) {
+      tempDirectory = sessionDirectory + "tmp/";
     }
-    fields.add("- " + name + ": " + escapeXml(value));
+    Map<String, Object> values = new LinkedHashMap<>();
+    values.put("hasEnvironment", hasEnvironment);
+    values.put("commandsAndFiles", commands && capabilities.fileTools());
+    values.put("commandsOnly", commands && !capabilities.fileTools());
+    values.put("filesOnly", !commands && capabilities.fileTools());
+    values.put("name", hasEnvironment ? environment.environmentName() : "none");
+    values.put(
+        "description", hasEnvironment && environment.note() != null ? environment.note() : "none");
+    values.put("hasOs", hasEnvironment);
+    values.put("os", operatingSystem(environment));
+    values.put("hasUser", hasEnvironment);
+    values.put("user", valueOrUnknown(environment.userName()));
+    values.put("hasHome", hasEnvironment);
+    values.put("home", valueOrUnknown(environment.homeDirectory()));
+    values.put("hasTempDir", tempDirectory != null);
+    values.put("tempDir", tempDirectory == null ? "" : tempDirectory);
+    values.put("hasSessionDir", capabilities.fileTools());
+    values.put("sessionDir", capabilities.fileTools() ? sessionDirectory : "");
+    values.put("hasThreadDir", capabilities.fileTools());
+    values.put(
+        "threadDir",
+        capabilities.fileTools() ? sessionDirectory + "threads/" + input.threadId() + "/" : "");
+    return values;
+  }
+
+  private static String operatingSystem(CurrentEnvironmentContext environment) {
+    return environment.operatingSystem() == null
+        ? "unknown"
+        : environment.operatingSystem().wireValue();
+  }
+
+  private static String valueOrUnknown(String value) {
+    return value == null ? "unknown" : value;
+  }
+
+  private static String sessionDirectory(UUID rootSessionId) {
+    return "vfs:/sessions/" + rootSessionId + "/";
   }
 
   private static String skillEntries(List<SkillPromptEntry> skills) {
-    List<String> values = new ArrayList<>(skills.size());
-    for (SkillPromptEntry skill : skills) {
-      values.add(skillFragment(skill));
-    }
-    return String.join("\n", values);
-  }
-
-  /**
-   * 渲染单个 Skill 在 {@code <available_skills>} 段中的精确 XML 片段（含段内缩进，不含尾部换行）。
-   *
-   * <p>这是该片段的唯一渲染入口：{@link #compose} 与只读 Debug 投影都复用它，因此投影展示的 {@code promptXml} 不可能与真正进入 {@code
-   * systemInstruction} 的文本漂移。
-   */
-  public static String skillFragment(SkillPromptEntry skill) {
-    Objects.requireNonNull(skill, "skill");
-    return PromptRenderer.render(
-            "fun/fengwk/kkstudio/harness/prompts/system/skill.md",
-            Map.of("name", skill.name(), "description", skill.description(), "path", skill.path()))
-        .stripTrailing();
+    return skills.stream()
+        .map(AgentPromptComposer::skillFragment)
+        .collect(Collectors.joining("\n"));
   }
 
   private static String subagentEntries(List<SubagentBinding> subagents) {
-    List<String> values = new ArrayList<>(subagents.size());
-    for (SubagentBinding subagent : subagents) {
-      String description =
-          subagent.description().isBlank() ? "(no description)" : subagent.description();
-      values.add(
-          PromptRenderer.render(
-                  "fun/fengwk/kkstudio/harness/prompts/system/subagent.md",
-                  Map.of("name", subagent.name(), "description", description))
-              .stripTrailing());
-    }
-    return String.join("\n", values);
+    return subagents.stream()
+        .map(
+            subagent ->
+                render(
+                    "subagent.md",
+                    Map.of(
+                        "name",
+                        subagent.name(),
+                        "description",
+                        subagent.description().isBlank()
+                            ? "(no description)"
+                            : subagent.description())))
+        .collect(Collectors.joining("\n"));
   }
 
-  private static String escapeXml(String value) {
-    return value
-        .replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-        .replace("\"", "&quot;")
-        .replace("'", "&apos;");
+  /** 把实际注入的工具名格式化为模板中的自然语言列表；只做列表格式，不承载任何说明文案。 */
+  private static String toolList(List<String> toolNames) {
+    List<String> quoted = toolNames.stream().map(name -> "`" + name + "`").toList();
+    if (quoted.size() == 1) {
+      return quoted.getFirst();
+    }
+    if (quoted.size() == 2) {
+      return quoted.getFirst() + " and " + quoted.getLast();
+    }
+    return String.join(", ", quoted.subList(0, quoted.size() - 1)) + ", and " + quoted.getLast();
+  }
+
+  private static boolean hasText(String value) {
+    return value != null && !value.isBlank();
+  }
+
+  /** 渲染模板并去掉模板尾换行；段间空行由 {@link #compose} 统一控制。 */
+  private static String render(String template, Map<String, ?> values) {
+    return PromptRenderer.render(SYSTEM + template, values).stripTrailing();
+  }
+
+  /** 本 turn 实际注入工具的能力视图：只回答 prompt 需要知道的分类与顺序。 */
+  private record Capabilities(
+      boolean read,
+      boolean write,
+      boolean edit,
+      boolean bash,
+      boolean lsp,
+      boolean fileTools,
+      List<String> hostTools,
+      List<String> vfsTools) {
+
+    private static Capabilities of(List<String> toolNames) {
+      Set<String> names = Set.copyOf(toolNames);
+      boolean read = names.contains(READ_TOOL);
+      boolean write = names.contains(WRITE_TOOL);
+      boolean edit = names.contains(EDIT_TOOL);
+      boolean bash = names.contains(BASH_TOOL);
+      List<String> lspTools =
+          names.stream().filter(name -> name.startsWith("lsp_")).sorted().toList();
+      List<String> vfsTools = FILE_TOOL_ORDER.stream().filter(names::contains).toList();
+      List<String> hostTools = new ArrayList<>(vfsTools);
+      if (bash) {
+        hostTools.add(BASH_TOOL);
+      }
+      hostTools.addAll(lspTools);
+      return new Capabilities(
+          read,
+          write,
+          edit,
+          bash,
+          !lspTools.isEmpty(),
+          !vfsTools.isEmpty(),
+          List.copyOf(hostTools),
+          vfsTools);
+    }
+
+    private boolean canWrite() {
+      return write || edit;
+    }
+
+    private boolean hasEnvironmentTools() {
+      return fileTools || bash || lsp;
+    }
   }
 }

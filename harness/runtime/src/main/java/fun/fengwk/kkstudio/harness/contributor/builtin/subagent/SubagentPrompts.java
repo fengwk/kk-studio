@@ -10,7 +10,6 @@ import java.util.Map;
 public final class SubagentPrompts {
 
   private static final String TOOLS = "fun/fengwk/kkstudio/harness/prompts/tools/";
-  private static final String SYSTEM = "fun/fengwk/kkstudio/harness/prompts/system/";
   private static final SchemaJsonCodec CODEC = new SchemaJsonCodec();
 
   private SubagentPrompts() {}
@@ -25,26 +24,9 @@ public final class SubagentPrompts {
     return CODEC.decode(PromptRenderer.read(TOOLS + "task.schema.json"));
   }
 
-  /** Agent 正文委派段落：{@code <available_subagents>} 外壳由调用方在渲染后拼接。 */
+  /** Agent 正文委派说明；{@code [subagents]} 段落由 system prompt 模板统一包裹。 */
   public static String systemInstructions(int defaultMaxTurns) {
     return PromptRenderer.render(
         TOOLS + "task-system.md", Map.of("defaultMaxTurns", defaultMaxTurns));
-  }
-
-  /** skills 段落外壳模板。 */
-  public static String agentSkills(String skills) {
-    return PromptRenderer.render(SYSTEM + "agent-skills.md", Map.of("skills", skills));
-  }
-
-  /** subagents 段落外壳模板。 */
-  public static String agentSubagents(String taskInstructions, String subagents) {
-    return PromptRenderer.render(
-        SYSTEM + "agent-subagents.md",
-        Map.of("taskInstructions", taskInstructions, "subagents", subagents));
-  }
-
-  /** current_environment 外壳；有值字段列表由调用方拼入 {@code fields}。 */
-  public static String currentEnvironment(String fields) {
-    return PromptRenderer.render(SYSTEM + "current-environment.md", Map.of("fields", fields));
   }
 }

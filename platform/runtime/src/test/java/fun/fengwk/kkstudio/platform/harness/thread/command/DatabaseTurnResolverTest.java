@@ -379,52 +379,53 @@ class DatabaseTurnResolverTest {
         List.of(),
         requestSpec.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
     assertFalse(requestSpec.systemInstruction().contains("<available_skills>"));
-    assertTrue(requestSpec.systemInstruction().contains("date:"));
+    assertTrue(requestSpec.systemInstruction().contains("[harness]"));
+    assertFalse(requestSpec.systemInstruction().contains("date"));
   }
 
   @Test
-  void alwaysProjectsNoneCurrentEnvironmentIntoProviderRequest() {
+  void rendersHarnessOnlyWithoutEnvironmentWhenNoToolsAreInjected() {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
 
     ModelRequestSpec requestSpec = fixture.resolved(fixture.path(unboundSettings("default")));
 
-    // 未选择 Environment：只输出 name: none 与 Platform 日期，没有任何宿主事实或路径默认值。
+    // 无工具时不出现 paths/environment；没有 Environment 也不注入任何路径或日期事实。
     assertEquals(
-        "agent system prompt\n\n"
-            + "<current_environment>\n"
-            + "- name: none\n"
-            + "- date: 2026-08-02\n"
-            + "</current_environment>",
+        "[agent]\n"
+            + "agent system prompt\n\n"
+            + "[harness]\n"
+            + "You are working in the KK Studio harness. A session is a tree of messages; you are a"
+            + " thread working on one branch of it. Subagents run in their own threads: they share"
+            + " the environment and session files with you, but not messages, and see only the task"
+            + " prompt they are given.",
         instructionText(requestSpec));
   }
 
   @Test
-  void noLiveMetadataUsesServiceClockZoneForNoneAndUnreportedEnvironment() {
-    Clock serviceClock = Clock.fixed(NOW, ZoneId.of("America/Los_Angeles"));
-    Fixture fixture = new Fixture(List.of(), List.of(), List.of(), serviceClock);
+  void environmentFactsShowUnknownWithoutLiveMetadataAndNeverIncludeDate() {
+    Fixture fixture = new Fixture(List.of("read"), List.of(), List.of());
 
-    // 未选择 Environment：环境块只有 name: none 与服务端时钟派生的日期。
+    // 未选择 Environment：只出现 none 与会话目录，不出现宿主事实或日期。
     String none = instructionText(fixture.resolved(fixture.path(unboundSettings("default"))));
-    assertTrue(none.contains("- name: none"), none);
-    assertFalse(none.contains("- system:"), none);
-    assertFalse(none.contains("- user:"), none);
-    assertFalse(none.contains("- home:"), none);
-    assertTrue(none.contains("- date: 2026-08-01"), none);
-    assertFalse(none.contains("- note:"), none);
+    assertTrue(none.contains("<name>none</name>"), none);
+    assertTrue(none.contains("No environment is selected now."), none);
+    assertFalse(none.contains("<os>"), none);
+    assertFalse(none.contains("<user>"), none);
+    assertFalse(none.contains("<home>"), none);
+    assertFalse(none.contains("date"), none);
 
-    // 已选择 Environment 但既无 live daemon 也无持久报告：只输出 name 与回退到服务端时钟的日期，绝不伪造 user/home。
+    // 已选择 Environment 但既无 live daemon 也无持久报告：宿主事实显示 unknown，绝不伪造。
     String unreported = instructionText(fixture.resolved(fixture.path(settings("default"))));
-    assertTrue(unreported.contains("- name: " + ENV_A_NAME), unreported);
-    assertFalse(unreported.contains("- system:"), unreported);
-    assertFalse(unreported.contains("- user:"), unreported);
-    assertFalse(unreported.contains("- home:"), unreported);
-    assertTrue(unreported.contains("- date: 2026-08-01"), unreported);
-    assertFalse(unreported.contains("- note:"), unreported);
+    assertTrue(unreported.contains("<name>" + ENV_A_NAME + "</name>"), unreported);
+    assertTrue(unreported.contains("<os>unknown</os>"), unreported);
+    assertTrue(unreported.contains("<user>unknown</user>"), unreported);
+    assertTrue(unreported.contains("<home>unknown</home>"), unreported);
+    assertFalse(unreported.contains("date"), unreported);
   }
 
   @Test
   void readyCurrentEnvironmentUsesDaemonMetadataAndTimeZone() {
-    Fixture fixture = new Fixture(List.of(), List.of(), List.of());
+    Fixture fixture = new Fixture(List.of("read"), List.of(), List.of());
     fixture.readyEnvironment(
         ENV_A,
         List.of(),
@@ -440,26 +441,27 @@ class DatabaseTurnResolverTest {
     ModelRequestSpec requestSpec = fixture.resolved(fixture.path(settings("default")));
     String prompt = instructionText(requestSpec);
 
-    assertTrue(prompt.contains("- name: " + ENV_A_NAME), prompt);
-    assertTrue(prompt.contains("- system: linux"), prompt);
-    assertTrue(prompt.contains("- user: dev-user"), prompt);
-    assertTrue(prompt.contains("- home: /home/dev"), prompt);
-    assertTrue(prompt.contains("- date: 2026-08-01"), prompt);
-    assertTrue(prompt.contains("- note: Custom &lt;Linux&gt; &amp; tools."), prompt);
+    assertTrue(prompt.contains("<name>" + ENV_A_NAME + "</name>"), prompt);
+    assertTrue(prompt.contains("<os>linux</os>"), prompt);
+    assertTrue(prompt.contains("<user>dev-user</user>"), prompt);
+    assertTrue(prompt.contains("<home>/home/dev</home>"), prompt);
+    assertTrue(
+        prompt.contains("<description>Custom &lt;Linux&gt; &amp; tools.</description>"), prompt);
+    assertFalse(prompt.contains("date"), prompt);
   }
 
   @Test
   void selectedEnvironmentUsesMetadataRegardlessOfHeartbeatReadiness() {
-    Fixture fixture = new Fixture(List.of(), List.of(), List.of());
+    Fixture fixture = new Fixture(List.of("read"), List.of(), List.of());
     fixture.connectingEnvironment(ENV_A);
 
     String withoutMetadata = instructionText(fixture.resolved(fixture.path(settings("default"))));
-    assertTrue(withoutMetadata.contains("- name: " + ENV_A_NAME), withoutMetadata);
-    assertFalse(withoutMetadata.contains("- system:"), withoutMetadata);
-    assertFalse(withoutMetadata.contains("- user:"), withoutMetadata);
-    assertFalse(withoutMetadata.contains("- home:"), withoutMetadata);
-    assertTrue(withoutMetadata.contains("- date: 2026-08-02"), withoutMetadata);
-    assertFalse(withoutMetadata.contains("- note:"), withoutMetadata);
+    assertTrue(withoutMetadata.contains("<name>" + ENV_A_NAME + "</name>"), withoutMetadata);
+    assertTrue(withoutMetadata.contains("<os>unknown</os>"), withoutMetadata);
+    assertTrue(withoutMetadata.contains("<user>unknown</user>"), withoutMetadata);
+    assertTrue(withoutMetadata.contains("<home>unknown</home>"), withoutMetadata);
+    assertTrue(withoutMetadata.contains("<description>none</description>"), withoutMetadata);
+    assertFalse(withoutMetadata.contains("date"), withoutMetadata);
 
     DaemonEnvironmentInfo environmentInfo =
         new DaemonEnvironmentInfo(
@@ -470,19 +472,19 @@ class DatabaseTurnResolverTest {
             "Stable WSL environment.",
             "/tmp/kk-studio",
             "amd64");
-    Fixture readyFixture = new Fixture(List.of(), List.of(), List.of());
+    Fixture readyFixture = new Fixture(List.of("read"), List.of(), List.of());
     readyFixture.readyEnvironment(ENV_A, List.of(), environmentInfo);
     String ready = instructionText(readyFixture.resolved(readyFixture.path(settings("default"))));
-    Fixture staleFixture = new Fixture(List.of(), List.of(), List.of());
+    Fixture staleFixture = new Fixture(List.of("read"), List.of(), List.of());
     staleFixture.staleEnvironment(ENV_A, environmentInfo);
     String stale = instructionText(staleFixture.resolved(staleFixture.path(settings("default"))));
     assertEquals(ready, stale);
-    assertTrue(stale.contains("- name: " + ENV_A_NAME), stale);
-    assertTrue(stale.contains("- system: wsl"), stale);
-    assertTrue(stale.contains("- user: dev-user"), stale);
-    assertTrue(stale.contains("- home: /home/dev"), stale);
-    assertTrue(stale.contains("- date: 2026-08-02"), stale);
-    assertTrue(stale.contains("- note: Stable WSL environment."), stale);
+    assertTrue(stale.contains("<name>" + ENV_A_NAME + "</name>"), stale);
+    assertTrue(stale.contains("<os>wsl</os>"), stale);
+    assertTrue(stale.contains("<user>dev-user</user>"), stale);
+    assertTrue(stale.contains("<home>/home/dev</home>"), stale);
+    assertTrue(stale.contains("<description>Stable WSL environment.</description>"), stale);
+    assertFalse(stale.contains("date"), stale);
   }
 
   @Test
@@ -710,45 +712,46 @@ class DatabaseTurnResolverTest {
         requestSpec
             .systemInstruction()
             .contains("<path>vfs:/skills/test-package/dev/SKILL.md</path>"));
-    assertFalse(instructionText(requestSpec).contains("- system:"));
+    assertFalse(instructionText(requestSpec).contains("<os>linux</os>"));
   }
 
   /** 测试意图：环境块只取自选中的 Environment 与连接行保留的宿主 metadata；无连接行时不伪造 user/home/OS/note。 */
   @Test
   void environmentContextComesOnlyFromRetainedHostMetadata() {
-    Fixture live = new Fixture(List.of(), List.of(), List.of(), Clock.fixed(NOW, ZoneOffset.UTC));
+    Fixture live =
+        new Fixture(List.of("read"), List.of(), List.of(), Clock.fixed(NOW, ZoneOffset.UTC));
     live.readyEnvironment(ENV_A);
     ModelRequestSpec liveSpec = live.resolved(live.path(settings("default")));
-    assertTrue(instructionText(liveSpec).contains("- name: " + ENV_A_NAME));
-    assertTrue(instructionText(liveSpec).contains("- system: linux"));
-    assertTrue(instructionText(liveSpec).contains("- user: dev-user"));
-    assertTrue(instructionText(liveSpec).contains("- home: /home/dev"));
+    assertTrue(instructionText(liveSpec).contains("<name>" + ENV_A_NAME + "</name>"));
+    assertTrue(instructionText(liveSpec).contains("<os>linux</os>"));
+    assertTrue(instructionText(liveSpec).contains("<user>dev-user</user>"));
+    assertTrue(instructionText(liveSpec).contains("<home>/home/dev</home>"));
 
     Fixture offline =
-        new Fixture(List.of(), List.of(), List.of(), Clock.fixed(NOW, ZoneOffset.UTC));
+        new Fixture(List.of("read"), List.of(), List.of(), Clock.fixed(NOW, ZoneOffset.UTC));
     offline.connectingEnvironment(ENV_A);
     ModelRequestSpec offlineSpec = offline.resolved(offline.path(settings("default")));
-    assertTrue(instructionText(offlineSpec).contains("- name: " + ENV_A_NAME));
-    assertFalse(instructionText(offlineSpec).contains("- system:"));
-    assertFalse(instructionText(offlineSpec).contains("- user:"));
-    assertFalse(instructionText(offlineSpec).contains("- home:"));
-    assertFalse(instructionText(offlineSpec).contains("- note:"));
+    assertTrue(instructionText(offlineSpec).contains("<name>" + ENV_A_NAME + "</name>"));
+    assertTrue(instructionText(offlineSpec).contains("<os>unknown</os>"));
+    assertTrue(instructionText(offlineSpec).contains("<user>unknown</user>"));
+    assertTrue(instructionText(offlineSpec).contains("<home>unknown</home>"));
+    assertTrue(instructionText(offlineSpec).contains("<description>none</description>"));
   }
 
   /** 测试意图：CONNECTING 连接行保留的最近一次 READY 宿主 metadata 仍进入环境块（断线不清空）。 */
   @Test
   void connectingEnvironmentStillProjectsRetainedHostMetadata() {
     Fixture fixture =
-        new Fixture(List.of(), List.of(), List.of(), Clock.fixed(NOW, ZoneOffset.UTC));
+        new Fixture(List.of("read"), List.of(), List.of(), Clock.fixed(NOW, ZoneOffset.UTC));
     fixture.connectingEnvironmentWithRetainedMetadata(ENV_A);
 
     ModelRequestSpec requestSpec = fixture.resolved(fixture.path(settings("default")));
 
-    assertTrue(instructionText(requestSpec).contains("- name: " + ENV_A_NAME));
-    assertTrue(instructionText(requestSpec).contains("- system: wsl"));
-    assertTrue(instructionText(requestSpec).contains("- user: dev-user"));
-    assertTrue(instructionText(requestSpec).contains("- home: /home/dev"));
-    assertTrue(instructionText(requestSpec).contains("- note: Retained note"));
+    assertTrue(instructionText(requestSpec).contains("<name>" + ENV_A_NAME + "</name>"));
+    assertTrue(instructionText(requestSpec).contains("<os>wsl</os>"));
+    assertTrue(instructionText(requestSpec).contains("<user>dev-user</user>"));
+    assertTrue(instructionText(requestSpec).contains("<home>/home/dev</home>"));
+    assertTrue(instructionText(requestSpec).contains("<description>Retained note</description>"));
   }
 
   @Test
@@ -1073,15 +1076,17 @@ class DatabaseTurnResolverTest {
 
     // 系统指令不再以 SYSTEM 消息进入会话投影：它只在 systemInstruction 中，messages 只含对话。
     String instruction = requestSpec.systemInstruction();
-    assertTrue(instruction.startsWith("agent system prompt"), instruction);
-    // 确定性空行拼接顺序：Agent 正文 → Environment → Skills，段间恰为空行分隔。
-    int environmentAt = instruction.indexOf("<current_environment>");
-    int skillsAt = instruction.indexOf("<available_skills>");
-    assertTrue(environmentAt > "agent system prompt".length(), instruction);
+    assertTrue(instruction.startsWith("[agent]\nagent system prompt"), instruction);
+    // 固定顺序：Agent 正文 → harness → paths → environment → skills，段间恰为空行分隔。
+    int harnessAt = instruction.indexOf("[harness]");
+    int pathsAt = instruction.indexOf("[paths]");
+    int environmentAt = instruction.indexOf("[environment]");
+    int skillsAt = instruction.indexOf("[skills]");
+    assertTrue(harnessAt > "agent system prompt".length(), instruction);
+    assertTrue(pathsAt > harnessAt, instruction);
+    assertTrue(environmentAt > pathsAt, instruction);
     assertTrue(skillsAt > environmentAt, instruction);
-    assertTrue(
-        instruction.contains("</current_environment>\n\nThe following skills provide"),
-        instruction);
+    assertTrue(instruction.contains("</current_environment>\n\n[skills]"), instruction);
     assertTrue(instruction.contains("<name>dev</name>"), instruction);
     assertTrue(
         instruction.contains("<path>vfs:/skills/test-package/dev/SKILL.md</path>"), instruction);
@@ -2471,7 +2476,7 @@ class DatabaseTurnResolverTest {
     ModelRequestSpec requestSpec = fixture.resolved(path);
 
     // 系统指令不再作为 SYSTEM 消息出现在投影首位；summary wrapper 是第一条 USER，随后是冻结压缩边界的 Goal 背景。
-    assertTrue(requestSpec.systemInstruction().startsWith("agent system prompt"));
+    assertTrue(requestSpec.systemInstruction().startsWith("[agent]\nagent system prompt"));
     List<ProviderMessage> messages = materialized(path, requestSpec);
     assertEquals(5, messages.size());
     assertEquals(ProviderMessageRole.USER, messages.get(0).role());

@@ -32,6 +32,7 @@ import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.skill.SkillPromptPathResolver;
 import fun.fengwk.kkstudio.platform.environment.skill.SkillPromptResolution;
 import fun.fengwk.kkstudio.platform.harness.task.AgentPromptComposer;
+import fun.fengwk.kkstudio.platform.harness.task.AgentPromptInput;
 import fun.fengwk.kkstudio.platform.harness.task.CurrentEnvironmentContext;
 import fun.fengwk.kkstudio.platform.harness.task.SkillPromptEntry;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
@@ -45,6 +46,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.UUID;
 
 /**
  * Builtin 规划共用的 Agent Turn 目录解析：Agent config、Environment、Skills、Subagent bindings、工具 bindings 与
@@ -97,7 +99,9 @@ public final class DatabaseAgentTurnContextResolver {
   }
 
   /** 在一次目录租用内解析完整的 Agent Turn 上下文。 */
-  public AgentTurnContext resolve(EntryPath path, BranchSettings settings, Instant now) {
+  public AgentTurnContext resolve(
+      UUID threadId, EntryPath path, BranchSettings settings, Instant now) {
+    Objects.requireNonNull(threadId, "threadId");
     Objects.requireNonNull(path, "path");
     Objects.requireNonNull(settings, "settings");
     Objects.requireNonNull(now, "now");
@@ -124,6 +128,9 @@ public final class DatabaseAgentTurnContextResolver {
           systemInstruction(
               agent.systemPrompt(),
               currentEnvironment,
+              path.root().sessionId(),
+              threadId,
+              tools.bindings().stream().map(binding -> binding.descriptor().name()).toList(),
               skills.stream().map(LiveTurnPlan.PlannedSkill::promptEntry).toList(),
               subagentBindings);
       return new AgentTurnContext(
@@ -374,14 +381,25 @@ public final class DatabaseAgentTurnContextResolver {
     return List.copyOf(bindings);
   }
 
-  /** 本轮请求唯一的系统指令由 Agent 正文、Environment、Skills 与 Subagents 组合，不写入会话消息。 */
+  /** 本轮请求唯一的系统指令由 Agent 正文、Environment、工具、Skills 与 Subagents 组合，不写入会话消息。 */
   private String systemInstruction(
       String systemPrompt,
       CurrentEnvironmentContext currentEnvironment,
+      UUID rootSessionId,
+      UUID threadId,
+      List<String> toolNames,
       List<SkillPromptEntry> skills,
       List<SubagentBinding> subagentBindings) {
     String instruction =
-        promptComposer.compose(systemPrompt, currentEnvironment, skills, subagentBindings);
+        promptComposer.compose(
+            new AgentPromptInput(
+                systemPrompt,
+                currentEnvironment,
+                rootSessionId,
+                threadId,
+                toolNames,
+                skills,
+                subagentBindings));
     if (instruction == null || instruction.isBlank()) {
       throw rejection("system instruction must not be blank");
     }
