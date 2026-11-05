@@ -1,9 +1,8 @@
 import { lstat, open, readdir, rename, rm } from 'node:fs/promises'
-import type { Stats } from 'node:fs'
 import { join, resolve, sep } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { CapabilityResult, ResultContent } from '../contracts.js'
-import { ensurePrivateDirectory, writePrivateFile } from '../native/index.js'
+import { ensurePrivateDirectory, isRealDirectory, writePrivateFile } from '../native/index.js'
 import { writeAll as writeAllBytes } from '../native/write-all.js'
 import { isCanonicalUuid } from '../protocol/uuid.js'
 
@@ -356,10 +355,6 @@ export class TemporaryResourceStore {
     }
     return (await readCreatedAt(entry)) !== null
   }
-}
-
-function isRealDirectory(info: Stats): boolean {
-  return info.isDirectory() && !info.isSymbolicLink()
 }
 
 /** 活动 workspace 句柄：持有 in-use lease，{@link Workspace.close()} 幂等释放且保证恰好一次。 */

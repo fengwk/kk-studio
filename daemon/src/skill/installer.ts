@@ -13,7 +13,7 @@ import {
   type PrivateFs,
   type SkillPackageInstallerOptions,
 } from './types.js'
-import { ensurePrivateDirectory, writePrivateFile } from '../native/index.js'
+import { ensurePrivateDirectory, isRealDirectory, isRealFile, writePrivateFile } from '../native/index.js'
 
 export const MARKER_FILENAME = '.kkstudio-sha256'
 export const MAX_ZIP_ENTRIES = 5000
@@ -116,12 +116,12 @@ export class SkillPackageInstaller {
     const packageDir = path.join(this._skillsRoot, packageName)
     try {
       const stat = await fs.promises.lstat(packageDir)
-      if (!stat.isDirectory() || stat.isSymbolicLink()) {
+      if (!isRealDirectory(stat)) {
         return null
       }
       const markerFile = path.join(packageDir, MARKER_FILENAME)
       const markerStat = await fs.promises.lstat(markerFile)
-      if (!markerStat.isFile() || markerStat.isSymbolicLink()) {
+      if (!isRealFile(markerStat)) {
         return null
       }
       const content = await fs.promises.readFile(markerFile, 'utf8')
@@ -628,7 +628,7 @@ export async function assertRealDirectory(dir: string, name: string): Promise<vo
   if (!stat) {
     throw new Error(`${name} does not exist: ${dir}`)
   }
-  if (!stat.isDirectory() || stat.isSymbolicLink()) {
+  if (!isRealDirectory(stat)) {
     throw new Error(`${name} must be a real non-symlink directory: ${dir}`)
   }
 }

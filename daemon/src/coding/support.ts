@@ -3,6 +3,7 @@ import type { Stats } from 'node:fs'
 import { dirname, join, posix, relative, win32 } from 'node:path'
 import type { CapabilityResult } from '../contracts.js'
 import { errorResult } from '../contracts.js'
+import { isRealDirectory, isRealFile } from '../native/fs-kind.js'
 import { isWindows } from '../native/host.js'
 
 /**
@@ -296,17 +297,17 @@ export async function exists(path: string): Promise<boolean> {
   }
 }
 
-/** 把 stat 结果归为目录、普通文件或其它；不把设备/FIFO/socket 当作普通文件。 */
+/** 把 stat/lstat 结果归为目录、普通文件或其它；设备、FIFO、socket 与 lstat 下的符号链接一律为 other。 */
 export type TargetKind = 'directory' | 'file' | 'other'
 
 export function classifyTarget(info: Stats | null): TargetKind {
   if (info === null) {
     return 'other'
   }
-  if (info.isDirectory()) {
+  if (isRealDirectory(info)) {
     return 'directory'
   }
-  return info.isFile() ? 'file' : 'other'
+  return isRealFile(info) ? 'file' : 'other'
 }
 
 /** 最终分量是否为符号链接（不跟随）。 */

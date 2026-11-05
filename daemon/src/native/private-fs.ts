@@ -1,5 +1,6 @@
 import { constants, closeSync, fsyncSync, lstatSync, mkdirSync, openSync, renameSync, rmSync, writeSync, chmodSync, type Stats } from 'node:fs'
 import { randomUUID } from 'node:crypto'
+import { isRealDirectory, isRealFile } from './fs-kind.js'
 import { isWindows } from './host.js'
 import { writeAllSync } from './write-all.js'
 
@@ -92,14 +93,6 @@ export async function verifyPrivateFile(path: string): Promise<void> {
     throw new Error(`the private file path is not a real file: ${path}`)
   }
   assertOwnerAndMode(path, stats.mode, FILE_MODE, stats.uid, 'file')
-}
-
-function isRealDirectory(info: Stats): boolean {
-  return info.isDirectory() && !info.isSymbolicLink()
-}
-
-function isRealFile(info: Stats): boolean {
-  return info.isFile() && !info.isSymbolicLink()
 }
 
 function assertOwnerAndMode(path: string, mode: number, expectedMode: number, uid: number, kind: string): void {

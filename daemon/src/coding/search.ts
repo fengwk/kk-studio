@@ -6,6 +6,7 @@ import { errorResult, textResult } from '../contracts.js'
 import {
   ToolInputRejectedError,
   ToolRunFailureError,
+  classifyTarget,
   isAbsolute,
   optionalBoolean,
   optionalPositiveInt,
@@ -223,8 +224,8 @@ export function createSearchCapabilities(
         )
       }
 
-      const info = await lstat(path)
-      if (info.isFile()) {
+      const kind = classifyTarget(await lstat(path))
+      if (kind === 'file') {
         await requireReadable(path)
         if (isGitMetadata(path)) {
           return textResult(call.invocationId, 'No matches found')
@@ -259,7 +260,7 @@ export function createSearchCapabilities(
         )
         return emitSearchResult(call, context, outcome, limit, 'No matches found', output)
       }
-      if (!info.isDirectory()) {
+      if (kind !== 'directory') {
         throw new ToolInputRejectedError('path must be a regular file or directory')
       }
       await requireReadable(path)
@@ -432,16 +433,11 @@ async function repositoryRoot(path: string): Promise<string | null> {
 /** 解析 `.git/info/exclude`，linked worktree 经 gitdir 指针与 commondir 落到共享仓库。 */
 async function resolveExcludeFile(repository: string): Promise<string | null> {
   const dotGit = join(repository, '.git')
-  let info
-  try {
-    info = await lstat(dotGit)
-  } catch {
-    return null
-  }
+  const kind = classifyTarget(await lstat(dotGit).catch(() => null))
   let gitDir: string
-  if (info.isDirectory()) {
+  if (kind === 'directory') {
     gitDir = dotGit
-  } else if (info.isFile()) {
+  } else if (kind === 'file') {
     const pointer = await readGitdirPointer(dotGit, repository)
     if (pointer === null) {
       return null
@@ -485,11 +481,8 @@ async function firstLine(file: string): Promise<string | null> {
 }
 
 async function existingFile(path: string): Promise<string | null> {
-  try {
-    return (await lstat(path)).isFile() ? path : null
-  } catch {
-    return null
-  }
+  const info = await lstat(path).catch(() => null)
+  return classifyTarget(info) === 'file' ? path : null
 }
 
 /** 固定忽略与隐藏文件语义；`--no-config` 防止宿主 RIPGREP_CONFIG_PATH 改变结果。 */
@@ -1046,13 +1039,7 @@ function skippedList(skipped: Map<string, string>): SkippedEntry[] {
 }
 
 async function requireDirectory(path: string): Promise<void> {
-  let info
-  try {
-    info = await lstat(path)
-  } catch {
-    throw new ToolInputRejectedError('path must be a directory')
-  }
-  if (!info.isDirectory()) {
+  if (classifyTarget(await lstat(path).catch(() => null)) !== 'directory') {
     throw new ToolInputRejectedError('path must be a directory')
   }
   await requireReadable(path)
