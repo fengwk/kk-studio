@@ -14,7 +14,7 @@ import { awaitGone, isAlive } from '../native/process-test-util.js'
  * Opt-in acceptance test that drives two frozen private views through the actual native POSIX
  * supervisor (compiled helper), not a plain process-group wrapper.
  *
- * Set KK_STUDIO_IDE_ACCEPTANCE_DIR to the extracted code-server 4.141.0 distribution. This
+ * Set KK_STUDIO_IDE_ACCEPTANCE_DIR to the extracted code-server distribution in runtime-manifest.json. This
  * exercises the real manager/bridge stack, real HTTP and WebSocket exchanges (via
  * `resolveView`), per-view close and native scope convergence on shutdown. The data-plane tunnel transport
  * and browser flow are covered by their own slices.

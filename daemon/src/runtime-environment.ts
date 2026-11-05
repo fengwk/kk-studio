@@ -38,7 +38,7 @@ export function detectArchitecture(): Architecture {
   }
 }
 
-export function detectOperatingSystem(): OperatingSystem {
+function detectOperatingSystem(): OperatingSystem {
   const name = platform()
   if (name === 'win32') {
     return OperatingSystem.WINDOWS

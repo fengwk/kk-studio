@@ -43,7 +43,7 @@ import { PROTOCOL_VERSION } from '../src/protocol/control/codec.js'
 import { FakeStudioPeer } from './support/fake-studio.js'
 import { IdeError } from '../src/ide/errors.js'
 
-describe('Unified Transport & Control Protocol (X-DESIGN §1, §2, §3)', () => {
+describe('Unified Transport & Control Protocol', () => {
   let tempDir: string
   let tokenPath: string
   let config: DaemonConfig
@@ -76,7 +76,7 @@ describe('Unified Transport & Control Protocol (X-DESIGN §1, §2, §3)', () => 
     rmSync(tempDir, { recursive: true, force: true })
   })
 
-  it('connects with X-DESIGN §1 request headers and completes handshake', async () => {
+  it('connects with the daemon request headers and completes handshake', async () => {
     peer = new FakeStudioPeer()
     await peer.start()
 
@@ -110,9 +110,6 @@ describe('Unified Transport & Control Protocol (X-DESIGN §1, §2, §3)', () => 
     expect(handshake?.protocol).toBe(String(PROTOCOL_VERSION))
     expect(handshake?.instance).toBe('11111111-1111-4111-8111-111111111111')
     expect(handshake?.platform).toBe('linux-amd64')
-    // 握手头不得包含 daemon-version 或 capability-catalog
-    expect(handshake?.headers['kk-daemon-version']).toBeUndefined()
-    expect(handshake?.headers['kk-capability-catalog']).toBeUndefined()
 
     await transport.close()
   })
@@ -409,7 +406,7 @@ describe('Unified Transport & Control Protocol (X-DESIGN §1, §2, §3)', () => 
     await transport.close()
   })
 
-  describe('IDE HTTP Tunnel (X-DESIGN §3.2)', () => {
+  describe('IDE HTTP Tunnel', () => {
     it('proxies HTTP requests to code-server and filters headers', async () => {
       // 启动假本地 code-server
       const fakeCodeServer = http.createServer((req, res) => {

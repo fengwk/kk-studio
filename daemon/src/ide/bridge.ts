@@ -4,7 +4,7 @@ import type { AddressInfo } from 'node:net'
 import { isAbsolute, resolve as resolvePath } from 'node:path'
 import { pathKeysIgnoreCase } from '../native/host.js'
 import { isCanonicalUuid } from '../protocol/uuid.js'
-import { IdeError } from './errors.js'
+import { abortError, IdeError } from './errors.js'
 
 /**
  * Loopback bridge between the daemon and the in-window VS Code bridge extension.
@@ -44,7 +44,6 @@ export interface BridgeResult {
   /** Explicit clean-state observation; absent means the bridge cannot prove cleanliness. */
   clean?: boolean
   documents?: BridgeDocument[]
-  bytes?: number
   omitted?: number
   complete?: boolean
   restored?: number
@@ -134,13 +133,6 @@ interface Pending {
 interface ConnectionWaiter {
   resolve: () => void
   reject: (error: unknown) => void
-}
-
-/** Aborts with the standard AbortError name so callers can distinguish cancellation. */
-function abortError(): Error {
-  const error = new Error('ide request was cancelled')
-  error.name = 'AbortError'
-  return error
 }
 
 /** A managed workspace has one confirmed folder, not merely a shared workspace file. */
@@ -454,9 +446,6 @@ export async function createIdeBridge(): Promise<IdeBridge> {
       directory: result.ok === true ? actualDirectory : undefined,
       ...(typeof result.clean === 'boolean' ? { clean: result.clean } : {}),
       ...(documents === undefined ? {} : { documents }),
-      ...(typeof result.bytes === 'number' && Number.isSafeInteger(result.bytes) && result.bytes >= 0
-        ? { bytes: result.bytes }
-        : {}),
       ...(typeof result.omitted === 'number' && Number.isSafeInteger(result.omitted) && result.omitted >= 0
         ? { omitted: result.omitted }
         : {}),

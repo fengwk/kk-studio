@@ -21,7 +21,7 @@ const BUILT_IN_FAILURE_TYPES: readonly (readonly [Function, string])[] = [
  *
  * @returns 诊断输出自身的失败；null 表示诊断已写出。
  */
-export function reportReleaseFailure(phase: string, error: unknown): unknown {
+function reportReleaseFailure(phase: string, error: unknown): unknown {
   try {
     process.stderr.write(`daemon ${phase} failed: ${describeFailureType(error)}\n`)
     return null

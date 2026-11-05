@@ -206,7 +206,7 @@ export interface IdeService extends IdeLeaseHandler {
   canStartUpdate(): boolean
   /** 更新准入后停止闲置 code-server，并确认受管进程范围已收敛。 */
   stopForUpdate(signal: AbortSignal): Promise<void>
-  /** 当前视图快照；用于数据适配器和诊断，不续租。 */
+  /** 当前视图快照，用于诊断，不续租。数据通道使用 resolveView。 */
   getViewState(viewId: string): IdeViewSummary | null
   activeStreamCount(): number
   /** 数据适配器唯一允许的上游解析入口。 */

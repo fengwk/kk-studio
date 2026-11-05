@@ -23,7 +23,7 @@ import { delay } from '../delay.js'
  * <p>「不可判定」与「没有成员」必须严格区分：只要有一个已确认属于本会话、仍活着的成员读不到身份，整次枚举就返回 `null`
  * （不可判定）。把这种情况过滤成空列表会把「查不到」谎报成「已经收敛」。
  *
- * <p>本模块只依赖 Node 内建模块与 Koffi，不引用同目录模块：helper 以 `.ts` 源码直接运行时相对 import 的 `.js` 无法解析。
+ * <p>父进程和编译后的 helper 共用这些会话原语。
  */
 
 /** 温和终止信号。 */
@@ -154,12 +154,12 @@ export function establishSession(): number {
 }
 
 /** 当前进程的会话 id。 */
-export function currentSession(): number {
+function currentSession(): number {
   return libc().getsid(0) >>> 0
 }
 
 /** 当前进程组 id。 */
-export function currentGroup(): number {
+function currentGroup(): number {
   return libc().getpgrp() >>> 0
 }
 

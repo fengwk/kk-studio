@@ -204,7 +204,7 @@ export function receiptToResend(active: ActiveUpdate | null, results: Map<string
   return last ?? null
 }
 
-export interface UpdateExecution {
+interface UpdateExecution {
   failure: Error | null
   prepared: UpdateOutcomeLike | null
 }

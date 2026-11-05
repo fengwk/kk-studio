@@ -415,8 +415,7 @@ const args = process.argv.slice(2)`,
     }
   })
 
-  // Regression for the Windows EBUSY cleanup race: the fixture must prove stdio teardown before a
-  // deleted distribution can be reported released.
+  // A deleted distribution can be reported released only after stdio teardown is proven.
   it('awaits stdio close before termination and supervisor close resolve', async () => {
     const supervisor = new TestSupervisor()
     const spawnSpec = (): ProcessSpec => ({

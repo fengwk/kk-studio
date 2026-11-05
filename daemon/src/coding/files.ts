@@ -43,7 +43,7 @@ import { acquireFileLock, commitTextFile } from './commit.js'
 import { textOutputStoreFor } from './output.js'
 
 /**
- * 文件能力（fs.read / fs.write / fs.edit）。
+ * 文件能力（fs.read / fs.write / fs.edit / fs.edit.preview）。
  *
  * <p>与 Java 参考实现对齐：文件参数只接受绝对路径，没有隐式 cwd；read 返回精确有界窗口（正文最多 60000 码点），图片作为二进制内容返回；write/edit 在保留
  * 编码/BOM/行尾的前提下原子提交，无法无损表示时拒绝。目录、设备、FIFO 与符号链接在任何 I/O 之前拒绝。
@@ -71,7 +71,7 @@ export interface FileCapabilityHooks {
 
 let fileHooks: FileCapabilityHooks = {}
 
-/** 注入跨片钩子；幂等，Runtime 热更时可重新调用。 */
+/** 注入跨片钩子；重复调用时以最后一次为准。 */
 export function setFileCapabilityHooks(hooks: FileCapabilityHooks): void {
   fileHooks = hooks
 }

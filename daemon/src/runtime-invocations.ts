@@ -34,7 +34,7 @@ import {
 } from './runtime-encoding.js'
 import type { OutboundControl } from './runtime-outbound.js'
 
-export type InvocationTerminationCause = 'TIMED_OUT' | 'CANCELLED' | 'SHUTDOWN'
+type InvocationTerminationCause = 'TIMED_OUT' | 'CANCELLED' | 'SHUTDOWN'
 
 /** 协议层已用同一字节上限校验 argumentsJson；这里复用共享严格解析，不额外收紧结构维度。 */
 const ARGUMENTS_JSON_LIMITS: StrictLimits = {

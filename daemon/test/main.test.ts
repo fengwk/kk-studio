@@ -248,12 +248,12 @@ describe('daemon main information commands', () => {
     expect(version.out.join('')).toContain(`kk-studio-daemon ${DAEMON_VERSION}`)
   })
 
-  it('rejects illegal external arguments and the removed encoding flag without leaking values', async () => {
+  it('rejects illegal external arguments and unknown flags without leaking values', async () => {
     const secret = 'secret-argument-value'
     const illegal = capture()
     try {
       expect(await main(['--config', `${secret}\0leak`])).toBe(2)
-      expect(await main(['--base64-args', secret])).toBe(1)
+      expect(await main(['--unknown-flag', secret])).toBe(1)
     } finally {
       illegal.restore()
     }
@@ -261,7 +261,7 @@ describe('daemon main information commands', () => {
     expect(stderr).toContain('invalid daemon argument transport')
     expect(stderr).toContain('Invalid daemon configuration:')
     expect(stderr).not.toContain(secret)
-    expect(stderr).not.toContain('--base64-args')
+    expect(stderr).not.toContain('--unknown-flag')
   })
 
   it('validates --check-config success and failure with safe diagnostics', async () => {

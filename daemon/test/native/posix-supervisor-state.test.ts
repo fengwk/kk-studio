@@ -22,8 +22,6 @@ const ports = vi.hoisted(() => ({
   posix: {
     supportsSessionEnumeration: vi.fn(),
     establishSession: vi.fn(),
-    currentSession: vi.fn(),
-    currentGroup: vi.fn(),
     sessionOf: vi.fn<(pid: number) => number>(),
     processIdentity: vi.fn<(pid: number) => string | null>(),
     membersSnapshot: vi.fn<(session: number, excluded: number) => SessionMember[] | null>(),
