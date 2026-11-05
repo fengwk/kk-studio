@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.platform.orchestration;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
@@ -134,7 +135,8 @@ class SessionDeletionOrchestratorTest {
         .thenAnswer(inv -> Optional.ofNullable(threads.get(inv.getArgument(0))));
     when(threadStore.find(any()))
         .thenAnswer(inv -> Optional.ofNullable(threads.get(inv.getArgument(0))));
-    when(threadStore.delete(any())).thenAnswer(inv -> ((List<UUID>) inv.getArgument(0)).size());
+    when(threadStore.delete(any(), any()))
+        .thenAnswer(inv -> ((List<UUID>) inv.getArgument(0)).size());
     when(sessionStore.delete(any())).thenReturn(true);
 
     when(chatOwnership.kind()).thenReturn("CHAT");
@@ -167,7 +169,7 @@ class SessionDeletionOrchestratorTest {
     storeOrder.verify(threadStore).lock(THREAD_1);
     storeOrder.verify(threadStore).lock(THREAD_2);
     storeOrder.verify(joinStore).deleteForThreads(List.of(THREAD_1, THREAD_2));
-    storeOrder.verify(threadStore).delete(List.of(THREAD_1, THREAD_2));
+    storeOrder.verify(threadStore).delete(eq(List.of(THREAD_1, THREAD_2)), any());
     storeOrder.verify(entryStore).delete(SESSION_1);
     storeOrder.verify(sessionStore).delete(SESSION_1);
     storeOrder.verify(entryStore).delete(SESSION_2);
@@ -203,7 +205,7 @@ class SessionDeletionOrchestratorTest {
     deleteOrder.verify(issueAgentOwnership).beforeSessionDeletion(ISSUE_AGENT_OWNER, SESSION_1);
     deleteOrder.verify(threadStore).lock(THREAD_1);
     deleteOrder.verify(joinStore).deleteForThreads(List.of(THREAD_1));
-    deleteOrder.verify(threadStore).delete(List.of(THREAD_1));
+    deleteOrder.verify(threadStore).delete(eq(List.of(THREAD_1)), any());
     deleteOrder.verify(refManager).releaseRef(SESSION_1, BLOB_1);
     deleteOrder.verify(entryStore).delete(SESSION_1);
     deleteOrder.verify(sessionStore).delete(SESSION_1);
@@ -239,7 +241,7 @@ class SessionDeletionOrchestratorTest {
     verify(refManager).releaseRef(SESSION_1, BLOB_1);
     verify(entryStore).delete(SESSION_1);
     verify(sessionStore).delete(SESSION_1);
-    verify(threadStore, never()).delete(any());
+    verify(threadStore, never()).delete(any(), any());
   }
 
   @Test
@@ -260,7 +262,7 @@ class SessionDeletionOrchestratorTest {
     verify(threadStore).lockTree(THREAD_FORK);
     verify(sessionStore).lockForUpdate(SESSION_1);
     verify(sessionStore).lockForUpdate(SESSION_2);
-    verify(threadStore).delete(List.of(THREAD_1, THREAD_2, THREAD_FORK));
+    verify(threadStore).delete(eq(List.of(THREAD_1, THREAD_2, THREAD_FORK)), any());
     verify(joinStore).deleteForThreads(List.of(THREAD_1, THREAD_2, THREAD_FORK));
     verify(sessionStore).delete(SESSION_2);
   }
@@ -280,7 +282,7 @@ class SessionDeletionOrchestratorTest {
 
     assertThrows(IllegalStateException.class, () -> service.deleteSessionsByOwner(CHAT_OWNER));
 
-    verify(threadStore, never()).delete(any());
+    verify(threadStore, never()).delete(any(), any());
     verify(joinStore, never()).deleteForThreads(any());
     verify(entryStore, never()).delete(any());
     verify(sessionStore, never()).delete(any());
@@ -346,7 +348,7 @@ class SessionDeletionOrchestratorTest {
         DataIntegrityViolationException.class,
         () -> service.deleteSessionsByOwner(ISSUE_AGENT_OWNER));
 
-    verify(threadStore, never()).delete(any());
+    verify(threadStore, never()).delete(any(), any());
     verify(joinStore, never()).deleteForThreads(any());
     verify(entryStore, never()).delete(any());
     verify(sessionStore, never()).delete(any());
