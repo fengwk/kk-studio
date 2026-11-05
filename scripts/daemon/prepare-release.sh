@@ -14,7 +14,7 @@
 #
 # 前置条件：先编译 Node Daemon：
 #   npm --prefix daemon ci && npm --prefix daemon run build
-# 使 `daemon/dist/main.js`（编译产物）存在。生产依赖由本脚本按目标平台重新安装。
+# 使 `daemon/dist/main.js`（编译产物）和构建用 tar 解析器存在。生产依赖由本脚本按目标平台重新安装。
 #
 # 跨平台正确性：脚本用 `npm ci --omit=dev --ignore-scripts --os=<npmOs> --cpu=<npmCpu>` 为目标
 # 平台安装依赖，因此只会装入锁定清单里对应平台的 optional 预编译产物（例如 koffi 的
@@ -320,7 +320,8 @@ main() {
   [ "$actual_sha" = "$code_server_sha" ] ||
     die "code-server runtime SHA256 does not match the frozen manifest for $os-$arch"
   install_platform_dependencies "$WORK_DIR/deps" "$npm_os" "$npm_cpu"
-  KK_ARCHIVE="$code_server_tar" KK_TAR_PACKAGE="$WORK_DIR/deps/package.json" \
+  # tar 是宿主侧构建工具，不属于目标平台运行依赖；从构建前已安装的 daemon 开发依赖加载。
+  KK_ARCHIVE="$code_server_tar" KK_TAR_PACKAGE="$DAEMON_DIR/package.json" \
     "$NODE_BIN" --input-type=module <<'JS'
 import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'

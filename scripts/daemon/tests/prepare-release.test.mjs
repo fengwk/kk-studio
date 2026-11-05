@@ -98,6 +98,8 @@ describe('prepare-release.sh', () => {
       }
       assert.ok(!names.includes('node_modules/@koromix/koffi-darwin-x64'))
       assert.ok(!names.some((name) => name.startsWith('node_modules/@vscode/ripgrep-') && !name.startsWith('node_modules/@vscode/ripgrep-linux-x64/')))
+      // tar 只用于构建时安全检查，目标平台的生产依赖不应包含它。
+      assert.ok(!names.some((name) => name.startsWith('node_modules/tar/')))
     }))
 
   it('selects the target optional prebuilt per platform', () => {

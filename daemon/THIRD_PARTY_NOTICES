@@ -12,7 +12,6 @@ inside the archive. Direct runtime dependencies:
 | --- | --- |
 | `@vscode/ripgrep` and its platform-specific binary packages, `jsonc-parser`, `koffi`, `undici`, `vscode-jsonrpc`, `ws`, `yauzl` | MIT License |
 | `diff` | BSD 3-Clause License |
-| `tar` | Blue Oak Model License 1.0.0 |
 | `code-server` (fengwk/code-server, managed fork of coder/code-server) | MIT License |
 | Node.js (bundled inside the code-server standalone runtime) | MIT License |
 

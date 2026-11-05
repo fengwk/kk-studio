@@ -143,12 +143,9 @@ fs.copyFileSync(source, output)
 `
 
 function npmShim() {
-  // The archive validator uses the real parser shipped with the daemon's own dependencies.
-  const parser = path.join(REPOSITORY_ROOT, 'daemon/node_modules/tar')
   return `#!${process.execPath}
 const fs = require('node:fs')
 const path = require('node:path')
-const TAR_PARSER = ${JSON.stringify(parser)}
 
 const args = process.argv.slice(2)
 let prefix = null
@@ -190,7 +187,6 @@ if (!ignoreScripts) {
   process.exit(1)
 }
 fs.mkdirSync(path.join(prefix, 'node_modules'), { recursive: true })
-fs.symlinkSync(TAR_PARSER, path.join(prefix, 'node_modules', 'tar'), 'dir')
 if (process.env.FAKE_NPM_OMIT_PREBUILT === '1' || targetOs === null || targetCpu === null) {
   process.exit(0)
 }
@@ -241,6 +237,9 @@ export class ReleaseFixture {
     writeText(path.join(daemon, 'THIRD_PARTY_NOTICES'), 'third-party notices\n', 0o644)
     writeText(path.join(daemon, 'package.json'), `{"name":"@kk-studio/daemon","version":"${DAEMON_VERSION}"}\n`, 0o644)
     writeText(path.join(daemon, 'package-lock.json'), '{}\n', 0o644)
+    // 构建侧使用真实 tar 解析器；目标平台的 --omit=dev 依赖不包含它。
+    mkdirSync(path.join(daemon, 'node_modules'), { recursive: true })
+    symlinkSync(path.join(REPOSITORY_ROOT, 'daemon/node_modules/tar'), path.join(daemon, 'node_modules/tar'), 'dir')
     writeText(path.join(daemon, 'dist', 'main.js'), MAIN_JS, 0o644)
     writeExecutable(path.join(daemon, 'ide-extension', 'extension.js'), 'module.exports = {}\n')
 
