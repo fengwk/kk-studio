@@ -24,6 +24,8 @@ import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.api.session.AttachmentMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
+import fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpecJsonCodec;
+import fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrchestrator;
 import fun.fengwk.kkstudio.platform.orchestration.SessionDeletionOrchestrator;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwner;
@@ -146,6 +148,42 @@ class SessionDeletionOrchestratorIntegrationTest extends WebPostgresTestSupport 
     assertEquals(0, count("harness_session", "id", secondSession));
     assertEquals(0, count("harness_thread", "id", firstThread));
     assertEquals(0, count("harness_thread", "id", secondThread));
+  }
+
+  /**
+   * 测试意图：真实组合根（含 Builtin Driver 装配）的深删除必须先经 Driver 端口清理模型调用行，再删除 Harness Thread；否则
+   * fk_builtin_model_invocation_thread 会拒绝删除。
+   */
+  @Test
+  void deepDeleteCleansBuiltinModelInvocationBeforeHarnessRows() {
+    UUID chatId = createChat("model-invocation-delete");
+    UUID sessionId = new UUID(0L, 21L);
+    UUID threadId = new UUID(0L, 22L);
+    acceptText(new SessionOwner("CHAT", chatId.toString()), sessionId, threadId, "hello");
+    UUID turnStartEntryId =
+        jdbc.queryForObject(
+            "select head_entry_id from harness_thread where id = ?", UUID.class, threadId);
+    UUID modelInvocationId = UUID.randomUUID();
+    Timestamp now = Timestamp.from(Instant.now());
+    String requestSpec = new ModelRequestSpecJsonCodec().encode(StoreTestSupport.modelRequest());
+    jdbc.update(
+        "insert into builtin_model_invocation (id, thread_id, turn_start_entry_id,"
+            + " request_head_entry_id, request_spec, status, attempt, failed_attempts,"
+            + " created_at, updated_at) values (?, ?, ?, ?, ?::jsonb, 'READY', 0,"
+            + " '[]'::jsonb, ?, ?)",
+        modelInvocationId,
+        threadId,
+        turnStartEntryId,
+        turnStartEntryId,
+        requestSpec,
+        now,
+        now);
+    assertEquals(1, count("builtin_model_invocation", "thread_id", threadId));
+
+    deletionService.deleteSessionsByOwner(new SessionOwner("CHAT", chatId.toString()));
+
+    assertEquals(0, count("harness_thread", "id", threadId));
+    assertEquals(0, count("builtin_model_invocation", "thread_id", threadId));
   }
 
   private void acceptText(SessionOwner owner, UUID sessionId, UUID threadId, String text) {
