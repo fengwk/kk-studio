@@ -29,6 +29,8 @@ fi
 `, { mode: 0o755 })
   writeFileSync(path.join(bin, 'curl'), '#!/usr/bin/env bash\nprintf \'{"data":[]}\\n\'\n', { mode: 0o755 })
   writeFileSync(path.join(bin, 'node'), `#!/usr/bin/env bash
+# 真实 probe 会读完管道输入；这里同样排空 stdin，避免 curl 在消费方先退出时收到 SIGPIPE。
+cat >/dev/null
 case "\${2:-}" in
   environment-ready) [ "\${FAKE_ENV_READY:-false}" = true ]; exit $? ;;
   environment-status) printf 'OFFLINE\\n' ;;
