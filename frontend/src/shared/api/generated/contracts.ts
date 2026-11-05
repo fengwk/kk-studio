@@ -1729,14 +1729,6 @@ export interface ModelDefaultLimitDTO {
   output?: number | null
 }
 
-/** Java：fun.fengwk.kkstudio.project.dto.PauseIssueRequestDTO */
-export interface PauseIssueRequestDTO {
-  expectedVersion: string
-  requestKey: string
-  reason: string
-  detail?: string | null
-}
-
 /** Java：fun.fengwk.kkstudio.share.ai.plugin.PluginAuthCompleteRequestDTO */
 export interface PluginAuthCompleteRequestDTO {
   authAttemptId: string

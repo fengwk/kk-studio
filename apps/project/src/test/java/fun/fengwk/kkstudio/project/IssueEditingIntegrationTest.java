@@ -23,7 +23,6 @@ import fun.fengwk.kkstudio.project.model.IssueActivityActorType;
 import fun.fengwk.kkstudio.project.model.IssueActivityKind;
 import fun.fengwk.kkstudio.project.model.IssueAgentThread;
 import fun.fengwk.kkstudio.project.model.IssueRun;
-import fun.fengwk.kkstudio.project.model.PauseReason;
 import fun.fengwk.kkstudio.project.model.Project;
 
 import java.util.List;
@@ -163,7 +162,7 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
     assertEquals(0, issueEditingService.listIssues(projectId, true).size());
   }
 
-  /** 已归档的 Issue 拒绝执行流转、阻塞、评论、暂停等写操作。 */
+  /** 已归档的 Issue 拒绝执行流转、阻塞、评论、终止等写操作。 */
   @Test
   void archivedIssueRejectsExecutionAndWorkflowWrites() {
     UUID projectId = createProject();
@@ -181,9 +180,7 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
         () -> issueEditingService.appendActivity(issue.getId(), 1L, "COMMENT", key("c"), "普通评论"));
     assertThrows(
         ProjectValidationException.class,
-        () ->
-            issueLifecycleService.pauseIssue(
-                issue.getId(), 1L, key("p"), PauseReason.USER, "暂停详情"));
+        () -> issueLifecycleService.stopIssue(issue.getId(), 1L, key("s"), "终止详情"));
 
     assertEquals(
         0L, count("select count(*) from project_issue_activity where issue_id = ?", issue.getId()));

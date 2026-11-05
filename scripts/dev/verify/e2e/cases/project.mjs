@@ -142,12 +142,52 @@ function assertHumanActivity(activity, { issueId, kind, body }) {
   return activity
 }
 
+/** 空闲 Issue 经 STOP 设置 USER 门禁，只有显式 resume 才解除。 */
+export async function verifyIssueStopResume(ctx, issue) {
+  const stopDetail = 'stopped by the operator'
+  const stopped = envelopeData(
+    (
+      await ctx.call('POST', `/api/issues/${issue.id}/stop`, {
+        expectedVersion: issue.version,
+        requestKey: `e2e-stop-${cid()}`,
+        detail: stopDetail,
+      })
+    ).json,
+  )
+  assert(
+    stopped.pauseReason === 'USER'
+      && stopped.pauseDetail === stopDetail
+      && stopped.state === 'WORK',
+    JSON.stringify(stopped),
+  )
+  // WORK → DONE 在工作流中合法，拒绝说明暂停门禁生效，而不是目标状态本身非法。
+  await expectHttpError(
+    () =>
+      ctx.call('POST', `/api/issues/${issue.id}/transition`, {
+        expectedVersion: stopped.version,
+        requestKey: `e2e-transition-paused-${cid()}`,
+        toState: 'DONE',
+      }),
+    { status: 400 },
+  )
+  const resumed = envelopeData(
+    (
+      await ctx.call('POST', `/api/issues/${issue.id}/resume`, {
+        expectedVersion: stopped.version,
+        requestKey: `e2e-resume-after-stop-${cid()}`,
+      })
+    ).json,
+  )
+  assert(resumed.pauseReason === null && resumed.pauseDetail === null, JSON.stringify(resumed))
+  return resumed
+}
+
 registerCase({
   id: 'project.issue_lifecycle',
   level: 'L1',
   title: 'Project workflow/Issue 状态机与 Activity 事实流',
   docs:
-    '免费 L1：UUID/版本严格 canonical（大写 UUID 与带空白版本返回 400）；Project 默认 workflow（INIT→WORK 人工阶段→DONE，含保留 BLOCKED）、设置 CAS（标题/描述与 YOLO 各自独立更新）、workflow JSON 整体替换与非法配置拒绝；Issue 从 INIT 起按 workflow next 白名单 transition（工作流外目标、保留状态与未声明状态一律拒绝）、BLOCKED 由专用 block/recover 进出并记录原阶段与原因、pause(ERROR/结果未知)/resume 门禁与 400 约定（UNKNOWN 暂停原因与 resolve-unknown 端点已移除：前者 400、后者 404）、无活动 Run 时 INSTRUCTION 明确拒绝、COMMENT 幂等重放；Activity 有界窗口分页（nextActivityCursor 语义）与 snapshot 投影（referencedStateCodes 聚合全部未归档及归档 Issue 的当前状态与阻塞恢复目标，归档不可丢引用）；旧七态/依赖/Run 控制端点（/status、/cancel、/inputs、/dependencies）已不存在',
+    '免费 L1：UUID/版本严格 canonical（大写 UUID 与带空白版本返回 400）；Project 默认 workflow（INIT→WORK 人工阶段→DONE，含保留 BLOCKED）、设置 CAS（标题/描述与 YOLO 各自独立更新）、workflow JSON 整体替换与非法配置拒绝；Issue 从 INIT 起按 workflow next 白名单 transition（工作流外目标、保留状态与未声明状态一律拒绝）、BLOCKED 由专用 block/recover 进出并记录原阶段与原因、空闲 STOP 产生 USER 暂停门禁并阻止流转，显式 resume 解除；/pause 和 /resolve-unknown 端点已移除并返回 404；无活动 Run 时 INSTRUCTION 明确拒绝、COMMENT 幂等重放；Activity 有界窗口分页（nextActivityCursor 语义）与 snapshot 投影（referencedStateCodes 聚合全部未归档及归档 Issue 的当前状态与阻塞恢复目标，归档不可丢引用）；旧七态/依赖/Run 控制端点（/status、/cancel、/inputs、/dependencies）已不存在',
   async run(ctx) {
     const suffix = cid().slice(0, 8)
     let project = null
@@ -620,42 +660,16 @@ registerCase({
         { status: 400 },
       )
 
-      // 控制暂停与业务阻塞分离：暂停原因只有 USER/ERROR；结果未知的失败收尾以 ERROR 暂停表达，只能由显式 resume 解除。
+      // 独立软暂停入口已移除；空闲时只能通过 STOP 设置 USER 门禁。
       await expectHttpError(
         () =>
           ctx.call('POST', `/api/issues/${issue.id}/pause`, {
             expectedVersion: current.version,
-            requestKey: `e2e-pause-unknown-${cid()}`,
-            reason: 'UNKNOWN',
-            detail: 'outcome unknown is an ERROR pause, not a separate reason',
+            requestKey: `e2e-pause-removed-${cid()}`,
+            reason: 'USER',
+            detail: 'removed endpoint',
           }),
-        { status: 400 },
-      )
-      const pauseDetail = 'Run stopped with in-flight side effects; outcome unknown'
-      current = envelopeData(
-        (
-          await ctx.call('POST', `/api/issues/${issue.id}/pause`, {
-            expectedVersion: current.version,
-            requestKey: `e2e-pause-error-${cid()}`,
-            reason: 'ERROR',
-            detail: pauseDetail,
-          })
-        ).json,
-      )
-      assert(
-        current.pauseReason === 'ERROR'
-          && current.pauseDetail === pauseDetail
-          && current.state === 'WORK',
-        JSON.stringify(current),
-      )
-      await expectHttpError(
-        () =>
-          ctx.call('POST', `/api/issues/${issue.id}/transition`, {
-            expectedVersion: current.version,
-            requestKey: `e2e-transition-paused-${cid()}`,
-            toState: 'WORK',
-          }),
-        { status: 400 },
+        { status: 404 },
       )
       // UNKNOWN 人工核查门禁已并入 FAILED + ERROR：旧的 resolve-unknown 端点整体移除。
       await expectHttpError(
@@ -667,45 +681,11 @@ registerCase({
           }),
         { status: 404 },
       )
-      current = envelopeData(
-        (
-          await ctx.call('POST', `/api/issues/${issue.id}/resume`, {
-            expectedVersion: current.version,
-            requestKey: `e2e-resume-${cid()}`,
-          })
-        ).json,
-      )
-      assert(current.pauseReason === null && current.pauseDetail === null, JSON.stringify(current))
-
       // 人工终止：没有活动 Run 时只保留 USER 门禁，不伪造 Run 事实。
-      const stopDetail = 'stopped by the operator'
-      current = envelopeData(
-        (
-          await ctx.call('POST', `/api/issues/${issue.id}/stop`, {
-            expectedVersion: current.version,
-            requestKey: `e2e-stop-${cid()}`,
-            detail: stopDetail,
-          })
-        ).json,
-      )
-      assert(
-        current.pauseReason === 'USER'
-          && current.pauseDetail === stopDetail
-          && current.state === 'WORK',
-        JSON.stringify(current),
-      )
-      current = envelopeData(
-        (
-          await ctx.call('POST', `/api/issues/${issue.id}/resume`, {
-            expectedVersion: current.version,
-            requestKey: `e2e-resume-after-stop-${cid()}`,
-          })
-        ).json,
-      )
-      assert(current.pauseReason === null, JSON.stringify(current))
+      current = await verifyIssueStopResume(ctx, current)
 
       // Activity 事实流：STATE_CHANGE 由服务端生成，窗口分页不重不漏。
-      // CONTROL 依次是 BLOCK、RECOVER、PAUSE(ERROR)、RESUME、STOP、RESUME：UNKNOWN 核查事实已不存在。
+      // CONTROL 依次是 BLOCK、RECOVER、STOP、RESUME。
       const facts = await readActivityPages(ctx, issue.id, 2)
       assert(
         facts.map((activity) => activity.kind).join(',')
@@ -715,8 +695,6 @@ registerCase({
             'STATE_CHANGE',
             'STATE_CHANGE',
             'STATE_CHANGE',
-            'CONTROL',
-            'CONTROL',
             'CONTROL',
             'CONTROL',
             'CONTROL',
@@ -738,19 +716,19 @@ registerCase({
           === 'INIT->WORK,WORK->DONE,DONE->INIT,INIT->WORK',
         JSON.stringify(transitions.map((activity) => activity.data)),
       )
-      // 失败暂停以 ERROR 原因留痕，且绝不出现已移除的 UNKNOWN 核查事实。
+      // STOP 以 HUMAN/USER 留痕，且绝不出现已移除的 UNKNOWN 核查事实。
       const controlFacts = facts.filter((activity) => activity.kind === 'CONTROL')
       assert(
         controlFacts.map((activity) => activity.data?.action).join(',')
-          === 'BLOCK,RECOVER,PAUSE,RESUME,STOP,RESUME',
+          === 'BLOCK,RECOVER,STOP,RESUME',
         JSON.stringify(controlFacts.map((activity) => activity.data)),
       )
-      const pauseFact = controlFacts.find((activity) => activity.data?.action === 'PAUSE')
+      const stopFact = controlFacts.find((activity) => activity.data?.action === 'STOP')
       assert(
-        pauseFact?.actorType === 'SYSTEM'
-          && pauseFact.data?.reason === 'ERROR'
+        stopFact?.actorType === 'HUMAN'
+          && stopFact.data?.reason === 'USER'
           && !facts.some((activity) => activity.data?.action === 'RESOLVE_UNKNOWN'),
-        JSON.stringify(pauseFact),
+        JSON.stringify(stopFact),
       )
       await expectHttpError(() => ctx.call('GET', `/api/issues/${issue.id}?limit=0`), { status: 400 })
       await expectHttpError(() => ctx.call('GET', `/api/issues/${issue.id}?afterSequence=-1`), {

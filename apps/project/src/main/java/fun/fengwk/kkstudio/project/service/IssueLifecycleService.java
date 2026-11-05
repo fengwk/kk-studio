@@ -39,7 +39,7 @@ import java.util.Objects;
 import java.util.UUID;
 
 /**
- * Issue 生命周期用例：归档/恢复归档、阻断/恢复、暂停/继续、停止、删除与状态迁移。
+ * Issue 生命周期用例：归档/恢复归档、阻断/恢复、终止/继续、删除与状态迁移。
  *
  * <p>写路径复用 {@link IssueMutationSupport} 的 owner 锁与幂等 receipt；状态合法性由领域 {@link IssueStateTransitions}
  * 判定。停止时在途副作用结果不明，按 FAILED 收尾并保留 ERROR 暂停，原因是结果未知。
@@ -171,39 +171,6 @@ public class IssueLifecycleService {
     // 恢复到仍需要执行的工作阶段时唤醒 mailbox；已有活动 Run 由该 Run 自己收尾。
     mutationSupport.wakeIfExecutable(persisted, locked.workflow());
     return persisted;
-  }
-
-  /** 控制暂停：阻止新派发并记录原因与详情（USER/ERROR）。 */
-  @Transactional
-  public Issue pauseIssue(
-      UUID issueId, long expectedVersion, String requestKey, PauseReason reason, String detail) {
-    Objects.requireNonNull(issueId, "issueId");
-    Objects.requireNonNull(reason, "reason");
-    String key = ProjectValidationUtils.requireRequestKey(requestKey);
-    String validDetail =
-        ProjectValidationUtils.requireUtf8Text(
-            detail, "detail", ProjectValidationUtils.MAX_LARGE_TEXT_BYTES);
-    Identity identity =
-        IssueActivityIdempotency.identity(
-            IssueActivityKind.CONTROL, "PAUSE", key, reason.name(), validDetail);
-    ReceiptLock<IssueMutationSupport.Locked> receipt =
-        mutationSupport.lockUnlessReplayed(issueId, identity);
-    if (receipt.activity() != null) {
-      return receipt.locked() == null
-          ? mutationSupport.currentIssue(issueId)
-          : receipt.locked().issue();
-    }
-    IssueMutationSupport.Locked locked = receipt.locked();
-    mutationSupport.requireMutable(locked, false);
-    mutationSupport.requireVersion(locked, expectedVersion);
-    ObjectNode data = mutationSupport.newData();
-    data.put("action", "PAUSE");
-    data.put("reason", reason.name());
-    mutationSupport.appendActivity(
-        locked.issue(), identity, IssueActivityActorType.SYSTEM, null, null, null, data);
-    locked.issue().setPauseReason(reason.name());
-    locked.issue().setPauseDetail(validDetail);
-    return mutationSupport.persist(locked, expectedVersion);
   }
 
   /** 显式解除控制暂停门禁。 */

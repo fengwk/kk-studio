@@ -16,7 +16,6 @@ import fun.fengwk.kkstudio.project.error.ProjectValidationException;
 import fun.fengwk.kkstudio.project.error.ProjectVersionConflictException;
 import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.IssueRun;
-import fun.fengwk.kkstudio.project.model.PauseReason;
 import fun.fengwk.kkstudio.project.model.Project;
 
 import java.util.UUID;
@@ -229,19 +228,17 @@ class ProjectWorkflowServiceIntegrationTest extends ProjectTestSupport {
     projectService.updateWorkflow(
         project.getId(), project.getVersion(), workflowJson(agent, agent, 3));
     Issue issue = createIssue(project.getId());
-    String pauseKey = key("pause");
-    Issue paused =
-        issueLifecycleService.pauseIssue(
-            issue.getId(), issue.getVersion(), pauseKey, PauseReason.USER, "人工暂停");
+    String stopKey = key("stop");
+    Issue stopped =
+        issueLifecycleService.stopIssue(issue.getId(), issue.getVersion(), stopKey, "人工终止");
     long activityCount = activityCount(issue.getId());
 
     // 用第一次请求前的旧版本重试：精确重试先于版本校验，因此必须成功且返回同一事实。
-    Issue replayed =
-        issueLifecycleService.pauseIssue(issue.getId(), 0L, pauseKey, PauseReason.USER, "人工暂停");
+    Issue replayed = issueLifecycleService.stopIssue(issue.getId(), 0L, stopKey, "人工终止");
 
     assertEquals("USER", replayed.getPauseReason());
-    assertEquals("人工暂停", replayed.getPauseDetail());
-    assertEquals(paused.getVersion(), replayed.getVersion());
+    assertEquals("人工终止", replayed.getPauseDetail());
+    assertEquals(stopped.getVersion(), replayed.getVersion());
     assertEquals(activityCount, activityCount(issue.getId()));
   }
 
@@ -298,28 +295,23 @@ class ProjectWorkflowServiceIntegrationTest extends ProjectTestSupport {
     projectService.updateWorkflow(
         project.getId(), project.getVersion(), workflowJson(agent, agent, 3));
     Issue issue = createIssue(project.getId());
-    String pauseKey = key("pause");
-    Issue paused =
-        issueLifecycleService.pauseIssue(
-            issue.getId(), issue.getVersion(), pauseKey, PauseReason.USER, "第一次暂停");
+    String stopKey = key("stop");
+    Issue stopped =
+        issueLifecycleService.stopIssue(issue.getId(), issue.getVersion(), stopKey, "第一次终止");
     long activityCount = activityCount(issue.getId());
 
-    Issue stillPaused = issueEditingService.getIssue(issue.getId());
+    Issue stillStopped = issueEditingService.getIssue(issue.getId());
     assertThrows(
         ProjectDuplicateException.class,
         () ->
-            issueLifecycleService.pauseIssue(
-                stillPaused.getId(),
-                stillPaused.getVersion(),
-                pauseKey,
-                PauseReason.USER,
-                "第二次暂停"));
+            issueLifecycleService.stopIssue(
+                stillStopped.getId(), stillStopped.getVersion(), stopKey, "第二次终止"));
 
     Issue after = issueEditingService.getIssue(issue.getId());
-    assertEquals("第一次暂停", after.getPauseDetail());
-    assertEquals(stillPaused.getVersion(), after.getVersion());
+    assertEquals("第一次终止", after.getPauseDetail());
+    assertEquals(stillStopped.getVersion(), after.getVersion());
     assertEquals(activityCount, activityCount(issue.getId()));
-    assertEquals(paused.getVersion(), after.getVersion());
+    assertEquals(stopped.getVersion(), after.getVersion());
   }
 
   private long activityCount(UUID issueId) {

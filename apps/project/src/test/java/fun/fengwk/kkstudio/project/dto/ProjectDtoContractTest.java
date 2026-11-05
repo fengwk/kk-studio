@@ -58,7 +58,6 @@ class ProjectDtoContractTest {
     "CreateIssueRequestDTO.description",
     "UpdateIssueRequestDTO.title",
     "UpdateIssueRequestDTO.description",
-    "PauseIssueRequestDTO.detail",
     "StopIssueRequestDTO.detail",
     "AppendIssueActivityRequestDTO.kind"
   };
@@ -86,7 +85,6 @@ class ProjectDtoContractTest {
     "TransitionIssueRequestDTO.expectedVersion",
     "BlockIssueRequestDTO.expectedVersion",
     "RecoverIssueRequestDTO.expectedVersion",
-    "PauseIssueRequestDTO.expectedVersion",
     "ResumeIssueRequestDTO.expectedVersion",
     "ReopenIssueRequestDTO.expectedVersion",
     "ResetStageBudgetRequestDTO.expectedVersion",
@@ -96,7 +94,7 @@ class ProjectDtoContractTest {
     "AppendIssueActivityRequestDTO.expectedVersion"
   };
 
-  /** 测试意图：精确验证全包 33 个 DTO 的实例字段集合，确保无多余冗余字段，且所有遗留字段被彻底移除。 */
+  /** 测试意图：精确验证全包 31 个 DTO 的实例字段集合，确保无多余冗余字段，且所有遗留字段被彻底移除。 */
   @Test
   void exactFieldSetsMatchCurrentContract() {
     // Response DTOs
@@ -247,10 +245,6 @@ class ProjectDtoContractTest {
     assertEquals(
         Set.of("expectedVersion", "requestKey"),
         getInstanceFieldNames(RecoverIssueRequestDTO.class));
-
-    assertEquals(
-        Set.of("expectedVersion", "requestKey", "reason", "detail"),
-        getInstanceFieldNames(PauseIssueRequestDTO.class));
 
     assertEquals(
         Set.of("expectedVersion", "requestKey"),

@@ -29,7 +29,6 @@ import fun.fengwk.kkstudio.project.dto.AppendIssueActivityRequestDTO;
 import fun.fengwk.kkstudio.project.dto.ArchiveIssueRequestDTO;
 import fun.fengwk.kkstudio.project.dto.BlockIssueRequestDTO;
 import fun.fengwk.kkstudio.project.dto.CreateIssueRequestDTO;
-import fun.fengwk.kkstudio.project.dto.PauseIssueRequestDTO;
 import fun.fengwk.kkstudio.project.dto.ProjectDtoMapper;
 import fun.fengwk.kkstudio.project.dto.RecoverIssueRequestDTO;
 import fun.fengwk.kkstudio.project.dto.ReopenIssueRequestDTO;
@@ -62,7 +61,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
-/** 验证 IssueController 的全部 15 个 REST 接口端点与 CAS 409 处理。 */
+/** 验证 IssueController 的全部 16 个 REST 接口端点与 CAS 409 处理。 */
 class IssueControllerTest {
 
   private IssueEditingService issueEditingService;
@@ -333,32 +332,15 @@ class IssueControllerTest {
         .andExpect(jsonPath("$.data.state").value("WORK"));
   }
 
+  /** 测试意图：删除的软暂停端点不可再调用，显式恢复入口仍单独提供。 */
   @Test
-  void testPause() throws Exception {
-    PauseIssueRequestDTO req =
-        PauseIssueRequestDTO.builder()
-            .expectedVersion("1")
-            .requestKey("k1")
-            .reason("USER")
-            .detail("manual pause")
-            .build();
-    Issue paused =
-        Issue.builder()
-            .id(issueId)
-            .version(2L)
-            .pauseReason("USER")
-            .pauseDetail("manual pause")
-            .build();
-    when(issueLifecycleService.pauseIssue(issueId, 1L, "k1", PauseReason.USER, "manual pause"))
-        .thenReturn(paused);
-
+  void pauseEndpointIsNotAvailable() throws Exception {
     mockMvc
         .perform(
             post("/api/issues/" + issueId + "/pause")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(req)))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.pauseReason").value("USER"));
+                .content("{}"))
+        .andExpect(status().isNotFound());
   }
 
   @Test

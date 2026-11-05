@@ -236,8 +236,7 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
     String acceptKey = key("accept");
     IssueRun accepted = issueRunService.acceptRun(issue.getId(), acceptKey);
     Issue inDesign = issueEditingService.getIssue(issue.getId());
-    issueLifecycleService.pauseIssue(
-        inDesign.getId(), inDesign.getVersion(), key("pause"), PauseReason.USER, "人工暂停");
+    seedPauseGate(inDesign, PauseReason.USER, "人工暂停");
 
     assertEquals(accepted.getId(), issueRunService.acceptRun(issue.getId(), acceptKey).getId());
     assertThrows(
@@ -929,10 +928,8 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
     IssueRun waiting = issueRunService.waitRun(run.getId(), run.getVersion());
     Issue waitingIssue = issueEditingService.getIssue(issue.getId());
-    issueLifecycleService.pauseIssue(
-        waitingIssue.getId(),
-        waitingIssue.getVersion(),
-        key("pause"),
+    seedPauseGate(
+        waitingIssue,
         PauseReason.ERROR,
         "Run stopped with in-flight side effects; outcome unknown");
 

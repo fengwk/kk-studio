@@ -469,8 +469,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     Issue issue = createIssue(projectId);
     issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     issue = issueEditingService.getIssue(issue.getId());
-    issueLifecycleService.pauseIssue(
-        issue.getId(), issue.getVersion(), key("pause"), PauseReason.USER, "人工暂停");
+    issueLifecycleService.stopIssue(issue.getId(), issue.getVersion(), key("stop"), "人工暂停");
 
     WorkClaim claim = claimWork(issue.getId());
     IssueReconcileOutcome outcome = reconciler.reconcile(claim);
@@ -1003,7 +1002,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
             run.getId()));
   }
 
-  /** 测试意图：业务人工暂停只阻止新 Run 调度，不挂起已接受的在途 Thread；静止的 RUNNING Run 保持原状延后，绝不自动 stop 或复活执行。 */
+  /** 测试意图：合成 RUNNING Run 与暂停门禁共存时，调谐不自动 stop 或复活执行，静止的 Run 保持原状延后。 */
   @Test
   void activeRunRunningAndIssuePausedStaysRunningWithoutStop() {
     String agent = createAgent();
@@ -1012,8 +1011,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
     issue = issueEditingService.getIssue(issue.getId());
-    issueLifecycleService.pauseIssue(
-        issue.getId(), issue.getVersion(), key("pause"), PauseReason.USER, "人工暂停");
+    seedPauseGate(issue, PauseReason.USER, "人工暂停");
 
     WorkClaim claim = claimWork(issue.getId());
     IssueReconcileOutcome outcome = reconciler.reconcile(claim);
@@ -1033,7 +1031,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
             issue.getId()));
   }
 
-  /** 测试意图：处于 WAITING 状态且 Issue 仍然暂停的 Run，reconcile 返回 WAITING_FOR_GATE 并继续延后检查。 */
+  /** 测试意图：合成 WAITING Run 与暂停门禁共存时，reconcile 返回 WAITING_FOR_GATE 并继续延后检查。 */
   @Test
   void activeRunWaitingAndIssueStillPausedWaitsForGate() {
     String agent = createAgent();
@@ -1042,8 +1040,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
     issue = issueEditingService.getIssue(issue.getId());
-    issueLifecycleService.pauseIssue(
-        issue.getId(), issue.getVersion(), key("pause"), PauseReason.USER, "人工暂停");
+    seedPauseGate(issue, PauseReason.USER, "人工暂停");
     issueRunService.waitRun(run.getId(), run.getVersion());
 
     WorkClaim claim = claimWork(issue.getId());
@@ -1057,7 +1054,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
             run.getId()));
   }
 
-  /** 测试意图：处于 WAITING 状态的 Run 在 Issue 暂停解除后被恢复为 RUNNING 状态，不消耗新的阶段额度。 */
+  /** 测试意图：合成 WAITING Run 与暂停门禁共存时，显式解除后 Run 恢复为 RUNNING，不消耗新的阶段额度。 */
   @Test
   void activeRunWaitingAndIssueResumedResumesRun() {
     String agent = createAgent();
@@ -1066,8 +1063,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
     issue = issueEditingService.getIssue(issue.getId());
-    issueLifecycleService.pauseIssue(
-        issue.getId(), issue.getVersion(), key("pause"), PauseReason.USER, "人工暂停");
+    seedPauseGate(issue, PauseReason.USER, "人工暂停");
     issueRunService.waitRun(run.getId(), run.getVersion());
     issue = issueEditingService.getIssue(issue.getId());
     issueLifecycleService.resumeIssue(issue.getId(), issue.getVersion(), key("resume"));
