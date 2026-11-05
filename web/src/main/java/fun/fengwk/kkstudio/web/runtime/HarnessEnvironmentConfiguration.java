@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.web.runtime;
 
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
@@ -37,6 +38,7 @@ import java.util.concurrent.TimeUnit;
  * <p>会话监听器的每个动作都立刻返回且各自隔离异常：会话状态推进会先完成，任何宿主回调失败都不得影响会话本身。协作者都用延迟解析，避免经 capability
  * 传输间接依赖本监听器而在启动期成环。
  */
+@Slf4j
 @Configuration(proxyBeanMethods = false)
 public class HarnessEnvironmentConfiguration {
 
@@ -118,17 +120,29 @@ public class HarnessEnvironmentConfiguration {
       public void onEnvironmentReady(EnvironmentId environmentId) {
         try {
           dispatcherProvider.ifAvailable(HarnessWorkDispatcher::wake);
-        } catch (RuntimeException ignored) {
+        } catch (RuntimeException error) {
+          log.warn(
+              "environment session callback dispatcher.wake failed for {}: {}",
+              environmentId,
+              error.getClass().getSimpleName());
         }
         try {
           orchestratorProvider.ifAvailable(
               orchestrator -> orchestrator.onEnvironmentReady(environmentId));
-        } catch (RuntimeException ignored) {
+        } catch (RuntimeException error) {
+          log.warn(
+              "environment session callback skillSync.onEnvironmentReady failed for {}: {}",
+              environmentId,
+              error.getClass().getSimpleName());
         }
         try {
           remoteExitReconcilerProvider.ifAvailable(
               reconciler -> reconciler.onEnvironmentReady(environmentId));
-        } catch (RuntimeException ignored) {
+        } catch (RuntimeException error) {
+          log.warn(
+              "environment session callback remoteExitReconcile.onEnvironmentReady failed for {}: {}",
+              environmentId,
+              error.getClass().getSimpleName());
         }
       }
 
@@ -139,7 +153,11 @@ public class HarnessEnvironmentConfiguration {
         try {
           ideLeaseCoordinatorProvider.ifAvailable(
               coordinator -> coordinator.onHeartbeat(environmentId, identity, ideLeaseRound));
-        } catch (RuntimeException ignored) {
+        } catch (RuntimeException error) {
+          log.warn(
+              "environment session callback ideLease.onHeartbeat failed for {}: {}",
+              environmentId,
+              error.getClass().getSimpleName());
         }
       }
 
@@ -149,7 +167,11 @@ public class HarnessEnvironmentConfiguration {
         try {
           orchestratorProvider.ifAvailable(
               orchestrator -> orchestrator.onSkillState(environmentId, packages));
-        } catch (RuntimeException ignored) {
+        } catch (RuntimeException error) {
+          log.warn(
+              "environment session callback skillSync.onSkillState failed for {}: {}",
+              environmentId,
+              error.getClass().getSimpleName());
         }
       }
 

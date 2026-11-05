@@ -5,14 +5,21 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
@@ -24,6 +31,7 @@ import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillSyncOrches
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessExecutionAdmissionProperties;
 import fun.fengwk.kkstudio.platform.harness.dispatch.HarnessWorkDispatcher;
 
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -137,6 +145,8 @@ class CompositeEnvironmentSessionListenerTest {
     verify(workDispatcher).wake();
     verify(orchestrator).onEnvironmentReady(envId);
     verify(reconciler).onEnvironmentReady(envId);
+    listener.onSkillState(envId, List.of());
+    verify(orchestrator).onSkillState(envId, List.of());
   }
 
   @Test
@@ -194,5 +204,59 @@ class CompositeEnvironmentSessionListenerTest {
     assertDoesNotThrow(() -> listener.onEnvironmentReady(envId));
 
     verify(orchestrator).onEnvironmentReady(envId);
+  }
+
+  /** 所有宿主回调失败仍相互隔离，且每条告警可定位环境和动作而不泄露异常正文。 */
+  @Test
+  void callbackFailuresAreIsolatedAndLogged() {
+    EnvironmentId envId = EnvironmentId.of(UUID.randomUUID());
+    DaemonConnectionIdentity identity = new DaemonConnectionIdentity(envId, "daemon-1");
+    doThrow(new IllegalStateException("private detail")).when(workDispatcher).wake();
+    doThrow(new IllegalStateException("private detail"))
+        .when(orchestrator)
+        .onEnvironmentReady(envId);
+    doThrow(new IllegalStateException("private detail")).when(reconciler).onEnvironmentReady(envId);
+    doThrow(new IllegalStateException("private detail"))
+        .when(leaseCoordinator)
+        .onHeartbeat(envId, identity, 7L);
+    doThrow(new IllegalStateException("private detail"))
+        .when(orchestrator)
+        .onSkillState(envId, List.of());
+
+    Logger logger = (Logger) LoggerFactory.getLogger(HarnessEnvironmentConfiguration.class);
+    ListAppender<ILoggingEvent> logs = new ListAppender<>();
+    logs.start();
+    logger.addAppender(logs);
+    try {
+      assertDoesNotThrow(() -> listener.onEnvironmentReady(envId));
+      assertDoesNotThrow(() -> listener.onHeartbeat(envId, identity, 7L));
+      assertDoesNotThrow(() -> listener.onSkillState(envId, List.of()));
+
+      verify(workDispatcher).wake();
+      verify(orchestrator).onEnvironmentReady(envId);
+      verify(reconciler).onEnvironmentReady(envId);
+      verify(leaseCoordinator).onHeartbeat(envId, identity, 7L);
+      verify(orchestrator).onSkillState(envId, List.of());
+      assertEquals(5, logs.list.size());
+      List<String> callbacks =
+          List.of(
+              "dispatcher.wake",
+              "skillSync.onEnvironmentReady",
+              "remoteExitReconcile.onEnvironmentReady",
+              "ideLease.onHeartbeat",
+              "skillSync.onSkillState");
+      for (int i = 0; i < callbacks.size(); i++) {
+        ILoggingEvent event = logs.list.get(i);
+        assertEquals(Level.WARN, event.getLevel());
+        assertTrue(event.getFormattedMessage().contains(envId.toString()));
+        assertTrue(event.getFormattedMessage().contains(callbacks.get(i)));
+        assertTrue(event.getFormattedMessage().contains("IllegalStateException"));
+        assertFalse(event.getFormattedMessage().contains("private detail"));
+        assertNull(event.getThrowableProxy());
+      }
+    } finally {
+      logger.detachAppender(logs);
+      logs.stop();
+    }
   }
 }
