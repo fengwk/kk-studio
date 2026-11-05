@@ -25,7 +25,7 @@ Reconcile 的执行器、生命周期由 [Web](web.md) 组装。模块依赖方�
 | [service](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service) | 用例级事务边界：Project、Issue 编辑/生命周期/阶段预算、Run、Evidence 与 Work 邮箱；`ProjectSnapshotAssembler` 与 `IssueDetailAssembler` 聚合快照；`IssueMutationSupport` 共用 owner 锁与幂等回执 |
 | [reconcile](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/reconcile) | Issue 调度的部署级配置与确定性推进 |
 | [platform](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/platform) | 对运行时与全局 Blob 的窄适配：Issue/Run 执行所需的 Thread 事实与命令控制、证据 Blob |
-| [tool](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/tool) | Project Harness Contributor：`issue_transition` 业务工具与 Thread 归属解析 |
+| [tool](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/tool) | Project Harness Contributor：`issue_transition` 业务工具 |
 | [dto](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/dto) | Project/Issue wire DTO 与领域模型双向映射 |
 | [http](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/http) | Project/Issue REST 控制器与统一错误映射；只做 HTTP 适配，领域行为在 `service` |
 | [error](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/error) | 模块自有错误模型与稳定的 Project 错误映射 |

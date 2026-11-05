@@ -47,7 +47,6 @@ class ToolSettingsProviderTest {
                 new SystemSettings.Tool(
                     Map.of("write", List.of(new PermissionRule("*", PermissionAction.DENY))),
                     5_000L,
-                    1_000L,
                     5_000L)));
     assertEquals(PermissionAction.DENY, provider.get().rulesFor("write").getFirst().action());
 

@@ -813,14 +813,6 @@ export const settingsCatalog = {
     'en-US': 'Delay in milliseconds before retrying when the model gateway encounters provider busy or rate limit errors.',
     'zh-CN': '模型网关遇到提供商繁忙或限流时的重试等待毫秒数。',
   },
-  'settings.field.tool.toolGatewayBusyRetryMillis': {
-    'en-US': 'Tool gateway busy retry (ms)',
-    'zh-CN': '工具网关繁忙重试（毫秒）',
-  },
-  'settings.field.tool.toolGatewayBusyRetryMillis.hint': {
-    'en-US': 'Delay in milliseconds before retrying when the tool gateway encounters a busy host or tool service.',
-    'zh-CN': '工具网关在外部工具或宿主繁忙时的重试等待毫秒数。',
-  },
   'settings.field.tool.toolGatewayOverloadRetryMillis': {
     'en-US': 'Tool gateway overload retry (ms)',
     'zh-CN': '工具网关过载重试（毫秒）',

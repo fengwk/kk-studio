@@ -850,7 +850,7 @@ insert into system_setting (id, config) values (
       "environment":{"heartbeatTimeoutMillis":60000,"maxResourceBytes":16777216},
       "network":{"noProxyHosts":"localhost,127.*,::1"},
       "storageMedia":{"canvasMediaProcessTimeoutMillis":30000,"s3PresignDefaultExpiresSeconds":1800,"s3PresignMaxExpiresSeconds":3600,"temporaryResourceCleanupIntervalSeconds":1800,"temporaryResourceTtlSeconds":259200,"thumbnailMaxDimension":512,"thumbnailQuality":80,"uploadExpiresSeconds":86400},
-      "tool":{"modelGatewayBusyRetryMillis":5000,"permission":{"bash":[{"action":"ask","pattern":"*"}],"edit":[{"action":"ask","pattern":"*"}],"write":[{"action":"ask","pattern":"*"}]},"toolGatewayBusyRetryMillis":1000,"toolGatewayOverloadRetryMillis":5000}
+      "tool":{"modelGatewayBusyRetryMillis":5000,"permission":{"bash":[{"action":"ask","pattern":"*"}],"edit":[{"action":"ask","pattern":"*"}],"write":[{"action":"ask","pattern":"*"}]},"toolGatewayOverloadRetryMillis":5000}
     }'::jsonb
 );
 

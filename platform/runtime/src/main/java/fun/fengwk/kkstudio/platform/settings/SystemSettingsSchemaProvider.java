@@ -215,14 +215,6 @@ public class SystemSettingsSchemaProvider {
             1,
             null),
         field(
-            "tool.toolGatewayBusyRetryMillis",
-            "settings.field.tool.toolGatewayBusyRetryMillis",
-            null,
-            FieldType.LONG,
-            false,
-            1,
-            null),
-        field(
             "tool.toolGatewayOverloadRetryMillis",
             "settings.field.tool.toolGatewayOverloadRetryMillis",
             null,

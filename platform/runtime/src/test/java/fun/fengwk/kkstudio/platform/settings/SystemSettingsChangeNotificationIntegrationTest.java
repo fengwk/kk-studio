@@ -203,10 +203,7 @@ class SystemSettingsChangeNotificationIntegrationTest extends PostgresSpringTest
     SystemSettings.Tool base = SystemSettings.DEFAULT.tool();
     return new SystemSettings(
         new SystemSettings.Tool(
-            base.permission(),
-            busyRetryMillis,
-            base.toolGatewayBusyRetryMillis(),
-            base.toolGatewayOverloadRetryMillis()),
+            base.permission(), busyRetryMillis, base.toolGatewayOverloadRetryMillis()),
         SystemSettings.DEFAULT.aiRuntime(),
         SystemSettings.DEFAULT.environment(),
         SystemSettings.DEFAULT.network(),

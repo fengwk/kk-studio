@@ -233,7 +233,6 @@ class SystemSettingsDtoContractTest {
     rule.setAction("ask");
     tool.setPermission(Map.of("write", List.of(rule)));
     tool.setModelGatewayBusyRetryMillis(5000L);
-    tool.setToolGatewayBusyRetryMillis(1000L);
     tool.setToolGatewayOverloadRetryMillis(5000L);
     dto.setTool(tool);
     SystemSettingsNetworkDTO network = new SystemSettingsNetworkDTO();

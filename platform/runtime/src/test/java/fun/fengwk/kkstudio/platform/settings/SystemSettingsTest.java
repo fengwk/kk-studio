@@ -38,7 +38,6 @@ class SystemSettingsTest {
         defaults.tool().permission().get("bash"));
     assertEquals(false, defaults.tool().permission().containsKey("read"));
     assertEquals(5_000L, defaults.tool().modelGatewayBusyRetryMillis());
-    assertEquals(1_000L, defaults.tool().toolGatewayBusyRetryMillis());
     assertEquals(5_000L, defaults.tool().toolGatewayOverloadRetryMillis());
 
     assertEquals(3, defaults.aiRuntime().retryMaxRetries());
@@ -390,9 +389,6 @@ class SystemSettingsTest {
     permission.put(toolId, List.of(rules));
     SystemSettings.Tool base = SystemSettings.DEFAULT.tool();
     return new SystemSettings.Tool(
-        permission,
-        base.modelGatewayBusyRetryMillis(),
-        base.toolGatewayBusyRetryMillis(),
-        base.toolGatewayOverloadRetryMillis());
+        permission, base.modelGatewayBusyRetryMillis(), base.toolGatewayOverloadRetryMillis());
   }
 }

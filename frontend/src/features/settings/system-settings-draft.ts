@@ -19,7 +19,6 @@ export interface PermissionGroupDraft {
 export interface SystemSettingsToolDraft {
   permission: PermissionGroupDraft[]
   modelGatewayBusyRetryMillis: DraftNumericField
-  toolGatewayBusyRetryMillis: DraftNumericField
   toolGatewayOverloadRetryMillis: DraftNumericField
 }
 
@@ -114,7 +113,6 @@ export function settingsSectionsToDraft(dto: SystemSettingsSectionsDTO): SystemS
     tool: {
       permission,
       modelGatewayBusyRetryMillis: dto.tool.modelGatewayBusyRetryMillis,
-      toolGatewayBusyRetryMillis: dto.tool.toolGatewayBusyRetryMillis,
       toolGatewayOverloadRetryMillis: dto.tool.toolGatewayOverloadRetryMillis,
     },
     aiRuntime: aiRuntimeToDraft(dto.aiRuntime),
@@ -211,9 +209,6 @@ export function assembleSettingsUpdate(
       permission,
       modelGatewayBusyRetryMillis: requiredLong(
         draft.tool.modelGatewayBusyRetryMillis,
-      ),
-      toolGatewayBusyRetryMillis: requiredLong(
-        draft.tool.toolGatewayBusyRetryMillis,
       ),
       toolGatewayOverloadRetryMillis: requiredLong(
         draft.tool.toolGatewayOverloadRetryMillis,
