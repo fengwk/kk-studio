@@ -575,6 +575,11 @@ export async function runComposerMatrix(ui) {
             'history tree did not preserve branch lanes',
           )
           const selectedBeforeTreeMove = await selectedHistoryRow.getAttribute('aria-label')
+          const previousRow = await selectedHistoryRow.evaluate((selected) => {
+            const rows = [...selected.closest('.history-tree-list').querySelectorAll('.history-tree-entry')]
+            return rows[rows.indexOf(selected) - 1]?.getAttribute('aria-label') ?? null
+          })
+          assert(previousRow != null, 'history head has no previous row')
           await historySearch.press('ArrowUp')
           await page.waitForFunction(
             ({ panelLabel, previous }) => {
@@ -585,6 +590,10 @@ export async function runComposerMatrix(ui) {
             },
             { panelLabel: '历史树', previous: selectedBeforeTreeMove },
             { timeout: 10_000 },
+          )
+          assert(
+            await selectedHistoryRow.getAttribute('aria-label') === previousRow,
+            'ArrowUp did not select the immediately preceding history entry',
           )
           await shot(caseArt, 'history-panel-keyboard-mode')
           await page.waitForFunction(
