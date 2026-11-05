@@ -20,6 +20,7 @@ const docsRoot = path.join(repositoryRoot, 'docs')
 const moduleDocuments = [
   'builtin-tools.md',
   'canvas.md',
+  'chat.md',
   'common.md',
   'daemon.md',
   'frontend.md',
@@ -405,6 +406,7 @@ const moduleDependencies = {
     'platform-runtime',
   ],
   'apps/project': ['common', 'share', 'work', 'harness-runtime', 'platform-runtime'],
+  'apps/chat': ['common', 'share', 'harness-runtime', 'platform-runtime'],
   'apps/ide': ['common', 'share', 'harness-environment', 'platform-daemon-server', 'platform-runtime'],
   'plugins/comfyui': ['common', 'canvas-spi', 'harness-runtime', 'platform-plugin-api'],
   'plugins/media': ['common', 'canvas-spi', 'harness-runtime', 'platform-plugin-api'],

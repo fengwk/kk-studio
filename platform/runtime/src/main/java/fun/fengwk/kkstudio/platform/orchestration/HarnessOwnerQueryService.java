@@ -76,7 +76,12 @@ public class HarnessOwnerQueryService {
     return List.copyOf(requireRuntime().getSessionEntries(sessionId));
   }
 
-  private List<HarnessSessionSummaryDTO> listSessionSummaries(List<UUID> sessionIds) {
+  /**
+   * 按给定 Session id 投影摘要，保持输入顺序。
+   *
+   * <p>供 owner 侧已按自身 keyset 分页的读取使用：平台只负责从 Harness Runtime 读取 Session 事实，分页与归属仍由产品决定。
+   */
+  public List<HarnessSessionSummaryDTO> listSessionSummaries(List<UUID> sessionIds) {
     Objects.requireNonNull(sessionIds, "sessionIds");
     List<HarnessSessionSummaryDTO> summaries = new ArrayList<>(sessionIds.size());
     HarnessRuntime runtime = requireRuntime();

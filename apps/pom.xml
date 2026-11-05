@@ -16,6 +16,7 @@
 
     <modules>
         <module>canvas</module>
+        <module>chat</module>
         <module>project</module>
         <module>ide</module>
     </modules>

@@ -723,28 +723,10 @@ create table chat (
     created_at          timestamptz(3) not null default current_timestamp,
     updated_at          timestamptz(3) not null default current_timestamp,
     version             bigint        not null default 0,
-    archived_at         timestamptz(3),
-    constraint ck_chat_version_nonneg check (version >= 0),
-    constraint ck_chat_agent_name check (
-        agent_name !~ '^[[:space:]]'
-        and agent_name !~ '[[:space:]]$'
-        and char_length(agent_name) > 0
-        and position('/' in agent_name) = 0
-    ),
-    constraint ck_chat_environment_name check (
-        environment_name is null
-        or (environment_name !~ '^[[:space:]]'
-            and environment_name !~ '[[:space:]]$'
-            and char_length(environment_name) > 0
-            and position('/' in environment_name) = 0)
-    )
+    constraint ck_chat_version_nonneg check (version >= 0)
 );
 
 create index idx_chat_modified on chat (updated_at, created_at);
-create index idx_chat_archived on chat (archived_at, updated_at, id);
-
-comment on column chat.archived_at is '归档时间戳（毫秒精度）；非空即离开默认列表，但历史与资源保留';
-comment on index idx_chat_archived is '归档 Chat 列表按 (archived_at, updated_at, id) 读取';
 
 ------------------------------------------------------------------------------
 -- 1b. Environment connections and operations

@@ -71,7 +71,7 @@ health、资源下载和 WebSocket 使用各自传输形式。公开路由如下
 | Skill | `/api/skill-packages` | CRUD、check、exact commit update |
 | MCP | `/api/mcp-servers` | name-keyed CRUD、显式 no-store config、同步 discover |
 | Plugin | `/api/plugins` | 安全投影、普通配置 PUT、auth/prepare、auth/complete、删除 auth；`{pluginId}/connection-check` 按 expected 坐标执行一次显式只读连接检查 |
-| Chat | `/api/chats` | CRUD 与归属 Session |
+| Chat | `/api/chats` | 由 [Chat](chat.md) 模块提供的 CRUD 与归属 Session；Web 只做装配 |
 | Harness command | `/api/command-batches`、`/api/threads/{threadId}/command-batches` | 创建型 Chat 命令接受（owner-aware）与既有 Thread 的 owner-free 续写；都返回 202 |
 | Session | `/api/sessions/{sessionId}` | threads、entries（含读取时 `usageCost`）、name、草稿/历史请求预览 |
 | Session files | `/api/sessions/{sessionId}/files` | 只读会话文件面板：列目录、文本窗口（`/content`）、下载（`/download`）；按 `ownerKind` + `ownerId` 校验归属 |
@@ -94,10 +94,7 @@ Agent 的创建、完整 PUT 和读取使用 `execution: {driver, settings}`。�
 | Environment IDE | `/api/environments/{id}/ide/views`、`/environment-ide/{environmentId}/{viewId}/` | 打开/关闭视图、切换目录与终端；同源 IDE 固定入口、bootstrap 票据与 HTTP/WebSocket 数据面 |
 | Environment Daemon | `/api/harness/environment-daemon` | Daemon 准入裁决与 WebSocket 升级端点，承载控制与数据传输 |
 
-`POST /api/chats` 省略 `yoloEnabled` 时为 `false`；创建请求的 `environmentName` 可省略或为 null（都表示无默认环境），
-携带时必须为已存在的 Environment 名；响应中的 `environmentName` 是始终存在的 required-nullable 字段（未选择时为 null）。
-`PUT /api/chats/{chatId}` 省略 `environmentName` 保留当前默认环境、显式 null 清空，
-未知或非 canonical Environment 名 400 且当前值/version 不变。
+`POST /api/chats` 与 `PUT /api/chats/{chatId}` 的字段语义见 [Chat](chat.md)。
 
 会话文件面板是只读 HTTP：`GET /api/sessions/{sessionId}/files?ownerKind&ownerId&path` 列目录、
 `GET .../files/content?path&offset&limit&columnOffset` 返回有界文本窗口与 revision、大小、更新时间，

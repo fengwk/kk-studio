@@ -27,6 +27,7 @@ import {
   type ChatPaneState,
 } from '@/features/chat/chat-pane-state'
 import { agentService } from '@/shared/api/agent-service'
+import { isNotFoundError } from '@/shared/api/client'
 import { chatService } from '@/features/chat/chat-service'
 import { environmentService } from '@/features/environment/environment-service'
 import { queryKeys } from '@/shared/lib/query-keys'
@@ -200,15 +201,23 @@ function ChatWorkspaceContent({
 
   const focusedReport = paneReports[paneState.focusedPaneId] ?? null
   const focusedSessionId = focusedReport?.sessionId ?? null
-  // 只用于顶栏面包屑的 Session 名称；按需查询，不参与目标路由。
-  const sessionsQuery = useQuery({
-    queryKey: ['chat-workspace', 'sessions', chat.id],
-    queryFn: () => chatService.listChatSessions(chat.id),
+  // 只用于顶栏面包屑的 Session 名称；按 id 单条读取，不依赖分页窗口。
+  const sessionQuery = useQuery({
+    queryKey: ['chat-workspace', 'session', chat.id, focusedSessionId],
+    queryFn: async () => {
+      try {
+        return await chatService.getChatSession(chat.id, focusedSessionId!)
+      } catch (error) {
+        // 目标 Session 已删除时面包屑退化为 id，而不是把整页打成错误态。
+        if (isNotFoundError(error)) {
+          return null
+        }
+        throw error
+      }
+    },
     enabled: focusedSessionId != null,
   })
-  const focusedSessionName = focusedSessionId == null
-    ? null
-    : sessionsQuery.data?.find((session) => session.sessionId === focusedSessionId)?.name ?? null
+  const focusedSessionName = sessionQuery.data?.name ?? null
   const filesHint = focusedSessionId == null
     ? t('ai.sessionFiles.noSession')
     : t('ai.sessionFiles.title')

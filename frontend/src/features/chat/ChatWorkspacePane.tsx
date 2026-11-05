@@ -3,6 +3,7 @@ import type { BranchRequestInput, PaneReport } from '@/features/thread/runtime/r
 import type { PaneTarget } from '@/features/thread/runtime/agent-pane'
 import type { ThreadPresentation } from '@/features/thread/runtime/thread-presentation'
 import { chatService } from '@/features/chat/chat-service'
+import { isNotFoundError } from '@/shared/api/client'
 import type {
   AgentDefinitionDTO,
   ChatDTO,
@@ -72,7 +73,17 @@ export function ChatWorkspacePane({
         ? undefined
         : (report) => onPaneReport(pane.id, report)}
       onPresentation={onPresentation == null ? undefined : (report) => onPresentation(pane.id, report)}
-      loadSessions={() => chatService.listChatSessions(chat.id)}
+      loadSessions={(_owner, cursor) => chatService.listChatSessions(chat.id, cursor)}
+      loadSession={async (sessionId) => {
+        try {
+          return await chatService.getChatSession(chat.id, sessionId)
+        } catch (error) {
+          if (isNotFoundError(error)) {
+            return null
+          }
+          throw error
+        }
+      }}
     />
   )
 }

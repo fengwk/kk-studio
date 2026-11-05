@@ -702,7 +702,7 @@ export interface CanvasTransformDTO {
   height: number
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.chat.ChatCreateDTO */
+/** Java：fun.fengwk.kkstudio.chat.dto.ChatCreateDTO */
 export interface ChatCreateDTO {
   title?: string | null
   agentName: string
@@ -710,7 +710,7 @@ export interface ChatCreateDTO {
   yoloEnabled?: boolean | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.chat.ChatDTO */
+/** Java：fun.fengwk.kkstudio.chat.dto.ChatDTO */
 export interface ChatDTO {
   id: string
   title?: string | null
@@ -722,7 +722,19 @@ export interface ChatDTO {
   updateTime: number
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.chat.ChatUpdateDTO */
+/** Java：fun.fengwk.kkstudio.chat.dto.ChatPageDTO */
+export interface ChatPageDTO {
+  items: ChatDTO[]
+  nextCursor: string | null
+}
+
+/** Java：fun.fengwk.kkstudio.chat.dto.ChatSessionPageDTO */
+export interface ChatSessionPageDTO {
+  items: HarnessSessionSummaryDTO[]
+  nextCursor: string | null
+}
+
+/** Java：fun.fengwk.kkstudio.chat.dto.ChatUpdateDTO */
 export interface ChatUpdateDTO {
   title?: string | null
   agentName?: string | null

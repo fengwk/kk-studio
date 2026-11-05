@@ -41,6 +41,7 @@ vi.mock('@/features/chat/chat-service', () => ({
   chatService: {
     getChat: vi.fn(),
     listChatSessions: vi.fn(),
+    getChatSession: vi.fn(),
   },
 }))
 vi.mock('@/features/environment/environment-service', () => ({

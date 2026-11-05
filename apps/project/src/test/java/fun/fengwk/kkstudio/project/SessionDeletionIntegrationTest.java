@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.project;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -13,6 +14,9 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import fun.fengwk.kkstudio.chat.Chat;
+import fun.fengwk.kkstudio.chat.ChatRepository;
+import fun.fengwk.kkstudio.chat.ChatSessionRepository;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionConfig;
@@ -36,8 +40,6 @@ import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.spi.store.UuidOrder;
-import fun.fengwk.kkstudio.platform.chat.ChatRepository;
-import fun.fengwk.kkstudio.platform.chat.ChatSessionRepository;
 import fun.fengwk.kkstudio.platform.harness.builtin.store.PostgresqlBuiltinHarnessStore;
 import fun.fengwk.kkstudio.platform.harness.store.PostgresqlHarnessStore;
 import fun.fengwk.kkstudio.platform.orchestration.OwnerTestSupport;
@@ -274,6 +276,18 @@ class SessionDeletionIntegrationTest extends OwnerTestSupport {
   }
 
   // ---------- fixtures ----------
+
+  /** 建一个 Chat owner 行并返回 id。 */
+  private UUID chatOwner() {
+    UUID id = UUID.randomUUID();
+    Chat chat = new Chat();
+    chat.setId(id);
+    chat.setTitle("owner-" + id);
+    chat.setAgentName("schema-agent");
+    chat.setVersion(0L);
+    assertTrue(chatRepository.create(chat));
+    return id;
+  }
 
   /** owner 持有的 Session：harness_session 行 + chat_session 归属行。 */
   private UUID ownedSession(String name, UUID owner) {

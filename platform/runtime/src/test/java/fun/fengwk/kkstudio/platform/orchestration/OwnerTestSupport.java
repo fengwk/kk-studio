@@ -1,20 +1,17 @@
 package fun.fengwk.kkstudio.platform.orchestration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 
-import fun.fengwk.kkstudio.platform.chat.Chat;
-import fun.fengwk.kkstudio.platform.chat.ChatRepository;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Chat / Issue+Agent owner 归属集成测试的共享装配与 fixture 构建。
+ * Issue+Agent owner 归属集成测试的共享装配与 fixture 构建。
  *
  * <p>owner 行、product 层级（project → issue → agent_definition）与 harness_session / harness_thread /
  * harness_entry 事实直接经 store 或 JDBC 构造（跳过业务服务校验分支），使测试聚焦于归属关系自身的 FK/PK/UK 契约。每个测试前由 {@link
@@ -28,19 +25,6 @@ public abstract class OwnerTestSupport extends PostgresSpringTestSupport {
   private static final AtomicLong ISSUE_NUMBER = new AtomicLong();
 
   @Autowired protected JdbcTemplate jdbc;
-  @Autowired protected ChatRepository chatRepository;
-
-  /** 建一个 Chat owner 行并返回 id。 */
-  protected UUID chatOwner() {
-    UUID id = uuid();
-    Chat chat = new Chat();
-    chat.setId(id);
-    chat.setTitle("owner-" + id);
-    chat.setAgentName("schema-agent");
-    chat.setVersion(0L);
-    assertTrue(chatRepository.create(chat));
-    return id;
-  }
 
   /** 建一个最小合法 AgentDefinition（引用全局 MODEL 名称）并返回 Agent 自然名称。 */
   protected String agentDefinition() {

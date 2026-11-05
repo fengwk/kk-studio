@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { useQueryClient, type UseQueryResult } from '@tanstack/react-query'
+import { useQueryClient, type InfiniteData } from '@tanstack/react-query'
 import { harnessService } from '@/shared/api/harness-service'
 import { compareCatalogVersions } from '@/shared/lib/catalog-version'
 import { queryKeys } from '@/shared/lib/query-keys'
@@ -17,6 +17,10 @@ import {
   type RenameKind,
   type RenameTarget,
 } from '@/features/thread/runtime/root-thread/types'
+import type {
+  SessionSummaryPage,
+  SessionSummaryResolver,
+} from '@/features/thread/runtime/root-thread/usePaneHistory'
 import type {
   HarnessSessionSummaryDTO,
   HarnessThreadDTO,
@@ -36,7 +40,11 @@ interface PaneRenameOptions {
   renamePendingRef: { current: boolean }
   boundThread: { threadId: string; name: string } | null
   boundSessionId: string | null
-  sessionsQuery: UseQueryResult<HarnessSessionSummaryDTO[]>
+  /** 已加载的 Session 摘要页；重命名面板优先就地解析名称，未命中再按 id 查询。 */
+  sessions: HarnessSessionSummaryDTO[]
+  sessionsPending: boolean
+  sessionsError: unknown
+  resolveSession?: SessionSummaryResolver
   hasPendingOperation: () => boolean
   setInteraction: (next: PaneInteraction) => void
   setActionError: (message: string | null) => void
@@ -59,7 +67,10 @@ export function usePaneRename(options: PaneRenameOptions) {
     renamePendingRef,
     boundThread,
     boundSessionId,
-    sessionsQuery,
+    sessions,
+    sessionsPending,
+    sessionsError,
+    resolveSession,
     hasPendingOperation,
     setInteraction,
     setActionError,
@@ -72,45 +83,76 @@ export function usePaneRename(options: PaneRenameOptions) {
   const [renameError, setRenameError] = useState<string | null>(null)
   const renameTargetRef = useRef<RenameTarget | null>(null)
 
-  // session 重命名面板的 on-demand 名称解析：打开时可能尚无 owner sessions
-  // 摘要；摘要到达后填充到 renameTarget.name（面板据此预填一次）。摘要加载
-  // 失败或已成功但不含目标（并发删除/权限变化）都会终止 busy 态并提示错误，
-  // 绝不把面板留在永久 busy。
-  const sessionsLoadFailed = sessionsQuery.isError
-    ? errorMessage(sessionsQuery.error, t('ai.runtime.action.requestFailed'))
+  // session 重命名面板的 on-demand 名称解析：优先使用已加载的 Session 摘要页，
+  // 未命中时按 id 向宿主解析（分页后目标不一定在当前页）。解析失败或目标不存在
+  // 都会终止 busy 态并提示错误，绝不把面板留在永久 busy。
+  const sessionsLoadFailed = sessionsError != null
+    ? errorMessage(sessionsError, t('ai.runtime.action.requestFailed'))
     : null
   useEffect(() => {
     if (renameTarget == null || renameTarget.kind !== 'session' || renameTarget.name != null) {
       return
     }
-    if (sessionsQuery.isError) {
+    const loaded = sessions.find((item) => item.sessionId === renameTarget.id)
+    if (loaded != null) {
+      setRenameTargetState((current) =>
+        current != null && current.id === renameTarget.id ? { ...current, name: loaded.name } : current,
+      )
+      return
+    }
+    if (sessionsLoadFailed != null) {
       setRenameTargetState((current) =>
         current != null && current.kind === 'session' && current.name == null
           ? { ...current, name: '' }
           : current,
       )
-      setRenameError(sessionsLoadFailed ?? t('ai.runtime.action.requestFailed'))
+      setRenameError(sessionsLoadFailed)
       return
     }
-    if (sessionsQuery.data == null) {
+    if (sessionsPending) {
       return
     }
-    const summary = sessionsQuery.data.find((item) => item.sessionId === renameTarget.id)
-    if (summary != null) {
+    if (resolveSession == null) {
+      // 没有单条解析能力时以已加载页为唯一来源；穷尽后目标仍不存在即不可用。
       setRenameTargetState((current) =>
-        current != null && current.id === renameTarget.id ? { ...current, name: summary.name } : current,
+        current != null && current.kind === 'session' && current.name == null
+          ? { ...current, name: '' }
+          : current,
       )
+      setRenameError(t('ai.runtime.rename.sessionUnavailable'))
       return
     }
-    // 摘要已成功加载但目标不存在：名称无法解析，结束 busy 并提示。
-    setRenameTargetState((current) =>
-      current != null && current.kind === 'session' && current.name == null
-        ? { ...current, name: '' }
-        : current,
-    )
-    setRenameError(t('ai.runtime.rename.sessionUnavailable'))
+    let active = true
+    void resolveSession(renameTarget.id)
+      .then((summary) => {
+        if (!active) {
+          return
+        }
+        setRenameTargetState((current) => (
+          current != null && current.id === renameTarget.id && current.name == null
+            ? { ...current, name: summary?.name ?? '' }
+            : current
+        ))
+        if (summary == null) {
+          setRenameError(t('ai.runtime.rename.sessionUnavailable'))
+        }
+      })
+      .catch((error: unknown) => {
+        if (!active) {
+          return
+        }
+        setRenameTargetState((current) =>
+          current != null && current.kind === 'session' && current.name == null
+            ? { ...current, name: '' }
+            : current,
+        )
+        setRenameError(errorMessage(error, t('ai.runtime.action.requestFailed')))
+      })
+    return () => {
+      active = false
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- t 是稳定 useCallback。
-  }, [renameTarget, sessionsQuery.data, sessionsQuery.isError, sessionsLoadFailed])
+  }, [renameTarget, sessions, sessionsPending, sessionsLoadFailed, resolveSession])
 
   /** 打开指定 kind 的单输入重命名面板。name 为空/未知时为 null（解析态）。 */
   function openRename(
@@ -137,11 +179,11 @@ export function usePaneRename(options: PaneRenameOptions) {
       return null
     }
     if (isNewThreadTarget(target)) {
-      const summary = sessionsQuery.data?.find((item) => item.sessionId === target.sessionId)
+      const summary = sessions.find((item) => item.sessionId === target.sessionId)
       return { id: target.sessionId, name: summary?.name ?? null }
     }
     if (isBoundTarget(target) && boundSessionId) {
-      const summary = sessionsQuery.data?.find((item) => item.sessionId === boundSessionId)
+      const summary = sessions.find((item) => item.sessionId === boundSessionId)
       return { id: boundSessionId, name: summary?.name ?? null }
     }
     return null
@@ -243,23 +285,28 @@ export function usePaneRename(options: PaneRenameOptions) {
   }
 
   /**
-   * 更新已加载缓存中的 Session 名称（owner session summaries）。保持简单：
+   * 更新已加载缓存中的 Session 名称（owner session summaries 分页缓存）。保持简单：
    * 直接 setQueryData 到已存在的 key，随后 invalidateAfterRename 做必要失效。
    */
   function patchSessionNameCache(sessionId: string, name: string): void {
     if (!ownerKey) {
       return
     }
-    for (const [key, data] of queryClient.getQueriesData<HarnessSessionSummaryDTO[]>({
+    for (const [key, data] of queryClient.getQueriesData<InfiniteData<SessionSummaryPage>>({
       queryKey: ['agent-pane', 'sessions', ownerKey],
     })) {
       if (data == null) {
         continue
       }
-      queryClient.setQueryData<HarnessSessionSummaryDTO[]>(
-        key,
-        data.map((item) => item.sessionId === sessionId ? { ...item, name } : item),
-      )
+      queryClient.setQueryData<InfiniteData<SessionSummaryPage>>(key, {
+        ...data,
+        pages: data.pages.map((page) => ({
+          ...page,
+          items: page.items.map((item) => (
+            item.sessionId === sessionId ? { ...item, name } : item
+          )),
+        })),
+      })
     }
   }
 
@@ -326,7 +373,7 @@ export function usePaneRename(options: PaneRenameOptions) {
     renameBusy: renameTarget != null
       && renameTarget.kind === 'session'
       && renameTarget.name == null
-      && !sessionsQuery.isError,
+      && renameError == null,
     openRename,
     openRenameForTarget,
     closeRename,

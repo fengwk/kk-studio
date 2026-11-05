@@ -339,9 +339,6 @@ select pg_temp.assert_true('Harness Thread gained a same-Session composite key',
         where c.conrelid = 'harness_thread'::regclass
             and c.conname = 'uk_harness_thread_session'
             and c.contype = 'u'));
-select pg_temp.assert_true('chat gained a nullable archived_at',
-    exists(select 1 from information_schema.columns
-        where table_name = 'chat' and column_name = 'archived_at'));
 select pg_temp.assert_true('the Agent Thread binding stores its Session',
     (select count(*) = 5 from information_schema.columns
         where table_name = 'project_issue_agent_thread')
@@ -997,17 +994,18 @@ select pg_temp.rejects('input receipt requires a nonblank actor',
       where id=pg_temp.uid(1200)$$, '23514', 'ck_harness_tool_input_receipt');
 
 -- ---------------------------------------------------------------------------
--- Chat: direct Session association and archive listing.
+-- Chat: direct Session association.
 -- ---------------------------------------------------------------------------
 insert into chat (id, title, agent_name) values (pg_temp.uid(1300), 'chat', 'designer');
 insert into chat_session (session_id, chat_id) values (pg_temp.uid(103), pg_temp.uid(1300));
 select pg_temp.rejects('a Chat Session must reference a real Session',
     $$insert into chat_session(session_id,chat_id) values(pg_temp.uid(1400),pg_temp.uid(1300))$$, '23503',
     'fk_chat_session_session');
-update chat set archived_at = now() where id = pg_temp.uid(1300);
-select pg_temp.assert_true('archived Chats leave the default list but stay queryable',
-    (select count(*) = 0 from chat where id = pg_temp.uid(1300) and archived_at is null)
-    and (select count(*) = 1 from chat where id = pg_temp.uid(1300) and archived_at is not null));
+select pg_temp.assert_true('chat has no archive column or index',
+    not exists(select 1 from information_schema.columns
+        where table_name = 'chat' and column_name = 'archived_at')
+    and not exists(select 1 from pg_indexes
+        where schemaname = 'public' and indexname = 'idx_chat_archived'));
 select pg_temp.assert_true('chat environment_name is nullable with no default',
     (select is_nullable = 'YES' and column_default is null
         from information_schema.columns
@@ -1015,12 +1013,10 @@ select pg_temp.assert_true('chat environment_name is nullable with no default',
 update chat set environment_name = 'install-fixture' where id = pg_temp.uid(1300);
 select pg_temp.assert_true('chat accepts a canonical environment name reference',
     (select environment_name = 'install-fixture' from chat where id = pg_temp.uid(1300)));
-select pg_temp.rejects('chat environment_name rejects a slash',
-    $$update chat set environment_name = 'a/b' where id = pg_temp.uid(1300)$$, '23514',
-    'ck_chat_environment_name');
-select pg_temp.rejects('chat environment_name rejects surrounding whitespace',
-    $$update chat set environment_name = ' a' where id = pg_temp.uid(1300)$$, '23514',
-    'ck_chat_environment_name');
+select pg_temp.assert_true('chat leaves Agent and Environment name canonicalization to the application',
+    not exists(select 1 from pg_constraint c
+        where c.conrelid = 'chat'::regclass
+            and c.conname in ('ck_chat_agent_name', 'ck_chat_environment_name')));
 select pg_temp.rejects('a Chat Session blocks deleting its Chat',
     $$delete from chat where id=pg_temp.uid(1300)$$, '23503', 'fk_chat_session_chat');
 

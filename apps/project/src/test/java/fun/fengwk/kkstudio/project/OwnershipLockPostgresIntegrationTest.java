@@ -9,8 +9,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
-import fun.fengwk.kkstudio.platform.chat.Chat;
-import fun.fengwk.kkstudio.platform.chat.ChatRepository;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwner;
 import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.service.ProjectSessionOwnership;
@@ -37,41 +35,6 @@ class OwnershipLockPostgresIntegrationTest extends ProjectTestSupport {
   @Autowired private DataSource dataSource;
   @Autowired private PlatformTransactionManager transactionManager;
   @Autowired private ProjectSessionOwnership ownership;
-  @Autowired private ChatRepository chats;
-
-  /** KEY SHARE 允许非键更新，但删除锁必须等待接受事务结束。 */
-  @Test
-  void chatKeyShareBlocksDeletionButNotNonKeyUpdate() throws Exception {
-    UUID chatId = UUID.randomUUID();
-    Chat chat = new Chat();
-    chat.setId(chatId);
-    chat.setTitle("lock test");
-    chat.setAgentName("schema-agent");
-    assertTrue(chats.create(chat));
-    CountDownLatch locked = new CountDownLatch(1);
-    CountDownLatch release = new CountDownLatch(1);
-    try (ExecutorService executor = Executors.newSingleThreadExecutor()) {
-      Future<?> acceptance =
-          executor.submit(
-              () ->
-                  new TransactionTemplate(transactionManager)
-                      .executeWithoutResult(
-                          status -> {
-                            chats.lockForKeyShare(chatId);
-                            locked.countDown();
-                            await(release);
-                          }));
-      try {
-        assertTrue(locked.await(10, TimeUnit.SECONDS));
-        assertTrue(canLock("select id from chat where id = ? for no key update nowait", chatId));
-        assertFalse(canLock("select id from chat where id = ? for update nowait", chatId));
-      } finally {
-        release.countDown();
-      }
-      acceptance.get(10, TimeUnit.SECONDS);
-      assertTrue(canLock("select id from chat where id = ? for update nowait", chatId));
-    }
-  }
 
   /** 先占住 Issue，再验证接受线程等待 Issue 时已持有 Project SHARE；删除排他锁与之冲突。 */
   @Test

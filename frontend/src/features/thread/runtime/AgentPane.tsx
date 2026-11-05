@@ -24,9 +24,12 @@ import type { PaneTarget } from '@/features/thread/runtime/agent-pane'
 import '@/features/thread/runtime/child-thread-view.css'
 import '@/features/thread/runtime/agent-pane.css'
 import type {
+  SessionSummaryLoader,
+  SessionSummaryResolver,
+} from '@/features/thread/runtime/root-thread/usePaneHistory'
+import type {
   AgentDefinitionDTO,
   EnvironmentCardDTO,
-  HarnessSessionSummaryDTO,
 } from '@/shared/api/generated/contracts'
 
 export type { AgentPaneCapabilities, AgentPaneDefaults, BranchRequestInput, PaneReport }
@@ -59,6 +62,7 @@ export function AgentPane({
   onReport,
   onPresentation,
   loadSessions,
+  loadSession,
 }: {
   owner?: AgentRuntimeOwnerDTO
   paneId: string
@@ -80,8 +84,10 @@ export function AgentPane({
   /** 面板运行时摘要上报；只读路径由本组件按投影派生。 */
   onReport?: (report: PaneReport) => void
   onPresentation?: (report: ThreadPresentation | null) => void
-  /** 宿主读取 Owner Session 摘要；未注入时 Session 导航入口不可用。 */
-  loadSessions?: (owner: AgentRuntimeOwnerDTO) => Promise<HarnessSessionSummaryDTO[]>
+  /** 宿主读取 Owner Session 摘要分页；未注入时 Session 导航入口不可用。 */
+  loadSessions?: SessionSummaryLoader
+  /** 宿主按 id 解析单个 Owner Session 摘要；未注入时分页窗口外的重命名不可解析。 */
+  loadSession?: SessionSummaryResolver
 }) {
   const paneSectionRef = useRef<HTMLElement | null>(null)
   const { t } = useI18n()
@@ -294,6 +300,7 @@ export function AgentPane({
               onPresentation={acceptPresentation}
               onOpenIde={handleOpenIde}
               loadSessions={loadSessions}
+              loadSession={loadSession}
             />
           ) : (
             <ThreadView

@@ -29,11 +29,6 @@ import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.spi.store.JoinStore;
 import fun.fengwk.kkstudio.harness.spi.store.SessionStore;
 import fun.fengwk.kkstudio.harness.spi.store.ThreadStore;
-import fun.fengwk.kkstudio.platform.chat.Chat;
-import fun.fengwk.kkstudio.platform.chat.ChatRepository;
-import fun.fengwk.kkstudio.platform.chat.ChatSession;
-import fun.fengwk.kkstudio.platform.chat.ChatSessionOwnership;
-import fun.fengwk.kkstudio.platform.chat.ChatSessionRepository;
 import fun.fengwk.kkstudio.platform.storage.persistence.SessionFileRepository;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 
@@ -75,8 +70,7 @@ class SessionDeletionOrchestratorTest {
   private static final SessionOwner ISSUE_AGENT_OWNER =
       new SessionOwner("ISSUE_AGENT", ISSUE_ID + ":" + AGENT_NAME);
 
-  private ChatSessionRepository chatSessionRepository;
-  private ChatRepository chatRepository;
+  private SessionOwnership chatOwnership;
   private SessionOwnership issueAgentOwnership;
   private ObjectProvider<HarnessRuntime> runtimes;
   private HarnessStore store;
@@ -99,8 +93,7 @@ class SessionDeletionOrchestratorTest {
   @BeforeEach
   @SuppressWarnings("unchecked")
   void setUp() {
-    chatSessionRepository = mock(ChatSessionRepository.class);
-    chatRepository = mock(ChatRepository.class);
+    chatOwnership = mock(SessionOwnership.class);
     issueAgentOwnership = mock(SessionOwnership.class);
     runtimes = mock(ObjectProvider.class);
     store = mock(HarnessStore.class);
@@ -144,19 +137,13 @@ class SessionDeletionOrchestratorTest {
     when(threadStore.delete(any())).thenAnswer(inv -> ((List<UUID>) inv.getArgument(0)).size());
     when(sessionStore.delete(any())).thenReturn(true);
 
-    when(chatRepository.lockById(CHAT_ID)).thenReturn(mock(Chat.class));
-
-    when(chatSessionRepository.findBySessionId(any()))
-        .thenAnswer(inv -> new ChatSession(inv.getArgument(0), CHAT_ID));
-    when(chatSessionRepository.deleteBySessionId(any())).thenReturn(1);
+    when(chatOwnership.kind()).thenReturn("CHAT");
     when(issueAgentOwnership.kind()).thenReturn("ISSUE_AGENT");
     when(issueAgentOwnership.lockForDeletion(ISSUE_AGENT_OWNER)).thenReturn(List.of(SESSION_1));
 
     service =
         new SessionDeletionOrchestrator(
-            List.of(
-                new ChatSessionOwnership(chatRepository, chatSessionRepository),
-                issueAgentOwnership),
+            List.of(chatOwnership, issueAgentOwnership),
             runtimes,
             refManager,
             sessionFileRepository);
@@ -165,7 +152,7 @@ class SessionDeletionOrchestratorTest {
   @Test
   void deletesChatSessionsAndThreadsInCanonicalLockOrder() {
     // Session 与 Thread 即使由仓库逆序返回，也必须在树锁后按 UUID 全局排序锁定并删除。
-    when(chatSessionRepository.listSessionIds(CHAT_ID)).thenReturn(List.of(SESSION_2, SESSION_1));
+    when(chatOwnership.lockForDeletion(CHAT_OWNER)).thenReturn(List.of(SESSION_2, SESSION_1));
     putSession(SESSION_1, thread(THREAD_2, SESSION_1));
     putSession(SESSION_2, thread(THREAD_1, SESSION_2));
     when(refManager.listBlobIds(SESSION_1)).thenReturn(List.of(BLOB_2, BLOB_1));
@@ -190,8 +177,8 @@ class SessionDeletionOrchestratorTest {
     blobOrder.verify(refManager).listBlobIds(SESSION_1);
     blobOrder.verify(refManager).releaseRef(SESSION_1, BLOB_2);
     blobOrder.verify(refManager).releaseRef(SESSION_1, BLOB_1);
-    verify(chatSessionRepository).deleteBySessionId(SESSION_1);
-    verify(chatSessionRepository).deleteBySessionId(SESSION_2);
+    verify(chatOwnership).beforeSessionDeletion(CHAT_OWNER, SESSION_1);
+    verify(chatOwnership).beforeSessionDeletion(CHAT_OWNER, SESSION_2);
     verify(issueAgentOwnership, never()).lockForDeletion(any());
   }
 
@@ -211,7 +198,7 @@ class SessionDeletionOrchestratorTest {
             sessionStore,
             entryStore,
             refManager,
-            chatSessionRepository);
+            chatOwnership);
     deleteOrder.verify(issueAgentOwnership).lockForDeletion(ISSUE_AGENT_OWNER);
     deleteOrder.verify(issueAgentOwnership).beforeSessionDeletion(ISSUE_AGENT_OWNER, SESSION_1);
     deleteOrder.verify(threadStore).lock(THREAD_1);
@@ -220,19 +207,19 @@ class SessionDeletionOrchestratorTest {
     deleteOrder.verify(refManager).releaseRef(SESSION_1, BLOB_1);
     deleteOrder.verify(entryStore).delete(SESSION_1);
     deleteOrder.verify(sessionStore).delete(SESSION_1);
-    verifyNoInteractions(chatSessionRepository);
+    verify(chatOwnership, never()).lockForDeletion(any());
   }
 
   @Test
   void skipsSessionsThatDisappearedBeforeLock() {
     // 并发消失的 Session 被跳过，只深删仍存在的 Session，且不为它删归属行或 History。
-    when(chatSessionRepository.listSessionIds(CHAT_ID)).thenReturn(List.of(SESSION_2, SESSION_1));
+    when(chatOwnership.lockForDeletion(CHAT_OWNER)).thenReturn(List.of(SESSION_2, SESSION_1));
     putSession(SESSION_2, thread(THREAD_2, SESSION_2));
 
     service.deleteSessionsByOwner(CHAT_OWNER);
 
-    verify(chatSessionRepository, never()).deleteBySessionId(SESSION_1);
-    verify(chatSessionRepository).deleteBySessionId(SESSION_2);
+    verify(chatOwnership, never()).beforeSessionDeletion(CHAT_OWNER, SESSION_1);
+    verify(chatOwnership).beforeSessionDeletion(CHAT_OWNER, SESSION_2);
     verify(entryStore, never()).delete(SESSION_1);
     verify(entryStore).delete(SESSION_2);
     verify(sessionStore).delete(SESSION_2);
@@ -242,13 +229,13 @@ class SessionDeletionOrchestratorTest {
   @Test
   void deletesPresentSessionWithoutThreads() {
     // 无 Thread 的 Session 仍须删除归属、释放 blob 并删除 Entry 和 Session。
-    when(chatSessionRepository.listSessionIds(CHAT_ID)).thenReturn(List.of(SESSION_1));
+    when(chatOwnership.lockForDeletion(CHAT_OWNER)).thenReturn(List.of(SESSION_1));
     putSession(SESSION_1);
     when(refManager.listBlobIds(SESSION_1)).thenReturn(List.of(BLOB_1));
 
     service.deleteSessionsByOwner(CHAT_OWNER);
 
-    verify(chatSessionRepository).deleteBySessionId(SESSION_1);
+    verify(chatOwnership).beforeSessionDeletion(CHAT_OWNER, SESSION_1);
     verify(refManager).releaseRef(SESSION_1, BLOB_1);
     verify(entryStore).delete(SESSION_1);
     verify(sessionStore).delete(SESSION_1);
@@ -259,7 +246,7 @@ class SessionDeletionOrchestratorTest {
   void deletesTaskChildSessionsAndParentlessForksInTheSameTree() {
     // 测试意图：task 子 Session 没有 owner relation，且其中可能有另一入口建立的无父 root fork；
     // 闭包必须以 Session 为单位推进，才能把整棵树（含 fork）一起删除，而不是留下悬挂 join/History。
-    when(chatSessionRepository.listSessionIds(CHAT_ID)).thenReturn(List.of(SESSION_1));
+    when(chatOwnership.lockForDeletion(CHAT_OWNER)).thenReturn(List.of(SESSION_1));
     ThreadState child = thread(THREAD_2, SESSION_2, THREAD_1);
     ThreadState fork = thread(THREAD_FORK, SESSION_2, null);
     putSession(SESSION_1, thread(THREAD_1, SESSION_1));
@@ -281,7 +268,7 @@ class SessionDeletionOrchestratorTest {
   @Test
   void newForkAppearingBetweenDiscoveryAndSessionLockAbortsDeletion() {
     // 测试意图：fork 创建由 Session 锁排除；若在发现与加锁之间出现新 Session，必须整体回滚而不是删掉漏后代的集合。
-    when(chatSessionRepository.listSessionIds(CHAT_ID)).thenReturn(List.of(SESSION_1));
+    when(chatOwnership.lockForDeletion(CHAT_OWNER)).thenReturn(List.of(SESSION_1));
     putSession(SESSION_1, thread(THREAD_1, SESSION_1));
     when(sessionStore.lockForUpdate(SESSION_1))
         .thenAnswer(
@@ -302,19 +289,20 @@ class SessionDeletionOrchestratorTest {
   @Test
   void missingOwnerIsAnIdempotentNoop() {
     // Owner 已不存在等价于删除已完成；不能枚举 relation，也不能打开 Harness 事务。
-    when(chatRepository.lockById(CHAT_ID)).thenReturn(null);
+    when(chatOwnership.lockForDeletion(CHAT_OWNER)).thenReturn(List.of());
     service.deleteSessionsByOwner(CHAT_OWNER);
 
     // Issue+Agent owner 不存在或尚未绑定时 lockForDeletion 为空。
     when(issueAgentOwnership.lockForDeletion(ISSUE_AGENT_OWNER)).thenReturn(List.of());
     service.deleteSessionsByOwner(ISSUE_AGENT_OWNER);
 
-    verifyNoInteractions(chatSessionRepository, store, refManager);
+    verify(chatOwnership, never()).beforeSessionDeletion(any(), any());
+    verifyNoInteractions(store, refManager);
   }
 
   @Test
   void ownerWithoutSessionsReturnsBeforeRuntimeLookup() {
-    when(chatSessionRepository.listSessionIds(CHAT_ID)).thenReturn(List.of());
+    when(chatOwnership.lockForDeletion(CHAT_OWNER)).thenReturn(List.of());
 
     service.deleteSessionsByOwner(CHAT_OWNER);
 
@@ -324,13 +312,13 @@ class SessionDeletionOrchestratorTest {
 
   @Test
   void missingRuntimeFailsBeforeOpeningDeletionTransaction() {
-    when(chatSessionRepository.listSessionIds(CHAT_ID)).thenReturn(List.of(SESSION_1));
+    when(chatOwnership.lockForDeletion(CHAT_OWNER)).thenReturn(List.of(SESSION_1));
     when(runtimes.getIfAvailable()).thenReturn(null);
 
     assertThrows(IllegalStateException.class, () -> service.deleteSessionsByOwner(CHAT_OWNER));
 
     verifyNoInteractions(transaction, refManager);
-    verify(chatSessionRepository, never()).deleteBySessionId(any());
+    verify(chatOwnership, never()).beforeSessionDeletion(any(), any());
   }
 
   @Test
@@ -363,7 +351,7 @@ class SessionDeletionOrchestratorTest {
     verify(entryStore, never()).delete(any());
     verify(sessionStore, never()).delete(any());
     verifyNoInteractions(refManager);
-    verify(chatSessionRepository, never()).deleteBySessionId(any());
+    verify(chatOwnership, never()).beforeSessionDeletion(any(), any());
   }
 
   @Test
@@ -377,11 +365,6 @@ class SessionDeletionOrchestratorTest {
         () ->
             new SessionDeletionOrchestrator(
                 List.of(issueAgentOwnership), runtimes, null, sessionFileRepository));
-    assertThrows(
-        NullPointerException.class,
-        () ->
-            new SessionDeletionOrchestrator(
-                List.of(issueAgentOwnership), runtimes, refManager, null));
     assertThrows(NullPointerException.class, () -> service.deleteSessionsByOwner(null));
   }
 
@@ -395,7 +378,10 @@ class SessionDeletionOrchestratorTest {
     when(duplicate.kind()).thenReturn("ISSUE_AGENT");
     SessionDeletionOrchestrator ambiguous =
         new SessionDeletionOrchestrator(
-            List.of(issueAgentOwnership, duplicate), runtimes, refManager, sessionFileRepository);
+            List.of(issueAgentOwnership, duplicate),
+            runtimes,
+            refManager,
+            sessionFileRepository);
     assertThrows(
         IllegalArgumentException.class, () -> ambiguous.deleteSessionsByOwner(ISSUE_AGENT_OWNER));
     verify(issueAgentOwnership, never()).lockForDeletion(any());
