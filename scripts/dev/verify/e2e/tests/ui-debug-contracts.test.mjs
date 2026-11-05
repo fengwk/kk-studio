@@ -13,7 +13,7 @@ const caseSource = (id) => {
 test('conversation switch uses the sole host exit while its composer remains mounted and hidden', () => {
   const section = caseSource('ui.chat.debug.conversation_switch')
   assert.match(section, /name: '关闭 Debug', exact: true.*\.click\(\)/)
-  assert.match(section, /composer\.count\(\).*composer\.isVisible\(\)/)
+  assert.match(section, /hiddenComposer\.count\(\).*hiddenComposer\.isVisible\(\)/)
   assert.match(section, /#chat-layout-select/)
   assert.ok(section.indexOf('composer.fill(draft)') < section.indexOf("const listbox ="))
   assert.match(section, /await expectStorage\(page, draftKey, draft\)/)
