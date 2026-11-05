@@ -1,7 +1,6 @@
 import { useCallback, useRef, useState } from 'react'
 import type { QueryClient } from '@tanstack/react-query'
 import { ApiError } from '@/shared/api/client'
-import { isCanvasFunctionVersion } from '@/shared/api/studio-codec'
 import {
   cancelCanvasFunctionRun,
   getCanvasFunctionRun,
@@ -21,6 +20,22 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
 
 export function isCanonicalUUID(value: unknown): value is string {
   return typeof value === 'string' && UUID_REGEX.test(value)
+}
+
+const DEFINITION_FINGERPRINT = /^[0-9a-f]{64}$/
+
+/**
+ * 未决记录里的目录版本来自 localStorage，不经生成契约约束，
+ * 必须拒绝缺失、未知字段与非 canonical 指纹。
+ */
+function isValidCanvasFunctionVersion(value: unknown): value is CanvasFunctionVersionDTO {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return false
+  }
+  const candidate = value as Record<string, unknown>
+  return Object.keys(candidate).length === 1
+    && typeof candidate.definitionFingerprint === 'string'
+    && DEFINITION_FINGERPRINT.test(candidate.definitionFingerprint)
 }
 
 /** 存储读取失败（localStorage 不可用 / getItem 抛错）：原始字节必须保留，绝不删除。 */
@@ -81,7 +96,7 @@ function isValidPendingRequest(value: unknown): value is CanvasFunctionRunReques
     && keys.includes('requestId')
     && keys.includes('expectedVersion')
     && isCanonicalUUID(request.requestId)
-    && isCanvasFunctionVersion(request.expectedVersion)
+    && isValidCanvasFunctionVersion(request.expectedVersion)
 }
 
 /** 未决记录是严格存储对象：字段集合必须与 PendingFunctionRunAttempt 完全一致。 */

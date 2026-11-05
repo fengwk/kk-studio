@@ -1,12 +1,5 @@
 import { ApiError, apiBaseUrl } from '@/shared/api/client'
 import type { ResultEnvelope } from '@/shared/api/contracts/base'
-import {
-  decodeCanvasDocument,
-  decodeCanvasDocumentList,
-  decodeCanvasFunctionDefinition,
-  decodeCanvasPatch,
-  decodeCanvasSnapshot,
-} from '@/shared/api/studio-codec'
 import { getLocale, translate } from '@/shared/i18n'
 import type {
   ApplyCanvasCommandsRequestDTO,
@@ -32,7 +25,7 @@ export interface CanvasRequestOptions {
 }
 
 export function listCanvases(options?: CanvasRequestOptions): Promise<CanvasDocumentDTO[]> {
-  return canvasRequest('/canvases', { signal: options?.signal }, decodeCanvasDocumentList)
+  return canvasRequest<CanvasDocumentDTO[]>('/canvases', { signal: options?.signal })
 }
 
 export function createCanvas(
@@ -40,18 +33,18 @@ export function createCanvas(
   options?: CanvasRequestOptions,
 ): Promise<CanvasDocumentDTO> {
   const body: CreateCanvasRequestDTO = title === undefined ? {} : { title }
-  return canvasRequest('/canvases', {
+  return canvasRequest<CanvasDocumentDTO>('/canvases', {
     method: 'POST',
     body,
     signal: options?.signal,
-  }, decodeCanvasDocument)
+  })
 }
 
 export function getCanvas(
   canvasId: string,
   options?: CanvasRequestOptions,
 ): Promise<CanvasSnapshotDTO> {
-  return canvasRequest(`/canvases/${canvasId}`, { signal: options?.signal }, decodeCanvasSnapshot)
+  return canvasRequest<CanvasSnapshotDTO>(`/canvases/${canvasId}`, { signal: options?.signal })
 }
 
 /**
@@ -63,22 +56,17 @@ export function postCanvasCommands(
   request: ApplyCanvasCommandsRequestDTO,
   options?: CanvasRequestOptions,
 ): Promise<CanvasPatchDTO> {
-  return canvasRequest(`/canvases/${canvasId}/commands`, {
+  return canvasRequest<CanvasPatchDTO>(`/canvases/${canvasId}/commands`, {
     method: 'POST',
     body: request,
     signal: options?.signal,
-  }, decodeCanvasPatch)
+  })
 }
 
 export function listCanvasFunctions(
   options?: CanvasRequestOptions,
 ): Promise<CanvasFunctionDefinitionDTO[]> {
-  return canvasRequest('/canvas-functions', { signal: options?.signal }, (data) => {
-    if (!Array.isArray(data)) {
-      throw new ApiError('Canvas functions payload must be an array')
-    }
-    return data.map(decodeCanvasFunctionDefinition)
-  })
+  return canvasRequest<CanvasFunctionDefinitionDTO[]>('/canvas-functions', { signal: options?.signal })
 }
 
 export function getCanvasResourceOriginalUrl(
@@ -86,7 +74,7 @@ export function getCanvasResourceOriginalUrl(
   resourceId: string,
   options?: CanvasRequestOptions,
 ): Promise<CanvasPresignedUrlDTO> {
-  return canvasRequest(`/canvases/${canvasId}/resources/${resourceId}/download-url`, {
+  return canvasRequest<CanvasPresignedUrlDTO>(`/canvases/${canvasId}/resources/${resourceId}/download-url`, {
     method: 'POST',
     signal: options?.signal,
   })
@@ -97,7 +85,7 @@ export function getCanvasResourcePreviewUrl(
   resourceId: string,
   options?: CanvasRequestOptions,
 ): Promise<CanvasPresignedUrlDTO> {
-  return canvasRequest(`/canvases/${canvasId}/resources/${resourceId}/preview-url`, {
+  return canvasRequest<CanvasPresignedUrlDTO>(`/canvases/${canvasId}/resources/${resourceId}/preview-url`, {
     method: 'POST',
     signal: options?.signal,
   })
@@ -109,7 +97,7 @@ export function startCanvasFunctionRun(
   request: CanvasFunctionRunRequestDTO,
   options?: CanvasRequestOptions,
 ): Promise<CanvasFunctionRunDTO> {
-  return canvasRequest(`/canvases/${canvasId}/nodes/${nodeId}/function-run`, {
+  return canvasRequest<CanvasFunctionRunDTO>(`/canvases/${canvasId}/nodes/${nodeId}/function-run`, {
     method: 'POST',
     body: request,
     signal: options?.signal,
@@ -121,7 +109,7 @@ export function getCanvasFunctionRun(
   nodeId: string,
   options?: CanvasRequestOptions,
 ): Promise<CanvasFunctionRunDTO> {
-  return canvasRequest(`/canvases/${canvasId}/nodes/${nodeId}/function-run`, {
+  return canvasRequest<CanvasFunctionRunDTO>(`/canvases/${canvasId}/nodes/${nodeId}/function-run`, {
     signal: options?.signal,
   })
 }
@@ -132,7 +120,7 @@ export function cancelCanvasFunctionRun(
   request: CanvasFunctionCancelRequestDTO,
   options?: CanvasRequestOptions,
 ): Promise<CanvasFunctionRunDTO> {
-  return canvasRequest(`/canvases/${canvasId}/nodes/${nodeId}/function-run/cancel`, {
+  return canvasRequest<CanvasFunctionRunDTO>(`/canvases/${canvasId}/nodes/${nodeId}/function-run/cancel`, {
     method: 'POST',
     body: request,
     signal: options?.signal,
@@ -145,7 +133,7 @@ export function resolveCanvasFunctionRun(
   request: CanvasFunctionUnknownResolutionDTO,
   options?: CanvasRequestOptions,
 ): Promise<CanvasFunctionRunDTO> {
-  return canvasRequest(`/canvases/${canvasId}/nodes/${nodeId}/function-run/resolve`, {
+  return canvasRequest<CanvasFunctionRunDTO>(`/canvases/${canvasId}/nodes/${nodeId}/function-run/resolve`, {
     method: 'POST',
     body: request,
     signal: options?.signal,
@@ -159,7 +147,6 @@ async function canvasRequest<T>(
     body?: unknown
     signal?: AbortSignal
   } = {},
-  decode?: (data: unknown) => T,
 ): Promise<T> {
   let response: Response
   try {
@@ -204,7 +191,7 @@ async function canvasRequest<T>(
       envelope.errors ?? undefined,
     )
   }
-  return decode ? decode(envelope.data) : (envelope.data as T)
+  return envelope.data as T
 }
 
 function isResultEnvelope<T>(value: unknown): value is ResultEnvelope<T> {

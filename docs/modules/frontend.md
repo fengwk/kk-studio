@@ -54,12 +54,13 @@ Thread panel 消费 timeline presentation 类型，宿主负责 API、realtime �
 [`write.sh`](../../scripts/dev/verify/generated-contracts/write.sh)。
 
 [`contracts`](../../frontend/src/shared/api/contracts) 只保留生成契约无法表达的封闭取值与前端细化
-（Harness 命令、上传与技能等），不再为 Interaction、Plugin 或 Project 手写运行时 decoder；
+（Harness 命令、上传、技能与 Canvas 资源/运行状态等），不再为 Interaction、Plugin、Project 或 Canvas 手写运行时 decoder；
 这些 HTTP 响应直接消费生成契约，在真正使用点做 `type` / `status` 分支。
+浏览器本地存储与应用事件 WebSocket 不经生成契约约束，仍保留结构校验。
 service 按职责归属：Chat、Environment、Extensions、Catalog、Settings 的接口客户端位于各自 feature；
 `shared/api` 只保留 HTTP client、生成契约和 Harness/Agent/Storage/Interaction 平台客户端。
 [Projects feature](../../frontend/src/features/projects) 使用生成的 HTTP 契约；
-[Canvas 接口客户端](../../frontend/src/features/canvas/canvas-api.ts) 与 wire codec 由 Canvas feature 持有。
+[Canvas 接口客户端](../../frontend/src/features/canvas/canvas-api.ts) 由 Canvas feature 持有。
 HTTP 路由事实源见 [Web](web.md)，JSON 字段规则见 [Share](share.md)。
 Java long 游标保持字符串，版本比较使用长度与字典序，保留整数精度。
 
