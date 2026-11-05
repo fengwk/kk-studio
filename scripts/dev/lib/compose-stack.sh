@@ -85,7 +85,7 @@ stack_down() {
 }
 
 # smoke/performance 的 EXIT trap 骨架：失败诊断后删除一次性栈。down 的失败必须
-# 被吞掉，否则会覆盖原命令的退出状态（与旧 cleanup_test_stack 行为一致）。
+# 被吞掉，否则会覆盖原命令的退出状态。
 cleanup_compose_stack() {
   local status=$1
   local remove_volumes=$2

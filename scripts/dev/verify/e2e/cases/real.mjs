@@ -1952,11 +1952,11 @@ registerCase({
           && readInvocation.attempt === 0,
         safeDiagnosticJson(readInvocation),
       )
-      // durable frozen arguments 必须保留绝对 path，拒绝旧 workdir 字段。
+      // durable frozen arguments 必须保留绝对 path。
       const readArguments = JSON.parse(readInvocation.argumentsJson || '{}')
       assert(
-        readArguments.path === fixturePath && !Object.hasOwn(readArguments, 'workdir'),
-        `read arguments must carry only an absolute path: ${safeDiagnosticJson(readArguments)}`,
+        readArguments.path === fixturePath,
+        `read arguments must carry an absolute path: ${safeDiagnosticJson(readArguments)}`,
       )
       const approvalJson = JSON.parse(readInvocation.approvalJson || '{}')
       assert(

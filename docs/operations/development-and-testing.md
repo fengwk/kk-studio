@@ -338,7 +338,7 @@ git diff --check
 路径和旧词守卫，并统一执行架构边界：平台业务包、apps 与 plugins 只可使用公开的 Harness 包，`spi.store` 与
 Builtin 存储端口只对平台引擎适配包和组合根开放；Java 源码 SQL 中的表名按唯一前缀映射校验归属；平台组合根、
 MCP 客户端、执行准入、无 Redis 与无 LangChain4j 等约束也在同一入口维护。规则的拒绝与放行由
-[repository tests](../../scripts/dev/verify/repository/tests/) 覆盖，模块内不再重复手写架构清单。
+[repository tests](../../scripts/dev/verify/repository/tests/) 统一覆盖。
 [check-sensitive-data.mjs](../../scripts/dev/verify/repository/check-sensitive-data.mjs) 扫描
 tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook、个人绝对路径和已知私有环境标识；
 命中时只输出规则与 `path:line`，不要回显完整敏感值。该入口不扫描 Git 历史，历史审计是公开策略中
@@ -678,7 +678,7 @@ Netty、Jackson 2/3 与 Kotlin BOM 在 Boot BOM 前导入，以 Maven 首次声�
 的真实 classpath 版本回归与
 [BootPlatformCompatibilityIntegrationTest](../../web/src/test/java/fun/fengwk/kkstudio/web/BootPlatformCompatibilityIntegrationTest.java)
 的真实启动断言共同守住该边界。Kotlin BOM 统一运行时版本；现代 stdlib 已包含 common metadata，
-根 POM 的 OkHttp 管理项限定排除 legacy `kotlin-stdlib-common` 传递 JAR，不增加替代依赖。
+根 POM 的 OkHttp 管理项限定排除传递的 `kotlin-stdlib-common` JAR，不增加额外依赖。
 
 - `NVD_API_KEY` 可选。有 key 时脚本在临时目录创建 mode `600` 的 `settings.xml`（server id
   `kk-studio-supply-chain-nvd`），Maven 进程不继承 key，key 不进入 command line、POM、summary 或

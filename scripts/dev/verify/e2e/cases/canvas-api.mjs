@@ -667,7 +667,7 @@ registerCase({
             nodeId: cid(),
             name: 'n',
             transform: transform(0, 0, 1, 1),
-            resources: [{ kind: 'UPLOAD', name: 'legacy.png', uploadId: cid() }],
+            resources: [{ kind: 'INVALID_RESOURCE_KIND', name: 'invalid.png', uploadId: cid() }],
           },
         ],
       },

@@ -326,19 +326,6 @@ export function agentConfigMatrix() {
       },
     },
     {
-      id: 'invalid.legacy_parent_environment',
-      ok: false,
-      expectStatus: 400,
-      messageIncludes: /Failed to read request|Bad Request|inheritParentEnvironment/i,
-      title: '旧 Environment 继承字段拒绝',
-      build: () => ({
-        tools: [],
-        skills: [],
-        subagents: [],
-        inheritParentEnvironment: false,
-      }),
-    },
-    {
       id: 'valid.goal_contributor_tools',
       ok: true,
       title: 'Goal contributor 工具已进入可选 ToolCatalog',

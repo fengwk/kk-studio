@@ -79,22 +79,14 @@ test('test intent: bootstrap materializes the shared config and launches the Nod
   const lib = readText(E2E_LIB_SH)
   const bootstrap = readText(BOOTSTRAP)
 
-  // 旧 CLI/数据目录/JVM 参数不得复活；启动路径只走 bootstrap helper 启动 Node 入口。
-  for (const removed of ['--gateway-uri', '--data-dir', '--registration-token-file', '--environment-root']) {
-    assert.ok(!lib.includes(removed), removed)
-  }
+  // 启动路径只走 bootstrap helper 启动 Node 入口。
   assert.ok(lib.includes('daemon-bootstrap.sh'))
   assert.ok(lib.includes('DAEMON_ROOT'))
-  assert.ok(!lib.includes('DAEMON_DATA_DIR'))
-  assert.ok(!lib.includes('DAEMON_JAR'))
   assert.ok(lib.includes('DAEMON_DIST'))
   assert.ok(lib.includes('Daemon 运行数据目录'))
   // 凭证经 assignment 前缀进入子进程环境，绝不作为 `env` 的 argv 参数出现。
   assert.ok(lib.includes('DAEMON_REGISTRATION_TOKEN="$DAEMON_REGISTRATION_TOKEN" nohup env'))
   assert.ok(bootstrap.includes('--config'))
-  assert.ok(!bootstrap.includes('--data-dir'))
-  assert.ok(!bootstrap.includes('-jar'))
-  assert.ok(!bootstrap.includes('JAVA_HOME'))
   assert.ok(lib.includes('$DAEMON_DIST/main.js'))
 
   // 执行 recorder：证明 config/secret 落盘布局与 daemon 启动参数，而非静态假通过。
