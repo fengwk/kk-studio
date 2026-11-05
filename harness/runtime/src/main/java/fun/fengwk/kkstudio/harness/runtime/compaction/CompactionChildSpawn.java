@@ -27,7 +27,7 @@ import java.util.UUID;
  * JoinDelivery#SETTLE_OWNER_TURN} 票据。
  *
  * <p>压缩子 Thread 以 {@link SpawnTrigger#RUNTIME} 创建，不计入子任务并发额度；其冻结约束为：输出上限等于父压缩 turn 冻结的
- * outputBudget、禁用 prompt cache、不允许自动压缩（后代经约束合并同样不允许）。调用方已持有父执行树的锁（含父 Thread）。
+ * outputBudget、不允许自动压缩（后代经约束合并同样不允许）。调用方已持有父执行树的锁（含父 Thread）。
  */
 public final class CompactionChildSpawn {
 
@@ -74,7 +74,7 @@ public final class CompactionChildSpawn {
             null,
             null,
             false,
-            new ThreadConstraints(outputCap, true, false),
+            new ThreadConstraints(outputCap, false),
             SpawnTrigger.RUNTIME,
             JoinDelivery.SETTLE_OWNER_TURN,
             SpawnRequest.Budget.unlimited(),

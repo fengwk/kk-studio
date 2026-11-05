@@ -874,14 +874,14 @@ class HarnessRuntimeJoinAcceptanceTest {
             null,
             null,
             false,
-            new ThreadConstraints(1_000, false, false),
+            new ThreadConstraints(1_000, false),
             SpawnTrigger.CONTROLLER,
             JoinDelivery.RECEIPT_ONLY,
             SpawnRequest.Budget.unlimited(),
             TestIds.id(4003),
             rootCommand.requestHash());
     AcceptedCommands root = runtime.spawn(rootRequest, AcceptancePreflight.IDENTITY);
-    assertEquals(new ThreadConstraints(1_000, false, false), root.thread().constraints());
+    assertEquals(new ThreadConstraints(1_000, false), root.thread().constraints());
     assertEquals(SpawnTrigger.CONTROLLER, root.thread().spawnTrigger());
 
     NewThreadCommand childCommand = userMessageCommand(TestIds.id(4004), "child");
@@ -895,14 +895,14 @@ class HarnessRuntimeJoinAcceptanceTest {
             root.thread().headEntryId(),
             null,
             false,
-            new ThreadConstraints(2_000, true, true),
+            new ThreadConstraints(2_000, true),
             SpawnTrigger.MODEL_TOOL,
             JoinDelivery.NOTIFY_PARENT,
             SpawnRequest.Budget.unlimited(),
             TestIds.id(4007),
             childCommand.requestHash());
     AcceptedCommands child = runtime.spawn(childRequest, AcceptancePreflight.IDENTITY);
-    assertEquals(new ThreadConstraints(1_000, true, false), child.thread().constraints());
+    assertEquals(new ThreadConstraints(1_000, false), child.thread().constraints());
     assertEquals(SpawnTrigger.MODEL_TOOL, child.thread().spawnTrigger());
     ThreadJoin childJoin = runtime.findJoin(TestIds.id(4007)).orElseThrow();
     assertEquals(JoinDelivery.NOTIFY_PARENT, childJoin.delivery());
@@ -928,7 +928,7 @@ class HarnessRuntimeJoinAcceptanceTest {
     AcceptedCommands resumed = runtime.spawn(resumedRequest, AcceptancePreflight.IDENTITY);
 
     assertEquals(SpawnTrigger.MODEL_TOOL, resumed.thread().spawnTrigger());
-    assertEquals(new ThreadConstraints(1_000, true, false), resumed.thread().constraints());
+    assertEquals(new ThreadConstraints(1_000, false), resumed.thread().constraints());
     ThreadJoin resumedJoin = runtime.findJoin(TestIds.id(4009)).orElseThrow();
     assertEquals(JoinDelivery.NOTIFY_PARENT, resumedJoin.delivery());
   }
