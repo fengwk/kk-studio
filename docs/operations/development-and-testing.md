@@ -211,8 +211,10 @@ env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -pl <changed-module> spotless:apply '-
 ### Checkstyle
 
 `validate` 阶段执行 Checkstyle `3.3.0`，读取根目录 [checkstyle.xml](../../checkstyle.xml)，包含
-test source 且 `failsOnError=true`。规则集中在两类：代码体内使用 import 而不是全限定类名；
-`if`、`else`、`for`、`while`、`do` 等控制流必须带 braces。
+test source 且 `failsOnError=true`。扫描范围限定为模块的 `src/main/java` 与 `src/test/java`；
+`target/generated-sources` 下的 protobuf 等生成代码不参与，避免生成物导致同一命令在重复运行时失败。
+规则集中在两类：代码体内使用 import 而不是全限定类名；`if`、`else`、`for`、`while`、`do`
+等控制流必须带 braces。
 
 ```bash
 env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp checkstyle:check

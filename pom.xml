@@ -377,6 +377,13 @@
                 <version>3.3.0</version>
                 <configuration>
                     <configLocation>${maven.multiModuleProjectDirectory}/checkstyle.xml</configLocation>
+                    <!-- 只检查手写源码；protobuf 等生成物位于 target/generated-sources，不进入 Checkstyle。 -->
+                    <sourceDirectories>
+                        <sourceDirectory>${project.build.sourceDirectory}</sourceDirectory>
+                    </sourceDirectories>
+                    <testSourceDirectories>
+                        <testSourceDirectory>${project.build.testSourceDirectory}</testSourceDirectory>
+                    </testSourceDirectories>
                     <includeTestSourceDirectory>true</includeTestSourceDirectory>
                     <consoleOutput>true</consoleOutput>
                     <failsOnError>true</failsOnError>
