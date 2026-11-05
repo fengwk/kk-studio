@@ -37,10 +37,6 @@ export const projectsCatalog = {
     'zh-CN': '删除 Issue',
     'en-US': 'Delete Issue',
   },
-  'projects.issue.pause': {
-    'zh-CN': '暂停执行',
-    'en-US': 'Pause Execution',
-  },
   'projects.issue.reopen': {
     'zh-CN': '重新打开',
     'en-US': 'Reopen',

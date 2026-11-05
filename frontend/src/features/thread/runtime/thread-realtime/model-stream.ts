@@ -11,14 +11,14 @@ import type {
   HarnessGenerationFailureDTO,
 } from '@/shared/api/generated/contracts'
 
-export interface RealtimeToolCallDraft {
+interface RealtimeToolCallDraft {
   index: number
   id: string
   name: string
   argumentsJson: string
 }
 
-export interface RealtimeToolCallDelta {
+interface RealtimeToolCallDelta {
   index: number
   id: string | null
   name: string | null
@@ -36,7 +36,7 @@ export interface RealtimeModelDelta {
   createdAt: string
 }
 
-export interface RealtimeModelCheckpoint {
+interface RealtimeModelCheckpoint {
   threadId: string
   invocationId: string
   attempt: number

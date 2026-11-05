@@ -11,8 +11,8 @@ import type {
   ToolDialogueMessage,
 } from '@/features/thread/runtime/thread-timeline-types'
 
-export type ToolVisualState = 'pending' | 'success' | 'error'
-export type ToolExecutionState =
+type ToolVisualState = 'pending' | 'success' | 'error'
+type ToolExecutionState =
   | 'preparing' | 'queued' | 'environment' | 'approval' | 'input'
   | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'unknown'
 
@@ -43,7 +43,7 @@ const CALL_PREVIEW_TOOLS = new Set(['write', 'edit'])
 /** 调用参数下移到正文的工具（task prompt、ask_user 问题）：Header 只保留小型参数。 */
 const CALL_RECORD_TOOLS = new Set(['task', 'ask_user'])
 
-export interface ToolMessageView {
+interface ToolMessageView {
   callMessage?: ToolDialogueMessage
   resultMessage?: ToolDialogueMessage
   preview: ToolCallPreview | null

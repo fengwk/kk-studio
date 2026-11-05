@@ -1,6 +1,5 @@
 import type { BranchDraft } from '@/features/thread/branch-draft'
 import { parsePayload } from '@/features/thread/runtime/payload-json'
-import { threadDraftPath } from '@/features/thread/thread-draft-path'
 import {
   createBuiltinExecution,
   getBuiltinModelSelection,
@@ -67,22 +66,6 @@ export function branchDraftFromEntry(
     execution: nextExecution,
     environmentName,
   }
-}
-
-export function branchDraftFromEntryPath(
-  entries: HarnessSessionEntryDTO[],
-  targetEntryId: string,
-  fallback: BranchDraft | null,
-): BranchDraft | null {
-  if (fallback == null) {
-    return null
-  }
-  const path = threadDraftPath(entries, entries.find((entry) => entry.entryId === targetEntryId)?.sessionId ?? '', targetEntryId)
-  let draft = cloneDraft(fallback)
-  for (const entry of path) {
-    draft = branchDraftFromEntry(entry, draft) ?? draft
-  }
-  return draft
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

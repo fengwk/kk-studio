@@ -5,13 +5,13 @@ export interface ExtensionComponentProps {
   children?: ReactNode
 }
 
-export interface PageNavItem {
+interface PageNavItem {
   label: string
   labelKey?: TranslationKey
   order?: number
 }
 
-export type PageWorkspacePredicate =
+type PageWorkspacePredicate =
   | boolean
   | ((params: Record<string, string | undefined>) => boolean)
 
@@ -34,12 +34,12 @@ export interface OverlayContribution {
   component: ComponentType<ExtensionComponentProps>
 }
 
-export type ToolRendererPhase = 'call' | 'result'
-export type ToolRendererStatus = 'streaming' | 'done' | 'error'
-export type ToolRendererAttachmentType = 'image' | 'audio' | 'video' | 'file'
+type ToolRendererPhase = 'call' | 'result'
+type ToolRendererStatus = 'streaming' | 'done' | 'error'
+type ToolRendererAttachmentType = 'image' | 'audio' | 'video' | 'file'
 
 /** Tool renderer contribution 可消费的稳定、与 Harness DTO 解耦的资源投影。 */
-export interface ToolRendererAttachment {
+interface ToolRendererAttachment {
   type: ToolRendererAttachmentType
   name: string
   mime: string
@@ -50,7 +50,7 @@ export interface ToolRendererAttachment {
 }
 
 /** 有序 Tool 结果内容：Text 忠实展示、JSON 格式化、Resource 按权威 MIME 渲染。 */
-export type ToolRendererContent =
+type ToolRendererContent =
   | { type: 'text'; text: string }
   | { type: 'json'; value: unknown }
   | { type: 'resource'; attachment: ToolRendererAttachment }

@@ -33,7 +33,7 @@ function MemoryRouter({ children }: { children: ReactNode }) {
 
 import { AgentPane } from '@/features/thread/runtime/AgentPane'
 import { useRootThreadControl, type UseRootThreadControlOptions } from '@/features/thread/runtime/useRootThreadControl'
-import { branchDraftFromEntry, branchDraftFromEntryPath } from '@/features/thread/runtime/root-thread/branch-draft-replay'
+import { branchDraftFromEntry } from '@/features/thread/runtime/root-thread/branch-draft-replay'
 import { sessionSelectionItem, threadSelectionItem } from '@/features/thread/runtime/root-thread/session-selection-items'
 import { usePaneTarget } from '@/features/thread/runtime/usePaneTarget'
 import { isBoundTarget, isPaneTarget, ownerIdentity, savePendingAcceptance, type PaneTarget, type PendingAcceptance } from '@/features/thread/runtime/agent-pane'
@@ -3170,29 +3170,6 @@ describe('branchDraftFromEntry and branchDraftFromEntryPath environment replay',
       )
       expect(result?.environmentName).toBe('initial-env')
     }
-  })
-
-  /**
-   * 测试意图：验证 branchDraftFromEntryPath 沿 entry 祖先链依序回放时，environmentName 的变更与清除能够正确链式传递。
-   */
-  it('replays environment changes sequentially along the entry path', () => {
-    const entries: HarnessSessionEntryDTO[] = [
-      { ...createEntry({ settings: { agentName: 'a1', environmentName: 'env-1' } }, 'root', null), entryType: 'ROOT' },
-      createEntry({ settings: { agentName: 'a2' } }, 'child-1', 'root'),
-      createEntry({ settings: { environmentName: null } }, 'child-2', 'child-1'),
-    ]
-
-    // 到 root：环境为 env-1
-    const atRoot = branchDraftFromEntryPath(entries, 'root', fallbackDraft)
-    expect(atRoot?.environmentName).toBe('env-1')
-
-    // 到 child-1：未改动环境，继承 env-1
-    const atChild1 = branchDraftFromEntryPath(entries, 'child-1', fallbackDraft)
-    expect(atChild1?.environmentName).toBe('env-1')
-
-    // 到 child-2：显式 null，环境被清空
-    const atChild2 = branchDraftFromEntryPath(entries, 'child-2', fallbackDraft)
-    expect(atChild2?.environmentName).toBeNull()
   })
 
   /**

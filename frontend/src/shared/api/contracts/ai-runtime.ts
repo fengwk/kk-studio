@@ -4,17 +4,7 @@ import type {
   HarnessModelSelectionDTO,
 } from '@/shared/api/generated/contracts'
 
-export const BUILTIN_DRIVER = 'builtin'
-
-export interface BuiltinExecutionSettings {
-  modelName: string
-  variant: string | null
-}
-
-export interface BuiltinExecutionSelection {
-  driver: 'builtin'
-  settings: BuiltinExecutionSettings
-}
+const BUILTIN_DRIVER = 'builtin'
 
 export function createBuiltinExecution(
   model: { modelName: string; variant?: string | null } | string,
@@ -129,7 +119,7 @@ export type HarnessCommandCreateDTO =
 
 export type AgentRuntimeOwnerDTO = { kind: string; id: string }
 
-export interface NewSessionCommandTargetDTO {
+interface NewSessionCommandTargetDTO {
   type: 'NEW_SESSION'
   sessionId: string
   threadId: string
@@ -137,7 +127,7 @@ export interface NewSessionCommandTargetDTO {
   yoloEnabled: boolean
 }
 
-export interface NewThreadCommandTargetDTO {
+interface NewThreadCommandTargetDTO {
   type: 'NEW_THREAD'
   sessionId: string
   startEntryId: string
@@ -151,7 +141,7 @@ export interface NewThreadCommandTargetDTO {
  * 与新 Thread。settings 从源切点 branch 推导，因此不携带 rootSettings/threadName；
  * commands 与产品 owner 语义同 NEW_SESSION / NEW_THREAD。
  */
-export interface NewForkedSessionCommandTargetDTO {
+interface NewForkedSessionCommandTargetDTO {
   type: 'NEW_FORKED_SESSION'
   sourceThreadId: string
   startEntryId: string

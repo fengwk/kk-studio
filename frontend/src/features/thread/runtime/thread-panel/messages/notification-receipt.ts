@@ -6,7 +6,7 @@ const STATES = ['completed', 'error', 'cancelled'] as const
 
 export type SubagentReceiptState = (typeof STATES)[number]
 
-export interface SubagentReceipt {
+interface SubagentReceipt {
   threadId: string | null
   agent: string | null
   state: SubagentReceiptState
@@ -17,7 +17,7 @@ export interface SubagentReceipt {
   partial: string | null
 }
 
-export type SubagentReceiptParseResult =
+type SubagentReceiptParseResult =
   | { ok: true; receipt: SubagentReceipt }
   | { ok: false }
 

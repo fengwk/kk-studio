@@ -7,7 +7,7 @@ import {
 import { getString, isRecord, nonBlank as isNonBlankString } from '@/shared/lib/value'
 import type { ToolInvocationDTO } from '@/shared/api/generated/contracts'
 
-export interface RealtimeToolPartial {
+interface RealtimeToolPartial {
   threadId: string
   invocationId: string
   attempt: number
@@ -27,7 +27,7 @@ export const PROCESS_OUTPUT_MAX_LINES = 2000
 
 export const PROCESS_OUTPUT_OMISSION_MARKER = '... [output omitted] ...'
 
-export interface ProcessOutputDetails {
+interface ProcessOutputDetails {
   kind: 'process.output'
   mode: 'APPEND' | 'SNAPSHOT'
   startOffset: number
@@ -35,7 +35,7 @@ export interface ProcessOutputDetails {
   observedBytes: number
 }
 
-export interface ProcessOutputStreamState {
+interface ProcessOutputStreamState {
   mode: 'APPEND' | 'SNAPSHOT'
   startOffset: number
   endOffset: number
