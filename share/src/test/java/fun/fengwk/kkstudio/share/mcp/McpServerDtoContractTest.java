@@ -1,0 +1,86 @@
+package fun.fengwk.kkstudio.share.mcp;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import org.junit.jupiter.api.Test;
+import tools.jackson.databind.json.JsonMapper;
+
+import java.time.Instant;
+import java.util.Map;
+
+/** MCP Server 相关 Share DTO 的序列化、严格未知字段拒绝与公开安全边界契约测试。 */
+class McpServerDtoContractTest {
+
+  private static final JsonMapper MAPPER = JsonMapper.builder().build();
+
+  @Test
+  void createDtoCarriesExplicitHttpFields() throws Exception {
+    // 意图：验证 McpServerCreateDTO 直接承载 name/url/headers/enabled/timeoutMillis，未知字段严格 fail closed
+    String json =
+        "{\"name\":\"my_server\",\"url\":\"https://example.com/mcp\","
+            + "\"headers\":{\"Authorization\":\"Bearer x\"},\"enabled\":true,\"timeoutMillis\":5000}";
+    McpServerCreateDTO dto = MAPPER.readValue(json, McpServerCreateDTO.class);
+    assertEquals("my_server", dto.getName());
+    assertEquals("https://example.com/mcp", dto.getUrl());
+    assertEquals(Map.of("Authorization", "Bearer x"), dto.getHeaders());
+    assertEquals(Boolean.TRUE, dto.getEnabled());
+    assertEquals(5000L, dto.getTimeoutMillis());
+
+    assertThrows(
+        Exception.class,
+        () ->
+            MAPPER.readValue(
+                "{\"name\":\"s\",\"url\":\"https://example.com\",\"configJson\":\"{}\"}",
+                McpServerCreateDTO.class));
+  }
+
+  @Test
+  void updateDtoCarriesExpectedVersionAndExplicitHttpFields() throws Exception {
+    // 意图：验证 McpServerUpdateDTO 承载 expectedVersion 与显式 HTTP 字段，名称不可编辑
+    String json =
+        "{\"expectedVersion\":\"3\",\"url\":\"https://example.com/mcp\",\"enabled\":false}";
+    McpServerUpdateDTO dto = MAPPER.readValue(json, McpServerUpdateDTO.class);
+    assertEquals("3", dto.getExpectedVersion());
+    assertEquals("https://example.com/mcp", dto.getUrl());
+    assertEquals(Boolean.FALSE, dto.getEnabled());
+  }
+
+  @Test
+  void serverDtoExposesMetadata() {
+    McpServerDTO dto = new McpServerDTO();
+    dto.setName("safe_server");
+    dto.setEnabled(true);
+    dto.setTimeoutMillis(30000L);
+    dto.setDiscoveryStatus("AVAILABLE");
+    dto.setToolCount(5);
+    dto.setVersion("2");
+    dto.setCreateTime(Instant.now());
+    dto.setUpdateTime(Instant.now());
+
+    String str = dto.toString();
+    assertTrue(str.contains("safe_server"));
+  }
+
+  @Test
+  void configDtoCarriesExplicitHttpFieldsAndRedactsHeadersFromToString() throws Exception {
+    // 意图：验证显式配置读取返回 name/version/url/headers，且 headers 不进入 toString
+    String secret = "Bearer sensitive-config-marker";
+    McpServerConfigDTO dto = new McpServerConfigDTO();
+    dto.setName("full_server");
+    dto.setVersion("1");
+    dto.setUrl("https://example.com/mcp");
+    dto.setHeaders(Map.of("Authorization", secret));
+
+    String serialized = MAPPER.writeValueAsString(dto);
+    McpServerConfigDTO read = MAPPER.readValue(serialized, McpServerConfigDTO.class);
+    assertEquals("full_server", read.getName());
+    assertEquals("1", read.getVersion());
+    assertEquals("https://example.com/mcp", read.getUrl());
+    assertEquals(secret, read.getHeaders().get("Authorization"));
+
+    assertFalse(dto.toString().contains("sensitive-config-marker"));
+  }
+}

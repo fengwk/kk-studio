@@ -11,14 +11,14 @@ export interface AddIssueEvidenceRequestDTO {
   uploadId: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO */
+/** Java：fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO */
 export interface AgentDefinitionConfigDTO {
   tools: string[]
   skills: SkillRefDTO[]
   subagents: string[]
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionCreateDTO */
+/** Java：fun.fengwk.kkstudio.share.catalog.AgentDefinitionCreateDTO */
 export interface AgentDefinitionCreateDTO {
   description?: string | null
   systemPrompt?: string | null
@@ -27,7 +27,7 @@ export interface AgentDefinitionCreateDTO {
   name: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionDTO */
+/** Java：fun.fengwk.kkstudio.share.catalog.AgentDefinitionDTO */
 export interface AgentDefinitionDTO {
   name: string
   type: AgentDefinitionType
@@ -40,7 +40,7 @@ export interface AgentDefinitionDTO {
   updateTime: number
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionType */
+/** Java：fun.fengwk.kkstudio.share.catalog.AgentDefinitionType */
 export type AgentDefinitionType =
   | 'USER'
   | 'BUILTIN'
@@ -50,7 +50,7 @@ export const AGENT_DEFINITION_TYPE_VALUES: readonly AgentDefinitionType[] = [
   'BUILTIN',
 ]
 
-/** Java：fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionUpdateDTO */
+/** Java：fun.fengwk.kkstudio.share.catalog.AgentDefinitionUpdateDTO */
 export interface AgentDefinitionUpdateDTO {
   description?: string | null
   systemPrompt?: string | null
@@ -59,14 +59,14 @@ export interface AgentDefinitionUpdateDTO {
   expectedVersion: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.catalog.AgentModelAbilitiesDTO */
+/** Java：fun.fengwk.kkstudio.share.catalog.AgentModelAbilitiesDTO */
 export interface AgentModelAbilitiesDTO {
   tools: boolean
   reasoning: boolean
   inputModalities: AgentModelInputModality[]
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO */
+/** Java：fun.fengwk.kkstudio.share.catalog.AgentModelConfigDTO */
 export interface AgentModelConfigDTO {
   limit: AgentModelLimitDTO
   abilities: AgentModelAbilitiesDTO
@@ -75,7 +75,7 @@ export interface AgentModelConfigDTO {
   variants: AgentModelVariantDTO[]
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.catalog.AgentModelCreateDTO */
+/** Java：fun.fengwk.kkstudio.share.catalog.AgentModelCreateDTO */
 export interface AgentModelCreateDTO {
   name: string
   kind: AgentModelKind
@@ -86,7 +86,7 @@ export interface AgentModelCreateDTO {
   group?: AgentModelGroupDTO | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.catalog.AgentModelDTO */
+/** Java：fun.fengwk.kkstudio.share.catalog.AgentModelDTO */
 export interface AgentModelDTO {
   name: string
   kind: AgentModelKind
@@ -100,20 +100,20 @@ export interface AgentModelDTO {
   updateTime: number
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.catalog.AgentModelGroupDTO */
+/** Java：fun.fengwk.kkstudio.share.catalog.AgentModelGroupDTO */
 export interface AgentModelGroupDTO {
   members: AgentModelGroupMemberDTO[]
   fallbackStatusCodes: number[]
   cooldownSeconds: number
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.catalog.AgentModelGroupMemberDTO */
+/** Java：fun.fengwk.kkstudio.share.catalog.AgentModelGroupMemberDTO */
 export interface AgentModelGroupMemberDTO {
   modelName: string
   variant: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.catalog.AgentModelInputModality */
+/** Java：fun.fengwk.kkstudio.share.catalog.AgentModelInputModality */
 export type AgentModelInputModality =
   | 'TEXT'
   | 'IMAGE'
@@ -129,7 +129,7 @@ export const AGENT_MODEL_INPUT_MODALITY_VALUES: readonly AgentModelInputModality
   'DOCUMENT',
 ]
 
-/** Java：fun.fengwk.kkstudio.share.ai.catalog.AgentModelKind */
+/** Java：fun.fengwk.kkstudio.share.catalog.AgentModelKind */
 export type AgentModelKind =
   | 'MODEL'
   | 'GROUP'
@@ -139,13 +139,13 @@ export const AGENT_MODEL_KIND_VALUES: readonly AgentModelKind[] = [
   'GROUP',
 ]
 
-/** Java：fun.fengwk.kkstudio.share.ai.catalog.AgentModelLimitDTO */
+/** Java：fun.fengwk.kkstudio.share.catalog.AgentModelLimitDTO */
 export interface AgentModelLimitDTO {
   context: number
   output: number
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingConditionDTO */
+/** Java：fun.fengwk.kkstudio.share.catalog.AgentModelPricingConditionDTO */
 export interface AgentModelPricingConditionDTO {
   context?: AgentModelPricingContextConditionDTO | null
   serviceTier?: string[] | null
@@ -157,7 +157,7 @@ export interface AgentModelPricingConditionDTO {
   not?: AgentModelPricingConditionDTO | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingContextConditionDTO */
+/** Java：fun.fengwk.kkstudio.share.catalog.AgentModelPricingContextConditionDTO */
 export interface AgentModelPricingContextConditionDTO {
   gt?: number | null
   gte?: number | null
@@ -165,20 +165,20 @@ export interface AgentModelPricingContextConditionDTO {
   lte?: number | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingDTO */
+/** Java：fun.fengwk.kkstudio.share.catalog.AgentModelPricingDTO */
 export interface AgentModelPricingDTO {
   base: AgentModelRateSetDTO
   overrides: AgentModelPricingOverrideDTO[]
   multipliers: AgentModelPricingMultiplierDTO[]
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingDateConditionDTO */
+/** Java：fun.fengwk.kkstudio.share.catalog.AgentModelPricingDateConditionDTO */
 export interface AgentModelPricingDateConditionDTO {
   gte?: string | null
   lt?: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingFactorsDTO */
+/** Java：fun.fengwk.kkstudio.share.catalog.AgentModelPricingFactorsDTO */
 export interface AgentModelPricingFactorsDTO {
   input?: string | null
   output?: string | null
@@ -187,27 +187,27 @@ export interface AgentModelPricingFactorsDTO {
   reasoning?: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingMultiplierDTO */
+/** Java：fun.fengwk.kkstudio.share.catalog.AgentModelPricingMultiplierDTO */
 export interface AgentModelPricingMultiplierDTO {
   id: string
   when: AgentModelPricingConditionDTO
   factors: AgentModelPricingFactorsDTO
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingOverrideDTO */
+/** Java：fun.fengwk.kkstudio.share.catalog.AgentModelPricingOverrideDTO */
 export interface AgentModelPricingOverrideDTO {
   id: string
   when: AgentModelPricingConditionDTO
   rates: AgentModelRatePatchDTO
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingRequestBodyConditionDTO */
+/** Java：fun.fengwk.kkstudio.share.catalog.AgentModelPricingRequestBodyConditionDTO */
 export interface AgentModelPricingRequestBodyConditionDTO {
   path?: string | null
   equals?: unknown | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingTimeConditionDTO */
+/** Java：fun.fengwk.kkstudio.share.catalog.AgentModelPricingTimeConditionDTO */
 export interface AgentModelPricingTimeConditionDTO {
   start: string
   end: string
@@ -215,7 +215,7 @@ export interface AgentModelPricingTimeConditionDTO {
   weekdays?: number[] | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.catalog.AgentModelRatePatchDTO */
+/** Java：fun.fengwk.kkstudio.share.catalog.AgentModelRatePatchDTO */
 export interface AgentModelRatePatchDTO {
   input?: string | null
   output?: string | null
@@ -225,7 +225,7 @@ export interface AgentModelRatePatchDTO {
   reasoning?: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.catalog.AgentModelRateSetDTO */
+/** Java：fun.fengwk.kkstudio.share.catalog.AgentModelRateSetDTO */
 export interface AgentModelRateSetDTO {
   input: string
   output: string
@@ -235,7 +235,7 @@ export interface AgentModelRateSetDTO {
   reasoning?: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.catalog.AgentModelUpdateDTO */
+/** Java：fun.fengwk.kkstudio.share.catalog.AgentModelUpdateDTO */
 export interface AgentModelUpdateDTO {
   name: string
   kind: AgentModelKind
@@ -247,14 +247,14 @@ export interface AgentModelUpdateDTO {
   expectedVersion: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.catalog.AgentModelVariantDTO */
+/** Java：fun.fengwk.kkstudio.share.catalog.AgentModelVariantDTO */
 export interface AgentModelVariantDTO {
   id: string
   reasoningEffort?: string | null
   protocolOptionsJson?: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.catalog.AgentProviderCreateDTO */
+/** Java：fun.fengwk.kkstudio.share.catalog.AgentProviderCreateDTO */
 export interface AgentProviderCreateDTO {
   description?: string | null
   providerType: string
@@ -266,7 +266,7 @@ export interface AgentProviderCreateDTO {
   name: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.catalog.AgentProviderDTO */
+/** Java：fun.fengwk.kkstudio.share.catalog.AgentProviderDTO */
 export interface AgentProviderDTO {
   name: string
   description?: string | null
@@ -281,7 +281,7 @@ export interface AgentProviderDTO {
   updateTime: number
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.catalog.AgentProviderUpdateDTO */
+/** Java：fun.fengwk.kkstudio.share.catalog.AgentProviderUpdateDTO */
 export interface AgentProviderUpdateDTO {
   description?: string | null
   providerType: string
@@ -293,7 +293,7 @@ export interface AgentProviderUpdateDTO {
   expectedVersion: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.runtime.AgentTaskDTO */
+/** Java：fun.fengwk.kkstudio.share.runtime.AgentTaskDTO */
 export interface AgentTaskDTO {
   ticketId: string
   threadId: string
@@ -304,7 +304,7 @@ export interface AgentTaskDTO {
   error: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.runtime.AgentTaskSubmitDTO */
+/** Java：fun.fengwk.kkstudio.share.runtime.AgentTaskSubmitDTO */
 export interface AgentTaskSubmitDTO {
   ticketId: string
   agent: string
@@ -842,7 +842,7 @@ export interface CreateProjectRequestDTO {
   yoloEnabled?: boolean | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.environment.DaemonConfiguration */
+/** Java：fun.fengwk.kkstudio.share.environment.DaemonConfiguration */
 export interface DaemonConfiguration {
   studioUrl: string
   note?: string | null
@@ -850,12 +850,12 @@ export interface DaemonConfiguration {
   lsp?: DaemonLspConfiguration | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.environment.DaemonLspConfiguration */
+/** Java：fun.fengwk.kkstudio.share.environment.DaemonLspConfiguration */
 export interface DaemonLspConfiguration {
   servers: Record<string, DaemonLspServerConfiguration>
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.environment.DaemonLspServerConfiguration */
+/** Java：fun.fengwk.kkstudio.share.environment.DaemonLspServerConfiguration */
 export interface DaemonLspServerConfiguration {
   command: string[]
   extensions?: string[] | null
@@ -863,7 +863,7 @@ export interface DaemonLspServerConfiguration {
   firstMatchMarkers?: string[] | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.environment.EnvironmentCardDTO */
+/** Java：fun.fengwk.kkstudio.share.environment.EnvironmentCardDTO */
 export interface EnvironmentCardDTO {
   id: string
   name: string
@@ -885,12 +885,12 @@ export interface EnvironmentCardDTO {
   updateTime: number
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.environment.EnvironmentCreateDTO */
+/** Java：fun.fengwk.kkstudio.share.environment.EnvironmentCreateDTO */
 export interface EnvironmentCreateDTO {
   name: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.environment.EnvironmentEventDTO */
+/** Java：fun.fengwk.kkstudio.share.environment.EnvironmentEventDTO */
 export interface EnvironmentEventDTO {
   time: number
   level: string
@@ -964,41 +964,41 @@ export interface EnvironmentIdeViewsDTO {
   views: EnvironmentIdeViewDTO[]
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.environment.EnvironmentInstallCodeDTO */
+/** Java：fun.fengwk.kkstudio.share.environment.EnvironmentInstallCodeDTO */
 export interface EnvironmentInstallCodeDTO {
   code: string
   expiresAt: number
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.environment.EnvironmentInstallCodeRequestDTO */
+/** Java：fun.fengwk.kkstudio.share.environment.EnvironmentInstallCodeRequestDTO */
 export interface EnvironmentInstallCodeRequestDTO {
   expectedVersion: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.environment.EnvironmentInstallConfigDTO */
+/** Java：fun.fengwk.kkstudio.share.environment.EnvironmentInstallConfigDTO */
 export interface EnvironmentInstallConfigDTO {
   operatingSystem: string
   daemon: DaemonConfiguration
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.environment.EnvironmentRotateTokenDTO */
+/** Java：fun.fengwk.kkstudio.share.environment.EnvironmentRotateTokenDTO */
 export interface EnvironmentRotateTokenDTO {
   expectedVersion: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.environment.EnvironmentRuntimeDTO */
+/** Java：fun.fengwk.kkstudio.share.environment.EnvironmentRuntimeDTO */
 export interface EnvironmentRuntimeDTO {
   daemonVersion: string
   update: EnvironmentUpdateProgressDTO | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.environment.EnvironmentRuntimeStatusDTO */
+/** Java：fun.fengwk.kkstudio.share.environment.EnvironmentRuntimeStatusDTO */
 export interface EnvironmentRuntimeStatusDTO {
   revision: string
   status: EnvironmentRuntimeDTO
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.catalog.EnvironmentSupportDTO */
+/** Java：fun.fengwk.kkstudio.share.catalog.EnvironmentSupportDTO */
 export type EnvironmentSupportDTO =
   | 'NONE'
   | 'ROUTED'
@@ -1010,20 +1010,20 @@ export const ENVIRONMENT_SUPPORT_DTO_VALUES: readonly EnvironmentSupportDTO[] = 
   'REQUIRED',
 ]
 
-/** Java：fun.fengwk.kkstudio.share.ai.environment.EnvironmentUpdateProgressDTO */
+/** Java：fun.fengwk.kkstudio.share.environment.EnvironmentUpdateProgressDTO */
 export interface EnvironmentUpdateProgressDTO {
   targetVersion: string
   downloadedBytes: string
   totalBytes: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.environment.EnvironmentUpdateStartDTO */
+/** Java：fun.fengwk.kkstudio.share.environment.EnvironmentUpdateStartDTO */
 export interface EnvironmentUpdateStartDTO {
   runtimeStatus: EnvironmentRuntimeStatusDTO
   commandStatus: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessAcceptedCommandsDTO */
+/** Java：fun.fengwk.kkstudio.share.runtime.HarnessAcceptedCommandsDTO */
 export interface HarnessAcceptedCommandsDTO {
   session: HarnessSessionDTO
   rootEntry: HarnessSessionEntryDTO
@@ -1032,7 +1032,7 @@ export interface HarnessAcceptedCommandsDTO {
   replayed: boolean
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessActiveAssistantOutputDTO */
+/** Java：fun.fengwk.kkstudio.share.runtime.HarnessActiveAssistantOutputDTO */
 export interface HarnessActiveAssistantOutputDTO {
   generationId: string
   turnStartEntryId: string
@@ -1047,19 +1047,19 @@ export interface HarnessActiveAssistantOutputDTO {
   updateTime: number
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessAgentMessageContentDTO */
+/** Java：fun.fengwk.kkstudio.share.runtime.HarnessAgentMessageContentDTO */
 export interface HarnessAgentMessageContentDTO {
   type: string
   text?: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessAssistantErrorDTO */
+/** Java：fun.fengwk.kkstudio.share.runtime.HarnessAssistantErrorDTO */
 export interface HarnessAssistantErrorDTO {
   code: string
   message: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessBranchSettingsDTO */
+/** Java：fun.fengwk.kkstudio.share.runtime.HarnessBranchSettingsDTO */
 export interface HarnessBranchSettingsDTO {
   agentName: string
   execution: HarnessExecutionSelectionDTO
@@ -1067,7 +1067,7 @@ export interface HarnessBranchSettingsDTO {
   goal: HarnessGoalSettingDTO | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessCancelledInputDTO */
+/** Java：fun.fengwk.kkstudio.share.runtime.HarnessCancelledInputDTO */
 export interface HarnessCancelledInputDTO {
   sequence: string
   idempotencyKey: string
@@ -1075,14 +1075,14 @@ export interface HarnessCancelledInputDTO {
   payloadJson: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandBatchDTO */
+/** Java：fun.fengwk.kkstudio.share.runtime.HarnessCommandBatchDTO */
 export interface HarnessCommandBatchDTO {
   owner: HarnessCommandOwnerDTO
   target: HarnessCommandTargetDTO
   commands: HarnessCommandCreateDTO[]
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandCreateDTO */
+/** Java：fun.fengwk.kkstudio.share.runtime.HarnessCommandCreateDTO */
 export interface HarnessCommandCreateDTO {
   type: string
   idempotencyKey: string
@@ -1093,7 +1093,7 @@ export interface HarnessCommandCreateDTO {
   text?: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandOwnerDTO */
+/** Java：fun.fengwk.kkstudio.share.runtime.HarnessCommandOwnerDTO */
 export interface HarnessCommandOwnerDTO {
   kind: string
   id: string
@@ -1101,7 +1101,7 @@ export interface HarnessCommandOwnerDTO {
   link?: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandTargetDTO */
+/** Java：fun.fengwk.kkstudio.share.runtime.HarnessCommandTargetDTO */
 export interface HarnessCommandTargetDTO {
   type: string
   sessionId?: string | null
@@ -1113,18 +1113,18 @@ export interface HarnessCommandTargetDTO {
   yoloEnabled?: boolean | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessDraftPreviewRequestDTO */
+/** Java：fun.fengwk.kkstudio.share.runtime.HarnessDraftPreviewRequestDTO */
 export interface HarnessDraftPreviewRequestDTO {
   startEntryId: string
   commands: HarnessCommandCreateDTO[]
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessExecutionAbandonDTO */
+/** Java：fun.fengwk.kkstudio.share.runtime.HarnessExecutionAbandonDTO */
 export interface HarnessExecutionAbandonDTO {
   expectedVersion: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessExecutionExitDTO */
+/** Java：fun.fengwk.kkstudio.share.runtime.HarnessExecutionExitDTO */
 export interface HarnessExecutionExitDTO {
   executionId: string
   invocationId: string
@@ -1133,13 +1133,13 @@ export interface HarnessExecutionExitDTO {
   registeredAt: number
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessExecutionSelectionDTO */
+/** Java：fun.fengwk.kkstudio.share.runtime.HarnessExecutionSelectionDTO */
 export interface HarnessExecutionSelectionDTO {
   driver: string
   settings: Record<string, unknown>
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessGenerationFailureDTO */
+/** Java：fun.fengwk.kkstudio.share.runtime.HarnessGenerationFailureDTO */
 export interface HarnessGenerationFailureDTO {
   generationId: string
   turnStartEntryId: string
@@ -1154,25 +1154,25 @@ export interface HarnessGenerationFailureDTO {
   retryAt: number
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessGoalSettingDTO */
+/** Java：fun.fengwk.kkstudio.share.runtime.HarnessGoalSettingDTO */
 export interface HarnessGoalSettingDTO {
   id: string
   text: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessManualCompactionDTO */
+/** Java：fun.fengwk.kkstudio.share.runtime.HarnessManualCompactionDTO */
 export interface HarnessManualCompactionDTO {
   available: boolean
   disabledReason: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessModelRequestDebugDTO.CacheControlDTO */
+/** Java：fun.fengwk.kkstudio.share.runtime.HarnessModelRequestDebugDTO.CacheControlDTO */
 export interface HarnessModelRequestDebugCacheControlDTO {
   retention: string
   key: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessModelRequestDebugDTO */
+/** Java：fun.fengwk.kkstudio.share.runtime.HarnessModelRequestDebugDTO */
 export interface HarnessModelRequestDebugDTO {
   kind: string
   generatedAt: number
@@ -1187,7 +1187,7 @@ export interface HarnessModelRequestDebugDTO {
   frozenInvocation: HarnessModelRequestDebugFrozenInvocationDTO | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessModelRequestDebugDTO.FrozenInvocationDTO */
+/** Java：fun.fengwk.kkstudio.share.runtime.HarnessModelRequestDebugDTO.FrozenInvocationDTO */
 export interface HarnessModelRequestDebugFrozenInvocationDTO {
   kind: string
   generationId: string
@@ -1195,13 +1195,13 @@ export interface HarnessModelRequestDebugFrozenInvocationDTO {
   requestJson: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessModelRequestDebugRequestDTO */
+/** Java：fun.fengwk.kkstudio.share.runtime.HarnessModelRequestDebugRequestDTO */
 export interface HarnessModelRequestDebugRequestDTO {
   model: HarnessModelSelectionDTO
   environmentName?: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessModelRequestDebugDTO.SkillDTO */
+/** Java：fun.fengwk.kkstudio.share.runtime.HarnessModelRequestDebugDTO.SkillDTO */
 export interface HarnessModelRequestDebugSkillDTO {
   packageName: string
   name: string
@@ -1215,7 +1215,7 @@ export interface HarnessModelRequestDebugSkillDTO {
   promptXml: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessModelRequestDebugDTO.SubagentDTO */
+/** Java：fun.fengwk.kkstudio.share.runtime.HarnessModelRequestDebugDTO.SubagentDTO */
 export interface HarnessModelRequestDebugSubagentDTO {
   name: string
   description: string
@@ -1225,7 +1225,7 @@ export interface HarnessModelRequestDebugSubagentDTO {
   configurationJson: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessModelRequestDebugDTO.ToolDTO */
+/** Java：fun.fengwk.kkstudio.share.runtime.HarnessModelRequestDebugDTO.ToolDTO */
 export interface HarnessModelRequestDebugToolDTO {
   name: string
   description: string
@@ -1236,18 +1236,18 @@ export interface HarnessModelRequestDebugToolDTO {
   filterReason: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessModelSelectionDTO */
+/** Java：fun.fengwk.kkstudio.share.runtime.HarnessModelSelectionDTO */
 export interface HarnessModelSelectionDTO {
   modelName: string
   variant?: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessNameUpdateDTO */
+/** Java：fun.fengwk.kkstudio.share.runtime.HarnessNameUpdateDTO */
 export interface HarnessNameUpdateDTO {
   name: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessProviderRequestPreviewDTO */
+/** Java：fun.fengwk.kkstudio.share.runtime.HarnessProviderRequestPreviewDTO */
 export interface HarnessProviderRequestPreviewDTO {
   kind: string
   generatedAt: number
@@ -1259,14 +1259,14 @@ export interface HarnessProviderRequestPreviewDTO {
   notice?: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionDTO */
+/** Java：fun.fengwk.kkstudio.share.runtime.HarnessSessionDTO */
 export interface HarnessSessionDTO {
   sessionId: string
   name: string
   createdAt: number
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionEntryDTO */
+/** Java：fun.fengwk.kkstudio.share.runtime.HarnessSessionEntryDTO */
 export interface HarnessSessionEntryDTO {
   entryId: string
   sessionId: string
@@ -1277,13 +1277,13 @@ export interface HarnessSessionEntryDTO {
   usageCost: HarnessUsageCostDTO | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionEntryPageDTO */
+/** Java：fun.fengwk.kkstudio.share.runtime.HarnessSessionEntryPageDTO */
 export interface HarnessSessionEntryPageDTO {
   items: HarnessSessionEntryDTO[]
   nextCursor: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionFileContentDTO */
+/** Java：fun.fengwk.kkstudio.share.runtime.HarnessSessionFileContentDTO */
 export interface HarnessSessionFileContentDTO {
   sessionId: string
   path: string
@@ -1293,7 +1293,7 @@ export interface HarnessSessionFileContentDTO {
   text: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionFileEntryDTO */
+/** Java：fun.fengwk.kkstudio.share.runtime.HarnessSessionFileEntryDTO */
 export interface HarnessSessionFileEntryDTO {
   name: string
   path: string
@@ -1303,14 +1303,14 @@ export interface HarnessSessionFileEntryDTO {
   updatedAt?: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionFileListDTO */
+/** Java：fun.fengwk.kkstudio.share.runtime.HarnessSessionFileListDTO */
 export interface HarnessSessionFileListDTO {
   sessionId: string
   path: string
   entries: HarnessSessionFileEntryDTO[]
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionSummaryDTO */
+/** Java：fun.fengwk.kkstudio.share.runtime.HarnessSessionSummaryDTO */
 export interface HarnessSessionSummaryDTO {
   sessionId: string
   name: string
@@ -1320,7 +1320,7 @@ export interface HarnessSessionSummaryDTO {
   threadCount: number
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessStoppedThreadReceiptDTO */
+/** Java：fun.fengwk.kkstudio.share.runtime.HarnessStoppedThreadReceiptDTO */
 export interface HarnessStoppedThreadReceiptDTO {
   threadId: string
   stopRequestId: string
@@ -1329,14 +1329,14 @@ export interface HarnessStoppedThreadReceiptDTO {
   cancelledInputs: HarnessCancelledInputDTO[]
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadCommandBatchDTO */
+/** Java：fun.fengwk.kkstudio.share.runtime.HarnessThreadCommandBatchDTO */
 export interface HarnessThreadCommandBatchDTO {
   expectedHeadEntryId?: string | null
   expectedNextCommandSequence?: string | null
   commands: HarnessCommandCreateDTO[]
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadCommandDTO */
+/** Java：fun.fengwk.kkstudio.share.runtime.HarnessThreadCommandDTO */
 export interface HarnessThreadCommandDTO {
   threadId: string
   sequence: string
@@ -1348,19 +1348,19 @@ export interface HarnessThreadCommandDTO {
   createTime: number
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadCompactDTO */
+/** Java：fun.fengwk.kkstudio.share.runtime.HarnessThreadCompactDTO */
 export interface HarnessThreadCompactDTO {
   expectedVersion: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadCompactResultDTO */
+/** Java：fun.fengwk.kkstudio.share.runtime.HarnessThreadCompactResultDTO */
 export interface HarnessThreadCompactResultDTO {
   thread: HarnessThreadDTO
   turnStartEntryId: string
   childThreadId: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadDTO */
+/** Java：fun.fengwk.kkstudio.share.runtime.HarnessThreadDTO */
 export interface HarnessThreadDTO {
   threadId: string
   parentThreadId: string | null
@@ -1378,7 +1378,7 @@ export interface HarnessThreadDTO {
   updateTime: number
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadSnapshotDTO */
+/** Java：fun.fengwk.kkstudio.share.runtime.HarnessThreadSnapshotDTO */
 export interface HarnessThreadSnapshotDTO {
   version: string
   thread: HarnessThreadDTO
@@ -1393,26 +1393,26 @@ export interface HarnessThreadSnapshotDTO {
   unconfirmedExecutions: HarnessExecutionExitDTO[]
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadStopDTO */
+/** Java：fun.fengwk.kkstudio.share.runtime.HarnessThreadStopDTO */
 export interface HarnessThreadStopDTO {
   stopRequestId: string
   expectedVersion: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadStopResultDTO */
+/** Java：fun.fengwk.kkstudio.share.runtime.HarnessThreadStopResultDTO */
 export interface HarnessThreadStopResultDTO {
   status: string
   thread: HarnessThreadDTO
   stoppedThreads: HarnessStoppedThreadReceiptDTO[]
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadStreamCatchupDTO */
+/** Java：fun.fengwk.kkstudio.share.runtime.HarnessThreadStreamCatchupDTO */
 export interface HarnessThreadStreamCatchupDTO {
   invocationId: string
   attempt: number
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadSummaryDTO */
+/** Java：fun.fengwk.kkstudio.share.runtime.HarnessThreadSummaryDTO */
 export interface HarnessThreadSummaryDTO {
   threadId: string
   parentThreadId: string | null
@@ -1425,7 +1425,7 @@ export interface HarnessThreadSummaryDTO {
   headMessagePreview: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadTreeNodeDTO */
+/** Java：fun.fengwk.kkstudio.share.runtime.HarnessThreadTreeNodeDTO */
 export interface HarnessThreadTreeNodeDTO {
   threadId: string
   parentThreadId: string | null
@@ -1440,19 +1440,19 @@ export interface HarnessThreadTreeNodeDTO {
   updateTime: number
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadYoloUpdateDTO */
+/** Java：fun.fengwk.kkstudio.share.runtime.HarnessThreadYoloUpdateDTO */
 export interface HarnessThreadYoloUpdateDTO {
   yoloEnabled: boolean
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessToolApprovalDTO */
+/** Java：fun.fengwk.kkstudio.share.runtime.HarnessToolApprovalDTO */
 export interface HarnessToolApprovalDTO {
   decision: string
   decisionId: string
   reason?: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.interaction.HarnessToolInputDTO */
+/** Java：fun.fengwk.kkstudio.share.interaction.HarnessToolInputDTO */
 export interface HarnessToolInputDTO {
   threadId: string
   submissionId: string
@@ -1460,7 +1460,7 @@ export interface HarnessToolInputDTO {
   answers?: (string[])[] | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.interaction.HarnessToolInputResultDTO */
+/** Java：fun.fengwk.kkstudio.share.interaction.HarnessToolInputResultDTO */
 export interface HarnessToolInputResultDTO {
   threadId: string
   interactionId: string
@@ -1470,13 +1470,13 @@ export interface HarnessToolInputResultDTO {
   materialized: boolean
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessUsageCostDTO */
+/** Java：fun.fengwk.kkstudio.share.runtime.HarnessUsageCostDTO */
 export interface HarnessUsageCostDTO {
   currency: string
   amount: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessUserMessageContentDTO */
+/** Java：fun.fengwk.kkstudio.share.runtime.HarnessUserMessageContentDTO */
 export interface HarnessUserMessageContentDTO {
   type: string
   text?: string | null
@@ -1509,7 +1509,7 @@ export interface IdeBrowserUseSnapshotView {
   bindingEpoch: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.interaction.InteractionDTO */
+/** Java：fun.fengwk.kkstudio.share.interaction.InteractionDTO */
 export interface InteractionDTO {
   type: string
   interactionId: string | null
@@ -1528,7 +1528,7 @@ export interface InteractionDTO {
   createTime: number
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.interaction.InteractionOwnerDTO */
+/** Java：fun.fengwk.kkstudio.share.interaction.InteractionOwnerDTO */
 export interface InteractionOwnerDTO {
   kind: string
   id: string
@@ -1536,7 +1536,7 @@ export interface InteractionOwnerDTO {
   link: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.interaction.InteractionPageDTO */
+/** Java：fun.fengwk.kkstudio.share.interaction.InteractionPageDTO */
 export interface InteractionPageDTO {
   items: InteractionDTO[]
   nextCursor: string | null
@@ -1648,12 +1648,12 @@ export interface IssueStageBudgetDTO {
   remainingRuns: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.environment.LiveEnvironmentCapabilityDTO */
+/** Java：fun.fengwk.kkstudio.share.environment.LiveEnvironmentCapabilityDTO */
 export interface LiveEnvironmentCapabilityDTO {
   id: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.mcp.McpServerConfigDTO */
+/** Java：fun.fengwk.kkstudio.share.mcp.McpServerConfigDTO */
 export interface McpServerConfigDTO {
   name: string
   version: string
@@ -1661,7 +1661,7 @@ export interface McpServerConfigDTO {
   headers?: Record<string, string> | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.mcp.McpServerCreateDTO */
+/** Java：fun.fengwk.kkstudio.share.mcp.McpServerCreateDTO */
 export interface McpServerCreateDTO {
   name: string
   url: string
@@ -1670,7 +1670,7 @@ export interface McpServerCreateDTO {
   timeoutMillis?: number | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.mcp.McpServerDTO */
+/** Java：fun.fengwk.kkstudio.share.mcp.McpServerDTO */
 export interface McpServerDTO {
   name: string
   enabled: boolean
@@ -1682,7 +1682,7 @@ export interface McpServerDTO {
   updateTime: number
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.mcp.McpServerUpdateDTO */
+/** Java：fun.fengwk.kkstudio.share.mcp.McpServerUpdateDTO */
 export interface McpServerUpdateDTO {
   expectedVersion: string
   url: string
@@ -1691,7 +1691,7 @@ export interface McpServerUpdateDTO {
   timeoutMillis?: number | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.catalog.ModelCatalogPageDTO */
+/** Java：fun.fengwk.kkstudio.share.catalog.ModelCatalogPageDTO */
 export interface ModelCatalogPageDTO {
   generation: string
   fetchedAt?: number | null
@@ -1701,14 +1701,14 @@ export interface ModelCatalogPageDTO {
   nextCursor?: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.catalog.ModelDefaultAbilitiesDTO */
+/** Java：fun.fengwk.kkstudio.share.catalog.ModelDefaultAbilitiesDTO */
 export interface ModelDefaultAbilitiesDTO {
   tools?: boolean | null
   reasoning?: boolean | null
   inputModalities?: AgentModelInputModality[] | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.catalog.ModelDefaultCandidateDTO */
+/** Java：fun.fengwk.kkstudio.share.catalog.ModelDefaultCandidateDTO */
 export interface ModelDefaultCandidateDTO {
   id: string
   provider: string
@@ -1723,47 +1723,47 @@ export interface ModelDefaultCandidateDTO {
   pricingSupported: boolean
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.catalog.ModelDefaultLimitDTO */
+/** Java：fun.fengwk.kkstudio.share.catalog.ModelDefaultLimitDTO */
 export interface ModelDefaultLimitDTO {
   context?: number | null
   output?: number | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.plugin.PluginAuthCompleteRequestDTO */
+/** Java：fun.fengwk.kkstudio.share.plugin.PluginAuthCompleteRequestDTO */
 export interface PluginAuthCompleteRequestDTO {
   authAttemptId: string
   callbackUrl: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.plugin.PluginAuthKindDTO.DeepLink */
+/** Java：fun.fengwk.kkstudio.share.plugin.PluginAuthKindDTO.DeepLink */
 export interface PluginAuthKindDeepLink {
   type: 'DEEP_LINK'
   regionCandidates: string[]
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.plugin.PluginAuthKindDTO.StaticKey */
+/** Java：fun.fengwk.kkstudio.share.plugin.PluginAuthKindDTO.StaticKey */
 export interface PluginAuthKindStaticKey {
   type: 'STATIC_KEY'
   secretField: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.plugin.PluginAuthKindDTO */
+/** Java：fun.fengwk.kkstudio.share.plugin.PluginAuthKindDTO */
 export type PluginAuthKindDTO =
   | PluginAuthKindDeepLink
   | PluginAuthKindStaticKey
 
-/** Java：fun.fengwk.kkstudio.share.ai.plugin.PluginAuthPrepareDTO */
+/** Java：fun.fengwk.kkstudio.share.plugin.PluginAuthPrepareDTO */
 export interface PluginAuthPrepareDTO {
   authAttemptId: string
   loginUrl: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.plugin.PluginAuthPrepareRequestDTO */
+/** Java：fun.fengwk.kkstudio.share.plugin.PluginAuthPrepareRequestDTO */
 export interface PluginAuthPrepareRequestDTO {
   region: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.plugin.PluginConfigurationDTO */
+/** Java：fun.fengwk.kkstudio.share.plugin.PluginConfigurationDTO */
 export interface PluginConfigurationDTO {
   revision?: string | null
   valuesJson: string
@@ -1772,14 +1772,14 @@ export interface PluginConfigurationDTO {
   secrets: Record<string, PluginSecretProjectionDTO>
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.plugin.PluginConfigurationUpdateRequestDTO */
+/** Java：fun.fengwk.kkstudio.share.plugin.PluginConfigurationUpdateRequestDTO */
 export interface PluginConfigurationUpdateRequestDTO {
   expectedRevision: string
   valuesJson: string
   secretPatch?: Record<string, PluginSecretPatchDTO> | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.plugin.PluginConnectionCheckDTO.Authentication */
+/** Java：fun.fengwk.kkstudio.share.plugin.PluginConnectionCheckDTO.Authentication */
 export type PluginConnectionCheckAuthentication =
   | 'ACCEPTED'
   | 'REJECTED'
@@ -1793,14 +1793,14 @@ export const PLUGIN_CONNECTION_CHECK_AUTHENTICATION_VALUES: readonly PluginConne
   'NOT_CHECKED',
 ]
 
-/** Java：fun.fengwk.kkstudio.share.ai.plugin.PluginConnectionCheckDTO.BrowserSession */
+/** Java：fun.fengwk.kkstudio.share.plugin.PluginConnectionCheckDTO.BrowserSession */
 export type PluginConnectionCheckBrowserSession = 'UNKNOWN'
 
 export const PLUGIN_CONNECTION_CHECK_BROWSER_SESSION_VALUES: readonly PluginConnectionCheckBrowserSession[] = [
   'UNKNOWN',
 ]
 
-/** Java：fun.fengwk.kkstudio.share.ai.plugin.PluginConnectionCheckDTO */
+/** Java：fun.fengwk.kkstudio.share.plugin.PluginConnectionCheckDTO */
 export interface PluginConnectionCheckDTO {
   pluginId: string
   appliedRevision: string
@@ -1810,7 +1810,7 @@ export interface PluginConnectionCheckDTO {
   browserSession: PluginConnectionCheckBrowserSession
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.plugin.PluginConnectionCheckDTO.Reachability */
+/** Java：fun.fengwk.kkstudio.share.plugin.PluginConnectionCheckDTO.Reachability */
 export type PluginConnectionCheckReachability =
   | 'REACHABLE'
   | 'UNREACHABLE'
@@ -1824,12 +1824,12 @@ export const PLUGIN_CONNECTION_CHECK_REACHABILITY_VALUES: readonly PluginConnect
   'INDETERMINATE',
 ]
 
-/** Java：fun.fengwk.kkstudio.share.ai.plugin.PluginConnectionCheckRequestDTO */
+/** Java：fun.fengwk.kkstudio.share.plugin.PluginConnectionCheckRequestDTO */
 export interface PluginConnectionCheckRequestDTO {
   expectedRevision: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.plugin.PluginDTO */
+/** Java：fun.fengwk.kkstudio.share.plugin.PluginDTO */
 export interface PluginDTO {
   pluginId: string
   name: string
@@ -1850,13 +1850,13 @@ export interface PluginDTO {
   applicationError?: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.plugin.PluginSecretPatchDTO */
+/** Java：fun.fengwk.kkstudio.share.plugin.PluginSecretPatchDTO */
 export interface PluginSecretPatchDTO {
   operation: string
   value?: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.plugin.PluginSecretProjectionDTO */
+/** Java：fun.fengwk.kkstudio.share.plugin.PluginSecretProjectionDTO */
 export interface PluginSecretProjectionDTO {
   description: string
   configured: boolean
@@ -1937,7 +1937,7 @@ export interface ResumeIssueRequestDTO {
   requestKey: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.skill.SkillArchiveDownloadDTO */
+/** Java：fun.fengwk.kkstudio.share.skill.SkillArchiveDownloadDTO */
 export interface SkillArchiveDownloadDTO {
   filename: string
   sha256: string
@@ -1945,7 +1945,7 @@ export interface SkillArchiveDownloadDTO {
   download: StoragePresignedUrlDTO
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.skill.SkillEnvironmentSyncDTO */
+/** Java：fun.fengwk.kkstudio.share.skill.SkillEnvironmentSyncDTO */
 export interface SkillEnvironmentSyncDTO {
   environmentId: string
   installedSha256: string | null
@@ -1954,25 +1954,25 @@ export interface SkillEnvironmentSyncDTO {
   upToDate: boolean
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.skill.SkillGitSourceDTO */
+/** Java：fun.fengwk.kkstudio.share.skill.SkillGitSourceDTO */
 export interface SkillGitSourceDTO {
   repositoryUrl: string
   branch: string
   hasToken: boolean
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.skill.SkillManifestEntryDTO */
+/** Java：fun.fengwk.kkstudio.share.skill.SkillManifestEntryDTO */
 export interface SkillManifestEntryDTO {
   name: string
   description: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.skill.SkillPackageCheckDTO */
+/** Java：fun.fengwk.kkstudio.share.skill.SkillPackageCheckDTO */
 export interface SkillPackageCheckDTO {
   expectedVersion: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.skill.SkillPackageDetailDTO */
+/** Java：fun.fengwk.kkstudio.share.skill.SkillPackageDetailDTO */
 export interface SkillPackageDetailDTO {
   packageName: string
   description?: string | null
@@ -1992,7 +1992,7 @@ export interface SkillPackageDetailDTO {
   updateTime: number
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.skill.SkillPackageEditDTO */
+/** Java：fun.fengwk.kkstudio.share.skill.SkillPackageEditDTO */
 export interface SkillPackageEditDTO {
   expectedVersion: string
   description?: string | null
@@ -2000,13 +2000,13 @@ export interface SkillPackageEditDTO {
   token?: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.skill.SkillPackageFileDTO */
+/** Java：fun.fengwk.kkstudio.share.skill.SkillPackageFileDTO */
 export interface SkillPackageFileDTO {
   path: string
   size: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.skill.SkillPackageGitCreateDTO */
+/** Java：fun.fengwk.kkstudio.share.skill.SkillPackageGitCreateDTO */
 export interface SkillPackageGitCreateDTO {
   packageName: string
   description?: string | null
@@ -2015,13 +2015,13 @@ export interface SkillPackageGitCreateDTO {
   token?: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.skill.SkillPackageGitPublishDTO */
+/** Java：fun.fengwk.kkstudio.share.skill.SkillPackageGitPublishDTO */
 export interface SkillPackageGitPublishDTO {
   expectedVersion: string
   targetCommit: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.skill.SkillPackagePreviewDTO */
+/** Java：fun.fengwk.kkstudio.share.skill.SkillPackagePreviewDTO */
 export interface SkillPackagePreviewDTO {
   stagingUploadId: string
   packageName: string
@@ -2035,7 +2035,7 @@ export interface SkillPackagePreviewDTO {
   fileCount: number
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.skill.SkillPackageSummaryDTO */
+/** Java：fun.fengwk.kkstudio.share.skill.SkillPackageSummaryDTO */
 export interface SkillPackageSummaryDTO {
   packageName: string
   description?: string | null
@@ -2049,7 +2049,7 @@ export interface SkillPackageSummaryDTO {
   updateTime: number
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.skill.SkillPackageUploadPreviewDTO */
+/** Java：fun.fengwk.kkstudio.share.skill.SkillPackageUploadPreviewDTO */
 export interface SkillPackageUploadPreviewDTO {
   uploadId: string
   packageName: string
@@ -2057,7 +2057,7 @@ export interface SkillPackageUploadPreviewDTO {
   description?: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.skill.SkillPackageUploadPublishDTO */
+/** Java：fun.fengwk.kkstudio.share.skill.SkillPackageUploadPublishDTO */
 export interface SkillPackageUploadPublishDTO {
   stagingUploadId: string
   packageName: string
@@ -2066,7 +2066,7 @@ export interface SkillPackageUploadPublishDTO {
   expectedVersion?: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO */
+/** Java：fun.fengwk.kkstudio.share.skill.SkillRefDTO */
 export interface SkillRefDTO {
   packageName: string
   name: string
@@ -2282,14 +2282,14 @@ export interface SystemSettingsUpdateDTO {
   expectedVersion: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.catalog.ToolCatalogEntryDTO */
+/** Java：fun.fengwk.kkstudio.share.catalog.ToolCatalogEntryDTO */
 export interface ToolCatalogEntryDTO {
   name: string
   description: string
   environmentSupport?: EnvironmentSupportDTO | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.runtime.ToolInvocationDTO */
+/** Java：fun.fengwk.kkstudio.share.runtime.ToolInvocationDTO */
 export interface ToolInvocationDTO {
   id: string
   threadId: string

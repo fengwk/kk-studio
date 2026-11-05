@@ -14,8 +14,8 @@ import ch.qos.logback.core.read.ListAppender;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 
-import fun.fengwk.kkstudio.share.ai.catalog.ModelCatalogPageDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.ModelDefaultCandidateDTO;
+import fun.fengwk.kkstudio.share.catalog.ModelCatalogPageDTO;
+import fun.fengwk.kkstudio.share.catalog.ModelDefaultCandidateDTO;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;

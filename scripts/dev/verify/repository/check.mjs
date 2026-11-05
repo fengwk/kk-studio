@@ -1061,7 +1061,18 @@ const platformDomainRoots = [
   'storage',
   'vfs',
 ]
-const shareDomainRoots = ['ai', 'configsync', 'storage', 'systemsettings']
+const shareDomainRoots = [
+  'catalog',
+  'configsync',
+  'environment',
+  'interaction',
+  'mcp',
+  'plugin',
+  'runtime',
+  'skill',
+  'storage',
+  'systemsettings',
+]
 
 /** 平台与共享契约的子域根保持精确，新增子域必须显式更新这里。 */
 function checkPackageRoots() {
@@ -1102,7 +1113,7 @@ function checkProviderTypeSingleSource() {
     existsSync(
       path.join(
         repositoryRoot,
-        'share/src/main/java/fun/fengwk/kkstudio/share/ai/catalog/AgentProviderType.java',
+        'share/src/main/java/fun/fengwk/kkstudio/share/catalog/AgentProviderType.java',
       ),
     )
   ) {

@@ -23,7 +23,7 @@ import fun.fengwk.kkstudio.common.number.DecimalLongs;
 import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionSummaryDTO;
+import fun.fengwk.kkstudio.share.runtime.HarnessSessionSummaryDTO;
 
 import java.util.function.Supplier;
 

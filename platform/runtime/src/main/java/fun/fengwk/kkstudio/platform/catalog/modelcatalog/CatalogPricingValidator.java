@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.platform.catalog.modelcatalog;
 
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModelPricingCodec;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingDTO;
+import fun.fengwk.kkstudio.share.catalog.AgentModelPricingDTO;
 
 /**
  * 用唯一 pricing parser 校验目录候选；只有能完整保存/求值的价格才标记为 supported。

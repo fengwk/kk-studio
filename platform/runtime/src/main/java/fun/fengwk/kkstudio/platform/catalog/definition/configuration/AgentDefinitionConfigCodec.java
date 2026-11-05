@@ -12,8 +12,8 @@ import tools.jackson.databind.type.LogicalType;
 
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillNames;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
-import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
+import fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO;
+import fun.fengwk.kkstudio.share.skill.SkillRefDTO;
 
 import java.util.HashSet;
 import java.util.List;

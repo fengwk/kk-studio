@@ -1,9 +1,9 @@
 package fun.fengwk.kkstudio.platform.catalog.model;
 
-import fun.fengwk.kkstudio.share.ai.catalog.AgentModelAbilitiesDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentModelInputModality;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentModelLimitDTO;
+import fun.fengwk.kkstudio.share.catalog.AgentModelAbilitiesDTO;
+import fun.fengwk.kkstudio.share.catalog.AgentModelConfigDTO;
+import fun.fengwk.kkstudio.share.catalog.AgentModelInputModality;
+import fun.fengwk.kkstudio.share.catalog.AgentModelLimitDTO;
 
 import java.util.ArrayList;
 import java.util.LinkedHashSet;

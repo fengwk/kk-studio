@@ -41,8 +41,8 @@ import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.platform.error.DomainException;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionSummaryDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadSummaryDTO;
+import fun.fengwk.kkstudio.share.runtime.HarnessSessionSummaryDTO;
+import fun.fengwk.kkstudio.share.runtime.HarnessThreadSummaryDTO;
 
 import java.time.Instant;
 import java.util.List;

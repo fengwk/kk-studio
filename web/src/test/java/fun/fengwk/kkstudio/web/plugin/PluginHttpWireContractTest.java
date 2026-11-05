@@ -37,12 +37,12 @@ import fun.fengwk.kkstudio.common.schema.StringSchema;
 import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfigSchema;
 import fun.fengwk.kkstudio.platform.pluginhost.service.PluginManagementService;
-import fun.fengwk.kkstudio.share.ai.plugin.PluginAuthKindDTO;
-import fun.fengwk.kkstudio.share.ai.plugin.PluginAuthPrepareDTO;
-import fun.fengwk.kkstudio.share.ai.plugin.PluginConfigurationDTO;
-import fun.fengwk.kkstudio.share.ai.plugin.PluginConnectionCheckDTO;
-import fun.fengwk.kkstudio.share.ai.plugin.PluginDTO;
-import fun.fengwk.kkstudio.share.ai.plugin.PluginSecretProjectionDTO;
+import fun.fengwk.kkstudio.share.plugin.PluginAuthKindDTO;
+import fun.fengwk.kkstudio.share.plugin.PluginAuthPrepareDTO;
+import fun.fengwk.kkstudio.share.plugin.PluginConfigurationDTO;
+import fun.fengwk.kkstudio.share.plugin.PluginConnectionCheckDTO;
+import fun.fengwk.kkstudio.share.plugin.PluginDTO;
+import fun.fengwk.kkstudio.share.plugin.PluginSecretProjectionDTO;
 import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
 import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
 

@@ -70,12 +70,12 @@ import fun.fengwk.kkstudio.platform.harness.thread.command.LiveTurnPlan;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrchestrator;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwner;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderUpdateDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessProviderRequestPreviewDTO;
+import fun.fengwk.kkstudio.share.catalog.AgentProviderUpdateDTO;
+import fun.fengwk.kkstudio.share.runtime.HarnessProviderRequestPreviewDTO;
 import fun.fengwk.kkstudio.share.storage.StorageUploadDTO;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
-import fun.fengwk.kkstudio.web.ai.chat.ChatIntegrationSupport;
 import fun.fengwk.kkstudio.web.storage.InMemoryS3StorageService;
+import fun.fengwk.kkstudio.web.storage.StorageUploadTestSupport;
 import fun.fengwk.kkstudio.web.storage.WebStorageS3TestConfiguration;
 
 import java.io.IOException;
@@ -140,7 +140,7 @@ class ProviderRequestPreviewIntegrationTest extends WebPostgresTestSupport {
   @Autowired private WebApplicationContext webContext;
   @Autowired private ObjectMapper objectMapper;
 
-  private ChatIntegrationSupport storage;
+  private StorageUploadTestSupport storage;
   private HttpServer providerServer;
   private ExecutorService providerServerExecutor;
   private ScheduledExecutorService fixturePollScheduler;
@@ -155,7 +155,7 @@ class ProviderRequestPreviewIntegrationTest extends WebPostgresTestSupport {
     providerRequests.set(0);
     capturedProviderBodies.clear();
     includeReasoning = false;
-    storage = new ChatIntegrationSupport(storageUploadService, s3Storage, jdbc);
+    storage = new StorageUploadTestSupport(storageUploadService, s3Storage, jdbc);
     startProviderServer();
     pointStubProviderAtLocalServer();
     fixturePollScheduler = Executors.newSingleThreadScheduledExecutor();

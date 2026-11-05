@@ -18,10 +18,10 @@ import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefini
 import fun.fengwk.kkstudio.platform.harness.task.AgentPromptComposer;
 import fun.fengwk.kkstudio.platform.harness.thread.command.DatabaseTurnResolver;
 import fun.fengwk.kkstudio.platform.harness.thread.command.LiveTurnPlan;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.EnvironmentSupportDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelRequestDebugDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelSelectionDTO;
+import fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO;
+import fun.fengwk.kkstudio.share.catalog.EnvironmentSupportDTO;
+import fun.fengwk.kkstudio.share.runtime.HarnessModelRequestDebugDTO;
+import fun.fengwk.kkstudio.share.runtime.HarnessModelSelectionDTO;
 
 import java.time.Clock;
 import java.util.List;

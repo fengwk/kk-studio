@@ -24,9 +24,9 @@ import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.model.ProviderProtocolOptions;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRuntimeConfigParser.ParsedAgentModelConfig;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentModelRateSetDTO;
+import fun.fengwk.kkstudio.share.catalog.AgentModelConfigDTO;
+import fun.fengwk.kkstudio.share.catalog.AgentModelPricingDTO;
+import fun.fengwk.kkstudio.share.catalog.AgentModelRateSetDTO;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;

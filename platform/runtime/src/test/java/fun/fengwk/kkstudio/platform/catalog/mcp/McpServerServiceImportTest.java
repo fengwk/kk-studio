@@ -15,7 +15,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 
 import fun.fengwk.kkstudio.platform.catalog.mcp.discovery.McpToolDiscovery;
 import fun.fengwk.kkstudio.platform.error.DomainException;
-import fun.fengwk.kkstudio.share.ai.mcp.McpServerDTO;
+import fun.fengwk.kkstudio.share.mcp.McpServerDTO;
 
 import java.util.List;
 import java.util.Map;

@@ -3,7 +3,7 @@ package fun.fengwk.kkstudio.platform.catalog.definition;
 import lombok.Builder;
 
 import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionType;
+import fun.fengwk.kkstudio.share.catalog.AgentDefinitionType;
 
 import java.time.Instant;
 

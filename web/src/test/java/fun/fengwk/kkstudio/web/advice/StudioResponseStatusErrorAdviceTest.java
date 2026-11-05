@@ -19,7 +19,7 @@ import fun.fengwk.kkstudio.platform.harness.builtin.query.ProviderRequestPreview
 import fun.fengwk.kkstudio.platform.harness.builtin.query.ProviderRequestPreviewUnavailableException.Reason;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
 import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessRequestFormatException;
+import fun.fengwk.kkstudio.share.runtime.HarnessRequestFormatException;
 
 import java.util.Locale;
 import java.util.Map;

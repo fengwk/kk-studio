@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.platform.catalog.definition.builtin;
 
-import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.BuiltinAgentPrompts;
+import fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO;
 
 import java.util.List;
 

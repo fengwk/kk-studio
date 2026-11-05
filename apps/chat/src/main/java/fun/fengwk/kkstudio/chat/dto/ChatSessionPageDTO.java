@@ -4,7 +4,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
 import org.jspecify.annotations.Nullable;
 
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionSummaryDTO;
+import fun.fengwk.kkstudio.share.runtime.HarnessSessionSummaryDTO;
 
 import java.util.ArrayList;
 import java.util.List;

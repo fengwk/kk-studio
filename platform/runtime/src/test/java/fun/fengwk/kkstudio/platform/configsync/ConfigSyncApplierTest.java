@@ -41,16 +41,16 @@ import fun.fengwk.kkstudio.platform.pluginhost.service.PluginConfigurationServic
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsCodec;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsService;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsTestFixture;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionCreateDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionEditablePropertiesDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionUpdateDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentModelCreateDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentModelEditablePropertiesDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentModelKind;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentModelUpdateDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderEditablePropertiesDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessExecutionSelectionDTO;
+import fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO;
+import fun.fengwk.kkstudio.share.catalog.AgentDefinitionCreateDTO;
+import fun.fengwk.kkstudio.share.catalog.AgentDefinitionEditablePropertiesDTO;
+import fun.fengwk.kkstudio.share.catalog.AgentDefinitionUpdateDTO;
+import fun.fengwk.kkstudio.share.catalog.AgentModelCreateDTO;
+import fun.fengwk.kkstudio.share.catalog.AgentModelEditablePropertiesDTO;
+import fun.fengwk.kkstudio.share.catalog.AgentModelKind;
+import fun.fengwk.kkstudio.share.catalog.AgentModelUpdateDTO;
+import fun.fengwk.kkstudio.share.catalog.AgentProviderEditablePropertiesDTO;
+import fun.fengwk.kkstudio.share.runtime.HarnessExecutionSelectionDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSectionsDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsUpdateDTO;
 

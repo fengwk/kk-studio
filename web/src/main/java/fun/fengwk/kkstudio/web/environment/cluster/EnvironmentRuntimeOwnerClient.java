@@ -16,8 +16,8 @@ import fun.fengwk.kkstudio.platform.cluster.ClusterInternalAuthentication;
 import fun.fengwk.kkstudio.platform.cluster.ClusterInternalPaths;
 import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
 import fun.fengwk.kkstudio.platform.error.DomainException;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRuntimeStatusDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentUpdateStartDTO;
+import fun.fengwk.kkstudio.share.environment.EnvironmentRuntimeStatusDTO;
+import fun.fengwk.kkstudio.share.environment.EnvironmentUpdateStartDTO;
 
 import java.net.URI;
 import java.net.http.HttpClient;

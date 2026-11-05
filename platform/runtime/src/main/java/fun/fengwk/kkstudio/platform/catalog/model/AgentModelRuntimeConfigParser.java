@@ -17,11 +17,11 @@ import fun.fengwk.kkstudio.harness.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.model.ProviderProtocolOptions;
 import fun.fengwk.kkstudio.harness.model.ProviderProtocolOptions.InvalidOptionsException;
 import fun.fengwk.kkstudio.harness.model.ProviderProtocolOptions.InvalidReason;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentModelAbilitiesDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentModelInputModality;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentModelLimitDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentModelVariantDTO;
+import fun.fengwk.kkstudio.share.catalog.AgentModelAbilitiesDTO;
+import fun.fengwk.kkstudio.share.catalog.AgentModelConfigDTO;
+import fun.fengwk.kkstudio.share.catalog.AgentModelInputModality;
+import fun.fengwk.kkstudio.share.catalog.AgentModelLimitDTO;
+import fun.fengwk.kkstudio.share.catalog.AgentModelVariantDTO;
 
 import java.util.ArrayList;
 import java.util.HashSet;

@@ -29,8 +29,8 @@ import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentService;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwnerDisplay;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwnership;
-import fun.fengwk.kkstudio.share.ai.interaction.InteractionDTO;
-import fun.fengwk.kkstudio.share.ai.interaction.InteractionPageDTO;
+import fun.fengwk.kkstudio.share.interaction.InteractionDTO;
+import fun.fengwk.kkstudio.share.interaction.InteractionPageDTO;
 
 import java.time.Instant;
 import java.util.List;

@@ -13,10 +13,10 @@ import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
-import fun.fengwk.kkstudio.share.ai.catalog.EnvironmentSupportDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelRequestDebugDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelSelectionDTO;
-import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
+import fun.fengwk.kkstudio.share.catalog.EnvironmentSupportDTO;
+import fun.fengwk.kkstudio.share.runtime.HarnessModelRequestDebugDTO;
+import fun.fengwk.kkstudio.share.runtime.HarnessModelSelectionDTO;
+import fun.fengwk.kkstudio.share.skill.SkillRefDTO;
 
 import java.time.Instant;
 import java.util.List;

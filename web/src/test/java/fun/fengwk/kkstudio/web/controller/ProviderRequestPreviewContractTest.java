@@ -26,7 +26,7 @@ import fun.fengwk.kkstudio.platform.harness.builtin.query.ProviderRequestPreview
 import fun.fengwk.kkstudio.platform.harness.builtin.query.ProviderRequestPreviewUnavailableException;
 import fun.fengwk.kkstudio.platform.harness.builtin.query.ProviderRequestPreviewUnavailableException.Reason;
 import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessProviderRequestPreviewDTO;
+import fun.fengwk.kkstudio.share.runtime.HarnessProviderRequestPreviewDTO;
 import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
 import fun.fengwk.kkstudio.web.advice.StudioResponseStatusErrorAdvice;
 

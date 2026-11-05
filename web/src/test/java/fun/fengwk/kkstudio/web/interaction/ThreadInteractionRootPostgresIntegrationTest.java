@@ -94,8 +94,8 @@ import fun.fengwk.kkstudio.platform.harness.thread.query.EnvironmentWaitProjecti
 import fun.fengwk.kkstudio.platform.harness.thread.query.UsageCostProjectionService;
 import fun.fengwk.kkstudio.platform.interaction.InteractionQueryService;
 import fun.fengwk.kkstudio.platform.interaction.InteractionService;
-import fun.fengwk.kkstudio.share.ai.interaction.InteractionDTO;
-import fun.fengwk.kkstudio.share.ai.interaction.InteractionPageDTO;
+import fun.fengwk.kkstudio.share.interaction.InteractionDTO;
+import fun.fengwk.kkstudio.share.interaction.InteractionPageDTO;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 import fun.fengwk.kkstudio.web.controller.StudioHarnessThreadController;
 import fun.fengwk.kkstudio.web.harness.HarnessThreadService;

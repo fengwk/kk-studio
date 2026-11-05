@@ -52,8 +52,8 @@ import fun.fengwk.kkstudio.platform.pluginhost.service.PluginContextFactory;
 import fun.fengwk.kkstudio.platform.pluginhost.service.PluginSecretPatch;
 import fun.fengwk.kkstudio.platform.pluginhost.testing.TestPluginFixtures;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsService;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionType;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderEditablePropertiesDTO;
+import fun.fengwk.kkstudio.share.catalog.AgentDefinitionType;
+import fun.fengwk.kkstudio.share.catalog.AgentProviderEditablePropertiesDTO;
 
 import javax.sql.DataSource;
 

@@ -20,8 +20,8 @@ import fun.fengwk.kkstudio.platform.vfs.SessionFileQueryService.SessionFileAcces
 import fun.fengwk.kkstudio.platform.vfs.SessionFileQueryService.SessionFileContentException;
 import fun.fengwk.kkstudio.platform.vfs.SessionFileQueryService.SessionFileDownload;
 import fun.fengwk.kkstudio.platform.vfs.SessionFileQueryService.SessionFileNotFoundException;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionFileContentDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionFileListDTO;
+import fun.fengwk.kkstudio.share.runtime.HarnessSessionFileContentDTO;
+import fun.fengwk.kkstudio.share.runtime.HarnessSessionFileListDTO;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Objects;

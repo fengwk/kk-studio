@@ -97,7 +97,7 @@ import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessProviderRequestPreviewDTO;
+import fun.fengwk.kkstudio.share.runtime.HarnessProviderRequestPreviewDTO;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;

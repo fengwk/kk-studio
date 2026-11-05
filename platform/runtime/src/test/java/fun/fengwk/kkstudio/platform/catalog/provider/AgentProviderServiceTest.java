@@ -15,9 +15,9 @@ import fun.fengwk.kkstudio.common.page.PageQuery;
 import fun.fengwk.kkstudio.platform.error.DomainErrorCode;
 import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderCreateDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderUpdateDTO;
+import fun.fengwk.kkstudio.share.catalog.AgentProviderCreateDTO;
+import fun.fengwk.kkstudio.share.catalog.AgentProviderDTO;
+import fun.fengwk.kkstudio.share.catalog.AgentProviderUpdateDTO;
 
 import java.util.Arrays;
 import java.util.concurrent.CountDownLatch;

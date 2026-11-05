@@ -5,15 +5,15 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageContent;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessBranchSettingsDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandBatchDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandCreateDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandOwnerDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandTargetDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessExecutionSelectionDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelSelectionDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadCommandBatchDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessUserMessageContentDTO;
+import fun.fengwk.kkstudio.share.runtime.HarnessBranchSettingsDTO;
+import fun.fengwk.kkstudio.share.runtime.HarnessCommandBatchDTO;
+import fun.fengwk.kkstudio.share.runtime.HarnessCommandCreateDTO;
+import fun.fengwk.kkstudio.share.runtime.HarnessCommandOwnerDTO;
+import fun.fengwk.kkstudio.share.runtime.HarnessCommandTargetDTO;
+import fun.fengwk.kkstudio.share.runtime.HarnessExecutionSelectionDTO;
+import fun.fengwk.kkstudio.share.runtime.HarnessModelSelectionDTO;
+import fun.fengwk.kkstudio.share.runtime.HarnessThreadCommandBatchDTO;
+import fun.fengwk.kkstudio.share.runtime.HarnessUserMessageContentDTO;
 
 import java.util.List;
 import java.util.Map;

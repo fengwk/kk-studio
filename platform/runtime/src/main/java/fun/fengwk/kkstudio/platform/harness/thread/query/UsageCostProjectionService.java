@@ -12,8 +12,8 @@ import fun.fengwk.kkstudio.harness.model.ModelPricing;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRuntimeConfigParser;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentModelKind;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessUsageCostDTO;
+import fun.fengwk.kkstudio.share.catalog.AgentModelKind;
+import fun.fengwk.kkstudio.share.runtime.HarnessUsageCostDTO;
 
 import java.util.HashMap;
 import java.util.List;

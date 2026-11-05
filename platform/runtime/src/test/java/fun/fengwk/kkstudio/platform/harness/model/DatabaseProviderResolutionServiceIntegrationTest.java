@@ -24,9 +24,9 @@ import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderConfigurationC
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderRepository;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderService;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderCreateDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderUpdateDTO;
+import fun.fengwk.kkstudio.share.catalog.AgentProviderCreateDTO;
+import fun.fengwk.kkstudio.share.catalog.AgentProviderDTO;
+import fun.fengwk.kkstudio.share.catalog.AgentProviderUpdateDTO;
 
 import java.time.Duration;
 import java.util.List;

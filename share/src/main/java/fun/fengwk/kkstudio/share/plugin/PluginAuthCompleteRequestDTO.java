@@ -1,0 +1,29 @@
+package fun.fengwk.kkstudio.share.plugin;
+
+import com.fasterxml.jackson.annotation.JsonAnySetter;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import lombok.Data;
+import lombok.ToString;
+
+/**
+ * {@code POST /api/plugins/{pluginId}/auth/complete} 请求体：prepare 返回的一次性句柄与用户粘贴回来的回调地址。
+ *
+ * <p>{@code callbackUrl} 是只写字段：它只在本次 {@code no-store} 请求内短暂存在，绝不出现在任何响应、{@code toString}
+ * 或通用日志中，服务端解析后只保留加密凭据。
+ */
+@Data
+public class PluginAuthCompleteRequestDTO {
+
+  /** prepare 返回的一次性 attempt 句柄：只在仍待完成且未过期时才可能被消费成功。该句柄不进入 {@code toString}。 */
+  @ToString.Exclude private String authAttemptId;
+
+  /** 插件回调 deep link 原值（含一次性登录参数）。 */
+  @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
+  @ToString.Exclude
+  private String callbackUrl;
+
+  @JsonAnySetter
+  public void rejectUnknownField(String fieldName, Object ignoredValue) {
+    throw new IllegalArgumentException("unknown plugin auth complete field: " + fieldName);
+  }
+}

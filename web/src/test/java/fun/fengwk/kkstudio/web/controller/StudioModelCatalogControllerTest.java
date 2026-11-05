@@ -17,8 +17,8 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import fun.fengwk.kkstudio.platform.catalog.modelcatalog.ModelCatalogService;
-import fun.fengwk.kkstudio.share.ai.catalog.ModelCatalogPageDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.ModelDefaultCandidateDTO;
+import fun.fengwk.kkstudio.share.catalog.ModelCatalogPageDTO;
+import fun.fengwk.kkstudio.share.catalog.ModelDefaultCandidateDTO;
 import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
 
 import java.time.Instant;

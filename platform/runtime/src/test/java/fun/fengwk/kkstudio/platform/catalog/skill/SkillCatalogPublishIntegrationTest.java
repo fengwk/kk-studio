@@ -24,8 +24,8 @@ import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobState;
-import fun.fengwk.kkstudio.share.ai.skill.SkillPackageDetailDTO;
-import fun.fengwk.kkstudio.share.ai.skill.SkillPackageUploadPublishDTO;
+import fun.fengwk.kkstudio.share.skill.SkillPackageDetailDTO;
+import fun.fengwk.kkstudio.share.skill.SkillPackageUploadPublishDTO;
 
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;

@@ -14,9 +14,9 @@ import org.springframework.web.bind.annotation.RestController;
 import fun.fengwk.kkstudio.common.page.Page;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModelService;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentModelCreateDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentModelDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentModelUpdateDTO;
+import fun.fengwk.kkstudio.share.catalog.AgentModelCreateDTO;
+import fun.fengwk.kkstudio.share.catalog.AgentModelDTO;
+import fun.fengwk.kkstudio.share.catalog.AgentModelUpdateDTO;
 
 /** 统一 Model / Model Group CRUD API；逻辑名称可包含斜杠。 */
 @AllArgsConstructor

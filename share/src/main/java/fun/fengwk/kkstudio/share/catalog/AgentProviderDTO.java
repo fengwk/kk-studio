@@ -1,0 +1,51 @@
+package fun.fengwk.kkstudio.share.catalog;
+
+import com.fasterxml.jackson.annotation.JsonInclude;
+import lombok.Data;
+import org.jspecify.annotations.Nullable;
+
+import java.time.Instant;
+import java.util.List;
+
+/** 不含凭证的 Provider 公开表示。 */
+@Data
+public class AgentProviderDTO {
+
+  /** Provider 唯一名（资源路由身份）：非空白、不得包含 {@code '/'}、≤64 字符。 */
+  private String name;
+
+  /** 可空描述（text，无长度上限）。 */
+  private @Nullable String description;
+
+  /** 供应商类型，稳定 wire 值之一：{@code openai}、{@code openai_responses}、{@code anthropic}、{@code google}。 */
+  private String providerType;
+
+  /** 可空模型 API base URL（≤512 字符）。 */
+  private @Nullable String baseUrl;
+
+  /** 是否已配置凭证（内部 credential 非空白即为 true）；凭证本身永不进入公开 DTO。 */
+  private boolean configured;
+
+  /** 模型调用总超时（毫秒，正数）；未配置时由产品默认值填充。 */
+  private Long modelCallTimeoutMillis;
+
+  /** 模型调用空闲超时（毫秒，正数）；未配置时由产品默认值填充。 */
+  private Long modelCallIdleTimeoutMillis;
+
+  /**
+   * HTTP 重试白名单覆盖：null 表示继承系统名单，空数组表示不自动重试任何 HTTP 错误。
+   *
+   * <p>前端契约为 {@code number[] | null}：即便全局默认省略 null，本字段也必须显式输出 null。
+   */
+  @JsonInclude(JsonInclude.Include.ALWAYS)
+  private @Nullable List<Integer> modelHttpRetryStatusCodes;
+
+  /** 非负十进制字符串版本号；客户端每次更新时必须回传。 */
+  private String version;
+
+  /** 创建时间（UTC Instant）。 */
+  private Instant createTime;
+
+  /** 更新时间（UTC Instant）。 */
+  private Instant updateTime;
+}

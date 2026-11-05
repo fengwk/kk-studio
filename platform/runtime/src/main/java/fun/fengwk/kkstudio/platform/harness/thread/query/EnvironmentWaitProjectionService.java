@@ -6,8 +6,8 @@ import fun.fengwk.kkstudio.harness.api.interaction.EnvironmentToolWait;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentService;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadSnapshotDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.ToolInvocationDTO;
+import fun.fengwk.kkstudio.share.runtime.HarnessThreadSnapshotDTO;
+import fun.fengwk.kkstudio.share.runtime.ToolInvocationDTO;
 
 import java.time.Instant;
 import java.util.HashMap;

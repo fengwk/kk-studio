@@ -32,8 +32,8 @@ import fun.fengwk.kkstudio.platform.orchestration.SessionOwner;
 import fun.fengwk.kkstudio.platform.storage.StorageObjectKeys;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
-import fun.fengwk.kkstudio.web.ai.chat.ChatIntegrationSupport;
 import fun.fengwk.kkstudio.web.storage.InMemoryS3StorageService;
+import fun.fengwk.kkstudio.web.storage.StorageUploadTestSupport;
 import fun.fengwk.kkstudio.web.storage.WebStorageS3TestConfiguration;
 
 import java.nio.charset.StandardCharsets;
@@ -68,12 +68,12 @@ class SessionDeletionOrchestratorIntegrationTest extends WebPostgresTestSupport 
   @Autowired private InMemoryS3StorageService s3Storage;
   @Autowired private JdbcTemplate jdbc;
 
-  private ChatIntegrationSupport storage;
+  private StorageUploadTestSupport storage;
 
   @BeforeEach
   void setUpStorage() {
     s3Storage.clear();
-    storage = new ChatIntegrationSupport(storageUploadService, s3Storage, jdbc);
+    storage = new StorageUploadTestSupport(storageUploadService, s3Storage, jdbc);
   }
 
   @Test

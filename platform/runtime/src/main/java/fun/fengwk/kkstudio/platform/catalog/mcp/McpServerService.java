@@ -13,10 +13,10 @@ import fun.fengwk.kkstudio.platform.catalog.mcp.McpConfigParser.HttpConfig;
 import fun.fengwk.kkstudio.platform.catalog.mcp.discovery.McpToolDiscovery;
 import fun.fengwk.kkstudio.platform.error.CatalogVersions;
 import fun.fengwk.kkstudio.platform.error.DomainException;
-import fun.fengwk.kkstudio.share.ai.mcp.McpServerConfigDTO;
-import fun.fengwk.kkstudio.share.ai.mcp.McpServerCreateDTO;
-import fun.fengwk.kkstudio.share.ai.mcp.McpServerDTO;
-import fun.fengwk.kkstudio.share.ai.mcp.McpServerUpdateDTO;
+import fun.fengwk.kkstudio.share.mcp.McpServerConfigDTO;
+import fun.fengwk.kkstudio.share.mcp.McpServerCreateDTO;
+import fun.fengwk.kkstudio.share.mcp.McpServerDTO;
+import fun.fengwk.kkstudio.share.mcp.McpServerUpdateDTO;
 
 import java.util.HashSet;
 import java.util.List;

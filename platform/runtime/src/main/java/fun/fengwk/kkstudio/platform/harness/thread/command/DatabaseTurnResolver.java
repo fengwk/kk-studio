@@ -38,9 +38,9 @@ import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRuntimeConfigParser.
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderRepository;
 import fun.fengwk.kkstudio.platform.harness.builtin.BuiltinModelBudget;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentModelGroupDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentModelGroupMemberDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentModelKind;
+import fun.fengwk.kkstudio.share.catalog.AgentModelGroupDTO;
+import fun.fengwk.kkstudio.share.catalog.AgentModelGroupMemberDTO;
+import fun.fengwk.kkstudio.share.catalog.AgentModelKind;
 
 import java.util.ArrayList;
 import java.util.LinkedHashSet;

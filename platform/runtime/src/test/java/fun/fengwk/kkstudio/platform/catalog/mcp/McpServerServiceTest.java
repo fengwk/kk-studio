@@ -17,10 +17,10 @@ import fun.fengwk.kkstudio.common.page.PageQuery;
 import fun.fengwk.kkstudio.platform.catalog.mcp.test.FakeStreamableHttpMcpServer;
 import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
-import fun.fengwk.kkstudio.share.ai.mcp.McpServerConfigDTO;
-import fun.fengwk.kkstudio.share.ai.mcp.McpServerCreateDTO;
-import fun.fengwk.kkstudio.share.ai.mcp.McpServerDTO;
-import fun.fengwk.kkstudio.share.ai.mcp.McpServerUpdateDTO;
+import fun.fengwk.kkstudio.share.mcp.McpServerConfigDTO;
+import fun.fengwk.kkstudio.share.mcp.McpServerCreateDTO;
+import fun.fengwk.kkstudio.share.mcp.McpServerDTO;
+import fun.fengwk.kkstudio.share.mcp.McpServerUpdateDTO;
 
 import java.io.IOException;
 import java.lang.reflect.Field;

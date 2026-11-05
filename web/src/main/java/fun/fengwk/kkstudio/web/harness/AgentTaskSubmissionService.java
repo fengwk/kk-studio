@@ -16,7 +16,7 @@ import fun.fengwk.kkstudio.platform.agenttask.AgentTaskRequest;
 import fun.fengwk.kkstudio.platform.agenttask.AgentTaskService;
 import fun.fengwk.kkstudio.platform.agenttask.AgentTaskStatus;
 import fun.fengwk.kkstudio.platform.harness.task.AgentBranchSettingsMaterializer;
-import fun.fengwk.kkstudio.share.ai.runtime.AgentTaskDTO;
+import fun.fengwk.kkstudio.share.runtime.AgentTaskDTO;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;

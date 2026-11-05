@@ -18,7 +18,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.platform.testing.TestCatalogSources;
-import fun.fengwk.kkstudio.share.ai.catalog.ToolCatalogEntryDTO;
+import fun.fengwk.kkstudio.share.catalog.ToolCatalogEntryDTO;
 
 import java.time.Duration;
 import java.util.List;

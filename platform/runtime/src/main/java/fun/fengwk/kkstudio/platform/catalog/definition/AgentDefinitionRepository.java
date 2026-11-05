@@ -11,7 +11,7 @@ import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.codec.ExecutionSelectionJsonCodec;
 import fun.fengwk.kkstudio.harness.model.HarnessJson;
 import fun.fengwk.kkstudio.platform.persistence.PostgresJdbcTypes;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionType;
+import fun.fengwk.kkstudio.share.catalog.AgentDefinitionType;
 
 import java.time.OffsetDateTime;
 import java.util.List;

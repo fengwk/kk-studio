@@ -36,12 +36,12 @@ import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsTestFixture;
-import fun.fengwk.kkstudio.share.ai.environment.DaemonConfiguration;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCardDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCreateDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentEventDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInstallCodeDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInstallConfigDTO;
+import fun.fengwk.kkstudio.share.environment.DaemonConfiguration;
+import fun.fengwk.kkstudio.share.environment.EnvironmentCardDTO;
+import fun.fengwk.kkstudio.share.environment.EnvironmentCreateDTO;
+import fun.fengwk.kkstudio.share.environment.EnvironmentEventDTO;
+import fun.fengwk.kkstudio.share.environment.EnvironmentInstallCodeDTO;
+import fun.fengwk.kkstudio.share.environment.EnvironmentInstallConfigDTO;
 
 import java.time.Clock;
 import java.time.Duration;
