@@ -207,6 +207,25 @@ class ChatWorkRead {
   }
 })
 
+test('MCP client boundary allows logging annotation but rejects unrelated dependencies', () => {
+  // Test intent: logging failures is observable without opening the client boundary.
+  const root = createRoot({
+    'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog/mcp/client/BoundaryProbe.java':
+      `package fun.fengwk.kkstudio.platform.catalog.mcp.client;
+import lombok.extern.slf4j.Slf4j;
+import fun.fengwk.kkstudio.platform.settings.SystemSettings;
+class BoundaryProbe {}
+`,
+  })
+  try {
+    const messages = diagnostics(root).filter((message) => message.includes('MCP client imports'))
+    assert.equal(messages.length, 1)
+    assert.match(messages[0], /BoundaryProbe\.java:3:.*platform\.settings\.SystemSettings/)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
 test('ported architecture guards reject stale provider enums and Redis configuration', () => {
   // Test intent: removed handwritten tests keep their behavioral constraints in the repository check.
   const root = createRoot({

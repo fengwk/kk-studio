@@ -1122,7 +1122,7 @@ function checkProviderTypeSingleSource() {
   }
 }
 
-/** MCP client 只依赖 JDK、官方 SDK、Jackson 3 与 common。 */
+/** MCP client 只依赖 JDK、官方 SDK、Jackson 3、common 与日志注解。 */
 function checkMcpClientBoundary() {
   const allowedPrefixes = [
     'java.',
@@ -1140,9 +1140,10 @@ function checkMcpClientBoundary() {
     return
   }
   for (const { file, imported, line } of javaImports(path.join(repositoryRoot, clientRoot))) {
-    if (!allowedPrefixes.some((prefix) => imported.startsWith(prefix))) {
+    if (imported !== 'lombok.extern.slf4j.Slf4j' &&
+        !allowedPrefixes.some((prefix) => imported.startsWith(prefix))) {
       addError(
-        `${file}:${line}: MCP client imports must stay on JDK, official SDK, Jackson 3 and common (${imported})`,
+        `${file}:${line}: MCP client imports must stay on JDK, official SDK, Jackson 3, common and the logging annotation (${imported})`,
       )
     }
   }
