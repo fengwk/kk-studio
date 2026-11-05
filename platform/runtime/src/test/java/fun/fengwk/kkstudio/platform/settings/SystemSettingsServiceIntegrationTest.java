@@ -8,6 +8,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSectionsDTO;
@@ -79,17 +81,20 @@ public class SystemSettingsServiceIntegrationTest extends PostgresSpringTestSupp
   @Test
   public void updateRejectsStaleAndMalformedVersions() {
     SystemSettingsDTO current = systemSettingsService.get();
-    assertThrows(
-        SystemSettingsVersionConflictException.class,
-        () -> systemSettingsService.update(updateFrom(current, "7")));
+    DomainException conflict =
+        assertThrows(
+            DomainException.class, () -> systemSettingsService.update(updateFrom(current, "7")));
+    assertEquals(DomainErrorCode.VERSION_CONFLICT, conflict.code());
 
     SystemSettingsUpdateDTO missing = updateFrom(current, null);
-    assertThrows(
-        SystemSettingsValidationException.class, () -> systemSettingsService.update(missing));
+    assertEquals(
+        DomainErrorCode.VALIDATION,
+        assertThrows(DomainException.class, () -> systemSettingsService.update(missing)).code());
 
     SystemSettingsUpdateDTO invalid = updateFrom(current, "not-a-version");
-    assertThrows(
-        SystemSettingsValidationException.class, () -> systemSettingsService.update(invalid));
+    assertEquals(
+        DomainErrorCode.VALIDATION,
+        assertThrows(DomainException.class, () -> systemSettingsService.update(invalid)).code());
   }
 
   @Test
@@ -97,9 +102,9 @@ public class SystemSettingsServiceIntegrationTest extends PostgresSpringTestSupp
     SystemSettingsDTO current = systemSettingsService.get();
     SystemSettingsUpdateDTO update = updateFrom(current, "0");
     update.getAdvanced().setProcessorHeartbeatIntervalMillis(60_000L);
-    SystemSettingsValidationException error =
-        assertThrows(
-            SystemSettingsValidationException.class, () -> systemSettingsService.update(update));
+    DomainException error =
+        assertThrows(DomainException.class, () -> systemSettingsService.update(update));
+    assertEquals(DomainErrorCode.VALIDATION, error.code());
     assertTrue(error.getMessage().contains("processorHeartbeatIntervalMillis"), error.getMessage());
   }
 
@@ -108,9 +113,9 @@ public class SystemSettingsServiceIntegrationTest extends PostgresSpringTestSupp
     SystemSettingsDTO current = systemSettingsService.get();
     SystemSettingsUpdateDTO update = updateFrom(current, "0");
     update.setNetwork(null);
-    SystemSettingsValidationException error =
-        assertThrows(
-            SystemSettingsValidationException.class, () -> systemSettingsService.update(update));
+    DomainException error =
+        assertThrows(DomainException.class, () -> systemSettingsService.update(update));
+    assertEquals(DomainErrorCode.VALIDATION, error.code());
     assertTrue(error.getMessage().contains("network is required"), error.getMessage());
   }
 

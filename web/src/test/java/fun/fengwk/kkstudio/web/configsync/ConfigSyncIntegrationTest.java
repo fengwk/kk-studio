@@ -26,13 +26,14 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MvcResult;
 import tools.jackson.databind.JsonNode;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.configsync.ConfigSyncApplier;
 import fun.fengwk.kkstudio.platform.configsync.ConfigSyncParser;
 import fun.fengwk.kkstudio.platform.configsync.ConfigSyncPlan;
 import fun.fengwk.kkstudio.platform.configsync.ConfigSyncPlanner;
 import fun.fengwk.kkstudio.platform.configsync.ConfigSyncYaml;
 import fun.fengwk.kkstudio.platform.environment.RegistrationTokens;
-import fun.fengwk.kkstudio.platform.settings.SystemSettingsVersionConflictException;
 import fun.fengwk.kkstudio.share.catalog.AgentDefinitionCreateDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentDefinitionUpdateDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentModelConfigDTO;
@@ -811,8 +812,9 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
                     .put("modelGatewayBusyRetryMillis", concurrentBusyRetry)));
     JsonNode concurrent = getData("/api/settings");
 
-    assertThrows(
-        SystemSettingsVersionConflictException.class, () -> applier.apply(plan, List.of()));
+    DomainException conflict =
+        assertThrows(DomainException.class, () -> applier.apply(plan, List.of()));
+    assertEquals(DomainErrorCode.VERSION_CONFLICT, conflict.code());
 
     assertNull(findProvider(name), "writes preceding the settings CAS must be rolled back");
     assertEquals(

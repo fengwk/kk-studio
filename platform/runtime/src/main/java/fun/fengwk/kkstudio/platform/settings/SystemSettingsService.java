@@ -5,6 +5,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsUpdateDTO;
 
@@ -40,33 +41,32 @@ public class SystemSettingsService {
     return toDto(requireRecord());
   }
 
-  /** 以 {@code expectedVersion} CAS 整体替换聚合；版本竞争抛 {@link SystemSettingsVersionConflictException}。 */
+  /** 以 {@code expectedVersion} CAS 整体替换聚合；版本竞争抛领域异常。 */
   @Transactional
   public SystemSettingsDTO update(SystemSettingsUpdateDTO updateDTO) {
     String rawExpected = updateDTO == null ? null : updateDTO.getExpectedVersion();
     if (rawExpected == null) {
-      throw new SystemSettingsValidationException(RESOURCE, "expectedVersion is required");
+      throw DomainException.validation(RESOURCE, "expectedVersion is required");
     }
     long expected = SystemSettingsVersions.parse(rawExpected, "expectedVersion");
     SystemSettings settings;
     try {
       settings = systemSettingsCodec.fromDto(updateDTO);
     } catch (IllegalArgumentException error) {
-      throw new SystemSettingsValidationException(RESOURCE, error.getMessage(), error);
+      throw DomainException.validation(RESOURCE, error.getMessage(), error);
     }
 
     SystemSettingsRepository.SystemSettingsRecord current = requireRecord();
     if (current.version() != expected) {
-      throw new SystemSettingsVersionConflictException(
+      throw DomainException.versionConflict(
           RESOURCE, rawExpected, SystemSettingsVersions.format(current.version()));
     }
     if (!systemSettingsRepository.update(settings, expected)) {
       SystemSettingsRepository.SystemSettingsRecord reread = systemSettingsRepository.get();
       if (reread == null) {
-        throw new SystemSettingsResourceNotFoundException(
-            RESOURCE, "system settings row is missing");
+        throw DomainException.notFound(RESOURCE, "system settings row is missing");
       }
-      throw new SystemSettingsVersionConflictException(
+      throw DomainException.versionConflict(
           RESOURCE, rawExpected, SystemSettingsVersions.format(reread.version()));
     }
     SystemSettingsRepository.SystemSettingsRecord updated = requireRecord();
@@ -93,7 +93,7 @@ public class SystemSettingsService {
   private SystemSettingsRepository.SystemSettingsRecord requireRecord() {
     SystemSettingsRepository.SystemSettingsRecord record = systemSettingsRepository.get();
     if (record == null) {
-      throw new SystemSettingsResourceNotFoundException(RESOURCE, "system settings row is missing");
+      throw DomainException.notFound(RESOURCE, "system settings row is missing");
     }
     return record;
   }

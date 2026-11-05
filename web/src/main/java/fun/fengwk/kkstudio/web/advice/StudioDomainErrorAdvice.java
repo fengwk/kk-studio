@@ -22,6 +22,7 @@ import fun.fengwk.kkstudio.web.controller.StudioConfigSyncController;
 import fun.fengwk.kkstudio.web.controller.StudioEnvironmentController;
 import fun.fengwk.kkstudio.web.controller.StudioMcpServerController;
 import fun.fengwk.kkstudio.web.controller.StudioSkillCatalogController;
+import fun.fengwk.kkstudio.web.controller.StudioSystemSettingsController;
 import fun.fengwk.kkstudio.web.plugin.StudioPluginController;
 
 import java.util.Map;
@@ -47,6 +48,7 @@ import java.util.Map;
       StudioEnvironmentController.class,
       StudioSkillCatalogController.class,
       StudioConfigSyncController.class,
+      StudioSystemSettingsController.class,
       StudioEnvironmentIdeController.class,
       StudioPluginController.class
     })

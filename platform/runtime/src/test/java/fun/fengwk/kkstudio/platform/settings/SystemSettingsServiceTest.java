@@ -13,6 +13,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSectionsDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsUpdateDTO;
 
@@ -66,10 +68,9 @@ class SystemSettingsServiceTest {
     when(repository.get()).thenReturn(record(0), record(1));
     when(repository.update(SystemSettingsTestFixture.DEFAULT, 0)).thenReturn(false);
 
-    SystemSettingsVersionConflictException error =
-        assertThrows(
-            SystemSettingsVersionConflictException.class, () -> service.update(update("0")));
+    DomainException error = assertThrows(DomainException.class, () -> service.update(update("0")));
 
+    assertEquals(DomainErrorCode.VERSION_CONFLICT, error.code());
     assertEquals("0", error.expectedVersion());
     assertEquals("1", error.actualVersion());
     verify(repository).update(SystemSettingsTestFixture.DEFAULT, 0);
@@ -81,7 +82,8 @@ class SystemSettingsServiceTest {
     when(repository.get()).thenReturn(record(0)).thenReturn(null);
     when(repository.update(SystemSettingsTestFixture.DEFAULT, 0)).thenReturn(false);
 
-    assertThrows(SystemSettingsResourceNotFoundException.class, () -> service.update(update("0")));
+    DomainException error = assertThrows(DomainException.class, () -> service.update(update("0")));
+    assertEquals(DomainErrorCode.NOT_FOUND, error.code());
   }
 
   /** GET 对 singleton 行缺失保持 fail-closed。 */
@@ -89,7 +91,8 @@ class SystemSettingsServiceTest {
   void getReportsMissingSingletonRow() {
     when(repository.get()).thenReturn(null);
 
-    assertThrows(SystemSettingsResourceNotFoundException.class, service::get);
+    DomainException error = assertThrows(DomainException.class, service::get);
+    assertEquals(DomainErrorCode.NOT_FOUND, error.code());
   }
 
   /** afterCommit 后才替换 live 快照：事务提交前内存仍为旧值，提交后为回读的权威新值。 */
@@ -179,8 +182,8 @@ class SystemSettingsServiceTest {
   void invalidProxyFailsBeforeRepositoryAccess() {
     SystemSettingsUpdateDTO request = update("0");
     request.getNetwork().setProxyUrl("http://synthetic-user:synthetic-password@proxy:3128");
-    SystemSettingsValidationException error =
-        assertThrows(SystemSettingsValidationException.class, () -> service.update(request));
+    DomainException error = assertThrows(DomainException.class, () -> service.update(request));
+    assertEquals(DomainErrorCode.VALIDATION, error.code());
     assertEquals("network.proxyUrl is invalid", error.getMessage());
     verifyNoInteractions(repository);
     assertEquals(SystemSettingsTestFixture.DEFAULT, snapshot.get());
