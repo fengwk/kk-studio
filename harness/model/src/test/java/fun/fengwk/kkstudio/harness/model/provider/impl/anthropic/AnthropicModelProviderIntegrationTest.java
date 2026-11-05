@@ -170,7 +170,7 @@ class AnthropicModelProviderIntegrationTest {
                 Set.of(ModelInputModality.TEXT),
                 true,
                 false),
-            new ModelVariant("default"),
+            new ModelVariant("default", null, PromptCacheRetention.NONE, null),
             1024,
             "Test system instruction.",
             List.of(
@@ -252,7 +252,7 @@ class AnthropicModelProviderIntegrationTest {
                 Set.of(ModelInputModality.TEXT),
                 true,
                 false),
-            new ModelVariant("default"),
+            new ModelVariant("default", null, PromptCacheRetention.NONE, null),
             1024,
             "Test system instruction.",
             List.of(
@@ -341,7 +341,7 @@ class AnthropicModelProviderIntegrationTest {
                 Set.of(ModelInputModality.TEXT),
                 true,
                 false),
-            new ModelVariant("default"),
+            new ModelVariant("default", null, PromptCacheRetention.NONE, null),
             1024,
             "Test system instruction.",
             List.of(
@@ -390,7 +390,7 @@ class AnthropicModelProviderIntegrationTest {
     assertTrue(modelProvider.toString().contains("AnthropicModelProvider"));
 
     // 传入非法工具 schema 触发 encode 阶段失败
-    ModelVariant badVariant = new ModelVariant("bad");
+    ModelVariant badVariant = new ModelVariant("bad", null, PromptCacheRetention.NONE, null);
     ProviderToolDefinition invalidTool =
         new ProviderToolDefinition("bad_tool", "desc", "{invalid_json");
     ProviderRequest request =
@@ -467,7 +467,7 @@ class AnthropicModelProviderIntegrationTest {
                 Set.of(ModelInputModality.TEXT),
                 true,
                 false),
-            new ModelVariant("default"),
+            new ModelVariant("default", null, PromptCacheRetention.NONE, null),
             1024,
             "Test system instruction.",
             List.of(
@@ -549,7 +549,13 @@ class AnthropicModelProviderIntegrationTest {
         complete(
             provider,
             new ProviderRequest(
-                model, new ModelVariant("default"), 1024, "system", history, tools, cache));
+                model,
+                new ModelVariant("default", null, PromptCacheRetention.SHORT, null),
+                1024,
+                "system",
+                history,
+                tools,
+                cache));
     assertNotNull(first.replayState());
     List<ProviderContentBlock> assistantContents = new ArrayList<>();
     assistantContents.add(new ProviderThinkingBlock(first.response().thinking()));
@@ -578,7 +584,13 @@ class AnthropicModelProviderIntegrationTest {
         complete(
             provider,
             new ProviderRequest(
-                model, new ModelVariant("default"), 1024, "system", history, tools, cache));
+                model,
+                new ModelVariant("default", null, PromptCacheRetention.SHORT, null),
+                1024,
+                "system",
+                history,
+                tools,
+                cache));
     history.add(
         new ProviderMessage(
             ProviderMessageRole.ASSISTANT,
@@ -589,7 +601,13 @@ class AnthropicModelProviderIntegrationTest {
     complete(
         provider,
         new ProviderRequest(
-            model, new ModelVariant("default"), 1024, "system", history, tools, cache));
+            model,
+            new ModelVariant("default", null, PromptCacheRetention.SHORT, null),
+            1024,
+            "system",
+            history,
+            tools,
+            cache));
     assertEquals(3, received.size());
     assertEquals(3, markerCount(received.get(0)));
     assertEquals(4, markerCount(received.get(1)));

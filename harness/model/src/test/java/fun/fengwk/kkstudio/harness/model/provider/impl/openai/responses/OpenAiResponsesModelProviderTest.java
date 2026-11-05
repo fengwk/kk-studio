@@ -169,7 +169,7 @@ class OpenAiResponsesModelProviderTest {
   private ProviderRequest createRequest() {
     return new ProviderRequest(
         createModel(),
-        new ModelVariant("default"),
+        new ModelVariant("default", null, PromptCacheRetention.NONE, null),
         1024,
         "Test system instruction.",
         List.of(
@@ -426,26 +426,17 @@ class OpenAiResponsesModelProviderTest {
         "OpenAiResponsesProviderAdapter[providerType=OPENAI_RESPONSES]", adapter.toString());
   }
 
-  /** 验证 Adapter 的各类重载构造器、null 边界校验、非匹配 ProviderType 拒绝及静态配置解析方法。 */
+  /** 验证 Adapter 的 null 边界校验及非匹配 ProviderType 拒绝。 */
   @Test
-  void test_adapterConstructorsAndStaticApisAndBoundaries() {
+  void test_adapterBoundaries() {
     JdkHttpSseTransport transport = stubTransport((req, cb) -> {});
 
     // 1. 构造器 transport 为空抛出 NullPointerException
     assertThrows(NullPointerException.class, () -> new OpenAiResponsesProviderAdapter(null, "key"));
 
-    // 2. 构造器支持并严格校验 configJson
-    OpenAiResponsesProviderAdapter adapterWithJson =
-        new OpenAiResponsesProviderAdapter(transport, "key", "{\"promptCacheRetention\":\"LONG\"}");
-    assertNotNull(adapterWithJson);
-
-    // 3. malformed configJson 在构造期确定性失败
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new OpenAiResponsesProviderAdapter(transport, "key", "{invalid json"));
-
-    // 4. descriptor 为空或 ProviderType 不匹配时抛出异常
-    assertThrows(NullPointerException.class, () -> adapterWithJson.create(null));
+    // descriptor 为空或 ProviderType 不匹配时抛出异常
+    OpenAiResponsesProviderAdapter adapter = new OpenAiResponsesProviderAdapter(transport, "key");
+    assertThrows(NullPointerException.class, () -> adapter.create(null));
     ProviderDescriptor anthropicDesc =
         new ProviderDescriptor(
             "anthropic",
@@ -453,14 +444,7 @@ class OpenAiResponsesModelProviderTest {
             "https://api.anthropic.com",
             new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(10)),
             UUID.randomUUID());
-    assertThrows(IllegalArgumentException.class, () -> adapterWithJson.create(anthropicDesc));
-
-    // 5. 静态 API 验证
-    assertEquals(
-        PromptCacheRetention.LONG,
-        OpenAiResponsesProviderAdapter.resolvePromptCacheRetention(
-            "{\"promptCacheRetention\":\"LONG\"}"));
-    assertNotNull(OpenAiResponsesProviderAdapter.parseConfig("{}"));
+    assertThrows(IllegalArgumentException.class, () -> adapter.create(anthropicDesc));
   }
 
   /** 验证 ModelProvider.stream 方法对 request 与 handler 的 null 参数边界校验。 */
@@ -481,7 +465,8 @@ class OpenAiResponsesModelProviderTest {
         new OpenAiResponsesProviderAdapter(stubTransport((req, cb) -> {}), "key");
     ModelProvider provider = adapter.create(createDescriptor());
 
-    ModelVariant invalidVariant = new ModelVariant("invalid-variant");
+    ModelVariant invalidVariant =
+        new ModelVariant("invalid-variant", null, PromptCacheRetention.NONE, null);
     ProviderToolDefinition invalidTool = new ProviderToolDefinition("badTool", "desc", "not-json");
     ProviderRequest invalidRequest =
         new ProviderRequest(

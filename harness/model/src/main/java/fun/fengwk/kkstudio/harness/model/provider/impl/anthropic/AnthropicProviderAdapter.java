@@ -16,33 +16,13 @@ public final class AnthropicProviderAdapter implements ProviderAdapter {
 
   private final JdkHttpSseTransport transport;
   private final String apiKey;
-  private final AnthropicConfiguration configuration;
 
   /** 与 {@link #create(ProviderDescriptor)} 的 Provider 使用同一 configuration 的请求编码器，供无网络预览复用。 */
-  private final AnthropicRequestEncoder encoder;
+  private final AnthropicRequestEncoder encoder = new AnthropicRequestEncoder();
 
   public AnthropicProviderAdapter(JdkHttpSseTransport transport, String apiKey) {
-    this(transport, apiKey, AnthropicConfiguration.defaults());
-  }
-
-  public AnthropicProviderAdapter(JdkHttpSseTransport transport, String apiKey, String configJson) {
-    this(transport, apiKey, AnthropicConfiguration.parse(configJson));
-  }
-
-  public AnthropicProviderAdapter(
-      JdkHttpSseTransport transport, String apiKey, AnthropicConfiguration configuration) {
     this.transport = Objects.requireNonNull(transport, "transport");
     this.apiKey = apiKey;
-    this.configuration = Objects.requireNonNull(configuration, "configuration");
-    this.encoder = new AnthropicRequestEncoder(this.configuration);
-  }
-
-  public AnthropicConfiguration configuration() {
-    return configuration;
-  }
-
-  public static AnthropicConfiguration parseConfig(String configJson) {
-    return AnthropicConfiguration.parse(configJson);
   }
 
   @Override
@@ -63,7 +43,7 @@ public final class AnthropicProviderAdapter implements ProviderAdapter {
           "descriptor type mismatch: expected ANTHROPIC but was " + descriptor.type());
     }
     URI messagesUri = AnthropicEndpoints.resolveMessagesUri(descriptor.endpoint());
-    return new AnthropicModelProvider(transport, descriptor, apiKey, messagesUri, configuration);
+    return new AnthropicModelProvider(transport, descriptor, apiKey, messagesUri);
   }
 
   @Override

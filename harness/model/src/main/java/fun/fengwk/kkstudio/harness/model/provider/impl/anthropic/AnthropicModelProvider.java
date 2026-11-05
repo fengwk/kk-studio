@@ -45,7 +45,6 @@ final class AnthropicModelProvider implements ModelProvider {
   private final ProviderDescriptor descriptor;
   private final String apiKey;
   private final URI messagesUri;
-  private final AnthropicConfiguration configuration;
   private final AnthropicRequestEncoder encoder;
 
   AnthropicModelProvider(
@@ -53,21 +52,11 @@ final class AnthropicModelProvider implements ModelProvider {
       ProviderDescriptor descriptor,
       String apiKey,
       URI messagesUri) {
-    this(transport, descriptor, apiKey, messagesUri, AnthropicConfiguration.defaults());
-  }
-
-  AnthropicModelProvider(
-      JdkHttpSseTransport transport,
-      ProviderDescriptor descriptor,
-      String apiKey,
-      URI messagesUri,
-      AnthropicConfiguration configuration) {
     this.transport = Objects.requireNonNull(transport, "transport");
     this.descriptor = Objects.requireNonNull(descriptor, "descriptor");
     this.apiKey = apiKey;
     this.messagesUri = Objects.requireNonNull(messagesUri, "messagesUri");
-    this.configuration = Objects.requireNonNull(configuration, "configuration");
-    this.encoder = new AnthropicRequestEncoder(this.configuration);
+    this.encoder = new AnthropicRequestEncoder();
   }
 
   public ProviderDescriptor descriptor() {
@@ -108,10 +97,6 @@ final class AnthropicModelProvider implements ModelProvider {
       return null;
     }
     return typeNode.stringValue();
-  }
-
-  AnthropicConfiguration configuration() {
-    return configuration;
   }
 
   @Override

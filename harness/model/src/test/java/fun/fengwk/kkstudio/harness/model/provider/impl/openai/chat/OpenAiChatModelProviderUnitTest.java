@@ -77,7 +77,7 @@ class OpenAiChatModelProviderUnitTest {
     modelDesc =
         new ModelDescriptor(
             "openai", "gpt-4o", "gpt-4o", Set.of(ModelInputModality.TEXT), true, false);
-    defaultVariant = new ModelVariant("default");
+    defaultVariant = new ModelVariant("default", null, PromptCacheRetention.NONE, null);
   }
 
   @AfterEach
@@ -111,21 +111,6 @@ class OpenAiChatModelProviderUnitTest {
             "https://api.anthropic.com",
             new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(10)));
     assertThrows(IllegalArgumentException.class, () -> adapter.create(anthropicDesc));
-  }
-
-  @Test
-  @DisplayName("静态 promptCacheRetention API 按配置解析留存档位")
-  void testStaticPromptCacheRetention() {
-    // AUTOMATIC（默认）不启用 Provider 端缓存
-    assertEquals(PromptCacheRetention.NONE, OpenAiChatProviderAdapter.promptCacheRetention("{}"));
-    assertEquals(PromptCacheRetention.NONE, OpenAiChatProviderAdapter.promptCacheRetention(null));
-
-    assertEquals(
-        PromptCacheRetention.SHORT,
-        OpenAiChatProviderAdapter.promptCacheRetention("{\"promptCacheRetention\":\"SHORT\"}"));
-    assertEquals(
-        PromptCacheRetention.LONG,
-        OpenAiChatProviderAdapter.promptCacheRetention("{\"promptCacheRetention\":\"LONG\"}"));
   }
 
   @Test
@@ -170,7 +155,7 @@ class OpenAiChatModelProviderUnitTest {
     assertEquals("OpenAiChatModelProvider[]", provider.toString());
 
     // 1. 编码异常进入 bridge.emitError（如工具 schema 非法）
-    ModelVariant invalidVariant = new ModelVariant("inv");
+    ModelVariant invalidVariant = new ModelVariant("inv", null, PromptCacheRetention.NONE, null);
     ProviderToolDefinition invalidTool = new ProviderToolDefinition("badTool", "desc", "not-json");
     ProviderRequest reqInvalid =
         new ProviderRequest(

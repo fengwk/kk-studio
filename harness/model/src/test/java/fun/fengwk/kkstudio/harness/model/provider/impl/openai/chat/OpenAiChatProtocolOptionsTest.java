@@ -163,11 +163,7 @@ class OpenAiChatProtocolOptionsTest {
     ProviderException error =
         assertThrows(
             ProviderException.class,
-            () ->
-                encoder.encode(
-                    request(reasoningModel, variant, List.of()),
-                    descriptor,
-                    OpenAiChatConfiguration.defaults()));
+            () -> encoder.encode(request(reasoningModel, variant, List.of()), descriptor));
 
     assertEquals(ProviderErrorKind.INVALID_REQUEST, error.kind());
     assertTrue(error.getMessage().contains(field));
@@ -214,10 +210,7 @@ class OpenAiChatProtocolOptionsTest {
         new ProviderToolDefinition("runtime_calc", "calc", "{\"type\":\"object\"}");
 
     OpenAiChatEncodedRequest encoded =
-        encoder.encode(
-            request(reasoningModel, variant, List.of(runtimeTool)),
-            descriptor,
-            OpenAiChatConfiguration.defaults());
+        encoder.encode(request(reasoningModel, variant, List.of(runtimeTool)), descriptor);
     JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
     ArrayNode tools = (ArrayNode) root.path("tools");
     assertEquals(1, tools.size());
@@ -225,10 +218,7 @@ class OpenAiChatProtocolOptionsTest {
 
     // 仅空 native tools 时保留空声明
     OpenAiChatEncodedRequest nativeOnlyEncoded =
-        encoder.encode(
-            request(reasoningModel, variant, List.of()),
-            descriptor,
-            OpenAiChatConfiguration.defaults());
+        encoder.encode(request(reasoningModel, variant, List.of()), descriptor);
     JsonNode nativeOnlyRoot = MAPPER.readTree(nativeOnlyEncoded.bodyUtf8Bytes());
     assertEquals(0, nativeOnlyRoot.path("tools").size());
 
@@ -237,9 +227,11 @@ class OpenAiChatProtocolOptionsTest {
         MAPPER.readTree(
             encoder
                 .encode(
-                    request(reasoningModel, new ModelVariant("native"), List.of(runtimeTool)),
-                    descriptor,
-                    OpenAiChatConfiguration.defaults())
+                    request(
+                        reasoningModel,
+                        new ModelVariant("native", null, PromptCacheRetention.NONE, null),
+                        List.of(runtimeTool)),
+                    descriptor)
                 .bodyUtf8Bytes());
     assertNotEquals(nativeOnlyRoot.path("tools"), plainRoot.path("tools"));
 
@@ -305,23 +297,18 @@ class OpenAiChatProtocolOptionsTest {
       ProviderException conflict =
           assertThrows(
               ProviderException.class,
-              () ->
-                  encoder.encode(
-                      request(reasoningModel, declaredEffort, List.of()),
-                      descriptor,
-                      OpenAiChatConfiguration.defaults()));
+              () -> encoder.encode(request(reasoningModel, declaredEffort, List.of()), descriptor));
       assertEquals(ProviderErrorKind.INVALID_REQUEST, conflict.kind());
       assertFalse(conflict.getMessage().contains("legacy"));
     }
 
-    // 声明 effort 后仍按现有 STANDARD / DEEPSEEK 语义写出运行时字段
+    // 声明 effort 后写出运行时字段
     JsonNode standard =
         MAPPER.readTree(
             encoder
                 .encode(
                     request(reasoningModel, nativeVariant("{\"seed\":1}", "high"), List.of()),
-                    descriptor,
-                    OpenAiChatConfiguration.defaults())
+                    descriptor)
                 .bodyUtf8Bytes());
     assertEquals("high", standard.path("reasoning_effort").asString(""));
 
@@ -329,12 +316,11 @@ class OpenAiChatProtocolOptionsTest {
         MAPPER.readTree(
             encoder
                 .encode(
-                    request(reasoningModel, nativeVariant("{\"seed\":1}", "off"), List.of()),
-                    descriptor,
-                    new OpenAiChatConfiguration(
-                        true,
-                        PromptCacheRetention.NONE,
-                        OpenAiChatConfiguration.ThinkingFormat.DEEPSEEK))
+                    request(
+                        reasoningModel,
+                        nativeVariant("{\"thinking\":{\"type\":\"disabled\"}}"),
+                        List.of()),
+                    descriptor)
                 .bodyUtf8Bytes());
     assertEquals("disabled", deepseek.path("thinking").path("type").asString(""));
     assertFalse(deepseek.has("reasoning_effort"));
@@ -345,7 +331,11 @@ class OpenAiChatProtocolOptionsTest {
   }
 
   private static ModelVariant nativeVariant(String optionsJson, String reasoningEffort) {
-    return new ModelVariant("native", reasoningEffort, new ProviderProtocolOptions(optionsJson));
+    return new ModelVariant(
+        "native",
+        reasoningEffort,
+        PromptCacheRetention.NONE,
+        new ProviderProtocolOptions(optionsJson));
   }
 
   private static ProviderRequest request(
@@ -365,8 +355,6 @@ class OpenAiChatProtocolOptionsTest {
       ModelDescriptor model, ModelVariant variant, List<ProviderToolDefinition> tools)
       throws Exception {
     return MAPPER.readTree(
-        encoder
-            .encode(request(model, variant, tools), descriptor, OpenAiChatConfiguration.defaults())
-            .bodyUtf8Bytes());
+        encoder.encode(request(model, variant, tools), descriptor).bodyUtf8Bytes());
   }
 }

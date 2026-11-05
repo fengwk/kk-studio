@@ -23,6 +23,7 @@ import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.model.ProviderProtocolOptions;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 
 import java.util.Comparator;
 import java.util.LinkedHashSet;
@@ -32,8 +33,7 @@ import java.util.Set;
 /**
  * 共享的 {@link ModelDescriptor} / {@link ModelVariant} 严格 deterministic JSON codec。
  *
- * <p>本 codec 是 runtime model 包中 model 与 variant 子树的唯一权威实现；其他 codec（如 {@code
- * ProviderRequestJsonCodec}）必须把对应子树委派到本类，避免 wire 漂移。
+ * <p>本 codec 是 runtime model 包中 model 与 variant 子树的唯一权威实现。
  *
  * <p>字段访问为逐字段 JsonNode 读 / 写：每个对象层都先列出允许字段集合，未知字段直接抛 {@link IllegalArgumentException}；类型不符（如非
  * string 的 enum 元素、非 boolean 的 flag）同样抛错。底层 Jackson {@link ObjectMapper} 启用 {@link
@@ -52,7 +52,8 @@ import java.util.Set;
  * </ul>
  *
  * <p>durable descriptor 固定六个字段（含 {@code modelId} 与 {@code inputModalities}），variant 固定 {@code id} /
- * {@code reasoningEffort} / {@code protocolOptions} 三个字段，codec 严格要求完整且精确的字段集合。
+ * {@code reasoningEffort} / {@code promptCacheRetention} / {@code protocolOptions} 四个字段，codec
+ * 严格要求完整且精确的字段集合。
  */
 public final class ModelDescriptorJsonCodec {
 
@@ -66,16 +67,9 @@ public final class ModelDescriptorJsonCodec {
 
   /** variant 字段顺序。 */
   private static final Set<String> VARIANT_FIELDS =
-      orderedSet("id", "reasoningEffort", "protocolOptions");
+      orderedSet("id", "reasoningEffort", "promptCacheRetention", "protocolOptions");
 
   public ModelDescriptorJsonCodec() {}
-
-  /** 把单个 {@link ModelDescriptor} 编码为 canonical JSON 文本。 */
-  public String encodeDescriptor(ModelDescriptor descriptor) {
-    Objects.requireNonNull(descriptor, "descriptor");
-    return JsonCodecSupport.write(
-        MAPPER, encodeDescriptorNode(descriptor), "cannot encode model JSON");
-  }
 
   /** 把单个 {@link ModelDescriptor} 编码为 canonical {@link ObjectNode}。 */
   public ObjectNode encodeDescriptorNode(ModelDescriptor descriptor) {
@@ -87,12 +81,6 @@ public final class ModelDescriptorJsonCodec {
   public ModelDescriptor decodeDescriptorNode(JsonNode value) {
     Objects.requireNonNull(value, "value");
     return readDescriptor(object(value, "model"));
-  }
-
-  /** 把单个 {@link ModelVariant} 编码为 canonical JSON 文本。 */
-  public String encodeVariant(ModelVariant variant) {
-    Objects.requireNonNull(variant, "variant");
-    return JsonCodecSupport.write(MAPPER, encodeVariantNode(variant), "cannot encode model JSON");
   }
 
   /** 把单个 {@link ModelVariant} 编码为 canonical {@link ObjectNode}。 */
@@ -169,6 +157,7 @@ public final class ModelDescriptorJsonCodec {
     } else {
       node.put("reasoningEffort", variant.reasoningEffort());
     }
+    node.put("promptCacheRetention", variant.promptCacheRetention().name());
     node.set("protocolOptions", protocolOptionsNode(variant.protocolOptions()));
     return node;
   }
@@ -178,7 +167,11 @@ public final class ModelDescriptorJsonCodec {
     String reasoningEffort = decodeNullableText(node, "reasoningEffort");
     ProviderProtocolOptions protocolOptions = readProtocolOptions(node);
     try {
-      return new ModelVariant(text(node, "id"), reasoningEffort, protocolOptions);
+      return new ModelVariant(
+          text(node, "id"),
+          reasoningEffort,
+          PromptCacheRetention.valueOf(text(node, "promptCacheRetention")),
+          protocolOptions);
     } catch (IllegalArgumentException exception) {
       throw new IllegalArgumentException("invalid variant: " + exception.getMessage(), exception);
     }

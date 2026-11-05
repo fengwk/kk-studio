@@ -109,7 +109,7 @@ class AnthropicRequestEncoderTest {
     ProviderRequest request =
         new ProviderRequest(
             logicalModel,
-            new ModelVariant("default"),
+            new ModelVariant("default", null, PromptCacheRetention.NONE, null),
             4096,
             "Test system instruction.",
             List.of(userMsg(new ProviderTextBlock("hi"))),
@@ -524,7 +524,8 @@ class AnthropicRequestEncoderTest {
             Set.of(ModelInputModality.TEXT),
             true,
             true);
-    ModelVariant variantWithReasoning = new ModelVariant("v", "high");
+    ModelVariant variantWithReasoning =
+        new ModelVariant("v", "high", PromptCacheRetention.NONE, null);
 
     ProviderRequest req =
         new ProviderRequest(
@@ -551,163 +552,8 @@ class AnthropicRequestEncoderTest {
   }
 
   @Test
-  void appliesReasoningBudgetForSupportedEfforts() throws IOException {
-    AnthropicRequestEncoder budgetEncoder =
-        new AnthropicRequestEncoder(new AnthropicConfiguration(AnthropicThinkingMode.BUDGET));
-    ModelDescriptor reasoningModel =
-        new ModelDescriptor(
-            "test-anthropic",
-            "claude-3-7-sonnet",
-            "claude-3-7-sonnet",
-            Set.of(ModelInputModality.TEXT),
-            true,
-            true);
-
-    // reasoning effort 精确映射为预算；max_tokens 原样使用请求输出预算。
-    List<String> efforts = List.of("low", "medium", "high");
-    List<Integer> outputTokensList = List.of(4096, 16384, 32768);
-    List<Integer> expectedBudgets = List.of(2048, 8192, 16384);
-
-    for (int i = 0; i < efforts.size(); i++) {
-      String effort = efforts.get(i);
-      int outputTokens = outputTokensList.get(i);
-      int expectedBudget = expectedBudgets.get(i);
-
-      ProviderRequest req =
-          new ProviderRequest(
-              reasoningModel,
-              new ModelVariant("v", effort),
-              outputTokens,
-              "Test system instruction.",
-              List.of(userMsg(new ProviderTextBlock("hi"))),
-              List.of(),
-              ProviderCacheControl.none());
-
-      AnthropicEncodedRequest encoded = budgetEncoder.encode(req, descriptor);
-      JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
-
-      assertEquals("enabled", root.path("thinking").path("type").asString(""));
-      assertEquals(expectedBudget, root.path("thinking").path("budget_tokens").asInt(0));
-      assertEquals("summarized", root.path("thinking").path("display").asString(""));
-      assertEquals(outputTokens, root.path("max_tokens").asInt(0));
-      assertFalse(
-          root.has("output_config"),
-          "BUDGET mode must omit output_config, but was: " + root.path("output_config"));
-      assertEquals(List.of("interleaved-thinking-2025-05-14"), encoded.betaFeatures());
-    }
-  }
-
-  @Test
-  void rejectsBudgetThatDoesNotFitRatherThanDowngradingEffort() {
-    AnthropicRequestEncoder budgetEncoder =
-        new AnthropicRequestEncoder(new AnthropicConfiguration(AnthropicThinkingMode.BUDGET));
-    ModelDescriptor reasoningModel =
-        new ModelDescriptor(
-            "test-anthropic",
-            "claude-3-7-sonnet",
-            "claude-3-7-sonnet",
-            Set.of(ModelInputModality.TEXT),
-            true,
-            true);
-
-    // high 固定映射 16384；请求预算不足时必须拒绝，不能静默降档到 outputTokens - 1。
-    ProviderRequest req =
-        new ProviderRequest(
-            reasoningModel,
-            new ModelVariant("v", "high"),
-            4096,
-            "Test system instruction.",
-            List.of(userMsg(new ProviderTextBlock("hi"))),
-            List.of(),
-            ProviderCacheControl.none());
-
-    ProviderException error =
-        assertThrows(ProviderException.class, () -> budgetEncoder.encode(req, descriptor));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, error.kind());
-    assertEquals("budget_tokens must be lower than max_tokens", error.getMessage());
-  }
-
-  @Test
-  void rejectsBudgetWhenRequestOutputBudgetTooSmall() {
-    AnthropicRequestEncoder budgetEncoder =
-        new AnthropicRequestEncoder(new AnthropicConfiguration(AnthropicThinkingMode.BUDGET));
-    ModelDescriptor reasoningModel =
-        new ModelDescriptor(
-            "test-anthropic",
-            "claude-3-7-sonnet",
-            "claude-3-7-sonnet",
-            Set.of(ModelInputModality.TEXT),
-            true,
-            true);
-
-    // outputTokens = 1 时无法容纳 low 固定映射的 2048 token reasoning budget。
-    ProviderRequest req =
-        new ProviderRequest(
-            reasoningModel,
-            new ModelVariant("v", "low"),
-            1,
-            "Test system instruction.",
-            List.of(userMsg(new ProviderTextBlock("hi"))),
-            List.of(),
-            ProviderCacheControl.none());
-
-    ProviderException ex =
-        assertThrows(ProviderException.class, () -> budgetEncoder.encode(req, descriptor));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex.kind());
-    assertEquals("budget_tokens must be lower than max_tokens", ex.getMessage());
-  }
-
-  @Test
-  void rejectsUnsupportedEffortsInBudgetMode() throws IOException {
-    AnthropicRequestEncoder budgetEncoder =
-        new AnthropicRequestEncoder(new AnthropicConfiguration(AnthropicThinkingMode.BUDGET));
-    ModelDescriptor reasoningModel =
-        new ModelDescriptor(
-            "test-anthropic",
-            "claude-3-7-sonnet",
-            "claude-3-7-sonnet",
-            Set.of(ModelInputModality.TEXT),
-            true,
-            true);
-
-    // off 是显式关闭，不进入 budget 映射：只发 thinking:{type:"disabled"}，不发 budget_tokens
-    ProviderRequest offRequest =
-        new ProviderRequest(
-            reasoningModel,
-            new ModelVariant("v", "off"),
-            65536,
-            "Test system instruction.",
-            List.of(userMsg(new ProviderTextBlock("hi"))),
-            List.of(),
-            ProviderCacheControl.none());
-    JsonNode offRoot =
-        MAPPER.readTree(budgetEncoder.encode(offRequest, descriptor).bodyUtf8Bytes());
-    assertEquals("disabled", offRoot.path("thinking").path("type").asString(""));
-    assertFalse(offRoot.path("thinking").has("budget_tokens"));
-    assertFalse(offRoot.has("output_config"));
-
-    // BUDGET 模式仅支持 low/medium/high，其他厂商自定义 effort 在编码阶段被拒绝
-    for (String unsupportedEffort : List.of("xhigh", "max", "arbitrary", "ultra")) {
-      ProviderRequest unsupportedRequest =
-          new ProviderRequest(
-              reasoningModel,
-              new ModelVariant("v", unsupportedEffort),
-              65536,
-              "Test system instruction.",
-              List.of(userMsg(new ProviderTextBlock("hi"))),
-              List.of(),
-              ProviderCacheControl.none());
-      ProviderException ex =
-          assertThrows(
-              ProviderException.class, () -> budgetEncoder.encode(unsupportedRequest, descriptor));
-      assertEquals(ProviderErrorKind.INVALID_REQUEST, ex.kind());
-    }
-  }
-
-  @Test
-  void omitsThinkingAndOutputConfigWhenReasoningNotRequestedInBudgetMode() throws IOException {
-    AnthropicRequestEncoder budgetEncoder =
-        new AnthropicRequestEncoder(new AnthropicConfiguration(AnthropicThinkingMode.BUDGET));
+  void omitsThinkingAndOutputConfigWhenReasoningNotRequested() throws IOException {
+    AnthropicRequestEncoder budgetEncoder = new AnthropicRequestEncoder();
 
     // 1. model.reasoning = false 且 variant 带有 reasoningEffort
     ModelDescriptor nonReasoningModel =
@@ -718,7 +564,7 @@ class AnthropicRequestEncoderTest {
             Set.of(ModelInputModality.TEXT),
             true,
             false);
-    ModelVariant variantWithEffort = new ModelVariant("v", "high");
+    ModelVariant variantWithEffort = new ModelVariant("v", "high", PromptCacheRetention.NONE, null);
     ProviderRequest req1 =
         new ProviderRequest(
             nonReasoningModel,
@@ -743,7 +589,7 @@ class AnthropicRequestEncoderTest {
             Set.of(ModelInputModality.TEXT),
             true,
             true);
-    ModelVariant variantNullEffort = new ModelVariant("v");
+    ModelVariant variantNullEffort = new ModelVariant("v", null, PromptCacheRetention.NONE, null);
     ProviderRequest req2 =
         new ProviderRequest(
             reasoningModel,
@@ -779,7 +625,7 @@ class AnthropicRequestEncoderTest {
     ProviderRequest req4 =
         new ProviderRequest(
             reasoningModel,
-            new ModelVariant("v", "off"),
+            new ModelVariant("v", "off", PromptCacheRetention.NONE, null),
             1024,
             "Test system instruction.",
             List.of(userMsg(new ProviderTextBlock("hi"))),
@@ -796,8 +642,7 @@ class AnthropicRequestEncoderTest {
 
   @Test
   void disablesThinkingInAdaptiveModeWhenReasoningEffortIsOff() throws IOException {
-    AnthropicRequestEncoder adaptiveEncoder =
-        new AnthropicRequestEncoder(new AnthropicConfiguration(AnthropicThinkingMode.ADAPTIVE));
+    AnthropicRequestEncoder adaptiveEncoder = new AnthropicRequestEncoder();
     ModelDescriptor reasoningModel =
         new ModelDescriptor(
             "test-anthropic",
@@ -811,7 +656,7 @@ class AnthropicRequestEncoderTest {
     ProviderRequest reqOff =
         new ProviderRequest(
             reasoningModel,
-            new ModelVariant("v", "off"),
+            new ModelVariant("v", "off", PromptCacheRetention.NONE, null),
             1024,
             "Test system instruction.",
             List.of(userMsg(new ProviderTextBlock("hi"))),
@@ -829,8 +674,7 @@ class AnthropicRequestEncoderTest {
 
   @Test
   void adaptiveModePreservesEffortAndOmitsBudgetTokens() throws IOException {
-    AnthropicRequestEncoder adaptiveEncoder =
-        new AnthropicRequestEncoder(new AnthropicConfiguration(AnthropicThinkingMode.ADAPTIVE));
+    AnthropicRequestEncoder adaptiveEncoder = new AnthropicRequestEncoder();
     ModelDescriptor reasoningModel =
         new ModelDescriptor(
             "test-anthropic",
@@ -844,7 +688,7 @@ class AnthropicRequestEncoderTest {
     ProviderRequest req =
         new ProviderRequest(
             reasoningModel,
-            new ModelVariant("v", "high"),
+            new ModelVariant("v", "high", PromptCacheRetention.NONE, null),
             512,
             "Test system instruction.",
             List.of(userMsg(new ProviderTextBlock("hi"))),
@@ -1571,6 +1415,7 @@ class AnthropicRequestEncoderTest {
         new ModelVariant(
             "native",
             null,
+            retention,
             new ProviderProtocolOptions(
                 "{\"tools\":[{\"type\":\"web_search_20250305\",\"name\":\"web_search\",\"cache_control\":"
                     + value
@@ -1608,6 +1453,7 @@ class AnthropicRequestEncoderTest {
         new ModelVariant(
             "native",
             null,
+            PromptCacheRetention.NONE,
             new ProviderProtocolOptions(
                 "{\"tools\":[{\"type\":\"web_search_20250305\",\"name\":\"web_search\",\"max_uses\":3,\"future_field\":{\"cache_control\":null}}]}"));
     ProviderToolDefinition tool =
@@ -1759,7 +1605,7 @@ class AnthropicRequestEncoderTest {
   }
 
   private static ModelVariant defaultVariant() {
-    return new ModelVariant("default");
+    return new ModelVariant("default", null, PromptCacheRetention.NONE, null);
   }
 
   /**

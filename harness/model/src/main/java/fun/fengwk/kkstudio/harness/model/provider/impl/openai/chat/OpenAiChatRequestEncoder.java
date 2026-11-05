@@ -91,11 +91,9 @@ final class OpenAiChatRequestEncoder {
     this.bodySizeGuard = Objects.requireNonNull(bodySizeGuard, "bodySizeGuard");
   }
 
-  OpenAiChatEncodedRequest encode(
-      ProviderRequest request, ProviderDescriptor descriptor, OpenAiChatConfiguration config) {
+  OpenAiChatEncodedRequest encode(ProviderRequest request, ProviderDescriptor descriptor) {
     Objects.requireNonNull(request, "request");
     Objects.requireNonNull(descriptor, "descriptor");
-    Objects.requireNonNull(config, "config");
 
     // variant 的原生协议选项是请求体的合并基座：官方顶层能力无损保留，运行时所有权字段随后覆盖并在 native 声明时冲突
     ObjectNode root = request.variant().protocolOptions().copyOptions();
@@ -122,7 +120,7 @@ final class OpenAiChatRequestEncoder {
 
     applyStreamOptions(root);
 
-    applyReasoningParameters(root, request.model(), request.variant(), config);
+    applyReasoningParameters(root, request.model(), request.variant());
     // 输出预算只来自 Model 级 limit.output（普通请求再按剩余上下文收敛），不来自 variant。
     root.put("max_tokens", request.outputTokens());
 
@@ -229,14 +227,11 @@ final class OpenAiChatRequestEncoder {
 
   /**
    * reasoning effort 编码：未声明（null）表示不覆盖服务端默认，此时 native 的 {@code reasoning_effort} / {@code thinking}
-   * 属于厂商原生事实，原样保留； 已声明（含 {@code off}）时这两个字段由运行时独占，native 声明即冲突，随后按 STANDARD / DEEPSEEK 写现有字段。非
-   * reasoning 模型不发送推理字段。
+   * 属于厂商原生事实，原样保留（如 DeepSeek 在原生选项中声明 thinking）；已声明（含 {@code off}）时这两个字段由运行时独占，native 声明即冲突， 随后写
+   * {@code reasoning_effort}。非 reasoning 模型不发送推理字段。
    */
   private static void applyReasoningParameters(
-      ObjectNode root,
-      ModelDescriptor model,
-      ModelVariant variant,
-      OpenAiChatConfiguration config) {
+      ObjectNode root, ModelDescriptor model, ModelVariant variant) {
     String effort = variant == null ? null : variant.reasoningEffort();
     if (effort == null) {
       return;
@@ -250,16 +245,6 @@ final class OpenAiChatRequestEncoder {
       return;
     }
     boolean off = variant.reasoningOff();
-    if (config.thinkingFormat() == OpenAiChatConfiguration.ThinkingFormat.DEEPSEEK) {
-      ObjectNode thinking = root.putObject("thinking");
-      if (off) {
-        thinking.put("type", "disabled");
-      } else {
-        thinking.put("type", "enabled");
-        root.put("reasoning_effort", effort);
-      }
-      return;
-    }
     root.put("reasoning_effort", off ? "none" : effort);
   }
 

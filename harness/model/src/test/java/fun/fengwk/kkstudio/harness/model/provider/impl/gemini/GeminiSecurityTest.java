@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderCompletion;
@@ -165,7 +166,8 @@ class GeminiSecurityTest {
         false);
   }
 
-  private static final ModelVariant DEFAULT_VARIANT = new ModelVariant("default");
+  private static final ModelVariant DEFAULT_VARIANT =
+      new ModelVariant("default", null, PromptCacheRetention.NONE, null);
 
   /** 验证所有 JSON、SSE 以及 URI 解析失败时使用固定脱敏异常消息，绝不回显原始输入、payload 或底层异常原因。 */
   @Test

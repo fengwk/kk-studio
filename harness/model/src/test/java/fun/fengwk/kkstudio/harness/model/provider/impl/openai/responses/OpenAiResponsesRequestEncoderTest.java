@@ -58,7 +58,8 @@ import java.util.stream.Stream;
 class OpenAiResponsesRequestEncoderTest {
 
   private static final ObjectMapper MAPPER = JsonMapper.builder().build();
-  private static final ModelVariant DEFAULT_VARIANT = new ModelVariant("default");
+  private static final ModelVariant DEFAULT_VARIANT =
+      new ModelVariant("default", null, PromptCacheRetention.NONE, null);
 
   private final OpenAiResponsesRequestEncoder encoder = new OpenAiResponsesRequestEncoder();
 
@@ -139,7 +140,7 @@ class OpenAiResponsesRequestEncoderTest {
   void test_basicFieldsAndNoPreviousResponseId() throws Exception {
     ProviderRequest request =
         request(
-            new ModelVariant("v1", "low"),
+            new ModelVariant("v1", "low", PromptCacheRetention.NONE, null),
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("hi")))),
@@ -166,7 +167,8 @@ class OpenAiResponsesRequestEncoderTest {
   @Test
   void test_reasoningEffortOffAndEnabledEncodings() throws Exception {
     // 1. effort = "none" -> emit reasoning:{effort:"none"} only; omit summary and omit include
-    ProviderRequest reqOff = request(new ModelVariant("v1", "off"));
+    ProviderRequest reqOff =
+        request(new ModelVariant("v1", "off", PromptCacheRetention.NONE, null));
     JsonNode rootOff = MAPPER.readTree(encoder.encode(reqOff, createDescriptor()).bodyUtf8Bytes());
     assertEquals("none", rootOff.path("reasoning").path("effort").asString(""));
     assertFalse(rootOff.path("reasoning").has("summary"));
@@ -174,7 +176,8 @@ class OpenAiResponsesRequestEncoderTest {
 
     // 2. 厂商定义值原样下发，并附带 summary 与 encrypted content
     // include:["reasoning.encrypted_content"]
-    ProviderRequest reqEnabled = request(new ModelVariant("v1", "xhigh"));
+    ProviderRequest reqEnabled =
+        request(new ModelVariant("v1", "xhigh", PromptCacheRetention.NONE, null));
     JsonNode rootEnabled =
         MAPPER.readTree(encoder.encode(reqEnabled, createDescriptor()).bodyUtf8Bytes());
     assertEquals("xhigh", rootEnabled.path("reasoning").path("effort").asString(""));
@@ -183,7 +186,8 @@ class OpenAiResponsesRequestEncoderTest {
     assertEquals("reasoning.encrypted_content", rootEnabled.path("include").get(0).asString(""));
 
     // 3. effort = null -> omit reasoning and include
-    ProviderRequest reqNull = request(new ModelVariant("v1"));
+    ProviderRequest reqNull =
+        request(new ModelVariant("v1", null, PromptCacheRetention.NONE, null));
     JsonNode rootNull =
         MAPPER.readTree(encoder.encode(reqNull, createDescriptor()).bodyUtf8Bytes());
     assertFalse(rootNull.has("reasoning"));

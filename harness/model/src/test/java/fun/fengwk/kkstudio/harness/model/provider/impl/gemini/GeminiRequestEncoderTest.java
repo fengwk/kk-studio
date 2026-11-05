@@ -61,7 +61,8 @@ import java.util.stream.Stream;
 class GeminiRequestEncoderTest {
 
   private static final ObjectMapper MAPPER = JsonMapper.builder().build();
-  private static final ModelVariant DEFAULT_VARIANT = new ModelVariant("default");
+  private static final ModelVariant DEFAULT_VARIANT =
+      new ModelVariant("default", null, PromptCacheRetention.NONE, null);
   private final GeminiRequestEncoder encoder = new GeminiRequestEncoder();
 
   private static ProviderDescriptor descriptor() {
@@ -177,7 +178,7 @@ class GeminiRequestEncoderTest {
     ProviderRequest request =
         new ProviderRequest(
             model(false),
-            new ModelVariant("v1"),
+            new ModelVariant("v1", null, PromptCacheRetention.NONE, null),
             4321,
             "Test system instruction.",
             List.of(
@@ -203,7 +204,8 @@ class GeminiRequestEncoderTest {
   @Test
   void encodesProviderDefinedThinkingLevels() throws Exception {
     for (String effort : List.of("low", "medium", "high", "max", "xhigh", "HIGH", "xHigh")) {
-      ModelVariant variant = new ModelVariant("v-" + effort, effort);
+      ModelVariant variant =
+          new ModelVariant("v-" + effort, effort, PromptCacheRetention.NONE, null);
       ProviderRequest request =
           new ProviderRequest(
               model(true),
@@ -231,7 +233,7 @@ class GeminiRequestEncoderTest {
     ProviderRequest request =
         new ProviderRequest(
             model(true),
-            new ModelVariant("v1", "off"),
+            new ModelVariant("v1", "off", PromptCacheRetention.NONE, null),
             1024,
             "Test system instruction.",
             List.of(
@@ -300,7 +302,8 @@ class GeminiRequestEncoderTest {
     ProviderRequest request =
         new ProviderRequest(
             model(false),
-            new ModelVariant("v1", null, new ProviderProtocolOptions(options)),
+            new ModelVariant(
+                "v1", null, PromptCacheRetention.NONE, new ProviderProtocolOptions(options)),
             777,
             "Test system instruction.",
             List.of(
@@ -370,7 +373,8 @@ class GeminiRequestEncoderTest {
     ProviderRequest request =
         new ProviderRequest(
             model(false),
-            new ModelVariant("v1", null, new ProviderProtocolOptions(options)),
+            new ModelVariant(
+                "v1", null, PromptCacheRetention.NONE, new ProviderProtocolOptions(options)),
             1024,
             "Test system instruction.",
             List.of(
@@ -395,7 +399,7 @@ class GeminiRequestEncoderTest {
     ProviderRequest withoutNativeTools =
         new ProviderRequest(
             model(false),
-            new ModelVariant("v1"),
+            new ModelVariant("v1", null, PromptCacheRetention.NONE, null),
             1024,
             "Test system instruction.",
             List.of(
@@ -420,7 +424,10 @@ class GeminiRequestEncoderTest {
         new ProviderRequest(
             model(false),
             new ModelVariant(
-                "v1", null, new ProviderProtocolOptions("{\"tools\":[{\"googleSearch\":{}}]}")),
+                "v1",
+                null,
+                PromptCacheRetention.NONE,
+                new ProviderProtocolOptions("{\"tools\":[{\"googleSearch\":{}}]}")),
             1024,
             "Test system instruction.",
             List.of(
@@ -445,7 +452,8 @@ class GeminiRequestEncoderTest {
     ProviderRequest request =
         new ProviderRequest(
             model(false),
-            new ModelVariant("v1", null, new ProviderProtocolOptions(options)),
+            new ModelVariant(
+                "v1", null, PromptCacheRetention.NONE, new ProviderProtocolOptions(options)),
             1024,
             "system",
             List.of(
@@ -467,6 +475,7 @@ class GeminiRequestEncoderTest {
           new ModelVariant(
               "v1",
               null,
+              PromptCacheRetention.NONE,
               new ProviderProtocolOptions(
                   "{\"generationConfig\":{\"candidateCount\":" + numeric + "}}"));
       assertEquals(
@@ -552,7 +561,11 @@ class GeminiRequestEncoderTest {
     ProviderRequest request =
         new ProviderRequest(
             model(false),
-            new ModelVariant("v1", reasoningEffort, new ProviderProtocolOptions(options)),
+            new ModelVariant(
+                "v1",
+                reasoningEffort,
+                PromptCacheRetention.NONE,
+                new ProviderProtocolOptions(options)),
             1024,
             "Test system instruction.",
             List.of(

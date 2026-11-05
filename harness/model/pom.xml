@@ -52,7 +52,6 @@
                                         <include>fun.fengwk.kkstudio.harness.model.provider.impl.ProviderSseCall</include>
                                         <include>fun.fengwk.kkstudio.harness.model.provider.impl.transport.IncrementalSseParser</include>
                                         <include>fun.fengwk.kkstudio.harness.model.provider.impl.transport.TransportException</include>
-                                        <include>fun.fengwk.kkstudio.harness.model.provider.impl.anthropic.AnthropicConfiguration</include>
                                         <include>fun.fengwk.kkstudio.harness.model.provider.impl.anthropic.AnthropicEndpoints</include>
                                         <include>fun.fengwk.kkstudio.harness.model.provider.impl.anthropic.AnthropicEncodedRequest</include>
                                         <include>fun.fengwk.kkstudio.harness.model.provider.impl.anthropic.AnthropicRequestEncoder</include>
@@ -67,7 +66,6 @@
                                         <include>fun.fengwk.kkstudio.harness.model.provider.impl.gemini.GeminiErrorMapper</include>
                                         <include>fun.fengwk.kkstudio.harness.model.provider.impl.gemini.GeminiModelProvider</include>
                                         <include>fun.fengwk.kkstudio.harness.model.provider.impl.gemini.GeminiProviderAdapter</include>
-                                        <include>fun.fengwk.kkstudio.harness.model.provider.impl.openai.chat.OpenAiChatConfiguration</include>
                                         <include>fun.fengwk.kkstudio.harness.model.provider.impl.openai.chat.OpenAiChatEndpoints</include>
                                         <include>fun.fengwk.kkstudio.harness.model.provider.impl.openai.chat.OpenAiChatEncodedRequest</include>
                                         <include>fun.fengwk.kkstudio.harness.model.provider.impl.openai.chat.OpenAiChatRequestEncoder</include>
@@ -75,7 +73,6 @@
                                         <include>fun.fengwk.kkstudio.harness.model.provider.impl.openai.chat.OpenAiChatErrorMapper</include>
                                         <include>fun.fengwk.kkstudio.harness.model.provider.impl.openai.chat.OpenAiChatModelProvider</include>
                                         <include>fun.fengwk.kkstudio.harness.model.provider.impl.openai.chat.OpenAiChatProviderAdapter</include>
-                                        <include>fun.fengwk.kkstudio.harness.model.provider.impl.openai.responses.OpenAiResponsesConfig</include>
                                         <include>fun.fengwk.kkstudio.harness.model.provider.impl.openai.responses.OpenAiResponsesEndpoints</include>
                                         <include>fun.fengwk.kkstudio.harness.model.provider.impl.openai.responses.OpenAiResponsesEncodedRequest</include>
                                         <include>fun.fengwk.kkstudio.harness.model.provider.impl.openai.responses.OpenAiResponsesRequestEncoder</include>
