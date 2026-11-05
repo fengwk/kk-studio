@@ -121,7 +121,8 @@ test('frozen threshold values fail closed for errors, latency, throughput, and s
   assert.match(evaluateScenario('canvas', tooFew).failures.join(' '), /samples/)
 })
 
-test('response validators enforce health, catalog envelope, and canvas DTO contracts', () => {
+test('response validators enforce health, catalog page, and canvas DTO contracts', () => {
+  // The resource or page is the response body, not a nested data member.
   assert.doesNotThrow(() => validateHealthResponse({ status: 200, json: { status: 'UP' } }))
   assert.throws(
     () => validateHealthResponse({ status: 200, json: { status: 'DOWN' } }),
@@ -131,39 +132,36 @@ test('response validators enforce health, catalog envelope, and canvas DTO contr
   const catalogResponse = {
     status: 200,
     json: {
-      code: 'success',
-      data: {
-        results: [
-          {
-            providerName: 'offline',
-            name: 'acceptance-stub',
-            modelId: 'upstream-stub',
-            config: {
-              defaultVariant: 'default',
-              variants: [{ id: 'default' }],
-              limit: { context: 4096 },
-            },
+      results: [
+        {
+          providerName: 'offline',
+          name: 'acceptance-stub',
+          modelId: 'upstream-stub',
+          config: {
+            defaultVariant: 'default',
+            variants: [{ id: 'default' }],
+            limit: { context: 4096 },
           },
-        ],
-      },
+        },
+      ],
     },
   }
   assert.equal(validateCatalogResponse(catalogResponse).length, 1)
   // modelId 是上游模型名称，必须存在，不能被误当作数据库身份字段拒绝。
   for (const modelId of [undefined, null, '', 123]) {
     const invalid = structuredClone(catalogResponse)
-    invalid.json.data.results[0].modelId = modelId
+    invalid.json.results[0].modelId = modelId
     assert.throws(() => validateCatalogResponse(invalid), /modelId/)
   }
   assert.throws(
-    () => validateCatalogResponse({ status: 200, json: { data: [] } }),
+    () => validateCatalogResponse({ status: 200, json: [] }),
     /catalog data must be an object/,
   )
   assert.throws(
     () =>
       validateCatalogResponse({
         status: 200,
-        json: { data: { results: [{ providerName: 'offline', name: 'bad', modelId: 'upstream', config: {} }] } },
+        json: { results: [{ providerName: 'offline', name: 'bad', modelId: 'upstream', config: {} }] },
       }),
     /defaultVariant/,
   )
@@ -172,14 +170,14 @@ test('response validators enforce health, catalog envelope, and canvas DTO contr
   assert.doesNotThrow(() =>
     validateCanvasCreateResponse({
       status: 201,
-      json: { data: { id, title: 'baseline', revision: '0' } },
+      json: { id, title: 'baseline', revision: '0' },
     }),
   )
   assert.throws(
     () =>
       validateCanvasCreateResponse({
         status: 201,
-        json: { data: { id, title: 'baseline', revision: '0', threadId: id } },
+        json: { id, title: 'baseline', revision: '0', threadId: id },
       }),
     /threadId/,
   )
@@ -188,7 +186,7 @@ test('response validators enforce health, catalog envelope, and canvas DTO contr
     () =>
       validateCanvasCreateResponse({
         status: 201,
-        json: { data: { id, title: 'baseline', revision: '0', version: '0' } },
+        json: { id, title: 'baseline', revision: '0', version: '0' },
       }),
     /must not expose version/,
   )
@@ -198,7 +196,7 @@ test('response validators enforce health, catalog envelope, and canvas DTO contr
       () =>
         validateCanvasCreateResponse({
           status: 201,
-          json: { data: { id, title: 'baseline', ...fields } },
+          json: { id, title: 'baseline', ...fields },
         }),
       /revision/,
     )
@@ -337,21 +335,18 @@ test(
         requestUrl.search === '?pageNumber=1&pageSize=20'
       ) {
         sendJson(response, 200, {
-          code: 'success',
-          data: {
-            results: [
-              {
-                providerName: 'offline',
-                name: 'acceptance-stub',
-                modelId: 'upstream-stub',
-                config: {
-                  defaultVariant: 'default',
-                  variants: [{ id: 'default' }],
-                  limit: { context: 4096 },
-                },
+          results: [
+            {
+              providerName: 'offline',
+              name: 'acceptance-stub',
+              modelId: 'upstream-stub',
+              config: {
+                defaultVariant: 'default',
+                variants: [{ id: 'default' }],
+                limit: { context: 4096 },
               },
-            ],
-          },
+            },
+          ],
         })
         return
       }
@@ -360,11 +355,11 @@ test(
         const id = randomUUID()
         const canvas = { id, title: body.title, revision: '0' }
         canvases.set(id, canvas)
-        sendJson(response, 201, { code: 'success', data: canvas })
+        sendJson(response, 201, canvas)
         return
       }
       unexpectedRequests.push(`${request.method} ${requestUrl.pathname}`)
-      sendJson(response, 404, { code: 'not_found' })
+      sendJson(response, 404, { type: 'about:blank', title: 'Not Found', status: 404, code: 'not_found' })
     })
 
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))

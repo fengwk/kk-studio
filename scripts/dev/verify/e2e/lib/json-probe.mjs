@@ -17,7 +17,7 @@ import { PROVIDER_SPECS } from '../sync-provider-credentials.mjs'
 const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
 
 const document = JSON.parse(readFileSync(0, 'utf8'))
-const firstModel = () => document?.data?.results?.[0] ?? null
+const firstModel = () => document?.results?.[0] ?? null
 
 const commands = {
   'model-config-print'() {
@@ -32,15 +32,15 @@ const commands = {
     process.exitCode = model && isObject(model.config) ? 0 : 1
   },
   'environment-ready'(name) {
-    const match = (document?.data ?? []).find((row) => row?.name === name)
+    const match = (document ?? []).find((row) => row?.name === name)
     process.exitCode = match && match.status === 'READY' ? 0 : 1
   },
   'environment-status'(name) {
-    const match = (document?.data ?? []).find((row) => row?.name === name)
+    const match = (document ?? []).find((row) => row?.name === name)
     console.log(match ? render(match.status) : '')
   },
   'providers-ready'() {
-    const rows = document?.data?.results ?? []
+    const rows = document?.results ?? []
     const configured = new Set(rows.filter((row) => row.configured && row.baseUrl).map((row) => row.name))
     const missing = PROVIDER_SPECS.map((spec) => spec.name).filter((name) => !configured.has(name)).sort()
     console.log(missing.length > 0 ? `missing:${missing.join(',')}` : 'ok')

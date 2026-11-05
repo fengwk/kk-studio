@@ -8,12 +8,12 @@ export function makeMockHttp({ rows, putError, getError } = {}) {
       if (getError) {
         throw getError
       }
-      return { data: { results: rows ?? [] } }
+      return { results: rows ?? [] }
     }
     if (putError) {
       throw putError
     }
-    return { data: { configured: true, baseUrl: payload.baseUrl } }
+    return { configured: true, baseUrl: payload.baseUrl }
   }
   return { request, calls }
 }
