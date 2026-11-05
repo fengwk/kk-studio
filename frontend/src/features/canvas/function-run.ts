@@ -8,6 +8,7 @@ import {
   startCanvasFunctionRun,
 } from '@/features/canvas/canvas-api'
 import { queryKeys } from '@/shared/lib/query-keys'
+import { isCanonicalUuid } from '@/shared/lib/uuid'
 import type {
   CanvasFunctionRunDTO,
   CanvasFunctionRunRequestDTO,
@@ -16,10 +17,9 @@ import type {
 } from '@/shared/api/generated/contracts'
 
 const PENDING_RUN_STORAGE_PREFIX = 'kkstudio.canvas.pending-run:'
-const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 export function isCanonicalUUID(value: unknown): value is string {
-  return typeof value === 'string' && UUID_REGEX.test(value)
+  return typeof value === 'string' && value === value.toLowerCase() && isCanonicalUuid(value)
 }
 
 const DEFINITION_FINGERPRINT = /^[0-9a-f]{64}$/

@@ -477,6 +477,11 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
     expect(loaded?.request.expectedVersion).toEqual({
       definitionFingerprint: FUNCTION_VERSION_A.definitionFingerprint,
     })
+
+    // 共享 UUID 校验只检查形状；非 v4 的小写 UUID 仍可恢复，不扩大或缩小原有记录契约。
+    const nonV4RequestId = 'abcdef01-2345-1234-0123-456789abcdef'
+    write({ requestId: nonV4RequestId, expectedVersion: FUNCTION_VERSION_A })
+    expect(loadPendingFunctionRun(canvasId, nodeId)?.request.requestId).toBe(nonV4RequestId)
   })
 
   it('坏缓存明确丢弃：损坏记录/旧缓存使本次点击 0 flush 0 POST，并清掉该记录，下一次显式点击才新建请求', async () => {
