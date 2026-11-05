@@ -111,10 +111,6 @@ export function eventStatusText(status: ThreadEventStatus): string {
   return translate(STATUS_TEXT_KEY[status])
 }
 
-function kindTitle(kind: ThreadEventKind): string {
-  return kind
-}
-
 /**
  * durable Entry 的 raw 事实：summary 为压缩后的 payload JSON，rawJson 为 pretty JSON。
  * 语义标题/kind 由各分支决定，绝不在此用 entryType 覆盖。
@@ -411,7 +407,7 @@ function projectEntryRecord(
         ...base,
         kind: 'ROOT',
         status: 'completed',
-        title: kindTitle('ROOT'),
+        title: 'ROOT',
         summary: translate('ai.runtime.entry.rootText'),
         details: withTime(base.details, entry.createTime),
       }
@@ -420,7 +416,7 @@ function projectEntryRecord(
         ...base,
         kind: 'TURN_START',
         status: 'completed',
-        title: kindTitle('TURN_START'),
+        title: 'TURN_START',
         summary: summarizeField(getString(payload.reason), translate('ai.runtime.event.emptyText')),
         details: withTime(base.details, entry.createTime),
       }
@@ -429,7 +425,7 @@ function projectEntryRecord(
         ...base,
         kind: 'SETTINGS',
         status: 'completed',
-        title: kindTitle('SETTINGS'),
+        title: 'SETTINGS',
         summary: '',
         details: withTime(base.details, entry.createTime),
       }
@@ -438,7 +434,7 @@ function projectEntryRecord(
         ...base,
         kind: 'COMPACTION',
         status: 'completed',
-        title: kindTitle('COMPACTION'),
+        title: 'COMPACTION',
         summary: summarizeField(getString(payload.reason), translate('ai.runtime.event.emptyText')),
         // 只有真实模型输出（携带 canonical metadata）才可读取历史请求预览；纯摘要无请求可重建。
         historicalPreviewEligible: hasAssistantMetadata(payload),
@@ -502,7 +498,7 @@ function projectEntryRecord(
         ...base,
         kind: 'TURN_END',
         status: 'completed',
-        title: kindTitle('TURN_END'),
+        title: 'TURN_END',
         summary: [
           outcome,
           ...(usage != null ? [formatTurnUsageText(usage)] : []),
@@ -523,7 +519,7 @@ function projectEntryRecord(
         ...base,
         kind: 'MODEL_ATTEMPT_FAILURE',
         status: 'failed',
-        title: kindTitle('MODEL_ATTEMPT_FAILURE'),
+        title: 'MODEL_ATTEMPT_FAILURE',
         summary: [`attempt ${attemptText}`, code].filter(Boolean).join(' · '),
         details: withTime([
           ...base.details,
@@ -543,7 +539,7 @@ function projectEntryRecord(
         ...base,
         kind: 'ASSISTANT_ERROR',
         status: 'failed',
-        title: kindTitle('ASSISTANT_ERROR'),
+        title: 'ASSISTANT_ERROR',
         summary: summarizeField(
           getString(error.message),
           translate('ai.runtime.entry.assistantRequestFailed'),
@@ -562,7 +558,7 @@ function projectEntryRecord(
         ...base,
         kind: 'ASSISTANT_ABORTED',
         status: 'stopped',
-        title: kindTitle('ASSISTANT_ABORTED'),
+        title: 'ASSISTANT_ABORTED',
         summary: translate('ai.runtime.event.abortedText'),
         details: withTime(base.details, entry.createTime),
       }
@@ -573,7 +569,7 @@ function projectEntryRecord(
         ...base,
         kind: 'CUSTOM',
         status: 'completed',
-        title: kindTitle('CUSTOM'),
+        title: 'CUSTOM',
         summary: summarizeField(customType || contributorId, translate('ai.runtime.event.emptyText')),
         details: withTime(base.details, entry.createTime),
       }
@@ -608,7 +604,7 @@ function projectEntryRecord(
         ...base,
         kind: 'FORK',
         status: 'completed',
-        title: kindTitle('FORK'),
+        title: 'FORK',
         summary: [mode, sourceEntryId].filter(Boolean).join(' · '),
         details: withTime([
           ...base.details,
@@ -765,7 +761,7 @@ function projectAttemptFailureRecord(
     turnNumber: turn.turnNumber,
     kind: 'MODEL_ATTEMPT_FAILURE',
     status: 'failed',
-    title: kindTitle('MODEL_ATTEMPT_FAILURE'),
+    title: 'MODEL_ATTEMPT_FAILURE',
     summary: `${failure.errorCode} · ${summarizeField(failure.errorMessage, translate('ai.runtime.event.emptyText'))}`,
     createdAt: failure.failedAt,
     details,
@@ -827,7 +823,7 @@ function projectActiveModelRecord(
     turnNumber: turn.turnNumber,
     kind: 'ACTIVE_MODEL_INVOCATION',
     status,
-    title: kindTitle('ACTIVE_MODEL_INVOCATION'),
+    title: 'ACTIVE_MODEL_INVOCATION',
     summary: `${eventStatusText(status)} · ${translate('ai.runtime.event.detail.attempt')} ${activeOutput.attempt}`,
     createdAt: activeOutput.createTime,
     details: withTime(details, activeOutput.createTime),
@@ -897,7 +893,7 @@ function projectActiveToolRecord(
     turnNumber: turn.turnNumber,
     kind: 'ACTIVE_TOOL_INVOCATION',
     status,
-    title: kindTitle('ACTIVE_TOOL_INVOCATION'),
+    title: 'ACTIVE_TOOL_INVOCATION',
     summary: `${invocation.toolName || translate('ai.runtime.event.unknownTool')} · ${eventStatusText(status)}`,
     createdAt: invocation.createTime,
     details: withTime(details, invocation.createTime),

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import type { ThreadCommand } from '@/features/thread/runtime'
+import type { ThreadCommand } from '@/features/thread/runtime/thread-panel'
 import type { ThreadProjection } from '@/features/thread/runtime/useThreadProjection'
 import { useThreadApprovals } from '@/features/thread/runtime/thread-draft/useThreadApprovals'
 import { useThreadDraftRecord } from '@/features/thread/runtime/thread-draft/useThreadDraftRecord'
