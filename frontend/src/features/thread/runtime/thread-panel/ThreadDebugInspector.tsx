@@ -170,9 +170,6 @@ export function ThreadDebugInspector({
                 ) : null}
               </KeyValueRow>
             <KeyValueRow label={t('ai.runtime.debug.inspector.environmentSupport')}><Mono>{formatEnvSupport(selection.tool.environmentSupport, t)}</Mono></KeyValueRow>
-            {selection.tool.requiredEnvironmentId ? (
-              <KeyValueRow label={t('ai.runtime.debug.inspector.requiredEnvId')}><Mono>{selection.tool.requiredEnvironmentId}</Mono></KeyValueRow>
-            ) : null}
             <KeyValueRow label={t('ai.runtime.debug.inspector.provenance')}><Mono>{selection.tool.provenance}</Mono></KeyValueRow>
             <KeyValueRow label={t('ai.runtime.debug.inspector.description')}>{selection.tool.description}</KeyValueRow>
           </KeyValue>

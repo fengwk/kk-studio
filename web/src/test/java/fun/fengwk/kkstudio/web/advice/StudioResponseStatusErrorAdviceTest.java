@@ -15,7 +15,6 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.web.server.ResponseStatusException;
 
 import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
-import fun.fengwk.kkstudio.ide.web.StudioEnvironmentIdeController;
 import fun.fengwk.kkstudio.platform.harness.builtin.query.ProviderRequestPreviewUnavailableException;
 import fun.fengwk.kkstudio.platform.harness.builtin.query.ProviderRequestPreviewUnavailableException.Reason;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;

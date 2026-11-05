@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.api.retry.InvocationRetryBackoffStrategy;
 import fun.fengwk.kkstudio.harness.api.retry.InvocationRetryPolicy;
+import fun.fengwk.kkstudio.harness.api.retry.ModelHttpErrorPolicy;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.builtin.port.BuiltinWorkType;
@@ -25,7 +26,6 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCallDiagnostic;
-import fun.fengwk.kkstudio.harness.api.retry.ModelHttpErrorPolicy;
 import fun.fengwk.kkstudio.harness.spi.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.spi.work.ProcessResult;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
@@ -33,7 +33,6 @@ import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
 
 import java.time.Duration;
 import java.util.List;
-import java.util.function.Function;
 import java.util.Optional;
 
 /** 流式与响应收敛：checkpoint 前缀、tool fragment gap、replayState、压缩子 final 完整性与 invalid response 重试。 */

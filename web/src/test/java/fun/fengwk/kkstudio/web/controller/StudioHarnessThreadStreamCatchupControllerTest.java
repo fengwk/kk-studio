@@ -16,7 +16,6 @@ import org.springframework.http.converter.json.JacksonJsonHttpMessageConverter;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.platform.harness.builtin.realtime.HarnessStreamCatchupService;
 import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;

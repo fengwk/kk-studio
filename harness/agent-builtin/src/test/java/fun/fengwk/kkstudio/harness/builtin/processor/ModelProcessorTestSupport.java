@@ -27,6 +27,7 @@ import fun.fengwk.kkstudio.harness.api.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.api.realtime.RealtimeEvent;
 import fun.fengwk.kkstudio.harness.api.retry.InvocationRetryBackoffStrategy;
 import fun.fengwk.kkstudio.harness.api.retry.InvocationRetryPolicy;
+import fun.fengwk.kkstudio.harness.api.retry.ModelHttpErrorPolicy;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.api.session.Session;
@@ -75,7 +76,6 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.execution.TestExecutionExitConfirmer;
 import fun.fengwk.kkstudio.harness.spi.RealtimeEventSink;
 import fun.fengwk.kkstudio.harness.spi.ToolHistoryActionResolver;
-import fun.fengwk.kkstudio.harness.api.retry.ModelHttpErrorPolicy;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.spi.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.spi.work.ProcessorLeaseConfig;
@@ -329,7 +329,8 @@ abstract class ModelProcessorTestSupport {
   }
 
   Fixture fixture(
-      InvocationRetryPolicy retryPolicy, Function<String, ModelHttpErrorPolicy> httpErrorPolicyProvider) {
+      InvocationRetryPolicy retryPolicy,
+      Function<String, ModelHttpErrorPolicy> httpErrorPolicyProvider) {
     return new Fixture(
         retryPolicy,
         requestSpec(),
