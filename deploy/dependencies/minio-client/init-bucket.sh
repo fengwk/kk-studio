@@ -1,20 +1,26 @@
 #!/bin/sh
 # kk-studio MinIO 私有桶一次性初始化；各 Compose 栈的 `minio-init` 共用。
 #
-# 只从环境读取 MINIO_ROOT_USER / MINIO_ROOT_PASSWORD / MINIO_BUCKET。凭据仅作为 mc 的
-# 位置参数传入，不由脚本回显；endpoint 固定为同一 Compose 网络内的 `minio:9000`。
-# 每条命令都直接串行执行，`set -e` 保证任一步失败立即以非零状态退出，后续步骤不再执行，
-# 调用方据 `service_completed_successfully` 中断。本脚本不修改镜像默认入口（mc）。
+# 凭据只从环境读取，并仅作为 mc 的位置参数传入，不由脚本回显。
+# 默认初始化 Compose 私有桶；--clean-existing 用于清空 E2E 专用桶。
 set -eu
+
+case "${1-}:$#" in
+  :0|--clean-existing:1) mode=${1-} ;;
+  *) echo "usage: init-bucket.sh [--clean-existing]" >&2; exit 2 ;;
+esac
 
 : "${MINIO_ROOT_USER:?MINIO_ROOT_USER is required}"
 : "${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}"
 : "${MINIO_BUCKET:?MINIO_BUCKET is required}"
 
-endpoint=http://minio:9000
+alias_name=${MINIO_ALIAS:-local}
+endpoint=${MINIO_ENDPOINT:-http://minio:9000}
 
-mc alias set local "$endpoint" "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"
-mc mb --ignore-existing "local/$MINIO_BUCKET"
-# 显式关闭匿名访问：bucket 只接受签名请求。
-mc anonymous set none "local/$MINIO_BUCKET"
-mc stat "local/$MINIO_BUCKET"
+mc alias set "$alias_name" "$endpoint" "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" >/dev/null
+if [ "$mode" = "--clean-existing" ] && mc ls "$alias_name/$MINIO_BUCKET" >/dev/null 2>&1; then
+  mc rm --recursive --force "$alias_name/$MINIO_BUCKET/"
+fi
+mc mb --ignore-existing "$alias_name/$MINIO_BUCKET"
+mc anonymous set none "$alias_name/$MINIO_BUCKET"
+mc stat "$alias_name/$MINIO_BUCKET"

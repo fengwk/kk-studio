@@ -228,22 +228,31 @@ ensure_dedicated_s3_bucket() {
 
   ensure_s3_storage
   step "Ensuring clean dedicated E2E bucket $STORAGE_S3_BUCKET"
-  local mc_cmd="
-    mc alias set e2e-local '$STORAGE_S3_ENDPOINT' '$STORAGE_S3_ACCESS_KEY' '$STORAGE_S3_SECRET_KEY' >/dev/null
-    if mc ls 'e2e-local/$STORAGE_S3_BUCKET' >/dev/null 2>&1; then
-      mc rm --recursive --force 'e2e-local/$STORAGE_S3_BUCKET/'
+  local init_script="$REPO_ROOT/deploy/dependencies/minio-client/init-bucket.sh"
+  (
+    export MINIO_ROOT_USER="$STORAGE_S3_ACCESS_KEY"
+    export MINIO_ROOT_PASSWORD="$STORAGE_S3_SECRET_KEY"
+    export MINIO_BUCKET="$STORAGE_S3_BUCKET"
+    export MINIO_ALIAS=e2e-local
+    export MINIO_ENDPOINT="$STORAGE_S3_ENDPOINT"
+    if command -v mc >/dev/null 2>&1; then
+      sh "$init_script" --clean-existing
+    elif command -v docker >/dev/null 2>&1; then
+      # Read the checkout's script before invoking mc, so an older image is safe
+      # and mc cannot consume the script from the container's stdin.
+      docker run --rm -i --net host \
+        --env MINIO_ROOT_USER \
+        --env MINIO_ROOT_PASSWORD \
+        --env MINIO_BUCKET \
+        --env MINIO_ALIAS \
+        --env MINIO_ENDPOINT \
+        --entrypoint /bin/sh \
+        kk-studio-minio-client:RELEASE.2025-04-16T18-13-26Z \
+        -ec 'script=$(cat); exec /bin/sh -c "$script" -- --clean-existing' <"$init_script"
     else
-      mc mb 'e2e-local/$STORAGE_S3_BUCKET'
-      mc anonymous set none 'e2e-local/$STORAGE_S3_BUCKET'
+      die "cannot initialize E2E S3 bucket: mc is not installed and docker is not available"
     fi
-  "
-  if command -v mc >/dev/null 2>&1; then
-    bash -ec "$mc_cmd"
-  elif command -v docker >/dev/null 2>&1; then
-    docker run --rm --net host --entrypoint /bin/sh kk-studio-minio-client:RELEASE.2025-04-16T18-13-26Z -ec "$mc_cmd"
-  else
-    die "cannot initialize E2E S3 bucket: mc is not installed and docker is not available"
-  fi
+  )
 }
 
 exec_postgres_admin_sql() {

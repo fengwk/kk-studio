@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 
-import { REPOSITORY_ROOT, functionBody, readText, runBash } from '../../../tests/support/shell.mjs'
+import { REPOSITORY_ROOT, cleanEnvironment, functionBody, readText, runBash } from '../../../tests/support/shell.mjs'
 
 const E2E_ROOT = path.join(REPOSITORY_ROOT, 'scripts/dev/verify/e2e')
 const E2E_LIB = path.join(E2E_ROOT, 'lib.sh')
@@ -240,4 +240,90 @@ ensure_dedicated_s3_bucket
   assert.equal(externalResult.status, 0, output(externalResult))
   assert.match(externalResult.stdout, /custom-external-bucket/)
   assert.match(externalResult.stdout, /External S3 endpoint configured.*skipping bucket cleanup/)
+})
+
+test('test intent: host mc and Docker fallback preserve dedicated bucket behavior', () => {
+  // Record both entry paths without Docker or a real bucket; an old image must use the checkout script.
+  withTempDir((root) => {
+    const mcDir = path.join(root, 'mc-bin')
+    const dockerDir = path.join(root, 'docker-bin')
+    mkdirSync(mcDir)
+    mkdirSync(dockerDir)
+    const mcLog = path.join(root, 'mc.log')
+    const dockerLog = path.join(root, 'docker.log')
+    writeFileSync(path.join(mcDir, 'mc'), [
+      '#!/bin/sh',
+      'printf "%s\\n" "$*" >> "$MC_LOG"',
+      'if [ "${MC_VERIFY_EOF-}" = yes ] && IFS= read -r unexpected; then exit 25; fi',
+      'if [ "${MC_FAIL_ON-}" = "$1" ]; then exit 1; fi',
+      'if [ "$1" = ls ] && [ "$MC_BUCKET_STATE" = absent ]; then exit 1; fi',
+      'exit 0',
+      '',
+    ].join('\n'), { mode: 0o755 })
+    writeFileSync(path.join(dockerDir, 'docker'), [
+      '#!/bin/sh',
+      'printf "%s\\n" "$@" > "$DOCKER_LOG"',
+      // Execute the requested entrypoint with streamed stdin and a fake mc.
+      'while [ "$#" -gt 0 ] && [ "$1" != kk-studio-minio-client:RELEASE.2025-04-16T18-13-26Z ]; do shift; done',
+      '[ "$#" -gt 0 ] || exit 2',
+      'shift',
+      'PATH="$FAKE_MC_DIR:$PATH" exec /bin/sh "$@"',
+      '',
+    ].join('\n'), { mode: 0o755 })
+
+    const run = (viaDocker, bucketState, failOn = '') => {
+      writeFileSync(mcLog, '')
+      const result = runBash(`source ${E2E_LIB}
+ensure_s3_storage() { :; }
+command() {
+  if [ "$1" = -v ] && [ "$2" = mc ]; then
+    [ "$FAKE_ROUTE" = host ]
+    return
+  fi
+  builtin command "$@"
+}
+ensure_dedicated_s3_bucket`, {
+        env: {
+          ...cleanEnvironment(),
+          PATH: `${viaDocker ? dockerDir : mcDir}:/usr/bin:/bin`,
+          FAKE_MC_DIR: mcDir,
+          FAKE_ROUTE: viaDocker ? 'docker' : 'host',
+          MC_LOG: mcLog,
+          MC_BUCKET_STATE: bucketState,
+          MC_FAIL_ON: failOn,
+          MC_VERIFY_EOF: viaDocker ? 'yes' : 'no',
+          DOCKER_LOG: dockerLog,
+          KK_STUDIO_STORAGE_S3_ENDPOINT: 'http://127.0.0.1:9000',
+          KK_STUDIO_STORAGE_S3_ACCESS_KEY: 'e2e-access',
+          KK_STUDIO_STORAGE_S3_SECRET_KEY: 'e2e-secret',
+          KK_STUDIO_STORAGE_S3_BUCKET: 'dev-user-bucket',
+        },
+      })
+      return { result, calls: readFileSync(mcLog, 'utf8').split('\n').filter(Boolean) }
+    }
+
+    for (const viaDocker of [false, true]) {
+      for (const bucketState of ['existing', 'absent']) {
+        const { result, calls } = run(viaDocker, bucketState)
+        assert.equal(result.status, 0, output(result))
+        assert.ok(!output(result).includes('e2e-secret'))
+        assert.deepEqual(calls, [
+          'alias set e2e-local http://127.0.0.1:9000 e2e-access e2e-secret',
+          'ls e2e-local/kk-studio-e2e-matrix',
+          ...(bucketState === 'existing' ? ['rm --recursive --force e2e-local/kk-studio-e2e-matrix/'] : []),
+          'mb --ignore-existing e2e-local/kk-studio-e2e-matrix',
+          'anonymous set none e2e-local/kk-studio-e2e-matrix',
+          'stat e2e-local/kk-studio-e2e-matrix',
+        ])
+      }
+      for (const [bucketState, failOn] of [
+        ['existing', 'alias'], ['existing', 'rm'], ['absent', 'mb'], ['absent', 'anonymous'], ['absent', 'stat'],
+      ]) {
+        const { result, calls } = run(viaDocker, bucketState, failOn)
+        assert.notEqual(result.status, 0, `${viaDocker ? 'docker' : 'host'} ${failOn}`)
+        assert.equal(calls.at(-1).split(' ')[0], failOn)
+      }
+    }
+    assert.ok(!readFileSync(dockerLog, 'utf8').includes('e2e-secret'))
+  })
 })

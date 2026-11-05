@@ -1,30 +1,22 @@
 #!/usr/bin/env node
-/** Synchronize the reliability matrix's MiniMax Responses provider. */
+/** Synchronize the reliability matrix's MiniMax Responses provider from the shared credential inventory. */
 
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { parseArgs } from 'node:util'
 
 import { syncProviderSpecs } from '../../lib/provider-credentials.mjs'
+import {
+  RELIABILITY_PROVIDER_SPECS,
+  TEST_MINIMAX_API_KEY,
+  TEST_MINIMAX_BASE_URL,
+} from '../e2e/sync-provider-credentials.mjs'
 
-export const TEST_MINIMAX_BASE_URL = 'TEST_MINIMAX_BASE_URL'
-export const TEST_MINIMAX_API_KEY = 'TEST_MINIMAX_API_KEY'
-const MINIMAX_SPEC = {
-  name: 'minimax',
-  providerType: 'openai_responses',
-  baseUrlEnv: TEST_MINIMAX_BASE_URL,
-  apiKeyEnv: TEST_MINIMAX_API_KEY,
-  requiresV1Suffix: true,
-  defaultDescription: 'MiniMax.',
-}
+export { TEST_MINIMAX_API_KEY, TEST_MINIMAX_BASE_URL }
 
 /** Synchronize the reliability-only credential pair without widening E2E inputs. */
 export async function syncMinimaxCredentials(backendUrl, env = process.env, request = undefined) {
-  const envValues = {
-    [TEST_MINIMAX_BASE_URL]: env[TEST_MINIMAX_BASE_URL],
-    [TEST_MINIMAX_API_KEY]: env[TEST_MINIMAX_API_KEY],
-  }
-  return syncProviderSpecs(backendUrl, [MINIMAX_SPEC], envValues, request)
+  return syncProviderSpecs(backendUrl, RELIABILITY_PROVIDER_SPECS, env, request)
 }
 
 async function main() {

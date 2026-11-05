@@ -32,6 +32,8 @@ function createSandbox() {
       '  echo "fake mc: refusing $1" >&2',
       '  exit 1',
       'fi',
+      'if [ "$1" = ls ] && [ "${FAKE_BUCKET_EXISTS:-yes}" = no ]; then exit 1; fi',
+      'if [ "$1" = alias ]; then echo "alias output"; fi',
       'exit 0',
       '',
     ].join('\n'),
@@ -41,21 +43,26 @@ function createSandbox() {
 }
 
 /** 用给定环境执行初始化脚本，返回退出码、合并输出与本次实际发生的 mc 调用。 */
-function runScript(sandbox, { env = {}, unset = [] } = {}) {
+function runScript(sandbox, { env = {}, unset = [], args = [] } = {}) {
   writeFileSync(sandbox.log, '')
   const childEnv = {
     ...process.env,
+  }
+  for (const name of ['MINIO_ALIAS', 'MINIO_ENDPOINT', 'FAKE_MC_FAIL_ON', 'FAKE_BUCKET_EXISTS']) {
+    delete childEnv[name]
+  }
+  Object.assign(childEnv, {
     PATH: `${sandbox.directory}:${process.env.PATH}`,
     FAKE_MC_CALL_LOG: sandbox.log,
     MINIO_ROOT_USER: USER,
     MINIO_ROOT_PASSWORD: PASSWORD,
     MINIO_BUCKET: BUCKET,
     ...env,
-  }
+  })
   for (const name of unset) {
     delete childEnv[name]
   }
-  const result = spawnSync('/bin/sh', [SCRIPT], { env: childEnv, encoding: 'utf8' })
+  const result = spawnSync('/bin/sh', [SCRIPT, ...args], { env: childEnv, encoding: 'utf8' })
   return {
     status: result.status,
     output: `${result.stdout}${result.stderr}`,
@@ -68,6 +75,7 @@ test('the bootstrap runs alias set, mb, anonymous none and stat in that exact or
   try {
     const run = runScript(sandbox)
     assert.equal(run.status, 0)
+    assert.equal(run.output, '')
     assert.deepEqual(run.calls, [
       `alias set local http://minio:9000 ${USER} ${PASSWORD}`,
       `mb --ignore-existing local/${BUCKET}`,
@@ -79,20 +87,64 @@ test('the bootstrap runs alias set, mb, anonymous none and stat in that exact or
   }
 })
 
+test('clean mode empties an existing bucket and ensures a private bucket in either case', () => {
+  // The fake mc models both outcomes of the existence probe without touching storage.
+  const sandbox = createSandbox()
+  try {
+    for (const bucketExists of [true, false]) {
+      const run = runScript(sandbox, {
+        args: ['--clean-existing'],
+        env: { FAKE_BUCKET_EXISTS: bucketExists ? 'yes' : 'no' },
+      })
+      assert.equal(run.status, 0)
+      assert.equal(run.output, '')
+      assert.deepEqual(run.calls, [
+        `alias set local http://minio:9000 ${USER} ${PASSWORD}`,
+        `ls local/${BUCKET}`,
+        ...(bucketExists ? [`rm --recursive --force local/${BUCKET}/`] : []),
+        `mb --ignore-existing local/${BUCKET}`,
+        `anonymous set none local/${BUCKET}`,
+        `stat local/${BUCKET}`,
+      ])
+    }
+  } finally {
+    rmSync(sandbox.directory, { recursive: true, force: true })
+  }
+})
+
+test('explicit alias and endpoint let host-side callers reuse the bootstrap', () => {
+  const sandbox = createSandbox()
+  try {
+    const run = runScript(sandbox, {
+      env: { MINIO_ALIAS: 'e2e-local', MINIO_ENDPOINT: 'http://127.0.0.1:9000' },
+    })
+    assert.equal(run.status, 0)
+    assert.deepEqual(run.calls, [
+      `alias set e2e-local http://127.0.0.1:9000 ${USER} ${PASSWORD}`,
+      `mb --ignore-existing e2e-local/${BUCKET}`,
+      `anonymous set none e2e-local/${BUCKET}`,
+      `stat e2e-local/${BUCKET}`,
+    ])
+  } finally {
+    rmSync(sandbox.directory, { recursive: true, force: true })
+  }
+})
+
 test('the first failing mc step aborts the bootstrap and runs no later step', () => {
-  const steps = [
-    ['alias', 1],
-    ['mb', 2],
-    ['anonymous', 3],
-    ['stat', 4],
+  // Failure of any mutating or verification step must prevent all following steps.
+  const modes = [
+    { args: [], steps: [['alias', 1], ['mb', 2], ['anonymous', 3], ['stat', 4]] },
+    { args: ['--clean-existing'], steps: [['alias', 1], ['rm', 3], ['mb', 4], ['anonymous', 5], ['stat', 6]] },
   ]
   const sandbox = createSandbox()
   try {
-    for (const [step, expectedCalls] of steps) {
-      const run = runScript(sandbox, { env: { FAKE_MC_FAIL_ON: step } })
-      assert.notEqual(run.status, 0, step)
-      assert.equal(run.calls.length, expectedCalls, step)
-      assert.equal(run.calls.at(-1).split(' ')[0], step)
+    for (const { args, steps } of modes) {
+      for (const [step, expectedCalls] of steps) {
+        const run = runScript(sandbox, { args, env: { FAKE_MC_FAIL_ON: step } })
+        assert.notEqual(run.status, 0, step)
+        assert.equal(run.calls.length, expectedCalls, step)
+        assert.equal(run.calls.at(-1).split(' ')[0], step)
+      }
     }
   } finally {
     rmSync(sandbox.directory, { recursive: true, force: true })

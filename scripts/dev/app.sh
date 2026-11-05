@@ -237,10 +237,7 @@ Environment:
   # 非符号链接）；未给出时脚本只按下面的默认值启动本机服务，不读取任何外部配置文件。
   # scripts/dev/shared-preview.sh 会额外设置 KK_STUDIO_SHARED_PREVIEW=true，此时缺配置或
   # profile/Flyway/worker 开关不是 prod/false/false 都在启动前失败。
-  TEST_GOOGLE_BASE_URL / TEST_GOOGLE_API_KEY
-  TEST_OPENAI_RESPONSES_BASE_URL / TEST_OPENAI_RESPONSES_API_KEY
-  TEST_ANTHROPIC_BASE_URL / TEST_ANTHROPIC_API_KEY
-  TEST_OPENAI_BASE_URL / TEST_OPENAI_API_KEY
+  # Credential names: node scripts/dev/verify/e2e/sync-provider-credentials.mjs --list-env
   # e2e profile: complete pairs are written to the matching seeded providers after backend readiness
   DEV_KILL_PORTS=true
   DEV_SKIP_PACKAGE=false

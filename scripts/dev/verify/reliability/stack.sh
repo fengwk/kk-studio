@@ -9,6 +9,7 @@ source "$SCRIPT_DIR/../../lib/compose-stack.sh"
 COMPOSE_FILE="$REPO_ROOT/deploy/test/compose.yaml"
 PROJECT_NAME=kk-studio-reliability
 COMPOSE=(docker compose --project-name "$PROJECT_NAME" --file "$COMPOSE_FILE")
+SYNC_MINIMAX_CREDENTIALS="$REPO_ROOT/scripts/dev/verify/reliability/sync-minimax-credentials.mjs"
 RELIABILITY_APP_PORT=${RELIABILITY_APP_PORT:-18091}
 RELIABILITY_MINIO_PORT=${RELIABILITY_MINIO_PORT:-19002}
 RELIABILITY_ENV_NAME=${RELIABILITY_ENV_NAME:-docker-reliability}
@@ -51,7 +52,7 @@ Usage: scripts/dev/verify/reliability/stack.sh <command> [arguments]
 Commands:
   up
       Build and start the isolated stack, wait for app health and daemon READY,
-      then synchronize the optional TEST_MINIMAX credential pair from the host.
+      then synchronize the optional host MiniMax credential pair.
   snapshot
       Copy clean snapshots from the non-empty PI_ANCHOR and PI_BASE_ANCHOR
       Git worktrees into the named volume.
@@ -127,10 +128,7 @@ up_stack() {
   wait_environment
   step "synchronizing optional MiniMax E2E credentials (secret values are never printed)"
   BACKEND_URL="$APP_URL" \
-    TEST_MINIMAX_API_KEY="${TEST_MINIMAX_API_KEY-}" \
-    TEST_MINIMAX_BASE_URL="${TEST_MINIMAX_BASE_URL-}" \
-    node "$REPO_ROOT/scripts/dev/verify/reliability/sync-minimax-credentials.mjs" \
-      --backend-url "$APP_URL"
+    node "$SYNC_MINIMAX_CREDENTIALS" --backend-url "$APP_URL"
 }
 
 require_clean_anchor() {
