@@ -1,4 +1,5 @@
 import { create } from '@bufbuild/protobuf'
+import { LONG_MAX } from './validation-constants.js'
 
 import {
   RuntimeBodySchema,
@@ -26,8 +27,6 @@ export interface RuntimeStatus {
     update: RuntimeStatusUpdate | null
   }
 }
-
-const LONG_MAX = 9223372036854775807n
 
 /**
  * 当前进程的完整运行状态快照。

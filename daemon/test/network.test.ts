@@ -8,7 +8,6 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
 import { Agent } from 'undici'
-import { WebSocket, WebSocketServer } from 'ws'
 
 import {
   applyNetworkSettings,
@@ -18,20 +17,21 @@ import {
   type OutboundNetwork,
 } from '../src/network.js'
 import { createHttpPutObject } from '../src/transport/resources.js'
+import { SkillPackageInstaller } from '../src/skill/installer.js'
+import { buildZipFixture, sha256Of } from './skill/zip-fixture.js'
+import { createTestPrivateFs } from './skill/test-private-fs.js'
 
 interface ForwardProxy {
   url: string
   requests: string[]
   connects: string[]
-  upgrades: string[]
   close(): Promise<void>
 }
 
-/** 真实本地转发代理：支持 absolute-form、CONNECT 隧道与 Upgrade 透传。 */
+/** 真实本地转发代理：支持 absolute-form 与 CONNECT 隧道。 */
 async function startProxy(): Promise<ForwardProxy> {
   const requests: string[] = []
   const connects: string[] = []
-  const upgrades: string[] = []
   const sockets = new Set<net.Socket>()
   const track = (socket: net.Socket): void => {
     sockets.add(socket)
@@ -75,48 +75,15 @@ async function startProxy(): Promise<ForwardProxy> {
     upstream.on('error', () => clientSocket.destroy())
     clientSocket.on('error', () => upstream.destroy())
   })
-  server.on('upgrade', (request, clientSocket, head) => {
-    upgrades.push(request.url ?? '')
-    const target = new URL(request.url ?? '/')
-    const upstream = http.request({
-      host: target.hostname,
-      port: target.port === '' ? 80 : Number(target.port),
-      method: request.method,
-      path: `${target.pathname}${target.search}`,
-      headers: { ...request.headers, host: target.host },
-    })
-    upstream.on('upgrade', (upResponse, upSocket, upHead) => {
-      track(upSocket)
-      upSocket.on('error', () => clientSocket.destroy())
-      let raw = `HTTP/1.1 ${upResponse.statusCode} ${upResponse.statusMessage}\r\n`
-      for (let index = 0; index < upResponse.rawHeaders.length; index += 2) {
-        raw += `${upResponse.rawHeaders[index]}: ${upResponse.rawHeaders[index + 1]}\r\n`
-      }
-      raw += '\r\n'
-      clientSocket.write(raw)
-      if (head.length > 0) {
-        upSocket.write(head)
-      }
-      if (upHead.length > 0) {
-        upSocket.unshift(upHead)
-      }
-      upSocket.pipe(clientSocket)
-      clientSocket.pipe(upSocket)
-    })
-    upstream.on('error', () => clientSocket.destroy())
-    upstream.end()
-    clientSocket.on('error', () => upstream.destroy())
-  })
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()))
   const port = (server.address() as net.AddressInfo).port
   return {
     url: `http://127.0.0.1:${port}`,
     requests,
     connects,
-    upgrades,
     close: () =>
       new Promise<void>((resolve) => {
-        // HTTP 的 closeAllConnections 不包含 Upgrade/CONNECT 后的裸 socket。
+        // HTTP 的 closeAllConnections 不包含 CONNECT 后的裸 socket。
         for (const socket of sockets) {
           socket.destroy()
         }
@@ -133,7 +100,7 @@ interface Origin {
   close(): Promise<void>
 }
 
-async function startOrigin(body = 'origin-body'): Promise<Origin> {
+async function startOrigin(body: string | Buffer = 'origin-body'): Promise<Origin> {
   const hits: string[] = []
   let connections = 0
   let closes = 0
@@ -228,6 +195,55 @@ async function runProbe(
 }
 
 describe('outbound network integration', () => {
+  it('downloads skill archives through the selected proxy and bypasses it when configured', async () => {
+    const zip = buildZipFixture([{ name: 'skill.txt', content: 'installed' }])
+    const proxy = await startProxy()
+    const origin = await startOrigin(zip)
+    const root = mkdtempSync(join(tmpdir(), 'kk-skill-network-'))
+    cleanups.push(proxy.close, origin.close, async () => rmSync(root, { recursive: true, force: true }))
+    const installer = new SkillPackageInstaller(join(root, 'skills'), { privateFs: createTestPrivateFs() })
+
+    await withNetwork({ http_proxy: proxy.url }, async () => {
+      // 真正安装归档，确认代理选择发生在下载而非仅策略查询。
+      const proxied = await installer.install('proxied', sha256Of(zip), zip.length, origin.url)
+      expect(proxied.error).toBeUndefined()
+      expect(proxy.requests).toHaveLength(1)
+      expect(readFileSync(join(proxied.localPath!, 'skill.txt'), 'utf8')).toBe('installed')
+
+      applyNetworkSettings(proxy.url, '127.0.0.1')
+      const bypassed = await installer.install('bypassed', sha256Of(zip), zip.length, origin.url)
+      expect(bypassed.error).toBeUndefined()
+      expect(proxy.requests).toHaveLength(1)
+      expect(origin.hits).toHaveLength(2)
+    })
+  })
+
+  it('fails a skill download without an installed outbound network', async () => {
+    const origin = await startOrigin()
+    const root = mkdtempSync(join(tmpdir(), 'kk-skill-uninitialized-'))
+    cleanups.push(origin.close, async () => rmSync(root, { recursive: true, force: true }))
+    // 子进程不加载测试 initializer，验证真实未安装状态及无直连副作用。
+    const probePath = fileURLToPath(new URL('./resources/network/skill-uninitialized-probe.mjs', import.meta.url))
+    const child = spawn(process.execPath, [probePath], {
+      env: { ...process.env, KK_PROBE_URL: origin.url, KK_PROBE_ROOT: root },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    probeChildren.add(child)
+    const stdout: Buffer[] = []
+    const stderr: Buffer[] = []
+    child.stdout.on('data', (chunk: Buffer) => stdout.push(chunk))
+    child.stderr.on('data', (chunk: Buffer) => stderr.push(chunk))
+    const code = await new Promise<number | null>((resolve, reject) => {
+      child.once('error', reject)
+      child.once('exit', resolve)
+    })
+    probeChildren.delete(child)
+    expect(code).toBe(0)
+    expect(Buffer.concat(stderr).toString()).toBe('')
+    expect(Buffer.concat(stdout).toString()).toBe('outbound network is not initialized')
+    expect(origin.hits).toHaveLength(0)
+  })
+
   it('routes signed PUTs using current settings and clears proxy and bypass dynamically', async () => {
     const proxy = await startProxy()
     const origin = await startOrigin()
@@ -314,46 +330,6 @@ describe('outbound network integration', () => {
       await expect(readText(network, origin.url)).rejects.toThrow()
     })
     expect(origin.hits).toHaveLength(0)
-  })
-
-  it('upgrades a WebSocket through the proxy', async () => {
-    const proxy = await startProxy()
-    const server = new WebSocketServer({ port: 0, perMessageDeflate: true })
-    await new Promise<void>((resolve) => server.once('listening', () => resolve()))
-    cleanups.push(
-      proxy.close,
-      () =>
-        new Promise<void>((resolve) => {
-          for (const client of server.clients) {
-            client.terminate()
-          }
-          server.close(() => resolve())
-        }),
-    )
-    const port = (server.address() as net.AddressInfo).port
-    server.on('connection', (socket) => {
-      socket.on('message', (data) => socket.send(data.toString()))
-    })
-
-    await withNetwork({ http_proxy: proxy.url }, async () => {
-      const { agent, destroy } = await getOutboundNetwork().createWebSocketAgent(
-        `ws://127.0.0.1:${port}`,
-        new AbortController().signal,
-      )
-      try {
-        const ws = new WebSocket(`ws://127.0.0.1:${port}`, { agent })
-        await new Promise<void>((resolve, reject) => {
-          ws.once('open', resolve)
-          ws.once('error', reject)
-        })
-        expect(ws.readyState).toBe(WebSocket.OPEN)
-        ws.close()
-      } finally {
-        destroy()
-      }
-    })
-    expect(proxy.upgrades).toHaveLength(1)
-    expect(proxy.upgrades[0]!.startsWith(`http://127.0.0.1:${port}`)).toBe(true)
   })
 
   it('never follows redirects for a signed PUT', async () => {
@@ -514,9 +490,6 @@ describe('outbound network lifecycle and connect deadlines', () => {
     await installed.close()
     await expect(
       installed.network.openResponse(origin.url, {}, new AbortController().signal),
-    ).rejects.toThrow(/closed/)
-    await expect(
-      installed.network.createWebSocketAgent(origin.url, new AbortController().signal),
     ).rejects.toThrow(/closed/)
     expect(origin.hits).toHaveLength(0)
   })

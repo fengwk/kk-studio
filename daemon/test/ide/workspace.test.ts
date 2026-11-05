@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { randomUUID } from 'node:crypto'
 import { mkdtemp, mkdir, opendir, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, parse } from 'node:path'
@@ -8,10 +9,8 @@ import { verifyPrivateFile } from '../../src/native/index.js'
 import {
   RecoveryQuotaError,
   canonicalDirectory,
-  epochValue,
   hostHome,
   listDirectories,
-  newViewId,
   readRecoveryBackup,
   recoveryDirectory,
   validateBindingEpoch,
@@ -121,11 +120,9 @@ describe('view identity and workspace files', () => {
     expect(() => validateViewId('AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA')).toThrow(IdeError)
     expect(() => validateViewId('pane-1')).toThrow(IdeError)
     expect(validateBindingEpoch('1')).toBe('1')
-    expect(epochValue('3')).toBe(3n)
     expect(validateBindingEpoch('9223372036854775807')).toBe('9223372036854775807')
     expect(() => validateBindingEpoch('0')).toThrow(IdeError)
     expect(() => validateBindingEpoch('9223372036854775808')).toThrow(IdeError)
-    expect(newViewId()).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
   })
 
   it('resolves the host HOME or fails closed', () => {
@@ -167,8 +164,8 @@ describe('view identity and workspace files', () => {
 describe('private recovery backups', () => {
   it('enforces aggregate quota and leaves existing recovery data intact', async () => {
     const cfg = config(await tempDir())
-    const first = backup(newViewId(), 'first')
-    const second = backup(newViewId(), 'second')
+    const first = backup(randomUUID(), 'first')
+    const second = backup(randomUUID(), 'second')
     const firstBytes = Buffer.byteLength(`${JSON.stringify(first)}\n`)
     const secondBytes = Buffer.byteLength(`${JSON.stringify(second)}\n`)
     await writeRecoveryBackup(cfg, first, firstBytes + secondBytes)
@@ -184,7 +181,7 @@ describe('private recovery backups', () => {
 
   it('reports malformed JSON and filesystem errors without leaking paths', async () => {
     const cfg = config(await tempDir())
-    const viewId = newViewId()
+    const viewId = randomUUID()
     const directory = recoveryDirectory(cfg)
     await mkdir(directory, { recursive: true })
     const file = join(directory, `${viewId}.json`)
@@ -202,14 +199,14 @@ describe('private recovery backups', () => {
     await mkdir(directory, { recursive: true })
     await symlink(join(directory, 'missing'), join(directory, 'dangling.json'))
     // A dangling entry must not be silently excluded from the quota.
-    await expect(writeRecoveryBackup(cfg, backup(newViewId()), 4096))
+    await expect(writeRecoveryBackup(cfg, backup(randomUUID()), 4096))
       .rejects.toThrow('recovery quota could not be measured: ENOENT')
   })
 
   it('round-trips a complete backup and replaces only the same view', async () => {
     const dir = await tempDir()
     const cfg = config(dir)
-    const viewId = newViewId()
+    const viewId = randomUUID()
     await writeRecoveryBackup(cfg, backup(viewId), 1024 * 1024)
     expect(await readRecoveryBackup(cfg, viewId, 1024 * 1024)).toEqual(backup(viewId))
     const file = join(recoveryDirectory(cfg), `${viewId}.json`)
@@ -217,14 +214,14 @@ describe('private recovery backups', () => {
     await expect(verifyPrivateFile(file)).resolves.toBeUndefined()
     await writeRecoveryBackup(cfg, backup(viewId, 'replacement'), 1024 * 1024)
     expect((await readRecoveryBackup(cfg, viewId, 1024 * 1024))?.documents[0]?.text).toBe('replacement')
-    expect(await readRecoveryBackup(cfg, newViewId(), 1024 * 1024)).toBeNull()
+    expect(await readRecoveryBackup(cfg, randomUUID(), 1024 * 1024)).toBeNull()
   })
 
   it('rejects over-quota writes without deleting other views and reports corrupt backups', async () => {
     const dir = await tempDir()
     const cfg = config(dir)
-    const first = newViewId()
-    const second = newViewId()
+    const first = randomUUID()
+    const second = randomUUID()
     await writeRecoveryBackup(cfg, backup(first, 'first'), 2048)
     await expect(writeRecoveryBackup(cfg, backup(second, 'x'.repeat(4096)), 4096)).rejects.toBeInstanceOf(
       RecoveryQuotaError,
@@ -240,7 +237,7 @@ describe('private recovery backups', () => {
   it('validates corrupt backup payload variants', async () => {
     const dir = await tempDir()
     const cfg = config(dir)
-    const viewId = newViewId()
+    const viewId = randomUUID()
     await mkdir(recoveryDirectory(cfg), { recursive: true })
     const file = join(recoveryDirectory(cfg), `${viewId}.json`)
 
@@ -282,7 +279,7 @@ describe('private recovery backups', () => {
   it('writes files privately and does not overflow the fixed directory budget', async () => {
     const dir = await tempDir()
     const cfg = config(dir)
-    const viewId = newViewId()
+    const viewId = randomUUID()
     const serialized = JSON.stringify(backup(viewId))
     await writeRecoveryBackup(cfg, backup(viewId), 4096)
     const file = join(recoveryDirectory(cfg), `${viewId}.json`)

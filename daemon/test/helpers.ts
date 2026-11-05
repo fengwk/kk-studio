@@ -3,7 +3,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { create } from '@bufbuild/protobuf'
 
-import type { DaemonConfig, ProcessSupervisor, ManagedProcess, ProcessSpec } from '../src/contracts.js'
+import type { DaemonConfig, ProcessSupervisor, ManagedProcess, ProcessSpec, CapabilityExecutor } from '../src/contracts.js'
+import { processCapability } from '../src/coding/process.js'
 import { PROTOCOL_VERSION } from '../src/protocol/control/codec.js'
 import type {
   ControlConnection,
@@ -50,6 +51,11 @@ export const fakeProcessSupervisor: ProcessSupervisor = {
     throw new Error(`not implemented: ${spec.executable}`)
   },
   async close(): Promise<void> {},
+}
+
+/** 测试用进程能力表。 */
+export const processCapabilities: Record<string, CapabilityExecutor> = {
+  'process.exec': processCapability,
 }
 
 export class FakeConnection implements ControlConnection {

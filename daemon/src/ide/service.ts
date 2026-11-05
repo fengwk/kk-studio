@@ -10,6 +10,7 @@ import type {
   ProcessSupervisor,
 } from '../contracts.js'
 import { writePrivateFile } from '../native/index.js'
+import { LONG_MAX } from '../validation-constants.js'
 import { createIdeBridge, type IdeBridge } from './bridge.js'
 import {
   createCodeServerManager,
@@ -24,7 +25,6 @@ import { createViewLease } from './serviceLease.js'
 import { createViewRegistry } from './serviceRegistry.js'
 import type { ActiveStream, ClaimRecord, ViewRecord } from './serviceTypes.js'
 import {
-  LONG_MAX,
   RecoveryQuotaError,
   canonicalDirectory,
   readRecoveryBackup,
@@ -53,7 +53,6 @@ const MAX_COMMAND_TEXT_CHARS = 4096
 const MAX_STREAM_PATH_BYTES = 8192
 const MAX_STREAM_HEADERS = 100
 const MAX_STREAM_HEADER_BYTES = 16 * 1024
-const EPOCH_PATTERN = /^[1-9][0-9]*$/
 const HEADER_NAME_PATTERN = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/
 const STREAM_METHOD_PATTERN = /^[A-Za-z!#$%&'*+.^_`|~-]{1,32}$/
 const PROTOCOL_TOKEN = /^[A-Za-z0-9!#$%&'*+.^_`|~-]+$/
@@ -769,12 +768,4 @@ export async function createIdeService(
       }
     },
   }
-}
-
-/** 只接受固定的根相对 view 路径；数据适配器不得借此访问任意 host/port。 */
-export function assertIdeEpoch(value: string): string {
-  if (!EPOCH_PATTERN.test(value) || BigInt(value) > LONG_MAX) {
-    throw new IdeError('bindingEpoch is invalid')
-  }
-  return value
 }

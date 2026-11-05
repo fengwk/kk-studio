@@ -85,31 +85,6 @@ describe('outbound network teardown failure retention', () => {
     })
   })
 
-  it('aggregates multiple destroyed agent failures during teardown', async () => {
-    await withFailureSeam(async (installed) => {
-      const first = await installed.network.createWebSocketAgent('ws://127.0.0.1:1', new AbortController().signal)
-      const second = await installed.network.createWebSocketAgent('ws://127.0.0.1:2', new AbortController().signal)
-      const firstFailure = new Error('first agent destroy failed')
-      const secondFailure = new Error('second agent destroy failed')
-      const firstDestroy = vi.fn(() => {
-        throw firstFailure
-      })
-      const secondDestroy = vi.fn(() => {
-        throw secondFailure
-      })
-      first.agent.destroy = firstDestroy
-      second.agent.destroy = secondDestroy
-      const error = await installed.close().then(
-        () => undefined,
-        (reason: unknown) => reason,
-      )
-      // 每个独占 agent 都必须被真实销毁，失败逐个保留后聚合，绝不能相互覆盖。
-      expect(firstDestroy).toHaveBeenCalledTimes(1)
-      expect(secondDestroy).toHaveBeenCalledTimes(1)
-      expect(error).toBeInstanceOf(AggregateError)
-      expect([...(error as AggregateError).errors]).toEqual([firstFailure, secondFailure])
-    })
-  })
 })
 
 describe('outbound network failure aggregation', () => {

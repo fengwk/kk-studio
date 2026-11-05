@@ -617,7 +617,7 @@ async function grepFiles(
     if (includeSet !== null && !includeSet.has(display)) {
       return true
     }
-    // rg 可能先输出了 NUL 之前的匹配；旧契约按前 8KiB 探针把整个文件视为二进制并静默跳过。
+    // rg 可能先输出了 NUL 之前的匹配；按前 8KiB 探针把整个文件视为二进制并静默跳过。
     let binary = binaryPaths.get(path)
     if (binary === undefined) {
       binary = probeLooksBinary(path)
@@ -716,7 +716,7 @@ async function grepFiles(
   }
 }
 
-/** 与旧检索一致：前 8KiB 含 NUL/控制字符（UTF-16 BOM 除外）即按二进制静默跳过。 */
+/** 前 8KiB 含 NUL/控制字符（UTF-16 BOM 除外）即按二进制静默跳过。 */
 function probeLooksBinary(path: string): boolean {
   let fd: number | null = null
   try {

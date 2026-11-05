@@ -6,7 +6,7 @@ import { holdForever, recordPid } from './_util.mjs'
 // 用独立实现持有目标目录的内核 flock：验证父进程的锁是真实内核锁，且崩溃时由内核释放。
 const lockDir = process.argv[2]
 const readyFile = process.argv[3]
-const lockName = process.argv[4] ?? 'daemon.lock'
+const lockName = 'daemon.lock'
 const { flock } = await libc()
 const descriptor = openSync(join(lockDir, lockName), constants.O_RDWR | constants.O_CREAT, 0o600)
 const LOCK_EX = 2

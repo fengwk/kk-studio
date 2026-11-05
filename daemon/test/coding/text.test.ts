@@ -7,6 +7,9 @@ import {
   detectImageMediaType,
   encodeText,
   forEachLine,
+  isBinaryBytes,
+  looksBinary,
+  PROBE_BYTES,
   readWindowFromChunks,
   TextWindowScanner,
 } from '../../src/coding/text.js'
@@ -186,5 +189,42 @@ describe('detectImageMediaType', () => {
       detectImageMediaType(Buffer.from('RIFF0000WEBP')),
     ).toBe('image/webp')
     expect(detectImageMediaType(Buffer.from('hello'))).toBeNull()
+  })
+})
+
+describe('isBinaryBytes / looksBinary', () => {
+  it('纯文本与允许的控制字符不判定为二进制', () => {
+    // 包含普通 ASCII、TAB(0x09)、LF(0x0a)、CR(0x0d)、ESC(0x1b)
+    const textBytes = Buffer.from('hello\tworld\r\n\x1b[31mred\x1b[0m')
+    expect(isBinaryBytes(textBytes)).toBe(false)
+    expect(looksBinary(textBytes, { charset: 'UTF-8', bomLength: 0, utf16: false })).toBe(false)
+  })
+
+  it('非法控制字符与 NUL 判定为二进制', () => {
+    expect(isBinaryBytes(Buffer.from([0x00]))).toBe(true)
+    expect(isBinaryBytes(Buffer.from([0x01]))).toBe(true)
+    expect(isBinaryBytes(Buffer.from([0x08]))).toBe(true)
+    expect(isBinaryBytes(Buffer.from([0x0e]))).toBe(true)
+    expect(isBinaryBytes(Buffer.from([0x1f]))).toBe(true)
+  })
+
+  it('PROBE_BYTES 探测窗口边界判定', () => {
+    expect(PROBE_BYTES).toBe(8192)
+    // 恰好在 PROBE_BYTES 窗口内的控制字符能被探测
+    const withinWindow = Buffer.alloc(PROBE_BYTES, 0x61)
+    withinWindow[PROBE_BYTES - 1] = 0x00
+    expect(isBinaryBytes(withinWindow)).toBe(true)
+
+    // 超出 PROBE_BYTES 窗口的控制字符不会被探测
+    const outsideWindow = Buffer.alloc(PROBE_BYTES + 10, 0x61)
+    outsideWindow[PROBE_BYTES] = 0x00
+    expect(isBinaryBytes(outsideWindow)).toBe(false)
+  })
+
+  it('UTF-16 编码下 looksBinary 一律返回 false', () => {
+    // UTF-16 编码自然包含 0x00 字节，looksBinary 跳过字节扫描
+    const utf16Bytes = Buffer.from([0x00, 0x61, 0x00, 0x62])
+    expect(looksBinary(utf16Bytes, { charset: 'UTF-16BE', bomLength: 2, utf16: true })).toBe(false)
+    expect(looksBinary(utf16Bytes, { charset: 'UTF-16LE', bomLength: 2, utf16: true })).toBe(false)
   })
 })

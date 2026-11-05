@@ -46,6 +46,59 @@ async function validatePath(rawPath: unknown): Promise<string> {
   }
 }
 
+/**
+ * 执行 LSP 能力的通用骨架：提前取消/超时判定、入参对象校验、参数提取与合法性校验、
+ * 执行范围标记、统一异常映射（超时、取消、LspError 及通用脱敏错误）。
+ */
+async function runLspCapability<T>(
+  call: CapabilityCall,
+  context: CapabilityContext,
+  validate: (args: Record<string, unknown>) => Promise<T> | T,
+  execute: (validated: T, signal: AbortSignal, onExecutionExit: () => void) => Promise<string>,
+): Promise<CapabilityResult> {
+  const callId = call.invocationId
+  if (context.signal.aborted) {
+    context.confirmExecutionExit()
+    if (isTimeout(null, context.signal)) {
+      return errorResult(callId, 'Operation timed out')
+    }
+    return errorResult(callId, 'Operation cancelled')
+  }
+
+  let executionStarted = false
+  try {
+    const args = call.arguments
+    if (!args || typeof args !== 'object' || Array.isArray(args)) {
+      context.confirmExecutionExit()
+      return errorResult(callId, 'tool arguments must be an object')
+    }
+
+    const validated = await validate(args as Record<string, unknown>)
+    executionStarted = true
+    const onExecutionExit = () => context.confirmExecutionExit()
+    const result = await execute(validated, context.signal, onExecutionExit)
+    return textResult(callId, result)
+  } catch (error) {
+    if (!executionStarted) {
+      // 参数校验在租约与服务调用之前完成，确定没有启动执行范围。
+      context.confirmExecutionExit()
+    }
+    if (isTimeout(error, context.signal)) {
+      return errorResult(callId, 'Operation timed out')
+    }
+    if (context.signal.aborted || isAbortError(error)) {
+      return errorResult(callId, 'Operation cancelled')
+    }
+    if (error instanceof LspError) {
+      return errorResult(callId, error.message)
+    }
+    return errorResult(
+      callId,
+      'The capability failed while running and the underlying error is not repeated to avoid leaking details',
+    )
+  }
+}
+
 export function createLspCapabilities(
   config: DaemonConfig,
   processes: ProcessSupervisor,
@@ -54,219 +107,98 @@ export function createLspCapabilities(
   const discovery = LspDiscovery.fromConfiguration(config.lsp)
   const service = new LspService(discovery, processes, options)
 
-  const gotoDefinition = async (
-    call: CapabilityCall,
-    context: CapabilityContext,
-  ): Promise<CapabilityResult> => {
-    const callId = call.invocationId
-    if (context.signal.aborted) {
-      context.confirmExecutionExit()
-      if (isTimeout(null, context.signal)) {
-        return errorResult(callId, 'Operation timed out')
-      }
-      return errorResult(callId, 'Operation cancelled')
-    }
-
-    let executionStarted = false
-    try {
-      const args = call.arguments
-      if (!args || typeof args !== 'object' || Array.isArray(args)) {
-        context.confirmExecutionExit()
-        return errorResult(callId, 'tool arguments must be an object')
-      }
-
-      const realPath = await validatePath(args['path'])
-      let stat: fs.Stats
-      try {
-        stat = fs.statSync(realPath)
-      } catch {
-        throw new LspError('path must exist: ' + realPath)
-      }
-      if (stat.isDirectory()) {
-        throw new LspError('path must be a file: ' + realPath)
-      }
-
-      const rawLine = args['line']
-      if (
-        rawLine === undefined ||
-        rawLine === null ||
-        typeof rawLine !== 'number' ||
-        !Number.isInteger(rawLine) ||
-        rawLine < 1
-      ) {
-        throw new LspError('line is required and must be a positive integer')
-      }
-      const line = rawLine
-
-      let character = 0
-      const rawChar = args['character']
-      if (rawChar !== undefined && rawChar !== null) {
-        if (typeof rawChar !== 'number' || !Number.isInteger(rawChar) || rawChar < 0) {
-          throw new LspError('character must be a non-negative integer')
+  const gotoDefinition = (call: CapabilityCall, context: CapabilityContext) =>
+    runLspCapability(
+      call,
+      context,
+      async (args) => {
+        const realPath = await validatePath(args['path'])
+        let stat: fs.Stats
+        try {
+          stat = fs.statSync(realPath)
+        } catch {
+          throw new LspError('path must exist: ' + realPath)
         }
-        character = rawChar
-      }
-
-      executionStarted = true
-      const result = await service.gotoDefinition(
-        realPath,
-        line,
-        character,
-        context.signal,
-        () => context.confirmExecutionExit(),
-      )
-      return textResult(callId, result)
-    } catch (error) {
-      if (!executionStarted) {
-        // 参数校验在租约与服务调用之前完成，确定没有启动执行范围。
-        context.confirmExecutionExit()
-      }
-      if (isTimeout(error, context.signal)) {
-        return errorResult(callId, 'Operation timed out')
-      }
-      if (context.signal.aborted || isAbortError(error)) {
-        return errorResult(callId, 'Operation cancelled')
-      }
-      if (error instanceof LspError) {
-        return errorResult(callId, error.message)
-      }
-      return errorResult(
-        callId,
-        'The capability failed while running and the underlying error is not repeated to avoid leaking details',
-      )
-    }
-  }
-
-  const workspaceSymbols = async (
-    call: CapabilityCall,
-    context: CapabilityContext,
-  ): Promise<CapabilityResult> => {
-    const callId = call.invocationId
-    if (context.signal.aborted) {
-      context.confirmExecutionExit()
-      if (isTimeout(null, context.signal)) {
-        return errorResult(callId, 'Operation timed out')
-      }
-      return errorResult(callId, 'Operation cancelled')
-    }
-
-    let executionStarted = false
-    try {
-      const args = call.arguments
-      if (!args || typeof args !== 'object' || Array.isArray(args)) {
-        context.confirmExecutionExit()
-        return errorResult(callId, 'tool arguments must be an object')
-      }
-
-      const realPath = await validatePath(args['path'])
-      const rawQuery = args['query']
-      if (rawQuery === undefined || rawQuery === null || typeof rawQuery !== 'string') {
-        throw new LspError('query is required and must be a string')
-      }
-      if (rawQuery.trim().length === 0) {
-        throw new LspError('query must not be blank')
-      }
-      const query = rawQuery
-
-      let limit = 50
-      const rawLimit = args['limit']
-      if (rawLimit !== undefined && rawLimit !== null) {
-        if (typeof rawLimit !== 'number' || !Number.isInteger(rawLimit) || rawLimit < 0) {
-          throw new LspError('limit must be a non-negative integer')
+        if (stat.isDirectory()) {
+          throw new LspError('path must be a file: ' + realPath)
         }
-        if (rawLimit > 500) {
-          throw new LspError('limit must be <= 500')
+
+        const rawLine = args['line']
+        if (
+          rawLine === undefined ||
+          rawLine === null ||
+          typeof rawLine !== 'number' ||
+          !Number.isInteger(rawLine) ||
+          rawLine < 1
+        ) {
+          throw new LspError('line is required and must be a positive integer')
         }
-        limit = rawLimit
-      }
 
-      executionStarted = true
-      const result = await service.workspaceSymbols(
-        realPath,
-        query,
-        limit,
-        context.signal,
-        () => context.confirmExecutionExit(),
-      )
-      return textResult(callId, result)
-    } catch (error) {
-      if (!executionStarted) {
-        context.confirmExecutionExit()
-      }
-      if (isTimeout(error, context.signal)) {
-        return errorResult(callId, 'Operation timed out')
-      }
-      if (context.signal.aborted || isAbortError(error)) {
-        return errorResult(callId, 'Operation cancelled')
-      }
-      if (error instanceof LspError) {
-        return errorResult(callId, error.message)
-      }
-      return errorResult(
-        callId,
-        'The capability failed while running and the underlying error is not repeated to avoid leaking details',
-      )
-    }
-  }
+        let character = 0
+        const rawChar = args['character']
+        if (rawChar !== undefined && rawChar !== null) {
+          if (typeof rawChar !== 'number' || !Number.isInteger(rawChar) || rawChar < 0) {
+            throw new LspError('character must be a non-negative integer')
+          }
+          character = rawChar
+        }
 
-  const javaDecompile = async (
-    call: CapabilityCall,
-    context: CapabilityContext,
-  ): Promise<CapabilityResult> => {
-    const callId = call.invocationId
-    if (context.signal.aborted) {
-      context.confirmExecutionExit()
-      if (isTimeout(null, context.signal)) {
-        return errorResult(callId, 'Operation timed out')
-      }
-      return errorResult(callId, 'Operation cancelled')
-    }
+        return { realPath, line: rawLine, character }
+      },
+      ({ realPath, line, character }, signal, onExecutionExit) =>
+        service.gotoDefinition(realPath, line, character, signal, onExecutionExit),
+    )
 
-    let executionStarted = false
-    try {
-      const args = call.arguments
-      if (!args || typeof args !== 'object' || Array.isArray(args)) {
-        context.confirmExecutionExit()
-        return errorResult(callId, 'tool arguments must be an object')
-      }
+  const workspaceSymbols = (call: CapabilityCall, context: CapabilityContext) =>
+    runLspCapability(
+      call,
+      context,
+      async (args) => {
+        const realPath = await validatePath(args['path'])
+        const rawQuery = args['query']
+        if (rawQuery === undefined || rawQuery === null || typeof rawQuery !== 'string') {
+          throw new LspError('query is required and must be a string')
+        }
+        if (rawQuery.trim().length === 0) {
+          throw new LspError('query must not be blank')
+        }
 
-      const realPath = await validatePath(args['path'])
-      const rawTarget = args['target']
-      if (rawTarget === undefined || rawTarget === null || typeof rawTarget !== 'string') {
-        throw new LspError('target is required and must be a string')
-      }
-      if (rawTarget.trim().length === 0) {
-        throw new LspError('target must not be blank')
-      }
-      const target = rawTarget
+        let limit = 50
+        const rawLimit = args['limit']
+        if (rawLimit !== undefined && rawLimit !== null) {
+          if (typeof rawLimit !== 'number' || !Number.isInteger(rawLimit) || rawLimit < 0) {
+            throw new LspError('limit must be a non-negative integer')
+          }
+          if (rawLimit > 500) {
+            throw new LspError('limit must be <= 500')
+          }
+          limit = rawLimit
+        }
 
-      executionStarted = true
-      const result = await service.javaDecompile(
-        realPath,
-        target,
-        context.signal,
-        () => context.confirmExecutionExit(),
-      )
-      return textResult(callId, result)
-    } catch (error) {
-      if (!executionStarted) {
-        context.confirmExecutionExit()
-      }
-      if (isTimeout(error, context.signal)) {
-        return errorResult(callId, 'Operation timed out')
-      }
-      if (context.signal.aborted || isAbortError(error)) {
-        return errorResult(callId, 'Operation cancelled')
-      }
-      if (error instanceof LspError) {
-        return errorResult(callId, error.message)
-      }
-      return errorResult(
-        callId,
-        'The capability failed while running and the underlying error is not repeated to avoid leaking details',
-      )
-    }
-  }
+        return { realPath, query: rawQuery, limit }
+      },
+      ({ realPath, query, limit }, signal, onExecutionExit) =>
+        service.workspaceSymbols(realPath, query, limit, signal, onExecutionExit),
+    )
+
+  const javaDecompile = (call: CapabilityCall, context: CapabilityContext) =>
+    runLspCapability(
+      call,
+      context,
+      async (args) => {
+        const realPath = await validatePath(args['path'])
+        const rawTarget = args['target']
+        if (rawTarget === undefined || rawTarget === null || typeof rawTarget !== 'string') {
+          throw new LspError('target is required and must be a string')
+        }
+        if (rawTarget.trim().length === 0) {
+          throw new LspError('target must not be blank')
+        }
+        return { realPath, target: rawTarget }
+      },
+      ({ realPath, target }, signal, onExecutionExit) =>
+        service.javaDecompile(realPath, target, signal, onExecutionExit),
+    )
 
   return {
     capabilities: {

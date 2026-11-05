@@ -55,7 +55,7 @@ POSIX 目录权限为 0700、敏感文件为 0600。`tmp/workspaces` 是 Daemon 
 - 默认文本捕获预算为 1 GiB，达到预算后停止捕获文件并继续排空与统计，结果中显式标记截断。
 - 定时清扫（默认 30 分钟一次）只回收超过保留期（默认 3 天）且未持用租约的 workspace，清扫不跟随符号链接、不越出受控根目录。
 
-技能包由 [`installer.ts`](../../daemon/src/skill/installer.ts) 安装：从下载地址流式下载归档并以 SHA-256 校验，使用 yauzl 在 staging 目录解压，拒绝符号链接、路径穿越与非普通文件，写入 `.kkstudio-sha256` 标记后原子替换 `skills/<package>`，失败时保留旧安装。连接级对账器 [`reconcile.ts`](../../daemon/src/skill/reconcile.ts) 基于 `SKILL_SYNC` 下发的全量期望集单飞对账，清理无期望标记目录并以 `SKILL_STATE` 统一上报受管状态。
+技能包由 [`installer.ts`](../../daemon/src/skill/installer.ts) 安装：通过平台代理及绕过策略从下载地址流式下载归档并以 SHA-256 校验，使用 yauzl 在 staging 目录解压，拒绝符号链接、路径穿越与非普通文件，写入 `.kkstudio-sha256` 标记后原子替换 `skills/<package>`，失败时保留旧安装。连接级对账器 [`reconcile.ts`](../../daemon/src/skill/reconcile.ts) 基于 `SKILL_SYNC` 下发的全量期望集单飞对账，清理无期望标记目录并以 `SKILL_STATE` 统一上报受管状态。
 
 ## 编码能力与原生监管
 

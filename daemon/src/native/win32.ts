@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 import type { Stats } from 'node:fs'
+import { delay } from '../delay.js'
 import type { ExitReport, LaunchSpec } from './state.js'
 import { joinCommandLine } from './windows-command-line.js'
 import { writeAllSync as writeDescriptor } from './write-all.js'
@@ -744,16 +745,13 @@ function createEnvironmentBlock(env: NodeJS.ProcessEnv): Buffer {
  * 本次新建的锁文件才显式设置当前用户属主。释放时无论解锁是否成功都会继续关闭句柄，并把两者的失败一起上报。
  */
 export async function lockDirectory(path: string): Promise<WindowsDirectoryLock> {
-  await ensurePrivateDirectory(path)
   return lockFile(joinPath(path, LOCK_FILE_NAME))
 }
 
 /**
- * 文件锁：确认锁文件所在目录私有后，打开锁文件、核验 DACL 并用 `LockFileEx` 取得独占锁。
- *
- * <p>错误文案保留「directory is already locked」，使目录锁的既有诊断契约不因实现复用而变化。
+ * 确认锁文件所在目录私有后，打开锁文件、核验 DACL 并用 `LockFileEx` 取得独占锁。
  */
-export async function lockFile(lockPath: string): Promise<WindowsDirectoryLock> {
+async function lockFile(lockPath: string): Promise<WindowsDirectoryLock> {
   const pathModule = await import('node:path')
   await ensurePrivateDirectory(pathModule.dirname(lockPath))
   const kernel32 = await kernel()
@@ -1190,8 +1188,4 @@ async function rejectReparsePoint(path: string): Promise<void> {
   if ((attributes & FILE_ATTRIBUTE_REPARSE_POINT) !== 0) {
     throw new Error(`the private path must not be a reparse point: ${path}`)
   }
-}
-
-function delay(millis: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, millis))
 }

@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { appendFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { delay } from '../delay.js'
 import { processScopePhase } from './host.js'
 import * as posix from './posix-session.js'
 import * as state from './state.js'
@@ -257,10 +258,6 @@ function describe(error: unknown): string {
     return error.name === '' ? 'Error' : error.name
   }
   return typeof error
-}
-
-function delay(millis: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, millis))
 }
 
 void main()
