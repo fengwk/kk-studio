@@ -40,7 +40,7 @@ Project 只经两个窄适配接触运行时与存储，平台异常在此收敛
 Agent 分支设置直接由平台的 `AgentBranchSettingsMaterializer` 按当前 Agent/Model 目录物化；`Issue + Agent` 名下 Session 的深删除直接调用平台的 `SessionDeletionOrchestrator`。
 
 `Issue + Agent` 是平台编排认识的产品 owner 之一。[`ProjectSessionOwnership`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service/ProjectSessionOwnership.java) 实现平台定义的 `SessionOwnership`：命令接受与人工交互按 `Project SHARE -> Issue UPDATE` 锁定产品层级（接受时 Project/Issue 缺失、归档或层级不一致时拒绝），深删除用排他锁，并读写 `(issueId, agentName) -> threadId` 稳定绑定。规则是不允许分叉、不允许通用命令直写，删除 Session 前先删除绑定行；锁序由 Project 自己维护，平台编排只按固定顺序调用它。
-[`ProjectAgentReferenceCheck`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service/ProjectAgentReferenceCheck.java) 实现平台的 `AgentReferenceCheck`：删除 Agent 前检查未归档项目的工作流阶段，平台不再读取 `project` 表。
+[`ProjectAgentReferenceCheck`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service/ProjectAgentReferenceCheck.java) 实现平台的 `AgentReferenceCheck`：删除 Agent 前由本实现检查未归档项目的工作流阶段，平台核心不直读 `project` 表。
 
 预算、等待、停止和证据发布政策由 Project 决定，停止区间以本次回执的权威 head 为界。
 
@@ -254,7 +254,7 @@ Project 深删除在一个事务内锁住 Project 行（`FOR UPDATE`），拒绝
 Activities -> Work -> Runs -> Stage 预算 -> Agent Session 深删除 -> Issue -> Project 的顺序清理；
 Issue 与 Project 行用 `version` CAS 删除并检查受影响行数。
 
-## REST 调度
+## Reconcile 调度
 
 [`reconcile`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/reconcile/package-info.java)
 承载 Issue 的部署级配置、邮箱处理与确定性推进：Web 组合根的
@@ -266,7 +266,7 @@ Issue 与 Project 行用 `version` CAS 删除并检查受影响行数。
 [`BoundedWorkDispatcher`](../../work/src/main/java/fun/fengwk/kkstudio/work/BoundedWorkDispatcher.java)，
 [`IssueReconciler`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/reconcile/IssueReconciler.java)
 在固定锁序下一次推进一个有界动作。调度只依赖数据库中的 work 行与 lease token，通知与 poll
-提供发现入口；租约参数见 [Platform](platform.md) 的配置表。
+提供发现入口；租约与调度参数由 [`IssueReconcileProperties`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/reconcile/IssueReconcileProperties.java)（前缀 `kk-studio.project.reconcile`）管理。
 
 Work 的请求、claim、续租、完成与重排由共享的
 [`DurableWorkStore`](../../work/src/main/java/fun/fengwk/kkstudio/work/DurableWorkStore.java)

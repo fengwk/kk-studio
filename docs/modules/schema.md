@@ -27,7 +27,7 @@ V1 的 `system_setting` seed 行是默认聚合的唯一事实源；测试用 `S
 | --- | --- | --- |
 | 1 共享基础 | storage_blob、storage_upload、storage_object_cleanup：全局内容寻址、上传契约与对象删除墓碑 | [Storage](platform.md#storageblob-与-resource) |
 | 2 平台内核存储 | environment、environment_connection、cluster_node、system_setting；harness_session/entry/thread/thread_command/realtime_subscription/tool_invocation/execution_exit/thread_join/thread_stop_receipt；durable_work；session_blob_ref、session_file | [Environment](harness-environment.md)、[Harness Runtime](harness-runtime.md)、[Durable Work](work.md)、[Storage](platform.md#storageblob-与-resource) |
-| 3 平台 Driver 存储 | agent_provider、agent_model（MODEL/GROUP 共用名称空间）、agent_model_group_cooldown、agent_definition、skill_package + Git source；plugin_configuration/credential/auth_attempt；mcp_server/tool；builtin_model_invocation | [Platform Catalog](platform.md#catalog)、[Plugin 配置存储](platform.md#plugin-配置存储)、[Platform MCP](platform.md#mcp-server-与运行时工具目录) |
+| 3 平台 Driver 存储 | agent_provider、agent_model（MODEL/GROUP 共用名称空间）、agent_model_group_cooldown、agent_definition、skill_package、skill_package_git_source；plugin_configuration、plugin_credential、plugin_auth_attempt；mcp_server、mcp_tool；builtin_model_invocation | [Platform Catalog](platform.md#catalog)、[Plugin 配置存储](platform.md#plugin-配置存储)、[Platform MCP](platform.md#mcp-server-与运行时工具目录) |
 | 4 产品 | Canvas：canvas_document/group/node/resource/function_run/function_resource_pin/command_dedup；Chat：chat、chat_session；Project：project、project_issue 与 agent_thread/stage_budget/run/activity/evidence | [Canvas](canvas.md)、[Project](project.md) |
 
 ```text
@@ -74,7 +74,7 @@ project
           +--< project_issue_evidence >-- storage_blob / project_issue_run
 ```
 
-Canvas Resource 与 pin 使用同画布外键，Run 固定 requestId 与 lease；Project Run 通过
+Canvas Resource 与 pin 使用同画布外键，Run 保存 requestId，调度与租约保存在 `durable_work`；Project Run 通过
 复合外键关联同 Issue 的 Thread 和同阶段预算，Entry 坐标是应用维护的历史引用。
 父链区间、权限、workflow 合法性和输出完整性由应用验证。表、列的准确清单与约束名直接查 V1。
 约束行为由 schema 模块的 fresh-install 探针在真实 PostgreSQL 上逐条验证。
@@ -101,7 +101,8 @@ Plugin 配置每个 pluginId 一行，`version` 为正并以 CAS 推进。`value
 其每次写入推进 `version`。`plugin_auth_attempt` 只保存 nonce 摘要与 prepare 时的 `config_version`。
 
 Canvas Resource 的 blob/text 恰好一个非空，owner/index 成对且槽位唯一。
-Run 以 node_id 保存当前/最后执行，状态与 lease/available/error 字段组合匹配；
+Run 以 node_id 保存当前/最后执行，数据库约束状态枚举；状态与错误字段的组合由应用校验，
+调度与租约由 `durable_work` 持有；
 INPUT/OUTPUT pin 保护执行资源生命周期。UNKNOWN 保留资源并等待核查，具体恢复见 Canvas Infra。
 引用连线从 Function args 投影。
 
@@ -123,8 +124,7 @@ UTC 失效时间（对象只有 `codeHash` 与 `expiresAt` 两个键），null �
 CHECK 只兜底对象形状、摘要格式与时间格式。签发按版本 CAS 覆盖旧值且不推进版本；
 兑换要求注册凭证代际一致、摘要匹配且严格未过期，成功后原子清空该列并推进版本；
 任何注册凭证变更在同一条 UPDATE 中清空它。该列不参与配置导出，不保存 code 明文。
-Environment 的当前运行状态与更新进度不入库：只存在于 Daemon 内存与 Server 当前控制代际的缓存，
-没有更新历史表，也没有历史查询接口。
+Environment 的当前运行状态与更新进度不入库：只存在于 Daemon 内存与 Server 当前控制代际的缓存，不持久化更新历史与历史查询。
 
 ACTIVE Blob 必须有正引用，DELETING 必须零引用，ACTIVE 内容以 hash/size 部分唯一。
 PENDING upload 的 candidate id 在 complete 创建 Blob 后才绑定真实外键。

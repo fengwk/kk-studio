@@ -40,10 +40,10 @@ Platform 终态化器另有内联预算：普通工具为 50 KiB / 2000 行，�
 现有文件原子替换保持文件系统支持的权限；edit 保持编码、BOM 和换行风格，write 按完整内容写入。无法无损编码则拒绝。提交成功后，通知或展示故障单独报告。设备、FIFO 等非普通文件在 I/O 前拒绝。
 
 需要人工批准的 edit 先通过内部 `fs.edit.preview` 只读计算真实文件 diff，冻结 canonical 路径、原始字节 SHA-256 与全部变更行。审批后的执行在文件修改锁内校验同一 `expectedFile`，文件变化即拒绝写入。
-diff 使用 `diff@9.0.0` 的 `diffArrays`，保留真实行号、所有变更行、4 行上下文与 EOF 缺失换行标记，不设独立的计算超时或 `maxEditLength`。
+diff 使用 `diff@9.0.0` 的 `diffArrays`，保留真实行号、所有变更行、4 行上下文与 EOF 缺失换行标记，由统一的 review 传输预算约束。
 完整 review 连同结果超过 1 MiB UTF-8 预算时，在预览或提交前明确拒绝，不截断变更行。协议和验证入口见 [Harness Environment](harness-environment.md) 与[开发与测试](../operations/development-and-testing.md)。
 
-grep 与 find 默认超时为 15 秒，可由正数 `timeout_seconds` 覆盖。搜索过程由 worker 在目录、行及 8KiB 块检查点共享原子 flag 检查中断；超时保留已收集的 partial 匹配，并显式标记 error 与 `search.incomplete`。非响应 stop 给予 5 秒清理宽限才 await terminate（非额外更短执行预算），清理失败明确暴露。
+grep 与 find 默认超时为 15 秒，可由正数 `timeout_seconds` 覆盖。Daemon 检索调用随包提供的 ripgrep（rg）：`fs.find` 解析 `rg --files` 输出，`fs.grep` 解析 `rg --json` 输出。超时或取消时终止 rg 进程并等待 stdio 和进程退出；超时与取消保留已收集的 partial 匹配，并显式标记 error 与 `search.incomplete`；达到结果上限时主动终止进程并保留 partial 结果。
 
 grep/find 共享仓库忽略解析：从搜索位置解析祖先 .gitignore、分层规则、否定规则和 .git/info/exclude，支持 .git 文件形式的 worktree。不因调用目录变化而改变同一目标的忽略行为。不引入 Environment 根目录。
 

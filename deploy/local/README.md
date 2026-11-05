@@ -82,9 +82,7 @@ docker compose -f deploy/local/compose.yaml logs -f minio
 
 [compose.yaml](compose.yaml) 还接受进程级的容量与调度参数，本地启动通常不需要覆盖：dispatcher
 与 admission 上限的默认值和语义由
-[Platform 配置](../../docs/modules/platform.md#配置)持有，
-`KK_STUDIO_ENVIRONMENT_GATEWAY_*` 的 Daemon WebSocket 边界由
-[Web 配置](../../docs/modules/web.md#组合与生命周期)持有；subagent 并发上限不经环境变量配置，
+[Platform 配置](../../docs/modules/platform.md#配置)持有；subagent 并发上限不经环境变量配置，
 只由运行时 SystemSettings 的 `aiRuntime.subagent*` 持有。
 
 把宿主绑定改成 `0.0.0.0` 等非 loopback 地址时，必须同时覆盖上面所有 PostgreSQL 与 MinIO

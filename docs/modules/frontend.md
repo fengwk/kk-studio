@@ -28,7 +28,7 @@ PageContribution 的 navGroup/workspace 决定当前导航分组高亮和沉浸�
 [`extensions`](../../frontend/src/features/extensions)（插件配置）、canvas、projects 与 settings。
 四个内置扩展提供页面：应用层的 [`ai-console`](../../frontend/src/app/ai-console) 把 chat、catalog、environment
 的页面组装进同一个 AI 导航分组，Projects、Canvas、Settings 各自声明扩展。
-i18n 文案按同一划分放在 [`catalogs`](../../frontend/src/shared/i18n/catalogs)，key 前缀保持不变。
+i18n 文案按同一划分放在 [`catalogs`](../../frontend/src/shared/i18n/catalogs)，key 按业务领域维护固定前缀。
 [`application-contributions.ts`](../../frontend/src/app/application-contributions.ts) 在应用组合边界
 把扩展一次性展开为只读的 pages、dialogs、overlays 与按 id 索引的 toolRenderers；
 重复 extension/contribution id 在组装时拒绝，运行时不动态注册、覆盖或订阅。
@@ -124,7 +124,7 @@ Thread 面板逐个列出 kind、attempt 与完整 executionId，RUNNABLE 的未
 
 ### Thread Debug
 
-Debug 是工作区独占的临时单格网格视图：源 pane 全宽展开，原 layout 保持不变，
+Debug 是工作区独占的临时单格网格视图：源 pane 全宽展开，保留原 layout，
 其他原可见 pane 保持稳定挂载且置为 hidden 与 inert，输入控制区挂起，上传注册表保持挂载；
 单顶栏左上角提供“关闭 Debug”，不导航 `/chats`，不渲染会话返回行并隐藏布局选择器；
 退出时完整恢复原 layout、可见 pane、阅读滚动与焦点。主区域包含下一次请求预览、事件与详情：
@@ -249,7 +249,7 @@ Snapshot、Debug、用量并展示真实身份，并在顶部提供返回直属�
 应用后随 Snapshot 更新移出待处理区，历史只展示持久 Entry，不复制待处理记录。
 task 初次执行入口只读取规范 `task.accepted` details 中的 thread_id：
 持久 Entry 的 detailsJson 与 live invocation 的 resultJson.details 使用同一投影。
-续接参数已有的 thread_id 链接保持不变；缺失或损坏 details 时完整展示正文，
+续接参数中已有的 thread_id 链接原样保留；缺失或损坏 details 时完整展示正文，
 不从自然语言或正文 JSON 推断链接，错误原文仍保留。
 
 全局与根交互区共用 InteractionCardBody/ApprovalCard。非文件变更工具的审批显示一次完整 `argumentsJson`（含 bash 的 workdir），
@@ -271,7 +271,7 @@ Chat 工具卡片与 ApprovalCard 共享文件变更审查组件：
 - **展开与结果呈现**：write 与 edit 默认保持展开并有界滚动；执行成功后，可见结果仅呈现简洁的本地化提示
   （中文“写入成功”/“编辑成功”，英文“Write succeeded”/“Edit succeeded”），不在成功结果中重复回显文件正文或 diff；
   执行失败时不隐藏错误详情，也不在产生真实终态前虚假展示成功。
-- **来源优先级与持久化结构**：优先从持久化的 `approvalJson.editReview` 获取真实 diff（freeze approval 优先）；对于自动放行（无需审批）、YOLO 模式或页面刷新与 GC 后的结果恢复，从持久化结果的 `details.editReview` 读取真实变更（durable entry 显式解码 `detailsJson`，invocation 从 `resultJson.details` 对象读取）；决不从旧/新参数在前端伪造 diff。其他工具的折叠与展示策略保持不变。
+- **来源优先级与持久化结构**：优先从持久化的 `approvalJson.editReview` 获取真实 diff（freeze approval 优先）；对于自动放行（无需审批）、YOLO 模式或页面刷新与 GC 后的结果恢复，从持久化结果的 `details.editReview` 读取真实变更（durable entry 显式解码 `detailsJson`，invocation 从 `resultJson.details` 对象读取）；决不从旧/新参数在前端伪造 diff。
 
 根面板自动查询执行树，在 Widget 区以单行节点展示非 IDLE 后代及其必要祖先；
 RUNNING 与 WAITING 都计入活跃数，停止控制独立展示；非 IDLE 节点不展示 COMPLETED outcome。
