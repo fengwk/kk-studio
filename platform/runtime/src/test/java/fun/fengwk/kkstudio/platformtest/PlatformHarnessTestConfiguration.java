@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform;
+package fun.fengwk.kkstudio.platformtest;
 
 import static org.mockito.Mockito.mock;
 

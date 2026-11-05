@@ -9,12 +9,14 @@ import org.junit.jupiter.api.BeforeEach;
 import org.postgresql.Driver;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
-import fun.fengwk.kkstudio.platform.PlatformTestApplication;
 import fun.fengwk.kkstudio.platform.storage.StorageMaintenance;
+import fun.fengwk.kkstudio.platform.storage.StorageS3TestConfiguration;
+import fun.fengwk.kkstudio.platformtest.PlatformTestApplication;
 
 import java.sql.Connection;
 import java.sql.SQLException;
@@ -34,6 +36,7 @@ import java.sql.SQLException;
  * <p>Docker 必须可用——不可用时容器启动失败，本测试也失败而非静默跳过。
  */
 @SpringBootTest(classes = PlatformTestApplication.class)
+@Import(StorageS3TestConfiguration.class)
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 public abstract class PostgresSpringTestSupport {
 

@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform;
+package fun.fengwk.kkstudio.platformtest;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -29,7 +29,7 @@ import tools.jackson.databind.ser.std.ToStringSerializer;
  *
  * <p>Platform 集成测试由测试宿主提供 JSON mapper；HTTP wire 严格性由 Web 负责。
  */
-@SpringBootApplication
+@SpringBootApplication(scanBasePackages = "fun.fengwk.kkstudio.platform")
 @Import(PlatformHarnessTestConfiguration.class)
 public class PlatformTestApplication {
 
