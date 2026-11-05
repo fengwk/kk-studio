@@ -54,7 +54,7 @@ class CanvasFunctionExecutionContextImplTest {
   private static final UUID BLOB = UUID.fromString("00000000-0000-0000-0000-000000000005");
   private static final UUID REQUEST = UUID.fromString("00000000-0000-0000-0000-000000000006");
   private static final UUID TARGET = UUID.fromString("00000000-0000-0000-0000-000000000007");
-  private static final String LEASE = "lease";
+  private static final UUID LEASE = UUID.randomUUID();
 
   private PostgresqlCanvasFunctionRunRepository runs;
   private CanvasFunctionRunTransactions transactions;
@@ -117,9 +117,9 @@ class CanvasFunctionExecutionContextImplTest {
             Instant.EPOCH);
     claim =
         new ClaimedRun(
-            running, new WorkClaim(running.nodeId(), 1L, "lease", Instant.EPOCH.plusSeconds(30)));
+            running, new WorkClaim(running.nodeId(), 1L, LEASE, Instant.EPOCH.plusSeconds(30)));
     when(runs.findByNodeId(NODE)).thenReturn(Optional.of(running));
-    when(runs.holdsLease(NODE, "lease")).thenReturn(true);
+    when(runs.holdsLease(NODE, LEASE)).thenReturn(true);
   }
 
   /** 只能读取冻结清单内的输入资源，且传递清单锁定的长度。 */
@@ -269,7 +269,7 @@ class CanvasFunctionExecutionContextImplTest {
     assertTrue(context.isRunning());
 
     // 数据库时钟下租约已失效
-    when(runs.holdsLease(NODE, "lease")).thenReturn(false);
+    when(runs.holdsLease(NODE, LEASE)).thenReturn(false);
     assertFalse(context.isRunning());
 
     // 本地 ownership 丢失
@@ -312,7 +312,7 @@ class CanvasFunctionExecutionContextImplTest {
   /** checkpoint CAS 失败抛出取消异常且不更新本地 currentRun。 */
   @Test
   void checkpointCasCancellationPropagatesWithoutUpdatingCurrent() {
-    when(transactions.checkpoint(any(), any(), anyString(), anyString(), anyString(), any()))
+    when(transactions.checkpoint(any(), any(), anyString(), any(UUID.class), anyString(), any()))
         .thenThrow(new CanvasFunctionInternalCancellation("no longer RUNNING"));
     CanvasFunctionExecutionContextImpl context = context();
 
@@ -333,7 +333,7 @@ class CanvasFunctionExecutionContextImplTest {
         CanvasFunctionInternalCancellation.class,
         () -> context.checkpoint("SUBMITTING", Map.of("jobId", "job")));
     verify(transactions, never())
-        .checkpoint(any(), any(), anyString(), anyString(), anyString(), any());
+        .checkpoint(any(), any(), anyString(), any(UUID.class), anyString(), any());
   }
 
   /** replace 允许在提交阶段推进提交事实后刷新上下文，但拒绝异构 Run。 */

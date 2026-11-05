@@ -137,7 +137,7 @@ public final class PluginCatalogRuntime implements AutoCloseable {
     Map<String, PluginConfig> configurations = new LinkedHashMap<>();
     for (PluginConfigurationRow row : repository.findAll()) {
       if (registry.find(row.pluginId()).isPresent()) {
-        configurations.put(row.pluginId(), new PluginConfig(row.revision(), row.valuesJson()));
+        configurations.put(row.pluginId(), new PluginConfig(row.version(), row.valuesJson()));
       }
     }
     return configurations;

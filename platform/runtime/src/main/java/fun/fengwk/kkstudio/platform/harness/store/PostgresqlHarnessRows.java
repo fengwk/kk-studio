@@ -239,7 +239,7 @@ final class PostgresqlHarnessRows {
               uuid(resultSet, "thread_id"),
               uuid(resultSet, "invocation_id"),
               resultSet.getInt("attempt"),
-              resultSet.getString("owner_lease_token"),
+              resultSet.getObject("owner_lease_token", UUID.class),
               ExecutionExitKind.valueOf(resultSet.getString("kind")),
               nullableUuid(resultSet, "parent_execution_id"),
               nullableEnvironmentId(resultSet.getObject("environment_id")),

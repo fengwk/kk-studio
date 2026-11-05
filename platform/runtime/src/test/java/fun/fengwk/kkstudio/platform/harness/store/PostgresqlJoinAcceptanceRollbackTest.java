@@ -667,7 +667,7 @@ class PostgresqlJoinAcceptanceRollbackTest {
                   tx ->
                       tx.work()
                           .claimNext(
-                              WorkTargetType.THREAD, "child-claim-1", Duration.ofSeconds(30)))
+                              WorkTargetType.THREAD, UUID.randomUUID(), Duration.ofSeconds(30)))
               .orElseThrow();
       assertEquals(ThreadProcessResult.COMPLETED, processor.process(childWork1));
 
@@ -701,7 +701,7 @@ class PostgresqlJoinAcceptanceRollbackTest {
                   tx ->
                       tx.work()
                           .claimNext(
-                              WorkTargetType.THREAD, "child-claim-2", Duration.ofSeconds(30)))
+                              WorkTargetType.THREAD, UUID.randomUUID(), Duration.ofSeconds(30)))
               .orElseThrow();
       assertEquals(ThreadProcessResult.COMPLETED, processor.process(childWork2));
 
@@ -736,7 +736,7 @@ class PostgresqlJoinAcceptanceRollbackTest {
                   tx ->
                       tx.work()
                           .claimNext(
-                              WorkTargetType.THREAD, "parent-claim-1", Duration.ofSeconds(30)))
+                              WorkTargetType.THREAD, UUID.randomUUID(), Duration.ofSeconds(30)))
               .orElseThrow();
       assertEquals(ThreadProcessResult.COMPLETED, processor.process(parentWork));
 

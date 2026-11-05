@@ -103,7 +103,7 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
         invalid);
     runs.insertReady(ready(valid, UUID.randomUUID(), T0));
 
-    assertEquals(valid, workStore.claimNext(LEASE, "owner").orElseThrow().nodeId());
+    assertEquals(valid, workStore.claimNext(LEASE, UUID.randomUUID()).orElseThrow().nodeId());
     assertEquals(0, workRows(invalid));
     assertEquals(1, runs.findByNodeId(valid).orElseThrow().attempt());
   }
@@ -147,7 +147,7 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
             transactions.getTransactionManager(),
             Clock.systemUTC());
 
-    assertEquals(1, observed.claimNext(LEASE, "owner").orElseThrow().run().attempt());
+    assertEquals(1, observed.claimNext(LEASE, UUID.randomUUID()).orElseThrow().run().attempt());
     var order = inOrder(observedRuns, queue);
     order.verify(observedRuns).findByNodeIdForUpdate(nodeId);
     order.verify(queue).lockClaimed(any());
@@ -166,6 +166,7 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
                 "CANVAS_RUN", JdbcClient.create(jdbc), transactions.getTransactionManager()));
     CountDownLatch claimed = new CountDownLatch(1);
     CountDownLatch resume = new CountDownLatch(1);
+    UUID ownerA = UUID.randomUUID();
     doAnswer(
             invocation -> {
               Object result = invocation.callRealMethod();
@@ -174,7 +175,7 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
               return result;
             })
         .when(queue)
-        .claimNext("owner-a", LEASE);
+        .claimNext(ownerA, LEASE);
     CanvasFunctionWorkStore delayed =
         new CanvasFunctionWorkStore(
             queue,
@@ -183,21 +184,22 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
             transactions.getTransactionManager(),
             Clock.systemUTC());
     try (var executor = Executors.newSingleThreadExecutor()) {
-      var old = executor.submit(() -> delayed.claimNext(LEASE, "owner-a"));
+      var old = executor.submit(() -> delayed.claimNext(LEASE, ownerA));
       try {
         assertTrue(claimed.await(10, TimeUnit.SECONDS));
         jdbc.update(
             "update durable_work set lease_until = statement_timestamp() - interval '1 second' where target_id = ?",
             nodeId);
         if (takeover) {
-          assertEquals(1, workStore.claimNext(LEASE, "owner-b").orElseThrow().run().attempt());
+          assertEquals(
+              1, workStore.claimNext(LEASE, UUID.randomUUID()).orElseThrow().run().attempt());
         }
       } finally {
         resume.countDown();
       }
       assertTrue(old.get(10, TimeUnit.SECONDS).isEmpty());
       assertEquals(takeover ? 1 : 0, runs.findByNodeId(nodeId).orElseThrow().attempt());
-      verify(queue).claimNext("owner-a", LEASE);
+      verify(queue).claimNext(ownerA, LEASE);
     }
   }
 
@@ -234,8 +236,8 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
     try (var executor = Executors.newFixedThreadPool(2)) {
       List<Callable<ClaimedRun>> tasks =
           List.of(
-              () -> workStore.claimNext(LEASE, "owner-a").orElseThrow(),
-              () -> workStore.claimNext(LEASE, "owner-b").orElseThrow());
+              () -> workStore.claimNext(LEASE, UUID.randomUUID()).orElseThrow(),
+              () -> workStore.claimNext(LEASE, UUID.randomUUID()).orElseThrow());
       List<Future<ClaimedRun>> futures = executor.invokeAll(tasks);
       Set<UUID> claimed =
           new HashSet<>(List.of(futures.get(0).get().nodeId(), futures.get(1).get().nodeId()));
@@ -251,10 +253,10 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
     UUID requestId = UUID.randomUUID();
     runs.insertReady(ready(node.id(), requestId, T0));
 
-    ClaimedRun first = workStore.claimNext(LEASE, "owner-old").orElseThrow();
+    ClaimedRun first = workStore.claimNext(LEASE, UUID.randomUUID()).orElseThrow();
     assertEquals(1, first.run().attempt());
     awaitLeaseExpiry();
-    ClaimedRun recovered = workStore.claimNext(LEASE, "owner-new").orElseThrow();
+    ClaimedRun recovered = workStore.claimNext(LEASE, UUID.randomUUID()).orElseThrow();
     assertEquals(2, recovered.run().attempt());
     assertNotEquals(first.leaseToken(), recovered.leaseToken());
 
@@ -280,7 +282,7 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
     UUID canvasId = addDocument();
     NodeRecord node = addNode(canvasId, true);
     runs.insertReady(ready(node.id(), UUID.randomUUID(), T0));
-    ClaimedRun claim = workStore.claimNext(LEASE, "owner").orElseThrow();
+    ClaimedRun claim = workStore.claimNext(LEASE, UUID.randomUUID()).orElseThrow();
 
     assertTrue(workStore.renew(claim, LEASE));
     jdbc.update(
@@ -296,13 +298,13 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
     UUID canvasId = addDocument();
     NodeRecord node = addNode(canvasId, true);
     runs.insertReady(ready(node.id(), UUID.randomUUID(), T0));
-    ClaimedRun claim = workStore.claimNext(LEASE, "owner").orElseThrow();
+    ClaimedRun claim = workStore.claimNext(LEASE, UUID.randomUUID()).orElseThrow();
     assertTrue(runs.holdsLease(node.id(), claim.leaseToken()));
 
     assertTrue(workStore.reschedule(claim, Duration.ofMinutes(2)));
     CanvasFunctionRun returned = runs.findByNodeId(node.id()).orElseThrow();
     assertEquals(CanvasFunctionRunStatus.READY, returned.status());
-    assertTrue(workStore.claimNext(LEASE, "too-early").isEmpty(), "the retry is deferred");
+    assertTrue(workStore.claimNext(LEASE, UUID.randomUUID()).isEmpty(), "the retry is deferred");
     assertFalse(workStore.reschedule(claim, Duration.ofSeconds(2)));
   }
 
@@ -310,8 +312,10 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
   @Test
   void rejectsInvalidClaimArgumentsBeforeDatabaseAccess() {
     assertThrows(
-        IllegalArgumentException.class, () -> workStore.claimNext(Duration.ofSeconds(1), ""));
-    assertThrows(IllegalArgumentException.class, () -> workStore.claimNext(Duration.ZERO, "owner"));
+        NullPointerException.class, () -> workStore.claimNext(Duration.ofSeconds(1), null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> workStore.claimNext(Duration.ZERO, UUID.randomUUID()));
   }
 
   /** Scheduled heartbeat 必须通过真实 PostgreSQL renew 延长阻塞 adapter 的当前 lease。 */
@@ -323,8 +327,7 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
     Instant now = Instant.now().truncatedTo(ChronoUnit.MILLIS);
     UUID requestId = UUID.randomUUID();
     runs.insertReady(ready(node.id(), requestId, now));
-    ClaimedRun claim =
-        workStore.claimNext(Duration.ofSeconds(5), "real-heartbeat-owner").orElseThrow();
+    ClaimedRun claim = workStore.claimNext(Duration.ofSeconds(5), UUID.randomUUID()).orElseThrow();
     Instant initialLeaseUntil = claim.work().leaseUntil();
     UUID targetResourceId = UUID.randomUUID();
     CanvasFunctionFrozenRun frozen = mock(CanvasFunctionFrozenRun.class);
@@ -411,7 +414,7 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
     CanvasFunctionRun runningReady = ready(runningNode.id(), UUID.randomUUID(), T0);
     runs.insertReady(ready);
     runs.insertReady(runningReady);
-    ClaimedRun claimed = workStore.claimNext(LEASE, "owner").orElseThrow();
+    ClaimedRun claimed = workStore.claimNext(LEASE, UUID.randomUUID()).orElseThrow();
     CanvasFunctionRun unclaimed = claimed.nodeId().equals(ready.nodeId()) ? runningReady : ready;
 
     assertTrue(
@@ -463,7 +466,7 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
     UUID canvasId = addDocument();
     NodeRecord node = addNode(canvasId, true);
     runs.insertReady(ready(node.id(), UUID.randomUUID(), T0));
-    ClaimedRun claim = workStore.claimNext(LEASE, "owner").orElseThrow();
+    ClaimedRun claim = workStore.claimNext(LEASE, UUID.randomUUID()).orElseThrow();
 
     try (Connection listener = listenOn(DurableWorkStore.CHANNEL)) {
       assertTrue(
@@ -485,8 +488,8 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
     runs.insertReady(ready(immediateNode.id(), UUID.randomUUID(), now));
     runs.insertReady(ready(futureNode.id(), UUID.randomUUID(), now));
 
-    ClaimedRun immediate = workStore.claimNext(LEASE, "owner-immediate").orElseThrow();
-    ClaimedRun future = workStore.claimNext(LEASE, "owner-future").orElseThrow();
+    ClaimedRun immediate = workStore.claimNext(LEASE, UUID.randomUUID()).orElseThrow();
+    ClaimedRun future = workStore.claimNext(LEASE, UUID.randomUUID()).orElseThrow();
 
     try (Connection listener = listenOn(DurableWorkStore.CHANNEL)) {
       // 立即重排 → 立即领取提示
@@ -507,9 +510,9 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
     UUID canvasId = addDocument();
     NodeRecord node = addNode(canvasId, true);
     runs.insertReady(ready(node.id(), UUID.randomUUID(), T0));
-    ClaimedRun stale = workStore.claimNext(LEASE, "owner-old").orElseThrow();
+    ClaimedRun stale = workStore.claimNext(LEASE, UUID.randomUUID()).orElseThrow();
     awaitLeaseExpiry();
-    workStore.claimNext(LEASE, "owner-new").orElseThrow();
+    workStore.claimNext(LEASE, UUID.randomUUID()).orElseThrow();
 
     try (Connection listener = listenOn(DurableWorkStore.CHANNEL)) {
       assertFalse(workStore.reschedule(stale, Duration.ofSeconds(1)));

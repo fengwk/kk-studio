@@ -43,6 +43,8 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 class PostgresqlRemoteExitReconcilerTest {
 
+  private static final UUID OWNER_LEASE = UUID.randomUUID();
+
   private static final EnvironmentId ENV_A =
       EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
   private static final EnvironmentId ENV_B =
@@ -242,14 +244,7 @@ class PostgresqlRemoteExitReconcilerTest {
           tx.threads().lock(threadId).orElseThrow();
           UUID toolExecId = tx.nextId();
           ExecutionExitLedger.register(
-              tx,
-              toolExecId,
-              threadId,
-              invocationId,
-              1,
-              "lease-token",
-              ExecutionExitKind.TOOL,
-              null);
+              tx, toolExecId, threadId, invocationId, 1, OWNER_LEASE, ExecutionExitKind.TOOL, null);
           UUID remoteExecId = tx.nextId();
           ExecutionExitLedger.register(
               tx,
@@ -257,7 +252,7 @@ class PostgresqlRemoteExitReconcilerTest {
               threadId,
               invocationId,
               1,
-              "lease-token",
+              OWNER_LEASE,
               ExecutionExitKind.REMOTE,
               toolExecId,
               environmentId);
@@ -276,7 +271,7 @@ class PostgresqlRemoteExitReconcilerTest {
               threadId,
               invocationId,
               1,
-              "lease-token",
+              OWNER_LEASE,
               ExecutionExitKind.TOOL,
               null,
               null);

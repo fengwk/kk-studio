@@ -19,7 +19,8 @@ class WorkValuesTest {
     UUID target = UUID.randomUUID();
     UUID environment = UUID.randomUUID();
     Instant now = Instant.parse("2026-10-31T00:00:00Z");
-    WorkState state = WorkState.initial(now, environment).claim(now, "owner", now.plusSeconds(30));
+    UUID owner = UUID.randomUUID();
+    WorkState state = WorkState.initial(now, environment).claim(now, owner, now.plusSeconds(30));
     DurableWork work = new DurableWork(target, state);
 
     assertEquals(target, work.targetId());
@@ -34,12 +35,13 @@ class WorkValuesTest {
   void claimRejectsANonPositiveWakeVersionAndKeepsOptionalAffinity() {
     UUID target = UUID.randomUUID();
     Instant until = Instant.parse("2026-10-31T00:00:30Z");
-    assertThrows(IllegalArgumentException.class, () -> new WorkClaim(target, 0, "owner", until));
-    WorkClaim claim = new WorkClaim(target, 1, "owner", until);
+    UUID owner = UUID.randomUUID();
+    assertThrows(IllegalArgumentException.class, () -> new WorkClaim(target, 0, owner, until));
+    WorkClaim claim = new WorkClaim(target, 1, owner, until);
     assertNull(claim.requiredEnvironmentId());
     assertEquals(target, claim.targetId());
     assertEquals(1, claim.claimedWakeVersion());
-    assertEquals("owner", claim.leaseToken());
+    assertEquals(owner, claim.leaseToken());
     assertEquals(until, claim.leaseUntil());
   }
 }

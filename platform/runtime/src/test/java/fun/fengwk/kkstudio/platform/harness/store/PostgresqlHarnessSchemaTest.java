@@ -133,15 +133,14 @@ class PostgresqlHarnessSchemaTest {
         List.of(
             "ck_harness_execution_exit_kind",
             "ck_harness_execution_exit_state",
-            "ck_harness_execution_exit_time",
-            "ck_harness_execution_exit_token"),
+            "ck_harness_execution_exit_time"),
         checks);
 
     UUID executionId = UUID.randomUUID();
     jdbc.update(
         "insert into harness_execution_exit (execution_id, thread_id, invocation_id, attempt,"
             + " owner_lease_token, kind, parent_execution_id, state, registered_at, confirmed_at,"
-            + " abandoned_at) values (?, ?, ?, 1, 'lease-1', 'TOOL', null, 'UNCONFIRMED',"
+            + " abandoned_at) values (?, ?, ?, 1, '00000000-0000-0000-0000-0000000000a3', 'TOOL', null, 'UNCONFIRMED',"
             + " timestamp with time zone '2026-01-01 00:00:00.123+00', null, null)",
         executionId,
         threadId,
@@ -177,7 +176,7 @@ class PostgresqlHarnessSchemaTest {
     jdbc.update(
         "insert into harness_execution_exit (execution_id, thread_id, invocation_id, attempt,"
             + " owner_lease_token, kind, parent_execution_id, state, registered_at, confirmed_at,"
-            + " abandoned_at) values (?, ?, ?, 1, 'lease-agent', 'DRIVER', null, 'UNCONFIRMED',"
+            + " abandoned_at) values (?, ?, ?, 1, '00000000-0000-0000-0000-0000000000a1', 'DRIVER', null, 'UNCONFIRMED',"
             + " timestamp with time zone '2026-01-01 00:00:00.000+00', null, null)",
         agentExecutionId,
         threadId,
@@ -200,7 +199,7 @@ class PostgresqlHarnessSchemaTest {
     jdbc.update(
         "insert into harness_execution_exit (execution_id, thread_id, invocation_id, attempt,"
             + " owner_lease_token, kind, parent_execution_id, environment_id, state, registered_at,"
-            + " confirmed_at, abandoned_at) values (?, ?, ?, 1, 'lease-remote', 'REMOTE', ?, ?,"
+            + " confirmed_at, abandoned_at) values (?, ?, ?, 1, '00000000-0000-0000-0000-0000000000a2', 'REMOTE', ?, ?,"
             + " 'REMOTE_ACKNOWLEDGED', timestamp with time zone '2026-01-01 00:00:00.000+00',"
             + " timestamp with time zone '2026-01-01 00:00:00.100+00', null)",
         remoteExecutionId,

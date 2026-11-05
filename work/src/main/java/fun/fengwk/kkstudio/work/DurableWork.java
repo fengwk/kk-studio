@@ -22,7 +22,7 @@ public record DurableWork(UUID targetId, WorkState state) {
     return state.wakeVersion();
   }
 
-  public String leaseToken() {
+  public UUID leaseToken() {
     return state.leaseToken();
   }
 

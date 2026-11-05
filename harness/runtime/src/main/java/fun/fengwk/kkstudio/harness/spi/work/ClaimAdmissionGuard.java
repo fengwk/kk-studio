@@ -35,11 +35,11 @@ public final class ClaimAdmissionGuard<E extends ClaimAdmissionGuard.GuardedExec
   }
 
   private static final class Entry<E extends GuardedExecution> {
-    private final String token;
+    private final UUID token;
     private volatile E execution;
     private volatile boolean superseded;
 
-    private Entry(String token) {
+    private Entry(UUID token) {
       this.token = token;
     }
   }
@@ -90,7 +90,7 @@ public final class ClaimAdmissionGuard<E extends ClaimAdmissionGuard.GuardedExec
       // close 后迟到准入：不创建 slot、不执行 verifier，返回不可 attach 的 ticket，由调用方按既有路由收敛。
       return new Ticket<>(this, invocationId, null);
     }
-    String token = claim.leaseToken();
+    UUID token = claim.leaseToken();
     AtomicReference<Ticket<E>> ticketRef = new AtomicReference<>();
     AtomicReference<E> oldExecution = new AtomicReference<>();
 

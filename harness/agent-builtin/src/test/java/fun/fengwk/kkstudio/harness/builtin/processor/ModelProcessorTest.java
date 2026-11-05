@@ -129,6 +129,7 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -223,7 +224,10 @@ class ModelProcessorTest {
             .<Optional<ClaimedWork>>transaction(
                 tx ->
                     tx.work()
-                        .claimNext(WorkTargetType.THREAD, "thread-token", Duration.ofSeconds(60)))
+                        .claimNext(
+                            WorkTargetType.THREAD,
+                            token(fixture.invocationId, "thread"),
+                            Duration.ofSeconds(60)))
             .orElseThrow();
     assertThrows(IllegalArgumentException.class, () -> fixture.processor.process(threadClaim));
   }
@@ -254,7 +258,7 @@ class ModelProcessorTest {
     Work modelWork =
         work(fixture.store, new WorkTarget(BuiltinWorkType.MODEL, fixture.invocationId));
     assertNotNull(modelWork);
-    assertEquals("token-" + fixture.invocationId, modelWork.leaseToken());
+    assertEquals(token(fixture.invocationId), modelWork.leaseToken());
   }
 
   /**
@@ -2538,12 +2542,14 @@ class ModelProcessorTest {
     try {
       assertEquals(
           ProcessResult.STARTED,
-          fixture.processor.process(claim(fixture.store, fixture.invocationId, "token-old")));
+          fixture.processor.process(
+              claim(fixture.store, fixture.invocationId, token(fixture.invocationId, "old"))));
       assertTrue(
           oldRun.entered.await(5, TimeUnit.SECONDS),
           "old model body must enter before the lease is reclaimed");
       fixture.clock.advance(Duration.ofSeconds(61));
-      ClaimedWork recovered = claim(fixture.store, fixture.invocationId, "token-new");
+      ClaimedWork recovered =
+          claim(fixture.store, fixture.invocationId, token(fixture.invocationId, "new"));
 
       assertEquals(ProcessResult.TERMINATED, fixture.processor.process(recovered));
       awaitExecutionExit(fixture);
@@ -2739,7 +2745,10 @@ class ModelProcessorTest {
             .transaction(
                 tx ->
                     tx.work()
-                        .claimNext(BuiltinWorkType.MODEL, "near-expiry", Duration.ofSeconds(1)))
+                        .claimNext(
+                            BuiltinWorkType.MODEL,
+                            token(fixture.invocationId, "near-expiry"),
+                            Duration.ofSeconds(1)))
             .orElseThrow();
     fixture.gateway.queueControlled();
 
@@ -2748,7 +2757,7 @@ class ModelProcessorTest {
     Work modelWork =
         work(fixture.store, new WorkTarget(BuiltinWorkType.MODEL, fixture.invocationId));
     assertEquals(NOW.plusSeconds(30), modelWork.leaseUntil());
-    assertEquals("near-expiry", modelWork.leaseToken());
+    assertEquals(token(fixture.invocationId, "near-expiry"), modelWork.leaseToken());
   }
 
   /** claim lease 剩余充足：不额外 renew，保持 dispatcher 写入的 lease。 */
@@ -2800,7 +2809,10 @@ class ModelProcessorTest {
 
     ClaimedWork forged =
         new ClaimedWork(
-            claimed.target(), claimed.claimedWakeVersion(), "forged-token", claimed.leaseUntil());
+            claimed.target(),
+            claimed.claimedWakeVersion(),
+            token(fixture.invocationId, "forged"),
+            claimed.leaseUntil());
     assertEquals(ProcessResult.LOST_OWNERSHIP, fixture.processor.process(forged));
 
     assertEquals(
@@ -2810,7 +2822,7 @@ class ModelProcessorTest {
     assertEquals(1, fixture.gateway.admitCalls);
     assertTrue(fixture.processor.hasActiveExecution());
     assertEquals(
-        "token-" + fixture.invocationId,
+        token(fixture.invocationId),
         work(fixture.store, new WorkTarget(BuiltinWorkType.MODEL, fixture.invocationId))
             .leaseToken());
   }
@@ -2958,7 +2970,8 @@ class ModelProcessorTest {
             }
           }
         };
-    ClaimedWork claimedA = claim(fixture.store, fixture.invocationId, "token-A");
+    ClaimedWork claimedA =
+        claim(fixture.store, fixture.invocationId, token(fixture.invocationId, "A"));
     AtomicReference<ProcessResult> resultA = new AtomicReference<>();
     Thread threadA = new Thread(() -> resultA.set(fixture.processor.process(claimedA)));
     threadA.start();
@@ -2966,7 +2979,8 @@ class ModelProcessorTest {
 
     // 旧 lease 被 dispatcher 重新 claim：删旧行、重建 wake 并以新 token 重新领取。
     replaceModelWork(fixture);
-    ClaimedWork claimedB = claim(fixture.store, fixture.invocationId, "token-B");
+    ClaimedWork claimedB =
+        claim(fixture.store, fixture.invocationId, token(fixture.invocationId, "B"));
     fixture.gateway.queueControlled();
     assertEquals(ProcessResult.STARTED, fixture.processor.process(claimedB));
     ControlledRun fresh = fixture.gateway.controlled(fixture.invocationId);
@@ -2984,7 +2998,7 @@ class ModelProcessorTest {
         ModelInvocationStatus.RUNNING, model(fixture.store, fixture.invocationId).status());
     assertEquals(1, model(fixture.store, fixture.invocationId).attempt());
     assertEquals(
-        "token-B",
+        token(fixture.invocationId, "B"),
         work(fixture.store, new WorkTarget(BuiltinWorkType.MODEL, fixture.invocationId))
             .leaseToken());
     fresh.succeed(response("done", GenerationStopReason.COMPLETE));
@@ -3029,7 +3043,8 @@ class ModelProcessorTest {
     try {
       assertEquals(
           ProcessResult.LOST_OWNERSHIP,
-          processor.process(claim(fixture.store, fixture.invocationId, "token-A")));
+          processor.process(
+              claim(fixture.store, fixture.invocationId, token(fixture.invocationId, "A"))));
       assertFalse(processor.hasActiveExecution());
       assertTrue(fixture.gateway.runs.get(fixture.invocationId).closedWithoutRun.get());
     } finally {
@@ -3062,7 +3077,8 @@ class ModelProcessorTest {
     try {
       assertEquals(
           ProcessResult.LOST_OWNERSHIP,
-          processor.process(claim(fixture.store, fixture.invocationId, "token-A")));
+          processor.process(
+              claim(fixture.store, fixture.invocationId, token(fixture.invocationId, "A"))));
       assertFalse(processor.hasActiveExecution());
       assertTrue(fixture.gateway.runs.get(fixture.invocationId).closedWithoutRun.get());
       assertTrue(
@@ -3121,7 +3137,8 @@ class ModelProcessorTest {
     try {
       assertEquals(
           ProcessResult.LOST_OWNERSHIP,
-          processor.process(claim(fixture.store, fixture.invocationId, "token-A")));
+          processor.process(
+              claim(fixture.store, fixture.invocationId, token(fixture.invocationId, "A"))));
       assertEquals(1, closes.get());
       assertEquals(0, runs.get());
       assertFalse(processor.hasActiveExecution());
@@ -3181,7 +3198,8 @@ class ModelProcessorTest {
     try {
       assertEquals(
           ProcessResult.STARTED,
-          processor.process(claim(fixture.store, fixture.invocationId, "token-A")));
+          processor.process(
+              claim(fixture.store, fixture.invocationId, token(fixture.invocationId, "A"))));
       assertNotNull(queued.get());
       ExecutionExitFact registered =
           fixture.store.transaction(
@@ -3232,7 +3250,8 @@ class ModelProcessorTest {
             Runnable::run,
             newExecutionExecutor(),
             TestExecutionExitConfirmer.create(fixture.store, fixture.clock));
-    ClaimedWork claimA = claim(fixture.store, fixture.invocationId, "token-A");
+    ClaimedWork claimA =
+        claim(fixture.store, fixture.invocationId, token(fixture.invocationId, "A"));
     AtomicReference<ProcessResult> result = new AtomicReference<>();
     Thread threadA = new Thread(() -> result.set(processor.process(claimA)));
     worker.set(threadA);
@@ -3240,7 +3259,8 @@ class ModelProcessorTest {
       threadA.start();
       assertTrue(checked.await(5, TimeUnit.SECONDS));
       fixture.clock.advance(Duration.ofSeconds(61));
-      ClaimedWork claimB = claim(fixture.store, fixture.invocationId, "token-B");
+      ClaimedWork claimB =
+          claim(fixture.store, fixture.invocationId, token(fixture.invocationId, "B"));
       fixture.gateway.queueControlled();
       assertEquals(ProcessResult.STARTED, processor.process(claimB));
       ControlledRun fresh = fixture.gateway.controlled(fixture.invocationId);
@@ -3285,7 +3305,8 @@ class ModelProcessorTest {
                 });
     Fixture fixtureA = fixture(NO_RETRY, requestSpec(), hooked);
     fixtureA.gateway.queueControlled(); // 不应被消费
-    ClaimedWork claimedA = claim(fixtureA.store, fixtureA.invocationId, "token-1");
+    ClaimedWork claimedA =
+        claim(fixtureA.store, fixtureA.invocationId, token(fixtureA.invocationId, "1"));
 
     AtomicReference<ProcessResult> resultA = new AtomicReference<>();
     Thread threadA = new Thread(() -> resultA.set(fixtureA.processor.process(claimedA)));
@@ -3295,7 +3316,8 @@ class ModelProcessorTest {
     // lease 过期，dispatcher 以 token-2 重新 claim；另一实例接管并完成运行（跨实例，A 的 abandoned 检查不可见）。
     fixtureA.clock.advance(Duration.ofSeconds(61));
     replaceModelWork(fixtureA);
-    ClaimedWork claimedB = claim(fixtureA.store, fixtureA.invocationId, "token-2");
+    ClaimedWork claimedB =
+        claim(fixtureA.store, fixtureA.invocationId, token(fixtureA.invocationId, "2"));
     FakeGateway gatewayB = new FakeGateway();
     gatewayB.queueScript(
         new ModelGateway.Succeeded(
@@ -3417,7 +3439,12 @@ class ModelProcessorTest {
         fixture
             .store
             .transaction(
-                tx -> tx.work().claimNext(BuiltinWorkType.MODEL, "partial", Duration.ofSeconds(15)))
+                tx ->
+                    tx.work()
+                        .claimNext(
+                            BuiltinWorkType.MODEL,
+                            token(fixture.invocationId, "partial"),
+                            Duration.ofSeconds(15)))
             .orElseThrow();
     fixture.gateway.queueControlled();
 
@@ -3426,7 +3453,7 @@ class ModelProcessorTest {
     Work modelWork =
         work(fixture.store, new WorkTarget(BuiltinWorkType.MODEL, fixture.invocationId));
     assertEquals(NOW.plusSeconds(30), modelWork.leaseUntil());
-    assertEquals("partial", modelWork.leaseToken());
+    assertEquals(token(fixture.invocationId, "partial"), modelWork.leaseToken());
   }
 
   /** lease 剩余恰好等于 leaseDuration：相等不 renew（renew 要求严格延展，等值会违反）。 */
@@ -3437,7 +3464,12 @@ class ModelProcessorTest {
         fixture
             .store
             .transaction(
-                tx -> tx.work().claimNext(BuiltinWorkType.MODEL, "exact", Duration.ofSeconds(30)))
+                tx ->
+                    tx.work()
+                        .claimNext(
+                            BuiltinWorkType.MODEL,
+                            token(fixture.invocationId, "exact"),
+                            Duration.ofSeconds(30)))
             .orElseThrow();
     fixture.gateway.queueControlled();
 
@@ -3619,7 +3651,7 @@ class ModelProcessorTest {
                 tx ->
                     tx.work()
                         .claimNext(
-                            BuiltinWorkType.MODEL, "token-" + invocationId, Duration.ofMillis(400)))
+                            BuiltinWorkType.MODEL, token(invocationId), Duration.ofMillis(400)))
             .orElseThrow();
 
     assertEquals(ProcessResult.STARTED, processor.process(claimed));
@@ -3693,7 +3725,7 @@ class ModelProcessorTest {
     assertEquals(0, fixture.gateway.admitCalls);
     Work modelWork =
         work(fixture.store, new WorkTarget(BuiltinWorkType.MODEL, fixture.invocationId));
-    assertEquals("token-" + fixture.invocationId, modelWork.leaseToken());
+    assertEquals(token(fixture.invocationId), modelWork.leaseToken());
   }
 
   /** Stop deleteWork 后：claim 行缺失同样 LOST_OWNERSHIP，无 mutation。 */
@@ -4593,10 +4625,19 @@ class ModelProcessorTest {
   }
 
   private static ClaimedWork claim(HarnessStore store, UUID invocationId) {
-    return claim(store, invocationId, "token-" + invocationId);
+    return claim(store, invocationId, token(invocationId));
   }
 
-  private static ClaimedWork claim(HarnessStore store, UUID invocationId, String token) {
+  private static UUID token(UUID invocationId) {
+    return token(invocationId, "default");
+  }
+
+  private static UUID token(UUID invocationId, String suffix) {
+    return UUID.nameUUIDFromBytes(
+        ("model-" + invocationId + "-" + suffix).getBytes(StandardCharsets.UTF_8));
+  }
+
+  private static ClaimedWork claim(HarnessStore store, UUID invocationId, UUID token) {
     return store
         .transaction(
             tx -> tx.work().claimNext(BuiltinWorkType.MODEL, token, Duration.ofSeconds(60)))

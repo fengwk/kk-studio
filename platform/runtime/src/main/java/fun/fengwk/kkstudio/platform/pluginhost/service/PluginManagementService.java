@@ -191,7 +191,7 @@ public final class PluginManagementService {
         new PluginAuthAttemptRow(
             pluginId,
             PluginAuthNonce.hash(authAttemptId),
-            requireConfiguration(pluginId).revision(),
+            requireConfiguration(pluginId).version(),
             region,
             clock.instant().plus(authAttemptTtl)));
     PluginAuthPrepareDTO response = new PluginAuthPrepareDTO();
@@ -325,12 +325,12 @@ public final class PluginManagementService {
       dto.setLastRefreshError(projection.lastRefreshError());
     }
     dto.setConfiguration(configurationOf(plugin, desired, configuredSecrets));
-    dto.setDesiredRevision(Long.toString(desired.revision()));
+    dto.setDesiredRevision(Long.toString(desired.version()));
     Optional<PluginCatalogSnapshot.ConfiguredPlugin> applied = applied(snapshot, pluginId);
     long appliedRevision = applied.map(entry -> entry.config().revision()).orElse(0L);
     dto.setAppliedRevision(applied.isPresent() ? Long.toString(appliedRevision) : null);
     dto.setApplicationError(
-        appliedRevision == desired.revision() ? null : pendingError(applicationError));
+        appliedRevision == desired.version() ? null : pendingError(applicationError));
     dto.setConnectionCheckSupported(
         applied.flatMap(entry -> entry.instance().connectionCheck()).isPresent());
     dto.setHarnessToolNames(applied.map(entry -> toolNames(snapshot, entry)).orElse(List.of()));
@@ -362,7 +362,7 @@ public final class PluginManagementService {
     PluginConfigurationDTO configuration = new PluginConfigurationDTO();
     configuration.setValuesSchema(SCHEMA_CODEC.encode(schema.valuesSchema()));
     configuration.setDefaultsJson(schema.defaultsJson());
-    configuration.setRevision(Long.toString(desired.revision()));
+    configuration.setRevision(Long.toString(desired.version()));
     configuration.setValuesJson(desired.valuesJson());
     Map<String, PluginSecretProjectionDTO> secrets = new LinkedHashMap<>();
     for (Map.Entry<String, String> entry : schema.secrets().entrySet()) {

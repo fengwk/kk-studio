@@ -65,7 +65,7 @@ public class CanvasBlobResourceMaterializer {
       UUID canvasId,
       UUID nodeId,
       UUID requestId,
-      String leaseToken,
+      UUID leaseToken,
       UUID resourceId,
       String name,
       InputStream content) {
@@ -107,7 +107,7 @@ public class CanvasBlobResourceMaterializer {
       UUID canvasId,
       UUID nodeId,
       UUID requestId,
-      String leaseToken,
+      UUID leaseToken,
       UUID resourceId,
       String name,
       String text) {
@@ -134,7 +134,7 @@ public class CanvasBlobResourceMaterializer {
       UUID canvasId,
       UUID nodeId,
       UUID requestId,
-      String leaseToken,
+      UUID leaseToken,
       UUID resourceId,
       String name,
       UUID uploadId) {
@@ -170,7 +170,7 @@ public class CanvasBlobResourceMaterializer {
       UUID canvasId,
       UUID nodeId,
       UUID requestId,
-      String leaseToken,
+      UUID leaseToken,
       UUID resourceId,
       String name,
       String text) {
@@ -200,8 +200,7 @@ public class CanvasBlobResourceMaterializer {
   }
 
   /** 在 document → run 锁内检查本次 owner；DB 时间检查发生在行锁取得后，避免锁等待掩盖租约到期。 */
-  private void requireRunningRequest(
-      UUID canvasId, UUID nodeId, UUID requestId, String leaseToken) {
+  private void requireRunningRequest(UUID canvasId, UUID nodeId, UUID requestId, UUID leaseToken) {
     if (canvasStore.lockDocument(canvasId).isEmpty()) {
       throw new IllegalStateException("Canvas no longer exists: " + canvasId);
     }

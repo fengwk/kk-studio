@@ -34,7 +34,10 @@ class ClaimedExecutionSupportTest {
   private final WorkStore work = mock(WorkStore.class);
   private final ClaimedWork claim =
       new ClaimedWork(
-          new WorkTarget(WorkTargetType.TOOL, UUID.randomUUID()), 1, "token", NOW.plusSeconds(60));
+          new WorkTarget(WorkTargetType.TOOL, UUID.randomUUID()),
+          1,
+          UUID.randomUUID(),
+          NOW.plusSeconds(60));
   private final ClaimedExecutionSupport<ClaimAdmissionGuard.GuardedExecution> support =
       new ClaimedExecutionSupport<>(store, WorkTargetType.TOOL, LEASE);
 

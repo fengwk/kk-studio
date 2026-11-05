@@ -360,8 +360,8 @@ class PostgresqlJoinQuiescenceConcurrencyTest {
   @ValueSource(booleans = {true, false})
   void successfulParentSettlesAfterConsumingChildReceiptInEitherOrder(boolean parentFirst) {
     Tree tree = seedThreeLevelTree(T1, true);
-    ClaimedWork first = claim("first", T1);
-    ClaimedWork second = claim("second", T1);
+    ClaimedWork first = claim(UUID.randomUUID(), T1);
+    ClaimedWork second = claim(UUID.randomUUID(), T1);
     ClaimedWork bClaim = first.target().id().equals(tree.threadB()) ? first : second;
     ClaimedWork cClaim = first.target().id().equals(tree.threadC()) ? first : second;
     ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
@@ -389,13 +389,13 @@ class PostgresqlJoinQuiescenceConcurrencyTest {
       assertTrue(commandsOf(tree.threadA()).isEmpty());
       assertFalse(hasThreadWork(tree.threadA()));
       assertEquals(1, queuedOf(tree.threadB()).size());
-      assertEquals(ThreadProcessResult.COMPLETED, processor.process(claim("b-input", T1)));
+      assertEquals(ThreadProcessResult.COMPLETED, processor.process(claim(UUID.randomUUID(), T1)));
       ThreadSnapshot processing = runtime.getThreadSnapshot(tree.threadB());
       assertEquals(2L, processing.thread().inputThroughSequence());
       assertEquals(ThreadRuntimeStatus.RUNNING, processing.runtimeStatus());
       assertFalse(join(tree.joinAB()).matched(), "INPUT consumption alone is not completion");
       completeReadyModel(tree.threadB(), T1);
-      assertEquals(ThreadProcessResult.COMPLETED, processor.process(claim("b-final", T1)));
+      assertEquals(ThreadProcessResult.COMPLETED, processor.process(claim(UUID.randomUUID(), T1)));
       ThreadJoin settled = join(tree.joinAB());
       assertTrue(settled.matched());
       assertNotEquals(earlyFinal, settled.terminalEntryId());
@@ -500,7 +500,7 @@ class PostgresqlJoinQuiescenceConcurrencyTest {
   void childSettlementAndParentEnqueueAreAtomicUnderRealTreeLock() throws Exception {
     Instant now = T1;
     Tree tree = seedThreeLevelTree(now);
-    ClaimedWork childClaim = claim("c-lease", now);
+    ClaimedWork childClaim = claim(UUID.randomUUID(), now);
 
     CountDownLatch matched = new CountDownLatch(1);
     CountDownLatch release = new CountDownLatch(1);
@@ -566,7 +566,7 @@ class PostgresqlJoinQuiescenceConcurrencyTest {
           commandsOf(tree.threadA()).isEmpty(), "A must receive no command while B is unsettled");
 
       // 只有真实 Processor 继续 B（B 消费通知并到达新的不可继续失败终态）后，A 才恰好收到一次回执。
-      ClaimedWork bClaim = claim("b-lease", now);
+      ClaimedWork bClaim = claim(UUID.randomUUID(), now);
       assertEquals(tree.threadB(), bClaim.target().id());
       ThreadProcessor realProcessor = processor(store, now, scheduler);
       assertEquals(ThreadProcessResult.COMPLETED, realProcessor.process(bClaim));
@@ -586,7 +586,7 @@ class PostgresqlJoinQuiescenceConcurrencyTest {
   void abortedChildSettlementRollsBackEntirelyAndRetryDeliversExactlyOnce() {
     Instant now = T1;
     Tree tree = seedThreeLevelTree(now);
-    ClaimedWork childClaim = claim("c-lease", now);
+    ClaimedWork childClaim = claim(UUID.randomUUID(), now);
     ThreadSnapshot cBefore = runtime.getThreadSnapshot(tree.threadC());
     ThreadState bBefore = runtime.getThreadSnapshot(tree.threadB()).thread();
     ThreadJoin bcBefore = join(tree.joinBC());
@@ -648,7 +648,7 @@ class PostgresqlJoinQuiescenceConcurrencyTest {
     }
   }
 
-  private ClaimedWork claim(String leaseId, Instant now) {
+  private ClaimedWork claim(UUID leaseId, Instant now) {
     return store
         .transaction(
             tx -> tx.work().claimNext(WorkTargetType.THREAD, leaseId, Duration.ofSeconds(30)))

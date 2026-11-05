@@ -546,7 +546,7 @@ class ExecutionExitConfirmerGovernanceTest {
         threadId,
         invocationId,
         1,
-        "lease-1",
+        UUID.randomUUID(),
         ExecutionExitKind.TOOL,
         null,
         null,

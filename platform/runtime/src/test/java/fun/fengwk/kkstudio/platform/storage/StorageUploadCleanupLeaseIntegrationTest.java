@@ -25,6 +25,7 @@ import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageUpload;
 import fun.fengwk.kkstudio.share.storage.StorageUploadDTO;
 
+import java.nio.charset.StandardCharsets;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -118,22 +119,25 @@ class StorageUploadCleanupLeaseIntegrationTest extends PostgresSpringTestSupport
     StorageUpload first =
         tx.execute(
             status ->
-                uploadRepository.claimById(uploadId, now, now.plusSeconds(30), "first-token"));
+                uploadRepository.claimById(
+                    uploadId, now, now.plusSeconds(30), token("first-token")));
     assertEquals(uploadId, first.getId());
     // RETURNING 与普通读取投影相同的所有字段。
     assertEquals(uploadRepository.getById(uploadId), first);
 
     assertNull(
         tx.execute(
-            status -> uploadRepository.claimById(uploadId, now, now.plusSeconds(30), "rival")),
+            status ->
+                uploadRepository.claimById(uploadId, now, now.plusSeconds(30), token("rival"))),
         "a valid lease must not be preempted by another owner");
     assertFalse(
         Boolean.TRUE.equals(
-            tx.execute(status -> uploadRepository.finalizePending(uploadId, "rival"))),
+            tx.execute(status -> uploadRepository.finalizePending(uploadId, token("rival")))),
         "the losing owner must not finalize a row it does not own");
     assertTrue(
         Boolean.TRUE.equals(
-            tx.execute(status -> uploadRepository.finalizePending(uploadId, "first-token"))));
+            tx.execute(
+                status -> uploadRepository.finalizePending(uploadId, token("first-token")))));
   }
 
   @Test
@@ -149,28 +153,35 @@ class StorageUploadCleanupLeaseIntegrationTest extends PostgresSpringTestSupport
         tx.execute(
             status ->
                 uploadRepository.claimById(
-                    uploadId, firstNow, firstNow.plusMillis(100), "first-token"));
-    assertEquals("first-token", first.getCleanupToken());
+                    uploadId, firstNow, firstNow.plusMillis(100), token("first-token")));
+    assertEquals(token("first-token"), first.getCleanupToken());
     assertNull(
         tx.execute(
             status ->
                 uploadRepository.claimById(
-                    uploadId, firstNow.plusMillis(50), firstNow.plusSeconds(1), "too-early")),
+                    uploadId,
+                    firstNow.plusMillis(50),
+                    firstNow.plusSeconds(1),
+                    token("too-early"))),
         "a still-valid lease must not be reclaimed");
 
     StorageUpload reclaimed =
         tx.execute(
             status ->
                 uploadRepository.claimById(
-                    uploadId, firstNow.plusMillis(101), firstNow.plusSeconds(1), "second-token"));
+                    uploadId,
+                    firstNow.plusMillis(101),
+                    firstNow.plusSeconds(1),
+                    token("second-token")));
     assertEquals(uploadId, reclaimed.getId());
     assertFalse(
         Boolean.TRUE.equals(
-            tx.execute(status -> uploadRepository.finalizePending(uploadId, "first-token"))),
+            tx.execute(status -> uploadRepository.finalizePending(uploadId, token("first-token")))),
         "stale owner must be fenced");
     assertTrue(
         Boolean.TRUE.equals(
-            tx.execute(status -> uploadRepository.finalizePending(uploadId, "second-token"))));
+            tx.execute(
+                status -> uploadRepository.finalizePending(uploadId, token("second-token")))));
   }
 
   @Test
@@ -183,15 +194,18 @@ class StorageUploadCleanupLeaseIntegrationTest extends PostgresSpringTestSupport
     StorageUpload claimed =
         tx.execute(
             status ->
-                uploadRepository.claimById(uploadId, now, now.plusSeconds(30), "release-owner"));
+                uploadRepository.claimById(
+                    uploadId, now, now.plusSeconds(30), token("release-owner")));
     assertNotNull(claimed);
 
     assertFalse(
         Boolean.TRUE.equals(
-            tx.execute(status -> uploadRepository.releaseCleanupClaim(uploadId, "wrong-owner"))));
+            tx.execute(
+                status -> uploadRepository.releaseCleanupClaim(uploadId, token("wrong-owner")))));
     assertTrue(
         Boolean.TRUE.equals(
-            tx.execute(status -> uploadRepository.releaseCleanupClaim(uploadId, "release-owner"))));
+            tx.execute(
+                status -> uploadRepository.releaseCleanupClaim(uploadId, token("release-owner")))));
     assertEquals(
         0,
         jdbc.queryForObject(
@@ -242,7 +256,8 @@ class StorageUploadCleanupLeaseIntegrationTest extends PostgresSpringTestSupport
     Instant now = Instant.now();
     tx.execute(
         status ->
-            uploadRepository.claimById(pendingId, now, now.plusSeconds(30), "pending-cleanup"));
+            uploadRepository.claimById(
+                pendingId, now, now.plusSeconds(30), token("pending-cleanup")));
     assertThrows(StorageVerificationException.class, () -> uploadService.complete(pendingId));
 
     StorageUploadDTO readyPending =
@@ -252,7 +267,8 @@ class StorageUploadCleanupLeaseIntegrationTest extends PostgresSpringTestSupport
     StorageUploadDTO ready = uploadService.complete(UUID.fromString(readyPending.getId()));
     UUID readyId = UUID.fromString(ready.getId());
     tx.execute(
-        status -> uploadRepository.claimById(readyId, now, now.plusSeconds(30), "ready-cleanup"));
+        status ->
+            uploadRepository.claimById(readyId, now, now.plusSeconds(30), token("ready-cleanup")));
 
     assertThrows(
         StorageVerificationException.class,
@@ -281,12 +297,16 @@ class StorageUploadCleanupLeaseIntegrationTest extends PostgresSpringTestSupport
         tx.execute(
             status ->
                 uploadRepository.claimById(
-                    uploadId, Instant.now(), Instant.now().plusSeconds(30), "requested-node"));
+                    uploadId,
+                    Instant.now(),
+                    Instant.now().plusSeconds(30),
+                    token("requested-node")));
     assertEquals(uploadId, claimed.getId());
     assertNotNull(claimed.getCleanupRequestedAt());
     assertTrue(
         Boolean.TRUE.equals(
-            tx.execute(status -> uploadRepository.finalizePending(uploadId, "requested-node"))));
+            tx.execute(
+                status -> uploadRepository.finalizePending(uploadId, token("requested-node")))));
     assertEquals(
         0,
         jdbc.queryForObject(
@@ -322,5 +342,9 @@ class StorageUploadCleanupLeaseIntegrationTest extends PostgresSpringTestSupport
     assertThrows(
         StorageVerificationException.class,
         () -> tx.execute(status -> uploadService.lockReady(readyId)));
+  }
+
+  private static UUID token(String value) {
+    return UUID.nameUUIDFromBytes(("storage-cleanup-" + value).getBytes(StandardCharsets.UTF_8));
   }
 }

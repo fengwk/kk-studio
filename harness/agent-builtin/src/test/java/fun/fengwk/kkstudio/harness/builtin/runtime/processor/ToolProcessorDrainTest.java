@@ -140,14 +140,13 @@ class ToolProcessorDrainTest {
     Work work = fixture.store.transaction(tx -> tx.work().find(toolTarget).orElseThrow());
     assertNull(work.leaseToken(), "work leaseToken must be cleared");
 
+    UUID newClaimToken = UUID.randomUUID();
     Optional<ClaimedWork> reClaim =
         fixture.store.transaction(
-            tx ->
-                tx.work()
-                    .claimNext(WorkTargetType.TOOL, "new-claim-token", Duration.ofSeconds(30)));
+            tx -> tx.work().claimNext(WorkTargetType.TOOL, newClaimToken, Duration.ofSeconds(30)));
     assertTrue(reClaim.isPresent(), "released work must be immediately claimable");
     assertEquals(toolTarget, reClaim.get().target());
-    assertEquals("new-claim-token", reClaim.get().leaseToken());
+    assertEquals(newClaimToken, reClaim.get().leaseToken());
   }
 
   /** 测试意图：普通本地工具（无远端调用）在 drain 时沿用现有 close 语义（本地 abandon，不 release claim，不提前确认退出）。 */
@@ -188,7 +187,7 @@ class ToolProcessorDrainTest {
         fixture.store.transaction(
             tx ->
                 tx.work()
-                    .claimNext(WorkTargetType.TOOL, "other-claim-token", Duration.ofSeconds(30)));
+                    .claimNext(WorkTargetType.TOOL, UUID.randomUUID(), Duration.ofSeconds(30)));
     assertTrue(reClaim.isEmpty(), "unreleased work must not be immediately claimable");
   }
 
@@ -455,16 +454,17 @@ class ToolProcessorDrainTest {
 
       ToolProcessorTestSupport.toRunning(
           fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW);
+      UUID oldLease = UUID.randomUUID();
       ExecutionExitFact oldToolFact =
           ToolProcessorTestSupport.registerOldToolExit(
-              fixture.store, fixture.baseline.threadId(), fixture.toolInvocationId, 1, "old-token");
+              fixture.store, fixture.baseline.threadId(), fixture.toolInvocationId, 1, oldLease);
       ExecutionExitFact oldRemoteFact =
           ToolProcessorTestSupport.registerRemoteExit(
               fixture.store,
               fixture.baseline.threadId(),
               fixture.toolInvocationId,
               1,
-              "old-token",
+              oldLease,
               oldToolFact.executionId(),
               ToolProcessorTestSupport.ENV_ID);
 

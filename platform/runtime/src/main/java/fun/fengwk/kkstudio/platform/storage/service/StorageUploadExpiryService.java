@@ -69,7 +69,7 @@ final class StorageUploadExpiryService {
    */
   int expireOnce() {
     long scanTtl = settingsSnapshot.get().storageMedia().uploadExpiresSeconds();
-    String cleanupToken = UUID.randomUUID().toString();
+    UUID cleanupToken = UUID.randomUUID();
     List<UUID> candidates =
         transactionTemplate.execute(
             status -> {
@@ -104,7 +104,7 @@ final class StorageUploadExpiryService {
    *
    * <p>这里现读一份 TTL 快照：扫描之后、claim 之前发生的 extend 会让本行不再过期从而被跳过（不误删）；已请求清理或已 claim 的行不受 TTL 影响，只用于把清理续完。
    */
-  private boolean cleanupClaimedUpload(UUID uploadId, String cleanupToken) {
+  private boolean cleanupClaimedUpload(UUID uploadId, UUID cleanupToken) {
     Instant claimNow = clock.instant();
     long uploadTtl = settingsSnapshot.get().storageMedia().uploadExpiresSeconds();
     StorageUpload claimed =
@@ -205,7 +205,7 @@ final class StorageUploadExpiryService {
     cleanupUnusedCandidate(upload);
   }
 
-  private boolean finalizeClaimed(StorageUpload upload, String cleanupToken) {
+  private boolean finalizeClaimed(StorageUpload upload, UUID cleanupToken) {
     Boolean finalized =
         transactionTemplate.execute(
             status -> {

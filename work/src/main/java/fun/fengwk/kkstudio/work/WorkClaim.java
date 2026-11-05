@@ -10,7 +10,7 @@ import java.util.UUID;
 public record WorkClaim(
     UUID targetId,
     long claimedWakeVersion,
-    String leaseToken,
+    UUID leaseToken,
     Instant leaseUntil,
     UUID requiredEnvironmentId) {
 
@@ -24,7 +24,7 @@ public record WorkClaim(
   }
 
   /** 无环境亲和性的 claim。 */
-  public WorkClaim(UUID targetId, long claimedWakeVersion, String leaseToken, Instant leaseUntil) {
+  public WorkClaim(UUID targetId, long claimedWakeVersion, UUID leaseToken, Instant leaseUntil) {
     this(targetId, claimedWakeVersion, leaseToken, leaseUntil, null);
   }
 }

@@ -1296,14 +1296,21 @@ public abstract class HarnessStoreJoinContract {
     UUID threadId = baseline.threadId();
     UUID invocationId = TestIds.id(810);
     ExecutionExitFact first =
-        fact(TestIds.id(811), threadId, invocationId, 1, "lease-1", ExecutionExitKind.TOOL, null);
+        fact(
+            TestIds.id(811),
+            threadId,
+            invocationId,
+            1,
+            UUID.randomUUID(),
+            ExecutionExitKind.TOOL,
+            null);
     ExecutionExitFact remote =
         fact(
             TestIds.id(812),
             threadId,
             invocationId,
             1,
-            "lease-1",
+            first.ownerLeaseToken(),
             ExecutionExitKind.REMOTE,
             first.executionId());
     store.transaction(
@@ -1320,7 +1327,7 @@ public abstract class HarnessStoreJoinContract {
             threadId,
             invocationId,
             1,
-            "lease-2",
+            UUID.randomUUID(),
             ExecutionExitKind.TOOL,
             null);
     IllegalArgumentException replacedIdentity =
@@ -1391,7 +1398,14 @@ public abstract class HarnessStoreJoinContract {
     UUID threadId = baseline.threadId();
     UUID invocationId = TestIds.id(820);
     ExecutionExitFact exitFact =
-        fact(TestIds.id(821), threadId, invocationId, 1, "lease-1", ExecutionExitKind.TOOL, null);
+        fact(
+            TestIds.id(821),
+            threadId,
+            invocationId,
+            1,
+            UUID.randomUUID(),
+            ExecutionExitKind.TOOL,
+            null);
     store.transaction(
         tx -> {
           tx.threads().lock(threadId);
@@ -1452,14 +1466,20 @@ public abstract class HarnessStoreJoinContract {
     UUID threadId = baseline.threadId();
     ExecutionExitFact tool =
         fact(
-            TestIds.id(830), threadId, TestIds.id(831), 1, "lease-1", ExecutionExitKind.TOOL, null);
+            TestIds.id(830),
+            threadId,
+            TestIds.id(831),
+            1,
+            UUID.randomUUID(),
+            ExecutionExitKind.TOOL,
+            null);
     ExecutionExitFact model =
         fact(
             TestIds.id(832),
             threadId,
             TestIds.id(833),
             1,
-            "lease-1",
+            UUID.randomUUID(),
             ExecutionExitKind.DRIVER,
             null);
     ExecutionExitFact remote =
@@ -1468,7 +1488,7 @@ public abstract class HarnessStoreJoinContract {
             threadId,
             TestIds.id(831),
             1,
-            "lease-1",
+            tool.ownerLeaseToken(),
             ExecutionExitKind.REMOTE,
             tool.executionId());
     store.transaction(
@@ -1518,19 +1538,25 @@ public abstract class HarnessStoreJoinContract {
             threadId,
             TestIds.id(831),
             1,
-            "lease-1",
+            wrongKindParent.ownerLeaseToken(),
             ExecutionExitKind.REMOTE,
             wrongKindParent.executionId());
     ExecutionExitFact otherLeaseParent =
         fact(
-            TestIds.id(838), threadId, TestIds.id(839), 1, "lease-3", ExecutionExitKind.TOOL, null);
+            TestIds.id(838),
+            threadId,
+            TestIds.id(839),
+            1,
+            UUID.randomUUID(),
+            ExecutionExitKind.TOOL,
+            null);
     ExecutionExitFact wrongIdentityRemote =
         fact(
             TestIds.id(840),
             threadId,
             TestIds.id(839),
             1,
-            "lease-4",
+            UUID.randomUUID(),
             ExecutionExitKind.REMOTE,
             otherLeaseParent.executionId());
     store.transaction(
@@ -1574,7 +1600,7 @@ public abstract class HarnessStoreJoinContract {
             threadId,
             TestIds.id(842),
             1,
-            "lease-agent",
+            AGENT_LEASE,
             ExecutionExitKind.DRIVER,
             null);
     ExecutionExitFact agentRemote =
@@ -1583,7 +1609,7 @@ public abstract class HarnessStoreJoinContract {
             threadId,
             TestIds.id(842),
             1,
-            "lease-agent",
+            AGENT_LEASE,
             ExecutionExitKind.REMOTE,
             agentParent.executionId());
     store.transaction(
@@ -1616,7 +1642,7 @@ public abstract class HarnessStoreJoinContract {
             threadId,
             invocationId,
             1,
-            "lease-old",
+            UUID.randomUUID(),
             ExecutionExitKind.DRIVER,
             null);
     ExecutionExitFact newGeneration =
@@ -1625,7 +1651,7 @@ public abstract class HarnessStoreJoinContract {
             threadId,
             invocationId,
             2,
-            "lease-new",
+            UUID.randomUUID(),
             ExecutionExitKind.DRIVER,
             null);
     store.transaction(
@@ -1675,14 +1701,21 @@ public abstract class HarnessStoreJoinContract {
     UUID threadId = baseline.threadId();
     UUID invocationId = TestIds.id(820);
     ExecutionExitFact local =
-        fact(TestIds.id(821), threadId, invocationId, 1, "lease-1", ExecutionExitKind.TOOL, null);
+        fact(
+            TestIds.id(821),
+            threadId,
+            invocationId,
+            1,
+            UUID.randomUUID(),
+            ExecutionExitKind.TOOL,
+            null);
     ExecutionExitFact remote =
         fact(
             TestIds.id(822),
             threadId,
             invocationId,
             1,
-            "lease-1",
+            local.ownerLeaseToken(),
             ExecutionExitKind.REMOTE,
             local.executionId());
     store.transaction(
@@ -1710,6 +1743,7 @@ public abstract class HarnessStoreJoinContract {
     assertEquals("only a remote execution can be remote-acknowledged", failure.getMessage());
   }
 
+  private static final UUID AGENT_LEASE = UUID.randomUUID();
   private static final EnvironmentId ENV_1 = EnvironmentId.of(TestIds.id(901));
   private static final EnvironmentId ENV_2 = EnvironmentId.of(TestIds.id(902));
 
@@ -1718,7 +1752,7 @@ public abstract class HarnessStoreJoinContract {
       UUID threadId,
       UUID invocationId,
       int attempt,
-      String lease,
+      UUID lease,
       ExecutionExitKind kind,
       UUID parentExecutionId) {
     return fact(
@@ -1738,7 +1772,7 @@ public abstract class HarnessStoreJoinContract {
       UUID threadId,
       UUID invocationId,
       int attempt,
-      String lease,
+      UUID lease,
       ExecutionExitKind kind,
       UUID parentExecutionId,
       EnvironmentId environmentId,
@@ -1767,14 +1801,21 @@ public abstract class HarnessStoreJoinContract {
     UUID threadId = baseline.threadId();
     UUID invocationId = TestIds.id(830);
     ExecutionExitFact parent =
-        fact(TestIds.id(831), threadId, invocationId, 1, "lease-1", ExecutionExitKind.TOOL, null);
+        fact(
+            TestIds.id(831),
+            threadId,
+            invocationId,
+            1,
+            UUID.randomUUID(),
+            ExecutionExitKind.TOOL,
+            null);
     ExecutionExitFact remoteEnv1Early =
         fact(
             TestIds.id(832),
             threadId,
             invocationId,
             1,
-            "lease-1",
+            parent.ownerLeaseToken(),
             ExecutionExitKind.REMOTE,
             parent.executionId(),
             ENV_1,
@@ -1785,7 +1826,7 @@ public abstract class HarnessStoreJoinContract {
             threadId,
             invocationId,
             1,
-            "lease-1",
+            parent.ownerLeaseToken(),
             ExecutionExitKind.REMOTE,
             parent.executionId(),
             ENV_1,
@@ -1796,7 +1837,7 @@ public abstract class HarnessStoreJoinContract {
             threadId,
             invocationId,
             1,
-            "lease-1",
+            parent.ownerLeaseToken(),
             ExecutionExitKind.REMOTE,
             parent.executionId(),
             ENV_2,
@@ -1853,14 +1894,21 @@ public abstract class HarnessStoreJoinContract {
     assertTrue(zeroFacts.isEmpty(), "未登记时应返回空列表");
 
     ExecutionExitFact parentAttempt1 =
-        fact(TestIds.id(842), threadId, invocationId, 1, "lease-1", ExecutionExitKind.TOOL, null);
+        fact(
+            TestIds.id(842),
+            threadId,
+            invocationId,
+            1,
+            UUID.randomUUID(),
+            ExecutionExitKind.TOOL,
+            null);
     ExecutionExitFact remote1 =
         fact(
             TestIds.id(843),
             threadId,
             invocationId,
             1,
-            "lease-1",
+            parentAttempt1.ownerLeaseToken(),
             ExecutionExitKind.REMOTE,
             parentAttempt1.executionId(),
             ENV_1,
@@ -1892,7 +1940,7 @@ public abstract class HarnessStoreJoinContract {
             threadId,
             invocationId,
             1,
-            "lease-1",
+            parentAttempt1.ownerLeaseToken(),
             ExecutionExitKind.REMOTE,
             parentAttempt1.executionId(),
             ENV_1,

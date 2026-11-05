@@ -108,7 +108,7 @@ class PluginConfigSyncIntegrationTest extends ConfigSyncTestSupport {
   void importAppliesPluginsTogetherWithOtherKinds() throws Exception {
     Map<String, String> plugins = installedPluginValues();
     String pluginId = plugins.keySet().iterator().next();
-    long revisionBefore = pluginRow(snapshotReader.read(), pluginId).revision();
+    long revisionBefore = pluginRow(snapshotReader.read(), pluginId).version();
 
     String yaml =
         mutateYaml(
@@ -125,7 +125,7 @@ class PluginConfigSyncIntegrationTest extends ConfigSyncTestSupport {
 
     ConfigSyncSnapshot after = snapshotReader.read();
     PluginConfigurationRow row = pluginRow(after, pluginId);
-    assertEquals(revisionBefore + 1, row.revision(), "exactly one plugin write");
+    assertEquals(revisionBefore + 1, row.version(), "exactly one plugin write");
     assertEquals(plugins.get(pluginId), row.valuesJson());
     assertNotEquals(
         "CONNECTED",
@@ -167,12 +167,12 @@ class PluginConfigSyncIntegrationTest extends ConfigSyncTestSupport {
 
     // 并发写入：按计划期的修订保存一次普通配置。
     pluginManagementService.updateConfiguration(
-        pluginId, row.revision(), row.valuesJson(), Map.of());
+        pluginId, row.version(), row.valuesJson(), Map.of());
 
     assertThrows(AiVersionConflictException.class, () -> applier.apply(plan));
 
     ConfigSyncSnapshot after = snapshotReader.read();
-    assertEquals(row.revision() + 1, pluginRow(after, pluginId).revision());
+    assertEquals(row.version() + 1, pluginRow(after, pluginId).version());
     assertFalse(
         providerNames(after).contains(CAS_PROVIDER),
         "the earlier provider write must be rolled back when the plugin revision CAS fails");

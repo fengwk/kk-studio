@@ -250,8 +250,8 @@ create table skill_package (
     manifest         jsonb          not null,
     published_at     timestamptz(3) not null,
     version          bigint         not null default 0,
-    create_time      timestamptz(3) not null default current_timestamp,
-    update_time      timestamptz(3) not null default current_timestamp,
+    created_at       timestamptz(3) not null default current_timestamp,
+    updated_at       timestamptz(3) not null default current_timestamp,
     constraint pk_skill_package primary key (package_name),
     constraint ck_skill_package_name check (
         package_name collate "C" ~ '^[a-z0-9]+(-[a-z0-9]+)*$'
@@ -272,7 +272,7 @@ create table skill_package (
     constraint ck_skill_package_manifest check (jsonb_typeof(manifest) = 'object'),
     constraint ck_skill_package_published_at check (published_at is not null),
     constraint ck_skill_package_version check (version >= 0),
-    constraint ck_skill_package_time_order check (update_time >= create_time)
+    constraint ck_skill_package_time_order check (updated_at >= created_at)
 );
 
 comment on table skill_package is 'Platform 全局 Skill Package 当前版本：每个 packageName 恰一行，保存当前版本号、规范化 ZIP 归档引用、从归档读出的 Skill 清单与发布时刻；不保留历史版本';
@@ -283,8 +283,8 @@ comment on column skill_package.artifact_blob_id is '当前版本规范化 ZIP �
 comment on column skill_package.manifest is '从最终 ZIP 读出的 Skill 清单（JSON object {skills:[{name,description}]}，按 name 排序）；不信任客户端提交的结构';
 comment on column skill_package.published_at is '当前版本发布时间（毫秒精度）';
 comment on column skill_package.version is 'CAS 乐观锁版本：非负，从 0 开始，实际事实变化时 +1';
-comment on column skill_package.create_time is '创建时间（毫秒精度）';
-comment on column skill_package.update_time is '最后更新时间（毫秒精度），应用侧维护';
+comment on column skill_package.created_at is '创建时间（毫秒精度）';
+comment on column skill_package.updated_at is '最后更新时间（毫秒精度），应用侧维护';
 
 create table skill_package_git_source (
     package_name   varchar(64)   not null,
@@ -341,21 +341,21 @@ comment on column skill_package_git_source.check_error is '最近一次检查的
 -- -----------------------------------------------------------------------------
 -- 构建期 Plugin 的普通配置与凭据
 --
--- plugin_configuration 每个已安装 Plugin 一行当前普通配置；revision 每次保存 +1，供写入 CAS。
+-- plugin_configuration 每个已安装 Plugin 一行当前普通配置；version 每次保存 +1，供写入 CAS。
 -- plugin_credential 每个已认证 Plugin 一行凭据（静态密钥或交互凭据），未认证时无行，断连即删除。
 -- 凭据载荷按可信单用户部署模型明文保存；管理查询永不返回 payload_json。
 -- -----------------------------------------------------------------------------
 
 create table plugin_configuration (
     plugin_id   varchar(64)    primary key,
-    revision    bigint         not null,
+    version     bigint         not null,
     values_json text           not null,
     created_at  timestamptz(3) not null default current_timestamp,
     updated_at  timestamptz(3) not null default current_timestamp,
     constraint ck_plugin_configuration_plugin_id check (
         plugin_id ~ '^[a-z0-9]+([.-][a-z0-9]+)*$'
     ),
-    constraint ck_plugin_configuration_revision check (revision > 0),
+    constraint ck_plugin_configuration_version check (version > 0),
     constraint ck_plugin_configuration_values_object check (
         values_json is json object with unique keys
     ),
@@ -367,7 +367,7 @@ create table plugin_configuration (
 
 comment on table plugin_configuration is '已安装 Plugin 的当前普通配置：每个 Plugin 一行，秘密不进入本表';
 comment on column plugin_configuration.plugin_id is 'Plugin 安装身份，与 classpath 中的 StudioPlugin.pluginId 对齐';
-comment on column plugin_configuration.revision is '配置修订：首次写入为 1，每次保存 +1，写入以它做 CAS';
+comment on column plugin_configuration.version is '配置修订：首次写入为 1，每次保存 +1，写入以它做 CAS';
 comment on column plugin_configuration.values_json is '按插件 Schema 归一化后的严格 JSON object 文本（≤64 KiB）';
 
 create table plugin_credential (
@@ -379,7 +379,7 @@ create table plugin_credential (
     status              varchar(32)    not null,
     last_refreshed_at   timestamptz(3),
     last_refresh_error  text,
-    refresh_lease_token varchar(128),
+    refresh_lease_token uuid,
     refresh_lease_until timestamptz(3),
     version             bigint         not null default 0,
     created_at          timestamptz(3) not null default current_timestamp,
@@ -416,23 +416,23 @@ comment on column plugin_credential.region is '交互凭据的 region 路由元�
 comment on column plugin_credential.expires_at is '交互凭据的本地失效时刻；静态密钥为 null';
 comment on column plugin_credential.next_refresh_at is '下一次刷新时刻；静态密钥为 null，因此永不被领取';
 comment on column plugin_credential.status is '状态：CONNECTED, REFRESH_FAILED, REFRESH_UNCERTAIN, REAUTH_REQUIRED';
-comment on column plugin_credential.refresh_lease_token is '跨节点刷新租约令牌，与 refresh_lease_until 成对';
+comment on column plugin_credential.refresh_lease_token is '跨节点刷新租约令牌 UUID，与 refresh_lease_until 成对';
 comment on column plugin_credential.version is 'CAS 版本：每次写入 +1；调用期拒绝与刷新终结都匹配它';
 
 create index idx_plugin_credential_refresh_due
     on plugin_credential (next_refresh_at);
 
 -- Plugin 交互式认证的待完成 attempt：每个 Plugin 至多一个，新的 prepare 直接替换旧的。
--- 只存 nonce 的 SHA-256 摘要与 prepare 时的配置修订；complete 以单条条件删除原子消费。
+-- 只存 nonce 的 SHA-256 摘要与 prepare 时的配置版本；complete 以单条条件删除原子消费。
 create table plugin_auth_attempt (
     plugin_id       varchar(64)    primary key,
     nonce_hash      char(64)       not null,
-    config_revision bigint         not null,
+    config_version  bigint         not null,
     region          varchar(64)    not null,
     expires_at      timestamptz(3) not null,
     created_at      timestamptz(3) not null default current_timestamp,
     constraint ck_plugin_auth_attempt_nonce_hash check (nonce_hash ~ '^[0-9a-f]{64}$'),
-    constraint ck_plugin_auth_attempt_config_revision check (config_revision > 0),
+    constraint ck_plugin_auth_attempt_config_version check (config_version > 0),
     constraint ck_plugin_auth_attempt_region check (char_length(region) between 1 and 64)
 );
 
@@ -795,9 +795,9 @@ create table cluster_node (
     instance_id  uuid           primary key,
     internal_url varchar(512)   not null,
     lease_until  timestamptz(3) not null,
-    last_seen    timestamptz(3) not null,
+    last_seen_at timestamptz(3) not null,
     constraint ck_cluster_node_lease check (
-        lease_until > last_seen
+        lease_until > last_seen_at
     )
 );
 
@@ -805,7 +805,7 @@ comment on table cluster_node is 'App 节点内部 IDE 路由注册表：节点�
 comment on column cluster_node.instance_id is '节点实例 UUID（PK），与 environment_connection.owner_node_id 对应';
 comment on column cluster_node.internal_url is '该节点对外可达的 HTTP(S) origin，仅用于内部单跳转发';
 comment on column cluster_node.lease_until is '注册租约到期时间（毫秒精度），过期节点的路由不被选中';
-comment on column cluster_node.last_seen is '最后一次心跳时间（毫秒精度），必须早于 lease_until';
+comment on column cluster_node.last_seen_at is '最后一次心跳时间（毫秒精度），必须早于 lease_until';
 
 ------------------------------------------------------------------------------
 -- 1c. Singleton system settings (id=1)
@@ -1278,7 +1278,7 @@ create table durable_work (
     target_id uuid not null,
     available_at timestamptz(3) not null,
     wake_version bigint not null check (wake_version > 0),
-    lease_token varchar(128),
+    lease_token uuid,
     lease_until timestamptz(3),
     required_environment_id uuid,
     primary key (target_type, target_id),
@@ -1289,10 +1289,6 @@ create table durable_work (
     ),
     constraint ck_durable_work_lease_pair check (
         (lease_token is null) = (lease_until is null)
-    ),
-    constraint ck_durable_work_lease_token check (
-        lease_token is null
-        or (length(lease_token) > 0 and btrim(lease_token) = lease_token)
     )
 );
 
@@ -1301,7 +1297,7 @@ comment on column durable_work.target_type is '模块定义的 target 类型，1
 comment on column durable_work.target_id is 'target 实体的 UUID（与 target_type 构成主键）';
 comment on column durable_work.available_at is '最早可被 claim 的时间（毫秒精度）';
 comment on column durable_work.wake_version is 'wake 计数（从 1 递增）';
-comment on column durable_work.lease_token is '当前 lease token（与 lease_until 同时存在或同时缺失）';
+comment on column durable_work.lease_token is '当前 lease token UUID（与 lease_until 同时存在或同时缺失）';
 comment on column durable_work.lease_until is '当前 lease 到期时间（毫秒精度）';
 comment on column durable_work.required_environment_id is '执行该 Work 所需 Environment 的全局唯一 UUID；非空时仅持有该 environment READY 连接租约的节点可 claim';
 
@@ -1421,7 +1417,7 @@ create table harness_execution_exit (
     thread_id uuid not null,
     invocation_id uuid not null,
     attempt integer not null check (attempt >= 1),
-    owner_lease_token varchar(128) not null,
+    owner_lease_token uuid not null,
     kind varchar(16) not null,
     parent_execution_id uuid,
     environment_id uuid,
@@ -1432,9 +1428,6 @@ create table harness_execution_exit (
     constraint fk_harness_execution_exit_thread foreign key (thread_id) references harness_thread (id),
     constraint fk_harness_execution_exit_parent foreign key (parent_execution_id)
         references harness_execution_exit (execution_id),
-    constraint ck_harness_execution_exit_token check (
-        char_length(owner_lease_token) > 0 and owner_lease_token = btrim(owner_lease_token)
-    ),
     constraint ck_harness_execution_exit_kind check (
         kind in ('DRIVER', 'TOOL', 'REMOTE')
     ),
@@ -1452,7 +1445,7 @@ comment on column harness_execution_exit.execution_id is '这一具体执行代�
 comment on column harness_execution_exit.thread_id is '所属 Thread；按 Thread 查询，不依赖 open turn';
 comment on column harness_execution_exit.invocation_id is '关联的逻辑 Driver 或 Tool invocation';
 comment on column harness_execution_exit.attempt is '该 invocation 的具体执行代次，从 1 开始';
-comment on column harness_execution_exit.owner_lease_token is '登记时持有的 Work lease token';
+comment on column harness_execution_exit.owner_lease_token is '登记时持有的 Work lease token UUID';
 comment on column harness_execution_exit.kind is 'DRIVER、TOOL 或挂在本地 TOOL/DRIVER 代次上的 REMOTE';
 comment on column harness_execution_exit.parent_execution_id is 'REMOTE 关联的本地 TOOL 或 DRIVER 执行代次；本地执行为空';
 comment on column harness_execution_exit.environment_id is 'REMOTE 执行关联的远端 Environment 标识；本地执行为空';
@@ -1835,7 +1828,7 @@ create table storage_upload (
     declared_size       bigint         not null,
     declared_sha256     char(64)       not null,
     cleanup_requested_at timestamptz(3),
-    cleanup_token       varchar(128),
+    cleanup_token       uuid,
     cleanup_until       timestamptz(3),
     created_at          timestamptz(3) not null default current_timestamp,
     constraint uk_storage_upload_candidate unique (candidate_blob_id),
@@ -1845,13 +1838,6 @@ create table storage_upload (
     constraint ck_storage_upload_sha256 check (declared_sha256 ~ '^[0-9a-f]{64}$'),
     constraint ck_storage_upload_cleanup_pair check (
         (cleanup_token is null) = (cleanup_until is null)
-    ),
-    constraint ck_storage_upload_cleanup_token check (
-        cleanup_token is null or (
-            btrim(cleanup_token) <> ''
-            and cleanup_token = btrim(cleanup_token)
-            and char_length(cleanup_token) <= 128
-        )
     ),
     constraint fk_storage_upload_blob foreign key (blob_id)
         references storage_blob (id) on delete restrict
@@ -1911,7 +1897,7 @@ comment on column storage_upload.cleanup_requested_at is
     'Durable explicit cleanup request; NULL for active uploads and retained until'
     ' maintenance removes the upload row.';
 comment on column storage_upload.cleanup_token is
-    'Opaque cleanup ownership token; NULL when unclaimed and fenced on finalize/release.';
+    'Cleanup ownership token UUID; NULL when unclaimed and fenced on finalize/release.';
 comment on column storage_upload.cleanup_until is
     'Cleanup lease deadline paired with cleanup_token; an expired lease is reclaimable.';
 comment on column storage_upload.created_at is

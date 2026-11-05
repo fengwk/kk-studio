@@ -149,7 +149,7 @@ public class StorageUploadRepository {
   }
 
   /** 按 id claim 指定清理事实；不能抢占有效 lease。 */
-  public StorageUpload claimById(UUID id, Instant now, Instant leaseUntil, String cleanupToken) {
+  public StorageUpload claimById(UUID id, Instant now, Instant leaseUntil, UUID cleanupToken) {
     return jdbcClient
         .sql(CLAIM_BY_ID_SQL)
         .param("cleanupToken", cleanupToken)
@@ -162,7 +162,7 @@ public class StorageUploadRepository {
   }
 
   /** token-fenced 删除 PENDING 清理事实。 */
-  public boolean finalizePending(UUID id, String cleanupToken) {
+  public boolean finalizePending(UUID id, UUID cleanupToken) {
     return jdbcClient
             .sql(
                 """
@@ -176,7 +176,7 @@ public class StorageUploadRepository {
   }
 
   /** token/blob-fenced 删除 READY 清理事实；成功后调用方在同一短事务 release blob。 */
-  public boolean finalizeReady(UUID id, UUID blobId, String cleanupToken) {
+  public boolean finalizeReady(UUID id, UUID blobId, UUID cleanupToken) {
     return jdbcClient
             .sql(
                 """
@@ -191,7 +191,7 @@ public class StorageUploadRepository {
   }
 
   /** token-fenced 主动释放 cleanup lease。 */
-  public boolean releaseCleanupClaim(UUID id, String cleanupToken) {
+  public boolean releaseCleanupClaim(UUID id, UUID cleanupToken) {
     return jdbcClient
             .sql(
                 """
@@ -220,7 +220,7 @@ public class StorageUploadRepository {
     upload.setDeclaredSha256(rs.getString("declared_sha256"));
     upload.setCleanupRequestedAt(
         PostgresJdbcTypes.toInstant(rs.getObject("cleanup_requested_at", OffsetDateTime.class)));
-    upload.setCleanupToken(rs.getString("cleanup_token"));
+    upload.setCleanupToken(rs.getObject("cleanup_token", UUID.class));
     upload.setCleanupUntil(
         PostgresJdbcTypes.toInstant(rs.getObject("cleanup_until", OffsetDateTime.class)));
     upload.setCreateTime(

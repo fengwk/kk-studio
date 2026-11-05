@@ -71,6 +71,8 @@ import java.util.UUID;
 @Import(CanvasFunctionRuntimeFoundationTest.FoundationConfiguration.class)
 class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport {
 
+  private static final UUID STALE_LEASE = UUID.randomUUID();
+
   private static final String REQUEST_1 = "00000000-0000-0000-0000-000000000101";
   private static final String REQUEST_2 = "00000000-0000-0000-0000-000000000102";
   private static final CanvasTransform TRANSFORM = new CanvasTransform(0, 0, 100, 80);
@@ -609,7 +611,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
     UUID targetNodeId = addFunctionNode(canvasId, "target", configWithReference(sourceNodeId));
     CanvasResource source = addBlobResource(canvasId, sourceNodeId, 0, UUID.randomUUID());
 
-    ClaimedRun claim = claimStartedRun(canvasId, targetNodeId, REQUEST_1, "foundation-success");
+    ClaimedRun claim = claimStartedRun(canvasId, targetNodeId, REQUEST_1, UUID.randomUUID());
     CanvasFunctionFrozenRun frozen = decode(claim.run());
     assertEquals(source.blobId(), frozen.manifest().get(0).blobId());
     assertEquals(3L, frozen.manifest().get(0).sizeBytes());
@@ -647,7 +649,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
     assertEquals(1, pinRepository.findByRun(canvasId, targetNodeId, ready.requestId()).size());
 
     // 2. Worker 认领 Run
-    ClaimedRun claim = workStore.claimNext(Duration.ofSeconds(30), "worker-1").orElseThrow();
+    ClaimedRun claim = workStore.claimNext(Duration.ofSeconds(30), UUID.randomUUID()).orElseThrow();
     CanvasFunctionFrozenRun frozen = decode(claim.run());
 
     // 3. beginSubmit 持久化提交意图 (SUBMITTING)
@@ -697,7 +699,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
     UUID targetNodeId = addFunctionNode(canvasId, "target", configWithReference(sourceNodeId));
     addBlobResource(canvasId, sourceNodeId, 0, UUID.randomUUID());
 
-    ClaimedRun claim = claimStartedRun(canvasId, targetNodeId, REQUEST_1, "worker-submitting");
+    ClaimedRun claim = claimStartedRun(canvasId, targetNodeId, REQUEST_1, UUID.randomUUID());
     CanvasFunctionFrozenRun frozen = decode(claim.run());
     CanvasResource target =
         materializeTarget(canvasId, targetNodeId, frozen.requestId(), frozen.output(0));
@@ -757,7 +759,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
 
     // 再次领取执行：已处于 SUBMITTED，直接 execute 物化并 completeSuccess
     ClaimedRun resumedClaim =
-        workStore.claimNext(Duration.ofSeconds(30), "worker-resumed").orElseThrow();
+        workStore.claimNext(Duration.ofSeconds(30), UUID.randomUUID()).orElseThrow();
     assertTrue(
         runtimeTransactions.completeSuccess(
             decode(resumedClaim.run()),
@@ -778,7 +780,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
     addBlobResource(canvasId, sourceNodeId, 0, UUID.randomUUID());
 
     // 1. 测试 UNKNOWN -> FAILED
-    ClaimedRun claim1 = claimStartedRun(canvasId, targetNodeId, REQUEST_1, "worker-failed");
+    ClaimedRun claim1 = claimStartedRun(canvasId, targetNodeId, REQUEST_1, UUID.randomUUID());
     CanvasFunctionFrozenRun frozen1 = decode(claim1.run());
     CanvasResource target1 =
         materializeTarget(canvasId, targetNodeId, frozen1.requestId(), frozen1.output(0));
@@ -815,7 +817,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
     // 2. 测试 UNKNOWN -> CANCELLED
     CanvasFunctionRun replacement = startRun(canvasId, targetNodeId, REQUEST_2).run();
     ClaimedRun claim2 =
-        workStore.claimNext(Duration.ofSeconds(30), "worker-cancelled").orElseThrow();
+        workStore.claimNext(Duration.ofSeconds(30), UUID.randomUUID()).orElseThrow();
     CanvasFunctionFrozenRun frozen2 = decode(claim2.run());
     CanvasResource target2 =
         materializeTarget(canvasId, targetNodeId, frozen2.requestId(), frozen2.output(0));
@@ -853,7 +855,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
   void completeSuccessRejectsMismatchAndStaleTokens() {
     UUID canvasId = addDocument();
     UUID nodeId = addFunctionNode(canvasId, "output", configWithoutReferences());
-    ClaimedRun claim = claimStartedRun(canvasId, nodeId, REQUEST_1, "worker-fencing");
+    ClaimedRun claim = claimStartedRun(canvasId, nodeId, REQUEST_1, UUID.randomUUID());
     CanvasFunctionFrozenRun frozen = decode(claim.run());
     CanvasResource target =
         materializeTarget(canvasId, nodeId, frozen.requestId(), frozen.output(0));
@@ -881,11 +883,9 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
 
     // 失效租约写回返回 false，状态保持 RUNNING
     assertFalse(
-        runtimeTransactions.completeSuccess(
-            frozen, "stale-lease-token", frozen.outputResourceIds()));
+        runtimeTransactions.completeSuccess(frozen, STALE_LEASE, frozen.outputResourceIds()));
     assertFalse(
-        runtimeTransactions.markUnknown(
-            nodeId, REQUEST_1, "stale-lease-token", "stale unknown reason"));
+        runtimeTransactions.markUnknown(nodeId, REQUEST_1, STALE_LEASE, "stale unknown reason"));
 
     CanvasFunctionRun runInDb = runRepository.findByNodeId(nodeId).orElseThrow();
     assertEquals(CanvasFunctionRunStatus.RUNNING, runInDb.status());
@@ -927,7 +927,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
   void checkpointRollbackLeavesRunAndVersionUntouched() {
     UUID canvasId = addDocument();
     UUID nodeId = addFunctionNode(canvasId, "output", configWithoutReferences());
-    ClaimedRun claim = claimStartedRun(canvasId, nodeId, REQUEST_1, "foundation-rollback");
+    ClaimedRun claim = claimStartedRun(canvasId, nodeId, REQUEST_1, UUID.randomUUID());
     long versionAfterStart = version(canvasId);
 
     TransactionTemplate template = new TransactionTemplate(transactionManager);
@@ -957,7 +957,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
   void checkpointAndFailureRequireTheCurrentLease() {
     UUID canvasId = addDocument();
     UUID nodeId = addFunctionNode(canvasId, "output", configWithoutReferences());
-    ClaimedRun claim = claimStartedRun(canvasId, nodeId, REQUEST_1, "foundation-fencing");
+    ClaimedRun claim = claimStartedRun(canvasId, nodeId, REQUEST_1, UUID.randomUUID());
 
     runtimeTransactions.checkpoint(
         canvasId, nodeId, REQUEST_1, claim.leaseToken(), "SUBMITTED", Map.of("jobId", "job"));
@@ -966,8 +966,10 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
     assertThrows(
         CanvasFunctionInternalCancellation.class,
         () ->
-            runtimeTransactions.checkpoint(canvasId, nodeId, REQUEST_1, "stale", "LATE", Map.of()));
-    assertFalse(runtimeTransactions.failIfRunning(nodeId, REQUEST_1, "stale", "ignored failure"));
+            runtimeTransactions.checkpoint(
+                canvasId, nodeId, REQUEST_1, STALE_LEASE, "LATE", Map.of()));
+    assertFalse(
+        runtimeTransactions.failIfRunning(nodeId, REQUEST_1, STALE_LEASE, "ignored failure"));
     assertTrue(
         runtimeTransactions.failIfRunning(nodeId, REQUEST_1, claim.leaseToken(), "safe failure"));
     CanvasFunctionRun failed = runRepository.findByNodeId(nodeId).orElseThrow();
@@ -982,12 +984,13 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
   void completeSuccessWithStaleLeaseIsANoOp() {
     UUID canvasId = addDocument();
     UUID nodeId = addFunctionNode(canvasId, "output", configWithoutReferences());
-    ClaimedRun claim = claimStartedRun(canvasId, nodeId, REQUEST_1, "foundation-success-fence");
+    ClaimedRun claim = claimStartedRun(canvasId, nodeId, REQUEST_1, UUID.randomUUID());
     CanvasFunctionFrozenRun frozen = decode(claim.run());
     CanvasResource target =
         materializeTarget(canvasId, nodeId, frozen.requestId(), frozen.output(0));
 
-    assertFalse(runtimeTransactions.completeSuccess(frozen, "stale", frozen.outputResourceIds()));
+    assertFalse(
+        runtimeTransactions.completeSuccess(frozen, STALE_LEASE, frozen.outputResourceIds()));
     CanvasFunctionRun current = runRepository.findByNodeId(nodeId).orElseThrow();
     assertEquals(CanvasFunctionRunStatus.RUNNING, current.status());
     assertTrue(runRepository.holdsLease(current.nodeId(), claim.leaseToken()));
@@ -1000,7 +1003,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
   void terminalWritebacksStopAfterNodeIsNoLongerAFunction() {
     UUID canvasId = addDocument();
     UUID nodeId = addFunctionNode(canvasId, "output", configWithoutReferences());
-    ClaimedRun claim = claimStartedRun(canvasId, nodeId, REQUEST_1, "foundation-node-fence");
+    ClaimedRun claim = claimStartedRun(canvasId, nodeId, REQUEST_1, UUID.randomUUID());
     CanvasFunctionFrozenRun frozen = decode(claim.run());
     jdbc.update("update canvas_node set \"function\" = null where id = ?", nodeId);
 
@@ -1020,7 +1023,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
   void completeSuccessRejectsInvalidOrUnmaterializedTarget() {
     UUID canvasId = addDocument();
     UUID nodeId = addFunctionNode(canvasId, "output", configWithoutReferences());
-    ClaimedRun claim = claimStartedRun(canvasId, nodeId, REQUEST_1, "foundation-invalid-success");
+    ClaimedRun claim = claimStartedRun(canvasId, nodeId, REQUEST_1, UUID.randomUUID());
     CanvasFunctionFrozenRun frozen = decode(claim.run());
 
     assertThrows(
@@ -1049,7 +1052,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
   void checkpointCancelsAfterAggregateDisappears() {
     UUID canvasId = addDocument();
     UUID nodeId = addFunctionNode(canvasId, "output", configWithoutReferences());
-    ClaimedRun claim = claimStartedRun(canvasId, nodeId, REQUEST_1, "foundation-delete-fence");
+    ClaimedRun claim = claimStartedRun(canvasId, nodeId, REQUEST_1, UUID.randomUUID());
     jdbc.update("delete from canvas_function_resource_pin where node_id = ?", nodeId);
     jdbc.update("delete from canvas_function_run where node_id = ?", nodeId);
     jdbc.update("delete from canvas_node where id = ?", nodeId);
@@ -1078,7 +1081,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
         addFunctionNode(
             canvasId, "multi-media-node", MULTI_MEDIA_DEFINITION.name(), configWithoutReferences());
 
-    ClaimedRun claim = claimStartedRun(canvasId, nodeId, REQUEST_1, "worker-two-media");
+    ClaimedRun claim = claimStartedRun(canvasId, nodeId, REQUEST_1, UUID.randomUUID());
     CanvasFunctionFrozenRun frozen = decode(claim.run());
     assertEquals(2, frozen.outputs().size());
     CanvasFunctionFrozenOutput slot0 = frozen.output(0);
@@ -1128,7 +1131,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
         addFunctionNode(
             canvasId, "text-image-node", TEXT_IMAGE_DEFINITION.name(), configWithoutReferences());
 
-    ClaimedRun claim = claimStartedRun(canvasId, nodeId, REQUEST_1, "worker-text-image");
+    ClaimedRun claim = claimStartedRun(canvasId, nodeId, REQUEST_1, UUID.randomUUID());
     CanvasFunctionFrozenRun frozen = decode(claim.run());
     assertEquals(2, frozen.outputs().size());
     CanvasFunctionFrozenOutput slot0Text = frozen.output(0);
@@ -1197,7 +1200,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
             configWithoutReferences());
 
     // 1. Worker 1 认领并推进提交确认
-    ClaimedRun claim1 = claimStartedRun(canvasId, nodeId, REQUEST_1, "worker-1-crash");
+    ClaimedRun claim1 = claimStartedRun(canvasId, nodeId, REQUEST_1, UUID.randomUUID());
     CanvasFunctionFrozenRun initialFrozen = decode(claim1.run());
     CanvasFunctionFrozenRun submittingFrozen =
         runtimeTransactions.beginSubmit(initialFrozen, claim1.leaseToken());
@@ -1237,7 +1240,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
 
     // 3. Worker 2 重新认领
     ClaimedRun claim2 =
-        workStore.claimNext(Duration.ofSeconds(30), "worker-2-recovered").orElseThrow();
+        workStore.claimNext(Duration.ofSeconds(30), UUID.randomUUID()).orElseThrow();
     assertEquals(nodeId, claim2.nodeId());
     assertEquals(REQUEST_1, claim2.requestId().toString());
     CanvasFunctionFrozenRun frozen2 = decode(claim2.run());
@@ -1276,7 +1279,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
         addFunctionNode(
             canvasId, "dup-mat-node", TWO_IMAGES_DEFINITION.name(), configWithoutReferences());
 
-    ClaimedRun claim = claimStartedRun(canvasId, nodeId, REQUEST_1, "worker-dup-mat");
+    ClaimedRun claim = claimStartedRun(canvasId, nodeId, REQUEST_1, UUID.randomUUID());
     CanvasFunctionFrozenRun frozen = decode(claim.run());
     CanvasFunctionFrozenOutput slot0 = frozen.output(0);
 
@@ -1307,7 +1310,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
             TWO_IMAGES_DEFINITION.name(),
             configWithoutReferences());
 
-    ClaimedRun claim = claimStartedRun(canvasId, nodeId, REQUEST_1, "worker-missing-output");
+    ClaimedRun claim = claimStartedRun(canvasId, nodeId, REQUEST_1, UUID.randomUUID());
     CanvasFunctionFrozenRun frozen = decode(claim.run());
     CanvasFunctionFrozenOutput slot0 = frozen.output(0);
 
@@ -1360,13 +1363,13 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
     UUID node1 =
         addFunctionNode(
             canvasId, "node-1", TWO_IMAGES_DEFINITION.name(), configWithReference(sharedNodeId));
-    ClaimedRun claim1 = claimStartedRun(canvasId, node1, REQUEST_1, "worker-run-1");
+    ClaimedRun claim1 = claimStartedRun(canvasId, node1, REQUEST_1, UUID.randomUUID());
     CanvasFunctionFrozenRun frozen1 = decode(claim1.run());
 
     // 节点 2：另一个函数也启动并引用 sharedResource
     UUID node2 =
         addFunctionNode(canvasId, "node-2", DEFINITION.name(), configWithReference(sharedNodeId));
-    claimStartedRun(canvasId, node2, REQUEST_2, "worker-run-2");
+    claimStartedRun(canvasId, node2, REQUEST_2, UUID.randomUUID());
 
     // 部分物化 node1 的 slot 0
     CanvasResource slot0Res =
@@ -1374,11 +1377,9 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
 
     // (a) 过期租约调用 completeSuccess / markUnknown 返回 false
     assertFalse(
-        runtimeTransactions.completeSuccess(
-            frozen1, "stale-lease-token", frozen1.outputResourceIds()));
+        runtimeTransactions.completeSuccess(frozen1, STALE_LEASE, frozen1.outputResourceIds()));
     assertFalse(
-        runtimeTransactions.markUnknown(
-            node1, REQUEST_1, "stale-lease-token", "stale unknown reason"));
+        runtimeTransactions.markUnknown(node1, REQUEST_1, STALE_LEASE, "stale unknown reason"));
 
     CanvasFunctionRun run1InDb = runRepository.findByNodeId(node1).orElseThrow();
     assertEquals(CanvasFunctionRunStatus.RUNNING, run1InDb.status());
@@ -1406,7 +1407,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
         addFunctionNode(
             canvasId, "node-3", TWO_IMAGES_DEFINITION.name(), configWithoutReferences());
     String request3 = "00000000-0000-0000-0000-000000000103";
-    ClaimedRun claim3 = claimStartedRun(canvasId, node3, request3, "worker-run-3");
+    ClaimedRun claim3 = claimStartedRun(canvasId, node3, request3, UUID.randomUUID());
     CanvasFunctionFrozenRun frozen3 = decode(claim3.run());
     CanvasResource slot0Res3 =
         materializeBlobOutput(canvasId, node3, frozen3.requestId(), frozen3.output(0));
@@ -1460,7 +1461,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
 
   /** start 提交的 availableAt 是 claim 的权威时间；不能用独立 wall clock 跨过同一事务的时间边界。 */
   private ClaimedRun claimStartedRun(
-      UUID canvasId, UUID nodeId, String requestId, String ownerToken) {
+      UUID canvasId, UUID nodeId, String requestId, UUID ownerToken) {
     CanvasFunctionRun started = startRun(canvasId, nodeId, requestId).run();
     ClaimedRun claim = workStore.claimNext(Duration.ofSeconds(30), ownerToken).orElseThrow();
     assertEquals(nodeId, claim.nodeId(), "claim must correspond to the started node");

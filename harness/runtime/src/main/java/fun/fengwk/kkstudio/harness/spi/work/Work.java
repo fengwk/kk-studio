@@ -6,6 +6,7 @@ import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.UUID;
 
 /**
  * 一次 Work mailbox target 的持久化当前调度状态。
@@ -21,7 +22,7 @@ public record Work(
     WorkTarget target,
     Instant availableAt,
     long wakeVersion,
-    String leaseToken,
+    UUID leaseToken,
     Instant leaseUntil,
     EnvironmentId requiredEnvironmentId) {
 
@@ -45,7 +46,7 @@ public record Work(
       WorkTarget target,
       Instant availableAt,
       long wakeVersion,
-      String leaseToken,
+      UUID leaseToken,
       Instant leaseUntil) {
     this(target, availableAt, wakeVersion, leaseToken, leaseUntil, null);
   }
@@ -102,7 +103,7 @@ public record Work(
    * 使用全新的 token 将 work claim 到 {@code until}。仅在 {@code availableAt <= now} 且不存在 有效 lease（无 lease 或在
    * {@code now} 时已过期）时允许；{@code until} 必须严格晚于 {@code now}。保留环境亲和性。
    */
-  public Work claim(Instant now, String token, Instant until) {
+  public Work claim(Instant now, UUID token, Instant until) {
     return from(target, state().claim(now, token, until));
   }
 
@@ -110,7 +111,7 @@ public record Work(
    * 在 lease 在 {@code now} 仍然有效时延长它；{@code until} 必须严格晚于当前的 {@code leaseUntil}。过期的 lease（在 {@code
    * now} 或之前已过期）会被拒绝。保留环境亲和性。
    */
-  public Work renew(String token, Instant now, Instant until) {
+  public Work renew(UUID token, Instant now, Instant until) {
     return from(target, state().renew(token, now, until));
   }
 
@@ -118,7 +119,7 @@ public record Work(
    * 在当前 lease 于 {@code now} 仍有效时完成对 {@code claimedWakeVersion} 的处理：相等的 claim 删除该 work（返回 {@link
    * Optional#empty()}）；过期 claim 仅清除 lease，保留行以便更新的 wake 仍可见；未来的 claim 视为非法。保留环境亲和性。
    */
-  public Optional<Work> complete(String token, long claimedWakeVersion, Instant now) {
+  public Optional<Work> complete(UUID token, long claimedWakeVersion, Instant now) {
     return state().complete(token, claimedWakeVersion, now).map(next -> from(target, next));
   }
 
@@ -127,17 +128,17 @@ public record Work(
    * 设为 {@code availableAt}；过期 claim 仅将 {@code availableAt} 提前到最小值；未来的 claim 视为非法。lease
    * 始终被清除，保留环境亲和性。
    */
-  public Work reschedule(String token, long claimedWakeVersion, Instant now, Instant availableAt) {
+  public Work reschedule(UUID token, long claimedWakeVersion, Instant now, Instant availableAt) {
     return from(target, state().reschedule(token, claimedWakeVersion, now, availableAt));
   }
 
   /** 在当前 lease 于 {@code now} 仍有效时主动释放 claim：清除 lease，使 work 立即可被认领。保留环境亲和性。 */
-  public Work release(String token, Instant now) {
+  public Work release(UUID token, Instant now) {
     return from(target, state().release(token, now));
   }
 
   /** 当前 lease 在 {@code now} 是否仍由 {@code token} 持有。 */
-  public boolean isOwnedBy(String token, Instant now) {
+  public boolean isOwnedBy(UUID token, Instant now) {
     return leaseToken != null
         && leaseToken.equals(token)
         && leaseUntil != null

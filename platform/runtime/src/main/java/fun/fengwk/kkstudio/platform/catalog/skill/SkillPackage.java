@@ -21,8 +21,8 @@ public record SkillPackage(
     List<SkillManifestEntry> skills,
     Instant publishedAt,
     long version,
-    Instant createTime,
-    Instant updateTime,
+    Instant createdAt,
+    Instant updatedAt,
     SkillPackageGitSource gitSource) {
 
   /** 返回 manifest 中指定名称的元素；不存在返回 null。 */

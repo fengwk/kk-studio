@@ -36,9 +36,7 @@ public class IssueReconcileWorkHandler {
   }
 
   public WorkClaim claimNext() {
-    return workQueue
-        .claimNext(UUID.randomUUID().toString(), properties.getLeaseDuration())
-        .orElse(null);
+    return workQueue.claimNext(UUID.randomUUID(), properties.getLeaseDuration()).orElse(null);
   }
 
   public void runHandoff(WorkClaim claim) {

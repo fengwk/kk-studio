@@ -81,7 +81,7 @@ class CanvasBlobResourceMaterializerIntegrationTest extends PostgresSpringTestSu
         "insert into durable_work (target_type, target_id, available_at, wake_version)"
             + " values ('CANVAS_RUN', ?, clock_timestamp() - interval '1 second', 1)",
         nodeId);
-    claim = workStore.claimNext(Duration.ofMinutes(5), "owner-a").orElseThrow();
+    claim = workStore.claimNext(Duration.ofMinutes(5), UUID.randomUUID()).orElseThrow();
   }
 
   /** A 已进入读流、尚未提交；B 真实 claim 同 request，A 必须失败并释放 upload，B 随后正常物化。 */
@@ -95,7 +95,7 @@ class CanvasBlobResourceMaterializerIntegrationTest extends PostgresSpringTestSu
         assertTrue(reading.await(10, TimeUnit.SECONDS));
         expireLease();
         ClaimedRun replacement =
-            workStore.claimNext(Duration.ofMinutes(5), "owner-b").orElseThrow();
+            workStore.claimNext(Duration.ofMinutes(5), UUID.randomUUID()).orElseThrow();
         assertEquals(requestId, replacement.requestId());
         resume.countDown();
         ExecutionException failure =
@@ -169,9 +169,9 @@ class CanvasBlobResourceMaterializerIntegrationTest extends PostgresSpringTestSu
   @ValueSource(booleans = {true, false})
   void newLeaseConsumesExistingWinnerWithoutStagingOrDuplicatePins(boolean media) {
     CanvasResource winner = media ? blob(new ByteArrayInputStream(new byte[] {1})) : text("cached");
-    String oldToken = claim.leaseToken();
+    UUID oldToken = claim.leaseToken();
     expireLease();
-    claim = workStore.claimNext(Duration.ofMinutes(5), "owner-b").orElseThrow();
+    claim = workStore.claimNext(Duration.ofMinutes(5), UUID.randomUUID()).orElseThrow();
     assertThrows(
         IllegalStateException.class,
         () ->

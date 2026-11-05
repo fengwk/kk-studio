@@ -20,6 +20,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Optional;
+import java.util.UUID;
 
 /** {@link DatabasePluginCredentialStore} 按状态、刷新租约与本地时限判定凭据可用性。 */
 class DatabasePluginCredentialStoreTest {
@@ -134,7 +135,7 @@ class DatabasePluginCredentialStoreTest {
         status,
         null,
         null,
-        leaseUntil == null ? null : "lease",
+        leaseUntil == null ? null : UUID.randomUUID(),
         leaseUntil,
         3L);
   }

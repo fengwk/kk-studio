@@ -885,7 +885,7 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
                     tx.work()
                         .claimNext(
                             WorkTargetType.TOOL,
-                            "lease-" + invocationId,
+                            UUID.randomUUID(),
                             Duration.ofMinutes(30),
                             ownerNodeId))
             .orElseThrow();

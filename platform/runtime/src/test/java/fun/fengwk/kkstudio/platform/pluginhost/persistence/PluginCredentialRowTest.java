@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialStatus;
 
 import java.time.Instant;
+import java.util.UUID;
 
 /** {@link PluginCredentialRow} 的租约判定、持久状态校验与去敏输出。 */
 class PluginCredentialRowTest {
@@ -59,7 +60,7 @@ class PluginCredentialRowTest {
         PluginCredentialStatus.CONNECTED,
         null,
         null,
-        leaseUntil == null ? null : "lease",
+        leaseUntil == null ? null : UUID.randomUUID(),
         leaseUntil,
         1L);
   }

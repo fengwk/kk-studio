@@ -337,9 +337,7 @@ class PostgresqlCompactionChildTest {
   private Optional<ClaimedWork> claimNextThreadWork() {
     return store.transaction(
         tx ->
-            tx.work()
-                .claimNext(
-                    WorkTargetType.THREAD, UUID.randomUUID().toString(), Duration.ofSeconds(30)));
+            tx.work().claimNext(WorkTargetType.THREAD, UUID.randomUUID(), Duration.ofSeconds(30)));
   }
 
   private List<ExecutionExitFact> loadUnconfirmedExecutions(UUID threadId) {
@@ -1450,9 +1448,7 @@ class PostgresqlCompactionChildTest {
                 tx ->
                     tx.work()
                         .claimNext(
-                            BuiltinWorkType.MODEL,
-                            UUID.randomUUID().toString(),
-                            Duration.ofSeconds(30)))
+                            BuiltinWorkType.MODEL, UUID.randomUUID(), Duration.ofSeconds(30)))
             .orElseThrow();
     assertEquals(invocationId, claim.target().id());
     return modelProcessor.process(claim);
@@ -1795,9 +1791,7 @@ class PostgresqlCompactionChildTest {
                 tx ->
                     tx.work()
                         .claimNext(
-                            WorkTargetType.THREAD,
-                            UUID.randomUUID().toString(),
-                            Duration.ofSeconds(30)))
+                            WorkTargetType.THREAD, UUID.randomUUID(), Duration.ofSeconds(30)))
             .orElseThrow();
     assertEquals(expectedThreadId, claim.target().id());
     assertEquals(ThreadProcessResult.COMPLETED, processor.process(claim));

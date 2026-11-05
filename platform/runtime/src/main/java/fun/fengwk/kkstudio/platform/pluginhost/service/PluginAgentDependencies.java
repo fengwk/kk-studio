@@ -119,7 +119,7 @@ public class PluginAgentDependencies {
     TreeSet<String> referencing = new TreeSet<>();
     for (PluginConfigurationRow row : configurationRepository.findAll()) {
       if (registry.find(row.pluginId()).isPresent()
-          && declaredAgentNames(row.pluginId(), row.revision(), row.valuesJson())
+          && declaredAgentNames(row.pluginId(), row.version(), row.valuesJson())
               .contains(agentName)) {
         referencing.add(row.pluginId());
       }

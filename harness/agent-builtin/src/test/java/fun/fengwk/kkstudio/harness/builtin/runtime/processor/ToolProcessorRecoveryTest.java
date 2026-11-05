@@ -50,6 +50,8 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 class ToolProcessorRecoveryTest {
 
+  private static final UUID OLD_LEASE = UUID.randomUUID();
+
   private final List<ScheduledExecutorService> schedulers = new ArrayList<>();
 
   @AfterEach
@@ -67,7 +69,8 @@ class ToolProcessorRecoveryTest {
             .transaction(
                 tx ->
                     tx.work()
-                        .claimNext(WorkTargetType.THREAD, "thread-token", Duration.ofSeconds(60)))
+                        .claimNext(
+                            WorkTargetType.THREAD, UUID.randomUUID(), Duration.ofSeconds(60)))
             .orElseThrow();
     assertThrows(IllegalArgumentException.class, () -> fixture.processor.process(threadClaim));
   }
@@ -239,13 +242,13 @@ class ToolProcessorRecoveryTest {
                   fixture.store,
                   fixture.toolInvocationId,
                   ToolProcessorTestSupport.NOW,
-                  "token-old")));
+                  UUID.randomUUID())));
       assertTrue(run.awaitExecuting());
       fixture.clock.advance(Duration.ofSeconds(61));
       ToolProcessorTestSupport.replaceToolWork(fixture, ToolProcessorTestSupport.NOW);
       ClaimedWork recovered =
           ToolProcessorTestSupport.claim(
-              fixture.store, fixture.toolInvocationId, fixture.clock.instant(), "token-new");
+              fixture.store, fixture.toolInvocationId, fixture.clock.instant(), UUID.randomUUID());
 
       assertEquals(ProcessResult.TERMINATED, fixture.processor.process(recovered));
 
@@ -301,7 +304,10 @@ class ToolProcessorRecoveryTest {
 
     ClaimedWork forged =
         new ClaimedWork(
-            claimed.target(), claimed.claimedWakeVersion(), "forged-token", claimed.leaseUntil());
+            claimed.target(),
+            claimed.claimedWakeVersion(),
+            UUID.randomUUID(),
+            claimed.leaseUntil());
     assertEquals(ProcessResult.LOST_OWNERSHIP, fixture.processor.process(forged));
 
     assertEquals(
@@ -315,7 +321,7 @@ class ToolProcessorRecoveryTest {
     assertEquals(1L, run.exited.getCount(), "body must not be interrupted");
     assertTrue(fixture.processor.hasActiveExecution());
     assertEquals(
-        "token-" + fixture.toolInvocationId,
+        ToolProcessorTestSupport.token(fixture.toolInvocationId),
         ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId).leaseToken());
   }
 
@@ -418,7 +424,10 @@ class ToolProcessorRecoveryTest {
     fixture.gateway.queueAdmit(new ToolGateway.Busy(Duration.ofSeconds(5)));
     ClaimedWork claimedA =
         ToolProcessorTestSupport.claim(
-            fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW, "token-A");
+            fixture.store,
+            fixture.toolInvocationId,
+            ToolProcessorTestSupport.NOW,
+            UUID.randomUUID());
 
     AtomicReference<ProcessResult> resultA = new AtomicReference<>();
     Thread threadA = new Thread(() -> resultA.set(fixture.processor.process(claimedA)));
@@ -428,7 +437,10 @@ class ToolProcessorRecoveryTest {
     ToolProcessorTestSupport.replaceToolWork(fixture, ToolProcessorTestSupport.NOW);
     ClaimedWork claimedB =
         ToolProcessorTestSupport.claim(
-            fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW, "token-B");
+            fixture.store,
+            fixture.toolInvocationId,
+            ToolProcessorTestSupport.NOW,
+            UUID.randomUUID());
     fixture.gateway.admitHook = null;
     AtomicReference<ProcessResult> resultB = new AtomicReference<>();
     Thread threadB = new Thread(() -> resultB.set(fixture.processor.process(claimedB)));
@@ -1163,18 +1175,14 @@ class ToolProcessorRecoveryTest {
         fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW);
     UUID toolFactId =
         ToolProcessorTestSupport.registerOldToolExit(
-                fixture.store,
-                fixture.baseline.threadId(),
-                fixture.toolInvocationId,
-                1,
-                "old-token")
+                fixture.store, fixture.baseline.threadId(), fixture.toolInvocationId, 1, OLD_LEASE)
             .executionId();
     ToolProcessorTestSupport.registerRemoteExit(
         fixture.store,
         fixture.baseline.threadId(),
         fixture.toolInvocationId,
         1,
-        "old-token",
+        OLD_LEASE,
         toolFactId,
         ToolProcessorTestSupport.ENV_ID);
     ToolProcessorTestSupport.registerRemoteExit(
@@ -1182,7 +1190,7 @@ class ToolProcessorRecoveryTest {
         fixture.baseline.threadId(),
         fixture.toolInvocationId,
         1,
-        "old-token",
+        OLD_LEASE,
         toolFactId,
         ToolProcessorTestSupport.ENV_ID);
     ToolProcessorTestSupport.claim(
@@ -1217,11 +1225,7 @@ class ToolProcessorRecoveryTest {
         fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW);
     UUID toolFactId =
         ToolProcessorTestSupport.registerOldToolExit(
-                fixture.store,
-                fixture.baseline.threadId(),
-                fixture.toolInvocationId,
-                1,
-                "old-token")
+                fixture.store, fixture.baseline.threadId(), fixture.toolInvocationId, 1, OLD_LEASE)
             .executionId();
     ExecutionExitFact remoteFact =
         ToolProcessorTestSupport.registerRemoteExit(
@@ -1229,7 +1233,7 @@ class ToolProcessorRecoveryTest {
             fixture.baseline.threadId(),
             fixture.toolInvocationId,
             1,
-            "old-token",
+            OLD_LEASE,
             toolFactId,
             ToolProcessorTestSupport.ENV_ID);
     TestExecutionExitConfirmer.create(fixture.store, fixture.clock)
@@ -1270,14 +1274,14 @@ class ToolProcessorRecoveryTest {
         fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW);
     ExecutionExitFact oldToolFact =
         ToolProcessorTestSupport.registerOldToolExit(
-            fixture.store, fixture.baseline.threadId(), fixture.toolInvocationId, 1, "old-token");
+            fixture.store, fixture.baseline.threadId(), fixture.toolInvocationId, 1, OLD_LEASE);
     ExecutionExitFact oldRemoteFact =
         ToolProcessorTestSupport.registerRemoteExit(
             fixture.store,
             fixture.baseline.threadId(),
             fixture.toolInvocationId,
             1,
-            "old-token",
+            OLD_LEASE,
             oldToolFact.executionId(),
             ToolProcessorTestSupport.ENV_ID);
 
@@ -1363,14 +1367,14 @@ class ToolProcessorRecoveryTest {
         fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW);
     ExecutionExitFact oldToolFact =
         ToolProcessorTestSupport.registerOldToolExit(
-            fixture.store, fixture.baseline.threadId(), fixture.toolInvocationId, 1, "old-token");
+            fixture.store, fixture.baseline.threadId(), fixture.toolInvocationId, 1, OLD_LEASE);
     ExecutionExitFact oldRemoteFact =
         ToolProcessorTestSupport.registerRemoteExit(
             fixture.store,
             fixture.baseline.threadId(),
             fixture.toolInvocationId,
             1,
-            "old-token",
+            OLD_LEASE,
             oldToolFact.executionId(),
             ToolProcessorTestSupport.ENV_ID);
     TestExecutionExitConfirmer.create(fixture.store, fixture.clock)
@@ -1419,18 +1423,14 @@ class ToolProcessorRecoveryTest {
         fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW);
     UUID toolFactId =
         ToolProcessorTestSupport.registerOldToolExit(
-                fixture.store,
-                fixture.baseline.threadId(),
-                fixture.toolInvocationId,
-                1,
-                "old-token")
+                fixture.store, fixture.baseline.threadId(), fixture.toolInvocationId, 1, OLD_LEASE)
             .executionId();
     ToolProcessorTestSupport.registerRemoteExit(
         fixture.store,
         fixture.baseline.threadId(),
         fixture.toolInvocationId,
         1,
-        "old-token",
+        OLD_LEASE,
         toolFactId,
         ToolProcessorTestSupport.ENV_ID);
 
@@ -1475,18 +1475,14 @@ class ToolProcessorRecoveryTest {
         fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW);
     UUID toolFactId =
         ToolProcessorTestSupport.registerOldToolExit(
-                fixture.store,
-                fixture.baseline.threadId(),
-                fixture.toolInvocationId,
-                1,
-                "old-token")
+                fixture.store, fixture.baseline.threadId(), fixture.toolInvocationId, 1, OLD_LEASE)
             .executionId();
     ToolProcessorTestSupport.registerRemoteExit(
         fixture.store,
         fixture.baseline.threadId(),
         fixture.toolInvocationId,
         1,
-        "old-token",
+        OLD_LEASE,
         toolFactId,
         ToolProcessorTestSupport.ENV_ID);
 
@@ -1536,18 +1532,14 @@ class ToolProcessorRecoveryTest {
         fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW);
     UUID toolFactId =
         ToolProcessorTestSupport.registerOldToolExit(
-                fixture.store,
-                fixture.baseline.threadId(),
-                fixture.toolInvocationId,
-                1,
-                "old-token")
+                fixture.store, fixture.baseline.threadId(), fixture.toolInvocationId, 1, OLD_LEASE)
             .executionId();
     ToolProcessorTestSupport.registerRemoteExit(
         fixture.store,
         fixture.baseline.threadId(),
         fixture.toolInvocationId,
         1,
-        "old-token",
+        OLD_LEASE,
         toolFactId,
         ToolProcessorTestSupport.ENV_ID);
 

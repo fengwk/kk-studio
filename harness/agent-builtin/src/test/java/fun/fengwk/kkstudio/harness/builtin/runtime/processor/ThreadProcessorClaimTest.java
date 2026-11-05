@@ -55,7 +55,7 @@ class ThreadProcessorClaimTest extends ThreadProcessorTestBase {
         new ClaimedWork(
             new WorkTarget(BuiltinWorkType.MODEL, new UUID(0L, 1L)),
             1L,
-            "token",
+            UUID.randomUUID(),
             NOW.plusSeconds(60));
     assertThrows(IllegalArgumentException.class, () -> fixture.processor.process(modelClaim));
   }

@@ -609,9 +609,7 @@ class PostgresqlSubagentContinuationTest {
                 tx ->
                     tx.work()
                         .claimNext(
-                            WorkTargetType.THREAD,
-                            UUID.randomUUID().toString(),
-                            Duration.ofSeconds(30)))
+                            WorkTargetType.THREAD, UUID.randomUUID(), Duration.ofSeconds(30)))
             .orElseThrow();
     assertEquals(expectedThreadId, claim.target().id());
     assertEquals(ThreadProcessResult.COMPLETED, processor.process(claim));

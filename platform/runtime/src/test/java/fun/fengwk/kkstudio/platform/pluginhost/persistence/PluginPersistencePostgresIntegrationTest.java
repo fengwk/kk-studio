@@ -15,6 +15,7 @@ import org.springframework.jdbc.datasource.SimpleDriverDataSource;
 import fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchemaSupport;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialStatus;
 
+import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.time.Duration;
@@ -25,6 +26,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 
 /** 插件配置、凭据与认证 attempt 三个仓储在真实 PostgreSQL 上的 SQL 契约。 */
 class PluginPersistencePostgresIntegrationTest {
@@ -124,9 +126,9 @@ class PluginPersistencePostgresIntegrationTest {
     assertEquals(Optional.of(at(-1)), credentials.earliestRefreshAt(List.of(PLUGIN)));
 
     PluginCredentialRow claimed =
-        credentials.claimDue(List.of(PLUGIN), LEASE, "lease-1").orElseThrow();
-    assertEquals("lease-1", claimed.refreshLeaseToken());
-    assertTrue(credentials.claimDue(List.of(PLUGIN), LEASE, "lease-2").isEmpty());
+        credentials.claimDue(List.of(PLUGIN), LEASE, lease("1")).orElseThrow();
+    assertEquals(lease("1"), claimed.refreshLeaseToken());
+    assertTrue(credentials.claimDue(List.of(PLUGIN), LEASE, lease("2")).isEmpty());
     assertTrue(credentials.earliestRefreshAt(List.of(PLUGIN)).isEmpty());
     assertTrue(credentials.ownsUnexpiredLease(claimed));
 
@@ -140,7 +142,7 @@ class PluginPersistencePostgresIntegrationTest {
     assertEquals(NOW, refreshed.lastRefreshedAt());
 
     PluginCredentialRow other =
-        credentials.claimDue(List.of(OTHER), LEASE, "lease-3").orElseThrow();
+        credentials.claimDue(List.of(OTHER), LEASE, lease("3")).orElseThrow();
     assertTrue(
         credentials.finalizeFailure(
             other, PluginCredentialStatus.REFRESH_FAILED, at(3600), "offline"));
@@ -151,7 +153,7 @@ class PluginPersistencePostgresIntegrationTest {
         .params(OffsetDateTime.ofInstant(NOW, ZoneOffset.UTC), OTHER)
         .update();
     PluginCredentialRow again =
-        credentials.claimDue(List.of(OTHER), LEASE, "lease-4").orElseThrow();
+        credentials.claimDue(List.of(OTHER), LEASE, lease("4")).orElseThrow();
     assertTrue(credentials.releaseLease(again));
     assertFalse(credentials.releaseLease(again));
   }
@@ -161,7 +163,7 @@ class PluginPersistencePostgresIntegrationTest {
   void expiredLeasesConvergeToUncertain() {
     credentials.upsertConnected(PLUGIN, "{\"token\":\"a\"}", "CN", at(60), at(-1));
     PluginCredentialRow claimed =
-        credentials.claimDue(List.of(PLUGIN), LEASE, "lease").orElseThrow();
+        credentials.claimDue(List.of(PLUGIN), LEASE, lease("expired")).orElseThrow();
 
     assertEquals(0, credentials.markExpiredLeasesUncertain(List.of(PLUGIN), "lost"));
     // 租约在数据库时钟下过期：旧持有者失去所有权，结果收敛为未知。
@@ -175,7 +177,7 @@ class PluginPersistencePostgresIntegrationTest {
     PluginCredentialRow uncertain = credentials.find(PLUGIN).orElseThrow();
     assertEquals(PluginCredentialStatus.REFRESH_UNCERTAIN, uncertain.status());
     assertNull(uncertain.refreshLeaseToken());
-    assertTrue(credentials.claimDue(List.of(PLUGIN), LEASE, "next").isEmpty());
+    assertTrue(credentials.claimDue(List.of(PLUGIN), LEASE, lease("next")).isEmpty());
   }
 
   /** attempt 只在摘要命中、未过期且配置修订未变时被消费一次；新 attempt 覆盖旧 attempt。 */
@@ -198,5 +200,9 @@ class PluginPersistencePostgresIntegrationTest {
 
   private static Instant at(long seconds) {
     return NOW.plus(seconds, ChronoUnit.SECONDS);
+  }
+
+  private static UUID lease(String value) {
+    return UUID.nameUUIDFromBytes(("plugin-credential-" + value).getBytes(StandardCharsets.UTF_8));
   }
 }

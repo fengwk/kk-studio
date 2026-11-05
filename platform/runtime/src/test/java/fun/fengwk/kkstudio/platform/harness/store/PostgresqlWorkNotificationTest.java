@@ -85,7 +85,8 @@ class PostgresqlWorkNotificationTest {
               .transaction(
                   tx ->
                       tx.work()
-                          .claimNext(WorkTargetType.THREAD, "lease-1", Duration.between(T1, T5)))
+                          .claimNext(
+                              WorkTargetType.THREAD, UUID.randomUUID(), Duration.between(T1, T5)))
               .orElseThrow();
       assertNoNotification(notifications);
       inTransaction(store, tx -> tx.work().renew(first, Duration.ofSeconds(5)));
@@ -101,7 +102,8 @@ class PostgresqlWorkNotificationTest {
               .transaction(
                   tx ->
                       tx.work()
-                          .claimNext(WorkTargetType.THREAD, "lease-2", Duration.between(T2, T5)))
+                          .claimNext(
+                              WorkTargetType.THREAD, UUID.randomUUID(), Duration.between(T2, T5)))
               .orElseThrow();
       assertNoNotification(notifications);
       inTransaction(store, tx -> tx.work().reschedule(second, Duration.ZERO));
@@ -111,7 +113,9 @@ class PostgresqlWorkNotificationTest {
           store
               .transaction(
                   tx ->
-                      tx.work().claimNext(WorkTargetType.THREAD, "lease-3", Duration.ofSeconds(60)))
+                      tx.work()
+                          .claimNext(
+                              WorkTargetType.THREAD, UUID.randomUUID(), Duration.ofSeconds(60)))
               .orElseThrow();
       assertNoNotification(notifications);
       assertTrue(store.transaction(tx -> tx.work().complete(third)).isEmpty());
@@ -185,7 +189,10 @@ class PostgresqlWorkNotificationTest {
     ClaimedWork claim =
         durable
             .transaction(
-                tx -> tx.work().claimNext(WorkTargetType.THREAD, "lease-1", Duration.ofSeconds(60)))
+                tx ->
+                    tx.work()
+                        .claimNext(
+                            WorkTargetType.THREAD, UUID.randomUUID(), Duration.ofSeconds(60)))
             .orElseThrow();
     Work beforeFailure = durable.transaction(tx -> tx.work().find(target)).orElseThrow();
     HarnessStore failing = notifyFailingStore();
@@ -222,7 +229,10 @@ class PostgresqlWorkNotificationTest {
     ClaimedWork claim =
         durable
             .transaction(
-                tx -> tx.work().claimNext(WorkTargetType.THREAD, "lease-1", Duration.ofSeconds(60)))
+                tx ->
+                    tx.work()
+                        .claimNext(
+                            WorkTargetType.THREAD, UUID.randomUUID(), Duration.ofSeconds(60)))
             .orElseThrow();
     inTransaction(
         durable,

@@ -313,7 +313,7 @@ class ExecutionConcurrentDeletionTest {
                 tx ->
                     tx.work()
                         .claimNext(
-                            BuiltinWorkType.MODEL, "token-" + invocationId, Duration.ofSeconds(60)))
+                            BuiltinWorkType.MODEL, UUID.randomUUID(), Duration.ofSeconds(60)))
             .orElseThrow();
     ModelExecutionFixture fixture =
         new ModelExecutionFixture(

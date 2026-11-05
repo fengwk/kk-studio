@@ -193,7 +193,7 @@ public abstract class WebPostgresTestSupport {
           lease.snapshot().configuredPlugins()) {
         baselineJdbc
             .sql(
-                "insert into plugin_configuration (plugin_id, revision, values_json)"
+                "insert into plugin_configuration (plugin_id, version, values_json)"
                     + " values (:pluginId, :revision, :valuesJson)")
             .param("pluginId", configured.descriptor().pluginId())
             .param("revision", configured.config().revision())

@@ -240,13 +240,13 @@ public class CanvasFunctionRunTransactions {
    * <p>之后任何崩溃都会让 Run 以 {@code SUBMITTING} 恢复，从而进入人工核查路径，绝不会被自动重新提交。
    */
   @Transactional
-  public CanvasFunctionFrozenRun beginSubmit(CanvasFunctionFrozenRun run, String leaseToken) {
+  public CanvasFunctionFrozenRun beginSubmit(CanvasFunctionFrozenRun run, UUID leaseToken) {
     return advanceSubmit(run, leaseToken, CanvasFunctionSubmitState.SUBMITTING);
   }
 
   /** 外部提交已被确认后持久化可查询的任务身份，使恢复路径只查询原任务。 */
   @Transactional
-  public CanvasFunctionFrozenRun confirmSubmitted(CanvasFunctionFrozenRun run, String leaseToken) {
+  public CanvasFunctionFrozenRun confirmSubmitted(CanvasFunctionFrozenRun run, UUID leaseToken) {
     return advanceSubmit(run, leaseToken, CanvasFunctionSubmitState.SUBMITTED);
   }
 
@@ -340,7 +340,7 @@ public class CanvasFunctionRunTransactions {
       UUID canvasId,
       UUID nodeId,
       String requestId,
-      String leaseToken,
+      UUID leaseToken,
       String stage,
       Map<String, Object> adapterState) {
     Objects.requireNonNull(canvasId, "canvasId");
@@ -360,7 +360,7 @@ public class CanvasFunctionRunTransactions {
 
   /** 提交结果不明：收敛为 UNKNOWN，保留 pin 与冻结计划，退出自动调度。 */
   @Transactional
-  public boolean markUnknown(UUID nodeId, String requestId, String leaseToken, String reason) {
+  public boolean markUnknown(UUID nodeId, String requestId, UUID leaseToken, String reason) {
     Objects.requireNonNull(nodeId, "nodeId");
     Objects.requireNonNull(requestId, "requestId");
     String validatedReason = validateUnknownReason(reason);
@@ -394,7 +394,7 @@ public class CanvasFunctionRunTransactions {
    */
   @Transactional
   public boolean completeSuccess(
-      CanvasFunctionFrozenRun frozen, String leaseToken, List<UUID> orderedResourceIds) {
+      CanvasFunctionFrozenRun frozen, UUID leaseToken, List<UUID> orderedResourceIds) {
     Objects.requireNonNull(frozen, "frozen");
     if (!orderedResourceIds.equals(frozen.outputResourceIds())) {
       throw new IllegalArgumentException(
@@ -428,7 +428,7 @@ public class CanvasFunctionRunTransactions {
 
   /** 在租约仍有效时将 Run 收敛为 FAILED，并清理未挂接输出和本次 Run 的 pin。 */
   @Transactional
-  public boolean failIfRunning(UUID nodeId, String requestId, String leaseToken, String error) {
+  public boolean failIfRunning(UUID nodeId, String requestId, UUID leaseToken, String error) {
     Objects.requireNonNull(nodeId, "nodeId");
     Objects.requireNonNull(requestId, "requestId");
     CanvasFunctionRun observed = runRepository.findByNodeId(nodeId).orElse(null);
@@ -456,7 +456,7 @@ public class CanvasFunctionRunTransactions {
 
   /** 推进外部提交事实；CAS 与 checkpoint 一致，旧租约只能得到内部取消。 */
   private CanvasFunctionFrozenRun advanceSubmit(
-      CanvasFunctionFrozenRun run, String leaseToken, CanvasFunctionSubmitState nextState) {
+      CanvasFunctionFrozenRun run, UUID leaseToken, CanvasFunctionSubmitState nextState) {
     Objects.requireNonNull(run, "run");
     Objects.requireNonNull(leaseToken, "leaseToken");
     Objects.requireNonNull(nextState, "nextState");
@@ -614,7 +614,7 @@ public class CanvasFunctionRunTransactions {
   }
 
   private void persistRunningState(
-      CanvasFunctionRun current, CanvasFunctionFrozenRun next, String leaseToken) {
+      CanvasFunctionRun current, CanvasFunctionFrozenRun next, UUID leaseToken) {
     CanvasFunctionRun updated =
         new CanvasFunctionRun(
             current.nodeId(),
@@ -651,7 +651,7 @@ public class CanvasFunctionRunTransactions {
     return node != null && node.function() != null;
   }
 
-  private CanvasFunctionRun requireClaim(UUID nodeId, String requestId, String leaseToken) {
+  private CanvasFunctionRun requireClaim(UUID nodeId, String requestId, UUID leaseToken) {
     CanvasFunctionRun run = runRepository.findByNodeIdForUpdate(nodeId).orElse(null);
     if (!matchesClaim(run, requestId, leaseToken)) {
       throw new CanvasFunctionInternalCancellation(
@@ -738,7 +738,7 @@ public class CanvasFunctionRunTransactions {
     throw new IllegalArgumentException("unsupported blob mediaType: " + mediaType);
   }
 
-  private boolean matchesClaim(CanvasFunctionRun run, String requestId, String leaseToken) {
+  private boolean matchesClaim(CanvasFunctionRun run, String requestId, UUID leaseToken) {
     return run != null
         && run.status() == CanvasFunctionRunStatus.RUNNING
         && run.requestId().toString().equals(requestId)

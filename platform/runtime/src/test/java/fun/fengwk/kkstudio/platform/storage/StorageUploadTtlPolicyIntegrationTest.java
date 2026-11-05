@@ -152,8 +152,7 @@ class StorageUploadTtlPolicyIntegrationTest extends PostgresSpringTestSupport {
     backdateCreatedAt(uploadId, 5L);
     Instant now = Instant.now();
     tx.execute(
-        status ->
-            uploadRepository.claimById(uploadId, now, now.plusMillis(1), "interrupted-owner"));
+        status -> uploadRepository.claimById(uploadId, now, now.plusMillis(1), UUID.randomUUID()));
     jdbc.update(
         "update storage_upload set cleanup_until = current_timestamp - interval '1 second' where id = ?",
         uploadId);

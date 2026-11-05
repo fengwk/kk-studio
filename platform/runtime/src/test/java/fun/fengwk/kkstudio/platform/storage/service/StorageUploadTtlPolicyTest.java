@@ -39,7 +39,7 @@ class StorageUploadTtlPolicyTest {
     assertFalse(StorageUploadExpiryService.isCleanupDue(live, now, 86_400L));
     assertTrue(StorageUploadExpiryService.isCleanupDue(live, now, 900L));
     // 有效 lease 保护下的过期行仍不可抢占。
-    live.setCleanupToken("held");
+    live.setCleanupToken(UUID.randomUUID());
     live.setCleanupUntil(now.plusSeconds(60));
     assertFalse(StorageUploadExpiryService.isCleanupDue(live, now, 900L));
   }
@@ -58,7 +58,7 @@ class StorageUploadTtlPolicyTest {
   void claimedCleanupIsNotResurrectedByExtendingTtl() {
     Instant now = CREATED.plusSeconds(1_000);
     StorageUpload claimed = newUpload();
-    claimed.setCleanupToken("owner");
+    claimed.setCleanupToken(UUID.randomUUID());
     // lease 仍然有效：其他节点不可抢占。
     claimed.setCleanupUntil(now.plusSeconds(60));
     assertFalse(StorageUploadExpiryService.isCleanupDue(claimed, now, 86_400L));

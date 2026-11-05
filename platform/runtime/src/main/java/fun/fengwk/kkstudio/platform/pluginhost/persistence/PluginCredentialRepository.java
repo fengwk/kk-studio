@@ -15,6 +15,7 @@ import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.UUID;
 
 /**
  * {@code plugin_credential} 存取：每个已认证 Plugin 至多一行。
@@ -39,7 +40,7 @@ public class PluginCredentialRepository {
               PluginCredentialStatus.valueOf(rs.getString("status")),
               toInstant(rs.getObject("last_refreshed_at", OffsetDateTime.class)),
               rs.getString("last_refresh_error"),
-              rs.getString("refresh_lease_token"),
+              rs.getObject("refresh_lease_token", UUID.class),
               toInstant(rs.getObject("refresh_lease_until", OffsetDateTime.class)),
               rs.getLong("version"));
 
@@ -129,7 +130,7 @@ public class PluginCredentialRepository {
 
   /** 领取一条到期的交互凭据并签发刷新租约；到期与租约都以数据库时钟判定。 */
   public Optional<PluginCredentialRow> claimDue(
-      List<String> pluginIds, Duration leaseDuration, String leaseToken) {
+      List<String> pluginIds, Duration leaseDuration, UUID leaseToken) {
     return jdbc.sql(
             """
             with claimable as (

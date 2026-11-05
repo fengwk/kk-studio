@@ -714,7 +714,7 @@ public final class ThreadProcessorTestSupport {
       InMemoryBuiltinHarnessStore store, UUID threadId, Instant now, Duration leaseDuration) {
     return store
         .transaction(
-            tx -> tx.work().claimNext(WorkTargetType.THREAD, "token-" + threadId, leaseDuration))
+            tx -> tx.work().claimNext(WorkTargetType.THREAD, UUID.randomUUID(), leaseDuration))
         .orElseThrow();
   }
 

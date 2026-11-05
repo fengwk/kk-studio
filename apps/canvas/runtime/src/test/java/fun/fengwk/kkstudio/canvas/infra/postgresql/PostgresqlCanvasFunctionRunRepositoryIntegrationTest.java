@@ -37,14 +37,14 @@ class PostgresqlCanvasFunctionRunRepositoryIntegrationTest extends PostgresCanva
     UUID requestId = UUID.randomUUID();
     Instant now = Instant.now().truncatedTo(ChronoUnit.MILLIS);
     runs.insertReady(ready(node.id(), requestId, now.minusSeconds(1)));
-    ClaimedRun claim = workStore.claimNext(LEASE, "owner").orElseThrow();
+    ClaimedRun claim = workStore.claimNext(LEASE, UUID.randomUUID()).orElseThrow();
 
     assertTrue(runs.ownsRunningRequest(canvasId, node.id(), requestId, claim.leaseToken()));
     assertFalse(
         runs.ownsRunningRequest(UUID.randomUUID(), node.id(), requestId, claim.leaseToken()));
     assertFalse(
         runs.ownsRunningRequest(canvasId, node.id(), UUID.randomUUID(), claim.leaseToken()));
-    assertFalse(runs.ownsRunningRequest(canvasId, node.id(), requestId, "other-token"));
+    assertFalse(runs.ownsRunningRequest(canvasId, node.id(), requestId, UUID.randomUUID()));
 
     CanvasFunctionRun running = runs.findByNodeId(node.id()).orElseThrow();
     CanvasFunctionRun succeeded =

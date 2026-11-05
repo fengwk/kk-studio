@@ -125,13 +125,13 @@ select pg_temp.assert_true('environment install code clears to SQL NULL',
     (select install_code is null from environment where id = pg_temp.uid(9000)));
 
 -- cluster_node: node registry carries only reachability origin + lease metadata, not liveness bytes.
-insert into cluster_node (instance_id, internal_url, lease_until, last_seen)
+insert into cluster_node (instance_id, internal_url, lease_until, last_seen_at)
     values (pg_temp.uid(9200), 'https://node-a.internal:8443',
         now() + interval '1 minute', now());
 select pg_temp.assert_true('cluster node registry accepts a fresh node lease',
-    (select lease_until > last_seen from cluster_node where instance_id = pg_temp.uid(9200)));
-select pg_temp.rejects('cluster node lease must be after last_seen',
-    $$insert into cluster_node (instance_id, internal_url, lease_until, last_seen)
+    (select lease_until > last_seen_at from cluster_node where instance_id = pg_temp.uid(9200)));
+select pg_temp.rejects('cluster node lease must be after last_seen_at',
+    $$insert into cluster_node (instance_id, internal_url, lease_until, last_seen_at)
         values (pg_temp.uid(9201), 'https://node-b.internal:8443',
             now(), now() + interval '1 minute')$$,
     '23514', 'ck_cluster_node_lease');
@@ -730,7 +730,7 @@ insert into canvas_function_run (node_id, request_id, status, state_json)
     values (pg_temp.uid(700), pg_temp.uid(1000), 'READY', '{"plan":[]}');
 select pg_temp.rejects('a work lease token and its deadline are stored together',
     $$insert into durable_work (target_type, target_id, available_at, wake_version, lease_token)
-      values ('CANVAS_RUN', pg_temp.uid(700), now(), 1, 'fixture')$$, '23514',
+      values ('CANVAS_RUN', pg_temp.uid(700), now(), 1, '00000000-0000-0000-0000-000000000002')$$, '23514',
     'ck_durable_work_lease_pair');
 select pg_temp.rejects('work type must start with an uppercase letter',
     $$insert into durable_work (target_type, target_id, available_at, wake_version,
@@ -1041,7 +1041,7 @@ select pg_temp.rejects('thread constraints are a json object',
 -- ---------------------------------------------------------------------------
 insert into harness_execution_exit (execution_id, thread_id, invocation_id, attempt,
     owner_lease_token, kind, parent_execution_id, state, registered_at, confirmed_at, abandoned_at)
-    values (pg_temp.uid(1700), pg_temp.uid(310), pg_temp.uid(1701), 1, 'lease-1', 'TOOL',
+    values (pg_temp.uid(1700), pg_temp.uid(310), pg_temp.uid(1701), 1, '00000000-0000-0000-0000-000000000001', 'TOOL',
         null, 'UNCONFIRMED', '2026-01-01 00:00:00.123+00', null, null);
 select pg_temp.rejects('BOGUS is not an execution exit kind',
     $$update harness_execution_exit set kind='BOGUS' where execution_id=pg_temp.uid(1700)$$,
@@ -1075,7 +1075,7 @@ select pg_temp.rejects('abandonment cannot precede registration',
     '23514', 'ck_harness_execution_exit_time');
 insert into harness_execution_exit (execution_id, thread_id, invocation_id, attempt,
     owner_lease_token, kind, parent_execution_id, environment_id, state, registered_at, confirmed_at, abandoned_at)
-    values (pg_temp.uid(1704), pg_temp.uid(310), pg_temp.uid(1701), 1, 'lease-1', 'REMOTE',
+    values (pg_temp.uid(1704), pg_temp.uid(310), pg_temp.uid(1701), 1, '00000000-0000-0000-0000-000000000001', 'REMOTE',
         pg_temp.uid(1700), pg_temp.uid(901), 'UNCONFIRMED', '2026-01-01 00:00:00.123+00', null, null);
 select pg_temp.assert_true('remote execution exit fact records environment_id and parent',
     (select kind = 'REMOTE' and parent_execution_id = pg_temp.uid(1700) and environment_id = pg_temp.uid(901)

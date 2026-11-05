@@ -11,7 +11,7 @@ import java.util.Optional;
 /**
  * {@code plugin_configuration} 存取：每个已安装 Plugin 一行当前普通配置。
  *
- * <p>写入以 revision 做 CAS 并在同一事务发出 {@value #CHANNEL} 通知，所有节点据此重建运行期目录。
+ * <p>写入以 version 做 CAS 并在同一事务发出 {@value #CHANNEL} 通知，所有节点据此重建运行期目录。
  */
 @Repository
 public class PluginConfigurationRepository {
@@ -19,11 +19,11 @@ public class PluginConfigurationRepository {
   /** 普通配置或凭据变化的 PostgreSQL 通知通道。 */
   public static final String CHANNEL = "plugin_changed";
 
-  private static final String COLUMNS = "plugin_id, revision, values_json";
+  private static final String COLUMNS = "plugin_id, version, values_json";
   private static final RowMapper<PluginConfigurationRow> ROW_MAPPER =
       (rs, row) ->
           new PluginConfigurationRow(
-              rs.getString("plugin_id"), rs.getLong("revision"), rs.getString("values_json"));
+              rs.getString("plugin_id"), rs.getLong("version"), rs.getString("values_json"));
 
   private final JdbcClient jdbc;
 
@@ -53,12 +53,12 @@ public class PluginConfigurationRepository {
         .update();
   }
 
-  /** 以 revision CAS 保存普通配置；未命中返回 false。 */
+  /** 以 version CAS 保存普通配置；未命中返回 false。 */
   public boolean update(String pluginId, long expectedRevision, String valuesJson) {
     return jdbc.sql(
                 "update plugin_configuration set values_json = :valuesJson,"
-                    + " revision = revision + 1, updated_at = current_timestamp"
-                    + " where plugin_id = :pluginId and revision = :expectedRevision")
+                    + " version = version + 1, updated_at = current_timestamp"
+                    + " where plugin_id = :pluginId and version = :expectedRevision")
             .param("valuesJson", valuesJson)
             .param("pluginId", pluginId)
             .param("expectedRevision", expectedRevision)

@@ -133,7 +133,8 @@ class PostgresqlAssistantErrorSettlementTest {
               .transaction(
                   tx ->
                       tx.work()
-                          .claimNext(WorkTargetType.THREAD, "settle-claim", Duration.ofSeconds(30)))
+                          .claimNext(
+                              WorkTargetType.THREAD, UUID.randomUUID(), Duration.ofSeconds(30)))
               .orElseThrow();
       assertEquals(ThreadProcessResult.COMPLETED, processor.process(claimed));
 
@@ -173,7 +174,8 @@ class PostgresqlAssistantErrorSettlementTest {
               .transaction(
                   tx ->
                       tx.work()
-                          .claimNext(WorkTargetType.THREAD, "replay-claim", Duration.ofSeconds(30)))
+                          .claimNext(
+                              WorkTargetType.THREAD, UUID.randomUUID(), Duration.ofSeconds(30)))
               .orElseThrow();
       assertEquals(ThreadProcessResult.COMPLETED, processor.process(replayed));
       EntryPath replayedPath = loadPath(store, baseline.threadId());

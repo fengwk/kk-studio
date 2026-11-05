@@ -230,7 +230,7 @@ public final class ConfigSyncGraph {
     Set<ConfigSyncRef> deps = new LinkedHashSet<>();
     for (String agent :
         pluginAgentDependencies.declaredAgentNames(
-            plugin.pluginId(), plugin.revision(), plugin.valuesJson())) {
+            plugin.pluginId(), plugin.version(), plugin.valuesJson())) {
       if (!builtinAgentNames.contains(agent)) {
         deps.add(ConfigSyncRefs.ref(ConfigSyncKind.AGENTS, agent));
       }

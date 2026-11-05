@@ -318,7 +318,7 @@ class ToolProcessorExecutionTest {
             fixture.store,
             fixture.toolInvocationId,
             ToolProcessorTestSupport.NOW,
-            "near-expiry",
+            UUID.randomUUID(),
             Duration.ofSeconds(1));
     AtomicReference<Instant> leaseAtAdmission = new AtomicReference<>();
     fixture.gateway.admitHook =
@@ -392,7 +392,7 @@ class ToolProcessorExecutionTest {
     fixture.gateway.queueRun(progress -> failed(true));
     fixture.processor.process(
         ToolProcessorTestSupport.claim(
-            fixture.store, fixture.toolInvocationId, fixture.clock.instant(), "token-2"));
+            fixture.store, fixture.toolInvocationId, fixture.clock.instant(), UUID.randomUUID()));
     awaitStatus(fixture, ToolInvocationStatus.FAILED);
     awaitIdle(fixture);
 

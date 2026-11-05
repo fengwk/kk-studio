@@ -194,7 +194,7 @@ class CanvasFunctionWorkerHeartbeatTest {
         future.get(5, TimeUnit.SECONDS);
       }
       verify(fixture.transactions, never())
-          .checkpoint(any(), any(), anyString(), anyString(), anyString(), any());
+          .checkpoint(any(), any(), anyString(), any(UUID.class), anyString(), any());
       verify(fixture.transactions, never()).completeSuccess(any(), any(), any());
       verify(fixture.transactions, never()).failIfRunning(any(), any(), any(), any());
     } finally {
@@ -231,7 +231,7 @@ class CanvasFunctionWorkerHeartbeatTest {
         future.get(5, TimeUnit.SECONDS);
       }
       verify(fixture.transactions, never())
-          .checkpoint(any(), any(), anyString(), anyString(), anyString(), any());
+          .checkpoint(any(), any(), anyString(), any(UUID.class), anyString(), any());
       verify(fixture.transactions, never()).completeSuccess(any(), any(), any());
       verify(fixture.transactions, never()).failIfRunning(any(), any(), any(), any());
     } finally {
@@ -340,7 +340,8 @@ class CanvasFunctionWorkerHeartbeatTest {
               NOW);
       claim =
           new ClaimedRun(
-              run, new WorkClaim(run.nodeId(), 1L, "lease", Instant.EPOCH.plusSeconds(30)));
+              run,
+              new WorkClaim(run.nodeId(), 1L, UUID.randomUUID(), Instant.EPOCH.plusSeconds(30)));
       when(runRepository.findByNodeId(run.nodeId())).thenReturn(Optional.of(run));
       when(runRepository.ownsRunningRequest(any(), any(), any(), any())).thenReturn(true);
 

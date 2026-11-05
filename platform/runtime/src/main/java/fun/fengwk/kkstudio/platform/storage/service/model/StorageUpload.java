@@ -34,7 +34,7 @@ public class StorageUpload {
   private Instant cleanupRequestedAt;
 
   /** 后台对象清理所有权 token；未 claim 时为 null。 */
-  private String cleanupToken;
+  private UUID cleanupToken;
 
   /** cleanupToken 的 lease 截止时刻；与 cleanupToken 成对为空或非空。 */
   private Instant cleanupUntil;

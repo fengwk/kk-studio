@@ -217,7 +217,7 @@ class HarnessRuntimeStopExitContractTest {
                                       remote.threadId(),
                                       remote.invocationId(),
                                       remote.attempt(),
-                                      "other-lease",
+                                      UUID.randomUUID(),
                                       remote.kind(),
                                       remote.parentExecutionId(),
                                       remote.environmentId(),

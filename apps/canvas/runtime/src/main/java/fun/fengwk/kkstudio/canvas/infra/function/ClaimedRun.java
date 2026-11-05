@@ -29,7 +29,7 @@ public record ClaimedRun(CanvasFunctionRun run, WorkClaim work) {
     return run.requestId();
   }
 
-  public String leaseToken() {
+  public UUID leaseToken() {
     return work.leaseToken();
   }
 }

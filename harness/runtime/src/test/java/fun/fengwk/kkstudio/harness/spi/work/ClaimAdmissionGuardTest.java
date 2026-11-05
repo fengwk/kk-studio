@@ -24,7 +24,7 @@ class ClaimAdmissionGuardTest {
   void ticketDeduplicatesSameTokenWithoutAbandoning() {
     ClaimAdmissionGuard<FakeExecution> guard = new ClaimAdmissionGuard<>();
     UUID id = TestIds.id(1);
-    ClaimedWork claim = claimedWork(id, "token-1");
+    ClaimedWork claim = claimedWork(id, UUID.randomUUID());
     FakeExecution exec1 = new FakeExecution(claim);
 
     ClaimAdmissionGuard.Ticket<FakeExecution> ticket1 = guard.tryAdmit(claim, () -> true);
@@ -46,7 +46,7 @@ class ClaimAdmissionGuardTest {
   void ticketVerifierRejectionDoesNotAbandonCurrentExecution() {
     ClaimAdmissionGuard<FakeExecution> guard = new ClaimAdmissionGuard<>();
     UUID id = TestIds.id(1);
-    ClaimedWork claim1 = claimedWork(id, "token-1");
+    ClaimedWork claim1 = claimedWork(id, UUID.randomUUID());
     FakeExecution exec1 = new FakeExecution(claim1);
 
     ClaimAdmissionGuard.Ticket<FakeExecution> ticket1 = guard.tryAdmit(claim1, () -> true);
@@ -54,7 +54,7 @@ class ClaimAdmissionGuardTest {
     assertTrue(ticket1.attach(exec1));
 
     // 旧 claim2 或失权 claim 校验返回 false：拒绝准入，不影响当前合法 exec1
-    ClaimedWork claim2 = claimedWork(id, "token-2");
+    ClaimedWork claim2 = claimedWork(id, UUID.randomUUID());
     ClaimAdmissionGuard.Ticket<FakeExecution> ticket2 = guard.tryAdmit(claim2, () -> false);
     assertNull(ticket2);
     assertFalse(exec1.abandoned.get());
@@ -68,14 +68,14 @@ class ClaimAdmissionGuardTest {
   void ticketSupersedesOlderExecutionWhenVerifierPasses() {
     ClaimAdmissionGuard<FakeExecution> guard = new ClaimAdmissionGuard<>();
     UUID id = TestIds.id(1);
-    ClaimedWork claim1 = claimedWork(id, "token-1");
+    ClaimedWork claim1 = claimedWork(id, UUID.randomUUID());
     FakeExecution exec1 = new FakeExecution(claim1);
 
     ClaimAdmissionGuard.Ticket<FakeExecution> ticket1 = guard.tryAdmit(claim1, () -> true);
     assertNotNull(ticket1);
     assertTrue(ticket1.attach(exec1));
 
-    ClaimedWork claim2 = claimedWork(id, "token-2");
+    ClaimedWork claim2 = claimedWork(id, UUID.randomUUID());
     FakeExecution exec2 = new FakeExecution(claim2);
 
     ClaimAdmissionGuard.Ticket<FakeExecution> ticket2 = guard.tryAdmit(claim2, () -> true);
@@ -95,7 +95,7 @@ class ClaimAdmissionGuardTest {
   void unattachedTicketReleasesOnClose() {
     ClaimAdmissionGuard<FakeExecution> guard = new ClaimAdmissionGuard<>();
     UUID id = TestIds.id(1);
-    ClaimedWork claim = claimedWork(id, "token-1");
+    ClaimedWork claim = claimedWork(id, UUID.randomUUID());
 
     ClaimAdmissionGuard.Ticket<FakeExecution> ticket = guard.tryAdmit(claim, () -> true);
     assertNotNull(ticket);
@@ -112,7 +112,7 @@ class ClaimAdmissionGuardTest {
   void cancelAbandonsExecutionAndRemovesEntry() {
     ClaimAdmissionGuard<FakeExecution> guard = new ClaimAdmissionGuard<>();
     UUID id = TestIds.id(1);
-    ClaimedWork claim = claimedWork(id, "token-1");
+    ClaimedWork claim = claimedWork(id, UUID.randomUUID());
     FakeExecution exec = new FakeExecution(claim);
 
     ClaimAdmissionGuard.Ticket<FakeExecution> ticket = guard.tryAdmit(claim, () -> true);
@@ -129,7 +129,7 @@ class ClaimAdmissionGuardTest {
   void cancelBeforeAttachRefusesSubsequentAttach() {
     ClaimAdmissionGuard<FakeExecution> guard = new ClaimAdmissionGuard<>();
     UUID id = TestIds.id(1);
-    ClaimedWork claim = claimedWork(id, "token-1");
+    ClaimedWork claim = claimedWork(id, UUID.randomUUID());
     FakeExecution exec = new FakeExecution(claim);
 
     ClaimAdmissionGuard.Ticket<FakeExecution> ticket = guard.tryAdmit(claim, () -> true);
@@ -151,8 +151,8 @@ class ClaimAdmissionGuardTest {
     ClaimAdmissionGuard<FakeExecution> guard = new ClaimAdmissionGuard<>();
     UUID id1 = TestIds.id(1);
     UUID id2 = TestIds.id(2);
-    ClaimedWork claim1 = claimedWork(id1, "token-1");
-    ClaimedWork claim2 = claimedWork(id2, "token-2");
+    ClaimedWork claim1 = claimedWork(id1, UUID.randomUUID());
+    ClaimedWork claim2 = claimedWork(id2, UUID.randomUUID());
     FakeExecution exec1 = new FakeExecution(claim1);
     FakeExecution exec2 = new FakeExecution(claim2);
 
@@ -172,7 +172,7 @@ class ClaimAdmissionGuardTest {
   void concurrentCloseDuringVerifierPreventsSlotCreation() throws Exception {
     ClaimAdmissionGuard<FakeExecution> guard = new ClaimAdmissionGuard<>();
     UUID id = TestIds.id(1);
-    ClaimedWork claim = claimedWork(id, "token-1");
+    ClaimedWork claim = claimedWork(id, UUID.randomUUID());
 
     CountDownLatch verifierEntered = new CountDownLatch(1);
     CountDownLatch resumeVerifier = new CountDownLatch(1);
@@ -230,7 +230,7 @@ class ClaimAdmissionGuardTest {
   void ticketAttachRejectedAfterClose() {
     ClaimAdmissionGuard<FakeExecution> guard = new ClaimAdmissionGuard<>();
     UUID id = TestIds.id(1);
-    ClaimedWork claim = claimedWork(id, "token-1");
+    ClaimedWork claim = claimedWork(id, UUID.randomUUID());
     FakeExecution exec = new FakeExecution(claim);
 
     ClaimAdmissionGuard.Ticket<FakeExecution> ticket = guard.tryAdmit(claim, () -> true);
@@ -252,7 +252,7 @@ class ClaimAdmissionGuardTest {
     assertTrue(condition.getAsBoolean(), "condition was not satisfied within timeout");
   }
 
-  private static ClaimedWork claimedWork(UUID id, String token) {
+  private static ClaimedWork claimedWork(UUID id, UUID token) {
     return new ClaimedWork(new WorkTarget(WorkTargetType.TOOL, id), 1L, token, Instant.EPOCH);
   }
 

@@ -37,11 +37,11 @@ public interface WorkStore {
 
   /** 领取下一个 due Work（无节点亲和性）。 */
   Optional<ClaimedWork> claimNext(
-      WorkTargetType targetType, String leaseToken, Duration leaseDuration);
+      WorkTargetType targetType, UUID leaseToken, Duration leaseDuration);
 
   /** 领取下一个满足环境亲和性的 due Work。 */
   Optional<ClaimedWork> claimNext(
-      WorkTargetType targetType, String leaseToken, Duration leaseDuration, UUID nodeInstanceId);
+      WorkTargetType targetType, UUID leaseToken, Duration leaseDuration, UUID nodeInstanceId);
 
   /** 延长 claim lease，返回是否实际延长。 */
   boolean renew(ClaimedWork claim, Duration leaseDuration);

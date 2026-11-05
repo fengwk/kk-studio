@@ -31,6 +31,7 @@ import java.util.concurrent.TimeUnit;
 
 class FileExecutionExitJournalTest {
 
+  private static final UUID LEASE_ID = UUID.fromString("11111111-1111-1111-1111-111111111111");
   private static final Instant T0 = Instant.parse("2026-07-01T00:00:00Z");
 
   @Test
@@ -385,7 +386,7 @@ class FileExecutionExitJournalTest {
             UUID.randomUUID(),
             UUID.randomUUID(),
             1,
-            "lease-1",
+            UUID.randomUUID(),
             ExecutionExitKind.REMOTE,
             UUID.randomUUID(),
             EnvironmentId.of(UUID.randomUUID()),
@@ -409,7 +410,9 @@ class FileExecutionExitJournalTest {
               + UUID.randomUUID()
               + "\",\"invocationId\":\""
               + UUID.randomUUID()
-              + "\",\"attempt\":1,\"ownerLeaseToken\":\"lease-1\",\"kind\":\"TOOL\","
+              + "\",\"attempt\":1,\"ownerLeaseToken\":\""
+              + LEASE_ID
+              + "\",\"kind\":\"TOOL\","
               + "\"parentExecutionId\":null,\"targetState\":\"STUDIO_EXITED\"}");
       assertSingleFailure(journal.loadAll(), ExecutionExitJournalFailure.Reason.CORRUPT);
 
@@ -421,7 +424,9 @@ class FileExecutionExitJournalTest {
               + UUID.randomUUID()
               + "\",\"invocationId\":\""
               + UUID.randomUUID()
-              + "\",\"attempt\":1,\"ownerLeaseToken\":\"lease-1\",\"kind\":\"TOOL\","
+              + "\",\"attempt\":1,\"ownerLeaseToken\":\""
+              + LEASE_ID
+              + "\",\"kind\":\"TOOL\","
               + "\"parentExecutionId\":null,\"targetState\":\"STUDIO_EXITED\","
               + "\"confirmedAt\":\""
               + T0
@@ -436,7 +441,9 @@ class FileExecutionExitJournalTest {
               + UUID.randomUUID()
               + "\",\"invocationId\":\""
               + UUID.randomUUID()
-              + "\",\"attempt\":1,\"ownerLeaseToken\":\"lease-1\",\"kind\":\"TOOL\","
+              + "\",\"attempt\":1,\"ownerLeaseToken\":\""
+              + LEASE_ID
+              + "\",\"kind\":\"TOOL\","
               + "\"parentExecutionId\":null,\"environmentId\":null,\"targetState\":\"STUDIO_EXITED\","
               + "\"confirmedAtX\":\""
               + T0
@@ -451,7 +458,9 @@ class FileExecutionExitJournalTest {
               + UUID.randomUUID()
               + "\",\"invocationId\":\""
               + UUID.randomUUID()
-              + "\",\"attempt\":\"one\",\"ownerLeaseToken\":\"lease-1\",\"kind\":\"TOOL\","
+              + "\",\"attempt\":\"one\",\"ownerLeaseToken\":\""
+              + LEASE_ID
+              + "\",\"kind\":\"TOOL\","
               + "\"parentExecutionId\":null,\"environmentId\":null,\"targetState\":\"STUDIO_EXITED\","
               + "\"confirmedAt\":\""
               + T0
@@ -890,7 +899,7 @@ class FileExecutionExitJournalTest {
         threadId,
         invocationId,
         1,
-        "lease-1",
+        LEASE_ID,
         ExecutionExitKind.TOOL,
         null,
         null,
