@@ -119,13 +119,13 @@ function mapResolveErrorToStatus(error: unknown): number {
   return 502
 }
 
-export interface ParsedIdePath {
+interface ParsedIdePath {
   viewId: string
   bindingEpoch: string
   viewPath: string
 }
 
-export function parseIdePath(path: string | undefined): ParsedIdePath | null {
+function parseIdePath(path: string | undefined): ParsedIdePath | null {
   if (typeof path !== 'string') {
     return null
   }

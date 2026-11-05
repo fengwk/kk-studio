@@ -88,7 +88,7 @@ export function requireFreshIdeLease(active: ActiveIdeLeaseRound | null, round: 
 }
 
 /** IDE 管理命令失败回执：取消用 BUSY，其余用 UNAVAILABLE。 */
-export function ideFailureReply(error: unknown, message: string): IdeResult {
+function ideFailureReply(error: unknown, message: string): IdeResult {
   return create(IdeResultSchema, {
     ok: false,
     code: error instanceof Error && error.name === 'AbortError' ? 'BUSY' : 'UNAVAILABLE',
@@ -169,7 +169,7 @@ function toIdeMode(mode: IdeOpenMode | undefined): IdeCommand['mode'] | undefine
 }
 
 /** 把 wire 命令映射为 IDE 服务契约；未知动作在这里失败关闭。 */
-export function toIdeCommand(protoCmd: ProtoIdeCommand): IdeCommand {
+function toIdeCommand(protoCmd: ProtoIdeCommand): IdeCommand {
   return {
     action: toIdeAction(protoCmd.action),
     viewId: protoCmd.viewId ?? undefined,

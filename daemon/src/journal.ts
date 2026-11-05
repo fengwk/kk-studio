@@ -157,8 +157,4 @@ export class InMemoryInvocationJournal implements InvocationJournal {
     }
   }
 
-  /** 当前条目数，供测试断言上界。 */
-  size(): number {
-    return this.entries.size
-  }
 }

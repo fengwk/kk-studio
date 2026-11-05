@@ -10,7 +10,6 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   handleIdeConnectRequest,
   handleIdeHttpRequest,
-  parseIdePath,
   validateUpstream,
 } from '../src/transport/ide-tunnel.js'
 import { IdeError } from '../src/ide/errors.js'
@@ -159,24 +158,34 @@ describe('ide-tunnel unit tests', () => {
     })
   })
 
-  describe('parseIdePath', () => {
-    it('returns null on invalid inputs', () => {
-      expect(parseIdePath(undefined)).toBeNull()
-      expect(parseIdePath(null as any)).toBeNull()
-      expect(parseIdePath(123 as any)).toBeNull()
-      expect(parseIdePath('/not-ide/path')).toBeNull()
-      expect(parseIdePath('/ide/not-a-uuid/1/path')).toBeNull()
-      expect(parseIdePath('/ide/11111111-1111-4111-8111-111111111111/0/path')).toBeNull() // epoch 必须为非零正整数
-      expect(parseIdePath('/ide/11111111-1111-4111-8111-111111111111/1')).toBeNull() // 缺少 viewPath 开头斜线
+  describe('IDE path validation', () => {
+    it('rejects invalid paths before resolving the view for HTTP and CONNECT', async () => {
+      const resolveView = vi.fn()
+      const ide = { resolveView } as unknown as IdeService
+      for (const handler of [handleIdeHttpRequest, handleIdeConnectRequest]) {
+        for (const path of [
+          undefined, null, 123, '/not-ide/path', '/ide/not-a-uuid/1/path',
+          '/ide/11111111-1111-4111-8111-111111111111/0/path',
+          '/ide/11111111-1111-4111-8111-111111111111/1',
+        ]) {
+          const stream = new MockServerHttp2Stream()
+          await handler(stream as any, { ':path': path } as any, ide)
+          expect(stream.respondedHeaders?.[HTTP2_HEADER_STATUS]).toBe(400)
+        }
+      }
+      expect(resolveView).not.toHaveBeenCalled()
     })
 
-    it('parses valid paths', () => {
-      const parsed = parseIdePath('/ide/11111111-1111-4111-8111-111111111111/42/sub/path?query=1')
-      expect(parsed).toEqual({
-        viewId: '11111111-1111-4111-8111-111111111111',
-        bindingEpoch: '42',
-        viewPath: '/sub/path?query=1',
-      })
+    it('passes the parsed identity and path to the view resolver', async () => {
+      const resolveView = vi.fn(async () => { throw new IdeError('unavailable') })
+      const stream = new MockServerHttp2Stream()
+      await handleIdeHttpRequest(stream as any, {
+        ':path': '/ide/11111111-1111-4111-8111-111111111111/42/sub/path?query=1',
+      }, { resolveView } as unknown as IdeService)
+      expect(resolveView).toHaveBeenCalledWith(
+        '11111111-1111-4111-8111-111111111111', '42',
+        expect.objectContaining({ mode: 'HTTP', path: '/sub/path?query=1' }),
+      )
     })
   })
 

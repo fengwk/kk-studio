@@ -331,7 +331,7 @@ export class TemporaryResourceStore {
 }
 
 /** 活动 workspace 句柄：持有 in-use lease，{@link Workspace.close()} 幂等释放且保证恰好一次。 */
-export class Workspace {
+class Workspace {
   private closed = false
 
   constructor(
