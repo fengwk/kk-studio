@@ -8,7 +8,7 @@ import {
   expectHttpError,
   pageResults,
 } from '../lib/http.mjs'
-import { canonicalUuid } from '../lib/harness.mjs'
+import { branchSettingsOf, canonicalUuid } from '../lib/harness.mjs'
 import { createCaseAdder } from '../lib/registry.mjs'
 
 export const cases = []
@@ -207,7 +207,7 @@ registerCase({
               type: 'NEW_SESSION',
               sessionId: cid(),
               threadId: cid(),
-              rootSettings: { agentName: 'unused-agent' },
+              rootSettings: branchSettingsOf({ name: 'unused-agent' }, { modelName: 'unused-model' }),
               yoloEnabled: false,
             },
             commands: [{ type: 'USER_MESSAGE', idempotencyKey: cid(), contents: [{ type: 'TEXT', text: 'x' }] }],
@@ -226,7 +226,7 @@ registerCase({
               type: 'NEW_SESSION',
               sessionId: cid(),
               threadId: cid(),
-              rootSettings: { agentName: 'e2e-agent-owner' },
+              rootSettings: branchSettingsOf({ name: 'e2e-agent-owner' }, { modelName: 'e2e-model-owner' }),
               yoloEnabled: false,
             },
             commands: [{ type: 'USER_MESSAGE', idempotencyKey: cid(), contents: [{ type: 'TEXT', text: 'x' }] }],
