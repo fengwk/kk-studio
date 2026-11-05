@@ -21,6 +21,7 @@ import fun.fengwk.kkstudio.harness.runtime.execution.FileExecutionExitJournal;
 import fun.fengwk.kkstudio.harness.runtime.execution.TestExecutionExitConfirmer;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
+import fun.fengwk.kkstudio.harness.spi.driver.DriverThreadDeletion;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 
 import java.lang.reflect.Proxy;
@@ -171,7 +172,7 @@ class ExecutionExitConfirmerDurabilityTest {
         tx -> {
           tx.threads().lockTree(baseline.threadId());
           tx.threads().lock(baseline.threadId());
-          tx.threads().delete(List.of(baseline.threadId()));
+          tx.threads().delete(List.of(baseline.threadId()), DriverThreadDeletion.NONE);
           return null;
         });
     try (FileExecutionExitJournal journal = new FileExecutionExitJournal(directory)) {

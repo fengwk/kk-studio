@@ -43,12 +43,8 @@ public interface ThreadStore {
 
   /**
    * 批量删除 Thread 及其全部 Command / Driver 私有行 / ToolInvocation / Work / Join / Stop 回执；要求所有 Thread 已按
-   * UUID 升序锁定。Driver 私有行由 {@link DriverThreadDeletion} 生命周期清理。
+   * UUID 升序锁定。Driver 私有行由 {@link DriverThreadDeletion} 生命周期清理，调用方必须传入组合根的 Driver 生命周期；不持有 Driver
+   * 私有行的调用方显式传入 {@link DriverThreadDeletion#NONE}。
    */
   int delete(List<UUID> threadIds, DriverThreadDeletion driverDeletion);
-
-  /** 无 Driver 私有状态的便捷删除；生产深删必须传入组合根的 Driver 生命周期。 */
-  default int delete(List<UUID> threadIds) {
-    return delete(threadIds, DriverThreadDeletion.NONE);
-  }
 }

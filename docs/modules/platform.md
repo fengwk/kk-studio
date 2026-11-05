@@ -149,7 +149,8 @@ INPUT/CONTINUATION 轮次和 assistant tool call，排除 COMPACTION 与 STOP。
 
 深删除先排序并锁定目标 Thread，重复 ID、未锁树或仍被引用的目标被拒绝；
 依次锁 Command、Driver 私有行、Tool、Work，再按 Work、Command、Tool、Driver 私有行、
-执行退出事实、Thread 的顺序删除。Driver 私有行由 `DriverThreadDeletion` 锁定和删除；
+执行退出事实、Thread 的顺序删除。Driver 私有行由 `DriverThreadDeletion` 锁定和删除，
+调用方必须显式传入组合根的 Driver 生命周期（无私有行时显式 `NONE`），不提供省略该端口的删除重载；
 Entry 叶子优先逐层删除，Session 单独删除。
 
 ### Work 的 claim / lease / wake

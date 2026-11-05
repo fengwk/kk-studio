@@ -57,11 +57,13 @@ import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
+import fun.fengwk.kkstudio.harness.spi.driver.DriverThreadDeletion;
 import fun.fengwk.kkstudio.harness.spi.store.EntryStore;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.spi.store.JoinStore;
 import fun.fengwk.kkstudio.harness.spi.store.SessionStore;
 import fun.fengwk.kkstudio.harness.spi.store.ThreadStore;
+import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.Project;
@@ -472,13 +474,19 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
                 }
                 return deleted;
               });
-      when(threadStore.delete(any()))
+      when(threadStore.delete(any(), any()))
           .thenAnswer(
               invocation -> {
                 List<UUID> threadIds = invocation.getArgument(0);
+                DriverThreadDeletion driverDeletion = invocation.getArgument(1);
+                List<WorkTarget> driverTargets =
+                    driverDeletion.lockForDeletion(transaction, threadIds);
                 int deleted = 0;
                 for (UUID threadId : threadIds) {
                   jdbc.update("delete from harness_thread_command where thread_id = ?", threadId);
+                }
+                driverDeletion.deleteLocked(transaction, threadIds, driverTargets);
+                for (UUID threadId : threadIds) {
                   deleted += jdbc.update("delete from harness_thread where id = ?", threadId);
                 }
                 return deleted;
