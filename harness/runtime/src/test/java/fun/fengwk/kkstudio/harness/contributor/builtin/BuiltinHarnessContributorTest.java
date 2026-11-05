@@ -5,7 +5,12 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
@@ -16,6 +21,7 @@ import fun.fengwk.kkstudio.harness.contributor.api.ContributorDescriptor;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
+import fun.fengwk.kkstudio.harness.contributor.api.HarnessRegistrar;
 import fun.fengwk.kkstudio.harness.contributor.api.StateDeclaration;
 import fun.fengwk.kkstudio.harness.contributor.api.StateMode;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
@@ -209,7 +215,11 @@ class BuiltinHarnessContributorTest {
     assertAskUserTool(catalog);
 
     // Custom entry types: exactly goal.progress ownership
-    assertEquals(1, catalog.customEntryTypes().size());
+    HarnessRegistrar registrar = mock(HarnessRegistrar.class);
+    contributor.contribute(registrar);
+    verify(registrar, times(1)).registerCustomEntryType(anyString(), anyString(), anyInt());
+    verify(registrar).registerCustomEntryType("goal.progress-type", "goal.progress", 0);
+    verify(registrar, never()).registerCustomEntryType(anyString(), anyString());
     assertTrue(
         catalog.findCustomEntryType(new ContributorId("builtin"), "goal.progress").isPresent());
     assertEquals(

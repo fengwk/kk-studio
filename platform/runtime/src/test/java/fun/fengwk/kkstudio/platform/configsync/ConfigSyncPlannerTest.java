@@ -768,9 +768,9 @@ class ConfigSyncPlannerTest {
     return entry;
   }
 
-  /** 插件条目在快照里有该 Agent 时被导入，并携带计划期的目录 epoch 与配置修订作为 CAS 坐标。 */
+  /** 插件条目在快照里有该 Agent 时被导入，并携带计划期的配置修订作为 CAS 坐标。 */
   @Test
-  void pluginImportCarriesCatalogEpochAndRevision() {
+  void pluginImportCarriesRevision() {
     when(snapshotReader.read())
         .thenReturn(
             snapshotWithPlugins(

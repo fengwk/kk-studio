@@ -256,6 +256,9 @@ test('test intent: UI smoke creates an agent without an implicit Environment', (
 test('test intent: the lifecycle fixture seeds canonical branch settings', () => {
   // HarnessRuntimePostgresqlLifecycleIntegrationTest must seed canonical branch settings.
   const content = readFileSync(LIFECYCLE_TEST_JAVA, 'utf8')
-  assert.ok(!content.includes('"workspacePath"'))
-  assert.ok(content.includes('{"settings": {"agentName": "lifecycle-test"'))
+  const block = content.match(/ROOT_PAYLOAD_JSON\s*=\s*"""([\s\S]*?)"""/u)
+  assert.ok(block, 'lifecycle fixture must declare the root payload')
+  const payload = JSON.parse(block[1].replaceAll('\\\n', ''))
+  assert.deepEqual(Object.keys(payload.settings).sort(), ['agentName', 'environmentName', 'execution', 'goal'])
+  assert.equal(payload.settings.agentName, 'lifecycle-test')
 })

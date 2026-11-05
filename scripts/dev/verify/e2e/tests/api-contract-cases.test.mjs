@@ -166,11 +166,19 @@ test('providerUpdateBody builds the editable PUT body without name and preserves
 test('settings contract accepts an empty existing HTTP retry list without mutating it on failure', async () => {
   const before = {
     version: '0',
+    createTime: '2026-01-01T00:00:00Z',
+    updateTime: '2026-01-01T00:00:00Z',
     tool: {},
     aiRuntime: { retryBaseDelayMillis: '2500', modelHttpRetryStatusCodes: [] },
     environment: {},
     network: { proxyUrl: null, noProxyHosts: '' },
     storageMedia: {
+      uploadExpiresSeconds: '3600',
+      s3PresignDefaultExpiresSeconds: '900',
+      s3PresignMaxExpiresSeconds: '3600',
+      canvasMediaProcessTimeoutMillis: '60000',
+      thumbnailMaxDimension: 1024,
+      thumbnailQuality: 80,
       temporaryResourceTtlSeconds: '259200',
       temporaryResourceCleanupIntervalSeconds: '1800',
     },
@@ -190,6 +198,34 @@ test('settings contract accepts an empty existing HTTP retry list without mutati
   await assert.rejects(getCase('settings.system_contract_cas').run(ctx), (error) => error === mutationError)
   assert.equal(puts, 1, 'empty existing list must pass validation and reach the CAS update')
   assert.deepEqual(before.aiRuntime.modelHttpRetryStatusCodes, [])
+
+  // 精确字段契约在更新前拒绝顶层与 section 的未知成员。
+  for (const invalid of [
+    { ...before, unexpected: true },
+    { ...before, storageMedia: { ...before.storageMedia, unexpected: true } },
+  ]) {
+    await assert.rejects(
+      getCase('settings.system_contract_cas').run({
+        async call(method) {
+          assert.equal(method, 'GET')
+          return { json: { data: invalid } }
+        },
+      }),
+      /fields must be/,
+    )
+  }
+})
+
+test('tool catalog case accepts its public fields and rejects extra fields', async () => {
+  // 真实 case 检查工具目录形状，不允许未知成员绕过。
+  const entries = ['get_goal', 'update_goal'].map((name) => ({
+    name, description: 'fixture', environmentSupport: 'NONE',
+  }))
+  const run = (tools) => getCase('catalog.internal_tools_hidden').run({
+    async call() { return { json: { data: tools } } },
+  })
+  await run(entries)
+  await assert.rejects(run([{ ...entries[0], unexpected: true }, entries[1]]), /fields must be/)
 })
 
 test('chat default environment case executes the create/retain/clear wire with omit-null semantics', async () => {

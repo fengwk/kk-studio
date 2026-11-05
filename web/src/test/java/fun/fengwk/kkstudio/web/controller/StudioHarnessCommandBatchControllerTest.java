@@ -457,7 +457,7 @@ class StudioHarnessCommandBatchControllerTest {
             [{
               "type":"SET_ENVIRONMENT",
               "idempotencyKey":"%s",
-              "unexpectedField":{"workspacePath":"."}
+              "unexpectedField":{"value":"."}
             }]
             """
                 .formatted(IDEMPOTENCY_KEY));

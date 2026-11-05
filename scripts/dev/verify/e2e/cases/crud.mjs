@@ -659,13 +659,11 @@ registerCase({
     let cleanupChat = chat
     let environment = null
     try {
+      assertExactFields(chat, ['id', 'title', 'agentName', 'environmentName', 'yoloEnabled', 'version', 'createTime', 'updateTime'], 'created chat')
       assert(
         chat.agentName === agent.name
           && chat.yoloEnabled === false
-          && chat.environmentName === null
-          && !Object.hasOwn(chat, 'workspacePath')
-          && !Object.hasOwn(chat, 'environment')
-          && !Object.hasOwn(chat, 'environmentId'),
+          && chat.environmentName === null,
         JSON.stringify(chat),
       )
       // 先创建 Thread（NEW_SESSION 初始创建），再更新 Chat 默认值，最后 reread 同一 Thread：
@@ -705,13 +703,11 @@ registerCase({
         ).json,
       )
       cleanupChat = updated
+      assertExactFields(updated, ['id', 'title', 'agentName', 'environmentName', 'yoloEnabled', 'version', 'createTime', 'updateTime'], 'updated chat')
       assert(
         updated.agentName === agent.name
           && updated.yoloEnabled === true
-          && updated.environmentName === environment.name
-          && !Object.hasOwn(updated, 'workspacePath')
-          && !Object.hasOwn(updated, 'environment')
-          && !Object.hasOwn(updated, 'environmentId'),
+          && updated.environmentName === environment.name,
         JSON.stringify(updated),
       )
       // 同一 Thread reread：branchSettings 逐字段不变。

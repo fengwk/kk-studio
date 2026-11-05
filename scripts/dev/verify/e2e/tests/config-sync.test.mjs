@@ -207,9 +207,9 @@ test('install config hard-invalid precheck rejects every endpoint without side e
   // 4 组非法配置 × 2 个端点，全部硬拒绝。
   assert.equal(requests.length, 8)
   assert.equal(
-    requests.filter((request) => request.yaml.includes('"javaHome":"/opt/jdk"')).length,
+    requests.filter((request) => request.yaml.includes('"unknownField":"/opt/jdk"')).length,
     2,
-    'retired javaHome must be probed at both import/check and import',
+    'unknown top-level field must be probed at both import/check and import',
   )
   for (const request of requests) {
     assert.equal(request.allowPartial, true)

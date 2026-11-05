@@ -15,14 +15,13 @@ test('environment install-config case is a free L1 matrix case', () => {
   assert.deepEqual(Array.from(caseDef.requires), [])
 })
 
-test('canonical install config omits the retired javaHome field', () => {
-  // 测试意图：Backend 严格 schema 已退役 javaHome；canonical fixture 连 null 都不能携带，断言也必须拒绝该字段回流。
+test('canonical install config has exactly the expected top-level fields', () => {
+  // 测试意图：往返断言拒绝包含任意未知字段的配置。
   const config = linuxInstallConfig()
-  assert.equal(Object.hasOwn(config, 'javaHome'), false)
   assert.doesNotThrow(() => assertInstallConfig(config))
   assert.throws(
-    () => assertInstallConfig({ ...config, javaHome: null }),
-    /retired javaHome/,
+    () => assertInstallConfig({ ...config, unknownField: null }),
+    /installConfig/,
   )
 })
 
@@ -48,7 +47,7 @@ test('environment install-config case exercises PUT CAS persistence, no-op and h
         if (
           config == null
           || config.operatingSystem !== 'linux'
-          || Object.hasOwn(config, 'javaHome')
+          || Object.keys(config).some((key) => !['operatingSystem', 'daemon'].includes(key))
           || config.daemon?.studioUrl !== 'http://127.0.0.1:18081'
           || Object.hasOwn(config.daemon ?? {}, 'unknown')
         ) {
