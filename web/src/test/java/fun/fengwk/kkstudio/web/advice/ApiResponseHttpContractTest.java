@@ -74,6 +74,11 @@ class ApiResponseHttpContractTest {
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.code").value("validation"))
         .andExpect(jsonPath("$.errors.detail").value("rejected"));
+    mockMvc
+        .perform(get("/probe/direct-error"))
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.code").value("conflict"))
+        .andExpect(jsonPath("$.errors.detail").value("rejected"));
   }
 
   @Test
@@ -162,6 +167,12 @@ class ApiResponseHttpContractTest {
           .body(
               ApiResponse.error(
                   HttpStatus.BAD_REQUEST, "validation", "invalid", Map.of("detail", "rejected")));
+    }
+
+    @GetMapping("/probe/direct-error")
+    ApiResponse<Void> directError() {
+      return ApiResponse.error(
+          HttpStatus.CONFLICT, "conflict", "conflict", Map.of("detail", "rejected"));
     }
 
     @GetMapping("/probe/empty")
