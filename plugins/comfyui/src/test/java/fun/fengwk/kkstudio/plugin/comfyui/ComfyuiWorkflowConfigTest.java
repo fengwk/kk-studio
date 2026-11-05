@@ -439,7 +439,7 @@ class ComfyuiWorkflowConfigTest {
 
   @Test
   void rejectsH3PresetsWhoseGraphBreaksTheOptimizationOrLengthChain() {
-    // 样本节点必须已删除；模板现在是外部配置，已知模板校验失败在配置边界收敛为去敏 IllegalArgumentException。
+    // 工作流模板不得包含样本节点；已知模板校验失败在配置边界收敛为去敏 IllegalArgumentException。
     ObjectNode withSample =
         ComfyuiWorkflowFixtures.h3WithAddedNode(
             "137", "{\"class_type\":\"SaveImage\",\"inputs\":{}}");

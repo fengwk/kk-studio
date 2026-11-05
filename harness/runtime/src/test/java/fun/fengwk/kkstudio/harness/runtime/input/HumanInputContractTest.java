@@ -222,7 +222,7 @@ class HumanInputContractTest {
   }
 
   /**
-   * 问卷与答案不再有业务数量/长度上限：fixture 的题数、选项数与问题/label/description 都超过旧上限，必须被接受并逐字保留。
+   * 问卷与答案不设人为业务数量/长度上限：fixture 的题数、选项数与问题/label/description 均被接受并逐字保留。
    *
    * <p>长结构化问卷放在 classpath fixture（{@code input/long-questionnaire.json}），避免把巨型 JSON 写进测试代码。
    */

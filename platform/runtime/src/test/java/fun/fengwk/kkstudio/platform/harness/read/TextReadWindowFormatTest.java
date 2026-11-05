@@ -104,7 +104,7 @@ class TextReadWindowFormatTest {
         String.join("\n", "path: test.txt", "ends_with_newline: yes", "range: empty"), result);
   }
 
-  /** 单行不再按长度截断：3000 码点整行返回。 */
+  /** 单行按完整长度返回：3000 码点整行可读。 */
   @Test
   void longLineIsNotTruncated() {
     String longLine = "a".repeat(3000);
@@ -115,7 +115,7 @@ class TextReadWindowFormatTest {
     assertFalse(result.contains("truncated"), result);
   }
 
-  /** column_offset 只作用于起始行片段，且不再要求 limit=1。 */
+  /** column_offset 只作用于起始行片段，后续行按 limit 返回。 */
   @Test
   void columnOffsetSlicesOnlyFirstLineAndKeepsFollowingLines() {
     String result = format("abcdefghij\nklmnop\n", 1, 200, 4);
@@ -378,7 +378,7 @@ class TextReadWindowFormatTest {
   }
 
   /**
-   * 大流只保留窗口，但总行数来自扫描到 EOF；不再有“资源超过 N MiB 就拒绝”的限制。
+   * 大流只保留窗口，但总行数来自扫描到 EOF。
    *
    * <p>测试意图：证明流式扫描是线性读取（大流不会被整段驻留内存），且行数统计准确。
    */

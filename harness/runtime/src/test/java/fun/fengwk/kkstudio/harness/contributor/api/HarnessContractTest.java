@@ -115,7 +115,7 @@ class HarnessContractTest {
    * 验证 ToolRequirements 的环境关系声明、状态访问集合校验与非法组合 fail closed。
    *
    * <p>环境关系只有执行位置语义：{@code NONE} 工具不参与环境绑定，{@code ROUTED} 文件工具按每次调用的参数决定位置，{@code REQUIRED}
-   * 工具只能在绑定环境执行。固定要求某个环境身份的做法已删除，因此不再有 {@code requiredEnvironmentId}。
+   * 工具只能在绑定环境执行。
    */
   @Test
   void toolRequirementsValidatesAndEnforcesUniqueness() {

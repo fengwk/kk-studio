@@ -176,7 +176,7 @@ final class H3WorkflowBuilder {
     try {
       validateTemplate(workflow.graph(), saveNodeId);
     } catch (IllegalStateException templateFailure) {
-      // 注册图现在是外部配置：已知模板校验失败在配置边界收敛为去敏 IllegalArgumentException，未知 RuntimeException/Error 不降级。
+      // 注册图为外部配置：已知模板校验失败在配置边界收敛为去敏 IllegalArgumentException，未知 RuntimeException/Error 不降级。
       throw new IllegalArgumentException(
           "workflow " + WORKFLOW_ID + " workflowJson must preserve the supported H3 template");
     }

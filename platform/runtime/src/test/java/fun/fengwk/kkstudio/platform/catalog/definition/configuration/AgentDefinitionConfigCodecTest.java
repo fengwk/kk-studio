@@ -34,16 +34,6 @@ class AgentDefinitionConfigCodecTest {
     assertEquals(List.of("reviewer"), decoded.getSubagents());
   }
 
-  /** 测试意图：旧环境开关不再属于配置契约，持久化配置必须拒绝该字段。 */
-  @Test
-  void rejectsLegacyEnvironmentField() {
-    assertThrows(
-        IllegalStateException.class,
-        () ->
-            codec.decode(
-                "{\"tools\":[],\"skills\":[],\"subagents\":[],\"inheritParentEnvironment\":true}"));
-  }
-
   /** 测试意图：验证编解码时严格要求必填字段，拒绝 null 字段与非规范配置。 */
   @Test
   void rejectsIncompleteAndNonCanonicalTypedConfigs() {

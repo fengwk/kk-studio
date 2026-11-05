@@ -175,8 +175,8 @@ class AnthropicContinuationReplayTest {
   }
 
   /**
-   * 测试意图：compaction replay 只与 affinity 绑定，与 system 指令和更早的历史无关（不再有前缀哈希绑定）：即使 system 指令与
-   * 前缀历史都发生变化，replay 仍生效并省略被摘要的历史。
+   * 测试意图：compaction replay 只与 affinity 绑定，与 system 指令和更早的历史无关：即使 system 指令与 前缀历史都发生变化，replay
+   * 仍生效并省略被摘要的历史。
    */
   @Test
   void compactionReplayAppliesAcrossChangedSystemAndHistory() throws IOException {

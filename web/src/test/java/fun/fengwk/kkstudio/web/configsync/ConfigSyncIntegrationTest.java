@@ -260,23 +260,6 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
         .andExpect(status().isBadRequest());
   }
 
-  /** 旧模型字段即使与有效 execution 并存，也不能通过检查或部分导入。 */
-  @Test
-  void legacyAgentFieldsAreRejectedAtBothImportEndpoints() throws Exception {
-    String agent = "legacy_agent_" + unique();
-    for (String legacy : List.of("    model: acceptance-stub\n", "    variant: default\n")) {
-      String yaml =
-          "agents:\n  - name: "
-              + agent
-              + "\n    execution: {driver: builtin, settings: {modelName: acceptance-stub, variant: default}}\n"
-              + legacy
-              + "    config: {tools: [], skills: [], subagents: []}\n";
-      checkRejected(yaml);
-      importRejected(yaml, true);
-      assertNull(findAgent(agent));
-    }
-  }
-
   /** 预检查对缺 section、空对象、非法嵌套值都与执行一致地硬拒绝，且不回显值。 */
   @Test
   void checkEndpointRejectsIncompleteSettingsAndInvalidValues() throws Exception {

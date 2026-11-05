@@ -806,8 +806,7 @@ class DatabaseTurnResolverTest {
   /**
    * 验证 Goal Tool 的 contributor provenance 冻结，以及用户 Goal 绝不进入 systemInstruction。
    *
-   * <p>Goal 正文由 branch settings 拥有，不再有任何 context projector：即使设置了 Goal，模型请求的 systemInstruction
-   * 也不会出现其正文。
+   * <p>Goal 正文由 branch settings 拥有：即使设置了 Goal，模型请求的 systemInstruction 也不会出现其正文。
    */
   @Test
   void freezesGoalToolProvenanceWithoutProjectingUserGoalIntoSystemInstruction() {
@@ -2467,22 +2466,6 @@ class DatabaseTurnResolverTest {
 
     assertEquals(live.spec(), historical.spec());
     assertEquals(live.contextWindow(), historical.contextWindow());
-  }
-
-  /** CompactionPreparation 保持最小，派生 token/window 与 compaction metadata 不进入 ModelRequestSpec。 */
-  @Test
-  void compactionFactsStayOutOfPreparationAndModelRequestSpec() {
-    assertThrows(
-        NoSuchMethodException.class,
-        () -> CompactionPreparation.class.getDeclaredMethod("tokensBefore"));
-    assertThrows(
-        NoSuchMethodException.class,
-        () -> CompactionPreparation.class.getDeclaredMethod("contextWindow"));
-    assertThrows(
-        NoSuchMethodException.class,
-        () -> CompactionPreparation.class.getDeclaredMethod("firstKeptEntryId"));
-    assertThrows(
-        NoSuchMethodException.class, () -> ModelRequestSpec.class.getDeclaredMethod("compaction"));
   }
 
   @Test

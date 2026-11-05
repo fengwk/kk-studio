@@ -32,15 +32,13 @@ import java.util.function.Consumer;
  *
  * <p>本工具只有「持久接受」一个阶段：把 arguments 归一化为 {@link SubagentTaskRequest} 交给 {@link
  * SubagentRunner}，接受成功后立即用一次 tool_result 回执英文自然语言接受正文（首行 {@code Task accepted. thread_id:
- * <uuid>.}，并说明异步完成/失败/取消、独立工作/让出与继续方式），然后 结束。它不再等待子任务终态，也不再有第二个 tool_result；子执行结清后由运行时把结果作为父 Thread
- * 的一条独立消息交付。
+ * <uuid>.}，并说明异步完成/失败/取消、独立工作/让出与继续方式），然后结束。执行不等待子任务终态，子执行结清后由运行时把结果作为父 Thread 的一条独立消息交付。
  *
  * <p>参数被拒或 Runner 抛异常都收敛为错误结果，绝不抛出。
  */
 public final class TaskTool implements Tool {
 
   public static final String NAME = "task";
-  public static final String RENDERER_KEY = "task";
 
   /** task 失败的统一下一步：明确列继续既有子线程所需的 thread_id/subagent_type/prompt，不构成重试倾向建议。 */
   private static final String TASK_CONTINUATION_NEXT_ACTION =
@@ -51,7 +49,7 @@ public final class TaskTool implements Tool {
       new ToolDescriptor(
           NAME,
           SubagentPrompts.taskToolDescription(),
-          RENDERER_KEY,
+          "task",
           SubagentPrompts.taskInputSchema(),
           ToolSideEffect.NON_IDEMPOTENT,
           Duration.ZERO);

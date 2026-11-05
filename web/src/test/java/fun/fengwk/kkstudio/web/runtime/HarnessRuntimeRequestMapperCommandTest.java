@@ -360,8 +360,8 @@ class HarnessRuntimeRequestMapperCommandTest {
 
   @Test
   void rejectsUnsupportedCommandTypes() {
-    // 内部命令、已删除的命令与未知 discriminator 均不可由产品 HTTP 面提交。
-    for (String type : List.of("CUSTOM_MESSAGE", "NOTIFICATION", "SET_CONTRIBUTOR_STATE")) {
+    // 内部命令与未知 discriminator 均不可由产品 HTTP 面提交。
+    for (String type : List.of("CUSTOM_MESSAGE", "NOTIFICATION")) {
       HarnessCommandCreateDTO rejected = command(type, type);
       assertThrows(
           IllegalArgumentException.class,

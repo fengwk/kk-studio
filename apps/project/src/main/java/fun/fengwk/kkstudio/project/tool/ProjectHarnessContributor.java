@@ -22,9 +22,6 @@ public final class ProjectHarnessContributor implements HarnessContributor {
   public static final String NAME = "Project";
   public static final String VERSION = "1";
 
-  /** Contributor 内的稳定工具贡献名。 */
-  private static final String LOCAL_TRANSITION_TOOL = "issue.transition";
-
   private static final ContributorDescriptor DESCRIPTOR =
       new ContributorDescriptor(ID, NAME, VERSION, Set.of());
 
@@ -43,6 +40,6 @@ public final class ProjectHarnessContributor implements HarnessContributor {
   public void contribute(HarnessRegistrar registrar) {
     Objects.requireNonNull(registrar, "registrar");
     registrar.registerTool(
-        LOCAL_TRANSITION_TOOL, issueTransitionTool, ToolVisibility.SELECTABLE, 0);
+        IssueTransitionTool.LOCAL_NAME, issueTransitionTool, ToolVisibility.SELECTABLE, 0);
   }
 }

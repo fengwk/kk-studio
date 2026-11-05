@@ -13,8 +13,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.test.annotation.DirtiesContext;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
@@ -54,24 +52,18 @@ import java.util.stream.Stream;
 /**
  * 配置同步 Web 集成测试的共享基座。
  *
- * <p>复用 {@link WebPostgresTestSupport} 的进程级 disposable PostgreSQL 与当前 Flyway schema；把 Skill 的 Git
- * bare cache 重定向到进程临时目录，避免写入模块工作树。提供 MockMvc 便捷读写、YAML 结构解析与真实 JGit 临时仓库构造器。
+ * <p>复用 {@link WebPostgresTestSupport} 的进程级 disposable PostgreSQL 与当前 Flyway schema。提供 MockMvc
+ * 便捷读写、YAML 结构解析与真实 JGit 临时仓库构造器。
  */
 @AutoConfigureMockMvc
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 public abstract class ConfigSyncTestSupport extends WebPostgresTestSupport {
-
-  /** Git 仓库与 Platform bare cache 都落在进程临时目录。 */
-  private static final Path TEST_ROOT = createTestRoot();
 
   @Autowired protected MockMvc mockMvc;
   @Autowired protected ObjectMapper objectMapper;
 
   /** 插件凭据不参与配置同步；停用无关后台刷新，避免重建测试 Schema 时与后台查询竞争。 */
   @MockitoBean private PluginCredentialRefreshDispatcher pluginCredentialRefreshDispatcher;
-
-  @DynamicPropertySource
-  static void overrideSkillCacheRoot(DynamicPropertyRegistry registry) {}
 
   /** 发起请求并断言指定 HTTP 状态，返回原始结果。 */
   protected MvcResult perform(MockHttpServletRequestBuilder builder, int expectedStatus)
@@ -215,14 +207,6 @@ public abstract class ConfigSyncTestSupport extends WebPostgresTestSupport {
     ref.setPackageName(packageName);
     ref.setName(name);
     return ref;
-  }
-
-  private static Path createTestRoot() {
-    try {
-      return Files.createTempDirectory("kk-studio-configsync-web");
-    } catch (IOException error) {
-      throw new IllegalStateException("failed to create config sync test root", error);
-    }
   }
 
   /**
