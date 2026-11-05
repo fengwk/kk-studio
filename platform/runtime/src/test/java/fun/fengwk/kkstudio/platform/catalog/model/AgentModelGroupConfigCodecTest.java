@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.catalog.model.runtime;
+package fun.fengwk.kkstudio.platform.catalog.model;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;

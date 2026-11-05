@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.catalog.model.runtime;
+package fun.fengwk.kkstudio.platform.catalog.model;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -23,7 +23,7 @@ import fun.fengwk.kkstudio.harness.model.ModelPricingCondition;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.model.ProviderProtocolOptions;
-import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser.ParsedAgentModelConfig;
+import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRuntimeConfigParser.ParsedAgentModelConfig;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelRateSetDTO;

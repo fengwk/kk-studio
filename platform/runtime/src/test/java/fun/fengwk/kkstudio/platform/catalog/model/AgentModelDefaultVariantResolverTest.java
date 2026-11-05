@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.catalog.model.runtime;
+package fun.fengwk.kkstudio.platform.catalog.model;
 
 import static fun.fengwk.kkstudio.platform.catalog.model.AgentModelTestData.executableConfig;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -9,8 +9,6 @@ import static org.mockito.Mockito.when;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.json.JsonMapper;
 
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelKind;
 

@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.platform.catalog.modelcatalog;
 
-import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelPricingCodec;
+import fun.fengwk.kkstudio.platform.catalog.model.AgentModelPricingCodec;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingDTO;
 
 /**

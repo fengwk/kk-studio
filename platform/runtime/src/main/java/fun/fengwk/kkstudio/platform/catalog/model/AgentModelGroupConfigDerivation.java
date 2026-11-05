@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.catalog.model.runtime;
+package fun.fengwk.kkstudio.platform.catalog.model;
 
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelAbilitiesDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;

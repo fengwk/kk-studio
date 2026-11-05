@@ -2,7 +2,7 @@ package fun.fengwk.kkstudio.platform.harness.builtin;
 
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionPhase;
-import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser.ParsedAgentModelConfig;
+import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRuntimeConfigParser.ParsedAgentModelConfig;
 
 /**
  * Builtin 的模型与压缩预算解析。

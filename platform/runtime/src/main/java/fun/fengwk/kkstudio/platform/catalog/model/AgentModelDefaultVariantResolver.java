@@ -1,9 +1,7 @@
-package fun.fengwk.kkstudio.platform.catalog.model.runtime;
+package fun.fengwk.kkstudio.platform.catalog.model;
 
 import org.springframework.stereotype.Component;
 
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelKind;
 
