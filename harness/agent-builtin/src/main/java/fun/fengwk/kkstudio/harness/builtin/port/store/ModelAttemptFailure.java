@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.builtin.port.store;
 
+import fun.fengwk.kkstudio.common.time.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
@@ -41,20 +42,12 @@ public record ModelAttemptFailure(
           "cancelled or overflow attempts are not model fallback audit failures");
     }
     if (requestedAt != null) {
-      requestedAt = requireMillisecondPrecision(requestedAt, "requestedAt");
+      requestedAt = HarnessStoreTime.requireMillisecondPrecision(requestedAt, "requestedAt");
     }
-    failedAt = requireMillisecondPrecision(failedAt, "failedAt");
-    retryAt = requireMillisecondPrecision(retryAt, "retryAt");
+    failedAt = HarnessStoreTime.requireMillisecondPrecision(failedAt, "failedAt");
+    retryAt = HarnessStoreTime.requireMillisecondPrecision(retryAt, "retryAt");
     if (retryAt.isBefore(failedAt)) {
       throw new IllegalArgumentException("retryAt must not precede failedAt");
     }
-  }
-
-  private static Instant requireMillisecondPrecision(Instant value, String name) {
-    Objects.requireNonNull(value, name);
-    if (value.getNano() % 1_000_000 != 0) {
-      throw new IllegalArgumentException(name + " must use millisecond precision");
-    }
-    return value;
   }
 }

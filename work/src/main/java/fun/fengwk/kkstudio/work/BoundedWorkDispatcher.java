@@ -78,7 +78,8 @@ public final class BoundedWorkDispatcher<T> implements AutoCloseable {
       throw new IllegalArgumentException(name + " maxDispatchTasks must be positive");
     }
     this.maxDispatchTasks = maxDispatchTasks;
-    this.pollInterval = requirePositiveWholeMillis(pollInterval, name, "pollInterval");
+    this.pollInterval =
+        HarnessStoreTime.requireWholeMillisecondDuration(pollInterval, name + " pollInterval");
     this.drainExecutor = requireFailFastExecutor(drainExecutor, name, "drainExecutor");
     this.workerExecutor = requireFailFastExecutor(workerExecutor, name, "workerExecutor");
     this.pollScheduler = Objects.requireNonNull(pollScheduler, "pollScheduler");
@@ -273,10 +274,6 @@ public final class BoundedWorkDispatcher<T> implements AutoCloseable {
       throw new IllegalArgumentException("name must not be blank");
     }
     return name;
-  }
-
-  private static Duration requirePositiveWholeMillis(Duration value, String name, String role) {
-    return HarnessStoreTime.requireWholeMillisecondDuration(value, name + " " + role);
   }
 
   private static Executor requireFailFastExecutor(Executor executor, String name, String role) {

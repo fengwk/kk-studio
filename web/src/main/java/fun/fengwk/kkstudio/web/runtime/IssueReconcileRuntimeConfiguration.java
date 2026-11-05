@@ -8,6 +8,7 @@ import org.springframework.context.SmartLifecycle;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import fun.fengwk.kkstudio.common.time.HarnessStoreTime;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessRuntimeProperties;
 import fun.fengwk.kkstudio.project.reconcile.IssueReconcileProperties;
 import fun.fengwk.kkstudio.project.reconcile.IssueReconcileWorkHandler;
@@ -36,7 +37,7 @@ import java.util.concurrent.TimeUnit;
 @EnableConfigurationProperties(HarnessRuntimeProperties.class)
 public class IssueReconcileRuntimeConfiguration {
 
-  private static final String DISPATCHER_NAME = "issue reconcile dispatcher";
+  private static final String DISPATCHER_NAME = "kk-studio.project.reconcile";
 
   /** fail-fast 单线程 drain executor：串行执行 drain，拒绝时同步抛错。 */
   @Bean(name = "issueReconcileDispatcherDrainExecutor", destroyMethod = "shutdown")
@@ -51,6 +52,14 @@ public class IssueReconcileRuntimeConfiguration {
       IssueReconcileProperties properties, ContextSnapshotFactory contextSnapshotFactory) {
     int concurrency = properties.getWorker().getConcurrency();
     int queueCapacity = properties.getWorker().getQueueCapacity();
+    if (concurrency < 1) {
+      throw new IllegalArgumentException(
+          "kk-studio.project.reconcile.worker.concurrency must be at least 1");
+    }
+    if (queueCapacity < 1) {
+      throw new IllegalArgumentException(
+          "kk-studio.project.reconcile.worker.queue-capacity must be at least 1");
+    }
     return ContextExecutorService.wrap(
         new ThreadPoolExecutor(
             concurrency,
@@ -76,6 +85,16 @@ public class IssueReconcileRuntimeConfiguration {
       @Qualifier("issueReconcileDispatcherDrainExecutor") Executor drainExecutor,
       @Qualifier("issueReconcileDispatcherWorkerExecutor") Executor workerExecutor,
       @Qualifier("issueReconcileDispatcherPollScheduler") ScheduledExecutorService pollScheduler) {
+    HarnessStoreTime.requireWholeMillisecondDuration(
+        properties.getLeaseDuration(), "kk-studio.project.reconcile.lease-duration");
+    HarnessStoreTime.requireWholeMillisecondDuration(
+        properties.getRejectionDelay(), "kk-studio.project.reconcile.rejection-delay");
+    HarnessStoreTime.requireWholeMillisecondDuration(
+        properties.getRetryDelay(), "kk-studio.project.reconcile.retry-delay");
+    HarnessStoreTime.requireWholeMillisecondDuration(
+        properties.getActiveDelay(), "kk-studio.project.reconcile.active-delay");
+    HarnessStoreTime.requireWholeMillisecondDuration(
+        properties.getBlockedDelay(), "kk-studio.project.reconcile.blocked-delay");
     return new BoundedWorkDispatcher<>(
         DISPATCHER_NAME,
         properties.getMaxDispatchTasks(),

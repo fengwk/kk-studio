@@ -17,11 +17,9 @@ public record ThreadProcessorConfig(
     Duration resolveFailureDelay, CompactionConfigProvider compactionProvider) {
 
   public ThreadProcessorConfig {
-    resolveFailureDelay = requireMillisPositive(resolveFailureDelay, "resolveFailureDelay");
+    resolveFailureDelay =
+        HarnessStoreTime.requireWholeMillisecondDuration(
+            resolveFailureDelay, "resolveFailureDelay");
     compactionProvider = Objects.requireNonNull(compactionProvider, "compactionProvider");
-  }
-
-  private static Duration requireMillisPositive(Duration value, String name) {
-    return HarnessStoreTime.requireWholeMillisecondDuration(value, name);
   }
 }

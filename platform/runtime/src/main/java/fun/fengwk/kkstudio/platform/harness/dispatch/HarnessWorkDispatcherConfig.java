@@ -23,16 +23,18 @@ public record HarnessWorkDispatcherConfig(
     int maxDispatchTasks) {
 
   public HarnessWorkDispatcherConfig {
-    leaseDuration = requireWholeMillisPositive(leaseDuration, "leaseDuration");
-    periodicPollInterval = requireWholeMillisPositive(periodicPollInterval, "periodicPollInterval");
+    leaseDuration =
+        HarnessStoreTime.requireWholeMillisecondDuration(
+            leaseDuration, "kk-studio.harness.dispatcher.lease-duration");
+    periodicPollInterval =
+        HarnessStoreTime.requireWholeMillisecondDuration(
+            periodicPollInterval, "kk-studio.harness.dispatcher.poll-interval");
     executorRejectionDelay =
-        requireWholeMillisPositive(executorRejectionDelay, "executorRejectionDelay");
+        HarnessStoreTime.requireWholeMillisecondDuration(
+            executorRejectionDelay, "kk-studio.harness.dispatcher.rejection-delay");
     if (maxDispatchTasks <= 0) {
-      throw new IllegalArgumentException("maxDispatchTasks must be positive");
+      throw new IllegalArgumentException(
+          "kk-studio.harness.dispatcher.max-dispatch-tasks must be positive");
     }
-  }
-
-  private static Duration requireWholeMillisPositive(Duration value, String name) {
-    return HarnessStoreTime.requireWholeMillisecondDuration(value, name);
   }
 }

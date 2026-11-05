@@ -6,6 +6,7 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.SmartLifecycle;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.DependsOn;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.PlatformTransactionManager;
 
@@ -33,7 +34,7 @@ import java.util.concurrent.TimeUnit;
 @Configuration(proxyBeanMethods = false)
 public class CanvasFunctionRuntimeConfiguration {
 
-  private static final String DISPATCHER_NAME = "canvas function dispatcher";
+  private static final String DISPATCHER_NAME = "kk-studio.canvas.function.runtime";
 
   @Bean(name = "canvasFunctionDrainExecutor", destroyMethod = "shutdownNow")
   public ExecutorService canvasFunctionDrainExecutor() {
@@ -44,7 +45,10 @@ public class CanvasFunctionRuntimeConfiguration {
   @Bean(name = "canvasFunctionWorkerExecutor", destroyMethod = "shutdownNow")
   public ExecutorService canvasFunctionWorkerExecutor(
       CanvasFunctionRuntimeProperties properties, ContextSnapshotFactory contextSnapshotFactory) {
-    properties.validate();
+    if (properties.getWorkerConcurrency() < 1) {
+      throw new IllegalArgumentException(
+          "kk-studio.canvas.function.runtime.worker-concurrency must be at least 1");
+    }
     return ContextExecutorService.wrap(
         new ThreadPoolExecutor(
             properties.getWorkerConcurrency(),
@@ -64,9 +68,9 @@ public class CanvasFunctionRuntimeConfiguration {
   }
 
   @Bean(name = "canvasFunctionHeartbeatScheduler", destroyMethod = "shutdownNow")
+  @DependsOn("canvasFunctionWorkerExecutor")
   public ScheduledExecutorService canvasFunctionHeartbeatScheduler(
       CanvasFunctionRuntimeProperties properties) {
-    properties.validate();
     return Executors.newScheduledThreadPool(
         properties.getWorkerConcurrency(),
         Thread.ofPlatform().name("canvas-function-heartbeat-", 0L).daemon(true).factory());
@@ -80,7 +84,23 @@ public class CanvasFunctionRuntimeConfiguration {
       @Qualifier("canvasFunctionWorkerExecutor") Executor workerExecutor,
       @Qualifier("canvasFunctionPollScheduler") ScheduledExecutorService pollScheduler,
       CanvasFunctionWorker worker) {
-    properties.validate();
+    if (properties.getMaxDispatchTasks() > properties.getWorkerConcurrency()) {
+      throw new IllegalArgumentException(
+          "kk-studio.canvas.function.runtime.max-dispatch-tasks must not exceed worker-concurrency");
+    }
+    if (properties.getLeaseDurationMillis() < 1) {
+      throw new IllegalArgumentException(
+          "kk-studio.canvas.function.runtime.lease-duration-millis must be positive");
+    }
+    if (properties.getHeartbeatIntervalMillis() < 1
+        || properties.getHeartbeatIntervalMillis() >= properties.getLeaseDurationMillis()) {
+      throw new IllegalArgumentException(
+          "kk-studio.canvas.function.runtime.heartbeat-interval-millis must be positive and less than lease-duration-millis");
+    }
+    if (properties.getRejectionDelayMillis() < 1) {
+      throw new IllegalArgumentException(
+          "kk-studio.canvas.function.runtime.rejection-delay-millis must be positive");
+    }
     CanvasFunctionWorkStore store = Objects.requireNonNull(workStore, "workStore");
     CanvasFunctionWorker functionWorker = Objects.requireNonNull(worker, "worker");
     return new BoundedWorkDispatcher<>(

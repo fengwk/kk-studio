@@ -14,6 +14,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import io.micrometer.context.ContextSnapshotFactory;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -55,6 +56,55 @@ class CanvasFunctionRuntimeConfigurationTest {
     drain.shutdownNow();
     workerExecutor.shutdownNow();
     poll.shutdownNow();
+  }
+
+  /** 部署拓扑与时间边界在创建 executor/dispatcher 时拒绝非法值。 */
+  @Test
+  void rejectsInvalidDeploymentSettings() {
+    CanvasFunctionRuntimeProperties properties = properties(1_000);
+    properties.setWorkerConcurrency(0);
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new CanvasFunctionRuntimeConfiguration()
+                .canvasFunctionWorkerExecutor(
+                    properties, ContextSnapshotFactory.builder().build()));
+
+    properties.setWorkerConcurrency(1);
+    CanvasFunctionWorkStore store = mock(CanvasFunctionWorkStore.class);
+    CanvasFunctionWorker worker = mock(CanvasFunctionWorker.class);
+    properties.setMaxDispatchTasks(2);
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> dispatcher(store, worker, workerExecutor, properties));
+    properties.setMaxDispatchTasks(0);
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> dispatcher(store, worker, workerExecutor, properties));
+    properties.setMaxDispatchTasks(1);
+    properties.setLeaseDurationMillis(0);
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> dispatcher(store, worker, workerExecutor, properties));
+    properties.setLeaseDurationMillis(30_000);
+    properties.setHeartbeatIntervalMillis(0);
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> dispatcher(store, worker, workerExecutor, properties));
+    properties.setHeartbeatIntervalMillis(30_000);
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> dispatcher(store, worker, workerExecutor, properties));
+    properties.setHeartbeatIntervalMillis(10_000);
+    properties.setRejectionDelayMillis(0);
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> dispatcher(store, worker, workerExecutor, properties));
+    properties.setRejectionDelayMillis(1_000);
+    properties.setPollIntervalMillis(0);
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> dispatcher(store, worker, workerExecutor, properties));
   }
 
   /** start 必须立即 wake；worker 占满唯一容量时不能继续 claim，释放后由 worker finally 再 wake。 */

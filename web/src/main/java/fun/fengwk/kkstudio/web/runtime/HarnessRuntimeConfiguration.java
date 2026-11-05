@@ -223,6 +223,14 @@ public class HarnessRuntimeConfiguration {
       HarnessDispatcherProperties dispatcherProperties) {
     int concurrency = dispatcherProperties.getWorker().getConcurrency();
     int queueCapacity = dispatcherProperties.getWorker().getQueueCapacity();
+    if (concurrency < 1) {
+      throw new IllegalArgumentException(
+          "kk-studio.harness.dispatcher.worker.concurrency must be at least 1");
+    }
+    if (queueCapacity < 1) {
+      throw new IllegalArgumentException(
+          "kk-studio.harness.dispatcher.worker.queue-capacity must be at least 1");
+    }
     return new ThreadPoolExecutor(
         concurrency,
         concurrency,
@@ -240,22 +248,26 @@ public class HarnessRuntimeConfiguration {
   }
 
   @Bean
+  public HarnessWorkDispatcherConfig harnessWorkDispatcherConfig(
+      HarnessDispatcherProperties dispatcherProperties) {
+    return new HarnessWorkDispatcherConfig(
+        dispatcherProperties.getLeaseDuration(),
+        dispatcherProperties.getPollInterval(),
+        dispatcherProperties.getRejectionDelay(),
+        dispatcherProperties.getMaxDispatchTasks());
+  }
+
+  @Bean
   public HarnessWorkDispatcher harnessWorkDispatcher(
       @Qualifier("nodeInstanceId") UUID nodeInstanceId,
       HarnessStore store,
-      HarnessDispatcherProperties dispatcherProperties,
+      HarnessWorkDispatcherConfig config,
       @Qualifier("harnessDispatcherDrainExecutor") Executor drainExecutor,
       @Qualifier("harnessDispatcherWorkerExecutor") Executor workerExecutor,
       @Qualifier("harnessDispatcherPollScheduler") ScheduledExecutorService pollScheduler,
       ThreadProcessor threadProcessor,
       ToolProcessor toolProcessor,
       DriverRegistry driverRegistry) {
-    HarnessWorkDispatcherConfig config =
-        new HarnessWorkDispatcherConfig(
-            dispatcherProperties.getLeaseDuration(),
-            dispatcherProperties.getPollInterval(),
-            dispatcherProperties.getRejectionDelay(),
-            dispatcherProperties.getMaxDispatchTasks());
     Map<WorkTargetType, Consumer<ClaimedWork>> handlers = new HashMap<>();
     handlers.put(WorkTargetType.THREAD, threadProcessor::process);
     handlers.put(WorkTargetType.TOOL, toolProcessor::process);

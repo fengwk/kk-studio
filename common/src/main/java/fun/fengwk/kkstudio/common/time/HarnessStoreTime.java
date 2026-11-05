@@ -19,8 +19,14 @@ public final class HarnessStoreTime {
 
   /** 返回一个可为 null 的 canonical instant，或拒绝任何包含 sub-millisecond 精度的值。 */
   public static Instant requireMillisecondPrecision(Instant value) {
-    if (value != null && value.getNano() % 1_000_000 != 0) {
-      throw new IllegalArgumentException("durable timestamps must use millisecond precision");
+    return value == null ? null : requireMillisecondPrecision(value, "durable timestamps");
+  }
+
+  /** 返回非 null 的 canonical instant，或在值为 null 或包含 sub-millisecond 精度时抛出异常。 */
+  public static Instant requireMillisecondPrecision(Instant value, String name) {
+    Objects.requireNonNull(value, name);
+    if (value.getNano() % 1_000_000 != 0) {
+      throw new IllegalArgumentException(name + " must use millisecond precision");
     }
     return value;
   }
@@ -28,8 +34,15 @@ public final class HarnessStoreTime {
   /** 返回适合 durable 时间运算的正整毫秒 duration。 */
   public static Duration requireWholeMillisecondDuration(Duration value, String name) {
     Objects.requireNonNull(value, name);
-    if (value.isZero() || value.isNegative() || value.toMillis() <= 0) {
+    if (value.isZero() || value.isNegative()) {
       throw new IllegalArgumentException(name + " must be at least one millisecond");
+    }
+    try {
+      if (value.toMillis() <= 0) {
+        throw new IllegalArgumentException(name + " must be at least one millisecond");
+      }
+    } catch (ArithmeticException overflow) {
+      throw new IllegalArgumentException(name + " must fit the millisecond range", overflow);
     }
     if (value.getNano() % 1_000_000 != 0) {
       throw new IllegalArgumentException(name + " must use whole milliseconds");

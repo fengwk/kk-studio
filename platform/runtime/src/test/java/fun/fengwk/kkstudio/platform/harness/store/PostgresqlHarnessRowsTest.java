@@ -1,16 +1,29 @@
 package fun.fengwk.kkstudio.platform.harness.store;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
 
+import java.time.Instant;
 import java.util.List;
 
 /** Thread 约束的持久化协议测试：冻结字段严格校验。 */
 class PostgresqlHarnessRowsTest {
+
+  /** 数据库时间戳转换复用可空毫秒精度边界。 */
+  @Test
+  void timestampUsesMillisecondPrecision() {
+    Instant instant = Instant.parse("2026-01-01T00:00:00.123Z");
+    assertNull(PostgresqlHarnessRows.timestamp(null));
+    assertEquals(instant, PostgresqlHarnessRows.timestamp(instant).toInstant());
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> PostgresqlHarnessRows.timestamp(instant.plusNanos(1)));
+  }
 
   @Test
   void constraintsRoundTripWithoutChangingFrozenExecutionPolicy() {
