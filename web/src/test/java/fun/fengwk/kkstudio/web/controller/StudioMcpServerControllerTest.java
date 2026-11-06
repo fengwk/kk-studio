@@ -21,6 +21,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.share.mcp.McpServerCreateDTO;
 import fun.fengwk.kkstudio.share.mcp.McpServerUpdateDTO;
@@ -71,7 +72,7 @@ public class StudioMcpServerControllerTest extends WebPostgresTestSupport {
             .perform(
                 post("/api/mcp-servers")
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content(objectMapper.writeValueAsString(create)))
+                    .content(createBody(create).toString()))
             .andExpect(status().isCreated())
             .andExpect(jsonPath("$.name").value(name))
             .andExpect(jsonPath("$.version").value("0"))
@@ -130,9 +131,9 @@ public class StudioMcpServerControllerTest extends WebPostgresTestSupport {
         .perform(
             put("/api/mcp-servers/{name}", name)
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(update)))
+                .content(updateBody(update).toString()))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.timeoutMillis").value(20000))
+        .andExpect(jsonPath("$.timeoutMillis").value("20000"))
         .andExpect(jsonPath("$.version").value("1"))
         .andExpect(jsonPath("$.discoveryStatus").value("UNVERIFIED"));
 
@@ -159,7 +160,7 @@ public class StudioMcpServerControllerTest extends WebPostgresTestSupport {
         .perform(
             post("/api/mcp-servers")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(create)))
+                .content(createBody(create).toString()))
         .andExpect(status().isCreated());
 
     McpServerUpdateDTO badVersionUpdate = new McpServerUpdateDTO();
@@ -193,7 +194,7 @@ public class StudioMcpServerControllerTest extends WebPostgresTestSupport {
             .perform(
                 post("/api/mcp-servers")
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content(objectMapper.writeValueAsString(create)))
+                    .content(createBody(create).toString()))
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.code").value("validation"))
             .andReturn();
@@ -215,6 +216,23 @@ public class StudioMcpServerControllerTest extends WebPostgresTestSupport {
     mockMvc
         .perform(post("/api/mcp-servers").contentType(MediaType.APPLICATION_JSON).content(body))
         .andExpect(status().isBadRequest());
+  }
+
+  private ObjectNode createBody(McpServerCreateDTO create) {
+    ObjectNode body = objectMapper.valueToTree(create);
+    // 全局 Long 序列化器输出十进制字符串；MCP 写请求的 timeout 是 JSON number。
+    if (create.getTimeoutMillis() != null) {
+      body.put("timeoutMillis", create.getTimeoutMillis());
+    }
+    return body;
+  }
+
+  private ObjectNode updateBody(McpServerUpdateDTO update) {
+    ObjectNode body = objectMapper.valueToTree(update);
+    if (update.getTimeoutMillis() != null) {
+      body.put("timeoutMillis", update.getTimeoutMillis());
+    }
+    return body;
   }
 
   private JsonNode data(MvcResult result) throws Exception {
