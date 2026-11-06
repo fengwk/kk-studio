@@ -55,7 +55,7 @@ HTTP 路由与传输类型由 Web 控制器签名与生产 HTTP Jackson mapper �
 [`write.sh`](../../scripts/dev/verify/generated-contracts/write.sh)。
 
 [`contracts`](../../frontend/src/shared/api/contracts) 只保留生成契约无法表达的封闭取值与前端细化
-（Harness 命令、上传、技能与 Canvas 资源/运行状态等）；Interaction、Plugin、Project 与 Canvas 的 HTTP 响应直接消费生成契约，在使用点做 `type` / `status` 分支。
+（Harness 命令、上传、技能与 Canvas 资源/运行状态等）；Interaction、Plugin、Project 与 Canvas 的 HTTP 响应直接消费生成契约，在使用点做 `type` 分支。
 浏览器本地存储与应用事件 WebSocket 不经生成契约约束，仍保留结构校验。
 service 按职责归属：Chat、Environment、Extensions、Catalog、Settings 的接口客户端位于各自 feature；
 `shared/api` 只保留 HTTP client、生成契约和 Harness/Agent/Storage/Interaction 平台客户端。
@@ -452,14 +452,15 @@ epoch、claimId、iframe 与票据不持久化。localStorage 只保存最后展
 对话顶栏的“文件”入口打开当前焦点 pane 所属 Session 的只读文件面板
 （[`SessionFilesDialog`](../../frontend/src/features/chat/session-files/SessionFilesDialog.tsx)）。
 没有 Session 的草稿 pane 禁用入口并提示先选择或创建会话；面板不提供上传、重命名或删除，编辑由 Agent 的文件工具完成。
-前端只消费生成契约的三个端点：`GET /api/sessions/{sessionId}/files` 列直属条目、
-`/files/content` 读取有界文本窗口、`/files/download` 下载完整字节，全部携带当前归属的 `ownerKind` 与 `ownerId`。
+前端只消费生成契约的三个端点：`GET /api/harness/sessions/{sessionId}/files` 列直属条目、
+`/files/content` 读取有界文本窗口、`/files/download` 下载完整字节，会话坐标只在路径里，不再携带产品 owner。
 列表返回的条目路径是会话内相对路径，面板自行拼成 `vfs:/sessions/<sessionId>/...` 再请求子目录、预览或下载；
 进入子目录只加载该层，上一级回到父目录。
 
 文本预览按服务端 `read` 同源的窗口格式展示：解析 `range`、`truncated` 与 `next` 后逐页回看，
 不把截断标记混入正文；图片按扩展名直接读取下载字节生成本地预览 URL。下载使用响应中的附件文件名，
-不经过 JSON 信封。后端 404 统一提示“文件不存在或无权访问”，422 提示“此文件不能作为文本预览”并保留下载动作，
+不经过 JSON 信封。后端 404 统一提示“文件不存在或无权访问”，`validation` 且 reason 为
+`SESSION_FILE_NOT_TEXT` 时提示“此文件不能作为文本预览”并保留下载动作，
 两种错误都单独展示后端原因，不用括号拼接。面板使用共享 `Dialog` 与 `modal-body`/`modal-footer`；
 窄屏全屏覆盖、操作区不小于 44px，并处理安全区域。
 
