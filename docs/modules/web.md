@@ -193,15 +193,10 @@ JSON Controller 暂时返回共享的
 其他状态保持不变，均无响应体。直接返回与 `ResponseEntity` 均适用，并保留控制器设置的响应头。
 下载、HTML 与字节流保留原始响应。
 
-集群内部端点（`/internal/**`）与浏览器 API 的领域失败共用同一个错误信封、同一个领域异常
-（[`DomainException`](../../common/src/main/java/fun/fengwk/kkstudio/common/error/DomainException.java)）、
-同一张错误码到状态映射
-（[`DomainErrorStatus`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/http/DomainErrorStatus.java)）
-和同一个响应构造
-（[`DomainErrorResponses`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/http/DomainErrorResponses.java)）：
-认证失败固定 401 且 `code` 为 `UNAUTHORIZED`、不回显原因；领域失败保留 `errors.resource`/`errors.detail`，
-版本冲突另带 expected/actual；请求体超限为 413。内部端点没有请求 locale，`message` 与 `errors.detail`
-使用固定的英文去敏文案，不把用户输入渲染进错误响应。
+集群内部端点（`/internal/**`）与浏览器 API 使用相同的 problem+json 错误格式。内部认证失败固定为
+401 `unauthorized`，不回显认证原因；请求体超限保留 413 `validation`。内部客户端使用有界响应读取和
+[`ClusterInternalErrors`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/cluster/ClusterInternalErrors.java)
+解析机器类别、原因和详情。
 
 [`StrictJacksonConfiguration`](../../web/src/main/java/fun/fengwk/kkstudio/web/StrictJacksonConfiguration.java)
 定制 Boot4 装配的唯一 Jackson 3 `JsonMapper`（它与其父类型 `ObjectMapper` 是同一 bean）：
@@ -213,15 +208,11 @@ JSON Controller 暂时返回共享的
 required-nullable 字段由 DTO 显式 ALWAYS。未知字段由 DTO 的 JsonAnySetter 控制，
 领域 codec 另有严格语法校验；HTTP mapper 的 trailing-token 行为保持 Jackson 配置本身的边界。
 
-领域失败统一表示为 [`DomainException`](../../common/src/main/java/fun/fengwk/kkstudio/common/error/DomainException.java)：
-稳定 `DomainErrorCode` 决定 HTTP 状态，`resource` 与 `detail` 进入 `errors`，版本冲突额外携带
-`expectedVersion`/`actualVersion`。全局 [`StudioDomainErrorAdvice`](../../web/src/main/java/fun/fengwk/kkstudio/web/advice/StudioDomainErrorAdvice.java)
-只保留一个领域 handler；Plugin advice 只保留请求体安全解析，Project advice 只映射产品与 harness
-运行时的特有错误。按状态翻译的 advice 共用 [`ProblemErrorResponses`](../../web/src/main/java/fun/fengwk/kkstudio/web/advice/ProblemErrorResponses.java)，
-未知或未登记文案的状态统一由 `StudioMessageService` 回退为数字 code 与英文兜底；Project 不变量异常为 500。
-locale 支持 en-US/zh-CN，其他回退英文。字段契约见 [Share](share.md)。
-Canvas 控制器由 `kk-studio-canvas-runtime` 的自动配置注册，仍显式列在这些 advice 的 `assignableTypes` 中，
-因此 Controller 归属模块变化不改变错误 envelope 的形状。
+领域失败由 [`DomainException`](../../common/src/main/java/fun/fengwk/kkstudio/common/error/DomainException.java)
+表达，全局 [`StudioProblemAdvice`](../../web/src/main/java/fun/fengwk/kkstudio/web/advice/StudioProblemAdvice.java)
+按错误类别、原因或框架状态生成 problem 响应。领域版本坐标和 Canvas 冲突详情放在 `errors` 中，内部
+`resource` 不进入 wire。请求体无法解析时只输出固定去敏详情，可信的 Harness 格式异常保留其详情；未预期异常不暴露内部消息。
+locale 支持 en-US/zh-CN，其他回退英文。错误类别与成员见[系统设计的 HTTP 契约](../system-design.md#http-契约)。
 
 用户认证、TLS 和 ingress 访问控制由部署边界提供。
 配置同步导出包含所需凭据；三个端点的成功和错误响应均为 `no-store`，请求体与 YAML 不记日志。

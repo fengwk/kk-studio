@@ -43,8 +43,9 @@ class StudioHarnessThreadApprovalActorIntegrationTest extends WebPostgresTestSup
                         + "\",\"actor\":\"forged\",\"reason\":null}"))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.status").value(400))
-        .andExpect(jsonPath("$.errors.type").value("about:blank"))
-        .andExpect(jsonPath("$.errors.detail").value("unknown tool approval field: actor"));
+        .andExpect(jsonPath("$.code").value("validation"))
+        .andExpect(jsonPath("$.type").value("about:blank"))
+        .andExpect(jsonPath("$.detail").value("unknown tool approval field: actor"));
   }
 
   /**
@@ -63,8 +64,9 @@ class StudioHarnessThreadApprovalActorIntegrationTest extends WebPostgresTestSup
                         + "\",\"reason\":null}"))
         .andExpect(status().isNotFound())
         .andExpect(jsonPath("$.status").value(404))
-        .andExpect(jsonPath("$.errors.type").value("about:blank"))
-        .andExpect(jsonPath("$.errors.detail").value("thread " + THREAD + " does not exist"));
+        .andExpect(jsonPath("$.code").value("not_found"))
+        .andExpect(jsonPath("$.type").value("about:blank"))
+        .andExpect(jsonPath("$.detail").value("thread " + THREAD + " does not exist"));
   }
 
   private static String approvalPath() {

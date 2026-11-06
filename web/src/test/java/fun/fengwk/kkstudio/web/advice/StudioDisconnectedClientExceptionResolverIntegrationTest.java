@@ -51,7 +51,8 @@ class StudioDisconnectedClientExceptionResolverIntegrationTest extends WebPostgr
         .perform(get("/__probe/local-io"))
         .andExpect(status().isInternalServerError())
         .andExpect(jsonPath("$.status").value(500))
-        .andExpect(jsonPath("$.success").value(false));
+        .andExpect(jsonPath("$.code").value("internal"))
+        .andExpect(jsonPath("$.detail").doesNotExist());
   }
 
   /** 测试意图：未提交的普通 API 错误翻译与状态码保持不变。 */
@@ -61,7 +62,7 @@ class StudioDisconnectedClientExceptionResolverIntegrationTest extends WebPostgr
         .perform(get("/__probe/api-error"))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.status").value(400))
-        .andExpect(jsonPath("$.success").value(false));
+        .andExpect(jsonPath("$.code").value("validation"));
   }
 
   /** 测试意图：静态资源 404 的既有路由与状态码不受断连隔离影响。 */

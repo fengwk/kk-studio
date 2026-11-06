@@ -114,6 +114,33 @@ daemon ──托管──▶ code-server（版本与摘要由 daemon/runtime-man
 内部实现、Harness 公开包访问边界、按表名前缀的表归属、Java 包跨模块唯一，以及平台组合根与无 Redis /
 LangChain4j 约束。各模块的契约与实现细节见[文档导航](README.md#按代码区域理解系统)。
 
+## HTTP 契约
+
+JSON 成功响应直接返回资源：读取、更新和动作使用 200，创建使用 201，异步受理使用 202，无内容使用
+204，204 不带响应体。过渡期的 `ApiResponse` 由 Web 翻译为资源；数据为 null 时 200 改为 204，
+其他状态保持原样且无响应体。下载、HTML 与字节流按各自的传输格式返回。
+
+错误使用 `application/problem+json`。响应包含固定的 `type: "about:blank"`、按请求语言本地化的
+`title`、HTTP `status` 和稳定 `code`；可选的 `detail` 是去敏的英文详情，`reason` 是模块内稳定的大写下划线原因，
+`errors` 是结构化详情。版本冲突的 `errors` 含 `expectedVersion` 和 `actualVersion`，Canvas 命令冲突包含
+`conflicts`。响应不包含内部 `resource`。
+
+| code | HTTP 状态 | 含义 |
+| --- | --- | --- |
+| `validation` | 400 | 请求无效 |
+| `not_found` | 404 | 资源不存在 |
+| `version_conflict`、`conflict`、`duplicate`、`in_use`、`unavailable` | 409 | 版本、业务状态、唯一性、引用或依赖可用性冲突 |
+| `upstream_failed` | 502 | 上游请求失败 |
+| `unauthorized` | 401 | 集群内部认证失败 |
+| `internal` | 500 | 未预期错误 |
+
+`conflict` 带 `reason`，客户端据此区分 Harness 与 Canvas 的不同冲突；环境与 IDE 的 `unavailable`
+分别使用 `ENVIRONMENT_UNAVAILABLE` 和 `IDE_UNAVAILABLE`。用户取消关闭 IDE 使用
+`validation` / `IDE_CLOSE_CANCELLED`。框架异常保持其 HTTP 状态，并按状态归入相应类别：400、405、406、
+413、415、422 为 `validation`，401、403 为 `unauthorized`，404 为 `not_found`，409 为 `conflict`，
+502、504 为 `upstream_failed`，503 为 `unavailable`，其余为 `internal`。
+`/internal/**` 同样使用此格式，集群客户端按 `code`、`reason` 和 `detail` 处理错误。
+
 ## Harness 引擎
 
 ### 公开面与存储端口

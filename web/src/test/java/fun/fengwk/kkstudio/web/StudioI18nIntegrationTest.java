@@ -41,15 +41,11 @@ class StudioI18nIntegrationTest extends WebPostgresTestSupport {
             .andExpect(status().isCreated())
             .andReturn();
     String chatId =
-        objectMapper
-            .readTree(created.getResponse().getContentAsString())
-            .path("data")
-            .path("id")
-            .asText();
+        objectMapper.readTree(created.getResponse().getContentAsString()).path("id").asText();
 
-    assertResponseStatusMessage(chatId, "zh-CN", "请求无效。", "请求错误");
-    assertResponseStatusMessage(chatId, "en-US", "The request is invalid.", "Bad Request");
-    assertResponseStatusMessage(chatId, "fr-FR", "The request is invalid.", "Bad Request");
+    assertResponseStatusMessage(chatId, "zh-CN", "请求无效。");
+    assertResponseStatusMessage(chatId, "en-US", "The request is invalid.");
+    assertResponseStatusMessage(chatId, "fr-FR", "The request is invalid.");
   }
 
   private void assertDomainMessage(String language, String expectedMessage) throws Exception {
@@ -63,13 +59,11 @@ class StudioI18nIntegrationTest extends WebPostgresTestSupport {
         .andExpect(status().isNotFound())
         .andExpect(jsonPath("$.status").value(404))
         .andExpect(jsonPath("$.code").value("not_found"))
-        .andExpect(jsonPath("$.message").value(expectedMessage))
-        .andExpect(jsonPath("$.errors.resource").value("chat"))
-        .andExpect(jsonPath("$.errors.detail").value("chat not found"));
+        .andExpect(jsonPath("$.title").value(expectedMessage))
+        .andExpect(jsonPath("$.detail").value("chat not found"));
   }
 
-  private void assertResponseStatusMessage(
-      String chatId, String language, String expectedMessage, String expectedTitle)
+  private void assertResponseStatusMessage(String chatId, String language, String expectedMessage)
       throws Exception {
     mockMvc
         .perform(
@@ -77,11 +71,9 @@ class StudioI18nIntegrationTest extends WebPostgresTestSupport {
                 .header(HttpHeaders.ACCEPT_LANGUAGE, language))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.status").value(400))
-        .andExpect(jsonPath("$.code").value("BAD_REQUEST"))
-        .andExpect(jsonPath("$.message").value(expectedMessage))
-        .andExpect(jsonPath("$.errors.type").value("about:blank"))
-        .andExpect(jsonPath("$.errors.title").value(expectedTitle))
-        .andExpect(
-            jsonPath("$.errors.detail").value("sessionId must be a canonical UUID: not-a-number"));
+        .andExpect(jsonPath("$.code").value("validation"))
+        .andExpect(jsonPath("$.title").value(expectedMessage))
+        .andExpect(jsonPath("$.type").value("about:blank"))
+        .andExpect(jsonPath("$.detail").value("sessionId must be a canonical UUID: not-a-number"));
   }
 }
