@@ -57,7 +57,7 @@ export const SCENARIOS = Object.freeze([
     id: 'canvas',
     name: 'Canvas create transaction',
     concurrency: 4,
-    path: '/api/canvases',
+    path: '/api/canvas/canvases',
   }),
 ])
 
@@ -821,7 +821,7 @@ function operationFor(scenarioId, manager, state) {
   if (scenarioId === 'canvas') {
     return async (workerIndex) => {
       const title = `${state.canvasTitlePrefix}${workerIndex}-${state.canvasSequence++}`
-      validateCanvasCreateResponse(await manager.request('POST', '/api/canvases', { title }))
+      validateCanvasCreateResponse(await manager.request('POST', '/api/canvas/canvases', { title }))
     }
   }
   throw new Error(`unknown scenario operation: ${scenarioId}`)

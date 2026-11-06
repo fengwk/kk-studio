@@ -64,10 +64,10 @@ test('createNodeCall forwards the body as JSON like the single-node path', async
   }
   try {
     const call = createNodeCall(createBaseUrls('http://a.test', 'http://b.test'))
-    await call('b', 'POST', '/api/canvases', { title: 't' }, 5000)
+    await call('b', 'POST', '/api/canvas/canvases', { title: 't' }, 5000)
     assert.deepEqual(JSON.parse(seen[0].body), { title: 't' })
     assert.equal(seen[0].headers['Content-Type'], 'application/json')
-    assert.equal(seen[0].url, 'http://b.test/api/canvases')
+    assert.equal(seen[0].url, 'http://b.test/api/canvas/canvases')
   } finally {
     globalThis.fetch = originalFetch
   }

@@ -83,7 +83,7 @@ project 名：
 - Canvas document/snapshot 的 `revision`，`CREATE_NODE` 挂载 Blob Resource，patch 的变化集、
   幂等重放不推进 revision，以及 preview signed GET；具体 typed command 契约见
   [`canvas-api.mjs`](../../scripts/dev/verify/e2e/cases/canvas-api.mjs)；
-- `/api/canvas-functions` 的函数目录与 `SET_NODE_FUNCTION` 的函数名、结构化 args 和
+- `/api/canvas/functions` 的函数目录与 `SET_NODE_FUNCTION` 的函数名、结构化 args 和
   `expectedFunction` 前置条件；打开 `kk-studio.canvas.function.fake-enabled` 后的 fake image：start、poll、
   terminal snapshot 替换与 preview signed GET；
 - OpenCLI fake Hub 上的 `gpt-image-2` 与 `seedance2.0fast` 两条 adapter 闭环，验证 GPT Image

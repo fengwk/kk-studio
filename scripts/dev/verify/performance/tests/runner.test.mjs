@@ -350,7 +350,7 @@ test(
         })
         return
       }
-      if (request.method === 'POST' && requestUrl.pathname === '/api/canvases') {
+      if (request.method === 'POST' && requestUrl.pathname === '/api/canvas/canvases') {
         const body = JSON.parse(await readRequestBody(request))
         const id = randomUUID()
         const canvas = { id, title: body.title, revision: '0' }
@@ -388,7 +388,7 @@ test(
       // Both warmup and measurement create rows; no list or delete request is needed.
       const canvasScenario = result.summary.scenarios.find((scenario) => scenario.id === 'canvas')
       assert.equal(canvasScenario.name, 'Canvas create transaction')
-      assert.equal(canvasScenario.path, '/api/canvases')
+      assert.equal(canvasScenario.path, '/api/canvas/canvases')
       assert.equal(canvases.size, canvasScenario.warmup.success + canvasScenario.metrics.success)
       assert.ok(canvases.size > 0)
       assert.ok([...canvases.values()].every((canvas) => canvas.title.startsWith('performance-')))

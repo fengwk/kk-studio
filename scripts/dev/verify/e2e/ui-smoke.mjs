@@ -612,7 +612,7 @@ async function main(argv) {
     await shot(caseArt, 'canvas-library')
     let createRequests = 0
     const countCreate = (request) => {
-      if (request.method() === 'POST' && new URL(request.url()).pathname === '/api/canvases') {
+      if (request.method() === 'POST' && new URL(request.url()).pathname === '/api/canvas/canvases') {
         createRequests += 1
       }
     }
@@ -852,7 +852,7 @@ async function main(argv) {
     async (caseArt) => {
       // 付费边界：本 case 只允许绑定 fake-image，提交任何运行前都必须按真实快照断言函数身份，
       // 绝不触碰 gpt-image-2 / seedance2.0* 等付费 Function。
-      const catalog = await apiJson(args.backendUrl, 'GET', '/api/canvas-functions')
+      const catalog = await apiJson(args.backendUrl, 'GET', '/api/canvas/functions')
       const fakeImage = (catalog.json || []).find((item) => item.name === 'fake-image')
       assert(
         fakeImage?.available === true,
@@ -869,7 +869,7 @@ async function main(argv) {
       let canvasId = null
       const flowStamp = Date.now().toString(36)
       const snapshot = async () => {
-        const { status, json } = await apiJson(args.backendUrl, 'GET', `/api/canvases/${canvasId}`)
+        const { status, json } = await apiJson(args.backendUrl, 'GET', `/api/canvas/canvases/${canvasId}`)
         assert(status === 200, `canvas snapshot failed: ${status}`)
         return json
       }

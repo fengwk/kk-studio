@@ -26,7 +26,7 @@ Platform 的 RuntimeToolCatalogConfiguration 加入现读数据库的 MCP 目录
 Canvas HTTP 目录查询在一次 `PluginCanvasFunctionCatalogSource` 租用内完成，输出定义与可用性来自同一快照；
 Run 的完整定义只保存在执行状态中，普通 Run DTO 不回显它。
 目录每项都携带 `version`（`definitionFingerprint` 字符串）；
-`POST /api/canvases/{canvasId}/nodes/{nodeId}/function-run` 必带同形状 `expectedVersion`，
+`POST /api/canvas/canvases/{canvasId}/nodes/{nodeId}/function-run` 必带同形状 `expectedVersion`，
 缺失或非法 fingerprint 一律 400，
 该函数已移除或定义已变化一律 409，且不产生 Run、pin 或外部调用；cancel 只带 `requestId`。
 
@@ -78,8 +78,8 @@ health、资源下载和 WebSocket 使用各自传输形式。公开路由如下
 | Thread | `/api/threads/{threadId}` | Snapshot、执行树、name、Debug、协议预览、流式追帧（`stream-catchup`）、compact、yolo、stop、tool approval |
 | Agent task | `/api/agent-tasks`、`/{ticketId}`、`/{ticketId}/stop` | 提交独立执行的 Agent 任务（外部身份由 `ticketId`/`agent`/`prompt`/`maxTurns` 确定规范指纹，与 settings 无关；已存在票据校验指纹后直接重放而不重建物化配置，不同字段拒绝）、按票据观察状态与冻结结果、停止 |
 | Interaction | `/api/interactions` | 等待分页（`total` 是同一过滤条件下真实可见的待处理计数）与 `/{interactionId}/input` 人工提交 |
-| Canvas | `/api/canvases` | 创建、列表、Snapshot、commands、resource download/preview URL、节点 Function Run |
-| Function catalog | `/api/canvas-functions` | 函数 schema、输出计划、可用性 |
+| Canvas | `/api/canvas/canvases` | 创建、列表、Snapshot、commands、resource download/preview URL、节点 Function Run |
+| Function catalog | `/api/canvas/functions` | 函数 schema、输出计划、可用性 |
 | Storage | `/api/storage/uploads`、`/api/storage/blobs/{blobId}` | reserve/complete/delete 与短期 download/preview URL |
 | Project | `/api/projects` | CRUD、workflow/yolo、archive/unarchive、Snapshot、Issue 创建（控制器在 [apps/project](project.md)） |
 | Issue | `/api/issues/{issueId}` | CRUD、活动/证据、流转、阻塞/恢复、stop/继续、额度重置、重开、归档（控制器在 [apps/project](project.md)） |
@@ -167,7 +167,7 @@ Snapshot 不携带手动压缩可用性：`GET /api/threads/{threadId}/compactio
 
 规划详情、连接凭据与异常原因链不进入错误响应；请求形状或归属错误仍为 400，缺失 Thread 为 404。
 
-Canvas commands 返回 patch，Function start 返回 202。
+Canvas commands 返回 patch，Function start 返回 202；资源读模型按 `type` 分为 `TEXT`（内联文本）与 `BLOB`（blob 引用）。
 Canvas Function 的 UNKNOWN resolve 要求 resolution 与非空 verification。Issue 结果未定的停止按 FAILED 收尾并以
 ERROR 暂停，`error`/`pauseDetail` 明确说明结果未知，只能由显式 resume 继续。
 Evidence 接收 READY uploadId，在事务内转移引用并返回规范资源标识，展示名取权威上传行。
