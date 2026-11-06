@@ -129,7 +129,7 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
    */
   @MockitoSpyBean protected IssueActivityRepository issueActivityRepository;
 
-  /** 插入一个最小合法的 AgentDefinition（引用全局 MODEL 名称）并返回 Agent 自然名称。 */
+  /** 插入一个最小合法的 Agent（引用全局 MODEL 名称）并返回 Agent 自然名称。 */
   protected String createAgent() {
     long id = FIXTURE_COUNTER.incrementAndGet();
     String providerName = "prov-" + id;

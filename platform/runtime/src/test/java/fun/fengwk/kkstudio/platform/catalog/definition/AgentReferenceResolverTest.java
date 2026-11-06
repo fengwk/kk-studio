@@ -33,26 +33,26 @@ import java.util.Optional;
 import java.util.UUID;
 
 /** Agent 引用解析必须在写入前校验全局 Agent 与 Skill 引用。 */
-class AgentDefinitionReferenceResolverTest {
+class AgentReferenceResolverTest {
 
   @Test
   void rejectsMissingAgentReference() {
-    AgentDefinitionReferenceResolver resolver = resolver();
+    AgentReferenceResolver resolver = resolver();
 
     assertThrows(DomainException.class, () -> resolver.requireAgent("missing"));
   }
 
   @Test
   void locksUpdatedAgentAndSubagentsInCanonicalOrder() {
-    AgentDefinitionRepository definitions = mock(AgentDefinitionRepository.class);
-    AgentDefinition target = AgentDefinition.builder().name("middle").build();
-    AgentDefinition alpha = AgentDefinition.builder().name("alpha").build();
-    AgentDefinition omega = AgentDefinition.builder().name("omega").build();
+    AgentRepository definitions = mock(AgentRepository.class);
+    Agent target = Agent.builder().name("middle").build();
+    Agent alpha = Agent.builder().name("alpha").build();
+    Agent omega = Agent.builder().name("omega").build();
     when(definitions.getByNameForUpdate("alpha")).thenReturn(alpha);
     when(definitions.getByNameForUpdate("middle")).thenReturn(target);
     when(definitions.getByNameForUpdate("omega")).thenReturn(omega);
-    AgentDefinitionReferenceResolver resolver =
-        new AgentDefinitionReferenceResolver(
+    AgentReferenceResolver resolver =
+        new AgentReferenceResolver(
             definitions,
             mock(SkillPackageRepository.class),
             mock(McpServerRepository.class),
@@ -72,9 +72,9 @@ class AgentDefinitionReferenceResolverTest {
   @Test
   void validatesSkillReferencesAndRejectsMissingOnes() {
     SkillPackageRepository skillPackages = mock(SkillPackageRepository.class);
-    AgentDefinitionReferenceResolver resolver =
-        new AgentDefinitionReferenceResolver(
-            mock(AgentDefinitionRepository.class),
+    AgentReferenceResolver resolver =
+        new AgentReferenceResolver(
+            mock(AgentRepository.class),
             skillPackages,
             mock(McpServerRepository.class),
             TestCatalogSources.singleLease(mock(RuntimeToolCatalog.class)));
@@ -119,9 +119,9 @@ class AgentDefinitionReferenceResolverTest {
   @Test
   void emptySkillSelectionDoesNotQueryCatalog() {
     SkillPackageRepository skillPackages = mock(SkillPackageRepository.class);
-    AgentDefinitionReferenceResolver resolver =
-        new AgentDefinitionReferenceResolver(
-            mock(AgentDefinitionRepository.class),
+    AgentReferenceResolver resolver =
+        new AgentReferenceResolver(
+            mock(AgentRepository.class),
             skillPackages,
             mock(McpServerRepository.class),
             TestCatalogSources.singleLease(mock(RuntimeToolCatalog.class)));
@@ -136,7 +136,7 @@ class AgentDefinitionReferenceResolverTest {
     SkillPackageRepository skills = mock(SkillPackageRepository.class);
     McpServerRepository servers = mock(McpServerRepository.class);
     RuntimeToolCatalog tools = mock(RuntimeToolCatalog.class);
-    AgentDefinitionRepository definitions = mock(AgentDefinitionRepository.class);
+    AgentRepository definitions = mock(AgentRepository.class);
     SkillPackage zeta = packageWith("zeta", "review");
     SkillPackage alpha = packageWith("alpha", "dev");
     when(skills.getPackage("zeta")).thenReturn(zeta);
@@ -159,8 +159,8 @@ class AgentDefinitionReferenceResolverTest {
         .thenReturn(Optional.of(mcpTool("mcp_alpha_fetch", "alpha")));
     when(servers.lockForShare("alpha")).thenReturn(Optional.of(mcpServer("alpha")));
     when(servers.lockForShare("zulu")).thenReturn(Optional.of(mcpServer("zulu")));
-    AgentDefinitionReferenceResolver resolver =
-        new AgentDefinitionReferenceResolver(
+    AgentReferenceResolver resolver =
+        new AgentReferenceResolver(
             definitions, skills, servers, TestCatalogSources.singleLease(tools));
 
     assertDoesNotThrow(
@@ -189,9 +189,9 @@ class AgentDefinitionReferenceResolverTest {
         .thenReturn(Optional.of(mcpTool("mcp_alpha_fetch", "alpha")));
     when(servers.lockToolForShare("mcp_alpha_fetch")).thenReturn(Optional.empty());
     when(servers.lockForShare("alpha")).thenReturn(Optional.of(mcpServer("alpha")));
-    AgentDefinitionReferenceResolver resolver =
-        new AgentDefinitionReferenceResolver(
-            mock(AgentDefinitionRepository.class),
+    AgentReferenceResolver resolver =
+        new AgentReferenceResolver(
+            mock(AgentRepository.class),
             mock(SkillPackageRepository.class),
             servers,
             TestCatalogSources.singleLease(tools));
@@ -209,9 +209,9 @@ class AgentDefinitionReferenceResolverTest {
     SkillPackage after = packageWith("tools", "alpha");
     when(skills.getPackage("tools")).thenReturn(before);
     when(skills.lockPackageForShare("tools")).thenReturn(after);
-    AgentDefinitionReferenceResolver resolver =
-        new AgentDefinitionReferenceResolver(
-            mock(AgentDefinitionRepository.class),
+    AgentReferenceResolver resolver =
+        new AgentReferenceResolver(
+            mock(AgentRepository.class),
             skills,
             mock(McpServerRepository.class),
             TestCatalogSources.singleLease(mock(RuntimeToolCatalog.class)));
@@ -238,9 +238,9 @@ class AgentDefinitionReferenceResolverTest {
     when(servers.lockToolForShare("mcp_alpha"))
         .thenReturn(Optional.of(mcpTool("mcp_alpha", "srv")));
     when(servers.lockToolForShare("mcp_zeta")).thenReturn(Optional.empty());
-    AgentDefinitionReferenceResolver resolver =
-        new AgentDefinitionReferenceResolver(
-            mock(AgentDefinitionRepository.class),
+    AgentReferenceResolver resolver =
+        new AgentReferenceResolver(
+            mock(AgentRepository.class),
             mock(SkillPackageRepository.class),
             servers,
             TestCatalogSources.singleLease(tools));
@@ -260,9 +260,9 @@ class AgentDefinitionReferenceResolverTest {
     when(servers.getTool("mcp_alpha_fetch"))
         .thenReturn(Optional.of(mcpTool("mcp_alpha_fetch", "alpha")));
     when(servers.lockForShare("alpha")).thenReturn(Optional.of(mcpServer("alpha")));
-    AgentDefinitionReferenceResolver resolver =
-        new AgentDefinitionReferenceResolver(
-            mock(AgentDefinitionRepository.class),
+    AgentReferenceResolver resolver =
+        new AgentReferenceResolver(
+            mock(AgentRepository.class),
             mock(SkillPackageRepository.class),
             servers,
             TestCatalogSources.singleLease(tools));
@@ -273,9 +273,9 @@ class AgentDefinitionReferenceResolverTest {
     verify(servers).lockForShare("alpha");
   }
 
-  private static AgentDefinitionReferenceResolver resolver() {
-    return new AgentDefinitionReferenceResolver(
-        mock(AgentDefinitionRepository.class),
+  private static AgentReferenceResolver resolver() {
+    return new AgentReferenceResolver(
+        mock(AgentRepository.class),
         mock(SkillPackageRepository.class),
         mock(McpServerRepository.class),
         TestCatalogSources.singleLease(mock(RuntimeToolCatalog.class)));

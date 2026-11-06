@@ -30,12 +30,12 @@ import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.builtin.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.spi.store.ThreadStore;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionService;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentService;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentConfigDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentCreateDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentDTO;
 import fun.fengwk.kkstudio.platform.harness.thread.command.DatabaseTurnResolver;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionCreateDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionDTO;
 import fun.fengwk.kkstudio.share.runtime.HarnessExecutionSelectionDTO;
 
 import java.sql.Connection;
@@ -54,7 +54,7 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
   private static final UUID SESSION_ID = new UUID(0L, 100L);
 
   @Autowired private ChatService chatService;
-  @Autowired private AgentDefinitionService agentDefinitionService;
+  @Autowired private AgentService agentService;
   @Autowired private DatabaseTurnResolver turnResolver;
   @MockitoBean private HarnessStore harnessStore;
 
@@ -139,7 +139,7 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
         chatService.deleteChat(second.getId(), "0");
       }
 
-      agentDefinitionService.deleteAgent("default-assistant", "0");
+      agentService.deleteAgent("default-assistant", "0");
       ChatDTO staleAgentChat = chatService.getChat(chatId);
       assertEquals("default-assistant", staleAgentChat.getAgentName());
       assertTrue(staleAgentChat.isYoloEnabled());
@@ -165,19 +165,19 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
 
       // 硬删除后同名重建：既有名称引用必须解析到当前新行，而不是继续缺失。
       String reboundSystemPrompt = "Rebound assistant: resolved from the re-created current row.";
-      AgentDefinitionCreateDTO rebound = new AgentDefinitionCreateDTO();
+      AgentCreateDTO rebound = new AgentCreateDTO();
       rebound.setName("default-assistant");
       HarnessExecutionSelectionDTO execution = new HarnessExecutionSelectionDTO();
       execution.setDriver("builtin");
       execution.setSettings(Map.of("modelName", "acceptance-stub", "variant", "default"));
       rebound.setExecution(execution);
-      AgentDefinitionConfigDTO reboundConfig = new AgentDefinitionConfigDTO();
+      AgentConfigDTO reboundConfig = new AgentConfigDTO();
       reboundConfig.setTools(List.of());
       reboundConfig.setSkills(List.of());
       reboundConfig.setSubagents(List.of());
       rebound.setConfig(reboundConfig);
       rebound.setSystemPrompt(reboundSystemPrompt);
-      AgentDefinitionDTO reboundAgent = agentDefinitionService.createAgent(rebound);
+      AgentDTO reboundAgent = agentService.createAgent(rebound);
       try {
         TurnResolver.Result reboundResolution =
             turnResolver.resolve(THREAD_ID, SESSION_ID, path, null);
@@ -188,7 +188,7 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
             resolved.spec().systemInstruction().contains(reboundSystemPrompt),
             "同名重建后的当前行 systemPrompt 必须出现在有效请求的唯一 systemInstruction 中");
       } finally {
-        agentDefinitionService.deleteAgent("default-assistant", reboundAgent.getVersion());
+        agentService.deleteAgent("default-assistant", reboundAgent.getVersion());
       }
 
       ChatUpdateDTO staleAgentUpdate = new ChatUpdateDTO();

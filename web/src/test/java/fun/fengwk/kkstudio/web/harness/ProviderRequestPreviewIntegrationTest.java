@@ -373,9 +373,7 @@ class ProviderRequestPreviewIntegrationTest extends WebPostgresTestSupport {
   private void updateSystemPrompt(String prompt) {
     assertEquals(
         1,
-        jdbc.update(
-            "update agent set system_prompt = ? where name = 'default-assistant'",
-            prompt));
+        jdbc.update("update agent set system_prompt = ? where name = 'default-assistant'", prompt));
   }
 
   private void assertCompletedTurns(Fixture fixture, int expected) {

@@ -37,7 +37,7 @@ class IssueAgentThreadRepositoryIntegrationTest extends OwnerTestSupport {
   void insertFindDeleteRoundTrip() {
     UUID projectId = projectRow();
     UUID issueId = issueRow(projectId);
-    String agentName = agentDefinition();
+    String agentName = agent();
     UUID sessionId = uuid();
     sessionRow(sessionId);
     UUID threadId = threadRow(sessionId);
@@ -64,7 +64,7 @@ class IssueAgentThreadRepositoryIntegrationTest extends OwnerTestSupport {
   void writesWithoutTransactionFailBeforeMutation() {
     UUID projectId = projectRow();
     UUID issueId = issueRow(projectId);
-    String agentName = agentDefinition();
+    String agentName = agent();
     UUID sessionId = uuid();
     sessionRow(sessionId);
     UUID threadId = threadRow(sessionId);
@@ -80,12 +80,12 @@ class IssueAgentThreadRepositoryIntegrationTest extends OwnerTestSupport {
     assertEquals(binding, issueAgentThreadRepository.findByIssueIdAndAgentName(issueId, agentName));
   }
 
-  /** FK：Issue、AgentDefinition 与 harness_thread 都必须存在，绑定不能凭空悬空。 */
+  /** FK：Issue、Agent 与 harness_thread 都必须存在，绑定不能凭空悬空。 */
   @Test
   void foreignKeysRejectOrphanedRows() {
     UUID projectId = projectRow();
     UUID issueId = issueRow(projectId);
-    String agentName = agentDefinition();
+    String agentName = agent();
     UUID sessionId = uuid();
     sessionRow(sessionId);
     UUID threadId = threadRow(sessionId);
@@ -130,7 +130,7 @@ class IssueAgentThreadRepositoryIntegrationTest extends OwnerTestSupport {
   @Test
   void sessionOwnershipExistsWithoutRuns() {
     UUID issueId = issueRow(projectRow());
-    String agentName = agentDefinition();
+    String agentName = agent();
     UUID sessionId = uuid();
     UUID otherSession = uuid();
     sessionRow(sessionId);
@@ -155,8 +155,8 @@ class IssueAgentThreadRepositoryIntegrationTest extends OwnerTestSupport {
   void stableIdentityAndThreadAreNeverReboundOrShared() {
     UUID projectId = projectRow();
     UUID issueId = issueRow(projectId);
-    String firstAgent = agentDefinition();
-    String secondAgent = agentDefinition();
+    String firstAgent = agent();
+    String secondAgent = agent();
     UUID firstSession = uuid();
     UUID secondSession = uuid();
     sessionRow(firstSession);
@@ -196,8 +196,8 @@ class IssueAgentThreadRepositoryIntegrationTest extends OwnerTestSupport {
   void concurrentBindingsOfSameThreadKeepExactlyOneOwner() throws Exception {
     UUID projectId = projectRow();
     UUID issueId = issueRow(projectId);
-    String firstAgent = agentDefinition();
-    String secondAgent = agentDefinition();
+    String firstAgent = agent();
+    String secondAgent = agent();
     UUID sessionId = uuid();
     sessionRow(sessionId);
     UUID threadId = threadRow(sessionId);
@@ -229,7 +229,7 @@ class IssueAgentThreadRepositoryIntegrationTest extends OwnerTestSupport {
   void runReferenceBlocksBindingAndThreadDeletion() {
     UUID projectId = projectRow();
     UUID issueId = issueRow(projectId);
-    String agentName = agentDefinition();
+    String agentName = agent();
     UUID sessionId = uuid();
     sessionRow(sessionId);
     UUID threadId = threadRow(sessionId);

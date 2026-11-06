@@ -17,8 +17,7 @@ import org.springframework.jdbc.datasource.SimpleDriverDataSource;
 
 import fun.fengwk.kkstudio.common.page.Page;
 import fun.fengwk.kkstudio.common.page.PageQuery;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
+import fun.fengwk.kkstudio.platform.catalog.definition.Agent;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
@@ -95,27 +94,6 @@ class CatalogPaginationIntegrationTest {
   }
 
   @Test
-  void agentDefinitionPageReturnsResultsAndTotalFromOneStatement() {
-    insertDefinition("delta");
-    insertDefinition("alpha");
-    insertDefinition("charlie");
-    insertDefinition("bravo");
-    AgentDefinitionRepository repository = new AgentDefinitionRepository(observed);
-
-    assertDefinitionPage(
-        repository.page(new PageQuery(1, 3)), List.of("alpha", "bravo", "charlie"), 4);
-    verify(observed, times(1)).sql(anyString());
-
-    reset(observed);
-    assertDefinitionPage(repository.page(new PageQuery(2, 3)), List.of("delta"), 4);
-    verify(observed, times(1)).sql(anyString());
-
-    reset(observed);
-    assertDefinitionPage(repository.page(new PageQuery(3, 3)), List.of(), 4);
-    verify(observed, times(1)).sql(anyString());
-  }
-
-  @Test
   void emptyCatalogPagesStillReportZeroTotalInOneStatement() {
     assertModelPage(new AgentModelRepository(observed).page(new PageQuery(1, 2)), List.of(), 0);
     verify(observed, times(1)).sql(anyString());
@@ -123,11 +101,6 @@ class CatalogPaginationIntegrationTest {
     reset(observed);
     assertProviderPage(
         new AgentProviderRepository(observed).page(new PageQuery(1, 2)), List.of(), 0);
-    verify(observed, times(1)).sql(anyString());
-
-    reset(observed);
-    assertDefinitionPage(
-        new AgentDefinitionRepository(observed).page(new PageQuery(1, 2)), List.of(), 0);
     verify(observed, times(1)).sql(anyString());
   }
 
@@ -163,9 +136,9 @@ class CatalogPaginationIntegrationTest {
     assertEquals(names, page.getResults().stream().map(AgentProvider::name).toList());
   }
 
-  private void assertDefinitionPage(Page<AgentDefinition> page, List<String> names, long total) {
+  private void assertDefinitionPage(Page<Agent> page, List<String> names, long total) {
     assertEquals(total, page.getTotalCount());
-    assertEquals(names, page.getResults().stream().map(AgentDefinition::name).toList());
+    assertEquals(names, page.getResults().stream().map(Agent::name).toList());
   }
 
   private void insertProvider(String name) {

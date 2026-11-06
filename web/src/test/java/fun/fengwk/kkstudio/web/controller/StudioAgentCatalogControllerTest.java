@@ -23,9 +23,9 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgentInitializer;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionCreateDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionUpdateDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentConfigDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentCreateDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentUpdateDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentModelAbilitiesDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentModelConfigDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentModelCreateDTO;
@@ -199,11 +199,11 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
     assertEquals(WIRE_MODEL_ID, modelData.path("modelId").asText());
     assertFalse(modelData.has("id"));
 
-    AgentDefinitionConfigDTO agentConfig = new AgentDefinitionConfigDTO();
+    AgentConfigDTO agentConfig = new AgentConfigDTO();
     agentConfig.setTools(List.of());
     agentConfig.setSkills(List.of());
     agentConfig.setSubagents(List.of());
-    AgentDefinitionCreateDTO agent = new AgentDefinitionCreateDTO();
+    AgentCreateDTO agent = new AgentCreateDTO();
     agent.setName(agentName);
     agent.setExecution(execution(modelName));
     agent.setConfig(agentConfig);
@@ -211,7 +211,7 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
         data(
             mockMvc
                 .perform(
-                    post("/api/agents")
+                    post("/api/platform/agents")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(agent)))
                 .andExpect(status().isCreated())
@@ -249,8 +249,8 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
     assertFalse(listedModel.has("id"));
 
     JsonNode agentPage =
-        data(mockMvc.perform(get("/api/agents")).andExpect(status().isOk()).andReturn());
-    JsonNode listedAgent = findResult(agentPage, agentName);
+        data(mockMvc.perform(get("/api/platform/agents")).andExpect(status().isOk()).andReturn());
+    JsonNode listedAgent = findAgent(agentPage, agentName);
     assertEquals(
         modelName, listedAgent.path("execution").path("settings").path("modelName").asText());
     assertFalse(listedAgent.has("model"));
@@ -352,7 +352,7 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.errors.expectedVersion").value("0"))
         .andExpect(jsonPath("$.errors.actualVersion").value("1"));
 
-    AgentDefinitionUpdateDTO agentUpdate = new AgentDefinitionUpdateDTO();
+    AgentUpdateDTO agentUpdate = new AgentUpdateDTO();
     agentUpdate.setDescription("updated agent");
     agentUpdate.setSystemPrompt("updated prompt");
     agentUpdate.setExecution(execution(modelName));
@@ -362,7 +362,7 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
     agentUpdateBody.put("name", "renamed-" + agentName);
     mockMvc
         .perform(
-            put("/api/agents/{name}", agentName)
+            put("/api/platform/agents/{name}", agentName)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(agentUpdateBody.toString()))
         .andExpect(status().isBadRequest());
@@ -370,7 +370,7 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
         data(
             mockMvc
                 .perform(
-                    put("/api/agents/{name}", agentName)
+                    put("/api/platform/agents/{name}", agentName)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(agentUpdate)))
                 .andExpect(status().isOk())
@@ -392,7 +392,7 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
     agentUpdate.setExpectedVersion("0");
     mockMvc
         .perform(
-            put("/api/agents/{name}", agentName)
+            put("/api/platform/agents/{name}", agentName)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(agentUpdate)))
         .andExpect(status().isConflict())
@@ -415,7 +415,7 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.errors.resource").doesNotExist());
 
     mockMvc
-        .perform(delete("/api/agents/{name}", agentName).param("expectedVersion", "1"))
+        .perform(delete("/api/platform/agents/{name}", agentName).param("expectedVersion", "1"))
         .andExpect(status().isNoContent());
     // 测试意图：验证 DELETE /api/models/{*modelName}?expectedVersion=... 解除引用后成功
     // CAS 硬删除，返回 204 NoContent。
@@ -459,7 +459,10 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
     JsonNode created =
         data(
             mockMvc
-                .perform(post("/api/agents").contentType(MediaType.APPLICATION_JSON).content(body))
+                .perform(
+                    post("/api/platform/agents")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
                 .andExpect(status().isCreated())
                 .andReturn());
     JsonNode settings = created.path("execution").path("settings");
@@ -473,7 +476,7 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
         data(
             mockMvc
                 .perform(
-                    put("/api/agents/{name}", name)
+                    put("/api/platform/agents/{name}", name)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(update.toString()))
                 .andExpect(status().isOk())
@@ -485,18 +488,18 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
   @Test
   public void shouldRejectMalformedModelRefsAndDatabaseIdContracts() throws Exception {
     String suffix = Long.toString(System.nanoTime());
-    AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
+    AgentConfigDTO config = new AgentConfigDTO();
     config.setTools(List.of());
     config.setSkills(List.of());
     config.setSubagents(List.of());
 
-    AgentDefinitionCreateDTO malformed = new AgentDefinitionCreateDTO();
+    AgentCreateDTO malformed = new AgentCreateDTO();
     malformed.setName("malformed-agent-" + suffix);
     malformed.setExecution(execution(" invalid surrounding whitespace "));
     malformed.setConfig(config);
     mockMvc
         .perform(
-            post("/api/agents")
+            post("/api/platform/agents")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(malformed)))
         .andExpect(status().isBadRequest())
@@ -516,7 +519,7 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
                 .content(idBasedModelBody.toString()))
         .andExpect(status().isBadRequest());
 
-    AgentDefinitionCreateDTO idBasedAgent = new AgentDefinitionCreateDTO();
+    AgentCreateDTO idBasedAgent = new AgentCreateDTO();
     idBasedAgent.setName("id-based-agent-" + suffix);
     idBasedAgent.setExecution(execution("acceptance-stub"));
     idBasedAgent.setConfig(config);
@@ -524,7 +527,7 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
     unknownAgentBody.put("unknownField", "1");
     mockMvc
         .perform(
-            post("/api/agents")
+            post("/api/platform/agents")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(unknownAgentBody.toString()))
         .andExpect(status().isBadRequest());
@@ -532,7 +535,7 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
     idBasedAgentBody.put("modelId", "1");
     mockMvc
         .perform(
-            post("/api/agents")
+            post("/api/platform/agents")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(idBasedAgentBody.toString()))
         .andExpect(status().isBadRequest());
@@ -549,7 +552,7 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
 
     mockMvc.perform(get("/api/providers/1")).andExpect(status().isMethodNotAllowed());
     mockMvc.perform(get("/api/models/1")).andExpect(status().isMethodNotAllowed());
-    mockMvc.perform(get("/api/agents/1")).andExpect(status().isMethodNotAllowed());
+    mockMvc.perform(get("/api/platform/agents/1")).andExpect(status().isMethodNotAllowed());
     mockMvc
         .perform(put("/api/models/1").contentType(MediaType.APPLICATION_JSON).content("{}"))
         .andExpect(status().isBadRequest());
@@ -590,17 +593,17 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
                 .andExpect(status().isCreated())
                 .andReturn());
 
-    AgentDefinitionCreateDTO agent = new AgentDefinitionCreateDTO();
+    AgentCreateDTO agent = new AgentCreateDTO();
     agent.setName(agentName);
     agent.setExecution(execution(oldModelName));
-    AgentDefinitionConfigDTO agentConfig = new AgentDefinitionConfigDTO();
+    AgentConfigDTO agentConfig = new AgentConfigDTO();
     agentConfig.setTools(List.of());
     agentConfig.setSkills(List.of());
     agentConfig.setSubagents(List.of());
     agent.setConfig(agentConfig);
     mockMvc
         .perform(
-            post("/api/agents")
+            post("/api/platform/agents")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(agent)))
         .andExpect(status().isCreated());
@@ -649,8 +652,8 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
 
     // 4. 验证 Agent 精确引用新全局名称（包含斜杠和空格），且版本递增为 1
     JsonNode agentPage =
-        data(mockMvc.perform(get("/api/agents")).andExpect(status().isOk()).andReturn());
-    JsonNode listedAgent = findResult(agentPage, agentName);
+        data(mockMvc.perform(get("/api/platform/agents")).andExpect(status().isOk()).andReturn());
+    JsonNode listedAgent = findAgent(agentPage, agentName);
     assertEquals(
         newModelName, listedAgent.path("execution").path("settings").path("modelName").asText());
     assertEquals(
@@ -726,8 +729,8 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
 
     // 验证目标冲突回滚后原模型及 Agent 保持冲突尝试前状态
     JsonNode agentPageAfterConflict =
-        data(mockMvc.perform(get("/api/agents")).andExpect(status().isOk()).andReturn());
-    JsonNode agentAfterConflict = findResult(agentPageAfterConflict, agentName);
+        data(mockMvc.perform(get("/api/platform/agents")).andExpect(status().isOk()).andReturn());
+    JsonNode agentAfterConflict = findAgent(agentPageAfterConflict, agentName);
     assertEquals(
         newModelName,
         agentAfterConflict.path("execution").path("settings").path("modelName").asText());
@@ -772,7 +775,7 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
   @Test
   void shouldExposeTypeAndProtectBuiltinIdentity() throws Exception {
     String suffix = Long.toString(System.nanoTime());
-    AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
+    AgentConfigDTO config = new AgentConfigDTO();
     config.setTools(List.of());
     config.setSkills(List.of());
     config.setSubagents(List.of());
@@ -784,7 +787,9 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
     forged.set("config", objectMapper.valueToTree(config));
     mockMvc
         .perform(
-            post("/api/agents").contentType(MediaType.APPLICATION_JSON).content(forged.toString()))
+            post("/api/platform/agents")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(forged.toString()))
         .andExpect(status().isBadRequest());
 
     ObjectNode reserved = objectMapper.createObjectNode();
@@ -793,7 +798,7 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
     reserved.set("config", objectMapper.valueToTree(config));
     mockMvc
         .perform(
-            post("/api/agents")
+            post("/api/platform/agents")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(reserved.toString()))
         .andExpect(status().isConflict())
@@ -802,8 +807,8 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
 
     builtinAgentInitializer.afterPropertiesSet();
     JsonNode page =
-        data(mockMvc.perform(get("/api/agents")).andExpect(status().isOk()).andReturn());
-    JsonNode builtin = findResult(page, "Compaction");
+        data(mockMvc.perform(get("/api/platform/agents")).andExpect(status().isOk()).andReturn());
+    JsonNode builtin = findAgent(page, "Compaction");
     assertEquals("BUILTIN", builtin.path("type").asText());
     // 未配置模型的内置 Agent 显式序列化 null，而不是字段缺失。
     assertTrue(builtin.has("execution"));
@@ -812,7 +817,7 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
     assertFalse(builtin.has("variant"));
 
     mockMvc
-        .perform(delete("/api/agents/{name}", "Compaction").param("expectedVersion", "0"))
+        .perform(delete("/api/platform/agents/{name}", "Compaction").param("expectedVersion", "0"))
         .andExpect(status().isConflict())
         .andExpect(jsonPath("$.code").value("in_use"))
         .andExpect(jsonPath("$.errors.resource").doesNotExist());
@@ -836,6 +841,15 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
       }
     }
     return false;
+  }
+
+  private static JsonNode findAgent(JsonNode agents, String name) {
+    for (JsonNode agent : agents) {
+      if (name.equals(agent.path("name").asText())) {
+        return agent;
+      }
+    }
+    throw new AssertionError("missing agent: " + name);
   }
 
   private static JsonNode findResult(JsonNode page, String name) {

@@ -18,13 +18,13 @@ import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.page.PageQuery;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionService;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentService;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentConfigDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentCreateDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentDTO;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderService;
 import fun.fengwk.kkstudio.platform.configsync.ConfigSyncService;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionCreateDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentModelConfigDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentModelCreateDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentModelDTO;
@@ -54,7 +54,7 @@ public class AgentModelServiceTest extends PostgresSpringTestSupport {
   @Autowired private AgentProviderService agentProviderService;
   @Autowired private AgentModelService agentModelService;
   @Autowired private AgentModelRepository agentModelRepository;
-  @Autowired private AgentDefinitionService agentDefinitionService;
+  @Autowired private AgentService agentService;
   @Autowired private JdbcTemplate jdbc;
   @Autowired private PlatformTransactionManager transactionManager;
   @Autowired private ConfigSyncService configSyncService;
@@ -96,9 +96,7 @@ public class AgentModelServiceTest extends PostgresSpringTestSupport {
             String.class,
             builtin));
     assertEquals(
-        1L,
-        jdbc.queryForObject(
-            "select version from agent where name = ?", Long.class, builtin));
+        1L, jdbc.queryForObject("select version from agent where name = ?", Long.class, builtin));
     assertEquals(
         original,
         jdbc.queryForObject(
@@ -106,9 +104,7 @@ public class AgentModelServiceTest extends PostgresSpringTestSupport {
             String.class,
             other));
     assertEquals(
-        0L,
-        jdbc.queryForObject(
-            "select version from agent where name = ?", Long.class, other));
+        0L, jdbc.queryForObject("select version from agent where name = ?", Long.class, other));
     assertFalse(agentModelRepository.hasAgents(original));
     assertFalse(agentModelRepository.hasVariantReferences(original, "default"));
     AgentModelDTO recreated = agentModelService.createModel(model(providerName, original));
@@ -186,8 +182,7 @@ public class AgentModelServiceTest extends PostgresSpringTestSupport {
         agentModelService.createModel(group("group-" + suffix, originalModel, "default"));
 
     String agentName = "agent-ref-" + suffix;
-    AgentDefinitionDTO agentDto =
-        agentDefinitionService.createAgent(agent(originalModel, agentName));
+    AgentDTO agentDto = agentService.createAgent(agent(originalModel, agentName));
     assertEquals(originalModel, agentDto.getExecution().getSettings().get("modelName"));
 
     insertCooldown(group.getName(), originalModel, "default", Long.parseLong(group.getVersion()));
@@ -202,8 +197,8 @@ public class AgentModelServiceTest extends PostgresSpringTestSupport {
     assertThrows(
         DomainException.class, () -> agentModelService.updateModel(originalModel, renameReq));
 
-    AgentDefinitionDTO updatedAgent =
-        agentDefinitionService.pageAgents(new PageQuery(1, 100)).getResults().stream()
+    AgentDTO updatedAgent =
+        agentService.listAgents().stream()
             .filter(candidate -> candidate.getName().equals(agentName))
             .findFirst()
             .orElseThrow();
@@ -240,15 +235,15 @@ public class AgentModelServiceTest extends PostgresSpringTestSupport {
         DomainException.class,
         () -> agentModelService.deleteModel(renamedModel, unchanged.getVersion()));
     agentModelService.deleteModel(renamedGroup.getName(), renamedGroup.getVersion());
-    AgentDefinitionDTO agentAfterCollision =
-        agentDefinitionService.pageAgents(new PageQuery(1, 100)).getResults().stream()
+    AgentDTO agentAfterCollision =
+        agentService.listAgents().stream()
             .filter(candidate -> candidate.getName().equals(agentName))
             .findFirst()
             .orElseThrow();
     assertThrows(
         DomainException.class,
         () -> agentModelService.deleteModel(renamedModel, unchanged.getVersion()));
-    agentDefinitionService.deleteAgent(agentName, agentAfterCollision.getVersion());
+    agentService.deleteAgent(agentName, agentAfterCollision.getVersion());
     agentModelService.deleteModel(renamedModel, unchanged.getVersion());
     agentModelService.deleteModel(existingModel, "0");
     agentProviderService.deleteProvider(providerName, "0");
@@ -534,8 +529,8 @@ public class AgentModelServiceTest extends PostgresSpringTestSupport {
         groupVersion);
   }
 
-  private AgentDefinitionCreateDTO agent(String model, String name) {
-    AgentDefinitionCreateDTO dto = new AgentDefinitionCreateDTO();
+  private AgentCreateDTO agent(String model, String name) {
+    AgentCreateDTO dto = new AgentCreateDTO();
     dto.setName(name);
     Map<String, Object> settings = new HashMap<>();
     settings.put("modelName", model);
@@ -544,7 +539,7 @@ public class AgentModelServiceTest extends PostgresSpringTestSupport {
     execution.setDriver(BuiltinExecution.DRIVER);
     execution.setSettings(settings);
     dto.setExecution(execution);
-    AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
+    AgentConfigDTO config = new AgentConfigDTO();
     config.setTools(List.of());
     config.setSkills(List.of());
     config.setSubagents(List.of());

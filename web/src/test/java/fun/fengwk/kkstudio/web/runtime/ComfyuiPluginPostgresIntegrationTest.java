@@ -49,7 +49,7 @@ import fun.fengwk.kkstudio.canvas.function.CanvasResourceKind;
 import fun.fengwk.kkstudio.canvas.infra.platform.PluginCanvasFunctionCatalog;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.json.JsonValues;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentRepository;
 import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
 import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialStore;
@@ -349,7 +349,7 @@ class ComfyuiPluginPostgresIntegrationTest {
         repository,
         new PluginCredentialRepository(JdbcClient.create(dataSource)),
         context.getBean(PluginContextFactory.class),
-        new PluginAgentDependencies(registry, repository, mock(AgentDefinitionRepository.class)),
+        new PluginAgentDependencies(registry, repository, mock(AgentRepository.class)),
         new DataSourceTransactionManager(dataSource),
         runtime::refresh,
         () -> {});

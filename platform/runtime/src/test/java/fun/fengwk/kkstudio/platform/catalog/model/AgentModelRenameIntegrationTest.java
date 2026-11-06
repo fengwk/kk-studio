@@ -144,8 +144,7 @@ class AgentModelRenameIntegrationTest {
         modelName,
         fixture
             .sql(
-                "select execution -> 'settings' ->> 'modelName' from agent"
-                    + " where name = :name")
+                "select execution -> 'settings' ->> 'modelName' from agent" + " where name = :name")
             .param("name", agentName)
             .query(String.class)
             .single());

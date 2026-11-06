@@ -9,22 +9,20 @@ import org.postgresql.Driver;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.jdbc.datasource.SimpleDriverDataSource;
 
-import fun.fengwk.kkstudio.common.page.PageQuery;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchemaSupport;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionType;
 
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.UUID;
 
 /** {@code agent} 读取路径的真实 SQL 覆盖：listAll 排序、count 与 jsonb 引用检查。 */
-class AgentDefinitionRepositoryIntegrationTest {
+class AgentRepositoryIntegrationTest {
 
   private static JdbcClient jdbcClient;
 
-  private AgentDefinitionRepository store;
+  private AgentRepository store;
 
   @BeforeAll
   static void beforeAll() {
@@ -43,17 +41,16 @@ class AgentDefinitionRepositoryIntegrationTest {
       PostgresSchemaSupport.resetDatabase(conn);
       PostgresSchemaSupport.applyBaseline(conn);
     }
-    store = new AgentDefinitionRepository(jdbcClient);
+    store = new AgentRepository(jdbcClient);
   }
 
-  /** listAll 按 name 升序，分页 total 统计全部行。 */
+  /** listAll 按 name 升序列出全部行。 */
   @Test
-  void listAllOrdersByNameAndCountsRows() {
+  void listAllOrdersByName() {
     insert("alpha", "{\"subagents\":[\"beta\"]}");
     insert("beta", "{}");
 
-    assertThat(store.page(new PageQuery(1, 10)).getTotalCount()).isEqualTo(2);
-    assertThat(store.listAll()).extracting(AgentDefinition::name).containsExactly("alpha", "beta");
+    assertThat(store.listAll()).extracting(Agent::name).containsExactly("alpha", "beta");
   }
 
   /** existsReferencingSubagent 与 existsReferencingSkill 按 config jsonb 形状判定。 */
@@ -92,9 +89,9 @@ class AgentDefinitionRepositoryIntegrationTest {
 
     assertThat(
             store.create(
-                AgentDefinition.builder()
+                Agent.builder()
                     .name(name)
-                    .type(AgentDefinitionType.USER)
+                    .type(AgentType.USER)
                     .execution(BuiltinExecution.of(ModelSelection.model(modelName, null)))
                     .configJson(configJson)
                     .build()))

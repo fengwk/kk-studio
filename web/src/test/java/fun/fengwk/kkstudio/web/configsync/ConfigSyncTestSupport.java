@@ -25,8 +25,8 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.cfg.JsonNodeFeature;
 
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentConfigDTO;
 import fun.fengwk.kkstudio.platform.pluginhost.credential.PluginCredentialRefreshDispatcher;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentModelAbilitiesDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentModelConfigDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentModelInputModality;
@@ -185,9 +185,9 @@ public abstract class ConfigSyncTestSupport extends WebPostgresTestSupport {
     return config;
   }
 
-  protected static AgentDefinitionConfigDTO agentConfig(
+  protected static AgentConfigDTO agentConfig(
       List<String> tools, List<SkillRefDTO> skills, List<String> subagents) {
-    AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
+    AgentConfigDTO config = new AgentConfigDTO();
     config.setTools(tools);
     config.setSkills(skills);
     config.setSubagents(subagents);

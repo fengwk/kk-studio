@@ -17,9 +17,12 @@ import org.springframework.test.annotation.DirtiesContext;
 import tools.jackson.databind.JsonNode;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
-import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgentDefinitions;
+import fun.fengwk.kkstudio.platform.catalog.definition.Agent;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentRepository;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentType;
+import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgents;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentConfigDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentCreateDTO;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
 import fun.fengwk.kkstudio.platform.configsync.ConfigSyncApplier;
 import fun.fengwk.kkstudio.platform.configsync.ConfigSyncParser;
@@ -29,9 +32,6 @@ import fun.fengwk.kkstudio.platform.configsync.ConfigSyncSnapshot;
 import fun.fengwk.kkstudio.platform.configsync.ConfigSyncSnapshotReader;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRow;
 import fun.fengwk.kkstudio.platform.pluginhost.service.PluginManagementService;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionCreateDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionType;
 
 import javax.sql.DataSource;
 
@@ -64,7 +64,7 @@ class PluginConfigSyncIntegrationTest extends ConfigSyncTestSupport {
   @Autowired private ConfigSyncSnapshotReader snapshotReader;
   @Autowired private PluginManagementService pluginManagementService;
   @Autowired private DataSource dataSource;
-  @Autowired private AgentDefinitionRepository definitionRepository;
+  @Autowired private AgentRepository definitionRepository;
 
   /** inventory 与导出把已安装插件当第八类，且 portable 条目只含 pluginId 与 valuesJson。 */
   @SuppressWarnings("unchecked")
@@ -186,14 +186,14 @@ class PluginConfigSyncIntegrationTest extends ConfigSyncTestSupport {
   @Test
   void builtinAgentSatisfiesReferencesWithoutBecomingPortable() throws Exception {
     // 系统内置 Agent 由系统持有身份：测试按同类身份落一行真实 BUILTIN 行，绝不把它当作可同步条目。
-    seedBuiltinAgent(BuiltinAgentDefinitions.COMPACTION_NAME);
+    seedBuiltinAgent(BuiltinAgents.COMPACTION_NAME);
     String agent = "builtin-dep-agent";
     createBuiltinDependentAgent(agent);
 
     JsonNode items = getData("/api/settings/sync").path("items");
     assertNotNull(findItem(items, "agents", agent));
     assertNull(
-        findItem(items, "agents", BuiltinAgentDefinitions.COMPACTION_NAME),
+        findItem(items, "agents", BuiltinAgents.COMPACTION_NAME),
         "a builtin agent must never be a selectable inventory item");
 
     JsonNode exported =
@@ -212,11 +212,10 @@ class PluginConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     assertTrue(references(result.path("skipped")).isEmpty());
 
     // 保留名仍不可覆盖：导入内置身份本身必须整份拒绝，库内内置行逐字段不变（version/config 都不被改写）。
-    AgentDefinition before =
-        definitionRepository.getByName(BuiltinAgentDefinitions.COMPACTION_NAME);
+    Agent before = definitionRepository.getByName(BuiltinAgents.COMPACTION_NAME);
     String reserved =
         "agents:\n  - name: "
-            + BuiltinAgentDefinitions.COMPACTION_NAME
+            + BuiltinAgents.COMPACTION_NAME
             + "\n    description: overridden\n"
             + "    execution: {driver: builtin, settings: {modelName: acceptance-stub, variant: default}}\n"
             + "    systemPrompt: overridden\n"
@@ -227,7 +226,7 @@ class PluginConfigSyncIntegrationTest extends ConfigSyncTestSupport {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(Map.of("yaml", reserved))))
         .andExpect(status().isBadRequest());
-    AgentDefinition after = definitionRepository.getByName(BuiltinAgentDefinitions.COMPACTION_NAME);
+    Agent after = definitionRepository.getByName(BuiltinAgents.COMPACTION_NAME);
     assertEquals(before.version(), after.version());
     assertEquals(before.configJson(), after.configJson());
     assertEquals(before.systemPrompt(), after.systemPrompt());
@@ -235,10 +234,10 @@ class PluginConfigSyncIntegrationTest extends ConfigSyncTestSupport {
 
   /** 以系统持有身份落一行 BUILTIN Agent：只用于证明内置身份满足引用却绝不进入 portable 范围。 */
   private void seedBuiltinAgent(String name) {
-    AgentDefinition builtin =
-        AgentDefinition.builder()
+    Agent builtin =
+        Agent.builder()
             .name(name)
-            .type(AgentDefinitionType.BUILTIN)
+            .type(AgentType.BUILTIN)
             .systemPrompt("builtin prompt")
             .configJson("{\"tools\":[],\"skills\":[],\"subagents\":[]}")
             .build();
@@ -247,18 +246,18 @@ class PluginConfigSyncIntegrationTest extends ConfigSyncTestSupport {
 
   /** 建一个 subagent 指向系统内置 Agent 的自定义 Agent：内置身份必须满足该引用。 */
   private void createBuiltinDependentAgent(String name) throws Exception {
-    AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
+    AgentConfigDTO config = new AgentConfigDTO();
     config.setTools(List.of());
     config.setSkills(List.of());
-    config.setSubagents(List.of(BuiltinAgentDefinitions.COMPACTION_NAME));
+    config.setSubagents(List.of(BuiltinAgents.COMPACTION_NAME));
 
-    AgentDefinitionCreateDTO dto = new AgentDefinitionCreateDTO();
+    AgentCreateDTO dto = new AgentCreateDTO();
     dto.setName(name);
     dto.setDescription("agent " + name);
     dto.setSystemPrompt("prompt " + name);
     dto.setExecution(execution("acceptance-stub", "default"));
     dto.setConfig(config);
-    postData("/api/agents", dto);
+    postData("/api/platform/agents", dto);
   }
 
   /** 导出文档里的 Agent 条目名，用于断言内置身份没有变成独立条目。 */

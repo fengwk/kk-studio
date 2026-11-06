@@ -31,19 +31,18 @@ import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.spi.driver.AgentDriver;
-import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgentDefinitions;
-import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
+import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgents;
+import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentConfigCodec;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentConfigDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentCreateDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentUpdateDTO;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModelDefaultVariantResolver;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.platform.catalog.tool.TestRuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.pluginhost.service.PluginAgentDependencies;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionCreateDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionType;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionUpdateDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentModelKind;
 import fun.fengwk.kkstudio.share.runtime.HarnessExecutionSelectionDTO;
 import fun.fengwk.kkstudio.share.skill.SkillRefDTO;
@@ -55,24 +54,24 @@ import java.util.Map;
 import java.util.Set;
 
 /** Agent 定义服务的单元契约（仓库与引用解析以 mock 隔离）：字段与配置规范化、内置 Agent 规则、CAS 失败分类、完整性错误映射与删除前置检查。 */
-class AgentDefinitionServiceUnitTest {
+class AgentServiceUnitTest {
 
   private static final String EMPTY_CONFIG = "{\"tools\":[],\"skills\":[],\"subagents\":[]}";
 
   private final ObjectMapper objectMapper = JsonMapper.builder().build();
-  private AgentDefinitionRepository repository;
-  private AgentDefinitionReferenceResolver resolver;
+  private AgentRepository repository;
+  private AgentReferenceResolver resolver;
   private AgentModelRepository modelRepository;
   private AgentModelDefaultVariantResolver variants;
   private PluginAgentDependencies pluginAgentDependencies;
   private AgentReferenceCheck productReference;
   private AgentReferenceCheck otherProductReference;
-  private AgentDefinitionService service;
+  private AgentService service;
 
   @BeforeEach
   void setUp() {
-    repository = mock(AgentDefinitionRepository.class);
-    resolver = mock(AgentDefinitionReferenceResolver.class);
+    repository = mock(AgentRepository.class);
+    resolver = mock(AgentReferenceResolver.class);
     modelRepository = mock(AgentModelRepository.class);
     variants = mock(AgentModelDefaultVariantResolver.class);
     pluginAgentDependencies = mock(PluginAgentDependencies.class);
@@ -101,14 +100,14 @@ class AgentDefinitionServiceUnitTest {
         .when(fake)
         .validateSettings(any());
     service =
-        new AgentDefinitionService(
+        new AgentService(
             repository,
             resolver,
             new DriverRegistry(builtin, fake),
             new BuiltinAgentExecutionValidator(modelRepository, variants),
-            new AgentDefinitionConfigValidator(
+            new AgentConfigValidator(
                 TestRuntimeToolCatalogSource.of(HarnessCatalog.from(List.of()))),
-            new AgentDefinitionConfigCodec(objectMapper),
+            new AgentConfigCodec(objectMapper),
             new AgentEditableSupport(objectMapper),
             pluginAgentDependencies,
             List.of(productReference, otherProductReference));
@@ -117,32 +116,31 @@ class AgentDefinitionServiceUnitTest {
   /** 创建持久化规范化的能力列表与全局 model 名；更新保持名称身份并改写模型与 variant。 */
   @Test
   void persistsCanonicalConfigurationAndKeepsIdentity() throws Exception {
-    AgentDefinition created =
+    Agent created =
         createAndCapture(
             create(
                 "agent",
                 "model",
                 config(List.of(), List.of(skillRef("tools", "java"), skillRef("tools", "dev"))),
                 null));
-    AgentDefinitionConfigDTO stored =
-        objectMapper.readValue(created.configJson(), AgentDefinitionConfigDTO.class);
+    AgentConfigDTO stored = objectMapper.readValue(created.configJson(), AgentConfigDTO.class);
     assertEquals(List.of(skillRef("tools", "java"), skillRef("tools", "dev")), stored.getSkills());
-    assertEquals(AgentDefinitionType.USER, created.type());
+    assertEquals(AgentType.USER, created.type());
     assertEquals(ModelSelection.model("model", null), BuiltinExecution.model(created.execution()));
 
-    AgentDefinition current = definition();
+    Agent current = definition();
     when(resolver.requireAgent("agent")).thenReturn(current);
     when(resolver.requireAgentAndSubagentsForUpdate("agent", List.of())).thenReturn(current);
     when(repository.updateByName(any(), eq(0L))).thenReturn(true);
     when(repository.getByName("agent")).thenReturn(current);
-    AgentDefinitionUpdateDTO update = update("0");
+    AgentUpdateDTO update = update("0");
     update.setDescription("updated");
     update.setExecution(execution("vendor/other model", "quality"));
     service.updateAgent("agent", update);
 
-    ArgumentCaptor<AgentDefinition> captor = ArgumentCaptor.forClass(AgentDefinition.class);
+    ArgumentCaptor<Agent> captor = ArgumentCaptor.forClass(Agent.class);
     verify(repository).updateByName(captor.capture(), eq(0L));
-    AgentDefinition updated = captor.getValue();
+    Agent updated = captor.getValue();
     assertEquals("agent", updated.name());
     assertEquals("updated", updated.description());
     assertEquals(
@@ -205,9 +203,9 @@ class AgentDefinitionServiceUnitTest {
         DomainException.class,
         () -> service.validateImport("agent", create("agent", "model", null, null)));
 
-    AgentDefinitionCreateDTO longDescription = create("agent", "model", emptyConfig(), null);
+    AgentCreateDTO longDescription = create("agent", "model", emptyConfig(), null);
     longDescription.setDescription("d".repeat(4096));
-    AgentDefinition created = createAndCapture(longDescription);
+    Agent created = createAndCapture(longDescription);
     assertEquals("d".repeat(4096), created.description());
     assertNull(BuiltinExecution.model(created.execution()).variant());
   }
@@ -215,7 +213,7 @@ class AgentDefinitionServiceUnitTest {
   /** 非法 model 名、variant、组级 variant 或执行配置在写入前包装为校验错误；null 请求同样确定性拒绝。 */
   @Test
   void wrapsInvalidReferencesAsValidationErrors() {
-    AgentDefinitionCreateDTO badRef = create("agent", " model", emptyConfig(), null);
+    AgentCreateDTO badRef = create("agent", " model", emptyConfig(), null);
     assertThrows(DomainException.class, () -> service.createAgent(badRef));
     assertThrows(DomainException.class, () -> service.createAgent(null));
 
@@ -251,12 +249,12 @@ class AgentDefinitionServiceUnitTest {
     verify(resolver).requireReferencedLifecycles(List.of(skillRef), List.of());
     verify(resolver).requireSubagentsForCreate("agent", List.of());
 
-    AgentDefinition current = definition();
+    Agent current = definition();
     when(resolver.requireAgent("agent")).thenReturn(current);
     when(resolver.requireAgentAndSubagentsForUpdate("agent", List.of())).thenReturn(current);
     when(repository.updateByName(any(), eq(0L))).thenReturn(true);
     when(repository.getByName("agent")).thenReturn(current);
-    AgentDefinitionUpdateDTO update = update("0");
+    AgentUpdateDTO update = update("0");
     update.getConfig().setSkills(List.of(skillRef));
     service.updateAgent("agent", update);
     verify(resolver, times(2)).requireReferencedLifecycles(List.of(skillRef), List.of());
@@ -265,7 +263,7 @@ class AgentDefinitionServiceUnitTest {
   /** 仓库写入失败：重复为 409、完整性错误原样抛出，CAS 落空重读后为 404 或版本冲突。 */
   @Test
   void classifiesFailedRepositoryMutations() {
-    AgentDefinitionCreateDTO create = create("agent", "model", emptyConfig(), null);
+    AgentCreateDTO create = create("agent", "model", emptyConfig(), null);
     when(repository.create(any())).thenReturn(false);
     assertThrows(IllegalStateException.class, () -> service.createAgent(create));
     when(repository.create(any())).thenThrow(new DuplicateKeyException("duplicate"));
@@ -282,9 +280,8 @@ class AgentDefinitionServiceUnitTest {
         assertThrows(DataIntegrityViolationException.class, () -> service.createAgent(create)));
 
     assertThrows(DomainException.class, () -> service.updateAgent("agent", null));
-    assertThrows(
-        DomainException.class, () -> service.updateAgent("agent", new AgentDefinitionUpdateDTO()));
-    AgentDefinition current = definition();
+    assertThrows(DomainException.class, () -> service.updateAgent("agent", new AgentUpdateDTO()));
+    Agent current = definition();
     when(resolver.requireAgent("agent")).thenReturn(current);
     when(resolver.requireAgentAndSubagentsForUpdate("agent", List.of())).thenReturn(current);
     when(repository.updateByName(any(), eq(0L))).thenReturn(false);
@@ -318,7 +315,7 @@ class AgentDefinitionServiceUnitTest {
   /** 删除 CAS：落空后重读区分 404 与版本冲突，使用解析后的 expectedVersion；过期版本在 CAS 前拒绝。 */
   @Test
   void deleteUsesCasAndRereadsOnFailure() {
-    AgentDefinition current = definition().toBuilder().version(3L).build();
+    Agent current = definition().toBuilder().version(3L).build();
     when(resolver.requireAgentForUpdate("agent")).thenReturn(current);
     when(repository.deleteByName("agent", 3L)).thenReturn(false);
     when(repository.getByName("agent")).thenReturn(null);
@@ -353,13 +350,11 @@ class AgentDefinitionServiceUnitTest {
   /** 内置 Agent：名称保留不可同名创建、按类型受删除保护、允许未配置 execution 但拒绝无模型的 variant。 */
   @Test
   void builtinAgentsKeepSystemOwnedIdentity() {
-    AgentDefinitionCreateDTO reserved =
-        create(BuiltinAgentDefinitions.COMPACTION_NAME, "model", emptyConfig(), null);
+    AgentCreateDTO reserved = create(BuiltinAgents.COMPACTION_NAME, "model", emptyConfig(), null);
     assertThrows(DomainException.class, () -> service.createAgent(reserved));
     verify(repository, never()).create(any());
 
-    AgentDefinition builtin =
-        definition().toBuilder().type(AgentDefinitionType.BUILTIN).execution(null).build();
+    Agent builtin = definition().toBuilder().type(AgentType.BUILTIN).execution(null).build();
     when(resolver.requireAgentForUpdate("agent")).thenReturn(builtin);
     assertThrows(DomainException.class, () -> service.deleteAgent("agent", "0"));
     verify(repository, never()).deleteByName(any(), anyLong());
@@ -368,9 +363,9 @@ class AgentDefinitionServiceUnitTest {
     when(resolver.requireAgentAndSubagentsForUpdate("agent", List.of())).thenReturn(builtin);
     when(repository.updateByName(any(), eq(0L))).thenReturn(true);
     when(repository.getByName("agent")).thenReturn(builtin);
-    AgentDefinitionUpdateDTO unconfigured = update("0");
+    AgentUpdateDTO unconfigured = update("0");
     unconfigured.setExecution(null);
-    AgentDefinitionDTO dto = service.updateAgent("agent", unconfigured);
+    AgentDTO dto = service.updateAgent("agent", unconfigured);
     assertNull(dto.getExecution());
     verify(modelRepository, never()).getByNameForUpdate(any());
     verify(variants, never()).resolve(any(), any());
@@ -385,7 +380,7 @@ class AgentDefinitionServiceUnitTest {
   @Test
   void userAgentUpdateRequiresModel() {
     when(resolver.requireAgent("agent")).thenReturn(definition());
-    AgentDefinitionUpdateDTO update = update("0");
+    AgentUpdateDTO update = update("0");
     update.setExecution(null);
     assertThrows(DomainException.class, () -> service.updateAgent("agent", update));
     verify(modelRepository, never()).getByNameForUpdate(any());
@@ -395,7 +390,7 @@ class AgentDefinitionServiceUnitTest {
   /** DTO 投影包含完整的 builtin 设置；未配置 execution 时为 null。 */
   @Test
   void projectsDefinitionToDto() {
-    AgentDefinitionDTO dto = service.toDto(definition());
+    AgentDTO dto = service.toDto(definition());
     assertEquals("agent", dto.getName());
     assertEquals(execution("model", null), dto.getExecution());
     assertEquals("0", dto.getVersion());
@@ -405,13 +400,13 @@ class AgentDefinitionServiceUnitTest {
   /** 已安装的非 builtin driver 使用自己的设置，并完整往返，不读取模型目录。 */
   @Test
   void acceptsInstalledNonBuiltinDriver() {
-    AgentDefinitionCreateDTO create = create("agent", "model", emptyConfig(), null);
+    AgentCreateDTO create = create("agent", "model", emptyConfig(), null);
     HarnessExecutionSelectionDTO selection = new HarnessExecutionSelectionDTO();
     selection.setDriver("fake");
     selection.setSettings(Map.of("endpoint", "local"));
     create.setExecution(selection);
 
-    AgentDefinition stored = createAndCapture(create);
+    Agent stored = createAndCapture(create);
     assertEquals("fake", stored.execution().driver());
     assertEquals("{\"endpoint\":\"local\"}", stored.execution().settingsJson());
     assertEquals(selection, service.toDto(stored.toBuilder().version(0L).build()).getExecution());
@@ -422,7 +417,7 @@ class AgentDefinitionServiceUnitTest {
   /** 未安装 driver、非法 driver 名及各 driver 的非法设置都在写入前拒绝。 */
   @Test
   void rejectsUninstalledAndMalformedDrivers() {
-    AgentDefinitionCreateDTO create = create("agent", "model", emptyConfig(), null);
+    AgentCreateDTO create = create("agent", "model", emptyConfig(), null);
     HarnessExecutionSelectionDTO selection = new HarnessExecutionSelectionDTO();
     selection.setDriver("missing");
     selection.setSettings(Map.of("endpoint", "local"));
@@ -457,15 +452,15 @@ class AgentDefinitionServiceUnitTest {
   /** Builtin Variant 的目录列宽在写入和导入预检时均受约束。 */
   @Test
   void rejectsOversizedBuiltinVariant() {
-    AgentDefinitionCreateDTO create = create("agent", "model", emptyConfig(), "v".repeat(65));
+    AgentCreateDTO create = create("agent", "model", emptyConfig(), "v".repeat(65));
     assertThrows(DomainException.class, () -> service.createAgent(create));
     assertThrows(DomainException.class, () -> service.validateImport("agent", create));
     verify(repository, never()).create(any());
   }
 
-  private AgentDefinition createAndCapture(AgentDefinitionCreateDTO create) {
+  private Agent createAndCapture(AgentCreateDTO create) {
     when(repository.create(any())).thenReturn(true);
-    ArgumentCaptor<AgentDefinition> captor = ArgumentCaptor.forClass(AgentDefinition.class);
+    ArgumentCaptor<Agent> captor = ArgumentCaptor.forClass(Agent.class);
     when(repository.getByName(create.getName()))
         .thenAnswer(
             invocation -> {
@@ -476,10 +471,10 @@ class AgentDefinitionServiceUnitTest {
     return captor.getValue();
   }
 
-  private static AgentDefinition definition() {
-    return AgentDefinition.builder()
+  private static Agent definition() {
+    return Agent.builder()
         .name("agent")
-        .type(AgentDefinitionType.USER)
+        .type(AgentType.USER)
         .execution(BuiltinExecution.of(ModelSelection.model("model", null)))
         .configJson(EMPTY_CONFIG)
         .version(0L)
@@ -490,24 +485,24 @@ class AgentDefinitionServiceUnitTest {
     return AgentModel.builder().name(name).kind(kind).version(0L).build();
   }
 
-  private static AgentDefinitionCreateDTO create(
-      String name, String model, AgentDefinitionConfigDTO config, String variant) {
-    AgentDefinitionCreateDTO create = new AgentDefinitionCreateDTO();
+  private static AgentCreateDTO create(
+      String name, String model, AgentConfigDTO config, String variant) {
+    AgentCreateDTO create = new AgentCreateDTO();
     create.setName(name);
     create.setExecution(model == null ? null : execution(model, variant));
     create.setConfig(config);
     return create;
   }
 
-  private static AgentDefinitionUpdateDTO update(String version) {
-    AgentDefinitionUpdateDTO update = new AgentDefinitionUpdateDTO();
+  private static AgentUpdateDTO update(String version) {
+    AgentUpdateDTO update = new AgentUpdateDTO();
     update.setExecution(execution("model", null));
     update.setConfig(emptyConfig());
     update.setExpectedVersion(version);
     return update;
   }
 
-  private static AgentDefinitionConfigDTO emptyConfig() {
+  private static AgentConfigDTO emptyConfig() {
     return config(List.of(), List.of());
   }
 
@@ -521,8 +516,8 @@ class AgentDefinitionServiceUnitTest {
     return execution;
   }
 
-  private static AgentDefinitionConfigDTO config(List<String> tools, List<SkillRefDTO> skills) {
-    AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
+  private static AgentConfigDTO config(List<String> tools, List<SkillRefDTO> skills) {
+    AgentConfigDTO config = new AgentConfigDTO();
     config.setTools(tools);
     config.setSkills(skills);
     config.setSubagents(List.of());

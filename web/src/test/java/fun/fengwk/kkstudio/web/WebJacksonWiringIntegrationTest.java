@@ -103,15 +103,12 @@ class WebJacksonWiringIntegrationTest extends WebPostgresTestSupport {
   void pageTotalCountIsDecimalStringOnTheHttpWire() throws Exception {
     MvcResult result =
         mockMvc
-            .perform(get("/api/agents").param("pageNumber", "1").param("pageSize", "1"))
+            .perform(get("/api/models").param("pageNumber", "1").param("pageSize", "1"))
             .andExpect(status().isOk())
             .andReturn();
 
     JsonNode totalCount =
-        objectMapper
-            .readTree(result.getResponse().getContentAsString())
-            .path("data")
-            .path("totalCount");
+        objectMapper.readTree(result.getResponse().getContentAsString()).path("totalCount");
     assertTrue(totalCount.isString(), "totalCount must be serialized as a decimal string");
     assertTrue(totalCount.asText().matches("\\d+"), "totalCount must contain only digits");
   }

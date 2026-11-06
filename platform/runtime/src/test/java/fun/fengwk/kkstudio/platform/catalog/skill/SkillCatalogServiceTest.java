@@ -24,7 +24,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentRepository;
 import fun.fengwk.kkstudio.platform.catalog.skill.archive.SkillArchiveBuilder;
 import fun.fengwk.kkstudio.platform.catalog.skill.archive.SkillArchiveIndex;
 import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitException;
@@ -70,7 +70,7 @@ class SkillCatalogServiceTest {
   private static final String NEW_ARTIFACT_SHA = "b".repeat(64);
 
   private SkillPackageRepository packageRepository;
-  private AgentDefinitionRepository agentDefinitionRepository;
+  private AgentRepository agentRepository;
   private SkillGitRepository gitRepository;
   private SkillCatalogWrites writes;
   private StorageUploadService uploadService;
@@ -83,7 +83,7 @@ class SkillCatalogServiceTest {
   @BeforeEach
   void setUp() {
     packageRepository = mock(SkillPackageRepository.class);
-    agentDefinitionRepository = mock(AgentDefinitionRepository.class);
+    agentRepository = mock(AgentRepository.class);
     gitRepository = mock(SkillGitRepository.class);
     writes = mock(SkillCatalogWrites.class);
     uploadService = mock(StorageUploadService.class);
@@ -98,7 +98,7 @@ class SkillCatalogServiceTest {
     service =
         new SkillCatalogService(
             packageRepository,
-            agentDefinitionRepository,
+            agentRepository,
             gitRepository,
             new AgentEditableSupport(JsonMapper.builder().build()),
             writes,
@@ -309,7 +309,7 @@ class SkillCatalogServiceTest {
             HEAD,
             prepared.skills(),
             prepared.stagingUploadId());
-    when(agentDefinitionRepository.existsReferencingSkill(PACKAGE, "dev")).thenReturn(true);
+    when(agentRepository.existsReferencingSkill(PACKAGE, "dev")).thenReturn(true);
 
     assertThrows(DomainException.class, () -> service.publishPreparedGitImport(prepared));
     assertThrows(DomainException.class, () -> service.publishPreparedGitImport(differentUrl));
@@ -424,7 +424,7 @@ class SkillCatalogServiceTest {
   void deleteRejectsSkillsStillReferencedByAgents() {
     SkillPackage current = uploadPackage(1);
     when(packageRepository.lockPackage(PACKAGE)).thenReturn(current);
-    when(agentDefinitionRepository.existsReferencingSkill(PACKAGE, "dev")).thenReturn(true);
+    when(agentRepository.existsReferencingSkill(PACKAGE, "dev")).thenReturn(true);
 
     assertThrows(DomainException.class, () -> service.deletePackage(PACKAGE, "1"));
     verify(packageRepository, never()).deletePackage(anyString(), anyLong());

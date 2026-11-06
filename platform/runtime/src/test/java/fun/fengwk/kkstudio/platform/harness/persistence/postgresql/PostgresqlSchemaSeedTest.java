@@ -419,8 +419,7 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
     }
     try (Statement st = conn.createStatement();
         ResultSet rs =
-            st.executeQuery(
-                "select count(*) from agent where name = 'default-assistant'")) {
+            st.executeQuery("select count(*) from agent where name = 'default-assistant'")) {
       assertTrue(rs.next());
       assertEquals(1L, rs.getLong(1));
     }

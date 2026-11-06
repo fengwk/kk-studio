@@ -220,7 +220,7 @@ public class McpServerServiceTest extends PostgresSpringTestSupport {
             .findFirst()
             .orElseThrow()
             .name();
-    insertFakeAgentDefinitionReferencingTool(referencedName);
+    insertFakeAgentReferencingTool(referencedName);
 
     // 远端未提供 critical_tool：引用保护必须阻止整次替换
     fakeServer.clearTools();
@@ -235,7 +235,7 @@ public class McpServerServiceTest extends PostgresSpringTestSupport {
   }
 
   @Test
-  public void blocksServerDeleteWhenReferencedByAgentDefinition() {
+  public void blocksServerDeleteWhenReferencedByAgent() {
     // 意图：被 Agent 引用的工具所属 Server 拒绝删除；引用清理后删除成功并级联物理删除工具行
     fakeServer.addTool("critical_tool", "Critical", "{}");
     mcpServerService.createServer(
@@ -243,7 +243,7 @@ public class McpServerServiceTest extends PostgresSpringTestSupport {
     mcpServerService.discoverServer("delete_guard", "0");
 
     String referencedName = repository.listTools("delete_guard").get(0).name();
-    insertFakeAgentDefinitionReferencingTool(referencedName);
+    insertFakeAgentReferencingTool(referencedName);
 
     assertThrows(DomainException.class, () -> mcpServerService.deleteServer("delete_guard", "0"));
     assertEquals(1, repository.listTools("delete_guard").size());
@@ -297,7 +297,7 @@ public class McpServerServiceTest extends PostgresSpringTestSupport {
     return jdbc.queryForObject("select count(*) from mcp_server", Integer.class);
   }
 
-  private void insertFakeAgentDefinitionReferencingTool(String modelName) {
+  private void insertFakeAgentReferencingTool(String modelName) {
     jdbc.update(
         "insert into agent_provider (name, provider_type, config, connection_generation_id) values ('test_p_mcp', 'openai', '{}'::jsonb, '00000000-0000-0000-0000-000000000099'::uuid) on conflict do nothing");
     jdbc.update(

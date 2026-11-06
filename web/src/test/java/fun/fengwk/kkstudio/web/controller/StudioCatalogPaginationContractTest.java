@@ -19,7 +19,6 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import fun.fengwk.kkstudio.common.page.Page;
 import fun.fengwk.kkstudio.common.page.PageQuery;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionService;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerService;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModelService;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderService;
@@ -32,7 +31,6 @@ import java.util.List;
 /** Catalog 分页参数的显式 400 边界；不依赖全局 IllegalArgumentException 兜底。 */
 class StudioCatalogPaginationContractTest {
 
-  private AgentDefinitionService agentDefinitionService;
   private AgentModelService agentModelService;
   private AgentProviderService agentProviderService;
   private McpServerService mcpServerService;
@@ -40,13 +38,11 @@ class StudioCatalogPaginationContractTest {
 
   @BeforeEach
   void setUp() {
-    agentDefinitionService = mock(AgentDefinitionService.class);
     agentModelService = mock(AgentModelService.class);
     agentProviderService = mock(AgentProviderService.class);
     mcpServerService = mock(McpServerService.class);
     mockMvc =
         MockMvcBuilders.standaloneSetup(
-                new StudioAgentDefinitionController(agentDefinitionService),
                 new StudioAgentModelController(agentModelService),
                 new StudioAgentProviderController(agentProviderService),
                 new StudioMcpServerController(mcpServerService))
@@ -57,7 +53,6 @@ class StudioCatalogPaginationContractTest {
 
   @Test
   void rejectsOutOfRangePageNumberOnEveryCatalogEndpoint() throws Exception {
-    assertRejected("/api/agents", "pageNumber", "0");
     assertRejected("/api/models", "pageNumber", "0");
     assertRejected("/api/providers", "pageNumber", "0");
     assertRejected("/api/mcp-servers", "pageNumber", "0");
@@ -66,8 +61,6 @@ class StudioCatalogPaginationContractTest {
 
   @Test
   void rejectsOutOfRangePageSizeOnEveryCatalogEndpoint() throws Exception {
-    assertRejected("/api/agents", "pageSize", "0");
-    assertRejected("/api/agents", "pageSize", "1001");
     assertRejected("/api/models", "pageSize", "0");
     assertRejected("/api/models", "pageSize", "1001");
     assertRejected("/api/providers", "pageSize", "0");
@@ -80,7 +73,7 @@ class StudioCatalogPaginationContractTest {
   @Test
   void rejectsPageNumberBeyondIntegerRangeWithoutReachingService() throws Exception {
     mockMvc
-        .perform(get("/api/agents").param("pageNumber", "2147483648"))
+        .perform(get("/api/models").param("pageNumber", "2147483648"))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.status").value(400))
         .andExpect(jsonPath("$.code").value("validation"))
@@ -90,7 +83,7 @@ class StudioCatalogPaginationContractTest {
 
   @Test
   void maxPageNumberUsesSaturatedLongOffset() throws Exception {
-    when(agentDefinitionService.pageAgents(any()))
+    when(agentModelService.pageModels(any()))
         .thenAnswer(
             invocation -> {
               PageQuery query = invocation.getArgument(0);
@@ -99,20 +92,20 @@ class StudioCatalogPaginationContractTest {
 
     mockMvc
         .perform(
-            get("/api/agents")
+            get("/api/models")
                 .param("pageNumber", String.valueOf(Integer.MAX_VALUE))
                 .param("pageSize", String.valueOf(PageQuery.MAX_PAGE_SIZE)))
         .andExpect(status().isOk());
 
     ArgumentCaptor<PageQuery> query = ArgumentCaptor.forClass(PageQuery.class);
-    verify(agentDefinitionService).pageAgents(query.capture());
+    verify(agentModelService).pageModels(query.capture());
     assertEquals((Integer.MAX_VALUE - 1L) * PageQuery.MAX_PAGE_SIZE, query.getValue().getOffset());
   }
 
   @Test
   void rejectsNonNumericPageParameterAsBadRequest() throws Exception {
     mockMvc
-        .perform(get("/api/agents").param("pageSize", "invalid"))
+        .perform(get("/api/models").param("pageSize", "invalid"))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.status").value(400))
         .andExpect(jsonPath("$.code").value("validation"))
@@ -130,7 +123,6 @@ class StudioCatalogPaginationContractTest {
   }
 
   private void verifyNoServiceCalls() {
-    verifyNoInteractions(
-        agentDefinitionService, agentModelService, agentProviderService, mcpServerService);
+    verifyNoInteractions(agentModelService, agentProviderService, mcpServerService);
   }
 }

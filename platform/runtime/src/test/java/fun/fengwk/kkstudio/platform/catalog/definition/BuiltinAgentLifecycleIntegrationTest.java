@@ -10,18 +10,16 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
-import fun.fengwk.kkstudio.common.page.PageQuery;
-import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgentDefinitions;
 import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgentInitializer;
 import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgentPrompts;
-import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
+import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgents;
+import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentConfigCodec;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentConfigDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentCreateDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentUpdateDTO;
 import fun.fengwk.kkstudio.platform.error.CatalogVersions;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionCreateDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionType;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionUpdateDTO;
 
 import java.util.List;
 
@@ -30,30 +28,30 @@ import java.util.List;
  */
 public class BuiltinAgentLifecycleIntegrationTest extends PostgresSpringTestSupport {
 
-  private static final String COMPACTION = BuiltinAgentDefinitions.COMPACTION_NAME;
+  private static final String COMPACTION = BuiltinAgents.COMPACTION_NAME;
 
   @Autowired private BuiltinAgentInitializer initializer;
-  @Autowired private AgentDefinitionService definitionService;
-  @Autowired private AgentDefinitionRepository definitionRepository;
-  @Autowired private AgentDefinitionConfigCodec configCodec;
+  @Autowired private AgentService definitionService;
+  @Autowired private AgentRepository definitionRepository;
+  @Autowired private AgentConfigCodec configCodec;
 
   /** 首次初始化写入固定定义；重复启动是 no-op，版本不变。 */
   @Test
   void initializesCompactionIdempotentlyWithUnconfiguredExecution() {
     initializer.afterPropertiesSet();
-    AgentDefinition first = definitionRepository.getByName(COMPACTION);
+    Agent first = definitionRepository.getByName(COMPACTION);
     assertNotNull(first);
-    assertEquals(AgentDefinitionType.BUILTIN, first.type());
+    assertEquals(AgentType.BUILTIN, first.type());
     assertNull(first.execution());
     assertEquals(BuiltinAgentPrompts.compactionSummarizationSystemPrompt(), first.systemPrompt());
     assertEquals(0L, first.version());
 
     initializer.afterPropertiesSet();
-    AgentDefinition second = definitionRepository.getByName(COMPACTION);
+    Agent second = definitionRepository.getByName(COMPACTION);
     assertEquals(0L, second.version(), "重复初始化绝不能覆盖既有行");
 
-    AgentDefinitionDTO dto = findPage(COMPACTION);
-    assertEquals(AgentDefinitionType.BUILTIN, dto.getType());
+    AgentDTO dto = findAgent(COMPACTION);
+    assertEquals(AgentType.BUILTIN, dto.getType());
     assertNull(dto.getExecution());
   }
 
@@ -61,20 +59,20 @@ public class BuiltinAgentLifecycleIntegrationTest extends PostgresSpringTestSupp
   @Test
   void preservesUserEditsAcrossRestart() {
     initializer.afterPropertiesSet();
-    AgentDefinition current = definitionRepository.getByName(COMPACTION);
+    Agent current = definitionRepository.getByName(COMPACTION);
 
-    AgentDefinitionUpdateDTO update = new AgentDefinitionUpdateDTO();
+    AgentUpdateDTO update = new AgentUpdateDTO();
     update.setDescription("edited description");
     update.setSystemPrompt("custom summarization prompt");
     update.setExecution(null);
     update.setConfig(configCodec.decode(current.configJson()));
     update.setExpectedVersion(CatalogVersions.format(current.version()));
-    AgentDefinitionDTO updated = definitionService.updateAgent(COMPACTION, update);
+    AgentDTO updated = definitionService.updateAgent(COMPACTION, update);
     assertEquals("custom summarization prompt", updated.getSystemPrompt());
     assertNull(updated.getExecution());
 
     initializer.afterPropertiesSet();
-    AgentDefinition reloaded = definitionRepository.getByName(COMPACTION);
+    Agent reloaded = definitionRepository.getByName(COMPACTION);
     assertEquals("custom summarization prompt", reloaded.systemPrompt());
     assertEquals("edited description", reloaded.description());
   }
@@ -83,21 +81,21 @@ public class BuiltinAgentLifecycleIntegrationTest extends PostgresSpringTestSupp
   @Test
   void protectsBuiltinByTypeNotByName() {
     initializer.afterPropertiesSet();
-    AgentDefinition compaction = definitionRepository.getByName(COMPACTION);
+    Agent compaction = definitionRepository.getByName(COMPACTION);
     assertThrows(
         DomainException.class,
         () ->
             definitionService.deleteAgent(
                 COMPACTION, CatalogVersions.format(compaction.version())));
 
-    AgentDefinition synthetic =
-        AgentDefinition.builder()
+    Agent synthetic =
+        Agent.builder()
             .name("synthetic-builtin")
-            .type(AgentDefinitionType.BUILTIN)
+            .type(AgentType.BUILTIN)
             .configJson(configCodec.encode(emptyConfig()))
             .build();
     assertTrue(definitionRepository.create(synthetic));
-    AgentDefinition stored = definitionRepository.getByName("synthetic-builtin");
+    Agent stored = definitionRepository.getByName("synthetic-builtin");
     assertThrows(
         DomainException.class,
         () ->
@@ -109,7 +107,7 @@ public class BuiltinAgentLifecycleIntegrationTest extends PostgresSpringTestSupp
   @Test
   void rejectsUserCreationOfReservedName() {
     initializer.afterPropertiesSet();
-    AgentDefinitionCreateDTO create = new AgentDefinitionCreateDTO();
+    AgentCreateDTO create = new AgentCreateDTO();
     create.setName(COMPACTION);
     create.setExecution(null);
     create.setConfig(emptyConfig());
@@ -122,22 +120,22 @@ public class BuiltinAgentLifecycleIntegrationTest extends PostgresSpringTestSupp
     initializer.afterPropertiesSet();
     assertNull(definitionRepository.getByName(COMPACTION).execution());
 
-    AgentDefinitionCreateDTO user = new AgentDefinitionCreateDTO();
+    AgentCreateDTO user = new AgentCreateDTO();
     user.setName("user-agent-without-model");
     user.setExecution(null);
     user.setConfig(emptyConfig());
     assertThrows(DomainException.class, () -> definitionService.createAgent(user));
   }
 
-  private AgentDefinitionDTO findPage(String name) {
-    return definitionService.pageAgents(new PageQuery(1, 100)).getResults().stream()
+  private AgentDTO findAgent(String name) {
+    return definitionService.listAgents().stream()
         .filter(agent -> agent.getName().equals(name))
         .findFirst()
         .orElseThrow();
   }
 
-  private static AgentDefinitionConfigDTO emptyConfig() {
-    AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
+  private static AgentConfigDTO emptyConfig() {
+    AgentConfigDTO config = new AgentConfigDTO();
     config.setTools(List.of());
     config.setSkills(List.of());
     config.setSubagents(List.of());
