@@ -451,11 +451,18 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
           saved.contains("appended by playwright in monaco editor"),
           "saved file must contain appended text from Monaco UI: " + saved);
 
+      // 保存后的编辑器已无未保存修改：正常关闭必须直接成功，不等待原生对话框也不取消。
+      CloseResult savedClose = normalCloseStatus(environmentId, viewId, documentId, bindingEpoch);
+      assertTrue(
+          savedClose.status() == 200 || savedClose.status() == 204,
+          "normal close of the saved view must succeed: "
+              + savedClose.status()
+              + " "
+              + savedClose.body());
+
       browserDriver.proceed();
       browserDriver.await("done");
       browserDriver.finish();
-
-      closeView(environmentId, viewId, documentId, bindingEpoch);
     }
   }
 
