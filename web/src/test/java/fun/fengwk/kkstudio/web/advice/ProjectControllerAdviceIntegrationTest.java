@@ -59,7 +59,7 @@ class ProjectControllerAdviceIntegrationTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.type").value("about:blank"))
         .andExpect(jsonPath("$.status").value(400))
         .andExpect(jsonPath("$.code").value("validation"))
-        .andExpect(jsonPath("$.detail").value("projectId must be a canonical UUID"));
+        .andExpect(jsonPath("$.detail").value("projectId has an invalid value"));
   }
 
   @Test
