@@ -57,7 +57,7 @@ registerCase({
       JSON.stringify(chineseValidation),
     )
     assert(
-      chineseValidation.detail === 'limit has invalid value: abc',
+      chineseValidation.detail === 'limit has an invalid value',
       JSON.stringify(chineseValidation),
     )
     assert(
