@@ -28,7 +28,7 @@ export function Harness() {
                 chat={{
                   id, title: id, agentName: 'agent', yoloEnabled: false,
                   environmentName: null,
-                  version: '1', createTime: value, updateTime: value,
+                  version: '1', createdAt: value, updatedAt: value,
                 }}
                 agents={[]}
               />

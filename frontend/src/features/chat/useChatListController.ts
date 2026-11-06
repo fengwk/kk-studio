@@ -107,16 +107,23 @@ export function useChatListController(
   })
 
   const updateChatMutation = useInvalidateMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
       if (!editingChat) {
         throw new Error('No chat being edited')
       }
-      return chatService.updateChat(editingChat.id, {
+      const updated = await chatService.updateChat(editingChat.id, {
         title: title.trim(),
         agentName: selectedAgentName,
-        yoloEnabled,
         environmentName: selectedEnvironmentName ?? null,
         expectedVersion: editingChat.version,
+      })
+      if (yoloEnabled === editingChat.yoloEnabled) {
+        return updated
+      }
+      // YOLO 是独立子资源，跟随整体替换后的新版本单独提交。
+      return chatService.updateYolo(editingChat.id, {
+        yoloEnabled,
+        expectedVersion: updated.version,
       })
     },
     invalidateQueryKeys: [queryKeys.chats.list],

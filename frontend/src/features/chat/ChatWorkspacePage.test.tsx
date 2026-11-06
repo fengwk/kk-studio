@@ -198,8 +198,8 @@ beforeEach(() => {
     environmentName: null,
     yoloEnabled: false,
     version: '1',
-    createTime: 0,
-    updateTime: 0,
+    createdAt: 0,
+    updatedAt: 0,
   })
   vi.mocked(agentService.listAgents).mockResolvedValue({
     pageNumber: 1,
@@ -334,7 +334,7 @@ describe('ChatWorkspacePage', () => {
     const user = userEvent.setup()
     vi.mocked(chatService.getChat).mockResolvedValue({
       id: CHAT_ID, title: 'Workspace', agentName: 'assistant', environmentName: 'local-node',
-      yoloEnabled: false, version: '1', createTime: 0, updateTime: 0,
+      yoloEnabled: false, version: '1', createdAt: 0, updatedAt: 0,
     })
     vi.mocked(environmentService.listEnvironments).mockResolvedValue([{
       id: 'a1000000-0000-4000-8000-000000000001', name: 'local-node', ready: true,
@@ -543,8 +543,8 @@ describe('ChatWorkspacePage', () => {
       environmentName: null,
       yoloEnabled: false,
       version: '1',
-      createTime: 0,
-      updateTime: 0,
+      createdAt: 0,
+      updatedAt: 0,
     }))
 
     // chat-B 预先存好 grid-4 布局与焦点

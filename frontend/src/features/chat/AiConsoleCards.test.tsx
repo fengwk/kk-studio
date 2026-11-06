@@ -215,7 +215,7 @@ function chat() {
     yoloEnabled: false,
     environmentName: null,
     version: '1',
-    createTime: 0,
-    updateTime: 0,
+    createdAt: 0,
+    updatedAt: 0,
   } satisfies ChatDTO
 }
