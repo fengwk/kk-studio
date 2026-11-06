@@ -96,7 +96,7 @@ final class TsContractGenerator {
   /** 标量探针：Java 类型、已知探针值与对映的 TS 类型；构造时用真实 mapper 核验。 */
   private record ScalarSpec(Class<?> javaType, Object probe, String tsType) {}
 
-  private static final Instant INSTANT_PROBE = Instant.ofEpochSecond(1772366400L);
+  private static final Instant INSTANT_PROBE = Instant.ofEpochMilli(1772366400123L);
 
   private static final List<ScalarSpec> SCALARS =
       List.of(
@@ -373,8 +373,8 @@ final class TsContractGenerator {
       }
     }
     JsonNode instant = mapper.readTree(mapper.writeValueAsString(INSTANT_PROBE));
-    if (!instant.isNumber() || instant.asDouble() != 1772366400d) {
-      mismatches.add("Instant -> " + instant + ", expected epoch seconds number");
+    if (!instant.isIntegralNumber() || instant.longValue() != 1772366400123L) {
+      mismatches.add("Instant -> " + instant + ", expected epoch milliseconds integer");
     }
     if (!mismatches.isEmpty()) {
       throw new IllegalStateException(

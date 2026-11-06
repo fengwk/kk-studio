@@ -44,6 +44,7 @@ import fun.fengwk.kkstudio.share.catalog.AgentModelCreateDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentModelKind;
 import fun.fengwk.kkstudio.share.catalog.AgentModelVariantDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentProviderCreateDTO;
+import fun.fengwk.kkstudio.share.catalog.PromptCacheRetention;
 import fun.fengwk.kkstudio.share.environment.EnvironmentCreateDTO;
 import fun.fengwk.kkstudio.share.skill.SkillRefDTO;
 import fun.fengwk.kkstudio.web.controller.FakeStreamableHttpMcpServer;
@@ -958,8 +959,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
             .andReturn();
     assertFalse(output.getAll().contains(secret), "invalid input must not enter request logs");
     assertEquals(
-        "Failed to read request",
-        objectMapper.readTree(body(result)).path("errors").path("detail").asText());
+        "Failed to read request", objectMapper.readTree(body(result)).path("detail").asText());
     assertFalse(body(result).contains(secret));
   }
 
@@ -1150,9 +1150,9 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
             "credential",
             "sk-configsync-" + name,
             "modelCallTimeoutMillis",
-            120000L,
+            120000,
             "modelCallIdleTimeoutMillis",
-            30000L));
+            30000));
   }
 
   private void updateProviderPut(String name, String expectedVersion, AgentProviderCreateDTO source)
@@ -1163,8 +1163,8 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     update.put("providerType", source.getProviderType());
     update.put("baseUrl", source.getBaseUrl());
     update.put("credential", source.getCredential());
-    update.put("modelCallTimeoutMillis", source.getModelCallTimeoutMillis());
-    update.put("modelCallIdleTimeoutMillis", source.getModelCallIdleTimeoutMillis());
+    update.put("modelCallTimeoutMillis", source.getModelCallTimeoutMillis().intValue());
+    update.put("modelCallIdleTimeoutMillis", source.getModelCallIdleTimeoutMillis().intValue());
     update.put("expectedVersion", expectedVersion);
     putData("/api/providers/" + name, update);
   }
@@ -1374,6 +1374,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     for (String id : variantIds) {
       AgentModelVariantDTO variant = new AgentModelVariantDTO();
       variant.setId(id);
+      variant.setPromptCacheRetention(PromptCacheRetention.NONE);
       variants.add(variant);
     }
     config.setVariants(variants);

@@ -8,14 +8,13 @@ import {
   updateDownloadPercent,
 } from '@/features/environment/environment-utils'
 
-/** 服务端 Instant 的 wire 形态是 epoch 秒，可带小数。 */
-const EPOCH_SECONDS = 1784505610.25
+/** 服务端 Instant 的 wire 形态是 epoch 毫秒整数。 */
 const EPOCH_MILLIS = 1784505610250
 
 describe('formatTimestamp', () => {
-  // 测试意图：epoch 秒按本地 24 小时制渲染，缺值不渲染。
-  it('renders epoch seconds in local time and empty values as empty', () => {
-    expect(formatTimestamp(EPOCH_SECONDS, 'en-US')).toBe(
+  // 测试意图：epoch 毫秒按本地 24 小时制渲染，缺值不渲染。
+  it('renders epoch milliseconds in local time and empty values as empty', () => {
+    expect(formatTimestamp(EPOCH_MILLIS, 'en-US')).toBe(
       formatDateTime24(new Date(EPOCH_MILLIS), 'en-US'),
     )
     expect(formatTimestamp(null, 'en-US')).toBe('')

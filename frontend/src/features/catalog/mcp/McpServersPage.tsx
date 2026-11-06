@@ -419,7 +419,7 @@ export function McpServersPage() {
               onClick={handleOpenCreate}
             />
           {servers.map((server: McpServerSummaryDTO) => {
-            const updateTime = formatDateTime24(new Date(server.updatedAt * 1000), locale)
+            const updateTime = formatDateTime24(new Date(server.updatedAt), locale)
 
             const statusLabel =
               server.discoveryStatus === 'AVAILABLE'

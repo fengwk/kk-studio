@@ -138,7 +138,7 @@ export function SkillPackageDetailModal({
                 </div>
                 <div>
                   <dt>{t('ai.skillPackages.publishedAt')}</dt>
-                  <dd>{formatDateTime24(new Date(detail.publishedAt * 1000), locale)}</dd>
+                  <dd>{formatDateTime24(new Date(detail.publishedAt), locale)}</dd>
                 </div>
                 <div>
                   <dt>{t('ai.skillPackages.skillsCount')}</dt>
