@@ -270,11 +270,11 @@ registerCase({
     assert(environmentId, 'created environment must have id')
     assert(typeof token === 'string' && token.length > 0, 'create must return a registration token')
     let version = String(created.version)
-    const cardPath = `/api/platform/environments/${encodeURIComponent(environmentId)}`
+    const environmentPath = `/api/platform/environments/${encodeURIComponent(environmentId)}`
     const config = linuxInstallConfig()
 
     try {
-      const { json: putJson } = await ctx.call('PUT', `${cardPath}/install-settings`, {
+      const { json: putJson } = await ctx.call('PUT', `${environmentPath}/install-settings`, {
         expectedVersion: version,
         installConfig: config,
       })
@@ -285,12 +285,12 @@ registerCase({
       version = String(saved.version)
 
       await expectHttpError(
-        () => ctx.call('POST', `${cardPath}/install-codes`, { expectedVersion: '999999' }),
+        () => ctx.call('POST', `${environmentPath}/install-codes`, { expectedVersion: '999999' }),
         { status: 409 },
       )
 
       const issuedAtMs = Date.now()
-      const { json: codeJson, headers: codeHeaders } = await ctx.call('POST', `${cardPath}/install-codes`, {
+      const { json: codeJson, headers: codeHeaders } = await ctx.call('POST', `${environmentPath}/install-codes`, {
         expectedVersion: version,
       })
       assertNoStore(codeHeaders, 'install code')
@@ -304,7 +304,7 @@ registerCase({
       assert(typeof code === 'string' && code.length > 0, 'install code must be non-empty text')
       assertExpiresNearFiveMinutes(issued.expiresAt, issuedAtMs)
 
-      const { json: afterIssueJson } = await ctx.call('GET', cardPath)
+      const { json: afterIssueJson } = await ctx.call('GET', environmentPath)
       const afterIssue = afterIssueJson
       assert(String(afterIssue.version) === version, 'issuing a code must not advance version')
       assertInstallConfig(afterIssue.installConfig)
@@ -315,7 +315,7 @@ registerCase({
 
       const { json: script, headers: scriptHeaders } = await downloadInstallationScript(
         ctx,
-        `${cardPath}/install-script?code=${encodeURIComponent(code)}`,
+        `${environmentPath}/install-script?code=${encodeURIComponent(code)}`,
       )
       assert(typeof script === 'string', 'install download must be text, not a JSON envelope')
       assert(
@@ -333,7 +333,7 @@ registerCase({
       )
       const downloadedToken = assertInstallScript(script, { previousTokens: [token], config })
       const checkRedemption = async () => {
-        const { json } = await ctx.call('GET', cardPath)
+        const { json } = await ctx.call('GET', environmentPath)
         const detail = json
         assert(BigInt(detail.version) === BigInt(version) + 1n, 'redemption must advance version once')
         assertInstallConfig(detail.installConfig)
@@ -341,19 +341,19 @@ registerCase({
         version = String(detail.version)
       }
       await checkRedemption()
-      await expectStatus(() => downloadInstallationScript(ctx, `${cardPath}/install-script?code=${encodeURIComponent(code)}`), 400)
+      await expectStatus(() => downloadInstallationScript(ctx, `${environmentPath}/install-script?code=${encodeURIComponent(code)}`), 400)
 
-      await expectStatus(() => downloadInstallationScript(ctx, `${cardPath}/install-script`), 400)
+      await expectStatus(() => downloadInstallationScript(ctx, `${environmentPath}/install-script`), 400)
       await expectStatus(
         () => downloadInstallationScript(
           ctx,
-          `${cardPath}/install-script?code=${encodeURIComponent(`${code}x`)}`,
+          `${environmentPath}/install-script?code=${encodeURIComponent(`${code}x`)}`,
         ),
         400,
       )
 
       const issueCode = async () => {
-        const { json, headers } = await ctx.call('POST', `${cardPath}/install-codes`, { expectedVersion: version })
+        const { json, headers } = await ctx.call('POST', `${environmentPath}/install-codes`, { expectedVersion: version })
         assertNoStore(headers, 'install code')
         const issued = json
         assert(typeof issued.code === 'string' && issued.code.length > 0, 'install code must be non-empty')
@@ -363,11 +363,11 @@ registerCase({
       const replacedCode = await issueCode()
       const pendingCode = await issueCode()
       assert(pendingCode !== replacedCode, 'reissue must replace the pending code')
-      await expectStatus(() => downloadInstallationScript(ctx, `${cardPath}/install-script?code=${encodeURIComponent(replacedCode)}`), 400)
+      await expectStatus(() => downloadInstallationScript(ctx, `${environmentPath}/install-script?code=${encodeURIComponent(replacedCode)}`), 400)
 
       const { json: rotatedJson, headers: rotatedHeaders } = await ctx.call(
         'POST',
-        `${cardPath}/rotate-token`,
+        `${environmentPath}/rotate-token`,
         { expectedVersion: version },
       )
       assertNoStore(rotatedHeaders, 'registration token rotation')
@@ -380,13 +380,13 @@ registerCase({
       assertInstallConfig(rotated.installConfig)
 
       await expectStatus(
-        () => downloadInstallationScript(ctx, `${cardPath}/install-script?code=${encodeURIComponent(pendingCode)}`),
+        () => downloadInstallationScript(ctx, `${environmentPath}/install-script?code=${encodeURIComponent(pendingCode)}`),
         400,
       )
 
       const { json: refreshedJson, headers: refreshedHeaders } = await ctx.call(
         'POST',
-        `${cardPath}/install-codes`,
+        `${environmentPath}/install-codes`,
         { expectedVersion: version },
       )
       assertNoStore(refreshedHeaders, 'refreshed install code')
@@ -397,7 +397,7 @@ registerCase({
 
       const { json: refreshedScript, headers: refreshedScriptHeaders } = await downloadInstallationScript(
         ctx,
-        `${cardPath}/install-script?code=${encodeURIComponent(refreshedCode)}`,
+        `${environmentPath}/install-script?code=${encodeURIComponent(refreshedCode)}`,
       )
       assertNoStore(refreshedScriptHeaders, 'refreshed install download')
       assert(
@@ -435,11 +435,11 @@ registerCase({
         { status: 400 },
       )
     } finally {
-      const { json } = await ctx.call('GET', cardPath)
+      const { json } = await ctx.call('GET', environmentPath)
       const current = json
       await ctx.call(
         'DELETE',
-        `${cardPath}?expectedVersion=${encodeURIComponent(String(current.version))}`,
+        `${environmentPath}?expectedVersion=${encodeURIComponent(String(current.version))}`,
       )
     }
   },

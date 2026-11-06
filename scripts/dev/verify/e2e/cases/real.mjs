@@ -1764,7 +1764,7 @@ registerCase({
     assertExactFields(match, [
       'id', 'name', 'status', 'ready', 'statusExpiresAt', 'capabilities', 'version',
       'createdAt', 'updatedAt', ...optionalFields.filter((key) => Object.hasOwn(match, key)),
-    ], 'environment card')
+    ], 'environment')
     assert(match.ready === true, safeDiagnosticJson(match))
     ctx.vars.daemonEnvironment = match
   },
