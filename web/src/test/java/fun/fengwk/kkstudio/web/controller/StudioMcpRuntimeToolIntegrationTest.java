@@ -166,15 +166,15 @@ public class StudioMcpRuntimeToolIntegrationTest extends WebPostgresTestSupport 
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(createMcp)))
         .andExpect(status().isCreated())
-        .andExpect(jsonPath("$.data.name").value(serverName))
-        .andExpect(jsonPath("$.data.version").value("0"))
-        .andExpect(jsonPath("$.data.discoveryStatus").value("UNVERIFIED"));
+        .andExpect(jsonPath("$.name").value(serverName))
+        .andExpect(jsonPath("$.version").value("0"))
+        .andExpect(jsonPath("$.discoveryStatus").value("UNVERIFIED"));
 
     mockMvc
         .perform(post("/api/mcp-servers/{name}/discover", serverName).param("expectedVersion", "0"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.discoveryStatus").value("AVAILABLE"))
-        .andExpect(jsonPath("$.data.toolCount").value(1));
+        .andExpect(jsonPath("$.discoveryStatus").value("AVAILABLE"))
+        .andExpect(jsonPath("$.toolCount").value(1));
 
     // 从数据库中查询已持久化的动态工具行；其模型可见 name 就是唯一 Agent 侧身份与主键
     List<McpTool> persistedTools = mcpServerRepository.listTools(serverName);
@@ -191,11 +191,10 @@ public class StudioMcpRuntimeToolIntegrationTest extends WebPostgresTestSupport 
     mockMvc
         .perform(get("/api/tools"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data[?(@.name == '" + modelName + "')].name").value(modelName))
-        .andExpect(
-            jsonPath("$.data[?(@.name == '" + modelName + "')].description").value("Echo text"))
-        .andExpect(jsonPath("$.data[?(@.name == '" + modelName + "')].id").doesNotExist())
-        .andExpect(jsonPath("$.data[?(@.name == '" + modelName + "')].version").doesNotExist());
+        .andExpect(jsonPath("$[?(@.name == '" + modelName + "')].name").value(modelName))
+        .andExpect(jsonPath("$[?(@.name == '" + modelName + "')].description").value("Echo text"))
+        .andExpect(jsonPath("$[?(@.name == '" + modelName + "')].id").doesNotExist())
+        .andExpect(jsonPath("$[?(@.name == '" + modelName + "')].version").doesNotExist());
 
     // 4. 创建 Provider / Model / Agent catalog 事实，证明 Agent 定义校验器接受该 MCP 工具
     String suffix = Long.toString(System.nanoTime());
@@ -219,7 +218,7 @@ public class StudioMcpRuntimeToolIntegrationTest extends WebPostgresTestSupport 
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(providerBody.toString()))
         .andExpect(status().isCreated())
-        .andExpect(jsonPath("$.data.name").value(providerName));
+        .andExpect(jsonPath("$.name").value(providerName));
 
     AgentModelCreateDTO modelDto = new AgentModelCreateDTO();
     modelDto.setKind(AgentModelKind.MODEL);
@@ -233,7 +232,7 @@ public class StudioMcpRuntimeToolIntegrationTest extends WebPostgresTestSupport 
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(modelDto)))
         .andExpect(status().isCreated())
-        .andExpect(jsonPath("$.data.name").value(configuredModelName));
+        .andExpect(jsonPath("$.name").value(configuredModelName));
 
     // 4.1 负向测试：证明未知工具名会被校验器确定性拒绝
     AgentDefinitionConfigDTO invalidConfig = new AgentDefinitionConfigDTO();
@@ -272,8 +271,8 @@ public class StudioMcpRuntimeToolIntegrationTest extends WebPostgresTestSupport 
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(agentDto)))
         .andExpect(status().isCreated())
-        .andExpect(jsonPath("$.data.name").value(agentName))
-        .andExpect(jsonPath("$.data.config.tools[0]").value(modelName));
+        .andExpect(jsonPath("$.name").value(agentName))
+        .andExpect(jsonPath("$.config.tools[0]").value(modelName));
 
     // 5. 验证 Spring 装配的 DatabaseTurnResolver 规划该动态贡献为冻结的 ToolBinding
     Instant now = Instant.now().truncatedTo(ChronoUnit.MILLIS);

@@ -87,18 +87,18 @@ class StudioSkillCatalogControllerTest extends WebPostgresTestSupport {
         mockMvc
             .perform(createRequest(name, git.url()))
             .andExpect(status().isCreated())
-            .andExpect(jsonPath("$.data.packageName").value(name))
-            .andExpect(jsonPath("$.data.packageVersion").value(firstCommit))
-            .andExpect(jsonPath("$.data.source").value("GIT"))
-            .andExpect(jsonPath("$.data.git.repositoryUrl").value(git.url()))
-            .andExpect(jsonPath("$.data.git.branch").value("main"))
-            .andExpect(jsonPath("$.data.git.hasToken").value(false))
-            .andExpect(jsonPath("$.data.headCommit").value(firstCommit))
-            .andExpect(jsonPath("$.data.headCheckError").value(nullValue()))
-            .andExpect(jsonPath("$.data.updateAvailable").value(false))
-            .andExpect(jsonPath("$.data.skills[0].name").value("dev"))
-            .andExpect(jsonPath("$.data.skills[0].description").value("开发者技能包含开发规范"))
-            .andExpect(jsonPath("$.data.version").value("0"))
+            .andExpect(jsonPath("$.packageName").value(name))
+            .andExpect(jsonPath("$.packageVersion").value(firstCommit))
+            .andExpect(jsonPath("$.source").value("GIT"))
+            .andExpect(jsonPath("$.git.repositoryUrl").value(git.url()))
+            .andExpect(jsonPath("$.git.branch").value("main"))
+            .andExpect(jsonPath("$.git.hasToken").value(false))
+            .andExpect(jsonPath("$.headCommit").value(firstCommit))
+            .andExpect(jsonPath("$.headCheckError").value(nullValue()))
+            .andExpect(jsonPath("$.updateAvailable").value(false))
+            .andExpect(jsonPath("$.skills[0].name").value("dev"))
+            .andExpect(jsonPath("$.skills[0].description").value("开发者技能包含开发规范"))
+            .andExpect(jsonPath("$.version").value("0"))
             .andReturn();
     assertEquals(firstCommit, data(createResult).path("packageVersion").asText());
 
@@ -107,15 +107,15 @@ class StudioSkillCatalogControllerTest extends WebPostgresTestSupport {
     mockMvc
         .perform(get("/api/skill-packages/{name}", name))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.packageVersion").value(firstCommit))
-        .andExpect(jsonPath("$.data.version").value("0"));
+        .andExpect(jsonPath("$.packageVersion").value(firstCommit))
+        .andExpect(jsonPath("$.version").value("0"));
 
     // HEAD 未变时检查是只读操作，不推进 version。
     mockMvc
         .perform(checkRequest(name, "0"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.headCommit").value(firstCommit))
-        .andExpect(jsonPath("$.data.version").value("0"));
+        .andExpect(jsonPath("$.headCommit").value(firstCommit))
+        .andExpect(jsonPath("$.version").value("0"));
 
     // 编辑：只有可编辑字段变化，version 前进。
     SkillPackageEditDTO edit = new SkillPackageEditDTO();
@@ -128,10 +128,10 @@ class StudioSkillCatalogControllerTest extends WebPostgresTestSupport {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(edit)))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.description").value("updated description"))
-        .andExpect(jsonPath("$.data.git.branch").value("release"))
-        .andExpect(jsonPath("$.data.packageVersion").value(firstCommit))
-        .andExpect(jsonPath("$.data.version").value("1"));
+        .andExpect(jsonPath("$.description").value("updated description"))
+        .andExpect(jsonPath("$.git.branch").value("release"))
+        .andExpect(jsonPath("$.packageVersion").value(firstCommit))
+        .andExpect(jsonPath("$.version").value("1"));
 
     // branch 前进：检查只更新观察值，当前版本与清单保持原样。
     String secondCommit =
@@ -139,44 +139,44 @@ class StudioSkillCatalogControllerTest extends WebPostgresTestSupport {
     mockMvc
         .perform(checkRequest(name, "1"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.headCommit").value(secondCommit))
-        .andExpect(jsonPath("$.data.packageVersion").value(firstCommit))
-        .andExpect(jsonPath("$.data.updateAvailable").value(true))
-        .andExpect(jsonPath("$.data.skills.length()").value(1))
-        .andExpect(jsonPath("$.data.version").value("1"));
+        .andExpect(jsonPath("$.headCommit").value(secondCommit))
+        .andExpect(jsonPath("$.packageVersion").value(firstCommit))
+        .andExpect(jsonPath("$.updateAvailable").value(true))
+        .andExpect(jsonPath("$.skills.length()").value(1))
+        .andExpect(jsonPath("$.version").value("1"));
 
     // 发布卡片展示过的 exact commit：版本号与清单在同一次 CAS 中切换。
     mockMvc
         .perform(publishRequest(name, "1", secondCommit))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.packageVersion").value(secondCommit))
-        .andExpect(jsonPath("$.data.headCommit").value(secondCommit))
-        .andExpect(jsonPath("$.data.updateAvailable").value(false))
-        .andExpect(jsonPath("$.data.skills.length()").value(2))
-        .andExpect(jsonPath("$.data.version").value("2"));
+        .andExpect(jsonPath("$.packageVersion").value(secondCommit))
+        .andExpect(jsonPath("$.headCommit").value(secondCommit))
+        .andExpect(jsonPath("$.updateAvailable").value(false))
+        .andExpect(jsonPath("$.skills.length()").value(2))
+        .andExpect(jsonPath("$.version").value("2"));
 
     // 文件清单只来自服务端归档索引，按路径升序返回 path 与解压后大小。
     mockMvc
         .perform(get("/api/skill-packages/{name}/files", name))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.length()").value(2))
-        .andExpect(jsonPath("$.data[0].path").value("dev/SKILL.md"))
-        .andExpect(jsonPath("$.data[0].size").isString())
-        .andExpect(jsonPath("$.data[1].path").value("review/SKILL.md"));
+        .andExpect(jsonPath("$.length()").value(2))
+        .andExpect(jsonPath("$[0].path").value("dev/SKILL.md"))
+        .andExpect(jsonPath("$[0].size").isString())
+        .andExpect(jsonPath("$[1].path").value("review/SKILL.md"));
 
     // 归档下载返回预签名 GET 与摘要。
     mockMvc
         .perform(post("/api/skill-packages/{name}/archive-url", name))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.filename").value(name + "-" + secondCommit + ".zip"))
-        .andExpect(jsonPath("$.data.sha256").isNotEmpty())
-        .andExpect(jsonPath("$.data.download.url").isNotEmpty());
+        .andExpect(jsonPath("$.filename").value(name + "-" + secondCommit + ".zip"))
+        .andExpect(jsonPath("$.sha256").isNotEmpty())
+        .andExpect(jsonPath("$.download.url").isNotEmpty());
 
     // 环境同步状态按环境投影，新建包尚未安装。
     mockMvc
         .perform(get("/api/skill-packages/{name}/environments", name))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data").isArray());
+        .andExpect(jsonPath("$").isArray());
 
     // 陈旧卡片的删除必须冲突，命中当前 version 才删除。
     mockMvc
@@ -204,9 +204,9 @@ class StudioSkillCatalogControllerTest extends WebPostgresTestSupport {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(edit)))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.description").value("description only"))
-        .andExpect(jsonPath("$.data.git.branch").value("main"))
-        .andExpect(jsonPath("$.data.version").value("1"));
+        .andExpect(jsonPath("$.description").value("description only"))
+        .andExpect(jsonPath("$.git.branch").value("main"))
+        .andExpect(jsonPath("$.version").value("1"));
 
     mockMvc
         .perform(get("/api/skill-packages/{name}/files", packageName("missing")))
@@ -270,8 +270,8 @@ class StudioSkillCatalogControllerTest extends WebPostgresTestSupport {
     mockMvc
         .perform(checkRequest(name, "0"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.headCommit").value(observed))
-        .andExpect(jsonPath("$.data.version").value("0"));
+        .andExpect(jsonPath("$.headCommit").value(observed))
+        .andExpect(jsonPath("$.version").value("0"));
     String advanced =
         git.commit(Map.of("dev/SKILL.md", DEV_SKILL_MD, "review/SKILL.md", REVIEW_SKILL_MD));
 
@@ -280,8 +280,8 @@ class StudioSkillCatalogControllerTest extends WebPostgresTestSupport {
     mockMvc
         .perform(publishRequest(name, "0", observed))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.packageVersion").value(observed))
-        .andExpect(jsonPath("$.data.version").value("1"));
+        .andExpect(jsonPath("$.packageVersion").value(observed))
+        .andExpect(jsonPath("$.version").value("1"));
   }
 
   /** 测试意图：仍被 Agent SkillRef 引用的 Package 不能删除，引用保护返回 409 且行保持原状。 */
@@ -298,8 +298,8 @@ class StudioSkillCatalogControllerTest extends WebPostgresTestSupport {
     mockMvc
         .perform(get("/api/skill-packages/{name}", name))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.version").value("0"))
-        .andExpect(jsonPath("$.data.packageVersion").value(git.firstCommit()));
+        .andExpect(jsonPath("$.version").value("0"))
+        .andExpect(jsonPath("$.packageVersion").value(git.firstCommit()));
   }
 
   /** 测试意图：Skill 在清单中消失但仍被 Agent 引用时，发布也必须拒绝。 */
@@ -315,14 +315,14 @@ class StudioSkillCatalogControllerTest extends WebPostgresTestSupport {
     mockMvc
         .perform(checkRequest(name, "0"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.headCommit").value(removingCommit));
+        .andExpect(jsonPath("$.headCommit").value(removingCommit));
     mockMvc.perform(publishRequest(name, "0", removingCommit)).andExpect(status().isConflict());
     mockMvc
         .perform(get("/api/skill-packages/{name}", name))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.packageVersion").value(firstCommit))
-        .andExpect(jsonPath("$.data.skills[0].name").value("dev"))
-        .andExpect(jsonPath("$.data.version").value("0"));
+        .andExpect(jsonPath("$.packageVersion").value(firstCommit))
+        .andExpect(jsonPath("$.skills[0].name").value("dev"))
+        .andExpect(jsonPath("$.version").value("0"));
   }
 
   /** 测试意图：不存在环境的重新同步请求返回 404，而不是静默成功。 */
@@ -416,7 +416,7 @@ class StudioSkillCatalogControllerTest extends WebPostgresTestSupport {
 
   private JsonNode data(MvcResult result) throws Exception {
     String body = result.getResponse().getContentAsString(StandardCharsets.UTF_8);
-    return objectMapper.readTree(body).path("data");
+    return objectMapper.readTree(body);
   }
 
   /** 测试临时目录中的技能仓库：每个测试独立，{@code main} 与 {@code release} 同步推进。 */
