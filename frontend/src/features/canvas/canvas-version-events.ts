@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { useResourceSync } from '@/shared/app-events/useResourceSync'
 import type { CanvasRevision } from '@/shared/api/contracts/base'
-import type { CanvasRevisionEventDTO } from '@/shared/api/contracts/studio'
+import type { CanvasRevisionEventDTO } from '@/shared/api/contracts/canvas'
 import { compareCanvasRevisions } from '@/shared/lib/canvas-version'
 
 export interface CanvasVersionEventsOptions {
