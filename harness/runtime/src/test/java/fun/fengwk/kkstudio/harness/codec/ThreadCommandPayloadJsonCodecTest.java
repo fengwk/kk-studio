@@ -319,7 +319,21 @@ class ThreadCommandPayloadJsonCodecTest {
             "{" + id21 + "," + kind + "," + id7 + "," + msg + ",\"extra\":1}",
             "{" + id21 + ",\"kind\":\"BOGUS\"," + id7 + "," + msg + "}",
             "{\"notificationId\":\"not-a-uuid\"," + kind + "," + id7 + "," + msg + "}",
+            "{\"notificationId\":\"00000000-0000-0000-0000-00000000000F\","
+                + kind
+                + ","
+                + id7
+                + ","
+                + msg
+                + "}",
             "{" + id21 + "," + kind + ",\"sourceThreadId\":\"not-a-uuid\"," + msg + "}",
+            "{"
+                + id21
+                + ","
+                + kind
+                + ",\"sourceThreadId\":\"00000000-0000-0000-0000-00000000000A\","
+                + msg
+                + "}",
             "{" + id21 + "," + kind + "," + id7 + ",\"message\":5}",
             "{\"notificationId\":5," + kind + "," + id7 + "," + msg + "}",
             "{" + id21 + ",\"kind\":5," + id7 + "," + msg + "}")) {

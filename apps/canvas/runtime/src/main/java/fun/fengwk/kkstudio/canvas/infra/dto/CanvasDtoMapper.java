@@ -250,34 +250,42 @@ public class CanvasDtoMapper {
   private CanvasCommand toCommand(CanvasCommandDTO command) {
     return switch (command) {
       case CanvasCommandDTO.CreateNode value -> new CanvasCommand.CreateNode(
-          value.nodeId(),
+          requireCommandId(value.nodeId(), "nodeId"),
           value.name(),
           toTransform(value.transform()),
           toResourceInputs(value.resources()));
       case CanvasCommandDTO.RenameNode value -> new CanvasCommand.RenameNode(
-          value.nodeId(), value.expectedName(), value.name());
+          requireCommandId(value.nodeId(), "nodeId"), value.expectedName(), value.name());
       case CanvasCommandDTO.SetNodeResources value -> new CanvasCommand.SetNodeResources(
-          value.nodeId(), value.expectedResourceIds(), toResourceInputs(value.resources()));
+          requireCommandId(value.nodeId(), "nodeId"),
+          value.expectedResourceIds(),
+          toResourceInputs(value.resources()));
       case CanvasCommandDTO.SetNodeFunction value -> new CanvasCommand.SetNodeFunction(
-          value.nodeId(), toFunction(value.expectedFunction()), toFunction(value.function()));
+          requireCommandId(value.nodeId(), "nodeId"),
+          toFunction(value.expectedFunction()),
+          toFunction(value.function()));
       case CanvasCommandDTO.SetNodeGroup value -> new CanvasCommand.SetNodeGroup(
-          value.nodeId(), value.expectedGroupId(), value.groupId());
+          requireCommandId(value.nodeId(), "nodeId"), value.expectedGroupId(), value.groupId());
       case CanvasCommandDTO.DeleteNode value -> new CanvasCommand.DeleteNode(
-          value.nodeId(), value.expectedResourceIds(), toFunction(value.expectedFunction()));
+          requireCommandId(value.nodeId(), "nodeId"),
+          value.expectedResourceIds(),
+          toFunction(value.expectedFunction()));
       case CanvasCommandDTO.UpdateNodeTransform value -> new CanvasCommand.UpdateNodeTransform(
-          value.nodeId(),
+          requireCommandId(value.nodeId(), "nodeId"),
           toTransform(value.transform()),
           toNullableTransform(value.expectedTransform()));
       case CanvasCommandDTO.CreateGroup value -> new CanvasCommand.CreateGroup(
-          value.groupId(), value.title(), toTransform(value.transform()));
+          requireCommandId(value.groupId(), "groupId"),
+          value.title(),
+          toTransform(value.transform()));
       case CanvasCommandDTO.RenameGroup value -> new CanvasCommand.RenameGroup(
-          value.groupId(), value.expectedTitle(), value.title());
+          requireCommandId(value.groupId(), "groupId"), value.expectedTitle(), value.title());
       case CanvasCommandDTO.UpdateGroupTransform value -> new CanvasCommand.UpdateGroupTransform(
-          value.groupId(),
+          requireCommandId(value.groupId(), "groupId"),
           toTransform(value.transform()),
           toNullableTransform(value.expectedTransform()));
       case CanvasCommandDTO.DeleteGroup value -> new CanvasCommand.DeleteGroup(
-          value.groupId(), value.expectedMemberNodeIds());
+          requireCommandId(value.groupId(), "groupId"), value.expectedMemberNodeIds());
     };
   }
 
@@ -347,7 +355,8 @@ public class CanvasDtoMapper {
 
   private static CanvasResourceInput toResourceInput(CanvasResourceInputDTO input) {
     return switch (input) {
-      case CanvasResourceInputDTO.Keep keep -> new CanvasResourceInput.Keep(keep.resourceId());
+      case CanvasResourceInputDTO.Keep keep -> new CanvasResourceInput.Keep(
+          requireCommandId(keep.resourceId(), "resourceId"));
       case CanvasResourceInputDTO.Text text -> {
         if (text.textContent() == null) {
           throw DomainException.validation("textContent", "textContent must not be null");
@@ -355,7 +364,7 @@ public class CanvasDtoMapper {
         yield new CanvasResourceInput.Text(text.name(), text.textContent());
       }
       case CanvasResourceInputDTO.Blob blob -> new CanvasResourceInput.Blob(
-          blob.name(), blob.blobId());
+          blob.name(), requireCommandId(blob.blobId(), "blobId"));
     };
   }
 
@@ -383,11 +392,23 @@ public class CanvasDtoMapper {
     return new CanvasFunction(function.name(), toJsonObject(function.args()));
   }
 
+  private static UUID requireCommandId(UUID value, String field) {
+    if (value == null) {
+      throw DomainException.validation(field, field + " is required");
+    }
+    return value;
+  }
+
   private static CanvasTransform toTransform(CanvasTransformDTO transform) {
     if (transform == null) {
       throw DomainException.validation("transform", "transform is required");
     }
-    return new CanvasTransform(transform.x(), transform.y(), transform.width(), transform.height());
+    try {
+      return new CanvasTransform(
+          transform.x(), transform.y(), transform.width(), transform.height());
+    } catch (IllegalArgumentException error) {
+      throw DomainException.validation("transform", error.getMessage(), error);
+    }
   }
 
   private static CanvasTransform toNullableTransform(CanvasTransformDTO transform) {

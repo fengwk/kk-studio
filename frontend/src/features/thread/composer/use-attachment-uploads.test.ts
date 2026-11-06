@@ -23,17 +23,17 @@ function createFakeStorageService(overrides?: Partial<StorageService>): StorageS
         url: 'https://upload.example.com/put',
         method: 'PUT',
         headers: {},
-        expiresAt: 1767225600,
+        expiresAt: 1767225600000,
         mediaType: null,
         sizeBytes: null,
       },
-      expiresAt: 1767225600,
+      expiresAt: 1767225600000,
     })),
     completeUpload: vi.fn().mockImplementation(async (id: string): Promise<StorageUploadDTO> => ({
       id,
       blobId: 'blob-1',
       type: 'READY',
-      expiresAt: 1767225600,
+      expiresAt: 1767225600000,
     })),
     deleteUpload: vi.fn().mockResolvedValue(undefined),
     uploadFile: vi.fn().mockResolvedValue(undefined),
@@ -342,17 +342,10 @@ describe('Attachment uploads lifecycle & safety', () => {
             throw new ApiError('Service Unavailable', 503)
           }
           return {
+            type: 'READY',
             id,
             blobId: 'b-1',
-            mediaKind: 'image',
-            type: 'READY',
-            presignedPut: { url: 'put', method: 'PUT', headers: {} },
-            filename: 'img.png',
-            mediaType: 'image/png',
-            sizeBytes: 100,
-            sha256: 'h1',
-            expiresAt: '2026',
-            createTime: '2026',
+            expiresAt: 1786492800000,
           }
         }),
       })
@@ -478,34 +471,27 @@ describe('Attachment uploads lifecycle & safety', () => {
       const scope = 'agent-pane:interleaved'
       const service = createFakeStorageService({
         reserveUpload: vi.fn().mockImplementation(async (req) => ({
-          id: `res-${req.filename}`,
-          blobId: 'b',
-          mediaKind: 'image',
           type: 'PENDING',
-          presignedPut: { url: 'put', method: 'PUT', headers: {} },
-          filename: req.filename,
-          mediaType: req.mediaType,
-          sizeBytes: req.sizeBytes,
-          sha256: req.sha256,
-          expiresAt: '2026',
-          createTime: '2026',
+          id: `res-${req.filename}`,
+          presignedPut: {
+            method: 'PUT',
+            url: `https://s3.test/res-${req.filename}`,
+            headers: {},
+            expiresAt: 1786492800000,
+            mediaType: null,
+            sizeBytes: null,
+          },
+          expiresAt: 1786492800000,
         })),
         completeUpload: vi.fn().mockImplementation(async (id: string) => {
           if (id === 'res-fileB.png') {
             throw new ApiError('Service Unavailable', 503)
           }
           return {
+            type: 'READY',
             id,
             blobId: 'b',
-            mediaKind: 'image',
-            type: 'READY',
-            presignedPut: { url: 'put', method: 'PUT', headers: {} },
-            filename: 'fileA.png',
-            mediaType: 'image/png',
-            sizeBytes: 100,
-            sha256: 'hA',
-            expiresAt: '2026',
-            createTime: '2026',
+            expiresAt: 1786492800000,
           }
         }),
       })
@@ -580,7 +566,7 @@ describe('Attachment uploads lifecycle & safety', () => {
           id: 'res-alpha',
           blobId: 'b',
           type: 'READY',
-          expiresAt: 1767225600,
+          expiresAt: 1767225600000,
         })
       })
 
@@ -727,7 +713,7 @@ describe('Attachment uploads lifecycle & safety', () => {
           id: 'upload-a-1',
           blobId: 'blob-a-1',
           type: 'READY',
-          expiresAt: 1767225600,
+          expiresAt: 1767225600000,
         })
       })
 
@@ -805,7 +791,7 @@ describe('Attachment uploads lifecycle & safety', () => {
           id: 'upload-cancel-1',
           blobId: 'blob-cancel-1',
           type: 'READY',
-          expiresAt: 1767225600,
+          expiresAt: 1767225600000,
         })
       })
 

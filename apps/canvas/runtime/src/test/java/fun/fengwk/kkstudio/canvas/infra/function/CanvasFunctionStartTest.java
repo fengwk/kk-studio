@@ -71,6 +71,19 @@ class CanvasFunctionStartTest extends CanvasFunctionRuntimeTestSupport {
     assertEquals(3L, version(canvasId));
   }
 
+  /** 缺少 resolution 的核查请求是客户端校验失败，必须在读取 Canvas/Run 前拒绝。 */
+  @Test
+  void resolveRequiresResolutionBeforeReadingRunState() {
+    DomainException error =
+        assertThrows(
+            DomainException.class,
+            () ->
+                runtimeTransactions.resolve(
+                    UUID.randomUUID(), UUID.randomUUID(), REQUEST_1, null, "verification"));
+    assertEquals(DomainErrorCode.VALIDATION, error.code());
+    assertEquals("resolution is required", error.getMessage());
+  }
+
   /** start 的目录租用保持到真实事务提交后才释放。 */
   @Test
   void startHoldsCurrentLeaseUntilTransactionCompletion() {
@@ -379,16 +392,21 @@ class CanvasFunctionStartTest extends CanvasFunctionRuntimeTestSupport {
 
     // 未知字段 extra
     UUID nodeUnknown = addFunctionNode(canvasId, "node1", "{\"prompt\":\"test\",\"extra\":1}");
-    assertThrows(IllegalArgumentException.class, () -> startRun(canvasId, nodeUnknown, REQUEST_1));
+    DomainException unknown =
+        assertThrows(DomainException.class, () -> startRun(canvasId, nodeUnknown, REQUEST_1));
+    assertEquals(DomainErrorCode.VALIDATION, unknown.code());
 
     // 缺少必填字段 prompt
     UUID nodeMissing = addFunctionNode(canvasId, "node2", "{\"ratio\":\"16:9\"}");
-    assertThrows(IllegalArgumentException.class, () -> startRun(canvasId, nodeMissing, REQUEST_1));
+    DomainException missing =
+        assertThrows(DomainException.class, () -> startRun(canvasId, nodeMissing, REQUEST_1));
+    assertEquals(DomainErrorCode.VALIDATION, missing.code());
 
     // 类型错误：prompt 应为 string
     UUID nodeWrongType = addFunctionNode(canvasId, "node3", "{\"prompt\":123}");
-    assertThrows(
-        IllegalArgumentException.class, () -> startRun(canvasId, nodeWrongType, REQUEST_1));
+    DomainException wrongType =
+        assertThrows(DomainException.class, () -> startRun(canvasId, nodeWrongType, REQUEST_1));
+    assertEquals(DomainErrorCode.VALIDATION, wrongType.code());
 
     // 合法输入：只传必填 prompt，默认值 ratio="16:9" 必须被自动补齐并冻结
     UUID nodeValid = addFunctionNode(canvasId, "node4", "{\"prompt\":\"hello world\"}");

@@ -12,6 +12,10 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.server.ResponseStatusException;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.JacksonException.Reference;
+import tools.jackson.databind.exc.IgnoredPropertyException;
+import tools.jackson.databind.exc.UnrecognizedPropertyException;
 
 import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
@@ -93,8 +97,8 @@ public class ProblemAdvice {
   }
 
   @ExceptionHandler(HttpMessageNotReadableException.class)
-  public ResponseEntity<Map<String, Object>> unreadable() {
-    return framework(400, "Failed to read request", null);
+  public ResponseEntity<Map<String, Object>> unreadable(HttpMessageNotReadableException error) {
+    return framework(400, requestBodyDetail(error), null);
   }
 
   @ExceptionHandler(Exception.class)
@@ -121,6 +125,44 @@ public class ProblemAdvice {
       reason = "HTTP_CONFLICT";
     }
     return problem(status, code, reason, detail, null, messages.httpMessage(status));
+  }
+
+  /**
+   * 请求体读取失败的 detail：有字段路径时只回报路径与错误类别，绝不回显原始输入。
+   *
+   * <p>未知或忽略字段写成 {@code <path> is not allowed}；类型与格式错误写成 {@code <path> has an invalid value}，与
+   * query/path 参数的同名文案一致；无法定位到字段的非法 JSON（语法错误、重复键、尾随内容）回退固定文本。
+   */
+  private static String requestBodyDetail(HttpMessageNotReadableException error) {
+    for (Throwable cause = error.getCause(); cause != null; cause = cause.getCause()) {
+      if (!(cause instanceof JacksonException jackson)) {
+        continue;
+      }
+      String path = jsonPath(jackson);
+      if (path.isEmpty()) {
+        continue;
+      }
+      boolean unknown =
+          jackson instanceof UnrecognizedPropertyException
+              || jackson instanceof IgnoredPropertyException;
+      return path + (unknown ? " is not allowed" : " has an invalid value");
+    }
+    return "Failed to read request";
+  }
+
+  private static String jsonPath(JacksonException error) {
+    StringBuilder path = new StringBuilder();
+    for (Reference reference : error.getPath()) {
+      if (reference.getPropertyName() != null) {
+        if (!path.isEmpty()) {
+          path.append('.');
+        }
+        path.append(reference.getPropertyName());
+      } else if (reference.getIndex() >= 0) {
+        path.append('[').append(reference.getIndex()).append(']');
+      }
+    }
+    return path.toString();
   }
 
   private ResponseEntity<Map<String, Object>> problem(

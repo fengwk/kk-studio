@@ -257,10 +257,16 @@ registerCase({
       assert(!(await providerList()).some((provider) => provider.name === name), 'precheck must not create provider')
 
       for (const path of ['/api/platform/config-sync/check-import', '/api/platform/config-sync/import']) {
-        const error = await expectHttpError(() => ctx.call('POST', path, { yaml: invalidYaml }), { status: 400 })
+        const error = await expectHttpError(() => ctx.call('POST', path, { yaml: invalidYaml }), {
+          status: 400,
+          code: 'validation',
+        })
         assert(!String(error.body).includes(secret), 'hard-error response must not echo credential')
       }
-      await expectHttpError(() => ctx.call('POST', '/api/platform/config-sync/import', { yaml }), { status: 400 })
+      await expectHttpError(() => ctx.call('POST', '/api/platform/config-sync/import', { yaml }), {
+        status: 400,
+        code: 'validation',
+      })
       assert(!(await providerList()).some((provider) => provider.name === name), 'unconfirmed partial import must not write')
 
       const { json: importedJson } = await ctx.call('POST', '/api/platform/config-sync/import', { yaml, allowPartial: true })
@@ -400,7 +406,7 @@ registerCase({
       for (const path of ['/api/platform/config-sync/check-import', '/api/platform/config-sync/import']) {
         const error = await expectHttpError(
           () => ctx.call('POST', path, { yaml, allowPartial: true }),
-          { status: 400 },
+          { status: 400, code: 'validation' },
         )
         assert(!String(error.body).includes('ftp://invalid'), 'hard error must not echo submitted values')
         assert(

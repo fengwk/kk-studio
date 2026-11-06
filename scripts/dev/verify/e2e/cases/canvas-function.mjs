@@ -147,10 +147,11 @@ registerCase({
           requestId: cid(),
           expectedVersion: imageVersion,
         }),
-      { status: 400 },
+      { status: 400, code: 'validation' },
     )
     await expectHttpError(() => ctx.call('GET', functionById(canvas.id, functionNodeId).runPath), {
       status: 404,
+      code: 'not_found',
     })
     await expectHttpError(
       () =>
@@ -158,7 +159,7 @@ registerCase({
           requestId: cid(),
           expectedVersion: imageVersion,
         }),
-      { status: 404 },
+      { status: 404, code: 'not_found' },
     )
 
     // 版本围栏：expectedVersion 必填且形状严格；目录已变化时明确 409，绝不 pin、写 Run 或提交外部任务。
@@ -171,7 +172,7 @@ registerCase({
     ]) {
       await expectHttpError(
         () => ctx.call('POST', functionById(canvas.id, functionNodeId).runPath, invalid),
-        { status: 400 },
+        { status: 400, code: 'validation' },
       )
     }
     // 构造合法但不同的 fingerprint，确保命中版本围栏而非输入校验。
@@ -187,7 +188,7 @@ registerCase({
           requestId: cid(),
           expectedVersion: staleVersion,
         }),
-      { status: 409 },
+      { status: 409, code: 'conflict', reason: 'FUNCTION_RUN_CONFLICT' },
     )
     assert(
       !/stateJson/.test(conflict.body),
@@ -196,6 +197,7 @@ registerCase({
     // 拒绝后没有产生任何 Run 事实：查询仍是「无运行」404，快照也没有新增 run 投影。
     await expectHttpError(() => ctx.call('GET', functionById(canvas.id, functionNodeId).runPath), {
       status: 404,
+      code: 'not_found',
     })
     const unchanged = (await ctx.call('GET', `/api/canvas/canvases/${canvas.id}`)).json
     assert(
@@ -284,7 +286,7 @@ registerCase({
     ]) {
       await expectHttpError(
         () => ctx.call('POST', `${functionById(canvas.id, functionNodeId).runPath}/resolve`, body),
-        { status: 400 },
+        { status: 400, code: 'validation' },
       )
     }
     for (const resolution of ['RESUME', 'FAILED', 'CANCELLED']) {
@@ -295,7 +297,7 @@ registerCase({
             resolution,
             verification: 'checked the provider console',
           }),
-        { status: 409 },
+        { status: 409, code: 'conflict', reason: 'FUNCTION_RUN_CONFLICT' },
       )
       assert(
         !/stateJson/.test(resolveConflict.body),
@@ -309,7 +311,7 @@ registerCase({
         ctx.call('POST', `${functionById(canvas.id, functionNodeId).runPath}/cancel`, {
           requestId: cid(),
         }),
-      { status: 409 },
+      { status: 409, code: 'conflict', reason: 'FUNCTION_RUN_CONFLICT' },
     )
     const cancelledTerminal = (
         await ctx.call('POST', `${functionById(canvas.id, functionNodeId).runPath}/cancel`, {

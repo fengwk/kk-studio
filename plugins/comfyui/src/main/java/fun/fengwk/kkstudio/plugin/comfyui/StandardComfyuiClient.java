@@ -9,6 +9,7 @@ import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.common.json.JsonValues;
+import fun.fengwk.kkstudio.common.uri.UrlEncoding;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialSnapshot;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialUnavailableException;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialAccess;
@@ -23,7 +24,6 @@ import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.net.ProxySelector;
 import java.net.URI;
-import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpHeaders;
 import java.net.http.HttpRequest;
@@ -674,13 +674,14 @@ public final class StandardComfyuiClient implements Closeable {
     }
   }
 
+  /** 路径段按 RFC 3986 编码：空格是 %20，{@code /} 也被编码，不产生表单语义的 {@code +}。 */
   private static String path(String segment) {
-    return URLEncoder.encode(segment, StandardCharsets.UTF_8).replace("+", "%20");
+    return UrlEncoding.encode(segment);
   }
 
-  /** query 值统一按 RFC 3986 编码：空格用 %20 而非 +，与 ComfyUI 的路径解析保持一致。 */
+  /** query 值与路径段共用同一编码，接收方按表单或 RFC 3986 解码都得到原文。 */
   private static String query(String value) {
-    return path(value == null ? "" : value);
+    return UrlEncoding.encode(value == null ? "" : value);
   }
 
   /**

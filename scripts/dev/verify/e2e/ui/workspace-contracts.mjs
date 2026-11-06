@@ -747,7 +747,10 @@ export async function runWorkspaceContractMatrix(ui) {
             assert(restored.aiRuntime.retryBaseDelayMillis === original, 'restore was not applied')
             break
           }
-          assert(res.status === 409, `restore PUT failed: ${res.status}`)
+          assert(
+            res.status === 409 && res.json?.code === 'version_conflict',
+            `restore PUT failed: ${res.status}`,
+          )
         }
         const verified = await readSettings()
         assert(

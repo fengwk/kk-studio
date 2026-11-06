@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.driver;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.spi.driver.AgentDriver;
@@ -59,7 +60,8 @@ public final class DriverRegistry implements DriverThreadDeletion {
     Objects.requireNonNull(selection, "selection");
     AgentDriver driver = drivers.get(selection.driver());
     if (driver == null) {
-      throw new IllegalArgumentException("driver is not installed: " + selection.driver());
+      throw DomainException.validation(
+          "execution", "driver is not installed: " + selection.driver());
     }
     driver.validateSettings(selection.settingsJson());
   }

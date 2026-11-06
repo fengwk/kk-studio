@@ -215,20 +215,20 @@ export function AgentPane({
   const environmentName = projection.thread?.branchSettings?.environmentName
     ?? defaults?.environmentName
     ?? null
-  const matchedEnvCard = environmentName
+  const matchedEnvironment = environmentName
     ? environments.find((env) => env.name === environmentName) ?? null
     : null
 
   const resolvedEnvironment: IdeEnvironmentInfo | null = useMemo(() => {
-    if (matchedEnvCard == null || !isCanonicalUuid(matchedEnvCard.id)) {
+    if (matchedEnvironment == null || !isCanonicalUuid(matchedEnvironment.id)) {
       return null
     }
     return {
-      id: matchedEnvCard.id,
-      name: matchedEnvCard.name,
-      ready: matchedEnvCard.ready,
+      id: matchedEnvironment.id,
+      name: matchedEnvironment.name,
+      ready: matchedEnvironment.ready,
     }
-  }, [matchedEnvCard])
+  }, [matchedEnvironment])
 
   const handleOpenIde = useCallback(
     (options: { mode: 'files' | 'shell' }) => {

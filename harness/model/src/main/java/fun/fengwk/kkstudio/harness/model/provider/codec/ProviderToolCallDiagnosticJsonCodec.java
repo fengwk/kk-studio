@@ -1,9 +1,9 @@
 package fun.fengwk.kkstudio.harness.model.provider.codec;
 
 import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.decodeNullableText;
-import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.objectNode;
+import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.object;
 import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.orderedSet;
-import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.requireFieldsWithCount;
+import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.requireFieldsWithoutEcho;
 import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.text;
 
 import tools.jackson.core.JacksonException;
@@ -69,8 +69,8 @@ public final class ProviderToolCallDiagnosticJsonCodec {
   }
 
   public ProviderToolCallDiagnostic decodeNode(JsonNode node) {
-    ObjectNode root = objectNode(node, "toolCallDiagnostic");
-    requireFieldsWithCount(root, FIELDS, "toolCallDiagnostic");
+    ObjectNode root = object(node, "toolCallDiagnostic");
+    requireFieldsWithoutEcho(root, FIELDS, "toolCallDiagnostic");
 
     String type = text(root, "type");
     if (!TYPE_TAG.equals(type)) {

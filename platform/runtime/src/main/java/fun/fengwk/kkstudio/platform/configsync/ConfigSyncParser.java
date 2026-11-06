@@ -310,9 +310,6 @@ public final class ConfigSyncParser {
     declared.add(name);
     String description = entry.optString("description");
     String systemPrompt = entry.optString("systemPrompt");
-    if (entry.raw.containsKey("model") || entry.raw.containsKey("variant")) {
-      throw DomainException.validation(RESOURCE, entry.path + " contains legacy agent fields");
-    }
     Object executionNode = requireObject(entry, "execution");
     Map<?, ?> executionMap = (Map<?, ?>) executionNode;
     if (!executionMap.keySet().equals(Set.of("driver", "settings"))) {

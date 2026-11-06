@@ -1,6 +1,7 @@
 import { Activity, LogIn, LogOut, Plug, Settings } from 'lucide-react'
 import { Badge, type BadgeTone } from '@/shared/ui/data/Badge'
-import { useI18n, type AppLocale, type TranslationKey } from '@/shared/i18n'
+import { useI18n, type TranslationKey } from '@/shared/i18n'
+import { formatBackendDate } from '@/shared/lib/date-format'
 import { Button } from '@/shared/ui/controls/Button'
 import { ResourceCard, type ResourceCardMetaRow } from '@/shared/ui/cards/ResourceCard'
 import { pluginConnectionCheckExpected } from '@/features/extensions/plugin-connection-check'
@@ -9,12 +10,9 @@ import type {
   PluginDTO,
 } from '@/shared/api/generated/contracts'
 
-/** 后端 Instant 的 wire 约定是 epoch 毫秒。 */
-function formatDateTime(value: number | null | undefined, locale: AppLocale): string {
-  if (value == null) {
-    return '—'
-  }
-  return new Date(value).toLocaleString(locale)
+/** 后端 Instant 的 wire 约定是 epoch 毫秒；缺值显示占位符。 */
+function formatDateTime(value: number | null | undefined): string {
+  return value == null ? '—' : formatBackendDate(value)
 }
 
 const PLUGIN_STATUS_LABEL_KEYS = {
@@ -56,7 +54,7 @@ export function PluginCard({
   /** 本 Plugin 的显式连接检查正在进行：入口必须禁用，避免重复请求。 */
   connectionCheckPending: boolean
 }) {
-  const { t, locale } = useI18n()
+  const { t } = useI18n()
   const statusLabel = plugin.status ? t(PLUGIN_STATUS_LABEL_KEYS[plugin.status]) : null
 
   const isDeepLink = plugin.authKind?.type === 'DEEP_LINK'
@@ -111,9 +109,9 @@ export function PluginCard({
   if (isDeepLink) {
     rows.push(
       [t('plugins.region'), plugin.region || '—'],
-      [t('plugins.tokenExpiresAt'), formatDateTime(plugin.expiresAt, locale)],
-      [t('plugins.nextRefreshAt'), formatDateTime(plugin.nextRefreshAt, locale)],
-      [t('plugins.lastRefreshedAt'), formatDateTime(plugin.lastRefreshedAt, locale)],
+      [t('plugins.tokenExpiresAt'), formatDateTime(plugin.expiresAt)],
+      [t('plugins.nextRefreshAt'), formatDateTime(plugin.nextRefreshAt)],
+      [t('plugins.lastRefreshedAt'), formatDateTime(plugin.lastRefreshedAt)],
     )
 
   }

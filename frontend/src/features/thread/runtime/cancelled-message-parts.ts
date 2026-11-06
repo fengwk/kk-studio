@@ -5,6 +5,7 @@ import {
   type ComposerPart,
 } from '@/features/thread/composer/composer-parts'
 import type { HarnessCancelledInputDTO } from '@/shared/api/generated/contracts'
+import { isRecord } from '@/shared/lib/value'
 
 /**
  * Stop 回执里可恢复的人工输入回填：
@@ -106,8 +107,9 @@ function contentToParts(content: unknown): ComposerPart[] {
   if (content.type === 'text' || content.type === 'thinking') {
     return [createTextPart(typeof content.text === 'string' ? content.text : stableText(content))]
   }
-  if (content.type === 'json') {
-    return [createTextPart(jsonContentText(content.json))]
+  if (content.type === 'json' && typeof content.json === 'string') {
+    // 契约中 json 内容就是 JSON 原文，直接作为文本回填，不再二次序列化。
+    return [createTextPart(content.json)]
   }
   if (
     content.type === 'resource'
@@ -134,13 +136,6 @@ function contentToParts(content: unknown): ComposerPart[] {
   return [createTextPart(stableText(content))]
 }
 
-function jsonContentText(value: unknown): string {
-  if (typeof value === 'string') {
-    return value
-  }
-  return stableText(value)
-}
-
 function stableText(value: unknown): string {
   try {
     const text = JSON.stringify(value)
@@ -148,8 +143,4 @@ function stableText(value: unknown): string {
   } catch {
     return String(value)
   }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value != null && typeof value === 'object' && !Array.isArray(value)
 }

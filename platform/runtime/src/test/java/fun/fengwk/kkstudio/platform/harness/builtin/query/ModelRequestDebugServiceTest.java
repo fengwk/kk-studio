@@ -21,8 +21,11 @@ import tools.jackson.databind.MapperFeature;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.json.JsonValues;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.api.entry.GoalSetting;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.api.entry.TurnStartReason;
@@ -542,6 +545,19 @@ class ModelRequestDebugServiceTest {
     assertFalse(lowered.contains("authorization"), configurationJson);
   }
 
+  /** 非 builtin 执行无法构造 provider 请求预览，是稳定业务冲突而不是 500。 */
+  @Test
+  void rejectsNonBuiltinExecutionAsPreviewConflict() {
+    when(runtime.getThreadSnapshot(THREAD_ID)).thenReturn(nonBuiltinSnapshot());
+
+    DomainException error =
+        assertThrows(
+            DomainException.class,
+            () -> service.getModelRequestDebug(THREAD_ID, DRAFT_MODEL, DRAFT_ENV));
+    assertEquals(DomainErrorCode.CONFLICT, error.code());
+    assertEquals("PREVIEW_UNSUPPORTED", error.reason());
+  }
+
   /** 测试意图：规划已保证 subagent 存在，Debug 侧同名缺失或配置非法必须明确失败，绝不静默返回空配置。 */
   @Test
   void rejectsMissingOrInvalidSubagentInsteadOfReturningEmptyConfiguration() {
@@ -615,9 +631,34 @@ class ModelRequestDebugServiceTest {
   }
 
   private static ThreadSnapshot idleSnapshot() {
-    EntryPath path = basePath();
+    return snapshot(basePath(), USER_ENTRY_ID);
+  }
+
+  private static ThreadSnapshot nonBuiltinSnapshot() {
+    BranchSettings settings =
+        new BranchSettings("assistant", new ExecutionSelection("external", "{}"), "env-b", GOAL);
+    EntryPath path =
+        new EntryPath(
+            List.of(
+                new Entry(SESSION_ID, SESSION_ID, null, new RootPayload(settings), NOW),
+                new Entry(
+                    TURN_START_ID,
+                    SESSION_ID,
+                    SESSION_ID,
+                    new TurnStartPayload(TurnStartReason.INPUT, settings, THREAD_ID),
+                    NOW),
+                new Entry(
+                    USER_ENTRY_ID,
+                    SESSION_ID,
+                    TURN_START_ID,
+                    message(AgentMessageRole.USER, "user-1"),
+                    NOW)));
+    return snapshot(path, USER_ENTRY_ID);
+  }
+
+  private static ThreadSnapshot snapshot(EntryPath path, UUID headEntryId) {
     return new ThreadSnapshot(
-        thread(USER_ENTRY_ID),
+        thread(headEntryId),
         EntryCurrentState.from(path),
         new EntrySlice(null, path.entries()),
         List.of(),

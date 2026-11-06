@@ -3,7 +3,7 @@ import {
   parseEditReview,
 } from '@/features/thread/runtime/mutation-review'
 import { asRecord, getRecordList } from '@/features/thread/runtime/payload-json'
-import { getString } from '@/shared/lib/value'
+import { getString, isRecord } from '@/shared/lib/value'
 import type {
   RealtimeModelStream,
 } from '@/features/thread/runtime/thread-realtime/model-stream'
@@ -554,8 +554,4 @@ function extractQueuedMessage(
     return null
   }
   return { role: 'user', text }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value != null && !Array.isArray(value)
 }

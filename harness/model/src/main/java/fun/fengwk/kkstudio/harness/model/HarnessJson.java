@@ -12,6 +12,10 @@ import tools.jackson.databind.json.JsonMapper;
  * Harness 共用的严格 JSON 读取器。
  *
  * <p>普通树、十进制精度和 canonical 选项分别保持原有数值语义；调用方不得改变其配置。
+ *
+ * <p>{@link #STRICT_DECIMAL} 与 common 的 {@code JsonValues} 树读取配置等价，但本模块是可独立编译的叶子模块，不依赖
+ * common，因此模型、runtime 与平台的 codec 统一使用本类；common 层继续由 {@code JsonValues} 服务。两处配置修改必须同步，
+ * 否则跨层报文会出现数值精度或重复键语义差异。
  */
 public final class HarnessJson {
 

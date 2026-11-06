@@ -8,9 +8,8 @@ import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.harness.model.HarnessJson;
+import fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport;
 
-import java.util.Iterator;
-import java.util.LinkedHashSet;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
@@ -53,8 +52,8 @@ public final class HarnessStreamCatchupNotificationCodec {
     } catch (JacksonException error) {
       throw new IllegalArgumentException("malformed stream catchup notification JSON", error);
     }
-    ObjectNode node = requireObject(root);
-    requireExactFields(node);
+    ObjectNode node = JsonCodecSupport.object(root, "stream catchup notification");
+    JsonCodecSupport.requireFields(node, FIELDS, "stream catchup notification");
     Envelope envelope =
         new Envelope(
             requiredCanonicalUuid(node, "originNodeId"),
@@ -65,23 +64,6 @@ public final class HarnessStreamCatchupNotificationCodec {
       throw new IllegalArgumentException("stream catchup notification must use canonical JSON");
     }
     return envelope;
-  }
-
-  private static ObjectNode requireObject(JsonNode value) {
-    if (value == null || !value.isObject()) {
-      throw new IllegalArgumentException("stream catchup notification must be a JSON object");
-    }
-    return (ObjectNode) value;
-  }
-
-  private static void requireExactFields(ObjectNode node) {
-    Set<String> actual = new LinkedHashSet<>();
-    Iterator<String> names = node.propertyNames().iterator();
-    names.forEachRemaining(actual::add);
-    if (!actual.equals(FIELDS)) {
-      throw new IllegalArgumentException(
-          "stream catchup notification fields must be exactly " + FIELDS + ", actual=" + actual);
-    }
   }
 
   private static String requiredText(ObjectNode node, String field) {

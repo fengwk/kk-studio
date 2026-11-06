@@ -143,9 +143,9 @@ class HarnessRuntimeForkTest {
     HarnessRuntimeTestSupport.TurnBaseline openTurn = seedOpenTurn(store);
     UUID threadId = TestIds.id(901);
 
-    IllegalArgumentException error =
+    DomainException error =
         assertThrows(
-            IllegalArgumentException.class,
+            DomainException.class,
             () ->
                 runtime.acceptCommands(
                     new AcceptCommandsCommand(
@@ -159,6 +159,7 @@ class HarnessRuntimeForkTest {
                     AcceptancePreflight.IDENTITY));
 
     assertTrue(error.getMessage().contains("not a legal NEW_THREAD fork boundary"));
+    assertEquals(DomainErrorCode.VALIDATION, error.code());
     assertTrue(store.<Boolean>transaction(tx -> tx.threads().find(threadId).isEmpty()));
   }
 
@@ -383,12 +384,13 @@ class HarnessRuntimeForkTest {
     UUID newSessionId = TestIds.id(994);
     UUID newThreadId = TestIds.id(995);
 
-    IllegalArgumentException error =
+    DomainException error =
         assertThrows(
-            IllegalArgumentException.class,
+            DomainException.class,
             () -> acceptSessionFork(childThreadId, sharedRootEntryId, newSessionId, newThreadId));
 
     assertTrue(error.getMessage().contains("must be an execution root"));
+    assertEquals(DomainErrorCode.VALIDATION, error.code());
     assertTrue(store.<Boolean>transaction(tx -> tx.sessions().find(newSessionId).isEmpty()));
     assertTrue(store.<Boolean>transaction(tx -> tx.threads().find(newThreadId).isEmpty()));
   }
@@ -422,12 +424,13 @@ class HarnessRuntimeForkTest {
     UUID newSessionId = TestIds.id(996);
     UUID newThreadId = TestIds.id(997);
 
-    IllegalArgumentException error =
+    DomainException error =
         assertThrows(
-            IllegalArgumentException.class,
+            DomainException.class,
             () -> acceptSessionFork(source.threadId(), siblingTurnEnd, newSessionId, newThreadId));
 
     assertTrue(error.getMessage().contains("is not on the source thread path"));
+    assertEquals(DomainErrorCode.VALIDATION, error.code());
     assertTrue(store.<Boolean>transaction(tx -> tx.sessions().find(newSessionId).isEmpty()));
     assertTrue(store.<Boolean>transaction(tx -> tx.threads().find(newThreadId).isEmpty()));
   }
@@ -439,14 +442,15 @@ class HarnessRuntimeForkTest {
     UUID newSessionId = TestIds.id(998);
     UUID newThreadId = TestIds.id(999);
 
-    IllegalArgumentException error =
+    DomainException error =
         assertThrows(
-            IllegalArgumentException.class,
+            DomainException.class,
             () ->
                 acceptSessionFork(
                     source.threadId(), source.assistantEntryId(), newSessionId, newThreadId));
 
     assertTrue(error.getMessage().contains("not a legal NEW_FORKED_SESSION fork boundary"));
+    assertEquals(DomainErrorCode.VALIDATION, error.code());
     assertTrue(store.<Boolean>transaction(tx -> tx.sessions().find(newSessionId).isEmpty()));
     assertTrue(store.<Boolean>transaction(tx -> tx.threads().find(newThreadId).isEmpty()));
   }
@@ -459,14 +463,15 @@ class HarnessRuntimeForkTest {
     UUID newSessionId = TestIds.id(960);
     UUID newThreadId = TestIds.id(961);
 
-    IllegalArgumentException error =
+    DomainException error =
         assertThrows(
-            IllegalArgumentException.class,
+            DomainException.class,
             () ->
                 acceptSessionFork(
                     source.threadId(), other.rootEntryId(), newSessionId, newThreadId));
 
     assertTrue(error.getMessage().contains("is not in the source session"));
+    assertEquals(DomainErrorCode.VALIDATION, error.code());
     assertTrue(store.<Boolean>transaction(tx -> tx.sessions().find(newSessionId).isEmpty()));
   }
 

@@ -6,9 +6,9 @@ import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.common.json.JsonValues;
+import fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport;
 
 import java.util.ArrayList;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
@@ -24,14 +24,16 @@ public final class HumanInputJsonCodec {
   private static final String QUESTIONNAIRE = HumanInputTool.ASK_USER;
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
   private static final Set<String> QUESTIONNAIRE_FIELDS = Set.of("questions");
-  private static final Set<String> QUESTION_FIELDS = Set.of("question", "multiple", "options");
-  private static final Set<String> OPTION_FIELDS = Set.of("label", "description", "recommended");
+  private static final Set<String> QUESTION_REQUIRED_FIELDS = Set.of("question");
+  private static final Set<String> QUESTION_OPTIONAL_FIELDS = Set.of("multiple", "options");
+  private static final Set<String> OPTION_REQUIRED_FIELDS = Set.of("label");
+  private static final Set<String> OPTION_OPTIONAL_FIELDS = Set.of("description", "recommended");
 
   /** 解析冻结问卷；任何与 {@code ask_user} 契约不符的输入抛 {@link IllegalArgumentException}。 */
   public HumanInputQuestionnaire decodeQuestionnaire(String argumentsJson) {
     JsonNode value = JsonValues.readTree(Objects.requireNonNull(argumentsJson, "argumentsJson"));
     ObjectNode root = requireObject(value, QUESTIONNAIRE);
-    requireFields(root, QUESTIONNAIRE_FIELDS, QUESTIONNAIRE_FIELDS, QUESTIONNAIRE);
+    JsonCodecSupport.requireFields(root, QUESTIONNAIRE_FIELDS, QUESTIONNAIRE);
     ArrayNode questions = requireArray(root.get("questions"), QUESTIONNAIRE + ".questions");
     List<HumanInputQuestion> parsed = new ArrayList<>(questions.size());
     for (JsonNode question : questions) {
@@ -61,7 +63,8 @@ public final class HumanInputJsonCodec {
   private static HumanInputQuestion decodeQuestion(JsonNode value) {
     String context = QUESTIONNAIRE + ".questions[]";
     ObjectNode node = requireObject(value, context);
-    requireFields(node, QUESTION_FIELDS, Set.of("question"), context);
+    JsonCodecSupport.requireFields(
+        node, QUESTION_REQUIRED_FIELDS, QUESTION_OPTIONAL_FIELDS, context);
     String question = requireText(node.get("question"), context + ".question");
     boolean multiple = requireBoolean(node.get("multiple"), context + ".multiple", false);
     List<HumanInputOption> options = List.of();
@@ -80,7 +83,7 @@ public final class HumanInputJsonCodec {
   private static HumanInputOption decodeOption(JsonNode value) {
     String context = QUESTIONNAIRE + ".questions[].options[]";
     ObjectNode node = requireObject(value, context);
-    requireFields(node, OPTION_FIELDS, Set.of("label"), context);
+    JsonCodecSupport.requireFields(node, OPTION_REQUIRED_FIELDS, OPTION_OPTIONAL_FIELDS, context);
     return new HumanInputOption(
         requireText(node.get("label"), context + ".label"),
         requireNullableText(node.get("description"), context + ".description"),
@@ -123,22 +126,5 @@ public final class HumanInputJsonCodec {
       throw new IllegalArgumentException(context + " must be boolean");
     }
     return value.booleanValue();
-  }
-
-  /** 严格字段集合：拒绝未知字段，要求全部必填字段存在。 */
-  private static void requireFields(
-      ObjectNode node, Set<String> allowed, Set<String> required, String context) {
-    Set<String> names = new LinkedHashSet<>();
-    node.propertyNames().forEach(names::add);
-    for (String name : names) {
-      if (!allowed.contains(name)) {
-        throw new IllegalArgumentException(context + " must not declare " + name);
-      }
-    }
-    for (String name : required) {
-      if (!names.contains(name)) {
-        throw new IllegalArgumentException(context + " must declare " + name);
-      }
-    }
   }
 }

@@ -1,4 +1,5 @@
 import { isCanonicalUuid } from '@/shared/lib/uuid'
+import { isRecord } from '@/shared/lib/value'
 
 export interface TaskToolArguments {
   subagentType: string | null
@@ -67,8 +68,4 @@ function positiveInteger(value: unknown): number | null {
 
 function nonBlankString(value: unknown): string | null {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value != null && !Array.isArray(value)
 }

@@ -25,6 +25,7 @@ import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Instant;
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
@@ -168,6 +169,34 @@ class FileExecutionExitJournalTest {
     }
     assertTrue(Files.exists(corrupt));
     assertFalse(Files.readString(corrupt).isBlank());
+  }
+
+  @Test
+  void nonCanonicalUuidRecordIsReportedAndCannotBeOverwritten(@TempDir Path directory)
+      throws IOException {
+    // 持久化身份只接受 canonical UUID 文本：大写变体可被 UUID.fromString 解析，但仍是损坏记录。
+    UUID executionId = UUID.randomUUID();
+    ExecutionExitJournalRecord original =
+        record(
+            executionId,
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            ExecutionExitState.STUDIO_EXITED,
+            T0);
+    try (FileExecutionExitJournal journal = new FileExecutionExitJournal(directory)) {
+      journal.write(original);
+      Path entry = directory.resolve(executionId + ".json");
+      String uppercase =
+          Files.readString(entry)
+              .replace(
+                  "\"executionId\":\"" + executionId + "\"",
+                  "\"executionId\":\"" + executionId.toString().toUpperCase(Locale.ROOT) + "\"");
+      Files.writeString(entry, uppercase);
+
+      assertSingleFailure(journal.loadAll(), ExecutionExitJournalFailure.Reason.CORRUPT);
+      assertThrows(ExecutionExitJournalException.class, () -> journal.write(original));
+      assertEquals(uppercase, Files.readString(entry));
+    }
   }
 
   @Test

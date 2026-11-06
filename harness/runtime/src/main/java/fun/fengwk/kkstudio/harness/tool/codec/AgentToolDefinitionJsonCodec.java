@@ -7,6 +7,7 @@ import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.model.HarnessJson;
+import fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 
@@ -62,25 +63,11 @@ public final class AgentToolDefinitionJsonCodec {
   /** 从 JsonNode 解码完整 Agent tool definition。 */
   public AgentToolDefinition decodeNode(JsonNode value) {
     Objects.requireNonNull(value, "value");
-    if (!value.isObject()) {
-      throw new IllegalArgumentException(CONTEXT + " must be an object");
-    }
-    ObjectNode node = (ObjectNode) value;
-    requireFields(node);
+    ObjectNode node = JsonCodecSupport.object(value, CONTEXT);
+    JsonCodecSupport.requireFields(node, FIELDS, CONTEXT);
     ToolVisibility visibility = enumValue(node, "visibility", ToolVisibility.class);
     return new AgentToolDefinition(
         DESCRIPTOR_CODEC.decodeNode(required(node, "descriptor")), visibility);
-  }
-
-  private static void requireFields(ObjectNode node) {
-    if (node.size() != FIELDS.size()) {
-      throw new IllegalArgumentException(CONTEXT + " must declare exactly " + FIELDS);
-    }
-    for (String field : FIELDS) {
-      if (!node.has(field)) {
-        throw new IllegalArgumentException(CONTEXT + " must declare " + field);
-      }
-    }
   }
 
   private static JsonNode required(ObjectNode node, String field) {

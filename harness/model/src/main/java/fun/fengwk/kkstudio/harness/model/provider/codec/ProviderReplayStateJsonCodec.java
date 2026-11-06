@@ -1,8 +1,8 @@
 package fun.fengwk.kkstudio.harness.model.provider.codec;
 
-import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.objectNode;
+import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.object;
 import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.orderedSet;
-import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.requireFieldsWithCount;
+import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.requireFieldsWithoutEcho;
 import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.text;
 
 import tools.jackson.core.JacksonException;
@@ -56,8 +56,8 @@ public final class ProviderReplayStateJsonCodec {
   }
 
   public ProviderReplayState decodeNode(JsonNode node) {
-    ObjectNode root = objectNode(node, "providerReplayState");
-    requireFieldsWithCount(root, ROOT_FIELDS, "providerReplayState");
+    ObjectNode root = object(node, "providerReplayState");
+    requireFieldsWithoutEcho(root, ROOT_FIELDS, "providerReplayState");
 
     ProviderReplayFormat format;
     try {
@@ -84,8 +84,8 @@ public final class ProviderReplayStateJsonCodec {
   }
 
   private ProviderReplayAffinity decodeAffinity(JsonNode node) {
-    ObjectNode object = objectNode(node, "affinity");
-    requireFieldsWithCount(object, AFFINITY_FIELDS, "affinity");
+    ObjectNode object = object(node, "affinity");
+    requireFieldsWithoutEcho(object, AFFINITY_FIELDS, "affinity");
 
     ProviderType providerType;
     try {
@@ -96,13 +96,32 @@ public final class ProviderReplayStateJsonCodec {
     String providerName = text(object, "providerName");
     UUID connectionGenerationId;
     try {
-      connectionGenerationId = UUID.fromString(text(object, "connectionGenerationId"));
+      connectionGenerationId = canonicalUuid(object, "connectionGenerationId");
     } catch (IllegalArgumentException error) {
       throw new IllegalArgumentException("affinity.connectionGenerationId must be a valid UUID");
     }
     String modelId = text(object, "modelId");
 
     return new ProviderReplayAffinity(providerType, providerName, connectionGenerationId, modelId);
+  }
+
+  /**
+   * 持久化身份只接受 canonical UUID 文本（{@code UUID.toString()} 往返一致）。
+   *
+   * <p>harness-model 不依赖 common，且这里的异常会进入日志与诊断，因此不复用 common 的 {@code Uuids} 消息：错误只回报字段名，绝不回显输入值。
+   */
+  private static UUID canonicalUuid(ObjectNode node, String field) {
+    String value = text(node, field);
+    UUID parsed;
+    try {
+      parsed = UUID.fromString(value);
+    } catch (IllegalArgumentException error) {
+      throw new IllegalArgumentException(field + " must be a canonical UUID");
+    }
+    if (!parsed.toString().equals(value)) {
+      throw new IllegalArgumentException(field + " must be a canonical UUID");
+    }
+    return parsed;
   }
 
   private static JsonNode parse(String json) {

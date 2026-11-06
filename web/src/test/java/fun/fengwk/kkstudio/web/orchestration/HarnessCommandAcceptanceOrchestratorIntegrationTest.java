@@ -269,19 +269,22 @@ class HarnessCommandAcceptanceOrchestratorIntegrationTest extends WebPostgresTes
     // 同一 blob 不能被带入没有 ref 的新 Session；relation 与全部 Harness facts 必须一起回滚。
     UUID foreignSessionId = UUID.randomUUID();
     UUID foreignThreadId = UUID.randomUUID();
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            acceptanceService.accept(
-                owner,
-                new AcceptCommandsCommand(
-                    new AcceptCommandsTarget.NewRootSession(
-                        foreignSessionId, foreignThreadId, settings(), false),
-                    List.of(
-                        new NewThreadCommand(
-                            new UserMessageCommandPayload(
-                                new AgentMessage(AgentMessageRole.USER, List.of(resource))),
-                            UUID.randomUUID())))));
+    assertEquals(
+        DomainErrorCode.VALIDATION,
+        assertThrows(
+                DomainException.class,
+                () ->
+                    acceptanceService.accept(
+                        owner,
+                        new AcceptCommandsCommand(
+                            new AcceptCommandsTarget.NewRootSession(
+                                foreignSessionId, foreignThreadId, settings(), false),
+                            List.of(
+                                new NewThreadCommand(
+                                    new UserMessageCommandPayload(
+                                        new AgentMessage(AgentMessageRole.USER, List.of(resource))),
+                                    UUID.randomUUID())))))
+            .code());
     assertEquals(0, count("chat_session", "session_id", foreignSessionId));
     assertEquals(0, count("harness_session", "id", foreignSessionId));
     assertEquals(0, count("harness_thread", "id", foreignThreadId));
@@ -304,23 +307,29 @@ class HarnessCommandAcceptanceOrchestratorIntegrationTest extends WebPostgresTes
     accept(
         new SessionOwner("CHAT", chat1Id.toString()), sessionId, threadId, payload, idempotencyKey);
 
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            accept(
-                new SessionOwner("CHAT", chat2Id.toString()),
-                sessionId,
-                UUID.randomUUID(),
-                payload));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            accept(
-                new SessionOwner("CHAT", chat2Id.toString()),
-                sessionId,
-                threadId,
-                payload,
-                idempotencyKey));
+    assertEquals(
+        DomainErrorCode.VALIDATION,
+        assertThrows(
+                DomainException.class,
+                () ->
+                    accept(
+                        new SessionOwner("CHAT", chat2Id.toString()),
+                        sessionId,
+                        UUID.randomUUID(),
+                        payload))
+            .code());
+    assertEquals(
+        DomainErrorCode.VALIDATION,
+        assertThrows(
+                DomainException.class,
+                () ->
+                    accept(
+                        new SessionOwner("CHAT", chat2Id.toString()),
+                        sessionId,
+                        threadId,
+                        payload,
+                        idempotencyKey))
+            .code());
 
     assertEquals(1, chatSessionRepository.listSessionIds(chat1Id).size());
     assertEquals(0, chatSessionRepository.listSessionIds(chat2Id).size());
@@ -345,9 +354,13 @@ class HarnessCommandAcceptanceOrchestratorIntegrationTest extends WebPostgresTes
     harnessRuntime.acceptCommands(command, AcceptancePreflight.IDENTITY);
 
     // 逆证：无 owner relation 的内部 Session 即使能命中 Runtime exact replay，也不能被产品 owner 接管。
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> acceptanceService.accept(new SessionOwner("CHAT", chatId.toString()), command));
+    assertEquals(
+        DomainErrorCode.VALIDATION,
+        assertThrows(
+                DomainException.class,
+                () ->
+                    acceptanceService.accept(new SessionOwner("CHAT", chatId.toString()), command))
+            .code());
     assertEquals(0, count("chat_session", "session_id", sessionId));
     assertEquals(1, count("harness_session", "id", sessionId));
     assertEquals(1, count("harness_thread", "id", threadId));

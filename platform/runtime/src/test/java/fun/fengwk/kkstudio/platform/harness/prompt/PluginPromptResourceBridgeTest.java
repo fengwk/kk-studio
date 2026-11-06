@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.platform.harness.prompt;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -19,6 +18,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.platform.plugin.prompt.PluginPromptResources;
@@ -152,33 +152,37 @@ class PluginPromptResourceBridgeTest {
     verify(uploadService, never()).delete(any());
   }
 
-  /** 非 READY 是确定性拒绝：必须转成可控错误，不能泄漏存储实现异常。 */
+  /** 非 READY 保留存储冲突，供请求路径暴露稳定 reason。 */
   @Test
   void acceptRejectsNotReadyUploadDeterministically() {
     when(uploadService.lockReady(UPLOAD_ID))
         .thenThrow(DomainException.conflict("STORAGE_VERIFICATION", "still pending"));
 
-    IllegalArgumentException failure =
+    DomainException failure =
         assertThrows(
-            IllegalArgumentException.class,
+            DomainException.class,
             () ->
                 bridge.accept(
                     SESSION_ID, new PluginPromptResources.StagedResource(UPLOAD_ID, BLOB_ID)));
-    assertFalse(failure.getMessage().contains("pending"), failure.getMessage());
+    assertEquals(DomainErrorCode.CONFLICT, failure.code());
+    assertEquals("STORAGE_VERIFICATION", failure.reason());
     verify(refManager, never()).retainRef(any(), any());
   }
 
-  /** 上传已不存在同样是确定性拒绝：不得泄漏存储异常，也不得触碰 Session 引用。 */
+  /** 上传不存在保留 not-found，且不得触碰 Session 引用。 */
   @Test
   void acceptRejectsMissingUploadDeterministically() {
     when(uploadService.lockReady(UPLOAD_ID))
         .thenThrow(DomainException.notFound("upload", "unknown upload: " + UPLOAD_ID));
 
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            bridge.accept(
-                SESSION_ID, new PluginPromptResources.StagedResource(UPLOAD_ID, BLOB_ID)));
+    assertEquals(
+        DomainErrorCode.NOT_FOUND,
+        assertThrows(
+                DomainException.class,
+                () ->
+                    bridge.accept(
+                        SESSION_ID, new PluginPromptResources.StagedResource(UPLOAD_ID, BLOB_ID)))
+            .code());
     verify(refManager, never()).retainRef(any(), any());
     verify(uploadService, never()).delete(any());
   }

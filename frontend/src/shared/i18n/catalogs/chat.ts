@@ -1805,7 +1805,7 @@ export const chatCatalog = {
     'en-US': 'Entry type',
     'zh-CN': 'Entry 类型',
   },
-  'ai.runtime.event.detail.createTime': {
+  'ai.runtime.event.detail.createdAt': {
     'en-US': 'Time',
     'zh-CN': '时间',
   },

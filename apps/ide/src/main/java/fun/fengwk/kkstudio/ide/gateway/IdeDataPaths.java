@@ -2,12 +2,11 @@ package fun.fengwk.kkstudio.ide.gateway;
 
 import jakarta.servlet.http.HttpServletRequest;
 
+import fun.fengwk.kkstudio.common.uri.UrlEncoding;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.cluster.IdeInternalPaths;
 
 import java.net.URI;
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.UUID;
@@ -59,7 +58,7 @@ public final class IdeDataPaths {
         + "&"
         + PATH_PARAMETER
         + "="
-        + URLEncoder.encode(rawPathAndQuery, StandardCharsets.UTF_8);
+        + UrlEncoding.encode(rawPathAndQuery);
   }
 
   /** 浏览器 path 必须是以 {@code /} 起始的 view 相对路径；拒绝点段、反斜杠与编码分隔符，避免 Daemon 拼接内部基址后被归一化跳出视图作用域。 */

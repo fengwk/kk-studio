@@ -6,6 +6,7 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.model.HarnessJson;
 import fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport;
@@ -53,16 +54,9 @@ public final class InvocationJsonSupport {
     return JsonCodecSupport.object(value, context);
   }
 
+  /** 字段集合与上下文名称的适配：校验由 {@link JsonCodecSupport#requireFields} 唯一实现。 */
   public static void requireFields(ObjectNode node, String context, String... names) {
-    Set<String> expected = Set.of(names);
-    if (node.size() != expected.size()) {
-      throw new IllegalArgumentException(context + " must declare exactly " + expected);
-    }
-    for (String name : expected) {
-      if (!node.has(name)) {
-        throw new IllegalArgumentException(context + " must declare " + name);
-      }
-    }
+    JsonCodecSupport.requireFields(node, Set.of(names), context);
   }
 
   public static JsonNode required(ObjectNode node, String field, String context) {
@@ -177,7 +171,7 @@ public final class InvocationJsonSupport {
       return null;
     }
     try {
-      return UUID.fromString(value);
+      return Uuids.parseCanonical(value, context + "." + field);
     } catch (IllegalArgumentException error) {
       throw new IllegalArgumentException(
           context + "." + field + " must be a canonical UUID string", error);

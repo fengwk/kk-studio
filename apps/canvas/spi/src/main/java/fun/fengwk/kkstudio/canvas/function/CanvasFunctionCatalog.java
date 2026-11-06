@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.canvas.function;
 
 import fun.fengwk.kkstudio.canvas.function.CanvasJson.JsonArray;
 import fun.fengwk.kkstudio.canvas.function.CanvasJson.JsonObject;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.hash.Sha256;
 
 import java.nio.charset.StandardCharsets;
@@ -171,7 +172,8 @@ public final class CanvasFunctionCatalog {
 
     public void requireAvailable() {
       if (!enabled) {
-        throw new IllegalArgumentException("Canvas Function is unavailable: " + unavailableReason);
+        throw DomainException.conflict(
+            "FUNCTION_RUN_CONFLICT", "Canvas Function is unavailable: " + unavailableReason);
       }
     }
   }

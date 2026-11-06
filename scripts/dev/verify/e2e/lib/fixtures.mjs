@@ -84,7 +84,7 @@ export function canonicalSeedCatalog(models) {
 
 /**
  * Model config 校验矩阵。
- * ok=true 期望 2xx；ok=false 期望 4xx 且 message 匹配。
+ * ok=true 期望 2xx；ok=false 期望 4xx，锁定 expectCode 与 message。
  */
 export function modelConfigMatrix() {
   const good = () => baseModelConfig()
@@ -100,7 +100,8 @@ export function modelConfigMatrix() {
       id: `invalid.protocol_options_${suffix}`,
       ok: false,
       expectStatus: 400,
-      messageIncludes: /protocolOptionsJson|Failed to read request|Bad Request/i,
+      expectCode: 'validation',
+      messageIncludes: /protocolOptionsJson/,
       title: `protocolOptionsJson 严格边界：${suffix}`,
       build: () => baseModelConfig({
         variants: [{ id: 'default', promptCacheRetention: 'SHORT', protocolOptionsJson }],
@@ -192,6 +193,7 @@ export function modelConfigMatrix() {
       id: 'invalid.effort_without_reasoning_ability',
       ok: false,
       expectStatus: 400,
+      expectCode: 'validation',
       messageIncludes: /reasoningEffort.*reasoning|reasoning.*false/i,
       title: 'reasoning=false 但 variant 仍声明 effort',
       build: () =>
@@ -204,6 +206,7 @@ export function modelConfigMatrix() {
       id: 'invalid.defaultVariant_mismatch',
       ok: false,
       expectStatus: 400,
+      expectCode: 'validation',
       messageIncludes: /defaultVariant must match/i,
       title: 'defaultVariant 不在 variants',
       build: () => baseModelConfig({ defaultVariant: 'missing' }),
@@ -212,6 +215,7 @@ export function modelConfigMatrix() {
       id: 'invalid.empty_variants',
       ok: false,
       expectStatus: 400,
+      expectCode: 'validation',
       messageIncludes: /variant/i,
       title: 'variants 为空',
       build: () => baseModelConfig({ variants: [] }),
@@ -220,6 +224,7 @@ export function modelConfigMatrix() {
       id: 'invalid.context_non_positive',
       ok: false,
       expectStatus: 400,
+      expectCode: 'validation',
       messageIncludes: /context|limit/i,
       title: 'context <= 0',
       build: () => baseModelConfig({ limit: { context: 0, output: 1 } }),
@@ -228,6 +233,7 @@ export function modelConfigMatrix() {
       id: 'invalid.output_gt_context',
       ok: false,
       expectStatus: 400,
+      expectCode: 'validation',
       messageIncludes: /output|context|limit/i,
       title: 'output > context',
       build: () => baseModelConfig({ limit: { context: 100, output: 200 } }),
@@ -236,7 +242,8 @@ export function modelConfigMatrix() {
       id: 'invalid.pricing_numeric',
       ok: false,
       expectStatus: 400,
-      messageIncludes: /Failed to read request/i,
+      expectCode: 'validation',
+      messageIncludes: /config\.pricing\.base\.input has an invalid value/,
       title: '价格必须是十进制字符串而非 JSON 数值',
       build: () => baseModelConfig({ pricing: basePricing({ base: { input: 1 } }) }),
     },
@@ -244,6 +251,7 @@ export function modelConfigMatrix() {
       id: 'invalid.pricing_negative',
       ok: false,
       expectStatus: 400,
+      expectCode: 'validation',
       messageIncludes: /negative|pricing|input/i,
       title: '价格为负',
       build: () => baseModelConfig({ pricing: basePricing({ base: { output: '-1' } }) }),
@@ -252,6 +260,7 @@ export function modelConfigMatrix() {
       id: 'invalid.empty_modalities',
       ok: false,
       expectStatus: 400,
+      expectCode: 'validation',
       messageIncludes: /modalit|abilities/i,
       title: 'inputModalities 为空',
       build: () =>
@@ -263,6 +272,7 @@ export function modelConfigMatrix() {
       id: 'invalid.duplicate_variant_id',
       ok: false,
       expectStatus: 400,
+      expectCode: 'validation',
       messageIncludes: /duplicate|variant/i,
       title: 'variant id 重复',
       build: () =>
@@ -277,6 +287,7 @@ export function modelConfigMatrix() {
       id: 'invalid.missing_config',
       ok: false,
       expectStatus: 400,
+      expectCode: 'validation',
       messageIncludes: /config/i,
       title: '缺少 config',
       build: () => null,
@@ -286,6 +297,7 @@ export function modelConfigMatrix() {
       id: 'invalid.variant_blank_id',
       ok: false,
       expectStatus: 400,
+      expectCode: 'validation',
       messageIncludes: /variant|id|blank/i,
       title: 'variant id 空白',
       build: () =>
@@ -297,7 +309,8 @@ export function modelConfigMatrix() {
       id: 'invalid.unknown_variant_field',
       ok: false,
       expectStatus: 400,
-      messageIncludes: /Failed to read request|Bad Request|unknown/i,
+      expectCode: 'validation',
+      messageIncludes: /config\.variants\[0\]\.temperature is not allowed/,
       title: '未知 variant 字段被拒绝',
       build: () =>
         baseModelConfig({
@@ -308,6 +321,7 @@ export function modelConfigMatrix() {
       id: 'invalid.oversized_reasoning_effort',
       ok: false,
       expectStatus: 400,
+      expectCode: 'validation',
       messageIncludes: /reasoningEffort|variant/i,
       title: 'reasoningEffort 超过长度限制',
       build: () =>
@@ -319,6 +333,7 @@ export function modelConfigMatrix() {
       id: 'invalid.missing_prompt_cache_retention',
       ok: false,
       expectStatus: 400,
+      expectCode: 'validation',
       messageIncludes: /promptCacheRetention.*required/i,
       title: '缺少 promptCacheRetention',
       build: () =>
@@ -330,7 +345,8 @@ export function modelConfigMatrix() {
       id: 'invalid.unsupported_prompt_cache_retention',
       ok: false,
       expectStatus: 400,
-      messageIncludes: /promptCacheRetention.*invalid|Failed to read request|Bad Request/i,
+      expectCode: 'validation',
+      messageIncludes: /config\.variants\[0\]\.promptCacheRetention has an invalid value/,
       title: '非法 promptCacheRetention 档位',
       build: () =>
         baseModelConfig({
@@ -375,6 +391,7 @@ export function agentConfigMatrix() {
       id: 'invalid.missing_tools',
       ok: false,
       expectStatus: 400,
+      expectCode: 'validation',
       messageIncludes: /tools.*required/i,
       title: 'tools 必填',
       build: () => ({
@@ -386,6 +403,7 @@ export function agentConfigMatrix() {
       id: 'invalid.missing_skills',
       ok: false,
       expectStatus: 400,
+      expectCode: 'validation',
       messageIncludes: /skills.*required/i,
       title: 'skills 必填',
       build: () => ({
@@ -397,6 +415,7 @@ export function agentConfigMatrix() {
       id: 'invalid.missing_subagents',
       ok: false,
       expectStatus: 400,
+      expectCode: 'validation',
       messageIncludes: /subagents.*required/i,
       title: 'subagents 必填',
       build: () => ({
@@ -408,6 +427,7 @@ export function agentConfigMatrix() {
       id: 'invalid.unknown_tool',
       ok: false,
       expectStatus: 400,
+      expectCode: 'validation',
       messageIncludes: /unknown agent tool/i,
       title: '未知 tool name',
       build: () => ({
@@ -420,6 +440,7 @@ export function agentConfigMatrix() {
       id: 'invalid.duplicate_skill_name',
       ok: false,
       expectStatus: 400,
+      expectCode: 'validation',
       messageIncludes: /duplicate|skill/i,
       title: '全局 Skill 名称重复',
       // skills 的 wire shape 是 (packageName, name) 引用列表；两个相同引用必须命中 duplicate 校验。
@@ -436,6 +457,7 @@ export function agentConfigMatrix() {
       id: 'invalid.duplicate_subagent',
       ok: false,
       expectStatus: 400,
+      expectCode: 'validation',
       messageIncludes: /duplicate|subagent/i,
       title: 'subagents 重复',
       build: () => ({
@@ -448,6 +470,7 @@ export function agentConfigMatrix() {
       id: 'invalid.unknown_subagent',
       ok: false,
       expectStatus: 404,
+      expectCode: 'not_found',
       messageIncludes: /agent.*not found|not found/i,
       title: '未知 subagent 引用',
       build: () => ({
@@ -460,7 +483,8 @@ export function agentConfigMatrix() {
       id: 'invalid.unknown_field_rejected',
       ok: false,
       expectStatus: 400,
-      messageIncludes: /Failed to read request|Bad Request/i,
+      expectCode: 'validation',
+      messageIncludes: /config\.unexpected is not allowed/,
       title: '未知字段 rejected',
       build: () => ({
         tools: [],
@@ -527,7 +551,16 @@ export async function deleteEnvironmentFixture(ctx, environmentId) {
     card = json
   } catch (error) {
     if (error instanceof HttpError && error.status === 404) {
-      return
+      // 只有 not_found 信封表示已清理完成，其它 404 形状原样失败。
+      let problem = null
+      try {
+        problem = JSON.parse(error.body)
+      } catch {
+        problem = null
+      }
+      if (problem?.code === 'not_found') {
+        return
+      }
     }
     throw error
   }

@@ -20,6 +20,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
@@ -435,9 +436,10 @@ class PostgresqlSubagentContinuationTest {
                   childId, child.headEntryId(), child.nextCommandSequence()),
               List.of(set, prompt("direct")));
       assertThrows(
-          IllegalArgumentException.class,
+          DomainException.class,
           () -> runtime.acceptCommands(direct, AcceptancePreflight.IDENTITY));
       UUID continuationTicket = UUID.randomUUID();
+      // 子线程 spawn 的请求构造器先拒绝子线程环境命令，因此仍以 IllegalArgumentException 拒绝且不写 join。
       assertThrows(
           IllegalArgumentException.class,
           () ->
@@ -471,7 +473,7 @@ class PostgresqlSubagentContinuationTest {
             List.of(commands.getFirst().withPayload(new SetEnvironmentCommandPayload(null)));
     ThreadState child = before.thread();
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () ->
             runtime.acceptCommands(
                 new AcceptCommandsCommand(
@@ -481,7 +483,7 @@ class PostgresqlSubagentContinuationTest {
                 rewrite));
     UUID rewrittenTicket = UUID.randomUUID();
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () ->
             SpawnTestSupport.acceptAndJoin(
                 runtime,

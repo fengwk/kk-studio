@@ -233,10 +233,9 @@ registerCase({
             { type: 'RENAME_NODE', nodeId, expectedName: 'stale-name', name: 'renamed' },
           ],
         }),
-      { status: 409 },
+      { status: 409, code: 'conflict', reason: 'CANVAS_COMMAND_CONFLICT' },
     )
     const staleBody = JSON.parse(staleRename.body)
-    assert(staleBody.code === 'conflict' && typeof staleBody.reason === 'string' && staleBody.reason.length > 0, staleRename.body)
     assert(
       staleBody.detail === 'command prerequisites are stale; no write was applied'
         && Array.isArray(staleBody.errors?.conflicts)
@@ -262,7 +261,7 @@ registerCase({
             },
           ],
         }),
-      { status: 409 },
+      { status: 409, code: 'conflict', reason: 'CANVAS_COMMAND_CONFLICT' },
     )
     assert(
       JSON.parse(layoutConflict.body).errors?.conflicts?.[0]?.group === 'LAYOUT',
@@ -461,10 +460,9 @@ registerCase({
             idempotencyKey: cid(),
             commands,
           }),
-        { status: 409 },
+        { status: 409, code: 'conflict', reason: 'CANVAS_COMMAND_CONFLICT' },
       )
       const body = JSON.parse(failure.body)
-      assert(body.code === 'conflict' && typeof body.reason === 'string' && body.reason.length > 0, failure.body)
       assert(Array.isArray(body.errors?.conflicts) && body.errors.conflicts.length > 0, failure.body)
       for (const conflict of body.errors.conflicts) {
         assert(!('revision' in conflict) && !('baseline' in conflict), failure.body)
@@ -619,7 +617,7 @@ registerCase({
           idempotencyKey: boundKey,
           commands: [{ type: 'RENAME_NODE', nodeId: consumerNodeId, expectedName: 'consumer', name: 'other' }],
         }),
-      { status: 409 },
+      { status: 409, code: 'conflict', reason: 'IDEMPOTENCY_CONFLICT' },
     )
     await expectHttpError(
       () =>
@@ -629,7 +627,7 @@ registerCase({
             { type: 'RENAME_NODE', nodeId: consumerNodeId, expectedName: 'consumer-2', name: 'x' },
           ],
         }),
-      { status: 404 },
+      { status: 404, code: 'not_found' },
     )
 
     // 严格请求校验：全部在触达写入前 400。
@@ -671,10 +669,10 @@ registerCase({
     ]) {
       await expectHttpError(
         () => ctx.call('POST', `/api/canvas/canvases/${canvas.id}/commands`, request),
-        { status: 400 },
+        { status: 400, code: 'validation' },
       )
     }
-    await expectHttpError(() => ctx.call('GET', '/api/canvas/canvases/not-a-uuid'), { status: 400 })
+    await expectHttpError(() => ctx.call('GET', '/api/canvas/canvases/not-a-uuid'), { status: 400, code: 'validation' })
 
     const finalSnapshot = await readSnapshot(ctx, canvas.id)
     assert(

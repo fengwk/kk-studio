@@ -1004,11 +1004,17 @@ export async function stopThreadForCleanup(
       })
       return
     } catch (error) {
-      if (
-        !(error instanceof HttpError)
-        || error.status !== 409
-        || !String(error.body).includes('STALE_VERSION')
-      ) {
+      if (!(error instanceof HttpError) || error.status !== 409) {
+        throw error
+      }
+      // 只有 Thread version CAS 过期（conflict + STALE_VERSION）可以重读重试，其它冲突原样抛出。
+      let problem = null
+      try {
+        problem = JSON.parse(error.body)
+      } catch {
+        problem = null
+      }
+      if (problem?.code !== 'conflict' || problem?.reason !== 'STALE_VERSION') {
         throw error
       }
       lastError = error

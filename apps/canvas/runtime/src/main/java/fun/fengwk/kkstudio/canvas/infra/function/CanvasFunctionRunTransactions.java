@@ -305,7 +305,9 @@ public class CanvasFunctionRunTransactions {
       String verification) {
     Objects.requireNonNull(canvasId, "canvasId");
     Objects.requireNonNull(nodeId, "nodeId");
-    Objects.requireNonNull(resolution, "resolution");
+    if (resolution == null) {
+      throw DomainException.validation("resolution", "resolution is required");
+    }
     String validatedRequestId = CanvasFunctionRequestIds.validate(requestId);
     String validatedVerification = validateVerification(verification);
     CanvasDocument document = requireDocumentForUpdate(canvasId);

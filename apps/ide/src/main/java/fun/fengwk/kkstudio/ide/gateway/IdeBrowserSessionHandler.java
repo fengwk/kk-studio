@@ -5,14 +5,13 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.stereotype.Component;
 
+import fun.fengwk.kkstudio.common.uri.UrlEncoding;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.IdeBootstrapTicketService;
 import fun.fengwk.kkstudio.ide.IdeCommandTransport;
 import fun.fengwk.kkstudio.ide.IdeGenerationState;
 
 import java.io.IOException;
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -90,8 +89,7 @@ public final class IdeBrowserSessionHandler {
     response.addHeader("Set-Cookie", cookie.toString());
     response.setStatus(HttpServletResponse.SC_SEE_OTHER);
     response.setHeader(
-        "Location",
-        base + "?workspace=" + URLEncoder.encode(ticket.workspacePath(), StandardCharsets.UTF_8));
+        "Location", base + "?workspace=" + UrlEncoding.encode(ticket.workspacePath()));
   }
 
   /** 探测当前 view 的 cookie；不刷新 cookie、不续租视图。 */

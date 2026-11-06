@@ -1020,8 +1020,11 @@ class HarnessRuntimeJoinAcceptanceTest {
             ticketId,
             commands.getFirst().requestHash());
 
-    assertThrows(
-        IllegalArgumentException.class, () -> runtime.spawn(request, AcceptancePreflight.IDENTITY));
+    assertEquals(
+        DomainErrorCode.VALIDATION,
+        assertThrows(
+                DomainException.class, () -> runtime.spawn(request, AcceptancePreflight.IDENTITY))
+            .code());
     assertTrue(store.transaction(tx -> tx.sessions().find(sessionId)).isEmpty());
     assertTrue(store.transaction(tx -> tx.threads().find(threadId)).isEmpty());
     assertTrue(runtime.findJoin(ticketId).isEmpty());

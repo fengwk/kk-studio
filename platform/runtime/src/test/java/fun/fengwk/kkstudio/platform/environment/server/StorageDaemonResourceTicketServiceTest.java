@@ -10,6 +10,7 @@ import static org.mockito.Mockito.when;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonResourceTicketService.Ticket;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonResourceTicketService.TransferRequest;
@@ -103,6 +104,21 @@ class StorageDaemonResourceTicketServiceTest {
             Ticket.Failed.class, service.commit(ENVIRONMENT_ID, INVOCATION_ID, requested));
 
     assertEquals("resource upload is unavailable", failed.message());
+  }
+
+  /** Daemon 后台协议将存储验证冲突转换成不泄漏内部细节的失败票据。 */
+  @Test
+  void commitMapsStorageVerificationToSafeFailure() {
+    StorageUploadService uploads = mock(StorageUploadService.class);
+    UUID uploadId = UUID.randomUUID();
+    when(uploads.complete(uploadId))
+        .thenThrow(DomainException.conflict("STORAGE_VERIFICATION", "private detail"));
+    Ticket.Failed failure =
+        assertInstanceOf(
+            Ticket.Failed.class,
+            new StorageDaemonResourceTicketService(uploads)
+                .commit(ENVIRONMENT_ID, INVOCATION_ID, uploadId));
+    assertEquals("uploaded object is not ready yet", failure.message());
   }
 
   /** 存储异常和含秘密的异常原文绝不能穿透到 Daemon 控制面。 */

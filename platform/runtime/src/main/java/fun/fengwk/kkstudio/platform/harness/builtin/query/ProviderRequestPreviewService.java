@@ -375,7 +375,8 @@ public final class ProviderRequestPreviewService {
   private static Entry requireSessionEntry(Map<UUID, Entry> entries, UUID entryId, String name) {
     Entry entry = entries.get(entryId);
     if (entry == null) {
-      throw new IllegalArgumentException(name + " does not belong to the session: " + entryId);
+      throw DomainException.validation(
+          "entry", name + " does not belong to the session: " + entryId);
     }
     return entry;
   }
@@ -386,8 +387,8 @@ public final class ProviderRequestPreviewService {
    */
   private static UUID requireRequestHead(Entry output) {
     if (!carriesModelOutputMetadata(output)) {
-      throw new IllegalArgumentException(
-          "provider request preview requires an assistant model output entry");
+      throw DomainException.validation(
+          "entry", "provider request preview requires an assistant model output entry");
     }
     if (output.parentEntryId() == null) {
       throw new IllegalStateException(

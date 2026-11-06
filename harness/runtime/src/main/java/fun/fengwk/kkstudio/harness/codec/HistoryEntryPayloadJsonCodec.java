@@ -51,6 +51,7 @@ import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInputReceipt;
 import fun.fengwk.kkstudio.harness.model.HarnessJson;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
+import fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport;
 import fun.fengwk.kkstudio.harness.tool.TurnMediaCapabilities;
 
 import java.time.Instant;
@@ -486,14 +487,14 @@ public final class HistoryEntryPayloadJsonCodec {
 
   private static RootPayload decodeRoot(JsonNode value) {
     ObjectNode node = HistoryValueCodecs.requireObject(value, "ROOT");
-    HistoryValueCodecs.requireExactFields(node, ROOT_FIELDS, "ROOT");
+    JsonCodecSupport.requireFields(node, ROOT_FIELDS, "ROOT");
     return new RootPayload(
         HistoryValueCodecs.decodeBranchSettings(node.get("settings"), "ROOT.settings"));
   }
 
   private static TurnStartPayload decodeTurnStart(JsonNode value) {
     ObjectNode node = HistoryValueCodecs.requireObject(value, "TURN_START");
-    HistoryValueCodecs.requireExactFields(node, TURN_START_FIELDS, "TURN_START");
+    JsonCodecSupport.requireFields(node, TURN_START_FIELDS, "TURN_START");
     return new TurnStartPayload(
         HistoryValueCodecs.readEnum(
             TurnStartReason.class, HistoryValueCodecs.text(node, "reason"), "TURN_START.reason"),
@@ -513,8 +514,7 @@ public final class HistoryEntryPayloadJsonCodec {
 
   private static TurnCapabilities decodeTurnCapabilities(JsonNode value) {
     ObjectNode node = HistoryValueCodecs.requireObject(value, "TURN_START.capabilities");
-    HistoryValueCodecs.requireExactFields(
-        node, TURN_CAPABILITIES_FIELDS, "TURN_START.capabilities");
+    JsonCodecSupport.requireFields(node, TURN_CAPABILITIES_FIELDS, "TURN_START.capabilities");
     ArrayNode toolValues =
         HistoryValueCodecs.requireArray(
             node.get("toolBindings"), "TURN_START.capabilities.toolBindings");
@@ -529,7 +529,7 @@ public final class HistoryEntryPayloadJsonCodec {
     for (JsonNode subagentValue : subagentValues) {
       String context = "TURN_START.capabilities.subagentBindings[]";
       ObjectNode subagent = HistoryValueCodecs.requireObject(subagentValue, context);
-      HistoryValueCodecs.requireExactFields(subagent, SUBAGENT_BINDING_FIELDS, context);
+      JsonCodecSupport.requireFields(subagent, SUBAGENT_BINDING_FIELDS, context);
       subagentBindings.add(
           new SubagentBinding(
               HistoryValueCodecs.requiredText(subagent, "name", context),
@@ -542,7 +542,7 @@ public final class HistoryEntryPayloadJsonCodec {
   private static TurnMediaCapabilities decodeTurnMediaCapabilities(JsonNode value) {
     String context = "TURN_START.capabilities.mediaCapabilities";
     ObjectNode node = HistoryValueCodecs.requireObject(value, context);
-    HistoryValueCodecs.requireExactFields(node, TURN_MEDIA_CAPABILITIES_FIELDS, context);
+    JsonCodecSupport.requireFields(node, TURN_MEDIA_CAPABILITIES_FIELDS, context);
     return new TurnMediaCapabilities(
         decodeModalities(node.get("inputModalities"), context + ".inputModalities"),
         decodeModalities(node.get("userModalities"), context + ".userModalities"),
@@ -571,7 +571,7 @@ public final class HistoryEntryPayloadJsonCodec {
 
   private static MessagePayload decodeMessage(JsonNode value) {
     ObjectNode node = HistoryValueCodecs.requireObject(value, "MESSAGE");
-    HistoryValueCodecs.requireExactFields(node, MESSAGE_FIELDS, "MESSAGE");
+    JsonCodecSupport.requireFields(node, MESSAGE_FIELDS, "MESSAGE");
     AgentMessage message = MESSAGE_CODEC.decodeNode(node.get("message"));
     JsonNode assistantMetadata = node.get("assistantMetadata");
     AssistantMessageMetadata metadata =
@@ -586,7 +586,7 @@ public final class HistoryEntryPayloadJsonCodec {
 
   private static CustomEntryPayload decodeCustomEntry(JsonNode value) {
     ObjectNode node = HistoryValueCodecs.requireObject(value, "CUSTOM");
-    HistoryValueCodecs.requireExactFields(node, CUSTOM_FIELDS, "CUSTOM");
+    JsonCodecSupport.requireFields(node, CUSTOM_FIELDS, "CUSTOM");
     return new CustomEntryPayload(
         CanonicalIdentifiers.requireCanonicalIdentifier(
             HistoryValueCodecs.text(node, "contributorId"), "contributorId"),
@@ -597,7 +597,7 @@ public final class HistoryEntryPayloadJsonCodec {
 
   private static CustomMessagePayload decodeCustomMessage(JsonNode value) {
     ObjectNode node = HistoryValueCodecs.requireObject(value, "CUSTOM_MESSAGE");
-    HistoryValueCodecs.requireExactFields(node, CUSTOM_MESSAGE_FIELDS, "CUSTOM_MESSAGE");
+    JsonCodecSupport.requireFields(node, CUSTOM_MESSAGE_FIELDS, "CUSTOM_MESSAGE");
     return new CustomMessagePayload(
         CanonicalIdentifiers.requireCanonicalIdentifier(
             HistoryValueCodecs.text(node, "contributorId"), "contributorId"),
@@ -612,11 +612,10 @@ public final class HistoryEntryPayloadJsonCodec {
 
   private static ModelAttemptFailurePayload decodeModelAttemptFailure(JsonNode value) {
     ObjectNode node = HistoryValueCodecs.requireObject(value, "MODEL_ATTEMPT_FAILURE");
-    HistoryValueCodecs.requireExactFields(
-        node, MODEL_ATTEMPT_FAILURE_FIELDS, "MODEL_ATTEMPT_FAILURE");
+    JsonCodecSupport.requireFields(node, MODEL_ATTEMPT_FAILURE_FIELDS, "MODEL_ATTEMPT_FAILURE");
     ObjectNode attemptNode =
         HistoryValueCodecs.requireObject(node.get("attempt"), "MODEL_ATTEMPT_FAILURE.attempt");
-    HistoryValueCodecs.requireExactFields(
+    JsonCodecSupport.requireFields(
         attemptNode, ATTEMPT_SNAPSHOT_FIELDS, "MODEL_ATTEMPT_FAILURE.attempt");
     ModelAttemptSnapshot attempt =
         new ModelAttemptSnapshot(
@@ -628,7 +627,7 @@ public final class HistoryEntryPayloadJsonCodec {
             HistoryValueCodecs.text(attemptNode, "thinking"));
     ObjectNode modelNode =
         HistoryValueCodecs.requireObject(node.get("model"), "MODEL_ATTEMPT_FAILURE.model");
-    HistoryValueCodecs.requireExactFields(
+    JsonCodecSupport.requireFields(
         modelNode, orderedSet("modelName", "variant"), "MODEL_ATTEMPT_FAILURE.model");
     ModelSelection model =
         ModelSelection.model(
@@ -647,7 +646,7 @@ public final class HistoryEntryPayloadJsonCodec {
 
   private static NativeCompactionPayload decodeNativeCompaction(JsonNode value) {
     ObjectNode node = HistoryValueCodecs.requireObject(value, "NATIVE_COMPACTION");
-    HistoryValueCodecs.requireExactFields(node, NATIVE_COMPACTION_FIELDS, "NATIVE_COMPACTION");
+    JsonCodecSupport.requireFields(node, NATIVE_COMPACTION_FIELDS, "NATIVE_COMPACTION");
     return new NativeCompactionPayload(
         nativeText(node, "trigger"),
         nativeCount(node, "preTokens"),
@@ -691,13 +690,13 @@ public final class HistoryEntryPayloadJsonCodec {
 
   private static AssistantErrorPayload decodeAssistantError(JsonNode value) {
     ObjectNode node = HistoryValueCodecs.requireObject(value, "ASSISTANT_ERROR");
-    HistoryValueCodecs.requireExactFields(node, ASSISTANT_ERROR_FIELDS, "ASSISTANT_ERROR");
+    JsonCodecSupport.requireFields(node, ASSISTANT_ERROR_FIELDS, "ASSISTANT_ERROR");
     JsonNode attempt = node.get("attempt");
     ModelAttemptSnapshot snapshot = null;
     if (!attempt.isNull()) {
       ObjectNode snapshotNode =
           HistoryValueCodecs.requireObject(attempt, "ASSISTANT_ERROR.attempt");
-      HistoryValueCodecs.requireExactFields(
+      JsonCodecSupport.requireFields(
           snapshotNode, ATTEMPT_SNAPSHOT_FIELDS, "ASSISTANT_ERROR.attempt");
       snapshot =
           new ModelAttemptSnapshot(
@@ -713,13 +712,13 @@ public final class HistoryEntryPayloadJsonCodec {
 
   private static AssistantAbortedPayload decodeAssistantAborted(JsonNode value) {
     ObjectNode node = HistoryValueCodecs.requireObject(value, "ASSISTANT_ABORTED");
-    HistoryValueCodecs.requireExactFields(node, ASSISTANT_ABORTED_FIELDS, "ASSISTANT_ABORTED");
+    JsonCodecSupport.requireFields(node, ASSISTANT_ABORTED_FIELDS, "ASSISTANT_ABORTED");
     return new AssistantAbortedPayload(MESSAGE_CODEC.decodeNode(node.get("message")));
   }
 
   private static CompactionPayload decodeCompaction(JsonNode value) {
     ObjectNode node = HistoryValueCodecs.requireObject(value, "COMPACTION");
-    HistoryValueCodecs.requireExactFields(node, COMPACTION_FIELDS, "COMPACTION");
+    JsonCodecSupport.requireFields(node, COMPACTION_FIELDS, "COMPACTION");
     JsonNode assistantMetadata = node.get("assistantMetadata");
     AssistantMessageMetadata metadata =
         assistantMetadata.isNull()
@@ -783,7 +782,7 @@ public final class HistoryEntryPayloadJsonCodec {
       return null;
     }
     ObjectNode node = HistoryValueCodecs.requireObject(value, "TURN_START.compaction");
-    HistoryValueCodecs.requireExactFields(node, COMPACTION_START_FIELDS, "TURN_START.compaction");
+    JsonCodecSupport.requireFields(node, COMPACTION_START_FIELDS, "TURN_START.compaction");
     JsonNode executionNode = node.get("execution");
     ExecutionSelection execution =
         executionNode == null || executionNode.isNull()
@@ -811,7 +810,7 @@ public final class HistoryEntryPayloadJsonCodec {
 
   private static TurnEndPayload decodeTurnEnd(JsonNode value) {
     ObjectNode node = HistoryValueCodecs.requireObject(value, "TURN_END");
-    HistoryValueCodecs.requireExactFields(node, TURN_END_FIELDS, "TURN_END");
+    JsonCodecSupport.requireFields(node, TURN_END_FIELDS, "TURN_END");
     return new TurnEndPayload(
         HistoryValueCodecs.requiredPositiveId(node, "turnStartEntryId", "TURN_END"),
         HistoryValueCodecs.readEnum(
@@ -823,7 +822,7 @@ public final class HistoryEntryPayloadJsonCodec {
 
   private static NotificationPayload decodeNotification(JsonNode value) {
     ObjectNode node = HistoryValueCodecs.requireObject(value, "NOTIFICATION");
-    HistoryValueCodecs.requireExactFields(node, NOTIFICATION_FIELDS, "NOTIFICATION");
+    JsonCodecSupport.requireFields(node, NOTIFICATION_FIELDS, "NOTIFICATION");
     return new NotificationPayload(
         HistoryValueCodecs.requiredPositiveId(node, "notificationId", "NOTIFICATION"),
         HistoryValueCodecs.readEnum(
@@ -834,7 +833,7 @@ public final class HistoryEntryPayloadJsonCodec {
 
   private static SettingsPayload decodeSettings(JsonNode value) {
     ObjectNode node = HistoryValueCodecs.requireObject(value, "SETTINGS");
-    HistoryValueCodecs.requireExactFields(node, SETTINGS_FIELDS, "SETTINGS");
+    JsonCodecSupport.requireFields(node, SETTINGS_FIELDS, "SETTINGS");
     return new SettingsPayload(
         HistoryValueCodecs.decodeBranchSettings(node.get("settings"), "SETTINGS.settings"),
         HistoryValueCodecs.requiredPositiveId(node, "ownerThreadId", "SETTINGS"));
@@ -842,7 +841,7 @@ public final class HistoryEntryPayloadJsonCodec {
 
   private static ForkPayload decodeFork(JsonNode value) {
     ObjectNode node = HistoryValueCodecs.requireObject(value, "FORK");
-    HistoryValueCodecs.requireExactFields(node, FORK_FIELDS, "FORK");
+    JsonCodecSupport.requireFields(node, FORK_FIELDS, "FORK");
     return new ForkPayload(
         HistoryValueCodecs.readEnum(
             ForkMode.class, HistoryValueCodecs.text(node, "mode"), "FORK.mode"),
@@ -852,14 +851,14 @@ public final class HistoryEntryPayloadJsonCodec {
 
   private static AssistantError decodeError(JsonNode value) {
     ObjectNode node = HistoryValueCodecs.requireObject(value, "ASSISTANT_ERROR.error");
-    HistoryValueCodecs.requireExactFields(node, ERROR_FIELDS, "ASSISTANT_ERROR.error");
+    JsonCodecSupport.requireFields(node, ERROR_FIELDS, "ASSISTANT_ERROR.error");
     return new AssistantError(
         HistoryValueCodecs.text(node, "code"), HistoryValueCodecs.text(node, "message"));
   }
 
   private static ToolResultMetadata decodeToolResultMetadata(JsonNode value) {
     ObjectNode node = HistoryValueCodecs.requireObject(value, "toolResultMetadata");
-    HistoryValueCodecs.requireExactFields(node, TOOL_RESULT_METADATA_FIELDS, "toolResultMetadata");
+    JsonCodecSupport.requireFields(node, TOOL_RESULT_METADATA_FIELDS, "toolResultMetadata");
     return new ToolResultMetadata(
         HistoryValueCodecs.nullablePositiveId(node, "invocationId", "toolResultMetadata"),
         HistoryValueCodecs.requiredPositiveId(node, "assistantEntryId", "toolResultMetadata"),

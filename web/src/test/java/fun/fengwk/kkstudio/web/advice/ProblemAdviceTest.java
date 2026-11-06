@@ -13,6 +13,7 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -145,10 +146,15 @@ class ProblemAdviceTest {
     }
   }
 
-  /** 普通 parser 异常不回显正文。 */
+  /** 无法定位字段的读取失败不回显正文。 */
   @Test
   void unreadableBodyIsSanitized() {
-    Map<String, Object> ordinary = advice.unreadable().getBody();
+    Map<String, Object> ordinary =
+        advice
+            .unreadable(
+                new HttpMessageNotReadableException(
+                    "Failed", new IllegalStateException("secret"), null))
+            .getBody();
     assertEquals("validation", ordinary.get("code"));
     assertEquals("Failed to read request", ordinary.get("detail"));
   }

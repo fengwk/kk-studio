@@ -72,7 +72,7 @@ registerCase({
       // stale expectedVersion must conflict before any write
       await expectHttpError(
         () => ctx.call('PUT', path, { expectedVersion: '999999', installConfig: linuxInstallConfig() }),
-        { status: 409 },
+        { status: 409, code: 'version_conflict' },
       )
 
       const { json: putJson } = await ctx.call('PUT', path, {
@@ -123,7 +123,10 @@ registerCase({
         { expectedVersion: version, installConfig: null },
       ]
       for (const body of invalidBodies) {
-        const error = await expectHttpError(() => ctx.call('PUT', path, body), { status: 400 })
+        const error = await expectHttpError(() => ctx.call('PUT', path, body), {
+          status: 400,
+          code: 'validation',
+        })
         assert(!String(error.body).includes('ftp://nope'), 'validation error must not echo submitted values')
         assert(!String(error.body).includes('/opt/jdk'), 'validation error must not echo submitted values')
       }
@@ -142,7 +145,7 @@ registerCase({
       // stale expectedVersion after a successful write also conflicts
       await expectHttpError(
         () => ctx.call('PUT', path, { expectedVersion: '0', installConfig: linuxInstallConfig() }),
-        { status: 409 },
+        { status: 409, code: 'version_conflict' },
       )
     } finally {
       const { json } = await ctx.call(
@@ -209,25 +212,44 @@ function assertUninstallScript(script, secrets) {
   assertScriptOmits(script, 'jdtls', 'saved config field')
 }
 
-/** 下载失败只保留状态和端点，避免 code、响应正文进入失败报告。 */
+/** 下载失败只保留状态与 problem 机器字段，避免 code、响应正文进入失败报告。 */
 async function downloadInstallationScript(ctx, path) {
   try {
     return await ctx.call('GET', path)
   } catch (error) {
     if (error instanceof HttpError) {
-      throw new HttpError(error.status, 'install script download failed', path.split('?')[0])
+      let problem = null
+      try {
+        problem = JSON.parse(error.body)
+      } catch {
+        problem = null
+      }
+      const sanitized = JSON.stringify({
+        type: 'about:blank',
+        status: error.status,
+        code: problem?.code ?? null,
+        reason: problem?.reason ?? null,
+      })
+      throw new HttpError(error.status, sanitized, path.split('?')[0])
     }
     throw new Error('install script download failed before a usable HTTP response')
   }
 }
 
-/** 只报告状态，不回显错误响应正文。 */
-async function expectStatus(fn, status) {
+/** 锁定失败状态与 problem code；失败消息不回显响应正文。 */
+async function expectProblem(fn, { status, code }) {
   try {
     await fn()
   } catch (error) {
     assert(error instanceof HttpError, `expected HTTP ${status}`)
     assert(error.status === status, `expected HTTP ${status}, got ${error.status}`)
+    let problem = null
+    try {
+      problem = JSON.parse(error.body)
+    } catch {
+      problem = null
+    }
+    assert(problem?.code === code, `expected problem code ${code}, got ${problem?.code}`)
     return
   }
   assert(false, `expected HTTP ${status}`)
@@ -286,7 +308,7 @@ registerCase({
 
       await expectHttpError(
         () => ctx.call('POST', `${environmentPath}/install-codes`, { expectedVersion: '999999' }),
-        { status: 409 },
+        { status: 409, code: 'version_conflict' },
       )
 
       const issuedAtMs = Date.now()
@@ -341,15 +363,21 @@ registerCase({
         version = String(detail.version)
       }
       await checkRedemption()
-      await expectStatus(() => downloadInstallationScript(ctx, `${environmentPath}/install-script?code=${encodeURIComponent(code)}`), 400)
+      await expectProblem(
+        () => downloadInstallationScript(ctx, `${environmentPath}/install-script?code=${encodeURIComponent(code)}`),
+        { status: 400, code: 'validation' },
+      )
 
-      await expectStatus(() => downloadInstallationScript(ctx, `${environmentPath}/install-script`), 400)
-      await expectStatus(
+      await expectProblem(
+        () => downloadInstallationScript(ctx, `${environmentPath}/install-script`),
+        { status: 400, code: 'validation' },
+      )
+      await expectProblem(
         () => downloadInstallationScript(
           ctx,
           `${environmentPath}/install-script?code=${encodeURIComponent(`${code}x`)}`,
         ),
-        400,
+        { status: 400, code: 'validation' },
       )
 
       const issueCode = async () => {
@@ -363,7 +391,10 @@ registerCase({
       const replacedCode = await issueCode()
       const pendingCode = await issueCode()
       assert(pendingCode !== replacedCode, 'reissue must replace the pending code')
-      await expectStatus(() => downloadInstallationScript(ctx, `${environmentPath}/install-script?code=${encodeURIComponent(replacedCode)}`), 400)
+      await expectProblem(
+        () => downloadInstallationScript(ctx, `${environmentPath}/install-script?code=${encodeURIComponent(replacedCode)}`),
+        { status: 400, code: 'validation' },
+      )
 
       const { json: rotatedJson, headers: rotatedHeaders } = await ctx.call(
         'POST',
@@ -379,9 +410,9 @@ registerCase({
       version = String(rotated.version)
       assertInstallConfig(rotated.installConfig)
 
-      await expectStatus(
+      await expectProblem(
         () => downloadInstallationScript(ctx, `${environmentPath}/install-script?code=${encodeURIComponent(pendingCode)}`),
-        400,
+        { status: 400, code: 'validation' },
       )
 
       const { json: refreshedJson, headers: refreshedHeaders } = await ctx.call(
@@ -432,7 +463,7 @@ registerCase({
       }
       await expectHttpError(
         () => ctx.call('GET', '/api/platform/daemon-uninstall-scripts/solaris'),
-        { status: 400 },
+        { status: 400, code: 'validation' },
       )
     } finally {
       const { json } = await ctx.call('GET', environmentPath)

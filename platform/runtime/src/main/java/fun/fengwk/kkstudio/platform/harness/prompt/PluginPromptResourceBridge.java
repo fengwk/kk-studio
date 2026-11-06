@@ -4,8 +4,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
-import fun.fengwk.kkstudio.common.error.DomainErrorCode;
-import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.platform.plugin.prompt.PluginPromptResources;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
@@ -68,17 +66,7 @@ public final class PluginPromptResourceBridge implements PluginPromptResources {
   ResourceMessageContent accept(UUID sessionId, StagedResource staged) {
     Objects.requireNonNull(sessionId, "sessionId");
     Objects.requireNonNull(staged, "staged");
-    StorageUploadService.ReadyUpload ready;
-    try {
-      ready = uploadService.lockReady(staged.uploadId());
-    } catch (DomainException error) {
-      if ((error.code() == DomainErrorCode.NOT_FOUND && "upload".equals(error.resource()))
-          || (error.code() == DomainErrorCode.CONFLICT
-              && "STORAGE_VERIFICATION".equals(error.reason()))) {
-        throw new IllegalArgumentException("staged prompt media cannot be consumed");
-      }
-      throw error;
-    }
+    StorageUploadService.ReadyUpload ready = uploadService.lockReady(staged.uploadId());
     if (!staged.blobId().equals(ready.blobId())) {
       throw new IllegalArgumentException("staged prompt media failed integrity validation");
     }

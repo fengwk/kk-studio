@@ -213,15 +213,15 @@ registerCase({
     const textResourceId = textPatch.nodes.find((item) => item.node?.id === textNodeId).node.resources[0].id
     await expectHttpError(
       () => ctx.call('POST', `/api/canvas/canvases/${canvas.id}/resources/${textResourceId}/download-url`),
-      { status: 400 },
+      { status: 400, code: 'validation' },
     )
     await expectHttpError(
       () => ctx.call('POST', `/api/canvas/canvases/${canvas.id}/resources/${cid()}/download-url`),
-      { status: 404 },
+      { status: 404, code: 'not_found' },
     )
     await expectHttpError(
       () => ctx.call('POST', `/api/canvas/canvases/${cid()}/resources/${resource.id}/download-url`),
-      { status: 404 },
+      { status: 404, code: 'not_found' },
     )
 
   },

@@ -5,16 +5,17 @@ import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.api.entry.GoalSetting;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.api.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.RequestBodyPricingSnapshot;
+import fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 
 import java.time.Instant;
-import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.Map;
@@ -83,7 +84,7 @@ final class HistoryValueCodecs {
 
   static BranchSettings decodeBranchSettings(JsonNode value, String context) {
     ObjectNode node = requireObject(value, context);
-    requireExactFields(node, BRANCH_SETTINGS_FIELDS, context);
+    JsonCodecSupport.requireFields(node, BRANCH_SETTINGS_FIELDS, context);
     return new BranchSettings(
         requiredText(node, "agentName", context),
         ExecutionSelectionJsonCodec.decode(node.get("execution"), context + ".execution"),
@@ -101,10 +102,12 @@ final class HistoryValueCodecs {
       return null;
     }
     ObjectNode goal = requireObject(value, context + "." + field);
-    requireExactFields(goal, GOAL_FIELDS, context + "." + field);
+    JsonCodecSupport.requireFields(goal, GOAL_FIELDS, context + "." + field);
     UUID id;
     try {
-      id = UUID.fromString(requiredText(goal, "id", context + "." + field));
+      id =
+          Uuids.parseCanonical(
+              requiredText(goal, "id", context + "." + field), context + "." + field + ".id");
     } catch (IllegalArgumentException error) {
       throw new IllegalArgumentException(context + "." + field + ".id must be a UUID", error);
     }
@@ -135,7 +138,7 @@ final class HistoryValueCodecs {
 
   static ModelSelection decodeModelSelection(JsonNode value, String context) {
     ObjectNode node = requireObject(value, context);
-    requireExactFields(node, MODEL_SELECTION_FIELDS, context);
+    JsonCodecSupport.requireFields(node, MODEL_SELECTION_FIELDS, context);
     JsonNode variant = node.get("variant");
     if (!variant.isNull() && !variant.isString()) {
       throw new IllegalArgumentException(context + ".variant must be text or null");
@@ -184,12 +187,13 @@ final class HistoryValueCodecs {
 
   static AssistantMessageMetadata decodeAssistantMetadata(JsonNode value) {
     ObjectNode node = requireObject(value, "assistantMetadata");
-    requireFields(node, METADATA_FIELDS, METADATA_OPTIONAL_FIELDS, "assistantMetadata");
+    JsonCodecSupport.requireFields(
+        node, METADATA_FIELDS, METADATA_OPTIONAL_FIELDS, "assistantMetadata");
     GenerationStopReason stopReason =
         readEnum(
             GenerationStopReason.class, text(node, "stopReason"), "assistantMetadata.stopReason");
     ObjectNode usageNode = requireObject(node.get("usage"), "assistantMetadata.usage");
-    requireExactFields(usageNode, USAGE_FIELDS, "assistantMetadata.usage");
+    JsonCodecSupport.requireFields(usageNode, USAGE_FIELDS, "assistantMetadata.usage");
     ModelUsage usage =
         new ModelUsage(
             requiredNonNegativeLong(usageNode, "inputTokens", "assistantMetadata.usage"),
@@ -408,14 +412,9 @@ final class HistoryValueCodecs {
     return value == null || value.isNull() ? null : text(node, field);
   }
 
+  /** 仅接受 canonical（小写、{@code UUID.toString()} 往返一致）UUID；非规范写法一律拒绝。 */
   static UUID requiredPositiveId(ObjectNode node, String field, String context) {
-    String text = requiredText(node, field, context);
-    try {
-      return UUID.fromString(text);
-    } catch (IllegalArgumentException error) {
-      throw new IllegalArgumentException(
-          context + "." + field + " must be a canonical UUID string", error);
-    }
+    return Uuids.parseCanonical(requiredText(node, field, context), context + "." + field);
   }
 
   static UUID nullablePositiveId(ObjectNode node, String field, String context) {
@@ -426,47 +425,7 @@ final class HistoryValueCodecs {
     if (!value.isString()) {
       throw new IllegalArgumentException(context + "." + field + " must be text or null");
     }
-    try {
-      return UUID.fromString(value.stringValue());
-    } catch (IllegalArgumentException error) {
-      throw new IllegalArgumentException(
-          context + "." + field + " must be a canonical UUID string", error);
-    }
-  }
-
-  static void requireExactFields(ObjectNode node, Set<String> expected, String context) {
-    Set<String> actual = new LinkedHashSet<>();
-    Iterator<String> names = node.propertyNames().iterator();
-    while (names.hasNext()) {
-      actual.add(names.next());
-    }
-    if (!actual.equals(expected)) {
-      throw new IllegalArgumentException(
-          context + " unexpected fields: " + actual + " (expected " + expected + ")");
-    }
-  }
-
-  /**
-   * 严格字段集合校验：{@code required} 必须全部存在，且实际字段不得超出 {@code required} 与 {@code optional}
-   * 的并集；未知字段、缺失必填字段一律拒绝。
-   */
-  static void requireFields(
-      ObjectNode node, Set<String> required, Set<String> optional, String context) {
-    Set<String> actual = new LinkedHashSet<>();
-    node.propertyNames().forEach(actual::add);
-    Set<String> allowed = new LinkedHashSet<>(required);
-    allowed.addAll(optional);
-    if (!actual.containsAll(required) || !allowed.containsAll(actual)) {
-      throw new IllegalArgumentException(
-          context
-              + " unexpected fields: "
-              + actual
-              + " (expected "
-              + required
-              + ", optional "
-              + optional
-              + ")");
-    }
+    return Uuids.parseCanonical(value.stringValue(), context + "." + field);
   }
 
   static Set<String> orderedSet(String... values) {

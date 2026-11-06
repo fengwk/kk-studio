@@ -3,13 +3,13 @@
     "name": "non-object document",
     "mode": "decode",
     "data": [1, 2],
-    "error": "goal progress must be an object"
+    "error": "goal progress must be a JSON object"
   },
   {
     "name": "null document",
     "mode": "decode",
     "data": null,
-    "error": "goal progress must be an object"
+    "error": "goal progress must be a JSON object"
   },
   {
     "name": "unknown extra field",
@@ -21,7 +21,7 @@
       "reportedAt": "2026-01-01T00:00:00Z",
       "extra": 1
     },
-    "error": "goal progress fields must be exactly"
+    "error": "goal progress unexpected fields"
   },
   {
     "name": "missing field replaced by unknown",
@@ -32,13 +32,24 @@
       "extra": "done",
       "reportedAt": "2026-01-01T00:00:00Z"
     },
-    "error": "goal progress must declare reason"
+    "error": "goal progress unexpected fields"
   },
   {
     "name": "goal id is not a uuid",
     "mode": "decode",
     "data": {
       "goalId": "not-a-uuid",
+      "status": "complete",
+      "reason": "done",
+      "reportedAt": "2026-01-01T00:00:00Z"
+    },
+    "error": "goal progress.goalId must be a UUID"
+  },
+  {
+    "name": "goal id is not canonical",
+    "mode": "decode",
+    "data": {
+      "goalId": "00000000-0000-0000-0000-00000000002A",
       "status": "complete",
       "reason": "done",
       "reportedAt": "2026-01-01T00:00:00Z"

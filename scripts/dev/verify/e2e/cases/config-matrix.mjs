@@ -39,7 +39,7 @@ for (const row of modelConfigMatrix()) {
     id: `config.model.${row.id}`,
     level: 'L1',
     title: `Model config 矩阵：${row.title}`,
-    docs: `期望 ${row.ok ? '成功创建' : `失败 ${row.expectStatus || 400}`}；${row.messageIncludes || ''}`,
+    docs: `期望 ${row.ok ? '成功创建' : `失败 ${row.expectStatus || 400} ${row.expectCode}`}；${row.messageIncludes || ''}`,
     async run(ctx) {
       assert(sharedProviderName, 'matrix provider missing; ensure matrix.model.setup_provider runs first')
       const body = row.rawBody
@@ -72,6 +72,7 @@ for (const row of modelConfigMatrix()) {
       } else {
         const err = await expectHttpError(() => ctx.call('POST', '/api/platform/models', body), {
           status: row.expectStatus || 400,
+          code: row.expectCode,
           messageIncludes: row.messageIncludes,
         })
         ctx.writeArtifact(`model-${row.id}-error.txt`, String(err.body))
@@ -132,7 +133,7 @@ for (const row of agentConfigMatrix()) {
     id: `config.agent.${row.id}`,
     level: 'L1',
     title: `Agent config 矩阵：${row.title}`,
-    docs: `期望 ${row.ok ? '成功创建 agent' : `失败 ${row.expectStatus || 400}`}`,
+    docs: `期望 ${row.ok ? '成功创建 agent' : `失败 ${row.expectStatus || 400} ${row.expectCode}`}`,
     async run(ctx) {
       assert(sharedModelRefForAgent, 'agent matrix model missing')
       const body = {
@@ -156,6 +157,7 @@ for (const row of agentConfigMatrix()) {
       } else {
         const err = await expectHttpError(() => ctx.call('POST', '/api/platform/agents', body), {
           status: row.expectStatus || 400,
+          code: row.expectCode,
           messageIncludes: row.messageIncludes,
         })
         ctx.writeArtifact(`agent-${row.id}-error.txt`, String(err.body))

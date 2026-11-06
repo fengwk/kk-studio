@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.harness.codec;
 
+import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.requireFields;
+
 import tools.jackson.core.JacksonException;
 import tools.jackson.core.StreamReadFeature;
 import tools.jackson.databind.DeserializationFeature;
@@ -9,6 +11,7 @@ import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.common.hash.Sha256;
+import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.harness.api.command.CommandValueValidation;
 import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.GoalCommandPayload;
@@ -23,7 +26,6 @@ import fun.fengwk.kkstudio.harness.api.history.NotificationKind;
 import fun.fengwk.kkstudio.harness.model.HarnessJson;
 
 import java.nio.charset.StandardCharsets;
-import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.Objects;
 import java.util.Set;
@@ -187,19 +189,19 @@ public final class ThreadCommandPayloadJsonCodec {
 
   private static UserMessageCommandPayload decodeUserMessage(JsonNode value) {
     ObjectNode node = requireObject(value, "USER_MESSAGE");
-    requireExactFields(node, USER_MESSAGE_FIELDS, "USER_MESSAGE");
+    requireFields(node, USER_MESSAGE_FIELDS, "USER_MESSAGE");
     return new UserMessageCommandPayload(MESSAGE_CODEC.decodeNode(node.get("message")));
   }
 
   private static CustomMessageCommandPayload decodeCustomMessage(JsonNode value) {
     ObjectNode node = requireObject(value, "CUSTOM_MESSAGE");
-    requireExactFields(node, CUSTOM_MESSAGE_FIELDS, "CUSTOM_MESSAGE");
+    requireFields(node, CUSTOM_MESSAGE_FIELDS, "CUSTOM_MESSAGE");
     return new CustomMessageCommandPayload(MESSAGE_CODEC.decodeNode(node.get("message")));
   }
 
   private static GoalCommandPayload decodeGoal(JsonNode value) {
     ObjectNode node = requireObject(value, "GOAL");
-    requireExactFields(node, GOAL_FIELDS, "GOAL");
+    requireFields(node, GOAL_FIELDS, "GOAL");
     return new GoalCommandPayload(nullableGoalText(node, "text", "GOAL"));
   }
 
@@ -218,20 +220,20 @@ public final class ThreadCommandPayloadJsonCodec {
 
   private static SetAgentCommandPayload decodeSetAgent(JsonNode value) {
     ObjectNode node = requireObject(value, "SET_AGENT");
-    requireExactFields(node, SET_AGENT_FIELDS, "SET_AGENT");
+    requireFields(node, SET_AGENT_FIELDS, "SET_AGENT");
     return new SetAgentCommandPayload(canonicalText(node, "agentName", "SET_AGENT"));
   }
 
   private static SetExecutionCommandPayload decodeSetExecution(JsonNode value) {
     ObjectNode node = requireObject(value, "SET_EXECUTION");
-    requireExactFields(node, SET_EXECUTION_FIELDS, "SET_EXECUTION");
+    requireFields(node, SET_EXECUTION_FIELDS, "SET_EXECUTION");
     return new SetExecutionCommandPayload(
         ExecutionSelectionJsonCodec.decode(node.get("execution"), "SET_EXECUTION.execution"));
   }
 
   private static SetEnvironmentCommandPayload decodeSetEnvironment(JsonNode value) {
     ObjectNode node = requireObject(value, "SET_ENVIRONMENT");
-    requireExactFields(node, SET_ENVIRONMENT_FIELDS, "SET_ENVIRONMENT");
+    requireFields(node, SET_ENVIRONMENT_FIELDS, "SET_ENVIRONMENT");
     return new SetEnvironmentCommandPayload(
         nullableEnvironmentName(node, "environmentName", "SET_ENVIRONMENT"));
   }
@@ -251,7 +253,7 @@ public final class ThreadCommandPayloadJsonCodec {
 
   private static NotificationCommandPayload decodeNotification(JsonNode value) {
     ObjectNode node = requireObject(value, "NOTIFICATION");
-    requireExactFields(node, NOTIFICATION_FIELDS, "NOTIFICATION");
+    requireFields(node, NOTIFICATION_FIELDS, "NOTIFICATION");
     return new NotificationCommandPayload(
         requiredUuid(node, "notificationId", "NOTIFICATION"),
         requiredNotificationKind(node, "kind", "NOTIFICATION"),
@@ -265,7 +267,7 @@ public final class ThreadCommandPayloadJsonCodec {
       throw new IllegalArgumentException(context + "." + field + " must be a UUID string");
     }
     try {
-      return UUID.fromString(value.stringValue());
+      return Uuids.parseCanonical(value.stringValue(), context + "." + field);
     } catch (IllegalArgumentException error) {
       throw new IllegalArgumentException(context + "." + field + " must be a UUID string", error);
     }
@@ -319,18 +321,6 @@ public final class ThreadCommandPayloadJsonCodec {
       throw new IllegalArgumentException(context + "." + field + " must be text");
     }
     return CommandValueValidation.requireCanonicalName(value.stringValue(), context + "." + field);
-  }
-
-  private static void requireExactFields(ObjectNode node, Set<String> expected, String context) {
-    Set<String> actual = new LinkedHashSet<>();
-    Iterator<String> names = node.propertyNames().iterator();
-    while (names.hasNext()) {
-      actual.add(names.next());
-    }
-    if (!actual.equals(expected)) {
-      throw new IllegalArgumentException(
-          context + " unexpected fields: " + actual + " (expected " + expected + ")");
-    }
   }
 
   private static Set<String> orderedSet(String... values) {

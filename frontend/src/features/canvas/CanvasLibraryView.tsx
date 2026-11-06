@@ -4,7 +4,8 @@ import { useRef, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router'
 import { createCanvas, listCanvases } from '@/features/canvas/canvas-api'
 import { queryKeys } from '@/shared/lib/query-keys'
-import { useI18n, type AppLocale } from '@/shared/i18n'
+import { useI18n } from '@/shared/i18n'
+import { formatBackendDate } from '@/shared/lib/date-format'
 import { ResourceCard } from '@/shared/ui/cards/ResourceCard'
 import { ResourceCardSkeleton } from '@/shared/ui/cards/ResourceCardSkeleton'
 import { ResourceGrid } from '@/shared/ui/cards/ResourceGrid'
@@ -20,7 +21,7 @@ import { Dialog } from '@/shared/ui/overlays/Dialog'
  * 新建卡只打开确认表单，用户确认后才 POST 并进入；取消不产生任何写入。
  */
 export function CanvasLibraryView() {
-  const { t, locale } = useI18n()
+  const { t } = useI18n()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
 
@@ -130,7 +131,7 @@ export function CanvasLibraryView() {
                 icon={<Grid2X2 aria-hidden="true" />}
                 title={canvas.title}
                 meta={[
-                  [t('canvas.library.updatedAt'), formatUpdatedAt(canvas.updatedAt, locale)],
+                  [t('canvas.library.updatedAt'), formatBackendDate(canvas.updatedAt)],
                 ]}
                 actions={
                   <Button
@@ -192,12 +193,4 @@ export function CanvasLibraryView() {
       ) : null}
     </section>
   )
-}
-
-function formatUpdatedAt(value: number, locale: AppLocale): string {
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) {
-    return '-'
-  }
-  return date.toLocaleString(locale, { dateStyle: 'medium', timeStyle: 'short' })
 }

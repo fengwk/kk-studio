@@ -6,6 +6,7 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionArgsSchema;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionDefinition;
 import fun.fengwk.kkstudio.canvas.function.CanvasJson;
 import fun.fengwk.kkstudio.canvas.function.CanvasJson.JsonObject;
+import fun.fengwk.kkstudio.common.error.DomainException;
 
 import java.util.Objects;
 
@@ -17,16 +18,22 @@ public final class CanvasFunctionArgsCodec {
   public JsonObject decode(String argsJson, CanvasFunctionDefinition definition) {
     Objects.requireNonNull(definition, "definition");
     if (argsJson == null || argsJson.isBlank()) {
-      throw new IllegalArgumentException("function args must not be blank");
+      throw DomainException.validation("function.args", "function args must not be blank");
     }
     JsonObject args;
     try {
       args = CanvasJson.parseObject(argsJson);
     } catch (IllegalArgumentException error) {
-      throw new IllegalArgumentException(
-          "function args must be a strict JSON object: " + error.getMessage(), error);
+      throw DomainException.validation(
+          "function.args",
+          "function args must be a strict JSON object: " + error.getMessage(),
+          error);
     }
-    return CanvasFunctionArgsSchema.normalize(args, definition.argsSchema(), "args");
+    try {
+      return CanvasFunctionArgsSchema.normalize(args, definition.argsSchema(), "args");
+    } catch (IllegalArgumentException error) {
+      throw DomainException.validation("function.args", error.getMessage(), error);
+    }
   }
 
   /** canonical 编码已校验的 args。 */

@@ -38,7 +38,7 @@ registerCase({
             modelCallTimeoutMillis: '1000',
             modelCallIdleTimeoutMillis: '1000',
           }),
-        { status: 400, messageIncludes },
+        { status: 400, code: 'validation', messageIncludes },
       )
     }
   },
@@ -60,7 +60,7 @@ registerCase({
           modelCallTimeoutMillis: '1000',
           modelCallIdleTimeoutMillis: '1000',
         }),
-      { status: 400, messageIncludes: /providerType|blank|required/i },
+      { status: 400, code: 'validation', messageIncludes: /providerType|blank|required/i },
     )
   },
 })
@@ -99,7 +99,7 @@ registerCase({
             expectedVersion: model.version,
           },
         ),
-      { status: 400, messageIncludes: /defaultVariant/i },
+      { status: 400, code: 'validation', messageIncludes: /defaultVariant/i },
     )
     const still = await findModel(ctx, modelName)
     assert(still?.config?.defaultVariant === 'default', JSON.stringify(still))
@@ -133,7 +133,7 @@ registerCase({
             execution: { driver: 'builtin', settings: { modelName: modelRef(model), variant: model.config.defaultVariant } },
             config: { tools: [], skills: [], subagents: [] },
           }),
-        { status: 400, messageIncludes },
+        { status: 400, code: 'validation', messageIncludes },
       )
     }
   },
@@ -155,7 +155,7 @@ registerCase({
           execution: { driver: 'builtin', settings: { modelName: modelRef(model), variant: '__missing_variant__' } },
           config: { tools: [], skills: [], subagents: [] },
         }),
-      { status: 400, messageIncludes: /variant/i },
+      { status: 400, code: 'validation', messageIncludes: /variant/i },
     )
   },
 })
@@ -541,7 +541,7 @@ registerCase({
             'DELETE',
             `/api/platform/agents/${encodeURIComponent(child.name)}?expectedVersion=${encodeURIComponent(child.version)}`,
           ),
-        { status: 409, messageIncludes: /in use|subagent|referenc/i },
+        { status: 409, code: 'in_use', messageIncludes: /in use|subagent|referenc/i },
       )
       parent = (
           await ctx.call(
@@ -599,7 +599,7 @@ registerCase({
           agentName: `missing-${cid().slice(0, 8)}`,
           yoloEnabled: false,
         }),
-      { status: 400, messageIncludes: /agent|unknown/i },
+      { status: 400, code: 'validation', messageIncludes: /agent|unknown/i },
     )
   },
 })
@@ -690,7 +690,7 @@ registerCase({
             target: { type: 'NEW_SESSION', sessionId: cid(), threadId: cid(), yoloEnabled: false },
             commands: [userMessageCommand('missing root settings', cid())],
           }),
-        { status: 400 },
+        { status: 400, code: 'validation' },
       )
     } finally {
       await deleteChat(ctx, cleanupChat)
@@ -745,7 +745,7 @@ registerCase({
             environmentName: `missing-env-${suffix}`,
             expectedVersion: chat.version,
           }),
-        { status: 400, messageIncludes: /environment/i },
+        { status: 400, code: 'validation', messageIncludes: /environment/i },
       )
       // 非 canonical（含 '/'）=> 400。
       await expectHttpError(
@@ -756,7 +756,7 @@ registerCase({
             environmentName: 'bad/name',
             expectedVersion: chat.version,
           }),
-        { status: 400, messageIncludes: /environmentName/i },
+        { status: 400, code: 'validation', messageIncludes: /environmentName/i },
       )
       const still = (await ctx.call('GET', `/api/chat/chats/${chat.id}`)).json
       assert(
@@ -793,7 +793,7 @@ registerCase({
           'DELETE',
           '/api/platform/models/missing-model?expectedVersion=0',
         ),
-      { status: 404, messageIncludes: /not found|unknown|model/i },
+      { status: 404, code: 'not_found', messageIncludes: /not found|unknown|model/i },
     )
   },
 })
@@ -829,10 +829,10 @@ registerCase({
           environmentName: null,
           expectedVersion: updated.version,
         }),
-      { status: 400, messageIncludes: /title.*blank/i },
+      { status: 400, code: 'validation', messageIncludes: /title.*blank/i },
     )
     await deleteChat(ctx, updated)
-    await expectHttpError(() => ctx.call('GET', `/api/chat/chats/${chat.id}`), { status: 404 })
+    await expectHttpError(() => ctx.call('GET', `/api/chat/chats/${chat.id}`), { status: 404, code: 'not_found' })
   },
 })
 
@@ -949,7 +949,7 @@ registerCase({
       const unknownChatId = '00000000-0000-0000-0000-000000000999'
       await expectHttpError(
         () => ctx.call('GET', `/api/chat/chats/${unknownChatId}/sessions`),
-        { status: 404, messageIncludes: /unknown|not found/i },
+        { status: 404, code: 'not_found', messageIncludes: /unknown|not found/i },
       )
     } finally {
       // 再次确认全部 Thread 已收敛，避免测试结束时的异步事件污染后续 case。
@@ -1033,6 +1033,7 @@ registerCase({
       ]) {
         await expectHttpError(() => put({ modelHttpRetryStatusCodes: invalidList }), {
           status: 400,
+          code: 'validation',
         })
       }
       const afterInvalid = (await listProviders(ctx)).find(
@@ -1084,7 +1085,7 @@ registerCase({
           config: compaction.config,
           expectedVersion: String(compaction.version),
         }),
-        { status: 400 },
+        { status: 400, code: 'validation' },
       )
     }
     // 删除：内置 Agent 的名称与存在性由系统持有。
@@ -1094,7 +1095,7 @@ registerCase({
           'DELETE',
           `/api/platform/agents/Compaction?expectedVersion=${encodeURIComponent(compaction.version)}`,
         ),
-      { status: 409 },
+      { status: 409, code: 'in_use' },
     )
     // 拒绝后 identity/version 严格不变。
     const after = listResults(

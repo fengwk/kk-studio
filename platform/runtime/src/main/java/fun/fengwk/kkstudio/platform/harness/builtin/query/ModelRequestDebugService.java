@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.platform.harness.builtin.query;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.json.JsonValues;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
@@ -94,7 +95,8 @@ public final class ModelRequestDebugService {
       environmentName = root.entryState().baseSettings().environmentName();
     }
     if (!BuiltinExecution.DRIVER.equals(path.baseSettings().execution().driver())) {
-      throw new IllegalArgumentException(
+      throw DomainException.conflict(
+          "PREVIEW_UNSUPPORTED",
           "model request debug is only supported for builtin execution driver");
     }
     BranchSettings draftSettings =

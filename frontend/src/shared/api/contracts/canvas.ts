@@ -7,4 +7,3 @@ import type { CanvasRevision } from '@/shared/api/contracts/base'
 export interface CanvasRevisionEventDTO {
   revision: CanvasRevision
 }
-

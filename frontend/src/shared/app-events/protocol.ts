@@ -41,6 +41,9 @@
  * 到达 listeners。
  */
 
+import { isCanonicalUuid } from '@/shared/lib/uuid'
+import { isRecord } from '@/shared/lib/value'
+
 export type ApplicationEventResourceKind =
   | 'thread'
   | 'canvas'
@@ -148,9 +151,7 @@ export function readInteractionsChangedRoot(data: unknown): string | null {
     return null
   }
   const rootThreadId = data.rootThreadId
-  return typeof rootThreadId === 'string' && CANONICAL_UUID.test(rootThreadId)
-    ? rootThreadId
-    : null
+  return isCanonicalUuid(rootThreadId) ? rootThreadId : null
 }
 
 /** interactions 的提示型 changed 事件：data 携带本次变化的真实执行根。 */
@@ -186,7 +187,6 @@ export type ApplicationEventServerMessage =
 
 const CANONICAL_DECIMAL = /^(0|[1-9][0-9]*)$/
 const CANONICAL_POSITIVE_DECIMAL = /^[1-9][0-9]*$/
-const CANONICAL_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const MAX_SIGNED_LONG_DECIMAL = '9223372036854775807'
 const EVENT_FIELDS = ['type', 'resource', 'name', 'data', 'cursor'] as const
 
@@ -364,10 +364,6 @@ function hasOnlyFields(
   return Object.keys(value).every((key) => fields.includes(key))
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
 function parseResource(value: unknown): ApplicationEventResource | null {
   if (!isRecord(value) || typeof value.kind !== 'string') {
     return null
@@ -378,8 +374,7 @@ function parseResource(value: unknown): ApplicationEventResource | null {
   if (
     (value.kind !== 'thread' && value.kind !== 'canvas' && value.kind !== 'thread-tree')
     || !hasExactFields(value, ['kind', 'id'])
-    || typeof value.id !== 'string'
-    || !CANONICAL_UUID.test(value.id)
+    || !isCanonicalUuid(value.id)
   ) {
     return null
   }
@@ -448,7 +443,7 @@ function parseSingleUuidField(data: unknown, key: 'projectId' | 'rootThreadId'):
 }
 
 function parseUuid(value: unknown): string | null {
-  return typeof value === 'string' && CANONICAL_UUID.test(value) ? value : null
+  return isCanonicalUuid(value) ? value : null
 }
 
 function hasExactFields(value: unknown, fields: readonly string[]): boolean {

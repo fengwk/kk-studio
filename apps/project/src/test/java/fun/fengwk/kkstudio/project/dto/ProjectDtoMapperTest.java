@@ -15,6 +15,7 @@ import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.module.SimpleModule;
 import tools.jackson.databind.ser.std.ToStringSerializer;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
 import fun.fengwk.kkstudio.project.domain.ProjectStateCode;
@@ -44,6 +45,13 @@ class ProjectDtoMapperTest {
   // 与生产 HTTP profile 相同的 Long 字符串与 NON_NULL 规则；容器注入身份由 web 装配测试核验。
   private final JsonMapper httpMapper = httpMapper();
   private final ProjectDtoMapper mapper = new ProjectDtoMapper(codec, httpMapper);
+
+  @Test
+  void testWorkflowRequiresBody() {
+    // 测试意图：请求体缺失 workflow 是客户端输入错误，映射器直接报 validation。
+    DomainException missing = assertThrows(DomainException.class, () -> mapper.toWorkflow(null));
+    assertEquals(DomainErrorCode.VALIDATION, missing.code());
+  }
 
   @Test
   void testProjectMapping() {
@@ -158,6 +166,7 @@ class ProjectDtoMapperTest {
     // 测试意图：maxRuns 的领域类型是 Integer，超过 int 范围时禁止 long 截断，必须拒绝。
     DomainException overflow =
         assertThrows(DomainException.class, () -> mapper.toWorkflow(maxRunsWorkflow(2147483648L)));
+    assertEquals(DomainErrorCode.VALIDATION, overflow.code());
     assertTrue(overflow.getMessage().contains("maxRuns"));
     assertTrue(
         overflow.getMessage().contains("int") || overflow.getMessage().contains("range"),
@@ -165,6 +174,7 @@ class ProjectDtoMapperTest {
 
     DomainException negative =
         assertThrows(DomainException.class, () -> mapper.toWorkflow(maxRunsWorkflow(-1L)));
+    assertEquals(DomainErrorCode.VALIDATION, negative.code());
     assertTrue(negative.getMessage().contains("maxRuns"));
     assertThrows(DomainException.class, () -> mapper.toWorkflow(maxRunsWorkflow(0L)));
 

@@ -126,7 +126,7 @@ class HarnessRuntimeAcceptThreadTest {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
     // 单条纯 USER_MESSAGE 只有无 cursor 一条路径：携带 cursor（即使精确）是请求错误且零写入。
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () ->
             runtime.acceptCommands(
                 thread(
@@ -189,7 +189,7 @@ class HarnessRuntimeAcceptThreadTest {
 
     // 非纯批次缺少 cursor 是受控请求错误。
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () ->
             runtime.acceptCommands(
                 new AcceptCommandsCommand(
@@ -399,7 +399,7 @@ class HarnessRuntimeAcceptThreadTest {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
     // 非法（请求校验错误，抛 IAE）：两条 user-like 命令（运行时 reminder + 真实用户消息）。
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () ->
             runtime.acceptCommands(
                 thread(
@@ -425,7 +425,7 @@ class HarnessRuntimeAcceptThreadTest {
 
     // 非法（IAE）：SET_* 出现在 user-like 之后。
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () ->
             runtime.acceptCommands(
                 thread(
@@ -442,7 +442,7 @@ class HarnessRuntimeAcceptThreadTest {
   void threadUserBatchRejectsMultipleUserMessages() {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () ->
             runtime.acceptCommands(
                 thread(
@@ -573,9 +573,9 @@ class HarnessRuntimeAcceptThreadTest {
   void rejectsJoinAcceptanceWithoutTrailingTaskInput() {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
     Ticket join = rootTicket(TestIds.id(60));
-    IllegalArgumentException error =
+    DomainException error =
         assertThrows(
-            IllegalArgumentException.class,
+            DomainException.class,
             () ->
                 SpawnTestSupport.acceptAndJoin(
                     runtime,
@@ -587,6 +587,7 @@ class HarnessRuntimeAcceptThreadTest {
                     join,
                     AcceptancePreflight.IDENTITY));
     assertTrue(error.getMessage().contains("batches must end with exactly one user-like input"));
+    assertEquals(DomainErrorCode.VALIDATION, error.code());
     assertTrue(runtime.findJoin(join.invocationId()).isEmpty());
   }
 
@@ -594,9 +595,9 @@ class HarnessRuntimeAcceptThreadTest {
   @Test
   void existingThreadRejectsDriverChange() {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
-    IllegalArgumentException error =
+    DomainException error =
         assertThrows(
-            IllegalArgumentException.class,
+            DomainException.class,
             () ->
                 runtime.acceptCommands(
                     thread(
@@ -611,6 +612,7 @@ class HarnessRuntimeAcceptThreadTest {
                             userMessageCommand(TestIds.id(2), "hello"))),
                     AcceptancePreflight.IDENTITY));
     assertTrue(error.getMessage().contains("driver cannot be changed on an existing thread"));
+    assertEquals(DomainErrorCode.VALIDATION, error.code());
   }
 
   /** durable 命令 sequence 不连续时 ordered replay 拒绝，不返回部分或跨越 gap 的接受事实。 */
@@ -662,9 +664,9 @@ class HarnessRuntimeAcceptThreadTest {
             childTicket,
             AcceptancePreflight.IDENTITY);
     ThreadState childThread = child.thread();
-    IllegalArgumentException error =
+    DomainException error =
         assertThrows(
-            IllegalArgumentException.class,
+            DomainException.class,
             () ->
                 runtime.acceptCommands(
                     thread(
@@ -676,6 +678,7 @@ class HarnessRuntimeAcceptThreadTest {
                             userMessageCommand(TestIds.id(601), "hello"))),
                     AcceptancePreflight.IDENTITY));
     assertTrue(error.getMessage().contains("only the execution root can set an environment"));
+    assertEquals(DomainErrorCode.VALIDATION, error.code());
     assertEquals(
         childThread, store.transaction(tx -> tx.threads().find(childThread.id()).orElseThrow()));
   }

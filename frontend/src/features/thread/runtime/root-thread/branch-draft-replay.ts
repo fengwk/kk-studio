@@ -6,6 +6,7 @@ import {
   getBuiltinModelSelection,
 } from '@/shared/api/contracts/ai-runtime'
 import type { HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'
+import { isRecord } from '@/shared/lib/value'
 
 
 export function cloneDraft(draft: BranchDraft): BranchDraft {
@@ -69,8 +70,4 @@ export function branchDraftFromEntry(
     execution: nextExecution,
     environmentName,
   }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }

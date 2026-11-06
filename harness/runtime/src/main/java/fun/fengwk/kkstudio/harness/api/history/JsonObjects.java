@@ -39,7 +39,7 @@ public final class JsonObjects {
     } catch (JacksonException error) {
       throw new IllegalArgumentException(name + " must contain JSON", error);
     }
-    return JsonCodecSupport.objectNode(node, name);
+    return JsonCodecSupport.object(node, name);
   }
 
   /** 用共享严格 mapper 序列化为 canonical JSON 文本。 */

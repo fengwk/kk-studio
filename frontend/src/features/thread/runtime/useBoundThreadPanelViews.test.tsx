@@ -213,7 +213,7 @@ const READY_ENVIRONMENT: EnvironmentDTO = {
 describe('useBoundThreadPanelLabels', () => {
   /**
    * 测试意图：bound footer 只投影已生效 snapshot 的 environmentName；
-   * 已知名称解析为 Card UUID/READY，未知名称保留原名并标记 unavailable，null 才表示 none。
+   * 已知名称解析为环境的 UUID/READY，未知名称保留原名并标记 unavailable，null 才表示 none。
    */
   it('resolves the active branch environment name without losing unknown identities', () => {
     const { result, rerender } = renderHook(

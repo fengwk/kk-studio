@@ -43,7 +43,7 @@ public class ChatSessionOwnership implements SessionOwnership {
     try {
       return Uuids.parseCanonical(owner.id(), "Chat id");
     } catch (IllegalArgumentException error) {
-      throw new IllegalArgumentException("Chat id must be a canonical UUID", error);
+      throw DomainException.validation("chat", "Chat id must be a canonical UUID", error);
     }
   }
 

@@ -290,11 +290,11 @@ public class IssueLifecycleService {
   @Transactional
   public Issue transition(UUID issueId, long expectedVersion, String requestKey, String toState) {
     Objects.requireNonNull(issueId, "issueId");
-    Objects.requireNonNull(toState, "toState");
+    ProjectStateCode to = ProjectValidationUtils.requireStateCode(toState, "toState");
     String key = ProjectValidationUtils.requireRequestKey(requestKey);
     Identity identity =
         IssueActivityIdempotency.identity(
-            IssueActivityKind.STATE_CHANGE, "TRANSITION", key, toState);
+            IssueActivityKind.STATE_CHANGE, "TRANSITION", key, to.value());
     ReceiptLock<IssueMutationSupport.Locked> receipt =
         mutationSupport.lockUnlessReplayed(issueId, identity);
     if (receipt.activity() != null) {
@@ -315,7 +315,6 @@ public class IssueLifecycleService {
           "issue", "Cannot transition a paused issue; resume it first");
     }
     ProjectStateCode from = ProjectStateCode.of(locked.issue().getState());
-    ProjectStateCode to = ProjectStateCode.of(toState);
     ProjectValidationUtils.validate(
         "issue", () -> new IssueStateTransitions(locked.workflow()).requireTransition(from, to));
     mutationSupport.appendStateChange(

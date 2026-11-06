@@ -361,12 +361,15 @@ registerCase({
       assert(debug.frozenInvocation === null, JSON.stringify(debug.frozenInvocation))
 
       // 请求形状边界：缺 model 与非法 canonical environmentName 都在写入前 400；该端点是只读 POST，GET 405。
-      await expectHttpError(() => ctx.call('POST', endpoint, { environmentName: null }), { status: 400 })
+      await expectHttpError(() => ctx.call('POST', endpoint, { environmentName: null }), {
+        status: 400,
+        code: 'validation',
+      })
       await expectHttpError(
         () => ctx.call('POST', endpoint, { model: target.model, environmentName: 'bad/name' }),
-        { status: 400 },
+        { status: 400, code: 'validation' },
       )
-      await expectHttpError(() => ctx.call('GET', endpoint), { status: 405 })
+      await expectHttpError(() => ctx.call('GET', endpoint), { status: 405, code: 'validation' })
 
       // 只读：head/version/nextCommandSequence 不变，不入队命令，也不启动 Invocation。
       const after = await getThreadSnapshot(ctx, threadId)
@@ -587,7 +590,7 @@ registerCase({
       }),
       `contents TEXT payload must be canonical: ${JSON.stringify(secondPayload)}`,
     )
-    const expectInvalidUserCommand = (command, options = { status: 400 }) =>
+    const expectInvalidUserCommand = (command, options = { status: 400, code: 'validation' }) =>
       expectHttpError(
         () =>
           acceptCommandBatch(ctx, {
@@ -599,11 +602,11 @@ registerCase({
       )
 
     // 文本 shorthand（text / content）已从 USER_MESSAGE wire 移除。
-    // 未知字段在 Jackson 反序列化层即拒绝（detail 为通用 "Failed to read request"）。
+    // 未知字段在 Jackson 反序列化层即拒绝（detail 指出路径为 "is not allowed"）。
     await expectInvalidUserCommand({ type: 'USER_MESSAGE', idempotencyKey: cid(), text: 'x' })
     await expectInvalidUserCommand(
       { type: 'USER_MESSAGE', idempotencyKey: cid(), content: 'x' },
-      { status: 400 },
+      { status: 400, code: 'validation' },
     )
     // 多余字段（role 等）与缺少 contents 字段均确定性 400。
     await expectInvalidUserCommand(
@@ -613,11 +616,11 @@ registerCase({
         contents: [{ type: 'TEXT', text: 'x' }],
         role: 'USER',
       },
-      { status: 400 },
+      { status: 400, code: 'validation' },
     )
     await expectInvalidUserCommand(
       { type: 'USER_MESSAGE', idempotencyKey: cid() },
-      { status: 400, messageIncludes: /contents/i },
+      { status: 400, code: 'validation', messageIncludes: /contents/i },
     )
     // IMAGE/AUDIO/VIDEO 内容类型已从 wire 契约移除。
     for (const [type, mediaType, source] of [
@@ -638,7 +641,7 @@ registerCase({
         idempotencyKey: cid(),
         contents: [{ type: 'ATTACHMENT', uploadId: 'not-a-uuid' }],
       },
-      { status: 400, messageIncludes: /uploadId/i },
+      { status: 400, code: 'validation', messageIncludes: /uploadId/i },
     )
     await expectInvalidUserCommand({
       type: 'USER_MESSAGE',
@@ -652,7 +655,7 @@ registerCase({
         idempotencyKey: cid(),
         contents: [{ type: 'TEXT', text: 'x', imageTier: '720P' }],
       },
-      { status: 400 },
+      { status: 400, code: 'validation' },
     )
     await expectInvalidUserCommand({
       type: 'USER_MESSAGE',
@@ -705,8 +708,8 @@ registerCase({
       }),
     })
 
-    // CUSTOM_MESSAGE 产品 HTTP 面被拒绝（SYSTEM/USER 均不可）。未知枚举在 Jackson
-    // 反序列化层即失败，detail 是通用 "Failed to read request"（不携带命令名）。
+    // CUSTOM_MESSAGE 产品 HTTP 面被拒绝（SYSTEM/USER 均不可）。未知 type 在 Jackson
+    // 反序列化层即失败，detail 指出命令路径（不携带命令名）。
     for (const role of ['SYSTEM', 'USER']) {
       await expectHttpError(
         () =>
@@ -716,7 +719,7 @@ registerCase({
               { type: 'CUSTOM_MESSAGE', role, idempotencyKey: cid(), content: 'x' },
             ],
           }),
-        { status: 400 },
+        { status: 400, code: 'validation' },
       )
     }
     // 两条 USER_MESSAGE 同一 batch => 400：typed GOAL 与 USER_MESSAGE 都是 user-like 终止输入，
@@ -730,7 +733,7 @@ registerCase({
             userMessageCommand('second', cid()),
           ],
         }),
-      { status: 400, messageIncludes: /terminal user-like command|USER_MESSAGE/i },
+      { status: 400, code: 'validation', messageIncludes: /terminal user-like command|USER_MESSAGE/i },
     )
     // USER_MESSAGE 不在末尾 => 400。
     await expectHttpError(
@@ -742,7 +745,7 @@ registerCase({
             setAgentCommand('x', cid()),
           ],
         }),
-      { status: 400, messageIncludes: /order|final|USER_MESSAGE/i },
+      { status: 400, code: 'validation', messageIncludes: /order|final|USER_MESSAGE/i },
     )
     // 未知命令类型 => 400。
     await expectHttpError(
@@ -751,7 +754,7 @@ registerCase({
           ...cursor(),
           commands: [{ type: 'RENAME_THREAD', idempotencyKey: cid() }],
         }),
-      { status: 400, messageIncludes: /type/i },
+      { status: 400, code: 'validation', messageIncludes: /type/i },
     )
     // 非法 shape 不推进 cursor。
     const after = await getThreadSnapshot(ctx, threadId)
@@ -829,7 +832,7 @@ registerCase({
             userMessageCommand('replayed again', idempotencyKey),
           ],
         }),
-      { status: 409, messageIncludes: /PARTIAL_COMMAND_REPLAY|replays only/i },
+      { status: 409, code: 'conflict', reason: 'PARTIAL_COMMAND_REPLAY' },
     )
   },
 })
@@ -879,7 +882,7 @@ registerCase({
     )
 
     // 设置混合批次仍依赖 cursor：旧 cursor 必须 409，且零写入。
-    const stale = await expectHttpError(
+    await expectHttpError(
       () =>
         acceptCommandBatch(ctx, {
           owner: chatOwner(chat.id),
@@ -893,12 +896,7 @@ registerCase({
             userMessageCommand('stale settings', cid()),
           ],
         }),
-      { status: 409, messageIncludes: /head|conflict|stale/i },
-    )
-    const staleBody = JSON.parse(stale.body)
-    assert(
-      staleBody.code === 'conflict' && staleBody.reason === 'STALE_COMMAND_CURSOR',
-      `stale settings conflict reason: ${stale.body}`,
+      { status: 409, code: 'conflict', reason: 'STALE_COMMAND_CURSOR' },
     )
     const afterReject = await getThreadSnapshot(ctx, threadId)
     assert(
@@ -1069,11 +1067,12 @@ registerCase({
             yoloEnabled: false,
             commands: [userMessageCommand(`illegal fork ${cid().slice(0, 8)}`, cid())],
           }),
-        { status: 400 },
+        { status: 400, code: 'validation' },
       )
       // 拒绝必须是零写入：预分配 Thread 未创建、Session Entry Tree 与源 Thread head 一字不动。
       await expectHttpError(() => ctx.call('GET', `/api/harness/threads/${rejectedThreadId}`), {
         status: 404,
+        code: 'not_found',
       })
     }
     assert(
@@ -1104,7 +1103,7 @@ registerCase({
           yoloEnabled: false,
           commands: [userMessageCommand('unknown entry', cid())],
         }),
-      { status: 404 },
+      { status: 404, code: 'not_found' },
     )
     // 清理：删除 owner Chat（连带其 Session/Thread/Entry 资源）。
     await ctx.call(
@@ -1309,7 +1308,7 @@ registerCase({
           yoloEnabled: false,
           commands: [userMessageCommand('cross session entry', cid())],
         }),
-      { status: 400, messageIncludes: /session|entry/i },
+      { status: 400, code: 'validation', messageIncludes: /session|entry/i },
     )
     // 两个原 Thread projection/entries/thread list 均不变。
     const afterFirstSnapshot = await getThreadSnapshot(ctx, firstThreadId)
@@ -1345,7 +1344,7 @@ registerCase({
     // rejectedThreadId 未创建：snapshot 404。
     await expectHttpError(
       () => ctx.call('GET', `/api/harness/threads/${rejectedThreadId}`),
-      { status: 404 },
+      { status: 404, code: 'not_found' },
     )
     // 清理：删除 owner Chat（连带两个 Session/Thread/Entry 资源）。
     await ctx.call(
@@ -1481,7 +1480,7 @@ registerCase({
           stopRequestId: cid(),
           expectedVersion: '999999999',
         }),
-      { status: 409, messageIncludes: /version/i },
+      { status: 409, code: 'conflict', reason: 'STALE_VERSION' },
     )
   },
 })
@@ -1645,7 +1644,7 @@ registerCase({
   id: 'thread.branch_settings_diff_commands',
   level: 'L1',
   title: 'SET_* 命令一个原子 batch 精确 wire 并消费投影',
-  docs: '前端固定顺序 SET_AGENT,SET_EXECUTION,USER_MESSAGE 一个 batch（yolo 走直接控制面，绝不进入 mailbox）；SET_AGENT 使用 canonical 但不存在的名称，使 Resolver 在调用 Provider 前确定性 PLANNING_FAILED；等 quiescent 后 Thread branchSettings 精确投影、queue 清空、USER entry 与 AssistantError 可见，最终 TURN_END(FAILED, continueModel=false)；未知 command 字段、未知 command type 与非法 environmentName => 400',
+  docs: '前端固定顺序 SET_AGENT,SET_EXECUTION,SET_ENVIRONMENT,USER_MESSAGE 一个 batch；SET_ENVIRONMENT 省略 environmentName 清除原环境；SET_AGENT 使用 canonical 但不存在的名称，使 Resolver 在调用 Provider 前确定性 PLANNING_FAILED；等 quiescent 后 Thread branchSettings 精确投影、queue 清空、USER entry 与 AssistantError 可见，最终 TURN_END(FAILED, continueModel=false)；未知 command 字段、未知 command type 与非法 environmentName => 400',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -1660,14 +1659,18 @@ registerCase({
       owner: chatOwner(chat.id),
       sessionId: cid(),
       threadId,
-      rootSettings: branchSettingsOf(
-        { name: `e2e-set-all-missing-${cid().slice(0, 8)}` },
-        modelSelectionOf(ctx),
-      ),
+      rootSettings: {
+        ...branchSettingsOf(
+          { name: `e2e-set-all-missing-${cid().slice(0, 8)}` },
+          modelSelectionOf(ctx),
+        ),
+        environmentName: 'e2e-previous-environment',
+      },
       yoloEnabled: false,
       commands: [userMessageCommand(`set-all materialize ${cid().slice(0, 8)}`, cid())],
     })
     const thread = await waitForQuiescentThread(ctx, threadId, { timeoutMs: 60_000, intervalMs: 100 })
+    assert(thread.branchSettings.environmentName === 'e2e-previous-environment', JSON.stringify(thread))
     const marker = `SET-ALL-${cid()}`
     const modelSelection = modelSelectionOf(ctx)
     const missingAgentName = `missing-agent-${cid().slice(0, 8)}`
@@ -1680,6 +1683,7 @@ registerCase({
         },
         cid(),
       ),
+      { type: 'SET_ENVIRONMENT', idempotencyKey: cid() },
       userMessageCommand(`${marker} 消费 SET 后的第一条消息。`, cid()),
     ]
     const accepted = await acceptCommandBatch(ctx, {
@@ -1695,7 +1699,7 @@ registerCase({
     const dto = accepted.acceptedCommands
     assert(
       dto.map((command) => command.type).join(',') ===
-        'SET_AGENT,SET_EXECUTION,USER_MESSAGE',
+        'SET_AGENT,SET_EXECUTION,SET_ENVIRONMENT,USER_MESSAGE',
       JSON.stringify(dto),
     )
     for (let i = 1; i < dto.length; i++) {
@@ -1782,7 +1786,7 @@ registerCase({
           }),
           commands: [{ type: 'RENAME_THREAD', idempotencyKey: cid() }],
         }),
-      { status: 400, messageIncludes: /type/i },
+      { status: 400, code: 'validation', messageIncludes: /type/i },
     )
     await expectHttpError(
       () =>
@@ -1802,9 +1806,9 @@ registerCase({
             },
           ],
         }),
-      { status: 400 },
+      { status: 400, code: 'validation' },
     )
-    // 真正未知的 command type 由严格 mapper 拒绝：sealed union 的 detail 文本不是稳定契约，只锁定 400。
+    // 真正未知的 command type 由严格 mapper 拒绝：sealed union 的 detail 文本不是稳定契约，只锁定状态与 code。
     await expectHttpError(
       () =>
         acceptCommandBatch(ctx, {
@@ -1816,7 +1820,7 @@ registerCase({
           }),
           commands: [{ type: 'UNKNOWN_COMMAND', idempotencyKey: cid() }],
         }),
-      { status: 400 },
+      { status: 400, code: 'validation' },
     )
     // SET_ENVIRONMENT 携带非法 canonical name（含 '/'）必须 400 拒绝。
     await expectHttpError(
@@ -1830,7 +1834,7 @@ registerCase({
           }),
           commands: [{ type: 'SET_ENVIRONMENT', idempotencyKey: cid(), environmentName: 'bad/name' }],
         }),
-      { status: 400, messageIncludes: /environmentName/i },
+      { status: 400, code: 'validation', messageIncludes: /environmentName/i },
     )
     // 其他 command type 不允许携带 environmentName 字段：sealed variant 由严格 mapper 拒绝，detail 文本不是稳定契约。
     await expectHttpError(
@@ -1851,7 +1855,7 @@ registerCase({
             },
           ],
         }),
-      { status: 400 },
+      { status: 400, code: 'validation' },
     )
     // 其他 discriminator 的未知字段也必须被严格 mapper 拒绝。
     await expectHttpError(
@@ -1878,7 +1882,7 @@ registerCase({
             },
           ],
         }),
-      { status: 400 },
+      { status: 400, code: 'validation' },
     )
     // 严格 wire：未预期的字段必须被拒绝。
     await expectHttpError(
@@ -1899,7 +1903,7 @@ registerCase({
             },
           ],
         }),
-      { status: 400 },
+      { status: 400, code: 'validation' },
     )
   },
 })
@@ -2039,11 +2043,11 @@ registerCase({
   async run(ctx) {
     await expectHttpError(
       () => ctx.call('GET', '/api/harness/threads/not-a-uuid/tree'),
-      { status: 400 },
+      { status: 400, code: 'validation' },
     )
     await expectHttpError(
       () => ctx.call('GET', '/api/harness/threads/00000000-0000-0000-0000-000000000999/tree'),
-      { status: 404 },
+      { status: 404, code: 'not_found' },
     )
   },
 })
@@ -2057,7 +2061,7 @@ registerCase({
     const unknownThreadId = '00000000-0000-0000-0000-000000000999'
     await expectHttpError(
       () => ctx.call('GET', `/api/harness/threads/${unknownThreadId}`),
-      { status: 404, messageIncludes: new RegExp(`thread ${unknownThreadId} does not exist`) },
+      { status: 404, code: 'not_found', messageIncludes: new RegExp(`thread ${unknownThreadId} does not exist`) },
     )
   },
 })
@@ -2092,7 +2096,7 @@ registerCase({
       // 1. 非 canonical afterEntryId -> 400
       await expectHttpError(
         () => ctx.call('GET', `/api/harness/threads/${threadId}?afterEntryId=not-a-valid-uuid`),
-        { status: 400 },
+        { status: 400, code: 'validation' },
       )
 
       // 2. ROOT 是 head 的祖先 -> 只返回 ROOT 之后的 Entry，顺序与完整历史一致

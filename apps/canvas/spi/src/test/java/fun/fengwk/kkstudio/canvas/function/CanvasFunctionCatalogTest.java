@@ -11,6 +11,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -59,8 +61,9 @@ class CanvasFunctionCatalogTest {
     assertFalse(disabledEntry.enabled());
     assertEquals("disabled", disabledEntry.unavailableReason());
     assertDoesNotThrow(availableEntry::requireAvailable);
-    IllegalArgumentException unavailable =
-        assertThrows(IllegalArgumentException.class, disabledEntry::requireAvailable);
+    DomainException unavailable =
+        assertThrows(DomainException.class, disabledEntry::requireAvailable);
+    assertEquals("FUNCTION_RUN_CONFLICT", unavailable.reason());
     assertEquals("Canvas Function is unavailable: disabled", unavailable.getMessage());
     assertThrows(UnsupportedOperationException.class, () -> catalog.list().clear());
   }

@@ -54,7 +54,7 @@ public final class ProviderJsonHelper {
       if (node == null || parser.nextToken() != null) {
         throw new ProviderException(ProviderErrorKind.INVALID_REQUEST, errorMessage);
       }
-      return requireObject ? JsonCodecSupport.objectNode(node, errorMessage) : node;
+      return requireObject ? JsonCodecSupport.object(node, errorMessage) : node;
     } catch (Exception e) {
       throw new ProviderException(ProviderErrorKind.INVALID_REQUEST, errorMessage);
     }
@@ -71,7 +71,7 @@ public final class ProviderJsonHelper {
       return null;
     }
     try {
-      return JsonCodecSupport.objectNode(OBJECT_MAPPER.readTree(text), "json");
+      return JsonCodecSupport.object(OBJECT_MAPPER.readTree(text), "json");
     } catch (Exception ignored) {
       // 宽容解析：调用方只在能得到对象时使用结果，其余情况按“无对象”继续。
       return null;
