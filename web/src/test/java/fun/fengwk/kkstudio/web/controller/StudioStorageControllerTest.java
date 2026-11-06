@@ -89,17 +89,16 @@ public class StudioStorageControllerTest extends WebPostgresTestSupport {
                     .content(
                         reserveBody("photo.png", "image/png", content.length, sha256Hex(content))))
             .andExpect(status().isCreated())
-            .andExpect(jsonPath("$.data.id").isString())
-            .andExpect(jsonPath("$.data.state").value("PENDING"))
-            .andExpect(jsonPath("$.data.blobId").value(nullValue()))
-            .andExpect(jsonPath("$.data.presignedPut.method").value("PUT"))
-            .andExpect(jsonPath("$.data.presignedPut.headers['if-none-match']").value("*"))
+            .andExpect(jsonPath("$.id").isString())
+            .andExpect(jsonPath("$.state").value("PENDING"))
+            .andExpect(jsonPath("$.blobId").value(nullValue()))
+            .andExpect(jsonPath("$.presignedPut.method").value("PUT"))
+            .andExpect(jsonPath("$.presignedPut.headers['if-none-match']").value("*"))
             .andExpect(
-                jsonPath("$.data.presignedPut.headers['x-amz-checksum-sha256']")
+                jsonPath("$.presignedPut.headers['x-amz-checksum-sha256']")
                     .value(Base64.getEncoder().encodeToString(sha256(content))))
-            .andExpect(
-                jsonPath("$.data.presignedPut.url").value(containsString("X-Amz-Signature=")))
-            .andExpect(jsonPath("$.data.expiresAt").isNumber())
+            .andExpect(jsonPath("$.presignedPut.url").value(containsString("X-Amz-Signature=")))
+            .andExpect(jsonPath("$.expiresAt").isNumber())
             .andReturn();
 
     String body = result.getResponse().getContentAsString();
@@ -111,7 +110,7 @@ public class StudioStorageControllerTest extends WebPostgresTestSupport {
     assertEquals(
         "checksummedCreateOnly", record.kind(), "reserve must sign a checksummed create-only PUT");
     assertEquals(
-        StorageObjectKeys.uploadOriginal(UUID.fromString(readJsonString(body, "$.data.id"))),
+        StorageObjectKeys.uploadOriginal(UUID.fromString(readJsonString(body, "$.id"))),
         record.key());
     assertEquals(0, jdbc.queryForObject("select count(*) from storage_blob", Integer.class));
   }
@@ -128,42 +127,39 @@ public class StudioStorageControllerTest extends WebPostgresTestSupport {
         mockMvc
             .perform(post("/api/storage/uploads/" + uploadId + "/complete"))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data.state").value("READY"))
-            .andExpect(jsonPath("$.data.blobId").isString())
-            .andExpect(jsonPath("$.data.presignedPut").value(nullValue()))
+            .andExpect(jsonPath("$.state").value("READY"))
+            .andExpect(jsonPath("$.blobId").isString())
+            .andExpect(jsonPath("$.presignedPut").value(nullValue()))
             .andReturn();
-    String blobId = readJsonString(completed.getResponse().getContentAsString(), "$.data.blobId");
+    String blobId = readJsonString(completed.getResponse().getContentAsString(), "$.blobId");
 
     MvcResult original =
         mockMvc
             .perform(post("/api/storage/blobs/" + blobId + "/download-url"))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data.method").value("GET"))
-            .andExpect(
-                jsonPath("$.data.url").value(containsString("blobs/" + blobId + "/original")))
-            .andExpect(jsonPath("$.data.headers").isEmpty())
-            .andExpect(jsonPath("$.data.mediaType").value("text/plain"))
-            .andExpect(jsonPath("$.data.sizeBytes").value(Long.toString(content.length)))
+            .andExpect(jsonPath("$.method").value("GET"))
+            .andExpect(jsonPath("$.url").value(containsString("blobs/" + blobId + "/original")))
+            .andExpect(jsonPath("$.headers").isEmpty())
+            .andExpect(jsonPath("$.mediaType").value("text/plain"))
+            .andExpect(jsonPath("$.sizeBytes").value(Long.toString(content.length)))
             .andReturn();
     JsonNode originalJson = objectMapper.readTree(original.getResponse().getContentAsByteArray());
-    assertTrue(originalJson.at("/data/sizeBytes").isTextual(), "sizeBytes must be a JSON string");
-    assertEquals(Long.toString(content.length), originalJson.at("/data/sizeBytes").textValue());
+    assertTrue(originalJson.at("/sizeBytes").isTextual(), "sizeBytes must be a JSON string");
+    assertEquals(Long.toString(content.length), originalJson.at("/sizeBytes").textValue());
 
     MvcResult preview =
         mockMvc
             .perform(post("/api/storage/blobs/" + blobId + "/preview-url"))
             .andExpect(status().isOk())
-            .andExpect(
-                jsonPath("$.data.url").value(containsString("blobs/" + blobId + "/preview.webp")))
-            .andExpect(jsonPath("$.data.mediaType").value(nullValue()))
-            .andExpect(jsonPath("$.data.sizeBytes").value(nullValue()))
+            .andExpect(jsonPath("$.url").value(containsString("blobs/" + blobId + "/preview.webp")))
+            .andExpect(jsonPath("$.mediaType").value(nullValue()))
+            .andExpect(jsonPath("$.sizeBytes").value(nullValue()))
             .andReturn();
     JsonNode previewJson = objectMapper.readTree(preview.getResponse().getContentAsByteArray());
-    assertTrue(previewJson.has("data"));
-    assertTrue(previewJson.path("data").has("mediaType"));
-    assertTrue(previewJson.at("/data/mediaType").isNull());
-    assertTrue(previewJson.path("data").has("sizeBytes"));
-    assertTrue(previewJson.at("/data/sizeBytes").isNull());
+    assertTrue(previewJson.has("mediaType"));
+    assertTrue(previewJson.at("/mediaType").isNull());
+    assertTrue(previewJson.has("sizeBytes"));
+    assertTrue(previewJson.at("/sizeBytes").isNull());
 
     mockMvc.perform(delete("/api/storage/uploads/" + uploadId)).andExpect(status().isNoContent());
 
@@ -220,9 +216,9 @@ public class StudioStorageControllerTest extends WebPostgresTestSupport {
                     reserveBody(
                         "b.bin", "application/octet-stream", content.length, sha256Hex(content))))
         .andExpect(status().isCreated())
-        .andExpect(jsonPath("$.data.state").value("READY"))
-        .andExpect(jsonPath("$.data.blobId").isString())
-        .andExpect(jsonPath("$.data.presignedPut").value(nullValue()));
+        .andExpect(jsonPath("$.state").value("READY"))
+        .andExpect(jsonPath("$.blobId").isString())
+        .andExpect(jsonPath("$.presignedPut").value(nullValue()));
 
     assertEquals(
         1,
@@ -259,8 +255,9 @@ public class StudioStorageControllerTest extends WebPostgresTestSupport {
     mockMvc
         .perform(post("/api/storage/uploads/" + uploadId + "/complete"))
         .andExpect(status().isConflict())
-        .andExpect(jsonPath("$.code").value("STORAGE_VERIFICATION"))
-        .andExpect(jsonPath("$.errors.detail").value(containsString("checksum")));
+        .andExpect(jsonPath("$.code").value("conflict"))
+        .andExpect(jsonPath("$.reason").value("STORAGE_VERIFICATION"))
+        .andExpect(jsonPath("$.detail").value(containsString("checksum")));
 
     assertEquals(
         1,
@@ -284,8 +281,9 @@ public class StudioStorageControllerTest extends WebPostgresTestSupport {
     mockMvc
         .perform(post("/api/storage/uploads/" + uploadId + "/complete"))
         .andExpect(status().isConflict())
-        .andExpect(jsonPath("$.code").value("STORAGE_VERIFICATION"))
-        .andExpect(jsonPath("$.errors.detail").value(containsString("size")));
+        .andExpect(jsonPath("$.code").value("conflict"))
+        .andExpect(jsonPath("$.reason").value("STORAGE_VERIFICATION"))
+        .andExpect(jsonPath("$.detail").value(containsString("size")));
   }
 
   @Test
@@ -301,12 +299,12 @@ public class StudioStorageControllerTest extends WebPostgresTestSupport {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(blankFilename)))
         .andExpect(status().isBadRequest())
-        .andExpect(jsonPath("$.code").value("STORAGE_VALIDATION"));
+        .andExpect(jsonPath("$.code").value("validation"));
 
     mockMvc
         .perform(post("/api/storage/uploads/not-a-uuid/complete"))
         .andExpect(status().isBadRequest())
-        .andExpect(jsonPath("$.code").value("STORAGE_VALIDATION"));
+        .andExpect(jsonPath("$.code").value("validation"));
 
     mockMvc
         .perform(post("/api/storage/uploads/" + UUID.randomUUID() + "/complete"))
@@ -360,7 +358,7 @@ public class StudioStorageControllerTest extends WebPostgresTestSupport {
                     .content(reserveBody(filename, mediaType, size, sha256)))
             .andExpect(status().isCreated())
             .andReturn();
-    return readJsonString(result.getResponse().getContentAsString(), "$.data.id");
+    return readJsonString(result.getResponse().getContentAsString(), "$.id");
   }
 
   private String reserveBody(String filename, String mediaType, long size, String sha256)
