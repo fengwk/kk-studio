@@ -56,7 +56,9 @@ import fun.fengwk.kkstudio.project.service.IssueRunService;
 import fun.fengwk.kkstudio.project.service.IssueStageBudgetService;
 import fun.fengwk.kkstudio.project.service.ProjectService;
 import fun.fengwk.kkstudio.project.service.StageBudgetView;
+import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
 import fun.fengwk.kkstudio.web.advice.ProblemAdvice;
+import fun.fengwk.kkstudio.web.advice.RequestBodyRequiredValidationAdvice;
 
 import java.time.Instant;
 import java.util.List;
@@ -73,11 +75,13 @@ class IssueControllerTest {
   private ProjectService projectService;
 
   private MockMvc mockMvc;
-  private final JsonMapper objectMapper = ProjectHttpJsonTestSupport.get();
+  private final JsonMapper objectMapper = StrictHttpJsonMapperTestSupport.get();
   private final UUID projectId = UUID.randomUUID();
   private final UUID issueId = UUID.randomUUID();
   private final Instant now = Instant.now();
   private final ProjectWorkflowJsonCodec codec = new ProjectWorkflowJsonCodec();
+  private final ProjectDtoMapper mapper =
+      new ProjectDtoMapper(codec, StrictHttpJsonMapperTestSupport.get());
 
   @BeforeEach
   void setUp() {
@@ -95,7 +99,7 @@ class IssueControllerTest {
             issueStageBudgetService,
             issueRunService,
             projectService,
-            new ProjectDtoMapper(codec, ProjectHttpJsonTestSupport.get()),
+            mapper,
             codec);
     IssueController controller =
         new IssueController(
@@ -103,13 +107,16 @@ class IssueControllerTest {
             issueLifecycleService,
             issueStageBudgetService,
             issueEvidenceService,
-            new ProjectDtoMapper(codec, ProjectHttpJsonTestSupport.get()),
+            mapper,
             issueDetailAssembler);
 
+    JsonMapper strictHttp = StrictHttpJsonMapperTestSupport.strictHttp();
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
-            .setControllerAdvice(new ProblemAdvice(new MessageService()))
-            .setMessageConverters(new JacksonJsonHttpMessageConverter(objectMapper))
+            .setControllerAdvice(
+                new RequestBodyRequiredValidationAdvice(strictHttp),
+                new ProblemAdvice(new MessageService()))
+            .setMessageConverters(new JacksonJsonHttpMessageConverter(strictHttp))
             .build();
   }
 

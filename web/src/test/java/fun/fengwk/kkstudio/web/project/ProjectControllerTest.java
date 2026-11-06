@@ -37,7 +37,9 @@ import fun.fengwk.kkstudio.project.http.ProjectController;
 import fun.fengwk.kkstudio.project.model.Project;
 import fun.fengwk.kkstudio.project.service.ProjectService;
 import fun.fengwk.kkstudio.project.service.ProjectSnapshotAssembler;
+import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
 import fun.fengwk.kkstudio.web.advice.ProblemAdvice;
+import fun.fengwk.kkstudio.web.advice.RequestBodyRequiredValidationAdvice;
 
 import java.time.Instant;
 import java.util.List;
@@ -50,13 +52,13 @@ class ProjectControllerTest {
   private ProjectSnapshotAssembler snapshotAssembler;
   private MockMvc mockMvc;
 
-  private final JsonMapper objectMapper = ProjectHttpJsonTestSupport.get();
+  private final JsonMapper objectMapper = StrictHttpJsonMapperTestSupport.get();
   private final UUID projectId = UUID.randomUUID();
   private final Instant now = Instant.now();
   private final ProjectWorkflowJsonCodec codec = new ProjectWorkflowJsonCodec();
   // 依赖显式提供：生产 HTTP Jackson 3 mapper，与容器注入的是同一实例。
   private final ProjectDtoMapper mapper =
-      new ProjectDtoMapper(codec, ProjectHttpJsonTestSupport.get());
+      new ProjectDtoMapper(codec, StrictHttpJsonMapperTestSupport.get());
 
   @BeforeEach
   void setUp() {
@@ -66,10 +68,13 @@ class ProjectControllerTest {
     ProjectController controller =
         new ProjectController(projectService, snapshotAssembler, mapper, codec);
 
+    JsonMapper strictHttp = StrictHttpJsonMapperTestSupport.strictHttp();
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
-            .setControllerAdvice(new ProblemAdvice(new MessageService()))
-            .setMessageConverters(new JacksonJsonHttpMessageConverter(objectMapper))
+            .setControllerAdvice(
+                new RequestBodyRequiredValidationAdvice(strictHttp),
+                new ProblemAdvice(new MessageService()))
+            .setMessageConverters(new JacksonJsonHttpMessageConverter(strictHttp))
             .build();
   }
 
@@ -245,6 +250,7 @@ class ProjectControllerTest {
         .andExpect(jsonPath("$.version").value("2"));
   }
 
+  /** 客户端形态错误在产生处就是 validation；detail 只说明规则，不回显提交的状态编码。 */
   @Test
   void rejectsMalformedClientWorkflowBeforeServiceCall() throws Exception {
     mockMvc
@@ -257,14 +263,34 @@ class ProjectControllerTest {
                     {"state":"not a state code","name":"Bad"}]}}
                     """))
         .andExpect(status().isBadRequest())
-        .andExpect(jsonPath("$.code").value("validation"));
+        .andExpect(jsonPath("$.code").value("validation"))
+        .andExpect(jsonPath("$.detail").value("state code must match [A-Z][A-Z0-9_]{0,63}"));
     mockMvc
         .perform(
             put("/api/project/projects/" + projectId + "/workflow")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"expectedVersion\":\"1\"}"))
         .andExpect(status().isBadRequest())
-        .andExpect(jsonPath("$.code").value("validation"));
+        .andExpect(jsonPath("$.code").value("validation"))
+        .andExpect(jsonPath("$.detail").value("workflow is required"));
+
+    verifyNoInteractions(projectService);
+  }
+
+  /** 严格 mapper 拒绝 workflow 请求体中的未知字段，detail 指出路径且不回显字段值。 */
+  @Test
+  void rejectsUnknownWorkflowFieldsWithTheStrictMapper() throws Exception {
+    mockMvc
+        .perform(
+            put("/api/project/projects/" + projectId + "/workflow")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {"expectedVersion":"1","workflow":{"states":[],"extra":true}}
+                    """))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("validation"))
+        .andExpect(jsonPath("$.detail").value("workflow.extra is not allowed"));
 
     verifyNoInteractions(projectService);
   }
