@@ -141,7 +141,7 @@ class CanvasDtoMapperTest {
     CanvasSnapshotDTO snapshot =
         mapper.toDto(
             new CanvasSnapshot(document, List.of(node), List.of(group), List.of(reference)));
-    assertEquals("3", snapshot.getDocument().getRevision());
+    assertEquals(3L, snapshot.getDocument().getRevision());
     assertEquals("image.crop", snapshot.getNodes().get(0).getFunction().name());
     assertEquals(CanvasFunctionRunStatus.RUNNING, snapshot.getNodes().get(0).getRun().getStatus());
     assertEquals(sourceId.toString(), snapshot.getReferences().get(0).getSourceNodeId());
@@ -152,7 +152,7 @@ class CanvasDtoMapperTest {
                 4L,
                 List.of(new CanvasNodePatch.Upsert(node), new CanvasNodePatch.Remove(nodeId)),
                 List.of(new CanvasGroupPatch.Upsert(group), new CanvasGroupPatch.Remove(groupId))));
-    assertEquals("4", patch.getRevision());
+    assertEquals(4L, patch.getRevision());
     assertInstanceOf(CanvasNodePatchDTO.Upsert.class, patch.getNodes().get(0));
     assertInstanceOf(CanvasNodePatchDTO.Remove.class, patch.getNodes().get(1));
     assertInstanceOf(CanvasGroupPatchDTO.Upsert.class, patch.getGroups().get(0));

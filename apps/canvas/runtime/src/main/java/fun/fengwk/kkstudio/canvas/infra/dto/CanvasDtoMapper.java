@@ -77,7 +77,7 @@ public class CanvasDtoMapper {
     CanvasDocumentDTO dto = new CanvasDocumentDTO();
     dto.setId(document.id().toString());
     dto.setTitle(document.title());
-    dto.setRevision(Long.toString(document.revision()));
+    dto.setRevision(document.revision());
     dto.setCreatedAt(document.createdAt());
     dto.setUpdatedAt(document.updatedAt());
     return dto;
@@ -96,7 +96,7 @@ public class CanvasDtoMapper {
   public CanvasPatchDTO toDto(CanvasPatch patch) {
     Objects.requireNonNull(patch, "patch");
     CanvasPatchDTO dto = new CanvasPatchDTO();
-    dto.setRevision(Long.toString(patch.revision()));
+    dto.setRevision(patch.revision());
     dto.setGroups(patch.groups().stream().map(this::toGroupPatchDto).toList());
     dto.setNodes(patch.nodes().stream().map(this::toNodePatchDto).toList());
     return dto;
