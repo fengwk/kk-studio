@@ -1408,7 +1408,7 @@ export interface HarnessThreadStopResultDTO {
   stoppedThreads: HarnessStoppedThreadReceiptDTO[]
 }
 
-/** Java：fun.fengwk.kkstudio.share.runtime.HarnessThreadStreamCatchupDTO */
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadStreamCatchupDTO */
 export interface HarnessThreadStreamCatchupDTO {
   invocationId: string
   attempt: number
@@ -2721,6 +2721,11 @@ export interface ApiRoutes {
     path: { environmentId: string }
     response: EnvironmentUpdateStartDTO
   }
+  'POST /api/harness/builtin/threads/{threadId}/stream-catchup': {
+    path: { threadId: string }
+    body: HarnessThreadStreamCatchupDTO
+    response: void
+  }
   'POST /api/interactions/{interactionId}/input': {
     path: { interactionId: string }
     body: HarnessToolInputDTO
@@ -2927,11 +2932,6 @@ export interface ApiRoutes {
     path: { threadId: string }
     body: HarnessThreadStopDTO
     response: HarnessThreadStopResultDTO
-  }
-  'POST /api/threads/{threadId}/stream-catchup': {
-    path: { threadId: string }
-    body: HarnessThreadStreamCatchupDTO
-    response: void
   }
   'PUT /api/agents/{name}': {
     path: { name: string }

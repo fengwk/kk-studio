@@ -27,6 +27,8 @@ import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.PreparedStatementCallback;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.api.entry.TurnStartReason;
@@ -90,6 +92,15 @@ class HarnessStreamCatchupServiceTest {
     service =
         new HarnessStreamCatchupService(
             runtime, modelProcessor, clusterNodePresence, jdbcTemplate, LOCAL, codec);
+  }
+
+  /** 非正 attempt 是领域校验失败，不应读取快照或触发追帧。 */
+  @Test
+  void rejectsNonPositiveAttemptBeforeReading() {
+    DomainException error =
+        assertThrows(DomainException.class, () -> service.catchUp(THREAD, INVOCATION, 0));
+    assertEquals(DomainErrorCode.VALIDATION, error.code());
+    verifyNoInteractions(runtime, modelProcessor, clusterNodePresence, jdbcTemplate);
   }
 
   @Test

@@ -7,7 +7,7 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 import { ApplicationEventProvider } from '@/shared/app-events'
-import { harnessService } from '@/shared/api/harness-service'
+import * as apiClient from '@/shared/api/client'
 import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
 import { useHarnessThreadRealtime } from '@/features/thread/runtime/useHarnessThreadRealtime'
 import type { RealtimeFrameSchedulerOptions } from '@/features/thread/runtime/realtime-frame-scheduler'
@@ -79,7 +79,7 @@ function emitRealtime(sockets: FakeWebSocketHarness, data: string, threadId = TH
   )
 }
 
-const requestStreamCatchup = vi.spyOn(harnessService, 'requestStreamCatchup')
+const requestStreamCatchup = vi.spyOn(apiClient, 'request')
 
 describe('useHarnessThreadRealtime', () => {
   beforeEach(() => {
@@ -125,9 +125,9 @@ describe('useHarnessThreadRealtime', () => {
 
     act(() => socket.emitServer({ type: 'subscribed', resource: threadResource, cursor: '42' }))
     await waitFor(() =>
-      expect(requestStreamCatchup).toHaveBeenCalledWith(THREAD_ID, {
-        invocationId: 'inv-1',
-        attempt: 1,
+      expect(requestStreamCatchup).toHaveBeenCalledWith('POST /api/harness/builtin/threads/{threadId}/stream-catchup', {
+        path: { threadId: THREAD_ID },
+        body: { invocationId: 'inv-1', attempt: 1 },
       }),
     )
     // subscribed 先做 snapshot 对账，再发出唯一一次 best-effort catchup。
@@ -169,9 +169,9 @@ describe('useHarnessThreadRealtime', () => {
     emitRealtime(sockets, realtime(6, 'six'))
     emitRealtime(sockets, realtime(7, 'seven'))
     await waitFor(() =>
-      expect(requestStreamCatchup).toHaveBeenCalledWith(THREAD_ID, {
-        invocationId: 'inv-1',
-        attempt: 1,
+      expect(requestStreamCatchup).toHaveBeenCalledWith('POST /api/harness/builtin/threads/{threadId}/stream-catchup', {
+        path: { threadId: THREAD_ID },
+        body: { invocationId: 'inv-1', attempt: 1 },
       }),
     )
     expect(requestStreamCatchup).toHaveBeenCalledTimes(1)

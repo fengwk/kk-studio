@@ -18,7 +18,7 @@ import {
   type RealtimeStreamContext,
 } from '@/features/thread/runtime/thread-realtime/realtime-streams'
 import { useRealtimeFrameScheduler } from '@/features/thread/runtime/thread-realtime/useRealtimeFrameScheduler'
-import { harnessService } from '@/shared/api/harness-service'
+import { request } from '@/shared/api/client'
 import { queryKeys } from '@/shared/lib/query-keys'
 import type {
   HarnessActiveAssistantOutputDTO,
@@ -109,8 +109,10 @@ export function useHarnessThreadRealtime(
       key,
       promise: Promise.resolve(),
     }
-    entry.promise = harnessService
-      .requestStreamCatchup(catchupThreadId, { invocationId, attempt })
+    entry.promise = request('POST /api/harness/builtin/threads/{threadId}/stream-catchup', {
+      path: { threadId: catchupThreadId },
+      body: { invocationId, attempt },
+    })
       .catch(() => undefined)
       .finally(() => {
         if (catchupInFlightRef.current === entry) {
