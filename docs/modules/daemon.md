@@ -27,7 +27,7 @@ Environment Daemon 是目标宿主上的独立 Node.js 进程，把 Platform 的
   updates/<operation-id>-*/  # 受管在线更新工作目录（安装脚本、许可和日志）
 ```
 
-POSIX 目录权限为 0700、敏感文件为 0600。`tmp/workspaces` 是 Daemon 自身大文本输出与中转文件的受控根，由受控临时存储按 TTL 自动清扫；上报给平台与模型的临时目录是宿主操作系统临时目录，Agent 写在那里的暂存文件由宿主清理策略负责。技能安装器在启动与安装时负责恢复或清理 `.staging-*` 与 `.old-*` 暂存与备份；已发布技能包不随服务卸载自动删除。更新目录保存安装脚本、许可与日志，不承载凭据。
+POSIX 目录权限为 0700、敏感文件为 0600。`tmp/workspaces` 是 Daemon 自身大文本输出与中转文件的受控根，由受控临时存储按 TTL 自动清扫；上报给平台与模型的临时目录是宿主操作系统临时目录，Agent 写在那里的暂存文件由宿主清理策略负责。技能安装器清理 `.staging-*` 与 `.old-*` 暂存与备份；已发布技能包不随服务卸载自动删除。更新目录保存安装脚本、许可与日志，不承载凭据。
 
 ## 能力装配与运行时调度
 
@@ -55,7 +55,7 @@ POSIX 目录权限为 0700、敏感文件为 0600。`tmp/workspaces` 是 Daemon 
 - 默认文本捕获预算为 1 GiB，达到预算后停止捕获文件并继续排空与统计，结果中显式标记截断。
 - 定时清扫（默认 30 分钟一次）只回收超过保留期（默认 3 天）且未持用租约的 workspace，清扫不跟随符号链接、不越出受控根目录。
 
-技能包由 [`installer.ts`](../../daemon/src/skill/installer.ts) 安装：通过平台代理及绕过策略从下载地址流式下载归档并以 SHA-256 校验，使用 yauzl 在 staging 目录解压，拒绝符号链接、路径穿越与非普通文件，写入 `.kkstudio-sha256` 标记后原子替换 `skills/<package>`，失败时保留旧安装。连接级对账器 [`reconcile.ts`](../../daemon/src/skill/reconcile.ts) 基于 `SKILL_SYNC` 下发的全量期望集单飞对账，清理无期望标记目录并以 `SKILL_STATE` 统一上报受管状态。
+技能包由 [`installer.ts`](../../daemon/src/skill/installer.ts) 安装：通过平台代理及绕过策略从下载地址流式下载归档并以 SHA-256 校验，使用 yauzl 在 staging 目录解压，拒绝符号链接、路径穿越与非普通文件，写入 `.kkstudio-sha256` 标记后通过重命名替换 `skills/<package>`。连接级对账器 [`reconcile.ts`](../../daemon/src/skill/reconcile.ts) 基于 `SKILL_SYNC` 下发的全量期望集单飞对账，清理无期望标记目录并以 `SKILL_STATE` 统一上报受管状态。
 
 ## 编码能力与原生监管
 

@@ -256,7 +256,7 @@ task 初次执行入口只读取规范 `task.accepted` details 中的 thread_id�
 
 全局与根交互区共用 InteractionCardBody/ApprovalCard。非文件变更工具的审批显示一次完整 `argumentsJson`（含 bash 的 workdir），
 默认权限原因本地化，额外原因完整展示；允许与拒绝复用共享 Button，拒绝使用 primary + danger。
-归属统一显示为“<类型> · <标题>”（Chat、Issue、Agent 任务）：类型与标题都来自会话归属 SPI 的 `owner`，
+归属统一显示为“<类型> · <标题>”：类型与标题都来自会话归属 SPI 的 `owner`，
 标题缺失时只显示类型，不逐卡获取 Snapshot，也不用来源 Thread 的 UUID 或名称冒充归属。有产品页面的归属
 点击后携带执行根 `thread` 参数跳转。
 审批与问卷的写回仍使用原始 Thread 与 invocation 身份，来源导航不改变它。
@@ -405,10 +405,10 @@ Agent 引用的技能”只是提示，最终阻塞仍以服务端校验为准�
 
 详情弹窗展示概览、技能、服务端归档索引还原出的文件树、各 Environment 的安装状态与归档下载，
 并承载编辑与删除。Git 渠道可以修改描述、分支与令牌，仓库地址只读；上传渠道只能修改描述，
-带分支或令牌的请求由服务端拒绝。删除使用确认弹窗，包仍被 Agent 引用时展示后端 `errors.detail`
+带分支或令牌的请求由服务端拒绝。删除使用确认弹窗，包仍被 Agent 引用时展示后端 `detail`
 并保留包本身。
 
-所有失败文案统一取后端 `errors.detail`；wire 上的 `Instant` 是 epoch 毫秒整数，展示时按本地时间格式化。
+失败时优先展示后端 `detail`，缺失时展示错误消息；wire 上的 `Instant` 是 epoch 毫秒整数，展示时按本地时间格式化。
 文案键集中在 `ai.skillPackages.*`，按钮与标题不使用括号补充说明。
 
 ### tab 全局 IDE 面板
