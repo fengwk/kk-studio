@@ -16,8 +16,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException.Reason;
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
+import fun.fengwk.kkstudio.harness.api.HarnessConflictReason;
 import fun.fengwk.kkstudio.harness.api.ToolApprovalCommand;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.api.tool.ToolApprovalDecision;
@@ -184,9 +185,9 @@ class HarnessRuntimeApprovalTest {
     setWaitingApproval(store, baseline);
     runtime.decideToolApproval(allow(baseline.threadId(), baseline.toolId()));
 
-    HarnessRuntimeConflictException differentDecision =
+    DomainException differentDecision =
         assertThrows(
-            HarnessRuntimeConflictException.class,
+            DomainException.class,
             () ->
                 runtime.decideToolApproval(
                     new ToolApprovalCommand(
@@ -196,11 +197,11 @@ class HarnessRuntimeApprovalTest {
                         TestIds.id(1),
                         "alice",
                         null)));
-    assertEquals(Reason.APPROVAL_DECISION_MISMATCH, differentDecision.reason());
+    assertConflict(HarnessConflictReason.APPROVAL_DECISION_MISMATCH, differentDecision);
 
-    HarnessRuntimeConflictException differentId =
+    DomainException differentId =
         assertThrows(
-            HarnessRuntimeConflictException.class,
+            DomainException.class,
             () ->
                 runtime.decideToolApproval(
                     new ToolApprovalCommand(
@@ -210,11 +211,11 @@ class HarnessRuntimeApprovalTest {
                         TestIds.id(2),
                         "alice",
                         null)));
-    assertEquals(Reason.APPROVAL_DECISION_MISMATCH, differentId.reason());
+    assertConflict(HarnessConflictReason.APPROVAL_DECISION_MISMATCH, differentId);
 
-    HarnessRuntimeConflictException differentActor =
+    DomainException differentActor =
         assertThrows(
-            HarnessRuntimeConflictException.class,
+            DomainException.class,
             () ->
                 runtime.decideToolApproval(
                     new ToolApprovalCommand(
@@ -224,11 +225,11 @@ class HarnessRuntimeApprovalTest {
                         TestIds.id(1),
                         "mallory",
                         null)));
-    assertEquals(Reason.APPROVAL_DECISION_MISMATCH, differentActor.reason());
+    assertConflict(HarnessConflictReason.APPROVAL_DECISION_MISMATCH, differentActor);
 
-    HarnessRuntimeConflictException differentReason =
+    DomainException differentReason =
         assertThrows(
-            HarnessRuntimeConflictException.class,
+            DomainException.class,
             () ->
                 runtime.decideToolApproval(
                     new ToolApprovalCommand(
@@ -238,7 +239,7 @@ class HarnessRuntimeApprovalTest {
                         TestIds.id(1),
                         "alice",
                         "changed my mind")));
-    assertEquals(Reason.APPROVAL_DECISION_MISMATCH, differentReason.reason());
+    assertConflict(HarnessConflictReason.APPROVAL_DECISION_MISMATCH, differentReason);
   }
 
   @Test
@@ -247,23 +248,23 @@ class HarnessRuntimeApprovalTest {
     setWaitingApproval(store, baseline);
     UUID otherThread = seedThreadAt(store, baseline.assistantEntryId());
 
-    HarnessRuntimeConflictException wrongThread =
+    DomainException wrongThread =
         assertThrows(
-            HarnessRuntimeConflictException.class,
+            DomainException.class,
             () -> runtime.decideToolApproval(allow(otherThread, baseline.toolId())));
-    assertEquals(Reason.APPROVAL_NOT_APPLICABLE, wrongThread.reason());
+    assertConflict(HarnessConflictReason.APPROVAL_NOT_APPLICABLE, wrongThread);
 
-    HarnessRuntimeConflictException missingThread =
+    DomainException missingThread =
         assertThrows(
-            HarnessRuntimeConflictException.class,
+            DomainException.class,
             () -> runtime.decideToolApproval(allow(TestIds.id(999), baseline.toolId())));
-    assertEquals(Reason.APPROVAL_NOT_APPLICABLE, missingThread.reason());
+    assertConflict(HarnessConflictReason.APPROVAL_NOT_APPLICABLE, missingThread);
 
-    HarnessRuntimeConflictException missingTool =
+    DomainException missingTool =
         assertThrows(
-            HarnessRuntimeConflictException.class,
+            DomainException.class,
             () -> runtime.decideToolApproval(allow(baseline.threadId(), TestIds.id(999))));
-    assertEquals(Reason.APPROVAL_NOT_APPLICABLE, missingTool.reason());
+    assertConflict(HarnessConflictReason.APPROVAL_NOT_APPLICABLE, missingTool);
   }
 
   @Test
@@ -277,11 +278,11 @@ class HarnessRuntimeApprovalTest {
           tx.threads().update(thread.advanceHead(baseline.rootEntryId(), T6));
           return null;
         });
-    HarnessRuntimeConflictException error =
+    DomainException error =
         assertThrows(
-            HarnessRuntimeConflictException.class,
+            DomainException.class,
             () -> runtime.decideToolApproval(allow(baseline.threadId(), baseline.toolId())));
-    assertEquals(Reason.APPROVAL_NOT_APPLICABLE, error.reason());
+    assertConflict(HarnessConflictReason.APPROVAL_NOT_APPLICABLE, error);
   }
 
   @Test
@@ -295,11 +296,11 @@ class HarnessRuntimeApprovalTest {
           tx.tools().update(List.of(tool.cancel(toolError(), T6)));
           return null;
         });
-    HarnessRuntimeConflictException error =
+    DomainException error =
         assertThrows(
-            HarnessRuntimeConflictException.class,
+            DomainException.class,
             () -> runtime.decideToolApproval(allow(baseline.threadId(), baseline.toolId())));
-    assertEquals(Reason.APPROVAL_NOT_APPLICABLE, error.reason());
+    assertConflict(HarnessConflictReason.APPROVAL_NOT_APPLICABLE, error);
     // 工具保持 CANCELLED + 未决定 approval，没有任何 mutation。
     ToolInvocation stored =
         store.transaction(tx -> tx.tools().find(baseline.toolId()).orElseThrow());
@@ -310,19 +311,24 @@ class HarnessRuntimeApprovalTest {
   @Test
   void nullOrNonRequiredApprovalIsNotApplicable() {
     HarnessRuntimeTestSupport.ToolBaseline noApproval = seedToolBaseline(store);
-    HarnessRuntimeConflictException absent =
+    DomainException absent =
         assertThrows(
-            HarnessRuntimeConflictException.class,
+            DomainException.class,
             () -> runtime.decideToolApproval(allow(noApproval.threadId(), noApproval.toolId())));
-    assertEquals(Reason.APPROVAL_NOT_APPLICABLE, absent.reason());
+    assertConflict(HarnessConflictReason.APPROVAL_NOT_APPLICABLE, absent);
 
     HarnessRuntimeTestSupport.ToolBaseline notRequired = seedToolBaseline(store);
     markApprovalNotRequired(store, notRequired);
-    HarnessRuntimeConflictException nonRequired =
+    DomainException nonRequired =
         assertThrows(
-            HarnessRuntimeConflictException.class,
+            DomainException.class,
             () -> runtime.decideToolApproval(allow(notRequired.threadId(), notRequired.toolId())));
-    assertEquals(Reason.APPROVAL_NOT_APPLICABLE, nonRequired.reason());
+    assertConflict(HarnessConflictReason.APPROVAL_NOT_APPLICABLE, nonRequired);
+  }
+
+  private static void assertConflict(HarnessConflictReason reason, DomainException error) {
+    assertEquals(DomainErrorCode.CONFLICT, error.code());
+    assertEquals(reason.name(), error.reason());
   }
 
   @Test

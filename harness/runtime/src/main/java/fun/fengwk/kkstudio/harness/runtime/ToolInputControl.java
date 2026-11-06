@@ -1,6 +1,8 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.result.JsonResultContent;
+import fun.fengwk.kkstudio.harness.api.HarnessConflictReason;
 import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException.Reason;
 import fun.fengwk.kkstudio.harness.api.ToolApprovalCommand;
@@ -336,7 +338,7 @@ final class ToolInputControl {
       }
     } catch (IllegalArgumentException error) {
       throw conflict(
-          HarnessRuntimeConflictException.Reason.APPROVAL_DECISION_MISMATCH,
+          HarnessConflictReason.APPROVAL_DECISION_MISMATCH,
           "approval of tool invocation " + tool.id() + " does not replay the stored decision");
     }
     return tool;
@@ -400,14 +402,12 @@ final class ToolInputControl {
     return updated;
   }
 
-  private static HarnessRuntimeConflictException conflict(
-      HarnessRuntimeConflictException.Reason reason, String message) {
-    return new HarnessRuntimeConflictException(reason, message);
+  private static DomainException conflict(HarnessConflictReason reason, String message) {
+    return DomainException.conflict(reason.name(), message);
   }
 
-  private static HarnessRuntimeConflictException approvalNotApplicable(String message) {
-    return new HarnessRuntimeConflictException(
-        HarnessRuntimeConflictException.Reason.APPROVAL_NOT_APPLICABLE, message);
+  private static DomainException approvalNotApplicable(String message) {
+    return DomainException.conflict(HarnessConflictReason.APPROVAL_NOT_APPLICABLE.name(), message);
   }
 
   private static HarnessRuntimeConflictException notApplicable(String message) {

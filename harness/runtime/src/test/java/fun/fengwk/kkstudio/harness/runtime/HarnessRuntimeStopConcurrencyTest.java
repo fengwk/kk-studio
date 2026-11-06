@@ -61,10 +61,10 @@ class HarnessRuntimeStopConcurrencyTest {
     assertStopped(stopped);
     // stopTools 在同一事务删除 tool 行；后续 decision replay 因找不到 durable row 而业务冲突拒绝。
     assertTrue(store.transaction(tx -> tx.tools().find(baseline.toolId())).isEmpty());
-    HarnessRuntimeConflictException replayError =
-        assertThrows(
-            HarnessRuntimeConflictException.class, () -> runtime.decideToolApproval(approval));
-    assertEquals(Reason.APPROVAL_NOT_APPLICABLE, replayError.reason());
+    DomainException replayError =
+        assertThrows(DomainException.class, () -> runtime.decideToolApproval(approval));
+    assertEquals(DomainErrorCode.CONFLICT, replayError.code());
+    assertEquals(Reason.APPROVAL_NOT_APPLICABLE.name(), replayError.reason());
   }
 
   @Test
@@ -75,12 +75,11 @@ class HarnessRuntimeStopConcurrencyTest {
     setWaitingApproval(store, baseline);
 
     runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 1));
-    HarnessRuntimeConflictException error =
-        assertThrows(
-            HarnessRuntimeConflictException.class,
-            () -> runtime.decideToolApproval(allow(baseline)));
+    DomainException error =
+        assertThrows(DomainException.class, () -> runtime.decideToolApproval(allow(baseline)));
 
-    assertEquals(Reason.APPROVAL_NOT_APPLICABLE, error.reason());
+    assertEquals(DomainErrorCode.CONFLICT, error.code());
+    assertEquals(Reason.APPROVAL_NOT_APPLICABLE.name(), error.reason());
     // Stop 已删除 tool 行；decision 不再能 undecided WAITING_APPROVAL → READY 转换。
     assertTrue(store.transaction(tx -> tx.tools().find(baseline.toolId())).isEmpty());
   }
@@ -109,7 +108,10 @@ class HarnessRuntimeStopConcurrencyTest {
         // Stop 胜出：tool 行在同一事务被 stopTools 物理删除，approval 因 TOOL_ACTIVE 不再属于当前
         // 上下文而被业务冲突拒绝。
         assertTrue(store.transaction(tx -> tx.tools().find(baseline.toolId())).isEmpty());
-        assertConflict(approvalAttempt, Reason.APPROVAL_NOT_APPLICABLE);
+        assertTrue(approvalAttempt.error() instanceof DomainException);
+        DomainException conflict = (DomainException) approvalAttempt.error();
+        assertEquals(DomainErrorCode.CONFLICT, conflict.code());
+        assertEquals(Reason.APPROVAL_NOT_APPLICABLE.name(), conflict.reason());
       } else {
         assertTrue(stopAttempt.error() instanceof DomainException);
         DomainException conflict = (DomainException) stopAttempt.error();
