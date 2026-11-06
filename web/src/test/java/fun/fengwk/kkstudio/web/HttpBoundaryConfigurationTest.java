@@ -6,6 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
@@ -14,7 +16,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.format.support.DefaultFormattingConversionService;
 import org.springframework.http.MediaType;
 import org.springframework.http.converter.HttpMessageConverter;
-import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.http.converter.json.JacksonJsonHttpMessageConverter;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
@@ -29,7 +30,10 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.json.JsonMapper;
 
+import fun.fengwk.kkstudio.platform.i18n.MessageService;
 import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsAiRuntimeDTO;
+import fun.fengwk.kkstudio.web.advice.ProblemAdvice;
+import fun.fengwk.kkstudio.web.advice.RequestBodyRequiredValidationAdvice;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -52,48 +56,67 @@ class HttpBoundaryConfigurationTest {
         MockMvcBuilders.standaloneSetup(new Probe())
             .setMessageConverters(converters.toArray(HttpMessageConverter[]::new))
             .setConversionService(conversionService)
-            .setControllerAdvice(new HttpBoundaryConfiguration.CanonicalUuidBinding())
+            .setControllerAdvice(
+                new HttpBoundaryConfiguration.CanonicalUuidBinding(),
+                new RequestBodyRequiredValidationAdvice(shared),
+                new ProblemAdvice(new MessageService()))
             .build();
   }
 
   @Test
   void rejectsInvalidWireTokens() throws Exception {
-    // 每一项都只破坏一条请求体规则。
+    // 每一项都只破坏一条请求体规则；detail 只描述路径与错误类别，不回显输入值。
     for (InvalidJson invalid :
         List.of(
             new InvalidJson(
                 "{\"text\":\"x\",\"number\":1,\"enabled\":true,\"extra\":0}",
-                "Unrecognized property \"extra\""),
+                "extra is not allowed"),
             new InvalidJson(
                 "{\"text\":\"x\",\"number\":1,\"enabled\":true,\"internal\":1}",
-                "Ignored field \"internal\""),
+                "internal is not allowed"),
             new InvalidJson(
-                "{\"text\":7,\"number\":1,\"enabled\":true}", "Cannot coerce Integer value"),
+                "{\"text\":7,\"number\":1,\"enabled\":true}", "text has an invalid value"),
             new InvalidJson(
-                "{\"text\":true,\"number\":1,\"enabled\":true}", "Cannot coerce Boolean value"),
+                "{\"text\":true,\"number\":1,\"enabled\":true}", "text has an invalid value"),
             new InvalidJson(
-                "{\"text\":\"x\",\"number\":\"1\",\"enabled\":true}", "Cannot coerce String value"),
+                "{\"text\":\"x\",\"number\":\"1\",\"enabled\":true}",
+                "number has an invalid value"),
             new InvalidJson(
-                "{\"text\":\"x\",\"number\":1.0,\"enabled\":true}",
-                "Cannot coerce Floating-point value"),
+                "{\"text\":\"x\",\"number\":1.0,\"enabled\":true}", "number has an invalid value"),
             new InvalidJson(
-                "{\"text\":\"x\",\"number\":\"\",\"enabled\":true}", "Cannot coerce empty String"),
+                "{\"text\":\"x\",\"number\":\"\",\"enabled\":true}", "number has an invalid value"),
             new InvalidJson(
-                "{\"text\":\"x\",\"number\":null,\"enabled\":true}", "Cannot map `null`"),
+                "{\"text\":\"x\",\"number\":null,\"enabled\":true}", "number is required"),
             new InvalidJson(
-                "{\"text\":\"x\",\"number\":1,\"enabled\":\"true\"}", "Cannot coerce String value"),
+                "{\"text\":\"x\",\"number\":1,\"enabled\":\"true\"}",
+                "enabled has an invalid value"),
             new InvalidJson(
                 "{\"text\":\"x\",\"number\":1,\"enabled\":true,\"text\":\"y\"}",
-                "Duplicate Object property \"text\""),
+                "Failed to read request"),
             new InvalidJson(
-                "{\"text\":\"x\",\"number\":1,\"enabled\":true} {}", "Trailing token"))) {
-      assertReadFailure("/probe", invalid.json(), invalid.reason());
+                "{\"text\":\"x\",\"number\":1,\"enabled\":true} {}", "Failed to read request"),
+            new InvalidJson("{ invalid json", "Failed to read request"))) {
+      assertReadFailure("/probe", invalid.json(), invalid.expected());
     }
     mvc.perform(
             post("/probe")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"text\":\"x\",\"number\":1,\"enabled\":true}"))
         .andExpect(status().isOk());
+  }
+
+  /** 嵌套对象与数组元素沿用同一路径语法，错误定位到确切字段。 */
+  @Test
+  void requestBodyProblemsNameTheJsonPath() throws Exception {
+    assertReadFailure(
+        "/optional-body",
+        "{\"id\":\"123e4567-e89b-12d3-a456-426614174000\","
+            + "\"nested\":{\"text\":\"x\",\"number\":\"1\",\"enabled\":true}}",
+        "nested.number has an invalid value");
+    assertReadFailure(
+        "/items-body",
+        "{\"items\":[{\"text\":\"x\",\"number\":\"1\",\"enabled\":true}]}",
+        "items[0].number has an invalid value");
   }
 
   @Test
@@ -133,7 +156,7 @@ class HttpBoundaryConfigurationTest {
                   mapper.readValue(
                       "{\"retryBaseDelayMillis\":" + invalid.json() + "}",
                       SystemSettingsAiRuntimeDTO.class));
-      assertTrue(error.getMessage().contains(invalid.reason()));
+      assertTrue(error.getMessage().contains(invalid.expected()));
     }
     JacksonException error =
         assertThrows(
@@ -156,7 +179,7 @@ class HttpBoundaryConfigurationTest {
       JacksonException error =
           assertThrows(
               JacksonException.class, () -> mapper.readValue(invalid.json(), OptionalTypes.class));
-      assertTrue(error.getMessage().contains(invalid.reason()));
+      assertTrue(error.getMessage().contains(invalid.expected()));
     }
   }
 
@@ -209,23 +232,19 @@ class HttpBoundaryConfigurationTest {
             "true",
             "[]",
             "{}")) {
-      assertReadFailure(
-          "/uuid-body", "{\"id\":" + value + "}", "UUID must be a canonical lowercase string");
+      assertReadFailure("/uuid-body", "{\"id\":" + value + "}", "id has an invalid value");
     }
   }
 
-  private void assertReadFailure(String path, String json, String reason) throws Exception {
-    var result =
-        mvc.perform(post(path).contentType(MediaType.APPLICATION_JSON).content(json))
-            .andExpect(status().isBadRequest())
-            .andReturn();
-    var exception =
-        assertInstanceOf(HttpMessageNotReadableException.class, result.getResolvedException());
-    assertTrue(
-        exception.getMessage().contains(reason), () -> "Expected " + reason + ": " + exception);
+  private void assertReadFailure(String path, String json, String detail) throws Exception {
+    mvc.perform(post(path).contentType(MediaType.APPLICATION_JSON).content(json))
+        .andExpect(status().isBadRequest())
+        .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+        .andExpect(jsonPath("$.code").value("validation"))
+        .andExpect(jsonPath("$.detail").value(detail));
   }
 
-  private record InvalidJson(String json, String reason) {}
+  private record InvalidJson(String json, String expected) {}
 
   static class ProbeDto {
     public String text;
@@ -239,12 +258,20 @@ class HttpBoundaryConfigurationTest {
     public ProbeDto nested;
   }
 
+  record ItemsBody(List<ProbeDto> items) {}
+
   record UuidBody(UUID id) {}
 
   @RestController
   static class Probe {
     @PostMapping("/probe")
     void post(@RequestBody ProbeDto dto) {}
+
+    @PostMapping("/optional-body")
+    void optionalBody(@RequestBody OptionalTypes body) {}
+
+    @PostMapping("/items-body")
+    void itemsBody(@RequestBody ItemsBody body) {}
 
     @PostMapping("/uuid-body")
     void uuidBody(@RequestBody UuidBody dto) {}

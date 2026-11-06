@@ -602,7 +602,7 @@ registerCase({
       )
 
     // 文本 shorthand（text / content）已从 USER_MESSAGE wire 移除。
-    // 未知字段在 Jackson 反序列化层即拒绝（detail 为通用 "Failed to read request"）。
+    // 未知字段在 Jackson 反序列化层即拒绝（detail 指出路径为 "is not allowed"）。
     await expectInvalidUserCommand({ type: 'USER_MESSAGE', idempotencyKey: cid(), text: 'x' })
     await expectInvalidUserCommand(
       { type: 'USER_MESSAGE', idempotencyKey: cid(), content: 'x' },
@@ -708,8 +708,8 @@ registerCase({
       }),
     })
 
-    // CUSTOM_MESSAGE 产品 HTTP 面被拒绝（SYSTEM/USER 均不可）。未知枚举在 Jackson
-    // 反序列化层即失败，detail 是通用 "Failed to read request"（不携带命令名）。
+    // CUSTOM_MESSAGE 产品 HTTP 面被拒绝（SYSTEM/USER 均不可）。未知 type 在 Jackson
+    // 反序列化层即失败，detail 指出命令路径（不携带命令名）。
     for (const role of ['SYSTEM', 'USER']) {
       await expectHttpError(
         () =>

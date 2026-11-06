@@ -333,7 +333,7 @@ class EnvironmentIdeControllerTest {
                         + "\",\"bindingEpoch\":\"7\",\"directory\":\"/workspace\",\"unknown\":true}"))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.code").value("validation"))
-        .andExpect(jsonPath("$.detail").value(containsString("Failed to read request")));
+        .andExpect(jsonPath("$.detail").value("unknown is not allowed"));
 
     verifyNoInteractions(environmentIdeService);
   }

@@ -336,7 +336,7 @@ class HarnessThreadCommandBatchControllerTest {
     postBatch(THREAD_ID, body)
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.code").value("validation"))
-        .andExpect(jsonPath("$.detail").value("Failed to read request"));
+        .andExpect(jsonPath("$.detail").value(field + " is not allowed"));
   }
 
   private static String batch(String commands) {

@@ -46,7 +46,7 @@ class HarnessThreadApprovalActorIntegrationTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.code").value("validation"))
         .andExpect(jsonPath("$.type").value("about:blank"))
         .andExpect(jsonPath("$.code").value("validation"))
-        .andExpect(jsonPath("$.detail").value("Failed to read request"));
+        .andExpect(jsonPath("$.detail").value("actor is not allowed"));
   }
 
   /**

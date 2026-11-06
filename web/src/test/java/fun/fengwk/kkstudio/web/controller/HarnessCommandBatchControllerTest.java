@@ -244,7 +244,7 @@ class HarnessCommandBatchControllerTest {
                 .content(forbidden))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.code").value("validation"))
-        .andExpect(jsonPath("$.detail").value("Failed to read request"));
+        .andExpect(jsonPath("$.detail").value("target.rootSettings is not allowed"));
 
     mockMvc
         .perform(
@@ -459,7 +459,7 @@ class HarnessCommandBatchControllerTest {
         .andExpect(jsonPath("$.code").value("validation"))
         .andExpect(jsonPath("$.type").value("about:blank"))
         .andExpect(jsonPath("$.title").value("The request is invalid."))
-        .andExpect(jsonPath("$.detail").value("Failed to read request"));
+        .andExpect(jsonPath("$.detail").value("commands[0].unexpectedField is not allowed"));
 
     verify(acceptanceService, never())
         .accept(any(SessionOwner.class), any(AcceptCommandsCommand.class));
