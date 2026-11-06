@@ -53,8 +53,8 @@ public class PluginDTO {
   /** 权威 catalog 当前 desired 配置的普通值、schema 与秘密录入状态投影。 */
   private PluginConfigurationDTO configuration;
 
-  /** 本节点运行实例构建时的配置版本（canonical 非负十进制字符串）。 */
-  private @Nullable String appliedVersion;
+  /** 本节点运行实例构建时的配置版本；wire 上为 canonical 非负十进制字符串。 */
+  private @Nullable Long appliedVersion;
 
   /** 本节点已应用实例是否声明显式只读连接检查能力。 */
   private boolean connectionCheckSupported;

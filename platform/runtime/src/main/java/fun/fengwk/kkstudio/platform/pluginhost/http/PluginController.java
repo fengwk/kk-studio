@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.pluginhost.dto.PluginAuthCompleteRequestDTO;
 import fun.fengwk.kkstudio.platform.pluginhost.dto.PluginAuthPrepareDTO;
 import fun.fengwk.kkstudio.platform.pluginhost.dto.PluginAuthPrepareRequestDTO;
@@ -36,6 +37,7 @@ import java.util.List;
 public class PluginController {
 
   private static final String NO_STORE = "no-store";
+  private static final String RESOURCE = "plugin";
 
   private final PluginManagementService pluginManagementService;
 
@@ -62,7 +64,7 @@ public class PluginController {
     PluginDTO plugin =
         pluginManagementService.updateConfiguration(
             pluginId,
-            request.getExpectedVersion(),
+            requireExpectedVersion(request.getExpectedVersion()),
             request.getValuesJson(),
             request.getSecretPatch());
     HttpStatus status = plugin.getApplicationError() == null ? HttpStatus.OK : HttpStatus.ACCEPTED;
@@ -79,7 +81,8 @@ public class PluginController {
       @PathVariable("pluginId") String pluginId,
       @RequestBody PluginConnectionCheckRequestDTO request) {
     PluginConnectionCheckDTO check =
-        pluginManagementService.checkConnection(pluginId, request.getExpectedVersion());
+        pluginManagementService.checkConnection(
+            pluginId, requireExpectedVersion(request.getExpectedVersion()));
     return ResponseEntity.ok().header(HttpHeaders.CACHE_CONTROL, NO_STORE).body(check);
   }
 
@@ -105,5 +108,13 @@ public class PluginController {
   public ResponseEntity<Void> disconnect(@PathVariable("pluginId") String pluginId) {
     pluginManagementService.disconnect(pluginId);
     return ResponseEntity.noContent().build();
+  }
+
+  /** 期望版本是必填请求字段；缺失在 HTTP 边界拒绝，绝不以缺省 0 参与 CAS。 */
+  private static long requireExpectedVersion(Long expectedVersion) {
+    if (expectedVersion == null) {
+      throw DomainException.validation(RESOURCE, "expectedVersion is required");
+    }
+    return expectedVersion;
   }
 }
