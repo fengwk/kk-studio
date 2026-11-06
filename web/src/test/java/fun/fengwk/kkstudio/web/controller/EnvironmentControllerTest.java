@@ -228,6 +228,19 @@ class EnvironmentControllerTest {
     verify(environmentService).delete(EnvironmentId.of(ENV_ID), 0L);
   }
 
+  /** 缺失 expectedVersion 的请求体必须在 HTTP 边界按校验失败拒绝，不能以缺省 0 参与 CAS。 */
+  @Test
+  void rejectsMissingExpectedVersionInBody() throws Exception {
+    mockMvc
+        .perform(
+            post("/api/platform/environments/" + ENV_ID + "/rotate-token")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("validation"));
+    verifyNoInteractions(environmentService);
+  }
+
   /** 非规范 query expectedVersion 必须在真实严格转换器处拒绝，不进入领域服务。 */
   @Test
   void rejectsNonCanonicalExpectedVersionInQuery() throws Exception {

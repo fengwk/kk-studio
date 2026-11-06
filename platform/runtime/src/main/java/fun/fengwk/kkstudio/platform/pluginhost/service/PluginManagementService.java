@@ -307,9 +307,7 @@ public final class PluginManagementService {
     long appliedVersion = applied.map(entry -> entry.config().revision()).orElse(0L);
     dto.setAppliedVersion(applied.isPresent() ? appliedVersion : null);
     dto.setApplicationError(
-        applied.isPresent() && appliedVersion == desired.version()
-            ? null
-            : pendingError(applicationError));
+        appliedVersion == desired.version() ? null : pendingError(applicationError));
     dto.setConnectionCheckSupported(
         applied.flatMap(entry -> entry.instance().connectionCheck()).isPresent());
     dto.setHarnessToolNames(applied.map(entry -> toolNames(snapshot, entry)).orElse(List.of()));

@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.platform.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentService;
@@ -42,6 +43,7 @@ import java.util.UUID;
 public class EnvironmentController {
 
   private static final String NO_STORE = "no-store";
+  private static final String RESOURCE = "environment";
   private static final MediaType PLAIN_TEXT =
       new MediaType(MediaType.TEXT_PLAIN, StandardCharsets.UTF_8);
 
@@ -76,7 +78,7 @@ public class EnvironmentController {
     return noStore(
         HttpStatus.OK,
         environmentService.issueInstallCode(
-            EnvironmentId.of(environmentId), request.getExpectedVersion()));
+            EnvironmentId.of(environmentId), requireExpectedVersion(request.getExpectedVersion())));
   }
 
   /** 校验 code 后签发新凭证并返回完整安装脚本；code 随即失效。 */
@@ -103,7 +105,7 @@ public class EnvironmentController {
     return noStore(
         HttpStatus.OK,
         environmentService.rotateToken(
-            EnvironmentId.of(environmentId), request.getExpectedVersion()));
+            EnvironmentId.of(environmentId), requireExpectedVersion(request.getExpectedVersion())));
   }
 
   @DeleteMapping("/api/platform/environments/{environmentId}")
@@ -126,6 +128,14 @@ public class EnvironmentController {
         .header(HttpHeaders.CACHE_CONTROL, NO_STORE)
         .header("X-Content-Type-Options", "nosniff")
         .body(body);
+  }
+
+  /** 期望版本是必填请求字段；缺失在 HTTP 边界拒绝，绝不以缺省 0 参与 CAS。 */
+  private static long requireExpectedVersion(Long expectedVersion) {
+    if (expectedVersion == null) {
+      throw DomainException.validation(RESOURCE, "expectedVersion is required");
+    }
+    return expectedVersion;
   }
 
   /** 携带凭据的响应必须禁止任何中间缓存。 */
