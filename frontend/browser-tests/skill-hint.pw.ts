@@ -54,7 +54,6 @@ function snapshot(environmentName: string | null) {
     baseEntryId: null,
     entries: [],
     queuedCommands: [],
-    executionStatus: 'IDLE',
     activeAssistantOutput: null,
     toolInvocations: [],
     generationFailures: [],
@@ -171,6 +170,11 @@ async function installSkillHintApi(
     }
     // Agent 定义由基座作为 props 提供；这里只需满足共享查询，不重复注入。
     if (path === '/api/platform/agents') {
+      await route.fulfill({ json: [] })
+      return
+    }
+    // 模型列表是数组契约；分页对象会被 toAgentModelViews 当作数组读取。
+    if (path === '/api/platform/models' || path === '/api/platform/providers') {
       await route.fulfill({ json: [] })
       return
     }

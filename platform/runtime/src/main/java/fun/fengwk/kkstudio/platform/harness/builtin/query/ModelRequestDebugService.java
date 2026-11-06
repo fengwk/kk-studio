@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.platform.harness.builtin.query;
 
+import fun.fengwk.kkstudio.common.json.JsonValues;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.api.history.EntryPath;
@@ -148,7 +149,7 @@ public final class ModelRequestDebugService {
     HarnessModelRequestDebugDTO.ToolDTO dto = new HarnessModelRequestDebugDTO.ToolDTO();
     dto.setName(tool.name());
     dto.setDescription(tool.description());
-    dto.setInputSchemaJson(tool.inputSchemaJson());
+    dto.setInputSchema(JsonValues.readTree(tool.inputSchemaJson()));
     dto.setEnvironmentSupport(tool.environmentSupport());
     dto.setProvenance(tool.provenance());
     dto.setState(tool.state());
@@ -194,7 +195,7 @@ public final class ModelRequestDebugService {
     dto.setSkills(List.copyOf(config.getSkills()));
     dto.setSubagents(List.copyOf(config.getSubagents()));
     // canonical config JSON 只含 tools/skills/subagents，不含任何凭据。
-    dto.setConfigurationJson(agentConfigCodec.encode(config));
+    dto.setConfiguration(JsonValues.readTree(agentConfigCodec.encode(config)));
     return dto;
   }
 
@@ -211,9 +212,7 @@ public final class ModelRequestDebugService {
       ProviderCacheControl cacheControl) {
     HarnessModelRequestDebugDTO.CacheControlDTO dto =
         new HarnessModelRequestDebugDTO.CacheControlDTO();
-    dto.setRetention(
-        HarnessModelRequestDebugDTO.CacheControlDTO.Retention.valueOf(
-            cacheControl.retention().name()));
+    dto.setRetention(cacheControl.retention());
     dto.setKey(cacheControl.key());
     return dto;
   }

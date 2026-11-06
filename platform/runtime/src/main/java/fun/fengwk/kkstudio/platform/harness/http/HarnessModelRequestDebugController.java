@@ -32,8 +32,7 @@ public class HarnessModelRequestDebugController {
   public HarnessModelRequestDebugDTO previewModelRequest(
       @PathVariable UUID threadId, @RequestBody HarnessModelRequestDebugRequestDTO request) {
     HarnessRuntimeRequestMapper.ModelRequestDebugSelection selection =
-        HarnessRequestErrors.map(
-            () -> HarnessRuntimeRequestMapper.toModelRequestDebugSelection(request));
+        HarnessRuntimeRequestMapper.toModelRequestDebugSelection(request);
     return modelRequestDebugService.getModelRequestDebug(
         threadId, selection.model(), selection.environmentName());
   }

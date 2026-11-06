@@ -21,7 +21,7 @@ export function aggregateEntryUsage(
 ): TurnUsage | null {
   let total: TurnUsage | null = null
   for (const entry of entries) {
-    const payload = parsePayload(entry.payloadJson)
+    const payload = parsePayload(entry.payload)
     let metadata: unknown
     if (entry.entryType === 'COMPACTION') {
       // 压缩结果也是真实模型输出：canonical assistantMetadata 与 Entry.usageCost 是同一份事实。

@@ -161,7 +161,6 @@ function snapshotOf(
     baseEntryId: null,
     entries: [],
     queuedCommands: [],
-    executionStatus: 'IDLE',
     activeAssistantOutput: null,
     toolInvocations: [],
     generationFailures: [],
@@ -179,7 +178,7 @@ function acceptedResponse(currentThread = threadFixture()): HarnessAcceptedComma
       sessionId: currentThread.sessionId,
       parentEntryId: null,
       entryType: 'ROOT',
-      payloadJson: '{}',
+      payload: '{}',
       createdAt: 0,
       usageCost: null,
     },
@@ -207,9 +206,9 @@ function toolInvocationFixture(overrides: Partial<ToolInvocationDTO> = {}): Tool
     requiredEnvironmentName: null,
     environmentWaitFreshnessAt: null,
     argumentsJson: '{}',
-    approvalJson: '{}',
-    resultJson: null,
-    errorJson: null,
+    approval: '{}',
+    result: null,
+    error: null,
     createdAt: 0,
     updatedAt: 0,
     ...overrides,
@@ -280,9 +279,9 @@ function cancelledUserMessage(sequence: number, text: string): HarnessCancelledI
     sequence: String(sequence),
     idempotencyKey: `idempotency-${sequence}`,
     type: 'USER_MESSAGE',
-    payloadJson: JSON.stringify({
+    payload: {
       message: { role: 'USER', contents: [{ type: 'text', text }] },
-    }),
+    },
   }
 }
 
@@ -859,15 +858,25 @@ describe('useAgentThreadController', () => {
                 sequence: '1',
                 idempotencyKey: 'c1',
                 type: 'USER_MESSAGE',
-                payloadJson:
-                  '{"message":{"role":"USER","contents":[{"type":"text","text":"cancelled"}]}}',
+                payload: {
+                  message: { role: 'USER', contents: [{ type: 'text', text: 'cancelled' }] },
+                },
               },
               {
                 sequence: '2',
                 idempotencyKey: 'c2',
                 type: 'USER_MESSAGE',
-                payloadJson:
-                  '{"message":{"role":"USER","contents":[{"type":"resource","blobId":"00000000-0000-0000-0000-000000000001","name":"a.txt","preview":"p"}]}}',
+                payload: {
+                  message: {
+                    role: 'USER',
+                    contents: [{
+                      type: 'resource',
+                      blobId: '00000000-0000-0000-0000-000000000001',
+                      name: 'a.txt',
+                      preview: 'p',
+                    }],
+                  },
+                },
               },
             ],
           },
@@ -913,8 +922,9 @@ describe('useAgentThreadController', () => {
               sequence: '1',
               idempotencyKey: 'c1',
               type: 'USER_MESSAGE',
-              payloadJson:
-                '{"message":{"role":"USER","contents":[{"type":"text","text":"cancelled"}]}}',
+              payload: {
+                message: { role: 'USER', contents: [{ type: 'text', text: 'cancelled' }] },
+              },
             },
           ],
         },
@@ -1321,7 +1331,7 @@ describe('useAgentThreadController', () => {
       sessionId: 's1',
       parentEntryId: null,
       entryType,
-      payloadJson: JSON.stringify(payload),
+      payload: JSON.stringify(payload),
       createdAt: 0,
       usageCost: null,
     })
@@ -2471,7 +2481,7 @@ describe('useAgentThreadController', () => {
         id: 'inv-1',
         toolName: 'test',
         rendererKey: 'test',
-        approvalJson: JSON.stringify({ decision: 'ALLOW', decisionId: body.decisionId, reason: null }),
+        approval: JSON.stringify({ decision: 'ALLOW', decisionId: body.decisionId, reason: null }),
       })
     })
 
@@ -2510,7 +2520,7 @@ describe('useAgentThreadController', () => {
           id: 'inv-1',
           toolName: 'test',
           rendererKey: 'test',
-          approvalJson: JSON.stringify({ decision: 'ALLOW', decisionId: decisionIdEpoch0, reason: null }),
+          approval: JSON.stringify({ decision: 'ALLOW', decisionId: decisionIdEpoch0, reason: null }),
         }),
       )
       await approvalActionEpoch0

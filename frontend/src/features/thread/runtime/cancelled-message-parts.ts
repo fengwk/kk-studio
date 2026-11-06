@@ -18,7 +18,7 @@ export function cancelledInputMessageParts(input: HarnessCancelledInputDTO): Com
   if (input.type !== 'USER_MESSAGE') {
     return []
   }
-  const payload = parsePayloadJson(input.payloadJson)
+  const payload = input.payload
   // canonical 形态是 ThreadCommandPayload JSON `{message:<AgentMessage>}`。
   if (!isRecord(payload) || !('message' in payload)) {
     return [createTextPart(typeof payload === 'string' ? payload : stableText(payload))]
@@ -31,7 +31,7 @@ export function cancelledInputGoalText(input: HarnessCancelledInputDTO): string 
   if (input.type !== 'GOAL') {
     return null
   }
-  const payload = parsePayloadJson(input.payloadJson)
+  const payload = input.payload
   const text = isRecord(payload) ? payload.text : null
   return typeof text === 'string' && text.length > 0 ? text : null
 }
@@ -97,14 +97,6 @@ export function payloadMessageToParts(message: unknown): ComposerPart[] {
     return [createTextPart(stableText(message))]
   }
   return message.contents.flatMap(contentToParts)
-}
-
-function parsePayloadJson(payloadJson: string): unknown {
-  try {
-    return JSON.parse(payloadJson)
-  } catch {
-    return payloadJson
-  }
 }
 
 function contentToParts(content: unknown): ComposerPart[] {

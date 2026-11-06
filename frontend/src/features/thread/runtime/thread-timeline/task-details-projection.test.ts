@@ -18,7 +18,7 @@ function entry(
     sessionId: 'session-task',
     parentEntryId: null,
     entryType: 'MESSAGE',
-    payloadJson: JSON.stringify({
+    payload: JSON.stringify({
       message: { role, contents },
     }),
     createdAt: 1785232800,
@@ -51,9 +51,9 @@ function toolInvocation(
       subagent_type: 'explorer',
       prompt: 'inspect the runtime',
     }),
-    approvalJson: null,
-    resultJson: null,
-    errorJson: null,
+    approval: null,
+    result: null,
+    error: null,
     createdAt: 1785232800,
     updatedAt: 1785232801,
     ...overrides,
@@ -153,11 +153,11 @@ describe('task canonical details projection', () => {
     expect(parseTaskReceipt(resultMessage?.details)).toBeNull()
   })
 
-  it('projects live invocation resultJson with details into transient result', () => {
+  it('projects live invocation result with details into transient result', () => {
     const threadId = '00000000-0000-4000-8000-000000000002'
     const invocation = toolInvocation('inv-1', 'asst-live', {
       status: 'SUCCEEDED',
-      resultJson: JSON.stringify({
+      result: JSON.stringify({
         details: {
           kind: 'task.accepted',
           thread_id: threadId,
@@ -207,7 +207,7 @@ describe('durable tool result status after invocation deletion', () => {
     const entry: HarnessSessionEntryDTO = {
       entryId: 'result', sessionId: 'session', parentEntryId: null,
       entryType: 'MESSAGE', createdAt: 1, usageCost: null,
-      payloadJson: JSON.stringify({
+      payload: JSON.stringify({
         message: { role: 'TOOL', contents: [{
           type: 'tool_result', toolCallId: 'call', toolName: 'bash', rendererKey: 'bash',
           error: true, contents: [{ type: 'text', text: 'Original terminal result' }],

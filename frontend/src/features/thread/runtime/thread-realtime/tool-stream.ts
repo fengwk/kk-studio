@@ -52,7 +52,7 @@ export interface RealtimeToolStream {
   toolCallId: string
   text: string
   error: boolean
-  /** 在尚无 result Entry 时，从持久 errorJson 投影出的错误消息。 */
+  /** 在尚无 result Entry 时，从持久 error 投影出的错误消息。 */
   errorText?: string
   /** Environment process.output 结构化流状态（mode、offsets、observedBytes、omission）。 */
   processOutput?: ProcessOutputStreamState
@@ -128,7 +128,7 @@ export function snapshotToolStream(
     // HTTP 快照不携带流事件时间；之后的实时事件按各自的 createdAt 排序。
     createdAt: '',
   }
-  const result = parseToolResultPayload(invocation.resultJson)
+  const result = parseToolResultPayload(invocation.result)
   if (result != null) {
     return {
       ...base,
@@ -136,48 +136,51 @@ export function snapshotToolStream(
       error: result.error,
     }
   }
-  const errorText = parseToolErrorText(invocation.errorJson)
+  const errorText = parseToolErrorText(invocation.error)
   if (errorText != null) {
     return { ...base, error: true, errorText }
   }
   return base
 }
 
-/** 将规范的 ToolResult JSON 解析为 text + error 标记。 */
-function parseToolResultPayload(json: string | null): {
+/** 将规范的 ToolResult JSON 节点解析为 text + error 标记。 */
+function parseToolResultPayload(value: unknown): {
   text: string
   error: boolean
 } | null {
-  if (json == null || !json.trim()) {
+  if (value == null) {
     return null
   }
-  try {
-    const value: unknown = JSON.parse(json)
-    if (!isRecord(value)) {
-      return null
-    }
-    return { text: partialText(value), error: value[TOOL_RESULT_ERROR_KEY] === true }
-  } catch {
+  const record = typeof value === 'string' ? parseJsonRecord(value) : value
+  if (!isRecord(record)) {
     return null
   }
+  return { text: partialText(record), error: record[TOOL_RESULT_ERROR_KEY] === true }
 }
 
-/** 将规范的错误 JSON 解析为用于展示的 message（不存在时返回 null）。 */
-export function parseToolErrorText(json: string | null): string | null {
-  if (json == null || !json.trim()) {
+/** 将规范的错误 JSON 节点解析为用于展示的 message（不存在时返回 null）。 */
+export function parseToolErrorText(value: unknown): string | null {
+  if (value == null) {
+    return null
+  }
+  const record = typeof value === 'string' ? parseJsonRecord(value) : value
+  if (isRecord(record)) {
+    const message = record.message
+    if (typeof message === 'string' && message.trim()) {
+      return message
+    }
+  }
+  return typeof value === 'string' && value.trim() ? value : null
+}
+
+function parseJsonRecord(value: string): unknown {
+  if (!value.trim()) {
     return null
   }
   try {
-    const value: unknown = JSON.parse(json)
-    if (isRecord(value)) {
-      const message = value.message
-      if (typeof message === 'string' && message.trim()) {
-        return message
-      }
-    }
-    return json
+    return JSON.parse(value)
   } catch {
-    return json
+    return null
   }
 }
 
@@ -288,7 +291,7 @@ export function boundProcessOutputText(
  * 将一条 TOOL_PARTIAL chunk 聚合到 overlay 中：只有 text/json chunk 会追加到 text。
  * 支持 process.output 结构化流（APPEND / SNAPSHOT / gap healing / offset 去重与 UI 有界裁剪）。
  * runtime 禁止 TOOL_PARTIAL 携带 Resource 内容，因此 attachments 不会在这里聚合——
- * 它们仅由 {@link snapshotToolStream} 从持久终止态 resultJson 投影得到。
+ * 它们仅由 {@link snapshotToolStream} 从持久终止态 result 投影得到。
  * attempt 发生变化（即重试）时会替换掉之前所有的片段。
  */
 export function reduceRealtimeToolStream(

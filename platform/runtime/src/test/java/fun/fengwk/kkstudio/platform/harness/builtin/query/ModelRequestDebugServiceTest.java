@@ -21,6 +21,7 @@ import tools.jackson.databind.MapperFeature;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
+import fun.fengwk.kkstudio.common.json.JsonValues;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.api.entry.GoalSetting;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
@@ -212,7 +213,7 @@ class ModelRequestDebugServiceTest {
     assertNull(sent.getFilterReason());
     assertEquals(EnvironmentSupport.ROUTED, sent.getEnvironmentSupport());
     assertEquals("builtin:read", sent.getProvenance());
-    assertEquals("{\"type\":\"object\"}", sent.getInputSchemaJson());
+    assertEquals(JsonValues.readTree("{\"type\":\"object\"}"), sent.getInputSchema());
     HarnessModelRequestDebugDTO.ToolDTO filtered = debug.getTools().get(1);
     assertEquals(LiveTurnPlan.ToolState.FILTERED, filtered.getState());
     assertEquals(LiveTurnPlan.FilterReason.ENVIRONMENT_NOT_SELECTED, filtered.getFilterReason());
@@ -241,11 +242,9 @@ class ModelRequestDebugServiceTest {
     assertEquals("pkg", subagent.getSkills().getFirst().getPackageName());
     assertEquals("sk", subagent.getSkills().getFirst().getName());
     assertEquals(List.of("nested"), subagent.getSubagents());
-    assertEquals(CODER_CONFIG_JSON, subagent.getConfigurationJson());
+    assertEquals(JsonValues.readTree(CODER_CONFIG_JSON), subagent.getConfiguration());
 
-    assertEquals(
-        HarnessModelRequestDebugDTO.CacheControlDTO.Retention.SHORT,
-        debug.getCacheControl().getRetention());
+    assertEquals(PromptCacheRetention.SHORT, debug.getCacheControl().getRetention());
     // key 直接就是 session UUID 文本：读取投影绝不哈希、也不重新派生 affinity。
     assertEquals(SESSION_ID.toString(), debug.getCacheControl().getKey());
   }
@@ -534,8 +533,8 @@ class ModelRequestDebugServiceTest {
     verify(agentRepository).getByName("coder");
     verifyNoMoreInteractions(agentRepository);
 
-    String configurationJson = subagent.getConfigurationJson();
-    assertEquals(CODER_CONFIG_JSON, configurationJson);
+    String configurationJson = JsonValues.write(subagent.getConfiguration());
+    assertEquals(JsonValues.readTree(CODER_CONFIG_JSON), subagent.getConfiguration());
     String lowered = configurationJson.toLowerCase();
     assertFalse(lowered.contains("key"), configurationJson);
     assertFalse(lowered.contains("token"), configurationJson);

@@ -267,7 +267,7 @@ test('stopThread validates per-thread receipts', async () => {
       sequence: '1',
       idempotencyKey: cid(),
       type: 'USER_MESSAGE',
-      payloadJson: '{"type":"USER_MESSAGE"}',
+      payload: { type: 'USER_MESSAGE' },
     }],
   }
   const stopCtx = {

@@ -462,9 +462,9 @@ describe('thread timeline edge branches', () => {
       requiredEnvironmentName: null,
       environmentWaitFreshnessAt: null,
       argumentsJson: '{"command":"ls"}',
-      approvalJson: null,
-      resultJson: null,
-      errorJson: null,
+      approval: null,
+      result: null,
+      error: null,
       createdAt: 1767225600,
       updatedAt: 1767225600,
     }
@@ -898,7 +898,7 @@ function entry(entryId: string, entryType: EntryType, payload: Record<string, un
     sessionId: 's1',
     parentEntryId: null,
     entryType,
-    payloadJson: JSON.stringify(payload),
+    payload: JSON.stringify(payload),
     createdAt: 1767225600,
     usageCost: null,
   }
@@ -917,7 +917,7 @@ function command(
     type,
     state,
     idempotencyKey: `cid-${label}`,
-    payloadJson: JSON.stringify(payload),
+    payload: JSON.stringify(payload),
     cancelledAt: null,
     createdAt: 1767225600,
   }
@@ -954,7 +954,7 @@ describe('Turn usage after TURN_END', () => {
       sessionId: 's1',
       parentEntryId: null,
       entryType,
-      payloadJson: JSON.stringify(payload),
+      payload: JSON.stringify(payload),
       createdAt,
       usageCost: null,
     }

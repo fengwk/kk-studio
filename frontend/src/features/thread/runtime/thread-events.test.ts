@@ -29,7 +29,7 @@ function entry(
     sessionId: 's1',
     parentEntryId: null,
     entryType,
-    payloadJson: JSON.stringify(payload),
+    payload: JSON.stringify(payload),
     createdAt,
     usageCost: null,
   }
@@ -102,9 +102,9 @@ function toolInvocation(overrides: Partial<ToolInvocationDTO> = {}): ToolInvocat
     requiredEnvironmentName: null,
     environmentWaitFreshnessAt: null,
     argumentsJson: '{"command":"ls"}',
-    approvalJson: null,
-    resultJson: null,
-    errorJson: null,
+    approval: null,
+    result: null,
+    error: null,
     createdAt: 1785232800,
     updatedAt: 1785232800,
     ...overrides,
@@ -607,9 +607,9 @@ describe('buildThreadEventTimeline', () => {
       ]),
     )
 
-    // errorJson / stream error → failed；resultJson → completed。
-    expect(build(entries, { toolInvocations: [toolInvocation({ errorJson: '{}' })] })[2]!.status).toBe('failed')
-    expect(build(entries, { toolInvocations: [toolInvocation({ resultJson: '{}' })] })[2]!.status).toBe('completed')
+    // error / stream error → failed；result → completed。
+    expect(build(entries, { toolInvocations: [toolInvocation({ error: '{}' })] })[2]!.status).toBe('failed')
+    expect(build(entries, { toolInvocations: [toolInvocation({ result: '{}' })] })[2]!.status).toBe('completed')
   })
 
   it('dedups active attempt failures and anchors them before the model event', () => {
@@ -782,7 +782,7 @@ describe('buildThreadEventTimeline', () => {
         entry('turn-1', 'TURN_START', { reason: 'USER_MESSAGE' }),
         entry('assistant-1', 'MESSAGE', messagePayload('ASSISTANT', [assistantToolCall])),
       ],
-      { toolInvocations: [toolInvocation({ resultJson: '{"toolCallId":"call-1","contents":[]}' })] },
+      { toolInvocations: [toolInvocation({ result: '{"toolCallId":"call-1","contents":[]}' })] },
     )
     expect(pending.some((event) => event.source === 'active-tool')).toBe(true)
   })
@@ -809,11 +809,11 @@ describe('buildThreadEventTimeline', () => {
   })
 
   it('keeps malformed payload JSON inspectable through compact/pretty fallbacks', () => {
-    // payloadJson 不是合法 JSON：compactJson 折叠为空格归一文本、prettyJson 原样返回，
+    // payload 不是合法 JSON：compactJson 折叠为空格归一文本、prettyJson 原样返回，
     // 事件仍然投影（审计视图不丢信息），且 summary/rawJson 不抛异常。
     const events = build([
       entry('turn-1', 'TURN_START', { reason: 'USER_MESSAGE' }),
-      { ...entry('bad-1', 'MESSAGE', {}), payloadJson: 'not-json' },
+      { ...entry('bad-1', 'MESSAGE', {}), payload: 'not-json' },
     ])
     const bad = events[1]!
     expect(bad.kind).toBe('CUSTOM_MESSAGE')
@@ -821,7 +821,7 @@ describe('buildThreadEventTimeline', () => {
     expect(bad.summary).toBe('not-json')
     expect(bad.rawJson).toBe('not-json')
     // 空白 payload 视为空对象（parsePayload 兜底），仍能正常投影。
-    const blank = build([{ ...entry('blank-1', 'MESSAGE', {}), payloadJson: '' }])[0]!
+    const blank = build([{ ...entry('blank-1', 'MESSAGE', {}), payload: '' }])[0]!
     expect(blank.kind).toBe('CUSTOM_MESSAGE')
     // parsePayload 对空字符串兜底为空对象：compactJson 输出 '{}' 作为可展示摘要。
     expect(blank.summary).toBe('{}')
@@ -979,9 +979,9 @@ describe('buildThreadEventTimeline', () => {
       rendererKey: 'bash-renderer',
       environmentId: 'env-1',
       argumentsJson: '{"command":"echo hello","timeout":30}',
-      approvalJson: '{"approved":true,"approver":"admin"}',
-      resultJson: '{"exitCode":0,"stdout":"hello\\n"}',
-      errorJson: null,
+      approval: { approved: true, approver: 'admin' },
+      result: { exitCode: 0, stdout: 'hello\n' },
+      error: null,
     })
     const toolStreamMap = new Map([
       [
@@ -1026,8 +1026,8 @@ describe('buildThreadEventTimeline', () => {
 
     // 格式化后的 JSON 字符串断言
     expect(detailMap.get('参数')).toBe(JSON.stringify(JSON.parse(fullInvocation.argumentsJson), null, 2))
-    expect(detailMap.get('审批')).toBe(JSON.stringify(JSON.parse(fullInvocation.approvalJson!), null, 2))
-    expect(detailMap.get('结果')).toBe(JSON.stringify(JSON.parse(fullInvocation.resultJson!), null, 2))
+    expect(detailMap.get('审批')).toBe(JSON.stringify(fullInvocation.approval, null, 2))
+    expect(detailMap.get('结果')).toBe(JSON.stringify(fullInvocation.result, null, 2))
     expect(detailMap.has('错误')).toBe(false)
     expect(detailMap.get('运行环境')).toBe('env-1')
     expect(detailMap.get('实时流')).toContain('hello\\n')
@@ -1039,18 +1039,18 @@ describe('buildThreadEventTimeline', () => {
     expect(rawParsed.threadId).toBe('thread-1')
     expect(rawParsed.turnStartEntryId).toBe('turn-1')
     expect(rawParsed.argumentsJson).toBe(fullInvocation.argumentsJson)
-    expect(rawParsed.resultJson).toBe(fullInvocation.resultJson)
-    expect(rawParsed.approvalJson).toBe(fullInvocation.approvalJson)
-    expect(rawParsed.errorJson).toBeNull()
+    expect(rawParsed.result).toEqual(fullInvocation.result)
+    expect(rawParsed.approval).toEqual(fullInvocation.approval)
+    expect(rawParsed.error).toBeNull()
     expect(rawParsed.realtimeStream?.text).toBe('hello\n')
 
-    // 验证失败工具调用时包含 errorJson 且 status 为 failed
+    // 验证失败工具调用时包含 error 且 status 为 failed
     const failedInvocation = toolInvocation({
       id: 'inv-failed',
       assistantEntryId: 'assistant-1',
       status: 'FAILED',
-      resultJson: null,
-      errorJson: '{"code":"IO_ERROR","message":"disk full"}',
+      result: null,
+      error: { code: 'IO_ERROR', message: 'disk full' },
     })
     const failedEvents = buildThreadEventTimeline({
       entries,
@@ -1060,21 +1060,21 @@ describe('buildThreadEventTimeline', () => {
     const failedEvent = failedEvents.find((e) => e.id === 'active:tool:inv-failed')!
     expect(failedEvent.status).toBe('failed')
     const failedDetailMap = new Map(failedEvent.details.map((d) => [d.label, d.value]))
-    expect(failedDetailMap.get('错误')).toBe(JSON.stringify(JSON.parse(failedInvocation.errorJson!), null, 2))
-    expect(JSON.parse(failedEvent.rawJson!).errorJson).toBe(failedInvocation.errorJson)
+    expect(failedDetailMap.get('错误')).toBe(JSON.stringify(failedInvocation.error, null, 2))
+    expect(JSON.parse(failedEvent.rawJson!).error).toEqual(failedInvocation.error)
   })
 
   it('handles malformed embedded JSON gracefully without throwing', () => {
-    // 意图：验证当 embedded JSON（如 argumentsJson, resultJson 等）格式错误时，投影不会抛出异常，而是安全地原样保留。
+    // 意图：验证当 embedded JSON（如 argumentsJson, result 等）格式错误时，投影不会抛出异常，而是安全地原样保留。
     const entries = [
       entry('turn-1', 'TURN_START', { reason: 'USER_MESSAGE' }),
     ]
     const malformedInvocation = toolInvocation({
       id: 'inv-malformed',
       argumentsJson: '{ malformed json: not valid }',
-      approvalJson: 'invalid approval [[[',
-      resultJson: '{ unclosed string: "abc }',
-      errorJson: 'some plain text error',
+      approval: 'invalid approval [[[',
+      result: '{ unclosed string: "abc }',
+      error: 'some plain text error',
     })
 
     const events = build(entries, { toolInvocations: [malformedInvocation] })

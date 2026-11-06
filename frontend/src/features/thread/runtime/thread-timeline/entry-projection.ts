@@ -54,7 +54,7 @@ export function projectDurableEntry(
   durableToolArguments: Map<string, string[]>,
   context: EntryProjectionContext,
 ) {
-  const payload = parsePayload(entry.payloadJson)
+  const payload = parsePayload(entry.payload)
   const entryType = entry.entryType
   if (entryType === 'ROOT') {
     const settings = parseSettingsSnapshot(payload.settings)
@@ -440,7 +440,7 @@ function decodeDurableToolResultContent(content: Record<string, unknown>): Recor
 
 /**
  * 从规范 ToolResult JSON 解析有序展示内容和错误。
- * durable Entry 与尚未物化的 invocation resultJson 共用这一事实，避免两套结果格式。
+ * durable Entry 与尚未物化的 invocation result 共用这一事实，避免两套结果格式。
  */
 export function projectToolResultContent(
   content: Record<string, unknown>,

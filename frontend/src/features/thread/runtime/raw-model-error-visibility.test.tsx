@@ -60,7 +60,7 @@ function sessionEntry(
     parentEntryId: null,
     sessionId: 'session-1',
     entryType,
-    payloadJson: JSON.stringify(payload),
+    payload: JSON.stringify(payload),
     createdAt: 1789473600,
     usageCost: null,
     ...overrides,

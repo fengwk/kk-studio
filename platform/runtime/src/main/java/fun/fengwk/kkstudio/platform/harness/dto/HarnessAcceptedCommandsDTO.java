@@ -12,5 +12,5 @@ public class HarnessAcceptedCommandsDTO {
   private HarnessSessionEntryDTO rootEntry;
   private HarnessThreadDTO thread;
   private List<HarnessThreadCommandDTO> acceptedCommands = List.of();
-  private Boolean replayed;
+  private boolean replayed;
 }

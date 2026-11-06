@@ -31,7 +31,7 @@ import fun.fengwk.kkstudio.web.advice.RequestBodyRequiredValidationAdvice;
 import java.util.UUID;
 
 /** 冻结的流式追帧 HTTP 契约：成功固定 202；请求形状严格 400；Thread 不存在 404；不匹配/过期 attempt 仍是 202 no-op。 */
-class StudioHarnessThreadStreamCatchupControllerTest {
+class HarnessThreadStreamCatchupControllerTest {
 
   private static final UUID THREAD = new UUID(0L, 1L);
   private static final UUID INVOCATION = new UUID(0L, 2L);

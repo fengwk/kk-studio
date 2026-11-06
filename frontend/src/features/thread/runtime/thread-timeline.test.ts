@@ -283,7 +283,7 @@ describe('compaction summary projection', () => {
       sessionId: 'session-1',
       parentEntryId: null,
       entryType,
-      payloadJson: JSON.stringify(payload),
+      payload: JSON.stringify(payload),
       createdAt: 1767225600 + (entryId === 'assistant' ? 2 : 3),
       usageCost: null,
     }
@@ -1009,7 +1009,7 @@ describe('thread timeline', () => {
   it('keeps a blank payload Entry inspectable through the durable Entry fallback', () => {
     const root = {
       ...entry('root', 'ROOT', {}),
-      payloadJson: '',
+      payload: '',
     }
 
     const timeline = buildThreadTimeline([root], [], [])
@@ -1223,9 +1223,9 @@ describe('thread timeline', () => {
         requiredEnvironmentName: null,
         environmentWaitFreshnessAt: null,
         argumentsJson: '{"command":"ls"}',
-        approvalJson: JSON.stringify({ required: true, decision: null, decisionId: null }),
-        resultJson: null,
-        errorJson: null,
+        approval: JSON.stringify({ required: true, decision: null, decisionId: null }),
+        result: null,
+        error: null,
         createdAt: 1785232800,
         updatedAt: 1785232800,
       },
@@ -1293,9 +1293,9 @@ describe('thread timeline', () => {
       requiredEnvironmentName: null,
       environmentWaitFreshnessAt: null,
       argumentsJson: '{"command":"ls"}',
-      approvalJson: JSON.stringify({ required: true, decision: null, decisionId: null }),
-      resultJson: null,
-      errorJson: null,
+      approval: JSON.stringify({ required: true, decision: null, decisionId: null }),
+      result: null,
+      error: null,
       createdAt: 1785232800,
       updatedAt: 1785232800,
     }
@@ -1386,9 +1386,9 @@ describe('thread timeline', () => {
       requiredEnvironmentName: null,
       environmentWaitFreshnessAt: null,
       argumentsJson: '{"command":"ls"}',
-      approvalJson: JSON.stringify({ required: true, decision: null, decisionId: null }),
-      resultJson: null,
-      errorJson: null,
+      approval: JSON.stringify({ required: true, decision: null, decisionId: null }),
+      result: null,
+      error: null,
       createdAt: 1785232800,
       updatedAt: 1785232800,
     }
@@ -1488,14 +1488,14 @@ describe('thread timeline', () => {
 
   it('projects terminal invocation error overlay and drops partial on attempt mismatch', () => {
     // overlay 与 invocation 的 attempt 不一致时视为陈旧（不投影 partial）；终态
-    // errorJson 存在时 status 投影为 error，partial 错误文案来自 errorText。
+    // error 存在时 status 投影为 error，partial 错误文案来自 errorText。
     const invocations: ToolInvocationDTO[] = [
       invocation('inv-term', '40', 'call-1', {
         status: 'FAILED',
         attempt: 1,
-        resultJson: null,
-        errorJson: JSON.stringify({ message: 'tool crashed' }),
-        approvalJson: null,
+        result: null,
+        error: JSON.stringify({ message: 'tool crashed' }),
+        approval: null,
       }),
     ]
     const staleStream: RealtimeToolStream = {
@@ -1541,15 +1541,15 @@ describe('thread timeline', () => {
     expect(call?.partialErrorText).toBeUndefined()
   })
 
-  it('projects terminal success via resultJson and drops the stale streaming overlay', () => {
-    // resultJson 已物化的终态 overlay：status 投影为 done，partial 字段消失。
+  it('projects terminal success via result and drops the stale streaming overlay', () => {
+    // result 已物化的终态 overlay：status 投影为 done，partial 字段消失。
     const invocations: ToolInvocationDTO[] = [
       invocation('inv-done', '40', 'call-1', {
         status: 'SUCCEEDED',
         attempt: 1,
-        resultJson: JSON.stringify({ contents: [{ type: 'text', text: 'ok' }], error: false }),
-        errorJson: null,
-        approvalJson: null,
+        result: JSON.stringify({ contents: [{ type: 'text', text: 'ok' }], error: false }),
+        error: null,
+        approval: null,
       }),
     ]
     const liveStream: RealtimeToolStream = {
@@ -1602,12 +1602,12 @@ describe('thread timeline', () => {
       invocation('inv-a', '40', 'call-1', {
         status: 'WAITING_APPROVAL',
         attempt: 1,
-        approvalJson: JSON.stringify({ required: true, decision: null, decisionId: null }),
+        approval: JSON.stringify({ required: true, decision: null, decisionId: null }),
       }),
       invocation('inv-b', '40', 'call-1', {
         status: 'RUNNING',
         attempt: 1,
-        approvalJson: null,
+        approval: null,
       }),
     ]
     const timeline = buildThreadTimeline(
@@ -1646,7 +1646,7 @@ describe('thread timeline', () => {
         status: 'WAITING_APPROVAL',
         attempt: 1,
         rendererKey: 'other-renderer',
-        approvalJson: JSON.stringify({ required: true, decision: null, decisionId: null }),
+        approval: JSON.stringify({ required: true, decision: null, decisionId: null }),
       }),
     ]
     const timeline = buildThreadTimeline(
@@ -1676,7 +1676,7 @@ describe('thread timeline', () => {
   })
 
   it('shows a succeeded sibling result while another tool in the batch is still waiting', () => {
-    // 同批兄弟仍 WAITING_APPROVAL 时，已成功调用必须按自身 resultJson 展示，不能一起 pending。
+    // 同批兄弟仍 WAITING_APPROVAL 时，已成功调用必须按自身 result 展示，不能一起 pending。
     const timeline = buildThreadTimeline(
       [
         entry('40', 'MESSAGE', messagePayload('ASSISTANT', [
@@ -1689,7 +1689,7 @@ describe('thread timeline', () => {
         invocation('inv-ok', '40', 'call-ok', {
           status: 'SUCCEEDED',
           callIndex: 0,
-          resultJson: JSON.stringify({
+          result: JSON.stringify({
             contents: [
               { type: 'text', text: 'listed files' },
               { type: 'resource', uri: 'blob-upload:00000000-0000-4000-8000-000000000001', mediaType: 'text/plain', name: 'out.txt', size: 4, sha256: 'a'.repeat(64) },
@@ -1702,7 +1702,7 @@ describe('thread timeline', () => {
           status: 'WAITING_APPROVAL',
           callIndex: 1,
           toolCallId: 'call-ask',
-          approvalJson: JSON.stringify({ required: true, decision: null, decisionId: null }),
+          approval: JSON.stringify({ required: true, decision: null, decisionId: null }),
         }),
       ],
       null,
@@ -1747,7 +1747,7 @@ describe('thread timeline', () => {
         invocation('inv-error', '40', 'call-error', {
           status: 'SUCCEEDED',
           callIndex: 0,
-          resultJson: JSON.stringify({ contents: [{ type: 'text', text: 'rejected' }], error: true }),
+          result: JSON.stringify({ contents: [{ type: 'text', text: 'rejected' }], error: true }),
         }),
         invocation('inv-failed', '40', 'call-failed', {
           status: 'FAILED',
@@ -1758,7 +1758,7 @@ describe('thread timeline', () => {
           status: 'UNKNOWN',
           callIndex: 2,
           toolCallId: 'call-unknown',
-          errorJson: JSON.stringify({ message: 'lost' }),
+          error: JSON.stringify({ message: 'lost' }),
         }),
         invocation('inv-cancelled', '40', 'call-cancelled', {
           status: 'CANCELLED',
@@ -1794,7 +1794,7 @@ describe('thread timeline', () => {
       [],
       [invocation('inv-other-entry', 'other-entry', 'call-1', {
         status: 'SUCCEEDED',
-        resultJson: JSON.stringify({ contents: [{ type: 'text', text: 'wrong call' }], error: false }),
+        result: JSON.stringify({ contents: [{ type: 'text', text: 'wrong call' }], error: false }),
       })],
     )
     expect(mismatched.messages.filter((message) => message.role === 'tool')).toMatchObject([
@@ -1830,7 +1830,7 @@ describe('thread timeline', () => {
       [],
       [invocation('inv-b', 'B', 'x', {
         status: 'SUCCEEDED',
-        resultJson: JSON.stringify({ contents: [{ type: 'text', text: 'current output' }], error: false }),
+        result: JSON.stringify({ contents: [{ type: 'text', text: 'current output' }], error: false }),
       })],
     )
     const current = timeline.messages.filter((message) =>
@@ -1882,13 +1882,13 @@ describe('thread timeline', () => {
         invocation('inv-b0', 'B', 'x', {
           callIndex: 0,
           status: 'SUCCEEDED',
-          resultJson: JSON.stringify({ contents: [{ type: 'text', text: 'stale transient' }], error: false }),
+          result: JSON.stringify({ contents: [{ type: 'text', text: 'stale transient' }], error: false }),
         }),
         invocation('inv-b1', 'B', 'x', {
           callIndex: 1,
           status: 'SUCCEEDED',
-          resultJson: JSON.stringify({ contents: [{ type: 'text', text: 'current second' }], error: false }),
-          errorJson: JSON.stringify({ code: 'TOOL_FAILED', message: 'disk full' }),
+          result: JSON.stringify({ contents: [{ type: 'text', text: 'current second' }], error: false }),
+          error: JSON.stringify({ code: 'TOOL_FAILED', message: 'disk full' }),
         }),
       ],
     )
@@ -1936,7 +1936,7 @@ describe('thread timeline', () => {
       [],
       [invocation('inv-1', '40', 'call-1', {
         status: 'SUCCEEDED',
-        resultJson: JSON.stringify({ contents: [{ type: 'text', text: 'transient ok' }], error: false }),
+        result: JSON.stringify({ contents: [{ type: 'text', text: 'transient ok' }], error: false }),
       })],
       null,
       new Map([['inv-1', {
@@ -1967,7 +1967,7 @@ describe('thread timeline', () => {
   })
 
   it('keeps a terminal model stream with content as a done assistant message', () => {
-    // modelStream status='done'（持久终止态 resultJson 投影）走非 streaming 分支：
+    // modelStream status='done'（持久终止态 result 投影）走非 streaming 分支：
     // 有文本/思考时投影为 done assistant，而不是丢弃。
     const done: RealtimeModelStream = {
       threadId: 'thread-1',
@@ -1997,7 +1997,7 @@ describe('thread timeline', () => {
       invocation('inv-decided', '40', 'call-1', {
         status: 'SUCCEEDED',
         attempt: 1,
-        approvalJson: JSON.stringify({
+        approval: JSON.stringify({
           required: true,
           decision: 'ALLOWED',
           decisionId: 'dec-1',
@@ -2052,7 +2052,7 @@ describe('thread timeline', () => {
       [invocation('inv-free', '41', 'call-1', {
         status: 'RUNNING',
         attempt: 1,
-        approvalJson: JSON.stringify({ required: false, decision: null }),
+        approval: JSON.stringify({ required: false, decision: null }),
       })],
     )
     const free = notRequired.messages.find((m) => m.role === 'tool')
@@ -2086,7 +2086,7 @@ describe('thread timeline', () => {
     ).toBe(true)
   })
 
-  it('projects editReview from pending ToolInvocation approvalJson.editReview onto call message', () => {
+  it('projects editReview from pending ToolInvocation approval.editReview onto call message', () => {
     const validSha = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
     const review = {
       path: '/canonical/src/App.tsx',
@@ -2109,7 +2109,7 @@ describe('thread timeline', () => {
           toolName: 'edit',
           rendererKey: 'edit',
           status: 'WAITING_APPROVAL',
-          approvalJson: JSON.stringify({
+          approval: JSON.stringify({
             required: true,
             editReview: review,
           }),
@@ -2124,7 +2124,7 @@ describe('thread timeline', () => {
     expect(callMsg?.editReview).toEqual(review)
   })
 
-  it('projects editReview from terminal invocation resultJson details.editReview', () => {
+  it('projects editReview from terminal invocation result details.editReview', () => {
     const validSha = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
     const resultReview = {
       path: '/canonical/src/AutoAllowed.tsx',
@@ -2147,7 +2147,7 @@ describe('thread timeline', () => {
           toolName: 'edit',
           rendererKey: 'edit',
           status: 'SUCCEEDED',
-          resultJson: JSON.stringify({
+          result: JSON.stringify({
             toolCallId: 'call-edit-2',
             contents: [{ type: 'text', text: 'ok' }],
             error: false,
@@ -2241,12 +2241,12 @@ describe('thread timeline', () => {
           toolName: 'edit',
           rendererKey: 'edit',
           status: 'SUCCEEDED',
-          approvalJson: JSON.stringify({
+          approval: JSON.stringify({
             required: true,
             decision: 'ALLOWED',
             editReview: approvalReview,
           }),
-          resultJson: JSON.stringify({
+          result: JSON.stringify({
             toolCallId: 'call-edit-4',
             contents: [{ type: 'text', text: 'applied' }],
             error: false,
@@ -2269,7 +2269,7 @@ function entry(entryId: string, entryType: EntryType, payload: Record<string, un
     sessionId: 's1',
     parentEntryId: null,
     entryType,
-    payloadJson: JSON.stringify(payload),
+    payload: JSON.stringify(payload),
     createdAt: 1767225600,
     usageCost: null,
   }
@@ -2288,7 +2288,7 @@ function command(
     type,
     state,
     idempotencyKey: `cid-${label}`,
-    payloadJson: JSON.stringify(payload),
+    payload: JSON.stringify(payload),
     cancelledAt: null,
     createdAt: 1767225600,
   }
@@ -2419,9 +2419,9 @@ function invocation(
     requiredEnvironmentName: null,
     environmentWaitFreshnessAt: null,
     argumentsJson: '{"command":"ls"}',
-    approvalJson: null,
-    resultJson: null,
-    errorJson: null,
+    approval: null,
+    result: null,
+    error: null,
     createdAt: 1785232800,
     updatedAt: 1785232800,
     ...overrides,

@@ -38,10 +38,7 @@ public class HarnessThreadCommandBatchController {
   public HarnessAcceptedCommandsDTO accept(
       @PathVariable UUID threadId, @RequestBody HarnessThreadCommandBatchDTO request) {
     AcceptCommandsCommand command =
-        HarnessRequestErrors.map(
-            () ->
-                HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(
-                    threadId.toString(), request));
+        HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(threadId.toString(), request);
     return commandBatchService.acceptOnThread(command);
   }
 }

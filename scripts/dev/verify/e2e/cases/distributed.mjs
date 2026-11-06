@@ -497,7 +497,7 @@ function extractToolExecution(snapshot) {
     return {
       id: t.id,
       status: t.status,
-      resultJson: t.resultJson,
+      result: t.result,
       attempt: t.attempt,
     }
   }
@@ -506,7 +506,7 @@ function extractToolExecution(snapshot) {
     if (entry.entryType !== 'MESSAGE') continue
     let payload = null
     try {
-      payload = JSON.parse(entry.payloadJson)
+      payload = entry.payload
     } catch {
       continue
     }
@@ -517,7 +517,7 @@ function extractToolExecution(snapshot) {
       return {
         id: metadata?.invocationId || toolResult?.toolCallId,
         status: metadata?.status || (toolResult?.error ? 'FAILED' : 'SUCCEEDED'),
-        resultJson: text,
+        result: text,
         attempt: metadata?.attempt ?? 1,
       }
     }
@@ -613,7 +613,7 @@ registerCase({
           if (tool?.status === 'UNKNOWN' || snap.toolInvocations?.some((t) => t.status === 'UNKNOWN')) {
             sawUnknown = true
           }
-          if (snap.executionStatus === 'IDLE' && tool?.status === 'SUCCEEDED') {
+          if (snap.thread.status === 'IDLE' && tool?.status === 'SUCCEEDED') {
             finalSnapshot = snap
             finalTool = tool
             break
@@ -629,8 +629,8 @@ registerCase({
 
       assert(finalTool?.status === 'SUCCEEDED', `expected tool status SUCCEEDED, got ${finalTool?.status}`)
       assert(
-        finalTool?.resultJson?.includes('handover-done'),
-        `expected result to contain handover-done: ${finalTool?.resultJson}`,
+        JSON.stringify(finalTool?.result).includes('handover-done'),
+        `expected result to contain handover-done: ${JSON.stringify(finalTool?.result)}`,
       )
       assert(finalTool?.attempt === 1, `expected attempt 1, got ${finalTool?.attempt}`)
       assert(
@@ -644,7 +644,7 @@ registerCase({
           {
             toolInvocation: finalTool,
             unconfirmedExecutions: finalSnapshot.unconfirmedExecutions,
-            executionStatus: finalSnapshot.executionStatus,
+            threadStatus: finalSnapshot.thread.status,
           },
           null,
           2,
@@ -745,7 +745,7 @@ registerCase({
           const snap = await getThreadSnapshotFromNode(ctx.callNode, takeoverNode, threadId)
           const tool = extractToolExecution(snap)
           // 接管节点在租约过期后重新挂接，并在同一 attempt=1 下交付 SUCCEEDED 结果
-          if (tool && tool.status === 'SUCCEEDED' && tool.resultJson?.includes('handover-done')) {
+          if (tool && tool.status === 'SUCCEEDED' && JSON.stringify(tool.result).includes('handover-done')) {
             finalSnapshot = snap
             finalTool = tool
             break
@@ -760,8 +760,8 @@ registerCase({
 
       assert(finalTool?.status === 'SUCCEEDED', `expected tool status SUCCEEDED, got ${finalTool?.status}`)
       assert(
-        finalTool?.resultJson?.includes('handover-done'),
-        `expected result to contain handover-done: ${finalTool?.resultJson}`,
+        JSON.stringify(finalTool?.result).includes('handover-done'),
+        `expected result to contain handover-done: ${JSON.stringify(finalTool?.result)}`,
       )
 
       // 【退出事实模型预期（Exit Fact Model Invariant）】：
@@ -773,8 +773,8 @@ registerCase({
         `expected unconfirmedExecutions to retain killed node TOOL fact: ${JSON.stringify(unconfirmed)}`,
       )
       assert(
-        finalSnapshot.executionStatus === 'RUNNING',
-        `expected thread to remain RUNNING while unconfirmed facts exist, got ${finalSnapshot.executionStatus}`,
+        finalSnapshot.thread.status === 'RUNNING',
+        `expected thread to remain RUNNING while unconfirmed facts exist, got ${finalSnapshot.thread.status}`,
       )
 
       ctx.writeArtifact(
@@ -783,7 +783,7 @@ registerCase({
           {
             toolInvocation: finalTool,
             unconfirmedExecutions: finalSnapshot.unconfirmedExecutions,
-            executionStatus: finalSnapshot.executionStatus,
+            threadStatus: finalSnapshot.thread.status,
           },
           null,
           2,
@@ -908,8 +908,8 @@ registerCase({
         `expected unconfirmedExecutions to retain restarted daemon REMOTE fact: ${JSON.stringify(unconfirmed)}`,
       )
       assert(
-        finalSnapshot.executionStatus === 'RUNNING',
-        `expected thread to remain RUNNING while unconfirmed facts exist, got ${finalSnapshot.executionStatus}`,
+        finalSnapshot.thread.status === 'RUNNING',
+        `expected thread to remain RUNNING while unconfirmed facts exist, got ${finalSnapshot.thread.status}`,
       )
 
       ctx.writeArtifact(
@@ -918,7 +918,7 @@ registerCase({
           {
             toolInvocation: finalTool,
             unconfirmedExecutions: finalSnapshot.unconfirmedExecutions,
-            executionStatus: finalSnapshot.executionStatus,
+            threadStatus: finalSnapshot.thread.status,
           },
           null,
           2,

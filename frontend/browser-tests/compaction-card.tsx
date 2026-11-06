@@ -32,7 +32,7 @@ function entry(
     sessionId: 'session-1',
     parentEntryId: null,
     entryType,
-    payloadJson: JSON.stringify(payload),
+    payload,
     createdAt: 1767225600,
     usageCost: null,
   }

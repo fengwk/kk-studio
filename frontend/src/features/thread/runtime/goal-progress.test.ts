@@ -8,7 +8,7 @@ function makeEntry(overrides: Partial<HarnessSessionEntryDTO> = {}): HarnessSess
     sessionId: 'session-1',
     parentEntryId: null,
     entryType: 'CUSTOM',
-    payloadJson: JSON.stringify({
+    payload: JSON.stringify({
       contributorId: 'builtin',
       customType: 'goal.progress',
       data: {
@@ -30,14 +30,14 @@ describe('parseGoalProgress', () => {
 
     const userEntry = makeEntry({
       entryType: 'MESSAGE',
-      payloadJson: JSON.stringify({ text: 'hello' }),
+      payload: JSON.stringify({ text: 'hello' }),
     })
     expect(parseGoalProgress([userEntry], 'goal-123')).toEqual({ active: null, stale: null })
   })
 
   it('parses active goal.progress with matching goalId from data object', () => {
     const entry = makeEntry({
-      payloadJson: JSON.stringify({
+      payload: JSON.stringify({
         contributorId: 'builtin',
         customType: 'goal.progress',
         data: {
@@ -63,7 +63,7 @@ describe('parseGoalProgress', () => {
 
   it('parses active goal.progress with matching goalId from stringified dataJson', () => {
     const entry = makeEntry({
-      payloadJson: JSON.stringify({
+      payload: JSON.stringify({
         contributorId: 'builtin',
         customType: 'goal.progress',
         dataJson: JSON.stringify({
@@ -89,7 +89,7 @@ describe('parseGoalProgress', () => {
 
   it('marks report as stale if goalId does not match currentGoalId', () => {
     const entry = makeEntry({
-      payloadJson: JSON.stringify({
+      payload: JSON.stringify({
         contributorId: 'builtin',
         customType: 'goal.progress',
         data: {
@@ -115,7 +115,7 @@ describe('parseGoalProgress', () => {
 
   it('marks report as stale if currentGoalId is null (goal cleared)', () => {
     const entry = makeEntry({
-      payloadJson: JSON.stringify({
+      payload: JSON.stringify({
         contributorId: 'builtin',
         customType: 'goal.progress',
         data: {
@@ -135,7 +135,7 @@ describe('parseGoalProgress', () => {
   it('picks the latest goal.progress from multiple entries', () => {
     const olderEntry = makeEntry({
       entryId: 'entry-1',
-      payloadJson: JSON.stringify({
+      payload: JSON.stringify({
         contributorId: 'builtin',
         customType: 'goal.progress',
         data: {
@@ -148,7 +148,7 @@ describe('parseGoalProgress', () => {
     })
     const newerEntry = makeEntry({
       entryId: 'entry-2',
-      payloadJson: JSON.stringify({
+      payload: JSON.stringify({
         contributorId: 'builtin',
         customType: 'goal.progress',
         data: {
@@ -168,7 +168,7 @@ describe('parseGoalProgress', () => {
   it('finds latest matching active report even when a newer stale report exists without letting stale override current', () => {
     const activeEntry = makeEntry({
       entryId: 'entry-active',
-      payloadJson: JSON.stringify({
+      payload: JSON.stringify({
         contributorId: 'builtin',
         customType: 'goal.progress',
         data: {
@@ -181,7 +181,7 @@ describe('parseGoalProgress', () => {
     })
     const newerMismatchedEntry = makeEntry({
       entryId: 'entry-mismatched',
-      payloadJson: JSON.stringify({
+      payload: JSON.stringify({
         contributorId: 'builtin',
         customType: 'goal.progress',
         data: {
@@ -202,21 +202,21 @@ describe('parseGoalProgress', () => {
 
   it('ignores entries with invalid contributorId, customType, or status', () => {
     const invalidContributor = makeEntry({
-      payloadJson: JSON.stringify({
+      payload: JSON.stringify({
         contributorId: 'other-plugin',
         customType: 'goal.progress',
         data: { goalId: 'goal-123', status: 'complete', reason: 'ok' },
       }),
     })
     const invalidType = makeEntry({
-      payloadJson: JSON.stringify({
+      payload: JSON.stringify({
         contributorId: 'builtin',
         customType: 'other.progress',
         data: { goalId: 'goal-123', status: 'complete', reason: 'ok' },
       }),
     })
     const invalidStatus = makeEntry({
-      payloadJson: JSON.stringify({
+      payload: JSON.stringify({
         contributorId: 'builtin',
         customType: 'goal.progress',
         data: { goalId: 'goal-123', status: 'in_progress', reason: 'ok' },

@@ -92,7 +92,7 @@ class HarnessRuntimeRequestMapperCommandTest {
     HarnessCommandCreateDTO execution = setExecution("execution-order", executionSelection());
     HarnessCommandCreateDTO environment = setEnvironment("environment-order", "local");
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () ->
             HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(
                 THREAD_ID, threadBatch(environment, execution, userCommand("tail"))));
@@ -131,7 +131,7 @@ class HarnessRuntimeRequestMapperCommandTest {
     assertEquals("user", denied.actor());
     approval.setDecision(null);
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () ->
             HarnessRuntimeRequestMapper.toToolApprovalCommand(
                 THREAD_ID, idText(31), approval, "user"));
@@ -154,13 +154,12 @@ class HarnessRuntimeRequestMapperCommandTest {
     assertEquals("my session", threadCommand.name());
 
     assertThrows(
-        IllegalArgumentException.class,
-        () -> HarnessRuntimeRequestMapper.toRenameThreadCommand(null, body));
+        DomainException.class, () -> HarnessRuntimeRequestMapper.toRenameThreadCommand(null, body));
     assertThrows(
         DomainException.class,
         () -> HarnessRuntimeRequestMapper.toRenameSessionCommand(id(2), null));
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () -> HarnessRuntimeRequestMapper.toRenameThreadCommand(THREAD_ID, null));
   }
 
@@ -173,13 +172,13 @@ class HarnessRuntimeRequestMapperCommandTest {
         DomainException.class,
         () -> HarnessRuntimeRequestMapper.toRenameSessionCommand(id(2), blank));
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () -> HarnessRuntimeRequestMapper.toRenameThreadCommand(THREAD_ID, blank));
 
     HarnessNameUpdateDTO overlong = new HarnessNameUpdateDTO();
     overlong.setName("n".repeat(257));
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () -> HarnessRuntimeRequestMapper.toRenameThreadCommand(THREAD_ID, overlong),
         "超长 name 必须由 Core 命令构造器拒绝，而不是在 web 层重复实现");
   }
@@ -251,7 +250,7 @@ class HarnessRuntimeRequestMapperCommandTest {
     // 必填字段、非空列表与 null 元素都必须 fail closed。
     HarnessCommandCreateDTO command = userCommand("empty", List.of());
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () ->
             HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(
                 THREAD_ID, threadBatch(command)));
@@ -259,7 +258,7 @@ class HarnessRuntimeRequestMapperCommandTest {
     HarnessUserMessageContentDTO missingName =
         new HarnessUserMessageContentDTO.ResourceDTO(idText(71), null, null, null);
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () ->
             HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(
                 THREAD_ID, threadBatch(userCommand("missing-name", List.of(missingName)))));
@@ -267,7 +266,7 @@ class HarnessRuntimeRequestMapperCommandTest {
     HarnessCommandCreateDTO nullContent =
         userCommand("null-content", Arrays.asList((HarnessUserMessageContentDTO) null));
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () ->
             HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(
                 THREAD_ID, threadBatch(nullContent)));
@@ -295,49 +294,47 @@ class HarnessRuntimeRequestMapperCommandTest {
   void rejectsNullBatchMembersAndControlBodies() {
     // mapper 自身必须拒绝缺失 DTO、target、command list、null command 与缺失控制请求体。
     assertThrows(
-        IllegalArgumentException.class,
-        () -> HarnessRuntimeRequestMapper.toAcceptCommandsCommand(null));
+        DomainException.class, () -> HarnessRuntimeRequestMapper.toAcceptCommandsCommand(null));
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () -> HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(THREAD_ID, null));
 
     HarnessCommandBatchDTO missingTarget = request(newThreadTarget(), userCommand("user"));
     missingTarget.setTarget(null);
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () -> HarnessRuntimeRequestMapper.toAcceptCommandsCommand(missingTarget));
 
     HarnessThreadCommandBatchDTO missingCommands = threadBatch(userCommand("user"));
     missingCommands.setCommands(null);
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () ->
             HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(THREAD_ID, missingCommands));
 
     HarnessThreadCommandBatchDTO nullCommand = threadBatch(userCommand("user"));
     nullCommand.setCommands(Arrays.asList((HarnessCommandCreateDTO) null));
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () -> HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(THREAD_ID, nullCommand));
 
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () -> HarnessRuntimeRequestMapper.toCompactThreadCommand(THREAD_ID, null));
     assertThrows(
-        IllegalArgumentException.class,
-        () -> HarnessRuntimeRequestMapper.toStopCommand(THREAD_ID, null));
+        DomainException.class, () -> HarnessRuntimeRequestMapper.toStopCommand(THREAD_ID, null));
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () -> HarnessRuntimeRequestMapper.toSetThreadYoloCommand(THREAD_ID, null));
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () ->
             HarnessRuntimeRequestMapper.toToolApprovalCommand(THREAD_ID, idText(31), null, "user"));
 
     HarnessCommandOwnerDTO owner = new HarnessCommandOwnerDTO();
     owner.setKind("CHAT");
-    assertThrows(IllegalArgumentException.class, () -> HarnessRuntimeRequestMapper.toOwner(owner));
-    assertThrows(IllegalArgumentException.class, () -> HarnessRuntimeRequestMapper.toOwner(null));
+    assertThrows(DomainException.class, () -> HarnessRuntimeRequestMapper.toOwner(owner));
+    assertThrows(DomainException.class, () -> HarnessRuntimeRequestMapper.toOwner(null));
   }
 
   /** typed GOAL 的 null 表示清除，canonical 文本表示设置；空白文本与 batch 形状错误必须 fail closed。 */
@@ -364,19 +361,19 @@ class HarnessRuntimeRequestMapperCommandTest {
     // 空白文本不是清除，必须由 Core canonical 规则拒绝。
     HarnessCommandCreateDTO blank = goal("goal-blank", "   ");
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () ->
             HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(
                 THREAD_ID, threadBatch(blank)));
 
     // GOAL 与 USER_MESSAGE 都是 user-like 终止输入：恰有一条且必须是最后一条。
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () ->
             HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(
                 THREAD_ID, threadBatch(set, userCommand("tail"))));
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () ->
             HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(
                 THREAD_ID, threadBatch(userCommand("head"), set)));

@@ -98,21 +98,22 @@ public final class TextReadWindow {
     Objects.requireNonNull(deadline, "deadline");
 
     if (offset != null && offset < 1) {
-      throw new PlatformReadException("offset must be a positive integer");
+      throw PlatformReadException.invalidArgument("offset must be a positive integer");
     }
     if (columnOffset != null && columnOffset < 1) {
-      throw new PlatformReadException("column_offset must be a positive integer");
+      throw PlatformReadException.invalidArgument("column_offset must be a positive integer");
     }
     int resolvedOffset = offset == null ? 1 : offset;
     int resolvedLimit = limit == null ? DEFAULT_LIMIT : limit;
     if (resolvedLimit < 1 || resolvedLimit > MAX_LIMIT) {
-      throw new PlatformReadException("limit must be a positive integer <= " + MAX_LIMIT);
+      throw PlatformReadException.invalidArgument(
+          "limit must be a positive integer <= " + MAX_LIMIT);
     }
 
     Runnable checkpoint =
         () -> {
           if (Thread.currentThread().isInterrupted() || deadline.isExpired()) {
-            throw new PlatformReadException(
+            throw PlatformReadException.timeout(
                 "resource read interrupted or timed out: " + displayPath);
           }
         };
@@ -125,11 +126,13 @@ public final class TextReadWindow {
           displayPath,
           lspStatus,
           checkpoint);
+    } catch (CharacterCodingException error) {
+      throw PlatformReadException.notText(
+          "file appears to be binary: invalid text encoding " + displayPath, error);
     } catch (IOException error) {
-      throw new PlatformReadException(
-          "file appears to be binary or cannot be read: " + displayPath, error);
+      throw new PlatformReadException("file cannot be read: " + displayPath, error);
     } catch (IllegalArgumentException error) {
-      throw new PlatformReadException(error.getMessage(), error);
+      throw PlatformReadException.notText(error.getMessage(), error);
     }
   }
 
@@ -209,7 +212,7 @@ public final class TextReadWindow {
   /** 协议位置是 {@code int}：超出即显式拒绝，不伪造越界元数据。 */
   static int requireProtocolPosition(long value, String field) {
     if (value > Integer.MAX_VALUE) {
-      throw new IllegalArgumentException(
+      throw PlatformReadException.invalidArgument(
           "text read position exceeds the supported integer range: " + field + "=" + value);
     }
     return (int) value;
@@ -410,7 +413,7 @@ public final class TextReadWindow {
 
     private void finishLine() {
       if (line == offset && columnStart > Math.max(columns, 1)) {
-        throw new IllegalArgumentException(
+        throw PlatformReadException.invalidArgument(
             "column_offset "
                 + columnStart
                 + " is out of range: line "

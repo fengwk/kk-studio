@@ -24,7 +24,7 @@ export function branchDraftFromEntry(
   if (fallback == null) {
     return null
   }
-  const payload = parsePayload(entry.payloadJson)
+  const payload = parsePayload(entry.payload)
   const settings = isRecord(payload.settings) ? payload.settings : null
   if (settings == null) {
     return cloneDraft(fallback)

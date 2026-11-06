@@ -55,14 +55,14 @@ export interface RealtimeModelStream {
   toolCalls: RealtimeToolCallDraft[]
   createdAt: string
   /**
-   * 'streaming' 表示 RUNNING/checkpoint/delta overlay；'done' 表示持久终止态 resultJson
-   * 投影；'error' 表示持久终止态 errorJson 投影（checkpoint 已冻结）。timeline
+   * 'streaming' 表示 RUNNING/checkpoint/delta overlay；'done' 表示持久终止态 result
+   * 投影；'error' 表示持久终止态 error 投影（checkpoint 已冻结）。timeline
    * 会渲染 status，因此终止态投影永远不会标记为 streaming。
    */
   status: 'streaming' | 'done' | 'error'
-  /** 从持久 errorJson 解析出的 ProviderErrorKind（仅在 status='error' 时存在）。 */
+  /** 从持久 error 解析出的 ProviderErrorKind（仅在 status='error' 时存在）。 */
   errorCode?: string
-  /** 从持久 errorJson 解析出的错误消息（仅在 status='error' 时存在）。 */
+  /** 从持久 error 解析出的错误消息（仅在 status='error' 时存在）。 */
   errorText?: string
 }
 

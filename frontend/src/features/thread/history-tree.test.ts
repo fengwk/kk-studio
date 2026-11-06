@@ -24,7 +24,7 @@ function entry(
     sessionId: SESSION_ID,
     parentEntryId: options.parentEntryId ?? null,
     entryType,
-    payloadJson: JSON.stringify(options.payload ?? {}),
+    payload: JSON.stringify(options.payload ?? {}),
     createdAt: 0,
     usageCost: null,
   }

@@ -12,8 +12,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 
+import fun.fengwk.kkstudio.common.json.JsonValues;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.platform.catalog.dto.SkillRefDTO;
 import fun.fengwk.kkstudio.platform.environment.skill.SkillPromptResolution;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessModelRequestDebugDTO;
@@ -24,8 +26,7 @@ import java.time.Instant;
 import java.util.List;
 
 /** Thread 的 Model Request Debug 只读投影端点。 */
-class StudioHarnessThreadModelRequestDebugControllerTest
-    extends HarnessThreadControllerTestSupport {
+class HarnessModelRequestDebugControllerTest extends HarnessThreadControllerTestSupport {
 
   /**
    * 意图：POST /api/harness/builtin/threads/{threadId}/model-request-debug 以请求体草稿 model/environment
@@ -64,7 +65,8 @@ class StudioHarnessThreadModelRequestDebugControllerTest
         .andExpect(jsonPath("$.subagents[0].tools[0]").value("read"))
         .andExpect(jsonPath("$.subagents[0].skills[0].packageName").value("pkg"))
         .andExpect(jsonPath("$.subagents[0].subagents[0]").value("nested"))
-        .andExpect(jsonPath("$.subagents[0].configurationJson").value("{\"tools\":[\"read\"]}"))
+        .andExpect(jsonPath("$.subagents[0].configuration.tools[0]").value("read"))
+        .andExpect(jsonPath("$.tools[0].inputSchema.type").value("object"))
         .andExpect(jsonPath("$.cacheControl.retention").value("NONE"))
         .andExpect(jsonPath("$.cacheControl.key").value(nullValue()))
         .andExpect(jsonPath("$.cacheControl.affinityKey").doesNotExist())
@@ -167,7 +169,7 @@ class StudioHarnessThreadModelRequestDebugControllerTest
     HarnessModelRequestDebugDTO.ToolDTO sent = new HarnessModelRequestDebugDTO.ToolDTO();
     sent.setName("read");
     sent.setDescription("Read a file.");
-    sent.setInputSchemaJson("{\"type\":\"object\"}");
+    sent.setInputSchema(JsonValues.readTree("{\"type\":\"object\"}"));
     sent.setEnvironmentSupport(EnvironmentSupport.ROUTED);
     sent.setProvenance("builtin:read");
     sent.setState(LiveTurnPlan.ToolState.SENT);
@@ -176,7 +178,7 @@ class StudioHarnessThreadModelRequestDebugControllerTest
     HarnessModelRequestDebugDTO.ToolDTO filtered = new HarnessModelRequestDebugDTO.ToolDTO();
     filtered.setName("bash");
     filtered.setDescription("Run a command.");
-    filtered.setInputSchemaJson("{\"type\":\"object\"}");
+    filtered.setInputSchema(JsonValues.readTree("{\"type\":\"object\"}"));
     filtered.setEnvironmentSupport(EnvironmentSupport.REQUIRED);
     filtered.setProvenance("builtin:bash");
     filtered.setState(LiveTurnPlan.ToolState.FILTERED);
@@ -204,11 +206,11 @@ class StudioHarnessThreadModelRequestDebugControllerTest
     skillReference.setName("sk");
     subagent.setSkills(List.of(skillReference));
     subagent.setSubagents(List.of("nested"));
-    subagent.setConfigurationJson("{\"tools\":[\"read\"]}");
+    subagent.setConfiguration(JsonValues.readTree("{\"tools\":[\"read\"]}"));
 
     HarnessModelRequestDebugDTO.CacheControlDTO cacheControl =
         new HarnessModelRequestDebugDTO.CacheControlDTO();
-    cacheControl.setRetention(HarnessModelRequestDebugDTO.CacheControlDTO.Retention.NONE);
+    cacheControl.setRetention(PromptCacheRetention.NONE);
     // NONE 时 key 显式 null：wire 上「未启用」与「有 key」必须可区分。
     cacheControl.setKey(null);
 

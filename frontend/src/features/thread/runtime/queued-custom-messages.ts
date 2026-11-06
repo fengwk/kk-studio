@@ -24,7 +24,7 @@ export function extractQueuedCustomMessages(
     if (command.state !== 'QUEUED' || command.type !== 'CUSTOM_MESSAGE') {
       continue
     }
-    const text = extractCustomMessageText(command.payloadJson)
+    const text = extractCustomMessageText(command.payload)
     if (!text.trim()) {
       continue
     }
@@ -37,8 +37,8 @@ export function extractQueuedCustomMessages(
   return result
 }
 
-function extractCustomMessageText(payloadJson: string | null): string {
-  const payload = parsePayload(payloadJson)
+function extractCustomMessageText(payloadValue: unknown): string {
+  const payload = parsePayload(payloadValue)
   const message = asRecord(payload.message)
   const contents = getRecordList(message.contents)
   const textParts: string[] = []

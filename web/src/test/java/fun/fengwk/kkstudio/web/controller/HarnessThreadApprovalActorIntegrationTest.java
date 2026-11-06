@@ -21,7 +21,7 @@ import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
  * 边界上就必须成立，而不是靠前端自律。
  */
 @AutoConfigureMockMvc
-class StudioHarnessThreadApprovalActorIntegrationTest extends WebPostgresTestSupport {
+class HarnessThreadApprovalActorIntegrationTest extends WebPostgresTestSupport {
 
   private static final String THREAD = "00000000-0000-0000-0000-0000000000a1";
   private static final String INVOCATION = "00000000-0000-0000-0000-0000000000a2";

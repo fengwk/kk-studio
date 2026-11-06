@@ -40,7 +40,7 @@ function makeEntry(id: string, parentId: string | null = null): HarnessSessionEn
     sessionId: 's-1',
     parentEntryId: parentId,
     entryType: 'MESSAGE',
-    payloadJson: JSON.stringify({ text: `message-${id}` }),
+    payload: JSON.stringify({ text: `message-${id}` }),
     createdAt: 1000,
     usageCost: null,
   }
@@ -54,7 +54,6 @@ function makeSnapshot(overrides: Partial<HarnessThreadSnapshotDTO> = {}): Harnes
     baseEntryId: overrides.baseEntryId !== undefined ? overrides.baseEntryId : null,
     entries: overrides.entries ?? [makeEntry(thread.headEntryId)],
     queuedCommands: [],
-    executionStatus: 'IDLE',
     activeAssistantOutput: null,
     generationFailures: [],
     toolInvocations: [],
@@ -188,7 +187,6 @@ describe('thread-snapshot-cache', () => {
       const cached = makeSnapshot({
         version: '5',
         entries: [makeEntry('entry-1')],
-        executionStatus: 'RUNNING',
         activeAssistantOutput: null,
       })
       const activeOutput: HarnessActiveAssistantOutputDTO = {
@@ -208,7 +206,6 @@ describe('thread-snapshot-cache', () => {
         version: '5',
         baseEntryId: 'entry-1',
         entries: [],
-        executionStatus: 'RUNNING',
         activeAssistantOutput: activeOutput,
       })
       const merged = mergeThreadSnapshotCache(cached, incomingDelta)

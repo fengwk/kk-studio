@@ -87,7 +87,7 @@ export function buildThreadTimeline(
 
   for (const entry of entries) {
     if (entry.entryType === 'TURN_START') {
-      const payload = asRecord(parsePayload(entry.payloadJson))
+      const payload = asRecord(parsePayload(entry.payload))
       latestTurnIsCompaction = getString(payload.reason) === 'COMPACTION'
       inCompactionTurn = latestTurnIsCompaction
       compactionTurn = latestTurnIsCompaction
@@ -103,14 +103,14 @@ export function buildThreadTimeline(
     }
     if (inCompactionTurn) {
       if (entry.entryType === 'COMPACTION') {
-        const summaryText = getString(asRecord(parsePayload(entry.payloadJson)).summaryText)
+        const summaryText = getString(asRecord(parsePayload(entry.payload)).summaryText)
         if (compactionTurn != null && summaryText.trim() !== '') {
           // 只保留最后一次仍是唯一结果；原回合的内流/思考/usage 继续屏蔽。
           compactionTurn.summaryEntry = entry
           compactionTurn.summaryText = summaryText
         }
       } else if (entry.entryType === 'TURN_END') {
-        const payload = asRecord(parsePayload(entry.payloadJson))
+        const payload = asRecord(parsePayload(entry.payload))
         if (
           compactionTurn != null
           && compactionTurn.summaryEntry != null
@@ -143,7 +143,7 @@ export function buildThreadTimeline(
       }
       continue
     }
-    const queuedMessage = extractQueuedMessage(command.payloadJson)
+    const queuedMessage = extractQueuedMessage(command.payload)
     if (!queuedMessage) {
       continue
     }
@@ -406,26 +406,26 @@ function projectInvocationOverlays(
     const stream = toolStreams?.get(invocation.id) ?? null
     const overlay =
       stream != null && stream.attempt === invocation.attempt ? stream : null
-    const approval = parseApproval(invocation.approvalJson)
+    const approval = parseApproval(invocation.approval)
     const failed =
       terminalResult != null
       && (
         terminalResult.status === 'error'
-        || invocation.errorJson != null
+        || invocation.error != null
         || isFailedInvocationStatus(invocation.status)
       )
-    const failureText = invocation.errorJson != null
-      ? parseToolErrorText(invocation.errorJson)
+    const failureText = invocation.error != null
+      ? parseToolErrorText(invocation.error)
       : null
     const effectiveEditReview =
       approval?.editReview
       ?? terminalResult?.editReview
-      ?? extractResultEditReview(invocation.resultJson)
+      ?? extractResultEditReview(invocation.result)
       ?? undefined
     const projected: ToolDialogueMessage = {
       ...message,
       callIdentity: toolCallIdentity(invocation.assistantEntryId, invocation.callIndex),
-      // 终态以 invocation 自己的 resultJson/errorJson 为准。call.status=done 只表示
+      // 终态以 invocation 自己的 result/error 为准。call.status=done 只表示
       // arguments 已完成，不能在 durable result 或 invocation 结果到达前当成成功。
       status: terminalResult == null
         ? (invocation.status === 'RUNNING' ? 'streaming' : 'done')
@@ -475,27 +475,27 @@ function projectInvocationOverlays(
 }
 
 /**
- * invocation 自身的终态结果。resultJson 里 error=true 优先于 SUCCEEDED；
+ * invocation 自身的终态结果。result 里 error=true 优先于 SUCCEEDED；
  * FAILED / UNKNOWN / CANCELLED 即使没有结果正文也是错误终态。
- * 没有 resultJson/errorJson 且状态仍活动时返回 null，调用保持 pending。
+ * 没有 result/error 且状态仍活动时返回 null，调用保持 pending。
  */
 function terminalInvocationResult(
   invocation: ToolInvocationDTO,
   call: ToolDialogueMessage,
 ): Pick<ToolDialogueMessage, 'arguments' | 'contents' | 'details' | 'errorMessage' | 'status' | 'editReview'> | null {
-  if (invocation.resultJson != null) {
-    const projected = projectToolResultContent(parsePayload(invocation.resultJson), call.arguments)
+  if (invocation.result != null) {
+    const projected = projectToolResultContent(parsePayload(invocation.result), call.arguments)
     return {
       ...projected,
-      editReview: extractResultEditReview(invocation.resultJson) ?? projected.editReview,
+      editReview: extractResultEditReview(invocation.result) ?? projected.editReview,
     }
   }
-  if (invocation.errorJson != null || isFailedInvocationStatus(invocation.status)) {
+  if (invocation.error != null || isFailedInvocationStatus(invocation.status)) {
     return {
       arguments: call.arguments,
       contents: [],
-      // 错误原文来自 errorJson；没有可解析原文时只有错误态，不补通用失败文案。
-      errorMessage: parseToolErrorText(invocation.errorJson) ?? undefined,
+      // 错误原文来自 error；没有可解析原文时只有错误态，不补通用失败文案。
+      errorMessage: parseToolErrorText(invocation.error) ?? undefined,
       status: 'error',
     }
   }
@@ -519,16 +519,15 @@ function hasDurableToolResult(
   )
 }
 
-/** 将规范的 ToolApproval JSON 解析为可安全展示的投影。 */
-export function parseApproval(approvalJson: string | null): ToolApprovalState | null {
-  if (approvalJson == null) {
-    return null
-  }
-  let value: unknown
-  try {
-    value = JSON.parse(approvalJson)
-  } catch {
-    return null
+/** 将规范的 ToolApproval JSON 节点解析为可安全展示的投影。 */
+export function parseApproval(approval: unknown): ToolApprovalState | null {
+  let value = approval
+  if (typeof approval === 'string') {
+    try {
+      value = JSON.parse(approval)
+    } catch {
+      return null
+    }
   }
   if (!isRecord(value)) {
     return null
@@ -552,9 +551,9 @@ function toolCallOrdinal(messageId: string): number {
 }
 
 function extractQueuedMessage(
-  payloadJson: string,
+  payloadValue: unknown,
 ): { role: 'user'; text: string } | null {
-  const payload = parsePayload(payloadJson)
+  const payload = parsePayload(payloadValue)
   const message = asRecord(payload.message)
   const contents = getRecordList(message.contents)
   const text = contents.map(contentText).filter(Boolean).join('\n')

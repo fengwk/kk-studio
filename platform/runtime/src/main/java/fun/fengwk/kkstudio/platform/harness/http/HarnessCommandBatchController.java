@@ -7,11 +7,9 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
-import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessAcceptedCommandsDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessCommandBatchDTO;
-import fun.fengwk.kkstudio.platform.orchestration.DirectCommandsNotAllowedException;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwner;
 
 import java.util.Objects;
@@ -36,15 +34,8 @@ public class HarnessCommandBatchController {
   @PostMapping
   @ResponseStatus(HttpStatus.ACCEPTED)
   public HarnessAcceptedCommandsDTO accept(@RequestBody HarnessCommandBatchDTO request) {
-    SessionOwner owner =
-        HarnessRequestErrors.map(() -> HarnessRuntimeRequestMapper.toOwner(request.getOwner()));
-    AcceptCommandsCommand command =
-        HarnessRequestErrors.map(
-            () -> HarnessRuntimeRequestMapper.toAcceptCommandsCommand(request));
-    try {
-      return commandBatchService.accept(owner, command);
-    } catch (DirectCommandsNotAllowedException error) {
-      throw DomainException.conflict("DIRECT_COMMANDS_NOT_ALLOWED", error.getMessage(), error);
-    }
+    SessionOwner owner = HarnessRuntimeRequestMapper.toOwner(request.getOwner());
+    AcceptCommandsCommand command = HarnessRuntimeRequestMapper.toAcceptCommandsCommand(request);
+    return commandBatchService.accept(owner, command);
   }
 }

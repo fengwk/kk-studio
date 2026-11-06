@@ -466,7 +466,7 @@ export async function createNewThread(
 }
 
 /**
- * 预览响应 DTO 的精确 wire 字段集：两种 kind 共用同一形状，null 字段由全局 NON_NULL 省略。
+ * 历史请求预览响应 DTO 的精确 wire 字段集；null 字段由全局 NON_NULL 省略。
  *
  * <p>{@code notice} 是固定能力声明而非噪声；历史预览必须声明它按当前 catalog 与 Provider 配置重建，不是当时的原始字节。
  */
@@ -498,9 +498,8 @@ export function assertProviderPreview(preview) {
   )
   assert(preview.kind === 'HISTORICAL_REQUEST_PREVIEW', `preview kind ${preview.kind} is not historical: ${JSON.stringify(preview)}`)
   assert(
-    (typeof preview.generatedAt === 'number' && Number.isFinite(preview.generatedAt))
-      || (typeof preview.generatedAt === 'string' && Number.isFinite(Date.parse(preview.generatedAt))),
-    `preview generatedAt invalid: ${JSON.stringify(preview.generatedAt)}`,
+    typeof preview.generatedAt === 'number' && Number.isSafeInteger(preview.generatedAt),
+    `preview generatedAt must be an epoch-millisecond integer: ${JSON.stringify(preview.generatedAt)}`,
   )
   assert(
     typeof preview.providerType === 'string' && preview.providerType.trim().length > 0
@@ -557,11 +556,11 @@ function assertSessionSummary(item) {
     `Session summary name must be non-blank: ${JSON.stringify(item)}`,
   )
   assert(
-    typeof item.createdAt === 'string' || typeof item.createdAt === 'number',
+    typeof item.createdAt === 'number' && Number.isSafeInteger(item.createdAt),
     JSON.stringify(item),
   )
   assert(
-    typeof item.lastActivityAt === 'string' || typeof item.lastActivityAt === 'number',
+    typeof item.lastActivityAt === 'number' && Number.isSafeInteger(item.lastActivityAt),
     JSON.stringify(item),
   )
   // firstMessagePreview 与名称独立：最近消息预览可为 null，绝不回退为 name/id。
@@ -626,11 +625,11 @@ export async function listSessionThreads(ctx, sessionId) {
       `Thread summary name must be non-blank: ${JSON.stringify(item)}`,
     )
     assert(
-      typeof item.createdAt === 'string' || typeof item.createdAt === 'number',
+      typeof item.createdAt === 'number' && Number.isSafeInteger(item.createdAt),
       JSON.stringify(item),
     )
     assert(
-      typeof item.updatedAt === 'string' || typeof item.updatedAt === 'number',
+      typeof item.updatedAt === 'number' && Number.isSafeInteger(item.updatedAt),
       JSON.stringify(item),
     )
     assert(typeof item.status === 'string', JSON.stringify(item))
@@ -646,7 +645,7 @@ export async function listSessionThreads(ctx, sessionId) {
 /**
  * Session Entry 的读取时费用投影：`usageCost` 永远存在（NON_NULL 全局省略只对 null 生效，DTO 声明 ALWAYS），
  * 未计价/非模型输出时为 null，否则是 {@code {currency, amount}} 且 amount 是精确十进制文本（不做展示舍入）。
- * 费用只是查询投影，绝不进入 payloadJson —— 这里同时锁住这两条事实。
+ * 费用只是查询投影，绝不进入 payload —— 这里同时锁住这两条事实。
  */
 export function assertEntryUsageCost(entry) {
   assert(Object.hasOwn(entry, 'usageCost'), `entry must expose usageCost: ${JSON.stringify(entry)}`)
@@ -662,8 +661,9 @@ export function assertEntryUsageCost(entry) {
     `usageCost.amount must be a non-negative decimal string (never a number): ${JSON.stringify(cost)}`,
   )
   assert(
-    typeof entry.payloadJson === 'string' && !entry.payloadJson.includes('usageCost'),
-    `usageCost must not be persisted inside payloadJson: ${JSON.stringify(entry)}`,
+    entry.payload != null && typeof entry.payload === 'object' && !Array.isArray(entry.payload)
+      && !JSON.stringify(entry.payload).includes('usageCost'),
+    `usageCost must not be persisted inside payload: ${JSON.stringify(entry)}`,
   )
   return cost
 }
@@ -680,7 +680,10 @@ export function assertSessionEntry(entry, { sessionId } = {}) {
   }
   if (entry.parentEntryId != null) canonicalUuid(entry.parentEntryId, 'entry.parentEntryId')
   assert(typeof entry.entryType === 'string' && entry.entryType, JSON.stringify(entry))
-  assert(typeof entry.payloadJson === 'string', JSON.stringify(entry))
+  assert(
+    entry.payload != null && typeof entry.payload === 'object' && !Array.isArray(entry.payload),
+    JSON.stringify(entry),
+  )
   assertEntryUsageCost(entry)
   return entry
 }
@@ -735,7 +738,7 @@ export async function waitForDurableMessages(
     const snapshot = await getThreadSnapshot(ctx, threadId)
     const entries = await listSessionEntries(ctx, snapshot.thread.sessionId)
     last = { snapshot, entries }
-    const payloads = entries.map((entry) => entry.payloadJson)
+    const payloads = entries.map((entry) => JSON.stringify(entry.payload))
     const hasExpectedMessages = expectedTexts.every(
       (text) => payloads.some((payload) => payload.includes(text)),
     )
@@ -792,9 +795,8 @@ export async function listEnvironments(ctx) {
     const expiresAt = environment.statusExpiresAt
     if (expiresAt != null) {
       assert(
-        (typeof expiresAt === 'number' && Number.isFinite(expiresAt))
-          || (typeof expiresAt === 'string' && Number.isFinite(Date.parse(expiresAt))),
-        `statusExpiresAt must be an instant: ${JSON.stringify(environment)}`,
+        typeof expiresAt === 'number' && Number.isSafeInteger(expiresAt),
+        `statusExpiresAt must be an epoch-millisecond integer: ${JSON.stringify(environment)}`,
       )
       assert(
         environment.status !== 'OFFLINE',
@@ -924,8 +926,8 @@ function assertStoppedThreadReceipt(receipt) {
       `cancelled input must be human USER_MESSAGE|GOAL: ${JSON.stringify(input)}`,
     )
     assert(
-      typeof input.payloadJson === 'string' && input.payloadJson.length > 0,
-      `cancelled input must carry payloadJson: ${JSON.stringify(input)}`,
+      input.payload != null && typeof input.payload === 'object' && !Array.isArray(input.payload),
+      `cancelled input must carry payload: ${JSON.stringify(input)}`,
     )
   }
   return receipt

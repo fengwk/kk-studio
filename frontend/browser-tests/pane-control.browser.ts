@@ -84,7 +84,6 @@ function snapshot(thread: Record<string, unknown>) {
     baseEntryId: null,
     entries: [],
     queuedCommands: [],
-    executionStatus: thread.status,
     activeAssistantOutput: null,
     toolInvocations: [],
     generationFailures: [],
@@ -142,7 +141,7 @@ function interactionItems() {
         type: 'APPROVAL',
         toolName: 'bash',
         argumentsJson: JSON.stringify({ command: 'npm test' }),
-        approvalJson: JSON.stringify({ required: true, reason: '需要确认' }),
+        approval: { required: true, reason: '需要确认' },
         createdAt: 1791194220000,
       },
     ],
@@ -535,7 +534,7 @@ test('recognizes SETTINGS once and uses the same model label in the footer', asy
       sessionId: 'b1000000-0000-4000-8000-0000000000b1',
       parentEntryId: null,
       entryType: 'ROOT',
-      payloadJson: JSON.stringify({ settings: rootSettings }),
+      payload: { settings: rootSettings },
       createdAt: 1790812800,
     },
     {
@@ -543,7 +542,7 @@ test('recognizes SETTINGS once and uses the same model label in the footer', asy
       sessionId: 'b1000000-0000-4000-8000-0000000000b1',
       parentEntryId: 'entry-root',
       entryType: 'TURN_START',
-      payloadJson: JSON.stringify({ reason: 'INPUT', settings: rootSettings }),
+      payload: { reason: 'INPUT', settings: rootSettings },
       createdAt: 1790812801,
     },
     {
@@ -551,9 +550,9 @@ test('recognizes SETTINGS once and uses the same model label in the footer', asy
       sessionId: 'b1000000-0000-4000-8000-0000000000b1',
       parentEntryId: 'entry-turn-1',
       entryType: 'MESSAGE',
-      payloadJson: JSON.stringify({
+      payload: {
         message: { role: 'USER', contents: [{ type: 'text', text: 'hi' }] },
-      }),
+      },
       createdAt: 1790812802,
     },
     {
@@ -561,7 +560,7 @@ test('recognizes SETTINGS once and uses the same model label in the footer', asy
       sessionId: 'b1000000-0000-4000-8000-0000000000b1',
       parentEntryId: 'entry-user-1',
       entryType: 'TURN_END',
-      payloadJson: JSON.stringify({ outcome: 'COMPLETED', turnStartEntryId: 'entry-turn-1' }),
+      payload: { outcome: 'COMPLETED', turnStartEntryId: 'entry-turn-1' },
       createdAt: 1790812803,
     },
     {
@@ -569,10 +568,10 @@ test('recognizes SETTINGS once and uses the same model label in the footer', asy
       sessionId: 'b1000000-0000-4000-8000-0000000000b1',
       parentEntryId: 'entry-turn-end-1',
       entryType: 'SETTINGS',
-      payloadJson: JSON.stringify({
+      payload: {
         settings: changedSettings,
         ownerThreadId: ROOT_ID,
-      }),
+      },
       createdAt: 1790812804,
     },
   ]
@@ -610,7 +609,7 @@ test('recognizes SETTINGS once and uses the same model label in the footer', asy
     sessionId: 'b1000000-0000-4000-8000-0000000000b1',
     parentEntryId: 'entry-settings-head',
     entryType: 'TURN_START',
-    payloadJson: JSON.stringify({ reason: 'INPUT', settings: changedSettings }),
+    payload: { reason: 'INPUT', settings: changedSettings },
     createdAt: 1790812805,
   })
   threadOverrides.headEntryId = 'entry-next-turn'
@@ -676,9 +675,9 @@ test('thread status three-state and execution facts in real browser', async ({ p
         requiredEnvironmentName: null,
         environmentWaitFreshnessAt: null,
         argumentsJson: '{"command":"ls"}',
-        approvalJson: null,
-        resultJson: null,
-        errorJson: null,
+        approval: null,
+        result: null,
+        error: null,
         createdAt: 1790812800,
         updatedAt: 1790812800,
       }],
@@ -718,9 +717,9 @@ test('thread status three-state and execution facts in real browser', async ({ p
         requiredEnvironmentName: null,
         environmentWaitFreshnessAt: null,
         argumentsJson: '{"command":"rm -rf /"}',
-        approvalJson: null,
-        resultJson: null,
-        errorJson: null,
+        approval: null,
+        result: null,
+        error: null,
         createdAt: 1790812800,
         updatedAt: 1790812800,
       }],

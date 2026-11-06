@@ -1081,7 +1081,7 @@ export interface HarnessCancelledInputDTO {
   sequence: string
   idempotencyKey: string
   type: ThreadCommandType
-  payloadJson: string
+  payload: unknown
 }
 
 /** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessCommandBatchDTO */
@@ -1138,8 +1138,6 @@ export type HarnessCommandCreateDTO =
 export interface HarnessCommandOwnerDTO {
   kind: string
   id: string
-  title?: string | null
-  link?: string | null
 }
 
 /** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessCommandTargetDTO.NewSessionDTO */
@@ -1238,21 +1236,9 @@ export interface HarnessManualCompactionDTO {
 
 /** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessModelRequestDebugDTO.CacheControlDTO */
 export interface HarnessModelRequestDebugCacheControlDTO {
-  retention: HarnessModelRequestDebugCacheControlRetention
+  retention: PromptCacheRetention
   key: string | null
 }
-
-/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessModelRequestDebugDTO.CacheControlDTO.Retention */
-export type HarnessModelRequestDebugCacheControlRetention =
-  | 'NONE'
-  | 'SHORT'
-  | 'LONG'
-
-export const HARNESS_MODEL_REQUEST_DEBUG_CACHE_CONTROL_RETENTION_VALUES: readonly HarnessModelRequestDebugCacheControlRetention[] = [
-  'NONE',
-  'SHORT',
-  'LONG',
-]
 
 /** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessModelRequestDebugDTO */
 export interface HarnessModelRequestDebugDTO {
@@ -1318,14 +1304,14 @@ export interface HarnessModelRequestDebugSubagentDTO {
   tools: string[]
   skills: SkillRefDTO[]
   subagents: string[]
-  configurationJson: string
+  configuration: unknown
 }
 
 /** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessModelRequestDebugDTO.ToolDTO */
 export interface HarnessModelRequestDebugToolDTO {
   name: string
   description: string
-  inputSchemaJson: string
+  inputSchema: unknown
   environmentSupport: EnvironmentSupport
   provenance: string
   state: LiveTurnPlanToolState
@@ -1375,7 +1361,7 @@ export interface HarnessSessionEntryDTO {
   sessionId: string
   parentEntryId: string | null
   entryType: EntryType
-  payloadJson: string
+  payload: unknown
   createdAt: number
   usageCost: HarnessUsageCostDTO | null
 }
@@ -1446,7 +1432,7 @@ export interface HarnessThreadCommandDTO {
   type: ThreadCommandType
   state: ThreadCommandState
   idempotencyKey: string
-  payloadJson: string
+  payload: unknown
   cancelledAt: number | null
   createdAt: number
 }
@@ -1488,7 +1474,6 @@ export interface HarnessThreadSnapshotDTO {
   baseEntryId: string | null
   entries: HarnessSessionEntryDTO[]
   queuedCommands: HarnessThreadCommandDTO[]
-  executionStatus: string
   activeAssistantOutput: HarnessActiveAssistantOutputDTO | null
   generationFailures: HarnessGenerationFailureDTO[]
   toolInvocations: ToolInvocationDTO[]
@@ -1684,7 +1669,7 @@ export interface InteractionApproval {
   toolCallId: string
   toolName: string
   argumentsJson: string
-  approvalJson?: string | null
+  approval?: unknown | null
   createdAt: number
 }
 
@@ -3008,9 +2993,9 @@ export interface ToolInvocationDTO {
   environmentWaitFreshnessAt: number | null
   waitingForEnvironment: boolean
   argumentsJson: string
-  approvalJson: string | null
-  resultJson: string | null
-  errorJson: string | null
+  approval: unknown | null
+  result: unknown | null
+  error: unknown | null
   createdAt: number
   updatedAt: number
 }

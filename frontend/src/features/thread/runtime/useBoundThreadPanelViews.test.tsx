@@ -250,7 +250,7 @@ describe('useBoundThreadPanelLabels', () => {
  */
 describe('useBoundThreadPanelViews view identity', () => {
   const PREVIEW = {
-    kind: 'DRAFT_REQUEST_PREVIEW' as const,
+    kind: 'HISTORICAL_REQUEST_PREVIEW' as const,
     providerType: 'OPENAI',
     modelName: 'MiniMax',
     bodyByteSize: 120,

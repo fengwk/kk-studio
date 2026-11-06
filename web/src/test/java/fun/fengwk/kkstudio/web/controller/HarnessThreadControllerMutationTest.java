@@ -35,7 +35,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 /** Thread 人工写端点：abandon、compact、rename、yolo、stop 与执行根守卫。 */
-class StudioHarnessThreadMutationControllerTest extends HarnessThreadControllerTestSupport {
+class HarnessThreadControllerMutationTest extends HarnessThreadControllerTestSupport {
 
   /** 意图：放弃执行确认严格解析字符串版本并返回最新快照，不限制目标必须为执行根。 */
   @Test
@@ -399,8 +399,7 @@ class StudioHarnessThreadMutationControllerTest extends HarnessThreadControllerT
             jsonPath("$.stoppedThreads[0].cancelledInputs[0].idempotencyKey").value(idText(50)))
         .andExpect(jsonPath("$.stoppedThreads[0].cancelledInputs[0].type").value("USER_MESSAGE"))
         .andExpect(
-            jsonPath("$.stoppedThreads[0].cancelledInputs[0].payloadJson")
-                .value(
-                    "{\"message\":{\"role\":\"USER\",\"contents\":[{\"type\":\"text\",\"text\":\"hello\"}]}}"));
+            jsonPath("$.stoppedThreads[0].cancelledInputs[0].payload.message.contents[0].text")
+                .value("hello"));
   }
 }

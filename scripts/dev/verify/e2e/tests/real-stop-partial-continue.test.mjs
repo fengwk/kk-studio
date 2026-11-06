@@ -128,7 +128,7 @@ function createStopCaseContext({ exitConverges = true } = {}) {
       sessionId,
       parentEntryId: null,
       entryType,
-      payloadJson: JSON.stringify(payload),
+      payload,
       usageCost: null,
     }
   }

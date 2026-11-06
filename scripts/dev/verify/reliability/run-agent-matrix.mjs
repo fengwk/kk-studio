@@ -625,7 +625,7 @@ function assertNoAssistantError(entries) {
     if (String(entry?.entryType || '').toUpperCase() !== 'ASSISTANT_ERROR') continue
     let message = 'assistant error'
     try {
-      message = JSON.parse(entry.payloadJson)?.error?.message || message
+      message = entry.payload?.error?.message || message
     } catch {
       // Keep the stable fallback.
     }

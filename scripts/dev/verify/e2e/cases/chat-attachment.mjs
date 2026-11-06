@@ -121,15 +121,15 @@ registerCase({
     assert(command.type === 'USER_MESSAGE', JSON.stringify(command))
     assert(/^[1-9]\d*$/.test(String(command.sequence)), JSON.stringify(command))
     assert(String(command.idempotencyKey) === idempotencyKey, JSON.stringify(command))
-    const payload = JSON.parse(command.payloadJson)
+    const payload = command.payload
     assert(payload.message.contents[0].type === 'resource', JSON.stringify(payload))
     assert(String(payload.message.contents[0].blobId) === blobId, JSON.stringify(payload))
     assert(payload.message.contents[0].name === 'e2e-attachment.txt', JSON.stringify(payload))
     // durable 只保存 blob 引用：文本附件不携带图片输入档位，payload 里也不出现任何内联内容。
     assert(payload.message.contents[0].imageTier === null, JSON.stringify(payload))
-    assert(!String(command.payloadJson).includes('base64'), String(command.payloadJson))
+    assert(!JSON.stringify(command.payload).includes('base64'), JSON.stringify(command.payload))
 
-    // 5. 整批精确重放：replayed=true，返回既有命令（payloadJson 一致），不二次消费。
+    // 5. 整批精确重放：replayed=true，返回既有命令（payload 一致），不二次消费。
     const replayed = await createNewSession(ctx, {
       owner: chatOwner(chat.id),
       sessionId,
@@ -139,7 +139,7 @@ registerCase({
       commands: [attachmentCommand],
     })
     assert(replayed.replayed === true, JSON.stringify(replayed))
-    assert(String(replayed.acceptedCommands[0].payloadJson) === String(command.payloadJson), JSON.stringify(replayed))
+    assert(JSON.stringify(replayed.acceptedCommands[0].payload) === JSON.stringify(command.payload), JSON.stringify(replayed))
     await waitForQuiescentThread(ctx, String(threadId), {
       timeoutMs: 60_000,
       intervalMs: 100,
@@ -165,7 +165,7 @@ registerCase({
       }),
       commands: [resourceCommand],
     })
-    const resourcePayload = JSON.parse(resourceAccepted.acceptedCommands[0].payloadJson)
+    const resourcePayload = resourceAccepted.acceptedCommands[0].payload
     assert(resourcePayload.message.contents[0].type === 'resource', JSON.stringify(resourcePayload))
     assert(String(resourcePayload.message.contents[0].blobId) === blobId, JSON.stringify(resourcePayload))
     assert(resourcePayload.message.contents[0].name === 'e2e-attachment.txt', JSON.stringify(resourcePayload))
@@ -411,8 +411,8 @@ registerCase({
         JSON.stringify(secondAccepted.acceptedCommands),
       )
       // 图片附件未显式选择档位：durable 历史必须冻结平台默认 720P，且不保存任何内联内容。
-      const secondPayloadJson = String(secondAccepted.acceptedCommands[0].payloadJson)
-      const secondPayload = JSON.parse(secondPayloadJson)
+      const secondPayload = secondAccepted.acceptedCommands[0].payload
+      const secondPayloadJson = JSON.stringify(secondPayload)
       const durableImage = secondPayload.message.contents.find((content) => content.type === 'resource')
       assert(durableImage?.imageTier === '720P', secondPayloadJson)
       assert(!secondPayloadJson.includes('base64'), secondPayloadJson)

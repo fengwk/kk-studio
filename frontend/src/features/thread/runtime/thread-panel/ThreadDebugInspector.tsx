@@ -22,15 +22,22 @@ export type DebugInspectorSelection =
   | { type: 'request' }
   | { type: 'preview'; preview: ThreadProviderRequestPreviewData }
 
-function formatJson(raw: string | undefined): string {
-  if (!raw) {
+function formatJson(raw: unknown): string {
+  if (raw == null) {
     return ''
   }
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw)
+      return JSON.stringify(parsed, null, 2)
+    } catch {
+      return raw
+    }
+  }
   try {
-    const parsed = JSON.parse(raw)
-    return JSON.stringify(parsed, null, 2)
+    return JSON.stringify(raw, null, 2) ?? ''
   } catch {
-    return raw
+    return String(raw)
   }
 }
 
@@ -115,10 +122,7 @@ export function ThreadDebugInspector({
   } else if (selection.type === 'request') {
     title = t('ai.runtime.debug.requestLabel')
   } else if (selection.type === 'preview') {
-    // 历史条目重放与草稿预览是两件事：标题必须按 kind 区分，不能把历史预览也标成草稿预览。
-    title = selection.preview.kind === 'HISTORICAL_REQUEST_PREVIEW'
-      ? t('ai.runtime.debug.inspector.historicalPreviewTitle')
-      : t('ai.runtime.debug.inspector.draftPreviewTitle')
+    title = t('ai.runtime.debug.inspector.historicalPreviewTitle')
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLElement>) {
@@ -175,10 +179,10 @@ export function ThreadDebugInspector({
           </KeyValue>
           <div className="thread-debug-payload-section">
             <span className="thread-debug-payload-title">
-              {t('ai.runtime.debug.inspector.inputSchemaJson')}
+              {t('ai.runtime.debug.inspector.inputSchema')}
             </span>
             <Code className="thread-event-detail-payload" tabIndex={0}>
-              {formatJson(selection.tool.inputSchemaJson)}
+              {formatJson(selection.tool.inputSchema)}
             </Code>
           </div>
         </div>
@@ -265,7 +269,7 @@ export function ThreadDebugInspector({
               data-testid="subagent-configuration-json"
               tabIndex={0}
             >
-              {formatJson(selection.subagent.configurationJson) || '—'}
+              {formatJson(selection.subagent.configuration) || '—'}
             </Code>
           </div>
         </div>
@@ -331,17 +335,13 @@ export function ThreadDebugInspector({
             <KeyValueRow label={t('ai.runtime.debug.inspector.providerType')}><Mono>{selection.preview.providerType}</Mono></KeyValueRow>
             <KeyValueRow label={t('ai.runtime.debug.inspector.modelName')}><Mono>{selection.preview.modelName}</Mono></KeyValueRow>
             <KeyValueRow label={t('ai.runtime.debug.inspector.bodyByteSize')}><Mono>{formatByteCount(selection.preview.bodyByteSize)} ({selection.preview.bodyByteSize} B)</Mono></KeyValueRow>
-            <KeyValueRow label={t(selection.preview.kind === 'HISTORICAL_REQUEST_PREVIEW'
-                ? 'ai.runtime.debug.inspector.recordedAt'
-                : 'ai.runtime.debug.inspector.generatedAt')}><Mono>{selection.preview.generatedAt}</Mono></KeyValueRow>
+            <KeyValueRow label={t('ai.runtime.debug.inspector.recordedAt')}><Mono>{selection.preview.generatedAt}</Mono></KeyValueRow>
             <KeyValueRow label={t('ai.runtime.debug.inspector.sourceHeadEntryId')}><Mono>{selection.preview.sourceHeadEntryId || '—'}</Mono></KeyValueRow>
             {selection.preview.notice ? (
               <KeyValueRow label={t('ai.runtime.debug.inspector.previewNotice')}>{selection.preview.notice}</KeyValueRow>
             ) : null}
           </KeyValue>
-          <p className="inline-hint">{t(selection.preview.kind === 'HISTORICAL_REQUEST_PREVIEW'
-            ? 'ai.runtime.debug.historicalNotice'
-            : 'ai.runtime.debug.draftNotice')}</p>
+          <p className="inline-hint">{t('ai.runtime.debug.historicalNotice')}</p>
           <p className="inline-hint">{t('ai.runtime.debug.httpOriginalUnavailable')}</p>
           <div className="thread-debug-payload-section">
             <span className="thread-debug-payload-title">

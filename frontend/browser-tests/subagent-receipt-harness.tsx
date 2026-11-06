@@ -48,12 +48,12 @@ function notificationEntry(
     sessionId: 'session-1',
     parentEntryId: null,
     entryType: 'NOTIFICATION',
-    payloadJson: JSON.stringify({
+    payload: {
       notificationId: `notification-${entryId}`,
       kind,
       sourceThreadId,
       message: { role: 'USER', contents: [{ type: 'text', text }] },
-    }),
+    },
     createdAt: 1785232800,
     usageCost: null,
   }

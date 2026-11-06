@@ -81,7 +81,8 @@ public class SessionFileQueryService {
   /**
    * 读取会话文件的文本窗口；二进制内容以确定性错误拒绝，绝不返回伪文本。
    *
-   * <p>不可作为文本的内容以 validation + {@value #NOT_TEXT_REASON} 拒绝，前端因此只停用预览、保留下载入口。
+   * <p>不可作为文本的内容以 validation + {@value #NOT_TEXT_REASON} 拒绝，前端因此只停用预览、保留下载入口；非法窗口参数是普通
+   * validation，读取超时不伪装成请求校验失败。
    */
   public HarnessSessionFileContentDTO readText(
       UUID sessionId, String path, Integer offset, Integer limit, Integer columnOffset) {
@@ -100,8 +101,8 @@ public class SessionFileQueryService {
       text =
           TextReadWindow.format(
               bytes, offset, limit, columnOffset, sessionPath(sessionId, relative), deadline());
-    } catch (PlatformReadException invalid) {
-      throw DomainException.validationReason(NOT_TEXT_REASON, invalid.getMessage());
+    } catch (PlatformReadException failure) {
+      throw readFailure(failure);
     }
     HarnessSessionFileContentDTO dto = new HarnessSessionFileContentDTO();
     dto.setSessionId(sessionId.toString());
@@ -220,6 +221,17 @@ public class SessionFileQueryService {
 
   private static DomainException accessDenied(String message) {
     return DomainException.notFound("session_file", message);
+  }
+
+  /** 文本窗口失败只在非文本内容时携带稳定 reason；参数错误是普通 validation，超时保持不可用语义。 */
+  private static RuntimeException readFailure(PlatformReadException failure) {
+    return switch (failure.kind()) {
+      case NOT_TEXT -> DomainException.validationReason(NOT_TEXT_REASON, failure.getMessage());
+      case INVALID_ARGUMENT -> DomainException.validation("session_file", failure.getMessage());
+      case TIMEOUT -> DomainException.unavailable(
+          "SESSION_FILE_READ_TIMEOUT", failure.getMessage(), failure);
+      case READ_FAILURE -> new IllegalStateException("session file cannot be read", failure);
+    };
   }
 
   private static DomainException fileNotFound(String path) {

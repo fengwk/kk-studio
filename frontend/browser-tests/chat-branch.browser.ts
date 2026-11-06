@@ -18,10 +18,10 @@ const CHILD_ID = 'a2000000-0000-4000-8000-0000000000c1'
 const GRANDCHILD_ID = 'a2000000-0000-4000-8000-0000000000d1'
 const SESSION_ID = 'b2000000-0000-4000-8000-0000000000b1'
 const HARNESS_URL = '/browser-tests/chat-branch-harness.html'
-const rootPayload = JSON.stringify({ settings: {
+const rootPayload = { settings: {
   agentName: 'assistant', model: { modelName: 'MiniMax', variant: 'default' },
   environmentName: null, goal: null,
-} })
+} }
 
 function chat() {
   return {
@@ -41,13 +41,13 @@ function entries(options: { usage?: boolean } = {}): HarnessSessionEntryDTO[] {
     // 已关闭回合的真实 usage 事实：ASSISTANT 的 assistantMetadata + 读取投影 usageCost，
     // 后面紧跟 TURN_END，使 conversation 渲染出带 turnUsage 的回合 footer。
     return [
-      { entryId: 'entry-1', sessionId: SESSION_ID, parentEntryId: null, entryType: 'ROOT', payloadJson: rootPayload, createdAt: 1790812800, usageCost: null },
+      { entryId: 'entry-1', sessionId: SESSION_ID, parentEntryId: null, entryType: 'ROOT', payload: rootPayload, createdAt: 1790812800, usageCost: null },
       {
         entryId: 'entry-assistant',
         sessionId: SESSION_ID,
         parentEntryId: 'entry-1',
         entryType: 'MESSAGE',
-        payloadJson: JSON.stringify({
+        payload: {
           message: { role: 'ASSISTANT', contents: [{ type: 'text', text: 'done' }] },
           assistantMetadata: {
             usage: {
@@ -60,7 +60,7 @@ function entries(options: { usage?: boolean } = {}): HarnessSessionEntryDTO[] {
             },
             decodeDurationMillis: 1000,
           },
-        }),
+        },
         usageCost: { currency: 'USD', amount: '0.0012' },
         createdAt: 1790812860,
       },
@@ -69,33 +69,33 @@ function entries(options: { usage?: boolean } = {}): HarnessSessionEntryDTO[] {
         sessionId: SESSION_ID,
         parentEntryId: 'entry-assistant',
         entryType: 'TURN_END',
-        payloadJson: JSON.stringify({ outcome: 'COMPLETED' }),
+        payload: { outcome: 'COMPLETED' },
         createdAt: 1790812920,
         usageCost: null,
       },
     ]
   }
   return [
-    { entryId: 'entry-1', sessionId: SESSION_ID, parentEntryId: null, entryType: 'ROOT', payloadJson: rootPayload, createdAt: 1790812800, usageCost: null },
+    { entryId: 'entry-1', sessionId: SESSION_ID, parentEntryId: null, entryType: 'ROOT', payload: rootPayload, createdAt: 1790812800, usageCost: null },
     {
       entryId: 'entry-ancestor', sessionId: SESSION_ID, parentEntryId: 'entry-1', entryType: 'MESSAGE',
-      payloadJson: JSON.stringify({ message: { role: 'USER', contents: [{ type: 'text', text: 'Real selected ancestor' }] } }),
+      payload: { message: { role: 'USER', contents: [{ type: 'text', text: 'Real selected ancestor' }] } },
       createdAt: 1790812830,
       usageCost: null,
     },
-    { entryId: 'entry-2', sessionId: SESSION_ID, parentEntryId: 'entry-ancestor', entryType: 'TURN_END', payloadJson: JSON.stringify({ outcome: 'COMPLETED' }), createdAt: 1790812860, usageCost: null },
+    { entryId: 'entry-2', sessionId: SESSION_ID, parentEntryId: 'entry-ancestor', entryType: 'TURN_END', payload: { outcome: 'COMPLETED' }, createdAt: 1790812860, usageCost: null },
     {
       entryId: 'entry-3',
       sessionId: SESSION_ID,
       parentEntryId: 'entry-2',
       entryType: 'MESSAGE',
-      payloadJson: JSON.stringify({ message: { role: 'USER', contents: [{ type: 'text', text: 'hello' }] } }),
+      payload: { message: { role: 'USER', contents: [{ type: 'text', text: 'hello' }] } },
       createdAt: 1790812920,
       usageCost: null,
     },
     {
       entryId: 'entry-sibling', sessionId: SESSION_ID, parentEntryId: 'entry-1', entryType: 'MESSAGE',
-      payloadJson: JSON.stringify({ message: { role: 'USER', contents: [{ type: 'text', text: 'Sibling must stay hidden' }] } }),
+      payload: { message: { role: 'USER', contents: [{ type: 'text', text: 'Sibling must stay hidden' }] } },
       createdAt: 1790812950,
       usageCost: null,
     },
@@ -143,9 +143,9 @@ async function installChatApi(
     entryList.push(...Array.from({ length: 24 }, (_, index) => ({
       entryId: `scroll-${index}`, sessionId: SESSION_ID,
       parentEntryId: index === 0 ? 'entry-3' : `scroll-${index - 1}`, entryType: 'MESSAGE' as EntryType,
-      payloadJson: JSON.stringify({ message: { role: 'USER', contents: [{
+      payload: { message: { role: 'USER', contents: [{
         type: 'text', text: `Scroll marker ${index}\n${Array(12).fill('Reading position is retained.').join('\n')}`,
-      }] } }),
+      }] } },
       createdAt: Date.parse('2026-10-01T00:03:00Z') / 1000 + index,
       usageCost: null,
     })))
@@ -330,11 +330,11 @@ async function installChatApi(
           ...entryList.filter((entry) => entry.entryId !== 'entry-sibling'),
           ...(grandchild && grandCompleted ? [{
             entryId: 'entry-background', sessionId: SESSION_ID, parentEntryId: boundThread.headEntryId, entryType: 'MESSAGE',
-            payloadJson: JSON.stringify({ message: { role: 'ASSISTANT', contents: [{ type: 'text', text: 'Background completion persisted' }] } }),
+            payload: { message: { role: 'ASSISTANT', contents: [{ type: 'text', text: 'Background completion persisted' }] } },
             createdAt: 1790813040,
             usageCost: null,
           }] : []),
-        ], baseEntryId: null, queuedCommands: [], executionStatus: grandchild && !grandCompleted ? 'RUNNING' : 'IDLE',
+        ], baseEntryId: null, queuedCommands: [],
         activeAssistantOutput: null, toolInvocations: [], generationFailures: [],
         stopReceipts: [], unconfirmedExecutions: [],
       } })
@@ -350,7 +350,6 @@ async function installChatApi(
             baseEntryId: null,
             entries: isCreated ? entryList.filter((entry) => ['entry-1', 'entry-ancestor', 'entry-2'].includes(entry.entryId)) : entryList.filter((entry) => entry.entryId !== 'entry-sibling'),
             queuedCommands: isCreated ? [] : queuedCommands,
-            executionStatus: currentThread.status,
             activeAssistantOutput: null,
             toolInvocations: [],
             generationFailures: [],
@@ -403,7 +402,7 @@ async function installChatApi(
             type: command.type,
             state: 'QUEUED',
             idempotencyKey: command.idempotencyKey,
-            payloadJson: JSON.stringify(payload),
+            payload,
             cancelledAt: null,
             createdAt: 1790813100,
           }

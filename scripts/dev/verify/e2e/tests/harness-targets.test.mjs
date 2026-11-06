@@ -206,8 +206,8 @@ test('Session summaries preserve same-named root and child parent identities', a
     threadId: sampleId(),
     parentThreadId: null,
     name: 'same name',
-    createdAt: '2026-01-01T00:00:00Z',
-    updatedAt: '2026-01-01T00:00:00Z',
+    createdAt: Date.parse('2026-01-01T00:00:00Z'),
+    updatedAt: Date.parse('2026-01-01T00:00:00Z'),
     status: 'IDLE',
     executionControl: 'RUNNABLE',
     execution: { driver: 'builtin', settings: { modelName: 'model', variant: 'default' } },
@@ -395,7 +395,7 @@ test('environment status deadline is required and explicitly null while offline'
   const { statusExpiresAt: _deadline, ...missing } = environment
   await assert.rejects(() => listEnvironments(ctx(missing)), /statusExpiresAt/)
   await assert.rejects(
-    () => listEnvironments(ctx({ ...environment, statusExpiresAt: '2026-10-07T00:00:00Z' })),
+    () => listEnvironments(ctx({ ...environment, statusExpiresAt: Date.parse('2026-10-07T00:00:00Z') })),
     /OFFLINE/,
   )
 })

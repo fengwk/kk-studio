@@ -3,17 +3,53 @@ package fun.fengwk.kkstudio.platform.harness.read;
 /**
  * 平台侧读取操作确定性失败异常。
  *
- * <p>该异常表示读取请求遇到确定性失败（如资源未找到、越权、参数不合法、内容超限或看似二进制等）， 最终会被统一映射为模型可见的工具错误结果。
+ * <p>该异常表示读取请求遇到确定性失败（如资源未找到、越权、参数不合法、内容超限或看似二进制等）， 最终会被统一映射为模型可见的工具错误结果。{@link Kind} 区分调用方需要不同
+ * HTTP 语义的失败：非法参数、非文本内容、读取超时与一般读取失败。
  */
 public class PlatformReadException extends RuntimeException {
 
   private static final long serialVersionUID = 1L;
 
+  /** 失败类别；调用方按类别决定 wire 语义。 */
+  public enum Kind {
+    INVALID_ARGUMENT,
+    NOT_TEXT,
+    TIMEOUT,
+    READ_FAILURE
+  }
+
+  private final Kind kind;
+
   public PlatformReadException(String message) {
-    super(message);
+    this(Kind.READ_FAILURE, message, null);
   }
 
   public PlatformReadException(String message, Throwable cause) {
+    this(Kind.READ_FAILURE, message, cause);
+  }
+
+  private PlatformReadException(Kind kind, String message, Throwable cause) {
     super(message, cause);
+    this.kind = kind;
+  }
+
+  public static PlatformReadException invalidArgument(String message) {
+    return new PlatformReadException(Kind.INVALID_ARGUMENT, message, null);
+  }
+
+  public static PlatformReadException notText(String message) {
+    return new PlatformReadException(Kind.NOT_TEXT, message, null);
+  }
+
+  public static PlatformReadException notText(String message, Throwable cause) {
+    return new PlatformReadException(Kind.NOT_TEXT, message, cause);
+  }
+
+  public static PlatformReadException timeout(String message) {
+    return new PlatformReadException(Kind.TIMEOUT, message, null);
+  }
+
+  public Kind kind() {
+    return kind;
   }
 }

@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessCommandOwnerDTO;
@@ -25,12 +26,10 @@ class HarnessRuntimeRequestMapperTargetTest {
 
   @Test
   void mapsOwnerAndCreationTargets() {
-    // owner 身份保持不透明，展示字段不能影响授权身份。
+    // owner 只承载不透明身份，不接收展示字段。
     HarnessCommandOwnerDTO chatOwner = new HarnessCommandOwnerDTO();
     chatOwner.setKind("CHAT");
     chatOwner.setId(idText(10));
-    chatOwner.setTitle("untrusted");
-    chatOwner.setLink("/untrusted");
     assertEquals(
         new SessionOwner("CHAT", idText(10)), HarnessRuntimeRequestMapper.toOwner(chatOwner));
 
@@ -62,14 +61,14 @@ class HarnessRuntimeRequestMapperTargetTest {
     assertFalse(forked.yoloEnabled());
 
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () -> {
           HarnessCommandOwnerDTO unknown = new HarnessCommandOwnerDTO();
           unknown.setKind("UNKNOWN");
           HarnessRuntimeRequestMapper.toOwner(unknown);
         });
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () -> {
           HarnessCommandOwnerDTO missingChatId = new HarnessCommandOwnerDTO();
           missingChatId.setKind("CHAT");
@@ -92,7 +91,7 @@ class HarnessRuntimeRequestMapperTargetTest {
 
   private static void assertTargetRejected(HarnessCommandTargetDTO target) {
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () ->
             HarnessRuntimeRequestMapper.toAcceptCommandsCommand(
                 request(target, userCommand("user"))));
@@ -104,7 +103,7 @@ class HarnessRuntimeRequestMapperTargetTest {
     HarnessThreadCompactDTO uppercase = new HarnessThreadCompactDTO();
     uppercase.setExpectedVersion("1");
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () ->
             HarnessRuntimeRequestMapper.toCompactThreadCommand(
                 "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA", uppercase));
@@ -112,7 +111,7 @@ class HarnessRuntimeRequestMapperTargetTest {
     HarnessThreadCompactDTO overflow = new HarnessThreadCompactDTO();
     overflow.setExpectedVersion("9223372036854775808");
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () -> HarnessRuntimeRequestMapper.toCompactThreadCommand(idText(1), overflow));
   }
 }

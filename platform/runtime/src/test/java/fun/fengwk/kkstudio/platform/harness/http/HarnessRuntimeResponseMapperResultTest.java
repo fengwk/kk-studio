@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.common.json.JsonValues;
 import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.api.CancelledThreadInput;
 import fun.fengwk.kkstudio.harness.api.CompactThreadResult;
@@ -76,7 +77,7 @@ class HarnessRuntimeResponseMapperResultTest {
     assertEquals(idText(1), dto.getThread().getThreadId());
     assertEquals("thread", dto.getThread().getName());
     assertEquals(idText(50), dto.getAcceptedCommands().getFirst().getIdempotencyKey());
-    assertTrue(dto.getReplayed());
+    assertTrue(dto.isReplayed());
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -145,8 +146,11 @@ class HarnessRuntimeResponseMapperResultTest {
     assertEquals(2, receiptDto.getCancelledInputs().size());
     assertEquals(
         ThreadCommandType.USER_MESSAGE, receiptDto.getCancelledInputs().getFirst().getType());
-    assertTrue(receiptDto.getCancelledInputs().getFirst().getPayloadJson().contains("first"));
-    assertTrue(receiptDto.getCancelledInputs().get(1).getPayloadJson().contains(idText(70)));
+    assertTrue(
+        JsonValues.write(receiptDto.getCancelledInputs().getFirst().getPayload())
+            .contains("first"));
+    assertTrue(
+        JsonValues.write(receiptDto.getCancelledInputs().get(1).getPayload()).contains(idText(70)));
 
     StopResult replay = new StopResult(true, stopped.thread(), stopped.stoppedThreads());
     HarnessThreadStopResultDTO replayDto =
@@ -189,7 +193,9 @@ class HarnessRuntimeResponseMapperResultTest {
     assertEquals(idText(1), receiptDto.getThreadId());
     assertEquals(idText(5), receiptDto.getStopRequestId());
     assertNull(receiptDto.getStoppedTurnEndEntryId());
-    assertTrue(receiptDto.getCancelledInputs().getFirst().getPayloadJson().contains("draft"));
+    assertTrue(
+        JsonValues.write(receiptDto.getCancelledInputs().getFirst().getPayload())
+            .contains("draft"));
   }
 
   @Test

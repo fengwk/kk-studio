@@ -335,7 +335,7 @@ describe('ThreadEventView', () => {
           {
             name: 'read',
             description: 'Read file',
-            inputSchemaJson: '{"type":"object"}',
+            inputSchema: { type: 'object' },
             environmentSupport: 'ROUTED',
             requiredEnvironmentId: null,
             provenance: 'builtin:read',
@@ -553,7 +553,7 @@ describe('ThreadEventView', () => {
       rerender(view({
         type: 'preview',
         preview: {
-          kind: 'DRAFT_REQUEST_PREVIEW',
+          kind: 'HISTORICAL_REQUEST_PREVIEW',
           providerType: 'OPENAI',
           modelName: 'MiniMax',
           bodyByteSize: 19,
@@ -584,7 +584,7 @@ describe('ThreadEventView', () => {
                 tools: ['read'],
                 skills: [{ packageName: 'dev-tools', name: 'dev' }],
                 subagents: ['helper'],
-                configurationJson: '{"tools":["read"]}',
+                configuration: { tools: ['read'] },
               },
             ],
           })}
@@ -827,7 +827,7 @@ describe('ThreadEventView', () => {
       // 测试意图：验证当 debugSelection 传入 preview 类型时，宽模式在第三列详情区展示请求预览与代码块；
       // 在窄屏模式下自动切换 activeTab 至「详情」tabpanel。
       const mockPreview = {
-        kind: 'DRAFT_REQUEST_PREVIEW' as const,
+        kind: 'HISTORICAL_REQUEST_PREVIEW' as const,
         providerType: 'OPENAI',
         modelName: 'MiniMax',
         bodyByteSize: 88,
@@ -863,7 +863,7 @@ describe('ThreadEventView', () => {
 
       // 宽模式下设置 preview
       await user.click(screen.getByRole('button', { name: 'Set Preview' }))
-      expect(screen.getByRole('heading', { level: 3, name: '请求预览' })).toBeInTheDocument()
+      expect(screen.getByRole('heading', { level: 3, name: '历史请求预览' })).toBeInTheDocument()
       expect(screen.getByTestId('preview-request-body')).toHaveTextContent('hello responsive preview')
 
       // 切到窄模式：自动切到详情页签

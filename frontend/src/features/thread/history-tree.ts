@@ -245,7 +245,7 @@ function historyEntryKind(entry: HarnessSessionEntryDTO): HistoryEntryKind {
   if (entryType !== 'MESSAGE') {
     return 'other'
   }
-  const role = getString(asRecord(parsePayload(entry.payloadJson).message).role)
+  const role = getString(asRecord(parsePayload(entry.payload).message).role)
   if (role === 'USER') {
     return 'user'
   }
@@ -269,7 +269,7 @@ function historyEntrySearchText(entry: HarnessSessionEntryDTO): string {
 }
 
 function messageContents(entry: HarnessSessionEntryDTO): Record<string, unknown>[] {
-  return getRecordList(asRecord(parsePayload(entry.payloadJson).message).contents)
+  return getRecordList(asRecord(parsePayload(entry.payload).message).contents)
 }
 
 function historyEntryVisibleText(entry: HarnessSessionEntryDTO): string {

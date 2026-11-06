@@ -25,7 +25,7 @@ import fun.fengwk.kkstudio.platformtest.harness.HarnessRuntimeTestFixtures;
 import java.util.List;
 
 /** Thread 只读查询端点：执行树与手动压缩 availability。 */
-class StudioHarnessThreadRuntimeQueryControllerTest extends HarnessThreadControllerTestSupport {
+class HarnessThreadControllerRuntimeQueryTest extends HarnessThreadControllerTestSupport {
 
   /** 子节点入口返回真实根和父关系；根与未结束 outcome 必须显式序列化为 null。 */
   @Test

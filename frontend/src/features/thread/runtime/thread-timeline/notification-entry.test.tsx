@@ -21,7 +21,7 @@ function notificationEntry(
     sessionId: 'session-1',
     parentEntryId: null,
     entryType: 'NOTIFICATION',
-    payloadJson: JSON.stringify({
+    payload: JSON.stringify({
       notificationId: `notification-${kind}`,
       kind,
       sourceThreadId: 'child-thread-1',
@@ -38,7 +38,7 @@ function userEntry(text: string, entryId: string): HarnessSessionEntryDTO {
     sessionId: 'session-1',
     parentEntryId: null,
     entryType: 'MESSAGE',
-    payloadJson: JSON.stringify({
+    payload: JSON.stringify({
       message: { role: 'USER', contents: [{ type: 'text', text }] },
     }),
     createdAt: 1785232800,
@@ -57,7 +57,7 @@ function queuedCommand(
     type,
     state: 'QUEUED',
     idempotencyKey: `queued-${type}-${sequence}`,
-    payloadJson: type === 'USER_MESSAGE'
+    payload: type === 'USER_MESSAGE'
       ? JSON.stringify({ message: { role: 'USER', contents: [{ type: 'text', text }] } })
       : JSON.stringify({
           notificationId: `notification-${sequence}`,

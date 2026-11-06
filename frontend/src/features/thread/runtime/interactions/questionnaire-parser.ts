@@ -57,28 +57,33 @@ export function parseQuestionnaire(argumentsJson: string | null | undefined): As
 /**
  * 解析已完成的 ToolResult（已物化答案或明确拒答）。
  */
-export function parseCompletedResult(resultJson: string | null | undefined): {
+export function parseCompletedResult(result: unknown): {
   declined: boolean
   answers?: string[][]
 } | null {
-  if (!resultJson || typeof resultJson !== 'string') {
+  const parsed = typeof result === 'string' ? parseJsonRecord(result) : result
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return null
+  }
+  const record = parsed as Record<string, unknown>
+  if (record.declined === true) {
+    return { declined: true }
+  }
+  if (Array.isArray(record.answers)) {
+    const answers: string[][] = record.answers.map((row: unknown) =>
+      Array.isArray(row) ? row.filter((item): item is string => typeof item === 'string') : [],
+    )
+    return { declined: false, answers }
+  }
+  return null
+}
+
+function parseJsonRecord(value: string): unknown {
+  if (!value.trim()) {
     return null
   }
   try {
-    const parsed = JSON.parse(resultJson)
-    if (!parsed || typeof parsed !== 'object') {
-      return null
-    }
-    if (parsed.declined === true) {
-      return { declined: true }
-    }
-    if (Array.isArray(parsed.answers)) {
-      const answers: string[][] = parsed.answers.map((row: unknown) =>
-        Array.isArray(row) ? row.filter((item): item is string => typeof item === 'string') : [],
-      )
-      return { declined: false, answers }
-    }
-    return null
+    return JSON.parse(value)
   } catch {
     return null
   }

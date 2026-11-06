@@ -670,13 +670,13 @@ describe('useHarnessThreadRealtime', () => {
     await waitFor(() =>
       expect(result.current?.toolStreams.get('inv-tool-1')?.text).toBe('partial-onepartial-two'),
     )
-    // 尚无持久化 result Entry 时的终态 resultJson：overlay 被终态
+    // 尚无持久化 result Entry 时的终态 result：overlay 被终态
     // 投影（text/error/attachments）取代，而不是被删除。
     rerender({
       invocations: [
         {
           ...active,
-          resultJson: JSON.stringify({
+          result: JSON.stringify({
             toolCallId: 'call-1',
             contents: [{ type: 'text', text: 'terminal answer' }],
             error: false,
@@ -693,7 +693,7 @@ describe('useHarnessThreadRealtime', () => {
     // invocation 仍在 snapshot（终态空结果）：终态投影继续保留 —— ToolResult
     // Entry 写入与 invocation 删除原子提交，只有 invocation 消失 overlay 才清除。
     rerender({
-      invocations: [{ ...active, resultJson: '{"contents":[]}' }],
+      invocations: [{ ...active, result: '{"contents":[]}' }],
     })
     await waitFor(() =>
       expect(result.current?.toolStreams.get('inv-tool-1')?.text).toBe(''),
@@ -716,12 +716,12 @@ describe('useHarnessThreadRealtime', () => {
       expect(result.current?.toolStreams.get('inv-tool-1')?.text).toBe('one'),
     )
 
-    // 终态 resultJson 到达 snapshot：其投影取代 overlay。
+    // 终态 result 到达 snapshot：其投影取代 overlay。
     rerender({
       invocations: [
         {
           ...active,
-          resultJson: JSON.stringify({
+          result: JSON.stringify({
             toolCallId: 'call-1',
             contents: [{ type: 'text', text: 'terminal answer' }],
             error: false,
@@ -757,7 +757,7 @@ describe('useHarnessThreadRealtime', () => {
     )
   })
 
-  it('projects terminal errorJson (error text) while the durable result Entry is pending', async () => {
+  it('projects terminal error (error text) while the durable result Entry is pending', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const active = toolInvocation()
     const { result, rerender, sockets } = renderRealtime(client, { invocations: [active] })
@@ -768,8 +768,8 @@ describe('useHarnessThreadRealtime', () => {
       expect(result.current?.toolStreams.get('inv-tool-1')?.text).toBe('partial-one'),
     )
 
-    // 无 result Entry 的 errorJson 保持 error overlay 可见（绝不显示为 "done"）。
-    rerender({ invocations: [{ ...active, errorJson: '{"message":"boom"}' }] })
+    // 无 result Entry 的 error 保持 error overlay 可见（绝不显示为 "done"）。
+    rerender({ invocations: [{ ...active, error: '{"message":"boom"}' }] })
     await waitFor(() =>
       expect(result.current?.toolStreams.get('inv-tool-1')).toMatchObject({
         error: true,
@@ -784,7 +784,7 @@ describe('useHarnessThreadRealtime', () => {
     const activeOutput = activeAssistantOutput()
     const noInvocations: ToolInvocationDTO[] = []
     const terminal = toolInvocation({
-      resultJson: JSON.stringify({
+      result: JSON.stringify({
         toolCallId: 'call-1',
         contents: [{ type: 'text', text: 'terminal answer' }],
         error: false,
@@ -792,7 +792,7 @@ describe('useHarnessThreadRealtime', () => {
       }),
     })
 
-    // disabled 期不订阅；首次 snapshot（终态 resultJson）与 ready 同批到达：
+    // disabled 期不订阅；首次 snapshot（终态 result）与 ready 同批到达：
     // reconcile effect 播种终态 tool overlay，随后订阅 state 尚为
     // null 的过渡 render 不得清空它（下一 render 依赖不变不会重新播种）。
     const { result, rerender, sockets } = renderRealtime(client, {
@@ -1739,10 +1739,10 @@ describe('useHarnessThreadRealtime', () => {
       expect(result.current?.toolStreams.get('inv-tool-1')?.text).toBe('running step 1\n'),
     )
 
-    // 持久化终态到达：快照 resultJson 成为权威
+    // 持久化终态到达：快照 result 成为权威
     const terminalInvocation: ToolInvocationDTO = {
       ...active,
-      resultJson: JSON.stringify({
+      result: JSON.stringify({
         toolCallId: 'call-1',
         contents: [{ type: 'text', text: 'durable completed result' }],
         error: false,
@@ -1958,9 +1958,9 @@ function toolInvocation(overrides: Partial<ToolInvocationDTO> = {}): ToolInvocat
     requiredEnvironmentName: null,
     environmentWaitFreshnessAt: null,
     argumentsJson: '{}',
-    approvalJson: null,
-    resultJson: null,
-    errorJson: null,
+    approval: null,
+    result: null,
+    error: null,
     createdAt: 1767225600,
     updatedAt: 1767225600,
     ...overrides,

@@ -1914,7 +1914,7 @@ registerCase({
         'id', 'threadId', 'turnStartEntryId', 'assistantEntryId', 'callIndex', 'status',
         'attempt', 'toolCallId', 'toolName', 'rendererKey', 'environmentId',
         'requiredEnvironmentId', 'requiredEnvironmentName', 'environmentWaitFreshnessAt',
-        'waitingForEnvironment', 'argumentsJson', 'approvalJson', 'resultJson', 'errorJson',
+        'waitingForEnvironment', 'argumentsJson', 'approval', 'result', 'error',
         'createTime', 'updateTime',
       ], 'tool invocation')
       assert(
@@ -1940,10 +1940,10 @@ registerCase({
         readArguments.path === fixturePath,
         `read arguments must carry an absolute path: ${safeDiagnosticJson(readArguments)}`,
       )
-      const approvalJson = JSON.parse(readInvocation.approvalJson || '{}')
+      const approval = readInvocation.approval ?? {}
       assert(
-        approvalJson.required === true && approvalJson.decision == null,
-        `approval must be required and undecided: ${safeDiagnosticJson(approvalJson)}`,
+        approval.required === true && approval.decision == null,
+        `approval must be required and undecided: ${safeDiagnosticJson(approval)}`,
       )
       ctx.writeArtifact(
         'waiting-approval.json',
@@ -1958,7 +1958,7 @@ registerCase({
       })
       assert(String(decided.id) === String(readInvocation.id), safeDiagnosticJson(decided))
       assert(decided.status === 'READY', safeDiagnosticJson(decided))
-      const decidedApproval = JSON.parse(decided.approvalJson || '{}')
+      const decidedApproval = decided.approval ?? {}
       assert(
         decidedApproval.decision === 'ALLOWED' && decidedApproval.decisionId === decisionId,
         `durable decision is ALLOWED (input is ALLOW): ${safeDiagnosticJson(decidedApproval)}`,
@@ -1968,7 +1968,7 @@ registerCase({
         decisionId,
         reason: null,
       })
-      const replayApproval = JSON.parse(replay.approvalJson || '{}')
+      const replayApproval = replay.approval ?? {}
       assert(
         replayApproval.decision === 'ALLOWED'
           && replayApproval.decidedAt === decidedApproval.decidedAt,
@@ -2331,7 +2331,7 @@ function messageText(entry) {
 
 function parseEntryPayload(entry) {
   try {
-    const payload = JSON.parse(entry?.payloadJson || '{}')
+    const payload = entry?.payload ?? {}
     assert(
       payload && typeof payload === 'object' && !Array.isArray(payload),
       `expected entry payload object: ${safeDiagnosticJson(entry)}`,

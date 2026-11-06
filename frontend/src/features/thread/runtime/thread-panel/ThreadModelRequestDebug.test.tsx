@@ -25,7 +25,7 @@ function sampleDebug(overrides: Partial<ThreadModelRequestDebugData> = {}): Thre
       {
         name: 'read',
         description: 'Read file',
-        inputSchemaJson: '{"type":"object","properties":{"path":{"type":"string"}}}',
+        inputSchema: { type: 'object', properties: { path: { type: 'string' } } },
         environmentSupport: 'ROUTED',
         requiredEnvironmentId: null,
         provenance: 'builtin:read',
@@ -35,7 +35,7 @@ function sampleDebug(overrides: Partial<ThreadModelRequestDebugData> = {}): Thre
       {
         name: 'bash',
         description: 'Execute shell commands',
-        inputSchemaJson: '{"type":"object","properties":{"command":{"type":"string"}}}',
+        inputSchema: { type: 'object', properties: { command: { type: 'string' } } },
         environmentSupport: 'REQUIRED',
         provenance: 'builtin:bash',
         state: 'FILTERED',
@@ -63,7 +63,11 @@ function sampleDebug(overrides: Partial<ThreadModelRequestDebugData> = {}): Thre
         tools: ['read', 'bash'],
         skills: [{ packageName: 'dev-tools', name: 'dev' }],
         subagents: ['explorer'],
-        configurationJson: '{"tools":["read","bash"],"skills":[{"packageName":"dev-tools","name":"dev"}],"subagents":["explorer"]}',
+        configuration: {
+          tools: ['read', 'bash'],
+          skills: [{ packageName: 'dev-tools', name: 'dev' }],
+          subagents: ['explorer'],
+        },
       },
     ],
     cacheControl: {
@@ -310,7 +314,11 @@ describe('ThreadModelRequestDebug & Inspector', () => {
                 tools: ['read', 'grep'],
                 skills: [{ packageName: 'core-pkg', name: 'dev' }],
                 subagents: ['searcher'],
-                configurationJson: '{"tools":["read","grep"],"skills":[{"packageName":"core-pkg","name":"dev"}],"subagents":["searcher"]}',
+                configuration: {
+                  tools: ['read', 'grep'],
+                  skills: [{ packageName: 'core-pkg', name: 'dev' }],
+                  subagents: ['searcher'],
+                },
               },
               {
                 name: 'helper',
@@ -318,7 +326,7 @@ describe('ThreadModelRequestDebug & Inspector', () => {
                 tools: [],
                 skills: [],
                 subagents: [],
-                configurationJson: '{"tools":[],"skills":[],"subagents":[]}',
+                configuration: { tools: [], skills: [], subagents: [] },
               },
             ],
           })}
@@ -442,7 +450,7 @@ describe('ThreadModelRequestDebug & Inspector', () => {
                 tools: ['read'],
                 skills: [{ packageName: 'pkg', name: 'skill-a' }],
                 subagents: ['helper'],
-                configurationJson: '{"tools":["read"]}',
+                configuration: { tools: ['read'] },
               },
             ],
             cacheControl: {
@@ -481,16 +489,16 @@ describe('ThreadModelRequestDebug & Inspector', () => {
     })
   })
 
-  it('handles invalid json gracefully in tool inspector schema display', async () => {
+  it('renders a structured JSON schema in the tool inspector', async () => {
     const user = userEvent.setup()
     render(
       <DebugViewHarness
         debug={sampleDebug({
           tools: [
             {
-              name: 'malformed_tool',
-              description: 'Malformed schema tool',
-              inputSchemaJson: '{not-valid-json}',
+              name: 'structured_tool',
+              description: 'Structured schema tool',
+              inputSchema: { type: 'object', required: ['path'] },
               environmentSupport: 'NONE',
               provenance: 'custom',
               state: 'SENT',
@@ -500,11 +508,11 @@ describe('ThreadModelRequestDebug & Inspector', () => {
         })}
       />,
     )
-    await user.click(screen.getByRole('button', { name: '工具 malformed_tool' }))
-    expect(screen.getByText('{not-valid-json}')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '工具 structured_tool' }))
+    expect(screen.getByText(/"type": "object"/)).toBeInTheDocument()
   })
 
-  it('handles empty inputSchemaJson in tool inspector and ignores Escape when isComposing', async () => {
+  it('handles an empty schema object in the tool inspector and ignores Escape when isComposing', async () => {
     const user = userEvent.setup()
     render(
       <DebugViewHarness
@@ -513,7 +521,7 @@ describe('ThreadModelRequestDebug & Inspector', () => {
             {
               name: 'empty_schema_tool',
               description: 'Empty schema tool',
-              inputSchemaJson: '',
+              inputSchema: {},
               environmentSupport: 'NONE',
               provenance: 'custom',
               state: 'SENT',
@@ -553,7 +561,7 @@ describe('ThreadModelRequestDebug & Inspector', () => {
               {
                 name: 'custom_tool',
                 description: 'custom',
-                inputSchemaJson: '{}',
+                inputSchema: {},
                 environmentSupport: 'UNKNOWN_SUPPORT' as unknown as ThreadModelRequestDebugTool['environmentSupport'],
                 provenance: 'custom',
                 state: 'SENT',
@@ -562,7 +570,7 @@ describe('ThreadModelRequestDebug & Inspector', () => {
               {
                 name: 'tool_none',
                 description: 'none',
-                inputSchemaJson: '{}',
+                inputSchema: {},
                 environmentSupport: 'NONE',
                 provenance: 'custom',
                 state: 'FILTERED',
@@ -643,7 +651,7 @@ describe('ThreadModelRequestDebug & Inspector', () => {
             tool: {
               name: 'env_tool',
               description: 'needs env',
-              inputSchemaJson: '{}',
+              inputSchema: {},
               environmentSupport: 'ROUTED',
               provenance: 'builtin',
               state: 'SENT',
@@ -690,7 +698,7 @@ describe('ThreadModelRequestDebug & Inspector', () => {
               {
                 name: 'filtered-tool',
                 description: 'Custom filtered tool',
-                inputSchemaJson: '{}',
+                inputSchema: {},
                 environmentSupport: 'UNKNOWN_ENV' as unknown as 'NONE',
                 provenance: 'custom:tool',
                 state: 'FILTERED',
@@ -740,11 +748,11 @@ describe('ThreadModelRequestDebug & Inspector', () => {
       expect(screen.getByText('S3_BUCKET')).toBeInTheDocument()
     })
 
-    it('renders provider request preview with metadata, preformatted payload and no authentication credentials', () => {
-      // 测试意图：验证 selection.type === 'preview' 时展示请求预览标题、Provider/Model/ByteSize/Timestamp 元数据，
+    it('renders historical provider request preview with metadata and no authentication credentials', () => {
+      // 测试意图：验证 selection.type === 'preview' 时展示历史请求预览标题、Provider/Model/ByteSize/Timestamp 元数据，
       // 并以可选择的只读预格式化代码块渲染 bodyJson，且绝不暴露任何 Authorization 头或凭据信息。
       const mockPreview = {
-        kind: 'DRAFT_REQUEST_PREVIEW' as const,
+        kind: 'HISTORICAL_REQUEST_PREVIEW' as const,
         providerType: 'OPENAI',
         modelName: 'gpt-4o',
         bodyByteSize: 1280,
@@ -754,7 +762,7 @@ describe('ThreadModelRequestDebug & Inspector', () => {
         }),
         sourceHeadEntryId: 'entry-head-123',
         generatedAt: 1790504400,
-        notice: 'Snapshot for draft preview',
+        notice: 'Reconstructed from recorded history',
       }
 
       render(
@@ -767,14 +775,14 @@ describe('ThreadModelRequestDebug & Inspector', () => {
         />,
       )
 
-      expect(screen.getByRole('heading', { level: 3, name: '请求预览' })).toBeInTheDocument()
-      expect(screen.getByText('DRAFT_REQUEST_PREVIEW')).toBeInTheDocument()
+      expect(screen.getByRole('heading', { level: 3, name: '历史请求预览' })).toBeInTheDocument()
+      expect(screen.getByText('HISTORICAL_REQUEST_PREVIEW')).toBeInTheDocument()
       expect(screen.getByText('OPENAI')).toBeInTheDocument()
       expect(screen.getByText('gpt-4o')).toBeInTheDocument()
       expect(screen.getByText(/1.3 KB/)).toBeInTheDocument()
       expect(screen.getByText('1790504400')).toBeInTheDocument()
       expect(screen.getByText('entry-head-123')).toBeInTheDocument()
-      expect(screen.getByText('Snapshot for draft preview')).toBeInTheDocument()
+      expect(screen.getByText('Reconstructed from recorded history')).toBeInTheDocument()
 
       const payload = screen.getByTestId('preview-request-body')
       expect(payload).toHaveAttribute('tabindex', '0')
@@ -784,41 +792,6 @@ describe('ThreadModelRequestDebug & Inspector', () => {
       expect(screen.queryByText(/Authorization/i)).not.toBeInTheDocument()
       expect(screen.queryByText(/Bearer/i)).not.toBeInTheDocument()
       expect(screen.queryByText(/api-key/i)).not.toBeInTheDocument()
-    })
-
-    // 意图：历史条目重放与草稿预览语义不同，检查器标题必须按 kind 区分，不能复用草稿标题。
-    it('does not reuse the draft preview title for a historical request preview', () => {
-      const sharedPreview = {
-        providerType: 'OPENAI',
-        modelName: 'gpt-4o',
-        bodyByteSize: 12,
-        bodyJson: '{"model":"gpt-4o"}',
-        sourceHeadEntryId: 'entry-head-1',
-        generatedAt: 1790485200,
-        notice: null,
-      }
-
-      const draft = render(
-        <ThreadDebugInspector
-          selection={{ type: 'preview', preview: { ...sharedPreview, kind: 'DRAFT_REQUEST_PREVIEW' } }}
-          onClose={() => {}}
-        />,
-      )
-      expect(screen.getByRole('heading', { level: 3, name: '请求预览' })).toBeInTheDocument()
-      draft.unmount()
-
-      render(
-        <ThreadDebugInspector
-          selection={{
-            type: 'preview',
-            preview: { ...sharedPreview, kind: 'HISTORICAL_REQUEST_PREVIEW' },
-          }}
-          onClose={() => {}}
-        />,
-      )
-      expect(screen.getByText('HISTORICAL_REQUEST_PREVIEW')).toBeInTheDocument()
-      expect(screen.queryByRole('heading', { level: 3, name: '请求预览' })).not.toBeInTheDocument()
-      expect(screen.getByRole('heading', { level: 3 }).textContent).not.toBe('请求预览')
     })
   })
 

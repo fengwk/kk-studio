@@ -161,7 +161,7 @@ public final class HarnessRuntimeResponseMapper {
     return dto;
   }
 
-  /** Entry 投影；{@code usageCost} 是读取时按当前目录价现算的费用（不可计价时为 null），绝不进入 {@code payloadJson}。 */
+  /** Entry 投影；{@code usageCost} 是读取时按当前目录价现算的费用（不可计价时为 null），绝不进入 {@code payload}。 */
   public static HarnessSessionEntryDTO toEntryDto(Entry entry, HarnessUsageCostDTO usageCost) {
     Objects.requireNonNull(entry, "entry");
     HarnessSessionEntryDTO dto = new HarnessSessionEntryDTO();
@@ -169,7 +169,7 @@ public final class HarnessRuntimeResponseMapper {
     dto.setSessionId(entry.sessionId().toString());
     dto.setParentEntryId(entry.parentEntryId() == null ? null : entry.parentEntryId().toString());
     dto.setEntryType(entry.payload().type());
-    dto.setPayloadJson(ENTRY_PAYLOADS.encode(entry.payload()));
+    dto.setPayload(ENTRY_PAYLOADS.encodeNode(entry.payload()));
     dto.setCreatedAt(entry.createdAt());
     dto.setUsageCost(usageCost);
     return dto;
@@ -183,7 +183,7 @@ public final class HarnessRuntimeResponseMapper {
     dto.setType(command.type());
     dto.setState(command.state());
     dto.setIdempotencyKey(command.idempotencyKey().toString());
-    dto.setPayloadJson(COMMAND_PAYLOADS.encode(command.payload()));
+    dto.setPayload(COMMAND_PAYLOADS.encodeNode(command.payload()));
     dto.setCancelledAt(command.cancelledAt());
     dto.setCreatedAt(command.createdAt());
     return dto;
@@ -236,12 +236,11 @@ public final class HarnessRuntimeResponseMapper {
       dto.setEnvironmentId(
           binding.environmentId() == null ? null : binding.environmentId().toString());
     }
-    dto.setApprovalJson(
-        invocation.approval() == null ? null : TOOL_APPROVALS.encode(invocation.approval()));
-    dto.setResultJson(
-        invocation.result() == null ? null : ToolResultJsonCodec.encode(invocation.result()));
-    dto.setErrorJson(
-        invocation.error() == null ? null : JSON.write(invocation.error(), "toolInvocationError"));
+    dto.setApproval(
+        invocation.approval() == null ? null : TOOL_APPROVALS.encodeNode(invocation.approval()));
+    dto.setResult(
+        invocation.result() == null ? null : ToolResultJsonCodec.encodeNode(invocation.result()));
+    dto.setError(invocation.error() == null ? null : JSON.tree(invocation.error()));
     dto.setCreatedAt(invocation.createdAt());
     dto.setUpdatedAt(invocation.updatedAt());
     return dto;
@@ -269,7 +268,6 @@ public final class HarnessRuntimeResponseMapper {
             entry -> toEntryDto(entry, usageCosts.get(entry.id()))));
     dto.setQueuedCommands(
         mapAll(snapshot.queuedCommands(), HarnessRuntimeResponseMapper::toCommandDto));
-    dto.setExecutionStatus(snapshot.runtimeStatus().name());
     GenerationProjection generation = snapshot.generation();
     dto.setActiveAssistantOutput(
         generation == null ? null : toActiveAssistantOutputDto(generation));
@@ -412,7 +410,7 @@ public final class HarnessRuntimeResponseMapper {
     inputDto.setSequence(Long.toString(input.sequence()));
     inputDto.setIdempotencyKey(input.idempotencyKey().toString());
     inputDto.setType(input.payload().type());
-    inputDto.setPayloadJson(COMMAND_PAYLOADS.encode(input.payload()));
+    inputDto.setPayload(COMMAND_PAYLOADS.encodeNode(input.payload()));
     return inputDto;
   }
 

@@ -105,10 +105,8 @@ public class HarnessThreadController {
       @PathVariable UUID executionId,
       @RequestBody HarnessExecutionAbandonDTO request) {
     HarnessRuntimeRequestMapper.AbandonExecutionTarget target =
-        HarnessRequestErrors.map(
-            () ->
-                HarnessRuntimeRequestMapper.toAbandonExecutionTarget(
-                    threadId.toString(), executionId.toString(), request));
+        HarnessRuntimeRequestMapper.toAbandonExecutionTarget(
+            threadId.toString(), executionId.toString(), request);
     return threadService.abandonExecution(
         target.threadId(), target.executionId(), target.expectedVersion());
   }
@@ -122,8 +120,7 @@ public class HarnessThreadController {
   public HarnessThreadDTO rename(
       @PathVariable UUID threadId, @RequestBody HarnessNameUpdateDTO request) {
     RenameThreadCommand command =
-        HarnessRequestErrors.map(
-            () -> HarnessRuntimeRequestMapper.toRenameThreadCommand(threadId.toString(), request));
+        HarnessRuntimeRequestMapper.toRenameThreadCommand(threadId.toString(), request);
     return threadService.rename(command);
   }
 
@@ -137,8 +134,7 @@ public class HarnessThreadController {
   public HarnessThreadCompactResultDTO compact(
       @PathVariable UUID threadId, @RequestBody HarnessThreadCompactDTO request) {
     CompactThreadCommand command =
-        HarnessRequestErrors.map(
-            () -> HarnessRuntimeRequestMapper.toCompactThreadCommand(threadId.toString(), request));
+        HarnessRuntimeRequestMapper.toCompactThreadCommand(threadId.toString(), request);
     return threadService.compact(command);
   }
 
@@ -153,8 +149,7 @@ public class HarnessThreadController {
   public HarnessThreadDTO updateYolo(
       @PathVariable UUID threadId, @RequestBody HarnessThreadYoloUpdateDTO request) {
     SetThreadYoloCommand command =
-        HarnessRequestErrors.map(
-            () -> HarnessRuntimeRequestMapper.toSetThreadYoloCommand(threadId.toString(), request));
+        HarnessRuntimeRequestMapper.toSetThreadYoloCommand(threadId.toString(), request);
     return threadService.updateYolo(command);
   }
 
@@ -163,9 +158,7 @@ public class HarnessThreadController {
   @ResponseStatus(HttpStatus.ACCEPTED)
   public HarnessThreadStopResultDTO stop(
       @PathVariable UUID threadId, @RequestBody HarnessThreadStopDTO request) {
-    StopCommand command =
-        HarnessRequestErrors.map(
-            () -> HarnessRuntimeRequestMapper.toStopCommand(threadId.toString(), request));
+    StopCommand command = HarnessRuntimeRequestMapper.toStopCommand(threadId.toString(), request);
     return threadService.stop(command);
   }
 
@@ -183,9 +176,7 @@ public class HarnessThreadController {
     String operator = OperatorResolver.resolve(httpRequest);
     return HarnessRuntimeResponseMapper.toToolInvocationDto(
         interactionService.decideApproval(
-            HarnessRequestErrors.map(
-                () ->
-                    HarnessRuntimeRequestMapper.toToolApprovalCommand(
-                        threadId.toString(), toolInvocationId.toString(), request, operator))));
+            HarnessRuntimeRequestMapper.toToolApprovalCommand(
+                threadId.toString(), toolInvocationId.toString(), request, operator)));
   }
 }

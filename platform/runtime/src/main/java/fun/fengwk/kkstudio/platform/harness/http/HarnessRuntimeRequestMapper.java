@@ -57,6 +57,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.Supplier;
 
 /** Harness Runtime HTTP 请求的严格解析与 DTO-to-domain 映射。 */
 public final class HarnessRuntimeRequestMapper {
@@ -82,16 +83,16 @@ public final class HarnessRuntimeRequestMapper {
       String threadId, HarnessThreadCompactDTO dto) {
     requireNonNull(dto, "compactDTO");
     return new CompactThreadCommand(
-        Uuids.parseCanonical(threadId, "threadId"),
-        DecimalLongs.parseNonNegative(dto.getExpectedVersion(), "expectedVersion"));
+        parseUuid(threadId, "threadId"),
+        parseNonNegativeLong(dto.getExpectedVersion(), "expectedVersion"));
   }
 
   public static StopCommand toStopCommand(String threadId, HarnessThreadStopDTO dto) {
     requireNonNull(dto, "stopDTO");
     return new StopCommand(
-        Uuids.parseCanonical(threadId, "threadId"),
-        Uuids.parseCanonical(dto.getStopRequestId(), "stopRequestId"),
-        DecimalLongs.parseNonNegative(dto.getExpectedVersion(), "expectedVersion"));
+        parseUuid(threadId, "threadId"),
+        parseUuid(dto.getStopRequestId(), "stopRequestId"),
+        parseNonNegativeLong(dto.getExpectedVersion(), "expectedVersion"));
   }
 
   /** 解析放弃退出确认目标；执行 id 与 Thread id 都是 canonical UUID，expectedVersion 是 non-negative bigint。 */
@@ -99,9 +100,9 @@ public final class HarnessRuntimeRequestMapper {
       String threadId, String executionId, HarnessExecutionAbandonDTO dto) {
     requireNonNull(dto, "abandonDTO");
     return new AbandonExecutionTarget(
-        Uuids.parseCanonical(threadId, "threadId"),
-        Uuids.parseCanonical(executionId, "executionId"),
-        DecimalLongs.parseNonNegative(dto.getExpectedVersion(), "expectedVersion"));
+        parseUuid(threadId, "threadId"),
+        parseUuid(executionId, "executionId"),
+        parseNonNegativeLong(dto.getExpectedVersion(), "expectedVersion"));
   }
 
   /** 已校验的放弃退出确认目标。 */
@@ -111,8 +112,7 @@ public final class HarnessRuntimeRequestMapper {
       String threadId, HarnessThreadYoloUpdateDTO dto) {
     requireNonNull(dto, "yoloUpdateDTO");
     return new SetThreadYoloCommand(
-        Uuids.parseCanonical(threadId, "threadId"),
-        requireBoolean(dto.getYoloEnabled(), "yoloEnabled"));
+        parseUuid(threadId, "threadId"), requireBoolean(dto.getYoloEnabled(), "yoloEnabled"));
   }
 
   /** 把 PUT name 请求映射为 Session 重命名命令；只校验 name 存在且非 blank，规范化与长度上限由 Core {@code Names} 权威处理。 */
@@ -130,8 +130,11 @@ public final class HarnessRuntimeRequestMapper {
   public static RenameThreadCommand toRenameThreadCommand(
       String threadId, HarnessNameUpdateDTO dto) {
     requireNonNull(dto, "nameUpdateDTO");
-    return new RenameThreadCommand(
-        Uuids.parseCanonical(threadId, "threadId"), requireText(dto.getName(), "name"));
+    return validation(
+        "thread",
+        () ->
+            new RenameThreadCommand(
+                parseUuid(threadId, "threadId"), requireText(dto.getName(), "name")));
   }
 
   /** 把审批请求映射为命令。操作者身份由调用方从认证上下文解析后显式传入，绝不读取请求体中的身份字段。 */
@@ -143,37 +146,45 @@ public final class HarnessRuntimeRequestMapper {
           case ALLOW -> ToolApprovalDecision.ALLOWED;
           case DENY -> ToolApprovalDecision.DENIED;
         };
-    return new ToolApprovalCommand(
-        Uuids.parseCanonical(threadId, "threadId"),
-        Uuids.parseCanonical(toolInvocationId, "toolInvocationId"),
-        parsed,
-        Uuids.parseCanonical(dto.getDecisionId(), "decisionId"),
-        requireText(actor, "actor"),
-        dto.getReason());
+    return validation(
+        "approval",
+        () ->
+            new ToolApprovalCommand(
+                parseUuid(threadId, "threadId"),
+                parseUuid(toolInvocationId, "toolInvocationId"),
+                parsed,
+                parseUuid(dto.getDecisionId(), "decisionId"),
+                requireText(actor, "actor"),
+                dto.getReason()));
   }
 
   private static AcceptCommandsTarget toTarget(HarnessCommandTargetDTO dto) {
     requireNonNull(dto, "target");
-    return switch (dto) {
-      case HarnessCommandTargetDTO.NewSessionDTO target -> new AcceptCommandsTarget.NewRootSession(
-          Uuids.parseCanonical(target.sessionId(), "target.sessionId"),
-          Uuids.parseCanonical(target.threadId(), "target.threadId"),
-          toBranchSettings(requireNonNull(target.rootSettings(), "target.rootSettings")),
-          target.yoloEnabled());
-      case HarnessCommandTargetDTO.NewThreadDTO target -> new AcceptCommandsTarget.NewThread(
-          Uuids.parseCanonical(target.sessionId(), "target.sessionId"),
-          Uuids.parseCanonical(target.startEntryId(), "target.startEntryId"),
-          Uuids.parseCanonical(target.threadId(), "target.threadId"),
-          requireText(target.threadName(), "target.threadName"),
-          target.yoloEnabled());
-      case HarnessCommandTargetDTO.NewForkedSessionDTO target -> new AcceptCommandsTarget
-          .NewForkedSession(
-          Uuids.parseCanonical(target.sourceThreadId(), "target.sourceThreadId"),
-          Uuids.parseCanonical(target.startEntryId(), "target.startEntryId"),
-          Uuids.parseCanonical(target.sessionId(), "target.sessionId"),
-          Uuids.parseCanonical(target.threadId(), "target.threadId"),
-          target.yoloEnabled());
-    };
+    return validation(
+        "target",
+        () ->
+            switch (dto) {
+              case HarnessCommandTargetDTO.NewSessionDTO target -> new AcceptCommandsTarget
+                  .NewRootSession(
+                  parseUuid(target.sessionId(), "target.sessionId"),
+                  parseUuid(target.threadId(), "target.threadId"),
+                  toBranchSettings(requireNonNull(target.rootSettings(), "target.rootSettings")),
+                  target.yoloEnabled());
+              case HarnessCommandTargetDTO.NewThreadDTO target -> new AcceptCommandsTarget
+                  .NewThread(
+                  parseUuid(target.sessionId(), "target.sessionId"),
+                  parseUuid(target.startEntryId(), "target.startEntryId"),
+                  parseUuid(target.threadId(), "target.threadId"),
+                  requireText(target.threadName(), "target.threadName"),
+                  target.yoloEnabled());
+              case HarnessCommandTargetDTO.NewForkedSessionDTO target -> new AcceptCommandsTarget
+                  .NewForkedSession(
+                  parseUuid(target.sourceThreadId(), "target.sourceThreadId"),
+                  parseUuid(target.startEntryId(), "target.startEntryId"),
+                  parseUuid(target.sessionId(), "target.sessionId"),
+                  parseUuid(target.threadId(), "target.threadId"),
+                  target.yoloEnabled());
+            });
   }
 
   /**
@@ -196,20 +207,22 @@ public final class HarnessRuntimeRequestMapper {
     String nextCommandSequence = dto.getExpectedNextCommandSequence();
     if (cursorRequired) {
       if (headEntryId == null || nextCommandSequence == null) {
-        throw new IllegalArgumentException(
+        throw DomainException.validation(
+            "request",
             "expectedHeadEntryId and expectedNextCommandSequence are required for this command batch");
       }
     } else if (headEntryId != null || nextCommandSequence != null) {
-      throw new IllegalArgumentException(
+      throw DomainException.validation(
+          "request",
           "expectedHeadEntryId and expectedNextCommandSequence must be omitted for a single USER_MESSAGE batch");
     }
     AcceptCommandsTarget target =
         new AcceptCommandsTarget.Thread(
-            Uuids.parseCanonical(threadId, "threadId"),
-            headEntryId == null ? null : Uuids.parseCanonical(headEntryId, "expectedHeadEntryId"),
+            parseUuid(threadId, "threadId"),
+            headEntryId == null ? null : parseUuid(headEntryId, "expectedHeadEntryId"),
             nextCommandSequence == null
                 ? null
-                : DecimalLongs.parsePositive(nextCommandSequence, "expectedNextCommandSequence"));
+                : parsePositiveLong(nextCommandSequence, "expectedNextCommandSequence"));
     return new AcceptCommandsCommand(target, commands);
   }
 
@@ -217,13 +230,16 @@ public final class HarnessRuntimeRequestMapper {
   private static BranchSettings toBranchSettings(HarnessBranchSettingsDTO dto) {
     requireNonNull(dto, "branchSettings");
     if (dto.getGoal() != null) {
-      throw new IllegalArgumentException(
-          "branchSettings must not carry a goal; goals are set through a GOAL command");
+      throw DomainException.validation(
+          "request", "branchSettings must not carry a goal; goals are set through a GOAL command");
     }
-    return new BranchSettings(
-        requireText(dto.getAgentName(), "branchSettings.agentName"),
-        toExecutionSelection(dto.getExecution()),
-        dto.getEnvironmentName());
+    return validation(
+        "branchSettings",
+        () ->
+            new BranchSettings(
+                requireText(dto.getAgentName(), "branchSettings.agentName"),
+                toExecutionSelection(dto.getExecution()),
+                dto.getEnvironmentName()));
   }
 
   private static ExecutionSelection toExecutionSelection(HarnessExecutionSelectionDTO dto) {
@@ -231,12 +247,16 @@ public final class HarnessRuntimeRequestMapper {
     String driver = requireText(dto.getDriver(), "execution.driver");
     Map<String, Object> settings = requireNonNull(dto.getSettings(), "execution.settings");
     String settingsJson = StrictJson.standard().write(settings, "execution.settings");
-    return new ExecutionSelection(driver, settingsJson);
+    return validation("execution", () -> new ExecutionSelection(driver, settingsJson));
   }
 
   private static ModelSelection toModelSelection(HarnessModelSelectionDTO dto) {
     requireNonNull(dto, "model");
-    return new ModelSelection(requireText(dto.getModelName(), "model.modelName"), dto.getVariant());
+    return validation(
+        "model",
+        () ->
+            new ModelSelection(
+                requireText(dto.getModelName(), "model.modelName"), dto.getVariant()));
   }
 
   /**
@@ -248,8 +268,11 @@ public final class HarnessRuntimeRequestMapper {
     requireNonNull(dto, "modelRequestDebugRequest");
     return new ModelRequestDebugSelection(
         toModelSelection(dto.getModel()),
-        BranchSettings.requireCanonicalEnvironmentName(
-            dto.getEnvironmentName(), "environmentName"));
+        validation(
+            "environmentName",
+            () ->
+                BranchSettings.requireCanonicalEnvironmentName(
+                    dto.getEnvironmentName(), "environmentName")));
   }
 
   /** Model Request Debug 的草稿选择：canonical model selection 与可空 Environment name。 */
@@ -260,22 +283,27 @@ public final class HarnessRuntimeRequestMapper {
     ThreadCommandPayload payload = toPayload(dto);
     return new NewThreadCommand(
         payload,
-        Uuids.parseCanonical(dto.idempotencyKey(), "command.idempotencyKey"),
+        parseUuid(dto.idempotencyKey(), "command.idempotencyKey"),
         ThreadCommandPayloadJsonCodec.requestHash(payload));
   }
 
   private static ThreadCommandPayload toPayload(HarnessCommandCreateDTO dto) {
-    return switch (dto) {
-      case HarnessCommandCreateDTO.UserMessageDTO command -> new UserMessageCommandPayload(
-          new AgentMessage(AgentMessageRole.USER, toUserMessageContents(command)));
-      case HarnessCommandCreateDTO.GoalDTO command -> new GoalCommandPayload(command.text());
-      case HarnessCommandCreateDTO.SetAgentDTO command -> new SetAgentCommandPayload(
-          requireText(command.agentName(), "command.agentName"));
-      case HarnessCommandCreateDTO.SetExecutionDTO command -> new SetExecutionCommandPayload(
-          toExecutionSelection(requireNonNull(command.execution(), "command.execution")));
-      case HarnessCommandCreateDTO.SetEnvironmentDTO command -> new SetEnvironmentCommandPayload(
-          command.environmentName());
-    };
+    return validation(
+        "command",
+        () ->
+            switch (dto) {
+              case HarnessCommandCreateDTO.UserMessageDTO command -> new UserMessageCommandPayload(
+                  new AgentMessage(AgentMessageRole.USER, toUserMessageContents(command)));
+              case HarnessCommandCreateDTO.GoalDTO command -> new GoalCommandPayload(
+                  command.text());
+              case HarnessCommandCreateDTO.SetAgentDTO command -> new SetAgentCommandPayload(
+                  requireText(command.agentName(), "command.agentName"));
+              case HarnessCommandCreateDTO.SetExecutionDTO
+              command -> new SetExecutionCommandPayload(
+                  toExecutionSelection(requireNonNull(command.execution(), "command.execution")));
+              case HarnessCommandCreateDTO.SetEnvironmentDTO
+              command -> new SetEnvironmentCommandPayload(command.environmentName());
+            });
   }
 
   /**
@@ -287,7 +315,7 @@ public final class HarnessRuntimeRequestMapper {
       List<HarnessCommandCreateDTO> requestCommands, String field, boolean requireUserLike) {
     List<HarnessCommandCreateDTO> required = requireList(requestCommands, field);
     if (required.isEmpty()) {
-      throw new IllegalArgumentException("commands must not be empty");
+      throw DomainException.validation("request", "commands must not be empty");
     }
     List<NewThreadCommand> commands = new ArrayList<>(required.size());
     for (HarnessCommandCreateDTO command : required) {
@@ -319,20 +347,21 @@ public final class HarnessRuntimeRequestMapper {
         // typed GOAL 与 USER_MESSAGE 都是 user-like 终止输入：至多一条且必须在最后。
         userLikeCount++;
         if (i != commands.size() - 1) {
-          throw new IllegalArgumentException(
-              "the terminal user-like command must be the final HTTP command");
+          throw DomainException.validation(
+              "request", "the terminal user-like command must be the final HTTP command");
         }
         continue;
       }
       int order = prefixOrder.indexOf(type);
       if (order <= lastSetOrder) {
-        throw new IllegalArgumentException(
-            "HTTP commands must use SET_AGENT, SET_EXECUTION, SET_ENVIRONMENT order");
+        throw DomainException.validation(
+            "request", "HTTP commands must use SET_AGENT, SET_EXECUTION, SET_ENVIRONMENT order");
       }
       lastSetOrder = order;
     }
     if (requireUserLike ? userLikeCount != 1 : userLikeCount > 1) {
-      throw new IllegalArgumentException(
+      throw DomainException.validation(
+          "request",
           requireUserLike
               ? "HTTP command batch must contain exactly one USER_MESSAGE or GOAL command"
               : "HTTP command batch may contain at most one USER_MESSAGE or GOAL command");
@@ -343,7 +372,7 @@ public final class HarnessRuntimeRequestMapper {
       HarnessCommandCreateDTO.UserMessageDTO command) {
     List<HarnessUserMessageContentDTO> required = requireList(command.contents(), "contents");
     if (required.isEmpty()) {
-      throw new IllegalArgumentException("contents must not be empty");
+      throw DomainException.validation("request", "contents must not be empty");
     }
     List<AgentMessageContent> mapped = new ArrayList<>(required.size());
     for (int i = 0; i < required.size(); i++) {
@@ -355,18 +384,22 @@ public final class HarnessRuntimeRequestMapper {
   private static AgentMessageContent toUserMessageContent(
       HarnessUserMessageContentDTO dto, int index) {
     String context = "contents[" + index + "]";
-    return switch (dto) {
-      case HarnessUserMessageContentDTO.TextDTO content -> new TextMessageContent(
-          requireText(content.text(), context + ".text"));
-      case HarnessUserMessageContentDTO.AttachmentDTO content -> new AttachmentMessageContent(
-          Uuids.parseCanonical(content.uploadId(), context + ".uploadId"),
-          toImageTier(content.imageTier(), context));
-      case HarnessUserMessageContentDTO.ResourceDTO content -> ResourceMessageContent.media(
-          Uuids.parseCanonical(content.blobId(), context + ".blobId"),
-          requireText(content.name(), context + ".name"),
-          content.preview(),
-          toImageTier(content.imageTier(), context));
-    };
+    return validation(
+        "contents",
+        () ->
+            switch (dto) {
+              case HarnessUserMessageContentDTO.TextDTO content -> new TextMessageContent(
+                  requireText(content.text(), context + ".text"));
+              case HarnessUserMessageContentDTO.AttachmentDTO
+              content -> new AttachmentMessageContent(
+                  parseUuid(content.uploadId(), context + ".uploadId"),
+                  toImageTier(content.imageTier(), context));
+              case HarnessUserMessageContentDTO.ResourceDTO content -> ResourceMessageContent.media(
+                  parseUuid(content.blobId(), context + ".blobId"),
+                  requireText(content.name(), context + ".name"),
+                  content.preview(),
+                  toImageTier(content.imageTier(), context));
+            });
   }
 
   /**
@@ -387,34 +420,68 @@ public final class HarnessRuntimeRequestMapper {
 
   private static String requireText(String value, String field) {
     if (value == null || value.isBlank()) {
-      throw new IllegalArgumentException(field + " must not be blank");
+      throw DomainException.validation("request", field + " must not be blank");
     }
     return value;
   }
 
   private static boolean requireBoolean(Boolean value, String field) {
     if (value == null) {
-      throw new IllegalArgumentException(field + " must not be null");
+      throw DomainException.validation("request", field + " must not be null");
     }
     return value;
   }
 
   private static <T> T requireNonNull(T value, String field) {
     if (value == null) {
-      throw new IllegalArgumentException(field + " must not be null");
+      throw DomainException.validation("request", field + " must not be null");
     }
     return value;
   }
 
   private static <T> List<T> requireList(List<T> value, String field) {
     if (value == null) {
-      throw new IllegalArgumentException(field + " must not be null");
+      throw DomainException.validation("request", field + " must not be null");
     }
     for (T element : value) {
       if (element == null) {
-        throw new IllegalArgumentException(field + " must not contain null elements");
+        throw DomainException.validation("request", field + " must not contain null elements");
       }
     }
     return List.copyOf(value);
+  }
+
+  private static UUID parseUuid(String value, String field) {
+    try {
+      return Uuids.parseCanonical(value, field);
+    } catch (IllegalArgumentException error) {
+      throw DomainException.validation("request", error.getMessage(), error);
+    }
+  }
+
+  private static long parseNonNegativeLong(String value, String field) {
+    try {
+      return DecimalLongs.parseNonNegative(value, field);
+    } catch (IllegalArgumentException error) {
+      throw DomainException.validation("request", error.getMessage(), error);
+    }
+  }
+
+  private static long parsePositiveLong(String value, String field) {
+    try {
+      return DecimalLongs.parsePositive(value, field);
+    } catch (IllegalArgumentException error) {
+      throw DomainException.validation("request", error.getMessage(), error);
+    }
+  }
+
+  private static <T> T validation(String resource, Supplier<T> construction) {
+    try {
+      return construction.get();
+    } catch (DomainException error) {
+      throw error;
+    } catch (IllegalArgumentException error) {
+      throw DomainException.validation(resource, error.getMessage(), error);
+    }
   }
 }

@@ -22,7 +22,7 @@ import java.util.List;
 import java.util.UUID;
 
 /** Thread 的 Tool approval 人工决策端点。 */
-class StudioHarnessThreadApprovalControllerTest extends HarnessThreadControllerTestSupport {
+class HarnessThreadControllerApprovalTest extends HarnessThreadControllerTestSupport {
 
   /** 测试意图：审批身份只能来自服务端认证主体。请求体携带 actor（无论伪造与否）都是未知字段 → 400，且绝不触达交互服务。 */
   @Test

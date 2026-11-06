@@ -4,6 +4,7 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
+import fun.fengwk.kkstudio.common.json.JsonValues;
 import fun.fengwk.kkstudio.harness.api.interaction.PendingEnvironmentWait;
 import fun.fengwk.kkstudio.harness.api.interaction.PendingEnvironmentWaitPage;
 import fun.fengwk.kkstudio.harness.api.interaction.PendingInteraction;
@@ -274,7 +275,7 @@ public class InteractionQueryService {
           interaction.toolCallId(),
           interaction.toolName(),
           interaction.argumentsJson(),
-          interaction.approvalJson(),
+          JsonValues.readTree(interaction.approvalJson()),
           interaction.createdAt());
     }
     return new InteractionDTO.Input(

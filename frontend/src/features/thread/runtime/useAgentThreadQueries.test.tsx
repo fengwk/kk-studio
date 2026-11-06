@@ -28,13 +28,13 @@ function snapshot(id = ROOT, overrides: Partial<ToolInvocationDTO> = {}): Harnes
       createdAt: 0, updatedAt: 0,
     },
     baseEntryId: null,
-    entries: [], queuedCommands: [], executionStatus: 'IDLE', activeAssistantOutput: null, generationFailures: [], stopReceipts: [], unconfirmedExecutions: [],
+    entries: [], queuedCommands: [], activeAssistantOutput: null, generationFailures: [], stopReceipts: [], unconfirmedExecutions: [],
     toolInvocations: [{
       id: 'tool', threadId: 'thread', turnStartEntryId: 'turn', assistantEntryId: 'entry', callIndex: 0,
       status: 'READY', attempt: 1, toolCallId: 'call', toolName: 'bash', rendererKey: 'bash',
       environmentId: null, requiredEnvironmentId: 'frozen-environment',
       requiredEnvironmentName: 'archlinux', waitingForEnvironment: true, environmentWaitFreshnessAt: null,
-      argumentsJson: '{"command":"pwd"}', approvalJson: null, resultJson: null, errorJson: null,
+      argumentsJson: '{"command":"pwd"}', approval: null, result: null, error: null,
       createdAt: 0, updatedAt: 0, ...overrides,
     }],
   }

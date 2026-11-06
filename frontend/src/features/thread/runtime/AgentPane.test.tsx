@@ -391,7 +391,6 @@ function snapshot(
     baseEntryId: null,
     entries: [],
     queuedCommands: [],
-    executionStatus: 'IDLE',
     activeAssistantOutput: null,
     toolInvocations: [],
     generationFailures: [],
@@ -407,7 +406,7 @@ function pendingInvocation(): ToolInvocationDTO {
     status: 'READY', attempt: 1, toolCallId: 'call-1', toolName: 'bash', rendererKey: 'bash',
     environmentId: null, requiredEnvironmentId: 'frozen-env', waitingForEnvironment: false,
     requiredEnvironmentName: 'archlinux', environmentWaitFreshnessAt: null,
-    argumentsJson: '{"command":"pwd"}', approvalJson: null, resultJson: null, errorJson: null,
+    argumentsJson: '{"command":"pwd"}', approval: null, result: null, error: null,
     createdAt: 0, updatedAt: 0,
   }
 }
@@ -418,7 +417,7 @@ function acceptedResponse(currentThread = thread()) {
     sessionId: currentThread.sessionId,
     parentEntryId: null,
     entryType: 'ROOT',
-    payloadJson: '{}',
+    payload: '{}',
     createdAt: 0,
     usageCost: null,
   }
@@ -591,7 +590,7 @@ function approvalInteraction(threadId: string): InteractionDTO {
     toolCallId: 'call-bash-1',
     toolName: 'bash',
     argumentsJson: '{"command":"ls"}',
-    approvalJson: JSON.stringify({ reason: '需要确认', decision: null }),
+    approval: JSON.stringify({ reason: '需要确认', decision: null }),
     createdAt: 1785232801000,
   }
 }
@@ -599,24 +598,24 @@ function approvalInteraction(threadId: string): InteractionDTO {
 describe('AgentPane orchestration', () => {
   const historyRoot: HarnessSessionEntryDTO = {
     entryId: 'draft-root', sessionId: 'session-1', parentEntryId: null, entryType: 'ROOT',
-    payloadJson: JSON.stringify({ settings: {
+    payload: JSON.stringify({ settings: {
       agentName: 'assistant', model: { modelName: 'MiniMax', variant: 'default' }, environmentName: null,
     } }), createdAt: 0,
     usageCost: null,
   }
   const historyMessage: HarnessSessionEntryDTO = {
     ...historyRoot, entryId: 'draft-message', parentEntryId: 'draft-root', entryType: 'MESSAGE',
-    payloadJson: JSON.stringify({ message: { role: 'USER', contents: [{ type: 'text', text: 'Selected ancestor text' }] } }),
+    payload: JSON.stringify({ message: { role: 'USER', contents: [{ type: 'text', text: 'Selected ancestor text' }] } }),
   }
   const historyEnd: HarnessSessionEntryDTO = {
-    ...historyRoot, entryId: 'draft-end', parentEntryId: 'draft-message', entryType: 'TURN_END', payloadJson: '{"outcome":"COMPLETED"}',
+    ...historyRoot, entryId: 'draft-end', parentEntryId: 'draft-message', entryType: 'TURN_END', payload: '{"outcome":"COMPLETED"}',
   }
   const historyEntries = [historyRoot, historyMessage, historyEnd, {
     ...historyMessage, entryId: 'future', parentEntryId: 'draft-end',
-    payloadJson: JSON.stringify({ message: { role: 'USER', contents: [{ type: 'text', text: 'Future hidden text' }] } }),
+    payload: JSON.stringify({ message: { role: 'USER', contents: [{ type: 'text', text: 'Future hidden text' }] } }),
   }, {
     ...historyMessage, entryId: 'sibling', parentEntryId: 'draft-root',
-    payloadJson: JSON.stringify({ message: { role: 'USER', contents: [{ type: 'text', text: 'Sibling hidden text' }] } }),
+    payload: JSON.stringify({ message: { role: 'USER', contents: [{ type: 'text', text: 'Sibling hidden text' }] } }),
   }]
   function seedHistoryDraft(startEntryId = 'draft-end') {
     localStorage.setItem(`kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`, JSON.stringify({
@@ -806,7 +805,7 @@ describe('AgentPane orchestration', () => {
     const user = userEvent.setup()
     vi.mocked(harnessService.listSessionEntries).mockResolvedValue(entryPage([{
       entryId: 'entry-1', sessionId: 'session-1', parentEntryId: null,
-      entryType: 'ROOT', payloadJson: '{}', createdAt: 0,
+      entryType: 'ROOT', payload: '{}', createdAt: 0,
       usageCost: null,
     }]))
     localStorage.setItem(
@@ -1098,7 +1097,7 @@ describe('AgentPane orchestration', () => {
       sessionId: 'session-1',
       parentEntryId: null,
       entryType: 'ROOT',
-      payloadJson: '{}',
+      payload: '{}',
       createdAt: 0,
       usageCost: null,
     }
@@ -1211,7 +1210,7 @@ describe('AgentPane orchestration', () => {
         sessionId: 'session-1',
         parentEntryId: null,
         entryType: 'ROOT',
-        payloadJson: '{}',
+        payload: '{}',
         createdAt: 0,
         usageCost: null,
       },
@@ -1220,7 +1219,7 @@ describe('AgentPane orchestration', () => {
         sessionId: 'session-1',
         parentEntryId: 'entry-1',
         entryType: 'TURN_END',
-        payloadJson: JSON.stringify({ status: 'TURN_END', turnId: 'turn-2' }),
+        payload: JSON.stringify({ status: 'TURN_END', turnId: 'turn-2' }),
         createdAt: 0,
         usageCost: null,
       },
@@ -1229,7 +1228,7 @@ describe('AgentPane orchestration', () => {
         sessionId: 'session-1',
         parentEntryId: 'entry-2',
         entryType: 'MESSAGE',
-        payloadJson: JSON.stringify({ message: { role: 'AGENT', contents: [] } }),
+        payload: JSON.stringify({ message: { role: 'AGENT', contents: [] } }),
         createdAt: 0,
         usageCost: null,
       },
@@ -1478,7 +1477,7 @@ describe('AgentPane orchestration', () => {
       sessionId: 'session-1',
       parentEntryId: null,
       entryType: 'ROOT',
-      payloadJson: JSON.stringify({
+      payload: JSON.stringify({
         settings: {
           agentName: 'assistant',
           model: { modelName: 'MiniMax', variant: 'default' },
@@ -1493,7 +1492,7 @@ describe('AgentPane orchestration', () => {
       sessionId: 'session-1',
       parentEntryId: null,
       entryType: 'ROOT',
-      payloadJson: JSON.stringify({ settings: {} }),
+      payload: JSON.stringify({ settings: {} }),
       createdAt: 0,
       usageCost: null,
     }))
@@ -1967,7 +1966,7 @@ describe('AgentPane orchestration', () => {
       sessionId: 'session-1',
       parentEntryId: null,
       entryType: 'ROOT',
-      payloadJson: '{}',
+      payload: '{}',
       createdAt: 0,
       usageCost: null,
     }]))
@@ -2210,7 +2209,7 @@ describe('AgentPane orchestration', () => {
           type: 'USER_MESSAGE',
           state: 'QUEUED',
           idempotencyKey: 'queued-1',
-          payloadJson: JSON.stringify({
+          payload: JSON.stringify({
             message: { role: 'USER', contents: [{ type: 'text', text: '排队中' }] },
           }),
           cancelledAt: null,
@@ -2298,7 +2297,7 @@ describe('AgentPane orchestration', () => {
       sessionId: 'session-1',
       parentEntryId: null,
       entryType: 'ROOT',
-      payloadJson: '{}',
+      payload: '{}',
       createdAt: 0,
       usageCost: null,
     }))
@@ -2584,7 +2583,7 @@ describe('AgentPane orchestration', () => {
               sequence: '1',
               idempotencyKey: 'c1',
               type: 'USER_MESSAGE',
-              payloadJson:
+              payload:
                 '{"message":{"role":"USER","contents":[{"type":"text","text":"cancelled draft"}]}}',
             },
           ],
@@ -2947,7 +2946,7 @@ describe('TURN_END 绑定与 Debug 只读退出', () => {
       sessionId: 'session-1',
       parentEntryId: 'entry-1',
       entryType: 'TURN_END',
-      payloadJson: JSON.stringify({ outcome: 'COMPLETED' }),
+      payload: JSON.stringify({ outcome: 'COMPLETED' }),
       createdAt: 0,
       usageCost: null,
     }))
@@ -2972,7 +2971,7 @@ describe('TURN_END 绑定与 Debug 只读退出', () => {
         sessionId: 'session-1',
         parentEntryId: null,
         entryType: 'ROOT',
-        payloadJson: JSON.stringify({
+        payload: JSON.stringify({
           settings: {
             agentName: 'assistant',
             model: { modelName: 'model-1', variant: 'default' },
@@ -2987,7 +2986,7 @@ describe('TURN_END 绑定与 Debug 只读退出', () => {
         sessionId: 'session-1',
         parentEntryId: 'entry-root',
         entryType: 'MESSAGE',
-        payloadJson: JSON.stringify({
+        payload: JSON.stringify({
           message: { role: 'USER', contents: [{ type: 'text', text: 'first prompt' }] },
         }),
         createdAt: 0,
@@ -2998,7 +2997,7 @@ describe('TURN_END 绑定与 Debug 只读退出', () => {
         sessionId: 'session-1',
         parentEntryId: 'entry-user-1',
         entryType: 'TURN_END',
-        payloadJson: JSON.stringify({ turnStartEntryId: 'entry-root', outcome: 'COMPLETED', continueModel: false }),
+        payload: JSON.stringify({ turnStartEntryId: 'entry-root', outcome: 'COMPLETED', continueModel: false }),
         createdAt: 0,
         usageCost: null,
       },
@@ -3117,7 +3116,7 @@ describe('branchDraftFromEntry environment replay', () => {
       sessionId: 's1',
       parentEntryId,
       entryType: 'MESSAGE',
-      payloadJson: JSON.stringify(payload),
+      payload: JSON.stringify(payload),
       createdAt: 1767225600,
       usageCost: null,
     }
@@ -3319,7 +3318,7 @@ function previewResponse(overrides: Partial<HarnessProviderRequestPreviewDTO> = 
           sessionId: 'session-1',
           parentEntryId: null,
           entryType: 'ROOT',
-          payloadJson: '{}',
+          payload: '{}',
           createdAt: 0,
           usageCost: null,
         },
@@ -3328,7 +3327,7 @@ function previewResponse(overrides: Partial<HarnessProviderRequestPreviewDTO> = 
           sessionId: 'session-1',
           parentEntryId: 'entry-root',
           entryType: 'TURN_END',
-          payloadJson: JSON.stringify({ outcome: 'COMPLETED' }),
+          payload: JSON.stringify({ outcome: 'COMPLETED' }),
           createdAt: 0,
           usageCost: null,
         },
@@ -3584,7 +3583,7 @@ function previewResponse(overrides: Partial<HarnessProviderRequestPreviewDTO> = 
           sessionId: 's-1',
           parentEntryId: null,
           entryType: 'MESSAGE',
-          payloadJson: '{}',
+          payload: '{}',
           createdAt: 0,
           usageCost: null,
         })
@@ -4691,7 +4690,6 @@ describe('AgentPane root control mounting', () => {
       'activeAssistantOutput',
       'baseEntryId',
       'entries',
-      'executionStatus',
       'generationFailures',
       'queuedCommands',
       'stopReceipts',
@@ -4882,7 +4880,7 @@ describe('AgentPane root control mounting', () => {
       sessionId: 'session-1',
       parentEntryId: null,
       entryType: 'MESSAGE',
-      payloadJson: JSON.stringify({
+      payload: JSON.stringify({
         message: {
           role: 'USER',
           contents: [
@@ -4945,7 +4943,7 @@ describe('AgentPane root control mounting', () => {
         type: 'USER_MESSAGE',
         state: 'QUEUED',
         idempotencyKey: 'queued-1',
-        payloadJson: JSON.stringify({
+        payload: JSON.stringify({
           message: { role: 'USER', contents: [{ type: 'text', text: '排队中的输入' }] },
         }),
         cancelledAt: null,
@@ -5050,7 +5048,7 @@ describe('AgentPane root control mounting', () => {
       sessionId: 'session-1',
       parentEntryId: null,
       entryType: 'ROOT',
-      payloadJson: '{}',
+      payload: '{}',
       createdAt: 0,
       usageCost: null,
     }]))
@@ -5128,7 +5126,7 @@ describe('AgentPane root control mounting', () => {
         sessionId: 'session-1',
         parentEntryId: null,
         entryType: 'MESSAGE',
-        payloadJson: JSON.stringify({
+        payload: JSON.stringify({
           message: { role: 'USER', contents: [{ type: 'text', text: '已有历史' }] },
         }),
         createdAt: 1785229200,

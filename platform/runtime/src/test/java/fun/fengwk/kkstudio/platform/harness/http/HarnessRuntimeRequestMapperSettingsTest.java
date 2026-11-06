@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
@@ -43,7 +44,7 @@ class HarnessRuntimeRequestMapperSettingsTest {
         new HarnessCommandTargetDTO.NewSessionDTO(
             target.sessionId(), target.threadId(), null, target.yoloEnabled());
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () ->
             HarnessRuntimeRequestMapper.toAcceptCommandsCommand(
                 request(missingSettings, userCommand("missing"))));
@@ -52,7 +53,7 @@ class HarnessRuntimeRequestMapperSettingsTest {
         (HarnessCommandTargetDTO.NewSessionDTO) newSessionTarget();
     invalid.rootSettings().setEnvironmentName("a/b");
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () ->
             HarnessRuntimeRequestMapper.toAcceptCommandsCommand(
                 request(invalid, userCommand("bad"))));
@@ -79,7 +80,7 @@ class HarnessRuntimeRequestMapperSettingsTest {
 
     // model 必填。
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () ->
             HarnessRuntimeRequestMapper.toModelRequestDebugSelection(
                 new HarnessModelRequestDebugRequestDTO()));
@@ -90,7 +91,7 @@ class HarnessRuntimeRequestMapperSettingsTest {
     blankModel.setVariant(" ");
     blankVariant.setModel(blankModel);
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () -> HarnessRuntimeRequestMapper.toModelRequestDebugSelection(blankVariant));
 
     // Environment name 复用 branch canonical 规则。
@@ -98,12 +99,12 @@ class HarnessRuntimeRequestMapperSettingsTest {
     badEnvironment.setModel(modelSelection());
     badEnvironment.setEnvironmentName("a/b");
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () -> HarnessRuntimeRequestMapper.toModelRequestDebugSelection(badEnvironment));
 
     // 请求本身为 null 也必须 fail closed。
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () -> HarnessRuntimeRequestMapper.toModelRequestDebugSelection(null));
   }
 }

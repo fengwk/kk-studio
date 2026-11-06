@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.platform.harness.dto;
 import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import org.jspecify.annotations.Nullable;
+import tools.jackson.databind.JsonNode;
 
 import java.time.Instant;
 
@@ -14,7 +15,7 @@ import java.time.Instant;
  *       是原始调用主键， 可经 {@code POST
  *       /api/harness/threads/{threadId}/tool-invocations/{toolInvocationId}/input} 提交问卷；
  *   <li>{@code APPROVAL}：等待审批的 {@code WAITING_APPROVAL} ToolInvocation；{@code toolInvocationId}
- *       是原始调用主键，携带 durable {@code approvalJson}；
+ *       是原始调用主键，携带 durable {@code approval}；
  *   <li>{@code ENVIRONMENT_WAIT}：按 {@code (真实执行根, 所需环境)} 聚合的一组待领取 TOOL 调用的只读投影。它没有可操作的调用
  *       主键、状态或审批事实，只有 {@code environmentId} / {@code environmentName} / {@code
  *       waitingCount}；排序/游标代表是最早未完成调用，但绝不冒充可操作的 interaction。
@@ -55,7 +56,7 @@ public sealed interface InteractionDTO
       Instant createdAt)
       implements InteractionDTO {}
 
-  /** 等待审批的 ToolInvocation；{@code approvalJson} 是冻结的审批载荷。 */
+  /** 等待审批的 ToolInvocation；{@code approval} 是冻结的审批载荷。 */
   record Approval(
       String toolInvocationId,
       String threadId,
@@ -65,7 +66,7 @@ public sealed interface InteractionDTO
       String toolCallId,
       String toolName,
       String argumentsJson,
-      @Nullable String approvalJson,
+      @Nullable JsonNode approval,
       Instant createdAt)
       implements InteractionDTO {}
 

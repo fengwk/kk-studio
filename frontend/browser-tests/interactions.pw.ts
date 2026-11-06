@@ -62,7 +62,7 @@ function buildItems(): InteractionDTO[] {
       toolCallId: 'call-approval',
       toolName: 'bash',
       argumentsJson: LONG_ARGUMENTS,
-      approvalJson: JSON.stringify({ required: true, reason: LONG_REASON }),
+      approval: { required: true, reason: LONG_REASON },
       createdAt: 1791194220000,
     },
     {

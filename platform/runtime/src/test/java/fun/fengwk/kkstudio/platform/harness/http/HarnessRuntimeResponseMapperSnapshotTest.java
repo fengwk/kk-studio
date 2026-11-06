@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.common.json.JsonValues;
 import fun.fengwk.kkstudio.common.json.StrictJson;
 import fun.fengwk.kkstudio.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
@@ -189,9 +190,9 @@ class HarnessRuntimeResponseMapperSnapshotTest {
     assertEquals("bash", boundDto.getToolName());
     assertEquals("bash", boundDto.getRendererKey());
     assertEquals("11111111-1111-1111-1111-111111111111", boundDto.getEnvironmentId());
-    assertEquals(approval, new ToolApprovalJsonCodec().decode(boundDto.getApprovalJson()));
-    assertEquals(result, ToolResultJsonCodec.decode(boundDto.getResultJson()));
-    assertNull(boundDto.getErrorJson());
+    assertEquals(approval, new ToolApprovalJsonCodec().decodeNode(boundDto.getApproval()));
+    assertEquals(result, ToolResultJsonCodec.decode(JsonValues.write(boundDto.getResult())));
+    assertNull(boundDto.getError());
 
     ToolInvocationError error = new ToolInvocationError("FAILED", "unknown tool");
     ToolInvocation unbound =
@@ -200,11 +201,11 @@ class HarnessRuntimeResponseMapperSnapshotTest {
 
     assertEquals("tool", unboundDto.getRendererKey());
     assertNull(unboundDto.getEnvironmentId());
-    assertNull(unboundDto.getApprovalJson());
-    assertNull(unboundDto.getResultJson());
+    assertNull(unboundDto.getApproval());
+    assertNull(unboundDto.getResult());
     assertEquals(
         error,
-        StrictJson.standard().read(unboundDto.getErrorJson(), ToolInvocationError.class, "error"));
+        StrictJson.standard().read(unboundDto.getError(), ToolInvocationError.class, "error"));
     assertEquals(idText(100), unboundDto.getId());
     assertEquals(idText(10), unboundDto.getThreadId());
     assertEquals(idText(11), unboundDto.getTurnStartEntryId());

@@ -59,7 +59,7 @@ Environment、Settings 与 Catalog 的实体仓库直接以 `JdbcClient` 承担 
 | [i18n](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/i18n) | 请求 locale 的用户可见消息解析 `MessageService`；资源包随本模块发布，中英文缺键回退固定 |
 
 Harness HTTP DTO 的 wire 契约由
-[`HarnessRuntimeDtoContractTest`](../../platform/runtime/src/test/java/fun/fengwk/kkstudio/platform/harness/dto/HarnessRuntimeDtoContractTest.java)
+[`HarnessHttpDtoContractTest`](../../platform/runtime/src/test/java/fun/fengwk/kkstudio/platform/harness/dto/HarnessHttpDtoContractTest.java)
 锁定：sealed union 的 discriminator 与 explicit null、固定枚举、最终字段名，以及请求未知字段的 fail-closed 行为。
 
 ## Harness 持久化与调度

@@ -478,7 +478,7 @@ registerCase({
   id: 'thread.user_message_strict_wire',
   level: 'L1',
   title: 'USER_MESSAGE 严格结构化 contents 与 exact replay',
-  docs: 'USER_MESSAGE 只接受一个非空有序 contents 列表（TEXT/ATTACHMENT/RESOURCE）；本免费 case 覆盖 TEXT 正向与 text/content shorthand、role、未知字段、空 contents、IMAGE/AUDIO/VIDEO、非 canonical uploadId、TEXT 携带 imageTier 与非法 imageTier 名等非法 shape；RESOURCE 正向与 Session ownership 由 chat.attachment_upload_contract 覆盖。202 payloadJson 是 canonical AgentMessage；同 batch exact replay 返回既有命令（sequence/payloadJson 稳定）',
+  docs: 'USER_MESSAGE 只接受一个非空有序 contents 列表（TEXT/ATTACHMENT/RESOURCE）；本免费 case 覆盖 TEXT 正向与 text/content shorthand、role、未知字段、空 contents、IMAGE/AUDIO/VIDEO、非 canonical uploadId、TEXT 携带 imageTier 与非法 imageTier 名等非法 shape；RESOURCE 正向与 Session ownership 由 chat.attachment_upload_contract 覆盖。202 payload 是 canonical AgentMessage；同 batch exact replay 返回既有命令（sequence/payload 稳定）',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -543,8 +543,8 @@ registerCase({
       assert(
         String(replayAccepted.acceptedCommands[0].sequence)
           === String(acceptedList.at(-1).sequence)
-          && String(replayAccepted.acceptedCommands[0].payloadJson)
-            === String(acceptedList.at(-1).payloadJson),
+          && JSON.stringify(replayAccepted.acceptedCommands[0].payload)
+            === JSON.stringify(acceptedList.at(-1).payload),
         `replay must return the existing command: ${JSON.stringify({
           original: acceptedList.at(-1),
           replay: replayAccepted.acceptedCommands[0],
@@ -562,12 +562,12 @@ registerCase({
     assert(commandsDto.every((item) => item.type === 'USER_MESSAGE' && item.state === 'QUEUED'), JSON.stringify(commandsDto))
     assert(commandsDto.every((item) => String(item.threadId) === threadId), JSON.stringify(commandsDto))
     assert(commandsDto.every((item) => /^[1-9]\d*$/.test(String(item.sequence))), JSON.stringify(commandsDto))
-    const payload = JSON.parse(commandsDto[0].payloadJson)
+    const payload = commandsDto[0].payload
     assert(
       isDeepStrictEqual(payload, { message: { role: 'USER', contents: [{ type: 'text', text: 'strict wire probe' }] } }),
       `USER_MESSAGE payload must be the canonical AgentMessage: ${JSON.stringify(payload)}`,
     )
-    const structuredPayload = JSON.parse(commandsDto[1].payloadJson)
+    const structuredPayload = commandsDto[1].payload
     assert(
       isDeepStrictEqual(structuredPayload, {
         message: {
@@ -580,7 +580,7 @@ registerCase({
       }),
       `structured USER_MESSAGE payload must be canonical: ${JSON.stringify(structuredPayload)}`,
     )
-    const secondPayload = JSON.parse(commandsDto[2].payloadJson)
+    const secondPayload = commandsDto[2].payload
     assert(
       isDeepStrictEqual(secondPayload, {
         message: { role: 'USER', contents: [{ type: 'text', text: 'second probe' }] },
@@ -807,7 +807,7 @@ registerCase({
     assert(replay.replayed === true, JSON.stringify(replay))
     assert(
       String(replay.acceptedCommands[0].sequence) === String(first.acceptedCommands[0].sequence)
-        && String(replay.acceptedCommands[0].payloadJson) === String(first.acceptedCommands[0].payloadJson),
+        && JSON.stringify(replay.acceptedCommands[0].payload) === JSON.stringify(first.acceptedCommands[0].payload),
       `replay must return the existing command: ${JSON.stringify({ first, replay })}`,
     )
     // 部分重放：HTTP 面 shape 限制一个 batch 恰一条 USER_MESSAGE，因此用
@@ -1015,7 +1015,7 @@ registerCase({
     assert(
       branchedEntries.some((entry) => {
         if (String(entry.entryType || '').toUpperCase() !== 'MESSAGE') return false
-        const message = JSON.parse(entry.payloadJson).message
+        const message = entry.payload.message
         return (
           message?.role === 'USER'
           && (message.contents || []).some(
@@ -1036,7 +1036,7 @@ registerCase({
       String(forkEntry.parentEntryId) === startEntryId,
       `FORK entry parent must be the fork cut ${startEntryId}: ${JSON.stringify(forkEntry)}`,
     )
-    const forkPayload = JSON.parse(forkEntry.payloadJson)
+    const forkPayload = forkEntry.payload
     assert(
       forkPayload.mode === 'BRANCH'
         && String(forkPayload.sourceEntryId) === startEntryId
@@ -1178,7 +1178,7 @@ registerCase({
     const entries = await listSessionEntries(ctx, sessionId)
     const entryText = (entry) => {
       if (String(entry.entryType || '').toUpperCase() !== 'MESSAGE') return ''
-      const message = JSON.parse(entry.payloadJson).message
+      const message = entry.payload.message
       return (message?.contents || [])
         .filter((content) => content?.type === 'text')
         .map((content) => content.text)
@@ -1198,7 +1198,7 @@ registerCase({
     // 分支 fork 在切点后追加 FORK 事实节点：分支 TURN_START 挂在 FORK 上，FORK 再挂回切点；
     // 原分支继续直接从切点展开。两条历史分支不共享同一 TURN_START。
     const alternateFork = alternateTurnStart ? byId.get(alternateTurnStart.parentEntryId) : null
-    const alternateForkPayload = alternateFork ? JSON.parse(alternateFork.payloadJson) : null
+    const alternateForkPayload = alternateFork?.payload ?? null
     assert(
       originalTurnStart?.entryType === 'TURN_START'
         && alternateTurnStart?.entryType === 'TURN_START'
@@ -1419,7 +1419,7 @@ registerCase({
       barrierEnd && String(barrierEnd.entryType || '').toUpperCase() === 'TURN_END',
       `missing stop barrier TURN_END: ${JSON.stringify(entries)}`,
     )
-    const barrierEndPayload = JSON.parse(barrierEnd.payloadJson)
+    const barrierEndPayload = barrierEnd.payload
     assert(
       barrierEndPayload.outcome === 'STOPPED'
         && barrierEndPayload.reason === 'USER_STOP'
@@ -1434,7 +1434,7 @@ registerCase({
       barrierStart && String(barrierStart.entryType || '').toUpperCase() === 'TURN_START',
       `missing stop barrier TURN_START: ${JSON.stringify(entries)}`,
     )
-    const barrierStartPayload = JSON.parse(barrierStart.payloadJson)
+    const barrierStartPayload = barrierStart.payload
     assert(
       barrierStartPayload.reason === 'STOP'
         && String(barrierStartPayload.ownerThreadId) === String(threadId),
@@ -1447,7 +1447,7 @@ registerCase({
       barrierCancel
         && String(barrierCancel.entryType || '').toUpperCase() === 'ASSISTANT_ERROR'
         && String(barrierCancel.parentEntryId) === String(barrierStart.entryId)
-        && JSON.parse(barrierCancel.payloadJson).error?.code === 'CANCELLED',
+        && barrierCancel.payload.error?.code === 'CANCELLED',
       `stop barrier must carry one CANCELLED ASSISTANT_ERROR: ${JSON.stringify(entries)}`,
     )
 
@@ -1746,13 +1746,13 @@ registerCase({
     // AssistantError(PLANNING_FAILED)，不能让 USER MESSAGE 自身满足消费证据。
     const userEntry = finalSnapshot.entries.find((entry) => {
       if (String(entry.entryType || '').toUpperCase() !== 'MESSAGE') return false
-      const message = JSON.parse(entry.payloadJson).message
+      const message = entry.payload.message
       return message?.role === 'USER' && JSON.stringify(message).includes(marker)
     })
     assert(userEntry, `USER entry missing: ${JSON.stringify(finalSnapshot.entries)}`)
     const planningError = finalSnapshot.entries.find((entry) => {
       if (String(entry.entryType || '').toUpperCase() !== 'ASSISTANT_ERROR') return false
-      const error = JSON.parse(entry.payloadJson).error
+      const error = entry.payload.error
       return error?.code === 'PLANNING_FAILED' && String(error?.message || '').includes(missingAgentName)
     })
     assert(
@@ -1763,7 +1763,7 @@ registerCase({
       (entry) => String(entry.entryType || '').toUpperCase() === 'TURN_END',
     )
     assert(turnEndEntries.length >= 1, `expected at least one TURN_END: ${JSON.stringify(finalSnapshot.entries)}`)
-    const lastTurnEnd = JSON.parse(turnEndEntries.at(-1).payloadJson)
+    const lastTurnEnd = turnEndEntries.at(-1).payload
     assert(
       lastTurnEnd.outcome === 'FAILED' && lastTurnEnd.continueModel === false,
       `expected the final TURN_END to converge: ${JSON.stringify(lastTurnEnd)}`,

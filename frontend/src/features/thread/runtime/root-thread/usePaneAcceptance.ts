@@ -334,7 +334,6 @@ export function usePaneAcceptance(options: PaneAcceptanceOptions) {
       baseEntryId: null,
       entries: isDraftHistoryTarget(targetRef.current) ? draftHistoryEntries : [],
       queuedCommands: response.acceptedCommands,
-      executionStatus: 'IDLE',
       activeAssistantOutput: null,
       toolInvocations: [],
       generationFailures: [],

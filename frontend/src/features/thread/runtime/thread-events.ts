@@ -122,24 +122,38 @@ function withRawPayload(
 ): ThreadEventRecord {
   return {
     ...record,
-    summary: compactJson(entry.payloadJson || '{}'),
-    rawJson: prettyJson(entry.payloadJson || '{}'),
+    summary: compactJson(entry.payload),
+    rawJson: prettyJson(entry.payload),
   }
 }
 
-function compactJson(raw: string): string {
+function compactJson(value: unknown): string {
+  if (typeof value === 'string') {
+    try {
+      return JSON.stringify(JSON.parse(value))
+    } catch {
+      return value.replace(/\s+/g, ' ').trim() || '{}'
+    }
+  }
   try {
-    return JSON.stringify(JSON.parse(raw))
+    return JSON.stringify(value) ?? '{}'
   } catch {
-    return raw.replace(/\s+/g, ' ').trim() || '{}'
+    return '{}'
   }
 }
 
-function prettyJson(raw: string): string {
+function prettyJson(value: unknown): string {
+  if (typeof value === 'string') {
+    try {
+      return JSON.stringify(JSON.parse(value), null, 2)
+    } catch {
+      return value
+    }
+  }
   try {
-    return JSON.stringify(JSON.parse(raw), null, 2)
+    return JSON.stringify(value, null, 2) ?? '{}'
   } catch {
-    return raw
+    return '{}'
   }
 }
 
@@ -236,7 +250,7 @@ export function buildThreadEventTimeline(
       pendingUsage = null
     }
     turnStartByEntryId.set(entry.entryId, currentTurnStartEntryId)
-    const payload = parsePayload(entry.payloadJson)
+    const payload = parsePayload(entry.payload)
     records.push(
       withRawPayload(
         projectEntryRecord(entry, payload, {
@@ -398,7 +412,7 @@ function projectEntryRecord(
     turnStartEntryId: turn.turnStartEntryId,
     turnNumber: turn.turnNumber,
     createdAt: entry.createdAt,
-    rawJson: entry.payloadJson || '{}',
+    rawJson: prettyJson(entry.payload),
     details: baseDetails,
   }
 
@@ -858,22 +872,22 @@ function projectActiveToolRecord(
     },
     { label: translate('ai.runtime.event.detail.arguments'), value: formatDisplayJson(invocation.argumentsJson) },
   ]
-  if (invocation.approvalJson != null) {
+  if (invocation.approval != null) {
     details.push({
       label: translate('ai.runtime.event.detail.approval'),
-      value: formatDisplayJson(invocation.approvalJson),
+      value: formatDisplayJson(invocation.approval),
     })
   }
-  if (invocation.resultJson != null) {
+  if (invocation.result != null) {
     details.push({
       label: translate('ai.runtime.event.detail.result'),
-      value: formatDisplayJson(invocation.resultJson),
+      value: formatDisplayJson(invocation.result),
     })
   }
-  if (invocation.errorJson != null) {
+  if (invocation.error != null) {
     details.push({
       label: translate('ai.runtime.event.detail.error'),
-      value: formatDisplayJson(invocation.errorJson),
+      value: formatDisplayJson(invocation.error),
     })
   }
   if (stream != null) {
@@ -944,10 +958,10 @@ function activeToolStatus(
   if (stream?.error === true) {
     return 'failed'
   }
-  if (invocation.errorJson != null) {
+  if (invocation.error != null) {
     return 'failed'
   }
-  if (invocation.resultJson != null) {
+  if (invocation.result != null) {
     return 'completed'
   }
   return mapActiveStatus(invocation.status)

@@ -31,7 +31,7 @@ const input: InteractionDTO = {
 const approval: InteractionDTO = {
   ...input,
   type: 'APPROVAL',
-  approvalJson: '{}',
+  approval: '{}',
 }
 
 const environmentWait = (rootThreadId: string, environmentId: string): InteractionDTO => ({

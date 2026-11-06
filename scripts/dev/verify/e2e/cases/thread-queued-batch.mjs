@@ -630,7 +630,7 @@ function messageText(entry) {
 
 function parseEntryPayload(entry) {
   try {
-    const payload = JSON.parse(entry?.payloadJson || '{}')
+    const payload = entry?.payload ?? {}
     assert(
       payload && typeof payload === 'object' && !Array.isArray(payload),
       `expected entry payload object: ${JSON.stringify(entry)}`,

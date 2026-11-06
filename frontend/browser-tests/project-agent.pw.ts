@@ -111,14 +111,14 @@ function createThreadSnapshot() {
           parentEntryId: null,
           entryType: 'ROOT',
           // 真实 message codec：ROOT 只带一份完整 branch settings 快照（含 goal: null）。
-          payloadJson: JSON.stringify({
+          payload: {
             settings: {
               agentName: 'architect',
               execution: { driver: 'builtin', settings: { modelName: 'MiniMax-M2.7', variant: 'default' } },
               environmentName: null,
               goal: null,
             },
-          }),
+          },
           createdAt: 1789862400,
         },
         {
@@ -126,15 +126,14 @@ function createThreadSnapshot() {
           threadId: VALID_THREAD_ID,
           parentEntryId: 'e0',
           entryType: 'MESSAGE',
-          payloadJson: JSON.stringify({
+          payload: {
             message: { role: 'USER', contents: [{ type: 'text', text: '梳理鉴权模块的现有边界' }] },
-          }),
+          },
           createdAt: 1789862401,
         },
       ],
       baseEntryId: null,
       queuedCommands: [],
-      executionStatus: 'IDLE',
       activeAssistantOutput: null,
       toolInvocations: [],
       generationFailures: [],
@@ -193,9 +192,9 @@ test.describe('Project Agent Real Browser Wiring & Control Gatekeeping', () => {
                         sequence: '1',
                         idempotencyKey: 'cmd-restored-1',
                         type: 'USER_MESSAGE',
-                        payloadJson: JSON.stringify({
+                        payload: {
                           message: { role: 'USER', contents: [{ type: 'text', text: cancelledText }] },
-                        }),
+                        },
                       },
                     ],
                   },

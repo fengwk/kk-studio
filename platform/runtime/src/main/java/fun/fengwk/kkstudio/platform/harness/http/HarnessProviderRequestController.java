@@ -5,9 +5,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.harness.builtin.query.ProviderRequestPreviewService;
-import fun.fengwk.kkstudio.platform.harness.builtin.query.ProviderRequestPreviewUnavailableException;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessProviderRequestPreviewDTO;
 
 import java.util.Objects;
@@ -32,10 +30,6 @@ public class HarnessProviderRequestController {
   @GetMapping("/{sessionId}/entries/{entryId}/provider-request")
   public HarnessProviderRequestPreviewDTO getProviderRequest(
       @PathVariable UUID sessionId, @PathVariable UUID entryId) {
-    try {
-      return previewService.previewHistorical(sessionId, entryId);
-    } catch (ProviderRequestPreviewUnavailableException error) {
-      throw DomainException.conflict(error.reason().name(), error.getMessage(), error);
-    }
+    return previewService.previewHistorical(sessionId, entryId);
   }
 }

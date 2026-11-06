@@ -39,7 +39,7 @@ export function parseGoalProgress(
     if (!entry || entry.entryType !== 'CUSTOM') {
       continue
     }
-    const payload = parsePayload(entry.payloadJson)
+    const payload = parsePayload(entry.payload)
     if (
       payload.contributorId !== 'builtin'
       || payload.customType !== 'goal.progress'

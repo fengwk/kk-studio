@@ -702,7 +702,7 @@ test('sanitizeArtifact 与 safeDiagnosticJson 递归严格脱敏推理文本、�
     httpBody: '{"stream":true,"prompt":"sensitive-http-body-leak"}',
     requestBody: '{"secret":"request-body-leak"}',
     responseBody: '{"secret":"response-body-leak"}',
-    payloadJson: '{"apiKey":"sk-nested-payload-secret","replayPayload":{"bad":"nested-replay-leak"},"url":"https://nested.url.com/api"}',
+    payload: '{"apiKey":"sk-nested-payload-secret","replayPayload":{"bad":"nested-replay-leak"},"url":"https://nested.url.com/api"}',
     // 安全字段（应保留）
     inputTokens: 100,
     outputTokens: 50,
@@ -872,22 +872,22 @@ test('task 完成结果只认 NOTIFICATION(kind=SUBAGENT_RESULT) 的 sourceThrea
   } = {}) => ({
     entryId: 'e-notification',
     entryType: 'NOTIFICATION',
-    payloadJson: JSON.stringify({
+    payload: {
       notificationId: id,
       kind,
       sourceThreadId,
       message: { role, contents: [{ type: 'text', text }] },
-    }),
+    },
   })
   const customMessage = (text) => ({
     entryId: 'e-custom',
     entryType: 'CUSTOM_MESSAGE',
-    payloadJson: JSON.stringify({
+    payload: {
       message: {
         role: 'USER',
         contents: [{ type: 'text', text: `<system-reminder>\n${text}\n</system-reminder>` }],
       },
-    }),
+    },
   })
 
   assert.deepEqual(subagentResults([]), [])
@@ -916,16 +916,16 @@ test('委派子 Thread 必须指回发起父且 ROOT payload 只有 settings', (
   // 里另一条线程或旧 subagentContext 运行树留下的残留。
   const parentThreadId = '11111111-1111-4111-8111-111111111111'
   const childThreadId = '22222222-2222-4222-8222-222222222222'
-  const rootPayload = JSON.stringify({
+  const rootPayload = {
     settings: {
       agentName: 'default-assistant',
       execution: { driver: 'builtin', settings: { modelName: 'm', variant: 'v' } },
       environmentName: null,
     },
-  })
-  const snapshot = (thread, payloadJson) => ({
+  }
+  const snapshot = (thread, payload) => ({
     thread,
-    entries: [{ entryId: 'e-root', entryType: 'ROOT', payloadJson }],
+    entries: [{ entryId: 'e-root', entryType: 'ROOT', payload }],
   })
   const childThread = (parentThreadId) => ({
     threadId: childThreadId,
@@ -957,7 +957,7 @@ test('委派子 Thread 必须指回发起父且 ROOT payload 只有 settings', (
         parentThreadId,
         snapshot(
           childThread(parentThreadId),
-          JSON.stringify({ settings: JSON.parse(rootPayload).settings, subagentContext: {} }),
+          { ...rootPayload, subagentContext: {} },
         ),
       ),
     /child ROOT payload fields must be/,
@@ -971,12 +971,12 @@ test('task 即时回执与诊断摘要只读真实 entry payload，错误码可�
     {
       entryId: 'e1',
       entryType: 'ASSISTANT_ERROR',
-      payloadJson: JSON.stringify({ error: { code: 'MODEL_CALL_FAILED', message: 'boom' }, attempt: null }),
+      payload: { error: { code: 'MODEL_CALL_FAILED', message: 'boom' }, attempt: null },
     },
     {
       entryId: 'e2',
       entryType: 'MESSAGE',
-      payloadJson: JSON.stringify({
+      payload: {
         message: {
           role: 'TOOL',
           contents: [
@@ -992,9 +992,9 @@ test('task 即时回执与诊断摘要只读真实 entry payload，错误码可�
             },
           ],
         },
-      }),
+      },
     },
-    { entryId: 'e3', entryType: 'TURN_END', payloadJson: JSON.stringify({ outcome: 'COMPLETED', continueModel: false }) },
+    { entryId: 'e3', entryType: 'TURN_END', payload: { outcome: 'COMPLETED', continueModel: false } },
   ]
 
   const results = collectTaskToolResults(entries)

@@ -178,7 +178,7 @@ function acceptedEnvelope(chat, model) {
       entryId: cid(),
       sessionId,
       entryType: 'ROOT',
-      payloadJson: '{}',
+      payload: {},
     },
     thread: {
       threadId,

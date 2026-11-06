@@ -60,8 +60,8 @@ describe('mutation-review parser and extractor', () => {
     expect(parseEditReview([])).toBeNull()
   })
 
-  it('extracts editReview from approvalJson string', () => {
-    const approvalJson = JSON.stringify({
+  it('extracts editReview from approval string', () => {
+    const approval = JSON.stringify({
       required: true,
       editReview: {
         path: '/workspace/file.txt',
@@ -69,13 +69,13 @@ describe('mutation-review parser and extractor', () => {
         sha256: validSha,
       },
     })
-    expect(extractApprovalEditReview(approvalJson)).toEqual({
+    expect(extractApprovalEditReview(approval)).toEqual({
       path: '/workspace/file.txt',
       diff: '-old\n+new',
       sha256: validSha,
     })
 
-    // Returns null for invalid or missing approvalJson or review
+    // Returns null for invalid or missing approval or review
     expect(extractApprovalEditReview(null)).toBeNull()
     expect(extractApprovalEditReview('invalid json')).toBeNull()
     expect(extractApprovalEditReview('{}')).toBeNull()

@@ -4,7 +4,6 @@ import {
   parseCompletedResult,
   parseQuestionnaire,
 } from '@/features/thread/runtime/interactions/questionnaire-parser'
-import { jsonContentText } from '@/features/thread/runtime/thread-timeline/content-utils'
 import type { ToolContent } from '@/features/thread/runtime/thread-timeline-types'
 import { useI18n } from '@/shared/i18n'
 
@@ -27,7 +26,7 @@ export function AskUserRecord({
     [argumentsJson],
   )
   const completed = useMemo(
-    () => parseCompletedResult(resultJson(contents)),
+    () => parseCompletedResult(resultPayload(contents)),
     [contents],
   )
   if (questionnaire == null) {
@@ -70,11 +69,11 @@ export function AskUserRecord({
   )
 }
 
-/** 从有序结果内容取出规范答案 JSON：json 内容序列化，否则使用首段非空文本。 */
-function resultJson(contents: ToolContent[]): string | null {
+/** 从有序结果内容取出规范答案载荷：json 内容直接使用节点，否则使用首段非空文本。 */
+function resultPayload(contents: ToolContent[]): unknown {
   for (const content of contents) {
     if (content.type === 'json') {
-      return jsonContentText(content.value)
+      return content.value
     }
     if (content.type === 'text' && content.text.trim()) {
       return content.text

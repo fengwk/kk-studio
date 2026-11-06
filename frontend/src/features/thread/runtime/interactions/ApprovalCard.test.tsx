@@ -11,7 +11,7 @@ function wrapper({ children }: { children: ReactNode }) {
 }
 const args = '{"command":"pwd\\nls -la","workdir":"/srv/完整目录","extra":{"flag":false}}'
 const props = { threadId: 'source-child', invocationId: 'original-invocation', toolName: 'bash',
-  argumentsJson: args, approvalJson: '{"required":true,"reason":"Permission rules require approval"}' }
+  argumentsJson: args, approval: '{"required":true,"reason":"Permission rules require approval"}' }
 
 it('默认权限原因本地化；完整 arguments/workdir 一次，额外真实原因完整保留', () => {
   const { container, rerender } = render(<ApprovalCard {...props} />, { wrapper })
@@ -23,7 +23,7 @@ it('默认权限原因本地化；完整 arguments/workdir 一次，额外真实
   expect(screen.getByRole('button', { name: '拒绝' })).toHaveClass('btn-primary', 'danger')
   expect(screen.getByRole('button', { name: '允许' })).toHaveClass('btn-primary')
   const reason = '此目录含部署凭据，需人工核对后才可执行。'.repeat(30)
-  rerender(<ApprovalCard {...props} approvalJson={JSON.stringify({ required: true, reason })} />)
+  rerender(<ApprovalCard {...props} approval={JSON.stringify({ required: true, reason })} />)
   expect(screen.getByText(reason)).toBeInTheDocument()
 })
 
@@ -53,14 +53,14 @@ it('409 围栏不可重试且保留参数和拒绝按钮的 danger 语义', asyn
 })
 
 it.each(['ALLOWED', 'DENIED'])('已决 %s 没有写入口', (decision) => {
-  render(<ApprovalCard {...props} approvalJson={JSON.stringify({ decision })} />, { wrapper })
+  render(<ApprovalCard {...props} approval={JSON.stringify({ decision })} />, { wrapper })
   expect(screen.queryByRole('button')).not.toBeInTheDocument()
   expect(document.querySelector('.is-completed')).toBeInTheDocument()
 })
 
 it('畸形审批 JSON 不隐藏完整调用参数，未知失败也能重试', async () => {
   vi.spyOn(harnessService, 'decideApproval').mockRejectedValue('transport error')
-  render(<ApprovalCard {...props} approvalJson="invalid" />, { wrapper })
+  render(<ApprovalCard {...props} approval="invalid" />, { wrapper })
   expect(document.querySelector('pre')?.textContent).toBe(args)
   fireEvent.click(screen.getByRole('button', { name: '允许' }))
   await waitFor(() => expect(document.querySelector('.interaction-error-banner')).toBeInTheDocument())

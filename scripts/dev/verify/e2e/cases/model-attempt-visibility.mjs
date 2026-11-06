@@ -582,7 +582,7 @@ function messageText(entry) {
 }
 
 function parsePayload(entry) {
-  const payload = JSON.parse(entry?.payloadJson || '{}')
+  const payload = entry?.payload ?? {}
   assert(payload && typeof payload === 'object' && !Array.isArray(payload), JSON.stringify(entry))
   return payload
 }
@@ -600,18 +600,11 @@ function assertInstant(value, field) {
 }
 
 function instantEpochMillis(value, field = 'instant') {
-  if (typeof value === 'number') {
-    assert(
-      Number.isInteger(value) && value >= 0,
-      `${field} must be a non-negative epoch-millisecond integer: ${JSON.stringify(value)}`,
-    )
-    return value
-  }
   assert(
-    typeof value === 'string' && value.trim() && Number.isFinite(Date.parse(value)),
-    `${field} must be an ISO instant or epoch-millisecond integer: ${JSON.stringify(value)}`,
+    typeof value === 'number' && Number.isInteger(value) && value >= 0,
+    `${field} must be a non-negative epoch-millisecond integer: ${JSON.stringify(value)}`,
   )
-  return Date.parse(value)
+  return value
 }
 
 async function cleanup(label, errors, action) {

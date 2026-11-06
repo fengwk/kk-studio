@@ -2,6 +2,7 @@ import { request } from '@/shared/api/client'
 import type {
   HarnessAcceptedCommandsDTO,
   HarnessCommandBatchDTO,
+  HarnessExecutionAbandonDTO,
   HarnessManualCompactionDTO,
   HarnessModelRequestDebugDTO,
   HarnessModelRequestDebugRequestDTO,
@@ -168,7 +169,7 @@ export const harnessService = {
   abandonExecution: (
     threadId: string,
     executionId: string,
-    data: { expectedVersion: string },
+    data: HarnessExecutionAbandonDTO,
   ): Promise<HarnessThreadSnapshotDTO> =>
     request('POST /api/harness/threads/{threadId}/executions/{executionId}/abandon', {
       path: { threadId, executionId },
