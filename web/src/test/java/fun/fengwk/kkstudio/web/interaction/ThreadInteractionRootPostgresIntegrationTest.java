@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.web.interaction;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtin;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -91,14 +92,14 @@ import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.platform.harness.dispatch.HarnessWorkDispatcher;
 import fun.fengwk.kkstudio.platform.harness.dispatch.HarnessWorkDispatcherConfig;
+import fun.fengwk.kkstudio.platform.harness.dto.InteractionDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.InteractionPageDTO;
 import fun.fengwk.kkstudio.platform.harness.http.HarnessThreadController;
 import fun.fengwk.kkstudio.platform.harness.http.HarnessThreadService;
 import fun.fengwk.kkstudio.platform.harness.thread.query.EnvironmentWaitProjectionService;
 import fun.fengwk.kkstudio.platform.harness.thread.query.UsageCostProjectionService;
 import fun.fengwk.kkstudio.platform.interaction.InteractionQueryService;
 import fun.fengwk.kkstudio.platform.interaction.InteractionService;
-import fun.fengwk.kkstudio.share.interaction.InteractionDTO;
-import fun.fengwk.kkstudio.share.interaction.InteractionPageDTO;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
 import java.io.IOException;
@@ -208,17 +209,15 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
     InteractionPageDTO page = queryService.listInteractions(tree.root(), null, 50);
     assertEquals(1, page.getItems().size(), "only the owner-bound grandchild row is visible");
     assertNull(page.getNextCursor());
-    InteractionDTO item = page.getItems().getFirst();
-    assertEquals(cInvocation.toString(), item.getInteractionId());
-    assertEquals(tree.c().toString(), item.getThreadId(), "source thread stays the grandchild");
-    assertEquals(tree.cSessionId().toString(), item.getSessionId());
-    assertEquals(tree.root().toString(), item.getRootThreadId(), "root is the execution root");
-    assertEquals("CHAT", item.getOwner().getKind());
-    assertEquals(chatId.toString(), item.getOwner().getId());
-    assertEquals(ToolInvocationStatus.WAITING_INPUT.name(), item.getStatus());
-    assertEquals("ask_user", item.getToolName());
-    assertEquals(QUESTIONNAIRE, item.getArgumentsJson());
-    assertNull(item.getApprovalJson());
+    InteractionDTO.Input item = input(page.getItems().getFirst());
+    assertEquals(cInvocation.toString(), item.toolInvocationId());
+    assertEquals(tree.c().toString(), item.threadId(), "source thread stays the grandchild");
+    assertEquals(tree.cSessionId().toString(), item.sessionId());
+    assertEquals(tree.root().toString(), item.rootThreadId(), "root is the execution root");
+    assertEquals("CHAT", item.owner().getKind());
+    assertEquals(chatId.toString(), item.owner().getId());
+    assertEquals("ask_user", item.toolName());
+    assertEquals(QUESTIONNAIRE, item.argumentsJson());
 
     // 执行根是归属事实源：C -> A -> R。
     assertEquals(tree.root(), runtime.findRootThreadId(tree.c()).orElseThrow());
@@ -245,13 +244,12 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
 
     InteractionPageDTO page = queryService.listInteractions(tree.root(), null, 50);
     assertEquals(1, page.getItems().size());
-    InteractionDTO item = page.getItems().getFirst();
-    assertEquals(cInvocation.toString(), item.getInteractionId());
-    assertEquals(tree.c().toString(), item.getThreadId());
-    assertEquals(tree.root().toString(), item.getRootThreadId());
-    assertEquals("ISSUE_AGENT", item.getOwner().getKind());
-    assertEquals(issue.issueId() + ":" + AGENT, item.getOwner().getId());
-    assertEquals(ToolInvocationStatus.WAITING_APPROVAL.name(), item.getStatus());
+    InteractionDTO.Approval item = approval(page.getItems().getFirst());
+    assertEquals(cInvocation.toString(), item.toolInvocationId());
+    assertEquals(tree.c().toString(), item.threadId());
+    assertEquals(tree.root().toString(), item.rootThreadId());
+    assertEquals("ISSUE_AGENT", item.owner().getKind());
+    assertEquals(issue.issueId() + ":" + AGENT, item.owner().getId());
 
     UUID decisionId = UUID.randomUUID();
     ToolInvocation decided =
@@ -278,8 +276,8 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
       List<InteractionDTO> collected = drain(tree.root(), limit);
       Set<String> ids = new HashSet<>();
       for (InteractionDTO dto : collected) {
-        ids.add(dto.getInteractionId());
-        assertEquals(tree.root().toString(), dto.getRootThreadId());
+        ids.add(input(dto).toolInvocationId());
+        assertEquals(tree.root().toString(), dto.rootThreadId());
       }
       assertEquals(
           Set.of(cInvocation.toString(), bInvocation.toString(), aInvocation.toString()),
@@ -460,13 +458,12 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
 
     InteractionPageDTO page = queryService.listInteractions(seed.threadId(), null, 50);
     assertEquals(1, page.getItems().size());
-    InteractionDTO item = page.getItems().getFirst();
-    assertEquals(seed.invocationId().toString(), item.getInteractionId());
-    assertEquals(seed.threadId().toString(), item.getRootThreadId());
-    assertEquals(seed.threadId().toString(), item.getThreadId());
-    assertEquals("CHAT", item.getOwner().getKind());
-    assertEquals(chatId.toString(), item.getOwner().getId());
-    assertEquals(ToolInvocationStatus.WAITING_INPUT.name(), item.getStatus());
+    InteractionDTO.Input item = input(page.getItems().getFirst());
+    assertEquals(seed.invocationId().toString(), item.toolInvocationId());
+    assertEquals(seed.threadId().toString(), item.rootThreadId());
+    assertEquals(seed.threadId().toString(), item.threadId());
+    assertEquals("CHAT", item.owner().getKind());
+    assertEquals(chatId.toString(), item.owner().getId());
   }
 
   /**
@@ -551,7 +548,7 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
     assertEnvironmentWait(all.get(2), third.threadId(), secondEnvironmentId, 1, null, "CHAT", null);
     assertEquals(
         Set.of(tree.root().toString(), second.threadId().toString(), third.threadId().toString()),
-        all.stream().map(InteractionDTO::getRootThreadId).collect(Collectors.toSet()));
+        all.stream().map(InteractionDTO::rootThreadId).collect(Collectors.toSet()));
     List<InteractionDTO> singlePages = drain(null, 1);
     assertEquals(3, singlePages.size());
     assertEnvironmentWait(
@@ -563,8 +560,7 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
         "CHAT",
         chatId.toString());
     assertFalse(
-        all.stream()
-            .anyMatch(item -> ownerless.threadId().toString().equals(item.getRootThreadId())));
+        all.stream().anyMatch(item -> ownerless.threadId().toString().equals(item.rootThreadId())));
 
     // total 是同过滤条件下的真实可见分组数，而不是首页长度。
     InteractionPageDTO firstPage = queryService.listInteractions(null, null, 2);
@@ -592,7 +588,7 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
     // limit=1 必须跨过多个在线候选分组，而不是在过滤后丢失后面的离线分组。
     InteractionPageDTO filteredPage = queryService.listInteractions(null, null, 1);
     assertEquals(1, filteredPage.getTotal());
-    assertEquals(third.threadId().toString(), filteredPage.getItems().getFirst().getRootThreadId());
+    assertEquals(third.threadId().toString(), filteredPage.getItems().getFirst().rootThreadId());
     assertEquals(
         jdbc.queryForObject(
             "select lease_until from environment_connection where environment_id = ?",
@@ -657,7 +653,7 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
 
     assertEquals(
         2, items.size(), "future-due, leased and server-side facts must not enter the projection");
-    InteractionDTO environmentItem = items.get(0);
+    InteractionDTO.EnvironmentWait environmentItem = environmentWait(items.get(0));
     assertEnvironmentWait(
         environmentItem,
         due.threadId(),
@@ -668,11 +664,10 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
         null);
     assertEquals(
         manual.invocationId().toString(),
-        items.get(1).getInteractionId(),
-        "the manual input keeps its operable interaction id");
-    assertEquals("INPUT", items.get(1).getType());
-    assertEquals("CHAT", items.get(1).getOwner().getKind());
-    assertEquals(manualChatId.toString(), items.get(1).getOwner().getId());
+        input(items.get(1)).toolInvocationId(),
+        "the manual input keeps its operable tool invocation id");
+    assertEquals("CHAT", items.get(1).owner().getKind());
+    assertEquals(manualChatId.toString(), items.get(1).owner().getId());
 
     // 真实 snapshot HTTP 不把聚合页的全局 freshnessAt 复制给每个调用。
     MockMvc mvc = MockMvcBuilders.webAppContextSetup(webContext).build();
@@ -781,29 +776,25 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
 
   /** 环境等待分组的公共断言：聚合身份、展示名、计数、排序代表、归属，且绝不冒充可操作 interaction。 */
   private void assertEnvironmentWait(
-      InteractionDTO item,
+      InteractionDTO candidate,
       UUID expectedRootThreadId,
       UUID expectedEnvironmentId,
       int expectedWaitingCount,
       Instant expectedCreatedAt,
       String expectedOwnerType,
       String expectedChatId) {
-    assertEquals("ENVIRONMENT_WAIT", item.getType());
-    assertEquals(expectedEnvironmentId.toString(), item.getEnvironmentId());
-    assertEquals(expectedWaitingCount, item.getWaitingCount().intValue());
-    assertEquals(expectedRootThreadId.toString(), item.getRootThreadId());
-    assertEquals(expectedOwnerType, item.getOwner().getKind());
+    InteractionDTO.EnvironmentWait item = environmentWait(candidate);
+    assertEquals(expectedEnvironmentId.toString(), item.environmentId());
+    assertEquals(expectedWaitingCount, item.waitingCount());
+    assertEquals(expectedRootThreadId.toString(), item.rootThreadId());
+    assertEquals(expectedOwnerType, item.owner().getKind());
     if (expectedChatId != null) {
-      assertEquals(expectedChatId, item.getOwner().getId());
+      assertEquals(expectedChatId, item.owner().getId());
     }
     if (expectedCreatedAt != null) {
-      assertEquals(expectedCreatedAt, item.getCreateTime());
+      assertEquals(expectedCreatedAt, item.createdAt());
     }
-    assertNull(item.getInteractionId());
-    assertNull(item.getStatus());
-    assertNull(item.getThreadId());
-    assertNull(item.getSessionId());
-    assertNotNull(item.getEnvironmentName());
+    assertNotNull(item.environmentName());
   }
 
   // ------------------------------------------------------------------ fixture
@@ -1271,6 +1262,18 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
   }
 
   // ------------------------------------------------------------------ reads / helpers
+
+  private static InteractionDTO.Input input(InteractionDTO item) {
+    return assertInstanceOf(InteractionDTO.Input.class, item);
+  }
+
+  private static InteractionDTO.Approval approval(InteractionDTO item) {
+    return assertInstanceOf(InteractionDTO.Approval.class, item);
+  }
+
+  private static InteractionDTO.EnvironmentWait environmentWait(InteractionDTO item) {
+    return assertInstanceOf(InteractionDTO.EnvironmentWait.class, item);
+  }
 
   /** 分页拉取某个执行根的全部可见 waiting 行，直到源耗尽；游标按服务端返回原样回传。 */
   private List<InteractionDTO> drain(UUID rootThreadId, int limit) {

@@ -11,7 +11,7 @@ import {
   FolderOpen,
 } from 'lucide-react'
 import { ApiError, isNotFoundError } from '@/shared/api/client'
-import { sessionFileService, type SessionFileOwner } from '@/shared/api/session-file-service'
+import { sessionFileService } from '@/shared/api/session-file-service'
 import type { HarnessSessionFileEntryDTO } from '@/shared/api/generated/contracts'
 import { useI18n } from '@/shared/i18n'
 import { formatByteCount } from '@/shared/lib/format-bytes'
@@ -33,7 +33,6 @@ import './session-files.css'
 
 export interface SessionFilesDialogProps {
   sessionId: string
-  owner: SessionFileOwner
   onClose: () => void
 }
 
@@ -108,7 +107,7 @@ function FilesError({ error, label, onRetry, testId }: FilesErrorProps) {
  * 文本按服务端有界窗口逐页回看，图片经下载字节预览，文件可下载。
  * 编辑由 Agent 的文件工具完成，面板不提供任何写操作。
  */
-export function SessionFilesDialog({ sessionId, owner, onClose }: SessionFilesDialogProps) {
+export function SessionFilesDialog({ sessionId, onClose }: SessionFilesDialogProps) {
   const { t } = useI18n()
   const [levels, setLevels] = useState<DirectoryLevel[]>([{ path: null, name: null }])
   const [selected, setSelected] = useState<HarnessSessionFileEntryDTO | null>(null)
@@ -120,17 +119,16 @@ export function SessionFilesDialog({ sessionId, owner, onClose }: SessionFilesDi
   const selectedIsImage = selected != null && isImageFileName(selected.name)
 
   const listQuery = useQuery({
-    queryKey: ['session-files', sessionId, owner.kind, owner.id, level.path],
-    queryFn: () => sessionFileService.listSessionFiles(sessionId, owner, level.path ?? undefined),
+    queryKey: ['session-files', sessionId, level.path],
+    queryFn: () => sessionFileService.listSessionFiles(sessionId, level.path ?? undefined),
   })
   const contentQuery = useQuery({
     queryKey: [
-      'session-files', sessionId, owner.kind, owner.id, 'content',
+      'session-files', sessionId, 'content',
       selected?.path, windowPosition.offset, windowPosition.columnOffset,
     ],
     queryFn: () => sessionFileService.readSessionFileContent(
       sessionId,
-      owner,
       sessionFilePath(sessionId, selected!.path),
       {
         offset: windowPosition.offset,
@@ -141,10 +139,9 @@ export function SessionFilesDialog({ sessionId, owner, onClose }: SessionFilesDi
     enabled: selected != null && !selectedIsImage,
   })
   const imageQuery = useQuery({
-    queryKey: ['session-files', sessionId, owner.kind, owner.id, 'image', selected?.path],
+    queryKey: ['session-files', sessionId, 'image', selected?.path],
     queryFn: ({ signal }) => sessionFileService.downloadSessionFile(
       sessionId,
-      owner,
       sessionFilePath(sessionId, selected!.path),
       signal,
     ),
@@ -188,7 +185,6 @@ export function SessionFilesDialog({ sessionId, owner, onClose }: SessionFilesDi
     try {
       const result = await sessionFileService.downloadSessionFile(
         sessionId,
-        owner,
         sessionFilePath(sessionId, entry.path),
       )
       saveDownload(result.blob, result.fileName)
@@ -375,7 +371,9 @@ export function SessionFilesDialog({ sessionId, owner, onClose }: SessionFilesDi
               ) : contentQuery.error != null ? (
                 <FilesError
                   error={contentQuery.error}
-                  label={contentQuery.error instanceof ApiError && contentQuery.error.status === 422
+                  label={contentQuery.error instanceof ApiError
+                    && contentQuery.error.code === 'validation'
+                    && contentQuery.error.reason === 'SESSION_FILE_NOT_TEXT'
                     ? t('ai.sessionFiles.unreadable')
                     : isNotFoundError(contentQuery.error)
                       ? t('ai.sessionFiles.notFound')

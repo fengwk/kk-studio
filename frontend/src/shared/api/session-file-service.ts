@@ -1,19 +1,8 @@
-import {
-  apiBaseUrl,
-  apiClient,
-  executeFetch,
-  type HttpClient,
-} from '@/shared/api/client'
+import { executeFetch, request, url } from '@/shared/api/client'
 import type {
   HarnessSessionFileContentDTO,
   HarnessSessionFileListDTO,
 } from '@/shared/api/generated/contracts'
-
-/** 会话归属：列目录、读文本与下载都必须携带产品 owner 供后端授权。 */
-export interface SessionFileOwner {
-  kind: string
-  id: string
-}
 
 /** 文本窗口坐标；offset 与 columnOffset 从 1 开始，limit 默认且最大 2000 行。 */
 export interface SessionFileTextWindow {
@@ -28,66 +17,53 @@ interface SessionFileDownload {
   fileName: string
 }
 
-/** 会话文件只读 HTTP：列目录、文本窗口与下载；写操作只由文件工具发起。 */
-export function createSessionFileService(
-  client: HttpClient = apiClient,
-  fetchImpl: typeof fetch = fetch,
-) {
-  const filesUrl = (sessionId: string): string =>
-    `/sessions/${encodeURIComponent(sessionId)}/files`
+/** 列出会话目录的直属条目；省略 path 表示会话根目录。 */
+export function listSessionFiles(
+  sessionId: string,
+  path?: string,
+): Promise<HarnessSessionFileListDTO> {
+  return request('GET /api/harness/sessions/{sessionId}/files', {
+    path: { sessionId },
+    query: { path },
+  })
+}
 
-  return {
-    listSessionFiles: (
-      sessionId: string,
-      owner: SessionFileOwner,
-      path?: string,
-    ): Promise<HarnessSessionFileListDTO> =>
-      client.get(filesUrl(sessionId), {
-        params: { ownerKind: owner.kind, ownerId: owner.id, path },
-      }),
-
-    readSessionFileContent: (
-      sessionId: string,
-      owner: SessionFileOwner,
-      path: string,
-      window: SessionFileTextWindow = {},
-    ): Promise<HarnessSessionFileContentDTO> =>
-      client.get(`${filesUrl(sessionId)}/content`, {
-        params: {
-          ownerKind: owner.kind,
-          ownerId: owner.id,
-          path,
-          offset: window.offset,
-          limit: window.limit,
-          columnOffset: window.columnOffset,
-        },
-      }),
-
-    /** 下载完整字节；失败响应按 RFC 9457 problem+json 解析以保留错误详情。 */
-    downloadSessionFile: async (
-      sessionId: string,
-      owner: SessionFileOwner,
-      path: string,
-      signal?: AbortSignal,
-    ): Promise<SessionFileDownload> => {
-      const params = new URLSearchParams({
-        ownerKind: owner.kind,
-        ownerId: owner.id,
-        path,
-      })
-      return executeFetch<SessionFileDownload>(
-        `${apiBaseUrl}${filesUrl(sessionId)}/download?${params.toString()}`,
-        {
-          fetchImpl,
-          signal,
-          readResponse: async (response) => ({
-            blob: await response.blob(),
-            fileName: attachmentFileName(response.headers.get('Content-Disposition'), path),
-          }),
-        },
-      )
+/** 读取会话文件的文本窗口；缺省坐标由服务端套用默认值。 */
+export function readSessionFileContent(
+  sessionId: string,
+  path: string,
+  window: SessionFileTextWindow = {},
+): Promise<HarnessSessionFileContentDTO> {
+  return request('GET /api/harness/sessions/{sessionId}/files/content', {
+    path: { sessionId },
+    query: {
+      path,
+      offset: window.offset,
+      limit: window.limit,
+      columnOffset: window.columnOffset,
     },
-  }
+  })
+}
+
+/** 下载完整字节；失败响应按 problem+json 解析以保留错误详情，成功时保留附件文件名。 */
+export function downloadSessionFile(
+  sessionId: string,
+  path: string,
+  signal?: AbortSignal,
+): Promise<SessionFileDownload> {
+  return executeFetch<SessionFileDownload>(
+    url('GET /api/harness/sessions/{sessionId}/files/download', {
+      path: { sessionId },
+      query: { path },
+    }),
+    {
+      signal,
+      readResponse: async (response) => ({
+        blob: await response.blob(),
+        fileName: attachmentFileName(response.headers.get('Content-Disposition'), path),
+      }),
+    },
+  )
 }
 
 /**
@@ -114,4 +90,9 @@ export function attachmentFileName(disposition: string | null, fallbackPath: str
   return slash < 0 ? fallbackPath : fallbackPath.slice(slash + 1)
 }
 
-export const sessionFileService = createSessionFileService()
+/** 会话文件浏览与下载共用的调用入口。 */
+export const sessionFileService = {
+  listSessionFiles,
+  readSessionFileContent,
+  downloadSessionFile,
+}

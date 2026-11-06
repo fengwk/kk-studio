@@ -62,7 +62,6 @@ Plugin 投影遵循同一边界：`PluginDTO` 只有安装元数据、region、�
 | [mcp](../../share/src/main/java/fun/fengwk/kkstudio/share/mcp/) | MCP Server 安全投影、显式配置 DTO 与显式 HTTP 创建/更新请求 |
 | [plugin](../../share/src/main/java/fun/fengwk/kkstudio/share/plugin/) | 已安装构建期 Plugin、安全认证状态、续期运维投影与 prepare/complete 请求和响应 |
 | [environment](../../share/src/main/java/fun/fengwk/kkstudio/share/environment/) | Environment Card CRUD、registration token、保存的安装设置（`installConfig` 与共享 Daemon 配置模型）、最近一次 READY 的 OS/user/HOME 投影与有界运维事件 |
-| [interaction](../../share/src/main/java/fun/fengwk/kkstudio/share/interaction/) | 统一交互（问卷等待与工具审批等待）DTO、不透明交互 owner `{kind,id,title,link}`、分页与人工输入提交回执 |
 | [runtime](../../share/src/main/java/fun/fengwk/kkstudio/share/runtime/) | Session、Entry 与读取时 `usageCost`、Thread Snapshot、Command batch（创建型与 owner-free Thread 续写）、请求预览（草稿与历史）、Invocation、approval、Stop 回执、compaction |
 | [canvas.dto](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/dto/) | Canvas document、Snapshot、Patch、typed command、Resource 输入、Function 定义/运行/未决决议、冲突与引用投影 |
 | [project/dto](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/dto/) | Project/Issue Snapshot、Issue 详情、工作流配置、阶段预算、Agent Thread、Run、时间线 Activity、公开 Evidence 与操作请求 |
@@ -112,7 +111,7 @@ Work 冻结路由，`requiredEnvironmentName` 沿此身份读取环境目录，�
 - 改某个领域的输出去敏或字段可见性：先在对应 DTO 上加注解，再补该领域的 `*DtoContractTest`；`SystemSettingsDtoContractTest`、`CanvasDtoContractTest` 与 `ProjectDtoContractTest` 的字段清单是这类改动的直接守卫。
 - 判断一个字段该不该进 DTO：它是否出现在 HTTP 请求/响应上。领域内部的值、数据库列、S3 key 一律不进。
 
-测试入口（全部是纯 Jackson/反射单元测试，不需要 Spring 或 PostgreSQL），测试目录按上面的 DTO 包组织；`interaction` 不单独建包级契约测试，其 wire 由 platform 的交互服务测试与 web 的 Controller 测试共同覆盖：
+测试入口（全部是纯 Jackson/反射单元测试，不需要 Spring 或 PostgreSQL），测试目录按上面的 DTO 包组织：
 
 | 领域 | 测试目录 | 代表测试 |
 | --- | --- | --- |

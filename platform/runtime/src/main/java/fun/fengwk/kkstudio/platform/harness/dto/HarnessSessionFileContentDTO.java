@@ -1,6 +1,8 @@
-package fun.fengwk.kkstudio.share.runtime;
+package fun.fengwk.kkstudio.platform.harness.dto;
 
 import lombok.Data;
+
+import java.time.Instant;
 
 /** 会话文件面板的文本内容：有界窗口文本与文件的权威元数据。 */
 @Data
@@ -18,8 +20,8 @@ public class HarnessSessionFileContentDTO {
   /** 文件 revision。 */
   private int revision;
 
-  /** 最后更新时间（epoch 毫秒）。 */
-  private long updatedAt;
+  /** 最后更新时间。 */
+  private Instant updatedAt;
 
   /** 从 {@code offset} 行、{@code columnOffset} 列开始的有界文本窗口。 */
   private String text;

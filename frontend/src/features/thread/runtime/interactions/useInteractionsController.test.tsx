@@ -31,9 +31,7 @@ describe('useInteractionsController', () => {
 
   const mockItem1: InteractionDTO = {
     type: 'INPUT',
-    environmentId: null, environmentName: null, waitingCount: null,
-    interactionId: 'int-1',
-    status: 'WAITING_INPUT',
+    toolInvocationId: 'int-1',
     threadId: 'th-1',
     rootThreadId: 'th-1',
     sessionId: 'sess-1',
@@ -41,15 +39,12 @@ describe('useInteractionsController', () => {
     toolCallId: 'call-1',
     toolName: 'ask_user',
     argumentsJson: '{"questions":[]}',
-    approvalJson: null,
-    createTime: 1790467200,
+    createdAt: 1790467200000,
   }
 
   const mockItem2: InteractionDTO = {
     type: 'APPROVAL',
-    environmentId: null, environmentName: null, waitingCount: null,
-    interactionId: 'int-2',
-    status: 'WAITING_APPROVAL',
+    toolInvocationId: 'int-2',
     threadId: 'th-2',
     rootThreadId: 'th-2',
     sessionId: 'sess-2',
@@ -58,7 +53,12 @@ describe('useInteractionsController', () => {
     toolName: 'bash',
     argumentsJson: '{"command":"ls"}',
     approvalJson: '{"required":true}',
-    createTime: 1790467260,
+    createdAt: 1790467260000,
+  }
+
+  /** 环境等待没有可操作调用，因此只对手工等待取回写主键。 */
+  function toolInvocationId(item: InteractionDTO): string | null {
+    return item.type === 'ENVIRONMENT_WAIT' ? null : item.toolInvocationId
   }
 
   function mockPage(
@@ -83,7 +83,7 @@ describe('useInteractionsController', () => {
     await waitFor(() => expect(result.current.isLoading).toBe(false))
 
     expect(result.current.items).toHaveLength(1)
-    expect(result.current.items[0].interactionId).toBe('int-1')
+    expect(toolInvocationId(result.current.items[0])).toBe('int-1')
     expect(result.current.hasMore).toBe(true)
 
     // 执行 loadMore
@@ -107,7 +107,7 @@ describe('useInteractionsController', () => {
 
     const { result } = renderHook(() => useInteractionsController(rootThreadId, 10), { wrapper })
     await waitFor(() => expect(result.current.isLoading).toBe(false))
-    expect(result.current.items[0].interactionId).toBe('int-1')
+    expect(toolInvocationId(result.current.items[0])).toBe('int-1')
     const socket = sockets.openLatest()
 
     act(() => {
@@ -133,7 +133,7 @@ describe('useInteractionsController', () => {
       })
     })
 
-    await waitFor(() => expect(result.current.items[0].interactionId).toBe('int-2'))
+    await waitFor(() => expect(toolInvocationId(result.current.items[0])).toBe('int-2'))
     expect(listSpy).toHaveBeenCalledTimes(2)
   })
 
@@ -145,13 +145,13 @@ describe('useInteractionsController', () => {
     const { result } = renderHook(() => useInteractionsController(null, 10), { wrapper })
     await waitFor(() => expect(result.current.isLoading).toBe(false))
 
-    expect(result.current.items[0].interactionId).toBe('int-1')
+    expect(toolInvocationId(result.current.items[0])).toBe('int-1')
 
     await act(async () => {
       await result.current.refresh()
     })
 
-    expect(result.current.items[0].interactionId).toBe('int-2')
+    expect(toolInvocationId(result.current.items[0])).toBe('int-2')
     expect(result.current.hasMore).toBe(false)
   })
 
@@ -190,11 +190,11 @@ describe('useInteractionsController', () => {
 
     // refresh 已经完成，列表已切换为 refreshedPage
     expect(result.current.items).toHaveLength(1)
-    expect(result.current.items[0].interactionId).toBe('int-2')
+    expect(toolInvocationId(result.current.items[0])).toBe('int-2')
     expect(result.current.nextCursor).toBe('cursor-refreshed')
 
     // 此时旧代的 slow loadMore 响应返回
-    const staleItem: InteractionDTO = { ...mockItem1, interactionId: 'stale-int-old' }
+    const staleItem: InteractionDTO = { ...mockItem1, toolInvocationId: 'stale-int-old' }
     await act(async () => {
       resolveSlowLoadMore(mockPage([staleItem], 'stale-cursor-old'))
       await loadMorePromise
@@ -202,7 +202,7 @@ describe('useInteractionsController', () => {
 
     // 验证：旧代 items 没有被追加到刷新后的列表中，nextCursor 没有被旧游标覆写
     expect(result.current.items).toHaveLength(1)
-    expect(result.current.items[0].interactionId).toBe('int-2')
+    expect(toolInvocationId(result.current.items[0])).toBe('int-2')
     expect(result.current.nextCursor).toBe('cursor-refreshed')
   })
 
@@ -217,7 +217,7 @@ describe('useInteractionsController', () => {
 
     const initialPage = mockPage([mockItem1], 'cursor-page-2')
     const externalInvalidatedPage = mockPage(
-      [{ ...mockItem1, interactionId: 'int-new-first' }],
+      [{ ...mockItem1, toolInvocationId: 'int-new-first' }],
       'cursor-new-page-2',
     )
     const subsequentPage = mockPage([mockItem2], null)
@@ -230,7 +230,7 @@ describe('useInteractionsController', () => {
 
     const { result } = renderHook(() => useInteractionsController(null, 10), { wrapper })
     await waitFor(() => expect(result.current.isLoading).toBe(false))
-    expect(result.current.items[0].interactionId).toBe('int-1')
+    expect(toolInvocationId(result.current.items[0])).toBe('int-1')
     expect(result.current.nextCursor).toBe('cursor-page-2')
 
     // 触发 loadMore 进入在途
@@ -246,19 +246,19 @@ describe('useInteractionsController', () => {
     })
 
     // 外部 invalidation 已经完成，首屏已替换为 externalInvalidatedPage
-    await waitFor(() => expect(result.current.items[0].interactionId).toBe('int-new-first'))
+    await waitFor(() => expect(toolInvocationId(result.current.items[0])).toBe('int-new-first'))
     expect(result.current.nextCursor).toBe('cursor-new-page-2')
     expect(result.current.isFetchingMore).toBe(false)
 
     // 此时旧在途 loadMore 返回
     await act(async () => {
-      resolveSlowLoadMore(mockPage([{ ...mockItem1, interactionId: 'stale-int-old' }], 'stale-cursor-old'))
+      resolveSlowLoadMore(mockPage([{ ...mockItem1, toolInvocationId: 'stale-int-old' }], 'stale-cursor-old'))
       await loadMorePromise
     })
 
     // 验证：旧数据没有 append，游标没有被污染为 stale-cursor-old
     expect(result.current.items).toHaveLength(1)
-    expect(result.current.items[0].interactionId).toBe('int-new-first')
+    expect(toolInvocationId(result.current.items[0])).toBe('int-new-first')
     expect(result.current.nextCursor).toBe('cursor-new-page-2')
     expect(result.current.isFetchingMore).toBe(false)
 
@@ -268,7 +268,7 @@ describe('useInteractionsController', () => {
     })
     expect(listSpy).toHaveBeenLastCalledWith(null, 'cursor-new-page-2', 10)
     expect(result.current.items).toHaveLength(2)
-    expect(result.current.items[1].interactionId).toBe('int-2')
+    expect(toolInvocationId(result.current.items[1])).toBe('int-2')
     expect(result.current.hasMore).toBe(false)
   })
 
@@ -447,14 +447,14 @@ describe('useInteractionsController', () => {
 
     // 验证新代已成功入库
     expect(result.current.items).toHaveLength(2)
-    expect(result.current.items[1].interactionId).toBe('int-2')
+    expect(toolInvocationId(result.current.items[1])).toBe('int-2')
     expect(result.current.nextCursor).toBe('cursor-page-3-new-generation')
     expect(result.current.isFetchingMore).toBe(false)
 
     // 5. 旧代 loadMore 1 迟到返回
     await act(async () => {
       resolveSlowLoadMore1(
-        mockPage([{ ...mockItem1, interactionId: 'stale-int-from-gen1' }], 'cursor-stale-gen1'),
+        mockPage([{ ...mockItem1, toolInvocationId: 'stale-int-from-gen1' }], 'cursor-stale-gen1'),
       )
       await slowLoadMore1Promise
     })
@@ -462,7 +462,7 @@ describe('useInteractionsController', () => {
     // 关键断言：游标严格为新代游标，列表不包含旧代 item，isFetchingMore 不受旧代 finally 影响
     expect(result.current.nextCursor).toBe('cursor-page-3-new-generation')
     expect(result.current.items).toHaveLength(2)
-    expect(result.current.items.map((it) => it.interactionId)).toEqual(['int-1', 'int-2'])
+    expect(result.current.items.map(toolInvocationId)).toEqual(['int-1', 'int-2'])
     expect(result.current.isFetchingMore).toBe(false)
   })
 
@@ -480,7 +480,7 @@ describe('useInteractionsController', () => {
       { wrapper, initialProps: { rootThreadId: rootA } },
     )
     await waitFor(() => expect(result.current.isLoading).toBe(false))
-    expect(result.current.items.map((it) => it.interactionId)).toEqual(['int-1'])
+    expect(result.current.items.map(toolInvocationId)).toEqual(['int-1'])
     expect(result.current.nextCursor).toBe('cursor-root-a')
 
     rerender({ rootThreadId: rootB })
@@ -491,7 +491,7 @@ describe('useInteractionsController', () => {
     expect(result.current.hasMore).toBe(false)
 
     await waitFor(() => {
-      expect(result.current.items.map((it) => it.interactionId)).toEqual(['int-2'])
+      expect(result.current.items.map(toolInvocationId)).toEqual(['int-2'])
     })
     expect(result.current.nextCursor).toBeNull()
     expect(interactionService.listInteractions).toHaveBeenLastCalledWith(rootB, null, 10)
@@ -540,7 +540,7 @@ describe('useInteractionsController', () => {
 
     await act(async () => {
       resolveStaleLoadMore(
-        mockPage([{ ...mockItem1, interactionId: 'stale-root-a-page-2' }], 'cursor-stale-root-a'),
+        mockPage([{ ...mockItem1, toolInvocationId: 'stale-root-a-page-2' }], 'cursor-stale-root-a'),
       )
       await staleLoadMore
     })
@@ -557,7 +557,7 @@ describe('useInteractionsController', () => {
     })
 
     await waitFor(() => {
-      expect(result.current.items.map((it) => it.interactionId)).toEqual(['int-2'])
+      expect(result.current.items.map(toolInvocationId)).toEqual(['int-2'])
     })
     expect(result.current.nextCursor).toBeNull()
     expect(result.current.hasMore).toBe(false)
@@ -637,22 +637,14 @@ describe('useInteractionsController', () => {
     type: 'ENVIRONMENT_WAIT',
     rootThreadId: 'th-1',
     owner: { kind: 'CHAT', id: 'chat-1', title: 'Chat', link: '/chats/chat-1' },
-    createTime: 1790467200,
-    interactionId: null,
-    status: null,
-    threadId: null,
-    sessionId: null,
-    toolCallId: null,
-    toolName: null,
-    argumentsJson: null,
-    approvalJson: null,
+    createdAt: 1790467200000,
     environmentId,
     environmentName: `env-${environmentId}`,
     waitingCount,
   })
 
   it('环境等待跨页按 (根, 环境) 去重，不同环境仍各自成项，且不影响人工等待', async () => {
-    // 测试意图：环境等待的 interactionId 恒为 null，若按 interactionId 去重会把所有环境等待并成一项；
+    // 测试意图：环境等待没有可操作调用主键，若按主键去重会把所有环境等待并成一项；
     // 只有按聚合身份去重才既剔除跨页重叠、又保留不同环境。
     vi.spyOn(interactionService, 'listInteractions')
       .mockResolvedValueOnce(mockPage([mockItem1, environmentWait('env-a', 2)], 'c2'))
@@ -666,7 +658,7 @@ describe('useInteractionsController', () => {
       await result.current.loadMore()
     })
 
-    // 人工等待各按 interactionId 保留；env-a 只保留先到的条目，env-b 独立成项。
+    // 人工等待各按调用主键保留；env-a 只保留先到的条目，env-b 独立成项。
     expect(result.current.items).toHaveLength(4)
     expect(result.current.items.map((item) => item.type)).toEqual([
       'INPUT',

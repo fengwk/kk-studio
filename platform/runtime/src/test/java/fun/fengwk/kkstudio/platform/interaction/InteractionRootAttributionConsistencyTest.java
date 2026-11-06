@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.platform.interaction;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
@@ -27,10 +28,10 @@ import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentService;
+import fun.fengwk.kkstudio.platform.harness.dto.InteractionDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.InteractionPageDTO;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwnerDisplay;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwnership;
-import fun.fengwk.kkstudio.share.interaction.InteractionDTO;
-import fun.fengwk.kkstudio.share.interaction.InteractionPageDTO;
 
 import java.time.Instant;
 import java.util.List;
@@ -112,12 +113,12 @@ class InteractionRootAttributionConsistencyTest {
     InteractionPageDTO page = queryService.listInteractions(null, null, 10);
 
     assertEquals(1, page.getItems().size());
-    InteractionDTO dto = page.getItems().get(0);
-    assertEquals(childThreadId.toString(), dto.getThreadId());
-    assertEquals(rootThreadId.toString(), dto.getRootThreadId());
-    assertEquals(issueId.toString(), dto.getOwner().getId());
-    assertEquals("ISSUE_AGENT", dto.getOwner().getKind());
-    assertEquals("issue", dto.getOwner().getTitle());
+    InteractionDTO.Input dto = assertInstanceOf(InteractionDTO.Input.class, page.getItems().get(0));
+    assertEquals(childThreadId.toString(), dto.threadId());
+    assertEquals(rootThreadId.toString(), dto.rootThreadId());
+    assertEquals(issueId.toString(), dto.owner().getId());
+    assertEquals("ISSUE_AGENT", dto.owner().getKind());
+    assertEquals("issue", dto.owner().getTitle());
 
     // 提交：同一点代来源的产品锁同样按根解析。
     ToolInputSubmissionCommand command =
@@ -171,10 +172,10 @@ class InteractionRootAttributionConsistencyTest {
     when(runtime.getThreadSnapshot(root)).thenReturn(snapshot);
 
     InteractionDTO dto = queryService.listInteractions(null, null, 10).getItems().get(0);
-    assertEquals("AGENT_TASK", dto.getOwner().getKind());
-    assertEquals(root.toString(), dto.getOwner().getId());
-    assertEquals("root name", dto.getOwner().getTitle());
-    assertNull(dto.getOwner().getLink());
+    assertEquals("AGENT_TASK", dto.owner().getKind());
+    assertEquals(root.toString(), dto.owner().getId());
+    assertEquals("root name", dto.owner().getTitle());
+    assertNull(dto.owner().getLink());
     verify(sessionOwnership).findOwner(root, session);
   }
 

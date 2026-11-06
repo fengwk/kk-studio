@@ -66,15 +66,15 @@ for (const scenario of ['pane-root', 'pane-child']) {
             approvalJson: null, resultJson: null, errorJson: null, createdAt: now, updatedAt: now,
           }],
         }
-      } else if (path === '/api/interactions') {
+      } else if (path === '/api/harness/interactions') {
         data = { items: [{
-          type: 'APPROVAL', interactionId: 'original-approval', status: 'WAITING_APPROVAL',
+          type: 'APPROVAL', toolInvocationId: 'original-approval',
           threadId: CHILD, rootThreadId: ROOT, sessionId: 'session-wait',
           owner: { kind: 'CHAT', id: 'chat-wait', title: null, link: '/chats/chat-wait' },
           toolCallId: 'approval-call', toolName: 'bash',
           argumentsJson: '{"command":"deploy --dry-run","workdir":"/srv/approval-workdir"}',
           approvalJson: '{"required":true,"reason":"Permission rules require approval"}',
-          environmentId: null, environmentName: null, waitingCount: null, createdAt: now,
+          createdAt: now,
         }], total: 1, nextCursor: null, freshnessAt: null }
       } else if (path.endsWith('/tree')) {
         data = [ROOT, CHILD].map((threadId) => ({

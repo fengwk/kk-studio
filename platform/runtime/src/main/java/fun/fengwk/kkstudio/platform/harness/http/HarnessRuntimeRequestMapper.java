@@ -11,7 +11,6 @@ import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.api.RenameSessionCommand;
 import fun.fengwk.kkstudio.harness.api.RenameThreadCommand;
 import fun.fengwk.kkstudio.harness.api.ToolApprovalCommand;
-import fun.fengwk.kkstudio.harness.api.ToolInputSubmissionCommand;
 import fun.fengwk.kkstudio.harness.api.command.GoalCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.SetAgentCommandPayload;
@@ -53,7 +52,6 @@ import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadYoloUpdateDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessToolApprovalDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessUserMessageContentDTO;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwner;
-import fun.fengwk.kkstudio.share.interaction.HarnessToolInputDTO;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -152,33 +150,6 @@ public final class HarnessRuntimeRequestMapper {
         Uuids.parseCanonical(dto.getDecisionId(), "decisionId"),
         requireText(actor, "actor"),
         dto.getReason());
-  }
-
-  /**
-   * 解析人工输入提交：{@code submissionId} 必须是 canonical UUID；{@code declined} 必须显式给出；拒答不得携带答案，非拒答必须给出
-   * 答案数组。目标 Thread 由请求体提供，调用方不预先假定其产品归属。操作者身份由服务端认证上下文提供，不从请求体读取。
-   */
-  public static ToolInputSubmissionCommand toToolInputSubmissionCommand(
-      String toolInvocationId, HarnessToolInputDTO dto, String actor) {
-    requireNonNull(dto, "toolInputDTO");
-    UUID submissionId = Uuids.parseCanonical(dto.getSubmissionId(), "submissionId");
-    boolean declined = requireBoolean(dto.getDeclined(), "declined");
-    List<List<String>> answers = dto.getAnswers();
-    if (declined) {
-      if (answers != null) {
-        throw new IllegalArgumentException("declined submission must not carry answers");
-      }
-      answers = List.of();
-    } else if (answers == null) {
-      throw new IllegalArgumentException("answers must not be null");
-    }
-    return new ToolInputSubmissionCommand(
-        Uuids.parseCanonical(dto.getThreadId(), "threadId"),
-        Uuids.parseCanonical(toolInvocationId, "toolInvocationId"),
-        submissionId,
-        requireText(actor, "actor"),
-        declined,
-        answers);
   }
 
   private static AcceptCommandsTarget toTarget(HarnessCommandTargetDTO dto) {

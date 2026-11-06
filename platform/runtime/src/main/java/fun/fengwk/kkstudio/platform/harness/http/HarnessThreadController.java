@@ -30,7 +30,6 @@ import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadTreeNodeDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadYoloUpdateDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessToolApprovalDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.ToolInvocationDTO;
-import fun.fengwk.kkstudio.platform.http.OperatorResolver;
 import fun.fengwk.kkstudio.platform.interaction.InteractionService;
 
 import java.util.List;

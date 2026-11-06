@@ -74,11 +74,11 @@ health、资源下载和 WebSocket 使用各自传输形式。公开路由如下
 | Chat | `/api/chats` | 由 [Chat](chat.md) 模块提供的 CRUD 与归属 Session；Web 只做装配 |
 | Harness command | `/api/harness/command-batches`、`/api/harness/threads/{threadId}/command-batches` | 创建型 Chat 命令接受（owner-aware）与既有 Thread 的 owner-free 续写；都返回 202 |
 | Session | `/api/harness/sessions/{sessionId}` | threads、entries（keyset 分页，含读取时 `usageCost`）与 name |
-| Session files | `/api/sessions/{sessionId}/files` | 只读会话文件面板：列目录、文本窗口（`/content`）、下载（`/download`）；按 `ownerKind` + `ownerId` 校验归属 |
+| Session files | `/api/harness/sessions/{sessionId}/files` | 只读会话文件面板：列目录、文本窗口（`/content`）、下载（`/download`）；会话坐标只在路径中，不携带产品 owner |
 | Thread | `/api/harness/threads/{threadId}` | Snapshot、执行树、name、compact、yolo、stop、tool approval |
 | Builtin | `/api/harness/builtin/...` | Model Request Debug、历史 Provider 请求重建与活动模型请求追帧 |
 | Agent task | `/api/agent-tasks`、`/{ticketId}`、`/{ticketId}/stop` | 提交独立执行的 Agent 任务（外部身份由 `ticketId`/`agent`/`prompt`/`maxTurns` 确定规范指纹，与 settings 无关；已存在票据校验指纹后直接重放而不重建物化配置，不同字段拒绝）、按票据观察状态与冻结结果、停止 |
-| Interaction | `/api/interactions` | 等待分页（`total` 是同一过滤条件下真实可见的待处理计数）与 `/{interactionId}/input` 人工提交 |
+| Interaction | `/api/harness/interactions`、`/api/harness/threads/{threadId}/tool-invocations/{toolInvocationId}/input` | 等待分页（条目是 `INPUT`/`APPROVAL`/`ENVIRONMENT_WAIT` 判别联合，`total` 是同一过滤条件下真实可见的待处理计数）与问卷回答/拒答提交 |
 | Canvas | `/api/canvases` | 创建、列表、Snapshot、commands、resource download/preview URL、节点 Function Run |
 | Function catalog | `/api/canvas-functions` | 函数 schema、输出计划、可用性 |
 | Storage | `/api/storage/uploads`、`/api/storage/blobs/{blobId}` | reserve/complete/delete 与短期 download/preview URL |
@@ -96,10 +96,11 @@ Driver、模型与 Variant 的校验和引用事务见 [Platform Catalog](platfo
 
 `POST /api/chats` 与 `PUT /api/chats/{chatId}` 的字段语义见 [Chat](chat.md)。
 
-会话文件面板是只读 HTTP：`GET /api/sessions/{sessionId}/files?ownerKind&ownerId&path` 列目录、
+会话文件面板是只读 HTTP：`GET /api/harness/sessions/{sessionId}/files?path` 列目录、
 `GET .../files/content?path&offset&limit&columnOffset` 返回有界文本窗口与 revision、大小、更新时间，
 `GET .../files/download?path` 返回完整字节并带附件文件名。`path` 使用 `vfs:/sessions/<sessionId>/...` 坐标且必须属于该 Session；
-未知 owner、越权与不存在的文件都返回 404，二进制或不可作为文本返回的内容返回 422。写操作只由文件工具发起，不在此开放。
+Session 不存在、跨会话路径与不存在的文件都返回 404，不可作为文本返回的内容以 `validation` + reason `SESSION_FILE_NOT_TEXT` 拒绝。
+写操作只由文件工具发起，不在此开放。
 
 Session 的 `GET /api/harness/sessions/{sessionId}/threads` 返回全部 Thread 摘要，包含执行根和子 Thread，不按名称去重。每项 `parentThreadId` 必须存在：根为 null，子为执行父 Thread 的 canonical UUID string；根与子同名时仍是独立摘要。
 

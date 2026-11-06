@@ -370,7 +370,7 @@ export async function runWorkspaceContractMatrix(ui) {
             try {
               await completedPreview.waitFor({ state: 'visible', timeout: 15_000 })
             } catch {
-              const interactions = await apiCtx.call('GET', `/api/interactions?rootThreadId=${encodeURIComponent(fixture.threadId)}`)
+              const interactions = await apiCtx.call('GET', `/api/harness/interactions?rootThreadId=${encodeURIComponent(fixture.threadId)}`)
               throw new Error(`edit review missing from approval: ${await approval.innerText()}; ${JSON.stringify(interactions.json)}`)
             }
             const completedText = await completedPreview.textContent() ?? ''
@@ -530,7 +530,7 @@ export async function runWorkspaceContractMatrix(ui) {
 
           const invocationId = cid()
           let decided = false
-          const interactionsMatcher = (url) => url.pathname === '/api/interactions'
+          const interactionsMatcher = (url) => url.pathname === '/api/harness/interactions'
             && url.searchParams.get('rootThreadId') === fixture.threadId
           const interactionsHandler = async (route) => {
             await route.fulfill({
@@ -539,8 +539,7 @@ export async function runWorkspaceContractMatrix(ui) {
               body: JSON.stringify({
                 items: decided ? [] : [{
                   type: 'APPROVAL',
-                  interactionId: invocationId,
-                  status: 'WAITING_APPROVAL',
+                  toolInvocationId: invocationId,
                   threadId: childThreadId,
                   rootThreadId: fixture.threadId,
                   sessionId: fixture.sessionId,
@@ -549,10 +548,7 @@ export async function runWorkspaceContractMatrix(ui) {
                   toolName: 'bash',
                   argumentsJson: '{"command":"echo approval"}',
                   approvalJson: JSON.stringify({ required: true, decision: null, reason: 'Permission rules require approval' }),
-                  environmentId: null,
-                  environmentName: null,
-                  waitingCount: null,
-                  createTime: 1,
+                  createdAt: 1,
                 }],
                 nextCursor: null,
                 total: decided ? 0 : 1,

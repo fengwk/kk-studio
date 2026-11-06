@@ -24,10 +24,8 @@ it('renders environment waits read-only without approval or questionnaire action
   const approve = vi.spyOn(harnessService, 'decideApproval')
   const item: InteractionDTO = {
     type: 'ENVIRONMENT_WAIT', rootThreadId: 'root', environmentId: 'env',
-    environmentName: 'archlinux', waitingCount: 2, createTime: 1780000000,
+    environmentName: 'archlinux', waitingCount: 2, createdAt: 1780000000000,
     owner: { kind: 'CHAT', id: 'chat', title: 'Chat', link: '/chats/chat' },
-    interactionId: null, status: null, threadId: null, sessionId: null,
-    toolCallId: null, toolName: null, argumentsJson: null, approvalJson: null,
   }
   render(<InteractionCardBody item={item} />)
   // 环境等待只有聚合身份：展示等待的环境与调用数，不出现任何可操作入口。
@@ -39,16 +37,15 @@ it('renders environment waits read-only without approval or questionnaire action
 
 it('renders and submits a long questionnaire without truncating questions, options or answers', async () => {
   const submit = vi.spyOn(interactionService, 'submitToolInput').mockResolvedValue({
-    threadId: 'th-1', interactionId: 'int-long', submissionId: 'sub-long',
-    actor: 'local-user', acceptedAt: 1790467200, materialized: false,
+    threadId: 'th-1', toolInvocationId: 'int-long', submissionId: 'sub-long',
+    actor: 'local-user', acceptedAt: 1790467200000, materialized: false,
   })
   const item: InteractionDTO = {
-    type: 'INPUT', status: 'WAITING_INPUT', rootThreadId: 'root',
-    interactionId: 'int-long', threadId: 'th-1', sessionId: 's-1',
+    type: 'INPUT', rootThreadId: 'root',
+    toolInvocationId: 'int-long', threadId: 'th-1', sessionId: 's-1',
     toolCallId: 'call-1', toolName: 'ask_user',
     argumentsJson: LONG_QUESTIONNAIRE_JSON,
-    approvalJson: null, environmentId: null, environmentName: null, waitingCount: null,
-    createTime: 1780000000,
+    createdAt: 1780000000000,
     owner: { kind: 'CHAT', id: 'chat', title: 'Chat', link: '/chats/chat' },
   }
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -86,8 +83,12 @@ it('renders and submits a long questionnaire without truncating questions, optio
   await waitFor(() => {
     expect(submit).toHaveBeenCalledTimes(1)
   })
-  // 长答案原样提交、不截断、不静默降级。
-  const body = submit.mock.calls[0][1]
-  expect(body.answers).toHaveLength(LONG_QUESTION_COUNT)
-  expect(body.answers).toEqual(Array.from({ length: LONG_QUESTION_COUNT }, () => [LONG_ANSWER]))
+  // 路径定位目标调用；长答案原样提交、不截断、不静默降级。
+  const [threadId, toolInvocationId, body] = submit.mock.calls[0]!
+  expect(threadId).toBe('th-1')
+  expect(toolInvocationId).toBe('int-long')
+  expect(body).toMatchObject({ type: 'ANSWER' })
+  const answers = body.type === 'ANSWER' ? body.answers : []
+  expect(answers).toHaveLength(LONG_QUESTION_COUNT)
+  expect(answers).toEqual(Array.from({ length: LONG_QUESTION_COUNT }, () => [LONG_ANSWER]))
 })

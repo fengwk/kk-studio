@@ -392,7 +392,7 @@ describe('ThreadWorkspacePage', () => {
   })
 
   it('aggregates a descendant approval in the root pane and writes back to the original invocation', async () => {
-    // 子 Thread 不内联审批：根面板通过 GET /interactions?rootThreadId= 汇聚待决审批，
+    // 子 Thread 不内联审批：根面板通过 GET /api/harness/interactions?rootThreadId= 汇聚待决审批，
     // 决策仍写回原始来源 Thread 与 invocation。
     const user = userEvent.setup()
     const rootId = '00000000-0000-4000-8000-000000000010'
@@ -410,8 +410,7 @@ describe('ThreadWorkspacePage', () => {
     vi.mocked(interactionService.listInteractions).mockResolvedValue({
       items: [{
         type: 'APPROVAL',
-        interactionId: 'inv-bash-1',
-        status: 'WAITING_APPROVAL',
+        toolInvocationId: 'inv-bash-1',
         threadId: CHILD_THREAD_ID,
         rootThreadId: rootId,
         sessionId: 'session-child',
@@ -420,10 +419,7 @@ describe('ThreadWorkspacePage', () => {
         toolName: 'bash',
         argumentsJson: '{"command":"rm -rf /tmp/test"}',
         approvalJson: JSON.stringify({ reason: '需要确认', decision: null }),
-        environmentId: null,
-        environmentName: null,
-        waitingCount: null,
-        createTime: 1785232801,
+        createdAt: 1785232801000,
       }],
       nextCursor: null,
       total: 1,

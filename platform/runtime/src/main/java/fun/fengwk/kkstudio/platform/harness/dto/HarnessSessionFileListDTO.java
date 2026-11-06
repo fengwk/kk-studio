@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.share.runtime;
+package fun.fengwk.kkstudio.platform.harness.dto;
 
 import lombok.Data;
 

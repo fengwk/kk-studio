@@ -6,7 +6,6 @@ import { ApiError } from '@/shared/api/client'
 import { SessionFilesDialog } from '@/features/chat/session-files/SessionFilesDialog'
 import {
   sessionFileService,
-  type SessionFileOwner,
   type SessionFileTextWindow,
 } from '@/shared/api/session-file-service'
 import type {
@@ -23,7 +22,6 @@ vi.mock('@/shared/api/session-file-service', () => ({
 }))
 
 const SESSION_ID = '11111111-2222-4333-8444-555555555555'
-const OWNER: SessionFileOwner = { kind: 'CHAT', id: 'a1000000-0000-4000-8000-000000000001' }
 const SESSION_ROOT = `vfs:/sessions/${SESSION_ID}/`
 
 function listing(path: string, entries: HarnessSessionFileListDTO['entries']): HarnessSessionFileListDTO {
@@ -32,14 +30,14 @@ function listing(path: string, entries: HarnessSessionFileListDTO['entries']): H
 
 const ROOT_LISTING = listing(SESSION_ROOT, [
   { name: 'docs/', path: 'docs/', directory: true },
-  { name: 'notes.txt', path: 'notes.txt', directory: false, sizeBytes: '42', revision: 1, updatedAt: '1790812800000' },
-  { name: 'photo.png', path: 'photo.png', directory: false, sizeBytes: '68', revision: 1, updatedAt: '1790812800000' },
-  { name: 'binary.bin', path: 'binary.bin', directory: false, sizeBytes: '4', revision: 1, updatedAt: '1790812800000' },
-  { name: 'missing.txt', path: 'missing.txt', directory: false, sizeBytes: '1', revision: 1, updatedAt: '1790812800000' },
+  { name: 'notes.txt', path: 'notes.txt', directory: false, sizeBytes: '42', revision: 1, updatedAt: 1790812800000 },
+  { name: 'photo.png', path: 'photo.png', directory: false, sizeBytes: '68', revision: 1, updatedAt: 1790812800000 },
+  { name: 'binary.bin', path: 'binary.bin', directory: false, sizeBytes: '4', revision: 1, updatedAt: 1790812800000 },
+  { name: 'missing.txt', path: 'missing.txt', directory: false, sizeBytes: '1', revision: 1, updatedAt: 1790812800000 },
 ])
 
 const DOCS_LISTING = listing(`${SESSION_ROOT}docs/`, [
-  { name: 'readme.md', path: 'docs/readme.md', directory: false, sizeBytes: '12', revision: 1, updatedAt: '1790812800000' },
+  { name: 'readme.md', path: 'docs/readme.md', directory: false, sizeBytes: '12', revision: 1, updatedAt: 1790812800000 },
 ])
 
 function content(text: string, path: string): HarnessSessionFileContentDTO {
@@ -48,7 +46,7 @@ function content(text: string, path: string): HarnessSessionFileContentDTO {
     path,
     sizeBytes: '64',
     revision: 2,
-    updatedAt: '1790812800000',
+    updatedAt: 1790812800000,
     text,
   }
 }
@@ -80,7 +78,7 @@ function renderDialog() {
   const onClose = vi.fn()
   render(
     <QueryClientProvider client={client}>
-      <SessionFilesDialog sessionId={SESSION_ID} owner={OWNER} onClose={onClose} />
+      <SessionFilesDialog sessionId={SESSION_ID} onClose={onClose} />
     </QueryClientProvider>,
   )
   return { onClose }
@@ -92,7 +90,7 @@ describe('SessionFilesDialog', () => {
     vi.mocked(sessionFileService.readSessionFileContent).mockReset()
     vi.mocked(sessionFileService.downloadSessionFile).mockReset()
 
-    vi.mocked(sessionFileService.listSessionFiles).mockImplementation(async (_sessionId, _owner, path) => {
+    vi.mocked(sessionFileService.listSessionFiles).mockImplementation(async (_sessionId, path) => {
       if (path == null) {
         return ROOT_LISTING
       }
@@ -102,14 +100,14 @@ describe('SessionFilesDialog', () => {
       throw new ApiError('No such directory', 404, 'NOT_FOUND')
     })
     vi.mocked(sessionFileService.readSessionFileContent).mockImplementation(
-      async (_sessionId, _owner, path, window?: SessionFileTextWindow) => {
+      async (_sessionId, path, window?: SessionFileTextWindow) => {
         if (path.endsWith('/missing.txt')) {
           throw new ApiError('The requested resource was not found.', 404, 'not_found',
             undefined, undefined, `No such file: ${path}`)
         }
         if (path.endsWith('/binary.bin')) {
-          throw new ApiError('HTTP error (status 422).', 422, 'validation',
-            undefined, undefined, 'file appears to be binary')
+          throw new ApiError('HTTP error (status 400).', 400, 'validation',
+            undefined, 'SESSION_FILE_NOT_TEXT', 'file appears to be binary')
         }
         return window?.offset === 3 ? SECOND_WINDOW : FIRST_WINDOW
       },
@@ -130,19 +128,18 @@ describe('SessionFilesDialog', () => {
 
     expect(await screen.findByTitle('docs/')).toBeVisible()
     expect(screen.getByTitle('notes.txt')).toBeVisible()
-    expect(sessionFileService.listSessionFiles).toHaveBeenCalledWith(SESSION_ID, OWNER, undefined)
+    expect(sessionFileService.listSessionFiles).toHaveBeenCalledWith(SESSION_ID, undefined)
 
     await user.click(screen.getByTitle('docs/'))
     expect(await screen.findByTitle('docs/readme.md')).toBeVisible()
     expect(sessionFileService.listSessionFiles).toHaveBeenLastCalledWith(
       SESSION_ID,
-      OWNER,
       `${SESSION_ROOT}docs/`,
     )
 
     await user.click(screen.getByTestId('session-files-up'))
     expect(await screen.findByTitle('notes.txt')).toBeVisible()
-    expect(sessionFileService.listSessionFiles).toHaveBeenLastCalledWith(SESSION_ID, OWNER, undefined)
+    expect(sessionFileService.listSessionFiles).toHaveBeenLastCalledWith(SESSION_ID, undefined)
   })
 
   /**
@@ -163,7 +160,6 @@ describe('SessionFilesDialog', () => {
     expect(screen.getByTestId('session-files-range')).toHaveTextContent('行 1:1-2:9')
     expect(sessionFileService.readSessionFileContent).toHaveBeenCalledWith(
       SESSION_ID,
-      OWNER,
       `${SESSION_ROOT}notes.txt`,
       { offset: 1, columnOffset: 1, limit: 500 },
     )
@@ -174,7 +170,6 @@ describe('SessionFilesDialog', () => {
     })
     expect(sessionFileService.readSessionFileContent).toHaveBeenLastCalledWith(
       SESSION_ID,
-      OWNER,
       `${SESSION_ROOT}notes.txt`,
       { offset: 3, columnOffset: 1, limit: 500 },
     )
@@ -226,7 +221,6 @@ describe('SessionFilesDialog', () => {
     await waitFor(() => {
       expect(sessionFileService.downloadSessionFile).toHaveBeenCalledWith(
         SESSION_ID,
-        OWNER,
         `${SESSION_ROOT}photo.png`,
       )
     })

@@ -94,7 +94,7 @@ export function InteractionsPage() {
                   <InteractionCardBody
                     item={item}
                     onSuccess={item.type === 'ENVIRONMENT_WAIT'
-                      ? undefined : () => removeItem(item.interactionId!)}
+                      ? undefined : () => removeItem(item.toolInvocationId)}
                   />
                 </div>
               </div>

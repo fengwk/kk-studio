@@ -53,34 +53,26 @@ interface PendingApiState {
 function buildItems(): InteractionDTO[] {
   return [
     {
-      interactionId: APPROVAL_INTERACTION_ID,
+      toolInvocationId: APPROVAL_INTERACTION_ID,
       type: 'APPROVAL',
-      status: 'WAITING_APPROVAL',
       threadId: 'thread-approval',
       rootThreadId: APPROVAL_ROOT_ID,
       sessionId: 'session-approval',
       owner: { kind: 'CHAT', id: 'chat-pending', title: '迁移审批', link: '/chats/chat-pending' },
-      environmentId: null,
-      environmentName: null,
-      waitingCount: null,
       toolCallId: 'call-approval',
       toolName: 'bash',
       argumentsJson: LONG_ARGUMENTS,
       approvalJson: JSON.stringify({ required: true, reason: LONG_REASON }),
-      createTime: 1791194220,
+      createdAt: 1791194220000,
     },
     {
-      interactionId: QUESTIONNAIRE_INTERACTION_ID,
+      toolInvocationId: QUESTIONNAIRE_INTERACTION_ID,
       type: 'INPUT',
-      status: 'WAITING_INPUT',
       threadId: 'thread-questionnaire',
       rootThreadId: QUESTIONNAIRE_ROOT_ID,
       sessionId: 'session-questionnaire',
       owner: { kind: 'ISSUE_AGENT', id: `${ISSUE_ID}:architect`, title: '迁移策略',
         link: `/projects/${PROJECT_ID}?issue=${ISSUE_ID}` },
-      environmentId: null,
-      environmentName: null,
-      waitingCount: null,
       toolCallId: 'call-questionnaire',
       toolName: 'ask_user',
       argumentsJson: JSON.stringify({
@@ -107,25 +99,16 @@ function buildItems(): InteractionDTO[] {
           { question: '补充说明（可自定义）', options: [] },
         ],
       }),
-      approvalJson: null,
-      createTime: 1791194280,
+      createdAt: 1791194280000,
     },
     {
       type: 'ENVIRONMENT_WAIT',
-      interactionId: null,
-      status: null,
-      threadId: null,
       rootThreadId: ENVIRONMENT_ROOT_ID,
-      sessionId: null,
       owner: { kind: 'CHAT', id: 'chat-environment', title: '等待迁移环境', link: '/chats/chat-environment' },
-      toolCallId: null,
-      toolName: null,
-      argumentsJson: null,
-      approvalJson: null,
       environmentId: 'a0000000-0000-0000-0000-00000000a001',
       environmentName: 'migration-node',
       waitingCount: 2,
-      createTime: 1791194340,
+      createdAt: 1791194340000,
     },
   ]
 }
@@ -155,11 +138,12 @@ async function mockPendingApi(page: Page, options: PendingApiOptions = {}): Prom
       // 决策只写原始调用；任何容器/目标 Thread 写入（包括未 mock 的请求）都必须失败。
       if (method !== 'GET'
         && !(method === 'PUT' && requestPath === '/api/harness/threads/thread-approval/tool-invocations/int-approval/approval')
-        && !(method === 'POST' && requestPath === '/api/interactions/int-questionnaire/input')) {
+        && !(method === 'POST'
+          && requestPath === '/api/harness/threads/thread-questionnaire/tool-invocations/int-questionnaire/input')) {
         targetWrites.push(`${method} ${requestPath}`)
       }
 
-      if (requestPath === '/api/interactions' && method === 'GET') {
+      if (requestPath === '/api/harness/interactions' && method === 'GET') {
         await options.listGate
         state.listCalls += 1
         if (options.failFirstList && state.listCalls === 1) {
@@ -171,8 +155,8 @@ async function mockPendingApi(page: Page, options: PendingApiOptions = {}): Prom
           return
         }
         const allItems = (options.empty ? [] : buildItems()).filter((item) => item.type === 'ENVIRONMENT_WAIT'
-          || (!state.decidedApprovals.has(item.interactionId!)
-          && !state.answeredQuestionnaires.has(item.interactionId!)))
+          || (!state.decidedApprovals.has(item.toolInvocationId)
+          && !state.answeredQuestionnaires.has(item.toolInvocationId)))
         const cursor = new URL(request.url()).searchParams.get('cursor')
         if (cursor && options.failFirstNextPage && !nextPageFailed) {
           nextPageFailed = true
@@ -225,17 +209,17 @@ async function mockPendingApi(page: Page, options: PendingApiOptions = {}): Prom
           url: request.url(),
           body: request.postDataJSON() as Record<string, unknown>,
         })
-        const interactionId = requestPath.split('/interactions/')[1]?.split('/')[0]
-        if (interactionId) {
-          state.answeredQuestionnaires.add(decodeURIComponent(interactionId))
+        const toolInvocationId = requestPath.split('/tool-invocations/')[1]?.split('/')[0]
+        if (toolInvocationId) {
+          state.answeredQuestionnaires.add(decodeURIComponent(toolInvocationId))
         }
         await route.fulfill({
           json: {
               threadId: 'thread-questionnaire',
-              interactionId: QUESTIONNAIRE_INTERACTION_ID,
+              toolInvocationId: QUESTIONNAIRE_INTERACTION_ID,
               submissionId: 'sub-1',
               actor: 'user',
-              acceptedAt: 1791194400,
+              acceptedAt: 1791194400000,
               materialized: true,
           },
         })
@@ -468,7 +452,7 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
     await expect(card.getByRole('button', { name: 'Chat · 等待迁移环境' })).toBeVisible()
     const refresh = page.getByRole('button', { name: '刷新', exact: true })
     const refreshed = page.waitForResponse((response) =>
-      new URL(response.url()).pathname === '/api/interactions'
+      new URL(response.url()).pathname === '/api/harness/interactions'
       && response.request().method() === 'GET')
     await refresh.click()
     await refreshed
@@ -624,10 +608,12 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
 
     await expect(page.locator('.interaction-questionnaire-card')).toHaveCount(0)
     expect(submissions).toHaveLength(1)
-    expect(submissions[0].url).toContain('/api/interactions/int-questionnaire/input')
+    expect(submissions[0].url).toContain(
+      '/api/harness/threads/thread-questionnaire/tool-invocations/int-questionnaire/input',
+    )
     expect(submissions[0].body).toMatchObject({
-      threadId: 'thread-questionnaire',
-      declined: false,
+      type: 'ANSWER',
+      submissionId: expect.any(String),
     })
     expect(submissions[0].body.answers).toEqual([
       [LONG_OPTION_LABEL],

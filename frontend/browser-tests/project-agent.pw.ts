@@ -260,7 +260,7 @@ test.describe('Project Agent Real Browser Wiring & Control Gatekeeping', () => {
           await route.fulfill({ json: [] })
           return
         }
-        if (path === '/api/interactions' && method === 'GET') {
+        if (path === '/api/harness/interactions' && method === 'GET') {
           await route.fulfill({
             json: { items: [], nextCursor: null, total: 0, freshnessAt: null },
           })

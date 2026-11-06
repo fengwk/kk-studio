@@ -156,12 +156,13 @@ export function QuestionnaireCard({
   ) => {
     interactionDraftStore.setSubmitting(interactionId, true)
     try {
-      const res = await interactionService.submitToolInput(interactionId, {
+      const res = await interactionService.submitToolInput(
         threadId,
-        submissionId,
-        answers,
-        declined,
-      })
+        interactionId,
+        declined
+          ? { type: 'DECLINE', submissionId }
+          : { type: 'ANSWER', submissionId, answers: answers ?? [] },
+      )
       // 提交成功，清理草稿并刷新 queries
       interactionDraftStore.clearDraft(interactionId)
       await Promise.all([

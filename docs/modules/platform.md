@@ -248,18 +248,20 @@ subscriber 独立围栏保证关闭后不再回调，用户回调在全局锁外
 
 ## 待处理交互
 
-`GET /api/interactions` 合并三类待处理事项：`INPUT`、`APPROVAL` 与只读
+`GET /api/harness/interactions` 合并三类待处理事项：`INPUT`、`APPROVAL` 与只读
 `ENVIRONMENT_WAIT`。前两类携带原始 ToolInvocation、Thread 与冻结 ToolCall，
-提交始终回写原始调用；环境等待没有调用主键，所有可操作字段显式为 null，不提供确认、
+提交始终回写原始调用；环境等待没有调用主键，判别联合只为它声明聚合字段，不提供确认、
 允许或拒绝入口。前端按 `type` 判别，环境等待使用 `(rootThreadId, environmentId)` 去重；
 根面板只渲染可操作的人工等待，不重复渲染第二张环境提醒卡，也不伪造可回写的调用。
+问卷与拒答提交到 `/api/harness/threads/{threadId}/tool-invocations/{toolInvocationId}/input`，
+请求体是 `ANSWER`/`DECLINE` 联合，目标线程与调用都在路径中。
 
 环境等待不是新的持久状态：只有 READY 调用存在已到领取时间、没有有效执行租约的
 环境亲和 TOOL Work，且所需环境没有有效 READY 连接租约时才进入查询。
 沿永久父链找到真实执行根，再按根与冻结环境聚合，`waitingCount` 是组内调用数。
 Harness 只读取调用和 Work 事实，在分页之前完成分组；平台环境服务用数据库时间判断
 READY 租约并补齐名称，过滤在线环境后继续扫描候选，确保跨页不拆分同一分组。
-分组用最早调用的 `(createTime, id)` 排序，与人工等待做 keyset 归并；`total` 是
+分组用最早调用的 `(createdAt, id)` 排序，与人工等待做 keyset 归并；`total` 是
 同一根过滤条件下的完整可见待处理数，不是当前页长度。产品归属按根解析为 `CHAT`、`ISSUE_AGENT`，
 或控制器/插件发起、没有产品页面的独立任务 `AGENT_TASK`（带 Agent 名与根 Thread 名，只在交互中心处理）；
 其余无法解析归属的根不暴露。
@@ -533,7 +535,7 @@ Daemon 字节走对象存储直传，控制协议见 [Harness Environment](harne
 `edit` 用读到的 revision 做条件更新，冲突是确定失败而不是不确定执行。
 
 [`SessionFileQueryService`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/vfs/SessionFileQueryService.java)
-为会话文件面板提供只读查询：列会话目录、读取有界文本窗口与下载完整字节，全部先按产品 owner 校验 Session 归属；
+为会话文件面板提供只读查询：列会话目录、读取有界文本窗口与下载完整字节，全部先验证 Session 存在；
 HTTP 契约见 [Web](web.md)。
 
 ## Environment

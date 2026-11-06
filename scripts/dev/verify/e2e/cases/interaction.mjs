@@ -27,11 +27,10 @@ const registerCase = createCaseAdder(cases)
 
 const UUID_TEXT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
-/** InteractionDTO 精确字段集合：Pane 跳转与回答所需的最小事实。 */
-const INTERACTION_FIELDS = [
+/** 人工等待条目的精确字段集合：Pane 跳转与回答所需的最小事实（判别联合的一个分支）。 */
+const INPUT_FIELDS = [
   'type',
-  'interactionId',
-  'status',
+  'toolInvocationId',
   'threadId',
   'sessionId',
   'rootThreadId',
@@ -39,12 +38,24 @@ const INTERACTION_FIELDS = [
   'toolCallId',
   'toolName',
   'argumentsJson',
-  'approvalJson',
+  'createdAt',
+]
+
+/** 环境等待条目的精确字段集合：只有聚合身份，没有可操作调用主键。 */
+const ENVIRONMENT_WAIT_FIELDS = [
+  'type',
+  'rootThreadId',
+  'owner',
   'environmentId',
   'environmentName',
   'waitingCount',
-  'createTime',
+  'createdAt',
 ]
+
+/** 按判别属性返回该条目必须精确出现的字段。 */
+function interactionFields(item) {
+  return item.type === 'ENVIRONMENT_WAIT' ? ENVIRONMENT_WAIT_FIELDS : INPUT_FIELDS
+}
 
 /**
  * InteractionPageDTO 精确字段集合：total 是同一过滤条件下的真实待处理总数，与当前页长度无关；
@@ -53,18 +64,22 @@ const INTERACTION_FIELDS = [
 const INTERACTION_PAGE_FIELDS = ['items', 'nextCursor', 'total', 'freshnessAt']
 
 const OWNER_FIELDS = ['kind', 'id', 'title', 'link']
-const RECEIPT_FIELDS = ['threadId', 'interactionId', 'submissionId', 'actor', 'acceptedAt', 'materialized']
+const RECEIPT_FIELDS = [
+  'threadId',
+  'toolInvocationId',
+  'submissionId',
+  'actor',
+  'acceptedAt',
+  'materialized',
+]
 
-function instantMillis(value) {
-  if (typeof value === 'number') {
-    assert(Number.isInteger(value) && value >= 0, `invalid epoch-millisecond instant: ${value}`)
-    return value
-  }
+/** 服务端 Instant 是 epoch 毫秒整数；小数或负数都不是合法时刻。 */
+function assertInstant(value) {
   assert(
-    typeof value === 'string' && Number.isFinite(Date.parse(value)),
-    `invalid ISO instant: ${JSON.stringify(value)}`,
+    typeof value === 'number' && Number.isInteger(value) && value >= 0,
+    `invalid epoch-millisecond instant: ${JSON.stringify(value)}`,
   )
-  return Date.parse(value)
+  return value
 }
 
 function parseArguments(interaction) {
@@ -76,11 +91,10 @@ function assertInteraction(
   interaction,
   { threadId, rootThreadId, sessionId, chatId, chatTitle, questionnaire, label },
 ) {
-  assertExactFields(interaction, INTERACTION_FIELDS, `${label} interaction`)
+  assertExactFields(interaction, INPUT_FIELDS, `${label} interaction`)
   assert(
     interaction.type === 'INPUT'
-      && UUID_TEXT.test(interaction.interactionId)
-      && interaction.status === 'WAITING_INPUT'
+      && UUID_TEXT.test(interaction.toolInvocationId)
       && interaction.threadId === threadId
       && interaction.sessionId === sessionId
       // 来源 Thread 保持原始坐标；本 case 只有一条执行根，rootThreadId 必须指向它。
@@ -88,11 +102,7 @@ function assertInteraction(
       && interaction.toolName === 'ask_user'
       && typeof interaction.toolCallId === 'string'
       && interaction.toolCallId.trim().length > 0
-      && interaction.approvalJson === null
-      && interaction.environmentId === null
-      && interaction.environmentName === null
-      && interaction.waitingCount === null
-      && instantMillis(interaction.createTime) >= 0,
+      && assertInstant(interaction.createdAt) >= 0,
     JSON.stringify(interaction),
   )
   assertExactFields(interaction.owner, OWNER_FIELDS, `${label} interaction owner`)
@@ -111,7 +121,7 @@ function assertInteraction(
 }
 
 /**
- * 以 keyset 游标遍历待处理 Interaction 全集，同时校验分页不变量：页内按 createTime 升序、跨页 id 唯一、
+ * 以 keyset 游标遍历待处理 Interaction 全集，同时校验分页不变量：页内按 createdAt 升序、跨页主键唯一、
  * 继续翻页必须给出非空游标（服务端只在源耗尽时返回 null）。
  */
 async function collectInteractions(ctx, { pageSize = 100, maxPages = 20, rootThreadId = null } = {}) {
@@ -122,11 +132,16 @@ async function collectInteractions(ctx, { pageSize = 100, maxPages = 20, rootThr
   for (let page = 0; page < maxPages; page++) {
     const filter = rootThreadId ? `&rootThreadId=${encodeURIComponent(rootThreadId)}` : ''
     const query = `?limit=${pageSize}${filter}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`
-    const page$ = (await ctx.call('GET', `/api/interactions${query}`)).json
-    assertExactFields(page$, INTERACTION_PAGE_FIELDS, 'interaction page')
-    // freshnessAt 是 required-nullable 的权威回读时刻：无时间驱动变更时为 null，有值必须是合法服务端时刻。
-    if (page$.freshnessAt !== null) {
-      instantMillis(page$.freshnessAt)
+    const page$ = (await ctx.call('GET', `/api/harness/interactions${query}`)).json
+    // nextCursor 与 freshnessAt 是可空的可选字段：NON_NULL 序列化在空值时省略，按「省略即 null」归一后再做精确字段校验。
+    assertExactFields(
+      { nextCursor: null, freshnessAt: null, ...page$ },
+      INTERACTION_PAGE_FIELDS,
+      'interaction page',
+    )
+    // freshnessAt 是可选的服务端权威回读时刻：省略表示没有时间驱动的变更。
+    if (page$.freshnessAt != null) {
+      assertInstant(page$.freshnessAt)
     }
     assert(Array.isArray(page$.items), JSON.stringify(page$))
     assert(page$.items.length <= pageSize, JSON.stringify(page$))
@@ -146,21 +161,24 @@ async function collectInteractions(ctx, { pageSize = 100, maxPages = 20, rootThr
     total = page$.total
     for (let index = 0; index < page$.items.length; index++) {
       const interaction = page$.items[index]
-      assertExactFields(interaction, INTERACTION_FIELDS, 'interaction')
-      assert(!seen.has(interaction.interactionId), `duplicate interaction across pages: ${interaction.interactionId}`)
-      seen.add(interaction.interactionId)
+      assertExactFields(interaction, interactionFields(interaction), 'interaction')
+      const identity = interaction.type === 'ENVIRONMENT_WAIT'
+        ? `environment:${interaction.rootThreadId}:${interaction.environmentId}`
+        : `invocation:${interaction.toolInvocationId}`
+      assert(!seen.has(identity), `duplicate interaction across pages: ${identity}`)
+      seen.add(identity)
       if (index > 0) {
-        const previous = page$.items[index - 1]
-        const order = instantMillis(previous.createTime) - instantMillis(interaction.createTime)
+        // keyset 只保证 createdAt 不降序；同时刻的条目按代表调用 id 排序，但不是本 case 需要断言的事实。
+        const order =
+          assertInstant(page$.items[index - 1].createdAt) - assertInstant(interaction.createdAt)
         assert(
-          order <= 0
-            || (order === 0 && previous.interactionId <= interaction.interactionId),
-          `interactions must be ordered by (createTime, interactionId): ${JSON.stringify([previous, interaction])}`,
+          order <= 0,
+          `interactions must be ordered by createdAt: ${JSON.stringify([page$.items[index - 1], interaction])}`,
         )
       }
       items.push(interaction)
     }
-    if (page$.nextCursor === null) {
+    if (page$.nextCursor == null) {
       assert(page$.items.length < pageSize, `exhausted page must not be full: ${JSON.stringify(page$)}`)
       return items
     }
@@ -185,17 +203,17 @@ async function waitForPendingInteraction(ctx, { threadId, timeoutMs = 60_000 }) 
   throw new Error(`pending interaction never appeared for thread ${threadId}: ${JSON.stringify(last)}`)
 }
 
-async function waitForInteractionGone(ctx, interactionId, { timeoutMs = 30_000 } = {}) {
+async function waitForInteractionGone(ctx, toolInvocationId, { timeoutMs = 30_000 } = {}) {
   const deadline = Date.now() + timeoutMs
   let last = null
   while (Date.now() <= deadline) {
     last = await collectInteractions(ctx)
-    if (!last.some((interaction) => interaction.interactionId === interactionId)) {
+    if (!last.some((interaction) => interaction.toolInvocationId === toolInvocationId)) {
       return
     }
     await sleep(200)
   }
-  throw new Error(`interaction ${interactionId} stayed pending: ${JSON.stringify(last)}`)
+  throw new Error(`interaction ${toolInvocationId} stayed pending: ${JSON.stringify(last)}`)
 }
 
 registerCase({
@@ -204,7 +222,7 @@ registerCase({
   // 本 case 把 Provider baseUrl 指向 case 内自建的宿主 127.0.0.1 mock；distributed 容器内无法回连宿主 loopback。
   requires: ['host-mock'],
   title: '统一人工交互 API：ask_user 待处理列表、答案物化与门禁',
-  docs: '本地 OpenAI SSE mock 触发内置 ask_user（Runtime 按 provenance 冻结为 WAITING_INPUT，不进审批）：GET /api/interactions 返回仅含 Chat/Issue+Agent 归属的 (createTime,interactionId) 升序 keyset 分页（limit 默认 50、[1,100]、非法参数 400），页内含与分页位置无关的真实可见待处理总数 total，并携带 required-nullable 的权威回读时刻 freshnessAt（本 case 无环境 Tool 等待时为 null）；可选 rootThreadId 按执行根过滤（返回该根及其后代，响应项保留来源 threadId/sessionId 并给出 rootThreadId；不存在的根 404、非法 canonical 400），非法 rootThreadId 或缺省过滤下的 total 与可见集一致；INPUT 条目携带冻结问卷原文与归属，approvalJson 及环境聚合字段显式为 null，owner 展示名取自 Chat 与执行根 Thread 的权威数据；POST /api/interactions/{id}/input 严格校验 threadId/submissionId/declined/answers（缺失、未知字段、拒答携带答案 400；答案不满足冻结问卷 409；未知目标 409），接受后同 submissionId 精确重放 materialized=true，换 submissionId 409；回答物化为 ToolResult 后交互消失、Thread 以答案收敛',
+  docs: '本地 OpenAI SSE mock 触发内置 ask_user（Runtime 按 provenance 冻结为 WAITING_INPUT，不进审批）：GET /api/harness/interactions 返回仅含 Chat/Issue+Agent 归属的 (createdAt, invocation) 升序 keyset 分页（limit 默认 50、[1,100]、非法参数 400），页内含与分页位置无关的真实可见待处理总数 total，并携带可省略的权威回读时刻 freshnessAt（本 case 无环境 Tool 等待时省略）；可选 rootThreadId 按执行根过滤（返回该根及其后代，响应项保留来源 threadId/sessionId 并给出 rootThreadId；不存在的根 404、非法 canonical 400），非法 rootThreadId 或缺省过滤下的 total 与可见集一致；INPUT 条目是判别联合分支，只携带冻结问卷原文、调用坐标与归属（没有审批或环境聚合字段），owner 展示名取自 Chat 与执行根 Thread 的权威数据；POST /api/harness/threads/{threadId}/tool-invocations/{toolInvocationId}/input 的请求体是 ANSWER / DECLINE 联合（未知字段、缺失 submissionId/answers、DECLINE 携带答案 400；答案不满足冻结问卷 409；未知目标 409），接受后同 submissionId 精确重放 materialized=true，换 submissionId 409；回答物化为 ToolResult 后交互消失、Thread 以答案收敛',
   async run(ctx) {
     const suffix = cid().slice(0, 8)
     const marker = `INTERACTION-PENDING-${suffix}`
@@ -286,7 +304,9 @@ registerCase({
 
       // 分页参数边界：limit 必须落在 [1,100]，cursor 必须是服务端给出的 keyset。
       for (const query of ['?limit=0', '?limit=101', '?limit=abc', '?cursor=not-a-cursor']) {
-        await expectHttpError(() => ctx.call('GET', `/api/interactions${query}`), { status: 400 })
+        await expectHttpError(() => ctx.call('GET', `/api/harness/interactions${query}`), {
+          status: 400,
+        })
       }
 
       const sessionId = cid()
@@ -324,15 +344,15 @@ registerCase({
       const filtered = (
           await ctx.call(
             'GET',
-            `/api/interactions?limit=100&rootThreadId=${encodeURIComponent(threadId)}`,
+            `/api/harness/interactions?limit=100&rootThreadId=${encodeURIComponent(threadId)}`,
           )
         ).json
       assertExactFields(filtered, INTERACTION_PAGE_FIELDS, 'root-filtered interaction page')
       // 本 case 的等待全部来自本地 ask_user，没有任何 Environment Tool 等待，因此不存在时间驱动的环境等待变更时刻。
-      assert(filtered.freshnessAt === null, JSON.stringify(filtered.freshnessAt))
+      assert(filtered.freshnessAt == null, JSON.stringify(filtered.freshnessAt))
       assert(
         filtered.items.length === 1
-          && filtered.items[0].interactionId === pending.interactionId
+          && filtered.items[0].toolInvocationId === pending.toolInvocationId
           && filtered.items[0].threadId === threadId
           && filtered.items[0].rootThreadId === threadId
           && filtered.total === 1,
@@ -340,60 +360,63 @@ registerCase({
       )
       // 过滤器身份必须是已存在的执行根：不存在的 Thread 404，非法 canonical 与非根 400。
       await expectHttpError(
-        () => ctx.call('GET', `/api/interactions?rootThreadId=${cid()}`),
+        () => ctx.call('GET', `/api/harness/interactions?rootThreadId=${cid()}`),
         { status: 404 },
       )
-      await expectHttpError(() => ctx.call('GET', '/api/interactions?rootThreadId=not-a-uuid'), {
-        status: 400,
-      })
+      await expectHttpError(
+        () => ctx.call('GET', '/api/harness/interactions?rootThreadId=not-a-uuid'),
+        { status: 400 },
+      )
       // 过滤器只缩小可见集，不改变未过滤视图：无过滤时仍能看到该待办。
       assert(
         (await collectInteractions(ctx)).some(
-          (interaction) => interaction.interactionId === pending.interactionId,
+          (interaction) => interaction.toolInvocationId === pending.toolInvocationId,
         ),
         'unfiltered view must still expose the pending interaction',
       )
 
-      // 提交请求形状严格校验：缺失/未知字段、拒答携带答案都在触达领域前 400。
+      // 提交请求形状严格校验：答案/拒答联合缺失判别、未知字段、拒答携带答案都在触达领域前 400。
       const submissionId = cid()
-      const inputPath = `/api/interactions/${pending.interactionId}/input`
+      const inputPath =
+        `/api/harness/threads/${threadId}/tool-invocations/${pending.toolInvocationId}/input`
       for (const body of [
-        { submissionId, declined: false, answers: [[chosenAnswer]] },
-        { threadId, submissionId, declined: false, answers: [[chosenAnswer]], actor: 'forged' },
-        { threadId, submissionId, answers: [[chosenAnswer]] },
-        { threadId, submissionId, declined: true, answers: [[chosenAnswer]] },
+        { submissionId, answers: [[chosenAnswer]] },
+        { type: 'ANSWER', submissionId, answers: [[chosenAnswer]], actor: 'forged' },
+        { type: 'DECLINE', submissionId, answers: [[chosenAnswer]] },
+        { type: 'ANSWER', submissionId },
+        { type: 'ANSWER', submissionId: 'not-a-uuid', answers: [[chosenAnswer]] },
       ]) {
         await expectHttpError(() => ctx.call('POST', inputPath, body), { status: 400 })
       }
       // 未知目标与不满足冻结问卷的答案由 Runtime 判定 409，且不写入任何事实。
       await expectHttpError(
         () =>
-          ctx.call('POST', `/api/interactions/${cid()}/input`, {
-            threadId,
-            submissionId: cid(),
-            declined: false,
-            answers: [[chosenAnswer]],
-          }),
+          ctx.call(
+            'POST',
+            `/api/harness/threads/${threadId}/tool-invocations/${cid()}/input`,
+            { type: 'ANSWER', submissionId: cid(), answers: [[chosenAnswer]] },
+          ),
         { status: 409 },
       )
       await expectHttpError(
         () =>
           ctx.call('POST', inputPath, {
-            threadId,
+            type: 'ANSWER',
             submissionId: cid(),
-            declined: false,
             answers: [['720P', '1080P']],
           }),
         { status: 409 },
       )
       const stillPending = await waitForPendingInteraction(ctx, { threadId })
-      assert(stillPending.interactionId === pending.interactionId, JSON.stringify(stillPending))
+      assert(
+        stillPending.toolInvocationId === pending.toolInvocationId,
+        JSON.stringify(stillPending),
+      )
 
       // 接受答案：回执只报告服务端事实，操作者身份来自部署边界。
       const accepted = await ctx.call('POST', inputPath, {
-        threadId,
+        type: 'ANSWER',
         submissionId,
-        declined: false,
         answers: [[chosenAnswer]],
       })
       assert(accepted.status === 200, `submit input status ${accepted.status}`)
@@ -401,18 +424,18 @@ registerCase({
       assertExactFields(receipt, RECEIPT_FIELDS, 'input receipt')
       assert(
         receipt.threadId === threadId
-          && receipt.interactionId === pending.interactionId
+          && receipt.toolInvocationId === pending.toolInvocationId
           && receipt.submissionId === submissionId
           && typeof receipt.actor === 'string'
           && receipt.actor.trim().length > 0
-          && instantMillis(receipt.acceptedAt) >= 0
+          && assertInstant(receipt.acceptedAt) >= 0
           && receipt.materialized === false,
         JSON.stringify(receipt),
       )
 
       // 回答先物化为 ToolResult，再检查已物化事实的同 submissionId 精确重放。
       // 立即重放可能仍处于 accepted-but-not-materialized，不用时序猜测代替门禁。
-      await waitForInteractionGone(ctx, pending.interactionId)
+      await waitForInteractionGone(ctx, pending.toolInvocationId)
       // 接受答案即移出待办；必须等 Thread 收敛，才可断言 ToolResult 已持久化。
       await waitForQuiescentThread(ctx, threadId, {
         timeoutMs: 60_000,
@@ -420,9 +443,8 @@ registerCase({
       })
       const replayed = (
           await ctx.call('POST', inputPath, {
-            threadId,
+            type: 'ANSWER',
             submissionId,
-            declined: false,
             answers: [[chosenAnswer]],
           })
         ).json
@@ -437,9 +459,8 @@ registerCase({
       await expectHttpError(
         () =>
           ctx.call('POST', inputPath, {
-            threadId,
+            type: 'ANSWER',
             submissionId: cid(),
-            declined: false,
             answers: [[chosenAnswer]],
           }),
         { status: 409 },
@@ -458,11 +479,11 @@ registerCase({
           return false
         }
         const payload = JSON.parse(entry.payloadJson || '{}')
-        return JSON.stringify(payload).includes(pending.interactionId)
+        return JSON.stringify(payload).includes(pending.toolInvocationId)
       })
       assert(
         resultEntry,
-        `materialized ToolResult for ${pending.interactionId} not found: ${JSON.stringify(entries.map((entry) => entry.entryType))}`,
+        `materialized ToolResult for ${pending.toolInvocationId} not found: ${JSON.stringify(entries.map((entry) => entry.entryType))}`,
       )
       // 历史请求预览：以真实模型输出为锚点复现「该输出之前的请求前缀」，必须恒为只读且声明是重建而非原始字节。
       const assistantOutput = entries
