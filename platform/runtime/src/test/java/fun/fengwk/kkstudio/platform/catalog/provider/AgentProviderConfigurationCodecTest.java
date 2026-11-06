@@ -1,22 +1,18 @@
 package fun.fengwk.kkstudio.platform.catalog.provider;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import tools.jackson.core.JacksonException;
 import tools.jackson.core.json.JsonFactory;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
-import tools.jackson.databind.cfg.JsonNodeFeature;
 import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
 
-import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
@@ -28,10 +24,6 @@ class AgentProviderConfigurationCodecTest {
   private final AgentProviderConfigurationCodec codec =
       new AgentProviderConfigurationCodec(objectMapper);
 
-  /** 断言写出文本的数值保真：严格读取方按 BigDecimal 读回，避免测试自身再经 double 折叠。 */
-  private static final ObjectMapper bigDecimalMapper =
-      JsonMapper.builder().enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS).build();
-
   @Test
   void missingTimeoutsUseProductDefaults() {
     assertEquals(ModelCallTimeoutPolicy.DEFAULT, codec.readTimeoutPolicy(null));
@@ -39,13 +31,14 @@ class AgentProviderConfigurationCodecTest {
   }
 
   @Test
-  void mergeNormalizesTimeoutsAndPreservesExtensionConfiguration() throws Exception {
+  void mergeNormalizesTimeoutsAndPreservesRetryConfiguration() throws Exception {
     String config =
         codec.mergeTimeoutPolicy(
-            "{\"extensionOption\":true}", Duration.ofMinutes(2).toMillis(), 3_000L);
+            "{\"modelHttpRetryStatusCodes\":[429]}", Duration.ofMinutes(2).toMillis(), 3_000L);
 
     JsonNode node = objectMapper.readTree(config);
-    assertEquals(true, node.path("extensionOption").asBoolean());
+    assertEquals(3, node.size());
+    assertEquals(List.of(429), codec.readHttpRetryStatusCodes(config));
     assertEquals(Duration.ofMinutes(2).toMillis(), node.path("modelCallTimeoutMillis").asLong());
     assertEquals(3_000L, node.path("modelCallIdleTimeoutMillis").asLong());
     assertEquals(
@@ -68,7 +61,7 @@ class AgentProviderConfigurationCodecTest {
 
   @Test
   void malformedConfigurationDoesNotRetainParserCause() {
-    // 测试意图：持久配置可能含敏感扩展值；语法失败只保留稳定错误，不挂载可能携带原文的
+    // 测试意图：损坏的持久配置可能含敏感值；语法失败只保留稳定错误，不挂载可能携带原文的
     // Jackson cause。
     IllegalArgumentException error =
         assertThrows(
@@ -93,35 +86,21 @@ class AgentProviderConfigurationCodecTest {
   }
 
   @Test
-  void mergePreservesHighPrecisionAndExtremeExtensionValues() {
-    // 两个 merge 接口都必须原样搬运 Provider 扩展值：不得经 double 折叠，也不得把极值写成 Infinity/0。
-    String existing =
-        "{\"extension\":{\"ratio\":0.12345678901234567890123456789,\"limit\":1e309,\"tiny\":1e-324}}";
-
-    String mergedTimeout = codec.mergeTimeoutPolicy(existing, 1_000L, 2_000L);
-    assertExtensionValuesPreserved(mergedTimeout);
-    assertEquals(
-        new ModelCallTimeoutPolicy(Duration.ofSeconds(1), Duration.ofSeconds(2)),
-        codec.readTimeoutPolicy(mergedTimeout));
-
-    String mergedRetry = codec.mergeHttpRetryStatusCodes(mergedTimeout, true, List.of(429, 500));
-    assertExtensionValuesPreserved(mergedRetry);
-    assertEquals(List.of(429, 500), codec.readHttpRetryStatusCodes(mergedRetry));
-
-    String preserved = codec.mergeHttpRetryStatusCodes(mergedRetry, false, null);
-    assertExtensionValuesPreserved(preserved);
-    assertEquals(List.of(429, 500), codec.readHttpRetryStatusCodes(preserved));
-  }
-
-  private static void assertExtensionValuesPreserved(String configJson) {
-    JsonNode extension = bigDecimalMapper.readTree(configJson).path("extension");
-    assertEquals(
-        new BigDecimal("0.12345678901234567890123456789"), extension.path("ratio").decimalValue());
-    assertEquals(0, extension.path("limit").decimalValue().compareTo(new BigDecimal("1e309")));
-    assertEquals(0, extension.path("tiny").decimalValue().compareTo(new BigDecimal("1e-324")));
-    // 极值在文本上就是数值 token，不是 Infinity/字符串。
-    assertTrue(extension.path("limit").isNumber());
-    assertFalse(extension.path("tiny").isNull());
+  void rejectsUnknownFieldsOnReadsAndWritesWithoutExposingInput() {
+    // 损坏配置不能在任一读取或合并路径被忽略、保留或泄露。
+    String corrupt = "{\"modelCallTimeoutMillis\":1000,\"unknown\":\"private-value\"}";
+    List<Runnable> operations =
+        List.of(
+            () -> codec.readTimeoutPolicy(corrupt),
+            () -> codec.readHttpRetryStatusCodes(corrupt),
+            () -> codec.mergeTimeoutPolicy(corrupt, 1000L, 2000L),
+            () -> codec.mergeHttpRetryStatusCodes(corrupt, true, List.of(429)),
+            () -> codec.mergeHttpRetryStatusCodes(corrupt, false, null));
+    for (Runnable operation : operations) {
+      IllegalArgumentException error = assertThrows(IllegalArgumentException.class, operation::run);
+      assertEquals("persisted provider configJson has unknown field", error.getMessage());
+      assertNull(error.getCause());
+    }
   }
 
   @Test

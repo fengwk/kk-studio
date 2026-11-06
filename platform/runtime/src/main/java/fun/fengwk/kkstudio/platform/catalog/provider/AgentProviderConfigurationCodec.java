@@ -4,8 +4,6 @@ import org.springframework.stereotype.Component;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
-import tools.jackson.databind.ObjectReader;
-import tools.jackson.databind.cfg.JsonNodeFeature;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
@@ -16,27 +14,23 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 
-/**
- * 读写 Provider 内部配置 JSON 中的模型调用超时策略与 Provider HTTP 重试白名单覆盖。
- *
- * <p>读取入口启用自己的 {@code USE_BIG_DECIMAL_FOR_FLOATS} profile（从注入 mapper 派生，不修改它），使 merge 保留 Provider
- * 扩展值的高精度与极值。
- */
+/** 读写 Provider 内部配置 JSON 中的模型调用超时策略与 Provider HTTP 重试白名单覆盖。持久配置中的未知字段视为损坏，不能被读取或写回。 */
 @Component
 public final class AgentProviderConfigurationCodec {
 
   private static final String MODEL_CALL_TIMEOUT_MILLIS = "modelCallTimeoutMillis";
   private static final String MODEL_CALL_IDLE_TIMEOUT_MILLIS = "modelCallIdleTimeoutMillis";
   private static final String MODEL_HTTP_RETRY_STATUS_CODES = "modelHttpRetryStatusCodes";
+  private static final Set<String> FIELDS =
+      Set.of(
+          MODEL_CALL_TIMEOUT_MILLIS, MODEL_CALL_IDLE_TIMEOUT_MILLIS, MODEL_HTTP_RETRY_STATUS_CODES);
 
   private final ObjectMapper objectMapper;
-  private final ObjectReader configReader;
 
   public AgentProviderConfigurationCodec(ObjectMapper objectMapper) {
     this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
-    // 扩展配置按 BigDecimal 读取，保留极值与有效位；写出沿用宿主 mapper。
-    this.configReader = objectMapper.reader().with(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS);
   }
 
   /** 读取策略；未配置的字段使用产品默认值。 */
@@ -55,7 +49,7 @@ public final class AgentProviderConfigurationCodec {
                 ModelCallTimeoutPolicy.DEFAULT.modelCallIdleTimeout().toMillis())));
   }
 
-  /** 覆盖已知超时字段，同时保留 Provider 扩展可能写入的其他内部配置。 */
+  /** 覆盖超时字段，同时保留已配置的 HTTP 重试覆盖。 */
   public String mergeTimeoutPolicy(
       String configJson, Long modelCallTimeoutMillis, Long modelCallIdleTimeoutMillis) {
     ObjectNode config = readObject(configJson);
@@ -70,11 +64,7 @@ public final class AgentProviderConfigurationCodec {
             : requirePositiveMillis(MODEL_CALL_IDLE_TIMEOUT_MILLIS, modelCallIdleTimeoutMillis);
     config.put(MODEL_CALL_TIMEOUT_MILLIS, totalMillis);
     config.put(MODEL_CALL_IDLE_TIMEOUT_MILLIS, idleMillis);
-    try {
-      return objectMapper.writeValueAsString(config);
-    } catch (JacksonException error) {
-      throw new IllegalStateException("cannot encode provider configuration", error);
-    }
+    return writeObject(config);
   }
 
   /**
@@ -138,17 +128,18 @@ public final class AgentProviderConfigurationCodec {
   }
 
   private ObjectNode readObject(String configJson) {
-    return readObject(configReader, configJson);
-  }
-
-  private ObjectNode readObject(ObjectReader reader, String configJson) {
     if (configJson == null || configJson.isBlank()) {
       return objectMapper.createObjectNode();
     }
     try {
-      JsonNode config = reader.readTree(configJson);
+      JsonNode config = objectMapper.readTree(configJson);
       if (config == null || !config.isObject()) {
         throw new IllegalArgumentException("persisted provider configJson must be an object");
+      }
+      for (String field : config.propertyNames()) {
+        if (!FIELDS.contains(field)) {
+          throw new IllegalArgumentException("persisted provider configJson has unknown field");
+        }
       }
       return (ObjectNode) config;
     } catch (JacksonException error) {
