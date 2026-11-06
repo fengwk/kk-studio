@@ -57,7 +57,7 @@ test('environment install-config case exercises PUT CAS persistence, no-op and h
           return { json: { id: environmentId, installConfig: saved, version } }
         }
         saved = config
-        version = String(Number(version) + 1)
+        version = String(BigInt(version) + 1n)
         return { json: { id: environmentId, installConfig: saved, version } }
       }
       if (method === 'GET' && path === `/api/platform/environments/${environmentId}`) {
@@ -152,7 +152,7 @@ test('environment install-script case checks code, headers and rotation without 
       if (method === 'PUT' && path === `/api/platform/environments/${environmentId}/install-settings`) {
         if (body.expectedVersion !== version) throw problemError(409, 'version_conflict', 'version conflict', path)
         saved = body.installConfig
-        version = String(Number(version) + 1)
+        version = String(BigInt(version) + 1n)
         return { json: { id: environmentId, installConfig: saved, version } }
       }
       if (method === 'POST' && path === `/api/platform/environments/${environmentId}/install-codes`) {
@@ -185,7 +185,7 @@ test('environment install-script case checks code, headers and rotation without 
         token = consumptions === 1
           ? '33333333-3333-4333-8333-333333333333'
           : '44444444-4444-4444-8444-444444444444'
-        version = String(Number(version) + 1)
+        version = String(BigInt(version) + 1n)
         return { json: installScript(token), headers: scriptHeaders() }
       }
       if (method === 'POST' && path === `/api/platform/environments/${environmentId}/rotate-token`) {
@@ -194,7 +194,7 @@ test('environment install-script case checks code, headers and rotation without 
         assert.ok(activeCode, 'rotation must invalidate an unconsumed code')
         invalidated.set(activeCode, 'rotated')
         activeCode = null
-        version = String(Number(version) + 1)
+        version = String(BigInt(version) + 1n)
         return {
           json: { id: environmentId, registrationToken: token, installConfig: saved, version },
           headers: new Headers({ 'cache-control': 'no-store' }),
