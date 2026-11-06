@@ -11,7 +11,7 @@ import {
  * 端点事实源（web 模块）：
  * - POST /api/harness/command-batches         创建型产品写入口：owner + NEW_SESSION/NEW_THREAD（202 accepted）
  * - POST /api/harness/threads/{id}/command-batches  既有 Thread 续写：owner-free，body 只带 cursor 与 commands
- * - GET  /api/chats/{chatId}/sessions       Chat owner 的 Session 摘要（新到旧）
+ * - GET  /api/chat/chats/{chatId}/sessions       Chat owner 的 Session 摘要（新到旧）
  * - GET  /api/harness/sessions/{sessionId}/threads   Session 下 Thread 摘要
  * - GET  /api/harness/sessions/{sessionId}/entries   完整不可变 Entry Tree
  * - GET  /api/harness/threads/{id}     一致快照（单事务，含 stopReceipts）
@@ -172,7 +172,7 @@ export async function createChat(
   { title, agentName, yoloEnabled = false, environmentName = null },
 ) {
   canonicalEnvironmentName(environmentName, 'environmentName')
-  const { status, json } = await ctx.call('POST', '/api/chats', {
+  const { status, json } = await ctx.call('POST', '/api/chat/chats', {
     title,
     agentName,
     yoloEnabled,
@@ -598,12 +598,12 @@ async function listChatPages(ctx, path, validateItem = () => {}) {
 }
 
 export async function listChats(ctx) {
-  return listChatPages(ctx, '/api/chats')
+  return listChatPages(ctx, '/api/chat/chats')
 }
 
 /** Chat owner 的 Session 摘要数组（归属时间新到旧）。 */
 export async function listChatSessions(ctx, chatId) {
-  return listChatPages(ctx, `/api/chats/${encodeURIComponent(chatId)}/sessions`, assertSessionSummary)
+  return listChatPages(ctx, `/api/chat/chats/${encodeURIComponent(chatId)}/sessions`, assertSessionSummary)
 }
 
 /** Session 下的 Thread 摘要数组（runtime 确定性顺序）。 */

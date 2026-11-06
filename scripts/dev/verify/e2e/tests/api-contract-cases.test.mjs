@@ -21,8 +21,8 @@ const FREE_L1_CASES = [
 
 /**
  * 只 fake HTTP 的 Chat + Environment 有状态后端：按当前契约建模 required-nullable 默认环境、
- * 部分更新（省略保留 / 显式 null 清空）与未知/非 canonical Environment 的 400 拒绝，用来真实执行
- * `crud.chat.default_environment` case 并断言它发出的 method/path/body（含 omit-null 语义）。
+ * 整体替换（title/agentName/environmentName 全量）与未知/非 canonical Environment 的 400 拒绝，用来真实执行
+ * `crud.chat.default_environment` case 并断言它发出的 method/path/body。
  */
 function chatDefaultEnvironmentFixture() {
   const agent = {
@@ -51,7 +51,7 @@ function chatDefaultEnvironmentFixture() {
       environments.set(environment.id, environment)
       return { status: 201, json: environment }
     }
-    if (method === 'POST' && pathname === '/api/chats') {
+    if (method === 'POST' && pathname === '/api/chat/chats') {
       const chat = {
         id: nextId(),
         title: body.title,
@@ -63,7 +63,7 @@ function chatDefaultEnvironmentFixture() {
       chats.set(chat.id, chat)
       return { status: 201, json: { ...chat } }
     }
-    const chatMatch = pathname.match(/^\/api\/chats\/([^/]+)$/)
+    const chatMatch = pathname.match(/^\/api\/chat\/chats\/([^/]+)$/)
     if (chatMatch) {
       const id = decodeURIComponent(chatMatch[1])
       const chat = chats.get(id)
@@ -74,29 +74,28 @@ function chatDefaultEnvironmentFixture() {
         if (body.expectedVersion !== chat.version) {
           throw problemError(409, 'version_conflict', 'version conflict', pathname)
         }
-        if (body.title !== undefined) chat.title = body.title
-        if (Object.hasOwn(body, 'environmentName')) {
-          if (body.environmentName === null) {
-            chat.environmentName = null
-          } else {
-            if (String(body.environmentName).includes('/')) {
-              throw problemError(
-                400,
-                'validation',
-                "environmentName must not contain '/'",
-                pathname,
-              )
-            }
-            if (![...environments.values()].some((env) => env.name === body.environmentName)) {
-              throw problemError(
-                400,
-                'validation',
-                `unknown environment: ${body.environmentName}`,
-                pathname,
-              )
-            }
-            chat.environmentName = body.environmentName
+        chat.title = body.title
+        chat.agentName = body.agentName
+        if (body.environmentName === null) {
+          chat.environmentName = null
+        } else {
+          if (String(body.environmentName).includes('/')) {
+            throw problemError(
+              400,
+              'validation',
+              "environmentName must not contain '/'",
+              pathname,
+            )
           }
+          if (![...environments.values()].some((env) => env.name === body.environmentName)) {
+            throw problemError(
+              400,
+              'validation',
+              `unknown environment: ${body.environmentName}`,
+              pathname,
+            )
+          }
+          chat.environmentName = body.environmentName
         }
         chat.version = String(Number(chat.version) + 1)
         return { status: 200, json: { ...chat } }
@@ -229,15 +228,15 @@ test('tool catalog case accepts its public fields and rejects extra fields', asy
   await assert.rejects(run([{ ...entries[0], unexpected: true }, entries[1]]), /fields must be/)
 })
 
-test('chat default environment case executes the create/retain/clear wire with omit-null semantics', async () => {
+test('chat default environment case executes the create/replace/clear wire with full replacement', async () => {
   // 测试意图：真实执行 crud.chat.default_environment（只 fake HTTP），证明它创建的 POST 请求体确实省略
-  // yoloEnabled（由服务端默认 false）并携带默认环境、省略 environmentName 的 PUT 不携带该键、显式清空携带
-  // environmentName:null，且非法值确实被发出并拒绝。
+  // yoloEnabled（由服务端默认 false）并携带默认环境、PUT 整体替换总是携带 title/agentName/environmentName，
+  // 显式清空携带 environmentName:null，且非法值确实被发出并拒绝。
   const fake = chatDefaultEnvironmentFixture()
   await getCase('crud.chat.default_environment').run(fake.ctx)
 
   const create = fake.requests.find(
-    (request) => request.method === 'POST' && request.path === '/api/chats',
+    (request) => request.method === 'POST' && request.path === '/api/chat/chats',
   )
   const environmentCreate = fake.requests.find(
     (request) => request.method === 'POST' && request.path === '/api/platform/environments',
@@ -247,10 +246,15 @@ test('chat default environment case executes the create/retain/clear wire with o
   assert.equal(create.body.environmentName, environmentCreate.body.name)
 
   const chatPuts = fake.requests.filter(
-    (request) => request.method === 'PUT' && request.path.startsWith('/api/chats/'),
+    (request) => request.method === 'PUT' && request.path.startsWith('/api/chat/chats/'),
   )
-  // 只改 title 的 PUT 省略 environmentName：键必须缺席（部分更新保留当前默认环境）。
-  assert.equal(Object.hasOwn(chatPuts[0].body, 'environmentName'), false)
+  // 整体替换：每次 PUT 都必须回传 title、agentName 与 environmentName。
+  assert.ok(chatPuts.length > 0)
+  for (const request of chatPuts) {
+    assert.equal(Object.hasOwn(request.body, 'title'), true)
+    assert.equal(Object.hasOwn(request.body, 'agentName'), true)
+    assert.equal(Object.hasOwn(request.body, 'environmentName'), true)
+  }
   // 显式清空：键必须存在且为 null。
   const clear = chatPuts.find(
     (request) => Object.hasOwn(request.body, 'environmentName') && request.body.environmentName === null,

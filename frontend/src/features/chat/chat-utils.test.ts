@@ -17,8 +17,8 @@ function chat(overrides: Partial<ChatDTO> = {}): ChatDTO {
     environmentName: null,
     yoloEnabled: false,
     version: '1',
-    createTime: 1781920800,
-    updateTime: 1781920800,
+    createdAt: 1781920800,
+    updatedAt: 1781920800,
     ...overrides,
   }
 }
@@ -134,8 +134,8 @@ describe('mergeChatIntoList', () => {
 describe('filterChats', () => {
   it('filters by title and keeps the server order for equal timestamps', () => {
     const chats = [
-      chat({ id: '2', title: 'beta', createTime: 1782000000 }),
-      chat({ id: '10', title: 'alpha', createTime: 1782000000 }),
+      chat({ id: '2', title: 'beta', createdAt: 1782000000 }),
+      chat({ id: '10', title: 'alpha', createdAt: 1782000000 }),
     ]
     // numeric-aware id tie-break: '10' is newer than '2'
     expect(filterChats(chats, '')).toMatchObject([{ id: '10' }, { id: '2' }])
@@ -146,16 +146,16 @@ describe('filterChats', () => {
 
   it('sorts by the extracted timestamp before falling back to the id tie-break', () => {
     const chats = [
-      chat({ id: '1', title: 'old', createTime: 1781913600 }),
-      chat({ id: '2', title: 'new', createTime: 1782086400 }),
+      chat({ id: '1', title: 'old', createdAt: 1781913600 }),
+      chat({ id: '2', title: 'new', createdAt: 1782086400 }),
     ]
     expect(filterChats(chats, '').map((item) => item.title)).toEqual(['new', 'old'])
   })
 
   it('treats the empty title as a searchable value', () => {
     const chats = [
-      chat({ id: '1', title: '', createTime: 1781913600 }),
-      chat({ id: '2', title: null, createTime: 1781913600 }),
+      chat({ id: '1', title: '', createdAt: 1781913600 }),
+      chat({ id: '2', title: null, createdAt: 1781913600 }),
     ]
     // both nullish titles match any search; the title fallback branch is exercised
     expect(filterChats(chats, '')).toHaveLength(2)

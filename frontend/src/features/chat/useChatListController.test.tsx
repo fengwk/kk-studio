@@ -14,19 +14,31 @@ vi.mock('@/features/chat/chat-service', () => ({
       id: 'c1',
       title: 'T',
       agentName: 'assistant',
+      environmentName: null,
       yoloEnabled: false,
       version: '1',
-      createTime: 0,
-      updateTime: 0,
+      createdAt: 0,
+      updatedAt: 0,
     })),
-    updateChat: vi.fn(async (chatId: string, data: { title?: string | null; agentName?: string | null; expectedVersion: string }) => ({
+    updateChat: vi.fn(async (chatId: string, data: { title: string; agentName: string }) => ({
       id: chatId,
-      title: data.title ?? null,
-      agentName: data.agentName ?? 'assistant',
+      title: data.title,
+      agentName: data.agentName,
+      environmentName: null,
       yoloEnabled: false,
-      version: '2',
-      createTime: 0,
-      updateTime: 0,
+      version: '3',
+      createdAt: 0,
+      updatedAt: 0,
+    })),
+    updateYolo: vi.fn(async (chatId: string, data: { yoloEnabled: boolean }) => ({
+      id: chatId,
+      title: 'T',
+      agentName: 'assistant',
+      environmentName: null,
+      yoloEnabled: data.yoloEnabled,
+      version: '4',
+      createdAt: 0,
+      updatedAt: 0,
     })),
     deleteChat: vi.fn(async () => undefined),
   },
@@ -156,8 +168,8 @@ describe('useChatListController', () => {
       yoloEnabled: false,
       environmentName: null,
       version: '5',
-      createTime: 0,
-      updateTime: 0,
+      createdAt: 0,
+      updatedAt: 0,
     }
 
     act(() => result.current.openEditChat(existingChat))
@@ -181,10 +193,10 @@ describe('useChatListController', () => {
       expect(chatService.updateChat).toHaveBeenCalledWith('chat-42', {
         title: 'Renamed Chat',
         agentName: 'coder',
-        yoloEnabled: false,
         environmentName: null,
         expectedVersion: '5',
       })
+      expect(chatService.updateYolo).not.toHaveBeenCalled()
       expect(result.current.createChatModal.open).toBe(false)
     })
   })
@@ -234,8 +246,8 @@ describe('useChatListController', () => {
       yoloEnabled: false,
       environmentName: 'production',
       version: '2',
-      createTime: 0,
-      updateTime: 0,
+      createdAt: 0,
+      updatedAt: 0,
     }
 
     act(() => result.current.openEditChat(existingChat))
@@ -254,9 +266,12 @@ describe('useChatListController', () => {
       expect(chatService.updateChat).toHaveBeenCalledWith('chat-99', {
         title: 'Server Chat',
         agentName: 'coder',
-        yoloEnabled: true,
         environmentName: null,
         expectedVersion: '2',
+      })
+      expect(chatService.updateYolo).toHaveBeenCalledWith('chat-99', {
+        yoloEnabled: true,
+        expectedVersion: '3',
       })
     })
   })
@@ -281,8 +296,8 @@ describe('useChatListController', () => {
       environmentName: null,
       yoloEnabled: false,
       version: '3',
-      createTime: 0,
-      updateTime: 0,
+      createdAt: 0,
+      updatedAt: 0,
     }
 
     act(() => result.current.openEditChat(existingChat))
@@ -359,8 +374,8 @@ describe('useChatListController', () => {
       environmentName: null,
       yoloEnabled: false,
       version: '9',
-      createTime: 0,
-      updateTime: 0,
+      createdAt: 0,
+      updatedAt: 0,
     }
 
     act(() => result.current.openDeleteChat(targetChat))

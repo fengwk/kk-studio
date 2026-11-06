@@ -13,8 +13,7 @@ import java.util.UUID;
 /**
  * 规范化 Chat 可变字段并分配 Chat id。
  *
- * <p>title/agentName 非 null 时更新并校验；Environment 省略保留、显式 null 清空，YOLO 省略保留、显式 null 拒绝。catalog 存在性由
- * {@link ChatGuard} 校验。创建省略 YOLO 时为 {@code false}；创建省略 Environment 时无默认环境。
+ * <p>更新整体替换标题、Agent 和默认环境；catalog 存在性由 {@link ChatGuard} 校验。创建省略 YOLO 时为 {@code false}。
  */
 @Component
 public class ChatMutationFactory {
@@ -53,26 +52,14 @@ public class ChatMutationFactory {
     if (updateDTO == null) {
       throw DomainException.validation(RESOURCE, RESOURCE + " body must not be null");
     }
-    if (updateDTO.getTitle() != null) {
-      String title = editableSupport.trimToNull(updateDTO.getTitle());
-      if (title == null) {
-        throw DomainException.validation(RESOURCE, RESOURCE + " title must not be blank");
-      }
-      editableSupport.validateMaxLength(RESOURCE, "title", title, TITLE_MAX_LENGTH);
-      chat.setTitle(title);
+    String title = editableSupport.trimToNull(updateDTO.getTitle());
+    if (title == null) {
+      throw DomainException.validation(RESOURCE, RESOURCE + " title must not be blank");
     }
-    if (updateDTO.getAgentName() != null) {
-      chat.setAgentName(parseRequiredAgentName(updateDTO.getAgentName()));
-    }
-    if (updateDTO.isEnvironmentNameProvided()) {
-      chat.setEnvironmentName(parseEnvironmentName(updateDTO.getEnvironmentName()));
-    }
-    if (updateDTO.isYoloEnabledProvided()) {
-      if (updateDTO.getYoloEnabled() == null) {
-        throw DomainException.validation(RESOURCE, "yoloEnabled must not be null");
-      }
-      chat.setYoloEnabled(updateDTO.getYoloEnabled());
-    }
+    editableSupport.validateMaxLength(RESOURCE, "title", title, TITLE_MAX_LENGTH);
+    chat.setTitle(title);
+    chat.setAgentName(parseRequiredAgentName(updateDTO.getAgentName()));
+    chat.setEnvironmentName(parseEnvironmentName(updateDTO.getEnvironmentName()));
   }
 
   /** 规范化必填的 Agent 名文本。 */

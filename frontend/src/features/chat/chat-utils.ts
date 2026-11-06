@@ -56,7 +56,7 @@ export function filterChats(chats: ChatDTO[], search: string): ChatDTO[] {
   return chats
     .filter((chat) => includesSearch(chat.title ?? '', search))
     .sort((left, right) => {
-      const delta = right.createTime - left.createTime
+      const delta = right.createdAt - left.createdAt
       if (delta !== 0) {
         return delta
       }

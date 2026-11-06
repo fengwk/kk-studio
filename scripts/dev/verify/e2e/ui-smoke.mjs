@@ -97,17 +97,10 @@ async function apiJson(backendUrl, method, requestPath, body) {
 }
 
 async function apiDeleteByName(backendUrl, resource, name) {
-  const isCatalog = resource === 'providers' || resource === 'models'
-  const resourcePath = resource === 'chats'
-    ? '/api/chats'
-    : isCatalog
-      ? `/api/platform/${resource}`
-      : `/api/${resource}`
+  const resourcePath = resource === 'chats' ? '/api/chat/chats' : `/api/platform/${resource}`
   const list = resource === 'chats'
     ? await listChats({ call: (method, requestPath) => apiJson(backendUrl, method, requestPath) })
-    : isCatalog
-      ? (await apiJson(backendUrl, 'GET', resourcePath)).json || []
-      : (await apiJson(backendUrl, 'GET', `${resourcePath}?pageNumber=1&pageSize=100`)).json?.results || []
+    : (await apiJson(backendUrl, 'GET', resourcePath)).json || []
   const key = resource === 'chats' ? 'title' : 'name'
   const hit = list.find((item) => item[key] === name)
   if (!hit) return false

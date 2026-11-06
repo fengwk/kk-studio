@@ -15,10 +15,10 @@ const summary = (id) => ({
 test('Chat 与 Session 摘要按 cursor 读取全部页面并保持顺序', async () => {
   // 通过两页及需要 URL 编码的 cursor，验证调用方不会漏掉后页。
   for (const [list, path, first, second] of [
-    [listChats, '/api/chats', { id: 'first' }, { id: 'second' }],
+    [listChats, '/api/chat/chats', { id: 'first' }, { id: 'second' }],
     [
       (ctx) => listChatSessions(ctx, 'chat/id'),
-      '/api/chats/chat%2Fid/sessions',
+      '/api/chat/chats/chat%2Fid/sessions',
       summary('00000000-0000-4000-8000-000000000001'),
       summary('00000000-0000-4000-8000-000000000002'),
     ],

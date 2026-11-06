@@ -73,7 +73,9 @@ class ChatServiceTest {
   /** 测试意图：非法游标在查询前失败，避免静默返回首屏。 */
   @Test
   void listChatsRejectsInvalidCursor() {
-    assertThrows(IllegalArgumentException.class, () -> service.listChats("bad", 2));
+    assertThrows(DomainException.class, () -> service.listChats("bad", 2));
+    assertThrows(DomainException.class, () -> service.listChats(null, 0));
+    assertThrows(DomainException.class, () -> service.listSessions(id(7).toString(), null, 101));
   }
 
   /** 测试意图：会话页只投影本页 id，并保持仓库给定的稳定顺序与游标。 */

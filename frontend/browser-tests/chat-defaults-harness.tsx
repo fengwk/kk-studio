@@ -146,8 +146,8 @@ export function ChatDefaultsHarnessApp() {
       yoloEnabled: true,
       environmentName: 'docker-node',
       version: '1',
-      createTime: 1790812800,
-      updateTime: 1790812800,
+      createdAt: 1790812800,
+      updatedAt: 1790812800,
     },
     {
       id: 'chat-safe-null',
@@ -156,8 +156,8 @@ export function ChatDefaultsHarnessApp() {
       yoloEnabled: false,
       environmentName: null,
       version: '2',
-      createTime: 1790899200,
-      updateTime: 1790899200,
+      createdAt: 1790899200,
+      updatedAt: 1790899200,
     },
   ], [])
 

@@ -513,7 +513,7 @@ async function cleanupChat(ctx, chat) {
   try {
     await ctx.call(
       'DELETE',
-      `/api/chats/${chat.id}?expectedVersion=${encodeURIComponent(chat.version ?? '0')}`,
+      `/api/chat/chats/${chat.id}?expectedVersion=${encodeURIComponent(chat.version ?? '0')}`,
     )
   } catch {
     // 尽力 cleanup，保留主断言失败

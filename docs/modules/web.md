@@ -71,7 +71,7 @@ health、资源下载和 WebSocket 使用各自传输形式。公开路由如下
 | Skill | `/api/platform/skill-packages`、`/api/platform/skill-package-stagings` | CRUD、branch check、exact commit 发布、上传暂存与发布、环境技能重同步（`environments/{environmentId}/resync-skills`）；Git 令牌用 SecretUpdate，响应只回 `configured` |
 | MCP | `/api/platform/mcp-servers` | name-keyed CRUD、摘要数组、headers 用 SecretUpdate 且只回 `configured`、同步 discover |
 | Plugin | `/api/platform/plugins` | 安全投影、普通配置 PUT、auth/prepare、auth/complete、删除 auth；`{pluginId}/check-connection` 按 expected 版本执行一次显式只读连接检查 |
-| Chat | `/api/chats` | 由 [Chat](chat.md) 模块提供的 CRUD 与归属 Session；Web 只做装配 |
+| Chat | `/api/chat/chats` | 由 [Chat](chat.md) 模块提供的 CRUD、整体替换 PUT、YOLO 子资源与归属 Session；Web 只做装配 |
 | Harness command | `/api/harness/command-batches`、`/api/harness/threads/{threadId}/command-batches` | 创建型 Chat 命令接受（owner-aware）与既有 Thread 的 owner-free 续写；都返回 202 |
 | Session | `/api/harness/sessions/{sessionId}` | threads、entries（keyset 分页，含读取时 `usageCost`）与 name |
 | Session files | `/api/harness/sessions/{sessionId}/files` | 只读会话文件面板：列目录、文本窗口（`/content`）、下载（`/download`）；会话坐标只在路径中，不携带产品 owner |
@@ -93,7 +93,7 @@ Agent 的创建、完整 PUT 和读取使用 `execution: {driver, settings}`。�
 内置 Agent 可显式为 null；当前 `builtin` 的 settings 为 `{modelName, variant}`。
 Driver、模型与 Variant 的校验和引用事务见 [Platform Catalog](platform.md#catalog)。
 
-`POST /api/chats` 与 `PUT /api/chats/{chatId}` 的字段语义见 [Chat](chat.md)。
+`POST /api/chat/chats`、`PUT /api/chat/chats/{chatId}` 与 `PUT /api/chat/chats/{chatId}/yolo` 的字段语义见 [Chat](chat.md)。
 
 会话文件面板是只读 HTTP：`GET /api/harness/sessions/{sessionId}/files?path` 列目录、
 `GET .../files/content?path&offset&limit&columnOffset` 返回有界文本窗口与 revision、大小、更新时间，

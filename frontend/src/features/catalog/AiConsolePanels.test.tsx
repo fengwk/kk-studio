@@ -51,8 +51,8 @@ describe('AiConsolePanels', () => {
               environmentName: null,
               yoloEnabled: false,
               version: '1',
-              createTime: 0,
-              updateTime: 0,
+              createdAt: 0,
+              updatedAt: 0,
             } satisfies ChatDTO,
           ]}
           agents={[]}

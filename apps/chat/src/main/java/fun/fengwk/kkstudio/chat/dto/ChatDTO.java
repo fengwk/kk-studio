@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.chat.dto;
 
-import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
 import org.jspecify.annotations.Nullable;
@@ -31,13 +30,8 @@ public class ChatDTO {
   private String version;
 
   /** 创建时间（UTC Instant）。 */
-  private Instant createTime;
+  private Instant createdAt;
 
   /** 更新时间（UTC Instant，单调不减）。 */
-  private Instant updateTime;
-
-  @JsonAnySetter
-  public void rejectUnknownField(String name, Object value) {
-    throw new IllegalArgumentException("unknown chat field: " + name);
-  }
+  private Instant updatedAt;
 }

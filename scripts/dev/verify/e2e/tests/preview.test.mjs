@@ -67,7 +67,7 @@ function modelRequestDebugFixture() {
     if (method === 'GET' && pathname === '/api/platform/models') {
       return { status: 200, json: { results: [model] } }
     }
-    if (method === 'POST' && pathname === '/api/chats') {
+    if (method === 'POST' && pathname === '/api/chat/chats') {
       chat = {
         id: id(1),
         title: body.title,
@@ -156,7 +156,7 @@ function modelRequestDebugFixture() {
         },
       }
     }
-    if (method === 'DELETE' && pathname === `/api/chats/${chat.id}`) {
+    if (method === 'DELETE' && pathname === `/api/chat/chats/${chat.id}`) {
       return { status: 204, json: null }
     }
     throw new Error(`unexpected call ${method} ${pathname}`)

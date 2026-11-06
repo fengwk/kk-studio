@@ -32,7 +32,7 @@ registerCase({
   title: 'HTTP 错误响应按 Accept-Language 返回英文或中文',
   docs: 'Domain error 与类型化参数校验保持 problem status/code/detail，仅本地化 title；不支持语言回退英文',
   async run(ctx) {
-    const unknownChatPath = '/api/chats/00000000-0000-0000-0000-000000000999'
+    const unknownChatPath = '/api/chat/chats/00000000-0000-0000-0000-000000000999'
     const englishDomain = problemBody(await localizedGet(ctx, unknownChatPath, 'en-US', 404))
     const chineseDomain = problemBody(await localizedGet(ctx, unknownChatPath, 'zh-CN', 404))
     assert(englishDomain.code === 'not_found', JSON.stringify(englishDomain))

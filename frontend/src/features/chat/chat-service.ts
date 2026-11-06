@@ -1,56 +1,47 @@
-import { apiClient, type HttpClient } from '@/shared/api/client'
+import { request } from '@/shared/api/client'
 import type {
   ChatCreateDTO,
   ChatDTO,
   ChatPageDTO,
   ChatSessionPageDTO,
   ChatUpdateDTO,
-  HarnessSessionSummaryDTO,
+  ChatYoloUpdateDTO,
 } from '@/shared/api/generated/contracts'
 
-/** keyset 分页参数只在调用方给出时发送，首屏请求保持无查询串与单参数调用。 */
-function pagedConfig(cursor: string | null, limit?: number) {
-  const params: Record<string, unknown> = {}
+/** keyset 分页参数只在调用方给出时发送，首屏请求保持无查询串。 */
+function pagedQuery(cursor: string | null, limit?: number) {
+  const query: { cursor?: string; limit?: number } = {}
   if (cursor) {
-    params.cursor = cursor
+    query.cursor = cursor
   }
   if (limit != null) {
-    params.limit = String(limit)
+    query.limit = limit
   }
-  return Object.keys(params).length === 0 ? undefined : { params }
+  return query
 }
 
-function pagedGet<T>(
-  client: HttpClient,
-  path: string,
-  cursor: string | null,
-  limit?: number,
-): Promise<T> {
-  const config = pagedConfig(cursor, limit)
-  return config == null ? client.get<T>(path) : client.get<T>(path, config)
+export const chatService = {
+  listChats: (cursor: string | null = null, limit?: number): Promise<ChatPageDTO> =>
+    request('GET /api/chat/chats', { query: pagedQuery(cursor, limit) }),
+  createChat: (data: ChatCreateDTO): Promise<ChatDTO> =>
+    request('POST /api/chat/chats', { body: data }),
+  getChat: (chatId: string): Promise<ChatDTO> =>
+    request('GET /api/chat/chats/{chatId}', { path: { chatId } }),
+  updateChat: (chatId: string, data: ChatUpdateDTO): Promise<ChatDTO> =>
+    request('PUT /api/chat/chats/{chatId}', { path: { chatId }, body: data }),
+  updateYolo: (chatId: string, data: ChatYoloUpdateDTO): Promise<ChatDTO> =>
+    request('PUT /api/chat/chats/{chatId}/yolo', { path: { chatId }, body: data }),
+  deleteChat: (chatId: string, expectedVersion: string): Promise<void> =>
+    request('DELETE /api/chat/chats/{chatId}', { path: { chatId }, query: { expectedVersion } }),
+  listChatSessions: (
+    chatId: string,
+    cursor: string | null = null,
+    limit?: number,
+  ): Promise<ChatSessionPageDTO> =>
+    request('GET /api/chat/chats/{chatId}/sessions', {
+      path: { chatId },
+      query: pagedQuery(cursor, limit),
+    }),
+  getChatSession: (chatId: string, sessionId: string) =>
+    request('GET /api/chat/chats/{chatId}/sessions/{sessionId}', { path: { chatId, sessionId } }),
 }
-
-export function createChatService(client: HttpClient = apiClient) {
-  return {
-    listChats: (cursor: string | null = null, limit?: number): Promise<ChatPageDTO> =>
-      pagedGet(client, '/chats', cursor, limit),
-    createChat: (data: ChatCreateDTO): Promise<ChatDTO> => client.post('/chats', data),
-    getChat: (chatId: string): Promise<ChatDTO> => client.get(`/chats/${encodeURIComponent(chatId)}`),
-    updateChat: (chatId: string, data: ChatUpdateDTO): Promise<ChatDTO> =>
-      client.put(`/chats/${encodeURIComponent(chatId)}`, data),
-    deleteChat: (chatId: string, expectedVersion: string): Promise<void> =>
-      client.delete(`/chats/${encodeURIComponent(chatId)}`, { params: { expectedVersion } }),
-    listChatSessions: (
-      chatId: string,
-      cursor: string | null = null,
-      limit?: number,
-    ): Promise<ChatSessionPageDTO> =>
-      pagedGet(client, `/chats/${encodeURIComponent(chatId)}/sessions`, cursor, limit),
-    getChatSession: (chatId: string, sessionId: string): Promise<HarnessSessionSummaryDTO> =>
-      client.get(
-        `/chats/${encodeURIComponent(chatId)}/sessions/${encodeURIComponent(sessionId)}`,
-      ),
-  }
-}
-
-export const chatService = createChatService()

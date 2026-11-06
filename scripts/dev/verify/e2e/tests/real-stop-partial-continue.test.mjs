@@ -259,7 +259,7 @@ function createStopCaseContext({ exitConverges = true } = {}) {
         })
         return { status: 201, json: { name: body.name, execution: body.execution, version: '0' } }
       }
-      if (method === 'POST' && url === '/api/chats') {
+      if (method === 'POST' && url === '/api/chat/chats') {
         return {
           status: 201,
           json: {

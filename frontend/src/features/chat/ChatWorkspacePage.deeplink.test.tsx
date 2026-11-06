@@ -98,7 +98,7 @@ beforeEach(() => {
   }))
   vi.mocked(chatService.getChat).mockResolvedValue({
     id: CHAT_ID, title: 'Workspace', agentName: 'assistant',
-    environmentName: null, yoloEnabled: false, version: '1', createTime: 0, updateTime: 0,
+    environmentName: null, yoloEnabled: false, version: '1', createdAt: 0, updatedAt: 0,
   })
   vi.mocked(agentService.listAgents).mockResolvedValue([])
   vi.mocked(environmentService.listEnvironments).mockResolvedValue([])

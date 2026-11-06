@@ -112,7 +112,7 @@ Work 冻结路由，`requiredEnvironmentName` 沿此身份读取环境目录，�
 | Project | [project/dto/](../../apps/project/src/test/java/fun/fengwk/kkstudio/project/dto/) | [`ProjectDtoContractTest.java`](../../apps/project/src/test/java/fun/fengwk/kkstudio/project/dto/ProjectDtoContractTest.java)：Project/Issue wire 的严格字段、decimal version 与全包 33 个 DTO 字段集合精确匹配 |
 | Catalog | [catalog/dto/](../../platform/runtime/src/test/java/fun/fengwk/kkstudio/platform/catalog/dto/) | [`ModelPricingDtoJsonTest.java`](../../platform/runtime/src/test/java/fun/fengwk/kkstudio/platform/catalog/dto/ModelPricingDtoJsonTest.java)：pricing 十进制 wire；[`ToolCatalogDtoContractTest.java`](../../platform/runtime/src/test/java/fun/fengwk/kkstudio/platform/catalog/dto/ToolCatalogDtoContractTest.java)：工具目录契约 |
 | Settings | [settings/dto/](../../platform/runtime/src/test/java/fun/fengwk/kkstudio/platform/settings/dto/) | [`SystemSettingsDtoContractTest.java`](../../platform/runtime/src/test/java/fun/fengwk/kkstudio/platform/settings/dto/SystemSettingsDtoContractTest.java)：每一层嵌套的未知字段拒绝与秘密字段扫描 |
-| Chat | [chat/](../../apps/chat/src/test/java/fun/fengwk/kkstudio/chat/) | [`ChatDtoContractTest.java`](../../apps/chat/src/test/java/fun/fengwk/kkstudio/chat/ChatDtoContractTest.java)：Chat 与 Session 分页 wire 的严格字段 |
+| Chat | [chat/](../../apps/chat/src/test/java/fun/fengwk/kkstudio/chat/) | Chat wire 的必填、可空与字段集合由统一 HTTP 边界与控制器测试覆盖，不逐 DTO 建契约测试 |
 | Environment | [platform/environment/dto/](../../platform/runtime/src/test/java/fun/fengwk/kkstudio/platform/environment/dto/) | [`EnvironmentDtoContractTest.java`](../../platform/runtime/src/test/java/fun/fengwk/kkstudio/platform/environment/dto/EnvironmentDtoContractTest.java)：Card、运维事件、安装设置、运行快照与受管更新投影的严格字段和闭集枚举 |
 
 ---

@@ -56,7 +56,7 @@ export function ChatCard({
           t('ai.chat.defaultEnvironment'),
           chat.environmentName || t('ai.chat.noEnvironment'),
         ],
-        [t('ai.chat.updated'), formatBackendDate(chat.updateTime)],
+        [t('ai.chat.updated'), formatBackendDate(chat.updatedAt)],
       ]}
       actions={
         <>

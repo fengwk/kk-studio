@@ -31,8 +31,8 @@ function chat() {
     environmentName: null,
     yoloEnabled: false,
     version: '1',
-    createTime: null,
-    updateTime: null,
+    createdAt: null,
+    updatedAt: null,
   }
 }
 
@@ -191,11 +191,11 @@ async function installChatApi(
     const path = new URL(request.url()).pathname
     const method = request.method()
 
-    if (path === `/api/chats/${CHAT_ID}`) {
+    if (path === `/api/chat/chats/${CHAT_ID}`) {
       await route.fulfill({ json: chat() })
       return
     }
-    if (path === `/api/chats/${CHAT_ID}/sessions`) {
+    if (path === `/api/chat/chats/${CHAT_ID}/sessions`) {
       // 归属 Session 摘要按 keyset 分页返回（ChatSessionPageDTO），首屏无下一页。
       await route.fulfill({
         json: {

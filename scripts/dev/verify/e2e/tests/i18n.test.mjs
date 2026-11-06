@@ -12,7 +12,7 @@ async function withResponses(mutate, run) {
   const requests = []
   const server = createServer((req, res) => {
     const language = req.headers['accept-language'] === 'zh-CN' ? 'zh-CN' : 'en-US'
-    const kind = req.url.startsWith('/api/chats/')
+    const kind = req.url.startsWith('/api/chat/chats/')
       ? 'domain'
       : req.url.startsWith('/api/platform/model-catalog?')
         ? 'validation'
