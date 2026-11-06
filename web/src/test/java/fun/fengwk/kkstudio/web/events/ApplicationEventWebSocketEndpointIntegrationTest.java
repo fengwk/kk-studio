@@ -31,7 +31,7 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
 /**
- * {@code /api/events} 的真实端到端覆盖（RANDOM_PORT + testcontainers PG）：真实 Jetty 握手、connected 首帧、
+ * {@code /ws/events} 的真实端到端覆盖（RANDOM_PORT + testcontainers PG）：真实 Jetty 握手、connected 首帧、
  * 严格帧解码、非法帧关闭、资源错误保活、合法订阅 ack，以及原生 ping 与文本共享同一物理 writer 串行发送。
  */
 class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSupport {
@@ -222,7 +222,7 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
                 .build(),
             HttpResponse.BodyHandlers.ofString());
     assertEquals(201, chatResponse.statusCode(), chatResponse.body());
-    String chatId = MAPPER.readTree(chatResponse.body()).path("data").path("id").asText();
+    String chatId = MAPPER.readTree(chatResponse.body()).path("id").asText();
 
     String sessionId = UUID.randomUUID().toString();
     String threadId = UUID.randomUUID().toString();
@@ -262,7 +262,7 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
                 .build(),
             HttpResponse.BodyHandlers.ofString());
     assertEquals(202, threadResponse.statusCode(), threadResponse.body());
-    JsonNode created = MAPPER.readTree(threadResponse.body()).path("data");
+    JsonNode created = MAPPER.readTree(threadResponse.body());
     assertEquals(threadId, created.path("thread").path("threadId").asText());
     String version = created.path("thread").path("version").asText();
 
@@ -314,8 +314,7 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
   private WebSocket connect(FrameCollector collector) throws Exception {
     return HttpClient.newHttpClient()
         .newWebSocketBuilder()
-        .buildAsync(
-            URI.create("ws://localhost:" + port + ApplicationEventWebSocketHandler.PATH), collector)
+        .buildAsync(URI.create("ws://localhost:" + port + "/ws/events"), collector)
         .get(10, TimeUnit.SECONDS);
   }
 

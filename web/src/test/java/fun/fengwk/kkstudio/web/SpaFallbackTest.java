@@ -20,7 +20,7 @@ import org.springframework.test.web.servlet.MockMvc;
  * <ul>
  *   <li>Controller/API（如 {@code /healthz}）正常返回；
  *   <li>真实静态资源（如 {@code /assets/index.js}）由 {@code PathResourceResolver} 正常返回；
- *   <li>不存在的 {@code /api/**} 与 {@code /actuator/**} 返回 404 而不是 {@code index.html}；
+ *   <li>不存在的 {@code /api/**}、{@code /actuator/**}、{@code /ws/**} 与 {@code /ide/**} 返回 404；
  *   <li>不存在且带文件扩展名的资源返回 404 而不是 {@code index.html}；
  *   <li>不存在且无扩展名的前端 GET（如 {@code /chats/123}、{@code /canvas}）返回 {@code index.html}；
  *   <li>非 GET 请求不会触发 fallback。
@@ -51,6 +51,20 @@ public class SpaFallbackTest extends WebPostgresTestSupport {
     mockMvc
         .perform(get("/actuator/studio-actuator-this-does-not-exist"))
         .andExpect(status().isNotFound());
+  }
+
+  @Test
+  public void shouldNotFallbackForChannelAndIdePaths() throws Exception {
+    // 根路径和子路径均不属于 SPA；相似前缀仍是正常前端路由。
+    for (String path : new String[] {"/ws", "/ws/missing", "/ide", "/ide/missing"}) {
+      mockMvc.perform(get(path)).andExpect(status().isNotFound());
+    }
+    for (String path : new String[] {"/workspace", "/ideas"}) {
+      mockMvc
+          .perform(get(path))
+          .andExpect(status().isOk())
+          .andExpect(content().string(containsString(INDEX_BODY_FRAGMENT)));
+    }
   }
 
   @Test

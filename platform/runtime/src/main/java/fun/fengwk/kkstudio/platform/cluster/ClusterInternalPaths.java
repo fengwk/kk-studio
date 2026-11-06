@@ -6,7 +6,7 @@ import java.util.UUID;
 public final class ClusterInternalPaths {
 
   /** 内部 realtime oversize payload 回拉前缀。 */
-  public static final String INTERNAL_REALTIME_PREFIX = "/internal/harness-realtime";
+  public static final String INTERNAL_REALTIME_PREFIX = "/internal/events/payloads";
 
   /** Environment owner 单跳的内部 runtime/update 前缀。 */
   public static final String INTERNAL_ENVIRONMENT_PREFIX = "/internal/environments";

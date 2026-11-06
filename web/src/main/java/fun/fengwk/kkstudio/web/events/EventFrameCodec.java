@@ -63,7 +63,7 @@ final class EventFrameCodec {
   private static final String THREAD = ResourceKind.THREAD.name().toLowerCase();
   private static final String CANVAS = ResourceKind.CANVAS.name().toLowerCase();
   private static final String PROJECTS = ResourceKind.PROJECTS.name().toLowerCase();
-  private static final String TREE = ResourceKind.TREE.name().toLowerCase();
+  private static final String TREE = "thread-tree";
   private static final String INTERACTIONS = ResourceKind.INTERACTIONS.name().toLowerCase();
   private static final String ENVIRONMENTS = ResourceKind.ENVIRONMENTS.name().toLowerCase();
 
