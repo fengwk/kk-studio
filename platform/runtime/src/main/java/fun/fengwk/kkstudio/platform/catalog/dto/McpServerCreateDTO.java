@@ -8,8 +8,8 @@ import fun.fengwk.kkstudio.platform.secret.SecretUpdate;
 /**
  * {@code POST /api/platform/mcp-servers} 请求体。
  *
- * <p>只接受 Streamable HTTP 传输参数：配置保存不发起任何网络 I/O。headers 作为整体秘密提交，{@code SET} 的值是 header 映射的 JSON
- * 对象文本，值可写 {@code ${VAR}}，由 Backend 在发起请求或发现前从进程环境整值替换。
+ * <p>只接受 Streamable HTTP 传输参数：配置保存不发起任何网络 I/O。headers 作为整体秘密提交，省略表示无 header，只接受 {@code SET}；{@code
+ * SET} 的值是 header 映射的 JSON 对象文本，值可写 {@code ${VAR}}，由 Backend 在发起请求或发现前从进程环境整值替换。
  */
 @Data
 public class McpServerCreateDTO {
@@ -20,7 +20,7 @@ public class McpServerCreateDTO {
   /** 必填 Streamable HTTP endpoint URL。 */
   private String url;
 
-  /** 自定义请求 header：省略或 KEEP 表示无 header，CLEAR 同 KEEP，SET 携带 JSON 对象文本。 */
+  /** 自定义请求 header：省略表示无 header，SET 携带 JSON 对象文本。 */
   private @Nullable SecretUpdate headers;
 
   /** 公共启用开关；可空时按 true 处理。 */

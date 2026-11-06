@@ -594,6 +594,7 @@ class SkillCatalogServiceTest {
     SkillPackageEditDTO dto = new SkillPackageEditDTO();
     dto.setExpectedVersion(expectedVersion);
     dto.setDescription(description);
+    dto.setToken(SecretUpdate.keep());
     return dto;
   }
 
@@ -612,7 +613,7 @@ class SkillCatalogServiceTest {
 
   private static SkillPackageStagingCreateDTO uploadPreviewDTO(UUID uploadId) {
     SkillPackageStagingCreateDTO dto = new SkillPackageStagingCreateDTO();
-    dto.setUploadId(uploadId.toString());
+    dto.setUploadId(uploadId);
     dto.setPackageName(PACKAGE);
     dto.setPackageVersion("v1");
     dto.setDescription("uploaded");

@@ -34,6 +34,7 @@ import fun.fengwk.kkstudio.platform.catalog.dto.SkillPackageEditDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.SkillPackagePublishDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.SkillPackageStagingCreateDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.SkillPackageStagingPublishDTO;
+import fun.fengwk.kkstudio.platform.secret.SecretUpdate;
 import fun.fengwk.kkstudio.share.skill.SkillRefDTO;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 import fun.fengwk.kkstudio.web.storage.WebStorageS3TestConfiguration;
@@ -125,6 +126,7 @@ class SkillCatalogControllerTest extends WebPostgresTestSupport {
     edit.setExpectedVersion("0");
     edit.setDescription("updated description");
     edit.setBranch("release");
+    edit.setToken(SecretUpdate.keep());
     mockMvc
         .perform(
             put("/api/platform/skill-packages/{name}", name)
@@ -204,6 +206,7 @@ class SkillCatalogControllerTest extends WebPostgresTestSupport {
     edit.setExpectedVersion("0");
     edit.setDescription("description only");
     edit.setBranch("main");
+    edit.setToken(SecretUpdate.keep());
     mockMvc
         .perform(
             put("/api/platform/skill-packages/{name}", name)
@@ -218,6 +221,7 @@ class SkillCatalogControllerTest extends WebPostgresTestSupport {
     SkillPackageEditDTO missingBranch = new SkillPackageEditDTO();
     missingBranch.setExpectedVersion("1");
     missingBranch.setDescription("description only");
+    missingBranch.setToken(SecretUpdate.keep());
     mockMvc
         .perform(
             put("/api/platform/skill-packages/{name}", name)
@@ -276,6 +280,7 @@ class SkillCatalogControllerTest extends WebPostgresTestSupport {
     stale.setExpectedVersion("7");
     stale.setDescription("stale edit");
     stale.setBranch("main");
+    stale.setToken(SecretUpdate.keep());
     mockMvc
         .perform(
             put("/api/platform/skill-packages/{name}", name)
@@ -358,13 +363,26 @@ class SkillCatalogControllerTest extends WebPostgresTestSupport {
   @Test
   void stagingRoutesAddressTheStagedArchiveById() throws Exception {
     SkillPackageStagingCreateDTO staging = new SkillPackageStagingCreateDTO();
-    staging.setUploadId(UUID.randomUUID().toString());
+    staging.setUploadId(UUID.randomUUID());
     staging.setPackageName("web-staged-pkg");
     staging.setPackageVersion("v1");
     mockMvc
         .perform(json(post("/api/platform/skill-package-stagings"), staging))
         .andExpect(status().isNotFound())
         .andExpect(jsonPath("$.code").value("not_found"));
+
+    // uploadId 是类型化 UUID：请求体中的非 UUID 同样在边界拒绝
+    String invalidUploadId =
+        """
+        {"uploadId":"not-a-uuid","packageName":"web-staged-pkg","packageVersion":"v1"}
+        """;
+    mockMvc
+        .perform(
+            post("/api/platform/skill-package-stagings")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(invalidUploadId))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("validation"));
 
     SkillPackageStagingPublishDTO publish = new SkillPackageStagingPublishDTO();
     publish.setPackageName("web-staged-pkg");

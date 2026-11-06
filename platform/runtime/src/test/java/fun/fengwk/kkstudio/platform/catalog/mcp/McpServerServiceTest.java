@@ -196,6 +196,8 @@ public class McpServerServiceTest extends PostgresSpringTestSupport {
     McpServerUpdateDTO update = new McpServerUpdateDTO();
     update.setExpectedVersion("0");
     update.setUrl(fakeServer.endpointUrl());
+    update.setHeaders(SecretUpdate.keep());
+    update.setEnabled(true);
     update.setTimeoutMillis(8000L);
 
     McpServerDTO updated = mcpServerService.updateServer("update_test", update);
@@ -295,6 +297,8 @@ public class McpServerServiceTest extends PostgresSpringTestSupport {
     keep.setExpectedVersion("0");
     keep.setUrl(fakeServer.endpointUrl());
     keep.setHeaders(SecretUpdate.keep());
+    keep.setEnabled(true);
+    keep.setTimeoutMillis(5000L);
     assertTrue(mcpServerService.updateServer("headers_secret", keep).getHeaders().configured());
     assertEquals(
         "Bearer a",
@@ -304,6 +308,8 @@ public class McpServerServiceTest extends PostgresSpringTestSupport {
     clear.setExpectedVersion("1");
     clear.setUrl(fakeServer.endpointUrl());
     clear.setHeaders(SecretUpdate.clear());
+    clear.setEnabled(true);
+    clear.setTimeoutMillis(5000L);
     assertFalse(mcpServerService.updateServer("headers_secret", clear).getHeaders().configured());
     assertTrue(repository.getByName("headers_secret").orElseThrow().headers().isEmpty());
 
@@ -311,6 +317,8 @@ public class McpServerServiceTest extends PostgresSpringTestSupport {
     set.setExpectedVersion("2");
     set.setUrl(fakeServer.endpointUrl());
     set.setHeaders(SecretUpdate.set("{\"X-Token\":\"b\"}"));
+    set.setEnabled(true);
+    set.setTimeoutMillis(5000L);
     assertTrue(mcpServerService.updateServer("headers_secret", set).getHeaders().configured());
     assertEquals(
         Map.of("X-Token", "b"), repository.getByName("headers_secret").orElseThrow().headers());
@@ -320,6 +328,8 @@ public class McpServerServiceTest extends PostgresSpringTestSupport {
     invalid.setExpectedVersion("3");
     invalid.setUrl(fakeServer.endpointUrl());
     invalid.setHeaders(SecretUpdate.set("not-json"));
+    invalid.setEnabled(true);
+    invalid.setTimeoutMillis(5000L);
     assertThrows(
         DomainException.class, () -> mcpServerService.updateServer("headers_secret", invalid));
     assertEquals("3", mcpServerService.getServer("headers_secret").getVersion());
@@ -335,10 +345,10 @@ public class McpServerServiceTest extends PostgresSpringTestSupport {
     return createDTO;
   }
 
-  /** headers 以秘密更新的 SET 值提交：JSON 对象文本。 */
+  /** 创建请求的 headers 省略表示无 header；非空映射以 SET 的 JSON 对象文本提交。 */
   private static SecretUpdate headersSecret(Map<String, String> headers) {
     if (headers.isEmpty()) {
-      return SecretUpdate.keep();
+      return null;
     }
     return SecretUpdate.set(JSON.writeValueAsString(headers));
   }

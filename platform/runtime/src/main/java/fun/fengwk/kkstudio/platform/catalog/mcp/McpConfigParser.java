@@ -54,14 +54,26 @@ public final class McpConfigParser {
     return name;
   }
 
-  /** 校验并规范化显式 HTTP 配置；{@code enabled} 为空时按 true 处理。 */
+  /** 校验并规范化显式 HTTP 配置；{@code enabled} 为空时按 true、{@code timeoutMillis} 为空时按默认值处理（创建与导入）。 */
   public static HttpConfig normalizeHttpConfig(
       String url, Map<String, String> headers, Boolean enabled, Long timeoutMillis) {
     return new HttpConfig(
         requireUrl(url),
         normalizeHeaders(headers),
         enabled == null || enabled,
-        normalizeTimeoutMillis(timeoutMillis));
+        timeoutMillis == null
+            ? DEFAULT_TIMEOUT_MILLIS
+            : requirePositiveTimeoutMillis(timeoutMillis));
+  }
+
+  /** 校验并规范化显式 HTTP 配置；更新是整体替换，enabled 与 timeoutMillis 必填且不补默认值。 */
+  public static HttpConfig requireHttpConfig(
+      String url, Map<String, String> headers, boolean enabled, long timeoutMillis) {
+    return new HttpConfig(
+        requireUrl(url),
+        normalizeHeaders(headers),
+        enabled,
+        requirePositiveTimeoutMillis(timeoutMillis));
   }
 
   /** 归一化后的显式 HTTP 配置；headers 可能内嵌凭据，不进入 {@link #toString()}。 */
@@ -170,11 +182,8 @@ public final class McpConfigParser {
     return normalizeHeaders(parsed);
   }
 
-  /** 校验正整数毫秒超时；{@code null} 归一化为 {@link #DEFAULT_TIMEOUT_MILLIS}。 */
-  private static long normalizeTimeoutMillis(Long timeoutMillis) {
-    if (timeoutMillis == null) {
-      return DEFAULT_TIMEOUT_MILLIS;
-    }
+  /** 校验正整数毫秒超时。 */
+  private static long requirePositiveTimeoutMillis(long timeoutMillis) {
     if (timeoutMillis <= 0) {
       throw DomainException.validation(
           RESOURCE, "timeoutMillis must be positive: " + timeoutMillis);

@@ -7,7 +7,6 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
-import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentRepository;
 import fun.fengwk.kkstudio.platform.catalog.dto.SkillArchiveDownloadDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.SkillEnvironmentSyncDTO;
@@ -168,7 +167,7 @@ public class SkillCatalogService {
     String description = requireDescription(createDTO.getDescription());
     String repositoryUrl = requireRepositoryUrl(createDTO.getRepositoryUrl());
     String branch = requireBranch(createDTO.getBranch());
-    String token = tokenOf(createDTO.getToken());
+    String token = createToken(createDTO.getToken());
     if (skillPackageRepository.getPackage(packageName) != null) {
       throw DomainException.duplicate(RESOURCE, "skill package already exists: " + packageName);
     }
@@ -353,9 +352,10 @@ public class SkillCatalogService {
     requireCurrentVersion(current, rawExpected, expected);
     String description = requireDescription(editDTO.getDescription());
     if (!current.isGit()) {
-      if (editDTO.getBranch() != null || editDTO.getToken() != null) {
+      if (editDTO.getBranch() != null
+          || editDTO.getToken().operation() != SecretUpdate.Operation.KEEP) {
         throw DomainException.validation(
-            RESOURCE, "branch and token are only valid for Git packages");
+            RESOURCE, "branch is only valid for Git packages and token must be KEEP");
       }
       if (!Objects.equals(description, current.description())) {
         if (!skillPackageRepository.updateDescription(packageName, description, expected)) {
@@ -368,17 +368,15 @@ public class SkillCatalogService {
     boolean tokenChanged = false;
     String storedToken = current.gitSource().token();
     SecretUpdate tokenUpdate = editDTO.getToken();
-    if (tokenUpdate != null) {
-      switch (tokenUpdate.operation()) {
-        case KEEP -> {}
-        case CLEAR -> {
-          tokenChanged = storedToken != null;
-          storedToken = null;
-        }
-        case SET -> {
-          storedToken = requireToken(tokenUpdate.value());
-          tokenChanged = !storedToken.equals(current.gitSource().token());
-        }
+    switch (tokenUpdate.operation()) {
+      case KEEP -> {}
+      case CLEAR -> {
+        tokenChanged = storedToken != null;
+        storedToken = null;
+      }
+      case SET -> {
+        storedToken = requireToken(tokenUpdate.value());
+        tokenChanged = !storedToken.equals(current.gitSource().token());
       }
     }
     if (!Objects.equals(description, current.description())) {
@@ -403,7 +401,7 @@ public class SkillCatalogService {
     String packageName = requirePackageName(previewDTO.getPackageName());
     String packageVersion = requireVersionText(previewDTO.getPackageVersion());
     String description = requireDescription(previewDTO.getDescription());
-    UUID uploadId = requireUploadId(previewDTO.getUploadId(), "uploadId");
+    UUID uploadId = previewDTO.getUploadId();
     StorageUploadService.ReadyUpload ready = uploadService.peekReady(uploadId);
     StorageBlobContent content;
     try {
@@ -869,10 +867,13 @@ public class SkillCatalogService {
     }
   }
 
-  /** 秘密更新到存储令牌：省略、KEEP 或 CLEAR 表示无令牌，SET 使用其值。 */
-  private static String tokenOf(SecretUpdate update) {
-    if (update == null || update.operation() != SecretUpdate.Operation.SET) {
+  /** 创建请求的秘密字段：省略表示无令牌，只接受 SET。 */
+  private static String createToken(SecretUpdate update) {
+    if (update == null) {
       return null;
+    }
+    if (update.operation() != SecretUpdate.Operation.SET) {
+      throw DomainException.validation(RESOURCE, "token must use the SET operation on create");
     }
     return requireToken(update.value());
   }
@@ -901,14 +902,6 @@ public class SkillCatalogService {
       throw DomainException.validation(RESOURCE, "expectedVersion is required");
     }
     return CatalogVersions.parse(raw, "expectedVersion");
-  }
-
-  private static UUID requireUploadId(String raw, String field) {
-    try {
-      return Uuids.parseCanonical(raw, field);
-    } catch (IllegalArgumentException error) {
-      throw DomainException.validation(RESOURCE, field + " must be a canonical UUID", error);
-    }
   }
 
   private static String requirePackageName(String raw) {

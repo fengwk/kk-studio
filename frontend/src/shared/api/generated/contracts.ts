@@ -1950,9 +1950,9 @@ export interface McpServerSummaryDTO {
 export interface McpServerUpdateDTO {
   expectedVersion: string
   url: string
-  headers?: SecretUpdate | null
-  enabled?: boolean | null
-  timeoutMillis?: number | null
+  headers: SecretUpdate
+  enabled: boolean
+  timeoutMillis: number
 }
 
 /** Java：fun.fengwk.kkstudio.platform.catalog.dto.ModelAbilitiesDTO */
@@ -2605,7 +2605,7 @@ export interface SkillPackageEditDTO {
   expectedVersion: string
   description?: string | null
   branch?: string | null
-  token?: SecretUpdate | null
+  token: SecretUpdate
 }
 
 /** Java：fun.fengwk.kkstudio.platform.catalog.dto.SkillPackageFileDTO */

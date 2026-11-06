@@ -29,6 +29,7 @@ import fun.fengwk.kkstudio.platform.catalog.skill.archive.SkillArchiveBuilder.Ty
 import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitRepository;
 import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillSyncOrchestrator;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
+import fun.fengwk.kkstudio.platform.secret.SecretUpdate;
 import fun.fengwk.kkstudio.platform.storage.StorageS3TestConfiguration;
 
 import java.nio.charset.StandardCharsets;
@@ -150,6 +151,7 @@ class SkillPackageChangeNotificationIntegrationTest extends PostgresSpringTestSu
       unchanged.setExpectedVersion("0");
       unchanged.setDescription("notify package");
       unchanged.setBranch("main");
+      unchanged.setToken(SecretUpdate.keep());
       skillCatalogService.editPackage(PACKAGE, unchanged);
       assertNoNotification(pg);
       assertEquals(0L, skillPackageRepository.getPackage(PACKAGE).version());
@@ -159,6 +161,7 @@ class SkillPackageChangeNotificationIntegrationTest extends PostgresSpringTestSu
       stale.setExpectedVersion("9");
       stale.setDescription("changed");
       stale.setBranch("release");
+      stale.setToken(SecretUpdate.keep());
       assertThrows(DomainException.class, () -> skillCatalogService.editPackage(PACKAGE, stale));
       assertNoNotification(pg);
       assertEquals(0L, skillPackageRepository.getPackage(PACKAGE).version());
