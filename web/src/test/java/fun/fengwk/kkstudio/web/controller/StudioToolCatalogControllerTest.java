@@ -32,14 +32,14 @@ class StudioToolCatalogControllerTest extends WebPostgresTestSupport {
         mockMvc
             .perform(get("/api/tools"))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data[?(@.name == 'read')].name").value("read"))
-            .andExpect(jsonPath("$.data[?(@.name == 'read')].description").isNotEmpty())
-            .andExpect(jsonPath("$.data[?(@.name == 'task')]").doesNotExist())
+            .andExpect(jsonPath("$[?(@.name == 'read')].name").value("read"))
+            .andExpect(jsonPath("$[?(@.name == 'read')].description").isNotEmpty())
+            .andExpect(jsonPath("$[?(@.name == 'task')]").doesNotExist())
             .andReturn();
 
     JsonNode root = jsonMapper.readTree(result.getResponse().getContentAsString());
     JsonNode readEntry = null;
-    for (JsonNode entry : root.path("data")) {
+    for (JsonNode entry : root) {
       if ("read".equals(entry.path("name").asText())) {
         readEntry = entry;
         break;

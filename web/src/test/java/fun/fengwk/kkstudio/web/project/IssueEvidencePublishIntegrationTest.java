@@ -103,12 +103,12 @@ class IssueEvidencePublishIntegrationTest extends WebPostgresTestSupport {
                     .contentType(MediaType.APPLICATION_JSON)
                     .content("{\"uploadId\":\"" + uploadId + "\"}"))
             .andExpect(status().isCreated())
-            .andExpect(jsonPath("$.data.issueId").value(issueId.toString()))
-            .andExpect(jsonPath("$.data.blobId").value(blobId.toString()))
-            .andExpect(jsonPath("$.data.uri").value(uri))
-            .andExpect(jsonPath("$.data.name").value("acceptance.txt"))
-            .andExpect(jsonPath("$.data.runId").value(nullValue()))
-            .andExpect(jsonPath("$.data.createdAt").isString())
+            .andExpect(jsonPath("$.issueId").value(issueId.toString()))
+            .andExpect(jsonPath("$.blobId").value(blobId.toString()))
+            .andExpect(jsonPath("$.uri").value(uri))
+            .andExpect(jsonPath("$.name").value("acceptance.txt"))
+            .andExpect(jsonPath("$.runId").value(nullValue()))
+            .andExpect(jsonPath("$.createdAt").isString())
             .andReturn();
 
     // 公开不复制字节：对象 key 集合与最终对象内容在发布前后逐字节一致，响应也不暴露物理 key

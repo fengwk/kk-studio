@@ -457,7 +457,7 @@ class ProviderRequestPreviewIntegrationTest extends WebPostgresTestSupport {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(httpDraft(head, sequence)))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.sourceHeadEntryId").value(head));
+        .andExpect(jsonPath("$.sourceHeadEntryId").value(head));
     UUID oldHead =
         jdbc.queryForObject(
             "select id from harness_entry where session_id = ? and entry_type = 'ROOT'",
@@ -469,7 +469,7 @@ class ProviderRequestPreviewIntegrationTest extends WebPostgresTestSupport {
             httpDraft(head, Long.toString(Long.parseLong(sequence) - 1)))) {
       mvc.perform(post(previewPath).contentType(MediaType.APPLICATION_JSON).content(body))
           .andExpect(status().isConflict())
-          .andExpect(jsonPath("$.errors.reason").value("PREVIEW_STALE_CURSOR"));
+          .andExpect(jsonPath("$.reason").value("PREVIEW_STALE_CURSOR"));
       assertEquals(before, durableState(fixture, null));
       assertEquals(requestsBefore, providerRequests.get());
     }
@@ -487,14 +487,12 @@ class ProviderRequestPreviewIntegrationTest extends WebPostgresTestSupport {
   }
 
   private JsonNode readHttpSnapshot(MockMvc mvc, String path) throws Exception {
-    return objectMapper
-        .readTree(
-            mvc.perform(get(path))
-                .andExpect(status().isOk())
-                .andReturn()
-                .getResponse()
-                .getContentAsString())
-        .path("data");
+    return objectMapper.readTree(
+        mvc.perform(get(path))
+            .andExpect(status().isOk())
+            .andReturn()
+            .getResponse()
+            .getContentAsString());
   }
 
   private String httpDraft(String head, String sequence) throws IOException {

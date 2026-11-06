@@ -73,9 +73,9 @@ public class StudioMcpServerControllerTest extends WebPostgresTestSupport {
                     .contentType(MediaType.APPLICATION_JSON)
                     .content(objectMapper.writeValueAsString(create)))
             .andExpect(status().isCreated())
-            .andExpect(jsonPath("$.data.name").value(name))
-            .andExpect(jsonPath("$.data.version").value("0"))
-            .andExpect(jsonPath("$.data.discoveryStatus").value("UNVERIFIED"))
+            .andExpect(jsonPath("$.name").value(name))
+            .andExpect(jsonPath("$.version").value("0"))
+            .andExpect(jsonPath("$.discoveryStatus").value("UNVERIFIED"))
             .andReturn();
 
     JsonNode createData = data(createResult);
@@ -89,7 +89,7 @@ public class StudioMcpServerControllerTest extends WebPostgresTestSupport {
         mockMvc
             .perform(get("/api/mcp-servers/{name}", name))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data.name").value(name))
+            .andExpect(jsonPath("$.name").value(name))
             .andReturn();
     assertFalse(data(getResult).has("url"));
     assertFalse(data(getResult).has("headers"));
@@ -100,8 +100,8 @@ public class StudioMcpServerControllerTest extends WebPostgresTestSupport {
             .perform(get("/api/mcp-servers/{name}/config", name))
             .andExpect(status().isOk())
             .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"))
-            .andExpect(jsonPath("$.data.name").value(name))
-            .andExpect(jsonPath("$.data.url").value(fakeServer.endpointUrl()))
+            .andExpect(jsonPath("$.name").value(name))
+            .andExpect(jsonPath("$.url").value(fakeServer.endpointUrl()))
             .andReturn();
     JsonNode configData = data(getConfigResult);
     assertTrue(
@@ -111,14 +111,14 @@ public class StudioMcpServerControllerTest extends WebPostgresTestSupport {
     mockMvc
         .perform(get("/api/mcp-servers").param("pageNumber", "1").param("pageSize", "10"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.results").isArray());
+        .andExpect(jsonPath("$.results").isArray());
 
     // 5. POST /api/mcp-servers/{name}/discover (同步发现)
     mockMvc
         .perform(post("/api/mcp-servers/{name}/discover", name).param("expectedVersion", "0"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.discoveryStatus").value("AVAILABLE"))
-        .andExpect(jsonPath("$.data.toolCount").value(1));
+        .andExpect(jsonPath("$.discoveryStatus").value("AVAILABLE"))
+        .andExpect(jsonPath("$.toolCount").value(1));
 
     // 6. PUT /api/mcp-servers/{name} (更新)
     McpServerUpdateDTO update = new McpServerUpdateDTO();
@@ -132,9 +132,9 @@ public class StudioMcpServerControllerTest extends WebPostgresTestSupport {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(update)))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.timeoutMillis").value(20000))
-        .andExpect(jsonPath("$.data.version").value("1"))
-        .andExpect(jsonPath("$.data.discoveryStatus").value("UNVERIFIED"));
+        .andExpect(jsonPath("$.timeoutMillis").value(20000))
+        .andExpect(jsonPath("$.version").value("1"))
+        .andExpect(jsonPath("$.discoveryStatus").value("UNVERIFIED"));
 
     // 7. DELETE /api/mcp-servers/{name} (删除)
     mockMvc
@@ -218,6 +218,6 @@ public class StudioMcpServerControllerTest extends WebPostgresTestSupport {
   }
 
   private JsonNode data(MvcResult result) throws Exception {
-    return objectMapper.readTree(result.getResponse().getContentAsString()).path("data");
+    return objectMapper.readTree(result.getResponse().getContentAsString());
   }
 }

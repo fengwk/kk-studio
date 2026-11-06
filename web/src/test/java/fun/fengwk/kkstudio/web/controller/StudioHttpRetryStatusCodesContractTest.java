@@ -79,7 +79,7 @@ class StudioHttpRetryStatusCodesContractTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"providerType\":\"openai\",\"credential\":\"k\"}"))
         .andExpect(status().is2xxSuccessful())
-        .andExpect(jsonPath("$.data.modelHttpRetryStatusCodes").value(nullValue()));
+        .andExpect(jsonPath("$.modelHttpRetryStatusCodes").value(nullValue()));
   }
 
   /** 合法整数数组必须被接受，并经 {@code @JsonSetter} 入口标记“字段出现”。 */
