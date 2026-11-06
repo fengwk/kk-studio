@@ -6,6 +6,7 @@ import static org.mockito.Mockito.*;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DuplicateKeyException;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwner;
 
@@ -50,12 +51,16 @@ class ChatSessionOwnershipTest {
     UUID id = UUID.randomUUID(), session = UUID.randomUUID();
     SessionOwner owner = new SessionOwner("CHAT", id.toString());
     assertThrows(DomainException.class, () -> spi.listSessions(owner));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> spi.lockForAcceptance(new SessionOwner("CHAT", "1-1-1-1-1"), null));
+    DomainException invalidOwnerId =
+        assertThrows(
+            DomainException.class,
+            () -> spi.lockForAcceptance(new SessionOwner("CHAT", "1-1-1-1-1"), null));
+    assertEquals(DomainErrorCode.VALIDATION, invalidOwnerId.code());
     when(sessions.insert(session, id)).thenThrow(new DuplicateKeyException("duplicate"));
     assertThrows(IllegalStateException.class, () -> spi.sessionCreated(owner, session));
-    assertThrows(IllegalArgumentException.class, () -> new SessionOwner(" ", "id"));
+    DomainException blankOwner =
+        assertThrows(DomainException.class, () -> new SessionOwner(" ", "id"));
+    assertEquals(DomainErrorCode.VALIDATION, blankOwner.code());
   }
 
   @Test

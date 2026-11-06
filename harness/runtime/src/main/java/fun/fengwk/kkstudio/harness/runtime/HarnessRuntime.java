@@ -169,7 +169,7 @@ public final class HarnessRuntime {
    * SET_ENVIRONMENT，每种至多一次） 的 SET_* 前缀且必须全部位于消息之前，整体必须以<b>恰一条</b> user-like 输入结尾（USER_MESSAGE、USER
    * 角色的 CUSTOM_MESSAGE 或 typed GOAL；typed GOAL 不可与任何消息同批）。运行时注入的 reminder 也是 USER
    * CUSTOM_MESSAGE，同样计入 user-like，因此 {@code [reminder, USER]} 是两条 user-like 而被拒。非法 batch 是请求校验错误，抛
-   * {@link IllegalArgumentException}。
+   * {@link DomainException}。
    */
   public AcceptedCommands acceptCommands(
       AcceptCommandsCommand command, AcceptancePreflight preflight) {
@@ -409,7 +409,8 @@ public final class HarnessRuntime {
                           DomainException.notFound(
                               "thread", "thread " + command.threadId() + " does not exist"));
           if (thread.parentThreadId() != null) {
-            throw new IllegalArgumentException(
+            throw DomainException.validation(
+                "thread",
                 "thread "
                     + command.threadId()
                     + " follows its execution root and does not own a yolo switch");
@@ -478,7 +479,7 @@ public final class HarnessRuntime {
     Objects.requireNonNull(threadId, "threadId");
     Objects.requireNonNull(executionId, "executionId");
     if (expectedVersion < 0) {
-      throw new IllegalArgumentException("expectedVersion must not be negative");
+      throw DomainException.validation("expectedVersion", "expectedVersion must not be negative");
     }
     store.transaction(
         tx -> {
@@ -553,7 +554,7 @@ public final class HarnessRuntime {
     Objects.requireNonNull(afterCreatedAt, "afterCreatedAt");
     Objects.requireNonNull(afterId, "afterId");
     if (limit <= 0) {
-      throw new IllegalArgumentException("limit must be positive");
+      throw DomainException.validation("limit", "limit must be positive");
     }
     int probeSize = limit == Integer.MAX_VALUE ? limit : limit + 1;
     return store.transaction(
@@ -600,7 +601,7 @@ public final class HarnessRuntime {
     Objects.requireNonNull(afterRepresentativeCreatedAt, "afterRepresentativeCreatedAt");
     Objects.requireNonNull(afterRepresentativeInvocationId, "afterRepresentativeInvocationId");
     if (limit <= 0) {
-      throw new IllegalArgumentException("limit must be positive");
+      throw DomainException.validation("limit", "limit must be positive");
     }
     int probeSize = limit == Integer.MAX_VALUE ? limit : limit + 1;
     return store.transaction(
@@ -794,19 +795,26 @@ public final class HarnessRuntime {
   /**
    * 在单个短事务内按存储追加顺序读取一页 Session Entry（含非当前 head 路径上的历史分支）。
    *
-   * <p>{@code afterEntryId} 可为 null；非 null 时必须属于该 Session。Session 不存在抛 NotFound，游标非法抛 {@link
-   * IllegalArgumentException}。父节点先于子节点写入，因此分页不会让子节点先于父节点出现。
+   * <p>{@code afterEntryId} 可为 null；非 null 时必须属于该 Session。Session 不存在抛 NotFound，游标非法或 limit
+   * 非正抛校验错误。父节点先于子节点写入，因此分页不会让子节点先于父节点出现。
    */
   public SessionEntryPage listSessionEntryPage(UUID sessionId, UUID afterEntryId, int limit) {
     Objects.requireNonNull(sessionId, "sessionId");
     if (limit <= 0) {
-      throw new IllegalArgumentException("limit must be positive");
+      throw DomainException.validation("limit", "limit must be positive");
     }
     int probeSize = limit == Integer.MAX_VALUE ? limit : limit + 1;
     return store.transaction(
         tx -> {
           if (tx.sessions().find(sessionId).isEmpty()) {
             throw DomainException.notFound("session", "session " + sessionId + " does not exist");
+          }
+          if (afterEntryId != null
+              && tx.entries()
+                  .find(afterEntryId)
+                  .filter(entry -> entry.sessionId().equals(sessionId))
+                  .isEmpty()) {
+            throw DomainException.validation("afterEntryId", "cursor must belong to the session");
           }
           List<Entry> rows = tx.entries().loadPageBySession(sessionId, afterEntryId, probeSize);
           boolean hasMore = rows.size() > limit;

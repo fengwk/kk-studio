@@ -139,9 +139,12 @@ class HarnessRuntimeAbandonExitTest {
             () -> runtime.abandonExecution(baseline.threadId(), UUID.randomUUID(), 0L));
     assertEquals(DomainErrorCode.NOT_FOUND, missingExecution.code());
     assertEquals("execution", missingExecution.resource());
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> runtime.abandonExecution(baseline.threadId(), UUID.randomUUID(), -1L));
+    assertEquals(
+        DomainErrorCode.VALIDATION,
+        assertThrows(
+                DomainException.class,
+                () -> runtime.abandonExecution(baseline.threadId(), UUID.randomUUID(), -1L))
+            .code());
   }
 
   private static ExecutionExitFact register(

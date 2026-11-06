@@ -16,6 +16,8 @@ import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.module.SimpleModule;
 import tools.jackson.databind.ser.std.ToStringSerializer;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
 import fun.fengwk.kkstudio.project.domain.ProjectStateCode;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflow;
@@ -51,9 +53,12 @@ class ProjectDtoMapperTest {
   void testWorkflowMaxRunsRejectsNonCanonicalDecimal() {
     // 测试意图：maxRuns 走共享 canonical 十进制；空白仍表示缺省，前后空白不被裁剪接受。
     ProjectWorkflowDTO padded = maxRunsWorkflow(" 1");
-    IllegalArgumentException error =
-        assertThrows(IllegalArgumentException.class, () -> mapper.toWorkflow(padded));
+    DomainException error = assertThrows(DomainException.class, () -> mapper.toWorkflow(padded));
+    assertEquals(DomainErrorCode.VALIDATION, error.code());
     assertTrue(error.getMessage().contains("maxRuns"));
+
+    DomainException missing = assertThrows(DomainException.class, () -> mapper.toWorkflow(null));
+    assertEquals(DomainErrorCode.VALIDATION, missing.code());
   }
 
   @Test
@@ -167,23 +172,23 @@ class ProjectDtoMapperTest {
   @Test
   void testMaxRunsRejectsValuesOutsideIntRange() {
     // 测试意图：maxRuns 的领域类型是 Integer，超过 int 范围时禁止 long 截断，必须拒绝。
-    IllegalArgumentException overflow =
-        assertThrows(
-            IllegalArgumentException.class, () -> mapper.toWorkflow(maxRunsWorkflow("2147483648")));
+    DomainException overflow =
+        assertThrows(DomainException.class, () -> mapper.toWorkflow(maxRunsWorkflow("2147483648")));
+    assertEquals(DomainErrorCode.VALIDATION, overflow.code());
     assertTrue(overflow.getMessage().contains("maxRuns"));
     assertTrue(
         overflow.getMessage().contains("int") || overflow.getMessage().contains("range"),
         () -> "truncation must be rejected as a range error, but was: " + overflow.getMessage());
 
-    IllegalArgumentException beyondLong =
+    DomainException beyondLong =
         assertThrows(
-            IllegalArgumentException.class,
-            () -> mapper.toWorkflow(maxRunsWorkflow("9223372036854775808")));
+            DomainException.class, () -> mapper.toWorkflow(maxRunsWorkflow("9223372036854775808")));
+    assertEquals(DomainErrorCode.VALIDATION, beyondLong.code());
     assertTrue(beyondLong.getMessage().contains("maxRuns"));
 
-    IllegalArgumentException negative =
-        assertThrows(
-            IllegalArgumentException.class, () -> mapper.toWorkflow(maxRunsWorkflow("-1")));
+    DomainException negative =
+        assertThrows(DomainException.class, () -> mapper.toWorkflow(maxRunsWorkflow("-1")));
+    assertEquals(DomainErrorCode.VALIDATION, negative.code());
     assertTrue(negative.getMessage().contains("maxRuns"));
 
     ProjectWorkflow accepted = mapper.toWorkflow(maxRunsWorkflow("2147483647"));

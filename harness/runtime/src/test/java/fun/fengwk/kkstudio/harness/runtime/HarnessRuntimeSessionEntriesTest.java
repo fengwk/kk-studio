@@ -156,12 +156,18 @@ class HarnessRuntimeSessionEntriesTest {
         assertThrows(
                 DomainException.class, () -> runtime.listSessionEntryPage(TestIds.id(999), null, 2))
             .code());
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> runtime.listSessionEntryPage(baseline.sessionId(), TestIds.id(999), 2));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> runtime.listSessionEntryPage(baseline.sessionId(), null, 0));
+    assertEquals(
+        DomainErrorCode.VALIDATION,
+        assertThrows(
+                DomainException.class,
+                () -> runtime.listSessionEntryPage(baseline.sessionId(), TestIds.id(999), 2))
+            .code());
+    assertEquals(
+        DomainErrorCode.VALIDATION,
+        assertThrows(
+                DomainException.class,
+                () -> runtime.listSessionEntryPage(baseline.sessionId(), null, 0))
+            .code());
     assertThrows(NullPointerException.class, () -> runtime.listSessionEntryPage(null, null, 2));
   }
 }

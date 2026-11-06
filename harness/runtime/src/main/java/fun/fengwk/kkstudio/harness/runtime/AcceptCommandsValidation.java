@@ -52,7 +52,8 @@ final class AcceptCommandsValidation {
     if (startEntry.payload().type().isRoot() || startEntry.payload() instanceof TurnEndPayload) {
       return;
     }
-    throw new IllegalArgumentException(
+    throw DomainException.validation(
+        "startEntry",
         "start entry "
             + startEntry.id()
             + " is not a legal "
@@ -75,8 +76,7 @@ final class AcceptCommandsValidation {
    *
    * <p>SET_* 必须以固定顺序（SET_AGENT -&gt; SET_EXECUTION -&gt; SET_ENVIRONMENT）、至多一次且全部出现在消息之前。 创建类
    * target（NEW_SESSION / NEW_THREAD）要求<b>恰有一条</b>末尾 user-like 输入；THREAD target 允许 settings-only
-   * batch（0 条 user-like），最多一条 user-like 且必须位于末尾。非法 batch 是请求校验错误，抛 {@link IllegalArgumentException}
-   * 而非业务冲突。
+   * batch（0 条 user-like），最多一条 user-like 且必须位于末尾。非法 batch 是请求校验错误，抛 {@link DomainException} 而非业务冲突。
    *
    * @param targetLabel 用于错误消息的来源标签
    */
@@ -167,7 +167,8 @@ final class AcceptCommandsValidation {
     if (!thread.id().equals(thread.rootThreadId())
         && commands.stream()
             .anyMatch(command -> command.payload().type() == ThreadCommandType.SET_ENVIRONMENT)) {
-      throw new IllegalArgumentException("only the execution root can set an environment");
+      throw DomainException.validation(
+          "commands", "only the execution root can set an environment");
     }
   }
 
@@ -214,14 +215,15 @@ final class AcceptCommandsValidation {
       String context) {
     AgentDriver sourceDriver = driverRegistry.of(sourceSettings);
     if (!sourceDriver.capabilities().fork()) {
-      throw new IllegalArgumentException(
-          "fork is unsupported by driver " + sourceDriver.id() + " in " + context);
+      throw DomainException.validation(
+          "execution", "fork is unsupported by driver " + sourceDriver.id() + " in " + context);
     }
     for (NewThreadCommand command : commands) {
       if (command.payload() instanceof SetExecutionCommandPayload setExecution) {
         driverRegistry.validate(setExecution.execution());
         if (!sourceDriver.id().equals(setExecution.execution().driver())) {
-          throw new IllegalArgumentException(
+          throw DomainException.validation(
+              "execution",
               "driver cannot be changed in fork: source="
                   + sourceDriver.id()
                   + ", requested="
@@ -242,7 +244,8 @@ final class AcceptCommandsValidation {
         driverRegistry.validate(setExecution.execution());
         if (currentSettings.execution() != null
             && !currentSettings.execution().driver().equals(setExecution.execution().driver())) {
-          throw new IllegalArgumentException(
+          throw DomainException.validation(
+              "execution",
               "driver cannot be changed on an existing thread: current="
                   + currentSettings.execution().driver()
                   + ", requested="
@@ -258,8 +261,8 @@ final class AcceptCommandsValidation {
         || command.payload() instanceof GoalCommandPayload;
   }
 
-  private static IllegalArgumentException invalidBatch(String targetLabel, String message) {
-    return new IllegalArgumentException(targetLabel + " batch: " + message);
+  private static DomainException invalidBatch(String targetLabel, String message) {
+    return DomainException.validation("commands", targetLabel + " batch: " + message);
   }
 
   private static DomainException conflict(HarnessConflictReason reason, String message) {

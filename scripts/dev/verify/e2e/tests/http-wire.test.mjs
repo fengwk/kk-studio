@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import test from 'node:test'
 
-import { HttpError, httpJson, listResults } from '../lib/http.mjs'
+import { HttpError, expectHttpError, httpJson, listResults } from '../lib/http.mjs'
 
 test('HTTP helper reads resources, empty 204 and problem details without a response wrapper', async () => {
   // Exercise the actual fetch path including the no-content and structured error cases.
@@ -37,6 +37,15 @@ test('HTTP helper reads resources, empty 204 and problem details without a respo
       assert.deepEqual(JSON.parse(error.body), problem)
       return true
     })
+    await expectHttpError(() => httpJson(base, 'GET', '/conflict'), {
+      status: 409, code: 'conflict', reason: 'STALE_COMMAND_CURSOR',
+    })
+    await assert.rejects(
+      () => expectHttpError(() => httpJson(base, 'GET', '/conflict'), {
+        status: 409, code: 'conflict', reason: 'OTHER',
+      }),
+      /expected reason OTHER/,
+    )
   } finally {
     await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
   }

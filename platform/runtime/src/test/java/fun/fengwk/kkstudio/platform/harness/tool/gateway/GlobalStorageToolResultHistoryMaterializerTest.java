@@ -12,6 +12,7 @@ import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.common.result.TextArtifactMetadata;
@@ -66,6 +67,32 @@ class GlobalStorageToolResultHistoryMaterializerTest {
     assertEquals("call", stable.toolCallId());
     verify(refManager).retainRef(sessionId, blobId);
     verify(uploadService).delete(uploadId);
+  }
+
+  /** 后台 Tool 结果的存储验证失败转为物化失败，且不写 Session 引用。 */
+  @Test
+  void rejectsUnreadyUploadAsToolMaterializationFailure() {
+    UUID uploadId = UUID.randomUUID();
+    StorageUploadService uploads = mock(StorageUploadService.class);
+    StorageBlobManager blobs = mock(StorageBlobManager.class);
+    SessionBlobRefManager refs = mock(SessionBlobRefManager.class);
+    when(uploads.lockReady(uploadId))
+        .thenThrow(DomainException.conflict("STORAGE_VERIFICATION", "pending"));
+    ResourceResultContent staged =
+        new ResourceResultContent(
+            new ResourceRef(ResourceRef.blobUploadUri(uploadId), "text/plain", "x", 7L, SHA256));
+    ToolOutcomeMaterializationException failure =
+        assertThrows(
+            ToolOutcomeMaterializationException.class,
+            () ->
+                materializer(uploads, blobs, refs)
+                    .materialize(
+                        UUID.randomUUID(),
+                        "tool",
+                        new ToolResult("call", List.of(staged), false, "{}")));
+    assertEquals("uploaded resource is not ready for history", failure.getMessage());
+    verifyNoInteractions(blobs, refs);
+    verify(uploads, never()).delete(any());
   }
 
   /** 意图：平台 read 已授权的 Session Blob 复用为稳定工具结果，不重新上传、不读对象存储。 */

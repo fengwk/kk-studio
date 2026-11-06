@@ -16,6 +16,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.thread.SetThreadYoloCommand;
 import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
@@ -122,9 +124,12 @@ class HarnessRuntimeSetYoloTest {
     UUID childThreadId = seedChildThread(baseline);
     clock.advance(T1);
 
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> runtime.setThreadYolo(new SetThreadYoloCommand(childThreadId, true)));
+    assertEquals(
+        DomainErrorCode.VALIDATION,
+        assertThrows(
+                DomainException.class,
+                () -> runtime.setThreadYolo(new SetThreadYoloCommand(childThreadId, true)))
+            .code());
 
     ThreadState child = store.transaction(tx -> tx.threads().find(childThreadId).orElseThrow());
     assertEquals(baseline.threadId(), child.rootThreadId());

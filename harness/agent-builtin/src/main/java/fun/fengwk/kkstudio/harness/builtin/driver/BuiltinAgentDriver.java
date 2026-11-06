@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.builtin.driver;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionPreparation;
 import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
@@ -153,7 +154,11 @@ public final class BuiltinAgentDriver implements AgentDriver {
 
   @Override
   public void validateSettings(String settingsJson) {
-    BuiltinExecution.parseSettings(settingsJson);
+    try {
+      BuiltinExecution.parseSettings(settingsJson);
+    } catch (IllegalArgumentException error) {
+      throw DomainException.validation("execution", error.getMessage(), error);
+    }
   }
 
   @Override

@@ -396,9 +396,9 @@ class HarnessRuntimeAcceptInitialTest {
                 List.of(userMessageCommand(TestIds.id(1), "root"))),
             AcceptancePreflight.IDENTITY);
 
-    IllegalArgumentException changed =
+    DomainException changed =
         assertThrows(
-            IllegalArgumentException.class,
+            DomainException.class,
             () ->
                 runtime.acceptCommands(
                     entry(
@@ -413,6 +413,7 @@ class HarnessRuntimeAcceptInitialTest {
                             userMessageCommand(TestIds.id(3), "branch"))),
                     AcceptancePreflight.IDENTITY));
     assertTrue(changed.getMessage().contains("driver cannot be changed in fork"));
+    assertEquals(DomainErrorCode.VALIDATION, changed.code());
 
     AcceptedCommands sameDriver =
         runtime.acceptCommands(
@@ -441,9 +442,9 @@ class HarnessRuntimeAcceptInitialTest {
                 TestIds.id(175),
                 List.of(userMessageCommand(TestIds.id(6), "root"))),
             AcceptancePreflight.IDENTITY);
-    IllegalArgumentException unsupported =
+    DomainException unsupported =
         assertThrows(
-            IllegalArgumentException.class,
+            DomainException.class,
             () ->
                 noForkRuntime.acceptCommands(
                     entry(
@@ -453,6 +454,7 @@ class HarnessRuntimeAcceptInitialTest {
                         List.of(userMessageCommand(TestIds.id(7), "branch"))),
                     AcceptancePreflight.IDENTITY));
     assertTrue(unsupported.getMessage().contains("fork is unsupported"));
+    assertEquals(DomainErrorCode.VALIDATION, unsupported.code());
   }
 
   /**
@@ -468,9 +470,9 @@ class HarnessRuntimeAcceptInitialTest {
             List.of(setAgent(TestIds.id(2)), userMessageCommand(TestIds.id(1), "hello"))),
         AcceptancePreflight.IDENTITY);
 
-    // 非法（请求校验错误，抛 IAE 而非业务冲突）：没有 user-like message。
+    // 非法（请求校验错误，而非业务冲突）：没有 user-like message。
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () ->
             runtime.acceptCommands(
                 newSession(TestIds.id(112), TestIds.id(113), List.of(setAgent(TestIds.id(3)))),
@@ -478,7 +480,7 @@ class HarnessRuntimeAcceptInitialTest {
 
     // 非法（IAE）：SET_* 出现在消息之后（user-like 必须恰好一条且结尾）。
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () ->
             runtime.acceptCommands(
                 newSession(
@@ -499,7 +501,7 @@ class HarnessRuntimeAcceptInitialTest {
 
     // 非法（IAE）：reminder + user message 是两条 user-like，违反「恰一条末尾 USER 消息」。
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () ->
             runtime.acceptCommands(
                 newSession(
@@ -533,7 +535,7 @@ class HarnessRuntimeAcceptInitialTest {
         AcceptancePreflight.IDENTITY);
     // 非法：GOAL 与 USER_MESSAGE 同批是两条 user-like。
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () ->
             runtime.acceptCommands(
                 newSession(
@@ -545,7 +547,7 @@ class HarnessRuntimeAcceptInitialTest {
                 AcceptancePreflight.IDENTITY));
     // 非法：GOAL 之后还有命令。
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () ->
             runtime.acceptCommands(
                 newSession(
@@ -579,7 +581,7 @@ class HarnessRuntimeAcceptInitialTest {
     assertFalse(result.replayed());
     // 非法：SET_AGENT 出现在 SET_EXECUTION 之后（顺序不变量拒绝）。
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () ->
             runtime.acceptCommands(
                 newSession(
@@ -594,7 +596,7 @@ class HarnessRuntimeAcceptInitialTest {
                 AcceptancePreflight.IDENTITY));
     // 非法：SET_ENVIRONMENT 出现在 SET_EXECUTION 之前（顺序不变量拒绝）。
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () ->
             runtime.acceptCommands(
                 newSession(
@@ -610,7 +612,7 @@ class HarnessRuntimeAcceptInitialTest {
                 AcceptancePreflight.IDENTITY));
     // 非法：同类型 SET_* 出现两次。
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () ->
             runtime.acceptCommands(
                 newSession(
@@ -622,7 +624,7 @@ class HarnessRuntimeAcceptInitialTest {
                         userMessageCommand(TestIds.id(3), "hi"))),
                 AcceptancePreflight.IDENTITY));
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () ->
             runtime.acceptCommands(
                 newSession(
@@ -636,7 +638,7 @@ class HarnessRuntimeAcceptInitialTest {
                 AcceptancePreflight.IDENTITY));
     // 非法：SET_* 出现在消息之后。
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () ->
             runtime.acceptCommands(
                 newSession(
@@ -741,7 +743,7 @@ class HarnessRuntimeAcceptInitialTest {
               return rootEntryId;
             });
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () ->
             runtime.acceptCommands(
                 entry(
@@ -768,9 +770,9 @@ class HarnessRuntimeAcceptInitialTest {
     illegalPrefixes.addAll(seedStopTurn(baseline, false));
 
     for (UUID startEntryId : illegalPrefixes) {
-      IllegalArgumentException error =
+      DomainException error =
           assertThrows(
-              IllegalArgumentException.class,
+              DomainException.class,
               () ->
                   runtime.acceptCommands(
                       entry(
@@ -783,6 +785,7 @@ class HarnessRuntimeAcceptInitialTest {
               + startEntryId
               + " is not a legal NEW_THREAD fork boundary (ROOT or a closed TURN_END)",
           error.getMessage());
+      assertEquals(DomainErrorCode.VALIDATION, error.code());
       assertNoNewThreadFacts(TestIds.id(203));
     }
 

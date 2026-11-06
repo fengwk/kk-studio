@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.project.service;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.hash.Sha256;
+import fun.fengwk.kkstudio.project.domain.ProjectStateCode;
 
 import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
@@ -97,6 +98,18 @@ public final class ProjectValidationUtils {
   /** 幂等请求键：非空白、无首尾空白且不超过 {@link #MAX_REQUEST_KEY_LENGTH} 个码点。 */
   public static String requireRequestKey(String requestKey) {
     return requireDisplayName(requestKey, "requestKey", MAX_REQUEST_KEY_LENGTH);
+  }
+
+  /** 客户端提交的工作流状态编码；缺失、空白或格式错误都是请求校验失败。 */
+  public static ProjectStateCode requireStateCode(String value, String field) {
+    if (value == null || value.isBlank()) {
+      throw DomainException.validation(field, field + " must be a state code");
+    }
+    try {
+      return ProjectStateCode.of(value);
+    } catch (IllegalArgumentException error) {
+      throw validation(field, error);
+    }
   }
 
   /** 执行领域校验动作，把确定性领域拒绝翻译为平台校验错误。 */

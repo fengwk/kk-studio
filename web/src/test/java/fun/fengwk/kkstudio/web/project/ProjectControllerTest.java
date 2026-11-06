@@ -4,6 +4,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -242,6 +243,30 @@ class ProjectControllerTest {
                 .content(objectMapper.writeValueAsString(req)))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.version").value("2"));
+  }
+
+  @Test
+  void rejectsMalformedClientWorkflowBeforeServiceCall() throws Exception {
+    mockMvc
+        .perform(
+            put("/api/project/projects/" + projectId + "/workflow")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {"expectedVersion":"1","workflow":{"states":[
+                    {"state":"not a state code","name":"Bad"}]}}
+                    """))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("validation"));
+    mockMvc
+        .perform(
+            put("/api/project/projects/" + projectId + "/workflow")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"expectedVersion\":\"1\"}"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("validation"));
+
+    verifyNoInteractions(projectService);
   }
 
   @Test

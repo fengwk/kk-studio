@@ -218,9 +218,14 @@ class HarnessCommandAcceptanceOrchestratorTest {
             new AcceptCommandsTarget.Thread(THREAD_ID, ENTRY_ID, 1),
             List.of(user(new TextMessageContent("continue"))));
 
-    assertThrows(IllegalArgumentException.class, () -> service.accept(CHAT_OWNER, threadCommand));
-    assertThrows(
-        IllegalArgumentException.class, () -> service.accept(ISSUE_AGENT_OWNER, threadCommand));
+    assertEquals(
+        DomainErrorCode.VALIDATION,
+        assertThrows(DomainException.class, () -> service.accept(CHAT_OWNER, threadCommand))
+            .code());
+    assertEquals(
+        DomainErrorCode.VALIDATION,
+        assertThrows(DomainException.class, () -> service.accept(ISSUE_AGENT_OWNER, threadCommand))
+            .code());
 
     verify(runtime, never()).acceptCommands(any(), any());
     verify(chatRepository, never()).lockForKeyShare(any());
@@ -313,9 +318,14 @@ class HarnessCommandAcceptanceOrchestratorTest {
     when(chatSessionRepository.findBySessionId(SESSION_ID))
         .thenReturn(new ChatSession(SESSION_ID, OTHER_CHAT_ID));
 
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> service.accept(CHAT_OWNER, newSession(THREAD_ID, user(new TextMessageContent("x")))));
+    assertEquals(
+        DomainErrorCode.VALIDATION,
+        assertThrows(
+                DomainException.class,
+                () ->
+                    service.accept(
+                        CHAT_OWNER, newSession(THREAD_ID, user(new TextMessageContent("x")))))
+            .code());
 
     // Issue+Agent 公共命令无论绑定状态如何均被拒绝。
     assertThrows(
@@ -492,11 +502,14 @@ class HarnessCommandAcceptanceOrchestratorTest {
         .when(uploadService)
         .lockReady(UPLOAD_ID);
 
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            preflight.prepare(
-                new Session(SESSION_ID, "session", NOW), command.commands(), List.of()));
+    assertEquals(
+        DomainErrorCode.VALIDATION,
+        assertThrows(
+                DomainException.class,
+                () ->
+                    preflight.prepare(
+                        new Session(SESSION_ID, "session", NOW), command.commands(), List.of()))
+            .code());
 
     doThrow(DomainException.conflict("STORAGE_VERIFICATION", "upload is pending"))
         .when(uploadService)
@@ -523,11 +536,14 @@ class HarnessCommandAcceptanceOrchestratorTest {
     AcceptancePreflight preflight = acceptAndCapturePreflight(CHAT_OWNER, command);
 
     when(refManager.contains(SESSION_ID, BLOB_ID)).thenReturn(false);
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            preflight.prepare(
-                new Session(SESSION_ID, "session", NOW), command.commands(), List.of()));
+    assertEquals(
+        DomainErrorCode.VALIDATION,
+        assertThrows(
+                DomainException.class,
+                () ->
+                    preflight.prepare(
+                        new Session(SESSION_ID, "session", NOW), command.commands(), List.of()))
+            .code());
 
     when(refManager.contains(SESSION_ID, BLOB_ID)).thenReturn(true);
     List<NewThreadCommand> prepared =
@@ -553,9 +569,12 @@ class HarnessCommandAcceptanceOrchestratorTest {
   void rejectsUnknownOrAmbiguousOwnerKindsBeforeLocking() {
     // 未知或重复 kind 必须在产品锁和 runtime 写之前拒绝。
     AcceptCommandsCommand command = newSession(THREAD_ID, user(new TextMessageContent("x")));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> service.accept(new SessionOwner("UNKNOWN", "id"), command));
+    assertEquals(
+        DomainErrorCode.VALIDATION,
+        assertThrows(
+                DomainException.class,
+                () -> service.accept(new SessionOwner("UNKNOWN", "id"), command))
+            .code());
     SessionOwnership duplicate = mock(SessionOwnership.class);
     when(duplicate.kind()).thenReturn("ISSUE_AGENT");
     HarnessCommandAcceptanceOrchestrator ambiguous =
@@ -565,8 +584,7 @@ class HarnessCommandAcceptanceOrchestratorTest {
             uploadService,
             refManager,
             blobManager);
-    assertThrows(
-        IllegalArgumentException.class, () -> ambiguous.accept(ISSUE_AGENT_OWNER, command));
+    assertThrows(IllegalStateException.class, () -> ambiguous.accept(ISSUE_AGENT_OWNER, command));
     verify(issueAgentOwnership, never()).lockForAcceptance(any(), any());
     verify(duplicate, never()).lockForAcceptance(any(), any());
     verifyNoInteractions(runtime);
@@ -639,13 +657,16 @@ class HarnessCommandAcceptanceOrchestratorTest {
     AcceptCommandsCommand foreign =
         sessionFork(user(ResourceMessageContent.media(FOREIGN_BLOB_ID, "foreign.txt")));
     AcceptancePreflight foreignPreflight = acceptAndCapturePreflight(CHAT_OWNER, foreign);
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            foreignPreflight.prepare(
-                new Session(NEW_SESSION_ID, "forked", NOW),
-                foreign.commands(),
-                List.of(copiedResourceEntry())));
+    assertEquals(
+        DomainErrorCode.VALIDATION,
+        assertThrows(
+                DomainException.class,
+                () ->
+                    foreignPreflight.prepare(
+                        new Session(NEW_SESSION_ID, "forked", NOW),
+                        foreign.commands(),
+                        List.of(copiedResourceEntry())))
+            .code());
 
     verify(refManager, never()).retainRef(NEW_SESSION_ID, FOREIGN_BLOB_ID);
   }
@@ -671,9 +692,12 @@ class HarnessCommandAcceptanceOrchestratorTest {
     when(chatSessionRepository.findBySessionId(SESSION_ID))
         .thenReturn(new ChatSession(SESSION_ID, OTHER_CHAT_ID));
 
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> service.accept(CHAT_OWNER, sessionFork(user(new TextMessageContent("fork")))));
+    assertEquals(
+        DomainErrorCode.VALIDATION,
+        assertThrows(
+                DomainException.class,
+                () -> service.accept(CHAT_OWNER, sessionFork(user(new TextMessageContent("fork")))))
+            .code());
 
     verify(runtime, never()).acceptCommands(any(), any());
     verify(chatSessionRepository, never()).insert(any(), any());
@@ -683,9 +707,12 @@ class HarnessCommandAcceptanceOrchestratorTest {
   /** 来源 Thread 不可解析说明归属事实不一致：fail closed 且零写入。 */
   @Test
   void rejectsSessionForkWithUnresolvableSourceThread() {
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> service.accept(CHAT_OWNER, sessionFork(user(new TextMessageContent("fork")))));
+    assertEquals(
+        DomainErrorCode.NOT_FOUND,
+        assertThrows(
+                DomainException.class,
+                () -> service.accept(CHAT_OWNER, sessionFork(user(new TextMessageContent("fork")))))
+            .code());
 
     verify(runtime, never()).acceptCommands(any(), any());
     verify(chatSessionRepository, never()).insert(any(), any());

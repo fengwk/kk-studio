@@ -1645,7 +1645,7 @@ registerCase({
   id: 'thread.branch_settings_diff_commands',
   level: 'L1',
   title: 'SET_* 命令一个原子 batch 精确 wire 并消费投影',
-  docs: '前端固定顺序 SET_AGENT,SET_EXECUTION,USER_MESSAGE 一个 batch（yolo 走直接控制面，绝不进入 mailbox）；SET_AGENT 使用 canonical 但不存在的名称，使 Resolver 在调用 Provider 前确定性 PLANNING_FAILED；等 quiescent 后 Thread branchSettings 精确投影、queue 清空、USER entry 与 AssistantError 可见，最终 TURN_END(FAILED, continueModel=false)；未知 command 字段、未知 command type 与非法 environmentName => 400',
+  docs: '前端固定顺序 SET_AGENT,SET_EXECUTION,SET_ENVIRONMENT,USER_MESSAGE 一个 batch；SET_ENVIRONMENT 省略 environmentName 清除原环境；SET_AGENT 使用 canonical 但不存在的名称，使 Resolver 在调用 Provider 前确定性 PLANNING_FAILED；等 quiescent 后 Thread branchSettings 精确投影、queue 清空、USER entry 与 AssistantError 可见，最终 TURN_END(FAILED, continueModel=false)；未知 command 字段、未知 command type 与非法 environmentName => 400',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -1660,14 +1660,18 @@ registerCase({
       owner: chatOwner(chat.id),
       sessionId: cid(),
       threadId,
-      rootSettings: branchSettingsOf(
-        { name: `e2e-set-all-missing-${cid().slice(0, 8)}` },
-        modelSelectionOf(ctx),
-      ),
+      rootSettings: {
+        ...branchSettingsOf(
+          { name: `e2e-set-all-missing-${cid().slice(0, 8)}` },
+          modelSelectionOf(ctx),
+        ),
+        environmentName: 'e2e-previous-environment',
+      },
       yoloEnabled: false,
       commands: [userMessageCommand(`set-all materialize ${cid().slice(0, 8)}`, cid())],
     })
     const thread = await waitForQuiescentThread(ctx, threadId, { timeoutMs: 60_000, intervalMs: 100 })
+    assert(thread.branchSettings.environmentName === 'e2e-previous-environment', JSON.stringify(thread))
     const marker = `SET-ALL-${cid()}`
     const modelSelection = modelSelectionOf(ctx)
     const missingAgentName = `missing-agent-${cid().slice(0, 8)}`
@@ -1680,6 +1684,7 @@ registerCase({
         },
         cid(),
       ),
+      { type: 'SET_ENVIRONMENT', idempotencyKey: cid() },
       userMessageCommand(`${marker} 消费 SET 后的第一条消息。`, cid()),
     ]
     const accepted = await acceptCommandBatch(ctx, {
@@ -1695,7 +1700,7 @@ registerCase({
     const dto = accepted.acceptedCommands
     assert(
       dto.map((command) => command.type).join(',') ===
-        'SET_AGENT,SET_EXECUTION,USER_MESSAGE',
+        'SET_AGENT,SET_EXECUTION,SET_ENVIRONMENT,USER_MESSAGE',
       JSON.stringify(dto),
     )
     for (let i = 1; i < dto.length; i++) {

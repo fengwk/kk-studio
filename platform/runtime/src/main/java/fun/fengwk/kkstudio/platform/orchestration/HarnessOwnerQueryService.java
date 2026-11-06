@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.platform.orchestration;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.json.StrictJson;
 import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.api.history.CustomMessagePayload;
@@ -51,9 +52,12 @@ public class HarnessOwnerQueryService {
     Objects.requireNonNull(owner, "owner");
     List<SessionOwnership> matches =
         ownerships.stream().filter(ownership -> owner.kind().equals(ownership.kind())).toList();
+    if (matches.isEmpty()) {
+      throw DomainException.validation(
+          "owner", "Unknown or ambiguous session owner kind: " + owner.kind());
+    }
     if (matches.size() != 1) {
-      throw new IllegalArgumentException(
-          "Unknown or ambiguous session owner kind: " + owner.kind());
+      throw new IllegalStateException("Ambiguous session owner kind: " + owner.kind());
     }
     return listSessionSummaries(matches.getFirst().listSessions(owner));
   }

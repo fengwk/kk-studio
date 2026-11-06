@@ -12,6 +12,8 @@ import fun.fengwk.kkstudio.canvas.function.CanvasJson.JsonNumber;
 import fun.fengwk.kkstudio.canvas.function.CanvasJson.JsonObject;
 import fun.fengwk.kkstudio.canvas.function.CanvasJson.JsonText;
 import fun.fengwk.kkstudio.canvas.function.CanvasResourceKind;
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 
 import java.math.BigDecimal;
 import java.util.Map;
@@ -59,16 +61,18 @@ class CanvasFunctionArgsCodecTest {
   void rejectsInvalidAndNonStrictShapes() {
     CanvasFunctionDefinition definition = definition();
 
-    assertThrows(IllegalArgumentException.class, () -> codec.decode(null, definition));
-    assertThrows(IllegalArgumentException.class, () -> codec.decode("", definition));
-    assertThrows(IllegalArgumentException.class, () -> codec.decode("   ", definition));
-    assertThrows(IllegalArgumentException.class, () -> codec.decode("[]", definition));
-    assertThrows(IllegalArgumentException.class, () -> codec.decode("123", definition));
-    assertThrows(IllegalArgumentException.class, () -> codec.decode("not-json", definition));
+    DomainException blank =
+        assertThrows(DomainException.class, () -> codec.decode(null, definition));
+    assertEquals(DomainErrorCode.VALIDATION, blank.code());
+    assertThrows(DomainException.class, () -> codec.decode("", definition));
+    assertThrows(DomainException.class, () -> codec.decode("   ", definition));
+    assertThrows(DomainException.class, () -> codec.decode("[]", definition));
+    assertThrows(DomainException.class, () -> codec.decode("123", definition));
+    assertThrows(DomainException.class, () -> codec.decode("not-json", definition));
 
     // 未知字段
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () ->
             codec.decode(
                 """
@@ -82,7 +86,7 @@ class CanvasFunctionArgsCodecTest {
 
     // 缺失必填字段 prompt
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () ->
             codec.decode(
                 """
@@ -94,7 +98,7 @@ class CanvasFunctionArgsCodecTest {
 
     // 缺失必填字段 source
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () ->
             codec.decode(
                 """
@@ -106,7 +110,7 @@ class CanvasFunctionArgsCodecTest {
 
     // 错误类型：duration 应为整数
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () ->
             codec.decode(
                 """
@@ -120,7 +124,7 @@ class CanvasFunctionArgsCodecTest {
 
     // 越界值：duration minimum=1, maximum=15
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () ->
             codec.decode(
                 """
@@ -134,7 +138,7 @@ class CanvasFunctionArgsCodecTest {
 
     // 非法 enum 值
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () ->
             codec.decode(
                 """
@@ -148,7 +152,7 @@ class CanvasFunctionArgsCodecTest {
 
     // 损坏的 resourceReference
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () ->
             codec.decode(
                 """

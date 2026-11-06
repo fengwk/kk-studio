@@ -221,7 +221,8 @@ final class AcceptCommandsControl {
                           DomainException.notFound(
                               "entry", "entry " + target.startEntryId() + " does not exist"));
           if (!startEntry.sessionId().equals(target.sessionId())) {
-            throw new IllegalArgumentException(
+            throw DomainException.validation(
+                "startEntry",
                 "start entry "
                     + target.startEntryId()
                     + " is not in session "
@@ -312,7 +313,8 @@ final class AcceptCommandsControl {
                               "thread",
                               "source thread " + target.sourceThreadId() + " does not exist"));
           if (sourceThread.parentThreadId() != null) {
-            throw new IllegalArgumentException(
+            throw DomainException.validation(
+                "sourceThread",
                 "fork source thread " + target.sourceThreadId() + " must be an execution root");
           }
           UUID sourceSessionId = sourceThread.sessionId();
@@ -330,7 +332,8 @@ final class AcceptCommandsControl {
                           DomainException.notFound(
                               "entry", "entry " + target.startEntryId() + " does not exist"));
           if (!startEntry.sessionId().equals(sourceSessionId)) {
-            throw new IllegalArgumentException(
+            throw DomainException.validation(
+                "startEntry",
                 "start entry "
                     + target.startEntryId()
                     + " is not in the source session "
@@ -342,7 +345,8 @@ final class AcceptCommandsControl {
               tx.entries().loadPath(sourceThread.headEntryId()).entries().stream()
                   .anyMatch(entry -> entry.id().equals(target.startEntryId()));
           if (!onSourcePath) {
-            throw new IllegalArgumentException(
+            throw DomainException.validation(
+                "startEntry",
                 "start entry " + target.startEntryId() + " is not on the source thread path");
           }
           BranchSettings rootSettings = tx.entries().loadBranchSettings(target.startEntryId());
@@ -438,7 +442,8 @@ final class AcceptCommandsControl {
     boolean cursorFreeBatch =
         ticket == null && AcceptCommandsCommand.isPureUserMessageBatch(commands);
     if (cursorFreeBatch == target.hasCursor()) {
-      throw new IllegalArgumentException(
+      throw DomainException.validation(
+          "target",
           cursorFreeBatch
               ? "expectedHeadEntryId and expectedNextCommandSequence must be omitted for a single USER_MESSAGE batch"
               : "expectedHeadEntryId and expectedNextCommandSequence are required for this command batch");
