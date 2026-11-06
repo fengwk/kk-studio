@@ -86,8 +86,8 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
       mockMvc
           .perform(get("/api/providers/{name}/remote-models", reachable))
           .andExpect(status().isOk())
-          .andExpect(jsonPath("$.data[0]").value("m-a"))
-          .andExpect(jsonPath("$.data[1]").value("m-b"));
+          .andExpect(jsonPath("$[0]").value("m-a"))
+          .andExpect(jsonPath("$[1]").value("m-b"));
 
       upstreamStatus.set(401);
       mockMvc
@@ -144,11 +144,11 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(providerBody.toString()))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.data.name").value(providerName))
-                .andExpect(jsonPath("$.data.id").doesNotExist())
-                .andExpect(jsonPath("$.data.credential").doesNotExist())
-                .andExpect(jsonPath("$.data.configured").value(true))
-                .andExpect(jsonPath("$.data.version").value("0"))
+                .andExpect(jsonPath("$.name").value(providerName))
+                .andExpect(jsonPath("$.id").doesNotExist())
+                .andExpect(jsonPath("$.credential").doesNotExist())
+                .andExpect(jsonPath("$.configured").value(true))
+                .andExpect(jsonPath("$.version").value("0"))
                 .andReturn());
     assertEquals(providerName, providerData.path("name").asText());
     assertFalse(providerData.has("id"));
@@ -164,7 +164,7 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
                 .content(objectMapper.writeValueAsString(duplicateProvider)))
         .andExpect(status().isConflict())
         .andExpect(jsonPath("$.code").value("duplicate"))
-        .andExpect(jsonPath("$.errors.resource").value("agent_provider"));
+        .andExpect(jsonPath("$.errors.resource").doesNotExist());
 
     AgentModelCreateDTO model = new AgentModelCreateDTO();
     model.setProviderName(providerName);
@@ -188,11 +188,11 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(model)))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.data.providerName").value(providerName))
-                .andExpect(jsonPath("$.data.name").value(modelName))
-                .andExpect(jsonPath("$.data.id").doesNotExist())
-                .andExpect(jsonPath("$.data.modelId").value(WIRE_MODEL_ID))
-                .andExpect(jsonPath("$.data.version").value("0"))
+                .andExpect(jsonPath("$.providerName").value(providerName))
+                .andExpect(jsonPath("$.name").value(modelName))
+                .andExpect(jsonPath("$.id").doesNotExist())
+                .andExpect(jsonPath("$.modelId").value(WIRE_MODEL_ID))
+                .andExpect(jsonPath("$.version").value("0"))
                 .andReturn());
     assertEquals(providerName, modelData.path("providerName").asText());
     assertEquals(modelName, modelData.path("name").asText());
@@ -215,19 +215,19 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(agent)))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.data.name").value(agentName))
-                .andExpect(jsonPath("$.data.type").value("USER"))
-                .andExpect(jsonPath("$.data.execution.driver").value("builtin"))
-                .andExpect(jsonPath("$.data.execution.settings.modelName").value(modelName))
-                .andExpect(jsonPath("$.data.execution.settings.variant").value("default"))
-                .andExpect(jsonPath("$.data.model").doesNotExist())
-                .andExpect(jsonPath("$.data.variant").doesNotExist())
-                .andExpect(jsonPath("$.data.id").doesNotExist())
-                .andExpect(jsonPath("$.data.modelId").doesNotExist())
-                .andExpect(jsonPath("$.data.config.tools").isEmpty())
-                .andExpect(jsonPath("$.data.config.skills").isEmpty())
-                .andExpect(jsonPath("$.data.config.subagents").isEmpty())
-                .andExpect(jsonPath("$.data.version").value("0"))
+                .andExpect(jsonPath("$.name").value(agentName))
+                .andExpect(jsonPath("$.type").value("USER"))
+                .andExpect(jsonPath("$.execution.driver").value("builtin"))
+                .andExpect(jsonPath("$.execution.settings.modelName").value(modelName))
+                .andExpect(jsonPath("$.execution.settings.variant").value("default"))
+                .andExpect(jsonPath("$.model").doesNotExist())
+                .andExpect(jsonPath("$.variant").doesNotExist())
+                .andExpect(jsonPath("$.id").doesNotExist())
+                .andExpect(jsonPath("$.modelId").doesNotExist())
+                .andExpect(jsonPath("$.config.tools").isEmpty())
+                .andExpect(jsonPath("$.config.skills").isEmpty())
+                .andExpect(jsonPath("$.config.subagents").isEmpty())
+                .andExpect(jsonPath("$.version").value("0"))
                 .andReturn());
     assertEquals(agentName, agentData.path("name").asText());
     assertEquals(
@@ -278,11 +278,11 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(providerUpdate)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.name").value(providerName))
-                .andExpect(jsonPath("$.data.description").value("updated provider"))
-                .andExpect(jsonPath("$.data.id").doesNotExist())
-                .andExpect(jsonPath("$.data.credential").doesNotExist())
-                .andExpect(jsonPath("$.data.version").value("1"))
+                .andExpect(jsonPath("$.name").value(providerName))
+                .andExpect(jsonPath("$.description").value("updated provider"))
+                .andExpect(jsonPath("$.id").doesNotExist())
+                .andExpect(jsonPath("$.credential").doesNotExist())
+                .andExpect(jsonPath("$.version").value("1"))
                 .andReturn());
     assertEquals(providerName, updatedProvider.path("name").asText());
     assertFalse(updatedProvider.has("id"));
@@ -296,7 +296,7 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
                 .content(objectMapper.writeValueAsString(providerUpdate)))
         .andExpect(status().isConflict())
         .andExpect(jsonPath("$.code").value("version_conflict"))
-        .andExpect(jsonPath("$.errors.resource").value("agent_provider"))
+        .andExpect(jsonPath("$.errors.resource").doesNotExist())
         .andExpect(jsonPath("$.errors.expectedVersion").value("0"))
         .andExpect(jsonPath("$.errors.actualVersion").value("1"));
 
@@ -327,12 +327,12 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(modelUpdate)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.providerName").value(providerName))
-                .andExpect(jsonPath("$.data.name").value(modelName))
-                .andExpect(jsonPath("$.data.description").value("updated model"))
-                .andExpect(jsonPath("$.data.id").doesNotExist())
-                .andExpect(jsonPath("$.data.modelId").value(WIRE_MODEL_ID))
-                .andExpect(jsonPath("$.data.version").value("1"))
+                .andExpect(jsonPath("$.providerName").value(providerName))
+                .andExpect(jsonPath("$.name").value(modelName))
+                .andExpect(jsonPath("$.description").value("updated model"))
+                .andExpect(jsonPath("$.id").doesNotExist())
+                .andExpect(jsonPath("$.modelId").value(WIRE_MODEL_ID))
+                .andExpect(jsonPath("$.version").value("1"))
                 .andReturn());
     assertEquals(providerName, updatedModel.path("providerName").asText());
     assertEquals(modelName, updatedModel.path("name").asText());
@@ -348,7 +348,7 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
                 .content(objectMapper.writeValueAsString(modelUpdate)))
         .andExpect(status().isConflict())
         .andExpect(jsonPath("$.code").value("version_conflict"))
-        .andExpect(jsonPath("$.errors.resource").value("agent_model"))
+        .andExpect(jsonPath("$.errors.resource").doesNotExist())
         .andExpect(jsonPath("$.errors.expectedVersion").value("0"))
         .andExpect(jsonPath("$.errors.actualVersion").value("1"));
 
@@ -374,16 +374,16 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(agentUpdate)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.name").value(agentName))
-                .andExpect(jsonPath("$.data.execution.driver").value("builtin"))
-                .andExpect(jsonPath("$.data.execution.settings.modelName").value(modelName))
-                .andExpect(jsonPath("$.data.execution.settings.variant").value("default"))
-                .andExpect(jsonPath("$.data.model").doesNotExist())
-                .andExpect(jsonPath("$.data.variant").doesNotExist())
-                .andExpect(jsonPath("$.data.description").value("updated agent"))
-                .andExpect(jsonPath("$.data.id").doesNotExist())
-                .andExpect(jsonPath("$.data.modelId").doesNotExist())
-                .andExpect(jsonPath("$.data.version").value("1"))
+                .andExpect(jsonPath("$.name").value(agentName))
+                .andExpect(jsonPath("$.execution.driver").value("builtin"))
+                .andExpect(jsonPath("$.execution.settings.modelName").value(modelName))
+                .andExpect(jsonPath("$.execution.settings.variant").value("default"))
+                .andExpect(jsonPath("$.model").doesNotExist())
+                .andExpect(jsonPath("$.variant").doesNotExist())
+                .andExpect(jsonPath("$.description").value("updated agent"))
+                .andExpect(jsonPath("$.id").doesNotExist())
+                .andExpect(jsonPath("$.modelId").doesNotExist())
+                .andExpect(jsonPath("$.version").value("1"))
                 .andReturn());
     assertEquals(agentName, updatedAgent.path("name").asText());
     assertEquals(
@@ -397,7 +397,7 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
                 .content(objectMapper.writeValueAsString(agentUpdate)))
         .andExpect(status().isConflict())
         .andExpect(jsonPath("$.code").value("version_conflict"))
-        .andExpect(jsonPath("$.errors.resource").value("agent_definition"))
+        .andExpect(jsonPath("$.errors.resource").doesNotExist())
         .andExpect(jsonPath("$.errors.expectedVersion").value("0"))
         .andExpect(jsonPath("$.errors.actualVersion").value("1"));
 
@@ -405,14 +405,14 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
         .perform(delete("/api/providers/{name}", providerName).param("expectedVersion", "1"))
         .andExpect(status().isConflict())
         .andExpect(jsonPath("$.code").value("in_use"))
-        .andExpect(jsonPath("$.errors.resource").value("agent_provider"));
+        .andExpect(jsonPath("$.errors.resource").doesNotExist());
     // 测试意图：验证 DELETE /api/models/{*modelName}?expectedVersion=... 在被 Agent
     // 引用时拒绝删除，返回 409 Conflict。
     mockMvc
         .perform(delete(modelPath(providerName, modelName)).param("expectedVersion", "1"))
         .andExpect(status().isConflict())
         .andExpect(jsonPath("$.code").value("in_use"))
-        .andExpect(jsonPath("$.errors.resource").value("agent_model"));
+        .andExpect(jsonPath("$.errors.resource").doesNotExist());
 
     mockMvc
         .perform(delete("/api/agents/{name}", agentName).param("expectedVersion", "1"))
@@ -501,7 +501,7 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
                 .content(objectMapper.writeValueAsString(malformed)))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.code").value("validation"))
-        .andExpect(jsonPath("$.errors.resource").value("agent_definition"));
+        .andExpect(jsonPath("$.errors.resource").doesNotExist());
 
     AgentModelCreateDTO idBasedModel = new AgentModelCreateDTO();
     idBasedModel.setName("id-based-model-" + suffix);
@@ -623,9 +623,9 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(renameUpdate)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.providerName").value(providerName))
-                .andExpect(jsonPath("$.data.name").value(newModelName))
-                .andExpect(jsonPath("$.data.version").value("1"))
+                .andExpect(jsonPath("$.providerName").value(providerName))
+                .andExpect(jsonPath("$.name").value(newModelName))
+                .andExpect(jsonPath("$.version").value("1"))
                 .andReturn());
     assertEquals(newModelName, renamedResult.path("name").asText());
     assertEquals(
@@ -694,7 +694,7 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
                 .content(objectMapper.writeValueAsString(conflictRename)))
         .andExpect(status().isConflict())
         .andExpect(jsonPath("$.code").value("duplicate"))
-        .andExpect(jsonPath("$.errors.resource").value("agent_model"));
+        .andExpect(jsonPath("$.errors.resource").doesNotExist());
 
     // 全局名称跨 Provider 与 MODEL/GROUP 唯一：合法组也不能占用已有 Model 名。
     AgentModelGroupMemberDTO member = new AgentModelGroupMemberDTO();
@@ -748,7 +748,7 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
                 .content(objectMapper.writeValueAsString(staleRename)))
         .andExpect(status().isConflict())
         .andExpect(jsonPath("$.code").value("version_conflict"))
-        .andExpect(jsonPath("$.errors.resource").value("agent_model"));
+        .andExpect(jsonPath("$.errors.resource").doesNotExist());
 
     // 7. 验证非法名称返回 400 validation
     AgentModelUpdateDTO invalidRename = new AgentModelUpdateDTO();
@@ -765,7 +765,7 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
                 .content(objectMapper.writeValueAsString(invalidRename)))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.code").value("validation"))
-        .andExpect(jsonPath("$.errors.resource").value("agent_model"));
+        .andExpect(jsonPath("$.errors.resource").doesNotExist());
   }
 
   /** 测试意图：读模型暴露系统持有的 type；可编辑请求不接受 type；保留名不能覆盖内置身份；内置 Agent 在普通目录可见且不可删除。 */
@@ -798,7 +798,7 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
                 .content(reserved.toString()))
         .andExpect(status().isConflict())
         .andExpect(jsonPath("$.code").value("duplicate"))
-        .andExpect(jsonPath("$.errors.resource").value("agent_definition"));
+        .andExpect(jsonPath("$.errors.resource").doesNotExist());
 
     builtinAgentInitializer.afterPropertiesSet();
     JsonNode page =
@@ -815,7 +815,7 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
         .perform(delete("/api/agents/{name}", "Compaction").param("expectedVersion", "0"))
         .andExpect(status().isConflict())
         .andExpect(jsonPath("$.code").value("in_use"))
-        .andExpect(jsonPath("$.errors.resource").value("agent_definition"));
+        .andExpect(jsonPath("$.errors.resource").doesNotExist());
   }
 
   private static HarnessExecutionSelectionDTO execution(String modelName) {
@@ -826,7 +826,7 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
   }
 
   private JsonNode data(MvcResult result) throws Exception {
-    return objectMapper.readTree(result.getResponse().getContentAsString()).path("data");
+    return objectMapper.readTree(result.getResponse().getContentAsString());
   }
 
   private static boolean hasResult(JsonNode page, String name) {
