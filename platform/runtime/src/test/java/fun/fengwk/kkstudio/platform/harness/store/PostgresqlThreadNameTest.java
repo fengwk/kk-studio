@@ -4,14 +4,17 @@ import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinT
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.loadCommandsByThread;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.seedThreadBaseline;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
+import fun.fengwk.kkstudio.harness.api.HarnessConflictReason;
 import fun.fengwk.kkstudio.harness.api.RenameThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
@@ -60,9 +63,11 @@ class PostgresqlThreadNameTest {
             commands);
     var conflict =
         assertThrows(
-            HarnessRuntimeConflictException.class,
+            DomainException.class,
             () -> runtime.acceptCommands(conflictRequest, AcceptancePreflight.IDENTITY));
-    assertEquals(HarnessRuntimeConflictException.Reason.THREAD_NAME_CONFLICT, conflict.reason());
+    assertEquals(DomainErrorCode.CONFLICT, conflict.code());
+    assertEquals(HarnessConflictReason.THREAD_NAME_CONFLICT.name(), conflict.reason());
+    assertNotNull(conflict.getCause());
     assertTrue(store.transaction(tx -> tx.threads().find(rejectedId)).isEmpty());
     assertTrue(store.transaction(tx -> loadCommandsByThread(tx, rejectedId)).isEmpty());
     assertTrue(
@@ -73,10 +78,10 @@ class PostgresqlThreadNameTest {
         2, store.transaction(tx -> tx.threads().listBySession(baseline.sessionId())).size());
     var renameConflict =
         assertThrows(
-            HarnessRuntimeConflictException.class,
+            DomainException.class,
             () -> runtime.renameThread(new RenameThreadCommand(createdId, "main")));
-    assertEquals(
-        HarnessRuntimeConflictException.Reason.THREAD_NAME_CONFLICT, renameConflict.reason());
+    assertEquals(DomainErrorCode.CONFLICT, renameConflict.code());
+    assertEquals(HarnessConflictReason.THREAD_NAME_CONFLICT.name(), renameConflict.reason());
     assertEquals(renamed, store.transaction(tx -> tx.threads().find(createdId).orElseThrow()));
   }
 }

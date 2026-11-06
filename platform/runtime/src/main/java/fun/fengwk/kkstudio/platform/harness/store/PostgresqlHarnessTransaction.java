@@ -7,7 +7,8 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
+import fun.fengwk.kkstudio.common.error.DomainException;
+import fun.fengwk.kkstudio.harness.api.HarnessConflictReason;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.history.EntryPath;
@@ -384,8 +385,8 @@ public final class PostgresqlHarnessTransaction implements HarnessStore.Transact
   }
 
   /**
-   * 仅当完整性冲突确由 root-name 部分唯一索引（{@link #ROOT_THREAD_NAME_INDEX}）触发时，才映射为类型化 {@link
-   * HarnessRuntimeConflictException}（{@code THREAD_NAME_CONFLICT}）；其它完整性错误原样返回，保持既有 {@link
+   * 仅当完整性冲突确由 root-name 部分唯一索引（{@link #ROOT_THREAD_NAME_INDEX}）触发时，才映射为 {@link
+   * DomainException}（{@code THREAD_NAME_CONFLICT}）；其它完整性错误原样返回，保持既有 {@link
    * IllegalArgumentException} 语义，不吞掉、不误分类。事务已由 {@link #remember(RuntimeException)} 标记 poisoned，
    * 因此该冲突不会提交任何脏状态。
    */
@@ -394,8 +395,8 @@ public final class PostgresqlHarnessTransaction implements HarnessStore.Transact
       if (cause instanceof PSQLException psqlException) {
         ServerErrorMessage serverMessage = psqlException.getServerErrorMessage();
         if (serverMessage != null && ROOT_THREAD_NAME_INDEX.equals(serverMessage.getConstraint())) {
-          return new HarnessRuntimeConflictException(
-              HarnessRuntimeConflictException.Reason.THREAD_NAME_CONFLICT,
+          return DomainException.conflict(
+              HarnessConflictReason.THREAD_NAME_CONFLICT.name(),
               "thread name "
                   + thread.name()
                   + " is already used by an execution root in session "

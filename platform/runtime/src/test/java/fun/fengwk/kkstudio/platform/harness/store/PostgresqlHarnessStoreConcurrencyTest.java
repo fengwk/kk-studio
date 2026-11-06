@@ -24,7 +24,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
+import fun.fengwk.kkstudio.harness.api.HarnessConflictReason;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.port.BuiltinWorkType;
@@ -98,8 +100,9 @@ class PostgresqlHarnessStoreConcurrencyTest {
                         threadId, baseline.sessionId(), baseline.rootEntryId(), "contended"));
             return true;
           });
-    } catch (HarnessRuntimeConflictException conflict) {
-      assertEquals(HarnessRuntimeConflictException.Reason.THREAD_NAME_CONFLICT, conflict.reason());
+    } catch (DomainException conflict) {
+      assertEquals(DomainErrorCode.CONFLICT, conflict.code());
+      assertEquals(HarnessConflictReason.THREAD_NAME_CONFLICT.name(), conflict.reason());
       return false;
     }
   }
