@@ -247,7 +247,7 @@ class ConfigSyncApplierTest {
 
     verify(environmentService).importEnvironment("new", "token-new", null);
     verify(environmentService)
-        .updateImportedEnvironment(EnvironmentId.of(existing.getId()), "token-old", null, "2");
+        .updateImportedEnvironment(EnvironmentId.of(existing.getId()), "token-old", null, 2L);
   }
 
   @Test

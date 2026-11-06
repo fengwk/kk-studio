@@ -108,7 +108,7 @@ class EnvironmentDtoContractTest {
   @Test
   void environmentExposesDaemonVersionDistinctFromCasVersion() throws Exception {
     assertEquals(String.class, EnvironmentDTO.class.getDeclaredField("daemonVersion").getType());
-    assertEquals(String.class, EnvironmentDTO.class.getDeclaredField("version").getType());
+    assertEquals(Long.class, EnvironmentDTO.class.getDeclaredField("version").getType());
   }
 
   /** 意图：runtime wire 保留 revision/status，且无更新与未知总长都必须显式输出 null。 */

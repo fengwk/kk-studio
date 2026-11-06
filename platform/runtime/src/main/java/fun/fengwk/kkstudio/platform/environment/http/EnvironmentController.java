@@ -109,7 +109,7 @@ public class EnvironmentController {
   @DeleteMapping("/api/platform/environments/{environmentId}")
   @ResponseStatus(HttpStatus.NO_CONTENT)
   public void deleteEnvironment(
-      @PathVariable UUID environmentId, @RequestParam String expectedVersion) {
+      @PathVariable UUID environmentId, @RequestParam long expectedVersion) {
     environmentService.delete(EnvironmentId.of(environmentId), expectedVersion);
   }
 

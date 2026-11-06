@@ -15,6 +15,6 @@ public class Environment {
   private String registrationTokenHash;
   private EnvironmentInstallConfigDTO installConfig;
   private Long version;
-  private Instant createTime;
-  private Instant updateTime;
+  private Instant createdAt;
+  private Instant updatedAt;
 }

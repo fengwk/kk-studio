@@ -67,8 +67,8 @@ public class EnvironmentDTO {
   /** 支持的原子能力列表。 */
   private List<LiveEnvironmentCapabilityDTO> capabilities;
 
-  /** CAS 版本。 */
-  private String version;
+  /** CAS 版本；wire 上为 canonical 非负十进制字符串。 */
+  private Long version;
 
   private Instant createdAt;
   private Instant updatedAt;

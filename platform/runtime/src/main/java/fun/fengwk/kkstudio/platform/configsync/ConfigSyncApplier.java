@@ -145,7 +145,7 @@ public class ConfigSyncApplier {
             EnvironmentId.of(existing.getId()),
             spec.registrationTokenHash(),
             spec.installConfig(),
-            CatalogVersions.format(existing.getVersion()));
+            existing.getVersion());
       }
     }
   }
