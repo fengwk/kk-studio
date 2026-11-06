@@ -451,11 +451,18 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
           saved.contains("appended by playwright in monaco editor"),
           "saved file must contain appended text from Monaco UI: " + saved);
 
+      // 保存后的编辑器已无未保存修改：正常关闭必须直接成功，不等待原生对话框也不取消。
+      CloseResult savedClose = normalCloseStatus(environmentId, viewId, documentId, bindingEpoch);
+      assertTrue(
+          savedClose.status() == 200 || savedClose.status() == 204,
+          "normal close of the saved view must succeed: "
+              + savedClose.status()
+              + " "
+              + savedClose.body());
+
       browserDriver.proceed();
       browserDriver.await("done");
       browserDriver.finish();
-
-      closeView(environmentId, viewId, documentId, bindingEpoch);
     }
   }
 
@@ -482,8 +489,7 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
     try (Response response =
         browser.newCall(new Request.Builder().url(listingUrl).build()).execute()) {
       assertEquals(200, response.code());
-      JsonNode listing =
-          JsonMapper.builder().build().readTree(response.body().string()).path("data");
+      JsonNode listing = JsonMapper.builder().build().readTree(response.body().string());
       assertEquals(workspace.toRealPath().toString(), listing.path("path").asText());
       assertEquals(
           workspace.toRealPath().getParent().toString(), listing.path("parentPath").asText());
@@ -491,11 +497,11 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
       assertEquals(2, listing.path("children").size());
       assertEquals("a-dir", listing.path("children").get(0).path("name").asText());
       assertEquals(
-          workspace.resolve("a-dir").toString(),
+          workspace.resolve("a-dir").toRealPath().toString(),
           listing.path("children").get(0).path("path").asText());
       assertEquals("z-dir", listing.path("children").get(1).path("name").asText());
       assertEquals(
-          workspace.resolve("z-dir").toString(),
+          workspace.resolve("z-dir").toRealPath().toString(),
           listing.path("children").get(1).path("path").asText());
     }
     assertTrue(localIdeService.listViews(EnvironmentId.parse(environmentId)).getViews().isEmpty());
@@ -575,14 +581,9 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
         browserDriver.await("dialog-answered");
         CloseResult cancelled = first.get(90, TimeUnit.SECONDS);
         assertEquals(400, cancelled.status(), "Cancel must reject the close");
-        assertEquals(
-            "ide_close_cancelled",
-            JsonMapper.builder()
-                .build()
-                .readTree(cancelled.body())
-                .path("errors")
-                .path("resource")
-                .asText());
+        JsonNode problem = JsonMapper.builder().build().readTree(cancelled.body());
+        assertEquals("validation", problem.path("code").asText());
+        assertEquals("IDE_CLOSE_CANCELLED", problem.path("reason").asText());
         assertTrue(fetchView(environmentId, viewId, cookie, "/").toLowerCase().contains("<html"));
         assertTrue(
             localIdeService.listViews(EnvironmentId.parse(environmentId)).getViews().stream()
@@ -632,7 +633,7 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
     Path release = explicitCodeServerRelease();
     JsonNode created =
         postJson("/api/environments", "{\"name\":\"ide-acceptance-" + suffix() + "\"}");
-    JsonNode card = created.path("data");
+    JsonNode card = created;
     String environmentId = card.path("id").asText();
     String registrationToken = card.path("registrationToken").asText();
     assertFalse(environmentId.isBlank(), "environment creation must return an id");
@@ -664,7 +665,7 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
     while (System.nanoTime() < deadline) {
       assertTrue(
           daemon.alive(), "the daemon process exited before READY; see " + daemon.stderrLog());
-      JsonNode card = getJson("/api/environments/" + environmentId).path("data");
+      JsonNode card = getJson("/api/environments/" + environmentId);
       lastStatus = card.path("status").asText("unknown");
       if ("READY".equals(lastStatus)) {
         return;
@@ -723,7 +724,7 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
     try (response) {
       String text = response.body().string();
       assertEquals(200, response.code(), "OPEN_VIEW (" + mode + ") must succeed");
-      return JsonMapper.builder().build().readTree(text).path("data");
+      return JsonMapper.builder().build().readTree(text);
     }
   }
 
