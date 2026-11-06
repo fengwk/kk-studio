@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -302,6 +303,52 @@ class AgentTaskServiceTest {
   }
 
   @Test
+  void stopThreadRetriesOnlyDomainStaleConflictAndPropagatesOtherFailures() {
+    // 迁移后只容忍 not-found 或精确 stale reason；其他领域失败原样抛出。
+    UUID threadId = UUID.randomUUID();
+    ThreadSnapshot snapshot = mock(ThreadSnapshot.class);
+    when(snapshot.thread()).thenReturn(thread(threadId, 0L));
+    when(runtime.getThreadSnapshot(threadId)).thenReturn(snapshot);
+    when(runtime.stop(any(StopCommand.class)))
+        .thenThrow(DomainException.conflict("STALE_VERSION", "stale"))
+        .thenReturn(null);
+    service.stopThread(threadId);
+    verify(runtime, times(2)).stop(any(StopCommand.class));
+
+    DomainException otherConflict = DomainException.conflict("THREAD_ID_REUSED", "other");
+    when(runtime.stop(any(StopCommand.class))).thenThrow(otherConflict);
+    assertSame(
+        otherConflict, assertThrows(DomainException.class, () -> service.stopThread(threadId)));
+    DomainException wrongCode = DomainException.validationReason("STALE_VERSION", "not a conflict");
+    doThrow(wrongCode).when(runtime).stop(any(StopCommand.class));
+    assertSame(wrongCode, assertThrows(DomainException.class, () -> service.stopThread(threadId)));
+    DomainException validation = DomainException.validation("thread", "invalid");
+    when(runtime.getThreadSnapshot(threadId)).thenThrow(validation);
+    assertSame(validation, assertThrows(DomainException.class, () -> service.stopThread(threadId)));
+    doThrow(DomainException.notFound("thread", "gone")).when(runtime).getThreadSnapshot(threadId);
+    service.stopThread(threadId);
+  }
+
+  @Test
+  void stopTicketedHandlesDomainNotFoundAndDoesNotSwallowOtherReasons() {
+    UUID ticketId = UUID.randomUUID();
+    UUID childId = UUID.randomUUID();
+    when(runtime.findJoin(ticketId)).thenReturn(Optional.of(join(ticketId, childId, false, false)));
+    ThreadSnapshot snapshot = mock(ThreadSnapshot.class);
+    when(snapshot.thread()).thenReturn(thread(childId, 0L));
+    when(runtime.getThreadSnapshot(childId)).thenReturn(snapshot);
+    when(runtime.stop(any(StopCommand.class)))
+        .thenThrow(DomainException.conflict("STALE_VERSION", "stale"))
+        .thenThrow(DomainException.notFound("thread", "gone"));
+    service.stop(ticketId);
+    verify(runtime, times(2)).stop(any(StopCommand.class));
+
+    DomainException other = DomainException.conflict("STOP_REQUEST_ID_REUSED", "other");
+    doThrow(other).when(runtime).stop(any(StopCommand.class));
+    assertSame(other, assertThrows(DomainException.class, () -> service.stop(ticketId)));
+  }
+
+  @Test
   @SuppressWarnings("unchecked")
   void missingRuntimeFailsDeterministically() {
     ObjectProvider<HarnessRuntime> missing = mock(ObjectProvider.class);
@@ -479,6 +526,46 @@ class AgentTaskServiceTest {
 
     UUID result = service.submitExternal(ticketId, hash, () -> req);
     assertEquals(threadId, result);
+  }
+
+  @Test
+  void submitExternalReplaysOnDomainThreadIdReusedButNotOtherDomainErrors() {
+    // DomainException 不再由 Java 异常类型区分：code 与 reason 必须一起匹配。
+    UUID ticketId = UUID.randomUUID();
+    UUID threadId = UUID.randomUUID();
+    String hash = AgentTaskRequest.requestHash(ticketId, "worker", "work", null);
+    AgentTaskRequest req =
+        new AgentTaskRequest(
+            ticketId,
+            threadId,
+            UUID.randomUUID(),
+            SETTINGS,
+            List.of(
+                new NewThreadCommand(
+                    new CustomMessageCommandPayload(AgentMessage.user("work")), UUID.randomUUID())),
+            AcceptancePreflight.IDENTITY,
+            SpawnTrigger.CONTROLLER,
+            null,
+            null,
+            null,
+            false,
+            new SpawnRequest.Budget(null, 1, 1, 10),
+            hash);
+    when(runtime.findJoin(ticketId))
+        .thenReturn(Optional.empty())
+        .thenReturn(Optional.of(join(ticketId, threadId, false, false, hash)));
+    when(runtime.spawn(any(SpawnRequest.class), any()))
+        .thenThrow(DomainException.conflict("THREAD_ID_REUSED", "conflict"));
+    assertEquals(threadId, service.submitExternal(ticketId, hash, () -> req));
+
+    when(runtime.findJoin(ticketId)).thenReturn(Optional.empty());
+    DomainException failure = DomainException.conflict("STALE_VERSION", "stale");
+    doThrow(failure).when(runtime).spawn(any(SpawnRequest.class), any());
+    assertSame(
+        failure,
+        assertThrows(
+            DomainException.class, () -> service.submitExternal(ticketId, hash, () -> req)));
+    verify(runtime, times(3)).findJoin(ticketId);
   }
 
   @Test

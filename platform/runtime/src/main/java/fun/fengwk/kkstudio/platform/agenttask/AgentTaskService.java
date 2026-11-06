@@ -4,6 +4,7 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
@@ -82,8 +83,14 @@ public class AgentTaskService {
 
     try {
       return submitToRuntime(runtime, request).threadId();
-    } catch (HarnessRuntimeConflictException conflict) {
-      if (conflict.reason() == HarnessRuntimeConflictException.Reason.THREAD_ID_REUSED) {
+    } catch (RuntimeException conflict) {
+      if ((conflict instanceof HarnessRuntimeConflictException legacy
+              && legacy.reason() == HarnessRuntimeConflictException.Reason.THREAD_ID_REUSED)
+          || (conflict instanceof DomainException domain
+              && domain.code() == DomainErrorCode.CONFLICT
+              && HarnessRuntimeConflictException.Reason.THREAD_ID_REUSED
+                  .name()
+                  .equals(domain.reason()))) {
         Optional<ThreadJoin> ticket = runtime.findJoin(ticketId);
         if (ticket.isPresent()) {
           if (!ticket.get().requestHash().equals(requestHash)) {
@@ -195,6 +202,11 @@ public class AgentTaskService {
       ThreadSnapshot snapshot;
       try {
         snapshot = runtime.getThreadSnapshot(threadId);
+      } catch (DomainException gone) {
+        if (gone.code() != DomainErrorCode.NOT_FOUND) {
+          throw gone;
+        }
+        return;
       } catch (HarnessRuntimeNotFoundException gone) {
         return;
       }
@@ -205,6 +217,16 @@ public class AgentTaskService {
       try {
         runtime.stop(new StopCommand(threadId, UUID.randomUUID(), snapshot.thread().version()));
         return;
+      } catch (DomainException failure) {
+        if (failure.code() == DomainErrorCode.NOT_FOUND) {
+          return;
+        }
+        if (failure.code() != DomainErrorCode.CONFLICT
+            || !HarnessRuntimeConflictException.Reason.STALE_VERSION
+                .name()
+                .equals(failure.reason())) {
+          throw failure;
+        }
       } catch (HarnessRuntimeConflictException conflict) {
         if (conflict.reason() != HarnessRuntimeConflictException.Reason.STALE_VERSION) {
           throw conflict;
@@ -225,12 +247,27 @@ public class AgentTaskService {
       ThreadSnapshot snapshot;
       try {
         snapshot = runtime.getThreadSnapshot(threadId);
+      } catch (DomainException gone) {
+        if (gone.code() != DomainErrorCode.NOT_FOUND) {
+          throw gone;
+        }
+        return;
       } catch (HarnessRuntimeNotFoundException gone) {
         return;
       }
       try {
         runtime.stop(new StopCommand(threadId, UUID.randomUUID(), snapshot.thread().version()));
         return;
+      } catch (DomainException failure) {
+        if (failure.code() == DomainErrorCode.NOT_FOUND) {
+          return;
+        }
+        if (failure.code() != DomainErrorCode.CONFLICT
+            || !HarnessRuntimeConflictException.Reason.STALE_VERSION
+                .name()
+                .equals(failure.reason())) {
+          throw failure;
+        }
       } catch (HarnessRuntimeConflictException conflict) {
         if (conflict.reason() != HarnessRuntimeConflictException.Reason.STALE_VERSION) {
           // 只有真正的 stale version 才是有界 CAS 重读；其它冲突必须明确失败。
