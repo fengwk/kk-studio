@@ -1,15 +1,11 @@
-import {
-  CANVAS_FUNCTION_RUN_STATUSES,
-  CANVAS_RESOURCE_KINDS,
-  type CanvasFunctionRunStatus,
-  type CanvasResourceKind,
-} from '@/shared/api/contracts/studio'
 import type { CanvasRevision } from '@/shared/api/contracts/base'
 import { isCanonicalUuid } from '@/shared/lib/uuid'
 import { resourceNodeSize } from '@/features/canvas/resource-node-size'
 import type {
+  CanvasFunctionRunStatus,
   CanvasReferenceDTO,
   CanvasResourceDTO,
+  CanvasResourceKind,
   CanvasSnapshotDTO,
   CanvasTransformDTO,
 } from '@/shared/api/generated/contracts'
@@ -18,8 +14,8 @@ export interface CanvasDocument {
   id: string
   title: string
   revision: CanvasRevision
-  createdAt: string
-  updatedAt: string
+  createdAt: number
+  updatedAt: number
 }
 
 export interface Resource {
@@ -36,7 +32,7 @@ export interface Resource {
   width: number | null
   height: number | null
   durationMs: number | null
-  createdAt: string
+  createdAt: number
 }
 
 export interface Function {
@@ -50,7 +46,7 @@ export interface Run {
   status: CanvasFunctionRunStatus
   stage: string
   error: string | null
-  updatedAt: string
+  updatedAt: number
 }
 
 export interface ResourceNode {
@@ -134,7 +130,7 @@ export function projectCanvasSnapshot(snapshot: CanvasSnapshotDTO): CanvasSnapsh
         name: node.function.name,
         args: node.function.args ?? {},
       } : null,
-      run: node.run ? { ...node.run, status: runStatus(node.run.status) } : null,
+      run: node.run,
     }
     return {
       ...projected,
@@ -168,37 +164,40 @@ export function projectCanvasSnapshot(snapshot: CanvasSnapshotDTO): CanvasSnapsh
 }
 
 export function projectCanvasResource(resource: CanvasResourceDTO): Resource {
-  return {
+  const base: Omit<
+    Resource,
+    'blobId' | 'textContent' | 'mediaType' | 'sizeBytes' | 'width' | 'height' | 'durationMs'
+  > = {
     id: resource.id,
     canvasId: resource.canvasId,
     ownerNodeId: resource.ownerNodeId,
     resourceIndex: resource.resourceIndex,
-    blobId: resource.blobId,
     name: resource.name,
-    textContent: resource.textContent,
-    kind: resourceKind(resource.kind),
+    kind: resource.kind,
+    createdAt: resource.createdAt,
+  }
+  if (resource.type === 'TEXT') {
+    return {
+      ...base,
+      blobId: null,
+      textContent: resource.textContent,
+      mediaType: null,
+      sizeBytes: null,
+      width: null,
+      height: null,
+      durationMs: null,
+    }
+  }
+  return {
+    ...base,
+    blobId: resource.blobId,
+    textContent: null,
     mediaType: resource.mediaType,
     sizeBytes: decimalLong(resource.sizeBytes),
     width: resource.width,
     height: resource.height,
     durationMs: decimalLong(resource.durationMs),
-    createdAt: resource.createdAt,
   }
-}
-
-/** wire 只承诺字符串；领域模型只接受已知的资源类型。 */
-function resourceKind(value: string): CanvasResourceKind {
-  if (!(CANVAS_RESOURCE_KINDS as readonly string[]).includes(value)) {
-    throw new Error(`unknown canvas resource kind: ${value}`)
-  }
-  return value as CanvasResourceKind
-}
-
-function runStatus(value: string): CanvasFunctionRunStatus {
-  if (!(CANVAS_FUNCTION_RUN_STATUSES as readonly string[]).includes(value)) {
-    throw new Error(`unknown canvas function run status: ${value}`)
-  }
-  return value as CanvasFunctionRunStatus
 }
 
 /** Java Long 以十进制字符串传输；解码器已保证它在安全整数范围内。 */

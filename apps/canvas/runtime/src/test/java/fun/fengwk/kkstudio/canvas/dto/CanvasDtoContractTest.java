@@ -27,13 +27,10 @@ class CanvasDtoContractTest {
     "CanvasResourceNodeDTO.groupId",
     "CanvasResourceNodeDTO.function",
     "CanvasResourceNodeDTO.run",
-    "CanvasResourceDTO.blobId",
-    "CanvasResourceDTO.textContent",
-    "CanvasResourceDTO.mediaType",
-    "CanvasResourceDTO.sizeBytes",
-    "CanvasResourceDTO.width",
-    "CanvasResourceDTO.height",
-    "CanvasResourceDTO.durationMs",
+    "CanvasResourceDTO.Blob.sizeBytes",
+    "CanvasResourceDTO.Blob.width",
+    "CanvasResourceDTO.Blob.height",
+    "CanvasResourceDTO.Blob.durationMs",
     "CanvasFunctionRunDTO.error",
     "CanvasFunctionDefinitionDTO.unavailableReason"
   };
@@ -91,25 +88,25 @@ class CanvasDtoContractTest {
   void commandsCarryGroupScopedPreconditionsInsteadOfGraphVersion() {
     assertEquals(
         Map.of(
-            "nodeId", "String",
+            "nodeId", "UUID",
             "expectedName", "String",
             "name", "String"),
         componentTypes(CanvasCommandDTO.RenameNode.class));
     assertEquals(
         Map.of(
-            "nodeId", "String",
-            "expectedGroupId", "String",
-            "groupId", "String"),
+            "nodeId", "UUID",
+            "expectedGroupId", "UUID",
+            "groupId", "UUID"),
         componentTypes(CanvasCommandDTO.SetNodeGroup.class));
     assertEquals(
         Map.of(
-            "nodeId", "String",
+            "nodeId", "UUID",
             "transform", "CanvasTransformDTO",
             "expectedTransform", "CanvasTransformDTO"),
         componentTypes(CanvasCommandDTO.UpdateNodeTransform.class));
     assertEquals(
         Map.of(
-            "nodeId", "String",
+            "nodeId", "UUID",
             "expectedResourceIds", "List",
             "expectedFunction", "CanvasFunctionDTO"),
         componentTypes(CanvasCommandDTO.DeleteNode.class));
@@ -144,7 +141,8 @@ class CanvasDtoContractTest {
     assertEquals(
         Map.of("definitionFingerprint", "String"), componentTypes(CanvasFunctionVersionDTO.class));
     assertEquals(
-        Map.of("kind", "String", "name", "String"), componentTypes(CanvasFunctionOutputDTO.class));
+        Map.of("kind", "CanvasResourceKind", "name", "String"),
+        componentTypes(CanvasFunctionOutputDTO.class));
   }
 
   /** start 必带 expectedVersion；cancel 是独立的 requestId-only wire，不留下非必填版本分支。 */
@@ -155,46 +153,6 @@ class CanvasDtoContractTest {
         componentTypes(CanvasFunctionRunRequestDTO.class));
     assertEquals(
         Map.of("requestId", "String"), componentTypes(CanvasFunctionCancelRequestDTO.class));
-  }
-
-  /**
-   * 版本字段只接受 JSON 字符串：数字/布尔/数组绝不被强制转换成文本。
-   *
-   * <p>否则数字会被读成文本，start 就会接受一个客户端从未以 canonical 形式表达过的版本。显式 {@code null} 由边界必填校验拒绝（见 Studio Canvas
-   * Function controller 契约测试）。
-   */
-  @Test
-  void versionFieldsOnlyAcceptJsonStrings() throws Exception {
-    String fingerprint = "a".repeat(64);
-    CanvasFunctionVersionDTO accepted =
-        MAPPER.readValue(
-            "{\"definitionFingerprint\":\"" + fingerprint + "\"}", CanvasFunctionVersionDTO.class);
-    assertEquals(fingerprint, accepted.getDefinitionFingerprint());
-
-    for (String body :
-        new String[] {
-          "{\"definitionFingerprint\":12345}",
-          "{\"definitionFingerprint\":true}",
-          "{\"definitionFingerprint\":[\"" + fingerprint + "\"]}",
-          "{\"definitionFingerprint\":\"" + fingerprint + "\",\"unknownField\":\"1\"}",
-          "{\"definitionFingerprint\":\"" + fingerprint + "\",\"extra\":true}"
-        }) {
-      assertThrows(
-          Exception.class, () -> MAPPER.readValue(body, CanvasFunctionVersionDTO.class), body);
-    }
-    assertThrows(
-        Exception.class,
-        () ->
-            MAPPER.readValue(
-                "{\"requestId\":\"r\",\"expectedVersion\":null}",
-                CanvasFunctionCancelRequestDTO.class));
-    // 嵌套在 start body 里同样严格：版本字段的严格化不能只在顶层 object 生效。
-    assertThrows(
-        Exception.class,
-        () ->
-            MAPPER.readValue(
-                "{\"requestId\":\"r\",\"expectedVersion\":{\"definitionFingerprint\":1}}",
-                CanvasFunctionRunRequestDTO.class));
   }
 
   /** Function 只有 name 与自由 args，目录不假设 model/prompt/provider。 */
@@ -233,7 +191,7 @@ class CanvasDtoContractTest {
             "NodeReferenced", "NODE_REFERENCED"),
         actual);
     assertEquals(
-        Map.of("nodeId", "String", "group", "String", "current", "CanvasResourceNodeDTO"),
+        Map.of("nodeId", "String", "group", "NodeGroup", "current", "CanvasResourceNodeDTO"),
         componentTypes(CanvasConflictDTO.StaleNode.class));
   }
 
@@ -275,10 +233,12 @@ class CanvasDtoContractTest {
   }
 
   private static Field field(String ownerAndField) throws NoSuchFieldException {
-    String[] parts = ownerAndField.split("\\.");
-    String owner = "fun.fengwk.kkstudio.canvas.dto." + parts[0];
+    int split = ownerAndField.lastIndexOf('.');
+    String type = ownerAndField.substring(0, split).replace('.', '$');
+    String name = ownerAndField.substring(split + 1);
+    String owner = "fun.fengwk.kkstudio.canvas.dto." + type;
     try {
-      return Class.forName(owner).getDeclaredField(parts[1]);
+      return Class.forName(owner).getDeclaredField(name);
     } catch (ClassNotFoundException error) {
       throw new AssertionError("unknown DTO: " + owner, error);
     }

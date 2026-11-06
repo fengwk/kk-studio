@@ -71,7 +71,7 @@ function resource(kind: Resource['kind'], overrides: Partial<Resource> = {}): Re
         ? 1080
         : null,
     durationMs: kind === 'VIDEO' || kind === 'AUDIO' ? 65_000 : null,
-    createdAt: '2026-08-10T00:00:00Z',
+    createdAt: 1786291200000,
     ...overrides,
   }
 }
@@ -91,7 +91,7 @@ function previewUrl(url: string) {
     method: 'GET' as const,
     url,
     headers: {},
-    expiresAt: '2026-08-10T00:15:00Z',
+    expiresAt: 1786320000000,
   }
 }
 
@@ -100,7 +100,7 @@ function originalUrl(url: string) {
     method: 'GET' as const,
     url,
     headers: {},
-    expiresAt: '2026-08-10T00:15:00Z',
+    expiresAt: 1786320000000,
   }
 }
 

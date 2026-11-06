@@ -9,7 +9,8 @@ export const COMMAND_ID = '00000000-0000-0000-0000-000000000004'
 export const MARKER = 'smoke-marker-123'
 export const BLOB_ID = '11111111-1111-4111-8111-111111111111'
 export const CANVAS_ID = '22222222-2222-4222-8222-222222222222'
-export const UPDATED_AT = '2026-01-01T00:00:00Z'
+/** epoch 毫秒：Canvas 读模型的时间字段。 */
+export const UPDATED_AT = 1767225600000
 export const REQUIRED_FUNCTIONS = [
   'fake-image',
   'gpt-image-2',
@@ -19,7 +20,7 @@ export const REQUIRED_FUNCTIONS = [
   'seedance2.0fast_vip',
 ]
 
-/** CanvasDocumentDTO：五字段快照，revision 是规范十进制字符串。 */
+/** CanvasDocumentDTO：五字段快照，revision 是规范十进制字符串，时间是 epoch 毫秒。 */
 export function documentDto(revision) {
   return {
     id: CANVAS_ID,

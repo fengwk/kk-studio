@@ -3,6 +3,8 @@ package fun.fengwk.kkstudio.canvas.dto;
 import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
 
+import fun.fengwk.kkstudio.canvas.CanvasConflict;
+
 import java.util.List;
 
 /**
@@ -29,10 +31,12 @@ public sealed interface CanvasConflictDTO
         CanvasConflictDTO.NodeReferenced {
 
   /** 命令指向的对象不存在；{@code target} 为 {@code NODE} 或 {@code GROUP}。 */
-  record TargetMissing(String targetId, String target) implements CanvasConflictDTO {}
+  record TargetMissing(String targetId, CanvasConflict.Target target)
+      implements CanvasConflictDTO {}
 
   /** 创建命令与既有对象 id 冲突；{@code target} 为 {@code NODE} 或 {@code GROUP}。 */
-  record TargetPresent(String targetId, String target) implements CanvasConflictDTO {}
+  record TargetPresent(String targetId, CanvasConflict.Target target)
+      implements CanvasConflictDTO {}
 
   /**
    * 节点语义组的前置条件已过期，携带当前权威节点投影。
@@ -40,7 +44,7 @@ public sealed interface CanvasConflictDTO
    * <p>{@code group} 为 {@code NAME}、{@code RESOURCES}、{@code FUNCTION}、{@code MEMBERSHIP} 或 {@code
    * LAYOUT}。
    */
-  record StaleNode(String nodeId, String group, CanvasResourceNodeDTO current)
+  record StaleNode(String nodeId, CanvasConflict.NodeGroup group, CanvasResourceNodeDTO current)
       implements CanvasConflictDTO {}
 
   /** 分组名称或几何的前置条件已过期，携带当前权威分组。 */

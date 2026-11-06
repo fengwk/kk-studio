@@ -1,7 +1,8 @@
 package fun.fengwk.kkstudio.canvas.dto;
 
-import com.fasterxml.jackson.annotation.JsonAnySetter;
 import lombok.Data;
+
+import java.time.Instant;
 
 /**
  * Canvas 聚合的持久化头。{@code revision} 是单调递增的同步位置，也是 command 接受回执与 patch 的公共坐标系，wire 为规范非负十进制字符串；
@@ -16,12 +17,7 @@ public class CanvasDocumentDTO {
 
   private String revision;
 
-  private String createdAt;
+  private Instant createdAt;
 
-  private String updatedAt;
-
-  @JsonAnySetter
-  public void rejectUnknownField(String field, Object value) {
-    throw new IllegalArgumentException("unknown field: " + field);
-  }
+  private Instant updatedAt;
 }

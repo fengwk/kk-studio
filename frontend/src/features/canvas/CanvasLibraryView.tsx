@@ -194,10 +194,10 @@ export function CanvasLibraryView() {
   )
 }
 
-function formatUpdatedAt(value: string, locale: AppLocale): string {
+function formatUpdatedAt(value: number, locale: AppLocale): string {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) {
-    return value
+    return '-'
   }
   return date.toLocaleString(locale, { dateStyle: 'medium', timeStyle: 'short' })
 }

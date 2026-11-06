@@ -22,8 +22,8 @@ import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 /**
  * 真实 Spring MVC 下 Canvas Resource 直读边界的 problem 错误契约。
  *
- * <p>{@link CanvasResourceController} 的缺失资源和无效参数分别走领域异常和状态异常映射；该控制器由 Canvas 模块自动配置注册，本测试验证 Web
- * 组合根对它们的覆盖。
+ * <p>{@link CanvasResourceController} 的缺失资源走领域异常，非法 UUID 路径参数走框架的类型转换映射；该控制器由 Canvas 模块自动配置注册，本测试验证
+ * Web 组合根对两者的覆盖。
  */
 @AutoConfigureMockMvc
 class CanvasResourceControllerAdviceIntegrationTest extends WebPostgresTestSupport {
@@ -39,7 +39,10 @@ class CanvasResourceControllerAdviceIntegrationTest extends WebPostgresTestSuppo
   void unknownCanvasReturnsProblem() throws Exception {
     mockMvc
         .perform(
-            post("/api/canvases/{canvasId}/resources/{resourceId}/download-url", CANVAS, RESOURCE)
+            post(
+                    "/api/canvas/canvases/{canvasId}/resources/{resourceId}/download-url",
+                    CANVAS,
+                    RESOURCE)
                 .header(HttpHeaders.ACCEPT_LANGUAGE, "en-US"))
         .andExpect(status().isNotFound())
         .andExpect(jsonPath("$.status").value(404))
@@ -48,18 +51,19 @@ class CanvasResourceControllerAdviceIntegrationTest extends WebPostgresTestSuppo
         .andExpect(jsonPath("$.detail").value("unknown canvas: " + CANVAS));
   }
 
-  /** 测试意图：非 canonical UUID 的 400 也必须走同一 problem 格式。 */
+  /** 测试意图：非 canonical UUID 的 400 也必须走同一 problem 格式，且不回显不可信输入。 */
   @Test
   void invalidCanvasIdReturnsProblem() throws Exception {
     mockMvc
         .perform(
-            post("/api/canvases/not-a-uuid/resources/{resourceId}/download-url", RESOURCE)
+            post("/api/canvas/canvases/not-a-uuid/resources/{resourceId}/download-url", RESOURCE)
                 .header(HttpHeaders.ACCEPT_LANGUAGE, "en-US"))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.status").value(400))
         .andExpect(jsonPath("$.code").value("validation"))
         .andExpect(jsonPath("$.type").value("about:blank"))
-        .andExpect(jsonPath("$.title").value("The request is invalid."));
+        .andExpect(jsonPath("$.title").value("The canvasId parameter has an invalid value."))
+        .andExpect(jsonPath("$.detail").value("canvasId has an invalid value"));
   }
 
   /** Canvas 写入准入的领域错误由组合根输出 problem。 */
@@ -77,7 +81,7 @@ class CanvasResourceControllerAdviceIntegrationTest extends WebPostgresTestSuppo
         .applyCommands(any(), any(), any());
     mockMvc
         .perform(
-            post("/api/canvases/{canvasId}/commands", CANVAS)
+            post("/api/canvas/canvases/{canvasId}/commands", CANVAS)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(request))
         .andExpect(status().isNotFound())
@@ -88,7 +92,7 @@ class CanvasResourceControllerAdviceIntegrationTest extends WebPostgresTestSuppo
         .applyCommands(any(), any(), any());
     mockMvc
         .perform(
-            post("/api/canvases/{canvasId}/commands", CANVAS)
+            post("/api/canvas/canvases/{canvasId}/commands", CANVAS)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(request))
         .andExpect(status().isConflict())
@@ -99,7 +103,7 @@ class CanvasResourceControllerAdviceIntegrationTest extends WebPostgresTestSuppo
         .applyCommands(any(), any(), any());
     mockMvc
         .perform(
-            post("/api/canvases/{canvasId}/commands", CANVAS)
+            post("/api/canvas/canvases/{canvasId}/commands", CANVAS)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(request))
         .andExpect(status().isBadRequest())

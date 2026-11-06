@@ -1,11 +1,11 @@
 package fun.fengwk.kkstudio.canvas.dto;
 
-import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import org.jspecify.annotations.Nullable;
 
 import java.util.List;
+import java.util.UUID;
 
 /**
  * Canvas typed command：与 canvas-core 的 {@code CanvasCommand} 一一对应，每条命令只修改一个语义组。
@@ -45,62 +45,56 @@ public sealed interface CanvasCommandDTO
         CanvasCommandDTO.UpdateGroupTransform,
         CanvasCommandDTO.DeleteGroup {
 
-  @JsonAnySetter
-  default void rejectUnknownField(String field, Object value) {
-    throw new IllegalArgumentException("unknown field: " + field);
-  }
-
   /** 创建节点：nodeId 由客户端生成，资源数组可为空以便同批再赋予 Function。 */
   record CreateNode(
-      String nodeId,
+      UUID nodeId,
       String name,
       CanvasTransformDTO transform,
       List<CanvasResourceInputDTO> resources)
       implements CanvasCommandDTO {}
 
   /** 改名：前置条件是编辑起点的旧名称。 */
-  record RenameNode(String nodeId, String expectedName, String name) implements CanvasCommandDTO {}
+  record RenameNode(UUID nodeId, String expectedName, String name) implements CanvasCommandDTO {}
 
   /** 替换资源数组：前置条件是编辑起点的有序 Resource id 列表。 */
   record SetNodeResources(
-      String nodeId, List<String> expectedResourceIds, List<CanvasResourceInputDTO> resources)
+      UUID nodeId, List<UUID> expectedResourceIds, List<CanvasResourceInputDTO> resources)
       implements CanvasCommandDTO {}
 
   /** 设置或清除 Function：前置条件是编辑起点的完整 {@code {name,args}}，null 表示编辑起点没有 Function。 */
   record SetNodeFunction(
-      String nodeId,
+      UUID nodeId,
       @Nullable CanvasFunctionDTO expectedFunction,
       @Nullable CanvasFunctionDTO function)
       implements CanvasCommandDTO {}
 
   /** 设置或清除节点分组：前置条件是编辑起点的分组 id，null 表示编辑起点未分组。 */
-  record SetNodeGroup(String nodeId, @Nullable String expectedGroupId, @Nullable String groupId)
+  record SetNodeGroup(UUID nodeId, @Nullable UUID expectedGroupId, @Nullable UUID groupId)
       implements CanvasCommandDTO {}
 
   /** 删除节点：前置条件是编辑起点的资源数组与 Function；仍被引用的节点必须先在同一批解除引用。 */
   record DeleteNode(
-      String nodeId, List<String> expectedResourceIds, @Nullable CanvasFunctionDTO expectedFunction)
+      UUID nodeId, List<UUID> expectedResourceIds, @Nullable CanvasFunctionDTO expectedFunction)
       implements CanvasCommandDTO {}
 
   /** 更新节点几何：expectedTransform 非空表示重连积压的布局基线，为空表示在线操作。 */
   record UpdateNodeTransform(
-      String nodeId, CanvasTransformDTO transform, @Nullable CanvasTransformDTO expectedTransform)
+      UUID nodeId, CanvasTransformDTO transform, @Nullable CanvasTransformDTO expectedTransform)
       implements CanvasCommandDTO {}
 
   /** 创建不嵌套的视觉分组；成员关系由各节点的 {@link SetNodeGroup} 建立。 */
-  record CreateGroup(String groupId, String title, CanvasTransformDTO transform)
+  record CreateGroup(UUID groupId, String title, CanvasTransformDTO transform)
       implements CanvasCommandDTO {}
 
   /** 重命名分组：前置条件是编辑起点的旧标题。 */
-  record RenameGroup(String groupId, String expectedTitle, String title)
+  record RenameGroup(UUID groupId, String expectedTitle, String title)
       implements CanvasCommandDTO {}
 
   /** 更新分组几何：expectedTransform 语义与 {@link UpdateNodeTransform} 一致。 */
   record UpdateGroupTransform(
-      String groupId, CanvasTransformDTO transform, @Nullable CanvasTransformDTO expectedTransform)
+      UUID groupId, CanvasTransformDTO transform, @Nullable CanvasTransformDTO expectedTransform)
       implements CanvasCommandDTO {}
 
   /** 删除分组：前置条件是编辑起点的成员节点集合；成员节点在同批解除分组。 */
-  record DeleteGroup(String groupId, List<String> expectedMemberNodeIds)
-      implements CanvasCommandDTO {}
+  record DeleteGroup(UUID groupId, List<UUID> expectedMemberNodeIds) implements CanvasCommandDTO {}
 }

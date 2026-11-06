@@ -20,8 +20,8 @@ function snapshot(): CanvasSnapshotDTO {
       id: CANVAS_ID,
       title: 'Board',
       revision: '0',
-      createdAt: '2026-08-10T00:00:00Z',
-      updatedAt: '2026-08-10T00:00:00Z',
+      createdAt: 1786291200000,
+      updatedAt: 1786291200000,
     },
     nodes: [{
       id: NODE_A,

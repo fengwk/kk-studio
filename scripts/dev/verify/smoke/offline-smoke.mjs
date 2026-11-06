@@ -68,19 +68,19 @@ const rawFetch = (url, init = {}) => fetch(url, { signal: AbortSignal.timeout(30
  */
 export async function createAndRun(client, canvasId, functionName, name, parameters, expectedCheckpointCount) {
   const { jsonCall, newId, sleep: wait } = client
-  const version = definitionVersion(await jsonCall('GET', '/api/canvas-functions'), functionName)
-  const current = await jsonCall('GET', `/api/canvases/${canvasId}`)
+  const version = definitionVersion(await jsonCall('GET', '/api/canvas/functions'), functionName)
+  const current = await jsonCall('GET', `/api/canvas/canvases/${canvasId}`)
   const currentRevision = documentRevision(current.document)
   const nodeId = newId()
   const patch = await jsonCall(
     'POST',
-    `/api/canvases/${canvasId}/commands`,
+    `/api/canvas/canvases/${canvasId}/commands`,
     functionBatch(nodeId, name, functionName, { prompt: `mock ${functionName}`, ...parameters }, newId()),
   )
   const patchRevision = assertPatch(patch, currentRevision)
   const node = upsertedNode(patch, nodeId)
   const requestId = newId()
-  const runPath = `/api/canvases/${canvasId}/nodes/${node.id}/function-run`
+  const runPath = `/api/canvas/canvases/${canvasId}/nodes/${node.id}/function-run`
   let run = await jsonCall('POST', runPath, { requestId, expectedVersion: version })
   for (let attempt = 0; attempt < 160; attempt += 1) {
     if (!['READY', 'RUNNING'].includes(run.status)) {
@@ -90,15 +90,15 @@ export async function createAndRun(client, canvasId, functionName, name, paramet
     run = await jsonCall('GET', runPath)
   }
   assertCompletedRun(run, nodeId, requestId)
-  const snapshot = await jsonCall('GET', `/api/canvases/${canvasId}`)
+  const snapshot = await jsonCall('GET', `/api/canvas/canvases/${canvasId}`)
   assertRunRevision(snapshot.document, patchRevision, expectedCheckpointCount)
   // 收尾后相同 requestId 重放不能启动新运行或改写资源；重放优先于版本校验。
-  const replay = await jsonCall('POST', `/api/canvases/${canvasId}/nodes/${nodeId}/function-run`, {
+  const replay = await jsonCall('POST', `/api/canvas/canvases/${canvasId}/nodes/${nodeId}/function-run`, {
     requestId,
     expectedVersion: version,
   })
   assert.deepEqual(replay, run)
-  assert.deepEqual(await jsonCall('GET', `/api/canvases/${canvasId}`), snapshot)
+  assert.deepEqual(await jsonCall('GET', `/api/canvas/canvases/${canvasId}`), snapshot)
   return snapshot.nodes.find((item) => item.id === node.id)
 }
 
@@ -292,42 +292,42 @@ export async function runSmoke({ baseUrl, imageFixture }) {
   const { jsonCall, newId, sleep: wait } = client
   const image = readFileSync(imageFixture)
 
-  const canvas = await jsonCall('POST', '/api/canvases', { title: 'container-resource-smoke' })
+  const canvas = await jsonCall('POST', '/api/canvas/canvases', { title: 'container-resource-smoke' })
   assert.match(canvas.id, UUID_V4)
   assert.equal(documentRevision(canvas), 0)
   const completed = await uploadBlob(client, image)
 
   const resourceNodeId = newId()
   const resourceRequest = resourceBatch(resourceNodeId, completed.blobId, newId())
-  const resourcePatch = await jsonCall('POST', `/api/canvases/${canvas.id}/commands`, resourceRequest)
+  const resourcePatch = await jsonCall('POST', `/api/canvas/canvases/${canvas.id}/commands`, resourceRequest)
   assertPatch(resourcePatch, 0)
   // 精确 replay 是空变化集，不再次创建资源或推进 revision。
-  assertPatch(await jsonCall('POST', `/api/canvases/${canvas.id}/commands`, resourceRequest), 1, true)
+  assertPatch(await jsonCall('POST', `/api/canvas/canvases/${canvas.id}/commands`, resourceRequest), 1, true)
   const resource = upsertedNode(resourcePatch, resourceNodeId).resources[0]
   assert.equal(resource.blobId, completed.blobId)
   assert.equal(resource.mediaType, 'image/png')
   assert.ok(resource.width > 0 && resource.height > 0)
   assert.equal(resource.sizeBytes, String(image.length))
 
-  const resourceSnapshot = await jsonCall('GET', `/api/canvases/${canvas.id}`)
+  const resourceSnapshot = await jsonCall('GET', `/api/canvas/canvases/${canvas.id}`)
   assert.equal(documentRevision(resourceSnapshot.document), 1)
   assert.equal(resourceSnapshot.nodes.length, 1)
   const snapshotResourceNode = resourceSnapshot.nodes.find((node) => node.id === resourceNodeId)
   assert.equal(snapshotResourceNode.resources[0].id, resource.id)
 
-  const original = await jsonCall('POST', `/api/canvases/${canvas.id}/resources/${resource.id}/download-url`)
+  const original = await jsonCall('POST', `/api/canvas/canvases/${canvas.id}/resources/${resource.id}/download-url`)
   const originalResponse = await rawFetch(original.url)
   assert.equal(originalResponse.status, 200)
   assert.ok(Buffer.from(await originalResponse.arrayBuffer()).equals(image))
 
-  const preview = await jsonCall('POST', `/api/canvases/${canvas.id}/resources/${resource.id}/preview-url`)
+  const preview = await jsonCall('POST', `/api/canvas/canvases/${canvas.id}/resources/${resource.id}/preview-url`)
   assert.ok(!('bucket' in preview) && !('key' in preview))
   await assertWebpPreview(preview.url)
 
   const functionNodeId = newId()
   const functionPatch = await jsonCall(
     'POST',
-    `/api/canvases/${canvas.id}/commands`,
+    `/api/canvas/canvases/${canvas.id}/commands`,
     functionBatch(
       functionNodeId,
       'generated',
@@ -340,8 +340,8 @@ export async function runSmoke({ baseUrl, imageFixture }) {
   const functionNode = upsertedNode(functionPatch, functionNodeId)
   const requestId = newId()
   // start 的 expectedVersion 只能来自真实目录项，绝不硬编码 epoch 或 fingerprint。
-  const fakeImageVersion = definitionVersion(await jsonCall('GET', '/api/canvas-functions'), 'fake-image')
-  const runPath = `/api/canvases/${canvas.id}/nodes/${functionNode.id}/function-run`
+  const fakeImageVersion = definitionVersion(await jsonCall('GET', '/api/canvas/functions'), 'fake-image')
+  const runPath = `/api/canvas/canvases/${canvas.id}/nodes/${functionNode.id}/function-run`
   const started = await jsonCall('POST', runPath, { requestId, expectedVersion: fakeImageVersion })
   assert.equal(started.requestId, requestId)
   let current
@@ -356,7 +356,7 @@ export async function runSmoke({ baseUrl, imageFixture }) {
   assert.ok(terminal, 'fake-image FunctionRun did not reach terminal state')
   assertCompletedRun(current, functionNodeId, requestId)
 
-  const generatedSnapshot = await jsonCall('GET', `/api/canvases/${canvas.id}`)
+  const generatedSnapshot = await jsonCall('GET', `/api/canvas/canvases/${canvas.id}`)
   const generatedNode = generatedSnapshot.nodes.find((node) => node.id === functionNode.id)
   assert.equal(assertRunRevision(generatedSnapshot.document, 2, 2), 8)
   assert.equal(generatedNode.resources.length, 1)
@@ -365,12 +365,12 @@ export async function runSmoke({ baseUrl, imageFixture }) {
   assert.equal(generatedResource.name, 'generated.png')
   const generatedPreview = await jsonCall(
     'POST',
-    `/api/canvases/${canvas.id}/resources/${generatedResource.id}/preview-url`,
+    `/api/canvas/canvases/${canvas.id}/resources/${generatedResource.id}/preview-url`,
   )
   await assertWebpPreview(generatedPreview.url)
 
   await initializeOpencliPlugin(client)
-  assertFunctionDefinitions(await jsonCall('GET', '/api/canvas-functions'))
+  assertFunctionDefinitions(await jsonCall('GET', '/api/canvas/functions'))
 
   const gptNode = await createAndRun(client, canvas.id, 'gpt-image-2', 'mock-gpt', { ratio: '1:1' }, 4)
   assert.equal(gptNode.resources.length, 1)

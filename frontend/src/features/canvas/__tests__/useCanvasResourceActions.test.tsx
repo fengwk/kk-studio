@@ -26,7 +26,7 @@ function resource(overrides: Partial<Resource> = {}): Resource {
     width: null,
     height: null,
     durationMs: null,
-    createdAt: '2026-08-10T00:00:00Z',
+    createdAt: 1786291200000,
     ...overrides,
   }
 }
@@ -66,7 +66,7 @@ describe('useCanvasResourceActions', () => {
       method: 'GET',
       url: 'https://s3.example/original',
       headers: {},
-      expiresAt: '2026-08-10T00:15:00Z',
+      expiresAt: 1786320000000,
     })
     const { result } = renderHook(() => useCanvasResourceActions(resource()))
 
@@ -90,7 +90,7 @@ describe('useCanvasResourceActions', () => {
       method: 'GET',
       url: 'https://s3.example/original',
       headers: {},
-      expiresAt: '2026-08-10T00:15:00Z',
+      expiresAt: 1786320000000,
     })
     const { result } = renderHook(() => useCanvasResourceActions(resource({ name: 'asset.png' })))
 
@@ -113,7 +113,7 @@ describe('useCanvasResourceActions', () => {
         method: 'GET',
         url: 'https://s3.example/retry',
         headers: {},
-        expiresAt: '2026-08-10T00:15:00Z',
+        expiresAt: 1786320000000,
       })
     const { result } = renderHook(() => useCanvasResourceActions(resource()))
 
@@ -136,7 +136,7 @@ describe('useCanvasResourceActions', () => {
       method: 'GET',
       url: 'https://s3.example/second',
       headers: {},
-      expiresAt: '2026-08-10T00:15:00Z',
+      expiresAt: 1786320000000,
     })
     const { result } = renderHook(() => useCanvasResourceActions(resource()))
 

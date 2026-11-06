@@ -51,7 +51,7 @@ function resource(kind: Resource['kind'], overrides: Partial<Resource> = {}): Re
     width: null,
     height: null,
     durationMs: null,
-    createdAt: '2026-08-10T00:00:00Z',
+    createdAt: 1786291200000,
     ...overrides,
   }
 }
@@ -202,7 +202,7 @@ describe('Canvas resource/group node renderers', () => {
         status: 'FAILED',
         stage: 'FAILED',
         error: 'boom',
-        updatedAt: '2026-08-10T00:00:00Z',
+        updatedAt: 1786291200000,
       },
     }))
 

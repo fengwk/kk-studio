@@ -5,7 +5,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRun;
-import fun.fengwk.kkstudio.canvas.CanvasFunctionRunException;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRunStatus;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionUnknownResolution;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionVersion;
@@ -13,6 +12,7 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
 import fun.fengwk.kkstudio.canvas.infra.platform.PluginCanvasFunctionCatalogSource;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.PostgresqlCanvasFunctionRunRepository;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.PostgresqlCanvasStore;
+import fun.fengwk.kkstudio.common.error.DomainException;
 
 import java.util.Objects;
 import java.util.UUID;
@@ -95,7 +95,7 @@ public class CanvasFunctionService {
     }
   }
 
-  private static CanvasFunctionRunException notFound(String message) {
-    return new CanvasFunctionRunException(CanvasFunctionRunException.Reason.NOT_FOUND, message);
+  private static DomainException notFound(String message) {
+    return DomainException.notFound("canvas_function_run", message);
   }
 }

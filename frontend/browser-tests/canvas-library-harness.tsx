@@ -36,8 +36,8 @@ const existingCanvas: CanvasDocumentDTO = {
   id: CANVAS_ID as CanvasDocumentDTO['id'],
   title: 'Research board',
   revision: '3',
-  createdAt: '2026-08-10T00:00:00Z',
-  updatedAt: '2026-08-10T00:00:00Z',
+  createdAt: 1786291200000,
+  updatedAt: 1786291200000,
 }
 
 function jsonResponse(status: number, code: string, data: unknown, message?: string): Response {
@@ -61,7 +61,7 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Re
   const body = typeof init?.body === 'string' ? JSON.parse(init.body) : undefined
   callLog.push({ method, path, body })
 
-  if (method === 'GET' && path === '/api/canvases') {
+  if (method === 'GET' && path === '/api/canvas/canvases') {
     if (listFailuresRemaining > 0) {
       listFailuresRemaining -= 1
       return jsonResponse(500, 'internal', null)
@@ -69,7 +69,7 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Re
     return jsonResponse(200, 'OK', listMode === 'empty' ? [] : [existingCanvas])
   }
 
-  if (method === 'POST' && path === '/api/canvases') {
+  if (method === 'POST' && path === '/api/canvas/canvases') {
     if (createMode === 'error') {
       return jsonResponse(409, 'duplicate', null, '画布名称已存在')
     }

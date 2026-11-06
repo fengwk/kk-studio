@@ -12,7 +12,6 @@ import static org.mockito.Mockito.when;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRun;
-import fun.fengwk.kkstudio.canvas.CanvasFunctionRunException;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRunStatus;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionUnknownResolution;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionVersion;
@@ -29,6 +28,8 @@ import fun.fengwk.kkstudio.canvas.infra.platform.PluginCanvasFunctionCatalogSour
 import fun.fengwk.kkstudio.canvas.infra.postgresql.PostgresqlCanvasFunctionRunRepository;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.PostgresqlCanvasStore;
 import fun.fengwk.kkstudio.canvas.testing.TestCanvasFunctionCatalogSource;
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 
 import java.time.Instant;
 import java.util.List;
@@ -72,16 +73,16 @@ class CanvasFunctionServiceTest {
   void getDistinguishesMissingNodeAndMissingRun() {
     Fixture fixture = new Fixture();
     when(fixture.canvasStore.findNode(CANVAS, NODE)).thenReturn(Optional.empty());
-    CanvasFunctionRunException missingNode =
-        assertThrows(CanvasFunctionRunException.class, () -> fixture.service.get(CANVAS, NODE));
-    assertEquals(CanvasFunctionRunException.Reason.NOT_FOUND, missingNode.reason());
+    DomainException missingNode =
+        assertThrows(DomainException.class, () -> fixture.service.get(CANVAS, NODE));
+    assertEquals(DomainErrorCode.NOT_FOUND, missingNode.code());
 
     when(fixture.canvasStore.findNode(CANVAS, NODE))
         .thenReturn(Optional.of(mock(NodeRecord.class)));
     when(fixture.runRepository.findByNodeId(NODE)).thenReturn(Optional.empty());
-    CanvasFunctionRunException missingRun =
-        assertThrows(CanvasFunctionRunException.class, () -> fixture.service.get(CANVAS, NODE));
-    assertEquals(CanvasFunctionRunException.Reason.NOT_FOUND, missingRun.reason());
+    DomainException missingRun =
+        assertThrows(DomainException.class, () -> fixture.service.get(CANVAS, NODE));
+    assertEquals(DomainErrorCode.NOT_FOUND, missingRun.code());
   }
 
   /** READY/RUNNING cancel 转 CANCELLED 终态后触发 adapter 的 best-effort cancel hook。 */

@@ -186,21 +186,21 @@ export type CanvasCommandDTO =
 export interface CanvasConflictTargetMissing {
   kind: 'TARGET_MISSING'
   targetId: string
-  target: string
+  target: CanvasConflictTarget
 }
 
 /** Java：fun.fengwk.kkstudio.canvas.dto.CanvasConflictDTO.TargetPresent */
 export interface CanvasConflictTargetPresent {
   kind: 'TARGET_PRESENT'
   targetId: string
-  target: string
+  target: CanvasConflictTarget
 }
 
 /** Java：fun.fengwk.kkstudio.canvas.dto.CanvasConflictDTO.StaleNode */
 export interface CanvasConflictStaleNode {
   kind: 'STALE_NODE'
   nodeId: string
-  group: string
+  group: CanvasConflictNodeGroup
   current: CanvasResourceNodeDTO
 }
 
@@ -234,13 +234,39 @@ export type CanvasConflictDTO =
   | CanvasConflictNodeRunning
   | CanvasConflictNodeReferenced
 
+/** Java：fun.fengwk.kkstudio.canvas.CanvasConflict.NodeGroup */
+export type CanvasConflictNodeGroup =
+  | 'NAME'
+  | 'RESOURCES'
+  | 'FUNCTION'
+  | 'MEMBERSHIP'
+  | 'LAYOUT'
+
+export const CANVAS_CONFLICT_NODE_GROUP_VALUES: readonly CanvasConflictNodeGroup[] = [
+  'NAME',
+  'RESOURCES',
+  'FUNCTION',
+  'MEMBERSHIP',
+  'LAYOUT',
+]
+
+/** Java：fun.fengwk.kkstudio.canvas.CanvasConflict.Target */
+export type CanvasConflictTarget =
+  | 'NODE'
+  | 'GROUP'
+
+export const CANVAS_CONFLICT_TARGET_VALUES: readonly CanvasConflictTarget[] = [
+  'NODE',
+  'GROUP',
+]
+
 /** Java：fun.fengwk.kkstudio.canvas.dto.CanvasDocumentDTO */
 export interface CanvasDocumentDTO {
   id: string
   title: string
   revision: string
-  createdAt: string
-  updatedAt: string
+  createdAt: number
+  updatedAt: number
 }
 
 /** Java：fun.fengwk.kkstudio.canvas.dto.CanvasFunctionCancelRequestDTO */
@@ -268,13 +294,13 @@ export interface CanvasFunctionDefinitionDTO {
 
 /** Java：fun.fengwk.kkstudio.canvas.dto.CanvasFunctionOutputDTO */
 export interface CanvasFunctionOutputDTO {
-  kind: string
+  kind: CanvasResourceKind
   name?: string | null
 }
 
 /** Java：fun.fengwk.kkstudio.canvas.dto.CanvasFunctionReferencePolicyDTO */
 export interface CanvasFunctionReferencePolicyDTO {
-  allowedKinds: string[]
+  allowedKinds: CanvasResourceKind[]
   maxReferences?: number | null
   maxByKind?: Record<string, number> | null
 }
@@ -283,10 +309,10 @@ export interface CanvasFunctionReferencePolicyDTO {
 export interface CanvasFunctionRunDTO {
   nodeId: string
   requestId: string
-  status: string
+  status: CanvasFunctionRunStatus
   stage: string
   error: string | null
-  updatedAt: string
+  updatedAt: number
 }
 
 /** Java：fun.fengwk.kkstudio.canvas.dto.CanvasFunctionRunRequestDTO */
@@ -295,10 +321,40 @@ export interface CanvasFunctionRunRequestDTO {
   expectedVersion: CanvasFunctionVersionDTO
 }
 
+/** Java：fun.fengwk.kkstudio.canvas.CanvasFunctionRunStatus */
+export type CanvasFunctionRunStatus =
+  | 'READY'
+  | 'RUNNING'
+  | 'SUCCEEDED'
+  | 'FAILED'
+  | 'CANCELLED'
+  | 'UNKNOWN'
+
+export const CANVAS_FUNCTION_RUN_STATUS_VALUES: readonly CanvasFunctionRunStatus[] = [
+  'READY',
+  'RUNNING',
+  'SUCCEEDED',
+  'FAILED',
+  'CANCELLED',
+  'UNKNOWN',
+]
+
+/** Java：fun.fengwk.kkstudio.canvas.CanvasFunctionUnknownResolution */
+export type CanvasFunctionUnknownResolution =
+  | 'RESUME'
+  | 'FAILED'
+  | 'CANCELLED'
+
+export const CANVAS_FUNCTION_UNKNOWN_RESOLUTION_VALUES: readonly CanvasFunctionUnknownResolution[] = [
+  'RESUME',
+  'FAILED',
+  'CANCELLED',
+]
+
 /** Java：fun.fengwk.kkstudio.canvas.dto.CanvasFunctionUnknownResolutionDTO */
 export interface CanvasFunctionUnknownResolutionDTO {
   requestId: string
-  resolution: string
+  resolution: CanvasFunctionUnknownResolution
   verification: string
 }
 
@@ -361,7 +417,7 @@ export interface CanvasPresignedUrlDTO {
   method: string
   url: string
   headers: Record<string, string>
-  expiresAt: string
+  expiresAt: number
 }
 
 /** Java：fun.fengwk.kkstudio.canvas.dto.CanvasReferenceDTO */
@@ -372,23 +428,41 @@ export interface CanvasReferenceDTO {
   index: number
 }
 
-/** Java：fun.fengwk.kkstudio.canvas.dto.CanvasResourceDTO */
-export interface CanvasResourceDTO {
+/** Java：fun.fengwk.kkstudio.canvas.dto.CanvasResourceDTO.Text */
+export interface CanvasResourceText {
+  type: 'TEXT'
   id: string
   canvasId: string
   ownerNodeId: string
   resourceIndex: number
-  blobId: string | null
   name: string
-  textContent: string | null
-  kind: string
-  mediaType: string | null
+  textContent: string
+  kind: CanvasResourceKind
+  createdAt: number
+}
+
+/** Java：fun.fengwk.kkstudio.canvas.dto.CanvasResourceDTO.Blob */
+export interface CanvasResourceBlob {
+  type: 'BLOB'
+  id: string
+  canvasId: string
+  ownerNodeId: string
+  resourceIndex: number
+  blobId: string
+  name: string
+  kind: CanvasResourceKind
+  mediaType: string
   sizeBytes: string | null
   width: number | null
   height: number | null
   durationMs: string | null
-  createdAt: string
+  createdAt: number
 }
+
+/** Java：fun.fengwk.kkstudio.canvas.dto.CanvasResourceDTO */
+export type CanvasResourceDTO =
+  | CanvasResourceText
+  | CanvasResourceBlob
 
 /** Java：fun.fengwk.kkstudio.canvas.dto.CanvasResourceInputDTO.Keep */
 export interface CanvasResourceInputKeep {
@@ -415,6 +489,20 @@ export type CanvasResourceInputDTO =
   | CanvasResourceInputKeep
   | CanvasResourceInputText
   | CanvasResourceInputBlob
+
+/** Java：fun.fengwk.kkstudio.canvas.function.CanvasResourceKind */
+export type CanvasResourceKind =
+  | 'IMAGE'
+  | 'VIDEO'
+  | 'AUDIO'
+  | 'TEXT'
+
+export const CANVAS_RESOURCE_KIND_VALUES: readonly CanvasResourceKind[] = [
+  'IMAGE',
+  'VIDEO',
+  'AUDIO',
+  'TEXT',
+]
 
 /** Java：fun.fengwk.kkstudio.canvas.dto.CanvasResourceNodeDTO */
 export interface CanvasResourceNodeDTO {
@@ -573,7 +661,7 @@ export interface ConfigSyncSkipped {
 
 /** Java：fun.fengwk.kkstudio.canvas.dto.CreateCanvasRequestDTO */
 export interface CreateCanvasRequestDTO {
-  title?: string | null
+  title: string
 }
 
 /** Java：fun.fengwk.kkstudio.project.dto.CreateIssueRequestDTO */
@@ -3042,19 +3130,19 @@ export interface ApiRoutes {
     query: { expectedVersion: number }
     response: void
   }
-  'GET /api/canvas-functions': {
-    response: CanvasFunctionDefinitionDTO[]
-  }
-  'GET /api/canvases': {
+  'GET /api/canvas/canvases': {
     response: CanvasDocumentDTO[]
   }
-  'GET /api/canvases/{canvasId}': {
+  'GET /api/canvas/canvases/{canvasId}': {
     path: { canvasId: string }
     response: CanvasSnapshotDTO
   }
-  'GET /api/canvases/{canvasId}/nodes/{nodeId}/function-run': {
+  'GET /api/canvas/canvases/{canvasId}/nodes/{nodeId}/function-run': {
     path: { canvasId: string; nodeId: string }
     response: CanvasFunctionRunDTO
+  }
+  'GET /api/canvas/functions': {
+    response: CanvasFunctionDefinitionDTO[]
   }
   'GET /api/chat/chats': {
     query: { cursor?: string; limit?: number }
@@ -3229,35 +3317,35 @@ export interface ApiRoutes {
     path: { projectId: string }
     response: ProjectSnapshotDTO
   }
-  'POST /api/canvases': {
-    body?: CreateCanvasRequestDTO
+  'POST /api/canvas/canvases': {
+    body: CreateCanvasRequestDTO
     response: CanvasDocumentDTO
   }
-  'POST /api/canvases/{canvasId}/commands': {
+  'POST /api/canvas/canvases/{canvasId}/commands': {
     path: { canvasId: string }
-    body?: ApplyCanvasCommandsRequestDTO
+    body: ApplyCanvasCommandsRequestDTO
     response: CanvasPatchDTO
   }
-  'POST /api/canvases/{canvasId}/nodes/{nodeId}/function-run': {
+  'POST /api/canvas/canvases/{canvasId}/nodes/{nodeId}/function-run': {
     path: { canvasId: string; nodeId: string }
     body: CanvasFunctionRunRequestDTO
     response: CanvasFunctionRunDTO
   }
-  'POST /api/canvases/{canvasId}/nodes/{nodeId}/function-run/cancel': {
+  'POST /api/canvas/canvases/{canvasId}/nodes/{nodeId}/function-run/cancel': {
     path: { canvasId: string; nodeId: string }
     body: CanvasFunctionCancelRequestDTO
     response: CanvasFunctionRunDTO
   }
-  'POST /api/canvases/{canvasId}/nodes/{nodeId}/function-run/resolve': {
+  'POST /api/canvas/canvases/{canvasId}/nodes/{nodeId}/function-run/resolve': {
     path: { canvasId: string; nodeId: string }
     body: CanvasFunctionUnknownResolutionDTO
     response: CanvasFunctionRunDTO
   }
-  'POST /api/canvases/{canvasId}/resources/{resourceId}/download-url': {
+  'POST /api/canvas/canvases/{canvasId}/resources/{resourceId}/download-url': {
     path: { canvasId: string; resourceId: string }
     response: CanvasPresignedUrlDTO
   }
-  'POST /api/canvases/{canvasId}/resources/{resourceId}/preview-url': {
+  'POST /api/canvas/canvases/{canvasId}/resources/{resourceId}/preview-url': {
     path: { canvasId: string; resourceId: string }
     response: CanvasPresignedUrlDTO
   }

@@ -66,8 +66,8 @@ function documentPayload() {
     id: CANVAS_ID,
     title: 'Canvas',
     revision: '3',
-    createdAt: '2026-01-01T00:00:00Z',
-    updatedAt: '2026-01-02T00:00:00Z',
+    createdAt: 1767196800000,
+    updatedAt: 1767283200000,
   }
 }
 
@@ -115,10 +115,10 @@ describe('canvas api transport adapter', () => {
         ]),
       )
       .mockResolvedValueOnce(
-        jsonResponse({ method: 'GET', url: 'https://download', headers: {}, expiresAt: 'later' }),
+        jsonResponse({ method: 'GET', url: 'https://download', headers: {}, expiresAt: 1786320000000 }),
       )
       .mockResolvedValueOnce(
-        jsonResponse({ method: 'GET', url: 'https://preview', headers: {}, expiresAt: 'later' }),
+        jsonResponse({ method: 'GET', url: 'https://preview', headers: {}, expiresAt: 1786320000000 }),
       )
       .mockResolvedValueOnce(
         jsonResponse(
@@ -128,7 +128,7 @@ describe('canvas api transport adapter', () => {
             status: 'RUNNING',
             stage: 'start',
             error: null,
-            updatedAt: 'now',
+            updatedAt: 1786291200000,
           },
           202,
         ),
@@ -140,7 +140,7 @@ describe('canvas api transport adapter', () => {
           status: 'SUCCEEDED',
           stage: 'done',
           error: null,
-          updatedAt: 'now',
+          updatedAt: 1786291200000,
         }),
       )
       .mockResolvedValueOnce(
@@ -150,7 +150,7 @@ describe('canvas api transport adapter', () => {
           status: 'CANCELLED',
           stage: 'cancelled',
           error: 'stop',
-          updatedAt: 'now',
+          updatedAt: 1786291200000,
         }),
       )
       .mockResolvedValueOnce(
@@ -160,12 +160,12 @@ describe('canvas api transport adapter', () => {
           status: 'SUCCEEDED',
           stage: 'done',
           error: null,
-          updatedAt: 'now',
+          updatedAt: 1786291200000,
         }),
       )
 
     expect(await listCanvases()).toHaveLength(1)
-    expect((await createCanvas()).title).toBe('Canvas')
+    expect((await createCanvas('Canvas')).title).toBe('Canvas')
     expect((await createCanvas('Named')).title).toBe('Canvas')
     expect((await getCanvas(CANVAS_ID)).document.id).toBe(CANVAS_ID)
     expect(
@@ -272,35 +272,35 @@ describe('canvas api transport adapter', () => {
     })
 
     expect(calls[0]).toMatchObject({
-      url: '/api/canvases',
+      url: '/api/canvas/canvases',
       method: 'POST',
       body: JSON.stringify({ title: 'Named' }),
     })
     expect(calls[1]).toMatchObject({
-      url: `/api/canvases/${CANVAS_ID}`,
+      url: `/api/canvas/canvases/${CANVAS_ID}`,
       method: 'GET',
     })
     expect(calls[2]).toMatchObject({
-      url: `/api/canvases/${CANVAS_ID}/commands`,
+      url: `/api/canvas/canvases/${CANVAS_ID}/commands`,
       method: 'POST',
       body: JSON.stringify({ idempotencyKey: ID, commands: [] }),
     })
     expect(calls[3]).toMatchObject({
-      url: `/api/canvases/${CANVAS_ID}/nodes/${NODE_ID}/function-run`,
+      url: `/api/canvas/canvases/${CANVAS_ID}/nodes/${NODE_ID}/function-run`,
       method: 'POST',
       body: JSON.stringify({ requestId: REQUEST_ID, expectedVersion: FUNCTION_VERSION }),
     })
     expect(calls[4]).toMatchObject({
-      url: `/api/canvases/${CANVAS_ID}/nodes/${NODE_ID}/function-run`,
+      url: `/api/canvas/canvases/${CANVAS_ID}/nodes/${NODE_ID}/function-run`,
       method: 'GET',
     })
     expect(calls[5]).toMatchObject({
-      url: `/api/canvases/${CANVAS_ID}/nodes/${NODE_ID}/function-run/cancel`,
+      url: `/api/canvas/canvases/${CANVAS_ID}/nodes/${NODE_ID}/function-run/cancel`,
       method: 'POST',
       body: JSON.stringify({ requestId: REQUEST_ID }),
     })
     expect(calls[6]).toMatchObject({
-      url: `/api/canvases/${CANVAS_ID}/nodes/${NODE_ID}/function-run/resolve`,
+      url: `/api/canvas/canvases/${CANVAS_ID}/nodes/${NODE_ID}/function-run/resolve`,
       method: 'POST',
       body: JSON.stringify({ requestId: REQUEST_ID, resolution: 'RESUME', verification: 'manual-check' }),
     })
@@ -317,7 +317,7 @@ describe('canvas api transport adapter', () => {
   it('encodes path variables segment-wise', async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(snapshotPayload()))
     fetchMock.mockResolvedValueOnce(
-      jsonResponse({ method: 'GET', url: 'https://download', headers: {}, expiresAt: 'later' }),
+      jsonResponse({ method: 'GET', url: 'https://download', headers: {}, expiresAt: 1786320000000 }),
     )
 
     const rawCanvasId = 'canvas/id with spaces&symbols'
@@ -334,9 +334,9 @@ describe('canvas api transport adapter', () => {
           : String(rawUrl),
     )
 
-    expect(calls[0]).toBe(`/api/canvases/${encodeURIComponent(rawCanvasId)}`)
+    expect(calls[0]).toBe(`/api/canvas/canvases/${encodeURIComponent(rawCanvasId)}`)
     expect(calls[1]).toBe(
-      `/api/canvases/${encodeURIComponent(rawCanvasId)}/resources/${encodeURIComponent(rawResourceId)}/download-url`,
+      `/api/canvas/canvases/${encodeURIComponent(rawCanvasId)}/resources/${encodeURIComponent(rawResourceId)}/download-url`,
     )
   })
 

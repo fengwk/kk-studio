@@ -17,13 +17,13 @@ const PNG_BYTES = Uint8Array.from(
 )
 
 const RESOURCE_FIELDS = [
+  'type',
   'id',
   'canvasId',
   'ownerNodeId',
   'resourceIndex',
   'blobId',
   'name',
-  'textContent',
   'kind',
   'mediaType',
   'sizeBytes',
@@ -91,7 +91,7 @@ registerCase({
   docs:
     '需 backend 启用 S3；验证无公开 /api/s3/** 接口，全局 upload reserve->PUT->complete 后可通过 /api/platform/storage/blobs/{blobId}/download-url|preview-url 获取预签名 URL（原件 URL 另带权威 mediaType/sizeBytes），typed command CREATE_NODE 的 BLOB 资源槽位引用 READY blob、KEEP 复用同一 Resource 且不推进 revision，Resource download/preview-url 只暴露 method/url/headers/expiresAt，TEXT 资源与未知资源明确拒绝',
   async run(ctx) {
-    const created = await ctx.call('POST', '/api/canvases', {
+    const created = await ctx.call('POST', '/api/canvas/canvases', {
       title: `e2e-resource-storage-${cid().slice(0, 8)}`,
     })
     assert(created.status === 201, `create canvas status ${created.status}`)
@@ -120,7 +120,7 @@ registerCase({
     const nodeId = cid()
     const { json: commandJson } = await ctx.call(
       'POST',
-      `/api/canvases/${canvas.id}/commands`,
+      `/api/canvas/canvases/${canvas.id}/commands`,
       {
         idempotencyKey: cid(),
         commands: [
@@ -145,9 +145,9 @@ registerCase({
     )
     assert(
       resource.blobId === upload.blobId
+        && resource.type === 'BLOB'
         && resource.kind === 'IMAGE'
         && resource.mediaType === 'image/png'
-        && resource.textContent === null
         && resource.name === 'tiny.png'
         && resource.ownerNodeId === nodeId
         && resource.canvasId === canvas.id
@@ -159,7 +159,7 @@ registerCase({
     assert(resource.sizeBytes === String(PNG_BYTES.length), JSON.stringify(resource))
 
     // KEEP 复用同一 Resource 槽位且内容不变：批不推进 revision。
-    const { json: keepJson } = await ctx.call('POST', `/api/canvases/${canvas.id}/commands`, {
+    const { json: keepJson } = await ctx.call('POST', `/api/canvas/canvases/${canvas.id}/commands`, {
       idempotencyKey: cid(),
       commands: [
         {
@@ -178,7 +178,7 @@ registerCase({
 
     // Resource 直读预签名：只暴露 method/url/headers/expiresAt，字节与上传一致。
     const download = assertPresigned(
-      (await ctx.call('POST', `/api/canvases/${canvas.id}/resources/${resource.id}/download-url`)).json,
+      (await ctx.call('POST', `/api/canvas/canvases/${canvas.id}/resources/${resource.id}/download-url`)).json,
       'resource download url',
     )
     const downloadResponse = await fetch(download.url, { headers: download.headers || {} })
@@ -190,13 +190,13 @@ registerCase({
       'downloaded bytes differ from uploaded bytes',
     )
     assertPresigned(
-      (await ctx.call('POST', `/api/canvases/${canvas.id}/resources/${resource.id}/preview-url`)).json,
+      (await ctx.call('POST', `/api/canvas/canvases/${canvas.id}/resources/${resource.id}/preview-url`)).json,
       'resource preview url',
     )
 
     // TEXT 资源没有 blob 内容；未知 resource/canvas 与非法 UUID 明确拒绝。
     const textNodeId = cid()
-    const { json: textJson } = await ctx.call('POST', `/api/canvases/${canvas.id}/commands`, {
+    const { json: textJson } = await ctx.call('POST', `/api/canvas/canvases/${canvas.id}/commands`, {
       idempotencyKey: cid(),
       commands: [
         {
@@ -212,15 +212,15 @@ registerCase({
     assert(textPatch.revision === '2', JSON.stringify(textPatch))
     const textResourceId = textPatch.nodes.find((item) => item.node?.id === textNodeId).node.resources[0].id
     await expectHttpError(
-      () => ctx.call('POST', `/api/canvases/${canvas.id}/resources/${textResourceId}/download-url`),
+      () => ctx.call('POST', `/api/canvas/canvases/${canvas.id}/resources/${textResourceId}/download-url`),
       { status: 400 },
     )
     await expectHttpError(
-      () => ctx.call('POST', `/api/canvases/${canvas.id}/resources/${cid()}/download-url`),
+      () => ctx.call('POST', `/api/canvas/canvases/${canvas.id}/resources/${cid()}/download-url`),
       { status: 404 },
     )
     await expectHttpError(
-      () => ctx.call('POST', `/api/canvases/${cid()}/resources/${resource.id}/download-url`),
+      () => ctx.call('POST', `/api/canvas/canvases/${cid()}/resources/${resource.id}/download-url`),
       { status: 404 },
     )
 

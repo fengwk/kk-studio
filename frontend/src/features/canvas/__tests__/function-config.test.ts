@@ -133,8 +133,8 @@ describe('useFunctionConfigSync', () => {
         id: '11111111-1111-4000-8000-000000000001',
         title: 'test',
         revision: '1',
-        createdAt: '2026-08-10T00:00:00Z',
-        updatedAt: '2026-08-10T00:00:00Z',
+        createdAt: 1786291200000,
+        updatedAt: 1786291200000,
       },
       nodes: [
         {

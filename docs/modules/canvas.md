@@ -206,14 +206,18 @@ heartbeat 按固定间隔续租，不触碰业务事实；续租失败即停止�
 [`CanvasHttpAutoConfiguration`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/http/CanvasHttpAutoConfiguration.java)
 自动配置扫描并注册到宿主 MVC，因此宿主不需要知道具体控制器类型：
 
-- [`CanvasController`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/http/CanvasController.java)：`/api/canvases` 的列表、快照与 typed command 批；接受时返回 patch，语义组前置条件过期返回 409 与受影响对象及服务端权威值。
-- [`CanvasFunctionController`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/http/CanvasFunctionController.java)：`/api/canvas-functions` 目录与 `/api/canvases/{canvasId}/nodes/{nodeId}/function-run` 的启动、查询、取消与 UNKNOWN 决议。
+- [`CanvasController`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/http/CanvasController.java)：`/api/canvas/canvases` 的列表、快照与 typed command 批；接受时返回 patch，语义组前置条件过期返回 409 与受影响对象及服务端权威值。
+- [`CanvasFunctionController`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/http/CanvasFunctionController.java)：`/api/canvas/functions` 目录与 `/api/canvas/canvases/{canvasId}/nodes/{nodeId}/function-run` 的启动、查询、取消与 UNKNOWN 决议。
 - [`CanvasResourceController`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/http/CanvasResourceController.java)：资源下载与预览 URL 直读，从不返回 bucket 或对象 key。
 
-三个控制器使用共享响应类型
-[`ApiResponse`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/http/ApiResponse.java)，边界错误以
-`ResponseStatusException` 或领域异常表达；宿主将成功响应转换为资源本身（见
-[Web 的 JSON 与错误边界](web.md#json错误与信任边界)）。控制器只做 HTTP 适配，不承载领域规则。
+控制器只声明路由与类型，直接返回资源：创建画布 201，启动 Function run 202，其余 200；路径与查询参数使用 `UUID`，
+请求体的必填、未知字段、标量强转与 canonical UUID 由宿主的严格 HTTP mapper 统一校验，控制器与映射器只保留领域规则并抛
+`DomainException`（见 [Web 的 JSON 与错误边界](web.md#json错误与信任边界)）。
+
+读模型的固定取值是 wire 枚举：资源与 Function 输出的 `kind`（`IMAGE` / `VIDEO` / `AUDIO` / `TEXT`）、Function run 的
+`status`、UNKNOWN 决议与画布冲突的 `target` / `group`。时间字段是 epoch 毫秒的 `Instant`（`createdAt`、`updatedAt`、
+预签名 `expiresAt`）；`revision` 与 Long 仍是规范十进制字符串。资源按内容形态是 sealed 联合：`TEXT` 只带 `textContent`，
+`BLOB` 只带 `blobId` 与服务端媒体事实。
 
 ## 部署参数
 

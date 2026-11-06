@@ -1,7 +1,8 @@
 package fun.fengwk.kkstudio.canvas.dto;
 
-import com.fasterxml.jackson.annotation.JsonAnySetter;
 import lombok.Data;
+
+import fun.fengwk.kkstudio.canvas.CanvasFunctionUnknownResolution;
 
 /**
  * 人工核查 UNKNOWN Function Run 的严格请求体。
@@ -13,11 +14,6 @@ import lombok.Data;
 public class CanvasFunctionUnknownResolutionDTO {
 
   private String requestId;
-  private String resolution;
+  private CanvasFunctionUnknownResolution resolution;
   private String verification;
-
-  @JsonAnySetter
-  public void rejectUnknownField(String field, Object value) {
-    throw new IllegalArgumentException("unknown field: " + field);
-  }
 }

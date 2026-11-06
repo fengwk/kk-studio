@@ -40,7 +40,7 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalog;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionDefinition;
 import fun.fengwk.kkstudio.canvas.function.CanvasJson;
 import fun.fengwk.kkstudio.canvas.function.CanvasResourceKind;
-import fun.fengwk.kkstudio.common.id.Uuids;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.storage.dto.StoragePresignedUrlDTO;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
@@ -78,8 +78,8 @@ public class CanvasDtoMapper {
     dto.setId(document.id().toString());
     dto.setTitle(document.title());
     dto.setRevision(Long.toString(document.revision()));
-    dto.setCreatedAt(document.createdAt().toString());
-    dto.setUpdatedAt(document.updatedAt().toString());
+    dto.setCreatedAt(document.createdAt());
+    dto.setUpdatedAt(document.updatedAt());
     return dto;
   }
 
@@ -118,27 +118,32 @@ public class CanvasDtoMapper {
 
   public CanvasResourceDTO toDto(CanvasResource resource) {
     Objects.requireNonNull(resource, "resource");
-    CanvasResourceDTO dto = new CanvasResourceDTO();
-    dto.setId(resource.id().toString());
-    dto.setCanvasId(resource.canvasId().toString());
-    dto.setOwnerNodeId(resource.ownerNodeId().toString());
-    dto.setResourceIndex(resource.resourceIndex());
-    dto.setBlobId(resource.blobId() == null ? null : resource.blobId().toString());
-    dto.setName(resource.name());
-    dto.setTextContent(resource.textContent());
-    dto.setCreatedAt(resource.createdAt().toString());
     if (resource.isText()) {
-      dto.setKind(CanvasResourceKind.TEXT.name());
-      return dto;
+      return new CanvasResourceDTO.Text(
+          resource.id().toString(),
+          resource.canvasId().toString(),
+          resource.ownerNodeId().toString(),
+          resource.resourceIndex(),
+          resource.name(),
+          resource.textContent(),
+          CanvasResourceKind.TEXT,
+          resource.createdAt());
     }
     StorageBlob blob = blob(resource.blobId());
-    dto.setKind(CanvasResourceKind.fromMediaType(blob.getMediaType()).name());
-    dto.setMediaType(blob.getMediaType());
-    dto.setSizeBytes(blob.getSizeBytes());
-    dto.setWidth(blob.getWidth() == null ? null : blob.getWidth().intValue());
-    dto.setHeight(blob.getHeight() == null ? null : blob.getHeight().intValue());
-    dto.setDurationMs(blob.getDurationMs());
-    return dto;
+    return new CanvasResourceDTO.Blob(
+        resource.id().toString(),
+        resource.canvasId().toString(),
+        resource.ownerNodeId().toString(),
+        resource.resourceIndex(),
+        resource.blobId().toString(),
+        resource.name(),
+        CanvasResourceKind.fromMediaType(blob.getMediaType()),
+        blob.getMediaType(),
+        blob.getSizeBytes(),
+        blob.getWidth() == null ? null : blob.getWidth().intValue(),
+        blob.getHeight() == null ? null : blob.getHeight().intValue(),
+        blob.getDurationMs(),
+        resource.createdAt());
   }
 
   public CanvasFunctionRunDTO toDto(CanvasFunctionRun run) {
@@ -148,10 +153,10 @@ public class CanvasDtoMapper {
     CanvasFunctionRunDTO dto = new CanvasFunctionRunDTO();
     dto.setNodeId(run.nodeId().toString());
     dto.setRequestId(run.requestId().toString());
-    dto.setStatus(run.status().name());
+    dto.setStatus(run.status());
     dto.setStage(run.stage());
     dto.setError(run.error());
-    dto.setUpdatedAt(run.updatedAt().toString());
+    dto.setUpdatedAt(run.updatedAt());
     return dto;
   }
 
@@ -173,14 +178,14 @@ public class CanvasDtoMapper {
             .map(
                 output -> {
                   CanvasFunctionOutputDTO outputDto = new CanvasFunctionOutputDTO();
-                  outputDto.setKind(output.kind().name());
+                  outputDto.setKind(output.kind());
                   outputDto.setName(output.name());
                   return outputDto;
                 })
             .toList());
     CanvasFunctionReferencePolicyDTO referencePolicy = new CanvasFunctionReferencePolicyDTO();
     referencePolicy.setAllowedKinds(
-        definition.referencePolicy().allowedKinds().stream().map(Enum::name).sorted().toList());
+        definition.referencePolicy().allowedKinds().stream().sorted().toList());
     referencePolicy.setMaxReferences(definition.referencePolicy().maxReferences());
     LinkedHashMap<String, Integer> maxByKind = new LinkedHashMap<>();
     definition.referencePolicy().maxByKind().entrySet().stream()
@@ -205,13 +210,13 @@ public class CanvasDtoMapper {
   public static CanvasFunctionVersion parseVersion(CanvasFunctionVersionDTO dto, String field) {
     Objects.requireNonNull(field, "field");
     if (dto == null) {
-      throw new IllegalArgumentException(field + " is required");
+      throw DomainException.validation(field, field + " is required");
     }
     try {
       return new CanvasFunctionVersion(dto.getDefinitionFingerprint());
     } catch (IllegalArgumentException error) {
-      throw new IllegalArgumentException(
-          field + ".definitionFingerprint must be a lowercase SHA-256 hex string", error);
+      throw DomainException.validation(
+          field, field + ".definitionFingerprint must be a lowercase SHA-256 hex string", error);
     }
   }
 
@@ -221,18 +226,18 @@ public class CanvasDtoMapper {
     dto.setMethod(signed.getMethod().name());
     dto.setUrl(signed.getUrl());
     dto.setHeaders(signed.getHeaders());
-    dto.setExpiresAt(signed.getExpiresAt().toString());
+    dto.setExpiresAt(signed.getExpiresAt());
     return dto;
   }
 
   public List<CanvasCommand> toCommands(List<CanvasCommandDTO> commands) {
     if (commands == null || commands.isEmpty()) {
-      throw new IllegalArgumentException("commands must contain at least one command");
+      throw DomainException.validation("commands", "commands must contain at least one command");
     }
     List<CanvasCommand> mapped = new ArrayList<>(commands.size());
     for (CanvasCommandDTO command : commands) {
       if (command == null) {
-        throw new IllegalArgumentException("commands must not contain null");
+        throw DomainException.validation("commands", "commands must not contain null");
       }
       mapped.add(toCommand(command));
     }
@@ -242,56 +247,45 @@ public class CanvasDtoMapper {
   private CanvasCommand toCommand(CanvasCommandDTO command) {
     return switch (command) {
       case CanvasCommandDTO.CreateNode value -> new CanvasCommand.CreateNode(
-          Uuids.parseCanonical(value.nodeId(), "nodeId"),
+          value.nodeId(),
           value.name(),
           toTransform(value.transform()),
           toResourceInputs(value.resources()));
       case CanvasCommandDTO.RenameNode value -> new CanvasCommand.RenameNode(
-          Uuids.parseCanonical(value.nodeId(), "nodeId"), value.expectedName(), value.name());
+          value.nodeId(), value.expectedName(), value.name());
       case CanvasCommandDTO.SetNodeResources value -> new CanvasCommand.SetNodeResources(
-          Uuids.parseCanonical(value.nodeId(), "nodeId"),
-          parseUuids(value.expectedResourceIds(), "expectedResourceIds"),
-          toResourceInputs(value.resources()));
+          value.nodeId(), value.expectedResourceIds(), toResourceInputs(value.resources()));
       case CanvasCommandDTO.SetNodeFunction value -> new CanvasCommand.SetNodeFunction(
-          Uuids.parseCanonical(value.nodeId(), "nodeId"),
-          toFunction(value.expectedFunction()),
-          toFunction(value.function()));
+          value.nodeId(), toFunction(value.expectedFunction()), toFunction(value.function()));
       case CanvasCommandDTO.SetNodeGroup value -> new CanvasCommand.SetNodeGroup(
-          Uuids.parseCanonical(value.nodeId(), "nodeId"),
-          toNullableUuid(value.expectedGroupId(), "expectedGroupId"),
-          toNullableUuid(value.groupId(), "groupId"));
+          value.nodeId(), value.expectedGroupId(), value.groupId());
       case CanvasCommandDTO.DeleteNode value -> new CanvasCommand.DeleteNode(
-          Uuids.parseCanonical(value.nodeId(), "nodeId"),
-          parseUuids(value.expectedResourceIds(), "expectedResourceIds"),
-          toFunction(value.expectedFunction()));
+          value.nodeId(), value.expectedResourceIds(), toFunction(value.expectedFunction()));
       case CanvasCommandDTO.UpdateNodeTransform value -> new CanvasCommand.UpdateNodeTransform(
-          Uuids.parseCanonical(value.nodeId(), "nodeId"),
+          value.nodeId(),
           toTransform(value.transform()),
           toNullableTransform(value.expectedTransform()));
       case CanvasCommandDTO.CreateGroup value -> new CanvasCommand.CreateGroup(
-          Uuids.parseCanonical(value.groupId(), "groupId"),
-          value.title(),
-          toTransform(value.transform()));
+          value.groupId(), value.title(), toTransform(value.transform()));
       case CanvasCommandDTO.RenameGroup value -> new CanvasCommand.RenameGroup(
-          Uuids.parseCanonical(value.groupId(), "groupId"), value.expectedTitle(), value.title());
+          value.groupId(), value.expectedTitle(), value.title());
       case CanvasCommandDTO.UpdateGroupTransform value -> new CanvasCommand.UpdateGroupTransform(
-          Uuids.parseCanonical(value.groupId(), "groupId"),
+          value.groupId(),
           toTransform(value.transform()),
           toNullableTransform(value.expectedTransform()));
       case CanvasCommandDTO.DeleteGroup value -> new CanvasCommand.DeleteGroup(
-          Uuids.parseCanonical(value.groupId(), "groupId"),
-          parseUuids(value.expectedMemberNodeIds(), "expectedMemberNodeIds"));
+          value.groupId(), value.expectedMemberNodeIds());
     };
   }
 
   private CanvasConflictDTO toDto(CanvasConflict conflict) {
     return switch (conflict) {
       case CanvasConflict.TargetMissing missing -> new CanvasConflictDTO.TargetMissing(
-          missing.targetId().toString(), missing.target().name());
+          missing.targetId().toString(), missing.target());
       case CanvasConflict.TargetPresent present -> new CanvasConflictDTO.TargetPresent(
-          present.targetId().toString(), present.target().name());
+          present.targetId().toString(), present.target());
       case CanvasConflict.StaleNode stale -> new CanvasConflictDTO.StaleNode(
-          stale.nodeId().toString(), stale.group().name(), toDto(stale.current()));
+          stale.nodeId().toString(), stale.group(), toDto(stale.current()));
       case CanvasConflict.StaleGroup stale -> new CanvasConflictDTO.StaleGroup(
           stale.groupId().toString(), toDto(stale.current()));
       case CanvasConflict.NodeRunning running -> new CanvasConflictDTO.NodeRunning(
@@ -350,27 +344,26 @@ public class CanvasDtoMapper {
 
   private static CanvasResourceInput toResourceInput(CanvasResourceInputDTO input) {
     return switch (input) {
-      case CanvasResourceInputDTO.Keep keep -> new CanvasResourceInput.Keep(
-          Uuids.parseCanonical(keep.resourceId(), "resourceId"));
+      case CanvasResourceInputDTO.Keep keep -> new CanvasResourceInput.Keep(keep.resourceId());
       case CanvasResourceInputDTO.Text text -> {
         if (text.textContent() == null) {
-          throw new IllegalArgumentException("textContent must not be null");
+          throw DomainException.validation("textContent", "textContent must not be null");
         }
         yield new CanvasResourceInput.Text(text.name(), text.textContent());
       }
       case CanvasResourceInputDTO.Blob blob -> new CanvasResourceInput.Blob(
-          blob.name(), Uuids.parseCanonical(blob.blobId(), "blobId"));
+          blob.name(), blob.blobId());
     };
   }
 
   private static List<CanvasResourceInput> toResourceInputs(List<CanvasResourceInputDTO> inputs) {
     if (inputs == null) {
-      throw new IllegalArgumentException("resources is required");
+      throw DomainException.validation("resources", "resources is required");
     }
     List<CanvasResourceInput> mapped = new ArrayList<>(inputs.size());
     for (CanvasResourceInputDTO input : inputs) {
       if (input == null) {
-        throw new IllegalArgumentException("resources must not contain null");
+        throw DomainException.validation("resources", "resources must not contain null");
       }
       mapped.add(toResourceInput(input));
     }
@@ -382,14 +375,14 @@ public class CanvasDtoMapper {
       return null;
     }
     if (function.name() == null) {
-      throw new IllegalArgumentException("function name is required");
+      throw DomainException.validation("function.name", "function name is required");
     }
     return new CanvasFunction(function.name(), toJsonObject(function.args()));
   }
 
   private static CanvasTransform toTransform(CanvasTransformDTO transform) {
     if (transform == null) {
-      throw new IllegalArgumentException("transform is required");
+      throw DomainException.validation("transform", "transform is required");
     }
     return new CanvasTransform(transform.x(), transform.y(), transform.width(), transform.height());
   }
@@ -398,28 +391,23 @@ public class CanvasDtoMapper {
     return transform == null ? null : toTransform(transform);
   }
 
-  private static UUID toNullableUuid(String value, String field) {
-    return value == null ? null : Uuids.parseCanonical(value, field);
-  }
-
-  private static List<UUID> parseUuids(List<String> ids, String field) {
-    if (ids == null) {
-      throw new IllegalArgumentException(field + " is required");
-    }
-    return ids.stream().map(id -> Uuids.parseCanonical(id, field)).toList();
-  }
-
   /** wire 的任意 JSON object 转成 Core 的严格 args 值模型，并复用 Core 的深度与长度上限。 */
   private static CanvasJson.JsonObject toJsonObject(Map<String, Object> args) {
     if (args == null) {
-      throw new IllegalArgumentException("function args is required");
+      throw DomainException.validation("function.args", "function args is required");
     }
     if (!(toJson(args, "function args", 0) instanceof CanvasJson.JsonObject object)) {
-      throw new IllegalArgumentException("function args must be a JSON object");
+      throw DomainException.validation("function.args", "function args must be a JSON object");
     }
-    String text = object.write();
+    String text;
+    try {
+      text = object.write();
+    } catch (IllegalArgumentException error) {
+      throw DomainException.validation("function.args", error.getMessage(), error);
+    }
     if (text.length() > CanvasJson.MAX_LENGTH) {
-      throw new IllegalArgumentException(
+      throw DomainException.validation(
+          "function.args",
           "function args must not exceed " + CanvasJson.MAX_LENGTH + " JSON characters");
     }
     return object;
@@ -427,8 +415,8 @@ public class CanvasDtoMapper {
 
   private static CanvasJson toJson(Object value, String field, int depth) {
     if (depth > CanvasJson.MAX_DEPTH) {
-      throw new IllegalArgumentException(
-          field + " must not nest deeper than " + CanvasJson.MAX_DEPTH);
+      throw DomainException.validation(
+          field, field + " must not nest deeper than " + CanvasJson.MAX_DEPTH);
     }
     if (value == null) {
       return new CanvasJson.JsonNull();
@@ -443,7 +431,7 @@ public class CanvasDtoMapper {
       LinkedHashMap<String, CanvasJson> values = new LinkedHashMap<>();
       for (Map.Entry<?, ?> entry : map.entrySet()) {
         if (!(entry.getKey() instanceof String key)) {
-          throw new IllegalArgumentException(field + " must use string object keys");
+          throw DomainException.validation(field, field + " must use string object keys");
         }
         values.put(key, toJson(entry.getValue(), field, depth + 1));
       }
@@ -469,12 +457,12 @@ public class CanvasDtoMapper {
     if (value instanceof Double || value instanceof Float) {
       double number = ((Number) value).doubleValue();
       if (!Double.isFinite(number)) {
-        throw new IllegalArgumentException(field + " numbers must be finite");
+        throw DomainException.validation(field, field + " numbers must be finite");
       }
       return new CanvasJson.JsonNumber(BigDecimal.valueOf(number));
     }
-    throw new IllegalArgumentException(
-        field + " must contain only JSON values, found " + value.getClass().getName());
+    throw DomainException.validation(
+        field, field + " must contain only JSON values, found " + value.getClass().getName());
   }
 
   /** Core 的严格 args 值模型转回 wire 的普通 JSON 树，数值保持十进制文本形态。 */

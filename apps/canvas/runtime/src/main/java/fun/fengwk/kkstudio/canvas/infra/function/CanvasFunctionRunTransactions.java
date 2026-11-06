@@ -10,7 +10,6 @@ import fun.fengwk.kkstudio.canvas.CanvasDocument;
 import fun.fengwk.kkstudio.canvas.CanvasFunction;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionResourcePin;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRun;
-import fun.fengwk.kkstudio.canvas.CanvasFunctionRunException;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRunStatus;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionUnknownResolution;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionVersion;
@@ -36,6 +35,7 @@ import fun.fengwk.kkstudio.canvas.infra.postgresql.PostgresqlCanvasFunctionResou
 import fun.fengwk.kkstudio.canvas.infra.postgresql.PostgresqlCanvasFunctionRunRepository;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.PostgresqlCanvasResourceRepository;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.PostgresqlCanvasStore;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.id.Uuids;
 
 import java.time.Clock;
@@ -126,7 +126,7 @@ public class CanvasFunctionRunTransactions {
             .lockNode(canvasId, nodeId)
             .orElseThrow(() -> notFound("Canvas Function node not found"));
     if (node.function() == null) {
-      throw new IllegalArgumentException("node must be a Canvas Function");
+      throw DomainException.validation("nodeId", "node must be a Canvas Function");
     }
     CanvasFunctionRun existing = runRepository.findByNodeIdForUpdate(nodeId).orElse(null);
     // 精确 requestId 重放优先于版本校验：即使 expectedVersion 已过时也返回已接受结果，不再取租用、pin 或提交。
@@ -534,20 +534,24 @@ public class CanvasFunctionRunTransactions {
     List<CanvasFunctionFrozenReference> manifest = new ArrayList<>();
     for (CanvasResourceReference reference : new CanvasFunction(functionName, args).references()) {
       if (canvasStore.findNode(canvasId, reference.nodeId()).isEmpty()) {
-        throw new IllegalArgumentException("referenced source node must belong to the same canvas");
+        throw DomainException.validation(
+            "function.args", "referenced source node must belong to the same canvas");
       }
       List<CanvasResource> resources =
           resourceRepository.findByOwnerNode(canvasId, reference.nodeId());
       if (reference.index() >= resources.size()) {
-        throw new IllegalArgumentException("reference index is outside source node resources");
+        throw DomainException.validation(
+            "function.args", "reference index is outside source node resources");
       }
       CanvasResource resource = resources.get(reference.index());
       if (resource.blobId() == null) {
-        throw new IllegalArgumentException("referenced resource must be a Storage blob");
+        throw DomainException.validation(
+            "function.args", "referenced resource must be a Storage blob");
       }
       BlobFacts blob = blobAccess.findFacts(resource.blobId()).orElse(null);
       if (blob == null) {
-        throw new IllegalArgumentException("referenced blob is missing: " + resource.blobId());
+        throw DomainException.validation(
+            "function.args", "referenced blob is missing: " + resource.blobId());
       }
       manifest.add(
           new CanvasFunctionFrozenReference(
@@ -570,19 +574,19 @@ public class CanvasFunctionRunTransactions {
   private static void validateReferencePolicy(
       List<CanvasFunctionFrozenReference> manifest, CanvasFunctionReferencePolicy policy) {
     if (manifest.size() > policy.maxReferences()) {
-      throw new IllegalArgumentException(
-          "reference manifest exceeds maxReferences=" + policy.maxReferences());
+      throw DomainException.validation(
+          "function.args", "reference manifest exceeds maxReferences=" + policy.maxReferences());
     }
     Map<CanvasResourceKind, Integer> counts = new EnumMap<>(CanvasResourceKind.class);
     for (CanvasFunctionFrozenReference reference : manifest) {
       if (!policy.allowedKinds().contains(reference.kind())) {
-        throw new IllegalArgumentException(
-            "reference kind is not allowed by function: " + reference.kind());
+        throw DomainException.validation(
+            "function.args", "reference kind is not allowed by function: " + reference.kind());
       }
       int count = counts.merge(reference.kind(), 1, Integer::sum);
       if (count > policy.maxFor(reference.kind())) {
-        throw new IllegalArgumentException(
-            "reference kind exceeds function limit: " + reference.kind());
+        throw DomainException.validation(
+            "function.args", "reference kind exceeds function limit: " + reference.kind());
       }
     }
   }
@@ -701,11 +705,11 @@ public class CanvasFunctionRunTransactions {
 
   private static String validateVerification(String verification) {
     if (verification == null || verification.isBlank()) {
-      throw new IllegalArgumentException("verification must not be blank");
+      throw DomainException.validation("verification", "verification must not be blank");
     }
     String stripped = stripControlCharacters(verification.strip());
     if (stripped.isEmpty()) {
-      throw new IllegalArgumentException("verification must not be blank");
+      throw DomainException.validation("verification", "verification must not be blank");
     }
     return stripped.length() > MAX_VERIFICATION_LENGTH
         ? stripped.substring(0, MAX_VERIFICATION_LENGTH)
@@ -778,11 +782,11 @@ public class CanvasFunctionRunTransactions {
     }
   }
 
-  private static CanvasFunctionRunException notFound(String message) {
-    return new CanvasFunctionRunException(CanvasFunctionRunException.Reason.NOT_FOUND, message);
+  private static DomainException notFound(String message) {
+    return DomainException.notFound("canvas_function_run", message);
   }
 
-  private static CanvasFunctionRunException conflict(String message) {
-    return new CanvasFunctionRunException(CanvasFunctionRunException.Reason.CONFLICT, message);
+  private static DomainException conflict(String message) {
+    return DomainException.conflict("FUNCTION_RUN_CONFLICT", message);
   }
 }

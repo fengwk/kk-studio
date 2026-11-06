@@ -141,12 +141,12 @@ test('test intent: createAndRun sends flat args, settles the revision and replay
       Array(2).fill({ requestId: harness.requestId, expectedVersion: functionVersion(harness.functionName) }),
     )
     assert.deepEqual(node.resources, harness.node.resources)
-    const canvasPath = `/api/canvases/${CANVAS_ID}`
+    const canvasPath = `/api/canvas/canvases/${CANVAS_ID}`
     const runPath = `${canvasPath}/nodes/${harness.nodeId}/function-run`
     assert.deepEqual(
       harness.requests.map(([method, requestPath]) => [method, requestPath]),
       [
-        ['GET', '/api/canvas-functions'],
+        ['GET', '/api/canvas/functions'],
         ['GET', canvasPath],
         ['POST', `${canvasPath}/commands`],
         ['POST', runPath],

@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.canvas.dto;
 
-import com.fasterxml.jackson.annotation.JsonAnySetter;
 import lombok.Data;
 
 /**
@@ -12,9 +11,4 @@ import lombok.Data;
 public class CanvasFunctionCancelRequestDTO {
 
   private String requestId;
-
-  @JsonAnySetter
-  public void rejectUnknownField(String field, Object value) {
-    throw new IllegalArgumentException("unknown field: " + field);
-  }
 }

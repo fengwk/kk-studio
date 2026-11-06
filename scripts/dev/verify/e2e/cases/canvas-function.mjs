@@ -36,7 +36,7 @@ function functionById(canvasId, nodeId) {
   return {
     canvasId,
     nodeId,
-    runPath: `/api/canvases/${canvasId}/nodes/${nodeId}/function-run`,
+    runPath: `/api/canvas/canvases/${canvasId}/nodes/${nodeId}/function-run`,
   }
 }
 
@@ -46,9 +46,9 @@ registerCase({
   requires: ['canvas-function'],
   title: 'Canvas Function 目录与免费 fake 运行链路',
   docs:
-    '需 backend 启用 S3 与 kk-studio.canvas.function.fake-enabled；GET /api/canvas-functions 只暴露函数名/说明/严格 args schema/有界输出/引用限制与目录版本（available + required-nullable unavailableReason + version{definitionFingerprint}）；typed SET_NODE_FUNCTION 冻结函数配置，POST function-run 的 expectedVersion 必填且形状严格（缺失/未知字段/非法 fingerprint 400），目录定义 fingerprint 不匹配返回 409 且不写 Run/pin，精确 requestId 重放优先于版本校验，返回 202 且只在 nodeId/requestId/status/stage/error/updatedAt 上表达运行状态（无 stateJson），非 Function 节点 400、无运行 404；RUNNING->SUCCEEDED 后快照按输出槽位替换 Resource（IMAGE+blobId），resource preview-url 可直读 WEBP；resolve 只对 UNKNOWN 有效（非 UNKNOWN 409、非法 resolution/空 verification 400），cancel 幂等',
+    '需 backend 启用 S3 与 kk-studio.canvas.function.fake-enabled；GET /api/canvas/functions 只暴露函数名/说明/严格 args schema/有界输出/引用限制与目录版本（available + required-nullable unavailableReason + version{definitionFingerprint}）；typed SET_NODE_FUNCTION 冻结函数配置，POST function-run 的 expectedVersion 必填且形状严格（缺失/未知字段/非法 fingerprint 400），目录定义 fingerprint 不匹配返回 409 且不写 Run/pin，精确 requestId 重放优先于版本校验，返回 202 且只在 nodeId/requestId/status/stage/error/updatedAt 上表达运行状态（无 stateJson），非 Function 节点 400、无运行 404；RUNNING->SUCCEEDED 后快照按输出槽位替换 Resource（IMAGE+blobId），resource preview-url 可直读 WEBP；resolve 只对 UNKNOWN 有效（非 UNKNOWN 409、非法 resolution/空 verification 400），cancel 幂等',
   async run(ctx) {
-    const definitions = (await ctx.call('GET', '/api/canvas-functions')).json
+    const definitions = (await ctx.call('GET', '/api/canvas/functions')).json
     assert(Array.isArray(definitions) && definitions.length > 0, JSON.stringify(definitions))
     for (const definition of definitions) {
       assertExactFields(definition, DEFINITION_FIELDS, 'function definition')
@@ -87,7 +87,7 @@ registerCase({
       JSON.stringify(imageFunction.outputs),
     )
 
-    const created = await ctx.call('POST', '/api/canvases', {
+    const created = await ctx.call('POST', '/api/canvas/canvases', {
       title: `e2e-function-${cid().slice(0, 8)}`,
     })
     assert(created.status === 201, `create canvas status ${created.status}`)
@@ -102,7 +102,7 @@ registerCase({
       ratio: '16:9',
     }
     const declared = (
-        await ctx.call('POST', `/api/canvases/${canvas.id}/commands`, {
+        await ctx.call('POST', `/api/canvas/canvases/${canvas.id}/commands`, {
           idempotencyKey: cid(),
           commands: [
             {
@@ -154,7 +154,7 @@ registerCase({
     })
     await expectHttpError(
       () =>
-        ctx.call('POST', `/api/canvases/${canvas.id}/nodes/${cid()}/function-run`, {
+        ctx.call('POST', `/api/canvas/canvases/${canvas.id}/nodes/${cid()}/function-run`, {
           requestId: cid(),
           expectedVersion: imageVersion,
         }),
@@ -197,7 +197,7 @@ registerCase({
     await expectHttpError(() => ctx.call('GET', functionById(canvas.id, functionNodeId).runPath), {
       status: 404,
     })
-    const unchanged = (await ctx.call('GET', `/api/canvases/${canvas.id}`)).json
+    const unchanged = (await ctx.call('GET', `/api/canvas/canvases/${canvas.id}`)).json
     assert(
       unchanged.document.revision === revisionAfterDeclare
         && unchanged.nodes.every((node) => node.run === null),
@@ -218,7 +218,7 @@ registerCase({
         && ['READY', 'RUNNING'].includes(run.status)
         && typeof run.stage === 'string'
         && run.error === null
-        && Number.isFinite(Date.parse(run.updatedAt)),
+        && Number.isFinite(run.updatedAt),
       JSON.stringify(run),
     )
     assert(!('stateJson' in run) && !('attempt' in run) && !('leaseToken' in run), JSON.stringify(run))
@@ -245,7 +245,7 @@ registerCase({
     assert(run.status === 'SUCCEEDED' && run.error === null, JSON.stringify(run))
 
     // 成功发布按输出槽位替换 Resource：Function node 现在只持有 1 个 IMAGE Resource。
-    const snapshot = (await ctx.call('GET', `/api/canvases/${canvas.id}`)).json
+    const snapshot = (await ctx.call('GET', `/api/canvas/canvases/${canvas.id}`)).json
     assert(Number(snapshot.document.revision) > Number(revisionAfterDeclare), JSON.stringify(snapshot.document))
     const published = snapshot.nodes.find((node) => node.id === functionNodeId)
     assert(
@@ -262,7 +262,7 @@ registerCase({
     const preview = (
         await ctx.call(
           'POST',
-          `/api/canvases/${canvas.id}/resources/${published.resources[0].id}/preview-url`,
+          `/api/canvas/canvases/${canvas.id}/resources/${published.resources[0].id}/preview-url`,
         )
       ).json
     const previewResponse = await fetch(preview.url, { headers: preview.headers || {} })

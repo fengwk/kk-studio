@@ -11,12 +11,12 @@ import org.springframework.context.annotation.Import;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRun;
-import fun.fengwk.kkstudio.canvas.CanvasFunctionRunException;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRunStatus;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionUnknownResolution;
 import fun.fengwk.kkstudio.canvas.CanvasResource;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionSubmitState;
+import fun.fengwk.kkstudio.common.error.DomainException;
 
 import java.time.Duration;
 import java.util.Map;
@@ -121,15 +121,13 @@ class CanvasFunctionSubmitRecoveryTest extends CanvasFunctionRuntimeTestSupport 
     assertTrue(resourceRepository.findById(canvasId, target.id()).isPresent());
 
     // UNKNOWN 状态下拒绝不同 requestId 的 start，也拒绝直接 cancel
+    assertThrows(DomainException.class, () -> startRun(canvasId, targetNodeId, REQUEST_2));
     assertThrows(
-        CanvasFunctionRunException.class, () -> startRun(canvasId, targetNodeId, REQUEST_2));
-    assertThrows(
-        CanvasFunctionRunException.class,
-        () -> runtimeTransactions.cancel(canvasId, targetNodeId, REQUEST_1));
+        DomainException.class, () -> runtimeTransactions.cancel(canvasId, targetNodeId, REQUEST_1));
 
     // resolve RESUME 必须要求非空 verification，并使 Run 回到 READY，submitState 推进为 SUBMITTED
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () ->
             runtimeTransactions.resolve(
                 canvasId, targetNodeId, REQUEST_1, CanvasFunctionUnknownResolution.RESUME, ""));
@@ -199,7 +197,7 @@ class CanvasFunctionSubmitRecoveryTest extends CanvasFunctionRuntimeTestSupport 
 
     // 再次 resolve 产生冲突
     assertThrows(
-        CanvasFunctionRunException.class,
+        DomainException.class,
         () ->
             runtimeTransactions.resolve(
                 canvasId,
@@ -234,7 +232,7 @@ class CanvasFunctionSubmitRecoveryTest extends CanvasFunctionRuntimeTestSupport 
     assertTrue(resourceRepository.findById(canvasId, target2.id()).isEmpty());
 
     assertThrows(
-        CanvasFunctionRunException.class,
+        DomainException.class,
         () ->
             runtimeTransactions.resolve(
                 canvasId,
@@ -318,7 +316,7 @@ class CanvasFunctionSubmitRecoveryTest extends CanvasFunctionRuntimeTestSupport 
                 canvasId, nodeId, REQUEST_1, claim.leaseToken(), "LATE", Map.of()));
     jdbc.update("delete from canvas_document where id = ?", canvasId);
     assertThrows(
-        CanvasFunctionRunException.class,
+        DomainException.class,
         () ->
             runtimeTransactions.checkpoint(
                 canvasId, nodeId, REQUEST_1, claim.leaseToken(), "LATE", Map.of()));
@@ -332,7 +330,7 @@ class CanvasFunctionSubmitRecoveryTest extends CanvasFunctionRuntimeTestSupport 
     startRun(canvasId, nodeId, REQUEST_1);
 
     assertThrows(
-        CanvasFunctionRunException.class,
+        DomainException.class,
         () ->
             transactions.execute(
                 status -> runtimeTransactions.cancel(canvasId, nodeId, REQUEST_2)));
@@ -354,7 +352,7 @@ class CanvasFunctionSubmitRecoveryTest extends CanvasFunctionRuntimeTestSupport 
     startRun(canvasId, nodeId, REQUEST_1);
 
     assertThrows(
-        CanvasFunctionRunException.class,
+        DomainException.class,
         () ->
             transactions.execute(
                 status ->

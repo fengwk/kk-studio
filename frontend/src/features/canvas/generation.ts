@@ -1,4 +1,4 @@
-import type { CanvasResourceKind } from '@/shared/api/contracts/studio'
+import type { CanvasResourceKind } from '@/shared/api/generated/contracts'
 import { isCanonicalUuid } from '@/shared/lib/uuid'
 import type { CanvasFunctionConfig, CanvasResourceReference } from '@/features/canvas/types'
 import type { CanvasSnapshot, Resource, ResourceNode } from '@/features/canvas/domain'

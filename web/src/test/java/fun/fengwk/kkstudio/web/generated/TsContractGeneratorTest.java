@@ -148,7 +148,7 @@ class TsContractGeneratorTest {
     String generated =
         new TsContractGenerator(
                 StrictHttpJsonMapperTestSupport.get(),
-                List.of(FIXTURE_PACKAGE, "fun.fengwk.kkstudio.canvas.dto"),
+                List.of(FIXTURE_PACKAGE, "fun.fengwk.kkstudio.canvas"),
                 List.of(ContractController.class),
                 List.of(CanvasConflictDTO.class))
             .generate();
@@ -157,6 +157,9 @@ class TsContractGeneratorTest {
     assertTrue(generated.contains("export interface CanvasSnapshotDTO"));
     assertTrue(generated.contains("export interface CanvasDocumentDTO"));
     assertTrue(generated.contains("export type CanvasConflictDTO"));
+    // 读模型里的固定取值来自 canvas 根的领域枚举，跨包嵌套字段同样要生成。
+    assertTrue(generated.contains("export type CanvasConflictTarget"));
+    assertTrue(generated.contains("export type CanvasFunctionRunStatus"));
   }
 
   /** 测试意图：未标 Nullable 必填非空；ALWAYS 可空必出现；其余可空可缺省；Long 写成字符串，Instant 写成 epoch 毫秒。 */
