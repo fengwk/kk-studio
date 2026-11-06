@@ -1,7 +1,5 @@
 import {
-  apiClient,
   request,
-  type HttpClient,
   type RequestOptions,
   type RouteArgs,
   type RouteResponse,
@@ -40,10 +38,7 @@ export type CatalogRequester = <R extends keyof ApiRoutes>(
   options?: RequestOptions,
 ) => Promise<RouteResponse<R>>
 
-export function createAgentService(
-  client: HttpClient = apiClient,
-  catalogRequest: CatalogRequester = request,
-) {
+export function createAgentService(catalogRequest: CatalogRequester = request) {
   return {
     listProviders: (): Promise<ProviderDTO[]> =>
       catalogRequest('GET /api/platform/providers', {}),

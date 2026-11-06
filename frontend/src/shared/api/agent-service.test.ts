@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createAgentService, type CatalogRequester } from '@/shared/api/agent-service'
-import { createMockHttpClient } from '@/test-support/mock-http-client'
 import { parseJsonPreservingPathEqualsNumbers } from '@/shared/lib/lossless-json-number'
 import type {
   AgentCreateDTO,
@@ -11,10 +10,6 @@ import type {
   ProviderUpdateDTO,
 } from '@/shared/api/generated/contracts'
 
-function createClient() {
-  return createMockHttpClient()
-}
-
 function createCatalogRequest() {
   return vi.fn(async () => ({})) as unknown as CatalogRequester
 }
@@ -22,7 +17,7 @@ function createCatalogRequest() {
 describe('agentService', () => {
   it('maps global resource lists to catalog routes', async () => {
     const catalogRequest = createCatalogRequest()
-    const service = createAgentService(createClient(), catalogRequest)
+    const service = createAgentService(catalogRequest)
 
     await service.listProviders()
     await service.listModels()
@@ -45,9 +40,8 @@ describe('agentService', () => {
    * 特别验证 Model 的 PUT/DELETE 端点使用尾段通配身份。
    */
   it('maps provider, model and agent mutations to name-based CRUD endpoints', async () => {
-    const client = createClient()
     const catalogRequest = createCatalogRequest()
-    const service = createAgentService(client, catalogRequest)
+    const service = createAgentService(catalogRequest)
     const providerBody: ProviderCreateDTO = {
       name: 'minimax',
       providerType: 'openai',
@@ -162,7 +156,7 @@ describe('agentService', () => {
 
   it('opts model catalog into the lossless JSON parser', async () => {
     const catalogRequest = createCatalogRequest()
-    const service = createAgentService(createClient(), catalogRequest)
+    const service = createAgentService(catalogRequest)
 
     await service.listModelDefaults('speed', 'cursor-1', 10)
     await service.refreshModelDefaults()
