@@ -4,7 +4,7 @@ import { MemoryRouter, useLocation } from 'react-router'
 import { describe, expect, it, vi } from 'vitest'
 import { ChatCard } from '@/features/chat/ChatCard'
 import { ChatCardsPanel } from '@/features/chat/ChatCardsPanel'
-import type { AgentDefinitionDTO, ChatDTO } from '@/shared/api/generated/contracts'
+import type { AgentDTO, ChatDTO } from '@/shared/api/generated/contracts'
 
 describe('ChatCard', () => {
   it('opens the Chat workspace route', async () => {
@@ -193,7 +193,7 @@ function Location() {
   return <output data-testid="location">{useLocation().pathname}</output>
 }
 
-function agent(): AgentDefinitionDTO {
+function agent(): AgentDTO {
   return {
     name: 'missing',
     description: null,
@@ -202,8 +202,8 @@ function agent(): AgentDefinitionDTO {
     execution: { driver: 'builtin', settings: { modelName: 'minimax/MiniMax', variant: 'default' } },
     config: { tools: [], skills: [], subagents: [] },
     version: '1',
-    createTime: 0,
-    updateTime: 0,
+    createdAt: 0,
+    updatedAt: 0,
   }
 }
 

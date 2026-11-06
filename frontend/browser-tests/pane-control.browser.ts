@@ -214,7 +214,11 @@ async function installPaneApi(
       await route.fulfill({ json: interactionItems() })
       return
     }
-    if (path === '/api/agents' || path === '/api/models') {
+    if (path === '/api/platform/agents') {
+      await route.fulfill({ json: [] })
+      return
+    }
+    if (path === '/api/models') {
       await route.fulfill({
         json: { pageNumber: 1, pageSize: 50, totalCount: '0', results: [] },
       })

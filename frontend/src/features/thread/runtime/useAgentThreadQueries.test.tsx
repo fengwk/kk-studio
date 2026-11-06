@@ -52,7 +52,7 @@ const wrapper = ({ children }: { children: ReactNode }) => (
 beforeEach(() => {
   sockets = new FakeWebSocketHarness()
   client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })
-  vi.spyOn(agentService, 'listAgents').mockResolvedValue({ results: [] } as never)
+  vi.spyOn(agentService, 'listAgents').mockResolvedValue([])
   vi.spyOn(agentService, 'listModels').mockResolvedValue({ results: [] } as never)
 })
 afterEach(() => {

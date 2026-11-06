@@ -170,6 +170,10 @@ async function installSkillHintApi(
       return
     }
     // Agent 定义由基座作为 props 提供；这里只需满足共享查询，不重复注入。
+    if (path === '/api/platform/agents') {
+      await route.fulfill({ json: [] })
+      return
+    }
     await route.fulfill({
       json: { pageNumber: 1, pageSize: 50, totalCount: '0', results: [] },
     })

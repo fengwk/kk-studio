@@ -5,7 +5,7 @@ import '@/styles.css'
 import { setLocale } from '@/shared/i18n'
 import { ApplicationEventProvider } from '@/shared/app-events'
 import { AgentPane } from '@/features/thread/runtime/AgentPane'
-import type { AgentDefinitionDTO, EnvironmentCardDTO } from '@/shared/api/generated/contracts'
+import type { AgentDTO, EnvironmentCardDTO } from '@/shared/api/generated/contracts'
 
 setLocale(new URLSearchParams(window.location.search).get('locale') === 'en-US' ? 'en-US' : 'zh-CN')
 
@@ -40,7 +40,7 @@ const HARNESS_ENVIRONMENTS: EnvironmentCardDTO[] = [{
   updateTime: 1790812800,
 }]
 
-const HARNESS_AGENT: AgentDefinitionDTO = {
+const HARNESS_AGENT: AgentDTO = {
   name: 'assistant',
   description: '带技能的助手',
   systemPrompt: null,
@@ -57,8 +57,8 @@ const HARNESS_AGENT: AgentDefinitionDTO = {
     subagents: [],
   },
   version: '1',
-  createTime: 1790812800,
-  updateTime: 1790812800,
+  createdAt: 1790812800,
+  updatedAt: 1790812800,
 }
 
 const queryClient = new QueryClient({

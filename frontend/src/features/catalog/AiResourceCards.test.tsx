@@ -5,7 +5,7 @@ import { AgentResourceCard } from '@/features/catalog/AiAgentResourceCard'
 import type { AgentModelView } from '@/features/catalog/AgentModelView'
 import { ModelResourceCard } from '@/features/catalog/AiModelResourceCard'
 import { ProviderResourceCard } from '@/features/catalog/AiProviderResourceCard'
-import type { AgentDefinitionDTO, AgentProviderDTO } from '@/shared/api/generated/contracts'
+import type { AgentDTO, AgentProviderDTO } from '@/shared/api/generated/contracts'
 
 function model(overrides: Partial<AgentModelView> = {}): AgentModelView {
   return {
@@ -37,7 +37,7 @@ function model(overrides: Partial<AgentModelView> = {}): AgentModelView {
   }
 }
 
-function agent(overrides: Partial<AgentDefinitionDTO> = {}): AgentDefinitionDTO {
+function agent(overrides: Partial<AgentDTO> = {}): AgentDTO {
   return {
     name: 'assistant',
     description: 'agent description',
@@ -50,8 +50,8 @@ function agent(overrides: Partial<AgentDefinitionDTO> = {}): AgentDefinitionDTO 
       subagents: ['writer'],
     },
     version: '1',
-    createTime: 0,
-    updateTime: 0,
+    createdAt: 0,
+    updatedAt: 0,
     ...overrides,
   }
 }

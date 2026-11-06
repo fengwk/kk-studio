@@ -1,28 +1,31 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createAgentService } from '@/shared/api/agent-service'
 import { createMockHttpClient } from '@/test-support/mock-http-client'
 import { parseJsonPreservingPathEqualsNumbers } from '@/shared/lib/lossless-json-number'
 import type {
-  AgentDefinitionCreateDTO,
-  AgentDefinitionUpdateDTO,
+  AgentCreateDTO,
+  AgentUpdateDTO,
   AgentModelCreateDTO,
   AgentModelUpdateDTO,
   AgentProviderCreateDTO,
   AgentProviderUpdateDTO,
 } from '@/shared/api/generated/contracts'
 
+afterEach(() => {
+  vi.unstubAllGlobals()
+})
+
 function createClient() {
   return createMockHttpClient()
 }
 
 describe('agentService', () => {
-  it('maps global resource lists to catalog paths', async () => {
+  it('maps provider, model and tool lists to catalog paths', async () => {
     const client = createClient()
     const service = createAgentService(client)
 
     await service.listProviders(2, 20)
     await service.listModels(3, 30)
-    await service.listAgents(4, 40)
     await service.listTools()
 
     expect(client.get).toHaveBeenNthCalledWith(1, '/providers', { params: { pageNumber: 2, pageSize: 20 } })
@@ -30,8 +33,7 @@ describe('agentService', () => {
       params: { pageNumber: 3, pageSize: 30 },
       jsonParser: parseJsonPreservingPathEqualsNumbers,
     })
-    expect(client.get).toHaveBeenNthCalledWith(3, '/agents', { params: { pageNumber: 4, pageSize: 40 } })
-    expect(client.get).toHaveBeenNthCalledWith(4, '/tools')
+    expect(client.get).toHaveBeenNthCalledWith(3, '/tools')
   })
 
   it('uses the standard page defaults for global resource lists', async () => {
@@ -40,14 +42,12 @@ describe('agentService', () => {
 
     await service.listProviders()
     await service.listModels()
-    await service.listAgents()
 
     expect(client.get).toHaveBeenNthCalledWith(1, '/providers', { params: { pageNumber: 1, pageSize: 50 } })
     expect(client.get).toHaveBeenNthCalledWith(2, '/models', {
       params: { pageNumber: 1, pageSize: 50 },
       jsonParser: parseJsonPreservingPathEqualsNumbers,
     })
-    expect(client.get).toHaveBeenNthCalledWith(3, '/agents', { params: { pageNumber: 1, pageSize: 50 } })
   })
 
   /**
@@ -83,7 +83,7 @@ describe('agentService', () => {
         variants: [{ id: 'default', promptCacheRetention: 'NONE' }],
       },
     }
-    const agentBody: AgentDefinitionCreateDTO = {
+    const agentBody: AgentCreateDTO = {
       name: 'default-assistant',
       description: null,
       systemPrompt: null,
@@ -113,13 +113,23 @@ describe('agentService', () => {
         variants: [{ id: 'fast', promptCacheRetention: 'NONE' }],
       },
     }
-    const updateAgentBody: AgentDefinitionUpdateDTO = {
+    const updateAgentBody: AgentUpdateDTO = {
       description: 'updated',
       expectedVersion: '9',
       systemPrompt: null,
       execution: { driver: 'builtin', settings: { modelName: 'MiniMax-M2.7', variant: 'default' } },
       config: { tools: [], skills: [], subagents: [] },
     }
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'DELETE') {
+        return new Response(null, { status: 204 })
+      }
+      return new Response('{}', {
+        status: init?.method === 'POST' ? 201 : 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    })
+    vi.stubGlobal('fetch', fetchMock)
 
     await service.createProvider(providerBody)
     await service.updateProvider('minimax', updateProviderBody)
@@ -141,9 +151,30 @@ describe('agentService', () => {
       jsonParser: parseJsonPreservingPathEqualsNumbers,
     })
     expect(client.delete).toHaveBeenNthCalledWith(2, '/models/vendor/MiniMax%20M2.7', { params: { expectedVersion: '10' } })
-    expect(client.post).toHaveBeenNthCalledWith(3, '/agents', agentBody)
-    expect(client.put).toHaveBeenNthCalledWith(3, '/agents/default-assistant', updateAgentBody)
-    expect(client.delete).toHaveBeenNthCalledWith(3, '/agents/default-assistant', { params: { expectedVersion: '11' } })
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/platform/agents', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify(agentBody),
+    }))
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/platform/agents/default-assistant', expect.objectContaining({
+      method: 'PUT',
+      body: JSON.stringify(updateAgentBody),
+    }))
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      '/api/platform/agents/default-assistant?expectedVersion=11',
+      expect.objectContaining({ method: 'DELETE' }),
+    )
+  })
+
+  it('reads the unpaged platform agent list', async () => {
+    const fetchMock = vi.fn(async () => new Response('[]', {
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    const service = createAgentService()
+
+    expect(await service.listAgents()).toEqual([])
+    expect(fetchMock).toHaveBeenCalledWith('/api/platform/agents', expect.objectContaining({ method: 'GET' }))
   })
 
   it('opts model defaults into the lossless JSON parser', async () => {

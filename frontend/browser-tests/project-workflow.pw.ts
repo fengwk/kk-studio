@@ -60,8 +60,8 @@ async function transport(page: Page) {
       await route.fulfill({ json: { ...state.project, version: '10' } })
     } else if (path === '/api/projects') {
       await route.fulfill({ json: [state.project] })
-    } else if (path === '/api/agents') {
-      await route.fulfill({ json: { results: [], totalCount: '0', pageNumber: 1, pageSize: 50 } })
+    } else if (path === '/api/platform/agents') {
+      await route.fulfill({ json: [] })
     } else if (path === '/api/environments') {
       await route.fulfill({ json: [] })
     } else {

@@ -9,7 +9,7 @@ import {
 import { agentService } from '@/shared/api/agent-service'
 import { environmentService } from '@/features/environment/environment-service'
 import type {
-  AgentDefinitionDTO,
+  AgentDTO,
   AgentModelDTO,
   AgentProviderDTO,
 } from '@/shared/api/generated/contracts'
@@ -70,7 +70,7 @@ describe('useCatalogPageController', () => {
     vi.clearAllMocks()
     vi.mocked(agentService.listProviders).mockResolvedValue(page([provider()]))
     vi.mocked(agentService.listModels).mockResolvedValue(page([model()]))
-    vi.mocked(agentService.listAgents).mockResolvedValue(page([agent()]))
+    vi.mocked(agentService.listAgents).mockResolvedValue([agent()])
     vi.mocked(agentService.listTools).mockResolvedValue([])
     vi.mocked(agentService.listSkillPackages).mockResolvedValue([])
     vi.mocked(environmentService.listEnvironments).mockResolvedValue([])
@@ -238,7 +238,7 @@ function model(): AgentModelDTO {
   }
 }
 
-function agent(): AgentDefinitionDTO {
+function agent(): AgentDTO {
   return {
     name: 'default-assistant',
     description: null,
@@ -251,7 +251,7 @@ function agent(): AgentDefinitionDTO {
       subagents: [],
     },
     version: '1',
-    createTime: 0,
-    updateTime: 0,
+    createdAt: 0,
+    updatedAt: 0,
   }
 }

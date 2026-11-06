@@ -5,7 +5,7 @@ import { MemoryRouter } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useChatListController } from '@/features/chat/useChatListController'
 import { chatService } from '@/features/chat/chat-service'
-import type { AgentDefinitionDTO } from '@/shared/api/generated/contracts'
+import type { AgentDTO } from '@/shared/api/generated/contracts'
 
 vi.mock('@/features/chat/chat-service', () => ({
   chatService: {
@@ -32,7 +32,7 @@ vi.mock('@/features/chat/chat-service', () => ({
   },
 }))
 
-const agents: AgentDefinitionDTO[] = [
+const agents: AgentDTO[] = [
   {
     name: 'assistant',
     description: null,
@@ -45,8 +45,8 @@ const agents: AgentDefinitionDTO[] = [
       subagents: [],
     },
     version: '1',
-    createTime: 0,
-    updateTime: 0,
+    createdAt: 0,
+    updatedAt: 0,
   },
   {
     name: 'coder',
@@ -60,8 +60,8 @@ const agents: AgentDefinitionDTO[] = [
       subagents: [],
     },
     version: '1',
-    createTime: 0,
-    updateTime: 0,
+    createdAt: 0,
+    updatedAt: 0,
   },
 ]
 

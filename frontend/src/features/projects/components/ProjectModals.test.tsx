@@ -10,16 +10,13 @@ import { CreateProjectModal } from './CreateProjectModal'
 import { EditProjectModal, type EditProjectModalProps } from './EditProjectModal'
 import { DeleteProjectModal } from './DeleteProjectModal'
 import type { ProjectsApi } from '../projects-api'
-import type { ProjectDTO, ProjectIssueSnapshotDTO } from '@/shared/api/generated/contracts'
+import type { AgentDTO, ProjectDTO, ProjectIssueSnapshotDTO } from '@/shared/api/generated/contracts'
 
 // Agent 目录与环境列表由共享查询提供；这里固定为可预期的目录内容，
 // 以便验证「目录中存在的 Agent」与「仅存于草稿中的历史 Agent」两条路径。
 vi.mock('@/shared/api/agent-service', () => ({
   agentService: {
-    listAgents: vi.fn().mockResolvedValue({
-      results: [{ name: 'architect' }, { name: 'backend-dev' }],
-      totalCount: '2',
-    }),
+    listAgents: vi.fn().mockResolvedValue([{ name: 'architect' }, { name: 'backend-dev' }]),
   },
 }))
 
@@ -169,7 +166,7 @@ describe('EditProjectModal', () => {
     async (catalogState) => {
       // 空/读取中/失败目录不撤销用户模式选择；真实查询刷新后仍须显式选 Agent 与额度。
       const user = userEvent.setup()
-      const emptyPage = { results: [], totalCount: '0', pageNumber: 1, pageSize: 50 }
+      const emptyPage: AgentDTO[] = []
       let resolveCatalog!: (value: typeof emptyPage) => void
       if (catalogState === 'loading') {
         vi.mocked(agentService.listAgents).mockImplementationOnce(

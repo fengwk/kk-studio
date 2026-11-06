@@ -16,7 +16,7 @@ import { environmentService } from '@/features/environment/environment-service'
 import { setLocale, translate } from '@/shared/i18n'
 import { ApplicationEventProvider } from '@/shared/app-events'
 import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
-import type { AgentDefinitionDTO } from '@/shared/api/generated/contracts'
+import type { AgentDTO } from '@/shared/api/generated/contracts'
 
 vi.mock('@/features/environment/environment-service', () => ({
   environmentService: {
@@ -26,7 +26,7 @@ vi.mock('@/features/environment/environment-service', () => ({
   },
 }))
 
-const agent: AgentDefinitionDTO = {
+const agent: AgentDTO = {
   name: 'assistant',
   description: null,
   systemPrompt: null,
@@ -38,8 +38,8 @@ const agent: AgentDefinitionDTO = {
     subagents: [],
   },
   version: '1',
-  createTime: 1790503200,
-  updateTime: 1790503200,
+  createdAt: 1790503200,
+  updatedAt: 1790503200,
 }
 
 beforeEach(() => {

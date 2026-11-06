@@ -8,12 +8,12 @@ import {
   withSelectedSkillOrphans,
 } from '@/features/catalog/agent-capability-candidates'
 import type {
-  AgentDefinitionDTO,
+  AgentDTO,
   SkillPackageSummaryDTO,
   ToolCatalogEntryDTO,
 } from '@/shared/api/generated/contracts'
 
-function agent(name: string, description: string | null): AgentDefinitionDTO {
+function agent(name: string, description: string | null): AgentDTO {
   return {
     name,
     description,
@@ -22,8 +22,8 @@ function agent(name: string, description: string | null): AgentDefinitionDTO {
     execution: { driver: 'builtin', settings: { modelName: 'minimax/MiniMax', variant: null } },
     config: { tools: [], skills: [], subagents: [] },
     version: '1',
-    createTime: 0,
-    updateTime: 0,
+    createdAt: 0,
+    updatedAt: 0,
   }
 }
 

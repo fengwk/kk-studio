@@ -57,7 +57,7 @@ import { ApiError } from '@/shared/api/client'
 import { harnessService } from '@/shared/api/harness-service'
 import { createBuiltinExecution } from '@/shared/api/contracts/ai-runtime'
 import type {
-  AgentDefinitionDTO,
+  AgentDTO,
   HarnessAcceptedCommandsDTO,
   HarnessBranchSettingsDTO,
   HarnessCancelledInputDTO,
@@ -216,7 +216,7 @@ function toolInvocationFixture(overrides: Partial<ToolInvocationDTO> = {}): Tool
   }
 }
 
-const assistantAgentEntry: AgentDefinitionDTO = {
+const assistantAgentEntry: AgentDTO = {
   name: 'assistant',
   description: null,
   systemPrompt: null,
@@ -224,8 +224,8 @@ const assistantAgentEntry: AgentDefinitionDTO = {
   execution: { driver: 'builtin', settings: { modelName: 'minimax/MiniMax', variant: 'default' } },
   config: { tools: [], skills: [], subagents: [] },
   version: '0',
-  createTime: 0,
-  updateTime: 0,
+  createdAt: 0,
+  updatedAt: 0,
 }
 
 let realtimeSockets: FakeWebSocketHarness
@@ -378,12 +378,7 @@ async function resetControllerTestEnvironment() {
   localStorage.clear()
   await resetDraftStoreToReal()
   realtimeSockets = new FakeWebSocketHarness()
-  vi.mocked(agentService.listAgents).mockResolvedValue({
-    pageNumber: 1,
-    pageSize: 50,
-    totalCount: '1',
-    results: [assistantAgentEntry],
-  })
+  vi.mocked(agentService.listAgents).mockResolvedValue([assistantAgentEntry])
   vi.mocked(agentService.listModels).mockResolvedValue({
     pageNumber: 1,
     pageSize: 50,
@@ -1289,24 +1284,19 @@ describe('useAgentThreadController', () => {
   })
 
   it('exposes runtime facts from the snapshot branch settings', async () => {
-    vi.mocked(agentService.listAgents).mockResolvedValue({
-      pageNumber: 1,
-      pageSize: 50,
-      totalCount: '1',
-      results: [
-        {
-          name: 'assistant',
-          description: null,
-          systemPrompt: null,
-          type: 'USER',
-          execution: { driver: 'builtin', settings: { modelName: 'minimax/MiniMax', variant: 'default' } },
-          config: { tools: [], skills: [], subagents: [] },
-          version: '1',
-          createTime: 0,
-          updateTime: 0,
-        },
-      ],
-    })
+    vi.mocked(agentService.listAgents).mockResolvedValue([
+      {
+        name: 'assistant',
+        description: null,
+        systemPrompt: null,
+        type: 'USER',
+        execution: { driver: 'builtin', settings: { modelName: 'minimax/MiniMax', variant: 'default' } },
+        config: { tools: [], skills: [], subagents: [] },
+        version: '1',
+        createdAt: 0,
+        updatedAt: 0,
+      },
+    ])
     const currentThread = threadFixture({
       branchSettings: branchSettings({
         agentName: 'assistant',

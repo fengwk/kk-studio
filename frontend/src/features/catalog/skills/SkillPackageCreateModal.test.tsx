@@ -7,7 +7,7 @@ import { agentService } from '@/shared/api/agent-service'
 import { SkillPackageCreateModal } from '@/features/catalog/skills/SkillPackageCreateModal'
 import { hashSkillArchive, uploadSkillArchive } from '@/features/catalog/skills/skill-package-upload'
 import type {
-  AgentDefinitionDTO,
+  AgentDTO,
   SkillPackageDetailDTO,
   SkillPackagePreviewDTO,
 } from '@/shared/api/generated/contracts'
@@ -72,7 +72,7 @@ function preview(overrides: Partial<SkillPackagePreviewDTO> = {}): SkillPackageP
   }
 }
 
-function agent(name: string, skills: { packageName: string; name: string }[]): AgentDefinitionDTO {
+function agent(name: string, skills: { packageName: string; name: string }[]): AgentDTO {
   return {
     name,
     type: 'USER',
@@ -81,8 +81,8 @@ function agent(name: string, skills: { packageName: string; name: string }[]): A
     execution: null,
     config: { tools: [], skills, subagents: [] },
     version: '1',
-    createTime: 0,
-    updateTime: 0,
+    createdAt: 0,
+    updatedAt: 0,
   }
 }
 
@@ -104,12 +104,7 @@ describe('SkillPackageCreateModal', () => {
       hasToken: false,
     } }))
     vi.mocked(agentService.getSkillPackage).mockRejectedValue(new ApiError('not found', 404))
-    vi.mocked(agentService.listAgents).mockResolvedValue({
-      pageNumber: 1,
-      pageSize: 100,
-      totalCount: '0',
-      results: [],
-    })
+    vi.mocked(agentService.listAgents).mockResolvedValue([])
     vi.mocked(hashSkillArchive).mockResolvedValue('c'.repeat(64))
     vi.mocked(uploadSkillArchive).mockResolvedValue('upload-1')
     vi.mocked(agentService.previewSkillPackageUpload).mockResolvedValue(preview())
@@ -239,12 +234,9 @@ describe('SkillPackageCreateModal', () => {
   it('publishes an existing upload package with its current version and reports referenced skills', async () => {
     const user = userEvent.setup()
     vi.mocked(agentService.getSkillPackage).mockResolvedValue(detail())
-    vi.mocked(agentService.listAgents).mockResolvedValue({
-      pageNumber: 1,
-      pageSize: 100,
-      totalCount: '1',
-      results: [agent('reviewer', [{ packageName: 'core-tools', name: 'dropped-skill' }])],
-    })
+    vi.mocked(agentService.listAgents).mockResolvedValue(
+      [agent('reviewer', [{ packageName: 'core-tools', name: 'dropped-skill' }])],
+    )
     renderModal()
 
     const modal = screen.getByRole('dialog', { name: /创建技能包/ })

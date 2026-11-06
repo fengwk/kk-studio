@@ -6,7 +6,7 @@ import { useAiConsoleResourceController } from '@/features/catalog/useAiConsoleR
 import { agentService } from '@/shared/api/agent-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 import type {
-  AgentDefinitionDTO,
+  AgentDTO,
   AgentModelDTO,
   AgentProviderDTO,
 } from '@/shared/api/generated/contracts'
@@ -50,7 +50,7 @@ describe('useAiConsoleResourceController', () => {
 
     vi.mocked(agentService.listProviders).mockImplementation(async () => page([currentProvider]))
     vi.mocked(agentService.listModels).mockImplementation(async () => page([currentModel]))
-    vi.mocked(agentService.listAgents).mockImplementation(async () => page([currentAgent]))
+    vi.mocked(agentService.listAgents).mockImplementation(async () => [currentAgent])
     vi.mocked(agentService.listTools).mockResolvedValue([])
     vi.mocked(agentService.createProvider).mockResolvedValue(currentProvider)
     vi.mocked(agentService.deleteProvider).mockResolvedValue(undefined)
@@ -613,7 +613,7 @@ function model(): AgentModelDTO {
   }
 }
 
-function agent(): AgentDefinitionDTO {
+function agent(): AgentDTO {
   return {
     name: 'default-assistant',
     description: 'Cloud agent',
@@ -626,7 +626,7 @@ function agent(): AgentDefinitionDTO {
       subagents: [],
     },
     version: '0',
-    createTime: 1781920800,
-    updateTime: 1781920800,
+    createdAt: 1781920800,
+    updatedAt: 1781920800,
   }
 }

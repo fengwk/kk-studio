@@ -31,7 +31,7 @@ import {
   getBuiltinModelSelection,
 } from '@/shared/api/contracts/ai-runtime'
 import type {
-  AgentDefinitionDTO,
+  AgentDTO,
   AgentModelDTO,
   HarnessAcceptedCommandsDTO,
   HarnessBranchSettingsDTO,
@@ -214,7 +214,7 @@ function acceptedResponse(
   }
 }
 
-const agents: AgentDefinitionDTO[] = [
+const agents: AgentDTO[] = [
   {
     name: 'assistant',
     description: null,
@@ -223,8 +223,8 @@ const agents: AgentDefinitionDTO[] = [
     execution: { driver: 'builtin', settings: { modelName: 'MiniMax', variant: 'default' } },
     config: { tools: [], skills: [], subagents: [] },
     version: '0',
-    createTime: 0,
-    updateTime: 0,
+    createdAt: 0,
+    updatedAt: 0,
   },
   {
     name: 'coder',
@@ -238,8 +238,8 @@ const agents: AgentDefinitionDTO[] = [
       subagents: [],
     },
     version: '0',
-    createTime: 0,
-    updateTime: 0,
+    createdAt: 0,
+    updatedAt: 0,
   },
   {
     name: 'writer',
@@ -253,8 +253,8 @@ const agents: AgentDefinitionDTO[] = [
       subagents: [],
     },
     version: '0',
-    createTime: 0,
-    updateTime: 0,
+    createdAt: 0,
+    updatedAt: 0,
   },
   {
     name: 'broken-model-agent',
@@ -264,8 +264,8 @@ const agents: AgentDefinitionDTO[] = [
     execution: { driver: 'builtin', settings: { modelName: 'nonexistent-model', variant: 'default' } },
     config: { tools: [], skills: [], subagents: [] },
     version: '0',
-    createTime: 0,
-    updateTime: 0,
+    createdAt: 0,
+    updatedAt: 0,
   },
   {
     name: 'broken-variant-agent',
@@ -275,8 +275,8 @@ const agents: AgentDefinitionDTO[] = [
     execution: { driver: 'builtin', settings: { modelName: 'MiniMax', variant: 'nonexistent-variant' } },
     config: { tools: [], skills: [], subagents: [] },
     version: '0',
-    createTime: 0,
-    updateTime: 0,
+    createdAt: 0,
+    updatedAt: 0,
   },
 ]
 
@@ -356,12 +356,7 @@ async function send(result: { current: ReturnType<typeof useBoundBranchPanel> })
 describe('useBoundBranchPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    vi.mocked(agentService.listAgents).mockResolvedValue({
-      pageNumber: 1,
-      pageSize: 50,
-      totalCount: String(agents.length),
-      results: agents,
-    })
+    vi.mocked(agentService.listAgents).mockResolvedValue(agents)
     vi.mocked(agentService.listModels).mockResolvedValue({
       pageNumber: 1,
       pageSize: 50,
@@ -1182,12 +1177,7 @@ describe('useBoundBranchPanel', () => {
   it('keeps idle and stopped threads as drafts without an immediate submit', async () => {
     for (const executionControl of ['RUNNABLE', 'STOPPED']) {
       vi.clearAllMocks()
-      vi.mocked(agentService.listAgents).mockResolvedValue({
-        pageNumber: 1,
-        pageSize: 50,
-        totalCount: String(agents.length),
-        results: agents,
-      })
+      vi.mocked(agentService.listAgents).mockResolvedValue(agents)
       vi.mocked(agentService.listModels).mockResolvedValue({
         pageNumber: 1,
         pageSize: 50,

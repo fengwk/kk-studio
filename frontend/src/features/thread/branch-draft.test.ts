@@ -14,7 +14,7 @@ import {
   getBuiltinModelSelection,
 } from '@/shared/api/contracts/ai-runtime'
 import type {
-  AgentDefinitionDTO,
+  AgentDTO,
   AgentModelDTO,
   HarnessBranchSettingsDTO,
   HarnessThreadCommandDTO,
@@ -61,7 +61,7 @@ function agent(
   tools: string[],
   skills: string[],
   subagents: string[],
-): AgentDefinitionDTO {
+): AgentDTO {
   return {
     name: 'root',
     description: null,
@@ -74,12 +74,12 @@ function agent(
       subagents,
     },
     version: '1',
-    createTime: 1786233600,
-    updateTime: 1786233600,
+    createdAt: 1786233600,
+    updatedAt: 1786233600,
   }
 }
 
-function agentWithoutModel(): AgentDefinitionDTO {
+function agentWithoutModel(): AgentDTO {
   return { ...agent([], [], []), execution: null }
 }
 
@@ -268,7 +268,7 @@ describe('BranchDraft conversion and diff semantics', () => {
     }
 
     it('updates model to match the target agent', () => {
-      const claudeAgent: AgentDefinitionDTO = {
+      const claudeAgent: AgentDTO = {
         ...agent([], [], []),
         name: 'claude-agent',
         execution: createBuiltinExecution('claude', null),
@@ -289,7 +289,7 @@ describe('BranchDraft conversion and diff semantics', () => {
     })
 
     it('respects explicit variant override over model default variant', () => {
-      const explicitVariantAgent: AgentDefinitionDTO = {
+      const explicitVariantAgent: AgentDTO = {
         ...agent([], [], []),
         name: 'claude-v2',
         execution: createBuiltinExecution('claude', 'v2'),
@@ -299,7 +299,7 @@ describe('BranchDraft conversion and diff semantics', () => {
     })
 
     it('falls back to model defaultVariant when agent variant is not specified', () => {
-      const defaultVariantAgent: AgentDefinitionDTO = {
+      const defaultVariantAgent: AgentDTO = {
         ...agent([], [], []),
         name: 'claude-default',
         execution: createBuiltinExecution('claude', null),
@@ -309,12 +309,12 @@ describe('BranchDraft conversion and diff semantics', () => {
     })
 
     it('updates variant when switching between agents using the same model but different variants', () => {
-      const agentV1: AgentDefinitionDTO = {
+      const agentV1: AgentDTO = {
         ...agent([], [], []),
         name: 'agent-v1',
         execution: createBuiltinExecution('claude', 'v1'),
       }
-      const agentV2: AgentDefinitionDTO = {
+      const agentV2: AgentDTO = {
         ...agent([], [], []),
         name: 'agent-v2',
         execution: createBuiltinExecution('claude', 'v2'),
@@ -353,13 +353,13 @@ describe('BranchDraft conversion and diff semantics', () => {
     })
 
     it('returns null and does not produce a draft if model, ref or variant is invalid', () => {
-      const agentNoModel: AgentDefinitionDTO = { ...agent([], [], []), execution: null }
+      const agentNoModel: AgentDTO = { ...agent([], [], []), execution: null }
       expect(materializeAgentBranchDraft(agentNoModel, [model], draftWith())).toBeNull()
 
-      const agentWithMissingModel: AgentDefinitionDTO = { ...agent([], [], []), execution: createBuiltinExecution('missing/model', null) }
+      const agentWithMissingModel: AgentDTO = { ...agent([], [], []), execution: createBuiltinExecution('missing/model', null) }
       expect(materializeAgentBranchDraft(agentWithMissingModel, [model], draftWith())).toBeNull()
 
-      const agentWithInvalidVariant: AgentDefinitionDTO = {
+      const agentWithInvalidVariant: AgentDTO = {
         ...agent([], [], []),
         execution: createBuiltinExecution('model', 'non-existent-variant'),
       }

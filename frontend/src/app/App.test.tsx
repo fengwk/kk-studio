@@ -47,7 +47,7 @@ describe('App routes', () => {
     window.history.replaceState({}, '', '/')
     vi.mocked(agentService.listProviders).mockResolvedValue(page([]))
     vi.mocked(agentService.listModels).mockResolvedValue(page([]))
-    vi.mocked(agentService.listAgents).mockResolvedValue(page([]))
+    vi.mocked(agentService.listAgents).mockResolvedValue([])
     vi.mocked(chatService.listChats).mockResolvedValue({ items: [], nextCursor: null })
     vi.mocked(environmentService.listEnvironments).mockResolvedValue([])
     vi.mocked(interactionService.listInteractions).mockResolvedValue({
