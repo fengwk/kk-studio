@@ -87,8 +87,8 @@ class StudioHarnessSessionControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"name\":\"  canonical name  \"}"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.sessionId").value(SESSION_ID.toString()))
-        .andExpect(jsonPath("$.data.name").value("canonical name"));
+        .andExpect(jsonPath("$.sessionId").value(SESSION_ID.toString()))
+        .andExpect(jsonPath("$.name").value("canonical name"));
 
     ArgumentCaptor<RenameSessionCommand> captor =
         ArgumentCaptor.forClass(RenameSessionCommand.class);
@@ -194,19 +194,19 @@ class StudioHarnessSessionControllerTest {
     mockMvc
         .perform(get("/api/sessions/" + SESSION_ID + "/threads"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.length()").value(2))
-        .andExpect(jsonPath("$.data[0].threadId").value(thread.getThreadId()))
-        .andExpect(jsonPath("$.data[0]").value(hasKey("parentThreadId")))
-        .andExpect(jsonPath("$.data[0].parentThreadId").value((Object) null))
-        .andExpect(jsonPath("$.data[1].threadId").value(child.getThreadId()))
-        .andExpect(jsonPath("$.data[1].parentThreadId").value(thread.getThreadId()))
-        .andExpect(jsonPath("$.data[1].name").value("thread"))
-        .andExpect(jsonPath("$.data[0].name").value("thread"))
-        .andExpect(jsonPath("$.data[0].status").value("IDLE"))
-        .andExpect(jsonPath("$.data[0].execution.driver").value("builtin"))
-        .andExpect(jsonPath("$.data[0].execution.settings.modelName").value("gpt-5"))
-        .andExpect(jsonPath("$.data[0].execution.settings.variant").value("default"))
-        .andExpect(jsonPath("$.data[0].headMessagePreview").value("hello"));
+        .andExpect(jsonPath("$.length()").value(2))
+        .andExpect(jsonPath("$[0].threadId").value(thread.getThreadId()))
+        .andExpect(jsonPath("$[0]").value(hasKey("parentThreadId")))
+        .andExpect(jsonPath("$[0].parentThreadId").value((Object) null))
+        .andExpect(jsonPath("$[1].threadId").value(child.getThreadId()))
+        .andExpect(jsonPath("$[1].parentThreadId").value(thread.getThreadId()))
+        .andExpect(jsonPath("$[1].name").value("thread"))
+        .andExpect(jsonPath("$[0].name").value("thread"))
+        .andExpect(jsonPath("$[0].status").value("IDLE"))
+        .andExpect(jsonPath("$[0].execution.driver").value("builtin"))
+        .andExpect(jsonPath("$[0].execution.settings.modelName").value("gpt-5"))
+        .andExpect(jsonPath("$[0].execution.settings.variant").value("default"))
+        .andExpect(jsonPath("$[0].headMessagePreview").value("hello"));
     verify(harnessQueryService).listThreadSummaries(SESSION_ID);
   }
 
@@ -245,16 +245,16 @@ class StudioHarnessSessionControllerTest {
     mockMvc
         .perform(get("/api/sessions/" + SESSION_ID + "/entries"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.items[0].entryId").value(root.id().toString()))
-        .andExpect(jsonPath("$.data.items[0].sessionId").value(SESSION_ID.toString()))
-        .andExpect(jsonPath("$.data.items[0].parentEntryId").value((Object) null))
-        .andExpect(jsonPath("$.data.items[0].entryType").value("ROOT"))
-        .andExpect(jsonPath("$.data.items[0].usageCost").value((Object) null))
-        .andExpect(jsonPath("$.data.items[1].entryId").value(user.id().toString()))
-        .andExpect(jsonPath("$.data.items[1].entryType").value("MESSAGE"))
-        .andExpect(jsonPath("$.data.items[1].usageCost.currency").value("USD"))
-        .andExpect(jsonPath("$.data.items[1].usageCost.amount").value("0.010000000000"))
-        .andExpect(jsonPath("$.data.nextCursor").value((Object) null));
+        .andExpect(jsonPath("$.items[0].entryId").value(root.id().toString()))
+        .andExpect(jsonPath("$.items[0].sessionId").value(SESSION_ID.toString()))
+        .andExpect(jsonPath("$.items[0].parentEntryId").value((Object) null))
+        .andExpect(jsonPath("$.items[0].entryType").value("ROOT"))
+        .andExpect(jsonPath("$.items[0].usageCost").value((Object) null))
+        .andExpect(jsonPath("$.items[1].entryId").value(user.id().toString()))
+        .andExpect(jsonPath("$.items[1].entryType").value("MESSAGE"))
+        .andExpect(jsonPath("$.items[1].usageCost.currency").value("USD"))
+        .andExpect(jsonPath("$.items[1].usageCost.amount").value("0.010000000000"))
+        .andExpect(jsonPath("$.nextCursor").value((Object) null));
     verify(harnessQueryService).listSessionEntries(SESSION_ID, null, 100);
     verify(usageCostProjectionService).project(entries);
   }
@@ -284,9 +284,9 @@ class StudioHarnessSessionControllerTest {
                 .param("cursor", cursor.toString())
                 .param("limit", "25"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.items.length()").value(1))
-        .andExpect(jsonPath("$.data.items[0].entryId").value(root.id().toString()))
-        .andExpect(jsonPath("$.data.nextCursor").value(root.id().toString()));
+        .andExpect(jsonPath("$.items.length()").value(1))
+        .andExpect(jsonPath("$.items[0].entryId").value(root.id().toString()))
+        .andExpect(jsonPath("$.nextCursor").value(root.id().toString()));
     verify(harnessQueryService).listSessionEntries(SESSION_ID, cursor, 25);
 
     // 分页边界在到达查询服务前拒绝：0、超过上限、非十进制与非法游标都是 400。
