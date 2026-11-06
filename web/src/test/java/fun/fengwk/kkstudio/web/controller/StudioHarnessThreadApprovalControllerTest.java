@@ -62,7 +62,7 @@ class StudioHarnessThreadApprovalControllerTest extends HarnessThreadControllerT
                         + "\",\"reason\":\"denied\"}")
                 .principal(() -> "alice"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.status").value("WAITING_APPROVAL"));
+        .andExpect(jsonPath("$.status").value("WAITING_APPROVAL"));
 
     mockMvc
         .perform(
@@ -74,7 +74,8 @@ class StudioHarnessThreadApprovalControllerTest extends HarnessThreadControllerT
                         + "\",\"reason\":\"denied\",\"operator\":\"admin\"}")
                 .principal(() -> "alice"))
         .andExpect(status().isBadRequest())
-        .andExpect(jsonPath("$.errors.detail").value("unknown tool approval field: operator"));
+        .andExpect(jsonPath("$.code").value("validation"))
+        .andExpect(jsonPath("$.detail").value("unknown tool approval field: operator"));
 
     ArgumentCaptor<ToolApprovalCommand> captor = ArgumentCaptor.forClass(ToolApprovalCommand.class);
     verify(interactionService, times(1)).decideApproval(captor.capture());
@@ -121,7 +122,7 @@ class StudioHarnessThreadApprovalControllerTest extends HarnessThreadControllerT
                 .content("{\"decision\":\"ALLOW\",\"decisionId\":\"" + idText(1) + "\"}")
                 .principal(() -> "alice"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.status").value("WAITING_APPROVAL"));
+        .andExpect(jsonPath("$.status").value("WAITING_APPROVAL"));
 
     ArgumentCaptor<ToolApprovalCommand> captor = ArgumentCaptor.forClass(ToolApprovalCommand.class);
     verify(interactionService).decideApproval(captor.capture());
@@ -148,7 +149,7 @@ class StudioHarnessThreadApprovalControllerTest extends HarnessThreadControllerT
                 .content("{\"decision\":\"ALLOW\",\"decisionId\":\"" + idText(51) + "\"}")
                 .principal(() -> "alice"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.status").value("WAITING_APPROVAL"));
+        .andExpect(jsonPath("$.status").value("WAITING_APPROVAL"));
 
     ArgumentCaptor<ToolApprovalCommand> captor = ArgumentCaptor.forClass(ToolApprovalCommand.class);
     verify(interactionService).decideApproval(captor.capture());
