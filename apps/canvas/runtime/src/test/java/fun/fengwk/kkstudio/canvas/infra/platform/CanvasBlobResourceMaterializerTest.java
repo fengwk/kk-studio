@@ -34,6 +34,7 @@ import fun.fengwk.kkstudio.canvas.infra.postgresql.PostgresqlCanvasFunctionResou
 import fun.fengwk.kkstudio.canvas.infra.postgresql.PostgresqlCanvasFunctionRunRepository;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.PostgresqlCanvasResourceRepository;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.PostgresqlCanvasStore;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 
@@ -121,6 +122,17 @@ class CanvasBlobResourceMaterializerTest {
                     requestId,
                     resourceId,
                     CanvasFunctionResourcePin.Role.OUTPUT)));
+  }
+
+  /** 后台物化失败时释放暂存 owner，并保留原有存储冲突供 worker 处理。 */
+  @Test
+  void storageVerificationFailureDiscardsStagedUpload() {
+    DomainException conflict = DomainException.conflict("STORAGE_VERIFICATION", "pending");
+    when(uploadService.lockReady(uploadId)).thenThrow(conflict);
+    assertSame(conflict, assertThrows(DomainException.class, this::materialize));
+    verify(uploadService).delete(uploadId);
+    verify(blobManager, never()).retain(any());
+    verify(pinRepository, never()).addAll(any());
   }
 
   @Test
