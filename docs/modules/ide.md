@@ -35,7 +35,7 @@ IDE 让用户在 Studio 同源下打开某个 Environment 上由 Daemon 托管�
 
 Server 只用 `CHANGE_DIRECTORY` 的确认回执确定目录，缺失或无效的确认目录使调用不可用，不回退到客户端请求，也不自动重试。命令确认后服务端再读一次 `LIST_VIEWS`，但这次回读只用于刷新绑定缓存与补充响应：回读本身失败只记录告警，已确认的目录切换仍按成功返回，响应只带命令确认的目录与已知绑定身份，不伪造 workspace 与视图状态；回读成功且快照中已没有该绑定时，视图确实已关闭或换代，调用仍按不可用结束。
 
-每条命令进入传输时冻结代际 [`DaemonConnectionIdentity`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/server/DaemonConnectionIdentity.java)，即 Environment 当前 READY 连接背后的 Daemon 实例。所有 IDE 凭据都绑定这个代际：同一 Daemon 进程断线重连后，它的 code-server 与视图都还在，凭据继续有效；另一个实例在本节点接管时，连接服务发出 `onDaemonInstanceReplaced`，旧代际的凭据与流一律作废。每个 Environment 在本节点至多保留一个代际。各入口按 [`IdeGenerationState`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/IdeGenerationState.java) 统一裁决：当前实例可以建立新的数据逻辑流；暂无 READY 连接时返回 503，等待同一实例重连；已被接管时返回 409，浏览器需要重新打开视图。
+每条命令进入传输时冻结代际 [`DaemonConnectionIdentity`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/server/DaemonConnectionIdentity.java)，即 Environment 当前 READY 连接背后的 Daemon 实例。所有 IDE 凭据都绑定这个代际：同一 Daemon 进程断线重连后，它的 code-server 与视图都还在，凭据继续有效；另一个实例在本节点接管时，连接服务发出 `onDaemonInstanceReplaced`，旧代际的凭据与流一律作废。数据面按 [`IdeGenerationState`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/IdeGenerationState.java) 裁决：当前实例可以建立新的数据逻辑流；暂无 READY 连接时返回 503，等待同一实例重连；已被接管时返回 409，浏览器需要重新打开视图。
 
 ## 元数据服务与浏览器入口
 
@@ -55,6 +55,8 @@ Server 只用 `CHANGE_DIRECTORY` 的确认回执确定目录，缺失或无效�
 | GET `/api/platform/environments/{id}/runtime` | owner 返回当前 `{revision, status}`；无本代 READY 快照时返回 unavailable |
 
 目录查询只列直接真实子目录，不跟随子目录符号链接；输入目录自身按宿主 `realpath` 规范化。结果按名称排序，最多 1000 项，响应字节达到上限也会截断并设置 `truncated`。不可访问或不存在的目录返回错误，不返回伪造的空列表。
+
+HTTP 中 64 位整数在请求与响应中使用规范十进制字符串；元数据业务输入错误由产生处抛出 `DomainException`，由宿主统一映射为 problem 响应。
 
 正常关闭等待 IDE 原生对话框，不设命令超时；取消以 `validation` / `IDE_CLOSE_CANCELLED` 返回，视图保持打开，也不触发外层放弃确认。控制连接中断时结果未知，不回放副作用或采用迟到结果；用户可在状态未知时显式确认强制关闭。
 
