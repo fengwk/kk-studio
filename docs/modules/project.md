@@ -31,10 +31,10 @@ Reconcile 的执行器、生命周期由 [Web](web.md) 组装。模块依赖方�
 
 ## 平台能力与 owner 归属
 
-Project 只经两个窄适配接触运行时与存储，平台异常在此收敛为 Project 错误：
+Project 经窄适配使用运行时与存储：
 
 - [`IssueThreadExecution`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/platform/IssueThreadExecution.java) 读取线程事实、接受命令与 Join、停止并取得权威 head、查询固定回执；Run 任务经平台的 `AgentTaskService` 提交。读取返回 [`IssueThreadView`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/platform/IssueThreadView.java)：Session、head、version、下一命令序号、历史路径与统一执行事实，Project 不取得完整运行时快照。控制操作加入调用方事务，权威版本冲突原样传播。
-- [`EvidenceBlobs`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/platform/EvidenceBlobs.java) 锁定并消费一次已 READY 的上传、对 Blob 引用做 retain/release、判定 Blob 是否仍可引用；上传不存在译为 not found，未 READY 或已清理译为 validation。
+- [`EvidenceBlobs`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/platform/EvidenceBlobs.java) 锁定并消费一次已 READY 的上传、对 Blob 引用做 retain/release、判定 Blob 是否仍可引用；上传不存在为 not found，不可消费时保留存储的 `conflict` / `STORAGE_VERIFICATION`。
 
 Agent 分支设置直接由平台的 `AgentBranchSettingsMaterializer` 按当前 Agent/Model 目录物化；`Issue + Agent` 名下 Session 的深删除直接调用平台的 `SessionDeletionOrchestrator`。
 
@@ -45,7 +45,7 @@ Agent 分支设置直接由平台的 `AgentBranchSettingsMaterializer` 按当前
 
 ## 工作流配置
 
-`project.workflow` 是严格 JSON。例如由设计和检查两个 Agent 阶段组成的流程：
+`project.workflow` 的持久化文本是严格 JSON。例如由设计和检查两个 Agent 阶段组成的流程：
 
 ```json
 {
@@ -284,14 +284,16 @@ Project 与 Issue 的公开接口都在 `/api/project` 命名空间下：项目�
 `PUT` 整体替换可编辑属性并携带 `expectedVersion`，状态转换与 Project 归档用 `POST /{id}/<动作>`。
 Issue 没有归档状态，删除是唯一的移除方式；Project 归档保留，默认列表只返回活跃项目，
 `includeArchived=true` 同时返回活跃与已归档项目。
-DTO 的时间字段是 epoch 毫秒整数，固定取值（暂停原因、Activity 种类与操作者、Run 状态）使用领域枚举。
+HTTP DTO 的工作流是结构化对象，数值坐标（包括 workflow 的 `maxRuns`、版本与序号）中
+64 位整数使用规范十进制字符串；上例展示的是存储 codec 的形态，不是请求体。
+时间字段是 epoch 毫秒整数，固定取值（暂停原因、Activity 种类与操作者、Run 状态）使用领域枚举。
 完整路由表以生成的 `ApiRoutes` 为准。
 
 ## 错误映射
 
 Project 与 Issue 使用 common 的
 [`DomainException`](../../common/src/main/java/fun/fengwk/kkstudio/common/error/DomainException.java)
-表达校验、缺失与并发冲突；Web 统一将它们翻译为 problem 响应，具体字段与状态见
+在客户端输入错误产生处表达校验、缺失与并发冲突；Web 统一将它们翻译为 problem 响应，具体字段与状态见
 [HTTP 契约](../system-design.md#http-契约)。Agent 工具边界同样使用领域错误类别。
 
 ## 测试与验证
