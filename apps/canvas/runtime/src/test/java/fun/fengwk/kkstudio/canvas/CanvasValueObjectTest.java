@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.canvas;
 
+import static fun.fengwk.kkstudio.canvas.CanvasTestAssertions.assertValidation;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -33,9 +34,7 @@ class CanvasValueObjectTest {
         new CanvasDocument(CANVAS, "canvas", 7L, CREATED, CREATED.plusMillis(1));
 
     assertEquals(7L, document.revision());
-    assertThrows(
-        CanvasValidationException.class,
-        () -> new CanvasDocument(CANVAS, "  ", 0L, CREATED, CREATED));
+    assertValidation(() -> new CanvasDocument(CANVAS, "  ", 0L, CREATED, CREATED));
     assertThrows(
         IllegalArgumentException.class,
         () -> new CanvasDocument(CANVAS, "canvas", -1L, CREATED, CREATED));
@@ -103,29 +102,19 @@ class CanvasValueObjectTest {
     UUID nodeId = UUID.fromString("00000000-0000-0000-0000-0000000000d1");
     UUID resourceId = UUID.fromString("00000000-0000-0000-0000-0000000000d2");
 
-    assertThrows(
-        CanvasValidationException.class,
-        () -> new CanvasCommand.SetNodeResources(nodeId, null, List.of()));
-    assertThrows(
-        CanvasValidationException.class,
-        () -> new CanvasCommand.SetNodeResources(nodeId, List.of(), null));
-    assertThrows(
-        CanvasValidationException.class,
+    assertValidation(() -> new CanvasCommand.SetNodeResources(nodeId, null, List.of()));
+    assertValidation(() -> new CanvasCommand.SetNodeResources(nodeId, List.of(), null));
+    assertValidation(
         () ->
             new CanvasCommand.SetNodeResources(nodeId, List.of(resourceId, resourceId), List.of()));
-    assertThrows(
-        CanvasValidationException.class,
+    assertValidation(
         () ->
             new CanvasCommand.SetNodeResources(
                 nodeId, List.of(resourceId), Collections.singletonList(null)));
     assertThrows(
         NullPointerException.class, () -> new CanvasCommand.DeleteNode(null, List.of(), null));
-    assertThrows(
-        CanvasValidationException.class,
-        () -> new CanvasCommand.RenameNode(nodeId, "node", "x".repeat(257)));
-    assertThrows(
-        CanvasValidationException.class,
-        () -> new CanvasResourceInput.Text("x".repeat(513), "body"));
+    assertValidation(() -> new CanvasCommand.RenameNode(nodeId, "node", "x".repeat(257)));
+    assertValidation(() -> new CanvasResourceInput.Text("x".repeat(513), "body"));
     assertThrows(NullPointerException.class, () -> new CanvasResourceInput.Blob("name", null));
   }
 
@@ -144,21 +133,6 @@ class CanvasValueObjectTest {
     assertEquals(List.of(conflict), ((CanvasCommandResult.Conflicted) conflicted).conflicts());
     assertThrows(
         IllegalArgumentException.class, () -> new CanvasCommandResult.Conflicted(List.of()));
-  }
-
-  /** 写入准入失败的两种原因都必须可被调用方区分，便于区分重试与幂等键复用。 */
-  @Test
-  void conflictExceptionCarriesItsReason() {
-    CanvasConflictException missing =
-        new CanvasConflictException(CanvasConflictException.Reason.CANVAS_NOT_FOUND);
-    assertEquals(CanvasConflictException.Reason.CANVAS_NOT_FOUND, missing.reason());
-    assertEquals("CANVAS_NOT_FOUND", missing.getMessage());
-
-    CanvasConflictException reused =
-        new CanvasConflictException(
-            CanvasConflictException.Reason.IDEMPOTENCY_CONFLICT, "key reused");
-    assertEquals(CanvasConflictException.Reason.IDEMPOTENCY_CONFLICT, reused.reason());
-    assertEquals("key reused", reused.getMessage());
   }
 
   /** 幂等记账与节点行记录都拒绝不合法基线：acceptedRevision 是同步游标，必须非负。 */

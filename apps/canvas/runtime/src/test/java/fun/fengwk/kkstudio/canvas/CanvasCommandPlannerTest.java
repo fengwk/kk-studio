@@ -1,15 +1,16 @@
 package fun.fengwk.kkstudio.canvas;
 
+import static fun.fengwk.kkstudio.canvas.CanvasTestAssertions.assertValidation;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.canvas.function.CanvasJson;
+import fun.fengwk.kkstudio.common.error.DomainException;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -334,8 +335,7 @@ class CanvasCommandPlannerTest {
   void functionReferencesMustResolveWithinTheCanvas() {
     CanvasResourceNode node = textNode(nodeId(1), "node", "body");
 
-    assertThrows(
-        CanvasValidationException.class,
+    assertValidation(
         () ->
             planner.plan(
                 graph(List.of(node)),
@@ -349,8 +349,7 @@ class CanvasCommandPlannerTest {
                                 "{\"source\":{\"type\":\"resource\",\"nodeId\":\""
                                     + nodeId(9)
                                     + "\",\"index\":0}}"))))));
-    assertThrows(
-        CanvasValidationException.class,
+    assertValidation(
         () ->
             planner.plan(
                 graph(List.of(node)),
@@ -372,8 +371,7 @@ class CanvasCommandPlannerTest {
     CanvasResourceNode node = textNode(nodeId(1), "name", "body");
     CanvasResourceNode other = textNode(nodeId(2), "other", "body");
 
-    assertThrows(
-        CanvasValidationException.class,
+    assertValidation(
         () ->
             planner.plan(
                 graph(List.of(node, other)),
@@ -384,11 +382,8 @@ class CanvasCommandPlannerTest {
                 graph(List.of(node)),
                 List.of(new CanvasCommand.RenameNode(nodeId(1), "name", "ＮＡＭＥ")))
             .isRejected());
-    assertThrows(
-        CanvasValidationException.class,
-        () -> new CanvasCommand.RenameNode(nodeId(1), "name", "with\u0007control"));
-    assertThrows(
-        CanvasValidationException.class, () -> new CanvasCommand.RenameNode(nodeId(1), " ", "x"));
+    assertValidation(() -> new CanvasCommand.RenameNode(nodeId(1), "name", "with\u0007control"));
+    assertValidation(() -> new CanvasCommand.RenameNode(nodeId(1), " ", "x"));
   }
 
   /** 分组命令只影响自己的语义组：建组、挂载成员、改名与删组保持成员节点一致。 */
@@ -447,16 +442,14 @@ class CanvasCommandPlannerTest {
     assertEquals(1, created.resources().size());
     assertEquals(0, created.resources().get(0).resourceIndex());
 
-    assertThrows(
-        CanvasValidationException.class,
+    assertValidation(
         () ->
             planner.plan(
                 graph(List.of()),
                 List.of(
                     new CanvasCommand.CreateNode(
                         nodeId(4), "empty", new CanvasTransform(0, 0, 10, 10), List.of()))));
-    assertThrows(
-        CanvasValidationException.class,
+    assertValidation(
         () ->
             planner.plan(
                 graph(List.of()),
@@ -495,9 +488,8 @@ class CanvasCommandPlannerTest {
   void deleteThenCreateMustNotReuseIdentityInTheSameBatch() {
     // 测试意图：同一批先删后建不能复用 node/group UUID；校验失败时不得留下可提交的部分 mutation。
     CanvasResourceNode node = textNode(nodeId(1), "node", "body");
-    CanvasValidationException reusedNode =
-        assertThrows(
-            CanvasValidationException.class,
+    DomainException reusedNode =
+        assertValidation(
             () ->
                 planner.plan(
                     graph(List.of(node)),
@@ -514,9 +506,8 @@ class CanvasCommandPlannerTest {
     UUID groupId = UUID.fromString("00000000-0000-0000-0000-0000000000f1");
     CanvasGroup group =
         new CanvasGroup(groupId, CANVAS, "group", new CanvasTransform(0, 0, 10, 10));
-    CanvasValidationException reusedGroup =
-        assertThrows(
-            CanvasValidationException.class,
+    DomainException reusedGroup =
+        assertValidation(
             () ->
                 planner.plan(
                     graph(List.of(node), List.of(group)),

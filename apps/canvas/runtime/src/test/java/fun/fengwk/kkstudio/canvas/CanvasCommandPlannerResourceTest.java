@@ -1,9 +1,9 @@
 package fun.fengwk.kkstudio.canvas;
 
+import static fun.fengwk.kkstudio.canvas.CanvasTestAssertions.assertValidation;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -43,8 +43,7 @@ class CanvasCommandPlannerResourceTest {
       tooMany.add(new CanvasResourceInput.Text("slot-" + index, "body"));
     }
 
-    assertThrows(
-        CanvasValidationException.class,
+    assertValidation(
         () ->
             planner.plan(
                 graph(List.of(node)),
@@ -58,16 +57,14 @@ class CanvasCommandPlannerResourceTest {
     UUID baseline = node.resources().get(0).id();
     UUID unknown = UUID.randomUUID();
 
-    assertThrows(
-        CanvasValidationException.class,
+    assertValidation(
         () ->
             planner.plan(
                 graph(List.of(node)),
                 List.of(
                     setResources(
                         List.of(baseline), List.of(new CanvasResourceInput.Keep(unknown))))));
-    assertThrows(
-        CanvasValidationException.class,
+    assertValidation(
         () ->
             planner.plan(
                 graph(List.of(node)),
@@ -84,8 +81,7 @@ class CanvasCommandPlannerResourceTest {
   void slotsMustShareOneContentKind() {
     CanvasResourceNode node = textNode(textSlot(0, "body"));
 
-    assertThrows(
-        CanvasValidationException.class,
+    assertValidation(
         () ->
             planner.plan(
                 graph(List.of(node)),

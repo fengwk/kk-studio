@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.canvas;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
+
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
@@ -27,28 +29,29 @@ public record CanvasResourceNode(
     Objects.requireNonNull(resources, "resources");
     resources = List.copyOf(resources);
     if (function == null && resources.isEmpty()) {
-      throw new CanvasValidationException("plain resource node must contain resources");
+      throw DomainException.validation("canvas", "plain resource node must contain resources");
     }
     for (int index = 0; index < resources.size(); index++) {
       CanvasResource resource = resources.get(index);
       if (!resource.canvasId().equals(canvasId)) {
-        throw new CanvasValidationException("node resources must belong to the same canvas");
+        throw DomainException.validation("canvas", "node resources must belong to the same canvas");
       }
       if (!Objects.equals(resource.ownerNodeId(), id)) {
-        throw new CanvasValidationException("node resources must be owned by the node");
+        throw DomainException.validation("canvas", "node resources must be owned by the node");
       }
       if (!Integer.valueOf(index).equals(resource.resourceIndex())) {
-        throw new CanvasValidationException("node resources must occupy consecutive slots");
+        throw DomainException.validation("canvas", "node resources must occupy consecutive slots");
       }
       if (resource.isText() != resources.get(0).isText()) {
-        throw new CanvasValidationException("node resources must have the same content kind");
+        throw DomainException.validation(
+            "canvas", "node resources must have the same content kind");
       }
     }
     if (run != null && !run.nodeId().equals(id)) {
-      throw new CanvasValidationException("run must belong to the node");
+      throw DomainException.validation("canvas", "run must belong to the node");
     }
     if (run != null && function == null) {
-      throw new CanvasValidationException("plain resource node cannot have a run");
+      throw DomainException.validation("canvas", "plain resource node cannot have a run");
     }
   }
 }

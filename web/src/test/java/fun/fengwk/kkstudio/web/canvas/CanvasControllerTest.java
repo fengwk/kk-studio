@@ -2,9 +2,12 @@ package fun.fengwk.kkstudio.web.canvas;
 
 import static org.hamcrest.Matchers.nullValue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -28,7 +31,6 @@ import tools.jackson.databind.json.JsonMapper;
 import fun.fengwk.kkstudio.canvas.CanvasCommand;
 import fun.fengwk.kkstudio.canvas.CanvasCommandResult;
 import fun.fengwk.kkstudio.canvas.CanvasConflict;
-import fun.fengwk.kkstudio.canvas.CanvasConflictException;
 import fun.fengwk.kkstudio.canvas.CanvasDocument;
 import fun.fengwk.kkstudio.canvas.CanvasFunction;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRun;
@@ -54,6 +56,7 @@ import fun.fengwk.kkstudio.canvas.http.CanvasController;
 import fun.fengwk.kkstudio.canvas.infra.dto.CanvasDtoMapper;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasCommandService;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasQueryService;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
@@ -86,6 +89,7 @@ class CanvasControllerTest {
   private CanvasQueryService queryService;
   private CanvasCommandService commandService;
   private StorageBlobManager blobManager;
+  private CanvasController controller;
 
   @BeforeEach
   @SuppressWarnings("unchecked")
@@ -102,10 +106,10 @@ class CanvasControllerTest {
     blob.setWidth(640L);
     blob.setHeight(480L);
     when(blobManager.getBlob(BLOB_1)).thenReturn(blob);
+    controller =
+        new CanvasController(queryService, commandService, new CanvasDtoMapper(blobManager));
     mockMvc =
-        standaloneSetup(
-                new CanvasController(
-                    queryService, commandService, new CanvasDtoMapper(blobManager)))
+        standaloneSetup(controller)
             .setMessageConverters(new JacksonJsonHttpMessageConverter(objectMapper))
             .setControllerAdvice(
                 new ApiResponseStatusAdvice(), new StudioProblemAdvice(new StudioMessageService()))
@@ -347,30 +351,43 @@ class CanvasControllerTest {
         .andExpect(jsonPath("$.errors.conflicts[3].run.status").value("RUNNING"));
   }
 
-  /** 测试意图：画布不存在返回 404，同一幂等键绑定不同请求指纹返回 409。 */
+  /** 控制器不吞掉准入失败；实际 HTTP 映射由 Web 组合根测试。 */
   @Test
-  void admissionFailuresMapToNotFoundAndIdempotencyConflict() throws Exception {
+  void admissionFailuresPropagateToDomainAdvice() throws Exception {
+    ApplyCanvasCommandsRequestDTO request =
+        objectMapper.readValue(commandJson(""), ApplyCanvasCommandsRequestDTO.class);
+    DomainException missing = DomainException.notFound("canvas");
     when(commandService.applyCommands(any(UUID.class), any(UUID.class), anyList()))
-        .thenThrow(
-            new CanvasConflictException(
-                CanvasConflictException.Reason.CANVAS_NOT_FOUND, "canvas document not found"));
+        .thenThrow(missing);
+    assertSame(
+        missing,
+        assertThrows(
+            DomainException.class, () -> controller.applyCommands(CANVAS.toString(), request)));
     mockMvc
         .perform(
             post("/api/canvases/" + CANVAS + "/commands")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(commandJson("")))
-        .andExpect(status().isNotFound());
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.code").value("not_found"));
 
-    when(commandService.applyCommands(any(UUID.class), any(UUID.class), anyList()))
-        .thenThrow(
-            new CanvasConflictException(
-                CanvasConflictException.Reason.IDEMPOTENCY_CONFLICT, "different request"));
+    DomainException conflict =
+        DomainException.conflict("IDEMPOTENCY_CONFLICT", "different request");
+    doThrow(conflict)
+        .when(commandService)
+        .applyCommands(any(UUID.class), any(UUID.class), anyList());
+    assertSame(
+        conflict,
+        assertThrows(
+            DomainException.class, () -> controller.applyCommands(CANVAS.toString(), request)));
     mockMvc
         .perform(
             post("/api/canvases/" + CANVAS + "/commands")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(commandJson("")))
-        .andExpect(status().isConflict());
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.code").value("conflict"))
+        .andExpect(jsonPath("$.reason").value("IDEMPOTENCY_CONFLICT"));
   }
 
   /** 测试意图：精确重放只返回当时记录的接受位置与空变化集，不冒充新的执行状态。 */

@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.canvas;
 
 import fun.fengwk.kkstudio.canvas.function.CanvasJson;
+import fun.fengwk.kkstudio.common.error.DomainException;
 
 import java.util.List;
 import java.util.UUID;
@@ -18,7 +19,7 @@ final class CanvasValidation {
 
   static String requireNonBlank(String value, String field) {
     if (value == null || value.isBlank()) {
-      throw new CanvasValidationException(field + " must not be blank");
+      throw DomainException.validation(field, field + " must not be blank");
     }
     return value;
   }
@@ -39,18 +40,19 @@ final class CanvasValidation {
 
   static String requireText(String value, String field, int maxLength) {
     if (value == null) {
-      throw new CanvasValidationException(field + " must not be null");
+      throw DomainException.validation(field, field + " must not be null");
     }
     String trimmed = value.strip();
     if (trimmed.isEmpty()) {
-      throw new CanvasValidationException(field + " must not be blank");
+      throw DomainException.validation(field, field + " must not be blank");
     }
     if (trimmed.length() > maxLength) {
-      throw new CanvasValidationException(field + " must not exceed " + maxLength + " characters");
+      throw DomainException.validation(
+          field, field + " must not exceed " + maxLength + " characters");
     }
     for (int index = 0; index < trimmed.length(); index++) {
       if (Character.isISOControl(trimmed.charAt(index))) {
-        throw new CanvasValidationException(field + " must not contain control characters");
+        throw DomainException.validation(field, field + " must not contain control characters");
       }
     }
     return trimmed;
@@ -58,11 +60,11 @@ final class CanvasValidation {
 
   static <T> List<T> requireList(List<T> values, String field) {
     if (values == null) {
-      throw new CanvasValidationException(field + " must not be null");
+      throw DomainException.validation(field, field + " must not be null");
     }
     for (T value : values) {
       if (value == null) {
-        throw new CanvasValidationException(field + " must not contain null elements");
+        throw DomainException.validation(field, field + " must not contain null elements");
       }
     }
     return List.copyOf(values);
@@ -70,23 +72,24 @@ final class CanvasValidation {
 
   static void requireDistinct(List<UUID> values, String field) {
     if (values.stream().distinct().count() != values.size()) {
-      throw new CanvasValidationException(field + " must not contain duplicates");
+      throw DomainException.validation(field, field + " must not contain duplicates");
     }
   }
 
   /** 解析命令携带的 args JSON：必须严格合法且是 object。 */
   static CanvasJson.JsonObject requireArgs(String argsJson, String field) {
     if (argsJson == null) {
-      throw new CanvasValidationException(field + " must not be null");
+      throw DomainException.validation(field, field + " must not be null");
     }
     CanvasJson value;
     try {
       value = CanvasJson.parse(argsJson);
     } catch (IllegalArgumentException error) {
-      throw new CanvasValidationException(field + " must be strict JSON: " + error.getMessage());
+      throw DomainException.validation(
+          field, field + " must be strict JSON: " + error.getMessage(), error);
     }
     if (!(value instanceof CanvasJson.JsonObject object)) {
-      throw new CanvasValidationException(field + " must be a JSON object");
+      throw DomainException.validation(field, field + " must be a JSON object");
     }
     return object;
   }

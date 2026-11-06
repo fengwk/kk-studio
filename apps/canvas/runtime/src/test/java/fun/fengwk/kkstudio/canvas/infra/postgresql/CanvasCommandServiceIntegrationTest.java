@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.canvas.infra.postgresql;
 
+import static fun.fengwk.kkstudio.canvas.CanvasTestAssertions.assertValidation;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -16,7 +17,6 @@ import fun.fengwk.kkstudio.canvas.CanvasCommandResult;
 import fun.fengwk.kkstudio.canvas.CanvasCommandResult.Accepted;
 import fun.fengwk.kkstudio.canvas.CanvasCommandResult.Conflicted;
 import fun.fengwk.kkstudio.canvas.CanvasConflict;
-import fun.fengwk.kkstudio.canvas.CanvasConflictException;
 import fun.fengwk.kkstudio.canvas.CanvasDocument;
 import fun.fengwk.kkstudio.canvas.CanvasFunction;
 import fun.fengwk.kkstudio.canvas.CanvasGroupPatch;
@@ -26,8 +26,9 @@ import fun.fengwk.kkstudio.canvas.CanvasResourceInput;
 import fun.fengwk.kkstudio.canvas.CanvasResourceNode;
 import fun.fengwk.kkstudio.canvas.CanvasSnapshot;
 import fun.fengwk.kkstudio.canvas.CanvasTransform;
-import fun.fengwk.kkstudio.canvas.CanvasValidationException;
 import fun.fengwk.kkstudio.canvas.function.CanvasJson;
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 
 import java.util.List;
 import java.util.UUID;
@@ -52,11 +53,10 @@ class CanvasCommandServiceIntegrationTest extends PostgresCanvasInfraTestSupport
     assertEquals(0L, document.revision());
     assertEquals(document, canvasStore.findDocument(document.id()).orElseThrow());
 
-    assertThrows(CanvasValidationException.class, () -> commandService.createCanvas(null));
-    assertThrows(CanvasValidationException.class, () -> commandService.createCanvas("   "));
-    assertThrows(CanvasValidationException.class, () -> commandService.createCanvas("bad\nname"));
-    assertThrows(
-        CanvasValidationException.class, () -> commandService.createCanvas("x".repeat(257)));
+    assertValidation(() -> commandService.createCanvas(null));
+    assertValidation(() -> commandService.createCanvas("   "));
+    assertValidation(() -> commandService.createCanvas("bad\nname"));
+    assertValidation(() -> commandService.createCanvas("x".repeat(257)));
   }
 
   /** 多命令批要么整体提交、要么整体不提交：接受后所有行与 revision 同时可见，patch 携带完整变化集。 */
@@ -178,16 +178,17 @@ class CanvasCommandServiceIntegrationTest extends PostgresCanvasInfraTestSupport
         idempotencyKey,
         List.of(new CanvasCommand.RenameNode(node.nodeId, node.name, "a")));
 
-    CanvasConflictException conflict =
+    DomainException conflict =
         assertThrows(
-            CanvasConflictException.class,
+            DomainException.class,
             () ->
                 apply(
                     canvasId,
                     idempotencyKey,
                     List.of(new CanvasCommand.RenameNode(node.nodeId, node.name, "b"))));
 
-    assertEquals(CanvasConflictException.Reason.IDEMPOTENCY_CONFLICT, conflict.reason());
+    assertEquals(DomainErrorCode.CONFLICT, conflict.code());
+    assertEquals("IDEMPOTENCY_CONFLICT", conflict.reason());
     assertEquals("a", findSnapshot(canvasId).nodes().get(0).name());
     assertEquals(1L, findSnapshot(canvasId).document().revision());
   }
@@ -196,9 +197,9 @@ class CanvasCommandServiceIntegrationTest extends PostgresCanvasInfraTestSupport
   @Test
   void missingCanvasIsRejected() {
     UUID canvasId = UUID.randomUUID();
-    CanvasConflictException conflict =
+    DomainException conflict =
         assertThrows(
-            CanvasConflictException.class,
+            DomainException.class,
             () ->
                 apply(
                     canvasId,
@@ -209,7 +210,8 @@ class CanvasCommandServiceIntegrationTest extends PostgresCanvasInfraTestSupport
                             TRANSFORM,
                             List.of(new CanvasResourceInput.Text("text", "body"))))));
 
-    assertEquals(CanvasConflictException.Reason.CANVAS_NOT_FOUND, conflict.reason());
+    assertEquals(DomainErrorCode.NOT_FOUND, conflict.code());
+    assertEquals("canvas", conflict.resource());
     assertTrue(canvasStore.findDocument(canvasId).isEmpty());
   }
 

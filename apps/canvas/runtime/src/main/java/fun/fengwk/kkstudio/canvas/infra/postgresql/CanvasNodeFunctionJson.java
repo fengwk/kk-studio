@@ -1,8 +1,8 @@
 package fun.fengwk.kkstudio.canvas.infra.postgresql;
 
 import fun.fengwk.kkstudio.canvas.CanvasFunction;
-import fun.fengwk.kkstudio.canvas.CanvasValidationException;
 import fun.fengwk.kkstudio.canvas.function.CanvasJson;
+import fun.fengwk.kkstudio.common.error.DomainException;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -28,7 +28,7 @@ final class CanvasNodeFunctionJson {
     return new CanvasJson.JsonObject(values).write();
   }
 
-  /** 解析持久化文本；列内容不符合 base shape 时抛 {@link CanvasValidationException}。 */
+  /** 解析持久化文本；列内容不符合 base shape 时抛 {@link DomainException}。 */
   static CanvasFunction decode(String functionJson) {
     if (functionJson == null) {
       return null;
@@ -37,16 +37,16 @@ final class CanvasNodeFunctionJson {
     try {
       shape = CanvasJson.parseObject(functionJson);
     } catch (IllegalArgumentException error) {
-      throw new CanvasValidationException(
-          "node function must be strict JSON: " + error.getMessage());
+      throw DomainException.validation(
+          "function", "node function must be strict JSON: " + error.getMessage(), error);
     }
     CanvasJson name = shape.values().get("name");
     CanvasJson args = shape.values().get("args");
     if (!(name instanceof CanvasJson.JsonText nameText)) {
-      throw new CanvasValidationException("node function must contain a string name");
+      throw DomainException.validation("function", "node function must contain a string name");
     }
     if (!(args instanceof CanvasJson.JsonObject argsObject)) {
-      throw new CanvasValidationException("node function must contain an object args");
+      throw DomainException.validation("function", "node function must contain an object args");
     }
     return new CanvasFunction(nameText.value(), argsObject);
   }
