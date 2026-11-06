@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -88,4 +89,21 @@ class ApiResponseTest {
         NullPointerException.class,
         () -> ApiResponse.error(HttpStatus.BAD_REQUEST, "CODE", "message", null));
   }
+
+  /** 过渡期 HTTP 只写出资源本身：信封按 data 序列化，空数据写出 null。 */
+  @Test
+  void serializesOnlyTheResourceData() {
+    JsonMapper mapper = JsonMapper.builder().build();
+    assertEquals("\"payload\"", mapper.writeValueAsString(ApiResponse.ok("payload")));
+    assertEquals(
+        "{\"name\":\"payload\"}",
+        mapper.writeValueAsString(ApiResponse.created(new Probe("payload"))));
+    assertEquals("null", mapper.writeValueAsString(ApiResponse.noContent()));
+    assertEquals(
+        "null",
+        mapper.writeValueAsString(
+            ApiResponse.error(HttpStatus.CONFLICT, "CONFLICT", "conflict", Map.of())));
+  }
+
+  private record Probe(String name) {}
 }
