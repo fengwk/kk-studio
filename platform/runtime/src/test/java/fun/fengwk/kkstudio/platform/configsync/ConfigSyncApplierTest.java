@@ -256,7 +256,7 @@ class ConfigSyncApplierTest {
         new SystemSettingsCodec().toSections(SystemSettingsTestFixture.DEFAULT);
     sections.getNetwork().setProxyUrl("http://127.0.0.1:9");
     sections.getNetwork().setNoProxyHosts("localhost,127.0.0.1");
-    ConfigSyncPlan.SettingsUpdate update = new ConfigSyncPlan.SettingsUpdate(sections, "9");
+    ConfigSyncPlan.SettingsUpdate update = new ConfigSyncPlan.SettingsUpdate(sections, 9L);
 
     applier.apply(
         plan(List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), update), List.of());
@@ -264,7 +264,7 @@ class ConfigSyncApplierTest {
     ArgumentCaptor<SystemSettingsUpdateDTO> captor =
         ArgumentCaptor.forClass(SystemSettingsUpdateDTO.class);
     verify(systemSettingsService).update(captor.capture());
-    assertEquals("9", captor.getValue().getExpectedVersion());
+    assertEquals(9L, captor.getValue().getExpectedVersion());
     // 完整聚合必须携带网络设置，避免省略字段导致校验失败或丢失代理事实。
     assertEquals(sections.getNetwork(), captor.getValue().getNetwork());
     // 不应再读当前版本。

@@ -68,7 +68,7 @@ class SystemSettingsServiceTest {
     when(repository.get()).thenReturn(record(0), record(1));
     when(repository.update(SystemSettingsTestFixture.DEFAULT, 0)).thenReturn(false);
 
-    DomainException error = assertThrows(DomainException.class, () -> service.update(update("0")));
+    DomainException error = assertThrows(DomainException.class, () -> service.update(update(0L)));
 
     assertEquals(DomainErrorCode.VERSION_CONFLICT, error.code());
     assertEquals("0", error.expectedVersion());
@@ -82,7 +82,7 @@ class SystemSettingsServiceTest {
     when(repository.get()).thenReturn(record(0)).thenReturn(null);
     when(repository.update(SystemSettingsTestFixture.DEFAULT, 0)).thenReturn(false);
 
-    DomainException error = assertThrows(DomainException.class, () -> service.update(update("0")));
+    DomainException error = assertThrows(DomainException.class, () -> service.update(update(0L)));
     assertEquals(DomainErrorCode.NOT_FOUND, error.code());
   }
 
@@ -102,7 +102,7 @@ class SystemSettingsServiceTest {
     when(repository.update(SystemSettingsTestFixture.DEFAULT, 0)).thenReturn(true);
 
     TransactionSynchronizationManager.initSynchronization();
-    service.update(update("0"));
+    service.update(update(0L));
     // 事务尚未提交：内存快照不得提前更新。
     assertEquals(SystemSettingsTestFixture.DEFAULT, snapshot.get());
     TransactionSynchronizationManager.getSynchronizations()
@@ -118,7 +118,7 @@ class SystemSettingsServiceTest {
     when(repository.update(SystemSettingsTestFixture.DEFAULT, 0)).thenReturn(true);
 
     TransactionSynchronizationManager.initSynchronization();
-    service.update(update("0"));
+    service.update(update(0L));
     // 模拟回滚：只触发 afterCompletion(STATUS_ROLLED_BACK)，不触发 afterCommit。
     TransactionSynchronizationManager.getSynchronizations()
         .forEach(
@@ -137,7 +137,7 @@ class SystemSettingsServiceTest {
     when(repository.update(SystemSettingsTestFixture.DEFAULT, 0)).thenReturn(true);
 
     TransactionSynchronizationManager.initSynchronization();
-    assertEquals("1", service.update(update("0")).getVersion());
+    assertEquals(1L, service.update(update(0L)).getVersion());
     assertDoesNotThrow(
         () ->
             TransactionSynchronizationManager.getSynchronizations()
@@ -155,7 +155,7 @@ class SystemSettingsServiceTest {
     when(repository.get()).thenReturn(record(0), record(0), record(1));
     when(repository.update(SystemSettingsTestFixture.DEFAULT, 0)).thenReturn(true);
 
-    service.update(update("0"));
+    service.update(update(0L));
 
     assertEquals(UPDATED_SETTINGS, snapshot.get());
   }
@@ -168,11 +168,11 @@ class SystemSettingsServiceTest {
         .thenThrow(new IllegalStateException("database temporarily unavailable"));
     when(repository.update(SystemSettingsTestFixture.DEFAULT, 0)).thenReturn(true);
 
-    assertEquals("1", assertDoesNotThrow(() -> service.update(update("0"))).getVersion());
+    assertEquals(1L, assertDoesNotThrow(() -> service.update(update(0L))).getVersion());
     assertEquals(SystemSettingsTestFixture.DEFAULT, snapshot.get());
   }
 
-  private SystemSettingsUpdateDTO update(String expectedVersion) {
+  private SystemSettingsUpdateDTO update(Long expectedVersion) {
     SystemSettingsSectionsDTO sections = codec.toSections(SystemSettingsTestFixture.DEFAULT);
     return update(sections, expectedVersion);
   }
@@ -180,7 +180,7 @@ class SystemSettingsServiceTest {
   /** 非法代理在任何仓库读写之前拒绝，快照保持原值，异常不回显凭据。 */
   @Test
   void invalidProxyFailsBeforeRepositoryAccess() {
-    SystemSettingsUpdateDTO request = update("0");
+    SystemSettingsUpdateDTO request = update(0L);
     request.getNetwork().setProxyUrl("http://synthetic-user:synthetic-password@proxy:3128");
     DomainException error = assertThrows(DomainException.class, () -> service.update(request));
     assertEquals(DomainErrorCode.VALIDATION, error.code());
@@ -201,13 +201,12 @@ class SystemSettingsServiceTest {
             new SystemSettingsRepository.SystemSettingsRecord(settings, 1, CREATED_AT, UPDATED_AT));
     var response = service.get();
     assertEquals(settings, codec.fromDto(response));
-    assertEquals("1", response.getVersion());
+    assertEquals(1L, response.getVersion());
     assertEquals(CREATED_AT, response.getCreatedAt());
     assertEquals(UPDATED_AT, response.getUpdatedAt());
   }
 
-  private SystemSettingsUpdateDTO update(
-      SystemSettingsSectionsDTO sections, String expectedVersion) {
+  private SystemSettingsUpdateDTO update(SystemSettingsSectionsDTO sections, Long expectedVersion) {
     SystemSettingsUpdateDTO update = new SystemSettingsUpdateDTO();
     update.setExpectedVersion(expectedVersion);
     update.setTool(sections.getTool());

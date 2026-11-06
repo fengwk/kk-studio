@@ -10,8 +10,8 @@ import java.time.Instant;
 @EqualsAndHashCode(callSuper = true)
 public class SystemSettingsDTO extends SystemSettingsSectionsDTO {
 
-  /** 非负十进制字符串版本号；客户端每次 PUT 时必须回传为 {@code expectedVersion}。 */
-  private String version;
+  /** 乐观锁版本；wire 上为非负十进制字符串，客户端每次 PUT 时必须回传为 {@code expectedVersion}。 */
+  private Long version;
 
   /** 创建时刻。 */
   private Instant createdAt;
