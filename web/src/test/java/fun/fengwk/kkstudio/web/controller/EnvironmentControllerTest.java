@@ -38,8 +38,8 @@ import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentInstallCodeDTO;
 import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentInstallConfigUpdateDTO;
 import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentStatus;
 import fun.fengwk.kkstudio.platform.environment.http.EnvironmentController;
-import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
-import fun.fengwk.kkstudio.web.advice.StudioProblemAdvice;
+import fun.fengwk.kkstudio.platform.i18n.MessageService;
+import fun.fengwk.kkstudio.web.advice.ProblemAdvice;
 
 import java.time.Instant;
 import java.util.List;
@@ -63,7 +63,7 @@ class EnvironmentControllerTest {
     mockMvc =
         MockMvcBuilders.standaloneSetup(new EnvironmentController(environmentService))
             .setConversionService(conversion)
-            .setControllerAdvice(new StudioProblemAdvice(new StudioMessageService()))
+            .setControllerAdvice(new ProblemAdvice(new MessageService()))
             .build();
   }
 

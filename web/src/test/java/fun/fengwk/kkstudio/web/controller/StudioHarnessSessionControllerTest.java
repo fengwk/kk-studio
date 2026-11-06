@@ -43,12 +43,12 @@ import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadSummaryDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessUsageCostDTO;
 import fun.fengwk.kkstudio.platform.harness.http.HarnessSessionController;
 import fun.fengwk.kkstudio.platform.harness.thread.query.UsageCostProjectionService;
-import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
+import fun.fengwk.kkstudio.platform.i18n.MessageService;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessOwnerQueryService;
 import fun.fengwk.kkstudio.web.HttpBoundaryConfiguration;
 import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
+import fun.fengwk.kkstudio.web.advice.ProblemAdvice;
 import fun.fengwk.kkstudio.web.advice.RequestBodyRequiredValidationAdvice;
-import fun.fengwk.kkstudio.web.advice.StudioProblemAdvice;
 
 import java.time.Instant;
 import java.util.List;
@@ -77,7 +77,7 @@ class StudioHarnessSessionControllerTest {
             .setMessageConverters(
                 new JacksonJsonHttpMessageConverter(StrictHttpJsonMapperTestSupport.strictHttp()))
             .setControllerAdvice(
-                new StudioProblemAdvice(new StudioMessageService()),
+                new ProblemAdvice(new MessageService()),
                 new RequestBodyRequiredValidationAdvice(StrictHttpJsonMapperTestSupport.get()),
                 new HttpBoundaryConfiguration.CanonicalUuidBinding())
             .build();

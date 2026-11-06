@@ -17,11 +17,11 @@ import fun.fengwk.kkstudio.platform.harness.http.HarnessThreadController;
 import fun.fengwk.kkstudio.platform.harness.http.HarnessThreadService;
 import fun.fengwk.kkstudio.platform.harness.thread.query.EnvironmentWaitProjectionService;
 import fun.fengwk.kkstudio.platform.harness.thread.query.UsageCostProjectionService;
-import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
+import fun.fengwk.kkstudio.platform.i18n.MessageService;
 import fun.fengwk.kkstudio.platform.interaction.InteractionService;
 import fun.fengwk.kkstudio.platformtest.harness.HarnessRuntimeTestFixtures;
 import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
-import fun.fengwk.kkstudio.web.advice.StudioProblemAdvice;
+import fun.fengwk.kkstudio.web.advice.ProblemAdvice;
 
 import java.util.Map;
 import java.util.UUID;
@@ -61,7 +61,7 @@ abstract class HarnessThreadControllerTestSupport {
                 controller, new HarnessModelRequestDebugController(modelRequestDebugService))
             .setMessageConverters(
                 new JacksonJsonHttpMessageConverter(StrictHttpJsonMapperTestSupport.strictHttp()))
-            .setControllerAdvice(new StudioProblemAdvice(new StudioMessageService()))
+            .setControllerAdvice(new ProblemAdvice(new MessageService()))
             .build();
   }
 

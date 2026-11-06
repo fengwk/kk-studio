@@ -55,8 +55,8 @@ Environment、Settings 与 Catalog 的实体仓库直接以 `JdbcClient` 承担 
 | [settings](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/settings) | 全局设置、严格 codec、编辑 schema、版本快照与运行时现读的全局代理装配 |
 | [configsync](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/configsync) | `ConfigSyncService` 编排八类配置的 YAML 读写、依赖闭包与导入 |
 | [events](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/events) | 各模块共享的进程内订阅原语：`SubscriptionFanOut` 的 UUID 定点/全局注册、幂等注销与消费者隔离投递，`SourceSubscribed` 的 ack 游标与释放句柄；不含领域事件语义、持久化或 LISTEN |
-| [http](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/http) | 各模块共享的 HTTP 边界约定：过渡期成功响应 `ApiResponse` 与路径、分页参数的共同翻译 `RequestParameters`；不含 advice、MVC 装配或容器 |
-| [i18n](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/i18n) | 请求 locale 的用户可见消息解析 `StudioMessageService`；资源包随本模块发布，中英文缺键回退固定 |
+| [http](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/http) | 各模块共享的 HTTP 边界约定：路径与查询参数的共同翻译 `RequestParameters`；不含 advice、MVC 装配或容器 |
+| [i18n](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/i18n) | 请求 locale 的用户可见消息解析 `MessageService`；资源包随本模块发布，中英文缺键回退固定 |
 
 Harness HTTP DTO 的 wire 契约由
 [`HarnessRuntimeDtoContractTest`](../../platform/runtime/src/test/java/fun/fengwk/kkstudio/platform/harness/dto/HarnessRuntimeDtoContractTest.java)
@@ -794,5 +794,5 @@ Harness 的定向入口：
 `FakeAgentDriver` 的进程内私有状态不参与数据库事务。
 真实设施测试基座、执行命令和覆盖率入口见 [开发与测试](../operations/development-and-testing.md)。
 
-上级：[系统设计](../system-design.md)。相关文档：[Web](web.md)、[Share](share.md)、
+上级：[系统设计](../system-design.md)。相关文档：[Web](web.md)、
 [Schema](schema.md)、[Harness Runtime](harness-runtime.md)、[Canvas](canvas.md)、[Project](project.md)、[IDE](ide.md)。

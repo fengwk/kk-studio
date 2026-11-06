@@ -34,7 +34,7 @@ import {
   writeCaseResult,
   writeSummaryAndReport,
 } from './report.mjs'
-import { assert, httpJson, pageResults, cid } from '../e2e/lib/http.mjs'
+import { assert, httpJson, listResults, cid } from '../e2e/lib/http.mjs'
 import {
   assertRootYoloEnabled,
   branchSettingsOf,
@@ -170,13 +170,13 @@ export async function main(argv = process.argv.slice(2)) {
 
 async function validatePreflight(ctx, daemonEnv) {
   const [providersResponse, modelsResponse, toolsResponse, environments] = await Promise.all([
-    ctx.call('GET', '/api/platform/providers?pageNumber=1&pageSize=100'),
-    ctx.call('GET', '/api/platform/models?pageNumber=1&pageSize=100'),
+    ctx.call('GET', '/api/platform/providers'),
+    ctx.call('GET', '/api/platform/models'),
     ctx.call('GET', '/api/platform/tools'),
     listEnvironments(ctx),
   ])
-  const providers = pageResults(providersResponse.json)
-  const models = pageResults(modelsResponse.json)
+  const providers = listResults(providersResponse.json)
+  const models = listResults(modelsResponse.json)
   const toolCatalog = toolsResponse.json
   assert(
     Array.isArray(toolCatalog),

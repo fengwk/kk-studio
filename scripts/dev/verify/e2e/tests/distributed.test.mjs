@@ -40,10 +40,10 @@ test('createNodeCall routes by node id and rejects unknown nodes', async () => {
   }
   try {
     const call = createNodeCall(createBaseUrls('http://node-a.test', 'http://node-b.test'))
-    const a = await call('a', 'GET', '/api/platform/agents?pageNumber=1&pageSize=1')
-    const b = await call('b', 'GET', '/api/platform/agents?pageNumber=1&pageSize=1')
-    assert.equal(seen[0].url, 'http://node-a.test/api/platform/agents?pageNumber=1&pageSize=1')
-    assert.equal(seen[1].url, 'http://node-b.test/api/platform/agents?pageNumber=1&pageSize=1')
+    const a = await call('a', 'GET', '/api/platform/agents')
+    const b = await call('b', 'GET', '/api/platform/agents')
+    assert.equal(seen[0].url, 'http://node-a.test/api/platform/agents')
+    assert.equal(seen[1].url, 'http://node-b.test/api/platform/agents')
     assert.equal(a.json.ok, true)
     assert.equal(b.json.ok, true)
 

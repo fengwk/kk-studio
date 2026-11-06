@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.platform.plugin.resource;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -11,6 +12,18 @@ import java.util.UUID;
 
 /** 会话 Resource URI 规范解析单元测试。 */
 class SessionResourceUriTest {
+
+  /** 规范 URI 只由 blob id 派生，并与严格解析互为往返；缺少 blob id 时拒绝而不是产生半成品 URI。 */
+  @Test
+  void formatsCanonicalUriFromBlobId() {
+    UUID blobId = UUID.fromString("3f1a2b4c-5d6e-4f70-8192-a3b4c5d6e7f8");
+
+    String uri = SessionResourceUri.format(blobId);
+
+    assertEquals("vfs:/resources/3f1a2b4c-5d6e-4f70-8192-a3b4c5d6e7f8", uri);
+    assertEquals(Optional.of(blobId), SessionResourceUri.parse(uri));
+    assertThrows(NullPointerException.class, () -> SessionResourceUri.format(null));
+  }
 
   /** 合法规范的小写 UUID 必须能正确解析出 blob id。 */
   @Test

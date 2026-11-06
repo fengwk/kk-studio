@@ -7,7 +7,7 @@ import org.junit.jupiter.api.Test;
 import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.platform.catalog.dto.AgentConfigDTO;
-import fun.fengwk.kkstudio.share.skill.SkillRefDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.SkillRefDTO;
 
 import java.util.ArrayList;
 import java.util.List;

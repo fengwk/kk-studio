@@ -306,7 +306,7 @@ start_backend() {
   local pid=$!
   echo "$pid" >"$WORK_DIR/backend.pid"
   wait_http_process \
-    "$BACKEND_URL/api/platform/agents?pageNumber=1&pageSize=1" \
+    "$BACKEND_URL/api/platform/agents" \
     backend \
     "$pid" \
     "$WORK_DIR/backend.log" \
@@ -404,7 +404,7 @@ ensure_stack() {
     package_backend "$java_home"
   fi
 
-  if ! curl -fsS "$BACKEND_URL/api/platform/agents?pageNumber=1&pageSize=1" >/dev/null 2>&1; then
+  if ! curl -fsS "$BACKEND_URL/api/platform/agents" >/dev/null 2>&1; then
     start_backend "$java_home"
   else
     step "Reusing backend $BACKEND_URL"

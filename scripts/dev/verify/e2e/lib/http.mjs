@@ -89,10 +89,10 @@ export async function httpJson(
   }
 }
 
-export function pageResults(payload) {
-  if (payload && typeof payload === 'object' && Array.isArray(payload.results)) return payload.results
+/** 读取直接返回的列表；分页信封已随页码分页删除，任何对象形状都视为契约漂移。 */
+export function listResults(payload) {
   if (Array.isArray(payload)) return payload
-  throw new Error(`expected page/list data, got ${JSON.stringify(payload)?.slice(0, 200)}`)
+  throw new Error(`expected list data, got ${JSON.stringify(payload)?.slice(0, 200)}`)
 }
 
 export function sleep(ms) {

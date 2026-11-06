@@ -19,7 +19,7 @@ import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
  * 异常翻译链构造并写出 JSON body（即 “Broken pipe 后 JSON 二次写入”）。验证修复后这两类边界 以“无 body”结束，而不影响普通 API 错误翻译。
  */
 @AutoConfigureMockMvc
-class StudioDisconnectedClientExceptionResolverIntegrationTest extends WebPostgresTestSupport {
+class DisconnectedClientExceptionResolverIntegrationTest extends WebPostgresTestSupport {
 
   @Autowired private MockMvc mockMvc;
 

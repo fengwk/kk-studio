@@ -41,11 +41,11 @@ import fun.fengwk.kkstudio.canvas.infra.dto.CanvasDtoMapper;
 import fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionService;
 import fun.fengwk.kkstudio.canvas.infra.platform.PluginCanvasFunctionCatalogSource;
 import fun.fengwk.kkstudio.common.error.DomainException;
-import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
+import fun.fengwk.kkstudio.platform.i18n.MessageService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
+import fun.fengwk.kkstudio.web.advice.ProblemAdvice;
 import fun.fengwk.kkstudio.web.advice.RequestBodyRequiredValidationAdvice;
-import fun.fengwk.kkstudio.web.advice.StudioProblemAdvice;
 
 import java.time.Instant;
 import java.util.List;
@@ -93,7 +93,7 @@ class CanvasFunctionControllerTest {
                     new CanvasDtoMapper(mock(StorageBlobManager.class))))
             .setControllerAdvice(
                 new RequestBodyRequiredValidationAdvice(mapper),
-                new StudioProblemAdvice(new StudioMessageService()))
+                new ProblemAdvice(new MessageService()))
             .setMessageConverters(new JacksonJsonHttpMessageConverter(mapper))
             .build();
   }

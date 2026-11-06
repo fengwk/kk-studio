@@ -13,12 +13,12 @@ import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
+import fun.fengwk.kkstudio.platform.catalog.dto.SkillRefDTO;
 import fun.fengwk.kkstudio.platform.environment.skill.SkillPromptResolution;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessModelRequestDebugDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessModelSelectionDTO;
 import fun.fengwk.kkstudio.platform.harness.thread.command.LiveTurnPlan;
-import fun.fengwk.kkstudio.share.catalog.EnvironmentSupportDTO;
-import fun.fengwk.kkstudio.share.skill.SkillRefDTO;
 
 import java.time.Instant;
 import java.util.List;
@@ -168,7 +168,7 @@ class StudioHarnessThreadModelRequestDebugControllerTest
     sent.setName("read");
     sent.setDescription("Read a file.");
     sent.setInputSchemaJson("{\"type\":\"object\"}");
-    sent.setEnvironmentSupport(EnvironmentSupportDTO.ROUTED);
+    sent.setEnvironmentSupport(EnvironmentSupport.ROUTED);
     sent.setProvenance("builtin:read");
     sent.setState(LiveTurnPlan.ToolState.SENT);
     sent.setFilterReason(null);
@@ -177,7 +177,7 @@ class StudioHarnessThreadModelRequestDebugControllerTest
     filtered.setName("bash");
     filtered.setDescription("Run a command.");
     filtered.setInputSchemaJson("{\"type\":\"object\"}");
-    filtered.setEnvironmentSupport(EnvironmentSupportDTO.REQUIRED);
+    filtered.setEnvironmentSupport(EnvironmentSupport.REQUIRED);
     filtered.setProvenance("builtin:bash");
     filtered.setState(LiveTurnPlan.ToolState.FILTERED);
     filtered.setFilterReason(LiveTurnPlan.FilterReason.ENVIRONMENT_NOT_SELECTED);

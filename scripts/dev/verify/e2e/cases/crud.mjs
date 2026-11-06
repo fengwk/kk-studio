@@ -1,4 +1,4 @@
-import { assert, assertExactFields, expectHttpError, pageResults, cid } from '../lib/http.mjs'
+import { assert, assertExactFields, expectHttpError, listResults, cid } from '../lib/http.mjs'
 import { baseModelConfig, encodePathTail, providerCreateBody, providerUpdateBody } from '../lib/fixtures.mjs'
 import {
   assertRootYoloEnabled,
@@ -169,8 +169,8 @@ registerCase({
     const suffix = cid().slice(0, 8)
     const created = (await ctx.call('POST', '/api/platform/providers', providerCreateBody(suffix))).json
     assert(created?.name && !('id' in created), JSON.stringify(created))
-    const listed = pageResults(
-      (await ctx.call('GET', '/api/platform/providers?pageNumber=1&pageSize=100')).json,
+    const listed = listResults(
+      (await ctx.call('GET', '/api/platform/providers')).json,
     )
     assert(listed.some((provider) => provider.name === created.name), 'created Provider not listed')
 
@@ -192,8 +192,8 @@ registerCase({
     assert(updated.baseUrl === 'https://example.com/v2', JSON.stringify(updated))
     assert(updated.credential?.configured === true, 'empty credential should keep configured')
     await deleteProvider(ctx, updated)
-    const after = pageResults(
-      (await ctx.call('GET', '/api/platform/providers?pageNumber=1&pageSize=100')).json,
+    const after = listResults(
+      (await ctx.call('GET', '/api/platform/providers')).json,
     )
     assert(!after.some((provider) => provider.name === created.name), 'Provider still listed')
 
@@ -212,8 +212,8 @@ registerCase({
         && recreated.description === 'e2e provider recreated',
       JSON.stringify(recreated),
     )
-    const relisted = pageResults(
-      (await ctx.call('GET', '/api/platform/providers?pageNumber=1&pageSize=100')).json,
+    const relisted = listResults(
+      (await ctx.call('GET', '/api/platform/providers')).json,
     )
     assert(
       relisted.some((provider) => provider.name === created.name),
@@ -464,8 +464,8 @@ registerCase({
       'DELETE',
       `/api/platform/agents/${encodeURIComponent(name)}?expectedVersion=${encodeURIComponent(updated.version)}`,
     )
-    const agents = pageResults(
-      (await ctx.call('GET', '/api/platform/agents?pageNumber=1&pageSize=100')).json,
+    const agents = listResults(
+      (await ctx.call('GET', '/api/platform/agents')).json,
     )
     assert(!agents.some((candidate) => candidate.name === name), 'Agent still listed')
 
@@ -482,8 +482,8 @@ registerCase({
     assert(recreated.name === name && recreated.execution?.driver === 'builtin' && recreated.execution.settings?.modelName === modelRef(model), JSON.stringify(recreated))
     assert(String(recreated.version) === '0', JSON.stringify(recreated))
     assert(recreated.systemPrompt === 'recreated prompt', JSON.stringify(recreated))
-    const relisted = pageResults(
-      (await ctx.call('GET', '/api/platform/agents?pageNumber=1&pageSize=100')).json,
+    const relisted = listResults(
+      (await ctx.call('GET', '/api/platform/agents')).json,
     )
     assert(relisted.some((candidate) => candidate.name === name), 'recreated Agent not listed')
     await ctx.call(
@@ -965,10 +965,10 @@ registerCase({
 })
 
 
-/** 列出全部 Provider（分页足够大），用于读回持久化事实。 */
+/** 列出全部 Provider，用于读回持久化事实。 */
 async function listProviders(ctx) {
-  return pageResults(
-    (await ctx.call('GET', '/api/platform/providers?pageNumber=1&pageSize=100')).json,
+  return listResults(
+    (await ctx.call('GET', '/api/platform/providers')).json,
   )
 }
 
@@ -1055,8 +1055,8 @@ registerCase({
   title: '内置 Compaction Agent identity 只读与改名/删除拒绝',
   docs: 'GET /api/platform/agents 必含内置 Compaction：type=BUILTIN，execution 字段显式输出；PUT 携带由系统持有的 name 字段 => 400；DELETE => 409；拒绝后 identity/version 不变',
   async run(ctx) {
-    const agents = pageResults(
-      (await ctx.call('GET', '/api/platform/agents?pageNumber=1&pageSize=100')).json,
+    const agents = listResults(
+      (await ctx.call('GET', '/api/platform/agents')).json,
     )
     const compaction = agents.find((agent) => agent.name === 'Compaction')
     assert(
@@ -1097,8 +1097,8 @@ registerCase({
       { status: 409 },
     )
     // 拒绝后 identity/version 严格不变。
-    const after = pageResults(
-      (await ctx.call('GET', '/api/platform/agents?pageNumber=1&pageSize=100')).json,
+    const after = listResults(
+      (await ctx.call('GET', '/api/platform/agents')).json,
     ).find((agent) => agent.name === 'Compaction')
     assert(
       after && after.type === 'BUILTIN' && String(after.version) === String(compaction.version),
@@ -1118,16 +1118,16 @@ function modelSelectionFor(agent) {
 }
 
 async function firstModel(ctx) {
-  const models = pageResults(
-    (await ctx.call('GET', '/api/platform/models?pageNumber=1&pageSize=10')).json,
+  const models = listResults(
+    (await ctx.call('GET', '/api/platform/models')).json,
   )
   assert(models[0]?.providerName && models[0]?.name, 'need seeded Model')
   return models[0]
 }
 
 async function firstTwoModels(ctx) {
-  const models = pageResults(
-    (await ctx.call('GET', '/api/platform/models?pageNumber=1&pageSize=10')).json,
+  const models = listResults(
+    (await ctx.call('GET', '/api/platform/models')).json,
   )
   assert(
     models[0]?.providerName
@@ -1140,8 +1140,8 @@ async function firstTwoModels(ctx) {
 }
 
 async function firstAgent(ctx) {
-  const agents = pageResults(
-    (await ctx.call('GET', '/api/platform/agents?pageNumber=1&pageSize=10')).json,
+  const agents = listResults(
+    (await ctx.call('GET', '/api/platform/agents')).json,
   )
   const agent = agents.find((candidate) => candidate.type === 'USER' && candidate.execution?.driver === 'builtin')
   assert(agent?.name, 'need a configured USER Agent')
@@ -1149,8 +1149,8 @@ async function firstAgent(ctx) {
 }
 
 async function findModel(ctx, name) {
-  const models = pageResults(
-    (await ctx.call('GET', '/api/platform/models?pageNumber=1&pageSize=100')).json,
+  const models = listResults(
+    (await ctx.call('GET', '/api/platform/models')).json,
   )
   return models.find((model) => model.name === name)
 }

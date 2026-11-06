@@ -29,13 +29,10 @@ harness 只提供执行引擎与能力契约，平台实现持久化与宿主适
 | L2 harness | [`harness/environment`](../harness/environment/pom.xml) | `EnvironmentId`、能力目录与能力调用端口 |
 | L2 harness | [`harness/model`](../harness/model/pom.xml) | 模型契约与 Provider 协议实现 |
 | L1 共享 | [`common`](../common/pom.xml) | 值契约：严格 JSON、资源引用、结果内容、输入 Schema、Work 状态 |
-| L1 共享 | [`share`](../share/pom.xml) | 平台与 harness 的 HTTP DTO |
 | L1 共享 | [`work`](../work/pom.xml) | `durable_work` 的 claim、租约 SQL 与有界调度骨架 |
 | L1 共享 | [`schema`](../schema/pom.xml) | 唯一的 [`V1__schema.sql`](../schema/src/main/resources/db/migration/V1__schema.sql)，按归属模块分段 |
 | 宿主 | [`daemon`](../daemon/package.json) | 文件、进程、LSP、技能安装与 IDE 服务；代理由平台下发；在线更新调用官方安装器 |
 | 前端 | [`frontend`](../frontend/package.json) | `app` → `platform`、`features` → `shared` 的浏览器工作台 |
-
-`share` 的平台与 Harness HTTP DTO 使用 `fun.fengwk.kkstudio.share.<领域>` 包名；产品 DTO 归各自产品模块。
 
 依赖只能向下，模块依赖由 [`check.mjs`](../scripts/dev/verify/repository/check.mjs) 守护：
 
@@ -88,12 +85,12 @@ L2               │                  │ harness-runtime │◀─────�
       │ harness-environment │◀──────────┘ │ harness-model │
       └──────────┬──────────┘             └───────────────┘
                  ▼
-            ┌────────┐    ┌──────┐   ┌───────┐   ┌────────┐
-L1          │ common │◀───│ work │   │ share │   │ schema │
-            └────────┘    └──────┘   └───────┘   └────────┘
+            ┌────────┐    ┌──────┐    ┌────────┐
+L1          │ common │◀───│ work │    │ schema │
+            └────────┘    └──────┘    └────────┘
 ```
 
-图中只画不能由其他路径推出的直接依赖。没有画出的边：`platform-runtime` 依赖 `share` 与 `work`；`canvas-spi`
+图中只画不能由其他路径推出的直接依赖。没有画出的边：`platform-runtime` 依赖 `work`；`canvas-spi`
 与多数模块直接依赖 `common`；`web` 以 runtime 范围依赖四个插件与 `schema`。插件中只有 `minimax-mavis` 不依赖
 `canvas-spi`；`harness-model` 不依赖任何内部模块。测试只复用下层模块的测试夹具（test-jar）与 `schema`。
 
@@ -117,8 +114,7 @@ LangChain4j 约束。各模块的契约与实现细节见[文档导航](README.m
 ## HTTP 契约
 
 JSON 成功响应直接返回资源：读取、更新和动作使用 200，创建使用 201，异步受理使用 202，无内容使用
-204，204 不带响应体。过渡期的 `ApiResponse` 由 Web 翻译为资源；数据为 null 时 200 改为 204，
-其他状态保持原样且无响应体。下载、HTML 与字节流按各自的传输格式返回。
+204，204 不带响应体。下载、HTML 与字节流按各自的传输格式返回。
 HTTP JSON 的 `Instant` 以 epoch 毫秒整数读写。
 
 错误使用 `application/problem+json`。响应包含固定的 `type: "about:blank"`、按请求语言本地化的

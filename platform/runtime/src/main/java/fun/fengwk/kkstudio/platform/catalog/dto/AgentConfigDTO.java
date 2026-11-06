@@ -2,8 +2,6 @@ package fun.fengwk.kkstudio.platform.catalog.dto;
 
 import lombok.Data;
 
-import fun.fengwk.kkstudio.share.skill.SkillRefDTO;
-
 import java.util.List;
 
 /**

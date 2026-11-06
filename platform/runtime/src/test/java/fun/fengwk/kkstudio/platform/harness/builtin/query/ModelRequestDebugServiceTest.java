@@ -69,7 +69,6 @@ import fun.fengwk.kkstudio.platform.harness.task.AgentPromptComposer;
 import fun.fengwk.kkstudio.platform.harness.task.SkillPromptEntry;
 import fun.fengwk.kkstudio.platform.harness.thread.command.DatabaseTurnResolver;
 import fun.fengwk.kkstudio.platform.harness.thread.command.LiveTurnPlan;
-import fun.fengwk.kkstudio.share.catalog.EnvironmentSupportDTO;
 
 import java.io.IOException;
 import java.time.Clock;
@@ -211,13 +210,13 @@ class ModelRequestDebugServiceTest {
     HarnessModelRequestDebugDTO.ToolDTO sent = debug.getTools().getFirst();
     assertEquals(LiveTurnPlan.ToolState.SENT, sent.getState());
     assertNull(sent.getFilterReason());
-    assertEquals(EnvironmentSupportDTO.ROUTED, sent.getEnvironmentSupport());
+    assertEquals(EnvironmentSupport.ROUTED, sent.getEnvironmentSupport());
     assertEquals("builtin:read", sent.getProvenance());
     assertEquals("{\"type\":\"object\"}", sent.getInputSchemaJson());
     HarnessModelRequestDebugDTO.ToolDTO filtered = debug.getTools().get(1);
     assertEquals(LiveTurnPlan.ToolState.FILTERED, filtered.getState());
     assertEquals(LiveTurnPlan.FilterReason.ENVIRONMENT_NOT_SELECTED, filtered.getFilterReason());
-    assertEquals(EnvironmentSupportDTO.REQUIRED, filtered.getEnvironmentSupport());
+    assertEquals(EnvironmentSupport.REQUIRED, filtered.getEnvironmentSupport());
 
     // Skill 交付事实与 promptXml：只复用 compose 的同一渲染入口，XML 不可能漂移。
     HarnessModelRequestDebugDTO.SkillDTO skill = debug.getSkills().getFirst();

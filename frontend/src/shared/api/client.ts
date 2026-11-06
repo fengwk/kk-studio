@@ -11,43 +11,13 @@ export interface RequestOptions {
 
 interface FetchRequestConfig {
   method?: string
-  headers?: Record<string, string>
   body?: unknown
   signal?: AbortSignal
   timeoutMs?: number
   jsonParser?: JsonParser
   responseType?: 'json' | 'text' | 'blob'
-  fetchImpl?: typeof fetch
   readResponse?: (response: Response) => Promise<unknown>
 }
-
-interface RequestConfig {
-  headers?: Record<string, string>
-  jsonParser?: JsonParser
-  signal?: AbortSignal
-}
-
-interface GetConfig extends RequestConfig {
-  params?: Record<string, unknown>
-}
-
-interface MutationConfig extends RequestConfig {
-  timeout?: number
-}
-
-interface DeleteConfig extends GetConfig {
-  data?: unknown
-  timeout?: number
-}
-
-export interface HttpClient {
-  get<T>(url: string, config?: GetConfig): Promise<T>
-  post<T>(url: string, data?: unknown, config?: MutationConfig): Promise<T>
-  put<T>(url: string, data?: unknown, config?: MutationConfig): Promise<T>
-  delete<T>(url: string, config?: DeleteConfig): Promise<T>
-}
-
-export const apiBaseUrl = '/api'
 
 export class ApiError extends Error {
   readonly status?: number
@@ -214,7 +184,7 @@ function isBinaryBody(body: unknown): boolean {
 }
 
 /**
- * 集中底层 fetch 执行器，供 request()、apiClient 外观及其他流（如 session 文件下载）复用。
+ * 集中底层 fetch 执行器，供 request() 与下载等非路由表流（如 session 文件下载）复用。
  */
 export async function executeFetch<T = unknown>(
   inputUrl: string,
@@ -224,7 +194,6 @@ export async function executeFetch<T = unknown>(
   const headers: Record<string, string> = {
     'Accept-Language': getLocale(),
     Accept: 'application/json, text/plain, */*',
-    ...(config.headers ?? {}),
   }
 
   let bodyPayload: BodyInit | undefined
@@ -233,9 +202,7 @@ export async function executeFetch<T = unknown>(
       bodyPayload = config.body as BodyInit
     } else {
       bodyPayload = JSON.stringify(config.body)
-      if (!Object.keys(headers).some((k) => k.toLowerCase() === 'content-type')) {
-        headers['Content-Type'] = 'application/json'
-      }
+      headers['Content-Type'] = 'application/json'
     }
   }
 
@@ -267,7 +234,7 @@ export async function executeFetch<T = unknown>(
   }
 
   try {
-    const response = await (config.fetchImpl ?? fetch)(inputUrl, {
+    const response = await fetch(inputUrl, {
       method,
       headers,
       body: bodyPayload,
@@ -397,63 +364,4 @@ export function request<R extends keyof ApiRoutes>(
     jsonParser: options?.jsonParser,
     responseType: API_RESPONSE_TYPES[route],
   })
-}
-
-function normalizeApiUrl(rawUrl: string): string {
-  if (rawUrl.startsWith('http://') || rawUrl.startsWith('https://')) {
-    return rawUrl
-  }
-  if (rawUrl.startsWith(apiBaseUrl + '/') || rawUrl === apiBaseUrl) {
-    return rawUrl
-  }
-  const cleanUrl = rawUrl.startsWith('/') ? rawUrl : `/${rawUrl}`
-  return `${apiBaseUrl}${cleanUrl}`
-}
-
-/**
- * 临时 apiClient 外观，保留原有 HttpClient 签名与配置，底层直接调用集中 fetch helper。
- */
-export const apiClient: HttpClient = {
-  get: <T>(rawUrl: string, config?: GetConfig) => {
-    const targetUrl = appendQueryParams(normalizeApiUrl(rawUrl), config?.params)
-    return executeFetch<T>(targetUrl, {
-      method: 'GET',
-      headers: config?.headers,
-      signal: config?.signal,
-      jsonParser: config?.jsonParser,
-    })
-  },
-  post: <T>(rawUrl: string, data?: unknown, config?: MutationConfig) => {
-    const targetUrl = normalizeApiUrl(rawUrl)
-    return executeFetch<T>(targetUrl, {
-      method: 'POST',
-      body: data,
-      headers: config?.headers,
-      signal: config?.signal,
-      timeoutMs: config?.timeout,
-      jsonParser: config?.jsonParser,
-    })
-  },
-  put: <T>(rawUrl: string, data?: unknown, config?: MutationConfig) => {
-    const targetUrl = normalizeApiUrl(rawUrl)
-    return executeFetch<T>(targetUrl, {
-      method: 'PUT',
-      body: data,
-      headers: config?.headers,
-      signal: config?.signal,
-      timeoutMs: config?.timeout,
-      jsonParser: config?.jsonParser,
-    })
-  },
-  delete: <T>(rawUrl: string, config?: DeleteConfig) => {
-    const targetUrl = appendQueryParams(normalizeApiUrl(rawUrl), config?.params)
-    return executeFetch<T>(targetUrl, {
-      method: 'DELETE',
-      body: config?.data,
-      headers: config?.headers,
-      signal: config?.signal,
-      timeoutMs: config?.timeout,
-      jsonParser: config?.jsonParser,
-    })
-  },
 }

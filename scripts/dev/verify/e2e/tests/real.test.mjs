@@ -440,10 +440,10 @@ test('resolveRealModel 与安全 resolver 校验 catalog 契约，失败时仅�
   const fakeCtx = {
     async call(method, url) {
       if (url.startsWith('/api/platform/providers')) {
-        return { json: { results: mockProviders, totalCount: mockProviders.length } }
+        return { json: mockProviders }
       }
       if (url.startsWith('/api/platform/models')) {
-        return { json: { results: mockModels, totalCount: mockModels.length } }
+        return { json: mockModels }
       }
       throw new Error(`unexpected url: ${url}`)
     },

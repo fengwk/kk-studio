@@ -13,7 +13,6 @@
 | `fun.fengwk.kkstudio.common.id` | canonical UUID 文本解析的唯一入口 | 只依赖 JDK；要求与 `UUID.toString()` 往返一致，不做大小写归一 |
 | `fun.fengwk.kkstudio.common.number` | canonical 非负与正数十进制 long 解析的唯一入口 | 只依赖 JDK；拒绝空白、符号、前导零和超过 `Long.MAX_VALUE` 的值 |
 | `fun.fengwk.kkstudio.common.time` | durable 毫秒时间边界：毫秒 Clock 包装与毫秒精度校验的唯一入口 | 只依赖 JDK；不承担时区、格式化或领域状态，非法输入以 `IllegalArgumentException` 表达 |
-| `fun.fengwk.kkstudio.common.page` | 共享分页值对象与安全 offset 计算 | 只保存分页元数据、当前结果集与逐项映射；不包含查询执行、排序或与存储相关的计算 |
 | `fun.fengwk.kkstudio.common.resource` | 不可变规范 Resource URI 引用与逐 scheme 校验 | 受支持的 scheme 与字节上限在此固定；下载、传输与存储由外部能力承接 |
 | `fun.fengwk.kkstudio.common.result` | sealed 结果内容单元 Text / Json / Binary / Resource 与文本工件元数据 | 纯不可变值模型；执行生命周期、权限与持久化调度由运行时承接 |
 | `fun.fengwk.kkstudio.common.schema` | 输入参数 schema 结构、严格校验器、容错归一化器与确定性 JSON 编解码器 | 属性字典序的确定性编解码；执行路由与 Provider 转换由上层处理 |

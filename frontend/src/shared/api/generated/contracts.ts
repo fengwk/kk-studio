@@ -965,18 +965,6 @@ export const ENVIRONMENT_SUPPORT_VALUES: readonly EnvironmentSupport[] = [
   'REQUIRED',
 ]
 
-/** Java：fun.fengwk.kkstudio.share.catalog.EnvironmentSupportDTO */
-export type EnvironmentSupportDTO =
-  | 'NONE'
-  | 'ROUTED'
-  | 'REQUIRED'
-
-export const ENVIRONMENT_SUPPORT_DTO_VALUES: readonly EnvironmentSupportDTO[] = [
-  'NONE',
-  'ROUTED',
-  'REQUIRED',
-]
-
 /** Java：fun.fengwk.kkstudio.platform.environment.dto.EnvironmentUpdateCommandStatus */
 export type EnvironmentUpdateCommandStatus =
   | 'CURRENT'
@@ -1338,7 +1326,7 @@ export interface HarnessModelRequestDebugToolDTO {
   name: string
   description: string
   inputSchemaJson: string
-  environmentSupport: EnvironmentSupportDTO
+  environmentSupport: EnvironmentSupport
   provenance: string
   state: LiveTurnPlanToolState
   filterReason: LiveTurnPlanFilterReason | null
@@ -2713,7 +2701,7 @@ export const SKILL_PROMPT_RESOLUTION_DELIVERY_VALUES: readonly SkillPromptResolu
   'PLATFORM',
 ]
 
-/** Java：fun.fengwk.kkstudio.share.skill.SkillRefDTO */
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.SkillRefDTO */
 export interface SkillRefDTO {
   packageName: string
   name: string

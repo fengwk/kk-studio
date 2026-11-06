@@ -54,7 +54,6 @@
 | [Plugins](modules/plugins.md) | 内置的 ComfyUI、Media、MiniMax Mavis 和 OpenCLI 插件如何配置、认证与提供能力？ |
 | [Schema](modules/schema.md) | 唯一 Flyway baseline、表关系、seed 与数据库约束是什么？ |
 | [Durable Work](modules/work.md) | 后台调度如何共用一张 mailbox 表、数据库时钟租约与唤醒通道？ |
-| [Share](modules/share.md) | 浏览器与服务端共享的 DTO 和 JSON wire 如何保持严格、稳定？ |
 
 ### 应用
 

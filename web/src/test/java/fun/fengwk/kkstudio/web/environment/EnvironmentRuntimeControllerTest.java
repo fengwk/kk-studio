@@ -25,8 +25,8 @@ import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentUpdateCommandStat
 import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentUpdateProgressDTO;
 import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentUpdateStartDTO;
 import fun.fengwk.kkstudio.platform.environment.update.EnvironmentUpdateService;
-import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
-import fun.fengwk.kkstudio.web.advice.StudioProblemAdvice;
+import fun.fengwk.kkstudio.platform.i18n.MessageService;
+import fun.fengwk.kkstudio.web.advice.ProblemAdvice;
 import fun.fengwk.kkstudio.web.environment.cluster.EnvironmentRuntimeOwnerClient;
 
 import java.net.URI;
@@ -56,7 +56,7 @@ class EnvironmentRuntimeControllerTest {
                 environmentUpdateService, clusterNodeRegistry, runtimeOwnerClient));
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
-            .setControllerAdvice(new StudioProblemAdvice(new StudioMessageService()))
+            .setControllerAdvice(new ProblemAdvice(new MessageService()))
             .build();
   }
 

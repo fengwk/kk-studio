@@ -40,8 +40,8 @@ test('model matrix consumes resource bodies and cleans up with their versions', 
   ])
 })
 
-test('agent matrix consumes resource and page bodies for setup and cleanup', async () => {
-  // A direct page must discover leftover agents, and each DELETE uses the returned version.
+test('agent matrix consumes resource and list bodies for setup and cleanup', async () => {
+  // A direct list must discover leftover agents, and each DELETE uses the returned version.
   const deletes = []
   const ctx = {
     vars: {},
@@ -57,7 +57,7 @@ test('agent matrix consumes resource and page bodies for setup and cleanup', asy
       if (method === 'POST' && path === '/api/platform/agents') {
         return { status: 201, json: { name: body.name, config: body.config, version: '3' } }
       }
-      if (method === 'GET' && path.startsWith('/api/platform/agents?')) {
+      if (method === 'GET' && path === '/api/platform/agents') {
         return { status: 200, json: [{ name: 'ag-leftover', version: '4' }] }
       }
       if (method === 'DELETE') {

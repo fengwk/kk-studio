@@ -29,7 +29,7 @@ test('seed case reads the execution contract, including a null builtin variant',
       if (path.startsWith('/api/platform/agents')) {
         return { json: [agent] }
       }
-      return { json: { results: providers } }
+      return { json: providers }
     },
   }
   await getCase('seed.agent_and_provider').run(ctx)
@@ -65,7 +65,7 @@ function modelRequestDebugFixture() {
       return { status: 200, json: [agent] }
     }
     if (method === 'GET' && pathname === '/api/platform/models') {
-      return { status: 200, json: { results: [model] } }
+      return { status: 200, json: [model] }
     }
     if (method === 'POST' && pathname === '/api/chat/chats') {
       chat = {

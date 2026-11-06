@@ -37,10 +37,9 @@ import fun.fengwk.kkstudio.chat.dto.ChatYoloUpdateDTO;
 import fun.fengwk.kkstudio.chat.http.ChatController;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessSessionSummaryDTO;
-import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
+import fun.fengwk.kkstudio.platform.i18n.MessageService;
 import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
-import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
-import fun.fengwk.kkstudio.web.advice.StudioProblemAdvice;
+import fun.fengwk.kkstudio.web.advice.ProblemAdvice;
 
 import java.time.Instant;
 import java.util.List;
@@ -64,8 +63,7 @@ class ChatControllerTest {
     chatService = mock(ChatService.class);
     mockMvc =
         MockMvcBuilders.standaloneSetup(new ChatController(chatService))
-            .setControllerAdvice(
-                new ApiResponseStatusAdvice(), new StudioProblemAdvice(new StudioMessageService()))
+            .setControllerAdvice(new ProblemAdvice(new MessageService()))
             .setMessageConverters(new JacksonJsonHttpMessageConverter(objectMapper))
             .build();
   }

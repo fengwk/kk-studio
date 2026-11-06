@@ -26,7 +26,7 @@ import java.util.regex.Pattern;
  * <p>{@code errors.resource} 保留稳定内部标识；用户可见 message 经 {@link #resourceDisplayName(String)} 使用本地化名称。
  */
 @Component
-public class StudioMessageService {
+public class MessageService {
 
   private static final String BASE_NAME = "string";
   private static final Locale EN_US = Locale.US;
@@ -38,11 +38,11 @@ public class StudioMessageService {
 
   private final Map<Locale, ResourceBundle> bundles;
 
-  public StudioMessageService() {
+  public MessageService() {
     this(defaultClassLoader());
   }
 
-  StudioMessageService(ClassLoader classLoader) {
+  MessageService(ClassLoader classLoader) {
     Objects.requireNonNull(classLoader, "classLoader");
     this.bundles =
         Map.of(
@@ -192,7 +192,7 @@ public class StudioMessageService {
   }
 
   private static ClassLoader defaultClassLoader() {
-    ClassLoader classLoader = StudioMessageService.class.getClassLoader();
+    ClassLoader classLoader = MessageService.class.getClassLoader();
     return classLoader == null ? ClassLoader.getSystemClassLoader() : classLoader;
   }
 }

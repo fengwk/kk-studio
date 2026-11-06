@@ -180,10 +180,7 @@ Evidence 接收 READY uploadId，在事务内转移引用并返回规范资源�
 
 ## JSON、错误与信任边界
 
-JSON Controller 暂时返回共享的
-[`ApiResponse`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/http/ApiResponse.java)
-信封，Web advice 将成功信封翻译为资源本身与信封状态，无 `data` 包装；数据为空时，200 改为 204，
-其他状态保持不变，均无响应体。直接返回与 `ResponseEntity` 均适用，并保留控制器设置的响应头。
+JSON Controller 直接返回资源本身：读取、更新与动作 200，创建 201，异步受理 202，无内容 204 且无响应体。
 下载、HTML 与字节流保留原始响应。
 
 集群内部端点（`/internal/**`）与浏览器 API 使用相同的 problem+json 错误格式。内部认证失败固定为
@@ -195,9 +192,11 @@ JSON Controller 暂时返回共享的
 定制 Boot4 装配的唯一 Jackson 3 `JsonMapper`（它与其父类型 `ObjectMapper` 是同一 bean）：
 启用重复键检测、Long 字符串序列化和 DTO 声明顺序，默认省略 null。
 全仓仅装配官方 Jackson 3 mapper，classpath 无 Jackson 2 databind；
-自有代码只解析到该 Jackson 3 mapper；Share DTO 的严格字段规则直接由 Jackson 3 注解声明
+自有代码只解析到该 Jackson 3 mapper；HTTP DTO 的严格字段规则直接由 Jackson 3 注解声明
 （例如 `protocolOptionsJson` 与网络文本字段只接受 JSON 字符串 token）。`protocolOptionsJson` 的内容语法、64 KiB 上限与 canonical 化
 由 harness-model 的 `ProviderProtocolOptions` 在平台解析配置时统一执行，HTTP mapper 只检查 wire 形状，不重复解析选项。
+wire DTO 归属各领域模块：平台族在 `platform.runtime` 的 `<feature>.dto`（Harness DTO 在 `platform.harness.dto`），Canvas 与
+Project 在各自 `dto` 包。
 required-nullable 响应字段由 DTO 显式 ALWAYS。[`HttpBoundaryConfiguration`](../../web/src/main/java/fun/fengwk/kkstudio/web/HttpBoundaryConfiguration.java)
 从容器 mapper 派生仅供 HTTP 消息转换器使用的配置，拒绝未知字段、标量强转、基本类型 null、重复键和尾随内容，
 不改变持久化、集群客户端和插件使用的 mapper。系统设置的 Long 属性以规范十进制字符串作为既有 wire 类型，
@@ -206,9 +205,9 @@ required-nullable 响应字段由 DTO 显式 ALWAYS。[`HttpBoundaryConfiguratio
 UUID 路径和查询参数统一使用规范小写转换。领域 codec 另有严格语法校验。
 
 领域失败由 [`DomainException`](../../common/src/main/java/fun/fengwk/kkstudio/common/error/DomainException.java)
-表达，全局 [`StudioProblemAdvice`](../../web/src/main/java/fun/fengwk/kkstudio/web/advice/StudioProblemAdvice.java)
+表达，全局 [`ProblemAdvice`](../../web/src/main/java/fun/fengwk/kkstudio/web/advice/ProblemAdvice.java)
 按错误类别、原因或框架状态生成 problem 响应。领域版本坐标和 Canvas 冲突详情放在 `errors` 中，内部
-`resource` 不进入 wire。请求体无法解析时只输出固定去敏详情，可信的 Harness 格式异常保留其详情；未预期异常不暴露内部消息。
+`resource` 不进入 wire。请求体无法解析时只输出固定去敏详情；未预期异常不暴露内部消息。
 locale 支持 en-US/zh-CN，其他回退英文。错误类别与成员见[系统设计的 HTTP 契约](../system-design.md#http-契约)。
 
 用户认证、TLS 和 ingress 访问控制由部署边界提供。
@@ -317,5 +316,5 @@ Spring 集成基座使用真实 PostgreSQL。
 Daemon 侧的 [`acceptance.test.ts`](../../daemon/test/ide/acceptance.test.ts) 直接验证受管视图；
 Frontend 的 Playwright 回归使用路由夹具，不替代真实 code-server 链路。执行命令和 E2E 分类见 [开发与测试](../operations/development-and-testing.md)。
 
-上级：[系统设计](../system-design.md)。相关文档：[Platform](platform.md)、[Share](share.md)、
+上级：[系统设计](../system-design.md)。相关文档：[Platform](platform.md)、
 [Canvas](canvas.md)、[IDE](ide.md)、[Frontend](frontend.md)。

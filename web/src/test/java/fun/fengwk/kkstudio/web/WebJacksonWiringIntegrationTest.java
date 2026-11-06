@@ -24,14 +24,10 @@ import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelVariantDTO;
 import fun.fengwk.kkstudio.project.dto.ProjectDtoMapper;
-import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
 
 import java.lang.reflect.Field;
 
-/**
- * 真实 Spring 容器验收：容器内只装配官方唯一 Jackson 3 mapper，classpath 无 Jackson 2 databind，Web 响应由 {@link
- * ApiResponseStatusAdvice} 对齐状态。
- */
+/** 真实 Spring 容器验收：容器内只装配官方唯一 Jackson 3 mapper，classpath 无 Jackson 2 databind，MVC 直接写出资源响应。 */
 @AutoConfigureMockMvc
 class WebJacksonWiringIntegrationTest extends WebPostgresTestSupport {
 
@@ -59,8 +55,6 @@ class WebJacksonWiringIntegrationTest extends WebPostgresTestSupport {
     field.setAccessible(true);
     assertSame(jsonMapper, field.get(context.getBean(ProjectDtoMapper.class)));
 
-    // 显式 ApiResponse 状态同步 advice 是活跃响应信封处理器。
-    assertFalse(context.getBeanNamesForType(ApiResponseStatusAdvice.class).length == 0);
     // 生产容器也注册 UUID binder，阻止 Spring 宽松的属性编辑器回退。
     context.getBean(HttpBoundaryConfiguration.CanonicalUuidBinding.class);
   }

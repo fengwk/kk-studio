@@ -172,7 +172,7 @@ registerCase({
   async run(ctx) {
     // best-effort cleanup of leftover matrix agents that block model delete
     try {
-      const { json } = await ctx.call('GET', '/api/platform/agents?pageNumber=1&pageSize=100')
+      const { json } = await ctx.call('GET', '/api/platform/agents')
       const agents = Array.isArray(json) ? json : []
       for (const agent of agents) {
         const name = String(agent.name || '')

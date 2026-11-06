@@ -21,7 +21,6 @@ import fun.fengwk.kkstudio.platform.catalog.dto.ModelCatalogPageDTO;
 import fun.fengwk.kkstudio.platform.catalog.http.ModelCatalogController;
 import fun.fengwk.kkstudio.platform.catalog.modelcatalog.ModelCatalogService;
 import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
-import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
 
 import java.time.Instant;
 import java.util.List;
@@ -37,7 +36,6 @@ class ModelCatalogControllerTest {
     service = mock(ModelCatalogService.class);
     mockMvc =
         MockMvcBuilders.standaloneSetup(new ModelCatalogController(service))
-            .setControllerAdvice(new ApiResponseStatusAdvice())
             .setMessageConverters(
                 new JacksonJsonHttpMessageConverter(StrictHttpJsonMapperTestSupport.get()))
             .build();

@@ -52,10 +52,10 @@ import fun.fengwk.kkstudio.platform.daemon.protocol.IdeCommand;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeResult;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
 import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer;
-import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
+import fun.fengwk.kkstudio.platform.i18n.MessageService;
 import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
+import fun.fengwk.kkstudio.web.advice.ProblemAdvice;
 import fun.fengwk.kkstudio.web.advice.RequestBodyRequiredValidationAdvice;
-import fun.fengwk.kkstudio.web.advice.StudioProblemAdvice;
 
 import java.time.Duration;
 import java.util.List;
@@ -90,7 +90,7 @@ class EnvironmentIdeControllerTest {
         MockMvcBuilders.standaloneSetup(controller)
             .setControllerAdvice(
                 new RequestBodyRequiredValidationAdvice(mapper),
-                new StudioProblemAdvice(new StudioMessageService()))
+                new ProblemAdvice(new MessageService()))
             .setMessageConverters(new JacksonJsonHttpMessageConverter(mapper))
             .build();
   }
@@ -357,7 +357,7 @@ class EnvironmentIdeControllerTest {
             null);
     MockMvc realChain =
         MockMvcBuilders.standaloneSetup(new EnvironmentIdeController(service))
-            .setControllerAdvice(new StudioProblemAdvice(new StudioMessageService()))
+            .setControllerAdvice(new ProblemAdvice(new MessageService()))
             .build();
 
     EnvironmentIdeOpenViewDTO openRequest = new EnvironmentIdeOpenViewDTO();

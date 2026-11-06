@@ -58,12 +58,12 @@ import fun.fengwk.kkstudio.canvas.infra.dto.CanvasDtoMapper;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasCommandService;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasQueryService;
 import fun.fengwk.kkstudio.common.error.DomainException;
-import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
+import fun.fengwk.kkstudio.platform.i18n.MessageService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
+import fun.fengwk.kkstudio.web.advice.ProblemAdvice;
 import fun.fengwk.kkstudio.web.advice.RequestBodyRequiredValidationAdvice;
-import fun.fengwk.kkstudio.web.advice.StudioProblemAdvice;
 
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -114,7 +114,7 @@ class CanvasControllerTest {
             .setMessageConverters(new JacksonJsonHttpMessageConverter(objectMapper))
             .setControllerAdvice(
                 new RequestBodyRequiredValidationAdvice(objectMapper),
-                new StudioProblemAdvice(new StudioMessageService()))
+                new ProblemAdvice(new MessageService()))
             .build();
   }
 

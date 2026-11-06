@@ -16,8 +16,8 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import fun.fengwk.kkstudio.platform.cluster.ClusterInternalPaths;
 import fun.fengwk.kkstudio.platform.cluster.HmacClusterInternalAuthentication;
 import fun.fengwk.kkstudio.platform.harness.realtime.RealtimePayloadBuffer;
-import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
-import fun.fengwk.kkstudio.web.advice.StudioProblemAdvice;
+import fun.fengwk.kkstudio.platform.i18n.MessageService;
+import fun.fengwk.kkstudio.web.advice.ProblemAdvice;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -47,7 +47,7 @@ class RealtimePayloadInternalControllerTest {
     mockMvc =
         MockMvcBuilders.standaloneSetup(
                 new RealtimePayloadInternalController(authentication, buffer))
-            .setControllerAdvice(new StudioProblemAdvice(new StudioMessageService()))
+            .setControllerAdvice(new ProblemAdvice(new MessageService()))
             .build();
   }
 

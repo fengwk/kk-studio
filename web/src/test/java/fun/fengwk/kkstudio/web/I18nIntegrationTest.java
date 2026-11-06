@@ -17,7 +17,7 @@ import tools.jackson.databind.ObjectMapper;
 
 /** 真实 Spring MVC 区域设置绑定与错误通知的集成覆盖。 */
 @AutoConfigureMockMvc
-class StudioI18nIntegrationTest extends WebPostgresTestSupport {
+class I18nIntegrationTest extends WebPostgresTestSupport {
 
   @Autowired private MockMvc mockMvc;
   @Autowired private ObjectMapper objectMapper;

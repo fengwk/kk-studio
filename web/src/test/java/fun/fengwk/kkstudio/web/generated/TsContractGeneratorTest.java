@@ -16,8 +16,6 @@ import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.canvas.dto.CanvasConflictDTO;
 import fun.fengwk.kkstudio.canvas.dto.CanvasSnapshotDTO;
-import fun.fengwk.kkstudio.common.page.Page;
-import fun.fengwk.kkstudio.platform.http.ApiResponse;
 import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
 import fun.fengwk.kkstudio.web.generated.fixture.FixtureDTO;
 
@@ -78,7 +76,7 @@ class TsContractGeneratorTest {
   @RequestMapping("/api/widgets")
   static final class RoutesController {
     @PutMapping("/{*name}")
-    ResponseEntity<ApiResponse<FixtureDTO.View>> update(
+    ResponseEntity<FixtureDTO.View> update(
         @PathVariable("name") String name,
         @RequestParam("version") String version,
         @RequestParam(value = "limit", defaultValue = "10") int limit,
@@ -87,7 +85,7 @@ class TsContractGeneratorTest {
     }
 
     @GetMapping
-    ApiResponse<Page<FixtureDTO.View>> list() {
+    FixtureDTO.View list() {
       throw new UnsupportedOperationException();
     }
 
@@ -111,7 +109,7 @@ class TsContractGeneratorTest {
     String generated =
         new TsContractGenerator(
                 StrictHttpJsonMapperTestSupport.get(),
-                List.of(FIXTURE_PACKAGE, "fun.fengwk.kkstudio.common.page"),
+                List.of(FIXTURE_PACKAGE),
                 List.of(RoutesController.class),
                 List.of())
             .generate();
@@ -125,7 +123,6 @@ class TsContractGeneratorTest {
             response: FixtureView
           }
         """);
-    assertTrue(generated.contains("response: Page<FixtureView>"));
     assertTrue(generated.contains("body?: FixtureCreate"));
     assertTrue(generated.contains("responseType: 'text'"));
     assertTrue(generated.contains("responseType: 'blob'"));
