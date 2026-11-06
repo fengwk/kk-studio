@@ -186,7 +186,7 @@ Web 保存的 `EnvironmentInstallConfigDTO`：
 }
 ```
 
-服务端与 Daemon 共用同一个严格 codec，未知字段、错误类型与越界值都会被拒绝，错误只报告字段路径
+服务端与 Daemon 分别严格校验同一配置契约，未知字段、错误类型与越界值都会被拒绝，错误只报告字段路径
 与规则、不回显输入值：
 
 - `operatingSystem` 必填，取值为 `linux` / `macos` / `windows`。

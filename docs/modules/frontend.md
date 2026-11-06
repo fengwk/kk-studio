@@ -47,7 +47,7 @@ Thread panel 消费 timeline presentation 类型，宿主负责 API、realtime �
 错误响应按 problem+json 解析，`ApiError` 保留 status、code、reason、detail 和 errors。
 恢复逻辑按精确 reason 判断，未知 reason 使用安全提示。
 
-HTTP 路由与传输类型由 Web 控制器签名与生产 HTTP Jackson mapper 生成到
+HTTP 路由与传输类型由领域控制器签名与生产 HTTP Jackson mapper 生成到
 [`generated/contracts.ts`](../../frontend/src/shared/api/generated/contracts.ts)：
 字段、可空性与枚举值跟随各领域模块的 Java DTO，Java long 在请求和响应中都是规范十进制字符串，
 `Instant` 是 epoch 毫秒整数。
@@ -460,7 +460,7 @@ epoch、claimId、iframe 与票据不持久化。localStorage 只保存最后展
 进入子目录只加载该层，上一级回到父目录。
 
 文本预览按服务端 `read` 同源的窗口格式展示：解析 `range`、`truncated` 与 `next` 后逐页回看，
-不把截断标记混入正文；图片按扩展名直接读取下载字节生成本地预览 URL。下载使用响应中的附件文件名，
+不把截断标记混入正文；图片按扩展名直接读取下载字节生成本地预览 URL。下载使用响应中的附件文件名。
 后端 404 统一提示“文件不存在或无权访问”，`validation` 且 reason 为
 `SESSION_FILE_NOT_TEXT` 时提示“此文件不能作为文本预览”并保留下载动作，
 两种错误都单独展示后端原因，不用括号拼接。面板使用共享 `Dialog` 与 `modal-body`/`modal-footer`；
