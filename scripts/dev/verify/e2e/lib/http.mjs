@@ -103,6 +103,12 @@ export function cid() {
   return crypto.randomUUID()
 }
 
+/**
+ * 断言调用失败，并锁定 canonical problem 信封。
+ *
+ * <p>4xx 必须显式给出确切的 problem {@code code}；{@code code=conflict} 还必须给出确切的 {@code reason}。
+ * 期望值来自产品抛出处的 {@code DomainException} 与 web `ProblemAdvice` 的状态映射，不接受“code 非空即可”。
+ */
 export async function expectHttpError(fn, { status, code, reason, messageIncludes } = {}) {
   try {
     await fn()
@@ -110,15 +116,26 @@ export async function expectHttpError(fn, { status, code, reason, messageInclude
   } catch (err) {
     assert(err instanceof HttpError, `expected HttpError, got ${err}`)
     if (status != null) assert(err.status === status, `expected status ${status}, got ${err.status}: ${err.body}`)
-    if ([400, 404, 409].includes(status)) {
-      const problem = JSON.parse(err.body)
-      const expectedCode = code ?? (status === 400 ? 'validation' : status === 404 ? 'not_found' : null)
-      if (expectedCode) assert(problem.code === expectedCode, `expected code ${expectedCode}: ${err.body}`)
-      else assert(typeof problem.code === 'string' && problem.code.length > 0, `missing problem code: ${err.body}`)
-      if (reason) assert(problem.reason === reason, `expected reason ${reason}: ${err.body}`)
-      else if (problem.code === 'conflict') {
-        assert(typeof problem.reason === 'string' && problem.reason.length > 0, `missing conflict reason: ${err.body}`)
+    if (status >= 400 && status < 500) {
+      assert(
+        typeof code === 'string' && code.length > 0,
+        `expectHttpError requires an explicit problem code for status ${status}`,
+      )
+      let problem = null
+      try {
+        problem = JSON.parse(err.body)
+      } catch {
+        problem = null
       }
+      assert(problem && typeof problem === 'object', `response body must be a problem object: ${err.body}`)
+      assert(problem.code === code, `expected code ${code}, got ${problem.code}: ${err.body}`)
+      if (code === 'conflict') {
+        assert(
+          typeof reason === 'string' && reason.length > 0,
+          'conflict assertions must pin the exact problem reason',
+        )
+      }
+      if (reason != null) assert(problem.reason === reason, `expected reason ${reason}: ${err.body}`)
     }
     if (messageIncludes) {
       const re = messageIncludes instanceof RegExp ? messageIncludes : new RegExp(messageIncludes)
