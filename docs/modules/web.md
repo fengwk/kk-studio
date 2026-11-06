@@ -180,10 +180,7 @@ Evidence 接收 READY uploadId，在事务内转移引用并返回规范资源�
 
 ## JSON、错误与信任边界
 
-JSON Controller 暂时返回共享的
-[`ApiResponse`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/http/ApiResponse.java)
-信封，Web advice 将成功信封翻译为资源本身与信封状态，无 `data` 包装；数据为空时，200 改为 204，
-其他状态保持不变，均无响应体。直接返回与 `ResponseEntity` 均适用，并保留控制器设置的响应头。
+JSON Controller 直接返回资源本身：读取、更新与动作 200，创建 201，异步受理 202，无内容 204 且无响应体。
 下载、HTML 与字节流保留原始响应。
 
 集群内部端点（`/internal/**`）与浏览器 API 使用相同的 problem+json 错误格式。内部认证失败固定为

@@ -33,7 +33,6 @@ import fun.fengwk.kkstudio.chat.http.ChatController;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessSessionSummaryDTO;
 import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
-import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
 import fun.fengwk.kkstudio.web.advice.StudioProblemAdvice;
 
 import java.util.List;
@@ -54,8 +53,7 @@ class ChatControllerTest {
     chatService = mock(ChatService.class);
     mockMvc =
         MockMvcBuilders.standaloneSetup(new ChatController(chatService))
-            .setControllerAdvice(
-                new ApiResponseStatusAdvice(), new StudioProblemAdvice(new StudioMessageService()))
+            .setControllerAdvice(new StudioProblemAdvice(new StudioMessageService()))
             .build();
   }
 

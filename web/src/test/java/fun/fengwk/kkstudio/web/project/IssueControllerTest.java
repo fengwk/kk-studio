@@ -54,7 +54,6 @@ import fun.fengwk.kkstudio.project.service.IssueRunService;
 import fun.fengwk.kkstudio.project.service.IssueStageBudgetService;
 import fun.fengwk.kkstudio.project.service.ProjectService;
 import fun.fengwk.kkstudio.project.service.StageBudgetView;
-import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
 import fun.fengwk.kkstudio.web.advice.StudioProblemAdvice;
 
 import java.time.Instant;
@@ -107,8 +106,7 @@ class IssueControllerTest {
 
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
-            .setControllerAdvice(
-                new ApiResponseStatusAdvice(), new StudioProblemAdvice(new StudioMessageService()))
+            .setControllerAdvice(new StudioProblemAdvice(new StudioMessageService()))
             .setMessageConverters(new JacksonJsonHttpMessageConverter(objectMapper))
             .build();
   }

@@ -36,7 +36,6 @@ import fun.fengwk.kkstudio.project.http.ProjectController;
 import fun.fengwk.kkstudio.project.model.Project;
 import fun.fengwk.kkstudio.project.service.ProjectService;
 import fun.fengwk.kkstudio.project.service.ProjectSnapshotAssembler;
-import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
 import fun.fengwk.kkstudio.web.advice.StudioProblemAdvice;
 
 import java.time.Instant;
@@ -68,8 +67,7 @@ class ProjectControllerTest {
 
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
-            .setControllerAdvice(
-                new ApiResponseStatusAdvice(), new StudioProblemAdvice(new StudioMessageService()))
+            .setControllerAdvice(new StudioProblemAdvice(new StudioMessageService()))
             .setMessageConverters(new JacksonJsonHttpMessageConverter(objectMapper))
             .build();
   }

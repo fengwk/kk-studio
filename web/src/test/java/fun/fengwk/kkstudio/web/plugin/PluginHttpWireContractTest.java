@@ -47,7 +47,6 @@ import fun.fengwk.kkstudio.platform.pluginhost.dto.PluginSecretProjectionDTO;
 import fun.fengwk.kkstudio.platform.pluginhost.http.PluginController;
 import fun.fengwk.kkstudio.platform.pluginhost.service.PluginManagementService;
 import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
-import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
 import fun.fengwk.kkstudio.web.advice.RequestBodyRequiredValidationAdvice;
 import fun.fengwk.kkstudio.web.advice.StudioProblemAdvice;
 
@@ -133,10 +132,7 @@ class PluginHttpWireContractTest {
         MockMvcBuilders.standaloneSetup(controller)
             // 只注册生产 mapper 的 converter：MVC 没有机会回退到构件自建或 Jackson 2 的副本。
             .setMessageConverters(HTTP_CONVERTER)
-            .setControllerAdvice(
-                new ApiResponseStatusAdvice(),
-                new RequestBodyRequiredValidationAdvice(HTTP_MAPPER),
-                errorAdvice)
+            .setControllerAdvice(new RequestBodyRequiredValidationAdvice(HTTP_MAPPER), errorAdvice)
             .build();
   }
 

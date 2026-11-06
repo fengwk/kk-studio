@@ -117,8 +117,7 @@ LangChain4j 约束。各模块的契约与实现细节见[文档导航](README.m
 ## HTTP 契约
 
 JSON 成功响应直接返回资源：读取、更新和动作使用 200，创建使用 201，异步受理使用 202，无内容使用
-204，204 不带响应体。过渡期的 `ApiResponse` 由 Web 翻译为资源；数据为 null 时 200 改为 204，
-其他状态保持原样且无响应体。下载、HTML 与字节流按各自的传输格式返回。
+204，204 不带响应体。下载、HTML 与字节流按各自的传输格式返回。
 HTTP JSON 的 `Instant` 以 epoch 毫秒整数读写。
 
 错误使用 `application/problem+json`。响应包含固定的 `type: "about:blank"`、按请求语言本地化的

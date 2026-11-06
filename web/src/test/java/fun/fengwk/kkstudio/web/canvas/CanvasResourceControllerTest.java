@@ -25,7 +25,6 @@ import fun.fengwk.kkstudio.platform.storage.dto.StoragePresignedUrlDTO;
 import fun.fengwk.kkstudio.platform.storage.dto.StorageUrlMethod;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
-import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
 import fun.fengwk.kkstudio.web.advice.StudioProblemAdvice;
 
 import java.time.Instant;
@@ -63,8 +62,7 @@ class CanvasResourceControllerTest {
                     new CanvasResourceUrlService(queryService, blobManager)))
             .setMessageConverters(
                 new JacksonJsonHttpMessageConverter(StrictHttpJsonMapperTestSupport.get()))
-            .setControllerAdvice(
-                new ApiResponseStatusAdvice(), new StudioProblemAdvice(new StudioMessageService()))
+            .setControllerAdvice(new StudioProblemAdvice(new StudioMessageService()))
             .build();
     CanvasResource media =
         new CanvasResource(MEDIA_RESOURCE, CANVAS, NODE, 0, BLOB, "a.png", null, NOW);

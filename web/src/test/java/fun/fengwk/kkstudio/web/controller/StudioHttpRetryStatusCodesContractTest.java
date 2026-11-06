@@ -31,7 +31,6 @@ import fun.fengwk.kkstudio.platform.settings.SystemSettingsSchemaProvider;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsService;
 import fun.fengwk.kkstudio.platform.settings.http.SystemSettingsController;
 import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
-import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
 
 import java.util.List;
 
@@ -61,7 +60,6 @@ class StudioHttpRetryStatusCodesContractTest {
                 new SystemSettingsController(
                     settingsService, mock(SystemSettingsSchemaProvider.class)))
             .setMessageConverters(new JacksonJsonHttpMessageConverter(strictHttpMapper()))
-            .setControllerAdvice(new ApiResponseStatusAdvice())
             .build();
   }
 

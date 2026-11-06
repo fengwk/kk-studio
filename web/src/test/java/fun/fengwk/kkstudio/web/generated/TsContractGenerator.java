@@ -28,10 +28,8 @@ import tools.jackson.databind.introspect.BeanPropertyDefinition;
 import tools.jackson.databind.introspect.ClassIntrospector;
 import tools.jackson.databind.json.JsonMapper;
 
-import fun.fengwk.kkstudio.common.page.Page;
 import fun.fengwk.kkstudio.platform.catalog.dto.DecimalStringSerializer;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelRatePatchDTOSerializer;
-import fun.fengwk.kkstudio.platform.http.ApiResponse;
 
 import java.io.InputStream;
 import java.lang.annotation.Annotation;
@@ -209,9 +207,7 @@ final class TsContractGenerator {
     }
     StringBuilder builder = new StringBuilder(HEADER);
     for (Class<?> type : ordered.values()) {
-      if (type == Page.class) {
-        appendPageInterface(builder);
-      } else if (type.isEnum()) {
+      if (type.isEnum()) {
         appendEnum(builder, type);
       } else if (isPolymorphic(type)) {
         appendUnion(builder, type);
@@ -221,27 +217,6 @@ final class TsContractGenerator {
     }
     appendApiRoutes(builder, routes);
     return builder.toString().stripTrailing() + '\n';
-  }
-
-  private void appendPageInterface(StringBuilder builder) {
-    builder.append("/** Java：").append(javaName(Page.class)).append(" */\n");
-    builder.append("export interface Page<T> {\n");
-    for (TsProperty property : properties(Page.class, Direction.RESPONSE)) {
-      try {
-        Type declared = Page.class.getDeclaredField(property.name()).getGenericType();
-        builder
-            .append("  ")
-            .append(propertyName(property.name()))
-            .append(property.optional() ? "?" : "")
-            .append(": ")
-            .append(tsType(declared, Direction.RESPONSE))
-            .append(property.nullable() ? " | null" : "")
-            .append('\n');
-      } catch (NoSuchFieldException ex) {
-        throw new IllegalStateException("cannot inspect Page property " + property.name(), ex);
-      }
-    }
-    builder.append("}\n\n");
   }
 
   private void appendApiRoutes(StringBuilder builder, Map<String, RouteSpec> routes) {
@@ -298,7 +273,7 @@ final class TsContractGenerator {
     }
     if (type instanceof ParameterizedType parameterized) {
       if (parameterized.getRawType() instanceof Class<?> raw) {
-        if (raw != ApiResponse.class && raw != ResponseEntity.class && isContractType(raw)) {
+        if (raw != ResponseEntity.class && isContractType(raw)) {
           register(raw, direction);
         }
       }
@@ -326,7 +301,7 @@ final class TsContractGenerator {
   }
 
   private void expand(Class<?> type, Direction direction) {
-    if (type.isEnum() || type == Page.class) {
+    if (type.isEnum()) {
       return;
     }
     if (isPolymorphic(type)) {
@@ -887,10 +862,6 @@ final class TsContractGenerator {
     }
     if (type instanceof ParameterizedType pt) {
       Type raw = pt.getRawType();
-      if (raw == Page.class) {
-        Type arg = pt.getActualTypeArguments()[0];
-        return "Page<" + tsType(arg, direction) + ">";
-      }
       if (raw == List.class || raw == Collection.class || raw == Set.class) {
         Type arg = pt.getActualTypeArguments()[0];
         String elem = tsType(arg, direction);
@@ -1211,7 +1182,7 @@ final class TsContractGenerator {
   static Type unwrapResponseType(Type type) {
     if (type instanceof ParameterizedType pt) {
       Type raw = pt.getRawType();
-      if (raw == ApiResponse.class || raw == ResponseEntity.class) {
+      if (raw == ResponseEntity.class) {
         Type[] args = pt.getActualTypeArguments();
         if (args.length > 0) {
           return unwrapResponseType(args[0]);
@@ -1219,7 +1190,7 @@ final class TsContractGenerator {
         return void.class;
       }
     } else if (type instanceof Class<?> cls) {
-      if (cls == ApiResponse.class || cls == ResponseEntity.class) {
+      if (cls == ResponseEntity.class) {
         return void.class;
       }
     }
