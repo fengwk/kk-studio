@@ -370,7 +370,7 @@ public class StorageControllerTest extends WebPostgresTestSupport {
     ObjectNode request = objectMapper.createObjectNode();
     request.put("filename", filename);
     request.put("mediaType", mediaType);
-    request.put("sizeBytes", size);
+    request.put("sizeBytes", Long.toString(size));
     request.put("sha256", sha256);
     return objectMapper.writeValueAsString(request);
   }

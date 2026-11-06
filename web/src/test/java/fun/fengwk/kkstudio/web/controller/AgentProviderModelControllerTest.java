@@ -141,8 +141,9 @@ public class AgentProviderModelControllerTest extends WebPostgresTestSupport {
     provider.setModelCallIdleTimeoutMillis(3_000L);
     ObjectNode providerBody = objectMapper.valueToTree(provider);
     providerBody.put("credential", provider.getCredential());
-    providerBody.put("modelCallTimeoutMillis", provider.getModelCallTimeoutMillis());
-    providerBody.put("modelCallIdleTimeoutMillis", provider.getModelCallIdleTimeoutMillis());
+    providerBody.put("modelCallTimeoutMillis", provider.getModelCallTimeoutMillis().toString());
+    providerBody.put(
+        "modelCallIdleTimeoutMillis", provider.getModelCallIdleTimeoutMillis().toString());
     JsonNode providerData =
         data(
             mockMvc

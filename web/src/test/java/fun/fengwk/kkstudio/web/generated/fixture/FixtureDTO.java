@@ -45,7 +45,7 @@ public final class FixtureDTO {
       List<Kind> kinds,
       Map<String, Integer> scores) {}
 
-  /** 只出现在请求里：Long 写作 number，可空属性可以缺省。 */
+  /** 只出现在请求里：Long 写作 string，可空属性可以缺省。 */
   public record Create(Long limit, @Nullable String note) {}
 
   /** 同时用于请求与响应：Long 保持写出形态。 */

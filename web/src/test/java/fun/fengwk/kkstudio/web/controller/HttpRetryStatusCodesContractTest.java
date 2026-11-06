@@ -131,7 +131,7 @@ class HttpRetryStatusCodesContractTest {
                   .contentType(MediaType.APPLICATION_JSON)
                   .content(
                       "{\"credential\":{\"operation\":\"KEEP\"},"
-                          + "\"modelCallTimeoutMillis\":1,\"modelCallIdleTimeoutMillis\":1,"
+                          + "\"modelCallTimeoutMillis\":\"1\",\"modelCallIdleTimeoutMillis\":\"1\","
                           + "\"modelHttpRetryStatusCodes\":"
                           + token
                           + "}"))

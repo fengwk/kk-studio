@@ -737,17 +737,11 @@ final class TsContractGenerator {
     return present;
   }
 
-  /**
-   * 属性的 TS 类型。Long 写出为十进制字符串，读取则接受 JSON 整数（严格 setter 只接受整数），因此只读入的请求类型写作 {@code
-   * number}，其余方向保持写出形态，客户端可以把收到的值原样回传。
-   */
+  /** Long 在所有 HTTP 方向都使用十进制字符串。 */
   private String tsType(JavaType type, Direction direction) {
     Class<?> raw = type.getRawClass();
     if (isContractType(raw)) {
       return tsName(raw);
-    }
-    if (direction == Direction.REQUEST && (raw == Long.class || raw == long.class)) {
-      return "number";
     }
     for (ScalarSpec spec : SCALARS) {
       if (spec.javaType() == raw) {

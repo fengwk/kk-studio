@@ -38,7 +38,7 @@ interface CreateModalState {
   url: string
   headersText: string
   enabled: boolean
-  timeoutMillis: string | number
+  timeoutMillis: string
   error: string | null
 }
 
@@ -50,14 +50,14 @@ interface EditModalState {
   loaded: {
     url: string
     enabled: boolean
-    timeoutMillis: number
+    timeoutMillis: string
     headersConfigured: boolean
   } | null
   url: string
   headersText: string
   clearHeaders: boolean
   enabled: boolean
-  timeoutMillis: string | number
+  timeoutMillis: string
   error: string | null
   discoverPending: boolean
 }
@@ -95,7 +95,7 @@ export function McpServersPage() {
       url: string
       headers: Record<string, string>
       enabled: boolean
-      timeoutMillis: number
+      timeoutMillis: string
     }) =>
       mcpServerService.createServer({
         name: data.name,
@@ -131,7 +131,7 @@ export function McpServersPage() {
         headers: Record<string, string>
         clearHeaders: boolean
         enabled: boolean
-        timeoutMillis: number
+        timeoutMillis: string
       }
     }) =>
       mcpServerService.updateServer(args.name, {
@@ -204,7 +204,7 @@ export function McpServersPage() {
       headersText: '',
       clearHeaders: false,
       enabled: server.enabled,
-      timeoutMillis: Number(server.timeoutMillis) || DEFAULT_TIMEOUT_MILLIS,
+      timeoutMillis: server.timeoutMillis,
       error: null,
       discoverPending: false,
     })
@@ -215,7 +215,7 @@ export function McpServersPage() {
         if (editRequestGenerationRef.current !== generation) {
           return
         }
-        const timeoutMillis = Number(detail.timeoutMillis) || DEFAULT_TIMEOUT_MILLIS
+        const timeoutMillis = detail.timeoutMillis
         setEditModal((prev) => {
           if (!prev || editRequestGenerationRef.current !== generation) return null
           return {

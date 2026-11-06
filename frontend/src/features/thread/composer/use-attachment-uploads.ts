@@ -265,7 +265,7 @@ export function useAttachmentUploads(options?: {
         const reservation = await service.reserveUpload({
           filename: record.filename,
           mediaType: record.mediaType,
-          sizeBytes: record.sizeBytes,
+          sizeBytes: String(record.sizeBytes),
           sha256,
         })
         reservedUploadId = reservation.id

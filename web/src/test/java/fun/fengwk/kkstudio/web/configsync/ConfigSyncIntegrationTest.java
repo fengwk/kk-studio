@@ -1169,9 +1169,9 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
             "credential",
             "sk-configsync-" + name,
             "modelCallTimeoutMillis",
-            120000,
+            "120000",
             "modelCallIdleTimeoutMillis",
-            30000));
+            "30000"));
   }
 
   private void updateProviderPut(String name, String expectedVersion, ProviderUpdateDTO update)
@@ -1224,7 +1224,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
 
   private JsonNode createMcp(String name, String url, Map<String, String> headers)
       throws Exception {
-    // 请求侧 Long 是 JSON 数值；headers 以一个 JSON 对象文本作为 SET 的秘密值提交
+    // 请求侧 Long 是十进制字符串；headers 以一个 JSON 对象文本作为 SET 的秘密值提交
     ObjectNode body = objectMapper.createObjectNode();
     body.put("name", name);
     body.put("url", url);
@@ -1234,7 +1234,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
       secret.put("value", objectMapper.writeValueAsString(headers));
     }
     body.put("enabled", true);
-    body.put("timeoutMillis", 10000L);
+    body.put("timeoutMillis", "10000");
     return postData("/api/platform/mcp-servers", body);
   }
 

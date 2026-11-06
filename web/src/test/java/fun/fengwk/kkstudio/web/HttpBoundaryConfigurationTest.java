@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
@@ -29,7 +30,9 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.json.JsonMapper;
 
+import fun.fengwk.kkstudio.platform.i18n.MessageService;
 import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsAiRuntimeDTO;
+import fun.fengwk.kkstudio.web.advice.ProblemAdvice;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -120,12 +123,13 @@ class HttpBoundaryConfigurationTest {
     assertEquals(2501L, parsed.getRetryBaseDelayMillis());
     for (InvalidJson invalid :
         List.of(
-            new InvalidJson("2501", "settings long must be a decimal string"),
-            new InvalidJson("\"02501\"", "settings long must be a canonical decimal string"),
-            new InvalidJson("\"\"", "settings long must be a canonical decimal string"),
-            new InvalidJson("\"-1\"", "settings long must be a canonical decimal string"),
+            new InvalidJson("2501", "long must be a canonical non-negative decimal string"),
+            new InvalidJson("\"02501\"", "long must be a canonical non-negative decimal string"),
+            new InvalidJson("\"\"", "long must be a canonical non-negative decimal string"),
+            new InvalidJson("\"-1\"", "long must be a canonical non-negative decimal string"),
             new InvalidJson(
-                "\"9223372036854775808\"", "settings long must be a canonical decimal string"))) {
+                "\"9223372036854775808\"",
+                "long must be a canonical non-negative decimal string"))) {
       JacksonException error =
           assertThrows(
               JacksonException.class,
@@ -143,6 +147,61 @@ class HttpBoundaryConfigurationTest {
                     "{\"modelHttpRetryStatusCodes\":[\"429\"]}", SystemSettingsAiRuntimeDTO.class));
     assertTrue(
         error.getMessage().contains("modelHttpRetryStatusCodes must contain only JSON integers"));
+  }
+
+  /** 同一解析规则覆盖 boxed/primitive 请求体、路径和查询，不允许 Spring 回退宽松编辑器。 */
+  @Test
+  void canonicalLongIsEnforcedAtEveryInputBoundary() throws Exception {
+    JsonMapper mapper = HttpBoundaryConfiguration.strictHttpMapper(shared);
+    for (String value : List.of("0", "1", "9223372036854775807")) {
+      long expected = Long.parseLong(value);
+      LongBody parsed =
+          mapper.readValue(
+              "{\"expectedVersion\":\"" + value + "\",\"other\":\"" + value + "\"}",
+              LongBody.class);
+      assertEquals(expected, parsed.expectedVersion());
+      assertEquals(expected, parsed.other());
+      mvc.perform(get("/long/" + value).param("value", value)).andExpect(status().isOk());
+    }
+    for (String value : List.of("", " 0", "0 ", "+1", "-1", "00", "9223372036854775808")) {
+      assertThrows(
+          JacksonException.class,
+          () ->
+              mapper.readValue(
+                  "{\"expectedVersion\":\"" + value + "\",\"other\":\"0\"}", LongBody.class));
+      mvc.perform(get("/long/1").param("value", value)).andExpect(status().isBadRequest());
+      if (!value.isEmpty() && !value.contains(" ")) {
+        mvc.perform(get("/long/" + value).param("value", "1")).andExpect(status().isBadRequest());
+      }
+    }
+    for (String token : List.of("1", "1.0", "true", "[]", "{}")) {
+      assertThrows(
+          JacksonException.class,
+          () ->
+              mapper.readValue(
+                  "{\"expectedVersion\":" + token + ",\"other\":\"0\"}", LongBody.class));
+    }
+  }
+
+  /** 非法 expectedVersion 经真实 HTTP mapper 与 ProblemAdvice 返回 validation，而非服务异常。 */
+  @Test
+  void malformedExpectedVersionIsValidationProblem() throws Exception {
+    HttpBoundaryConfiguration config = new HttpBoundaryConfiguration(shared);
+    List<HttpMessageConverter<?>> converters = new ArrayList<>();
+    converters.add(new JacksonJsonHttpMessageConverter(shared));
+    config.extendMessageConverters(converters);
+    MockMvc problemMvc =
+        MockMvcBuilders.standaloneSetup(new Probe())
+            .setMessageConverters(converters.toArray(HttpMessageConverter[]::new))
+            .setControllerAdvice(new ProblemAdvice(new MessageService()))
+            .build();
+    problemMvc
+        .perform(
+            post("/long-body")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"expectedVersion\":\" 0\",\"other\":\"0\"}"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("validation"));
   }
 
   @Test
@@ -241,6 +300,8 @@ class HttpBoundaryConfigurationTest {
 
   record UuidBody(UUID id) {}
 
+  record LongBody(Long expectedVersion, long other) {}
+
   @RestController
   static class Probe {
     @PostMapping("/probe")
@@ -251,5 +312,11 @@ class HttpBoundaryConfigurationTest {
 
     @GetMapping("/uuid/{path}")
     void uuid(@PathVariable("path") UUID path, @RequestParam("id") UUID id) {}
+
+    @GetMapping("/long/{path}")
+    void longParameters(@PathVariable("path") long path, @RequestParam("value") Long value) {}
+
+    @PostMapping("/long-body")
+    void longBody(@RequestBody LongBody body) {}
   }
 }

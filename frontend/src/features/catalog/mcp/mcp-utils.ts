@@ -1,4 +1,4 @@
-export const DEFAULT_TIMEOUT_MILLIS = 60000
+export const DEFAULT_TIMEOUT_MILLIS = '60000'
 export const URL_MAX_LENGTH = 2048
 export const HEADER_NAME_MAX_LENGTH = 256
 export const HEADER_VALUE_MAX_LENGTH = 8192
@@ -29,7 +29,7 @@ export interface HeaderParseResult {
 
 export interface TimeoutValidationResult {
   valid: boolean
-  timeoutMillis: number
+  timeoutMillis: string
   error?: string
 }
 
@@ -162,13 +162,12 @@ export function validateTimeoutMillis(val: unknown): TimeoutValidationResult {
   if (val === undefined || val === null || val === '') {
     return { valid: true, timeoutMillis: DEFAULT_TIMEOUT_MILLIS }
   }
-  const num = typeof val === 'number' ? val : Number(val)
-  if (!Number.isFinite(num) || !Number.isInteger(num) || num <= 0) {
+  if (typeof val !== 'string' || !/^[1-9][0-9]*$/.test(val) || BigInt(val) > 9223372036854775807n) {
     return {
       valid: false,
       timeoutMillis: DEFAULT_TIMEOUT_MILLIS,
       error: 'Timeout must be a positive integer',
     }
   }
-  return { valid: true, timeoutMillis: num }
+  return { valid: true, timeoutMillis: val }
 }

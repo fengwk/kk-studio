@@ -86,7 +86,7 @@ export async function uploadSkillArchive({
   const reservation = await storageService.reserveUpload({
     filename: file.name,
     mediaType: skillArchiveMediaType(file.name),
-    sizeBytes: file.size,
+    sizeBytes: String(file.size),
     sha256,
   })
   if (reservation.type === 'PENDING') {

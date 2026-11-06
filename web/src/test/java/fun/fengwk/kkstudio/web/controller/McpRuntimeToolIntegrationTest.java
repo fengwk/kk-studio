@@ -164,7 +164,7 @@ public class McpRuntimeToolIntegrationTest extends WebPostgresTestSupport {
         objectMapper.writeValueAsString(
             Map.of("Authorization", "Bearer secret-bearer-token-do-not-leak")));
     createMcp.put("enabled", true);
-    createMcp.put("timeoutMillis", 15000L);
+    createMcp.put("timeoutMillis", "15000");
 
     mockMvc
         .perform(
@@ -222,8 +222,8 @@ public class McpRuntimeToolIntegrationTest extends WebPostgresTestSupport {
     providerDto.setModelCallIdleTimeoutMillis(3000L);
     ObjectNode providerBody = objectMapper.valueToTree(providerDto);
     providerBody.put("credential", providerDto.getCredential());
-    providerBody.put("modelCallTimeoutMillis", 120000);
-    providerBody.put("modelCallIdleTimeoutMillis", 3000);
+    providerBody.put("modelCallTimeoutMillis", "120000");
+    providerBody.put("modelCallIdleTimeoutMillis", "3000");
 
     mockMvc
         .perform(

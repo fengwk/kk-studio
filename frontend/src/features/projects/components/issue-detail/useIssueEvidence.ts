@@ -90,7 +90,7 @@ export function useIssueEvidence({
       const sha256 = await calculateFileSha256(file, hashFile)
       const upload = await storageService.reserveUpload({
         filename: file.name,
-        sizeBytes: file.size,
+        sizeBytes: String(file.size),
         mediaType: file.type || 'application/octet-stream',
         sha256,
       })
