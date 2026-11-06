@@ -139,7 +139,10 @@ registerCase({
       ]) {
         const invalid = updateBody(structuredClone(saved))
         invalid.network.proxyUrl = proxyUrl
-        const error = await expectHttpError(() => ctx.call('PUT', '/api/platform/settings', invalid), { status: 400 })
+        const error = await expectHttpError(() => ctx.call('PUT', '/api/platform/settings', invalid), {
+          status: 400,
+          code: 'validation',
+        })
         assert(
           !String(error.body).includes('synthetic-user') &&
             !String(error.body).includes('synthetic-password'),
@@ -148,7 +151,10 @@ registerCase({
       }
       const missingNetwork = updateBody(structuredClone(saved))
       delete missingNetwork.network
-      await expectHttpError(() => ctx.call('PUT', '/api/platform/settings', missingNetwork), { status: 400 })
+      await expectHttpError(() => ctx.call('PUT', '/api/platform/settings', missingNetwork), {
+        status: 400,
+        code: 'validation',
+      })
       const afterInvalid = await readSettings()
       assert(
         afterInvalid.version === saved.version &&
@@ -171,7 +177,10 @@ registerCase({
       ]) {
         const invalid = updateBody(structuredClone(saved))
         invalid.aiRuntime.modelHttpRetryStatusCodes = invalidList
-        await expectHttpError(() => ctx.call('PUT', '/api/platform/settings', invalid), { status: 400 })
+        await expectHttpError(() => ctx.call('PUT', '/api/platform/settings', invalid), {
+          status: 400,
+          code: 'validation',
+        })
       }
       const afterInvalidRetry = await readSettings()
       assert(
@@ -186,6 +195,7 @@ registerCase({
       delete badPermission.tool.permission['write']
       await expectHttpError(() => ctx.call('PUT', '/api/platform/settings', badPermission), {
         status: 400,
+        code: 'validation',
       })
       assert(
         (await readSettings()).version === saved.version,
@@ -199,7 +209,7 @@ registerCase({
             '/api/platform/settings',
             updateBody(structuredClone(saved), before.version),
           ),
-        { status: 409 },
+        { status: 409, code: 'version_conflict' },
       )
       assert(
         (await readSettings()).version === saved.version,
@@ -226,6 +236,16 @@ registerCase({
           break
         } catch (error) {
           if (!(error instanceof HttpError) || error.status !== 409) {
+            throw error
+          }
+          // 恢复写入只容忍并发推进版本的 CAS 冲突，其它 409 原样失败。
+          let problem = null
+          try {
+            problem = JSON.parse(error.body)
+          } catch {
+            problem = null
+          }
+          if (problem?.code !== 'version_conflict') {
             throw error
           }
         }

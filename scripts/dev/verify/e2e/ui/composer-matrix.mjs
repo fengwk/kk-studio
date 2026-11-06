@@ -44,6 +44,23 @@ const TINY_VIDEO = readFileSync(
   ),
 )
 
+/**
+ * stopped Thread 的退出尚未收敛（conflict + EXIT_UNCONFIRMED）是唯一可等待后重试的冲突：
+ * 单条 USER_MESSAGE 批次没有 cursor，其它 409 都是契约漂移，必须原样失败。
+ */
+function isExitUnconfirmedConflict(error) {
+  if (!(error instanceof HttpError) || error.status !== 409) {
+    return false
+  }
+  let problem = null
+  try {
+    problem = JSON.parse(error.body)
+  } catch {
+    problem = null
+  }
+  return problem?.code === 'conflict' && problem?.reason === 'EXIT_UNCONFIRMED'
+}
+
 export async function runComposerMatrix(ui) {
   const {
     apiCtx,
@@ -1174,7 +1191,7 @@ async function createDurableHistoryFixture(
     state.sessionId = String(sessionId)
     for (const message of messages.slice(1)) {
       // 每条 THREAD batch 前等待上一 turn 收敛（missing agent 的 turn 确定性快速失败），
-      // 再读最新 cursor；STALE 409 时短暂等待后重读重试（最多 5 次兜底）。
+      // 再读最新 snapshot；仅 EXIT_UNCONFIRMED 冲突短暂等待后重试（最多 5 次兜底）。
       let accepted
       for (let attempt = 0; attempt < 5; attempt += 1) {
         if (attempt > 0) await sleep(80)
@@ -1193,7 +1210,7 @@ async function createDurableHistoryFixture(
           })
           break
         } catch (error) {
-          if (!(error instanceof HttpError) || error.status !== 409) throw error
+          if (!isExitUnconfirmedConflict(error)) throw error
         }
       }
       if (!accepted) {
@@ -1266,7 +1283,7 @@ async function createBranchedHistoryFixture(
     // 原分支：originalMessages 逐条 THREAD batch。
     for (const message of originalMessages) {
       // 每条 batch 前等待上一 turn 收敛（missing agent 的 turn 确定性快速失败），
-      // 再读最新 cursor；STALE 409 时短暂等待后重读重试（最多 5 次兜底）。
+      // 再读最新 snapshot；仅 EXIT_UNCONFIRMED 冲突短暂等待后重试（最多 5 次兜底）。
       let accepted
       for (let attempt = 0; attempt < 5; attempt += 1) {
         if (attempt > 0) await sleep(80)
@@ -1285,7 +1302,7 @@ async function createBranchedHistoryFixture(
           })
           break
         } catch (error) {
-          if (!(error instanceof HttpError) || error.status !== 409) throw error
+          if (!isExitUnconfirmedConflict(error)) throw error
         }
       }
       if (!accepted) {
@@ -1562,7 +1579,13 @@ async function deleteChat(apiCtx, chat) {
     'GET',
     `/api/chat/chats/${encodeURIComponent(chat.id)}`,
   )
-  if (currentResponse.status === 404) return
+  if (currentResponse.status === 404) {
+    assert(
+      currentResponse.json?.code === 'not_found',
+      `read Chat for cleanup: ${JSON.stringify(currentResponse)}`,
+    )
+    return
+  }
   assert(
     currentResponse.status === 200,
     `read Chat for cleanup: ${JSON.stringify(currentResponse)}`,
@@ -1581,10 +1604,15 @@ async function deleteChat(apiCtx, chat) {
 
 async function deleteCatalogResource(apiCtx, requestPath) {
   const response = await apiCtx.call('DELETE', requestPath)
+  if (response.status === 404) {
+    assert(
+      response.json?.code === 'not_found',
+      `delete catalog resource: ${JSON.stringify(response)}`,
+    )
+    return
+  }
   assert(
-    response.status === 200
-      || response.status === 204
-      || response.status === 404,
+    response.status === 200 || response.status === 204,
     `delete catalog resource: ${JSON.stringify(response)}`,
   )
 }

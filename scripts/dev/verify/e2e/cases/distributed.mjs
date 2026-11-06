@@ -140,7 +140,7 @@ registerCase({
             `/api/platform/environments/${encodeURIComponent(createdId)}/rotate-token`,
             { expectedVersion: created.version },
           ),
-        { status: 409 },
+        { status: 409, code: 'version_conflict' },
       )
       const rotateOnARes = await ctx.callNode(
         'a',
@@ -167,7 +167,7 @@ registerCase({
             `/api/platform/environments/${encodeURIComponent(createdId)}?expectedVersion=${encodeURIComponent(latestVersion)}`,
             { name: `${envName}-renamed` },
           ),
-        { status: 405 },
+        { status: 405, code: 'validation' },
       )
       const getARes = await ctx.callNode('a', 'GET', `/api/platform/environments/${encodeURIComponent(createdId)}`)
       const fromA = getARes.json
@@ -182,11 +182,11 @@ registerCase({
       )
       await expectHttpError(
         () => ctx.callNode('a', 'GET', `/api/platform/environments/${encodeURIComponent(createdId)}`),
-        { status: 404 },
+        { status: 404, code: 'not_found' },
       )
       await expectHttpError(
         () => ctx.callNode('b', 'GET', `/api/platform/environments/${encodeURIComponent(createdId)}`),
-        { status: 404 },
+        { status: 404, code: 'not_found' },
       )
 
       // 6. 记录安全 artifact（禁止写入一次性 registrationToken）

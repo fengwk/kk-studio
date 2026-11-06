@@ -306,6 +306,7 @@ registerCase({
       for (const query of ['?limit=0', '?limit=101', '?limit=abc', '?cursor=not-a-cursor']) {
         await expectHttpError(() => ctx.call('GET', `/api/harness/interactions${query}`), {
           status: 400,
+          code: 'validation',
         })
       }
 
@@ -365,11 +366,11 @@ registerCase({
       // 过滤器身份必须是已存在的执行根：不存在的 Thread 404，非法 canonical 与非根 400。
       await expectHttpError(
         () => ctx.call('GET', `/api/harness/interactions?rootThreadId=${cid()}`),
-        { status: 404 },
+        { status: 404, code: 'not_found' },
       )
       await expectHttpError(
         () => ctx.call('GET', '/api/harness/interactions?rootThreadId=not-a-uuid'),
-        { status: 400 },
+        { status: 400, code: 'validation' },
       )
       // 过滤器只缩小可见集，不改变未过滤视图：无过滤时仍能看到该待办。
       assert(
@@ -390,7 +391,7 @@ registerCase({
         { type: 'ANSWER', submissionId },
         { type: 'ANSWER', submissionId: 'not-a-uuid', answers: [[chosenAnswer]] },
       ]) {
-        await expectHttpError(() => ctx.call('POST', inputPath, body), { status: 400 })
+        await expectHttpError(() => ctx.call('POST', inputPath, body), { status: 400, code: 'validation' })
       }
       // 未知目标与不满足冻结问卷的答案由 Runtime 判定 409，且不写入任何事实。
       await expectHttpError(
@@ -400,7 +401,7 @@ registerCase({
             `/api/harness/threads/${threadId}/tool-invocations/${cid()}/input`,
             { type: 'ANSWER', submissionId: cid(), answers: [[chosenAnswer]] },
           ),
-        { status: 409 },
+        { status: 409, code: 'conflict', reason: 'INPUT_SUBMISSION_NOT_APPLICABLE' },
       )
       await expectHttpError(
         () =>
@@ -409,7 +410,7 @@ registerCase({
             submissionId: cid(),
             answers: [['720P', '1080P']],
           }),
-        { status: 409 },
+        { status: 409, code: 'conflict', reason: 'INPUT_SUBMISSION_INVALID' },
       )
       const stillPending = await waitForPendingInteraction(ctx, { threadId })
       assert(
@@ -467,7 +468,7 @@ registerCase({
             submissionId: cid(),
             answers: [[chosenAnswer]],
           }),
-        { status: 409 },
+        { status: 409, code: 'conflict', reason: 'INPUT_SUBMISSION_MISMATCH' },
       )
 
       // 回答物化后 Thread 以 ToolResult 收敛到终态。

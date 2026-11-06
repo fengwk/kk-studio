@@ -18,11 +18,11 @@ const IDE_CONNECTION_ID = '44444444-4444-4444-8444-444444444444'
 const IDE_CLAIM_ID = '55555555-5555-4555-8555-555555555555'
 
 /**
- * canonical problem 断言：HTTP 状态、稳定类别与原因必须同时成立。
+ * canonical problem 断言：状态、code 与 reason 由 expectHttpError 按产品抛出处的契约锁定。
  *
- * <p>只看状态码不足以证明契约：同一个 409 既可能是 IDE 通道不可用，也可能是其它领域冲突；机器码才是分支依据。
+ * <p>这里只补信封元数据；只看状态码不足以证明契约，机器码才是分支依据。
  */
-function assertCanonicalError(error, { status, code, reason }) {
+function assertProblemEnvelope(error) {
   let body = null
   try {
     body = JSON.parse(error.body)
@@ -31,9 +31,6 @@ function assertCanonicalError(error, { status, code, reason }) {
   }
   assert(body && typeof body === 'object', `error body must be a problem object: ${error.body}`)
   assert(body.type === 'about:blank' && typeof body.title === 'string', `invalid problem metadata: ${error.body}`)
-  assert(body.status === status, `error status must be ${status}: ${error.body}`)
-  assert(body.code === code, `error code must be ${code}: ${error.body}`)
-  if (reason !== undefined) assert(body.reason === reason, `error reason must be ${reason}: ${error.body}`)
   return body
 }
 
@@ -48,9 +45,9 @@ registerCase({
     try {
       const error = await expectHttpError(
         () => ctx.call('GET', `/api/platform/environments/${encodeURIComponent(environment.id)}/runtime`),
-        { status: 409 },
+        { status: 409, code: 'unavailable', reason: 'ENVIRONMENT_UNAVAILABLE' },
       )
-      assertCanonicalError(error, { status: 409, code: 'unavailable', reason: 'ENVIRONMENT_UNAVAILABLE' })
+      assertProblemEnvelope(error)
       assert(
         !/"revision"\s*:/.test(error.body),
         `runtime absence must not fabricate a revision: ${error.body}`,
@@ -67,9 +64,9 @@ registerCase({
       // 非 canonical environmentId 在进入服务之前即被拒绝，不落到运行快照读取。
       const invalid = await expectHttpError(
         () => ctx.call('GET', '/api/platform/environments/not-a-uuid/runtime'),
-        { status: 400 },
+        { status: 400, code: 'validation' },
       )
-      assertCanonicalError(invalid, { status: 400, code: 'validation' })
+      assertProblemEnvelope(invalid)
     } finally {
       await deleteEnvironmentFixture(ctx, environment.id)
     }
@@ -97,9 +94,9 @@ registerCase({
     try {
       const openError = await expectHttpError(
         () => ctx.call('POST', viewsPath, openBody),
-        { status: 409 },
+        { status: 409, code: 'unavailable', reason: 'IDE_UNAVAILABLE' },
       )
-      assertCanonicalError(openError, { status: 409, code: 'unavailable', reason: 'IDE_UNAVAILABLE' })
+      assertProblemEnvelope(openError)
       assert(
         !/"entryUrl"\s*:/.test(openError.body) && !/"bindingEpoch"\s*:/.test(openError.body),
         `rejected open must not fabricate a view binding: ${openError.body}`,
@@ -113,9 +110,9 @@ registerCase({
             bindingEpoch: '1',
             directory: '/workspace/subdir',
           }),
-        { status: 409 },
+        { status: 409, code: 'unavailable', reason: 'IDE_UNAVAILABLE' },
       )
-      assertCanonicalError(directoryError, { status: 409, code: 'unavailable', reason: 'IDE_UNAVAILABLE' })
+      assertProblemEnvelope(directoryError)
 
       const terminalError = await expectHttpError(
         () =>
@@ -123,23 +120,23 @@ registerCase({
             documentId: IDE_DOCUMENT_ID,
             bindingEpoch: '1',
           }),
-        { status: 409 },
+        { status: 409, code: 'unavailable', reason: 'IDE_UNAVAILABLE' },
       )
-      assertCanonicalError(terminalError, { status: 409, code: 'unavailable', reason: 'IDE_UNAVAILABLE' })
+      assertProblemEnvelope(terminalError)
 
       const listError = await expectHttpError(
         () => ctx.call('GET', `/api/ide/environments/${encodeURIComponent(environment.id)}/directories`),
-        { status: 409 },
+        { status: 409, code: 'unavailable', reason: 'IDE_UNAVAILABLE' },
       )
-      assertCanonicalError(listError, { status: 409, code: 'unavailable', reason: 'IDE_UNAVAILABLE' })
+      assertProblemEnvelope(listError)
       const mobileError = await expectHttpError(
         () => ctx.call('POST', `${viewsPath}/${IDE_VIEW_ID}/apply-mobile-layout`, {
           documentId: IDE_DOCUMENT_ID,
           bindingEpoch: '1',
         }),
-        { status: 409 },
+        { status: 409, code: 'unavailable', reason: 'IDE_UNAVAILABLE' },
       )
-      assertCanonicalError(mobileError, { status: 409, code: 'unavailable', reason: 'IDE_UNAVAILABLE' })
+      assertProblemEnvelope(mobileError)
 
       const closeError = await expectHttpError(
         () =>
@@ -148,16 +145,16 @@ registerCase({
             bindingEpoch: '1',
             discard: true,
           }),
-        { status: 409 },
+        { status: 409, code: 'unavailable', reason: 'IDE_UNAVAILABLE' },
       )
-      assertCanonicalError(closeError, { status: 409, code: 'unavailable', reason: 'IDE_UNAVAILABLE' })
+      assertProblemEnvelope(closeError)
 
       // 非 canonical environmentId 在进入路由判定之前即被拒绝。
       const invalid = await expectHttpError(
         () => ctx.call('POST', '/api/ide/environments/not-a-uuid/views', openBody),
-        { status: 400 },
+        { status: 400, code: 'validation' },
       )
-      assertCanonicalError(invalid, { status: 400, code: 'validation' })
+      assertProblemEnvelope(invalid)
     } finally {
       await deleteEnvironmentFixture(ctx, environment.id)
     }

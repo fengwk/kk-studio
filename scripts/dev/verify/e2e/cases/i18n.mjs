@@ -11,7 +11,7 @@ function problemBody(error) {
   return body
 }
 
-async function localizedGet(ctx, requestPath, language, status = 400) {
+async function localizedGet(ctx, requestPath, language, { status = 400, code = 'validation' } = {}) {
   return expectHttpError(
     () =>
       httpJson(
@@ -22,7 +22,7 @@ async function localizedGet(ctx, requestPath, language, status = 400) {
         60_000,
         { 'Accept-Language': language },
       ),
-    { status },
+    { status, code },
   )
 }
 
@@ -33,8 +33,12 @@ registerCase({
   docs: 'Domain error 与类型化参数校验保持 problem status/code/detail，仅本地化 title；不支持语言回退英文',
   async run(ctx) {
     const unknownChatPath = '/api/chat/chats/00000000-0000-0000-0000-000000000999'
-    const englishDomain = problemBody(await localizedGet(ctx, unknownChatPath, 'en-US', 404))
-    const chineseDomain = problemBody(await localizedGet(ctx, unknownChatPath, 'zh-CN', 404))
+    const englishDomain = problemBody(
+      await localizedGet(ctx, unknownChatPath, 'en-US', { status: 404, code: 'not_found' }),
+    )
+    const chineseDomain = problemBody(
+      await localizedGet(ctx, unknownChatPath, 'zh-CN', { status: 404, code: 'not_found' }),
+    )
     assert(englishDomain.code === 'not_found', JSON.stringify(englishDomain))
     assert(englishDomain.title === 'The chat was not found.', JSON.stringify(englishDomain))
     assert(chineseDomain.code === 'not_found', JSON.stringify(chineseDomain))

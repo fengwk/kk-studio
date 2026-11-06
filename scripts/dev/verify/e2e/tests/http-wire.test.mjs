@@ -46,6 +46,23 @@ test('HTTP helper reads resources, empty 204 and problem details without a respo
       }),
       /expected reason OTHER/,
     )
+    // 4xx 不接受“code 非空即可”：调用点必须给出确切 code，conflict 还必须给出确切 reason。
+    await assert.rejects(
+      () => expectHttpError(() => httpJson(base, 'GET', '/conflict'), { status: 409 }),
+      /requires an explicit problem code/,
+    )
+    await assert.rejects(
+      () => expectHttpError(() => httpJson(base, 'GET', '/conflict'), {
+        status: 409, code: 'conflict',
+      }),
+      /must pin the exact problem reason/,
+    )
+    await assert.rejects(
+      () => expectHttpError(() => httpJson(base, 'GET', '/conflict'), {
+        status: 409, code: 'version_conflict', reason: 'STALE_COMMAND_CURSOR',
+      }),
+      /expected code version_conflict/,
+    )
   } finally {
     await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
   }

@@ -189,11 +189,11 @@ registerCase({
           yoloEnabled: false,
           commands: [{ ...resourceCommand, idempotencyKey: cid() }],
         }),
-      { status: 400 },
+      { status: 400, code: 'validation' },
     )
     await expectHttpError(
       () => ctx.call('GET', `/api/harness/threads/${rejectedThreadId}`),
-      { status: 404 },
+      { status: 404, code: 'not_found' },
     )
 
     // 8. 已消费的行可能正在等待清理，也可能已清理完成。
@@ -234,7 +234,7 @@ registerCase({
               },
             ],
           }),
-        { status: 400 },
+        { status: 400, code: 'validation' },
       )
     }
 
