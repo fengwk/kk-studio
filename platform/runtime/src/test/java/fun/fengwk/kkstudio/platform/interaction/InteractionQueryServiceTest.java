@@ -16,7 +16,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
 
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.api.history.EntryCurrentState;
@@ -341,8 +342,10 @@ class InteractionQueryServiceTest {
   @Test
   void rootFilterRejectsNonexistentAndNonRootThreads() {
     when(runtime.findRootThreadId(id(999))).thenReturn(Optional.empty());
-    assertThrows(
-        HarnessRuntimeNotFoundException.class, () -> service.listInteractions(id(999), null, 10));
+    assertEquals(
+        DomainErrorCode.NOT_FOUND,
+        assertThrows(DomainException.class, () -> service.listInteractions(id(999), null, 10))
+            .code());
 
     UUID child = id(501);
     UUID root = id(500);

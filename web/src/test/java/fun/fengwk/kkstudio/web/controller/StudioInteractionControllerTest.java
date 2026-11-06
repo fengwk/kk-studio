@@ -20,6 +20,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.ToolInputAcceptance;
 import fun.fengwk.kkstudio.harness.api.ToolInputSubmissionCommand;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInputReceipt;
@@ -139,6 +140,19 @@ class StudioInteractionControllerTest {
         .andExpect(status().isOk());
 
     verify(interactionQueryService).listInteractions(id(7), null, 50);
+  }
+
+  /** 测试意图：迁移后的根线程不存在仍通过旧错误信封返回 404 和原始 detail。 */
+  @Test
+  void listInteractionsReportsMissingRootAsNotFound() throws Exception {
+    when(interactionQueryService.listInteractions(id(7), null, 50))
+        .thenThrow(DomainException.notFound("thread", "thread missing"));
+
+    mockMvc
+        .perform(get("/api/interactions").param("rootThreadId", idText(7)))
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.code").value("NOT_FOUND"))
+        .andExpect(jsonPath("$.errors.detail").value("thread missing"));
   }
 
   /** 测试意图：非 canonical 的 rootThreadId 在触达查询服务前以 400 拒绝。 */
