@@ -562,7 +562,7 @@ export async function runWorkspaceContractMatrix(ui) {
           }
 
           const approvalMatcher = (url) =>
-            url.pathname.startsWith(`/api/threads/${childThreadId}/tool-invocations/`)
+            url.pathname.startsWith(`/api/harness/threads/${childThreadId}/tool-invocations/`)
             && url.pathname.endsWith('/approval')
           const approvalHandler = async (route) => {
             const request = route.request()

@@ -2,19 +2,28 @@
   "domain": {
     "status": 404,
     "code": "not_found",
-    "messages": { "en-US": "The chat was not found.", "zh-CN": "未找到 对话。" },
+    "messages": {
+      "en-US": "The chat was not found.",
+      "zh-CN": "未找到 对话。"
+    },
     "detail": "chat not found"
   },
   "validation": {
     "status": 400,
     "code": "validation",
-    "messages": { "en-US": "The pageNumber parameter has an invalid value.", "zh-CN": "pageNumber 参数的值无效。" },
+    "messages": {
+      "en-US": "The pageNumber parameter has an invalid value.",
+      "zh-CN": "pageNumber 参数的值无效。"
+    },
     "detail": "pageNumber has invalid value: abc"
   },
   "responseStatus": {
     "status": 400,
     "code": "validation",
-    "messages": { "en-US": "The request is invalid.", "zh-CN": "请求无效。" },
-    "detail": "threadId must be a canonical UUID: not-a-number"
+    "messages": {
+      "en-US": "The threadId parameter has an invalid value.",
+      "zh-CN": "threadId 参数的值无效。"
+    },
+    "detail": "threadId has an invalid value"
   }
 }

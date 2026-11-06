@@ -478,7 +478,7 @@ registerCase({
         historical.sourceHeadEntryId === String(assistantOutput.entry.parentEntryId),
         `historical preview prefix head must be the output parent: ${JSON.stringify(historical)}`,
       )
-      // 历史预览与草稿预览共用同一只读面：不写 Entry、不推进 cursor。
+      // 历史预览是只读面：不写 Entry、不推进 cursor。
       assert(
         JSON.stringify((await getThreadSnapshot(ctx, threadId)).entries) === JSON.stringify(entries),
         'historical preview must not write any Entry',

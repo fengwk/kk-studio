@@ -274,7 +274,7 @@ function createStopCaseContext({ exitConverges = true } = {}) {
           },
         }
       }
-      if (method === 'POST' && url === '/api/command-batches') {
+      if (method === 'POST' && url === '/api/harness/command-batches') {
         assert.equal(body.target.type, 'NEW_SESSION')
         // case 在请求中预分配 Session/Thread 身份，mock 采用这些身份以匹配后续路由。
         sessionId = body.target.sessionId
@@ -287,7 +287,7 @@ function createStopCaseContext({ exitConverges = true } = {}) {
         }
         return acceptedResponse(body.commands)
       }
-      if (method === 'POST' && url === `/api/threads/${threadId}/command-batches`) {
+      if (method === 'POST' && url === `/api/harness/threads/${threadId}/command-batches`) {
         if (phase === 'idle') {
           assert.deepEqual(Object.keys(body).sort(), ['commands', 'expectedHeadEntryId', 'expectedNextCommandSequence'])
           assert.equal(body.expectedHeadEntryId, thread.headEntryId)
@@ -337,7 +337,7 @@ function createStopCaseContext({ exitConverges = true } = {}) {
         }
         throw new Error(`unexpected command batch in phase ${phase}`)
       }
-      if (method === 'GET' && url === `/api/threads/${threadId}`) {
+      if (method === 'GET' && url === `/api/harness/threads/${threadId}`) {
         if (phase === 'stopped-unconfirmed') {
           postStopReads += 1
           // 首次 stop 后的即时 durable 读取仍看到未确认退出；下一次读取才模拟 ledger confirmation。
@@ -347,7 +347,7 @@ function createStopCaseContext({ exitConverges = true } = {}) {
         }
         return snapshotResponse()
       }
-      if (method === 'POST' && url === `/api/threads/${threadId}/stop`) {
+      if (method === 'POST' && url === `/api/harness/threads/${threadId}/stop`) {
         if (firstStopRequest === null) {
           assert.equal(body.expectedVersion, thread.version)
           firstStopRequest = {
@@ -383,7 +383,7 @@ function createStopCaseContext({ exitConverges = true } = {}) {
           }
           phase = 'stopped-unconfirmed'
           return {
-            status: 200,
+            status: 202,
             json: { status: 'STOPPED', thread: { ...thread }, stoppedThreads: [stopReceipt()] },
           }
         }
@@ -398,7 +398,7 @@ function createStopCaseContext({ exitConverges = true } = {}) {
         if (phase === 'stopped-unconfirmed') confirmExit()
         replayVersion = thread.version
         return {
-          status: 200,
+          status: 202,
           json: { status: 'REPLAYED', thread: { ...thread }, stoppedThreads: [stopReceipt()] },
         }
       }

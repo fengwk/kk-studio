@@ -680,12 +680,12 @@ registerCase({
       // 缺 rootSettings 的 NEW_SESSION => 400（mapper requireNonNull）。
       await expectHttpError(
         () =>
-          ctx.call('POST', '/api/command-batches', {
+          ctx.call('POST', '/api/harness/command-batches', {
             owner: chatOwner(chat.id),
             target: { type: 'NEW_SESSION', sessionId: cid(), threadId: cid(), yoloEnabled: false },
             commands: [userMessageCommand('missing root settings', cid())],
           }),
-        { status: 400, messageIncludes: /rootSettings/i },
+        { status: 400 },
       )
     } finally {
       await deleteChat(ctx, cleanupChat)

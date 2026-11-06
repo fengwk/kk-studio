@@ -192,7 +192,7 @@ registerCase({
       { status: 400 },
     )
     await expectHttpError(
-      () => ctx.call('GET', `/api/threads/${rejectedThreadId}`),
+      () => ctx.call('GET', `/api/harness/threads/${rejectedThreadId}`),
       { status: 404 },
     )
 
