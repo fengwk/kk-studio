@@ -291,8 +291,7 @@ public final class PluginConfigurationService {
   }
 
   private static DomainException conflict(long expected, long actual) {
-    return DomainException.versionConflict(
-        RESOURCE, Long.toString(expected), Long.toString(actual));
+    return DomainException.versionConflict(RESOURCE, expected, actual);
   }
 
   private enum CredentialAction {

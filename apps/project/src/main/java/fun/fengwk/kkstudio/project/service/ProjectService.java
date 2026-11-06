@@ -223,8 +223,7 @@ public class ProjectService {
             ProjectSessionOwnership.owner(issue.getId(), binding.agentName()));
       }
       if (!issueRepository.deleteById(issue.getId(), issue.getVersion())) {
-        throw DomainException.versionConflict(
-            "issue", Long.toString(issue.getVersion()), Long.toString(issue.getVersion()));
+        throw DomainException.versionConflict("issue", issue.getVersion(), issue.getVersion());
       }
     }
     if (!projectRepository.deleteById(projectId, expectedVersion)) {
@@ -304,7 +303,6 @@ public class ProjectService {
   }
 
   private static DomainException conflict(Project locked, long expectedVersion) {
-    return DomainException.versionConflict(
-        "project", Long.toString(expectedVersion), Long.toString(locked.getVersion()));
+    return DomainException.versionConflict("project", expectedVersion, locked.getVersion());
   }
 }

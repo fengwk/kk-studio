@@ -151,8 +151,7 @@ public class EnvironmentService {
       throw DomainException.notFound(RESOURCE);
     }
     if (env.getVersion() != expectedVersion) {
-      throw DomainException.versionConflict(
-          RESOURCE, Long.toString(expectedVersion), Long.toString(env.getVersion()));
+      throw DomainException.versionConflict(RESOURCE, expectedVersion, env.getVersion());
     }
     if (tokenHash.equals(env.getRegistrationTokenHash())
         && Objects.equals(config, env.getInstallConfig())) {
@@ -166,8 +165,7 @@ public class EnvironmentService {
         if (reread == null) {
           throw DomainException.notFound(RESOURCE);
         }
-        throw DomainException.versionConflict(
-            RESOURCE, Long.toString(expectedVersion), Long.toString(reread.getVersion()));
+        throw DomainException.versionConflict(RESOURCE, expectedVersion, reread.getVersion());
       }
     } catch (DuplicateKeyException error) {
       throw DomainException.duplicate(
@@ -195,8 +193,7 @@ public class EnvironmentService {
       throw DomainException.notFound(RESOURCE);
     }
     if (env.getVersion() != expectedVersion) {
-      throw DomainException.versionConflict(
-          RESOURCE, Long.toString(expectedVersion), Long.toString(env.getVersion()));
+      throw DomainException.versionConflict(RESOURCE, expectedVersion, env.getVersion());
     }
     if (Objects.equals(config, env.getInstallConfig())) {
       return toDto(env, null);
@@ -207,8 +204,7 @@ public class EnvironmentService {
       if (reread == null) {
         throw DomainException.notFound(RESOURCE);
       }
-      throw DomainException.versionConflict(
-          RESOURCE, Long.toString(expectedVersion), Long.toString(reread.getVersion()));
+      throw DomainException.versionConflict(RESOURCE, expectedVersion, reread.getVersion());
     }
     return toDto(environmentRepository.getById(id.value()), null);
   }
@@ -280,8 +276,7 @@ public class EnvironmentService {
       throw DomainException.notFound(RESOURCE);
     }
     if (env.getVersion() != expectedVersion) {
-      throw DomainException.versionConflict(
-          RESOURCE, Long.toString(expectedVersion), Long.toString(env.getVersion()));
+      throw DomainException.versionConflict(RESOURCE, expectedVersion, env.getVersion());
     }
     return env;
   }
@@ -298,8 +293,7 @@ public class EnvironmentService {
       throw DomainException.notFound(RESOURCE);
     }
     if (env.getVersion() != expectedVersion) {
-      throw DomainException.versionConflict(
-          RESOURCE, Long.toString(expectedVersion), Long.toString(env.getVersion()));
+      throw DomainException.versionConflict(RESOURCE, expectedVersion, env.getVersion());
     }
     String token = RegistrationTokens.generate();
     env.setRegistrationTokenHash(RegistrationTokens.hash(token));
@@ -308,8 +302,7 @@ public class EnvironmentService {
       if (reread == null) {
         throw DomainException.notFound(RESOURCE);
       }
-      throw DomainException.versionConflict(
-          RESOURCE, Long.toString(expectedVersion), Long.toString(reread.getVersion()));
+      throw DomainException.versionConflict(RESOURCE, expectedVersion, reread.getVersion());
     }
     Environment updated = environmentRepository.getById(id.value());
     return toDto(updated, token);
@@ -323,8 +316,7 @@ public class EnvironmentService {
       throw DomainException.notFound(RESOURCE);
     }
     if (env.getVersion() != expectedVersion) {
-      throw DomainException.versionConflict(
-          RESOURCE, Long.toString(expectedVersion), Long.toString(env.getVersion()));
+      throw DomainException.versionConflict(RESOURCE, expectedVersion, env.getVersion());
     }
     if (environmentRegistry.hasActiveLease(id)) {
       throw DomainException.inUse(
@@ -340,8 +332,7 @@ public class EnvironmentService {
         if (reread == null) {
           throw DomainException.notFound(RESOURCE);
         }
-        throw DomainException.versionConflict(
-            RESOURCE, Long.toString(expectedVersion), Long.toString(reread.getVersion()));
+        throw DomainException.versionConflict(RESOURCE, expectedVersion, reread.getVersion());
       }
     } catch (DataIntegrityViolationException error) {
       throw DomainException.inUse(

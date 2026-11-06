@@ -156,8 +156,7 @@ public class ChatService {
       if (reread == null) {
         throw DomainException.notFound(RESOURCE);
       }
-      throw DomainException.versionConflict(
-          RESOURCE, Long.toString(expected), Long.toString(reread.getVersion()));
+      throw DomainException.versionConflict(RESOURCE, expected, reread.getVersion());
     }
     return convert(repository.getById(existing.getId()));
   }
@@ -206,8 +205,7 @@ public class ChatService {
 
   private static void ensureExpectedVersion(Chat chat, long expected) {
     if (chat.getVersion() != expected) {
-      throw DomainException.versionConflict(
-          RESOURCE, Long.toString(expected), Long.toString(chat.getVersion()));
+      throw DomainException.versionConflict(RESOURCE, expected, chat.getVersion());
     }
   }
 }

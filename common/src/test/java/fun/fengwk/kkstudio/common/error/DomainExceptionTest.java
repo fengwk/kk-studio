@@ -82,12 +82,12 @@ class DomainExceptionTest {
     assertNull(notFound.getCause());
     assertNull(notFound.reason());
 
-    DomainException conflict = DomainException.versionConflict("model", "3", "4");
+    DomainException conflict = DomainException.versionConflict("model", 3L, 4L);
     assertEquals(DomainErrorCode.VERSION_CONFLICT, conflict.code());
     assertEquals("model", conflict.resource());
     assertEquals("model version conflict: expected=3 actual=4", conflict.getMessage());
-    assertEquals("3", conflict.expectedVersion());
-    assertEquals("4", conflict.actualVersion());
+    assertEquals(3L, conflict.expectedVersion());
+    assertEquals(4L, conflict.actualVersion());
     assertNull(conflict.reason());
   }
 

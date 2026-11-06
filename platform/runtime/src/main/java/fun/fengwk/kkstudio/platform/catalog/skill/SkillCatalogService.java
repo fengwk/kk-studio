@@ -290,8 +290,7 @@ public class SkillCatalogService {
             SkillPackage locked = requireGitPackageForUpdate(packageName);
             requireCurrentVersion(locked, expected);
             if (!targetCommit.equals(locked.gitSource().headCommit())) {
-              throw DomainException.versionConflict(
-                  RESOURCE, Long.toString(expected), Long.toString(locked.version()));
+              throw DomainException.versionConflict(RESOURCE, expected, locked.version());
             }
             ensureSkillsRemovable(packageName, removedSkillNames(locked, archive.skills()));
             UUID artifactBlobId = consumeStaging(stagingUploadId);
@@ -449,7 +448,7 @@ public class SkillCatalogService {
           RESOURCE, "skill package is a Git package and cannot be replaced by an upload");
     }
     if (existing == null && rawExpected != null) {
-      throw DomainException.versionConflict(RESOURCE, Long.toString(rawExpected), "0");
+      throw DomainException.versionConflict(RESOURCE, rawExpected, 0);
     }
     if (existing != null && rawExpected == null) {
       throw DomainException.validation(
@@ -835,14 +834,12 @@ public class SkillCatalogService {
     if (reread == null) {
       return DomainException.notFound(RESOURCE);
     }
-    return DomainException.versionConflict(
-        RESOURCE, Long.toString(expected), Long.toString(reread.version()));
+    return DomainException.versionConflict(RESOURCE, expected, reread.version());
   }
 
   private static void requireCurrentVersion(SkillPackage skillPackage, long expected) {
     if (skillPackage.version() != expected) {
-      throw DomainException.versionConflict(
-          RESOURCE, Long.toString(expected), Long.toString(skillPackage.version()));
+      throw DomainException.versionConflict(RESOURCE, expected, skillPackage.version());
     }
   }
 

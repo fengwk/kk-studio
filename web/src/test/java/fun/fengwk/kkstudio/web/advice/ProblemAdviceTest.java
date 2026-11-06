@@ -177,7 +177,7 @@ class ProblemAdviceTest {
   static class Probe {
     @GetMapping("/problem/version")
     void version() {
-      throw DomainException.versionConflict("canvas", "3", "4");
+      throw DomainException.versionConflict("canvas", 3L, 4L);
     }
 
     @GetMapping("/problem/conflict")

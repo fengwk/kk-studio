@@ -110,8 +110,7 @@ public class McpServerService {
                       updateDTO.getTimeoutMillis());
               McpServer updated = withConfig(locked, config);
               if (!repository.update(updated, expectedVersion)) {
-                throw DomainException.versionConflict(
-                    RESOURCE, Long.toString(expectedVersion), Long.toString(locked.version()));
+                throw DomainException.versionConflict(RESOURCE, expectedVersion, locked.version());
               }
               return updated.toBuilder().version(expectedVersion + 1).build();
             });
@@ -165,8 +164,7 @@ public class McpServerService {
       long expected = existing.version();
       server = withConfig(existing, config);
       if (!repository.update(server, expected)) {
-        throw DomainException.versionConflict(
-            RESOURCE, Long.toString(expected), Long.toString(expected));
+        throw DomainException.versionConflict(RESOURCE, expected, expected);
       }
       server = server.toBuilder().version(expected + 1).build();
     }
@@ -195,8 +193,7 @@ public class McpServerService {
             }
           }
           if (!repository.delete(name, expectedVersion)) {
-            throw DomainException.versionConflict(
-                RESOURCE, Long.toString(expectedVersion), Long.toString(locked.version()));
+            throw DomainException.versionConflict(RESOURCE, expectedVersion, locked.version());
           }
           return null;
         });
@@ -221,8 +218,7 @@ public class McpServerService {
       repository.insertTool(tool);
     }
     if (!repository.updateDiscoveryStatus(name, locked.version(), McpDiscoveryStatus.AVAILABLE)) {
-      throw DomainException.versionConflict(
-          RESOURCE, Long.toString(locked.version()), Long.toString(locked.version()));
+      throw DomainException.versionConflict(RESOURCE, locked.version(), locked.version());
     }
   }
 
@@ -260,8 +256,7 @@ public class McpServerService {
 
   private static void requireVersion(McpServer server, long expectedVersion) {
     if (server.version() != expectedVersion) {
-      throw DomainException.versionConflict(
-          RESOURCE, Long.toString(expectedVersion), Long.toString(server.version()));
+      throw DomainException.versionConflict(RESOURCE, expectedVersion, server.version());
     }
   }
 

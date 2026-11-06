@@ -71,8 +71,8 @@ class SystemSettingsServiceTest {
     DomainException error = assertThrows(DomainException.class, () -> service.update(update(0L)));
 
     assertEquals(DomainErrorCode.VERSION_CONFLICT, error.code());
-    assertEquals("0", error.expectedVersion());
-    assertEquals("1", error.actualVersion());
+    assertEquals(0L, error.expectedVersion());
+    assertEquals(1L, error.actualVersion());
     verify(repository).update(SystemSettingsTestFixture.DEFAULT, 0);
   }
 

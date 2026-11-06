@@ -234,8 +234,7 @@ public final class PluginManagementService {
           applied(lease.snapshot(), pluginId).orElseThrow();
       long appliedVersion = configured.config().revision();
       if (expectedVersion != appliedVersion) {
-        throw DomainException.versionConflict(
-            RESOURCE, Long.toString(expectedVersion), Long.toString(appliedVersion));
+        throw DomainException.versionConflict(RESOURCE, expectedVersion, appliedVersion);
       }
       PluginConnectionCheck connectionCheck =
           configured

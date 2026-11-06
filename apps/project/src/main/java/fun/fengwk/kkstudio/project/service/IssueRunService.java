@@ -240,8 +240,7 @@ public class IssueRunService {
         objectMapper.createObjectNode());
     issue.setNextRunOrdinal(ordinal + 1);
     if (!issueRepository.updateById(issue, issue.getVersion())) {
-      throw DomainException.versionConflict(
-          "issue", Long.toString(issue.getVersion()), Long.toString(issue.getVersion()));
+      throw DomainException.versionConflict("issue", issue.getVersion(), issue.getVersion());
     }
     issueWorkQueue.request(issueId, Duration.ZERO);
     return issueRunRepository.getById(run.getId());
@@ -457,22 +456,19 @@ public class IssueRunService {
 
   private void requireVersion(IssueRun run, long expectedVersion) {
     if (run.getVersion() != expectedVersion) {
-      throw DomainException.versionConflict(
-          "issue_run", Long.toString(expectedVersion), Long.toString(run.getVersion()));
+      throw DomainException.versionConflict("issue_run", expectedVersion, run.getVersion());
     }
   }
 
   private void updateRun(IssueRun run, long expectedVersion) {
     if (!issueRunRepository.updateById(run, expectedVersion)) {
-      throw DomainException.versionConflict(
-          "issue_run", Long.toString(expectedVersion), Long.toString(run.getVersion()));
+      throw DomainException.versionConflict("issue_run", expectedVersion, run.getVersion());
     }
   }
 
   private void persistIssue(Issue issue, long expectedVersion) {
     if (!issueRepository.updateById(issue, expectedVersion)) {
-      throw DomainException.versionConflict(
-          "issue", Long.toString(expectedVersion), Long.toString(issue.getVersion()));
+      throw DomainException.versionConflict("issue", expectedVersion, issue.getVersion());
     }
   }
 

@@ -19,8 +19,8 @@ public class DomainException extends RuntimeException {
   private final DomainErrorCode code;
   private final String resource;
   private final String reason;
-  private final String expectedVersion;
-  private final String actualVersion;
+  private final Long expectedVersion;
+  private final Long actualVersion;
   private final Map<String, Object> errors;
 
   private DomainException(
@@ -29,8 +29,8 @@ public class DomainException extends RuntimeException {
       String reason,
       String message,
       Throwable cause,
-      String expectedVersion,
-      String actualVersion,
+      Long expectedVersion,
+      Long actualVersion,
       Map<String, Object> errors) {
     super(message, cause);
     this.code = Objects.requireNonNull(code, "code");
@@ -80,7 +80,7 @@ public class DomainException extends RuntimeException {
 
   /** 更新/删除 CAS 在乐观版本竞争中失败。 */
   public static DomainException versionConflict(
-      String resource, String expectedVersion, String actualVersion) {
+      String resource, long expectedVersion, long actualVersion) {
     return new DomainException(
         DomainErrorCode.VERSION_CONFLICT,
         resource,
@@ -166,12 +166,12 @@ public class DomainException extends RuntimeException {
   }
 
   /** 仅 {@link DomainErrorCode#VERSION_CONFLICT} 携带期望版本。 */
-  public String expectedVersion() {
+  public Long expectedVersion() {
     return expectedVersion;
   }
 
   /** 仅 {@link DomainErrorCode#VERSION_CONFLICT} 携带实际版本。 */
-  public String actualVersion() {
+  public Long actualVersion() {
     return actualVersion;
   }
 

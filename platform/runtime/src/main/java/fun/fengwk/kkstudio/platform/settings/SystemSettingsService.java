@@ -57,16 +57,14 @@ public class SystemSettingsService {
 
     SystemSettingsRepository.SystemSettingsRecord current = requireRecord();
     if (current.version() != expected) {
-      throw DomainException.versionConflict(
-          RESOURCE, Long.toString(expected), Long.toString(current.version()));
+      throw DomainException.versionConflict(RESOURCE, expected, current.version());
     }
     if (!systemSettingsRepository.update(settings, expected)) {
       SystemSettingsRepository.SystemSettingsRecord reread = systemSettingsRepository.get();
       if (reread == null) {
         throw DomainException.notFound(RESOURCE, "system settings row is missing");
       }
-      throw DomainException.versionConflict(
-          RESOURCE, Long.toString(expected), Long.toString(reread.version()));
+      throw DomainException.versionConflict(RESOURCE, expected, reread.version());
     }
     SystemSettingsRepository.SystemSettingsRecord updated = requireRecord();
     refreshSnapshotAfterCommit();

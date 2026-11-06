@@ -118,8 +118,7 @@ public class AgentService {
       if (reread == null) {
         throw DomainException.notFound(RESOURCE);
       }
-      throw DomainException.versionConflict(
-          RESOURCE, Long.toString(expected), Long.toString(reread.version()));
+      throw DomainException.versionConflict(RESOURCE, expected, reread.version());
     }
     return toDto(repository.getByName(name));
   }
@@ -149,8 +148,7 @@ public class AgentService {
       if (reread == null) {
         throw DomainException.notFound(RESOURCE);
       }
-      throw DomainException.versionConflict(
-          RESOURCE, Long.toString(expected), Long.toString(reread.version()));
+      throw DomainException.versionConflict(RESOURCE, expected, reread.version());
     }
   }
 
@@ -176,8 +174,7 @@ public class AgentService {
 
   private static void ensureExpectedVersion(Agent definition, long expected) {
     if (definition.version() != expected) {
-      throw DomainException.versionConflict(
-          RESOURCE, Long.toString(expected), Long.toString(definition.version()));
+      throw DomainException.versionConflict(RESOURCE, expected, definition.version());
     }
   }
 

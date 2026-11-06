@@ -180,8 +180,7 @@ public class ProviderService {
     if (reread == null) {
       return DomainException.notFound(RESOURCE);
     }
-    return DomainException.versionConflict(
-        RESOURCE, Long.toString(expected), Long.toString(reread.version()));
+    return DomainException.versionConflict(RESOURCE, expected, reread.version());
   }
 
   private Provider requireProvider(String name) {
@@ -194,8 +193,7 @@ public class ProviderService {
 
   private static void ensureExpectedVersion(Provider provider, long expected) {
     if (provider.version() != expected) {
-      throw DomainException.versionConflict(
-          RESOURCE, Long.toString(expected), Long.toString(provider.version()));
+      throw DomainException.versionConflict(RESOURCE, expected, provider.version());
     }
   }
 

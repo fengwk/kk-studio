@@ -625,7 +625,7 @@ class IssueControllerTest {
     UpdateIssueRequestDTO req =
         UpdateIssueRequestDTO.builder().expectedVersion(1L).title("T").build();
     when(issueEditingService.updateIssue(eq(issueId), eq(1L), any(), any()))
-        .thenThrow(DomainException.versionConflict("issue", "1", "2"));
+        .thenThrow(DomainException.versionConflict("issue", 1L, 2L));
 
     mockMvc
         .perform(

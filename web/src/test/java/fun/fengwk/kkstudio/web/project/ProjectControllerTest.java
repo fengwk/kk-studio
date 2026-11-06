@@ -194,7 +194,7 @@ class ProjectControllerTest {
             .description("Updated Desc")
             .build();
     when(projectService.updateConfiguration(projectId, 1L, "Updated Title", "Updated Desc"))
-        .thenThrow(DomainException.versionConflict("project", "1", "2"));
+        .thenThrow(DomainException.versionConflict("project", 1L, 2L));
 
     mockMvc
         .perform(

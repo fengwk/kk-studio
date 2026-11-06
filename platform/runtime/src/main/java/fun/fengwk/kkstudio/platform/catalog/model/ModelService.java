@@ -147,8 +147,7 @@ public class ModelService {
         if (reread == null) {
           throw DomainException.notFound(RESOURCE);
         }
-        throw DomainException.versionConflict(
-            RESOURCE, Long.toString(expected), Long.toString(reread.version()));
+        throw DomainException.versionConflict(RESOURCE, expected, reread.version());
       }
     } catch (DuplicateKeyException error) {
       throw DomainException.duplicate(
@@ -178,8 +177,7 @@ public class ModelService {
       if (reread == null) {
         throw DomainException.notFound(RESOURCE);
       }
-      throw DomainException.versionConflict(
-          RESOURCE, Long.toString(expected), Long.toString(reread.version()));
+      throw DomainException.versionConflict(RESOURCE, expected, reread.version());
     }
   }
 
@@ -392,8 +390,7 @@ public class ModelService {
 
   private static void ensureExpectedVersion(Model model, long expected) {
     if (model.version() != expected) {
-      throw DomainException.versionConflict(
-          RESOURCE, Long.toString(expected), Long.toString(model.version()));
+      throw DomainException.versionConflict(RESOURCE, expected, model.version());
     }
   }
 
