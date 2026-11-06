@@ -12,6 +12,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
@@ -109,7 +111,10 @@ class HarnessRuntimeStopConcurrencyTest {
         assertTrue(store.transaction(tx -> tx.tools().find(baseline.toolId())).isEmpty());
         assertConflict(approvalAttempt, Reason.APPROVAL_NOT_APPLICABLE);
       } else {
-        assertConflict(stopAttempt, Reason.STALE_VERSION);
+        assertTrue(stopAttempt.error() instanceof DomainException);
+        DomainException conflict = (DomainException) stopAttempt.error();
+        assertEquals(DomainErrorCode.CONFLICT, conflict.code());
+        assertEquals(Reason.STALE_VERSION.name(), conflict.reason());
         ToolInvocation tool =
             store.transaction(tx -> tx.tools().find(baseline.toolId()).orElseThrow());
         assertEquals(ToolInvocationStatus.READY, tool.status());

@@ -27,9 +27,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.harness.api.ThreadTreeNode;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
@@ -154,8 +155,11 @@ public abstract class HarnessRuntimeThreadTreeContract {
 
   @Test
   protected void missingThreadIsNotFoundAndQueryDoesNotWrite() {
-    assertThrows(
-        HarnessRuntimeNotFoundException.class, () -> runtime.getThreadTree(TestIds.id(999)));
+    DomainException error =
+        assertThrows(DomainException.class, () -> runtime.getThreadTree(TestIds.id(999)));
+    assertEquals(DomainErrorCode.NOT_FOUND, error.code());
+    assertEquals("thread", error.resource());
+    assertNull(error.reason());
     TreeFixture tree = seedCrossSessionTree(store);
     long version =
         store.transaction(tx -> tx.threads().find(tree.rootId()).orElseThrow().version());

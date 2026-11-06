@@ -15,9 +15,10 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.ObjectProvider;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.harness.api.SpawnRequest;
 import fun.fengwk.kkstudio.harness.api.StopResult;
 import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
@@ -97,12 +98,12 @@ class IssueThreadExecutionTest {
   /** 读取失败原样传播宿主异常，不吞掉也不换成空视图。 */
   @Test
   void readThreadPropagatesMissingThread() {
-    HarnessRuntimeNotFoundException missing = new HarnessRuntimeNotFoundException("thread missing");
+    DomainException missing = DomainException.notFound("thread", "thread missing");
     when(runtime.getThreadSnapshot(THREAD_ID)).thenThrow(missing);
 
-    assertSame(
-        missing,
-        assertThrows(HarnessRuntimeNotFoundException.class, () -> port.readThread(THREAD_ID)));
+    assertSame(missing, assertThrows(DomainException.class, () -> port.readThread(THREAD_ID)));
+    assertEquals(DomainErrorCode.NOT_FOUND, missing.code());
+    assertNull(missing.reason());
   }
 
   /** 部署缺少运行时（平台只装配上下文）时确定失败，绝不退回本地假执行或空视图。 */

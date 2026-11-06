@@ -9,6 +9,9 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
+import fun.fengwk.kkstudio.harness.api.HarnessConflictReason;
 import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
@@ -18,8 +21,10 @@ import fun.fengwk.kkstudio.project.error.ProjectNotFoundException;
 import fun.fengwk.kkstudio.project.error.ProjectValidationException;
 import fun.fengwk.kkstudio.project.error.ProjectVersionConflictException;
 
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Project / Issue REST 控制器全局统一错误处理器。
@@ -29,6 +34,9 @@ import java.util.Map;
 @Order(Ordered.HIGHEST_PRECEDENCE)
 @RestControllerAdvice(assignableTypes = {ProjectController.class, IssueController.class})
 public class ProjectErrorAdvice {
+
+  private static final Set<String> HARNESS_RESOURCES =
+      Set.of("thread", "session", "entry", "execution", "agent_task");
 
   private final StudioMessageService messageService;
 
@@ -95,6 +103,33 @@ public class ProjectErrorAdvice {
         "PROJECT_RUNTIME_NOT_FOUND",
         messageService.message("studio.error.project.runtime_not_found.message", Map.of()),
         ctx);
+  }
+
+  @ExceptionHandler(DomainException.class)
+  public ResponseEntity<ApiResponse<Void>> handleHarnessDomain(DomainException error) {
+    if (error.code() == DomainErrorCode.NOT_FOUND
+        && error.resource() != null
+        && HARNESS_RESOURCES.contains(error.resource())) {
+      Map<String, Object> ctx = new LinkedHashMap<>();
+      ctx.put("detail", "Issue runtime resource not found");
+      return build(
+          HttpStatus.NOT_FOUND,
+          "PROJECT_RUNTIME_NOT_FOUND",
+          messageService.message("studio.error.project.runtime_not_found.message", Map.of()),
+          ctx);
+    }
+    if (error.code() == DomainErrorCode.CONFLICT
+        && Arrays.stream(HarnessConflictReason.values())
+            .anyMatch(reason -> reason.name().equals(error.reason()))) {
+      Map<String, Object> ctx = new LinkedHashMap<>();
+      ctx.put("detail", "Issue runtime conflict occurred");
+      return build(
+          HttpStatus.CONFLICT,
+          "PROJECT_RUNTIME_CONFLICT",
+          messageService.message("studio.error.project.runtime_conflict.message", Map.of()),
+          ctx);
+    }
+    throw error;
   }
 
   @ExceptionHandler({ProjectValidationException.class, IllegalArgumentException.class})

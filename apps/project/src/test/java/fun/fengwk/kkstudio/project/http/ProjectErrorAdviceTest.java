@@ -2,6 +2,8 @@ package fun.fengwk.kkstudio.project.http;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -10,6 +12,7 @@ import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.BindException;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
@@ -102,6 +105,27 @@ class ProjectErrorAdviceTest {
     assertNotNull(body);
     assertEquals("PROJECT_RUNTIME_NOT_FOUND", body.getCode());
     assertEquals(Map.of("detail", "Issue runtime resource not found"), body.getErrors());
+  }
+
+  @Test
+  void handlesHarnessDomainErrorsWithoutSwallowingOtherCategories() {
+    // 保留 Issue 旧信封，并验证其他领域 code/reason 不会被误当成 Harness 拒绝。
+    var conflict =
+        advice.handleHarnessDomain(DomainException.conflict("STALE_VERSION", "runtime busy"));
+    assertEquals(409, conflict.getStatusCode().value());
+    assertEquals("PROJECT_RUNTIME_CONFLICT", conflict.getBody().getCode());
+    var missing = advice.handleHarnessDomain(DomainException.notFound("thread", "gone"));
+    assertEquals(404, missing.getStatusCode().value());
+    assertEquals("PROJECT_RUNTIME_NOT_FOUND", missing.getBody().getCode());
+    for (DomainException other :
+        new DomainException[] {
+          DomainException.validationReason("STALE_VERSION", "invalid"),
+          DomainException.conflict("OTHER_MODULE_CONFLICT", "other"),
+          DomainException.notFound("project", "missing")
+        }) {
+      assertSame(
+          other, assertThrows(DomainException.class, () -> advice.handleHarnessDomain(other)));
+    }
   }
 
   @Test

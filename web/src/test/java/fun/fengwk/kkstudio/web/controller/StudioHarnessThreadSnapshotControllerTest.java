@@ -13,6 +13,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.api.generation.GenerationProjection;
 import fun.fengwk.kkstudio.harness.api.generation.GenerationStatus;
@@ -38,6 +39,18 @@ import java.util.UUID;
 
 /** Thread 快照读取端点：完整快照、增量快照、费用投影与环境等待叠加。 */
 class StudioHarnessThreadSnapshotControllerTest extends HarnessThreadControllerTestSupport {
+
+  @Test
+  void missingSnapshotRetainsNotFoundEnvelope() throws Exception {
+    // 真实 Runtime 的 Domain not-found 在旧 advice 下仍返回原有 404。
+    when(runtime.getThreadSnapshot(id(1)))
+        .thenThrow(DomainException.notFound("thread", "thread missing"));
+    mockMvc
+        .perform(get("/api/threads/" + idText(1)))
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.code").value("NOT_FOUND"))
+        .andExpect(jsonPath("$.errors.detail").value("thread missing"));
+  }
 
   /** 无本地工作和未完成直接委派时透传 IDLE/RUNNABLE，并暴露执行父关系；路由不另行推导状态。 */
   @Test

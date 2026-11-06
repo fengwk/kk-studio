@@ -46,7 +46,7 @@ class RuntimeErrorsTest {
         new DomainException[] {
           DomainException.notFound("project", "project missing"),
           DomainException.validation("thread", "invalid"),
-          DomainException.conflict("STALE_VERSION", "stale")
+          DomainException.conflict("OTHER_MODULE_CONFLICT", "other")
         }) {
       assertSame(
           other,
@@ -58,6 +58,32 @@ class RuntimeErrorsTest {
                         throw other;
                       })));
     }
+  }
+
+  @Test
+  void translatesOnlyKnownHarnessConflictReasons() {
+    // code 与原 Harness reason 都匹配才进入旧 409 信封。
+    DomainException conflict = DomainException.conflict("STALE_VERSION", "stale");
+    ResponseStatusException response =
+        assertThrows(
+            ResponseStatusException.class,
+            () ->
+                RuntimeErrors.translate(
+                    () -> {
+                      throw conflict;
+                    }));
+    assertEquals(HttpStatus.CONFLICT, response.getStatusCode());
+    assertSame(conflict, response.getCause());
+    DomainException wrongCode = DomainException.validationReason("STALE_VERSION", "invalid");
+    assertSame(
+        wrongCode,
+        assertThrows(
+            DomainException.class,
+            () ->
+                RuntimeErrors.translate(
+                    () -> {
+                      throw wrongCode;
+                    })));
   }
 
   @Test

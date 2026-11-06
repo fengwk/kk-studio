@@ -2,9 +2,12 @@ package fun.fengwk.kkstudio.chat;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -22,6 +25,7 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.web.server.ResponseStatusException;
 
 import fun.fengwk.kkstudio.chat.dto.ChatCreateDTO;
 import fun.fengwk.kkstudio.chat.dto.ChatDTO;
@@ -29,6 +33,7 @@ import fun.fengwk.kkstudio.chat.dto.ChatPageDTO;
 import fun.fengwk.kkstudio.chat.dto.ChatSessionPageDTO;
 import fun.fengwk.kkstudio.chat.dto.ChatUpdateDTO;
 import fun.fengwk.kkstudio.chat.http.ChatController;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.share.runtime.HarnessSessionSummaryDTO;
 
 import java.util.List;
@@ -75,6 +80,31 @@ class ChatControllerTest {
         .andExpect(jsonPath("$.data.items[0].title").value("chat-1"))
         .andExpect(jsonPath("$.data.nextCursor").value("cursor-2"));
     verify(chatService).listChats(null, 50);
+  }
+
+  @Test
+  void translatesHarnessDomainErrorsButPropagatesOtherDomainFailures() {
+    // 只把 Harness not-found 与已知 conflict 转为旧 HTTP 状态，保留原因供 advice 输出。
+    ChatController controller = new ChatController(chatService);
+    DomainException missing = DomainException.notFound("session", "gone");
+    when(chatService.getSession("chat", "session")).thenThrow(missing);
+    ResponseStatusException notFound =
+        assertThrows(
+            ResponseStatusException.class, () -> controller.getChatSession("chat", "session"));
+    assertEquals(404, notFound.getStatusCode().value());
+    assertSame(missing, notFound.getCause());
+    DomainException conflict = DomainException.conflict("STALE_VERSION", "stale");
+    doThrow(conflict).when(chatService).getSession("chat", "session");
+    ResponseStatusException rejected =
+        assertThrows(
+            ResponseStatusException.class, () -> controller.getChatSession("chat", "session"));
+    assertEquals(409, rejected.getStatusCode().value());
+    assertSame(conflict, rejected.getCause());
+    DomainException other = DomainException.validation("chat", "invalid");
+    doThrow(other).when(chatService).getSession("chat", "session");
+    assertSame(
+        other,
+        assertThrows(DomainException.class, () -> controller.getChatSession("chat", "session")));
   }
 
   /** 测试意图：验证分页参数原样传递，且显式 limit 上限被拒绝为 400。 */

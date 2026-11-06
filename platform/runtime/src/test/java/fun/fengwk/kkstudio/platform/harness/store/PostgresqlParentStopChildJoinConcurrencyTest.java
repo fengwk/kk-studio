@@ -21,7 +21,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
+import fun.fengwk.kkstudio.harness.api.HarnessConflictReason;
 import fun.fengwk.kkstudio.harness.api.StopResult;
 import fun.fengwk.kkstudio.harness.api.command.NotificationCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
@@ -606,9 +608,9 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
         assertNotNull(stopResult);
       } catch (ExecutionException e) {
         // 子终态先交付时父 version 已前进；只有明确的 CAS 冲突允许重读后发起停止。
-        HarnessRuntimeConflictException conflict =
-            assertInstanceOf(HarnessRuntimeConflictException.class, e.getCause());
-        assertEquals(HarnessRuntimeConflictException.Reason.STALE_VERSION, conflict.reason());
+        DomainException conflict = assertInstanceOf(DomainException.class, e.getCause());
+        assertEquals(DomainErrorCode.CONFLICT, conflict.code());
+        assertEquals(HarnessConflictReason.STALE_VERSION.name(), conflict.reason());
         ThreadState current =
             store.transaction(tx -> tx.threads().find(fixture.parentThreadId()).orElseThrow());
         assertNotNull(
@@ -746,9 +748,12 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
         });
 
     // 传入旧版本 expectedVersion = 0 发起 Stop
-    assertThrows(
-        HarnessRuntimeConflictException.class,
-        () -> runtime.stop(new StopCommand(fixture.parentThreadId(), UUID.randomUUID(), 0)));
+    DomainException conflict =
+        assertThrows(
+            DomainException.class,
+            () -> runtime.stop(new StopCommand(fixture.parentThreadId(), UUID.randomUUID(), 0)));
+    assertEquals(DomainErrorCode.CONFLICT, conflict.code());
+    assertEquals(HarnessConflictReason.STALE_VERSION.name(), conflict.reason());
 
     // 验证 PostgreSQL 中父子线程状态未被 Stop 破坏
     ThreadState parent =

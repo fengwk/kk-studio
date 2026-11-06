@@ -21,9 +21,9 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.springframework.beans.factory.ObjectProvider;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.harness.api.SpawnRequest;
 import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
@@ -496,7 +496,7 @@ class PluginPromptTaskServiceTest {
     assertThrows(NullPointerException.class, () -> service.stop(null));
 
     UUID gone = UUID.randomUUID();
-    when(runtime.getThreadSnapshot(gone)).thenThrow(new HarnessRuntimeNotFoundException("gone"));
+    when(runtime.getThreadSnapshot(gone)).thenThrow(DomainException.notFound("thread", "gone"));
     service.stop(gone);
     verify(runtime, never()).stop(any(StopCommand.class));
 
@@ -515,9 +515,7 @@ class PluginPromptTaskServiceTest {
     when(runtime.getThreadSnapshot(taskId)).thenReturn(idle(taskId));
     // stop 返回 StopResult：第一次 CAS 撞上 stale version，重读后第二次成功。
     when(runtime.stop(any(StopCommand.class)))
-        .thenThrow(
-            new HarnessRuntimeConflictException(
-                HarnessRuntimeConflictException.Reason.STALE_VERSION, "stale"))
+        .thenThrow(DomainException.conflict("STALE_VERSION", "stale"))
         .thenReturn(null);
 
     service.stop(taskId);
@@ -531,9 +529,7 @@ class PluginPromptTaskServiceTest {
   void stopFailsControlledWhenStaleRetriesAreExhausted() {
     UUID taskId = UUID.randomUUID();
     when(runtime.getThreadSnapshot(taskId)).thenReturn(idle(taskId));
-    doThrow(
-            new HarnessRuntimeConflictException(
-                HarnessRuntimeConflictException.Reason.STALE_VERSION, "stale"))
+    doThrow(DomainException.conflict("STALE_VERSION", "stale"))
         .when(runtime)
         .stop(any(StopCommand.class));
 
@@ -548,14 +544,13 @@ class PluginPromptTaskServiceTest {
   void stopPropagatesNonStaleConflictsWithoutRetry() {
     UUID taskId = UUID.randomUUID();
     when(runtime.getThreadSnapshot(taskId)).thenReturn(idle(taskId));
-    HarnessRuntimeConflictException conflict =
-        new HarnessRuntimeConflictException(
-            HarnessRuntimeConflictException.Reason.STOP_REQUEST_ID_REUSED, "reused");
+    DomainException conflict = DomainException.conflict("STOP_REQUEST_ID_REUSED", "reused");
     doThrow(conflict).when(runtime).stop(any(StopCommand.class));
 
-    HarnessRuntimeConflictException thrown =
-        assertThrows(HarnessRuntimeConflictException.class, () -> service.stop(taskId));
+    DomainException thrown = assertThrows(DomainException.class, () -> service.stop(taskId));
     assertEquals(conflict, thrown);
+    assertEquals(DomainErrorCode.CONFLICT, thrown.code());
+    assertEquals("STOP_REQUEST_ID_REUSED", thrown.reason());
     verify(runtime, times(1)).stop(any(StopCommand.class));
   }
 

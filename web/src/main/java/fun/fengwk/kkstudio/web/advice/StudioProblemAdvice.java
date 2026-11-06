@@ -60,10 +60,13 @@ public class StudioProblemAdvice {
 
   @ExceptionHandler(ResponseStatusException.class)
   public ResponseEntity<Map<String, Object>> responseStatus(ResponseStatusException error) {
-    String reason =
-        error.getCause() instanceof ProviderRequestPreviewUnavailableException preview
-            ? preview.reason().name()
-            : null;
+    String reason = null;
+    if (error.getCause() instanceof DomainException domain
+        && domain.code() == DomainErrorCode.CONFLICT) {
+      reason = domain.reason();
+    } else if (error.getCause() instanceof ProviderRequestPreviewUnavailableException preview) {
+      reason = preview.reason().name();
+    }
     return framework(error.getStatusCode().value(), error.getReason(), reason);
   }
 

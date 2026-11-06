@@ -91,6 +91,11 @@ class StudioProblemAdviceTest {
     var response =
         advice.responseStatus(new ResponseStatusException(HttpStatus.CONFLICT, "safe", preview));
     assertEquals("PREVIEW_UNSUPPORTED", response.getBody().get("reason"));
+    DomainException conflict = DomainException.conflict("STALE_COMMAND_CURSOR", "stale cursor");
+    var wrapped =
+        advice.responseStatus(
+            new ResponseStatusException(HttpStatus.CONFLICT, conflict.getMessage(), conflict));
+    assertEquals("STALE_COMMAND_CURSOR", wrapped.getBody().get("reason"));
   }
 
   /** 缺失和非法参数给出参数名但不回显不可信输入。 */
