@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.ide.browser;
 
 import fun.fengwk.kkstudio.common.id.Uuids;
-import fun.fengwk.kkstudio.common.number.DecimalLongs;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 
 import java.util.ArrayList;
@@ -47,13 +46,10 @@ public record IdeBrowserUse(UUID documentId, long revision, List<IdeBrowserUseVi
     views = List.copyOf(canonical);
   }
 
-  /** 解析 wire 的 documentId/revision；列表仍由已校验的 typed view 组成。 */
+  /** 解析 wire 的 documentId；revision 已由入口按正整数校验，列表由已校验的 typed view 组成。 */
   public static IdeBrowserUse parse(
-      String documentId, String revision, List<IdeBrowserUseView> views) {
-    return new IdeBrowserUse(
-        Uuids.parseCanonical(documentId, "documentId"),
-        DecimalLongs.parsePositive(revision, "revision"),
-        views);
+      String documentId, long revision, List<IdeBrowserUseView> views) {
+    return new IdeBrowserUse(Uuids.parseCanonical(documentId, "documentId"), revision, views);
   }
 
   /** 查找文档中与给定打开/恢复意图完全相同的项（不要求已绑定 epoch）。 */

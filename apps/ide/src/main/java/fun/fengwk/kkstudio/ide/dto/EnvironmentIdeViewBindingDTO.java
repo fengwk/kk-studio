@@ -7,5 +7,5 @@ import lombok.Data;
 public class EnvironmentIdeViewBindingDTO {
 
   private String documentId;
-  private String bindingEpoch;
+  private Long bindingEpoch;
 }

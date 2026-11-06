@@ -76,7 +76,7 @@ class EnvironmentIdeControllerTest {
   private static final String DOCUMENT_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
   private static final String DIRTY_REJECTION =
       "save or discard unsaved changes before switching directory";
-  private static final ObjectMapper OBJECT_MAPPER = JsonMapper.builder().build();
+  private static final ObjectMapper OBJECT_MAPPER = StrictHttpJsonMapperTestSupport.strictHttp();
 
   private EnvironmentIdeService environmentIdeService;
   private MockMvc mockMvc;
@@ -119,7 +119,7 @@ class EnvironmentIdeControllerTest {
     verify(environmentIdeService)
         .collapseMobile(eq(EnvironmentId.of(ENV_ID)), eq(VIEW_ID), body.capture());
     assertEquals(DOCUMENT_ID, body.getValue().getDocumentId());
-    assertEquals("7", body.getValue().getBindingEpoch());
+    assertEquals(7L, body.getValue().getBindingEpoch());
   }
 
   /** 意图：OPEN_VIEW 返回 200 与受控 entryUrl，并把路径中的 environmentId 与请求体原样转发给服务。 */
@@ -200,7 +200,7 @@ class EnvironmentIdeControllerTest {
     verify(environmentIdeService)
         .changeDirectory(eq(EnvironmentId.of(ENV_ID)), eq(VIEW_ID), request.capture());
     assertEquals(DOCUMENT_ID, request.getValue().getDocumentId());
-    assertEquals("7", request.getValue().getBindingEpoch());
+    assertEquals(7L, request.getValue().getBindingEpoch());
     assertEquals("/workspace/subdir", request.getValue().getDirectory());
   }
 
@@ -297,9 +297,9 @@ class EnvironmentIdeControllerTest {
     verify(environmentIdeService)
         .closeView(eq(EnvironmentId.of(ENV_ID)), eq(VIEW_ID), close.capture());
     assertEquals(DOCUMENT_ID, focus.getValue().getDocumentId());
-    assertEquals("7", focus.getValue().getBindingEpoch());
+    assertEquals(7L, focus.getValue().getBindingEpoch());
     assertEquals(DOCUMENT_ID, close.getValue().getDocumentId());
-    assertEquals("7", close.getValue().getBindingEpoch());
+    assertEquals(7L, close.getValue().getBindingEpoch());
     assertFalse(close.getValue().isDiscard());
   }
 
@@ -380,7 +380,7 @@ class EnvironmentIdeControllerTest {
 
     EnvironmentIdeChangeDirectoryDTO changeRequest = new EnvironmentIdeChangeDirectoryDTO();
     changeRequest.setDocumentId(DOCUMENT_ID);
-    changeRequest.setBindingEpoch("7");
+    changeRequest.setBindingEpoch(7L);
     changeRequest.setDirectory(directory);
     realChain
         .perform(

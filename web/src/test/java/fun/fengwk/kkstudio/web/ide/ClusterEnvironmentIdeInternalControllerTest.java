@@ -158,11 +158,15 @@ class ClusterEnvironmentIdeInternalControllerTest {
             eq(ENV),
             eq(VIEW),
             argThat(
-                dto -> "/next".equals(dto.getDirectory()) && "1".equals(dto.getBindingEpoch())));
+                dto ->
+                    "/next".equals(dto.getDirectory())
+                        && Long.valueOf(1L).equals(dto.getBindingEpoch())));
     verify(localEnvironmentIdeService)
-        .focusTerminal(eq(ENV), eq(VIEW), argThat(dto -> "1".equals(dto.getBindingEpoch())));
+        .focusTerminal(
+            eq(ENV), eq(VIEW), argThat(dto -> Long.valueOf(1L).equals(dto.getBindingEpoch())));
     verify(localEnvironmentIdeService)
-        .collapseMobile(eq(ENV), eq(VIEW), argThat(dto -> "1".equals(dto.getBindingEpoch())));
+        .collapseMobile(
+            eq(ENV), eq(VIEW), argThat(dto -> Long.valueOf(1L).equals(dto.getBindingEpoch())));
   }
 
   /** 客户端通过真实 controller 与 advice 收到 problem，只允许已知取消原因穿透。 */
@@ -213,7 +217,7 @@ class ClusterEnvironmentIdeInternalControllerTest {
               NODE_B, URI.create("http://127.0.0.1:" + server.getAddress().getPort()));
       EnvironmentIdeCloseViewDTO request = new EnvironmentIdeCloseViewDTO();
       request.setDocumentId("11111111-1111-1111-1111-111111111111");
-      request.setBindingEpoch("1");
+      request.setBindingEpoch(1L);
       request.setDiscard(false);
       DomainException cancelled =
           assertThrows(DomainException.class, () -> client.closeView(ENV, owner, VIEW, request));

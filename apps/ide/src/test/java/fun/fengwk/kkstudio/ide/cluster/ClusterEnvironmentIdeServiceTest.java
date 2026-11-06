@@ -159,14 +159,14 @@ class ClusterEnvironmentIdeServiceTest {
         Optional.of(ClusterOwnerRoute.remote(NODE_B, URI.create("http://b.internal")));
     EnvironmentIdeViewBindingDTO binding = new EnvironmentIdeViewBindingDTO();
     binding.setDocumentId(DOCUMENT);
-    binding.setBindingEpoch("3");
+    binding.setBindingEpoch(3L);
     EnvironmentIdeCloseViewDTO close = new EnvironmentIdeCloseViewDTO();
     close.setDocumentId(DOCUMENT);
-    close.setBindingEpoch("3");
+    close.setBindingEpoch(3L);
     close.setDiscard(false);
     EnvironmentIdeChangeDirectoryDTO directory = new EnvironmentIdeChangeDirectoryDTO();
     directory.setDocumentId(DOCUMENT);
-    directory.setBindingEpoch("3");
+    directory.setBindingEpoch(3L);
     directory.setDirectory("/tmp");
 
     service.changeDirectory(ENV, VIEW, directory);

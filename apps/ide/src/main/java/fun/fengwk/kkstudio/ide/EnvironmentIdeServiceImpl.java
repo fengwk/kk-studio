@@ -5,7 +5,6 @@ import lombok.extern.slf4j.Slf4j;
 import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.id.Uuids;
-import fun.fengwk.kkstudio.common.number.DecimalLongs;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityBusyException;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilitySendUncertainException;
@@ -672,7 +671,7 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     dto.setConnectionId(binding.connectionId().toString());
     dto.setClaimId(binding.claimId().toString());
     dto.setDaemonInstanceId(binding.daemonIdentity().daemonInstanceId());
-    dto.setBindingEpoch(Long.toString(binding.bindingEpoch()));
+    dto.setBindingEpoch(binding.bindingEpoch());
     return dto;
   }
 
@@ -688,13 +687,11 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     return parseUuid(value, "viewId");
   }
 
-  private static long parseEpoch(String value) {
-    try {
-      return DecimalLongs.parsePositive(value, "bindingEpoch");
-    } catch (IllegalArgumentException error) {
-      throw DomainException.validation(
-          "environment", "bindingEpoch must be a canonical positive decimal");
+  private static long parseEpoch(Long value) {
+    if (value == null || value <= 0) {
+      throw DomainException.validation("environment", "bindingEpoch must be positive");
     }
+    return value;
   }
 
   private static EnvironmentIdeViewState viewState(IdeViewState state) {
