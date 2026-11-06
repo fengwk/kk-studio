@@ -30,7 +30,8 @@ for (const scenario of ['pane-root', 'pane-child']) {
     await page.route((url) => url.pathname.startsWith('/api/'), async (route) => {
       const path = new URL(route.request().url()).pathname
       if (route.request().method() !== 'GET') writes.push(path)
-      let data: unknown = { results: [], totalCount: '0', pageNumber: 1, pageSize: 50 }
+      // 目录与其它只读集合都直接返回数组；未单独建模的端点给空集合，避免把旧分页信封喂给列表消费者。
+      let data: unknown = []
       if (path === `/api/harness/threads/${id}`) {
         reads += 1
         data = {

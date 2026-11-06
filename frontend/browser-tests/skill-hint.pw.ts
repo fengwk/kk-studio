@@ -174,9 +174,8 @@ async function installSkillHintApi(
       await route.fulfill({ json: [] })
       return
     }
-    await route.fulfill({
-      json: { pageNumber: 1, pageSize: 50, totalCount: '0', results: [] },
-    })
+    // 目录与其它只读集合都直接返回数组；未单独建模的端点给空集合，避免把旧分页信封喂给列表消费者。
+    await route.fulfill({ json: [] })
   })
   return state
 }
