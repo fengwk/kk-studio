@@ -225,18 +225,18 @@ export function useBoundThreadPanelLabels(
   },
 ): ThreadPaneLabels {
   const environmentName = controller.runtimeLabels.environmentName
-  const boundEnvCard = environmentName
+  const boundEnvironment = environmentName
     ? environments.find((e) => e.name === environmentName)
     : undefined
   const environmentReady =
     environmentName == null
       ? undefined
-      : boundEnvCard != null
-        ? boundEnvCard.ready
+      : boundEnvironment != null
+        ? boundEnvironment.ready
         : false
   const environment = environmentName
     ? {
-        environmentId: boundEnvCard?.id ?? environmentName,
+        environmentId: boundEnvironment?.id ?? environmentName,
         environmentName,
       }
     : null

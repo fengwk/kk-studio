@@ -221,7 +221,7 @@ export function EnvironmentInstallModal({ environment, uninstall = false, onClos
             lsp: parsedLsp,
           },
         })
-        const savedCard = await environmentService.saveInstallConfig(
+        const savedEnvironment = await environmentService.saveInstallConfig(
           environment.id,
           version,
           installConfig,
@@ -229,14 +229,17 @@ export function EnvironmentInstallModal({ environment, uninstall = false, onClos
         saved = true
         void queryClient.invalidateQueries({ queryKey: queryKeys.environments.all })
         if (!active.current) return
-        setVersion(savedCard.version)
-        if (savedCard.installConfig == null) throw new InstallConfigError('installConfig')
-        const issued = await environmentService.createInstallCode(savedCard.id, savedCard.version)
+        setVersion(savedEnvironment.version)
+        if (savedEnvironment.installConfig == null) throw new InstallConfigError('installConfig')
+        const issued = await environmentService.createInstallCode(
+          savedEnvironment.id,
+          savedEnvironment.version,
+        )
         if (!active.current) return
         command = generateInstallCommand(
           downloadOrigin,
-          savedCard.id,
-          validateInstallConfig(savedCard.installConfig).operatingSystem,
+          savedEnvironment.id,
+          validateInstallConfig(savedEnvironment.installConfig).operatingSystem,
           issued.code,
         )
       }

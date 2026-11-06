@@ -41,8 +41,8 @@ export interface IdePanelStorageProps {
   storage?: IdeTabStorage
 }
 
-function toEnvironmentInfo(card: EnvironmentDTO): IdeEnvironmentInfo {
-  return { id: card.id, name: card.name, ready: card.ready }
+function toEnvironmentInfo(environment: EnvironmentDTO): IdeEnvironmentInfo {
+  return { id: environment.id, name: environment.name, ready: environment.ready }
 }
 
 /**
@@ -87,8 +87,8 @@ export function IdePanelProvider({
 
   const environments = useMemo(() => {
     const map = new Map<string, IdeEnvironmentInfo>()
-    for (const card of environmentsQuery.data ?? []) {
-      map.set(card.id, toEnvironmentInfo(card))
+    for (const listed of environmentsQuery.data ?? []) {
+      map.set(listed.id, toEnvironmentInfo(listed))
     }
     for (const environment of Object.values(knownEnvironments)) {
       if (!map.has(environment.id)) {
@@ -239,7 +239,7 @@ export function IdePanelProvider({
     if (!environmentsQuery.isSuccess) {
       return
     }
-    const available = new Set((environmentsQuery.data ?? []).map((card) => card.id))
+    const available = new Set((environmentsQuery.data ?? []).map((listed) => listed.id))
     const current = presentationRef.current
     const openedEnvironmentIds = current.openedEnvironmentIds.filter(
       (environmentId) => available.has(environmentId),
