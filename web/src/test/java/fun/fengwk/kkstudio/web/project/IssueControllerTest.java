@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.web.project.http;
+package fun.fengwk.kkstudio.web.project;
 
 import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.any;

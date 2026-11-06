@@ -3,7 +3,9 @@ package fun.fengwk.kkstudio.web.advice;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -54,7 +56,26 @@ class ProjectControllerAdviceIntegrationTest extends WebPostgresTestSupport {
     mockMvc
         .perform(get("/api/project/projects/00000000-0000-0000-0000-0000000000A1"))
         .andExpect(status().isBadRequest())
-        .andExpect(jsonPath("$.code").value("validation"));
+        .andExpect(jsonPath("$.type").value("about:blank"))
+        .andExpect(jsonPath("$.status").value(400))
+        .andExpect(jsonPath("$.code").value("validation"))
+        .andExpect(jsonPath("$.detail").value("projectId must be a canonical UUID"));
+  }
+
+  @Test
+  void requiredBodyPropertyIsValidationProblem() throws Exception {
+    // F2 的必填校验在真实组合根中由统一 advice 转为 problem；请求不会触达服务。
+    mockMvc
+        .perform(
+            post("/api/project/projects")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"description\":\"desc\"}"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.type").value("about:blank"))
+        .andExpect(jsonPath("$.status").value(400))
+        .andExpect(jsonPath("$.code").value("validation"))
+        .andExpect(jsonPath("$.detail").value("title is required"));
+    verifyNoInteractions(projectService);
   }
 
   @Test

@@ -29,7 +29,6 @@ import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.Project;
 import fun.fengwk.kkstudio.project.service.IssueEditingService;
-import fun.fengwk.kkstudio.project.service.IssueLifecycleService;
 import fun.fengwk.kkstudio.project.service.ProjectService;
 import fun.fengwk.kkstudio.share.storage.StorageUploadDTO;
 import fun.fengwk.kkstudio.share.storage.StorageUploadReserveRequestDTO;
@@ -71,7 +70,6 @@ class IssueEvidencePublishIntegrationTest extends WebPostgresTestSupport {
   @Autowired private JdbcTemplate jdbc;
   @Autowired private ProjectService projectService;
   @Autowired private IssueEditingService issueEditingService;
-  @Autowired private IssueLifecycleService issueLifecycleService;
   @Autowired private InMemoryS3StorageService s3Storage;
   @Autowired private StorageUploadService uploadService;
   @MockitoBean private StorageMaintenance storageMaintenance;

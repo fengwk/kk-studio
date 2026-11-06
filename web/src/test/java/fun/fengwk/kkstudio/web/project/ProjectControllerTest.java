@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.web.project.http;
+package fun.fengwk.kkstudio.web.project;
 
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
