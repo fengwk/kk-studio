@@ -157,8 +157,22 @@ describe('IssueDetailModal', () => {
     uploadFile: vi.fn().mockResolvedValue(undefined),
     completeUpload: vi.fn().mockResolvedValue(mockUploadDTO),
     deleteUpload: vi.fn().mockResolvedValue(undefined),
-    getBlobDownloadUrl: vi.fn().mockResolvedValue({ url: 'https://storage.example.com/download/blob-1', expiresAt: Date.UTC(2026, 8, 27), sizeBytes: 1024, mediaType: 'image/png' }),
-    getBlobPreviewUrl: vi.fn().mockResolvedValue({ url: 'https://storage.example.com/preview/blob-1', expiresAt: Date.UTC(2026, 8, 27) }),
+    getBlobDownloadUrl: vi.fn().mockResolvedValue({
+      method: 'GET',
+      url: 'https://storage.example.com/download/blob-1',
+      headers: {},
+      expiresAt: Date.UTC(2026, 8, 27),
+      sizeBytes: '1024',
+      mediaType: 'image/png',
+    }),
+    getBlobPreviewUrl: vi.fn().mockResolvedValue({
+      method: 'GET',
+      url: 'https://storage.example.com/preview/blob-1',
+      headers: {},
+      expiresAt: Date.UTC(2026, 8, 27),
+      sizeBytes: null,
+      mediaType: null,
+    }),
   })
 
   it('renders issue detail header, tabs, and natural state token', async () => {

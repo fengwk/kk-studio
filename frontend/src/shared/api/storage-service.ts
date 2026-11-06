@@ -1,5 +1,4 @@
 import { ApiError, request } from '@/shared/api/client'
-import type { StorageBlobUrl } from '@/shared/api/contracts/storage'
 import type {
   StoragePresignedUrlDTO,
   StorageUploadDTO,
@@ -46,12 +45,10 @@ export const FORBIDDEN_UPLOAD_HEADERS = new Set([
  * 该契约绝不暴露 bucket/key，客户端也不能提交对象 key。
  */
 export function createStorageService() {
-  const getBlobDownloadUrl = async (blobId: string): Promise<StorageBlobUrl> =>
-    decodeBlobUrl(
-      await request('POST /api/platform/storage/blobs/{blobId}/download-url', {
-        path: { blobId },
-      }),
-    )
+  const getBlobDownloadUrl = (blobId: string): Promise<StoragePresignedUrlDTO> =>
+    request('POST /api/platform/storage/blobs/{blobId}/download-url', {
+      path: { blobId },
+    })
 
   return {
     reserveUpload: (body: StorageUploadReserveRequestDTO): Promise<StorageUploadDTO> =>
@@ -64,12 +61,10 @@ export function createStorageService() {
       request('DELETE /api/platform/storage/uploads/{uploadId}', { path: { uploadId } }),
     /** 下载 URL 端点（原件）：给出权威 mediaType 与 sizeBytes。 */
     getBlobDownloadUrl,
-    getBlobPreviewUrl: async (blobId: string): Promise<StorageBlobUrl> =>
-      decodeBlobUrl(
-        await request('POST /api/platform/storage/blobs/{blobId}/preview-url', {
-          path: { blobId },
-        }),
-      ),
+    getBlobPreviewUrl: (blobId: string): Promise<StoragePresignedUrlDTO> =>
+      request('POST /api/platform/storage/blobs/{blobId}/preview-url', {
+        path: { blobId },
+      }),
     /** 直传对象字节到签名 URL；仅发送签名响应提供的浏览器安全请求头。 */
     uploadFile: async (
       presignedPut: StoragePresignedUrlDTO,
@@ -114,34 +109,3 @@ export function createStorageService() {
 export type StorageService = ReturnType<typeof createStorageService>
 
 export const storageService = createStorageService()
-
-/**
- * 严格解码 blob 预签名 URL 响应：url 必须是非空字符串；
- * sizeBytes 是 Java long 的十进制字符串或 null，转为非负安全整数，非法即 fail closed。
- */
-function decodeBlobUrl(value: unknown): StorageBlobUrl {
-  if (!value || typeof value !== 'object') {
-    throw new ApiError('Storage blob URL response is invalid')
-  }
-  const candidate = value as Record<string, unknown>
-  if (typeof candidate.url !== 'string' || !candidate.url.trim()) {
-    throw new ApiError('Storage blob URL response is missing a non-empty url')
-  }
-  return {
-    url: candidate.url,
-    mediaType: typeof candidate.mediaType === 'string' ? candidate.mediaType : null,
-    sizeBytes: decodeBlobSizeBytes(candidate.sizeBytes),
-  }
-}
-
-function decodeBlobSizeBytes(value: unknown): number | null {
-  if (value === null || value === undefined) {
-    return null
-  }
-  const parsed =
-    typeof value === 'string' && /^(0|[1-9][0-9]*)$/.test(value) ? Number(value) : Number.NaN
-  if (!Number.isSafeInteger(parsed) || parsed < 0) {
-    throw new ApiError('Storage blob URL response sizeBytes must be a non-negative safe integer or null')
-  }
-  return parsed
-}

@@ -500,7 +500,7 @@ describe('ToolMessageBlock per-tool bodies', () => {
       original: 'https://s3.test/shot.png',
       preview: 'https://s3.test/shot.png.preview',
       mediaType: 'image/png',
-      sizeBytes: 12,
+      sizeBytes: '12',
     }))
     render(
       <ResourceBlobUrlContext.Provider value={resolveBlobUrls}>
@@ -1188,7 +1188,7 @@ describe('ToolMessageBlock resources and approvals', () => {
       original: 'https://s3.test/result',
       preview: null,
       mediaType: 'text/plain',
-      sizeBytes: 12,
+      sizeBytes: '12',
     }))
     render(
       <ResourceBlobUrlContext.Provider value={resolveBlobUrls}>

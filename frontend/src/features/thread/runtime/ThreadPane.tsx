@@ -177,9 +177,6 @@ function useBlobUrlResolver() {
       original == null
       || !original.url.trim()
       || !original.mediaType?.trim()
-      || typeof original.sizeBytes !== 'number'
-      || !Number.isSafeInteger(original.sizeBytes)
-      || original.sizeBytes < 0
     ) {
       return null
     }

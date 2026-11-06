@@ -1,7 +1,9 @@
 import { translate } from '@/shared/i18n'
 import { formatByteCount } from '@/shared/lib/format-bytes'
 import { createUuid } from '@/shared/lib/uuid'
-import type { StorageMediaKind } from '@/shared/api/contracts/storage'
+
+/** 共享存储上传的媒体类别；mediaType 负责精确分类，mediaKind 只是本地路由/限制键。 */
+export type StorageMediaKind = 'image' | 'video' | 'audio' | 'file'
 
 export interface UploadLimits {
   image: number
