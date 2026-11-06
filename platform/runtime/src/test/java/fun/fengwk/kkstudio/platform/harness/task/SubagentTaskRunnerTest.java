@@ -651,6 +651,11 @@ class SubagentTaskRunnerTest {
     assertSame(
         validation,
         assertThrows(DomainException.class, () -> runner(config()).accept(request(null, null))));
+    DomainException unrelatedMissing = DomainException.notFound("session", "gone");
+    doThrow(unrelatedMissing).when(runtime).getThreadSnapshot(parentThreadId);
+    assertSame(
+        unrelatedMissing,
+        assertThrows(DomainException.class, () -> runner(config()).accept(request(null, null))));
     doThrow(missing).when(runtime).getThreadSnapshot(parentThreadId);
     rejected =
         assertThrows(
@@ -708,7 +713,24 @@ class SubagentTaskRunnerTest {
             SubagentTaskRejectedException.class,
             () -> runner(config()).accept(request(null, null)));
     assertSame(conflict, rejected.getCause());
-    verify(runtime, times(2)).spawn(any(), any());
+    DomainException unrelatedMissing = DomainException.notFound("session", "gone");
+    doThrow(unrelatedMissing).when(runtime).spawn(any(), any());
+    assertSame(
+        unrelatedMissing,
+        assertThrows(DomainException.class, () -> runner(config()).accept(request(null, null))));
+    verify(runtime, times(3)).spawn(any(), any());
+  }
+
+  @Test
+  void materializerDomainErrorsPropagateUnchanged() {
+    // 物化配置不属于 Harness 控制面，其他领域失败不能包装成 task 拒绝。
+    stubParent(List.of(AGENT));
+    DomainException failure = DomainException.notFound("model", "model missing");
+    doThrow(failure).when(materializer).materialize(AGENT);
+    assertSame(
+        failure,
+        assertThrows(DomainException.class, () -> runner(config()).accept(request(null, null))));
+    verify(runtime, never()).spawn(any(), any());
   }
 
   @Test

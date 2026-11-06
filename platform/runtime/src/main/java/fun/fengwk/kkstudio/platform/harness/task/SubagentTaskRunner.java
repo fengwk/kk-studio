@@ -134,7 +134,7 @@ public class SubagentTaskRunner implements SubagentRunner {
             accepted.joinReplaced());
       } catch (RuntimeException failure) {
         if (failure instanceof DomainException domain) {
-          if (domain.code() == DomainErrorCode.NOT_FOUND) {
+          if (isMissingThread(domain)) {
             throw reject("subagent task parent thread no longer exists", domain);
           }
           if (domain.code() != DomainErrorCode.CONFLICT
@@ -265,7 +265,7 @@ public class SubagentTaskRunner implements SubagentRunner {
     try {
       child = runtime.getThreadSnapshot(request.resumeThreadId());
     } catch (DomainException notFound) {
-      if (notFound.code() != DomainErrorCode.NOT_FOUND) {
+      if (!isMissingThread(notFound)) {
         throw notFound;
       }
       throw reject("subagent thread " + request.resumeThreadId() + " was not found", notFound);
@@ -281,7 +281,7 @@ public class SubagentTaskRunner implements SubagentRunner {
     try {
       child = runtime.getThreadSnapshot(childThreadId);
     } catch (DomainException notFound) {
-      if (notFound.code() != DomainErrorCode.NOT_FOUND) {
+      if (!isMissingThread(notFound)) {
         throw notFound;
       }
       throw reject("subagent thread " + childThreadId + " was not found", notFound);
@@ -298,7 +298,7 @@ public class SubagentTaskRunner implements SubagentRunner {
     try {
       parent = runtime.getThreadSnapshot(request.parentThreadId());
     } catch (DomainException notFound) {
-      if (notFound.code() != DomainErrorCode.NOT_FOUND) {
+      if (!isMissingThread(notFound)) {
         throw notFound;
       }
       throw reject("task invocation is no longer attached to its parent Thread context", notFound);
@@ -337,6 +337,8 @@ public class SubagentTaskRunner implements SubagentRunner {
   private BranchSettings materializeTarget(SubagentTaskRequest request) {
     try {
       return settingsMaterializer.materialize(request.subagentType());
+    } catch (DomainException failure) {
+      throw failure;
     } catch (RuntimeException failure) {
       throw reject(message(failure), failure);
     }
@@ -352,11 +354,15 @@ public class SubagentTaskRunner implements SubagentRunner {
     try {
       return runtime.getThreadSnapshot(childThreadId).thread().sessionId();
     } catch (DomainException notFound) {
-      if (notFound.code() != DomainErrorCode.NOT_FOUND) {
+      if (!isMissingThread(notFound)) {
         throw notFound;
       }
       throw reject("subagent thread " + childThreadId + " was not found", notFound);
     }
+  }
+
+  private static boolean isMissingThread(DomainException error) {
+    return error.code() == DomainErrorCode.NOT_FOUND && "thread".equals(error.resource());
   }
 
   /** 命令幂等键只由 invocationId 与固定槽位派生：同一次调用的任何重试都命中同一批命令。 */

@@ -197,7 +197,7 @@ public class AgentTaskService {
       try {
         snapshot = runtime.getThreadSnapshot(threadId);
       } catch (DomainException gone) {
-        if (gone.code() != DomainErrorCode.NOT_FOUND) {
+        if (gone.code() != DomainErrorCode.NOT_FOUND || !"thread".equals(gone.resource())) {
           throw gone;
         }
         return;
@@ -210,7 +210,7 @@ public class AgentTaskService {
         runtime.stop(new StopCommand(threadId, UUID.randomUUID(), snapshot.thread().version()));
         return;
       } catch (DomainException failure) {
-        if (failure.code() == DomainErrorCode.NOT_FOUND) {
+        if (failure.code() == DomainErrorCode.NOT_FOUND && "thread".equals(failure.resource())) {
           return;
         }
         if (failure.code() != DomainErrorCode.CONFLICT
@@ -232,7 +232,7 @@ public class AgentTaskService {
       try {
         snapshot = runtime.getThreadSnapshot(threadId);
       } catch (DomainException gone) {
-        if (gone.code() != DomainErrorCode.NOT_FOUND) {
+        if (gone.code() != DomainErrorCode.NOT_FOUND || !"thread".equals(gone.resource())) {
           throw gone;
         }
         return;
@@ -241,7 +241,7 @@ public class AgentTaskService {
         runtime.stop(new StopCommand(threadId, UUID.randomUUID(), snapshot.thread().version()));
         return;
       } catch (DomainException failure) {
-        if (failure.code() == DomainErrorCode.NOT_FOUND) {
+        if (failure.code() == DomainErrorCode.NOT_FOUND && "thread".equals(failure.resource())) {
           return;
         }
         if (failure.code() != DomainErrorCode.CONFLICT

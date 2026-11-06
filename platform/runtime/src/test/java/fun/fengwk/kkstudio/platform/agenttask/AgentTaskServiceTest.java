@@ -314,6 +314,10 @@ class AgentTaskServiceTest {
     when(runtime.stop(any(StopCommand.class))).thenThrow(otherConflict);
     assertSame(
         otherConflict, assertThrows(DomainException.class, () -> service.stopThread(threadId)));
+    DomainException unrelatedMissing = DomainException.notFound("session", "gone");
+    doThrow(unrelatedMissing).when(runtime).stop(any(StopCommand.class));
+    assertSame(
+        unrelatedMissing, assertThrows(DomainException.class, () -> service.stopThread(threadId)));
     DomainException wrongCode = DomainException.validationReason("STALE_VERSION", "not a conflict");
     doThrow(wrongCode).when(runtime).stop(any(StopCommand.class));
     assertSame(wrongCode, assertThrows(DomainException.class, () -> service.stopThread(threadId)));
@@ -347,6 +351,9 @@ class AgentTaskServiceTest {
     DomainException invalid = DomainException.validation("thread", "invalid");
     doThrow(invalid).when(runtime).getThreadSnapshot(childId);
     assertSame(invalid, assertThrows(DomainException.class, () -> service.stop(ticketId)));
+    DomainException unrelatedMissing = DomainException.notFound("session", "gone");
+    doThrow(unrelatedMissing).when(runtime).getThreadSnapshot(childId);
+    assertSame(unrelatedMissing, assertThrows(DomainException.class, () -> service.stop(ticketId)));
     doThrow(DomainException.notFound("thread", "gone")).when(runtime).getThreadSnapshot(childId);
     service.stop(ticketId);
   }

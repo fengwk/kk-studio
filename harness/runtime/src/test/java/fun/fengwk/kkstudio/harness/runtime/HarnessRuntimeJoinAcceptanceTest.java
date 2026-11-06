@@ -951,6 +951,37 @@ class HarnessRuntimeJoinAcceptanceTest {
     assertEquals(JoinDelivery.NOTIFY_PARENT, resumedJoin.delivery());
   }
 
+  @Test
+  void spawnContinuationOfMissingThreadIsNotFound() {
+    // 续接目标不存在时不能注册票据或伪造已接受的子 Thread。
+    UUID missingThread = TestIds.id(4900);
+    UUID ticket = TestIds.id(4901);
+    NewThreadCommand command = userMessageCommand(TestIds.id(4902), "resume");
+    SpawnRequest request =
+        new SpawnRequest(
+            missingThread,
+            null,
+            settings(),
+            List.of(command),
+            null,
+            null,
+            new SpawnRequest.Continuation(TestIds.id(4903), 1),
+            false,
+            ThreadConstraints.NONE,
+            SpawnTrigger.CONTROLLER,
+            JoinDelivery.RECEIPT_ONLY,
+            SpawnRequest.Budget.unlimited(),
+            ticket,
+            command.requestHash());
+    DomainException error =
+        assertThrows(
+            DomainException.class, () -> runtime.spawn(request, AcceptancePreflight.IDENTITY));
+    assertEquals(DomainErrorCode.NOT_FOUND, error.code());
+    assertEquals("thread", error.resource());
+    assertEquals("thread " + missingThread + " does not exist", error.getMessage());
+    assertTrue(runtime.findJoin(ticket).isEmpty());
+  }
+
   /** 统一 spawn 在写任何行前复用 accept 的 batch 形状规则；非法批次必须是参数错误而不是 ClassCast 或部分写入。 */
   @Test
   void spawnRejectsInvalidBatchShapesBeforeAnyWrite() {
