@@ -1060,7 +1060,6 @@ const platformDomainRoots = [
   'cluster',
   'configsync',
   'environment',
-  'error',
   'events',
   'harness',
   'i18n',
