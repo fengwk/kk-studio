@@ -23,6 +23,7 @@ import org.springframework.dao.DuplicateKeyException;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
+import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderRepository;
 import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
@@ -57,7 +58,8 @@ class AgentModelServiceUnitTest {
     repository = mock(AgentModelRepository.class);
     providerRepository = mock(AgentProviderRepository.class);
     when(providerRepository.getByNameForUpdate("provider"))
-        .thenReturn(AgentProvider.builder().name("provider").build());
+        .thenReturn(
+            AgentProvider.builder().name("provider").providerType(ProviderType.OPENAI).build());
     service =
         new AgentModelService(
             repository,

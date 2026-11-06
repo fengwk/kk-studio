@@ -24,12 +24,20 @@ import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerRepository;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpTool;
+import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
+import fun.fengwk.kkstudio.platform.catalog.model.AgentModelService;
+import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
+import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderRepository;
+import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalog;
 import fun.fengwk.kkstudio.platform.error.DomainException;
 import fun.fengwk.kkstudio.platform.testing.TestCatalogSources;
 import fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO;
+import fun.fengwk.kkstudio.share.catalog.AgentModelCreateDTO;
+import fun.fengwk.kkstudio.share.catalog.AgentModelKind;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncKind;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncRef;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncSkipped;
@@ -108,6 +116,40 @@ class ConfigSyncPlannerTest {
   }
 
   private static final String PROVIDER_AND_MODEL = providerAndModelYaml();
+
+  /** 同一不受支持档位经保存和导入走同一 validation 错误。 */
+  @Test
+  void saveAndImportRejectUnsupportedRetentionIdentically() {
+    when(snapshotReader.read()).thenReturn(emptySnapshot());
+    String unsupported =
+        PROVIDER_AND_MODEL
+            .replace("providerType: openai", "providerType: google")
+            .replace("promptCacheRetention: NONE", "promptCacheRetention: LONG");
+    DomainException imported = assertThrows(DomainException.class, () -> plan(unsupported));
+
+    AgentProviderRepository providers = mock(AgentProviderRepository.class);
+    when(providers.getByNameForUpdate("p"))
+        .thenReturn(AgentProvider.builder().name("p").providerType(ProviderType.GOOGLE).build());
+    AgentModelService service =
+        new AgentModelService(
+            mock(AgentModelRepository.class),
+            providers,
+            new AgentEditableSupport(ConfigSyncFixtures.MAPPER),
+            ConfigSyncFixtures.MODEL_CONFIG_PARSER,
+            ConfigSyncFixtures.GROUP_CONFIG_CODEC);
+    var config = ConfigSyncFixtures.modelConfig();
+    config.getVariants().getFirst().setPromptCacheRetention("LONG");
+    AgentModelCreateDTO create = new AgentModelCreateDTO();
+    create.setKind(AgentModelKind.MODEL);
+    create.setProviderName("p");
+    create.setName("m");
+    create.setModelId("gpt");
+    create.setConfig(config);
+    DomainException saved = assertThrows(DomainException.class, () -> service.createModel(create));
+    assertEquals(saved.code(), imported.code());
+    assertEquals(saved.resource(), imported.resource());
+    assertEquals(saved.getMessage(), imported.getMessage());
+  }
 
   /** 拼接一个 document 内的 Agent 条目；configLines 使用 6 空格缩进。 */
   private static String agent(String name, String model, String configLines) {

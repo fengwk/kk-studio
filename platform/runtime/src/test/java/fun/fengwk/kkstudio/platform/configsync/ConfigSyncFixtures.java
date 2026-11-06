@@ -191,6 +191,7 @@ final class ConfigSyncFixtures {
     pricing.setMultipliers(List.of());
     AgentModelVariantDTO variant = new AgentModelVariantDTO();
     variant.setId("default");
+    variant.setPromptCacheRetention("NONE");
     AgentModelConfigDTO config = new AgentModelConfigDTO();
     config.setLimit(limit);
     config.setAbilities(abilities);
@@ -207,6 +208,7 @@ final class ConfigSyncFixtures {
     for (String id : variantIds) {
       AgentModelVariantDTO variant = new AgentModelVariantDTO();
       variant.setId(id);
+      variant.setPromptCacheRetention("NONE");
       variants.add(variant);
     }
     config.setVariants(variants);

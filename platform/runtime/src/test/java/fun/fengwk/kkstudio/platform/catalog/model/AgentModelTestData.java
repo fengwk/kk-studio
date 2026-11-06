@@ -61,6 +61,7 @@ public final class AgentModelTestData {
     for (String id : variantIds) {
       AgentModelVariantDTO variant = new AgentModelVariantDTO();
       variant.setId(id);
+      variant.setPromptCacheRetention("NONE");
       variants.add(variant);
     }
     config.setVariants(variants);
