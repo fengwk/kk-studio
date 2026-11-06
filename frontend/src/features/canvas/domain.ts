@@ -81,6 +81,13 @@ export interface CanvasSnapshot {
   references: Reference[]
 }
 
+/** 服务端已校验 args 为 JSON object；本地仅做对象形状收窄，缺失或非对象时按空对象处理。 */
+export function readJsonObject(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {}
+}
+
 export function scanArgsForReferences(obj: unknown, onRef: (nodeId: string, index: number) => void): void {
   if (!obj || typeof obj !== 'object') {
     return
@@ -102,7 +109,11 @@ export function scanArgsForReferences(obj: unknown, onRef: (nodeId: string, inde
   }
 }
 
-export function deriveReferencesFromNodes(nodes: Array<{ id: string; canvasId: string; function?: Function | null }>): Reference[] {
+export function deriveReferencesFromNodes(nodes: Array<{
+  id: string
+  canvasId: string
+  function?: { name: string; args: unknown } | null
+}>): Reference[] {
   const refs: Reference[] = []
   for (const node of nodes) {
     if (!node.function?.args) {
@@ -128,7 +139,7 @@ export function projectCanvasSnapshot(snapshot: CanvasSnapshotDTO): CanvasSnapsh
       resources: node.resources.map(projectCanvasResource),
       function: node.function ? {
         name: node.function.name,
-        args: node.function.args ?? {},
+        args: readJsonObject(node.function.args),
       } : null,
       run: node.run,
     }

@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.web;
 
+import static fun.fengwk.kkstudio.platformtest.harness.HarnessRuntimeTestFixtures.jsonObject;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -12,6 +13,7 @@ import org.springframework.boot.jackson.autoconfigure.JacksonAutoConfiguration;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.chat.dto.ChatDTO;
 import fun.fengwk.kkstudio.harness.model.ModelPricingCondition;
@@ -99,7 +101,7 @@ class StrictJacksonConfigurationTest {
 
           HarnessExecutionSelectionDTO execution = new HarnessExecutionSelectionDTO();
           execution.setDriver("builtin");
-          Map<String, Object> settingsMap = new LinkedHashMap<>();
+          ObjectNode settingsMap = jsonObject();
           settingsMap.put("modelName", "claude-3-5-sonnet");
           settingsMap.put("variant", "default");
           execution.setSettings(settingsMap);
@@ -144,11 +146,11 @@ class StrictJacksonConfigurationTest {
     runner.run(
         context -> {
           JsonMapper mapper = context.getBean(JsonMapper.class);
-          Map<String, Object> nested = new LinkedHashMap<>();
-          nested.put("optional", null);
-          Map<String, Object> values = new LinkedHashMap<>();
-          values.put("variant", null);
-          values.put("nested", nested);
+          ObjectNode nested = jsonObject();
+          nested.putNull("optional");
+          ObjectNode values = jsonObject();
+          values.putNull("variant");
+          values.set("nested", nested);
           HarnessExecutionSelectionDTO execution = new HarnessExecutionSelectionDTO();
           execution.setDriver("custom");
           execution.setSettings(values);

@@ -48,6 +48,13 @@ export function createBuiltinExecution(
   }
 }
 
+/** 复制 execution settings 的 JSON object；服务端已保证对象形状，非对象值按空对象处理。 */
+export function copyExecutionSettings(settings: unknown): Record<string, unknown> {
+  return settings !== null && typeof settings === 'object' && !Array.isArray(settings)
+    ? { ...(settings as Record<string, unknown>) }
+    : {}
+}
+
 export function getBuiltinModelSelection(
   execution: unknown,
 ): HarnessModelSelectionDTO | null {

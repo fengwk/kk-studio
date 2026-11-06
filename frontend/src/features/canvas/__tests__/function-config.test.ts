@@ -1,5 +1,6 @@
 import { act, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { readJsonObject } from '@/features/canvas/domain'
 import { useFunctionConfigSync } from '@/features/canvas/function-config'
 import type { CanvasDraftAck } from '@/features/canvas/canvas-operation-storage'
 import type { CanvasCommandDTO, CanvasSnapshotDTO } from '@/shared/api/generated/contracts'
@@ -121,7 +122,7 @@ describe('useFunctionConfigSync', () => {
     if (cmd?.type !== 'SET_NODE_FUNCTION') {
       throw new Error('Expected SET_NODE_FUNCTION')
     }
-    expect(cmd.function?.args.prompt).toBe('version 2')
+    expect(readJsonObject(cmd.function?.args).prompt).toBe('version 2')
   })
 
   it('flushFunctionConfig flushes immediately and cancels pending timer', async () => {

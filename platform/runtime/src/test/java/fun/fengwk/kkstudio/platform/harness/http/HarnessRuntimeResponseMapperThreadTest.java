@@ -57,8 +57,12 @@ class HarnessRuntimeResponseMapperThreadTest {
     assertTrue(dto.isYoloEnabled());
     assertEquals("default-assistant", dto.getBranchSettings().getAgentName());
     assertEquals("builtin", dto.getBranchSettings().getExecution().getDriver());
-    assertEquals("gpt-5", dto.getBranchSettings().getExecution().getSettings().get("modelName"));
-    assertEquals("default", dto.getBranchSettings().getExecution().getSettings().get("variant"));
+    assertEquals(
+        "gpt-5",
+        dto.getBranchSettings().getExecution().getSettings().get("modelName").stringValue());
+    assertEquals(
+        "default",
+        dto.getBranchSettings().getExecution().getSettings().get("variant").stringValue());
     // Environment 引用投影为 nullable name（该 fixture 未选择环境）。
     assertNull(dto.getBranchSettings().getEnvironmentName());
     assertEquals(NOW, dto.getCreatedAt());
@@ -168,8 +172,8 @@ class HarnessRuntimeResponseMapperThreadTest {
     assertEquals(parent.thread().name(), node.getName());
     assertEquals(parent.branchSettings().agentName(), node.getAgentName());
     assertEquals("builtin", node.getExecution().getDriver());
-    assertEquals("gpt-5", node.getExecution().getSettings().get("modelName"));
-    assertEquals("default", node.getExecution().getSettings().get("variant"));
+    assertEquals("gpt-5", node.getExecution().getSettings().get("modelName").stringValue());
+    assertEquals("default", node.getExecution().getSettings().get("variant").stringValue());
     assertEquals(ThreadRuntimeStatus.IDLE, node.getStatus());
     assertEquals(ThreadExecutionControl.RUNNABLE, node.getExecutionControl());
     assertEquals(0, node.getTurnCount());

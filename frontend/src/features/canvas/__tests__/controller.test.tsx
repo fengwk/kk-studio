@@ -10,6 +10,7 @@ import * as draftStorageModule from '@/features/canvas/canvas-draft-storage'
 import { loadCanvasOperations } from '@/features/canvas/canvas-operation-storage'
 import { createMockIDBFactory } from './mock-idb'
 import type { CanvasNodeDraft } from '@/features/canvas/canvas-drafts'
+import { readJsonObject } from '@/features/canvas/domain'
 import {
   cancelCanvasFunctionRun,
   getCanvas,
@@ -1851,7 +1852,7 @@ describe('useCanvasController real snapshot runtime', () => {
     })
 
     expect(result.current.state.drafts[NODE_FN]?.generation).toBe(3)
-    expect(result.current.state.drafts[NODE_FN]?.function?.args.prompt).toBe('3')
+    expect(readJsonObject(result.current.state.drafts[NODE_FN]?.function?.args).prompt).toBe('3')
   })
 
   it('canvas 切换 queued writes 隔离：画布切换时排队的持久化任务严格被 scope/epoch 拦截，绝不跨画布写入', async () => {
@@ -1889,10 +1890,10 @@ describe('useCanvasController real snapshot runtime', () => {
     })
 
     // 确认内存草稿已就绪，并等待本地 IDB 草稿落盘
-    expect(result.current.state.drafts[NODE_FN]?.function?.args.prompt).toBe('library-exit-draft')
+    expect(readJsonObject(result.current.state.drafts[NODE_FN]?.function?.args).prompt).toBe('library-exit-draft')
     await waitFor(async () => {
       const stored = await loadCanvasDrafts(CANVAS_ID)
-      expect(stored[NODE_FN]?.function?.args.prompt).toBe('library-exit-draft')
+      expect(readJsonObject(stored[NODE_FN]?.function?.args).prompt).toBe('library-exit-draft')
     })
 
     // 在 320ms 网络防抖冲刷前调用 openLibrary 退出到库视图
@@ -1905,13 +1906,13 @@ describe('useCanvasController real snapshot runtime', () => {
 
     // 绝不向网络发送旧配置命令
     const functionCommands = commands.filter((req) =>
-      req.commands.some((c) => c.type === 'SET_NODE_FUNCTION' && c.function?.args.prompt === 'library-exit-draft'),
+      req.commands.some((c) => c.type === 'SET_NODE_FUNCTION' && readJsonObject(c.function?.args).prompt === 'library-exit-draft'),
     )
     expect(functionCommands).toHaveLength(0)
 
     // 本地持久草稿完好保留在底层存储中
     const stored = await loadCanvasDrafts(CANVAS_ID)
-    expect(stored[NODE_FN]?.function?.args.prompt).toBe('library-exit-draft')
+    expect(readJsonObject(stored[NODE_FN]?.function?.args).prompt).toBe('library-exit-draft')
   })
 
   it('定时器控制：切画布不污染：在画布 1 防抖期间切换至画布 2，定时器到期后绝不向画布 2 队列发送旧配置', async () => {
@@ -1928,10 +1929,10 @@ describe('useCanvasController real snapshot runtime', () => {
     })
 
     // 确认内存草稿就绪并等待本地 IDB 落盘
-    expect(result.current.state.drafts[NODE_FN]?.function?.args.prompt).toBe('canvas-1-pending-config')
+    expect(readJsonObject(result.current.state.drafts[NODE_FN]?.function?.args).prompt).toBe('canvas-1-pending-config')
     await waitFor(async () => {
       const drafts1 = await loadCanvasDrafts(CANVAS_ID)
-      expect(drafts1[NODE_FN]?.function?.args.prompt).toBe('canvas-1-pending-config')
+      expect(readJsonObject(drafts1[NODE_FN]?.function?.args).prompt).toBe('canvas-1-pending-config')
     })
 
     // 在 320ms 网络防抖冲刷前立即切换至画布 2
@@ -1944,7 +1945,7 @@ describe('useCanvasController real snapshot runtime', () => {
 
     // 验证绝无向网络发送画布 1 的配置命令
     const leakedCommands = commands.filter((req) =>
-      req.commands.some((c) => c.type === 'SET_NODE_FUNCTION' && c.function?.args.prompt === 'canvas-1-pending-config'),
+      req.commands.some((c) => c.type === 'SET_NODE_FUNCTION' && readJsonObject(c.function?.args).prompt === 'canvas-1-pending-config'),
     )
     expect(leakedCommands).toHaveLength(0)
 
@@ -1954,7 +1955,7 @@ describe('useCanvasController real snapshot runtime', () => {
 
     // 验证画布 1 的持久草稿完好保留
     const draftsCanvas1 = await loadCanvasDrafts(CANVAS_ID)
-    expect(draftsCanvas1[NODE_FN]?.function?.args.prompt).toBe('canvas-1-pending-config')
+    expect(readJsonObject(draftsCanvas1[NODE_FN]?.function?.args).prompt).toBe('canvas-1-pending-config')
   })
 
   it('ACK 后紧接 persist 不复活：ACK 成功后同一边界更新权威草稿，后续 persist 绝不复活已确认草稿', async () => {
@@ -2003,7 +2004,7 @@ describe('useCanvasController real snapshot runtime', () => {
 
     await waitFor(async () => {
       const stored = await loadCanvasDrafts(CANVAS_ID)
-      expect(stored[NODE_FN]?.function?.args.prompt).toBe('another')
+      expect(readJsonObject(stored[NODE_FN]?.function?.args).prompt).toBe('another')
       // 关键断言：NODE_NOTE 的 position 绝不被复活写回 IDB！
       expect(stored[NODE_NOTE]?.position).toBeUndefined()
     })

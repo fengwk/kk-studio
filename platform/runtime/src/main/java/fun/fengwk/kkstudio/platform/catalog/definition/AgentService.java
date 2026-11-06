@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.platform.catalog.definition;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.databind.JsonNode;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.json.StrictJson;
@@ -21,7 +22,6 @@ import fun.fengwk.kkstudio.platform.error.CatalogVersions;
 import fun.fengwk.kkstudio.platform.pluginhost.service.PluginAgentDependencies;
 
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -248,7 +248,7 @@ public class AgentService {
       }
       return null;
     }
-    if (dto.getDriver() == null || dto.getSettings() == null) {
+    if (dto.getDriver() == null || dto.getSettings() == null || !dto.getSettings().isObject()) {
       throw DomainException.validation(RESOURCE, "execution driver and settings are required");
     }
     ExecutionSelection selection;
@@ -264,14 +264,13 @@ public class AgentService {
     return selection;
   }
 
-  @SuppressWarnings("unchecked")
   private static HarnessExecutionSelectionDTO toExecutionDto(ExecutionSelection execution) {
     if (execution == null) {
       return null;
     }
     HarnessExecutionSelectionDTO dto = new HarnessExecutionSelectionDTO();
     dto.setDriver(execution.driver());
-    dto.setSettings(JSON.read(execution.settingsJson(), Map.class, "execution.settings"));
+    dto.setSettings(JSON.read(execution.settingsJson(), JsonNode.class, "execution.settings"));
     return dto;
   }
 

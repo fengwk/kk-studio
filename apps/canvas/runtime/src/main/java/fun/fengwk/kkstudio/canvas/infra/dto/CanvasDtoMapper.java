@@ -1,5 +1,10 @@
 package fun.fengwk.kkstudio.canvas.infra.dto;
 
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
+
 import fun.fengwk.kkstudio.canvas.CanvasCommand;
 import fun.fengwk.kkstudio.canvas.CanvasConflict;
 import fun.fengwk.kkstudio.canvas.CanvasDocument;
@@ -45,8 +50,6 @@ import fun.fengwk.kkstudio.platform.storage.dto.StoragePresignedUrlDTO;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 
-import java.math.BigDecimal;
-import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -172,7 +175,7 @@ public class CanvasDtoMapper {
     CanvasFunctionDefinitionDTO dto = new CanvasFunctionDefinitionDTO();
     dto.setName(definition.name());
     dto.setDescription(definition.description());
-    dto.setArgsSchema(toArgs(definition.argsSchema()));
+    dto.setArgsSchema(toJsonNode(definition.argsSchema()));
     dto.setOutputs(
         definition.outputs().stream()
             .map(
@@ -316,7 +319,7 @@ public class CanvasDtoMapper {
     if (function == null) {
       return null;
     }
-    return new CanvasFunctionDTO(function.name(), toArgs(function.args()));
+    return new CanvasFunctionDTO(function.name(), toJsonNode(function.args()));
   }
 
   private CanvasGroupDTO toDto(CanvasGroup group) {
@@ -392,7 +395,7 @@ public class CanvasDtoMapper {
   }
 
   /** wire 的任意 JSON object 转成 Core 的严格 args 值模型，并复用 Core 的深度与长度上限。 */
-  private static CanvasJson.JsonObject toJsonObject(Map<String, Object> args) {
+  private static CanvasJson.JsonObject toJsonObject(JsonNode args) {
     if (args == null) {
       throw DomainException.validation("function.args", "function args is required");
     }
@@ -413,87 +416,67 @@ public class CanvasDtoMapper {
     return object;
   }
 
-  private static CanvasJson toJson(Object value, String field, int depth) {
+  private static CanvasJson toJson(JsonNode value, String field, int depth) {
     if (depth > CanvasJson.MAX_DEPTH) {
       throw DomainException.validation(
           field, field + " must not nest deeper than " + CanvasJson.MAX_DEPTH);
     }
-    if (value == null) {
+    if (value == null || value.isNull()) {
       return new CanvasJson.JsonNull();
     }
-    if (value instanceof String text) {
-      return new CanvasJson.JsonText(text);
+    if (value.isString()) {
+      return new CanvasJson.JsonText(value.stringValue());
     }
-    if (value instanceof Boolean bool) {
-      return new CanvasJson.JsonBool(bool);
+    if (value.isBoolean()) {
+      return new CanvasJson.JsonBool(value.booleanValue());
     }
-    if (value instanceof Map<?, ?> map) {
+    if (value.isObject()) {
       LinkedHashMap<String, CanvasJson> values = new LinkedHashMap<>();
-      for (Map.Entry<?, ?> entry : map.entrySet()) {
-        if (!(entry.getKey() instanceof String key)) {
-          throw DomainException.validation(field, field + " must use string object keys");
-        }
-        values.put(key, toJson(entry.getValue(), field, depth + 1));
+      for (Map.Entry<String, JsonNode> entry : value.properties()) {
+        values.put(entry.getKey(), toJson(entry.getValue(), field, depth + 1));
       }
       return new CanvasJson.JsonObject(values);
     }
-    if (value instanceof List<?> list) {
-      List<CanvasJson> values = new ArrayList<>(list.size());
-      for (Object item : list) {
+    if (value.isArray()) {
+      List<CanvasJson> values = new ArrayList<>(value.size());
+      for (JsonNode item : value) {
         values.add(toJson(item, field, depth + 1));
       }
       return new CanvasJson.JsonArray(values);
     }
-    if (value instanceof BigDecimal decimal) {
-      return new CanvasJson.JsonNumber(decimal);
+    if (value.isNumber()) {
+      return new CanvasJson.JsonNumber(value.decimalValue());
     }
-    if (value instanceof BigInteger
-        || value instanceof Long
-        || value instanceof Integer
-        || value instanceof Short
-        || value instanceof Byte) {
-      return new CanvasJson.JsonNumber(new BigDecimal(value.toString()));
-    }
-    if (value instanceof Double || value instanceof Float) {
-      double number = ((Number) value).doubleValue();
-      if (!Double.isFinite(number)) {
-        throw DomainException.validation(field, field + " numbers must be finite");
-      }
-      return new CanvasJson.JsonNumber(BigDecimal.valueOf(number));
-    }
-    throw DomainException.validation(
-        field, field + " must contain only JSON values, found " + value.getClass().getName());
+    throw DomainException.validation(field, field + " must contain only JSON values");
   }
 
-  /** Core 的严格 args 值模型转回 wire 的普通 JSON 树，数值保持十进制文本形态。 */
-  private static Map<String, Object> toArgs(CanvasJson.JsonObject args) {
-    LinkedHashMap<String, Object> values = new LinkedHashMap<>();
-    args.values().forEach((key, value) -> values.put(key, toJsonValue(value, 0)));
-    return values;
+  /** Core 的严格 args 值模型转回 wire 的 JSON 树，数值保持精确十进制。 */
+  private static JsonNode toJsonNode(CanvasJson.JsonObject args) {
+    return toJsonNode(args, 0);
   }
 
-  private static Object toJsonValue(CanvasJson value, int depth) {
+  private static JsonNode toJsonNode(CanvasJson value, int depth) {
     if (depth > CanvasJson.MAX_DEPTH) {
       throw new IllegalStateException(
           "function args must not nest deeper than " + CanvasJson.MAX_DEPTH);
     }
     return switch (value) {
       case CanvasJson.JsonObject object -> {
-        LinkedHashMap<String, Object> values = new LinkedHashMap<>();
-        object.values().forEach((key, item) -> values.put(key, toJsonValue(item, depth + 1)));
-        yield values;
+        ObjectNode node = JsonNodeFactory.instance.objectNode();
+        object.values().forEach((key, item) -> node.set(key, toJsonNode(item, depth + 1)));
+        yield node;
       }
       case CanvasJson.JsonArray array -> {
-        List<Object> values = new ArrayList<>(array.values().size());
+        ArrayNode node = JsonNodeFactory.instance.arrayNode();
         for (CanvasJson item : array.values()) {
-          values.add(toJsonValue(item, depth + 1));
+          node.add(toJsonNode(item, depth + 1));
         }
-        yield values;
+        yield node;
       }
-      case CanvasJson.JsonText text -> text.value();
-      case CanvasJson.JsonNumber number -> new BigDecimal(number.value().toPlainString());
-      case CanvasJson.JsonBool bool -> bool.value();
-      case CanvasJson.JsonNull ignored -> null;
+      case CanvasJson.JsonText text -> JsonNodeFactory.instance.textNode(text.value());
+      case CanvasJson.JsonNumber number -> JsonNodeFactory.instance.numberNode(number.value());
+      case CanvasJson.JsonBool bool -> JsonNodeFactory.instance.booleanNode(bool.value());
+      case CanvasJson.JsonNull ignored -> JsonNodeFactory.instance.nullNode();
     };
   }
 

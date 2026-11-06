@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.platform.catalog.model;
 
 import static fun.fengwk.kkstudio.platform.catalog.model.ModelTestData.buildConfig;
 import static fun.fengwk.kkstudio.platform.catalog.model.ModelTestData.executable;
+import static fun.fengwk.kkstudio.platformtest.harness.HarnessRuntimeTestFixtures.jsonObject;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -13,6 +14,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
@@ -41,9 +43,7 @@ import fun.fengwk.kkstudio.platform.configsync.ConfigSyncService;
 import fun.fengwk.kkstudio.platform.configsync.dto.ConfigSyncImportRequestDTO;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -187,7 +187,8 @@ public class ModelServiceTest extends PostgresSpringTestSupport {
 
     String agentName = "agent-ref-" + suffix;
     AgentDTO agentDto = agentService.createAgent(agent(originalModel, agentName));
-    assertEquals(originalModel, agentDto.getExecution().getSettings().get("modelName"));
+    assertEquals(
+        originalModel, agentDto.getExecution().getSettings().get("modelName").stringValue());
 
     insertCooldown(group.getName(), originalModel, "default", Long.parseLong(group.getVersion()));
 
@@ -206,7 +207,8 @@ public class ModelServiceTest extends PostgresSpringTestSupport {
             .filter(candidate -> candidate.getName().equals(agentName))
             .findFirst()
             .orElseThrow();
-    assertEquals(renamedModel, updatedAgent.getExecution().getSettings().get("modelName"));
+    assertEquals(
+        renamedModel, updatedAgent.getExecution().getSettings().get("modelName").stringValue());
     assertEquals("1", updatedAgent.getVersion());
 
     ModelDTO renamedGroup =
@@ -532,9 +534,9 @@ public class ModelServiceTest extends PostgresSpringTestSupport {
   private AgentCreateDTO agent(String model, String name) {
     AgentCreateDTO dto = new AgentCreateDTO();
     dto.setName(name);
-    Map<String, Object> settings = new HashMap<>();
+    ObjectNode settings = jsonObject();
     settings.put("modelName", model);
-    settings.put("variant", null);
+    settings.putNull("variant");
     HarnessExecutionSelectionDTO execution = new HarnessExecutionSelectionDTO();
     execution.setDriver(BuiltinExecution.DRIVER);
     execution.setSettings(settings);

@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.platform.catalog.definition;
 
+import static fun.fengwk.kkstudio.platformtest.harness.HarnessRuntimeTestFixtures.jsonObject;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -24,6 +25,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.DuplicateKeyException;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
@@ -48,7 +50,6 @@ import fun.fengwk.kkstudio.platform.catalog.tool.TestRuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.pluginhost.service.PluginAgentDependencies;
 
 import java.sql.SQLException;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -369,7 +370,8 @@ class AgentServiceUnitTest {
     verify(variants, never()).resolve(any(), any());
 
     HarnessExecutionSelectionDTO malformed = execution("model", "default");
-    malformed.getSettings().put("modelName", null);
+    ObjectNode malformedSettings = (ObjectNode) malformed.getSettings();
+    malformedSettings.putNull("modelName");
     unconfigured.setExecution(malformed);
     assertThrows(DomainException.class, () -> service.updateAgent("agent", unconfigured));
   }
@@ -401,7 +403,7 @@ class AgentServiceUnitTest {
     AgentCreateDTO create = create("agent", "model", emptyConfig(), null);
     HarnessExecutionSelectionDTO selection = new HarnessExecutionSelectionDTO();
     selection.setDriver("fake");
-    selection.setSettings(Map.of("endpoint", "local"));
+    selection.setSettings(jsonObject(Map.of("endpoint", "local")));
     create.setExecution(selection);
 
     Agent stored = createAndCapture(create);
@@ -418,7 +420,7 @@ class AgentServiceUnitTest {
     AgentCreateDTO create = create("agent", "model", emptyConfig(), null);
     HarnessExecutionSelectionDTO selection = new HarnessExecutionSelectionDTO();
     selection.setDriver("missing");
-    selection.setSettings(Map.of("endpoint", "local"));
+    selection.setSettings(jsonObject(Map.of("endpoint", "local")));
     create.setExecution(selection);
     DomainException missing =
         assertThrows(DomainException.class, () -> service.createAgent(create));
@@ -431,17 +433,18 @@ class AgentServiceUnitTest {
     selection.setDriver("fake");
     selection.setSettings(null);
     assertThrows(DomainException.class, () -> service.createAgent(create));
-    selection.setSettings(Map.of("endpoint", "other"));
+    selection.setSettings(jsonObject(Map.of("endpoint", "other")));
     DomainException invalidSettings =
         assertThrows(DomainException.class, () -> service.createAgent(create));
     assertTrue(invalidSettings.getMessage().contains("invalid fake settings"));
 
     HarnessExecutionSelectionDTO malformedBuiltin = execution("model", null);
-    malformedBuiltin.getSettings().remove("variant");
+    ObjectNode malformedBuiltinSettings = (ObjectNode) malformedBuiltin.getSettings();
+    malformedBuiltinSettings.remove("variant");
     create.setExecution(malformedBuiltin);
     assertThrows(DomainException.class, () -> service.createAgent(create));
-    malformedBuiltin.getSettings().put("variant", null);
-    malformedBuiltin.getSettings().put("unexpected", true);
+    malformedBuiltinSettings.putNull("variant");
+    malformedBuiltinSettings.put("unexpected", true);
     assertThrows(DomainException.class, () -> service.createAgent(create));
     verify(repository, never()).create(any());
     verify(modelRepository, never()).getByNameForUpdate(any());
@@ -505,9 +508,13 @@ class AgentServiceUnitTest {
   }
 
   private static HarnessExecutionSelectionDTO execution(String model, String variant) {
-    Map<String, Object> settings = new HashMap<>();
+    ObjectNode settings = jsonObject();
     settings.put("modelName", model);
-    settings.put("variant", variant);
+    if (variant == null) {
+      settings.putNull("variant");
+    } else {
+      settings.put("variant", variant);
+    }
     HarnessExecutionSelectionDTO execution = new HarnessExecutionSelectionDTO();
     execution.setDriver(BuiltinExecution.DRIVER);
     execution.setSettings(settings);

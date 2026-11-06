@@ -1,8 +1,9 @@
-import type {
-  AgentRuntimeOwnerDTO,
-  HarnessCommandBatchDTO,
-  HarnessCommandCreateDTO,
-  HarnessThreadCommandBatchDTO,
+import {
+  copyExecutionSettings,
+  type AgentRuntimeOwnerDTO,
+  type HarnessCommandBatchDTO,
+  type HarnessCommandCreateDTO,
+  type HarnessThreadCommandBatchDTO,
 } from '@/shared/api/contracts/ai-runtime'
 import {
   buildBranchDiffCommands,
@@ -75,7 +76,7 @@ export function createBranchSettings(draft: BranchDraft): HarnessBranchSettingsD
     agentName: draft.agentName,
     execution: {
       driver: draft.execution.driver,
-      settings: { ...draft.execution.settings },
+      settings: copyExecutionSettings(draft.execution.settings),
     },
     environmentName: draft.environmentName,
     goal: null,
@@ -259,7 +260,7 @@ export function copyBranchDraft(draft: BranchDraft): BranchDraft {
     ...draft,
     execution: {
       driver: draft.execution.driver,
-      settings: { ...draft.execution.settings },
+      settings: copyExecutionSettings(draft.execution.settings),
     },
   }
 }

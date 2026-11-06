@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.web.controller;
 
+import static fun.fengwk.kkstudio.platformtest.harness.HarnessRuntimeTestFixtures.jsonObject;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -835,7 +836,7 @@ public class AgentProviderModelControllerTest extends WebPostgresTestSupport {
   private static HarnessExecutionSelectionDTO execution(String modelName) {
     HarnessExecutionSelectionDTO execution = new HarnessExecutionSelectionDTO();
     execution.setDriver("builtin");
-    execution.setSettings(Map.of("modelName", modelName, "variant", "default"));
+    execution.setSettings(jsonObject(Map.of("modelName", modelName, "variant", "default")));
     return execution;
   }
 

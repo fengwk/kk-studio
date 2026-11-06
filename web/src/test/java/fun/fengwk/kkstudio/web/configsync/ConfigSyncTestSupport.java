@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.web.configsync;
 
+import static fun.fengwk.kkstudio.platformtest.harness.HarnessRuntimeTestFixtures.jsonObject;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -201,7 +202,7 @@ public abstract class ConfigSyncTestSupport extends WebPostgresTestSupport {
   protected static HarnessExecutionSelectionDTO execution(String model, String variant) {
     HarnessExecutionSelectionDTO selection = new HarnessExecutionSelectionDTO();
     selection.setDriver(BuiltinExecution.DRIVER);
-    selection.setSettings(Map.of("modelName", model, "variant", variant));
+    selection.setSettings(jsonObject(Map.of("modelName", model, "variant", variant)));
     return selection;
   }
 

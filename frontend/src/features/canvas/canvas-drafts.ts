@@ -11,7 +11,7 @@
  */
 
 import type { CanvasRevision } from '@/shared/api/contracts/base'
-import type { ResourceNode } from './domain'
+import { readJsonObject, type ResourceNode } from './domain'
 import type {
   CanvasConflictDTO,
   CanvasFunctionDTO,
@@ -119,7 +119,7 @@ export function overlayNodeWithDraft(node: ResourceNode, draft?: CanvasNodeDraft
       ...transformedNode,
       function: draft.function ? {
         name: draft.function.name,
-        args: draft.function.args ?? {},
+        args: readJsonObject(draft.function.args),
       } : null,
     }
   }

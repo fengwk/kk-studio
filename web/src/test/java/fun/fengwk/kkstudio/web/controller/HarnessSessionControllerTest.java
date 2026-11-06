@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.web.controller;
 
+import static fun.fengwk.kkstudio.platformtest.harness.HarnessRuntimeTestFixtures.jsonObject;
 import static org.hamcrest.Matchers.hasKey;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -186,7 +187,7 @@ class HarnessSessionControllerTest {
     thread.setStatus(ThreadRuntimeStatus.IDLE);
     HarnessExecutionSelectionDTO execution = new HarnessExecutionSelectionDTO();
     execution.setDriver("builtin");
-    execution.setSettings(Map.of("modelName", "gpt-5", "variant", "default"));
+    execution.setSettings(jsonObject(Map.of("modelName", "gpt-5", "variant", "default")));
     thread.setExecution(execution);
     thread.setHeadMessagePreview("hello");
     // 真实 Session HTTP 出口必须保留同名根/子及显式的根 null 父身份。

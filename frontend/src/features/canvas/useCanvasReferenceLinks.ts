@@ -2,6 +2,7 @@ import { useCallback } from 'react'
 import { currentCanvasSnapshot, publishDrafts, type CanvasScope } from '@/features/canvas/canvas-controller-scope'
 import type { CanvasDraftAck } from '@/features/canvas/canvas-operation-storage'
 import { readResourceReferences, withDraftReferences } from '@/features/canvas/canvas-references'
+import { readJsonObject } from '@/features/canvas/domain'
 import { functionSupportsReferences } from '@/features/canvas/generation'
 import type { CanvasResourceReference } from '@/features/canvas/types'
 import type {
@@ -38,7 +39,7 @@ export function useCanvasReferenceLinks({
   const commitReferences = useCallback(async (
     targetNodeId: string,
     target: NonNullable<CanvasSnapshotDTO['nodes'][number]>,
-    currentArgs: Record<string, unknown> | undefined,
+    currentArgs: unknown,
     references: CanvasResourceReference[],
   ) => {
     const existingDraft = draftsRef.current[targetNodeId]
@@ -52,7 +53,7 @@ export function useCanvasReferenceLinks({
       type: 'SET_NODE_FUNCTION',
       nodeId: targetNodeId,
       expectedFunction: target.function,
-      function: { name: target.function!.name, args: { ...currentArgs, references } },
+      function: { name: target.function!.name, args: { ...readJsonObject(currentArgs), references } },
     }]).catch(() => undefined)
   }, [draftsRef, executeCommands, scope])
 

@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.platform.configsync;
 
 import static fun.fengwk.kkstudio.platform.configsync.ConfigSyncFixtures.agentConfig;
+import static fun.fengwk.kkstudio.platformtest.harness.HarnessRuntimeTestFixtures.jsonObject;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -184,7 +185,8 @@ class ConfigSyncApplierTest {
       assertTrue(created.getConfig().getSubagents().isEmpty());
       assertEquals("builtin", created.getExecution().getDriver());
       assertEquals(
-          Map.of("modelName", "m", "variant", "default"), created.getExecution().getSettings());
+          jsonObject(Map.of("modelName", "m", "variant", "default")),
+          created.getExecution().getSettings());
     }
 
     ArgumentCaptor<AgentUpdateDTO> updateCaptor = ArgumentCaptor.forClass(AgentUpdateDTO.class);
@@ -196,7 +198,8 @@ class ConfigSyncApplierTest {
     for (AgentUpdateDTO updated : updateCaptor.getAllValues()) {
       assertEquals("builtin", updated.getExecution().getDriver());
       assertEquals(
-          Map.of("modelName", "m", "variant", "default"), updated.getExecution().getSettings());
+          jsonObject(Map.of("modelName", "m", "variant", "default")),
+          updated.getExecution().getSettings());
     }
   }
 
@@ -483,7 +486,7 @@ class ConfigSyncApplierTest {
     AgentEditablePropertiesDTO properties = new AgentEditablePropertiesDTO();
     HarnessExecutionSelectionDTO execution = new HarnessExecutionSelectionDTO();
     execution.setDriver("builtin");
-    execution.setSettings(Map.of("modelName", "m", "variant", "default"));
+    execution.setSettings(jsonObject(Map.of("modelName", "m", "variant", "default")));
     properties.setExecution(execution);
     properties.setConfig(config);
     return properties;

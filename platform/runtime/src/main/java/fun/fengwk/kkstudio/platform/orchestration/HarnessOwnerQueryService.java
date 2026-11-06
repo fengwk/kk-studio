@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.platform.orchestration;
 
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
+import tools.jackson.databind.JsonNode;
 
 import fun.fengwk.kkstudio.common.json.StrictJson;
 import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
@@ -29,7 +30,6 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -136,7 +136,8 @@ public class HarnessOwnerQueryService {
       HarnessExecutionSelectionDTO executionDto = new HarnessExecutionSelectionDTO();
       executionDto.setDriver(execution.driver());
       executionDto.setSettings(
-          StrictJson.standard().read(execution.settingsJson(), Map.class, "execution.settings"));
+          StrictJson.standard()
+              .read(execution.settingsJson(), JsonNode.class, "execution.settings"));
       dto.setExecution(executionDto);
     }
     dto.setHeadMessagePreview(headMessagePreview(snapshot));

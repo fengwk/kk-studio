@@ -1,5 +1,6 @@
 import {
   type HarnessCommandCreateDTO,
+  copyExecutionSettings,
   createBuiltinExecution,
   getBuiltinModelSelection,
   isSameExecution,
@@ -144,7 +145,7 @@ export function buildBranchDiffCommands(
       idempotencyKey: createCommandId(),
       execution: {
         driver: draft.execution.driver,
-        settings: { ...draft.execution.settings },
+        settings: copyExecutionSettings(draft.execution.settings),
       },
     })
   }

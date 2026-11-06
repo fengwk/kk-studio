@@ -1,13 +1,14 @@
 package fun.fengwk.kkstudio.platform.catalog.definition;
 
 import static fun.fengwk.kkstudio.platform.catalog.model.ModelTestData.executable;
+import static fun.fengwk.kkstudio.platformtest.harness.HarnessRuntimeTestFixtures.jsonObject;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
@@ -26,9 +27,7 @@ import fun.fengwk.kkstudio.platform.catalog.model.ModelService;
 import fun.fengwk.kkstudio.platform.catalog.provider.ProviderService;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 /** Agent 定义全局唯一并引用当前模型名称；记录存续期间名称不可变，硬删除后可同名重建。 */
 public class AgentServiceTest extends PostgresSpringTestSupport {
@@ -64,7 +63,7 @@ public class AgentServiceTest extends PostgresSpringTestSupport {
     update.setExpectedVersion(definition.getVersion());
     AgentDTO updated = agentService.updateAgent(name, update);
     assertEquals(name, updated.getName());
-    assertEquals(modelRef, updated.getExecution().getSettings().get("modelName"));
+    assertEquals(modelRef, updated.getExecution().getSettings().get("modelName").stringValue());
     assertEquals("updated", updated.getDescription());
     assertEquals("1", updated.getVersion());
     assertTrue(
@@ -199,7 +198,7 @@ public class AgentServiceTest extends PostgresSpringTestSupport {
     valid.setExecution(execution(modelRef, null));
     AgentDTO created = agentService.createAgent(valid);
     try {
-      assertNull(created.getExecution().getSettings().get("variant"));
+      assertTrue(created.getExecution().getSettings().get("variant").isNull());
       AgentUpdateDTO invalidUpdate = new AgentUpdateDTO();
       invalidUpdate.setDescription(created.getDescription());
       invalidUpdate.setExecution(execution(modelRef, "missing"));
@@ -231,8 +230,8 @@ public class AgentServiceTest extends PostgresSpringTestSupport {
       rebind.setConfig(definition.getConfig());
       rebind.setExpectedVersion(definition.getVersion());
       AgentDTO updated = agentService.updateAgent(definition.getName(), rebind);
-      assertEquals(nextRef, updated.getExecution().getSettings().get("modelName"));
-      assertNull(updated.getExecution().getSettings().get("variant"));
+      assertEquals(nextRef, updated.getExecution().getSettings().get("modelName").stringValue());
+      assertTrue(updated.getExecution().getSettings().get("variant").isNull());
 
       AgentUpdateDTO missing = new AgentUpdateDTO();
       missing.setDescription(updated.getDescription());
@@ -278,9 +277,13 @@ public class AgentServiceTest extends PostgresSpringTestSupport {
   }
 
   private static HarnessExecutionSelectionDTO execution(String model, String variant) {
-    Map<String, Object> settings = new HashMap<>();
+    ObjectNode settings = jsonObject();
     settings.put("modelName", model);
-    settings.put("variant", variant);
+    if (variant == null) {
+      settings.putNull("variant");
+    } else {
+      settings.put("variant", variant);
+    }
     HarnessExecutionSelectionDTO selection = new HarnessExecutionSelectionDTO();
     selection.setDriver(BuiltinExecution.DRIVER);
     selection.setSettings(settings);

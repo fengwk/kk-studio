@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.chat;
 
 import static fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchemaSupport.applyFixtureDatabase;
 import static fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchemaSupport.newConnection;
+import static fun.fengwk.kkstudio.platformtest.harness.HarnessRuntimeTestFixtures.jsonObject;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -175,7 +176,8 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
       rebound.setName("default-assistant");
       HarnessExecutionSelectionDTO execution = new HarnessExecutionSelectionDTO();
       execution.setDriver("builtin");
-      execution.setSettings(Map.of("modelName", "acceptance-stub", "variant", "default"));
+      execution.setSettings(
+          jsonObject(Map.of("modelName", "acceptance-stub", "variant", "default")));
       rebound.setExecution(execution);
       AgentConfigDTO reboundConfig = new AgentConfigDTO();
       reboundConfig.setTools(List.of());

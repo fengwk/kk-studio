@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.platform.harness.http;
 
+import tools.jackson.databind.JsonNode;
+
 import fun.fengwk.kkstudio.common.json.StrictJson;
 import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.api.CancelledThreadInput;
@@ -141,13 +143,12 @@ public final class HarnessRuntimeResponseMapper {
     return dto;
   }
 
-  @SuppressWarnings("unchecked")
   private static HarnessExecutionSelectionDTO toExecutionSelectionDto(
       ExecutionSelection selection) {
     Objects.requireNonNull(selection, "selection");
     HarnessExecutionSelectionDTO dto = new HarnessExecutionSelectionDTO();
     dto.setDriver(selection.driver());
-    dto.setSettings(JSON.read(selection.settingsJson(), Map.class, "execution.settings"));
+    dto.setSettings(JSON.read(selection.settingsJson(), JsonNode.class, "execution.settings"));
     return dto;
   }
 

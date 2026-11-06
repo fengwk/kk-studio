@@ -1,5 +1,9 @@
 package fun.fengwk.kkstudio.platformtest.harness;
 
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
+
+import fun.fengwk.kkstudio.common.json.StrictJson;
 import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.api.StoppedThreadReceipt;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
@@ -75,6 +79,16 @@ public final class HarnessRuntimeTestFixtures {
   }
 
   private HarnessRuntimeTestFixtures() {}
+
+  /** 可继续增删键的执行设置 JSON object。 */
+  public static ObjectNode jsonObject() {
+    return JsonNodeFactory.instance.objectNode();
+  }
+
+  /** 由测试值构造执行设置 JSON object。 */
+  public static ObjectNode jsonObject(Map<String, ?> values) {
+    return (ObjectNode) StrictJson.standard().tree(values);
+  }
 
   public static BranchSettings settings() {
     return new BranchSettings(

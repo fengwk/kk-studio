@@ -1,10 +1,11 @@
 import type { CanvasNodeDraft } from '@/features/canvas/canvas-drafts'
+import { readJsonObject } from '@/features/canvas/domain'
 import type { CanvasResourceReference } from '@/features/canvas/types'
 import { isCanonicalUuid } from '@/shared/lib/uuid'
 
 /** 从函数参数中读取合法的 canonical 资源引用；非数组或形状不符的元素一律忽略。 */
-export function readResourceReferences(args: Record<string, unknown> | undefined): CanvasResourceReference[] {
-  const references = args?.references
+export function readResourceReferences(args: unknown): CanvasResourceReference[] {
+  const references = readJsonObject(args).references
   if (!Array.isArray(references)) {
     return []
   }
@@ -32,7 +33,7 @@ export function withDraftReferences(
     function: {
       ...draft.function!,
       args: {
-        ...draft.function!.args,
+        ...readJsonObject(draft.function!.args),
         references,
       },
     },

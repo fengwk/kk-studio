@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.platform.harness.http;
 
 import org.jspecify.annotations.Nullable;
+import tools.jackson.databind.JsonNode;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.id.Uuids;
@@ -54,7 +55,6 @@ import fun.fengwk.kkstudio.platform.orchestration.SessionOwner;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 import java.util.function.Supplier;
 
@@ -244,7 +244,10 @@ public final class HarnessRuntimeRequestMapper {
   private static ExecutionSelection toExecutionSelection(HarnessExecutionSelectionDTO dto) {
     requireNonNull(dto, "execution");
     String driver = requireText(dto.getDriver(), "execution.driver");
-    Map<String, Object> settings = requireNonNull(dto.getSettings(), "execution.settings");
+    JsonNode settings = requireNonNull(dto.getSettings(), "execution.settings");
+    if (!settings.isObject()) {
+      throw DomainException.validation("execution", "execution.settings must be a JSON object");
+    }
     String settingsJson = StrictJson.standard().write(settings, "execution.settings");
     return validation("execution", () -> new ExecutionSelection(driver, settingsJson));
   }

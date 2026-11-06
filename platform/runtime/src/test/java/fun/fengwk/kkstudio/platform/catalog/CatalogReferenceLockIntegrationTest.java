@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.platform.catalog;
 
 import static fun.fengwk.kkstudio.platform.catalog.model.ModelTestData.executable;
+import static fun.fengwk.kkstudio.platformtest.harness.HarnessRuntimeTestFixtures.jsonObject;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -622,7 +623,7 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
     create.setName(name);
     HarnessExecutionSelectionDTO execution = new HarnessExecutionSelectionDTO();
     execution.setDriver(BuiltinExecution.DRIVER);
-    execution.setSettings(Map.of("modelName", modelRef, "variant", "default"));
+    execution.setSettings(jsonObject(Map.of("modelName", modelRef, "variant", "default")));
     create.setExecution(execution);
     create.setConfig(config);
     return create;

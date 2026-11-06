@@ -277,14 +277,14 @@ export interface CanvasFunctionCancelRequestDTO {
 /** Java：fun.fengwk.kkstudio.canvas.dto.CanvasFunctionDTO */
 export interface CanvasFunctionDTO {
   name: string
-  args: Record<string, unknown>
+  args: unknown
 }
 
 /** Java：fun.fengwk.kkstudio.canvas.dto.CanvasFunctionDefinitionDTO */
 export interface CanvasFunctionDefinitionDTO {
   name: string
   description?: string | null
-  argsSchema: Record<string, unknown>
+  argsSchema: unknown
   outputs: CanvasFunctionOutputDTO[]
   referencePolicy?: CanvasFunctionReferencePolicyDTO | null
   available?: boolean | null
@@ -1192,7 +1192,7 @@ export interface HarnessExecutionExitDTO {
 /** Java：fun.fengwk.kkstudio.platform.catalog.dto.HarnessExecutionSelectionDTO */
 export interface HarnessExecutionSelectionDTO {
   driver: string
-  settings: Record<string, unknown>
+  settings: unknown
 }
 
 /** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessGenerationFailureDTO */

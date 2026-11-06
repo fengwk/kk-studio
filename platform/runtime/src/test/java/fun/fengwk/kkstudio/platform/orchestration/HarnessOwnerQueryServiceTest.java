@@ -208,8 +208,8 @@ class HarnessOwnerQueryServiceTest {
     assertEquals("thread", summary.getName());
     assertEquals(ThreadRuntimeStatus.IDLE, summary.getStatus());
     assertEquals("builtin", summary.getExecution().getDriver());
-    assertEquals("turn-model", summary.getExecution().getSettings().get("modelName"));
-    assertEquals("fast", summary.getExecution().getSettings().get("variant"));
+    assertEquals("turn-model", summary.getExecution().getSettings().get("modelName").stringValue());
+    assertEquals("fast", summary.getExecution().getSettings().get("variant").stringValue());
     assertEquals("after reminder", summary.getHeadMessagePreview());
 
     // head 恰为提醒本身时，预览回退到更早的真实用户发言，提醒文本绝不泄漏到用户可见摘要。

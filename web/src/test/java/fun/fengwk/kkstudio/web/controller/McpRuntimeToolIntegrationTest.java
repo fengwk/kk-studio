@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.web.controller;
 
+import static fun.fengwk.kkstudio.platformtest.harness.HarnessRuntimeTestFixtures.jsonObject;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -255,7 +256,8 @@ public class McpRuntimeToolIntegrationTest extends WebPostgresTestSupport {
     invalidAgent.setName(agentName + "-invalid");
     HarnessExecutionSelectionDTO agentExecution = new HarnessExecutionSelectionDTO();
     agentExecution.setDriver("builtin");
-    agentExecution.setSettings(Map.of("modelName", configuredModelName, "variant", "default"));
+    agentExecution.setSettings(
+        jsonObject(Map.of("modelName", configuredModelName, "variant", "default")));
     invalidAgent.setExecution(agentExecution);
     invalidAgent.setConfig(invalidConfig);
 
