@@ -52,8 +52,6 @@ type RecordedRequest = SnapshotRequest | PreviewRequest | DebugRequest
 
 function threadSnapshot(cursor: Cursor, entries: unknown[] = []) {
   return {
-    status: 200,
-    data: {
       version: cursor.nextCommandSequence,
       thread: {
         threadId: THREAD_ID,
@@ -85,14 +83,11 @@ function threadSnapshot(cursor: Cursor, entries: unknown[] = []) {
       generationFailures: [],
       stopReceipts: [],
       unconfirmedExecutions: [],
-    },
   }
 }
 
 function modelRequestDebug(draft?: DebugRequest['body']) {
   return {
-    status: 200,
-    data: {
       kind: 'NEXT_REQUEST_PREVIEW',
       generatedAt: '2026-10-02T00:00:00.000Z',
       model: draft?.model ?? { modelName: 'minimax-m2.7', variant: 'default' },
@@ -144,15 +139,12 @@ function modelRequestDebug(draft?: DebugRequest['body']) {
         attempt: 1,
         requestJson: JSON.stringify({ model: 'minimax-m2.7', messages: [] }, null, 2),
       },
-    },
   }
 }
 
 /** 预览响应回显 POST target 的游标，让 inspector 渲染值与请求游标严格同源。 */
 function draftRequestPreview(target: Cursor, modelName = 'minimax-m2.7') {
   return {
-    status: 200,
-    data: {
       kind: 'DRAFT_REQUEST_PREVIEW',
       providerType: 'openai-compatible',
       modelName,
@@ -170,7 +162,6 @@ function draftRequestPreview(target: Cursor, modelName = 'minimax-m2.7') {
       sourceHeadEntryId: target.headEntryId,
       generatedAt: '2026-10-02T00:01:00.000Z',
       notice: 'Preview is a click-time reconstruction. A later send may observe different facts.',
-    },
   }
 }
 
@@ -228,7 +219,8 @@ async function installPreviewApiMock(
         if (method !== 'POST') {
           await route.fulfill({
             status: 405,
-            json: { status: 405, message: 'Method Not Allowed' },
+            contentType: 'application/problem+json',
+            json: { type: 'about:blank', status: 405, code: 'validation', title: 'Method Not Allowed' },
           })
           return
         }
@@ -238,11 +230,9 @@ async function installPreviewApiMock(
         return
       }
       if (path === `/api/threads/${THREAD_ID}/tree`) {
-        const thread = threadSnapshot(INITIAL_CURSOR).data.thread
+        const thread = threadSnapshot(INITIAL_CURSOR).thread
         await route.fulfill({
-          json: {
-            status: 200,
-            data: [{
+          json: [{
               threadId: thread.threadId,
               parentThreadId: null,
               name: thread.name,
@@ -255,7 +245,6 @@ async function installPreviewApiMock(
               outcome: null,
               updateTime: 1774958400,
             }],
-          },
         })
         return
       }
@@ -274,7 +263,7 @@ async function installPreviewApiMock(
           version: '1',
         })) : []
         await route.fulfill({
-          json: { status: 200, data: { pageNumber: 1, pageSize: 50, totalCount: String(results.length), results } },
+          json: { pageNumber: 1, pageSize: 50, totalCount: String(results.length), results },
         })
         return
       }
@@ -301,17 +290,17 @@ async function installPreviewApiMock(
           updateTime: '2026-01-01T00:00:00Z',
         }] : []
         await route.fulfill({
-          json: { status: 200, data: { pageNumber: 1, pageSize: 50, totalCount: String(results.length), results } },
+          json: { pageNumber: 1, pageSize: 50, totalCount: String(results.length), results },
         })
         return
       }
       if (path === '/api/interactions' && method === 'GET') {
         await route.fulfill({
-          json: { status: 200, data: { items: [], nextCursor: null, total: 0, freshnessAt: null } },
+          json: { items: [], nextCursor: null, total: 0, freshnessAt: null },
         })
         return
       }
-      await route.fulfill({ json: { status: 200, data: {} } })
+      await route.fulfill({ json: {} })
     },
   )
 

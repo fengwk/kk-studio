@@ -37,7 +37,7 @@ import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
-import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
@@ -688,12 +688,11 @@ final class DispatcherTestSupport {
         ProviderType.OPENAI,
         new UUID(0L, 1L),
         modelDescriptor(),
-        new ModelVariant("v1"),
+        new ModelVariant("v1", null, PromptCacheRetention.NONE, null),
         1024,
         "Test system instruction.",
         List.of(),
-        List.of(),
-        ProviderCacheControl.none());
+        List.of());
   }
 
   /** 带 bash binding 的机械请求（与 {@link #toolRequest()} 的 binding renderer 全等）。 */
@@ -707,8 +706,7 @@ final class DispatcherTestSupport {
         1024,
         "Test system instruction.",
         List.of(toolRequest().binding()),
-        List.of(),
-        base.cacheControl());
+        List.of());
   }
 
   private static ProviderResponse toolResponse() {

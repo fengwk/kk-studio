@@ -20,8 +20,8 @@ import fun.fengwk.kkstudio.harness.codec.ToolBindingJsonCodec;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.model.ProviderProtocolOptions;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.codec.ModelDescriptorJsonCodec;
-import fun.fengwk.kkstudio.harness.model.provider.codec.ProviderRequestJsonCodec;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -33,14 +33,13 @@ class ModelRequestSpecJsonCodecTest {
 
   private final ModelRequestSpecJsonCodec codec = new ModelRequestSpecJsonCodec();
   private final ModelDescriptorJsonCodec modelCodec = new ModelDescriptorJsonCodec();
-  private final ProviderRequestJsonCodec providerCodec = new ProviderRequestJsonCodec();
   private final ToolBindingJsonCodec bindingCodec = new ToolBindingJsonCodec();
 
   /** variants 是不可变冻结列表，解码必须拒绝缺失、重复和与选择不一致的值。 */
   @Test
   void strictlyFreezesAndValidatesVariants() {
     ModelRequestSpec base = hostModelRequest();
-    ModelVariant extra = new ModelVariant("other", "max");
+    ModelVariant extra = new ModelVariant("other", "max", PromptCacheRetention.LONG, null);
     var variants = new ArrayList<>(List.of(base.variant(), extra));
     ModelRequestSpec spec =
         new ModelRequestSpec(
@@ -52,8 +51,7 @@ class ModelRequestSpecJsonCodecTest {
             base.outputTokens(),
             base.systemInstruction(),
             base.toolBindings(),
-            base.subagentBindings(),
-            base.cacheControl());
+            base.subagentBindings());
     variants.clear();
     assertEquals(List.of(base.variant(), extra), codec.decode(codec.encode(spec)).modelVariants());
     assertThrows(UnsupportedOperationException.class, () -> spec.modelVariants().clear());
@@ -78,11 +76,11 @@ class ModelRequestSpecJsonCodecTest {
         "{\"providerType\":\"OPENAI\",\"providerConnectionGenerationId\":\""
             + requestSpec.providerConnectionGenerationId()
             + "\",\"model\":"
-            + modelCodec.encodeDescriptor(requestSpec.model())
+            + modelCodec.encodeDescriptorNode(requestSpec.model())
             + ",\"variant\":"
-            + modelCodec.encodeVariant(requestSpec.variant())
+            + modelCodec.encodeVariantNode(requestSpec.variant())
             + ",\"modelVariants\":["
-            + modelCodec.encodeVariant(requestSpec.variant())
+            + modelCodec.encodeVariantNode(requestSpec.variant())
             + "]"
             + ",\"outputTokens\":"
             + requestSpec.outputTokens()
@@ -90,9 +88,7 @@ class ModelRequestSpecJsonCodecTest {
             + requestSpec.systemInstruction()
             + "\",\"toolBindings\":["
             + bindingCodec.encode(requestSpec.toolBindings().getFirst())
-            + "],\"subagentBindings\":[],\"cacheControl\":"
-            + providerCodec.encodeCacheControlNode(requestSpec.cacheControl())
-            + "}";
+            + "],\"subagentBindings\":[]}";
 
     assertEquals(expected, codec.encode(requestSpec));
     assertEquals(requestSpec, codec.decode(expected));
@@ -124,8 +120,10 @@ class ModelRequestSpecJsonCodecTest {
                 single.model().inputModalities(),
                 single.model().tools(),
                 single.model().reasoning()),
-            new ModelVariant("v2"),
-            List.of(new ModelVariant("v2"), new ModelVariant("v3", "max")));
+            new ModelVariant("v2", null, PromptCacheRetention.SHORT, null),
+            List.of(
+                new ModelVariant("v2", null, PromptCacheRetention.SHORT, null),
+                new ModelVariant("v3", "max", PromptCacheRetention.LONG, null)));
     ModelGroupExecution group =
         new ModelGroupExecution("fallback-group", 9L, List.of(first, second), Set.of(429, 503), 45);
     ModelRequestSpec spec =
@@ -138,7 +136,6 @@ class ModelRequestSpecJsonCodecTest {
             single.systemInstruction(),
             single.toolBindings(),
             single.subagentBindings(),
-            single.cacheControl(),
             group);
 
     String encoded = codec.encode(spec);
@@ -172,8 +169,7 @@ class ModelRequestSpecJsonCodecTest {
             base.outputTokens(),
             "Test system instruction.",
             base.toolBindings(),
-            List.of(new SubagentBinding("reviewer", "Review changes")),
-            base.cacheControl());
+            List.of(new SubagentBinding("reviewer", "Review changes")));
 
     String encoded = codec.encode(requestSpec);
     assertTrue(
@@ -198,8 +194,7 @@ class ModelRequestSpecJsonCodecTest {
             base.outputTokens(),
             "Test system instruction.",
             base.toolBindings(),
-            List.of(new SubagentBinding("reviewer", longDescription)),
-            base.cacheControl());
+            List.of(new SubagentBinding("reviewer", longDescription)));
 
     ModelRequestSpec decoded = codec.decode(codec.encode(requestSpec));
     assertEquals(longDescription, decoded.subagentBindings().getFirst().description());
@@ -220,8 +215,7 @@ class ModelRequestSpecJsonCodecTest {
             "outputTokens",
             "systemInstruction",
             "toolBindings",
-            "subagentBindings",
-            "cacheControl"),
+            "subagentBindings"),
         fieldNames);
   }
 
@@ -242,8 +236,7 @@ class ModelRequestSpecJsonCodecTest {
             base.outputTokens(),
             instruction,
             base.toolBindings(),
-            base.subagentBindings(),
-            base.cacheControl());
+            base.subagentBindings());
 
     String encoded = codec.encode(requestSpec);
     assertTrue(encoded.contains("\"systemInstruction\":\"You are a careful reviewer."), encoded);
@@ -317,8 +310,7 @@ class ModelRequestSpecJsonCodecTest {
             base.outputTokens(),
             base.systemInstruction(),
             base.toolBindings(),
-            List.of(new SubagentBinding("reviewer", "review")),
-            base.cacheControl());
+            List.of(new SubagentBinding("reviewer", "review")));
     for (String field : List.of("name", "description")) {
       ObjectNode missingSubagentField = codec.encodeNode(specWithSubagent);
       ObjectNode subagent = (ObjectNode) missingSubagentField.path("subagentBindings").get(0);
@@ -357,12 +349,12 @@ class ModelRequestSpecJsonCodecTest {
             base.providerType(),
             base.providerConnectionGenerationId(),
             base.model(),
-            new ModelVariant("v1", "high", new ProviderProtocolOptions(rawOptions)),
+            new ModelVariant(
+                "v1", "high", PromptCacheRetention.LONG, new ProviderProtocolOptions(rawOptions)),
             base.outputTokens(),
             base.systemInstruction(),
             base.toolBindings(),
-            base.subagentBindings(),
-            base.cacheControl());
+            base.subagentBindings());
 
     String encoded = codec.encode(requestSpec);
 

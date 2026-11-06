@@ -11,6 +11,7 @@ import tools.jackson.databind.node.ArrayNode;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
@@ -40,7 +41,8 @@ class GeminiRequestMapperTest {
 
   private static final ObjectMapper MAPPER = JsonMapper.builder().build();
   private final GeminiRequestEncoder encoder = new GeminiRequestEncoder();
-  private static final ModelVariant VARIANT = new ModelVariant("default");
+  private static final ModelVariant VARIANT =
+      new ModelVariant("default", null, PromptCacheRetention.NONE, null);
 
   private static ProviderDescriptor descriptor() {
     return new ProviderDescriptor(

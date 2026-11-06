@@ -54,12 +54,10 @@ function createBackend(initial: SystemSettingsDTO = makeSettingsDto()) {
   const update = vi.fn(async (update: SystemSettingsUpdateDTO) => {
     if (update.expectedVersion !== state.version) {
       throw new ApiError('conflict', 409, 'version_conflict', {
-        resource: 'system_settings',
-        reason: 'VERSION_CONFLICT',
         expectedVersion: update.expectedVersion,
         actualVersion: state.version,
-        detail: `system settings version conflict: expected=${update.expectedVersion} actual=${state.version}`,
-      })
+      }, 'VERSION_CONFLICT',
+      `system settings version conflict: expected=${update.expectedVersion} actual=${state.version}`)
     }
     state = {
       ...makeSettingsDto({ version: String(Number(state.version) + 1) }),

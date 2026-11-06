@@ -18,7 +18,7 @@ import fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
-import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
@@ -69,8 +69,7 @@ class ModelRequestSpecTest {
             1024,
             "Test system instruction.",
             tools,
-            subagents,
-            ProviderCacheControl.none());
+            subagents);
 
     tools.add(host("extra"));
     subagents.add(new SubagentBinding("extra", "Extra"));
@@ -94,8 +93,7 @@ class ModelRequestSpecTest {
                 1024,
                 "",
                 List.of(),
-                List.of(),
-                ProviderCacheControl.none()));
+                List.of()));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -107,8 +105,7 @@ class ModelRequestSpecTest {
                 1024,
                 "   ",
                 List.of(),
-                List.of(),
-                ProviderCacheControl.none()));
+                List.of()));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -120,8 +117,7 @@ class ModelRequestSpecTest {
                 1024,
                 null,
                 List.of(),
-                List.of(),
-                ProviderCacheControl.none()));
+                List.of()));
   }
 
   @Test
@@ -235,8 +231,7 @@ class ModelRequestSpecTest {
                 1024,
                 "Test system instruction.",
                 List.of(),
-                List.of(),
-                ProviderCacheControl.none()));
+                List.of()));
     assertThrows(
         NullPointerException.class,
         () ->
@@ -248,8 +243,7 @@ class ModelRequestSpecTest {
                 1024,
                 "Test system instruction.",
                 List.of(),
-                List.of(),
-                ProviderCacheControl.none()));
+                List.of()));
     assertThrows(
         NullPointerException.class,
         () ->
@@ -261,21 +255,7 @@ class ModelRequestSpecTest {
                 1024,
                 "Test system instruction.",
                 List.of(),
-                List.of(),
-                ProviderCacheControl.none()));
-    assertThrows(
-        NullPointerException.class,
-        () ->
-            new ModelRequestSpec(
-                ProviderType.OPENAI,
-                CONNECTION_GENERATION_ID,
-                modelDescriptor(),
-                variant(),
-                1024,
-                "Test system instruction.",
-                null,
-                List.of(),
-                ProviderCacheControl.none()));
+                List.of()));
     assertThrows(
         NullPointerException.class,
         () ->
@@ -286,9 +266,20 @@ class ModelRequestSpecTest {
                 variant(),
                 1024,
                 "Test system instruction.",
-                List.of(),
                 null,
-                ProviderCacheControl.none()));
+                List.of()));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new ModelRequestSpec(
+                ProviderType.OPENAI,
+                CONNECTION_GENERATION_ID,
+                modelDescriptor(),
+                variant(),
+                1024,
+                "Test system instruction.",
+                List.of(),
+                null));
   }
 
   private static ModelRequestSpec spec(List<ToolBinding> tools, List<SubagentBinding> subagents) {
@@ -300,8 +291,7 @@ class ModelRequestSpecTest {
         1024,
         "Test system instruction.",
         tools,
-        subagents,
-        ProviderCacheControl.none());
+        subagents);
   }
 
   private static ToolDescriptor toolDescriptor(String name) {
@@ -315,7 +305,7 @@ class ModelRequestSpecTest {
   }
 
   private static ModelVariant variant() {
-    return new ModelVariant("v1");
+    return new ModelVariant("v1", null, PromptCacheRetention.NONE, null);
   }
 
   private static List<String> names(List<ToolBinding> bindings) {

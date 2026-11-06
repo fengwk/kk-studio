@@ -1,6 +1,6 @@
 /** 可复用的合法请求体与配置矩阵行定义。 */
 
-import { assert, envelopeData, HttpError } from './http.mjs'
+import { assert, HttpError } from './http.mjs'
 
 /**
  * 把 Model 逻辑名编码为 catalog 路径 tail：按 `/` 分段编码，保留逻辑名中的路径层级。
@@ -44,13 +44,23 @@ export function baseModelConfig(overrides = {}) {
     },
     pricing: basePricing(),
     defaultVariant: 'default',
-    variants: [{ id: 'default' }],
+    variants: [{ id: 'default', promptCacheRetention: 'SHORT' }],
     ...overrides,
   }
 }
 
 export function clone(value) {
   return JSON.parse(JSON.stringify(value))
+}
+
+/** Pi 基础快照与 E2E 种子的 variant 预期均必须覆盖完整目录。 */
+export function seedCatalogWithVariants(models, variantsByName) {
+  assert(Object.keys(variantsByName).length === models.length, 'variant fixture size mismatch')
+  return models.map((model) => {
+    const variants = variantsByName[model.name]
+    assert(Array.isArray(variants), `missing variant fixture for ${model.name}`)
+    return { ...model, config: { ...model.config, variants } }
+  })
 }
 
 /**
@@ -93,7 +103,7 @@ export function modelConfigMatrix() {
       messageIncludes: /protocolOptionsJson|Failed to read request|Bad Request/i,
       title: `protocolOptionsJson 严格边界：${suffix}`,
       build: () => baseModelConfig({
-        variants: [{ id: 'default', protocolOptionsJson }],
+        variants: [{ id: 'default', promptCacheRetention: 'SHORT', protocolOptionsJson }],
       }),
     })),
     {
@@ -143,10 +153,10 @@ export function modelConfigMatrix() {
           abilities: { tools: true, reasoning: true, inputModalities: ['TEXT', 'IMAGE'] },
           defaultVariant: 'medium',
           variants: [
-            { id: 'off' },
-            { id: 'low', reasoningEffort: 'low' },
-            { id: 'medium', reasoningEffort: 'medium' },
-            { id: 'high', reasoningEffort: 'high' },
+            { id: 'off', promptCacheRetention: 'SHORT' },
+            { id: 'low', reasoningEffort: 'low', promptCacheRetention: 'SHORT' },
+            { id: 'medium', reasoningEffort: 'medium', promptCacheRetention: 'SHORT' },
+            { id: 'high', reasoningEffort: 'high', promptCacheRetention: 'SHORT' },
           ],
         }),
     },
@@ -159,8 +169,8 @@ export function modelConfigMatrix() {
           abilities: { tools: true, reasoning: true, inputModalities: ['TEXT'] },
           defaultVariant: 'off',
           variants: [
-            { id: 'off', reasoningEffort: 'off' },
-            { id: 'high', reasoningEffort: 'high' },
+            { id: 'off', reasoningEffort: 'off', promptCacheRetention: 'SHORT' },
+            { id: 'high', reasoningEffort: 'high', promptCacheRetention: 'SHORT' },
           ],
         }),
     },
@@ -172,7 +182,10 @@ export function modelConfigMatrix() {
         baseModelConfig({
           abilities: { tools: true, reasoning: true, inputModalities: ['TEXT'] },
           defaultVariant: 'default',
-          variants: [{ id: 'default' }, { id: 'high', reasoningEffort: 'high' }],
+          variants: [
+            { id: 'default', promptCacheRetention: 'SHORT' },
+            { id: 'high', reasoningEffort: 'high', promptCacheRetention: 'SHORT' },
+          ],
         }),
     },
     {
@@ -184,7 +197,7 @@ export function modelConfigMatrix() {
       build: () =>
         baseModelConfig({
           abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
-          variants: [{ id: 'default', reasoningEffort: 'high' }],
+          variants: [{ id: 'default', reasoningEffort: 'high', promptCacheRetention: 'SHORT' }],
         }),
     },
     {
@@ -255,8 +268,8 @@ export function modelConfigMatrix() {
       build: () =>
         baseModelConfig({
           variants: [
-            { id: 'default' },
-            { id: 'default', reasoningEffort: 'high' },
+            { id: 'default', promptCacheRetention: 'SHORT' },
+            { id: 'default', reasoningEffort: 'high', promptCacheRetention: 'SHORT' },
           ],
         }),
     },
@@ -277,7 +290,7 @@ export function modelConfigMatrix() {
       title: 'variant id 空白',
       build: () =>
         baseModelConfig({
-          variants: [{ id: ' ' }],
+          variants: [{ id: ' ', promptCacheRetention: 'SHORT' }],
         }),
     },
     {
@@ -288,7 +301,7 @@ export function modelConfigMatrix() {
       title: '未知 variant 字段被拒绝',
       build: () =>
         baseModelConfig({
-          variants: [{ id: 'default', temperature: 0.5 }],
+          variants: [{ id: 'default', promptCacheRetention: 'SHORT', temperature: 0.5 }],
         }),
     },
     {
@@ -299,7 +312,29 @@ export function modelConfigMatrix() {
       title: 'reasoningEffort 超过长度限制',
       build: () =>
         baseModelConfig({
-          variants: [{ id: 'default', reasoningEffort: 'x'.repeat(65) }],
+          variants: [{ id: 'default', promptCacheRetention: 'SHORT', reasoningEffort: 'x'.repeat(65) }],
+        }),
+    },
+    {
+      id: 'invalid.missing_prompt_cache_retention',
+      ok: false,
+      expectStatus: 400,
+      messageIncludes: /promptCacheRetention.*required/i,
+      title: '缺少 promptCacheRetention',
+      build: () =>
+        baseModelConfig({
+          variants: [{ id: 'default' }],
+        }),
+    },
+    {
+      id: 'invalid.unsupported_prompt_cache_retention',
+      ok: false,
+      expectStatus: 400,
+      messageIncludes: /promptCacheRetention.*invalid|Failed to read request|Bad Request/i,
+      title: '非法 promptCacheRetention 档位',
+      build: () =>
+        baseModelConfig({
+          variants: [{ id: 'default', promptCacheRetention: 'UNSUPPORTED' }],
         }),
     },
   ]
@@ -472,7 +507,7 @@ export function providerUpdateBody(overrides = {}) {
  */
 export async function createEnvironmentFixture(ctx, name) {
   const { json } = await ctx.call('POST', '/api/environments', { name })
-  const card = envelopeData(json)
+  const card = json
   assert(
     card && typeof card === 'object' && card.id && card.version != null,
     'created environment must expose id and version',
@@ -490,7 +525,7 @@ export async function deleteEnvironmentFixture(ctx, environmentId) {
   let card
   try {
     const { json } = await ctx.call('GET', path)
-    card = envelopeData(json)
+    card = json
   } catch (error) {
     if (error instanceof HttpError && error.status === 404) {
       return

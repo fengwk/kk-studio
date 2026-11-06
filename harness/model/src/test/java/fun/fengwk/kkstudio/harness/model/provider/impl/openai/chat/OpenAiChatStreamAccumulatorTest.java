@@ -73,7 +73,8 @@ class OpenAiChatStreamAccumulatorTest {
             "openai", "gpt-4o", "gpt-4o", Set.of(ModelInputModality.TEXT), true, false);
     ProviderMessage userMsg =
         new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hello")));
-    ModelVariant defaultVariant = new ModelVariant("default");
+    ModelVariant defaultVariant =
+        new ModelVariant("default", null, PromptCacheRetention.NONE, null);
     request =
         new ProviderRequest(
             modelDesc,
@@ -323,8 +324,7 @@ class OpenAiChatStreamAccumulatorTest {
   @DisplayName("文本 content delta 派发与尾部 usage 读取")
   void testContentDeltaAndTrailingUsage() {
     OpenAiChatStreamAccumulator accumulator =
-        new OpenAiChatStreamAccumulator(
-            request, descriptor, OpenAiChatConfiguration.defaults(), bridge);
+        new OpenAiChatStreamAccumulator(request, descriptor, bridge);
 
     accumulator.handleData(
         "{\"id\":\"c1\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Hello\"}}]}");
@@ -375,8 +375,7 @@ class OpenAiChatStreamAccumulatorTest {
   @DisplayName("refusal delta 进入可见文本通道并保留原生 replay")
   void testRefusalDeltaIsVisibleCompletedText() {
     OpenAiChatStreamAccumulator accumulator =
-        new OpenAiChatStreamAccumulator(
-            request, descriptor, OpenAiChatConfiguration.defaults(), bridge);
+        new OpenAiChatStreamAccumulator(request, descriptor, bridge);
 
     accumulator.handleData(
         "{\"id\":\"refusal-1\",\"choices\":[{\"index\":0,\"delta\":{\"refusal\":\"I cannot\"}}]}");
@@ -404,8 +403,7 @@ class OpenAiChatStreamAccumulatorTest {
   @DisplayName("reasoning_content 派发 ThinkingDelta，reasoning_details 仅存 native replay")
   void testReasoningContentAndDetails() {
     OpenAiChatStreamAccumulator accumulator =
-        new OpenAiChatStreamAccumulator(
-            request, descriptor, OpenAiChatConfiguration.defaults(), bridge);
+        new OpenAiChatStreamAccumulator(request, descriptor, bridge);
 
     accumulator.handleData(
         """
@@ -473,8 +471,7 @@ class OpenAiChatStreamAccumulatorTest {
   @DisplayName("单工具与并行工具片段聚合与完成")
   void testToolCallsAggregation() {
     OpenAiChatStreamAccumulator accumulator =
-        new OpenAiChatStreamAccumulator(
-            request, descriptor, OpenAiChatConfiguration.defaults(), bridge);
+        new OpenAiChatStreamAccumulator(request, descriptor, bridge);
 
     accumulator.handleData(
         """
@@ -531,8 +528,7 @@ class OpenAiChatStreamAccumulatorTest {
   @Test
   void seedsFunctionAfterUntypedIdentityOnlyFrameFollowingCustomCall() {
     OpenAiChatStreamAccumulator accumulator =
-        new OpenAiChatStreamAccumulator(
-            request, descriptor, OpenAiChatConfiguration.defaults(), bridge);
+        new OpenAiChatStreamAccumulator(request, descriptor, bridge);
     accumulator.handleData(
         """
         {"choices":[{"delta":{"tool_calls":[
@@ -580,8 +576,7 @@ class OpenAiChatStreamAccumulatorTest {
   @Test
   void retainsTypedFunctionIdentityBeforeFunctionFragments() {
     OpenAiChatStreamAccumulator accumulator =
-        new OpenAiChatStreamAccumulator(
-            request, descriptor, OpenAiChatConfiguration.defaults(), bridge);
+        new OpenAiChatStreamAccumulator(request, descriptor, bridge);
     accumulator.handleData(
         """
         {"choices":[{"delta":{"tool_calls":[
@@ -613,8 +608,7 @@ class OpenAiChatStreamAccumulatorTest {
   @Test
   void identityOnlyFragmentAfterFunctionBuilderDoesNotFail() {
     OpenAiChatStreamAccumulator accumulator =
-        new OpenAiChatStreamAccumulator(
-            request, descriptor, OpenAiChatConfiguration.defaults(), bridge);
+        new OpenAiChatStreamAccumulator(request, descriptor, bridge);
     accumulator.handleData(
         """
         {"choices":[{"delta":{"tool_calls":[
@@ -644,8 +638,7 @@ class OpenAiChatStreamAccumulatorTest {
   @Test
   void nullOrScalarFunctionFragmentIsInvalidResponse() {
     OpenAiChatStreamAccumulator nullFunction =
-        new OpenAiChatStreamAccumulator(
-            request, descriptor, OpenAiChatConfiguration.defaults(), bridge);
+        new OpenAiChatStreamAccumulator(request, descriptor, bridge);
     nullFunction.handleData(
         """
         {"choices":[{"delta":{"tool_calls":[
@@ -665,8 +658,7 @@ class OpenAiChatStreamAccumulatorTest {
     assertEquals(ProviderErrorKind.INVALID_RESPONSE, nullError.kind());
 
     OpenAiChatStreamAccumulator scalarFunction =
-        new OpenAiChatStreamAccumulator(
-            request, descriptor, OpenAiChatConfiguration.defaults(), bridge);
+        new OpenAiChatStreamAccumulator(request, descriptor, bridge);
     scalarFunction.handleData(
         """
         {"choices":[{"delta":{"tool_calls":[
@@ -690,8 +682,7 @@ class OpenAiChatStreamAccumulatorTest {
   @Test
   void usesNormalizedOrdinalForLengthDiagnosticAfterCustomCall() {
     OpenAiChatStreamAccumulator accumulator =
-        new OpenAiChatStreamAccumulator(
-            request, descriptor, OpenAiChatConfiguration.defaults(), bridge);
+        new OpenAiChatStreamAccumulator(request, descriptor, bridge);
     accumulator.handleData(
         """
         {"choices":[{"delta":{"tool_calls":[
@@ -723,8 +714,7 @@ class OpenAiChatStreamAccumulatorTest {
   @Test
   void keepsContiguousOrdinalsForInterleavedFunctionCalls() {
     OpenAiChatStreamAccumulator accumulator =
-        new OpenAiChatStreamAccumulator(
-            request, descriptor, OpenAiChatConfiguration.defaults(), bridge);
+        new OpenAiChatStreamAccumulator(request, descriptor, bridge);
     accumulator.handleData(
         """
         {"choices":[{"delta":{"tool_calls":[
@@ -775,8 +765,7 @@ class OpenAiChatStreamAccumulatorTest {
   @DisplayName("LENGTH 截断：未闭合工具调用转诊断，不补 JSON，不执行，不存 replay")
   void testLengthTruncationDiagnostics() {
     OpenAiChatStreamAccumulator accumulator =
-        new OpenAiChatStreamAccumulator(
-            request, descriptor, OpenAiChatConfiguration.defaults(), bridge);
+        new OpenAiChatStreamAccumulator(request, descriptor, bridge);
 
     accumulator.handleData(
         """
@@ -811,8 +800,7 @@ class OpenAiChatStreamAccumulatorTest {
   @DisplayName("FILTERED 终态：清空 toolCalls，不存 replay")
   void testContentFilterFinalState() {
     OpenAiChatStreamAccumulator accumulator =
-        new OpenAiChatStreamAccumulator(
-            request, descriptor, OpenAiChatConfiguration.defaults(), bridge);
+        new OpenAiChatStreamAccumulator(request, descriptor, bridge);
 
     accumulator.handleData(
         "{\"id\":\"c5\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"censored\"},\"finish_reason\":\"content_filter\"}]}");
@@ -830,8 +818,7 @@ class OpenAiChatStreamAccumulatorTest {
   @DisplayName("未知 finish_reason 明确报错")
   void testUnsupportedFinishReason() {
     OpenAiChatStreamAccumulator accumulator =
-        new OpenAiChatStreamAccumulator(
-            request, descriptor, OpenAiChatConfiguration.defaults(), bridge);
+        new OpenAiChatStreamAccumulator(request, descriptor, bridge);
 
     assertThrows(
         ProviderException.class,
@@ -839,11 +826,10 @@ class OpenAiChatStreamAccumulatorTest {
   }
 
   @Test
-  @DisplayName("openAiChatRequireDone 缺省为 true 时缺少 [DONE] 报错")
+  @DisplayName("缺少 [DONE] 报错")
   void testMissingDoneWhenRequired() {
     OpenAiChatStreamAccumulator accumulator =
-        new OpenAiChatStreamAccumulator(
-            request, descriptor, OpenAiChatConfiguration.defaults(), bridge);
+        new OpenAiChatStreamAccumulator(request, descriptor, bridge);
 
     accumulator.handleData(
         "{\"choices\":[{\"delta\":{\"content\":\"hi\"},\"finish_reason\":\"stop\"}],"
@@ -851,38 +837,6 @@ class OpenAiChatStreamAccumulatorTest {
     ProviderException ex = assertThrows(ProviderException.class, accumulator::finish);
     assertEquals(ProviderErrorKind.INVALID_RESPONSE, ex.kind());
     assertEquals("stream completed without [DONE]", ex.getMessage());
-  }
-
-  @Test
-  @DisplayName("openAiChatRequireDone 为 false 时已看到有效 finish_reason 且 EOF 可完成")
-  void testOptionalDoneWithValidFinishReason() {
-    OpenAiChatConfiguration config = new OpenAiChatConfiguration(false, PromptCacheRetention.NONE);
-    OpenAiChatStreamAccumulator accumulator =
-        new OpenAiChatStreamAccumulator(request, descriptor, config, bridge);
-
-    accumulator.handleData(
-        "{\"choices\":[{\"delta\":{\"content\":\"hi\"},\"finish_reason\":\"stop\"}]}");
-    accumulator.handleData(
-        "{\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5,\"total_tokens\":15}}");
-    // 没有 [DONE]，直接 EOF finish
-    ProviderCompletion completion = accumulator.finish();
-    assertEquals("hi", completion.response().text());
-    assertEquals(GenerationStopReason.COMPLETE, completion.response().stopReason());
-  }
-
-  @Test
-  @DisplayName("openAiChatRequireDone 为 false 时未见有效 finish_reason 单纯 EOF 报错")
-  void testOptionalDoneWithoutFinishReasonFailsOnEof() {
-    OpenAiChatConfiguration config = new OpenAiChatConfiguration(false, PromptCacheRetention.NONE);
-    OpenAiChatStreamAccumulator accumulator =
-        new OpenAiChatStreamAccumulator(request, descriptor, config, bridge);
-
-    accumulator.handleData(
-        "{\"choices\":[{\"delta\":{\"content\":\"incomplete\"}}],"
-            + "\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5,\"total_tokens\":15}}");
-    ProviderException ex = assertThrows(ProviderException.class, accumulator::finish);
-    assertEquals(ProviderErrorKind.INVALID_RESPONSE, ex.kind());
-    assertEquals("stream ended with EOF before valid finish_reason", ex.getMessage());
   }
 
   @Test
@@ -1360,8 +1314,7 @@ class OpenAiChatStreamAccumulatorTest {
   }
 
   private OpenAiChatStreamAccumulator createAccumulator() {
-    return new OpenAiChatStreamAccumulator(
-        request, descriptor, OpenAiChatConfiguration.defaults(), bridge);
+    return new OpenAiChatStreamAccumulator(request, descriptor, bridge);
   }
 
   private void assertInvalidUsage(String usageJson, String field) {

@@ -457,6 +457,38 @@ test('module boundary guard rejects platform depending on an app in isolation', 
   }
 })
 
+test('module boundary guard rejects an app depending on another app in test scope in isolation', () => {
+  // Test intent: products never depend on other products even in test scope; app -> app test dependency must fail closed while keeping foundation test dependencies.
+  const mirrorRoot = createRepositoryMirror()
+  try {
+    const mirrorApps = path.join(mirrorRoot, 'apps')
+    rmSync(mirrorApps, { recursive: true, force: true })
+    cpSync(path.join(REPOSITORY_ROOT, 'apps'), mirrorApps, {
+      recursive: true,
+      filter: (source) => path.basename(source) !== 'target',
+    })
+    const pom = path.join(mirrorApps, 'project/pom.xml')
+    writeFileSync(
+      pom,
+      readFileSync(pom, 'utf8').replace(
+        '</dependencies>',
+        '    <dependency><groupId>fun.fengwk.kk-studio</groupId><artifactId>kk-studio-chat</artifactId><scope>test</scope></dependency>\n    </dependencies>',
+      ),
+    )
+    assert.throws(
+      () =>
+        execFileSync('node', [CHECK_SCRIPT, '--root', mirrorRoot], {
+          cwd: mirrorRoot,
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'pipe'],
+        }),
+      (error) => (error.stderr || '').includes('apps/project must not depend on kk-studio-chat'),
+    )
+  } finally {
+    rmSync(mirrorRoot, { recursive: true, force: true })
+  }
+})
+
 test('module boundary guard rejects plugin imports outside the plugin SPI in isolation', () => {
   // Test intent: plugin sources may import only the platform plugin SPI and shared value types.
   const mirrorRoot = createRepositoryMirror()

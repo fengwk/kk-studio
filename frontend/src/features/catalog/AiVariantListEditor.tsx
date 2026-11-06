@@ -3,9 +3,11 @@ import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
 import { Button } from '@/shared/ui/controls/Button'
 import { TextInput } from '@/shared/ui/controls/TextInput'
 import { TextArea } from '@/shared/ui/controls/TextArea'
+import { Select } from '@/shared/ui/controls/Select'
 import { Plus, Trash2 } from 'lucide-react'
 import type { VariantDraft } from '@/features/catalog/ai-console-types'
 import { newVariantDraft } from '@/features/catalog/ai-resource-draft-primitives'
+import type { PromptCacheRetention } from '@/shared/api/generated/contracts'
 import { useI18n } from '@/shared/i18n'
 import './catalog-form-layout.css'
 
@@ -14,16 +16,28 @@ export function VariantListEditor({
   variants,
   defaultVariant,
   reasoning,
+  promptCacheRetentions,
   onChange,
 }: {
   label: string
   variants: VariantDraft[]
   defaultVariant: string
   reasoning: boolean
+  promptCacheRetentions?: readonly PromptCacheRetention[]
   onChange: (variants: VariantDraft[], preferredDefaultVariant?: string) => void
 }) {
   const { t } = useI18n()
   const reasoningHintId = useId()
+
+  const supportedRetentions = promptCacheRetentions ?? []
+
+  const retentionOptions = supportedRetentions.map((retention) => ({
+    value: retention,
+    label:
+      retention === 'NONE'
+        ? t('ai.catalog.form.promptCacheRetentionNone')
+        : retention,
+  }))
 
   function updateVariant(index: number, patch: Partial<VariantDraft>) {
     const currentVariant = variants[index]
@@ -45,7 +59,10 @@ export function VariantListEditor({
       suffix += 1
       id = `variant-${suffix}`
     }
-    onChange([...variants, newVariantDraft({ id })])
+    const defaultRetention: PromptCacheRetention = supportedRetentions.includes('SHORT')
+      ? 'SHORT'
+      : 'NONE'
+    onChange([...variants, newVariantDraft({ id, promptCacheRetention: defaultRetention })])
   }
 
   function removeVariant(index: number) {
@@ -70,64 +87,90 @@ export function VariantListEditor({
           : t('ai.catalog.form.reasoningDisabledHint')}
       </p>
       <div className="variant-stack">
-        {variants.map((variant, index) => (
-          <div className="variant-editor" key={variant.draftId}>
-            <div className="editor-grid editor-grid-2">
+        {variants.map((variant, index) => {
+          const currentRetention = variant.promptCacheRetention
+          const options = supportedRetentions.includes(currentRetention)
+            ? retentionOptions
+            : [
+                {
+                  value: currentRetention,
+                  label: `${currentRetention} · ${t('ai.catalog.form.unavailable')}`,
+                  disabled: true,
+                },
+                ...retentionOptions,
+              ]
+
+          return (
+            <div className="variant-editor" key={variant.draftId}>
+              <div className="editor-grid">
+                <label className="form-group">
+                  <FieldLabel required>{t('ai.catalog.form.variantId')}</FieldLabel>
+                  <TextInput
+                    aria-label={`${t('ai.catalog.form.variantId')} ${index + 1}`}
+                    value={variant.id}
+                    onChange={(event) => updateVariant(index, { id: event.target.value })}
+                    placeholder="medium"
+                    required
+                  />
+                </label>
+                <label className="form-group">
+                  <FieldLabel required>{t('ai.catalog.form.promptCacheRetention')}</FieldLabel>
+                  <Select
+                    aria-label={`${t('ai.catalog.form.promptCacheRetentionAria')} ${index + 1}`}
+                    value={currentRetention}
+                    options={options}
+                    disabled={supportedRetentions.length === 0}
+                    onChange={(value) =>
+                      updateVariant(index, { promptCacheRetention: value as PromptCacheRetention })
+                    }
+                  />
+                </label>
+                <label className="form-group">
+                  <FieldLabel>{t('ai.catalog.form.reasoningEffort')}</FieldLabel>
+                  <TextInput
+                    aria-label={`${t('ai.catalog.form.reasoningEffortAria')} ${index + 1}`}
+                    aria-describedby={!reasoning ? reasoningHintId : undefined}
+                    disabled={!reasoning}
+                    value={variant.reasoningEffort}
+                    maxLength={64}
+                    onChange={(event) =>
+                      updateVariant(index, { reasoningEffort: event.target.value })
+                    }
+                    placeholder={t('ai.catalog.form.reasoningEffortPlaceholder')}
+                  />
+                </label>
+              </div>
+
               <label className="form-group">
-                <FieldLabel required>{t('ai.catalog.form.variantId')}</FieldLabel>
-                <TextInput
-                  aria-label={`${t('ai.catalog.form.variantId')} ${index + 1}`}
-                  value={variant.id}
-                  onChange={(event) => updateVariant(index, { id: event.target.value })}
-                  placeholder="medium"
-                  required
-                />
-              </label>
-              <label className="form-group">
-                <FieldLabel>{t('ai.catalog.form.reasoningEffort')}</FieldLabel>
-                <TextInput
-                  aria-label={`${t('ai.catalog.form.reasoningEffortAria')} ${index + 1}`}
-                  aria-describedby={!reasoning ? reasoningHintId : undefined}
-                  disabled={!reasoning}
-                  value={variant.reasoningEffort}
-                  maxLength={64}
+                <FieldLabel>{t('ai.catalog.form.protocolOptions')}</FieldLabel>
+                <TextArea
+                  className="code-textarea"
+                  aria-label={`${t('ai.catalog.form.protocolOptionsAria')} ${index + 1}`}
+                  value={variant.protocolOptionsJson}
                   onChange={(event) =>
-                    updateVariant(index, { reasoningEffort: event.target.value })
+                    updateVariant(index, { protocolOptionsJson: event.target.value })
                   }
-                  placeholder={t('ai.catalog.form.reasoningEffortPlaceholder')}
+                  placeholder={t('ai.catalog.form.protocolOptionsPlaceholder')}
+                  rows={3}
+                  spellCheck={false}
                 />
+                <span className="inline-hint">{t('ai.catalog.form.protocolOptionsHint')}</span>
               </label>
-            </div>
 
-            <label className="form-group">
-              <FieldLabel>{t('ai.catalog.form.protocolOptions')}</FieldLabel>
-              <TextArea
-                className="code-textarea"
-                aria-label={`${t('ai.catalog.form.protocolOptionsAria')} ${index + 1}`}
-                value={variant.protocolOptionsJson}
-                onChange={(event) =>
-                  updateVariant(index, { protocolOptionsJson: event.target.value })
-                }
-                placeholder={t('ai.catalog.form.protocolOptionsPlaceholder')}
-                rows={3}
-                spellCheck={false}
-              />
-              <span className="inline-hint">{t('ai.catalog.form.protocolOptionsHint')}</span>
-            </label>
-
-            <div className="variant-editor-actions">
-              <Button
-                variant="inline"
-                danger
-                onClick={() => removeVariant(index)}
-                disabled={variants.length <= 1}
-              >
-                <Trash2 aria-hidden="true" />
-                {t('ai.catalog.form.deleteVariant')}
-              </Button>
+              <div className="variant-editor-actions">
+                <Button
+                  variant="inline"
+                  danger
+                  onClick={() => removeVariant(index)}
+                  disabled={variants.length <= 1}
+                >
+                  <Trash2 aria-hidden="true" />
+                  {t('ai.catalog.form.deleteVariant')}
+                </Button>
+              </div>
             </div>
-          </div>
-        ))}
+          )
+        })}
       </div>
     </section>
   )

@@ -150,6 +150,7 @@ export function ModelFormDemo() {
             name: 'openai',
             description: null,
             providerType: 'openai',
+            promptCacheRetentions: ['NONE', 'SHORT', 'LONG'],
             baseUrl: null,
             configured: true,
             modelCallTimeoutMillis: '1800000',

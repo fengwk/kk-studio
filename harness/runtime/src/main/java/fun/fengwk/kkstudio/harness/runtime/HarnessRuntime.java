@@ -17,7 +17,6 @@ import fun.fengwk.kkstudio.harness.api.ThreadTreeNode;
 import fun.fengwk.kkstudio.harness.api.ToolApprovalCommand;
 import fun.fengwk.kkstudio.harness.api.ToolInputAcceptance;
 import fun.fengwk.kkstudio.harness.api.ToolInputSubmissionCommand;
-import fun.fengwk.kkstudio.harness.api.ToolOutcomeView;
 import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionConfig;
@@ -108,7 +107,6 @@ public final class HarnessRuntime {
   private final AcceptCommandsControl acceptCommandsControl;
   private final StopControl stopControl;
   private final ToolInputControl toolInputControl;
-  private final ToolOutcomeQuery toolOutcomeQuery;
   private final ManualCompactionControl manualCompactionControl;
   private final Consumer<UUID> driverExecutionCanceller;
   private final Consumer<UUID> toolExecutionCanceller;
@@ -133,7 +131,6 @@ public final class HarnessRuntime {
     this.acceptCommandsControl = new AcceptCommandsControl(store, driverRegistry);
     this.stopControl = new StopControl(store, driverRegistry);
     this.toolInputControl = new ToolInputControl(this.store);
-    this.toolOutcomeQuery = new ToolOutcomeQuery(this.store);
     this.manualCompactionControl =
         new ManualCompactionControl(
             this.store,
@@ -197,20 +194,6 @@ public final class HarnessRuntime {
   public Optional<ThreadJoin> findJoin(UUID invocationId) {
     Objects.requireNonNull(invocationId, "invocationId");
     return store.transaction(tx -> tx.joins().find(invocationId));
-  }
-
-  /**
-   * 统一读取一次工具调用的 terminal outcome：优先读取本 Thread 尚存的 terminal Invocation，行已删除时按 Session 反查已物化的
-   * ToolResult Entry。
-   *
-   * <p>严格归属校验：Invocation 经公共 threadId 与 turnStartEntryId 归属该 Thread；历史 Entry 必须位于该 Thread 当前 head
-   * 路径上且最近 TurnStart 由该 Thread 发起。不属于该 Thread、尚未 terminal 或不存在时返回 empty；Thread 本身不存在抛 not-found
-   * 领域异常。非成功结果同时返回 durable error kind/message，人工输入返回 durable receipt。
-   */
-  public Optional<ToolOutcomeView> findToolOutcome(UUID threadId, UUID invocationId) {
-    Objects.requireNonNull(threadId, "threadId");
-    Objects.requireNonNull(invocationId, "invocationId");
-    return toolOutcomeQuery.find(threadId, invocationId);
   }
 
   /** 从已匹配的固定结果 head 和原始源 command 投影回执，不读取子线程当前 head。 */

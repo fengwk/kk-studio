@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.harness.model.provider.impl.openai.chat;
 
-import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.provider.ModelProvider;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderAdapter;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
@@ -17,30 +16,13 @@ public final class OpenAiChatProviderAdapter implements ProviderAdapter {
 
   private final JdkHttpSseTransport transport;
   private final String apiKey;
-  private final OpenAiChatConfiguration configuration;
 
   /** 与 {@link #create(ProviderDescriptor)} 的 Provider 使用同一 encoder 的请求编码器，供无网络预览复用。 */
   private final OpenAiChatRequestEncoder encoder = new OpenAiChatRequestEncoder();
 
   public OpenAiChatProviderAdapter(JdkHttpSseTransport transport, String apiKey) {
-    this(transport, apiKey, OpenAiChatConfiguration.defaults());
-  }
-
-  public OpenAiChatProviderAdapter(
-      JdkHttpSseTransport transport, String apiKey, String configJson) {
-    this(transport, apiKey, OpenAiChatConfiguration.parse(configJson));
-  }
-
-  public OpenAiChatProviderAdapter(
-      JdkHttpSseTransport transport, String apiKey, OpenAiChatConfiguration configuration) {
     this.transport = Objects.requireNonNull(transport, "transport");
     this.apiKey = apiKey;
-    this.configuration = Objects.requireNonNull(configuration, "configuration");
-  }
-
-  /** 解析配置 JSON 得到该 Provider 的提示缓存留存档位，供平台 ProviderFactory 动态解析。 */
-  public static PromptCacheRetention promptCacheRetention(String configJson) {
-    return OpenAiChatConfiguration.parse(configJson).promptCacheRetention();
   }
 
   @Override
@@ -64,12 +46,12 @@ public final class OpenAiChatProviderAdapter implements ProviderAdapter {
           "descriptor type mismatch: expected OPENAI but was " + descriptor.type());
     }
     URI chatUri = OpenAiChatEndpoints.resolveChatCompletionsUri(descriptor.endpoint());
-    return new OpenAiChatModelProvider(transport, descriptor, apiKey, chatUri, configuration);
+    return new OpenAiChatModelProvider(transport, descriptor, apiKey, chatUri);
   }
 
   @Override
   public byte[] encodeRequestBody(ProviderRequest request, ProviderDescriptor descriptor) {
-    return encoder.encode(request, descriptor, configuration).bodyUtf8Bytes();
+    return encoder.encode(request, descriptor).bodyUtf8Bytes();
   }
 
   @Override

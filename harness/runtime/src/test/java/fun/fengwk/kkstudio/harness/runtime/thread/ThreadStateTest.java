@@ -1055,7 +1055,7 @@ class ThreadStateTest {
                     id(100),
                     false,
                     SpawnTrigger.MODEL_TOOL,
-                    new ThreadConstraints(128, true, false),
+                    new ThreadConstraints(128, false),
                     ThreadExecutionControl.RUNNABLE,
                     0L,
                     3L,

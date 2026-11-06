@@ -13,6 +13,7 @@ export function newVariantDraft(input?: Partial<Omit<VariantDraft, 'draftId'>>):
     id: input?.id ?? 'medium',
     reasoningEffort: input?.reasoningEffort ?? '',
     protocolOptionsJson: input?.protocolOptionsJson ?? '',
+    promptCacheRetention: input?.promptCacheRetention ?? 'NONE',
   }
 }
 

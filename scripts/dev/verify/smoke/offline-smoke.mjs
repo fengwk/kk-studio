@@ -29,7 +29,7 @@ const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f
 
 const sleep = (millis) => new Promise((resolve) => setTimeout(resolve, millis))
 
-/** HTTP client for the application API: resolves to the `data` member of a 2xx JSON body. */
+/** HTTP client for the application API: resolves to the 2xx resource body, or null for 204. */
 export function createClient(baseUrl) {
   return {
     newId: () => randomUUID(),
@@ -42,7 +42,7 @@ export function createClient(baseUrl) {
         signal: AbortSignal.timeout(30_000),
       })
       assert.ok(response.ok, `${method} ${requestPath} -> HTTP ${response.status}`)
-      return (await response.json()).data
+      return response.status === 204 ? null : response.json()
     },
   }
 }
@@ -208,7 +208,7 @@ async function createStubCatalog({ jsonCall }) {
       limit: { context: 128000, output: 4096 },
       abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
       defaultVariant: 'default',
-      variants: [{ id: 'default' }],
+      variants: [{ id: 'default', promptCacheRetention: 'SHORT' }],
     },
   })
   await jsonCall('POST', '/api/agents', {

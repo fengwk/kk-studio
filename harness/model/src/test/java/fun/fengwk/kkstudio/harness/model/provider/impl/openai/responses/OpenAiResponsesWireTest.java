@@ -45,7 +45,8 @@ class OpenAiResponsesWireTest {
   private static final ObjectMapper MAPPER = JsonMapper.builder().build();
   private static final String VALID_PREFIX_HASH =
       "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-  private static final ModelVariant DEFAULT_VARIANT = new ModelVariant("default");
+  private static final ModelVariant DEFAULT_VARIANT =
+      new ModelVariant("default", null, PromptCacheRetention.NONE, null);
 
   private ProviderDescriptor createDescriptor() {
     return new ProviderDescriptor(
@@ -164,7 +165,7 @@ class OpenAiResponsesWireTest {
     ProviderRequest req =
         new ProviderRequest(
             createModel(),
-            new ModelVariant("v1", "medium"),
+            new ModelVariant("v1", "medium", PromptCacheRetention.NONE, null),
             100,
             "You are helpful.",
             List.of(
@@ -272,7 +273,7 @@ class OpenAiResponsesWireTest {
   void test_offReasoningWirePayload() throws Exception {
     ProviderRequest req =
         request(
-            new ModelVariant("v1", "off"),
+            new ModelVariant("v1", "off", PromptCacheRetention.NONE, null),
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Count to three.")))),
@@ -295,7 +296,7 @@ class OpenAiResponsesWireTest {
         new ProviderToolDefinition("get_time", "get current time", "{\"type\":\"object\"}");
     ProviderRequest req =
         request(
-            new ModelVariant("v1", "high"),
+            new ModelVariant("v1", "high", PromptCacheRetention.NONE, null),
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("What time is it?")))),
@@ -334,7 +335,10 @@ class OpenAiResponsesWireTest {
                 ProviderMessageRole.USER, List.of(new ProviderTextBlock("Weather in Paris?"))));
     ProviderRequest base =
         request(
-            new ModelVariant("v1", "medium"), messages, List.of(tool), ProviderCacheControl.none());
+            new ModelVariant("v1", "medium", PromptCacheRetention.NONE, null),
+            messages,
+            List.of(tool),
+            ProviderCacheControl.none());
     ProviderCacheControl cacheControl =
         ProviderCacheControl.session(
             PromptCacheRetention.SHORT, "55555555-5555-5555-5555-555555555555");

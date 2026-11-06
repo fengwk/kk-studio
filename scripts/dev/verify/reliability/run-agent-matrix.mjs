@@ -34,7 +34,7 @@ import {
   writeCaseResult,
   writeSummaryAndReport,
 } from './report.mjs'
-import { assert, envelopeData, httpJson, pageResults, cid } from '../e2e/lib/http.mjs'
+import { assert, httpJson, pageResults, cid } from '../e2e/lib/http.mjs'
 import {
   assertRootYoloEnabled,
   branchSettingsOf,
@@ -177,7 +177,7 @@ async function validatePreflight(ctx, daemonEnv) {
   ])
   const providers = pageResults(providersResponse.json)
   const models = pageResults(modelsResponse.json)
-  const toolCatalog = envelopeData(toolsResponse.json)
+  const toolCatalog = toolsResponse.json
   assert(
     Array.isArray(toolCatalog),
     `expected tool catalog array: ${JSON.stringify(toolsResponse.json)}`,
@@ -247,7 +247,7 @@ async function createTemporaryAgent(ctx, model, systemPrompt, runId) {
   }
   const { status, json } = await ctx.call('POST', '/api/agents', body)
   assert(status === 201, `create Agent status ${status}`)
-  const agent = envelopeData(json)
+  const agent = json
   assert(agent?.name === name, `created Agent identity mismatch: ${JSON.stringify(agent)}`)
   assert(agent.systemPrompt === systemPrompt, 'created Agent systemPrompt mismatch')
   assert(

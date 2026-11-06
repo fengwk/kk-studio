@@ -2,7 +2,7 @@ import {
   HttpError,
   assert,
   assertDecimalVersion,
-  envelopeData,
+  assertExactFields,
   expectHttpError,
 } from '../lib/http.mjs'
 import { createCaseAdder } from '../lib/registry.mjs'
@@ -63,7 +63,7 @@ registerCase({
   async run(ctx) {
     const readSettings = async () => {
       const { json } = await ctx.call('GET', '/api/settings')
-      return envelopeData(json)
+      return json
     }
 
     const before = await readSettings()
@@ -75,14 +75,12 @@ registerCase({
       before.aiRuntime.retryBaseDelayMillis,
       'aiRuntime.retryBaseDelayMillis',
     )
-    assert(
-      !Object.hasOwn(before, 'integrations'),
-      'the retired integrations section must not remain on the wire',
-    )
-    assert(
-      !Object.hasOwn(before.storageMedia, 'canvasUploadExpiryMillis'),
-      'dead storageMedia.canvasUploadExpiryMillis must not remain on the wire',
-    )
+    assertExactFields(before, [...SECTION_NAMES, 'version', 'createTime', 'updateTime'], 'SystemSettings')
+    assertExactFields(before.storageMedia, [
+      'uploadExpiresSeconds', 's3PresignDefaultExpiresSeconds', 's3PresignMaxExpiresSeconds',
+      'canvasMediaProcessTimeoutMillis', 'thumbnailMaxDimension', 'thumbnailQuality',
+      'temporaryResourceTtlSeconds', 'temporaryResourceCleanupIntervalSeconds',
+    ], 'SystemSettings.storageMedia')
     // 系统默认值必须存在且形状合法：HTTP 重试白名单是 400–599 整数数组，tmp TTL/扫描间隔是正整数字符串。
     assertRetryStatusCodes(
       before.aiRuntime.modelHttpRetryStatusCodes,
@@ -112,7 +110,7 @@ registerCase({
       // 仅保存重启生效配置，不连接代理、不更改运行期客户端。
       update.network = { proxyUrl: 'http://proxy.example.test:3128', noProxyHosts: '' }
       const { json } = await ctx.call('PUT', '/api/settings', update)
-      const saved = envelopeData(json)
+      const saved = json
       assertDecimalVersion(saved.version, 'saved system settings version')
       assert(saved.version !== before.version, 'SystemSettings CAS PUT must advance version')
       assert(

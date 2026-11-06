@@ -295,7 +295,7 @@ const claudeModelEntry: AgentModelDTO = {
       multipliers: [],
     },
     defaultVariant: 'v1',
-    variants: [{ id: 'v1' }, { id: 'fast' }],
+    variants: [{ id: 'v1', promptCacheRetention: 'NONE' }, { id: 'fast', promptCacheRetention: 'NONE' }],
   },
   version: '0',
   createTime: 0,
@@ -317,7 +317,7 @@ const modelEntry: AgentModelDTO = {
       multipliers: [],
     },
     defaultVariant: 'default',
-    variants: [{ id: 'default' }],
+    variants: [{ id: 'default', promptCacheRetention: 'NONE' }],
   },
   version: '0',
   createTime: 0,
@@ -1351,9 +1351,8 @@ describe('useBoundBranchPanel', () => {
       .mockResolvedValueOnce(snapshotOf(busy))
       .mockResolvedValue(snapshotOf(fresh))
     vi.mocked(harnessService.acceptThreadCommandBatch)
-      .mockRejectedValueOnce(new ApiError('stale cursor', 409, 'CONFLICT', {
-        reason: 'STALE_COMMAND_CURSOR',
-      }))
+      .mockRejectedValueOnce(new ApiError('stale cursor', 409, 'conflict',
+        undefined, 'STALE_COMMAND_CURSOR'))
       .mockImplementationOnce((threadId, request) =>
         Promise.resolve(
           acceptedResponse(busyThreadFixture(threadId, { version: '6' }), request.commands),

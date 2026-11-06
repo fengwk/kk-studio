@@ -9,6 +9,7 @@ import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.model.ProviderProtocolOptions;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.model.provider.ModelProvider;
@@ -126,7 +127,8 @@ class ProviderExecutionGuardTransportTest {
     ProviderRequest request =
         new ProviderRequest(
             model,
-            new ModelVariant("v", null, new ProviderProtocolOptions(options)),
+            new ModelVariant(
+                "v", null, PromptCacheRetention.NONE, new ProviderProtocolOptions(options)),
             1024,
             "system",
             List.of(

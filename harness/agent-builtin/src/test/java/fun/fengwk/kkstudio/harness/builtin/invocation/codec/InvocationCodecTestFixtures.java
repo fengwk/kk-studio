@@ -13,6 +13,7 @@ import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolDefinition;
@@ -92,7 +93,7 @@ public final class InvocationCodecTestFixtures {
     return new ProviderRequest(
         new ModelDescriptor(
             "provider", "model", "model", Set.of(ModelInputModality.TEXT), tools.length > 0, true),
-        new ModelVariant("v1"),
+        new ModelVariant("v1", null, PromptCacheRetention.NONE, null),
         1024,
         "Test system instruction.",
         List.of(),
@@ -111,8 +112,7 @@ public final class InvocationCodecTestFixtures {
         1024,
         "Test system instruction.",
         List.of(binding),
-        List.of(),
-        provider.cacheControl());
+        List.of());
   }
 
   public static ModelRequestSpec hostModelRequest() {
@@ -126,8 +126,7 @@ public final class InvocationCodecTestFixtures {
         1024,
         "Test system instruction.",
         List.of(binding),
-        List.of(),
-        provider.cacheControl());
+        List.of());
   }
 
   private static ModelPricing pricing() {

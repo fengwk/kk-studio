@@ -12,6 +12,7 @@ import tools.jackson.databind.json.JsonMapper;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
@@ -40,7 +41,8 @@ class OpenAiResponsesThinkingTest {
   private static final ObjectMapper MAPPER = JsonMapper.builder().build();
   private static final String VALID_PREFIX_HASH =
       "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-  private static final ModelVariant DEFAULT_VARIANT = new ModelVariant("default");
+  private static final ModelVariant DEFAULT_VARIANT =
+      new ModelVariant("default", null, PromptCacheRetention.NONE, null);
 
   private ProviderDescriptor createDescriptor() {
     return new ProviderDescriptor(

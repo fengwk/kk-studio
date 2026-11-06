@@ -54,7 +54,6 @@ final class OpenAiChatStreamAccumulator extends ProviderStreamState {
 
   private final ProviderRequest request;
   private final ProviderDescriptor descriptor;
-  private final OpenAiChatConfiguration config;
   private final ProviderStreamBridge bridge;
 
   private String messageId = null;
@@ -93,13 +92,9 @@ final class OpenAiChatStreamAccumulator extends ProviderStreamState {
   private String rawUsageJson = "{}";
 
   OpenAiChatStreamAccumulator(
-      ProviderRequest request,
-      ProviderDescriptor descriptor,
-      OpenAiChatConfiguration config,
-      ProviderStreamBridge bridge) {
+      ProviderRequest request, ProviderDescriptor descriptor, ProviderStreamBridge bridge) {
     this.request = Objects.requireNonNull(request, "request");
     this.descriptor = Objects.requireNonNull(descriptor, "descriptor");
-    this.config = Objects.requireNonNull(config, "config");
     this.bridge = Objects.requireNonNull(bridge, "bridge");
   }
 
@@ -585,20 +580,13 @@ final class OpenAiChatStreamAccumulator extends ProviderStreamState {
           ProviderErrorKind.INVALID_RESPONSE,
           "missing complete usage: OpenAI Chat model " + request.model().modelId());
     }
-    if (config.requireDone()) {
-      if (!seenDone) {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_RESPONSE, "stream completed without [DONE]");
-      }
-      if (stopReason == null) {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_RESPONSE, "stream completed without valid finish_reason");
-      }
-    } else {
-      if (stopReason == null) {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_RESPONSE, "stream ended with EOF before valid finish_reason");
-      }
+    if (!seenDone) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE, "stream completed without [DONE]");
+    }
+    if (stopReason == null) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE, "stream completed without valid finish_reason");
     }
 
     boolean canReplay = (stopReason == GenerationStopReason.COMPLETE);

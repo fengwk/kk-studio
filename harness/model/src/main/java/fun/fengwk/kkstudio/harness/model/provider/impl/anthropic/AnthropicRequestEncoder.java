@@ -49,8 +49,7 @@ import java.util.Set;
  * max_tokens}/{@code stream}/{@code messages}/{@code system}/{@code cache_control}） 冲突显式失败，{@code
  * tools} 保留 native 条目后追加 runtime 工具，其余官方顶层字段无损保留；cache marker 与请求体大小均基于最终合并结果。
  *
- * <p>{@code anthropic-beta} 能力是「配置列表 + 运行时强制能力」的有序并集：配置的 {@code anthropicBetaFeatures} 原样在前；实际启用
- * BUDGET 思考时追加 interleaved thinking，显式 ADAPTIVE effort 时追加消息级 effort 所需的三个 beta。
+ * <p>显式 adaptive effort 时，{@code anthropic-beta} 包含消息级 effort 所需的三个 beta。
  *
  * <p>{@code cacheControl} 只表达留存档位：{@code retention != NONE} 时在 tools/system/历史边界写入固定的原生 {@code
  * cache_control} ephemeral 标记，{@code LONG} 额外携带 {@code ttl:"1h"}；会话 {@code key} 不属于 Anthropic
@@ -84,29 +83,11 @@ public final class AnthropicRequestEncoder {
   private static final String MID_CONVERSATION_BETA = "mid-conversation-system-2026-04-07";
   private static final String EFFORT_BETA = "effort-2025-11-24";
 
-  private final AnthropicConfiguration configuration;
-
-  public AnthropicRequestEncoder() {
-    this(AnthropicConfiguration.defaults());
-  }
-
-  AnthropicRequestEncoder(AnthropicConfiguration configuration) {
-    this.configuration = Objects.requireNonNull(configuration, "configuration");
-  }
-
-  AnthropicConfiguration configuration() {
-    return configuration;
-  }
+  public AnthropicRequestEncoder() {}
 
   public AnthropicEncodedRequest encode(ProviderRequest request, ProviderDescriptor descriptor) {
-    return encode(request, descriptor, this.configuration);
-  }
-
-  AnthropicEncodedRequest encode(
-      ProviderRequest request, ProviderDescriptor descriptor, AnthropicConfiguration config) {
     Objects.requireNonNull(request, "request");
     Objects.requireNonNull(descriptor, "descriptor");
-    Objects.requireNonNull(config, "config");
 
     // native protocolOptions 是合并起点：运行时所有权字段由本编码器写入，其余官方顶层字段原样保留
     ObjectNode root = request.variant().protocolOptions().copyOptions();
@@ -118,17 +99,14 @@ public final class AnthropicRequestEncoder {
     root.put("max_tokens", maxTokens);
     root.put("stream", true);
 
-    boolean requiresInterleavedThinkingBeta =
-        applyReasoningParameters(root, request, config, maxTokens);
+    applyReasoningParameters(root, request);
 
     boolean perTurnEffort =
-        config.anthropicThinkingMode() == AnthropicThinkingMode.ADAPTIVE
-            && request.model().reasoning()
+        request.model().reasoning()
             && request.variant() != null
             && request.variant().reasoningEffort() != null
             && !request.variant().reasoningOff();
-    List<String> betaFeatures =
-        resolveBetaFeatures(config, requiresInterleavedThinkingBeta, perTurnEffort);
+    List<String> betaFeatures = resolveBetaFeatures(perTurnEffort);
 
     ArrayNode toolsArray = mergeTools(root, request.tools());
 
@@ -207,24 +185,12 @@ public final class AnthropicRequestEncoder {
     return new AnthropicEncodedRequest(utf8Bytes, betaFeatures);
   }
 
-  /** 配置列表在前，按实际启用的推理模式追加所需 beta，已配置则不重复。 */
-  private static List<String> resolveBetaFeatures(
-      AnthropicConfiguration config,
-      boolean requiresInterleavedThinkingBeta,
-      boolean perTurnEffort) {
-    List<String> union = new ArrayList<>(config.anthropicBetaFeatures());
-    if (requiresInterleavedThinkingBeta
-        && !union.contains(AnthropicConfiguration.INTERLEAVED_THINKING_BETA)) {
-      union.add(AnthropicConfiguration.INTERLEAVED_THINKING_BETA);
-    }
+  /** 按实际启用的推理模式追加所需 beta。 */
+  private static List<String> resolveBetaFeatures(boolean perTurnEffort) {
     if (perTurnEffort) {
-      for (String beta : List.of(MID_CONVERSATION_BETA, PER_TURN_BETA, EFFORT_BETA)) {
-        if (!union.contains(beta)) {
-          union.add(beta);
-        }
-      }
+      return List.of(MID_CONVERSATION_BETA, PER_TURN_BETA, EFFORT_BETA);
     }
-    return List.copyOf(union);
+    return List.of();
   }
 
   /** 从最终保留的消息反向补齐未知等级，再在连续 user/tool 消息之后声明变化。 */
@@ -282,19 +248,19 @@ public final class AnthropicRequestEncoder {
   }
 
   /**
-   * reasoning effort 编码：{@code off} 显式关闭推理，发送 {@code thinking:{type:"disabled"}}；ADAPTIVE
-   * 模式原样下发厂商定义值， BUDGET 模式仅将 {@code high/medium/low} 映射为 token 预算；null 不声明推理字段，由服务端默认决定，此时 native
-   * {@code thinking}/{@code output_config} 原样保留。
+   * reasoning effort 编码：{@code off} 显式关闭推理，发送 {@code thinking:{type:"disabled"}}； 非空 effort 默认以
+   * ADAPTIVE 模式发送 {@code thinking:{type:"adaptive",display:"summarized"}} 与 {@code
+   * output_config:{effort:...}}；null 不声明推理字段，由服务端默认决定，此时 native {@code thinking}/{@code
+   * output_config} 原样保留（如预算思考在原生选项中声明 thinking）。
    *
    * <p>一旦 runtime 要写入 {@code thinking}，native {@code thinking} 必须显式拒绝；{@code output_config} 只对
    * runtime 同样要写的 {@code effort} 子字段拒绝，其余官方子字段无损保留。
    */
-  private static boolean applyReasoningParameters(
-      ObjectNode root, ProviderRequest request, AnthropicConfiguration config, int maxTokens) {
+  private static void applyReasoningParameters(ObjectNode root, ProviderRequest request) {
     if (!request.model().reasoning()
         || request.variant() == null
         || request.variant().reasoningEffort() == null) {
-      return false;
+      return;
     }
 
     if (root.has("thinking")) {
@@ -306,36 +272,16 @@ public final class AnthropicRequestEncoder {
     if (request.variant().reasoningOff()) {
       ObjectNode thinking = root.putObject("thinking");
       thinking.put("type", "disabled");
-      return false;
+      return;
     }
 
     String effort = request.variant().reasoningEffort();
+    ObjectNode thinking = root.putObject("thinking");
+    thinking.put("type", "adaptive");
+    thinking.put("display", "summarized");
 
-    AnthropicThinkingMode mode = config.anthropicThinkingMode();
-    switch (mode) {
-      case ADAPTIVE -> {
-        ObjectNode thinking = root.putObject("thinking");
-        thinking.put("type", "adaptive");
-        thinking.put("display", "summarized");
-
-        ObjectNode outputConfig = mergeOutputConfig(root);
-        outputConfig.put("effort", effort);
-        return false;
-      }
-      case BUDGET -> {
-        int budgetTokens = mapBudgetTokens(effort);
-        if (budgetTokens >= maxTokens) {
-          throw new ProviderException(
-              ProviderErrorKind.INVALID_REQUEST, "budget_tokens must be lower than max_tokens");
-        }
-        ObjectNode thinking = root.putObject("thinking");
-        thinking.put("type", "enabled");
-        thinking.put("budget_tokens", budgetTokens);
-        thinking.put("display", "summarized");
-        return true;
-      }
-    }
-    return false;
+    ObjectNode outputConfig = mergeOutputConfig(root);
+    outputConfig.put("effort", effort);
   }
 
   /** 以 native {@code output_config} 为起点合并 runtime effort，保留 format 等其余官方子字段。 */
@@ -354,20 +300,6 @@ public final class AnthropicRequestEncoder {
           "protocolOptions must not override runtime field: output_config.effort");
     }
     return (ObjectNode) nativeOutputConfig;
-  }
-
-  private static int mapBudgetTokens(String effort) {
-    if (effort == null) {
-      throw new ProviderException(
-          ProviderErrorKind.INVALID_REQUEST, "unsupported reasoning effort for budget thinking");
-    }
-    return switch (effort) {
-      case "low" -> 2048;
-      case "medium" -> 8192;
-      case "high" -> 16384;
-      default -> throw new ProviderException(
-          ProviderErrorKind.INVALID_REQUEST, "unsupported reasoning effort for budget thinking");
-    };
   }
 
   /** 拒绝 native options 覆盖运行时所有权字段：错误只报字段名，绝不回显 value。 */

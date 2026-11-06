@@ -17,6 +17,7 @@ import tools.jackson.databind.json.JsonMapper;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderAdapter;
@@ -218,7 +219,7 @@ class ProviderUserProjectedMediaWireTest {
         new ModelDescriptor("provider", "test-model", "test-model", ALL_MODALITIES, true, false);
     return new ProviderRequest(
         model,
-        new ModelVariant("default"),
+        new ModelVariant("default", null, PromptCacheRetention.NONE, null),
         1024,
         "Test system instruction.",
         List.of(

@@ -415,7 +415,7 @@ comment on column harness_thread.name is 'Thread 显示名称：应用保证非�
 comment on column harness_thread.root_thread_id is '不可变执行根 UUID（根 Thread 指向自身），供树锁与整树读取';
 comment on column harness_thread.yolo_enabled is '执行根的 YOLO 开关；子代理恒为 false，有效值取自执行根';
 comment on column harness_thread.spawn_trigger is '不可变创建来源：USER / MODEL_TOOL / RUNTIME / CONTROLLER / PLUGIN';
-comment on column harness_thread.constraints is '不可变执行约束 JSON：maxOutputTokens（可空）、promptCacheDisabled、allowAutoCompaction；子 Thread 为请求约束与父约束合并后的有效值';
+comment on column harness_thread.constraints is '不可变执行约束 JSON：maxOutputTokens（可空）、allowAutoCompaction；子 Thread 为请求约束与父约束合并后的有效值';
 comment on column harness_thread.execution_control is '持久执行控制状态（RUNNABLE/STOPPED）';
 comment on column harness_thread.input_through_sequence is '已被普通 INPUT 接纳或确定性拒绝的输入序号水位（>= 0，初值 0，< next_command_sequence）';
 comment on column harness_thread.next_command_sequence is '下一条 Command 的 sequence（从 1 递增）';
@@ -550,7 +550,6 @@ create table harness_tool_invocation (
         status in (
             'WAITING_APPROVAL',
             'WAITING_INPUT',
-            'WAITING_REQUEST',
             'READY',
             'RUNNING',
             'SUCCEEDED',
@@ -575,7 +574,7 @@ comment on column harness_tool_invocation.assistant_entry_id is '携带对应 To
 comment on column harness_tool_invocation.call_index is 'assistant 消息内 tool call 的下标（从 0 递增）';
 comment on column harness_tool_invocation.call is '冻结的 ToolCall（JSON object）';
 comment on column harness_tool_invocation.binding is '冻结的 tool binding（JSON object，仅在 immediate FAILED attempt=0 槽位可空）';
-comment on column harness_tool_invocation.status is '生命周期状态（含 WAITING_REQUEST、WAITING_APPROVAL 与 WAITING_INPUT）';
+comment on column harness_tool_invocation.status is '生命周期状态（含 WAITING_APPROVAL 与 WAITING_INPUT）';
 comment on column harness_tool_invocation.attempt is '已确认的 start 尝试次数（从 0 递增）';
 comment on column harness_tool_invocation.approval is '审批记录（JSON object，可空）';
 comment on column harness_tool_invocation.result is 'terminal 成功结果（JSON object，与 error 互斥）';
@@ -587,7 +586,7 @@ comment on column harness_tool_invocation.input_receipt is '交互回执（JSON 
 
 create index idx_harness_tool_invocation_thread_nonterminal
     on harness_tool_invocation (thread_id)
-    where status in ('WAITING_APPROVAL', 'WAITING_INPUT', 'WAITING_REQUEST', 'READY', 'RUNNING');
+    where status in ('WAITING_APPROVAL', 'WAITING_INPUT', 'READY', 'RUNNING');
 
 comment on index idx_harness_tool_invocation_thread_nonterminal is '未收尾 ToolInvocation 按公共 Thread 归属的查找路径（已终态行在 batch apply 后物理删除，不需要覆盖）';
 

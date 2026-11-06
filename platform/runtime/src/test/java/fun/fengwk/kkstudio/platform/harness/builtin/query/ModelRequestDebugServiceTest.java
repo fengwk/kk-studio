@@ -57,7 +57,6 @@ import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
-import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
@@ -785,11 +784,10 @@ class ModelRequestDebugServiceTest {
         new ModelDescriptor(
             "provider", "model", "wire-model", Set.of(ModelInputModality.TEXT), true, false),
         // 冻结请求只携带 Agent 正文唯一的 systemInstruction 与零 tool binding。
-        new ModelVariant("default"),
+        new ModelVariant("default", null, PromptCacheRetention.SHORT, null),
         512,
         "system instruction",
         List.of(),
-        List.of(new SubagentBinding("coder", "Codes solutions.")),
-        new ProviderCacheControl(PromptCacheRetention.SHORT, SESSION_ID.toString()));
+        List.of(new SubagentBinding("coder", "Codes solutions.")));
   }
 }

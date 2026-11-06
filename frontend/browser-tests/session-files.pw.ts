@@ -101,18 +101,18 @@ const README_WINDOW = {
   ].join('\n'),
 }
 
-function errorEnvelope(status: number, code: string, message: string, detail: string) {
+function problem(status: number, code: string, title: string, detail: string) {
   return {
+    type: 'about:blank',
     status,
     code,
-    message,
-    success: false,
-    errors: { type: 'about:blank', title: code, detail },
+    title,
+    detail,
   }
 }
 
 async function fulfillJson(route: Route, status: number, body: unknown) {
-  await route.fulfill({ status, json: body })
+  await route.fulfill({ status, contentType: status >= 400 ? 'application/problem+json' : 'application/json', json: body })
 }
 
 /** 按生成契约拦截三个只读端点，并记录每次请求的参数供断言。 */
@@ -129,41 +129,38 @@ async function installSessionFilesApi(page: Page): Promise<RecordedRequest[]> {
 
       if (endpoint === '') {
         if (path == null) {
-          await fulfillJson(route, 200, { status: 200, data: ROOT_LISTING })
+          await fulfillJson(route, 200, ROOT_LISTING)
           return
         }
         if (path === `${SESSION_ROOT}docs/`) {
-          await fulfillJson(route, 200, { status: 200, data: DOCS_LISTING })
+          await fulfillJson(route, 200, DOCS_LISTING)
           return
         }
-        await fulfillJson(route, 404, errorEnvelope(
-          404, 'NOT_FOUND', 'The requested resource was not found.', `No such file: ${path}`,
+        await fulfillJson(route, 404, problem(
+          404, 'not_found', 'The requested resource was not found.', `No such file: ${path}`,
         ))
         return
       }
 
       if (endpoint === '/content') {
         if (path === `${SESSION_ROOT}docs/readme.md`) {
-          await fulfillJson(route, 200, { status: 200, data: README_WINDOW })
+          await fulfillJson(route, 200, README_WINDOW)
           return
         }
         if (path === `${SESSION_ROOT}binary.bin`) {
-          await fulfillJson(route, 422, errorEnvelope(
-            422, 'UNPROCESSABLE_CONTENT', 'HTTP error (status 422).', 'file appears to be binary',
+          await fulfillJson(route, 422, problem(
+            422, 'validation', 'HTTP error (status 422).', 'file appears to be binary',
           ))
           return
         }
         if (path === `${SESSION_ROOT}missing.txt`) {
-          await fulfillJson(route, 404, errorEnvelope(
-            404, 'NOT_FOUND', 'The requested resource was not found.', `No such file: ${path}`,
+          await fulfillJson(route, 404, problem(
+            404, 'not_found', 'The requested resource was not found.', `No such file: ${path}`,
           ))
           return
         }
         const offset = url.searchParams.get('offset') ?? '1'
-        await fulfillJson(route, 200, {
-          status: 200,
-          data: offset === '3' ? SECOND_TEXT_WINDOW : FIRST_TEXT_WINDOW,
-        })
+        await fulfillJson(route, 200, offset === '3' ? SECOND_TEXT_WINDOW : FIRST_TEXT_WINDOW)
         return
       }
 
@@ -189,8 +186,8 @@ async function installSessionFilesApi(page: Page): Promise<RecordedRequest[]> {
         })
         return
       }
-      await fulfillJson(route, 404, errorEnvelope(
-        404, 'NOT_FOUND', 'The requested resource was not found.', `No such file: ${path}`,
+      await fulfillJson(route, 404, problem(
+        404, 'not_found', 'The requested resource was not found.', `No such file: ${path}`,
       ))
     },
   )

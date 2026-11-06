@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
@@ -108,7 +109,7 @@ class GeminiModelProviderIntegrationTest {
             Set.of(ModelInputModality.TEXT),
             true,
             false);
-    ModelVariant variant = new ModelVariant("default");
+    ModelVariant variant = new ModelVariant("default", null, PromptCacheRetention.NONE, null);
     return new ProviderRequest(
         model,
         variant,

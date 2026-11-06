@@ -131,7 +131,6 @@ public final class ThreadCreationRequestHash {
     } else {
       node.put("maxOutputTokens", constraints.maxOutputTokens());
     }
-    node.put("promptCacheDisabled", constraints.promptCacheDisabled());
     node.put("allowAutoCompaction", constraints.allowAutoCompaction());
     return node;
   }

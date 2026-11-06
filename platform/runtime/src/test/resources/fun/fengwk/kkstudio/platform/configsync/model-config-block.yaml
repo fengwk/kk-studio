@@ -6,3 +6,4 @@
       defaultVariant: default
       variants:
         - id: default
+          promptCacheRetention: NONE

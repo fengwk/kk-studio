@@ -7,7 +7,7 @@ describe('errorDetailMessage', () => {
   it('prefers the sanitized api detail over the generic message', () => {
     expect(
       errorDetailMessage(
-        new ApiError('Request failed', 400, 'BAD_REQUEST', { detail: 'No such file: a.txt' }),
+        new ApiError('Request failed', 400, 'validation', undefined, undefined, 'No such file: a.txt'),
       ),
     ).toBe('No such file: a.txt')
   })

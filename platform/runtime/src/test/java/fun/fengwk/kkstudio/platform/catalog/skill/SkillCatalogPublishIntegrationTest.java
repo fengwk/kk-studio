@@ -158,6 +158,7 @@ class SkillCatalogPublishIntegrationTest extends PostgresSpringTestSupport {
     skillCatalogService.publishUpload(publish1);
 
     SkillPackage pkg1 = skillPackageRepository.getPackage(PACKAGE);
+    assertEquals("initial", pkg1.description());
     UUID blob1Id = pkg1.artifactBlobId();
     StorageBlob blob1AfterInit = storageBlobManager.getBlob(blob1Id);
     assertNotNull(blob1AfterInit);
@@ -177,6 +178,7 @@ class SkillCatalogPublishIntegrationTest extends PostgresSpringTestSupport {
     SkillPackage pkg2 = skillPackageRepository.getPackage(PACKAGE);
     UUID blob2Id = pkg2.artifactBlobId();
     assertEquals(1L, pkg2.version());
+    assertEquals("updated", pkg2.description());
 
     // 新归档 blob 持有 1 个引用且处于 ACTIVE
     StorageBlob blob2 = storageBlobManager.getBlob(blob2Id);

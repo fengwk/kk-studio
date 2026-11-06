@@ -205,8 +205,12 @@ JSON Controller 暂时返回共享的
 自有代码只解析到该 Jackson 3 mapper；Share DTO 的严格字段规则直接由 Jackson 3 注解声明
 （例如 `protocolOptionsJson` 与网络文本字段只接受 JSON 字符串 token）。`protocolOptionsJson` 的内容语法、64 KiB 上限与 canonical 化
 由 harness-model 的 `ProviderProtocolOptions` 在平台解析配置时统一执行，HTTP mapper 只检查 wire 形状，不重复解析选项。
-required-nullable 字段由 DTO 显式 ALWAYS。未知字段由 DTO 的 JsonAnySetter 控制，
-领域 codec 另有严格语法校验；HTTP mapper 的 trailing-token 行为保持 Jackson 配置本身的边界。
+required-nullable 响应字段由 DTO 显式 ALWAYS。[`HttpBoundaryConfiguration`](../../web/src/main/java/fun/fengwk/kkstudio/web/HttpBoundaryConfiguration.java)
+从容器 mapper 派生仅供 HTTP 消息转换器使用的配置，拒绝未知字段、标量强转、基本类型 null、重复键和尾随内容，
+不改变持久化、集群客户端和插件使用的 mapper。系统设置的 Long 属性以规范十进制字符串作为既有 wire 类型，
+要求与读取响应相同的字符串形态，不接受数值 token。请求体按字段或 record 组件的 `@Nullable`
+统一检查必填性并递归检查 DTO、集合与 Map；未标注的属性缺失或为 null 时报告属性路径。
+UUID 路径和查询参数统一使用规范小写转换。领域 codec 另有严格语法校验。
 
 领域失败由 [`DomainException`](../../common/src/main/java/fun/fengwk/kkstudio/common/error/DomainException.java)
 表达，全局 [`StudioProblemAdvice`](../../web/src/main/java/fun/fengwk/kkstudio/web/advice/StudioProblemAdvice.java)

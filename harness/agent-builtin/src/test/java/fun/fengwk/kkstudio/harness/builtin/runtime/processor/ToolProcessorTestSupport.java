@@ -53,6 +53,7 @@ import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
@@ -287,24 +288,6 @@ public final class ToolProcessorTestSupport {
         ScheduledExecutorService scheduler,
         Scenario scenario,
         boolean childMode) {
-      this(
-          retryPolicy,
-          yoloEnabled,
-          followDepth,
-          scheduler,
-          scenario,
-          childMode,
-          ToolInvocationStatus.READY);
-    }
-
-    Fixture(
-        InvocationRetryPolicy retryPolicy,
-        boolean yoloEnabled,
-        int followDepth,
-        ScheduledExecutorService scheduler,
-        Scenario scenario,
-        boolean childMode,
-        ToolInvocationStatus initialStatus) {
       this.scheduler = scheduler;
       this.request =
           new ToolInvocationRequest(
@@ -317,7 +300,7 @@ public final class ToolProcessorTestSupport {
         this.toolInvocationId = leaf.toolInvocationId();
       } else {
         this.baseline = seedToolBaseline(store, NOW, yoloEnabled, scenario);
-        Seeded seeded = seedTool(store, baseline, request, NOW, scenario, initialStatus);
+        Seeded seeded = seedTool(store, baseline, request, NOW, scenario);
         this.modelInvocationId = seeded.modelInvocationId();
         this.toolInvocationId = seeded.toolInvocationId();
       }
@@ -344,17 +327,6 @@ public final class ToolProcessorTestSupport {
       Baseline extraBaseline = seedToolBaseline(store, NOW);
       return seedTool(store, extraBaseline, request, NOW);
     }
-  }
-
-  static Fixture waitingRequestFixture() {
-    return new Fixture(
-        NO_RETRY,
-        false,
-        0,
-        newScheduler(),
-        bashScenario(ToolSideEffect.READ_ONLY),
-        false,
-        ToolInvocationStatus.WAITING_REQUEST);
   }
 
   static Fixture fixture() {
@@ -682,19 +654,6 @@ public final class ToolProcessorTestSupport {
       ToolInvocationRequest request,
       Instant now,
       Scenario scenario) {
-    return seedTool(store, baseline, request, now, scenario, ToolInvocationStatus.READY);
-  }
-
-  /**
-   * 按给定场景与初始状态种子 terminal ModelInvocation + ToolInvocation + Work（{@code scenario} 为 null 时用 bash）。
-   */
-  static Seeded seedTool(
-      InMemoryBuiltinHarnessStore store,
-      Baseline baseline,
-      ToolInvocationRequest request,
-      Instant now,
-      Scenario scenario,
-      ToolInvocationStatus initialStatus) {
     return store.transaction(
         tx -> {
           UUID modelId = tx.nextId();
@@ -742,7 +701,7 @@ public final class ToolProcessorTestSupport {
                           0,
                           request.call(),
                           request.binding(),
-                          initialStatus,
+                          ToolInvocationStatus.READY,
                           0,
                           null,
                           null,
@@ -967,14 +926,13 @@ public final class ToolProcessorTestSupport {
         1024,
         "Test system instruction.",
         List.of(scenario == null ? hostBinding(ToolSideEffect.READ_ONLY) : scenario.binding()),
-        List.of(),
-        provider.cacheControl());
+        List.of());
   }
 
   private static ProviderRequest providerRequest() {
     return new ProviderRequest(
         modelDescriptor(),
-        new ModelVariant("v1"),
+        new ModelVariant("v1", null, PromptCacheRetention.NONE, null),
         1024,
         "Test system instruction.",
         List.of(),

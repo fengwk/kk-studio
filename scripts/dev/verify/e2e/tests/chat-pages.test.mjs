@@ -29,9 +29,9 @@ test('Chat 与 Session 摘要按 cursor 读取全部页面并保持顺序', asyn
         requests.push([method, url])
         return {
           status: 200,
-          json: { data: requests.length === 1
+          json: requests.length === 1
             ? { items: [first], nextCursor: 'next+/=' }
-            : { items: [second], nextCursor: null } },
+            : { items: [second], nextCursor: null },
         }
       },
     }
@@ -46,10 +46,10 @@ test('Chat 与 Session 摘要按 cursor 读取全部页面并保持顺序', asyn
 test('Chat 分页拒绝错误响应和无效游标', async () => {
   // 合同缺字段时不能误判为最后一页，更不能把无效状态当成成功。
   for (const response of [
-    { status: 500, json: { data: { items: [], nextCursor: null } } },
-    { status: 200, json: { data: [] } },
-    { status: 200, json: { data: { items: [] } } },
-    { status: 200, json: { data: { items: [], nextCursor: '' } } },
+    { status: 500, json: { items: [], nextCursor: null } },
+    { status: 200, json: [] },
+    { status: 200, json: { items: [] } },
+    { status: 200, json: { items: [], nextCursor: '' } },
   ]) {
     await assert.rejects(() => listChats({ call: async () => response }))
   }
@@ -61,9 +61,9 @@ test('Session 每页均校验摘要', async () => {
   await assert.rejects(() => listChatSessions({
     async call() {
       calls += 1
-      return { status: 200, json: { data: calls === 1
+      return { status: 200, json: calls === 1
         ? { items: [summary('00000000-0000-4000-8000-000000000001')], nextCursor: 'next' }
-        : { items: [summary('bad-id')], nextCursor: null } } }
+        : { items: [summary('bad-id')], nextCursor: null } }
     },
   }, 'chat'), /session\.sessionId/)
 })

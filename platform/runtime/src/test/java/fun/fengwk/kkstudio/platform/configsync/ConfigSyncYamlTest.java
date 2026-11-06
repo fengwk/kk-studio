@@ -175,7 +175,13 @@ class ConfigSyncYamlTest {
     config.put(
         "abilities", Map.of("tools", true, "reasoning", false, "inputModalities", List.of("TEXT")));
     config.put("defaultVariant", "default");
-    config.put("variants", List.of(Map.of("id", "default", "protocolOptionsJson", "{\"a\":1}")));
+    config.put(
+        "variants",
+        List.of(
+            Map.of(
+                "id", "default",
+                "promptCacheRetention", "NONE",
+                "protocolOptionsJson", "{\"a\":1}")));
     Map<String, Object> pricing = new LinkedHashMap<>();
     pricing.put(
         "base",

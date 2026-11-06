@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildAcceptanceRequest } from '@/features/thread/runtime/agent-pane/agent-pane-pipeline'
 import { buildGoalBatchPlan, buildMessageBatchPlan } from '@/features/thread/command-batch-plan'
 import { createTextPart } from '@/features/thread/composer/composer-parts'
@@ -6,25 +6,7 @@ import { harnessService } from '@/shared/api/harness-service'
 import { createBuiltinExecution } from '@/shared/api/contracts/ai-runtime'
 import type { HarnessThreadDTO } from '@/shared/api/generated/contracts'
 
-const captured = vi.hoisted(() => [] as Array<{ url: string; data: string }>)
-
-// Keep the real axios instance, request serialization and apiClient interceptors;
-// replace only the network adapter so assertions inspect the actual HTTP body.
-vi.mock('axios', async (importOriginal) => {
-  const { default: axios } = await importOriginal<typeof import('axios')>()
-  return {
-    default: {
-      create: (config: Parameters<typeof axios.create>[0]) => {
-        const client = axios.create(config)
-        client.defaults.adapter = async (request) => {
-          captured.push({ url: request.url ?? '', data: String(request.data) })
-          return { data: { status: 200, data: {} }, status: 200, statusText: 'OK', headers: {}, config: request }
-        }
-        return client
-      },
-    },
-  }
-})
+const captured: Array<{ url: string; data: string }> = []
 
 const draft = {
   agentName: 'coder',
@@ -58,7 +40,14 @@ function wireAt(index: number): { url: string; data: string } {
 }
 
 describe('owner-free HTTP wire', () => {
-  beforeEach(() => captured.splice(0))
+  beforeEach(() => {
+    captured.splice(0)
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) => {
+      captured.push({ url, data: String(init.body) })
+      return new Response('{}', { headers: { 'Content-Type': 'application/json' } })
+    }))
+  })
+  afterEach(() => vi.unstubAllGlobals())
 
   it('serializes a Chat container creation with owner and a NEW_SESSION target', async () => {
     // 测试意图：创建型批次走不透明 owner 契约，序列化为 { kind, id }。
@@ -72,7 +61,7 @@ describe('owner-free HTTP wire', () => {
     })
     await harnessService.acceptCommandBatch(created.request)
     const { url, data } = wireAt(0)
-    expect(url).toBe('/command-batches')
+    expect(url).toBe('/api/command-batches')
     const body = JSON.parse(data) as {
       owner: unknown
       target: { type: string }
@@ -95,7 +84,7 @@ describe('owner-free HTTP wire', () => {
     })
     await harnessService.acceptThreadCommandBatch('thread-1', plan.request)
     const { url, data } = wireAt(0)
-    expect(url).toBe('/threads/thread-1/command-batches')
+    expect(url).toBe('/api/threads/thread-1/command-batches')
     const body = JSON.parse(data) as Record<string, unknown>
     expect(Object.keys(body).sort()).toEqual(['commands'])
     expect(body).not.toHaveProperty('owner')
@@ -117,7 +106,7 @@ describe('owner-free HTTP wire', () => {
     })
     await harnessService.acceptThreadCommandBatch('thread-1', plan.request)
     const { url, data } = wireAt(0)
-    expect(url).toBe('/threads/thread-1/command-batches')
+    expect(url).toBe('/api/threads/thread-1/command-batches')
     const body = JSON.parse(data) as {
       commands: Array<{ type: string }>
     } & Record<string, unknown>
@@ -172,6 +161,6 @@ describe('owner-free HTTP wire', () => {
       createCommandId: () => 'cmd-1',
     })
     await harnessService.acceptThreadCommandBatch('thread /1', plan.request)
-    expect(wireAt(0).url).toBe('/threads/thread%20%2F1/command-batches')
+    expect(wireAt(0).url).toBe('/api/threads/thread%20%2F1/command-batches')
   })
 })

@@ -12,6 +12,7 @@ import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
@@ -81,7 +82,7 @@ final class InvocationTestData {
   static ProviderRequest providerRequest(List<ToolBinding> bindings) {
     return new ProviderRequest(
         modelDescriptor(),
-        new ModelVariant("v1"),
+        new ModelVariant("v1", null, PromptCacheRetention.NONE, null),
         1024,
         "Test system instruction.",
         List.of(),
@@ -124,8 +125,7 @@ final class InvocationTestData {
         1024,
         "Test system instruction.",
         bindings,
-        List.of(),
-        provider.cacheControl());
+        List.of());
   }
 
   static ModelRequestSpec requestSpec() {

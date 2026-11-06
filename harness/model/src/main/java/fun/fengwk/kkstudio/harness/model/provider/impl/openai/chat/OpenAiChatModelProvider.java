@@ -35,20 +35,14 @@ final class OpenAiChatModelProvider implements ModelProvider {
   private final ProviderDescriptor descriptor;
   private final String apiKey;
   private final URI chatUri;
-  private final OpenAiChatConfiguration config;
   private final OpenAiChatRequestEncoder encoder;
 
   OpenAiChatModelProvider(
-      JdkHttpSseTransport transport,
-      ProviderDescriptor descriptor,
-      String apiKey,
-      URI chatUri,
-      OpenAiChatConfiguration config) {
+      JdkHttpSseTransport transport, ProviderDescriptor descriptor, String apiKey, URI chatUri) {
     this.transport = Objects.requireNonNull(transport, "transport");
     this.descriptor = Objects.requireNonNull(descriptor, "descriptor");
     this.apiKey = apiKey;
     this.chatUri = Objects.requireNonNull(chatUri, "chatUri");
-    this.config = Objects.requireNonNull(config, "config");
     this.encoder = new OpenAiChatRequestEncoder();
   }
 
@@ -65,7 +59,7 @@ final class OpenAiChatModelProvider implements ModelProvider {
 
     OpenAiChatEncodedRequest encoded;
     try {
-      encoded = encoder.encode(request, descriptor, config);
+      encoded = encoder.encode(request, descriptor);
     } catch (ProviderException exception) {
       bridge.emitError(exception);
       return;
@@ -91,7 +85,7 @@ final class OpenAiChatModelProvider implements ModelProvider {
     }
 
     OpenAiChatStreamAccumulator accumulator =
-        new OpenAiChatStreamAccumulator(request, descriptor, config, bridge);
+        new OpenAiChatStreamAccumulator(request, descriptor, bridge);
 
     ProviderSseCall.run(
         transport,

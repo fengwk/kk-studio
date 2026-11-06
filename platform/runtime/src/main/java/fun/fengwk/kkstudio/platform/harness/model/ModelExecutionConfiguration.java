@@ -8,7 +8,6 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import fun.fengwk.kkstudio.harness.builtin.port.ModelGateway;
-import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderFactory;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.model.provider.impl.ProviderModelDiscovery;
@@ -128,10 +127,7 @@ public class ModelExecutionConfiguration {
   public ProviderFactory openaiProviderFactory(
       @Qualifier("modelExecutionTransport") JdkHttpSseTransport transport) {
     return ProviderFactory.of(
-        ProviderType.OPENAI,
-        OpenAiChatProviderAdapter::promptCacheRetention,
-        (credential, configJson) ->
-            new OpenAiChatProviderAdapter(transport, credential, configJson));
+        ProviderType.OPENAI, credential -> new OpenAiChatProviderAdapter(transport, credential));
   }
 
   @Bean(name = "openaiResponsesProviderFactory")
@@ -140,9 +136,7 @@ public class ModelExecutionConfiguration {
       @Qualifier("modelExecutionTransport") JdkHttpSseTransport transport) {
     return ProviderFactory.of(
         ProviderType.OPENAI_RESPONSES,
-        OpenAiResponsesProviderAdapter::resolvePromptCacheRetention,
-        (credential, configJson) ->
-            new OpenAiResponsesProviderAdapter(transport, credential, configJson));
+        credential -> new OpenAiResponsesProviderAdapter(transport, credential));
   }
 
   @Bean(name = "anthropicProviderFactory")
@@ -150,10 +144,7 @@ public class ModelExecutionConfiguration {
   public ProviderFactory anthropicProviderFactory(
       @Qualifier("modelExecutionTransport") JdkHttpSseTransport transport) {
     return ProviderFactory.of(
-        ProviderType.ANTHROPIC,
-        PromptCacheRetention.SHORT,
-        (credential, configJson) ->
-            new AnthropicProviderAdapter(transport, credential, configJson));
+        ProviderType.ANTHROPIC, credential -> new AnthropicProviderAdapter(transport, credential));
   }
 
   @Bean(name = "googleProviderFactory")
@@ -161,9 +152,7 @@ public class ModelExecutionConfiguration {
   public ProviderFactory googleProviderFactory(
       @Qualifier("modelExecutionTransport") JdkHttpSseTransport transport) {
     return ProviderFactory.of(
-        ProviderType.GOOGLE,
-        PromptCacheRetention.NONE,
-        (credential, configJson) -> new GeminiProviderAdapter(transport, credential));
+        ProviderType.GOOGLE, credential -> new GeminiProviderAdapter(transport, credential));
   }
 
   @Bean

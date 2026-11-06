@@ -51,7 +51,7 @@ test('THREAD continuation routes to the owner-free thread command-batches endpoi
   const ctx = {
     async call(...args) {
       calls.push(args)
-      return { status: 202, json: { data: acceptedDto(threadId, command) } }
+      return { status: 202, json: acceptedDto(threadId, command) }
     },
   }
   await acceptCommandBatch(ctx, {
@@ -88,7 +88,7 @@ test('pure THREAD message omits both cursor fields from the owner-free wire body
   const ctx = {
     async call(...args) {
       calls.push(args)
-      return { status: 202, json: { data: acceptedDto(threadId, command) } }
+      return { status: 202, json: acceptedDto(threadId, command) }
     },
   }
   await acceptCommandBatch(ctx, {
@@ -113,7 +113,7 @@ test('cursor-bound THREAD batch without cursor is not silently completed by the 
     async call(method, url, body) {
       assert.equal(url, `/api/threads/${threadId}/command-batches`)
       assert.deepEqual(Object.keys(body).sort(), ['commands'])
-      throw new HttpError(400, JSON.stringify({ errors: { detail: 'cursor required' } }), url)
+      throw new HttpError(400, JSON.stringify({ type: 'about:blank', title: 'Invalid request', status: 400, code: 'validation', detail: 'cursor required' }), url)
     },
   }
   await assert.rejects(
@@ -139,7 +139,7 @@ test('THREAD continuation surfaces the public rejection of NOTIFICATION commands
     async call(method, url, body) {
       assert.equal(url, `/api/threads/${threadId}/command-batches`)
       assert.equal(body.commands[0].type, 'NOTIFICATION')
-      throw new HttpError(400, JSON.stringify({ errors: { detail: 'NOTIFICATION is internal-only' } }), url)
+      throw new HttpError(400, JSON.stringify({ type: 'about:blank', title: 'Invalid request', status: 400, code: 'validation', detail: 'NOTIFICATION is internal-only' }), url)
     },
   }
   await assert.rejects(
@@ -177,7 +177,7 @@ test('previewProviderRequest posts the owner-free cursor body and validates the 
   const ctx = {
     async call(...args) {
       calls.push(args)
-      return { status: 200, json: { data: previewDto() } }
+      return { status: 200, json: previewDto() }
     },
   }
   const preview = await previewProviderRequest(ctx, threadId, {
@@ -211,7 +211,7 @@ test('preview wire rejects a non-preview shape instead of guessing notice/kind',
   for (const malformed of cases) {
     const ctx = {
       async call() {
-        return { status: 200, json: { data: malformed } }
+        return { status: 200, json: malformed }
       },
     }
     await assert.rejects(
@@ -276,13 +276,13 @@ test('NEW_THREAD first creation asserts the normalized name, exact replay does n
   const target = newThreadTarget({ sessionId, startEntryId: cid(), threadId, threadName: 'branch   name' })
   const response = (threadName, replayed) => ({
     status: 202,
-    json: { data: {
+    json: {
       ...acceptedDto(threadId, command),
       session: { sessionId, name: 'fixture-session' },
       rootEntry: { entryId: cid(), entryType: 'ROOT', sessionId },
       thread: { ...threadDto(threadId), sessionId, name: threadName },
       replayed,
-    } },
+    },
   })
 
   const owner = chatOwner(cid())
@@ -318,7 +318,7 @@ test('cleanup does not repeat an accepted stop while the Thread remains RUNNING'
     async call(method, path) {
       calls.push([method, path])
       assert.equal(method, 'GET')
-      return { json: { data: snapshot } }
+      return { json: snapshot }
     },
   }, threadId)
   assert.deepEqual(calls, [['GET', `/api/threads/${threadId}`]])
@@ -346,7 +346,7 @@ test('stopThread validates per-thread receipts', async () => {
     async call() {
       return {
         status: 200,
-        json: { data: {
+        json: {
           status: 'STOPPED',
           thread: threadDto(threadId, {
             status: 'IDLE',
@@ -354,7 +354,7 @@ test('stopThread validates per-thread receipts', async () => {
             headEntryId: stoppedTurnEndEntryId,
           }),
           stoppedThreads: [receipt],
-        } },
+        },
       }
     },
   }
@@ -374,7 +374,7 @@ test('stopThread validates per-thread receipts', async () => {
   ]) {
     await assert.rejects(() =>
       stopThread(
-        { call: async () => ({ status: 200, json: { data: malformed } }) },
+        { call: async () => ({ status: 200, json: malformed }) },
         threadId,
         { stopRequestId, expectedVersion: '1' },
       ),

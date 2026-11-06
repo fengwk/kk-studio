@@ -33,7 +33,7 @@ class ModelPricingPlanSourceTest {
         """
         {"limit":{"context":1024,"output":256},
          "abilities":{"tools":true,"reasoning":false,"inputModalities":["TEXT"]},
-         "defaultVariant":"default","variants":[{"id":"default"}],
+         "defaultVariant":"default","variants":[{"id":"default","promptCacheRetention":"NONE"}],
          "pricing":{"overrides":[{"id":"fast","when":{"requestBody":{"path":"/speed","equals":"fast"}},
           "rates":{"input":"1"}}]}}
         """;

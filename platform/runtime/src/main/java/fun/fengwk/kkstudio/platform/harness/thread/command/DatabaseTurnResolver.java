@@ -20,8 +20,6 @@ import fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
-import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
-import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderFactory;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.spi.TurnResolveTransientException;
@@ -201,8 +199,6 @@ public final class DatabaseTurnResolver implements TurnResolver {
 
   private LiveTurnPlan.Planned plan(
       UUID threadId, UUID rootSessionId, EntryPath path, BranchSettings settings) {
-    UUID sessionId = path.root().sessionId();
-
     // 一次上下文解析租用一份 catalog 快照：Agent/Environment/tools/skills/subagents/prompt 同源。
     AgentTurnContext context = contextResolver.resolve(threadId, rootSessionId, path, settings);
     ResolvedSelection resolved =
@@ -229,13 +225,6 @@ public final class DatabaseTurnResolver implements TurnResolver {
                         member.parsed(), contextWindow(member.parsed()), estimatedInputTokens))
             .min()
             .orElseThrow();
-    ProviderCacheControl cacheControl =
-        usesCompactionAgentCacheHint(settings)
-            ? ProviderCacheControl.none()
-            : ProviderCacheControl.session(
-                promptCacheRetention(
-                    first.factory(), first.provider().configJson(), first.provider().name()),
-                sessionId.toString());
     return new LiveTurnPlan.Planned(
         new ModelRequestSpec(
             first.providerType(),
@@ -247,21 +236,10 @@ public final class DatabaseTurnResolver implements TurnResolver {
             systemInstruction,
             context.toolBindings(),
             context.subagentBindings(),
-            cacheControl,
             resolved.group()),
         contextWindow,
         context.candidateTools(),
         context.skills());
-  }
-
-  /**
-   * 分支是否直接使用了内置压缩 Agent 名称：只影响 cache hint（这类分支不落会话级 cache key 或 Provider 自动缓存档位），绝不作为压缩身份权威。
-   *
-   * <p>压缩执行身份由 runtime 的 durable COMPACTION Join 事实判定：直接压缩子的每一次请求（含工具 loop turn 与失败重试）都由 runtime
-   * 按父冻结 outputBudget 收紧并强制 NONE cache。普通分支即便直接选择该 Agent 名称，也只得到同样的 cache hint，不会改变、也不会覆盖该 Join 规则。
-   */
-  private static boolean usesCompactionAgentCacheHint(BranchSettings settings) {
-    return BuiltinAgentDefinitions.COMPACTION_NAME.equals(settings.agentName());
   }
 
   /**
@@ -396,10 +374,9 @@ public final class DatabaseTurnResolver implements TurnResolver {
         require(
             provider.connectionGenerationId(),
             "provider connection generation id must not be null");
-    ProviderFactory factory =
-        require(
-            providerFactories.get(providerType),
-            "provider factory not found for " + provider.name() + " (" + providerType + ")");
+    require(
+        providerFactories.get(providerType),
+        "provider factory not found for " + provider.name() + " (" + providerType + ")");
     ParsedAgentModelConfig parsed = parseModel(model);
     ModelVariant variant = findVariant(parsed, variantName);
     if (variant == null) {
@@ -418,7 +395,6 @@ public final class DatabaseTurnResolver implements TurnResolver {
         provider,
         providerType,
         providerConnectionGenerationId,
-        factory,
         parsed,
         descriptor,
         variant);
@@ -432,9 +408,9 @@ public final class DatabaseTurnResolver implements TurnResolver {
 
   /**
    * 压缩 resolver 路径：只按 preparation 的 executionModel 查找模型、Provider 与 Variant 构造请求——不查 Agent system
-   * prompt、不查 contributors、零 tool/skill、不做 environment 可用性查找、不启用 cache（{@code
-   * ProviderCacheControl.none()}）。切分事实由 candidate path 的 compaction TURN_START 持有，不复制进 spec；输出预算按当前
-   * config 与 removedPrefixTokens 现算。
+   * prompt、不查 contributors、零 tool/skill、不做 environment 可用性查找。压缩使用 Compaction Agent 自身配置的模型与
+   * variant。 切分事实由 candidate path 的 compaction TURN_START 持有，不复制进 spec；输出预算按当前 config 与
+   * removedPrefixTokens 现算。
    */
   private Result resolveCompaction(CompactionPreparation preparation) {
     String compactionAgentName = BuiltinAgentDefinitions.COMPACTION_NAME;
@@ -525,29 +501,12 @@ public final class DatabaseTurnResolver implements TurnResolver {
         .orElse(null);
   }
 
-  /** Provider 当前配置下的提示缓存留存档位；配置非法或解析失败时确定性拒绝规划（绝不静默降级或不缓存）。 */
-  private static PromptCacheRetention promptCacheRetention(
-      ProviderFactory providerFactory, String configJson, String providerName) {
-    PromptCacheRetention retention;
-    try {
-      retention = providerFactory.promptCacheRetention(configJson);
-    } catch (IllegalArgumentException error) {
-      // 只把配置非法 / 解析失败当确定性拒绝；其它异常（含基础设施）照常传播，绝不伪装成 planning 失败。
-      throw rejection("invalid prompt cache configuration for provider: " + providerName);
-    }
-    if (retention == null) {
-      throw rejection("invalid prompt cache configuration for provider: " + providerName);
-    }
-    return retention;
-  }
-
   /** 一个单 Model 的已解析执行身份；模型组的每个成员各有一份。 */
   private record MemberRuntime(
       String modelName,
       AgentProvider provider,
       ProviderType providerType,
       UUID providerConnectionGenerationId,
-      ProviderFactory factory,
       ParsedAgentModelConfig parsed,
       ModelDescriptor descriptor,
       ModelVariant variant) {}

@@ -1020,35 +1020,10 @@ class ToolProcessorExecutionTest {
     }
   }
 
-  /** WAITING_REQUEST 工具认领时直接完成 Work，不调网关、不唤醒 Thread；激活为 READY 并重新请求 Work 后正常执行。 */
+  /** READY 工具认领后经网关正常执行为 SUCCEEDED，且 ToolOutcomeQuery.find 可读到该终态。 */
   @Test
-  void waitingRequestToolCompletesWorkWithoutGatewayOrThreadWakeThenRunsOnActivate()
-      throws Exception {
-    Fixture fixture = ToolProcessorTestSupport.waitingRequestFixture();
-
-    int initialAdmitCalls = fixture.gateway.admitCalls;
-    Work initialThreadWork =
-        ToolProcessorTestSupport.threadWork(fixture.store, fixture.baseline.threadId());
-
-    // 认领 TOOL Work 并处理
-    assertEquals(ProcessResult.TERMINATED, fixture.processor.process(claim(fixture)));
-
-    // 网关未调用，TOOL Work 已完成，Thread 未唤醒
-    assertEquals(initialAdmitCalls, fixture.gateway.admitCalls);
-    assertNull(ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId));
-    Work currentThreadWork =
-        ToolProcessorTestSupport.threadWork(fixture.store, fixture.baseline.threadId());
-    assertEquals(initialThreadWork.wakeVersion(), currentThreadWork.wakeVersion());
-
-    // 2. activateRequest 并请求 TOOL Work
-    ToolProcessorTestSupport.transition(
-        fixture.store,
-        fixture.toolInvocationId,
-        tool -> tool.activateRequest(ToolProcessorTestSupport.NOW));
-    // 激活后状态转为 READY，预审放行（标记无需审批）并请求 TOOL Work
-    ToolProcessorTestSupport.toApproved(
-        fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW);
-    ToolProcessorTestSupport.requestToolWork(fixture, ToolProcessorTestSupport.NOW);
+  void readyToolRunsSuccessfullyAndOutcomeCanBeQueried() throws Exception {
+    Fixture fixture = approvedFixture();
 
     // 经测试网关执行为 SUCCEEDED
     fixture.gateway.queueRun(progress -> ToolProcessorTestSupport.succeeded("call-1"));

@@ -31,9 +31,8 @@ describe('RemoteModelIdPicker', () => {
     const load = vi
       .fn()
       .mockRejectedValue(
-        new ApiError('The agent provider service request failed.', 502, 'upstream_failed', {
-          detail: 'Provider model list returned HTTP 401',
-        }),
+        new ApiError('The agent provider service request failed.', 502, 'upstream_failed',
+          undefined, undefined, 'Provider model list returned HTTP 401'),
       )
     render(<RemoteModelIdPicker listId="ids" providerName="openai" load={load} />)
 

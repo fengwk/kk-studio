@@ -17,13 +17,7 @@ import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.model.ProviderProtocolOptions;
-import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderToolDefinition;
-import fun.fengwk.kkstudio.harness.model.provider.codec.ProviderRequestJsonCodec;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -31,7 +25,7 @@ import java.util.Set;
 
 /**
  * {@link ModelDescriptorJsonCodec} 的契约与 round-trip 测试，覆盖 descriptor 与 variant 完整字段、所有 strict
- * 拒绝路径、确定性 canonical 输出，并断言与 {@link ProviderRequestJsonCodec} 在 model/variant 子树上的 wire 一致性，防止未来漂移。
+ * 拒绝路径与确定性 canonical 输出。
  */
 class ModelDescriptorJsonCodecTest {
 
@@ -44,7 +38,6 @@ class ModelDescriptorJsonCodecTest {
           + "\"thinking\":{\"budget_tokens\":4096}}";
 
   private final ModelDescriptorJsonCodec codec = new ModelDescriptorJsonCodec();
-  private final ProviderRequestJsonCodec providerCodec = new ProviderRequestJsonCodec();
 
   private ModelDescriptor decodeDescriptor(String json) {
     if (json == null) {
@@ -74,17 +67,17 @@ class ModelDescriptorJsonCodecTest {
   @Test
   void roundTripsFullDescriptor() {
     ModelDescriptor descriptor = canonicalDescriptor();
-    String json = codec.encodeDescriptor(descriptor);
+    String json = codec.encodeDescriptorNode(descriptor).toString();
     ModelDescriptor decoded = decodeDescriptor(json);
     assertEquals(descriptor, decoded);
-    assertEquals(json, codec.encodeDescriptor(decoded));
+    assertEquals(json, codec.encodeDescriptorNode(decoded).toString());
   }
 
   /** variant 完整字段 + nullable 字段必须按 wire 输出，且 decode 后保留 null。 */
   @Test
   void roundTripsVariantWithAllNullables() {
-    ModelVariant variant = new ModelVariant("id");
-    String json = codec.encodeVariant(variant);
+    ModelVariant variant = new ModelVariant("id", null, PromptCacheRetention.NONE, null);
+    String json = codec.encodeVariantNode(variant).toString();
     ModelVariant decoded = decodeVariant(json);
     assertEquals(variant, decoded);
   }
@@ -92,8 +85,8 @@ class ModelDescriptorJsonCodecTest {
   /** Variant 含全 nullable 字段填充。 */
   @Test
   void roundTripsVariantWithFilledNullables() {
-    ModelVariant variant = new ModelVariant("id", "high");
-    String json = codec.encodeVariant(variant);
+    ModelVariant variant = new ModelVariant("id", "high", PromptCacheRetention.SHORT, null);
+    String json = codec.encodeVariantNode(variant).toString();
     ModelVariant decoded = decodeVariant(json);
     assertEquals(variant, decoded);
   }
@@ -101,55 +94,64 @@ class ModelDescriptorJsonCodecTest {
   /** 厂商自定义 reasoningEffort（如 MAX、xHigh、hiGh）走完 codec 必须等价往返并原样保留大小写，仅去除首尾空白。 */
   @Test
   void roundTripsVariantWithCustomReasoningEfforts() {
-    ModelVariant max = new ModelVariant("id", "MAX");
-    assertEquals(max, decodeVariant(codec.encodeVariant(max)));
+    ModelVariant max = new ModelVariant("id", "MAX", PromptCacheRetention.NONE, null);
+    assertEquals(max, decodeVariant(codec.encodeVariantNode(max).toString()));
 
-    ModelVariant xhigh = new ModelVariant("id", "xHigh");
-    assertEquals(xhigh, decodeVariant(codec.encodeVariant(xhigh)));
+    ModelVariant xhigh = new ModelVariant("id", "xHigh", PromptCacheRetention.SHORT, null);
+    assertEquals(xhigh, decodeVariant(codec.encodeVariantNode(xhigh).toString()));
 
-    ModelVariant mixed = new ModelVariant("id", "HiGh");
-    assertEquals(mixed, decodeVariant(codec.encodeVariant(mixed)));
+    ModelVariant mixed = new ModelVariant("id", "HiGh", PromptCacheRetention.LONG, null);
+    assertEquals(mixed, decodeVariant(codec.encodeVariantNode(mixed).toString()));
 
     // 外层空白在解码时被去除，大小写保持原值
     ModelVariant decodedFromTrimmed =
-        decodeVariant("{\"id\":\"id\",\"reasoningEffort\":\"  MAX \",\"protocolOptions\":{}}");
+        decodeVariant(
+            "{\"id\":\"id\",\"reasoningEffort\":\"  MAX \",\"promptCacheRetention\":\"SHORT\",\"protocolOptions\":{}}");
     assertEquals("MAX", decodedFromTrimmed.reasoningEffort());
 
     // 空白与超长 reasoningEffort 必须在解码时被拒绝
     assertThrows(
         IllegalArgumentException.class,
-        () -> decodeVariant("{\"id\":\"id\",\"reasoningEffort\":\"   \",\"protocolOptions\":{}}"));
+        () ->
+            decodeVariant(
+                "{\"id\":\"id\",\"reasoningEffort\":\"   \",\"promptCacheRetention\":\"SHORT\",\"protocolOptions\":{}}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             decodeVariant(
                 "{\"id\":\"id\",\"reasoningEffort\":\""
                     + "a".repeat(65)
-                    + "\",\"protocolOptions\":{}}"));
+                    + "\",\"promptCacheRetention\":\"SHORT\",\"protocolOptions\":{}}"));
   }
 
   /** 原生协议选项必须作为嵌套 object 往返：厂商私有字段、整数与小数原样保留，且空选项仍输出 {@code {}}。 */
   @Test
   void roundTripsVariantWithProtocolOptions() throws Exception {
     ModelVariant variant =
-        new ModelVariant("id", "high", new ProviderProtocolOptions(CANONICAL_VARIANT_OPTIONS_JSON));
+        new ModelVariant(
+            "id",
+            "high",
+            PromptCacheRetention.SHORT,
+            new ProviderProtocolOptions(CANONICAL_VARIANT_OPTIONS_JSON));
 
-    String json = codec.encodeVariant(variant);
+    String json = codec.encodeVariantNode(variant).toString();
     ModelVariant decoded = decodeVariant(json);
 
     assertEquals(variant, decoded);
-    assertEquals(json, codec.encodeVariant(decoded));
+    assertEquals(json, codec.encodeVariantNode(decoded).toString());
 
     JsonNode protocolOptions = OBJECT_MAPPER.readTree(json).get("protocolOptions");
     assertTrue(protocolOptions.isObject());
     assertEquals("kept", protocolOptions.path("vendor_extension").asText());
     assertEquals("1.1", protocolOptions.path("ratio").asText());
     assertEquals(
-        List.of("id", "reasoningEffort", "protocolOptions"),
+        List.of("id", "reasoningEffort", "promptCacheRetention", "protocolOptions"),
         List.copyOf(fieldNames(OBJECT_MAPPER.readTree(json))));
 
     JsonNode emptyOptions =
-        OBJECT_MAPPER.readTree(codec.encodeVariant(new ModelVariant("id"))).get("protocolOptions");
+        codec
+            .encodeVariantNode(new ModelVariant("id", null, PromptCacheRetention.NONE, null))
+            .get("protocolOptions");
     assertTrue(emptyOptions.isObject());
     assertTrue(emptyOptions.isEmpty());
   }
@@ -159,20 +161,24 @@ class ModelDescriptorJsonCodecTest {
   void rejectsInvalidVariantProtocolOptions() {
     assertThrows(
         IllegalArgumentException.class,
-        () -> decodeVariant("{\"id\":\"id\",\"reasoningEffort\":null}"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> decodeVariant("{\"id\":\"id\",\"reasoningEffort\":null,\"protocolOptions\":null}"));
+        () ->
+            decodeVariant(
+                "{\"id\":\"id\",\"reasoningEffort\":null,\"promptCacheRetention\":\"SHORT\"}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             decodeVariant(
-                "{\"id\":\"id\",\"reasoningEffort\":null,\"protocolOptions\":[{\"a\":1}]}"));
+                "{\"id\":\"id\",\"reasoningEffort\":null,\"promptCacheRetention\":\"SHORT\",\"protocolOptions\":null}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             decodeVariant(
-                "{\"id\":\"id\",\"reasoningEffort\":null,\"protocolOptions\":{\"a\":1,\"a\":2}}"));
+                "{\"id\":\"id\",\"reasoningEffort\":null,\"promptCacheRetention\":\"SHORT\",\"protocolOptions\":[{\"a\":1}]}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            decodeVariant(
+                "{\"id\":\"id\",\"reasoningEffort\":null,\"promptCacheRetention\":\"SHORT\",\"protocolOptions\":{\"a\":1,\"a\":2}}"));
   }
 
   // ---------- 确定性 / canonical ----------
@@ -181,15 +187,15 @@ class ModelDescriptorJsonCodecTest {
   @Test
   void encodingIsDeterministic() {
     ModelDescriptor descriptor = canonicalDescriptor();
-    String first = codec.encodeDescriptor(descriptor);
-    String second = codec.encodeDescriptor(descriptor);
+    String first = codec.encodeDescriptorNode(descriptor).toString();
+    String second = codec.encodeDescriptorNode(descriptor).toString();
     assertEquals(first, second);
   }
 
   /** descriptor 字段顺序固定。 */
   @Test
   void descriptorFieldsAreInFixedOrder() throws Exception {
-    JsonNode root = OBJECT_MAPPER.readTree(codec.encodeDescriptor(canonicalDescriptor()));
+    JsonNode root = codec.encodeDescriptorNode(canonicalDescriptor());
     ArrayNode names = NODES.arrayNode();
     root.propertyNames().forEach(names::add);
     assertEquals(
@@ -255,9 +261,7 @@ class ModelDescriptorJsonCodecTest {
     assertThrows(
         IllegalArgumentException.class, () -> codec.decodeDescriptorNode(NODES.numberNode(42)));
     assertThrows(NullPointerException.class, () -> codec.decodeDescriptorNode(null));
-    assertThrows(NullPointerException.class, () -> codec.encodeDescriptor(null));
     assertThrows(NullPointerException.class, () -> codec.encodeDescriptorNode(null));
-    assertThrows(NullPointerException.class, () -> codec.encodeVariant(null));
     assertThrows(NullPointerException.class, () -> codec.encodeVariantNode(null));
     assertThrows(IllegalArgumentException.class, () -> codec.decodeVariantNode(NODES.arrayNode()));
     assertThrows(NullPointerException.class, () -> codec.decodeVariantNode(null));
@@ -334,64 +338,21 @@ class ModelDescriptorJsonCodecTest {
     assertThrows(IllegalArgumentException.class, () -> codec.decodeDescriptorNode(str));
   }
 
-  // ---------- 跨 codec 一致性 ----------
-
-  /**
-   * 关键交叉断言：ProviderRequest 内嵌的 model 与 variant 子节点必须与共享 codec 输出完全一致，确保未来修改 不会让两者漂移。两边都是直接 {@code
-   * encodeNode} 产出，未经过 JSON parse，所以节点类型（IntNode / LongNode 等）天然一致，{@code JsonNode#equals} 可直接生效。
-   */
+  // 档位是 durable variant 的必填字段，缺失、null 和未知值都不可被默认填充。
   @Test
-  void providerRequestModelAndVariantMatchSharedCodec() {
-    ModelDescriptor model = canonicalDescriptor();
-    ModelVariant variant = new ModelVariant("balanced", "medium");
-    ProviderRequest request =
-        new ProviderRequest(
-            model,
-            variant,
-            1024,
-            "Test system instruction.",
-            List.of(
-                new ProviderMessage(
-                    ProviderMessageRole.USER, List.of(new ProviderTextBlock("hello")))),
-            List.of(new ProviderToolDefinition("noop", "no-op", "{\"type\":\"object\"}")),
-            ProviderCacheControl.none());
-
-    JsonNode providerRoot = providerCodec.encodeNode(request);
-    JsonNode sharedModel = codec.encodeDescriptorNode(model);
-    JsonNode sharedVariant = codec.encodeVariantNode(variant);
-
-    assertEquals(sharedModel, providerRoot.get("model"));
-    assertEquals(sharedVariant, providerRoot.get("variant"));
-  }
-
-  /**
-   * 端到端：canonical wire fixture 必须与 ProviderRequestJsonCodec 生成的 request JSON 完全一致，确保 shared codec
-   * 抽取后 wire bit-identical。
-   *
-   * <p>{@code ProviderRequestJsonCodec.encode} 与共享 codec 必须对 model/variant 子树输出相同的 canonical
-   * wire；同时保留通过 shared codec 反向解码的对象相等断言，确保两端语义等价。
-   */
-  @Test
-  void sharedCodecMatchesCanonicalProviderFixture() throws Exception {
-    ProviderRequest request = canonicalProviderRequest();
-    String providerJson = providerCodec.encode(request);
-
-    // 1) canonical wire 与共享 codec 文本输出逐字节一致（直接比较文本，无需 parse 再 toString）。
-    JsonNode root = OBJECT_MAPPER.readTree(providerJson);
-    String sharedModelJson = codec.encodeDescriptor(request.model());
-    String sharedVariantJson = codec.encodeVariant(request.variant());
-    assertEquals(sharedModelJson, root.get("model").toString());
-    assertEquals(sharedVariantJson, root.get("variant").toString());
-
-    // 2) 经过 parse 后的子树与共享 codec 直接 encodeNode 输出文本完全一致（canonical wire 一致）。
-    assertEquals(
-        codec.encodeDescriptorNode(request.model()).toString(), root.get("model").toString());
-    assertEquals(
-        codec.encodeVariantNode(request.variant()).toString(), root.get("variant").toString());
-
-    // 3) 通过 shared codec 反向解码 model/variant 子树必须等于 request 中的对应字段。
-    assertEquals(request.model(), codec.decodeDescriptorNode(root.get("model")));
-    assertEquals(request.variant(), codec.decodeVariantNode(root.get("variant")));
+  void requiresValidPromptCacheRetention() {
+    for (PromptCacheRetention retention : PromptCacheRetention.values()) {
+      ModelVariant value = new ModelVariant("v", null, retention, null);
+      assertEquals(value, codec.decodeVariantNode(codec.encodeVariantNode(value)));
+    }
+    ObjectNode missing =
+        codec.encodeVariantNode(new ModelVariant("v", null, PromptCacheRetention.SHORT, null));
+    missing.remove("promptCacheRetention");
+    assertThrows(IllegalArgumentException.class, () -> codec.decodeVariantNode(missing));
+    missing.putNull("promptCacheRetention");
+    assertThrows(IllegalArgumentException.class, () -> codec.decodeVariantNode(missing));
+    missing.put("promptCacheRetention", "FOREVER");
+    assertThrows(IllegalArgumentException.class, () -> codec.decodeVariantNode(missing));
   }
 
   // ---------- Fixture / 辅助方法 ----------
@@ -413,31 +374,6 @@ class ModelDescriptorJsonCodecTest {
   }
 
   private static ObjectNode canonicalDescriptorNode() {
-    try {
-      return (ObjectNode)
-          OBJECT_MAPPER.readTree(
-              new ModelDescriptorJsonCodec().encodeDescriptor(canonicalDescriptor()));
-    } catch (JacksonException exception) {
-      throw new IllegalStateException(exception);
-    }
-  }
-
-  /**
-   * 与 {@code ProviderRequestJsonCodecTest.canonicalRequest()} 等价的 request，但仅用于交叉断言（不依赖该测试
-   * 私有字段）。canonical fixture 由 ProviderRequestJsonCodecTest 维护，本测试只复用其形态。
-   */
-  private static ProviderRequest canonicalProviderRequest() {
-    ModelDescriptor model = canonicalDescriptor();
-    ModelVariant variant =
-        new ModelVariant(
-            "balanced", "medium", new ProviderProtocolOptions(CANONICAL_VARIANT_OPTIONS_JSON));
-    return new ProviderRequest(
-        model,
-        variant,
-        1024,
-        "Test system instruction.",
-        new ArrayList<>(),
-        List.of(new ProviderToolDefinition("lookup", "Look up facts", "{}")),
-        ProviderCacheControl.none());
+    return new ModelDescriptorJsonCodec().encodeDescriptorNode(canonicalDescriptor());
   }
 }

@@ -264,22 +264,23 @@ class AnthropicProtocolOptionsTest {
         root.path("output_config").path("format").path("schema").path("type").asString(""));
   }
 
-  /** 测试意图：BUDGET 模式 runtime 不写 effort，native output_config 子字段保留且不得凭空生成 effort。 */
+  /** 原生预算选项与 output_config 子字段都保留，运行时不得凭空生成 effort。 */
   @Test
   void preservesNativeOutputConfigSubFieldsInBudgetMode() throws IOException {
-    AnthropicRequestEncoder budgetEncoder =
-        new AnthropicRequestEncoder(new AnthropicConfiguration(AnthropicThinkingMode.BUDGET));
+    AnthropicRequestEncoder budgetEncoder = new AnthropicRequestEncoder();
     ProviderRequest request =
         request(
             reasoningModel(),
-            variant("medium", "{\"output_config\":{\"format\":{\"type\":\"json_schema\"}}}"),
+            variant(
+                null,
+                "{\"thinking\":{\"type\":\"enabled\",\"budget_tokens\":8192},\"output_config\":{\"format\":{\"type\":\"json_schema\"}}}"),
             32768,
             List.of(userMsg()),
             List.of());
 
     JsonNode root = wire(budgetEncoder.encode(request, descriptor));
 
-    // BUDGET 模式 runtime 不写 effort：native output_config 子字段原样保留且不得凭空出现 effort
+    // native output_config 子字段原样保留且不得凭空出现 effort。
     assertEquals("enabled", root.path("thinking").path("type").asString(""));
     assertEquals(8192, root.path("thinking").path("budget_tokens").asInt(0));
     assertEquals(
@@ -396,7 +397,10 @@ class AnthropicProtocolOptionsTest {
 
   private static ModelVariant variant(String reasoningEffort, String protocolOptionsJson) {
     return new ModelVariant(
-        "native", reasoningEffort, new ProviderProtocolOptions(protocolOptionsJson));
+        "native",
+        reasoningEffort,
+        PromptCacheRetention.NONE,
+        new ProviderProtocolOptions(protocolOptionsJson));
   }
 
   private static ModelDescriptor reasoningModel() {

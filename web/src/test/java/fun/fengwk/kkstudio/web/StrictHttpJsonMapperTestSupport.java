@@ -19,6 +19,11 @@ public final class StrictHttpJsonMapperTestSupport {
     return MAPPER;
   }
 
+  /** 消息转换器使用的严格输入配置；其他测试仍可取容器注入的 mapper。 */
+  public static JsonMapper strictHttp() {
+    return HttpBoundaryConfiguration.strictHttpMapper(MAPPER);
+  }
+
   private static JsonMapper create() {
     AtomicReference<JsonMapper> reference = new AtomicReference<>();
     new ApplicationContextRunner()

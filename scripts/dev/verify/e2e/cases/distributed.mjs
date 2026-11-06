@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { assert, assertDecimalVersion, envelopeData, expectHttpError, sleep } from '../lib/http.mjs'
+import { assert, assertDecimalVersion, expectHttpError, sleep } from '../lib/http.mjs'
 import {
   assertDistributedContext,
   ENV_A_ID,
@@ -27,7 +27,7 @@ async function waitForEnvironmentReady(callNode, node, envId, maxAttempts = 60) 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       const res = await callNode(node, 'GET', `/api/environments/${encodeURIComponent(envId)}`)
-      const card = envelopeData(res.json)
+      const card = res.json
       if (card?.ready === true && card?.status === 'READY') {
         return card
       }
@@ -94,7 +94,7 @@ registerCase({
     try {
       // 1. 在 node A 创建临时 Environment Card
       const createRes = await ctx.callNode('a', 'POST', '/api/environments', { name: envName })
-      const created = envelopeData(createRes.json)
+      const created = createRes.json
       assert(created?.id, 'expected created environment id')
       assert(created.name === envName, `expected name ${envName}, got ${created.name}`)
       assert(
@@ -107,7 +107,7 @@ registerCase({
 
       // 2. 在 node B 读取并验证一致性（注意 registrationToken 不暴露）
       const getBRes = await ctx.callNode('b', 'GET', `/api/environments/${encodeURIComponent(createdId)}`)
-      const fromB = envelopeData(getBRes.json)
+      const fromB = getBRes.json
       assert(fromB.id === createdId, 'node B get: id mismatch')
       assert(fromB.name === envName, 'node B get: name mismatch')
       assert(fromB.version === latestVersion, 'node B get: version mismatch')
@@ -120,7 +120,7 @@ registerCase({
         `/api/environments/${encodeURIComponent(createdId)}/registration-token`,
         { expectedVersion: latestVersion },
       )
-      const rotatedOnB = envelopeData(rotateOnBRes.json)
+      const rotatedOnB = rotateOnBRes.json
       assert(rotatedOnB.name === envName, 'node B rotate: name must stay immutable')
       assert(rotatedOnB.version !== latestVersion, 'node B rotate: version must advance')
       assertDecimalVersion(rotatedOnB.version, 'rotatedOnB.version')
@@ -148,7 +148,7 @@ registerCase({
         `/api/environments/${encodeURIComponent(createdId)}/registration-token`,
         { expectedVersion: latestVersion },
       )
-      const rotatedOnA = envelopeData(rotateOnARes.json)
+      const rotatedOnA = rotateOnARes.json
       assert(rotatedOnA.name === envName, 'node A rotate: name must stay immutable')
       assert(
         rotatedOnA.registrationToken !== tokenFromB,
@@ -170,7 +170,7 @@ registerCase({
         { status: 405 },
       )
       const getARes = await ctx.callNode('a', 'GET', `/api/environments/${encodeURIComponent(createdId)}`)
-      const fromA = envelopeData(getARes.json)
+      const fromA = getARes.json
       assert(fromA.name === envName, 'node A verify: name must stay immutable')
       assert(fromA.version === latestVersion, 'node A verify: version mismatch')
 
@@ -210,7 +210,7 @@ registerCase({
       if (createdId) {
         try {
           const probe = await ctx.callNode('a', 'GET', `/api/environments/${encodeURIComponent(createdId)}`)
-          const card = envelopeData(probe.json)
+          const card = probe.json
           if (card?.version) {
             await ctx.callNode(
               'a',
@@ -383,7 +383,7 @@ registerCase({
 
 async function getThreadSnapshotFromNode(callNode, node, threadId) {
   const { json } = await callNode(node, 'GET', `/api/threads/${encodeURIComponent(threadId)}`)
-  return envelopeData(json)
+  return json
 }
 
 async function setupDistributedHarness(ctx, suffix) {
@@ -396,7 +396,7 @@ async function setupDistributedHarness(ctx, suffix) {
     modelCallTimeoutMillis: 60_000,
     modelCallIdleTimeoutMillis: 30_000,
   })
-  const provider = envelopeData(providerRes.json)
+  const provider = providerRes.json
   assert(provider?.name, 'provider creation failed')
 
   const modelRes = await ctx.callNode('a', 'POST', '/api/models', {
@@ -408,10 +408,10 @@ async function setupDistributedHarness(ctx, suffix) {
     config: baseModelConfig({
       limit: { context: 4096, output: 512 },
       abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
-      variants: [{ id: 'default' }],
+      variants: [{ id: 'default', promptCacheRetention: 'SHORT' }],
     }),
   })
-  const model = envelopeData(modelRes.json)
+  const model = modelRes.json
   assert(model?.name, 'model creation failed')
 
   const agentRes = await ctx.callNode('a', 'POST', '/api/agents', {
@@ -425,7 +425,7 @@ async function setupDistributedHarness(ctx, suffix) {
       subagents: [],
     },
   })
-  const agent = envelopeData(agentRes.json)
+  const agent = agentRes.json
   assert(agent?.name, 'agent creation failed')
 
   return { provider, model, agent }

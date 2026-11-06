@@ -4,7 +4,6 @@ import { createServer } from 'node:http'
 import {
   assert,
   cid,
-  envelopeData,
   expectHttpError,
 } from '../lib/http.mjs'
 import {
@@ -67,7 +66,7 @@ registerCase({
       sizeBytes: content.length,
       sha256,
     })
-    const pending = envelopeData(reserveJson)
+    const pending = reserveJson
     assert(pending.state === 'PENDING', JSON.stringify(pending))
     assert(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(String(pending.id)), JSON.stringify(pending))
     assert(pending.presignedPut?.method === 'PUT', JSON.stringify(pending))
@@ -96,7 +95,7 @@ registerCase({
       'POST',
       `/api/storage/uploads/${encodeURIComponent(uploadId)}/complete`,
     )
-    const ready = envelopeData(completeJson)
+    const ready = completeJson
     assert(ready.state === 'READY', JSON.stringify(ready))
     const blobId = String(ready.blobId)
     assert(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(blobId), JSON.stringify(ready))
@@ -240,7 +239,7 @@ registerCase({
       sizeBytes: 1,
       sha256: createHash('sha256').update(Buffer.from([1])).digest('hex'),
     })
-    const pendingUploadId = String(envelopeData(pendingReserveJson).id)
+    const pendingUploadId = String(pendingReserveJson.id)
     await expectHttpError(
       () =>
         acceptCommandBatch(ctx, {
@@ -278,8 +277,7 @@ registerCase({
     let primaryError = null
     const cleanupErrors = []
     try {
-      provider = envelopeData(
-        (
+      provider = (
           await ctx.call('POST', '/api/providers', {
             name: `e2e-provider-image-${suffix}`,
             description: 'Local Responses probe for attachment materialization.',
@@ -289,10 +287,8 @@ registerCase({
             modelCallTimeoutMillis: 30_000,
             modelCallIdleTimeoutMillis: 10_000,
           })
-        ).json,
-      )
-      model = envelopeData(
-        (
+        ).json
+      model = (
           await ctx.call('POST', '/api/models', {
             kind: 'MODEL',
             providerName: provider.name,
@@ -306,13 +302,11 @@ registerCase({
                 reasoning: false,
                 inputModalities: ['TEXT', 'IMAGE'],
               },
-              variants: [{ id: 'default' }],
+              variants: [{ id: 'default', promptCacheRetention: 'SHORT' }],
             }),
           })
-        ).json,
-      )
-      agent = envelopeData(
-        (
+        ).json
+      agent = (
           await ctx.call('POST', '/api/agents', {
             name: `e2e-agent-image-${suffix}`,
             description: 'Agent starts with one environment-independent tool.',
@@ -324,8 +318,7 @@ registerCase({
               subagents: [],
             },
           })
-        ).json,
-      )
+        ).json
       chat = await createChat(ctx, {
         title: `e2e-inline-image-${suffix}`,
         agentName: agent.name,
@@ -379,8 +372,7 @@ registerCase({
 
       // 既有 Thread 的第二轮必须读取最新 Agent config.tools。
       // Goal tools 是无需 Environment 的真实可选工具，避免把本 Canvas-only case 错绑到 live daemon。
-      agent = envelopeData(
-        (
+      agent = (
           await ctx.call('PUT', `/api/agents/${encodeURIComponent(agent.name)}`, {
             description: 'Agent now has the latest tools.',
             systemPrompt: 'Complete without calling tools.',
@@ -392,8 +384,7 @@ registerCase({
             },
             expectedVersion: agent.version,
           })
-        ).json,
-      )
+        ).json
       const uploadId = await uploadReadyFile(ctx, {
         filename: 'pixel.png',
         mediaType: 'image/png',
@@ -520,30 +511,26 @@ registerCase({
 
 async function uploadReadyFile(ctx, { filename, mediaType, content }) {
   const sha256 = createHash('sha256').update(content).digest('hex')
-  const pending = envelopeData(
-    (
+  const pending = (
       await ctx.call('POST', '/api/storage/uploads', {
         filename,
         mediaType,
         sizeBytes: content.length,
         sha256,
       })
-    ).json,
-  )
+    ).json
   const put = await fetch(pending.presignedPut.url, {
     method: 'PUT',
     headers: pending.presignedPut.headers || {},
     body: content,
   })
   assert(put.ok, `presigned PUT failed: ${put.status} ${await put.text()}`)
-  const ready = envelopeData(
-    (
+  const ready = (
       await ctx.call(
         'POST',
         `/api/storage/uploads/${encodeURIComponent(String(pending.id))}/complete`,
       )
-    ).json,
-  )
+    ).json
   assert(ready.state === 'READY', JSON.stringify(ready))
   return String(ready.id)
 }

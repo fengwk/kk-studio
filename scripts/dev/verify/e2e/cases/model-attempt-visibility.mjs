@@ -1,6 +1,6 @@
 import { createServer } from 'node:http'
 
-import { assert, cid, envelopeData, sleep } from '../lib/http.mjs'
+import { assert, cid, sleep } from '../lib/http.mjs'
 import {
   acceptCommandBatch,
   branchSettingsOf,
@@ -71,7 +71,7 @@ registerCase({
         modelCallTimeoutMillis: 30_000,
         modelCallIdleTimeoutMillis: 10_000,
       })
-      provider = envelopeData(providerResponse.json)
+      provider = providerResponse.json
       assert(provider?.name && provider?.version, JSON.stringify(providerResponse.json))
 
       const modelResponse = await ctx.call('POST', '/api/models', {
@@ -87,10 +87,10 @@ registerCase({
             reasoning: false,
             inputModalities: ['TEXT'],
           },
-          variants: [{ id: 'default' }],
+          variants: [{ id: 'default', promptCacheRetention: 'SHORT' }],
         }),
       })
-      model = envelopeData(modelResponse.json)
+      model = modelResponse.json
       assert(model?.providerName === provider.name && model?.name, JSON.stringify(modelResponse.json))
 
       const agentResponse = await ctx.call('POST', '/api/agents', {
@@ -100,7 +100,7 @@ registerCase({
         execution: { driver: 'builtin', settings: { modelName: model.name, variant: 'default' } },
         config: { tools: [], skills: [], subagents: [] },
       })
-      agent = envelopeData(agentResponse.json)
+      agent = agentResponse.json
       assert(agent?.name && agent.execution?.driver === 'builtin' && agent.execution.settings?.modelName === model.name, JSON.stringify(agentResponse.json))
 
       chat = await createChat(ctx, {

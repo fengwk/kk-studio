@@ -10,8 +10,6 @@ const ILLEGAL_THREAD_ID = 'd0000000-0000-0000-0000-000000000001'
 
 function createProjectSnapshot() {
   return {
-    status: 200,
-    data: {
       project: {
         id: PROJECT_ID,
         title: 'Alpha Project',
@@ -50,14 +48,11 @@ function createProjectSnapshot() {
         },
       ],
       referencedStateCodes: ['INIT'],
-    },
   }
 }
 
 function createIssueDetail() {
   return {
-    status: 200,
-    data: {
       issue: {
         id: ISSUE_ID,
         projectId: PROJECT_ID,
@@ -84,14 +79,11 @@ function createIssueDetail() {
           threadId: VALID_THREAD_ID,
         },
       ],
-    },
   }
 }
 
 function createThreadSnapshot() {
   return {
-    status: 200,
-    data: {
       version: '1',
       thread: {
         name: 'Architecture Thread',
@@ -150,7 +142,6 @@ function createThreadSnapshot() {
       generationFailures: [],
       stopReceipts: [],
       unconfirmedExecutions: [],
-    },
   }
 }
 
@@ -177,7 +168,7 @@ test.describe('Project Agent Real Browser Wiring & Control Gatekeeping', () => {
 
         if (path === `/api/threads/${VALID_THREAD_ID}/command-batches` && method === 'POST') {
           commandBatches.push(route.request().postDataJSON())
-          await route.fulfill({ json: { status: 200, data: { accepted: true, thread: createThreadSnapshot().data.thread } } })
+          await route.fulfill({ json: { accepted: true, thread: createThreadSnapshot().thread } })
           return
         }
         if (path === `/api/threads/${VALID_THREAD_ID}/stop` && method === 'POST') {
@@ -186,11 +177,9 @@ test.describe('Project Agent Real Browser Wiring & Control Gatekeeping', () => {
           stopCount += 1
           await route.fulfill({
             json: {
-              status: 200,
-              data: {
                 status: 'STOPPED',
                 thread: {
-                  ...createThreadSnapshot().data.thread,
+                  ...createThreadSnapshot().thread,
                   status: 'IDLE',
                   executionControl: 'STOPPED',
                   version: String(stopCount + 1),
@@ -213,7 +202,6 @@ test.describe('Project Agent Real Browser Wiring & Control Gatekeeping', () => {
                     ],
                   },
                 ],
-              },
             },
           })
           return
@@ -223,11 +211,11 @@ test.describe('Project Agent Real Browser Wiring & Control Gatekeeping', () => {
           return
         }
         if (path === `/api/threads/${VALID_THREAD_ID}/tree`) {
-          await route.fulfill({ json: { status: 200, data: [] } })
+          await route.fulfill({ json: [] })
           return
         }
         if (path === `/api/environments`) {
-          await route.fulfill({ json: { status: 200, data: [] } })
+          await route.fulfill({ json: [] })
           return
         }
         if (path === `/api/issues/${ISSUE_ID}`) {
@@ -236,18 +224,18 @@ test.describe('Project Agent Real Browser Wiring & Control Gatekeeping', () => {
         }
         if (path === `/api/issues/${ISSUE_ID}/activities` && method === 'POST') {
           issueActivities.push(route.request().postDataJSON())
-          await route.fulfill({ json: { status: 200, data: [] } })
+          await route.fulfill({ json: [] })
           return
         }
         if (path === `/api/issues/${ISSUE_ID}/evidence`) {
-          await route.fulfill({ json: { status: 200, data: [] } })
+          await route.fulfill({ json: [] })
           return
         }
         if (path.startsWith(`/api/issues/${ISSUE_ID}`)) {
           if (path.endsWith('/stop') && method === 'POST') {
             issueStops.push(route.request().postDataJSON())
           }
-          await route.fulfill({ json: { status: 200, data: createIssueDetail().data.issue } })
+          await route.fulfill({ json: createIssueDetail().issue })
           return
         }
         if (path === `/api/projects/${PROJECT_ID}/snapshot`) {
@@ -261,8 +249,6 @@ test.describe('Project Agent Real Browser Wiring & Control Gatekeeping', () => {
         if (path === '/api/agents') {
           await route.fulfill({
             json: {
-              status: 200,
-              data: {
                 pageNumber: 1,
                 pageSize: 50,
                 totalCount: '1',
@@ -271,7 +257,6 @@ test.describe('Project Agent Real Browser Wiring & Control Gatekeeping', () => {
                     execution: { driver: 'builtin', settings: { modelName: 'MiniMax-M2.7', variant: 'default' } },
                     config: { tools: [], skills: [], subagents: [] }, version: '1' },
                 ],
-              },
             },
           })
           return
@@ -279,25 +264,22 @@ test.describe('Project Agent Real Browser Wiring & Control Gatekeeping', () => {
         if (path === '/api/models') {
           await route.fulfill({
             json: {
-              status: 200,
-              data: {
                 pageNumber: 1,
                 pageSize: 50,
                 totalCount: '0',
                 results: [],
-              },
             },
           })
           return
         }
         if (path === '/api/interactions' && method === 'GET') {
           await route.fulfill({
-            json: { status: 200, data: { items: [], nextCursor: null, total: 0, freshnessAt: null } },
+            json: { items: [], nextCursor: null, total: 0, freshnessAt: null },
           })
           return
         }
 
-        await route.fulfill({ json: { status: 200, data: {} } })
+        await route.fulfill({ json: {} })
       },
     )
 
@@ -416,7 +398,7 @@ test.describe('Project Agent Real Browser Wiring & Control Gatekeeping', () => {
         await route.fulfill({ json: createIssueDetail() })
         return
       }
-      await route.fulfill({ json: { status: 200, data: {} } })
+      await route.fulfill({ json: {} })
     })
 
     await page.goto(

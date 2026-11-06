@@ -180,23 +180,20 @@ async function installPaneApi(
       recorded.stopRequests.push(request.postDataJSON())
       await route.fulfill({
         json: {
-          status: 200,
-          data: {
-            status: 'STOPPED',
-            thread: rootThread({ status: 'IDLE', executionControl: 'STOPPED', version: '2' }),
-            stoppedThreads: [],
-          },
+          status: 'STOPPED',
+          thread: rootThread({ status: 'IDLE', executionControl: 'STOPPED', version: '2' }),
+          stoppedThreads: [],
         },
       })
       return
     }
     if (path === `/api/threads/${ROOT_ID}/command-batches` && method === 'POST') {
       recorded.commandRequests.push(request.postDataJSON())
-      await route.fulfill({ json: { status: 200, data: { accepted: true, thread: rootThread() } } })
+      await route.fulfill({ json: { accepted: true, thread: rootThread() } })
       return
     }
     if (path === `/api/threads/${ROOT_ID}/tree`) {
-      await route.fulfill({ json: { status: 200, data: treeNodes() } })
+      await route.fulfill({ json: treeNodes() })
       return
     }
     if (path === `/api/threads/${ROOT_ID}`) {
@@ -206,39 +203,36 @@ async function installPaneApi(
         entries: options.rootEntries ?? [],
         ...(options.rootSnapshotOverrides ?? {}),
       }
-      await route.fulfill({ json: { status: 200, data } })
+      await route.fulfill({ json: data })
       return
     }
     if (path === `/api/threads/${CHILD_ID}`) {
-      await route.fulfill({ json: { status: 200, data: snapshot(childThread()) } })
+      await route.fulfill({ json: snapshot(childThread()) })
       return
     }
     if (path === '/api/interactions' && method === 'GET') {
-      await route.fulfill({ json: { status: 200, data: interactionItems() } })
+      await route.fulfill({ json: interactionItems() })
       return
     }
     if (path === '/api/agents' || path === '/api/models') {
       await route.fulfill({
-        json: { status: 200, data: { pageNumber: 1, pageSize: 50, totalCount: '0', results: [] } },
+        json: { pageNumber: 1, pageSize: 50, totalCount: '0', results: [] },
       })
       return
     }
     if (path === '/api/environments') {
-      await route.fulfill({ json: { status: 200, data: environmentCards() } })
+      await route.fulfill({ json: environmentCards() })
       return
     }
     if (path === '/api/storage/uploads' && method === 'POST') {
       recorded.uploadCalls.push('reserve')
       await route.fulfill({
         json: {
-          status: 200,
-          data: {
-            id: 'c1000000-0000-4000-8000-0000000000c1',
-            state: 'PENDING',
-            blobId: null,
-            presignedPut: { method: 'PUT', url: 'https://storage.test/pane-put', headers: {} },
-            expiresAt: null,
-          },
+          id: 'c1000000-0000-4000-8000-0000000000c1',
+          state: 'PENDING',
+          blobId: null,
+          presignedPut: { method: 'PUT', url: 'https://storage.test/pane-put', headers: {} },
+          expiresAt: null,
         },
       })
       return
@@ -247,24 +241,21 @@ async function installPaneApi(
       recorded.uploadCalls.push('complete')
       await route.fulfill({
         json: {
-          status: 200,
-          data: {
-            id: 'c1000000-0000-4000-8000-0000000000c1',
-            state: 'READY',
-            blobId: 'blob-pane-1',
-            presignedPut: null,
-            expiresAt: null,
-          },
+          id: 'c1000000-0000-4000-8000-0000000000c1',
+          state: 'READY',
+          blobId: 'blob-pane-1',
+          presignedPut: null,
+          expiresAt: null,
         },
       })
       return
     }
     if (path.startsWith('/api/storage/uploads/') && method === 'DELETE') {
       recorded.deletedUploads.push(path)
-      await route.fulfill({ json: { status: 200, data: null } })
+      await route.fulfill({ status: 204 })
       return
     }
-    await route.fulfill({ json: { status: 200, data: {} } })
+    await route.fulfill({ json: {} })
   })
   await page.route('https://storage.test/**', async (route) => {
     await route.fulfill({ status: 200, body: '' })
@@ -652,7 +643,7 @@ test('thread status three-state and execution facts in real browser', async ({ p
   // 2. RUNNING 且无 active model/tool：展示“运行中”，绝不直接显示生成，且无动画
   await page.route(`/api/threads/${ROOT_ID}`, async (route) => {
     const thread = rootThread({ status: 'RUNNING', executionControl: 'RUNNABLE' })
-    await route.fulfill({ json: { status: 200, data: snapshot(thread) } })
+    await route.fulfill({ json: snapshot(thread) })
   })
   await page.reload()
   const runningWorking = page.locator('.thread-working')
@@ -694,7 +685,7 @@ test('thread status three-state and execution facts in real browser', async ({ p
         updateTime: 1790812800,
       }],
     }
-    await route.fulfill({ json: { status: 200, data } })
+    await route.fulfill({ json: data })
   })
   await page.reload()
   const activeWorking = page.locator('.thread-working')
@@ -736,7 +727,7 @@ test('thread status three-state and execution facts in real browser', async ({ p
         updateTime: 1790812800,
       }],
     }
-    await route.fulfill({ json: { status: 200, data } })
+    await route.fulfill({ json: data })
   })
   await page.reload()
   const approvalWorking = page.locator('.thread-working')

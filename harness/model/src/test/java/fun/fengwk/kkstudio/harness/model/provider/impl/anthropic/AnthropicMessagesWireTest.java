@@ -21,6 +21,7 @@ import tools.jackson.databind.json.JsonMapper;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.model.ProviderProtocolOptions;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
@@ -288,13 +289,9 @@ class AnthropicMessagesWireTest {
     assertNull(req.firstHeader("anthropic-beta"), "native wire path does not invent beta headers");
   }
 
-  /**
-   * 验证在 BUDGET 思考模式且启用推理时，线缆请求发送 anthropic-beta: interleaved-thinking-2025-05-14，且 body 中 thinking
-   * 包含 display=summarized。
-   */
+  /** 原生预算思考按原样发送，且不自动添加 interleaved beta。 */
   @Test
-  void should_send_interleaved_thinking_beta_header_when_budget_thinking_enabled()
-      throws Exception {
+  void should_not_send_interleaved_beta_for_native_budget_thinking() throws Exception {
     AtomicReference<RecordedRequest> recorded = new AtomicReference<>();
     CountDownLatch serverLatch = new CountDownLatch(1);
 
@@ -306,14 +303,17 @@ class AnthropicMessagesWireTest {
           respondSseText(exchange, "msg_budget_beta_1", "ok");
         });
 
-    AnthropicProviderAdapter budgetAdapter =
-        new AnthropicProviderAdapter(
-            transport, TEST_API_KEY, new AnthropicConfiguration(AnthropicThinkingMode.BUDGET));
     ProviderDescriptor descriptor = createDescriptor(null);
-    AnthropicModelProvider provider = (AnthropicModelProvider) budgetAdapter.create(descriptor);
+    AnthropicModelProvider provider = (AnthropicModelProvider) adapter.create(descriptor);
 
     ModelDescriptor reasoningModel = createReasoningModelDescriptor("MiniMax-M3");
-    ModelVariant variant = new ModelVariant("budget-v", "low");
+    ModelVariant variant =
+        new ModelVariant(
+            "budget-v",
+            null,
+            PromptCacheRetention.NONE,
+            new ProviderProtocolOptions(
+                "{\"thinking\":{\"type\":\"enabled\",\"budget_tokens\":2048,\"display\":\"summarized\"}}"));
     ProviderRequest request =
         new ProviderRequest(
             reasoningModel,
@@ -330,10 +330,10 @@ class AnthropicMessagesWireTest {
     assertTrue(serverLatch.await(5, TimeUnit.SECONDS), "server should receive request");
     RecordedRequest req = recorded.get();
     assertNotNull(req);
-    assertEquals(
-        "interleaved-thinking-2025-05-14",
-        req.firstHeader("anthropic-beta"),
-        "BUDGET mode with reasoning enabled must send interleaved thinking beta header");
+    assertNull(req.firstHeader("anthropic-beta"));
+    assertEquals(TEST_API_KEY, req.firstHeader("x-api-key"));
+    assertEquals("Bearer " + TEST_API_KEY, req.firstHeader("Authorization"));
+    assertEquals("2023-06-01", req.firstHeader("anthropic-version"));
 
     JsonNode bodyJson = mapper.readTree(req.bodyBytes);
     assertEquals("enabled", bodyJson.path("thinking").path("type").asString(""));
@@ -360,7 +360,7 @@ class AnthropicMessagesWireTest {
     AnthropicModelProvider provider = (AnthropicModelProvider) adapter.create(descriptor);
 
     ModelDescriptor reasoningModel = createReasoningModelDescriptor("claude-3-7-sonnet");
-    ModelVariant variant = new ModelVariant("adaptive-v", "low");
+    ModelVariant variant = new ModelVariant("adaptive-v", "low", PromptCacheRetention.NONE, null);
     ProviderRequest request =
         new ProviderRequest(
             reasoningModel,
@@ -392,105 +392,9 @@ class AnthropicMessagesWireTest {
         bodyJson.path("messages").get(1));
   }
 
-  /** 验证配置的 beta 能力在单个 anthropic-beta 头内按声明顺序以逗号连接发送。 */
+  /** 显式关闭推理时不发送 beta，thinking 为 disabled。 */
   @Test
-  void should_send_configured_beta_features_in_one_ordered_header() throws Exception {
-    AtomicReference<RecordedRequest> recorded = new AtomicReference<>();
-    CountDownLatch serverLatch = new CountDownLatch(1);
-    server.createContext(
-        "/v1/messages",
-        exchange -> {
-          recorded.set(recordExchange(exchange));
-          serverLatch.countDown();
-          respondSseText(exchange, "msg_configured_beta_1", "ok");
-        });
-
-    AnthropicProviderAdapter configuredAdapter =
-        new AnthropicProviderAdapter(
-            transport,
-            TEST_API_KEY,
-            "{\"anthropicBetaFeatures\":[\"prompt-caching-2024-07-31\",\"context-1m-2025-08-07\"]}");
-    ProviderDescriptor descriptor = createDescriptor(null);
-    AnthropicModelProvider provider = (AnthropicModelProvider) configuredAdapter.create(descriptor);
-
-    AnthropicEncodedRequest encoded =
-        new AnthropicRequestEncoder(configuredAdapter.configuration())
-            .encode(
-                createRequest("claude-3-5-sonnet", null, List.of(userTextMsg("test")), null, null),
-                descriptor);
-    assertEquals(
-        List.of("prompt-caching-2024-07-31", "context-1m-2025-08-07"), encoded.betaFeatures());
-
-    RecordingStreamHandler handler = new RecordingStreamHandler();
-    provider.stream(
-        createRequest("claude-3-5-sonnet", null, List.of(userTextMsg("test")), null, null),
-        handler);
-
-    assertTrue(serverLatch.await(5, TimeUnit.SECONDS), "server should receive request");
-    RecordedRequest req = recorded.get();
-    assertNotNull(req);
-    assertEquals(
-        "prompt-caching-2024-07-31,context-1m-2025-08-07", req.firstHeader("anthropic-beta"));
-  }
-
-  /**
-   * 验证配置能力与运行时强制的 interleaved thinking 合并为单个 anthropic-beta 头：配置顺序在前，强制能力追加在后且与已配置值 去重，不产生重复头字段。
-   */
-  @Test
-  void should_send_configured_and_implicit_beta_features_deduped_in_one_header() throws Exception {
-    AtomicReference<RecordedRequest> recorded = new AtomicReference<>();
-    CountDownLatch serverLatch = new CountDownLatch(1);
-    server.createContext(
-        "/v1/messages",
-        exchange -> {
-          recorded.set(recordExchange(exchange));
-          serverLatch.countDown();
-          respondSseText(exchange, "msg_union_beta_1", "ok");
-        });
-
-    AnthropicProviderAdapter budgetAdapter =
-        new AnthropicProviderAdapter(
-            transport,
-            TEST_API_KEY,
-            "{\"anthropicThinkingMode\":\"BUDGET\",\"anthropicBetaFeatures\":[\"interleaved-thinking-2025-05-14\",\"prompt-caching-2024-07-31\"]}");
-    ProviderDescriptor descriptor = createDescriptor(null);
-    AnthropicModelProvider provider = (AnthropicModelProvider) budgetAdapter.create(descriptor);
-
-    ProviderRequest request =
-        new ProviderRequest(
-            createReasoningModelDescriptor("MiniMax-M3"),
-            new ModelVariant("budget-v", "low"),
-            4096,
-            "Test system instruction.",
-            List.of(userTextMsg("test")),
-            List.of(),
-            ProviderCacheControl.none());
-
-    RecordingStreamHandler handler = new RecordingStreamHandler();
-    provider.stream(request, handler);
-
-    assertTrue(serverLatch.await(5, TimeUnit.SECONDS), "server should receive request");
-    RecordedRequest req = recorded.get();
-    assertNotNull(req);
-    assertEquals(
-        "interleaved-thinking-2025-05-14,prompt-caching-2024-07-31",
-        req.firstHeader("anthropic-beta"),
-        "configured order wins and the runtime-required beta must not be duplicated");
-    assertEquals(1, req.headers.get("anthropic-beta").size(), "exactly one anthropic-beta header");
-
-    // 其余保护头照常发送
-    assertEquals(TEST_API_KEY, req.firstHeader("x-api-key"));
-    assertEquals("Bearer " + TEST_API_KEY, req.firstHeader("Authorization"));
-    assertEquals("2023-06-01", req.firstHeader("anthropic-version"));
-  }
-
-  /**
-   * 验证即使配置为 BUDGET 模式，当推理显式关闭（reasoningEffort 为 off）时，线缆请求不发送 anthropic-beta 且发送
-   * thinking:{type:"disabled"}。
-   */
-  @Test
-  void should_not_send_anthropic_beta_header_when_budget_mode_but_reasoning_disabled()
-      throws Exception {
+  void should_not_send_anthropic_beta_header_when_reasoning_disabled() throws Exception {
     AtomicReference<RecordedRequest> recorded = new AtomicReference<>();
     CountDownLatch serverLatch = new CountDownLatch(1);
 
@@ -502,14 +406,11 @@ class AnthropicMessagesWireTest {
           respondSseText(exchange, "msg_budget_noreason_1", "ok");
         });
 
-    AnthropicProviderAdapter budgetAdapter =
-        new AnthropicProviderAdapter(
-            transport, TEST_API_KEY, new AnthropicConfiguration(AnthropicThinkingMode.BUDGET));
     ProviderDescriptor descriptor = createDescriptor(null);
-    AnthropicModelProvider provider = (AnthropicModelProvider) budgetAdapter.create(descriptor);
+    AnthropicModelProvider provider = (AnthropicModelProvider) adapter.create(descriptor);
 
     ModelDescriptor reasoningModel = createReasoningModelDescriptor("MiniMax-M3");
-    ModelVariant variantNone = new ModelVariant("none-v", "off");
+    ModelVariant variantNone = new ModelVariant("none-v", "off", PromptCacheRetention.NONE, null);
     ProviderRequest request =
         new ProviderRequest(
             reasoningModel,
@@ -527,8 +428,7 @@ class AnthropicMessagesWireTest {
     RecordedRequest req = recorded.get();
     assertNotNull(req);
     assertNull(
-        req.firstHeader("anthropic-beta"),
-        "BUDGET mode with reasoningEffort=off must omit anthropic-beta header");
+        req.firstHeader("anthropic-beta"), "reasoningEffort=off must omit anthropic-beta header");
 
     JsonNode bodyJson = mapper.readTree(req.bodyBytes);
     assertEquals(
@@ -623,7 +523,7 @@ class AnthropicMessagesWireTest {
   /** 验证请求 outputTokens 正确映射至原生 max_tokens 字段。 */
   @Test
   void encodesRequestOutputBudget() throws Exception {
-    ModelVariant variant = new ModelVariant("output-budget");
+    ModelVariant variant = new ModelVariant("output-budget", null, PromptCacheRetention.NONE, null);
     ProviderDescriptor descriptor = createDescriptor(null);
     ProviderRequest request =
         createRequest("claude-3-5-sonnet", variant, 2048, List.of(userTextMsg("hi")), null, null);
@@ -649,7 +549,7 @@ class AnthropicMessagesWireTest {
   /** 验证请求中的 outputTokens 能够写入原生 max_tokens。 */
   @Test
   void should_respect_maxOutputTokens_in_chat_request() throws Exception {
-    ModelVariant variant = new ModelVariant("v");
+    ModelVariant variant = new ModelVariant("v", null, PromptCacheRetention.NONE, null);
     ProviderDescriptor descriptor = createDescriptor(null);
     ProviderRequest request =
         createRequest("claude-3-5-sonnet", variant, 4096, List.of(userTextMsg("hi")), null, null);
@@ -689,7 +589,7 @@ class AnthropicMessagesWireTest {
   /** 验证生效的请求 outputTokens 正确序列化至线缆请求负载中的 max_tokens。 */
   @Test
   void should_encode_effective_request_parameters() throws Exception {
-    ModelVariant variant = new ModelVariant("override");
+    ModelVariant variant = new ModelVariant("override", null, PromptCacheRetention.NONE, null);
     ProviderDescriptor descriptor = createDescriptor(null);
     ProviderRequest request =
         createRequest("claude-3-5-sonnet", variant, 512, List.of(userTextMsg("hi")), null, null);
@@ -718,7 +618,7 @@ class AnthropicMessagesWireTest {
             Set.of(ModelInputModality.TEXT),
             true,
             true);
-    ModelVariant variant = new ModelVariant("reasoning-v", "low");
+    ModelVariant variant = new ModelVariant("reasoning-v", "low", PromptCacheRetention.NONE, null);
     ProviderDescriptor descriptor = createDescriptor(null);
     ProviderRequest request =
         new ProviderRequest(
@@ -748,7 +648,7 @@ class AnthropicMessagesWireTest {
   @Test
   void should_respect_common_parameters_wrapped_in_integration_specific_class_in_chat_request()
       throws Exception {
-    ModelVariant variant = new ModelVariant("common");
+    ModelVariant variant = new ModelVariant("common", null, PromptCacheRetention.NONE, null);
     ProviderDescriptor descriptor = createDescriptor(null);
     ProviderRequest request =
         createRequest("claude-3-5-sonnet", variant, 1500, List.of(userTextMsg("hi")), null, null);
@@ -1910,7 +1810,7 @@ class AnthropicMessagesWireTest {
       ProviderCacheControl cacheControl) {
     return new ProviderRequest(
         createModelDescriptor("claude-3-5-sonnet"),
-        new ModelVariant("default"),
+        new ModelVariant("default", null, PromptCacheRetention.NONE, null),
         1024,
         systemInstruction,
         messages,
@@ -1927,7 +1827,9 @@ class AnthropicMessagesWireTest {
       ProviderCacheControl cacheControl) {
     return new ProviderRequest(
         createModelDescriptor(modelName),
-        variant != null ? variant : new ModelVariant("default"),
+        variant != null
+            ? variant
+            : new ModelVariant("default", null, PromptCacheRetention.NONE, null),
         outputTokens,
         "Test system instruction.",
         messages,

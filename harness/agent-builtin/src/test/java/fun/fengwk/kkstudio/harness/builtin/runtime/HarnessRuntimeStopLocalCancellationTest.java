@@ -10,6 +10,7 @@ import static fun.fengwk.kkstudio.harness.builtin.runtime.HarnessRuntimeTestSupp
 import static fun.fengwk.kkstudio.harness.builtin.runtime.HarnessRuntimeTestSupport.seedModelWork;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.HarnessRuntimeTestSupport.seedThreadWork;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.HarnessRuntimeTestSupport.seedToolWork;
+import static fun.fengwk.kkstudio.harness.builtin.runtime.HarnessRuntimeTestSupport.setWaitingApproval;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.HarnessRuntimeTestSupport.succeedTool;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.HarnessRuntimeTestSupport.targetReceipt;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtin;
@@ -29,7 +30,6 @@ import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.api.history.ToolResultStatus;
 import fun.fengwk.kkstudio.harness.api.thread.StopCommand;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.port.BuiltinWorkType;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
@@ -206,22 +206,19 @@ class HarnessRuntimeStopLocalCancellationTest {
     assertEquals(List.of(active.modelId()), calls);
   }
 
+  /** Stop 收敛审批中的 sibling，并在推进 head 后通知 Driver。 */
   @Test
-  void stopCancelsWaitingRequestToolSiblingAndNotifiesDriverCompleteStopAfterHeadAdvance() {
+  void stopCancelsWaitingApprovalToolSiblingAndNotifiesDriverCompleteStopAfterHeadAdvance() {
     InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
     FakeAgentDriver fakeDriver = new FakeAgentDriver("fake-driver");
     BranchSettings fakeSettings =
         new BranchSettings("fake-agent", new ExecutionSelection(fakeDriver.id(), "{}"), null);
     HarnessRuntimeTestSupport.ModelFreeMultiToolBaseline baseline =
-        HarnessRuntimeTestSupport.seedModelFreeToolBaseline(
-            store,
-            2,
-            fakeSettings,
-            ToolInvocationStatus.WAITING_REQUEST,
-            ToolInvocationStatus.READY);
+        HarnessRuntimeTestSupport.seedModelFreeToolBaseline(store, 2, fakeSettings);
     List<UUID> ids = baseline.toolIds();
     UUID waitingToolId = ids.get(0);
     UUID readyToolId = ids.get(1);
+    setWaitingApproval(store, waitingToolId);
 
     seedThreadWork(store, baseline.threadId());
     seedToolWork(store, waitingToolId);
@@ -243,10 +240,13 @@ class HarnessRuntimeStopLocalCancellationTest {
     StopResult result = runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 1));
     assertStopped(result);
 
-    // 兄弟工具通过 ToolOutcomeQuery 读取终态为 CANCELLED
-    var outcome = new ToolOutcomeQuery(store).find(baseline.threadId(), waitingToolId);
-    assertTrue(outcome.isPresent());
-    assertEquals(ToolResultStatus.CANCELLED, outcome.get().status());
+    // 两个兄弟工具均被取消并物化；本地取消回调按调用顺序执行。
+    assertEquals(ids, cancelledTools);
+    for (UUID toolId : ids) {
+      var outcome = new ToolOutcomeQuery(store).find(baseline.threadId(), toolId);
+      assertTrue(outcome.isPresent());
+      assertEquals(ToolResultStatus.CANCELLED, outcome.get().status());
+    }
 
     // FakeAgentDriver 的 completeStop 恰好调用一次
     assertEquals(1, fakeDriver.completeStopInvocations());

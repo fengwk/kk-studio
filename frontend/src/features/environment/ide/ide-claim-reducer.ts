@@ -1,4 +1,4 @@
-import { ApiError, apiErrorDetail, isNotFoundError } from '@/shared/api/client'
+import { ApiError, isNotFoundError } from '@/shared/api/client'
 import type {
   EnvironmentIdeOpenViewDTO,
   EnvironmentIdeViewDTO,
@@ -53,7 +53,7 @@ export function ideErrorText(error: unknown): string {
     const details = Object.values(error.errors ?? {}).filter(
       (value): value is string => typeof value === 'string',
     )
-    return [error.code, error.message, ...details].filter(Boolean).join(' ')
+    return [error.code, error.reason, error.message, error.detail, ...details].filter(Boolean).join(' ')
   }
   if (error instanceof Error) {
     return error.message
@@ -62,7 +62,10 @@ export function ideErrorText(error: unknown): string {
 }
 
 export function ideErrorDetail(error: unknown): string {
-  return apiErrorDetail(error) ?? (error instanceof Error ? error.message : '')
+  if (error instanceof ApiError && typeof error.detail === 'string' && error.detail.length > 0) {
+    return error.detail
+  }
+  return error instanceof Error ? error.message : ''
 }
 
 export function containsSensitivePath(value: string): boolean {
@@ -81,10 +84,19 @@ export function isViewGone(error: unknown): boolean {
   if (isNotFoundError(error)) {
     return true
   }
+  if (error instanceof ApiError && (error.reason === 'VIEW_GONE' || error.detail === 'VIEW_GONE')) {
+    return true
+  }
   return /VIEW_GONE|VIEW GONE|view is gone/i.test(ideErrorText(error))
 }
 
 export function isViewInUse(error: unknown): boolean {
+  if (
+    error instanceof ApiError &&
+    (error.reason === 'VIEW_IN_USE' || error.reason === 'CLAIM_CONFLICT')
+  ) {
+    return true
+  }
   return /VIEW_IN_USE|VIEW IN USE|view in use|CLAIM_CONFLICT|claim conflict/i.test(
     ideErrorText(error),
   )
@@ -95,9 +107,9 @@ export function isUnknownIdeFailure(error: unknown): boolean {
     if (error.status == null || error.status >= 500) {
       return true
     }
-    return error.code?.toLowerCase() === 'ide_unavailable'
+    return error.code === 'unavailable' && error.reason === 'IDE_UNAVAILABLE'
   }
-  // axios 拦截器之外抛出的网络错误没有 HTTP 状态，同样只能作为结果未知处理。
+  // 拦截器之外抛出的网络错误没有 HTTP 状态，同样作为结果未知处理。
   return true
 }
 

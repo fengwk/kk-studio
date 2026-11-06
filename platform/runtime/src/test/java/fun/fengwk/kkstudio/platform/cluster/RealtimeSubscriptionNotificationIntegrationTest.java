@@ -257,7 +257,7 @@ class RealtimeSubscriptionNotificationIntegrationTest extends PostgresSchemaSupp
                  yolo_enabled, spawn_trigger, constraints, execution_control,
                  input_through_sequence, next_command_sequence, version, created_at, updated_at)
             values (?, ?, ?, repeat('a', 64), 'realtime', ?, true, 'USER',
-                '{"maxOutputTokens":null,"promptCacheDisabled":false,"allowAutoCompaction":true}',
+                '{"maxOutputTokens":null,"allowAutoCompaction":true}',
                 'RUNNABLE', 0, 1, 0, now(), now())
             """)
         .params(THREAD, SESSION, ENTRY, THREAD)

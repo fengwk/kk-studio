@@ -8,6 +8,9 @@ import org.springframework.transaction.annotation.Transactional;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.page.Page;
 import fun.fengwk.kkstudio.common.page.PageQuery;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
+import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderRepository;
 import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.platform.error.CatalogVersions;
@@ -70,7 +73,9 @@ public class AgentModelService {
   public AgentModelDTO createModel(AgentModelCreateDTO createDTO) {
     Mutation mutation = mutation(createDTO == null ? null : createDTO.getName(), createDTO, null);
     if (mutation.kind() == AgentModelKind.MODEL) {
-      requireProviderForUpdate(mutation.providerName());
+      AgentProvider provider = requireProviderForUpdate(mutation.providerName());
+      validateVariantRetentions(
+          provider.name(), provider.providerType(), decodeConfig(mutation.configJson()));
     } else {
       validateMembers(groupCodec.decode(mutation.groupConfigJson()));
     }
@@ -117,7 +122,9 @@ public class AgentModelService {
     ensureExpectedVersion(current, rawExpected, expected);
     Mutation mutation = mutation(updateDTO.getName(), updateDTO, current);
     if (mutation.kind() == AgentModelKind.MODEL) {
-      requireProviderForUpdate(mutation.providerName());
+      AgentProvider provider = requireProviderForUpdate(mutation.providerName());
+      validateVariantRetentions(
+          provider.name(), provider.providerType(), decodeConfig(mutation.configJson()));
       for (String removedVariant : removedVariants(current.configJson(), mutation.configJson())) {
         if (repository.hasVariantReferences(name, removedVariant)) {
           throw DomainException.inUse(
@@ -216,9 +223,34 @@ public class AgentModelService {
     return model;
   }
 
-  private void requireProviderForUpdate(String providerName) {
-    if (providerRepository.getByNameForUpdate(providerName) == null) {
+  private AgentProvider requireProviderForUpdate(String providerName) {
+    AgentProvider provider = providerRepository.getByNameForUpdate(providerName);
+    if (provider == null) {
       throw DomainException.notFound(PROVIDER_RESOURCE);
+    }
+    return provider;
+  }
+
+  /** 校验每个 Variant 的提示缓存留存档位是否被所属 Provider 的类型支持。 模型保存与配置导入共用此校验，确保不支持时给出一致的 validation 错误。 */
+  public static void validateVariantRetentions(
+      String providerName, ProviderType providerType, AgentModelConfigDTO config) {
+    Set<PromptCacheRetention> supported =
+        Objects.requireNonNull(providerType, "providerType").promptCacheRetentions();
+    for (AgentModelVariantDTO variant : config.getVariants()) {
+      PromptCacheRetention retention =
+          PromptCacheRetention.valueOf(variant.getPromptCacheRetention().name());
+      if (!supported.contains(retention)) {
+        throw DomainException.validation(
+            RESOURCE,
+            "provider "
+                + providerName
+                + " ("
+                + providerType.wireValue()
+                + ") does not support prompt cache retention "
+                + retention
+                + " for variant: "
+                + variant.getId());
+      }
     }
   }
 
@@ -314,6 +346,13 @@ public class AgentModelService {
       throw DomainException.validation(RESOURCE, "agent model config is required: " + model.name());
     }
     return runtimeConfigParser.decode(model.configJson());
+  }
+
+  private AgentModelConfigDTO decodeConfig(String configJson) {
+    if (configJson == null || configJson.isBlank()) {
+      throw DomainException.validation(RESOURCE, "agent model config is required");
+    }
+    return runtimeConfigParser.decode(configJson);
   }
 
   private AgentModelGroupDTO decodeGroup(AgentModel model) {

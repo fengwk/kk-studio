@@ -404,7 +404,7 @@ async function resetControllerTestEnvironment() {
             multipliers: [],
           },
           defaultVariant: 'default',
-          variants: [{ id: 'default' }],
+          variants: [{ id: 'default', promptCacheRetention: 'NONE' }],
         },
         version: '0',
         createTime: 0,
@@ -537,7 +537,7 @@ describe('useAgentThreadController', () => {
   it('sends a pure USER_MESSAGE without cursor and never auto-retries a stale response', async () => {
     const currentThread = threadFixture()
     vi.mocked(harnessService.acceptThreadCommandBatch).mockRejectedValueOnce(
-      new ApiError('stale', 409, 'CONFLICT', { reason: 'STALE_COMMAND_CURSOR' }),
+      new ApiError('stale', 409, 'conflict', undefined, 'STALE_COMMAND_CURSOR'),
     )
     const base = branchDraftFromThread(currentThread)
 
@@ -1386,7 +1386,7 @@ describe('useAgentThreadController', () => {
 
   it('clears the exact replay on 409 so the retry mints fresh command ids without cursors', async () => {
     vi.mocked(harnessService.acceptThreadCommandBatch).mockRejectedValueOnce(
-      new ApiError('conflict', 409, 'CONFLICT', { reason: 'IDEMPOTENCY_KEY_REUSED' }),
+      new ApiError('conflict', 409, 'conflict', undefined, 'IDEMPOTENCY_KEY_REUSED'),
     )
     const currentThread = threadFixture()
     vi.mocked(harnessService.acceptThreadCommandBatch).mockResolvedValueOnce(
@@ -1714,7 +1714,7 @@ describe('useAgentThreadController', () => {
     const invalidateSpy = vi.spyOn(client, 'invalidateQueries')
     // 409：conflict 展示 + 目标 snapshot 失效；draft/错误通道不受影响。
     vi.mocked(harnessService.compactThread).mockRejectedValueOnce(
-      new ApiError('stale compact version', 409, 'CONFLICT', { reason: 'STALE_VERSION' }),
+      new ApiError('stale compact version', 409, 'conflict', undefined, 'STALE_VERSION'),
     )
     const { result } = renderHook(() => useTestController(THREAD_ID), {
       wrapper: clientWrapper(client),
@@ -2135,7 +2135,7 @@ describe('useAgentThreadController', () => {
       snapshotOf(tid === THREAD_ID_2 ? threadB : threadA))
 
     vi.mocked(harnessService.acceptThreadCommandBatch).mockRejectedValueOnce(
-      new ApiError('stale cursor', 409, 'CONFLICT', { reason: 'STALE_COMMAND_CURSOR' }),
+      new ApiError('stale cursor', 409, 'conflict', undefined, 'STALE_COMMAND_CURSOR'),
     )
 
     const { result, rerender } = renderHook(
@@ -2438,7 +2438,7 @@ describe('useAgentThreadController', () => {
 
     // 3. 在 epoch 2 制造一个 conflict
     vi.mocked(harnessService.decideApproval).mockRejectedValueOnce(
-      new ApiError('stale conflict', 409, 'CONFLICT', { reason: 'STALE_VERSION' }),
+      new ApiError('stale conflict', 409, 'conflict', undefined, 'STALE_VERSION'),
     )
     await act(async () => {
       await result.current.decideApproval('inv-conflict', 'ALLOW').catch(() => undefined)

@@ -87,7 +87,7 @@ for (const scenario of ['pane-root', 'pane-child']) {
       } else if (path === '/api/environments') {
         data = []
       }
-      await route.fulfill({ json: { status: 200, data } })
+      await route.fulfill({ json: data })
     })
     await page.goto(`/browser-tests/pane-control-harness.html?scenario=${scenario}`)
     const card = page.locator('.thread-block-tool')

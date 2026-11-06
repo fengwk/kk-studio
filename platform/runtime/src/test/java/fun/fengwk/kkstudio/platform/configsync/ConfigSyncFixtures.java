@@ -70,6 +70,7 @@ import fun.fengwk.kkstudio.share.catalog.AgentModelLimitDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentModelPricingDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentModelRateSetDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentModelVariantDTO;
+import fun.fengwk.kkstudio.share.catalog.PromptCacheRetention;
 import fun.fengwk.kkstudio.share.skill.SkillRefDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSectionsDTO;
 
@@ -191,6 +192,7 @@ final class ConfigSyncFixtures {
     pricing.setMultipliers(List.of());
     AgentModelVariantDTO variant = new AgentModelVariantDTO();
     variant.setId("default");
+    variant.setPromptCacheRetention(PromptCacheRetention.NONE);
     AgentModelConfigDTO config = new AgentModelConfigDTO();
     config.setLimit(limit);
     config.setAbilities(abilities);
@@ -207,6 +209,7 @@ final class ConfigSyncFixtures {
     for (String id : variantIds) {
       AgentModelVariantDTO variant = new AgentModelVariantDTO();
       variant.setId(id);
+      variant.setPromptCacheRetention(PromptCacheRetention.NONE);
       variants.add(variant);
     }
     config.setVariants(variants);

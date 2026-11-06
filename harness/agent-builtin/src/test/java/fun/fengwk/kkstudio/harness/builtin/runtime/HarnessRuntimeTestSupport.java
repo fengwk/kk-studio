@@ -67,6 +67,7 @@ import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
@@ -511,15 +512,6 @@ public final class HarnessRuntimeTestSupport {
 
   static ModelFreeMultiToolBaseline seedModelFreeToolBaseline(
       InMemoryBuiltinHarnessStore store, int toolCount, BranchSettings branchSettings) {
-    return seedModelFreeToolBaseline(
-        store, toolCount, branchSettings, (ToolInvocationStatus[]) null);
-  }
-
-  static ModelFreeMultiToolBaseline seedModelFreeToolBaseline(
-      InMemoryBuiltinHarnessStore store,
-      int toolCount,
-      BranchSettings branchSettings,
-      ToolInvocationStatus... statuses) {
     if (toolCount <= 0) {
       throw new IllegalArgumentException("toolCount must be positive");
     }
@@ -562,18 +554,9 @@ public final class HarnessRuntimeTestSupport {
           for (int i = 0; i < toolCount; i++) {
             UUID toolId = tx.nextId();
             toolIds.add(toolId);
-            ToolInvocationStatus status =
-                statuses != null && i < statuses.length ? statuses[i] : ToolInvocationStatus.READY;
             invocations.add(
                 toolInvocation(
-                    toolId,
-                    threadId,
-                    turnStartEntryId,
-                    assistantEntryId,
-                    i,
-                    callIds[i],
-                    status,
-                    T1));
+                    toolId, threadId, turnStartEntryId, assistantEntryId, i, callIds[i], T1));
           }
           tx.tools().insert(invocations);
           tx.threads().update(thread.advanceHead(assistantEntryId, T2));
@@ -723,8 +706,7 @@ public final class HarnessRuntimeTestSupport {
         1024,
         "Test system instruction.",
         List.of(askUserBinding()),
-        List.of(),
-        provider.cacheControl());
+        List.of());
   }
 
   /** 内置 contributor 贡献的 {@code ask_user}：只有该 provenance 才会被运行时视为人工输入等待。 */
@@ -1335,12 +1317,11 @@ public final class HarnessRuntimeTestSupport {
         ProviderType.OPENAI,
         new UUID(0L, 1L),
         modelDescriptor(),
-        new ModelVariant("v1"),
+        new ModelVariant("v1", null, PromptCacheRetention.NONE, null),
         1024,
         "Test system instruction.",
         bindings,
-        List.of(),
-        ProviderCacheControl.none());
+        List.of());
   }
 
   /**
@@ -1382,26 +1363,6 @@ public final class HarnessRuntimeTestSupport {
       int callIndex,
       String toolCallId,
       Instant createdAt) {
-    return toolInvocation(
-        id,
-        threadId,
-        turnStartEntryId,
-        assistantEntryId,
-        callIndex,
-        toolCallId,
-        ToolInvocationStatus.READY,
-        createdAt);
-  }
-
-  static ToolInvocation toolInvocation(
-      UUID id,
-      UUID threadId,
-      UUID turnStartEntryId,
-      UUID assistantEntryId,
-      int callIndex,
-      String toolCallId,
-      ToolInvocationStatus status,
-      Instant createdAt) {
     return new ToolInvocation(
         id,
         threadId,
@@ -1410,7 +1371,7 @@ public final class HarnessRuntimeTestSupport {
         callIndex,
         new ToolCall(toolCallId, "bash", "{}"),
         hostBinding(),
-        status,
+        ToolInvocationStatus.READY,
         0,
         null,
         null,
@@ -1437,8 +1398,7 @@ public final class HarnessRuntimeTestSupport {
         1024,
         "Test system instruction.",
         List.of(),
-        List.of(),
-        provider.cacheControl());
+        List.of());
   }
 
   static ProviderResponse responseWithToolCalls(String... toolCallIds) {
@@ -1480,7 +1440,7 @@ public final class HarnessRuntimeTestSupport {
   private static ProviderRequest providerRequest() {
     return new ProviderRequest(
         modelDescriptor(),
-        new ModelVariant("v1"),
+        new ModelVariant("v1", null, PromptCacheRetention.NONE, null),
         1024,
         "Test system instruction.",
         List.of(),

@@ -561,7 +561,6 @@ class PostgresqlCompactionChildTest {
           // 压缩子的创建来源与约束经 PostgreSQL 持久化后原样读回。
           assertEquals(SpawnTrigger.RUNTIME, childThread.spawnTrigger());
           assertEquals(false, childThread.constraints().allowAutoCompaction());
-          assertEquals(true, childThread.constraints().promptCacheDisabled());
           assertEquals(
               compaction.outputBudget().intValue(), childThread.constraints().maxOutputTokens());
           assertEquals(parentId, join.parentThreadId());
@@ -834,11 +833,11 @@ class PostgresqlCompactionChildTest {
   }
 
   /**
-   * 意图：父 COMPACTION TURN_START 冻结的 outputBudget 是压缩子每一次请求的权威上限。子自身解析出的更大预算被收紧到冻结值（min 语义）、cache 强制
-   * NONE、TURN_START 冻结的实际预算与落库 spec 一致；身份只来自 durable COMPACTION Join，而非 Agent name。
+   * 意图：父 COMPACTION TURN_START 冻结的 outputBudget 是压缩子每一次请求的权威上限。子自身解析出的更大预算被收紧到冻结值， variant
+   * 档位保留，TURN_START 冻结的实际预算与落库 spec 一致。
    */
   @Test
-  void compactionChildFirstRequestBudgetIsCappedAndCacheForcedNone() {
+  void compactionChildFirstRequestBudgetIsCappedAndVariantRetentionPreserved() {
     ProviderCacheControl cacheControl =
         ProviderCacheControl.session(PromptCacheRetention.SHORT, "child-session");
     resolvedOutputTokens = 9000;
@@ -856,10 +855,11 @@ class PostgresqlCompactionChildTest {
     // 反证前提：resolver 确实给压缩子提出了更大的预算与会话级 cache（否则本用例不构成收紧证据）。
     assertTrue(observedResolvedSpecs.stream().anyMatch(item -> item.outputTokens() == 9000));
     assertTrue(
-        observedResolvedSpecs.stream().anyMatch(item -> cacheControl.equals(item.cacheControl())));
+        observedResolvedSpecs.stream()
+            .anyMatch(item -> cacheControl.retention() == item.variant().promptCacheRetention()));
     ModelRequestSpec spec = findModel(openChildModel(child.childThreadId())).requestSpec();
     assertEquals(4096, spec.outputTokens());
-    assertEquals(ProviderCacheControl.none(), spec.cacheControl());
+    assertEquals(PromptCacheRetention.SHORT, spec.variant().promptCacheRetention());
     assertEquals("Test system instruction.", spec.systemInstruction());
     // TURN_START 冻结的 maxOutputTokens 必须等于实际请求预算，绝不残留 resolver 提出的 9000。
     assertEquals(4096, childTurnStartMaxOutputTokens(child.childThreadId()));
@@ -867,10 +867,10 @@ class PostgresqlCompactionChildTest {
 
   /**
    * 意图：压缩子的工具 loop 续作回合（工具回合闭合后的 CONTINUATION 模型轮）同样只由 durable 冻结事实收紧——resolver 给出的预算低于父 冻结预算时保持
-   * min 语义（绝不抬高到父预算），cache 一律 NONE，TURN_START 与实际 spec 一致。
+   * min 语义（绝不抬高到父预算），variant 档位保留，TURN_START 与实际 spec 一致。
    */
   @Test
-  void compactionChildToolLoopContinuationTurnIsCappedAndCacheForcedNone() {
+  void compactionChildToolLoopContinuationTurnIsCappedAndVariantRetentionPreserved() {
     resolvedOutputTokens = 1024;
     resolvedCacheControl =
         ProviderCacheControl.session(PromptCacheRetention.SHORT, "child-session");
@@ -891,7 +891,7 @@ class PostgresqlCompactionChildTest {
     ModelRequestSpec spec = findModel(openChildModel(child.childThreadId())).requestSpec();
     assertEquals(1024, spec.outputTokens());
     assertEquals(1024, continuationStart.maxOutputTokens());
-    assertEquals(ProviderCacheControl.none(), spec.cacheControl());
+    assertEquals(PromptCacheRetention.SHORT, spec.variant().promptCacheRetention());
   }
 
   /** 纯空白 final（COMPLETE）同样不是可用摘要：绝不冻结成父 receipt，走同一调用的既有重试，第二次合法摘要才由父一次提交。 */
@@ -1296,12 +1296,17 @@ class PostgresqlCompactionChildTest {
         base.providerType(),
         base.providerConnectionGenerationId(),
         base.model(),
-        base.variant(),
+        new ModelVariant(
+            base.variant().id(),
+            base.variant().reasoningEffort(),
+            resolvedCacheControl != null
+                ? resolvedCacheControl.retention()
+                : base.variant().promptCacheRetention(),
+            base.variant().protocolOptions()),
         resolvedOutputTokens != null ? resolvedOutputTokens : base.outputTokens(),
         base.systemInstruction(),
         base.toolBindings(),
-        base.subagentBindings(),
-        resolvedCacheControl != null ? resolvedCacheControl : base.cacheControl());
+        base.subagentBindings());
   }
 
   /** 父路径上冻结的压缩输出预算。 */
@@ -1891,11 +1896,10 @@ class PostgresqlCompactionChildTest {
             Set.of(ModelInputModality.TEXT),
             true,
             true),
-        new ModelVariant(model.variant()),
+        new ModelVariant(model.variant(), null, PromptCacheRetention.NONE, null),
         1024,
         "Test system instruction.",
         List.of(),
-        List.of(),
-        ProviderCacheControl.none());
+        List.of());
   }
 }

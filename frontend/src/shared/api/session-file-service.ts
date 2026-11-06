@@ -1,10 +1,13 @@
-import { ApiError, apiBaseUrl, apiClient, type HttpClient } from '@/shared/api/client'
-import type { ResultEnvelope } from '@/shared/api/contracts/base'
+import {
+  apiBaseUrl,
+  apiClient,
+  executeFetch,
+  type HttpClient,
+} from '@/shared/api/client'
 import type {
   HarnessSessionFileContentDTO,
   HarnessSessionFileListDTO,
 } from '@/shared/api/generated/contracts'
-import { getLocale, translate } from '@/shared/i18n'
 
 /** 会话归属：列目录、读文本与下载都必须携带产品 owner 供后端授权。 */
 export interface SessionFileOwner {
@@ -60,7 +63,7 @@ export function createSessionFileService(
         },
       }),
 
-    /** 下载完整字节；失败响应仍是 API 信封，需要显式解包以保留错误详情。 */
+    /** 下载完整字节；失败响应按 RFC 9457 problem+json 解析以保留错误详情。 */
     downloadSessionFile: async (
       sessionId: string,
       owner: SessionFileOwner,
@@ -72,34 +75,18 @@ export function createSessionFileService(
         ownerId: owner.id,
         path,
       })
-      const response = await fetchImpl(
+      return executeFetch<SessionFileDownload>(
         `${apiBaseUrl}${filesUrl(sessionId)}/download?${params.toString()}`,
-        { headers: { 'Accept-Language': getLocale() }, signal },
+        {
+          fetchImpl,
+          signal,
+          readResponse: async (response) => ({
+            blob: await response.blob(),
+            fileName: attachmentFileName(response.headers.get('Content-Disposition'), path),
+          }),
+        },
       )
-      if (!response.ok) {
-        const envelope = await readErrorEnvelope(response)
-        throw new ApiError(
-          envelope?.message || translate('shared.requestFailed'),
-          response.status,
-          envelope?.code,
-          envelope?.errors ?? undefined,
-        )
-      }
-      return {
-        blob: await response.blob(),
-        fileName: attachmentFileName(response.headers.get('Content-Disposition'), path),
-      }
     },
-  }
-}
-
-async function readErrorEnvelope(
-  response: Response,
-): Promise<Partial<ResultEnvelope<unknown>> | null> {
-  try {
-    return (await response.json()) as Partial<ResultEnvelope<unknown>>
-  } catch {
-    return null
   }
 }
 

@@ -22,6 +22,8 @@ import tools.jackson.databind.node.ObjectNode;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.model.ProviderProtocolOptions;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
@@ -122,7 +124,7 @@ class AnthropicThinkingTest {
   void should_return_and_send_thinking(String modelName) throws IOException {
     // 1. 首轮请求构建与编码断言
     ModelDescriptor modelDesc = createReasoningModel(modelName);
-    ModelVariant variant = new ModelVariant("default", "high");
+    ModelVariant variant = new ModelVariant("default", "high", PromptCacheRetention.NONE, null);
     ProviderMessage userMsg1 =
         new ProviderMessage(
             ProviderMessageRole.USER,
@@ -274,7 +276,7 @@ class AnthropicThinkingTest {
   @MethodSource("upstreamModels")
   void should_return_and_send_thinking_with_tools(String modelName) throws IOException {
     ModelDescriptor modelDesc = createReasoningModel(modelName);
-    ModelVariant variant = new ModelVariant("default", "medium");
+    ModelVariant variant = new ModelVariant("default", "medium", PromptCacheRetention.NONE, null);
     ProviderToolDefinition tool =
         new ProviderToolDefinition(
             "getWeather",
@@ -441,7 +443,7 @@ class AnthropicThinkingTest {
   @MethodSource("upstreamModels")
   void should_support_and_replay_redacted_thinking(String modelName) throws IOException {
     ModelDescriptor modelDesc = createReasoningModel(modelName);
-    ModelVariant variant = new ModelVariant("default", "high");
+    ModelVariant variant = new ModelVariant("default", "high", PromptCacheRetention.NONE, null);
     ProviderMessage userMsg =
         new ProviderMessage(
             ProviderMessageRole.USER, List.of(new ProviderTextBlock("Explain quantum mechanics")));
@@ -527,7 +529,7 @@ class AnthropicThinkingTest {
   @Test
   void should_disable_replay_when_signature_is_missing() throws IOException {
     ModelDescriptor modelDesc = createReasoningModel("claude-sonnet-4-6");
-    ModelVariant variant = new ModelVariant("default", "high");
+    ModelVariant variant = new ModelVariant("default", "high", PromptCacheRetention.NONE, null);
     ProviderMessage userMsg =
         new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")));
     ProviderRequest req =
@@ -607,7 +609,7 @@ class AnthropicThinkingTest {
   @Test
   void fallsBackOnAffinityMismatch_when_native_only_replay() throws IOException {
     ModelDescriptor modelDesc = createReasoningModel("claude-opus-4-8");
-    ModelVariant variant = new ModelVariant("default", "high");
+    ModelVariant variant = new ModelVariant("default", "high", PromptCacheRetention.NONE, null);
     ProviderMessage userMsg =
         new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")));
 
@@ -668,7 +670,7 @@ class AnthropicThinkingTest {
   @Test
   void replaysNativeThinkingAcrossChangedSystemAndHistory() throws IOException {
     ModelDescriptor modelDesc = createReasoningModel("claude-sonnet-4-6");
-    ModelVariant variant = new ModelVariant("default", "high");
+    ModelVariant variant = new ModelVariant("default", "high", PromptCacheRetention.NONE, null);
 
     ObjectNode payload = NODES.objectNode();
     payload.put("role", "assistant");
@@ -729,7 +731,7 @@ class AnthropicThinkingTest {
   @Test
   void should_disable_replay_when_payload_durable_contents_mismatch() throws IOException {
     ModelDescriptor modelDesc = createReasoningModel("claude-sonnet-4-6");
-    ModelVariant variant = new ModelVariant("default", "high");
+    ModelVariant variant = new ModelVariant("default", "high", PromptCacheRetention.NONE, null);
     ProviderMessage userMsg =
         new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")));
     ProviderRequest req =
@@ -799,7 +801,8 @@ class AnthropicThinkingTest {
             Set.of(ModelInputModality.TEXT),
             true,
             false); // disabled
-    ModelVariant variantWithEffort = new ModelVariant("default", "high");
+    ModelVariant variantWithEffort =
+        new ModelVariant("default", "high", PromptCacheRetention.NONE, null);
 
     ProviderRequest req1 =
         new ProviderRequest(
@@ -820,7 +823,8 @@ class AnthropicThinkingTest {
 
     // 情况 2: model.reasoning = true, 但 variant.reasoningEffort = null
     ModelDescriptor reasoningModel = createReasoningModel("claude-sonnet-4-6");
-    ModelVariant variantWithoutEffort = new ModelVariant("default");
+    ModelVariant variantWithoutEffort =
+        new ModelVariant("default", null, PromptCacheRetention.NONE, null);
 
     ProviderRequest req2 =
         new ProviderRequest(
@@ -856,7 +860,7 @@ class AnthropicThinkingTest {
     assertTrue(fixtureArray.isArray());
 
     ModelDescriptor modelDesc = createReasoningModel("claude-sonnet-4-5-20250929");
-    ModelVariant variant = new ModelVariant("default", "high");
+    ModelVariant variant = new ModelVariant("default", "high", PromptCacheRetention.NONE, null);
     ProviderRequest req =
         new ProviderRequest(
             modelDesc,
@@ -895,11 +899,16 @@ class AnthropicThinkingTest {
    */
   @Test
   void should_support_budget_thinking_mode_wire_and_stream() throws IOException {
-    AnthropicRequestEncoder budgetEncoder =
-        new AnthropicRequestEncoder(new AnthropicConfiguration(AnthropicThinkingMode.BUDGET));
+    AnthropicRequestEncoder budgetEncoder = new AnthropicRequestEncoder();
 
     ModelDescriptor modelDesc = createReasoningModel("MiniMax-M3");
-    ModelVariant variant = new ModelVariant("default", "medium");
+    ModelVariant variant =
+        new ModelVariant(
+            "default",
+            null,
+            PromptCacheRetention.NONE,
+            new ProviderProtocolOptions(
+                "{\"thinking\":{\"type\":\"enabled\",\"budget_tokens\":8192,\"display\":\"summarized\"}}"));
     ProviderMessage userMsg =
         new ProviderMessage(
             ProviderMessageRole.USER,
@@ -922,7 +931,7 @@ class AnthropicThinkingTest {
     assertEquals(8192, turn1WireRoot.path("thinking").path("budget_tokens").asInt(0));
     assertEquals("summarized", turn1WireRoot.path("thinking").path("display").asString(""));
     assertFalse(turn1WireRoot.has("output_config"), "BUDGET mode must omit output_config");
-    assertEquals(List.of("interleaved-thinking-2025-05-14"), encodedTurn1.betaFeatures());
+    assertEquals(List.of(), encodedTurn1.betaFeatures());
 
     RecordingStreamHandler handler = new RecordingStreamHandler();
     ProviderStreamBridge bridge = new ProviderStreamBridge(handler);

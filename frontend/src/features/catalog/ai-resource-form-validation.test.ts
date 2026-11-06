@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { toUserFacingErrorMessage } from '@/shared/lib/user-facing-error'
 import { emptyModelGroupDraft } from '@/features/catalog/ai-model-group-draft-codec'
 import { emptyModelDraft } from '@/features/catalog/ai-model-draft-codec'
+import { newVariantDraft } from '@/features/catalog/ai-resource-draft-primitives'
 import type { ModelDraft, ProviderDraft } from '@/features/catalog/ai-console-types'
 import {
   validateResourceDraft,
@@ -93,18 +94,16 @@ describe('ai-resource-form-validation', () => {
         modelDraft: draft({
           defaultVariant: 'stale',
           variants: [
-            {
-              draftId: 'variant-default',
+            newVariantDraft({
               id: 'fast',
               reasoningEffort: '',
               protocolOptionsJson: '',
-            },
-            {
-              draftId: 'variant-2',
+            }),
+            newVariantDraft({
               id: 'creative',
               reasoningEffort: '',
               protocolOptionsJson: '',
-            },
+            }),
           ],
         }),
         modelGroupDraft: emptyModelGroupDraft(),
@@ -124,12 +123,11 @@ describe('ai-resource-form-validation', () => {
         modelDraft: draft({
           reasoning: true,
           variants: [
-            {
-              draftId: 'variant-x',
+            newVariantDraft({
               id: 'medium',
               reasoningEffort: '',
               protocolOptionsJson: '',
-            },
+            }),
           ],
         }),
         modelGroupDraft: emptyModelGroupDraft(),
@@ -144,7 +142,7 @@ describe('ai-resource-form-validation', () => {
   it('does not mutate the model draft while validating', () => {
     const modelDraft = draft({
       reasoning: true,
-      variants: [{ draftId: 'variant-x', id: 'medium', reasoningEffort: '', protocolOptionsJson: '' }],
+      variants: [newVariantDraft({ id: 'medium', reasoningEffort: '', protocolOptionsJson: '' })],
     })
     const snapshot = JSON.stringify(modelDraft)
     const result = validateResourceDraft(
@@ -193,12 +191,11 @@ describe('ai-resource-form-validation', () => {
           providerDraft: providerDraft(),
           modelDraft: draft({
             variants: [
-              {
-                draftId: 'v1',
+              newVariantDraft({
                 id: 'medium',
                 reasoningEffort: '',
                 protocolOptionsJson: '{\n  "temperature": 0.7\n}',
-              },
+              }),
             ],
           }),
           modelGroupDraft: emptyModelGroupDraft(),
@@ -218,12 +215,11 @@ describe('ai-resource-form-validation', () => {
           modelDraft: draft({
             defaultVariant: 'fast',
             variants: [
-              {
-                draftId: 'v1',
+              newVariantDraft({
                 id: 'fast',
                 reasoningEffort: '',
                 protocolOptionsJson: '{ not valid json }',
-              },
+              }),
             ],
           }),
           modelGroupDraft: emptyModelGroupDraft(),
@@ -245,12 +241,11 @@ describe('ai-resource-form-validation', () => {
           modelDraft: draft({
             defaultVariant: 'fast',
             variants: [
-              {
-                draftId: 'v1',
+              newVariantDraft({
                 id: 'fast',
                 reasoningEffort: '',
                 protocolOptionsJson: '[1, 2, 3]',
-              },
+              }),
             ],
           }),
           modelGroupDraft: emptyModelGroupDraft(),
@@ -273,12 +268,11 @@ describe('ai-resource-form-validation', () => {
             reasoning: false,
             defaultVariant: 'standard',
             variants: [
-              {
-                draftId: 'v1',
+              newVariantDraft({
                 id: 'standard',
                 reasoningEffort: '',
                 protocolOptionsJson: 'null',
-              },
+              }),
             ],
           }),
           modelGroupDraft: emptyModelGroupDraft(),

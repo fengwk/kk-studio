@@ -33,7 +33,7 @@ class HarnessCatalogTest {
     assertTrue(catalog.descriptors().isEmpty());
     assertTrue(catalog.tools().isEmpty());
     assertTrue(catalog.selectableTools().isEmpty());
-    assertTrue(catalog.customEntryTypes().isEmpty());
+    assertTrue(catalog.findCustomEntryType(new ContributorId("core"), "state").isEmpty());
     assertTrue(catalog.findTool("bash").isEmpty());
     assertTrue(catalog.findTool(new ContributionId(new ContributorId("core"), "bash")).isEmpty());
   }
@@ -187,8 +187,9 @@ class HarnessCatalogTest {
     assertSame(envContrib, catalog.findTool("env_tool").orElseThrow());
 
     // 验证 custom entry types
-    assertEquals(1, catalog.customEntryTypes().size());
-    assertTrue(catalog.findCustomEntryType(new ContributorId("core"), "state").isPresent());
+    assertEquals(
+        new ContributionId(new ContributorId("core"), "state-entry"),
+        catalog.findCustomEntryType(new ContributorId("core"), "state").orElseThrow().id());
     assertTrue(catalog.findCustomEntryType(new ContributorId("core"), "other").isEmpty());
   }
 

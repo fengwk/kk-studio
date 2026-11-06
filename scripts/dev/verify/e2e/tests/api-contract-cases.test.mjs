@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 
 import { providerCreateBody, providerUpdateBody } from '../lib/fixtures.mjs'
-import { HttpError } from '../lib/http.mjs'
+import { problemError } from './fixtures/problem.mjs'
 import { ALL_CASES, getCase } from '../run-matrix.mjs'
 
 const RUN_MATRIX = fileURLToPath(new URL('../run-matrix.mjs', import.meta.url))
@@ -39,7 +39,7 @@ function chatDefaultEnvironmentFixture() {
     requests.push({ method, path, body })
     const pathname = new URL(path, 'http://fixture.local').pathname
     if (method === 'GET' && pathname === '/api/agents') {
-      return { status: 200, json: { data: { results: [agent] } } }
+      return { status: 200, json: { results: [agent] } }
     }
     if (method === 'POST' && pathname === '/api/environments') {
       const environment = {
@@ -49,7 +49,7 @@ function chatDefaultEnvironmentFixture() {
         registrationToken: `tok-${body.name}`,
       }
       environments.set(environment.id, environment)
-      return { status: 201, json: { data: environment } }
+      return { status: 201, json: environment }
     }
     if (method === 'POST' && pathname === '/api/chats') {
       const chat = {
@@ -61,18 +61,18 @@ function chatDefaultEnvironmentFixture() {
         version: '0',
       }
       chats.set(chat.id, chat)
-      return { status: 201, json: { data: { ...chat } } }
+      return { status: 201, json: { ...chat } }
     }
     const chatMatch = pathname.match(/^\/api\/chats\/([^/]+)$/)
     if (chatMatch) {
       const id = decodeURIComponent(chatMatch[1])
       const chat = chats.get(id)
       if (method === 'GET') {
-        return { status: 200, json: { data: { ...chat } } }
+        return { status: 200, json: { ...chat } }
       }
       if (method === 'PUT') {
         if (body.expectedVersion !== chat.version) {
-          throw new HttpError(409, JSON.stringify({ message: 'version conflict' }), pathname)
+          throw problemError(409, 'version_conflict', 'version conflict', pathname)
         }
         if (body.title !== undefined) chat.title = body.title
         if (Object.hasOwn(body, 'environmentName')) {
@@ -80,16 +80,18 @@ function chatDefaultEnvironmentFixture() {
             chat.environmentName = null
           } else {
             if (String(body.environmentName).includes('/')) {
-              throw new HttpError(
+              throw problemError(
                 400,
-                JSON.stringify({ message: "environmentName must not contain '/'" }),
+                'validation',
+                "environmentName must not contain '/'",
                 pathname,
               )
             }
             if (![...environments.values()].some((env) => env.name === body.environmentName)) {
-              throw new HttpError(
+              throw problemError(
                 400,
-                JSON.stringify({ message: `unknown environment: ${body.environmentName}` }),
+                'validation',
+                `unknown environment: ${body.environmentName}`,
                 pathname,
               )
             }
@@ -97,7 +99,7 @@ function chatDefaultEnvironmentFixture() {
           }
         }
         chat.version = String(Number(chat.version) + 1)
-        return { status: 200, json: { data: { ...chat } } }
+        return { status: 200, json: { ...chat } }
       }
       if (method === 'DELETE') {
         chats.delete(id)
@@ -108,7 +110,7 @@ function chatDefaultEnvironmentFixture() {
     if (environmentMatch) {
       const id = decodeURIComponent(environmentMatch[1])
       if (method === 'GET') {
-        return { status: 200, json: { data: { ...environments.get(id) } } }
+        return { status: 200, json: { ...environments.get(id) } }
       }
       if (method === 'DELETE') {
         environments.delete(id)
@@ -166,11 +168,19 @@ test('providerUpdateBody builds the editable PUT body without name and preserves
 test('settings contract accepts an empty existing HTTP retry list without mutating it on failure', async () => {
   const before = {
     version: '0',
+    createTime: '2026-01-01T00:00:00Z',
+    updateTime: '2026-01-01T00:00:00Z',
     tool: {},
     aiRuntime: { retryBaseDelayMillis: '2500', modelHttpRetryStatusCodes: [] },
     environment: {},
     network: { proxyUrl: null, noProxyHosts: '' },
     storageMedia: {
+      uploadExpiresSeconds: '3600',
+      s3PresignDefaultExpiresSeconds: '900',
+      s3PresignMaxExpiresSeconds: '3600',
+      canvasMediaProcessTimeoutMillis: '60000',
+      thumbnailMaxDimension: 1024,
+      thumbnailQuality: 80,
       temporaryResourceTtlSeconds: '259200',
       temporaryResourceCleanupIntervalSeconds: '1800',
     },
@@ -181,7 +191,7 @@ test('settings contract accepts an empty existing HTTP retry list without mutati
   const ctx = {
     async call(method, path) {
       assert.equal(path, '/api/settings')
-      if (method === 'GET') return { json: { data: structuredClone(before) } }
+      if (method === 'GET') return { json: structuredClone(before) }
       assert.equal(method, 'PUT')
       puts++
       throw mutationError
@@ -190,6 +200,34 @@ test('settings contract accepts an empty existing HTTP retry list without mutati
   await assert.rejects(getCase('settings.system_contract_cas').run(ctx), (error) => error === mutationError)
   assert.equal(puts, 1, 'empty existing list must pass validation and reach the CAS update')
   assert.deepEqual(before.aiRuntime.modelHttpRetryStatusCodes, [])
+
+  // 精确字段契约在更新前拒绝顶层与 section 的未知成员。
+  for (const invalid of [
+    { ...before, unexpected: true },
+    { ...before, storageMedia: { ...before.storageMedia, unexpected: true } },
+  ]) {
+    await assert.rejects(
+      getCase('settings.system_contract_cas').run({
+        async call(method) {
+          assert.equal(method, 'GET')
+          return { json: invalid }
+        },
+      }),
+      /fields must be/,
+    )
+  }
+})
+
+test('tool catalog case accepts its public fields and rejects extra fields', async () => {
+  // 真实 case 检查工具目录形状，不允许未知成员绕过。
+  const entries = ['get_goal', 'update_goal'].map((name) => ({
+    name, description: 'fixture', environmentSupport: 'NONE',
+  }))
+  const run = (tools) => getCase('catalog.internal_tools_hidden').run({
+    async call() { return { json: tools } },
+  })
+  await run(entries)
+  await assert.rejects(run([{ ...entries[0], unexpected: true }, entries[1]]), /fields must be/)
 })
 
 test('chat default environment case executes the create/retain/clear wire with omit-null semantics', async () => {

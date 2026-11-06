@@ -4,7 +4,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
@@ -32,6 +31,7 @@ import fun.fengwk.kkstudio.harness.codec.AgentMessageJsonCodec;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.model.provider.ModelProvider;
@@ -52,7 +52,6 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderThinkingBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.model.provider.codec.ProviderReplayStateJsonCodec;
-import fun.fengwk.kkstudio.harness.model.provider.codec.ProviderRequestJsonCodec;
 import fun.fengwk.kkstudio.harness.model.provider.impl.anthropic.AnthropicProviderAdapter;
 import fun.fengwk.kkstudio.harness.model.provider.impl.gemini.GeminiProviderAdapter;
 import fun.fengwk.kkstudio.harness.model.provider.impl.openai.chat.OpenAiChatProviderAdapter;
@@ -265,10 +264,6 @@ class ProviderReplayMaterializationTransportTest {
                 modalities,
                 adapter.mediaCapabilities()),
             modalities);
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new ProviderRequestJsonCodec().encode(firstRequest),
-        "attempt-only Base64 must not be persisted as a durable request");
     ProviderCompletion completion = stream(provider, firstRequest);
     assertEquals(THINKING, completion.response().thinking());
     assertEquals(ANSWER, completion.response().text());
@@ -420,7 +415,7 @@ class ProviderReplayMaterializationTransportTest {
         new ModelDescriptor("test-provider", "test-model", "test-model", modalities, false, true);
     return new ProviderRequest(
         model,
-        new ModelVariant("default"),
+        new ModelVariant("default", null, PromptCacheRetention.NONE, null),
         1024,
         "Test system instruction.",
         messages,

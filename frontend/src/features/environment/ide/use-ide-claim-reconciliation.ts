@@ -473,7 +473,8 @@ export function useIdeClaimReconciliation({
       registerUsageQuiet()
       return { ok: true, dirty: false }
     } catch (error) {
-      const cancelled = error instanceof ApiError && error.errors?.resource === 'ide_close_cancelled'
+      const cancelled = error instanceof ApiError
+        && error.code === 'validation' && error.reason === 'IDE_CLOSE_CANCELLED'
       const current = viewsRef.current[environmentId]
       if (current?.viewId !== view.viewId || current.bindingEpoch !== view.bindingEpoch) {
         return { ok: false, dirty: false, message: 'binding-changed' }

@@ -15,6 +15,7 @@ import tools.jackson.databind.node.ArrayNode;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
@@ -70,7 +71,7 @@ class OpenAiChatThinkingTest {
             Set.of(ModelInputModality.TEXT),
             true,
             true);
-    defaultVariant = new ModelVariant("default");
+    defaultVariant = new ModelVariant("default", null, PromptCacheRetention.NONE, null);
     encoder = new OpenAiChatRequestEncoder();
     recordedEvents = new ArrayList<>();
     ProviderStreamHandler handler =
@@ -106,13 +107,11 @@ class OpenAiChatThinkingTest {
             List.of(),
             ProviderCacheControl.none());
 
-    OpenAiChatEncodedRequest encoded1 =
-        encoder.encode(turn1Request, descriptor, OpenAiChatConfiguration.defaults());
+    OpenAiChatEncodedRequest encoded1 = encoder.encode(turn1Request, descriptor);
 
     // 2. 模拟收到包含 reasoning_content 与 reasoning_details 的 SSE 流
     OpenAiChatStreamAccumulator accumulator =
-        new OpenAiChatStreamAccumulator(
-            turn1Request, descriptor, OpenAiChatConfiguration.defaults(), bridge);
+        new OpenAiChatStreamAccumulator(turn1Request, descriptor, bridge);
 
     accumulator.handleData(
         """
@@ -179,8 +178,7 @@ class OpenAiChatThinkingTest {
             List.of(),
             ProviderCacheControl.none());
 
-    OpenAiChatEncodedRequest encoded2 =
-        encoder.encode(turn2Request, descriptor, OpenAiChatConfiguration.defaults());
+    OpenAiChatEncodedRequest encoded2 = encoder.encode(turn2Request, descriptor);
     JsonNode root2 = MAPPER.readTree(encoded2.bodyUtf8Bytes());
     ArrayNode messages2 = (ArrayNode) root2.path("messages");
     // 合成的系统指令消息占据 0 号，会话消息整体后移一位

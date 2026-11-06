@@ -28,7 +28,7 @@ import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
-import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
@@ -70,12 +70,7 @@ class ResolvedRequestValidatorTest {
 
   @Test
   void acceptsValidNormalRequestWithMatchingToolRoutes() {
-    ModelRequestSpec spec =
-        normalSpec(
-            SETTINGS,
-            List.of(environmentTool(ENV_BINDING)),
-            List.of(),
-            ProviderCacheControl.none());
+    ModelRequestSpec spec = normalSpec(SETTINGS, List.of(environmentTool(ENV_BINDING)), List.of());
 
     // 正常 turn 允许匹配 candidate environment 的 tool binding。
     assertDoesNotThrow(
@@ -107,10 +102,7 @@ class ResolvedRequestValidatorTest {
                 normalPath(SETTINGS),
                 resolved(
                     normalSpec(
-                        SETTINGS,
-                        List.of(environmentTool(OTHER_ENVIRONMENT_ID)),
-                        List.of(),
-                        ProviderCacheControl.none()))));
+                        SETTINGS, List.of(environmentTool(OTHER_ENVIRONMENT_ID)), List.of()))));
   }
 
   private static TurnResolver.Resolved resolved(ModelRequestSpec spec) {
@@ -142,22 +134,16 @@ class ResolvedRequestValidatorTest {
   }
 
   private static ModelRequestSpec normalSpec(BranchSettings settings) {
-    return normalSpec(settings, List.of(), List.of(), ProviderCacheControl.none());
+    return normalSpec(settings, List.of(), List.of());
   }
 
   private static ModelRequestSpec normalSpec(
-      BranchSettings settings,
-      List<ToolBinding> tools,
-      List<SubagentBinding> subagents,
-      ProviderCacheControl cacheControl) {
-    return normalSpec(BuiltinExecution.model(settings.execution()), tools, subagents, cacheControl);
+      BranchSettings settings, List<ToolBinding> tools, List<SubagentBinding> subagents) {
+    return normalSpec(BuiltinExecution.model(settings.execution()), tools, subagents);
   }
 
   private static ModelRequestSpec normalSpec(
-      ModelSelection model,
-      List<ToolBinding> tools,
-      List<SubagentBinding> subagents,
-      ProviderCacheControl cacheControl) {
+      ModelSelection model, List<ToolBinding> tools, List<SubagentBinding> subagents) {
     return new ModelRequestSpec(
         ProviderType.OPENAI,
         new UUID(0L, 1L),
@@ -168,12 +154,11 @@ class ResolvedRequestValidatorTest {
             Set.of(ModelInputModality.TEXT),
             true,
             true),
-        new ModelVariant(model.variant()),
+        new ModelVariant(model.variant(), null, PromptCacheRetention.NONE, null),
         1024,
         "Test system instruction.",
         tools,
-        subagents,
-        cacheControl);
+        subagents);
   }
 
   private static ToolBinding environmentTool(EnvironmentId environment) {

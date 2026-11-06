@@ -26,7 +26,6 @@ import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestMaterializer;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec;
-import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderAdapter;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
@@ -209,7 +208,7 @@ public final class ProviderRequestPreviewService {
    *
    * <p>父 COMPACTION 结果自身不创建 ModelInvocation：它的摘要请求由独立的压缩子 Thread 发出。此时沿父 COMPACTION TURN_START 冻结的
    * child Thread / join 票据定位子执行，并以 join 冻结的 finalAnswerEntryId（而不是 child 当前
-   * head）找到真正产出该摘要的最后一次调用前缀；工具 loop、输出预算与 cache 约束都按该子执行的冻结事实重建。关联缺失或不属于同一冻结执行时 typed 拒绝，绝不猜测。
+   * head）找到真正产出该摘要的最后一次调用前缀；工具 loop 与输出预算按子执行重建，缓存使用所选 variant。关联缺失或不属于同一冻结执行时 typed 拒绝，绝不猜测。
    *
    * @param sessionId path 中的目标 Session；不存在时由 {@link HarnessRuntime} 以 typed 异常拒绝
    * @param entryId 被查看的模型输出 Entry，必须属于该 Session 且携带 assistantMetadata（压缩结果为 {@link
@@ -248,7 +247,7 @@ public final class ProviderRequestPreviewService {
    *
    * <p>父 TURN_START 冻结 child Thread 与 join 票据；join 的 finalAnswerEntryId 是这次压缩执行的最终答复边界。这里只沿
    * finalAnswer 的 parent（该次调用的 request head）构造前缀，绝不使用 child 当前 head，因此同一条 child Thread 上后续续跑
-   * 不会污染旧压缩结果。child Thread 的不可变执行约束在规划后再次收紧输出预算并强制关闭 prompt cache，与正式提交路径一致。
+   * 不会污染旧压缩结果。child Thread 的不可变执行约束在规划后再次收紧输出预算，与正式提交路径一致。
    */
   private HarnessProviderRequestPreviewDTO previewCompactionChild(
       UUID parentSessionId, Map<UUID, Entry> parentEntries, Entry output) {
@@ -405,7 +404,6 @@ public final class ProviderRequestPreviewService {
             && childThread.parentThreadId().equals(ownerThreadId)
             && !childThread.sessionId().equals(parentSessionId)
             && childThread.spawnTrigger() == SpawnTrigger.RUNTIME
-            && constraints.promptCacheDisabled()
             && constraints.maxOutputTokens() != null
             && constraints.maxOutputTokens() <= frozen.outputBudget();
     if (!frozenExecution) {
@@ -449,16 +447,16 @@ public final class ProviderRequestPreviewService {
     }
   }
 
-  /** 冻结 child 的约束与正式提交一致：输出预算取 min，禁用 cache 时固定 NONE。 */
+  /** 冻结 child 的约束与正式提交一致：输出预算取 min。 */
   private static ModelRequestSpec applyConstraints(
       ModelRequestSpec spec, ThreadConstraints constraints) {
-    if (constraints.maxOutputTokens() == null && !constraints.promptCacheDisabled()) {
+    if (constraints.maxOutputTokens() == null) {
       return spec;
     }
-    int outputTokens =
-        constraints.maxOutputTokens() == null
-            ? spec.outputTokens()
-            : Math.min(spec.outputTokens(), constraints.maxOutputTokens());
+    int outputTokens = Math.min(spec.outputTokens(), constraints.maxOutputTokens());
+    if (outputTokens == spec.outputTokens()) {
+      return spec;
+    }
     return new ModelRequestSpec(
         spec.providerType(),
         spec.providerConnectionGenerationId(),
@@ -469,7 +467,6 @@ public final class ProviderRequestPreviewService {
         spec.systemInstruction(),
         spec.toolBindings(),
         spec.subagentBindings(),
-        constraints.promptCacheDisabled() ? ProviderCacheControl.none() : spec.cacheControl(),
         spec.groupExecution());
   }
 

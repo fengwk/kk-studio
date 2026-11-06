@@ -1,4 +1,4 @@
-import { assert, assertExactFields, envelopeData, expectHttpError, pageResults, cid } from '../lib/http.mjs'
+import { assert, assertExactFields, expectHttpError, pageResults, cid } from '../lib/http.mjs'
 import { baseModelConfig, encodePathTail, providerCreateBody, providerUpdateBody } from '../lib/fixtures.mjs'
 import {
   assertRootYoloEnabled,
@@ -72,12 +72,9 @@ registerCase({
   docs: 'path 以全局逻辑名定位既有 Model；PUT body 的 name 是目标逻辑名（支持重命名，本 case 保持同名）；PUT 非法 defaultVariant => 400，随后 GET 原配置不变',
   async run(ctx) {
     const suffix = cid().slice(0, 8)
-    const provider = envelopeData(
-      (await ctx.call('POST', '/api/providers', providerCreateBody(suffix))).json,
-    )
+    const provider = (await ctx.call('POST', '/api/providers', providerCreateBody(suffix))).json
     const modelName = `e2e-model-invupd-${suffix}`
-    const model = envelopeData(
-      (
+    const model = (
         await ctx.call('POST', '/api/models', {
           kind: 'MODEL',
           providerName: provider.name,
@@ -86,8 +83,7 @@ registerCase({
           description: 'ok',
           config: baseModelConfig(),
         })
-      ).json,
-    )
+      ).json
     await expectHttpError(
       () =>
         ctx.call(
@@ -171,17 +167,14 @@ registerCase({
   docs: '记录存续期间 name 不可修改；PUT 仅更新 editable properties；DELETE 带 expectedVersion 硬删除后同名可重建，version 从 0 重新开始且读取到新数据',
   async run(ctx) {
     const suffix = cid().slice(0, 8)
-    const created = envelopeData(
-      (await ctx.call('POST', '/api/providers', providerCreateBody(suffix))).json,
-    )
+    const created = (await ctx.call('POST', '/api/providers', providerCreateBody(suffix))).json
     assert(created?.name && !('id' in created), JSON.stringify(created))
     const listed = pageResults(
       (await ctx.call('GET', '/api/providers?pageNumber=1&pageSize=100')).json,
     )
     assert(listed.some((provider) => provider.name === created.name), 'created Provider not listed')
 
-    const updated = envelopeData(
-      (
+    const updated = (
         await ctx.call(
           'PUT',
           `/api/providers/${encodeURIComponent(created.name)}`,
@@ -195,8 +188,7 @@ registerCase({
             expectedVersion: created.version,
           },
         )
-      ).json,
-    )
+      ).json
     assert(updated.name === created.name, JSON.stringify(updated))
     assert(updated.baseUrl === 'https://example.com/v2', JSON.stringify(updated))
     assert(updated.configured === true, 'empty credential should keep configured')
@@ -207,15 +199,13 @@ registerCase({
     assert(!after.some((provider) => provider.name === created.name), 'Provider still listed')
 
     // 硬删除后同名可重建：version 从 0 重新开始，且严格使用新请求体属性。
-    const recreated = envelopeData(
-      (
+    const recreated = (
         await ctx.call('POST', '/api/providers', {
           ...providerCreateBody(suffix),
           description: 'e2e provider recreated',
           baseUrl: 'https://example.com/v3',
         })
-      ).json,
-    )
+      ).json
     assert(recreated.name === created.name, JSON.stringify(recreated))
     assert(String(recreated.version) === '0', JSON.stringify(recreated))
     assert(
@@ -241,15 +231,12 @@ registerCase({
   docs: 'path 以全局逻辑名定位；PUT 不改 providerName；protocolOptionsJson 在创建/读取/更新时保留数值文本；DELETE 后同名可重建且 version 从 0 开始；Provider 最后删除',
   async run(ctx) {
     const suffix = cid().slice(0, 8)
-    const provider = envelopeData(
-      (await ctx.call('POST', '/api/providers', providerCreateBody(suffix))).json,
-    )
+    const provider = (await ctx.call('POST', '/api/providers', providerCreateBody(suffix))).json
     const name = `vendor/e2e-model-${suffix}`
     // 文本必须跨 HTTP/持久化往返不变，不能被 JS 的 Number 舍入。
     const originalOptions = '{"large":9007199254740993,"ratio":0.12345678901234567890123456789}'
     const updatedOptions = '{"large":9223372036854775808,"nested":{"ratio":1.234567890123456789e+45}}'
-    const model = envelopeData(
-      (
+    const model = (
         await ctx.call('POST', '/api/models', {
           kind: 'MODEL',
           providerName: provider.name,
@@ -257,11 +244,10 @@ registerCase({
           modelId: `wire-lifecycle-${suffix}`,
           description: 'create',
           config: baseModelConfig({
-            variants: [{ id: 'default', protocolOptionsJson: originalOptions }],
+            variants: [{ id: 'default', promptCacheRetention: 'SHORT', protocolOptionsJson: originalOptions }],
           }),
         })
-      ).json,
-    )
+      ).json
     assert(
       model?.providerName === provider.name && model.name === name && !('id' in model),
       JSON.stringify(model),
@@ -274,12 +260,11 @@ registerCase({
       abilities: { tools: false, reasoning: true, inputModalities: ['TEXT', 'IMAGE'] },
       defaultVariant: 'fast',
       variants: [
-        { id: 'fast', protocolOptionsJson: updatedOptions },
-        { id: 'quality', reasoningEffort: 'high' },
+        { id: 'fast', promptCacheRetention: 'SHORT', protocolOptionsJson: updatedOptions },
+        { id: 'quality', promptCacheRetention: 'SHORT', reasoningEffort: 'high' },
       ],
     })
-    const updated = envelopeData(
-      (
+    const updated = (
         await ctx.call('PUT', modelPath(name), {
           kind: 'MODEL',
           name,
@@ -289,8 +274,7 @@ registerCase({
           config: updatedConfig,
           expectedVersion: model.version,
         })
-      ).json,
-    )
+      ).json
     assert(updated.providerName === provider.name && updated.name === name, JSON.stringify(updated))
     assert(updated.config.defaultVariant === 'fast', JSON.stringify(updated.config))
     assert(updated.config.variants[0].protocolOptionsJson === updatedOptions, 'updated options changed')
@@ -300,8 +284,7 @@ registerCase({
     assert(!(await findModel(ctx, name)), 'Model still listed')
 
     // 硬删除后同名可重建：version 从 0 重新开始，且严格使用新请求体配置。
-    const recreated = envelopeData(
-      (
+    const recreated = (
         await ctx.call('POST', '/api/models', {
           kind: 'MODEL',
           providerName: provider.name,
@@ -310,8 +293,7 @@ registerCase({
           description: 'recreated',
           config: baseModelConfig(),
         })
-      ).json,
-    )
+      ).json
     assert(
       recreated.providerName === provider.name && recreated.name === name,
       JSON.stringify(recreated),
@@ -339,12 +321,9 @@ registerCase({
     const models = []
     let group = null
     try {
-      provider = envelopeData(
-        (await ctx.call('POST', '/api/providers', providerCreateBody(suffix))).json,
-      )
+      provider = (await ctx.call('POST', '/api/providers', providerCreateBody(suffix))).json
       for (const [index, variant] of ['default', 'review'].entries()) {
-        const model = envelopeData(
-          (
+        const model = (
             await ctx.call('POST', '/api/models', {
               kind: 'MODEL',
               providerName: provider.name,
@@ -353,18 +332,16 @@ registerCase({
               description: `group member ${index}`,
               config: baseModelConfig({
                 limit: { context: 4096 + index * 1024, output: 256 },
-                variants: [{ id: variant }],
+                variants: [{ id: variant, promptCacheRetention: 'SHORT' }],
                 defaultVariant: variant,
               }),
             })
-          ).json,
-        )
+          ).json
         models.push(model)
       }
 
       const groupName = `e2e-model-group-${suffix}`
-      group = envelopeData(
-        (
+      group = (
           await ctx.call('POST', '/api/models', {
             kind: 'GROUP',
             name: groupName,
@@ -378,8 +355,7 @@ registerCase({
               cooldownSeconds: 30,
             },
           })
-        ).json,
-      )
+        ).json
       assert(
         group.kind === 'GROUP'
           && group.name === groupName
@@ -409,8 +385,7 @@ registerCase({
       )
       assert((await findModel(ctx, groupName))?.kind === 'GROUP', 'group missing from list')
 
-      const updated = envelopeData(
-        (
+      const updated = (
           await ctx.call('PUT', modelPath(groupName), {
             kind: 'GROUP',
             name: groupName,
@@ -425,8 +400,7 @@ registerCase({
             },
             expectedVersion: group.version,
           })
-        ).json,
-      )
+        ).json
       assert(
         updated.description === 'updated group'
           && updated.group?.members?.[0]?.modelName === models[1].name
@@ -462,8 +436,7 @@ registerCase({
   async run(ctx) {
     const [model, updatedModel] = await firstTwoModels(ctx)
     const name = `e2e-agent-${cid().slice(0, 8)}`
-    const agent = envelopeData(
-      (
+    const agent = (
         await ctx.call('POST', '/api/agents', {
           name,
           description: 'create',
@@ -471,11 +444,9 @@ registerCase({
           execution: { driver: 'builtin', settings: { modelName: modelRef(model), variant: model.config.defaultVariant } },
           config: { tools: [], skills: [], subagents: [] },
         })
-      ).json,
-    )
+      ).json
     assert(agent?.name === name && agent.execution?.driver === 'builtin' && agent.execution.settings?.modelName === modelRef(model) && !('id' in agent), JSON.stringify(agent))
-    const updated = envelopeData(
-      (
+    const updated = (
         await ctx.call('PUT', `/api/agents/${encodeURIComponent(name)}`, {
           description: 'updated',
           systemPrompt: 'updated prompt',
@@ -483,8 +454,7 @@ registerCase({
           config: { tools: [], skills: [], subagents: [] },
           expectedVersion: agent.version,
         })
-      ).json,
-    )
+      ).json
     assert(
       updated.name === name && updated.execution?.driver === 'builtin' && updated.execution.settings?.modelName === modelRef(updatedModel),
       JSON.stringify(updated),
@@ -501,8 +471,7 @@ registerCase({
     assert(!agents.some((candidate) => candidate.name === name), 'Agent still listed')
 
     // 硬删除后同名可重建：version 从 0 重新开始，且严格使用新请求体 prompt。
-    const recreated = envelopeData(
-      (
+    const recreated = (
         await ctx.call('POST', '/api/agents', {
           name,
           description: 'recreated',
@@ -510,8 +479,7 @@ registerCase({
           execution: { driver: 'builtin', settings: { modelName: modelRef(model), variant: model.config.defaultVariant } },
           config: { tools: [], skills: [], subagents: [] },
         })
-      ).json,
-    )
+      ).json
     assert(recreated.name === name && recreated.execution?.driver === 'builtin' && recreated.execution.settings?.modelName === modelRef(model), JSON.stringify(recreated))
     assert(String(recreated.version) === '0', JSON.stringify(recreated))
     assert(recreated.systemPrompt === 'recreated prompt', JSON.stringify(recreated))
@@ -537,8 +505,7 @@ registerCase({
     let child = null
     let parent = null
     try {
-      child = envelopeData(
-        (
+      child = (
           await ctx.call('POST', '/api/agents', {
             name: `e2e-child-${suffix}`,
             description: 'subagent child',
@@ -546,10 +513,8 @@ registerCase({
             execution: { driver: 'builtin', settings: { modelName: modelRef(model), variant: model.config.defaultVariant } },
             config: { tools: [], skills: [], subagents: [] },
           })
-        ).json,
-      )
-      parent = envelopeData(
-        (
+        ).json
+      parent = (
           await ctx.call('POST', '/api/agents', {
             name: `e2e-parent-${suffix}`,
             description: 'subagent parent',
@@ -561,8 +526,7 @@ registerCase({
               subagents: [child.name],
             },
           })
-        ).json,
-      )
+        ).json
       assert(
         Array.isArray(parent.config?.tools)
           && parent.config.tools.length === 0
@@ -580,8 +544,7 @@ registerCase({
           ),
         { status: 409, messageIncludes: /in use|subagent|referenc/i },
       )
-      parent = envelopeData(
-        (
+      parent = (
           await ctx.call(
             'PUT',
             `/api/agents/${encodeURIComponent(parent.name)}`,
@@ -597,8 +560,7 @@ registerCase({
               expectedVersion: parent.version,
             },
           )
-        ).json,
-      )
+        ).json
       await ctx.call(
         'DELETE',
         `/api/agents/${encodeURIComponent(child.name)}?expectedVersion=${encodeURIComponent(child.version)}`,
@@ -659,13 +621,11 @@ registerCase({
     let cleanupChat = chat
     let environment = null
     try {
+      assertExactFields(chat, ['id', 'title', 'agentName', 'environmentName', 'yoloEnabled', 'version', 'createTime', 'updateTime'], 'created chat')
       assert(
         chat.agentName === agent.name
           && chat.yoloEnabled === false
-          && chat.environmentName === null
-          && !Object.hasOwn(chat, 'workspacePath')
-          && !Object.hasOwn(chat, 'environment')
-          && !Object.hasOwn(chat, 'environmentId'),
+          && chat.environmentName === null,
         JSON.stringify(chat),
       )
       // 先创建 Thread（NEW_SESSION 初始创建），再更新 Chat 默认值，最后 reread 同一 Thread：
@@ -695,23 +655,19 @@ registerCase({
       )
       // 同时改 YOLO 与 Chat 默认环境：既有 Thread 的 branchSettings 必须逐字段不变。
       environment = await createEnvironment(ctx, `e2e-chat-independent-env-${suffix}`)
-      const updated = envelopeData(
-        (
+      const updated = (
           await ctx.call('PUT', `/api/chats/${chat.id}`, {
             yoloEnabled: true,
             environmentName: environment.name,
             expectedVersion: chat.version,
           })
-        ).json,
-      )
+        ).json
       cleanupChat = updated
+      assertExactFields(updated, ['id', 'title', 'agentName', 'environmentName', 'yoloEnabled', 'version', 'createTime', 'updateTime'], 'updated chat')
       assert(
         updated.agentName === agent.name
           && updated.yoloEnabled === true
-          && updated.environmentName === environment.name
-          && !Object.hasOwn(updated, 'workspacePath')
-          && !Object.hasOwn(updated, 'environment')
-          && !Object.hasOwn(updated, 'environmentId'),
+          && updated.environmentName === environment.name,
         JSON.stringify(updated),
       )
       // 同一 Thread reread：branchSettings 逐字段不变。
@@ -757,7 +713,7 @@ registerCase({
         environmentName: environment.name,
       })
       assert(created.status === 201, `create Chat status ${created.status}: ${JSON.stringify(created.json)}`)
-      chat = envelopeData(created.json)
+      chat = created.json
       assert(
         chat.agentName === agent.name
           && chat.yoloEnabled === false
@@ -765,14 +721,12 @@ registerCase({
         JSON.stringify(chat),
       )
       // PUT 省略 environmentName（只改 title）：保留当前默认环境。
-      chat = envelopeData(
-        (
+      chat = (
           await ctx.call('PUT', `/api/chats/${chat.id}`, {
             title: `e2e-chat-default-upd-${suffix}`,
             expectedVersion: chat.version,
           })
-        ).json,
-      )
+        ).json
       assert(chat.environmentName === environment.name, JSON.stringify(chat))
       // 未知 Environment name => 400，且不写回：当前值/version 不变。
       const beforeRejected = chat
@@ -793,21 +747,19 @@ registerCase({
           }),
         { status: 400, messageIncludes: /environmentName/i },
       )
-      const still = envelopeData((await ctx.call('GET', `/api/chats/${chat.id}`)).json)
+      const still = (await ctx.call('GET', `/api/chats/${chat.id}`)).json
       assert(
         still.environmentName === beforeRejected.environmentName
           && String(still.version) === String(beforeRejected.version),
         JSON.stringify({ before: beforeRejected, after: still }),
       )
       // 显式 null 清空默认环境。
-      chat = envelopeData(
-        (
+      chat = (
           await ctx.call('PUT', `/api/chats/${chat.id}`, {
             environmentName: null,
             expectedVersion: still.version,
           })
-        ).json,
-      )
+        ).json
       assert(chat.environmentName === null, JSON.stringify(chat))
     } finally {
       if (chat) await deleteChat(ctx, chat)
@@ -840,23 +792,19 @@ registerCase({
   docs: 'POST/PUT/DELETE Chat；Agent name 稳定引用；空白 title 400；删除后 404',
   async run(ctx) {
     const agent = await firstAgent(ctx)
-    const chat = envelopeData(
-      (
+    const chat = (
         await ctx.call('POST', '/api/chats', {
           title: 'e2e-chat',
           agentName: agent.name,
           yoloEnabled: false,
         })
-      ).json,
-    )
-    const updated = envelopeData(
-      (
+      ).json
+    const updated = (
         await ctx.call('PUT', `/api/chats/${chat.id}`, {
           title: 'e2e-chat-upd',
           expectedVersion: chat.version,
         })
-      ).json,
-    )
+      ).json
     assert(updated.title === 'e2e-chat-upd' && updated.agentName === agent.name, JSON.stringify(updated))
     await expectHttpError(
       () =>
@@ -1014,9 +962,7 @@ registerCase({
   docs: 'POST/PUT /api/providers 的 modelHttpRetryStatusCodes 为 number[]|null：无覆盖显式输出 null（继承系统名单）；数组完全替代系统名单；显式 null 清除覆盖；空数组禁用；省略字段保留既有覆盖；非 400–599 整数/越界/重复/非数组/字符串/小数/null 元素一律 400 且不推进版本；测试结束前按 CAS 删除临时 Provider',
   async run(ctx) {
     const suffix = cid().slice(0, 8)
-    const created = envelopeData(
-      (await ctx.call('POST', '/api/providers', providerCreateBody(suffix))).json,
-    )
+    const created = (await ctx.call('POST', '/api/providers', providerCreateBody(suffix))).json
     let current = created
     const put = (overrides) =>
       ctx.call('PUT', `/api/providers/${encodeURIComponent(created.name)}`, {
@@ -1031,7 +977,7 @@ registerCase({
         `uncovered Provider must expose explicit null override: ${JSON.stringify(created)}`,
       )
       // 数组完全替代系统名单。
-      current = envelopeData((await put({ modelHttpRetryStatusCodes: [500, 503] })).json)
+      current = (await put({ modelHttpRetryStatusCodes: [500, 503] })).json
       assert(
         JSON.stringify(current.modelHttpRetryStatusCodes) === JSON.stringify([500, 503]),
         JSON.stringify(current),
@@ -1045,21 +991,21 @@ registerCase({
         JSON.stringify(listed),
       )
       // 空数组表示禁用自动重试，必须与继承(null)区分。
-      current = envelopeData((await put({ modelHttpRetryStatusCodes: [] })).json)
+      current = (await put({ modelHttpRetryStatusCodes: [] })).json
       assert(
         Array.isArray(current.modelHttpRetryStatusCodes) &&
           current.modelHttpRetryStatusCodes.length === 0,
         JSON.stringify(current),
       )
       // 省略字段保留既有覆盖（仍为空数组）。
-      current = envelopeData((await put({})).json)
+      current = (await put({})).json
       assert(
         Array.isArray(current.modelHttpRetryStatusCodes) &&
           current.modelHttpRetryStatusCodes.length === 0,
         `omitted override must preserve the existing list: ${JSON.stringify(current)}`,
       )
       // 显式 null 清除覆盖，恢复继承系统名单。
-      current = envelopeData((await put({ modelHttpRetryStatusCodes: null })).json)
+      current = (await put({ modelHttpRetryStatusCodes: null })).json
       assert(
         current.modelHttpRetryStatusCodes === null,
         `explicit null must clear the override: ${JSON.stringify(current)}`,
@@ -1224,9 +1170,7 @@ async function deleteChat(ctx, chat) {
 
 /** 创建一次性 Environment Card（dedicated 资源，随 case 清理），返回权威 Card。 */
 async function createEnvironment(ctx, name) {
-  const environment = envelopeData(
-    (await ctx.call('POST', '/api/environments', { name })).json,
-  )
+  const environment = (await ctx.call('POST', '/api/environments', { name })).json
   assert(
     environment?.id && environment?.name === name && environment?.version != null,
     `invalid Environment Card: ${JSON.stringify(environment)}`,
@@ -1236,9 +1180,7 @@ async function createEnvironment(ctx, name) {
 
 /** 删除一次性 Environment Card：先读回权威版本，再用它做 CAS 删除（GET 失败直接失败，不静默回退陈旧版本）。 */
 async function deleteEnvironment(ctx, environment) {
-  const card = envelopeData(
-    (await ctx.call('GET', `/api/environments/${encodeURIComponent(environment.id)}`)).json,
-  )
+  const card = (await ctx.call('GET', `/api/environments/${encodeURIComponent(environment.id)}`)).json
   const version = String(card.version)
   await ctx.call(
     'DELETE',

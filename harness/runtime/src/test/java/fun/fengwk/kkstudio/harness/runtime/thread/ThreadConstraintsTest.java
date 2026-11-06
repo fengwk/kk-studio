@@ -13,38 +13,37 @@ class ThreadConstraintsTest {
 
   @Test
   void mergeTakesTheTighterValueForEveryDimension() {
-    // 输出上限取 min，cache 禁用取 OR，自动压缩取 AND：父与子都只能把约束收紧。
-    ThreadConstraints parent = new ThreadConstraints(1_000, false, false);
-    ThreadConstraints child = new ThreadConstraints(2_000, true, true);
+    // 输出上限取 min，自动压缩取 AND：父与子都只能把约束收紧。
+    ThreadConstraints parent = new ThreadConstraints(1_000, false);
+    ThreadConstraints child = new ThreadConstraints(2_000, true);
 
     ThreadConstraints merged = child.merge(parent);
 
     assertEquals(1_000, merged.maxOutputTokens());
-    assertEquals(true, merged.promptCacheDisabled());
     assertEquals(false, merged.allowAutoCompaction());
   }
 
   @Test
   void mergeKeepsAnUnsetOutputLimitFromEitherSide() {
     assertNull(
-        new ThreadConstraints(null, false, true)
-            .merge(new ThreadConstraints(null, true, true))
+        new ThreadConstraints(null, true)
+            .merge(new ThreadConstraints(null, true))
             .maxOutputTokens());
     assertEquals(
         256,
-        new ThreadConstraints(256, false, true)
-            .merge(new ThreadConstraints(null, false, true))
+        new ThreadConstraints(256, true)
+            .merge(new ThreadConstraints(null, true))
             .maxOutputTokens());
     assertEquals(
         256,
-        new ThreadConstraints(null, false, true)
-            .merge(new ThreadConstraints(256, false, true))
+        new ThreadConstraints(null, true)
+            .merge(new ThreadConstraints(256, true))
             .maxOutputTokens());
   }
 
   @Test
   void nonPositiveOutputLimitIsRejected() {
-    assertThrows(IllegalArgumentException.class, () -> new ThreadConstraints(0, false, true));
-    assertThrows(IllegalArgumentException.class, () -> new ThreadConstraints(-1, false, true));
+    assertThrows(IllegalArgumentException.class, () -> new ThreadConstraints(0, true));
+    assertThrows(IllegalArgumentException.class, () -> new ThreadConstraints(-1, true));
   }
 }

@@ -176,7 +176,7 @@ class CanvasDtoContractTest {
           "{\"definitionFingerprint\":12345}",
           "{\"definitionFingerprint\":true}",
           "{\"definitionFingerprint\":[\"" + fingerprint + "\"]}",
-          "{\"definitionFingerprint\":\"" + fingerprint + "\",\"catalogEpoch\":\"1\"}",
+          "{\"definitionFingerprint\":\"" + fingerprint + "\",\"unknownField\":\"1\"}",
           "{\"definitionFingerprint\":\"" + fingerprint + "\",\"extra\":true}"
         }) {
       assertThrows(

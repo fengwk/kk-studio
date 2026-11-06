@@ -226,8 +226,8 @@ test('test intent: UI smoke creates an agent without an implicit Environment', (
     'tempAgentName',
     "execution: { driver: 'builtin', settings: { modelName: REAL_UI_MODEL_ID",
     'agentCreateRes.status === 201',
-    "!Object.hasOwn(agentCreateRes.json.data, 'environmentId')",
-    "!Object.hasOwn(agentCreateRes.json.data, 'branchSettings')",
+    "!Object.hasOwn(agentCreateRes.json, 'environmentId')",
+    "!Object.hasOwn(agentCreateRes.json, 'branchSettings')",
     'button[aria-label="工作区路径"]',
     'button.environment-binding-trigger',
     'Create Chat still rendered a workspace path selector',
@@ -256,6 +256,9 @@ test('test intent: UI smoke creates an agent without an implicit Environment', (
 test('test intent: the lifecycle fixture seeds canonical branch settings', () => {
   // HarnessRuntimePostgresqlLifecycleIntegrationTest must seed canonical branch settings.
   const content = readFileSync(LIFECYCLE_TEST_JAVA, 'utf8')
-  assert.ok(!content.includes('"workspacePath"'))
-  assert.ok(content.includes('{"settings": {"agentName": "lifecycle-test"'))
+  const block = content.match(/ROOT_PAYLOAD_JSON\s*=\s*"""([\s\S]*?)"""/u)
+  assert.ok(block, 'lifecycle fixture must declare the root payload')
+  const payload = JSON.parse(block[1].replaceAll('\\\n', ''))
+  assert.deepEqual(Object.keys(payload.settings).sort(), ['agentName', 'environmentName', 'execution', 'goal'])
+  assert.equal(payload.settings.agentName, 'lifecycle-test')
 })
