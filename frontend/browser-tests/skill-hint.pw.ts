@@ -42,8 +42,8 @@ function rootThread(environmentName: string | null) {
       environmentName,
       goal: null,
     },
-    createTime: 1790812800,
-    updateTime: 1790812800,
+    createdAt: 1790812800000,
+    updatedAt: 1790812800000,
   }
 }
 
@@ -134,14 +134,14 @@ async function installSkillHintApi(
             turnCount: 1,
             toolCallCount: 0,
             outcome: null,
-            updateTime: 1774958400,
+            updatedAt: 1774958400000,
           }],
       })
       return
     }
     if (path === '/api/harness/interactions') {
       await route.fulfill({
-        json: { items: [], total: 0, freshnessAt: 1790812800, nextCursor: null },
+        json: { items: [], total: 0, freshnessAt: 1790812800000, nextCursor: null },
       })
       return
     }

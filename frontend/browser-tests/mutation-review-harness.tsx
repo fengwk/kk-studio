@@ -86,12 +86,12 @@ const mutationReviewHarness = {
       workdir: '/workspace/root',
       content: LONG_WRITE_CONTENT,
     })
-    const rawApproval = JSON.stringify({
+    const approval = {
       required: true,
       decision: null,
       decisionId: null,
       reason: 'Permission rules require approval',
-    })
+    }
 
     const callMsg: ToolDialogueMessage = {
       id: 'call-write-pending',
@@ -122,7 +122,7 @@ const mutationReviewHarness = {
         invocationId: 'inv-write-1',
         toolName: 'write',
         argumentsJson: rawArgs,
-        approval: rawApproval,
+        approval,
       },
     })
   },
@@ -240,13 +240,13 @@ const mutationReviewHarness = {
       diff: MULTI_HUNK_DIFF,
       sha256: VALID_SHA,
     }
-    const rawApproval = JSON.stringify({
+    const approval = {
       required: true,
       decision: null,
       decisionId: null,
       reason: null,
       editReview: reviewData,
-    })
+    }
 
     const callMsg: ToolDialogueMessage = {
       id: 'call-edit-reviewed',
@@ -278,7 +278,7 @@ const mutationReviewHarness = {
         invocationId: 'inv-edit-1',
         toolName: 'edit',
         argumentsJson: rawArgs,
-        approval: rawApproval,
+        approval,
       },
     })
   },
