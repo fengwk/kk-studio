@@ -49,7 +49,7 @@ Thread panel 消费 timeline presentation 类型，宿主负责 API、realtime �
 
 HTTP 路由与传输类型由 Web 控制器签名与生产 HTTP Jackson mapper 生成到
 [`generated/contracts.ts`](../../frontend/src/shared/api/generated/contracts.ts)：
-字段、可空性与枚举值跟随 Java DTO，Java long 在响应中是十进制字符串，`Instant` 是 epoch 秒数字。
+字段、可空性与枚举值跟随 Java DTO，Java long 在响应中是十进制字符串，`Instant` 是 epoch 毫秒整数。
 生成物不手改；漂移由 [`check.sh`](../../scripts/dev/verify/generated-contracts/check.sh)
 （`mvn verify` 内执行同一测试）拦截，更新走同目录
 [`write.sh`](../../scripts/dev/verify/generated-contracts/write.sh)。
@@ -406,7 +406,7 @@ Agent 引用的技能”只是提示，最终阻塞仍以服务端校验为准�
 带分支或令牌的请求由服务端拒绝。删除使用确认弹窗，包仍被 Agent 引用时展示后端 `errors.detail`
 并保留包本身。
 
-所有失败文案统一取后端 `errors.detail`；wire 上的 `Instant` 是 epoch 秒，展示前换算成本地时间。
+所有失败文案统一取后端 `errors.detail`；wire 上的 `Instant` 是 epoch 毫秒整数，展示时按本地时间格式化。
 文案键集中在 `ai.skillPackages.*`，按钮与标题不使用括号补充说明。
 
 ### tab 全局 IDE 面板
