@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.web.runtime;
+package fun.fengwk.kkstudio.platform.harness.http;
 
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;

@@ -13,10 +13,10 @@ import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
 import fun.fengwk.kkstudio.platform.harness.builtin.query.ProviderRequestPreviewService;
 import fun.fengwk.kkstudio.platform.harness.builtin.query.ProviderRequestPreviewUnavailableException;
+import fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMapper;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
 import fun.fengwk.kkstudio.share.runtime.HarnessDraftPreviewRequestDTO;
 import fun.fengwk.kkstudio.share.runtime.HarnessProviderRequestPreviewDTO;
-import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeRequestMapper;
 
 import java.util.List;
 import java.util.Objects;

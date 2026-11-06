@@ -11,13 +11,13 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentService;
 import fun.fengwk.kkstudio.platform.harness.builtin.query.ModelRequestDebugService;
+import fun.fengwk.kkstudio.platform.harness.http.HarnessThreadService;
 import fun.fengwk.kkstudio.platform.harness.thread.query.EnvironmentWaitProjectionService;
 import fun.fengwk.kkstudio.platform.harness.thread.query.UsageCostProjectionService;
 import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.platform.interaction.InteractionService;
 import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
 import fun.fengwk.kkstudio.web.advice.StudioProblemAdvice;
-import fun.fengwk.kkstudio.web.harness.HarnessThreadService;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeTestFixtures;
 
 import java.util.Map;

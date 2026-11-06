@@ -1,14 +1,14 @@
-package fun.fengwk.kkstudio.web.runtime;
+package fun.fengwk.kkstudio.platform.harness.http;
 
-import static fun.fengwk.kkstudio.web.runtime.HarnessRuntimeRequestMapperTestSupport.THREAD_ID;
-import static fun.fengwk.kkstudio.web.runtime.HarnessRuntimeRequestMapperTestSupport.command;
-import static fun.fengwk.kkstudio.web.runtime.HarnessRuntimeRequestMapperTestSupport.cursorBatch;
-import static fun.fengwk.kkstudio.web.runtime.HarnessRuntimeRequestMapperTestSupport.executionSelection;
-import static fun.fengwk.kkstudio.web.runtime.HarnessRuntimeRequestMapperTestSupport.idText;
-import static fun.fengwk.kkstudio.web.runtime.HarnessRuntimeRequestMapperTestSupport.newSessionTarget;
-import static fun.fengwk.kkstudio.web.runtime.HarnessRuntimeRequestMapperTestSupport.request;
-import static fun.fengwk.kkstudio.web.runtime.HarnessRuntimeRequestMapperTestSupport.threadBatch;
-import static fun.fengwk.kkstudio.web.runtime.HarnessRuntimeRequestMapperTestSupport.userCommand;
+import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMapperTestSupport.THREAD_ID;
+import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMapperTestSupport.command;
+import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMapperTestSupport.cursorBatch;
+import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMapperTestSupport.executionSelection;
+import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMapperTestSupport.idText;
+import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMapperTestSupport.newSessionTarget;
+import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMapperTestSupport.request;
+import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMapperTestSupport.threadBatch;
+import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMapperTestSupport.userCommand;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;

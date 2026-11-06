@@ -26,6 +26,7 @@ import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.api.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadLiveState;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
+import fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeResponseMapper;
 import fun.fengwk.kkstudio.share.runtime.HarnessAcceptedCommandsDTO;
 import fun.fengwk.kkstudio.share.runtime.HarnessManualCompactionDTO;
 import fun.fengwk.kkstudio.share.runtime.HarnessStoppedThreadReceiptDTO;

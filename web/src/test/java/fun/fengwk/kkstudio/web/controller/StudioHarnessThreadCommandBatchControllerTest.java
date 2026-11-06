@@ -29,12 +29,12 @@ import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommandType;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
+import fun.fengwk.kkstudio.platform.harness.http.HarnessCommandBatchService;
 import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrchestrator;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwner;
 import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
 import fun.fengwk.kkstudio.web.advice.StudioProblemAdvice;
-import fun.fengwk.kkstudio.web.harness.HarnessCommandBatchService;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeTestFixtures;
 
 import java.util.List;
@@ -305,7 +305,9 @@ class StudioHarnessThreadCommandBatchControllerTest {
     when(runtime.findRootThreadId(child)).thenReturn(Optional.of(root));
 
     postBatch(THREAD_ID, messageBatch(userMessageCommand(COMMAND_KEY)))
-        .andExpect(status().isConflict());
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.code").value("conflict"))
+        .andExpect(jsonPath("$.reason").value("MANUAL_THREAD_CONTROL_ROOT_REQUIRED"));
 
     verifyNoInteractions(acceptanceService);
   }

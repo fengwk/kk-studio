@@ -8,13 +8,13 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
+import fun.fengwk.kkstudio.platform.harness.http.HarnessCommandBatchService;
+import fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMapper;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
 import fun.fengwk.kkstudio.platform.orchestration.DirectCommandsNotAllowedException;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwner;
 import fun.fengwk.kkstudio.share.runtime.HarnessAcceptedCommandsDTO;
 import fun.fengwk.kkstudio.share.runtime.HarnessCommandBatchDTO;
-import fun.fengwk.kkstudio.web.harness.HarnessCommandBatchService;
-import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeRequestMapper;
 
 import java.util.Objects;
 

@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.web.harness;
+package fun.fengwk.kkstudio.platform.harness.http;
 
 import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -19,7 +19,6 @@ import fun.fengwk.kkstudio.share.runtime.HarnessThreadDTO;
 import fun.fengwk.kkstudio.share.runtime.HarnessThreadSnapshotDTO;
 import fun.fengwk.kkstudio.share.runtime.HarnessThreadStopResultDTO;
 import fun.fengwk.kkstudio.share.runtime.HarnessUsageCostDTO;
-import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeResponseMapper;
 
 import java.util.Map;
 import java.util.UUID;
@@ -27,7 +26,7 @@ import java.util.UUID;
 /**
  * Thread 控制面的应用编排：快照读取时投影费用与环境等待，人工写入只允许执行根并在写后回读权威快照。
  *
- * <p>Controller 只负责 HTTP 形状与信封；这里的每个方法都以 Runtime 的 durable 结果为准，不缓存、不推测状态。
+ * <p>Controller 只负责 HTTP 形状；这里的每个方法都以 Runtime 的 durable 结果为准，不缓存、不推测状态。
  */
 @Service
 @AllArgsConstructor

@@ -92,6 +92,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.platform.harness.builtin.query.ModelRequestDebugService;
 import fun.fengwk.kkstudio.platform.harness.dispatch.HarnessWorkDispatcher;
 import fun.fengwk.kkstudio.platform.harness.dispatch.HarnessWorkDispatcherConfig;
+import fun.fengwk.kkstudio.platform.harness.http.HarnessThreadService;
 import fun.fengwk.kkstudio.platform.harness.thread.query.EnvironmentWaitProjectionService;
 import fun.fengwk.kkstudio.platform.harness.thread.query.UsageCostProjectionService;
 import fun.fengwk.kkstudio.platform.interaction.InteractionQueryService;
@@ -100,7 +101,6 @@ import fun.fengwk.kkstudio.share.interaction.InteractionDTO;
 import fun.fengwk.kkstudio.share.interaction.InteractionPageDTO;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 import fun.fengwk.kkstudio.web.controller.StudioHarnessThreadController;
-import fun.fengwk.kkstudio.web.harness.HarnessThreadService;
 
 import java.io.IOException;
 import java.io.InputStream;

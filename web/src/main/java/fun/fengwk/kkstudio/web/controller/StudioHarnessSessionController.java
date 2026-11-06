@@ -13,6 +13,8 @@ import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.history.SessionEntryPage;
 import fun.fengwk.kkstudio.harness.api.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
+import fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMapper;
+import fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeResponseMapper;
 import fun.fengwk.kkstudio.platform.harness.thread.query.UsageCostProjectionService;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
 import fun.fengwk.kkstudio.platform.http.RequestParameters;
@@ -23,8 +25,6 @@ import fun.fengwk.kkstudio.share.runtime.HarnessSessionEntryDTO;
 import fun.fengwk.kkstudio.share.runtime.HarnessSessionEntryPageDTO;
 import fun.fengwk.kkstudio.share.runtime.HarnessThreadSummaryDTO;
 import fun.fengwk.kkstudio.share.runtime.HarnessUsageCostDTO;
-import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeRequestMapper;
-import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeResponseMapper;
 
 import java.util.ArrayList;
 import java.util.List;

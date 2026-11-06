@@ -16,6 +16,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.common.json.StrictJson;
 import fun.fengwk.kkstudio.common.result.TextResultContent;
+import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.api.ManualCompactionAvailability;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.api.generation.FailureProjection;
@@ -34,6 +35,7 @@ import fun.fengwk.kkstudio.harness.codec.ToolApprovalJsonCodec;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec;
+import fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeResponseMapper;
 import fun.fengwk.kkstudio.share.runtime.HarnessActiveAssistantOutputDTO;
 import fun.fengwk.kkstudio.share.runtime.HarnessAgentMessageContentDTO;
 import fun.fengwk.kkstudio.share.runtime.HarnessManualCompactionDTO;
@@ -72,9 +74,9 @@ class HarnessRuntimeResponseMapperSnapshotTest {
     ThreadCommand queued = HarnessRuntimeTestFixtures.queuedUserMessageCommand();
     ThreadCommand applied = queued.markApplied(id(2));
     ThreadCommand cancelled = queued.cancel(id(90), NOW.plusSeconds(1));
-    HarnessThreadCommandDTO queuedDto = HarnessRuntimeResponseMapper.toCommandDto(queued);
-    HarnessThreadCommandDTO appliedDto = HarnessRuntimeResponseMapper.toCommandDto(applied);
-    HarnessThreadCommandDTO cancelledDto = HarnessRuntimeResponseMapper.toCommandDto(cancelled);
+    HarnessThreadCommandDTO queuedDto = acceptedCommand(queued);
+    HarnessThreadCommandDTO appliedDto = acceptedCommand(applied);
+    HarnessThreadCommandDTO cancelledDto = acceptedCommand(cancelled);
 
     assertEquals("QUEUED", queuedDto.getState());
     assertNull(queuedDto.getCancelledAt());
@@ -83,6 +85,22 @@ class HarnessRuntimeResponseMapperSnapshotTest {
     assertEquals(NOW.plusSeconds(1), cancelledDto.getCancelledAt());
     assertEquals("4", queuedDto.getSequence());
     assertEquals(NOW, queuedDto.getCreateTime());
+  }
+
+  /** 重放回执可以包含已应用或取消的命令，而快照的 queuedCommands 只能包含排队命令。 */
+  private static HarnessThreadCommandDTO acceptedCommand(ThreadCommand command) {
+    AcceptedCommands accepted =
+        new AcceptedCommands(
+            HarnessRuntimeTestFixtures.session(),
+            HarnessRuntimeTestFixtures.rootEntry(),
+            HarnessRuntimeTestFixtures.thread(id(1)),
+            List.of(command),
+            true,
+            false);
+    return HarnessRuntimeResponseMapper.toAcceptedCommandsDto(
+            accepted, HarnessRuntimeTestFixtures.idleSnapshot())
+        .getAcceptedCommands()
+        .getFirst();
   }
 
   @Test
@@ -98,7 +116,8 @@ class HarnessRuntimeResponseMapperSnapshotTest {
             null,
             List.of());
     HarnessActiveAssistantOutputDTO runningDto =
-        HarnessRuntimeResponseMapper.toActiveAssistantOutputDto(running);
+        HarnessRuntimeResponseMapper.toSnapshotDto(modelSnapshot(running, List.of()), Map.of())
+            .getActiveAssistantOutput();
     assertEquals(idText(10), runningDto.getGenerationId());
     assertEquals(idText(2), runningDto.getTurnStartEntryId());
     assertEquals(idText(3), runningDto.getRequestHeadEntryId());
@@ -125,7 +144,8 @@ class HarnessRuntimeResponseMapperSnapshotTest {
             id(4),
             List.of());
     HarnessActiveAssistantOutputDTO succeededDto =
-        HarnessRuntimeResponseMapper.toActiveAssistantOutputDto(succeeded);
+        HarnessRuntimeResponseMapper.toSnapshotDto(modelSnapshot(succeeded, List.of()), Map.of())
+            .getActiveAssistantOutput();
     assertEquals("SUCCEEDED", succeededDto.getStatus());
     assertEquals("8", succeededDto.getSequence());
     assertEquals("answer", succeededDto.getContents().getFirst().getText());
@@ -136,7 +156,8 @@ class HarnessRuntimeResponseMapperSnapshotTest {
     GenerationProjection failed =
         generation(GenerationStatus.FAILED, 3, 9L, List.of(), error, null, List.of());
     HarnessActiveAssistantOutputDTO failedDto =
-        HarnessRuntimeResponseMapper.toActiveAssistantOutputDto(failed);
+        HarnessRuntimeResponseMapper.toSnapshotDto(modelSnapshot(failed, List.of()), Map.of())
+            .getActiveAssistantOutput();
     assertEquals("FAILED", failedDto.getStatus());
     assertEquals("TRANSIENT", failedDto.getError().getCode());
     assertEquals("provider unavailable", failedDto.getError().getMessage());

@@ -1,8 +1,6 @@
-package fun.fengwk.kkstudio.web.harness;
+package fun.fengwk.kkstudio.platform.harness.http;
 
-import org.springframework.http.HttpStatus;
-import org.springframework.web.server.ResponseStatusException;
-
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 
@@ -26,8 +24,9 @@ final class ManualThreadControlGuard {
   /** 目标必须是执行根，否则以 409 拒绝人工控制。 */
   static void requireExecutionRoot(HarnessRuntime runtime, UUID threadId) {
     if (runtime.findRootThreadId(threadId).filter(root -> !root.equals(threadId)).isPresent()) {
-      throw new ResponseStatusException(
-          HttpStatus.CONFLICT, "manual thread control is limited to the execution root");
+      throw DomainException.conflict(
+          "MANUAL_THREAD_CONTROL_ROOT_REQUIRED",
+          "manual thread control is limited to the execution root");
     }
   }
 
@@ -35,8 +34,8 @@ final class ManualThreadControlGuard {
   static void requireForkRootSession(HarnessRuntime runtime, UUID sessionId) {
     for (ThreadState thread : runtime.listThreadsBySession(sessionId)) {
       if (thread.parentThreadId() != null) {
-        throw new ResponseStatusException(
-            HttpStatus.CONFLICT, "manual thread fork is limited to execution roots");
+        throw DomainException.conflict(
+            "MANUAL_THREAD_FORK_ROOT_REQUIRED", "manual thread fork is limited to execution roots");
       }
     }
   }

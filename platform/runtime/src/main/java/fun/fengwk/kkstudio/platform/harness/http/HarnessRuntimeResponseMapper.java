@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.web.runtime;
+package fun.fengwk.kkstudio.platform.harness.http;
 
 import fun.fengwk.kkstudio.common.json.StrictJson;
 import fun.fengwk.kkstudio.harness.api.AcceptedCommands;

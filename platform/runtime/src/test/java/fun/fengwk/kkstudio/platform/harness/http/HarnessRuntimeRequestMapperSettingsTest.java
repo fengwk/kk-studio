@@ -1,9 +1,9 @@
-package fun.fengwk.kkstudio.web.runtime;
+package fun.fengwk.kkstudio.platform.harness.http;
 
-import static fun.fengwk.kkstudio.web.runtime.HarnessRuntimeRequestMapperTestSupport.modelSelection;
-import static fun.fengwk.kkstudio.web.runtime.HarnessRuntimeRequestMapperTestSupport.newSessionTarget;
-import static fun.fengwk.kkstudio.web.runtime.HarnessRuntimeRequestMapperTestSupport.request;
-import static fun.fengwk.kkstudio.web.runtime.HarnessRuntimeRequestMapperTestSupport.userCommand;
+import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMapperTestSupport.modelSelection;
+import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMapperTestSupport.newSessionTarget;
+import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMapperTestSupport.request;
+import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeRequestMapperTestSupport.userCommand;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
