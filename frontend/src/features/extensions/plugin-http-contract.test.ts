@@ -13,11 +13,7 @@ function httpGoldenData(filename: string): unknown {
     '../../../../web/src/test/resources/fun/fengwk/kkstudio/web/plugin',
     filename,
   ), 'utf8')
-  const envelope: unknown = JSON.parse(source)
-  if (envelope === null || typeof envelope !== 'object' || !('data' in envelope)) {
-    throw new Error('HTTP wire golden must contain a data envelope')
-  }
-  return envelope.data
+  return JSON.parse(source) as unknown
 }
 
 describe('plugin HTTP contract', () => {

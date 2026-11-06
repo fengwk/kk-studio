@@ -28,13 +28,7 @@ function comfyuiHttpGolden(): PluginDTO {
     ),
     'utf8',
   )
-  const envelope: unknown = JSON.parse(source)
-  if (envelope === null || typeof envelope !== 'object' || !('data' in envelope)) {
-    throw new Error('HTTP wire golden must contain a data envelope')
-  }
-  const decoded = [envelope.data] as PluginDTO[]
-  expect(decoded).toHaveLength(1)
-  return decoded[0]
+  return JSON.parse(source) as PluginDTO
 }
 
 /** 与 Java 侧共用同一份真实 schema，用来推导可选/必需属性，避免测试里再手写一份结构。 */

@@ -14,14 +14,10 @@ vi.mock('@/features/extensions/plugins-service', () => ({
   pluginsService: { updateConfiguration: vi.fn() },
 }))
 
-const goldenEnvelope: unknown = JSON.parse(readFileSync(resolve(
+const opencliPluginFixture = JSON.parse(readFileSync(resolve(
   dirname(fileURLToPath(import.meta.url)),
   '../../../../web/src/test/resources/fun/fengwk/kkstudio/web/plugin/opencli-http.json',
-), 'utf8'))
-if (goldenEnvelope === null || typeof goldenEnvelope !== 'object' || !('data' in goldenEnvelope)) {
-  throw new Error('OpenCLI HTTP golden must contain a data envelope')
-}
-const opencliPluginFixture = goldenEnvelope.data as PluginDTO
+), 'utf8')) as PluginDTO
 
 describe('PluginConfigModal OpenCLI regression coverage', () => {
   let queryClient: QueryClient

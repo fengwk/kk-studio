@@ -17,8 +17,7 @@ function comfyuiPluginFromGolden(): PluginDTO {
     ),
     'utf8',
   )
-  const envelope = JSON.parse(source) as { data: unknown }
-  return envelope.data as PluginDTO
+  return JSON.parse(source) as PluginDTO
 }
 
 const comfyuiPlugin = comfyuiPluginFromGolden()
