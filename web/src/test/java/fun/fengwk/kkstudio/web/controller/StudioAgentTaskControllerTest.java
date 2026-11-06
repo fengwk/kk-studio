@@ -90,9 +90,9 @@ class StudioAgentTaskControllerTest {
       mockMvc
           .perform(post("/api/agent-tasks").contentType(MediaType.APPLICATION_JSON).content(body))
           .andExpect(status().isAccepted())
-          .andExpect(jsonPath("$.data.ticketId").value(TICKET_ID.toString()))
-          .andExpect(jsonPath("$.data.state").value("RUNNING"))
-          .andExpect(jsonPath("$.data.agent").value("worker"));
+          .andExpect(jsonPath("$.ticketId").value(TICKET_ID.toString()))
+          .andExpect(jsonPath("$.state").value("RUNNING"))
+          .andExpect(jsonPath("$.agent").value("worker"));
     }
 
     @SuppressWarnings("unchecked")
@@ -200,10 +200,10 @@ class StudioAgentTaskControllerTest {
     mockMvc
         .perform(get("/api/agent-tasks/" + TICKET_ID))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.ticketId").value(TICKET_ID.toString()))
-        .andExpect(jsonPath("$.data.threadId").value(THREAD_ID.toString()))
-        .andExpect(jsonPath("$.data.state").value("RUNNING"))
-        .andExpect(jsonPath("$.data.report").doesNotExist());
+        .andExpect(jsonPath("$.ticketId").value(TICKET_ID.toString()))
+        .andExpect(jsonPath("$.threadId").value(THREAD_ID.toString()))
+        .andExpect(jsonPath("$.state").value("RUNNING"))
+        .andExpect(jsonPath("$.report").doesNotExist());
   }
 
   @Test
@@ -217,10 +217,10 @@ class StudioAgentTaskControllerTest {
     mockMvc
         .perform(get("/api/agent-tasks/" + TICKET_ID))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.state").value("SUPERSEDED"))
-        .andExpect(jsonPath("$.data.report").doesNotExist())
-        .andExpect(jsonPath("$.data.partialResult").doesNotExist())
-        .andExpect(jsonPath("$.data.error").doesNotExist());
+        .andExpect(jsonPath("$.state").value("SUPERSEDED"))
+        .andExpect(jsonPath("$.report").doesNotExist())
+        .andExpect(jsonPath("$.partialResult").doesNotExist())
+        .andExpect(jsonPath("$.error").doesNotExist());
   }
 
   @Test
@@ -245,8 +245,8 @@ class StudioAgentTaskControllerTest {
     mockMvc
         .perform(get("/api/agent-tasks/" + TICKET_ID))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.state").value("COMPLETED"))
-        .andExpect(jsonPath("$.data.report").value("the summary"));
+        .andExpect(jsonPath("$.state").value("COMPLETED"))
+        .andExpect(jsonPath("$.report").value("the summary"));
   }
 
   @Test
@@ -255,18 +255,16 @@ class StudioAgentTaskControllerTest {
     mockMvc
         .perform(get("/api/agent-tasks/" + TICKET_ID))
         .andExpect(status().isNotFound())
-        .andExpect(jsonPath("$.code").value("NOT_FOUND"))
-        .andExpect(
-            jsonPath("$.errors.detail").value("agent task " + TICKET_ID + " does not exist"));
+        .andExpect(jsonPath("$.code").value("not_found"))
+        .andExpect(jsonPath("$.detail").value("agent task " + TICKET_ID + " does not exist"));
     doThrow(DomainException.notFound("agent_task", "agent task " + TICKET_ID + " does not exist"))
         .when(agentTasks)
         .stop(TICKET_ID);
     mockMvc
         .perform(post("/api/agent-tasks/" + TICKET_ID + "/stop"))
         .andExpect(status().isNotFound())
-        .andExpect(jsonPath("$.code").value("NOT_FOUND"))
-        .andExpect(
-            jsonPath("$.errors.detail").value("agent task " + TICKET_ID + " does not exist"));
+        .andExpect(jsonPath("$.code").value("not_found"))
+        .andExpect(jsonPath("$.detail").value("agent task " + TICKET_ID + " does not exist"));
     mockMvc.perform(get("/api/agent-tasks/not-a-uuid")).andExpect(status().isBadRequest());
   }
 
@@ -290,9 +288,9 @@ class StudioAgentTaskControllerTest {
     mockMvc
         .perform(post("/api/agent-tasks/" + TICKET_ID + "/stop"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.state").value("CANCELLED"))
-        .andExpect(jsonPath("$.data.partialResult").value("partial"))
-        .andExpect(jsonPath("$.data.error").value("stopped"));
+        .andExpect(jsonPath("$.state").value("CANCELLED"))
+        .andExpect(jsonPath("$.partialResult").value("partial"))
+        .andExpect(jsonPath("$.error").value("stopped"));
     verify(agentTasks).stop(TICKET_ID);
   }
 
