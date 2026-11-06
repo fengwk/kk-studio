@@ -48,7 +48,7 @@ public class ClusterEnvironmentRuntimeInternalController {
     return localEnvironmentUpdateService.runtimeStatus(environment);
   }
 
-  @PostMapping("/update")
+  @PostMapping("/update-daemon")
   public EnvironmentUpdateStartDTO startUpdate(
       @PathVariable String environmentId, HttpServletRequest request) {
     EnvironmentId environment = authenticateAndAuthorize(request, environmentId);
