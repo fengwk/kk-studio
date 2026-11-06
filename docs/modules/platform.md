@@ -640,7 +640,8 @@ complete 请求为 `{authAttemptId, callbackUrl}`，仅消费 prepare 之后配�
 ### Plugin credential
 
 `plugin_credential` 每个已认证 Plugin 一行，载荷以明文 JSON 保存，数据库访问控制与备份加密是其保护边界；
-载荷绝不进入 API 响应、日志、配置同步或模型上下文。所有写入以 `version` 做 CAS 并推进版本。
+载荷绝不进入 API 响应、日志、配置同步或模型上下文。刷新与调用期作废以版本和租约围栏防止覆盖新凭据；
+登录或配置写入可替换凭据并推进已有行版本。
 Plugin 只通过作用域 `PluginCredentialAccess` 读取本插件凭据：每次调用现读当前行，因此登录、轮换或撤销
 立即对已配置实例生效，不需要重建实例。刷新在途、需要重新认证、刷新结果未知或已过期时以对应原因拒绝。
 静态密钥的认证目标字段（`contextFields`）变化而本次没有重新录入密钥时，旧密钥被删除，避免把密钥发往新目标。
