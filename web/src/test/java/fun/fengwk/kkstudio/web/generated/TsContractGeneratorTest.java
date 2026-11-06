@@ -159,7 +159,7 @@ class TsContractGeneratorTest {
     assertTrue(generated.contains("export type CanvasConflictDTO"));
   }
 
-  /** 测试意图：未标 Nullable 必填非空；ALWAYS 可空必出现；其余可空可缺省；Long 写成字符串，Instant 写成 epoch 秒。 */
+  /** 测试意图：未标 Nullable 必填非空；ALWAYS 可空必出现；其余可空可缺省；Long 写成字符串，Instant 写成 epoch 毫秒。 */
   @Test
   void responsePresenceAndScalarsFollowTheRealMapper() {
     assertContains(

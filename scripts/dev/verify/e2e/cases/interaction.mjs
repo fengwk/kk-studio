@@ -73,10 +73,11 @@ const RECEIPT_FIELDS = [
   'materialized',
 ]
 
+/** 服务端 Instant 是 epoch 毫秒整数；小数或负数都不是合法时刻。 */
 function assertInstant(value) {
   assert(
-    typeof value === 'number' && Number.isFinite(value) && value >= 0,
-    `invalid epoch instant: ${JSON.stringify(value)}`,
+    typeof value === 'number' && Number.isInteger(value) && value >= 0,
+    `invalid epoch-millisecond instant: ${JSON.stringify(value)}`,
   )
   return value
 }
