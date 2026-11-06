@@ -3,7 +3,7 @@ import { buildSchemaPlaceholder, parsePluginValuesSchema } from './plugin-schema
 
 describe('plugin-schema parser', () => {
   it('parses valid controlled schemas correctly', () => {
-    const validJson = JSON.stringify({
+    const validJson = {
       type: 'object',
       description: 'Test plugin config',
       properties: {
@@ -32,7 +32,7 @@ describe('plugin-schema parser', () => {
       },
       required: ['enabled'],
       additionalProperties: false,
-    })
+    }
 
     const result = parsePluginValuesSchema(validJson)
     expect(result.ok).toBe(true)
@@ -49,40 +49,40 @@ describe('plugin-schema parser', () => {
   })
 
   it('rejects unsupported schema keywords explicitly', () => {
-    const withRef = JSON.stringify({
+    const withRef = {
       type: 'object',
       $ref: '#/definitions/MyType',
       properties: {},
       required: [],
       additionalProperties: false,
-    })
+    }
     const resRef = parsePluginValuesSchema(withRef)
     expect(resRef.ok).toBe(false)
     if (!resRef.ok) {
       expect(resRef.error).toContain('Unsupported schema keyword "$ref"')
     }
 
-    const withOneOf = JSON.stringify({
+    const withOneOf = {
       type: 'object',
       oneOf: [{ type: 'string' }],
       properties: {},
       required: [],
       additionalProperties: false,
-    })
+    }
     const resOneOf = parsePluginValuesSchema(withOneOf)
     expect(resOneOf.ok).toBe(false)
     if (!resOneOf.ok) {
       expect(resOneOf.error).toContain('Unsupported schema keyword "oneOf"')
     }
 
-    const withMin = JSON.stringify({
+    const withMin = {
       type: 'object',
       properties: {
         port: { type: 'integer', minimum: 1024 },
       },
       required: [],
       additionalProperties: false,
-    })
+    }
     const resMin = parsePluginValuesSchema(withMin)
     expect(resMin.ok).toBe(false)
     if (!resMin.ok) {
@@ -90,16 +90,14 @@ describe('plugin-schema parser', () => {
     }
   })
 
-  it('rejects non-object root or malformed JSON or duplicate keys', () => {
-    expect(parsePluginValuesSchema('not json').ok).toBe(false)
-    expect(parsePluginValuesSchema('').ok).toBe(false)
-    expect(parsePluginValuesSchema('   ').ok).toBe(false)
-    expect(parsePluginValuesSchema('""').ok).toBe(false)
-    expect(parsePluginValuesSchema('{"type": "string"}').ok).toBe(false)
-
-    // Duplicate schema keys rejected
-    const dupKeyJson = '{"type": "object", "properties": {}, "properties": {}}'
-    expect(parsePluginValuesSchema(dupKeyJson).ok).toBe(false)
+  it('rejects non-object roots', () => {
+    expect(parsePluginValuesSchema(null).ok).toBe(false)
+    expect(parsePluginValuesSchema(undefined).ok).toBe(false)
+    expect(parsePluginValuesSchema('not an object').ok).toBe(false)
+    expect(parsePluginValuesSchema('"type"').ok).toBe(false)
+    expect(parsePluginValuesSchema(42).ok).toBe(false)
+    expect(parsePluginValuesSchema([]).ok).toBe(false)
+    expect(parsePluginValuesSchema({ type: 'string' }).ok).toBe(false)
   })
 
   it('strictly validates description, properties, required, enum, and additionalProperties', () => {
@@ -136,12 +134,10 @@ describe('plugin-schema parser', () => {
       { properties: { mode: { type: 'string', enum: 'A' } } },
       { properties: { nested: { type: 'object', properties: {}, additionalProperties: false } } },
     ]) {
-      expect(parsePluginValuesSchema(JSON.stringify({ ...valid, ...change })).ok)
+      expect(parsePluginValuesSchema({ ...valid, ...change }).ok)
         .toBe(false)
     }
-    const undeclared = parsePluginValuesSchema(
-      JSON.stringify({ ...valid, required: ['bar'] }),
-    )
+    const undeclared = parsePluginValuesSchema({ ...valid, required: ['bar'] })
     expect(undeclared.ok).toBe(false)
     if (!undeclared.ok) {
       expect(undeclared.error).toContain('not defined in properties')
@@ -150,8 +146,10 @@ describe('plugin-schema parser', () => {
 
   it('accepts null descriptions and declared special names without prototype inheritance', () => {
     const result = parsePluginValuesSchema(
-      '{"type":"object","description":null,"properties":{"__proto__":{"type":"string"},'
-        + '"constructor":{"type":"number"}},"required":["constructor"],"additionalProperties":true}',
+      JSON.parse(
+        '{"type":"object","description":null,"properties":{"__proto__":{"type":"string"},'
+          + '"constructor":{"type":"number"}},"required":["constructor"],"additionalProperties":true}',
+      ),
     )
     expect(result.ok).toBe(true)
     if (result.ok) {
@@ -165,9 +163,12 @@ describe('plugin-schema parser', () => {
 
 describe('buildSchemaPlaceholder', () => {
   function elementOf(properties: unknown, required: string[] = []) {
-    const parsed = parsePluginValuesSchema(
-      JSON.stringify({ type: 'object', properties, required, additionalProperties: false }),
-    )
+    const parsed = parsePluginValuesSchema({
+      type: 'object',
+      properties,
+      required,
+      additionalProperties: false,
+    } as Record<string, unknown>)
     if (!parsed.ok) {
       throw new Error(parsed.error)
     }
@@ -213,10 +214,12 @@ describe('buildSchemaPlaceholder', () => {
   it('keeps own keys for prototype-shaped property names', () => {
     // 用原始 JSON 文本声明属性名：对象字面量里的 __proto__ 只会改写原型，构造不出该用例。
     const parsed = parsePluginValuesSchema(
-      '{"type":"object","properties":{"item":{"type":"object","properties":' +
-        '{"__proto__":{"type":"string"},"constructor":{"type":"string"}},' +
-        '"required":["__proto__","constructor"],"additionalProperties":false}},' +
-        '"required":["item"],"additionalProperties":false}',
+      JSON.parse(
+        '{"type":"object","properties":{"item":{"type":"object","properties":' +
+          '{"__proto__":{"type":"string"},"constructor":{"type":"string"}},' +
+          '"required":["__proto__","constructor"],"additionalProperties":false}},' +
+          '"required":["item"],"additionalProperties":false}',
+      ),
     )
     if (!parsed.ok) {
       throw new Error(parsed.error)

@@ -1,5 +1,3 @@
-import { parseStrictJsonObject } from './plugin-config-json'
-
 export type PluginSchemaElement =
   | {
       kind: 'string'
@@ -229,27 +227,15 @@ export function buildSchemaPlaceholder(element: PluginSchemaElement): unknown {
 }
 
 /**
- * 严格解析受控配置 valuesSchema JSON 字符串。
- * 使用严格 parseStrictJsonObject 杜绝 duplicate keys、注释、尾随逗号。
+ * 解析受控配置 valuesSchema 对象；严格 JSON 语法与重复键已由服务端 schema 编码保证。
  */
-export function parsePluginValuesSchema(schemaJson: string): ParseSchemaResult {
-  if (!schemaJson || schemaJson.trim().length === 0) {
-    return { ok: false, error: 'valuesSchema must not be empty' }
+export function parsePluginValuesSchema(schemaJson: unknown): ParseSchemaResult {
+  if (schemaJson === null || typeof schemaJson !== 'object' || Array.isArray(schemaJson)) {
+    return { ok: false, error: 'valuesSchema must be an object' }
   }
-
-  // 用严格解析器拒绝 duplicate keys
-  const strictCheck = parseStrictJsonObject(schemaJson)
-  if (!strictCheck.ok) {
-    return {
-      ok: false,
-      error: `Malformed schema JSON: ${strictCheck.error}`,
-    }
-  }
-
-  const parsed: unknown = JSON.parse(schemaJson)
 
   try {
-    const root = parseElement(parsed, 'root')
+    const root = parseElement(schemaJson, 'root')
     if (root.kind !== 'object') {
       return { ok: false, error: 'Root schema must be of type "object"' }
     }

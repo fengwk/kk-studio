@@ -5,9 +5,9 @@ import org.springframework.stereotype.Service;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentRepository;
+import fun.fengwk.kkstudio.platform.plugin.Plugin;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfig;
-import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
-import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
+import fun.fengwk.kkstudio.platform.plugin.PluginRegistry;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRepository;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRow;
 
@@ -21,9 +21,9 @@ import java.util.TreeSet;
 /**
  * 插件普通配置声明的 Agent 依赖的宿主唯一入口。
  *
- * <p>普通配置保存、Agent 删除、配置同步的依赖图/计划/事务内重检都必须通过同一份 {@link
- * StudioPlugin#requiredAgentNames(PluginConfig)} 声明解析引用的 Agent 名称，绝不按 pluginId 或字段路径猜测；普通值先经插件自身
- * Schema 归一化，只有安装目录中的插件才可解析（权威目录与安装集合本应一致，漂移即失败）。声明解析是纯解析：不访问数据库、不读取秘密、不访问外部资源。
+ * <p>普通配置保存、Agent 删除、配置同步的依赖图/计划/事务内重检都必须通过同一份 {@link Plugin#requiredAgentNames(PluginConfig)}
+ * 声明解析引用的 Agent 名称，绝不按 pluginId 或字段路径猜测；普通值先经插件自身 Schema
+ * 归一化，只有安装目录中的插件才可解析（权威目录与安装集合本应一致，漂移即失败）。声明解析是纯解析：不访问数据库、不读取秘密、不访问外部资源。
  *
  * <p>插件拒绝自身普通配置时抛出的 {@link IllegalArgumentException} 是已知的输入边界：统一收敛为固定去敏的 {@link
  * DomainException}，不串联 cause、不回显配置值。其它异常（含未知运行时错误与致命错误）照常上抛，绝不伪装成校验失败。
@@ -43,7 +43,7 @@ public class PluginAgentDependencies {
   /** 固定去敏文案：声明引用的 Agent 不存在。 */
   private static final String MISSING_AGENT = "plugins reference a missing agent";
 
-  private final StudioPluginRegistry registry;
+  private final PluginRegistry registry;
   private final PluginConfigurationRepository configurationRepository;
   private final AgentRepository agentRepository;
 
@@ -65,7 +65,7 @@ public class PluginAgentDependencies {
    * @throws IllegalStateException 插件未安装（目录与安装集合漂移）
    */
   public Set<String> declaredAgentNames(String pluginId, long revision, String valuesJson) {
-    StudioPlugin plugin = requireInstalled(pluginId);
+    Plugin plugin = requireInstalled(pluginId);
     PluginConfig config;
     try {
       config = new PluginConfig(revision, plugin.configurationSchema().resolveValues(valuesJson));
@@ -127,7 +127,7 @@ public class PluginAgentDependencies {
     return Collections.unmodifiableSortedSet(referencing);
   }
 
-  private StudioPlugin requireInstalled(String pluginId) {
+  private Plugin requireInstalled(String pluginId) {
     return registry
         .find(pluginId)
         .orElseThrow(() -> new IllegalStateException("plugin is not installed: " + pluginId));

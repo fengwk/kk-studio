@@ -276,7 +276,7 @@ HTTP JSON 的 `Instant` 以 epoch 毫秒整数读写。
 ### 插件 SPI
 
 插件是构建期 JAR，[`web`](../web/pom.xml) 的 runtime 依赖决定发行物包含哪些插件，Spring Boot
-auto-configuration 注册安装定义。`StudioPlugin` 声明身份、配置 Schema、认证形态与实例构建；`PluginInstance`
+auto-configuration 注册安装定义。`Plugin` 声明身份、配置 Schema、认证形态与实例构建；`PluginInstance`
 暴露 `harnessContributors()` 与按类型读取产品贡献的 `contributions(Class<T>)`——画布函数这类贡献类型属于
 Canvas，平台只按类型转交。凭据经 `PluginCredentialAccess` 在上游失败时作废，资源经 `PluginResourceGateway`
 读取，提示词资源经 `PluginPromptContent` 提供。插件与宿主同进程、拥有相同 JVM 权限，部署者须信任其代码。完整

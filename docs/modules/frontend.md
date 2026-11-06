@@ -501,8 +501,8 @@ Settings 的 General 保存本地偏好；server tabs 由 settings schema 驱动
 ### Plugin 设置
 
 `/settings` 的静态 Plugins 页签挂载
-[`PluginsTab`](../../frontend/src/features/extensions/PluginsTab.tsx)，调用 `/api/plugins`。
-卡片展示发行物已安装 StudioPlugin 的安全 descriptor、region、状态和刷新摘要。
+[`PluginsTab`](../../frontend/src/features/extensions/PluginsTab.tsx)，调用 `/api/platform/plugins`。
+卡片展示发行物已安装 Plugin 的安全 descriptor、region、状态和刷新摘要。
 认证 contract 当前为 DEEP_LINK：选 region、打开官方链接、粘贴 callback、提交后清空 password 输入、
 重新读取安全状态。callback 不写浏览器 storage，同一请求保持单次提交。
 generation fence 隔离关闭/重开的弹窗。

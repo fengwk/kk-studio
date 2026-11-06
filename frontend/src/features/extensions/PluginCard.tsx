@@ -4,7 +4,10 @@ import { useI18n, type AppLocale, type TranslationKey } from '@/shared/i18n'
 import { Button } from '@/shared/ui/controls/Button'
 import { ResourceCard, type ResourceCardMetaRow } from '@/shared/ui/cards/ResourceCard'
 import { pluginConnectionCheckExpected } from '@/features/extensions/plugin-connection-check'
-import type { PluginDTO } from '@/shared/api/generated/contracts'
+import type {
+  PluginCredentialStatus,
+  PluginDTO,
+} from '@/shared/api/generated/contracts'
 
 /** 后端 Instant 的 wire 约定是 epoch 毫秒。 */
 function formatDateTime(value: number | null | undefined, locale: AppLocale): string {
@@ -20,13 +23,9 @@ const PLUGIN_STATUS_LABEL_KEYS = {
   REFRESH_FAILED: 'plugins.status.REFRESH_FAILED',
   REFRESH_UNCERTAIN: 'plugins.status.REFRESH_UNCERTAIN',
   REAUTH_REQUIRED: 'plugins.status.REAUTH_REQUIRED',
-} as const satisfies Record<string, TranslationKey>
+} as const satisfies Record<PluginCredentialStatus, TranslationKey>
 
-function isPluginStatus(status: string): status is keyof typeof PLUGIN_STATUS_LABEL_KEYS {
-  return Object.hasOwn(PLUGIN_STATUS_LABEL_KEYS, status)
-}
-
-function statusTone(status: string): BadgeTone {
+function statusTone(status: PluginCredentialStatus): BadgeTone {
   switch (status) {
     case 'CONNECTED':
       return 'success'
@@ -58,9 +57,7 @@ export function PluginCard({
   connectionCheckPending: boolean
 }) {
   const { t, locale } = useI18n()
-  const statusLabel = plugin.status != null && isPluginStatus(plugin.status)
-    ? t(PLUGIN_STATUS_LABEL_KEYS[plugin.status])
-    : plugin.status
+  const statusLabel = plugin.status ? t(PLUGIN_STATUS_LABEL_KEYS[plugin.status]) : null
 
   const isDeepLink = plugin.authKind?.type === 'DEEP_LINK'
   const isConnected = plugin.status === 'CONNECTED'
@@ -69,7 +66,7 @@ export function PluginCard({
   // 修订不同或存在 applicationError 即为待应用状态，不能展示为全局已生效
   const isPendingApplication =
     plugin.applicationError !== null ||
-    plugin.desiredRevision !== plugin.appliedRevision
+    plugin.desiredVersion !== plugin.appliedVersion
 
   // 能力来自实例 metadata；未应用或坐标缺失时不提供可提交的检查坐标。
   const connectionCheckAvailable = pluginConnectionCheckExpected(plugin) !== null
@@ -81,12 +78,12 @@ export function PluginCard({
 
   const rows: ResourceCardMetaRow[] = [
     [
-      t('plugins.desiredRevision'),
-      `Rev ${plugin.desiredRevision}`,
+      t('plugins.desiredVersion'),
+      `v${plugin.desiredVersion}`,
     ],
     [
-      t('plugins.appliedRevision'),
-      `Rev ${plugin.appliedRevision ?? '—'}`,
+      t('plugins.appliedVersion'),
+      `v${plugin.appliedVersion ?? '—'}`,
     ],
     [
       t('plugins.capabilities'),

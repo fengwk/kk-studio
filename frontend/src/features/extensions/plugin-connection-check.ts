@@ -17,7 +17,7 @@ const POSITIVE_DECIMAL = /^[1-9]\d*$/
 
 export interface PluginConnectionCheckRun {
   pluginId: string
-  expectedRevision: string
+  expectedVersion: string
   phase: PluginConnectionCheckPhase
   result: PluginConnectionCheckDTO | null
   /** 只有 `failed` 时的可控错误文案；不外显远端原始值。 */
@@ -34,18 +34,18 @@ export function pluginConnectionCheckExpected(
   if (!plugin.connectionCheckSupported) {
     return null
   }
-  const { appliedRevision } = plugin
-  if (appliedRevision == null) {
+  const { appliedVersion } = plugin
+  if (appliedVersion == null) {
     return null
   }
   // 已应用实例的配置修订恒为正；0 表示尚无已应用配置，不得作为检查坐标提交。
-  if (!POSITIVE_DECIMAL.test(appliedRevision)) {
+  if (!POSITIVE_DECIMAL.test(appliedVersion)) {
     return null
   }
-  if (plugin.desiredRevision !== appliedRevision) {
+  if (plugin.desiredVersion !== appliedVersion) {
     return null
   }
-  return { expectedRevision: appliedRevision }
+  return { expectedVersion: appliedVersion }
 }
 
 /**
@@ -61,6 +61,6 @@ export function pluginConnectionCheckIsStale(
   }
   return (
     current === null
-    || current.expectedRevision !== run.result.appliedRevision
+    || current.expectedVersion !== run.result.appliedVersion
   )
 }

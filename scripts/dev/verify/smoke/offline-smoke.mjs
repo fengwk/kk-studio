@@ -104,15 +104,14 @@ export async function createAndRun(client, canvasId, functionName, name, paramet
 
 /**
  * Offline seed/smoke: initialize the opencli plugin through the unified plugin configuration and
- * secret API. Secrets never enter seed or schema. expectedEpoch/expectedRevision come from the GET.
+ * secret API. Secrets never enter seed or schema. The desired version comes from the GET.
  */
 export async function initializeOpencliPlugin(client) {
   const { jsonCall, sleep: wait } = client
-  const descriptor = await jsonCall('GET', '/api/plugins/opencli')
-  await jsonCall('PUT', '/api/plugins/opencli/configuration', {
-    expectedEpoch: descriptor.desiredEpoch,
-    expectedRevision: descriptor.desiredRevision,
-    valuesJson: JSON.stringify({
+  const descriptor = await jsonCall('GET', '/api/platform/plugins/opencli')
+  await jsonCall('PUT', '/api/platform/plugins/opencli/configuration', {
+    expectedVersion: descriptor.desiredVersion,
+    values: {
       enabled: true,
       baseUrl: 'http://opencli-hub:8080',
       gptImage2: { paidEnabled: true },
@@ -122,16 +121,15 @@ export async function initializeOpencliPlugin(client) {
         statusPollIntervalMillis: 10,
         maxWaitMillis: 30000,
       },
-    }),
+    },
     secretPatch: { apiKey: { operation: 'SET', value: 'synthetic-opencli-key' } },
   })
   let current
   for (let attempt = 0; attempt < 80; attempt += 1) {
-    current = await jsonCall('GET', '/api/plugins/opencli')
+    current = await jsonCall('GET', '/api/platform/plugins/opencli')
     if (
       current.status === 'CONNECTED' &&
-      current.appliedEpoch === current.desiredEpoch &&
-      current.appliedRevision === current.desiredRevision &&
+      current.appliedVersion === current.desiredVersion &&
       (current.applicationError ?? null) === null
     ) {
       return

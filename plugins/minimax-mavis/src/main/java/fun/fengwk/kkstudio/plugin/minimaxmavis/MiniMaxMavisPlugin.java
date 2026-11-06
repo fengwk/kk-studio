@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.plugin.minimaxmavis;
 import fun.fengwk.kkstudio.common.json.JsonValues;
 import fun.fengwk.kkstudio.common.schema.BooleanSchema;
 import fun.fengwk.kkstudio.common.schema.InputSchema;
+import fun.fengwk.kkstudio.platform.plugin.Plugin;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthHandler;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthSpec;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfig;
@@ -11,7 +12,6 @@ import fun.fengwk.kkstudio.platform.plugin.PluginContext;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialRefresher;
 import fun.fengwk.kkstudio.platform.plugin.PluginDescriptor;
 import fun.fengwk.kkstudio.platform.plugin.PluginInstance;
-import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
 
 import java.util.Arrays;
 import java.util.List;
@@ -21,13 +21,13 @@ import java.util.Optional;
 import java.util.Set;
 
 /**
- * MiniMax Mavis 的 Studio Plugin 安装期定义：安装身份、受控配置、固定 CN/EN region 候选、deep-link 认证与凭据刷新。
+ * MiniMax Mavis 的 Plugin 安装期定义：安装身份、受控配置、固定 CN/EN region 候选、deep-link 认证与凭据刷新。
  *
  * <p>它只声明安装期事实，不持有 repository、密文或主密钥：认证回调与刷新结果都以 opaque JSON 材料交回 Platform，由 Platform 的凭据 store
  * 加密落库。 运行期实例（15 个模型工具与其执行器）由 {@link #configure(PluginConfig, PluginContext)} 按一次配置装配，归本 Plugin
  * 所有并可关闭。
  */
-public final class MiniMaxMavisPlugin implements StudioPlugin {
+public final class MiniMaxMavisPlugin implements Plugin {
 
   /** 全局唯一安装身份。 */
   public static final String PLUGIN_ID = "minimax-mavis";

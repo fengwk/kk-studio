@@ -50,11 +50,12 @@ import fun.fengwk.kkstudio.canvas.infra.platform.PluginCanvasFunctionCatalog;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.json.JsonValues;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentRepository;
-import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
-import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
+import fun.fengwk.kkstudio.platform.plugin.Plugin;
+import fun.fengwk.kkstudio.platform.plugin.PluginRegistry;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialStore;
 import fun.fengwk.kkstudio.platform.pluginhost.catalog.PluginCatalogRuntime;
 import fun.fengwk.kkstudio.platform.pluginhost.catalog.PluginCatalogSnapshot;
+import fun.fengwk.kkstudio.platform.pluginhost.http.PluginController;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginAuthAttemptRepository;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRepository;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginCredentialRepository;
@@ -65,8 +66,6 @@ import fun.fengwk.kkstudio.platform.pluginhost.service.PluginManagementService;
 import fun.fengwk.kkstudio.platform.settings.HttpProxySelector;
 import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
-import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
-import fun.fengwk.kkstudio.web.plugin.StudioPluginController;
 
 import javax.sql.DataSource;
 
@@ -159,8 +158,7 @@ class ComfyuiPluginPostgresIntegrationTest {
             context -> {
               try (PluginCatalogRuntime.Lease lease = runtime(context).acquire()) {
                 PluginCatalogSnapshot snapshot = lease.snapshot();
-                assertEquals(
-                    List.of(COMFYUI), context.getBean(StudioPluginRegistry.class).pluginIds());
+                assertEquals(List.of(COMFYUI), context.getBean(PluginRegistry.class).pluginIds());
                 assertTrue(
                     PluginCanvasFunctionCatalog.of(snapshot).functionNames(COMFYUI).isEmpty());
                 assertThrows(
@@ -250,7 +248,7 @@ class ComfyuiPluginPostgresIntegrationTest {
   }
 
   /**
-   * 真实 ComfyUI schema/default 到 HTTP 的共用 golden：GET /api/plugins/comfyui 的响应体必须与已提交资源逐值一致。
+   * 真实 ComfyUI schema/default 到 HTTP 的共用 golden：GET /api/platform/plugins/comfyui 的响应体必须与已提交资源逐值一致。
    *
    * <p>配置来自启动期写入的 schema 默认值，因此 golden 锁定的就是生产派生文本；前端消费同一份资源。
    */
@@ -260,7 +258,7 @@ class ComfyuiPluginPostgresIntegrationTest {
         .run(
             context -> {
               PluginCatalogRuntime runtime = runtime(context);
-              StudioPluginRegistry registry = context.getBean(StudioPluginRegistry.class);
+              PluginRegistry registry = context.getBean(PluginRegistry.class);
               PluginManagementService management =
                   new PluginManagementService(
                       registry,
@@ -275,38 +273,22 @@ class ComfyuiPluginPostgresIntegrationTest {
 
               assertSame(HTTP_MAPPER, HTTP_CONVERTER.getMapper());
               MockMvc mockMvc =
-                  MockMvcBuilders.standaloneSetup(new StudioPluginController(management))
+                  MockMvcBuilders.standaloneSetup(new PluginController(management))
                       .setMessageConverters(HTTP_CONVERTER)
-                      .setControllerAdvice(new ApiResponseStatusAdvice())
                       .build();
               MockHttpServletResponse response =
-                  mockMvc.perform(get("/api/plugins/" + COMFYUI)).andReturn().getResponse();
+                  mockMvc
+                      .perform(get("/api/platform/plugins/" + COMFYUI))
+                      .andReturn()
+                      .getResponse();
 
               assertEquals(200, response.getStatus());
               String body = new String(response.getContentAsByteArray(), StandardCharsets.UTF_8);
               assertEquals(
-                  wireView(goldenText(HTTP_GOLDEN)),
-                  wireView(body),
+                  JsonValues.readTree(goldenText(HTTP_GOLDEN)),
+                  JsonValues.readTree(body),
                   HTTP_GOLDEN + " must match the live HTTP body");
             });
-  }
-
-  /**
-   * wire 值视图：配置里的内嵌 JSON 文本按其 JSON 值参与比较。
-   *
-   * <p>内嵌文本的对象键顺序来自生产 schema 的 map 迭代顺序，同一份配置在两次 JVM 之间可能不同，而顺序不是 wire 契约的一部分； 除此之外（字段有无、取值、token
-   * 类型、内嵌文档的全部键值）都逐值比较。
-   */
-  private static JsonNode wireView(String body) {
-    JsonNode root = JsonValues.readTree(body);
-    JsonNode configuration = root.get("configuration");
-    for (String field : List.of("valuesJson", "valuesSchema", "defaultsJson")) {
-      JsonNode text = configuration.get(field);
-      if (text != null && text.isTextual()) {
-        ((ObjectNode) configuration).set(field, JsonValues.readTree(text.asString()));
-      }
-    }
-    return root;
   }
 
   /** 已提交的共用 golden 原文：测试只读取，绝不在运行时改写资源。 */
@@ -343,7 +325,7 @@ class ComfyuiPluginPostgresIntegrationTest {
   /** 与生产一致的写入口；提交后立即在本节点应用。 */
   private PluginConfigurationService configurationService(
       ApplicationContext context, PluginCatalogRuntime runtime) {
-    StudioPluginRegistry registry = context.getBean(StudioPluginRegistry.class);
+    PluginRegistry registry = context.getBean(PluginRegistry.class);
     return new PluginConfigurationService(
         registry,
         repository,
@@ -364,8 +346,8 @@ class ComfyuiPluginPostgresIntegrationTest {
     }
   }
 
-  private StudioPluginRegistry registry(ConfigurableApplicationContext context) {
-    return context.getBean(StudioPluginRegistry.class);
+  private PluginRegistry registry(ConfigurableApplicationContext context) {
+    return context.getBean(PluginRegistry.class);
   }
 
   /**
@@ -465,7 +447,7 @@ class ComfyuiPluginPostgresIntegrationTest {
   private String schemaDefaults() {
     try {
       Class<?> pluginClass = Class.forName(PLUGIN_PREFIX + "comfyui.ComfyuiPlugin");
-      StudioPlugin plugin = (StudioPlugin) pluginClass.getDeclaredConstructor().newInstance();
+      Plugin plugin = (Plugin) pluginClass.getDeclaredConstructor().newInstance();
       assertTrue(plugin.descriptor().pluginId().equals(COMFYUI));
       return plugin.configurationSchema().defaultsJson();
     } catch (ReflectiveOperationException error) {
@@ -580,13 +562,13 @@ class ComfyuiPluginPostgresIntegrationTest {
     }
   }
 
-  /** 测试自有注册表：只登记运行期 classpath 上真实存在的 StudioPlugin。 */
+  /** 测试自有注册表：只登记运行期 classpath 上真实存在的 Plugin。 */
   @Configuration
   static class RegistryConfiguration {
 
     @Bean
-    StudioPluginRegistry studioPluginRegistry(ObjectProvider<StudioPlugin> plugins) {
-      return new StudioPluginRegistry(plugins.orderedStream().toList());
+    PluginRegistry pluginRegistry(ObjectProvider<Plugin> plugins) {
+      return new PluginRegistry(plugins.orderedStream().toList());
     }
   }
 }

@@ -5,8 +5,8 @@ import java.util.regex.Pattern;
 /**
  * Plugin 的安装身份。
  *
- * <p>descriptor 只声明身份：{@code pluginId} 全局唯一且不可变，认证候选与配置契约分别在 {@link
- * StudioPlugin#authenticationSpec()} 与 {@link StudioPlugin#configurationSchema()} 中声明。
+ * <p>descriptor 只声明身份：{@code pluginId} 全局唯一且不可变，认证候选与配置契约分别在 {@link Plugin#authenticationSpec()} 与
+ * {@link Plugin#configurationSchema()} 中声明。
  *
  * @param pluginId 全局唯一不可变安装身份，canonical 小写点划线标识符（与 {@code plugin_credential.plugin_id} 约束一致，≤64）
  * @param name 展示名

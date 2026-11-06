@@ -3,19 +3,23 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { PluginConfigModal } from './PluginConfigModal'
-import { pluginsService } from '@/features/extensions/plugins-service'
+import { request } from '@/shared/api/client'
 import { MAX_PLUGIN_VALUES_UTF8_BYTES } from './plugin-config-json'
-import type { PluginDTO } from '@/shared/api/generated/contracts'
+import type {
+  PluginConfigurationUpdateRequestDTO,
+  PluginDTO,
+} from '@/shared/api/generated/contracts'
 
-vi.mock('@/features/extensions/plugins-service', () => ({
-  pluginsService: { updateConfiguration: vi.fn() },
-}))
+vi.mock('@/shared/api/client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/shared/api/client')>()
+  return { ...actual, request: vi.fn() }
+})
 
 /**
  * 通用受控 schema：只出现一次「受控 object 数组 + 内嵌 JSON 字符串 + 可选字段」结构，
  * 与任何具体插件无关，用来证明编辑器不做字段名或 pluginId 特判。
  */
-const WORKFLOW_SCHEMA = JSON.stringify({
+const WORKFLOW_SCHEMA = {
   type: 'object',
   description: 'generic workflow configuration',
   properties: {
@@ -55,12 +59,16 @@ const WORKFLOW_SCHEMA = JSON.stringify({
   },
   required: ['entries'],
   additionalProperties: false,
-})
+}
 
-const WORKFLOW_VALUES =
-  '{"title":"root","graphJson":"{\\"1\\":{\\"seed\\":9007199254740993123456789}}",' +
-  '"entries":[{"id":"a","slot":{"index":0,"kind":"ALPHA"},"outputs":[{"index":0}]},' +
-  '{"id":"b","slot":{"index":1,"kind":"BETA"},"outputs":[{"index":1}]}]}'
+const WORKFLOW_VALUES = {
+  title: 'root',
+  graphJson: '{"1":{"seed":9007199254740993123456789}}',
+  entries: [
+    { id: 'a', slot: { index: 0, kind: 'ALPHA' }, outputs: [{ index: 0 }] },
+    { id: 'b', slot: { index: 1, kind: 'BETA' }, outputs: [{ index: 1 }] },
+  ],
+}
 
 const workflowPlugin: PluginDTO = {
   pluginId: 'generic-workflow',
@@ -74,14 +82,14 @@ const workflowPlugin: PluginDTO = {
   lastRefreshedAt: null,
   lastRefreshError: null,
   configuration: {
-    revision: '4',
-    valuesJson: WORKFLOW_VALUES,
+    version: '4',
+    values: WORKFLOW_VALUES,
     valuesSchema: WORKFLOW_SCHEMA,
-    defaultsJson: '{"entries":[]}',
+    defaults: { entries: [] },
     secrets: { apiKey: { description: 'workflow credential', configured: true } },
   },
-  desiredRevision: '4',
-  appliedRevision: '4',
+  desiredVersion: '4',
+  appliedVersion: '4',
   connectionCheckSupported: false,
   harnessToolNames: [],
   canvasFunctionNames: [],
@@ -106,13 +114,20 @@ describe('PluginConfigModal workflow editing', () => {
     )
   }
 
+  /** 最近一次配置保存的请求体。 */
+  function savedPayload(call = 0): PluginConfigurationUpdateRequestDTO {
+    const args = vi.mocked(request).mock.calls[call][1] as {
+      body: PluginConfigurationUpdateRequestDTO
+    }
+    return args.body
+  }
+
   async function save(): Promise<Record<string, unknown>> {
     await userEvent.setup().click(screen.getByRole('button', { name: '保存配置' }))
     await waitFor(() => {
-      expect(pluginsService.updateConfiguration).toHaveBeenCalledTimes(1)
+      expect(request).toHaveBeenCalledTimes(1)
     })
-    const payload = vi.mocked(pluginsService.updateConfiguration).mock.calls[0][1]
-    return JSON.parse(payload.valuesJson) as Record<string, unknown>
+    return savedPayload().values as Record<string, unknown>
   }
 
   /** 可控的在途文件读取：arrayBuffer 由测试显式放行，用来构造"读取中"的真实时序。 */
@@ -156,7 +171,7 @@ describe('PluginConfigModal workflow editing', () => {
   })
 
   it('appends only schema placeholders, omits optional properties and preserves untouched bytes', async () => {
-    vi.mocked(pluginsService.updateConfiguration).mockResolvedValue(workflowPlugin)
+    vi.mocked(request).mockResolvedValue(workflowPlugin)
     renderModal()
 
     await userEvent.setup().click(screen.getByRole('button', { name: '添加 entries 条目' }))
@@ -171,13 +186,11 @@ describe('PluginConfigModal workflow editing', () => {
     const entries = values.entries as Record<string, unknown>[]
     expect(entries).toHaveLength(3)
     expect(entries[2]).toEqual({ id: '', slot: { index: 0, kind: '' } })
-    expect(vi.mocked(pluginsService.updateConfiguration).mock.calls[0][1].valuesJson).toContain(
-      '9007199254740993123456789',
-    )
+    expect(JSON.stringify(values)).toContain('9007199254740993123456789')
   })
 
   it('removes an item only through its indexed control and keeps the rest byte-identical', async () => {
-    vi.mocked(pluginsService.updateConfiguration).mockResolvedValue(workflowPlugin)
+    vi.mocked(request).mockResolvedValue(workflowPlugin)
     renderModal()
 
     await userEvent.setup().click(
@@ -189,13 +202,13 @@ describe('PluginConfigModal workflow editing', () => {
 
     const values = await save()
     expect(values.entries).toEqual([{ id: 'a', slot: { index: 0, kind: 'ALPHA' }, outputs: [{ index: 0 }] }])
-    expect(vi.mocked(pluginsService.updateConfiguration).mock.calls[0][1].valuesJson).toContain(
+    expect(JSON.stringify(values)).toContain(
       '"graphJson":"{\\"1\\":{\\"seed\\":9007199254740993123456789}}"',
     )
   })
 
   it('keeps a single anonymous output unnamed until the user names it, and can unset it again', async () => {
-    vi.mocked(pluginsService.updateConfiguration).mockResolvedValue(workflowPlugin)
+    vi.mocked(request).mockResolvedValue(workflowPlugin)
     renderModal()
 
     const outputs = within(screen.getByRole('group', { name: 'entries[0]' })).getByRole('group', {
@@ -213,13 +226,11 @@ describe('PluginConfigModal workflow editing', () => {
     const values = await save()
     const firstEntry = (values.entries as Record<string, unknown>[])[0]
     expect((firstEntry.outputs as Record<string, unknown>[])[0]).toEqual({ index: 0 })
-    expect(
-      vi.mocked(pluginsService.updateConfiguration).mock.calls[0][1].valuesJson,
-    ).not.toContain('"name":null')
+    expect(JSON.stringify(values)).not.toContain('"name":null')
   })
 
   it('treats clearing an optional text field as an explicit empty string, never a silent delete', async () => {
-    vi.mocked(pluginsService.updateConfiguration).mockResolvedValue(workflowPlugin)
+    vi.mocked(request).mockResolvedValue(workflowPlugin)
     renderModal()
 
     const user = userEvent.setup()
@@ -232,7 +243,7 @@ describe('PluginConfigModal workflow editing', () => {
   })
 
   it('edits an embedded JSON string through the multiline editor with strict JSON validation', async () => {
-    vi.mocked(pluginsService.updateConfiguration).mockResolvedValue(workflowPlugin)
+    vi.mocked(request).mockResolvedValue(workflowPlugin)
     renderModal()
 
     const user = userEvent.setup()
@@ -247,7 +258,7 @@ describe('PluginConfigModal workflow editing', () => {
     fireEvent.change(editor, { target: { value: '{"1":' } })
     expect(screen.getByRole('alert')).toHaveTextContent('JSON 内容无效')
     expect(screen.getByRole('button', { name: '保存配置' })).toBeDisabled()
-    expect(pluginsService.updateConfiguration).not.toHaveBeenCalled()
+    expect(request).not.toHaveBeenCalled()
 
     // 非法草稿可以显式丢弃，恢复为已提交内容且不再阻止保存。
     await user.click(screen.getByRole('button', { name: '丢弃 graphJson 的草稿' }))
@@ -261,17 +272,13 @@ describe('PluginConfigModal workflow editing', () => {
     expect(values.graphJson).toBe(
       '{\n  "1": {"seed": 9007199254740993123456789},\n  "2": {"ratio": 1.230000}\n}',
     )
-    // 换行以 \\n 转义进入 valuesJson，长整数与精确小数逐字符保留。
-    expect(vi.mocked(pluginsService.updateConfiguration).mock.calls[0][1].valuesJson).toContain(
-      '9007199254740993123456789',
-    )
-    expect(vi.mocked(pluginsService.updateConfiguration).mock.calls[0][1].valuesJson).toContain(
-      '1.230000',
-    )
+    // 换行以 \\n 转义进入 graphJson 字符串，长整数与精确小数逐字符保留。
+    expect(JSON.stringify(values)).toContain('9007199254740993123456789')
+    expect(JSON.stringify(values)).toContain('1.230000')
   })
 
   it('imports a strict UTF-8 JSON file and rejects oversized, invalid-UTF-8 and invalid files', async () => {
-    vi.mocked(pluginsService.updateConfiguration).mockResolvedValue(workflowPlugin)
+    vi.mocked(request).mockResolvedValue(workflowPlugin)
     renderModal()
     const user = userEvent.setup()
     await user.click(screen.getByRole('button', { name: 'graphJson 的多行/JSON 文本编辑器' }))
@@ -327,7 +334,7 @@ describe('PluginConfigModal workflow editing', () => {
   })
 
   it('never lets a late file read overwrite newer manual edits', async () => {
-    vi.mocked(pluginsService.updateConfiguration).mockResolvedValue(workflowPlugin)
+    vi.mocked(request).mockResolvedValue(workflowPlugin)
     renderModal()
     const user = userEvent.setup()
     await user.click(screen.getByRole('button', { name: 'graphJson 的多行/JSON 文本编辑器' }))
@@ -388,7 +395,7 @@ describe('PluginConfigModal workflow editing', () => {
   })
 
   it('imports through the visible button, validates the imported graph and reports an unreadable file', async () => {
-    vi.mocked(pluginsService.updateConfiguration).mockResolvedValue(workflowPlugin)
+    vi.mocked(request).mockResolvedValue(workflowPlugin)
     renderModal()
     const user = userEvent.setup()
     await user.click(screen.getByRole('button', { name: 'graphJson 的多行/JSON 文本编辑器' }))
@@ -427,7 +434,7 @@ describe('PluginConfigModal workflow editing', () => {
   })
 
   it('gates saving on in-flight file reads and keeps late results out of newer state', async () => {
-    vi.mocked(pluginsService.updateConfiguration).mockResolvedValue(workflowPlugin)
+    vi.mocked(request).mockResolvedValue(workflowPlugin)
     renderModal()
     const user = userEvent.setup()
     await user.click(screen.getByRole('button', { name: 'graphJson 的多行/JSON 文本编辑器' }))
@@ -441,7 +448,7 @@ describe('PluginConfigModal workflow editing', () => {
     expect(screen.getByRole('status')).toHaveTextContent('正在读取导入的文件')
     expect(saveButton).toBeDisabled()
     await user.click(saveButton)
-    expect(pluginsService.updateConfiguration).not.toHaveBeenCalled()
+    expect(request).not.toHaveBeenCalled()
 
     fireEvent.change(editor, { target: { value: '{"manual":1}' } })
     first.release()
@@ -476,14 +483,14 @@ describe('PluginConfigModal workflow editing', () => {
   })
 
   it('keeps edits made in other fields while a file read is still pending', async () => {
-    vi.mocked(pluginsService.updateConfiguration).mockResolvedValue(workflowPlugin)
+    vi.mocked(request).mockResolvedValue(workflowPlugin)
     renderModal()
     const user = userEvent.setup()
     await user.click(screen.getByRole('button', { name: 'graphJson 的多行/JSON 文本编辑器' }))
     const input = fileInputOf()
 
     // 读取挂起期间修改另一个标量字段，并往另一个数组追加条目：
-    // 文件返回时必须调用当前渲染的 editor，而不是发起读取那一刻捕获的旧闭包（旧闭包会以旧 valuesJson 覆盖这两处编辑）。
+    // 文件返回时必须调用当前渲染的 editor，而不是发起读取那一刻捕获的旧闭包（旧闭包会以旧 values 覆盖这两处编辑）。
     const read = deferredRead('{"from-file":{"seed":9007199254740993}}')
     fireEvent.change(input, { target: { files: [read.file] } })
     fireEvent.change(screen.getByRole('textbox', { name: 'title' }), {
@@ -525,7 +532,7 @@ describe('PluginConfigModal workflow editing', () => {
       screen.getByText('请先修复或显式丢弃表单中的草稿错误，再切换编辑器'),
     ).toBeInTheDocument()
     expect(screen.getByRole('alert')).toHaveTextContent('JSON 内容无效')
-    expect(pluginsService.updateConfiguration).not.toHaveBeenCalled()
+    expect(request).not.toHaveBeenCalled()
 
     // 显式丢弃后错误消失，切换与保存同时恢复。
     await user.click(screen.getByRole('button', { name: '丢弃 graphJson 的草稿' }))
@@ -552,7 +559,7 @@ describe('PluginConfigModal workflow editing', () => {
     expect(screen.getByRole('textbox', { name: 'entries' })).toHaveValue('[] ,"injected":1')
     expect(screen.getByRole('alert')).toHaveTextContent('无效的 JSON 容器格式')
     expect(screen.getByText('请先修复或显式丢弃 entries 下的草稿错误，再切换编辑器')).toBeInTheDocument()
-    expect(pluginsService.updateConfiguration).not.toHaveBeenCalled()
+    expect(request).not.toHaveBeenCalled()
 
     // 显式修复成合法片段后，切换与保存都恢复。
     fireEvent.change(rawArea, { target: { value: '[{"id":"c","slot":{"index":2,"kind":"BETA"}}]' } })
@@ -561,7 +568,7 @@ describe('PluginConfigModal workflow editing', () => {
     await user.click(screen.getByRole('button', { name: toggleName }))
     expect(screen.getByRole('group', { name: 'entries[0]' })).toBeInTheDocument()
 
-    vi.mocked(pluginsService.updateConfiguration).mockResolvedValue(workflowPlugin)
+    vi.mocked(request).mockResolvedValue(workflowPlugin)
     const values = await save()
     expect((values.entries as Record<string, unknown>[])[0]).toMatchObject({ id: 'c' })
   })
@@ -587,13 +594,13 @@ describe('PluginConfigModal workflow editing', () => {
     expect(removeButton).toBeDisabled()
     expect(screen.getByText('请先解决草稿错误，再删除 entries 条目')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '保存配置' })).toBeDisabled()
-    expect(pluginsService.updateConfiguration).not.toHaveBeenCalled()
+    expect(request).not.toHaveBeenCalled()
   })
 
-  it('blocks POST when the valuesJson byte budget is exceeded, including escape overhead', async () => {
+  it('blocks POST when the values byte budget is exceeded, including escape overhead', async () => {
     renderModal()
     const editor = screen.getByRole('textbox', { name: 'graphJson' })
-    // 逻辑字符数远小于上限，但每个引号都要写成 \"，转义开销让最终 valuesJson 超过 64KiB。
+    // 逻辑字符数远小于上限，但每个引号都要写成 \"，转义开销让最终 values 超过 64KiB。
     fireEvent.change(editor, { target: { value: '"'.repeat(40000) } })
 
     expect(screen.getByRole('alert')).toHaveTextContent(
@@ -601,11 +608,11 @@ describe('PluginConfigModal workflow editing', () => {
     )
     expect(screen.getByRole('button', { name: '保存配置' })).toBeDisabled()
     await userEvent.setup().click(screen.getByRole('button', { name: '保存配置' }))
-    expect(pluginsService.updateConfiguration).not.toHaveBeenCalled()
+    expect(request).not.toHaveBeenCalled()
   })
 
   it('keeps the secret patch and ordinary values separate while editing workflows', async () => {
-    vi.mocked(pluginsService.updateConfiguration).mockResolvedValue(workflowPlugin)
+    vi.mocked(request).mockResolvedValue(workflowPlugin)
     renderModal()
 
     await userEvent.setup().click(
@@ -615,9 +622,9 @@ describe('PluginConfigModal workflow editing', () => {
     )
     await save()
 
-    const payload = vi.mocked(pluginsService.updateConfiguration).mock.calls[0][1]
+    const payload = savedPayload()
     expect(payload.secretPatch).toEqual({ apiKey: { operation: 'KEEP' } })
-    expect(payload.valuesJson).not.toContain('apiKey')
+    expect(JSON.stringify(payload.values)).not.toContain('apiKey')
     expect(onSuccess).toHaveBeenCalledTimes(1)
   })
 })

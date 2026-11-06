@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.share.plugin;
+package fun.fengwk.kkstudio.platform.pluginhost.dto;
 
 import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
@@ -21,13 +21,12 @@ public sealed interface PluginAuthKindDTO
   /**
    * 固定深链登录：用户在浏览器完成登录后把回调 deep link 粘贴回来，Platform 只接收 {@code callbackUrl}，不接收任何 token 参数。
    *
-   * @param regionCandidates Plugin 声明的固定 region 候选（非空、去重）；prepare 请求只能选其中之一， loginUrl 只会是该 region
-   *     的公开官方地址
+   * @param regionCandidates Plugin 声明的固定 region 候选（非空、去重）；prepare 请求只能选其中之一
    */
   record DeepLink(List<String> regionCandidates) implements PluginAuthKindDTO {}
 
   /**
-   * 静态密钥认证：用户通过配置秘密补丁录入密钥，没有交互式登录、没有 region、没有过期与自动刷新。
+   * 静态密钥认证：用户通过秘密补丁录入密钥，没有交互式登录、没有 region、没有过期与自动刷新。
    *
    * @param secretField 该 Plugin 唯一声明的秘密字段名
    */

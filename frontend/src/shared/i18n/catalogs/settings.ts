@@ -241,10 +241,6 @@ export const settingsCatalog = {
     'en-US': 'Secret "{{key}}" requires a non-empty value.',
     'zh-CN': '秘密凭据 “{{key}}” 需要非空值。',
   },
-  'plugins.configDialog.missingRevision': {
-    'en-US': 'Missing configuration revision. Configuration cannot be saved.',
-    'zh-CN': '缺少配置修订版本，无法保存配置。',
-  },
   'plugins.configDialog.invalidInteger': {
     'en-US': 'Invalid integer format.',
     'zh-CN': '无效的整数格式。',
@@ -357,13 +353,13 @@ export const settingsCatalog = {
     'en-US': 'Resolve draft errors before removing {{name}} items',
     'zh-CN': '请先解决草稿错误，再删除 {{name}} 条目',
   },
-  'plugins.desiredRevision': {
-    'en-US': 'Desired Revision',
-    'zh-CN': '期望修订',
+  'plugins.desiredVersion': {
+    'en-US': 'Desired Version',
+    'zh-CN': '期望版本',
   },
-  'plugins.appliedRevision': {
-    'en-US': 'Applied Revision',
-    'zh-CN': '已应用修订',
+  'plugins.appliedVersion': {
+    'en-US': 'Applied Version',
+    'zh-CN': '已应用版本',
   },
   'plugins.applicationStatus': {
     'en-US': 'Application Status',
@@ -407,8 +403,8 @@ export const settingsCatalog = {
     'zh-CN': '仅对远端服务执行一次只读探测，不修改配置与凭据，也不会自行重复检查。',
   },
   'plugins.connectionCheck.coordinates': {
-    'en-US': 'Applied Revision',
-    'zh-CN': '已应用修订',
+    'en-US': 'Applied Version',
+    'zh-CN': '已应用版本',
   },
   'plugins.connectionCheck.checkedAt': {
     'en-US': 'Checked At',

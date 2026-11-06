@@ -28,9 +28,7 @@ import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.transaction.PlatformTransactionManager;
-import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
-import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionBinding;
@@ -48,11 +46,15 @@ import fun.fengwk.kkstudio.canvas.infra.platform.PluginCanvasFunctionCatalog;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.json.JsonValues;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentRepository;
+import fun.fengwk.kkstudio.platform.plugin.Plugin;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialStatus;
-import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
-import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
+import fun.fengwk.kkstudio.platform.plugin.PluginRegistry;
 import fun.fengwk.kkstudio.platform.pluginhost.catalog.PluginCatalogRuntime;
 import fun.fengwk.kkstudio.platform.pluginhost.credential.DatabasePluginCredentialStore;
+import fun.fengwk.kkstudio.platform.pluginhost.dto.PluginConfigurationDTO;
+import fun.fengwk.kkstudio.platform.pluginhost.dto.PluginConnectionCheckDTO;
+import fun.fengwk.kkstudio.platform.pluginhost.dto.PluginDTO;
+import fun.fengwk.kkstudio.platform.pluginhost.http.PluginController;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginAuthAttemptRepository;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRepository;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginCredentialRepository;
@@ -60,15 +62,10 @@ import fun.fengwk.kkstudio.platform.pluginhost.service.PluginAgentDependencies;
 import fun.fengwk.kkstudio.platform.pluginhost.service.PluginConfigurationService;
 import fun.fengwk.kkstudio.platform.pluginhost.service.PluginContextFactory;
 import fun.fengwk.kkstudio.platform.pluginhost.service.PluginManagementService;
-import fun.fengwk.kkstudio.platform.pluginhost.service.PluginSecretPatch;
+import fun.fengwk.kkstudio.platform.secret.SecretUpdate;
 import fun.fengwk.kkstudio.platform.settings.HttpProxySelector;
-import fun.fengwk.kkstudio.share.plugin.PluginConfigurationDTO;
-import fun.fengwk.kkstudio.share.plugin.PluginConnectionCheckDTO;
-import fun.fengwk.kkstudio.share.plugin.PluginDTO;
 import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
-import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
-import fun.fengwk.kkstudio.web.plugin.StudioPluginController;
 
 import javax.sql.DataSource;
 
@@ -149,7 +146,7 @@ class OpenCliPluginPostgresIntegrationTest {
         .run(
             context -> {
               PluginCatalogRuntime runtime = context.getBean(PluginCatalogRuntime.class);
-              StudioPluginRegistry registry = context.getBean(StudioPluginRegistry.class);
+              PluginRegistry registry = context.getBean(PluginRegistry.class);
               assertEquals("OpenCLI", registry.find(PLUGIN_ID).orElseThrow().descriptor().name());
 
               try (PluginCatalogRuntime.Lease lease = runtime.acquire()) {
@@ -180,7 +177,7 @@ class OpenCliPluginPostgresIntegrationTest {
               PluginConfigurationService configuration = configurationService(context, runtime);
 
               configuration.configure(
-                  PLUGIN_ID, 1L, values, Map.of("apiKey", PluginSecretPatch.set("key-1")));
+                  PLUGIN_ID, 1L, values, Map.of("apiKey", SecretUpdate.set("key-1")));
 
               assertEquals(
                   PluginCredentialStatus.CONNECTED,
@@ -212,12 +209,12 @@ class OpenCliPluginPostgresIntegrationTest {
               PluginCatalogRuntime runtime = context.getBean(PluginCatalogRuntime.class);
               PluginConfigurationService configuration = configurationService(context, runtime);
               configuration.configure(
-                  PLUGIN_ID, 1L, values, Map.of("apiKey", PluginSecretPatch.set("key-1")));
+                  PLUGIN_ID, 1L, values, Map.of("apiKey", SecretUpdate.set("key-1")));
 
               try (PluginCatalogRuntime.Lease oldLease = runtime.acquire()) {
                 CanvasFunctionAdapter oldAdapter = adapter(oldLease);
                 configuration.configure(
-                    PLUGIN_ID, 2L, values, Map.of("apiKey", PluginSecretPatch.set("key-2")));
+                    PLUGIN_ID, 2L, values, Map.of("apiKey", SecretUpdate.set("key-2")));
 
                 submit(oldAdapter, "leased instance");
                 try (PluginCatalogRuntime.Lease newLease = runtime.acquire()) {
@@ -247,7 +244,7 @@ class OpenCliPluginPostgresIntegrationTest {
               PluginCatalogRuntime runtime = context.getBean(PluginCatalogRuntime.class);
               PluginConfigurationService configuration = configurationService(context, runtime);
               configuration.configure(
-                  PLUGIN_ID, 1L, values, Map.of("apiKey", PluginSecretPatch.set("key-1")));
+                  PLUGIN_ID, 1L, values, Map.of("apiKey", SecretUpdate.set("key-1")));
 
               try (PluginCatalogRuntime.Lease oldLease = runtime.acquire()) {
                 CanvasFunctionAdapter oldAdapter = adapter(oldLease);
@@ -273,13 +270,13 @@ class OpenCliPluginPostgresIntegrationTest {
               PluginCatalogRuntime runtime = context.getBean(PluginCatalogRuntime.class);
               PluginConfigurationService configuration = configurationService(context, runtime);
               configuration.configure(
-                  PLUGIN_ID, 1L, values, Map.of("apiKey", PluginSecretPatch.set("key-1")));
+                  PLUGIN_ID, 1L, values, Map.of("apiKey", SecretUpdate.set("key-1")));
 
               try (PluginCatalogRuntime.Lease oldLease = runtime.acquire()) {
                 CanvasFunctionAdapter oldAdapter = adapter(oldLease);
                 submit(oldAdapter, "before clear");
                 configuration.configure(
-                    PLUGIN_ID, 2L, values, Map.of("apiKey", PluginSecretPatch.clear()));
+                    PLUGIN_ID, 2L, values, Map.of("apiKey", SecretUpdate.clear()));
 
                 assertTrue(credentialRepository.find(PLUGIN_ID).isEmpty());
                 assertThrows(
@@ -312,23 +309,23 @@ class OpenCliPluginPostgresIntegrationTest {
         .run(
             context -> {
               PluginCatalogRuntime runtime = context.getBean(PluginCatalogRuntime.class);
-              StudioPluginRegistry registry = context.getBean(StudioPluginRegistry.class);
+              PluginRegistry registry = context.getBean(PluginRegistry.class);
               // 只保存、不立即应用：refresh 之前真实存在「已保存但未应用」的窗口。
               PluginConfigurationService pending =
                   configurationService(registry, context, () -> {});
               PluginManagementService management = managementService(registry, runtime, pending);
 
               pending.configure(
-                  PLUGIN_ID, 1L, values, Map.of("apiKey", PluginSecretPatch.set("check-key")));
-              assertThrows(DomainException.class, () -> management.checkConnection(PLUGIN_ID, 2L));
+                  PLUGIN_ID, 1L, values, Map.of("apiKey", SecretUpdate.set("check-key")));
+              assertThrows(DomainException.class, () -> management.checkConnection(PLUGIN_ID, "2"));
 
               runtime.refresh();
-              assertThrows(DomainException.class, () -> management.checkConnection(PLUGIN_ID, 1L));
+              assertThrows(DomainException.class, () -> management.checkConnection(PLUGIN_ID, "1"));
               assertEquals(
                   0, requests.size(), "unapplied or mismatched revisions must not reach out");
 
-              PluginConnectionCheckDTO checked = management.checkConnection(PLUGIN_ID, 2L);
-              assertEquals("2", checked.getAppliedRevision());
+              PluginConnectionCheckDTO checked = management.checkConnection(PLUGIN_ID, "2");
+              assertEquals("2", checked.getAppliedVersion());
               assertEquals(
                   PluginConnectionCheckDTO.Reachability.REACHABLE, checked.getReachability());
               assertEquals(
@@ -338,9 +335,9 @@ class OpenCliPluginPostgresIntegrationTest {
               assertEquals("/api/resources/dates", requests.get(0).path());
               assertEquals("Bearer check-key", requests.get(0).authorization());
 
-              pending.configure(PLUGIN_ID, 2L, values, Map.of("apiKey", PluginSecretPatch.clear()));
+              pending.configure(PLUGIN_ID, 2L, values, Map.of("apiKey", SecretUpdate.clear()));
               runtime.refresh();
-              PluginConnectionCheckDTO revoked = management.checkConnection(PLUGIN_ID, 3L);
+              PluginConnectionCheckDTO revoked = management.checkConnection(PLUGIN_ID, "3");
               assertEquals(
                   PluginConnectionCheckDTO.Reachability.NOT_CHECKED, revoked.getReachability());
               assertEquals(
@@ -350,7 +347,7 @@ class OpenCliPluginPostgresIntegrationTest {
   }
 
   /**
-   * 真实插件与真实管理服务到 HTTP 的共用 golden：GET /api/plugins/opencli 的响应体必须与已提交资源逐值一致。
+   * 真实插件与真实管理服务到 HTTP 的共用 golden：GET /api/platform/plugins/opencli 的响应体必须与已提交资源逐值一致。
    *
    * <p>配置只给出 baseUrl 与 seedance.workspaceId，其余取值由真实 schema 补齐，因此 golden 锁定的就是生产派生文本；前端直接消费同一份资源。
    */
@@ -360,7 +357,7 @@ class OpenCliPluginPostgresIntegrationTest {
         .run(
             context -> {
               PluginCatalogRuntime runtime = context.getBean(PluginCatalogRuntime.class);
-              StudioPluginRegistry registry = context.getBean(StudioPluginRegistry.class);
+              PluginRegistry registry = context.getBean(PluginRegistry.class);
               PluginConfigurationService configuration = configurationService(context, runtime);
               PluginManagementService management =
                   managementService(registry, runtime, configuration);
@@ -371,24 +368,26 @@ class OpenCliPluginPostgresIntegrationTest {
                   "{\"baseUrl\":\"http://127.0.0.1:8080\","
                       + "\"seedance\":{\"workspaceId\":\"workspace-main\"}}",
                   Map.of(
-                      "apiKey", PluginSecretPatch.set(HTTP_GOLDEN_API_KEY),
-                      "instanceId", PluginSecretPatch.set(HTTP_GOLDEN_INSTANCE_ID)));
+                      "apiKey", SecretUpdate.set(HTTP_GOLDEN_API_KEY),
+                      "instanceId", SecretUpdate.set(HTTP_GOLDEN_INSTANCE_ID)));
 
               assertSame(HTTP_MAPPER, HTTP_CONVERTER.getMapper());
               MockMvc mockMvc =
-                  MockMvcBuilders.standaloneSetup(new StudioPluginController(management))
+                  MockMvcBuilders.standaloneSetup(new PluginController(management))
                       .setMessageConverters(HTTP_CONVERTER)
-                      .setControllerAdvice(new ApiResponseStatusAdvice())
                       .build();
               MockHttpServletResponse response =
-                  mockMvc.perform(get("/api/plugins/" + PLUGIN_ID)).andReturn().getResponse();
+                  mockMvc
+                      .perform(get("/api/platform/plugins/" + PLUGIN_ID))
+                      .andReturn()
+                      .getResponse();
 
               assertEquals(200, response.getStatus());
               String body = new String(response.getContentAsByteArray(), StandardCharsets.UTF_8);
               assertFalse(body.contains(HTTP_GOLDEN_API_KEY));
               assertEquals(
-                  wireView(goldenText(HTTP_GOLDEN)),
-                  wireView(body),
+                  JsonValues.readTree(goldenText(HTTP_GOLDEN)),
+                  JsonValues.readTree(body),
                   HTTP_GOLDEN + " must match the live HTTP body");
             });
   }
@@ -407,28 +406,24 @@ class OpenCliPluginPostgresIntegrationTest {
         .run(
             context -> {
               PluginCatalogRuntime runtime = context.getBean(PluginCatalogRuntime.class);
-              StudioPluginRegistry registry = context.getBean(StudioPluginRegistry.class);
+              PluginRegistry registry = context.getBean(PluginRegistry.class);
               PluginConfigurationService configuration = configurationService(context, runtime);
               PluginManagementService management =
                   managementService(registry, runtime, configuration);
 
               configuration.configure(
-                  PLUGIN_ID,
-                  1L,
-                  values,
-                  Map.of("instanceId", PluginSecretPatch.set(privateIdentity)));
+                  PLUGIN_ID, 1L, values, Map.of("instanceId", SecretUpdate.set(privateIdentity)));
               PluginDTO privateOnly = management.getPlugin(PLUGIN_ID);
-              assertEquals(PluginCredentialStatus.NOT_CONNECTED.name(), privateOnly.getStatus());
+              assertEquals(PluginCredentialStatus.NOT_CONNECTED, privateOnly.getStatus());
               PluginConfigurationDTO projected = privateOnly.getConfiguration();
-              assertFalse(projected.getValuesJson().contains(privateIdentity));
+              assertFalse(projected.getValues().toString().contains(privateIdentity));
               assertTrue(projected.getSecrets().get("instanceId").isConfigured());
               assertFalse(projected.getSecrets().get("apiKey").isConfigured());
 
               configuration.configure(
-                  PLUGIN_ID, 2L, values, Map.of("apiKey", PluginSecretPatch.set("key-1")));
+                  PLUGIN_ID, 2L, values, Map.of("apiKey", SecretUpdate.set("key-1")));
               assertEquals(
-                  PluginCredentialStatus.CONNECTED.name(),
-                  management.getPlugin(PLUGIN_ID).getStatus());
+                  PluginCredentialStatus.CONNECTED, management.getPlugin(PLUGIN_ID).getStatus());
               try (PluginCatalogRuntime.Lease lease = runtime.acquire()) {
                 submit(adapter(lease), "generate portrait");
               }
@@ -438,10 +433,10 @@ class OpenCliPluginPostgresIntegrationTest {
                   requests.get(0).body().contains("\"instanceId\":\"" + privateIdentity + "\""));
 
               configuration.configure(
-                  PLUGIN_ID, 3L, values, Map.of("apiKey", PluginSecretPatch.clear()));
+                  PLUGIN_ID, 3L, values, Map.of("apiKey", SecretUpdate.clear()));
               assertTrue(credentialRepository.find(PLUGIN_ID).isPresent());
               assertEquals(
-                  PluginCredentialStatus.NOT_CONNECTED.name(),
+                  PluginCredentialStatus.NOT_CONNECTED,
                   management.getPlugin(PLUGIN_ID).getStatus());
               try (PluginCatalogRuntime.Lease lease = runtime.acquire()) {
                 CanvasFunctionAdapter adapter = adapter(lease);
@@ -467,24 +462,6 @@ class OpenCliPluginPostgresIntegrationTest {
 
   private void submit(CanvasFunctionAdapter adapter, String prompt) {
     adapter.submit(execContext, createTestRun(adapter.functions().get(0), prompt));
-  }
-
-  /**
-   * wire 值视图：配置里的内嵌 JSON 文本按其 JSON 值参与比较。
-   *
-   * <p>这些文本的 key 顺序来自生产 schema 的 map 迭代顺序，同一份配置在两次 JVM 之间可能不同，而顺序不是 wire 契约的一部分；除此之外（字段有无、 取值、token
-   * 类型、内嵌文档的全部键值）都逐值比较。
-   */
-  private static JsonNode wireView(String body) {
-    JsonNode root = JsonValues.readTree(body);
-    JsonNode configuration = root.get("configuration");
-    for (String field : List.of("valuesJson", "valuesSchema", "defaultsJson")) {
-      JsonNode text = configuration.get(field);
-      if (text != null && text.isTextual()) {
-        ((ObjectNode) configuration).set(field, JsonValues.readTree(text.asString()));
-      }
-    }
-    return root;
   }
 
   /** 已提交的共用 golden 原文：测试只读取，绝不在运行时改写资源。 */
@@ -573,12 +550,11 @@ class OpenCliPluginPostgresIntegrationTest {
   /** 与生产一致的写入口；提交后立即在本节点应用，使断言不依赖后台对账。 */
   private PluginConfigurationService configurationService(
       ApplicationContext context, PluginCatalogRuntime runtime) {
-    return configurationService(
-        context.getBean(StudioPluginRegistry.class), context, runtime::refresh);
+    return configurationService(context.getBean(PluginRegistry.class), context, runtime::refresh);
   }
 
   private PluginConfigurationService configurationService(
-      StudioPluginRegistry registry, ApplicationContext context, Runnable catalogChanged) {
+      PluginRegistry registry, ApplicationContext context, Runnable catalogChanged) {
     return new PluginConfigurationService(
         registry,
         configurationRepository,
@@ -591,7 +567,7 @@ class OpenCliPluginPostgresIntegrationTest {
   }
 
   private PluginManagementService managementService(
-      StudioPluginRegistry registry,
+      PluginRegistry registry,
       PluginCatalogRuntime runtime,
       PluginConfigurationService configuration) {
     return new PluginManagementService(
@@ -632,8 +608,8 @@ class OpenCliPluginPostgresIntegrationTest {
   @Configuration(proxyBeanMethods = false)
   static class RegistryConfiguration {
     @Bean
-    StudioPluginRegistry studioPluginRegistry(ObjectProvider<StudioPlugin> plugins) {
-      return new StudioPluginRegistry(plugins.orderedStream().toList());
+    PluginRegistry pluginRegistry(ObjectProvider<Plugin> plugins) {
+      return new PluginRegistry(plugins.orderedStream().toList());
     }
   }
 }

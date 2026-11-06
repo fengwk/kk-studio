@@ -262,7 +262,7 @@ class ComfyuiPluginTest {
 
   /** 自动配置只注册一个安装定义，不发布静态 adapter 或宿主内置 client Bean。 */
   @Test
-  void autoConfigurationRegistersOnlyTheStudioPluginInstallDefinition() {
+  void autoConfigurationRegistersOnlyThePluginInstallDefinition() {
     ComfyuiAutoConfiguration configuration = new ComfyuiAutoConfiguration();
     assertInstanceOf(ComfyuiPlugin.class, configuration.comfyuiPlugin());
   }

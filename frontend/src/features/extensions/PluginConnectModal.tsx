@@ -5,7 +5,7 @@ import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
 import { Select } from '@/shared/ui/controls/Select'
 import { TextInput } from '@/shared/ui/controls/TextInput'
 import { Dialog } from '@/shared/ui/overlays/Dialog'
-import { pluginsService } from '@/features/extensions/plugins-service'
+import { request } from '@/shared/api/client'
 import { useI18n } from '@/shared/i18n'
 import type { PluginDTO } from '@/shared/api/generated/contracts'
 
@@ -73,7 +73,10 @@ function PluginConnection({
     setAuthAttemptId(null)
 
     try {
-      const data = await pluginsService.prepareAuth(plugin.pluginId, { region: selectedRegion })
+      const data = await request('POST /api/platform/plugins/{pluginId}/auth/prepare', {
+        path: { pluginId: plugin.pluginId },
+        body: { region: selectedRegion },
+      })
       if (!mountedRef.current) return
       setAuthAttemptId(data.authAttemptId)
       if (data.loginUrl) {
@@ -114,9 +117,9 @@ function PluginConnection({
     setCallbackUrl('')
 
     try {
-      await pluginsService.completeAuth(plugin.pluginId, {
-        authAttemptId: currentAttemptId,
-        callbackUrl: trimmed,
+      await request('POST /api/platform/plugins/{pluginId}/auth/complete', {
+        path: { pluginId: plugin.pluginId },
+        body: { authAttemptId: currentAttemptId, callbackUrl: trimmed },
       })
       if (!mountedRef.current) return
       onSuccess()

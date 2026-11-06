@@ -2,15 +2,15 @@ package fun.fengwk.kkstudio.platform.pluginhost.credential;
 
 import lombok.extern.slf4j.Slf4j;
 
+import fun.fengwk.kkstudio.platform.plugin.Plugin;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthRejectedException;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthSpec;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialMaterial;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialRefresher;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialSnapshot;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialStatus;
+import fun.fengwk.kkstudio.platform.plugin.PluginRegistry;
 import fun.fengwk.kkstudio.platform.plugin.PluginRenewalNotSentException;
-import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
-import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
 import fun.fengwk.kkstudio.platform.pluginhost.PluginProperties;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginCredentialRepository;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginCredentialRow;
@@ -44,13 +44,13 @@ public final class PluginCredentialRefreshService {
       "plugin credential renewal failed with an unknown outcome";
   private static final int MAX_ERROR_BYTES = 4096;
 
-  private final StudioPluginRegistry registry;
+  private final PluginRegistry registry;
   private final PluginCredentialRepository repository;
   private final PluginProperties properties;
   private final Clock clock;
 
   public PluginCredentialRefreshService(
-      StudioPluginRegistry registry,
+      PluginRegistry registry,
       PluginCredentialRepository repository,
       PluginProperties properties,
       Clock clock) {
@@ -99,7 +99,7 @@ public final class PluginCredentialRefreshService {
   }
 
   private boolean refreshClaimed(PluginCredentialRow row) {
-    StudioPlugin plugin = registry.find(row.pluginId()).orElseThrow();
+    Plugin plugin = registry.find(row.pluginId()).orElseThrow();
     PluginCredentialRefresher refresher = plugin.refresher().orElseThrow();
     if (!repository.ownsUnexpiredLease(row)) {
       return false;
@@ -155,10 +155,7 @@ public final class PluginCredentialRefreshService {
 
   /** 刷新结果必须仍是同一 region 的交互凭据，且尚未过期。 */
   private static boolean usable(
-      StudioPlugin plugin,
-      PluginCredentialRow row,
-      PluginCredentialMaterial material,
-      Instant now) {
+      Plugin plugin, PluginCredentialRow row, PluginCredentialMaterial material, Instant now) {
     return material != null
         && material.interactive()
         && material.region().equals(row.region())

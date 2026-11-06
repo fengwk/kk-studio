@@ -5,25 +5,25 @@ import tools.jackson.databind.JsonNode;
 import fun.fengwk.kkstudio.common.json.JsonValues;
 import fun.fengwk.kkstudio.common.schema.BooleanSchema;
 import fun.fengwk.kkstudio.common.schema.InputSchema;
+import fun.fengwk.kkstudio.platform.plugin.Plugin;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthSpec;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfig;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfigSchema;
 import fun.fengwk.kkstudio.platform.plugin.PluginContext;
 import fun.fengwk.kkstudio.platform.plugin.PluginDescriptor;
 import fun.fengwk.kkstudio.platform.plugin.PluginInstance;
-import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
 
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
 /**
- * Media 的 Studio Plugin 安装期定义：安装身份、受控配置与运行期实例装配。
+ * Media 的 Plugin 安装期定义：安装身份、受控配置与运行期实例装配。
  *
  * <p>本插件不需要认证也不消费凭据：认证声明是 {@link PluginAuthSpec.None}，schema 没有秘密字段，配置与执行都不解析凭据、不联网。 启动期静态冻结
  * descriptor 与受控配置 schema，运行期实例由 {@link #configure(PluginConfig, PluginContext)} 装配并归本 Plugin 所有。
  */
-public final class MediaPlugin implements StudioPlugin {
+public final class MediaPlugin implements Plugin {
 
   public static final String PLUGIN_ID = "media";
   public static final String PLUGIN_NAME = "Media";

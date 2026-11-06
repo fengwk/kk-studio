@@ -14,6 +14,7 @@ import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.platform.plugin.Plugin;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthHandler;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthRejectedException;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthSpec;
@@ -25,9 +26,8 @@ import fun.fengwk.kkstudio.platform.plugin.PluginCredentialRefresher;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialStatus;
 import fun.fengwk.kkstudio.platform.plugin.PluginDescriptor;
 import fun.fengwk.kkstudio.platform.plugin.PluginInstance;
+import fun.fengwk.kkstudio.platform.plugin.PluginRegistry;
 import fun.fengwk.kkstudio.platform.plugin.PluginRenewalNotSentException;
-import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
-import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
 import fun.fengwk.kkstudio.platform.pluginhost.PluginProperties;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginCredentialRepository;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginCredentialRow;
@@ -59,7 +59,7 @@ class PluginCredentialRefreshServiceTest {
   void skipsTheDatabaseWhenNoPluginRefreshes() {
     PluginCredentialRefreshService service =
         new PluginCredentialRefreshService(
-            new StudioPluginRegistry(List.of()), repository, properties, clock());
+            new PluginRegistry(List.of()), repository, properties, clock());
 
     assertEquals(0, service.refreshOnce());
     assertEquals(Optional.empty(), service.earliestRefreshAt());
@@ -193,7 +193,7 @@ class PluginCredentialRefreshServiceTest {
 
   private PluginCredentialRefreshService service() {
     return new PluginCredentialRefreshService(
-        new StudioPluginRegistry(List.of(new DeepLinkPlugin())), repository, properties, clock());
+        new PluginRegistry(List.of(new DeepLinkPlugin())), repository, properties, clock());
   }
 
   private static Clock clock() {
@@ -216,7 +216,7 @@ class PluginCredentialRefreshServiceTest {
   }
 
   /** 声明 DeepLink 认证与刷新器的最小 Plugin。 */
-  private final class DeepLinkPlugin implements StudioPlugin {
+  private final class DeepLinkPlugin implements Plugin {
 
     @Override
     public PluginDescriptor descriptor() {

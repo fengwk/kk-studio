@@ -19,7 +19,9 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
+import fun.fengwk.kkstudio.common.json.JsonValues;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
+import fun.fengwk.kkstudio.platform.plugin.Plugin;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthHandler;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthSpec;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfig;
@@ -31,11 +33,14 @@ import fun.fengwk.kkstudio.platform.plugin.PluginCredentialMaterial;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialStatus;
 import fun.fengwk.kkstudio.platform.plugin.PluginDescriptor;
 import fun.fengwk.kkstudio.platform.plugin.PluginInstance;
-import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
-import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
+import fun.fengwk.kkstudio.platform.plugin.PluginRegistry;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialAccess;
 import fun.fengwk.kkstudio.platform.pluginhost.catalog.PluginCatalogRuntime;
 import fun.fengwk.kkstudio.platform.pluginhost.catalog.PluginFunctionNamesProjection;
+import fun.fengwk.kkstudio.platform.pluginhost.dto.PluginAuthKindDTO;
+import fun.fengwk.kkstudio.platform.pluginhost.dto.PluginAuthPrepareDTO;
+import fun.fengwk.kkstudio.platform.pluginhost.dto.PluginConnectionCheckDTO;
+import fun.fengwk.kkstudio.platform.pluginhost.dto.PluginDTO;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginAuthAttemptRepository;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginAuthAttemptRow;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRepository;
@@ -43,11 +48,7 @@ import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRo
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginCredentialRepository;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginCredentialRow;
 import fun.fengwk.kkstudio.platform.pluginhost.testing.TestPluginFixtures;
-import fun.fengwk.kkstudio.share.plugin.PluginAuthKindDTO;
-import fun.fengwk.kkstudio.share.plugin.PluginAuthPrepareDTO;
-import fun.fengwk.kkstudio.share.plugin.PluginConnectionCheckDTO;
-import fun.fengwk.kkstudio.share.plugin.PluginDTO;
-import fun.fengwk.kkstudio.share.plugin.PluginSecretPatchDTO;
+import fun.fengwk.kkstudio.platform.secret.SecretUpdate;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -91,9 +92,8 @@ class PluginManagementServiceTest {
 
   @BeforeEach
   void setUp() {
-    StudioPluginRegistry registry =
-        new StudioPluginRegistry(
-            List.of(new StaticKeyPlugin(), new DeepLinkPlugin(), new NonePlugin()));
+    PluginRegistry registry =
+        new PluginRegistry(List.of(new StaticKeyPlugin(), new DeepLinkPlugin(), new NonePlugin()));
     stored(STATIC_ID, 2L);
     stored(DEEPLINK_ID, 1L);
     stored(NONE_ID, 1L);
@@ -154,18 +154,18 @@ class PluginManagementServiceTest {
         plugins.stream().map(PluginDTO::getPluginId).toList());
     PluginDTO staticPlugin = service.getPlugin(STATIC_ID);
     assertEquals(new PluginAuthKindDTO.StaticKey("apiKey"), staticPlugin.getAuthKind());
-    assertEquals("CONNECTED", staticPlugin.getStatus());
+    assertEquals(PluginCredentialStatus.CONNECTED, staticPlugin.getStatus());
     assertTrue(staticPlugin.getConfiguration().getSecrets().get("apiKey").isConfigured());
     assertFalse(staticPlugin.toString().contains("secret-value"));
-    assertEquals("2", staticPlugin.getDesiredRevision());
-    assertEquals("2", staticPlugin.getAppliedRevision());
+    assertEquals("2", staticPlugin.getDesiredVersion());
+    assertEquals("2", staticPlugin.getAppliedVersion());
     assertNull(staticPlugin.getApplicationError());
     assertTrue(staticPlugin.isConnectionCheckSupported());
     assertEquals(List.of("static.render"), staticPlugin.getCanvasFunctionNames());
 
     PluginDTO deepLink = service.getPlugin(DEEPLINK_ID);
     assertEquals(new PluginAuthKindDTO.DeepLink(List.of("CN", "US")), deepLink.getAuthKind());
-    assertEquals("NOT_CONNECTED", deepLink.getStatus());
+    assertEquals(PluginCredentialStatus.NOT_CONNECTED, deepLink.getStatus());
     assertNull(service.getPlugin(NONE_ID).getAuthKind());
     assertThrows(DomainException.class, () -> service.getPlugin("ghost"));
   }
@@ -190,59 +190,45 @@ class PluginManagementServiceTest {
                     1L)));
     stored(STATIC_ID, 3L);
 
-    PluginDTO dto = service.updateConfiguration(STATIC_ID, 2L, "{}", Map.of());
+    PluginDTO dto =
+        service.updateConfiguration(STATIC_ID, "2", JsonValues.readTree("{}"), Map.of());
 
     verify(configurationService).configure(STATIC_ID, 2L, "{}", Map.of());
-    assertEquals("NOT_CONNECTED", dto.getStatus());
-    assertEquals("3", dto.getDesiredRevision());
-    assertEquals("2", dto.getAppliedRevision());
+    assertEquals(PluginCredentialStatus.NOT_CONNECTED, dto.getStatus());
+    assertEquals("3", dto.getDesiredVersion());
+    assertEquals("2", dto.getAppliedVersion());
     assertEquals(
         "configuration is saved but this node has not applied it yet", dto.getApplicationError());
   }
 
-  /** 仅有效补丁传给配置服务，非法字段与值均被拒绝且错误不泄露秘密。 */
+  /** 有效补丁原样传给配置服务，非规范字段名与缺失操作被拒绝且错误不泄露秘密。 */
   @Test
-  void validatesAndMapsSecretPatchesBeforeSaving() {
+  void validatesSecretPatchFieldNamesBeforeSaving() {
     String secret = "sensitive-patch-marker";
-    PluginSecretPatchDTO set = patch("SET", secret);
-    service.updateConfiguration(STATIC_ID, 2L, "{}", Map.of("apiKey", set));
+    service.updateConfiguration(
+        STATIC_ID, "2", JsonValues.readTree("{}"), Map.of("apiKey", SecretUpdate.set(secret)));
     verify(configurationService)
-        .configure(STATIC_ID, 2L, "{}", Map.of("apiKey", PluginSecretPatch.set(secret)));
-    service.updateConfiguration(STATIC_ID, 2L, "{}", Map.of("apiKey", patch("KEEP", null)));
+        .configure(STATIC_ID, 2L, "{}", Map.of("apiKey", SecretUpdate.set(secret)));
+    service.updateConfiguration(
+        STATIC_ID, "2", JsonValues.readTree("{}"), Map.of("apiKey", SecretUpdate.keep()));
     verify(configurationService)
-        .configure(STATIC_ID, 2L, "{}", Map.of("apiKey", PluginSecretPatch.keep()));
-    service.updateConfiguration(STATIC_ID, 2L, "{}", Map.of("apiKey", patch("CLEAR", null)));
+        .configure(STATIC_ID, 2L, "{}", Map.of("apiKey", SecretUpdate.keep()));
+    service.updateConfiguration(
+        STATIC_ID, "2", JsonValues.readTree("{}"), Map.of("apiKey", SecretUpdate.clear()));
     verify(configurationService)
-        .configure(STATIC_ID, 2L, "{}", Map.of("apiKey", PluginSecretPatch.clear()));
+        .configure(STATIC_ID, 2L, "{}", Map.of("apiKey", SecretUpdate.clear()));
 
-    Map<String, PluginSecretPatchDTO> nullEntry = new HashMap<>();
+    Map<String, SecretUpdate> nullEntry = new HashMap<>();
     nullEntry.put("apiKey", null);
-    Map<String, PluginSecretPatchDTO> nullField = new HashMap<>();
-    nullField.put(null, set);
-    for (Map<String, PluginSecretPatchDTO> invalid :
-        List.of(
-            nullEntry,
-            nullField,
-            Map.of(" apiKey", set),
-            Map.of("apiKey", patch(null, null)),
-            Map.of("apiKey", patch("UNKNOWN", secret)),
-            Map.of("apiKey", patch("KEEP", secret)),
-            Map.of("apiKey", patch("CLEAR", secret)),
-            Map.of("apiKey", patch("SET", " *** ")))) {
+    for (Map<String, SecretUpdate> invalid :
+        List.of(nullEntry, Map.of(" apiKey", SecretUpdate.keep()))) {
       DomainException error =
           assertThrows(
               DomainException.class,
-              () -> service.updateConfiguration(STATIC_ID, 2L, "{}", invalid));
+              () ->
+                  service.updateConfiguration(STATIC_ID, "2", JsonValues.readTree("{}"), invalid));
       assertFalse(error.toString().contains(secret));
-      assertFalse(error.toString().contains("***"));
     }
-  }
-
-  private static PluginSecretPatchDTO patch(String operation, String value) {
-    PluginSecretPatchDTO dto = new PluginSecretPatchDTO();
-    dto.setOperation(operation);
-    dto.setValue(value);
-    return dto;
   }
 
   /** prepare 只保存 attempt 摘要与当时的配置修订，返回一次性句柄与登录地址。 */
@@ -327,13 +313,13 @@ class PluginManagementServiceTest {
                 PluginConnectionCheckResult.Authentication.ACCEPTED,
                 PluginConnectionCheckResult.BrowserSession.UNKNOWN));
 
-    PluginConnectionCheckDTO result = service.checkConnection(STATIC_ID, 2L);
+    PluginConnectionCheckDTO result = service.checkConnection(STATIC_ID, "2");
 
-    assertEquals("2", result.getAppliedRevision());
+    assertEquals("2", result.getAppliedVersion());
     assertEquals(NOW, result.getCheckedAt());
     assertEquals(PluginConnectionCheckDTO.Reachability.REACHABLE, result.getReachability());
-    assertThrows(DomainException.class, () -> service.checkConnection(STATIC_ID, 1L));
-    assertThrows(DomainException.class, () -> service.checkConnection(NONE_ID, 1L));
+    assertThrows(DomainException.class, () -> service.checkConnection(STATIC_ID, "1"));
+    assertThrows(DomainException.class, () -> service.checkConnection(NONE_ID, "1"));
   }
 
   private void stored(String pluginId, long revision) {
@@ -359,7 +345,7 @@ class PluginManagementServiceTest {
     return new PluginCredentialMaterial(region, expiresAt, NOW, "{\"token\":\"t\"}");
   }
 
-  private abstract static class BasePlugin implements StudioPlugin {
+  private abstract static class BasePlugin implements Plugin {
 
     private final String pluginId;
 

@@ -13,7 +13,7 @@ import java.util.Set;
  * {@link PluginInstance}，它是 Plugin 的 Harness 贡献、产品贡献与实例资源的唯一所有者。Plugin 通过 {@link PluginContext} 接触
  * Platform：只能读取本 Plugin 的凭据快照与调用期作废，不持有 repository、lease、加密主密钥或任何 DTO。
  */
-public interface StudioPlugin {
+public interface Plugin {
 
   /** 安装身份；{@code pluginId} 全局唯一且不可变。 */
   PluginDescriptor descriptor();

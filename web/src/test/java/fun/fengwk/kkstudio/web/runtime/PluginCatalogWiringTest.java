@@ -23,14 +23,14 @@ import fun.fengwk.kkstudio.harness.contributor.api.ContributorDescriptor;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
+import fun.fengwk.kkstudio.platform.plugin.Plugin;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthSpec;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfig;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfigSchema;
 import fun.fengwk.kkstudio.platform.plugin.PluginContext;
 import fun.fengwk.kkstudio.platform.plugin.PluginDescriptor;
 import fun.fengwk.kkstudio.platform.plugin.PluginInstance;
-import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
-import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
+import fun.fengwk.kkstudio.platform.plugin.PluginRegistry;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialStore;
 import fun.fengwk.kkstudio.platform.pluginhost.catalog.PluginCatalogRuntime;
 import fun.fengwk.kkstudio.platform.pluginhost.catalog.PluginCatalogSnapshot;
@@ -119,7 +119,7 @@ class PluginCatalogWiringTest {
     try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext()) {
       registerHost(context);
       WiringPlugin plugin = new WiringPlugin();
-      context.registerBean("wiringPlugin", StudioPlugin.class, () -> plugin);
+      context.registerBean("wiringPlugin", Plugin.class, () -> plugin);
       context.refresh();
 
       PluginCatalogRuntime runtime = context.getBean(PluginCatalogRuntime.class);
@@ -222,13 +222,13 @@ class PluginCatalogWiringTest {
   static class RegistryConfiguration {
 
     @Bean
-    StudioPluginRegistry studioPluginRegistry(ObjectProvider<StudioPlugin> plugins) {
-      return new StudioPluginRegistry(plugins.orderedStream().toList());
+    PluginRegistry pluginRegistry(ObjectProvider<Plugin> plugins) {
+      return new PluginRegistry(plugins.orderedStream().toList());
     }
   }
 
   /** 无普通配置、无秘密、不贡献任何能力的最小安装定义。 */
-  private static final class WiringPlugin implements StudioPlugin {
+  private static final class WiringPlugin implements Plugin {
 
     private final AtomicInteger closes = new AtomicInteger();
 

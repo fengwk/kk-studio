@@ -302,7 +302,6 @@
                                         <include>fun.fengwk.kkstudio.platform.pluginhost.service.PluginConfigurationService*</include>
                                         <include>fun.fengwk.kkstudio.platform.pluginhost.service.PluginManagementService*</include>
                                         <include>fun.fengwk.kkstudio.platform.pluginhost.service.PluginContextFactory</include>
-                                        <include>fun.fengwk.kkstudio.platform.pluginhost.service.PluginSecretPatch</include>
                                     </includes>
                                     <limits>
                                         <limit>

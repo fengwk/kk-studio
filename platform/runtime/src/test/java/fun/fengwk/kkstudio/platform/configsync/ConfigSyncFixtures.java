@@ -56,14 +56,14 @@ import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageGitSource;
 import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.platform.environment.Environment;
 import fun.fengwk.kkstudio.platform.environment.RegistrationTokens;
+import fun.fengwk.kkstudio.platform.plugin.Plugin;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthSpec;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfig;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfigSchema;
 import fun.fengwk.kkstudio.platform.plugin.PluginContext;
 import fun.fengwk.kkstudio.platform.plugin.PluginDescriptor;
 import fun.fengwk.kkstudio.platform.plugin.PluginInstance;
-import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
-import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
+import fun.fengwk.kkstudio.platform.plugin.PluginRegistry;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRepository;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRow;
 import fun.fengwk.kkstudio.platform.pluginhost.service.PluginAgentDependencies;
@@ -157,7 +157,7 @@ final class ConfigSyncFixtures {
   }
 
   /** 同上，但带指定安装目录，用于插件条目的解析期校验。 */
-  static ConfigSyncParser parser(ConfigSyncYaml yaml, StudioPluginRegistry pluginRegistry) {
+  static ConfigSyncParser parser(ConfigSyncYaml yaml, PluginRegistry pluginRegistry) {
     return new ConfigSyncParser(
         yaml,
         PROVIDER_SERVICE,
@@ -387,18 +387,18 @@ final class ConfigSyncFixtures {
     return new PluginConfigurationRow(pluginId, revision, valuesJson);
   }
 
-  static StudioPluginRegistry registry(StudioPlugin... plugins) {
-    return new StudioPluginRegistry(List.of(plugins));
+  static PluginRegistry registry(Plugin... plugins) {
+    return new PluginRegistry(List.of(plugins));
   }
 
   /** 宿主依赖服务替身：Graph/Planner 只做纯声明解析，仓库替身不会被调用。 */
-  static PluginAgentDependencies agentDependencies(StudioPlugin... plugins) {
+  static PluginAgentDependencies agentDependencies(Plugin... plugins) {
     return new PluginAgentDependencies(
         registry(plugins), mock(PluginConfigurationRepository.class), mock(AgentRepository.class));
   }
 
   static PluginAgentDependencies agentDependencies(
-      AgentRepository definitionRepository, StudioPlugin... plugins) {
+      AgentRepository definitionRepository, Plugin... plugins) {
     return new PluginAgentDependencies(
         registry(plugins), mock(PluginConfigurationRepository.class), definitionRepository);
   }
@@ -409,7 +409,7 @@ final class ConfigSyncFixtures {
    * <p>用于证明「插件声明 Agent 依赖」的通用机制，不引用也不猜测任何具体插件的字段或实现。名称以 {@code "!"} 开头表示插件拒绝该普通配置
    * （真实的插件会纯解析内嵌结构化配置并抛输入错误），用于证明输入边界异常被收敛为固定去敏校验失败。
    */
-  static final class AgentDependencyPlugin implements StudioPlugin {
+  static final class AgentDependencyPlugin implements Plugin {
 
     static final String AGENT_FIELD = "promptAgentName";
 
@@ -469,7 +469,7 @@ final class ConfigSyncFixtures {
    *
    * <p>用于证明未知运行时错误绝不被伪装成校验失败或 skip，而是照常上抛。
    */
-  static final class FailingAgentDeclarationPlugin implements StudioPlugin {
+  static final class FailingAgentDeclarationPlugin implements Plugin {
 
     private final String pluginId;
 

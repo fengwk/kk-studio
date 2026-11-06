@@ -23,7 +23,7 @@ import org.springframework.web.server.ResponseStatusException;
 import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.canvas.dto.ApplyCanvasCommandsRequestDTO;
-import fun.fengwk.kkstudio.share.plugin.PluginConfigurationUpdateRequestDTO;
+import fun.fengwk.kkstudio.platform.pluginhost.dto.PluginConfigurationUpdateRequestDTO;
 import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
 
 import java.util.List;
@@ -621,7 +621,7 @@ class RequestBodyRequiredValidationAdviceTest {
               post("/test/plugin")
                   .contentType(MediaType.APPLICATION_JSON)
                   .content(
-                      "{\"expectedRevision\":\"0\",\"valuesJson\":\"{}\",\"secretPatch\":{\"key\":"
+                      "{\"expectedVersion\":\"0\",\"values\":{},\"secretPatch\":{\"key\":"
                           + patch
                           + "}}"))
           .andExpect(status().isOk());

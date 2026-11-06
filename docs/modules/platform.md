@@ -566,11 +566,11 @@ Skill 同步结果按 owner/lease fence 写回，运维窗口保存有界、去�
 ## 构建期 Plugin
 
 选中的 Plugin JAR 由 [`web/pom.xml`](../../web/pom.xml) 的 runtime dependency 进入发行物，
-通过 `AutoConfiguration.imports` 创建 bean。`StudioPluginRegistry` 冻结唯一 pluginId；
-`StudioPlugin` 声明身份、配置 Schema 与认证协议，`configure` 产出持有资源的
+通过 `AutoConfiguration.imports` 创建 bean。`PluginRegistry` 冻结唯一 pluginId；
+`Plugin` 声明身份、配置 Schema 与认证协议，`configure` 产出持有资源的
 `PluginInstance`：Harness 贡献由 `harnessContributors()` 直接声明，其它产品域贡献按类型读取
 （`contributions(CanvasFunctionAdapter.class)`），可以都为空。
-安装集合随发行物构建确定；`StudioPlugin`、安装目录以及凭据与资源端口的纯契约见
+安装集合随发行物构建确定；`Plugin`、安装目录以及凭据与资源端口的纯契约见
 [Platform Plugin API](platform-plugin-api.md)。
 
 `PluginCatalogSnapshot` 逐个配置实例，合并内置 Harness 贡献，并在返回前验证完整 Harness 目录；
@@ -586,16 +586,16 @@ Skill 同步结果按 owner/lease fence 写回，运维窗口保存有界、去�
 启动时为新安装的 Plugin 写入 Schema 默认值（version 1），已有行保持不变；已卸载 Plugin 的残留行被忽略。
 
 [`PluginConfigurationService`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/pluginhost/service/PluginConfigurationService.java)
-是普通配置与凭据的唯一写入口。保存以 expectedRevision 做 CAS：先按 Schema 归一普通值，
+是普通配置与凭据的唯一写入口。保存以 expectedVersion 做 CAS：先按 Schema 归一普通值，
 用候选配置与候选凭据 configure 一次目标插件（被拒绝即 400，不写入），再在同一事务内核验声明依赖的 Agent、
 更新配置、写入或删除凭据行并发出 `plugin_changed` 提示。提交后唤醒本节点目录刷新，
 凭据被改写时额外唤醒凭据刷新调度器；回滚不触发任何唤醒。
 
 [`PluginCatalogRuntime`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/pluginhost/catalog/PluginCatalogRuntime.java)
-持有本节点当前快照。刷新回读全部配置，修订有变化时构建新快照并原子替换；构建失败保留旧快照，
+持有本节点当前快照。刷新回读全部配置，配置版本有变化时构建新快照并原子替换；构建失败保留旧快照，
 并暴露固定的 `applicationError`。快照按引用计数退役：被替换的快照在最后一个租用释放后才关闭，
 因此在途调用继续使用自己租到的实例完成。Web 合并通知、重连提示与每 5 秒的回读。
-管理面投影把数据库中的 desired 修订与本节点快照的 applied 修订一起报告，二者不一致时附带应用说明；
+管理面投影把数据库中的 desired 版本与本节点快照的 applied 版本一起报告，二者不一致时附带应用说明；
 数据库提交提示不代表所有节点已经应用。
 
 产品目录投影由持有该目录的应用提供：Canvas 在每次快照构建时把内置 adapter 与插件贡献合并校验成唯一目录并冻结，
@@ -612,12 +612,12 @@ Skill 同步结果按 owner/lease fence 写回，运维窗口保存有界、去�
 声明真实 side effect、timeout 和 EnvironmentSupport。最后在 Web 中选择 runtime 依赖，
 验证 bean 装配、工具 schema、去敏、失败/取消/超时与资源预算。
 
-管理协议为 `/api/plugins` 的列表/详情、配置写入和认证操作。
+管理协议为 `/api/platform/plugins` 的列表/详情、配置写入和认证操作。
 配置 Schema 与安全秘密投影由插件声明派生；秘密仅支持 KEEP、SET、CLEAR，不回读明文。
 无认证插件不提供登录操作；STATIC_KEY 通过配置接口更新密钥。
 DEEP_LINK 的 prepare 请求为 `{region}`，返回 loginUrl 与单次 authAttemptId；
-complete 请求为 `{authAttemptId, callbackUrl}`，仅消费 prepare 之后配置修订未变、region 一致的未过期尝试。
-认证响应 no-store。新增交互需同步 Share DTO、前端和测试；管理 UI 见
+complete 请求为 `{authAttemptId, callbackUrl}`，仅消费 prepare 之后配置版本未变、region 一致的未过期尝试。
+认证响应 no-store。新增交互需同步平台 DTO、前端和测试；管理 UI 见
 [Plugin 设置](frontend.md#plugin-设置)。
 
 ### Plugin credential

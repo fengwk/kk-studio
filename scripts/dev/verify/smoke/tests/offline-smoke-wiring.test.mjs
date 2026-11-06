@@ -193,27 +193,23 @@ test('test intent: opencli initialization takes coordinates from the GET and sen
   const requests = []
   const jsonCall = async (method, requestPath, body = null) => {
     requests.push([method, requestPath, body])
-    if (method === 'GET' && requestPath === '/api/plugins/opencli') {
+    if (method === 'GET' && requestPath === '/api/platform/plugins/opencli') {
       return requests.length === 1
         ? {
-            desiredEpoch: '42',
-            desiredRevision: '99',
-            appliedEpoch: '40',
-            appliedRevision: '98',
+            desiredVersion: '99',
+            appliedVersion: '98',
             status: 'NOT_CONNECTED',
             applicationError: null,
           }
         : {
-            desiredEpoch: '43',
-            desiredRevision: '100',
-            appliedEpoch: '43',
-            appliedRevision: '100',
+            desiredVersion: '100',
+            appliedVersion: '100',
             status: 'CONNECTED',
             applicationError: null,
           }
     }
-    if (method === 'PUT' && requestPath === '/api/plugins/opencli/configuration') {
-      return { desiredEpoch: '43', desiredRevision: '100' }
+    if (method === 'PUT' && requestPath === '/api/platform/plugins/opencli/configuration') {
+      return { desiredVersion: '100' }
     }
     throw new assert.AssertionError({ message: `unexpected request ${method} ${requestPath}` })
   }
@@ -221,15 +217,14 @@ test('test intent: opencli initialization takes coordinates from the GET and sen
   await initializeOpencliPlugin({ jsonCall, ...noSleep })
 
   assert.ok(requests.length >= 3)
-  assert.deepEqual(requests[0], ['GET', '/api/plugins/opencli', null])
+  assert.deepEqual(requests[0], ['GET', '/api/platform/plugins/opencli', null])
   const [putMethod, putPath, putBody] = requests[1]
   assert.equal(putMethod, 'PUT')
-  assert.equal(putPath, '/api/plugins/opencli/configuration')
+  assert.equal(putPath, '/api/platform/plugins/opencli/configuration')
   // 验证从 GET 实际取得坐标
-  assert.equal(putBody.expectedEpoch, '42')
-  assert.equal(putBody.expectedRevision, '99')
+  assert.equal(putBody.expectedVersion, '99')
   assert.deepEqual(putBody.secretPatch, { apiKey: { operation: 'SET', value: 'synthetic-opencli-key' } })
-  const values = JSON.parse(putBody.valuesJson)
+  const values = putBody.values
   assert.equal(values.enabled, true)
   assert.equal(values.baseUrl, 'http://opencli-hub:8080')
   assert.equal(values.gptImage2.paidEnabled, true)
@@ -241,10 +236,8 @@ test('test intent: opencli initialization fails when the poll never converges', 
   const jsonCall = async (method) =>
     method === 'GET'
       ? {
-          desiredEpoch: '1',
-          desiredRevision: '1',
-          appliedEpoch: '0',
-          appliedRevision: '0',
+          desiredVersion: '1',
+          appliedVersion: '0',
           status: 'NOT_CONNECTED',
           applicationError: 'saving',
         }

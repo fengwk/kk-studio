@@ -53,7 +53,7 @@ export function PluginConnectionCheckModal({
               {t('plugins.connectionCheck.coordinates')}
             </span>
             <span className="plugin-check-fact-value" data-testid="plugin-check-coordinates">
-              {`Rev ${run.expectedRevision}`}
+              {`v${run.expectedVersion}`}
             </span>
           </div>
           {result ? (

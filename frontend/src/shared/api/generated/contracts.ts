@@ -2018,57 +2018,57 @@ export interface ModelVariantDTO {
   protocolOptionsJson?: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.plugin.PluginAuthCompleteRequestDTO */
+/** Java：fun.fengwk.kkstudio.platform.pluginhost.dto.PluginAuthCompleteRequestDTO */
 export interface PluginAuthCompleteRequestDTO {
   authAttemptId: string
   callbackUrl: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.plugin.PluginAuthKindDTO.DeepLink */
+/** Java：fun.fengwk.kkstudio.platform.pluginhost.dto.PluginAuthKindDTO.DeepLink */
 export interface PluginAuthKindDeepLink {
   type: 'DEEP_LINK'
   regionCandidates: string[]
 }
 
-/** Java：fun.fengwk.kkstudio.share.plugin.PluginAuthKindDTO.StaticKey */
+/** Java：fun.fengwk.kkstudio.platform.pluginhost.dto.PluginAuthKindDTO.StaticKey */
 export interface PluginAuthKindStaticKey {
   type: 'STATIC_KEY'
   secretField: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.plugin.PluginAuthKindDTO */
+/** Java：fun.fengwk.kkstudio.platform.pluginhost.dto.PluginAuthKindDTO */
 export type PluginAuthKindDTO =
   | PluginAuthKindDeepLink
   | PluginAuthKindStaticKey
 
-/** Java：fun.fengwk.kkstudio.share.plugin.PluginAuthPrepareDTO */
+/** Java：fun.fengwk.kkstudio.platform.pluginhost.dto.PluginAuthPrepareDTO */
 export interface PluginAuthPrepareDTO {
   authAttemptId: string
   loginUrl: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.plugin.PluginAuthPrepareRequestDTO */
+/** Java：fun.fengwk.kkstudio.platform.pluginhost.dto.PluginAuthPrepareRequestDTO */
 export interface PluginAuthPrepareRequestDTO {
   region: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.plugin.PluginConfigurationDTO */
+/** Java：fun.fengwk.kkstudio.platform.pluginhost.dto.PluginConfigurationDTO */
 export interface PluginConfigurationDTO {
-  revision?: string | null
-  valuesJson: string
-  valuesSchema: string
-  defaultsJson: string
+  version: string
+  values: unknown
+  valuesSchema: unknown
+  defaults: unknown
   secrets: Record<string, PluginSecretProjectionDTO>
 }
 
-/** Java：fun.fengwk.kkstudio.share.plugin.PluginConfigurationUpdateRequestDTO */
+/** Java：fun.fengwk.kkstudio.platform.pluginhost.dto.PluginConfigurationUpdateRequestDTO */
 export interface PluginConfigurationUpdateRequestDTO {
-  expectedRevision: string
-  valuesJson: string
-  secretPatch?: Record<string, PluginSecretPatchDTO> | null
+  expectedVersion: string
+  values: unknown
+  secretPatch?: Record<string, SecretUpdate> | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.plugin.PluginConnectionCheckDTO.Authentication */
+/** Java：fun.fengwk.kkstudio.platform.pluginhost.dto.PluginConnectionCheckDTO.Authentication */
 export type PluginConnectionCheckAuthentication =
   | 'ACCEPTED'
   | 'REJECTED'
@@ -2082,24 +2082,24 @@ export const PLUGIN_CONNECTION_CHECK_AUTHENTICATION_VALUES: readonly PluginConne
   'NOT_CHECKED',
 ]
 
-/** Java：fun.fengwk.kkstudio.share.plugin.PluginConnectionCheckDTO.BrowserSession */
+/** Java：fun.fengwk.kkstudio.platform.pluginhost.dto.PluginConnectionCheckDTO.BrowserSession */
 export type PluginConnectionCheckBrowserSession = 'UNKNOWN'
 
 export const PLUGIN_CONNECTION_CHECK_BROWSER_SESSION_VALUES: readonly PluginConnectionCheckBrowserSession[] = [
   'UNKNOWN',
 ]
 
-/** Java：fun.fengwk.kkstudio.share.plugin.PluginConnectionCheckDTO */
+/** Java：fun.fengwk.kkstudio.platform.pluginhost.dto.PluginConnectionCheckDTO */
 export interface PluginConnectionCheckDTO {
   pluginId: string
-  appliedRevision: string
+  appliedVersion: string
   checkedAt: number
   reachability: PluginConnectionCheckReachability
   authentication: PluginConnectionCheckAuthentication
   browserSession: PluginConnectionCheckBrowserSession
 }
 
-/** Java：fun.fengwk.kkstudio.share.plugin.PluginConnectionCheckDTO.Reachability */
+/** Java：fun.fengwk.kkstudio.platform.pluginhost.dto.PluginConnectionCheckDTO.Reachability */
 export type PluginConnectionCheckReachability =
   | 'REACHABLE'
   | 'UNREACHABLE'
@@ -2113,39 +2113,49 @@ export const PLUGIN_CONNECTION_CHECK_REACHABILITY_VALUES: readonly PluginConnect
   'INDETERMINATE',
 ]
 
-/** Java：fun.fengwk.kkstudio.share.plugin.PluginConnectionCheckRequestDTO */
+/** Java：fun.fengwk.kkstudio.platform.pluginhost.dto.PluginConnectionCheckRequestDTO */
 export interface PluginConnectionCheckRequestDTO {
-  expectedRevision: string
+  expectedVersion: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.plugin.PluginDTO */
+/** Java：fun.fengwk.kkstudio.platform.plugin.PluginCredentialStatus */
+export type PluginCredentialStatus =
+  | 'NOT_CONNECTED'
+  | 'CONNECTED'
+  | 'REFRESH_FAILED'
+  | 'REFRESH_UNCERTAIN'
+  | 'REAUTH_REQUIRED'
+
+export const PLUGIN_CREDENTIAL_STATUS_VALUES: readonly PluginCredentialStatus[] = [
+  'NOT_CONNECTED',
+  'CONNECTED',
+  'REFRESH_FAILED',
+  'REFRESH_UNCERTAIN',
+  'REAUTH_REQUIRED',
+]
+
+/** Java：fun.fengwk.kkstudio.platform.pluginhost.dto.PluginDTO */
 export interface PluginDTO {
   pluginId: string
   name: string
   version: string
   authKind?: PluginAuthKindDTO | null
-  status?: string | null
+  status?: PluginCredentialStatus | null
   region?: string | null
   expiresAt?: number | null
   nextRefreshAt?: number | null
   lastRefreshedAt?: number | null
   lastRefreshError?: string | null
   configuration: PluginConfigurationDTO
-  desiredRevision: string
-  appliedRevision?: string | null
+  desiredVersion: string
+  appliedVersion?: string | null
   connectionCheckSupported: boolean
   harnessToolNames: string[]
   canvasFunctionNames: string[]
   applicationError?: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.plugin.PluginSecretPatchDTO */
-export interface PluginSecretPatchDTO {
-  operation: string
-  value?: string | null
-}
-
-/** Java：fun.fengwk.kkstudio.share.plugin.PluginSecretProjectionDTO */
+/** Java：fun.fengwk.kkstudio.platform.pluginhost.dto.PluginSecretProjectionDTO */
 export interface PluginSecretProjectionDTO {
   description: string
   configured: boolean
@@ -2874,6 +2884,10 @@ export interface ApiRoutes {
     query: { expectedVersion: string }
     response: void
   }
+  'DELETE /api/platform/plugins/{pluginId}/auth': {
+    path: { pluginId: string }
+    response: void
+  }
   'DELETE /api/platform/providers/{name}': {
     path: { name: string }
     query: { expectedVersion: string }
@@ -2886,10 +2900,6 @@ export interface ApiRoutes {
   'DELETE /api/platform/skill-packages/{name}': {
     path: { name: string }
     query: { expectedVersion: string }
-    response: void
-  }
-  'DELETE /api/plugins/{pluginId}/auth': {
-    path: { pluginId: string }
     response: void
   }
   'DELETE /api/projects/{projectId}': {
@@ -3039,6 +3049,13 @@ export interface ApiRoutes {
   'GET /api/platform/models': {
     response: ModelDTO[]
   }
+  'GET /api/platform/plugins': {
+    response: PluginDTO[]
+  }
+  'GET /api/platform/plugins/{pluginId}': {
+    path: { pluginId: string }
+    response: PluginDTO
+  }
   'GET /api/platform/providers': {
     response: ProviderDTO[]
   }
@@ -3063,13 +3080,6 @@ export interface ApiRoutes {
   }
   'GET /api/platform/tools': {
     response: ToolCatalogEntryDTO[]
-  }
-  'GET /api/plugins': {
-    response: PluginDTO[]
-  }
-  'GET /api/plugins/{pluginId}': {
-    path: { pluginId: string }
-    response: PluginDTO
   }
   'GET /api/projects': {
     query: { includeArchived?: boolean }
@@ -3287,6 +3297,21 @@ export interface ApiRoutes {
     body: ModelCreateDTO
     response: ModelDTO
   }
+  'POST /api/platform/plugins/{pluginId}/auth/complete': {
+    path: { pluginId: string }
+    body: PluginAuthCompleteRequestDTO
+    response: PluginDTO
+  }
+  'POST /api/platform/plugins/{pluginId}/auth/prepare': {
+    path: { pluginId: string }
+    body: PluginAuthPrepareRequestDTO
+    response: PluginAuthPrepareDTO
+  }
+  'POST /api/platform/plugins/{pluginId}/check-connection': {
+    path: { pluginId: string }
+    body: PluginConnectionCheckRequestDTO
+    response: PluginConnectionCheckDTO
+  }
   'POST /api/platform/providers': {
     body: ProviderCreateDTO
     response: ProviderDTO
@@ -3317,21 +3342,6 @@ export interface ApiRoutes {
     path: { name: string }
     body: SkillPackagePublishDTO
     response: SkillPackageDetailDTO
-  }
-  'POST /api/plugins/{pluginId}/auth/complete': {
-    path: { pluginId: string }
-    body: PluginAuthCompleteRequestDTO
-    response: PluginDTO
-  }
-  'POST /api/plugins/{pluginId}/auth/prepare': {
-    path: { pluginId: string }
-    body: PluginAuthPrepareRequestDTO
-    response: PluginAuthPrepareDTO
-  }
-  'POST /api/plugins/{pluginId}/connection-check': {
-    path: { pluginId: string }
-    body: PluginConnectionCheckRequestDTO
-    response: PluginConnectionCheckDTO
   }
   'POST /api/projects': {
     body: CreateProjectRequestDTO
@@ -3435,6 +3445,11 @@ export interface ApiRoutes {
     body: ModelUpdateDTO
     response: ModelDTO
   }
+  'PUT /api/platform/plugins/{pluginId}/configuration': {
+    path: { pluginId: string }
+    body: PluginConfigurationUpdateRequestDTO
+    response: PluginDTO
+  }
   'PUT /api/platform/providers/{name}': {
     path: { name: string }
     body: ProviderUpdateDTO
@@ -3444,11 +3459,6 @@ export interface ApiRoutes {
     path: { name: string }
     body: SkillPackageEditDTO
     response: SkillPackageDetailDTO
-  }
-  'PUT /api/plugins/{pluginId}/configuration': {
-    path: { pluginId: string }
-    body: PluginConfigurationUpdateRequestDTO
-    response: PluginDTO
   }
   'PUT /api/projects/{projectId}': {
     path: { projectId: string }

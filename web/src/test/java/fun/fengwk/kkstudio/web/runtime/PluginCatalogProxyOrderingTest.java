@@ -15,14 +15,14 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
 import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
+import fun.fengwk.kkstudio.platform.plugin.Plugin;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthSpec;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfig;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfigSchema;
 import fun.fengwk.kkstudio.platform.plugin.PluginContext;
 import fun.fengwk.kkstudio.platform.plugin.PluginDescriptor;
 import fun.fengwk.kkstudio.platform.plugin.PluginInstance;
-import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
-import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
+import fun.fengwk.kkstudio.platform.plugin.PluginRegistry;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialStore;
 import fun.fengwk.kkstudio.platform.pluginhost.catalog.PluginCatalogRuntime;
 import fun.fengwk.kkstudio.platform.pluginhost.catalog.PluginCatalogSnapshot;
@@ -56,8 +56,7 @@ class PluginCatalogProxyOrderingTest {
     new ApplicationContextRunner()
         .withUserConfiguration(PluginCatalogConfiguration.class)
         .withBean(
-            StudioPluginRegistry.class,
-            () -> new StudioPluginRegistry(List.of(new ProbePlugin(observed))))
+            PluginRegistry.class, () -> new PluginRegistry(List.of(new ProbePlugin(observed))))
         .withBean(
             PluginContextFactory.class,
             () ->
@@ -98,7 +97,7 @@ class PluginCatalogProxyOrderingTest {
   }
 
   /** 只记录 configure 期默认代理的安装定义，不贡献任何两域能力。 */
-  static final class ProbePlugin implements StudioPlugin {
+  static final class ProbePlugin implements Plugin {
 
     static final String PLUGIN_ID = "proxy-probe";
 

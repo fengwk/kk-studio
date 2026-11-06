@@ -16,14 +16,14 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
-/** StudioPlugin 定义与实例分离：可选认证默认缺席，configure 产出由 Plugin 拥有的可关闭实例。 */
-class StudioPluginTest {
+/** Plugin 定义与实例分离：可选认证默认缺席，configure 产出由 Plugin 拥有的可关闭实例。 */
+class PluginTest {
 
   private static final PluginConfigSchema SCHEMA =
       new PluginConfigSchema(new InputSchema(null, Map.of(), Set.of(), false), "{}", Map.of());
 
   /** 只声明安装期定义的最小实现：认证能力全部默认缺席。 */
-  private static final class MinimalPlugin implements StudioPlugin {
+  private static final class MinimalPlugin implements Plugin {
 
     @Override
     public PluginDescriptor descriptor() {
@@ -81,7 +81,7 @@ class StudioPluginTest {
 
   @Test
   void optionalAuthenticationCapabilitiesDefaultToEmpty() {
-    StudioPlugin plugin = new MinimalPlugin();
+    Plugin plugin = new MinimalPlugin();
 
     assertEquals("acme.plugin", plugin.descriptor().pluginId());
     assertTrue(plugin.authHandler().isEmpty());
@@ -94,7 +94,7 @@ class StudioPluginTest {
   /** configure 产出的实例是可关闭的，且未贡献任何能力。 */
   @Test
   void configureProducesCloseableInstance() {
-    StudioPlugin plugin = new MinimalPlugin();
+    Plugin plugin = new MinimalPlugin();
     PluginContext context =
         new PluginContext(
             new NoopCredentialAccess(), Optional.empty(), Optional.empty(), Optional.empty());

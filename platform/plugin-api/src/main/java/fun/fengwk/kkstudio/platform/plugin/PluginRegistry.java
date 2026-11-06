@@ -10,27 +10,27 @@ import java.util.Objects;
 import java.util.Optional;
 
 /**
- * 当前 classpath 的安装目录：启动期一次性冻结的全部 {@link StudioPlugin}。
+ * 当前 classpath 的安装目录：启动期一次性冻结的全部 {@link Plugin}。
  *
  * <p>目录只收集 Spring 容器中的 bean，因此「是否安装」由依赖决定；相同 {@code pluginId} 出现两次说明两个 JAR 声明了同一身份，启动即失败。
  * 目录构造完成后不可变，没有运行时安装、classloader 热更新或刷新入口。
  */
-public final class StudioPluginRegistry {
+public final class PluginRegistry {
 
-  private final Map<String, StudioPlugin> pluginsById;
+  private final Map<String, Plugin> pluginsById;
 
-  public StudioPluginRegistry(List<StudioPlugin> plugins) {
+  public PluginRegistry(List<Plugin> plugins) {
     Objects.requireNonNull(plugins, "plugins");
-    List<StudioPlugin> ordered = new ArrayList<>(plugins);
+    List<Plugin> ordered = new ArrayList<>(plugins);
     ordered.sort(Comparator.comparing(plugin -> plugin.descriptor().pluginId()));
-    Map<String, StudioPlugin> indexed = new LinkedHashMap<>();
-    for (StudioPlugin plugin : ordered) {
+    Map<String, Plugin> indexed = new LinkedHashMap<>();
+    for (Plugin plugin : ordered) {
       Objects.requireNonNull(plugin, "plugins[]");
       PluginDescriptor descriptor = Objects.requireNonNull(plugin.descriptor(), "descriptor");
-      StudioPlugin previous = indexed.putIfAbsent(descriptor.pluginId(), plugin);
+      Plugin previous = indexed.putIfAbsent(descriptor.pluginId(), plugin);
       if (previous != null) {
         throw new IllegalStateException(
-            "duplicate StudioPlugin pluginId: "
+            "duplicate Plugin pluginId: "
                 + descriptor.pluginId()
                 + " ("
                 + previous.getClass().getName()
@@ -44,7 +44,7 @@ public final class StudioPluginRegistry {
   }
 
   /** 已安装 Plugin 的不可变快照，按 {@code pluginId} 升序。 */
-  public List<StudioPlugin> plugins() {
+  public List<Plugin> plugins() {
     return List.copyOf(pluginsById.values());
   }
 
@@ -54,7 +54,7 @@ public final class StudioPluginRegistry {
   }
 
   /** 按安装身份查找；未安装的 id 返回空，绝不加载或合成 Plugin。 */
-  public Optional<StudioPlugin> find(String pluginId) {
+  public Optional<Plugin> find(String pluginId) {
     return pluginId == null ? Optional.empty() : Optional.ofNullable(pluginsById.get(pluginId));
   }
 
