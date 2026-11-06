@@ -8,7 +8,6 @@ import fun.fengwk.kkstudio.harness.api.ManualCompactionAvailability;
 import fun.fengwk.kkstudio.harness.api.StopResult;
 import fun.fengwk.kkstudio.harness.api.StoppedThreadReceipt;
 import fun.fengwk.kkstudio.harness.api.ThreadTreeNode;
-import fun.fengwk.kkstudio.harness.api.ToolInputAcceptance;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
@@ -30,7 +29,6 @@ import fun.fengwk.kkstudio.harness.codec.HistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.codec.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.codec.ToolApprovalJsonCodec;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec;
-import fun.fengwk.kkstudio.share.interaction.HarnessToolInputResultDTO;
 import fun.fengwk.kkstudio.share.runtime.HarnessAcceptedCommandsDTO;
 import fun.fengwk.kkstudio.share.runtime.HarnessActiveAssistantOutputDTO;
 import fun.fengwk.kkstudio.share.runtime.HarnessAgentMessageContentDTO;
@@ -213,18 +211,6 @@ public final class HarnessRuntimeResponseMapper {
         generation.resultEntryId() == null ? null : generation.resultEntryId().toString());
     dto.setCreateTime(generation.createdAt());
     dto.setUpdateTime(generation.updatedAt());
-    return dto;
-  }
-
-  public static HarnessToolInputResultDTO toToolInputResultDto(ToolInputAcceptance acceptance) {
-    Objects.requireNonNull(acceptance, "acceptance");
-    HarnessToolInputResultDTO dto = new HarnessToolInputResultDTO();
-    dto.setThreadId(acceptance.threadId().toString());
-    dto.setInteractionId(acceptance.toolInvocationId().toString());
-    dto.setSubmissionId(acceptance.receipt().submissionId().toString());
-    dto.setActor(acceptance.receipt().actor());
-    dto.setAcceptedAt(acceptance.receipt().acceptedAt());
-    dto.setMaterialized(acceptance.materialized());
     return dto;
   }
 

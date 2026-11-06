@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.platform.interaction;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.interaction.PendingEnvironmentWait;
 import fun.fengwk.kkstudio.harness.api.interaction.PendingEnvironmentWaitPage;
 import fun.fengwk.kkstudio.harness.api.interaction.PendingInteraction;
@@ -14,11 +15,11 @@ import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.spi.store.UuidOrder;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentService;
+import fun.fengwk.kkstudio.platform.harness.dto.InteractionDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.InteractionOwnerDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.InteractionPageDTO;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwnerDisplay;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwnership;
-import fun.fengwk.kkstudio.share.interaction.InteractionDTO;
-import fun.fengwk.kkstudio.share.interaction.InteractionOwnerDTO;
-import fun.fengwk.kkstudio.share.interaction.InteractionPageDTO;
 
 import java.time.Instant;
 import java.util.ArrayDeque;
@@ -47,9 +48,8 @@ public class InteractionQueryService {
   /** 计数扫描的分页大小：total 只多付出一次有界扫描，绝不使用无界 limit 读回全部源行。 */
   static final int COUNT_PAGE_SIZE = 200;
 
-  private static final String TYPE_INPUT = "INPUT";
-  private static final String TYPE_APPROVAL = "APPROVAL";
-  private static final String TYPE_ENVIRONMENT_WAIT = "ENVIRONMENT_WAIT";
+  /** 单页最多可见条目数；越界请求立即失败，而不是静默截断。 */
+  static final int MAX_LIMIT = 100;
 
   private final List<SessionOwnership> ownerships;
   private final EnvironmentService environmentService;
@@ -66,20 +66,20 @@ public class InteractionQueryService {
 
   /**
    * 返回一页待处理 Interaction；{@code rootThreadId} 为 null 时不按根过滤，非 null 时必须是已存在的执行根（不存在为 404、非根为
-   * 400）。{@code cursor} 为空表示首屏，{@code limit} 必须为正（调用方已在边界校验上限）。
+   * 400）。{@code cursor} 为空表示首屏，{@code limit} 必须在 {@code [1, 100]} 内。
    *
    * <p>{@code nextCursor} 只定位本页最后一条「已消费的原始行/分组代表」，因此即使整页都被归属过滤/根过滤后为空，客户端回传同一游标也能继续向前翻页而不 漏项、不空转；
    * 两条流都耗尽时返回 {@code null}。
    */
   public InteractionPageDTO listInteractions(UUID rootThreadId, String cursor, int limit) {
-    if (limit <= 0) {
-      throw new IllegalArgumentException("limit must be positive");
+    if (limit < 1 || limit > MAX_LIMIT) {
+      throw DomainException.validation("interaction", "limit must be between 1 and " + MAX_LIMIT);
     }
     HarnessRuntime runtime = rootResolver.requireRuntime();
     if (rootThreadId != null) {
       requireCanonicalRoot(rootThreadId);
     }
-    InteractionCursor decoded = InteractionCursor.parse(cursor);
+    InteractionCursor decoded = parseCursor(cursor);
     QueryContext context = new QueryContext(runtime, rootThreadId);
     List<InteractionDTO> items = new ArrayList<>(limit);
     Instant consumedCreatedAt = decoded.createdAt();
@@ -236,10 +236,21 @@ public class InteractionQueryService {
     return total;
   }
 
+  /** 游标形状非法与缺少参数同类：都是客户端请求形状错误。 */
+  private static InteractionCursor parseCursor(String cursor) {
+    try {
+      return InteractionCursor.parse(cursor);
+    } catch (IllegalArgumentException malformed) {
+      throw DomainException.validation(
+          "interaction", "cursor must be <epochMilli>:<uuid>", malformed);
+    }
+  }
+
   /** 显式根过滤值必须是 canonical 执行根：共用根解析对不存在的 Thread 抛 404，对子 Thread（自身不是链末位根）判为非法参数。 */
   private void requireCanonicalRoot(UUID rootThreadId) {
     if (!rootResolver.requireRootId(rootThreadId).equals(rootThreadId)) {
-      throw new IllegalArgumentException("rootThreadId must be an execution root: " + rootThreadId);
+      throw DomainException.validation(
+          "interaction", "rootThreadId must be an execution root: " + rootThreadId);
     }
   }
 
@@ -253,35 +264,41 @@ public class InteractionQueryService {
   }
 
   private static InteractionDTO toManualDto(PendingInteraction interaction, ResolvedRoot resolved) {
-    InteractionDTO dto = new InteractionDTO();
-    dto.setType(
-        interaction.status() == ToolInvocationStatus.WAITING_APPROVAL ? TYPE_APPROVAL : TYPE_INPUT);
-    dto.setInteractionId(interaction.invocationId().toString());
-    dto.setStatus(interaction.status().name());
-    dto.setThreadId(interaction.threadId().toString());
-    dto.setSessionId(interaction.sessionId().toString());
-    dto.setRootThreadId(resolved.rootThreadId().toString());
-    dto.setOwner(resolved.owner());
-    dto.setToolCallId(interaction.toolCallId());
-    dto.setToolName(interaction.toolName());
-    dto.setArgumentsJson(interaction.argumentsJson());
-    dto.setApprovalJson(interaction.approvalJson());
-    dto.setCreateTime(interaction.createdAt());
-    return dto;
+    if (interaction.status() == ToolInvocationStatus.WAITING_APPROVAL) {
+      return new InteractionDTO.Approval(
+          interaction.invocationId().toString(),
+          interaction.threadId().toString(),
+          interaction.sessionId().toString(),
+          resolved.rootThreadId().toString(),
+          resolved.owner(),
+          interaction.toolCallId(),
+          interaction.toolName(),
+          interaction.argumentsJson(),
+          interaction.approvalJson(),
+          interaction.createdAt());
+    }
+    return new InteractionDTO.Input(
+        interaction.invocationId().toString(),
+        interaction.threadId().toString(),
+        interaction.sessionId().toString(),
+        resolved.rootThreadId().toString(),
+        resolved.owner(),
+        interaction.toolCallId(),
+        interaction.toolName(),
+        interaction.argumentsJson(),
+        interaction.createdAt());
   }
 
   private InteractionDTO toEnvironmentDto(
       PendingEnvironmentWait environmentWait, ResolvedRoot resolved, QueryContext context) {
-    InteractionDTO dto = new InteractionDTO();
-    dto.setType(TYPE_ENVIRONMENT_WAIT);
-    dto.setRootThreadId(resolved.rootThreadId().toString());
-    dto.setOwner(resolved.owner());
     String environmentId = environmentWait.environmentId().value().toString();
-    dto.setEnvironmentId(environmentId);
-    dto.setEnvironmentName(context.resolveEnvironmentName(environmentId));
-    dto.setWaitingCount(environmentWait.waitingCount());
-    dto.setCreateTime(environmentWait.representativeCreatedAt());
-    return dto;
+    return new InteractionDTO.EnvironmentWait(
+        resolved.rootThreadId().toString(),
+        resolved.owner(),
+        environmentId,
+        context.resolveEnvironmentName(environmentId),
+        environmentWait.waitingCount(),
+        environmentWait.representativeCreatedAt());
   }
 
   /** 请求级解析上下文：按来源 Thread 缓存根、按根缓存 owner、按环境缓存展示名，避免跨来源重复解析与重复快照。 */

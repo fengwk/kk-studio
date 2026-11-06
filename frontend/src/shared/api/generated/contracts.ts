@@ -1285,27 +1285,27 @@ export interface HarnessSessionEntryPageDTO {
   nextCursor: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.runtime.HarnessSessionFileContentDTO */
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessSessionFileContentDTO */
 export interface HarnessSessionFileContentDTO {
   sessionId: string
   path: string
   sizeBytes: string
   revision: number
-  updatedAt: string
+  updatedAt: number
   text: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.runtime.HarnessSessionFileEntryDTO */
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessSessionFileEntryDTO */
 export interface HarnessSessionFileEntryDTO {
   name: string
   path: string
   directory: boolean
   sizeBytes?: string | null
   revision?: number | null
-  updatedAt?: string | null
+  updatedAt?: number | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.runtime.HarnessSessionFileListDTO */
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessSessionFileListDTO */
 export interface HarnessSessionFileListDTO {
   sessionId: string
   path: string
@@ -1454,18 +1454,28 @@ export interface HarnessToolApprovalDTO {
   reason?: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.interaction.HarnessToolInputDTO */
-export interface HarnessToolInputDTO {
-  threadId: string
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessToolInputDTO.Answer */
+export interface HarnessToolInputAnswer {
+  type: 'ANSWER'
   submissionId: string
-  declined?: boolean | null
-  answers?: (string[])[] | null
+  answers: (string[])[]
 }
 
-/** Java：fun.fengwk.kkstudio.share.interaction.HarnessToolInputResultDTO */
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessToolInputDTO.Decline */
+export interface HarnessToolInputDecline {
+  type: 'DECLINE'
+  submissionId: string
+}
+
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessToolInputDTO */
+export type HarnessToolInputDTO =
+  | HarnessToolInputAnswer
+  | HarnessToolInputDecline
+
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessToolInputResultDTO */
 export interface HarnessToolInputResultDTO {
   threadId: string
-  interactionId: string
+  toolInvocationId: string
   submissionId: string
   actor: string
   acceptedAt: number
@@ -1511,39 +1521,66 @@ export interface IdeBrowserUseSnapshotView {
   bindingEpoch: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.interaction.InteractionDTO */
-export interface InteractionDTO {
-  type: string
-  interactionId: string | null
-  status: string | null
-  threadId: string | null
-  sessionId: string | null
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.InteractionDTO.Input */
+export interface InteractionInput {
+  type: 'INPUT'
+  toolInvocationId: string
+  threadId: string
+  sessionId: string
   rootThreadId: string
   owner: InteractionOwnerDTO
-  toolCallId: string | null
-  toolName: string | null
-  argumentsJson: string | null
-  approvalJson: string | null
-  environmentId: string | null
-  environmentName: string | null
-  waitingCount: number | null
-  createTime: number
+  toolCallId: string
+  toolName: string
+  argumentsJson: string
+  createdAt: number
 }
 
-/** Java：fun.fengwk.kkstudio.share.interaction.InteractionOwnerDTO */
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.InteractionDTO.Approval */
+export interface InteractionApproval {
+  type: 'APPROVAL'
+  toolInvocationId: string
+  threadId: string
+  sessionId: string
+  rootThreadId: string
+  owner: InteractionOwnerDTO
+  toolCallId: string
+  toolName: string
+  argumentsJson: string
+  approvalJson?: string | null
+  createdAt: number
+}
+
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.InteractionDTO.EnvironmentWait */
+export interface InteractionEnvironmentWait {
+  type: 'ENVIRONMENT_WAIT'
+  rootThreadId: string
+  owner: InteractionOwnerDTO
+  environmentId: string
+  environmentName: string
+  waitingCount: number
+  createdAt: number
+}
+
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.InteractionDTO */
+export type InteractionDTO =
+  | InteractionInput
+  | InteractionApproval
+  | InteractionEnvironmentWait
+
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.InteractionOwnerDTO */
 export interface InteractionOwnerDTO {
   kind: string
   id: string
-  title: string | null
-  link: string | null
+  title?: string | null
+  link?: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.interaction.InteractionPageDTO */
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.InteractionPageDTO */
 export interface InteractionPageDTO {
   items: InteractionDTO[]
-  nextCursor: string | null
+  nextCursor?: string | null
   total: number
-  freshnessAt: number | null
+  freshnessAt?: number | null
 }
 
 /** Java：fun.fengwk.kkstudio.project.dto.IssueActivityDTO */
@@ -2503,9 +2540,25 @@ export interface ApiRoutes {
     path: { environmentId: string }
     response: EnvironmentRuntimeStatusDTO
   }
-  'GET /api/interactions': {
-    query: { cursor?: string; limit?: string; rootThreadId?: string }
+  'GET /api/harness/interactions': {
+    query: { cursor?: string; limit?: number; rootThreadId?: string }
     response: InteractionPageDTO
+  }
+  'GET /api/harness/sessions/{sessionId}/files': {
+    path: { sessionId: string }
+    query: { path?: string }
+    response: HarnessSessionFileListDTO
+  }
+  'GET /api/harness/sessions/{sessionId}/files/content': {
+    path: { sessionId: string }
+    query: { columnOffset?: number; limit?: number; offset?: number; path: string }
+    response: HarnessSessionFileContentDTO
+  }
+  'GET /api/harness/sessions/{sessionId}/files/download': {
+    path: { sessionId: string }
+    query: { path: string }
+    response: Blob
+    responseType: 'blob'
   }
   'GET /api/issues/{issueId}': {
     path: { issueId: string }
@@ -2571,22 +2624,6 @@ export interface ApiRoutes {
   'GET /api/sessions/{sessionId}/entries/{entryId}/provider-request-preview': {
     path: { entryId: string; sessionId: string }
     response: HarnessProviderRequestPreviewDTO
-  }
-  'GET /api/sessions/{sessionId}/files': {
-    path: { sessionId: string }
-    query: { ownerId: string; ownerKind: string; path?: string }
-    response: HarnessSessionFileListDTO
-  }
-  'GET /api/sessions/{sessionId}/files/content': {
-    path: { sessionId: string }
-    query: { columnOffset?: number; limit?: number; offset?: number; ownerId: string; ownerKind: string; path: string }
-    response: HarnessSessionFileContentDTO
-  }
-  'GET /api/sessions/{sessionId}/files/download': {
-    path: { sessionId: string }
-    query: { ownerId: string; ownerKind: string; path: string }
-    response: Blob
-    responseType: 'blob'
   }
   'GET /api/sessions/{sessionId}/threads': {
     path: { sessionId: string }
@@ -2721,8 +2758,8 @@ export interface ApiRoutes {
     path: { environmentId: string }
     response: EnvironmentUpdateStartDTO
   }
-  'POST /api/interactions/{interactionId}/input': {
-    path: { interactionId: string }
+  'POST /api/harness/threads/{threadId}/tool-invocations/{toolInvocationId}/input': {
+    path: { threadId: string; toolInvocationId: string }
     body: HarnessToolInputDTO
     response: HarnessToolInputResultDTO
   }
@@ -3027,5 +3064,5 @@ export interface ApiRoutes {
 export const API_RESPONSE_TYPES: Partial<Record<keyof ApiRoutes, 'text' | 'blob'>> = {
   'GET /api/environments/uninstall/{operatingSystem}': 'text',
   'GET /api/environments/{environmentId}/install': 'text',
-  'GET /api/sessions/{sessionId}/files/download': 'blob',
+  'GET /api/harness/sessions/{sessionId}/files/download': 'blob',
 }

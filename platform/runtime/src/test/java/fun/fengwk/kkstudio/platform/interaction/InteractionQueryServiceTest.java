@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.platform.interaction;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
@@ -33,11 +34,11 @@ import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentService;
+import fun.fengwk.kkstudio.platform.harness.dto.InteractionDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.InteractionOwnerDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.InteractionPageDTO;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwnerDisplay;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwnership;
-import fun.fengwk.kkstudio.share.interaction.InteractionDTO;
-import fun.fengwk.kkstudio.share.interaction.InteractionOwnerDTO;
-import fun.fengwk.kkstudio.share.interaction.InteractionPageDTO;
 
 import java.time.Instant;
 import java.util.List;
@@ -51,6 +52,18 @@ class InteractionQueryServiceTest {
 
   private static UUID id(long value) {
     return new UUID(0L, value);
+  }
+
+  private static InteractionDTO.Input input(InteractionDTO item) {
+    return assertInstanceOf(InteractionDTO.Input.class, item);
+  }
+
+  private static InteractionDTO.Approval approval(InteractionDTO item) {
+    return assertInstanceOf(InteractionDTO.Approval.class, item);
+  }
+
+  private static InteractionDTO.EnvironmentWait environmentWait(InteractionDTO item) {
+    return assertInstanceOf(InteractionDTO.EnvironmentWait.class, item);
   }
 
   private SessionOwnership ownership;
@@ -103,8 +116,8 @@ class InteractionQueryServiceTest {
 
     InteractionPageDTO page = service.listInteractions(null, null, 10);
     assertEquals(2, page.getTotal());
-    assertEquals("CHAT", page.getItems().get(0).getOwner().getKind());
-    assertEquals("issue:agent", page.getItems().get(1).getOwner().getId());
+    assertEquals("CHAT", page.getItems().get(0).owner().getKind());
+    assertEquals("issue:agent", page.getItems().get(1).owner().getId());
     verify(other).findOwner(root1, session1);
     verify(ownership).findOwner(root2, session2);
   }
@@ -218,35 +231,32 @@ class InteractionQueryServiceTest {
     assertNull(page.getNextCursor());
     assertEquals(2, page.getTotal(), "total 统计的是可见待处理行，而不是原始源行数");
 
-    InteractionDTO dto1 = page.getItems().get(0);
-    assertEquals(invocationId1.toString(), dto1.getInteractionId());
-    assertEquals("WAITING_INPUT", dto1.getStatus());
-    assertEquals(threadId1.toString(), dto1.getThreadId());
-    assertEquals(sessionId1.toString(), dto1.getSessionId());
-    assertEquals(threadId1.toString(), dto1.getRootThreadId());
-    assertEquals("call", dto1.getToolCallId());
-    assertEquals("ask_user", dto1.getToolName());
-    assertEquals("{}", dto1.getArgumentsJson());
-    assertNull(dto1.getApprovalJson());
-    assertEquals(t1, dto1.getCreateTime());
-    assertEquals("CHAT", dto1.getOwner().getKind());
-    assertEquals(id(1001).toString(), dto1.getOwner().getId());
-    assertEquals("deploy chat", dto1.getOwner().getTitle());
-    assertEquals("/chats/1001", dto1.getOwner().getLink());
+    InteractionDTO.Input dto1 = input(page.getItems().get(0));
+    assertEquals(invocationId1.toString(), dto1.toolInvocationId());
+    assertEquals(threadId1.toString(), dto1.threadId());
+    assertEquals(sessionId1.toString(), dto1.sessionId());
+    assertEquals(threadId1.toString(), dto1.rootThreadId());
+    assertEquals("call", dto1.toolCallId());
+    assertEquals("ask_user", dto1.toolName());
+    assertEquals("{}", dto1.argumentsJson());
+    assertEquals(t1, dto1.createdAt());
+    assertEquals("CHAT", dto1.owner().getKind());
+    assertEquals(id(1001).toString(), dto1.owner().getId());
+    assertEquals("deploy chat", dto1.owner().getTitle());
+    assertEquals("/chats/1001", dto1.owner().getLink());
 
-    InteractionDTO dto2 = page.getItems().get(1);
-    assertEquals(invocationId2.toString(), dto2.getInteractionId());
-    assertEquals("WAITING_APPROVAL", dto2.getStatus());
-    assertEquals(threadId2.toString(), dto2.getThreadId());
-    assertEquals(sessionId2.toString(), dto2.getSessionId());
-    assertEquals(threadId2.toString(), dto2.getRootThreadId());
-    assertEquals("{\"env\":\"prod\"}", dto2.getArgumentsJson());
-    assertEquals("{\"allowed\":false}", dto2.getApprovalJson());
-    assertEquals(t2, dto2.getCreateTime());
-    assertEquals("ISSUE_AGENT", dto2.getOwner().getKind());
-    assertEquals(id(2001).toString(), dto2.getOwner().getId());
-    assertEquals("fix the pipeline", dto2.getOwner().getTitle());
-    assertNull(dto2.getOwner().getLink());
+    InteractionDTO.Approval dto2 = approval(page.getItems().get(1));
+    assertEquals(invocationId2.toString(), dto2.toolInvocationId());
+    assertEquals(threadId2.toString(), dto2.threadId());
+    assertEquals(sessionId2.toString(), dto2.sessionId());
+    assertEquals(threadId2.toString(), dto2.rootThreadId());
+    assertEquals("{\"env\":\"prod\"}", dto2.argumentsJson());
+    assertEquals("{\"allowed\":false}", dto2.approvalJson());
+    assertEquals(t2, dto2.createdAt());
+    assertEquals("ISSUE_AGENT", dto2.owner().getKind());
+    assertEquals(id(2001).toString(), dto2.owner().getId());
+    assertEquals("fix the pipeline", dto2.owner().getTitle());
+    assertNull(dto2.owner().getLink());
 
     // 列表和计数共用请求级缓存。
     verify(ownership, times(1)).findOwner(threadId1, sessionId1);
@@ -276,12 +286,12 @@ class InteractionQueryServiceTest {
 
     assertEquals(1, page.getItems().size());
     assertEquals(1, page.getTotal());
-    InteractionDTO dto = page.getItems().get(0);
-    assertEquals(childThreadId.toString(), dto.getThreadId());
-    assertEquals(childSessionId.toString(), dto.getSessionId());
-    assertEquals(rootThreadId.toString(), dto.getRootThreadId());
-    assertEquals("CHAT", dto.getOwner().getKind());
-    assertEquals(id(700).toString(), dto.getOwner().getId());
+    InteractionDTO.Input dto = input(page.getItems().get(0));
+    assertEquals(childThreadId.toString(), dto.threadId());
+    assertEquals(childSessionId.toString(), dto.sessionId());
+    assertEquals(rootThreadId.toString(), dto.rootThreadId());
+    assertEquals("CHAT", dto.owner().getKind());
+    assertEquals(id(700).toString(), dto.owner().getId());
   }
 
   /**
@@ -326,11 +336,11 @@ class InteractionQueryServiceTest {
     InteractionPageDTO page = service.listInteractions(rootThreadId, null, 2);
 
     assertEquals(2, page.getItems().size());
-    assertEquals(id(901).toString(), page.getItems().get(0).getInteractionId());
-    assertEquals(rootThreadId.toString(), page.getItems().get(0).getRootThreadId());
-    assertEquals(id(903).toString(), page.getItems().get(1).getInteractionId());
-    assertEquals(childThreadId.toString(), page.getItems().get(1).getThreadId());
-    assertEquals(rootThreadId.toString(), page.getItems().get(1).getRootThreadId());
+    assertEquals(id(901).toString(), input(page.getItems().get(0)).toolInvocationId());
+    assertEquals(rootThreadId.toString(), page.getItems().get(0).rootThreadId());
+    assertEquals(id(903).toString(), input(page.getItems().get(1)).toolInvocationId());
+    assertEquals(childThreadId.toString(), input(page.getItems().get(1)).threadId());
+    assertEquals(rootThreadId.toString(), page.getItems().get(1).rootThreadId());
     assertNull(page.getNextCursor());
     assertEquals(2, page.getTotal(), "total 必须与列表使用同一根过滤");
 
@@ -350,7 +360,10 @@ class InteractionQueryServiceTest {
     UUID child = id(501);
     UUID root = id(500);
     when(runtime.findRootThreadId(child)).thenReturn(Optional.of(root));
-    assertThrows(IllegalArgumentException.class, () -> service.listInteractions(child, null, 10));
+    assertEquals(
+        DomainErrorCode.VALIDATION,
+        assertThrows(DomainException.class, () -> service.listInteractions(child, null, 10))
+            .code());
 
     verify(runtime, never()).listPendingInteractions(any(), any(), anyInt());
   }
@@ -402,9 +415,9 @@ class InteractionQueryServiceTest {
     InteractionPageDTO page = service.listInteractions(null, null, 3);
 
     assertEquals(3, page.getItems().size());
-    assertEquals(id(30).toString(), page.getItems().get(0).getInteractionId());
-    assertEquals(id(40).toString(), page.getItems().get(1).getInteractionId());
-    assertEquals(id(50).toString(), page.getItems().get(2).getInteractionId());
+    assertEquals(id(30).toString(), input(page.getItems().get(0)).toolInvocationId());
+    assertEquals(id(40).toString(), input(page.getItems().get(1)).toolInvocationId());
+    assertEquals(id(50).toString(), input(page.getItems().get(2)).toolInvocationId());
     assertNull(page.getNextCursor());
     assertEquals(3, page.getTotal(), "total 只统计可见行（row3/row4/row5）");
 
@@ -460,7 +473,7 @@ class InteractionQueryServiceTest {
 
     InteractionPageDTO secondPage = service.listInteractions(null, firstPage.getNextCursor(), 1);
     assertEquals(1, secondPage.getItems().size());
-    assertEquals(id(30).toString(), secondPage.getItems().get(0).getInteractionId());
+    assertEquals(id(30).toString(), input(secondPage.getItems().get(0)).toolInvocationId());
     assertNull(secondPage.getNextCursor());
     assertEquals(2, secondPage.getTotal(), "total 与分页位置无关，翻页后仍然是全局可见总数");
 
@@ -529,13 +542,13 @@ class InteractionQueryServiceTest {
     InteractionPageDTO page = service.listInteractions(null, null, 1);
 
     assertEquals(1, page.getItems().size());
-    assertEquals(id(10).toString(), page.getItems().get(0).getInteractionId());
+    assertEquals(id(10).toString(), input(page.getItems().get(0)).toolInvocationId());
     assertEquals(3, page.getTotal(), "total 必须统计完整源的可见行，不能等于首页长度");
   }
 
-  /** 测试意图：验证各种非法格式游标均抛出 IllegalArgumentException，且不触碰 runtime。 */
+  /** 测试意图：验证各种非法格式游标都被拒绝为 validation，且不触碰 runtime。 */
   @Test
-  void malformedCursorThrowsIllegalArgumentException() {
+  void malformedCursorIsValidationError() {
     List<String> malformedCursors =
         List.of(
             "nope",
@@ -548,18 +561,22 @@ class InteractionQueryServiceTest {
             "123:00000000-0000-0000-0000-000000000001:extra");
 
     for (String cursor : malformedCursors) {
-      assertThrows(
-          IllegalArgumentException.class, () -> service.listInteractions(null, cursor, 10));
+      DomainException error =
+          assertThrows(DomainException.class, () -> service.listInteractions(null, cursor, 10));
+      assertEquals(DomainErrorCode.VALIDATION, error.code());
     }
 
     verifyNoInteractions(runtime);
   }
 
-  /** 测试意图：验证 limit <= 0 时立即抛出 IllegalArgumentException，且不触碰 runtime。 */
+  /** 测试意图：验证 limit 越界同样是 validation 错误，且不触碰 runtime。 */
   @Test
-  void nonPositiveLimitThrowsIllegalArgumentException() {
-    assertThrows(IllegalArgumentException.class, () -> service.listInteractions(null, null, 0));
-    assertThrows(IllegalArgumentException.class, () -> service.listInteractions(null, null, -1));
+  void outOfRangeLimitIsValidationError() {
+    for (int limit : new int[] {0, -1, InteractionQueryService.MAX_LIMIT + 1}) {
+      DomainException error =
+          assertThrows(DomainException.class, () -> service.listInteractions(null, null, limit));
+      assertEquals(DomainErrorCode.VALIDATION, error.code());
+    }
     verifyNoInteractions(runtime);
   }
 
@@ -632,10 +649,10 @@ class InteractionQueryServiceTest {
 
     InteractionPageDTO page = service.listInteractions(null, null, 10);
     assertEquals(2, page.getTotal());
-    assertEquals(childSession.toString(), page.getItems().get(0).getSessionId());
-    assertEquals(root.toString(), page.getItems().get(0).getRootThreadId());
-    assertEquals(id(86).toString(), page.getItems().get(0).getOwner().getId());
-    assertEquals(page.getItems().get(0).getOwner(), page.getItems().get(1).getOwner());
+    assertEquals(childSession.toString(), input(page.getItems().get(0)).sessionId());
+    assertEquals(root.toString(), page.getItems().get(0).rootThreadId());
+    assertEquals(id(86).toString(), page.getItems().get(0).owner().getId());
+    assertEquals(page.getItems().get(0).owner(), page.getItems().get(1).owner());
     verify(ownership).findOwner(root, rootSession);
   }
 
@@ -680,27 +697,21 @@ class InteractionQueryServiceTest {
     assertEquals(3, page.getTotal());
     assertNull(page.getNextCursor());
 
-    InteractionDTO environmentItem = page.getItems().get(0);
-    assertEquals("ENVIRONMENT_WAIT", environmentItem.getType());
-    assertEquals(WAITING_ENVIRONMENT_ID, environmentItem.getEnvironmentId());
-    assertEquals("dev-env", environmentItem.getEnvironmentName());
-    assertEquals(3, environmentItem.getWaitingCount().intValue());
-    assertEquals(environmentRootThreadId.toString(), environmentItem.getRootThreadId());
-    assertEquals("CHAT", environmentItem.getOwner().getKind());
-    assertEquals(id(23).toString(), environmentItem.getOwner().getId());
-    assertEquals(earlierCreatedAt, environmentItem.getCreateTime());
-    assertNull(environmentItem.getInteractionId());
-    assertNull(environmentItem.getStatus());
-    assertNull(environmentItem.getThreadId());
+    InteractionDTO.EnvironmentWait environmentItem = environmentWait(page.getItems().get(0));
+    assertEquals(WAITING_ENVIRONMENT_ID, environmentItem.environmentId());
+    assertEquals("dev-env", environmentItem.environmentName());
+    assertEquals(3, environmentItem.waitingCount());
+    assertEquals(environmentRootThreadId.toString(), environmentItem.rootThreadId());
+    assertEquals("CHAT", environmentItem.owner().getKind());
+    assertEquals(id(23).toString(), environmentItem.owner().getId());
+    assertEquals(earlierCreatedAt, environmentItem.createdAt());
 
-    assertEquals("INPUT", page.getItems().get(1).getType());
-    assertEquals(id(101).toString(), page.getItems().get(1).getInteractionId());
+    assertEquals(id(101).toString(), input(page.getItems().get(1)).toolInvocationId());
 
-    InteractionDTO secondEnvironmentItem = page.getItems().get(2);
-    assertEquals("ENVIRONMENT_WAIT", secondEnvironmentItem.getType());
-    assertEquals(SECOND_ENVIRONMENT_ID, secondEnvironmentItem.getEnvironmentId());
-    assertEquals("prod-env", secondEnvironmentItem.getEnvironmentName());
-    assertEquals(1, secondEnvironmentItem.getWaitingCount().intValue());
+    InteractionDTO.EnvironmentWait secondEnvironmentItem = environmentWait(page.getItems().get(2));
+    assertEquals(SECOND_ENVIRONMENT_ID, secondEnvironmentItem.environmentId());
+    assertEquals("prod-env", secondEnvironmentItem.environmentName());
+    assertEquals(1, secondEnvironmentItem.waitingCount());
   }
 
   /** 在线候选不能让人工等待末页出现多余的空游标页，total 同样不计在线环境。 */
@@ -725,7 +736,7 @@ class InteractionQueryServiceTest {
     InteractionPageDTO page = service.listInteractions(null, null, 1);
 
     assertEquals(1, page.getTotal());
-    assertEquals(id(101).toString(), page.getItems().getFirst().getInteractionId());
+    assertEquals(id(101).toString(), input(page.getItems().getFirst()).toolInvocationId());
     assertNull(page.getNextCursor());
   }
 
@@ -757,15 +768,15 @@ class InteractionQueryServiceTest {
 
     InteractionPageDTO firstPage = service.listInteractions(null, null, 1);
     assertEquals(1, firstPage.getItems().size());
-    assertEquals(1, firstPage.getItems().get(0).getWaitingCount().intValue());
+    assertEquals(1, environmentWait(firstPage.getItems().get(0)).waitingCount());
     assertEquals(2, firstPage.getTotal());
     String cursor = firstPage.getNextCursor();
     assertEquals(InteractionCursor.encode(firstCreatedAt, id(901)), cursor);
 
     InteractionPageDTO secondPage = service.listInteractions(null, cursor, 1);
     assertEquals(1, secondPage.getItems().size());
-    assertEquals(2, secondPage.getItems().get(0).getWaitingCount().intValue());
-    assertEquals(secondCreatedAt, secondPage.getItems().get(0).getCreateTime());
+    assertEquals(2, environmentWait(secondPage.getItems().get(0)).waitingCount());
+    assertEquals(secondCreatedAt, environmentWait(secondPage.getItems().get(0)).createdAt());
     assertEquals(2, secondPage.getTotal());
     assertNull(secondPage.getNextCursor());
   }
@@ -801,7 +812,7 @@ class InteractionQueryServiceTest {
     InteractionPageDTO page = service.listInteractions(environmentRootThreadId, null, 10);
 
     assertEquals(1, page.getItems().size());
-    assertEquals("ENVIRONMENT_WAIT", page.getItems().get(0).getType());
+    assertInstanceOf(InteractionDTO.EnvironmentWait.class, page.getItems().get(0));
     assertEquals(1, page.getTotal());
   }
 
@@ -863,7 +874,7 @@ class InteractionQueryServiceTest {
     InteractionPageDTO page = service.listInteractions(null, null, 5);
 
     assertEquals(1, page.getItems().size());
-    InteractionOwnerDTO owner = page.getItems().get(0).getOwner();
+    InteractionOwnerDTO owner = page.getItems().get(0).owner();
     assertEquals("AGENT_TASK", owner.getKind());
     assertEquals(rootThreadId.toString(), owner.getId());
     assertEquals("worker", owner.getTitle());

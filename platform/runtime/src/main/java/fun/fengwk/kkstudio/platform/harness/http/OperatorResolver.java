@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.web.api;
+package fun.fengwk.kkstudio.platform.harness.http;
 
 import jakarta.servlet.http.HttpServletRequest;
 

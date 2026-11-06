@@ -1,20 +1,20 @@
 package fun.fengwk.kkstudio.platform.vfs;
 
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
+import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessSessionFileContentDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessSessionFileEntryDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessSessionFileListDTO;
 import fun.fengwk.kkstudio.platform.harness.read.PlatformReadException;
 import fun.fengwk.kkstudio.platform.harness.read.TextReadWindow;
-import fun.fengwk.kkstudio.platform.orchestration.SessionOwner;
-import fun.fengwk.kkstudio.platform.orchestration.SessionOwnership;
 import fun.fengwk.kkstudio.platform.storage.ReadDeadline;
 import fun.fengwk.kkstudio.platform.storage.model.SessionFile;
 import fun.fengwk.kkstudio.platform.storage.service.SessionFileStore;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
-import fun.fengwk.kkstudio.share.runtime.HarnessSessionFileContentDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessSessionFileEntryDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessSessionFileListDTO;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -25,8 +25,7 @@ import java.util.UUID;
 /**
  * 会话文件面板的只读查询：列目录、读取文本窗口与下载原始字节。
  *
- * <p>授权按会话归属进行：调用方给出产品 owner（kind + id），只有该 owner 实际拥有该 Session 时才返回内容；否则与不存在一样失败。 路径使用 {@code
- * vfs:/sessions/<sessionId>/...} 坐标，且必须属于请求的 Session，绝不跨会话读取。
+ * <p>先验证 Session 存在。路径使用 {@code vfs:/sessions/<sessionId>/...} 坐标，且必须属于请求的 Session，绝不跨会话读取。
  */
 @Service
 public class SessionFileQueryService {
@@ -34,22 +33,25 @@ public class SessionFileQueryService {
   /** 面板读取的扫描截止：只约束平台侧文本窗口与字节读取，不改变文件内容。 */
   private static final Duration READ_TIMEOUT = Duration.ofSeconds(15);
 
-  private final List<SessionOwnership> ownerships;
+  /** 内容不可作为文本预览的稳定失败原因：面板据此提示保留下载，而不是显示通用预览失败。 */
+  public static final String NOT_TEXT_REASON = "SESSION_FILE_NOT_TEXT";
+
+  private final ObjectProvider<HarnessRuntime> runtimes;
   private final SessionFileStore fileStore;
   private final StorageBlobManager blobManager;
 
   public SessionFileQueryService(
-      List<SessionOwnership> ownerships,
+      ObjectProvider<HarnessRuntime> runtimes,
       SessionFileStore fileStore,
       StorageBlobManager blobManager) {
-    this.ownerships = List.copyOf(Objects.requireNonNull(ownerships, "ownerships"));
+    this.runtimes = Objects.requireNonNull(runtimes, "runtimes");
     this.fileStore = Objects.requireNonNull(fileStore, "fileStore");
     this.blobManager = Objects.requireNonNull(blobManager, "blobManager");
   }
 
   /** 列出会话目录的直属条目；{@code directory} 为空表示会话根目录。 */
-  public HarnessSessionFileListDTO list(SessionOwner owner, UUID sessionId, String directory) {
-    requireOwned(owner, sessionId);
+  public HarnessSessionFileListDTO list(UUID sessionId, String directory) {
+    requireSession(sessionId);
     String relative = relativeDirectory(sessionId, directory);
     String prefix = relative.isEmpty() ? "" : relative + "/";
     List<SessionFile> files = fileStore.list(sessionId, prefix);
@@ -76,15 +78,14 @@ public class SessionFileQueryService {
     return dto;
   }
 
-  /** 读取会话文件的文本窗口；二进制内容以确定性错误拒绝，绝不返回伪文本。 */
+  /**
+   * 读取会话文件的文本窗口；二进制内容以确定性错误拒绝，绝不返回伪文本。
+   *
+   * <p>不可作为文本的内容以 validation + {@value #NOT_TEXT_REASON} 拒绝，前端因此只停用预览、保留下载入口。
+   */
   public HarnessSessionFileContentDTO readText(
-      SessionOwner owner,
-      UUID sessionId,
-      String path,
-      Integer offset,
-      Integer limit,
-      Integer columnOffset) {
-    requireOwned(owner, sessionId);
+      UUID sessionId, String path, Integer offset, Integer limit, Integer columnOffset) {
+    requireSession(sessionId);
     String relative = relativeFile(sessionId, path);
     SessionFile file =
         fileStore
@@ -100,21 +101,21 @@ public class SessionFileQueryService {
           TextReadWindow.format(
               bytes, offset, limit, columnOffset, sessionPath(sessionId, relative), deadline());
     } catch (PlatformReadException invalid) {
-      throw DomainException.validation("session_file", invalid.getMessage(), invalid);
+      throw DomainException.validationReason(NOT_TEXT_REASON, invalid.getMessage());
     }
     HarnessSessionFileContentDTO dto = new HarnessSessionFileContentDTO();
     dto.setSessionId(sessionId.toString());
     dto.setPath(sessionPath(sessionId, relative));
     dto.setSizeBytes(bytes.length);
     dto.setRevision(file.revision());
-    dto.setUpdatedAt(file.updatedAt().toEpochMilli());
+    dto.setUpdatedAt(file.updatedAt());
     dto.setText(text);
     return dto;
   }
 
   /** 读取会话文件的原始字节与权威媒体类型，供下载端点直接返回。 */
-  public SessionFileDownload download(SessionOwner owner, UUID sessionId, String path) {
-    requireOwned(owner, sessionId);
+  public SessionFileDownload download(UUID sessionId, String path) {
+    requireSession(sessionId);
     String relative = relativeFile(sessionId, path);
     SessionFile file =
         fileStore
@@ -135,24 +136,15 @@ public class SessionFileQueryService {
   /** 下载结果：文件名取会话文件末段，字节为完整内容。 */
   public record SessionFileDownload(String fileName, String mediaType, byte[] bytes) {}
 
-  /** 校验产品 owner 实际拥有该 Session；未知 owner kind、越权与不存在给出同一种失败。 */
-  private void requireOwned(SessionOwner owner, UUID sessionId) {
-    Objects.requireNonNull(owner, "owner");
+  /** 不存在的 Session 不能被当作空目录。 */
+  private void requireSession(UUID sessionId) {
     Objects.requireNonNull(sessionId, "sessionId");
-    SessionOwnership ownership =
-        ownerships.stream()
-            .filter(candidate -> owner.kind().equals(candidate.kind()))
-            .findFirst()
-            .orElseThrow(() -> accessDenied("unknown session owner: " + owner.kind()));
-    boolean owned;
-    try {
-      owned = ownership.ownsSession(owner, sessionId);
-    } catch (IllegalArgumentException malformedOwner) {
-      // owner id 格式非法与「不属于该 owner」在面板 API 上不可区分：统一按不存在处理，不泄漏解析细节。
-      throw accessDenied("session is not owned by the given owner");
+    HarnessRuntime runtime = runtimes.getIfAvailable();
+    if (runtime == null) {
+      throw new IllegalStateException("harness runtime is not available in this deployment");
     }
-    if (!owned) {
-      throw accessDenied("session is not owned by the given owner");
+    if (!runtime.sessionExists(sessionId)) {
+      throw accessDenied("session does not exist");
     }
   }
 
@@ -200,7 +192,7 @@ public class SessionFileQueryService {
     entry.setDirectory(false);
     entry.setSizeBytes(blob == null ? null : blob.getSizeBytes());
     entry.setRevision(file.revision());
-    entry.setUpdatedAt(file.updatedAt().toEpochMilli());
+    entry.setUpdatedAt(file.updatedAt());
     return entry;
   }
 
