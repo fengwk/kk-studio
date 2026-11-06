@@ -83,7 +83,7 @@ registerCase({
   docs: '在新建且没有 READY owner 的 Environment 上，IDE 打开、列举目录、切换目录、终端、移动布局和关闭返回 409 unavailable + IDE_UNAVAILABLE，且不伪造绑定；非 canonical environmentId 返回 400 validation；结束时按权威 version 清理。本用例只证明无 owner 路由拒绝，不证明 exact-intent 强制校验；READY owner 下的精确意图校验需单独验收，此处未验证',
   async run(ctx) {
     const card = await createEnvironmentFixture(ctx, `e2e-ide-no-owner-${cid().slice(0, 8)}`)
-    const viewsPath = `/api/environments/${encodeURIComponent(card.id)}/ide/views`
+    const viewsPath = `/api/ide/environments/${encodeURIComponent(card.id)}/views`
     const openBody = {
       viewId: IDE_VIEW_ID,
       documentId: IDE_DOCUMENT_ID,
@@ -119,7 +119,7 @@ registerCase({
 
       const terminalError = await expectHttpError(
         () =>
-          ctx.call('POST', `${viewsPath}/${IDE_VIEW_ID}/terminal`, {
+          ctx.call('POST', `${viewsPath}/${IDE_VIEW_ID}/focus-terminal`, {
             documentId: IDE_DOCUMENT_ID,
             bindingEpoch: '1',
           }),
@@ -128,12 +128,12 @@ registerCase({
       assertCanonicalError(terminalError, { status: 409, code: 'unavailable', reason: 'IDE_UNAVAILABLE' })
 
       const listError = await expectHttpError(
-        () => ctx.call('GET', `/api/environments/${encodeURIComponent(card.id)}/ide/directories`),
+        () => ctx.call('GET', `/api/ide/environments/${encodeURIComponent(card.id)}/directories`),
         { status: 409 },
       )
       assertCanonicalError(listError, { status: 409, code: 'unavailable', reason: 'IDE_UNAVAILABLE' })
       const mobileError = await expectHttpError(
-        () => ctx.call('POST', `${viewsPath}/${IDE_VIEW_ID}/mobile-layout`, {
+        () => ctx.call('POST', `${viewsPath}/${IDE_VIEW_ID}/apply-mobile-layout`, {
           documentId: IDE_DOCUMENT_ID,
           bindingEpoch: '1',
         }),
@@ -143,7 +143,7 @@ registerCase({
 
       const closeError = await expectHttpError(
         () =>
-          ctx.call('DELETE', `${viewsPath}/${IDE_VIEW_ID}`, {
+          ctx.call('POST', `${viewsPath}/${IDE_VIEW_ID}/close`, {
             documentId: IDE_DOCUMENT_ID,
             bindingEpoch: '1',
             discard: true,
@@ -154,7 +154,7 @@ registerCase({
 
       // 非 canonical environmentId 在进入路由判定之前即被拒绝。
       const invalid = await expectHttpError(
-        () => ctx.call('POST', '/api/environments/not-a-uuid/ide/views', openBody),
+        () => ctx.call('POST', '/api/ide/environments/not-a-uuid/views', openBody),
         { status: 400 },
       )
       assertCanonicalError(invalid, { status: 400, code: 'validation' })

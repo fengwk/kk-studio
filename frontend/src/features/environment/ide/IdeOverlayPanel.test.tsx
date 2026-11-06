@@ -6,9 +6,7 @@ import type { IdeViewState } from '@/features/environment/ide/IdePanelProvider'
 
 const listIdeDirectories = vi.hoisted(() => vi.fn())
 
-vi.mock('@/features/environment/environment-service', () => ({
-  environmentService: { listIdeDirectories },
-}))
+vi.mock('@/features/environment/ide/environment-ide-service', () => ({ listIdeDirectories }))
 
 const ENV_A = 'a1000000-0000-4000-8000-000000000001'
 const ENV_B = 'a1000000-0000-4000-8000-000000000002'
@@ -27,7 +25,7 @@ function view(partial: Partial<IdeViewState> & Pick<IdeViewState, 'environmentId
     status: 'ready',
     attempt: 1,
     claimInFlight: false,
-    entryUrl: `/environment-ide/${environmentId}/${viewId}/__ide/bootstrap?token=fixture`,
+    entryUrl: `/ide/${environmentId}/${viewId}/__ide/bootstrap?token=fixture`,
     daemonInstanceId: 'd1000000-0000-4000-8000-000000000001',
     bindingEpoch: '7',
     directory: environmentId === ENV_A ? DIRECTORY_A : DIRECTORY_B,

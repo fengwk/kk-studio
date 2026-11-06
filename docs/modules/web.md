@@ -86,7 +86,7 @@ health、资源下载和 WebSocket 使用各自传输形式。公开路由如下
 | Settings | `/api/platform/settings` | 聚合 GET/CAS PUT、编辑 schema |
 | Configuration sync | `/api/platform/config-sync` | 清单、选择导出、导入检查与确认执行；响应禁止缓存 |
 | Environment | `/api/platform/environments`、`/{id}/runtime`、`/{id}/install-settings`、`/{id}/install-codes`、`/{id}/install-script`、`/{id}/rotate-token`、`/{id}/update-daemon`、`/api/platform/daemon-uninstall-scripts/{os}` | Card、当前运行状态快照、注册令牌轮换（明文只在创建与轮换响应中返回一次）、安装设置保存、安装命令与一次性安装码、卸载脚本、受管二进制在线更新（POST 发起并返回当前运行快照）、运维 events |
-| Environment IDE | `/api/environments/{id}/ide/views`、`/environment-ide/{environmentId}/{viewId}/` | 打开/关闭视图、切换目录与终端；同源 IDE 固定入口、bootstrap 票据与 HTTP/WebSocket 数据面 |
+| Environment IDE | `/api/ide/environments/{id}/views`、`/ide/{environmentId}/{viewId}/` | 打开/关闭视图、切换目录与终端；同源 IDE 固定入口、bootstrap 票据与 HTTP/WebSocket 数据面 |
 | Environment Daemon | `/ws/daemon` | Daemon 准入裁决与 WebSocket 升级端点，承载控制与数据传输 |
 
 Agent 的创建、完整 PUT 和读取使用 `execution: {driver, settings}`。用户 Agent 必须配置，
@@ -167,16 +167,16 @@ Evidence 接收 READY uploadId，在事务内转移引用并返回规范资源�
 
 ## 同源 IDE 网关
 
-同源 IDE 网关在 Studio 同源下固定 `/environment-ide/{environmentId}/{viewId}/` 路由：
+同源 IDE 网关在 Studio 同源下固定 `/ide/{environmentId}/{viewId}/` 路由：
 按路径严格解析 canonical UUID 的 `environmentId` 与 `viewId`。跨节点控制命令经由
-[`ClusterEnvironmentIdeInternalController`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/web/ClusterEnvironmentIdeInternalController.java)
+[`ClusterEnvironmentIdeInternalController`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/http/ClusterEnvironmentIdeInternalController.java)
 进行 HMAC 认证与 owner 转发。
 
 - **Bootstrap 与会话隔离**：一次性票据请求由 `__ide/bootstrap?token=...` 消费，并在响应中通过 `Set-Cookie` 下发
-  `Path` 限定在 `/environment-ide/{environmentId}/` 的 HttpOnly cookie；重定向严格保持在当前环境 route base 之下。
+  `Path` 限定在 `/ide/{environmentId}/` 的 HttpOnly cookie；重定向严格保持在当前环境 route base 之下。
   Studio 与受管环境属于同一可信浏览器边界（非沙箱隔离），不需要独立 IDE 域名或主机模板。
 - **会话探测**：`__ide/session` 只读、不触达 Daemon，返回 204（会话有效）、401（无会话）、409（代际已被另一个 Daemon 实例接管）或 503（暂无 READY 连接，同一实例重连后原 cookie 继续有效）。前端据此决定等待还是重新打开视图。
-- **开发代理**：本地开发时 Vite 代理 `/environment-ide` 配置 `changeOrigin: false, ws: true`，保留浏览器原始 Host 与 Origin 以对齐同源校验。
+- **开发代理**：本地开发时 Vite 代理 `/ide` 配置 `changeOrigin: false, ws: true`，保留浏览器原始 Host 与 Origin 以对齐同源校验。
 
 ## JSON、错误与信任边界
 

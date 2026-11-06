@@ -2,7 +2,7 @@
  * 入口与 Studio 共用可信浏览器边界，只接受指定环境与视图的同源 bootstrap 路径。
  * pathname 可含部署前缀；不接受跨源、网络路径、凭据或 fragment。
  */
-const ENVIRONMENT_BOOTSTRAP_PATH = /^(?:\/[A-Za-z0-9_-]+)*\/environment-ide\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/__ide\/bootstrap$/
+const ENVIRONMENT_BOOTSTRAP_PATH = /^(?:\/[A-Za-z0-9_-]+)*\/ide\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/__ide\/bootstrap$/
 
 export function validateIdeEntryUrl(
   entryUrl: string | null | undefined,

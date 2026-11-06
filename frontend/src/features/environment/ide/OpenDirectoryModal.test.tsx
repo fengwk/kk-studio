@@ -2,18 +2,18 @@ import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiError } from '@/shared/api/client'
-import { environmentService } from '@/features/environment/environment-service'
+import * as ideService from '@/features/environment/ide/environment-ide-service'
 import type { EnvironmentIdeDirectoryListingDTO } from '@/shared/api/generated/contracts'
 import {
   OpenDirectoryModal,
   type OpenDirectoryModalProps,
 } from '@/features/environment/ide/OpenDirectoryModal'
 
-vi.mock('@/features/environment/environment-service', () => ({
-  environmentService: { listIdeDirectories: vi.fn() },
+vi.mock('@/features/environment/ide/environment-ide-service', () => ({
+  listIdeDirectories: vi.fn(),
 }))
 
-const listIdeDirectories = vi.mocked(environmentService.listIdeDirectories)
+const listIdeDirectories = vi.mocked(ideService.listIdeDirectories)
 
 const ENV_A = 'a1000000-0000-4000-8000-000000000001'
 const ENV_B = 'a1000000-0000-4000-8000-000000000002'

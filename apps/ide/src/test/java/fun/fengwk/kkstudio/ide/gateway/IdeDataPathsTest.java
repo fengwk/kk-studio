@@ -31,12 +31,12 @@ class IdeDataPathsTest {
   @Test
   void internalDataPathsFormatting() {
     String httpPath = IdeDataPaths.dataHttpPath(ENV, VIEW, "/src/main.ts?a=1&b=2");
-    assertTrue(httpPath.contains("/internal/environment-ide/" + ENV + "/data-http"));
+    assertTrue(httpPath.contains("/internal/ide/environments/" + ENV + "/data-http"));
     assertTrue(httpPath.contains("viewId=" + VIEW));
     assertTrue(httpPath.contains("path="));
 
     String wsPath = IdeDataPaths.dataWebSocketPath(ENV, VIEW, "/ws");
-    assertTrue(wsPath.contains("/internal/environment-ide/" + ENV + "/data-ws"));
+    assertTrue(wsPath.contains("/internal/ide/environments/" + ENV + "/data-ws"));
     assertTrue(wsPath.contains("viewId=" + VIEW));
   }
 
@@ -62,14 +62,11 @@ class IdeDataPathsTest {
   void viewBaseFormatting() {
     HttpServletRequest req = mock(HttpServletRequest.class);
     when(req.getContextPath()).thenReturn("");
-    assertEquals(
-        "/environment-ide/" + ENV + "/" + VIEW + "/", IdeDataPaths.viewBase(req, ENV, VIEW));
-    assertEquals("/environment-ide/" + ENV + "/", IdeDataPaths.viewBase(req, ENV, null));
+    assertEquals("/ide/" + ENV + "/" + VIEW + "/", IdeDataPaths.viewBase(req, ENV, VIEW));
+    assertEquals("/ide/" + ENV + "/", IdeDataPaths.viewBase(req, ENV, null));
 
     when(req.getContextPath()).thenReturn("/context");
-    assertEquals(
-        "/context/environment-ide/" + ENV + "/" + VIEW + "/",
-        IdeDataPaths.viewBase(req, ENV, VIEW));
+    assertEquals("/context/ide/" + ENV + "/" + VIEW + "/", IdeDataPaths.viewBase(req, ENV, VIEW));
   }
 
   @Test
@@ -81,26 +78,26 @@ class IdeDataPathsTest {
         "https://external.com/path",
         IdeDataPaths.rebaseLocation("https://external.com/path", req, ENV, VIEW));
     assertEquals(
-        "/environment-ide/" + ENV + "/" + VIEW + "/relative/path",
+        "/ide/" + ENV + "/" + VIEW + "/relative/path",
         IdeDataPaths.rebaseLocation("/relative/path", req, ENV, VIEW));
     assertEquals(
-        "/environment-ide/" + ENV + "/" + VIEW + "/dashboard",
+        "/ide/" + ENV + "/" + VIEW + "/dashboard",
         IdeDataPaths.rebaseLocation("/__kk/ide/view/" + VIEW + "/1/dashboard", req, ENV, VIEW));
     assertEquals(
-        "/environment-ide/" + ENV + "/" + VIEW + "/",
+        "/ide/" + ENV + "/" + VIEW + "/",
         IdeDataPaths.rebaseLocation("/__kk/ide/view/" + VIEW + "/1/", req, ENV, VIEW));
     assertEquals(
-        "/environment-ide/" + ENV + "/" + VIEW + "/?workspace=a",
+        "/ide/" + ENV + "/" + VIEW + "/?workspace=a",
         IdeDataPaths.rebaseLocation("/__kk/ide/view/" + VIEW + "/1?workspace=a", req, ENV, VIEW));
     assertEquals(null, IdeDataPaths.rebaseLocation(null, req, ENV, VIEW));
     assertEquals("  ", IdeDataPaths.rebaseLocation("  ", req, ENV, VIEW));
     assertEquals("//host/path", IdeDataPaths.rebaseLocation("//host/path", req, ENV, VIEW));
     assertEquals(
-        "/environment-ide/" + ENV + "/" + VIEW + "/__kk/ide/view/" + VIEW + "/invalid-epoch/path",
+        "/ide/" + ENV + "/" + VIEW + "/__kk/ide/view/" + VIEW + "/invalid-epoch/path",
         IdeDataPaths.rebaseLocation(
             "/__kk/ide/view/" + VIEW + "/invalid-epoch/path", req, ENV, VIEW));
     assertEquals(
-        "/environment-ide/" + ENV + "/" + VIEW + "/",
+        "/ide/" + ENV + "/" + VIEW + "/",
         IdeDataPaths.rebaseLocation("/__kk/ide/view/" + VIEW + "/1", req, ENV, VIEW));
   }
 
@@ -108,16 +105,15 @@ class IdeDataPathsTest {
   void rebaseWorkerScopeHandling() {
     HttpServletRequest req = mock(HttpServletRequest.class);
     when(req.getContextPath()).thenReturn("");
-    when(req.getRequestURI()).thenReturn("/environment-ide/" + ENV + "/" + VIEW + "/root");
+    when(req.getRequestURI()).thenReturn("/ide/" + ENV + "/" + VIEW + "/root");
 
-    String base = "/environment-ide/" + ENV + "/" + VIEW + "/";
+    String base = "/ide/" + ENV + "/" + VIEW + "/";
     assertEquals(base, IdeDataPaths.rebaseWorkerScope("invalid#fragment", req, ENV, VIEW));
     assertEquals(base, IdeDataPaths.rebaseWorkerScope("https://other.com", req, ENV, VIEW));
     assertEquals(
         base, IdeDataPaths.rebaseWorkerScope("/__kk/ide/view/" + VIEW + "/1/", req, ENV, VIEW));
     assertEquals(base, IdeDataPaths.rebaseWorkerScope("scope?query=1", req, ENV, VIEW));
-    assertEquals(
-        "/environment-ide/" + ENV + "/", IdeDataPaths.rebaseWorkerScope("scope", req, ENV, null));
+    assertEquals("/ide/" + ENV + "/", IdeDataPaths.rebaseWorkerScope("scope", req, ENV, null));
     assertEquals(
         base + "sub/worker.js", IdeDataPaths.rebaseWorkerScope("./sub/worker.js", req, ENV, VIEW));
     assertEquals(base, IdeDataPaths.rebaseWorkerScope("/outside/view", req, ENV, VIEW));

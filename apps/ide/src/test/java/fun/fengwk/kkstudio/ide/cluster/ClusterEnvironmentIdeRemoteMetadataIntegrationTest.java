@@ -114,7 +114,7 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
             new NoopAuthorization());
 
     server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-    server.createContext("/internal/environment-ide/", this::handle);
+    server.createContext("/internal/ide/environments/", this::handle);
     server.start();
     int port = server.getAddress().getPort();
     registryA.current =
@@ -139,8 +139,7 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
     assertEquals("/home/dev/project", dto.getDirectory());
     assertEquals("/daemon/workspaces/" + VIEW, dto.getWorkspacePath());
     assertTrue(
-        dto.getEntryUrl()
-            .startsWith("/environment-ide/" + ENV + "/" + VIEW + "/__ide/bootstrap?token="),
+        dto.getEntryUrl().startsWith("/ide/" + ENV + "/" + VIEW + "/__ide/bootstrap?token="),
         () -> "unexpected entry url: " + dto.getEntryUrl());
     assertEquals(1, received.get());
     assertTrue(localTransportA.commands.isEmpty());
@@ -200,7 +199,7 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
   void oversizedResponseBodyIsRejectedByTheTotalByteCap() throws IOException {
     HttpServer oversizeServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
     oversizeServer.createContext(
-        "/internal/environment-ide/",
+        "/internal/ide/environments/",
         exchange -> {
           String body =
               "{\"viewId\":\""
@@ -245,7 +244,7 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
     CountDownLatch finishBody = new CountDownLatch(1);
     HttpServer delayed = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
     delayed.createContext(
-        "/internal/environment-ide/",
+        "/internal/ide/environments/",
         exchange -> {
           receivedRequest.countDown();
           try {
@@ -295,7 +294,7 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
   void normalRemoteCloseRejectsOversizedBody() throws Exception {
     HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
     server.createContext(
-        "/internal/environment-ide/", exchange -> respond(exchange, 200, "x".repeat(2048)));
+        "/internal/ide/environments/", exchange -> respond(exchange, 200, "x".repeat(2048)));
     server.start();
     try {
       IdeClusterClient client =
@@ -323,7 +322,7 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
     CountDownLatch release = new CountDownLatch(1);
     HttpServer delayed = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
     delayed.createContext(
-        "/internal/environment-ide/",
+        "/internal/ide/environments/",
         exchange -> {
           try {
             release.await(5, TimeUnit.SECONDS);
@@ -360,7 +359,7 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
     CountDownLatch release = new CountDownLatch(1);
     HttpServer stalledServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
     stalledServer.createContext(
-        "/internal/environment-ide/",
+        "/internal/ide/environments/",
         exchange -> {
           exchange.getResponseHeaders().set("Content-Type", "application/json");
           exchange.sendResponseHeaders(200, 0);
@@ -476,7 +475,7 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
         respond(exchange, 200, objectMapper.writeValueAsString(views));
         return;
       }
-      if ("PUT".equals(method) && segments.length == 7 && "directory".equals(segments[6])) {
+      if ("PUT".equals(method) && segments.length == 8 && "directory".equals(segments[7])) {
         EnvironmentIdeChangeDirectoryDTO request =
             objectMapper.readValue(
                 exchange.getRequestBody(), EnvironmentIdeChangeDirectoryDTO.class);
@@ -484,27 +483,29 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
             exchange,
             200,
             objectMapper.writeValueAsString(
-                nodeBLocal.changeDirectory(environmentId, segments[5], request)));
+                nodeBLocal.changeDirectory(environmentId, segments[6], request)));
         return;
       }
-      if ("POST".equals(method) && segments.length == 7 && "terminal".equals(segments[6])) {
+      if ("POST".equals(method) && segments.length == 8 && "focus-terminal".equals(segments[7])) {
         EnvironmentIdeViewBindingDTO request =
             objectMapper.readValue(exchange.getRequestBody(), EnvironmentIdeViewBindingDTO.class);
-        nodeBLocal.focusTerminal(environmentId, segments[5], request);
+        nodeBLocal.focusTerminal(environmentId, segments[6], request);
         respond(exchange, 204, "");
         return;
       }
-      if ("POST".equals(method) && segments.length == 7 && "mobile-layout".equals(segments[6])) {
+      if ("POST".equals(method)
+          && segments.length == 8
+          && "apply-mobile-layout".equals(segments[7])) {
         EnvironmentIdeViewBindingDTO request =
             objectMapper.readValue(exchange.getRequestBody(), EnvironmentIdeViewBindingDTO.class);
-        nodeBLocal.collapseMobile(environmentId, segments[5], request);
+        nodeBLocal.collapseMobile(environmentId, segments[6], request);
         respond(exchange, 204, "");
         return;
       }
-      if ("DELETE".equals(method) && segments.length == 6) {
+      if ("POST".equals(method) && segments.length == 8 && "close".equals(segments[7])) {
         EnvironmentIdeCloseViewDTO request =
             objectMapper.readValue(exchange.getRequestBody(), EnvironmentIdeCloseViewDTO.class);
-        nodeBLocal.closeView(environmentId, segments[5], request);
+        nodeBLocal.closeView(environmentId, segments[6], request);
         respond(exchange, 204, "");
         return;
       }
@@ -516,7 +517,7 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
 
   private static EnvironmentId environmentIdFrom(String path) {
     String[] segments = path.split("/");
-    return EnvironmentId.parse(segments[3]);
+    return EnvironmentId.parse(segments[4]);
   }
 
   private static void respond(HttpExchange exchange, int status, String body) throws IOException {

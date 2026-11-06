@@ -31,7 +31,7 @@ export default defineConfig({
         rewriteWsOrigin: true,
         ws: true,
       },
-      '/environment-ide': {
+      '/ide': {
         target: process.env.API_PROXY_TARGET || 'http://127.0.0.1:8080',
         // 保留浏览器原始 Host 与 Origin，对齐后端 IdeOriginPolicy 的同源严格校验。
         changeOrigin: false,

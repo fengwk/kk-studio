@@ -143,9 +143,8 @@ class IdeGatewayJettyIntegrationTest {
     ServletContextHandler node2Context = new ServletContextHandler();
     node2Context.setContextPath("/");
     node2Context.addServlet(
-        new ServletHolder(new InternalServlet(node2DataPlane)), "/internal/environment-ide/*");
-    node2Context.addServlet(
-        new ServletHolder(new GatewayServlet(node2DataPlane)), "/environment-ide/*");
+        new ServletHolder(new InternalServlet(node2DataPlane)), "/internal/ide/environments/*");
+    node2Context.addServlet(new ServletHolder(new GatewayServlet(node2DataPlane)), "/ide/*");
     node2Server.setHandler(node2Context);
     node2Server.start();
     node2Port = node2Connector.getLocalPort();
@@ -172,8 +171,7 @@ class IdeGatewayJettyIntegrationTest {
 
     ServletContextHandler node1Context = new ServletContextHandler();
     node1Context.setContextPath("/");
-    node1Context.addServlet(
-        new ServletHolder(new GatewayServlet(node1DataPlane)), "/environment-ide/*");
+    node1Context.addServlet(new ServletHolder(new GatewayServlet(node1DataPlane)), "/ide/*");
     node1Server.setHandler(node1Context);
     node1Server.start();
     node1Port = node1Connector.getLocalPort();
@@ -239,13 +237,7 @@ class IdeGatewayJettyIntegrationTest {
     HttpRequest request =
         HttpRequest.newBuilder(
                 URI.create(
-                    "http://127.0.0.1:"
-                        + node1Port
-                        + "/environment-ide/"
-                        + ENV
-                        + "/"
-                        + VIEW
-                        + "/data/save"))
+                    "http://127.0.0.1:" + node1Port + "/ide/" + ENV + "/" + VIEW + "/data/save"))
             .POST(HttpRequest.BodyPublishers.ofString(reqPayload))
             .header("Origin", "http://127.0.0.1:" + node1Port)
             .header("Cookie", IdeGatewayConstants.SESSION_COOKIE_NAME + "=" + sessionCookie)
@@ -296,14 +288,7 @@ class IdeGatewayJettyIntegrationTest {
 
     TestFrameHandler clientHandler = new TestFrameHandler();
     URI wsUri =
-        URI.create(
-            "ws://127.0.0.1:"
-                + node1Port
-                + "/environment-ide/"
-                + ENV
-                + "/"
-                + VIEW
-                + "/ws-terminal");
+        URI.create("ws://127.0.0.1:" + node1Port + "/ide/" + ENV + "/" + VIEW + "/ws-terminal");
 
     CoreClientUpgradeRequest upgradeRequest =
         CoreClientUpgradeRequest.from(wsClient, wsUri, clientHandler);
@@ -365,14 +350,7 @@ class IdeGatewayJettyIntegrationTest {
 
     TestFrameHandler clientHandler = new TestFrameHandler();
     URI wsUri =
-        URI.create(
-            "ws://127.0.0.1:"
-                + node1Port
-                + "/environment-ide/"
-                + ENV
-                + "/"
-                + VIEW
-                + "/ws-terminal");
+        URI.create("ws://127.0.0.1:" + node1Port + "/ide/" + ENV + "/" + VIEW + "/ws-terminal");
 
     CoreClientUpgradeRequest upgradeRequest =
         CoreClientUpgradeRequest.from(wsClient, wsUri, clientHandler);
@@ -400,7 +378,7 @@ class IdeGatewayJettyIntegrationTest {
     int remoteStatus =
         sendRawWebSocketUpgrade(
             node1Port,
-            "/environment-ide/" + ENV + "/" + VIEW + "/ws-terminal",
+            "/ide/" + ENV + "/" + VIEW + "/ws-terminal",
             IdeGatewayConstants.SESSION_COOKIE_NAME + "=bad-cookie");
     assertEquals(401, remoteStatus);
 
@@ -420,7 +398,7 @@ class IdeGatewayJettyIntegrationTest {
     int localStatus =
         sendRawWebSocketUpgrade(
             node2Port,
-            "/environment-ide/" + ENV + "/" + VIEW + "/ws-terminal",
+            "/ide/" + ENV + "/" + VIEW + "/ws-terminal",
             IdeGatewayConstants.SESSION_COOKIE_NAME + "=" + sessionCookie);
     assertEquals(503, localStatus);
   }
@@ -514,7 +492,7 @@ class IdeGatewayJettyIntegrationTest {
                 URI.create(
                     "http://127.0.0.1:"
                         + node2Port
-                        + "/environment-ide/"
+                        + "/ide/"
                         + ENV
                         + "/"
                         + VIEW
@@ -559,7 +537,7 @@ class IdeGatewayJettyIntegrationTest {
                 URI.create(
                     "http://127.0.0.1:"
                         + node1Port
-                        + "/environment-ide/"
+                        + "/ide/"
                         + ENV
                         + "/"
                         + VIEW
@@ -579,15 +557,14 @@ class IdeGatewayJettyIntegrationTest {
     Optional<String> setCookie = response.headers().firstValue("Set-Cookie");
     assertTrue(setCookie.isPresent());
     assertTrue(setCookie.get().contains(IdeGatewayConstants.SESSION_COOKIE_NAME + "="));
-    assertTrue(setCookie.get().contains("Path=/environment-ide/" + ENV + "/" + VIEW + "/"));
+    assertTrue(setCookie.get().contains("Path=/ide/" + ENV + "/" + VIEW + "/"));
     assertTrue(setCookie.get().contains("HttpOnly"));
     assertTrue(setCookie.get().contains("SameSite=Strict"));
     assertFalse(setCookie.get().contains("Secure"));
 
     Optional<String> location = response.headers().firstValue("Location");
     assertTrue(location.isPresent());
-    String expectedLocation =
-        "/environment-ide/" + ENV + "/" + VIEW + "/?workspace=%2Fmanaged%2Fworkspace";
+    String expectedLocation = "/ide/" + ENV + "/" + VIEW + "/?workspace=%2Fmanaged%2Fworkspace";
     assertEquals(expectedLocation, location.get());
 
     // Test 2: X-Forwarded-Proto: https -> cookie has Secure flag
@@ -602,7 +579,7 @@ class IdeGatewayJettyIntegrationTest {
                 URI.create(
                     "http://127.0.0.1:"
                         + node1Port
-                        + "/environment-ide/"
+                        + "/ide/"
                         + ENV
                         + "/"
                         + VIEW
@@ -690,7 +667,7 @@ class IdeGatewayJettyIntegrationTest {
     protected void service(HttpServletRequest req, HttpServletResponse resp)
         throws ServletException, IOException {
       String uri = req.getRequestURI();
-      String prefix = "/environment-ide/";
+      String prefix = "/ide/";
       if (!uri.startsWith(prefix)) {
         resp.sendError(404);
         return;
@@ -725,7 +702,7 @@ class IdeGatewayJettyIntegrationTest {
     protected void service(HttpServletRequest req, HttpServletResponse resp)
         throws ServletException, IOException {
       String uri = req.getRequestURI();
-      String prefix = "/internal/environment-ide/";
+      String prefix = "/internal/ide/environments/";
       if (!uri.startsWith(prefix)) {
         resp.sendError(404);
         return;

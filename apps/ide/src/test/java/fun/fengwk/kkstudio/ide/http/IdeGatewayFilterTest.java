@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.ide.web;
+package fun.fengwk.kkstudio.ide.http;
 
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.same;
@@ -29,8 +29,7 @@ class IdeGatewayFilterTest {
     IdeGatewayFilter filter = new IdeGatewayFilter(dataPlane);
     FilterChain chain = mock(FilterChain.class);
 
-    HttpServletRequest req =
-        request("/environment-ide/" + ENV + "/" + VIEW + "/src/main.ts", "a=1");
+    HttpServletRequest req = request("/ide/" + ENV + "/" + VIEW + "/src/main.ts", "a=1");
     HttpServletResponse res = mock(HttpServletResponse.class);
 
     filter.doFilter(req, res, chain);
@@ -61,14 +60,14 @@ class IdeGatewayFilterTest {
     IdeGatewayFilter filter = new IdeGatewayFilter(dataPlane);
     FilterChain chain = mock(FilterChain.class);
 
-    HttpServletRequest req = request("/environment-ide/" + ENV + "/" + VIEW, null);
+    HttpServletRequest req = request("/ide/" + ENV + "/" + VIEW, null);
     when(req.getContextPath()).thenReturn("");
     HttpServletResponse res = mock(HttpServletResponse.class);
 
     filter.doFilter(req, res, chain);
 
     verify(res).setStatus(HttpServletResponse.SC_MOVED_PERMANENTLY);
-    verify(res).setHeader("Location", "/environment-ide/" + ENV + "/" + VIEW + "/");
+    verify(res).setHeader("Location", "/ide/" + ENV + "/" + VIEW + "/");
     verifyNoInteractions(dataPlane);
   }
 

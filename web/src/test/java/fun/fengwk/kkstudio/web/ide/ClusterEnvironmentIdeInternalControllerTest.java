@@ -10,7 +10,6 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -34,7 +33,7 @@ import fun.fengwk.kkstudio.ide.cluster.IdeClusterClient;
 import fun.fengwk.kkstudio.ide.cluster.IdeInternalPaths;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeCloseViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO;
-import fun.fengwk.kkstudio.ide.web.ClusterEnvironmentIdeInternalController;
+import fun.fengwk.kkstudio.ide.http.ClusterEnvironmentIdeInternalController;
 import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
 import fun.fengwk.kkstudio.platform.cluster.HmacClusterInternalAuthentication;
@@ -96,7 +95,7 @@ class ClusterEnvironmentIdeInternalControllerTest {
         .andExpect(status().isOk());
     verify(localEnvironmentIdeService).listDirectories(ENV, "/a+b");
 
-    String mobile = IdeInternalPaths.viewsPath(ENV) + "/" + VIEW + "/mobile-layout";
+    String mobile = IdeInternalPaths.viewsPath(ENV) + "/" + VIEW + "/apply-mobile-layout";
     mockMvc
         .perform(
             post(mobile)
@@ -112,11 +111,11 @@ class ClusterEnvironmentIdeInternalControllerTest {
   @Test
   void authenticatedCloseUsesViewsPath() throws Exception {
     when(clusterNodeRegistry.route(ENV)).thenReturn(Optional.of(ClusterOwnerRoute.local(NODE_B)));
-    String path = IdeInternalPaths.viewPath(ENV, VIEW);
+    String path = IdeInternalPaths.closePath(ENV, VIEW);
     mockMvc
         .perform(
-            delete(path)
-                .headers(mockHeaders(authentication.sign("DELETE", path, NODE_B)))
+            post(path)
+                .headers(mockHeaders(authentication.sign("POST", path, NODE_B)))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     "{\"documentId\":\"11111111-1111-1111-1111-111111111111\",\"bindingEpoch\":\"1\",\"discard\":false}"))
@@ -146,7 +145,7 @@ class ClusterEnvironmentIdeInternalControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body))
         .andExpect(status().isOk());
-    String mobile = IdeInternalPaths.viewsPath(ENV) + "/" + VIEW + "/mobile-layout";
+    String mobile = IdeInternalPaths.viewsPath(ENV) + "/" + VIEW + "/apply-mobile-layout";
     mockMvc
         .perform(
             post(mobile)
@@ -185,7 +184,7 @@ class ClusterEnvironmentIdeInternalControllerTest {
             MvcResult result =
                 mockMvc
                     .perform(
-                        delete(exchange.getRequestURI())
+                        post(exchange.getRequestURI())
                             .headers(headers)
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(exchange.getRequestBody().readAllBytes()))

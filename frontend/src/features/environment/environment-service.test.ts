@@ -6,133 +6,150 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-/** IDE 函数仍在 environment-service 中，由调用方持有 claim 与 binding 身份；文件浏览与下载见各调用方测试。 */
-describe('environmentService IDE', () => {
-  it('opens or resumes an ide view with the full binding identity', async () => {
-    const environmentId = 'a1000000-0000-4000-8000-000000000001'
-    const viewId = 'c1000000-0000-4000-8000-000000000001'
-    const request = {
-      viewId,
-      documentId: 'd1000000-0000-4000-8000-000000000001',
-      eventNodeId: 'e1000000-0000-4000-8000-000000000001',
-      connectionId: 'f1000000-0000-4000-8000-000000000001',
-      claimId: '91000000-0000-4000-8000-000000000001',
-      mode: 'resume',
-    }
-    const view = {
-      ...request,
-      environmentId,
-      daemonInstanceId: '92000000-0000-4000-8000-000000000001',
-      bindingEpoch: '7',
-      directory: '/home/user/workspace',
-      workspacePath: '/home/user/workspace',
-      state: 'OPEN',
-      entryUrl: `/environment-ide/${environmentId}/${viewId}/__ide/bootstrap?token=xyz`,
-    }
+describe('environmentService', () => {
+  it('saves nested daemon settings with the CAS version and encoded ID', async () => {
     const client = createMockHttpClient()
-    client.post.mockResolvedValue(view)
+    client.put.mockResolvedValue({ version: '9' })
+    const config = { operatingSystem: 'linux' as const, daemon: { studioUrl: 'https://studio.example.com' } }
+    expect(await createEnvironmentService(client).saveInstallConfig('env/a', '8', config)).toEqual({ version: '9' })
+    expect(client.put).toHaveBeenCalledWith('/environments/env%2Fa/install-config', { expectedVersion: '8', installConfig: config })
+  })
+  /**
+   * 测试意图：验证 Environment 列表查询端点为 /environments。
+   */
+  it('lists environments from GET /environments', async () => {
+    const client = createMockHttpClient()
+    client.get.mockResolvedValue([])
     const service = createEnvironmentService(client)
-    const result = await service.openIdeView(environmentId, request)
-    expect(client.post).toHaveBeenCalledWith(`/environments/${environmentId}/ide/views`, request)
-    expect(result).toEqual(view)
+    await service.listEnvironments()
+    expect(client.get).toHaveBeenCalledWith('/environments')
   })
 
-  it('changes ide view directory with the current document and binding epoch', async () => {
-    const updated = {
-      viewId: 'c1000000-0000-4000-8000-000000000001',
-      environmentId: 'a1000000-0000-4000-8000-000000000001',
-      documentId: 'd1000000-0000-4000-8000-000000000001',
-      eventNodeId: 'e1000000-0000-4000-8000-000000000001',
-      connectionId: 'f1000000-0000-4000-8000-000000000001',
-      claimId: '91000000-0000-4000-8000-000000000001',
-      daemonInstanceId: '92000000-0000-4000-8000-000000000001',
-      bindingEpoch: '8',
-      directory: '/new/path',
-      workspacePath: '/new/path',
-      state: 'OPEN',
-      entryUrl: null,
-    }
-    const binding = {
-      documentId: updated.documentId,
-      bindingEpoch: '7',
-      directory: '/new/path',
-    }
+  /**
+   * 测试意图：验证通过 UUID 获取单个 Environment 详情端点使用 /environments/{id}。
+   */
+  it('gets a single environment by UUID via GET /environments/{id}', async () => {
     const client = createMockHttpClient()
-    client.put.mockResolvedValue(updated)
+    client.get.mockResolvedValue({ id: 'env-1', name: 'local' })
     const service = createEnvironmentService(client)
-    const result = await service.changeIdeViewDirectory('env-1', updated.viewId, binding)
-    expect(client.put).toHaveBeenCalledWith(
-      `/environments/env-1/ide/views/${updated.viewId}/directory`,
-      binding,
-    )
-    expect(result).toEqual(updated)
+    await service.getEnvironment('env-1')
+    expect(client.get).toHaveBeenCalledWith('/environments/env-1')
   })
 
-  it('lists ide directories with the encoded environment id and the requested path', async () => {
+  /**
+   * 测试意图：验证创建 Environment 使用 POST /environments，且返回包含 registrationToken。
+   */
+  it('creates an environment card via POST /environments', async () => {
     const client = createMockHttpClient()
-    const listing = {
-      path: '/home/dev/a b',
-      parentPath: '/home',
-      children: [{ name: 'project', path: '/home/dev/a b/project' }],
-      truncated: false,
-    }
-    client.get.mockResolvedValue(listing)
+    client.post.mockResolvedValue({ id: 'env-1', name: 'dev', registrationToken: 'tok-123' })
     const service = createEnvironmentService(client)
-    const signal = new AbortController().signal
+    const result = await service.createEnvironment({ name: 'dev' })
+    expect(client.post).toHaveBeenCalledWith('/environments', { name: 'dev' })
+    expect(result.registrationToken).toBe('tok-123')
+  })
 
-    expect(await service.listIdeDirectories('env/1', '/home/dev/a b', signal)).toEqual(listing)
-    expect(client.get).toHaveBeenCalledWith('/environments/env%2F1/ide/directories', {
-      params: { path: '/home/dev/a b' },
-      signal,
+  /**
+   * 测试意图：签发 5 分钟安装 code 使用 POST /environments/{id}/install-code，
+   * body 只有 expectedVersion，返回解包后的 code 与 expiresAt，不轮换长期 token。
+   */
+  it('issues a short install code via POST /environments/{id}/install-code', async () => {
+    const issued = { code: "code'汉字", expiresAt: '2026-10-05T09:05:00.000Z' }
+    const client = createMockHttpClient()
+    client.post.mockResolvedValue(issued)
+    const service = createEnvironmentService(client)
+    const result = await service.createInstallCode('env/a', '8')
+    expect(client.post).toHaveBeenCalledWith('/environments/env%2Fa/install-code', {
+      expectedVersion: '8',
     })
-
-    // 省略 path 时服务端返回宿主主目录，请求不携带空查询参数。
-    await service.listIdeDirectories('env/1')
-    expect(client.get).toHaveBeenLastCalledWith('/environments/env%2F1/ide/directories', {
-      signal: undefined,
-    })
+    expect(result).toEqual(issued)
+    expect(client.get).not.toHaveBeenCalled()
   })
 
-  it('opens an ide view terminal with the current binding identity', async () => {
-    const binding = {
-      documentId: 'd1000000-0000-4000-8000-000000000001',
-      bindingEpoch: '7',
-    }
+  /**
+   * 测试意图：验证轮换 registration token 端点使用 POST /environments/{id}/registration-token，
+   * 且 expectedVersion 放在 POST body { expectedVersion } 中。
+   */
+  it('rotates registration token via POST /environments/{id}/registration-token with body {expectedVersion}', async () => {
     const client = createMockHttpClient()
-    client.post.mockResolvedValue(undefined)
+    client.post.mockResolvedValue({ id: 'env-1', registrationToken: 'tok-new', version: '2' })
     const service = createEnvironmentService(client)
-    await service.openIdeViewTerminal('env-1', 'c1000000-0000-4000-8000-000000000001', binding)
+    const result = await service.rotateToken('env-1', '1')
     expect(client.post).toHaveBeenCalledWith(
-      '/environments/env-1/ide/views/c1000000-0000-4000-8000-000000000001/terminal',
-      binding,
+      '/environments/env-1/registration-token',
+      { expectedVersion: '1' },
     )
+    expect(result.registrationToken).toBe('tok-new')
   })
 
-  it('closes an ide view with an explicit discard flag in the DELETE body', async () => {
-    const binding = {
-      documentId: 'd1000000-0000-4000-8000-000000000001',
-      bindingEpoch: '7',
-      discard: true,
-    }
+  /**
+   * 测试意图：验证删除 Environment 端点使用 DELETE /environments/{id}?expectedVersion=。
+   */
+  it('deletes environment via DELETE /environments/{id}?expectedVersion=', async () => {
     const client = createMockHttpClient()
     client.delete.mockResolvedValue(undefined)
     const service = createEnvironmentService(client)
-    await service.closeIdeView('env/a', 'c1000000-0000-4000-8000-000000000001', binding)
+    await service.deleteEnvironment('env-1', '3')
     expect(client.delete).toHaveBeenCalledWith(
-      '/environments/env%2Fa/ide/views/c1000000-0000-4000-8000-000000000001',
-      { data: binding },
-    )
-    await service.closeIdeView('env/a', 'view/a', { ...binding, discard: false })
-    expect(client.delete).toHaveBeenLastCalledWith(
-      '/environments/env%2Fa/ide/views/view%2Fa',
-      { data: { ...binding, discard: false }, timeout: 0 },
+      '/environments/env-1?expectedVersion=3',
     )
   })
 
-  it('sends the binding to the mobile layout endpoint', async () => {
+  /**
+   * 测试意图：验证获取 Environment 事件列表端点使用 GET /environments/{id}/events，
+   * 且支持路径参数转义。
+   */
+  it('lists environment events via GET /environments/{id}/events with proper encoding', async () => {
+    const events = [
+      {
+        time: '2026-07-20T01:00:00.000Z',
+        level: 'INFO',
+        type: 'READY',
+        message: 'Connected',
+      },
+    ]
     const client = createMockHttpClient()
-    const binding = { documentId: 'doc', bindingEpoch: '7' }
-    await createEnvironmentService(client).setIdeViewMobileLayout('env/a', 'view/a', binding)
-    expect(client.post).toHaveBeenCalledWith('/environments/env%2Fa/ide/views/view%2Fa/mobile-layout', binding)
+    client.get.mockResolvedValue(events)
+    const service = createEnvironmentService(client)
+    const result = await service.listEnvironmentEvents('env/special:1')
+    expect(client.get).toHaveBeenCalledWith('/environments/env%2Fspecial%3A1/events')
+    expect(result).toEqual(events)
+  })
+
+  it('reads the current runtime snapshot via GET /environments/{id}/runtime', async () => {
+    const runtime = {
+      revision: '7',
+      status: {
+        daemonVersion: '1.2.3',
+        update: {
+          targetVersion: '1.3.0',
+          downloadedBytes: '8388608',
+          totalBytes: null,
+        },
+      },
+    }
+    const client = createMockHttpClient()
+    client.get.mockResolvedValue(runtime)
+    const service = createEnvironmentService(client)
+    const result = await service.getEnvironmentRuntime('env/a')
+    expect(client.get).toHaveBeenCalledWith('/environments/env%2Fa/runtime')
+    expect(client.post).not.toHaveBeenCalled()
+    expect(result).toEqual(runtime)
+  })
+
+  it('starts a managed daemon update via POST /environments/{id}/update and returns command status with the snapshot', async () => {
+    const started = {
+      commandStatus: 'SENT_UNCONFIRMED',
+      runtimeStatus: {
+        revision: '8',
+        status: { daemonVersion: '1.2.3', update: null },
+      },
+    }
+    const client = createMockHttpClient()
+    client.post.mockResolvedValue(started)
+    const service = createEnvironmentService(client)
+    const result = await service.startEnvironmentUpdate('env/a')
+    expect(client.post).toHaveBeenCalledWith('/environments/env%2Fa/update')
+    expect(client.get).not.toHaveBeenCalled()
+    expect(result).toEqual(started)
   })
 })

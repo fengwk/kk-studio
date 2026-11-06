@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.ide.web;
+package fun.fengwk.kkstudio.ide.http;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
@@ -44,7 +44,7 @@ class ClusterEnvironmentIdeInternalDataPlaneControllerTest {
 
     HttpServletRequest req = mock(HttpServletRequest.class);
     when(req.getMethod()).thenReturn("GET");
-    when(req.getRequestURI()).thenReturn("/internal/environment-ide/" + ENV + "/data-http");
+    when(req.getRequestURI()).thenReturn("/internal/ide/environments/" + ENV + "/data-http");
     when(req.getQueryString()).thenReturn("viewId=" + VIEW + "&path=%2Fsrc%2Fa.ts");
     HttpServletResponse res = mock(HttpServletResponse.class);
 
@@ -67,7 +67,7 @@ class ClusterEnvironmentIdeInternalDataPlaneControllerTest {
 
     HttpServletRequest req = mock(HttpServletRequest.class);
     when(req.getMethod()).thenReturn("GET");
-    when(req.getRequestURI()).thenReturn("/internal/environment-ide/" + ENV + "/data-ws");
+    when(req.getRequestURI()).thenReturn("/internal/ide/environments/" + ENV + "/data-ws");
     when(req.getQueryString()).thenReturn("viewId=" + VIEW + "&path=%2Fws");
     HttpServletResponse res = mock(HttpServletResponse.class);
 

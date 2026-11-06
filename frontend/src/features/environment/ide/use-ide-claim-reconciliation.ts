@@ -6,7 +6,13 @@ import {
 } from 'react'
 import { useApplicationEvents } from '@/shared/app-events'
 import type { ApplicationEventConnectionIdentity } from '@/shared/app-events/protocol'
-import { environmentService } from '@/features/environment/environment-service'
+import {
+  applyIdeMobileLayout,
+  changeIdeViewDirectory,
+  closeIdeView,
+  focusIdeTerminal,
+  openIdeView,
+} from '@/features/environment/ide/environment-ide-service'
 import { ApiError } from '@/shared/api/client'
 import type {
   EnvironmentIdeOpenViewDTO,
@@ -162,7 +168,7 @@ export function useIdeClaimReconciliation({
     }
     dispatch({ type: 'TERMINAL_SUBMITTED', environmentId })
     try {
-      await environmentService.openIdeViewTerminal(environmentId, view.viewId, {
+      await focusIdeTerminal(environmentId, view.viewId, {
         documentId: documentIdRef.current,
         bindingEpoch: view.bindingEpoch,
       })
@@ -350,7 +356,7 @@ export function useIdeClaimReconciliation({
       request,
     })
     try {
-      const response = await environmentService.openIdeView(environmentId, request)
+      const response = await openIdeView(environmentId, request)
       if (!mountedRef.current) {
         return
       }
@@ -460,7 +466,7 @@ export function useIdeClaimReconciliation({
     }
     dispatch({ type: 'CLOSE_SUBMITTED', environmentId })
     try {
-      await environmentService.closeIdeView(environmentId, view.viewId, {
+      await closeIdeView(environmentId, view.viewId, {
         documentId: documentIdRef.current,
         bindingEpoch: view.bindingEpoch,
         discard,
@@ -514,7 +520,7 @@ export function useIdeClaimReconciliation({
     }
     const epoch = view.bindingEpoch
     try {
-      const response = await environmentService.changeIdeViewDirectory(environmentId, view.viewId, {
+      const response = await changeIdeViewDirectory(environmentId, view.viewId, {
         documentId: documentIdRef.current,
         bindingEpoch: epoch,
         directory,
@@ -556,7 +562,7 @@ export function useIdeClaimReconciliation({
     if (view?.entryUrl === entryUrl) {
       if (!before?.iframeLoaded && view.status === 'ready' && view.bindingEpoch != null
         && !view.claimInFlight && window.matchMedia('(max-width: 760px)').matches) {
-        void environmentService.setIdeViewMobileLayout(environmentId, view.viewId, {
+        void applyIdeMobileLayout(environmentId, view.viewId, {
           documentId: documentIdRef.current,
           bindingEpoch: view.bindingEpoch,
         }).catch(() => {

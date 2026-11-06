@@ -97,7 +97,7 @@ public final class IdeDataPaths {
         contextPath == null || contextPath.isEmpty()
             ? IdeGatewayConstants.ROUTE_PREFIX + environmentId + "/"
             : (contextPath.endsWith("/") ? contextPath : contextPath + "/")
-                + "environment-ide/"
+                + "ide/"
                 + environmentId
                 + "/";
     return viewId == null ? base : base + viewId + "/";

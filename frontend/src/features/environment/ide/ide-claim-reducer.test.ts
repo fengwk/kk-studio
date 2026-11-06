@@ -41,7 +41,7 @@ function sampleView(overrides: Partial<IdeViewState> = {}): IdeViewState {
     status: 'ready',
     attempt: 1,
     claimInFlight: false,
-    entryUrl: '/environment-ide/env-1/view-1/__ide/bootstrap?token=xyz',
+    entryUrl: '/ide/env-1/view-1/__ide/bootstrap?token=xyz',
     daemonInstanceId: DAEMON_1,
     bindingEpoch: '10',
     directory: '/workspace/project',

@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.ide.web;
+package fun.fengwk.kkstudio.ide.http;
 
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -19,7 +19,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * IDE 同源网关路由过滤器：在 Studio 同源下固定 {@code /environment-ide/{environmentId}/{viewId}/...} 数据路由。
+ * IDE 同源网关路由过滤器：在 Studio 同源下固定 {@code /ide/{environmentId}/{viewId}/...} 数据路由。
  *
  * <p>view 基址之后的原始 path/query 进入 HTTP/WS 数据面；非 IDE 路径原样放行。数据面自身复核 view+epoch 与 owner 归属，非 owner
  * 只做单跳转发。
@@ -29,7 +29,7 @@ public final class IdeGatewayFilter extends OncePerRequestFilter {
 
   private static final Pattern ROUTE_PATTERN =
       Pattern.compile(
-          "^/environment-ide/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})(/.*)?$");
+          "^/ide/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})(/.*)?$");
 
   private final IdeGatewayDataPlane dataPlane;
 

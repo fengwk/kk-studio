@@ -3073,11 +3073,6 @@ export interface ApiRoutes {
     query: { expectedVersion: string }
     response: void
   }
-  'DELETE /api/environments/{environmentId}/ide/views/{viewId}': {
-    path: { environmentId: string; viewId: string }
-    body: EnvironmentIdeCloseViewDTO
-    response: void
-  }
   'DELETE /api/platform/agents/{name}': {
     path: { name: string }
     query: { expectedVersion: string }
@@ -3161,11 +3156,6 @@ export interface ApiRoutes {
     path: { chatId: string; sessionId: string }
     response: HarnessSessionSummaryDTO
   }
-  'GET /api/environments/{environmentId}/ide/directories': {
-    path: { environmentId: string }
-    query: { path?: string }
-    response: EnvironmentIdeDirectoryListingDTO
-  }
   'GET /api/harness/builtin/sessions/{sessionId}/entries/{entryId}/provider-request': {
     path: { entryId: string; sessionId: string }
     response: HarnessProviderRequestPreviewDTO
@@ -3211,6 +3201,11 @@ export interface ApiRoutes {
   'GET /api/harness/threads/{threadId}/tree': {
     path: { threadId: string }
     response: HarnessThreadTreeNodeDTO[]
+  }
+  'GET /api/ide/environments/{environmentId}/directories': {
+    path: { environmentId: string }
+    query: { path?: string }
+    response: EnvironmentIdeDirectoryListingDTO
   }
   'GET /api/platform/agents': {
     response: AgentDTO[]
@@ -3353,21 +3348,6 @@ export interface ApiRoutes {
     body: ChatCreateDTO
     response: ChatDTO
   }
-  'POST /api/environments/{environmentId}/ide/views': {
-    path: { environmentId: string }
-    body: EnvironmentIdeOpenViewDTO
-    response: EnvironmentIdeViewDTO
-  }
-  'POST /api/environments/{environmentId}/ide/views/{viewId}/mobile-layout': {
-    path: { environmentId: string; viewId: string }
-    body: EnvironmentIdeViewBindingDTO
-    response: void
-  }
-  'POST /api/environments/{environmentId}/ide/views/{viewId}/terminal': {
-    path: { environmentId: string; viewId: string }
-    body: EnvironmentIdeViewBindingDTO
-    response: void
-  }
   'POST /api/harness/builtin/threads/{threadId}/model-request-debug': {
     path: { threadId: string }
     body: HarnessModelRequestDebugRequestDTO
@@ -3406,6 +3386,26 @@ export interface ApiRoutes {
     path: { threadId: string; toolInvocationId: string }
     body: HarnessToolInputDTO
     response: HarnessToolInputResultDTO
+  }
+  'POST /api/ide/environments/{environmentId}/views': {
+    path: { environmentId: string }
+    body: EnvironmentIdeOpenViewDTO
+    response: EnvironmentIdeViewDTO
+  }
+  'POST /api/ide/environments/{environmentId}/views/{viewId}/apply-mobile-layout': {
+    path: { environmentId: string; viewId: string }
+    body: EnvironmentIdeViewBindingDTO
+    response: void
+  }
+  'POST /api/ide/environments/{environmentId}/views/{viewId}/close': {
+    path: { environmentId: string; viewId: string }
+    body: EnvironmentIdeCloseViewDTO
+    response: void
+  }
+  'POST /api/ide/environments/{environmentId}/views/{viewId}/focus-terminal': {
+    path: { environmentId: string; viewId: string }
+    body: EnvironmentIdeViewBindingDTO
+    response: void
   }
   'POST /api/platform/agents': {
     body: AgentCreateDTO
@@ -3597,11 +3597,6 @@ export interface ApiRoutes {
     body: ChatYoloUpdateDTO
     response: ChatDTO
   }
-  'PUT /api/environments/{environmentId}/ide/views/{viewId}/directory': {
-    path: { environmentId: string; viewId: string }
-    body: EnvironmentIdeChangeDirectoryDTO
-    response: EnvironmentIdeViewDTO
-  }
   'PUT /api/harness/sessions/{sessionId}/name': {
     path: { sessionId: string }
     body: HarnessNameUpdateDTO
@@ -3621,6 +3616,11 @@ export interface ApiRoutes {
     path: { threadId: string }
     body: HarnessThreadYoloUpdateDTO
     response: HarnessThreadDTO
+  }
+  'PUT /api/ide/environments/{environmentId}/views/{viewId}/directory': {
+    path: { environmentId: string; viewId: string }
+    body: EnvironmentIdeChangeDirectoryDTO
+    response: EnvironmentIdeViewDTO
   }
   'PUT /api/platform/agents/{name}': {
     path: { name: string }

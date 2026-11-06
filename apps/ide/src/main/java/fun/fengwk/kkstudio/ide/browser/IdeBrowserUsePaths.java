@@ -8,7 +8,7 @@ import java.util.UUID;
 public final class IdeBrowserUsePaths {
 
   /** 认证单跳端点；不经过 owner 路由，eventNodeId 由客户端用 cluster_node 现在时解析。 */
-  public static final String INTERNAL_PATH = "/internal/environment-ide/browser-use";
+  public static final String INTERNAL_PATH = "/internal/ide/browser-use";
 
   /** 请求与回执的硬上限；超出即 fail-closed。 */
   public static final int MAX_BODY_BYTES = 16 * 1024;

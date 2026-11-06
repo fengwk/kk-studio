@@ -1,9 +1,8 @@
-package fun.fengwk.kkstudio.ide.web;
+package fun.fengwk.kkstudio.ide.http;
 
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.HttpStatus;
-import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -100,7 +99,7 @@ public class ClusterEnvironmentIdeInternalController {
     return localEnvironmentIdeService.listDirectories(environment, request.getParameter("path"));
   }
 
-  @PostMapping("/views/{viewId:" + VIEW_ID + "}/mobile-layout")
+  @PostMapping("/views/{viewId:" + VIEW_ID + "}/apply-mobile-layout")
   public void collapseMobile(
       @PathVariable String environmentId, @PathVariable String viewId, HttpServletRequest request) {
     EnvironmentId environment = authenticateAndAuthorize(request, environmentId);
@@ -117,7 +116,7 @@ public class ClusterEnvironmentIdeInternalController {
     return localEnvironmentIdeService.changeDirectory(environment, viewId, body);
   }
 
-  @PostMapping("/views/{viewId:" + VIEW_ID + "}/terminal")
+  @PostMapping("/views/{viewId:" + VIEW_ID + "}/focus-terminal")
   public void focusTerminal(
       @PathVariable String environmentId, @PathVariable String viewId, HttpServletRequest request) {
     EnvironmentId environment = authenticateAndAuthorize(request, environmentId);
@@ -125,7 +124,7 @@ public class ClusterEnvironmentIdeInternalController {
     localEnvironmentIdeService.focusTerminal(environment, viewId, body);
   }
 
-  @DeleteMapping("/views/{viewId:" + VIEW_ID + "}")
+  @PostMapping("/views/{viewId:" + VIEW_ID + "}/close")
   public void closeView(
       @PathVariable String environmentId, @PathVariable String viewId, HttpServletRequest request) {
     EnvironmentId environment = authenticateAndAuthorize(request, environmentId);

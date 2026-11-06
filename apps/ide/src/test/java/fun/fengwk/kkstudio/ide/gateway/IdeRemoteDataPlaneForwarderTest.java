@@ -207,7 +207,9 @@ class IdeRemoteDataPlaneForwarderTest {
                   ByteBuffer readBuf = ByteBuffer.allocate(1024);
                   accepted.read(readBuf).get();
                   String response =
-                      "HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\n\r\nview-not-found-body";
+                      "HTTP/1.1 404 Not Found\r\n"
+                          + "Content-Type: text/plain\r\n\r\n"
+                          + "view-not-found-body";
                   accepted
                       .write(ByteBuffer.wrap(response.getBytes(StandardCharsets.ISO_8859_1)))
                       .get();
@@ -390,7 +392,7 @@ class IdeRemoteDataPlaneForwarderTest {
 
     forwarder.forwardDataHttp(reqData, resData, owner, ENV, VIEW, "/page");
     verify(resData, never()).addHeader(eq("Set-Cookie"), any());
-    verify(resData).addHeader("Location", "/environment-ide/" + ENV + "/" + VIEW + "/target");
+    verify(resData).addHeader("Location", "/ide/" + ENV + "/" + VIEW + "/target");
   }
 
   @Test
