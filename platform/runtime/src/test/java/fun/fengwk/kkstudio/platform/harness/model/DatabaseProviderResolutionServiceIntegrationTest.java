@@ -149,7 +149,7 @@ class DatabaseProviderResolutionServiceIntegrationTest extends PostgresSpringTes
     assertEquals("https://second.example/v1", openAi.descriptor.endpoint(), "同名重建后解析到新行 baseUrl");
     assertEquals(
         Duration.ofSeconds(30), resolved.timeoutPolicy().modelCallTimeout(), "同名重建后解析到新行 config");
-    assertEquals("0", recreated.getVersion(), "重建行 version 从 0 重新开始");
+    assertEquals(0L, recreated.getVersion(), "重建行 version 从 0 重新开始");
   }
 
   private DatabaseProviderResolutionService resolution(ProviderFactory... factories) {

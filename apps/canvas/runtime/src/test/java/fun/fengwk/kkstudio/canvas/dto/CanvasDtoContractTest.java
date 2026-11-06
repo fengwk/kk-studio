@@ -37,8 +37,8 @@ class CanvasDtoContractTest {
     "CanvasFunctionDefinitionDTO.unavailableReason"
   };
 
-  /** durable 位置与版本游标在 wire 上永远是十进制字符串，避免 JS 丢精度。 */
-  private static final String[] VERSION_STRING_FIELDS = {
+  /** durable 版本游标以 Long 承载，HTTP 边界统一把 64 位整数写成十进制字符串，避免 JS 丢精度。 */
+  private static final String[] VERSION_LONG_FIELDS = {
     "CanvasDocumentDTO.revision", "CanvasPatchDTO.revision"
   };
 
@@ -77,13 +77,13 @@ class CanvasDtoContractTest {
   }
 
   @Test
-  void durableRevisionsAreWireDecimalStrings() throws Exception {
-    for (String field : VERSION_STRING_FIELDS) {
+  void durableRevisionsAreTypedLongs() throws Exception {
+    for (String field : VERSION_LONG_FIELDS) {
       Field version = field(field);
       assertEquals(
-          String.class,
+          Long.class,
           version.getType(),
-          field + " must be String so the wire is always a decimal string");
+          field + " must be Long; the HTTP boundary writes it as a decimal string");
     }
   }
 
@@ -150,7 +150,7 @@ class CanvasDtoContractTest {
         Map.of(
             "name", "String",
             "description", "String",
-            "argsSchema", "Map",
+            "argsSchema", "JsonNode",
             "outputs", "List",
             "referencePolicy", "CanvasFunctionReferencePolicyDTO",
             "available", "Boolean",
@@ -177,7 +177,8 @@ class CanvasDtoContractTest {
   /** Function 只有 name 与自由 args，目录不假设 model/prompt/provider。 */
   @Test
   void functionExposesNameAndArgsOnly() {
-    assertEquals(Map.of("name", "String", "args", "Map"), componentTypes(CanvasFunctionDTO.class));
+    assertEquals(
+        Map.of("name", "String", "args", "JsonNode"), componentTypes(CanvasFunctionDTO.class));
   }
 
   @Test
