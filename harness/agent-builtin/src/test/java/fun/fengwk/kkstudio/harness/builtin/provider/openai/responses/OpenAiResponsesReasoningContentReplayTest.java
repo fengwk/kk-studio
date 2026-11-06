@@ -24,6 +24,7 @@ import fun.fengwk.kkstudio.harness.codec.HistoryEntryPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
@@ -94,7 +95,7 @@ class OpenAiResponsesReasoningContentReplayTest {
     return new ProviderRequest(
         new ModelDescriptor(
             descriptor.providerName(), model, model, Set.of(ModelInputModality.TEXT), true, true),
-        new ModelVariant("default", "medium"),
+        new ModelVariant("default", "medium", PromptCacheRetention.NONE, null),
         1024,
         "Synthetic system instruction.",
         messages,

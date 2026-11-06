@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.platform.harness.persistence.postgresql;
 import static fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchemaSupport.applyCanvasTestDatabase;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -13,6 +12,7 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionAction;
 import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionRule;
@@ -143,26 +143,13 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
                 "select name || ':' || provider_type from agent_provider"
                     + " where name = 'minimax-anthropic'"),
             "the real E2E credential synchronizer targets the minimax-anthropic provider name");
-        // Provider 配置统一由 promptCacheRetention 声明留存档位；具体取值由 crosscutting seed 负责，这里只校验 key。
-        assertFalse(
-            OBJECT_MAPPER
-                .readTree(
-                    singleString(
-                        st, "select config::text from agent_provider where name = 'openai'"))
-                .path("promptCacheRetention")
-                .asText()
-                .isBlank(),
-            "the openai provider config must declare promptCacheRetention");
-        assertEquals(
-            "BUDGET",
-            OBJECT_MAPPER
-                .readTree(
-                    singleString(
-                        st,
-                        "select config::text from agent_provider where name = 'minimax-anthropic'"))
-                .path("anthropicThinkingMode")
-                .asText(),
-            "the minimax-anthropic provider config must declare BUDGET thinking mode");
+        // 所有 Provider 都只能携带超时配置；缓存和原生 thinking 由 variant 定义。
+        assertSingleLong(
+            conn,
+            "select count(*) from agent_provider"
+                + " where config <> '{\"modelCallTimeoutMillis\":1800000,"
+                + "\"modelCallIdleTimeoutMillis\":120000}'::jsonb",
+            0L);
         assertEquals(
             "claude-fable-5-dd-3M-xaMiniM",
             singleString(
@@ -170,16 +157,6 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
                 "select model_id from agent_model"
                     + " where provider_name = 'minimax-anthropic' and name = 'MiniMax-M3'"),
             "minimax-anthropic/MiniMax-M3 must carry its real upstream wire model identity");
-        assertEquals(
-            "DEEPSEEK",
-            OBJECT_MAPPER
-                .readTree(
-                    singleString(
-                        st, "select config::text from agent_provider where name = 'deepseek'"))
-                .path("openAiChatThinkingFormat")
-                .asText(),
-            "the deepseek provider config must declare DEEPSEEK thinking format");
-
         assertEquals(
             "minimax/MiniMax-M3-Responses,minimax-anthropic/MiniMax-M3",
             singleString(
@@ -489,8 +466,19 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
     try (InputStream input =
             Objects.requireNonNull(
                 PostgresqlSchemaSeedTest.class.getResourceAsStream("pi-model-catalog.json"));
+        InputStream variantInput =
+            Objects.requireNonNull(
+                PostgresqlSchemaSeedTest.class.getResourceAsStream("e2e-model-variants.json"));
         Statement st = conn.createStatement()) {
       JsonNode expected = OBJECT_MAPPER.readTree(input);
+      JsonNode variants = OBJECT_MAPPER.readTree(variantInput);
+      assertEquals(
+          expected.size(), variants.size(), "every model must have an expected variant list");
+      for (JsonNode model : expected) {
+        JsonNode modelVariants = variants.path(model.path("name").asText());
+        assertTrue(modelVariants.isArray(), "model variant expectation must be present");
+        ((ObjectNode) model.path("config")).set("variants", modelVariants);
+      }
       JsonNode actual =
           OBJECT_MAPPER.readTree(
               singleString(

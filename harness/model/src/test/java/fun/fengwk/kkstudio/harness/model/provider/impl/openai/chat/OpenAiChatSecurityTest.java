@@ -4,7 +4,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -75,8 +74,7 @@ class OpenAiChatSecurityTest {
   @DisplayName("ProviderAdapter 与 ModelProvider 的 toString 绝不泄漏 apiKey 与敏感配置")
   void testToStringDoesNotLeakSecrets() {
     String sensitiveKey = "sk-super-sensitive-secret-token-xyz-123456789";
-    OpenAiChatProviderAdapter adapter =
-        new OpenAiChatProviderAdapter(transport, sensitiveKey, "{\"openAiChatRequireDone\":true}");
+    OpenAiChatProviderAdapter adapter = new OpenAiChatProviderAdapter(transport, sensitiveKey);
     ModelProvider provider = adapter.create(descriptor);
 
     String adapterStr = adapter.toString();
@@ -111,16 +109,5 @@ class OpenAiChatSecurityTest {
     assertEquals("HTTP 401\n" + upstreamBody, pe.getMessage());
     assertFalse(pe.getMessage().contains("internal transport failure"));
     assertNull(pe.getCause());
-  }
-
-  @Test
-  @DisplayName("非法配置异常信息不回显非法输入的敏感内容")
-  void testConfigurationExceptionSanitization() {
-    ProviderException ex =
-        assertThrows(
-            ProviderException.class,
-            () -> OpenAiChatConfiguration.parse("{\"promptCacheRetention\":\"SECRET_INVALID\"}"));
-    assertNotNull(ex.getMessage());
-    assertFalse(ex.getMessage().contains("SECRET_INVALID"));
   }
 }

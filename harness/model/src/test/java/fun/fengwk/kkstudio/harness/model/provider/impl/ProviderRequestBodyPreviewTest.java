@@ -262,7 +262,11 @@ class ProviderRequestBodyPreviewTest {
     ProviderRequest invalid =
         new ProviderRequest(
             model(Protocol.OPENAI_CHAT),
-            new ModelVariant("default", null, new ProviderProtocolOptions("{\"n\":2}")),
+            new ModelVariant(
+                "default",
+                null,
+                PromptCacheRetention.NONE,
+                new ProviderProtocolOptions("{\"n\":2}")),
             1024,
             "Preview system instruction.",
             List.of(userMessage()),
@@ -354,10 +358,8 @@ class ProviderRequestBodyPreviewTest {
 
   private ProviderAdapter adapterFor(Protocol protocol, JdkHttpSseTransport transport) {
     return switch (protocol) {
-      case OPENAI_CHAT -> new OpenAiChatProviderAdapter(
-          transport, API_KEY, "{\"promptCacheRetention\":\"SHORT\"}");
-      case OPENAI_RESPONSES -> new OpenAiResponsesProviderAdapter(
-          transport, API_KEY, "{\"promptCacheRetention\":\"SHORT\"}");
+      case OPENAI_CHAT -> new OpenAiChatProviderAdapter(transport, API_KEY);
+      case OPENAI_RESPONSES -> new OpenAiResponsesProviderAdapter(transport, API_KEY);
       case ANTHROPIC -> new AnthropicProviderAdapter(transport, API_KEY);
       case GEMINI -> new GeminiProviderAdapter(transport, API_KEY);
     };
@@ -383,7 +385,10 @@ class ProviderRequestBodyPreviewTest {
 
   private static ModelVariant variant(Protocol protocol) {
     return new ModelVariant(
-        "default", null, new ProviderProtocolOptions(protocol.nativeOptionsJson));
+        "default",
+        null,
+        protocol == Protocol.GEMINI ? PromptCacheRetention.NONE : PromptCacheRetention.SHORT,
+        new ProviderProtocolOptions(protocol.nativeOptionsJson));
   }
 
   private static ProviderMessage userMessage() {

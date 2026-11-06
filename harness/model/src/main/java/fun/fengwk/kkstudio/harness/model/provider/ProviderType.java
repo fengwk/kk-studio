@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.model.provider;
 
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 
 import java.util.Set;
 
@@ -15,19 +16,22 @@ public enum ProviderType {
   OPENAI(
       "openai",
       Set.of(ModelInputModality.IMAGE, ModelInputModality.AUDIO, ModelInputModality.DOCUMENT),
-      Set.of()),
+      Set.of(),
+      Set.of(PromptCacheRetention.NONE, PromptCacheRetention.SHORT, PromptCacheRetention.LONG)),
 
   /** OpenAI Responses：用户内容与工具结果都支持 IMAGE/DOCUMENT。 */
   OPENAI_RESPONSES(
       "openai_responses",
       Set.of(ModelInputModality.IMAGE, ModelInputModality.DOCUMENT),
-      Set.of(ModelInputModality.IMAGE, ModelInputModality.DOCUMENT)),
+      Set.of(ModelInputModality.IMAGE, ModelInputModality.DOCUMENT),
+      Set.of(PromptCacheRetention.NONE, PromptCacheRetention.SHORT, PromptCacheRetention.LONG)),
 
   /** Anthropic Messages：用户内容与工具结果都支持 IMAGE/DOCUMENT。 */
   ANTHROPIC(
       "anthropic",
       Set.of(ModelInputModality.IMAGE, ModelInputModality.DOCUMENT),
-      Set.of(ModelInputModality.IMAGE, ModelInputModality.DOCUMENT)),
+      Set.of(ModelInputModality.IMAGE, ModelInputModality.DOCUMENT),
+      Set.of(PromptCacheRetention.NONE, PromptCacheRetention.SHORT, PromptCacheRetention.LONG)),
 
   /** Gemini GenerateContent：用户内容支持 IMAGE/AUDIO/VIDEO/DOCUMENT；工具结果只支持 IMAGE/DOCUMENT。 */
   GOOGLE(
@@ -37,17 +41,21 @@ public enum ProviderType {
           ModelInputModality.AUDIO,
           ModelInputModality.VIDEO,
           ModelInputModality.DOCUMENT),
-      Set.of(ModelInputModality.IMAGE, ModelInputModality.DOCUMENT));
+      Set.of(ModelInputModality.IMAGE, ModelInputModality.DOCUMENT),
+      Set.of(PromptCacheRetention.NONE));
 
   private final String wireValue;
   private final ProviderMediaCapabilities mediaCapabilities;
+  private final Set<PromptCacheRetention> promptCacheRetentions;
 
   ProviderType(
       String wireValue,
       Set<ModelInputModality> userModalities,
-      Set<ModelInputModality> toolResultModalities) {
+      Set<ModelInputModality> toolResultModalities,
+      Set<PromptCacheRetention> promptCacheRetentions) {
     this.wireValue = wireValue;
     this.mediaCapabilities = new ProviderMediaCapabilities(userModalities, toolResultModalities);
+    this.promptCacheRetentions = Set.copyOf(promptCacheRetentions);
   }
 
   /** 返回 Catalog / HTTP / database 使用的稳定 wire 值。 */
@@ -58,6 +66,11 @@ public enum ProviderType {
   /** 本协议编码器实际可编码的内联媒体模态（用户内容与工具结果）。 */
   public ProviderMediaCapabilities mediaCapabilities() {
     return mediaCapabilities;
+  }
+
+  /** 本协议支持的显式提示缓存留存档位。 */
+  public Set<PromptCacheRetention> promptCacheRetentions() {
+    return promptCacheRetentions;
   }
 
   /**

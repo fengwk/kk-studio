@@ -6,6 +6,7 @@ import type {
   AgentModelKind,
   AgentModelPricingDTO,
   HarnessExecutionSelectionDTO,
+  PromptCacheRetention,
   SkillRefDTO,
 } from '@/shared/api/generated/contracts'
 
@@ -32,6 +33,8 @@ export interface VariantDraft {
   reasoningEffort: string
   /** 厂商原生协议请求选项（JSON 文本）。 */
   protocolOptionsJson: string
+  /** 提示缓存策略。必填项，由所选 Variant 决定。 */
+  promptCacheRetention: PromptCacheRetention
 }
 
 /**

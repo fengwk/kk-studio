@@ -1351,7 +1351,7 @@ class AnthropicRequestMapperTest {
   /** 测试意图：合法的请求正常通过校验并不抛出异常。 */
   @Test
   void validate_WithNoUnsupportedFeatures_ShouldNotThrowException() {
-    ModelVariant variant = new ModelVariant("normal");
+    ModelVariant variant = new ModelVariant("normal", null, PromptCacheRetention.NONE, null);
     ProviderRequest request =
         request(
             variant,
@@ -1638,7 +1638,7 @@ class AnthropicRequestMapperTest {
   }
 
   private static ModelVariant defaultVariant() {
-    return new ModelVariant("default");
+    return new ModelVariant("default", null, PromptCacheRetention.NONE, null);
   }
 
   private static ProviderRequest request(

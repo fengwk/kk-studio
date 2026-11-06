@@ -146,8 +146,8 @@ const SAMPLE_MODEL: AgentModelView = {
     },
     defaultVariant: 'standard',
     variants: [
-      { id: 'standard', reasoningEffort: 'HIGH' },
-      { id: 'fast', reasoningEffort: 'low' },
+      { id: 'standard', reasoningEffort: 'HIGH', promptCacheRetention: 'SHORT' },
+      { id: 'fast', reasoningEffort: 'low', promptCacheRetention: 'SHORT' },
     ],
   },
   version: '1',
@@ -164,9 +164,9 @@ const LONG_MODEL: AgentModelView = {
   config: {
     ...SAMPLE_MODEL.config!,
     variants: [
-      { id: 'variant-alpha-primary', reasoningEffort: 'HIGH' },
-      { id: 'variant-beta-secondary', reasoningEffort: 'medium' },
-      { id: 'variant-gamma-experimental', reasoningEffort: 'low' },
+      { id: 'variant-alpha-primary', reasoningEffort: 'HIGH', promptCacheRetention: 'SHORT' },
+      { id: 'variant-beta-secondary', reasoningEffort: 'medium', promptCacheRetention: 'SHORT' },
+      { id: 'variant-gamma-experimental', reasoningEffort: 'low', promptCacheRetention: 'SHORT' },
     ],
   },
 }
@@ -175,6 +175,7 @@ const SAMPLE_PROVIDER: AgentProviderDTO = {
   name: 'openai',
   description: 'OpenAI 官方 API 服务提供方',
   providerType: 'openai',
+  promptCacheRetentions: ['NONE', 'SHORT', 'LONG'],
   baseUrl: 'https://api.openai.com/v1',
   configured: true,
   modelCallTimeoutMillis: '60000',

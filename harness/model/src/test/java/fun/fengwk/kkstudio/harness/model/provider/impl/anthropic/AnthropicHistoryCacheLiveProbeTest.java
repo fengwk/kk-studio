@@ -61,8 +61,6 @@ class AnthropicHistoryCacheLiveProbeTest {
   private static final ObjectMapper JSON = JsonMapper.builder().build();
   private static final String MODEL = "claude-fable-5-dd-3M-xaMiniM";
   private static final String MARKER = ",\"cache_control\":{\"type\":\"ephemeral\"}";
-  private static final AnthropicConfiguration CONFIG =
-      new AnthropicConfiguration(AnthropicThinkingMode.BUDGET);
   private static final ModelCallTimeoutPolicy TIMEOUT =
       new ModelCallTimeoutPolicy(Duration.ofSeconds(120), Duration.ofSeconds(120));
 
@@ -72,14 +70,14 @@ class AnthropicHistoryCacheLiveProbeTest {
     ProviderDescriptor descriptor = descriptor("https://example.invalid");
     ProviderMessage prefix = prefix();
     ProviderRequest warm = request(List.of(prefix));
-    byte[] warmBytes = new AnthropicRequestEncoder(CONFIG).encode(warm, descriptor).bodyUtf8Bytes();
+    byte[] warmBytes = new AnthropicRequestEncoder().encode(warm, descriptor).bodyUtf8Bytes();
     assertEquals(List.of(0), markers(JSON.readTree(warmBytes)));
     List<ProviderMessage> history = new ArrayList<>(warm.messages());
     history.add(
         new ProviderMessage(ProviderMessageRole.ASSISTANT, List.of(new ProviderTextBlock("OK"))));
     history.add(increment());
     byte[] current =
-        new AnthropicRequestEncoder(CONFIG).encode(request(history), descriptor).bodyUtf8Bytes();
+        new AnthropicRequestEncoder().encode(request(history), descriptor).bodyUtf8Bytes();
     verify(current, false, false);
     byte[] old = oldBody(current);
     verify(old, true, false);
@@ -112,7 +110,7 @@ class AnthropicHistoryCacheLiveProbeTest {
         ProviderDescriptor descriptor = descriptor(base);
         AnthropicModelProvider provider =
             new AnthropicModelProvider(
-                transport, descriptor, key, AnthropicEndpoints.resolveMessagesUri(base), CONFIG);
+                transport, descriptor, key, AnthropicEndpoints.resolveMessagesUri(base));
         for (boolean old : List.of(false, true)) {
           transport.old = false;
           transport.warm = true;
@@ -220,7 +218,7 @@ class AnthropicHistoryCacheLiveProbeTest {
     return new ProviderRequest(
         new ModelDescriptor(
             "minimax-anthropic", "MiniMax-M3", MODEL, Set.of(ModelInputModality.TEXT), true, true),
-        new ModelVariant("off", "off"),
+        new ModelVariant("off", "off", PromptCacheRetention.SHORT, null),
         128,
         "answer OK only",
         messages,

@@ -208,7 +208,7 @@ async function createStubCatalog({ jsonCall }) {
       limit: { context: 128000, output: 4096 },
       abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
       defaultVariant: 'default',
-      variants: [{ id: 'default' }],
+      variants: [{ id: 'default', promptCacheRetention: 'SHORT' }],
     },
   })
   await jsonCall('POST', '/api/agents', {

@@ -119,7 +119,7 @@ const model: AgentModelDTO = {
       multipliers: [],
     },
     defaultVariant: 'default',
-    variants: [{ id: 'default' }],
+    variants: [{ id: 'default', promptCacheRetention: 'NONE' }],
   },
   version: '0',
   createTime: 0,

@@ -15,6 +15,7 @@ import fun.fengwk.kkstudio.share.catalog.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentProviderDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentProviderEditablePropertiesDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentProviderUpdateDTO;
+import fun.fengwk.kkstudio.share.catalog.PromptCacheRetention;
 
 import java.util.List;
 import java.util.Objects;
@@ -187,7 +188,7 @@ public class AgentProviderService {
     }
   }
 
-  /** 应用编辑并在协议、凭据或协议配置变化（或缺失世代）时轮换连接世代。 */
+  /** 应用编辑并在协议、地址或凭据变化（或缺失世代）时轮换连接世代。 */
   private AgentProvider applyEdits(
       AgentProvider provider,
       AgentProviderEditablePropertiesDTO properties,
@@ -202,9 +203,7 @@ public class AgentProviderService {
     boolean protocolChanged =
         !Objects.equals(provider.providerType(), mutation.providerType())
             || !Objects.equals(provider.baseUrl(), mutation.baseUrl())
-            || !Objects.equals(provider.credential(), mutation.credential())
-            || !configurationCodec.isProtocolConfigEqual(
-                provider.configJson(), mutation.configJson());
+            || !Objects.equals(provider.credential(), mutation.credential());
     UUID generationId =
         provider.connectionGenerationId() == null || protocolChanged
             ? UUID.randomUUID()
@@ -297,6 +296,11 @@ public class AgentProviderService {
     dto.setModelCallIdleTimeoutMillis(timeoutPolicy.modelCallIdleTimeout().toMillis());
     dto.setModelHttpRetryStatusCodes(
         configurationCodec.readHttpRetryStatusCodes(provider.configJson()));
+    dto.setPromptCacheRetentions(
+        provider.providerType().promptCacheRetentions().stream()
+            .sorted()
+            .map(retention -> PromptCacheRetention.valueOf(retention.name()))
+            .toList());
     dto.setVersion(CatalogVersions.format(provider.version()));
     dto.setCreateTime(provider.createTime());
     dto.setUpdateTime(provider.updateTime());

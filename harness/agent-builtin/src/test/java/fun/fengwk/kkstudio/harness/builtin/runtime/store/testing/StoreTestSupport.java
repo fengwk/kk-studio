@@ -16,6 +16,7 @@ import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
@@ -75,8 +76,7 @@ public final class StoreTestSupport {
         1024,
         "Test system instruction.",
         List.of(),
-        List.of(),
-        provider.cacheControl());
+        List.of());
   }
 
   /** SUCCEEDED live-attach 的机械请求：单一 bash binding（renderer 由 binding 派生，与 assistant ToolCall 全等）。 */
@@ -90,8 +90,7 @@ public final class StoreTestSupport {
         1024,
         "Test system instruction.",
         List.of(hostBinding()),
-        List.of(),
-        base.cacheControl());
+        List.of());
   }
 
   /** 只有 {@code ask_user} binding 的 frozen request：assistant ToolCall 必须与该 binding 全等。 */
@@ -105,8 +104,7 @@ public final class StoreTestSupport {
         1024,
         "Test system instruction.",
         List.of(askUserBinding()),
-        List.of(),
-        base.cacheControl());
+        List.of());
   }
 
   /** 单个 {@code ask_user} 调用的 provider response（参数即冻结问卷原文）。 */
@@ -142,7 +140,7 @@ public final class StoreTestSupport {
   private static ProviderRequest providerRequest() {
     return new ProviderRequest(
         modelDescriptor(),
-        new ModelVariant("v1"),
+        new ModelVariant("v1", null, PromptCacheRetention.NONE, null),
         1024,
         "Test system instruction.",
         List.of(),

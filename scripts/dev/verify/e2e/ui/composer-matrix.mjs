@@ -1380,7 +1380,7 @@ async function createHoldingQueueFixture(
             reasoning: false,
             inputModalities: ['TEXT'],
           },
-          variants: [{ id: 'default' }, { id: 'review' }],
+          variants: [{ id: 'default', promptCacheRetention: 'SHORT' }, { id: 'review', promptCacheRetention: 'SHORT' }],
         }),
       },
     )

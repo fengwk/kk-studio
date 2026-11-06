@@ -14,6 +14,8 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.model.ProviderProtocolOptions;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderCompletion;
@@ -80,7 +82,7 @@ class AnthropicModelProviderUnitTest {
     request =
         new ProviderRequest(
             model,
-            new ModelVariant("default"),
+            new ModelVariant("default", null, PromptCacheRetention.NONE, null),
             1024,
             "Test system instruction.",
             List.of(
@@ -157,47 +159,16 @@ class AnthropicModelProviderUnitTest {
   }
 
   @Test
-  void adapterWiringAndConfigurationBehavior() {
+  void adapterCreatesProviderForMatchingType() {
     JdkHttpSseTransport transport = new JdkHttpSseTransport(client, sched);
 
-    // 1. 默认构造函数使用 ADAPTIVE
     AnthropicProviderAdapter defaultAdapter = new AnthropicProviderAdapter(transport, "key-1");
-    assertEquals(
-        AnthropicThinkingMode.ADAPTIVE, defaultAdapter.configuration().anthropicThinkingMode());
     assertEquals("AnthropicProviderAdapter[providerType=ANTHROPIC]", defaultAdapter.toString());
-
-    // 2. configJson 构造函数解析 BUDGET
-    AnthropicProviderAdapter budgetAdapter =
-        new AnthropicProviderAdapter(transport, "key-2", "{\"anthropicThinkingMode\":\"BUDGET\"}");
-    assertEquals(
-        AnthropicThinkingMode.BUDGET, budgetAdapter.configuration().anthropicThinkingMode());
-
-    // 3. 显式 AnthropicConfiguration 构造函数
-    AnthropicConfiguration explicitBudgetConfig =
-        new AnthropicConfiguration(AnthropicThinkingMode.BUDGET);
-    AnthropicProviderAdapter explicitAdapter =
-        new AnthropicProviderAdapter(transport, "key-3", explicitBudgetConfig);
-    assertEquals(explicitBudgetConfig, explicitAdapter.configuration());
-
-    // 4. static parseConfig 委托
-    assertEquals(
-        AnthropicThinkingMode.BUDGET,
-        AnthropicProviderAdapter.parseConfig("{\"anthropicThinkingMode\":\"BUDGET\"}")
-            .anthropicThinkingMode());
-
-    // 5. 非法 JSON 在 adapter 构造时被拒绝
-    assertThrows(
-        ProviderException.class, () -> new AnthropicProviderAdapter(transport, "key", "not-json"));
-
-    // 6. create(descriptor) 传递 configuration 到 AnthropicModelProvider
-    AnthropicModelProvider budgetModelProvider =
-        (AnthropicModelProvider) budgetAdapter.create(descriptor);
-    assertEquals(
-        AnthropicThinkingMode.BUDGET, budgetModelProvider.configuration().anthropicThinkingMode());
+    assertNotNull(defaultAdapter.create(descriptor));
   }
 
   @Test
-  void modelProviderEmitsInvalidRequestOnBudgetConstraintViolationWithoutInvokingTransport() {
+  void modelProviderRejectsRuntimeOwnedNativeCacheWithoutInvokingTransport() {
     AtomicReference<Boolean> transportInvoked = new AtomicReference<>(false);
     JdkHttpSseTransport hookTransport =
         new JdkHttpSseTransport(client, sched) {
@@ -211,14 +182,9 @@ class AnthropicModelProviderUnitTest {
           }
         };
 
-    AnthropicConfiguration budgetConfig = new AnthropicConfiguration(AnthropicThinkingMode.BUDGET);
     AnthropicModelProvider provider =
         new AnthropicModelProvider(
-            hookTransport,
-            descriptor,
-            "key",
-            URI.create("https://api.anthropic.com/v1/messages"),
-            budgetConfig);
+            hookTransport, descriptor, "key", URI.create("https://api.anthropic.com/v1/messages"));
 
     ModelDescriptor reasoningModel =
         new ModelDescriptor(
@@ -229,11 +195,15 @@ class AnthropicModelProviderUnitTest {
             true,
             true);
 
-    // 当 outputTokens 为 1 时，budgetTokens = min(2048, 1 - 1) = 0 <= 0 触发校验失败
+    // native 选项不能覆盖运行时独占的缓存字段。
     ProviderRequest violatingReq =
         new ProviderRequest(
             reasoningModel,
-            new ModelVariant("default", "low"),
+            new ModelVariant(
+                "default",
+                "low",
+                PromptCacheRetention.NONE,
+                new ProviderProtocolOptions("{\"cache_control\":null}")),
             1,
             "Test system instruction.",
             List.of(
@@ -262,7 +232,7 @@ class AnthropicModelProviderUnitTest {
         transportInvoked.get(), "Transport must not be invoked on request encoding failure");
     assertNotNull(caughtError.get());
     assertEquals(ProviderErrorKind.INVALID_REQUEST, caughtError.get().kind());
-    assertEquals("budget_tokens must be lower than max_tokens", caughtError.get().getMessage());
+    assertTrue(caughtError.get().getMessage().contains("cache_control"));
   }
 
   /** 测试意图：传输失败（发送阶段或读到一半）都被映射为恰好一次 onError，且不再交付其它终态。 */

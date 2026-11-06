@@ -535,7 +535,7 @@ class ModelProcessorStreamTest extends ModelProcessorTestSupport {
   /** 普通子代理即使继承 allowAutoCompaction=false，也不是摘要任务：LENGTH/FILTERED 仍按普通 Runtime 语义提交。 */
   @Test
   void inheritedNoAutoCompactionDoesNotTurnOrdinaryChildIntoSummaryAgent() {
-    ThreadConstraints inherited = new ThreadConstraints(4096, false, false);
+    ThreadConstraints inherited = new ThreadConstraints(4096, false);
     Fixture truncated =
         new Fixture(
             NO_RETRY,

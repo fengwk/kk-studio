@@ -104,7 +104,7 @@ class OpenAiChatModelProviderIntegrationTest {
     modelDesc =
         new ModelDescriptor(
             "openai", "gpt-4o", "gpt-4o", Set.of(ModelInputModality.TEXT), true, false);
-    defaultVariant = new ModelVariant("default");
+    defaultVariant = new ModelVariant("default", null, PromptCacheRetention.NONE, null);
   }
 
   @AfterEach
@@ -624,10 +624,7 @@ class OpenAiChatModelProviderIntegrationTest {
           }
         });
 
-    OpenAiChatConfiguration sessionConfig =
-        new OpenAiChatConfiguration(true, PromptCacheRetention.SHORT);
-    ModelProvider provider =
-        new OpenAiChatProviderAdapter(transport, "sk-test", sessionConfig).create(descriptor);
+    ModelProvider provider = new OpenAiChatProviderAdapter(transport, "sk-test").create(descriptor);
 
     List<ProviderToolDefinition> tools =
         List.of(

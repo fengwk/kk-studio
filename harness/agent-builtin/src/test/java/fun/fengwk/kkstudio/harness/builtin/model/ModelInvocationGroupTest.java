@@ -55,7 +55,6 @@ class ModelInvocationGroupTest {
         single.systemInstruction(),
         single.toolBindings(),
         single.subagentBindings(),
-        single.cacheControl(),
         group);
   }
 

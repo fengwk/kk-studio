@@ -17,6 +17,7 @@ import tools.jackson.databind.node.ObjectNode;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
@@ -73,7 +74,7 @@ class OpenAiChatNativeReplayTest {
     modelDesc =
         new ModelDescriptor(
             "openai", "gpt-4o-audio", "gpt-4o-audio", Set.of(ModelInputModality.TEXT), true, false);
-    defaultVariant = new ModelVariant("default");
+    defaultVariant = new ModelVariant("default", null, PromptCacheRetention.NONE, null);
     bridge =
         new ProviderStreamBridge(
             new ProviderStreamHandler() {
@@ -95,8 +96,7 @@ class OpenAiChatNativeReplayTest {
         new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Say hi")));
     ProviderRequest turn1Req = request(turn1User);
     OpenAiChatStreamAccumulator accumulator =
-        new OpenAiChatStreamAccumulator(
-            turn1Req, descriptor, OpenAiChatConfiguration.defaults(), bridge);
+        new OpenAiChatStreamAccumulator(turn1Req, descriptor, bridge);
     // chunk 级 transport metadata（id/object/created/model/service_tier/usage）不得进入 assistant message
     accumulator.handleData(
         """
@@ -169,12 +169,7 @@ class OpenAiChatNativeReplayTest {
         new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Again")));
     JsonNode wireRoot =
         MAPPER.readTree(
-            encoder
-                .encode(
-                    request(turn1User, turn1Asst, turn2User),
-                    descriptor,
-                    OpenAiChatConfiguration.defaults())
-                .bodyUtf8Bytes());
+            encoder.encode(request(turn1User, turn1Asst, turn2User), descriptor).bodyUtf8Bytes());
     JsonNode wireAsst = wireRoot.path("messages").get(2);
     assertEquals("assistant", wireAsst.path("role").asString(""));
     assertEquals("Hello world", wireAsst.path("content").asString(""));
@@ -191,8 +186,7 @@ class OpenAiChatNativeReplayTest {
         new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")));
     for (String audio : List.of("{}", "{\"id\":\"  \"}", "\"audio_1\"")) {
       OpenAiChatStreamAccumulator accumulator =
-          new OpenAiChatStreamAccumulator(
-              request(user), descriptor, OpenAiChatConfiguration.defaults(), bridge);
+          new OpenAiChatStreamAccumulator(request(user), descriptor, bridge);
       accumulator.handleData(
           "{\"choices\":[{\"delta\":{\"audio\":" + audio + "},\"finish_reason\":\"stop\"}]}");
       accumulator.handleData("[DONE]");
@@ -216,10 +210,7 @@ class OpenAiChatNativeReplayTest {
               new ProviderReplayState(ProviderReplayFormat.OPENAI_CHAT, modelAffinity(), payload));
       ProviderException error =
           assertThrows(
-              ProviderException.class,
-              () ->
-                  encoder.encode(
-                      request(user, assistant), descriptor, OpenAiChatConfiguration.defaults()));
+              ProviderException.class, () -> encoder.encode(request(user, assistant), descriptor));
       assertEquals(ProviderErrorKind.INVALID_REQUEST, error.kind());
     }
   }
@@ -230,8 +221,7 @@ class OpenAiChatNativeReplayTest {
     ProviderMessage user =
         new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")));
     OpenAiChatStreamAccumulator accumulator =
-        new OpenAiChatStreamAccumulator(
-            request(user), descriptor, OpenAiChatConfiguration.defaults(), bridge);
+        new OpenAiChatStreamAccumulator(request(user), descriptor, bridge);
     accumulator.handleData(
         """
         {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"custom_1","type":"custom",
@@ -252,8 +242,7 @@ class OpenAiChatNativeReplayTest {
                     request(
                         user,
                         assistant(List.of(new ProviderTextBlock("")), completion.replayState())),
-                    descriptor,
-                    OpenAiChatConfiguration.defaults())
+                    descriptor)
                 .bodyUtf8Bytes());
     assertEquals(nativeCall, wire.path("messages").get(2).path("tool_calls").get(0));
   }
@@ -264,8 +253,7 @@ class OpenAiChatNativeReplayTest {
     ProviderMessage user =
         new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")));
     OpenAiChatStreamAccumulator accumulator =
-        new OpenAiChatStreamAccumulator(
-            request(user), descriptor, OpenAiChatConfiguration.defaults(), bridge);
+        new OpenAiChatStreamAccumulator(request(user), descriptor, bridge);
     accumulator.handleData(
         """
         {"choices":[{"delta":{"tool_calls":[
@@ -298,10 +286,7 @@ class OpenAiChatNativeReplayTest {
             List.of(new ProviderToolCallBlock(completion.response().toolCalls().get(0))),
             completion.replayState());
     JsonNode wire =
-        MAPPER.readTree(
-            encoder
-                .encode(request(user, assistant), descriptor, OpenAiChatConfiguration.defaults())
-                .bodyUtf8Bytes());
+        MAPPER.readTree(encoder.encode(request(user, assistant), descriptor).bodyUtf8Bytes());
     assertEquals(calls, wire.path("messages").get(2).path("tool_calls"));
 
     ObjectNode tampered = (ObjectNode) completion.replayState().payload().deepCopy();
@@ -320,8 +305,7 @@ class OpenAiChatNativeReplayTest {
                                 new ProviderToolCallBlock(
                                     completion.response().toolCalls().get(0))),
                             badIndex)),
-                    descriptor,
-                    OpenAiChatConfiguration.defaults()));
+                    descriptor));
     assertEquals(ProviderErrorKind.INVALID_REQUEST, error.kind());
   }
 
@@ -331,8 +315,7 @@ class OpenAiChatNativeReplayTest {
     ProviderMessage user =
         new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")));
     OpenAiChatStreamAccumulator accumulator =
-        new OpenAiChatStreamAccumulator(
-            request(user), descriptor, OpenAiChatConfiguration.defaults(), bridge);
+        new OpenAiChatStreamAccumulator(request(user), descriptor, bridge);
     accumulator.handleData(
         """
         {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"fn_1","type":"function",
@@ -359,7 +342,6 @@ class OpenAiChatNativeReplayTest {
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")))),
             descriptor,
-            OpenAiChatConfiguration.defaults(),
             bridge);
     ProviderException error =
         assertThrows(
@@ -378,8 +360,7 @@ class OpenAiChatNativeReplayTest {
         request(
             new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi"))));
     OpenAiChatStreamAccumulator accumulator =
-        new OpenAiChatStreamAccumulator(
-            turn1Req, descriptor, OpenAiChatConfiguration.defaults(), bridge);
+        new OpenAiChatStreamAccumulator(turn1Req, descriptor, bridge);
     // 一帧携带 n=2：只有 choices[0] 的 delta 与 finish_reason 被消费
     accumulator.handleData(
         """
@@ -420,8 +401,7 @@ class OpenAiChatNativeReplayTest {
         request(
             new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi"))));
     OpenAiChatStreamAccumulator accumulator =
-        new OpenAiChatStreamAccumulator(
-            turn1Req, descriptor, OpenAiChatConfiguration.defaults(), bridge);
+        new OpenAiChatStreamAccumulator(turn1Req, descriptor, bridge);
     accumulator.handleData(
         """
         {
@@ -472,8 +452,7 @@ class OpenAiChatNativeReplayTest {
         request(
             new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi"))));
     OpenAiChatStreamAccumulator accumulator =
-        new OpenAiChatStreamAccumulator(
-            turn1Req, descriptor, OpenAiChatConfiguration.defaults(), bridge);
+        new OpenAiChatStreamAccumulator(turn1Req, descriptor, bridge);
     accumulator.handleData(
         """
         {"id":"c-tamper","choices":[{"index":0,"delta":{"role":"assistant","content":"honest"},
@@ -495,9 +474,7 @@ class OpenAiChatNativeReplayTest {
             ProviderMessageRole.ASSISTANT, List.of(new ProviderTextBlock("honest")), tamperedState);
     ProviderRequest tamperedReq = request(turn1Req.messages().get(0), tamperedAsst);
     ProviderException error =
-        assertThrows(
-            ProviderException.class,
-            () -> encoder.encode(tamperedReq, descriptor, OpenAiChatConfiguration.defaults()));
+        assertThrows(ProviderException.class, () -> encoder.encode(tamperedReq, descriptor));
     assertEquals(ProviderErrorKind.INVALID_REQUEST, error.kind());
 
     // 未篡改时同一 payload 可正常回放，证明失败来自 durable 不一致而非未知字段
@@ -509,10 +486,7 @@ class OpenAiChatNativeReplayTest {
     JsonNode honestRoot =
         MAPPER.readTree(
             encoder
-                .encode(
-                    request(turn1Req.messages().get(0), honestAsst),
-                    descriptor,
-                    OpenAiChatConfiguration.defaults())
+                .encode(request(turn1Req.messages().get(0), honestAsst), descriptor)
                 .bodyUtf8Bytes());
     JsonNode honestWire = honestRoot.path("messages").get(2);
     assertEquals("assistant", honestWire.path("role").asString(""));
@@ -669,11 +643,7 @@ class OpenAiChatNativeReplayTest {
               List.of(user, assistant),
               changeSystem ? List.of() : List.of(tool),
               ProviderCacheControl.none());
-      JsonNode wire =
-          MAPPER.readTree(
-              encoder
-                  .encode(changed, descriptor, OpenAiChatConfiguration.defaults())
-                  .bodyUtf8Bytes());
+      JsonNode wire = MAPPER.readTree(encoder.encode(changed, descriptor).bodyUtf8Bytes());
       assertEquals(system, wire.at("/messages/0/content").asString(""));
       assertEquals(payload, wire.path("messages").get(2));
       assertEquals(payload, replay.payload());
@@ -766,10 +736,7 @@ class OpenAiChatNativeReplayTest {
         new ProviderReplayState(ProviderReplayFormat.OPENAI_CHAT, affinity, payload);
     return MAPPER.readTree(
         encoder
-            .encode(
-                request(user, assistant(durableBlocks, replayState)),
-                descriptor,
-                OpenAiChatConfiguration.defaults())
+            .encode(request(user, assistant(durableBlocks, replayState)), descriptor)
             .bodyUtf8Bytes());
   }
 
@@ -787,11 +754,7 @@ class OpenAiChatNativeReplayTest {
     ProviderException error =
         assertThrows(
             ProviderException.class,
-            () ->
-                encoder.encode(
-                    request(user, assistant(durableBlocks, replayState)),
-                    descriptor,
-                    OpenAiChatConfiguration.defaults()));
+            () -> encoder.encode(request(user, assistant(durableBlocks, replayState)), descriptor));
     assertEquals(ProviderErrorKind.INVALID_REQUEST, error.kind());
   }
 

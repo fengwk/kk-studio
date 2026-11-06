@@ -14,6 +14,7 @@ import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.model.ProviderProtocolOptions;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
@@ -61,7 +62,8 @@ class OpenAiResponsesNativeProtocolOptionsTest {
   }
 
   private static ModelVariant variant(String id, String effort, String protocolOptionsJson) {
-    return new ModelVariant(id, effort, new ProviderProtocolOptions(protocolOptionsJson));
+    return new ModelVariant(
+        id, effort, PromptCacheRetention.NONE, new ProviderProtocolOptions(protocolOptionsJson));
   }
 
   private ProviderRequest request(
@@ -131,7 +133,11 @@ class OpenAiResponsesNativeProtocolOptionsTest {
 
     // 非所有权字段仅透传，不改变 runtime 所有权决定的接线内容
     JsonNode withoutOptions =
-        encode(request(new ModelVariant("plain", "low"), userMessage(), List.of()));
+        encode(
+            request(
+                new ModelVariant("plain", "low", PromptCacheRetention.NONE, null),
+                userMessage(),
+                List.of()));
     assertEquals(root.path("model"), withoutOptions.path("model"));
     assertEquals(root.path("instructions"), withoutOptions.path("instructions"));
     assertEquals(root.path("input"), withoutOptions.path("input"));
@@ -462,7 +468,10 @@ class OpenAiResponsesNativeProtocolOptionsTest {
             userMessage(),
             List.of(tool));
     ProviderRequest withoutNative =
-        request(new ModelVariant("plain"), userMessage(), List.of(tool));
+        request(
+            new ModelVariant("plain", null, PromptCacheRetention.NONE, null),
+            userMessage(),
+            List.of(tool));
 
     JsonNode nativeRoot = encode(withNative);
     JsonNode plainRoot = encode(withoutNative);
@@ -481,7 +490,12 @@ class OpenAiResponsesNativeProtocolOptionsTest {
   void test_emptyProtocolOptionsBehaveAsUnset() throws Exception {
     JsonNode explicitEmpty =
         encode(request(variant("native", "low", "{}"), userMessage(), List.of()));
-    JsonNode unset = encode(request(new ModelVariant("plain", "low"), userMessage(), List.of()));
+    JsonNode unset =
+        encode(
+            request(
+                new ModelVariant("plain", "low", PromptCacheRetention.NONE, null),
+                userMessage(),
+                List.of()));
 
     assertEquals(unset, explicitEmpty);
   }

@@ -23,6 +23,10 @@ public class AgentModelVariantDTO {
   /** 必填变体 id：非空白、无环绕空白，且在 {@code config.variants} 内唯一。 */
   private String id;
 
+  /** 必填提示缓存留存档位：{@code NONE} / {@code SHORT} / {@code LONG}。 */
+  @JsonDeserialize(using = PromptCacheRetentionDeserializer.class)
+  private PromptCacheRetention promptCacheRetention;
+
   /** 可空 reasoning effort：由厂商自定义，{@code off} 显式关闭，null 表示协议默认；最大长度 64。 */
   private @Nullable String reasoningEffort;
 

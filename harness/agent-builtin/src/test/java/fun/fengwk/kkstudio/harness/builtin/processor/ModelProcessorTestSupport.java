@@ -60,6 +60,7 @@ import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderCompletion;
@@ -425,7 +426,7 @@ abstract class ModelProcessorTestSupport {
           retryPolicy,
           requestSpec,
           scheduler,
-          compactionChild ? new ThreadConstraints(4096, true, false) : ThreadConstraints.NONE,
+          compactionChild ? new ThreadConstraints(4096, false) : ThreadConstraints.NONE,
           compactionChild,
           flushConfig,
           toolHistoryActionResolver,
@@ -940,18 +941,17 @@ abstract class ModelProcessorTestSupport {
         ProviderType.OPENAI,
         new UUID(0L, 1L),
         modelDescriptor(),
-        new ModelVariant("v1"),
+        new ModelVariant("v1", null, PromptCacheRetention.NONE, null),
         1024,
         "Test system instruction.",
         bindings,
-        List.of(),
-        ProviderCacheControl.none());
+        List.of());
   }
 
   static ProviderRequest providerRequest(List<ProviderToolDefinition> tools) {
     return new ProviderRequest(
         modelDescriptor(),
-        new ModelVariant("v1"),
+        new ModelVariant("v1", null, PromptCacheRetention.NONE, null),
         1024,
         "Test system instruction.",
         List.of(),

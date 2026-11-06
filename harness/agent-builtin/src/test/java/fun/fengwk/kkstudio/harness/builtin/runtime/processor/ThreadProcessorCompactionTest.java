@@ -86,8 +86,8 @@ import fun.fengwk.kkstudio.harness.codec.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.model.ModelCost;
 import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
+import fun.fengwk.kkstudio.harness.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
-import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
@@ -200,7 +200,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
           ThreadJoin join = tx.joins().find(compaction.joinInvocationId()).orElseThrow();
           assertEquals(JoinDelivery.SETTLE_OWNER_TURN, join.delivery());
           assertEquals(SpawnTrigger.RUNTIME, childThread.spawnTrigger());
-          assertEquals(new ThreadConstraints(4096, true, false), childThread.constraints());
+          assertEquals(new ThreadConstraints(4096, false), childThread.constraints());
           assertEquals(baseline.threadId(), join.parentThreadId());
           assertEquals(compaction.childThreadId(), join.childThreadId());
           assertFalse(join.matched());
@@ -1954,7 +1954,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
         ((TurnStartPayload) path(fixture.store, baseline.threadId()).head().payload()).compaction();
     assertEquals(4096L, frozen.outputBudget());
 
-    // 子解析出的 spec 预算更大且带会话级 cache：必须被父冻结 budget 收紧并强制 NONE。
+    // 子解析出的 spec 预算更大：必须被父冻结 budget 收紧，保留压缩 agent 的档位。
     fixture.resolver.autoConsistent = false;
     BranchSettings childSettings =
         fixture.store.transaction(
@@ -1964,17 +1964,13 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                     .baseSettings());
     fixture.resolver.results.add(
         new TurnResolver.Resolved(
-            probeSpec(
-                childSettings,
-                9000,
-                ProviderCacheControl.session(PromptCacheRetention.SHORT, "child-session")),
-            CONTEXT_WINDOW,
-            9000));
+            probeSpec(childSettings, 9000, PromptCacheRetention.SHORT), CONTEXT_WINDOW, 9000));
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(frozen.childThreadId()));
 
     ModelInvocation invocation = childOpenModel(fixture.store, frozen.childThreadId());
     assertEquals(4096, invocation.requestSpec().outputTokens());
-    assertEquals(ProviderCacheControl.none(), invocation.requestSpec().cacheControl());
+    assertEquals(
+        PromptCacheRetention.SHORT, invocation.requestSpec().variant().promptCacheRetention());
     assertEquals("Test system instruction.", invocation.requestSpec().systemInstruction());
     assertEquals(4096, turnStartMaxOutputTokens(fixture.store, invocation.turnStartEntryId()));
   }
@@ -1987,16 +1983,15 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     UUID taskChild = seedJoinChildThread(fixture.store, baseline.threadId());
     requestThreadWork(fixture.store, taskChild);
 
-    ProviderCacheControl sessionCache =
-        ProviderCacheControl.session(PromptCacheRetention.SHORT, "task-session");
     fixture.resolver.results.add(
         new TurnResolver.Resolved(
-            probeSpec(branchSettings(), 9000, sessionCache), CONTEXT_WINDOW, 9000));
+            probeSpec(branchSettings(), 9000, PromptCacheRetention.SHORT), CONTEXT_WINDOW, 9000));
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(taskChild));
 
     ModelInvocation invocation = childOpenModel(fixture.store, taskChild);
     assertEquals(9000, invocation.requestSpec().outputTokens());
-    assertEquals(sessionCache, invocation.requestSpec().cacheControl());
+    assertEquals(
+        PromptCacheRetention.SHORT, invocation.requestSpec().variant().promptCacheRetention());
     assertEquals(9000, turnStartMaxOutputTokens(fixture.store, invocation.turnStartEntryId()));
   }
 
@@ -2005,23 +2000,16 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
   @CsvSource(
       nullValues = "null",
       value = {
-        "4096, true, 2000, 9000, 2000, 2000",
-        "4096, false, 9000, 3000, 4096, 3000",
-        "null, true, 2000, 9000, 2000, 9000",
-        "null, false, 2000, 9000, 2000, 9000"
+        "4096, 2000, 9000, 2000, 2000",
+        "4096, 9000, 3000, 4096, 3000",
+        "null, 2000, 9000, 2000, 9000"
       })
   void taskRequestHonorsFrozenConstraintsWithoutChangingOtherFacts(
-      Integer cap,
-      boolean disableCache,
-      int requested,
-      int resolvedMax,
-      int expectedOutput,
-      int expectedMax) {
+      Integer cap, int requested, int resolvedMax, int expectedOutput, int expectedMax) {
     Fixture fixture = fixture();
     var baseline = seedCompactionReadyClosedTurn(fixture.store, BELOW_THRESHOLD_USAGE);
     UUID taskChild =
-        seedJoinChildThread(
-            fixture.store, baseline.threadId(), new ThreadConstraints(cap, disableCache, true));
+        seedJoinChildThread(fixture.store, baseline.threadId(), new ThreadConstraints(cap, true));
     requestThreadWork(fixture.store, taskChild);
 
     ModelRequestSpec base = ThreadProcessorTestSupport.tooledRequest(List.of("bash"));
@@ -2037,8 +2025,6 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                     base.variant())),
             Set.of(429),
             30);
-    ProviderCacheControl sessionCache =
-        ProviderCacheControl.session(PromptCacheRetention.SHORT, "task-session");
     List<SubagentBinding> subagents = List.of(new SubagentBinding("helper", "delegate"));
     ModelRequestSpec original =
         new ModelRequestSpec(
@@ -2050,7 +2036,6 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
             base.systemInstruction(),
             base.toolBindings(),
             subagents,
-            sessionCache,
             group);
     fixture.resolver.results.add(new TurnResolver.Resolved(original, CONTEXT_WINDOW, resolvedMax));
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(taskChild));
@@ -2066,7 +2051,6 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
             base.systemInstruction(),
             base.toolBindings(),
             subagents,
-            disableCache ? ProviderCacheControl.none() : sessionCache,
             group),
         invocation.requestSpec());
     TurnStartPayload start =
@@ -2082,20 +2066,23 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     assertEquals("test-group", invocation.groupProgress().groupName());
   }
 
-  /** 以 base spec 为模板构造指定预算与 cache 的探测 spec。 */
+  /** 以 base spec 为模板构造指定预算与 variant 留存的探测 spec。 */
   private static ModelRequestSpec probeSpec(
-      BranchSettings settings, int outputTokens, ProviderCacheControl cacheControl) {
+      BranchSettings settings, int outputTokens, PromptCacheRetention retention) {
     ModelRequestSpec base = ThreadProcessorTestSupport.requestFor(settings);
     return new ModelRequestSpec(
         base.providerType(),
         base.providerConnectionGenerationId(),
         base.model(),
-        base.variant(),
+        new ModelVariant(
+            base.variant().id(),
+            base.variant().reasoningEffort(),
+            retention,
+            base.variant().protocolOptions()),
         outputTokens,
         base.systemInstruction(),
         base.toolBindings(),
-        base.subagentBindings(),
-        cacheControl);
+        base.subagentBindings());
   }
 
   /** 读取指定 Thread 当前 open Turn 的 model invocation（未经模型执行，仅本地 durable 事实）。 */

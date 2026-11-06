@@ -6,6 +6,7 @@ import { VariantListEditor } from '@/features/catalog/AiVariantListEditor'
 import { ModelPricingEditor } from '@/features/catalog/AiModelPricingEditor'
 import { ModelCatalogPicker } from '@/features/catalog/AiModelCatalogPicker'
 import { applyCatalogCandidate } from '@/features/catalog/ai-model-catalog-apply'
+import { resolvePromptCacheRetentions } from '@/shared/api/contracts/ai-catalog'
 import { Button } from '@/shared/ui/controls/Button'
 import { Checkbox } from '@/shared/ui/controls/Checkbox'
 import { NumberInput } from '@/shared/ui/controls/NumberInput'
@@ -45,6 +46,8 @@ export function ModelForm({
   const { t } = useI18n()
   const [catalogOpen, setCatalogOpen] = useState(false)
   const variantOptions = variantOptionsFromDraft(draft.variants)
+  const activeProvider = providers.find((provider) => provider.name === draft.providerName)
+  const promptCacheRetentions = resolvePromptCacheRetentions(activeProvider)
   const providerUnavailable =
     mode === 'edit' &&
     Boolean(draft.providerName) &&
@@ -284,6 +287,7 @@ export function ModelForm({
           variants={draft.variants}
           defaultVariant={selectedDefaultVariant}
           reasoning={draft.reasoning}
+          promptCacheRetentions={promptCacheRetentions}
           onChange={commitVariants}
         />
         {/* 只保留一条汇总错误，避免顶部 banner + 字段旁重复堆叠 */}

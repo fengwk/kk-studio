@@ -26,7 +26,10 @@ const baseConfig: AgentModelConfigDTO = {
       multipliers: [],
     },
   defaultVariant: 'default',
-  variants: [{ id: 'default' }, { id: 'fast' }],
+  variants: [
+    { id: 'default', promptCacheRetention: 'NONE' },
+    { id: 'fast', promptCacheRetention: 'NONE' },
+  ],
 }
 
 function modelWithVariants(): AgentModelView {

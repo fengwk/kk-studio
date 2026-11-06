@@ -37,7 +37,7 @@ import {
   waitForDurableMessages,
   waitForQuiescentThread,
 } from '../lib/harness.mjs'
-import { baseModelConfig, canonicalSeedCatalog, encodePathTail } from '../lib/fixtures.mjs'
+import { baseModelConfig, canonicalSeedCatalog, encodePathTail, seedCatalogWithVariants } from '../lib/fixtures.mjs'
 import { createCaseAdder, findCase } from '../lib/registry.mjs'
 import { REPO_ROOT } from '../../../lib/repo-root.mjs'
 
@@ -50,6 +50,15 @@ const PI_MODEL_CATALOG = JSON.parse(
     path.join(
       REPO_ROOT,
       'platform/runtime/src/test/resources/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/pi-model-catalog.json',
+    ),
+    'utf8',
+  ),
+)
+const E2E_MODEL_VARIANTS = JSON.parse(
+  readFileSync(
+    path.join(
+      REPO_ROOT,
+      'platform/runtime/src/test/resources/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/e2e-model-variants.json',
     ),
     'utf8',
   ),
@@ -72,7 +81,9 @@ registerCase({
         config: model.config,
       }))
       .sort(compareModel)
-    const expectedCatalog = canonicalSeedCatalog(PI_MODEL_CATALOG).sort(compareModel)
+    const expectedCatalog = canonicalSeedCatalog(
+      seedCatalogWithVariants(PI_MODEL_CATALOG, E2E_MODEL_VARIANTS),
+    ).sort(compareModel)
     assert(
       actualCatalog.length === expectedCatalog.length,
       `expected ${expectedCatalog.length} Pi models, got ${actualCatalog.length}`,

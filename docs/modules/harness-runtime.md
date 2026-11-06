@@ -265,7 +265,7 @@ Driver 的 Work 处理器在事务外认领并执行，可复用 [`ClaimedExecut
 
 自动压缩的阈值判定由各 Driver 通过 `AgentDriver.prepareAutomaticCompaction` 提供；Builtin 的 owned `HISTORY` -> hard overflow -> eligible threshold 策略见 [Harness Agent Builtin](harness-agent-builtin.md#自动压缩)。Runtime 只负责压缩回合结构与子执行结算。
 
-子执行使用目录中的 `Compaction` 内置 Agent，约束为父回合的输出预算、禁用 prompt cache、禁止自动压缩；[`CompactionStart`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/compaction/CompactionStart.java) 冻结阶段、触发原因、执行模型、输出预算、切分锚点与子身份，后来排队的输入不会污染它。
+子执行使用目录中的 `Compaction` 内置 Agent，约束为父回合的输出预算与禁止自动压缩；提示缓存遵循该 Agent 选用的 variant。[`CompactionStart`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/compaction/CompactionStart.java) 冻结阶段、触发原因、执行模型、输出预算、切分锚点与子身份，后来排队的输入不会污染它。
 
 [`CompactionConfig`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/compaction/CompactionConfig.java) 只有 `keepRecentTokens` 一个参数，其余阈值都由它与上下文窗口 `C`、输出上限派生：
 

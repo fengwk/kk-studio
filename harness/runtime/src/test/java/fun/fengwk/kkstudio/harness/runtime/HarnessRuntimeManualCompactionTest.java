@@ -622,8 +622,7 @@ class HarnessRuntimeManualCompactionTest {
   }
 
   /** 压缩子冻结的创建约束：输出上限、禁用 cache、不允许自动压缩；后代经约束合并继承。 */
-  private static final ThreadConstraints COMPACTION_CONSTRAINTS =
-      new ThreadConstraints(100, true, false);
+  private static final ThreadConstraints COMPACTION_CONSTRAINTS = new ThreadConstraints(100, false);
 
   /** 手工创建带 source command 与 Join 的 child Thread，用于按创建约束事实验证手动入口 guard。 */
   private static UUID seedChildThread(

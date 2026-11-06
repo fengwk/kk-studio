@@ -22,6 +22,7 @@ import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.builtin.request.ProviderMessageProjector;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolDefinition;
@@ -82,7 +83,8 @@ public final class ModelRequestMaterializer {
         spec.systemInstruction(),
         projector(spec.toolBindings()).projectSources(projectedMessages),
         tools,
-        spec.cacheControl());
+        ProviderCacheControl.session(
+            spec.variant().promptCacheRetention(), path.root().sessionId().toString()));
   }
 
   private ProviderMessageProjector projector(List<ToolBinding> toolBindings) {

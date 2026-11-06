@@ -17,6 +17,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
@@ -92,7 +93,7 @@ class OpenAiChatProtocolEventTest {
     modelDesc =
         new ModelDescriptor(
             "openai", "gpt-4o", "gpt-4o", Set.of(ModelInputModality.TEXT), true, false);
-    defaultVariant = new ModelVariant("default");
+    defaultVariant = new ModelVariant("default", null, PromptCacheRetention.NONE, null);
   }
 
   @AfterEach

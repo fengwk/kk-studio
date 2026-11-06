@@ -15,6 +15,7 @@ import tools.jackson.databind.node.ArrayNode;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderCompletion;
@@ -83,7 +84,7 @@ class GeminiThinkingTest {
             true,
             true);
 
-    ModelVariant variant = new ModelVariant("default");
+    ModelVariant variant = new ModelVariant("default", null, PromptCacheRetention.NONE, null);
     request =
         new ProviderRequest(
             model,
@@ -399,7 +400,7 @@ class GeminiThinkingTest {
   @Test
   void replaysAccumulatorFrozenSignedAndUnknownPartsOnNextTurn() throws Exception {
     GeminiRequestEncoder encoder = new GeminiRequestEncoder();
-    ModelVariant variant = new ModelVariant("default");
+    ModelVariant variant = new ModelVariant("default", null, PromptCacheRetention.NONE, null);
 
     GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
     accumulator.handleEvent(
@@ -463,7 +464,7 @@ class GeminiThinkingTest {
   void preservesThoughtSignatureInReplayAcrossTurns() throws Exception {
     GeminiRequestEncoder encoder = new GeminiRequestEncoder();
 
-    ModelVariant variant = new ModelVariant("default");
+    ModelVariant variant = new ModelVariant("default", null, PromptCacheRetention.NONE, null);
 
     // 构造第一轮返回的 replayState
     var replayPayload = MAPPER.createObjectNode();

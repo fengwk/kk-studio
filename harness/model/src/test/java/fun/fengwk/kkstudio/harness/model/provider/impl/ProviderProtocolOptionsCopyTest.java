@@ -9,6 +9,7 @@ import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.model.ProviderProtocolOptions;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 
 import java.math.BigDecimal;
 
@@ -22,7 +23,10 @@ class ProviderProtocolOptionsCopyTest {
   /** 未声明选项的 variant 得到空 object，可直接作为合并基座。 */
   @Test
   void returnsEmptyObjectWhenVariantDeclaresNoOptions() {
-    ObjectNode options = new ModelVariant("default").protocolOptions().copyOptions();
+    ObjectNode options =
+        new ModelVariant("default", null, PromptCacheRetention.NONE, null)
+            .protocolOptions()
+            .copyOptions();
 
     assertTrue(options.isEmpty());
     assertEquals("{}", options.toString());
@@ -35,6 +39,7 @@ class ProviderProtocolOptionsCopyTest {
         new ModelVariant(
             "balanced",
             "medium",
+            PromptCacheRetention.NONE,
             new ProviderProtocolOptions(
                 "{\"metadata\":{\"source\":\"catalog\"},\"thinking\":{\"budget_tokens\":4096},"
                     + "\"ratio\":1.10,\"revision\":1758880000000,\"flags\":[true,false]}"));
@@ -60,6 +65,7 @@ class ProviderProtocolOptionsCopyTest {
         new ModelVariant(
             "precise",
             null,
+            PromptCacheRetention.NONE,
             new ProviderProtocolOptions(
                 "{\"big\":1e309,\"tiny\":1e-324,"
                     + "\"exact\":0.1234567890123456789012345678,\"ratio\":1.10}"));
@@ -81,6 +87,7 @@ class ProviderProtocolOptionsCopyTest {
         new ModelVariant(
             "balanced",
             null,
+            PromptCacheRetention.NONE,
             new ProviderProtocolOptions("{\"metadata\":{\"source\":\"catalog\"}}"));
 
     ObjectNode first = variant.protocolOptions().copyOptions();

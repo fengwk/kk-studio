@@ -16,7 +16,7 @@ const baseConfig: AgentModelConfigDTO = {
       multipliers: [],
     },
   defaultVariant: 'default',
-  variants: [{ id: 'default' }],
+  variants: [{ id: 'default', promptCacheRetention: 'NONE' }],
 }
 
 function modelWithProvider(): AgentModelView {
@@ -95,6 +95,7 @@ describe('AiConsolePanels', () => {
               name: 'minimax',
               description: null,
               providerType: 'openai',
+              promptCacheRetentions: ['NONE', 'SHORT', 'LONG'],
               baseUrl: null,
               configured: true,
               modelCallTimeoutMillis: '1',

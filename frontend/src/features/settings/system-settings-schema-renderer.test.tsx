@@ -51,7 +51,7 @@ function catalogModel(): AgentModelDTO {
       multipliers: [],
     },
       defaultVariant: 'default',
-      variants: [{ id: 'default' }, { id: 'fast' }],
+      variants: [{ id: 'default', promptCacheRetention: 'NONE' }, { id: 'fast', promptCacheRetention: 'NONE' }],
     },
     version: '1',
     createTime: 1790503200,

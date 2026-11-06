@@ -107,7 +107,7 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
   private static final String VALID_MODEL_CONFIG =
       "{\"limit\":{\"context\":128000,\"output\":8192},"
           + "\"abilities\":{\"tools\":true,\"reasoning\":true,\"inputModalities\":[\"TEXT\"]},"
-          + "\"variants\":[{\"id\":\"default\"}],"
+          + "\"variants\":[{\"id\":\"default\",\"promptCacheRetention\":\"NONE\"}],"
           + "\"defaultVariant\":\"default\","
           + "\"pricing\":{\"base\":{\"input\":\"0\",\"output\":\"0\",\"cacheRead\":\"0\","
           + "\"cacheWrite\":\"0\",\"cacheWriteByTtl\":{},\"reasoning\":\"0\"},"
@@ -698,7 +698,7 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
                 + " name, root_thread_id, yolo_enabled, spawn_trigger, constraints,"
                 + " execution_control, input_through_sequence,"
                 + " next_command_sequence, version, created_at, updated_at)"
-                + " values (?, ?, ?, ?, ?, ?, ?, 'USER', '{\"maxOutputTokens\":null,\"promptCacheDisabled\":false,\"allowAutoCompaction\":true}'::jsonb, 'RUNNABLE', 0, ?, 0, ?, ?)",
+                + " values (?, ?, ?, ?, ?, ?, ?, 'USER', '{\"maxOutputTokens\":null,\"allowAutoCompaction\":true}'::jsonb, 'RUNNABLE', 0, ?, 0, ?, ?)",
             threadId,
             sessionId,
             rootEntryId,
@@ -760,7 +760,7 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
               + " creation_request_hash, name, root_thread_id, yolo_enabled, spawn_trigger,"
               + " constraints, execution_control, input_through_sequence, next_command_sequence,"
               + " version, created_at, updated_at)"
-              + " values (?, ?, ?, ?, ?, ?, ?, false, ?, '{\"maxOutputTokens\":null,\"promptCacheDisabled\":false,\"allowAutoCompaction\":true}'::jsonb, 'RUNNABLE', 0, ?, 0, ?, ?)",
+              + " values (?, ?, ?, ?, ?, ?, ?, false, ?, '{\"maxOutputTokens\":null,\"allowAutoCompaction\":true}'::jsonb, 'RUNNABLE', 0, ?, 0, ?, ?)",
           threadId,
           sessionId,
           parentThreadId,

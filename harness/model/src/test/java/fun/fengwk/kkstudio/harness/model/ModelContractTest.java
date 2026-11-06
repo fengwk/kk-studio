@@ -72,33 +72,61 @@ class ModelContractTest {
   }
 
   /**
-   * Variant 只承载 id 与可空 reasoningEffort：id 必须无前后空白且非空；effort 为厂商自定义自由字符串，只去除首尾空白并原样保留大小写； 允许
+   * Variant 承载 id、必填缓存档位和可空 reasoningEffort：id 必须无前后空白且非空；effort 为厂商自定义自由字符串，只去除首尾空白并原样保留大小写；允许
    * max、xhigh 等任意非空且不超过 64 字符的值；空白与超长（>64）被拒绝；{@code off} 是显式关闭、{@code null} 是不声明，二者绝不互相静默映射。
    */
   @Test
   void enforcesVariantIdentityAndReasoningEffort() {
-    assertEquals("default", new ModelVariant("default").id());
-    assertNull(new ModelVariant("default").reasoningEffort());
-    assertEquals("high", new ModelVariant("default", "high").reasoningEffort());
-    assertEquals("off", new ModelVariant("default", "off").reasoningEffort());
+    assertEquals(
+        "default", new ModelVariant("default", null, PromptCacheRetention.NONE, null).id());
+    assertNull(
+        new ModelVariant("default", null, PromptCacheRetention.NONE, null).reasoningEffort());
+    assertEquals(
+        "high",
+        new ModelVariant("default", "high", PromptCacheRetention.NONE, null).reasoningEffort());
+    assertEquals(
+        "off",
+        new ModelVariant("default", "off", PromptCacheRetention.NONE, null).reasoningEffort());
     // 大小写是厂商原生值，绝不被归一化；仅首尾空白被去除
-    assertEquals("OFF", new ModelVariant("default", "  OFF ").reasoningEffort());
-    assertEquals("MAX", new ModelVariant("default", "MAX").reasoningEffort());
-    assertEquals("xHigh", new ModelVariant("default", "  xHigh ").reasoningEffort());
-    assertTrue(new ModelVariant("default", "off").reasoningOff());
+    assertEquals(
+        "OFF",
+        new ModelVariant("default", "  OFF ", PromptCacheRetention.NONE, null).reasoningEffort());
+    assertEquals(
+        "MAX",
+        new ModelVariant("default", "MAX", PromptCacheRetention.NONE, null).reasoningEffort());
+    assertEquals(
+        "xHigh",
+        new ModelVariant("default", "  xHigh ", PromptCacheRetention.NONE, null).reasoningEffort());
+    assertTrue(new ModelVariant("default", "off", PromptCacheRetention.NONE, null).reasoningOff());
     // 只有精确小写 off 是显式关闭；OFF 等原生值不构成 case-insensitive 别名
-    assertFalse(new ModelVariant("default", "OFF").reasoningOff());
-    assertFalse(new ModelVariant("default").reasoningOff());
-    assertFalse(new ModelVariant("default", "high").reasoningOff());
-    assertFalse(new ModelVariant("default", "max").reasoningOff());
+    assertFalse(new ModelVariant("default", "OFF", PromptCacheRetention.NONE, null).reasoningOff());
+    assertFalse(new ModelVariant("default", null, PromptCacheRetention.NONE, null).reasoningOff());
+    assertFalse(
+        new ModelVariant("default", "high", PromptCacheRetention.NONE, null).reasoningOff());
+    assertFalse(new ModelVariant("default", "max", PromptCacheRetention.NONE, null).reasoningOff());
 
-    assertThrows(IllegalArgumentException.class, () -> new ModelVariant(" default "));
-    assertThrows(IllegalArgumentException.class, () -> new ModelVariant(" "));
-    assertThrows(IllegalArgumentException.class, () -> new ModelVariant(null));
-    assertThrows(IllegalArgumentException.class, () -> new ModelVariant("default", ""));
-    assertThrows(IllegalArgumentException.class, () -> new ModelVariant("default", " "));
-    assertThrows(IllegalArgumentException.class, () -> new ModelVariant("default", "   "));
-    assertThrows(IllegalArgumentException.class, () -> new ModelVariant("default", "a".repeat(65)));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new ModelVariant(" default ", null, PromptCacheRetention.NONE, null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new ModelVariant(" ", null, PromptCacheRetention.NONE, null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new ModelVariant(null, null, PromptCacheRetention.NONE, null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new ModelVariant("default", "", PromptCacheRetention.NONE, null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new ModelVariant("default", " ", PromptCacheRetention.NONE, null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new ModelVariant("default", "   ", PromptCacheRetention.NONE, null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new ModelVariant("default", "a".repeat(65), PromptCacheRetention.NONE, null));
+    assertThrows(NullPointerException.class, () -> new ModelVariant("default", null, null, null));
   }
 
   /** 不同 Provider 用量类别必须分别按其适用单价计费；output 总量包含 reasoning，独立 reasoning 价只影响其子集。 */

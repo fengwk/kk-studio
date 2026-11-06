@@ -24,7 +24,7 @@ function modelConfig(): AgentModelConfigDTO {
       multipliers: [],
     },
     defaultVariant: 'default',
-    variants: [{ id: 'default' }],
+    variants: [{ id: 'default', promptCacheRetention: 'NONE' }],
   }
 }
 
@@ -33,6 +33,7 @@ function provider(_id: string, name: string): AgentProviderDTO {
     name,
     description: null,
     providerType: 'openai',
+    promptCacheRetentions: ['NONE', 'SHORT', 'LONG'],
     baseUrl: null,
     configured: true,
     modelCallTimeoutMillis: '1800000',

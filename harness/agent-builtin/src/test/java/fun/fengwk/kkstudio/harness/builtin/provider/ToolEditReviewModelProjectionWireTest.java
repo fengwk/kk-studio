@@ -20,6 +20,7 @@ import fun.fengwk.kkstudio.harness.builtin.request.ProviderMessageProjector;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderAdapter;
@@ -312,7 +313,7 @@ class ToolEditReviewModelProjectionWireTest {
   private static ProviderRequest request(ModelDescriptor model, List<ProviderMessage> messages) {
     return new ProviderRequest(
         model,
-        new ModelVariant("default"),
+        new ModelVariant("default", null, PromptCacheRetention.NONE, null),
         1024,
         "Synthetic system instruction.",
         messages,

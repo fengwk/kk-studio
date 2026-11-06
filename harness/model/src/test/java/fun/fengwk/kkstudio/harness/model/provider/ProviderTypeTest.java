@@ -5,8 +5,23 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
+
+import java.util.Set;
+
 /** ProviderType 的稳定 Catalog wire 值契约。 */
 class ProviderTypeTest {
+
+  @Test
+  void declaresProtocolCacheCapabilities() {
+    // 档位是协议能力，Google 只能不发送显式缓存指令。
+    Set<PromptCacheRetention> all =
+        Set.of(PromptCacheRetention.NONE, PromptCacheRetention.SHORT, PromptCacheRetention.LONG);
+    assertEquals(all, ProviderType.OPENAI.promptCacheRetentions());
+    assertEquals(all, ProviderType.OPENAI_RESPONSES.promptCacheRetentions());
+    assertEquals(all, ProviderType.ANTHROPIC.promptCacheRetentions());
+    assertEquals(Set.of(PromptCacheRetention.NONE), ProviderType.GOOGLE.promptCacheRetentions());
+  }
 
   @Test
   void everyProviderTypeRoundTripsItsCatalogWireValue() {

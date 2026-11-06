@@ -40,6 +40,9 @@ public class AgentProviderDTO {
   @JsonInclude(JsonInclude.Include.ALWAYS)
   private @Nullable List<Integer> modelHttpRetryStatusCodes;
 
+  /** 只读支持的提示缓存留存档位列表（由 providerType 派生）。 */
+  private List<PromptCacheRetention> promptCacheRetentions;
+
   /** 非负十进制字符串版本号；客户端每次更新时必须回传。 */
   private String version;
 

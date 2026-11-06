@@ -526,6 +526,18 @@ export const resourcesCatalog = {
     'en-US': 'Variant ID',
     'zh-CN': 'Variant ID',
   },
+  'ai.catalog.form.promptCacheRetention': {
+    'en-US': 'Prompt Cache Retention',
+    'zh-CN': '提示缓存',
+  },
+  'ai.catalog.form.promptCacheRetentionAria': {
+    'en-US': 'Prompt Cache Retention',
+    'zh-CN': '提示缓存留存',
+  },
+  'ai.catalog.form.promptCacheRetentionNone': {
+    'en-US': 'Do not send cache instructions',
+    'zh-CN': '不发送缓存指令',
+  },
   'ai.catalog.form.reasoningEffort': {
     'en-US': 'Reasoning Effort',
     'zh-CN': '思考强度',

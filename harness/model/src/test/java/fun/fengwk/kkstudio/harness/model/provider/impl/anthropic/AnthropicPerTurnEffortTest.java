@@ -48,7 +48,6 @@ class AnthropicPerTurnEffortTest {
           new UUID(1, 2));
   private static final ModelDescriptor MODEL =
       new ModelDescriptor("p", "model", "wire", Set.of(ModelInputModality.TEXT), true, true);
-  private static final AnthropicConfiguration DEFAULT_CONFIG = AnthropicConfiguration.defaults();
 
   // 如果已有中途 system，复用该节点，不能覆盖它既有的 output_config 子字段。
   @Test
@@ -74,9 +73,8 @@ class AnthropicPerTurnEffortTest {
   // 首轮已有 max 声明；后续不变时重传同一前缀，不追加重复声明。
   @Test
   void keepsTheFirstDeclarationStableAcrossUnchangedTurns() {
-    JsonNode first = body(encode(DEFAULT_CONFIG, "max", List.of(user("u1"))));
-    JsonNode second =
-        body(encode(DEFAULT_CONFIG, "max", List.of(user("u1"), assistant("max"), user("u2"))));
+    JsonNode first = body(encode("max", List.of(user("u1"))));
+    JsonNode second = body(encode("max", List.of(user("u1"), assistant("max"), user("u2"))));
     assertEquals("max", first.path("output_config").path("effort").asString());
     assertEquals("max", second.path("output_config").path("effort").asString());
     assertEquals(List.of("user", "system:max"), describe(first.path("messages")));
@@ -93,7 +91,7 @@ class AnthropicPerTurnEffortTest {
   // 对比官方 .280 样本抽取的 effort 子树，而不是只对照实现生成的角色列表。
   @Test
   void firstDeclarationMatchesNormalizedNativeSample() throws Exception {
-    JsonNode wire = body(encode(DEFAULT_CONFIG, "max", List.of(user("u1"))));
+    JsonNode wire = body(encode("max", List.of(user("u1"))));
     ObjectNode normalized = MAPPER.createObjectNode();
     normalized.set("root_output_config", wire.path("output_config"));
     ObjectNode control = normalized.putArray("messages_output_config_entries").addObject();
@@ -112,7 +110,6 @@ class AnthropicPerTurnEffortTest {
   void declaresOnlyChangesAndBackfillsUnknown() {
     var encoded =
         encode(
-            DEFAULT_CONFIG,
             "max",
             List.of(
                 user("u1"),
@@ -150,7 +147,6 @@ class AnthropicPerTurnEffortTest {
     ProviderMessage tool2 = tool("b");
     JsonNode messages =
         body(encode(
-                DEFAULT_CONFIG,
                 "max",
                 List.of(
                     user("first"), user("second"), assistant("off"), tool1, tool2, user("tail"))))
@@ -160,20 +156,18 @@ class AnthropicPerTurnEffortTest {
         describe(messages));
   }
 
-  // 不同思考语义不产生消息级控制；自定义 beta 只追加能力并去重。
+  // 关闭或未声明推理以及非推理模型不产生消息级控制。
   @Test
   void excludesOffUnsetBudgetAndNonReasoning() {
     List<ProviderMessage> messages = List.of(user("u"), assistant("high"), user("tail"));
-    assertEquals(3, body(encode(DEFAULT_CONFIG, "off", messages)).path("messages").size());
-    assertEquals(3, body(encode(DEFAULT_CONFIG, null, messages)).path("messages").size());
-    var budget = new AnthropicConfiguration(AnthropicThinkingMode.BUDGET);
-    assertEquals(3, body(encode(budget, "low", messages)).path("messages").size());
+    assertEquals(3, body(encode("off", messages)).path("messages").size());
+    assertEquals(3, body(encode(null, messages)).path("messages").size());
     ModelDescriptor noReasoning =
         new ModelDescriptor("p", "model", "wire", Set.of(ModelInputModality.TEXT), true, false);
     ProviderRequest nonReasoning =
         new ProviderRequest(
             noReasoning,
-            new ModelVariant("v", "max"),
+            new ModelVariant("v", "max", PromptCacheRetention.NONE, null),
             20000,
             "system",
             messages,
@@ -181,15 +175,9 @@ class AnthropicPerTurnEffortTest {
             ProviderCacheControl.none());
     assertEquals(
         3,
-        body(new AnthropicRequestEncoder(DEFAULT_CONFIG).encode(nonReasoning, DESCRIPTOR))
+        body(new AnthropicRequestEncoder().encode(nonReasoning, DESCRIPTOR))
             .path("messages")
             .size());
-    var configured =
-        new AnthropicConfiguration(
-            AnthropicThinkingMode.ADAPTIVE, List.of("custom-2026-01-01", EFFORT, BETA));
-    AnthropicEncodedRequest withExtras = encode(configured, "max", messages);
-    assertEquals(List.of("custom-2026-01-01", EFFORT, BETA, MID), withExtras.betaFeatures());
-    assertEquals(body(encode(DEFAULT_CONFIG, "max", messages)), body(withExtras));
   }
 
   // native compaction reset 后不允许已丢弃的旧 effort 或缓存端点影响新前缀。
@@ -208,30 +196,29 @@ class AnthropicPerTurnEffortTest {
     var request =
         new ProviderRequest(
             MODEL,
-            new ModelVariant("v", "max"),
+            new ModelVariant("v", "max", PromptCacheRetention.SHORT, null),
             20000,
             "system",
             List.of(user("discard"), assistant("high"), compacted, user("retained")),
             List.of(),
             ProviderCacheControl.session(PromptCacheRetention.SHORT, "key"));
-    JsonNode root = body(new AnthropicRequestEncoder(DEFAULT_CONFIG).encode(request, DESCRIPTOR));
+    JsonNode root = body(new AnthropicRequestEncoder().encode(request, DESCRIPTOR));
     assertEquals(List.of("assistant", "user", "system:max"), describe(root.path("messages")));
     assertFalse(root.toString().contains("discard"));
     assertFalse(root.path("messages").get(2).toString().contains("cache_control"));
   }
 
-  private static AnthropicEncodedRequest encode(
-      AnthropicConfiguration config, String effort, List<ProviderMessage> messages) {
+  private static AnthropicEncodedRequest encode(String effort, List<ProviderMessage> messages) {
     ProviderRequest request =
         new ProviderRequest(
             MODEL,
-            new ModelVariant("v", effort),
+            new ModelVariant("v", effort, PromptCacheRetention.NONE, null),
             20000,
             "system",
             messages,
             List.of(),
             ProviderCacheControl.none());
-    return new AnthropicRequestEncoder(config).encode(request, DESCRIPTOR);
+    return new AnthropicRequestEncoder().encode(request, DESCRIPTOR);
   }
 
   private static JsonNode body(AnthropicEncodedRequest encoded) {

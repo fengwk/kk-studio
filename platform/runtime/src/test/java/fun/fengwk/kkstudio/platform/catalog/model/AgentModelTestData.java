@@ -10,6 +10,7 @@ import fun.fengwk.kkstudio.share.catalog.AgentModelLimitDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentModelPricingDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentModelRateSetDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentModelVariantDTO;
+import fun.fengwk.kkstudio.share.catalog.PromptCacheRetention;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -61,6 +62,7 @@ public final class AgentModelTestData {
     for (String id : variantIds) {
       AgentModelVariantDTO variant = new AgentModelVariantDTO();
       variant.setId(id);
+      variant.setPromptCacheRetention(PromptCacheRetention.NONE);
       variants.add(variant);
     }
     config.setVariants(variants);

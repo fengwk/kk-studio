@@ -244,7 +244,7 @@ registerCase({
           modelId: `wire-lifecycle-${suffix}`,
           description: 'create',
           config: baseModelConfig({
-            variants: [{ id: 'default', protocolOptionsJson: originalOptions }],
+            variants: [{ id: 'default', promptCacheRetention: 'SHORT', protocolOptionsJson: originalOptions }],
           }),
         })
       ).json
@@ -260,8 +260,8 @@ registerCase({
       abilities: { tools: false, reasoning: true, inputModalities: ['TEXT', 'IMAGE'] },
       defaultVariant: 'fast',
       variants: [
-        { id: 'fast', protocolOptionsJson: updatedOptions },
-        { id: 'quality', reasoningEffort: 'high' },
+        { id: 'fast', promptCacheRetention: 'SHORT', protocolOptionsJson: updatedOptions },
+        { id: 'quality', promptCacheRetention: 'SHORT', reasoningEffort: 'high' },
       ],
     })
     const updated = (
@@ -332,7 +332,7 @@ registerCase({
               description: `group member ${index}`,
               config: baseModelConfig({
                 limit: { context: 4096 + index * 1024, output: 256 },
-                variants: [{ id: variant }],
+                variants: [{ id: variant, promptCacheRetention: 'SHORT' }],
                 defaultVariant: variant,
               }),
             })

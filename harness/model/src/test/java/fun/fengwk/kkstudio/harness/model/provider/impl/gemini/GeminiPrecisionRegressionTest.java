@@ -13,6 +13,7 @@ import tools.jackson.databind.json.JsonMapper;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
@@ -160,7 +161,7 @@ class GeminiPrecisionRegressionTest {
       List<ProviderMessage> messages, List<ProviderToolDefinition> tools) {
     return new ProviderRequest(
         model,
-        new ModelVariant("default"),
+        new ModelVariant("default", null, PromptCacheRetention.NONE, null),
         1024,
         "Test system instruction.",
         messages,

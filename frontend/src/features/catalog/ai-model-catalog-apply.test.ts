@@ -22,7 +22,15 @@ function draft(): ModelDraft {
       multipliers: [],
     },
     defaultVariant: 'manual',
-    variants: [{ draftId: 'manual-1', id: 'manual', reasoningEffort: '', protocolOptionsJson: '' }],
+    variants: [
+      {
+        draftId: 'manual-1',
+        id: 'manual',
+        reasoningEffort: '',
+        protocolOptionsJson: '',
+        promptCacheRetention: 'SHORT',
+      },
+    ],
   }
 }
 
@@ -104,27 +112,36 @@ describe('applyCatalogCandidate', () => {
   it('keeps the existing variants without a complete, mappable default variant', () => {
     const before = draft()
     const noDefault = applyCatalogCandidate(before, candidate({
-      variants: [{ id: 'fast' }, { id: 'slow' }],
+      variants: [
+        { id: 'fast', promptCacheRetention: 'NONE' },
+        { id: 'slow', promptCacheRetention: 'NONE' },
+      ],
     }))
     expect(noDefault.variants).toEqual(before.variants)
     expect(noDefault.defaultVariant).toBe('manual')
 
     const unmappable = applyCatalogCandidate(before, candidate({
       defaultVariant: 'fast',
-      variants: [{ id: 'fast' }, { id: ' ' }],
+      variants: [
+        { id: 'fast', promptCacheRetention: 'NONE' },
+        { id: ' ', promptCacheRetention: 'NONE' },
+      ],
     }))
     expect(unmappable.variants).toEqual(before.variants)
   })
 
-  it('replaces variants only when every id maps and the default exists', () => {
+  it('replaces variants only when every id maps and the default exists and preserves existing promptCacheRetention', () => {
     const next = applyCatalogCandidate(draft(), candidate({
-      variants: [{ id: 'fast', reasoningEffort: 'low' }, { id: 'slow' }],
+      variants: [
+        { id: 'fast', promptCacheRetention: 'NONE', reasoningEffort: 'low' },
+        { id: 'slow', promptCacheRetention: 'NONE' },
+      ],
       defaultVariant: 'fast',
     }))
     expect(next.defaultVariant).toBe('fast')
-    expect(next.variants.map((variant) => [variant.id, variant.reasoningEffort])).toEqual([
-      ['fast', 'low'],
-      ['slow', ''],
+    expect(next.variants.map((variant) => [variant.id, variant.reasoningEffort, variant.promptCacheRetention])).toEqual([
+      ['fast', 'low', 'SHORT'],
+      ['slow', '', 'SHORT'],
     ])
   })
 

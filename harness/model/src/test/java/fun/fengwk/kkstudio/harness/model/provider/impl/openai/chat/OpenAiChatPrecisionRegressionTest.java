@@ -14,6 +14,7 @@ import tools.jackson.databind.json.JsonMapper;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
@@ -95,10 +96,7 @@ class OpenAiChatPrecisionRegressionTest {
   void streamAndReplayPreserveOpaquePayloadNumberPrecision() throws Exception {
     OpenAiChatStreamAccumulator accumulator =
         new OpenAiChatStreamAccumulator(
-            request(List.of(user("Hi")), List.of()),
-            descriptor,
-            OpenAiChatConfiguration.defaults(),
-            bridge);
+            request(List.of(user("Hi")), List.of()), descriptor, bridge);
     accumulator.handleData(
         "{\"id\":\"c1\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"ok\","
             + "\"vendor_opaque\":{\"big\":1e309,\"tiny\":1e-324,"
@@ -138,10 +136,7 @@ class OpenAiChatPrecisionRegressionTest {
   void opaqueIndexedArrayKeepsDistinctWideIndices() throws Exception {
     OpenAiChatStreamAccumulator accumulator =
         new OpenAiChatStreamAccumulator(
-            request(List.of(user("Hi")), List.of()),
-            descriptor,
-            OpenAiChatConfiguration.defaults(),
-            bridge);
+            request(List.of(user("Hi")), List.of()), descriptor, bridge);
     for (JsonNode frame : frames("fixtures/precision/opaque-indexed-deltas.json")) {
       accumulator.handleData(frame.stringValue());
     }
@@ -183,10 +178,7 @@ class OpenAiChatPrecisionRegressionTest {
   void nullIdAndServiceTierFallBackToProtocolDefaults() {
     OpenAiChatStreamAccumulator accumulator =
         new OpenAiChatStreamAccumulator(
-            request(List.of(user("Hi")), List.of()),
-            descriptor,
-            OpenAiChatConfiguration.defaults(),
-            bridge);
+            request(List.of(user("Hi")), List.of()), descriptor, bridge);
     accumulator.handleData(
         "{\"id\":null,\"service_tier\":null,\"choices\":[{\"index\":0,"
             + "\"delta\":{\"role\":\"assistant\",\"content\":\"hi\"},\"finish_reason\":\"stop\"}]}");
@@ -204,7 +196,7 @@ class OpenAiChatPrecisionRegressionTest {
       List<ProviderMessage> messages, List<ProviderToolDefinition> tools) {
     return new ProviderRequest(
         model,
-        new ModelVariant("default"),
+        new ModelVariant("default", null, PromptCacheRetention.NONE, null),
         1024,
         "Test system instruction.",
         messages,
@@ -214,9 +206,7 @@ class OpenAiChatPrecisionRegressionTest {
 
   private JsonNode wire(ProviderRequest request) throws Exception {
     return MAPPER.readTree(
-        new OpenAiChatRequestEncoder()
-            .encode(request, descriptor, OpenAiChatConfiguration.defaults())
-            .bodyUtf8Bytes());
+        new OpenAiChatRequestEncoder().encode(request, descriptor).bodyUtf8Bytes());
   }
 
   private static JsonNode[] frames(String name) throws Exception {

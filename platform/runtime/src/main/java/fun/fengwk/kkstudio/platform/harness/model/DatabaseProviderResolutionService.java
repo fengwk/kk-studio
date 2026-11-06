@@ -100,7 +100,7 @@ public final class DatabaseProviderResolutionService implements ProviderResoluti
         providerName, providerType, baseUrl, timeoutPolicy, connectionGenerationId);
     ProviderAdapter adapter;
     try {
-      adapter = factory.create(provider.credential(), provider.configJson());
+      adapter = factory.create(provider.credential());
     } catch (RuntimeException error) {
       throw new IllegalArgumentException("cannot create provider adapter for " + providerName);
     }

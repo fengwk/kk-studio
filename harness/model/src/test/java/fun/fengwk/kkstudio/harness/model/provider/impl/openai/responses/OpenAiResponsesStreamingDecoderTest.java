@@ -125,7 +125,7 @@ class OpenAiResponsesStreamingDecoderTest {
             true);
     return new ProviderRequest(
         model,
-        new ModelVariant("default"),
+        new ModelVariant("default", null, PromptCacheRetention.NONE, null),
         1024,
         "Test system instruction.",
         List.of(
@@ -307,7 +307,7 @@ class OpenAiResponsesStreamingDecoderTest {
     ModelDescriptor model =
         new ModelDescriptor(
             "openai_test", "gpt-5.6", "gpt-5.6", Set.of(ModelInputModality.TEXT), true, true);
-    ModelVariant variant = new ModelVariant("default", "medium");
+    ModelVariant variant = new ModelVariant("default", "medium", PromptCacheRetention.SHORT, null);
     String sys = "Test system instruction.";
 
     // Round 1

@@ -78,7 +78,7 @@ class OpenAiChatRequestEncoderTest {
     modelDesc =
         new ModelDescriptor(
             "openai", "gpt-4o", "gpt-4o", Set.of(ModelInputModality.TEXT), true, false);
-    defaultVariant = new ModelVariant("default");
+    defaultVariant = new ModelVariant("default", null, PromptCacheRetention.NONE, null);
   }
 
   /** 内部历史 effort 不改变 OpenAI Chat 的任何 wire 字段。 */
@@ -114,12 +114,8 @@ class OpenAiChatRequestEncoderTest {
             List.of(),
             ProviderCacheControl.none());
     assertEquals(
-        MAPPER.readTree(
-            encoder.encode(first, descriptor, OpenAiChatConfiguration.defaults()).bodyUtf8Bytes()),
-        MAPPER.readTree(
-            encoder
-                .encode(second, descriptor, OpenAiChatConfiguration.defaults())
-                .bodyUtf8Bytes()));
+        MAPPER.readTree(encoder.encode(first, descriptor).bodyUtf8Bytes()),
+        MAPPER.readTree(encoder.encode(second, descriptor).bodyUtf8Bytes()));
   }
 
   @Test
@@ -137,8 +133,7 @@ class OpenAiChatRequestEncoderTest {
             List.of(),
             ProviderCacheControl.none());
 
-    OpenAiChatEncodedRequest encoded =
-        encoder.encode(request, descriptor, OpenAiChatConfiguration.defaults());
+    OpenAiChatEncodedRequest encoded = encoder.encode(request, descriptor);
     assertNotNull(encoded.bodyUtf8Bytes());
 
     JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
@@ -156,10 +151,8 @@ class OpenAiChatRequestEncoderTest {
   }
 
   @Test
-  @DisplayName("始终请求 usage：requireDone=false 也不关闭 include_usage")
+  @DisplayName("始终请求 usage")
   void alwaysRequestsUsage() throws Exception {
-    OpenAiChatConfiguration config =
-        OpenAiChatConfiguration.parse("{\"openAiChatRequireDone\": false}");
     ProviderMessage userMsg =
         new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hello")));
     ProviderRequest request =
@@ -172,7 +165,7 @@ class OpenAiChatRequestEncoderTest {
             List.of(),
             ProviderCacheControl.none());
 
-    OpenAiChatEncodedRequest encoded = encoder.encode(request, descriptor, config);
+    OpenAiChatEncodedRequest encoded = encoder.encode(request, descriptor);
     JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
     assertTrue(root.path("stream_options").path("include_usage").asBoolean(false));
   }
@@ -189,7 +182,8 @@ class OpenAiChatRequestEncoderTest {
             Set.of(ModelInputModality.TEXT),
             true,
             true);
-    ModelVariant variantWithReasoning = new ModelVariant("v1", "high");
+    ModelVariant variantWithReasoning =
+        new ModelVariant("v1", "high", PromptCacheRetention.NONE, null);
     ProviderMessage userMsg =
         new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Solve this")));
     ProviderRequest req1 =
@@ -202,9 +196,7 @@ class OpenAiChatRequestEncoderTest {
             List.of(),
             ProviderCacheControl.none());
 
-    JsonNode root1 =
-        MAPPER.readTree(
-            encoder.encode(req1, descriptor, OpenAiChatConfiguration.defaults()).bodyUtf8Bytes());
+    JsonNode root1 = MAPPER.readTree(encoder.encode(req1, descriptor).bodyUtf8Bytes());
     assertEquals("high", root1.path("reasoning_effort").asString(""));
 
     // 手工配置的大小写是厂商原生值，编码时原样下发（如 HIGH 不被小写化）
@@ -212,21 +204,17 @@ class OpenAiChatRequestEncoderTest {
       ProviderRequest casedReq =
           new ProviderRequest(
               reasoningModel,
-              new ModelVariant("v-cased", effort),
+              new ModelVariant("v-cased", effort, PromptCacheRetention.NONE, null),
               1024,
               "Test system instruction.",
               List.of(userMsg),
               List.of(),
               ProviderCacheControl.none());
-      JsonNode casedRoot =
-          MAPPER.readTree(
-              encoder
-                  .encode(casedReq, descriptor, OpenAiChatConfiguration.defaults())
-                  .bodyUtf8Bytes());
+      JsonNode casedRoot = MAPPER.readTree(encoder.encode(casedReq, descriptor).bodyUtf8Bytes());
       assertEquals(effort, casedRoot.path("reasoning_effort").asString(""));
     }
 
-    ModelVariant variantOff = new ModelVariant("v2", "off");
+    ModelVariant variantOff = new ModelVariant("v2", "off", PromptCacheRetention.NONE, null);
     ProviderRequest req2 =
         new ProviderRequest(
             reasoningModel,
@@ -236,9 +224,7 @@ class OpenAiChatRequestEncoderTest {
             List.of(userMsg),
             List.of(),
             ProviderCacheControl.none());
-    JsonNode root2 =
-        MAPPER.readTree(
-            encoder.encode(req2, descriptor, OpenAiChatConfiguration.defaults()).bodyUtf8Bytes());
+    JsonNode root2 = MAPPER.readTree(encoder.encode(req2, descriptor).bodyUtf8Bytes());
     assertEquals("none", root2.path("reasoning_effort").asString(""));
 
     ProviderRequest req3 =
@@ -250,135 +236,14 @@ class OpenAiChatRequestEncoderTest {
             List.of(userMsg),
             List.of(),
             ProviderCacheControl.none());
-    JsonNode root3 =
-        MAPPER.readTree(
-            encoder.encode(req3, descriptor, OpenAiChatConfiguration.defaults()).bodyUtf8Bytes());
+    JsonNode root3 = MAPPER.readTree(encoder.encode(req3, descriptor).bodyUtf8Bytes());
     assertFalse(root3.has("reasoning_effort"));
-  }
-
-  @Test
-  @DisplayName("DEEPSEEK thinking format 与 STANDARD 格式编码对比测试")
-  void testDeepSeekThinkingFormatEncoding() throws Exception {
-    ModelDescriptor reasoningModel =
-        new ModelDescriptor(
-            "deepseek",
-            "deepseek-reasoner",
-            "deepseek-reasoner",
-            Set.of(ModelInputModality.TEXT),
-            true,
-            true);
-    OpenAiChatConfiguration deepseekConfig =
-        OpenAiChatConfiguration.parse("{\"openAiChatThinkingFormat\":\"DEEPSEEK\"}");
-    ProviderMessage userMsg =
-        new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Solve math")));
-
-    // 1. DEEPSEEK 格式下 reasoning=true 且 effort="low" -> thinking:{type:"enabled"} 且
-    // reasoning_effort:"low"
-    ModelVariant variantLow = new ModelVariant("v1", "low");
-    ProviderRequest reqLow =
-        new ProviderRequest(
-            reasoningModel,
-            variantLow,
-            1024,
-            "Test system instruction.",
-            List.of(userMsg),
-            List.of(),
-            ProviderCacheControl.none());
-    JsonNode rootLow =
-        MAPPER.readTree(encoder.encode(reqLow, descriptor, deepseekConfig).bodyUtf8Bytes());
-    assertEquals("enabled", rootLow.path("thinking").path("type").asString(""));
-    assertEquals("low", rootLow.path("reasoning_effort").asString(""));
-
-    // 2. DEEPSEEK 格式下 reasoning=true 且 effort="off" -> 显式 thinking:{type:"disabled"}
-    // 且不发送 reasoning_effort（off 是显式关闭，不是某个强度值）
-    ModelVariant variantOff = new ModelVariant("v2", "off");
-    ProviderRequest reqOff =
-        new ProviderRequest(
-            reasoningModel,
-            variantOff,
-            1024,
-            "Test system instruction.",
-            List.of(userMsg),
-            List.of(),
-            ProviderCacheControl.none());
-    JsonNode rootOff =
-        MAPPER.readTree(encoder.encode(reqOff, descriptor, deepseekConfig).bodyUtf8Bytes());
-    assertEquals("disabled", rootOff.path("thinking").path("type").asString(""));
-    assertFalse(rootOff.has("reasoning_effort"));
-
-    // 3. DEEPSEEK 格式下 reasoning=true 且 variant.reasoningEffort 为 null -> 不覆盖协议默认：
-    // thinking 与 reasoning_effort 都不发送
-    ProviderRequest reqDefaultVariant =
-        new ProviderRequest(
-            reasoningModel,
-            defaultVariant,
-            1024,
-            "Test system instruction.",
-            List.of(userMsg),
-            List.of(),
-            ProviderCacheControl.none());
-    JsonNode rootDefaultVariant =
-        MAPPER.readTree(
-            encoder.encode(reqDefaultVariant, descriptor, deepseekConfig).bodyUtf8Bytes());
-    assertFalse(rootDefaultVariant.has("thinking"));
-    assertFalse(rootDefaultVariant.has("reasoning_effort"));
-
-    // 4. DEEPSEEK 格式下 reasoning=false 且 effort="low" -> 均不生成 thinking 和 reasoning_effort
-    ProviderRequest reqNonReasoningWithEffort =
-        new ProviderRequest(
-            modelDesc,
-            variantLow,
-            1024,
-            "Test system instruction.",
-            List.of(userMsg),
-            List.of(),
-            ProviderCacheControl.none());
-    JsonNode rootNonReasoningWithEffort =
-        MAPPER.readTree(
-            encoder.encode(reqNonReasoningWithEffort, descriptor, deepseekConfig).bodyUtf8Bytes());
-    assertFalse(rootNonReasoningWithEffort.has("thinking"));
-    assertFalse(rootNonReasoningWithEffort.has("reasoning_effort"));
-
-    // 5. DEEPSEEK 格式下 reasoning=false 且 effort=null -> 均不生成 thinking 和 reasoning_effort
-    ProviderRequest reqNonReasoningNull =
-        new ProviderRequest(
-            modelDesc,
-            defaultVariant,
-            1024,
-            "Test system instruction.",
-            List.of(userMsg),
-            List.of(),
-            ProviderCacheControl.none());
-    JsonNode rootNonReasoningNull =
-        MAPPER.readTree(
-            encoder.encode(reqNonReasoningNull, descriptor, deepseekConfig).bodyUtf8Bytes());
-    assertFalse(rootNonReasoningNull.has("thinking"));
-    assertFalse(rootNonReasoningNull.has("reasoning_effort"));
-
-    // 6. STANDARD 格式保持标准编码：有 effort 时仅出 reasoning_effort，不出 thinking
-    OpenAiChatConfiguration standardConfig = OpenAiChatConfiguration.defaults();
-    JsonNode rootStandard =
-        MAPPER.readTree(encoder.encode(reqLow, descriptor, standardConfig).bodyUtf8Bytes());
-    assertFalse(rootStandard.has("thinking"));
-    assertEquals("low", rootStandard.path("reasoning_effort").asString(""));
-
-    // 7. STANDARD 格式下 off 映射为协议关闭值 none
-    JsonNode rootStandardOff =
-        MAPPER.readTree(encoder.encode(reqOff, descriptor, standardConfig).bodyUtf8Bytes());
-    assertFalse(rootStandardOff.has("thinking"));
-    assertEquals("none", rootStandardOff.path("reasoning_effort").asString(""));
-
-    // 8. STANDARD 格式下 null effort 不发送任何推理字段
-    JsonNode rootStandardDefault =
-        MAPPER.readTree(
-            encoder.encode(reqDefaultVariant, descriptor, standardConfig).bodyUtf8Bytes());
-    assertFalse(rootStandardDefault.has("reasoning_effort"));
   }
 
   @Test
   @DisplayName("输出预算 max_tokens 正确映射到 JSON")
   void testOutputBudgetParameter() throws Exception {
-    ModelVariant variant = new ModelVariant("v");
+    ModelVariant variant = new ModelVariant("v", null, PromptCacheRetention.NONE, null);
     ProviderMessage userMsg =
         new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")));
     ProviderRequest request =
@@ -391,11 +256,7 @@ class OpenAiChatRequestEncoderTest {
             List.of(),
             ProviderCacheControl.none());
 
-    JsonNode root =
-        MAPPER.readTree(
-            encoder
-                .encode(request, descriptor, OpenAiChatConfiguration.defaults())
-                .bodyUtf8Bytes());
+    JsonNode root = MAPPER.readTree(encoder.encode(request, descriptor).bodyUtf8Bytes());
     assertEquals(100, root.path("max_tokens").asInt(0));
   }
 
@@ -419,11 +280,7 @@ class OpenAiChatRequestEncoderTest {
             List.of(tool),
             ProviderCacheControl.none());
 
-    JsonNode root =
-        MAPPER.readTree(
-            encoder
-                .encode(request, descriptor, OpenAiChatConfiguration.defaults())
-                .bodyUtf8Bytes());
+    JsonNode root = MAPPER.readTree(encoder.encode(request, descriptor).bodyUtf8Bytes());
     ArrayNode tools = (ArrayNode) root.path("tools");
     assertEquals(1, tools.size());
     assertEquals("function", tools.get(0).path("type").asString(""));
@@ -454,11 +311,7 @@ class OpenAiChatRequestEncoderTest {
             List.of(),
             ProviderCacheControl.none());
 
-    JsonNode root =
-        MAPPER.readTree(
-            encoder
-                .encode(request, descriptor, OpenAiChatConfiguration.defaults())
-                .bodyUtf8Bytes());
+    JsonNode root = MAPPER.readTree(encoder.encode(request, descriptor).bodyUtf8Bytes());
     ArrayNode messages = (ArrayNode) root.path("messages");
     assertEquals(2, messages.size());
     assertEquals("tool", messages.get(1).path("role").asString(""));
@@ -483,9 +336,7 @@ class OpenAiChatRequestEncoderTest {
             List.of(),
             ProviderCacheControl.none());
 
-    JsonNode rootImg =
-        MAPPER.readTree(
-            encoder.encode(reqImg, descriptor, OpenAiChatConfiguration.defaults()).bodyUtf8Bytes());
+    JsonNode rootImg = MAPPER.readTree(encoder.encode(reqImg, descriptor).bodyUtf8Bytes());
     ArrayNode parts = (ArrayNode) rootImg.path("messages").get(1).path("content");
     assertEquals("image_url", parts.get(0).path("type").asString(""));
     assertEquals(
@@ -507,10 +358,7 @@ class OpenAiChatRequestEncoderTest {
             List.of(),
             ProviderCacheControl.none());
     JsonNode rootImgBase64 =
-        MAPPER.readTree(
-            encoder
-                .encode(reqImgBase64, descriptor, OpenAiChatConfiguration.defaults())
-                .bodyUtf8Bytes());
+        MAPPER.readTree(encoder.encode(reqImgBase64, descriptor).bodyUtf8Bytes());
     ArrayNode imgBase64Parts = (ArrayNode) rootImgBase64.path("messages").get(1).path("content");
     assertEquals("image_url", imgBase64Parts.get(0).path("type").asString(""));
     assertEquals(base64Png, imgBase64Parts.get(0).path("image_url").path("url").asString(""));
@@ -530,9 +378,7 @@ class OpenAiChatRequestEncoderTest {
             List.of(userAudioUrl),
             List.of(),
             ProviderCacheControl.none());
-    assertThrows(
-        ProviderException.class,
-        () -> encoder.encode(reqAudioUrl, descriptor, OpenAiChatConfiguration.defaults()));
+    assertThrows(ProviderException.class, () -> encoder.encode(reqAudioUrl, descriptor));
 
     // 4. 音频处理：base64 允许编码为 input_audio
     ProviderMessage userAudioBase64 =
@@ -549,10 +395,7 @@ class OpenAiChatRequestEncoderTest {
             List.of(),
             ProviderCacheControl.none());
     JsonNode rootAudio =
-        MAPPER.readTree(
-            encoder
-                .encode(reqAudioBase64, descriptor, OpenAiChatConfiguration.defaults())
-                .bodyUtf8Bytes());
+        MAPPER.readTree(encoder.encode(reqAudioBase64, descriptor).bodyUtf8Bytes());
     ArrayNode audioParts = (ArrayNode) rootAudio.path("messages").get(1).path("content");
     assertEquals("input_audio", audioParts.get(0).path("type").asString(""));
     assertEquals("UklGRg==", audioParts.get(0).path("input_audio").path("data").asString(""));
@@ -574,9 +417,7 @@ class OpenAiChatRequestEncoderTest {
             List.of(userPdf),
             List.of(),
             ProviderCacheControl.none());
-    JsonNode rootPdf =
-        MAPPER.readTree(
-            encoder.encode(reqPdf, descriptor, OpenAiChatConfiguration.defaults()).bodyUtf8Bytes());
+    JsonNode rootPdf = MAPPER.readTree(encoder.encode(reqPdf, descriptor).bodyUtf8Bytes());
     ArrayNode pdfParts = (ArrayNode) rootPdf.path("messages").get(1).path("content");
     assertEquals("file", pdfParts.get(0).path("type").asString(""));
     assertEquals(
@@ -597,9 +438,7 @@ class OpenAiChatRequestEncoderTest {
             List.of(userVideo),
             List.of(),
             ProviderCacheControl.none());
-    assertThrows(
-        ProviderException.class,
-        () -> encoder.encode(reqVideo, descriptor, OpenAiChatConfiguration.defaults()));
+    assertThrows(ProviderException.class, () -> encoder.encode(reqVideo, descriptor));
   }
 
   @Test
@@ -638,11 +477,7 @@ class OpenAiChatRequestEncoderTest {
             List.of(),
             ProviderCacheControl.none());
 
-    JsonNode root =
-        MAPPER.readTree(
-            encoder
-                .encode(turn2Req, descriptor, OpenAiChatConfiguration.defaults())
-                .bodyUtf8Bytes());
+    JsonNode root = MAPPER.readTree(encoder.encode(turn2Req, descriptor).bodyUtf8Bytes());
     ArrayNode messages = (ArrayNode) root.path("messages");
     assertEquals(4, messages.size());
 
@@ -676,10 +511,7 @@ class OpenAiChatRequestEncoderTest {
             List.of(),
             ProviderCacheControl.none());
     JsonNode extendedRoot =
-        MAPPER.readTree(
-            encoder
-                .encode(extendedReq, descriptor, OpenAiChatConfiguration.defaults())
-                .bodyUtf8Bytes());
+        MAPPER.readTree(encoder.encode(extendedReq, descriptor).bodyUtf8Bytes());
     JsonNode extendedAsst = extendedRoot.path("messages").get(2);
     assertEquals("Why did chicken cross road?", extendedAsst.path("content").asString(""));
     assertEquals("kept", extendedAsst.path("vendor_future_field").asString(""));
@@ -708,9 +540,7 @@ class OpenAiChatRequestEncoderTest {
             List.of(userMsg1, illegalAsstMsg, userMsg2),
             List.of(),
             ProviderCacheControl.none());
-    assertThrows(
-        ProviderException.class,
-        () -> encoder.encode(illegalReq, descriptor, OpenAiChatConfiguration.defaults()));
+    assertThrows(ProviderException.class, () -> encoder.encode(illegalReq, descriptor));
 
     // 3. affinity 失配（不同 wire 模型）且 payload 合法一致时，退回语义 fallback
     ObjectNode fallbackPayload = MAPPER.createObjectNode();
@@ -734,10 +564,7 @@ class OpenAiChatRequestEncoderTest {
             List.of(),
             ProviderCacheControl.none());
     JsonNode fallbackRoot =
-        MAPPER.readTree(
-            encoder
-                .encode(fallbackReq, descriptor, OpenAiChatConfiguration.defaults())
-                .bodyUtf8Bytes());
+        MAPPER.readTree(encoder.encode(fallbackReq, descriptor).bodyUtf8Bytes());
     JsonNode fallbackAsstNode = fallbackRoot.path("messages").get(2);
     assertEquals("assistant", fallbackAsstNode.path("role").asString(""));
     assertEquals("Fallback answer", fallbackAsstNode.path("content").asString(""));
@@ -760,8 +587,7 @@ class OpenAiChatRequestEncoderTest {
                 List.of(firstUser),
                 List.of(),
                 ProviderCacheControl.none()),
-            descriptor,
-            OpenAiChatConfiguration.defaults());
+            descriptor);
 
     ObjectNode replayPayload = MAPPER.createObjectNode();
     replayPayload.put("role", "assistant");
@@ -788,11 +614,7 @@ class OpenAiChatRequestEncoderTest {
             List.of(firstUser, refusal, nextUser),
             List.of(),
             ProviderCacheControl.none());
-    JsonNode root =
-        MAPPER.readTree(
-            encoder
-                .encode(nextRequest, descriptor, OpenAiChatConfiguration.defaults())
-                .bodyUtf8Bytes());
+    JsonNode root = MAPPER.readTree(encoder.encode(nextRequest, descriptor).bodyUtf8Bytes());
 
     JsonNode replayedRefusal = root.path("messages").get(2);
     assertEquals("I cannot help with that.", replayedRefusal.path("refusal").asString(""));
@@ -812,9 +634,7 @@ class OpenAiChatRequestEncoderTest {
             List.of(firstUser, mismatchedRefusal, nextUser),
             List.of(),
             ProviderCacheControl.none());
-    assertThrows(
-        ProviderException.class,
-        () -> encoder.encode(invalidRequest, descriptor, OpenAiChatConfiguration.defaults()));
+    assertThrows(ProviderException.class, () -> encoder.encode(invalidRequest, descriptor));
   }
 
   @Test
@@ -825,25 +645,19 @@ class OpenAiChatRequestEncoderTest {
             ProviderMessageRole.USER, List.of(new ProviderTextBlock("User prompt")));
 
     // 1. NONE: 不发任何 cache hint
-    OpenAiChatConfiguration configNone =
-        new OpenAiChatConfiguration(true, PromptCacheRetention.NONE);
     ProviderRequest reqNone =
         cacheRequest("Test system instruction.", List.of(userMsg), ProviderCacheControl.none());
-    JsonNode rootNone =
-        MAPPER.readTree(encoder.encode(reqNone, descriptor, configNone).bodyUtf8Bytes());
+    JsonNode rootNone = MAPPER.readTree(encoder.encode(reqNone, descriptor).bodyUtf8Bytes());
     assertFalse(rootNone.has("prompt_cache_key"));
     assertFalse(rootNone.has("prompt_cache_retention"));
     assertFalse(rootNone.has("prompt_cache_options"));
 
     // 2. SHORT: key 直接使用运行时会话 key，retention=in_memory
-    OpenAiChatConfiguration configShort =
-        new OpenAiChatConfiguration(true, PromptCacheRetention.SHORT);
     ProviderCacheControl cacheControlShort =
         ProviderCacheControl.session(PromptCacheRetention.SHORT, "my-key-short");
     ProviderRequest reqShort =
         cacheRequest("Test system instruction.", List.of(userMsg), cacheControlShort);
-    JsonNode rootShort =
-        MAPPER.readTree(encoder.encode(reqShort, descriptor, configShort).bodyUtf8Bytes());
+    JsonNode rootShort = MAPPER.readTree(encoder.encode(reqShort, descriptor).bodyUtf8Bytes());
     assertEquals("my-key-short", rootShort.path("prompt_cache_key").asString(""));
     assertEquals("in_memory", rootShort.path("prompt_cache_retention").asString(""));
     assertFalse(rootShort.has("prompt_cache_options"));
@@ -851,24 +665,13 @@ class OpenAiChatRequestEncoderTest {
     assertEquals("User prompt", rootShort.path("messages").get(1).path("content").asString(""));
 
     // 3. LONG: retention=24h
-    OpenAiChatConfiguration configLong =
-        new OpenAiChatConfiguration(true, PromptCacheRetention.LONG);
     ProviderCacheControl cacheControlLong =
         ProviderCacheControl.session(PromptCacheRetention.LONG, "my-key-long");
     ProviderRequest reqLong =
         cacheRequest("Test system instruction.", List.of(userMsg), cacheControlLong);
-    JsonNode rootLong =
-        MAPPER.readTree(encoder.encode(reqLong, descriptor, configLong).bodyUtf8Bytes());
+    JsonNode rootLong = MAPPER.readTree(encoder.encode(reqLong, descriptor).bodyUtf8Bytes());
     assertEquals("my-key-long", rootLong.path("prompt_cache_key").asString(""));
     assertEquals("24h", rootLong.path("prompt_cache_retention").asString(""));
-
-    // 4. NONE retention: 即便配置为 LONG，cacheControl=NONE 也不发 cache 字段
-    ProviderRequest reqLongNone =
-        cacheRequest("Test system instruction.", List.of(userMsg), ProviderCacheControl.none());
-    JsonNode rootLongNone =
-        MAPPER.readTree(encoder.encode(reqLongNone, descriptor, configLong).bodyUtf8Bytes());
-    assertFalse(rootLongNone.has("prompt_cache_key"));
-    assertFalse(rootLongNone.has("prompt_cache_retention"));
   }
 
   @Test
@@ -892,10 +695,7 @@ class OpenAiChatRequestEncoderTest {
             List.of(),
             ProviderCacheControl.none());
     JsonNode rootAsstThinking =
-        MAPPER.readTree(
-            encoder
-                .encode(reqAsstThinking, descriptor, OpenAiChatConfiguration.defaults())
-                .bodyUtf8Bytes());
+        MAPPER.readTree(encoder.encode(reqAsstThinking, descriptor).bodyUtf8Bytes());
     JsonNode asstNode = rootAsstThinking.path("messages").get(1);
     assertEquals(
         "<thinking>\ninternal thought\n</thinking>\nanswer text",
@@ -916,9 +716,7 @@ class OpenAiChatRequestEncoderTest {
             List.of(asstWithImage),
             List.of(),
             ProviderCacheControl.none());
-    assertThrows(
-        ProviderException.class,
-        () -> encoder.encode(reqAsstImage, descriptor, OpenAiChatConfiguration.defaults()));
+    assertThrows(ProviderException.class, () -> encoder.encode(reqAsstImage, descriptor));
 
     // 3. TOOL 消息包含 ProviderJsonBlock
     ProviderToolResultBlock resultWithJson =
@@ -936,15 +734,10 @@ class OpenAiChatRequestEncoderTest {
             List.of(),
             ProviderCacheControl.none());
     JsonNode rootToolJson =
-        MAPPER.readTree(
-            encoder
-                .encode(reqToolJson, descriptor, OpenAiChatConfiguration.defaults())
-                .bodyUtf8Bytes());
+        MAPPER.readTree(encoder.encode(reqToolJson, descriptor).bodyUtf8Bytes());
     assertEquals("{\"ans\":42}", rootToolJson.path("messages").get(1).path("content").asString(""));
 
     // 4. 不支持的音频格式抛异常
-    OpenAiChatConfiguration audioConfig =
-        new OpenAiChatConfiguration(true, PromptCacheRetention.NONE);
     ProviderMessage audioFlac =
         new ProviderMessage(
             ProviderMessageRole.USER,
@@ -958,7 +751,7 @@ class OpenAiChatRequestEncoderTest {
             List.of(audioFlac),
             List.of(),
             ProviderCacheControl.none());
-    assertThrows(ProviderException.class, () -> encoder.encode(reqFlac, descriptor, audioConfig));
+    assertThrows(ProviderException.class, () -> encoder.encode(reqFlac, descriptor));
 
     // 7. 非法 data URI 音频数据
     ProviderMessage audioBadUri =
@@ -974,8 +767,7 @@ class OpenAiChatRequestEncoderTest {
             List.of(audioBadUri),
             List.of(),
             ProviderCacheControl.none());
-    assertThrows(
-        ProviderException.class, () -> encoder.encode(reqBadAudio, descriptor, audioConfig));
+    assertThrows(ProviderException.class, () -> encoder.encode(reqBadAudio, descriptor));
   }
 
   @Test
@@ -1011,9 +803,7 @@ class OpenAiChatRequestEncoderTest {
             List.of(user1, badRoleMsg),
             List.of(),
             ProviderCacheControl.none());
-    assertThrows(
-        ProviderException.class,
-        () -> encoder.encode(reqBadRole, descriptor, OpenAiChatConfiguration.defaults()));
+    assertThrows(ProviderException.class, () -> encoder.encode(reqBadRole, descriptor));
 
     // 2. payload 文本与 durable 不匹配
     ObjectNode mismatchTextPayload = MAPPER.createObjectNode();
@@ -1036,9 +826,7 @@ class OpenAiChatRequestEncoderTest {
             List.of(user1, mismatchTextMsg),
             List.of(),
             ProviderCacheControl.none());
-    assertThrows(
-        ProviderException.class,
-        () -> encoder.encode(reqMismatchText, descriptor, OpenAiChatConfiguration.defaults()));
+    assertThrows(ProviderException.class, () -> encoder.encode(reqMismatchText, descriptor));
 
     // 3. payload tool_calls 格式损坏（缺少 function）
     ObjectNode badToolPayload = MAPPER.createObjectNode();
@@ -1066,9 +854,7 @@ class OpenAiChatRequestEncoderTest {
             List.of(user1, badToolMsg),
             List.of(),
             ProviderCacheControl.none());
-    assertThrows(
-        ProviderException.class,
-        () -> encoder.encode(reqBadTool, descriptor, OpenAiChatConfiguration.defaults()));
+    assertThrows(ProviderException.class, () -> encoder.encode(reqBadTool, descriptor));
 
     // 4. 合法带 tool_calls 的原位回放
     ObjectNode validToolPayload = MAPPER.createObjectNode();
@@ -1099,10 +885,7 @@ class OpenAiChatRequestEncoderTest {
             List.of(),
             ProviderCacheControl.none());
     JsonNode rootValidTool =
-        MAPPER.readTree(
-            encoder
-                .encode(reqValidTool, descriptor, OpenAiChatConfiguration.defaults())
-                .bodyUtf8Bytes());
+        MAPPER.readTree(encoder.encode(reqValidTool, descriptor).bodyUtf8Bytes());
     assertEquals(3, rootValidTool.path("messages").size());
     assertEquals(
         "c1",
@@ -1126,9 +909,7 @@ class OpenAiChatRequestEncoderTest {
             List.of(user1, badRoleTypeMsg),
             List.of(),
             ProviderCacheControl.none());
-    assertThrows(
-        ProviderException.class,
-        () -> encoder.encode(reqBadRoleType, descriptor, OpenAiChatConfiguration.defaults()));
+    assertThrows(ProviderException.class, () -> encoder.encode(reqBadRoleType, descriptor));
 
     // 7. payload tool_calls 包含非 object 元素
     ObjectNode nonObjToolPayload = MAPPER.createObjectNode();
@@ -1152,9 +933,7 @@ class OpenAiChatRequestEncoderTest {
             List.of(user1, nonObjToolMsg),
             List.of(),
             ProviderCacheControl.none());
-    assertThrows(
-        ProviderException.class,
-        () -> encoder.encode(reqNonObjTool, descriptor, OpenAiChatConfiguration.defaults()));
+    assertThrows(ProviderException.class, () -> encoder.encode(reqNonObjTool, descriptor));
   }
 
   @Test
@@ -1174,9 +953,7 @@ class OpenAiChatRequestEncoderTest {
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")))),
             List.of(badJsonTool),
             ProviderCacheControl.none());
-    assertThrows(
-        ProviderException.class,
-        () -> encoder.encode(reqBadJsonTool, descriptor, OpenAiChatConfiguration.defaults()));
+    assertThrows(ProviderException.class, () -> encoder.encode(reqBadJsonTool, descriptor));
 
     // 2. Tool inputSchemaJson 不是 JSON object (如 "123")
     ProviderToolDefinition nonObjTool = new ProviderToolDefinition("non_obj_tool", "desc", "123");
@@ -1191,13 +968,9 @@ class OpenAiChatRequestEncoderTest {
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")))),
             List.of(nonObjTool),
             ProviderCacheControl.none());
-    assertThrows(
-        ProviderException.class,
-        () -> encoder.encode(reqNonObjJsonTool, descriptor, OpenAiChatConfiguration.defaults()));
+    assertThrows(ProviderException.class, () -> encoder.encode(reqNonObjJsonTool, descriptor));
 
     // 3. MP3 音频格式识别
-    OpenAiChatConfiguration audioConfig =
-        new OpenAiChatConfiguration(true, PromptCacheRetention.NONE);
     ProviderMessage mp3Msg =
         new ProviderMessage(
             ProviderMessageRole.USER,
@@ -1211,8 +984,7 @@ class OpenAiChatRequestEncoderTest {
             List.of(mp3Msg),
             List.of(),
             ProviderCacheControl.none());
-    JsonNode rootMp3 =
-        MAPPER.readTree(encoder.encode(reqMp3, descriptor, audioConfig).bodyUtf8Bytes());
+    JsonNode rootMp3 = MAPPER.readTree(encoder.encode(reqMp3, descriptor).bodyUtf8Bytes());
     assertEquals(
         "mp3",
         rootMp3
@@ -1225,8 +997,6 @@ class OpenAiChatRequestEncoderTest {
             .asString(""));
 
     // 4. PDF 非法 mediaType
-    OpenAiChatConfiguration pdfConfig =
-        new OpenAiChatConfiguration(true, PromptCacheRetention.NONE);
     ProviderMessage badDocMsg =
         new ProviderMessage(
             ProviderMessageRole.USER,
@@ -1242,7 +1012,7 @@ class OpenAiChatRequestEncoderTest {
             List.of(badDocMsg),
             List.of(),
             ProviderCacheControl.none());
-    assertThrows(ProviderException.class, () -> encoder.encode(reqBadDoc, descriptor, pdfConfig));
+    assertThrows(ProviderException.class, () -> encoder.encode(reqBadDoc, descriptor));
 
     // 5. PDF 纯 base64 自动补充 data:application/pdf;base64, 前缀
     ProviderMessage rawPdfMsg =
@@ -1258,8 +1028,7 @@ class OpenAiChatRequestEncoderTest {
             List.of(rawPdfMsg),
             List.of(),
             ProviderCacheControl.none());
-    JsonNode rootRawPdf =
-        MAPPER.readTree(encoder.encode(reqRawPdf, descriptor, pdfConfig).bodyUtf8Bytes());
+    JsonNode rootRawPdf = MAPPER.readTree(encoder.encode(reqRawPdf, descriptor).bodyUtf8Bytes());
     assertEquals(
         "data:application/pdf;base64,JVBERi0xLjQK",
         rootRawPdf
@@ -1272,8 +1041,6 @@ class OpenAiChatRequestEncoderTest {
             .asString(""));
 
     // 6. tool-call-only assistant 不制造 content；启用缓存时也不改写消息内容或注入 breakpoint
-    OpenAiChatConfiguration configShort =
-        new OpenAiChatConfiguration(true, PromptCacheRetention.SHORT);
     ProviderCacheControl cacheControlShort =
         ProviderCacheControl.session(PromptCacheRetention.SHORT, "session-key");
     ProviderMessage userMsg =
@@ -1292,7 +1059,7 @@ class OpenAiChatRequestEncoderTest {
             List.of(),
             cacheControlShort);
     JsonNode rootBreak =
-        MAPPER.readTree(encoder.encode(reqLastToolBreak, descriptor, configShort).bodyUtf8Bytes());
+        MAPPER.readTree(encoder.encode(reqLastToolBreak, descriptor).bodyUtf8Bytes());
     assertEquals("session-key", rootBreak.path("prompt_cache_key").asString(""));
     assertEquals("in_memory", rootBreak.path("prompt_cache_retention").asString(""));
     ArrayNode messages = (ArrayNode) rootBreak.path("messages");
@@ -1332,11 +1099,7 @@ class OpenAiChatRequestEncoderTest {
             List.of(userMsg, toolMsg),
             List.of(),
             ProviderCacheControl.none());
-    JsonNode rootMulti =
-        MAPPER.readTree(
-            encoder
-                .encode(reqMulti, descriptor, OpenAiChatConfiguration.defaults())
-                .bodyUtf8Bytes());
+    JsonNode rootMulti = MAPPER.readTree(encoder.encode(reqMulti, descriptor).bodyUtf8Bytes());
     assertEquals(
         "Result: {\"score\":99} done",
         rootMulti.path("messages").get(2).path("content").asString(""));
@@ -1363,9 +1126,7 @@ class OpenAiChatRequestEncoderTest {
             List.of(),
             ProviderCacheControl.none());
     ProviderException ex =
-        assertThrows(
-            ProviderException.class,
-            () -> encoder.encode(reqBadTool, descriptor, OpenAiChatConfiguration.defaults()));
+        assertThrows(ProviderException.class, () -> encoder.encode(reqBadTool, descriptor));
     assertEquals(ProviderErrorKind.INVALID_REQUEST, ex.kind());
   }
 
@@ -1393,19 +1154,13 @@ class OpenAiChatRequestEncoderTest {
 
     if (expectedContent == null) {
       ProviderException ex =
-          assertThrows(
-              ProviderException.class,
-              () -> encoder.encode(request, descriptor, OpenAiChatConfiguration.defaults()));
+          assertThrows(ProviderException.class, () -> encoder.encode(request, descriptor));
       assertEquals(ProviderErrorKind.INVALID_REQUEST, ex.kind());
       assertNotNull(ex.getMessage());
       return;
     }
 
-    JsonNode root =
-        MAPPER.readTree(
-            encoder
-                .encode(request, descriptor, OpenAiChatConfiguration.defaults())
-                .bodyUtf8Bytes());
+    JsonNode root = MAPPER.readTree(encoder.encode(request, descriptor).bodyUtf8Bytes());
     JsonNode wire = root.path("messages").get(1);
     assertEquals("tool", wire.path("role").asString(""));
     assertEquals("call_1", wire.path("tool_call_id").asString(""));
@@ -1463,9 +1218,7 @@ class OpenAiChatRequestEncoderTest {
             List.of(),
             ProviderCacheControl.none());
     ProviderException exRole =
-        assertThrows(
-            ProviderException.class,
-            () -> encoder.encode(reqBadRole, descriptor, OpenAiChatConfiguration.defaults()));
+        assertThrows(ProviderException.class, () -> encoder.encode(reqBadRole, descriptor));
     assertEquals(ProviderErrorKind.INVALID_REQUEST, exRole.kind());
 
     // 2. affinity 失配且 known 字段 content 形态非法（非文本）-> 必须抛出 INVALID_REQUEST
@@ -1494,10 +1247,7 @@ class OpenAiChatRequestEncoderTest {
             List.of(),
             ProviderCacheControl.none());
     ProviderException exContent =
-        assertThrows(
-            ProviderException.class,
-            () ->
-                encoder.encode(reqIllegalContent, descriptor, OpenAiChatConfiguration.defaults()));
+        assertThrows(ProviderException.class, () -> encoder.encode(reqIllegalContent, descriptor));
     assertEquals(ProviderErrorKind.INVALID_REQUEST, exContent.kind());
 
     // 3. affinity 失配且 reasoning_content 与 durable ProviderThinkingBlock 不一致 -> 必须抛出 INVALID_REQUEST
@@ -1527,10 +1277,7 @@ class OpenAiChatRequestEncoderTest {
             ProviderCacheControl.none());
     ProviderException exThinking =
         assertThrows(
-            ProviderException.class,
-            () ->
-                encoder.encode(
-                    reqMismatchThinking, descriptor, OpenAiChatConfiguration.defaults()));
+            ProviderException.class, () -> encoder.encode(reqMismatchThinking, descriptor));
     assertEquals(ProviderErrorKind.INVALID_REQUEST, exThinking.kind());
 
     // 4. affinity 失配但 payload 完全合法且与 durable 一致 -> 允许降级为语义 fallback
@@ -1557,10 +1304,7 @@ class OpenAiChatRequestEncoderTest {
             List.of(),
             ProviderCacheControl.none());
     JsonNode rootFallback =
-        MAPPER.readTree(
-            encoder
-                .encode(reqValidFallback, descriptor, OpenAiChatConfiguration.defaults())
-                .bodyUtf8Bytes());
+        MAPPER.readTree(encoder.encode(reqValidFallback, descriptor).bodyUtf8Bytes());
     assertEquals("assistant", rootFallback.path("messages").get(2).path("role").asString(""));
     assertEquals("text", rootFallback.path("messages").get(2).path("content").asString(""));
   }
@@ -1594,9 +1338,7 @@ class OpenAiChatRequestEncoderTest {
             List.of(),
             ProviderCacheControl.none());
     ProviderException ex1 =
-        assertThrows(
-            ProviderException.class,
-            () -> encoder.encode(req1, descriptor, OpenAiChatConfiguration.defaults()));
+        assertThrows(ProviderException.class, () -> encoder.encode(req1, descriptor));
     assertEquals(ProviderErrorKind.INVALID_REQUEST, ex1.kind());
 
     // 2. tool call 的 id 为 blank
@@ -1627,9 +1369,7 @@ class OpenAiChatRequestEncoderTest {
             List.of(),
             ProviderCacheControl.none());
     ProviderException ex2 =
-        assertThrows(
-            ProviderException.class,
-            () -> encoder.encode(req2, descriptor, OpenAiChatConfiguration.defaults()));
+        assertThrows(ProviderException.class, () -> encoder.encode(req2, descriptor));
     assertEquals(ProviderErrorKind.INVALID_REQUEST, ex2.kind());
 
     // 3. tool call 的 function arguments 为 blank（若直接构造 ProviderToolCall 会抛 IllegalArgumentException）
@@ -1660,9 +1400,7 @@ class OpenAiChatRequestEncoderTest {
             List.of(),
             ProviderCacheControl.none());
     ProviderException ex3 =
-        assertThrows(
-            ProviderException.class,
-            () -> encoder.encode(req3, descriptor, OpenAiChatConfiguration.defaults()));
+        assertThrows(ProviderException.class, () -> encoder.encode(req3, descriptor));
     assertEquals(ProviderErrorKind.INVALID_REQUEST, ex3.kind());
 
     // 4. tool call 的 function name 为 blank
@@ -1693,9 +1431,7 @@ class OpenAiChatRequestEncoderTest {
             List.of(),
             ProviderCacheControl.none());
     ProviderException ex4 =
-        assertThrows(
-            ProviderException.class,
-            () -> encoder.encode(req4, descriptor, OpenAiChatConfiguration.defaults()));
+        assertThrows(ProviderException.class, () -> encoder.encode(req4, descriptor));
     assertEquals(ProviderErrorKind.INVALID_REQUEST, ex4.kind());
   }
 
@@ -1729,9 +1465,7 @@ class OpenAiChatRequestEncoderTest {
             List.of(user1, asstMsg),
             List.of(),
             ProviderCacheControl.none());
-    JsonNode root =
-        MAPPER.readTree(
-            encoder.encode(req, descriptor, OpenAiChatConfiguration.defaults()).bodyUtf8Bytes());
+    JsonNode root = MAPPER.readTree(encoder.encode(req, descriptor).bodyUtf8Bytes());
     JsonNode wireAsst = root.path("messages").get(2);
     assertEquals("assistant", wireAsst.path("role").asString(""));
     // 可读思考以带来源标记的普通文本保留，与 final text 明确分隔。
@@ -1775,9 +1509,7 @@ class OpenAiChatRequestEncoderTest {
             List.of(),
             ProviderCacheControl.none());
 
-    JsonNode root =
-        MAPPER.readTree(
-            encoder.encode(req, descriptor, OpenAiChatConfiguration.defaults()).bodyUtf8Bytes());
+    JsonNode root = MAPPER.readTree(encoder.encode(req, descriptor).bodyUtf8Bytes());
     JsonNode wireAsst = root.path("messages").get(2);
     assertEquals("assistant", wireAsst.path("role").asString(""));
     assertEquals(
@@ -1828,8 +1560,7 @@ class OpenAiChatRequestEncoderTest {
                         List.of(user1, msg1),
                         List.of(),
                         ProviderCacheControl.none()),
-                    descriptor,
-                    OpenAiChatConfiguration.defaults()));
+                    descriptor));
     assertEquals(ProviderErrorKind.INVALID_REQUEST, ex1.kind());
 
     // 2. type 非 "function"（custom）无法与 durable function 调用对齐 -> INVALID_REQUEST
@@ -1862,8 +1593,7 @@ class OpenAiChatRequestEncoderTest {
                         List.of(user1, msg2),
                         List.of(),
                         ProviderCacheControl.none()),
-                    descriptor,
-                    OpenAiChatConfiguration.defaults()));
+                    descriptor));
     assertEquals(ProviderErrorKind.INVALID_REQUEST, ex2.kind());
 
     // 3. vendor 额外嵌套字段（call 级与 function 级）属于原生事实：affinity 匹配时原样保留
@@ -1895,8 +1625,7 @@ class OpenAiChatRequestEncoderTest {
                         List.of(user1, msg3),
                         List.of(),
                         ProviderCacheControl.none()),
-                    descriptor,
-                    OpenAiChatConfiguration.defaults())
+                    descriptor)
                 .bodyUtf8Bytes());
     JsonNode wireCall = wire.path("messages").get(2).path("tool_calls").get(0);
     assertEquals("value", wireCall.path("extra_call_field").asString(""));
@@ -1931,9 +1660,7 @@ class OpenAiChatRequestEncoderTest {
             List.of(),
             ProviderCacheControl.none());
     ProviderException ex1 =
-        assertThrows(
-            ProviderException.class,
-            () -> encoder.encode(req1, descriptor, OpenAiChatConfiguration.defaults()));
+        assertThrows(ProviderException.class, () -> encoder.encode(req1, descriptor));
     assertEquals(ProviderErrorKind.INVALID_REQUEST, ex1.kind());
 
     // 2. int 标量
@@ -1957,9 +1684,7 @@ class OpenAiChatRequestEncoderTest {
             List.of(),
             ProviderCacheControl.none());
     ProviderException ex2 =
-        assertThrows(
-            ProviderException.class,
-            () -> encoder.encode(req2, descriptor, OpenAiChatConfiguration.defaults()));
+        assertThrows(ProviderException.class, () -> encoder.encode(req2, descriptor));
     assertEquals(ProviderErrorKind.INVALID_REQUEST, ex2.kind());
   }
 
@@ -1995,8 +1720,7 @@ class OpenAiChatRequestEncoderTest {
             });
 
     OpenAiChatStreamAccumulator accumulator =
-        new OpenAiChatStreamAccumulator(
-            turn1Req, descriptor, OpenAiChatConfiguration.defaults(), bridge);
+        new OpenAiChatStreamAccumulator(turn1Req, descriptor, bridge);
 
     accumulator.handleData(
         """
@@ -2060,8 +1784,7 @@ class OpenAiChatRequestEncoderTest {
             List.of(),
             ProviderCacheControl.none());
 
-    OpenAiChatEncodedRequest encodedTurn2 =
-        encoder.encode(turn2Req, descriptor, OpenAiChatConfiguration.defaults());
+    OpenAiChatEncodedRequest encodedTurn2 = encoder.encode(turn2Req, descriptor);
     JsonNode wireRoot = MAPPER.readTree(encodedTurn2.bodyUtf8Bytes());
     ArrayNode wireMessages = (ArrayNode) wireRoot.path("messages");
     assertEquals(4, wireMessages.size());
@@ -2103,9 +1826,7 @@ class OpenAiChatRequestEncoderTest {
               List.of(),
               ProviderCacheControl.none());
       ProviderException exFallback =
-          assertThrows(
-              ProviderException.class,
-              () -> encoder.encode(fallbackReq, descriptor, OpenAiChatConfiguration.defaults()));
+          assertThrows(ProviderException.class, () -> encoder.encode(fallbackReq, descriptor));
       assertEquals(ProviderErrorKind.INVALID_REQUEST, exFallback.kind());
       assertNull(exFallback.getCause());
       assertFalse(exFallback.getMessage().contains(badArg));
@@ -2136,9 +1857,7 @@ class OpenAiChatRequestEncoderTest {
               List.of(),
               ProviderCacheControl.none());
       ProviderException exReplay =
-          assertThrows(
-              ProviderException.class,
-              () -> encoder.encode(replayReq, descriptor, OpenAiChatConfiguration.defaults()));
+          assertThrows(ProviderException.class, () -> encoder.encode(replayReq, descriptor));
       assertEquals(ProviderErrorKind.INVALID_REQUEST, exReplay.kind());
       assertNull(exReplay.getCause());
       assertFalse(exReplay.getMessage().contains(badArg));
@@ -2170,10 +1889,7 @@ class OpenAiChatRequestEncoderTest {
               ProviderCacheControl.none());
       ProviderException exDurable =
           assertThrows(
-              ProviderException.class,
-              () ->
-                  encoder.encode(
-                      reqWithBadDurable, descriptor, OpenAiChatConfiguration.defaults()));
+              ProviderException.class, () -> encoder.encode(reqWithBadDurable, descriptor));
       assertEquals(ProviderErrorKind.INVALID_REQUEST, exDurable.kind());
       assertNull(exDurable.getCause());
       assertFalse(exDurable.getMessage().contains(badArg));
@@ -2198,15 +1914,12 @@ class OpenAiChatRequestEncoderTest {
             ProviderCacheControl.none());
 
     int actualBytes =
-        new OpenAiChatRequestEncoder()
-            .encode(request, descriptor, OpenAiChatConfiguration.defaults())
-            .bodyUtf8Bytes()
-            .length;
+        new OpenAiChatRequestEncoder().encode(request, descriptor).bodyUtf8Bytes().length;
 
     // 恰好等于真实长度：通过
     OpenAiChatEncodedRequest atLimit =
         new OpenAiChatRequestEncoder(new RequestBodySizeGuard(actualBytes))
-            .encode(request, descriptor, OpenAiChatConfiguration.defaults());
+            .encode(request, descriptor);
     assertEquals(actualBytes, atLimit.bodyUtf8Bytes().length);
 
     // 比真实长度少 1 字节：调用点必须拒绝，且错误消息不泄露请求体内容
@@ -2214,9 +1927,7 @@ class OpenAiChatRequestEncoderTest {
     ProviderException ex =
         assertThrows(
             ProviderException.class,
-            () ->
-                new OpenAiChatRequestEncoder(tiny)
-                    .encode(request, descriptor, OpenAiChatConfiguration.defaults()));
+            () -> new OpenAiChatRequestEncoder(tiny).encode(request, descriptor));
     assertEquals(ProviderErrorKind.INVALID_REQUEST, ex.kind());
     assertTrue(ex.getMessage().contains("request body exceeds"));
     assertFalse(ex.getMessage().contains("size guard"));
@@ -2279,11 +1990,7 @@ class OpenAiChatRequestEncoderTest {
             List.of(),
             ProviderCacheControl.none());
 
-    JsonNode wire =
-        MAPPER.readTree(
-            encoder
-                .encode(turn2Req, descriptor, OpenAiChatConfiguration.defaults())
-                .bodyUtf8Bytes());
+    JsonNode wire = MAPPER.readTree(encoder.encode(turn2Req, descriptor).bodyUtf8Bytes());
     JsonNode wireCalls = wire.path("messages").get(2).path("tool_calls");
 
     assertEquals(

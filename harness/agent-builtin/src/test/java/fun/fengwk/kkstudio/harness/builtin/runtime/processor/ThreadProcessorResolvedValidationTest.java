@@ -39,7 +39,7 @@ import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
-import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessResult;
 import fun.fengwk.kkstudio.harness.spi.work.ClaimedWork;
@@ -159,11 +159,11 @@ class ThreadProcessorResolvedValidationTest extends ThreadProcessorTestBase {
             Set.of(ModelInputModality.TEXT),
             true,
             true),
-        new ModelVariant(builtinExecution(settings).variant()),
+        new ModelVariant(
+            builtinExecution(settings).variant(), null, PromptCacheRetention.NONE, null),
         1024,
         "Test system instruction.",
         List.of(environmentTool),
-        List.of(),
-        ProviderCacheControl.none());
+        List.of());
   }
 }
