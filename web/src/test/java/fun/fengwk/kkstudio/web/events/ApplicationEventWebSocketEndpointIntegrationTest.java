@@ -222,7 +222,7 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
                 .build(),
             HttpResponse.BodyHandlers.ofString());
     assertEquals(201, chatResponse.statusCode(), chatResponse.body());
-    String chatId = MAPPER.readTree(chatResponse.body()).path("data").path("id").asText();
+    String chatId = MAPPER.readTree(chatResponse.body()).path("id").asText();
 
     String sessionId = UUID.randomUUID().toString();
     String threadId = UUID.randomUUID().toString();
@@ -262,7 +262,7 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
                 .build(),
             HttpResponse.BodyHandlers.ofString());
     assertEquals(202, threadResponse.statusCode(), threadResponse.body());
-    JsonNode created = MAPPER.readTree(threadResponse.body()).path("data");
+    JsonNode created = MAPPER.readTree(threadResponse.body());
     assertEquals(threadId, created.path("thread").path("threadId").asText());
     String version = created.path("thread").path("version").asText();
 

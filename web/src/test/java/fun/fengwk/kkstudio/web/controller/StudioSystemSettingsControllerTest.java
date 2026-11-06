@@ -155,7 +155,7 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
         bodyFromGet(
             body -> {
               body.put("expectedVersion", "0");
-              body.withObject("tool").put("modelGatewayBusyRetryMillis", 6000L);
+              body.withObject("tool").put("modelGatewayBusyRetryMillis", "6000");
             });
     mockMvc
         .perform(put("/api/settings").contentType(MediaType.APPLICATION_JSON).content(first))
@@ -168,7 +168,7 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
         bodyFromGet(
             body -> {
               body.put("expectedVersion", "1");
-              body.withObject("tool").put("modelGatewayBusyRetryMillis", 7000L);
+              body.withObject("tool").put("modelGatewayBusyRetryMillis", "7000");
             });
     mockMvc
         .perform(put("/api/settings").contentType(MediaType.APPLICATION_JSON).content(second))
@@ -183,7 +183,7 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
         bodyFromGet(
             update -> {
               update.put("expectedVersion", "99");
-              update.withObject("tool").put("modelGatewayBusyRetryMillis", 6000L);
+              update.withObject("tool").put("modelGatewayBusyRetryMillis", "6000");
             });
     mockMvc
         .perform(put("/api/settings").contentType(MediaType.APPLICATION_JSON).content(body))
@@ -213,7 +213,7 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
         bodyFromGet(
             update -> {
               update.put("expectedVersion", "0");
-              update.withObject("advanced").put("processorHeartbeatIntervalMillis", 60_000L);
+              update.withObject("advanced").put("processorHeartbeatIntervalMillis", "60000");
             });
     mockMvc
         .perform(put("/api/settings").contentType(MediaType.APPLICATION_JSON).content(body))

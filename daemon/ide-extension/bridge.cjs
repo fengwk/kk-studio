@@ -396,6 +396,37 @@ function createBridgeHost(vscode, options) {
     await reply(message.id, { ok: true })
   }
 
+  /**
+   * True when a dirty document is not represented by any of the tabs the workbench just closed.
+   *
+   * The extension host mirrors workbench dirty state asynchronously, so a tab the workbench already
+   * closed (and whose save/discard decision it already committed) can still be reported as dirty
+   * for a few milliseconds. Only documents that never had a closed tab can still hold unsaved work
+   * this close did not address.
+   */
+  const hasHiddenDirtyDocuments = (closedTabs) => {
+    const closedUris = new Set()
+    for (const tab of closedTabs) {
+      const input = tab && tab.input
+      if (input === undefined || input === null) {
+        continue
+      }
+      if (input instanceof vscode.TabInputText) {
+        closedUris.add(input.uri.toString())
+      } else if (input instanceof vscode.TabInputTextDiff) {
+        closedUris.add(input.original.toString())
+        closedUris.add(input.modified.toString())
+      }
+    }
+    return (vscode.workspace.textDocuments || []).some((document) => {
+      if (document.isDirty !== true) {
+        return false
+      }
+      const uri = document.uri
+      return !(uri !== undefined && uri !== null && closedUris.has(uri.toString()))
+    })
+  }
+
   const closeView = async (message) => {
     // Explicit discard/expiry follows the daemon's backup attempt and cannot await an interactive window.
     if (message.discard !== true) {
@@ -403,7 +434,11 @@ function createBridgeHost(vscode, options) {
       const tabs = vscode.window.tabGroups.all.flatMap((group) => group.tabs)
       const closed = await vscode.window.tabGroups.close(tabs)
       // A hidden dirty document or a newly opened tab must not be destroyed with the view.
-      if (!closed || hasDirtyDocuments() || vscode.window.tabGroups.all.some((group) => group.tabs.length > 0)) {
+      if (
+        !closed ||
+        hasHiddenDirtyDocuments(tabs) ||
+        vscode.window.tabGroups.all.some((group) => group.tabs.length > 0)
+      ) {
         await reply(message.id, {
           ok: false,
           code: 'CANCELLED',
