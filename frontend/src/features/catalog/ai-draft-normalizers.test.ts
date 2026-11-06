@@ -16,8 +16,11 @@ import { newVariantDraft } from '@/features/catalog/ai-resource-draft-primitives
 import type {
   AgentModelConfigDTO,
   AgentModelDTO,
+  AgentModelVariantDTO,
   AgentProviderDTO,
 } from '@/shared/api/generated/contracts'
+
+const v = (id: string): AgentModelVariantDTO => ({ id, promptCacheRetention: 'NONE' })
 
 function modelConfig(overrides: Partial<AgentModelConfigDTO> = {}): AgentModelConfigDTO {
   return {
@@ -29,7 +32,7 @@ function modelConfig(overrides: Partial<AgentModelConfigDTO> = {}): AgentModelCo
       multipliers: [],
     },
     defaultVariant: 'default',
-    variants: [{ id: 'default' }],
+    variants: [v('default')],
     ...overrides,
   }
 }
@@ -54,6 +57,7 @@ function provider(name: string): AgentProviderDTO {
     name,
     description: null,
     providerType: 'openai',
+    promptCacheRetentions: ['NONE', 'SHORT', 'LONG'],
     baseUrl: null,
     configured: true,
     modelCallTimeoutMillis: '1800000',
@@ -85,7 +89,7 @@ describe('ai-draft-normalizers', () => {
         model({
           config: modelConfig({
             defaultVariant: 'creative',
-            variants: [{ id: 'creative' }, { id: 'precise' }],
+            variants: [v('creative'), v('precise')],
           }),
         }),
       ),
@@ -94,7 +98,7 @@ describe('ai-draft-normalizers', () => {
       variantOptionsFromModel(
         model({
           config: modelConfig({
-            variants: [{ id: 'creative' }, { id: 'precise' }],
+            variants: [v('creative'), v('precise')],
           }),
         }),
       ),
@@ -124,7 +128,7 @@ describe('ai-draft-normalizers', () => {
           config: {
             ...modelConfig(),
             defaultVariant: 'precise',
-            variants: [{ id: 'creative' }, { id: 'precise' }],
+            variants: [v('creative'), v('precise')],
           },
         }),
       ],
@@ -158,7 +162,7 @@ describe('ai-draft-normalizers', () => {
         name: 'MiniMax-M2.7',
         config: modelConfig({
           defaultVariant: 'default',
-          variants: [{ id: 'default' }],
+          variants: [v('default')],
         }),
       }),
       model({
@@ -166,7 +170,7 @@ describe('ai-draft-normalizers', () => {
         name: 'Claude-Sonnet-4.5',
         config: modelConfig({
           defaultVariant: 'creative',
-          variants: [{ id: 'creative' }, { id: 'precise' }],
+          variants: [v('creative'), v('precise')],
         }),
       }),
     ]
@@ -214,8 +218,8 @@ describe('ai-draft-normalizers', () => {
   it('picks preferred model id then first available model', () => {
     const draft: AgentDraft = { ...emptyAgentDraft(), model: 'gone', variant: '' }
     const models = [
-      model({ providerName: 'minimax', name: 'MiniMax-M2.7', config: modelConfig({ defaultVariant: 'default', variants: [{ id: 'default' }] }) }),
-      model({ providerName: 'anthropic', name: 'Claude-Sonnet-4.5', config: modelConfig({ defaultVariant: 'creative', variants: [{ id: 'creative' }] }) }),
+      model({ providerName: 'minimax', name: 'MiniMax-M2.7', config: modelConfig({ defaultVariant: 'default', variants: [v('default')] }) }),
+      model({ providerName: 'anthropic', name: 'Claude-Sonnet-4.5', config: modelConfig({ defaultVariant: 'creative', variants: [v('creative')] }) }),
     ]
 
     const preferred = normalizeCreateAgentDraftSelection(draft, models, 'Claude-Sonnet-4.5')
@@ -240,7 +244,7 @@ describe('ai-draft-normalizers', () => {
       providerName: 'unrelated',
       name: 'different-model',
       config: modelConfig({
-        variants: [{ id: 'unrelated-variant' }],
+        variants: [v('unrelated-variant')],
         defaultVariant: 'unrelated-variant',
       }),
     })
@@ -261,7 +265,7 @@ describe('ai-draft-normalizers', () => {
       providerName: 'original',
       name: 'original-model',
       config: modelConfig({
-        variants: [{ id: 'original-variant' }],
+        variants: [v('original-variant')],
         defaultVariant: 'original-variant',
       }),
     })
@@ -269,7 +273,7 @@ describe('ai-draft-normalizers', () => {
       providerName: 'unrelated',
       name: 'different-model',
       config: modelConfig({
-        variants: [{ id: 'unrelated-variant' }],
+        variants: [v('unrelated-variant')],
         defaultVariant: 'unrelated-variant',
       }),
     })

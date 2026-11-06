@@ -35,7 +35,7 @@ const model: AgentModelDTO = {
       multipliers: [],
     },
     defaultVariant: 'default',
-    variants: [{ id: 'default' }],
+    variants: [{ id: 'default', promptCacheRetention: 'NONE' }],
   },
   version: '1',
   createTime: 1786233600,
@@ -263,7 +263,7 @@ describe('BranchDraft conversion and diff semantics', () => {
       config: {
         ...model.config!,
         defaultVariant: 'v1',
-        variants: [{ id: 'v1' }, { id: 'v2' }],
+        variants: [{ id: 'v1', promptCacheRetention: 'NONE' }, { id: 'v2', promptCacheRetention: 'NONE' }],
       },
     }
 

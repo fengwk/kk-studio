@@ -1,5 +1,8 @@
 import type { ModelDraft } from '@/features/catalog/ai-console-types'
-import type { ModelDefaultCandidateDTO } from '@/shared/api/generated/contracts'
+import type {
+  ModelDefaultCandidateDTO,
+  PromptCacheRetention,
+} from '@/shared/api/generated/contracts'
 import { clonePricing } from '@/features/catalog/ai-model-pricing-codec'
 
 /**
@@ -40,12 +43,21 @@ export function applyCatalogCandidate(
     && variants.every((variant) => variant.id.trim().length > 0)
     && variants.some((variant) => variant.id.trim() === defaultVariant)
   if (variantsMappable) {
-    next.variants = variants.map((variant) => ({
-      draftId: `catalog-${candidate.id}-${variant.id}`,
-      id: variant.id,
-      reasoningEffort: variant.reasoningEffort == null ? '' : String(variant.reasoningEffort),
-      protocolOptionsJson: variant.protocolOptionsJson ?? '',
-    }))
+    next.variants = variants.map((variant, index) => {
+      const existing =
+        draft.variants.find((v) => v.id.trim() === variant.id.trim()) ??
+        draft.variants[index] ??
+        draft.variants[0]
+      const promptCacheRetention: PromptCacheRetention =
+        existing?.promptCacheRetention ?? variant.promptCacheRetention ?? 'NONE'
+      return {
+        draftId: `catalog-${candidate.id}-${variant.id}`,
+        id: variant.id,
+        reasoningEffort: variant.reasoningEffort == null ? '' : String(variant.reasoningEffort),
+        protocolOptionsJson: variant.protocolOptionsJson ?? '',
+        promptCacheRetention,
+      }
+    })
     next.defaultVariant = defaultVariant
   }
   return next

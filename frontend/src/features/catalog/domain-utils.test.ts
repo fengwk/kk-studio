@@ -55,7 +55,7 @@ function fullConfig(): AgentModelConfigDTO {
       multipliers: [],
     },
     defaultVariant: 'default',
-    variants: [{ id: 'default' }],
+    variants: [{ id: 'default', promptCacheRetention: 'NONE' }],
   }
 }
 
@@ -100,6 +100,7 @@ describe('AI domain utilities', () => {
         name: 'minimax',
         description: 'provider desc',
         providerType: 'openai_responses',
+        promptCacheRetentions: ['NONE', 'SHORT', 'LONG'],
         baseUrl: 'https://api.minimax.io/v1',
         configured: true,
         modelCallTimeoutMillis: '120000',
@@ -130,6 +131,7 @@ describe('AI domain utilities', () => {
               {
                 id: 'quality',
                 reasoningEffort: 'high',
+                promptCacheRetention: 'NONE',
               },
             ],
           },
@@ -337,6 +339,7 @@ describe('AI domain utilities', () => {
         name: 'minimax',
         description: 'MiniMax endpoint',
         providerType: 'openai',
+        promptCacheRetentions: ['NONE', 'SHORT', 'LONG'],
         baseUrl: 'https://api.minimax.io/v1',
         configured: true,
         modelCallTimeoutMillis: '1800000',
@@ -350,6 +353,7 @@ describe('AI domain utilities', () => {
         name: 'openai',
         description: 'OpenAI',
         providerType: 'openai_responses',
+        promptCacheRetentions: ['NONE', 'SHORT', 'LONG'],
         baseUrl: null,
         configured: true,
         modelCallTimeoutMillis: '1800000',

@@ -48,6 +48,7 @@ function fullConfig(): AgentModelConfigDTO {
     variants: [
       {
         id: 'quality',
+        promptCacheRetention: 'SHORT',
         reasoningEffort: 'high',
       },
     ],
@@ -69,6 +70,18 @@ function model(configOverride?: AgentModelConfigDTO): AgentModelDTO {
 }
 
 describe('ai-model-draft-codec', () => {
+  it('prefills new variants from the selected provider capability', () => {
+    // SHORT 不是协议默认值：只在 Provider 明确支持时预填。
+    expect(
+      emptyModelDraft({ name: 'openai', promptCacheRetentions: ['NONE', 'SHORT', 'LONG'] })
+        .variants[0]?.promptCacheRetention,
+    ).toBe('SHORT')
+    expect(
+      emptyModelDraft({ name: 'google', promptCacheRetentions: ['NONE'] })
+        .variants[0]?.promptCacheRetention,
+    ).toBe('NONE')
+  })
+
   /** 完整的持久化 config 必须能往返覆盖表单使用的每一个嵌套 schema 字段。 */
   it('reads nested limit, abilities, pricing, defaultVariant, and variant fields', () => {
     const source = model()
@@ -154,9 +167,10 @@ describe('ai-model-draft-codec', () => {
       variants: [
         {
           id: 'quality',
+          promptCacheRetention: 'NONE',
           reasoningEffort: 'high',
         },
-        { id: 'provider-defaults' },
+        { id: 'provider-defaults', promptCacheRetention: 'NONE' },
       ],
     })
     expect(editable.config).toEqual(config)
@@ -173,7 +187,7 @@ describe('ai-model-draft-codec', () => {
     })
 
     const config = buildModelConfig(input)
-    expect(config.variants).toEqual([{ id: 'medium' }])
+    expect(config.variants).toEqual([{ id: 'medium', promptCacheRetention: 'NONE' }])
   })
 
   /** 在发起 mutation 请求前，必须拒绝无效的 variant/default 关系。 */
@@ -212,9 +226,9 @@ describe('ai-model-draft-codec', () => {
     })
     const config = buildModelConfig(input)
     expect(config.variants).toEqual([
-      { id: 'v1', reasoningEffort: 'MAX' },
-      { id: 'v2', reasoningEffort: 'xHigh' },
-      { id: 'v3' },
+      { id: 'v1', promptCacheRetention: 'NONE', reasoningEffort: 'MAX' },
+      { id: 'v2', promptCacheRetention: 'NONE', reasoningEffort: 'xHigh' },
+      { id: 'v3', promptCacheRetention: 'NONE' },
     ])
   })
 
@@ -233,9 +247,9 @@ describe('ai-model-draft-codec', () => {
 
     const createPayload = toEditableModel(input)
     expect(createPayload.config!.variants).toEqual([
-      { id: 'v-high-upper', reasoningEffort: 'HIGH' },
-      { id: 'v-high-lower', reasoningEffort: 'high' },
-      { id: 'v-xhigh-mixed', reasoningEffort: 'xHigh' },
+      { id: 'v-high-upper', promptCacheRetention: 'NONE', reasoningEffort: 'HIGH' },
+      { id: 'v-high-lower', promptCacheRetention: 'NONE', reasoningEffort: 'high' },
+      { id: 'v-xhigh-mixed', promptCacheRetention: 'NONE', reasoningEffort: 'xHigh' },
     ])
 
     const savedModel: AgentModelDTO = {
@@ -267,16 +281,16 @@ describe('ai-model-draft-codec', () => {
     const source = model({
       ...fullConfig(),
       variants: [
-        { id: 'max-variant', reasoningEffort: 'max' },
-        { id: 'xhigh-variant', reasoningEffort: 'xhigh' },
+        { id: 'max-variant', promptCacheRetention: 'SHORT', reasoningEffort: 'max' },
+        { id: 'xhigh-variant', promptCacheRetention: 'LONG', reasoningEffort: 'xhigh' },
       ],
       defaultVariant: 'max-variant',
     })
     const draftFromModel = toModelDraft(source)
     const rebuilt = buildModelConfig(draftFromModel)
     expect(rebuilt.variants).toEqual([
-      { id: 'max-variant', reasoningEffort: 'max' },
-      { id: 'xhigh-variant', reasoningEffort: 'xhigh' },
+      { id: 'max-variant', promptCacheRetention: 'SHORT', reasoningEffort: 'max' },
+      { id: 'xhigh-variant', promptCacheRetention: 'LONG', reasoningEffort: 'xhigh' },
     ])
   })
 
@@ -398,7 +412,7 @@ describe('ai-model-draft-codec', () => {
     it('preserves arbitrary precision numeric JSON text across loading and submission', () => {
       const json = '{"large":9007199254740993,"beyond":9223372036854775808,"nested":{"decimal":0.123456789012345678901234567890,"exp":1.234567890123456789e+45}}'
       expect(parseProtocolOptionsJson(` \n${json}\t`, 'quality')).toBe(json)
-      const source = model({ ...fullConfig(), variants: [{ id: 'quality', protocolOptionsJson: json }] })
+      const source = model({ ...fullConfig(), variants: [{ id: 'quality', promptCacheRetention: 'SHORT', protocolOptionsJson: json }] })
       const loaded = toModelDraft(source)
       expect(loaded.variants[0]?.protocolOptionsJson).toBe(json)
       expect(buildModelConfig(loaded).variants[0]?.protocolOptionsJson).toBe(json)

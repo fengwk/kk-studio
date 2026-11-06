@@ -16,6 +16,7 @@ const SAMPLE_PROVIDER: AgentProviderDTO = {
   name: 'openai',
   description: 'OpenAI 兼容端点',
   providerType: 'openai',
+  promptCacheRetentions: ['NONE', 'SHORT', 'LONG'],
   baseUrl: 'https://api.example.com/v1',
   configured: true,
   modelCallTimeoutMillis: '1800000',

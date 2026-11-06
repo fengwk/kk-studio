@@ -24,7 +24,7 @@ function model(): AgentModelDTO {
       multipliers: [],
     },
       defaultVariant: 'quality',
-      variants: [{ id: 'quality' }],
+      variants: [{ id: 'quality', promptCacheRetention: 'NONE' }],
     },
     version: '1',
     createTime: 0,

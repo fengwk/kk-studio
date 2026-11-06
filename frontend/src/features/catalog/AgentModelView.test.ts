@@ -15,7 +15,7 @@ function model(name = 'MiniMax-M2.7'): AgentModelDTO {
       multipliers: [],
     },
     defaultVariant: 'default',
-    variants: [{ id: 'default' }],
+    variants: [{ id: 'default', promptCacheRetention: 'NONE' }],
   }
   return {
     providerName: 'minimax',

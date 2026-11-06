@@ -80,7 +80,7 @@ describe('agentService', () => {
       multipliers: [],
     },
         defaultVariant: 'default',
-        variants: [{ id: 'default' }],
+        variants: [{ id: 'default', promptCacheRetention: 'NONE' }],
       },
     }
     const agentBody: AgentDefinitionCreateDTO = {
@@ -110,7 +110,7 @@ describe('agentService', () => {
       multipliers: [],
     },
         defaultVariant: 'fast',
-        variants: [{ id: 'fast' }],
+        variants: [{ id: 'fast', promptCacheRetention: 'NONE' }],
       },
     }
     const updateAgentBody: AgentDefinitionUpdateDTO = {

@@ -8,12 +8,16 @@ import {
   emptyPricingDraft,
   normalizePricing,
 } from '@/features/catalog/ai-model-pricing-codec'
-import type { AgentModelEditablePropertiesDTO } from '@/shared/api/contracts/ai-catalog'
+import {
+  defaultPromptCacheRetention,
+  type AgentModelEditablePropertiesDTO,
+} from '@/shared/api/contracts/ai-catalog'
 import type {
   AgentModelConfigDTO,
   AgentModelDTO,
   AgentModelInputModality,
   AgentModelVariantDTO,
+  AgentProviderDTO,
 } from '@/shared/api/generated/contracts'
 
 const AGENT_MODEL_MODALITIES: AgentModelInputModality[] = [
@@ -26,8 +30,11 @@ const AGENT_MODEL_MODALITIES: AgentModelInputModality[] = [
 const AGENT_MODEL_MODALITY_SET = new Set<string>(AGENT_MODEL_MODALITIES)
 
 export function emptyModelDraft(
-  provider?: { name: string } | null,
+  provider?: ({ name: string } & Partial<Pick<AgentProviderDTO, 'promptCacheRetentions'>>) | null,
 ): ModelDraft {
+  const retention = defaultPromptCacheRetention(
+    provider?.promptCacheRetentions ? { promptCacheRetentions: provider.promptCacheRetentions } : null,
+  )
   return {
     providerName: provider?.name ?? '',
     name: '',
@@ -40,7 +47,7 @@ export function emptyModelDraft(
     inputModalities: ['TEXT'],
     pricing: emptyPricingDraft(),
     defaultVariant: 'medium',
-    variants: [newVariantDraft({ id: 'medium' })],
+    variants: [newVariantDraft({ id: 'medium', promptCacheRetention: retention })],
   }
 }
 
@@ -73,6 +80,7 @@ function parseVariant(variant: AgentModelVariantDTO): VariantDraft {
     id: variant.id,
     reasoningEffort: variant.reasoningEffort == null ? '' : String(variant.reasoningEffort),
     protocolOptionsJson: variant.protocolOptionsJson ?? '',
+    promptCacheRetention: variant.promptCacheRetention,
   })
 }
 
@@ -149,7 +157,10 @@ function serializeVariants(
     }
     ids.add(id)
 
-    const payload: AgentModelVariantDTO = { id }
+    const payload: AgentModelVariantDTO = {
+      id,
+      promptCacheRetention: variant.promptCacheRetention,
+    }
     const reasoningEffort = variant.reasoningEffort.trim()
     if (reasoningEnabled && reasoningEffort) {
       if (reasoningEffort.length > 64) {
