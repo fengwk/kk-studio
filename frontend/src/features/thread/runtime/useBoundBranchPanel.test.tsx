@@ -127,7 +127,6 @@ function snapshotOf(
     baseEntryId: null,
     entries: [],
     queuedCommands: [],
-    executionStatus: 'IDLE',
     activeAssistantOutput: null,
     toolInvocations: [],
     generationFailures: [],
@@ -148,7 +147,7 @@ function queuedSettingCommand(
     type,
     state: 'QUEUED',
     idempotencyKey: `queued-${sequence}`,
-    payloadJson: JSON.stringify(payload),
+    payload: JSON.stringify(payload),
     cancelledAt: null,
     createdAt: 0,
   }
@@ -175,7 +174,7 @@ function acceptedCommandPayload(command: HarnessCommandCreateDTO): Record<string
   }
 }
 
-/** 接受响应中 durable 的 SET 命令投影：state 恒为 QUEUED，payloadJson 与请求一致。 */
+/** 接受响应中 durable 的 SET 命令投影：state 恒为 QUEUED，payload 与请求一致。 */
 function acceptedSettingCommand(
   threadId: string,
   sequence: string,
@@ -187,7 +186,7 @@ function acceptedSettingCommand(
     type: command.type,
     state: 'QUEUED',
     idempotencyKey: command.idempotencyKey,
-    payloadJson: JSON.stringify(acceptedCommandPayload(command)),
+    payload: JSON.stringify(acceptedCommandPayload(command)),
     cancelledAt: null,
     createdAt: 0,
   }
@@ -204,7 +203,7 @@ function acceptedResponse(
       sessionId: thread.sessionId,
       parentEntryId: null,
       entryType: 'ROOT',
-      payloadJson: '{}',
+      payload: '{}',
       createdAt: 0,
       usageCost: null,
     },

@@ -64,7 +64,6 @@ function threadSnapshot(cursor: Cursor, entries: unknown[] = []) {
       baseEntryId: null,
       entries,
       queuedCommands: [],
-      executionStatus: 'IDLE',
       activeAssistantOutput: null,
       toolInvocations: [],
       generationFailures: [],
@@ -85,7 +84,7 @@ function modelRequestDebug(draft?: DebugRequest['body']) {
         {
           name: 'read',
           description: 'Read file content from a repository path.',
-          inputSchemaJson: '{"type":"object","properties":{"path":{"type":"string"}}}',
+          inputSchema: { type: 'object', properties: { path: { type: 'string' } } },
           environmentSupport: 'ROUTED',
           requiredEnvironmentId: null,
           provenance: 'builtin:read',
@@ -95,7 +94,7 @@ function modelRequestDebug(draft?: DebugRequest['body']) {
         {
           name: 'bash',
           description: 'Execute shell commands inside the safe execution environment.',
-          inputSchemaJson: '{"type":"object","properties":{"command":{"type":"string"}}}',
+          inputSchema: { type: 'object', properties: { command: { type: 'string' } } },
           environmentSupport: 'REQUIRED',
           requiredEnvironmentId: null,
           provenance: 'builtin:bash',
@@ -303,12 +302,12 @@ test('owner-free bound thread renders a NOTIFICATION entry as a system card', as
     threadId: THREAD_ID,
     parentEntryId: null,
     entryType: 'NOTIFICATION',
-    payloadJson: JSON.stringify({
+    payload: {
       notificationId: 'a0000000-0000-0000-0000-00000000a001',
       kind: 'SUBAGENT_RESULT',
       sourceThreadId,
       message: { role: 'USER', contents: [{ type: 'text', text: receipt }] },
-    }),
+    },
     createdAt: 1790812805,
   }
   const recorded = await installPreviewApiMock(page, { cursor: () => INITIAL_CURSOR, entries: [notificationEntry] })

@@ -25,7 +25,7 @@ export interface QuestionnaireCardProps {
   interactionId: string
   threadId: string
   argumentsJson: string
-  resultJson?: string | null
+  result?: unknown
   onSuccess?: (result: HarnessToolInputResultDTO) => void
 }
 
@@ -33,7 +33,7 @@ export function QuestionnaireCard({
   interactionId,
   threadId,
   argumentsJson,
-  resultJson,
+  result,
   onSuccess,
 }: QuestionnaireCardProps) {
   const { t } = useI18n()
@@ -45,8 +45,8 @@ export function QuestionnaireCard({
     [argumentsJson],
   )
   const completed = useMemo(
-    () => parseCompletedResult(resultJson),
-    [resultJson],
+    () => parseCompletedResult(result),
+    [result],
   )
 
   // 1. 如果已物化终态结果，展示完成状态视图

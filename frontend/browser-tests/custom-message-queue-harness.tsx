@@ -35,12 +35,12 @@ function makeInitialEntries(): HarnessSessionEntryDTO[] {
       sessionId: 'session-child-1',
       parentEntryId: null,
       entryType: 'CUSTOM_MESSAGE',
-      payloadJson: JSON.stringify({
+      payload: {
         message: {
           role: 'USER',
           contents: [{ type: 'text', text: INITIAL_TASK_TEXT }],
         },
-      }),
+      },
       createdAt: 1774958400,
       usageCost: null,
     },
@@ -55,12 +55,12 @@ function makeInitialQueuedCommands(): HarnessThreadCommandDTO[] {
       type: 'CUSTOM_MESSAGE',
       state: 'QUEUED',
       idempotencyKey: 'cmd-supp-1',
-      payloadJson: JSON.stringify({
+      payload: {
         message: {
           role: 'USER',
           contents: [{ type: 'text', text: SUPPLEMENTARY_TEXT }],
         },
-      }),
+      },
       cancelledAt: null,
       createdAt: 1774958420,
     },
@@ -83,12 +83,12 @@ export function CustomMessageQueueHarness() {
         sessionId: 'session-child-1',
         parentEntryId: 'entry-task-1',
         entryType: 'CUSTOM_MESSAGE',
-        payloadJson: JSON.stringify({
+        payload: {
           message: {
             role: 'USER',
             contents: [{ type: 'text', text: SUPPLEMENTARY_TEXT }],
           },
-        }),
+        },
         createdAt: 1774958460,
         usageCost: null,
       },

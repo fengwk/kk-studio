@@ -109,7 +109,7 @@ function queuedSettingCommand(
     type,
     state: 'QUEUED',
     idempotencyKey: `queued-${sequence}`,
-    payloadJson: JSON.stringify(payload),
+    payload: JSON.stringify(payload),
     cancelledAt: null,
     createdAt: 0,
   }

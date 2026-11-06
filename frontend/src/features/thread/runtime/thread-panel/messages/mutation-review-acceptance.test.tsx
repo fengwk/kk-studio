@@ -205,7 +205,7 @@ describe('Slice F 审查与审批组件验收测试', () => {
         invocationId="inv-1"
         toolName="edit"
         argumentsJson={JSON.stringify({ path: '/src/App.tsx', old_string: 'a', new_string: 'b' })}
-        approvalJson={JSON.stringify({ required: true })}
+        approval={JSON.stringify({ required: true })}
       />,
       { wrapper },
     )
@@ -224,7 +224,7 @@ describe('Slice F 审查与审批组件验收测试', () => {
         invocationId="inv-1"
         toolName="edit"
         argumentsJson={JSON.stringify({ path: '/src/App.tsx', old_string: 'a', new_string: 'b' })}
-        approvalJson={JSON.stringify({
+        approval={JSON.stringify({
           required: true,
           editReview: { path: '/src/App.tsx', diff: '+b', sha256: 'invalid' },
         })}
@@ -240,7 +240,7 @@ describe('Slice F 审查与审批组件验收测试', () => {
         invocationId="inv-1"
         toolName="edit"
         argumentsJson={JSON.stringify({ path: '/src/App.tsx', old_string: 'a', new_string: 'b' })}
-        approvalJson={JSON.stringify({
+        approval={JSON.stringify({
           required: true,
           editReview: { path: '/canonical/src/App.tsx', diff: '-a\n+b', sha256: validSha },
         })}
@@ -321,7 +321,7 @@ describe('Slice F 审查与审批组件验收测试', () => {
         invocationId="inv-1"
         toolName="edit"
         argumentsJson={rawArgs}
-        approvalJson={rawApproval}
+        approval={rawApproval}
       />,
       { wrapper },
     )
@@ -429,7 +429,7 @@ describe('真实 AgentMessageJsonCodec 历史生命周期与真实组件验收�
       sessionId: 'sess-acceptance-1',
       parentEntryId: null,
       entryType,
-      payloadJson: JSON.stringify(payload),
+      payload: JSON.stringify(payload),
       createdAt: 1792404000,
       usageCost: null,
     }
@@ -462,9 +462,9 @@ describe('真实 AgentMessageJsonCodec 历史生命周期与真实组件验收�
         old_string: 'const value = 1;',
         new_string: 'const value = 2;',
       }),
-      approvalJson: null,
-      resultJson: null,
-      errorJson: null,
+      approval: null,
+      result: null,
+      error: null,
       createdAt: 1792404000,
       updatedAt: 1792404000,
       ...overrides,
@@ -499,10 +499,10 @@ describe('真实 AgentMessageJsonCodec 历史生命周期与真实组件验收�
   }
 
   it('模拟完整生命周期：invocation overlay 存在 -> durable entry 出现 -> invocation 清理 -> 刷新空 overlay，diff 相同可读且去重展示短成功文案', () => {
-    // 阶段 1: invocation overlay 存在（处于 WAITING_APPROVAL，approvalJson 携带真实 editReview）
+    // 阶段 1: invocation overlay 存在（处于 WAITING_APPROVAL，approval 携带真实 editReview）
     const invPhase1 = createInvocation('inv-flow-1', 'asst-entry-1', 'call-edit-1', {
       status: 'WAITING_APPROVAL',
-      approvalJson: JSON.stringify({
+      approval: JSON.stringify({
         required: true,
         decision: null,
         decisionId: null,
@@ -540,14 +540,14 @@ describe('真实 AgentMessageJsonCodec 历史生命周期与真实组件验收�
     // 此时 invocation 仍留在列表（例如已成为 SUCCEEDED，尚未被 GC/清理）
     const invPhase2 = createInvocation('inv-flow-1', 'asst-entry-1', 'call-edit-1', {
       status: 'SUCCEEDED',
-      approvalJson: JSON.stringify({
+      approval: JSON.stringify({
         required: true,
         decision: 'ALLOWED',
         decisionId: 'dec-1',
         reason: null,
         editReview: validReview,
       }),
-      resultJson: JSON.stringify({
+      result: JSON.stringify({
         toolCallId: 'call-edit-1',
         contents: [{ type: 'text', text: 'Edited successfully.' }],
         error: false,
@@ -665,14 +665,14 @@ describe('真实 AgentMessageJsonCodec 历史生命周期与真实组件验收�
 
     const conflictInvocation = createInvocation('inv-conflict', 'asst-entry-conflict', 'call-conflict', {
       status: 'SUCCEEDED',
-      approvalJson: JSON.stringify({
+      approval: JSON.stringify({
         required: true,
         decision: 'ALLOWED',
         decisionId: 'dec-conflict',
         reason: null,
         editReview: frozenApprovalReview,
       }),
-      resultJson: JSON.stringify({
+      result: JSON.stringify({
         toolCallId: 'call-conflict',
         contents: [{ type: 'text', text: 'Edited' }],
         error: false,
@@ -721,8 +721,8 @@ describe('真实 AgentMessageJsonCodec 历史生命周期与真实组件验收�
 
     const yoloInvocation = createInvocation('inv-yolo', 'asst-yolo', 'call-yolo', {
       status: 'SUCCEEDED',
-      approvalJson: null, // 无需审批
-      resultJson: JSON.stringify({
+      approval: null, // 无需审批
+      result: JSON.stringify({
         toolCallId: 'call-yolo',
         contents: [{ type: 'text', text: 'Auto applied' }],
         error: false,

@@ -51,9 +51,9 @@ function cancelledUserMessage(sequence: number, text: string): HarnessCancelledI
     sequence: String(sequence),
     idempotencyKey: `idempotency-${sequence}`,
     type: 'USER_MESSAGE',
-    payloadJson: JSON.stringify({
+    payload: {
       message: { role: 'USER', contents: [{ type: 'text', text }] },
-    }),
+    },
   }
 }
 
@@ -63,12 +63,12 @@ function cancelledUserResource(sequence: number, name: string): HarnessCancelled
     sequence: String(sequence),
     idempotencyKey: `idempotency-${sequence}`,
     type: 'USER_MESSAGE',
-    payloadJson: JSON.stringify({
+    payload: {
       message: {
         role: 'USER',
         contents: [{ type: 'resource', blobId: BLOB_ID, name, preview: 'preview' }],
       },
-    }),
+    },
   }
 }
 
@@ -77,7 +77,7 @@ function cancelledGoal(sequence: number, text: string): HarnessCancelledInputDTO
     sequence: String(sequence),
     idempotencyKey: `idempotency-${sequence}`,
     type: 'GOAL',
-    payloadJson: JSON.stringify({ text }),
+    payload: { text },
   }
 }
 

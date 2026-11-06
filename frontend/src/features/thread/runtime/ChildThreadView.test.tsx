@@ -47,7 +47,7 @@ function mockChildSnapshot(overrides: Partial<HarnessThreadSnapshotDTO> = {}): H
         sessionId: 'session-child',
         parentEntryId: null,
         entryType: 'CUSTOM_MESSAGE',
-        payloadJson: JSON.stringify({
+        payload: JSON.stringify({
           message: {
             role: 'USER',
             contents: [{ type: 'text', text: '历史初始任务' }],
@@ -64,7 +64,7 @@ function mockChildSnapshot(overrides: Partial<HarnessThreadSnapshotDTO> = {}): H
         type: 'CUSTOM_MESSAGE',
         state: 'QUEUED',
         idempotencyKey: 'cmd-supp-1',
-        payloadJson: JSON.stringify({
+        payload: JSON.stringify({
           message: {
             role: 'USER',
             contents: [{ type: 'text', text: '请优先补充边界测试用例' }],
@@ -75,7 +75,6 @@ function mockChildSnapshot(overrides: Partial<HarnessThreadSnapshotDTO> = {}): H
       },
     ],
     baseEntryId: null,
-    executionStatus: 'IDLE',
     activeAssistantOutput: null,
     toolInvocations: [],
     generationFailures: [],
@@ -225,7 +224,7 @@ describe('ChildThreadView 只读子观察面板 QUEUED CUSTOM_MESSAGE', () => {
           type: 'CUSTOM_MESSAGE',
           state: 'APPLIED',
           idempotencyKey: 'cmd-supp-1',
-          payloadJson: JSON.stringify({
+          payload: JSON.stringify({
             message: {
               role: 'USER',
               contents: [{ type: 'text', text: '请优先补充边界测试用例' }],
@@ -242,7 +241,7 @@ describe('ChildThreadView 只读子观察面板 QUEUED CUSTOM_MESSAGE', () => {
           sessionId: 'session-child',
           parentEntryId: 'entry-1',
           entryType: 'CUSTOM_MESSAGE',
-          payloadJson: JSON.stringify({
+          payload: JSON.stringify({
             message: {
               role: 'USER',
               contents: [{ type: 'text', text: '请优先补充边界测试用例' }],

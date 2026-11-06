@@ -158,7 +158,6 @@ function snapshot(currentThread = thread()): HarnessThreadSnapshotDTO {
     baseEntryId: null,
     entries: [],
     queuedCommands: [],
-    executionStatus: 'IDLE',
     activeAssistantOutput: null,
     toolInvocations: [],
     generationFailures: [],
@@ -173,7 +172,7 @@ function acceptedResponse(currentThread = thread()): HarnessAcceptedCommandsDTO 
     sessionId: currentThread.sessionId,
     parentEntryId: null,
     entryType: 'ROOT',
-    payloadJson: '{}',
+    payload: '{}',
     createdAt: 0,
     usageCost: null,
   }
@@ -673,7 +672,7 @@ describe('ChatWorkspacePage 新建分支路由', () => {
     sessionId: 'session-1',
     parentEntryId: null,
     entryType: 'ROOT',
-    payloadJson: '{}',
+    payload: '{}',
     createdAt: 0,
     usageCost: null,
   }
@@ -682,7 +681,7 @@ describe('ChatWorkspacePage 新建分支路由', () => {
     sessionId: 'session-1',
     parentEntryId: 'entry-1',
     entryType: 'TURN_END',
-    payloadJson: JSON.stringify({ outcome: 'COMPLETED' }),
+    payload: JSON.stringify({ outcome: 'COMPLETED' }),
     createdAt: 0,
     usageCost: null,
   }
@@ -691,7 +690,7 @@ describe('ChatWorkspacePage 新建分支路由', () => {
     sessionId: 'session-1',
     parentEntryId: 'entry-2',
     entryType: 'MESSAGE',
-    payloadJson: JSON.stringify({
+    payload: JSON.stringify({
       message: { role: 'USER', contents: [{ type: 'text', text: 'hello' }] },
     }),
     createdAt: 0,

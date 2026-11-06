@@ -122,7 +122,7 @@ const mutationReviewHarness = {
         invocationId: 'inv-write-1',
         toolName: 'write',
         argumentsJson: rawArgs,
-        approvalJson: rawApproval,
+        approval: rawApproval,
       },
     })
   },
@@ -278,7 +278,7 @@ const mutationReviewHarness = {
         invocationId: 'inv-edit-1',
         toolName: 'edit',
         argumentsJson: rawArgs,
-        approvalJson: rawApproval,
+        approval: rawApproval,
       },
     })
   },
@@ -433,7 +433,7 @@ const mutationReviewHarness = {
         invocationId: 'inv-missing-review',
         toolName: 'edit',
         argumentsJson: JSON.stringify({ path: '/src/App.tsx', old_string: 'a', new_string: 'b' }),
-        approvalJson: JSON.stringify({ required: true }),
+        approval: { required: true },
       },
     })
   },
@@ -447,14 +447,14 @@ const mutationReviewHarness = {
         invocationId: 'inv-malformed-review',
         toolName: 'edit',
         argumentsJson: JSON.stringify({ path: '/src/App.tsx', old_string: 'a', new_string: 'b' }),
-        approvalJson: JSON.stringify({
+        approval: {
           required: true,
           editReview: {
             path: '/src/App.tsx',
             diff: '+b',
             sha256: 'invalid-sha-characters',
           },
-        }),
+        },
       },
     })
   },
@@ -468,14 +468,14 @@ const mutationReviewHarness = {
         invocationId: 'inv-valid-review',
         toolName: 'edit',
         argumentsJson: JSON.stringify({ path: '/src/App.tsx', old_string: 'a', new_string: 'b' }),
-        approvalJson: JSON.stringify({
+        approval: {
           required: true,
           editReview: {
             path: '/canonical/src/App.tsx',
             diff: '-a\n+b',
             sha256: VALID_SHA,
           },
-        }),
+        },
       },
     })
   },
@@ -486,7 +486,7 @@ const mutationReviewHarness = {
       sessionId: 'sess-pw',
       parentEntryId: null,
       entryType: 'MESSAGE' as const,
-      payloadJson: JSON.stringify({
+      payload: {
         message: {
           role: 'ASSISTANT',
           contents: [
@@ -499,7 +499,7 @@ const mutationReviewHarness = {
             },
           ],
         },
-      }),
+      },
       createdAt: 1792368000,
       usageCost: null,
     }
@@ -509,7 +509,7 @@ const mutationReviewHarness = {
       sessionId: 'sess-pw',
       parentEntryId: null,
       entryType: 'MESSAGE' as const,
-      payloadJson: JSON.stringify({
+      payload: {
         message: {
           role: 'TOOL',
           contents: [
@@ -534,7 +534,7 @@ const mutationReviewHarness = {
           assistantEntryId: 'asst-durable-pw',
           callIndex: 0,
         },
-      }),
+      },
       createdAt: 1792368001,
       usageCost: null,
     }

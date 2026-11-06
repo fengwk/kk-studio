@@ -50,20 +50,20 @@ for (const scenario of ['pane-root', 'pane-child']) {
           entries: [{
             entryId: 'assistant-wait', parentEntryId: null, sessionId: 'session-wait',
             entryType: 'MESSAGE', createdAt: now,
-            payloadJson: JSON.stringify({ message: { role: 'ASSISTANT', contents: [{
+            payload: { message: { role: 'ASSISTANT', contents: [{
               type: 'tool_call', toolCallId: 'call-wait', toolName: 'bash', rendererKey: 'bash',
               argumentsJson: '{"command":"pwd","workdir":"/srv/frozen-workdir"}',
-            }] } }),
+            }] } },
           }],
           baseEntryId: null,
-          queuedCommands: [], executionStatus: 'RUNNING', activeAssistantOutput: null, generationFailures: [], stopReceipts: [], unconfirmedExecutions: [],
+          queuedCommands: [], activeAssistantOutput: null, generationFailures: [], stopReceipts: [], unconfirmedExecutions: [],
           toolInvocations: [{
             id: 'inv-wait', threadId: id, turnStartEntryId: 'turn-wait', assistantEntryId: 'assistant-wait', callIndex: 0,
             status, attempt: 1, toolCallId: 'call-wait', toolName: 'bash', rendererKey: 'bash',
             environmentId: null, requiredEnvironmentId: 'frozen-env', requiredEnvironmentName: 'archlinux',
             waitingForEnvironment: waiting, environmentWaitFreshnessAt: freshnessAt,
             argumentsJson: '{"command":"pwd","workdir":"/srv/frozen-workdir"}',
-            approvalJson: null, resultJson: null, errorJson: null, createdAt: now, updatedAt: now,
+            approval: null, result: null, error: null, createdAt: now, updatedAt: now,
           }],
         }
       } else if (path === '/api/harness/interactions') {
@@ -73,7 +73,7 @@ for (const scenario of ['pane-root', 'pane-child']) {
           owner: { kind: 'CHAT', id: 'chat-wait', title: null, link: '/chats/chat-wait' },
           toolCallId: 'approval-call', toolName: 'bash',
           argumentsJson: '{"command":"deploy --dry-run","workdir":"/srv/approval-workdir"}',
-          approvalJson: '{"required":true,"reason":"Permission rules require approval"}',
+          approval: { required: true, reason: 'Permission rules require approval' },
           createdAt: now,
         }], total: 1, nextCursor: null, freshnessAt: null }
       } else if (path.endsWith('/tree')) {
@@ -85,6 +85,8 @@ for (const scenario of ['pane-root', 'pane-child']) {
           outcome: null, updatedAt: now,
         }))
       } else if (path === '/api/platform/agents') {
+        data = []
+      } else if (path === '/api/platform/models' || path === '/api/platform/providers') {
         data = []
       } else if (path === '/api/platform/environments') {
         data = []

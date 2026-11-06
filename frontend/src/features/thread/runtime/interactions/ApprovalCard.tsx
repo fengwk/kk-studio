@@ -9,6 +9,7 @@ import { createUuid } from '@/shared/lib/uuid'
 import { Code } from '@/shared/ui/data/Mono'
 import { Button } from '@/shared/ui/controls/Button'
 import { extractApprovalEditReview } from '@/features/thread/runtime/mutation-review'
+import { parsePayload } from '@/features/thread/runtime/payload-json'
 import { previewForToolCall } from '@/features/thread/runtime/thread-panel/messages/tool-previews'
 import { ToolCallPreview } from '@/features/thread/runtime/thread-panel/messages/ToolCallPreview'
 import './interaction-cards.css'
@@ -17,7 +18,7 @@ export interface ApprovalCardProps {
   threadId: string
   invocationId: string
   toolName: string
-  approvalJson?: string | null
+  approval?: unknown
   argumentsJson?: string
   onSuccess?: () => void
 }
@@ -26,7 +27,7 @@ export function ApprovalCard({
   threadId,
   invocationId,
   toolName,
-  approvalJson,
+  approval,
   argumentsJson,
   onSuccess,
 }: ApprovalCardProps) {
@@ -40,24 +41,17 @@ export function ApprovalCard({
   // 幂等 decisionId
   const [decisionIdMap] = useState(() => new Map<string, string>())
 
-  const approvalData = useMemo(() => {
-    if (!approvalJson) return null
-    try {
-      return JSON.parse(approvalJson)
-    } catch {
-      return null
-    }
-  }, [approvalJson])
+  const approvalData = useMemo(() => parsePayload(approval), [approval])
 
-  const reason = approvalData?.reason || null
-  const decided = approvalData?.decision === 'ALLOWED' || approvalData?.decision === 'DENIED'
+  const reason = typeof approvalData.reason === 'string' ? approvalData.reason : null
+  const decided = approvalData.decision === 'ALLOWED' || approvalData.decision === 'DENIED'
 
   const normalizedTool = toolName.trim().toLowerCase()
   const isEdit = normalizedTool === 'edit'
   const isWrite = normalizedTool === 'write'
   const isMutation = isWrite || isEdit
 
-  const editReview = useMemo(() => extractApprovalEditReview(approvalJson), [approvalJson])
+  const editReview = useMemo(() => extractApprovalEditReview(approval), [approval])
   const isEditMissingReview = isEdit && !editReview
 
   const mutationPreview = useMemo(() => {

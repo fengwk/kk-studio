@@ -10,7 +10,7 @@ import {
 } from '@/features/thread/runtime/cancelled-message-parts'
 import type { HarnessCancelledInputDTO } from '@/shared/api/generated/contracts'
 
-/** Stop 回执里的 USER_MESSAGE：payloadJson 是 canonical ThreadCommandPayload JSON。 */
+/** Stop 回执里的 USER_MESSAGE：payload 是 canonical ThreadCommandPayload JSON。 */
 function cancelledMessage(
   sequence: string,
   contents: unknown[],
@@ -20,7 +20,7 @@ function cancelledMessage(
     sequence,
     idempotencyKey,
     type: 'USER_MESSAGE',
-    payloadJson: JSON.stringify({ message: { role: 'USER', contents } }),
+    payload: { message: { role: 'USER', contents } },
   }
 }
 
@@ -29,7 +29,7 @@ function cancelledGoal(sequence: string, text: string): HarnessCancelledInputDTO
     sequence,
     idempotencyKey: `g${sequence}`,
     type: 'GOAL',
-    payloadJson: JSON.stringify({ text }),
+    payload: { text },
   }
 }
 
@@ -86,7 +86,7 @@ describe('cancelled message composer recovery', () => {
       sequence: '1',
       idempotencyKey: 'c1',
       type: 'USER_MESSAGE',
-      payloadJson: 'not-json',
+      payload: 'not-json',
     }))).toEqual([{ type: 'TEXT', text: 'not-json' }])
   })
 

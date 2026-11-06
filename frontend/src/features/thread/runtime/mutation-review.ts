@@ -1,6 +1,6 @@
 /**
  * Authoritative mutation review contract and parsing for write and edit tools.
- * Sourced strictly from approvalJson.editReview or terminal result details.editReview.
+ * Sourced strictly from approval.editReview or terminal result details.editReview.
  */
 
 export interface EditReview {
@@ -48,26 +48,35 @@ export function parseEditReview(value: unknown): EditReview | null {
 }
 
 /**
- * Extracts EditReview from an approval JSON string if present and valid.
+ * Extracts EditReview from an approval JSON node if present and valid.
  */
-export function extractApprovalEditReview(approvalJson: string | null | undefined): EditReview | null {
-  if (!approvalJson) {
-    return null
-  }
-  try {
-    const parsed = JSON.parse(approvalJson)
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      return parseEditReview((parsed as Record<string, unknown>).editReview)
-    }
-  } catch {
-    // Malformed approval JSON
+export function extractApprovalEditReview(approval: unknown): EditReview | null {
+  const parsed = typeof approval === 'string'
+    ? parseStringRecord(approval)
+    : approval
+  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    return parseEditReview((parsed as Record<string, unknown>).editReview)
   }
   return null
 }
 
+function parseStringRecord(value: string): Record<string, unknown> | null {
+  if (!value) {
+    return null
+  }
+  try {
+    const parsed: unknown = JSON.parse(value)
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null
+  } catch {
+    return null
+  }
+}
+
 /**
  * Extracts EditReview strictly from canonical result details.editReview.
- * Wire result has details object; accepts either parsed ToolResult object or raw resultJson string.
+ * Wire result has details object; accepts either parsed ToolResult object or raw result string.
  */
 export function extractResultEditReview(payload: unknown): EditReview | null {
   if (!payload) {

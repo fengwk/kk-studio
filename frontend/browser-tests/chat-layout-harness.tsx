@@ -245,7 +245,7 @@ function TurnUsageHarness() {
       entryType,
       sessionId: 'usage-session',
       parentEntryId: entries.at(-1)?.entryId ?? null,
-      payloadJson: JSON.stringify(payload),
+      payload,
       createdAt: 1785232800,
       usageCost: null,
     })

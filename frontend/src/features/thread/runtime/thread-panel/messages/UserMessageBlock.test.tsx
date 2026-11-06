@@ -13,7 +13,7 @@ function message(contents: Record<string, unknown>[]) {
     sessionId: 'session-1',
     parentEntryId: null,
     entryType: 'MESSAGE',
-    payloadJson: JSON.stringify({ message: { role: 'USER', contents } }),
+    payload: JSON.stringify({ message: { role: 'USER', contents } }),
     createdAt: 1790380800,
     usageCost: null,
   }], [], [])

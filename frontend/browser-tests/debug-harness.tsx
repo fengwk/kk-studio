@@ -58,7 +58,7 @@ function createDebugData(): ThreadModelRequestDebugData {
       {
         name: 'read',
         description: 'Read file content from repository path with line range offset support.',
-        inputSchemaJson: JSON.stringify({
+        inputSchema: {
           type: 'object',
           properties: {
             path: { type: 'string', description: 'Target file path' },
@@ -66,7 +66,7 @@ function createDebugData(): ThreadModelRequestDebugData {
             limit: { type: 'number', description: 'Line count' },
           },
           required: ['path'],
-        }, null, 2),
+        },
         environmentSupport: 'ROUTED',
         requiredEnvironmentId: null,
         provenance: 'builtin:read',
@@ -76,13 +76,13 @@ function createDebugData(): ThreadModelRequestDebugData {
       {
         name: 'bash',
         description: 'Execute shell commands inside the safe execution environment.',
-        inputSchemaJson: JSON.stringify({
+        inputSchema: {
           type: 'object',
           properties: {
             command: { type: 'string', description: 'Shell command string' },
           },
           required: ['command'],
-        }, null, 2),
+        },
         environmentSupport: 'REQUIRED',
         requiredEnvironmentId: null,
         provenance: 'builtin:bash',
@@ -92,7 +92,7 @@ function createDebugData(): ThreadModelRequestDebugData {
       {
         name: 'eval',
         description: 'Direct code evaluation engine.',
-        inputSchemaJson: '{"type":"object"}',
+        inputSchema: { type: 'object' },
         environmentSupport: 'REQUIRED',
         requiredEnvironmentId: null,
         provenance: 'builtin:eval',
@@ -133,7 +133,7 @@ function createDebugData(): ThreadModelRequestDebugData {
         tools: ['read'],
         skills: [{ packageName: 'dev-tools', name: 'dev' }],
         subagents: [],
-        configurationJson: '{"tools":["read"]}',
+        configuration: { tools: ['read'] },
       },
       {
         name: 'explorer',
@@ -141,7 +141,7 @@ function createDebugData(): ThreadModelRequestDebugData {
         tools: [],
         skills: [],
         subagents: [],
-        configurationJson: '{}',
+        configuration: {},
       },
     ],
     cacheControl: {

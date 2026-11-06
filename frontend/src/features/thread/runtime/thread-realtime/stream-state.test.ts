@@ -255,7 +255,7 @@ describe('thread realtime state', () => {
     expect(parseRealtimeToolPartial(JSON.stringify({ ...base, eventId: 'A0000000-0000-4000-8000-000000000001' }))).toBeNull()
   })
 
-  it('projects terminal tool resultJson/errorJson while the durable result Entry is pending', () => {
+  it('projects terminal tool result/error while the durable result Entry is pending', () => {
     const base: ToolInvocationDTO = {
       id: 'inv-t',
       threadId: 'thread-1',
@@ -273,9 +273,9 @@ describe('thread realtime state', () => {
       requiredEnvironmentName: null,
       environmentWaitFreshnessAt: null,
       argumentsJson: '{}',
-      approvalJson: null,
-      resultJson: null,
-      errorJson: null,
+      approval: null,
+      result: null,
+      error: null,
       createdAt: 1785232800,
       updatedAt: 1785232800,
     }
@@ -286,7 +286,7 @@ describe('thread realtime state', () => {
     const result = snapshotToolStream(
       {
         ...base,
-        resultJson: JSON.stringify({
+        result: JSON.stringify({
           toolCallId: 'call-1',
           contents: [
             { type: 'text', text: 'answer' },
@@ -304,7 +304,7 @@ describe('thread realtime state', () => {
     const failedResult = snapshotToolStream(
       {
         ...base,
-        resultJson: JSON.stringify({
+        result: JSON.stringify({
           toolCallId: 'call-1',
           contents: [{ type: 'text', text: 'partial output' }],
           error: true,
@@ -316,7 +316,7 @@ describe('thread realtime state', () => {
     expect(failedResult).toMatchObject({ error: true, text: 'partial output' })
 
     const failed = snapshotToolStream(
-      { ...base, errorJson: '{"message":"boom"}' },
+      { ...base, error: '{"message":"boom"}' },
       '7',
     )
     expect(failed).toMatchObject({ error: true, errorText: 'boom' })
@@ -344,18 +344,18 @@ describe('thread realtime state', () => {
       requiredEnvironmentName: null,
       environmentWaitFreshnessAt: null,
       argumentsJson: '{}',
-      approvalJson: null,
-      resultJson: null,
-      errorJson: null,
+      approval: null,
+      result: null,
+      error: null,
       createdAt: 1785232800,
       updatedAt: 1785232800,
     }
     // 瞬时上传引用投影为 attachment；invalid result 回退
-    // 到空文本 base；空白 resultJson 不算终态；非法 errorJson 原样暴露 message。
+    // 到空文本 base；空白 result 不算终态；非法 error 原样暴露 message。
     const managed = snapshotToolStream(
       {
         ...base,
-        resultJson: JSON.stringify({
+        result: JSON.stringify({
           toolCallId: 'call-2',
           contents: [
             { type: 'text', text: 'ok' },
@@ -377,17 +377,17 @@ describe('thread realtime state', () => {
     expect(managed).toMatchObject({ text: 'ok', error: false })
 
     // 非法 result JSON 回退为空文本的活跃 base（仍标记为当前 invocation）。
-    expect(snapshotToolStream({ ...base, resultJson: 'not-json' }, '7')).toMatchObject({
+    expect(snapshotToolStream({ ...base, result: 'not-json' }, '7')).toMatchObject({
       toolCallId: 'call-2',
       text: '',
       error: false,
     })
-    // 空白 errorJson 不算终止错误。
-    expect(snapshotToolStream({ ...base, errorJson: ' ' }, '7')).toMatchObject({
+    // 空白 error 不算终止错误。
+    expect(snapshotToolStream({ ...base, error: ' ' }, '7')).toMatchObject({
       error: false,
     })
-    // 非法 errorJson 原样作为 errorText 暴露。
-    expect(snapshotToolStream({ ...base, errorJson: 'not-json' }, '7')).toMatchObject({
+    // 非法 error 原样作为 errorText 暴露。
+    expect(snapshotToolStream({ ...base, error: 'not-json' }, '7')).toMatchObject({
       error: true,
       errorText: 'not-json',
     })
@@ -792,10 +792,10 @@ describe('thread realtime state', () => {
   })
 
   it('tolerates malformed tool result/error payloads and non-record contents', () => {
-    // tool resultJson 是数组：非 record 回退为空文本 base（error 保持 false）。
+    // tool result 是数组：非 record 回退为空文本 base（error 保持 false）。
     expect(
       snapshotToolStream(
-        { ...toolInvocation(), resultJson: '[1]' } as ToolInvocationDTO,
+        { ...toolInvocation(), result: '[1]' } as ToolInvocationDTO,
         '7',
       ),
     ).toMatchObject({ text: '', error: false })
@@ -804,7 +804,7 @@ describe('thread realtime state', () => {
       snapshotToolStream(
         {
           ...toolInvocation(),
-          resultJson: JSON.stringify({
+          result: JSON.stringify({
             toolCallId: 'call-1',
             contents: [null, { type: 'text', text: 'ok' }],
             error: false,
@@ -814,7 +814,7 @@ describe('thread realtime state', () => {
         '7',
       ),
     ).toMatchObject({ text: 'ok', error: false })
-    // 非 record 的 errorJson：错误文本原样暴露。
+    // 非 record 的 error：错误文本原样暴露。
     expect(parseToolErrorText('[1]')).toBe('[1]')
     expect(parseToolErrorText('{"noMessage":1}')).toBe('{"noMessage":1}')
   })
@@ -866,9 +866,9 @@ describe('thread realtime state', () => {
       requiredEnvironmentName: null,
       environmentWaitFreshnessAt: null,
       argumentsJson: '{}',
-      approvalJson: null,
-      resultJson: null,
-      errorJson: null,
+      approval: null,
+      result: null,
+      error: null,
       createdAt: 1785232800,
       updatedAt: 1785232800,
     })
@@ -1699,9 +1699,9 @@ function toolInvocation(overrides: Partial<ToolInvocationDTO> = {}): ToolInvocat
     requiredEnvironmentName: null,
     environmentWaitFreshnessAt: null,
     argumentsJson: '{}',
-    approvalJson: null,
-    resultJson: null,
-    errorJson: null,
+    approval: null,
+    result: null,
+    error: null,
     createdAt: 1785232800,
     updatedAt: 1785232800,
     ...overrides,

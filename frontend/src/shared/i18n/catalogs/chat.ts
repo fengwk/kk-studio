@@ -1665,7 +1665,7 @@ export const chatCatalog = {
     'en-US': 'Description',
     'zh-CN': '描述',
   },
-  'ai.runtime.debug.inspector.inputSchemaJson': {
+  'ai.runtime.debug.inspector.inputSchema': {
     'en-US': 'Input Schema JSON:',
     'zh-CN': '输入 Schema JSON：',
   },
@@ -1745,10 +1745,6 @@ export const chatCatalog = {
     'en-US': 'Failed to preview request',
     'zh-CN': '请求预览失败',
   },
-  'ai.runtime.debug.inspector.draftPreviewTitle': {
-    'en-US': 'Request Preview',
-    'zh-CN': '请求预览',
-  },
   'ai.runtime.debug.inspector.historicalPreviewTitle': {
     'en-US': 'Historical Request Preview',
     'zh-CN': '历史请求预览',
@@ -1764,10 +1760,6 @@ export const chatCatalog = {
   'ai.runtime.debug.inspector.bodyByteSize': {
     'en-US': 'Payload Size',
     'zh-CN': '载荷大小',
-  },
-  'ai.runtime.debug.inspector.generatedAt': {
-    'en-US': 'Generated At',
-    'zh-CN': '生成时间',
   },
   'ai.runtime.debug.inspector.sourceHeadEntryId': {
     'en-US': 'Base Entry ID',
@@ -1788,10 +1780,6 @@ export const chatCatalog = {
   'ai.runtime.debug.previewLoadFailed': {
     'en-US': 'Failed to load request preview',
     'zh-CN': '请求预览加载失败',
-  },
-  'ai.runtime.debug.draftNotice': {
-    'en-US': 'Read-only materialization of settings and draft input at click time. This operation does not send a model request; a later send may differ.',
-    'zh-CN': '按点击时的设置与草稿输入只读物化；本次操作不调用模型，后续发送内容可能不同。',
   },
   'ai.runtime.debug.historicalNotice': {
     'en-US': 'Reconstructed from the recorded history under current catalog, provider and model definitions; not the original request sent at the time.',

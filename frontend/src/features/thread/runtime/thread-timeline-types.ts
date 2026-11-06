@@ -69,8 +69,7 @@ export interface ToolAttachment {
   blobId?: string
 }
 
-/** 由 ToolInvocation approvalJson 投影得到的、未决/已决的 Tool 审批状态。 */
-/** 投影得到的审批状态；持久化的枚举是 ALLOWED/DENIED（而非输入的 ALLOW/DENY）。 */
+/** 由 ToolInvocation approval 投影得到的、未决/已决的 Tool 审批状态。 */
 export interface ToolApprovalState {
   required: boolean
   decision: 'ALLOWED' | 'DENIED' | null
@@ -296,7 +295,7 @@ export interface ThreadModelRequestDebugData {
 export interface ThreadModelRequestDebugTool {
   name: string
   description: string
-  inputSchemaJson: string
+  inputSchema: unknown
   environmentSupport: 'NONE' | 'ROUTED' | 'REQUIRED'
   requiredEnvironmentId?: string | null
   provenance: string
@@ -323,7 +322,7 @@ export interface ThreadModelRequestDebugSubagent {
   tools: string[]
   skills: SkillRefDTO[]
   subagents: string[]
-  configurationJson: string
+  configuration: unknown
 }
 
 export interface ThreadModelRequestDebugCacheControl {
@@ -342,10 +341,10 @@ export interface ThreadModelRequestDebugFrozenInvocation {
 
 /**
  * Portable Thread Panel 消费的请求预览投影；不依赖 API DTO。
- * kind 区分草稿（绑定或本地分支）与历史条目重放，notice 是服务端的如实说明。
+ * 保留的历史 Provider 请求视图按当前定义重建，notice 是服务端的如实说明。
  */
 export interface ThreadProviderRequestPreviewData {
-  kind: string
+  kind: 'HISTORICAL_REQUEST_PREVIEW'
   providerType: string
   modelName: string
   bodyByteSize: number

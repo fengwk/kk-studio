@@ -13,7 +13,7 @@ function entry(entryId: string, parentEntryId: string | null = null): HarnessSes
     sessionId: 'session-1',
     parentEntryId,
     entryType: parentEntryId == null ? 'ROOT' : 'MESSAGE',
-    payloadJson: '{}',
+    payload: '{}',
     createdAt: 0,
     usageCost: null,
   }

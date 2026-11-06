@@ -40,7 +40,7 @@ export function InteractionCardBody({
         interactionId={item.toolInvocationId}
         threadId={item.threadId}
         argumentsJson={item.argumentsJson}
-        resultJson={null}
+        result={null}
         onSuccess={onSuccess}
       />
     )
@@ -50,7 +50,7 @@ export function InteractionCardBody({
       threadId={item.threadId}
       invocationId={item.toolInvocationId}
       toolName={item.toolName}
-      approvalJson={item.approvalJson}
+      approval={item.approval}
       argumentsJson={item.argumentsJson}
       onSuccess={onSuccess}
     />

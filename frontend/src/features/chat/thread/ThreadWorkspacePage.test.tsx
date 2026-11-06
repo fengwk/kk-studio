@@ -102,7 +102,7 @@ function snapshotWithPendingTool(targetThreadId: string): HarnessThreadSnapshotD
     sessionId: 'session-child',
     parentEntryId: null,
     entryType: 'MESSAGE',
-    payloadJson: JSON.stringify({
+    payload: JSON.stringify({
       message: {
         role: 'ASSISTANT',
         contents: [
@@ -143,20 +143,19 @@ function snapshotWithPendingTool(targetThreadId: string): HarnessThreadSnapshotD
         requiredEnvironmentName: null,
         environmentWaitFreshnessAt: null,
         argumentsJson: '{"command":"rm -rf /tmp/test"}',
-        approvalJson: JSON.stringify({
+        approval: JSON.stringify({
           required: true,
           decision: null,
           decisionId: null,
           reason: 'Dangerous shell command execution',
         }),
-        resultJson: null,
-        errorJson: null,
+        result: null,
+        error: null,
         createdAt: 1785232801,
         updatedAt: 1785232801,
       },
     ],
     baseEntryId: null,
-    executionStatus: 'IDLE',
     activeAssistantOutput: null,
     generationFailures: [],
     stopReceipts: [],
@@ -210,7 +209,7 @@ function userEntry(text: string, entryId: string): HarnessSessionEntryDTO {
     sessionId: 'session-child',
     parentEntryId: null,
     entryType: 'MESSAGE',
-    payloadJson: JSON.stringify({
+    payload: JSON.stringify({
       message: { role: 'USER', contents: [{ type: 'text', text }] },
     }),
     createdAt: 1785232800,
@@ -243,7 +242,7 @@ function snapshotFor(
           type: 'USER_MESSAGE',
           state: 'QUEUED',
           idempotencyKey: `queued-${targetThreadId}`,
-          payloadJson: JSON.stringify({
+          payload: JSON.stringify({
             message: { role: 'USER', contents: [{ type: 'text', text: 'parent queued' }] },
           }),
           cancelledAt: null,
@@ -287,7 +286,7 @@ describe('ThreadWorkspacePage', () => {
         sessionId: 'session-1',
         parentEntryId: null,
         entryType: 'ROOT',
-        payloadJson: '{}',
+        payload: '{}',
         createdAt: 0,
         usageCost: null,
       },
@@ -418,7 +417,7 @@ describe('ThreadWorkspacePage', () => {
         toolCallId: 'call-bash-1',
         toolName: 'bash',
         argumentsJson: '{"command":"rm -rf /tmp/test"}',
-        approvalJson: JSON.stringify({ reason: '需要确认', decision: null }),
+        approval: JSON.stringify({ reason: '需要确认', decision: null }),
         createdAt: 1785232801000,
       }],
       nextCursor: null,

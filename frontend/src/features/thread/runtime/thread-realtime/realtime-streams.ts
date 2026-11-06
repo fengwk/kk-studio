@@ -100,7 +100,7 @@ export function reconcileSnapshotStreams(
     clearModelRecovery()
     next = null
   } else if (snapshot.status !== 'streaming') {
-    // 持久化终态边界：resultJson/errorJson 投影无条件
+    // 持久化终态边界：result/error 投影无条件
     // 取代任何更高 sequence 的 lossy realtime overlay（流式 seq8 绝不能压过
     // 持久化 seq7 的结果）。resultEntryId == null 时投影保持可见，直到
     // 持久化 Entry 到达；期间事件处理器 fence 拒绝后续 delta。
@@ -192,7 +192,7 @@ export function reconcileSnapshotStreams(
   }
 
   // 用持久化 snapshot 对账 tool overlay。ToolResult Entry 写入与 invocation 删除
-  // 在同一事务原子提交：invocation 仍存在时，终态 resultJson/errorJson 以完整形式
+  // 在同一事务原子提交：invocation 仍存在时，终态 result/error 以完整形式
   // 投影并取代部分片段；invocation 从 snapshot 消失时才删除流。RUNNING 的
   // invocation 保留同 attempt 的部分内容。
   const streams = new Map(toolStreamsRef.current)
@@ -201,7 +201,7 @@ export function reconcileSnapshotStreams(
     activeIds.add(invocation.id)
     const existing = streams.get(invocation.id)
     const seeded = snapshotToolStream(invocation, threadId)!
-    if (invocation.resultJson != null || invocation.errorJson != null) {
+    if (invocation.result != null || invocation.error != null) {
       // 持久化终态投影优先于部分片段。
       streams.set(invocation.id, seeded)
     } else if (existing == null) {
@@ -219,7 +219,7 @@ export function reconcileSnapshotStreams(
   // 变化、终态 snapshot 和消失的 invocation 都会淘汰它们。
   const seenEventIds = new Map<string, Set<string>>()
   for (const invocation of toolInvocations) {
-    if (invocation.resultJson == null && invocation.errorJson == null) {
+    if (invocation.result == null && invocation.error == null) {
       const key = `${threadId}:${invocation.id}:${invocation.attempt}`
       const existing = toolPartialSeenEventIdsRef.current.get(key)
       if (existing != null) {
@@ -401,7 +401,7 @@ export function createRealtimeEventHandler(
     }
     // Snapshot 优先：只有 invocation 在持久化 snapshot 中仍然活跃时
     // （同 attempt、无终态 result/error）才聚合 partial。一旦终态
-    // resultJson/errorJson 成为权威（ToolResult Entry 与 invocation 删除原子
+    // result/error 成为权威（ToolResult Entry 与 invocation 删除原子
     // 提交：Entry 落地即 invocation 消失），迟到的或重复的 lossy realtime partial
     // 绝不能追加到完整的终态投影上。
     const invocation = toolInvocationsRef.current.find(
@@ -410,8 +410,8 @@ export function createRealtimeEventHandler(
     if (
       invocation == null
       || invocation.attempt !== partial.attempt
-      || invocation.resultJson != null
-      || invocation.errorJson != null
+      || invocation.result != null
+      || invocation.error != null
     ) {
       return
     }

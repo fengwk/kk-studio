@@ -9,7 +9,7 @@ import './tool-card.css'
  * - write: shows target path/workdir and exact complete content before approval in bounded scroll default expanded,
  *   preserving all whitespace and newlines without line truncation (including explicit empty files).
  * - edit: streamed incoming old/new input explicitly labeled as input, then real persisted
- *   approvalJson.editReview / result details.editReview with real multi-hunk diff, or preparing state while waiting.
+ *   approval.editReview / result details.editReview with real multi-hunk diff, or preparing state while waiting.
  */
 export function ToolCallPreview({
   preview,

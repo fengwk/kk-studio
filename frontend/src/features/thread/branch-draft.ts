@@ -178,7 +178,7 @@ export function projectPendingTarget(
 }
 
 function applySettingCommand(base: BranchDraft, command: HarnessThreadCommandDTO): BranchDraft {
-  const payload = parsePayload(command.payloadJson)
+  const payload = parsePayload(command.payload)
   switch (command.type) {
     case 'SET_AGENT': {
       const agentName = typeof payload.agentName === 'string' ? payload.agentName : base.agentName

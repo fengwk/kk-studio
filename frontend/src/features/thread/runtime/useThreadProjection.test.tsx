@@ -39,7 +39,6 @@ function createSnapshot(queuedCommands: HarnessThreadSnapshotDTO['queuedCommands
     baseEntryId: null,
     entries: [],
     queuedCommands,
-    executionStatus: 'IDLE',
     activeAssistantOutput: null,
     toolInvocations: [],
     generationFailures: [],
@@ -82,7 +81,7 @@ describe('useThreadProjection queuedCustomMessages derivation', () => {
           type: 'CUSTOM_MESSAGE',
           state: 'QUEUED',
           idempotencyKey: 'custom-1',
-          payloadJson: JSON.stringify({
+          payload: JSON.stringify({
             message: {
               role: 'USER',
               contents: [{ type: 'text', text: '补充要求：增加边界测试' }],
@@ -97,7 +96,7 @@ describe('useThreadProjection queuedCustomMessages derivation', () => {
           type: 'USER_MESSAGE',
           state: 'QUEUED',
           idempotencyKey: 'user-1',
-          payloadJson: JSON.stringify({
+          payload: JSON.stringify({
             message: {
               role: 'USER',
               contents: [{ type: 'text', text: '用户正常输入' }],
@@ -134,7 +133,7 @@ describe('useThreadProjection queuedCustomMessages derivation', () => {
           type: 'CUSTOM_MESSAGE',
           state: 'QUEUED',
           idempotencyKey: 'custom-1',
-          payloadJson: JSON.stringify({
+          payload: JSON.stringify({
             message: {
               role: 'USER',
               contents: [{ type: 'text', text: '待处理补充要求' }],
@@ -159,7 +158,7 @@ describe('useThreadProjection queuedCustomMessages derivation', () => {
           type: 'CUSTOM_MESSAGE',
           state: 'APPLIED',
           idempotencyKey: 'custom-1',
-          payloadJson: JSON.stringify({
+          payload: JSON.stringify({
             message: {
               role: 'USER',
               contents: [{ type: 'text', text: '待处理补充要求' }],

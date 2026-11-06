@@ -28,7 +28,7 @@ function sampleDebug(): HarnessModelRequestDebugDTO {
       {
         name: 'read',
         description: 'Read file',
-        inputSchemaJson: '{}',
+        inputSchema: {},
         environmentSupport: 'ROUTED',
         provenance: 'builtin:read',
         state: 'SENT',
@@ -43,7 +43,7 @@ function sampleDebug(): HarnessModelRequestDebugDTO {
         tools: ['read'],
         skills: [{ packageName: 'dev-tools', name: 'dev' }],
         subagents: [],
-        configurationJson: '{"tools":["read"]}',
+        configuration: { tools: ['read'] },
       },
     ],
     cacheControl: null,

@@ -32,7 +32,7 @@ function abortedEntry(
     sessionId: 'session-1',
     parentEntryId: '2',
     entryType: 'ASSISTANT_ABORTED',
-    payloadJson: JSON.stringify({ message }),
+    payload: JSON.stringify({ message }),
     createdAt: 1782864000,
     usageCost: null,
   }
@@ -82,7 +82,7 @@ function turnStart(executedSelection: unknown): HarnessSessionEntryDTO {
     sessionId: 'session-1',
     parentEntryId: 'root-1',
     entryType: 'TURN_START',
-    payloadJson: JSON.stringify({ reason: 'INPUT', settings, executedSelection }),
+    payload: JSON.stringify({ reason: 'INPUT', settings, executedSelection }),
     createdAt: 1792368000,
     usageCost: null,
   }
