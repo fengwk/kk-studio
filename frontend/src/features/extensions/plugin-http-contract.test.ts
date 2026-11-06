@@ -26,7 +26,7 @@ describe('plugin HTTP contract', () => {
     expect(plugins[3].desiredVersion).toBe('2')
     expect(plugins[3].appliedVersion).toBe('1')
     expect(plugins[3].applicationError).not.toBeNull()
-    expect(typeof plugins[4].expiresAt).toBe('number')
+    expect(plugins[4].expiresAt).toBe(1777574730000)
     expect(plugins[0].connectionCheckSupported).toBe(false)
     expect(plugins[4].connectionCheckSupported).toBe(true)
     const values = plugins[4].configuration.values as {
@@ -66,6 +66,7 @@ describe('plugin HTTP contract', () => {
     expect(raw).toMatchObject({
       pluginId: 'beta-deep-connected',
       appliedVersion: '8',
+      checkedAt: 1772366400000,
       reachability: 'REACHABLE',
       authentication: 'ACCEPTED',
       browserSession: 'UNKNOWN',

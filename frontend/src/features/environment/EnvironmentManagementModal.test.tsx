@@ -27,11 +27,11 @@ function testEnvironment(overrides: Partial<EnvironmentCardDTO> = {}): Environme
     status: 'READY',
     ready: true,
     statusExpiresAt: null,
-    lastSeen: 1784512800,
+    lastSeen: 1784512800000,
     capabilities: [],
     version: '1',
-    createTime: 1784505600,
-    updateTime: 1784505600,
+    createTime: 1784505600000,
+    updateTime: 1784505600000,
     ...overrides,
   }
 }
@@ -106,13 +106,13 @@ describe('EnvironmentManagementModal', () => {
   it('renders events list with distinguishable levels and empty state when none', async () => {
     const mockEvents: EnvironmentEventDTO[] = [
       {
-        time: 1784509200,
+        time: 1784509200000,
         level: 'INFO',
         type: 'READY',
         message: 'Host connected successfully',
       },
       {
-        time: 1784509500,
+        time: 1784509500000,
         level: 'WARN',
         type: 'SKILL_SYNC_FAILED',
         message: 'Failed to synchronize skill package',
