@@ -12,7 +12,6 @@ import fun.fengwk.kkstudio.platform.catalog.dto.ProviderCreateDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ProviderDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ProviderUpdateDTO;
 import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
-import fun.fengwk.kkstudio.platform.error.CatalogVersions;
 import fun.fengwk.kkstudio.platform.secret.SecretConfiguredDTO;
 import fun.fengwk.kkstudio.platform.secret.SecretUpdate;
 
@@ -69,16 +68,15 @@ public class ProviderService {
     if (updateDTO == null) {
       throw DomainException.validation(RESOURCE, RESOURCE + " body must not be null");
     }
-    String rawExpected = updateDTO.getExpectedVersion();
-    if (rawExpected == null) {
+    Long expected = updateDTO.getExpectedVersion();
+    if (expected == null) {
       throw DomainException.validation(RESOURCE, "expectedVersion is required");
     }
-    long expected = CatalogVersions.parse(rawExpected, "expectedVersion");
     Provider provider = requireProvider(name);
-    ensureExpectedVersion(provider, rawExpected, expected);
+    ensureExpectedVersion(provider, expected);
     String credential = applyCredential(updateDTO.getCredential(), provider.credential());
     Mutation mutation = mutation(updateDTO, provider.providerType());
-    return persistUpdate(applyEdits(provider, mutation, credential), rawExpected, expected);
+    return persistUpdate(applyEdits(provider, mutation, credential), expected);
   }
 
   /**
@@ -103,9 +101,7 @@ public class ProviderService {
     long expected = existing.version();
     Mutation mutation = mutation(spec, existing.providerType());
     return persistUpdate(
-        applyEdits(existing, mutation, importCredential(spec.getCredential())),
-        CatalogVersions.format(expected),
-        expected);
+        applyEdits(existing, mutation, importCredential(spec.getCredential())), expected);
   }
 
   /** 与导入写入共用静态校验，不生成连接身份或写入数据库。 */
@@ -118,18 +114,17 @@ public class ProviderService {
 
   /** 基于 (name, expectedVersion) 的原子 CAS 删除；仍被模型引用时拒绝。 */
   @Transactional
-  public void deleteProvider(String name, String expectedVersion) {
-    long expected = CatalogVersions.parse(expectedVersion, "expectedVersion");
+  public void deleteProvider(String name, long expected) {
     Provider provider = repository.getByNameForUpdate(name);
     if (provider == null) {
       throw DomainException.notFound(RESOURCE);
     }
-    ensureExpectedVersion(provider, expectedVersion, expected);
+    ensureExpectedVersion(provider, expected);
     if (repository.hasModels(name)) {
       throw DomainException.inUse(RESOURCE, RESOURCE + " in use by models: " + name);
     }
     if (!repository.deleteByName(name, expected)) {
-      throw casFailure(name, expectedVersion);
+      throw casFailure(name, expected);
     }
   }
 
@@ -172,21 +167,20 @@ public class ProviderService {
     return toDto(repository.getByName(provider.name()));
   }
 
-  private ProviderDTO persistUpdate(Provider provider, String rawExpected, long expected) {
+  private ProviderDTO persistUpdate(Provider provider, long expected) {
     if (!repository.updateByName(provider, expected)) {
-      throw casFailure(provider.name(), rawExpected);
+      throw casFailure(provider.name(), expected);
     }
     return toDto(repository.getByName(provider.name()));
   }
 
   /** CAS 落空后重读：行已消失为未找到，否则为版本冲突。 */
-  private RuntimeException casFailure(String name, String rawExpected) {
+  private RuntimeException casFailure(String name, long expected) {
     Provider reread = repository.getByName(name);
     if (reread == null) {
       return DomainException.notFound(RESOURCE);
     }
-    return DomainException.versionConflict(
-        RESOURCE, rawExpected, CatalogVersions.format(reread.version()));
+    return DomainException.versionConflict(RESOURCE, expected, reread.version());
   }
 
   private Provider requireProvider(String name) {
@@ -197,11 +191,9 @@ public class ProviderService {
     return provider;
   }
 
-  private static void ensureExpectedVersion(
-      Provider provider, String expectedVersion, long expected) {
+  private static void ensureExpectedVersion(Provider provider, long expected) {
     if (provider.version() != expected) {
-      throw DomainException.versionConflict(
-          RESOURCE, expectedVersion, CatalogVersions.format(provider.version()));
+      throw DomainException.versionConflict(RESOURCE, expected, provider.version());
     }
   }
 
@@ -342,9 +334,9 @@ public class ProviderService {
         provider.providerType().promptCacheRetentions().stream()
             .sorted(Comparator.comparingInt(PromptCacheRetention::ordinal))
             .toList());
-    dto.setVersion(CatalogVersions.format(provider.version()));
-    dto.setCreatedAt(provider.createTime());
-    dto.setUpdatedAt(provider.updateTime());
+    dto.setVersion(provider.version());
+    dto.setCreatedAt(provider.createdAt());
+    dto.setUpdatedAt(provider.updatedAt());
     return dto;
   }
 

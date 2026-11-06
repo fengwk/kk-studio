@@ -172,7 +172,7 @@ describe('skill package upload', () => {
     expect(reserve).toHaveBeenCalledWith({
       filename: 'skills.tar.gz',
       mediaType: 'application/gzip',
-      sizeBytes: 10,
+      sizeBytes: '10',
       sha256: 'a'.repeat(64),
     })
     expect(complete).toHaveBeenCalledWith('upload-1')

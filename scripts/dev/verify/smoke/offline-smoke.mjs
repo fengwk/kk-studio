@@ -146,7 +146,7 @@ async function uploadBlob(client, image) {
   const reservation = await client.jsonCall('POST', '/api/platform/storage/uploads', {
     filename: 'tiny.png',
     mediaType: 'image/png',
-    sizeBytes: image.length,
+    sizeBytes: String(image.length),
     sha256,
   })
   assert.ok(!('bucket' in reservation) && !('key' in reservation))
@@ -192,8 +192,8 @@ async function createStubCatalog({ jsonCall }) {
     providerType: 'openai',
     baseUrl: 'http://stub.local:8080/v1',
     credential: 'stub-key',
-    modelCallTimeoutMillis: 1_800_000,
-    modelCallIdleTimeoutMillis: 120_000,
+    modelCallTimeoutMillis: '1800000',
+    modelCallIdleTimeoutMillis: '120000',
   })
   assert.equal(stub.credential?.configured, true, JSON.stringify(stub))
   // 缺省 pricing 由服务端归一为完整零价格定义。

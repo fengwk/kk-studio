@@ -189,16 +189,16 @@ describe('AI domain utilities', () => {
       providerType: 'openai_responses',
       baseUrl: 'https://api.minimax.io/v1',
       credential: 'secret',
-      modelCallTimeoutMillis: 120000,
-      modelCallIdleTimeoutMillis: 3000,
+      modelCallTimeoutMillis: '120000',
+      modelCallIdleTimeoutMillis: '3000',
       modelHttpRetryStatusCodes: null,
     })
     expect(toEditableProviderUpdate(providerInput)).toEqual({
       description: 'provider desc',
       baseUrl: 'https://api.minimax.io/v1',
       credential: { operation: 'SET', value: 'secret' },
-      modelCallTimeoutMillis: 120000,
-      modelCallIdleTimeoutMillis: 3000,
+      modelCallTimeoutMillis: '120000',
+      modelCallIdleTimeoutMillis: '3000',
       modelHttpRetryStatusCodes: null,
     })
 
@@ -389,8 +389,8 @@ describe('AI domain utilities', () => {
         providerType: 'openai',
         baseUrl: null,
         credential: { configured: false },
-        modelCallTimeoutMillis: 1800000,
-        modelCallIdleTimeoutMillis: 120000,
+        modelCallTimeoutMillis: '1800000',
+        modelCallIdleTimeoutMillis: '120000',
         version: '1',
         createdAt: 1781920800,
         updatedAt: 1781920800,

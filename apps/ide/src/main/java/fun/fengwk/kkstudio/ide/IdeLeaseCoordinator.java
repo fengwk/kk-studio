@@ -4,7 +4,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import fun.fengwk.kkstudio.common.id.Uuids;
-import fun.fengwk.kkstudio.common.number.DecimalLongs;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewsDTO;
@@ -143,7 +142,7 @@ public final class IdeLeaseCoordinator {
         try {
           UUID viewId = Uuids.parseCanonical(view.getViewId(), "viewId");
           UUID documentId = Uuids.parseCanonical(view.getDocumentId(), "documentId");
-          long epoch = DecimalLongs.parsePositive(view.getBindingEpoch(), "bindingEpoch");
+          long epoch = requirePositiveEpoch(view.getBindingEpoch());
           if (hasExactProof(proofs.get(), environmentId, viewId, documentId, epoch)) {
             bindings.add(new DaemonIdeLease.Binding(viewId, documentId, epoch));
           }
@@ -164,6 +163,13 @@ public final class IdeLeaseCoordinator {
       log.warn(
           "IDE lease send failed for environment {} round {}", environmentId, ideLeaseRound, error);
     }
+  }
+
+  private static long requirePositiveEpoch(Long value) {
+    if (value == null || value <= 0) {
+      throw new IllegalArgumentException("bindingEpoch must be positive");
+    }
+    return value;
   }
 
   private static boolean hasExactProof(

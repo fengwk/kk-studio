@@ -64,7 +64,7 @@ class EnvironmentRuntimeControllerTest {
   @Test
   void runtimeEndpointReturnsCurrentSnapshotFromLocalOwner() throws Exception {
     when(environmentUpdateService.runtimeStatus(EnvironmentId.of(ENV_ID)))
-        .thenReturn(runtimeStatus("7", "1.0.9", null));
+        .thenReturn(runtimeStatus(7L, "1.0.9", null));
 
     mockMvc
         .perform(get("/api/platform/environments/" + ENV_ID + "/runtime"))
@@ -92,7 +92,7 @@ class EnvironmentRuntimeControllerTest {
         ClusterOwnerRoute.remote(UUID.randomUUID(), URI.create("https://owner.internal"));
     when(clusterNodeRegistry.route(any())).thenReturn(Optional.of(remote));
     when(runtimeOwnerClient.runtimeStatus(remote, EnvironmentId.of(ENV_ID)))
-        .thenReturn(runtimeStatus("9", "1.0.9", null));
+        .thenReturn(runtimeStatus(9L, "1.0.9", null));
 
     mockMvc
         .perform(get("/api/platform/environments/" + ENV_ID + "/runtime"))
@@ -106,7 +106,7 @@ class EnvironmentRuntimeControllerTest {
   void startUpdateReturnsUnconfirmedCommandStatus() throws Exception {
     EnvironmentUpdateStartDTO started = new EnvironmentUpdateStartDTO();
     started.setCommandStatus(EnvironmentUpdateCommandStatus.SENT_UNCONFIRMED);
-    started.setRuntimeStatus(runtimeStatus("7", "1.0.9", null));
+    started.setRuntimeStatus(runtimeStatus(7L, "1.0.9", null));
     when(environmentUpdateService.startUpdate(EnvironmentId.of(ENV_ID))).thenReturn(started);
 
     mockMvc
@@ -124,7 +124,7 @@ class EnvironmentRuntimeControllerTest {
     when(clusterNodeRegistry.route(any())).thenReturn(Optional.of(remote));
     EnvironmentUpdateStartDTO started = new EnvironmentUpdateStartDTO();
     started.setCommandStatus(EnvironmentUpdateCommandStatus.SENT_UNCONFIRMED);
-    started.setRuntimeStatus(runtimeStatus("8", "1.0.9", null));
+    started.setRuntimeStatus(runtimeStatus(8L, "1.0.9", null));
     when(runtimeOwnerClient.startUpdate(remote, EnvironmentId.of(ENV_ID))).thenReturn(started);
 
     mockMvc
@@ -135,7 +135,7 @@ class EnvironmentRuntimeControllerTest {
   }
 
   private static EnvironmentRuntimeStatusDTO runtimeStatus(
-      String revision, String daemonVersion, EnvironmentUpdateProgressDTO update) {
+      long revision, String daemonVersion, EnvironmentUpdateProgressDTO update) {
     EnvironmentRuntimeDTO status = new EnvironmentRuntimeDTO();
     status.setDaemonVersion(daemonVersion);
     status.setUpdate(update);

@@ -91,7 +91,7 @@ export function useCanvasUploadPipeline(options: CanvasUploadPipelineOptions): C
       const reservation = await service.reserveUpload({
         filename: file.name,
         mediaType: descriptor.mediaType,
-        sizeBytes: file.size,
+        sizeBytes: String(file.size),
         sha256,
       })
       if (!active()) {

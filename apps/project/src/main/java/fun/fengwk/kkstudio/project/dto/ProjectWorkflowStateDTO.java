@@ -29,7 +29,7 @@ public class ProjectWorkflowStateDTO {
   private @Nullable String instructions;
 
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private @Nullable String maxRuns;
+  private @Nullable Long maxRuns;
 
   private @Nullable Boolean enabled;
   private @Nullable List<String> next;

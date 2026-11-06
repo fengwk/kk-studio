@@ -18,10 +18,10 @@ import java.util.List;
 @Data
 public class HarnessThreadSnapshotDTO {
   /**
-   * Thread 结构与控制状态的 durable invalidation cursor：strict non-negative decimal string，等于 {@link
-   * #thread} 的 version；不是完整快照 ETag。
+   * Thread 结构与控制状态的 durable invalidation cursor：strict non-negative integer，等于 {@link #thread} 的
+   * version；不是完整快照 ETag。
    */
-  private String version;
+  private Long version;
 
   /** 同一数据库快照下的完整 Thread 投影。 */
   private HarnessThreadDTO thread;

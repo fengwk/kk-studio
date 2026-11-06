@@ -143,7 +143,7 @@ describe('McpServersPage', () => {
         url: 'https://example.com/mcp',
         headers: { operation: 'SET', value: '{"Authorization":"Bearer secret"}' },
         enabled: true,
-        timeoutMillis: 60000,
+        timeoutMillis: '60000',
       })
     })
   })
@@ -166,7 +166,7 @@ describe('McpServersPage', () => {
         name: 'no_headers',
         url: 'https://example.com/mcp',
         enabled: true,
-        timeoutMillis: 60000,
+        timeoutMillis: '60000',
       })
     })
   })
@@ -228,7 +228,7 @@ describe('McpServersPage', () => {
         url: 'https://example.com/api-v2',
         headers: { operation: 'KEEP' },
         enabled: true,
-        timeoutMillis: 30000,
+        timeoutMillis: '30000',
       })
     })
   })
@@ -257,7 +257,7 @@ describe('McpServersPage', () => {
         url: 'https://example.com/mcp',
         headers: { operation: 'SET', value: '{"X-Api-Key":"key_123"}' },
         enabled: true,
-        timeoutMillis: 30000,
+        timeoutMillis: '30000',
       })
     })
 
@@ -272,7 +272,7 @@ describe('McpServersPage', () => {
         url: 'https://example.com/mcp',
         headers: { operation: 'CLEAR' },
         enabled: true,
-        timeoutMillis: 30000,
+        timeoutMillis: '30000',
       })
     })
   })

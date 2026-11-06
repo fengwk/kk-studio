@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -21,11 +22,12 @@ import org.junit.jupiter.api.Test;
 import org.springframework.format.support.FormattingConversionService;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.http.converter.StringHttpMessageConverter;
+import org.springframework.http.converter.json.JacksonJsonHttpMessageConverter;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
-import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.platform.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentService;
@@ -39,8 +41,11 @@ import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentInstallConfigUpda
 import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentStatus;
 import fun.fengwk.kkstudio.platform.environment.http.EnvironmentController;
 import fun.fengwk.kkstudio.platform.i18n.MessageService;
+import fun.fengwk.kkstudio.web.HttpBoundaryConfiguration;
+import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
 import fun.fengwk.kkstudio.web.advice.ProblemAdvice;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -55,15 +60,20 @@ class EnvironmentControllerTest {
   @BeforeEach
   void setUp() {
     environmentService = mock(EnvironmentService.class);
-    // 与应用一致的路径参数词汇：Daemon 操作系统使用小写 wire 值，而不是枚举常量名。
+    // 复用生产 HTTP 边界：同一严格 mapper、同一 String→Long/UUID/操作系统转换器与绑定 advice。
+    HttpBoundaryConfiguration boundary =
+        new HttpBoundaryConfiguration(StrictHttpJsonMapperTestSupport.get());
     FormattingConversionService conversion = new FormattingConversionService();
-    conversion.addConverter(String.class, UUID.class, value -> Uuids.parseCanonical(value, "UUID"));
-    conversion.addConverter(
-        String.class, DaemonOperatingSystem.class, DaemonOperatingSystem::fromWireValue);
+    boundary.addFormatters(conversion);
     mockMvc =
         MockMvcBuilders.standaloneSetup(new EnvironmentController(environmentService))
             .setConversionService(conversion)
-            .setControllerAdvice(new ProblemAdvice(new MessageService()))
+            .setMessageConverters(
+                new StringHttpMessageConverter(StandardCharsets.UTF_8),
+                new JacksonJsonHttpMessageConverter(StrictHttpJsonMapperTestSupport.strictHttp()))
+            .setControllerAdvice(
+                new HttpBoundaryConfiguration.CanonicalUuidBinding(),
+                new ProblemAdvice(new MessageService()))
             .build();
   }
 
@@ -193,7 +203,7 @@ class EnvironmentControllerTest {
     EnvironmentDTO environment = new EnvironmentDTO();
     environment.setId(ENV_ID.toString());
     environment.setRegistrationToken("new-secret-token");
-    when(environmentService.rotateToken(eq(EnvironmentId.of(ENV_ID)), eq("0")))
+    when(environmentService.rotateToken(eq(EnvironmentId.of(ENV_ID)), eq(0L)))
         .thenReturn(environment);
 
     mockMvc
@@ -205,7 +215,7 @@ class EnvironmentControllerTest {
         .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"))
         .andExpect(jsonPath("$.registrationToken").value("new-secret-token"));
 
-    verify(environmentService).rotateToken(EnvironmentId.of(ENV_ID), "0");
+    verify(environmentService).rotateToken(EnvironmentId.of(ENV_ID), 0L);
   }
 
   /** 意图：验证 DELETE /api/platform/environments/{id} 通过 query param 传递 expectedVersion 并返回 204。 */
@@ -215,7 +225,45 @@ class EnvironmentControllerTest {
         .perform(delete("/api/platform/environments/" + ENV_ID).param("expectedVersion", "0"))
         .andExpect(status().isNoContent());
 
-    verify(environmentService).delete(EnvironmentId.of(ENV_ID), "0");
+    verify(environmentService).delete(EnvironmentId.of(ENV_ID), 0L);
+  }
+
+  /** 缺失 expectedVersion 的请求体必须在 HTTP 边界按校验失败拒绝，不能以缺省 0 参与 CAS。 */
+  @Test
+  void rejectsMissingExpectedVersionInBody() throws Exception {
+    mockMvc
+        .perform(
+            post("/api/platform/environments/" + ENV_ID + "/rotate-token")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("validation"));
+    verifyNoInteractions(environmentService);
+  }
+
+  /** 非规范 query expectedVersion 必须在真实严格转换器处拒绝，不进入领域服务。 */
+  @Test
+  void rejectsNonCanonicalExpectedVersionInQuery() throws Exception {
+    mockMvc
+        .perform(delete("/api/platform/environments/" + ENV_ID).param("expectedVersion", " 0"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("validation"));
+    verifyNoInteractions(environmentService);
+  }
+
+  /** 非规范请求体 expectedVersion 必须在真实严格 mapper 处拒绝，不进入领域服务。 */
+  @Test
+  void rejectsNonCanonicalExpectedVersionInBody() throws Exception {
+    mockMvc
+        .perform(
+            put("/api/platform/environments/" + ENV_ID + "/install-settings")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    "{\"expectedVersion\":\" 0\",\"installConfig\":{\"operatingSystem\":\"linux\","
+                        + "\"daemon\":{\"studioUrl\":\"https://studio.example.com\"}}}"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("validation"));
+    verifyNoInteractions(environmentService);
   }
 
   /** 意图：Environment 直接暴露连接行保留的最近一次 READY 宿主 metadata，操作系统按 wire 值输出。 */
@@ -263,7 +311,7 @@ class EnvironmentControllerTest {
     EnvironmentInstallCodeDTO issued = new EnvironmentInstallCodeDTO();
     issued.setCode("short-code");
     issued.setExpiresAt(Instant.parse("2026-10-05T00:05:00Z"));
-    when(environmentService.issueInstallCode(EnvironmentId.of(ENV_ID), "4")).thenReturn(issued);
+    when(environmentService.issueInstallCode(EnvironmentId.of(ENV_ID), 4L)).thenReturn(issued);
 
     mockMvc
         .perform(
@@ -275,7 +323,7 @@ class EnvironmentControllerTest {
         .andExpect(jsonPath("$.code").value("short-code"))
         .andExpect(jsonPath("$.expiresAt").exists())
         .andExpect(jsonPath("$.registrationToken").doesNotExist());
-    verify(environmentService).issueInstallCode(EnvironmentId.of(ENV_ID), "4");
+    verify(environmentService).issueInstallCode(EnvironmentId.of(ENV_ID), 4L);
   }
 
   /** 错误 code 必须保持 HTTP 400，不能按成功脚本返回。 */

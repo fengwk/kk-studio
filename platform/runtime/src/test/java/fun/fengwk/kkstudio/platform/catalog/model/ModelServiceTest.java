@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.platform.catalog.model;
 
 import static fun.fengwk.kkstudio.platform.catalog.model.ModelTestData.buildConfig;
 import static fun.fengwk.kkstudio.platform.catalog.model.ModelTestData.executable;
+import static fun.fengwk.kkstudio.platformtest.harness.HarnessRuntimeTestFixtures.jsonObject;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -13,6 +14,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
@@ -41,9 +43,7 @@ import fun.fengwk.kkstudio.platform.configsync.ConfigSyncService;
 import fun.fengwk.kkstudio.platform.configsync.dto.ConfigSyncImportRequestDTO;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -88,7 +88,7 @@ public class ModelServiceTest extends PostgresSpringTestSupport {
         other,
         "other",
         original);
-    assertThrows(DomainException.class, () -> agentModelService.deleteModel(original, "0"));
+    assertThrows(DomainException.class, () -> agentModelService.deleteModel(original, 0L));
     assertTrue(agentModelRepository.hasVariantReferences(original, "default"));
     assertFalse(agentModelRepository.hasVariantReferences(original, "other"));
     ModelDTO result =
@@ -129,7 +129,7 @@ public class ModelServiceTest extends PostgresSpringTestSupport {
     ModelDTO model = agentModelService.createModel(model(provider.getName(), modelName));
     assertEquals(provider.getName(), single(model).getProviderName());
     assertEquals(ModelKind.MODEL, kindOf(model));
-    assertEquals("0", model.getVersion());
+    assertEquals(0L, model.getVersion());
     assertThrows(
         DomainException.class,
         () -> agentModelService.createModel(model(provider.getName(), modelName)));
@@ -151,7 +151,7 @@ public class ModelServiceTest extends PostgresSpringTestSupport {
     SingleModelUpdateDTO update = modelUpdate(model, modelName, "updated");
     ModelDTO updated = agentModelService.updateModel(modelName, update);
     assertEquals("updated", updated.getDescription());
-    assertEquals("1", updated.getVersion());
+    assertEquals(1L, updated.getVersion());
     assertTrue(
         agentModelService.listModels().stream()
             .anyMatch(candidate -> candidate.getName().equals(modelName)));
@@ -161,13 +161,13 @@ public class ModelServiceTest extends PostgresSpringTestSupport {
     assertThrows(DomainException.class, () -> agentModelService.updateModel(modelName, stale));
 
     agentModelService.deleteModel(modelName, updated.getVersion());
-    assertThrows(DomainException.class, () -> agentModelService.deleteModel(modelName, "0"));
+    assertThrows(DomainException.class, () -> agentModelService.deleteModel(modelName, 0L));
     // 硬删除：同名立即可重建，重建后解析到新行。
     ModelDTO recreated = agentModelService.createModel(model(provider.getName(), modelName));
-    assertEquals("0", recreated.getVersion());
+    assertEquals(0L, recreated.getVersion());
     agentModelService.deleteModel(modelName, recreated.getVersion());
-    agentProviderService.deleteProvider(provider.getName(), "0");
-    agentProviderService.deleteProvider(otherProvider.getName(), "0");
+    agentProviderService.deleteProvider(provider.getName(), 0L);
+    agentProviderService.deleteProvider(otherProvider.getName(), 0L);
   }
 
   @Test
@@ -187,15 +187,16 @@ public class ModelServiceTest extends PostgresSpringTestSupport {
 
     String agentName = "agent-ref-" + suffix;
     AgentDTO agentDto = agentService.createAgent(agent(originalModel, agentName));
-    assertEquals(originalModel, agentDto.getExecution().getSettings().get("modelName"));
+    assertEquals(
+        originalModel, agentDto.getExecution().getSettings().get("modelName").stringValue());
 
-    insertCooldown(group.getName(), originalModel, "default", Long.parseLong(group.getVersion()));
+    insertCooldown(group.getName(), originalModel, "default", group.getVersion());
 
     SingleModelUpdateDTO renameReq = modelUpdate(origDto, renamedModel, "renamed desc");
     ModelDTO renamedDto = agentModelService.updateModel(originalModel, renameReq);
     assertEquals(renamedModel, renamedDto.getName());
     assertEquals(providerName, single(renamedDto).getProviderName());
-    assertEquals("1", renamedDto.getVersion());
+    assertEquals(1L, renamedDto.getVersion());
     assertEquals(origDto.getCreatedAt(), renamedDto.getCreatedAt());
 
     assertThrows(
@@ -206,15 +207,16 @@ public class ModelServiceTest extends PostgresSpringTestSupport {
             .filter(candidate -> candidate.getName().equals(agentName))
             .findFirst()
             .orElseThrow();
-    assertEquals(renamedModel, updatedAgent.getExecution().getSettings().get("modelName"));
-    assertEquals("1", updatedAgent.getVersion());
+    assertEquals(
+        renamedModel, updatedAgent.getExecution().getSettings().get("modelName").stringValue());
+    assertEquals(1L, updatedAgent.getVersion());
 
     ModelDTO renamedGroup =
         agentModelService.listModels().stream()
             .filter(candidate -> candidate.getName().equals(group.getName()))
             .findFirst()
             .orElseThrow();
-    assertEquals("1", renamedGroup.getVersion());
+    assertEquals(1L, renamedGroup.getVersion());
     assertEquals(renamedModel, groupOf(renamedGroup).getGroup().getMembers().get(0).getModelName());
     assertEquals(
         0,
@@ -231,7 +233,7 @@ public class ModelServiceTest extends PostgresSpringTestSupport {
             .filter(candidate -> candidate.getName().equals(renamedModel))
             .findFirst()
             .orElseThrow();
-    assertEquals("1", unchanged.getVersion());
+    assertEquals(1L, unchanged.getVersion());
     assertEquals("renamed desc", unchanged.getDescription());
 
     // 组仍引用单 Model 时不可删除；删除组后引用消失。
@@ -249,8 +251,8 @@ public class ModelServiceTest extends PostgresSpringTestSupport {
         () -> agentModelService.deleteModel(renamedModel, unchanged.getVersion()));
     agentService.deleteAgent(agentName, agentAfterCollision.getVersion());
     agentModelService.deleteModel(renamedModel, unchanged.getVersion());
-    agentModelService.deleteModel(existingModel, "0");
-    agentProviderService.deleteProvider(providerName, "0");
+    agentModelService.deleteModel(existingModel, 0L);
+    agentProviderService.deleteProvider(providerName, 0L);
   }
 
   @Test
@@ -286,7 +288,7 @@ public class ModelServiceTest extends PostgresSpringTestSupport {
 
     agentModelService.deleteModel(group.getName(), group.getVersion());
     agentModelService.deleteModel(model.getName(), model.getVersion());
-    agentProviderService.deleteProvider(providerName, "0");
+    agentProviderService.deleteProvider(providerName, 0L);
   }
 
   /** 真实 PostgreSQL 主键决定全局名称竞争：并发 create 只允许一个成功。 */
@@ -317,7 +319,7 @@ public class ModelServiceTest extends PostgresSpringTestSupport {
       ModelDTO created =
           outcomes.stream().filter(Outcome::succeeded).findFirst().orElseThrow().value();
       agentModelService.deleteModel(created.getName(), created.getVersion());
-      agentProviderService.deleteProvider(provider.getName(), "0");
+      agentProviderService.deleteProvider(provider.getName(), 0L);
     } finally {
       executor.shutdownNow();
     }
@@ -366,7 +368,7 @@ public class ModelServiceTest extends PostgresSpringTestSupport {
               .orElseThrow();
       agentModelService.deleteModel(renamed.getName(), renamed.getVersion());
       agentModelService.deleteModel(untouched.getName(), untouched.getVersion());
-      agentProviderService.deleteProvider(provider.getName(), "0");
+      agentProviderService.deleteProvider(provider.getName(), 0L);
     } finally {
       executor.shutdownNow();
     }
@@ -473,7 +475,7 @@ public class ModelServiceTest extends PostgresSpringTestSupport {
       agentModelService.deleteModel(updated.getName(), updated.getVersion());
       agentModelService.deleteModel(oldMember.getName(), oldMember.getVersion());
       agentModelService.deleteModel(newMember.getName(), newMember.getVersion());
-      agentProviderService.deleteProvider(provider.getName(), "0");
+      agentProviderService.deleteProvider(provider.getName(), 0L);
     } finally {
       releaseMemberLock.countDown();
       executor.shutdownNow();
@@ -532,9 +534,9 @@ public class ModelServiceTest extends PostgresSpringTestSupport {
   private AgentCreateDTO agent(String model, String name) {
     AgentCreateDTO dto = new AgentCreateDTO();
     dto.setName(name);
-    Map<String, Object> settings = new HashMap<>();
+    ObjectNode settings = jsonObject();
     settings.put("modelName", model);
-    settings.put("variant", null);
+    settings.putNull("variant");
     HarnessExecutionSelectionDTO execution = new HarnessExecutionSelectionDTO();
     execution.setDriver(BuiltinExecution.DRIVER);
     execution.setSettings(settings);

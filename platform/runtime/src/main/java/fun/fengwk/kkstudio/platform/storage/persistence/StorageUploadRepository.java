@@ -26,8 +26,7 @@ public class StorageUploadRepository {
 
   private static final String COLUMNS =
       "id, candidate_blob_id, blob_id, filename, declared_media_type, declared_size, "
-          + "declared_sha256, cleanup_requested_at, cleanup_token, cleanup_until, "
-          + "created_at as create_time";
+          + "declared_sha256, cleanup_requested_at, cleanup_token, cleanup_until, created_at";
 
   private static final String SELECT_SQL = "select " + COLUMNS + " from storage_upload";
 
@@ -38,7 +37,7 @@ public class StorageUploadRepository {
           declared_size, declared_sha256, created_at
       ) values (
           :id, :candidateBlobId, :blobId, :filename, :declaredMediaType,
-          :declaredSize, :declaredSha256, :createTime
+          :declaredSize, :declaredSha256, :createdAt
       )
       """;
 
@@ -70,7 +69,7 @@ public class StorageUploadRepository {
             .param("declaredMediaType", upload.getDeclaredMediaType())
             .param("declaredSize", upload.getDeclaredSize())
             .param("declaredSha256", upload.getDeclaredSha256())
-            .param("createTime", PostgresJdbcTypes.toOffsetDateTime(upload.getCreateTime()))
+            .param("createdAt", PostgresJdbcTypes.toOffsetDateTime(upload.getCreatedAt()))
             .update()
         == 1;
   }
@@ -208,8 +207,8 @@ public class StorageUploadRepository {
     upload.setCleanupToken(rs.getObject("cleanup_token", UUID.class));
     upload.setCleanupUntil(
         PostgresJdbcTypes.toInstant(rs.getObject("cleanup_until", OffsetDateTime.class)));
-    upload.setCreateTime(
-        PostgresJdbcTypes.toInstant(rs.getObject("create_time", OffsetDateTime.class)));
+    upload.setCreatedAt(
+        PostgresJdbcTypes.toInstant(rs.getObject("created_at", OffsetDateTime.class)));
     return upload;
   }
 }

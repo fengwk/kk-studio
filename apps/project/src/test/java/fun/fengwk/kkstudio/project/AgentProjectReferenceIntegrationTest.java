@@ -33,7 +33,7 @@ class AgentProjectReferenceIntegrationTest extends ProjectTestSupport {
     assertNull(agentRepository.getByName(agent));
   }
 
-  private String currentVersion(String agent) {
-    return String.valueOf(agentRepository.getByName(agent).version());
+  private long currentVersion(String agent) {
+    return agentRepository.getByName(agent).version();
   }
 }

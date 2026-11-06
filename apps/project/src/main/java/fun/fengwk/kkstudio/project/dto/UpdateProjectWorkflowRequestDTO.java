@@ -12,6 +12,6 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 public class UpdateProjectWorkflowRequestDTO {
 
-  private String expectedVersion;
+  private Long expectedVersion;
   private ProjectWorkflowDTO workflow;
 }

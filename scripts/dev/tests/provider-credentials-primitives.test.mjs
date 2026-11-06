@@ -74,15 +74,15 @@ test('test intent: an update payload inherits the backend description, version a
   const payload = buildPayload('https://api.example.com/v1', 'test-secret', {
     description: 'Custom Description',
     providerType: 'openai_responses',
-    modelCallTimeoutMillis: 600000,
-    modelCallIdleTimeoutMillis: 50000,
+    modelCallTimeoutMillis: '9223372036854775807',
+    modelCallIdleTimeoutMillis: '50000',
     version: '7',
   })
 
   assert.equal(payload.description, 'Custom Description')
   assert.equal(payload.expectedVersion, '7')
-  assert.equal(payload.modelCallTimeoutMillis, 600000)
-  assert.equal(payload.modelCallIdleTimeoutMillis, 50000)
+  assert.equal(payload.modelCallTimeoutMillis, '9223372036854775807')
+  assert.equal(payload.modelCallIdleTimeoutMillis, '50000')
   assert.equal(payload.baseUrl, 'https://api.example.com/v1')
   assert.deepEqual(payload.credential, { operation: 'SET', value: 'test-secret' })
 })
@@ -96,7 +96,7 @@ test('test intent: missing timeouts and description fall back to platform defaul
     requiresV1Suffix: false,
     defaultDescription: 'Default Mock Description.',
   }
-  const payload = buildPayload('https://api.example.com', 'test-secret', { version: 3 }, spec)
+  const payload = buildPayload('https://api.example.com', 'test-secret', { version: '3' }, spec)
 
   assert.equal(payload.expectedVersion, '3')
   assert.equal(payload.description, 'Default Mock Description.')

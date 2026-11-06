@@ -17,5 +17,5 @@ public class SkillPackageStagingPublishDTO {
   private @Nullable String description;
 
   /** 客户端已展示的 CAS 版本号；新建时为 null。 */
-  private @Nullable String expectedVersion;
+  private @Nullable Long expectedVersion;
 }

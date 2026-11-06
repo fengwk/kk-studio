@@ -1,11 +1,20 @@
 import type { ProviderDraft } from '@/features/catalog/ai-console-types'
-import { numberToNull, trimToNull } from '@/features/catalog/ai-resource-draft-primitives'
+import { trimToNull } from '@/features/catalog/ai-resource-draft-primitives'
 import { assembleHttpStatusCodeList } from '@/shared/lib/integer-list'
 import type {
   ProviderCreateDTO,
   ProviderDTO,
   ProviderUpdateDTO,
 } from '@/shared/api/generated/contracts'
+
+function timeoutToNull(value: string): string | null {
+  const text = trimToNull(value)
+  if (text === null) return null
+  if (!/^(0|[1-9][0-9]*)$/.test(text) || BigInt(text) > 9223372036854775807n) {
+    throw new Error('provider timeout must be a canonical non-negative integer')
+  }
+  return text
+}
 
 export function emptyProviderDraft(): ProviderDraft {
   return {
@@ -43,8 +52,8 @@ export function toEditableProvider(draft: ProviderDraft): ProviderCreateDTO {
     providerType: draft.providerType,
     baseUrl: trimToNull(draft.baseUrl),
     credential: trimToNull(draft.credential),
-    modelCallTimeoutMillis: numberToNull(draft.modelCallTimeoutMillis),
-    modelCallIdleTimeoutMillis: numberToNull(draft.modelCallIdleTimeoutMillis),
+    modelCallTimeoutMillis: timeoutToNull(draft.modelCallTimeoutMillis),
+    modelCallIdleTimeoutMillis: timeoutToNull(draft.modelCallIdleTimeoutMillis),
     modelHttpRetryStatusCodes:
       draft.modelHttpRetryStatusCodes === null
         ? null
@@ -58,8 +67,8 @@ export function toEditableProviderUpdate(
   draft: ProviderDraft,
 ): Omit<ProviderUpdateDTO, 'expectedVersion'> {
   const credential = trimToNull(draft.credential)
-  const modelCallTimeoutMillis = numberToNull(draft.modelCallTimeoutMillis)
-  const modelCallIdleTimeoutMillis = numberToNull(draft.modelCallIdleTimeoutMillis)
+  const modelCallTimeoutMillis = timeoutToNull(draft.modelCallTimeoutMillis)
+  const modelCallIdleTimeoutMillis = timeoutToNull(draft.modelCallIdleTimeoutMillis)
   if (modelCallTimeoutMillis === null || modelCallIdleTimeoutMillis === null) {
     throw new Error('provider timeouts are required')
   }

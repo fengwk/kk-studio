@@ -168,7 +168,7 @@ class SkillCatalogServiceTest {
     when(blobManager.getBlob(updated.artifactBlobId()))
         .thenReturn(blob(updated.artifactBlobId(), ARTIFACT_SHA, 10));
 
-    SkillPackageDetailDTO detail = service.editPackage(PACKAGE, editDTO("3", "updated"));
+    SkillPackageDetailDTO detail = service.editPackage(PACKAGE, editDTO(3L, "updated"));
 
     assertEquals(SkillPackageSource.UPLOAD, detail.getSource());
     verify(packageRepository).updateDescription(PACKAGE, "updated", 3);
@@ -179,10 +179,10 @@ class SkillCatalogServiceTest {
   void editUploadPackageRejectsGitFields() {
     // 意图：上传渠道传入分支或令牌是无效契约，必须在写入前拒绝。
     when(packageRepository.lockPackage(PACKAGE)).thenReturn(uploadPackage(3));
-    SkillPackageEditDTO branchEdit = editDTO("3", "updated");
+    SkillPackageEditDTO branchEdit = editDTO(3L, "updated");
     branchEdit.setBranch("main");
     assertThrows(DomainException.class, () -> service.editPackage(PACKAGE, branchEdit));
-    SkillPackageEditDTO tokenEdit = editDTO("3", "updated");
+    SkillPackageEditDTO tokenEdit = editDTO(3L, "updated");
     tokenEdit.setToken(SecretUpdate.clear());
     assertThrows(DomainException.class, () -> service.editPackage(PACKAGE, tokenEdit));
     verify(packageRepository, never()).updateDescription(any(), any(), anyLong());
@@ -194,7 +194,7 @@ class SkillCatalogServiceTest {
     when(packageRepository.lockPackage(PACKAGE)).thenReturn(gitPackage(2, HEAD, HEAD));
 
     assertThrows(
-        DomainException.class, () -> service.editPackage(PACKAGE, gitEditDTO("1", "stale")));
+        DomainException.class, () -> service.editPackage(PACKAGE, gitEditDTO(1L, "stale")));
     verify(packageRepository, never()).updateDescription(any(), any(), anyLong());
     verify(packageRepository, never()).updateGitSettings(any(), any(), any());
   }
@@ -233,7 +233,7 @@ class SkillCatalogServiceTest {
     assertFalse(detail.isUpdateAvailable());
     assertEquals(
         List.of("dev", "review"), detail.getSkills().stream().map(s -> s.getName()).toList());
-    assertEquals("0", detail.getVersion());
+    assertEquals(0L, detail.getVersion());
     assertEquals(ARTIFACT_SHA, detail.getArtifactSha256());
     verify(blobManager).retain(blobId);
     verify(uploadService).delete(stagingUploadId);
@@ -342,7 +342,7 @@ class SkillCatalogServiceTest {
     when(gitRepository.resolveBranchHead(anyString(), anyString(), any()))
         .thenThrow(new SkillGitException("remote\nerror"));
 
-    service.checkGitPackage(PACKAGE, checkDTO("4"));
+    service.checkGitPackage(PACKAGE, checkDTO(4L));
 
     verify(packageRepository).updateGitObservation(eq(PACKAGE), eq(OLD_HEAD), any(), eq("remote"));
     verify(packageRepository, never()).updatePublication(any(), anyLong());
@@ -352,7 +352,7 @@ class SkillCatalogServiceTest {
   void checkGitPackageRejectsAStaleVersion() {
     when(packageRepository.getPackage(PACKAGE)).thenReturn(gitPackage(5, HEAD, HEAD));
 
-    assertThrows(DomainException.class, () -> service.checkGitPackage(PACKAGE, checkDTO("4")));
+    assertThrows(DomainException.class, () -> service.checkGitPackage(PACKAGE, checkDTO(4L)));
   }
 
   @Test
@@ -360,7 +360,7 @@ class SkillCatalogServiceTest {
     when(packageRepository.getPackage(PACKAGE)).thenReturn(gitPackage(1, HEAD, OLD_HEAD));
 
     assertThrows(
-        DomainException.class, () -> service.publishGitPackage(PACKAGE, publishDTO("1", HEAD)));
+        DomainException.class, () -> service.publishGitPackage(PACKAGE, publishDTO(1L, HEAD)));
     verify(gitRepository, never()).buildArchive(anyString(), anyString(), any());
   }
 
@@ -390,7 +390,7 @@ class SkillCatalogServiceTest {
     when(packageRepository.updateGitObservation(eq(PACKAGE), eq(HEAD), any(), eq(null)))
         .thenReturn(true);
 
-    SkillPackageDetailDTO detail = service.publishGitPackage(PACKAGE, publishDTO("2", HEAD));
+    SkillPackageDetailDTO detail = service.publishGitPackage(PACKAGE, publishDTO(2L, HEAD));
 
     assertEquals(HEAD, detail.getPackageVersion());
     assertEquals(NEW_ARTIFACT_SHA, detail.getArtifactSha256());
@@ -415,7 +415,7 @@ class SkillCatalogServiceTest {
     when(packageRepository.updatePublication(any(), eq(2L))).thenReturn(false);
 
     assertThrows(
-        DomainException.class, () -> service.publishGitPackage(PACKAGE, publishDTO("2", HEAD)));
+        DomainException.class, () -> service.publishGitPackage(PACKAGE, publishDTO(2L, HEAD)));
 
     verify(blobManager, never()).release(current.artifactBlobId());
     // 冲突后暂存对象被取消，不会留下无主归档。
@@ -428,7 +428,7 @@ class SkillCatalogServiceTest {
     when(packageRepository.lockPackage(PACKAGE)).thenReturn(current);
     when(agentRepository.existsReferencingSkill(PACKAGE, "dev")).thenReturn(true);
 
-    assertThrows(DomainException.class, () -> service.deletePackage(PACKAGE, "1"));
+    assertThrows(DomainException.class, () -> service.deletePackage(PACKAGE, 1L));
     verify(packageRepository, never()).deletePackage(anyString(), anyLong());
   }
 
@@ -513,7 +513,7 @@ class SkillCatalogServiceTest {
 
     assertThrows(
         DomainException.class,
-        () -> service.publishUpload(UUID.randomUUID(), uploadPublishDTO("1")));
+        () -> service.publishUpload(UUID.randomUUID(), uploadPublishDTO(1L)));
   }
 
   @Test
@@ -540,7 +540,7 @@ class SkillCatalogServiceTest {
     when(blobManager.getBlob(artifactBlobId))
         .thenReturn(blob(artifactBlobId, NEW_ARTIFACT_SHA, archive.zip().length));
 
-    service.publishUpload(stagingUploadId, uploadPublishDTO("3"));
+    service.publishUpload(stagingUploadId, uploadPublishDTO(3L));
 
     verify(blobManager).release(current.artifactBlobId());
     verify(uploadService).delete(stagingUploadId);
@@ -584,13 +584,13 @@ class SkillCatalogServiceTest {
     return dto;
   }
 
-  private static SkillPackageEditDTO gitEditDTO(String expectedVersion, String description) {
+  private static SkillPackageEditDTO gitEditDTO(long expectedVersion, String description) {
     SkillPackageEditDTO dto = editDTO(expectedVersion, description);
     dto.setBranch("main");
     return dto;
   }
 
-  private static SkillPackageEditDTO editDTO(String expectedVersion, String description) {
+  private static SkillPackageEditDTO editDTO(long expectedVersion, String description) {
     SkillPackageEditDTO dto = new SkillPackageEditDTO();
     dto.setExpectedVersion(expectedVersion);
     dto.setDescription(description);
@@ -598,13 +598,13 @@ class SkillCatalogServiceTest {
     return dto;
   }
 
-  private static SkillPackageCheckDTO checkDTO(String expectedVersion) {
+  private static SkillPackageCheckDTO checkDTO(long expectedVersion) {
     SkillPackageCheckDTO dto = new SkillPackageCheckDTO();
     dto.setExpectedVersion(expectedVersion);
     return dto;
   }
 
-  private static SkillPackagePublishDTO publishDTO(String expectedVersion, String targetCommit) {
+  private static SkillPackagePublishDTO publishDTO(long expectedVersion, String targetCommit) {
     SkillPackagePublishDTO dto = new SkillPackagePublishDTO();
     dto.setExpectedVersion(expectedVersion);
     dto.setTargetCommit(targetCommit);
@@ -620,7 +620,7 @@ class SkillCatalogServiceTest {
     return dto;
   }
 
-  private static SkillPackageStagingPublishDTO uploadPublishDTO(String expectedVersion) {
+  private static SkillPackageStagingPublishDTO uploadPublishDTO(Long expectedVersion) {
     SkillPackageStagingPublishDTO dto = new SkillPackageStagingPublishDTO();
     dto.setPackageName(PACKAGE);
     dto.setPackageVersion("v1");

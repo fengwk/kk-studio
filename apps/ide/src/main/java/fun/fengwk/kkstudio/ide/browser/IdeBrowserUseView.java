@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.ide.browser;
 
 import fun.fengwk.kkstudio.common.id.Uuids;
-import fun.fengwk.kkstudio.common.number.DecimalLongs;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 
 import java.util.Objects;
@@ -20,18 +19,18 @@ public record IdeBrowserUseView(
     viewId = Objects.requireNonNull(viewId, "viewId");
     claimId = Objects.requireNonNull(claimId, "claimId");
     if (bindingEpoch != null && bindingEpoch <= 0) {
-      throw new IllegalArgumentException("bindingEpoch must be a positive decimal");
+      throw new IllegalArgumentException("bindingEpoch must be positive");
     }
   }
 
-  /** 解析 wire 字段；{@code bindingEpoch} 只接受 canonical 正十进制字符串且不超过 long 上限。 */
+  /** 解析 wire 身份字段；{@code bindingEpoch} 已由入口按正整数校验。 */
   public static IdeBrowserUseView parse(
-      String environmentId, String viewId, String claimId, String bindingEpoch) {
+      String environmentId, String viewId, String claimId, Long bindingEpoch) {
     return new IdeBrowserUseView(
         EnvironmentId.parse(environmentId),
         Uuids.parseCanonical(viewId, "viewId"),
         Uuids.parseCanonical(claimId, "claimId"),
-        bindingEpoch == null ? null : DecimalLongs.parsePositive(bindingEpoch, "bindingEpoch"));
+        bindingEpoch);
   }
 
   /** 该持有项是否已带 claim 成功后的 binding epoch。 */

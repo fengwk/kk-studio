@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.web.controller;
 
+import static fun.fengwk.kkstudio.platformtest.harness.HarnessRuntimeTestFixtures.jsonObject;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -141,8 +142,9 @@ public class AgentProviderModelControllerTest extends WebPostgresTestSupport {
     provider.setModelCallIdleTimeoutMillis(3_000L);
     ObjectNode providerBody = objectMapper.valueToTree(provider);
     providerBody.put("credential", provider.getCredential());
-    providerBody.put("modelCallTimeoutMillis", provider.getModelCallTimeoutMillis());
-    providerBody.put("modelCallIdleTimeoutMillis", provider.getModelCallIdleTimeoutMillis());
+    providerBody.put("modelCallTimeoutMillis", provider.getModelCallTimeoutMillis().toString());
+    providerBody.put(
+        "modelCallIdleTimeoutMillis", provider.getModelCallIdleTimeoutMillis().toString());
     JsonNode providerData =
         data(
             mockMvc
@@ -273,7 +275,7 @@ public class AgentProviderModelControllerTest extends WebPostgresTestSupport {
     providerUpdate.setCredential(SecretUpdate.keep());
     providerUpdate.setModelCallTimeoutMillis(1_800_000L);
     providerUpdate.setModelCallIdleTimeoutMillis(120_000L);
-    providerUpdate.setExpectedVersion("0");
+    providerUpdate.setExpectedVersion(0L);
     ObjectNode providerUpdateBody = objectMapper.valueToTree(providerUpdate);
     providerUpdateBody.put("name", "renamed-" + providerName);
     mockMvc
@@ -300,7 +302,7 @@ public class AgentProviderModelControllerTest extends WebPostgresTestSupport {
     assertFalse(updatedProvider.has("id"));
     assertTrue(updatedProvider.path("credential").path("configured").asBoolean());
 
-    providerUpdate.setExpectedVersion("0");
+    providerUpdate.setExpectedVersion(0L);
     mockMvc
         .perform(
             put("/api/platform/providers/{name}", providerName)
@@ -318,7 +320,7 @@ public class AgentProviderModelControllerTest extends WebPostgresTestSupport {
     modelUpdate.setModelId(WIRE_MODEL_ID);
     modelUpdate.setDescription("updated model");
     modelUpdate.setConfig(model.getConfig());
-    modelUpdate.setExpectedVersion("0");
+    modelUpdate.setExpectedVersion(0L);
     ObjectNode modelUpdateBody = objectMapper.valueToTree(modelUpdate);
     modelUpdateBody.put("unknownField", "1");
     // 全局模型 PUT 拒绝未知字段。
@@ -351,7 +353,7 @@ public class AgentProviderModelControllerTest extends WebPostgresTestSupport {
 
     // 测试意图：验证 PUT /api/platform/models/{*modelName} 在 expectedVersion 过期时触发 CAS
     // 版本冲突，返回 409 Conflict。
-    modelUpdate.setExpectedVersion("0");
+    modelUpdate.setExpectedVersion(0L);
     mockMvc
         .perform(
             put(modelPath(providerName, modelName))
@@ -368,7 +370,7 @@ public class AgentProviderModelControllerTest extends WebPostgresTestSupport {
     agentUpdate.setSystemPrompt("updated prompt");
     agentUpdate.setExecution(execution(modelName));
     agentUpdate.setConfig(agentConfig);
-    agentUpdate.setExpectedVersion("0");
+    agentUpdate.setExpectedVersion(0L);
     ObjectNode agentUpdateBody = objectMapper.valueToTree(agentUpdate);
     agentUpdateBody.put("name", "renamed-" + agentName);
     mockMvc
@@ -400,7 +402,7 @@ public class AgentProviderModelControllerTest extends WebPostgresTestSupport {
     assertEquals(
         modelName, updatedAgent.path("execution").path("settings").path("modelName").asText());
 
-    agentUpdate.setExpectedVersion("0");
+    agentUpdate.setExpectedVersion(0L);
     mockMvc
         .perform(
             put("/api/platform/agents/{name}", agentName)
@@ -629,7 +631,7 @@ public class AgentProviderModelControllerTest extends WebPostgresTestSupport {
     renameUpdate.setModelId(WIRE_MODEL_ID);
     renameUpdate.setDescription("renamed model description");
     renameUpdate.setConfig(model.getConfig());
-    renameUpdate.setExpectedVersion("0");
+    renameUpdate.setExpectedVersion(0L);
 
     JsonNode renamedResult =
         data(
@@ -700,7 +702,7 @@ public class AgentProviderModelControllerTest extends WebPostgresTestSupport {
     conflictRename.setName(otherModelName);
     conflictRename.setModelId(WIRE_MODEL_ID);
     conflictRename.setConfig(model.getConfig());
-    conflictRename.setExpectedVersion("1");
+    conflictRename.setExpectedVersion(1L);
     mockMvc
         .perform(
             put(modelPath(providerName, newModelName))
@@ -752,7 +754,7 @@ public class AgentProviderModelControllerTest extends WebPostgresTestSupport {
     staleRename.setName("vendor/stale-model-" + suffix);
     staleRename.setModelId(WIRE_MODEL_ID);
     staleRename.setConfig(model.getConfig());
-    staleRename.setExpectedVersion("0");
+    staleRename.setExpectedVersion(0L);
     mockMvc
         .perform(
             put(modelPath(providerName, newModelName))
@@ -768,7 +770,7 @@ public class AgentProviderModelControllerTest extends WebPostgresTestSupport {
     invalidRename.setName("   ");
     invalidRename.setModelId(WIRE_MODEL_ID);
     invalidRename.setConfig(model.getConfig());
-    invalidRename.setExpectedVersion("1");
+    invalidRename.setExpectedVersion(1L);
     mockMvc
         .perform(
             put(modelPath(providerName, newModelName))
@@ -834,7 +836,7 @@ public class AgentProviderModelControllerTest extends WebPostgresTestSupport {
   private static HarnessExecutionSelectionDTO execution(String modelName) {
     HarnessExecutionSelectionDTO execution = new HarnessExecutionSelectionDTO();
     execution.setDriver("builtin");
-    execution.setSettings(Map.of("modelName", modelName, "variant", "default"));
+    execution.setSettings(jsonObject(Map.of("modelName", modelName, "variant", "default")));
     return execution;
   }
 

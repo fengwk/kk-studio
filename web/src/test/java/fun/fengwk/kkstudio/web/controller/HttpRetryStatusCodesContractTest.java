@@ -69,7 +69,7 @@ class HttpRetryStatusCodesContractTest {
     ProviderDTO created = new ProviderDTO();
     created.setName("p");
     created.setProviderType(ProviderType.OPENAI);
-    created.setVersion("1");
+    created.setVersion(1L);
     when(providerService.createProvider(any())).thenReturn(created);
 
     mockMvc
@@ -131,7 +131,7 @@ class HttpRetryStatusCodesContractTest {
                   .contentType(MediaType.APPLICATION_JSON)
                   .content(
                       "{\"credential\":{\"operation\":\"KEEP\"},"
-                          + "\"modelCallTimeoutMillis\":1,\"modelCallIdleTimeoutMillis\":1,"
+                          + "\"modelCallTimeoutMillis\":\"1\",\"modelCallIdleTimeoutMillis\":\"1\","
                           + "\"modelHttpRetryStatusCodes\":"
                           + token
                           + "}"))

@@ -7,5 +7,5 @@ import lombok.Data;
 public class EnvironmentRotateTokenDTO {
 
   /** 期望的乐观锁版本。 */
-  private String expectedVersion;
+  private Long expectedVersion;
 }

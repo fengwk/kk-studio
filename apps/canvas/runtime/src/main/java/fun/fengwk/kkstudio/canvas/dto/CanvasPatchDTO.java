@@ -14,7 +14,7 @@ import java.util.List;
 @Data
 public class CanvasPatchDTO {
 
-  private String revision;
+  private Long revision;
 
   private List<CanvasGroupPatchDTO> groups = new ArrayList<>();
 

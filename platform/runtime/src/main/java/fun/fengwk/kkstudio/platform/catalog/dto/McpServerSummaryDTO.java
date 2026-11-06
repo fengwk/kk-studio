@@ -25,8 +25,8 @@ public class McpServerSummaryDTO {
   /** 当前 server 下已发现的工具数量。 */
   private int toolCount;
 
-  /** 当前配置的非负十进制字符串版本号；客户端每次更新/发现时必须回传。 */
-  private String version;
+  /** 当前配置的非负版本号；客户端每次更新/发现时必须回传。 */
+  private Long version;
 
   /** 创建时间。 */
   private Instant createdAt;

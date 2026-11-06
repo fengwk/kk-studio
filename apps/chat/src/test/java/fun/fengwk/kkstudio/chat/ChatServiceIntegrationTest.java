@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.chat;
 
 import static fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchemaSupport.applyFixtureDatabase;
 import static fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchemaSupport.newConnection;
+import static fun.fengwk.kkstudio.platformtest.harness.HarnessRuntimeTestFixtures.jsonObject;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -88,7 +89,7 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
     assertEquals("alpha", created.getTitle());
     assertEquals("default-assistant", created.getAgentName());
     assertEquals(false, created.isYoloEnabled());
-    assertEquals("0", created.getVersion());
+    assertEquals(0L, created.getVersion());
 
     String chatId = created.getId();
     try {
@@ -113,16 +114,16 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
       assertThrows(DomainException.class, () -> chatService.updateChat(chatId, badUpdate));
       badUpdate.setAgentName("missing-agent");
       badUpdate.setTitle("alpha");
-      badUpdate.setExpectedVersion("0");
+      badUpdate.setExpectedVersion(0L);
       assertThrows(DomainException.class, () -> chatService.updateChat(chatId, badUpdate));
 
       ChatUpdateDTO update = new ChatUpdateDTO();
       update.setTitle("beta");
       update.setAgentName("default-assistant");
-      update.setExpectedVersion("0");
+      update.setExpectedVersion(0L);
       ChatDTO updated = chatService.updateChat(chatId, update);
       assertEquals("beta", updated.getTitle());
-      assertEquals("1", updated.getVersion());
+      assertEquals(1L, updated.getVersion());
       ChatYoloUpdateDTO yolo = new ChatYoloUpdateDTO();
       yolo.setYoloEnabled(true);
       yolo.setExpectedVersion(updated.getVersion());
@@ -131,7 +132,7 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
 
       ChatUpdateDTO stale = new ChatUpdateDTO();
       stale.setAgentName("missing-agent");
-      stale.setExpectedVersion("0");
+      stale.setExpectedVersion(0L);
       assertThrows(DomainException.class, () -> chatService.updateChat(chatId, stale));
 
       ChatCreateDTO newer = new ChatCreateDTO();
@@ -142,10 +143,10 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
         List<ChatDTO> listed = chatService.listChats(null, 50).getItems();
         assertTrue(indexOf(listed, second.getId()) < indexOf(listed, chatId));
       } finally {
-        chatService.deleteChat(second.getId(), "0");
+        chatService.deleteChat(second.getId(), 0L);
       }
 
-      agentService.deleteAgent("default-assistant", "0");
+      agentService.deleteAgent("default-assistant", 0L);
       ChatDTO staleAgentChat = chatService.getChat(chatId);
       assertEquals("default-assistant", staleAgentChat.getAgentName());
       assertTrue(staleAgentChat.isYoloEnabled());
@@ -175,7 +176,8 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
       rebound.setName("default-assistant");
       HarnessExecutionSelectionDTO execution = new HarnessExecutionSelectionDTO();
       execution.setDriver("builtin");
-      execution.setSettings(Map.of("modelName", "acceptance-stub", "variant", "default"));
+      execution.setSettings(
+          jsonObject(Map.of("modelName", "acceptance-stub", "variant", "default")));
       rebound.setExecution(execution);
       AgentConfigDTO reboundConfig = new AgentConfigDTO();
       reboundConfig.setTools(List.of());
@@ -200,7 +202,7 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
       ChatUpdateDTO staleAgentUpdate = new ChatUpdateDTO();
       staleAgentUpdate.setTitle("still editable");
       staleAgentUpdate.setAgentName("default-assistant");
-      staleAgentUpdate.setExpectedVersion("2");
+      staleAgentUpdate.setExpectedVersion(2L);
       ChatDTO updatedWithStaleAgent = chatService.updateChat(chatId, staleAgentUpdate);
       assertEquals("default-assistant", updatedWithStaleAgent.getAgentName());
       assertEquals("still editable", updatedWithStaleAgent.getTitle());
@@ -263,7 +265,7 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
       stale.setTitle("renamed");
       stale.setAgentName("default-assistant");
       stale.setEnvironmentName("env-a");
-      stale.setExpectedVersion("0");
+      stale.setExpectedVersion(0L);
       assertThrows(DomainException.class, () -> chatService.updateChat(created.getId(), stale));
       assertNull(chatService.getChat(created.getId()).getEnvironmentName());
     } finally {

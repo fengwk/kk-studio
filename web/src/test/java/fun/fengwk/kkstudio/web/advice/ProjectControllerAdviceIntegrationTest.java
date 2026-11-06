@@ -82,7 +82,7 @@ class ProjectControllerAdviceIntegrationTest extends WebPostgresTestSupport {
   void issueDomainErrorsUseTheUnifiedAdvice() throws Exception {
     // 同一路由分别确认 CAS 坐标和校验错误使用统一 problem。
     String request = "{\"expectedVersion\":\"1\",\"title\":\"title\"}";
-    doThrow(DomainException.versionConflict("issue", "1", "2"))
+    doThrow(DomainException.versionConflict("issue", 1L, 2L))
         .when(issueEditingService)
         .updateIssue(any(), anyLong(), any(), any());
     mockMvc

@@ -165,9 +165,9 @@ describe('mcp-utils', () => {
       })
     })
 
-    it('accepts positive integer numbers and numeric strings', () => {
-      expect(validateTimeoutMillis(30000)).toEqual({ valid: true, timeoutMillis: 30000 })
-      expect(validateTimeoutMillis('45000')).toEqual({ valid: true, timeoutMillis: 45000 })
+    it('preserves canonical positive strings including the long maximum', () => {
+      expect(validateTimeoutMillis('45000')).toEqual({ valid: true, timeoutMillis: '45000' })
+      expect(validateTimeoutMillis('9223372036854775807')).toEqual({ valid: true, timeoutMillis: '9223372036854775807' })
     })
 
     it('rejects zero, negative numbers, floats and invalid strings', () => {
@@ -176,6 +176,8 @@ describe('mcp-utils', () => {
       expect(validateTimeoutMillis(12.34).valid).toBe(false)
       expect(validateTimeoutMillis('abc').valid).toBe(false)
       expect(validateTimeoutMillis(NaN).valid).toBe(false)
+      expect(validateTimeoutMillis('01').valid).toBe(false)
+      expect(validateTimeoutMillis('9223372036854775808').valid).toBe(false)
     })
   })
 })

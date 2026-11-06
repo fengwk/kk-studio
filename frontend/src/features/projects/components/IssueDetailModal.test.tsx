@@ -1216,7 +1216,7 @@ describe('IssueDetailModal', () => {
       }
       return {
         ...mockActiveIssueDetail.issue,
-        version: String(Number(currentVersion) + 1),
+        version: (BigInt(currentVersion) + 1n).toString(),
         title: req.title,
       }
     })

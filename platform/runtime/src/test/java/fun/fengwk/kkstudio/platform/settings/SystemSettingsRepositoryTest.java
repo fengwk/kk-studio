@@ -38,8 +38,8 @@ public class SystemSettingsRepositoryTest extends PostgresSpringTestSupport {
     assertNotNull(record);
     assertEquals(SystemSettingsTestFixture.DEFAULT, record.settings());
     assertEquals(0L, record.version());
-    assertNotNull(record.createTime());
-    assertNotNull(record.updateTime());
+    assertNotNull(record.createdAt());
+    assertNotNull(record.updatedAt());
   }
 
   @Test

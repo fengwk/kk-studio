@@ -24,7 +24,6 @@ import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentEvent;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
-import fun.fengwk.kkstudio.platform.error.CatalogVersions;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 
 import java.time.Clock;
@@ -142,19 +141,17 @@ public class EnvironmentService {
       EnvironmentId id,
       String registrationTokenHash,
       EnvironmentInstallConfigDTO installConfig,
-      String expectedVersion) {
+      long expectedVersion) {
     Objects.requireNonNull(id, "id");
     String tokenHash = validateRegistrationTokenHash(registrationTokenHash);
     EnvironmentInstallConfigDTO config =
         installConfig == null ? null : EnvironmentInstallConfigs.validate(installConfig);
-    long expected = CatalogVersions.parse(expectedVersion, "expectedVersion");
     Environment env = environmentRepository.lockById(id.value());
     if (env == null) {
       throw DomainException.notFound(RESOURCE);
     }
-    if (env.getVersion() != expected) {
-      throw DomainException.versionConflict(
-          RESOURCE, expectedVersion, CatalogVersions.format(env.getVersion()));
+    if (env.getVersion() != expectedVersion) {
+      throw DomainException.versionConflict(RESOURCE, expectedVersion, env.getVersion());
     }
     if (tokenHash.equals(env.getRegistrationTokenHash())
         && Objects.equals(config, env.getInstallConfig())) {
@@ -163,13 +160,12 @@ public class EnvironmentService {
     env.setRegistrationTokenHash(tokenHash);
     env.setInstallConfig(config);
     try {
-      if (!environmentRepository.updateById(env, expected)) {
+      if (!environmentRepository.updateById(env, expectedVersion)) {
         Environment reread = environmentRepository.getById(id.value());
         if (reread == null) {
           throw DomainException.notFound(RESOURCE);
         }
-        throw DomainException.versionConflict(
-            RESOURCE, expectedVersion, CatalogVersions.format(reread.getVersion()));
+        throw DomainException.versionConflict(RESOURCE, expectedVersion, reread.getVersion());
       }
     } catch (DuplicateKeyException error) {
       throw DomainException.duplicate(
@@ -188,26 +184,27 @@ public class EnvironmentService {
     }
     EnvironmentInstallConfigDTO config =
         EnvironmentInstallConfigs.validate(request.getInstallConfig());
-    long expected = CatalogVersions.parse(request.getExpectedVersion(), "expectedVersion");
+    Long expectedVersion = request.getExpectedVersion();
+    if (expectedVersion == null) {
+      throw DomainException.validation(RESOURCE, "expectedVersion is required");
+    }
     Environment env = environmentRepository.lockById(id.value());
     if (env == null) {
       throw DomainException.notFound(RESOURCE);
     }
-    if (env.getVersion() != expected) {
-      throw DomainException.versionConflict(
-          RESOURCE, request.getExpectedVersion(), CatalogVersions.format(env.getVersion()));
+    if (env.getVersion() != expectedVersion) {
+      throw DomainException.versionConflict(RESOURCE, expectedVersion, env.getVersion());
     }
     if (Objects.equals(config, env.getInstallConfig())) {
       return toDto(env, null);
     }
     env.setInstallConfig(config);
-    if (!environmentRepository.updateById(env, expected)) {
+    if (!environmentRepository.updateById(env, expectedVersion)) {
       Environment reread = environmentRepository.getById(id.value());
       if (reread == null) {
         throw DomainException.notFound(RESOURCE);
       }
-      throw DomainException.versionConflict(
-          RESOURCE, request.getExpectedVersion(), CatalogVersions.format(reread.getVersion()));
+      throw DomainException.versionConflict(RESOURCE, expectedVersion, reread.getVersion());
     }
     return toDto(environmentRepository.getById(id.value()), null);
   }
@@ -230,7 +227,7 @@ public class EnvironmentService {
   }
 
   @Transactional
-  public EnvironmentInstallCodeDTO issueInstallCode(EnvironmentId id, String expectedVersion) {
+  public EnvironmentInstallCodeDTO issueInstallCode(EnvironmentId id, long expectedVersion) {
     Environment env = requireInstallable(id, expectedVersion);
     String code = EnvironmentInstallCodes.generate();
     Instant expiresAt = clock.instant().plus(Duration.ofMinutes(5));
@@ -272,15 +269,14 @@ public class EnvironmentService {
   }
 
   /** 签发必须校验期望版本；兑换只校验 code，不接收版本。 */
-  private Environment requireInstallable(EnvironmentId id, String expectedVersion) {
+  private Environment requireInstallable(EnvironmentId id, long expectedVersion) {
     Objects.requireNonNull(id, "id");
     Environment env = environmentRepository.lockById(id.value());
     if (env == null || env.getInstallConfig() == null) {
       throw DomainException.notFound(RESOURCE);
     }
-    if (env.getVersion() != CatalogVersions.parse(expectedVersion, "expectedVersion")) {
-      throw DomainException.versionConflict(
-          RESOURCE, expectedVersion, CatalogVersions.format(env.getVersion()));
+    if (env.getVersion() != expectedVersion) {
+      throw DomainException.versionConflict(RESOURCE, expectedVersion, env.getVersion());
     }
     return env;
   }
@@ -290,42 +286,37 @@ public class EnvironmentService {
   }
 
   @Transactional
-  public EnvironmentDTO rotateToken(EnvironmentId id, String expectedVersion) {
+  public EnvironmentDTO rotateToken(EnvironmentId id, long expectedVersion) {
     Objects.requireNonNull(id, "id");
-    long expected = CatalogVersions.parse(expectedVersion, "expectedVersion");
     Environment env = environmentRepository.lockById(id.value());
     if (env == null) {
       throw DomainException.notFound(RESOURCE);
     }
-    if (env.getVersion() != expected) {
-      throw DomainException.versionConflict(
-          RESOURCE, expectedVersion, CatalogVersions.format(env.getVersion()));
+    if (env.getVersion() != expectedVersion) {
+      throw DomainException.versionConflict(RESOURCE, expectedVersion, env.getVersion());
     }
     String token = RegistrationTokens.generate();
     env.setRegistrationTokenHash(RegistrationTokens.hash(token));
-    if (!environmentRepository.updateById(env, expected)) {
+    if (!environmentRepository.updateById(env, expectedVersion)) {
       Environment reread = environmentRepository.getById(id.value());
       if (reread == null) {
         throw DomainException.notFound(RESOURCE);
       }
-      throw DomainException.versionConflict(
-          RESOURCE, expectedVersion, CatalogVersions.format(reread.getVersion()));
+      throw DomainException.versionConflict(RESOURCE, expectedVersion, reread.getVersion());
     }
     Environment updated = environmentRepository.getById(id.value());
     return toDto(updated, token);
   }
 
   @Transactional
-  public void delete(EnvironmentId id, String expectedVersion) {
+  public void delete(EnvironmentId id, long expectedVersion) {
     Objects.requireNonNull(id, "id");
-    long expected = CatalogVersions.parse(expectedVersion, "expectedVersion");
     Environment env = environmentRepository.lockById(id.value());
     if (env == null) {
       throw DomainException.notFound(RESOURCE);
     }
-    if (env.getVersion() != expected) {
-      throw DomainException.versionConflict(
-          RESOURCE, expectedVersion, CatalogVersions.format(env.getVersion()));
+    if (env.getVersion() != expectedVersion) {
+      throw DomainException.versionConflict(RESOURCE, expectedVersion, env.getVersion());
     }
     if (environmentRegistry.hasActiveLease(id)) {
       throw DomainException.inUse(
@@ -336,13 +327,12 @@ public class EnvironmentService {
           RESOURCE, "cannot delete environment required by active harness work");
     }
     try {
-      if (!environmentRepository.deleteById(id.value(), expected)) {
+      if (!environmentRepository.deleteById(id.value(), expectedVersion)) {
         Environment reread = environmentRepository.getById(id.value());
         if (reread == null) {
           throw DomainException.notFound(RESOURCE);
         }
-        throw DomainException.versionConflict(
-            RESOURCE, expectedVersion, CatalogVersions.format(reread.getVersion()));
+        throw DomainException.versionConflict(RESOURCE, expectedVersion, reread.getVersion());
       }
     } catch (DataIntegrityViolationException error) {
       throw DomainException.inUse(
@@ -401,9 +391,9 @@ public class EnvironmentService {
     dto.setName(env.getName());
     dto.setInstallConfig(env.getInstallConfig());
     dto.setRegistrationToken(token);
-    dto.setVersion(CatalogVersions.format(env.getVersion()));
-    dto.setCreatedAt(env.getCreateTime());
-    dto.setUpdatedAt(env.getUpdateTime());
+    dto.setVersion(env.getVersion());
+    dto.setCreatedAt(env.getCreatedAt());
+    dto.setUpdatedAt(env.getUpdatedAt());
 
     EnvironmentId envId = EnvironmentId.of(env.getId());
     Optional<EnvironmentConnection> connOpt = environmentRegistry.find(envId);

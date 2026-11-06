@@ -125,10 +125,10 @@ class ProjectSnapshotAssemblerTest {
     assertEquals("Proj", snapshot.getProject().getTitle());
     // 验证按 number 排序：issue 1 先于 issue 2
     assertEquals(2, snapshot.getIssues().size());
-    assertEquals("1", snapshot.getIssues().get(0).getIssue().getNumber());
+    assertEquals(1L, snapshot.getIssues().get(0).getIssue().getNumber());
     assertNotNull(snapshot.getIssues().get(0).getCurrentOrLatestRun());
     assertEquals("coder", snapshot.getIssues().get(0).getCurrentOrLatestRun().getAgentName());
-    assertEquals("2", snapshot.getIssues().get(1).getIssue().getNumber());
+    assertEquals(2L, snapshot.getIssues().get(1).getIssue().getNumber());
     assertNull(snapshot.getIssues().get(1).getCurrentOrLatestRun());
 
     assertEquals(List.of("INIT", "WORK"), snapshot.getReferencedStateCodes());

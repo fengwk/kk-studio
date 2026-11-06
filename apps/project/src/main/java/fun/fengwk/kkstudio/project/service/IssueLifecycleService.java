@@ -282,8 +282,7 @@ public class IssueLifecycleService {
           ProjectSessionOwnership.owner(issueId, binding.agentName()));
     }
     if (!issueRepository.deleteById(issueId, expectedVersion)) {
-      throw DomainException.versionConflict(
-          "issue", Long.toString(expectedVersion), Long.toString(locked.issue().getVersion()));
+      throw DomainException.versionConflict("issue", expectedVersion, locked.issue().getVersion());
     }
   }
 

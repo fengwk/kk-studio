@@ -127,7 +127,7 @@ describe('useCanvasUploadPipeline', () => {
     expect(storageService.reserveUpload).toHaveBeenCalledWith({
       filename: 'upload.png',
       mediaType: 'image/png',
-      sizeBytes: 3,
+      sizeBytes: '3',
       sha256: 'upload.png:sha256',
     })
     expect(storageService.uploadFile).not.toHaveBeenCalled()

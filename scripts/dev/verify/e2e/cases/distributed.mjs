@@ -393,8 +393,8 @@ async function setupDistributedHarness(ctx, suffix) {
     providerType: 'openai',
     baseUrl: 'http://stub.local:8080/v1',
     credential: `e2e-dist-${suffix}`,
-    modelCallTimeoutMillis: 60_000,
-    modelCallIdleTimeoutMillis: 30_000,
+    modelCallTimeoutMillis: '60000',
+    modelCallIdleTimeoutMillis: '30000',
   })
   const provider = providerRes.json
   assert(provider?.name, 'provider creation failed')

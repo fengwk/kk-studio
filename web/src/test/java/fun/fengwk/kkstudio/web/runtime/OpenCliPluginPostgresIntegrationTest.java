@@ -319,15 +319,15 @@ class OpenCliPluginPostgresIntegrationTest {
 
               pending.configure(
                   PLUGIN_ID, 1L, values, Map.of("apiKey", SecretUpdate.set("check-key")));
-              assertThrows(DomainException.class, () -> management.checkConnection(PLUGIN_ID, "2"));
+              assertThrows(DomainException.class, () -> management.checkConnection(PLUGIN_ID, 2L));
 
               runtime.refresh();
-              assertThrows(DomainException.class, () -> management.checkConnection(PLUGIN_ID, "1"));
+              assertThrows(DomainException.class, () -> management.checkConnection(PLUGIN_ID, 1L));
               assertEquals(
                   0, requests.size(), "unapplied or mismatched revisions must not reach out");
 
-              PluginConnectionCheckDTO checked = management.checkConnection(PLUGIN_ID, "2");
-              assertEquals("2", checked.getAppliedVersion());
+              PluginConnectionCheckDTO checked = management.checkConnection(PLUGIN_ID, 2L);
+              assertEquals(2L, checked.getAppliedVersion());
               assertEquals(
                   PluginConnectionCheckDTO.Reachability.REACHABLE, checked.getReachability());
               assertEquals(
@@ -339,7 +339,7 @@ class OpenCliPluginPostgresIntegrationTest {
 
               pending.configure(PLUGIN_ID, 2L, values, Map.of("apiKey", SecretUpdate.clear()));
               runtime.refresh();
-              PluginConnectionCheckDTO revoked = management.checkConnection(PLUGIN_ID, "3");
+              PluginConnectionCheckDTO revoked = management.checkConnection(PLUGIN_ID, 3L);
               assertEquals(
                   PluginConnectionCheckDTO.Reachability.NOT_CHECKED, revoked.getReachability());
               assertEquals(

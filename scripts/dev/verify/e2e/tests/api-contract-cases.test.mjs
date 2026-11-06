@@ -97,7 +97,7 @@ function chatDefaultEnvironmentFixture() {
           }
           chat.environmentName = body.environmentName
         }
-        chat.version = String(Number(chat.version) + 1)
+        chat.version = String(BigInt(chat.version) + 1n)
         return { status: 200, json: { ...chat } }
       }
       if (method === 'DELETE') {
@@ -150,6 +150,8 @@ test('providerUpdateBody builds the editable PUT body without name and preserves
   ])
   assert.equal(Object.hasOwn(base, 'modelHttpRetryStatusCodes'), false, 'omitted override must be absent')
   assert.deepEqual(base.credential, { operation: 'KEEP' }, 'KEEP must preserve the stored secret')
+  assert.equal(base.modelCallTimeoutMillis, '1800000')
+  assert.equal(base.modelCallIdleTimeoutMillis, '120000')
 
   assert.deepEqual(providerUpdateBody({ modelHttpRetryStatusCodes: [500, 503] }).modelHttpRetryStatusCodes, [
     500,
@@ -160,6 +162,8 @@ test('providerUpdateBody builds the editable PUT body without name and preserves
 
   const created = providerCreateBody('suffix')
   assert.equal(created.name, 'e2e-provider-suffix')
+  assert.equal(created.modelCallTimeoutMillis, '1800000')
+  assert.equal(created.modelCallIdleTimeoutMillis, '120000')
   assert.equal(Object.hasOwn(created, 'modelHttpRetryStatusCodes'), false)
 })
 

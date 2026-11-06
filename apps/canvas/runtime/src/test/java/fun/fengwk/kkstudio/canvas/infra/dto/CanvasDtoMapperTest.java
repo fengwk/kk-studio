@@ -8,6 +8,9 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.canvas.CanvasCommand;
 import fun.fengwk.kkstudio.canvas.CanvasConflict;
@@ -45,6 +48,7 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionReferencePolicy;
 import fun.fengwk.kkstudio.canvas.function.CanvasJson;
 import fun.fengwk.kkstudio.canvas.function.CanvasResourceKind;
 import fun.fengwk.kkstudio.common.error.DomainException;
+import fun.fengwk.kkstudio.common.json.StrictJson;
 import fun.fengwk.kkstudio.platform.storage.dto.StoragePresignedUrlDTO;
 import fun.fengwk.kkstudio.platform.storage.dto.StorageUrlMethod;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
@@ -53,7 +57,6 @@ import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -141,7 +144,7 @@ class CanvasDtoMapperTest {
     CanvasSnapshotDTO snapshot =
         mapper.toDto(
             new CanvasSnapshot(document, List.of(node), List.of(group), List.of(reference)));
-    assertEquals("3", snapshot.getDocument().getRevision());
+    assertEquals(3L, snapshot.getDocument().getRevision());
     assertEquals("image.crop", snapshot.getNodes().get(0).getFunction().name());
     assertEquals(CanvasFunctionRunStatus.RUNNING, snapshot.getNodes().get(0).getRun().getStatus());
     assertEquals(sourceId.toString(), snapshot.getReferences().get(0).getSourceNodeId());
@@ -152,7 +155,7 @@ class CanvasDtoMapperTest {
                 4L,
                 List.of(new CanvasNodePatch.Upsert(node), new CanvasNodePatch.Remove(nodeId)),
                 List.of(new CanvasGroupPatch.Upsert(group), new CanvasGroupPatch.Remove(groupId))));
-    assertEquals("4", patch.getRevision());
+    assertEquals(4L, patch.getRevision());
     assertInstanceOf(CanvasNodePatchDTO.Upsert.class, patch.getNodes().get(0));
     assertInstanceOf(CanvasNodePatchDTO.Remove.class, patch.getNodes().get(1));
     assertInstanceOf(CanvasGroupPatchDTO.Upsert.class, patch.getGroups().get(0));
@@ -219,7 +222,8 @@ class CanvasDtoMapperTest {
     UUID groupId = UUID.randomUUID();
     UUID resourceId = UUID.randomUUID();
     UUID blobId = UUID.randomUUID();
-    CanvasFunctionDTO functionDto = new CanvasFunctionDTO("image.crop", Map.of("x", 1));
+    CanvasFunctionDTO functionDto =
+        new CanvasFunctionDTO("image.crop", StrictJson.standard().tree(Map.of("x", 1)));
     List<CanvasCommand> commands =
         mapper.toCommands(
             List.of(
@@ -283,19 +287,15 @@ class CanvasDtoMapperTest {
             mapper.toCommands(
                 List.of(new CanvasCommandDTO.SetNodeFunction(nodeId, null, nullArgs()))));
 
-    LinkedHashMap<String, Object> badNumber = new LinkedHashMap<>();
-    badNumber.put("value", Double.NaN);
-    assertThrows(DomainException.class, () -> commandWithArgs(badNumber));
-    LinkedHashMap<String, Object> badKey = new LinkedHashMap<>();
-    badKey.put("nested", Map.of(1, "x"));
-    assertThrows(DomainException.class, () -> commandWithArgs(badKey));
-    assertThrows(DomainException.class, () -> commandWithArgs(Map.of("value", new Object())));
+    assertThrows(
+        DomainException.class,
+        () -> commandWithArgs(JsonNodeFactory.instance.textNode("not-an-object")));
 
-    LinkedHashMap<String, Object> deep = new LinkedHashMap<>();
-    Object current = deep;
+    ObjectNode deep = JsonNodeFactory.instance.objectNode();
+    ObjectNode current = deep;
     for (int i = 0; i < CanvasJson.MAX_DEPTH + 1; i++) {
-      LinkedHashMap<String, Object> next = new LinkedHashMap<>();
-      ((Map<String, Object>) current).put("child", next);
+      ObjectNode next = JsonNodeFactory.instance.objectNode();
+      current.set("child", next);
       current = next;
     }
     assertThrows(DomainException.class, () -> commandWithArgs(deep));
@@ -318,7 +318,7 @@ class CanvasDtoMapperTest {
     assertNull(node.getRun());
   }
 
-  private void commandWithArgs(Map<String, Object> args) {
+  private void commandWithArgs(JsonNode args) {
     mapper.toCommands(
         List.of(
             new CanvasCommandDTO.SetNodeFunction(

@@ -47,8 +47,8 @@ describe('agentService', () => {
       providerType: 'openai',
       baseUrl: 'https://api.minimax.chat/v1',
       credential: 'key',
-      modelCallTimeoutMillis: 1800000,
-      modelCallIdleTimeoutMillis: 120000,
+      modelCallTimeoutMillis: '1800000',
+      modelCallIdleTimeoutMillis: '120000',
     }
     const modelBody: ModelCreateDTO = {
       providerName: 'minimax',
@@ -78,8 +78,8 @@ describe('agentService', () => {
     const updateProviderBody: ProviderUpdateDTO = {
       credential: { operation: 'KEEP' },
       description: 'updated',
-      modelCallTimeoutMillis: 1800000,
-      modelCallIdleTimeoutMillis: 120000,
+      modelCallTimeoutMillis: '1800000',
+      modelCallIdleTimeoutMillis: '120000',
       expectedVersion: '7',
     }
     const updateModelBody: ModelUpdateDTO = {

@@ -161,8 +161,7 @@ public class IssueTransitionService {
     long expectedVersion = run.getVersion();
     run.setNextState(target.value());
     if (!issueRunRepository.updateById(run, expectedVersion)) {
-      throw DomainException.versionConflict(
-          "issue_run", Long.toString(expectedVersion), Long.toString(run.getVersion()));
+      throw DomainException.versionConflict("issue_run", expectedVersion, run.getVersion());
     }
     return new IssueTransitionResult(from.value(), target.value(), run.getId(), false);
   }

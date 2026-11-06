@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.platform.harness.http;
 
+import static fun.fengwk.kkstudio.platformtest.harness.HarnessRuntimeTestFixtures.jsonObject;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -70,7 +71,7 @@ final class HarnessRuntimeRequestMapperTestSupport {
   static HarnessThreadCommandBatchDTO cursorBatch(HarnessCommandCreateDTO... commands) {
     HarnessThreadCommandBatchDTO batch = new HarnessThreadCommandBatchDTO();
     batch.setExpectedHeadEntryId(idText(3));
-    batch.setExpectedNextCommandSequence("4");
+    batch.setExpectedNextCommandSequence(4L);
     batch.setCommands(List.of(commands));
     return batch;
   }
@@ -146,7 +147,7 @@ final class HarnessRuntimeRequestMapperTestSupport {
   static HarnessExecutionSelectionDTO executionSelection() {
     HarnessExecutionSelectionDTO selection = new HarnessExecutionSelectionDTO();
     selection.setDriver("builtin");
-    selection.setSettings(Map.of("modelName", "gpt-5", "variant", "default"));
+    selection.setSettings(jsonObject(Map.of("modelName", "gpt-5", "variant", "default")));
     return selection;
   }
 

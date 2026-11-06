@@ -20,8 +20,8 @@ public class HarnessGenerationFailureDTO {
   /** 失败 attempt（正整数）。 */
   private Integer attempt;
 
-  /** 该 attempt 输出覆盖到的 canonical 非负十进制 sequence。 */
-  private String sequence;
+  /** 该 attempt 输出覆盖到的非负 sequence。 */
+  private Long sequence;
 
   private String text;
   private String thinking;

@@ -86,7 +86,7 @@ class HarnessRuntimeResponseMapperSnapshotTest {
     assertEquals(ThreadCommandState.APPLIED, appliedDto.getState());
     assertEquals(ThreadCommandState.CANCELLED, cancelledDto.getState());
     assertEquals(NOW.plusSeconds(1), cancelledDto.getCancelledAt());
-    assertEquals("4", queuedDto.getSequence());
+    assertEquals(4L, queuedDto.getSequence());
     assertEquals(NOW, queuedDto.getCreatedAt());
   }
 
@@ -126,7 +126,7 @@ class HarnessRuntimeResponseMapperSnapshotTest {
     assertEquals(idText(3), runningDto.getRequestHeadEntryId());
     assertEquals(GenerationStatus.RUNNING, runningDto.getStatus());
     assertEquals(1, runningDto.getAttempt());
-    assertEquals("7", runningDto.getSequence());
+    assertEquals(7L, runningDto.getSequence());
     assertEquals(
         List.of(
             HarnessAgentMessageContentDTO.Type.TEXT, HarnessAgentMessageContentDTO.Type.THINKING),
@@ -151,7 +151,7 @@ class HarnessRuntimeResponseMapperSnapshotTest {
         HarnessRuntimeResponseMapper.toSnapshotDto(modelSnapshot(succeeded, List.of()), Map.of())
             .getActiveAssistantOutput();
     assertEquals(GenerationStatus.SUCCEEDED, succeededDto.getStatus());
-    assertEquals("8", succeededDto.getSequence());
+    assertEquals(8L, succeededDto.getSequence());
     assertEquals("answer", succeededDto.getContents().getFirst().getText());
     assertEquals(idText(4), succeededDto.getResultEntryId());
     assertNull(succeededDto.getError());
@@ -242,7 +242,7 @@ class HarnessRuntimeResponseMapperSnapshotTest {
     Map<UUID, HarnessUsageCostDTO> usageCosts = Map.of(id(3), usageCost);
     HarnessThreadSnapshotDTO dto = HarnessRuntimeResponseMapper.toSnapshotDto(snapshot, usageCosts);
 
-    assertEquals("3", dto.getVersion());
+    assertEquals(3L, dto.getVersion());
     assertEquals(3, dto.getEntries().size());
     assertEquals(
         List.of(EntryType.ROOT, EntryType.TURN_START, EntryType.MESSAGE),
@@ -260,7 +260,7 @@ class HarnessRuntimeResponseMapperSnapshotTest {
     assertEquals(idText(2), dto.getGenerationFailures().getFirst().getTurnStartEntryId());
     assertEquals(idText(3), dto.getGenerationFailures().getFirst().getRequestHeadEntryId());
     assertEquals(1, dto.getGenerationFailures().getFirst().getAttempt());
-    assertEquals("3", dto.getGenerationFailures().getFirst().getSequence());
+    assertEquals(3L, dto.getGenerationFailures().getFirst().getSequence());
     assertEquals("first partial", dto.getGenerationFailures().getFirst().getText());
     assertEquals("first thought", dto.getGenerationFailures().getFirst().getThinking());
     assertEquals("TRANSIENT", dto.getGenerationFailures().getFirst().getErrorCode());

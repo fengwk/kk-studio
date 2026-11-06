@@ -59,12 +59,19 @@ export function isCanonicalResourceReference(item: unknown): item is CanvasResou
 
 export function extractParametersFromDefinition(model: CanvasFunctionDefinitionDTO): CanvasFunctionParameterDefinition[] {
   const schema = model.argsSchema
-  if (!schema || typeof schema !== 'object' || !schema.properties || typeof schema.properties !== 'object') {
+  if (!schema || typeof schema !== 'object' || Array.isArray(schema)) {
     return []
   }
-  const required = Array.isArray(schema.required) ? new Set(schema.required) : new Set<string>()
+  const schemaRecord = schema as Record<string, unknown>
+  const properties = schemaRecord.properties
+  if (!properties || typeof properties !== 'object' || Array.isArray(properties)) {
+    return []
+  }
+  const required = Array.isArray(schemaRecord.required)
+    ? new Set(schemaRecord.required)
+    : new Set<string>()
   const params: CanvasFunctionParameterDefinition[] = []
-  for (const [key, prop] of Object.entries(schema.properties as Record<string, unknown>)) {
+  for (const [key, prop] of Object.entries(properties as Record<string, unknown>)) {
     if (key === 'prompt' || key === 'references') continue
     if (!prop || typeof prop !== 'object') continue
     const p = prop as Record<string, unknown>

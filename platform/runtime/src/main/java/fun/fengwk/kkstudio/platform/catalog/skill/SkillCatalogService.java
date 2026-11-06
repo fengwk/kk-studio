@@ -30,7 +30,6 @@ import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentSkillState;
-import fun.fengwk.kkstudio.platform.error.CatalogVersions;
 import fun.fengwk.kkstudio.platform.secret.SecretConfiguredDTO;
 import fun.fengwk.kkstudio.platform.secret.SecretUpdate;
 import fun.fengwk.kkstudio.platform.storage.dto.StoragePresignedUrlDTO;
@@ -226,10 +225,9 @@ public class SkillCatalogService {
     if (checkDTO == null) {
       throw DomainException.validation(RESOURCE, "request body must not be null");
     }
-    String rawExpected = checkDTO.getExpectedVersion();
-    long expected = requireExpectedVersion(rawExpected);
+    long expected = requireExpectedVersion(checkDTO.getExpectedVersion());
     SkillPackage current = requireGitPackage(packageName);
-    requireCurrentVersion(current, rawExpected, expected);
+    requireCurrentVersion(current, expected);
     String headCommit;
     String checkError;
     try {
@@ -249,7 +247,7 @@ public class SkillCatalogService {
     return writes.execute(
         () -> {
           SkillPackage locked = requireGitPackageForUpdate(packageName);
-          requireCurrentVersion(locked, rawExpected, expected);
+          requireCurrentVersion(locked, expected);
           Instant checkedAt = Instant.now();
           if (!Objects.equals(preparedHead, locked.gitSource().headCommit())
               || !Objects.equals(preparedError, locked.gitSource().checkError())) {
@@ -269,11 +267,10 @@ public class SkillCatalogService {
     if (publishDTO == null) {
       throw DomainException.validation(RESOURCE, "request body must not be null");
     }
-    String rawExpected = publishDTO.getExpectedVersion();
-    long expected = requireExpectedVersion(rawExpected);
+    long expected = requireExpectedVersion(publishDTO.getExpectedVersion());
     String targetCommit = requireCommit(publishDTO.getTargetCommit(), "targetCommit");
     SkillPackage current = requireGitPackage(packageName);
-    requireCurrentVersion(current, rawExpected, expected);
+    requireCurrentVersion(current, expected);
     if (!targetCommit.equals(current.gitSource().headCommit())) {
       throw DomainException.validation(
           RESOURCE,
@@ -291,10 +288,9 @@ public class SkillCatalogService {
       return writes.execute(
           () -> {
             SkillPackage locked = requireGitPackageForUpdate(packageName);
-            requireCurrentVersion(locked, rawExpected, expected);
+            requireCurrentVersion(locked, expected);
             if (!targetCommit.equals(locked.gitSource().headCommit())) {
-              throw DomainException.versionConflict(
-                  RESOURCE, rawExpected, CatalogVersions.format(locked.version()));
+              throw DomainException.versionConflict(RESOURCE, expected, locked.version());
             }
             ensureSkillsRemovable(packageName, removedSkillNames(locked, archive.skills()));
             UUID artifactBlobId = consumeStaging(stagingUploadId);
@@ -311,7 +307,7 @@ public class SkillCatalogService {
                     locked.updatedAt(),
                     locked.gitSource());
             if (!skillPackageRepository.updatePublication(published, expected)) {
-              throw conflictOrMissing(packageName, rawExpected);
+              throw conflictOrMissing(packageName, expected);
             }
             if (!skillPackageRepository.updateGitObservation(
                 packageName, targetCommit, Instant.now(), null)) {
@@ -346,10 +342,10 @@ public class SkillCatalogService {
     if (editDTO == null) {
       throw DomainException.validation(RESOURCE, "request body must not be null");
     }
-    String rawExpected = editDTO.getExpectedVersion();
+    Long rawExpected = editDTO.getExpectedVersion();
     long expected = requireExpectedVersion(rawExpected);
     SkillPackage current = requirePackageForUpdate(packageName);
-    requireCurrentVersion(current, rawExpected, expected);
+    requireCurrentVersion(current, expected);
     String description = requireDescription(editDTO.getDescription());
     if (!current.isGit()) {
       if (editDTO.getBranch() != null
@@ -359,7 +355,7 @@ public class SkillCatalogService {
       }
       if (!Objects.equals(description, current.description())) {
         if (!skillPackageRepository.updateDescription(packageName, description, expected)) {
-          throw conflictOrMissing(packageName, rawExpected);
+          throw conflictOrMissing(packageName, expected);
         }
       }
       return getPackage(packageName);
@@ -381,7 +377,7 @@ public class SkillCatalogService {
     }
     if (!Objects.equals(description, current.description())) {
       if (!skillPackageRepository.updateDescription(packageName, description, expected)) {
-        throw conflictOrMissing(packageName, rawExpected);
+        throw conflictOrMissing(packageName, expected);
       }
     }
     if (!Objects.equals(branch, current.gitSource().branch()) || tokenChanged) {
@@ -445,14 +441,14 @@ public class SkillCatalogService {
     String packageName = requirePackageName(publishDTO.getPackageName());
     String packageVersion = requireVersionText(publishDTO.getPackageVersion());
     String description = requireDescription(publishDTO.getDescription());
-    String rawExpected = publishDTO.getExpectedVersion();
+    Long rawExpected = publishDTO.getExpectedVersion();
     SkillPackage existing = skillPackageRepository.getPackage(packageName);
     if (existing != null && existing.isGit()) {
       throw DomainException.validation(
           RESOURCE, "skill package is a Git package and cannot be replaced by an upload");
     }
     if (existing == null && rawExpected != null) {
-      throw DomainException.versionConflict(RESOURCE, rawExpected, "0");
+      throw DomainException.versionConflict(RESOURCE, rawExpected, 0);
     }
     if (existing != null && rawExpected == null) {
       throw DomainException.validation(
@@ -460,7 +456,7 @@ public class SkillCatalogService {
     }
     long expected = rawExpected == null ? 0L : requireExpectedVersion(rawExpected);
     if (existing != null) {
-      requireCurrentVersion(existing, rawExpected, expected);
+      requireCurrentVersion(existing, expected);
     }
     StagedArchive staged = readStagedArchive(stagingUploadId);
     List<SkillManifestEntry> skills = staged.archive().skills();
@@ -469,7 +465,7 @@ public class SkillCatalogService {
           () -> {
             SkillPackage locked = existing == null ? null : requirePackageForUpdate(packageName);
             if (locked != null) {
-              requireCurrentVersion(locked, rawExpected, expected);
+              requireCurrentVersion(locked, expected);
             }
             if (locked != null) {
               ensureSkillsRemovable(packageName, removedSkillNames(locked, skills));
@@ -510,7 +506,7 @@ public class SkillCatalogService {
                       locked.updatedAt(),
                       null);
               if (!skillPackageRepository.updatePublication(published, expected)) {
-                throw conflictOrMissing(packageName, rawExpected);
+                throw conflictOrMissing(packageName, expected);
               }
               releaseArtifact(locked);
             }
@@ -530,13 +526,12 @@ public class SkillCatalogService {
 
   /** 删除 Package；仍被 Agent {@code SkillRef} 引用时拒绝。 */
   @Transactional
-  public void deletePackage(String packageName, String expectedVersion) {
-    long expected = requireExpectedVersion(expectedVersion);
+  public void deletePackage(String packageName, long expected) {
     SkillPackage current = requirePackageForUpdate(packageName);
-    requireCurrentVersion(current, expectedVersion, expected);
+    requireCurrentVersion(current, expected);
     ensureSkillsRemovable(packageName, manifestNames(current.skills()));
     if (!skillPackageRepository.deletePackage(packageName, expected)) {
-      throw conflictOrMissing(packageName, expectedVersion);
+      throw conflictOrMissing(packageName, expected);
     }
     releaseArtifact(current);
   }
@@ -639,7 +634,7 @@ public class SkillCatalogService {
               current.updatedAt(),
               current.gitSource());
       if (!skillPackageRepository.updatePublication(published, current.version())) {
-        throw conflictOrMissing(name, CatalogVersions.format(current.version()));
+        throw conflictOrMissing(name, current.version());
       }
       if (!skillPackageRepository.updateGitSettings(name, prepared.branch(), prepared.token())
           || !skillPackageRepository.updateGitObservation(
@@ -834,20 +829,17 @@ public class SkillCatalogService {
     return skills.stream().map(SkillManifestEntry::name).toList();
   }
 
-  private RuntimeException conflictOrMissing(String packageName, String expectedVersion) {
+  private RuntimeException conflictOrMissing(String packageName, long expected) {
     SkillPackage reread = skillPackageRepository.getPackage(packageName);
     if (reread == null) {
       return DomainException.notFound(RESOURCE);
     }
-    return DomainException.versionConflict(
-        RESOURCE, expectedVersion, CatalogVersions.format(reread.version()));
+    return DomainException.versionConflict(RESOURCE, expected, reread.version());
   }
 
-  private static void requireCurrentVersion(
-      SkillPackage skillPackage, String rawExpected, long expected) {
+  private static void requireCurrentVersion(SkillPackage skillPackage, long expected) {
     if (skillPackage.version() != expected) {
-      throw DomainException.versionConflict(
-          RESOURCE, rawExpected, CatalogVersions.format(skillPackage.version()));
+      throw DomainException.versionConflict(RESOURCE, expected, skillPackage.version());
     }
   }
 
@@ -897,11 +889,11 @@ public class SkillCatalogService {
     return token.isEmpty() ? null : token;
   }
 
-  private static long requireExpectedVersion(String raw) {
-    if (raw == null) {
+  private static long requireExpectedVersion(Long expected) {
+    if (expected == null) {
       throw DomainException.validation(RESOURCE, "expectedVersion is required");
     }
-    return CatalogVersions.parse(raw, "expectedVersion");
+    return expected;
   }
 
   private static String requirePackageName(String raw) {
@@ -1037,7 +1029,7 @@ public class SkillCatalogService {
             : skillPackage.skills().stream().map(SkillCatalogService::toDto).toList());
     dto.setSource(sourceOf(skillPackage));
     dto.setUpdateAvailable(updateAvailable(skillPackage));
-    dto.setVersion(CatalogVersions.format(skillPackage.version()));
+    dto.setVersion(skillPackage.version());
     dto.setCreatedAt(skillPackage.createdAt());
     dto.setUpdatedAt(skillPackage.updatedAt());
     return dto;
@@ -1074,7 +1066,7 @@ public class SkillCatalogService {
     dto.setUpdateAvailable(updateAvailable(skillPackage));
     dto.setArtifactSha256(artifact.getSha256());
     dto.setArtifactSizeBytes(artifact.getSizeBytes());
-    dto.setVersion(CatalogVersions.format(skillPackage.version()));
+    dto.setVersion(skillPackage.version());
     dto.setCreatedAt(skillPackage.createdAt());
     dto.setUpdatedAt(skillPackage.updatedAt());
     return dto;

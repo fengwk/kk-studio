@@ -1409,7 +1409,7 @@ registerCase({
         safeDiagnosticJson(stopReceipt),
       )
       assert(
-        Number(stop.thread.version) === Number(beforeStop.version) + 1,
+        BigInt(stop.thread.version) === BigInt(beforeStop.version) + 1n,
         `active stop must bump version by one: ${safeDiagnosticJson({ beforeStop, stop })}`,
       )
 

@@ -2226,7 +2226,7 @@ describe('ThreadComposer attachment pills', () => {
     expect(reserveUpload).toHaveBeenCalledWith(expect.objectContaining({
       filename: 'photo.png',
       mediaType: 'image/png',
-      sizeBytes: 64,
+      sizeBytes: '64',
       sha256: 'a'.repeat(64),
     }))
     expect(reserveUpload.mock.calls[0]?.[0]).not.toHaveProperty('mediaKind')

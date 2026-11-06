@@ -53,7 +53,7 @@ async function uploadPng(ctx) {
   const reserved = await ctx.call('POST', '/api/platform/storage/uploads', {
     filename: 'tiny.png',
     mediaType: 'image/png',
-    sizeBytes: PNG_BYTES.length,
+    sizeBytes: String(PNG_BYTES.length),
     sha256,
   })
   const upload = reserved.json

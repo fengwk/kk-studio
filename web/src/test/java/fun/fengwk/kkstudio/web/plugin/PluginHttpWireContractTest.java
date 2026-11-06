@@ -340,8 +340,8 @@ class PluginHttpWireContractTest {
   /** 测试意图：POST connection-check 的真实响应体（含 no-store 头）必须与已提交的共用 golden 逐值一致。 */
   @Test
   void checkConnectionResponseMatchesCommittedHttpWireGolden() throws Exception {
-    when(pluginManagementService.checkConnection("beta-deep-connected", "8"))
-        .thenReturn(connectionCheck("beta-deep-connected", "8"));
+    when(pluginManagementService.checkConnection("beta-deep-connected", 8L))
+        .thenReturn(connectionCheck("beta-deep-connected", 8L));
 
     MockHttpServletResponse response =
         mockMvc
@@ -360,8 +360,8 @@ class PluginHttpWireContractTest {
   /** 测试意图：检查结果只含类型化维度与已应用坐标，绝不回显远端地址、正文、凭据或异常文本。 */
   @Test
   void checkConnectionBodyNeverCarriesRemoteMaterial() throws Exception {
-    when(pluginManagementService.checkConnection("beta-deep-connected", "8"))
-        .thenReturn(connectionCheck("beta-deep-connected", "8"));
+    when(pluginManagementService.checkConnection("beta-deep-connected", 8L))
+        .thenReturn(connectionCheck("beta-deep-connected", 8L));
 
     MockHttpServletResponse response =
         mockMvc
@@ -413,7 +413,7 @@ class PluginHttpWireContractTest {
     String valuesJson =
         "{\"limits\":{\"maxTokens\":9007199254740993123456789,"
             + "\"temperature\":1.230000},\"weight\":1E+1000}";
-    when(pluginManagementService.updateConfiguration(eq("alpha-none"), eq("1"), any(), any()))
+    when(pluginManagementService.updateConfiguration(eq("alpha-none"), eq(1L), any(), any()))
         .thenReturn(nonePlugin());
 
     MockHttpServletResponse response =
@@ -433,7 +433,7 @@ class PluginHttpWireContractTest {
     assertEquals(200, response.getStatus());
     ArgumentCaptor<String> submitted = ArgumentCaptor.forClass(String.class);
     verify(pluginManagementService)
-        .updateConfiguration(eq("alpha-none"), eq("1"), submitted.capture(), any());
+        .updateConfiguration(eq("alpha-none"), eq(1L), submitted.capture(), any());
     assertEquals(valuesJson, submitted.getValue());
     assertTrue(submitted.getValue().contains("9007199254740993123456789"));
     assertTrue(submitted.getValue().contains("1.230000"));
@@ -590,7 +590,7 @@ class PluginHttpWireContractTest {
     PluginDTO dto = basePlugin("alpha-none", "Alpha None", "0.1.0");
     dto.setConfiguration(
         configuration(
-            "1",
+            1L,
             configValuesJson(
                 "https://alpha-none.example.com",
                 "{\"maxTokens\":2048,\"temperature\":0.25}",
@@ -599,7 +599,7 @@ class PluginHttpWireContractTest {
                 false,
                 "1"),
             false));
-    dto.setAppliedVersion("1");
+    dto.setAppliedVersion(1L);
     return dto;
   }
 
@@ -612,7 +612,7 @@ class PluginHttpWireContractTest {
     dto.setCanvasFunctionNames(List.of("alpha-static-fn"));
     dto.setConfiguration(
         configuration(
-            "3",
+            3L,
             configValuesJson(
                 "https://alpha-static.example.com",
                 "{\"maxTokens\":4096,\"temperature\":0.2}",
@@ -621,7 +621,7 @@ class PluginHttpWireContractTest {
                 false,
                 "2"),
             true));
-    dto.setAppliedVersion("3");
+    dto.setAppliedVersion(3L);
     return dto;
   }
 
@@ -635,7 +635,7 @@ class PluginHttpWireContractTest {
     dto.setCanvasFunctionNames(List.of());
     dto.setConfiguration(
         configuration(
-            "5",
+            5L,
             configValuesJson(
                 "https://alpha-reauth.example.com",
                 "{\"maxTokens\":1000,\"temperature\":0.5}",
@@ -644,7 +644,7 @@ class PluginHttpWireContractTest {
                 true,
                 "3"),
             false));
-    dto.setAppliedVersion("5");
+    dto.setAppliedVersion(5L);
     return dto;
   }
 
@@ -661,7 +661,7 @@ class PluginHttpWireContractTest {
     dto.setCanvasFunctionNames(List.of("beta-deep-pending-fn"));
     dto.setConfiguration(
         configuration(
-            "2",
+            2L,
             configValuesJson(
                 "https://beta-pending.example.com",
                 "{\"maxTokens\":8192,\"temperature\":0.7}",
@@ -670,7 +670,7 @@ class PluginHttpWireContractTest {
                 false,
                 "4"),
             true));
-    dto.setAppliedVersion("1");
+    dto.setAppliedVersion(1L);
     dto.setApplicationError(PluginManagementService.PENDING_APPLICATION_ERROR);
     return dto;
   }
@@ -687,14 +687,14 @@ class PluginHttpWireContractTest {
     dto.setLastRefreshedAt(DEEP_CONNECTED_LAST_REFRESHED_AT);
     dto.setHarnessToolNames(List.of("beta-deep-connected-tool", "beta-deep-connected-extra"));
     dto.setCanvasFunctionNames(List.of("beta-deep-connected-fn"));
-    dto.setConfiguration(configuration("8", PROBE_VALUES_JSON, true));
+    dto.setConfiguration(configuration(8L, PROBE_VALUES_JSON, true));
     dto.setConnectionCheckSupported(true);
-    dto.setAppliedVersion("8");
+    dto.setAppliedVersion(8L);
     return dto;
   }
 
   /** 显式连接检查的响应 fixture：只有类型化维度与本次已应用坐标。 */
-  private static PluginConnectionCheckDTO connectionCheck(String pluginId, String appliedVersion) {
+  private static PluginConnectionCheckDTO connectionCheck(String pluginId, long appliedVersion) {
     PluginConnectionCheckDTO dto = new PluginConnectionCheckDTO();
     dto.setPluginId(pluginId);
     dto.setAppliedVersion(appliedVersion);
@@ -716,7 +716,7 @@ class PluginHttpWireContractTest {
   }
 
   private static PluginConfigurationDTO configuration(
-      String version, String valuesJson, boolean secretConfigured) {
+      long version, String valuesJson, boolean secretConfigured) {
     PluginConfigurationDTO configuration = new PluginConfigurationDTO();
     configuration.setVersion(version);
     configuration.setValuesJson(valuesJson);

@@ -167,7 +167,7 @@ class PluginConfigSyncIntegrationTest extends ConfigSyncTestSupport {
 
     // 并发写入：按计划期的版本保存一次普通配置。
     pluginManagementService.updateConfiguration(
-        pluginId, Long.toString(row.version()), row.valuesJson(), Map.of());
+        pluginId, row.version(), row.valuesJson(), Map.of());
 
     assertThrows(DomainException.class, () -> applier.apply(plan, List.of()));
 

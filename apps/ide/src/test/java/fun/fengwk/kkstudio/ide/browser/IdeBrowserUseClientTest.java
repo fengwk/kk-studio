@@ -92,16 +92,20 @@ class IdeBrowserUseClientTest {
 
   @Test
   void remoteBoundProofsReturnsOnlyTheTypedActiveSnapshot() throws Exception {
-    IdeBrowserUse active = usage(7, boundView(12L));
-    IdeBrowserUseSnapshot snapshot = IdeBrowserUseSnapshot.from(IDENTITY_REMOTE, active);
-    byte[] payload = MAPPER.writeValueAsBytes(snapshot);
+    // 内部 HTTP 响应遵循统一 Long wire：revision 与 bindingEpoch 都是 canonical 十进制字符串。
+    String payload =
+        """
+        {"eventNodeId":"%s","connectionId":"%s","documentId":"%s","revision":"7","views":[
+          {"environmentId":"%s","viewId":"%s","claimId":"%s","bindingEpoch":"12"}]}
+        """
+            .formatted(REMOTE_NODE, CONNECTION, DOCUMENT, ENVIRONMENT, VIEW, CLAIM);
     startServer(
         exchange -> {
           verifyAuth("GET", exchange);
           assertEquals(
               IdeBrowserUsePaths.activeProofsPath(IDENTITY_REMOTE, DOCUMENT),
               exchange.getRequestURI().toString());
-          respond(exchange, 200, new String(payload, StandardCharsets.UTF_8));
+          respond(exchange, 200, payload);
         });
     IdeBrowserUseRegistry registry = new IdeBrowserUseRegistry();
     ClusterNodeRegistry nodes = mock(ClusterNodeRegistry.class);

@@ -7,6 +7,6 @@ import lombok.Data;
 public class EnvironmentIdeChangeDirectoryDTO {
 
   private String documentId;
-  private String bindingEpoch;
+  private Long bindingEpoch;
   private String directory;
 }

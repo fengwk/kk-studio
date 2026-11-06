@@ -42,8 +42,8 @@ public class ProviderRepositoryTest extends PostgresSpringTestSupport {
         jdbc.queryForObject(
             "select provider_type from provider where name = ?", String.class, name));
     assertEquals("{}", stored.configJson());
-    assertNotNull(stored.createTime());
-    assertNotNull(stored.updateTime());
+    assertNotNull(stored.createdAt());
+    assertNotNull(stored.updatedAt());
     assertTrue(
         agentProviderRepository.listAll().stream()
             .anyMatch(candidate -> candidate.name().equals(name)));
@@ -120,7 +120,7 @@ public class ProviderRepositoryTest extends PostgresSpringTestSupport {
         source.configJson(),
         source.connectionGenerationId(),
         source.version(),
-        source.createTime(),
-        source.updateTime());
+        source.createdAt(),
+        source.updatedAt());
   }
 }

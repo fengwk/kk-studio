@@ -94,7 +94,7 @@ class EnvironmentIdeServiceImplTest {
     assertEquals(CONNECTION.toString(), dto.getConnectionId());
     assertEquals(CLAIM.toString(), dto.getClaimId());
     assertEquals(DAEMON_INSTANCE, dto.getDaemonInstanceId());
-    assertEquals("7", dto.getBindingEpoch());
+    assertEquals(7L, dto.getBindingEpoch());
     assertEquals("/daemon/dir", dto.getDirectory());
     assertEquals("/daemon/ws", dto.getWorkspacePath());
     assertEquals(EnvironmentIdeViewState.OPEN, dto.getState());
@@ -204,7 +204,7 @@ class EnvironmentIdeServiceImplTest {
 
     EnvironmentIdeCloseViewDTO close = new EnvironmentIdeCloseViewDTO();
     close.setDocumentId(DOCUMENT.toString());
-    close.setBindingEpoch("7");
+    close.setBindingEpoch(7L);
     close.setDiscard(true);
     transport.replies.add(success(VIEW));
     service.closeView(ENV, VIEW.toString(), close);
@@ -227,7 +227,7 @@ class EnvironmentIdeServiceImplTest {
     open();
     EnvironmentIdeCloseViewDTO request = new EnvironmentIdeCloseViewDTO();
     request.setDocumentId(DOCUMENT.toString());
-    request.setBindingEpoch("7");
+    request.setBindingEpoch(7L);
     request.setDiscard(false);
     transport.replies.add(
         IdeResult.newBuilder().setOk(false).setCode("CANCELLED").setMessage("cancelled").build());
@@ -243,7 +243,7 @@ class EnvironmentIdeServiceImplTest {
     open();
     EnvironmentIdeCloseViewDTO request = new EnvironmentIdeCloseViewDTO();
     request.setDocumentId(DOCUMENT.toString());
-    request.setBindingEpoch("7");
+    request.setBindingEpoch(7L);
     request.setDiscard(false);
     transport.replies.add(
         IdeResult.newBuilder()
@@ -258,7 +258,7 @@ class EnvironmentIdeServiceImplTest {
 
     EnvironmentIdeCloseViewDTO canonical = new EnvironmentIdeCloseViewDTO();
     canonical.setDocumentId(DOCUMENT.toString());
-    canonical.setBindingEpoch("7");
+    canonical.setBindingEpoch(7L);
     canonical.setDiscard(true);
     int beforeInvalidView = transport.commands.size();
     // 测试意图：请求体本身合法时，大写 viewId 仍必须在发命令前按校验错误拒绝。
@@ -273,7 +273,7 @@ class EnvironmentIdeServiceImplTest {
     open();
     EnvironmentIdeChangeDirectoryDTO request = new EnvironmentIdeChangeDirectoryDTO();
     request.setDocumentId(DOCUMENT.toString());
-    request.setBindingEpoch("7");
+    request.setBindingEpoch(7L);
     request.setDirectory("/client/link/.");
     transport.replies.add(
         IdeResult.newBuilder()
@@ -350,7 +350,7 @@ class EnvironmentIdeServiceImplTest {
     open();
     EnvironmentIdeChangeDirectoryDTO request = new EnvironmentIdeChangeDirectoryDTO();
     request.setDocumentId(DOCUMENT.toString());
-    request.setBindingEpoch("7");
+    request.setBindingEpoch(7L);
     request.setDirectory("/daemon/next");
     transport.replies.add(
         IdeResult.newBuilder()
@@ -370,7 +370,7 @@ class EnvironmentIdeServiceImplTest {
     assertEquals("/daemon/next", changed.getDirectory());
     assertEquals(VIEW.toString(), changed.getViewId());
     assertEquals(DOCUMENT.toString(), changed.getDocumentId());
-    assertEquals("7", changed.getBindingEpoch());
+    assertEquals(7L, changed.getBindingEpoch());
     assertNull(changed.getWorkspacePath(), "回读失败时不得伪造 Daemon workspace");
     assertNull(changed.getState(), "回读失败时不得伪造 Daemon 视图状态");
     assertTrue(bindings.find(ENV, VIEW).orElseThrow().matches(DOCUMENT, 7L));
@@ -383,7 +383,7 @@ class EnvironmentIdeServiceImplTest {
     open();
     EnvironmentIdeChangeDirectoryDTO request = new EnvironmentIdeChangeDirectoryDTO();
     request.setDocumentId(DOCUMENT.toString());
-    request.setBindingEpoch("7");
+    request.setBindingEpoch(7L);
     request.setDirectory("/client/link/.");
     // Missing and blank directory are not confirmation, and neither is another view's reply.
     for (IdeResult reply :
@@ -426,7 +426,7 @@ class EnvironmentIdeServiceImplTest {
     open();
     EnvironmentIdeChangeDirectoryDTO request = new EnvironmentIdeChangeDirectoryDTO();
     request.setDocumentId(DOCUMENT.toString());
-    request.setBindingEpoch("7");
+    request.setBindingEpoch(7L);
     request.setDirectory("/next");
     transport.replies.add(
         IdeResult.newBuilder()
@@ -473,7 +473,7 @@ class EnvironmentIdeServiceImplTest {
     EnvironmentIdeViewsDTO views = service.listViews(ENV);
 
     assertEquals(1, views.getViews().size());
-    assertEquals("8", views.getViews().get(0).getBindingEpoch());
+    assertEquals(8L, views.getViews().get(0).getBindingEpoch());
     assertTrue(authorization.closed.contains(new Closed(VIEW, 7L)));
   }
 
@@ -523,7 +523,7 @@ class EnvironmentIdeServiceImplTest {
 
     EnvironmentIdeViewDTO dto = service.openView(ENV, openRequest(null));
 
-    assertEquals("7", dto.getBindingEpoch());
+    assertEquals(7L, dto.getBindingEpoch());
     assertEquals(List.of(IdeAction.OPEN_VIEW, IdeAction.LIST_VIEWS), actions());
     assertEquals(1, transport.abandoned);
     assertEquals(2, browserUse.queries.size(), "claim 与对账后都必须核对 exact intent");
@@ -566,7 +566,7 @@ class EnvironmentIdeServiceImplTest {
 
     EnvironmentIdeChangeDirectoryDTO request = new EnvironmentIdeChangeDirectoryDTO();
     request.setDocumentId(DOCUMENT.toString());
-    request.setBindingEpoch("7");
+    request.setBindingEpoch(7L);
     request.setDirectory("/next");
     transport.failNext.set(IdeAction.CHANGE_DIRECTORY);
     assertThrows(
@@ -585,7 +585,7 @@ class EnvironmentIdeServiceImplTest {
         DomainException.class, () -> service.focusTerminal(ENV, VIEW.toString(), binding(7L)));
     EnvironmentIdeCloseViewDTO close = new EnvironmentIdeCloseViewDTO();
     close.setDocumentId(DOCUMENT.toString());
-    close.setBindingEpoch("7");
+    close.setBindingEpoch(7L);
     close.setDiscard(true);
     assertThrows(DomainException.class, () -> service.closeView(ENV, VIEW.toString(), close));
     assertEquals(2, transport.abandoned);
@@ -613,7 +613,7 @@ class EnvironmentIdeServiceImplTest {
     transport.pendingStarted = new CountDownLatch(1);
     EnvironmentIdeCloseViewDTO close = new EnvironmentIdeCloseViewDTO();
     close.setDocumentId(DOCUMENT.toString());
-    close.setBindingEpoch("7");
+    close.setBindingEpoch(7L);
     close.setDiscard(false);
     AtomicReference<Throwable> failure = new AtomicReference<>();
     AtomicBoolean interrupted = new AtomicBoolean();
@@ -672,7 +672,7 @@ class EnvironmentIdeServiceImplTest {
   private static EnvironmentIdeViewBindingDTO binding(long epoch) {
     EnvironmentIdeViewBindingDTO binding = new EnvironmentIdeViewBindingDTO();
     binding.setDocumentId(DOCUMENT.toString());
-    binding.setBindingEpoch(Long.toString(epoch));
+    binding.setBindingEpoch(epoch);
     return binding;
   }
 

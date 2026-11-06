@@ -33,6 +33,6 @@ public class ProviderUpdateDTO {
   /** HTTP 重试白名单覆盖：null 表示继承系统名单，空数组表示不自动重试任何 HTTP 错误。 */
   private @Nullable List<Integer> modelHttpRetryStatusCodes;
 
-  /** 必填非负十进制字符串；必须与当前 Provider 版本一致。 */
-  private String expectedVersion;
+  /** 必填非负版本号；必须与当前 Provider 版本一致。 */
+  private Long expectedVersion;
 }

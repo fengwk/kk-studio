@@ -186,7 +186,7 @@ function createStopCaseContext({ exitConverges = true } = {}) {
     thread = {
       ...thread,
       status: 'IDLE',
-      version: String(Number(thread.version) + 1),
+      version: (BigInt(thread.version) + 1n).toString(),
     }
     phase = 'stopped-confirmed'
     return true
@@ -199,9 +199,9 @@ function createStopCaseContext({ exitConverges = true } = {}) {
     thread = {
       ...thread,
       headEntryId: turnEnd.entryId,
-      nextCommandSequence: String(Number(thread.nextCommandSequence) + 1),
+      nextCommandSequence: (BigInt(thread.nextCommandSequence) + 1n).toString(),
       status: 'IDLE',
-      version: String(Number(thread.version) + 1),
+      version: (BigInt(thread.version) + 1n).toString(),
     }
     phase = 'followup-idle'
   }
@@ -326,7 +326,7 @@ function createStopCaseContext({ exitConverges = true } = {}) {
             headEntryId: user.entryId,
             executionControl: 'RUNNABLE',
             status: 'RUNNING',
-            version: String(Number(thread.version) + 1),
+            version: (BigInt(thread.version) + 1n).toString(),
           }
           phase = 'followup-running'
           return acceptedResponse(body.commands)
@@ -372,8 +372,8 @@ function createStopCaseContext({ exitConverges = true } = {}) {
           thread = {
             ...thread,
             headEntryId: stoppedTurnEndEntryId,
-            nextCommandSequence: String(Number(thread.nextCommandSequence) + 1),
-            version: String(Number(thread.version) + 1),
+            nextCommandSequence: (BigInt(thread.nextCommandSequence) + 1n).toString(),
+            version: (BigInt(thread.version) + 1n).toString(),
             executionControl: 'STOPPED',
             status: 'RUNNING',
           }
@@ -425,7 +425,7 @@ test('registered stop case waits for the stable exit baseline before replay and 
   assert.ok(baseline, `artifact must capture the converged exit baseline: ${JSON.stringify(afterStop.data)}`)
   assert.equal(baseline.status, 'IDLE')
   assert.equal(baseline.executionControl, 'STOPPED')
-  assert.equal(baseline.version, String(Number(afterStop.data.stop.thread.version) + 1))
+  assert.equal(baseline.version, (BigInt(afterStop.data.stop.thread.version) + 1n).toString())
   assert.equal(baseline.headEntryId, afterStop.data.stop.thread.headEntryId)
   assert.equal(afterStop.data.replay.status, 'REPLAYED')
   assert.equal(afterStop.data.replay.thread.version, baseline.version)

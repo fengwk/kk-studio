@@ -6,5 +6,5 @@ import lombok.Data;
 @Data
 public class ChatYoloUpdateDTO {
   private boolean yoloEnabled;
-  private String expectedVersion;
+  private Long expectedVersion;
 }

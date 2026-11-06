@@ -10,6 +10,7 @@ import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.common.id.Uuids;
+import fun.fengwk.kkstudio.common.number.DecimalLongs;
 import fun.fengwk.kkstudio.harness.codec.RealtimeEventJsonCodec;
 import fun.fengwk.kkstudio.ide.browser.IdeBrowserUse;
 import fun.fengwk.kkstudio.ide.browser.IdeBrowserUseView;
@@ -293,9 +294,12 @@ final class EventFrameCodec {
       String environmentId = requiredText(view, "environmentId", "frame.views[]");
       String viewId = requiredText(view, "viewId", "frame.views[]");
       String claimId = requiredText(view, "claimId", "frame.views[]");
-      String bindingEpoch =
-          view.has("bindingEpoch") ? requiredText(view, "bindingEpoch", "frame.views[]") : null;
       try {
+        Long bindingEpoch =
+            view.has("bindingEpoch")
+                ? DecimalLongs.parsePositive(
+                    requiredText(view, "bindingEpoch", "frame.views[]"), "bindingEpoch")
+                : null;
         views.add(IdeBrowserUseView.parse(environmentId, viewId, claimId, bindingEpoch));
       } catch (RuntimeException error) {
         // 不回显非法输入：EnvironmentId 等解析异常可能携带原始字符串。
@@ -303,8 +307,9 @@ final class EventFrameCodec {
       }
     }
     String documentId = requiredText(node, "documentId", "frame");
-    String revision = requiredText(node, "revision", "frame");
     try {
+      long revision =
+          DecimalLongs.parsePositive(requiredText(node, "revision", "frame"), "revision");
       return IdeBrowserUse.parse(documentId, revision, views);
     } catch (RuntimeException error) {
       throw new IllegalArgumentException("frame ide-use is invalid", error);

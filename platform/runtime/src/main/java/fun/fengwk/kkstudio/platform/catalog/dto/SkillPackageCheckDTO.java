@@ -6,6 +6,6 @@ import lombok.Data;
 @Data
 public class SkillPackageCheckDTO {
 
-  /** 客户端已展示的 CAS 版本号（十进制字符串）。 */
-  private String expectedVersion;
+  /** 客户端已展示的 CAS 版本号。 */
+  private Long expectedVersion;
 }

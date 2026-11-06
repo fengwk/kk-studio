@@ -56,6 +56,7 @@ import fun.fengwk.kkstudio.project.service.IssueRunService;
 import fun.fengwk.kkstudio.project.service.IssueStageBudgetService;
 import fun.fengwk.kkstudio.project.service.ProjectService;
 import fun.fengwk.kkstudio.project.service.StageBudgetView;
+import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
 import fun.fengwk.kkstudio.web.advice.ProblemAdvice;
 
 import java.time.Instant;
@@ -109,7 +110,8 @@ class IssueControllerTest {
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
             .setControllerAdvice(new ProblemAdvice(new MessageService()))
-            .setMessageConverters(new JacksonJsonHttpMessageConverter(objectMapper))
+            .setMessageConverters(
+                new JacksonJsonHttpMessageConverter(StrictHttpJsonMapperTestSupport.strictHttp()))
             .build();
   }
 
@@ -247,11 +249,24 @@ class IssueControllerTest {
         .andExpect(status().isMethodNotAllowed());
   }
 
+  /** 非规范 expectedVersion 必须在真实 HTTP mapper 处拒绝，不进入领域服务。 */
+  @Test
+  void rejectsNonCanonicalExpectedVersion() throws Exception {
+    mockMvc
+        .perform(
+            put("/api/project/issues/" + issueId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"expectedVersion\":\" 0\",\"title\":\"T\",\"description\":null}"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("validation"));
+    verifyNoInteractions(issueEditingService);
+  }
+
   @Test
   void testUpdateIssue() throws Exception {
     UpdateIssueRequestDTO req =
         UpdateIssueRequestDTO.builder()
-            .expectedVersion("1")
+            .expectedVersion(1L)
             .title("New Title")
             .description("New Desc")
             .build();
@@ -273,7 +288,7 @@ class IssueControllerTest {
   void testTransition() throws Exception {
     TransitionIssueRequestDTO req =
         TransitionIssueRequestDTO.builder()
-            .expectedVersion("1")
+            .expectedVersion(1L)
             .requestKey("k1")
             .toState("DONE")
             .build();
@@ -293,7 +308,7 @@ class IssueControllerTest {
   void testBlock() throws Exception {
     BlockIssueRequestDTO req =
         BlockIssueRequestDTO.builder()
-            .expectedVersion("1")
+            .expectedVersion(1L)
             .requestKey("k1")
             .reason("need review")
             .build();
@@ -320,7 +335,7 @@ class IssueControllerTest {
   @Test
   void testRecover() throws Exception {
     RecoverIssueRequestDTO req =
-        RecoverIssueRequestDTO.builder().expectedVersion("1").requestKey("k1").build();
+        RecoverIssueRequestDTO.builder().expectedVersion(1L).requestKey("k1").build();
     Issue recovered = Issue.builder().id(issueId).version(2L).state("WORK").build();
     when(issueLifecycleService.recoverIssue(issueId, 1L, "k1")).thenReturn(recovered);
 
@@ -336,7 +351,7 @@ class IssueControllerTest {
   @Test
   void testResume() throws Exception {
     ResumeIssueRequestDTO req =
-        ResumeIssueRequestDTO.builder().expectedVersion("1").requestKey("k1").build();
+        ResumeIssueRequestDTO.builder().expectedVersion(1L).requestKey("k1").build();
     Issue resumed = Issue.builder().id(issueId).version(2L).build();
     when(issueLifecycleService.resumeIssue(issueId, 1L, "k1")).thenReturn(resumed);
 
@@ -352,7 +367,7 @@ class IssueControllerTest {
   @Test
   void testReopen() throws Exception {
     ReopenIssueRequestDTO req =
-        ReopenIssueRequestDTO.builder().expectedVersion("1").requestKey("k1").build();
+        ReopenIssueRequestDTO.builder().expectedVersion(1L).requestKey("k1").build();
     Issue reopened = Issue.builder().id(issueId).version(2L).state("INIT").build();
     when(issueLifecycleService.reopen(issueId, 1L, "k1")).thenReturn(reopened);
 
@@ -369,7 +384,7 @@ class IssueControllerTest {
   void testBudgetReset() throws Exception {
     ResetStageBudgetRequestDTO req =
         ResetStageBudgetRequestDTO.builder()
-            .expectedVersion("1")
+            .expectedVersion(1L)
             .requestKey("k1")
             .state("WORK")
             .maxRuns(10)
@@ -392,7 +407,7 @@ class IssueControllerTest {
   void testAppendActivityComment() throws Exception {
     AppendIssueActivityRequestDTO req =
         AppendIssueActivityRequestDTO.builder()
-            .expectedVersion("1")
+            .expectedVersion(1L)
             .requestKey("k1")
             .kind(IssueActivityRequestKind.COMMENT)
             .body("A human comment")
@@ -428,7 +443,7 @@ class IssueControllerTest {
   void testAppendActivityInstruction() throws Exception {
     AppendIssueActivityRequestDTO req =
         AppendIssueActivityRequestDTO.builder()
-            .expectedVersion("1")
+            .expectedVersion(1L)
             .requestKey("k2")
             .kind(IssueActivityRequestKind.INSTRUCTION)
             .body("A human instruction")
@@ -479,7 +494,7 @@ class IssueControllerTest {
   void testAppendActivityReplayConflictReturns409() throws Exception {
     AppendIssueActivityRequestDTO req =
         AppendIssueActivityRequestDTO.builder()
-            .expectedVersion("1")
+            .expectedVersion(1L)
             .requestKey("k1")
             .kind(IssueActivityRequestKind.COMMENT)
             .body("Different content reusing key")
@@ -564,7 +579,7 @@ class IssueControllerTest {
   void testStopIssue() throws Exception {
     StopIssueRequestDTO req =
         StopIssueRequestDTO.builder()
-            .expectedVersion("1")
+            .expectedVersion(1L)
             .requestKey("stop-1")
             .detail("Manual stop")
             .build();
@@ -608,9 +623,9 @@ class IssueControllerTest {
   @Test
   void testVersionConflict() throws Exception {
     UpdateIssueRequestDTO req =
-        UpdateIssueRequestDTO.builder().expectedVersion("1").title("T").build();
+        UpdateIssueRequestDTO.builder().expectedVersion(1L).title("T").build();
     when(issueEditingService.updateIssue(eq(issueId), eq(1L), any(), any()))
-        .thenThrow(DomainException.versionConflict("issue", "1", "2"));
+        .thenThrow(DomainException.versionConflict("issue", 1L, 2L));
 
     mockMvc
         .perform(

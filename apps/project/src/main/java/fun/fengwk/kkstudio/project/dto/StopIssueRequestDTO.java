@@ -13,7 +13,7 @@ import org.jspecify.annotations.Nullable;
 @AllArgsConstructor
 public class StopIssueRequestDTO {
 
-  private String expectedVersion;
+  private Long expectedVersion;
   private String requestKey;
 
   private @Nullable String detail;

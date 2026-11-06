@@ -131,6 +131,20 @@ describe('Canvas snapshot projection', () => {
     })
   })
 
+  it('rejects resource longs outside the safe integer range instead of rounding them', () => {
+    // 测试意图：wire 上的 Java long 越界时视图模型必须显式报错，不能静默丢精度。
+    expect(() => projectCanvasSnapshot({
+      ...snapshotDTO,
+      nodes: [{
+        ...snapshotDTO.nodes[0],
+        resources: [{
+          ...(snapshotDTO.nodes[0].resources[0] as CanvasResourceBlob),
+          sizeBytes: '9007199254740992',
+        }],
+      }],
+    })).toThrow(/safe integer/)
+  })
+
   it('projects a single media renderer at its source-ratio size', () => {
     const snapshot = projectCanvasSnapshot({
       ...snapshotDTO,

@@ -3,12 +3,10 @@ package fun.fengwk.kkstudio.platform.pluginhost.service;
 import lombok.extern.slf4j.Slf4j;
 import tools.jackson.databind.JsonNode;
 
-import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.json.JsonValues;
 import fun.fengwk.kkstudio.common.schema.SchemaJsonCodec;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
-import fun.fengwk.kkstudio.platform.error.CatalogVersions;
 import fun.fengwk.kkstudio.platform.plugin.Plugin;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthHandler;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthSpec;
@@ -121,12 +119,12 @@ public final class PluginManagementService {
 
   public PluginDTO updateConfiguration(
       String pluginId,
-      String expectedVersion,
+      long expectedVersion,
       String valuesJson,
       Map<String, SecretUpdate> secretPatch) {
-    long version = parseVersion(expectedVersion);
     Plugin plugin = requirePlugin(pluginId);
-    configurationService.configure(pluginId, version, valuesJson, canonicalPatch(secretPatch));
+    configurationService.configure(
+        pluginId, expectedVersion, valuesJson, canonicalPatch(secretPatch));
     return describe(plugin);
   }
 
@@ -147,19 +145,6 @@ public final class PluginManagementService {
       patch.put(field, entry.getValue());
     }
     return patch;
-  }
-
-  /** canonical 非负十进制版本；不可解析即校验失败，错误绝不回显请求值。 */
-  private static long parseVersion(String value) {
-    try {
-      return CatalogVersions.parse(value, "expectedVersion");
-    } catch (DomainException error) {
-      if (error.code() != DomainErrorCode.VALIDATION) {
-        throw error;
-      }
-      throw DomainException.validation(
-          RESOURCE, "expectedVersion must be a canonical non-negative decimal string");
-    }
   }
 
   /** 校验 region、取官方登录地址，再写入本次唯一的 pending attempt。返回值只有 attemptId 与登录地址。 */
@@ -242,16 +227,14 @@ public final class PluginManagementService {
   }
 
   /** 对本节点当前实例执行一次显式只读连接检查；请求版本必须等于本节点已应用的版本。 */
-  public PluginConnectionCheckDTO checkConnection(String pluginId, String expectedVersion) {
-    long version = parseVersion(expectedVersion);
+  public PluginConnectionCheckDTO checkConnection(String pluginId, long expectedVersion) {
     requirePlugin(pluginId);
     try (PluginCatalogRuntime.Lease lease = catalogRuntime.get().acquire()) {
       PluginCatalogSnapshot.ConfiguredPlugin configured =
           applied(lease.snapshot(), pluginId).orElseThrow();
       long appliedVersion = configured.config().revision();
-      if (version != appliedVersion) {
-        throw DomainException.versionConflict(
-            RESOURCE, "version=" + version, "version=" + appliedVersion);
+      if (expectedVersion != appliedVersion) {
+        throw DomainException.versionConflict(RESOURCE, expectedVersion, appliedVersion);
       }
       PluginConnectionCheck connectionCheck =
           configured
@@ -264,7 +247,7 @@ public final class PluginManagementService {
       PluginConnectionCheckResult result = connectionCheck.check();
       PluginConnectionCheckDTO dto = new PluginConnectionCheckDTO();
       dto.setPluginId(pluginId);
-      dto.setAppliedVersion(Long.toString(appliedVersion));
+      dto.setAppliedVersion(appliedVersion);
       dto.setCheckedAt(clock.instant());
       dto.setReachability(Reachability.valueOf(result.reachability().name()));
       dto.setAuthentication(Authentication.valueOf(result.authentication().name()));
@@ -321,7 +304,7 @@ public final class PluginManagementService {
     dto.setConfiguration(configurationOf(plugin, desired, configuredSecrets));
     Optional<PluginCatalogSnapshot.ConfiguredPlugin> applied = applied(snapshot, pluginId);
     long appliedVersion = applied.map(entry -> entry.config().revision()).orElse(0L);
-    dto.setAppliedVersion(applied.isPresent() ? Long.toString(appliedVersion) : null);
+    dto.setAppliedVersion(applied.isPresent() ? appliedVersion : null);
     dto.setApplicationError(
         appliedVersion == desired.version() ? null : pendingError(applicationError));
     dto.setConnectionCheckSupported(
@@ -353,7 +336,7 @@ public final class PluginManagementService {
       Plugin plugin, PluginConfigurationRow desired, Set<String> configuredSecrets) {
     PluginConfigSchema schema = plugin.configurationSchema();
     PluginConfigurationDTO configuration = new PluginConfigurationDTO();
-    configuration.setVersion(Long.toString(desired.version()));
+    configuration.setVersion(desired.version());
     configuration.setValuesJson(desired.valuesJson());
     configuration.setValuesSchema(JsonValues.readTree(SCHEMA_CODEC.encode(schema.valuesSchema())));
     configuration.setDefaults(JsonValues.readTree(schema.defaultsJson()));

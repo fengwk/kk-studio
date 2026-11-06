@@ -108,8 +108,7 @@ final class IssueMutationSupport {
 
   void requireVersion(Locked locked, long expectedVersion) {
     if (locked.issue().getVersion() != expectedVersion) {
-      throw DomainException.versionConflict(
-          "issue", Long.toString(expectedVersion), Long.toString(locked.issue().getVersion()));
+      throw DomainException.versionConflict("issue", expectedVersion, locked.issue().getVersion());
     }
   }
 
@@ -156,8 +155,7 @@ final class IssueMutationSupport {
 
   Issue persist(Locked locked, long expectedVersion) {
     if (!issueRepository.updateById(locked.issue(), expectedVersion)) {
-      throw DomainException.versionConflict(
-          "issue", Long.toString(expectedVersion), Long.toString(locked.issue().getVersion()));
+      throw DomainException.versionConflict("issue", expectedVersion, locked.issue().getVersion());
     }
     return issueRepository.getById(locked.issue().getId());
   }

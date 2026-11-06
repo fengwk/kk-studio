@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.web.controller;
 
+import static fun.fengwk.kkstudio.platformtest.harness.HarnessRuntimeTestFixtures.jsonObject;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -164,7 +165,7 @@ public class McpRuntimeToolIntegrationTest extends WebPostgresTestSupport {
         objectMapper.writeValueAsString(
             Map.of("Authorization", "Bearer secret-bearer-token-do-not-leak")));
     createMcp.put("enabled", true);
-    createMcp.put("timeoutMillis", 15000L);
+    createMcp.put("timeoutMillis", "15000");
 
     mockMvc
         .perform(
@@ -177,7 +178,7 @@ public class McpRuntimeToolIntegrationTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.discoveryStatus").value("UNVERIFIED"));
 
     McpServerDiscoverDTO discover = new McpServerDiscoverDTO();
-    discover.setExpectedVersion("0");
+    discover.setExpectedVersion(0L);
     mockMvc
         .perform(
             post("/api/platform/mcp-servers/{name}/discover", serverName)
@@ -222,8 +223,8 @@ public class McpRuntimeToolIntegrationTest extends WebPostgresTestSupport {
     providerDto.setModelCallIdleTimeoutMillis(3000L);
     ObjectNode providerBody = objectMapper.valueToTree(providerDto);
     providerBody.put("credential", providerDto.getCredential());
-    providerBody.put("modelCallTimeoutMillis", 120000);
-    providerBody.put("modelCallIdleTimeoutMillis", 3000);
+    providerBody.put("modelCallTimeoutMillis", "120000");
+    providerBody.put("modelCallIdleTimeoutMillis", "3000");
 
     mockMvc
         .perform(
@@ -255,7 +256,8 @@ public class McpRuntimeToolIntegrationTest extends WebPostgresTestSupport {
     invalidAgent.setName(agentName + "-invalid");
     HarnessExecutionSelectionDTO agentExecution = new HarnessExecutionSelectionDTO();
     agentExecution.setDriver("builtin");
-    agentExecution.setSettings(Map.of("modelName", configuredModelName, "variant", "default"));
+    agentExecution.setSettings(
+        jsonObject(Map.of("modelName", configuredModelName, "variant", "default")));
     invalidAgent.setExecution(agentExecution);
     invalidAgent.setConfig(invalidConfig);
 

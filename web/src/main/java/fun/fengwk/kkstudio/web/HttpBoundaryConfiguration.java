@@ -16,7 +16,6 @@ import tools.jackson.databind.DeserializationContext;
 import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.MapperFeature;
 import tools.jackson.databind.ValueDeserializer;
-import tools.jackson.databind.annotation.JsonDeserialize;
 import tools.jackson.databind.cfg.CoercionAction;
 import tools.jackson.databind.cfg.CoercionInputShape;
 import tools.jackson.databind.cfg.EnumFeature;
@@ -26,14 +25,7 @@ import tools.jackson.databind.type.LogicalType;
 
 import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.common.number.DecimalLongs;
-import fun.fengwk.kkstudio.platform.catalog.dto.ProviderCreateDTO;
-import fun.fengwk.kkstudio.platform.catalog.dto.ProviderUpdateDTO;
 import fun.fengwk.kkstudio.platform.daemon.DaemonOperatingSystem;
-import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsAdvancedDTO;
-import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsAiRuntimeDTO;
-import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsEnvironmentDTO;
-import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsStorageMediaDTO;
-import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsToolDTO;
 
 import java.beans.PropertyEditorSupport;
 import java.util.List;
@@ -45,6 +37,8 @@ public class HttpBoundaryConfiguration implements WebMvcConfigurer {
 
   private static final Converter<String, UUID> UUID_CONVERTER =
       value -> Uuids.parseCanonical(value, "UUID");
+  private static final Converter<String, Long> LONG_CONVERTER =
+      value -> DecimalLongs.parseNonNegative(value, "long");
 
   /** Daemon 操作系统族的 HTTP 词汇是小写 wire 值，不是枚举常量名。 */
   private static final Converter<String, DaemonOperatingSystem> OPERATING_SYSTEM_CONVERTER =
@@ -102,14 +96,10 @@ public class HttpBoundaryConfiguration implements WebMvcConfigurer {
         .addModule(
             new SimpleModule("CanonicalHttpUuid")
                 .addDeserializer(UUID.class, new CanonicalUuidDeserializer()))
-        // Settings 的 Long wire 是十进制字符串，而不是 JSON 数字。
-        .addMixIn(SystemSettingsToolDTO.class, SettingsToolMixin.class)
-        .addMixIn(SystemSettingsAiRuntimeDTO.class, SettingsAiRuntimeMixin.class)
-        .addMixIn(SystemSettingsEnvironmentDTO.class, SettingsEnvironmentMixin.class)
-        .addMixIn(SystemSettingsStorageMediaDTO.class, SettingsStorageMediaMixin.class)
-        .addMixIn(SystemSettingsAdvancedDTO.class, SettingsAdvancedMixin.class)
-        .addMixIn(ProviderCreateDTO.class, ProviderTimeoutMixin.class)
-        .addMixIn(ProviderUpdateDTO.class, ProviderTimeoutMixin.class)
+        .addModule(
+            new SimpleModule("CanonicalHttpLong")
+                .addDeserializer(Long.class, new CanonicalLongDeserializer())
+                .addDeserializer(Long.TYPE, new CanonicalLongDeserializer()))
         .build();
   }
 
@@ -127,129 +117,20 @@ public class HttpBoundaryConfiguration implements WebMvcConfigurer {
     }
   }
 
-  /** Provider 超时同时接受十进制字符串（服务端写出形态）与 JSON 整数（生成契约的请求形态）。 */
-  abstract static class ProviderTimeoutMixin {
-
-    @JsonDeserialize(using = ProviderTimeoutDeserializer.class)
-    Long modelCallTimeoutMillis;
-
-    @JsonDeserialize(using = ProviderTimeoutDeserializer.class)
-    Long modelCallIdleTimeoutMillis;
-  }
-
-  static class ProviderTimeoutDeserializer extends ValueDeserializer<Long> {
-    @Override
-    public Long deserialize(JsonParser parser, DeserializationContext context) {
-      JsonToken token = parser.currentToken();
-      try {
-        if (token == JsonToken.VALUE_NUMBER_INT) {
-          return parser.getLongValue();
-        }
-        if (token == JsonToken.VALUE_STRING) {
-          return DecimalLongs.parseNonNegative(parser.getString(), "provider timeout");
-        }
-      } catch (IllegalArgumentException error) {
-        throw DatabindException.from(parser, "provider timeout must be a non-negative decimal");
-      }
-      throw DatabindException.from(parser, "provider timeout must be a decimal string or integer");
-    }
-  }
-
-  static class DecimalStringLong extends ValueDeserializer<Long> {
+  static class CanonicalLongDeserializer extends ValueDeserializer<Long> {
     @Override
     public Long deserialize(JsonParser parser, DeserializationContext context) {
       if (parser.currentToken() != JsonToken.VALUE_STRING) {
-        throw DatabindException.from(parser, "settings long must be a decimal string");
+        throw DatabindException.from(
+            parser, "long must be a canonical non-negative decimal string");
       }
       try {
-        return DecimalLongs.parseNonNegative(parser.getString(), "settings long");
+        return DecimalLongs.parseNonNegative(parser.getString(), "long");
       } catch (IllegalArgumentException error) {
-        throw DatabindException.from(parser, "settings long must be a canonical decimal string");
+        throw DatabindException.from(
+            parser, "long must be a canonical non-negative decimal string");
       }
     }
-  }
-
-  abstract static class SettingsToolMixin {
-    @JsonDeserialize(using = DecimalStringLong.class)
-    Long modelGatewayBusyRetryMillis;
-
-    @JsonDeserialize(using = DecimalStringLong.class)
-    Long toolGatewayOverloadRetryMillis;
-  }
-
-  abstract static class SettingsAiRuntimeMixin
-      extends StrictJacksonConfiguration.HttpRetryStatusListMixin {
-    @JsonDeserialize(using = DecimalStringLong.class)
-    Long retryBaseDelayMillis;
-
-    @JsonDeserialize(using = DecimalStringLong.class)
-    Long retryMaxDelayMillis;
-  }
-
-  abstract static class SettingsEnvironmentMixin {
-    @JsonDeserialize(using = DecimalStringLong.class)
-    Long maxResourceBytes;
-
-    @JsonDeserialize(using = DecimalStringLong.class)
-    Long heartbeatTimeoutMillis;
-  }
-
-  abstract static class SettingsStorageMediaMixin {
-    @JsonDeserialize(using = DecimalStringLong.class)
-    Long uploadExpiresSeconds;
-
-    @JsonDeserialize(using = DecimalStringLong.class)
-    Long s3PresignDefaultExpiresSeconds;
-
-    @JsonDeserialize(using = DecimalStringLong.class)
-    Long s3PresignMaxExpiresSeconds;
-
-    @JsonDeserialize(using = DecimalStringLong.class)
-    Long canvasMediaProcessTimeoutMillis;
-
-    @JsonDeserialize(using = DecimalStringLong.class)
-    Long temporaryResourceTtlSeconds;
-
-    @JsonDeserialize(using = DecimalStringLong.class)
-    Long temporaryResourceCleanupIntervalSeconds;
-  }
-
-  abstract static class SettingsAdvancedMixin {
-    @JsonDeserialize(using = DecimalStringLong.class)
-    Long resourceMaxBytes;
-
-    @JsonDeserialize(using = DecimalStringLong.class)
-    Long processorLeaseDurationMillis;
-
-    @JsonDeserialize(using = DecimalStringLong.class)
-    Long processorHeartbeatIntervalMillis;
-
-    @JsonDeserialize(using = DecimalStringLong.class)
-    Long threadResolveFailureDelayMillis;
-
-    @JsonDeserialize(using = DecimalStringLong.class)
-    Long modelDispatchBusyFallbackDelayMillis;
-
-    @JsonDeserialize(using = DecimalStringLong.class)
-    Long toolPreflightFailureDelayMillis;
-
-    @JsonDeserialize(using = DecimalStringLong.class)
-    Long toolDispatchBusyFallbackDelayMillis;
-
-    @JsonDeserialize(using = DecimalStringLong.class)
-    Long applicationEventMaxBytes;
-
-    @JsonDeserialize(using = DecimalStringLong.class)
-    Long applicationEventSendTimeoutMillis;
-
-    @JsonDeserialize(using = DecimalStringLong.class)
-    Long applicationEventHeartbeatIntervalMillis;
-
-    @JsonDeserialize(using = DecimalStringLong.class)
-    Long postgresqlWorkNotificationPollMillis;
-
-    @JsonDeserialize(using = DecimalStringLong.class)
-    Long postgresqlWorkReconnectBackoffMillis;
   }
 
   @Override
@@ -264,10 +145,11 @@ public class HttpBoundaryConfiguration implements WebMvcConfigurer {
   @Override
   public void addFormatters(FormatterRegistry registry) {
     registry.addConverter(String.class, UUID.class, UUID_CONVERTER);
+    registry.addConverter(String.class, Long.class, LONG_CONVERTER);
     registry.addConverter(String.class, DaemonOperatingSystem.class, OPERATING_SYSTEM_CONVERTER);
   }
 
-  /** 防止 Spring 在转换器拒绝后回退到宽松的默认 UUID 属性编辑器。 */
+  /** 防止 Spring 在转换器拒绝后回退到宽松的默认属性编辑器。 */
   @ControllerAdvice
   public static class CanonicalUuidBinding {
     @InitBinder
@@ -280,6 +162,17 @@ public class HttpBoundaryConfiguration implements WebMvcConfigurer {
               setValue(UUID_CONVERTER.convert(text));
             }
           });
+      binder.registerCustomEditor(Long.class, longEditor());
+      binder.registerCustomEditor(long.class, longEditor());
+    }
+
+    private PropertyEditorSupport longEditor() {
+      return new PropertyEditorSupport() {
+        @Override
+        public void setAsText(String text) {
+          setValue(LONG_CONVERTER.convert(text));
+        }
+      };
     }
   }
 }

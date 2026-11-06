@@ -3,9 +3,10 @@ package fun.fengwk.kkstudio.project.dto;
 import org.springframework.stereotype.Component;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
-import fun.fengwk.kkstudio.common.number.DecimalLongs;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.plugin.resource.SessionResourceUri;
 import fun.fengwk.kkstudio.project.domain.ProjectStateCode;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflow;
@@ -41,10 +42,6 @@ public class ProjectDtoMapper {
     return uuid == null ? null : uuid.toString().toLowerCase();
   }
 
-  private static String formatLong(Long value) {
-    return value == null ? null : String.valueOf(value);
-  }
-
   public ProjectWorkflow toWorkflow(ProjectWorkflowDTO dto) {
     Objects.requireNonNull(dto, "dto");
     if (dto.getStates() == null) {
@@ -61,10 +58,10 @@ public class ProjectDtoMapper {
       String environment = stateDto.getEnvironment();
       String instructions = stateDto.getInstructions();
       Integer maxRuns = null;
-      if (stateDto.getMaxRuns() != null && !stateDto.getMaxRuns().isBlank()) {
-        long parsed = DecimalLongs.parseNonNegative(stateDto.getMaxRuns(), "maxRuns");
-        if (parsed > Integer.MAX_VALUE) {
-          throw new IllegalArgumentException("maxRuns exceeds int range");
+      if (stateDto.getMaxRuns() != null) {
+        long parsed = stateDto.getMaxRuns();
+        if (parsed < 1 || parsed > Integer.MAX_VALUE) {
+          throw DomainException.validation("maxRuns", "maxRuns must be in range [1, 2147483647]");
         }
         maxRuns = (int) parsed;
       }
@@ -94,7 +91,7 @@ public class ProjectDtoMapper {
                         .agent(state.agent())
                         .environment(state.environment())
                         .instructions(state.instructions())
-                        .maxRuns(state.maxRuns() != null ? String.valueOf(state.maxRuns()) : null)
+                        .maxRuns(state.maxRuns() != null ? state.maxRuns().longValue() : null)
                         .enabled(state.enabled())
                         .next(state.next().stream().map(ProjectStateCode::value).toList())
                         .build())
@@ -115,8 +112,8 @@ public class ProjectDtoMapper {
         .description(project.getDescription())
         .workflow(workflowDto)
         .yoloEnabled(project.isYoloEnabled())
-        .nextIssueNumber(formatLong(project.getNextIssueNumber()))
-        .version(formatLong(project.getVersion()))
+        .nextIssueNumber(project.getNextIssueNumber())
+        .version(project.getVersion())
         .archivedAt(project.getArchivedAt())
         .createdAt(project.getCreatedAt())
         .updatedAt(project.getUpdatedAt())
@@ -128,7 +125,7 @@ public class ProjectDtoMapper {
     return IssueDTO.builder()
         .id(formatUuid(issue.getId()))
         .projectId(formatUuid(issue.getProjectId()))
-        .number(formatLong(issue.getNumber()))
+        .number(issue.getNumber())
         .title(issue.getTitle())
         .description(issue.getDescription())
         .state(issue.getState())
@@ -137,7 +134,7 @@ public class ProjectDtoMapper {
         .pauseReason(
             issue.getPauseReason() == null ? null : PauseReason.valueOf(issue.getPauseReason()))
         .pauseDetail(issue.getPauseDetail())
-        .version(formatLong(issue.getVersion()))
+        .version(issue.getVersion())
         .createdAt(issue.getCreatedAt())
         .updatedAt(issue.getUpdatedAt())
         .build();
@@ -147,7 +144,7 @@ public class ProjectDtoMapper {
     Objects.requireNonNull(activity, "activity");
     return IssueActivityDTO.builder()
         .issueId(formatUuid(activity.getIssueId()))
-        .sequence(formatLong(activity.getSequence()))
+        .sequence(activity.getSequence())
         .kind(activity.getKind())
         .actorType(activity.getActorType())
         .actorAgentName(activity.getActorAgentName())
@@ -186,9 +183,9 @@ public class ProjectDtoMapper {
     return IssueStageBudgetDTO.builder()
         .state(budget.state())
         .maxRuns(budget.maxRuns())
-        .budgetAfterOrdinal(formatLong(budget.budgetAfterOrdinal()))
-        .usedRuns(formatLong(budget.usedRuns()))
-        .remainingRuns(formatLong(budget.remainingRuns()))
+        .budgetAfterOrdinal(budget.budgetAfterOrdinal())
+        .usedRuns(budget.usedRuns())
+        .remainingRuns(budget.remainingRuns())
         .build();
   }
 
@@ -203,7 +200,7 @@ public class ProjectDtoMapper {
     return IssueRunSummaryDTO.builder()
         .id(formatUuid(run.getId()))
         .issueId(formatUuid(run.getIssueId()))
-        .ordinal(formatLong(run.getOrdinal()))
+        .ordinal(run.getOrdinal())
         .state(run.getState())
         .status(run.getStatus())
         .agentName(agentName)
@@ -223,7 +220,7 @@ public class ProjectDtoMapper {
     return IssueRunDTO.builder()
         .id(formatUuid(run.getId()))
         .issueId(formatUuid(run.getIssueId()))
-        .ordinal(formatLong(run.getOrdinal()))
+        .ordinal(run.getOrdinal())
         .state(run.getState())
         .agentName(agentName)
         .sessionId(formatUuid(run.getSessionId()))
@@ -233,23 +230,23 @@ public class ProjectDtoMapper {
         .endEntryId(formatUuid(run.getEndEntryId()))
         .finalAnswerEntryId(formatUuid(run.getFinalAnswerEntryId()))
         .nextState(run.getNextState())
-        .observedActivitySequence(formatLong(run.getObservedActivitySequence()))
-        .remainingExecutionMs(formatLong(run.getRemainingExecutionMs()))
+        .observedActivitySequence(run.getObservedActivitySequence())
+        .remainingExecutionMs(run.getRemainingExecutionMs())
         .error(run.getError())
-        .version(formatLong(run.getVersion()))
+        .version(run.getVersion())
         .startedAt(run.getStartedAt())
         .endedAt(run.getEndedAt())
         .build();
   }
 
-  private Object decodeJsonData(String data) {
+  private JsonNode decodeJsonData(String data) {
     if (data == null || data.isBlank()) {
       return null;
     }
     try {
-      // 活动扩展数据按 BigDecimal 读取；其整数写出仍使用宿主 HTTP profile。
+      // 自由 JSON 以节点保留数字形态，不受 DTO 的 Long 字符串序列化规则影响。
       return objectMapper
-          .readerFor(Object.class)
+          .readerFor(JsonNode.class)
           .with(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
           .readValue(data);
     } catch (JacksonException error) {

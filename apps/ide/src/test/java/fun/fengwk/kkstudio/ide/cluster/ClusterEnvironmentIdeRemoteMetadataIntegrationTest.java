@@ -136,7 +136,7 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
 
     assertEquals(VIEW, dto.getViewId());
     assertEquals(ENV.toString(), dto.getEnvironmentId());
-    assertEquals("7", dto.getBindingEpoch());
+    assertEquals(7L, dto.getBindingEpoch());
     assertEquals("/home/dev/project", dto.getDirectory());
     assertEquals("/daemon/workspaces/" + VIEW, dto.getWorkspacePath());
     assertTrue(
@@ -150,7 +150,7 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
   @Test
   void remoteBoundCommandsCarryDocumentAndEpochOverAuthenticatedHttp() {
     nodeAService.openView(ENV, openViewRequest("/home/dev/project"));
-    EnvironmentIdeViewBindingDTO binding = binding("7");
+    EnvironmentIdeViewBindingDTO binding = binding(7L);
 
     nodeAService.focusTerminal(ENV, VIEW, binding);
 
@@ -169,7 +169,7 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
     assertEquals("/", nodeAService.listDirectories(ENV, "/a b+中").getPath());
     assertEquals("/a b+中", transportB.commands.getLast().getDirectory());
     nodeAService.openView(ENV, openViewRequest(null));
-    nodeAService.collapseMobile(ENV, VIEW, binding("7"));
+    nodeAService.collapseMobile(ENV, VIEW, binding(7L));
     assertEquals(IdeAction.COLLAPSE_MOBILE, transportB.commands.getLast().getAction());
     assertEquals(3, received.get());
     assertThrows(DomainException.class, () -> nodeAService.listDirectories(ENV, "x".repeat(4097)));
@@ -544,7 +544,7 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
     return request;
   }
 
-  private static EnvironmentIdeViewBindingDTO binding(String epoch) {
+  private static EnvironmentIdeViewBindingDTO binding(long epoch) {
     EnvironmentIdeViewBindingDTO binding = new EnvironmentIdeViewBindingDTO();
     binding.setDocumentId(DOCUMENT);
     binding.setBindingEpoch(epoch);

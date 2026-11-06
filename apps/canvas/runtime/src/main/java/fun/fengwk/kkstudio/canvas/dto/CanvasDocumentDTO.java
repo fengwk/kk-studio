@@ -15,7 +15,7 @@ public class CanvasDocumentDTO {
 
   private String title;
 
-  private String revision;
+  private Long revision;
 
   private Instant createdAt;
 

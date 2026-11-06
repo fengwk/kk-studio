@@ -5,7 +5,6 @@ import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
-import fun.fengwk.kkstudio.common.number.DecimalLongs;
 import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
 import fun.fengwk.kkstudio.project.dto.ProjectDtoMapper;
 import fun.fengwk.kkstudio.project.dto.ProjectIssueSnapshotDTO;
@@ -128,9 +127,7 @@ public class ProjectSnapshotAssembler {
 
   private List<ProjectIssueSnapshotDTO> sortByNumber(List<ProjectIssueSnapshotDTO> snapshots) {
     return snapshots.stream()
-        .sorted(
-            Comparator.comparingLong(
-                s -> DecimalLongs.parseNonNegative(s.getIssue().getNumber(), "number")))
+        .sorted(Comparator.comparingLong(s -> s.getIssue().getNumber()))
         .toList();
   }
 }

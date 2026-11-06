@@ -24,8 +24,8 @@ public non-sealed class SingleModelDTO implements ModelDTO {
   /** 结构化可执行配置。 */
   private ModelConfigDTO config;
 
-  /** 非负十进制字符串版本号。 */
-  private String version;
+  /** 非负版本号。 */
+  private Long version;
 
   /** 创建时间。 */
   private Instant createdAt;

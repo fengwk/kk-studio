@@ -12,15 +12,15 @@ import java.util.UUID;
  * <p>编码为 {@code <epochMilli>:<uuid>}，与仓库的毫秒精度 {@code created_at} 精确对应。空游标表示首屏；非法形状抛 {@link
  * IllegalArgumentException}（翻译为 400）。
  */
-record ChatSessionCursor(Instant createTime, UUID sessionId) {
+record ChatSessionCursor(Instant createdAt, UUID sessionId) {
 
   ChatSessionCursor {
-    Objects.requireNonNull(createTime, "createTime");
+    Objects.requireNonNull(createdAt, "createdAt");
     Objects.requireNonNull(sessionId, "sessionId");
   }
 
   static ChatSessionCursor of(ChatSessionRow row) {
-    return new ChatSessionCursor(row.createTime(), row.sessionId());
+    return new ChatSessionCursor(row.createdAt(), row.sessionId());
   }
 
   static ChatSessionCursor parse(String cursor) {
@@ -50,6 +50,6 @@ record ChatSessionCursor(Instant createTime, UUID sessionId) {
   }
 
   String encode() {
-    return createTime.toEpochMilli() + ":" + sessionId;
+    return createdAt.toEpochMilli() + ":" + sessionId;
   }
 }

@@ -20,8 +20,8 @@ public class HarnessThreadCommandBatchDTO {
   /** 期望的当前 head Entry：canonical UUID string；纯 USER_MESSAGE 发送批次必须省略，其余必须携带。 */
   private @Nullable String expectedHeadEntryId;
 
-  /** 期望的下一条 command sequence：strict positive decimal string；纯 USER_MESSAGE 发送批次必须省略，其余必须携带。 */
-  private @Nullable String expectedNextCommandSequence;
+  /** 期望的下一条 command sequence：strict positive integer；纯 USER_MESSAGE 发送批次必须省略，其余必须携带。 */
+  private @Nullable Long expectedNextCommandSequence;
 
   /** 非空、按产品顺序排列的 SET_* + USER_MESSAGE / GOAL 命令列表。 */
   private List<HarnessCommandCreateDTO> commands = List.of();

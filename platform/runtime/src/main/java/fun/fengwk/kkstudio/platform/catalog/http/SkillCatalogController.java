@@ -75,7 +75,7 @@ public class SkillCatalogController {
   @DeleteMapping("/skill-packages/{name}")
   @ResponseStatus(HttpStatus.NO_CONTENT)
   public void deletePackage(
-      @PathVariable("name") String name, @RequestParam("expectedVersion") String expectedVersion) {
+      @PathVariable("name") String name, @RequestParam("expectedVersion") long expectedVersion) {
     skillCatalogService.deletePackage(name, expectedVersion);
   }
 

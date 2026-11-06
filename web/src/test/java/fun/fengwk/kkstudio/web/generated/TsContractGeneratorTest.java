@@ -77,8 +77,8 @@ class TsContractGeneratorTest {
   static final class RoutesController {
     @PutMapping("/{*name}")
     ResponseEntity<FixtureDTO.View> update(
-        @PathVariable("name") String name,
-        @RequestParam("version") String version,
+        @PathVariable("name") long name,
+        @RequestParam("version") Long version,
         @RequestParam(value = "limit", defaultValue = "10") int limit,
         @RequestBody FixtureDTO.Create body) {
       throw new UnsupportedOperationException();
@@ -192,7 +192,7 @@ class TsContractGeneratorTest {
         """);
   }
 
-  /** 测试意图：只读入的请求把 Long 写作 number，请求里的可空属性一律可缺省；双向类型保持写出形态。 */
+  /** 测试意图：请求及双向类型的 Long 均为 string；可空属性可缺省。 */
   @Test
   void longFollowsTheDirectionItIsUsedIn() {
     String generated = generate(ContractController.class);
@@ -201,7 +201,7 @@ class TsContractGeneratorTest {
         generated,
         """
         export interface FixtureCreate {
-          limit: number
+          limit: string
           note?: string | null
         }
         """);

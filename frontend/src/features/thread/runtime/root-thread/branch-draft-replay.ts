@@ -1,6 +1,7 @@
 import type { BranchDraft } from '@/features/thread/branch-draft'
 import { asRecord } from '@/features/thread/runtime/payload-json'
 import {
+  copyExecutionSettings,
   createBuiltinExecution,
   getBuiltinModelSelection,
 } from '@/shared/api/contracts/ai-runtime'
@@ -12,7 +13,7 @@ export function cloneDraft(draft: BranchDraft): BranchDraft {
     ...draft,
     execution: {
       driver: draft.execution.driver,
-      settings: { ...draft.execution.settings },
+      settings: copyExecutionSettings(draft.execution.settings),
     },
   }
 }
@@ -48,7 +49,9 @@ export function branchDraftFromEntry(
     } else {
       nextExecution = {
         driver,
-        settings: isRecord(execution.settings) ? { ...execution.settings } : { ...fallback.execution.settings },
+        settings: isRecord(execution.settings)
+          ? copyExecutionSettings(execution.settings)
+          : copyExecutionSettings(fallback.execution.settings),
       }
     }
   }

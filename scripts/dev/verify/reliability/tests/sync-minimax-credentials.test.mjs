@@ -28,8 +28,8 @@ test('test intent: a complete pair updates the Responses provider and appends /v
       providerType: 'openai_responses',
       baseUrl: null,
       version: '7',
-      modelCallTimeoutMillis: 1800000,
-      modelCallIdleTimeoutMillis: 120000,
+      modelCallTimeoutMillis: '1800000',
+      modelCallIdleTimeoutMillis: '120000',
     },
   ]
   const { request, calls } = makeMockHttp({ rows })

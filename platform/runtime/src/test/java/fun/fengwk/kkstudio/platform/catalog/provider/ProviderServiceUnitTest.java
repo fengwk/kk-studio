@@ -213,7 +213,7 @@ public class ProviderServiceUnitTest {
     when(repository.getByName("provider")).thenReturn(existing(null, "{}", 1L));
     assertThrows(
         DomainException.class,
-        () -> service.updateProvider("provider", versioned(update(SecretUpdate.keep()), "0")));
+        () -> service.updateProvider("provider", versioned(update(SecretUpdate.keep()), 0L)));
     verify(repository, never()).updateByName(any(), anyLong());
   }
 
@@ -221,7 +221,7 @@ public class ProviderServiceUnitTest {
   public void updateCasFailureDistinguishesMissingRowFromNewerVersion() {
     when(repository.getByName("provider")).thenReturn(existing(null, "{}"));
     when(repository.updateByName(any(), eq(0L))).thenReturn(false);
-    ProviderUpdateDTO update = versioned(update(SecretUpdate.keep()), "0");
+    ProviderUpdateDTO update = versioned(update(SecretUpdate.keep()), 0L);
 
     when(repository.getByName("provider")).thenReturn(existing(null, "{}"), (Provider) null);
     assertThrows(DomainException.class, () -> service.updateProvider("provider", update));
@@ -235,7 +235,7 @@ public class ProviderServiceUnitTest {
   public void updateOfMissingProviderIsNotFound() {
     assertThrows(
         DomainException.class,
-        () -> service.updateProvider("missing", versioned(update(SecretUpdate.keep()), "0")));
+        () -> service.updateProvider("missing", versioned(update(SecretUpdate.keep()), 0L)));
   }
 
   // ---- 导入 upsert ----
@@ -343,24 +343,24 @@ public class ProviderServiceUnitTest {
 
   @Test
   public void deleteChecksVersionBeforeReferencesAndMapsCasFailure() {
-    assertThrows(DomainException.class, () -> service.deleteProvider("provider", "0"));
+    assertThrows(DomainException.class, () -> service.deleteProvider("provider", 0L));
 
     Provider provider = existing(null, "{}", 1L);
     when(repository.getByNameForUpdate("provider")).thenReturn(provider);
     // 版本过期优先于引用检查。
     when(repository.hasModels("provider")).thenReturn(true);
-    assertThrows(DomainException.class, () -> service.deleteProvider("provider", "0"));
+    assertThrows(DomainException.class, () -> service.deleteProvider("provider", 0L));
     verify(repository, never()).hasModels("provider");
 
-    assertThrows(DomainException.class, () -> service.deleteProvider("provider", "1"));
+    assertThrows(DomainException.class, () -> service.deleteProvider("provider", 1L));
     verify(repository, never()).deleteByName(any(), anyLong());
 
     when(repository.hasModels("provider")).thenReturn(false);
     when(repository.deleteByName("provider", 1L)).thenReturn(false);
     when(repository.getByName("provider")).thenReturn(null);
-    assertThrows(DomainException.class, () -> service.deleteProvider("provider", "1"));
+    assertThrows(DomainException.class, () -> service.deleteProvider("provider", 1L));
     when(repository.getByName("provider")).thenReturn(existing(null, "{}", 5L));
-    assertThrows(DomainException.class, () -> service.deleteProvider("provider", "1"));
+    assertThrows(DomainException.class, () -> service.deleteProvider("provider", 1L));
   }
 
   // ---- 远端模型发现 ----
@@ -407,14 +407,14 @@ public class ProviderServiceUnitTest {
   private Provider updated(Provider current, ProviderUpdateDTO update) {
     when(repository.getByName("provider")).thenReturn(current);
     when(repository.updateByName(any(), anyLong())).thenReturn(true);
-    versioned(update, String.valueOf(current.version()));
+    versioned(update, current.version());
     service.updateProvider("provider", update);
     ArgumentCaptor<Provider> captor = ArgumentCaptor.forClass(Provider.class);
     verify(repository, atLeastOnce()).updateByName(captor.capture(), anyLong());
     return captor.getValue();
   }
 
-  private static ProviderUpdateDTO versioned(ProviderUpdateDTO update, String version) {
+  private static ProviderUpdateDTO versioned(ProviderUpdateDTO update, long version) {
     update.setExpectedVersion(version);
     return update;
   }

@@ -6,6 +6,6 @@ import lombok.Data;
 @Data
 public class HarnessThreadCompactDTO {
 
-  /** exact non-negative decimal version cursor。 */
-  private String expectedVersion;
+  /** exact non-negative version cursor。 */
+  private Long expectedVersion;
 }

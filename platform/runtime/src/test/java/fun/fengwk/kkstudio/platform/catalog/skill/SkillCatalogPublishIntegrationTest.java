@@ -88,13 +88,13 @@ class SkillCatalogPublishIntegrationTest extends PostgresSpringTestSupport {
     publish1.setPackageName(PACKAGE);
     publish1.setPackageVersion("1.1.0");
     publish1.setDescription("v1.1 description");
-    publish1.setExpectedVersion("0");
+    publish1.setExpectedVersion(0L);
 
     SkillPackageStagingPublishDTO publish2 = new SkillPackageStagingPublishDTO();
     publish2.setPackageName(PACKAGE);
     publish2.setPackageVersion("1.2.0");
     publish2.setDescription("v1.2 description");
-    publish2.setExpectedVersion("0");
+    publish2.setExpectedVersion(0L);
 
     ExecutorService executor = Executors.newFixedThreadPool(2);
     CountDownLatch startLatch = new CountDownLatch(1);
@@ -167,7 +167,7 @@ class SkillCatalogPublishIntegrationTest extends PostgresSpringTestSupport {
     publish2.setPackageName(PACKAGE);
     publish2.setPackageVersion("2.0.0");
     publish2.setDescription("updated");
-    publish2.setExpectedVersion("0");
+    publish2.setExpectedVersion(0L);
     skillCatalogService.publishUpload(stage2, publish2);
 
     SkillPackage pkg2 = skillPackageRepository.getPackage(PACKAGE);
@@ -205,7 +205,7 @@ class SkillCatalogPublishIntegrationTest extends PostgresSpringTestSupport {
     assertEquals(StorageBlobState.ACTIVE, blobBefore.getState());
 
     // 删除包
-    skillCatalogService.deletePackage(PACKAGE, "0");
+    skillCatalogService.deletePackage(PACKAGE, 0L);
 
     // 权威行被物理删除
     assertNull(skillPackageRepository.getPackage(PACKAGE));

@@ -35,8 +35,8 @@ registerCase({
             providerType: 'openai',
             baseUrl: 'https://example.com/v1',
             credential: 'sk',
-            modelCallTimeoutMillis: 1000,
-            modelCallIdleTimeoutMillis: 1000,
+            modelCallTimeoutMillis: '1000',
+            modelCallIdleTimeoutMillis: '1000',
           }),
         { status: 400, messageIncludes },
       )
@@ -57,8 +57,8 @@ registerCase({
           description: 'x',
           baseUrl: 'https://example.com/v1',
           credential: 'sk',
-          modelCallTimeoutMillis: 1000,
-          modelCallIdleTimeoutMillis: 1000,
+          modelCallTimeoutMillis: '1000',
+          modelCallIdleTimeoutMillis: '1000',
         }),
       { status: 400, messageIncludes: /providerType|blank|required/i },
     )
@@ -182,8 +182,8 @@ registerCase({
             description: 'e2e provider updated',
             baseUrl: 'https://example.com/v2',
             credential: { operation: 'KEEP' },
-            modelCallTimeoutMillis: 1_800_000,
-            modelCallIdleTimeoutMillis: 120_000,
+            modelCallTimeoutMillis: '1800000',
+            modelCallIdleTimeoutMillis: '120000',
             expectedVersion: created.version,
           },
         )

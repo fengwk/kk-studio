@@ -48,7 +48,7 @@ public class AgentController {
   @DeleteMapping("/{name}")
   @ResponseStatus(HttpStatus.NO_CONTENT)
   public void deleteAgent(
-      @PathVariable("name") String name, @RequestParam("expectedVersion") String expectedVersion) {
+      @PathVariable("name") String name, @RequestParam("expectedVersion") long expectedVersion) {
     agentService.deleteAgent(name, expectedVersion);
   }
 }

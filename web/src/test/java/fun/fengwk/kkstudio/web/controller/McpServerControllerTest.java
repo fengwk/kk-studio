@@ -106,7 +106,7 @@ public class McpServerControllerTest extends WebPostgresTestSupport {
 
     // 同步发现：CAS 坐标在请求体
     McpServerDiscoverDTO discover = new McpServerDiscoverDTO();
-    discover.setExpectedVersion("0");
+    discover.setExpectedVersion(0L);
     mockMvc
         .perform(
             post(BASE + "/{name}/discover", name)
@@ -123,7 +123,7 @@ public class McpServerControllerTest extends WebPostgresTestSupport {
     update.put("url", fakeServer.endpointUrl());
     update.putObject("headers").put("operation", "KEEP");
     update.put("enabled", true);
-    update.put("timeoutMillis", 20000L);
+    update.put("timeoutMillis", "20000");
 
     mockMvc
         .perform(
@@ -131,7 +131,7 @@ public class McpServerControllerTest extends WebPostgresTestSupport {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(update.toString()))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.timeoutMillis").value(20000))
+        .andExpect(jsonPath("$.timeoutMillis").value("20000"))
         .andExpect(jsonPath("$.version").value("1"))
         .andExpect(jsonPath("$.discoveryStatus").value("UNVERIFIED"))
         .andExpect(jsonPath("$.headers.configured").value(true));
@@ -160,7 +160,7 @@ public class McpServerControllerTest extends WebPostgresTestSupport {
     clear.put("url", fakeServer.endpointUrl());
     clear.putObject("headers").put("operation", "CLEAR");
     clear.put("enabled", true);
-    clear.put("timeoutMillis", 5000L);
+    clear.put("timeoutMillis", "5000");
     mockMvc
         .perform(
             put(BASE + "/{name}", name)
@@ -186,7 +186,7 @@ public class McpServerControllerTest extends WebPostgresTestSupport {
     badVersionUpdate.put("url", fakeServer.endpointUrl());
     badVersionUpdate.putObject("headers").put("operation", "KEEP");
     badVersionUpdate.put("enabled", true);
-    badVersionUpdate.put("timeoutMillis", 5000L);
+    badVersionUpdate.put("timeoutMillis", "5000");
 
     mockMvc
         .perform(
@@ -197,7 +197,7 @@ public class McpServerControllerTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.code").value("version_conflict"));
 
     McpServerDiscoverDTO staleDiscover = new McpServerDiscoverDTO();
-    staleDiscover.setExpectedVersion("999");
+    staleDiscover.setExpectedVersion(999L);
     mockMvc
         .perform(
             post(BASE + "/{name}/discover", name)
@@ -250,7 +250,7 @@ public class McpServerControllerTest extends WebPostgresTestSupport {
     missingEnabled.put("expectedVersion", "0");
     missingEnabled.put("url", fakeServer.endpointUrl());
     missingEnabled.putObject("headers").put("operation", "KEEP");
-    missingEnabled.put("timeoutMillis", 5000L);
+    missingEnabled.put("timeoutMillis", "5000");
     mockMvc
         .perform(
             put(BASE + "/{name}", name)
@@ -263,7 +263,7 @@ public class McpServerControllerTest extends WebPostgresTestSupport {
     missingHeaders.put("expectedVersion", "0");
     missingHeaders.put("url", fakeServer.endpointUrl());
     missingHeaders.put("enabled", true);
-    missingHeaders.put("timeoutMillis", 5000L);
+    missingHeaders.put("timeoutMillis", "5000");
     mockMvc
         .perform(
             put(BASE + "/{name}", name)
@@ -307,12 +307,12 @@ public class McpServerControllerTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.code").value("validation"));
   }
 
-  /** 请求体用 JSON 数字表达 Long：生成契约的请求侧 Long 是数值，服务端拒绝标量强转。 */
+  /** 请求体的 Long 使用规范十进制字符串。 */
   private ObjectNode createBody(String name, String url, long timeoutMillis) {
     ObjectNode body = objectMapper.createObjectNode();
     body.put("name", name);
     body.put("url", url);
-    body.put("timeoutMillis", timeoutMillis);
+    body.put("timeoutMillis", Long.toString(timeoutMillis));
     return body;
   }
 

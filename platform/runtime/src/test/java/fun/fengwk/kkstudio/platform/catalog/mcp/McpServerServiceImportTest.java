@@ -66,7 +66,7 @@ class McpServerServiceImportTest {
     verify(repository).insertTool(discovered);
     assertEquals(McpDiscoveryStatus.AVAILABLE, dto.getDiscoveryStatus());
     assertEquals(1, dto.getToolCount());
-    assertEquals("0", dto.getVersion());
+    assertEquals(0L, dto.getVersion());
   }
 
   @Test

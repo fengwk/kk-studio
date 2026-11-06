@@ -21,8 +21,8 @@ public class HarnessThreadCommandDTO {
   /** 所属 Thread 主键：canonical UUID string。 */
   private String threadId;
 
-  /** Thread 内单调递增的命令序号：strict positive decimal string（从 1 开始）。 */
-  private String sequence;
+  /** Thread 内单调递增的命令序号：strict positive integer（从 1 开始）。 */
+  private Long sequence;
 
   /**
    * 命令类型，取 {@code ThreadCommandType} 枚举名：USER_MESSAGE / CUSTOM_MESSAGE / GOAL / SET_AGENT /

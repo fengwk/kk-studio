@@ -33,8 +33,8 @@ public class SkillPackageSummaryDTO {
   /** Git 渠道是否存在比当前版本更新的已检查 HEAD。 */
   private boolean updateAvailable;
 
-  /** CAS 乐观锁版本号（十进制字符串）。 */
-  private String version;
+  /** CAS 乐观锁版本号。 */
+  private Long version;
 
   /** 创建时间。 */
   private Instant createdAt;

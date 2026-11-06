@@ -123,7 +123,7 @@ describe('PluginConfigModal', () => {
     renderModal()
 
     expect(screen.getByText('配置插件：Demo Plugin')).toBeInTheDocument()
-    expect(screen.getByText('v3')).toBeInTheDocument()
+    expect(screen.getByText('配置版本 3')).toBeInTheDocument()
 
     // Checkbox for boolean
     const checkbox = screen.getByRole('checkbox', { name: 'enabled' })

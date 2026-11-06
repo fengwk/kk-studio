@@ -68,8 +68,8 @@ registerCase({
         providerType: 'openai',
         baseUrl: mock.baseUrl('/v1'),
         credential: `e2e-attempt-${suffix}`,
-        modelCallTimeoutMillis: 30_000,
-        modelCallIdleTimeoutMillis: 10_000,
+        modelCallTimeoutMillis: '30000',
+        modelCallIdleTimeoutMillis: '10000',
       })
       provider = providerResponse.json
       assert(provider?.name && provider?.version, JSON.stringify(providerResponse.json))

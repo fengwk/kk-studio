@@ -60,7 +60,7 @@ function createBackend(initial: SystemSettingsDTO = makeSettingsDto()) {
       `system settings version conflict: expected=${update.expectedVersion} actual=${state.version}`)
     }
     state = {
-      ...makeSettingsDto({ version: String(Number(state.version) + 1) }),
+      ...makeSettingsDto({ version: String(BigInt(state.version) + 1n) }),
       tool: update.tool,
       aiRuntime: update.aiRuntime,
       environment: update.environment,

@@ -13,7 +13,7 @@ import org.jspecify.annotations.Nullable;
 @AllArgsConstructor
 public class AppendIssueActivityRequestDTO {
 
-  private String expectedVersion;
+  private Long expectedVersion;
   private String requestKey;
 
   /** 人工活动类型，只接受 COMMENT 与 INSTRUCTION；省略等同 COMMENT。 */

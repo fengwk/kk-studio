@@ -50,7 +50,7 @@ export function createProjectsApi() {
     deleteProject: (projectId: string, expectedVersion: string): Promise<void> =>
       request('DELETE /api/project/projects/{projectId}', {
         path: { projectId },
-        query: { expectedVersion: Number(expectedVersion) },
+        query: { expectedVersion },
       }),
     archiveProject: (
       projectId: string,
@@ -70,7 +70,7 @@ export function createProjectsApi() {
       request('GET /api/project/issues/{issueId}', {
         path: { issueId },
         query: {
-          ...(afterSequence ? { afterSequence: Number(afterSequence) } : {}),
+          ...(afterSequence ? { afterSequence } : {}),
           ...(typeof limit === 'number' ? { limit } : {}),
         },
       }),
@@ -89,7 +89,7 @@ export function createProjectsApi() {
     deleteIssue: (issueId: string, expectedVersion: string): Promise<void> =>
       request('DELETE /api/project/issues/{issueId}', {
         path: { issueId },
-        query: { expectedVersion: Number(expectedVersion) },
+        query: { expectedVersion },
       }),
     reopenIssue: (issueId: string, body: ReopenIssueRequestDTO): Promise<IssueDTO> =>
       request('POST /api/project/issues/{issueId}/reopen', { path: { issueId }, body }),

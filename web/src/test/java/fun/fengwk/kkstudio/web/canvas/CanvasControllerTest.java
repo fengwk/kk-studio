@@ -28,6 +28,8 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.canvas.CanvasCommand;
 import fun.fengwk.kkstudio.canvas.CanvasCommandResult;
@@ -66,9 +68,7 @@ import fun.fengwk.kkstudio.web.advice.ProblemAdvice;
 import fun.fengwk.kkstudio.web.advice.RequestBodyRequiredValidationAdvice;
 
 import java.time.Instant;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -616,12 +616,11 @@ class CanvasControllerTest {
 
   /** 引用基线以 {name,args} 表达；args 的 JSON 语义相等就是 Function 语义组相等。 */
   private static CanvasFunctionDTO functionDto() {
-    Map<String, Object> source = new LinkedHashMap<>();
-    source.put("type", "resource");
-    source.put("nodeId", NODE_1.toString());
-    source.put("index", 0);
-    Map<String, Object> args = new LinkedHashMap<>();
-    args.put("source", source);
+    ObjectNode args = JsonNodeFactory.instance.objectNode();
+    args.putObject("source")
+        .put("type", "resource")
+        .put("nodeId", NODE_1.toString())
+        .put("index", 0);
     args.put("x", 100);
     return new CanvasFunctionDTO("image.crop", args);
   }

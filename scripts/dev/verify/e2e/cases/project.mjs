@@ -805,7 +805,7 @@ async function readActivityPages(ctx, issueId, pageSize = 2) {
     for (const activity of window.activities) {
       assertExactFields(activity, ACTIVITY_FIELDS, 'issue activity')
       assert(
-        Number(activity.sequence) > Number(cursor),
+        BigInt(activity.sequence) > BigInt(cursor),
         `activity ${activity.sequence} not after cursor ${cursor}`,
       )
       paged.push(activity)

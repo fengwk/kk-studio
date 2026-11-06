@@ -72,7 +72,7 @@ public class ChatSessionRepository {
                 + " or (created_at = :createdAt and session_id < :sessionId))"
                 + " order by created_at desc, session_id desc limit :limit")
         .param("chatId", chatId)
-        .param("createdAt", Timestamp.from(cursor.createTime()))
+        .param("createdAt", Timestamp.from(cursor.createdAt()))
         .param("sessionId", cursor.sessionId())
         .param("limit", limit)
         .query(ChatSessionRepository::mapPageRow)

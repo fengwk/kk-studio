@@ -25,7 +25,7 @@ public class SystemSettingsServiceIntegrationTest extends PostgresSpringTestSupp
   @Test
   public void getReturnsDefaultsWithVersionAndTimestamps() {
     SystemSettingsDTO dto = systemSettingsService.get();
-    assertEquals("0", dto.getVersion());
+    assertEquals(0L, dto.getVersion());
     assertNotNull(dto.getCreatedAt());
     assertNotNull(dto.getUpdatedAt());
     assertEquals(
@@ -38,7 +38,7 @@ public class SystemSettingsServiceIntegrationTest extends PostgresSpringTestSupp
   public void updateReplacesTheCompleteAggregateWithCas() {
     SystemSettingsDTO current = systemSettingsService.get();
 
-    SystemSettingsUpdateDTO update = updateFrom(current, "0");
+    SystemSettingsUpdateDTO update = updateFrom(current, 0L);
     update.getTool().setModelGatewayBusyRetryMillis(6000L);
     update.getAiRuntime().setCompactionKeepRecentTokens(8_192);
     update.getStorageMedia().setUploadExpiresSeconds(7200L);
@@ -47,7 +47,7 @@ public class SystemSettingsServiceIntegrationTest extends PostgresSpringTestSupp
     update.getNetwork().setNoProxyHosts("localhost,*.example.test");
 
     SystemSettingsDTO updated = systemSettingsService.update(update);
-    assertEquals("1", updated.getVersion());
+    assertEquals(1L, updated.getVersion());
     assertEquals(6000L, updated.getTool().getModelGatewayBusyRetryMillis());
     assertEquals(8_192, updated.getAiRuntime().getCompactionKeepRecentTokens());
     assertEquals(7200L, updated.getStorageMedia().getUploadExpiresSeconds());
@@ -59,7 +59,7 @@ public class SystemSettingsServiceIntegrationTest extends PostgresSpringTestSupp
 
     // 再次读取与最新版本一致。
     SystemSettingsDTO reread = systemSettingsService.get();
-    assertEquals("1", reread.getVersion());
+    assertEquals(1L, reread.getVersion());
     assertEquals(updated.getNetwork(), reread.getNetwork());
   }
 
@@ -67,14 +67,14 @@ public class SystemSettingsServiceIntegrationTest extends PostgresSpringTestSupp
   @Test
   public void updateReplacesLiveSnapshotAfterCommit() {
     SystemSettingsDTO current = systemSettingsService.get();
-    SystemSettingsUpdateDTO update = updateFrom(current, "0");
+    SystemSettingsUpdateDTO update = updateFrom(current, 0L);
     update.getAiRuntime().setRetryMaxRetries(9);
 
     // 事务尚未提交：内存快照保持旧值。
     assertEquals(3, systemSettingsSnapshot.get().aiRuntime().retryMaxRetries());
     SystemSettingsDTO updated = systemSettingsService.update(update);
     // Spring 事务在 service 返回时已提交：快照已替换为最新权威聚合。
-    assertEquals("1", updated.getVersion());
+    assertEquals(1L, updated.getVersion());
     assertEquals(9, systemSettingsSnapshot.get().aiRuntime().retryMaxRetries());
   }
 
@@ -83,7 +83,7 @@ public class SystemSettingsServiceIntegrationTest extends PostgresSpringTestSupp
     SystemSettingsDTO current = systemSettingsService.get();
     DomainException conflict =
         assertThrows(
-            DomainException.class, () -> systemSettingsService.update(updateFrom(current, "7")));
+            DomainException.class, () -> systemSettingsService.update(updateFrom(current, 7L)));
     assertEquals(DomainErrorCode.VERSION_CONFLICT, conflict.code());
 
     SystemSettingsUpdateDTO missing = updateFrom(current, null);
@@ -91,16 +91,13 @@ public class SystemSettingsServiceIntegrationTest extends PostgresSpringTestSupp
         DomainErrorCode.VALIDATION,
         assertThrows(DomainException.class, () -> systemSettingsService.update(missing)).code());
 
-    SystemSettingsUpdateDTO invalid = updateFrom(current, "not-a-version");
-    assertEquals(
-        DomainErrorCode.VALIDATION,
-        assertThrows(DomainException.class, () -> systemSettingsService.update(invalid)).code());
+    // 非十进制文本在 HTTP 边界被拒绝；服务层只接受已解析的 Long。
   }
 
   @Test
   public void updateRejectsInvalidAggregateWithFieldQualifiedMessage() {
     SystemSettingsDTO current = systemSettingsService.get();
-    SystemSettingsUpdateDTO update = updateFrom(current, "0");
+    SystemSettingsUpdateDTO update = updateFrom(current, 0L);
     update.getAdvanced().setProcessorHeartbeatIntervalMillis(60_000L);
     DomainException error =
         assertThrows(DomainException.class, () -> systemSettingsService.update(update));
@@ -111,7 +108,7 @@ public class SystemSettingsServiceIntegrationTest extends PostgresSpringTestSupp
   @Test
   public void updateRejectsMissingSectionsAndUnknownRequestFields() {
     SystemSettingsDTO current = systemSettingsService.get();
-    SystemSettingsUpdateDTO update = updateFrom(current, "0");
+    SystemSettingsUpdateDTO update = updateFrom(current, 0L);
     update.setNetwork(null);
     DomainException error =
         assertThrows(DomainException.class, () -> systemSettingsService.update(update));
@@ -120,7 +117,7 @@ public class SystemSettingsServiceIntegrationTest extends PostgresSpringTestSupp
   }
 
   private static SystemSettingsUpdateDTO updateFrom(
-      SystemSettingsDTO current, String expectedVersion) {
+      SystemSettingsDTO current, Long expectedVersion) {
     SystemSettingsUpdateDTO update = new SystemSettingsUpdateDTO();
     update.setExpectedVersion(expectedVersion);
     update.setTool(current.getTool());

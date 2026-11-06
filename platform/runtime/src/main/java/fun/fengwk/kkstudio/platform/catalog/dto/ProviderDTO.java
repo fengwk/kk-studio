@@ -43,8 +43,8 @@ public class ProviderDTO {
   /** 只读支持的提示缓存留存档位（由 providerType 派生）。 */
   private List<PromptCacheRetention> promptCacheRetentions;
 
-  /** 非负十进制字符串版本号；客户端每次更新时必须回传。 */
-  private String version;
+  /** 非负版本号；客户端每次更新时必须回传。 */
+  private Long version;
 
   /** 创建时间。 */
   private Instant createdAt;

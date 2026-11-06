@@ -208,7 +208,7 @@ class IdeLeaseCoordinatorTest {
     dto.setConnectionId(CONNECTION.toString());
     dto.setClaimId(CLAIM.toString());
     dto.setDaemonInstanceId(IDENTITY.daemonInstanceId());
-    dto.setBindingEpoch(Long.toString(epoch));
+    dto.setBindingEpoch(epoch);
     dto.setDirectory("/dir");
     dto.setWorkspacePath("/ws");
     dto.setState(EnvironmentIdeViewState.OPEN);

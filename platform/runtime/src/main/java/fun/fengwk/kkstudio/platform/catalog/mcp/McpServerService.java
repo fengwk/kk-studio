@@ -15,7 +15,6 @@ import fun.fengwk.kkstudio.platform.catalog.dto.McpServerSummaryDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.McpServerUpdateDTO;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpConfigParser.HttpConfig;
 import fun.fengwk.kkstudio.platform.catalog.mcp.discovery.McpToolDiscovery;
-import fun.fengwk.kkstudio.platform.error.CatalogVersions;
 import fun.fengwk.kkstudio.platform.secret.SecretConfiguredDTO;
 import fun.fengwk.kkstudio.platform.secret.SecretUpdate;
 
@@ -97,13 +96,12 @@ public class McpServerService {
     if (updateDTO == null || updateDTO.getExpectedVersion() == null) {
       throw DomainException.validation(RESOURCE, "expectedVersion must not be null");
     }
-    String rawExpectedVersion = updateDTO.getExpectedVersion();
-    long expectedVersion = CatalogVersions.parse(rawExpectedVersion, "expectedVersion");
+    Long expectedVersion = updateDTO.getExpectedVersion();
     McpServer updatedServer =
         transactionTemplate.execute(
             status -> {
               McpServer locked = requireServerForUpdate(name);
-              requireVersion(locked, expectedVersion, rawExpectedVersion);
+              requireVersion(locked, expectedVersion);
               HttpConfig config =
                   McpConfigParser.requireHttpConfig(
                       updateDTO.getUrl(),
@@ -112,8 +110,7 @@ public class McpServerService {
                       updateDTO.getTimeoutMillis());
               McpServer updated = withConfig(locked, config);
               if (!repository.update(updated, expectedVersion)) {
-                throw DomainException.versionConflict(
-                    RESOURCE, rawExpectedVersion, CatalogVersions.format(locked.version()));
+                throw DomainException.versionConflict(RESOURCE, expectedVersion, locked.version());
               }
               return updated.toBuilder().version(expectedVersion + 1).build();
             });
@@ -125,10 +122,9 @@ public class McpServerService {
     if (discoverDTO == null || discoverDTO.getExpectedVersion() == null) {
       throw DomainException.validation(RESOURCE, "expectedVersion must not be null");
     }
-    String rawExpectedVersion = discoverDTO.getExpectedVersion();
-    long expectedVersion = CatalogVersions.parse(rawExpectedVersion, "expectedVersion");
+    Long expectedVersion = discoverDTO.getExpectedVersion();
     McpServer server = requireServer(name);
-    requireVersion(server, expectedVersion, rawExpectedVersion);
+    requireVersion(server, expectedVersion);
 
     // 网络与工具名校验全部发生在事务之外：失败绝不触碰既有工具行。
     List<McpTool> discovered = toolDiscovery.discover(server);
@@ -137,7 +133,7 @@ public class McpServerService {
         transactionTemplate.execute(
             status -> {
               McpServer locked = requireServerForUpdate(name);
-              requireVersion(locked, expectedVersion, rawExpectedVersion);
+              requireVersion(locked, expectedVersion);
               replaceTools(locked, discovered);
               return locked.toBuilder().discoveryStatus(McpDiscoveryStatus.AVAILABLE).build();
             });
@@ -168,8 +164,7 @@ public class McpServerService {
       long expected = existing.version();
       server = withConfig(existing, config);
       if (!repository.update(server, expected)) {
-        throw DomainException.versionConflict(
-            RESOURCE, CatalogVersions.format(expected), CatalogVersions.format(expected));
+        throw DomainException.versionConflict(RESOURCE, expected, expected);
       }
       server = server.toBuilder().version(expected + 1).build();
     }
@@ -183,14 +178,13 @@ public class McpServerService {
   }
 
   /** 基于 (name, expectedVersion) 的硬删除 CAS：被 agent 引用时拒绝删除。 */
-  public void deleteServer(String name, String rawExpectedVersion) {
+  public void deleteServer(String name, long expectedVersion) {
     McpConfigParser.requireName(name);
-    long expectedVersion = CatalogVersions.parse(rawExpectedVersion, "expectedVersion");
 
     transactionTemplate.execute(
         status -> {
           McpServer locked = requireServerForUpdate(name);
-          requireVersion(locked, expectedVersion, rawExpectedVersion);
+          requireVersion(locked, expectedVersion);
           List<String> referenced = repository.selectReferencedToolNames();
           for (McpTool tool : repository.listTools(name)) {
             if (referenced.contains(tool.name())) {
@@ -199,8 +193,7 @@ public class McpServerService {
             }
           }
           if (!repository.delete(name, expectedVersion)) {
-            throw DomainException.versionConflict(
-                RESOURCE, rawExpectedVersion, CatalogVersions.format(locked.version()));
+            throw DomainException.versionConflict(RESOURCE, expectedVersion, locked.version());
           }
           return null;
         });
@@ -225,10 +218,7 @@ public class McpServerService {
       repository.insertTool(tool);
     }
     if (!repository.updateDiscoveryStatus(name, locked.version(), McpDiscoveryStatus.AVAILABLE)) {
-      throw DomainException.versionConflict(
-          RESOURCE,
-          CatalogVersions.format(locked.version()),
-          CatalogVersions.format(locked.version()));
+      throw DomainException.versionConflict(RESOURCE, locked.version(), locked.version());
     }
   }
 
@@ -264,10 +254,9 @@ public class McpServerService {
     return repository.getForUpdate(name).orElseThrow(() -> DomainException.notFound(RESOURCE));
   }
 
-  private static void requireVersion(McpServer server, long expectedVersion, String raw) {
+  private static void requireVersion(McpServer server, long expectedVersion) {
     if (server.version() != expectedVersion) {
-      throw DomainException.versionConflict(
-          RESOURCE, raw, CatalogVersions.format(server.version()));
+      throw DomainException.versionConflict(RESOURCE, expectedVersion, server.version());
     }
   }
 
@@ -300,9 +289,9 @@ public class McpServerService {
     dto.setTimeoutMillis(server.timeoutMillis());
     dto.setDiscoveryStatus(server.discoveryStatus());
     dto.setToolCount(toolCount);
-    dto.setVersion(CatalogVersions.format(server.version()));
-    dto.setCreatedAt(server.createTime());
-    dto.setUpdatedAt(server.updateTime());
+    dto.setVersion(server.version());
+    dto.setCreatedAt(server.createdAt());
+    dto.setUpdatedAt(server.updatedAt());
     return dto;
   }
 
@@ -316,9 +305,9 @@ public class McpServerService {
     dto.setDiscoveryStatus(server.discoveryStatus());
     dto.setHeaders(SecretConfiguredDTO.of(!server.headers().isEmpty()));
     dto.setToolCount(toolCount);
-    dto.setVersion(CatalogVersions.format(server.version()));
-    dto.setCreatedAt(server.createTime());
-    dto.setUpdatedAt(server.updateTime());
+    dto.setVersion(server.version());
+    dto.setCreatedAt(server.createdAt());
+    dto.setUpdatedAt(server.updatedAt());
     return dto;
   }
 }

@@ -5,7 +5,7 @@ import java.util.Objects;
 
 /** 事件节点返回的已绑定使用证明快照；只包含带 binding epoch、当前仍可续租的持有项。 */
 public record IdeBrowserUseSnapshot(
-    String eventNodeId, String connectionId, String documentId, String revision, List<View> views) {
+    String eventNodeId, String connectionId, String documentId, Long revision, List<View> views) {
 
   public IdeBrowserUseSnapshot {
     eventNodeId = Objects.requireNonNull(eventNodeId, "eventNodeId");
@@ -15,8 +15,8 @@ public record IdeBrowserUseSnapshot(
     views = List.copyOf(Objects.requireNonNull(views, "views"));
   }
 
-  /** 单个已绑定持有项；bindingEpoch 是 canonical 正十进制字符串。 */
-  public record View(String environmentId, String viewId, String claimId, String bindingEpoch) {
+  /** 单个已绑定持有项；bindingEpoch 是正整数。 */
+  public record View(String environmentId, String viewId, String claimId, Long bindingEpoch) {
 
     public View {
       environmentId = Objects.requireNonNull(environmentId, "environmentId");
@@ -38,17 +38,17 @@ public record IdeBrowserUseSnapshot(
                         view.environmentId().toString(),
                         view.viewId().toString(),
                         view.claimId().toString(),
-                        Long.toString(view.bindingEpoch())))
+                        view.bindingEpoch()))
             .toList();
     return new IdeBrowserUseSnapshot(
         identity.eventNodeId().toString(),
         identity.connectionId().toString(),
         activeBoundProofs.documentId().toString(),
-        Long.toString(activeBoundProofs.revision()),
+        activeBoundProofs.revision(),
         viewBodies);
   }
 
-  /** 严格还原 typed usage；wire 字符串非法或列表为空时抛 {@link IllegalArgumentException}。 */
+  /** 严格还原 typed usage；wire 身份非法或列表为空时抛 {@link IllegalArgumentException}。 */
   public IdeBrowserUse toUsage() {
     if (views.isEmpty()) {
       throw new IllegalArgumentException("active browser usage snapshot must not be empty");

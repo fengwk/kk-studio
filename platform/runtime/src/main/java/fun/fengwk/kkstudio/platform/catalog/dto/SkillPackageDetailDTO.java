@@ -56,8 +56,8 @@ public class SkillPackageDetailDTO {
   /** 当前版本归档的字节大小。 */
   private long artifactSizeBytes;
 
-  /** CAS 乐观锁版本号（十进制字符串）。 */
-  private String version;
+  /** CAS 乐观锁版本号。 */
+  private Long version;
 
   /** 创建时间。 */
   private Instant createdAt;

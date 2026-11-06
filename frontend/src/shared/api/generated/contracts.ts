@@ -277,14 +277,14 @@ export interface CanvasFunctionCancelRequestDTO {
 /** Java：fun.fengwk.kkstudio.canvas.dto.CanvasFunctionDTO */
 export interface CanvasFunctionDTO {
   name: string
-  args: Record<string, unknown>
+  args: unknown
 }
 
 /** Java：fun.fengwk.kkstudio.canvas.dto.CanvasFunctionDefinitionDTO */
 export interface CanvasFunctionDefinitionDTO {
   name: string
   description?: string | null
-  argsSchema: Record<string, unknown>
+  argsSchema: unknown
   outputs: CanvasFunctionOutputDTO[]
   referencePolicy?: CanvasFunctionReferencePolicyDTO | null
   available?: boolean | null
@@ -1192,7 +1192,7 @@ export interface HarnessExecutionExitDTO {
 /** Java：fun.fengwk.kkstudio.platform.catalog.dto.HarnessExecutionSelectionDTO */
 export interface HarnessExecutionSelectionDTO {
   driver: string
-  settings: Record<string, unknown>
+  settings: unknown
 }
 
 /** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessGenerationFailureDTO */
@@ -1915,7 +1915,7 @@ export interface McpServerCreateDTO {
   url: string
   headers?: SecretUpdate | null
   enabled?: boolean | null
-  timeoutMillis?: number | null
+  timeoutMillis?: string | null
 }
 
 /** Java：fun.fengwk.kkstudio.platform.catalog.dto.McpServerDTO */
@@ -1955,7 +1955,7 @@ export interface McpServerUpdateDTO {
   url: string
   headers: SecretUpdate
   enabled: boolean
-  timeoutMillis: number
+  timeoutMillis: string
 }
 
 /** Java：fun.fengwk.kkstudio.platform.catalog.dto.ModelAbilitiesDTO */
@@ -2443,8 +2443,8 @@ export interface ProviderCreateDTO {
   description?: string | null
   baseUrl?: string | null
   credential?: string | null
-  modelCallTimeoutMillis?: number | null
-  modelCallIdleTimeoutMillis?: number | null
+  modelCallTimeoutMillis?: string | null
+  modelCallIdleTimeoutMillis?: string | null
   modelHttpRetryStatusCodes?: number[] | null
 }
 
@@ -2483,8 +2483,8 @@ export interface ProviderUpdateDTO {
   description?: string | null
   baseUrl?: string | null
   credential: SecretUpdate
-  modelCallTimeoutMillis: number
-  modelCallIdleTimeoutMillis: number
+  modelCallTimeoutMillis: string
+  modelCallIdleTimeoutMillis: string
   modelHttpRetryStatusCodes?: number[] | null
   expectedVersion: string
 }
@@ -2734,7 +2734,7 @@ export type StorageUploadDTO =
 export interface StorageUploadReserveRequestDTO {
   filename: string
   mediaType: string
-  sizeBytes: number
+  sizeBytes: string
   sha256: string
 }
 
@@ -3119,12 +3119,12 @@ export interface ApiRoutes {
   }
   'DELETE /api/project/issues/{issueId}': {
     path: { issueId: string }
-    query: { expectedVersion: number }
+    query: { expectedVersion: string }
     response: void
   }
   'DELETE /api/project/projects/{projectId}': {
     path: { projectId: string }
-    query: { expectedVersion: number }
+    query: { expectedVersion: string }
     response: void
   }
   'GET /api/canvas/canvases': {
@@ -3295,7 +3295,7 @@ export interface ApiRoutes {
   }
   'GET /api/project/issues/{issueId}': {
     path: { issueId: string }
-    query: { afterSequence?: number; limit?: number }
+    query: { afterSequence?: string; limit?: number }
     response: IssueDetailDTO
   }
   'GET /api/project/issues/{issueId}/evidence': {

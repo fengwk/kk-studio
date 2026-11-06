@@ -12,6 +12,6 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 public class UpdateProjectYoloRequestDTO {
 
-  private String expectedVersion;
+  private Long expectedVersion;
   private Boolean yoloEnabled;
 }

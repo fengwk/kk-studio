@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.platform.configsync;
 
 import static fun.fengwk.kkstudio.platform.configsync.ConfigSyncFixtures.agentConfig;
+import static fun.fengwk.kkstudio.platformtest.harness.HarnessRuntimeTestFixtures.jsonObject;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -184,7 +185,8 @@ class ConfigSyncApplierTest {
       assertTrue(created.getConfig().getSubagents().isEmpty());
       assertEquals("builtin", created.getExecution().getDriver());
       assertEquals(
-          Map.of("modelName", "m", "variant", "default"), created.getExecution().getSettings());
+          jsonObject(Map.of("modelName", "m", "variant", "default")),
+          created.getExecution().getSettings());
     }
 
     ArgumentCaptor<AgentUpdateDTO> updateCaptor = ArgumentCaptor.forClass(AgentUpdateDTO.class);
@@ -196,7 +198,8 @@ class ConfigSyncApplierTest {
     for (AgentUpdateDTO updated : updateCaptor.getAllValues()) {
       assertEquals("builtin", updated.getExecution().getDriver());
       assertEquals(
-          Map.of("modelName", "m", "variant", "default"), updated.getExecution().getSettings());
+          jsonObject(Map.of("modelName", "m", "variant", "default")),
+          updated.getExecution().getSettings());
     }
   }
 
@@ -247,7 +250,7 @@ class ConfigSyncApplierTest {
 
     verify(environmentService).importEnvironment("new", "token-new", null);
     verify(environmentService)
-        .updateImportedEnvironment(EnvironmentId.of(existing.getId()), "token-old", null, "2");
+        .updateImportedEnvironment(EnvironmentId.of(existing.getId()), "token-old", null, 2L);
   }
 
   @Test
@@ -256,7 +259,7 @@ class ConfigSyncApplierTest {
         new SystemSettingsCodec().toSections(SystemSettingsTestFixture.DEFAULT);
     sections.getNetwork().setProxyUrl("http://127.0.0.1:9");
     sections.getNetwork().setNoProxyHosts("localhost,127.0.0.1");
-    ConfigSyncPlan.SettingsUpdate update = new ConfigSyncPlan.SettingsUpdate(sections, "9");
+    ConfigSyncPlan.SettingsUpdate update = new ConfigSyncPlan.SettingsUpdate(sections, 9L);
 
     applier.apply(
         plan(List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), update), List.of());
@@ -264,7 +267,7 @@ class ConfigSyncApplierTest {
     ArgumentCaptor<SystemSettingsUpdateDTO> captor =
         ArgumentCaptor.forClass(SystemSettingsUpdateDTO.class);
     verify(systemSettingsService).update(captor.capture());
-    assertEquals("9", captor.getValue().getExpectedVersion());
+    assertEquals(9L, captor.getValue().getExpectedVersion());
     // 完整聚合必须携带网络设置，避免省略字段导致校验失败或丢失代理事实。
     assertEquals(sections.getNetwork(), captor.getValue().getNetwork());
     // 不应再读当前版本。
@@ -321,7 +324,7 @@ class ConfigSyncApplierTest {
   @Test
   void pluginCommitFailurePropagatesWithoutSecretPatch() {
     when(pluginConfigurationService.configure(anyString(), anyLong(), anyString(), any()))
-        .thenThrow(DomainException.versionConflict("plugin", "version=1", "version=2"));
+        .thenThrow(DomainException.versionConflict("plugin", 1L, 2L));
 
     assertThrows(
         DomainException.class,
@@ -483,7 +486,7 @@ class ConfigSyncApplierTest {
     AgentEditablePropertiesDTO properties = new AgentEditablePropertiesDTO();
     HarnessExecutionSelectionDTO execution = new HarnessExecutionSelectionDTO();
     execution.setDriver("builtin");
-    execution.setSettings(Map.of("modelName", "m", "variant", "default"));
+    execution.setSettings(jsonObject(Map.of("modelName", "m", "variant", "default")));
     properties.setExecution(execution);
     properties.setConfig(config);
     return properties;
@@ -575,7 +578,7 @@ class ConfigSyncApplierTest {
 
     ArgumentCaptor<ModelUpdateDTO> captor = ArgumentCaptor.forClass(ModelUpdateDTO.class);
     verify(modelService).updateModel(eq("m"), captor.capture());
-    assertEquals("4", captor.getValue().getExpectedVersion());
+    assertEquals(4L, captor.getValue().getExpectedVersion());
     verify(modelService, never()).createModel(any());
   }
 
@@ -597,6 +600,6 @@ class ConfigSyncApplierTest {
     verify(definitionService, never()).createAgent(any());
     ArgumentCaptor<AgentUpdateDTO> captor = ArgumentCaptor.forClass(AgentUpdateDTO.class);
     verify(definitionService).updateAgent(eq("a"), captor.capture());
-    assertEquals("7", captor.getValue().getExpectedVersion());
+    assertEquals(7L, captor.getValue().getExpectedVersion());
   }
 }

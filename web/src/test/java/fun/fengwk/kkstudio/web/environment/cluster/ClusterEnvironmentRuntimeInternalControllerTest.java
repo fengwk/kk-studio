@@ -57,7 +57,7 @@ class ClusterEnvironmentRuntimeInternalControllerTest {
 
   @Test
   void returnsLocalRuntimeSnapshotAfterAuthenticationAndOwnerCheck() throws Exception {
-    when(updateService.runtimeStatus(any())).thenReturn(runtimeStatus("3"));
+    when(updateService.runtimeStatus(any())).thenReturn(runtimeStatus(3L));
 
     mockMvc
         .perform(get("/internal/platform/environments/" + ENV_ID + "/runtime"))
@@ -70,7 +70,7 @@ class ClusterEnvironmentRuntimeInternalControllerTest {
   void forwardsUpdateToLocalServiceAndReturnsCommandStatus() throws Exception {
     EnvironmentUpdateStartDTO started = new EnvironmentUpdateStartDTO();
     started.setCommandStatus(EnvironmentUpdateCommandStatus.SENT_UNCONFIRMED);
-    started.setRuntimeStatus(runtimeStatus("4"));
+    started.setRuntimeStatus(runtimeStatus(4L));
     when(updateService.startUpdate(any())).thenReturn(started);
 
     mockMvc
@@ -105,7 +105,7 @@ class ClusterEnvironmentRuntimeInternalControllerTest {
         .andExpect(jsonPath("$.code").value("unavailable"));
   }
 
-  private static EnvironmentRuntimeStatusDTO runtimeStatus(String revision) {
+  private static EnvironmentRuntimeStatusDTO runtimeStatus(long revision) {
     EnvironmentRuntimeDTO status = new EnvironmentRuntimeDTO();
     status.setDaemonVersion("1.0.9");
     EnvironmentRuntimeStatusDTO snapshot = new EnvironmentRuntimeStatusDTO();

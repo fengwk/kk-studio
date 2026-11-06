@@ -63,7 +63,7 @@ describe('storage-service', () => {
     const body = {
       filename: 'photo.png',
       mediaType: 'image/png',
-      sizeBytes: 64,
+      sizeBytes: '64',
       sha256: 'a'.repeat(64),
     }
     apiRequest.mockResolvedValue(pendingUpload('up-1'))

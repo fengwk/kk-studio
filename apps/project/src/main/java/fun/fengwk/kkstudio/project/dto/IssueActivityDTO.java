@@ -6,6 +6,7 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.jspecify.annotations.Nullable;
+import tools.jackson.databind.JsonNode;
 
 import fun.fengwk.kkstudio.project.model.IssueActivityActorType;
 import fun.fengwk.kkstudio.project.model.IssueActivityKind;
@@ -24,7 +25,7 @@ import java.time.Instant;
 public class IssueActivityDTO {
 
   private String issueId;
-  private String sequence;
+  private Long sequence;
   private IssueActivityKind kind;
   private IssueActivityActorType actorType;
 
@@ -37,6 +38,6 @@ public class IssueActivityDTO {
   @JsonInclude(JsonInclude.Include.ALWAYS)
   private @Nullable String body;
 
-  private @Nullable Object data;
+  private @Nullable JsonNode data;
   private Instant createdAt;
 }

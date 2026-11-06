@@ -98,20 +98,20 @@ class HarnessRuntimeRequestMapperTargetTest {
   }
 
   @Test
-  void mapperRejectsNonCanonicalIdentityAndVersion() {
-    // 真实 DTO 映射必须把大写 UUID 与越界版本交给共同解析器，而不是只重复测试解析器本身。
+  void mapperRejectsNonCanonicalIdentityAndNegativeVersion() {
+    // 真实 DTO 映射必须拒绝大写 UUID 与非负游标之外的值，而不是只重复测试 HTTP 解析器本身。
     HarnessThreadCompactDTO uppercase = new HarnessThreadCompactDTO();
-    uppercase.setExpectedVersion("1");
+    uppercase.setExpectedVersion(1L);
     assertThrows(
         DomainException.class,
         () ->
             HarnessRuntimeRequestMapper.toCompactThreadCommand(
                 "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA", uppercase));
 
-    HarnessThreadCompactDTO overflow = new HarnessThreadCompactDTO();
-    overflow.setExpectedVersion("9223372036854775808");
+    HarnessThreadCompactDTO negative = new HarnessThreadCompactDTO();
+    negative.setExpectedVersion(-1L);
     assertThrows(
         DomainException.class,
-        () -> HarnessRuntimeRequestMapper.toCompactThreadCommand(idText(1), overflow));
+        () -> HarnessRuntimeRequestMapper.toCompactThreadCommand(idText(1), negative));
   }
 }

@@ -23,7 +23,7 @@ public sealed interface ModelDTO permits SingleModelDTO, ModelGroupDTO {
 
   ModelConfigDTO getConfig();
 
-  String getVersion();
+  Long getVersion();
 
   Instant getCreatedAt();
 

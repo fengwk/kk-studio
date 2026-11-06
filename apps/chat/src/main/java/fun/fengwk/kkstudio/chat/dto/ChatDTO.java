@@ -26,8 +26,8 @@ public class ChatDTO {
   /** 可见的发送权限模式。 */
   private boolean yoloEnabled;
 
-  /** 非负十进制字符串版本号；客户端每次更新时必须回传。 */
-  private String version;
+  /** 非负版本号；客户端每次更新时必须回传。 */
+  private Long version;
 
   /** 创建时间（UTC Instant）。 */
   private Instant createdAt;

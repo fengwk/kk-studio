@@ -229,20 +229,32 @@ public class StorageControllerTest extends WebPostgresTestSupport {
         "dedup hit must not create a second blob");
   }
 
+  /** sizeBytes 的 wire 形态是 canonical 十进制字符串；JSON 数字不是合法输入。 */
   @Test
-  public void reserveRejectsStringSizeBytesRequest() throws Exception {
+  public void reserveAcceptsCanonicalStringSizeBytesAndRejectsJsonNumber() throws Exception {
     byte[] content = "sized".getBytes(StandardCharsets.UTF_8);
     mockMvc
         .perform(
             post("/api/platform/storage/uploads")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
-                    """
-                    {"filename":"s.bin","mediaType":"application/octet-stream",
-                     "sizeBytes":"%d","sha256":"%s"}
-                    """
-                        .formatted(content.length, sha256Hex(content))))
-        .andExpect(status().isBadRequest());
+                    reserveBody(
+                        "s.bin", "application/octet-stream", content.length, sha256Hex(content))))
+        .andExpect(status().isCreated())
+        .andExpect(jsonPath("$.type").value("PENDING"));
+
+    ObjectNode numeric = objectMapper.createObjectNode();
+    numeric.put("filename", "s.bin");
+    numeric.put("mediaType", "application/octet-stream");
+    numeric.put("sizeBytes", content.length);
+    numeric.put("sha256", sha256Hex(content));
+    mockMvc
+        .perform(
+            post("/api/platform/storage/uploads")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(numeric)))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("validation"));
   }
 
   @Test
@@ -370,7 +382,7 @@ public class StorageControllerTest extends WebPostgresTestSupport {
     ObjectNode request = objectMapper.createObjectNode();
     request.put("filename", filename);
     request.put("mediaType", mediaType);
-    request.put("sizeBytes", size);
+    request.put("sizeBytes", Long.toString(size));
     request.put("sha256", sha256);
     return objectMapper.writeValueAsString(request);
   }
