@@ -228,13 +228,13 @@ select pg_temp.assert_true('fork entry is an accepted history fact',
     (select entry_type = 'FORK' from harness_entry where id = pg_temp.uid(9700)));
 insert into harness_thread (id, session_id, head_entry_id, creation_request_hash, name,
     root_thread_id, yolo_enabled, spawn_trigger, constraints, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at) values
-    (pg_temp.uid(300), pg_temp.uid(100), pg_temp.uid(200), repeat('a', 64), 'work', pg_temp.uid(300), true, 'USER', '{"maxOutputTokens":null,"promptCacheDisabled":false,"allowAutoCompaction":true}', 'RUNNABLE', 0, 1, 0, now(), now()),
-    (pg_temp.uid(301), pg_temp.uid(101), pg_temp.uid(201), repeat('b', 64), 'review', pg_temp.uid(301), true, 'USER', '{"maxOutputTokens":null,"promptCacheDisabled":false,"allowAutoCompaction":true}', 'STOPPED', 0, 1, 0, now(), now()),
-    (pg_temp.uid(302), pg_temp.uid(102), pg_temp.uid(202), repeat('c', 64), 'second', pg_temp.uid(302), true, 'USER', '{"maxOutputTokens":null,"promptCacheDisabled":false,"allowAutoCompaction":true}', 'RUNNABLE', 0, 1, 0, now(), now()),
-    (pg_temp.uid(303), pg_temp.uid(106), pg_temp.uid(207), repeat('d', 64), 'second-reviewer', pg_temp.uid(303), true, 'USER', '{"maxOutputTokens":null,"promptCacheDisabled":false,"allowAutoCompaction":true}', 'STOPPED', 0, 1, 0, now(), now()),
-    (pg_temp.uid(304), pg_temp.uid(101), pg_temp.uid(201), repeat('e', 64), 'takeover', pg_temp.uid(304), true, 'USER', '{"maxOutputTokens":null,"promptCacheDisabled":false,"allowAutoCompaction":true}', 'STOPPED', 0, 1, 0, now(), now()),
-    (pg_temp.uid(305), pg_temp.uid(104), pg_temp.uid(203), repeat('f', 64), 'third', pg_temp.uid(305), true, 'USER', '{"maxOutputTokens":null,"promptCacheDisabled":false,"allowAutoCompaction":true}', 'RUNNABLE', 0, 1, 0, now(), now()),
-    (pg_temp.uid(306), pg_temp.uid(103), pg_temp.uid(208), repeat('1', 64), 'unbound', pg_temp.uid(306), true, 'USER', '{"maxOutputTokens":null,"promptCacheDisabled":false,"allowAutoCompaction":true}', 'RUNNABLE', 0, 1, 0, now(), now());
+    (pg_temp.uid(300), pg_temp.uid(100), pg_temp.uid(200), repeat('a', 64), 'work', pg_temp.uid(300), true, 'USER', '{"maxOutputTokens":null,"allowAutoCompaction":true}', 'RUNNABLE', 0, 1, 0, now(), now()),
+    (pg_temp.uid(301), pg_temp.uid(101), pg_temp.uid(201), repeat('b', 64), 'review', pg_temp.uid(301), true, 'USER', '{"maxOutputTokens":null,"allowAutoCompaction":true}', 'STOPPED', 0, 1, 0, now(), now()),
+    (pg_temp.uid(302), pg_temp.uid(102), pg_temp.uid(202), repeat('c', 64), 'second', pg_temp.uid(302), true, 'USER', '{"maxOutputTokens":null,"allowAutoCompaction":true}', 'RUNNABLE', 0, 1, 0, now(), now()),
+    (pg_temp.uid(303), pg_temp.uid(106), pg_temp.uid(207), repeat('d', 64), 'second-reviewer', pg_temp.uid(303), true, 'USER', '{"maxOutputTokens":null,"allowAutoCompaction":true}', 'STOPPED', 0, 1, 0, now(), now()),
+    (pg_temp.uid(304), pg_temp.uid(101), pg_temp.uid(201), repeat('e', 64), 'takeover', pg_temp.uid(304), true, 'USER', '{"maxOutputTokens":null,"allowAutoCompaction":true}', 'STOPPED', 0, 1, 0, now(), now()),
+    (pg_temp.uid(305), pg_temp.uid(104), pg_temp.uid(203), repeat('f', 64), 'third', pg_temp.uid(305), true, 'USER', '{"maxOutputTokens":null,"allowAutoCompaction":true}', 'RUNNABLE', 0, 1, 0, now(), now()),
+    (pg_temp.uid(306), pg_temp.uid(103), pg_temp.uid(208), repeat('1', 64), 'unbound', pg_temp.uid(306), true, 'USER', '{"maxOutputTokens":null,"allowAutoCompaction":true}', 'RUNNABLE', 0, 1, 0, now(), now());
 
 -- 跨节点 realtime 订阅：复合主键、无节点 FK、Thread FK 级联。
 insert into realtime_subscription (thread_id, node_instance_id, lease_until)
@@ -921,11 +921,11 @@ select pg_temp.rejects('a Chat Session blocks deleting its Chat',
 -- ---------------------------------------------------------------------------
 insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name,
     root_thread_id, yolo_enabled, spawn_trigger, constraints, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at) values
-    (pg_temp.uid(310), pg_temp.uid(102), null, pg_temp.uid(202), repeat('1', 64), 'join-child', pg_temp.uid(310), true, 'USER', '{"maxOutputTokens":null,"promptCacheDisabled":false,"allowAutoCompaction":true}',
+    (pg_temp.uid(310), pg_temp.uid(102), null, pg_temp.uid(202), repeat('1', 64), 'join-child', pg_temp.uid(310), true, 'USER', '{"maxOutputTokens":null,"allowAutoCompaction":true}',
         'RUNNABLE', 0, 2, 0, now(), now()),
-    (pg_temp.uid(311), pg_temp.uid(102), null, pg_temp.uid(202), repeat('2', 64), 'join-parent', pg_temp.uid(311), true, 'USER', '{"maxOutputTokens":null,"promptCacheDisabled":false,"allowAutoCompaction":true}',
+    (pg_temp.uid(311), pg_temp.uid(102), null, pg_temp.uid(202), repeat('2', 64), 'join-parent', pg_temp.uid(311), true, 'USER', '{"maxOutputTokens":null,"allowAutoCompaction":true}',
         'STOPPED', 0, 2, 0, now(), now()),
-    (pg_temp.uid(312), pg_temp.uid(102), pg_temp.uid(311), pg_temp.uid(202), repeat('0', 64), 'tree-child', pg_temp.uid(311), false, 'MODEL_TOOL', '{"maxOutputTokens":null,"promptCacheDisabled":false,"allowAutoCompaction":true}',
+    (pg_temp.uid(312), pg_temp.uid(102), pg_temp.uid(311), pg_temp.uid(202), repeat('0', 64), 'tree-child', pg_temp.uid(311), false, 'MODEL_TOOL', '{"maxOutputTokens":null,"allowAutoCompaction":true}',
         'RUNNABLE', 0, 1, 0, now(), now());
 select pg_temp.assert_true('a child Thread records its real execution root',
     (select root_thread_id = pg_temp.uid(311) and not yolo_enabled

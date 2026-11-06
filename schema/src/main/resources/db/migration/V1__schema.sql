@@ -415,7 +415,7 @@ comment on column harness_thread.name is 'Thread 显示名称：应用保证非�
 comment on column harness_thread.root_thread_id is '不可变执行根 UUID（根 Thread 指向自身），供树锁与整树读取';
 comment on column harness_thread.yolo_enabled is '执行根的 YOLO 开关；子代理恒为 false，有效值取自执行根';
 comment on column harness_thread.spawn_trigger is '不可变创建来源：USER / MODEL_TOOL / RUNTIME / CONTROLLER / PLUGIN';
-comment on column harness_thread.constraints is '不可变执行约束 JSON：maxOutputTokens（可空）、promptCacheDisabled、allowAutoCompaction；子 Thread 为请求约束与父约束合并后的有效值';
+comment on column harness_thread.constraints is '不可变执行约束 JSON：maxOutputTokens（可空）、allowAutoCompaction；子 Thread 为请求约束与父约束合并后的有效值';
 comment on column harness_thread.execution_control is '持久执行控制状态（RUNNABLE/STOPPED）';
 comment on column harness_thread.input_through_sequence is '已被普通 INPUT 接纳或确定性拒绝的输入序号水位（>= 0，初值 0，< next_command_sequence）';
 comment on column harness_thread.next_command_sequence is '下一条 Command 的 sequence（从 1 递增）';
