@@ -8,7 +8,6 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
-import fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;
 import fun.fengwk.kkstudio.web.controller.StudioStorageController;
 
@@ -20,8 +19,7 @@ import java.util.Map;
  *
  * <ul>
  *   <li>{@link IllegalArgumentException} → 400（请求参数/声明不合法）
- *   <li>{@link StorageResourceNotFoundException} → 404（上传或 blob 不存在、blob 已 DELETING；重复删除/重复
- *       complete 幂等）
+ *   <li>领域资源不存在 → 404（上传或 blob 不存在、blob 已 DELETING）
  *   <li>{@link StorageVerificationException} → 409（对象大小/校验和不匹配或对象缺失，上传保持 PENDING 可重传）
  *   <li>领域冲突 → 409（上传锁竞争，可重试），由通用领域 advice 处理
  * </ul>
@@ -35,11 +33,6 @@ public class StudioStorageErrorAdvice {
   @ExceptionHandler(IllegalArgumentException.class)
   public ResponseEntity<ApiResponse<Void>> handleValidation(IllegalArgumentException error) {
     return build(HttpStatus.BAD_REQUEST, "STORAGE_VALIDATION", error.getMessage());
-  }
-
-  @ExceptionHandler(StorageResourceNotFoundException.class)
-  public ResponseEntity<ApiResponse<Void>> handleNotFound(StorageResourceNotFoundException error) {
-    return build(HttpStatus.NOT_FOUND, "STORAGE_NOT_FOUND", error.getMessage());
   }
 
   @ExceptionHandler(StorageVerificationException.class)

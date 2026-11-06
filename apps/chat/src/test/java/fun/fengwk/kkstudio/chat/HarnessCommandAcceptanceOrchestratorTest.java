@@ -55,7 +55,6 @@ import fun.fengwk.kkstudio.platform.orchestration.DirectCommandsNotAllowedExcept
 import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrchestrator;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwner;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwnership;
-import fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
@@ -489,7 +488,7 @@ class HarnessCommandAcceptanceOrchestratorTest {
         newSession(THREAD_ID, user(new AttachmentMessageContent(UPLOAD_ID)));
     when(chatSessionRepository.insert(SESSION_ID, CHAT_ID)).thenReturn(true);
     AcceptancePreflight preflight = acceptAndCapturePreflight(CHAT_OWNER, command);
-    doThrow(new StorageResourceNotFoundException("upload", UPLOAD_ID.toString()))
+    doThrow(DomainException.notFound("upload", "unknown upload: " + UPLOAD_ID))
         .when(uploadService)
         .lockReady(UPLOAD_ID);
 

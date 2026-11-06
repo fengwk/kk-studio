@@ -17,8 +17,9 @@ import org.springframework.transaction.IllegalTransactionStateException;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
-import fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
@@ -202,14 +203,17 @@ class SessionBlobRefManagerIntegrationTest extends PostgresSpringTestSupport {
     String blobId = storage.completeFirstUpload("deleting".getBytes(StandardCharsets.UTF_8));
     UUID blobUuid = UUID.fromString(blobId);
     jdbc.update("update storage_blob set state = 'DELETING', ref_count = 0 where id = ?", blobUuid);
-    assertThrows(
-        StorageResourceNotFoundException.class,
-        () ->
-            tx.execute(
-                status -> {
-                  refManager.retainRef(SESSION_A, blobUuid);
-                  return null;
-                }));
+    DomainException error =
+        assertThrows(
+            DomainException.class,
+            () ->
+                tx.execute(
+                    status -> {
+                      refManager.retainRef(SESSION_A, blobUuid);
+                      return null;
+                    }));
+    assertEquals(DomainErrorCode.NOT_FOUND, error.code());
+    assertEquals("blob", error.resource());
   }
 
   @Test

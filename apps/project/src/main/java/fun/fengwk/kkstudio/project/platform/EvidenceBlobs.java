@@ -3,7 +3,8 @@ package fun.fengwk.kkstudio.project.platform;
 import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Service;
 
-import fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException;
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
@@ -44,7 +45,10 @@ public class EvidenceBlobs {
     try {
       StorageUploadService.ReadyUpload ready = uploadService.lockReady(uploadId);
       return new ReadyUpload(ready.blobId(), ready.filename());
-    } catch (StorageResourceNotFoundException error) {
+    } catch (DomainException error) {
+      if (error.code() != DomainErrorCode.NOT_FOUND || !"upload".equals(error.resource())) {
+        throw error;
+      }
       throw new ProjectNotFoundException("storage_upload");
     } catch (StorageVerificationException error) {
       throw new ProjectValidationException(
@@ -65,7 +69,10 @@ public class EvidenceBlobs {
   public void retainBlob(UUID blobId) {
     try {
       blobManager.retain(blobId);
-    } catch (StorageResourceNotFoundException error) {
+    } catch (DomainException error) {
+      if (error.code() != DomainErrorCode.NOT_FOUND || !"blob".equals(error.resource())) {
+        throw error;
+      }
       throw new ProjectValidationException("issue_evidence", EVIDENCE_BLOB_UNAVAILABLE);
     }
   }

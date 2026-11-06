@@ -24,8 +24,9 @@ import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.support.TransactionCallbackWithoutResult;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
-import fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 import fun.fengwk.kkstudio.share.storage.StorageUploadDTO;
@@ -177,9 +178,12 @@ class StorageUploadLockReadyTest extends PostgresSpringTestSupport {
 
   @Test
   void lockReadyUnknownUploadThrowsNotFound() {
-    assertThrows(
-        StorageResourceNotFoundException.class,
-        () -> tx.execute(status -> storageUploadService.lockReady(UUID.randomUUID())));
+    assertEquals(
+        DomainErrorCode.NOT_FOUND,
+        assertThrows(
+                DomainException.class,
+                () -> tx.execute(status -> storageUploadService.lockReady(UUID.randomUUID())))
+            .code());
   }
 
   @Test
@@ -349,9 +353,10 @@ class StorageUploadLockReadyTest extends PostgresSpringTestSupport {
         consumedError.getMessage().contains("cleanup was requested"),
         "actual: " + consumedError.getMessage());
 
-    assertThrows(
-        StorageResourceNotFoundException.class,
-        () -> storageUploadService.peekReady(UUID.randomUUID()));
+    assertEquals(
+        DomainErrorCode.NOT_FOUND,
+        assertThrows(DomainException.class, () -> storageUploadService.peekReady(UUID.randomUUID()))
+            .code());
 
     // 被拒绝的 PENDING 行必须保持可完成状态。
     assertEquals(

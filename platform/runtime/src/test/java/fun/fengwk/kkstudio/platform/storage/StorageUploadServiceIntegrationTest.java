@@ -32,8 +32,9 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.ObjectMapper;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
-import fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageUploadRepository;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
@@ -531,9 +532,10 @@ class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
 
   @Test
   void completeUnknownUploadThrowsNotFound() {
-    assertThrows(
-        StorageResourceNotFoundException.class,
-        () -> storageUploadService.complete(UUID.randomUUID()));
+    DomainException error =
+        assertThrows(DomainException.class, () -> storageUploadService.complete(UUID.randomUUID()));
+    assertEquals(DomainErrorCode.NOT_FOUND, error.code());
+    assertEquals("upload", error.resource());
   }
 
   @Test
@@ -1114,14 +1116,20 @@ class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
 
   @Test
   void retainOnMissingOrDeletingThrowsNotFound() {
-    assertThrows(
-        StorageResourceNotFoundException.class,
-        () -> tx.execute(status -> storageBlobManager.retain(UUID.randomUUID())));
+    assertEquals(
+        DomainErrorCode.NOT_FOUND,
+        assertThrows(
+                DomainException.class,
+                () -> tx.execute(status -> storageBlobManager.retain(UUID.randomUUID())))
+            .code());
 
     UUID deletingBlob = insertRawBlob(StorageBlobState.DELETING, 0L);
-    assertThrows(
-        StorageResourceNotFoundException.class,
-        () -> tx.execute(status -> storageBlobManager.retain(deletingBlob)));
+    assertEquals(
+        DomainErrorCode.NOT_FOUND,
+        assertThrows(
+                DomainException.class,
+                () -> tx.execute(status -> storageBlobManager.retain(deletingBlob)))
+            .code());
   }
 
   // ------------------------------------------------------------------
@@ -1333,9 +1341,10 @@ class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
 
   @Test
   void deleteMissingIsIdempotentNotFound() {
-    assertThrows(
-        StorageResourceNotFoundException.class,
-        () -> storageUploadService.delete(UUID.randomUUID()));
+    assertEquals(
+        DomainErrorCode.NOT_FOUND,
+        assertThrows(DomainException.class, () -> storageUploadService.delete(UUID.randomUUID()))
+            .code());
     StorageUploadDTO pending =
         reserve("gone.bin", "application/octet-stream", 1, sha256Hex(new byte[] {1}));
     storageUploadService.delete(UUID.fromString(pending.getId()));
@@ -1393,15 +1402,21 @@ class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
           json.contains("\"key\""), "blob URL response must not expose physical key: " + json);
     }
 
-    assertThrows(
-        StorageResourceNotFoundException.class,
-        () -> storageBlobManager.presignOriginalUrl(UUID.randomUUID()));
+    assertEquals(
+        DomainErrorCode.NOT_FOUND,
+        assertThrows(
+                DomainException.class,
+                () -> storageBlobManager.presignOriginalUrl(UUID.randomUUID()))
+            .code());
 
     UUID deletingBlob = insertRawBlob(StorageBlobState.DELETING, 0L);
-    assertThrows(
-        StorageResourceNotFoundException.class,
-        () -> storageBlobManager.presignPreviewUrl(deletingBlob),
-        "DELETING blob must not issue presigned URLs");
+    assertEquals(
+        DomainErrorCode.NOT_FOUND,
+        assertThrows(
+                DomainException.class,
+                () -> storageBlobManager.presignPreviewUrl(deletingBlob),
+                "DELETING blob must not issue presigned URLs")
+            .code());
   }
 
   // ------------------------------------------------------------------

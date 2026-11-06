@@ -35,12 +35,13 @@ import software.amazon.awssdk.services.s3.model.GetObjectResponse;
 import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
 import software.amazon.awssdk.services.s3.model.HeadObjectResponse;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.storage.ReadDeadline;
 import fun.fengwk.kkstudio.platform.storage.StorageObjectKeys;
 import fun.fengwk.kkstudio.platform.storage.configuration.S3StorageProperties;
 import fun.fengwk.kkstudio.platform.storage.error.StorageReadInterruptedException;
 import fun.fengwk.kkstudio.platform.storage.error.StorageReadTimeoutException;
-import fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.storage.s3.S3ObjectContent;
 import fun.fengwk.kkstudio.platform.storage.s3.S3ObjectMetadata;
 import fun.fengwk.kkstudio.platform.storage.s3.S3ObjectStream;
@@ -477,11 +478,12 @@ class StorageBlobContentServiceTest {
   void shouldNotDownloadOrReleaseWhenRetainFails() {
     UUID blobId = UUID.randomUUID();
     when(blobManager.retain(blobId))
-        .thenThrow(new StorageResourceNotFoundException("blob", blobId.toString()));
+        .thenThrow(DomainException.notFound("blob", "unknown blob: " + blobId));
 
-    assertThrows(
-        StorageResourceNotFoundException.class,
-        () -> contentService.readBlobContent(blobId, 1024L));
+    assertEquals(
+        DomainErrorCode.NOT_FOUND,
+        assertThrows(DomainException.class, () -> contentService.readBlobContent(blobId, 1024L))
+            .code());
 
     verify(s3StorageService, never()).download(any(), anyLong());
     verify(blobManager, never()).release(any());

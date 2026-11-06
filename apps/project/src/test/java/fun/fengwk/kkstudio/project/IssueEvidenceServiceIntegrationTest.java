@@ -16,12 +16,12 @@ import org.springframework.context.annotation.Primary;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsTestFixture;
 import fun.fengwk.kkstudio.platform.storage.StorageMaintenanceWakeup;
 import fun.fengwk.kkstudio.platform.storage.configuration.S3StorageProperties;
 import fun.fengwk.kkstudio.platform.storage.configuration.StorageMaintenanceProperties;
-import fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.storage.media.FfmpegStorageMediaProbe;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageBlobRepository;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageUploadRepository;
@@ -612,7 +612,7 @@ class IssueEvidenceServiceIntegrationTest extends ProjectTestSupport {
     public ReadyUpload peekReady(UUID uploadId) {
       ReadyUpload ready = readyMap.get(uploadId);
       if (ready == null) {
-        throw new StorageResourceNotFoundException("upload", uploadId.toString());
+        throw DomainException.notFound("upload", "unknown upload: " + uploadId);
       }
       return ready;
     }

@@ -12,11 +12,11 @@ import static org.mockito.Mockito.when;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.tool.TurnMediaCapabilities;
 import fun.fengwk.kkstudio.platform.storage.ReadDeadline;
 import fun.fengwk.kkstudio.platform.storage.error.StorageReadInterruptedException;
 import fun.fengwk.kkstudio.platform.storage.error.StorageReadTimeoutException;
-import fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
@@ -105,7 +105,7 @@ class PlatformResourceContentReaderTest {
     UUID blobId = UUID.randomUUID();
     authorize(sessionId, blobId, true);
     when(blobs.withBlobStream(eq(blobId), any(), any()))
-        .thenThrow(new StorageResourceNotFoundException("blob", blobId.toString()));
+        .thenThrow(DomainException.notFound("blob", "unknown blob: " + blobId));
     assertTrue(
         assertThrows(PlatformReadException.class, () -> read(sessionId, blobId))
             .getMessage()

@@ -16,6 +16,8 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.transaction.support.TransactionTemplate;
 import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.hash.Sha256;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
@@ -23,7 +25,6 @@ import fun.fengwk.kkstudio.platform.storage.StorageMaintenanceWakeup;
 import fun.fengwk.kkstudio.platform.storage.StorageObjectKeys;
 import fun.fengwk.kkstudio.platform.storage.configuration.S3StorageProperties;
 import fun.fengwk.kkstudio.platform.storage.configuration.StorageMaintenanceProperties;
-import fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;
 import fun.fengwk.kkstudio.platform.storage.media.FfmpegStorageMediaProbe;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageBlobRepository;
@@ -169,7 +170,10 @@ public class StorageUploadService {
                 try {
                   blobManager.retain(active.getId());
                   hitBlobId = active.getId();
-                } catch (StorageResourceNotFoundException e) {
+                } catch (DomainException e) {
+                  if (e.code() != DomainErrorCode.NOT_FOUND || !"blob".equals(e.resource())) {
+                    throw e;
+                  }
                   // ACTIVE 行在并发中被释放到 DELETING：按未命中处理。
                 }
               }
@@ -223,7 +227,7 @@ public class StorageUploadService {
   private StorageUploadDTO completeLocked(UUID uploadId, long uploadTtl) {
     StorageUpload upload = uploadRepository.getById(uploadId);
     if (upload == null) {
-      throw new StorageResourceNotFoundException("upload", uploadId.toString());
+      throw DomainException.notFound("upload", "unknown upload: " + uploadId);
     }
     requireCleanupAvailable(upload, uploadTtl);
     if (upload.getBlobId() != null) {
@@ -409,7 +413,7 @@ public class StorageUploadService {
    * 删除上传：请求线程只在短事务内持久化 cleanup request 并快速返回，后台再幂等删除临时/候选对象与上传行；READY 在首次标记时同事务 release
    * 上传引用。消费方已有事务中同样只标记请求，不得在请求/事务线程执行 S3 I/O。
    *
-   * @throws fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException 上传不存在
+   * @throws DomainException 上传不存在
    */
   public void delete(UUID uploadId) {
     Objects.requireNonNull(uploadId, "uploadId must not be null");
@@ -430,7 +434,7 @@ public class StorageUploadService {
    * <p>调用方随后必须先为新 owner retain（Session blob ref 或 Canvas Resource），再调用 {@link #delete} 标记并 release
    * upload owner；全部在同一事务内完成，上传行保留到后台清理完成。
    *
-   * @throws fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException 上传不存在
+   * @throws DomainException 上传不存在
    * @throws fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException 上传仍为
    *     PENDING、已过期、 已请求 cleanup 或已被 claim
    */
@@ -441,7 +445,7 @@ public class StorageUploadService {
         status -> {
           StorageUpload locked = uploadRepository.getByIdForUpdate(uploadId);
           if (locked == null) {
-            throw new StorageResourceNotFoundException("upload", uploadId.toString());
+            throw DomainException.notFound("upload", "unknown upload: " + uploadId);
           }
           if (locked.getBlobId() == null) {
             throw new StorageVerificationException(
@@ -458,7 +462,7 @@ public class StorageUploadService {
    * <p>与 {@link #lockReady} 共用同一份 READY 可消费判定（PENDING / 过期 / 已请求 cleanup / 已被 claim 一律拒绝），供「点击时快照」
    * 类只读预览使用；调用方绝不能据此获得 owner 权限——真正的消费仍必须走 {@link #lockReady}。
    *
-   * @throws fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException 上传不存在
+   * @throws DomainException 上传不存在
    * @throws fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException 上传仍为
    *     PENDING、已过期、 已请求 cleanup 或已被 claim
    */
@@ -468,7 +472,7 @@ public class StorageUploadService {
     // 只读：不起事务、不加行锁、不推进任何 lifecycle marker；最终消费仍由 lockReady 独占。
     StorageUpload upload = uploadRepository.getById(uploadId);
     if (upload == null) {
-      throw new StorageResourceNotFoundException("upload", uploadId.toString());
+      throw DomainException.notFound("upload", "unknown upload: " + uploadId);
     }
     if (upload.getBlobId() == null) {
       throw new StorageVerificationException(
@@ -491,7 +495,7 @@ public class StorageUploadService {
     StorageUpload locked = uploadRepository.getByIdForUpdate(upload.getId());
     if (locked == null) {
       // 并发 delete/过期已删除行：上传不存在，事务回滚（含任何 blob 写入）。
-      throw new StorageResourceNotFoundException("upload", upload.getId().toString());
+      throw DomainException.notFound("upload", "unknown upload: " + upload.getId());
     }
     requireCleanupAvailable(locked, uploadTtl);
     if (locked.getBlobId() != null) {
@@ -519,8 +523,14 @@ public class StorageUploadService {
   private void requestFailedStageCleanup(StorageUpload upload) {
     try {
       delete(upload.getId());
-    } catch (StorageResourceNotFoundException | StorageVerificationException ignored) {
+    } catch (StorageVerificationException ignored) {
       log.warn("deferred storage cleanup for staged upload {}", upload.getId());
+    } catch (DomainException error) {
+      if (error.code() == DomainErrorCode.NOT_FOUND && "upload".equals(error.resource())) {
+        log.warn("deferred storage cleanup for staged upload {}", upload.getId());
+      } else {
+        throw error;
+      }
     } catch (RuntimeException error) {
       log.warn("failed to request cleanup for staged upload {}", upload.getId());
     }
@@ -529,7 +539,7 @@ public class StorageUploadService {
   private void requestCleanupInCurrentTransaction(UUID uploadId) {
     StorageUpload locked = uploadRepository.getByIdForUpdate(uploadId);
     if (locked == null) {
-      throw new StorageResourceNotFoundException("upload", uploadId.toString());
+      throw DomainException.notFound("upload", "unknown upload: " + uploadId);
     }
     if (locked.getCleanupToken() != null) {
       throw new StorageVerificationException("upload " + uploadId + " cleanup is already claimed");

@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.platform.harness.prompt;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -18,9 +19,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.platform.plugin.prompt.PluginPromptResources;
-import fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
@@ -96,7 +97,7 @@ class PluginPromptResourceBridgeTest {
   void stageKeepsTheIntegrityFailureWhenCleanupFails() {
     when(uploadService.stage(anyString(), anyString(), any(InputStream.class), anyLong()))
         .thenReturn(staged("image/jpeg", 3L));
-    doThrow(new StorageResourceNotFoundException("upload", UPLOAD_ID.toString()))
+    doThrow(DomainException.notFound("upload", "unknown upload: " + UPLOAD_ID))
         .when(uploadService)
         .delete(UPLOAD_ID);
 
@@ -172,7 +173,7 @@ class PluginPromptResourceBridgeTest {
   @Test
   void acceptRejectsMissingUploadDeterministically() {
     when(uploadService.lockReady(UPLOAD_ID))
-        .thenThrow(new StorageResourceNotFoundException("upload", UPLOAD_ID.toString()));
+        .thenThrow(DomainException.notFound("upload", "unknown upload: " + UPLOAD_ID));
 
     assertThrows(
         IllegalArgumentException.class,
@@ -181,6 +182,21 @@ class PluginPromptResourceBridgeTest {
                 SESSION_ID, new PluginPromptResources.StagedResource(UPLOAD_ID, BLOB_ID)));
     verify(refManager, never()).retainRef(any(), any());
     verify(uploadService, never()).delete(any());
+  }
+
+  @Test
+  void acceptDoesNotTranslateUnrelatedDomainFailure() {
+    // 共同异常只能按上传 not_found 收敛，不能吞掉其他领域错误。
+    DomainException failure = DomainException.conflict("STORAGE_CONFLICT", "busy");
+    when(uploadService.lockReady(UPLOAD_ID)).thenThrow(failure);
+    assertSame(
+        failure,
+        assertThrows(
+            DomainException.class,
+            () ->
+                bridge.accept(
+                    SESSION_ID, new PluginPromptResources.StagedResource(UPLOAD_ID, BLOB_ID))));
+    verify(refManager, never()).retainRef(any(), any());
   }
 
   /** discard 是准备阶段失败的显式清理入口：直接释放上传 owner。 */

@@ -9,9 +9,9 @@ import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.storage.StorageMaintenanceWakeup;
 import fun.fengwk.kkstudio.platform.storage.StorageObjectKeys;
-import fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageBlobRepository;
 import fun.fengwk.kkstudio.platform.storage.s3.S3PresignService;
 import fun.fengwk.kkstudio.platform.storage.s3.S3StorageService;
@@ -69,18 +69,17 @@ public class StorageBlobManager {
    * 事务内 retain：{@code ref_count + 1}。
    *
    * @return retain 后的 blob 行
-   * @throws fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException blob 不存在或已
-   *     DELETING
+   * @throws DomainException blob 不存在或已 DELETING
    */
   @Transactional(propagation = Propagation.MANDATORY)
   public StorageBlob retain(UUID blobId) {
     Objects.requireNonNull(blobId, "blobId must not be null");
     if (!blobRepository.incrementRefCount(blobId)) {
-      throw new StorageResourceNotFoundException("blob", blobId.toString());
+      throw DomainException.notFound("blob", "unknown blob: " + blobId);
     }
     StorageBlob blob = blobRepository.getById(blobId);
     if (blob == null) {
-      throw new StorageResourceNotFoundException("blob", blobId.toString());
+      throw DomainException.notFound("blob", "unknown blob: " + blobId);
     }
     return blob;
   }
@@ -167,7 +166,7 @@ public class StorageBlobManager {
   private StorageBlob requireActive(UUID blobId) {
     StorageBlob blob = blobRepository.getById(blobId);
     if (blob == null || blob.getState() != StorageBlobState.ACTIVE) {
-      throw new StorageResourceNotFoundException("blob", blobId.toString());
+      throw DomainException.notFound("blob", "unknown blob: " + blobId);
     }
     return blob;
   }

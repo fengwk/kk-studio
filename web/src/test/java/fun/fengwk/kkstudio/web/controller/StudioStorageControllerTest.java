@@ -192,11 +192,11 @@ public class StudioStorageControllerTest extends WebPostgresTestSupport {
     mockMvc
         .perform(delete("/api/storage/uploads/" + uploadId))
         .andExpect(status().isNotFound())
-        .andExpect(jsonPath("$.code").value("STORAGE_NOT_FOUND"));
+        .andExpect(jsonPath("$.code").value("not_found"));
     mockMvc
         .perform(post("/api/storage/blobs/" + blobId + "/download-url"))
         .andExpect(status().isNotFound())
-        .andExpect(jsonPath("$.code").value("STORAGE_NOT_FOUND"));
+        .andExpect(jsonPath("$.code").value("not_found"));
   }
 
   @Test
@@ -311,7 +311,7 @@ public class StudioStorageControllerTest extends WebPostgresTestSupport {
     mockMvc
         .perform(post("/api/storage/uploads/" + UUID.randomUUID() + "/complete"))
         .andExpect(status().isNotFound())
-        .andExpect(jsonPath("$.code").value("STORAGE_NOT_FOUND"));
+        .andExpect(jsonPath("$.code").value("not_found"));
 
     mockMvc
         .perform(post("/api/storage/blobs/" + UUID.randomUUID() + "/download-url"))

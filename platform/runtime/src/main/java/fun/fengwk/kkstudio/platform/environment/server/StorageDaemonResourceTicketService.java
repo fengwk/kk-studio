@@ -3,11 +3,12 @@ package fun.fengwk.kkstudio.platform.environment.server;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.platform.daemon.DaemonPresignedPut;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonResourceTicketService;
-import fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 import fun.fengwk.kkstudio.share.storage.StoragePresignedUrlDTO;
@@ -88,7 +89,10 @@ public class StorageDaemonResourceTicketService implements DaemonResourceTicketS
     }
     try {
       uploadService.delete(uploadId);
-    } catch (StorageResourceNotFoundException ignored) {
+    } catch (DomainException error) {
+      if (error.code() != DomainErrorCode.NOT_FOUND || !"upload".equals(error.resource())) {
+        throw error;
+      }
       // 已被消费或已被后台回收：释放本就幂等。
     } catch (RuntimeException error) {
       log.warn("cannot release daemon resource upload {}", uploadId);
