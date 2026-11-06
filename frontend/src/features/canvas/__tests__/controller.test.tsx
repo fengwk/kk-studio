@@ -576,7 +576,7 @@ describe('useCanvasController real snapshot runtime', () => {
     expect(storageService.reserveUpload).toHaveBeenCalledWith({
       filename: 'upload.png',
       mediaType: 'image/png',
-      sizeBytes: 3,
+      sizeBytes: '3',
       sha256: FAKE_SHA256,
     })
     expect(storageService.uploadFile).toHaveBeenCalledOnce()
