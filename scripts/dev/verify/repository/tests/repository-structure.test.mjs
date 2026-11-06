@@ -298,8 +298,11 @@ test('web architecture guard rejects undeclared harness imports and controller p
       path.join(mirrorWeb, 'src/main/java/fun/fengwk/kkstudio/web/ArchGuardProbe.java'),
       'package fun.fengwk.kkstudio.web;\nimport fun.fengwk.kkstudio.harness.builtin.driver.BuiltinAgentDriver;\npublic class ArchGuardProbe {}\n',
     )
+    // web/controller 目录可以没有生产类；探针自带目录，避免夹具依赖仓库当前布局。
+    const mirrorControllerDir = path.join(mirrorWeb, 'src/main/java/fun/fengwk/kkstudio/web/controller')
+    mkdirSync(mirrorControllerDir, { recursive: true })
     writeFileSync(
-      path.join(mirrorWeb, 'src/main/java/fun/fengwk/kkstudio/web/controller/ArchGuardProbeController.java'),
+      path.join(mirrorControllerDir, 'ArchGuardProbeController.java'),
       'package fun.fengwk.kkstudio.web.controller;\nimport fun.fengwk.kkstudio.harness.runtime.processor.ModelProcessor;\npublic class ArchGuardProbeController {}\n',
     )
     assert.throws(
