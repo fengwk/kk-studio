@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.project.http;
+package fun.fengwk.kkstudio.web.project;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import tools.jackson.core.StreamReadFeature;

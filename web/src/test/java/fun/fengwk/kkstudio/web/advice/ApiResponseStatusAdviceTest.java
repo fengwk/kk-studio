@@ -31,12 +31,13 @@ class ApiResponseStatusAdviceTest {
   }
 
   @Test
-  void unwrapsDataAndCopiesStatus() {
+  void keepsEnvelopeAndCopiesStatus() {
     Object data = new Object();
     ApiResponse<Object> body = ApiResponse.created(data);
     ServerHttpResponse response = mock(ServerHttpResponse.class);
 
-    assertSame(data, advice.beforeBodyWrite(body, null, null, null, null, response));
+    // 返回信封本身，由 @JsonValue 输出 data；Spring 不会把返回值按声明类型强转。
+    assertSame(body, advice.beforeBodyWrite(body, null, null, null, null, response));
 
     verify(response).setStatusCode(HttpStatusCode.valueOf(201));
   }

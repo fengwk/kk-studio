@@ -37,6 +37,21 @@ interface FakeTerminal {
   dispose(): void
 }
 
+interface FakeTabDocumentUri {
+  toString(): string
+}
+
+class FakeTabInputText {
+  constructor(readonly uri: FakeTabDocumentUri) {}
+}
+
+class FakeTabInputTextDiff {
+  constructor(
+    readonly original: FakeTabDocumentUri,
+    readonly modified: FakeTabDocumentUri,
+  ) {}
+}
+
 function fakeVscode(
   workspaceFile: string | undefined,
   folders: string[],
@@ -88,6 +103,8 @@ function fakeVscode(
     Range: FakeRange,
     Position: FakePosition,
     WorkspaceEdit: FakeWorkspaceEdit,
+    TabInputText: FakeTabInputText,
+    TabInputTextDiff: FakeTabInputTextDiff,
     workspace: {
       workspaceFile: workspaceFile === undefined ? undefined : { fsPath: workspaceFile },
       workspaceFolders: folders.map((path) => ({ uri: { fsPath: path } })),
@@ -278,6 +295,21 @@ describe('VS Code bridge extension host', () => {
     fake.vscode.workspace.textDocuments.push({ isDirty: true })
     const { bridge, viewId } = await setupWith(fake, '/managed/one.code-workspace')
     expect(await bridge.request(viewId, { op: 'closeView' }, signal())).toMatchObject({ ok: false, code: 'CANCELLED' })
+  })
+
+  it('accepts native close when the extension host still mirrors a just-closed tab as dirty', async () => {
+    // The workbench has already committed the tab's save/discard decision and removed it, but the
+    // extension-host mirror of the dirty flag can lag behind for a few milliseconds.
+    const uri = {
+      scheme: 'file',
+      fsPath: '/home/user/editable.txt',
+      toString: () => 'file:///home/user/editable.txt',
+    }
+    const fake = fakeVscode('/managed/one.code-workspace', ['/home/user'], { closeTabs: async () => true })
+    fake.vscode.window.tabGroups.all = [{ tabs: [{ input: new FakeTabInputText(uri) }] }]
+    fake.vscode.workspace.textDocuments.push({ uri, isDirty: true, isClosed: false })
+    const { bridge, viewId } = await setupWith(fake, '/managed/one.code-workspace')
+    expect(await bridge.request(viewId, { op: 'closeView' }, signal())).toMatchObject({ ok: true })
   })
 
   it('rejects closing if another editor opens during the native prompt', async () => {

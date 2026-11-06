@@ -99,6 +99,13 @@
         </dependency>
         <dependency>
             <groupId>fun.fengwk.kk-studio</groupId>
+            <artifactId>kk-studio-canvas-runtime</artifactId>
+            <version>${kk-studio.version}</version>
+            <type>test-jar</type>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>fun.fengwk.kk-studio</groupId>
             <artifactId>kk-studio-platform-runtime</artifactId>
             <version>${kk-studio.version}</version>
             <type>test-jar</type>
