@@ -73,7 +73,7 @@ class AgentModelRenameIntegrationTest {
           repository.rename("model", renamedModel("model-renamed", "provider"), 0L);
         });
 
-    verify(observed, times(1)).sql(contains("update agent"));
+    verify(observed, times(1)).sql(contains("update agent set"));
     assertAgentReference("alpha", "model-renamed", 1L);
     assertAgentReference("zeta", "model-renamed", 1L);
     assertAgentReference("manual", "model", 0L);
