@@ -137,6 +137,7 @@ class TextReadWindowFormatTest {
   void columnOffsetBeyondLineLengthThrowsWhileEmptyLineEndpointIsValid() {
     PlatformReadException failure =
         assertThrows(PlatformReadException.class, () -> format("abc", 1, 200, 10));
+    assertEquals(PlatformReadException.Kind.INVALID_ARGUMENT, failure.kind());
     assertTrue(
         failure.getMessage().contains("column_offset 10 is out of range: line 1 has 3 columns"),
         failure.getMessage());
