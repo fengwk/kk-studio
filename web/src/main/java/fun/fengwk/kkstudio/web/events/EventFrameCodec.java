@@ -11,6 +11,7 @@ import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.harness.codec.RealtimeEventJsonCodec;
+import fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport;
 import fun.fengwk.kkstudio.ide.browser.IdeBrowserUse;
 import fun.fengwk.kkstudio.ide.browser.IdeBrowserUseView;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.ResourceKey;
@@ -53,10 +54,9 @@ final class EventFrameCodec {
   private static final Set<String> SUBSCRIPTION_FIELDS = orderedSet("type", "resource");
   private static final Set<String> IDE_USE_FIELDS =
       orderedSet("type", "documentId", "revision", "views");
-  private static final Set<String> IDE_USE_VIEW_FIELDS =
-      orderedSet("environmentId", "viewId", "claimId", "bindingEpoch");
   private static final Set<String> IDE_USE_VIEW_REQUIRED_FIELDS =
       orderedSet("environmentId", "viewId", "claimId");
+  private static final Set<String> IDE_USE_VIEW_OPTIONAL_FIELDS = orderedSet("bindingEpoch");
   private static final Set<String> RESOURCE_FIELDS = orderedSet("kind", "id");
   private static final Set<String> GLOBAL_RESOURCE_FIELDS = orderedSet("kind");
 
@@ -94,21 +94,21 @@ final class EventFrameCodec {
     } catch (JacksonException error) {
       throw new IllegalArgumentException("malformed client frame JSON");
     }
-    ObjectNode node = requireObject(root, "frame");
+    ObjectNode node = JsonCodecSupport.object(root, "frame");
     String typeName = requiredText(node, "type", "frame");
     return switch (typeName) {
       case "subscribe" -> {
-        requireExactFields(node, SUBSCRIPTION_FIELDS, "frame");
+        JsonCodecSupport.requireFields(node, SUBSCRIPTION_FIELDS, "frame");
         yield new SubscriptionFrame(
             SubscriptionType.SUBSCRIBE, parseResource(node.get("resource")));
       }
       case "unsubscribe" -> {
-        requireExactFields(node, SUBSCRIPTION_FIELDS, "frame");
+        JsonCodecSupport.requireFields(node, SUBSCRIPTION_FIELDS, "frame");
         yield new SubscriptionFrame(
             SubscriptionType.UNSUBSCRIBE, parseResource(node.get("resource")));
       }
       case "ide-use" -> {
-        requireExactFields(node, IDE_USE_FIELDS, "frame");
+        JsonCodecSupport.requireFields(node, IDE_USE_FIELDS, "frame");
         yield new IdeUseFrame(parseIdeUse(node));
       }
       default -> throw new IllegalArgumentException(
@@ -288,8 +288,9 @@ final class EventFrameCodec {
     }
     List<IdeBrowserUseView> views = new ArrayList<>(viewsNode.size());
     for (JsonNode item : viewsNode) {
-      ObjectNode view = requireObject(item, "frame.views[]");
-      requireFields(view, IDE_USE_VIEW_FIELDS, IDE_USE_VIEW_REQUIRED_FIELDS, "frame.views[]");
+      ObjectNode view = JsonCodecSupport.object(item, "frame.views[]");
+      JsonCodecSupport.requireFields(
+          view, IDE_USE_VIEW_REQUIRED_FIELDS, IDE_USE_VIEW_OPTIONAL_FIELDS, "frame.views[]");
       String environmentId = requiredText(view, "environmentId", "frame.views[]");
       String viewId = requiredText(view, "viewId", "frame.views[]");
       String claimId = requiredText(view, "claimId", "frame.views[]");
@@ -311,22 +312,8 @@ final class EventFrameCodec {
     }
   }
 
-  private static void requireFields(
-      ObjectNode node, Set<String> allowed, Set<String> required, String context) {
-    for (String name : node.propertyNames()) {
-      if (!allowed.contains(name)) {
-        throw new IllegalArgumentException(context + " has an unknown field");
-      }
-    }
-    for (String name : required) {
-      if (!node.has(name)) {
-        throw new IllegalArgumentException(context + " is missing field " + name);
-      }
-    }
-  }
-
   private static ResourceKey parseResource(JsonNode value) {
-    ObjectNode node = requireObject(value, "frame.resource");
+    ObjectNode node = JsonCodecSupport.object(value, "frame.resource");
     String kindName = requiredText(node, "kind", "frame.resource");
     if (THREAD.equals(kindName)) {
       return new ResourceKey(ResourceKind.THREAD, resourceId(node));
@@ -338,15 +325,15 @@ final class EventFrameCodec {
       return new ResourceKey(ResourceKind.THREAD_TREE, resourceId(node));
     }
     if (PROJECTS.equals(kindName)) {
-      requireExactFields(node, GLOBAL_RESOURCE_FIELDS, "frame.resource");
+      JsonCodecSupport.requireFields(node, GLOBAL_RESOURCE_FIELDS, "frame.resource");
       return new ResourceKey(ResourceKind.PROJECTS, null);
     }
     if (INTERACTIONS.equals(kindName)) {
-      requireExactFields(node, GLOBAL_RESOURCE_FIELDS, "frame.resource");
+      JsonCodecSupport.requireFields(node, GLOBAL_RESOURCE_FIELDS, "frame.resource");
       return new ResourceKey(ResourceKind.INTERACTIONS, null);
     }
     if (ENVIRONMENTS.equals(kindName)) {
-      requireExactFields(node, GLOBAL_RESOURCE_FIELDS, "frame.resource");
+      JsonCodecSupport.requireFields(node, GLOBAL_RESOURCE_FIELDS, "frame.resource");
       return new ResourceKey(ResourceKind.ENVIRONMENTS, null);
     }
     throw new IllegalArgumentException(
@@ -355,7 +342,7 @@ final class EventFrameCodec {
   }
 
   private static UUID resourceId(ObjectNode node) {
-    requireExactFields(node, RESOURCE_FIELDS, "frame.resource");
+    JsonCodecSupport.requireFields(node, RESOURCE_FIELDS, "frame.resource");
     return parseUuid(requiredText(node, "id", "frame.resource"), "frame.resource.id");
   }
 
@@ -383,30 +370,12 @@ final class EventFrameCodec {
         || kind == ResourceKind.ENVIRONMENTS;
   }
 
-  private static ObjectNode requireObject(JsonNode value, String field) {
-    if (value == null || !value.isObject()) {
-      throw new IllegalArgumentException(field + " must be a JSON object");
-    }
-    return (ObjectNode) value;
-  }
-
   private static String requiredText(ObjectNode node, String field, String context) {
     JsonNode value = node.get(field);
     if (value == null || !value.isString()) {
       throw new IllegalArgumentException(context + "." + field + " must be a string");
     }
     return value.stringValue();
-  }
-
-  private static void requireExactFields(ObjectNode node, Set<String> fields, String context) {
-    if (node.size() != fields.size()) {
-      throw new IllegalArgumentException(context + " must contain exactly " + fields + " fields");
-    }
-    for (String name : node.propertyNames()) {
-      if (!fields.contains(name)) {
-        throw new IllegalArgumentException(context + " has an unknown field");
-      }
-    }
   }
 
   private static String write(ObjectNode node) {

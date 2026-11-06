@@ -10,9 +10,8 @@ import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.harness.api.realtime.RealtimeEvent;
 import fun.fengwk.kkstudio.harness.codec.RealtimeEventJsonCodec;
 import fun.fengwk.kkstudio.harness.model.HarnessJson;
+import fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport;
 
-import java.util.Iterator;
-import java.util.LinkedHashSet;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
@@ -99,7 +98,7 @@ public final class RealtimeNotificationCodec {
     Kind kind = readKind(requiredText(node, "kind", "notification"));
     Envelope envelope;
     if (kind == Kind.EVENT) {
-      requireExactFields(node, EVENT_FIELDS, "notification");
+      JsonCodecSupport.requireFields(node, EVENT_FIELDS, "notification");
       JsonNode eventNode = node.get("event");
       if (eventNode == null || !eventNode.isObject()) {
         throw new IllegalArgumentException("notification.event must be a JSON object");
@@ -109,14 +108,14 @@ public final class RealtimeNotificationCodec {
               requiredCanonicalUuid(node, "originNodeId", "notification"),
               eventCodec.decodeNode(eventNode));
     } else if (kind == Kind.REFERENCE) {
-      requireExactFields(node, REFERENCE_FIELDS, "notification");
+      JsonCodecSupport.requireFields(node, REFERENCE_FIELDS, "notification");
       envelope =
           new Envelope.Reference(
               requiredCanonicalUuid(node, "originNodeId", "notification"),
               requiredCanonicalUuid(node, "threadId", "notification"),
               requiredCanonicalUuid(node, "payloadId", "notification"));
     } else {
-      requireExactFields(node, RESYNC_FIELDS, "notification");
+      JsonCodecSupport.requireFields(node, RESYNC_FIELDS, "notification");
       envelope =
           new Envelope.Resync(
               requiredCanonicalUuid(node, "originNodeId", "notification"),
@@ -173,16 +172,6 @@ public final class RealtimeNotificationCodec {
       return Kind.valueOf(value);
     } catch (IllegalArgumentException error) {
       throw new IllegalArgumentException("unknown notification.kind: " + value, error);
-    }
-  }
-
-  private static void requireExactFields(ObjectNode node, Set<String> expected, String objectName) {
-    Set<String> actual = new LinkedHashSet<>();
-    Iterator<String> names = node.propertyNames().iterator();
-    names.forEachRemaining(actual::add);
-    if (!actual.equals(expected)) {
-      throw new IllegalArgumentException(
-          objectName + " fields must be exactly " + expected + ", actual=" + actual);
     }
   }
 
