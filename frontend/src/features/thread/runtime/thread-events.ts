@@ -1,4 +1,4 @@
-import { asRecord, getRecordList, parsePayload } from '@/features/thread/runtime/payload-json'
+import { asRecord, formatRawJsonText, getRecordList } from '@/features/thread/runtime/payload-json'
 import { getString } from '@/shared/lib/value'
 import type {
   RealtimeModelStream,
@@ -128,13 +128,6 @@ function withRawPayload(
 }
 
 function compactJson(value: unknown): string {
-  if (typeof value === 'string') {
-    try {
-      return JSON.stringify(JSON.parse(value))
-    } catch {
-      return value.replace(/\s+/g, ' ').trim() || '{}'
-    }
-  }
   try {
     return JSON.stringify(value) ?? '{}'
   } catch {
@@ -143,13 +136,6 @@ function compactJson(value: unknown): string {
 }
 
 function prettyJson(value: unknown): string {
-  if (typeof value === 'string') {
-    try {
-      return JSON.stringify(JSON.parse(value), null, 2)
-    } catch {
-      return value
-    }
-  }
   try {
     return JSON.stringify(value, null, 2) ?? '{}'
   } catch {
@@ -183,13 +169,6 @@ function accumulateUsage(
 function formatDisplayJson(value: unknown): string {
   if (value == null) {
     return ''
-  }
-  if (typeof value === 'string') {
-    try {
-      return JSON.stringify(JSON.parse(value), null, 2)
-    } catch {
-      return value
-    }
   }
   try {
     return JSON.stringify(value, null, 2)
@@ -250,7 +229,7 @@ export function buildThreadEventTimeline(
       pendingUsage = null
     }
     turnStartByEntryId.set(entry.entryId, currentTurnStartEntryId)
-    const payload = parsePayload(entry.payload)
+    const payload = asRecord(entry.payload)
     records.push(
       withRawPayload(
         projectEntryRecord(entry, payload, {
@@ -870,7 +849,7 @@ function projectActiveToolRecord(
       label: translate('ai.runtime.event.detail.environment'),
       value: invocation.environmentId ?? '',
     },
-    { label: translate('ai.runtime.event.detail.arguments'), value: formatDisplayJson(invocation.argumentsJson) },
+    { label: translate('ai.runtime.event.detail.arguments'), value: formatRawJsonText(invocation.argumentsJson) },
   ]
   if (invocation.approval != null) {
     details.push({

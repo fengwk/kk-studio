@@ -12,12 +12,12 @@ function createCommand(overrides: Partial<HarnessThreadCommandDTO>): HarnessThre
     type: 'CUSTOM_MESSAGE',
     state: 'QUEUED',
     idempotencyKey: 'cmd-1',
-    payload: JSON.stringify({
+    payload: {
       message: {
         role: 'USER',
         contents: [{ type: 'text', text: '补充要求内容' }],
       },
-    }),
+    },
     cancelledAt: null,
     createdAt: 1774958400,
     ...overrides,
@@ -30,17 +30,17 @@ describe('extractQueuedCustomMessages', () => {
       createCommand({
         sequence: '10',
         idempotencyKey: 'key-10',
-        payload: JSON.stringify({
+        payload: {
           message: {
             role: 'USER',
             contents: [{ type: 'text', text: '请优先补充单测' }],
           },
-        }),
+        },
       }),
       createCommand({
         sequence: '11',
         idempotencyKey: 'key-11',
-        payload: JSON.stringify({
+        payload: {
           message: {
             role: 'USER',
             contents: [
@@ -48,7 +48,7 @@ describe('extractQueuedCustomMessages', () => {
               { type: 'text', text: '第二行要求' },
             ],
           },
-        }),
+        },
       }),
     ]
 
@@ -75,12 +75,12 @@ describe('extractQueuedCustomMessages', () => {
       createCommand({
         sequence: '3',
         state: 'QUEUED',
-        payload: JSON.stringify({
+        payload: {
           message: {
             role: 'USER',
             contents: [{ type: 'text', text: '仍在队列中' }],
           },
-        }),
+        },
       }),
     ]
 
@@ -110,25 +110,25 @@ describe('extractQueuedCustomMessages', () => {
     const commands: HarnessThreadCommandDTO[] = [
       createCommand({
         sequence: '1',
-        payload: JSON.stringify({
+        payload: {
           message: {
             role: 'USER',
             contents: [{ type: 'text', text: '   ' }],
           },
-        }),
+        },
       }),
       createCommand({
         sequence: '2',
-        payload: JSON.stringify({
+        payload: {
           message: {
             role: 'USER',
             contents: [],
           },
-        }),
+        },
       }),
       createCommand({
         sequence: '3',
-        payload: JSON.stringify({}),
+        payload: {},
       }),
       createCommand({
         sequence: '4',
@@ -145,7 +145,7 @@ describe('extractQueuedCustomMessages', () => {
     const commands: HarnessThreadCommandDTO[] = [
       createCommand({
         sequence: '7',
-        payload: JSON.stringify({
+        payload: {
           message: {
             role: 'USER',
             contents: [
@@ -154,7 +154,7 @@ describe('extractQueuedCustomMessages', () => {
               { type: 'text', text: '规范文本' },
             ],
           },
-        }),
+        },
       }),
     ]
 

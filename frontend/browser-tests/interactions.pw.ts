@@ -168,7 +168,7 @@ async function mockPendingApi(page: Page, options: PendingApiOptions = {}): Prom
         const nextCursor = options.paginate && !cursor ? 'page-2' : null
         // total 是同一过滤条件下的真实可见待处理总数，与游标分页位置无关。
         await route.fulfill({
-          json: { items, nextCursor, total: allItems.length, freshnessAt: 1791194400 },
+          json: { items, nextCursor, total: allItems.length, freshnessAt: 1791194400000 },
         })
         return
       }

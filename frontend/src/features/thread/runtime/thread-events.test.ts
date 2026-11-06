@@ -29,7 +29,7 @@ function entry(
     sessionId: 's1',
     parentEntryId: null,
     entryType,
-    payload: JSON.stringify(payload),
+    payload,
     createdAt,
     usageCost: null,
   }
@@ -808,23 +808,18 @@ describe('buildThreadEventTimeline', () => {
     expect(events[1]!.turnStartEntryId).toBeNull()
   })
 
-  it('keeps malformed payload JSON inspectable through compact/pretty fallbacks', () => {
-    // payload 不是合法 JSON：compactJson 折叠为空格归一文本、prettyJson 原样返回，
-    // 事件仍然投影（审计视图不丢信息），且 summary/rawJson 不抛异常。
+  it('renders scalar payload nodes without interpreting them as JSON text', () => {
     const events = build([
       entry('turn-1', 'TURN_START', { reason: 'USER_MESSAGE' }),
       { ...entry('bad-1', 'MESSAGE', {}), payload: 'not-json' },
     ])
     const bad = events[1]!
     expect(bad.kind).toBe('CUSTOM_MESSAGE')
-    // compactJson 对非法 JSON 回退为空格折叠文本；prettyJson 原样返回。
-    expect(bad.summary).toBe('not-json')
-    expect(bad.rawJson).toBe('not-json')
-    // 空白 payload 视为空对象（parsePayload 兜底），仍能正常投影。
+    expect(bad.summary).toBe('"not-json"')
+    expect(bad.rawJson).toBe('"not-json"')
     const blank = build([{ ...entry('blank-1', 'MESSAGE', {}), payload: '' }])[0]!
     expect(blank.kind).toBe('CUSTOM_MESSAGE')
-    // parsePayload 对空字符串兜底为空对象：compactJson 输出 '{}' 作为可展示摘要。
-    expect(blank.summary).toBe('{}')
+    expect(blank.summary).toBe('""')
   })
 
   it('maps unknown active statuses to pending and stream errors to failed', () => {
@@ -1064,8 +1059,7 @@ describe('buildThreadEventTimeline', () => {
     expect(JSON.parse(failedEvent.rawJson!).error).toEqual(failedInvocation.error)
   })
 
-  it('handles malformed embedded JSON gracefully without throwing', () => {
-    // 意图：验证当 embedded JSON（如 argumentsJson, result 等）格式错误时，投影不会抛出异常，而是安全地原样保留。
+  it('keeps invalid raw arguments and renders scalar nodes without parsing them', () => {
     const entries = [
       entry('turn-1', 'TURN_START', { reason: 'USER_MESSAGE' }),
     ]
@@ -1083,9 +1077,9 @@ describe('buildThreadEventTimeline', () => {
 
     const detailMap = new Map(toolEvent!.details.map((d) => [d.label, d.value]))
     expect(detailMap.get('参数')).toBe('{ malformed json: not valid }')
-    expect(detailMap.get('审批')).toBe('invalid approval [[[')
-    expect(detailMap.get('结果')).toBe('{ unclosed string: "abc }')
-    expect(detailMap.get('错误')).toBe('some plain text error')
+    expect(detailMap.get('审批')).toBe(JSON.stringify('invalid approval [[['))
+    expect(detailMap.get('结果')).toBe(JSON.stringify('{ unclosed string: "abc }'))
+    expect(detailMap.get('错误')).toBe(JSON.stringify('some plain text error'))
     expect(toolEvent!.rawJson).not.toBeNull()
   })
 

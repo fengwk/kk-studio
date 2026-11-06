@@ -147,7 +147,7 @@ function queuedSettingCommand(
     type,
     state: 'QUEUED',
     idempotencyKey: `queued-${sequence}`,
-    payload: JSON.stringify(payload),
+    payload,
     cancelledAt: null,
     createdAt: 0,
   }
@@ -186,7 +186,7 @@ function acceptedSettingCommand(
     type: command.type,
     state: 'QUEUED',
     idempotencyKey: command.idempotencyKey,
-    payload: JSON.stringify(acceptedCommandPayload(command)),
+    payload: acceptedCommandPayload(command),
     cancelledAt: null,
     createdAt: 0,
   }
@@ -203,7 +203,7 @@ function acceptedResponse(
       sessionId: thread.sessionId,
       parentEntryId: null,
       entryType: 'ROOT',
-      payload: '{}',
+      payload: {},
       createdAt: 0,
       usageCost: null,
     },

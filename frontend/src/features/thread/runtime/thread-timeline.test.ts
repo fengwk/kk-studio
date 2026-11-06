@@ -283,7 +283,7 @@ describe('compaction summary projection', () => {
       sessionId: 'session-1',
       parentEntryId: null,
       entryType,
-      payload: JSON.stringify(payload),
+      payload,
       createdAt: 1767225600 + (entryId === 'assistant' ? 2 : 3),
       usageCost: null,
     }
@@ -1169,6 +1169,9 @@ describe('thread timeline', () => {
                 { type: 'text', text: 'ok' },
                 { type: 'json', json: '{"nested":true,"n":1}' },
                 { type: 'json', json: '[1,2]' },
+                // Durable codec stores json content as raw text, including string scalars.
+                { type: 'json', json: '"{\\"nested\\":true}"' },
+                { type: 'json', json: { nested: true } },
               ],
             },
           ]),
@@ -1196,8 +1199,9 @@ describe('thread timeline', () => {
         arguments: '{"command":"ls"}',
         contents: [
           { type: 'text', text: 'ok' },
-          { type: 'json', value: '{"nested":true,"n":1}' },
-          { type: 'json', value: '[1,2]' },
+          { type: 'json', value: { nested: true, n: 1 } },
+          { type: 'json', value: [1, 2] },
+          { type: 'json', value: '{"nested":true}' },
         ],
         status: 'done',
       },
@@ -1223,7 +1227,7 @@ describe('thread timeline', () => {
         requiredEnvironmentName: null,
         environmentWaitFreshnessAt: null,
         argumentsJson: '{"command":"ls"}',
-        approval: JSON.stringify({ required: true, decision: null, decisionId: null }),
+        approval: { required: true, decision: null, decisionId: null },
         result: null,
         error: null,
         createdAt: 1785232800,
@@ -1293,7 +1297,7 @@ describe('thread timeline', () => {
       requiredEnvironmentName: null,
       environmentWaitFreshnessAt: null,
       argumentsJson: '{"command":"ls"}',
-      approval: JSON.stringify({ required: true, decision: null, decisionId: null }),
+      approval: { required: true, decision: null, decisionId: null },
       result: null,
       error: null,
       createdAt: 1785232800,
@@ -1386,7 +1390,7 @@ describe('thread timeline', () => {
       requiredEnvironmentName: null,
       environmentWaitFreshnessAt: null,
       argumentsJson: '{"command":"ls"}',
-      approval: JSON.stringify({ required: true, decision: null, decisionId: null }),
+      approval: { required: true, decision: null, decisionId: null },
       result: null,
       error: null,
       createdAt: 1785232800,
@@ -1494,7 +1498,7 @@ describe('thread timeline', () => {
         status: 'FAILED',
         attempt: 1,
         result: null,
-        error: JSON.stringify({ message: 'tool crashed' }),
+        error: { message: 'tool crashed' },
         approval: null,
       }),
     ]
@@ -1547,7 +1551,7 @@ describe('thread timeline', () => {
       invocation('inv-done', '40', 'call-1', {
         status: 'SUCCEEDED',
         attempt: 1,
-        result: JSON.stringify({ contents: [{ type: 'text', text: 'ok' }], error: false }),
+        result: { contents: [{ type: 'text', text: 'ok' }], error: false },
         error: null,
         approval: null,
       }),
@@ -1602,7 +1606,7 @@ describe('thread timeline', () => {
       invocation('inv-a', '40', 'call-1', {
         status: 'WAITING_APPROVAL',
         attempt: 1,
-        approval: JSON.stringify({ required: true, decision: null, decisionId: null }),
+        approval: { required: true, decision: null, decisionId: null },
       }),
       invocation('inv-b', '40', 'call-1', {
         status: 'RUNNING',
@@ -1646,7 +1650,7 @@ describe('thread timeline', () => {
         status: 'WAITING_APPROVAL',
         attempt: 1,
         rendererKey: 'other-renderer',
-        approval: JSON.stringify({ required: true, decision: null, decisionId: null }),
+        approval: { required: true, decision: null, decisionId: null },
       }),
     ]
     const timeline = buildThreadTimeline(
@@ -1689,20 +1693,20 @@ describe('thread timeline', () => {
         invocation('inv-ok', '40', 'call-ok', {
           status: 'SUCCEEDED',
           callIndex: 0,
-          result: JSON.stringify({
+          result: {
             contents: [
               { type: 'text', text: 'listed files' },
               { type: 'resource', uri: 'blob-upload:00000000-0000-4000-8000-000000000001', mediaType: 'text/plain', name: 'out.txt', size: 4, sha256: 'a'.repeat(64) },
             ],
             error: false,
-          }),
+          },
           environmentId: 'env-must-not-be-thread',
         }),
         invocation('inv-ask', '40', 'call-ask', {
           status: 'WAITING_APPROVAL',
           callIndex: 1,
           toolCallId: 'call-ask',
-          approval: JSON.stringify({ required: true, decision: null, decisionId: null }),
+          approval: { required: true, decision: null, decisionId: null },
         }),
       ],
       null,
@@ -1747,7 +1751,7 @@ describe('thread timeline', () => {
         invocation('inv-error', '40', 'call-error', {
           status: 'SUCCEEDED',
           callIndex: 0,
-          result: JSON.stringify({ contents: [{ type: 'text', text: 'rejected' }], error: true }),
+          result: { contents: [{ type: 'text', text: 'rejected' }], error: true },
         }),
         invocation('inv-failed', '40', 'call-failed', {
           status: 'FAILED',
@@ -1758,7 +1762,7 @@ describe('thread timeline', () => {
           status: 'UNKNOWN',
           callIndex: 2,
           toolCallId: 'call-unknown',
-          error: JSON.stringify({ message: 'lost' }),
+          error: { message: 'lost' },
         }),
         invocation('inv-cancelled', '40', 'call-cancelled', {
           status: 'CANCELLED',
@@ -1794,7 +1798,7 @@ describe('thread timeline', () => {
       [],
       [invocation('inv-other-entry', 'other-entry', 'call-1', {
         status: 'SUCCEEDED',
-        result: JSON.stringify({ contents: [{ type: 'text', text: 'wrong call' }], error: false }),
+        result: { contents: [{ type: 'text', text: 'wrong call' }], error: false },
       })],
     )
     expect(mismatched.messages.filter((message) => message.role === 'tool')).toMatchObject([
@@ -1830,7 +1834,7 @@ describe('thread timeline', () => {
       [],
       [invocation('inv-b', 'B', 'x', {
         status: 'SUCCEEDED',
-        result: JSON.stringify({ contents: [{ type: 'text', text: 'current output' }], error: false }),
+        result: { contents: [{ type: 'text', text: 'current output' }], error: false },
       })],
     )
     const current = timeline.messages.filter((message) =>
@@ -1882,13 +1886,13 @@ describe('thread timeline', () => {
         invocation('inv-b0', 'B', 'x', {
           callIndex: 0,
           status: 'SUCCEEDED',
-          result: JSON.stringify({ contents: [{ type: 'text', text: 'stale transient' }], error: false }),
+          result: { contents: [{ type: 'text', text: 'stale transient' }], error: false },
         }),
         invocation('inv-b1', 'B', 'x', {
           callIndex: 1,
           status: 'SUCCEEDED',
-          result: JSON.stringify({ contents: [{ type: 'text', text: 'current second' }], error: false }),
-          error: JSON.stringify({ code: 'TOOL_FAILED', message: 'disk full' }),
+          result: { contents: [{ type: 'text', text: 'current second' }], error: false },
+          error: { code: 'TOOL_FAILED', message: 'disk full' },
         }),
       ],
     )
@@ -1936,7 +1940,7 @@ describe('thread timeline', () => {
       [],
       [invocation('inv-1', '40', 'call-1', {
         status: 'SUCCEEDED',
-        result: JSON.stringify({ contents: [{ type: 'text', text: 'transient ok' }], error: false }),
+        result: { contents: [{ type: 'text', text: 'transient ok' }], error: false },
       })],
       null,
       new Map([['inv-1', {
@@ -1997,12 +2001,12 @@ describe('thread timeline', () => {
       invocation('inv-decided', '40', 'call-1', {
         status: 'SUCCEEDED',
         attempt: 1,
-        approval: JSON.stringify({
+        approval: {
           required: true,
           decision: 'ALLOWED',
           decisionId: 'dec-1',
           reason: 'user approved',
-        }),
+        },
       }),
     ]
     const decided = buildThreadTimeline(
@@ -2052,7 +2056,7 @@ describe('thread timeline', () => {
       [invocation('inv-free', '41', 'call-1', {
         status: 'RUNNING',
         attempt: 1,
-        approval: JSON.stringify({ required: false, decision: null }),
+        approval: { required: false, decision: null },
       })],
     )
     const free = notRequired.messages.find((m) => m.role === 'tool')
@@ -2109,10 +2113,10 @@ describe('thread timeline', () => {
           toolName: 'edit',
           rendererKey: 'edit',
           status: 'WAITING_APPROVAL',
-          approval: JSON.stringify({
+          approval: {
             required: true,
             editReview: review,
-          }),
+          },
         }),
       ],
     )
@@ -2147,12 +2151,12 @@ describe('thread timeline', () => {
           toolName: 'edit',
           rendererKey: 'edit',
           status: 'SUCCEEDED',
-          result: JSON.stringify({
+          result: {
             toolCallId: 'call-edit-2',
             contents: [{ type: 'text', text: 'ok' }],
             error: false,
             details: { editReview: resultReview },
-          }),
+          },
         }),
       ],
     )
@@ -2241,17 +2245,17 @@ describe('thread timeline', () => {
           toolName: 'edit',
           rendererKey: 'edit',
           status: 'SUCCEEDED',
-          approval: JSON.stringify({
+          approval: {
             required: true,
             decision: 'ALLOWED',
             editReview: approvalReview,
-          }),
-          result: JSON.stringify({
+          },
+          result: {
             toolCallId: 'call-edit-4',
             contents: [{ type: 'text', text: 'applied' }],
             error: false,
             details: { editReview: resultReview },
-          }),
+          },
         }),
       ],
     )
@@ -2269,7 +2273,7 @@ function entry(entryId: string, entryType: EntryType, payload: Record<string, un
     sessionId: 's1',
     parentEntryId: null,
     entryType,
-    payload: JSON.stringify(payload),
+    payload,
     createdAt: 1767225600,
     usageCost: null,
   }
@@ -2288,7 +2292,7 @@ function command(
     type,
     state,
     idempotencyKey: `cid-${label}`,
-    payload: JSON.stringify(payload),
+    payload,
     cancelledAt: null,
     createdAt: 1767225600,
   }

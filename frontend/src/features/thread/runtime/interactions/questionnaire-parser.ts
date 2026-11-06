@@ -61,11 +61,10 @@ export function parseCompletedResult(result: unknown): {
   declined: boolean
   answers?: string[][]
 } | null {
-  const parsed = typeof result === 'string' ? parseJsonRecord(result) : result
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+  if (!result || typeof result !== 'object' || Array.isArray(result)) {
     return null
   }
-  const record = parsed as Record<string, unknown>
+  const record = result as Record<string, unknown>
   if (record.declined === true) {
     return { declined: true }
   }
@@ -76,17 +75,6 @@ export function parseCompletedResult(result: unknown): {
     return { declined: false, answers }
   }
   return null
-}
-
-function parseJsonRecord(value: string): unknown {
-  if (!value.trim()) {
-    return null
-  }
-  try {
-    return JSON.parse(value)
-  } catch {
-    return null
-  }
 }
 
 /**

@@ -1,4 +1,4 @@
-import { asRecord, getRecordList, parsePayload } from '@/features/thread/runtime/payload-json'
+import { asRecord, getRecordList } from '@/features/thread/runtime/payload-json'
 import { getString } from '@/shared/lib/value'
 import type { HarnessThreadCommandDTO } from '@/shared/api/generated/contracts'
 
@@ -38,7 +38,7 @@ export function extractQueuedCustomMessages(
 }
 
 function extractCustomMessageText(payloadValue: unknown): string {
-  const payload = parsePayload(payloadValue)
+  const payload = asRecord(payloadValue)
   const message = asRecord(payload.message)
   const contents = getRecordList(message.contents)
   const textParts: string[] = []

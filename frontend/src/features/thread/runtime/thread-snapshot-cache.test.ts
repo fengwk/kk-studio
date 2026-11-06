@@ -40,7 +40,7 @@ function makeEntry(id: string, parentId: string | null = null): HarnessSessionEn
     sessionId: 's-1',
     parentEntryId: parentId,
     entryType: 'MESSAGE',
-    payload: JSON.stringify({ text: `message-${id}` }),
+    payload: { text: `message-${id}` },
     createdAt: 1000,
     usageCost: null,
   }

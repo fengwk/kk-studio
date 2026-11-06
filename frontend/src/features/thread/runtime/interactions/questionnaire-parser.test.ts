@@ -87,12 +87,13 @@ describe('questionnaire-parser', () => {
   })
 
   it('parses completed results (declined vs answers)', () => {
-    expect(parseCompletedResult('{"declined":true}')).toEqual({ declined: true })
-    expect(parseCompletedResult('{"answers":[["1080P"],["成片"]]}')).toEqual({
+    expect(parseCompletedResult({ declined: true })).toEqual({ declined: true })
+    expect(parseCompletedResult({ answers: [['1080P'], ['成片']] })).toEqual({
       declined: false,
       answers: [['1080P'], ['成片']],
     })
     expect(parseCompletedResult(null)).toBeNull()
+    expect(parseCompletedResult('{"declined":true}')).toBeNull()
   })
 
   it('accepts questionnaires and answers beyond business ceilings without truncation', () => {

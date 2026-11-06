@@ -32,10 +32,10 @@ function assistantEntry(
     sessionId: 's1',
     parentEntryId: null,
     entryType,
-    payload: JSON.stringify({
+    payload: {
       message: { role: 'ASSISTANT', contents: [{ type: 'text', text: 'ok' }] },
       ...(norm != null ? { assistantMetadata: { usage: norm } } : {}),
-    }),
+    },
     createdAt: 1785232800,
     usageCost: usageCost ?? null,
   }
@@ -47,7 +47,7 @@ function otherEntry(entryId: string, entryType: HarnessSessionEntryDTO['entryTyp
     sessionId: 's1',
     parentEntryId: null,
     entryType,
-    payload: JSON.stringify({ reason: 'USER_MESSAGE' }),
+    payload: { reason: 'USER_MESSAGE' },
     createdAt: 1785232740,
     usageCost: null,
   }
@@ -65,10 +65,10 @@ function compactionEntry(
     sessionId: 's1',
     parentEntryId: null,
     entryType: 'COMPACTION',
-    payload: JSON.stringify({
+    payload: {
       summaryText: 'summarized',
       assistantMetadata: norm == null ? null : { stopReason: 'COMPLETE', usage: norm },
-    }),
+    },
     createdAt: 1785232800,
     usageCost: usageCost ?? null,
   }
@@ -164,13 +164,13 @@ describe('aggregateEntryUsage', () => {
   it('weights speed samples and takes the latest context estimate', () => {
     const withSpeed = (entryId: string, input: number, tokens: number, millis: number): HarnessSessionEntryDTO => ({
       ...assistantEntry(entryId, { inputTokens: input, outputTokens: tokens, reasoningTokens: 0, providerTotalTokens: input + tokens }),
-      payload: JSON.stringify({
+      payload: {
         message: { role: 'ASSISTANT', contents: [{ type: 'text', text: 'ok' }] },
         assistantMetadata: {
           usage: { inputTokens: input, outputTokens: tokens, cacheReadTokens: 0, cacheWriteTokens: 0 },
           decodeDurationMillis: millis,
         },
-      }),
+      },
     })
 
     const aggregated = aggregateEntryUsage([
@@ -215,9 +215,9 @@ describe('aggregateEntryUsage', () => {
         sessionId: 's1',
         parentEntryId: null,
         entryType: 'MESSAGE',
-        payload: JSON.stringify({
+        payload: {
           message: { role: 'ASSISTANT', contents: [{ type: 'text', text: '人工消息' }] },
-        }),
+        },
         createdAt: 1785232800,
         usageCost: null,
       },
@@ -236,9 +236,9 @@ describe('aggregateEntryUsage', () => {
         sessionId: 's1',
         parentEntryId: null,
         entryType: 'MESSAGE',
-        payload: JSON.stringify({
+        payload: {
           message: { role: 'ASSISTANT', contents: [{ type: 'text', text: '人工消息' }] },
-        }),
+        },
         createdAt: 1785232810,
         usageCost: null,
       },
@@ -263,10 +263,10 @@ describe('aggregateEntryUsage', () => {
       sessionId: 's1',
       parentEntryId: null,
       entryType: 'MESSAGE',
-      payload: JSON.stringify({
+      payload: {
         message: { role: 'ASSISTANT', contents: [{ type: 'text', text: '模型调用输出' }] },
         assistantMetadata: {}, // 显式空 metadata 不是人工消息
-      }),
+      },
       createdAt: 1785232850,
       usageCost: { currency: 'USD', amount: '0.02' },
     }
@@ -315,12 +315,12 @@ describe('aggregateEntryUsage', () => {
       sessionId: 's1',
       parentEntryId: null,
       entryType: 'MESSAGE',
-      payload: JSON.stringify({
+      payload: {
         message: { role: 'ASSISTANT', contents: [{ type: 'text', text: 'hi' }] },
         assistantMetadata: {
           usage: { inputTokens: 50, outputTokens: 20, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: null },
         },
-      }),
+      },
       createdAt: 1785232800,
       usageCost: { currency: 'USD', amount: '0.005' },
     }

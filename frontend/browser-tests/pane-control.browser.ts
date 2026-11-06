@@ -146,7 +146,7 @@ function interactionItems() {
       },
     ],
     total: 1,
-    freshnessAt: 1791194220,
+    freshnessAt: 1791194220000,
     nextCursor: null,
   }
 }

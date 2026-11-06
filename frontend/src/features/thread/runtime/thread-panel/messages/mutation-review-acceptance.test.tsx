@@ -205,7 +205,7 @@ describe('Slice F 审查与审批组件验收测试', () => {
         invocationId="inv-1"
         toolName="edit"
         argumentsJson={JSON.stringify({ path: '/src/App.tsx', old_string: 'a', new_string: 'b' })}
-        approval={JSON.stringify({ required: true })}
+        approval={{ required: true }}
       />,
       { wrapper },
     )
@@ -224,10 +224,10 @@ describe('Slice F 审查与审批组件验收测试', () => {
         invocationId="inv-1"
         toolName="edit"
         argumentsJson={JSON.stringify({ path: '/src/App.tsx', old_string: 'a', new_string: 'b' })}
-        approval={JSON.stringify({
+        approval={{
           required: true,
           editReview: { path: '/src/App.tsx', diff: '+b', sha256: 'invalid' },
-        })}
+        }}
       />,
     )
     expect(screen.getByRole('button', { name: '允许' })).toBeDisabled()
@@ -240,10 +240,10 @@ describe('Slice F 审查与审批组件验收测试', () => {
         invocationId="inv-1"
         toolName="edit"
         argumentsJson={JSON.stringify({ path: '/src/App.tsx', old_string: 'a', new_string: 'b' })}
-        approval={JSON.stringify({
+        approval={{
           required: true,
           editReview: { path: '/canonical/src/App.tsx', diff: '-a\n+b', sha256: validSha },
-        })}
+        }}
       />,
     )
     expect(screen.getByRole('button', { name: '允许' })).toBeEnabled()
@@ -313,7 +313,7 @@ describe('Slice F 审查与审批组件验收测试', () => {
       sha256: validSha,
     }
     const rawArgs = JSON.stringify({ path: '/src/SharedComponent.tsx', old_string: 'old', new_string: 'new' })
-    const rawApproval = JSON.stringify({ required: true, editReview: reviewData })
+    const approval = { required: true, editReview: reviewData }
 
     const { container: cardContainer } = render(
       <ApprovalCard
@@ -321,7 +321,7 @@ describe('Slice F 审查与审批组件验收测试', () => {
         invocationId="inv-1"
         toolName="edit"
         argumentsJson={rawArgs}
-        approval={rawApproval}
+        approval={approval}
       />,
       { wrapper },
     )
@@ -429,7 +429,7 @@ describe('真实 AgentMessageJsonCodec 历史生命周期与真实组件验收�
       sessionId: 'sess-acceptance-1',
       parentEntryId: null,
       entryType,
-      payload: JSON.stringify(payload),
+      payload,
       createdAt: 1792404000,
       usageCost: null,
     }
@@ -502,13 +502,13 @@ describe('真实 AgentMessageJsonCodec 历史生命周期与真实组件验收�
     // 阶段 1: invocation overlay 存在（处于 WAITING_APPROVAL，approval 携带真实 editReview）
     const invPhase1 = createInvocation('inv-flow-1', 'asst-entry-1', 'call-edit-1', {
       status: 'WAITING_APPROVAL',
-      approval: JSON.stringify({
+      approval: {
         required: true,
         decision: null,
         decisionId: null,
         reason: 'Permission rules require approval',
         editReview: validReview,
-      }),
+      },
     })
 
     const asstEntry = createEntry('asst-entry-1', 'MESSAGE', {
@@ -540,19 +540,19 @@ describe('真实 AgentMessageJsonCodec 历史生命周期与真实组件验收�
     // 此时 invocation 仍留在列表（例如已成为 SUCCEEDED，尚未被 GC/清理）
     const invPhase2 = createInvocation('inv-flow-1', 'asst-entry-1', 'call-edit-1', {
       status: 'SUCCEEDED',
-      approval: JSON.stringify({
+      approval: {
         required: true,
         decision: 'ALLOWED',
         decisionId: 'dec-1',
         reason: null,
         editReview: validReview,
-      }),
-      result: JSON.stringify({
+      },
+      result: {
         toolCallId: 'call-edit-1',
         contents: [{ type: 'text', text: 'Edited successfully.' }],
         error: false,
         details: { editReview: validReview },
-      }),
+      },
     })
 
     const toolResultEntry = createEntry('result-entry-1', 'MESSAGE', {
@@ -665,19 +665,19 @@ describe('真实 AgentMessageJsonCodec 历史生命周期与真实组件验收�
 
     const conflictInvocation = createInvocation('inv-conflict', 'asst-entry-conflict', 'call-conflict', {
       status: 'SUCCEEDED',
-      approval: JSON.stringify({
+      approval: {
         required: true,
         decision: 'ALLOWED',
         decisionId: 'dec-conflict',
         reason: null,
         editReview: frozenApprovalReview,
-      }),
-      result: JSON.stringify({
+      },
+      result: {
         toolCallId: 'call-conflict',
         contents: [{ type: 'text', text: 'Edited' }],
         error: false,
         details: { editReview: daemonResultReview },
-      }),
+      },
     })
 
     // 1. Invocation 存在时：审批冻结快照严格优先！
@@ -722,12 +722,12 @@ describe('真实 AgentMessageJsonCodec 历史生命周期与真实组件验收�
     const yoloInvocation = createInvocation('inv-yolo', 'asst-yolo', 'call-yolo', {
       status: 'SUCCEEDED',
       approval: null, // 无需审批
-      result: JSON.stringify({
+      result: {
         toolCallId: 'call-yolo',
         contents: [{ type: 'text', text: 'Auto applied' }],
         error: false,
         details: { editReview: yoloReview },
-      }),
+      },
     })
 
     const toolResultEntry = createEntry('result-yolo', 'MESSAGE', {

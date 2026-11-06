@@ -8,7 +8,7 @@ function makeEntry(overrides: Partial<HarnessSessionEntryDTO> = {}): HarnessSess
     sessionId: 'session-1',
     parentEntryId: null,
     entryType: 'CUSTOM',
-    payload: JSON.stringify({
+    payload: {
       contributorId: 'builtin',
       customType: 'goal.progress',
       data: {
@@ -17,7 +17,7 @@ function makeEntry(overrides: Partial<HarnessSessionEntryDTO> = {}): HarnessSess
         reason: 'Successfully completed the task',
         reportedAt: '2026-09-24T12:00:00Z',
       },
-    }),
+    },
     createdAt: 1790251200,
     usageCost: null,
     ...overrides,
@@ -30,14 +30,14 @@ describe('parseGoalProgress', () => {
 
     const userEntry = makeEntry({
       entryType: 'MESSAGE',
-      payload: JSON.stringify({ text: 'hello' }),
+      payload: { text: 'hello' },
     })
     expect(parseGoalProgress([userEntry], 'goal-123')).toEqual({ active: null, stale: null })
   })
 
   it('parses active goal.progress with matching goalId from data object', () => {
     const entry = makeEntry({
-      payload: JSON.stringify({
+      payload: {
         contributorId: 'builtin',
         customType: 'goal.progress',
         data: {
@@ -46,7 +46,7 @@ describe('parseGoalProgress', () => {
           reason: 'All requirements verified',
           reportedAt: '2026-09-24T10:00:00Z',
         },
-      }),
+      },
     })
 
     const result = parseGoalProgress([entry], 'goal-123')
@@ -61,9 +61,9 @@ describe('parseGoalProgress', () => {
     })
   })
 
-  it('parses active goal.progress with matching goalId from stringified dataJson', () => {
+  it('ignores obsolete dataJson text rather than interpreting it as a node', () => {
     const entry = makeEntry({
-      payload: JSON.stringify({
+      payload: {
         contributorId: 'builtin',
         customType: 'goal.progress',
         dataJson: JSON.stringify({
@@ -72,24 +72,16 @@ describe('parseGoalProgress', () => {
           reason: 'Missing API key',
           reportedAt: '2026-09-24T11:00:00Z',
         }),
-      }),
+      },
     })
 
     const result = parseGoalProgress([entry], 'goal-123')
-    expect(result.stale).toBeNull()
-    expect(result.active).toEqual({
-      entryId: 'entry-1',
-      goalId: 'goal-123',
-      status: 'blocked',
-      reason: 'Missing API key',
-      reportedAt: '2026-09-24T11:00:00Z',
-      createdAt: 1790251200,
-    })
+    expect(result).toEqual({ active: null, stale: null })
   })
 
   it('marks report as stale if goalId does not match currentGoalId', () => {
     const entry = makeEntry({
-      payload: JSON.stringify({
+      payload: {
         contributorId: 'builtin',
         customType: 'goal.progress',
         data: {
@@ -98,7 +90,7 @@ describe('parseGoalProgress', () => {
           reason: 'Old task completed',
           reportedAt: '2026-09-24T09:00:00Z',
         },
-      }),
+      },
     })
 
     const result = parseGoalProgress([entry], 'new-goal-789')
@@ -115,7 +107,7 @@ describe('parseGoalProgress', () => {
 
   it('marks report as stale if currentGoalId is null (goal cleared)', () => {
     const entry = makeEntry({
-      payload: JSON.stringify({
+      payload: {
         contributorId: 'builtin',
         customType: 'goal.progress',
         data: {
@@ -124,7 +116,7 @@ describe('parseGoalProgress', () => {
           reason: 'Old task completed',
           reportedAt: '2026-09-24T09:00:00Z',
         },
-      }),
+      },
     })
 
     const result = parseGoalProgress([entry], null)
@@ -135,7 +127,7 @@ describe('parseGoalProgress', () => {
   it('picks the latest goal.progress from multiple entries', () => {
     const olderEntry = makeEntry({
       entryId: 'entry-1',
-      payload: JSON.stringify({
+      payload: {
         contributorId: 'builtin',
         customType: 'goal.progress',
         data: {
@@ -144,11 +136,11 @@ describe('parseGoalProgress', () => {
           reason: 'Step 1 blocked',
           reportedAt: '2026-09-24T09:00:00Z',
         },
-      }),
+      },
     })
     const newerEntry = makeEntry({
       entryId: 'entry-2',
-      payload: JSON.stringify({
+      payload: {
         contributorId: 'builtin',
         customType: 'goal.progress',
         data: {
@@ -157,7 +149,7 @@ describe('parseGoalProgress', () => {
           reason: 'Step 1 resolved and finished',
           reportedAt: '2026-09-24T09:30:00Z',
         },
-      }),
+      },
     })
 
     const result = parseGoalProgress([olderEntry, newerEntry], 'goal-123')
@@ -168,7 +160,7 @@ describe('parseGoalProgress', () => {
   it('finds latest matching active report even when a newer stale report exists without letting stale override current', () => {
     const activeEntry = makeEntry({
       entryId: 'entry-active',
-      payload: JSON.stringify({
+      payload: {
         contributorId: 'builtin',
         customType: 'goal.progress',
         data: {
@@ -177,11 +169,11 @@ describe('parseGoalProgress', () => {
           reason: 'Done current goal',
           reportedAt: '2026-09-24T10:00:00Z',
         },
-      }),
+      },
     })
     const newerMismatchedEntry = makeEntry({
       entryId: 'entry-mismatched',
-      payload: JSON.stringify({
+      payload: {
         contributorId: 'builtin',
         customType: 'goal.progress',
         data: {
@@ -190,7 +182,7 @@ describe('parseGoalProgress', () => {
           reason: 'Irrelevant stale report',
           reportedAt: '2026-09-24T10:30:00Z',
         },
-      }),
+      },
     })
 
     const result = parseGoalProgress([activeEntry, newerMismatchedEntry], 'current-goal')
@@ -202,25 +194,25 @@ describe('parseGoalProgress', () => {
 
   it('ignores entries with invalid contributorId, customType, or status', () => {
     const invalidContributor = makeEntry({
-      payload: JSON.stringify({
+      payload: {
         contributorId: 'other-plugin',
         customType: 'goal.progress',
         data: { goalId: 'goal-123', status: 'complete', reason: 'ok' },
-      }),
+      },
     })
     const invalidType = makeEntry({
-      payload: JSON.stringify({
+      payload: {
         contributorId: 'builtin',
         customType: 'other.progress',
         data: { goalId: 'goal-123', status: 'complete', reason: 'ok' },
-      }),
+      },
     })
     const invalidStatus = makeEntry({
-      payload: JSON.stringify({
+      payload: {
         contributorId: 'builtin',
         customType: 'goal.progress',
         data: { goalId: 'goal-123', status: 'in_progress', reason: 'ok' },
-      }),
+      },
     })
 
     expect(parseGoalProgress([invalidContributor], 'goal-123')).toEqual({ active: null, stale: null })

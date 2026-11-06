@@ -52,7 +52,7 @@ describe('useInteractionsController', () => {
     toolCallId: 'call-2',
     toolName: 'bash',
     argumentsJson: '{"command":"ls"}',
-    approval: '{"required":true}',
+    approval: { required: true },
     createdAt: 1790467260000,
   }
 

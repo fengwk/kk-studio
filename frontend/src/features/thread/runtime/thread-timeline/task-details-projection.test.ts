@@ -18,9 +18,9 @@ function entry(
     sessionId: 'session-task',
     parentEntryId: null,
     entryType: 'MESSAGE',
-    payload: JSON.stringify({
+    payload: {
       message: { role, contents },
-    }),
+    },
     createdAt: 1785232800,
     usageCost: null,
   }
@@ -157,13 +157,13 @@ describe('task canonical details projection', () => {
     const threadId = '00000000-0000-4000-8000-000000000002'
     const invocation = toolInvocation('inv-1', 'asst-live', {
       status: 'SUCCEEDED',
-      result: JSON.stringify({
+      result: {
         details: {
           kind: 'task.accepted',
           thread_id: threadId,
         },
         contents: [{ type: 'text', text: 'Live delegation accepted.' }],
-      }),
+      },
     })
 
     const timeline = buildThreadTimeline(
@@ -207,7 +207,7 @@ describe('durable tool result status after invocation deletion', () => {
     const entry: HarnessSessionEntryDTO = {
       entryId: 'result', sessionId: 'session', parentEntryId: null,
       entryType: 'MESSAGE', createdAt: 1, usageCost: null,
-      payload: JSON.stringify({
+      payload: {
         message: { role: 'TOOL', contents: [{
           type: 'tool_result', toolCallId: 'call', toolName: 'bash', rendererKey: 'bash',
           error: true, contents: [{ type: 'text', text: 'Original terminal result' }],
@@ -217,7 +217,7 @@ describe('durable tool result status after invocation deletion', () => {
           invocationId: 'deleted', assistantEntryId: 'assistant', toolCallId: 'call',
           callIndex: 0, status, synthetic: false, reason: null,
         },
-      }),
+      },
     }
     const result = buildThreadTimeline([entry], [], []).messages.find(
       (message) => message.role === 'tool',

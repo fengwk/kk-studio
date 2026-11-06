@@ -420,7 +420,7 @@ function acceptedResponse(currentThread = thread()) {
     sessionId: currentThread.sessionId,
     parentEntryId: null,
     entryType: 'ROOT',
-    payload: '{}',
+    payload: {},
     createdAt: 0,
     usageCost: null,
   }
@@ -593,7 +593,7 @@ function approvalInteraction(threadId: string): InteractionDTO {
     toolCallId: 'call-bash-1',
     toolName: 'bash',
     argumentsJson: '{"command":"ls"}',
-    approval: JSON.stringify({ reason: '需要确认', decision: null }),
+    approval: { reason: '需要确认', decision: null },
     createdAt: 1785232801000,
   }
 }
@@ -601,24 +601,24 @@ function approvalInteraction(threadId: string): InteractionDTO {
 describe('AgentPane orchestration', () => {
   const historyRoot: HarnessSessionEntryDTO = {
     entryId: 'draft-root', sessionId: 'session-1', parentEntryId: null, entryType: 'ROOT',
-    payload: JSON.stringify({ settings: {
+    payload: { settings: {
       agentName: 'assistant', model: { modelName: 'MiniMax', variant: 'default' }, environmentName: null,
-    } }), createdAt: 0,
+    } }, createdAt: 0,
     usageCost: null,
   }
   const historyMessage: HarnessSessionEntryDTO = {
     ...historyRoot, entryId: 'draft-message', parentEntryId: 'draft-root', entryType: 'MESSAGE',
-    payload: JSON.stringify({ message: { role: 'USER', contents: [{ type: 'text', text: 'Selected ancestor text' }] } }),
+    payload: { message: { role: 'USER', contents: [{ type: 'text', text: 'Selected ancestor text' }] } },
   }
   const historyEnd: HarnessSessionEntryDTO = {
-    ...historyRoot, entryId: 'draft-end', parentEntryId: 'draft-message', entryType: 'TURN_END', payload: '{"outcome":"COMPLETED"}',
+    ...historyRoot, entryId: 'draft-end', parentEntryId: 'draft-message', entryType: 'TURN_END', payload: { outcome: 'COMPLETED' },
   }
   const historyEntries = [historyRoot, historyMessage, historyEnd, {
     ...historyMessage, entryId: 'future', parentEntryId: 'draft-end',
-    payload: JSON.stringify({ message: { role: 'USER', contents: [{ type: 'text', text: 'Future hidden text' }] } }),
+    payload: { message: { role: 'USER', contents: [{ type: 'text', text: 'Future hidden text' }] } },
   }, {
     ...historyMessage, entryId: 'sibling', parentEntryId: 'draft-root',
-    payload: JSON.stringify({ message: { role: 'USER', contents: [{ type: 'text', text: 'Sibling hidden text' }] } }),
+    payload: { message: { role: 'USER', contents: [{ type: 'text', text: 'Sibling hidden text' }] } },
   }]
   function seedHistoryDraft(startEntryId = 'draft-end') {
     localStorage.setItem(`kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`, JSON.stringify({
@@ -808,7 +808,7 @@ describe('AgentPane orchestration', () => {
     const user = userEvent.setup()
     vi.mocked(harnessService.listSessionEntries).mockResolvedValue(entryPage([{
       entryId: 'entry-1', sessionId: 'session-1', parentEntryId: null,
-      entryType: 'ROOT', payload: '{}', createdAt: 0,
+      entryType: 'ROOT', payload: {}, createdAt: 0,
       usageCost: null,
     }]))
     localStorage.setItem(
@@ -1100,7 +1100,7 @@ describe('AgentPane orchestration', () => {
       sessionId: 'session-1',
       parentEntryId: null,
       entryType: 'ROOT',
-      payload: '{}',
+      payload: {},
       createdAt: 0,
       usageCost: null,
     }
@@ -1213,7 +1213,7 @@ describe('AgentPane orchestration', () => {
         sessionId: 'session-1',
         parentEntryId: null,
         entryType: 'ROOT',
-        payload: '{}',
+        payload: {},
         createdAt: 0,
         usageCost: null,
       },
@@ -1222,7 +1222,7 @@ describe('AgentPane orchestration', () => {
         sessionId: 'session-1',
         parentEntryId: 'entry-1',
         entryType: 'TURN_END',
-        payload: JSON.stringify({ status: 'TURN_END', turnId: 'turn-2' }),
+        payload: { status: 'TURN_END', turnId: 'turn-2' },
         createdAt: 0,
         usageCost: null,
       },
@@ -1231,7 +1231,7 @@ describe('AgentPane orchestration', () => {
         sessionId: 'session-1',
         parentEntryId: 'entry-2',
         entryType: 'MESSAGE',
-        payload: JSON.stringify({ message: { role: 'AGENT', contents: [] } }),
+        payload: { message: { role: 'AGENT', contents: [] } },
         createdAt: 0,
         usageCost: null,
       },
@@ -1480,12 +1480,12 @@ describe('AgentPane orchestration', () => {
       sessionId: 'session-1',
       parentEntryId: null,
       entryType: 'ROOT',
-      payload: JSON.stringify({
+      payload: {
         settings: {
           agentName: 'assistant',
           model: { modelName: 'MiniMax', variant: 'default' },
         },
-      }),
+      },
       createdAt: 0,
       usageCost: null,
     }))
@@ -1495,7 +1495,7 @@ describe('AgentPane orchestration', () => {
       sessionId: 'session-1',
       parentEntryId: null,
       entryType: 'ROOT',
-      payload: JSON.stringify({ settings: {} }),
+      payload: { settings: {} },
       createdAt: 0,
       usageCost: null,
     }))
@@ -1969,7 +1969,7 @@ describe('AgentPane orchestration', () => {
       sessionId: 'session-1',
       parentEntryId: null,
       entryType: 'ROOT',
-      payload: '{}',
+      payload: {},
       createdAt: 0,
       usageCost: null,
     }]))
@@ -2212,9 +2212,9 @@ describe('AgentPane orchestration', () => {
           type: 'USER_MESSAGE',
           state: 'QUEUED',
           idempotencyKey: 'queued-1',
-          payload: JSON.stringify({
+          payload: {
             message: { role: 'USER', contents: [{ type: 'text', text: '排队中' }] },
-          }),
+          },
           cancelledAt: null,
           createdAt: 0,
         }],
@@ -2300,7 +2300,7 @@ describe('AgentPane orchestration', () => {
       sessionId: 'session-1',
       parentEntryId: null,
       entryType: 'ROOT',
-      payload: '{}',
+      payload: {},
       createdAt: 0,
       usageCost: null,
     }))
@@ -2949,7 +2949,7 @@ describe('TURN_END 绑定与 Debug 只读退出', () => {
       sessionId: 'session-1',
       parentEntryId: 'entry-1',
       entryType: 'TURN_END',
-      payload: JSON.stringify({ outcome: 'COMPLETED' }),
+      payload: { outcome: 'COMPLETED' },
       createdAt: 0,
       usageCost: null,
     }))
@@ -2974,13 +2974,13 @@ describe('TURN_END 绑定与 Debug 只读退出', () => {
         sessionId: 'session-1',
         parentEntryId: null,
         entryType: 'ROOT',
-        payload: JSON.stringify({
+        payload: {
           settings: {
             agentName: 'assistant',
             model: { modelName: 'model-1', variant: 'default' },
             environmentName: null,
           },
-        }),
+        },
         createdAt: 0,
         usageCost: null,
       },
@@ -2989,9 +2989,9 @@ describe('TURN_END 绑定与 Debug 只读退出', () => {
         sessionId: 'session-1',
         parentEntryId: 'entry-root',
         entryType: 'MESSAGE',
-        payload: JSON.stringify({
+        payload: {
           message: { role: 'USER', contents: [{ type: 'text', text: 'first prompt' }] },
-        }),
+        },
         createdAt: 0,
         usageCost: null,
       },
@@ -3000,7 +3000,7 @@ describe('TURN_END 绑定与 Debug 只读退出', () => {
         sessionId: 'session-1',
         parentEntryId: 'entry-user-1',
         entryType: 'TURN_END',
-        payload: JSON.stringify({ turnStartEntryId: 'entry-root', outcome: 'COMPLETED', continueModel: false }),
+        payload: { turnStartEntryId: 'entry-root', outcome: 'COMPLETED', continueModel: false },
         createdAt: 0,
         usageCost: null,
       },
@@ -3119,7 +3119,7 @@ describe('branchDraftFromEntry environment replay', () => {
       sessionId: 's1',
       parentEntryId,
       entryType: 'MESSAGE',
-      payload: JSON.stringify(payload),
+      payload,
       createdAt: 1767225600,
       usageCost: null,
     }
@@ -3321,7 +3321,7 @@ function previewResponse(overrides: Partial<HarnessProviderRequestPreviewDTO> = 
           sessionId: 'session-1',
           parentEntryId: null,
           entryType: 'ROOT',
-          payload: '{}',
+          payload: {},
           createdAt: 0,
           usageCost: null,
         },
@@ -3330,7 +3330,7 @@ function previewResponse(overrides: Partial<HarnessProviderRequestPreviewDTO> = 
           sessionId: 'session-1',
           parentEntryId: 'entry-root',
           entryType: 'TURN_END',
-          payload: JSON.stringify({ outcome: 'COMPLETED' }),
+          payload: { outcome: 'COMPLETED' },
           createdAt: 0,
           usageCost: null,
         },
@@ -3586,7 +3586,7 @@ function previewResponse(overrides: Partial<HarnessProviderRequestPreviewDTO> = 
           sessionId: 's-1',
           parentEntryId: null,
           entryType: 'MESSAGE',
-          payload: '{}',
+          payload: {},
           createdAt: 0,
           usageCost: null,
         })
@@ -4883,7 +4883,7 @@ describe('AgentPane root control mounting', () => {
       sessionId: 'session-1',
       parentEntryId: null,
       entryType: 'MESSAGE',
-      payload: JSON.stringify({
+      payload: {
         message: {
           role: 'USER',
           contents: [
@@ -4891,7 +4891,7 @@ describe('AgentPane root control mounting', () => {
             { type: 'resource', blobId, name: `${blobId}.png`, mediaType: 'image/png' },
           ],
         },
-      }),
+      },
       createdAt: 1785232800,
       usageCost: null,
     })
@@ -4965,9 +4965,9 @@ describe('AgentPane root control mounting', () => {
         type: 'USER_MESSAGE',
         state: 'QUEUED',
         idempotencyKey: 'queued-1',
-        payload: JSON.stringify({
+        payload: {
           message: { role: 'USER', contents: [{ type: 'text', text: '排队中的输入' }] },
-        }),
+        },
         cancelledAt: null,
         createdAt: 1785232800,
       }],
@@ -5070,7 +5070,7 @@ describe('AgentPane root control mounting', () => {
       sessionId: 'session-1',
       parentEntryId: null,
       entryType: 'ROOT',
-      payload: '{}',
+      payload: {},
       createdAt: 0,
       usageCost: null,
     }]))
@@ -5148,9 +5148,9 @@ describe('AgentPane root control mounting', () => {
         sessionId: 'session-1',
         parentEntryId: null,
         entryType: 'MESSAGE',
-        payload: JSON.stringify({
+        payload: {
           message: { role: 'USER', contents: [{ type: 'text', text: '已有历史' }] },
-        }),
+        },
         createdAt: 1785229200,
         usageCost: null,
       }],

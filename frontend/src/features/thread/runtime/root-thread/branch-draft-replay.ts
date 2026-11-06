@@ -1,5 +1,5 @@
 import type { BranchDraft } from '@/features/thread/branch-draft'
-import { parsePayload } from '@/features/thread/runtime/payload-json'
+import { asRecord } from '@/features/thread/runtime/payload-json'
 import {
   createBuiltinExecution,
   getBuiltinModelSelection,
@@ -24,7 +24,7 @@ export function branchDraftFromEntry(
   if (fallback == null) {
     return null
   }
-  const payload = parsePayload(entry.payload)
+  const payload = asRecord(entry.payload)
   const settings = isRecord(payload.settings) ? payload.settings : null
   if (settings == null) {
     return cloneDraft(fallback)

@@ -446,7 +446,7 @@ describe('ToolMessageBlock per-tool bodies', () => {
           contents: [
             text('first text'),
             resource({ type: 'file', name: 'out.txt', mime: 'text/plain', data: 'https://example.test/out.txt' }),
-            { type: 'json', value: '{"nested":true,"n":1}' },
+            { type: 'json', value: { nested: true, n: 1 } },
             text('last text'),
           ],
         })}

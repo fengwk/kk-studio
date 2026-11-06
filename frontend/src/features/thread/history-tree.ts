@@ -1,4 +1,4 @@
-import { asRecord, getRecordList, parsePayload } from '@/features/thread/runtime/payload-json'
+import { asRecord, getRecordList } from '@/features/thread/runtime/payload-json'
 import { getString } from '@/shared/lib/value'
 import { FORK_NOTICE_TEXT } from '@/features/thread/runtime/thread-timeline/entry-event-projection'
 import { translate } from '@/shared/i18n'
@@ -245,7 +245,7 @@ function historyEntryKind(entry: HarnessSessionEntryDTO): HistoryEntryKind {
   if (entryType !== 'MESSAGE') {
     return 'other'
   }
-  const role = getString(asRecord(parsePayload(entry.payload).message).role)
+  const role = getString(asRecord(asRecord(entry.payload).message).role)
   if (role === 'USER') {
     return 'user'
   }
@@ -269,7 +269,7 @@ function historyEntrySearchText(entry: HarnessSessionEntryDTO): string {
 }
 
 function messageContents(entry: HarnessSessionEntryDTO): Record<string, unknown>[] {
-  return getRecordList(asRecord(parsePayload(entry.payload).message).contents)
+  return getRecordList(asRecord(asRecord(entry.payload).message).contents)
 }
 
 function historyEntryVisibleText(entry: HarnessSessionEntryDTO): string {

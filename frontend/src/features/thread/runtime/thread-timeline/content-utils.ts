@@ -52,41 +52,13 @@ export function toToolContents(contents: readonly Record<string, unknown>[]): To
   return projected
 }
 
-/**
- * json 内容的紧凑文本：字符串值先按 JSON 解析（规范 codec 两种形态都会出现），
- * 无法解析时按原字符串处理。用于把 JSON 结果交给只读解析器。
- */
-export function jsonContentText(value: unknown): string {
-  const encoded = JSON.stringify(normalizeJsonValue(value))
-  return encoded === undefined ? String(normalizeJsonValue(value)) : encoded
-}
-
 /** json 内容的格式化正文：仅在结果声明为 json 时缩进展示，纯文本绝不猜测。 */
 export function formatJsonContent(value: unknown): string {
-  const normalized = normalizeJsonValue(value)
-  if (typeof normalized === 'string') {
-    return normalized
-  }
   try {
-    const encoded = JSON.stringify(normalized, null, 2)
-    return encoded === undefined ? String(normalized) : encoded
+    const encoded = JSON.stringify(value, null, 2)
+    return encoded === undefined ? String(value) : encoded
   } catch {
-    return String(normalized)
-  }
-}
-
-function normalizeJsonValue(value: unknown): unknown {
-  if (typeof value !== 'string') {
-    return value
-  }
-  const trimmed = value.trim()
-  if (!trimmed) {
-    return value
-  }
-  try {
-    return JSON.parse(trimmed)
-  } catch {
-    return value
+    return String(value)
   }
 }
 

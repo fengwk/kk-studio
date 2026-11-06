@@ -676,12 +676,12 @@ describe('useHarnessThreadRealtime', () => {
       invocations: [
         {
           ...active,
-          result: JSON.stringify({
+          result: {
             toolCallId: 'call-1',
             contents: [{ type: 'text', text: 'terminal answer' }],
             error: false,
             details: null,
-          }),
+          },
         },
       ],
     })
@@ -693,7 +693,7 @@ describe('useHarnessThreadRealtime', () => {
     // invocation 仍在 snapshot（终态空结果）：终态投影继续保留 —— ToolResult
     // Entry 写入与 invocation 删除原子提交，只有 invocation 消失 overlay 才清除。
     rerender({
-      invocations: [{ ...active, result: '{"contents":[]}' }],
+      invocations: [{ ...active, result: { contents: [] } }],
     })
     await waitFor(() =>
       expect(result.current?.toolStreams.get('inv-tool-1')?.text).toBe(''),
@@ -721,12 +721,12 @@ describe('useHarnessThreadRealtime', () => {
       invocations: [
         {
           ...active,
-          result: JSON.stringify({
+          result: {
             toolCallId: 'call-1',
             contents: [{ type: 'text', text: 'terminal answer' }],
             error: false,
             details: null,
-          }),
+          },
         },
       ],
     })
@@ -769,7 +769,7 @@ describe('useHarnessThreadRealtime', () => {
     )
 
     // 无 result Entry 的 error 保持 error overlay 可见（绝不显示为 "done"）。
-    rerender({ invocations: [{ ...active, error: '{"message":"boom"}' }] })
+    rerender({ invocations: [{ ...active, error: { message: 'boom' } }] })
     await waitFor(() =>
       expect(result.current?.toolStreams.get('inv-tool-1')).toMatchObject({
         error: true,
@@ -784,12 +784,12 @@ describe('useHarnessThreadRealtime', () => {
     const activeOutput = activeAssistantOutput()
     const noInvocations: ToolInvocationDTO[] = []
     const terminal = toolInvocation({
-      result: JSON.stringify({
+      result: {
         toolCallId: 'call-1',
         contents: [{ type: 'text', text: 'terminal answer' }],
         error: false,
         details: null,
-      }),
+      },
     })
 
     // disabled 期不订阅；首次 snapshot（终态 result）与 ready 同批到达：
@@ -1742,12 +1742,12 @@ describe('useHarnessThreadRealtime', () => {
     // 持久化终态到达：快照 result 成为权威
     const terminalInvocation: ToolInvocationDTO = {
       ...active,
-      result: JSON.stringify({
+      result: {
         toolCallId: 'call-1',
         contents: [{ type: 'text', text: 'durable completed result' }],
         error: false,
         details: {},
-      }),
+      },
     }
     rerender({ invocations: [terminalInvocation] })
     await waitFor(() =>

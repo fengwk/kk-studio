@@ -51,57 +51,22 @@ export function parseEditReview(value: unknown): EditReview | null {
  * Extracts EditReview from an approval JSON node if present and valid.
  */
 export function extractApprovalEditReview(approval: unknown): EditReview | null {
-  const parsed = typeof approval === 'string'
-    ? parseStringRecord(approval)
-    : approval
-  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-    return parseEditReview((parsed as Record<string, unknown>).editReview)
+  if (approval && typeof approval === 'object' && !Array.isArray(approval)) {
+    return parseEditReview((approval as Record<string, unknown>).editReview)
   }
   return null
 }
 
-function parseStringRecord(value: string): Record<string, unknown> | null {
-  if (!value) {
-    return null
-  }
-  try {
-    const parsed: unknown = JSON.parse(value)
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-      ? parsed as Record<string, unknown>
-      : null
-  } catch {
-    return null
-  }
-}
-
 /**
  * Extracts EditReview strictly from canonical result details.editReview.
- * Wire result has details object; accepts either parsed ToolResult object or raw result string.
+ * Wire result has a details object.
  */
 export function extractResultEditReview(payload: unknown): EditReview | null {
-  if (!payload) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     return null
   }
-  let record: Record<string, unknown> | null = null
-  if (typeof payload === 'string') {
-    try {
-      const parsed = JSON.parse(payload)
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        record = parsed as Record<string, unknown>
-      }
-    } catch {
-      return null
-    }
-  } else if (typeof payload === 'object' && !Array.isArray(payload)) {
-    record = payload as Record<string, unknown>
-  }
-
-  if (!record) {
-    return null
-  }
-
   // Sourced strictly from canonical details object only
-  const details = record.details
+  const details = (payload as Record<string, unknown>).details
   if (details && typeof details === 'object' && !Array.isArray(details)) {
     return parseEditReview((details as Record<string, unknown>).editReview)
   }
