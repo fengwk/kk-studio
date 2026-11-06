@@ -171,7 +171,7 @@ async function installChatApi(
           name: 'version', data: { version: '1' }, cursor: '1',
         }))
         socket.send(JSON.stringify({
-          type: 'event', resource: { kind: 'tree', id: THREAD_ID },
+          type: 'event', resource: { kind: 'thread-tree', id: THREAD_ID },
           name: 'changed', data: {},
         }))
       }

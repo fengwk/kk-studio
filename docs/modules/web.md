@@ -256,9 +256,9 @@ attempt fence，不回广播、不回查 head；连接重连不重放追帧提�
 `/api/events` 是唯一的浏览器事件通道，采用无版本帧（严格拒绝携带 `version` 或未知字段）。
 连接建立后的第一帧是 `connected`，携带本次物理连接的 `eventNodeId` 与 `connectionId`；每次重连都是新身份，
 浏览器据此把 IDE 视图绑定到当前连接，而不是沿用旧代际。
-资源为 `{kind:thread|canvas|tree,id}` 或全局 `{kind:projects|interactions|environments}`；
+资源为 `{kind:thread|canvas|thread-tree,id}` 或全局 `{kind:projects|interactions|environments}`；
 Thread `version` 与 Canvas `revision` 携 durable cursor，Thread `realtime` 是唯一的真负载事件，
-`projects` / `tree` / `interactions` / `environments` 只发失效提示，由客户端回读权威事实。
+`projects` / `thread-tree` / `interactions` / `environments` 只发失效提示，由客户端回读权威事实。
 订阅先注册上游再读 cursor，sender 先排 subscribed ack 后 activate，
 过滤陈旧版本；缓冲溢出折叠为 resync。
 
