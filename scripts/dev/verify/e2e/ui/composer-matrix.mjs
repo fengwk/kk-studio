@@ -720,7 +720,8 @@ export async function runComposerMatrix(ui) {
           }),
           async (fixture) => {
             await bindThreadComposer(page, goto, fixture)
-            const imageName = `scene-${stamp}.png`
+            // 图片名必须长到超出 200px 固定卡片的名字区，才能验证省略号截断而不是刚好放得下。
+            const imageName = `scene-${stamp}-wide-establishing-shot-of-the-skyline.png`
             const videoName = `clip-${stamp}.mp4`
             const fileName = `notes-${stamp}.pdf`
             await page.locator('input[type="file"]').setInputFiles([
@@ -1844,8 +1845,9 @@ function createReadyUploadRoute() {
   return async (route) => {
     const request = route.request()
     const pathname = new URL(request.url()).pathname
-    const completeMatch = pathname.match(/\/api\/storage\/uploads\/([^/]+)\/complete$/u)
-    const deleteMatch = pathname.match(/\/api\/storage\/uploads\/([^/]+)$/u)
+    // 上传句柄沿用 platform 存储路由：complete/delete 都挂在 /api/platform/storage/uploads 下。
+    const completeMatch = pathname.match(/\/api\/platform\/storage\/uploads\/([^/]+)\/complete$/u)
+    const deleteMatch = pathname.match(/\/api\/platform\/storage\/uploads\/([^/]+)$/u)
     if (request.method() === 'POST' && pathname.endsWith('/api/platform/storage/uploads')) {
       sequence += 1
       const suffix = String(sequence).padStart(12, '0')
@@ -1855,13 +1857,7 @@ function createReadyUploadRoute() {
       await route.fulfill({
         status: 201,
         contentType: 'application/json',
-        body: JSON.stringify({
-          id,
-          state: 'READY',
-          blobId,
-          presignedPut: null,
-          expiresAt: null,
-        }),
+        body: JSON.stringify(readyUploadBody(id, blobId)),
       })
       return
     }
@@ -1870,13 +1866,7 @@ function createReadyUploadRoute() {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({
-          id,
-          state: 'READY',
-          blobId: blobs.get(id) ?? null,
-          presignedPut: null,
-          expiresAt: null,
-        }),
+        body: JSON.stringify(readyUploadBody(id, blobs.get(id) ?? null)),
       })
       return
     }
@@ -1889,6 +1879,11 @@ function createReadyUploadRoute() {
     }
     await route.fallback()
   }
+}
+
+/** READY 上传是按 `type` 判别的 sealed wire：只携带 id、blobId 与清理截止快照。 */
+function readyUploadBody(id, blobId) {
+  return { type: 'READY', id, blobId, expiresAt: Date.now() + 300_000 }
 }
 
 async function waitForPlaceholder(composer, visible) {
