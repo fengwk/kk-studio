@@ -9,7 +9,7 @@ import type { AgentModelView } from '@/features/catalog/AgentModelView'
 import { useAiConsoleResourceController } from '@/features/catalog/useAiConsoleResourceController'
 import type { AiConsoleResourceQueryEnabled } from '@/features/catalog/useAiConsoleResourceQueries'
 import { useI18n } from '@/shared/i18n'
-import type { AgentDefinitionDTO, AgentProviderDTO } from '@/shared/api/generated/contracts'
+import type { AgentDefinitionDTO, ProviderDTO } from '@/shared/api/generated/contracts'
 
 export type CatalogPageScope = 'agents' | 'models' | 'providers'
 
@@ -109,8 +109,8 @@ export function useCatalogPageController(scope: CatalogPageScope) {
       providers,
       deletePending: deletePending.provider,
       onCreate: editorActions.createProvider,
-      onEdit: (provider: AgentProviderDTO) => editorActions.editProvider(provider.name),
-      onDelete: (provider: AgentProviderDTO) =>
+      onEdit: (provider: ProviderDTO) => editorActions.editProvider(provider.name),
+      onDelete: (provider: ProviderDTO) =>
         deleteResource.provider(provider.name, provider.version),
     },
     resourceEditorModal: resourceController.resourceEditorModal,

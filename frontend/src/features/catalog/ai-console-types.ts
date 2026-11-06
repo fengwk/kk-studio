@@ -1,10 +1,9 @@
-import type { AgentProviderType } from '@/shared/api/contracts/ai-catalog'
+import type { AgentProviderType, ModelKind } from '@/shared/api/contracts/ai-catalog'
 import type { CatalogVersion } from '@/shared/api/contracts/base'
 import type {
   AgentDefinitionType,
-  AgentModelInputModality,
-  AgentModelKind,
-  AgentModelPricingDTO,
+  ModelInputModality,
+  ModelPricingDTO,
   HarnessExecutionSelectionDTO,
   PromptCacheRetention,
   SkillRefDTO,
@@ -22,7 +21,7 @@ export interface ProviderDraft {
 }
 
 /**
- * 一个 Agent model 变体。表单输入使用字符串类型，以便空字段能干净地映射到 wire {@link AgentModelVariantDTO}
+ * 一个 Agent model 变体。表单输入使用字符串类型，以便空字段能干净地映射到 wire {@link ModelVariantDTO}
  * 上的 {@code null}/{@code undefined}。
  */
 export interface VariantDraft {
@@ -41,7 +40,7 @@ export interface VariantDraft {
  * 单 Model 的完整价格草稿。所有十进制值保持字符串，提交时原样发送；
  * 覆盖/倍率规则与结构化条件也直接使用 wire 形状，确保完整原子替换。
  */
-export type ModelPricingDraft = AgentModelPricingDTO
+export type ModelPricingDraft = ModelPricingDTO
 
 /** 单 Model 的表单草稿。输入保持字符串类型以获得可预测的编辑体验。 */
 export interface ModelDraft {
@@ -58,7 +57,7 @@ export interface ModelDraft {
   /**
    * 提交时非空。新建 model 默认始终包含 {@code TEXT}；切换时通过不可变数组新增/移除项（不进行原地变更）。
    */
-  inputModalities: AgentModelInputModality[]
+  inputModalities: ModelInputModality[]
   defaultVariant: string
   variants: VariantDraft[]
   pricing: ModelPricingDraft
@@ -97,11 +96,11 @@ export interface AgentDraft {
 export type ResourceModal =
   | { kind: 'provider'; mode: 'create' }
   | { kind: 'provider'; mode: 'edit'; name: string; expectedVersion: CatalogVersion }
-  | { kind: 'model'; mode: 'create'; resourceKind: AgentModelKind }
+  | { kind: 'model'; mode: 'create'; resourceKind: ModelKind }
   | {
       kind: 'model'
       mode: 'edit'
-      resourceKind: AgentModelKind
+      resourceKind: ModelKind
       name: string
       expectedVersion: CatalogVersion
     }

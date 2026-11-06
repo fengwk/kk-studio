@@ -384,14 +384,10 @@ async function resetControllerTestEnvironment() {
     totalCount: '1',
     results: [assistantAgentEntry],
   })
-  vi.mocked(agentService.listModels).mockResolvedValue({
-    pageNumber: 1,
-    pageSize: 50,
-    totalCount: '1',
-    results: [
+  vi.mocked(agentService.listModels).mockResolvedValue([
       {
         providerName: 'minimax',
-        kind: 'MODEL',
+        type: 'MODEL',
         name: 'MiniMax',
         modelId: 'MiniMax',
         description: null,
@@ -407,11 +403,10 @@ async function resetControllerTestEnvironment() {
           variants: [{ id: 'default', promptCacheRetention: 'NONE' }],
         },
         version: '0',
-        createTime: 0,
-        updateTime: 0,
+        createdAt: 0,
+        updatedAt: 0,
       },
-    ],
-  })
+  ])
   vi.mocked(harnessService.getThreadSnapshot).mockImplementation(async (threadId) =>
     snapshotOf(threadFixture({ threadId })))
   vi.mocked(harnessService.acceptThreadCommandBatch).mockResolvedValue(

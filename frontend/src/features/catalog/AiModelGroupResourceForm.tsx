@@ -1,6 +1,7 @@
 import { ArrowDown, ArrowUp, Trash2 } from 'lucide-react'
 import type { ModelGroupDraft } from '@/features/catalog/ai-console-types'
 import type { AgentModelView } from '@/features/catalog/AgentModelView'
+import type { SingleModelDTO } from '@/shared/api/generated/contracts'
 import { variantOptionsFromModel } from '@/features/catalog/ai-draft-variant-options'
 import { newGroupMemberDraft } from '@/features/catalog/ai-model-group-draft-codec'
 import type { ResourceFieldKey } from '@/features/catalog/ai-resource-form-validation'
@@ -26,10 +27,12 @@ export function ModelGroupForm({
   onChange: (draft: ModelGroupDraft) => void
 }) {
   const { t } = useI18n()
-  const candidates = models.filter((model) => model.kind === 'MODEL')
+  const candidates = models.filter(
+    (model): model is SingleModelDTO => model.type === 'MODEL',
+  )
   const selectedModels = draft.members
     .map((member) => candidates.find((model) => model.name === member.modelName))
-    .filter((model): model is AgentModelView => model != null)
+    .filter((model): model is SingleModelDTO => model != null)
   const summary = summarizeGroup(selectedModels)
 
   function updateMember(index: number, patch: Partial<ModelGroupDraft['members'][number]>) {

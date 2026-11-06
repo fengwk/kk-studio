@@ -30,7 +30,7 @@ import { setLocale } from '@/shared/i18n'
 import { entryPage } from '@/test-support/session-entry-page'
 import type {
   AgentDefinitionDTO,
-  AgentModelDTO,
+  ModelDTO,
   HarnessAcceptedCommandsDTO,
   HarnessSessionEntryDTO,
   HarnessThreadDTO,
@@ -104,9 +104,9 @@ const assistantAgent: AgentDefinitionDTO = {
   updateTime: 0,
 }
 
-const model: AgentModelDTO = {
+const model: ModelDTO = {
   providerName: 'minimax',
-  kind: 'MODEL',
+  type: 'MODEL',
   name: 'MiniMax',
   modelId: 'MiniMax',
   description: null,
@@ -122,8 +122,8 @@ const model: AgentModelDTO = {
     variants: [{ id: 'default', promptCacheRetention: 'NONE' }],
   },
   version: '0',
-  createTime: 0,
-  updateTime: 0,
+  createdAt: 0,
+  updatedAt: 0,
 }
 
 function thread(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
@@ -207,12 +207,7 @@ beforeEach(() => {
     totalCount: '1',
     results: [assistantAgent],
   })
-  vi.mocked(agentService.listModels).mockResolvedValue({
-    pageNumber: 1,
-    pageSize: 50,
-    totalCount: '1',
-    results: [model],
-  })
+  vi.mocked(agentService.listModels).mockResolvedValue([model])
   vi.mocked(chatService.getChatSession).mockResolvedValue({
     sessionId: 'session-1',
     name: 'Session One',

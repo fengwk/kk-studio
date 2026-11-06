@@ -22,7 +22,7 @@ function formatEffectiveModel(
     return translate('ai.catalog.card.modelUnconfigured')
   }
   const label = model?.name || modelRefValue
-  if (model?.kind === 'GROUP') {
+  if (model?.type === 'GROUP') {
     return label
   }
   const override = variantOverride?.trim()

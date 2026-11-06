@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type {
   ModelCatalogPageDTO,
-  ModelDefaultCandidateDTO,
+  ModelCatalogCandidateDTO,
 } from '@/shared/api/generated/contracts'
 import { ModelCatalogPicker } from '@/features/catalog/AiModelCatalogPicker'
 import { agentService } from '@/shared/api/agent-service'
@@ -22,7 +22,7 @@ function deferred<T>() {
   return { promise, resolve }
 }
 
-function candidate(id: string): ModelDefaultCandidateDTO {
+function candidate(id: string): ModelCatalogCandidateDTO {
   return {
     id,
     provider: 'catalog-provider',
@@ -36,7 +36,7 @@ function candidate(id: string): ModelDefaultCandidateDTO {
 
 function page(
   generation: string,
-  items: ModelDefaultCandidateDTO[],
+  items: ModelCatalogCandidateDTO[],
 ): ModelCatalogPageDTO {
   return { generation, loading: false, items, nextCursor: null }
 }
@@ -97,7 +97,7 @@ describe('ModelCatalogPicker request fencing', () => {
   it('renders mapped support issues in candidate preview and invokes onApply on fill', async () => {
     setLocale('zh-CN')
     vi.useFakeTimers()
-    const item: ModelDefaultCandidateDTO = {
+    const item: ModelCatalogCandidateDTO = {
       ...candidate('warned-model'),
       supportIssues: [
         'ignored region multiplier',
@@ -136,7 +136,7 @@ describe('ModelCatalogPicker request fencing', () => {
   it('renders clear warning notices in en-US preview and indicates unsupported pricing', async () => {
     setLocale('en-US')
     vi.useFakeTimers()
-    const unsupportedItem: ModelDefaultCandidateDTO = {
+    const unsupportedItem: ModelCatalogCandidateDTO = {
       ...candidate('unsupported-model'),
       supportIssues: [
         'ignored region multiplier',

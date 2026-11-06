@@ -11,10 +11,10 @@ import {
   toModelDraft,
 } from '@/features/catalog/ai-model-draft-codec'
 import type {
-  AgentModelConfigDTO,
-  AgentModelDTO,
-  AgentModelInputModality,
-  AgentModelPricingDTO,
+  ModelConfigDTO,
+  ModelDTO,
+  ModelInputModality,
+  ModelPricingDTO,
 } from '@/shared/api/generated/contracts'
 
 function draft(overrides: Partial<ModelDraft> = {}): ModelDraft {
@@ -27,11 +27,11 @@ function draft(overrides: Partial<ModelDraft> = {}): ModelDraft {
   }
 }
 
-function buildModelConfig(input: ModelDraft): AgentModelConfigDTO {
+function buildModelConfig(input: ModelDraft): ModelConfigDTO {
   return toEditableModel(input).config!
 }
 
-function fullConfig(): AgentModelConfigDTO {
+function fullConfig(): ModelConfigDTO {
   return {
     limit: { context: 200000, output: 16000 },
     abilities: {
@@ -55,17 +55,17 @@ function fullConfig(): AgentModelConfigDTO {
   }
 }
 
-function model(configOverride?: AgentModelConfigDTO): AgentModelDTO {
+function model(configOverride?: ModelConfigDTO): ModelDTO {
   return {
     providerName: 'provider-1',
-    kind: 'MODEL',
+    type: 'MODEL',
     name: 'model-a',
     modelId: 'wire-model-a',
     description: 'desc',
     config: configOverride ?? fullConfig(),
     version: '1',
-    createTime: 0,
-    updateTime: 0,
+    createdAt: 0,
+    updatedAt: 0,
   }
 }
 
@@ -121,7 +121,7 @@ describe('ai-model-draft-codec', () => {
 
   /** 新建 model 草稿默认仅 TEXT（而非包含所有 modality）。 */
   it('defaults to TEXT-only input modalities on empty drafts', () => {
-    expect(emptyModelDraft().inputModalities).toEqual<AgentModelInputModality[]>(['TEXT'])
+    expect(emptyModelDraft().inputModalities).toEqual<ModelInputModality[]>(['TEXT'])
   })
 
   /** 序列化使用结构化 config 对象，并省略空的 optional variant 字段。 */
@@ -252,16 +252,16 @@ describe('ai-model-draft-codec', () => {
       { id: 'v-xhigh-mixed', promptCacheRetention: 'NONE', reasoningEffort: 'xHigh' },
     ])
 
-    const savedModel: AgentModelDTO = {
+    const savedModel: ModelDTO = {
       providerName: createPayload.providerName,
-      kind: 'MODEL',
+      type: 'MODEL',
       name: createPayload.name,
       modelId: createPayload.modelId,
       description: createPayload.description,
       config: createPayload.config,
       version: '1',
-      createTime: 0,
-      updateTime: 0,
+      createdAt: 0,
+      updatedAt: 0,
     }
     const editDraft = toModelDraft(savedModel)
     expect(
@@ -310,12 +310,12 @@ describe('ai-model-draft-codec', () => {
     const base = emptyModelDraft()
     const onlyText = base.inputModalities.filter((m) => m !== 'TEXT')
     const toggled = onlyText.length > 0 ? onlyText : ['TEXT']
-    expect(toggled).toEqual<AgentModelInputModality[]>(['TEXT'])
+    expect(toggled).toEqual<ModelInputModality[]>(['TEXT'])
   })
 
   /** 价格定义完整往返：基础费率、TTL、显式 0、覆盖与倍率规则均原样保留。 */
   it('round-trips the full pricing definition across toModelDraft -> buildModelConfig', () => {
-    const pricing: AgentModelPricingDTO = {
+    const pricing: ModelPricingDTO = {
       base: {
         input: '9',
         output: '11',

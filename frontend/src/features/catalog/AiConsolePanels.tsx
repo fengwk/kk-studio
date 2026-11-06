@@ -5,7 +5,7 @@ import type { AgentModelView } from '@/features/catalog/AgentModelView'
 import { ResourceGrid } from '@/shared/ui/cards/ResourceGrid'
 import { CreateCard } from '@/shared/ui/feedback/CreateCard'
 import { useI18n } from '@/shared/i18n'
-import type { AgentDefinitionDTO, AgentProviderDTO } from '@/shared/api/generated/contracts'
+import type { AgentDefinitionDTO, ProviderDTO } from '@/shared/api/generated/contracts'
 
 export function AgentsPanel({
   agents,
@@ -85,11 +85,11 @@ export function ProvidersPanel({
   onEdit,
   onDelete,
 }: {
-  providers: AgentProviderDTO[]
+  providers: ProviderDTO[]
   deletePending: boolean
   onCreate: () => void
-  onEdit: (provider: AgentProviderDTO) => void
-  onDelete: (provider: AgentProviderDTO) => void
+  onEdit: (provider: ProviderDTO) => void
+  onDelete: (provider: ProviderDTO) => void
 }) {
   const { t } = useI18n()
   return (

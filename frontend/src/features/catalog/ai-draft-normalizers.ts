@@ -1,6 +1,6 @@
 import type { AgentDraft, ModelDraft } from '@/features/catalog/ai-console-types'
 import type { AgentModelView } from '@/features/catalog/AgentModelView'
-import type { AgentProviderDTO } from '@/shared/api/generated/contracts'
+import type { ProviderDTO } from '@/shared/api/generated/contracts'
 import {
   resolvePreferredVariant,
   trimValue,
@@ -20,7 +20,7 @@ export function normalizeModelDraftDefaultVariant(draft: ModelDraft): ModelDraft
 
 export function normalizeCreateModelDraftProvider(
   draft: ModelDraft,
-  providers: AgentProviderDTO[],
+  providers: ProviderDTO[],
   preferredProviderName?: string | null,
 ): ModelDraft {
   const currentProviderName = trimValue(draft.providerName)
@@ -60,7 +60,7 @@ export function normalizeAgentDraftDefaultVariant(draft: AgentDraft, models: Age
     const variant = trimValue(draft.variant)
     return variant === draft.variant ? draft : { ...draft, variant }
   }
-  if (selectedModel.kind === 'GROUP') {
+  if (selectedModel.type === 'GROUP') {
     // 组没有默认 Variant 覆盖；也绝不伪造一个组级 variant。
     const variant = ''
     return variant === draft.variant ? draft : { ...draft, variant }

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { apiClient } from '@/shared/api/client'
-import type { AgentModelPricingDTO } from '@/shared/api/generated/contracts'
+import type { ModelPricingDTO } from '@/shared/api/generated/contracts'
 import { parseJsonPreservingPathEqualsNumbers } from '@/shared/lib/lossless-json-number'
 import { clonePricing, normalizePricing } from '@/features/catalog/ai-model-pricing-codec'
 
@@ -23,7 +23,7 @@ describe('request-body pricing HTTP round-trip', () => {
     vi.stubGlobal('fetch', transport)
 
     const response = await apiClient.get<{
-      config: { pricing: AgentModelPricingDTO }
+      config: { pricing: ModelPricingDTO }
     }>('/models/example', {
       jsonParser: parseJsonPreservingPathEqualsNumbers,
     })

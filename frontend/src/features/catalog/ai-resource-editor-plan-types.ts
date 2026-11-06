@@ -2,10 +2,10 @@ import type { AgentDraft, ModelDraft, ModelGroupDraft, ProviderDraft, ResourceMo
 import type {
   AgentDefinitionCreateDTO,
   AgentDefinitionUpdateDTO,
-  AgentModelCreateDTO,
-  AgentModelUpdateDTO,
-  AgentProviderCreateDTO,
-  AgentProviderUpdateDTO,
+  ModelCreateDTO,
+  ModelUpdateDTO,
+  ProviderCreateDTO,
+  ProviderUpdateDTO,
 } from '@/shared/api/generated/contracts'
 
 export type ResourceEditorPlan =
@@ -30,24 +30,24 @@ export type ResourceSubmitPlan =
   | {
       kind: 'provider'
       mode: 'create'
-      data: AgentProviderCreateDTO
+      data: ProviderCreateDTO
     }
   | {
       kind: 'provider'
       mode: 'edit'
       name: string
-      data: AgentProviderUpdateDTO
+      data: ProviderUpdateDTO
     }
   | {
       kind: 'model'
       mode: 'create'
-      data: AgentModelCreateDTO
+      data: ModelCreateDTO
     }
   | {
       kind: 'model'
       mode: 'edit'
       name: string
-      data: AgentModelUpdateDTO
+      data: ModelUpdateDTO
     }
   | {
       kind: 'agent'

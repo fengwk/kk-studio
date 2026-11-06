@@ -6,12 +6,12 @@ import {
   toEditableAgentUpdate,
 } from '@/features/catalog/ai-agent-draft-codec'
 import type { AgentDraft } from '@/features/catalog/ai-console-types'
-import type { AgentDefinitionDTO, AgentModelDTO } from '@/shared/api/generated/contracts'
+import type { AgentDefinitionDTO, ModelDTO } from '@/shared/api/generated/contracts'
 
-function model(): AgentModelDTO {
+function model(): ModelDTO {
   return {
     providerName: 'minimax',
-    kind: 'MODEL',
+    type: 'MODEL',
     name: 'model',
     modelId: 'model-id',
     description: null,
@@ -27,8 +27,8 @@ function model(): AgentModelDTO {
       variants: [{ id: 'quality', promptCacheRetention: 'NONE' }],
     },
     version: '1',
-    createTime: 0,
-    updateTime: 0,
+    createdAt: 0,
+    updatedAt: 0,
   }
 }
 

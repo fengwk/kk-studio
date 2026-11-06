@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import type { AgentModelPricingConditionDTO } from '@/shared/api/generated/contracts'
+import type { ModelPricingConditionDTO } from '@/shared/api/generated/contracts'
 import {
   isRawJsonNumber,
   scalarKind,
@@ -53,8 +53,8 @@ export function ConditionEditor({
   onChange,
   depth = 0,
 }: {
-  condition: AgentModelPricingConditionDTO
-  onChange: (condition: AgentModelPricingConditionDTO) => void
+  condition: ModelPricingConditionDTO
+  onChange: (condition: ModelPricingConditionDTO) => void
   depth?: number
 }) {
   const { t } = useI18n()
@@ -384,8 +384,8 @@ function NestedConditions({
   depth,
 }: {
   keyName: 'all' | 'any'
-  conditions: AgentModelPricingConditionDTO[]
-  onChange: (conditions: AgentModelPricingConditionDTO[]) => void
+  conditions: ModelPricingConditionDTO[]
+  onChange: (conditions: ModelPricingConditionDTO[]) => void
   depth: number
 }) {
   const { t } = useI18n()

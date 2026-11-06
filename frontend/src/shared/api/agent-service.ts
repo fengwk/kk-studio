@@ -1,16 +1,22 @@
-import { apiClient, type HttpClient } from '@/shared/api/client'
-import type { PageResult } from '@/shared/api/contracts/base'
+import {
+  apiClient,
+  request,
+  type HttpClient,
+  type RequestOptions,
+  type RouteArgs,
+  type RouteResponse,
+} from '@/shared/api/client'
 import { parseJsonPreservingPathEqualsNumbers } from '@/shared/lib/lossless-json-number'
 import type {
   AgentDefinitionCreateDTO,
   AgentDefinitionDTO,
   AgentDefinitionUpdateDTO,
-  AgentModelCreateDTO,
-  AgentModelDTO,
-  AgentModelUpdateDTO,
-  AgentProviderCreateDTO,
-  AgentProviderDTO,
-  AgentProviderUpdateDTO,
+  ModelCreateDTO,
+  ModelDTO,
+  ModelUpdateDTO,
+  ProviderCreateDTO,
+  ProviderDTO,
+  ProviderUpdateDTO,
   ModelCatalogPageDTO,
   SkillArchiveDownloadDTO,
   SkillEnvironmentSyncDTO,
@@ -25,77 +31,89 @@ import type {
   SkillPackageUploadPreviewDTO,
   SkillPackageUploadPublishDTO,
   ToolCatalogEntryDTO,
+  ApiRoutes,
 } from '@/shared/api/generated/contracts'
+import type { PageResult } from '@/shared/api/contracts/base'
 
-function encodePathTail(value: string): string {
-  return value.split('/').map(encodeURIComponent).join('/')
-}
+export type CatalogRequester = <R extends keyof ApiRoutes>(
+  route: R,
+  args: RouteArgs<R>,
+  options?: RequestOptions,
+) => Promise<RouteResponse<R>>
 
-export function createAgentService(client: HttpClient = apiClient) {
+export function createAgentService(
+  client: HttpClient = apiClient,
+  catalogRequest: CatalogRequester = request,
+) {
   return {
-    listProviders: (pageNumber = 1, pageSize = 50): Promise<PageResult<AgentProviderDTO>> =>
-      client.get('/providers', { params: { pageNumber, pageSize } }),
+    listProviders: (): Promise<ProviderDTO[]> =>
+      catalogRequest('GET /api/platform/providers', {}),
 
-    createProvider: (data: AgentProviderCreateDTO): Promise<AgentProviderDTO> =>
-      client.post('/providers', data),
+    createProvider: (data: ProviderCreateDTO): Promise<ProviderDTO> =>
+      catalogRequest('POST /api/platform/providers', { body: data }),
 
-    updateProvider: (name: string, data: AgentProviderUpdateDTO): Promise<AgentProviderDTO> =>
-      client.put(`/providers/${encodeURIComponent(name)}`, data),
+    updateProvider: (name: string, data: ProviderUpdateDTO): Promise<ProviderDTO> =>
+      catalogRequest('PUT /api/platform/providers/{name}', { path: { name }, body: data }),
 
     deleteProvider: (name: string, expectedVersion: string): Promise<void> =>
-      client.delete(`/providers/${encodeURIComponent(name)}`, { params: { expectedVersion } }),
+      catalogRequest('DELETE /api/platform/providers/{name}', {
+        path: { name },
+        query: { expectedVersion },
+      }),
 
     listRemoteModels: (providerName: string): Promise<string[]> =>
-      client.get(`/providers/${encodeURIComponent(providerName)}/remote-models`),
+      catalogRequest('GET /api/platform/providers/{name}/remote-models', {
+        path: { name: providerName },
+      }),
 
-    listModels: (pageNumber = 1, pageSize = 50): Promise<PageResult<AgentModelDTO>> =>
-      client.get('/models', {
-        params: { pageNumber, pageSize },
+    listModels: (): Promise<ModelDTO[]> =>
+      catalogRequest('GET /api/platform/models', {}, {
         jsonParser: parseJsonPreservingPathEqualsNumbers,
       }),
 
-    createModel: (data: AgentModelCreateDTO): Promise<AgentModelDTO> =>
-      client.post('/models', data, { jsonParser: parseJsonPreservingPathEqualsNumbers }),
-
-    updateModel: (
-      modelName: string,
-      data: AgentModelUpdateDTO,
-    ): Promise<AgentModelDTO> =>
-      client.put(`/models/${encodePathTail(modelName)}`, data, {
+    createModel: (data: ModelCreateDTO): Promise<ModelDTO> =>
+      catalogRequest('POST /api/platform/models', { body: data }, {
         jsonParser: parseJsonPreservingPathEqualsNumbers,
       }),
 
-    deleteModel: (
-      modelName: string,
-      expectedVersion: string,
-    ): Promise<void> =>
-      client.delete(`/models/${encodePathTail(modelName)}`, {
-        params: { expectedVersion },
+    updateModel: (modelName: string, data: ModelUpdateDTO): Promise<ModelDTO> =>
+      catalogRequest('PUT /api/platform/models/{*name}', { path: { name: modelName }, body: data }, {
+        jsonParser: parseJsonPreservingPathEqualsNumbers,
+      }),
+
+    deleteModel: (modelName: string, expectedVersion: string): Promise<void> =>
+      catalogRequest('DELETE /api/platform/models/{*name}', {
+        path: { name: modelName },
+        query: { expectedVersion },
       }),
 
     listModelDefaults: (
       query = '',
       cursor?: string | null,
-      pageSize = 20,
+      limit = 20,
     ): Promise<ModelCatalogPageDTO> =>
-      client.get('/model-defaults', {
-        params: {
-          ...(query.trim() ? { query: query.trim() } : {}),
-          ...(cursor ? { cursor } : {}),
-          pageSize,
+      catalogRequest(
+        'GET /api/platform/model-catalog',
+        {
+          query: {
+            ...(query.trim() ? { query: query.trim() } : {}),
+            ...(cursor ? { cursor } : {}),
+            limit,
+          },
         },
-        jsonParser: parseJsonPreservingPathEqualsNumbers,
-      }),
+        { jsonParser: parseJsonPreservingPathEqualsNumbers },
+      ),
 
     refreshModelDefaults: (): Promise<ModelCatalogPageDTO> =>
-      client.post('/model-defaults/refresh', {}, {
+      catalogRequest('POST /api/platform/model-catalog/refresh', {}, {
         jsonParser: parseJsonPreservingPathEqualsNumbers,
       }),
 
     listAgents: (pageNumber = 1, pageSize = 50): Promise<PageResult<AgentDefinitionDTO>> =>
       client.get('/agents', { params: { pageNumber, pageSize } }),
 
-    listTools: (): Promise<ToolCatalogEntryDTO[]> => client.get('/tools'),
+    listTools: (): Promise<ToolCatalogEntryDTO[]> =>
+      catalogRequest('GET /api/platform/tools', {}),
 
     createAgent: (data: AgentDefinitionCreateDTO): Promise<AgentDefinitionDTO> =>
       client.post('/agents', data),

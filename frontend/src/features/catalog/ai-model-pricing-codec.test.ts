@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type {
-  AgentModelPricingConditionDTO,
-  AgentModelPricingDTO,
+  ModelPricingConditionDTO,
+  ModelPricingDTO,
 } from '@/shared/api/generated/contracts'
 import {
   MAX_CONDITION_CHILDREN,
@@ -13,7 +13,7 @@ import {
   normalizePricing,
 } from '@/features/catalog/ai-model-pricing-codec'
 
-function pricing(): AgentModelPricingDTO {
+function pricing(): ModelPricingDTO {
   return {
     base: {
       input: '1.1',
@@ -69,7 +69,7 @@ describe('ai-model-pricing-codec', () => {
   })
 
   it('round-trips zero-edit pricing while preserving explicit empty TTL and false conditions', () => {
-    const source: AgentModelPricingDTO = {
+    const source: ModelPricingDTO = {
       base: {
         input: '1',
         output: '2',
@@ -91,7 +91,7 @@ describe('ai-model-pricing-codec', () => {
     }
 
     const roundTrip = normalizePricing(
-      clonePricing(JSON.parse(JSON.stringify(source)) as AgentModelPricingDTO),
+      clonePricing(JSON.parse(JSON.stringify(source)) as ModelPricingDTO),
     )
     expect(roundTrip).toEqual(source)
     expect(roundTrip.overrides[0]!.when.serviceTier).toEqual([])
@@ -100,7 +100,7 @@ describe('ai-model-pricing-codec', () => {
   })
 
   it('accepts end 24:00 after any valid start and rejects equal bounds', () => {
-    const time = (start: string, end: string): AgentModelPricingConditionDTO => ({
+    const time = (start: string, end: string): ModelPricingConditionDTO => ({
       time: { start, end, timezone: 'UTC' },
     })
 
@@ -117,8 +117,8 @@ describe('ai-model-pricing-codec', () => {
   })
 
   it('honors the backend condition depth and list bounds without exponential fixtures', () => {
-    const nestedNot = (depth: number): AgentModelPricingConditionDTO => {
-      let condition: AgentModelPricingConditionDTO = {}
+    const nestedNot = (depth: number): ModelPricingConditionDTO => {
+      let condition: ModelPricingConditionDTO = {}
       for (let index = 0; index < depth; index += 1) {
         condition = { not: condition }
       }

@@ -152,13 +152,13 @@ export function ModelFormDemo() {
             providerType: 'openai',
             promptCacheRetentions: ['NONE', 'SHORT', 'LONG'],
             baseUrl: null,
-            configured: true,
+            credential: { configured: true },
             modelCallTimeoutMillis: '1800000',
             modelCallIdleTimeoutMillis: '120000',
             modelHttpRetryStatusCodes: null,
             version: '1',
-            createTime: 0,
-            updateTime: 0,
+            createdAt: 0,
+            updatedAt: 0,
           },
         ]}
         onChange={setDraft}

@@ -12,6 +12,7 @@ import { ModelForm } from '@/features/catalog/AiModelResourceForm'
 import { ProviderForm } from '@/features/catalog/AiProviderResourceForm'
 import { chooseSelectOption } from '@/test-support/chooseSelectOption'
 import { setLocale } from '@/shared/i18n'
+import type { ProviderDTO } from '@/shared/api/generated/contracts'
 
 async function selectFormOption(
   user: ReturnType<typeof userEvent.setup>,
@@ -51,6 +52,79 @@ describe('AiResourceForms', () => {
     expect(screen.getByDisplayValue('240000')).toBeInTheDocument()
     expect(screen.getByDisplayValue('3000')).toBeInTheDocument()
     expect(screen.getByText('留空会以无 Authorization 方式请求 OpenAI-compatible 端点。')).toBeInTheDocument()
+  })
+
+  it('resets unsupported variant cache retentions when the Provider changes', async () => {
+    const user = userEvent.setup()
+    let currentDraft: ModelDraft = {
+      ...emptyModelDraft({ name: 'no-cache', promptCacheRetentions: ['NONE'] }),
+      providerName: 'no-cache',
+      variants: [
+        { draftId: 'v1', id: 'default', reasoningEffort: '', protocolOptionsJson: '', promptCacheRetention: 'LONG' },
+        { draftId: 'v2', id: 'fast', reasoningEffort: '', protocolOptionsJson: '', promptCacheRetention: 'NONE' },
+      ],
+    }
+    const providers: ProviderDTO[] = [
+      {
+        name: 'no-cache',
+        description: null,
+        providerType: 'openai',
+        promptCacheRetentions: ['NONE'],
+        baseUrl: null,
+        credential: { configured: true },
+        modelCallTimeoutMillis: '1800000',
+        modelCallIdleTimeoutMillis: '120000',
+        version: '1',
+        createdAt: 1781920800,
+        updatedAt: 1781920800,
+        modelHttpRetryStatusCodes: null,
+      },
+      {
+        name: 'short-cache',
+        description: null,
+        providerType: 'openai',
+        promptCacheRetentions: ['NONE', 'SHORT'],
+        baseUrl: null,
+        credential: { configured: true },
+        modelCallTimeoutMillis: '1800000',
+        modelCallIdleTimeoutMillis: '120000',
+        version: '1',
+        createdAt: 1781920800,
+        updatedAt: 1781920800,
+        modelHttpRetryStatusCodes: null,
+      },
+    ]
+
+    function RetentionHarness() {
+      const [draft, setDraft] = useState<ModelDraft>(currentDraft)
+      return (
+        <ModelForm
+          draft={draft}
+          mode="create"
+          providers={providers}
+          onChange={(next) => {
+            currentDraft = next
+            setDraft(next)
+          }}
+        />
+      )
+    }
+
+    render(<RetentionHarness />)
+
+    // 新 Provider 支持 SHORT：逐 Variant 把不支持的 LONG 重置为 SHORT，已支持的保持。
+    await selectFormOption(user, 'Provider', 'short-cache')
+    expect(currentDraft.variants.map((variant) => variant.promptCacheRetention)).toEqual([
+      'SHORT',
+      'NONE',
+    ])
+
+    // 新 Provider 不支持 SHORT：不支持的档位重置为 NONE。
+    await selectFormOption(user, 'Provider', 'no-cache')
+    expect(currentDraft.variants.map((variant) => variant.promptCacheRetention)).toEqual([
+      'NONE',
+      'NONE',
+    ])
   })
 
   it('manages HTTP retry policy: inherit, custom, empty list, staged invalid withoutEnter, correct, duplicate, submit payload', async () => {
@@ -241,12 +315,12 @@ describe('AiResourceForms', () => {
               providerType: 'openai',
               promptCacheRetentions: ['NONE', 'SHORT', 'LONG'],
               baseUrl: null,
-              configured: true,
+              credential: { configured: true },
               modelCallTimeoutMillis: '1800000',
               modelCallIdleTimeoutMillis: '120000',
               version: '1',
-              createTime: 0,
-              updateTime: 0,
+              createdAt: 0,
+              updatedAt: 0,
               modelHttpRetryStatusCodes: null,
             },
           ]}
@@ -371,12 +445,12 @@ describe('AiResourceForms', () => {
               providerType: 'openai',
               promptCacheRetentions: ['NONE', 'SHORT', 'LONG'],
               baseUrl: null,
-              configured: true,
+              credential: { configured: true },
               modelCallTimeoutMillis: '1800000',
               modelCallIdleTimeoutMillis: '120000',
               version: '1',
-              createTime: 1781920800,
-              updateTime: 1781920800,
+              createdAt: 1781920800,
+              updatedAt: 1781920800,
               modelHttpRetryStatusCodes: null,
             },
           ]}
@@ -553,12 +627,12 @@ describe('AiResourceForms', () => {
             providerType: 'openai',
             promptCacheRetentions: ['NONE', 'SHORT', 'LONG'],
             baseUrl: null,
-            configured: true,
+            credential: { configured: true },
             modelCallTimeoutMillis: '1800000',
             modelCallIdleTimeoutMillis: '120000',
             version: '1',
-            createTime: 0,
-            updateTime: 0,
+            createdAt: 0,
+            updatedAt: 0,
             modelHttpRetryStatusCodes: null,
           },
         ]}
@@ -671,12 +745,12 @@ function ModelFormHarness() {
           providerType: 'openai',
           promptCacheRetentions: ['NONE', 'SHORT', 'LONG'],
           baseUrl: null,
-          configured: true,
+          credential: { configured: true },
           modelCallTimeoutMillis: '1800000',
           modelCallIdleTimeoutMillis: '120000',
           version: '1',
-          createTime: 1781920800,
-          updateTime: 1781920800,
+          createdAt: 1781920800,
+          updatedAt: 1781920800,
           modelHttpRetryStatusCodes: null,
         },
       ]}
@@ -703,12 +777,12 @@ function EditModelFormHarness() {
           providerType: 'openai',
           promptCacheRetentions: ['NONE', 'SHORT', 'LONG'],
           baseUrl: null,
-          configured: true,
+          credential: { configured: true },
           modelCallTimeoutMillis: '1800000',
           modelCallIdleTimeoutMillis: '120000',
           version: '1',
-          createTime: 0,
-          updateTime: 0,
+          createdAt: 0,
+          updatedAt: 0,
           modelHttpRetryStatusCodes: null,
         },
       ]}
@@ -734,7 +808,7 @@ function AgentFormHarness() {
       models={[
         {
           providerName: 'minimax',
-          kind: 'MODEL',
+          type: 'MODEL',
           name: 'MiniMax-M2.7',
           modelId: 'minimax-m2.7',
           description: null,
@@ -750,12 +824,12 @@ function AgentFormHarness() {
             variants: [{ id: 'default', promptCacheRetention: 'NONE' }],
           },
           version: '1',
-          createTime: 1781920800,
-          updateTime: 1781920800,
+          createdAt: 1781920800,
+          updatedAt: 1781920800,
         },
         {
           providerName: 'anthropic',
-          kind: 'MODEL',
+          type: 'MODEL',
           name: 'Claude-Sonnet-4.5',
           modelId: 'claude-sonnet-4.5',
           description: null,
@@ -774,8 +848,8 @@ function AgentFormHarness() {
             ],
           },
           version: '1',
-          createTime: 1781920800,
-          updateTime: 1781920800,
+          createdAt: 1781920800,
+          updatedAt: 1781920800,
         },
       ]}
       onChange={setDraft}

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { ModelDraft } from '@/features/catalog/ai-console-types'
 import { applyCatalogCandidate } from '@/features/catalog/ai-model-catalog-apply'
 import { emptyModelDraft } from '@/features/catalog/ai-model-draft-codec'
-import type { ModelDefaultCandidateDTO } from '@/shared/api/generated/contracts'
+import type { ModelCatalogCandidateDTO } from '@/shared/api/generated/contracts'
 
 function draft(): ModelDraft {
   return {
@@ -34,7 +34,7 @@ function draft(): ModelDraft {
   }
 }
 
-function candidate(overrides: Partial<ModelDefaultCandidateDTO> = {}): ModelDefaultCandidateDTO {
+function candidate(overrides: Partial<ModelCatalogCandidateDTO> = {}): ModelCatalogCandidateDTO {
   return {
     id: 'candidate-1',
     provider: 'catalog-provider',

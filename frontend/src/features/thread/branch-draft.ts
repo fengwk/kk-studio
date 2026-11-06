@@ -46,7 +46,7 @@ export function materializeBlankBranchDraft(
   if (!model) {
     return null
   }
-  if (model.kind === 'GROUP') {
+  if (model.type === 'GROUP') {
     // 组没有组级 Variant；成员的 Variant 已固化在组配置中。
     return {
       agentName: agent.name,

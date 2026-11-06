@@ -62,7 +62,7 @@ export function AgentForm({
   const builtin = agentType === 'BUILTIN'
   const driver = draft.execution?.driver ?? 'builtin'
   const selectedModel = models.find((model) => model.name === draft.model)
-  const selectedGroup = selectedModel?.kind === 'GROUP'
+  const selectedGroup = selectedModel?.type === 'GROUP'
   const modelUnavailable =
     mode === 'edit' && Boolean(draft.model) && selectedModel === undefined
   const modelUnconfigured = builtin && !draft.model.trim()

@@ -15,7 +15,7 @@ import type { AgentModelView } from '@/features/catalog/AgentModelView'
 import { setLocale } from '@/shared/i18n'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { PluginsTab } from '@/features/extensions/PluginsTab'
-import type { AgentProviderDTO } from '@/shared/api/generated/contracts'
+import type { ProviderDTO } from '@/shared/api/generated/contracts'
 
 setLocale(new URLSearchParams(location.search).get('locale') === 'en-US' ? 'en-US' : 'zh-CN')
 
@@ -128,7 +128,7 @@ if (rootEl) {
 
 const SAMPLE_MODEL: AgentModelView = {
   providerName: 'openai',
-  kind: 'MODEL',
+  type: 'MODEL',
   name: 'gpt-4o',
   modelId: 'gpt-4o',
   description: 'OpenAI 旗舰多模态思考与生成模型',
@@ -151,8 +151,8 @@ const SAMPLE_MODEL: AgentModelView = {
     ],
   },
   version: '1',
-  createTime: 0,
-  updateTime: 0,
+  createdAt: 0,
+  updatedAt: 0,
 }
 
 const LONG_MODEL: AgentModelView = {
@@ -171,19 +171,19 @@ const LONG_MODEL: AgentModelView = {
   },
 }
 
-const SAMPLE_PROVIDER: AgentProviderDTO = {
+const SAMPLE_PROVIDER: ProviderDTO = {
   name: 'openai',
   description: 'OpenAI 官方 API 服务提供方',
   providerType: 'openai',
   promptCacheRetentions: ['NONE', 'SHORT', 'LONG'],
   baseUrl: 'https://api.openai.com/v1',
-  configured: true,
+  credential: { configured: true },
   modelCallTimeoutMillis: '60000',
   modelCallIdleTimeoutMillis: '15000',
   modelHttpRetryStatusCodes: [429, 500, 502, 503],
   version: '1',
-  createTime: 1790812800,
-  updateTime: 1790812800,
+  createdAt: 1790812800,
+  updatedAt: 1790812800,
 }
 
 function PanelsHarness() {

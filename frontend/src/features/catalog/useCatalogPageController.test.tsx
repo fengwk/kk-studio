@@ -10,8 +10,8 @@ import { agentService } from '@/shared/api/agent-service'
 import { environmentService } from '@/features/environment/environment-service'
 import type {
   AgentDefinitionDTO,
-  AgentModelDTO,
-  AgentProviderDTO,
+  ModelDTO,
+  ProviderDTO,
 } from '@/shared/api/generated/contracts'
 
 vi.mock('@/shared/api/agent-service', () => ({
@@ -68,8 +68,8 @@ const scopeQueryMatrix: Array<{
 describe('useCatalogPageController', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    vi.mocked(agentService.listProviders).mockResolvedValue(page([provider()]))
-    vi.mocked(agentService.listModels).mockResolvedValue(page([model()]))
+    vi.mocked(agentService.listProviders).mockResolvedValue([provider()])
+    vi.mocked(agentService.listModels).mockResolvedValue([model()])
     vi.mocked(agentService.listAgents).mockResolvedValue(page([agent()]))
     vi.mocked(agentService.listTools).mockResolvedValue([])
     vi.mocked(agentService.listSkillPackages).mockResolvedValue([])
@@ -197,27 +197,27 @@ function page<T>(results: T[]) {
   }
 }
 
-function provider(): AgentProviderDTO {
+function provider(): ProviderDTO {
   return {
     name: 'stub',
     description: 'Local provider',
     providerType: 'openai',
     promptCacheRetentions: ['NONE', 'SHORT', 'LONG'],
     baseUrl: 'http://stub.local/v1',
-    configured: true,
+    credential: { configured: true },
     modelCallTimeoutMillis: '1800000',
     modelCallIdleTimeoutMillis: '120000',
     version: '1',
-    createTime: 0,
-    updateTime: 0,
+    createdAt: 0,
+    updatedAt: 0,
     modelHttpRetryStatusCodes: null,
   }
 }
 
-function model(): AgentModelDTO {
+function model(): ModelDTO {
   return {
     providerName: 'stub',
-    kind: 'MODEL',
+    type: 'MODEL',
     name: 'model',
     modelId: 'model-1',
     description: 'Test model',
@@ -233,8 +233,8 @@ function model(): AgentModelDTO {
       variants: [{ id: 'default', promptCacheRetention: 'NONE' }],
     },
     version: '1',
-    createTime: 0,
-    updateTime: 0,
+    createdAt: 0,
+    updatedAt: 0,
   }
 }
 

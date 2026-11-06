@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react'
-import type { AgentModelPricingConditionDTO } from '@/shared/api/generated/contracts'
+import type { ModelPricingConditionDTO } from '@/shared/api/generated/contracts'
 import { describeCondition } from '@/features/catalog/ai-model-pricing-codec'
 import { Button } from '@/shared/ui/controls/Button'
 import { useI18n } from '@/shared/i18n'
@@ -8,7 +8,7 @@ import './ai-pricing.css'
 
 export interface PricingRuleItem {
   id: string
-  when: AgentModelPricingConditionDTO
+  when: ModelPricingConditionDTO
 }
 
 let ruleSeed = 0

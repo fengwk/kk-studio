@@ -9,12 +9,12 @@ import {
 } from '@/features/catalog/ai-resource-editor-open-plans'
 import type {
   AgentDefinitionDTO,
-  AgentModelConfigDTO,
-  AgentModelDTO,
-  AgentProviderDTO,
+  ModelConfigDTO,
+  ModelDTO,
+  ProviderDTO,
 } from '@/shared/api/generated/contracts'
 
-function modelConfig(): AgentModelConfigDTO {
+function modelConfig(): ModelConfigDTO {
   return {
     limit: { context: 128000, output: 8192 },
     abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
@@ -28,34 +28,34 @@ function modelConfig(): AgentModelConfigDTO {
   }
 }
 
-function provider(_id: string, name: string): AgentProviderDTO {
+function provider(_id: string, name: string): ProviderDTO {
   return {
     name,
     description: null,
     providerType: 'openai',
     promptCacheRetentions: ['NONE', 'SHORT', 'LONG'],
     baseUrl: null,
-    configured: true,
+    credential: { configured: true },
     modelCallTimeoutMillis: '1800000',
     modelCallIdleTimeoutMillis: '120000',
     version: '1',
-    createTime: 0,
-    updateTime: 0,
+    createdAt: 0,
+    updatedAt: 0,
     modelHttpRetryStatusCodes: null,
   }
 }
 
-function model(id: string, providerName: string): AgentModelDTO {
+function model(id: string, providerName: string): ModelDTO {
   return {
     providerName,
-    kind: 'MODEL',
+    type: 'MODEL',
     name: id,
     modelId: id.toLowerCase(),
     description: null,
     config: modelConfig(),
     version: '1',
-    createTime: 0,
-    updateTime: 0,
+    createdAt: 0,
+    updatedAt: 0,
   }
 }
 

@@ -1,6 +1,5 @@
 import type { ModelGroupDraft, ModelGroupMemberDraft } from '@/features/catalog/ai-console-types'
-import type { AgentModelEditablePropertiesDTO } from '@/shared/api/contracts/ai-catalog'
-import type { AgentModelDTO } from '@/shared/api/generated/contracts'
+import type { ModelDTO, ModelGroupCreateDTO } from '@/shared/api/generated/contracts'
 import { trimToNull } from '@/features/catalog/ai-resource-draft-primitives'
 
 let memberDraftIdSeed = 0
@@ -24,7 +23,10 @@ export function emptyModelGroupDraft(): ModelGroupDraft {
   }
 }
 
-export function toModelGroupDraft(model: AgentModelDTO): ModelGroupDraft {
+export function toModelGroupDraft(model: ModelDTO): ModelGroupDraft {
+  if (model.type !== 'GROUP') {
+    throw new Error(`${model.name} is not a model group`)
+  }
   const group = model.group
   if (!group) {
     throw new Error(`GROUP ${model.name} is missing group config`)
@@ -64,9 +66,8 @@ function statusCodes(value: (number | string)[]): number[] {
   return result
 }
 
-/** 组请求只发送 group 配置；绝不附带派生 config 或单模型字段。 */
 /** GROUP 的完整可编辑属性：创建与 PUT 都整体替换，不携带 Provider、ModelID 或单模型配置。 */
-export function toEditableModelGroup(draft: ModelGroupDraft): AgentModelEditablePropertiesDTO {
+export function toEditableModelGroup(draft: ModelGroupDraft): ModelGroupCreateDTO {
   const members = draft.members.map((member) => ({
     modelName: member.modelName.trim(),
     variant: member.variant.trim(),
@@ -96,7 +97,7 @@ export function toEditableModelGroup(draft: ModelGroupDraft): AgentModelEditable
       }
       return name
     })(),
-    kind: 'GROUP',
+    type: 'GROUP',
     description: trimToNull(draft.description),
     group: {
       members,

@@ -12,9 +12,9 @@ afterEach(() => {
 describe('HTTP client', () => {
   // 类型与编码都来自实际生成的路由；通配符只保留段间斜线。
   it('builds typed URLs with path and query encoding', () => {
-    expect(url('DELETE /api/models/{*modelName}', {
-      path: { modelName: 'a/b c' }, query: { expectedVersion: '1' },
-    })).toBe('/api/models/a/b%20c?expectedVersion=1')
+    expect(url('DELETE /api/platform/models/{*name}', {
+      path: { name: 'a/b c' }, query: { expectedVersion: '1' },
+    })).toBe('/api/platform/models/a/b%20c?expectedVersion=1')
     expect(url('GET /api/canvases/{canvasId}', { path: { canvasId: 'a/b c' } }))
       .toBe('/api/canvases/a%2Fb%20c')
     // 类型断言由 tsc 检查，不执行无效请求。

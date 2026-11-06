@@ -59,242 +59,6 @@ export interface AgentDefinitionUpdateDTO {
   expectedVersion: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.catalog.AgentModelAbilitiesDTO */
-export interface AgentModelAbilitiesDTO {
-  tools: boolean
-  reasoning: boolean
-  inputModalities: AgentModelInputModality[]
-}
-
-/** Java：fun.fengwk.kkstudio.share.catalog.AgentModelConfigDTO */
-export interface AgentModelConfigDTO {
-  limit: AgentModelLimitDTO
-  abilities: AgentModelAbilitiesDTO
-  pricing?: AgentModelPricingDTO | null
-  defaultVariant?: string | null
-  variants: AgentModelVariantDTO[]
-}
-
-/** Java：fun.fengwk.kkstudio.share.catalog.AgentModelCreateDTO */
-export interface AgentModelCreateDTO {
-  name: string
-  kind: AgentModelKind
-  description?: string | null
-  providerName?: string | null
-  modelId?: string | null
-  config?: AgentModelConfigDTO | null
-  group?: AgentModelGroupDTO | null
-}
-
-/** Java：fun.fengwk.kkstudio.share.catalog.AgentModelDTO */
-export interface AgentModelDTO {
-  name: string
-  kind: AgentModelKind
-  description?: string | null
-  providerName?: string | null
-  modelId?: string | null
-  config?: AgentModelConfigDTO | null
-  group?: AgentModelGroupDTO | null
-  version: string
-  createTime: number
-  updateTime: number
-}
-
-/** Java：fun.fengwk.kkstudio.share.catalog.AgentModelGroupDTO */
-export interface AgentModelGroupDTO {
-  members: AgentModelGroupMemberDTO[]
-  fallbackStatusCodes: number[]
-  cooldownSeconds: number
-}
-
-/** Java：fun.fengwk.kkstudio.share.catalog.AgentModelGroupMemberDTO */
-export interface AgentModelGroupMemberDTO {
-  modelName: string
-  variant: string
-}
-
-/** Java：fun.fengwk.kkstudio.share.catalog.AgentModelInputModality */
-export type AgentModelInputModality =
-  | 'TEXT'
-  | 'IMAGE'
-  | 'AUDIO'
-  | 'VIDEO'
-  | 'DOCUMENT'
-
-export const AGENT_MODEL_INPUT_MODALITY_VALUES: readonly AgentModelInputModality[] = [
-  'TEXT',
-  'IMAGE',
-  'AUDIO',
-  'VIDEO',
-  'DOCUMENT',
-]
-
-/** Java：fun.fengwk.kkstudio.share.catalog.AgentModelKind */
-export type AgentModelKind =
-  | 'MODEL'
-  | 'GROUP'
-
-export const AGENT_MODEL_KIND_VALUES: readonly AgentModelKind[] = [
-  'MODEL',
-  'GROUP',
-]
-
-/** Java：fun.fengwk.kkstudio.share.catalog.AgentModelLimitDTO */
-export interface AgentModelLimitDTO {
-  context: number
-  output: number
-}
-
-/** Java：fun.fengwk.kkstudio.share.catalog.AgentModelPricingConditionDTO */
-export interface AgentModelPricingConditionDTO {
-  context?: AgentModelPricingContextConditionDTO | null
-  serviceTier?: string[] | null
-  date?: AgentModelPricingDateConditionDTO | null
-  time?: AgentModelPricingTimeConditionDTO | null
-  requestBody?: AgentModelPricingRequestBodyConditionDTO | null
-  all?: AgentModelPricingConditionDTO[] | null
-  any?: AgentModelPricingConditionDTO[] | null
-  not?: AgentModelPricingConditionDTO | null
-}
-
-/** Java：fun.fengwk.kkstudio.share.catalog.AgentModelPricingContextConditionDTO */
-export interface AgentModelPricingContextConditionDTO {
-  gt?: number | null
-  gte?: number | null
-  lt?: number | null
-  lte?: number | null
-}
-
-/** Java：fun.fengwk.kkstudio.share.catalog.AgentModelPricingDTO */
-export interface AgentModelPricingDTO {
-  base: AgentModelRateSetDTO
-  overrides: AgentModelPricingOverrideDTO[]
-  multipliers: AgentModelPricingMultiplierDTO[]
-}
-
-/** Java：fun.fengwk.kkstudio.share.catalog.AgentModelPricingDateConditionDTO */
-export interface AgentModelPricingDateConditionDTO {
-  gte?: string | null
-  lt?: string | null
-}
-
-/** Java：fun.fengwk.kkstudio.share.catalog.AgentModelPricingFactorsDTO */
-export interface AgentModelPricingFactorsDTO {
-  input?: string | null
-  output?: string | null
-  cacheRead?: string | null
-  cacheWrite?: string | null
-  reasoning?: string | null
-}
-
-/** Java：fun.fengwk.kkstudio.share.catalog.AgentModelPricingMultiplierDTO */
-export interface AgentModelPricingMultiplierDTO {
-  id: string
-  when: AgentModelPricingConditionDTO
-  factors: AgentModelPricingFactorsDTO
-}
-
-/** Java：fun.fengwk.kkstudio.share.catalog.AgentModelPricingOverrideDTO */
-export interface AgentModelPricingOverrideDTO {
-  id: string
-  when: AgentModelPricingConditionDTO
-  rates: AgentModelRatePatchDTO
-}
-
-/** Java：fun.fengwk.kkstudio.share.catalog.AgentModelPricingRequestBodyConditionDTO */
-export interface AgentModelPricingRequestBodyConditionDTO {
-  path?: string | null
-  equals?: unknown | null
-}
-
-/** Java：fun.fengwk.kkstudio.share.catalog.AgentModelPricingTimeConditionDTO */
-export interface AgentModelPricingTimeConditionDTO {
-  start: string
-  end: string
-  timezone: string
-  weekdays?: number[] | null
-}
-
-/** Java：fun.fengwk.kkstudio.share.catalog.AgentModelRatePatchDTO */
-export interface AgentModelRatePatchDTO {
-  input?: string | null
-  output?: string | null
-  cacheRead?: string | null
-  cacheWrite?: string | null
-  cacheWriteByTtl?: Record<string, string> | null
-  reasoning?: string | null
-}
-
-/** Java：fun.fengwk.kkstudio.share.catalog.AgentModelRateSetDTO */
-export interface AgentModelRateSetDTO {
-  input: string
-  output: string
-  cacheRead: string
-  cacheWrite: string
-  cacheWriteByTtl: Record<string, string>
-  reasoning?: string | null
-}
-
-/** Java：fun.fengwk.kkstudio.share.catalog.AgentModelUpdateDTO */
-export interface AgentModelUpdateDTO {
-  name: string
-  kind: AgentModelKind
-  description?: string | null
-  providerName?: string | null
-  modelId?: string | null
-  config?: AgentModelConfigDTO | null
-  group?: AgentModelGroupDTO | null
-  expectedVersion: string
-}
-
-/** Java：fun.fengwk.kkstudio.share.catalog.AgentModelVariantDTO */
-export interface AgentModelVariantDTO {
-  id: string
-  promptCacheRetention: PromptCacheRetention
-  reasoningEffort?: string | null
-  protocolOptionsJson?: string | null
-}
-
-/** Java：fun.fengwk.kkstudio.share.catalog.AgentProviderCreateDTO */
-export interface AgentProviderCreateDTO {
-  description?: string | null
-  providerType: string
-  baseUrl?: string | null
-  credential?: string | null
-  modelCallTimeoutMillis?: number | null
-  modelCallIdleTimeoutMillis?: number | null
-  modelHttpRetryStatusCodes?: number[] | null
-  name: string
-}
-
-/** Java：fun.fengwk.kkstudio.share.catalog.AgentProviderDTO */
-export interface AgentProviderDTO {
-  name: string
-  description?: string | null
-  providerType: string
-  baseUrl?: string | null
-  configured: boolean
-  modelCallTimeoutMillis: string
-  modelCallIdleTimeoutMillis: string
-  modelHttpRetryStatusCodes: number[] | null
-  promptCacheRetentions: PromptCacheRetention[]
-  version: string
-  createTime: number
-  updateTime: number
-}
-
-/** Java：fun.fengwk.kkstudio.share.catalog.AgentProviderUpdateDTO */
-export interface AgentProviderUpdateDTO {
-  description?: string | null
-  providerType: string
-  baseUrl?: string | null
-  credential?: string | null
-  modelCallTimeoutMillis?: number | null
-  modelCallIdleTimeoutMillis?: number | null
-  modelHttpRetryStatusCodes?: number[] | null
-  expectedVersion: string
-}
-
 /** Java：fun.fengwk.kkstudio.share.runtime.AgentTaskDTO */
 export interface AgentTaskDTO {
   ticketId: string
@@ -1000,6 +764,18 @@ export interface EnvironmentRuntimeStatusDTO {
   status: EnvironmentRuntimeDTO
 }
 
+/** Java：fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport */
+export type EnvironmentSupport =
+  | 'NONE'
+  | 'ROUTED'
+  | 'REQUIRED'
+
+export const ENVIRONMENT_SUPPORT_VALUES: readonly EnvironmentSupport[] = [
+  'NONE',
+  'ROUTED',
+  'REQUIRED',
+]
+
 /** Java：fun.fengwk.kkstudio.share.catalog.EnvironmentSupportDTO */
 export type EnvironmentSupportDTO =
   | 'NONE'
@@ -1693,42 +1469,269 @@ export interface McpServerUpdateDTO {
   timeoutMillis?: number | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.catalog.ModelCatalogPageDTO */
-export interface ModelCatalogPageDTO {
-  generation: string
-  fetchedAt?: number | null
-  loading: boolean
-  error?: string | null
-  items: ModelDefaultCandidateDTO[]
-  nextCursor?: string | null
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.ModelAbilitiesDTO */
+export interface ModelAbilitiesDTO {
+  tools: boolean
+  reasoning: boolean
+  inputModalities: ModelInputModality[]
 }
 
-/** Java：fun.fengwk.kkstudio.share.catalog.ModelDefaultAbilitiesDTO */
-export interface ModelDefaultAbilitiesDTO {
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.ModelCatalogAbilitiesDTO */
+export interface ModelCatalogAbilitiesDTO {
   tools?: boolean | null
   reasoning?: boolean | null
-  inputModalities?: AgentModelInputModality[] | null
+  inputModalities?: ModelInputModality[] | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.catalog.ModelDefaultCandidateDTO */
-export interface ModelDefaultCandidateDTO {
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.ModelCatalogCandidateDTO */
+export interface ModelCatalogCandidateDTO {
   id: string
   provider: string
   modelId: string
   name: string
-  limit?: ModelDefaultLimitDTO | null
-  abilities: ModelDefaultAbilitiesDTO
-  pricing?: AgentModelPricingDTO | null
-  variants?: AgentModelVariantDTO[] | null
+  limit?: ModelCatalogLimitDTO | null
+  abilities: ModelCatalogAbilitiesDTO
+  pricing?: ModelPricingDTO | null
+  variants?: ModelVariantDTO[] | null
   defaultVariant?: string | null
   supportIssues: string[]
   pricingSupported: boolean
 }
 
-/** Java：fun.fengwk.kkstudio.share.catalog.ModelDefaultLimitDTO */
-export interface ModelDefaultLimitDTO {
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.ModelCatalogLimitDTO */
+export interface ModelCatalogLimitDTO {
   context?: number | null
   output?: number | null
+}
+
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.ModelCatalogPageDTO */
+export interface ModelCatalogPageDTO {
+  generation: string
+  fetchedAt?: number | null
+  loading: boolean
+  error?: string | null
+  items: ModelCatalogCandidateDTO[]
+  nextCursor?: string | null
+}
+
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.ModelConfigDTO */
+export interface ModelConfigDTO {
+  limit: ModelLimitDTO
+  abilities: ModelAbilitiesDTO
+  pricing?: ModelPricingDTO | null
+  defaultVariant?: string | null
+  variants: ModelVariantDTO[]
+}
+
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.SingleModelCreateDTO */
+export interface SingleModelCreateDTO {
+  type: 'MODEL'
+  name: string
+  description?: string | null
+  providerName: string
+  modelId: string
+  config: ModelConfigDTO
+}
+
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.ModelGroupCreateDTO */
+export interface ModelGroupCreateDTO {
+  type: 'GROUP'
+  name: string
+  description?: string | null
+  group: ModelGroupConfigDTO
+}
+
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.ModelCreateDTO */
+export type ModelCreateDTO =
+  | SingleModelCreateDTO
+  | ModelGroupCreateDTO
+
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.SingleModelDTO */
+export interface SingleModelDTO {
+  type: 'MODEL'
+  name: string
+  description?: string | null
+  providerName: string
+  modelId: string
+  config: ModelConfigDTO
+  version: string
+  createdAt: number
+  updatedAt: number
+}
+
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.ModelGroupDTO */
+export interface ModelGroupDTO {
+  type: 'GROUP'
+  name: string
+  description?: string | null
+  group: ModelGroupConfigDTO
+  config: ModelConfigDTO
+  version: string
+  createdAt: number
+  updatedAt: number
+}
+
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.ModelDTO */
+export type ModelDTO =
+  | SingleModelDTO
+  | ModelGroupDTO
+
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.ModelGroupConfigDTO */
+export interface ModelGroupConfigDTO {
+  members: ModelGroupMemberDTO[]
+  fallbackStatusCodes: number[]
+  cooldownSeconds: number
+}
+
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.ModelGroupMemberDTO */
+export interface ModelGroupMemberDTO {
+  modelName: string
+  variant: string
+}
+
+/** Java：fun.fengwk.kkstudio.harness.model.ModelInputModality */
+export type ModelInputModality =
+  | 'TEXT'
+  | 'IMAGE'
+  | 'AUDIO'
+  | 'VIDEO'
+  | 'DOCUMENT'
+
+export const MODEL_INPUT_MODALITY_VALUES: readonly ModelInputModality[] = [
+  'TEXT',
+  'IMAGE',
+  'AUDIO',
+  'VIDEO',
+  'DOCUMENT',
+]
+
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.ModelLimitDTO */
+export interface ModelLimitDTO {
+  context: number
+  output: number
+}
+
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingConditionDTO */
+export interface ModelPricingConditionDTO {
+  context?: ModelPricingContextConditionDTO | null
+  serviceTier?: string[] | null
+  date?: ModelPricingDateConditionDTO | null
+  time?: ModelPricingTimeConditionDTO | null
+  requestBody?: ModelPricingRequestBodyConditionDTO | null
+  all?: ModelPricingConditionDTO[] | null
+  any?: ModelPricingConditionDTO[] | null
+  not?: ModelPricingConditionDTO | null
+}
+
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingContextConditionDTO */
+export interface ModelPricingContextConditionDTO {
+  gt?: number | null
+  gte?: number | null
+  lt?: number | null
+  lte?: number | null
+}
+
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingDTO */
+export interface ModelPricingDTO {
+  base: ModelRateSetDTO
+  overrides: ModelPricingOverrideDTO[]
+  multipliers: ModelPricingMultiplierDTO[]
+}
+
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingDateConditionDTO */
+export interface ModelPricingDateConditionDTO {
+  gte?: string | null
+  lt?: string | null
+}
+
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingFactorsDTO */
+export interface ModelPricingFactorsDTO {
+  input?: string | null
+  output?: string | null
+  cacheRead?: string | null
+  cacheWrite?: string | null
+  reasoning?: string | null
+}
+
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingMultiplierDTO */
+export interface ModelPricingMultiplierDTO {
+  id: string
+  when: ModelPricingConditionDTO
+  factors: ModelPricingFactorsDTO
+}
+
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingOverrideDTO */
+export interface ModelPricingOverrideDTO {
+  id: string
+  when: ModelPricingConditionDTO
+  rates: ModelRatePatchDTO
+}
+
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingRequestBodyConditionDTO */
+export interface ModelPricingRequestBodyConditionDTO {
+  path?: string | null
+  equals?: unknown | null
+}
+
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingTimeConditionDTO */
+export interface ModelPricingTimeConditionDTO {
+  start: string
+  end: string
+  timezone: string
+  weekdays?: number[] | null
+}
+
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.ModelRatePatchDTO */
+export interface ModelRatePatchDTO {
+  input?: string | null
+  output?: string | null
+  cacheRead?: string | null
+  cacheWrite?: string | null
+  cacheWriteByTtl?: Record<string, string> | null
+  reasoning?: string | null
+}
+
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.ModelRateSetDTO */
+export interface ModelRateSetDTO {
+  input: string
+  output: string
+  cacheRead: string
+  cacheWrite: string
+  cacheWriteByTtl: Record<string, string>
+  reasoning?: string | null
+}
+
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.SingleModelUpdateDTO */
+export interface SingleModelUpdateDTO {
+  type: 'MODEL'
+  name: string
+  description?: string | null
+  providerName: string
+  modelId: string
+  config: ModelConfigDTO
+  expectedVersion: string
+}
+
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.ModelGroupUpdateDTO */
+export interface ModelGroupUpdateDTO {
+  type: 'GROUP'
+  name: string
+  description?: string | null
+  group: ModelGroupConfigDTO
+  expectedVersion: string
+}
+
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.ModelUpdateDTO */
+export type ModelUpdateDTO =
+  | SingleModelUpdateDTO
+  | ModelGroupUpdateDTO
+
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.ModelVariantDTO */
+export interface ModelVariantDTO {
+  id: string
+  promptCacheRetention: PromptCacheRetention
+  reasoningEffort?: string | null
+  protocolOptionsJson?: string | null
 }
 
 /** Java：fun.fengwk.kkstudio.common.page.Page */
@@ -1921,7 +1924,7 @@ export interface ProjectWorkflowStateDTO {
   next?: string[] | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.catalog.PromptCacheRetention */
+/** Java：fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention */
 export type PromptCacheRetention =
   | 'NONE'
   | 'SHORT'
@@ -1932,6 +1935,59 @@ export const PROMPT_CACHE_RETENTION_VALUES: readonly PromptCacheRetention[] = [
   'SHORT',
   'LONG',
 ]
+
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.ProviderCreateDTO */
+export interface ProviderCreateDTO {
+  name: string
+  providerType: ProviderType
+  description?: string | null
+  baseUrl?: string | null
+  credential?: string | null
+  modelCallTimeoutMillis?: number | null
+  modelCallIdleTimeoutMillis?: number | null
+  modelHttpRetryStatusCodes?: number[] | null
+}
+
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.ProviderDTO */
+export interface ProviderDTO {
+  name: string
+  description?: string | null
+  providerType: ProviderType
+  baseUrl?: string | null
+  credential: SecretConfiguredDTO
+  modelCallTimeoutMillis: string
+  modelCallIdleTimeoutMillis: string
+  modelHttpRetryStatusCodes: number[] | null
+  promptCacheRetentions: PromptCacheRetention[]
+  version: string
+  createdAt: number
+  updatedAt: number
+}
+
+/** Java：fun.fengwk.kkstudio.harness.model.provider.ProviderType */
+export type ProviderType =
+  | 'openai'
+  | 'openai_responses'
+  | 'anthropic'
+  | 'google'
+
+export const PROVIDER_TYPE_VALUES: readonly ProviderType[] = [
+  'openai',
+  'openai_responses',
+  'anthropic',
+  'google',
+]
+
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.ProviderUpdateDTO */
+export interface ProviderUpdateDTO {
+  description?: string | null
+  baseUrl?: string | null
+  credential: SecretUpdate
+  modelCallTimeoutMillis: number
+  modelCallIdleTimeoutMillis: number
+  modelHttpRetryStatusCodes?: number[] | null
+  expectedVersion: string
+}
 
 /** Java：fun.fengwk.kkstudio.project.dto.RecoverIssueRequestDTO */
 export interface RecoverIssueRequestDTO {
@@ -1958,6 +2014,29 @@ export interface ResumeIssueRequestDTO {
   expectedVersion: string
   requestKey: string
 }
+
+/** Java：fun.fengwk.kkstudio.platform.secret.SecretConfiguredDTO */
+export interface SecretConfiguredDTO {
+  configured: boolean
+}
+
+/** Java：fun.fengwk.kkstudio.platform.secret.SecretUpdate */
+export interface SecretUpdate {
+  operation: SecretUpdateOperation
+  value?: string | null
+}
+
+/** Java：fun.fengwk.kkstudio.platform.secret.SecretUpdate.Operation */
+export type SecretUpdateOperation =
+  | 'KEEP'
+  | 'SET'
+  | 'CLEAR'
+
+export const SECRET_UPDATE_OPERATION_VALUES: readonly SecretUpdateOperation[] = [
+  'KEEP',
+  'SET',
+  'CLEAR',
+]
 
 /** Java：fun.fengwk.kkstudio.share.skill.SkillArchiveDownloadDTO */
 export interface SkillArchiveDownloadDTO {
@@ -2304,11 +2383,11 @@ export interface SystemSettingsUpdateDTO {
   expectedVersion: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.catalog.ToolCatalogEntryDTO */
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.ToolCatalogEntryDTO */
 export interface ToolCatalogEntryDTO {
   name: string
   description: string
-  environmentSupport?: EnvironmentSupportDTO | null
+  environmentSupport?: EnvironmentSupport | null
 }
 
 /** Java：fun.fengwk.kkstudio.share.runtime.ToolInvocationDTO */
@@ -2405,8 +2484,13 @@ export interface ApiRoutes {
     query: { expectedVersion: string }
     response: void
   }
-  'DELETE /api/models/{*modelName}': {
-    path: { modelName: string }
+  'DELETE /api/platform/models/{*name}': {
+    path: { name: string }
+    query: { expectedVersion: string }
+    response: void
+  }
+  'DELETE /api/platform/providers/{name}': {
+    path: { name: string }
     query: { expectedVersion: string }
     response: void
   }
@@ -2416,11 +2500,6 @@ export interface ApiRoutes {
   }
   'DELETE /api/projects/{projectId}': {
     path: { projectId: string }
-    query: { expectedVersion: string }
-    response: void
-  }
-  'DELETE /api/providers/{name}': {
-    path: { name: string }
     query: { expectedVersion: string }
     response: void
   }
@@ -2528,13 +2607,22 @@ export interface ApiRoutes {
     path: { name: string }
     response: McpServerConfigDTO
   }
-  'GET /api/model-defaults': {
-    query: { cursor?: string; pageSize?: number; query?: string }
+  'GET /api/platform/model-catalog': {
+    query: { cursor?: string; limit?: number; query?: string }
     response: ModelCatalogPageDTO
   }
-  'GET /api/models': {
-    query: { pageNumber?: number; pageSize?: number }
-    response: Page<AgentModelDTO>
+  'GET /api/platform/models': {
+    response: ModelDTO[]
+  }
+  'GET /api/platform/providers': {
+    response: ProviderDTO[]
+  }
+  'GET /api/platform/providers/{name}/remote-models': {
+    path: { name: string }
+    response: string[]
+  }
+  'GET /api/platform/tools': {
+    response: ToolCatalogEntryDTO[]
   }
   'GET /api/plugins': {
     response: PluginDTO[]
@@ -2554,14 +2642,6 @@ export interface ApiRoutes {
   'GET /api/projects/{projectId}/snapshot': {
     path: { projectId: string }
     response: ProjectSnapshotDTO
-  }
-  'GET /api/providers': {
-    query: { pageNumber?: number; pageSize?: number }
-    response: Page<AgentProviderDTO>
-  }
-  'GET /api/providers/{name}/remote-models': {
-    path: { name: string }
-    response: string[]
   }
   'GET /api/sessions/{sessionId}/entries': {
     path: { sessionId: string }
@@ -2628,9 +2708,6 @@ export interface ApiRoutes {
   'GET /api/threads/{threadId}/tree': {
     path: { threadId: string }
     response: HarnessThreadTreeNodeDTO[]
-  }
-  'GET /api/tools': {
-    response: ToolCatalogEntryDTO[]
   }
   'POST /api/agent-tasks': {
     body: AgentTaskSubmitDTO
@@ -2790,12 +2867,16 @@ export interface ApiRoutes {
     query: { expectedVersion: string }
     response: McpServerDTO
   }
-  'POST /api/model-defaults/refresh': {
+  'POST /api/platform/model-catalog/refresh': {
     response: ModelCatalogPageDTO
   }
-  'POST /api/models': {
-    body: AgentModelCreateDTO
-    response: AgentModelDTO
+  'POST /api/platform/models': {
+    body: ModelCreateDTO
+    response: ModelDTO
+  }
+  'POST /api/platform/providers': {
+    body: ProviderCreateDTO
+    response: ProviderDTO
   }
   'POST /api/plugins/{pluginId}/auth/complete': {
     path: { pluginId: string }
@@ -2830,10 +2911,6 @@ export interface ApiRoutes {
     path: { projectId: string }
     body: ProjectVersionRequestDTO
     response: ProjectDTO
-  }
-  'POST /api/providers': {
-    body: AgentProviderCreateDTO
-    response: AgentProviderDTO
   }
   'POST /api/sessions/{sessionId}/provider-request-preview': {
     path: { sessionId: string }
@@ -2963,10 +3040,15 @@ export interface ApiRoutes {
     body: McpServerUpdateDTO
     response: McpServerDTO
   }
-  'PUT /api/models/{*modelName}': {
-    path: { modelName: string }
-    body: AgentModelUpdateDTO
-    response: AgentModelDTO
+  'PUT /api/platform/models/{*name}': {
+    path: { name: string }
+    body: ModelUpdateDTO
+    response: ModelDTO
+  }
+  'PUT /api/platform/providers/{name}': {
+    path: { name: string }
+    body: ProviderUpdateDTO
+    response: ProviderDTO
   }
   'PUT /api/plugins/{pluginId}/configuration': {
     path: { pluginId: string }
@@ -2987,11 +3069,6 @@ export interface ApiRoutes {
     path: { projectId: string }
     body: UpdateProjectYoloRequestDTO
     response: ProjectDTO
-  }
-  'PUT /api/providers/{name}': {
-    path: { name: string }
-    body: AgentProviderUpdateDTO
-    response: AgentProviderDTO
   }
   'PUT /api/sessions/{sessionId}/name': {
     path: { sessionId: string }

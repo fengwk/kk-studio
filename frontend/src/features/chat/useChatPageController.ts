@@ -36,8 +36,8 @@ export function useChatPageController() {
       ? { hasProvider: true, hasModel: true, hasAgent: true }
       : providersQuery.data && modelsQuery.data
         ? {
-            hasProvider: providersQuery.data.results.length > 0,
-            hasModel: modelsQuery.data.results.length > 0,
+            hasProvider: providersQuery.data.length > 0,
+            hasModel: modelsQuery.data.length > 0,
             hasAgent: false,
           }
         : undefined

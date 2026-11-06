@@ -1,12 +1,12 @@
-import {
-  isAgentProviderType,
-  type AgentProviderEditablePropertiesDTO,
-  type AgentProviderType,
-} from '@/shared/api/contracts/ai-catalog'
+import { isAgentProviderType, type AgentProviderType } from '@/shared/api/contracts/ai-catalog'
 import type { ProviderDraft } from '@/features/catalog/ai-console-types'
 import { numberToNull, trimToNull } from '@/features/catalog/ai-resource-draft-primitives'
 import { assembleHttpStatusCodeList } from '@/shared/lib/integer-list'
-import type { AgentProviderCreateDTO, AgentProviderDTO } from '@/shared/api/generated/contracts'
+import type {
+  ProviderCreateDTO,
+  ProviderDTO,
+  ProviderUpdateDTO,
+} from '@/shared/api/generated/contracts'
 
 export function emptyProviderDraft(): ProviderDraft {
   return {
@@ -21,7 +21,7 @@ export function emptyProviderDraft(): ProviderDraft {
   }
 }
 
-export function toProviderDraft(provider: AgentProviderDTO): ProviderDraft {
+export function toProviderDraft(provider: ProviderDTO): ProviderDraft {
   return {
     name: provider.name,
     description: provider.description || '',
@@ -37,7 +37,7 @@ export function toProviderDraft(provider: AgentProviderDTO): ProviderDraft {
   }
 }
 
-export function toEditableProvider(draft: ProviderDraft): AgentProviderCreateDTO {
+export function toEditableProvider(draft: ProviderDraft): ProviderCreateDTO {
   return {
     name: draft.name.trim(),
     description: trimToNull(draft.description),
@@ -55,14 +55,22 @@ export function toEditableProvider(draft: ProviderDraft): AgentProviderCreateDTO
   }
 }
 
-export function toEditableProviderUpdate(draft: ProviderDraft): AgentProviderEditablePropertiesDTO {
+export function toEditableProviderUpdate(
+  draft: ProviderDraft,
+): Omit<ProviderUpdateDTO, 'expectedVersion'> {
+  const credential = trimToNull(draft.credential)
+  const modelCallTimeoutMillis = numberToNull(draft.modelCallTimeoutMillis)
+  const modelCallIdleTimeoutMillis = numberToNull(draft.modelCallIdleTimeoutMillis)
+  if (modelCallTimeoutMillis === null || modelCallIdleTimeoutMillis === null) {
+    throw new Error('provider timeouts are required')
+  }
   return {
     description: trimToNull(draft.description),
-    providerType: draft.providerType.trim() as AgentProviderType,
     baseUrl: trimToNull(draft.baseUrl),
-    credential: trimToNull(draft.credential),
-    modelCallTimeoutMillis: numberToNull(draft.modelCallTimeoutMillis),
-    modelCallIdleTimeoutMillis: numberToNull(draft.modelCallIdleTimeoutMillis),
+    credential:
+      credential === null ? { operation: 'KEEP' } : { operation: 'SET', value: credential },
+    modelCallTimeoutMillis,
+    modelCallIdleTimeoutMillis,
     modelHttpRetryStatusCodes:
       draft.modelHttpRetryStatusCodes === null
         ? null

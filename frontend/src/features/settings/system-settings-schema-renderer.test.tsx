@@ -15,7 +15,7 @@ import {
   type SystemSettingsSectionsDraft,
 } from '@/features/settings/system-settings-draft'
 import { agentService } from '@/shared/api/agent-service'
-import type { AgentModelDTO, SystemSettingsSchemaDTO } from '@/shared/api/generated/contracts'
+import type { ModelDTO, SystemSettingsSchemaDTO } from '@/shared/api/generated/contracts'
 
 vi.mock('@/shared/api/agent-service', () => ({
   agentService: {
@@ -35,10 +35,10 @@ function renderRenderer(ui: ReactNode) {
   return render(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>)
 }
 
-function catalogModel(): AgentModelDTO {
+function catalogModel(): ModelDTO {
   return {
     providerName: 'minimax',
-    kind: 'MODEL',
+    type: 'MODEL',
     name: 'MiniMax',
     modelId: 'minimax-model-id',
     description: null,
@@ -54,8 +54,8 @@ function catalogModel(): AgentModelDTO {
       variants: [{ id: 'default', promptCacheRetention: 'NONE' }, { id: 'fast', promptCacheRetention: 'NONE' }],
     },
     version: '1',
-    createTime: 1790503200,
-    updateTime: 1790503200,
+    createdAt: 1790503200,
+    updatedAt: 1790503200,
   }
 }
 
@@ -68,12 +68,7 @@ function catalogModel(): AgentModelDTO {
 describe('system settings schema renderer', () => {
   beforeEach(() => {
     vi.mocked(agentService.listTools).mockResolvedValue([])
-    vi.mocked(agentService.listModels).mockResolvedValue({
-      pageNumber: 1,
-      pageSize: 50,
-      totalCount: '1',
-      results: [catalogModel()],
-    })
+    vi.mocked(agentService.listModels).mockResolvedValue([catalogModel()])
   })
 
   it('renders every schema field exactly once for every section', () => {

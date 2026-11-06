@@ -3,7 +3,6 @@ import {
   FIXTURE_DEFAULTS_PAGE,
   FIXTURE_MODELS,
   FIXTURE_PROVIDER,
-  pageResult,
 } from './model-browser-fixtures'
 
 const HARNESS_URL = '/browser-tests/model-browser-harness.html'
@@ -31,15 +30,15 @@ async function installFakeCatalogServer(page: Page): Promise<string[]> {
           body: JSON.stringify(data),
         })
 
-      if (request.method() === 'GET' && path === '/api/providers') {
-        await json(pageResult([FIXTURE_PROVIDER]))
+      if (request.method() === 'GET' && path === '/api/platform/providers') {
+        await json([FIXTURE_PROVIDER])
         return
       }
-      if (request.method() === 'GET' && path === '/api/models') {
-        await json(pageResult(FIXTURE_MODELS))
+      if (request.method() === 'GET' && path === '/api/platform/models') {
+        await json(FIXTURE_MODELS)
         return
       }
-      if (path === '/api/model-defaults') {
+      if (path === '/api/platform/model-catalog' || path === '/api/platform/model-catalog/refresh') {
         await json(FIXTURE_DEFAULTS_PAGE)
         return
       }
@@ -237,8 +236,8 @@ test.describe('Model, Model Group and catalog real browser acceptance', () => {
       }
     }
 
-    expect(calls).not.toContain('POST /api/models')
-    expect(calls).not.toContain('PUT /api/models/main')
+    expect(calls).not.toContain('POST /api/platform/models')
+    expect(calls).not.toContain('PUT /api/platform/models/main')
   })
 
   test('catalog rows preview without writing draft; fill applies limits/abilities/pricing/variants only', async ({

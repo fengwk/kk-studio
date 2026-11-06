@@ -7,7 +7,7 @@ import type {
   AgentDefinitionConfigDTO,
   AgentDefinitionCreateDTO,
   AgentDefinitionDTO,
-  AgentModelDTO,
+  ModelDTO,
   SkillRefDTO,
 } from '@/shared/api/generated/contracts'
 
@@ -82,7 +82,7 @@ function toConfig(draft: AgentDraft): AgentDefinitionConfigDTO {
   }
 }
 
-export function emptyAgentDraft(model?: AgentModelDTO): AgentDraft {
+export function emptyAgentDraft(model?: ModelDTO): AgentDraft {
   return {
     name: '',
     description: '',

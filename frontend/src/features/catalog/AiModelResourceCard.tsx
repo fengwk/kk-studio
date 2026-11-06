@@ -43,7 +43,7 @@ function formatLimit(model: AgentModelView): string {
 
 /** 组卡只显示成员顺序、触发码与固定冷却；不把组当成第二个定价或能力配置入口。 */
 function formatGroupMembers(model: AgentModelView): string {
-  const members = model.group?.members ?? []
+  const members = model.type === 'GROUP' ? model.group.members : []
   if (members.length === 0) {
     return translate('ai.catalog.card.emptyValue')
   }
@@ -66,7 +66,8 @@ export function ModelResourceCard({
   deletePending: boolean
 }) {
   const { t } = useI18n()
-  const group = model.kind === 'GROUP'
+  const groupConfig = model.type === 'GROUP' ? model.group : null
+  const singleModel = model.type === 'MODEL' ? model : null
   const variants = extractVariantIdsFromModel(model)
   const defaultVariant = extractDefaultVariantFromModel(model)
   return (
@@ -74,19 +75,22 @@ export function ModelResourceCard({
       icon="model"
       title={model.name}
       subtitle={model.description || model.name}
-      rows={group ? [
+      rows={groupConfig ? [
         [t('ai.catalog.card.groupMembers'), formatGroupMembers(model)],
         [
           t('ai.catalog.card.fallbackStatusCodes'),
-          model.group?.fallbackStatusCodes.join(', ') || t('ai.catalog.card.emptyValue'),
+          groupConfig.fallbackStatusCodes.join(', ') || t('ai.catalog.card.emptyValue'),
         ],
         [
           t('ai.catalog.card.cooldownSeconds'),
-          `${model.group?.cooldownSeconds ?? 0} s`,
+          `${groupConfig.cooldownSeconds} s`,
         ],
       ] : [
-        [t('ai.catalog.card.provider'), model.providerName || t('ai.catalog.card.emptyValue')],
-        [t('ai.catalog.card.modelId'), model.modelId || t('ai.catalog.card.emptyValue')],
+        [
+          t('ai.catalog.card.provider'),
+          singleModel?.providerName || t('ai.catalog.card.emptyValue'),
+        ],
+        [t('ai.catalog.card.modelId'), singleModel?.modelId || t('ai.catalog.card.emptyValue')],
         [t('ai.catalog.card.limit'), formatLimit(model)],
         [t('ai.catalog.card.ability'), formatAbilities(model)],
         [t('ai.catalog.card.default'), defaultVariant || t('ai.catalog.card.emptyValue')],

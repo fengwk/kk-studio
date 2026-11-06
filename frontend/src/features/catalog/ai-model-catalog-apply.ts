@@ -1,6 +1,6 @@
 import type { ModelDraft } from '@/features/catalog/ai-console-types'
 import type {
-  ModelDefaultCandidateDTO,
+  ModelCatalogCandidateDTO,
   PromptCacheRetention,
 } from '@/shared/api/generated/contracts'
 import { clonePricing } from '@/features/catalog/ai-model-pricing-codec'
@@ -14,7 +14,7 @@ import { clonePricing } from '@/features/catalog/ai-model-pricing-codec'
  */
 export function applyCatalogCandidate(
   draft: ModelDraft,
-  candidate: ModelDefaultCandidateDTO,
+  candidate: ModelCatalogCandidateDTO,
 ): ModelDraft {
   const next: ModelDraft = { ...draft }
 

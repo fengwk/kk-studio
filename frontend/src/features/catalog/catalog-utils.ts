@@ -2,7 +2,7 @@ import type { AgentModelView } from '@/features/catalog/AgentModelView'
 import { includesSearch, naturalNameCompare } from '@/shared/lib/search-utils'
 import type { ResourceModal } from '@/features/catalog/ai-console-types'
 import { translate, type TranslationKey } from '@/shared/i18n'
-import type { AgentDefinitionDTO, AgentProviderDTO } from '@/shared/api/generated/contracts'
+import type { AgentDefinitionDTO, ProviderDTO } from '@/shared/api/generated/contracts'
 
 export function resourceTitle(modal: ResourceModal): string {
   const prefix = modal.mode === 'create'
@@ -34,9 +34,9 @@ export function filterModels(models: AgentModelView[], search: string): AgentMod
 }
 
 export function filterProviders(
-  providers: AgentProviderDTO[],
+  providers: ProviderDTO[],
   search: string,
-): AgentProviderDTO[] {
+): ProviderDTO[] {
   return providers
     .filter((provider) => includesSearch(provider.name, search))
     .sort((left, right) => naturalNameCompare(left.name, right.name))

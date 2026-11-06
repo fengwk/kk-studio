@@ -12,7 +12,7 @@ import type { AgentModelView } from '@/features/catalog/AgentModelView'
 import { useI18n } from '@/shared/i18n'
 import type {
   AgentDefinitionDTO,
-  AgentProviderDTO,
+  ProviderDTO,
   SkillPackageSummaryDTO,
   ToolCatalogEntryDTO,
 } from '@/shared/api/generated/contracts'
@@ -43,7 +43,7 @@ export function ResourceEditorModal({
   onSubmit,
 }: {
   modal: ResourceModal | null
-  providers: AgentProviderDTO[]
+  providers: ProviderDTO[]
   models: AgentModelView[]
   agents?: AgentDefinitionDTO[]
   toolCatalog?: ToolCatalogEntryDTO[]
@@ -61,7 +61,7 @@ export function ResourceEditorModal({
   onProviderDraftChange: (draft: ProviderDraft) => void
   onModelDraftChange: (draft: ModelDraft) => void
   onModelGroupDraftChange: (draft: ModelGroupDraft) => void
-  onModelCreateKindChange: (kind: 'MODEL' | 'GROUP') => void
+  onModelCreateKindChange: (type: 'MODEL' | 'GROUP') => void
   onAgentDraftChange: (draft: AgentDraft) => void
   onSubmit: FormEventHandler<HTMLFormElement>
 }) {

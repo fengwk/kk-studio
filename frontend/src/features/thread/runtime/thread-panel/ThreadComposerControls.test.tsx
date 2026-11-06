@@ -13,7 +13,7 @@ import {
 /** 测试用稳定模型目录：第一项多 variant（走二级菜单），第二项单 variant（直接选中）。 */
 const MODELS: readonly ThreadComposerModelOption[] = [
   {
-    kind: 'MODEL',
+    type: 'MODEL',
     name: 'MiniMax',
     config: {
       defaultVariant: 'default',
@@ -21,7 +21,7 @@ const MODELS: readonly ThreadComposerModelOption[] = [
     },
   },
   {
-    kind: 'MODEL',
+    type: 'MODEL',
     name: 'gpt',
     config: {
       defaultVariant: 'fast',
@@ -305,7 +305,7 @@ describe('ThreadComposerControls model/variant menus', () => {
     const settings = createSettings({
       models: [
         ...MODELS,
-        { kind: 'GROUP', name: 'fallback-group', config: null },
+        { type: 'GROUP', name: 'fallback-group', config: null },
       ],
     })
     const view = renderOpen('model', settings)
@@ -386,12 +386,12 @@ describe('ThreadComposerControls disabled and empty states', () => {
     const settings = createSettings({
       models: [
         {
-          kind: 'MODEL',
+          type: 'MODEL',
           name: 'no-variants',
           config: { defaultVariant: 'x', variants: [] },
         },
         {
-          kind: 'MODEL',
+          type: 'MODEL',
           name: 'blank-variants',
           config: { defaultVariant: 'x', variants: [{ id: '   ' }] },
         },
