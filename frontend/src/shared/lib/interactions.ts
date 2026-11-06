@@ -51,8 +51,8 @@ export function interactionOwnerLink(owner: InteractionOwnerDTO): string | null 
 }
 
 /**
- * 待处理条目的稳定身份：环境等待是聚合项（多个调用的 `interactionId` 都是 null），
- * 只能按 `(真实执行根, 冻结环境)` 去重，否则会把这些 null 主键错误合并成一项。
+ * 待处理条目的稳定身份：环境等待是聚合项，判别联合不为它声明调用主键，
+ * 只能按 `(真实执行根, 冻结环境)` 去重，否则会把不同环境错误合并成一项。
  */
 export function interactionIdentity(item: InteractionDTO): string {
   return item.type === 'ENVIRONMENT_WAIT'
