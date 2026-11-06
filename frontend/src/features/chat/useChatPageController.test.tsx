@@ -163,15 +163,6 @@ function queryWrapper(queryClient: QueryClient) {
   }
 }
 
-function page<T>(results: T[]) {
-  return {
-    pageNumber: 1,
-    pageSize: 50,
-    totalCount: String(results.length),
-    results,
-  }
-}
-
 function agent(overrides: Partial<AgentDTO> = {}): AgentDTO {
   return {
     name: 'default-assistant',

@@ -1,4 +1,4 @@
-import { apiClient, request, type HttpClient } from '@/shared/api/client'
+import { request } from '@/shared/api/client'
 import type {
   EnvironmentCreateDTO,
   EnvironmentDTO,
@@ -9,7 +9,7 @@ import type {
   EnvironmentUpdateStartDTO,
 } from '@/shared/api/generated/contracts'
 
-export function createEnvironmentService(client: HttpClient = apiClient) {
+export function createEnvironmentService() {
   return {
     listEnvironments: (): Promise<EnvironmentDTO[]> =>
       request('GET /api/platform/environments', {}),

@@ -20,12 +20,12 @@ describe('vite dev proxy', () => {
 
   it('rewrites the application event WebSocket origin to the backend target', () => {
     const source = readFileSync(path.resolve(process.cwd(), 'vite.config.ts'), 'utf8')
-    const apiProxy = source.match(/'\/api': \{([\s\S]*?)\n\s{6}\},/)
+    const wsProxy = source.match(/'\/ws': \{([\s\S]*?)\n\s{6}\},/)
 
-    expect(apiProxy?.[1]).toContain("target: process.env.API_PROXY_TARGET || 'http://127.0.0.1:8080'")
-    expect(apiProxy?.[1]).toContain('changeOrigin: true')
-    expect(apiProxy?.[1]).toContain('rewriteWsOrigin: true')
-    expect(apiProxy?.[1]).toContain('ws: true')
+    expect(wsProxy?.[1]).toContain("target: process.env.API_PROXY_TARGET || 'http://127.0.0.1:8080'")
+    expect(wsProxy?.[1]).toContain('changeOrigin: true')
+    expect(wsProxy?.[1]).toContain('rewriteWsOrigin: true')
+    expect(wsProxy?.[1]).toContain('ws: true')
   })
 
   it('preserves browser Host and Origin for same-origin IDE HTTP and WebSocket proxy', () => {

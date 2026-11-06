@@ -188,15 +188,6 @@ function queryWrapper(queryClient: QueryClient) {
   }
 }
 
-function page<T>(results: T[]) {
-  return {
-    pageNumber: 1,
-    pageSize: 50,
-    totalCount: String(results.length),
-    results,
-  }
-}
-
 function provider(): ProviderDTO {
   return {
     name: 'stub',

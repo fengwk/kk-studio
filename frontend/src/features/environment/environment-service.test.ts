@@ -1,155 +1,187 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createEnvironmentService } from '@/features/environment/environment-service'
-import { createMockHttpClient } from '@/test-support/mock-http-client'
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { request } from "@/shared/api/client";
+import type {
+  EnvironmentDTO,
+  EnvironmentEventDTO,
+  EnvironmentInstallCodeDTO,
+  EnvironmentRuntimeStatusDTO,
+  EnvironmentUpdateStartDTO,
+} from "@/shared/api/generated/contracts";
+import { createEnvironmentService } from "@/features/environment/environment-service";
 
-afterEach(() => {
-  vi.unstubAllGlobals()
-})
+vi.mock("@/shared/api/client", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/shared/api/client")>();
+  return { ...actual, request: vi.fn() };
+});
 
-describe('environmentService', () => {
-  it('saves nested daemon settings with the CAS version and encoded ID', async () => {
-    const client = createMockHttpClient()
-    client.put.mockResolvedValue({ version: '9' })
-    const config = { operatingSystem: 'linux' as const, daemon: { studioUrl: 'https://studio.example.com' } }
-    expect(await createEnvironmentService(client).saveInstallConfig('env/a', '8', config)).toEqual({ version: '9' })
-    expect(client.put).toHaveBeenCalledWith('/environments/env%2Fa/install-config', { expectedVersion: '8', installConfig: config })
-  })
-  /**
-   * 测试意图：验证 Environment 列表查询端点为 /environments。
-   */
-  it('lists environments from GET /environments', async () => {
-    const client = createMockHttpClient()
-    client.get.mockResolvedValue([])
-    const service = createEnvironmentService(client)
-    await service.listEnvironments()
-    expect(client.get).toHaveBeenCalledWith('/environments')
-  })
+const apiRequest = vi.mocked(request);
+const service = createEnvironmentService();
 
-  /**
-   * 测试意图：验证通过 UUID 获取单个 Environment 详情端点使用 /environments/{id}。
-   */
-  it('gets a single environment by UUID via GET /environments/{id}', async () => {
-    const client = createMockHttpClient()
-    client.get.mockResolvedValue({ id: 'env-1', name: 'local' })
-    const service = createEnvironmentService(client)
-    await service.getEnvironment('env-1')
-    expect(client.get).toHaveBeenCalledWith('/environments/env-1')
-  })
+afterEach(() => apiRequest.mockReset());
 
-  /**
-   * 测试意图：验证创建 Environment 使用 POST /environments，且返回包含 registrationToken。
-   */
-  it('creates an environment card via POST /environments', async () => {
-    const client = createMockHttpClient()
-    client.post.mockResolvedValue({ id: 'env-1', name: 'dev', registrationToken: 'tok-123' })
-    const service = createEnvironmentService(client)
-    const result = await service.createEnvironment({ name: 'dev' })
-    expect(client.post).toHaveBeenCalledWith('/environments', { name: 'dev' })
-    expect(result.registrationToken).toBe('tok-123')
-  })
+function environment(overrides: Partial<EnvironmentDTO> = {}): EnvironmentDTO {
+  return {
+    id: "env-1",
+    name: "local",
+    status: "READY",
+    ready: true,
+    statusExpiresAt: 1_760_000_000_000,
+    capabilities: [],
+    version: "1",
+    createdAt: 1_759_000_000_000,
+    updatedAt: 1_759_000_000_000,
+    ...overrides,
+  };
+}
 
-  /**
-   * 测试意图：签发 5 分钟安装 code 使用 POST /environments/{id}/install-code，
-   * body 只有 expectedVersion，返回解包后的 code 与 expiresAt，不轮换长期 token。
-   */
-  it('issues a short install code via POST /environments/{id}/install-code', async () => {
-    const issued = { code: "code'汉字", expiresAt: '2026-10-05T09:05:00.000Z' }
-    const client = createMockHttpClient()
-    client.post.mockResolvedValue(issued)
-    const service = createEnvironmentService(client)
-    const result = await service.createInstallCode('env/a', '8')
-    expect(client.post).toHaveBeenCalledWith('/environments/env%2Fa/install-code', {
-      expectedVersion: '8',
-    })
-    expect(result).toEqual(issued)
-    expect(client.get).not.toHaveBeenCalled()
-  })
-
-  /**
-   * 测试意图：验证轮换 registration token 端点使用 POST /environments/{id}/registration-token，
-   * 且 expectedVersion 放在 POST body { expectedVersion } 中。
-   */
-  it('rotates registration token via POST /environments/{id}/registration-token with body {expectedVersion}', async () => {
-    const client = createMockHttpClient()
-    client.post.mockResolvedValue({ id: 'env-1', registrationToken: 'tok-new', version: '2' })
-    const service = createEnvironmentService(client)
-    const result = await service.rotateToken('env-1', '1')
-    expect(client.post).toHaveBeenCalledWith(
-      '/environments/env-1/registration-token',
-      { expectedVersion: '1' },
-    )
-    expect(result.registrationToken).toBe('tok-new')
-  })
-
-  /**
-   * 测试意图：验证删除 Environment 端点使用 DELETE /environments/{id}?expectedVersion=。
-   */
-  it('deletes environment via DELETE /environments/{id}?expectedVersion=', async () => {
-    const client = createMockHttpClient()
-    client.delete.mockResolvedValue(undefined)
-    const service = createEnvironmentService(client)
-    await service.deleteEnvironment('env-1', '3')
-    expect(client.delete).toHaveBeenCalledWith(
-      '/environments/env-1?expectedVersion=3',
-    )
-  })
-
-  /**
-   * 测试意图：验证获取 Environment 事件列表端点使用 GET /environments/{id}/events，
-   * 且支持路径参数转义。
-   */
-  it('lists environment events via GET /environments/{id}/events with proper encoding', async () => {
-    const events = [
+describe("environmentService", () => {
+  it("saves nested daemon settings with the CAS version", async () => {
+    apiRequest.mockResolvedValue(environment({ version: "9" }));
+    const config = {
+      operatingSystem: "linux" as const,
+      daemon: { studioUrl: "https://studio.example.com" },
+    };
+    expect(await service.saveInstallConfig("env/a", "8", config)).toEqual(
+      environment({ version: "9" }),
+    );
+    expect(apiRequest).toHaveBeenCalledWith(
+      "PUT /api/platform/environments/{environmentId}/install-settings",
       {
-        time: '2026-07-20T01:00:00.000Z',
-        level: 'INFO',
-        type: 'READY',
-        message: 'Connected',
+        path: { environmentId: "env/a" },
+        body: { expectedVersion: "8", installConfig: config },
       },
-    ]
-    const client = createMockHttpClient()
-    client.get.mockResolvedValue(events)
-    const service = createEnvironmentService(client)
-    const result = await service.listEnvironmentEvents('env/special:1')
-    expect(client.get).toHaveBeenCalledWith('/environments/env%2Fspecial%3A1/events')
-    expect(result).toEqual(events)
-  })
+    );
+  });
 
-  it('reads the current runtime snapshot via GET /environments/{id}/runtime', async () => {
-    const runtime = {
-      revision: '7',
+  /** 测试意图：验证 Environment 列表查询命中平台环境资源。 */
+  it("lists environments from the platform resource", async () => {
+    apiRequest.mockResolvedValue([]);
+    await service.listEnvironments();
+    expect(apiRequest).toHaveBeenCalledWith(
+      "GET /api/platform/environments",
+      {},
+    );
+  });
+
+  /** 测试意图：验证单个 Environment 详情以路径参数定位。 */
+  it("gets a single environment by its identifier", async () => {
+    apiRequest.mockResolvedValue(environment());
+    await service.getEnvironment("env-1");
+    expect(apiRequest).toHaveBeenCalledWith(
+      "GET /api/platform/environments/{environmentId}",
+      {
+        path: { environmentId: "env-1" },
+      },
+    );
+  });
+
+  /** 测试意图：验证创建 Environment 返回含 registrationToken 的卡片。 */
+  it("creates an environment card", async () => {
+    apiRequest.mockResolvedValue(
+      environment({ name: "dev", registrationToken: "tok-123" }),
+    );
+    const result = await service.createEnvironment({ name: "dev" });
+    expect(apiRequest).toHaveBeenCalledWith("POST /api/platform/environments", {
+      body: { name: "dev" },
+    });
+    expect(result.registrationToken).toBe("tok-123");
+  });
+
+  /** 测试意图：签发 5 分钟安装 code，body 只有 expectedVersion。 */
+  it("issues a short install code", async () => {
+    const issued: EnvironmentInstallCodeDTO = {
+      code: "code'汉字",
+      expiresAt: 1_760_000_300_000,
+    };
+    apiRequest.mockResolvedValue(issued);
+    const result = await service.createInstallCode("env/a", "8");
+    expect(apiRequest).toHaveBeenCalledWith(
+      "POST /api/platform/environments/{environmentId}/install-codes",
+      { path: { environmentId: "env/a" }, body: { expectedVersion: "8" } },
+    );
+    expect(result).toEqual(issued);
+  });
+
+  /** 测试意图：轮换 registration token 把 expectedVersion 放进 body。 */
+  it("rotates the registration token with the CAS version", async () => {
+    apiRequest.mockResolvedValue(
+      environment({ registrationToken: "tok-new", version: "2" }),
+    );
+    const result = await service.rotateToken("env-1", "1");
+    expect(apiRequest).toHaveBeenCalledWith(
+      "POST /api/platform/environments/{environmentId}/rotate-token",
+      { path: { environmentId: "env-1" }, body: { expectedVersion: "1" } },
+    );
+    expect(result.registrationToken).toBe("tok-new");
+  });
+
+  /** 测试意图：删除 Environment 用 query 传递 expectedVersion。 */
+  it("deletes an environment with the expected version", async () => {
+    apiRequest.mockResolvedValue(undefined);
+    await service.deleteEnvironment("env-1", "3");
+    expect(apiRequest).toHaveBeenCalledWith(
+      "DELETE /api/platform/environments/{environmentId}",
+      {
+        path: { environmentId: "env-1" },
+        query: { expectedVersion: "3" },
+      },
+    );
+  });
+
+  /** 测试意图：事件列表按路径参数定位环境。 */
+  it("lists environment events by identifier", async () => {
+    const events: EnvironmentEventDTO[] = [
+      {
+        occurredAt: 1_759_000_000_000,
+        level: "INFO",
+        type: "READY",
+        message: "Connected",
+      },
+    ];
+    apiRequest.mockResolvedValue(events);
+    const result = await service.listEnvironmentEvents("env/special:1");
+    expect(apiRequest).toHaveBeenCalledWith(
+      "GET /api/platform/environments/{environmentId}/events",
+      { path: { environmentId: "env/special:1" } },
+    );
+    expect(result).toEqual(events);
+  });
+
+  it("reads the current runtime snapshot", async () => {
+    const runtime: EnvironmentRuntimeStatusDTO = {
+      revision: "7",
       status: {
-        daemonVersion: '1.2.3',
+        daemonVersion: "1.2.3",
         update: {
-          targetVersion: '1.3.0',
-          downloadedBytes: '8388608',
+          targetVersion: "1.3.0",
+          downloadedBytes: "8388608",
           totalBytes: null,
         },
       },
-    }
-    const client = createMockHttpClient()
-    client.get.mockResolvedValue(runtime)
-    const service = createEnvironmentService(client)
-    const result = await service.getEnvironmentRuntime('env/a')
-    expect(client.get).toHaveBeenCalledWith('/environments/env%2Fa/runtime')
-    expect(client.post).not.toHaveBeenCalled()
-    expect(result).toEqual(runtime)
-  })
+    };
+    apiRequest.mockResolvedValue(runtime);
+    const result = await service.getEnvironmentRuntime("env/a");
+    expect(apiRequest).toHaveBeenCalledWith(
+      "GET /api/platform/environments/{environmentId}/runtime",
+      { path: { environmentId: "env/a" } },
+    );
+    expect(result).toEqual(runtime);
+  });
 
-  it('starts a managed daemon update via POST /environments/{id}/update and returns command status with the snapshot', async () => {
-    const started = {
-      commandStatus: 'SENT_UNCONFIRMED',
+  it("starts a managed daemon update and returns command status with the snapshot", async () => {
+    const started: EnvironmentUpdateStartDTO = {
+      commandStatus: "SENT_UNCONFIRMED",
       runtimeStatus: {
-        revision: '8',
-        status: { daemonVersion: '1.2.3', update: null },
+        revision: "8",
+        status: { daemonVersion: "1.2.3", update: null },
       },
-    }
-    const client = createMockHttpClient()
-    client.post.mockResolvedValue(started)
-    const service = createEnvironmentService(client)
-    const result = await service.startEnvironmentUpdate('env/a')
-    expect(client.post).toHaveBeenCalledWith('/environments/env%2Fa/update')
-    expect(client.get).not.toHaveBeenCalled()
-    expect(result).toEqual(started)
-  })
-})
+    };
+    apiRequest.mockResolvedValue(started);
+    const result = await service.startEnvironmentUpdate("env/a");
+    expect(apiRequest).toHaveBeenCalledWith(
+      "POST /api/platform/environments/{environmentId}/update-daemon",
+      { path: { environmentId: "env/a" } },
+    );
+    expect(result).toEqual(started);
+  });
+});
