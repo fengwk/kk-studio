@@ -229,6 +229,13 @@ registerCase({
 
       const listed = (await ctx.call('GET', '/api/project/projects')).json
       assert(listed.some((candidate) => candidate.id === project.id), 'created Project not listed')
+      const listedWithArchived = (
+        await ctx.call('GET', '/api/project/projects?includeArchived=true')
+      ).json
+      assert(
+        listedWithArchived.some((candidate) => candidate.id === project.id),
+        'active Project must appear with includeArchived=true',
+      )
 
       // 公共 batch 端点只服务直接持有 Session 的 Chat owner：Project 不是 owner 形态，
       // Issue+Agent 命令由 Issue 业务工作流拥有，都不能借该端点伪造命令。
@@ -719,8 +726,11 @@ registerCase({
         await ctx.call('GET', '/api/project/projects?includeArchived=true')
       ).json
       assert(
-        archivedProjects.some((candidate) => candidate.id === project.id),
-        'archived Project must appear with includeArchived=true',
+        activeProjects.every((active) =>
+          archivedProjects.some((candidate) => candidate.id === active.id),
+        ) &&
+          archivedProjects.some((candidate) => candidate.id === project.id),
+        'includeArchived=true must list both active and archived projects',
       )
       project = (
           await ctx.call('POST', `/api/project/projects/${project.id}/unarchive`, {

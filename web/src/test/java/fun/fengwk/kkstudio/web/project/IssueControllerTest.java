@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -29,6 +30,7 @@ import fun.fengwk.kkstudio.project.dto.AddIssueEvidenceRequestDTO;
 import fun.fengwk.kkstudio.project.dto.AppendIssueActivityRequestDTO;
 import fun.fengwk.kkstudio.project.dto.BlockIssueRequestDTO;
 import fun.fengwk.kkstudio.project.dto.CreateIssueRequestDTO;
+import fun.fengwk.kkstudio.project.dto.IssueActivityRequestKind;
 import fun.fengwk.kkstudio.project.dto.ProjectDtoMapper;
 import fun.fengwk.kkstudio.project.dto.RecoverIssueRequestDTO;
 import fun.fengwk.kkstudio.project.dto.ReopenIssueRequestDTO;
@@ -394,7 +396,7 @@ class IssueControllerTest {
         AppendIssueActivityRequestDTO.builder()
             .expectedVersion("1")
             .requestKey("k1")
-            .kind(IssueActivityKind.COMMENT)
+            .kind(IssueActivityRequestKind.COMMENT)
             .body("A human comment")
             .build();
     IssueActivity act =
@@ -430,7 +432,7 @@ class IssueControllerTest {
         AppendIssueActivityRequestDTO.builder()
             .expectedVersion("1")
             .requestKey("k2")
-            .kind(IssueActivityKind.INSTRUCTION)
+            .kind(IssueActivityRequestKind.INSTRUCTION)
             .body("A human instruction")
             .build();
     IssueActivity act =
@@ -461,12 +463,27 @@ class IssueControllerTest {
   }
 
   @Test
+  void testAppendActivityRejectsNonHumanKind() throws Exception {
+    mockMvc
+        .perform(
+            post("/api/project/issues/" + issueId + "/activities")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    "{\"expectedVersion\":\"1\",\"requestKey\":\"k1\","
+                        + "\"kind\":\"RUN\",\"body\":\"system only\"}"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("validation"));
+
+    verifyNoInteractions(issueEditingService);
+  }
+
+  @Test
   void testAppendActivityReplayConflictReturns409() throws Exception {
     AppendIssueActivityRequestDTO req =
         AppendIssueActivityRequestDTO.builder()
             .expectedVersion("1")
             .requestKey("k1")
-            .kind(IssueActivityKind.COMMENT)
+            .kind(IssueActivityRequestKind.COMMENT)
             .body("Different content reusing key")
             .build();
     when(issueEditingService.appendActivity(

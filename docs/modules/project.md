@@ -282,7 +282,8 @@ Project 与 Issue 的公开接口都在 `/api/project` 命名空间下：项目�
 `/api/project/projects`，Issue 是 `/api/project/issues`，项目下创建 Issue 用
 `/api/project/projects/{projectId}/issues`。列表直接返回数组，创建返回 201，删除返回 204；
 `PUT` 整体替换可编辑属性并携带 `expectedVersion`，状态转换与 Project 归档用 `POST /{id}/<动作>`。
-Issue 没有归档状态，删除是唯一的移除方式；Project 归档保留，`includeArchived` 只影响项目列表。
+Issue 没有归档状态，删除是唯一的移除方式；Project 归档保留，默认列表只返回活跃项目，
+`includeArchived=true` 同时返回活跃与已归档项目。
 DTO 的时间字段是 epoch 毫秒整数，固定取值（暂停原因、Activity 种类与操作者、Run 状态）使用领域枚举。
 完整路由表以生成的 `ApiRoutes` 为准。
 

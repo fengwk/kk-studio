@@ -24,7 +24,7 @@ public class ProjectDTO {
   private String title;
   private String description;
   private ProjectWorkflowDTO workflow;
-  private Boolean yoloEnabled;
+  private boolean yoloEnabled;
   private String nextIssueNumber;
   private String version;
 

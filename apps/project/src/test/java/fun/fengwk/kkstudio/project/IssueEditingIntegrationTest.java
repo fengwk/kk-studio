@@ -540,7 +540,7 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
     assertValidation(() -> issueEditingService.updateIssue(issue.getId(), 0L, "修改需求", "描述"));
   }
 
-  /** archiveProject 与 unarchiveProject 切换项目归档状态并在 listProjects(archived) 间迁移。 */
+  /** archiveProject 与 unarchiveProject 切换归档状态；includeArchived 同时返回活跃与已归档项目。 */
   @Test
   void archiveAndUnarchiveProjectTogglesArchivedAtAndFilterMembership() {
     Project project = projectService.createProject("生命周期项目", "描述", true);
@@ -548,7 +548,7 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
     assertTrue(
         projectService.listProjects(false).stream()
             .anyMatch(p -> p.getId().equals(project.getId())));
-    assertFalse(
+    assertTrue(
         projectService.listProjects(true).stream()
             .anyMatch(p -> p.getId().equals(project.getId())));
 
@@ -574,7 +574,7 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
     assertTrue(
         projectService.listProjects(false).stream()
             .anyMatch(p -> p.getId().equals(project.getId())));
-    assertFalse(
+    assertTrue(
         projectService.listProjects(true).stream()
             .anyMatch(p -> p.getId().equals(project.getId())));
 

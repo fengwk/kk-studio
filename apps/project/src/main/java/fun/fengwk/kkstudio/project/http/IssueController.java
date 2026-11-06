@@ -20,6 +20,7 @@ import fun.fengwk.kkstudio.project.dto.AppendIssueActivityRequestDTO;
 import fun.fengwk.kkstudio.project.dto.BlockIssueRequestDTO;
 import fun.fengwk.kkstudio.project.dto.CreateIssueRequestDTO;
 import fun.fengwk.kkstudio.project.dto.IssueActivityDTO;
+import fun.fengwk.kkstudio.project.dto.IssueActivityRequestKind;
 import fun.fengwk.kkstudio.project.dto.IssueDTO;
 import fun.fengwk.kkstudio.project.dto.IssueDetailDTO;
 import fun.fengwk.kkstudio.project.dto.IssueEvidenceDTO;
@@ -34,6 +35,7 @@ import fun.fengwk.kkstudio.project.dto.TransitionIssueRequestDTO;
 import fun.fengwk.kkstudio.project.dto.UpdateIssueRequestDTO;
 import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.IssueActivity;
+import fun.fengwk.kkstudio.project.model.IssueActivityKind;
 import fun.fengwk.kkstudio.project.model.IssueEvidence;
 import fun.fengwk.kkstudio.project.service.IssueDetailAssembler;
 import fun.fengwk.kkstudio.project.service.IssueEditingService;
@@ -208,13 +210,14 @@ public class IssueController {
       @PathVariable("issueId") UUID issueId, @RequestBody AppendIssueActivityRequestDTO request) {
     long expectedVersion =
         DecimalLongs.parseNonNegative(request.getExpectedVersion(), "expectedVersion");
+    IssueActivityKind kind =
+        switch (request.getKind() == null ? IssueActivityRequestKind.COMMENT : request.getKind()) {
+          case COMMENT -> IssueActivityKind.COMMENT;
+          case INSTRUCTION -> IssueActivityKind.INSTRUCTION;
+        };
     IssueActivity activity =
         issueEditingService.appendActivity(
-            issueId,
-            expectedVersion,
-            request.getKind(),
-            request.getRequestKey(),
-            request.getBody());
+            issueId, expectedVersion, kind, request.getRequestKey(), request.getBody());
     return ResponseEntity.status(HttpStatus.CREATED).body(mapper.toDto(activity));
   }
 

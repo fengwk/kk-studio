@@ -63,7 +63,7 @@ export interface AgentUpdateDTO {
 export interface AppendIssueActivityRequestDTO {
   expectedVersion: string
   requestKey: string
-  kind?: IssueActivityKind | null
+  kind?: IssueActivityRequestKind | null
   body: string
 }
 
@@ -543,7 +543,7 @@ export interface ChatCreateDTO {
 /** Java：fun.fengwk.kkstudio.chat.dto.ChatDTO */
 export interface ChatDTO {
   id: string
-  title?: string | null
+  title: string
   agentName: string
   environmentName: string | null
   yoloEnabled: boolean
@@ -1764,6 +1764,16 @@ export const ISSUE_ACTIVITY_KIND_VALUES: readonly IssueActivityKind[] = [
   'SPEC_CHANGE',
   'STATE_CHANGE',
   'CONTROL',
+]
+
+/** Java：fun.fengwk.kkstudio.project.dto.IssueActivityRequestKind */
+export type IssueActivityRequestKind =
+  | 'COMMENT'
+  | 'INSTRUCTION'
+
+export const ISSUE_ACTIVITY_REQUEST_KIND_VALUES: readonly IssueActivityRequestKind[] = [
+  'COMMENT',
+  'INSTRUCTION',
 ]
 
 /** Java：fun.fengwk.kkstudio.project.dto.IssueAgentThreadDTO */

@@ -122,8 +122,8 @@ public class ProjectService {
     return project;
   }
 
-  public List<Project> listProjects(boolean archived) {
-    return projectRepository.listByArchived(archived);
+  public List<Project> listProjects(boolean includeArchived) {
+    return projectRepository.list(includeArchived);
   }
 
   @Transactional

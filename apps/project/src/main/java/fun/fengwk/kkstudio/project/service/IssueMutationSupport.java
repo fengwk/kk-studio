@@ -30,7 +30,7 @@ import java.util.UUID;
 /**
  * Issue 写用例共用的 owner 锁、幂等 receipt 与事务内落库逻辑。
  *
- * <p>只集中三种 Issue 写用例重复的加锁顺序、归档/版本门禁、活动追加与 Work 唤醒；不承载具体动作、状态迁移或额度规则。调用方必须在自己的
+ * <p>只集中三种 Issue 写用例重复的加锁顺序、Project 归档与版本门禁、活动追加与 Work 唤醒；不承载具体动作、状态迁移或额度规则。调用方必须在自己的
  * {@code @Transactional} 边界内使用，本类不代理事务。
  */
 @Component

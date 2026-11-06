@@ -1,4 +1,5 @@
 import { ApiError } from '@/shared/api/client'
+import type { IssueActivityRequestKind } from '@/shared/api/generated/contracts'
 import { isRecord, nonBlank } from '@/shared/lib/value'
 
 const STORAGE_PREFIX = 'kk-studio.projects.pending-action:'
@@ -22,7 +23,7 @@ export interface IssueActionPayloads {
   BLOCK: { reason: string }
   STOP: { detail: string | null }
   RESET_BUDGET: { state: string; maxRuns: number }
-  ACTIVITY: { kind: 'COMMENT' | 'INSTRUCTION'; body: string }
+  ACTIVITY: { kind: IssueActivityRequestKind; body: string }
 }
 
 /** 单条侧车记录：kind 决定 payload 的精确形状。 */

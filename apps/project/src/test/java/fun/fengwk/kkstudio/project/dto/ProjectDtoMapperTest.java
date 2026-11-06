@@ -112,7 +112,7 @@ class ProjectDtoMapperTest {
     assertEquals("Desc", dto.getDescription());
     assertNotNull(dto.getWorkflow());
     assertEquals(3, dto.getWorkflow().getStates().size());
-    assertEquals(Boolean.TRUE, dto.getYoloEnabled());
+    assertTrue(dto.isYoloEnabled());
     assertEquals("10", dto.getNextIssueNumber());
     assertEquals("2", dto.getVersion());
     assertEquals(now, dto.getArchivedAt());
