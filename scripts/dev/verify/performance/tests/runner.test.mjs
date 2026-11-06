@@ -139,7 +139,7 @@ test('response validators enforce health, catalog page, and canvas DTO contracts
           modelId: 'upstream-stub',
           config: {
             defaultVariant: 'default',
-            variants: [{ id: 'default' }],
+            variants: [{ id: 'default', promptCacheRetention: 'NONE' }],
             limit: { context: 4096 },
           },
         },
@@ -342,7 +342,7 @@ test(
               modelId: 'upstream-stub',
               config: {
                 defaultVariant: 'default',
-                variants: [{ id: 'default' }],
+                variants: [{ id: 'default', promptCacheRetention: 'NONE' }],
                 limit: { context: 4096 },
               },
             },

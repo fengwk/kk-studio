@@ -87,7 +87,7 @@ registerCase({
             reasoning: false,
             inputModalities: ['TEXT'],
           },
-          variants: [{ id: 'default' }],
+          variants: [{ id: 'default', promptCacheRetention: 'SHORT' }],
         }),
       })
       model = modelResponse.json

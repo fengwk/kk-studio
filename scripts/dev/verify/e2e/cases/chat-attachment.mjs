@@ -302,7 +302,7 @@ registerCase({
                 reasoning: false,
                 inputModalities: ['TEXT', 'IMAGE'],
               },
-              variants: [{ id: 'default' }],
+              variants: [{ id: 'default', promptCacheRetention: 'SHORT' }],
             }),
           })
         ).json
