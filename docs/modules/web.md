@@ -3,7 +3,7 @@
 [`WebApplication`](../../web/src/main/java/fun/fengwk/kkstudio/web/WebApplication.java)
 是生产 Spring Boot 组合根：装配 Platform、Project、Canvas/Harness runtime、
 Contributor 和构建期 Plugin，提供 REST、静态 SPA、浏览器事件与 Daemon WebSocket。
-Web 保留组合根自身与 Harness/Platform 的 Controller；Canvas、Project 的 Controller、DTO 映射与错误 advice 随各自产品模块，经自动装配进入 MVC。Controller 解析请求（统一使用 `Uuids.parseCanonical`、`DecimalLongs` 以及 `platform.http.RequestParameters` 解析校验 environmentId 与 limit 等）并返回结果；Harness 控制面的快照投影、写后回读、命令批归属判定、Agent 任务提交与 Environment owner 路由由 `web.harness` / `web.environment` 的应用服务编排。DTO 映射规则：Harness 领域类型由 web 的 Harness mapper 映射；Canvas、Project 领域服务返回领域类型，由各自模块的映射器转换，web 在 HTTP 边界调用；Platform 用例服务直接返回 share DTO。领域行为、用例组装与事务由相应模块持有，Web 模块不直连业务表或业务 repository。
+Web 保留组合根自身与 Harness/Platform 的 Controller；Canvas、Project 的 Controller、DTO 映射与错误 advice 随各自产品模块，经自动装配进入 MVC。Controller 解析请求（统一使用 `Uuids.parseCanonical`、`DecimalLongs` 以及 `platform.http.RequestParameters` 解析校验 environmentId 与 limit 等）并返回结果；Harness 控制面的快照投影、写后回读、命令批归属判定与 Environment owner 路由由 `web.harness` / `web.environment` 的应用服务编排。DTO 映射规则：Harness 领域类型由 web 的 Harness mapper 映射；Canvas、Project 领域服务返回领域类型，由各自模块的映射器转换，web 在 HTTP 边界调用；Platform 用例服务直接返回所属模块的 DTO。领域行为、用例组装与事务由相应模块持有，Web 模块不直连业务表或业务 repository。
 
 ## 组合与生命周期
 
@@ -79,7 +79,7 @@ health、资源下载和 WebSocket 使用各自传输形式。公开路由如下
 | Interaction | `/api/interactions` | 等待分页（`total` 是同一过滤条件下真实可见的待处理计数）与 `/{interactionId}/input` 人工提交 |
 | Canvas | `/api/canvases` | 创建、列表、Snapshot、commands、resource download/preview URL、节点 Function Run |
 | Function catalog | `/api/canvas-functions` | 函数 schema、输出计划、可用性 |
-| Storage | `/api/storage/uploads`、`/api/storage/blobs/{blobId}` | reserve/complete/delete 与短期 download/preview URL |
+| Storage | `/api/platform/storage/uploads`、`/api/platform/storage/blobs/{blobId}` | reserve/complete/delete 与短期 download/preview URL |
 | Project | `/api/projects` | CRUD、workflow/yolo、archive/unarchive、Snapshot、Issue 创建（控制器在 [apps/project](project.md)） |
 | Issue | `/api/issues/{issueId}` | CRUD、活动/证据、流转、阻塞/恢复、stop/继续、额度重置、重开、归档（控制器在 [apps/project](project.md)） |
 | Settings | `/api/platform/settings` | 聚合 GET/CAS PUT、编辑 schema |

@@ -1,7 +1,7 @@
 import { act, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiError } from '@/shared/api/client'
-import type { StorageUploadDTO } from '@/shared/api/contracts/storage'
+import type { StorageUploadDTO } from '@/shared/api/generated/contracts'
 import type { StorageService } from '@/shared/api/storage-service'
 import { createAttachmentPart } from '@/features/thread/composer/composer-parts'
 import { loadUnknownUploads, persistPendingUnknownUpload } from '@/features/thread/composer/composer-draft'
@@ -18,16 +18,21 @@ function createFakeStorageService(overrides?: Partial<StorageService>): StorageS
   return {
     reserveUpload: vi.fn().mockImplementation(async (): Promise<StorageUploadDTO> => ({
       id: 'res-1',
-      blobId: 'blob-1',
-      state: 'PENDING',
-      presignedPut: { url: 'https://upload.example.com/put', method: 'PUT', headers: {} },
+      type: 'PENDING',
+      presignedPut: {
+        url: 'https://upload.example.com/put',
+        method: 'PUT',
+        headers: {},
+        expiresAt: 1767225600,
+        mediaType: null,
+        sizeBytes: null,
+      },
       expiresAt: 1767225600,
     })),
     completeUpload: vi.fn().mockImplementation(async (id: string): Promise<StorageUploadDTO> => ({
       id,
       blobId: 'blob-1',
-      state: 'READY',
-      presignedPut: null,
+      type: 'READY',
       expiresAt: 1767225600,
     })),
     deleteUpload: vi.fn().mockResolvedValue(undefined),
@@ -340,7 +345,7 @@ describe('Attachment uploads lifecycle & safety', () => {
             id,
             blobId: 'b-1',
             mediaKind: 'image',
-            state: 'READY',
+            type: 'READY',
             presignedPut: { url: 'put', method: 'PUT', headers: {} },
             filename: 'img.png',
             mediaType: 'image/png',
@@ -476,7 +481,7 @@ describe('Attachment uploads lifecycle & safety', () => {
           id: `res-${req.filename}`,
           blobId: 'b',
           mediaKind: 'image',
-          state: 'PENDING',
+          type: 'PENDING',
           presignedPut: { url: 'put', method: 'PUT', headers: {} },
           filename: req.filename,
           mediaType: req.mediaType,
@@ -493,7 +498,7 @@ describe('Attachment uploads lifecycle & safety', () => {
             id,
             blobId: 'b',
             mediaKind: 'image',
-            state: 'READY',
+            type: 'READY',
             presignedPut: { url: 'put', method: 'PUT', headers: {} },
             filename: 'fileA.png',
             mediaType: 'image/png',
@@ -574,8 +579,7 @@ describe('Attachment uploads lifecycle & safety', () => {
         resolveOldComplete({
           id: 'res-alpha',
           blobId: 'b',
-          state: 'READY',
-          presignedPut: null,
+          type: 'READY',
           expiresAt: 1767225600,
         })
       })
@@ -722,8 +726,7 @@ describe('Attachment uploads lifecycle & safety', () => {
         resolveSlowComplete({
           id: 'upload-a-1',
           blobId: 'blob-a-1',
-          state: 'READY',
-          presignedPut: null,
+          type: 'READY',
           expiresAt: 1767225600,
         })
       })
@@ -801,8 +804,7 @@ describe('Attachment uploads lifecycle & safety', () => {
         resolveSlowComplete({
           id: 'upload-cancel-1',
           blobId: 'blob-cancel-1',
-          state: 'READY',
-          presignedPut: null,
+          type: 'READY',
           expiresAt: 1767225600,
         })
       })

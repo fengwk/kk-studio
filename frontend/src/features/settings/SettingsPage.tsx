@@ -23,7 +23,7 @@ import './settings.css'
 
 /**
  * 全局设置页：General 保留本地偏好；所有 server tabs、section/group 顺序和字段控件来自
- * GET /api/settings/schema。
+ * GET /api/platform/settings/schema。
  */
 export function SettingsPage({
   reloadPage = reloadCurrentPage,

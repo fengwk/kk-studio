@@ -338,7 +338,7 @@ describe('settings sync tab', () => {
 
     expect(screen.getByRole('button', { name: '导入' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '导出' })).toBeInTheDocument()
-    // 同步只走 /api/settings/sync，不触发 system settings 的 CAS 保存。
+    // 同步只走 /api/platform/config-sync，不触发 system settings 的 CAS 保存。
     expect(mocks.update).not.toHaveBeenCalled()
   })
 })

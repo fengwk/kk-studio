@@ -84,7 +84,7 @@ test('config_sync.inventory_contract guards secret leakage and validates exact f
   const cleanCtx = {
     vars: {},
     async call(method, path) {
-      if (method === 'GET' && path === '/api/settings/sync') {
+      if (method === 'GET' && path === '/api/platform/config-sync') {
         return { status: 200, json: cleanInventory }
       }
       assert.fail(`unexpected call ${method} ${path}`)
@@ -107,7 +107,7 @@ test('config_sync.inventory_contract guards secret leakage and validates exact f
   const dirtyCtx = {
     vars: {},
     async call(method, path) {
-      if (method === 'GET' && path === '/api/settings/sync') {
+      if (method === 'GET' && path === '/api/platform/config-sync') {
         return { status: 200, json: dirtyInventory }
       }
       assert.fail(`unexpected call ${method} ${path}`)
@@ -135,7 +135,7 @@ test('config_sync.inventory_contract guards secret leakage and validates exact f
     const forbiddenCtx = {
       vars: {},
       async call(method, path) {
-        if (method === 'GET' && path === '/api/settings/sync') {
+        if (method === 'GET' && path === '/api/platform/config-sync') {
           return { status: 200, json: forbiddenInventory }
         }
         assert.fail(`unexpected call ${method} ${path}`)
@@ -167,19 +167,19 @@ test('precheck case enforces read-only checking and explicit partial import befo
       if (!body.yaml.includes('providerType:')) {
         throw problemError(400, 'validation', 'providerType is required', path)
       }
-      if (path.endsWith('/check')) {
+      if (path.endsWith('/check-import')) {
         return {
           headers: new Headers({ 'cache-control': 'no-store' }),
-          json: { created: [{ kind: 'providers', name }], updated: [], skipped: [{ kind: 'futureConfig', name: '', reason: 'unknown config category' }] },
+          json: { created: [{ kind: 'providers', name }], updated: [], skipped: [{ name: 'futureConfig', reason: 'unknown config category' }] },
         }
       }
-      assert.equal(path, '/api/settings/sync/import')
+      assert.equal(path, '/api/platform/config-sync/import')
       if (!body.allowPartial) {
         throw problemError(400, 'validation', 'partial import requires explicit confirmation', path)
       }
       writes.push(body)
       provider = { name, version: '0' }
-      return { json: { imported: [{ kind: 'providers', name }], skipped: [{ kind: 'futureConfig', name: '', reason: 'unknown config category' }] } }
+      return { json: { imported: [{ kind: 'providers', name }], skipped: [{ name: 'futureConfig', reason: 'unknown config category' }] } }
     },
   }
   await getCase('config_sync.import_precheck_and_partial_confirmation').run(ctx)
@@ -198,7 +198,7 @@ test('install config hard-invalid precheck rejects every endpoint without side e
         return { json: [] }
       }
       assert.equal(method, 'POST')
-      assert.ok(['/api/settings/sync/import/check', '/api/settings/sync/import'].includes(path))
+      assert.ok(['/api/platform/config-sync/check-import', '/api/platform/config-sync/import'].includes(path))
       requests.push({ path, yaml: body.yaml, allowPartial: body.allowPartial })
       throw problemError(400, 'validation', 'environment installConfig.daemon.studioUrl is invalid', path)
     },
@@ -252,7 +252,7 @@ test('environment install-config roundtrip case wires PUT/export/import/clear/cl
         state = { ...state, installConfig: body.installConfig, version: String(Number(state.version) + 1) }
         return { json: { id: environmentId, installConfig: state.installConfig, version: state.version } }
       }
-      if (method === 'POST' && path === '/api/settings/sync/export') {
+      if (method === 'POST' && path === '/api/platform/config-sync/export') {
         return {
           json: {
             yaml: JSON.stringify({
@@ -267,7 +267,7 @@ test('environment install-config roundtrip case wires PUT/export/import/clear/cl
           },
         }
       }
-      if (method === 'POST' && path === '/api/settings/sync/import/check') {
+      if (method === 'POST' && path === '/api/platform/config-sync/check-import') {
         parseEntry(body)
         // 预检查只暴露覆盖引用，绝不回显 token 或 installConfig 值。
         return {
@@ -278,7 +278,7 @@ test('environment install-config roundtrip case wires PUT/export/import/clear/cl
           },
         }
       }
-      if (method === 'POST' && path === '/api/settings/sync/import') {
+      if (method === 'POST' && path === '/api/platform/config-sync/import') {
         const entry = parseEntry(body)
         assert.equal(entry.name, state.name)
         const nextConfig = entry.installConfig ?? null
@@ -312,10 +312,10 @@ test('environment install-config roundtrip case wires PUT/export/import/clear/cl
 
   const methods = calls.map((c) => `${c.method} ${c.path.split('?')[0]}`)
   assert.ok(methods.includes(`PUT ${base}/install-config`), 'case must persist installConfig via PUT')
-  assert.ok(methods.includes('POST /api/settings/sync/export'), 'case must export the environment')
-  assert.equal(methods.filter((m) => m === 'POST /api/settings/sync/import/check').length, 2, 'roundtrip plus atomic update precheck')
-  assert.equal(methods.filter((m) => m === 'POST /api/settings/sync/import').length, 3, 'roundtrip, atomic update, and clearing import')
-  assert.equal(methods.filter((m) => m === 'POST /api/settings/sync/export').length, 2, 'roundtrip export plus re-export after the atomic update')
+  assert.ok(methods.includes('POST /api/platform/config-sync/export'), 'case must export the environment')
+  assert.equal(methods.filter((m) => m === 'POST /api/platform/config-sync/check-import').length, 2, 'roundtrip plus atomic update precheck')
+  assert.equal(methods.filter((m) => m === 'POST /api/platform/config-sync/import').length, 3, 'roundtrip, atomic update, and clearing import')
+  assert.equal(methods.filter((m) => m === 'POST /api/platform/config-sync/export').length, 2, 'roundtrip export plus re-export after the atomic update')
   assert.equal(deleted, true, 'case must delete the environment it created')
   assert.equal(atomicUpdateApplied, true, 'new token+config must be applied in a single import entry')
   assert.equal(atomicUpdateNote, 'e2e install config updated', 'atomic update must use a legal changed daemon.note')

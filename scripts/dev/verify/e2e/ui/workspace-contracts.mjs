@@ -654,9 +654,9 @@ export async function runWorkspaceContractMatrix(ui) {
 
   await run(
     'ui.settings.system_contract_cas',
-    'Settings server tab 与 /api/settings 契约：完整聚合 CAS、冲突确认后刷新，并在收尾恢复全局状态',
+    'Settings server tab 与 /api/platform/settings 契约：完整聚合 CAS、冲突确认后刷新，并在收尾恢复全局状态',
     async (caseArt) => {
-      const readSettings = async () => (await apiCtx.call('GET', '/api/settings')).json
+      const readSettings = async () => (await apiCtx.call('GET', '/api/platform/settings')).json
       const before = await readSettings()
       const original = before.aiRuntime.retryBaseDelayMillis
       // Long 在 wire 上是十进制字符串。
@@ -703,7 +703,7 @@ export async function runWorkspaceContractMatrix(ui) {
           advanced: after.advanced,
           expectedVersion: after.version,
         }
-        const externalRes = await apiCtx.call('PUT', '/api/settings', externalUpdate)
+        const externalRes = await apiCtx.call('PUT', '/api/platform/settings', externalUpdate)
         assert(externalRes.status === 200, `external settings update failed: ${externalRes.status}`)
         await base.fill(staleDraft)
         await page.getByRole('button', { name: '保存', exact: true }).click()
@@ -745,7 +745,7 @@ export async function runWorkspaceContractMatrix(ui) {
             advanced: latest.advanced,
             expectedVersion: latest.version,
           }
-          const res = await apiCtx.call('PUT', '/api/settings', restore)
+          const res = await apiCtx.call('PUT', '/api/platform/settings', restore)
           if (res.status === 200) {
             const restored = res.json
             assert(restored.aiRuntime.retryBaseDelayMillis === original, 'restore was not applied')

@@ -1,7 +1,7 @@
 import { ApiError } from '@/shared/api/client'
 import { storageService } from '@/shared/api/storage-service'
 import { FORBIDDEN_UPLOAD_HEADERS } from '@/shared/api/storage-service'
-import type { StoragePresignedPutDTO } from '@/shared/api/contracts/storage'
+import type { StoragePresignedUrlDTO } from '@/shared/api/generated/contracts'
 import { createWorkerHasher, type HashFile } from '@/shared/lib/upload-file'
 
 const defaultHashFile: HashFile = createWorkerHasher()
@@ -21,7 +21,7 @@ export function skillArchiveMediaType(filename: string): string {
  * 因此这里不复用基于 fetch 的通用直传；禁止发送的请求头与共享直传使用同一份清单。
  */
 export function putFileWithProgress(
-  presigned: StoragePresignedPutDTO,
+  presigned: StoragePresignedUrlDTO,
   file: File,
   onProgress: (progress: UploadProgress) => void,
   signal?: AbortSignal,
@@ -89,7 +89,7 @@ export async function uploadSkillArchive({
     sizeBytes: file.size,
     sha256,
   })
-  if (reservation.state === 'PENDING') {
+  if (reservation.type === 'PENDING') {
     await putFileWithProgress(reservation.presignedPut, file, onProgress, signal)
   } else {
     // 摘要命中已有内容时服务端不会要求直传，进度直接视为完成。

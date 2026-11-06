@@ -1,4 +1,4 @@
-import { apiClient, type HttpClient } from '@/shared/api/client'
+import { request } from '@/shared/api/client'
 import type {
   SystemSettingsDTO,
   SystemSettingsSchemaDTO,
@@ -7,18 +7,18 @@ import type {
 
 /**
  * 全局 system settings 聚合的读写面：
- * - GET /settings：返回六个 section + version/createTime/updateTime；
- * - PUT /settings：以 expectedVersion CAS 完整替换聚合，返回更新后的 GET 形状。
+ * - GET /api/platform/settings：返回六个 section + version/createdAt/updatedAt；
+ * - PUT /api/platform/settings：以 expectedVersion CAS 完整替换聚合，返回更新后的 GET 形状。
  *
  * 前端不做默认值兜底：GET 返回的权威聚合是唯一事实源，draft 只从它派生。
  */
-export function createSystemSettingsService(client: HttpClient = apiClient) {
+export function createSystemSettingsService() {
   return {
-    get: (): Promise<SystemSettingsDTO> => client.get<SystemSettingsDTO>('/settings'),
+    get: (): Promise<SystemSettingsDTO> => request('GET /api/platform/settings', {}),
     getSchema: (): Promise<SystemSettingsSchemaDTO> =>
-      client.get<SystemSettingsSchemaDTO>('/settings/schema'),
+      request('GET /api/platform/settings/schema', {}),
     update: (update: SystemSettingsUpdateDTO): Promise<SystemSettingsDTO> =>
-      client.put<SystemSettingsDTO>('/settings', update),
+      request('PUT /api/platform/settings', { body: update }),
   }
 }
 

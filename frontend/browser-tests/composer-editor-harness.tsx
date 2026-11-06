@@ -30,18 +30,23 @@ function createFakeStorage(): StorageService {
       }
       return {
         id,
-        state: 'PENDING',
-        blobId: null,
-        presignedPut: { method: 'PUT', url: `https://s3.test/${id}`, headers: {} },
+        type: 'PENDING',
+        presignedPut: {
+          method: 'PUT',
+          url: `https://s3.test/${id}`,
+          headers: {},
+          expiresAt: 0,
+          mediaType: null,
+          sizeBytes: null,
+        },
         expiresAt: 0,
       }
     },
     completeUpload: async (uploadId: string) => ({
       id: uploadId,
-      state: 'READY',
+      type: 'READY',
       blobId: `blob-${uploadId}`,
-      presignedPut: null,
-      expiresAt: null,
+      expiresAt: 0,
     }),
     deleteUpload: async () => undefined,
     getBlobDownloadUrl: async () => ({ url: 'https://s3.test/orig', expiresAt: null }),

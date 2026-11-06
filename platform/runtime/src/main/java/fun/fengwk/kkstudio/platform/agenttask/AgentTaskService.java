@@ -20,11 +20,9 @@ import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.function.Supplier;
 
 /**
- * 平台的 Agent 任务入口：子代理 task 工具、插件 Prompt 任务、Issue 任务与 HTTP 提交都经由它创建
- * Thread、接受首批输入并登记结果票据，再用同一张票据观察、停止与读取结果。
+ * 平台的 Agent 任务入口：子代理 task 工具、插件 Prompt 任务与 Issue 任务都经由它创建 Thread、接受首批输入并登记结果票据，再用同一张票据观察、停止与读取结果。
  *
  * <p>提交委托运行时的统一创建原语 {@link HarnessRuntime#spawn}，并加入调用方已有的事务（Issue 在自己的产品事务内提交）。有父 Thread 的任务以
  * {@code NOTIFY_PARENT} 通知父 Thread 并计入并发额度，无父任务以 {@code RECEIPT_ONLY}
@@ -43,58 +41,6 @@ public class AgentTaskService {
   @Autowired
   public AgentTaskService(ObjectProvider<HarnessRuntime> runtimes) {
     this.runtimes = Objects.requireNonNull(runtimes, "runtimes");
-  }
-
-  /**
-   * 提交外部独立任务（仅限 HTTP 等外部请求）：同一事务内创建（或续用）Thread、接受首批输入并登记票据。
-   *
-   * <p>外部身份由 {@code ticketId} 与 {@code requestHash} 唯一确定；已存在票据先校验请求指纹再重放，避免对已接受任务重复物化设置。 首次提交才经由
-   * {@code requestSupplier} 惰性物化请求并调用运行时；校验物化请求与外部身份声明严格一致且无父 Thread。 仅当遭遇 {@code THREAD_ID_REUSED}
-   * 精确冲突时，再次复核票据指纹以实现并发安全的回放。
-   */
-  public UUID submitExternal(
-      UUID ticketId, String requestHash, Supplier<AgentTaskRequest> requestSupplier) {
-    Objects.requireNonNull(ticketId, "ticketId");
-    Objects.requireNonNull(requestHash, "requestHash");
-    Objects.requireNonNull(requestSupplier, "requestSupplier");
-    HarnessRuntime runtime = requireRuntime();
-
-    Optional<ThreadJoin> existingTicket = runtime.findJoin(ticketId);
-    if (existingTicket.isPresent()) {
-      ThreadJoin ticket = existingTicket.get();
-      if (!ticket.requestHash().equals(requestHash)) {
-        throw new IllegalArgumentException("join invocation identity reused");
-      }
-      return ticket.childThreadId();
-    }
-
-    AgentTaskRequest request =
-        Objects.requireNonNull(requestSupplier.get(), "requestSupplier returned null");
-    if (!ticketId.equals(request.ticketId())) {
-      throw new IllegalArgumentException("request supplier returned mismatched ticketId");
-    }
-    if (!requestHash.equals(request.requestHash())) {
-      throw new IllegalArgumentException("request supplier returned mismatched requestHash");
-    }
-    if (request.parentThreadId() != null) {
-      throw new IllegalArgumentException("external agent task cannot have parent thread");
-    }
-
-    try {
-      return submitToRuntime(runtime, request).threadId();
-    } catch (DomainException conflict) {
-      if (conflict.code() == DomainErrorCode.CONFLICT
-          && HarnessConflictReason.THREAD_ID_REUSED.name().equals(conflict.reason())) {
-        Optional<ThreadJoin> ticket = runtime.findJoin(ticketId);
-        if (ticket.isPresent()) {
-          if (!ticket.get().requestHash().equals(requestHash)) {
-            throw new IllegalArgumentException("join invocation identity reused", conflict);
-          }
-          return ticket.get().childThreadId();
-        }
-      }
-      throw conflict;
-    }
   }
 
   /** 提交任务：同一事务内创建（或续用）Thread、接受首批输入并登记票据。 直接提交给运行时，保留 subagent 等内部创建屏障。 */

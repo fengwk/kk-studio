@@ -224,7 +224,7 @@ async function installPaneApi(
       await route.fulfill({ json: environmentCards() })
       return
     }
-    if (path === '/api/storage/uploads' && method === 'POST') {
+    if (path === '/api/platform/storage/uploads' && method === 'POST') {
       recorded.uploadCalls.push('reserve')
       await route.fulfill({
         json: {
@@ -237,7 +237,7 @@ async function installPaneApi(
       })
       return
     }
-    if (path === '/api/storage/uploads/c1000000-0000-4000-8000-0000000000c1/complete') {
+    if (path === '/api/platform/storage/uploads/c1000000-0000-4000-8000-0000000000c1/complete') {
       recorded.uploadCalls.push('complete')
       await route.fulfill({
         json: {
@@ -250,7 +250,7 @@ async function installPaneApi(
       })
       return
     }
-    if (path.startsWith('/api/storage/uploads/') && method === 'DELETE') {
+    if (path.startsWith('/api/platform/storage/uploads/') && method === 'DELETE') {
       recorded.deletedUploads.push(path)
       await route.fulfill({ status: 204 })
       return

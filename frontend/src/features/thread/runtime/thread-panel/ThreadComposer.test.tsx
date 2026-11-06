@@ -637,7 +637,7 @@ describe('ThreadComposer and commands', () => {
           id: uploadId,
           blobId: 'blob-123',
           mediaKind: 'image',
-          state: 'READY',
+          type: 'READY',
           presignedPut: { url: 'put', method: 'PUT', headers: {} },
           filename: 'ambiguous.png',
           mediaType: 'image/png',
@@ -2246,9 +2246,8 @@ describe('ThreadComposer attachment pills', () => {
     const { service, reserveUpload, uploadFile, completeUpload } = fakeStorage({
       reserve: (request) => ({
         id: `dedup-${request.sha256.slice(0, 8)}`,
-        state: 'READY',
+        type: 'READY',
         blobId: 'blob-existing',
-        presignedPut: null,
         expiresAt: 0,
       }),
     })

@@ -1,6 +1,9 @@
 import type { SystemSettingsSectionsDTO } from '@/shared/api/contracts/system-settings'
 import { assembleHttpStatusCodeList, IntegerListValidationError } from '@/shared/lib/integer-list'
-import type { SystemSettingsUpdateDTO } from '@/shared/api/generated/contracts'
+import type {
+  InvocationRetryBackoffStrategy,
+  SystemSettingsUpdateDTO,
+} from '@/shared/api/generated/contracts'
 
 /** 前端 draft 的共享数字/文本基元。 */
 export type DraftNumericField = string
@@ -216,7 +219,8 @@ export function assembleSettingsUpdate(
     },
     aiRuntime: {
       retryMaxRetries: requiredInt(draft.aiRuntime.retryMaxRetries),
-      retryBackoffStrategy: draft.aiRuntime.retryBackoffStrategy,
+      retryBackoffStrategy:
+        draft.aiRuntime.retryBackoffStrategy as InvocationRetryBackoffStrategy,
       retryBaseDelayMillis: requiredLong(draft.aiRuntime.retryBaseDelayMillis),
       retryMaxDelayMillis: requiredLong(draft.aiRuntime.retryMaxDelayMillis),
       compactionKeepRecentTokens: requiredInt(draft.aiRuntime.compactionKeepRecentTokens),

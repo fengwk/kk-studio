@@ -45,10 +45,8 @@ export function SyncImportModal({
   const [result, setResult] = useState<ConfigSyncImportResultDTO | null>(null)
 
   const mode = configSyncImportMode(preview)
-  const kindLabel = (kind: string): string =>
-    CONFIG_SYNC_KIND_ORDER.includes(kind as ConfigSyncKind)
-      ? t(configSyncKindLabelKey(kind as ConfigSyncKind))
-      : kind
+  const kindLabel = (kind: ConfigSyncKind): string =>
+    CONFIG_SYNC_KIND_ORDER.includes(kind) ? t(configSyncKindLabelKey(kind)) : kind
 
   const handleImport = async (allowPartial: boolean) => {
     setPending(true)
@@ -140,7 +138,7 @@ function ImportPreview({
 }: {
   preview: ConfigSyncImportCheckDTO
   mode: ReturnType<typeof configSyncImportMode>
-  kindLabel: (kind: string) => string
+  kindLabel: (kind: ConfigSyncKind) => string
 }) {
   const { t } = useI18n()
 
@@ -172,7 +170,8 @@ function ImportPreview({
           <ul className="settings-sync-result-list">
             {preview.skipped.map((entry, index) => (
               <li key={`${entry.kind}:${entry.name}:${index}`}>
-                {kindLabel(entry.kind)}: {entry.name} — {entry.reason}
+                {entry.kind ? `${kindLabel(entry.kind)}: ` : ''}
+                {entry.name} — {entry.reason}
               </li>
             ))}
           </ul>
@@ -191,7 +190,7 @@ function RefList({
   heading: string
   state: 'created' | 'updated'
   refs: ConfigSyncImportCheckDTO['created']
-  kindLabel: (kind: string) => string
+  kindLabel: (kind: ConfigSyncKind) => string
 }) {
   if (refs.length === 0) {
     return null
@@ -217,7 +216,7 @@ function ImportResult({
   onReloadSettings,
 }: {
   result: ConfigSyncImportResultDTO
-  kindLabel: (kind: string) => string
+  kindLabel: (kind: ConfigSyncKind) => string
   settingsDirty: boolean
   onReloadSettings: () => void
 }) {
@@ -246,7 +245,8 @@ function ImportResult({
           <ul className="settings-sync-result-list">
             {result.skipped.map((entry, index) => (
               <li key={`${entry.kind}:${entry.name}:${index}`}>
-                {kindLabel(entry.kind)}: {entry.name} — {entry.reason}
+                {entry.kind ? `${kindLabel(entry.kind)}: ` : ''}
+                {entry.name} — {entry.reason}
               </li>
             ))}
           </ul>

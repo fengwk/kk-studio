@@ -60,14 +60,14 @@ registerCase({
     // 1. reserve：PENDING + PUT + 不暴露 bucket/key。
     const content = Buffer.from(`e2e chat attachment payload ${cid()}`, 'utf8')
     const sha256 = createHash('sha256').update(content).digest('hex')
-    const { json: reserveJson } = await ctx.call('POST', '/api/storage/uploads', {
+    const { json: reserveJson } = await ctx.call('POST', '/api/platform/storage/uploads', {
       filename: 'e2e-attachment.txt',
       mediaType: 'text/plain',
       sizeBytes: content.length,
       sha256,
     })
     const pending = reserveJson
-    assert(pending.state === 'PENDING', JSON.stringify(pending))
+    assert(pending.type === 'PENDING', JSON.stringify(pending))
     assert(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(String(pending.id)), JSON.stringify(pending))
     assert(pending.presignedPut?.method === 'PUT', JSON.stringify(pending))
     assert(/^https?:\/\//.test(pending.presignedPut.url), JSON.stringify(pending))
@@ -93,10 +93,10 @@ registerCase({
     const uploadId = String(pending.id)
     const { json: completeJson } = await ctx.call(
       'POST',
-      `/api/storage/uploads/${encodeURIComponent(uploadId)}/complete`,
+      `/api/platform/storage/uploads/${encodeURIComponent(uploadId)}/complete`,
     )
     const ready = completeJson
-    assert(ready.state === 'READY', JSON.stringify(ready))
+    assert(ready.type === 'READY', JSON.stringify(ready))
     const blobId = String(ready.blobId)
     assert(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(blobId), JSON.stringify(ready))
 
@@ -233,7 +233,7 @@ registerCase({
     }
 
     // 10. PENDING（未 complete）upload 同样确定性 400。
-    const { json: pendingReserveJson } = await ctx.call('POST', '/api/storage/uploads', {
+    const { json: pendingReserveJson } = await ctx.call('POST', '/api/platform/storage/uploads', {
       filename: 'pending.bin',
       mediaType: 'application/octet-stream',
       sizeBytes: 1,
@@ -512,7 +512,7 @@ registerCase({
 async function uploadReadyFile(ctx, { filename, mediaType, content }) {
   const sha256 = createHash('sha256').update(content).digest('hex')
   const pending = (
-      await ctx.call('POST', '/api/storage/uploads', {
+      await ctx.call('POST', '/api/platform/storage/uploads', {
         filename,
         mediaType,
         sizeBytes: content.length,
@@ -528,10 +528,10 @@ async function uploadReadyFile(ctx, { filename, mediaType, content }) {
   const ready = (
       await ctx.call(
         'POST',
-        `/api/storage/uploads/${encodeURIComponent(String(pending.id))}/complete`,
+        `/api/platform/storage/uploads/${encodeURIComponent(String(pending.id))}/complete`,
       )
     ).json
-  assert(ready.state === 'READY', JSON.stringify(ready))
+  assert(ready.type === 'READY', JSON.stringify(ready))
   return String(ready.id)
 }
 

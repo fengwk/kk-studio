@@ -30,10 +30,16 @@ export function fakeStorage(overrides: {
       return overrides.reserve
         ? await overrides.reserve(request)
         : {
+            type: 'PENDING' as const,
             id,
-            state: 'PENDING' as const,
-            blobId: null,
-            presignedPut: { method: 'PUT' as const, url: `https://s3.test/${id}`, headers: {} },
+            presignedPut: {
+              method: 'PUT' as const,
+              url: `https://s3.test/${id}`,
+              headers: {},
+              expiresAt: 0,
+              mediaType: null,
+              sizeBytes: null,
+            },
             expiresAt: 0,
           }
     },
@@ -44,10 +50,9 @@ export function fakeStorage(overrides: {
       throw new Error('complete failed')
     }
     return {
+      type: 'READY',
       id: uploadId,
-      state: 'READY',
       blobId: `blob-${uploadId}`,
-      presignedPut: null,
       expiresAt: 0,
     }
   })

@@ -17,7 +17,7 @@ export const PLUGINS_SETTINGS_TAB: SettingsTabMeta = {
   labelKey: 'settings.tabs.plugins',
 }
 
-/** Sync 是静态 UI 页签，走 /api/settings/sync，不混入 SystemSettings aggregate。 */
+/** Sync 是静态 UI 页签，走 /api/platform/config-sync，不混入 SystemSettings aggregate。 */
 export const SYNC_SETTINGS_TAB: SettingsTabMeta = {
   id: 'sync',
   labelKey: 'settings.tabs.sync',

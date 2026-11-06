@@ -5,8 +5,10 @@ import {
   type CanvasUploadPipelineOptions,
 } from '@/features/canvas/canvas-upload'
 import { uniqueNodeAlias } from '@/features/canvas/node-alias'
-import type { StorageUploadDTO } from '@/shared/api/contracts/storage'
-import type { CanvasCommandDTO } from '@/shared/api/generated/contracts'
+import type {
+  CanvasCommandDTO,
+  StorageUploadDTO,
+} from '@/shared/api/generated/contracts'
 
 const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f'
 const UPLOAD_ID = 'dddddddd-0000-4000-8000-000000000009'
@@ -14,14 +16,16 @@ const PENDING_PUT = {
   method: 'PUT' as const,
   url: 'https://s3.example/upload',
   headers: { 'If-None-Match': '*' },
+  expiresAt: 1786320900000,
+  mediaType: null,
+  sizeBytes: null,
 }
 const EXPIRES_AT = 1786320900
 
 function pendingReservation(id: string = UPLOAD_ID): StorageUploadDTO {
   return {
     id,
-    state: 'PENDING',
-    blobId: null,
+    type: 'PENDING',
     presignedPut: PENDING_PUT,
     expiresAt: EXPIRES_AT,
   }
@@ -30,9 +34,8 @@ function pendingReservation(id: string = UPLOAD_ID): StorageUploadDTO {
 function readyReservation(id: string = UPLOAD_ID): StorageUploadDTO {
   return {
     id,
-    state: 'READY',
+    type: 'READY',
     blobId: 'blob-existing',
-    presignedPut: null,
     expiresAt: EXPIRES_AT,
   }
 }

@@ -168,8 +168,8 @@ test('providerUpdateBody builds the editable PUT body without name and preserves
 test('settings contract accepts an empty existing HTTP retry list without mutating it on failure', async () => {
   const before = {
     version: '0',
-    createTime: '2026-01-01T00:00:00Z',
-    updateTime: '2026-01-01T00:00:00Z',
+    createdAt: 1767225600000,
+    updatedAt: 1767225600000,
     tool: {},
     aiRuntime: { retryBaseDelayMillis: '2500', modelHttpRetryStatusCodes: [] },
     environment: {},
@@ -190,7 +190,7 @@ test('settings contract accepts an empty existing HTTP retry list without mutati
   let puts = 0
   const ctx = {
     async call(method, path) {
-      assert.equal(path, '/api/settings')
+      assert.equal(path, '/api/platform/settings')
       if (method === 'GET') return { json: structuredClone(before) }
       assert.equal(method, 'PUT')
       puts++

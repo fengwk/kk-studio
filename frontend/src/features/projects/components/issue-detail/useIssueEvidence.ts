@@ -94,7 +94,7 @@ export function useIssueEvidence({
         mediaType: file.type || 'application/octet-stream',
         sha256,
       })
-      if (upload.state === 'PENDING') {
+      if (upload.type === 'PENDING') {
         await storageService.uploadFile(upload.presignedPut, file)
       }
       await storageService.completeUpload(upload.id)
