@@ -477,7 +477,7 @@ registerCase({
         if (!chat?.id) return
         await ctx.call(
           'DELETE',
-          `/api/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
+          `/api/chat/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
         )
       })
       await cleanup('agent', cleanupErrors, async () => {

@@ -1242,7 +1242,7 @@ async function cleanupCompletedUsageFixture(state) {
     if (state.chat?.id) {
       await state.apiCtx.call(
         'DELETE',
-        `/api/chats/${encodeURIComponent(state.chat.id)}?expectedVersion=${encodeURIComponent(state.chat.version)}`,
+        `/api/chat/chats/${encodeURIComponent(state.chat.id)}?expectedVersion=${encodeURIComponent(state.chat.version)}`,
       )
     }
   })
@@ -1311,7 +1311,7 @@ async function cleanupActiveTaskFixture(state) {
     if (state.chat?.id) {
       await state.apiCtx.call(
         'DELETE',
-        `/api/chats/${encodeURIComponent(state.chat.id)}?expectedVersion=${encodeURIComponent(state.chat.version)}`,
+        `/api/chat/chats/${encodeURIComponent(state.chat.id)}?expectedVersion=${encodeURIComponent(state.chat.version)}`,
       )
     }
   })
@@ -1361,7 +1361,7 @@ async function cleanupToolCardFixture(state) {
     if (state.chat?.id) {
       await state.apiCtx.call(
         'DELETE',
-        `/api/chats/${encodeURIComponent(state.chat.id)}?expectedVersion=${encodeURIComponent(state.chat.version)}`,
+        `/api/chat/chats/${encodeURIComponent(state.chat.id)}?expectedVersion=${encodeURIComponent(state.chat.version)}`,
       )
     }
   })

@@ -301,7 +301,7 @@ registerCase({
     // 清理：删除 owner Chat（连带其 Session/Thread/Entry 资源）。
     await ctx.call(
       'DELETE',
-      `/api/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
+      `/api/chat/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
     )
   },
 })
@@ -609,7 +609,7 @@ registerCase({
         if (chat?.id) {
           await ctx.call(
             'DELETE',
-            `/api/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(
+            `/api/chat/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(
               chat.version,
             )}`,
           )
@@ -735,7 +735,7 @@ registerCase({
     } finally {
       await ctx.call(
         'DELETE',
-        `/api/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
+        `/api/chat/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
       )
     }
   },
@@ -1463,7 +1463,7 @@ registerCase({
     // 清理：删除 owner Chat（连带其 Session/Thread/Entry 资源）。
     await ctx.call(
       'DELETE',
-      `/api/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
+      `/api/chat/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
     )
   },
 })
@@ -1587,7 +1587,7 @@ registerCase({
     // 清理：删除 owner Chat（连带其 Session/Thread/Entry 资源）。
     await ctx.call(
       'DELETE',
-      `/api/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
+      `/api/chat/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
     )
   },
 })
@@ -1704,7 +1704,7 @@ registerCase({
     // 清理：删除 owner Chat（连带两个 Session/Thread/Entry 资源）。
     await ctx.call(
       'DELETE',
-      `/api/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
+      `/api/chat/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
     )
   },
 })
@@ -1892,7 +1892,7 @@ registerCase({
       await waitForQuiescentThread(ctx, threadId, { timeoutMs: 60_000, intervalMs: 100 }).catch(() => {})
       await ctx.call(
         'DELETE',
-        `/api/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
+        `/api/chat/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
       )
     }
   },
@@ -1989,7 +1989,7 @@ registerCase({
       await waitForQuiescentThread(ctx, threadId, { timeoutMs: 60_000, intervalMs: 100 }).catch(() => {})
       await ctx.call(
         'DELETE',
-        `/api/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
+        `/api/chat/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
       )
     }
   },
@@ -2340,7 +2340,7 @@ registerCase({
     // 清理：删除 owner Chat（连带其 Session/Thread/Entry 资源）。
     await ctx.call(
       'DELETE',
-      `/api/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
+      `/api/chat/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
     )
   },
 })
@@ -2397,7 +2397,7 @@ registerCase({
     } finally {
       await ctx.call(
         'DELETE',
-        `/api/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
+        `/api/chat/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
       )
     }
   },
@@ -2496,7 +2496,7 @@ registerCase({
     } finally {
       await ctx.call(
         'DELETE',
-        `/api/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
+        `/api/chat/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
       )
     }
   },

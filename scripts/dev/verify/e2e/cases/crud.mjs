@@ -591,11 +591,11 @@ registerCase({
   id: 'crud.chat.invalid_agent_name',
   level: 'L1',
   title: 'Chat 不存在 Agent name 拒绝',
-  docs: 'POST /api/chats 请求体中的 agentName 必须引用现有 Agent，否则返回 400 validation',
+  docs: 'POST /api/chat/chats 请求体中的 agentName 必须引用现有 Agent，否则返回 400 validation',
   async run(ctx) {
     await expectHttpError(
       () =>
-        ctx.call('POST', '/api/chats', {
+        ctx.call('POST', '/api/chat/chats', {
           title: 'bad-agent',
           agentName: `missing-${cid().slice(0, 8)}`,
           yoloEnabled: false,
@@ -621,7 +621,7 @@ registerCase({
     let cleanupChat = chat
     let environment = null
     try {
-      assertExactFields(chat, ['id', 'title', 'agentName', 'environmentName', 'yoloEnabled', 'version', 'createTime', 'updateTime'], 'created chat')
+      assertExactFields(chat, ['id', 'title', 'agentName', 'environmentName', 'yoloEnabled', 'version', 'createdAt', 'updatedAt'], 'created chat')
       assert(
         chat.agentName === agent.name
           && chat.yoloEnabled === false
@@ -653,22 +653,28 @@ registerCase({
         JSON.stringify(thread.branchSettings) === JSON.stringify(expectedSettings),
         JSON.stringify({ expected: expectedSettings, actual: thread.branchSettings }),
       )
-      // 同时改 YOLO 与 Chat 默认环境：既有 Thread 的 branchSettings 必须逐字段不变。
+      // 整体替换默认环境，再经独立子资源打开 YOLO：既有 Thread 的 branchSettings 必须逐字段不变。
       environment = await createEnvironment(ctx, `e2e-chat-independent-env-${suffix}`)
       const updated = (
-          await ctx.call('PUT', `/api/chats/${chat.id}`, {
-            yoloEnabled: true,
+          await ctx.call('PUT', `/api/chat/chats/${chat.id}`, {
+            title: chat.title,
+            agentName: agent.name,
             environmentName: environment.name,
             expectedVersion: chat.version,
           })
         ).json
-      cleanupChat = updated
-      assertExactFields(updated, ['id', 'title', 'agentName', 'environmentName', 'yoloEnabled', 'version', 'createTime', 'updateTime'], 'updated chat')
+      cleanupChat = (
+          await ctx.call('PUT', `/api/chat/chats/${chat.id}/yolo`, {
+            yoloEnabled: true,
+            expectedVersion: updated.version,
+          })
+        ).json
+      assertExactFields(cleanupChat, ['id', 'title', 'agentName', 'environmentName', 'yoloEnabled', 'version', 'createdAt', 'updatedAt'], 'updated chat')
       assert(
-        updated.agentName === agent.name
-          && updated.yoloEnabled === true
-          && updated.environmentName === environment.name,
-        JSON.stringify(updated),
+        cleanupChat.agentName === agent.name
+          && cleanupChat.yoloEnabled === true
+          && cleanupChat.environmentName === environment.name,
+        JSON.stringify(cleanupChat),
       )
       // 同一 Thread reread：branchSettings 逐字段不变。
       const reread = await getThreadSnapshot(ctx, threadId)
@@ -698,7 +704,7 @@ registerCase({
   id: 'crud.chat.default_environment',
   level: 'L1',
   title: 'Chat 默认 Environment 的创建/保留/清空与拒绝',
-  docs: 'POST /api/chats 省略 yoloEnabled 默认 false，携带已存在 Environment name 作为默认环境；PUT 省略 environmentName 保留当前默认环境，显式 null 清空；未知或非 canonical Environment name => 400 且当前值/version 不变',
+  docs: 'POST /api/chat/chats 省略 yoloEnabled 默认 false，携带已存在 Environment name 作为默认环境；PUT 整体替换 title、agentName 与 environmentName，显式 null 清空；未知或非 canonical Environment name => 400 且当前值/version 不变',
   async run(ctx) {
     const agent = await firstAgent(ctx)
     const suffix = cid().slice(0, 8)
@@ -707,7 +713,7 @@ registerCase({
     try {
       environment = await createEnvironment(ctx, `e2e-chat-default-env-${suffix}`)
       // 创建：请求体显式省略 yoloEnabled（服务端默认 false），并携带已存在 Environment 作为默认环境。
-      const created = await ctx.call('POST', '/api/chats', {
+      const created = await ctx.call('POST', '/api/chat/chats', {
         title: `e2e-chat-default-${suffix}`,
         agentName: agent.name,
         environmentName: environment.name,
@@ -720,10 +726,12 @@ registerCase({
           && chat.environmentName === environment.name,
         JSON.stringify(chat),
       )
-      // PUT 省略 environmentName（只改 title）：保留当前默认环境。
+      // PUT 整体替换：回传当前 Agent 与默认环境，只改 title。
       chat = (
-          await ctx.call('PUT', `/api/chats/${chat.id}`, {
+          await ctx.call('PUT', `/api/chat/chats/${chat.id}`, {
             title: `e2e-chat-default-upd-${suffix}`,
+            agentName: agent.name,
+            environmentName: environment.name,
             expectedVersion: chat.version,
           })
         ).json
@@ -732,7 +740,9 @@ registerCase({
       const beforeRejected = chat
       await expectHttpError(
         () =>
-          ctx.call('PUT', `/api/chats/${chat.id}`, {
+          ctx.call('PUT', `/api/chat/chats/${chat.id}`, {
+            title: chat.title,
+            agentName: agent.name,
             environmentName: `missing-env-${suffix}`,
             expectedVersion: chat.version,
           }),
@@ -741,13 +751,15 @@ registerCase({
       // 非 canonical（含 '/'）=> 400。
       await expectHttpError(
         () =>
-          ctx.call('PUT', `/api/chats/${chat.id}`, {
+          ctx.call('PUT', `/api/chat/chats/${chat.id}`, {
+            title: chat.title,
+            agentName: agent.name,
             environmentName: 'bad/name',
             expectedVersion: chat.version,
           }),
         { status: 400, messageIncludes: /environmentName/i },
       )
-      const still = (await ctx.call('GET', `/api/chats/${chat.id}`)).json
+      const still = (await ctx.call('GET', `/api/chat/chats/${chat.id}`)).json
       assert(
         still.environmentName === beforeRejected.environmentName
           && String(still.version) === String(beforeRejected.version),
@@ -755,7 +767,9 @@ registerCase({
       )
       // 显式 null 清空默认环境。
       chat = (
-          await ctx.call('PUT', `/api/chats/${chat.id}`, {
+          await ctx.call('PUT', `/api/chat/chats/${chat.id}`, {
+            title: chat.title,
+            agentName: agent.name,
             environmentName: null,
             expectedVersion: still.version,
           })
@@ -793,29 +807,33 @@ registerCase({
   async run(ctx) {
     const agent = await firstAgent(ctx)
     const chat = (
-        await ctx.call('POST', '/api/chats', {
+        await ctx.call('POST', '/api/chat/chats', {
           title: 'e2e-chat',
           agentName: agent.name,
           yoloEnabled: false,
         })
       ).json
     const updated = (
-        await ctx.call('PUT', `/api/chats/${chat.id}`, {
+        await ctx.call('PUT', `/api/chat/chats/${chat.id}`, {
           title: 'e2e-chat-upd',
+          agentName: agent.name,
+          environmentName: null,
           expectedVersion: chat.version,
         })
       ).json
     assert(updated.title === 'e2e-chat-upd' && updated.agentName === agent.name, JSON.stringify(updated))
     await expectHttpError(
       () =>
-        ctx.call('PUT', `/api/chats/${chat.id}`, {
+        ctx.call('PUT', `/api/chat/chats/${chat.id}`, {
           title: '   ',
+          agentName: agent.name,
+          environmentName: null,
           expectedVersion: updated.version,
         }),
       { status: 400, messageIncludes: /title.*blank/i },
     )
     await deleteChat(ctx, updated)
-    await expectHttpError(() => ctx.call('GET', `/api/chats/${chat.id}`), { status: 404 })
+    await expectHttpError(() => ctx.call('GET', `/api/chat/chats/${chat.id}`), { status: 404 })
   },
 })
 
@@ -823,7 +841,7 @@ registerCase({
   id: 'crud.chat.session_ownership_list',
   level: 'L1',
   title: 'Chat Session 摘要与 Session Thread 列表',
-  docs: 'NEW_SESSION 原子创建即建立 Chat owner 归属；GET /api/chats/{chatId}/sessions 返回 Session 摘要（新到旧，firstMessagePreview 精确等于首条 USER 文本、threadCount=1）；同批 NEW_SESSION 幂等重放 replayed=true 且不新增 Session/Thread relation；GET /api/sessions/{sessionId}/threads 返回 Thread 摘要；未知 Chat sessions => 404',
+  docs: 'NEW_SESSION 原子创建即建立 Chat owner 归属；GET /api/chat/chats/{chatId}/sessions 返回 Session 摘要（新到旧，firstMessagePreview 精确等于首条 USER 文本、threadCount=1）；同批 NEW_SESSION 幂等重放 replayed=true 且不新增 Session/Thread relation；GET /api/sessions/{sessionId}/threads 返回 Thread 摘要；未知 Chat sessions => 404',
   async run(ctx) {
     const agent = await firstAgent(ctx)
     const suffix = cid().slice(0, 8)
@@ -931,7 +949,7 @@ registerCase({
       // canonical 但未知的 Chat sessions => 404。
       const unknownChatId = '00000000-0000-0000-0000-000000000999'
       await expectHttpError(
-        () => ctx.call('GET', `/api/chats/${unknownChatId}/sessions`),
+        () => ctx.call('GET', `/api/chat/chats/${unknownChatId}/sessions`),
         { status: 404, messageIncludes: /unknown|not found/i },
       )
     } finally {
@@ -1164,7 +1182,7 @@ async function deleteProvider(ctx, provider) {
 async function deleteChat(ctx, chat) {
   await ctx.call(
     'DELETE',
-    `/api/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
+    `/api/chat/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
   )
 }
 

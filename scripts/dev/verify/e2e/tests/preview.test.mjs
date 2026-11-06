@@ -50,7 +50,7 @@ function fixture(reasons = ['PREVIEW_STALE_CURSOR', 'PREVIEW_PLANNING_FAILED'], 
       seedModel: { config: { defaultVariant: 'default' } },
     },
     async call(method, path, body) {
-      if (method === 'POST' && path === '/api/chats') {
+      if (method === 'POST' && path === '/api/chat/chats') {
         return { status: 201, json: { id: id(1), agentName: body.agentName, environmentName: body.environmentName ?? null } }
       }
       if (method === 'POST' && path === '/api/command-batches') {
@@ -190,7 +190,7 @@ function modelRequestDebugFixture() {
     if (method === 'GET' && pathname === '/api/models') {
       return { status: 200, json: { results: [model] } }
     }
-    if (method === 'POST' && pathname === '/api/chats') {
+    if (method === 'POST' && pathname === '/api/chat/chats') {
       chat = {
         id: id(1),
         title: body.title,
@@ -279,7 +279,7 @@ function modelRequestDebugFixture() {
         },
       }
     }
-    if (method === 'DELETE' && pathname === `/api/chats/${chat.id}`) {
+    if (method === 'DELETE' && pathname === `/api/chat/chats/${chat.id}`) {
       return { status: 204, json: null }
     }
     throw new Error(`unexpected call ${method} ${pathname}`)

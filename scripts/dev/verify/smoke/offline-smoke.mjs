@@ -228,7 +228,7 @@ const isMessage = (entry, role) =>
 async function offlineChat(client) {
   const { jsonCall, newId, sleep: wait } = client
   await createStubCatalog(client)
-  const chat = await jsonCall('POST', '/api/chats', {
+  const chat = await jsonCall('POST', '/api/chat/chats', {
     title: 'offline-chat-smoke',
     agentName: 'default-assistant',
     yoloEnabled: false,

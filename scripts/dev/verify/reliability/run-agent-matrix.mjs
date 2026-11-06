@@ -406,7 +406,7 @@ async function executeCase({ ctx, docker, runDir, testCase, agent, daemonEnv }) 
       try {
         await ctx.call(
           'DELETE',
-          `/api/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
+          `/api/chat/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
         )
       } catch (error) {
         if (result.status !== 'fail') {

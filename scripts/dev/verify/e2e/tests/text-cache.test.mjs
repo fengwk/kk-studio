@@ -47,7 +47,7 @@ function mockContext(def, { hitAt = 2, fault } = {}) {
         assert.deepEqual(body.execution, { driver: 'builtin', settings: { modelName: def.modelName, variant: def.variant } })
         return response({ name: body.name, version: '0', execution: body.execution }, 201)
       }
-      if (method === 'POST' && url === '/api/chats') {
+      if (method === 'POST' && url === '/api/chat/chats') {
         return response(
           { id: chatId, agentName: body.agentName, environmentName: body.environmentName ?? null, version: '0' },
           201,

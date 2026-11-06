@@ -351,7 +351,7 @@ vfs:/
 | Canvas | [`apps/canvas/runtime`](../apps/canvas/runtime/pom.xml) | `canvas_*`；三个控制器与模块内 DTO | 无（不参与会话归属） |
 | IDE | [`apps/ide`](../apps/ide/pom.xml) | 视图与数据面状态；IDE 控制器、过滤器与模块内 DTO | 无（读取平台环境与租约） |
 
-**Chat**：控制器以 `/api/chats` 提供列表、创建、详情、更新、删除与会话列表，DTO 在模块内，删除按预期版本校验。
+**Chat**：控制器以 `/api/chat/chats` 提供列表、创建、详情、整体替换、YOLO 子资源、删除与会话列表，DTO 在模块内，删除按预期版本校验。
 会话归属允许分叉与通用直写，`chat_session` 记录 Chat 与 Session 的关联。
 
 **Project**：领域含可配置工作流与阶段、Issue、Run、Activity、阶段预算与证据，HTTP 面覆盖 `/api/projects`、

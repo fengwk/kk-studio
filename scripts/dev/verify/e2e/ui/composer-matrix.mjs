@@ -1557,7 +1557,7 @@ async function deleteChat(apiCtx, chat) {
   if (!chat?.id) return
   const currentResponse = await apiCtx.call(
     'GET',
-    `/api/chats/${encodeURIComponent(chat.id)}`,
+    `/api/chat/chats/${encodeURIComponent(chat.id)}`,
   )
   if (currentResponse.status === 404) return
   assert(
@@ -1567,7 +1567,7 @@ async function deleteChat(apiCtx, chat) {
   const current = currentResponse.json
   const response = await apiCtx.call(
     'DELETE',
-    `/api/chats/${encodeURIComponent(chat.id)}`
+    `/api/chat/chats/${encodeURIComponent(chat.id)}`
       + `?expectedVersion=${encodeURIComponent(current.version)}`,
   )
   assert(

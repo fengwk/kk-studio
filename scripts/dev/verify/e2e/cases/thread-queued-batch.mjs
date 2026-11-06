@@ -323,7 +323,7 @@ registerCase({
         if (chat?.id) {
           await ctx.call(
             'DELETE',
-            `/api/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(
+            `/api/chat/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(
               chat.version,
             )}`,
           )

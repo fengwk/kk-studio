@@ -97,7 +97,7 @@ async function apiJson(backendUrl, method, requestPath, body) {
 }
 
 async function apiDeleteByName(backendUrl, resource, name) {
-  const resourcePath = resource === 'chats' ? '/api/chats' : `/api/${resource}`
+  const resourcePath = resource === 'chats' ? '/api/chat/chats' : `/api/${resource}`
   const list = resource === 'chats'
     ? await listChats({ call: (method, requestPath) => apiJson(backendUrl, method, requestPath) })
     : (await apiJson(backendUrl, 'GET', `${resourcePath}?pageNumber=1&pageSize=100`)).json?.results || []

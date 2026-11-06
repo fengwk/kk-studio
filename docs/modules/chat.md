@@ -18,25 +18,26 @@ Chat 是直接持有 Harness Session 的产品之一：一次对话把多个 Ses
 | 包 | 内容 |
 | --- | --- |
 | [chat](../../apps/chat/src/main/java/fun/fengwk/kkstudio/chat) | `Chat`/`ChatSession` 值、两张表的 `JdbcClient` Repository、CRUD 与深删除服务、目录守卫、可变字段规范化、`ChatSessionOwnership` 与自动装配入口 |
-| [dto](../../apps/chat/src/main/java/fun/fengwk/kkstudio/chat/dto) | `/api/chats` 的公开 wire DTO；由契约生成器扫描，产物写入前端 `contracts.ts` |
-| [http](../../apps/chat/src/main/java/fun/fengwk/kkstudio/chat/http) | [`ChatController`](../../apps/chat/src/main/java/fun/fengwk/kkstudio/chat/http/ChatController.java)：只做 HTTP 映射与边界参数翻译 |
+| [dto](../../apps/chat/src/main/java/fun/fengwk/kkstudio/chat/dto) | `/api/chat/chats` 的公开 wire DTO；由契约生成器扫描，产物写入前端 `contracts.ts` |
+| [http](../../apps/chat/src/main/java/fun/fengwk/kkstudio/chat/http) | [`ChatController`](../../apps/chat/src/main/java/fun/fengwk/kkstudio/chat/http/ChatController.java)：只做 HTTP 映射，路径参数用 UUID |
 
 ## HTTP 接口
 
 | 方法与路径 | 语义 |
 | --- | --- |
-| `GET /api/chats?cursor=&limit=` | 按最近更新倒序返回 Chat 一页；`nextCursor` 非空表示还有下一页 |
-| `POST /api/chats` | 创建 Chat；省略 `yoloEnabled` 为 `false`，`environmentName` 可省略或为 null（都表示无默认环境），携带时必须为已存在的 Environment 名 |
-| `GET /api/chats/{chatId}` | 读取单个 Chat 的权威版本 |
-| `PUT /api/chats/{chatId}` | 部分更新；`expectedVersion` 必填，省略 `environmentName` 保留当前默认环境、显式 null 清空；未知或非 canonical Environment 名返回 400 且当前值/version 不变 |
-| `DELETE /api/chats/{chatId}?expectedVersion=` | 深删除 Chat 及其全部归属 Session |
-| `GET /api/chats/{chatId}/sessions?cursor=&limit=` | 按归属时间从新到旧返回该 Chat 的 Session 摘要一页 |
-| `GET /api/chats/{chatId}/sessions/{sessionId}` | 按 id 读取单个归属 Session 摘要；不存在或不属于该 Chat 返回 404 |
+| `GET /api/chat/chats?cursor=&limit=` | 按最近更新倒序返回 Chat 一页；`nextCursor` 非空表示还有下一页 |
+| `POST /api/chat/chats` | 创建 Chat，返回 201；省略 `yoloEnabled` 为 `false`，`environmentName` 可省略或为 null（都表示无默认环境），携带时必须为已存在的 Environment 名 |
+| `GET /api/chat/chats/{chatId}` | 读取单个 Chat 的权威版本 |
+| `PUT /api/chat/chats/{chatId}` | 整体替换 `title`、`agentName`、`environmentName` 与 `expectedVersion`；未知或非 canonical Environment 名返回 400 且当前值/version 不变 |
+| `PUT /api/chat/chats/{chatId}/yolo` | 单独设置 `yoloEnabled`，与 Chat 其他修改共享同一版本 |
+| `DELETE /api/chat/chats/{chatId}?expectedVersion=` | 深删除 Chat 及其全部归属 Session，返回 204 |
+| `GET /api/chat/chats/{chatId}/sessions?cursor=&limit=` | 按归属时间从新到旧返回该 Chat 的 Session 摘要一页 |
+| `GET /api/chat/chats/{chatId}/sessions/{sessionId}` | 按 id 读取单个归属 Session 摘要；不存在或不属于该 Chat 返回 404 |
 
 两个列表接口使用 keyset 分页：`limit` 缺省 50、范围 `[1, 100]`，`cursor` 是上一页返回的
 `nextCursor`，首屏省略；排序键包含唯一 id，因此相同时间戳与同名标题下也不会跳行或重复。Chat 的
-稳定顺序是 `(updateTime desc, createTime desc, title asc, id asc)`，Session 是
-`(createTime desc, sessionId desc)`。
+稳定顺序是 `(updatedAt desc, createdAt desc, title asc, id asc)`，Session 是
+`(createdAt desc, sessionId desc)`。
 
 成功响应直接返回资源；响应的 `environmentName` 是始终存在的 required-nullable 字段（未选择时为
 null）。`agentName` 与 `environmentName` 只按名称软引用目录行，不建立

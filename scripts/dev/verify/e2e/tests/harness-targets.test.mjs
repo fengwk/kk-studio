@@ -351,7 +351,7 @@ test('createChat sends a nullable environmentName and requires the projected fie
   const chat = await createChat(ctx, { title: 't', agentName: 'agent' })
   assert.equal(chat.environmentName, null)
   assert.equal(calls[0].method, 'POST')
-  assert.equal(calls[0].path, '/api/chats')
+  assert.equal(calls[0].path, '/api/chat/chats')
   assert.equal(Object.hasOwn(calls[0].body, 'environmentName'), true)
   assert.equal(calls[0].body.environmentName, null)
   assert.equal(calls[0].body.yoloEnabled, false)
