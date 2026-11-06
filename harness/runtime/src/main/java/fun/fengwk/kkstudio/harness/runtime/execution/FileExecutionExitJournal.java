@@ -5,6 +5,7 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitKind;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitState;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
@@ -384,7 +385,12 @@ public final class FileExecutionExitJournal implements ExecutionExitJournal {
   }
 
   private static UUID uuid(JsonNode node, String name) {
-    return UUID.fromString(text(node, name));
+    String value = text(node, name);
+    try {
+      return Uuids.parseCanonical(value, name);
+    } catch (IllegalArgumentException error) {
+      throw new IllegalArgumentException(name + " must be a canonical UUID", error);
+    }
   }
 
   private static String text(JsonNode node, String name) {

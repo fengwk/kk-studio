@@ -5,6 +5,7 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.harness.contributor.api.CustomStateSnapshot;
 import fun.fengwk.kkstudio.harness.model.HarnessJson;
 import fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport;
@@ -48,7 +49,7 @@ final class GoalProgressCodec {
     JsonCodecSupport.requireFields(node, FIELDS, "goal progress");
     UUID goalId;
     try {
-      goalId = UUID.fromString(requiredText(node, "goalId"));
+      goalId = Uuids.parseCanonical(requiredText(node, "goalId"), "goal progress.goalId");
     } catch (IllegalArgumentException error) {
       throw new IllegalArgumentException("goal progress.goalId must be a UUID", error);
     }

@@ -6,6 +6,7 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.model.HarnessJson;
 import fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport;
@@ -170,7 +171,7 @@ public final class InvocationJsonSupport {
       return null;
     }
     try {
-      return UUID.fromString(value);
+      return Uuids.parseCanonical(value, context + "." + field);
     } catch (IllegalArgumentException error) {
       throw new IllegalArgumentException(
           context + "." + field + " must be a canonical UUID string", error);

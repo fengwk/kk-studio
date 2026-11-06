@@ -11,6 +11,7 @@ import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.common.hash.Sha256;
+import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.harness.api.command.CommandValueValidation;
 import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.GoalCommandPayload;
@@ -266,7 +267,7 @@ public final class ThreadCommandPayloadJsonCodec {
       throw new IllegalArgumentException(context + "." + field + " must be a UUID string");
     }
     try {
-      return UUID.fromString(value.stringValue());
+      return Uuids.parseCanonical(value.stringValue(), context + "." + field);
     } catch (IllegalArgumentException error) {
       throw new IllegalArgumentException(context + "." + field + " must be a UUID string", error);
     }

@@ -46,6 +46,17 @@
     "error": "goal progress.goalId must be a UUID"
   },
   {
+    "name": "goal id is not canonical",
+    "mode": "decode",
+    "data": {
+      "goalId": "00000000-0000-0000-0000-00000000002A",
+      "status": "complete",
+      "reason": "done",
+      "reportedAt": "2026-01-01T00:00:00Z"
+    },
+    "error": "goal progress.goalId must be a UUID"
+  },
+  {
     "name": "non-terminal status",
     "mode": "decode",
     "data": {

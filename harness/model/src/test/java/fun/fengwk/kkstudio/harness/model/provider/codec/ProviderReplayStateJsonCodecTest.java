@@ -175,6 +175,12 @@ class ProviderReplayStateJsonCodecTest {
     ((ObjectNode) badUuid.get("affinity")).put("connectionGenerationId", "not-a-valid-uuid");
     assertThrows(IllegalArgumentException.class, () -> codec.decode(badUuid.toString()));
 
+    // 大写变体可被 UUID.fromString 解析，但持久化身份只接受 canonical 文本。
+    ObjectNode nonCanonicalUuid = (ObjectNode) codec.encodeNode(sampleState());
+    ((ObjectNode) nonCanonicalUuid.get("affinity"))
+        .put("connectionGenerationId", "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE");
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(nonCanonicalUuid.toString()));
+
     // affinity 不是 Object
     ObjectNode badAffinityType = (ObjectNode) codec.encodeNode(sampleState());
     badAffinityType.put("affinity", "string");

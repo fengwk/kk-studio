@@ -122,6 +122,12 @@ class ToolApprovalJsonCodecTest {
     assertInvalid(
         "{\"required\":true,\"decision\":null,\"decisionId\":null,\"actor\":null,"
             + "\"reason\":null,\"requestedAt\":\"not-an-instant\",\"decidedAt\":null}");
+    // decisionId 只接受 canonical UUID 文本：大写变体虽可解析，仍必须拒绝。
+    assertInvalid(
+        "{\"required\":true,\"decision\":\"ALLOWED\","
+            + "\"decisionId\":\"00000000-0000-0000-0000-00000000000A\",\"actor\":\"a\","
+            + "\"reason\":null,\"requestedAt\":\"2026-08-04T00:00:00Z\","
+            + "\"decidedAt\":\"2026-08-04T00:00:01Z\"}");
     assertInvalid(
         "{\"required\":true,\"decision\":null,\"decisionId\":null,\"actor\":null,"
             + "\"reason\":null,\"requestedAt\":1,\"decidedAt\":null}");

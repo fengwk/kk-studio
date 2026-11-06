@@ -733,6 +733,16 @@ class HistoryEntryPayloadJsonCodecTest {
             CODEC.decode(
                 EntryType.ROOT,
                 "{\"settings\":{" + base + ",\"goal\":{\"id\":\"not-a-uuid\",\"text\":\"x\"}}}"));
+    // 大写变体可被 UUID.fromString 解析，但持久化身份只接受 canonical 文本。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            CODEC.decode(
+                EntryType.ROOT,
+                "{\"settings\":{"
+                    + base
+                    + ",\"goal\":{\"id\":\"00000000-0000-0000-0000-0000000002BC\","
+                    + "\"text\":\"x\"}}}"));
   }
 
   @Test

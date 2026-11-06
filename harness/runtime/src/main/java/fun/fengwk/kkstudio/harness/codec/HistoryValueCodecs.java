@@ -105,7 +105,9 @@ final class HistoryValueCodecs {
     JsonCodecSupport.requireFields(goal, GOAL_FIELDS, context + "." + field);
     UUID id;
     try {
-      id = UUID.fromString(requiredText(goal, "id", context + "." + field));
+      id =
+          Uuids.parseCanonical(
+              requiredText(goal, "id", context + "." + field), context + "." + field + ".id");
     } catch (IllegalArgumentException error) {
       throw new IllegalArgumentException(context + "." + field + ".id must be a UUID", error);
     }
