@@ -21,8 +21,8 @@ import type { ResourceFieldKey } from '@/features/catalog/ai-resource-form-valid
 import { Select } from '@/shared/ui/controls/Select'
 import { translate, useI18n } from '@/shared/i18n'
 import type {
-  AgentDefinitionDTO,
-  AgentDefinitionType,
+  AgentDTO,
+  AgentType,
   SkillPackageSummaryDTO,
   ToolCatalogEntryDTO,
 } from '@/shared/api/generated/contracts'
@@ -48,10 +48,10 @@ export function AgentForm({
   draft: AgentDraft
   mode?: 'create' | 'edit'
   /** 系统持有的 Agent 类型；BUILTIN 允许未配置模型，USER 保持必填。 */
-  agentType?: AgentDefinitionType
+  agentType?: AgentType
   models: AgentModelView[]
   toolCatalog?: ToolCatalogEntryDTO[]
-  agents?: AgentDefinitionDTO[]
+  agents?: AgentDTO[]
   skills?: SkillPackageSummaryDTO[]
   skillsLoading?: boolean
   skillsError?: unknown

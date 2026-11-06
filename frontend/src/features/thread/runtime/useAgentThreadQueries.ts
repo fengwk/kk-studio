@@ -28,7 +28,7 @@ export function useAgentThreadQueries(threadId: string) {
   const sessionId = thread?.sessionId ?? ''
 
   // 为派生数组提供稳定的身份，避免依赖它们的 hook 在每次渲染时都重跑。
-  const agents = useMemo(() => agentsQuery.data?.results ?? [], [agentsQuery.data])
+  const agents = useMemo(() => agentsQuery.data ?? [], [agentsQuery.data])
   const models = useMemo(
     () => toAgentModelViews(modelsQuery.data?.results ?? []),
     [modelsQuery.data],

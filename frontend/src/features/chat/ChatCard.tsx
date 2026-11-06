@@ -6,7 +6,7 @@ import { useI18n } from '@/shared/i18n'
 import { ResourceCard } from '@/shared/ui/cards/ResourceCard'
 import { Button } from '@/shared/ui/controls/Button'
 import './chat-cards.css'
-import type { AgentDefinitionDTO, ChatDTO } from '@/shared/api/generated/contracts'
+import type { AgentDTO, ChatDTO } from '@/shared/api/generated/contracts'
 
 export function ChatCard({
   chat,
@@ -16,7 +16,7 @@ export function ChatCard({
   deletePending = false,
 }: {
   chat: ChatDTO
-  agents: AgentDefinitionDTO[]
+  agents: AgentDTO[]
   onEdit?: () => void
   onDelete?: () => void
   deletePending?: boolean

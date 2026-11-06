@@ -1,10 +1,10 @@
-import { apiClient, type HttpClient } from '@/shared/api/client'
+import { apiClient, request, type HttpClient } from '@/shared/api/client'
 import type { PageResult } from '@/shared/api/contracts/base'
 import { parseJsonPreservingPathEqualsNumbers } from '@/shared/lib/lossless-json-number'
 import type {
-  AgentDefinitionCreateDTO,
-  AgentDefinitionDTO,
-  AgentDefinitionUpdateDTO,
+  AgentCreateDTO,
+  AgentDTO,
+  AgentUpdateDTO,
   AgentModelCreateDTO,
   AgentModelDTO,
   AgentModelUpdateDTO,
@@ -92,19 +92,18 @@ export function createAgentService(client: HttpClient = apiClient) {
         jsonParser: parseJsonPreservingPathEqualsNumbers,
       }),
 
-    listAgents: (pageNumber = 1, pageSize = 50): Promise<PageResult<AgentDefinitionDTO>> =>
-      client.get('/agents', { params: { pageNumber, pageSize } }),
+    listAgents: (): Promise<AgentDTO[]> => request('GET /api/platform/agents', {}),
 
     listTools: (): Promise<ToolCatalogEntryDTO[]> => client.get('/tools'),
 
-    createAgent: (data: AgentDefinitionCreateDTO): Promise<AgentDefinitionDTO> =>
-      client.post('/agents', data),
+    createAgent: (data: AgentCreateDTO): Promise<AgentDTO> =>
+      request('POST /api/platform/agents', { body: data }),
 
-    updateAgent: (name: string, data: AgentDefinitionUpdateDTO): Promise<AgentDefinitionDTO> =>
-      client.put(`/agents/${encodeURIComponent(name)}`, data),
+    updateAgent: (name: string, data: AgentUpdateDTO): Promise<AgentDTO> =>
+      request('PUT /api/platform/agents/{name}', { path: { name }, body: data }),
 
     deleteAgent: (name: string, expectedVersion: string): Promise<void> =>
-      client.delete(`/agents/${encodeURIComponent(name)}`, { params: { expectedVersion } }),
+      request('DELETE /api/platform/agents/{name}', { path: { name }, query: { expectedVersion } }),
 
     // --- Global Skills & Skill Packages ---
 

@@ -5,7 +5,7 @@ import {
   type AgentModelView,
 } from '@/features/catalog/AgentModelView'
 import { translate, useI18n } from '@/shared/i18n'
-import type { AgentDefinitionDTO } from '@/shared/api/generated/contracts'
+import type { AgentDTO } from '@/shared/api/generated/contracts'
 import { getBuiltinModelSelection } from '@/shared/api/contracts/ai-runtime'
 
 /**
@@ -42,7 +42,7 @@ export function AgentResourceCard({
   onDelete,
   deletePending,
 }: {
-  agent: AgentDefinitionDTO
+  agent: AgentDTO
   models?: AgentModelView[]
   onEdit: () => void
   onDelete: () => void

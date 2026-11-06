@@ -1,5 +1,5 @@
 import type {
-  AgentDefinitionUpdateDTO,
+  AgentUpdateDTO,
   AgentModelUpdateDTO,
   AgentProviderDTO,
   AgentProviderUpdateDTO,
@@ -39,4 +39,4 @@ export function defaultPromptCacheRetention(
 /** 更新请求体去掉乐观锁版本后的可编辑部分；编辑表单整体替换这些字段。 */
 export type AgentProviderEditablePropertiesDTO = Omit<AgentProviderUpdateDTO, 'expectedVersion'>
 export type AgentModelEditablePropertiesDTO = Omit<AgentModelUpdateDTO, 'expectedVersion'>
-export type AgentDefinitionEditablePropertiesDTO = Omit<AgentDefinitionUpdateDTO, 'expectedVersion'>
+export type AgentEditablePropertiesDTO = Omit<AgentUpdateDTO, 'expectedVersion'>

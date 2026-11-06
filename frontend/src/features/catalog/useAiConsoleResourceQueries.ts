@@ -16,7 +16,7 @@ export interface AiConsoleResourceQueries {
   resources: {
     providers: Awaited<ReturnType<typeof agentService.listProviders>>['results']
     models: AgentModelView[]
-    agents: Awaited<ReturnType<typeof agentService.listAgents>>['results']
+    agents: Awaited<ReturnType<typeof agentService.listAgents>>
     toolCatalog: Awaited<ReturnType<typeof agentService.listTools>>
     skills: Awaited<ReturnType<typeof agentService.listSkillPackages>>
     environments: Awaited<ReturnType<typeof environmentService.listEnvironments>>
@@ -83,7 +83,7 @@ export function useAiConsoleResourceQueries(
     resources: {
       providers: providersQuery.data?.results ?? [],
       models: toAgentModelViews(modelsQuery.data?.results ?? []),
-      agents: agentsQuery.data?.results ?? [],
+      agents: agentsQuery.data ?? [],
       toolCatalog: toolsQuery.data ?? [],
       skills: skillsQuery.data ?? [],
       environments: environmentsQuery.data ?? [],

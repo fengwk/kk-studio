@@ -5,7 +5,7 @@ import { agentService } from '@/shared/api/agent-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { unavailableSkills } from '@/features/thread/runtime/skill-availability'
 import type {
-  AgentDefinitionDTO,
+  AgentDTO,
   EnvironmentCardDTO,
   SkillEnvironmentSyncDTO,
 } from '@/shared/api/generated/contracts'
@@ -29,7 +29,7 @@ export function SkillEnvironmentHint({
   agentName: string | null
   /** 执行根生效的 Environment 名；null 表示未选择环境。 */
   environmentName: string | null
-  agents: AgentDefinitionDTO[]
+  agents: AgentDTO[]
   environments: EnvironmentCardDTO[]
 }) {
   const { t } = useI18n()

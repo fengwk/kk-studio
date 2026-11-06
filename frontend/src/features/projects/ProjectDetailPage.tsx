@@ -506,7 +506,7 @@ export function ProjectDetailPage({
                 <AgentPane
                   key={queryThreadId}
                   paneId={`project-issue-${queryThreadId}`}
-                  agents={agentsQuery.data?.results ?? []}
+                  agents={agentsQuery.data ?? []}
                   environments={environmentsQuery.data ?? []}
                   initialTarget={{ kind: 'BOUND_THREAD', threadId: queryThreadId }}
                   capabilities={{

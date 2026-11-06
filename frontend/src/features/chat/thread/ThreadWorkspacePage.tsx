@@ -16,7 +16,7 @@ import { shouldDeferToBlockingModal } from '@/shared/ui/blocking-overlay'
 import '@/features/chat/chat-workspace.css'
 import '@/features/thread/thread-state.css'
 import type {
-  AgentDefinitionDTO,
+  AgentDTO,
   EnvironmentCardDTO,
   HarnessThreadDTO,
 } from '@/shared/api/generated/contracts'
@@ -72,13 +72,13 @@ export function ThreadWorkspacePage() {
   }
 
   return <ThreadWorkspaceContent key={threadId} thread={threadQuery.data.thread}
-    agents={agentsQuery.data?.results ?? []} environments={environmentsQuery.data ?? []} />
+    agents={agentsQuery.data ?? []} environments={environmentsQuery.data ?? []} />
 }
 
 /** 路由身份同时隔离 presentation：新地址即使缓存命中也不复用上一地址的报告/动作。 */
 function ThreadWorkspaceContent({ thread, agents, environments }: {
   thread: HarnessThreadDTO
-  agents: AgentDefinitionDTO[]
+  agents: AgentDTO[]
   environments: EnvironmentCardDTO[]
 }) {
   const { t } = useI18n()

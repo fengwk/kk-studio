@@ -7,7 +7,7 @@ import {
 import type { AgentModelView } from '@/features/catalog'
 import { parsePayload } from '@/features/thread/runtime/payload-json'
 import type {
-  AgentDefinitionDTO,
+  AgentDTO,
   HarnessBranchSettingsDTO,
   HarnessExecutionSelectionDTO,
   HarnessThreadCommandDTO,
@@ -30,7 +30,7 @@ export interface BranchDraft {
  * - variant = agent override 或 model 的 defaultVariant
  */
 export function materializeBlankBranchDraft(
-  agent: AgentDefinitionDTO | undefined,
+  agent: AgentDTO | undefined,
   yoloEnabled: boolean,
   models: AgentModelView[],
   environmentName?: string | null,
@@ -73,7 +73,7 @@ export function materializeBlankBranchDraft(
  * 始终采用目标 Agent 所选取的 model 与 variant，同时保留已有 draft 的 environmentName 与 yoloEnabled。
  */
 export function materializeAgentBranchDraft(
-  agent: AgentDefinitionDTO,
+  agent: AgentDTO,
   models: AgentModelView[],
   existing: BranchDraft | null,
   fallbackYoloEnabled?: boolean,

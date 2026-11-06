@@ -72,14 +72,14 @@ import type {
   RenameTarget,
 } from '@/features/thread/runtime/root-thread/types'
 import type {
-  AgentDefinitionDTO,
+  AgentDTO,
   EnvironmentCardDTO,
 } from '@/shared/api/generated/contracts'
 
 export interface UseRootThreadControlOptions {
   owner?: AgentRuntimeOwnerDTO
   paneId: string
-  agents: AgentDefinitionDTO[]
+  agents: AgentDTO[]
   environments: EnvironmentCardDTO[]
   defaults: AgentPaneDefaults
   focused: boolean

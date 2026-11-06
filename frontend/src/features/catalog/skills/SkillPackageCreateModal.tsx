@@ -48,31 +48,17 @@ const STAGE_LABEL_KEYS: Record<UploadStage, TranslationKey> = {
   PACKAGING: 'ai.skillPackages.stage.packaging',
 }
 
-const AGENT_REFERENCE_PAGE_SIZE = 100
-
-/** 全量分页读取 Agent 技能引用；预览只据此提示，最终发布仍由服务端校验。 */
+/** 全量读取 Agent 技能引用；预览只据此提示，最终发布仍由服务端校验。 */
 async function fetchAgentSkillReferences(): Promise<Map<string, string[]>> {
   const references = new Map<string, Set<string>>()
-  let pageNumber = 1
-  while (true) {
-    const page = await agentService.listAgents(pageNumber, AGENT_REFERENCE_PAGE_SIZE)
-    const results = page?.results ?? []
-    for (const agent of results) {
-      for (const skill of agent.config?.skills ?? []) {
-        const key = skillReferenceKey(skill.packageName, skill.name)
-        const names = references.get(key) ?? new Set<string>()
-        names.add(agent.name)
-        references.set(key, names)
-      }
+  const agents = await agentService.listAgents()
+  for (const agent of agents ?? []) {
+    for (const skill of agent.config?.skills ?? []) {
+      const key = skillReferenceKey(skill.packageName, skill.name)
+      const names = references.get(key) ?? new Set<string>()
+      names.add(agent.name)
+      references.set(key, names)
     }
-    const totalCount = Number(page?.totalCount ?? 0)
-    if (
-      results.length < AGENT_REFERENCE_PAGE_SIZE
-      || (totalCount > 0 && pageNumber * AGENT_REFERENCE_PAGE_SIZE >= totalCount)
-    ) {
-      break
-    }
-    pageNumber += 1
   }
   return new Map(
     Array.from(references, ([key, names]) => [key, Array.from(names).sort((a, b) => a.localeCompare(b))]),

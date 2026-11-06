@@ -2,8 +2,8 @@ import { agentService } from '@/shared/api/agent-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useInvalidateMutation } from '@/shared/lib/useInvalidateMutation'
 import type {
-  AgentDefinitionCreateDTO,
-  AgentDefinitionUpdateDTO,
+  AgentCreateDTO,
+  AgentUpdateDTO,
   AgentModelCreateDTO,
   AgentModelUpdateDTO,
   AgentProviderCreateDTO,
@@ -62,12 +62,12 @@ export function useAiConsoleResourceMutations({
     onSuccess: onDeleteCompleted,
   })
   const createAgentMutation = useInvalidateMutation({
-    mutationFn: (agent: AgentDefinitionCreateDTO) => agentService.createAgent(agent),
+    mutationFn: (agent: AgentCreateDTO) => agentService.createAgent(agent),
     invalidateQueryKeys: [queryKeys.agents.list],
     onSuccess: onResourceSaved,
   })
   const updateAgentMutation = useInvalidateMutation({
-    mutationFn: ({ name, data }: { name: string; data: AgentDefinitionUpdateDTO }) =>
+    mutationFn: ({ name, data }: { name: string; data: AgentUpdateDTO }) =>
       agentService.updateAgent(name, data),
     invalidateQueryKeys: [queryKeys.agents.list, queryKeys.threads.all],
     onSuccess: onResourceSaved,
@@ -102,8 +102,8 @@ export function useAiConsoleResourceMutations({
       updateModelMutation.mutate({ name, data }),
     deleteModel: (name: string, expectedVersion: string) =>
       deleteModelMutation.mutate({ name, expectedVersion }),
-    createAgent: (data: AgentDefinitionCreateDTO) => createAgentMutation.mutate(data),
-    updateAgent: (name: string, data: AgentDefinitionUpdateDTO) =>
+    createAgent: (data: AgentCreateDTO) => createAgentMutation.mutate(data),
+    updateAgent: (name: string, data: AgentUpdateDTO) =>
       updateAgentMutation.mutate({ name, data }),
     deleteAgent: (name: string, expectedVersion: string) =>
       deleteAgentMutation.mutate({ name, expectedVersion }),

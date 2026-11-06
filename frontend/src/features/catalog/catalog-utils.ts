@@ -2,7 +2,7 @@ import type { AgentModelView } from '@/features/catalog/AgentModelView'
 import { includesSearch, naturalNameCompare } from '@/shared/lib/search-utils'
 import type { ResourceModal } from '@/features/catalog/ai-console-types'
 import { translate, type TranslationKey } from '@/shared/i18n'
-import type { AgentDefinitionDTO, AgentProviderDTO } from '@/shared/api/generated/contracts'
+import type { AgentDTO, AgentProviderDTO } from '@/shared/api/generated/contracts'
 
 export function resourceTitle(modal: ResourceModal): string {
   const prefix = modal.mode === 'create'
@@ -21,7 +21,7 @@ export function resourceTitle(modal: ResourceModal): string {
   return `${prefix} ${translate('ai.catalog.resourceType.agent')}`
 }
 
-export function filterAgents(agents: AgentDefinitionDTO[], search: string): AgentDefinitionDTO[] {
+export function filterAgents(agents: AgentDTO[], search: string): AgentDTO[] {
   return agents
     .filter((agent) => includesSearch(agent.name, search))
     .sort((left, right) => naturalNameCompare(left.name, right.name))
