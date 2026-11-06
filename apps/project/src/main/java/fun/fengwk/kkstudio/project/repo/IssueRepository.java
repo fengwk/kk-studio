@@ -20,7 +20,7 @@ public class IssueRepository {
   private static final String COLUMNS =
       "id, project_id, number, title, description, state, blocked_from_state, block_reason,"
           + " pause_reason, pause_detail, next_run_ordinal, next_activity_sequence, version,"
-          + " archived_at, created_at, updated_at";
+          + " created_at, updated_at";
 
   private static final RowMapper<Issue> ROW_MAPPER =
       (resultSet, rowNumber) -> {
@@ -42,7 +42,6 @@ public class IssueRepository {
             .nextRunOrdinal(nextRunOrdinal != null ? nextRunOrdinal : 1L)
             .nextActivitySequence(nextActivitySequence != null ? nextActivitySequence : 1L)
             .version(version != null ? version : 0L)
-            .archivedAt(ProjectRows.nullableInstant(resultSet, "archived_at"))
             .createdAt(ProjectRows.nullableInstant(resultSet, "created_at"))
             .updatedAt(ProjectRows.nullableInstant(resultSet, "updated_at"))
             .build();
@@ -62,10 +61,10 @@ public class IssueRepository {
                     "insert into project_issue ("
                         + "id, project_id, number, title, description, state, blocked_from_state,"
                         + " block_reason, pause_reason, pause_detail, next_run_ordinal,"
-                        + " next_activity_sequence, version, archived_at, created_at, updated_at"
+                        + " next_activity_sequence, version, created_at, updated_at"
                         + ") values ("
                         + ":id, :projectId, :number, :title, :description, :state, null,"
-                        + " null, null, null, 1, 1, 0, null, clock_timestamp(), clock_timestamp())")
+                        + " null, null, null, 1, 1, 0, clock_timestamp(), clock_timestamp())")
                 .param("id", issue.getId())
                 .param("projectId", issue.getProjectId())
                 .param("number", issue.getNumber())
@@ -107,18 +106,6 @@ public class IssueRepository {
         .list();
   }
 
-  public List<Issue> listByProjectIdAndArchived(UUID projectId, boolean archived) {
-    return jdbc.sql(
-            "select "
-                + COLUMNS
-                + " from project_issue where project_id = :projectId"
-                + " and (archived_at is not null) = :archived order by number asc")
-        .param("projectId", projectId)
-        .param("archived", archived)
-        .query(ROW_MAPPER)
-        .list();
-  }
-
   /** 以版本 CAS 更新状态、阻塞恢复点、暂停门禁与编号/序号分配游标。 */
   public boolean updateById(Issue issue, long expectedVersion) {
     boolean changed =
@@ -133,7 +120,6 @@ public class IssueRepository {
                         + " pause_detail = :pauseDetail,"
                         + " next_run_ordinal = :nextRunOrdinal,"
                         + " next_activity_sequence = :nextActivitySequence,"
-                        + " archived_at = :archivedAt,"
                         + " updated_at = clock_timestamp(),"
                         + " version = version + 1"
                         + " where id = :id and version = :expectedVersion")
@@ -146,7 +132,6 @@ public class IssueRepository {
                 .param("pauseDetail", issue.getPauseDetail())
                 .param("nextRunOrdinal", issue.getNextRunOrdinal())
                 .param("nextActivitySequence", issue.getNextActivitySequence())
-                .param("archivedAt", ProjectRows.timestamp(issue.getArchivedAt()))
                 .param("id", issue.getId())
                 .param("expectedVersion", expectedVersion)
                 .update()

@@ -1,12 +1,15 @@
 package fun.fengwk.kkstudio.project.dto;
 
-import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.jspecify.annotations.Nullable;
+
+import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
+
+import java.time.Instant;
 
 /** IssueRun 完整执行事实 DTO。 */
 @Data
@@ -18,6 +21,8 @@ public class IssueRunDTO {
   private String id;
   private String issueId;
   private String ordinal;
+
+  /** 工作流自然状态编码，保持开放字符串。 */
   private String state;
 
   @JsonInclude(JsonInclude.Include.ALWAYS)
@@ -25,7 +30,7 @@ public class IssueRunDTO {
 
   private String sessionId;
   private String threadId;
-  private String status;
+  private IssueRunStatus status;
   private String startEntryId;
 
   @JsonInclude(JsonInclude.Include.ALWAYS)
@@ -44,13 +49,8 @@ public class IssueRunDTO {
   private @Nullable String error;
 
   private String version;
-  private String startedAt;
+  private Instant startedAt;
 
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private @Nullable String endedAt;
-
-  @JsonAnySetter
-  public void rejectUnknownField(String name, Object value) {
-    throw new IllegalArgumentException("Unknown response field");
-  }
+  private @Nullable Instant endedAt;
 }

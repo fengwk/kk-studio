@@ -45,13 +45,8 @@ public class Issue {
   private long nextRunOrdinal;
   private long nextActivitySequence;
   private long version;
-  private Instant archivedAt;
   private Instant createdAt;
   private Instant updatedAt;
-
-  public boolean isArchived() {
-    return archivedAt != null;
-  }
 
   /** 是否存在阻止新派发的控制暂停门禁。 */
   public boolean isPaused() {

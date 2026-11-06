@@ -1,12 +1,11 @@
 package fun.fengwk.kkstudio.project.dto;
 
-import com.fasterxml.jackson.annotation.JsonAnySetter;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-/** 项目版本 CAS 请求 DTO，用于归档、解归档、删除等操作。 */
+/** 只携带乐观锁版本的 Project 动作请求 DTO。 */
 @Data
 @Builder
 @NoArgsConstructor
@@ -14,9 +13,4 @@ import lombok.NoArgsConstructor;
 public class ProjectVersionRequestDTO {
 
   private String expectedVersion;
-
-  @JsonAnySetter
-  public void rejectUnknownField(String name, Object value) {
-    throw new IllegalArgumentException("Unknown request field");
-  }
 }

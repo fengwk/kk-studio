@@ -92,7 +92,7 @@ public class ProjectSessionOwnership implements SessionOwnership {
     if (locked == null || !projectId.equals(locked.getProjectId())) {
       throw new IllegalStateException("Issue owner hierarchy is inconsistent");
     }
-    if (!allowArchived && (project.isArchived() || locked.isArchived())) {
+    if (!allowArchived && project.isArchived()) {
       throw new IllegalArgumentException("Owner is archived");
     }
     return locked;

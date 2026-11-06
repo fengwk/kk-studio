@@ -1,12 +1,15 @@
 package fun.fengwk.kkstudio.project.dto;
 
-import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.jspecify.annotations.Nullable;
+
+import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
+
+import java.time.Instant;
 
 /** IssueRun 概要信息 DTO。 */
 @Data
@@ -18,19 +21,17 @@ public class IssueRunSummaryDTO {
   private String id;
   private String issueId;
   private String ordinal;
+
+  /** 工作流自然状态编码，保持开放字符串。 */
   private String state;
-  private String status;
+
+  private IssueRunStatus status;
 
   @JsonInclude(JsonInclude.Include.ALWAYS)
   private @Nullable String agentName;
 
-  private String startedAt;
+  private Instant startedAt;
 
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private @Nullable String endedAt;
-
-  @JsonAnySetter
-  public void rejectUnknownField(String name, Object value) {
-    throw new IllegalArgumentException("Unknown response field");
-  }
+  private @Nullable Instant endedAt;
 }

@@ -43,7 +43,7 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * {@code POST /api/issues/{issueId}/evidence} 的人工上传公开证据端到端测试（真实 PostgreSQL + 内存 S3 假件）。
+ * {@code POST /api/project/issues/{issueId}/evidence} 的人工上传公开证据端到端测试（真实 PostgreSQL + 内存 S3 假件）。
  *
  * <p>测试意图：
  *
@@ -99,7 +99,7 @@ class IssueEvidencePublishIntegrationTest extends WebPostgresTestSupport {
     MvcResult result =
         mockMvc
             .perform(
-                post("/api/issues/" + issueId + "/evidence")
+                post("/api/project/issues/" + issueId + "/evidence")
                     .contentType(MediaType.APPLICATION_JSON)
                     .content("{\"uploadId\":\"" + uploadId + "\"}"))
             .andExpect(status().isCreated())
@@ -108,7 +108,7 @@ class IssueEvidencePublishIntegrationTest extends WebPostgresTestSupport {
             .andExpect(jsonPath("$.uri").value(uri))
             .andExpect(jsonPath("$.name").value("acceptance.txt"))
             .andExpect(jsonPath("$.runId").value(nullValue()))
-            .andExpect(jsonPath("$.createdAt").isString())
+            .andExpect(jsonPath("$.createdAt").isNumber())
             .andReturn();
 
     // 公开不复制字节：对象 key 集合与最终对象内容在发布前后逐字节一致，响应也不暴露物理 key
@@ -155,11 +155,11 @@ class IssueEvidencePublishIntegrationTest extends WebPostgresTestSupport {
 
     mockMvc
         .perform(
-            post("/api/issues/" + issueId + "/evidence")
+            post("/api/project/issues/" + issueId + "/evidence")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"uploadId\":\"" + uploadId + "\"}"))
         .andExpect(status().isBadRequest())
-        .andExpect(jsonPath("$.code").value("PROJECT_VALIDATION_ERROR"));
+        .andExpect(jsonPath("$.code").value("validation"));
 
     assertEquals(1, support.count("project_issue_evidence", "issue_id", issueId));
     assertEquals(1L, support.refCount(blobId), "rejected replay must not retain the blob again");
@@ -176,23 +176,23 @@ class IssueEvidencePublishIntegrationTest extends WebPostgresTestSupport {
 
     mockMvc
         .perform(
-            post("/api/issues/" + issueId + "/evidence")
+            post("/api/project/issues/" + issueId + "/evidence")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"uploadId\":\"" + pending.getId() + "\"}"))
         .andExpect(status().isBadRequest())
-        .andExpect(jsonPath("$.code").value("PROJECT_VALIDATION_ERROR"));
+        .andExpect(jsonPath("$.code").value("validation"));
 
     mockMvc
         .perform(
-            post("/api/issues/" + issueId + "/evidence")
+            post("/api/project/issues/" + issueId + "/evidence")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"uploadId\":\"" + UUID.randomUUID() + "\"}"))
         .andExpect(status().isNotFound())
-        .andExpect(jsonPath("$.code").value("PROJECT_RESOURCE_NOT_FOUND"));
+        .andExpect(jsonPath("$.code").value("not_found"));
 
     mockMvc
         .perform(
-            post("/api/issues/" + issueId + "/evidence")
+            post("/api/project/issues/" + issueId + "/evidence")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"uploadId\":\"not-a-uuid\"}"))
         .andExpect(status().isBadRequest());
@@ -207,33 +207,6 @@ class IssueEvidencePublishIntegrationTest extends WebPostgresTestSupport {
         "PENDING upload stays pending: refused publication must not bind or consume it");
   }
 
-  @Test
-  void archivedIssueRejectsPublicationWithoutConsumingTheUpload() throws Exception {
-    UUID uploadId = support.readyUpload("late.txt", "late body");
-    UUID blobId = support.blobIdOf(uploadId);
-    // 已归档 Issue 只读：无活动 Run 时可直接归档，任何公开入口都必须拒绝
-    Issue issue = issueEditingService.getIssue(issueId);
-    issueLifecycleService.archiveIssue(issueId, issue.getVersion());
-
-    mockMvc
-        .perform(
-            post("/api/issues/" + issueId + "/evidence")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"uploadId\":\"" + uploadId + "\"}"))
-        .andExpect(status().isBadRequest())
-        .andExpect(jsonPath("$.code").value("PROJECT_VALIDATION_ERROR"));
-
-    assertEquals(0, support.count("project_issue_evidence", "issue_id", issueId));
-    assertEquals(
-        1L, support.refCount(blobId), "refused publication must keep the upload reference");
-    assertNull(
-        jdbc.queryForObject(
-            "select cleanup_requested_at from storage_upload where id = ?",
-            Instant.class,
-            uploadId),
-        "refused publication must not consume the upload");
-  }
-
   private int commentActivityCount() {
     Integer count =
         jdbc.queryForObject(
@@ -246,7 +219,7 @@ class IssueEvidencePublishIntegrationTest extends WebPostgresTestSupport {
   private void publishEvidence(UUID uploadId) throws Exception {
     mockMvc
         .perform(
-            post("/api/issues/" + issueId + "/evidence")
+            post("/api/project/issues/" + issueId + "/evidence")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"uploadId\":\"" + uploadId + "\"}"))
         .andExpect(status().isCreated());

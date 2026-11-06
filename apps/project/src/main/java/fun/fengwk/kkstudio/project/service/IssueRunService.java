@@ -128,9 +128,6 @@ public class IssueRunService {
     if (project.isArchived()) {
       throw DomainException.validation("project", "Cannot accept a run in an archived project");
     }
-    if (issue.isArchived()) {
-      throw DomainException.validation("issue", "Cannot accept a run for an archived issue");
-    }
     if (issue.isGateClosed()) {
       throw DomainException.validation(
           "issue", "Cannot accept a run while the issue gate is closed");

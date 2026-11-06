@@ -69,10 +69,6 @@ public class IssueEvidenceService {
     if (!issue.getProjectId().equals(project.getId())) {
       throw DomainException.validation("issue", "Issue hierarchy is inconsistent");
     }
-    if (issue.isArchived()) {
-      throw DomainException.validation("issue", "Cannot publish evidence for an archived issue");
-    }
-
     EvidenceBlobs.ReadyUpload ready = blobPort.lockReadyUpload(uploadId);
     UUID blobId = ready.blobId();
     IssueEvidence existing = issueEvidenceRepository.get(issueId, blobId);
@@ -148,10 +144,6 @@ public class IssueEvidenceService {
     if (issue == null) {
       throw DomainException.notFound("issue");
     }
-    if (issue.isArchived()) {
-      throw DomainException.validation("issue", "Cannot publish evidence for an archived issue");
-    }
-
     if (runId != null) {
       if (actorAgentName == null || actorAgentName.isBlank()) {
         throw DomainException.validation(

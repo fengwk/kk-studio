@@ -125,7 +125,7 @@ class IssueEvidenceLifecycleIntegrationTest extends WebPostgresTestSupport {
     for (int attempt = 0; attempt < 2; attempt++) {
       mockMvc
           .perform(
-              post("/api/issues/" + fixture.issueId() + "/activities")
+              post("/api/project/issues/" + fixture.issueId() + "/activities")
                   .contentType(MediaType.APPLICATION_JSON)
                   .content(body))
           .andExpect(status().isCreated())
@@ -147,7 +147,7 @@ class IssueEvidenceLifecycleIntegrationTest extends WebPostgresTestSupport {
     String commentKey = "comment-" + UUID.randomUUID();
     mockMvc
         .perform(
-            post("/api/issues/" + fixture.issueId() + "/activities")
+            post("/api/project/issues/" + fixture.issueId() + "/activities")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     "{\"expectedVersion\":\""
@@ -388,7 +388,8 @@ class IssueEvidenceLifecycleIntegrationTest extends WebPostgresTestSupport {
         "wire-" + id,
         "{\"limit\":{\"context\":128000,\"output\":8192},"
             + "\"abilities\":{\"tools\":true,\"reasoning\":true,\"inputModalities\":[\"TEXT\"]},"
-            + "\"variants\":[{\"id\":\"default\"}],\"defaultVariant\":\"default\","
+            + "\"variants\":[{\"id\":\"default\",\"promptCacheRetention\":\"NONE\"}],"
+            + "\"defaultVariant\":\"default\","
             + "\"pricing\":{\"base\":{\"input\":\"0\",\"output\":\"0\",\"cacheRead\":\"0\","
             + "\"cacheWrite\":\"0\",\"cacheWriteByTtl\":{},\"reasoning\":\"0\"},"
             + "\"overrides\":[],\"multipliers\":[]}}");

@@ -1571,7 +1571,6 @@ create table project_issue (
     next_run_ordinal bigint not null default 1 check (next_run_ordinal >= 1),
     next_activity_sequence bigint not null default 1 check (next_activity_sequence >= 1),
     version bigint not null default 0 check (version >= 0),
-    archived_at timestamptz(3),
     created_at timestamptz(3) not null default current_timestamp,
     updated_at timestamptz(3) not null default current_timestamp,
     unique (project_id, number),
@@ -1594,9 +1593,8 @@ comment on column project_issue.pause_detail is '控制暂停详情（非空白�
 comment on column project_issue.next_run_ordinal is '下一个 Run ordinal 分配器，>= 1';
 comment on column project_issue.next_activity_sequence is '下一个 Activity sequence 分配器，>= 1';
 comment on column project_issue.version is '乐观锁行版本，>= 0';
-comment on column project_issue.archived_at is '归档时间戳，为空表示活跃';
 
-create index idx_project_issue_board on project_issue (project_id, state, number) where archived_at is null;
+create index idx_project_issue_board on project_issue (project_id, state, number);
 
 create table project_issue_agent_thread (
     issue_id uuid not null,

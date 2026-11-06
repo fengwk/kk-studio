@@ -1,10 +1,11 @@
 package fun.fengwk.kkstudio.project.dto;
 
-import com.fasterxml.jackson.annotation.JsonAnySetter;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+
+import java.util.UUID;
 
 /** 人工发布 Issue 证据请求 DTO。 */
 @Data
@@ -13,10 +14,6 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 public class AddIssueEvidenceRequestDTO {
 
-  private String uploadId;
-
-  @JsonAnySetter
-  public void rejectUnknownField(String name, Object value) {
-    throw new IllegalArgumentException("Unknown request field");
-  }
+  /** 待发布上传的 id。 */
+  private UUID uploadId;
 }

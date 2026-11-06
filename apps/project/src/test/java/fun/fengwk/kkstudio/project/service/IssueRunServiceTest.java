@@ -223,7 +223,7 @@ class IssueRunServiceTest {
     verify(threadExecutions, never()).submitRunTask(any());
   }
 
-  /** 归档后的项目和 Issue 均不能接受新的 Run。 */
+  /** 归档后的项目不能接受新的 Run。 */
   @Test
   void rejectsArchivedOwnersBeforeDispatch() {
     Issue issue = issue();
@@ -235,10 +235,6 @@ class IssueRunServiceTest {
     project.setArchivedAt(Instant.now());
     DomainException projectError = assertValidation(() -> service.acceptRun(ISSUE_ID, "start"));
     assertTrue(projectError.getMessage().contains("archived project"));
-    project.setArchivedAt(null);
-    issue.setArchivedAt(Instant.now());
-    DomainException issueError = assertValidation(() -> service.acceptRun(ISSUE_ID, "start"));
-    assertTrue(issueError.getMessage().contains("archived issue"));
     verify(threadExecutions, never()).submitRunTask(any());
     verify(issueRunRepository, never()).insert(any());
   }

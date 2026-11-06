@@ -482,7 +482,7 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
     assertEquals("New Desc", updated.getDescription());
 
     // listIssues
-    List<Issue> activeIssues = issueEditingService.listIssues(projectId, false);
+    List<Issue> activeIssues = issueEditingService.listIssues(projectId);
     assertEquals(1, activeIssues.size());
 
     // authorizeStageBudget
@@ -518,43 +518,6 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
     assertEquals(10, resetBudget.maxRuns());
   }
 
-  /** 测试意图：验证 Issue 归档与解归档、在已归档 Issue 上的写操作防御拒绝。 */
-  @Test
-  void issueArchiveAndUnarchiveOperations() {
-    String agent = createAgent();
-    UUID projectId = createProjectWithStages("ArchiveProj", agent, agent, 3);
-    Issue issue = createIssue(projectId);
-
-    Issue archived = issueLifecycleService.archiveIssue(issue.getId(), issue.getVersion());
-    assertTrue(archived.isArchived());
-
-    // 幂等重复归档返回原 Issue
-    Issue archived2 = issueLifecycleService.archiveIssue(archived.getId(), archived.getVersion());
-    assertEquals(archived.getId(), archived2.getId());
-
-    // 在已归档 Issue 上尝试修改需求、评论、流转等操作均被拒绝
-    assertValidation(
-        () -> issueEditingService.updateIssue(archived.getId(), archived.getVersion(), "T", "D"));
-    assertValidation(
-        () ->
-            issueEditingService.appendActivity(
-                archived.getId(), archived.getVersion(), "COMMENT", key("c"), "body"));
-    assertValidation(
-        () ->
-            issueLifecycleService.transition(
-                archived.getId(), archived.getVersion(), key("t"), "DESIGN"));
-
-    // 解归档回到可编辑状态
-    Issue unarchived =
-        issueLifecycleService.unarchiveIssue(archived.getId(), archived.getVersion());
-    assertFalse(unarchived.isArchived());
-
-    // 幂等重复解归档返回原 Issue
-    Issue unarchived2 =
-        issueLifecycleService.unarchiveIssue(unarchived.getId(), unarchived.getVersion());
-    assertEquals(unarchived.getId(), unarchived2.getId());
-  }
-
   /** 测试意图：验证业务阻塞 blockIssue、恢复 recoverIssue、DONE 重开 reopen、活动窗口查询与指示投递。 */
   @Test
   void issueBlockRecoverReopenAndActivityOperations() {
@@ -564,7 +527,7 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
 
     // appendComment
     issueEditingService.appendActivity(
-        issue.getId(), issue.getVersion(), "COMMENT", key("c1"), "Comment text");
+        issue.getId(), issue.getVersion(), IssueActivityKind.COMMENT, key("c1"), "Comment text");
     var activities = issueEditingService.listActivities(issue.getId(), 0, 10);
     assertTrue(activities.stream().anyMatch(a -> "Comment text".equals(a.getBody())));
 
@@ -575,7 +538,7 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
             issueEditingService.appendActivity(
                 withComment.getId(),
                 withComment.getVersion(),
-                "INSTRUCTION",
+                IssueActivityKind.INSTRUCTION,
                 key("ins"),
                 "Instruction text"));
 
@@ -608,7 +571,11 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
     IssueRun run = issueRunService.acceptRun(recovered.getId(), key("acc"));
     fresh = issueEditingService.getIssue(issue.getId());
     issueEditingService.appendActivity(
-        fresh.getId(), fresh.getVersion(), "INSTRUCTION", key("ins1"), "Do something");
+        fresh.getId(),
+        fresh.getVersion(),
+        IssueActivityKind.INSTRUCTION,
+        key("ins1"),
+        "Do something");
 
     // 完成并交接到 DONE
     UUID end = appendHistoryEntry(run.getThreadId());

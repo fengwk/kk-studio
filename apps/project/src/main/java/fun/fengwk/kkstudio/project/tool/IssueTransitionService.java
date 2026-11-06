@@ -110,9 +110,6 @@ public class IssueTransitionService {
     if (!run.getThreadId().equals(callingThreadId)) {
       throw DomainException.validation("issue_run", "the active run belongs to a different thread");
     }
-    if (issue.isArchived()) {
-      throw DomainException.validation("issue", "Issue is archived");
-    }
     requireAssistantTurnOfActiveRun(run, callingThreadId, assistantEntryId);
 
     ProjectWorkflow workflow;

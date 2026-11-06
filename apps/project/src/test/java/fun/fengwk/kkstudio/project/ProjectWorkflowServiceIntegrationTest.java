@@ -95,12 +95,12 @@ class ProjectWorkflowServiceIntegrationTest extends ProjectTestSupport {
   }
 
   /**
-   * 现存 Issue 正在使用的工作阶段、阻塞来源和已归档引用都不能从新 workflow 中消失。
+   * 现存 Issue 正在使用的工作阶段、阻塞来源都不能从新 workflow 中消失。
    *
    * <p>没有被任何 Issue 引用的阶段可以删除；保留状态本来就必须存在。
    */
   @Test
-  void updateWorkflowRejectsRemovalOfReferencedStatesIncludingArchivedIssues() {
+  void updateWorkflowRejectsRemovalOfReferencedStates() {
     String agent = createAgent();
     Project project = projectService.createProject("引用完整性", "描述", true);
     projectService.updateWorkflow(
@@ -127,8 +127,6 @@ class ProjectWorkflowServiceIntegrationTest extends ProjectTestSupport {
         null,
         "REVIEW",
         null);
-    Issue inReview = issueEditingService.getIssue(archived.getId());
-    issueLifecycleService.archiveIssue(inReview.getId(), inReview.getVersion());
     Project current = projectService.getProject(project.getId());
     String withoutDesign =
         "{"

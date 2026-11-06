@@ -48,6 +48,7 @@ import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
 import fun.fengwk.kkstudio.project.model.Issue;
+import fun.fengwk.kkstudio.project.model.IssueActivityKind;
 import fun.fengwk.kkstudio.project.model.IssueRun;
 import fun.fengwk.kkstudio.project.model.Project;
 import fun.fengwk.kkstudio.project.reconcile.IssueReconcileOutcome;
@@ -278,34 +279,6 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     assertThrows(
         NullPointerException.class,
         () -> reconciler.reconcile(new WorkClaim(UUID.randomUUID(), 1L, UUID.randomUUID(), null)));
-  }
-
-  /** 测试意图：已归档的 Issue 不会继续派发执行，reconcile 返回 CONVERGED_ARCHIVED 并清除 mailbox 工作行。 */
-  @Test
-  void archivedIssueConvergesAndRemovesWorkRow() {
-    String agent = createAgent();
-    UUID projectId = createProjectWithStages("归档Issue调谐", agent, agent, 3);
-    Issue issue = createIssue(projectId);
-    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
-    issue = issueEditingService.getIssue(issue.getId());
-    issueLifecycleService.archiveIssue(issue.getId(), issue.getVersion());
-
-    WorkClaim claim = claimWork(issue.getId());
-    IssueReconcileOutcome outcome = reconciler.reconcile(claim);
-
-    assertEquals(IssueReconcileOutcome.CONVERGED_ARCHIVED, outcome);
-    assertEquals(
-        0L,
-        count(
-            "select count(*) from durable_work where target_type = 'ISSUE' and target_id = ?",
-            issue.getId()));
-    assertEquals(
-        1L,
-        count(
-            "select count(*) from project_issue where id = ? and archived_at is not null",
-            issue.getId()));
-    assertEquals(
-        0L, count("select count(*) from project_issue_run where issue_id = ?", issue.getId()));
   }
 
   /** 测试意图：已完成（DONE）的 Issue 不会继续派发执行，reconcile 返回 CONVERGED_ARCHIVED 并清除 mailbox 工作行。 */
@@ -777,7 +750,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     // 收尾窗口内到达的人工指示绑定在当前 Run 上。
     issue = issueEditingService.getIssue(issue.getId());
     issueEditingService.appendActivity(
-        issue.getId(), issue.getVersion(), "INSTRUCTION", key("inst"), "先处理这条人工指示");
+        issue.getId(), issue.getVersion(), IssueActivityKind.INSTRUCTION, key("inst"), "先处理这条人工指示");
     Long instructionSequence =
         jdbc.queryForObject(
             "select sequence from project_issue_activity where issue_id = ? and kind ="
@@ -922,7 +895,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
     issue = issueEditingService.getIssue(issue.getId());
     issueEditingService.appendActivity(
-        issue.getId(), issue.getVersion(), "INSTRUCTION", key("inst"), "请调整方案设计");
+        issue.getId(), issue.getVersion(), IssueActivityKind.INSTRUCTION, key("inst"), "请调整方案设计");
     Long instSeq =
         jdbc.queryForObject(
             "select sequence from project_issue_activity where issue_id = ? and kind ="
@@ -963,7 +936,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
     issue = issueEditingService.getIssue(issue.getId());
     issueEditingService.appendActivity(
-        issue.getId(), issue.getVersion(), "COMMENT", key("c"), "这是一条普通评论");
+        issue.getId(), issue.getVersion(), IssueActivityKind.COMMENT, key("c"), "这是一条普通评论");
     Long commentSeq =
         jdbc.queryForObject(
             "select sequence from project_issue_activity where issue_id = ? and kind = 'COMMENT'",
@@ -1384,12 +1357,20 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     issue = issueEditingService.getIssue(issue.getId());
     for (int i = 1; i <= 220; i++) {
       issueEditingService.appendActivity(
-          issue.getId(), issue.getVersion() + (i - 1), "COMMENT", key("c" + i), "评论 " + i);
+          issue.getId(),
+          issue.getVersion() + (i - 1),
+          IssueActivityKind.COMMENT,
+          key("c" + i),
+          "评论 " + i);
     }
     issue = issueEditingService.getIssue(issue.getId());
     // 随后追加一条 INSTRUCTION
     issueEditingService.appendActivity(
-        issue.getId(), issue.getVersion(), "INSTRUCTION", key("inst"), "第221条是指示，必须先处理");
+        issue.getId(),
+        issue.getVersion(),
+        IssueActivityKind.INSTRUCTION,
+        key("inst"),
+        "第221条是指示，必须先处理");
     Long instSeq =
         jdbc.queryForObject(
             "select sequence from project_issue_activity where issue_id = ? and kind ="

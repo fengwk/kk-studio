@@ -1,12 +1,16 @@
 package fun.fengwk.kkstudio.project.dto;
 
-import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.jspecify.annotations.Nullable;
+
+import fun.fengwk.kkstudio.project.model.IssueActivityActorType;
+import fun.fengwk.kkstudio.project.model.IssueActivityKind;
+
+import java.time.Instant;
 
 /**
  * Issue Activity 公开传输对象：Issue 唯一有序事实流上的一条记录。
@@ -21,8 +25,8 @@ public class IssueActivityDTO {
 
   private String issueId;
   private String sequence;
-  private String kind;
-  private String actorType;
+  private IssueActivityKind kind;
+  private IssueActivityActorType actorType;
 
   @JsonInclude(JsonInclude.Include.ALWAYS)
   private @Nullable String actorAgentName;
@@ -34,10 +38,5 @@ public class IssueActivityDTO {
   private @Nullable String body;
 
   private @Nullable Object data;
-  private String createdAt;
-
-  @JsonAnySetter
-  public void rejectUnknownField(String name, Object value) {
-    throw new IllegalArgumentException("Unknown response field");
-  }
+  private Instant createdAt;
 }

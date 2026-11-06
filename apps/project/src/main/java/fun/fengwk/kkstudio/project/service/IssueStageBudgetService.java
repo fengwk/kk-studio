@@ -46,7 +46,7 @@ public class IssueStageBudgetService {
       return getStageBudget(issueId, state);
     }
     IssueMutationSupport.Locked locked = receipt.locked();
-    mutationSupport.requireMutable(locked, false);
+    mutationSupport.requireMutable(locked);
     mutationSupport.requireVersion(locked, expectedVersion);
     ProjectStateCode code = ProjectStateCode.of(state);
     StageBudgetView authorized =
@@ -84,7 +84,7 @@ public class IssueStageBudgetService {
       return getStageBudget(issueId, state);
     }
     IssueMutationSupport.Locked locked = receipt.locked();
-    mutationSupport.requireMutable(locked, false);
+    mutationSupport.requireMutable(locked);
     mutationSupport.requireVersion(locked, expectedVersion);
     if (issueRunRepository.lockActiveByIssueId(issueId) != null) {
       throw DomainException.validation(

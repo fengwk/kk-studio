@@ -32,7 +32,7 @@ class ProjectControllerAdviceIntegrationTest extends WebPostgresTestSupport {
   void projectDomainErrorsUseTheUnifiedAdvice() throws Exception {
     doThrow(DomainException.notFound("project")).when(projectService).getProject(any());
     mockMvc
-        .perform(get("/api/projects/{id}", ID))
+        .perform(get("/api/project/projects/{id}", ID))
         .andExpect(status().isNotFound())
         .andExpect(jsonPath("$.code").value("not_found"))
         .andExpect(jsonPath("$.detail").value("project not found"))
@@ -41,13 +41,18 @@ class ProjectControllerAdviceIntegrationTest extends WebPostgresTestSupport {
         .when(projectService)
         .getProject(any());
     mockMvc
-        .perform(get("/api/projects/{id}", ID))
+        .perform(get("/api/project/projects/{id}", ID))
         .andExpect(status().isConflict())
         .andExpect(jsonPath("$.code").value("conflict"))
         .andExpect(jsonPath("$.reason").value("STALE_VERSION"))
         .andExpect(jsonPath("$.detail").value("issue runtime conflict occurred"));
     mockMvc
-        .perform(get("/api/projects/not-a-uuid"))
+        .perform(get("/api/project/projects/not-a-uuid"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("validation"));
+    // 路径 UUID 只接受规范小写形式，大写即使能被 JDK 解析也拒绝。
+    mockMvc
+        .perform(get("/api/project/projects/00000000-0000-0000-0000-0000000000A1"))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.code").value("validation"));
   }
@@ -61,7 +66,9 @@ class ProjectControllerAdviceIntegrationTest extends WebPostgresTestSupport {
         .updateIssue(any(), anyLong(), any(), any());
     mockMvc
         .perform(
-            put("/api/issues/{id}", ID).contentType(MediaType.APPLICATION_JSON).content(request))
+            put("/api/project/issues/{id}", ID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(request))
         .andExpect(status().isConflict())
         .andExpect(jsonPath("$.code").value("version_conflict"))
         .andExpect(jsonPath("$.errors.expectedVersion").value("1"))
@@ -71,7 +78,9 @@ class ProjectControllerAdviceIntegrationTest extends WebPostgresTestSupport {
         .updateIssue(any(), anyLong(), any(), any());
     mockMvc
         .perform(
-            put("/api/issues/{id}", ID).contentType(MediaType.APPLICATION_JSON).content(request))
+            put("/api/project/issues/{id}", ID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(request))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.code").value("validation"))
         .andExpect(jsonPath("$.detail").value("title is invalid"))
@@ -81,7 +90,9 @@ class ProjectControllerAdviceIntegrationTest extends WebPostgresTestSupport {
         .updateIssue(any(), anyLong(), any(), any());
     mockMvc
         .perform(
-            put("/api/issues/{id}", ID).contentType(MediaType.APPLICATION_JSON).content(request))
+            put("/api/project/issues/{id}", ID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(request))
         .andExpect(status().isConflict())
         .andExpect(jsonPath("$.code").value("duplicate"));
   }

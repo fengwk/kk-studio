@@ -16,10 +16,10 @@ import fun.fengwk.kkstudio.project.model.IssueActivity;
 import fun.fengwk.kkstudio.project.model.IssueAgentThread;
 import fun.fengwk.kkstudio.project.model.IssueEvidence;
 import fun.fengwk.kkstudio.project.model.IssueRun;
+import fun.fengwk.kkstudio.project.model.PauseReason;
 import fun.fengwk.kkstudio.project.model.Project;
 import fun.fengwk.kkstudio.project.service.StageBudgetView;
 
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -43,10 +43,6 @@ public class ProjectDtoMapper {
 
   private static String formatLong(Long value) {
     return value == null ? null : String.valueOf(value);
-  }
-
-  private static String formatInstant(Instant instant) {
-    return instant == null ? null : instant.toString();
   }
 
   public ProjectWorkflow toWorkflow(ProjectWorkflowDTO dto) {
@@ -121,9 +117,9 @@ public class ProjectDtoMapper {
         .yoloEnabled(project.isYoloEnabled())
         .nextIssueNumber(formatLong(project.getNextIssueNumber()))
         .version(formatLong(project.getVersion()))
-        .archivedAt(formatInstant(project.getArchivedAt()))
-        .createdAt(formatInstant(project.getCreatedAt()))
-        .updatedAt(formatInstant(project.getUpdatedAt()))
+        .archivedAt(project.getArchivedAt())
+        .createdAt(project.getCreatedAt())
+        .updatedAt(project.getUpdatedAt())
         .build();
   }
 
@@ -138,12 +134,12 @@ public class ProjectDtoMapper {
         .state(issue.getState())
         .blockedFromState(issue.getBlockedFromState())
         .blockReason(issue.getBlockReason())
-        .pauseReason(issue.getPauseReason())
+        .pauseReason(
+            issue.getPauseReason() == null ? null : PauseReason.valueOf(issue.getPauseReason()))
         .pauseDetail(issue.getPauseDetail())
         .version(formatLong(issue.getVersion()))
-        .archivedAt(formatInstant(issue.getArchivedAt()))
-        .createdAt(formatInstant(issue.getCreatedAt()))
-        .updatedAt(formatInstant(issue.getUpdatedAt()))
+        .createdAt(issue.getCreatedAt())
+        .updatedAt(issue.getUpdatedAt())
         .build();
   }
 
@@ -152,13 +148,13 @@ public class ProjectDtoMapper {
     return IssueActivityDTO.builder()
         .issueId(formatUuid(activity.getIssueId()))
         .sequence(formatLong(activity.getSequence()))
-        .kind(activity.getKind() != null ? activity.getKind().name() : null)
-        .actorType(activity.getActorType() != null ? activity.getActorType().name() : null)
+        .kind(activity.getKind())
+        .actorType(activity.getActorType())
         .actorAgentName(activity.getActorAgentName())
         .runId(formatUuid(activity.getRunId()))
         .body(activity.getBody())
         .data(decodeJsonData(activity.getData()))
-        .createdAt(formatInstant(activity.getCreatedAt()))
+        .createdAt(activity.getCreatedAt())
         .build();
   }
 
@@ -172,7 +168,7 @@ public class ProjectDtoMapper {
         .name(evidence.getName())
         .actorAgentName(evidence.getActorAgentName())
         .runId(formatUuid(evidence.getRunId()))
-        .createdAt(formatInstant(evidence.getCreatedAt()))
+        .createdAt(evidence.getCreatedAt())
         .build();
   }
 
@@ -209,10 +205,10 @@ public class ProjectDtoMapper {
         .issueId(formatUuid(run.getIssueId()))
         .ordinal(formatLong(run.getOrdinal()))
         .state(run.getState())
-        .status(run.getStatus() != null ? run.getStatus().name() : null)
+        .status(run.getStatus())
         .agentName(agentName)
-        .startedAt(formatInstant(run.getStartedAt()))
-        .endedAt(formatInstant(run.getEndedAt()))
+        .startedAt(run.getStartedAt())
+        .endedAt(run.getEndedAt())
         .build();
   }
 
@@ -232,7 +228,7 @@ public class ProjectDtoMapper {
         .agentName(agentName)
         .sessionId(formatUuid(run.getSessionId()))
         .threadId(formatUuid(run.getThreadId()))
-        .status(run.getStatus() != null ? run.getStatus().name() : null)
+        .status(run.getStatus())
         .startEntryId(formatUuid(run.getStartEntryId()))
         .endEntryId(formatUuid(run.getEndEntryId()))
         .finalAnswerEntryId(formatUuid(run.getFinalAnswerEntryId()))
@@ -241,8 +237,8 @@ public class ProjectDtoMapper {
         .remainingExecutionMs(formatLong(run.getRemainingExecutionMs()))
         .error(run.getError())
         .version(formatLong(run.getVersion()))
-        .startedAt(formatInstant(run.getStartedAt()))
-        .endedAt(formatInstant(run.getEndedAt()))
+        .startedAt(run.getStartedAt())
+        .endedAt(run.getEndedAt())
         .build();
   }
 

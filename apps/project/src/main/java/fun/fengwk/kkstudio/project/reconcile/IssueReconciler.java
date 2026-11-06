@@ -179,7 +179,6 @@ public class IssueReconciler {
     Project project = locked.project();
     Issue issue = locked.issue();
     if (project.isArchived()
-        || issue.isArchived()
         || ProjectWorkflowReservedState.DONE.code().value().equals(issue.getState())) {
       return finish(claim, false, Duration.ZERO, IssueReconcileOutcome.CONVERGED_ARCHIVED);
     }
@@ -375,7 +374,6 @@ public class IssueReconciler {
 
   private IssueReconcileOutcome reconcileIdle(Project project, Issue issue, WorkClaim claim) {
     if (project.isArchived()
-        || issue.isArchived()
         || ProjectWorkflowReservedState.DONE.code().value().equals(issue.getState())) {
       return finish(claim, false, Duration.ZERO, IssueReconcileOutcome.CONVERGED_ARCHIVED);
     }

@@ -32,13 +32,12 @@ import fun.fengwk.kkstudio.project.service.IssueActivityIdempotency.ReceiptLock;
 import fun.fengwk.kkstudio.work.DurableWorkStore;
 
 import java.nio.charset.StandardCharsets;
-import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
 /**
- * Issue 生命周期用例：归档/恢复归档、阻断/恢复、终止/继续、删除与状态迁移。
+ * Issue 生命周期用例：阻断/恢复、终止/继续、删除与状态迁移。
  *
  * <p>写路径复用 {@link IssueMutationSupport} 的 owner 锁与幂等 receipt；状态合法性由领域 {@link IssueStateTransitions}
  * 判定。停止时在途副作用结果不明，按 FAILED 收尾并保留 ERROR 暂停，原因是结果未知。
@@ -63,37 +62,6 @@ public class IssueLifecycleService {
   private final ObjectProvider<IssueThreadExecution> threadExecutions;
   private final IssueMutationSupport mutationSupport;
 
-  /** 归档：要求没有活动 Run；归档后禁止执行，不删除历史与资源。 */
-  @Transactional
-  public Issue archiveIssue(UUID issueId, long expectedVersion) {
-    Objects.requireNonNull(issueId, "issueId");
-    // 允许读取已归档事实：当前版本的重复归档必须能回到「归档已是当前事实」的分支，而不是被归档门禁拒绝。
-    IssueMutationSupport.Locked locked = mutationSupport.lock(issueId, expectedVersion, true);
-    if (issueRunRepository.lockActiveByIssueId(issueId) != null) {
-      throw DomainException.validation(
-          "issue", "Cannot archive an issue while it has an active run; stop or settle it first");
-    }
-    if (locked.issue().isArchived()) {
-      // 当前版本已经归档：不重复写行。陈旧版本在加锁时已被拒绝。
-      return locked.issue();
-    }
-    locked.issue().setArchivedAt(Instant.now());
-    return mutationSupport.persist(locked, expectedVersion);
-  }
-
-  /** 恢复归档：只回到可编辑状态，不自动新建 Run。 */
-  @Transactional
-  public Issue unarchiveIssue(UUID issueId, long expectedVersion) {
-    Objects.requireNonNull(issueId, "issueId");
-    IssueMutationSupport.Locked locked = mutationSupport.lock(issueId, expectedVersion, true);
-    if (!locked.issue().isArchived()) {
-      // 当前版本已经可编辑：不重复写行。陈旧版本在加锁时已被拒绝。
-      return locked.issue();
-    }
-    locked.issue().setArchivedAt(null);
-    return mutationSupport.persist(locked, expectedVersion);
-  }
-
   /** 业务阻塞：原子记录 BLOCKED、原阶段与原因。 */
   @Transactional
   public Issue blockIssue(UUID issueId, long expectedVersion, String requestKey, String reason) {
@@ -112,7 +80,7 @@ public class IssueLifecycleService {
           : receipt.locked().issue();
     }
     IssueMutationSupport.Locked locked = receipt.locked();
-    mutationSupport.requireMutable(locked, false);
+    mutationSupport.requireMutable(locked);
     mutationSupport.requireVersion(locked, expectedVersion);
     ProjectStateCode from = ProjectStateCode.of(locked.issue().getState());
     ProjectValidationUtils.validate(
@@ -145,7 +113,7 @@ public class IssueLifecycleService {
           : receipt.locked().issue();
     }
     IssueMutationSupport.Locked locked = receipt.locked();
-    mutationSupport.requireMutable(locked, false);
+    mutationSupport.requireMutable(locked);
     mutationSupport.requireVersion(locked, expectedVersion);
     Issue issue = locked.issue();
     if (!ProjectWorkflowReservedState.BLOCKED.code().value().equals(issue.getState())) {
@@ -186,7 +154,7 @@ public class IssueLifecycleService {
           : receipt.locked().issue();
     }
     IssueMutationSupport.Locked locked = receipt.locked();
-    mutationSupport.requireMutable(locked, false);
+    mutationSupport.requireMutable(locked);
     mutationSupport.requireVersion(locked, expectedVersion);
     ObjectNode data = mutationSupport.newData();
     data.put("action", "RESUME");
@@ -227,7 +195,7 @@ public class IssueLifecycleService {
           : receipt.locked().issue();
     }
     IssueMutationSupport.Locked locked = receipt.locked();
-    mutationSupport.requireMutable(locked, false);
+    mutationSupport.requireMutable(locked);
     mutationSupport.requireVersion(locked, expectedVersion);
     IssueRun activeRun = issueRunRepository.lockActiveByIssueId(issueId);
     boolean outcomeUnknown = false;
@@ -298,7 +266,7 @@ public class IssueLifecycleService {
   @Transactional
   public void deleteIssue(UUID issueId, long expectedVersion) {
     Objects.requireNonNull(issueId, "issueId");
-    IssueMutationSupport.Locked locked = mutationSupport.lock(issueId, expectedVersion, true);
+    IssueMutationSupport.Locked locked = mutationSupport.lock(issueId, expectedVersion);
     if (issueRunRepository.lockActiveByIssueId(issueId) != null) {
       throw DomainException.validation(
           "issue", "Cannot delete an issue while it has an active run; stop or settle it first");
@@ -336,7 +304,7 @@ public class IssueLifecycleService {
           : receipt.locked().issue();
     }
     IssueMutationSupport.Locked locked = receipt.locked();
-    mutationSupport.requireMutable(locked, false);
+    mutationSupport.requireMutable(locked);
     mutationSupport.requireVersion(locked, expectedVersion);
     if (issueRunRepository.lockActiveByIssueId(issueId) != null) {
       throw DomainException.validation(
@@ -375,7 +343,7 @@ public class IssueLifecycleService {
           : receipt.locked().issue();
     }
     IssueMutationSupport.Locked locked = receipt.locked();
-    mutationSupport.requireMutable(locked, false);
+    mutationSupport.requireMutable(locked);
     mutationSupport.requireVersion(locked, expectedVersion);
     if (issueRunRepository.lockActiveByIssueId(issueId) != null) {
       throw DomainException.validation(

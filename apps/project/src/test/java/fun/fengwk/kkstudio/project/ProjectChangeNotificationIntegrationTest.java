@@ -11,6 +11,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import fun.fengwk.kkstudio.project.model.IssueActivityKind;
 import fun.fengwk.kkstudio.project.notification.ProjectChangeNotifications;
 import fun.fengwk.kkstudio.project.repo.ProjectChangeNotifier;
 
@@ -44,7 +45,11 @@ class ProjectChangeNotificationIntegrationTest extends ProjectTestSupport {
       tx.executeWithoutResult(
           status -> {
             issueEditingService.appendActivity(
-                issue.getId(), issue.getVersion(), "COMMENT", "notify-commit", "comment");
+                issue.getId(),
+                issue.getVersion(),
+                IssueActivityKind.COMMENT,
+                "notify-commit",
+                "comment");
             try {
               assertNoNotification(pg);
             } catch (Exception error) {
@@ -59,7 +64,7 @@ class ProjectChangeNotificationIntegrationTest extends ProjectTestSupport {
             issueEditingService.appendActivity(
                 issue.getId(),
                 issueEditingService.getIssue(issue.getId()).getVersion(),
-                "COMMENT",
+                IssueActivityKind.COMMENT,
                 "notify-rollback",
                 "comment");
             status.setRollbackOnly();

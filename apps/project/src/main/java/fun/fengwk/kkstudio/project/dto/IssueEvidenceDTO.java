@@ -1,12 +1,13 @@
 package fun.fengwk.kkstudio.project.dto;
 
-import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.jspecify.annotations.Nullable;
+
+import java.time.Instant;
 
 /** Issue 公开证据传输对象。 */
 @Data
@@ -26,10 +27,5 @@ public class IssueEvidenceDTO {
   @JsonInclude(JsonInclude.Include.ALWAYS)
   private @Nullable String runId;
 
-  private String createdAt;
-
-  @JsonAnySetter
-  public void rejectUnknownField(String name, Object value) {
-    throw new IllegalArgumentException("Unknown response field");
-  }
+  private Instant createdAt;
 }

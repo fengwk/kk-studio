@@ -15,6 +15,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import fun.fengwk.kkstudio.project.dto.IssueDetailDTO;
 import fun.fengwk.kkstudio.project.dto.ProjectSnapshotDTO;
 import fun.fengwk.kkstudio.project.model.Issue;
+import fun.fengwk.kkstudio.project.model.IssueActivityKind;
 import fun.fengwk.kkstudio.project.model.Project;
 import fun.fengwk.kkstudio.project.service.IssueDetailAssembler;
 import fun.fengwk.kkstudio.project.service.IssueEditingService;
@@ -54,18 +55,15 @@ class ProjectReadSnapshotIsolationIntegrationTest extends WebPostgresTestSupport
     doAnswer(
             invocation -> {
               Project resolved = (Project) invocation.callRealMethod();
-              // 第一次读取已建立快照；独立事务提交活动及归档 Issue，两个查询都不得提前看到。
+              // 第一次读取已建立快照；独立事务提交 Issue 及其阻塞事实，两个查询都不得提前看到。
               if (injected.compareAndSet(false, true)) {
                 commitInNewTransaction(
                     () -> {
                       issueEditingService.createIssue(project.getId(), "Concurrent Issue", "Desc");
-                      Issue archived =
-                          issueEditingService.createIssue(
-                              project.getId(), "Archived Issue", "Desc");
-                      archived =
-                          issueLifecycleService.blockIssue(
-                              archived.getId(), archived.getVersion(), "rr-block", "Blocked");
-                      issueLifecycleService.archiveIssue(archived.getId(), archived.getVersion());
+                      Issue blocked =
+                          issueEditingService.createIssue(project.getId(), "Blocked Issue", "Desc");
+                      issueLifecycleService.blockIssue(
+                          blocked.getId(), blocked.getVersion(), "rr-block", "Blocked");
                     });
               }
               return resolved;
@@ -81,9 +79,11 @@ class ProjectReadSnapshotIsolationIntegrationTest extends WebPostgresTestSupport
 
     ProjectSnapshotDTO snapshotTakenAfterCommit =
         projectSnapshotAssembler.assemble(project.getId());
-    assertEquals(1, snapshotTakenAfterCommit.getIssues().size(), "新事务必须看到已提交事实");
+    assertEquals(2, snapshotTakenAfterCommit.getIssues().size(), "新事务必须看到已提交事实");
     assertEquals(
         "Concurrent Issue", snapshotTakenAfterCommit.getIssues().get(0).getIssue().getTitle());
+    assertEquals(
+        "Blocked Issue", snapshotTakenAfterCommit.getIssues().get(1).getIssue().getTitle());
     assertEquals(List.of("BLOCKED", "INIT"), snapshotTakenAfterCommit.getReferencedStateCodes());
   }
 
@@ -103,7 +103,7 @@ class ProjectReadSnapshotIsolationIntegrationTest extends WebPostgresTestSupport
                         issueEditingService.appendActivity(
                             issue.getId(),
                             resolved.getVersion(),
-                            "COMMENT",
+                            IssueActivityKind.COMMENT,
                             "rr-concurrent-comment",
                             "concurrent"));
               }
