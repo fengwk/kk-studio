@@ -43,7 +43,7 @@ describe('HTTP client', () => {
       method: 'POST', body: '{"title":"A"}',
       headers: { 'Accept-Language': 'en-US', 'Content-Type': 'application/json' },
     })
-    await expect(apiClient.delete('/models/a', { params: { v: 1 }, data: { x: 2 } }))
+    await expect(apiClient.delete('/platform/models/a', { params: { v: 1 }, data: { x: 2 } }))
       .resolves.toBeUndefined()
     expect(fetchMock.mock.calls[1]![0]).toBe('/api/platform/models/a?v=1')
     expect(fetchMock.mock.calls[1]![1].body).toBe('{"x":2}')
@@ -55,7 +55,7 @@ describe('HTTP client', () => {
       new Response('{"n":9007199254740993}', { headers: { 'Content-Type': 'application/json' } }))
     vi.stubGlobal('fetch', transport)
     const parser = vi.fn((raw: string) => raw)
-    expect(await apiClient.get('/models?existing=1', {
+    expect(await apiClient.get('/platform/models?existing=1', {
       params: { q: 'a b', omit: undefined, enabled: false },
       headers: { 'Cache-Control': 'no-store' },
       jsonParser: parser,

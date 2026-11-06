@@ -39,7 +39,7 @@ class StudioMessageServiceTest {
   void resolvesDomainAndHttpMessagesForSupportedLocales() {
     LocaleContextHolder.setLocale(Locale.US);
     assertEquals(
-        "The agent model was modified by another request.",
+        "The model was modified by another request.",
         messageService.domainMessage(
             DomainErrorCode.VERSION_CONFLICT, Map.of("resource", "model")));
     assertEquals("The request is invalid.", messageService.httpMessage(400));
@@ -49,7 +49,7 @@ class StudioMessageServiceTest {
 
     LocaleContextHolder.setLocale(Locale.SIMPLIFIED_CHINESE);
     assertEquals(
-        "Agent Model 已被其他请求修改。",
+        "Model 已被其他请求修改。",
         messageService.domainMessage(
             DomainErrorCode.VERSION_CONFLICT, Map.of("resource", "model")));
     assertEquals("limit 参数为必填项。", messageService.validationRequired("limit"));

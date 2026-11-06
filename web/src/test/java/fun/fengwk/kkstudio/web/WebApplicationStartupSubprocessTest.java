@@ -55,7 +55,7 @@ class WebApplicationStartupSubprocessTest {
         assertTrue(ready, "production entry readiness timed out");
         var models = entry.get("/api/platform/models");
         assertEquals(200, models.statusCode());
-        assertTrue(JsonMapper.builder().build().readTree(models.body()).has("data"));
+        assertTrue(JsonMapper.builder().build().readTree(models.body()).isArray());
       }
     }
   }

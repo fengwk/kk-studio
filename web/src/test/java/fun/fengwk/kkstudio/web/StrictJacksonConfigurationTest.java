@@ -303,7 +303,8 @@ class StrictJacksonConfigurationTest {
   void shouldRejectUnknownAgentModelVariantFields() {
     runner.run(
         context -> {
-          JsonMapper mapper = context.getBean(JsonMapper.class);
+          JsonMapper mapper =
+              HttpBoundaryConfiguration.strictHttpMapper(context.getBean(JsonMapper.class));
 
           assertThrows(
               JacksonException.class,
@@ -321,7 +322,8 @@ class StrictJacksonConfigurationTest {
   void shouldRejectNonStringProtocolOptionsJsonTokens() {
     runner.run(
         context -> {
-          JsonMapper mapper = context.getBean(JsonMapper.class);
+          JsonMapper mapper =
+              HttpBoundaryConfiguration.strictHttpMapper(context.getBean(JsonMapper.class));
 
           ModelVariantDTO accepted =
               mapper.readValue(

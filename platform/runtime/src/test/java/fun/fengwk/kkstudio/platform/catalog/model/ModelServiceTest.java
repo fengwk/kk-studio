@@ -281,14 +281,13 @@ public class ModelServiceTest extends PostgresSpringTestSupport {
     assertEquals(List.of(), group.getConfig().getVariants());
     assertNull(group.getConfig().getDefaultVariant());
     assertEquals(1, groupOf(group).getGroup().getMembers().size());
-
     SingleModelUpdateDTO removeVariant = modelUpdate(model, model.getName(), null);
     removeVariant.setConfig(
         buildConfig(32768, 4096, true, false, "standard", "v1", List.of("default"), "default"));
     assertThrows(
         DomainException.class, () -> agentModelService.updateModel(model.getName(), removeVariant));
 
-    ModelCreateDTO invalidGroup = group("invalid-group-" + suffix, model.getName(), "fast");
+    ModelCreateDTO invalidGroup = group("invalid-group-" + suffix, model.getName(), "missing");
     assertThrows(DomainException.class, () -> agentModelService.createModel(invalidGroup));
 
     agentModelService.deleteModel(group.getName(), group.getVersion());

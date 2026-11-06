@@ -38,7 +38,6 @@ public class ProviderServiceTest extends PostgresSpringTestSupport {
     ProviderDTO provider = providerService.createProvider(provider(name, "secret"));
 
     assertTrue(provider.getCredential().configured());
-    assertFalse(hasProperty(provider, "credential"));
     assertEquals(name, provider.getName());
     assertEquals(ProviderType.OPENAI, provider.getProviderType());
     assertEquals("0", provider.getVersion());

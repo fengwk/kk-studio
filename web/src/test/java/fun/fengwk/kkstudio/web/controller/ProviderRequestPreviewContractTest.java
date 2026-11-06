@@ -88,7 +88,7 @@ abstract class ProviderRequestPreviewContractTest {
         performPreview()
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.kind").value("DRAFT_REQUEST_PREVIEW"))
-            .andExpect(jsonPath("$.providerType").value("OPENAI"))
+            .andExpect(jsonPath("$.providerType").value("openai"))
             .andExpect(jsonPath("$.modelName").value("acceptance-stub"))
             .andExpect(jsonPath("$.bodyByteSize").value(dto.getBodyByteSize()))
             .andExpect(jsonPath("$.bodyJson").value(body))

@@ -148,6 +148,7 @@ class ConfigSyncApplierTest {
 
   private static ConfigSyncParser.ProviderSpec providerSpec(String name) {
     ProviderCreateDTO properties = new ProviderCreateDTO();
+    properties.setName(name);
     properties.setProviderType(ProviderType.OPENAI);
     properties.setBaseUrl("https://api.example.com");
     properties.setCredential("secret");
