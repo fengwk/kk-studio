@@ -21,7 +21,6 @@ import org.springframework.http.MediaType;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.CancelledThreadInput;
 import fun.fengwk.kkstudio.harness.api.CompactThreadResult;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.harness.api.RenameThreadCommand;
 import fun.fengwk.kkstudio.harness.api.StopResult;
@@ -154,9 +153,7 @@ class StudioHarnessThreadMutationControllerTest extends HarnessThreadControllerT
   @Test
   void renameNameConflictIsHttp409WithTypedReason() throws Exception {
     when(runtime.renameThread(any(RenameThreadCommand.class)))
-        .thenThrow(
-            new HarnessRuntimeConflictException(
-                HarnessRuntimeConflictException.Reason.THREAD_NAME_CONFLICT, "name already used"));
+        .thenThrow(DomainException.conflict("THREAD_NAME_CONFLICT", "name already used"));
     mockMvc
         .perform(
             put("/api/threads/" + idText(1) + "/name")

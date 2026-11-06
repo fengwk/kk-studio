@@ -30,7 +30,6 @@ import fun.fengwk.kkstudio.common.schema.StringSchema;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.api.HarnessConflictReason;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.api.SpawnRequest;
 import fun.fengwk.kkstudio.harness.api.ToolApprovalCommand;
 import fun.fengwk.kkstudio.harness.api.ToolInputAcceptance;
@@ -405,9 +404,9 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
     assertEquals(versionAfterAccept, threadState(tree.c()).version());
 
     // 同 submissionId 但不同（且合法的）答案：冲突，不改写已接受事实。
-    HarnessRuntimeConflictException changedAnswers =
+    DomainException changedAnswers =
         assertThrows(
-            HarnessRuntimeConflictException.class,
+            DomainException.class,
             () ->
                 interactionService.submitInput(
                     new ToolInputSubmissionCommand(
@@ -417,19 +416,19 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
                         ACTOR,
                         false,
                         List.of(List.of("canary"), List.of("typed-routing")))));
-    assertEquals(
-        HarnessRuntimeConflictException.Reason.INPUT_SUBMISSION_MISMATCH, changedAnswers.reason());
+    assertEquals(DomainErrorCode.CONFLICT, changedAnswers.code());
+    assertEquals(HarnessConflictReason.INPUT_SUBMISSION_MISMATCH.name(), changedAnswers.reason());
 
     // 相同答案但不同 submissionId：仍属于“已被其他提交作答”。
-    HarnessRuntimeConflictException otherSubmission =
+    DomainException otherSubmission =
         assertThrows(
-            HarnessRuntimeConflictException.class,
+            DomainException.class,
             () ->
                 interactionService.submitInput(
                     new ToolInputSubmissionCommand(
                         tree.c(), cInvocation, UUID.randomUUID(), ACTOR, false, answers)));
-    assertEquals(
-        HarnessRuntimeConflictException.Reason.INPUT_SUBMISSION_MISMATCH, otherSubmission.reason());
+    assertEquals(DomainErrorCode.CONFLICT, otherSubmission.code());
+    assertEquals(HarnessConflictReason.INPUT_SUBMISSION_MISMATCH.name(), otherSubmission.reason());
 
     assertEquals(tree.a(), joinParentOf(tree.c()));
   }

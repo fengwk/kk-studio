@@ -1,7 +1,8 @@
 package fun.fengwk.kkstudio.harness.runtime.store.testing;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.time.HarnessStoreTime;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
+import fun.fengwk.kkstudio.harness.api.HarnessConflictReason;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.join.ThreadJoin;
@@ -162,8 +163,8 @@ final class InMemoryThreadStore implements ThreadStore {
                         && existing.sessionId().equals(thread.sessionId())
                         && existing.name().equals(thread.name()));
     if (conflict) {
-      throw new HarnessRuntimeConflictException(
-          HarnessRuntimeConflictException.Reason.THREAD_NAME_CONFLICT,
+      throw DomainException.conflict(
+          HarnessConflictReason.THREAD_NAME_CONFLICT.name(),
           "thread name "
               + thread.name()
               + " is already used by an execution root in session "

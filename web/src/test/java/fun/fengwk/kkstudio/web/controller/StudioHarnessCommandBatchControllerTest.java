@@ -19,6 +19,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
@@ -91,9 +92,7 @@ class StudioHarnessCommandBatchControllerTest {
   @Test
   void nameConflictFromCreationIsHttp409WithTypedReason() throws Exception {
     when(acceptanceService.accept(any(SessionOwner.class), any(AcceptCommandsCommand.class)))
-        .thenThrow(
-            new HarnessRuntimeConflictException(
-                HarnessRuntimeConflictException.Reason.THREAD_NAME_CONFLICT, "name already used"));
+        .thenThrow(DomainException.conflict("THREAD_NAME_CONFLICT", "name already used"));
     mockMvc
         .perform(
             post("/api/command-batches")

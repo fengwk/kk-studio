@@ -3,8 +3,6 @@ package fun.fengwk.kkstudio.harness.runtime;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.result.JsonResultContent;
 import fun.fengwk.kkstudio.harness.api.HarnessConflictReason;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException.Reason;
 import fun.fengwk.kkstudio.harness.api.ToolApprovalCommand;
 import fun.fengwk.kkstudio.harness.api.ToolInputAcceptance;
 import fun.fengwk.kkstudio.harness.api.ToolInputSubmissionCommand;
@@ -296,8 +294,8 @@ final class ToolInputControl {
     try {
       answers = HumanInputAnswers.accept(questionnaire, command.declined(), command.answers());
     } catch (IllegalArgumentException invalid) {
-      throw new HarnessRuntimeConflictException(
-          Reason.INPUT_SUBMISSION_INVALID, invalid.getMessage());
+      throw DomainException.conflict(
+          HarnessConflictReason.INPUT_SUBMISSION_INVALID.name(), invalid.getMessage());
     }
     return INPUT_JSON.encodeAnswers(answers);
   }
@@ -410,11 +408,13 @@ final class ToolInputControl {
     return DomainException.conflict(HarnessConflictReason.APPROVAL_NOT_APPLICABLE.name(), message);
   }
 
-  private static HarnessRuntimeConflictException notApplicable(String message) {
-    return new HarnessRuntimeConflictException(Reason.INPUT_SUBMISSION_NOT_APPLICABLE, message);
+  private static DomainException notApplicable(String message) {
+    return DomainException.conflict(
+        HarnessConflictReason.INPUT_SUBMISSION_NOT_APPLICABLE.name(), message);
   }
 
-  private static HarnessRuntimeConflictException mismatch(String message) {
-    return new HarnessRuntimeConflictException(Reason.INPUT_SUBMISSION_MISMATCH, message);
+  private static DomainException mismatch(String message) {
+    return DomainException.conflict(
+        HarnessConflictReason.INPUT_SUBMISSION_MISMATCH.name(), message);
   }
 }

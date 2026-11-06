@@ -17,6 +17,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
@@ -141,9 +143,9 @@ class HarnessRuntimeAcceptInitialTest {
     assertTrue(replay.replayed());
     assertEquals(accepted.thread().id(), replay.thread().id());
     assertEquals("renamed", replay.thread().name());
-    HarnessRuntimeConflictException conflict =
+    DomainException conflict =
         assertThrows(
-            HarnessRuntimeConflictException.class,
+            DomainException.class,
             () ->
                 runtime.acceptCommands(
                     entry(
@@ -153,7 +155,8 @@ class HarnessRuntimeAcceptInitialTest {
                         "renamed",
                         List.of(userMessageCommand(TestIds.id(2), "other"))),
                     AcceptancePreflight.IDENTITY));
-    assertEquals(HarnessRuntimeConflictException.Reason.THREAD_NAME_CONFLICT, conflict.reason());
+    assertEquals(DomainErrorCode.CONFLICT, conflict.code());
+    assertEquals("THREAD_NAME_CONFLICT", conflict.reason());
     assertNoNewThreadFacts(TestIds.id(204));
   }
 

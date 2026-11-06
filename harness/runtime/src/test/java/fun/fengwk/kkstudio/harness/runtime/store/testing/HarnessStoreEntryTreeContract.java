@@ -22,7 +22,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
+import fun.fengwk.kkstudio.harness.api.HarnessConflictReason;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionTrigger;
@@ -70,9 +72,9 @@ public abstract class HarnessStoreEntryTreeContract {
   void rootNameConflictsRollbackInsertAndRenameButAllowSelfReplay() {
     Baseline baseline = seedThreadBaseline(store);
     UUID duplicateId = TestIds.id(101);
-    HarnessRuntimeConflictException insert =
+    DomainException insert =
         assertThrows(
-            HarnessRuntimeConflictException.class,
+            DomainException.class,
             () ->
                 inTransaction(
                     store,
@@ -81,7 +83,8 @@ public abstract class HarnessStoreEntryTreeContract {
                             .insert(
                                 thread(
                                     duplicateId, baseline.sessionId(), baseline.rootEntryId()))));
-    assertEquals(HarnessRuntimeConflictException.Reason.THREAD_NAME_CONFLICT, insert.reason());
+    assertEquals(DomainErrorCode.CONFLICT, insert.code());
+    assertEquals(HarnessConflictReason.THREAD_NAME_CONFLICT.name(), insert.reason());
     assertTrue(store.transaction(tx -> tx.threads().find(duplicateId)).isEmpty());
     UUID siblingId = TestIds.id(102);
     inTransaction(
@@ -92,9 +95,9 @@ public abstract class HarnessStoreEntryTreeContract {
                     StoreTestSupport.siblingRoot(
                         siblingId, baseline.sessionId(), baseline.rootEntryId(), "branch")));
     ThreadState before = store.transaction(tx -> tx.threads().find(siblingId).orElseThrow());
-    HarnessRuntimeConflictException rename =
+    DomainException rename =
         assertThrows(
-            HarnessRuntimeConflictException.class,
+            DomainException.class,
             () ->
                 inTransaction(
                     store,
@@ -102,7 +105,8 @@ public abstract class HarnessStoreEntryTreeContract {
                       ThreadState locked = tx.threads().lock(siblingId).orElseThrow();
                       tx.threads().update(locked.renameThread("main", T1));
                     }));
-    assertEquals(HarnessRuntimeConflictException.Reason.THREAD_NAME_CONFLICT, rename.reason());
+    assertEquals(DomainErrorCode.CONFLICT, rename.code());
+    assertEquals(HarnessConflictReason.THREAD_NAME_CONFLICT.name(), rename.reason());
     assertEquals(before, store.transaction(tx -> tx.threads().find(siblingId).orElseThrow()));
     inTransaction(store, tx -> tx.threads().update(tx.threads().lock(siblingId).orElseThrow()));
     assertEquals(before, store.transaction(tx -> tx.threads().find(siblingId).orElseThrow()));
