@@ -44,7 +44,7 @@ import java.util.HexFormat;
 import java.util.UUID;
 
 /**
- * {@link StudioStorageController} 端到端测试（真实 PostgreSQL + 内存 S3 假件）。
+ * {@code StorageController} 端到端测试（真实 PostgreSQL + 内存 S3 假件）。
  *
  * <p>覆盖 reserve/complete/delete/预签名端点的 HTTP 契约、错误翻译（400/404/409）、 上传生命周期与响应不泄露 bucket/key。
  *
@@ -61,7 +61,7 @@ import java.util.UUID;
       "kk-studio.storage.s3.access-key=local-test-access-key",
       "kk-studio.storage.s3.secret-key=local-test-secret-key"
     })
-public class StudioStorageControllerTest extends WebPostgresTestSupport {
+public class StorageControllerTest extends WebPostgresTestSupport {
 
   @Autowired private MockMvc mockMvc;
   @Autowired private ObjectMapper objectMapper;

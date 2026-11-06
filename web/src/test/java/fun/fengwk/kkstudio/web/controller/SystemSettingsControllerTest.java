@@ -24,13 +24,13 @@ import java.util.List;
 import java.util.function.Consumer;
 
 /**
- * {@link StudioSystemSettingsController} 的端到端测试。
+ * {@code SystemSettingsController} 的端到端测试。
  *
  * <p>验证：GET 返回安全默认聚合（version="0"）；PUT 以 expectedVersion CAS 完整替换并返回新版本；陈旧版本 → 409 （version_conflict
  * 错误码）；非法聚合、未知字段与缺失 expectedVersion → 400。
  */
 @AutoConfigureMockMvc
-public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
+public class SystemSettingsControllerTest extends WebPostgresTestSupport {
 
   @Autowired private MockMvc mockMvc;
   @Autowired private ObjectMapper objectMapper;
