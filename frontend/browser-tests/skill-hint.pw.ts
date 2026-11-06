@@ -151,13 +151,13 @@ async function installSkillHintApi(
         json: [
             {
               id: NAS_ID, name: 'NAS', status: 'READY', ready: true, statusExpiresAt: null,
-              lastSeenAt: 1790812800, capabilities: [], userName: null, homeDirectory: null,
-              version: '1', createdAt: 1790812800, updatedAt: 1790812800,
+              lastSeenAt: 1790812800000, capabilities: [], userName: null, homeDirectory: null,
+              version: '1', createdAt: 1790812800000, updatedAt: 1790812800000,
             },
             {
               id: BUILDER_ID, name: 'builder', status: 'READY', ready: true, statusExpiresAt: null,
-              lastSeenAt: 1790812800, capabilities: [], userName: null, homeDirectory: null,
-              version: '1', createdAt: 1790812800, updatedAt: 1790812800,
+              lastSeenAt: 1790812800000, capabilities: [], userName: null, homeDirectory: null,
+              version: '1', createdAt: 1790812800000, updatedAt: 1790812800000,
             },
           ],
       })

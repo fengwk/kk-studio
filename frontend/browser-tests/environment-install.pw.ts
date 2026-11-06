@@ -409,7 +409,7 @@ test('keeps event history out of the card and inside the management modal', asyn
   ]
   const card: EnvironmentDTO = {
     id: 'env-1', name: 'recovered-box', version: '1', status: 'READY', ready: true,
-    statusExpiresAt: null, lastSeenAt: 1784505660, capabilities: [], createdAt: 0, updatedAt: 0,
+    statusExpiresAt: null, lastSeenAt: 1784505660000, capabilities: [], createdAt: 0, updatedAt: 0,
   }
   await page.route('**/api/platform/environments**', async route => {
     const path = new URL(route.request().url()).pathname

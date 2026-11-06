@@ -21,13 +21,13 @@ const HARNESS_ENVIRONMENTS: EnvironmentDTO[] = [{
   status: 'READY',
   statusExpiresAt: null,
   ready: true,
-  lastSeenAt: 1790812800,
+  lastSeenAt: 1790812800000,
   capabilities: [],
   userName: null,
   homeDirectory: null,
   version: '1',
-  createdAt: 1790812800,
-  updatedAt: 1790812800,
+  createdAt: 1790812800000,
+  updatedAt: 1790812800000,
 }]
 
 const HARNESS_AGENT: AgentDefinitionDTO = {

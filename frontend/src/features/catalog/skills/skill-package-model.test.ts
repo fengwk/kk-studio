@@ -116,8 +116,8 @@ describe('skill package model', () => {
     expect(formatBytes(2048)).toBe('2 KB')
     expect(formatBytes('1572864')).toBe('1.5 MB')
     expect(formatBytes('not-a-size')).toBe('not-a-size')
-    // wire 上的 Instant 是 epoch 秒：按毫秒解析会退化成 1970 年。
-    expect(formatDateTime24(new Date(1784505600 * 1000), 'en-US')).toContain('2026')
+    // wire 上的 Instant 是 epoch 毫秒，直接解析。
+    expect(formatDateTime24(new Date(1784505600000), 'en-US')).toContain('2026')
   })
 
   it('validates package names, versions, descriptions and archive extensions', () => {

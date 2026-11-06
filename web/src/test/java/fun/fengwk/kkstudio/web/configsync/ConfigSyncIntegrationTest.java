@@ -25,6 +25,7 @@ import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MvcResult;
 import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
@@ -42,6 +43,7 @@ import fun.fengwk.kkstudio.share.catalog.AgentModelCreateDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentModelKind;
 import fun.fengwk.kkstudio.share.catalog.AgentModelVariantDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentProviderCreateDTO;
+import fun.fengwk.kkstudio.share.catalog.PromptCacheRetention;
 import fun.fengwk.kkstudio.share.mcp.McpServerCreateDTO;
 import fun.fengwk.kkstudio.share.skill.SkillPackageGitCreateDTO;
 import fun.fengwk.kkstudio.share.skill.SkillRefDTO;
@@ -961,8 +963,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
             .andReturn();
     assertFalse(output.getAll().contains(secret), "invalid input must not enter request logs");
     assertEquals(
-        "Failed to read request",
-        objectMapper.readTree(body(result)).path("errors").path("detail").asText());
+        "Failed to read request", objectMapper.readTree(body(result)).path("detail").asText());
     assertFalse(body(result).contains(secret));
   }
 
@@ -1153,9 +1154,9 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
             "credential",
             "sk-configsync-" + name,
             "modelCallTimeoutMillis",
-            120000L,
+            120000,
             "modelCallIdleTimeoutMillis",
-            30000L));
+            30000));
   }
 
   private void updateProviderPut(String name, String expectedVersion, AgentProviderCreateDTO source)
@@ -1166,8 +1167,8 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     update.put("providerType", source.getProviderType());
     update.put("baseUrl", source.getBaseUrl());
     update.put("credential", source.getCredential());
-    update.put("modelCallTimeoutMillis", source.getModelCallTimeoutMillis());
-    update.put("modelCallIdleTimeoutMillis", source.getModelCallIdleTimeoutMillis());
+    update.put("modelCallTimeoutMillis", source.getModelCallTimeoutMillis().intValue());
+    update.put("modelCallIdleTimeoutMillis", source.getModelCallIdleTimeoutMillis().intValue());
     update.put("expectedVersion", expectedVersion);
     putData("/api/providers/" + name, update);
   }
@@ -1218,7 +1219,9 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     dto.setHeaders(headers);
     dto.setEnabled(true);
     dto.setTimeoutMillis(10000L);
-    return postData("/api/mcp-servers", dto);
+    ObjectNode body = objectMapper.valueToTree(dto);
+    body.put("timeoutMillis", 10000);
+    return postData("/api/mcp-servers", body);
   }
 
   private JsonNode discover(String name, String expectedVersion) throws Exception {
@@ -1371,6 +1374,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     for (String id : variantIds) {
       AgentModelVariantDTO variant = new AgentModelVariantDTO();
       variant.setId(id);
+      variant.setPromptCacheRetention(PromptCacheRetention.NONE);
       variants.add(variant);
     }
     config.setVariants(variants);

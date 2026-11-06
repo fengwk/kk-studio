@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.project.http;
+package fun.fengwk.kkstudio.web.project;
 
 import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.any;
@@ -39,6 +39,7 @@ import fun.fengwk.kkstudio.project.dto.StopIssueRequestDTO;
 import fun.fengwk.kkstudio.project.dto.TransitionIssueRequestDTO;
 import fun.fengwk.kkstudio.project.dto.UnarchiveIssueRequestDTO;
 import fun.fengwk.kkstudio.project.dto.UpdateIssueRequestDTO;
+import fun.fengwk.kkstudio.project.http.IssueController;
 import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.IssueActivity;
 import fun.fengwk.kkstudio.project.model.IssueActivityActorType;

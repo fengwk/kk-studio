@@ -1,8 +1,8 @@
 import type { AppLocale } from '@/shared/i18n'
 
-/** 把 wire Instant（epoch 秒）格式化为本地 `YYYY-MM-DD HH:mm`；非法值显示 '-'。 */
+/** 把 wire Instant（epoch 毫秒）格式化为本地 `YYYY-MM-DD HH:mm`；非法值显示 '-'。 */
 export function formatBackendDate(value: number): string {
-  const date = new Date(value * 1000)
+  const date = new Date(value)
   if (!Number.isFinite(date.getTime())) {
     return '-'
   }
@@ -35,8 +35,7 @@ export function formatDateTime24(date: Date, locale: AppLocale): string {
 export type TimestampInput = number | string | readonly number[] | null | undefined
 
 /**
- * wire 时间戳转毫秒。数字按绝对值区分秒与毫秒（服务端 epoch 秒可能带小数，
- * 毫秒时间戳已超过 1e11）；字符串按可解析日期；数组按 UTC 日历字段。
+ * 时间戳转毫秒。数字直接按 epoch 毫秒处理；字符串按可解析日期；数组按 UTC 日历字段。
  * 无法识别的形态返回 null，绝不猜测当前时间。
  */
 export function timestampMillis(value: TimestampInput): number | null {
@@ -44,7 +43,7 @@ export function timestampMillis(value: TimestampInput): number | null {
     if (!Number.isFinite(value)) {
       return null
     }
-    return Math.abs(value) < 100_000_000_000 ? value * 1000 : value
+    return value
   }
   if (typeof value === 'string') {
     if (!value.trim()) {

@@ -234,15 +234,15 @@ async function expectStatus(fn, status) {
 }
 
 /**
- * 解析 install code 的真实 wire 时刻：全局 Jackson 开启 `WRITE_DATES_AS_TIMESTAMPS`，`Instant` 序列化为 epoch
- * seconds 数字（可为小数），按秒换算成毫秒。
+ * 解析 install code 的真实 wire 时刻：全局 Jackson 开启 `WRITE_DATES_AS_TIMESTAMPS` 且写毫秒，`Instant`
+ * 序列化为 epoch 毫秒整数。
  */
 function instantMillis(value) {
   assert(
-    typeof value === 'number' && Number.isFinite(value) && value >= 0,
-    `invalid epoch-second instant: ${value}`,
+    typeof value === 'number' && Number.isInteger(value) && value >= 0,
+    `invalid epoch-millisecond instant: ${value}`,
   )
-  return value * 1000
+  return value
 }
 
 /** 校验 code 严格在签发后约五分钟过期（有限时刻 + ±skew）。 */

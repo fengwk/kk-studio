@@ -52,6 +52,7 @@ import fun.fengwk.kkstudio.share.catalog.AgentModelPricingRequestBodyConditionDT
 import fun.fengwk.kkstudio.share.catalog.AgentModelRatePatchDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentModelRateSetDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentModelVariantDTO;
+import fun.fengwk.kkstudio.share.catalog.PromptCacheRetention;
 import fun.fengwk.kkstudio.share.runtime.HarnessUsageCostDTO;
 
 import java.math.BigDecimal;
@@ -546,6 +547,7 @@ class UsageCostProjectionServiceTest {
 
     AgentModelVariantDTO variant = new AgentModelVariantDTO();
     variant.setId("default");
+    variant.setPromptCacheRetention(PromptCacheRetention.NONE);
     config.setVariants(List.of(variant));
     config.setDefaultVariant("default");
     config.setPricing(pricing);

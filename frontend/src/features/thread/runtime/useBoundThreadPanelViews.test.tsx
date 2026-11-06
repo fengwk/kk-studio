@@ -200,13 +200,13 @@ const READY_ENVIRONMENT: EnvironmentDTO = {
   status: 'READY',
   statusExpiresAt: null,
   ready: true,
-  lastSeenAt: 1789776000,
+  lastSeenAt: 1789776000000,
   capabilities: [],
   userName: 'dev-user',
   homeDirectory: '/home/dev',
   version: '1',
-  createdAt: 1789776000,
-  updatedAt: 1789776000,
+  createdAt: 1789776000000,
+  updatedAt: 1789776000000,
 }
 
 describe('useBoundThreadPanelLabels', () => {

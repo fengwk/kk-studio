@@ -25,7 +25,7 @@ export function environmentEventLevelClass(level: EnvironmentEventLevel): string
 }
 
 export function formatTimestamp(value: number | null | undefined, locale: AppLocale): string {
-  return value == null ? '' : formatDateTime24(new Date(value * 1000), locale)
+  return value == null ? '' : formatDateTime24(new Date(value), locale)
 }
 
 /** 当前 runtime 端点只在 READY owner 可用；按 code unavailable + reason ENVIRONMENT_UNAVAILABLE 识别。 */

@@ -162,8 +162,8 @@ test('environment install-script case checks code, headers and rotation without 
         return {
           json: {
             code: activeCode,
-            // 真实 wire：全局 Jackson 把 Instant 序列化为 epoch seconds 数字（此处带小数毫秒）。
-            expiresAt: (Date.now() + 5 * 60 * 1000) / 1000,
+            // 真实 wire：全局 Jackson 把 Instant 序列化为 epoch 毫秒整数。
+            expiresAt: Date.now() + 5 * 60 * 1000,
           },
           headers: new Headers({ 'cache-control': 'no-store' }),
         }
@@ -263,7 +263,7 @@ for (const failure of ['http', 'timeout']) {
         if (method === 'POST' && path === `${cardPath}/install-codes`) {
           if (body.expectedVersion !== card.version) throw problemError(409, 'version_conflict', 'version conflict', path)
           return {
-            json: { code, expiresAt: (Date.now() + 300_000) / 1000 },
+            json: { code, expiresAt: Date.now() + 300_000 },
             headers: new Headers({ 'cache-control': 'no-store' }),
           }
         }
@@ -292,11 +292,20 @@ for (const failure of ['http', 'timeout']) {
 
 const INSTALL_TTL_MS = 5 * 60 * 1000
 
-test('install code expiresAt accepts epoch seconds from the real wire, including fractional values', () => {
-  // 测试意图：全局 Jackson 写出的 expiresAt 是 epoch seconds 数字（可为小数），必须按秒换算而非直接 Date.parse(number)。
+test('install code expiresAt is an epoch-millisecond integer on the real wire', () => {
+  // 测试意图：全局 Jackson 写出的 expiresAt 是 epoch 毫秒整数，必须直接按毫秒比较，绝不按秒换算。
   const issuedAtMs = 1_700_000_000_000
-  assert.doesNotThrow(() => assertExpiresNearFiveMinutes(issuedAtMs / 1000 + 300, issuedAtMs))
-  assert.doesNotThrow(() => assertExpiresNearFiveMinutes(issuedAtMs / 1000 + 300.5, issuedAtMs))
+  assert.doesNotThrow(() => assertExpiresNearFiveMinutes(issuedAtMs + 300_000, issuedAtMs))
+  // 秒级数字不再换算：按毫秒比较必然落在五分钟窗口之外。
+  assert.throws(
+    () => assertExpiresNearFiveMinutes(issuedAtMs / 1000 + 300, issuedAtMs),
+    /expire about five minutes/,
+  )
+  // 非整数毫秒不是 wire 形态。
+  assert.throws(
+    () => assertExpiresNearFiveMinutes(issuedAtMs + 300_000.5, issuedAtMs),
+    /invalid epoch-millisecond instant/,
+  )
 })
 
 test('install code expiresAt rejects unparseable instants and out-of-window expiry', () => {
@@ -305,23 +314,23 @@ test('install code expiresAt rejects unparseable instants and out-of-window expi
   for (const invalid of [undefined, null, 'not-a-time', -1, Number.NaN, Number.POSITIVE_INFINITY]) {
     assert.throws(
       () => assertExpiresNearFiveMinutes(invalid, issuedAtMs),
-      /invalid epoch-second instant/,
+      /invalid epoch-millisecond instant/,
     )
   }
   // ±skew（30s）内视为同一约五分钟到期。
-  assert.doesNotThrow(() => assertExpiresNearFiveMinutes(issuedAtMs / 1000 + 270, issuedAtMs))
-  assert.doesNotThrow(() => assertExpiresNearFiveMinutes(issuedAtMs / 1000 + 330, issuedAtMs))
+  assert.doesNotThrow(() => assertExpiresNearFiveMinutes(issuedAtMs + 270_000, issuedAtMs))
+  assert.doesNotThrow(() => assertExpiresNearFiveMinutes(issuedAtMs + 330_000, issuedAtMs))
   // 早于签发时刻（已过期）或超出 ±skew 的到期值都被拒绝。
   assert.throws(
-    () => assertExpiresNearFiveMinutes(issuedAtMs / 1000 - 60, issuedAtMs),
+    () => assertExpiresNearFiveMinutes(issuedAtMs - 60_000, issuedAtMs),
     /expire about five minutes/,
   )
   assert.throws(
-    () => assertExpiresNearFiveMinutes(issuedAtMs / 1000 + 240, issuedAtMs),
+    () => assertExpiresNearFiveMinutes(issuedAtMs + 240_000, issuedAtMs),
     /expire about five minutes/,
   )
   assert.throws(
-    () => assertExpiresNearFiveMinutes(issuedAtMs / 1000 + 360, issuedAtMs),
+    () => assertExpiresNearFiveMinutes(issuedAtMs + 360_000, issuedAtMs),
     /expire about five minutes/,
   )
 })

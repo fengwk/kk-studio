@@ -33,7 +33,7 @@ import tools.jackson.databind.ser.std.ToStringSerializer;
 @Import(PlatformHarnessTestConfiguration.class)
 public class PlatformTestApplication {
 
-  /** 测试宿主注入的 JSON mapper：禁用字母序（保持声明序）、省略 null、按时间戳写时间、Long 写为字符串。 */
+  /** 测试宿主注入的 JSON mapper：禁用字母序（保持声明序）、省略 null、按毫秒时间戳写时间、Long 写为字符串。 */
   @Bean
   @Primary
   public JsonMapper testJsonMapper() {
@@ -45,6 +45,8 @@ public class PlatformTestApplication {
         .changeDefaultPropertyInclusion(
             inclusion -> inclusion.withValueInclusion(JsonInclude.Include.NON_NULL))
         .enable(DateTimeFeature.WRITE_DATES_AS_TIMESTAMPS)
+        .disable(DateTimeFeature.WRITE_DATE_TIMESTAMPS_AS_NANOSECONDS)
+        .disable(DateTimeFeature.READ_DATE_TIMESTAMPS_AS_NANOSECONDS)
         .addModule(longToStringModule)
         .build();
   }

@@ -159,7 +159,7 @@ class IssueEvidencePublishIntegrationTest extends WebPostgresTestSupport {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"uploadId\":\"" + uploadId + "\"}"))
         .andExpect(status().isBadRequest())
-        .andExpect(jsonPath("$.code").value("PROJECT_VALIDATION_ERROR"));
+        .andExpect(jsonPath("$.code").value("validation"));
 
     assertEquals(1, support.count("project_issue_evidence", "issue_id", issueId));
     assertEquals(1L, support.refCount(blobId), "rejected replay must not retain the blob again");
@@ -180,7 +180,7 @@ class IssueEvidencePublishIntegrationTest extends WebPostgresTestSupport {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"uploadId\":\"" + pending.getId() + "\"}"))
         .andExpect(status().isBadRequest())
-        .andExpect(jsonPath("$.code").value("PROJECT_VALIDATION_ERROR"));
+        .andExpect(jsonPath("$.code").value("validation"));
 
     mockMvc
         .perform(
@@ -188,7 +188,7 @@ class IssueEvidencePublishIntegrationTest extends WebPostgresTestSupport {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"uploadId\":\"" + UUID.randomUUID() + "\"}"))
         .andExpect(status().isNotFound())
-        .andExpect(jsonPath("$.code").value("PROJECT_RESOURCE_NOT_FOUND"));
+        .andExpect(jsonPath("$.code").value("not_found"));
 
     mockMvc
         .perform(
@@ -221,7 +221,7 @@ class IssueEvidencePublishIntegrationTest extends WebPostgresTestSupport {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"uploadId\":\"" + uploadId + "\"}"))
         .andExpect(status().isBadRequest())
-        .andExpect(jsonPath("$.code").value("PROJECT_VALIDATION_ERROR"));
+        .andExpect(jsonPath("$.code").value("validation"));
 
     assertEquals(0, support.count("project_issue_evidence", "issue_id", issueId));
     assertEquals(
