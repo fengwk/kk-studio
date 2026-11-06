@@ -1,5 +1,9 @@
 package fun.fengwk.kkstudio.platform.catalog.mcp;
 
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
+
 import fun.fengwk.kkstudio.common.error.DomainException;
 
 import java.net.URI;
@@ -29,6 +33,8 @@ public final class McpConfigParser {
 
   private static final Pattern WHOLE_VAR_PATTERN =
       Pattern.compile("^\\$\\{([a-zA-Z_][a-zA-Z0-9_]*)\\}$");
+
+  private static final JsonMapper HEADERS_MAPPER = JsonMapper.builder().build();
 
   private McpConfigParser() {}
 
@@ -135,6 +141,33 @@ public final class McpConfigParser {
       normalized.put(key, value);
     }
     return Collections.unmodifiableMap(normalized);
+  }
+
+  /** 解析秘密更新携带的 header 文本：必须是 header 名到字符串值的 JSON 对象。 */
+  public static Map<String, String> parseHeaders(String headersJson) {
+    if (headersJson == null || headersJson.isBlank()) {
+      throw DomainException.validation(RESOURCE, "headers must be a JSON object of string values");
+    }
+    JsonNode root;
+    try {
+      root = HEADERS_MAPPER.readTree(headersJson);
+    } catch (IllegalArgumentException | JacksonException error) {
+      throw DomainException.validation(
+          RESOURCE, "headers must be a JSON object of string values", error);
+    }
+    if (root == null || !root.isObject()) {
+      throw DomainException.validation(RESOURCE, "headers must be a JSON object of string values");
+    }
+    Map<String, String> parsed = new LinkedHashMap<>();
+    for (Map.Entry<String, JsonNode> entry : root.properties()) {
+      JsonNode value = entry.getValue();
+      if (!value.isString()) {
+        throw DomainException.validation(
+            RESOURCE, "headers must be a JSON object of string values");
+      }
+      parsed.put(entry.getKey(), value.stringValue());
+    }
+    return normalizeHeaders(parsed);
   }
 
   /** 校验正整数毫秒超时；{@code null} 归一化为 {@link #DEFAULT_TIMEOUT_MILLIS}。 */

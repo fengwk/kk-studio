@@ -1,18 +1,14 @@
-package fun.fengwk.kkstudio.share.mcp;
+package fun.fengwk.kkstudio.platform.catalog.dto;
 
 import lombok.Data;
 
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpDiscoveryStatus;
+
 import java.time.Instant;
 
-/**
- * Platform MCP Server 公开安全表示。
- *
- * <p>安全边界：仅暴露安全元数据，绝不包含 URL、headers、bearer token 或 {code ${VAR}} 解析后的值。
- *
- * @author fengwk
- */
+/** MCP server 列表项：只含列表页需要的安全元数据，不含 URL 与 headers。 */
 @Data
-public class McpServerDTO {
+public class McpServerSummaryDTO {
 
   /** 唯一名（主键与路径身份，创建后不可变）：{@code ^[a-z][a-z0-9_]*$} 且 ≤32 字符。 */
   private String name;
@@ -23,8 +19,8 @@ public class McpServerDTO {
   /** 正整数毫秒超时。 */
   private Long timeoutMillis;
 
-  /** 发现状态：{@code UNVERIFIED}、{@code AVAILABLE}、{@code FAILED}。 */
-  private String discoveryStatus;
+  /** 发现状态。 */
+  private McpDiscoveryStatus discoveryStatus;
 
   /** 当前 server 下已发现的工具数量。 */
   private int toolCount;
@@ -32,9 +28,9 @@ public class McpServerDTO {
   /** 当前配置的非负十进制字符串版本号；客户端每次更新/发现时必须回传。 */
   private String version;
 
-  /** 创建时间（UTC Instant）。 */
-  private Instant createTime;
+  /** 创建时间。 */
+  private Instant createdAt;
 
-  /** 更新时间（UTC Instant）。 */
-  private Instant updateTime;
+  /** 更新时间。 */
+  private Instant updatedAt;
 }

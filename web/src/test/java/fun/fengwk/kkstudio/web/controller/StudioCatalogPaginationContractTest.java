@@ -20,7 +20,6 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import fun.fengwk.kkstudio.common.page.Page;
 import fun.fengwk.kkstudio.common.page.PageQuery;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionService;
-import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerService;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModelService;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderService;
 import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
@@ -35,7 +34,6 @@ class StudioCatalogPaginationContractTest {
   private AgentDefinitionService agentDefinitionService;
   private AgentModelService agentModelService;
   private AgentProviderService agentProviderService;
-  private McpServerService mcpServerService;
   private MockMvc mockMvc;
 
   @BeforeEach
@@ -43,13 +41,11 @@ class StudioCatalogPaginationContractTest {
     agentDefinitionService = mock(AgentDefinitionService.class);
     agentModelService = mock(AgentModelService.class);
     agentProviderService = mock(AgentProviderService.class);
-    mcpServerService = mock(McpServerService.class);
     mockMvc =
         MockMvcBuilders.standaloneSetup(
                 new StudioAgentDefinitionController(agentDefinitionService),
                 new StudioAgentModelController(agentModelService),
-                new StudioAgentProviderController(agentProviderService),
-                new StudioMcpServerController(mcpServerService))
+                new StudioAgentProviderController(agentProviderService))
             .setControllerAdvice(
                 new ApiResponseStatusAdvice(), new StudioProblemAdvice(new StudioMessageService()))
             .build();
@@ -60,7 +56,6 @@ class StudioCatalogPaginationContractTest {
     assertRejected("/api/agents", "pageNumber", "0");
     assertRejected("/api/models", "pageNumber", "0");
     assertRejected("/api/providers", "pageNumber", "0");
-    assertRejected("/api/mcp-servers", "pageNumber", "0");
     verifyNoServiceCalls();
   }
 
@@ -72,8 +67,6 @@ class StudioCatalogPaginationContractTest {
     assertRejected("/api/models", "pageSize", "1001");
     assertRejected("/api/providers", "pageSize", "0");
     assertRejected("/api/providers", "pageSize", "1001");
-    assertRejected("/api/mcp-servers", "pageSize", "0");
-    assertRejected("/api/mcp-servers", "pageSize", "1001");
     verifyNoServiceCalls();
   }
 
@@ -130,7 +123,6 @@ class StudioCatalogPaginationContractTest {
   }
 
   private void verifyNoServiceCalls() {
-    verifyNoInteractions(
-        agentDefinitionService, agentModelService, agentProviderService, mcpServerService);
+    verifyNoInteractions(agentDefinitionService, agentModelService, agentProviderService);
   }
 }

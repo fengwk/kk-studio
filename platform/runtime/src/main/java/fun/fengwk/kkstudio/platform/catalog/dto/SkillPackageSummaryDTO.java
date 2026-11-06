@@ -1,7 +1,9 @@
-package fun.fengwk.kkstudio.share.skill;
+package fun.fengwk.kkstudio.platform.catalog.dto;
 
 import lombok.Data;
 import org.jspecify.annotations.Nullable;
+
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageSource;
 
 import java.time.Instant;
 import java.util.List;
@@ -25,8 +27,8 @@ public class SkillPackageSummaryDTO {
   /** 当前版本的 Skill 清单（按 name 升序）；Agent 配置的技能候选直接来自这里。 */
   private List<SkillManifestEntryDTO> skills;
 
-  /** 渠道：{@code GIT} 或 {@code UPLOAD}。 */
-  private String source;
+  /** 发布渠道。 */
+  private SkillPackageSource source;
 
   /** Git 渠道是否存在比当前版本更新的已检查 HEAD。 */
   private boolean updateAvailable;
@@ -35,8 +37,8 @@ public class SkillPackageSummaryDTO {
   private String version;
 
   /** 创建时间。 */
-  private Instant createTime;
+  private Instant createdAt;
 
   /** 最后更新时间。 */
-  private Instant updateTime;
+  private Instant updatedAt;
 }

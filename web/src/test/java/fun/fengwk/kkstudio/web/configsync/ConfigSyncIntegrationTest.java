@@ -25,9 +25,12 @@ import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MvcResult;
 import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
+import fun.fengwk.kkstudio.platform.catalog.dto.McpServerDiscoverDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.SkillPackageCreateDTO;
 import fun.fengwk.kkstudio.platform.configsync.ConfigSyncApplier;
 import fun.fengwk.kkstudio.platform.configsync.ConfigSyncParser;
 import fun.fengwk.kkstudio.platform.configsync.ConfigSyncPlan;
@@ -42,8 +45,6 @@ import fun.fengwk.kkstudio.share.catalog.AgentModelKind;
 import fun.fengwk.kkstudio.share.catalog.AgentModelVariantDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.environment.EnvironmentCreateDTO;
-import fun.fengwk.kkstudio.share.mcp.McpServerCreateDTO;
-import fun.fengwk.kkstudio.share.skill.SkillPackageGitCreateDTO;
 import fun.fengwk.kkstudio.share.skill.SkillRefDTO;
 import fun.fengwk.kkstudio.web.controller.FakeStreamableHttpMcpServer;
 import fun.fengwk.kkstudio.web.storage.WebStorageS3TestConfiguration;
@@ -530,8 +531,8 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     deleteOk("/api/agents/" + agentB, findAgent(agentB).path("version").asText());
     deleteOk("/api/agents/" + agentA, unlinkedA.path("version").asText());
     deleteOk("/api/models/" + model, modelDto.path("version").asText());
-    deleteOk("/api/skill-packages/" + pkg, skillDto.path("version").asText());
-    deleteOk("/api/mcp-servers/" + mcpName, discoveredMcp.path("version").asText());
+    deleteOk("/api/platform/skill-packages/" + pkg, skillDto.path("version").asText());
+    deleteOk("/api/platform/mcp-servers/" + mcpName, discoveredMcp.path("version").asText());
     deleteOk("/api/environments/" + envDto.path("id").asText(), envDto.path("version").asText());
     deleteOk("/api/providers/" + provider, providerDto.path("version").asText());
     assertNull(findAgent(agentA), "agent must be gone before import");
@@ -577,12 +578,12 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
         envDto.path("id").asText().equals(reEnv.path("id").asText()),
         "re-created environment must receive a new UUID");
     assertEquals(RegistrationTokens.hash(token), storedTokenHash(reEnv.path("id").asText()));
-    JsonNode reMcp = getData("/api/mcp-servers/" + mcpName);
+    JsonNode reMcp = getData("/api/platform/mcp-servers/" + mcpName);
     assertEquals("AVAILABLE", reMcp.path("discoveryStatus").asText());
     assertEquals(1, reMcp.path("toolCount").asInt());
 
     // Skill exact commit 恢复。
-    JsonNode reSkill = getData("/api/skill-packages/" + pkg);
+    JsonNode reSkill = getData("/api/platform/skill-packages/" + pkg);
     assertEquals(commit1, reSkill.path("packageVersion").asText());
     assertEquals(1, reSkill.path("skills").size());
 
@@ -677,13 +678,13 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
         git.commit(Map.of("dev/SKILL.md", DEV_SKILL_MD, "review/SKILL.md", REVIEW_SKILL_MD));
     assertFalse(commit2.equals(commit1));
 
-    deleteOk("/api/skill-packages/" + pkg, skillDto.path("version").asText());
+    deleteOk("/api/platform/skill-packages/" + pkg, skillDto.path("version").asText());
     JsonNode importResult = importYaml(yaml);
     assertTrue(
         importResult.path("imported").findValuesAsString("name").contains(pkg),
         "skill package must be imported");
 
-    JsonNode reSkill = getData("/api/skill-packages/" + pkg);
+    JsonNode reSkill = getData("/api/platform/skill-packages/" + pkg);
     assertEquals(
         commit2, reSkill.path("packageVersion").asText(), "import must publish the branch HEAD");
     assertEquals(2, reSkill.path("skills").size(), "manifest must come from the rebuilt archive");
@@ -1198,28 +1199,34 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
   }
 
   private JsonNode createSkill(GitFixture git, String pkg, String description) throws Exception {
-    SkillPackageGitCreateDTO dto = new SkillPackageGitCreateDTO();
+    SkillPackageCreateDTO dto = new SkillPackageCreateDTO();
     dto.setPackageName(pkg);
     dto.setDescription(description);
     dto.setRepositoryUrl(git.url());
     dto.setBranch("main");
-    return postData("/api/skill-packages/git", dto);
+    return postData("/api/platform/skill-packages", dto);
   }
 
   private JsonNode createMcp(String name, String url, Map<String, String> headers)
       throws Exception {
-    McpServerCreateDTO dto = new McpServerCreateDTO();
-    dto.setName(name);
-    dto.setUrl(url);
-    dto.setHeaders(headers);
-    dto.setEnabled(true);
-    dto.setTimeoutMillis(10000L);
-    return postData("/api/mcp-servers", dto);
+    // 请求侧 Long 是 JSON 数值；headers 以一个 JSON 对象文本作为 SET 的秘密值提交
+    ObjectNode body = objectMapper.createObjectNode();
+    body.put("name", name);
+    body.put("url", url);
+    if (!headers.isEmpty()) {
+      ObjectNode secret = body.putObject("headers");
+      secret.put("operation", "SET");
+      secret.put("value", objectMapper.writeValueAsString(headers));
+    }
+    body.put("enabled", true);
+    body.put("timeoutMillis", 10000L);
+    return postData("/api/platform/mcp-servers", body);
   }
 
   private JsonNode discover(String name, String expectedVersion) throws Exception {
-    return postData(
-        "/api/mcp-servers/" + name + "/discover?expectedVersion=" + expectedVersion, null);
+    McpServerDiscoverDTO discover = new McpServerDiscoverDTO();
+    discover.setExpectedVersion(expectedVersion);
+    return postData("/api/platform/mcp-servers/" + name + "/discover", discover);
   }
 
   private JsonNode createEnvironment(String name) throws Exception {

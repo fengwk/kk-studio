@@ -7,8 +7,6 @@ import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
-import fun.fengwk.kkstudio.common.page.Page;
-import fun.fengwk.kkstudio.common.page.PageQuery;
 import fun.fengwk.kkstudio.platform.persistence.PostgresJdbcTypes;
 
 import java.time.OffsetDateTime;
@@ -64,36 +62,6 @@ public class McpServerRepository {
   public McpServerRepository(JdbcClient jdbcClient) {
     this.jdbcClient = Objects.requireNonNull(jdbcClient, "jdbcClient");
   }
-
-  public Page<McpServer> page(PageQuery pageQuery) {
-    // 聚合行始终存在，左连接保留越界空页的 total；同一语句共享 PostgreSQL 快照。
-    List<ServerPageRow> rows =
-        jdbcClient
-            .sql(
-                """
-                select page.*, totals.total_count
-                from (select count(*) as total_count from mcp_server) totals
-                left join lateral (
-                    select %s from mcp_server order by name asc limit :limit offset :offset
-                ) page on true
-                order by page.name asc
-                """
-                    .formatted(SERVER_COLUMNS))
-            .param("limit", pageQuery.getPageSize())
-            .param("offset", pageQuery.getOffset())
-            .query(
-                (rs, rowNum) ->
-                    new ServerPageRow(
-                        rs.getString("name") == null ? null : SERVER_ROW_MAPPER.mapRow(rs, rowNum),
-                        rs.getLong("total_count")))
-            .list();
-    List<McpServer> results =
-        rows.stream().map(ServerPageRow::server).filter(Objects::nonNull).toList();
-    return new Page<>(
-        pageQuery.getPageNumber(), pageQuery.getPageSize(), results, rows.getFirst().total());
-  }
-
-  private record ServerPageRow(McpServer server, long total) {}
 
   /** 返回全部 server 行（按 name 排序）。 */
   public List<McpServer> listAllServers() {

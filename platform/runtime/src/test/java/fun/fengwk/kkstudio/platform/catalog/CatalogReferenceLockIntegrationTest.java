@@ -17,6 +17,8 @@ import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionService;
+import fun.fengwk.kkstudio.platform.catalog.dto.McpServerCreateDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.McpServerDTO;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerRepository;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerService;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpTool;
@@ -36,8 +38,6 @@ import fun.fengwk.kkstudio.share.catalog.AgentModelDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentModelKind;
 import fun.fengwk.kkstudio.share.catalog.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentProviderDTO;
-import fun.fengwk.kkstudio.share.mcp.McpServerCreateDTO;
-import fun.fengwk.kkstudio.share.mcp.McpServerDTO;
 import fun.fengwk.kkstudio.share.runtime.HarnessExecutionSelectionDTO;
 import fun.fengwk.kkstudio.share.skill.SkillRefDTO;
 

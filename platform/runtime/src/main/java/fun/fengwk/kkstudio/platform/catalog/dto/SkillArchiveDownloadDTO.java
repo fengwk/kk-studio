@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.share.skill;
+package fun.fengwk.kkstudio.platform.catalog.dto;
 
 import lombok.Data;
 

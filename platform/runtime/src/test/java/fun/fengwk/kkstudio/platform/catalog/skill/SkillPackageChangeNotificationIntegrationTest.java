@@ -21,6 +21,8 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
+import fun.fengwk.kkstudio.platform.catalog.dto.SkillPackageCreateDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.SkillPackageEditDTO;
 import fun.fengwk.kkstudio.platform.catalog.skill.archive.SkillArchiveBuilder;
 import fun.fengwk.kkstudio.platform.catalog.skill.archive.SkillArchiveBuilder.InputEntry;
 import fun.fengwk.kkstudio.platform.catalog.skill.archive.SkillArchiveBuilder.Type;
@@ -28,8 +30,6 @@ import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitRepository;
 import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillSyncOrchestrator;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.platform.storage.StorageS3TestConfiguration;
-import fun.fengwk.kkstudio.share.skill.SkillPackageEditDTO;
-import fun.fengwk.kkstudio.share.skill.SkillPackageGitCreateDTO;
 
 import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
@@ -187,7 +187,7 @@ class SkillPackageChangeNotificationIntegrationTest extends PostgresSpringTestSu
       statement.execute("listen " + EnvironmentSkillSyncOrchestrator.CHANNEL);
       PGConnection pg = listener.unwrap(PGConnection.class);
 
-      SkillPackageGitCreateDTO create = new SkillPackageGitCreateDTO();
+      SkillPackageCreateDTO create = new SkillPackageCreateDTO();
       create.setPackageName(PACKAGE);
       create.setDescription("notify package");
       create.setRepositoryUrl(REPOSITORY_URL);

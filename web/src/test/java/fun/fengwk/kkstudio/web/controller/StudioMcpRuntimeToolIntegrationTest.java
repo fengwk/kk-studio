@@ -46,6 +46,7 @@ import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.TurnMediaCapabilities;
+import fun.fengwk.kkstudio.platform.catalog.dto.McpServerDiscoverDTO;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerRepository;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpTool;
 import fun.fengwk.kkstudio.platform.catalog.mcp.runtime.McpToolCatalog;
@@ -63,7 +64,6 @@ import fun.fengwk.kkstudio.share.catalog.AgentModelPricingDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentModelRateSetDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentModelVariantDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentProviderCreateDTO;
-import fun.fengwk.kkstudio.share.mcp.McpServerCreateDTO;
 import fun.fengwk.kkstudio.share.runtime.HarnessExecutionSelectionDTO;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
@@ -150,28 +150,38 @@ public class StudioMcpRuntimeToolIntegrationTest extends WebPostgresTestSupport 
         """;
     fakeServer.addTool("echo", "Echo text", schemaJson);
 
-    // 2. 通过 HTTP POST /api/mcp-servers 创建 Server，再显式发现入库
+    // 2. 通过 HTTP POST /api/platform/mcp-servers 创建 Server，再显式发现入库
     String serverName = "mcp_prod_" + (System.currentTimeMillis() % 1_000_000_000L);
 
-    McpServerCreateDTO createMcp = new McpServerCreateDTO();
-    createMcp.setName(serverName);
-    createMcp.setUrl(fakeServer.endpointUrl());
-    createMcp.setHeaders(Map.of("Authorization", "Bearer secret-bearer-token-do-not-leak"));
-    createMcp.setEnabled(true);
-    createMcp.setTimeoutMillis(15000L);
+    ObjectNode createMcp = objectMapper.createObjectNode();
+    createMcp.put("name", serverName);
+    createMcp.put("url", fakeServer.endpointUrl());
+    ObjectNode headers = createMcp.putObject("headers");
+    headers.put("operation", "SET");
+    headers.put(
+        "value",
+        objectMapper.writeValueAsString(
+            Map.of("Authorization", "Bearer secret-bearer-token-do-not-leak")));
+    createMcp.put("enabled", true);
+    createMcp.put("timeoutMillis", 15000L);
 
     mockMvc
         .perform(
-            post("/api/mcp-servers")
+            post("/api/platform/mcp-servers")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(createMcp)))
+                .content(createMcp.toString()))
         .andExpect(status().isCreated())
         .andExpect(jsonPath("$.name").value(serverName))
         .andExpect(jsonPath("$.version").value("0"))
         .andExpect(jsonPath("$.discoveryStatus").value("UNVERIFIED"));
 
+    McpServerDiscoverDTO discover = new McpServerDiscoverDTO();
+    discover.setExpectedVersion("0");
     mockMvc
-        .perform(post("/api/mcp-servers/{name}/discover", serverName).param("expectedVersion", "0"))
+        .perform(
+            post("/api/platform/mcp-servers/{name}/discover", serverName)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(discover)))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.discoveryStatus").value("AVAILABLE"))
         .andExpect(jsonPath("$.toolCount").value(1));

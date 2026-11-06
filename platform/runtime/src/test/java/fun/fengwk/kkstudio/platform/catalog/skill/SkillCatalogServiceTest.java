@@ -25,6 +25,15 @@ import tools.jackson.databind.json.JsonMapper;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
+import fun.fengwk.kkstudio.platform.catalog.dto.SkillPackageCheckDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.SkillPackageCreateDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.SkillPackageDetailDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.SkillPackageEditDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.SkillPackageFileDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.SkillPackagePublishDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.SkillPackageStagingCreateDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.SkillPackageStagingDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.SkillPackageStagingPublishDTO;
 import fun.fengwk.kkstudio.platform.catalog.skill.archive.SkillArchiveBuilder;
 import fun.fengwk.kkstudio.platform.catalog.skill.archive.SkillArchiveIndex;
 import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitException;
@@ -34,6 +43,7 @@ import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentSkillState;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
+import fun.fengwk.kkstudio.platform.secret.SecretUpdate;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageBlobRepository;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
@@ -41,15 +51,6 @@ import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobContent;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobState;
-import fun.fengwk.kkstudio.share.skill.SkillPackageCheckDTO;
-import fun.fengwk.kkstudio.share.skill.SkillPackageDetailDTO;
-import fun.fengwk.kkstudio.share.skill.SkillPackageEditDTO;
-import fun.fengwk.kkstudio.share.skill.SkillPackageFileDTO;
-import fun.fengwk.kkstudio.share.skill.SkillPackageGitCreateDTO;
-import fun.fengwk.kkstudio.share.skill.SkillPackageGitPublishDTO;
-import fun.fengwk.kkstudio.share.skill.SkillPackagePreviewDTO;
-import fun.fengwk.kkstudio.share.skill.SkillPackageUploadPreviewDTO;
-import fun.fengwk.kkstudio.share.skill.SkillPackageUploadPublishDTO;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -169,7 +170,7 @@ class SkillCatalogServiceTest {
 
     SkillPackageDetailDTO detail = service.editPackage(PACKAGE, editDTO("3", "updated"));
 
-    assertEquals("UPLOAD", detail.getSource());
+    assertEquals(SkillPackageSource.UPLOAD, detail.getSource());
     verify(packageRepository).updateDescription(PACKAGE, "updated", 3);
     verify(packageRepository, never()).updateGitSettings(any(), any(), any());
   }
@@ -182,7 +183,7 @@ class SkillCatalogServiceTest {
     branchEdit.setBranch("main");
     assertThrows(DomainException.class, () -> service.editPackage(PACKAGE, branchEdit));
     SkillPackageEditDTO tokenEdit = editDTO("3", "updated");
-    tokenEdit.applyToken(null);
+    tokenEdit.setToken(SecretUpdate.clear());
     assertThrows(DomainException.class, () -> service.editPackage(PACKAGE, tokenEdit));
     verify(packageRepository, never()).updateDescription(any(), any(), anyLong());
   }
@@ -192,7 +193,8 @@ class SkillCatalogServiceTest {
     // 意图：统一编辑沿用 CAS version，陈旧卡片不会改写描述或 Git 设置。
     when(packageRepository.lockPackage(PACKAGE)).thenReturn(gitPackage(2, HEAD, HEAD));
 
-    assertThrows(DomainException.class, () -> service.editPackage(PACKAGE, editDTO("1", "stale")));
+    assertThrows(
+        DomainException.class, () -> service.editPackage(PACKAGE, gitEditDTO("1", "stale")));
     verify(packageRepository, never()).updateDescription(any(), any(), anyLong());
     verify(packageRepository, never()).updateGitSettings(any(), any(), any());
   }
@@ -225,9 +227,9 @@ class SkillCatalogServiceTest {
     SkillPackageDetailDTO detail = service.createGitPackage(createDTO("token"));
 
     assertEquals(HEAD, detail.getPackageVersion());
-    assertEquals("GIT", detail.getSource());
+    assertEquals(SkillPackageSource.GIT, detail.getSource());
     assertEquals(HEAD, detail.getHeadCommit());
-    assertTrue(detail.getGit().isHasToken());
+    assertTrue(detail.getGit().getToken().configured());
     assertFalse(detail.isUpdateAvailable());
     assertEquals(
         List.of("dev", "review"), detail.getSkills().stream().map(s -> s.getName()).toList());
@@ -449,9 +451,9 @@ class SkillCatalogServiceTest {
     when(blobManager.getBlob(stagedBlobId))
         .thenReturn(blob(stagedBlobId, ARTIFACT_SHA, archive.zip().length));
 
-    SkillPackagePreviewDTO preview = service.previewUpload(uploadPreviewDTO(rawUploadId));
+    SkillPackageStagingDTO preview = service.previewUpload(uploadPreviewDTO(rawUploadId));
 
-    assertEquals(stagingUploadId.toString(), preview.getStagingUploadId());
+    assertEquals(stagingUploadId.toString(), preview.getId());
     assertEquals("v1", preview.getPackageVersion());
     assertEquals(1, preview.getFileCount());
     assertEquals(archive.index().get(0).size(), preview.getContentSizeBytes());
@@ -496,9 +498,9 @@ class SkillCatalogServiceTest {
     when(packageRepository.getPackage(PACKAGE))
         .thenReturn(null, uploadPackageWith(artifactBlobId, ARTIFACT_SHA));
 
-    SkillPackageDetailDTO detail = service.publishUpload(uploadPublishDTO(stagingUploadId, null));
+    SkillPackageDetailDTO detail = service.publishUpload(stagingUploadId, uploadPublishDTO(null));
 
-    assertEquals("UPLOAD", detail.getSource());
+    assertEquals(SkillPackageSource.UPLOAD, detail.getSource());
     assertNull(detail.getGit());
     assertEquals("v1", detail.getPackageVersion());
     verify(blobManager).retain(artifactBlobId);
@@ -511,7 +513,7 @@ class SkillCatalogServiceTest {
 
     assertThrows(
         DomainException.class,
-        () -> service.publishUpload(uploadPublishDTO(UUID.randomUUID(), "1")));
+        () -> service.publishUpload(UUID.randomUUID(), uploadPublishDTO("1")));
   }
 
   @Test
@@ -538,7 +540,7 @@ class SkillCatalogServiceTest {
     when(blobManager.getBlob(artifactBlobId))
         .thenReturn(blob(artifactBlobId, NEW_ARTIFACT_SHA, archive.zip().length));
 
-    service.publishUpload(uploadPublishDTO(stagingUploadId, "3"));
+    service.publishUpload(stagingUploadId, uploadPublishDTO("3"));
 
     verify(blobManager).release(current.artifactBlobId());
     verify(uploadService).delete(stagingUploadId);
@@ -548,24 +550,9 @@ class SkillCatalogServiceTest {
   void cancelUploadReleasesTheStagingUpload() {
     UUID stagingUploadId = UUID.randomUUID();
 
-    service.cancelUpload(stagingUploadId.toString());
+    service.cancelUpload(stagingUploadId);
 
     verify(uploadService).delete(stagingUploadId);
-  }
-
-  @Test
-  void uploadRejectsNonCanonicalUploadId() {
-    DomainException notUuid =
-        assertThrows(DomainException.class, () -> service.cancelUpload("not-a-uuid"));
-    assertEquals("stagingUploadId must be a canonical UUID", notUuid.getMessage());
-
-    String uppercase = "00000000-0000-0000-0000-00000000000A";
-    DomainException upper =
-        assertThrows(DomainException.class, () -> service.cancelUpload(uppercase));
-    assertEquals("stagingUploadId must be a canonical UUID", upper.getMessage());
-
-    DomainException nullId = assertThrows(DomainException.class, () -> service.cancelUpload(null));
-    assertEquals("stagingUploadId must be a canonical UUID", nullId.getMessage());
   }
 
   @Test
@@ -587,13 +574,19 @@ class SkillCatalogServiceTest {
     assertEquals(ARTIFACT_SHA, states.get(0).getInstalledSha256());
   }
 
-  private static SkillPackageGitCreateDTO createDTO(String token) {
-    SkillPackageGitCreateDTO dto = new SkillPackageGitCreateDTO();
+  private static SkillPackageCreateDTO createDTO(String token) {
+    SkillPackageCreateDTO dto = new SkillPackageCreateDTO();
     dto.setPackageName(PACKAGE);
     dto.setDescription("dev tools");
     dto.setRepositoryUrl("https://git.example.com/repo.git");
     dto.setBranch("main");
-    dto.setToken(token);
+    dto.setToken(token == null ? null : SecretUpdate.set(token));
+    return dto;
+  }
+
+  private static SkillPackageEditDTO gitEditDTO(String expectedVersion, String description) {
+    SkillPackageEditDTO dto = editDTO(expectedVersion, description);
+    dto.setBranch("main");
     return dto;
   }
 
@@ -610,15 +603,15 @@ class SkillCatalogServiceTest {
     return dto;
   }
 
-  private static SkillPackageGitPublishDTO publishDTO(String expectedVersion, String targetCommit) {
-    SkillPackageGitPublishDTO dto = new SkillPackageGitPublishDTO();
+  private static SkillPackagePublishDTO publishDTO(String expectedVersion, String targetCommit) {
+    SkillPackagePublishDTO dto = new SkillPackagePublishDTO();
     dto.setExpectedVersion(expectedVersion);
     dto.setTargetCommit(targetCommit);
     return dto;
   }
 
-  private static SkillPackageUploadPreviewDTO uploadPreviewDTO(UUID uploadId) {
-    SkillPackageUploadPreviewDTO dto = new SkillPackageUploadPreviewDTO();
+  private static SkillPackageStagingCreateDTO uploadPreviewDTO(UUID uploadId) {
+    SkillPackageStagingCreateDTO dto = new SkillPackageStagingCreateDTO();
     dto.setUploadId(uploadId.toString());
     dto.setPackageName(PACKAGE);
     dto.setPackageVersion("v1");
@@ -626,10 +619,8 @@ class SkillCatalogServiceTest {
     return dto;
   }
 
-  private static SkillPackageUploadPublishDTO uploadPublishDTO(
-      UUID stagingUploadId, String expectedVersion) {
-    SkillPackageUploadPublishDTO dto = new SkillPackageUploadPublishDTO();
-    dto.setStagingUploadId(stagingUploadId.toString());
+  private static SkillPackageStagingPublishDTO uploadPublishDTO(String expectedVersion) {
+    SkillPackageStagingPublishDTO dto = new SkillPackageStagingPublishDTO();
     dto.setPackageName(PACKAGE);
     dto.setPackageVersion("v1");
     dto.setDescription("uploaded");

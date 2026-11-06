@@ -5,19 +5,20 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.share.mcp.McpServerConfigDTO;
-import fun.fengwk.kkstudio.share.mcp.McpServerDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.McpServerDTO;
+import fun.fengwk.kkstudio.platform.secret.SecretConfiguredDTO;
 
+import java.time.Instant;
 import java.util.Map;
 
-/** 验证持有完整 MCP 配置或 schema 的内部对象不会经 {@code toString()} 泄露内容。 */
+/** 验证持有完整 MCP 配置或 schema 的内部对象与 HTTP DTO 不会经 {@code toString()} 泄露内容。 */
 class McpSensitiveToStringTest {
 
   private static final String SECRET = "sensitive-mcp-marker";
 
   @Test
   void redactsHeadersAndSchemaValues() {
-    // 意图：日志格式化领域对象、规范化配置与配置 DTO 时均不出现 headers 值或 schema 内容
+    // 意图：日志格式化领域对象、规范化配置与 HTTP DTO 时均不出现 headers 值或 schema 内容
     McpServer server =
         McpServer.builder()
             .name("sensitive_server")
@@ -34,22 +35,21 @@ class McpSensitiveToStringTest {
         McpConfigParser.normalizeHttpConfig(
             "https://mcp.example.com/mcp", Map.of("Authorization", "Bearer " + SECRET), true, 1L);
 
-    McpServerConfigDTO configDTO = new McpServerConfigDTO();
-    configDTO.setName("sensitive_server");
-    configDTO.setUrl("https://mcp.example.com/mcp");
-    configDTO.setHeaders(Map.of("Authorization", "Bearer " + SECRET));
-
     assertFalse(server.toString().contains(SECRET));
     assertFalse(server.toString().contains("Authorization"));
     assertFalse(tool.toString().contains(SECRET));
     assertFalse(config.toString().contains(SECRET));
-    // 显式配置 DTO 允许暴露 URL（不含 user-info 凭据），但绝不暴露 headers
-    assertFalse(configDTO.toString().contains("Authorization"));
 
-    // 公开安全视图只暴露元数据，物理上不存在 headers 字段
-    McpServerDTO publicDTO = new McpServerDTO();
-    publicDTO.setName("sensitive_server");
-    assertTrue(publicDTO.toString().contains("sensitive_server"));
-    assertFalse(publicDTO.toString().contains(SECRET));
+    // 详情只陈述 headers 已配置，物理上不存在 header 值
+    McpServerDTO detail = new McpServerDTO();
+    detail.setName("sensitive_server");
+    detail.setUrl("https://mcp.example.com/mcp");
+    detail.setHeaders(new SecretConfiguredDTO(true));
+    detail.setVersion("0");
+    detail.setCreatedAt(Instant.now());
+    detail.setUpdatedAt(Instant.now());
+    assertTrue(detail.toString().contains("sensitive_server"));
+    assertFalse(detail.toString().contains(SECRET));
+    assertFalse(detail.toString().contains("Authorization"));
   }
 }
