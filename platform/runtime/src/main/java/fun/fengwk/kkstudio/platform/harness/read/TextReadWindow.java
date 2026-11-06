@@ -155,7 +155,8 @@ public final class TextReadWindow {
    * @param displayPath header 展示的路径
    * @param lspStatus LSP 状态；{@code null} 或 {@code "unsupported"} 时省略该 header 行
    * @param checkpoint 每块读取前后执行的检查点；抛出异常即中止扫描，用于超时与中断映射
-   * @throws IllegalArgumentException 目标行越界列、内容看似二进制或位置超出可分页范围
+   * @throws PlatformReadException 目标行越界列或位置超出可分页范围
+   * @throws IllegalArgumentException 内容看似二进制
    * @throws IOException 读取失败
    */
   public static String read(

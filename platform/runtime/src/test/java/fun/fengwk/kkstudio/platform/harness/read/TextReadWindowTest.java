@@ -104,8 +104,9 @@ class TextReadWindowTest {
   /** 有效目标行上的越界列报错；无字符空行的合法端点是第 1 列且正文为空串。 */
   @Test
   void columnOffsetBeyondLineLengthThrowsWhileEmptyLineEndpointIsValid() {
-    IllegalArgumentException failure =
-        assertThrows(IllegalArgumentException.class, () -> read("abc", 1, 200, 10));
+    PlatformReadException failure =
+        assertThrows(PlatformReadException.class, () -> read("abc", 1, 200, 10));
+    assertEquals(PlatformReadException.Kind.INVALID_ARGUMENT, failure.kind());
     assertEquals("column_offset 10 is out of range: line 1 has 3 columns", failure.getMessage());
 
     assertEquals(
@@ -273,10 +274,11 @@ class TextReadWindowTest {
   void protocolPositionOverflowIsRejected() {
     assertEquals(
         Integer.MAX_VALUE, TextReadWindow.requireProtocolPosition(Integer.MAX_VALUE, "line"));
-    IllegalArgumentException failure =
+    PlatformReadException failure =
         assertThrows(
-            IllegalArgumentException.class,
+            PlatformReadException.class,
             () -> TextReadWindow.requireProtocolPosition(Integer.MAX_VALUE + 1L, "line"));
+    assertEquals(PlatformReadException.Kind.INVALID_ARGUMENT, failure.kind());
     assertTrue(failure.getMessage().contains("line=2147483648"), failure.getMessage());
   }
 
