@@ -139,12 +139,11 @@ public class ConfigSyncApplier {
         environmentService.importEnvironment(
             spec.name(), spec.registrationTokenHash(), spec.installConfig());
       } else {
-        // Environment 仍以字符串承载 CAS 坐标，跨族边界只做最小适配。
         environmentService.updateImportedEnvironment(
             EnvironmentId.of(existing.getId()),
             spec.registrationTokenHash(),
             spec.installConfig(),
-            Long.toString(existing.getVersion()));
+            existing.getVersion());
       }
     }
   }
@@ -196,7 +195,7 @@ public class ConfigSyncApplier {
     dto.setStorageMedia(sections.getStorageMedia());
     dto.setAdvanced(sections.getAdvanced());
     // 使用计划期快照版本做 CAS：计划到 apply 之间 settings 若被并发修改会正常冲突并随事务整体回滚。
-    dto.setExpectedVersion(Long.toString(update.expectedVersion()));
+    dto.setExpectedVersion(update.expectedVersion());
     systemSettingsService.update(dto);
   }
 

@@ -26,7 +26,7 @@ public class EnvironmentRepository {
 
   private static final String COLUMNS =
       "id, name, registration_token_hash, install_config::text as install_config_json, version, "
-          + "created_at as create_time, updated_at as update_time";
+          + "created_at, updated_at";
 
   static final String UPDATE_BY_ID_SQL =
       """
@@ -267,10 +267,10 @@ public class EnvironmentRepository {
     environment.setInstallConfig(
         EnvironmentInstallConfigs.read(rs.getString("install_config_json")));
     environment.setVersion(rs.getLong("version"));
-    environment.setCreateTime(
-        PostgresJdbcTypes.toInstant(rs.getObject("create_time", OffsetDateTime.class)));
-    environment.setUpdateTime(
-        PostgresJdbcTypes.toInstant(rs.getObject("update_time", OffsetDateTime.class)));
+    environment.setCreatedAt(
+        PostgresJdbcTypes.toInstant(rs.getObject("created_at", OffsetDateTime.class)));
+    environment.setUpdatedAt(
+        PostgresJdbcTypes.toInstant(rs.getObject("updated_at", OffsetDateTime.class)));
     return environment;
   }
 }

@@ -47,7 +47,7 @@ class EnvironmentInstallConfigServiceTest {
             });
     when(repo.getById(id)).thenReturn(env);
     var result = service.updateInstallConfig(EnvironmentId.of(id), request());
-    assertEquals("1", result.getVersion());
+    assertEquals(1L, result.getVersion());
     assertEquals(request().getInstallConfig(), result.getInstallConfig());
     assertNull(result.getRegistrationToken());
     assertEquals(RegistrationTokens.hash("private-token"), env.getRegistrationTokenHash());
@@ -59,7 +59,7 @@ class EnvironmentInstallConfigServiceTest {
     Environment env = environment(0);
     env.setInstallConfig(request().getInstallConfig());
     when(repo.lockById(id)).thenReturn(env);
-    assertEquals("0", service.updateInstallConfig(EnvironmentId.of(id), request()).getVersion());
+    assertEquals(0L, service.updateInstallConfig(EnvironmentId.of(id), request()).getVersion());
     verify(repo, never()).updateById(any(), anyLong());
     env.setVersion(1L);
     assertThrows(
@@ -72,7 +72,7 @@ class EnvironmentInstallConfigServiceTest {
     assertThrows(
         DomainException.class, () -> service.updateInstallConfig(EnvironmentId.of(id), null));
     var empty = new EnvironmentInstallConfigUpdateDTO();
-    empty.setExpectedVersion("0");
+    empty.setExpectedVersion(0L);
     assertThrows(
         DomainException.class, () -> service.updateInstallConfig(EnvironmentId.of(id), empty));
     verify(repo, never()).lockById(any());
@@ -107,7 +107,7 @@ class EnvironmentInstallConfigServiceTest {
     config.setOperatingSystem(DaemonOperatingSystem.LINUX);
     config.setDaemon(daemon);
     EnvironmentInstallConfigUpdateDTO request = new EnvironmentInstallConfigUpdateDTO();
-    request.setExpectedVersion("0");
+    request.setExpectedVersion(0L);
     request.setInstallConfig(config);
     return request;
   }

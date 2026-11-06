@@ -23,10 +23,9 @@ public class SystemSettingsRepository {
 
   /** 当前单行聚合的完整读取投影。 */
   public record SystemSettingsRecord(
-      SystemSettings settings, long version, Instant createTime, Instant updateTime) {}
+      SystemSettings settings, long version, Instant createdAt, Instant updatedAt) {}
 
-  private static final String COLUMNS =
-      "config, version, created_at as create_time, updated_at as update_time";
+  private static final String COLUMNS = "config, version, created_at, updated_at";
 
   static final String UPDATE_BY_VERSION_SQL =
       """
@@ -79,7 +78,7 @@ public class SystemSettingsRepository {
     return new SystemSettingsRecord(
         systemSettingsCodec.decode(rs.getString("config")),
         rs.getLong("version"),
-        PostgresJdbcTypes.toInstant(rs.getObject("create_time", OffsetDateTime.class)),
-        PostgresJdbcTypes.toInstant(rs.getObject("update_time", OffsetDateTime.class)));
+        PostgresJdbcTypes.toInstant(rs.getObject("created_at", OffsetDateTime.class)),
+        PostgresJdbcTypes.toInstant(rs.getObject("updated_at", OffsetDateTime.class)));
   }
 }

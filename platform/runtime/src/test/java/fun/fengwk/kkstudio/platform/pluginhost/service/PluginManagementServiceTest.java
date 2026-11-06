@@ -156,9 +156,9 @@ class PluginManagementServiceTest {
     assertEquals(PluginCredentialStatus.CONNECTED, staticPlugin.getStatus());
     assertTrue(staticPlugin.getConfiguration().getSecrets().get("apiKey").isConfigured());
     assertFalse(staticPlugin.toString().contains("secret-value"));
-    assertEquals("2", staticPlugin.getConfiguration().getVersion());
+    assertEquals(2L, staticPlugin.getConfiguration().getVersion());
     assertEquals("{}", staticPlugin.getConfiguration().getValuesJson());
-    assertEquals("2", staticPlugin.getAppliedVersion());
+    assertEquals(2L, staticPlugin.getAppliedVersion());
     assertNull(staticPlugin.getApplicationError());
     assertTrue(staticPlugin.isConnectionCheckSupported());
     assertEquals(List.of("static.render"), staticPlugin.getCanvasFunctionNames());
@@ -208,12 +208,12 @@ class PluginManagementServiceTest {
                     1L)));
     stored(STATIC_ID, 3L);
 
-    PluginDTO dto = service.updateConfiguration(STATIC_ID, "2", "{}", Map.of());
+    PluginDTO dto = service.updateConfiguration(STATIC_ID, 2L, "{}", Map.of());
 
     verify(configurationService).configure(STATIC_ID, 2L, "{}", Map.of());
     assertEquals(PluginCredentialStatus.NOT_CONNECTED, dto.getStatus());
-    assertEquals("3", dto.getConfiguration().getVersion());
-    assertEquals("2", dto.getAppliedVersion());
+    assertEquals(3L, dto.getConfiguration().getVersion());
+    assertEquals(2L, dto.getAppliedVersion());
     assertEquals(
         "configuration is saved but this node has not applied it yet", dto.getApplicationError());
   }
@@ -222,13 +222,13 @@ class PluginManagementServiceTest {
   @Test
   void validatesSecretPatchFieldNamesBeforeSaving() {
     String secret = "sensitive-patch-marker";
-    service.updateConfiguration(STATIC_ID, "2", "{}", Map.of("apiKey", SecretUpdate.set(secret)));
+    service.updateConfiguration(STATIC_ID, 2L, "{}", Map.of("apiKey", SecretUpdate.set(secret)));
     verify(configurationService)
         .configure(STATIC_ID, 2L, "{}", Map.of("apiKey", SecretUpdate.set(secret)));
-    service.updateConfiguration(STATIC_ID, "2", "{}", Map.of("apiKey", SecretUpdate.keep()));
+    service.updateConfiguration(STATIC_ID, 2L, "{}", Map.of("apiKey", SecretUpdate.keep()));
     verify(configurationService)
         .configure(STATIC_ID, 2L, "{}", Map.of("apiKey", SecretUpdate.keep()));
-    service.updateConfiguration(STATIC_ID, "2", "{}", Map.of("apiKey", SecretUpdate.clear()));
+    service.updateConfiguration(STATIC_ID, 2L, "{}", Map.of("apiKey", SecretUpdate.clear()));
     verify(configurationService)
         .configure(STATIC_ID, 2L, "{}", Map.of("apiKey", SecretUpdate.clear()));
 
@@ -239,7 +239,7 @@ class PluginManagementServiceTest {
       DomainException error =
           assertThrows(
               DomainException.class,
-              () -> service.updateConfiguration(STATIC_ID, "2", "{}", invalid));
+              () -> service.updateConfiguration(STATIC_ID, 2L, "{}", invalid));
       assertFalse(error.toString().contains(secret));
     }
   }
@@ -326,13 +326,13 @@ class PluginManagementServiceTest {
                 PluginConnectionCheckResult.Authentication.ACCEPTED,
                 PluginConnectionCheckResult.BrowserSession.UNKNOWN));
 
-    PluginConnectionCheckDTO result = service.checkConnection(STATIC_ID, "2");
+    PluginConnectionCheckDTO result = service.checkConnection(STATIC_ID, 2L);
 
-    assertEquals("2", result.getAppliedVersion());
+    assertEquals(2L, result.getAppliedVersion());
     assertEquals(NOW, result.getCheckedAt());
     assertEquals(PluginConnectionCheckDTO.Reachability.REACHABLE, result.getReachability());
-    assertThrows(DomainException.class, () -> service.checkConnection(STATIC_ID, "1"));
-    assertThrows(DomainException.class, () -> service.checkConnection(NONE_ID, "1"));
+    assertThrows(DomainException.class, () -> service.checkConnection(STATIC_ID, 1L));
+    assertThrows(DomainException.class, () -> service.checkConnection(NONE_ID, 1L));
   }
 
   private void stored(String pluginId, long revision) {

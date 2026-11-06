@@ -208,7 +208,7 @@ public class StorageUploadService {
     return toDTO(
         outcome.upload.getId(),
         outcome.blobId,
-        expiresAt(outcome.upload.getCreateTime(), uploadTtl),
+        expiresAt(outcome.upload.getCreatedAt(), uploadTtl),
         presignedPut);
   }
 
@@ -236,8 +236,7 @@ public class StorageUploadService {
       s3StorageService.deleteObjectIfExists(StorageObjectKeys.uploadOriginal(uploadId));
       expiryService.cleanupUnusedCandidate(upload);
       generatePreviewBestEffort(upload.getBlobId());
-      return toDTO(
-          uploadId, upload.getBlobId(), expiresAt(upload.getCreateTime(), uploadTtl), null);
+      return toDTO(uploadId, upload.getBlobId(), expiresAt(upload.getCreatedAt(), uploadTtl), null);
     }
 
     String tempKey = StorageObjectKeys.uploadOriginal(uploadId);
@@ -245,7 +244,7 @@ public class StorageUploadService {
     verifyObject(head, upload);
     StorageMediaFacts facts = mediaProbe.probe(tempKey, head);
     UUID blobId = materializeAndBind(upload, facts, false, uploadTtl);
-    return toDTO(upload.getId(), blobId, expiresAt(upload.getCreateTime(), uploadTtl), null);
+    return toDTO(upload.getId(), blobId, expiresAt(upload.getCreatedAt(), uploadTtl), null);
   }
 
   /**
@@ -568,7 +567,7 @@ public class StorageUploadService {
       throw DomainException.conflict(
           "STORAGE_VERIFICATION", "upload " + upload.getId() + " cleanup is already claimed");
     }
-    if (StorageUploadExpiryService.isExpired(upload.getCreateTime(), clock.instant(), uploadTtl)) {
+    if (StorageUploadExpiryService.isExpired(upload.getCreatedAt(), clock.instant(), uploadTtl)) {
       throw DomainException.conflict(
           "STORAGE_VERIFICATION", "upload " + upload.getId() + " expired");
     }
@@ -632,7 +631,7 @@ public class StorageUploadService {
       String mediaType,
       long sizeBytes,
       String sha256,
-      Instant createTime) {
+      Instant createdAt) {
     StorageUpload upload = new StorageUpload();
     upload.setId(uploadId);
     upload.setCandidateBlobId(candidateBlobId);
@@ -641,7 +640,7 @@ public class StorageUploadService {
     upload.setDeclaredMediaType(mediaType);
     upload.setDeclaredSize(sizeBytes);
     upload.setDeclaredSha256(sha256);
-    upload.setCreateTime(createTime);
+    upload.setCreatedAt(createdAt);
     return upload;
   }
 

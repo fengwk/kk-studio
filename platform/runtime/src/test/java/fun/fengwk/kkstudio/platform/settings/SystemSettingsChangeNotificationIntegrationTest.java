@@ -122,7 +122,7 @@ class SystemSettingsChangeNotificationIntegrationTest extends PostgresSpringTest
       SystemSettings snapshotOnEntry = systemSettingsSnapshot.get();
       tx.executeWithoutResult(
           status -> {
-            SystemSettingsUpdateDTO update = updateFrom(before, "0");
+            SystemSettingsUpdateDTO update = updateFrom(before, 0L);
             update.getAiRuntime().setRetryMaxRetries(changedRetries);
             systemSettingsService.update(update);
             status.setRollbackOnly();
@@ -134,7 +134,7 @@ class SystemSettingsChangeNotificationIntegrationTest extends PostgresSpringTest
       assertSame(snapshotOnEntry, systemSettingsSnapshot.get());
       assertNotEquals(changedRetries, systemSettingsSnapshot.get().aiRuntime().retryMaxRetries());
 
-      SystemSettingsUpdateDTO committed = updateFrom(before, "0");
+      SystemSettingsUpdateDTO committed = updateFrom(before, 0L);
       committed.getAiRuntime().setRetryMaxRetries(changedRetries);
       systemSettingsService.update(committed);
 
@@ -212,7 +212,7 @@ class SystemSettingsChangeNotificationIntegrationTest extends PostgresSpringTest
   }
 
   private static SystemSettingsUpdateDTO updateFrom(
-      SystemSettingsDTO current, String expectedVersion) {
+      SystemSettingsDTO current, Long expectedVersion) {
     SystemSettingsUpdateDTO update = new SystemSettingsUpdateDTO();
     update.setExpectedVersion(expectedVersion);
     update.setTool(current.getTool());

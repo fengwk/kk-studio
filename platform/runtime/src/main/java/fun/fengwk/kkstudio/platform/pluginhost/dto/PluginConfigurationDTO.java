@@ -16,8 +16,8 @@ import java.util.Map;
 @Data
 public class PluginConfigurationDTO {
 
-  /** 该投影对应的配置版本（canonical 非负十进制字符串）。 */
-  private String version;
+  /** 该投影对应的配置版本；wire 上为 canonical 非负十进制字符串。 */
+  private Long version;
 
   /** 该版本校验后的规范配置文本。 */
   private String valuesJson;

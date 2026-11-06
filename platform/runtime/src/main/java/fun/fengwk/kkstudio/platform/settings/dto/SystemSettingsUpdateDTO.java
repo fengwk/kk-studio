@@ -8,6 +8,6 @@ import lombok.EqualsAndHashCode;
 @EqualsAndHashCode(callSuper = true)
 public class SystemSettingsUpdateDTO extends SystemSettingsSectionsDTO {
 
-  /** 必填非负十进制字符串；必须与当前聚合版本一致。 */
-  private String expectedVersion;
+  /** 必填乐观锁版本；wire 上为非负十进制字符串，必须与当前聚合版本一致。 */
+  private Long expectedVersion;
 }

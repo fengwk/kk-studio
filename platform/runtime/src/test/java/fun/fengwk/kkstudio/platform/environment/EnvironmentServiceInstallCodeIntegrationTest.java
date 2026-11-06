@@ -61,7 +61,7 @@ class EnvironmentServiceInstallCodeIntegrationTest extends PostgresSpringTestSup
   @Test
   void tamperedCodeRejectedAndGenuineCodePreserved() {
     EnvironmentId envId = createTestEnvironment("tampered-code-env");
-    EnvironmentInstallCodeDTO issued = environmentService.issueInstallCode(envId, "1");
+    EnvironmentInstallCodeDTO issued = environmentService.issueInstallCode(envId, 1L);
     assertThat(countInstallCodes(envId)).isEqualTo(1L);
 
     String originalCode = issued.getCode();
@@ -92,7 +92,7 @@ class EnvironmentServiceInstallCodeIntegrationTest extends PostgresSpringTestSup
     EnvironmentId envA = createTestEnvironment("wrong-env-a");
     EnvironmentId envB = createTestEnvironment("wrong-env-b");
 
-    EnvironmentInstallCodeDTO issuedA = environmentService.issueInstallCode(envA, "1");
+    EnvironmentInstallCodeDTO issuedA = environmentService.issueInstallCode(envA, 1L);
     assertThat(countInstallCodes(envA)).isEqualTo(1L);
     assertThat(countInstallCodes(envB)).isZero();
 
@@ -113,7 +113,7 @@ class EnvironmentServiceInstallCodeIntegrationTest extends PostgresSpringTestSup
   @Test
   void duplicateConsumptionRejected() {
     EnvironmentId envId = createTestEnvironment("duplicate-consume-env");
-    EnvironmentInstallCodeDTO issued = environmentService.issueInstallCode(envId, "1");
+    EnvironmentInstallCodeDTO issued = environmentService.issueInstallCode(envId, 1L);
 
     String firstScript = environmentService.installationScript(envId, issued.getCode());
     assertThat(firstScript).isNotBlank();
@@ -128,8 +128,8 @@ class EnvironmentServiceInstallCodeIntegrationTest extends PostgresSpringTestSup
   @Test
   void newCodeReplacesOldCodeViaUpsert() {
     EnvironmentId envId = createTestEnvironment("upsert-replace-env");
-    EnvironmentInstallCodeDTO first = environmentService.issueInstallCode(envId, "1");
-    EnvironmentInstallCodeDTO second = environmentService.issueInstallCode(envId, "1");
+    EnvironmentInstallCodeDTO first = environmentService.issueInstallCode(envId, 1L);
+    EnvironmentInstallCodeDTO second = environmentService.issueInstallCode(envId, 1L);
 
     // 仅保留最新的一条临时安装 code
     assertThat(countInstallCodes(envId)).isEqualTo(1L);
@@ -149,23 +149,23 @@ class EnvironmentServiceInstallCodeIntegrationTest extends PostgresSpringTestSup
   @Test
   void issueDoesNotAdvanceVersionAndStaleExpectedVersionKeepsExistingCode() {
     EnvironmentId envId = createTestEnvironment("issue-version-env");
-    EnvironmentInstallCodeDTO issued = environmentService.issueInstallCode(envId, "1");
+    EnvironmentInstallCodeDTO issued = environmentService.issueInstallCode(envId, 1L);
 
-    assertThat(environmentService.get(envId).getVersion()).isEqualTo("1");
+    assertThat(environmentService.get(envId).getVersion()).isEqualTo(1L);
     assertThat(countInstallCodes(envId)).isEqualTo(1L);
 
-    assertThrows(DomainException.class, () -> environmentService.issueInstallCode(envId, "0"));
+    assertThrows(DomainException.class, () -> environmentService.issueInstallCode(envId, 0L));
     assertThat(countInstallCodes(envId)).isEqualTo(1L);
 
     assertThat(environmentService.installationScript(envId, issued.getCode())).isNotBlank();
-    assertThat(environmentService.get(envId).getVersion()).isEqualTo("2");
+    assertThat(environmentService.get(envId).getVersion()).isEqualTo(2L);
   }
 
   /** 测试意图：过期 code 在数据库时间下被拒绝，且不会被消费或轮换凭证。 */
   @Test
   void expiredCodeIsRejectedAndPreserved() {
     EnvironmentId envId = createTestEnvironment("expired-code-env");
-    EnvironmentInstallCodeDTO issued = environmentService.issueInstallCode(envId, "1");
+    EnvironmentInstallCodeDTO issued = environmentService.issueInstallCode(envId, 1L);
     jdbcClient
         .sql(
             """
@@ -183,18 +183,18 @@ class EnvironmentServiceInstallCodeIntegrationTest extends PostgresSpringTestSup
         DomainException.class,
         () -> environmentService.installationScript(envId, issued.getCode()));
     assertThat(countInstallCodes(envId)).isEqualTo(1L);
-    assertThat(environmentService.get(envId).getVersion()).isEqualTo("1");
+    assertThat(environmentService.get(envId).getVersion()).isEqualTo(1L);
   }
 
   /** 测试意图：签发 code 后发生凭证轮换（rotateToken），同一行事务清空 code，旧 code 拒绝消费。 */
   @Test
   void rotateTokenInvalidatesIssuedCode() {
     EnvironmentId envId = createTestEnvironment("rotate-invalidates-env");
-    EnvironmentInstallCodeDTO issued = environmentService.issueInstallCode(envId, "1");
+    EnvironmentInstallCodeDTO issued = environmentService.issueInstallCode(envId, 1L);
     assertThat(countInstallCodes(envId)).isEqualTo(1L);
 
     // 轮换凭证，使 Environment 持有的 registrationTokenHash 发生改变
-    environmentService.rotateToken(envId, "1");
+    environmentService.rotateToken(envId, 1L);
     assertThat(countInstallCodes(envId)).isZero();
 
     assertThrows(
@@ -206,11 +206,11 @@ class EnvironmentServiceInstallCodeIntegrationTest extends PostgresSpringTestSup
   @Test
   void importInvalidatesIssuedCode() {
     EnvironmentId envId = createTestEnvironment("import-invalidates-env");
-    EnvironmentInstallCodeDTO issued = environmentService.issueInstallCode(envId, "1");
+    EnvironmentInstallCodeDTO issued = environmentService.issueInstallCode(envId, 1L);
     assertThat(countInstallCodes(envId)).isEqualTo(1L);
 
     String newImportedTokenHash = RegistrationTokens.hash("imported-fresh-token");
-    environmentService.updateImportedEnvironment(envId, newImportedTokenHash, validConfig(), "1");
+    environmentService.updateImportedEnvironment(envId, newImportedTokenHash, validConfig(), 1L);
     assertThat(countInstallCodes(envId)).isZero();
 
     assertThrows(
@@ -228,7 +228,7 @@ class EnvironmentServiceInstallCodeIntegrationTest extends PostgresSpringTestSup
             new EnvironmentService(
                 environmentRepository, environmentRegistry, snapshot, Clock.systemUTC()));
 
-    EnvironmentInstallCodeDTO issued = serviceInstance1.issueInstallCode(envId, "1");
+    EnvironmentInstallCodeDTO issued = serviceInstance1.issueInstallCode(envId, 1L);
     assertThat(countInstallCodes(envId)).isEqualTo(1L);
 
     // 由第二个服务实例核销 code 并生成脚本
@@ -238,7 +238,7 @@ class EnvironmentServiceInstallCodeIntegrationTest extends PostgresSpringTestSup
 
     // 第一个实例观察到版本已递增
     EnvironmentDTO card = serviceInstance1.get(envId);
-    assertThat(card.getVersion()).isEqualTo("2");
+    assertThat(card.getVersion()).isEqualTo(2L);
 
     // 再次在第一个实例尝试兑换失败
     assertThrows(
@@ -249,7 +249,7 @@ class EnvironmentServiceInstallCodeIntegrationTest extends PostgresSpringTestSup
   @Test
   void concurrentConsumptionExactlyOneSucceeds() throws Exception {
     EnvironmentId envId = createTestEnvironment("concurrent-consume-env");
-    EnvironmentInstallCodeDTO issued = environmentService.issueInstallCode(envId, "1");
+    EnvironmentInstallCodeDTO issued = environmentService.issueInstallCode(envId, 1L);
 
     int threadCount = 8;
     ExecutorService pool = Executors.newFixedThreadPool(threadCount);
@@ -297,14 +297,14 @@ class EnvironmentServiceInstallCodeIntegrationTest extends PostgresSpringTestSup
     assertThat(countInstallCodes(envId)).isZero();
 
     EnvironmentDTO card = environmentService.get(envId);
-    assertThat(card.getVersion()).isEqualTo("2");
+    assertThat(card.getVersion()).isEqualTo(2L);
   }
 
   /** 测试意图：安装脚本渲染失败抛异常时，外层事务回滚，code 消费行与环境行均恢复，之后仍可正常消费。 */
   @Test
   void renderFailureRollsBackCodeConsumption() {
     EnvironmentId envId = createTestEnvironment("render-failure-env");
-    EnvironmentInstallCodeDTO issued = environmentService.issueInstallCode(envId, "1");
+    EnvironmentInstallCodeDTO issued = environmentService.issueInstallCode(envId, 1L);
     assertThat(countInstallCodes(envId)).isEqualTo(1L);
 
     try (MockedStatic<EnvironmentInstallScripts> mocked =
@@ -321,20 +321,20 @@ class EnvironmentServiceInstallCodeIntegrationTest extends PostgresSpringTestSup
     // 事务回滚后：临时 code 未被删除，版本保持不变
     assertThat(countInstallCodes(envId)).isEqualTo(1L);
     EnvironmentDTO card = environmentService.get(envId);
-    assertThat(card.getVersion()).isEqualTo("1");
+    assertThat(card.getVersion()).isEqualTo(1L);
 
     // 原 code 仍可成功兑换，且成功后版本推进为 2
     String script = environmentService.installationScript(envId, issued.getCode());
     assertThat(script).isNotBlank();
     assertThat(countInstallCodes(envId)).isZero();
-    assertThat(environmentService.get(envId).getVersion()).isEqualTo("2");
+    assertThat(environmentService.get(envId).getVersion()).isEqualTo(2L);
   }
 
   /** 测试意图：兑换已写入后发生异常时，外层事务回滚撤销 code 清空、token 轮换与版本递增。 */
   @Test
   void redeemFailureRollsBackCodeConsumption() {
     EnvironmentId envId = createTestEnvironment("token-write-failure-env");
-    EnvironmentInstallCodeDTO issued = environmentService.issueInstallCode(envId, "1");
+    EnvironmentInstallCodeDTO issued = environmentService.issueInstallCode(envId, 1L);
     assertThat(countInstallCodes(envId)).isEqualTo(1L);
 
     // 构造在 redeemInstallCode 真实写入后抛出异常的 Repository 代理
@@ -363,13 +363,13 @@ class EnvironmentServiceInstallCodeIntegrationTest extends PostgresSpringTestSup
     // 事务回滚后：code 仍然有效保留
     assertThat(countInstallCodes(envId)).isEqualTo(1L);
     EnvironmentDTO card = environmentService.get(envId);
-    assertThat(card.getVersion()).isEqualTo("1");
+    assertThat(card.getVersion()).isEqualTo(1L);
 
     // 使用正常 service 重试兑换成功
     String script = environmentService.installationScript(envId, issued.getCode());
     assertThat(script).isNotBlank();
     assertThat(countInstallCodes(envId)).isZero();
-    assertThat(environmentService.get(envId).getVersion()).isEqualTo("2");
+    assertThat(environmentService.get(envId).getVersion()).isEqualTo(2L);
   }
 
   private EnvironmentId createTestEnvironment(String name) {

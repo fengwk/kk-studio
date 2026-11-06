@@ -250,7 +250,7 @@ class ConfigSyncApplierTest {
 
     verify(environmentService).importEnvironment("new", "token-new", null);
     verify(environmentService)
-        .updateImportedEnvironment(EnvironmentId.of(existing.getId()), "token-old", null, "2");
+        .updateImportedEnvironment(EnvironmentId.of(existing.getId()), "token-old", null, 2L);
   }
 
   @Test
@@ -267,7 +267,7 @@ class ConfigSyncApplierTest {
     ArgumentCaptor<SystemSettingsUpdateDTO> captor =
         ArgumentCaptor.forClass(SystemSettingsUpdateDTO.class);
     verify(systemSettingsService).update(captor.capture());
-    assertEquals("9", captor.getValue().getExpectedVersion());
+    assertEquals(9L, captor.getValue().getExpectedVersion());
     // 完整聚合必须携带网络设置，避免省略字段导致校验失败或丢失代理事实。
     assertEquals(sections.getNetwork(), captor.getValue().getNetwork());
     // 不应再读当前版本。

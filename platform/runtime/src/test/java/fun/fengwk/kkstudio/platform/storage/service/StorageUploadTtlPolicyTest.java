@@ -77,7 +77,7 @@ class StorageUploadTtlPolicyTest {
   private static StorageUpload newUpload() {
     StorageUpload upload = new StorageUpload();
     upload.setId(UUID.randomUUID());
-    upload.setCreateTime(CREATED);
+    upload.setCreatedAt(CREATED);
     return upload;
   }
 }

@@ -100,8 +100,8 @@ class EnvironmentServiceTest {
               env.setName("local-env");
               env.setRegistrationTokenHash(h("secret-token"));
               env.setVersion(0L);
-              env.setCreateTime(NOW);
-              env.setUpdateTime(NOW);
+              env.setCreatedAt(NOW);
+              env.setUpdatedAt(NOW);
               return env;
             });
     when(registry.find(any())).thenReturn(Optional.empty());
@@ -161,8 +161,8 @@ class EnvironmentServiceTest {
               env.setName("local-env");
               env.setRegistrationTokenHash(h("secret-token"));
               env.setVersion(0L);
-              env.setCreateTime(NOW);
-              env.setUpdateTime(NOW);
+              env.setCreatedAt(NOW);
+              env.setUpdatedAt(NOW);
               return env;
             });
 
@@ -177,7 +177,7 @@ class EnvironmentServiceTest {
     ArgumentCaptor<Environment> created = ArgumentCaptor.forClass(Environment.class);
     verify(repo).create(created.capture());
     assertEquals(h(result.getRegistrationToken()), created.getValue().getRegistrationTokenHash());
-    assertEquals("0", result.getVersion());
+    assertEquals(0L, result.getVersion());
   }
 
   @Test
@@ -193,8 +193,8 @@ class EnvironmentServiceTest {
     env.setName("local-env");
     env.setRegistrationTokenHash(h("secret-token"));
     env.setVersion(0L);
-    env.setCreateTime(NOW);
-    env.setUpdateTime(NOW);
+    env.setCreatedAt(NOW);
+    env.setUpdatedAt(NOW);
 
     when(repo.getById(ENV_ID)).thenReturn(env);
     when(repo.listNewestFirst()).thenReturn(List.of(env));
@@ -254,8 +254,8 @@ class EnvironmentServiceTest {
     env.setName("local-env");
     env.setRegistrationTokenHash(h("secret-token"));
     env.setVersion(0L);
-    env.setCreateTime(NOW);
-    env.setUpdateTime(NOW);
+    env.setCreatedAt(NOW);
+    env.setUpdatedAt(NOW);
     when(repo.getById(ENV_ID)).thenReturn(env);
     // 没有任何连接行：Environment 从未连接，无任何已保留事实。
     when(registry.find(EnvironmentId.of(ENV_ID))).thenReturn(Optional.empty());
@@ -292,8 +292,8 @@ class EnvironmentServiceTest {
     env.setName("local-env");
     env.setRegistrationTokenHash(h("secret-token"));
     env.setVersion(0L);
-    env.setCreateTime(NOW);
-    env.setUpdateTime(NOW);
+    env.setCreatedAt(NOW);
+    env.setUpdatedAt(NOW);
     when(repo.getById(ENV_ID)).thenReturn(env);
 
     EnvironmentConnection conn =
@@ -380,8 +380,8 @@ class EnvironmentServiceTest {
             });
 
     assertThrows(
-        DomainException.class, () -> service.issueInstallCode(EnvironmentId.of(ENV_ID), "3"));
-    EnvironmentInstallCodeDTO issued = service.issueInstallCode(EnvironmentId.of(ENV_ID), "4");
+        DomainException.class, () -> service.issueInstallCode(EnvironmentId.of(ENV_ID), 3L));
+    EnvironmentInstallCodeDTO issued = service.issueInstallCode(EnvironmentId.of(ENV_ID), 4L);
     assertEquals(NOW.plus(Duration.ofMinutes(5)), issued.getExpiresAt());
     verify(repo)
         .saveInstallCode(
@@ -418,10 +418,6 @@ class EnvironmentServiceTest {
     verify(repo, never()).getByRegistrationTokenHash(any());
     assertThrows(
         DomainException.class, () -> service.installationScript(EnvironmentId.of(ENV_ID), null));
-    assertThrows(
-        DomainException.class, () -> service.issueInstallCode(EnvironmentId.of(ENV_ID), null));
-    assertThrows(
-        DomainException.class, () -> service.issueInstallCode(EnvironmentId.of(ENV_ID), " "));
   }
 
   /** 测试意图：未知身份或缺少已保存安装设置都不能返回可执行的成功空脚本。 */
@@ -472,8 +468,8 @@ class EnvironmentServiceTest {
     env.setName("local-env");
     env.setRegistrationTokenHash(h("old-token"));
     env.setVersion(0L);
-    env.setCreateTime(NOW);
-    env.setUpdateTime(NOW);
+    env.setCreatedAt(NOW);
+    env.setUpdatedAt(NOW);
 
     when(repo.lockById(ENV_ID)).thenReturn(env);
     when(repo.getById(ENV_ID)).thenReturn(env);
@@ -483,7 +479,7 @@ class EnvironmentServiceTest {
 
     EnvironmentService service = new EnvironmentService(repo, registry, snapshot, CLOCK);
 
-    EnvironmentDTO rotated = service.rotateToken(EnvironmentId.of(ENV_ID), "0");
+    EnvironmentDTO rotated = service.rotateToken(EnvironmentId.of(ENV_ID), 0L);
 
     assertNotNull(rotated.getRegistrationToken());
     assertNotEquals("old-token", rotated.getRegistrationToken());
@@ -513,16 +509,16 @@ class EnvironmentServiceTest {
 
     // 1. Active lease in DB -> rejects
     when(registry.hasActiveLease(EnvironmentId.of(ENV_ID))).thenReturn(true);
-    assertThrows(DomainException.class, () -> service.delete(EnvironmentId.of(ENV_ID), "0"));
+    assertThrows(DomainException.class, () -> service.delete(EnvironmentId.of(ENV_ID), 0L));
 
     // 2. Offline, but active work in durable_work -> rejects
     when(registry.hasActiveLease(EnvironmentId.of(ENV_ID))).thenReturn(false);
     when(repo.hasActiveWork(ENV_ID)).thenReturn(true);
-    assertThrows(DomainException.class, () -> service.delete(EnvironmentId.of(ENV_ID), "0"));
+    assertThrows(DomainException.class, () -> service.delete(EnvironmentId.of(ENV_ID), 0L));
 
     // 3. All clear -> succeeds
     when(repo.hasActiveWork(ENV_ID)).thenReturn(false);
-    service.delete(EnvironmentId.of(ENV_ID), "0");
+    service.delete(EnvironmentId.of(ENV_ID), 0L);
     verify(repo).deleteById(ENV_ID, 0L);
   }
 
@@ -637,8 +633,8 @@ class EnvironmentServiceTest {
               env.setName("imported");
               env.setRegistrationTokenHash(h("token-1"));
               env.setVersion(0L);
-              env.setCreateTime(NOW);
-              env.setUpdateTime(NOW);
+              env.setCreatedAt(NOW);
+              env.setUpdatedAt(NOW);
               return env;
             });
     EnvironmentService service =
@@ -649,7 +645,7 @@ class EnvironmentServiceTest {
 
     assertEquals("imported", card.getName());
     assertNull(card.getRegistrationToken());
-    assertEquals("0", card.getVersion());
+    assertEquals(0L, card.getVersion());
   }
 
   /** 意图：同名的 Environment 导入必须拒绝（name 即身份）。 */
@@ -691,8 +687,8 @@ class EnvironmentServiceTest {
     env.setName("local-env");
     env.setRegistrationTokenHash(h("old-token"));
     env.setVersion(0L);
-    env.setCreateTime(NOW);
-    env.setUpdateTime(NOW);
+    env.setCreatedAt(NOW);
+    env.setUpdatedAt(NOW);
     when(repo.lockById(ENV_ID)).thenReturn(env);
     when(repo.updateById(any(), eq(0L))).thenReturn(true);
     when(repo.getById(ENV_ID))
@@ -703,8 +699,8 @@ class EnvironmentServiceTest {
               updated.setName("local-env");
               updated.setRegistrationTokenHash(h("new-token"));
               updated.setVersion(1L);
-              updated.setCreateTime(NOW);
-              updated.setUpdateTime(NOW);
+              updated.setCreatedAt(NOW);
+              updated.setUpdatedAt(NOW);
               return updated;
             });
     EnvironmentService service =
@@ -712,9 +708,9 @@ class EnvironmentServiceTest {
             repo, mock(EnvironmentRegistry.class), mock(SystemSettingsSnapshot.class), CLOCK);
 
     EnvironmentDTO card =
-        service.updateImportedEnvironment(EnvironmentId.of(ENV_ID), h("new-token"), null, "0");
+        service.updateImportedEnvironment(EnvironmentId.of(ENV_ID), h("new-token"), null, 0L);
     assertNull(card.getRegistrationToken());
-    assertEquals("1", card.getVersion());
+    assertEquals(1L, card.getVersion());
 
     // 过期版本：既有行版本 2，预期 0，必须冲突。
     Environment stale = new Environment();
@@ -727,7 +723,7 @@ class EnvironmentServiceTest {
         DomainException.class,
         () ->
             service.updateImportedEnvironment(
-                EnvironmentId.of(ENV_ID), h("other-token"), null, "0"));
+                EnvironmentId.of(ENV_ID), h("other-token"), null, 0L));
   }
 
   /** 意图：导入 create 返回 false 时冒泡，不留下半成品。 */
@@ -773,7 +769,7 @@ class EnvironmentServiceTest {
     assertThrows(
         DomainException.class,
         () ->
-            service.updateImportedEnvironment(EnvironmentId.of(ENV_ID), h("new-token"), null, "0"));
+            service.updateImportedEnvironment(EnvironmentId.of(ENV_ID), h("new-token"), null, 0L));
   }
 
   /** 意图：token 与当前值一致时幂等成功返回，且不写库。 */
@@ -786,7 +782,7 @@ class EnvironmentServiceTest {
             repo, mock(EnvironmentRegistry.class), mock(SystemSettingsSnapshot.class), CLOCK);
 
     EnvironmentDTO card =
-        service.updateImportedEnvironment(EnvironmentId.of(ENV_ID), h("old-token"), null, "0");
+        service.updateImportedEnvironment(EnvironmentId.of(ENV_ID), h("old-token"), null, 0L);
 
     assertNull(card.getRegistrationToken());
     verify(repo, never()).updateById(any(), anyLong());
@@ -807,7 +803,7 @@ class EnvironmentServiceTest {
     assertThrows(
         DomainException.class,
         () ->
-            service.updateImportedEnvironment(EnvironmentId.of(ENV_ID), h("new-token"), null, "0"));
+            service.updateImportedEnvironment(EnvironmentId.of(ENV_ID), h("new-token"), null, 0L));
   }
 
   /** 意图：CAS 失败但行仍在（版本已前进）时按版本冲突失败。 */
@@ -825,7 +821,7 @@ class EnvironmentServiceTest {
     assertThrows(
         DomainException.class,
         () ->
-            service.updateImportedEnvironment(EnvironmentId.of(ENV_ID), h("new-token"), null, "0"));
+            service.updateImportedEnvironment(EnvironmentId.of(ENV_ID), h("new-token"), null, 0L));
   }
 
   /** 意图：唯一 token 竞争触发约束异常时映射为业务重复错误。 */
@@ -842,7 +838,7 @@ class EnvironmentServiceTest {
     assertThrows(
         DomainException.class,
         () ->
-            service.updateImportedEnvironment(EnvironmentId.of(ENV_ID), h("new-token"), null, "0"));
+            service.updateImportedEnvironment(EnvironmentId.of(ENV_ID), h("new-token"), null, 0L));
   }
 
   /** 意图：CRUD 与配置同步共用的静态校验覆盖全部拒绝分支。 */
@@ -901,18 +897,18 @@ class EnvironmentServiceTest {
         new EnvironmentService(
             repo, mock(EnvironmentRegistry.class), mock(SystemSettingsSnapshot.class), CLOCK);
 
-    assertThrows(DomainException.class, () -> service.rotateToken(EnvironmentId.of(ENV_ID), "0"));
+    assertThrows(DomainException.class, () -> service.rotateToken(EnvironmentId.of(ENV_ID), 0L));
 
     when(repo.lockById(ENV_ID)).thenReturn(environment("old", 2L));
-    assertThrows(DomainException.class, () -> service.rotateToken(EnvironmentId.of(ENV_ID), "0"));
+    assertThrows(DomainException.class, () -> service.rotateToken(EnvironmentId.of(ENV_ID), 0L));
 
     when(repo.lockById(ENV_ID)).thenReturn(environment("old", 0L));
     when(repo.updateById(any(), eq(0L))).thenReturn(false);
     when(repo.getById(ENV_ID)).thenReturn(null);
-    assertThrows(DomainException.class, () -> service.rotateToken(EnvironmentId.of(ENV_ID), "0"));
+    assertThrows(DomainException.class, () -> service.rotateToken(EnvironmentId.of(ENV_ID), 0L));
 
     when(repo.getById(ENV_ID)).thenReturn(environment("newer", 3L));
-    assertThrows(DomainException.class, () -> service.rotateToken(EnvironmentId.of(ENV_ID), "0"));
+    assertThrows(DomainException.class, () -> service.rotateToken(EnvironmentId.of(ENV_ID), 0L));
   }
 
   /** 意图：delete 覆盖缺失行、过期版本、CAS 丢失与引用完整性冲突的拒绝路径。 */
@@ -923,10 +919,10 @@ class EnvironmentServiceTest {
     EnvironmentService service =
         new EnvironmentService(repo, registry, mock(SystemSettingsSnapshot.class), CLOCK);
 
-    assertThrows(DomainException.class, () -> service.delete(EnvironmentId.of(ENV_ID), "0"));
+    assertThrows(DomainException.class, () -> service.delete(EnvironmentId.of(ENV_ID), 0L));
 
     when(repo.lockById(ENV_ID)).thenReturn(environment("token", 2L));
-    assertThrows(DomainException.class, () -> service.delete(EnvironmentId.of(ENV_ID), "0"));
+    assertThrows(DomainException.class, () -> service.delete(EnvironmentId.of(ENV_ID), 0L));
 
     when(repo.lockById(ENV_ID)).thenReturn(environment("token", 0L));
     when(registry.hasActiveLease(EnvironmentId.of(ENV_ID))).thenReturn(false);
@@ -934,13 +930,13 @@ class EnvironmentServiceTest {
 
     when(repo.deleteById(ENV_ID, 0L)).thenReturn(false);
     when(repo.getById(ENV_ID)).thenReturn(null);
-    assertThrows(DomainException.class, () -> service.delete(EnvironmentId.of(ENV_ID), "0"));
+    assertThrows(DomainException.class, () -> service.delete(EnvironmentId.of(ENV_ID), 0L));
 
     when(repo.getById(ENV_ID)).thenReturn(environment("token", 5L));
-    assertThrows(DomainException.class, () -> service.delete(EnvironmentId.of(ENV_ID), "0"));
+    assertThrows(DomainException.class, () -> service.delete(EnvironmentId.of(ENV_ID), 0L));
 
     when(repo.deleteById(ENV_ID, 0L)).thenThrow(new DataIntegrityViolationException("ref"));
-    assertThrows(DomainException.class, () -> service.delete(EnvironmentId.of(ENV_ID), "0"));
+    assertThrows(DomainException.class, () -> service.delete(EnvironmentId.of(ENV_ID), 0L));
   }
 
   /** 测试意图：租约/心跳窗口已过期的连接用同一时钟派生为 OFFLINE，不对外暴露可用能力。 */
@@ -1025,8 +1021,8 @@ class EnvironmentServiceTest {
     env.setName("local-env");
     env.setRegistrationTokenHash(h(registrationToken));
     env.setVersion(version);
-    env.setCreateTime(NOW);
-    env.setUpdateTime(NOW);
+    env.setCreatedAt(NOW);
+    env.setUpdatedAt(NOW);
     return env;
   }
 

@@ -44,11 +44,10 @@ public class SystemSettingsService {
   /** 以 {@code expectedVersion} CAS 整体替换聚合；版本竞争抛领域异常。 */
   @Transactional
   public SystemSettingsDTO update(SystemSettingsUpdateDTO updateDTO) {
-    String rawExpected = updateDTO == null ? null : updateDTO.getExpectedVersion();
-    if (rawExpected == null) {
+    Long expected = updateDTO == null ? null : updateDTO.getExpectedVersion();
+    if (expected == null) {
       throw DomainException.validation(RESOURCE, "expectedVersion is required");
     }
-    long expected = SystemSettingsVersions.parse(rawExpected, "expectedVersion");
     SystemSettings settings;
     try {
       settings = systemSettingsCodec.fromDto(updateDTO);
@@ -59,7 +58,7 @@ public class SystemSettingsService {
     SystemSettingsRepository.SystemSettingsRecord current = requireRecord();
     if (current.version() != expected) {
       throw DomainException.versionConflict(
-          RESOURCE, rawExpected, SystemSettingsVersions.format(current.version()));
+          RESOURCE, Long.toString(expected), Long.toString(current.version()));
     }
     if (!systemSettingsRepository.update(settings, expected)) {
       SystemSettingsRepository.SystemSettingsRecord reread = systemSettingsRepository.get();
@@ -67,7 +66,7 @@ public class SystemSettingsService {
         throw DomainException.notFound(RESOURCE, "system settings row is missing");
       }
       throw DomainException.versionConflict(
-          RESOURCE, rawExpected, SystemSettingsVersions.format(reread.version()));
+          RESOURCE, Long.toString(expected), Long.toString(reread.version()));
     }
     SystemSettingsRepository.SystemSettingsRecord updated = requireRecord();
     refreshSnapshotAfterCommit();
@@ -101,9 +100,9 @@ public class SystemSettingsService {
   private SystemSettingsDTO toDto(SystemSettingsRepository.SystemSettingsRecord record) {
     SystemSettingsDTO dto =
         systemSettingsCodec.toSections(record.settings(), new SystemSettingsDTO());
-    dto.setVersion(SystemSettingsVersions.format(record.version()));
-    dto.setCreatedAt(record.createTime());
-    dto.setUpdatedAt(record.updateTime());
+    dto.setVersion(record.version());
+    dto.setCreatedAt(record.createdAt());
+    dto.setUpdatedAt(record.updatedAt());
     return dto;
   }
 }

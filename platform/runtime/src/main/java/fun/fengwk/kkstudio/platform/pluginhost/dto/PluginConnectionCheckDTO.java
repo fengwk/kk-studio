@@ -55,8 +55,8 @@ public class PluginConnectionCheckDTO {
   /** Plugin 全局唯一不可变安装身份。 */
   private String pluginId;
 
-  /** 本次检查所依据的已应用配置版本（canonical 非负十进制字符串）。 */
-  private String appliedVersion;
+  /** 本次检查所依据的已应用配置版本；wire 上为 canonical 非负十进制字符串。 */
+  private Long appliedVersion;
 
   /** 本次检查的执行时刻。 */
   private Instant checkedAt;

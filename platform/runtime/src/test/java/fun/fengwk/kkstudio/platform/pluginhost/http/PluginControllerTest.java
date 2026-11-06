@@ -57,11 +57,11 @@ class PluginControllerTest {
   void configurationUpdatePassesTheTypedRequestThrough() {
     PluginDTO applied = samplePluginDTO("my-plugin");
     when(pluginManagementService.updateConfiguration(
-            "my-plugin", "7", VALUES_JSON, Map.of("apiKey", SecretUpdate.set("secret"))))
+            "my-plugin", 7L, VALUES_JSON, Map.of("apiKey", SecretUpdate.set("secret"))))
         .thenReturn(applied);
 
     PluginConfigurationUpdateRequestDTO request = new PluginConfigurationUpdateRequestDTO();
-    request.setExpectedVersion("7");
+    request.setExpectedVersion(7L);
     request.setValuesJson(VALUES_JSON);
     request.setSecretPatch(Map.of("apiKey", SecretUpdate.set("secret")));
 
@@ -77,11 +77,11 @@ class PluginControllerTest {
   void pendingApplicationIsReportedAsAccepted() {
     PluginDTO pending = samplePluginDTO("my-plugin");
     pending.setApplicationError("configuration is saved but this node has not applied it yet");
-    when(pluginManagementService.updateConfiguration("my-plugin", "7", VALUES_JSON, null))
+    when(pluginManagementService.updateConfiguration("my-plugin", 7L, VALUES_JSON, null))
         .thenReturn(pending);
 
     PluginConfigurationUpdateRequestDTO request = new PluginConfigurationUpdateRequestDTO();
-    request.setExpectedVersion("7");
+    request.setExpectedVersion(7L);
     request.setValuesJson(VALUES_JSON);
 
     ResponseEntity<PluginDTO> response = controller.updateConfiguration("my-plugin", request);
@@ -95,22 +95,22 @@ class PluginControllerTest {
   void checkConnectionReturnsTheTypedResultWithNoStore() {
     PluginConnectionCheckDTO result = new PluginConnectionCheckDTO();
     result.setPluginId("my-plugin");
-    result.setAppliedVersion("8");
+    result.setAppliedVersion(8L);
     result.setCheckedAt(Instant.parse("2026-03-01T12:00:00Z"));
     result.setReachability(PluginConnectionCheckDTO.Reachability.REACHABLE);
     result.setAuthentication(PluginConnectionCheckDTO.Authentication.ACCEPTED);
     result.setBrowserSession(PluginConnectionCheckDTO.BrowserSession.UNKNOWN);
-    when(pluginManagementService.checkConnection("my-plugin", "8")).thenReturn(result);
+    when(pluginManagementService.checkConnection("my-plugin", 8L)).thenReturn(result);
 
     PluginConnectionCheckRequestDTO request = new PluginConnectionCheckRequestDTO();
-    request.setExpectedVersion("8");
+    request.setExpectedVersion(8L);
     ResponseEntity<PluginConnectionCheckDTO> response =
         controller.checkConnection("my-plugin", request);
 
     assertEquals(HttpStatus.OK, response.getStatusCode());
     assertEquals("no-store", response.getHeaders().getFirst(HttpHeaders.CACHE_CONTROL));
     assertSame(result, response.getBody());
-    verify(pluginManagementService).checkConnection("my-plugin", "8");
+    verify(pluginManagementService).checkConnection("my-plugin", 8L);
   }
 
   @Test

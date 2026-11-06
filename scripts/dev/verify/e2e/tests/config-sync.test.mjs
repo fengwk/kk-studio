@@ -249,7 +249,7 @@ test('environment install-config roundtrip case wires PUT/export/import/clear/cl
       }
       if (method === 'PUT' && path === `${base}/install-settings`) {
         assert.equal(body.expectedVersion, state.version, 'PUT must CAS on the current version')
-        state = { ...state, installConfig: body.installConfig, version: String(Number(state.version) + 1) }
+        state = { ...state, installConfig: body.installConfig, version: String(BigInt(state.version) + 1n) }
         return { json: { id: environmentId, installConfig: state.installConfig, version: state.version } }
       }
       if (method === 'POST' && path === '/api/platform/config-sync/export') {
@@ -290,7 +290,7 @@ test('environment install-config roundtrip case wires PUT/export/import/clear/cl
           ...state,
           registrationTokenHash: entry.registrationTokenHash,
           installConfig: nextConfig,
-          version: String(Number(state.version) + 1),
+          version: String(BigInt(state.version) + 1n),
         }
         return { json: { imported: [{ kind: 'environments', name: state.name }], skipped: [] } }
       }
