@@ -439,8 +439,8 @@ class RequestBodyRequiredValidationAdviceTest {
   void nestedResourceDiscriminatorUsesItsOwnSubtypeAndPath() throws Exception {
     // Canvas 请求中 type 和 kind 是两个独立的 NAME/PROPERTY union。
     String prefix =
-        "{\"idempotencyKey\":\"id\",\"commands\":[{\"type\":\"CREATE_NODE\","
-            + "\"nodeId\":\"node\",\"name\":\"n\","
+        "{\"idempotencyKey\":\"00000000-0000-0000-0000-000000000001\",\"commands\":[{\"type\":\"CREATE_NODE\","
+            + "\"nodeId\":\"00000000-0000-0000-0000-000000000002\",\"name\":\"n\","
             + "\"transform\":{\"x\":0,\"y\":0,\"width\":10,\"height\":10},\"resources\":[";
     String suffix = "]}]}";
     for (var entry :
@@ -503,13 +503,16 @@ class RequestBodyRequiredValidationAdviceTest {
     // 可空子类型字段允许缺失及显式 null。
     for (String command :
         List.of(
-            "{\"type\":\"SET_NODE_FUNCTION\",\"nodeId\":\"id\"}",
-            "{\"type\":\"SET_NODE_FUNCTION\",\"nodeId\":\"id\",\"function\":null}")) {
+            "{\"type\":\"SET_NODE_FUNCTION\",\"nodeId\":\"00000000-0000-0000-0000-000000000002\"}",
+            "{\"type\":\"SET_NODE_FUNCTION\",\"nodeId\":\"00000000-0000-0000-0000-000000000002\",\"function\":null}")) {
       mockMvc
           .perform(
               post("/test/canvas")
                   .contentType(MediaType.APPLICATION_JSON)
-                  .content("{\"idempotencyKey\":\"id\",\"commands\":[" + command + "]}"))
+                  .content(
+                      "{\"idempotencyKey\":\"00000000-0000-0000-0000-000000000001\",\"commands\":["
+                          + command
+                          + "]}"))
           .andExpect(status().isOk());
     }
   }

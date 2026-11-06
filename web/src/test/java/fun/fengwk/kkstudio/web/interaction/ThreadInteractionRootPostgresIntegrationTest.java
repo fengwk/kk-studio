@@ -222,9 +222,11 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
     // 执行根是归属事实源：C -> A -> R。
     assertEquals(tree.root(), runtime.findRootThreadId(tree.c()).orElseThrow());
 
-    // 非 canonical 执行根（中间父/自身）被拒为非法参数，而不是静默返回别的树。
-    assertThrows(
-        IllegalArgumentException.class, () -> queryService.listInteractions(tree.a(), null, 50));
+    // 非 canonical 执行根（中间父/自身）以 validation 拒绝，而不是静默返回别的树。
+    DomainException notRoot =
+        assertThrows(
+            DomainException.class, () -> queryService.listInteractions(tree.a(), null, 50));
+    assertEquals(DomainErrorCode.VALIDATION, notRoot.code());
 
     // 无关执行根看不到本树的等待行。
     assertTrue(
@@ -276,7 +278,7 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
       List<InteractionDTO> collected = drain(tree.root(), limit);
       Set<String> ids = new HashSet<>();
       for (InteractionDTO dto : collected) {
-        ids.add(input(dto).toolInvocationId());
+        ids.add(manualInvocationId(dto));
         assertEquals(tree.root().toString(), dto.rootThreadId());
       }
       assertEquals(
@@ -1265,6 +1267,17 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
 
   private static InteractionDTO.Input input(InteractionDTO item) {
     return assertInstanceOf(InteractionDTO.Input.class, item);
+  }
+
+  /** 人工等待键：INPUT 与 APPROVAL 处在同一待处理分页流。 */
+  private static String manualInvocationId(InteractionDTO item) {
+    if (item instanceof InteractionDTO.Input input) {
+      return input.toolInvocationId();
+    }
+    if (item instanceof InteractionDTO.Approval approval) {
+      return approval.toolInvocationId();
+    }
+    throw new AssertionError("unexpected interaction: " + item);
   }
 
   private static InteractionDTO.Approval approval(InteractionDTO item) {

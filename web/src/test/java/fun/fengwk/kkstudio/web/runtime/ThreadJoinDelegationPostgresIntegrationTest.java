@@ -1007,14 +1007,14 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
     assertEquals(ThreadExecutionControl.RUNNABLE, threadState(parentThreadId).executionControl());
     HarnessThreadDTO parentDto =
         HarnessRuntimeResponseMapper.toThreadDto(runtime.getThreadSnapshot(parentThreadId));
-    assertEquals(ThreadRuntimeStatus.WAITING.name(), parentDto.getStatus());
-    assertEquals("RUNNABLE", parentDto.getExecutionControl());
+    assertEquals(ThreadRuntimeStatus.WAITING, parentDto.getStatus());
+    assertEquals(ThreadExecutionControl.RUNNABLE, parentDto.getExecutionControl());
     assertNull(parentDto.getParentThreadId());
     // 子执行尚未被消费：有排队输入，对外处于本地待启动 RUNNING，并携带不可变执行父关系。
     HarnessThreadDTO childDto =
         HarnessRuntimeResponseMapper.toThreadDto(runtime.getThreadSnapshot(childThreadId));
-    assertEquals(ThreadRuntimeStatus.RUNNING.name(), childDto.getStatus());
-    assertEquals("RUNNABLE", childDto.getExecutionControl());
+    assertEquals(ThreadRuntimeStatus.RUNNING, childDto.getStatus());
+    assertEquals(ThreadExecutionControl.RUNNABLE, childDto.getExecutionControl());
     assertEquals(parentThreadId.toString(), childDto.getParentThreadId());
     // 子未收敛前父不可能拿到结果。
     assertFalse(joinOf(invocationId).matched());

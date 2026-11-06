@@ -243,9 +243,8 @@ class HarnessCommandBatchControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(forbidden))
         .andExpect(status().isBadRequest())
-        .andExpect(
-            jsonPath("$.detail")
-                .value("field target.rootSettings is forbidden for target type NEW_THREAD"));
+        .andExpect(jsonPath("$.code").value("validation"))
+        .andExpect(jsonPath("$.detail").value("Failed to read request"));
 
     mockMvc
         .perform(
@@ -344,22 +343,7 @@ class HarnessCommandBatchControllerTest {
                 .content(cleared))
         .andExpect(status().isAccepted());
 
-    // 缺 text 的 GOAL 与「携带 text 的 USER_MESSAGE」都必须 400。
-    String missingText =
-        batchWithCommands(
-            newThreadTarget(),
-            """
-            [{
-              "type":"GOAL",
-              "idempotencyKey":"00000000-0000-0000-0000-000000000034"
-            }]
-            """);
-    mockMvc
-        .perform(
-            post("/api/harness/command-batches")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(missingText))
-        .andExpect(status().isBadRequest());
+    // text 是 required-nullable：省略等价于 null（清除 Goal）；USER_MESSAGE 携带 text 是未知字段，必须 400。
     String userWithText =
         batchWithCommands(
             newThreadTarget(),
@@ -475,7 +459,7 @@ class HarnessCommandBatchControllerTest {
         .andExpect(jsonPath("$.code").value("validation"))
         .andExpect(jsonPath("$.type").value("about:blank"))
         .andExpect(jsonPath("$.title").value("The request is invalid."))
-        .andExpect(jsonPath("$.detail").value("unknown HTTP command field: unexpectedField"));
+        .andExpect(jsonPath("$.detail").value("Failed to read request"));
 
     verify(acceptanceService, never())
         .accept(any(SessionOwner.class), any(AcceptCommandsCommand.class));

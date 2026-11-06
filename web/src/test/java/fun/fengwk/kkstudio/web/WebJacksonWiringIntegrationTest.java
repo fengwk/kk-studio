@@ -98,16 +98,16 @@ class WebJacksonWiringIntegrationTest extends WebPostgresTestSupport {
   }
 
   @Test
-  void pageTotalCountIsDecimalStringOnTheHttpWire() throws Exception {
+  void longValuesAreDecimalStringsOnTheHttpWire() throws Exception {
     MvcResult result =
-        mockMvc
-            .perform(get("/api/models").param("pageNumber", "1").param("pageSize", "1"))
-            .andExpect(status().isOk())
-            .andReturn();
+        mockMvc.perform(get("/api/platform/settings")).andExpect(status().isOk()).andReturn();
 
-    JsonNode totalCount =
-        objectMapper.readTree(result.getResponse().getContentAsString()).path("totalCount");
-    assertTrue(totalCount.isString(), "totalCount must be serialized as a decimal string");
-    assertTrue(totalCount.asText().matches("\\d+"), "totalCount must contain only digits");
+    JsonNode resourceMaxBytes =
+        objectMapper
+            .readTree(result.getResponse().getContentAsString())
+            .path("advanced")
+            .path("resourceMaxBytes");
+    assertTrue(resourceMaxBytes.isString(), "Long must be serialized as a decimal string");
+    assertTrue(resourceMaxBytes.asText().matches("\\d+"), "Long must contain only digits");
   }
 }

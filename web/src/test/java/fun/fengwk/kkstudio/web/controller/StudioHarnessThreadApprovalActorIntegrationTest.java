@@ -45,7 +45,8 @@ class StudioHarnessThreadApprovalActorIntegrationTest extends WebPostgresTestSup
         .andExpect(jsonPath("$.status").value(400))
         .andExpect(jsonPath("$.code").value("validation"))
         .andExpect(jsonPath("$.type").value("about:blank"))
-        .andExpect(jsonPath("$.detail").value("unknown tool approval field: actor"));
+        .andExpect(jsonPath("$.code").value("validation"))
+        .andExpect(jsonPath("$.detail").value("Failed to read request"));
   }
 
   /**

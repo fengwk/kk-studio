@@ -20,6 +20,9 @@ import fun.fengwk.kkstudio.platform.catalog.mcp.runtime.McpToolCatalog;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.catalog.tool.TestRuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentSessionListener;
+import fun.fengwk.kkstudio.platform.harness.builtin.query.ModelRequestDebugService;
+import fun.fengwk.kkstudio.platform.harness.builtin.query.ProviderRequestPreviewService;
+import fun.fengwk.kkstudio.platform.harness.builtin.realtime.HarnessStreamCatchupService;
 
 /**
  * Platform 测试宿主的能力目录与 Harness 装配基座。
@@ -86,5 +89,35 @@ public class PlatformHarnessTestConfiguration {
   @ConditionalOnMissingBean(HarnessRuntime.class)
   public HarnessRuntime platformHarnessRuntime() {
     return mock(HarnessRuntime.class);
+  }
+
+  /**
+   * Thread Debug 服务由 web 组合根装配（需要完整的 Harness 规划链）；platform 测试上下文给出占位 bean 仅为满足 {@code
+   * HarnessModelRequestDebugController} 的构造依赖，真实投影由 service 自身与 web 的测试覆盖。
+   */
+  @Bean
+  @ConditionalOnMissingBean(ModelRequestDebugService.class)
+  public ModelRequestDebugService platformModelRequestDebugService() {
+    return mock(ModelRequestDebugService.class);
+  }
+
+  /**
+   * Provider 请求预览服务同样由 web 组合根装配；platform 测试上下文用占位 bean 满足 {@code HarnessProviderRequestController}
+   * 的构造依赖，真实预览由 service 自身与 web 的测试覆盖。
+   */
+  @Bean
+  @ConditionalOnMissingBean(ProviderRequestPreviewService.class)
+  public ProviderRequestPreviewService platformProviderRequestPreviewService() {
+    return mock(ProviderRequestPreviewService.class);
+  }
+
+  /**
+   * 活动模型请求追帧服务由 web 组合根装配（需要 Dispatcher 与 cluster 传输）；platform 测试上下文用占位 bean 满足 {@code
+   * HarnessThreadStreamCatchupController} 的构造依赖。
+   */
+  @Bean
+  @ConditionalOnMissingBean(HarnessStreamCatchupService.class)
+  public HarnessStreamCatchupService platformHarnessStreamCatchupService() {
+    return mock(HarnessStreamCatchupService.class);
   }
 }

@@ -273,7 +273,7 @@ class HarnessThreadCommandBatchControllerTest {
   @Test
   void translatesTypedRejectionsFromAcceptOnThread() throws Exception {
     when(acceptanceService.acceptOnThread(any(AcceptCommandsCommand.class)))
-        .thenThrow(new IllegalArgumentException("thread command batch rejected"));
+        .thenThrow(DomainException.validation("thread", "thread command batch rejected"));
     postBatch(THREAD_ID, messageBatch(userMessageCommand(COMMAND_KEY)))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.detail").value("thread command batch rejected"));
@@ -335,7 +335,8 @@ class HarnessThreadCommandBatchControllerTest {
             .formatted(HEAD_ENTRY_ID, field, extraValue, userMessageCommand(COMMAND_KEY));
     postBatch(THREAD_ID, body)
         .andExpect(status().isBadRequest())
-        .andExpect(jsonPath("$.detail").value("unknown thread command batch field: " + field));
+        .andExpect(jsonPath("$.code").value("validation"))
+        .andExpect(jsonPath("$.detail").value("Failed to read request"));
   }
 
   private static String batch(String commands) {
