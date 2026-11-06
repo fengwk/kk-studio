@@ -1114,6 +1114,13 @@ class ProviderRequestPreviewServiceTest {
         assertThrows(
             DomainException.class,
             () -> service.previewHistorical(SESSION_ID, COMPACTION_ENTRY_ID)));
+    DomainException unrelatedMissing = DomainException.notFound("session", "gone");
+    doThrow(unrelatedMissing).when(runtime).getThreadSnapshot(CHILD_THREAD_ID);
+    assertSame(
+        unrelatedMissing,
+        assertThrows(
+            DomainException.class,
+            () -> service.previewHistorical(SESSION_ID, COMPACTION_ENTRY_ID)));
   }
 
   /**

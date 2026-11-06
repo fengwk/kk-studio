@@ -289,7 +289,7 @@ public final class ProviderRequestPreviewService {
     try {
       childSnapshot = runtime.getThreadSnapshot(frozen.childThreadId());
     } catch (DomainException error) {
-      if (error.code() != DomainErrorCode.NOT_FOUND) {
+      if (error.code() != DomainErrorCode.NOT_FOUND || !"thread".equals(error.resource())) {
         throw error;
       }
       throw frozenCompactionUnavailable("compaction child thread does not exist", error);
