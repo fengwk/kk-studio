@@ -430,7 +430,7 @@ class PluginHttpWireContractTest {
   /** 真实资源体与共用 golden 的资源数据按 JSON 值比对，保留 BigDecimal scale。 */
   private static void assertWireMatchesGolden(String goldenName, MockHttpServletResponse response) {
     assertEquals(
-        JsonValues.readTree(golden(goldenName)).get("data"),
+        JsonValues.readTree(golden(goldenName)),
         JsonValues.readTree(bodyText(response)),
         goldenName + " must match the live HTTP body");
   }

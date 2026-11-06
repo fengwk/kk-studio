@@ -299,7 +299,7 @@ class ComfyuiPluginPostgresIntegrationTest {
    */
   private static JsonNode wireView(String body) {
     JsonNode root = JsonValues.readTree(body);
-    JsonNode configuration = root.get("data").get("configuration");
+    JsonNode configuration = root.get("configuration");
     for (String field : List.of("valuesJson", "valuesSchema", "defaultsJson")) {
       JsonNode text = configuration.get(field);
       if (text != null && text.isTextual()) {
