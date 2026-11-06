@@ -1084,7 +1084,6 @@ const shareDomainRoots = [
   'environment',
   'interaction',
   'mcp',
-  'plugin',
   'runtime',
   'skill',
   'storage',

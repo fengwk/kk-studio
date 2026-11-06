@@ -56,7 +56,7 @@ Storage DTO 不提供独立的 S3 bucket 与对象 key 配置字段，只给 `ur
 
 [`SystemSettingsDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/systemsettings/SystemSettingsDtoContractTest.java) 用反射扫描 `systemsettings` DTO 的字段名，拒绝 secret / bootstrap 名称（`token`、`credential`、`secret`、`apikey`、`accesskey`、`secretkey`、`bearer`、`instanceId`、`endpoint`、`region`、`bucket`、`workdir`、`environmentRoot`、`tempDir`、`binary`、`prefix`、`username`、`password`）；以 `tokens` 结尾的预算计数字段（如 `compactionKeepRecentTokens`）不受 `token` 规则约束。
 
-Plugin 投影遵循同一边界：`PluginDTO` 只有安装元数据、region、状态、到期/刷新时间和有界错误；[`PluginAuthCompleteRequestDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/plugin/PluginAuthCompleteRequestDTO.java) 的 `callbackUrl` 是 `WRITE_ONLY`，不出现在任何响应、`toString` 或通用日志。`PluginAuthPrepareDTO.loginUrl` 只能是 Plugin 声明的固定公开 origin。认证交互只允许 sealed `DEEP_LINK` 类型及固定的 `{region}` / `{callbackUrl}` DTO，不承载任意 Plugin schema；所有 auth 响应由 Web 额外设置 `Cache-Control: no-store`。
+构建期 Plugin 的管理投影与认证 DTO 位于 platform runtime 的 `platform.pluginhost.dto`，同样只暴露安全投影；`callbackUrl` 只写不读，不承载任意 Plugin schema，认证响应显式 `no-store`。契约见 [Platform Plugin API](platform-plugin-api.md)。
 
 ## DTO 组织
 
@@ -67,7 +67,6 @@ Plugin 投影遵循同一边界：`PluginDTO` 只有安装元数据、region、�
 | [catalog](../../share/src/main/java/fun/fengwk/kkstudio/share/catalog/) | Provider、MODEL/GROUP、Agent、Tool catalog |
 | [skill](../../share/src/main/java/fun/fengwk/kkstudio/share/skill/) | Git Skill Package、branch 更新检查、exact commit 发布与派生 Skill 列表 |
 | [mcp](../../share/src/main/java/fun/fengwk/kkstudio/share/mcp/) | MCP Server 安全投影、显式配置 DTO 与显式 HTTP 创建/更新请求 |
-| [plugin](../../share/src/main/java/fun/fengwk/kkstudio/share/plugin/) | 已安装构建期 Plugin、安全认证状态、续期运维投影与 prepare/complete 请求和响应 |
 | [environment](../../share/src/main/java/fun/fengwk/kkstudio/share/environment/) | Environment Card CRUD、registration token、保存的安装设置（`installConfig` 与共享 Daemon 配置模型）、最近一次 READY 的 OS/user/HOME 投影与有界运维事件 |
 | [interaction](../../share/src/main/java/fun/fengwk/kkstudio/share/interaction/) | 统一交互（问卷等待与工具审批等待）DTO、不透明交互 owner `{kind,id,title,link}`、分页与人工输入提交回执 |
 | [runtime](../../share/src/main/java/fun/fengwk/kkstudio/share/runtime/) | Session、Entry 与读取时 `usageCost`、Thread Snapshot、Command batch（创建型与 owner-free Thread 续写）、请求预览（草稿与历史）、Invocation、approval、Stop 回执、compaction |
@@ -130,7 +129,7 @@ Work 冻结路由，`requiredEnvironmentName` 沿此身份读取环境目录，�
 | Storage | [storage/](../../share/src/test/java/fun/fengwk/kkstudio/share/storage/) | [`StorageDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/storage/StorageDtoContractTest.java)：upload/presign 的 nullable 字段与请求侧 `sizeBytes` 类型 |
 | Settings | [systemsettings/](../../share/src/test/java/fun/fengwk/kkstudio/share/systemsettings/) | [`SystemSettingsDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/systemsettings/SystemSettingsDtoContractTest.java)：每一层嵌套的未知字段拒绝与秘密字段扫描 |
 | Chat | [chat/](../../apps/chat/src/test/java/fun/fengwk/kkstudio/chat/) | [`ChatDtoContractTest.java`](../../apps/chat/src/test/java/fun/fengwk/kkstudio/chat/ChatDtoContractTest.java)：Chat 与 Session 分页 wire 的严格字段 |
-| MCP、Environment、Plugin | [mcp/](../../share/src/test/java/fun/fengwk/kkstudio/share/mcp/)、[environment/](../../share/src/test/java/fun/fengwk/kkstudio/share/environment/)、[plugin/](../../share/src/test/java/fun/fengwk/kkstudio/share/plugin/) | [`McpServerDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/mcp/McpServerDtoContractTest.java)、[`EnvironmentDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/environment/EnvironmentDtoContractTest.java)、[`PluginDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/plugin/PluginDtoContractTest.java) |
+| MCP、Environment | [mcp/](../../share/src/test/java/fun/fengwk/kkstudio/share/mcp/)、[environment/](../../share/src/test/java/fun/fengwk/kkstudio/share/environment/) | [`McpServerDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/mcp/McpServerDtoContractTest.java)、[`EnvironmentDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/environment/EnvironmentDtoContractTest.java) |
 
 ---
 
