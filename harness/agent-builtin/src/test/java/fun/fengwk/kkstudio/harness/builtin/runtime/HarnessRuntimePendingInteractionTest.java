@@ -31,6 +31,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.interaction.EnvironmentToolWait;
 import fun.fengwk.kkstudio.harness.api.interaction.PendingInteraction;
 import fun.fengwk.kkstudio.harness.api.interaction.PendingInteractionPage;
@@ -283,15 +285,16 @@ class HarnessRuntimePendingInteractionTest {
     assertEquals(T2, approvalInteraction.createdAt());
   }
 
-  /** 参数校验：limit <= 0 抛出 IllegalArgumentException，游标为 null 抛出 NullPointerException。 */
+  /** 参数校验：limit <= 0 抛出 validation DomainException，游标为 null 抛出 NullPointerException。 */
   @Test
   void listPendingInteractionsValidatesArguments() {
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> runtime.listPendingInteractions(Instant.EPOCH, new UUID(0L, 0L), 0));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> runtime.listPendingInteractions(Instant.EPOCH, new UUID(0L, 0L), -1));
+    for (int limit : new int[] {0, -1}) {
+      DomainException error =
+          assertThrows(
+              DomainException.class,
+              () -> runtime.listPendingInteractions(Instant.EPOCH, new UUID(0L, 0L), limit));
+      assertEquals(DomainErrorCode.VALIDATION, error.code());
+    }
     assertThrows(
         NullPointerException.class,
         () -> runtime.listPendingInteractions(null, new UUID(0L, 0L), 10));
