@@ -1088,7 +1088,7 @@ create table plugin_configuration (
 );
 
 comment on table plugin_configuration is '已安装 Plugin 的当前普通配置：每个 Plugin 一行，秘密不进入本表';
-comment on column plugin_configuration.plugin_id is 'Plugin 安装身份，与 classpath 中的 StudioPlugin.pluginId 对齐';
+comment on column plugin_configuration.plugin_id is 'Plugin 安装身份，与 classpath 中的 Plugin.pluginId 对齐';
 comment on column plugin_configuration.version is '配置修订：首次写入为 1，每次保存 +1，写入以它做 CAS';
 comment on column plugin_configuration.values_json is '按插件 Schema 归一化后的严格 JSON object 文本（≤64 KiB）';
 

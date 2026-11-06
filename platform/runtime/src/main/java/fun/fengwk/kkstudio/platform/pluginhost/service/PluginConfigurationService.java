@@ -12,13 +12,13 @@ import tools.jackson.databind.node.ObjectNode;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.json.BoundedJsonWriter;
 import fun.fengwk.kkstudio.common.json.JsonValues;
+import fun.fengwk.kkstudio.platform.plugin.Plugin;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthSpec;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfig;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialMaterial;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialSnapshot;
 import fun.fengwk.kkstudio.platform.plugin.PluginInstance;
-import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
-import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
+import fun.fengwk.kkstudio.platform.plugin.PluginRegistry;
 import fun.fengwk.kkstudio.platform.pluginhost.credential.FixedPluginCredentialAccess;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRepository;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRow;
@@ -44,7 +44,7 @@ public final class PluginConfigurationService {
   private static final String RESOURCE = "plugin";
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
-  private final StudioPluginRegistry registry;
+  private final PluginRegistry registry;
   private final PluginConfigurationRepository configurations;
   private final PluginCredentialRepository credentials;
   private final PluginContextFactory contextFactory;
@@ -54,7 +54,7 @@ public final class PluginConfigurationService {
   private final Runnable credentialChanged;
 
   public PluginConfigurationService(
-      StudioPluginRegistry registry,
+      PluginRegistry registry,
       PluginConfigurationRepository configurations,
       PluginCredentialRepository credentials,
       PluginContextFactory contextFactory,
@@ -75,16 +75,16 @@ public final class PluginConfigurationService {
   /**
    * 保存普通配置与秘密补丁。
    *
-   * @param expectedRevision 期望的当前配置修订；不匹配即版本冲突
+   * @param expectedVersion 期望的当前配置版本；不匹配即版本冲突
    * @param secretPatch 秘密字段补丁；省略的声明字段按 KEEP 处理
-   * @return 保存后的配置修订
+   * @return 保存后的配置版本
    */
   public long configure(
       String pluginId,
-      long expectedRevision,
+      long expectedVersion,
       String valuesJson,
       Map<String, SecretUpdate> secretPatch) {
-    StudioPlugin plugin = requirePlugin(pluginId);
+    Plugin plugin = requirePlugin(pluginId);
     Map<String, SecretUpdate> patch = requirePatch(plugin, secretPatch);
     String resolved;
     try {
@@ -94,17 +94,17 @@ public final class PluginConfigurationService {
     }
     PluginConfigurationRow current =
         configurations.find(pluginId).orElseThrow(() -> DomainException.notFound(RESOURCE));
-    if (current.version() != expectedRevision) {
-      throw conflict(expectedRevision, current.version());
+    if (current.version() != expectedVersion) {
+      throw conflict(expectedVersion, current.version());
     }
     Optional<PluginCredentialRow> existing = credentials.find(pluginId);
     CredentialChange change = credentialChange(plugin, current, resolved, patch, existing);
-    verifyConfigures(plugin, new PluginConfig(expectedRevision + 1, resolved), change, existing);
+    verifyConfigures(plugin, new PluginConfig(expectedVersion + 1, resolved), change, existing);
     transactions.executeWithoutResult(
         status -> {
-          agentDependencies.requireDeclaredAgents(pluginId, expectedRevision + 1, resolved);
-          if (!configurations.update(pluginId, expectedRevision, resolved)) {
-            throw conflict(expectedRevision, configurations.find(pluginId).orElseThrow().version());
+          agentDependencies.requireDeclaredAgents(pluginId, expectedVersion + 1, resolved);
+          if (!configurations.update(pluginId, expectedVersion, resolved)) {
+            throw conflict(expectedVersion, configurations.find(pluginId).orElseThrow().version());
           }
           switch (change.action()) {
             case WRITE -> credentials.upsertConnected(
@@ -117,7 +117,7 @@ public final class PluginConfigurationService {
           configurations.notifyChanged(pluginId);
           afterCommit(change.action() != CredentialAction.NONE);
         });
-    return expectedRevision + 1;
+    return expectedVersion + 1;
   }
 
   /** 登录完成：用交互材料替换凭据行。材料的 region 与时限由调用方校验。 */
@@ -149,7 +149,7 @@ public final class PluginConfigurationService {
 
   /** 由补丁与 context 字段变化决定本次对凭据行的动作。 */
   private static CredentialChange credentialChange(
-      StudioPlugin plugin,
+      Plugin plugin,
       PluginConfigurationRow current,
       String resolved,
       Map<String, SecretUpdate> patch,
@@ -203,7 +203,7 @@ public final class PluginConfigurationService {
 
   /** 用候选配置与候选凭据 configure 一次目标插件；失败即拒绝保存。 */
   private void verifyConfigures(
-      StudioPlugin plugin,
+      Plugin plugin,
       PluginConfig config,
       CredentialChange change,
       Optional<PluginCredentialRow> existing) {
@@ -237,7 +237,7 @@ public final class PluginConfigurationService {
   }
 
   /** 已有载荷限制到 schema 声明的秘密字段，避免把不透明内容带入静态补丁。 */
-  private static ObjectNode declaredPayload(StudioPlugin plugin, String payloadJson) {
+  private static ObjectNode declaredPayload(Plugin plugin, String payloadJson) {
     JsonNode node = JsonValues.readTree(payloadJson);
     ObjectNode declared = new ObjectNode(NODES);
     for (String field : plugin.configurationSchema().secrets().keySet()) {
@@ -250,7 +250,7 @@ public final class PluginConfigurationService {
   }
 
   private static Map<String, SecretUpdate> requirePatch(
-      StudioPlugin plugin, Map<String, SecretUpdate> secretPatch) {
+      Plugin plugin, Map<String, SecretUpdate> secretPatch) {
     Map<String, SecretUpdate> patch = new LinkedHashMap<>();
     if (secretPatch == null) {
       return patch;
@@ -286,12 +286,12 @@ public final class PluginConfigurationService {
         });
   }
 
-  private StudioPlugin requirePlugin(String pluginId) {
+  private Plugin requirePlugin(String pluginId) {
     return registry.find(pluginId).orElseThrow(() -> DomainException.notFound(RESOURCE));
   }
 
   private static DomainException conflict(long expected, long actual) {
-    return DomainException.versionConflict(RESOURCE, "revision=" + expected, "revision=" + actual);
+    return DomainException.versionConflict(RESOURCE, "version=" + expected, "version=" + actual);
   }
 
   private enum CredentialAction {

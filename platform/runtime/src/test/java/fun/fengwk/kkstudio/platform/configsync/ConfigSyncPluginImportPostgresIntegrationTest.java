@@ -34,14 +34,14 @@ import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogService;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentService;
 import fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchemaSupport;
+import fun.fengwk.kkstudio.platform.plugin.Plugin;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthSpec;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfig;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfigSchema;
 import fun.fengwk.kkstudio.platform.plugin.PluginContext;
 import fun.fengwk.kkstudio.platform.plugin.PluginDescriptor;
 import fun.fengwk.kkstudio.platform.plugin.PluginInstance;
-import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
-import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
+import fun.fengwk.kkstudio.platform.plugin.PluginRegistry;
 import fun.fengwk.kkstudio.platform.pluginhost.credential.DatabasePluginCredentialStore;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRepository;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRow;
@@ -80,7 +80,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  *   <li>普通配置导入（秘密补丁恒为空）改变静态密钥的目标地址时，已保存的密钥被删除，绝不把它带到新目标。通知只在提交后触发，事务内不可观测。
  * </ol>
  *
- * <p>合成 StudioPlugin 只用公共 API 声明普通值、秘密与依赖，不引用任何具体插件实现，也不访问网络或真实凭据。
+ * <p>合成 Plugin 只用公共 API 声明普通值、秘密与依赖，不引用任何具体插件实现，也不访问网络或真实凭据。
  */
 class ConfigSyncPluginImportPostgresIntegrationTest {
 
@@ -107,7 +107,7 @@ class ConfigSyncPluginImportPostgresIntegrationTest {
   private final AtomicInteger dispatcherWakes = new AtomicInteger();
   private final AtomicInteger catalogWakes = new AtomicInteger();
 
-  private StudioPluginRegistry registry;
+  private PluginRegistry registry;
   private PluginAgentDependencies pluginAgentDependencies;
   private PlatformTransactionManager transactionManager;
   private PluginConfigurationRepository configurationRepository;
@@ -273,7 +273,7 @@ class ConfigSyncPluginImportPostgresIntegrationTest {
 
   /** 为已安装 Plugin 写入默认配置（revision 1）。 */
   private void seedCatalog() {
-    for (StudioPlugin plugin : registry.plugins()) {
+    for (Plugin plugin : registry.plugins()) {
       configurationRepository.insertIfMissing(
           plugin.descriptor().pluginId(), plugin.configurationSchema().defaultsJson());
     }
@@ -341,7 +341,7 @@ class ConfigSyncPluginImportPostgresIntegrationTest {
   }
 
   /** 合成静态密钥插件：普通值含一个认证目标字段。 */
-  private static final class StaticKeyPlugin implements StudioPlugin {
+  private static final class StaticKeyPlugin implements Plugin {
 
     private static final PluginConfigSchema SCHEMA =
         new PluginConfigSchema(

@@ -16,6 +16,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.common.schema.StringSchema;
+import fun.fengwk.kkstudio.platform.plugin.Plugin;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthHandler;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthSpec;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfig;
@@ -27,8 +28,7 @@ import fun.fengwk.kkstudio.platform.plugin.PluginCredentialStatus;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialUnavailableException;
 import fun.fengwk.kkstudio.platform.plugin.PluginDescriptor;
 import fun.fengwk.kkstudio.platform.plugin.PluginInstance;
-import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
-import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
+import fun.fengwk.kkstudio.platform.plugin.PluginRegistry;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialStore;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRepository;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRow;
@@ -66,7 +66,7 @@ class PluginConfigurationServiceTest {
   void setUp() {
     service =
         new PluginConfigurationService(
-            new StudioPluginRegistry(List.of(staticPlugin, new DeepLinkPlugin())),
+            new PluginRegistry(List.of(staticPlugin, new DeepLinkPlugin())),
             configurations,
             credentials,
             new PluginContextFactory(
@@ -205,7 +205,7 @@ class PluginConfigurationServiceTest {
   }
 
   /** 以 endpoint 为认证目标的静态密钥 Plugin，记录 configure 看到的候选配置与凭据。 */
-  private static final class StaticKeyPlugin implements StudioPlugin {
+  private static final class StaticKeyPlugin implements Plugin {
 
     private PluginConfig lastConfig;
     private PluginCredentialSnapshot lastCandidate;
@@ -245,7 +245,7 @@ class PluginConfigurationServiceTest {
     }
   }
 
-  private static final class DeepLinkPlugin implements StudioPlugin {
+  private static final class DeepLinkPlugin implements Plugin {
 
     @Override
     public PluginDescriptor descriptor() {

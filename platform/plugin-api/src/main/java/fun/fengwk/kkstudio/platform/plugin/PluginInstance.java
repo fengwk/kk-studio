@@ -8,7 +8,7 @@ import java.util.Objects;
 import java.util.Optional;
 
 /**
- * {@link StudioPlugin#configure(PluginConfig, PluginContext)} 产出的、由单个 Plugin 拥有的运行期实例。
+ * {@link Plugin#configure(PluginConfig, PluginContext)} 产出的、由单个 Plugin 拥有的运行期实例。
  *
  * <p>实例对外只有两类能力：Harness 域贡献由 {@link #harnessContributors()} 直接声明，平台据此构建 {@code
  * HarnessCatalog}；其它产品域的贡献按类型读取，见 {@link #contributions(Class)}。两份列表都在 configure 中冻结且不返回

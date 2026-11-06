@@ -6,8 +6,8 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.transaction.PlatformTransactionManager;
 
-import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
-import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
+import fun.fengwk.kkstudio.platform.plugin.Plugin;
+import fun.fengwk.kkstudio.platform.plugin.PluginRegistry;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialStore;
 import fun.fengwk.kkstudio.platform.plugin.prompt.PluginPromptResources;
 import fun.fengwk.kkstudio.platform.plugin.prompt.PluginPromptTasks;
@@ -31,7 +31,7 @@ import java.time.Clock;
 /**
  * Plugin 控制面的装配。
  *
- * <p>{@link StudioPlugin} bean 由各 Plugin JAR 自己的 auto-configuration 提供；没有 Plugin 时安装目录为空，管理面返回空列表。
+ * <p>{@link Plugin} bean 由各 Plugin JAR 自己的 auto-configuration 提供；没有 Plugin 时安装目录为空，管理面返回空列表。
  * 凭据只有一条写入路径：{@link PluginConfigurationService}。运行期目录 {@link PluginCatalogRuntime} 由 Web 组合根装配。
  */
 @Configuration(proxyBeanMethods = false)
@@ -39,8 +39,8 @@ import java.time.Clock;
 public class PluginConfiguration {
 
   @Bean
-  public StudioPluginRegistry studioPluginRegistry(ObjectProvider<StudioPlugin> plugins) {
-    return new StudioPluginRegistry(plugins.orderedStream().toList());
+  public PluginRegistry pluginRegistry(ObjectProvider<Plugin> plugins) {
+    return new PluginRegistry(plugins.orderedStream().toList());
   }
 
   @Bean
@@ -63,7 +63,7 @@ public class PluginConfiguration {
 
   @Bean
   public PluginConfigurationService pluginConfigurationService(
-      StudioPluginRegistry registry,
+      PluginRegistry registry,
       PluginConfigurationRepository configurations,
       PluginCredentialRepository credentials,
       PluginContextFactory contextFactory,
@@ -84,7 +84,7 @@ public class PluginConfiguration {
 
   @Bean
   public PluginManagementService pluginManagementService(
-      StudioPluginRegistry registry,
+      PluginRegistry registry,
       ObjectProvider<PluginCatalogRuntime> catalogRuntime,
       PluginConfigurationRepository configurations,
       PluginCredentialRepository credentials,
@@ -106,9 +106,7 @@ public class PluginConfiguration {
 
   @Bean
   public PluginCredentialRefreshService pluginCredentialRefreshService(
-      StudioPluginRegistry registry,
-      PluginCredentialRepository repository,
-      PluginProperties properties) {
+      PluginRegistry registry, PluginCredentialRepository repository, PluginProperties properties) {
     return new PluginCredentialRefreshService(registry, repository, properties, Clock.systemUTC());
   }
 

@@ -12,7 +12,7 @@ import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderRepository;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageRepository;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentRepository;
-import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
+import fun.fengwk.kkstudio.platform.plugin.PluginRegistry;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRepository;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRow;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsRepository;
@@ -39,7 +39,7 @@ public class ConfigSyncSnapshotReader {
   private final McpServerRepository mcpServerRepository;
   private final SystemSettingsRepository systemSettingsRepository;
   private final PluginConfigurationRepository pluginConfigurationRepository;
-  private final StudioPluginRegistry pluginRegistry;
+  private final PluginRegistry pluginRegistry;
 
   /**
    * 读取全部八类配置的当前事实。

@@ -3,24 +3,37 @@ package fun.fengwk.kkstudio.platform.pluginhost.service;
 import lombok.extern.slf4j.Slf4j;
 import tools.jackson.databind.JsonNode;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
+import fun.fengwk.kkstudio.common.json.BoundedJsonWriter;
 import fun.fengwk.kkstudio.common.json.JsonValues;
 import fun.fengwk.kkstudio.common.schema.SchemaJsonCodec;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
+import fun.fengwk.kkstudio.platform.error.CatalogVersions;
+import fun.fengwk.kkstudio.platform.plugin.Plugin;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthHandler;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthSpec;
+import fun.fengwk.kkstudio.platform.plugin.PluginConfig;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfigSchema;
 import fun.fengwk.kkstudio.platform.plugin.PluginConnectionCheck;
 import fun.fengwk.kkstudio.platform.plugin.PluginConnectionCheckResult;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialMaterial;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialStatus;
 import fun.fengwk.kkstudio.platform.plugin.PluginDescriptor;
-import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
-import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
+import fun.fengwk.kkstudio.platform.plugin.PluginRegistry;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialProjection;
 import fun.fengwk.kkstudio.platform.pluginhost.catalog.PluginCatalogRuntime;
 import fun.fengwk.kkstudio.platform.pluginhost.catalog.PluginCatalogSnapshot;
 import fun.fengwk.kkstudio.platform.pluginhost.catalog.PluginFunctionNamesProjection;
+import fun.fengwk.kkstudio.platform.pluginhost.dto.PluginAuthKindDTO;
+import fun.fengwk.kkstudio.platform.pluginhost.dto.PluginAuthPrepareDTO;
+import fun.fengwk.kkstudio.platform.pluginhost.dto.PluginConfigurationDTO;
+import fun.fengwk.kkstudio.platform.pluginhost.dto.PluginConnectionCheckDTO;
+import fun.fengwk.kkstudio.platform.pluginhost.dto.PluginConnectionCheckDTO.Authentication;
+import fun.fengwk.kkstudio.platform.pluginhost.dto.PluginConnectionCheckDTO.BrowserSession;
+import fun.fengwk.kkstudio.platform.pluginhost.dto.PluginConnectionCheckDTO.Reachability;
+import fun.fengwk.kkstudio.platform.pluginhost.dto.PluginDTO;
+import fun.fengwk.kkstudio.platform.pluginhost.dto.PluginSecretProjectionDTO;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginAuthAttemptRepository;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginAuthAttemptRow;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRepository;
@@ -28,16 +41,6 @@ import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRo
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginCredentialRepository;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginCredentialRow;
 import fun.fengwk.kkstudio.platform.secret.SecretUpdate;
-import fun.fengwk.kkstudio.share.plugin.PluginAuthKindDTO;
-import fun.fengwk.kkstudio.share.plugin.PluginAuthPrepareDTO;
-import fun.fengwk.kkstudio.share.plugin.PluginConfigurationDTO;
-import fun.fengwk.kkstudio.share.plugin.PluginConnectionCheckDTO;
-import fun.fengwk.kkstudio.share.plugin.PluginConnectionCheckDTO.Authentication;
-import fun.fengwk.kkstudio.share.plugin.PluginConnectionCheckDTO.BrowserSession;
-import fun.fengwk.kkstudio.share.plugin.PluginConnectionCheckDTO.Reachability;
-import fun.fengwk.kkstudio.share.plugin.PluginDTO;
-import fun.fengwk.kkstudio.share.plugin.PluginSecretPatchDTO;
-import fun.fengwk.kkstudio.share.plugin.PluginSecretProjectionDTO;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -56,7 +59,7 @@ import java.util.stream.Collectors;
  * Plugin 管理面用例：安全投影、保存配置、{@code DEEP_LINK} 认证的 prepare / complete / disconnect 与显式连接检查。
  *
  * <p>只路由到已安装 Plugin。交互式认证是「一个 Plugin 至多一个 pending attempt」的一次性协议：complete 以单条条件删除原子消费 attempt，并要求
- * prepare 之后配置修订未变、材料 region 与 prepare 选定的 region 一致。回调地址既不落库也不进日志或异常消息。
+ * prepare 之后配置版本未变、材料 region 与 prepare 选定的 region 一致。回调地址既不落库也不进日志或异常消息。
  */
 @Slf4j
 public final class PluginManagementService {
@@ -68,7 +71,7 @@ public final class PluginManagementService {
   private static final String RESOURCE = "plugin";
   private static final SchemaJsonCodec SCHEMA_CODEC = new SchemaJsonCodec();
 
-  private final StudioPluginRegistry registry;
+  private final PluginRegistry registry;
   private final Supplier<PluginCatalogRuntime> catalogRuntime;
   private final PluginConfigurationRepository configurations;
   private final PluginCredentialRepository credentials;
@@ -79,7 +82,7 @@ public final class PluginManagementService {
   private final Clock clock;
 
   public PluginManagementService(
-      StudioPluginRegistry registry,
+      PluginRegistry registry,
       Supplier<PluginCatalogRuntime> catalogRuntime,
       PluginConfigurationRepository configurations,
       PluginCredentialRepository credentials,
@@ -120,55 +123,60 @@ public final class PluginManagementService {
 
   public PluginDTO updateConfiguration(
       String pluginId,
-      long expectedRevision,
-      String valuesJson,
-      Map<String, PluginSecretPatchDTO> secretPatch) {
-    StudioPlugin plugin = requirePlugin(pluginId);
+      String expectedVersion,
+      JsonNode values,
+      Map<String, SecretUpdate> secretPatch) {
+    long version = parseVersion(expectedVersion);
+    Plugin plugin = requirePlugin(pluginId);
     configurationService.configure(
-        pluginId, expectedRevision, valuesJson, toSecretPatch(secretPatch));
+        pluginId, version, valuesJson(values), canonicalPatch(secretPatch));
     return describe(plugin);
   }
 
-  /** 校验秘密补丁并转为领域操作；错误不得包含请求字段名或秘密值。 */
-  private static Map<String, SecretUpdate> toSecretPatch(
-      Map<String, PluginSecretPatchDTO> secretPatch) {
-    Map<String, SecretUpdate> mapped = new LinkedHashMap<>();
-    if (secretPatch == null) {
-      return mapped;
+  /** 普通配置值由 Plugin schema 决定，转换为有界 JSON 文本后交给唯一写入口。 */
+  private static String valuesJson(JsonNode values) {
+    String text = BoundedJsonWriter.write(values, PluginConfig.MAX_VALUES_UTF8_BYTES);
+    if (text == null) {
+      throw DomainException.validation(RESOURCE, "values must match the plugin schema");
     }
-    for (Map.Entry<String, PluginSecretPatchDTO> entry : secretPatch.entrySet()) {
+    return text;
+  }
+
+  /** 秘密补丁的字段名必须是规范的已声明字段名；操作与值由 {@link SecretUpdate} 自身约束，错误不得包含秘密值。 */
+  private static Map<String, SecretUpdate> canonicalPatch(Map<String, SecretUpdate> secretPatch) {
+    if (secretPatch == null) {
+      return Map.of();
+    }
+    Map<String, SecretUpdate> patch = new LinkedHashMap<>();
+    for (Map.Entry<String, SecretUpdate> entry : secretPatch.entrySet()) {
       String field = entry.getKey();
-      if (field == null || field.isBlank() || !field.equals(field.strip())) {
+      if (field.isBlank() || !field.equals(field.strip())) {
         throw DomainException.validation(RESOURCE, "secretPatch must use canonical field names");
       }
-      PluginSecretPatchDTO dto = entry.getValue();
-      if (dto == null || dto.getOperation() == null) {
+      if (entry.getValue() == null) {
         throw DomainException.validation(RESOURCE, "secretPatch must declare an operation");
       }
-      String operation = dto.getOperation();
-      if (("KEEP".equals(operation) || "CLEAR".equals(operation)) && dto.getValue() != null) {
-        throw DomainException.validation(RESOURCE, operation + " must not carry a value");
-      }
-      try {
-        mapped.put(
-            field,
-            switch (operation) {
-              case "KEEP" -> SecretUpdate.keep();
-              case "SET" -> SecretUpdate.set(dto.getValue());
-              case "CLEAR" -> SecretUpdate.clear();
-              default -> throw DomainException.validation(
-                  RESOURCE, "secretPatch operation must be KEEP, SET or CLEAR");
-            });
-      } catch (IllegalArgumentException error) {
-        throw DomainException.validation(RESOURCE, "secretPatch value is invalid");
-      }
+      patch.put(field, entry.getValue());
     }
-    return mapped;
+    return patch;
+  }
+
+  /** canonical 非负十进制版本；不可解析即校验失败，错误绝不回显请求值。 */
+  private static long parseVersion(String value) {
+    try {
+      return CatalogVersions.parse(value, "expectedVersion");
+    } catch (DomainException error) {
+      if (error.code() != DomainErrorCode.VALIDATION) {
+        throw error;
+      }
+      throw DomainException.validation(
+          RESOURCE, "expectedVersion must be a canonical non-negative decimal string");
+    }
   }
 
   /** 校验 region、取官方登录地址，再写入本次唯一的 pending attempt。返回值只有 attemptId 与登录地址。 */
   public PluginAuthPrepareDTO prepareAuth(String pluginId, String region) {
-    StudioPlugin plugin = requirePlugin(pluginId);
+    Plugin plugin = requirePlugin(pluginId);
     PluginAuthSpec.DeepLink deepLink = requireDeepLink(plugin);
     PluginAuthHandler handler = requireAuthHandler(plugin);
     if (!deepLink.acceptsRegion(region)) {
@@ -201,7 +209,7 @@ public final class PluginManagementService {
 
   /** 原子消费 attempt、调用 Plugin 校验回调，并把材料写为新凭据。 */
   public PluginDTO completeAuth(String pluginId, String authAttemptId, String callbackUrl) {
-    StudioPlugin plugin = requirePlugin(pluginId);
+    Plugin plugin = requirePlugin(pluginId);
     PluginAuthSpec.DeepLink deepLink = requireDeepLink(plugin);
     PluginAuthHandler handler = requireAuthHandler(plugin);
     if (!PluginAuthNonce.isValidHandle(authAttemptId)) {
@@ -245,16 +253,17 @@ public final class PluginManagementService {
     configurationService.disconnect(pluginId);
   }
 
-  /** 对本节点当前实例执行一次显式只读连接检查；请求修订必须等于本节点已应用的修订。 */
-  public PluginConnectionCheckDTO checkConnection(String pluginId, long expectedRevision) {
+  /** 对本节点当前实例执行一次显式只读连接检查；请求版本必须等于本节点已应用的版本。 */
+  public PluginConnectionCheckDTO checkConnection(String pluginId, String expectedVersion) {
+    long version = parseVersion(expectedVersion);
     requirePlugin(pluginId);
     try (PluginCatalogRuntime.Lease lease = catalogRuntime.get().acquire()) {
       PluginCatalogSnapshot.ConfiguredPlugin configured =
           applied(lease.snapshot(), pluginId).orElseThrow();
-      long appliedRevision = configured.config().revision();
-      if (expectedRevision != appliedRevision) {
+      long appliedVersion = configured.config().revision();
+      if (version != appliedVersion) {
         throw DomainException.versionConflict(
-            RESOURCE, "revision=" + expectedRevision, "revision=" + appliedRevision);
+            RESOURCE, "version=" + version, "version=" + appliedVersion);
       }
       PluginConnectionCheck connectionCheck =
           configured
@@ -267,7 +276,7 @@ public final class PluginManagementService {
       PluginConnectionCheckResult result = connectionCheck.check();
       PluginConnectionCheckDTO dto = new PluginConnectionCheckDTO();
       dto.setPluginId(pluginId);
-      dto.setAppliedRevision(Long.toString(appliedRevision));
+      dto.setAppliedVersion(Long.toString(appliedVersion));
       dto.setCheckedAt(clock.instant());
       dto.setReachability(Reachability.valueOf(result.reachability().name()));
       dto.setAuthentication(Authentication.valueOf(result.authentication().name()));
@@ -276,16 +285,16 @@ public final class PluginManagementService {
     }
   }
 
-  private PluginDTO describe(StudioPlugin plugin) {
+  private PluginDTO describe(Plugin plugin) {
     PluginCatalogRuntime runtime = catalogRuntime.get();
     try (PluginCatalogRuntime.Lease lease = runtime.acquire()) {
       return describe(plugin, lease.snapshot(), runtime.applicationError());
     }
   }
 
-  /** 安全投影：配置取自数据库当前行（desired），能力与已应用修订取自本节点快照；秘密只以说明与布尔出现。 */
+  /** 安全投影：配置取自数据库当前行（desired），能力与已应用版本取自本节点快照；秘密只以说明与布尔出现。 */
   private PluginDTO describe(
-      StudioPlugin plugin, PluginCatalogSnapshot snapshot, String applicationError) {
+      Plugin plugin, PluginCatalogSnapshot snapshot, String applicationError) {
     PluginDescriptor descriptor = plugin.descriptor();
     String pluginId = descriptor.pluginId();
     PluginConfigurationRow desired = requireConfiguration(pluginId);
@@ -314,10 +323,7 @@ public final class PluginManagementService {
       boolean staticKeyMissing =
           plugin.authenticationSpec() instanceof PluginAuthSpec.StaticKey staticKey
               && !configuredSecrets.contains(staticKey.secretField());
-      dto.setStatus(
-          staticKeyMissing
-              ? PluginCredentialStatus.NOT_CONNECTED.name()
-              : projection.status().name());
+      dto.setStatus(staticKeyMissing ? PluginCredentialStatus.NOT_CONNECTED : projection.status());
       dto.setRegion(projection.region());
       dto.setExpiresAt(projection.expiresAt());
       dto.setNextRefreshAt(projection.nextRefreshAt());
@@ -325,12 +331,12 @@ public final class PluginManagementService {
       dto.setLastRefreshError(projection.lastRefreshError());
     }
     dto.setConfiguration(configurationOf(plugin, desired, configuredSecrets));
-    dto.setDesiredRevision(Long.toString(desired.version()));
+    dto.setDesiredVersion(Long.toString(desired.version()));
     Optional<PluginCatalogSnapshot.ConfiguredPlugin> applied = applied(snapshot, pluginId);
-    long appliedRevision = applied.map(entry -> entry.config().revision()).orElse(0L);
-    dto.setAppliedRevision(applied.isPresent() ? Long.toString(appliedRevision) : null);
+    long appliedVersion = applied.map(entry -> entry.config().revision()).orElse(0L);
+    dto.setAppliedVersion(applied.isPresent() ? Long.toString(appliedVersion) : null);
     dto.setApplicationError(
-        appliedRevision == desired.version() ? null : pendingError(applicationError));
+        appliedVersion == desired.version() ? null : pendingError(applicationError));
     dto.setConnectionCheckSupported(
         applied.flatMap(entry -> entry.instance().connectionCheck()).isPresent());
     dto.setHarnessToolNames(applied.map(entry -> toolNames(snapshot, entry)).orElse(List.of()));
@@ -357,13 +363,13 @@ public final class PluginManagementService {
   }
 
   private static PluginConfigurationDTO configurationOf(
-      StudioPlugin plugin, PluginConfigurationRow desired, Set<String> configuredSecrets) {
+      Plugin plugin, PluginConfigurationRow desired, Set<String> configuredSecrets) {
     PluginConfigSchema schema = plugin.configurationSchema();
     PluginConfigurationDTO configuration = new PluginConfigurationDTO();
-    configuration.setValuesSchema(SCHEMA_CODEC.encode(schema.valuesSchema()));
-    configuration.setDefaultsJson(schema.defaultsJson());
-    configuration.setRevision(Long.toString(desired.version()));
-    configuration.setValuesJson(desired.valuesJson());
+    configuration.setVersion(Long.toString(desired.version()));
+    configuration.setValues(JsonValues.readTree(desired.valuesJson()));
+    configuration.setValuesSchema(JsonValues.readTree(SCHEMA_CODEC.encode(schema.valuesSchema())));
+    configuration.setDefaults(JsonValues.readTree(schema.defaultsJson()));
     Map<String, PluginSecretProjectionDTO> secrets = new LinkedHashMap<>();
     for (Map.Entry<String, String> entry : schema.secrets().entrySet()) {
       PluginSecretProjectionDTO secret = new PluginSecretProjectionDTO();
@@ -376,7 +382,7 @@ public final class PluginManagementService {
   }
 
   /** 已录入的声明秘密字段名；只有字段名，绝无值。 */
-  private static Set<String> configuredSecretFields(StudioPlugin plugin, Optional<String> payload) {
+  private static Set<String> configuredSecretFields(Plugin plugin, Optional<String> payload) {
     if (payload.isEmpty()) {
       return Set.of();
     }
@@ -397,11 +403,11 @@ public final class PluginManagementService {
     return configurations.find(pluginId).orElseThrow(() -> DomainException.notFound(RESOURCE));
   }
 
-  private StudioPlugin requirePlugin(String pluginId) {
+  private Plugin requirePlugin(String pluginId) {
     return registry.find(pluginId).orElseThrow(() -> DomainException.notFound(RESOURCE));
   }
 
-  private static PluginAuthHandler requireAuthHandler(StudioPlugin plugin) {
+  private static PluginAuthHandler requireAuthHandler(Plugin plugin) {
     return plugin
         .authHandler()
         .orElseThrow(
@@ -410,7 +416,7 @@ public final class PluginManagementService {
                     RESOURCE, "plugin does not provide interactive authentication"));
   }
 
-  private static PluginAuthSpec.DeepLink requireDeepLink(StudioPlugin plugin) {
+  private static PluginAuthSpec.DeepLink requireDeepLink(Plugin plugin) {
     if (plugin.authenticationSpec() instanceof PluginAuthSpec.DeepLink deepLink) {
       return deepLink;
     }

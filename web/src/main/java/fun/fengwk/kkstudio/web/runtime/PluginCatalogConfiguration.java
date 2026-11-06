@@ -9,7 +9,7 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
 import fun.fengwk.kkstudio.canvas.infra.platform.PluginCanvasFunctionCatalog;
 import fun.fengwk.kkstudio.canvas.infra.platform.PluginCanvasFunctionCatalogSource;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
-import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
+import fun.fengwk.kkstudio.platform.plugin.PluginRegistry;
 import fun.fengwk.kkstudio.platform.pluginhost.catalog.PluginCatalogRuntime;
 import fun.fengwk.kkstudio.platform.pluginhost.catalog.PluginFunctionNamesProjection;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRepository;
@@ -39,7 +39,7 @@ public class PluginCatalogConfiguration {
   @Bean(destroyMethod = "close")
   @DependsOn("systemProxySelector")
   public PluginCatalogRuntime pluginCatalogRuntime(
-      StudioPluginRegistry registry,
+      PluginRegistry registry,
       PluginConfigurationRepository repository,
       PluginContextFactory contextFactory,
       ObjectProvider<HarnessContributor> contributors,

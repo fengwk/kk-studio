@@ -33,14 +33,14 @@ import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageRepository;
 import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.platform.catalog.tool.TestRuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchemaSupport;
+import fun.fengwk.kkstudio.platform.plugin.Plugin;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthSpec;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfig;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfigSchema;
 import fun.fengwk.kkstudio.platform.plugin.PluginContext;
 import fun.fengwk.kkstudio.platform.plugin.PluginDescriptor;
 import fun.fengwk.kkstudio.platform.plugin.PluginInstance;
-import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
-import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
+import fun.fengwk.kkstudio.platform.plugin.PluginRegistry;
 import fun.fengwk.kkstudio.platform.pluginhost.credential.DatabasePluginCredentialStore;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRepository;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginCredentialRepository;
@@ -79,7 +79,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  *   <li>并发 save-vs-delete 的两个锁顺序都不能提交悬空引用：谁先取得 Agent 行锁谁成功，另一方确定性失败。
  * </ol>
  *
- * <p>合成 StudioPlugin 只用公共 API 声明普通值字段与声明的 Agent 名称，不引用任何具体插件实现，也不访问网络或真实凭据。
+ * <p>合成 Plugin 只用公共 API 声明普通值字段与声明的 Agent 名称，不引用任何具体插件实现，也不访问网络或真实凭据。
  */
 class PluginAgentDependencyPostgresIntegrationTest {
 
@@ -98,7 +98,7 @@ class PluginAgentDependencyPostgresIntegrationTest {
   private final AtomicInteger dispatcherWakes = new AtomicInteger();
   private final AtomicInteger catalogWakes = new AtomicInteger();
 
-  private StudioPluginRegistry registry;
+  private PluginRegistry registry;
   private PlatformTransactionManager transactionManager;
   private PluginConfigurationRepository configurationRepository;
   private PluginCredentialRepository credentialRepository;
@@ -130,7 +130,7 @@ class PluginAgentDependencyPostgresIntegrationTest {
     }
     dispatcherWakes.set(0);
     catalogWakes.set(0);
-    registry = new StudioPluginRegistry(List.of(new DeclaringPlugin(DECLARING_PLUGIN_ID)));
+    registry = new PluginRegistry(List.of(new DeclaringPlugin(DECLARING_PLUGIN_ID)));
     transactionManager = new DataSourceTransactionManager(dataSource);
     configurationRepository = new PluginConfigurationRepository(jdbcClient);
     credentialRepository = new PluginCredentialRepository(jdbcClient);
@@ -494,7 +494,7 @@ class PluginAgentDependencyPostgresIntegrationTest {
   }
 
   /** 合成插件：普通配置声明一个 Agent 名称字段，{@code requiredAgentNames} 只解析该字段。 */
-  private static final class DeclaringPlugin implements StudioPlugin {
+  private static final class DeclaringPlugin implements Plugin {
 
     private static final PluginConfigSchema SCHEMA =
         new PluginConfigSchema(

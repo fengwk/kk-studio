@@ -7,7 +7,7 @@ import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
-import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
+import fun.fengwk.kkstudio.platform.plugin.Plugin;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -18,8 +18,8 @@ import java.util.List;
 /**
  * MediaAutoConfiguration 自动装配与契约凭证测试。
  *
- * <p>验证加载 MediaAutoConfiguration 时只注册一个 {@link StudioPlugin} 安装定义，不把函数 adapter 发布为宿主内置 Bean；
- * 验证用户自定义 Bean 覆盖，以及 AutoConfiguration.imports 声明符合 Spring Boot 约定。
+ * <p>验证加载 MediaAutoConfiguration 时只注册一个 {@link Plugin} 安装定义，不把函数 adapter 发布为宿主内置 Bean； 验证用户自定义 Bean
+ * 覆盖，以及 AutoConfiguration.imports 声明符合 Spring Boot 约定。
  */
 class MediaAutoConfigurationTest {
 
@@ -30,29 +30,29 @@ class MediaAutoConfigurationTest {
       new ApplicationContextRunner()
           .withConfiguration(AutoConfigurations.of(MediaAutoConfiguration.class));
 
-  /** 装配唯一 StudioPlugin 安装定义，且容器中不存在内置 CanvasFunctionAdapter。 */
+  /** 装配唯一 Plugin 安装定义，且容器中不存在内置 CanvasFunctionAdapter。 */
   @Test
-  void autoConfigurationRegistersOnlyTheStudioPlugin() {
+  void autoConfigurationRegistersOnlyThePlugin() {
     runner.run(
         context -> {
           assertThat(context).hasNotFailed();
           assertThat(context).hasSingleBean(MediaPlugin.class);
-          assertThat(context).hasSingleBean(StudioPlugin.class);
+          assertThat(context).hasSingleBean(Plugin.class);
           assertThat(context.getBeansOfType(CanvasFunctionAdapter.class)).isEmpty();
         });
   }
 
   /** 用户显式定义 MediaPlugin 时，自动配置退让。 */
   @Test
-  void customStudioPluginOverridesDefault() {
+  void customPluginOverridesDefault() {
     MediaPlugin custom = new MediaPlugin();
     runner
         .withBean(MediaPlugin.class, () -> custom)
         .run(
             context -> {
               assertThat(context).hasNotFailed();
-              assertThat(context).hasSingleBean(StudioPlugin.class);
-              assertThat(context.getBean(StudioPlugin.class)).isSameAs(custom);
+              assertThat(context).hasSingleBean(Plugin.class);
+              assertThat(context.getBean(Plugin.class)).isSameAs(custom);
             });
   }
 

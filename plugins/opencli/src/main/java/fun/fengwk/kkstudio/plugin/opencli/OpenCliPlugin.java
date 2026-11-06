@@ -8,6 +8,7 @@ import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.common.schema.IntegerSchema;
 import fun.fengwk.kkstudio.common.schema.ObjectSchema;
 import fun.fengwk.kkstudio.common.schema.StringSchema;
+import fun.fengwk.kkstudio.platform.plugin.Plugin;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthHandler;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthSpec;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfig;
@@ -16,7 +17,6 @@ import fun.fengwk.kkstudio.platform.plugin.PluginContext;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialRefresher;
 import fun.fengwk.kkstudio.platform.plugin.PluginDescriptor;
 import fun.fengwk.kkstudio.platform.plugin.PluginInstance;
-import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
 
 import java.util.Map;
 import java.util.Objects;
@@ -24,12 +24,12 @@ import java.util.Optional;
 import java.util.Set;
 
 /**
- * OpenCLI 的 Studio Plugin 安装期定义：安装身份、受控配置、静态 apiKey 认证、受保护私有身份与运行期实例装配。
+ * OpenCLI 的 Plugin 安装期定义：安装身份、受控配置、静态 apiKey 认证、受保护私有身份与运行期实例装配。
  *
  * <p>启动期静态冻结 descriptor 与受控配置 schema，不访问 Hub 也不解析凭据。 运行期实例由 {@link #configure(PluginConfig,
  * PluginContext)} 装配，归本 Plugin 所有并可关闭。
  */
-public final class OpenCliPlugin implements StudioPlugin {
+public final class OpenCliPlugin implements Plugin {
 
   public static final String PLUGIN_ID = "opencli";
   public static final String PLUGIN_NAME = "OpenCLI";

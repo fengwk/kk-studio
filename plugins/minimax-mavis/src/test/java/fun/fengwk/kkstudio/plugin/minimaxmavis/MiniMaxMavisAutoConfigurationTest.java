@@ -11,8 +11,8 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
+import fun.fengwk.kkstudio.platform.plugin.Plugin;
 import fun.fengwk.kkstudio.platform.plugin.PluginInstance;
-import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -49,7 +49,7 @@ class MiniMaxMavisAutoConfigurationTest {
             context -> {
               assertThat(context).hasNotFailed();
 
-              assertThat(context).hasSingleBean(StudioPlugin.class);
+              assertThat(context).hasSingleBean(Plugin.class);
               assertThat(context).hasSingleBean(MiniMaxMavisPlugin.class);
 
               // 验证未向容器注册全局 Contributor 或 Tool bean
@@ -57,7 +57,7 @@ class MiniMaxMavisAutoConfigurationTest {
               assertThat(context.getBeansOfType(Tool.class)).isEmpty();
 
               // 唯一注册点仍是安装定义：默认配置由它装配出完整 15 工具的实例。
-              StudioPlugin plugin = context.getBean(StudioPlugin.class);
+              Plugin plugin = context.getBean(Plugin.class);
               assertEquals(MiniMaxMavisPlugin.PLUGIN_ID, plugin.descriptor().pluginId());
 
               // 启动期断言：绝不触发任何 HTTP 传输调用（未联网启动）
@@ -69,18 +69,18 @@ class MiniMaxMavisAutoConfigurationTest {
 
   /** 其它插件已经注册不能抑制 Mavis 安装，条件退让仅针对本插件的具体类型。 */
   @Test
-  void anotherStudioPluginDoesNotSuppressTheMavisDefinition() {
+  void anotherPluginDoesNotSuppressTheMavisDefinition() {
     RecordingTransport recordingTransport = new RecordingTransport();
-    StudioPlugin anotherPlugin = mock(StudioPlugin.class);
+    Plugin anotherPlugin = mock(Plugin.class);
     baseRunner
-        .withBean("anotherPlugin", StudioPlugin.class, () -> anotherPlugin)
+        .withBean("anotherPlugin", Plugin.class, () -> anotherPlugin)
         .withBean(MavisHttpTransport.class, () -> recordingTransport)
         .withConfiguration(AutoConfigurations.of(MiniMaxMavisAutoConfiguration.class))
         .run(
             context -> {
               assertThat(context).hasNotFailed();
               assertThat(context).hasSingleBean(MiniMaxMavisPlugin.class);
-              assertThat(context.getBeansOfType(StudioPlugin.class).values())
+              assertThat(context.getBeansOfType(Plugin.class).values())
                   .containsExactlyInAnyOrder(
                       anotherPlugin, context.getBean(MiniMaxMavisPlugin.class));
               assertTrue(recordingTransport.requests().isEmpty());
@@ -88,15 +88,15 @@ class MiniMaxMavisAutoConfigurationTest {
   }
 
   /**
-   * 验证当没有加载 MiniMaxMavisAutoConfiguration 时（模拟 classpath 上没有该插件）， 容器中绝不包含
-   * StudioPlugin、HarnessContributor 或任何 MiniMax 工具。
+   * 验证当没有加载 MiniMaxMavisAutoConfiguration 时（模拟 classpath 上没有该插件）， 容器中绝不包含 Plugin、HarnessContributor
+   * 或任何 MiniMax 工具。
    */
   @Test
   void withoutAutoConfigurationContextContainsNoPluginOrTools() {
     baseRunner.run(
         context -> {
           assertThat(context).hasNotFailed();
-          assertThat(context).doesNotHaveBean(StudioPlugin.class);
+          assertThat(context).doesNotHaveBean(Plugin.class);
           assertThat(context).doesNotHaveBean(MiniMaxMavisPlugin.class);
           assertThat(context).doesNotHaveBean(PluginInstance.class);
           assertThat(context).doesNotHaveBean(HarnessContributor.class);

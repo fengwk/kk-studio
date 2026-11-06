@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.share.plugin;
+package fun.fengwk.kkstudio.platform.pluginhost.dto;
 
 import lombok.Data;
 
@@ -7,8 +7,8 @@ import java.time.Instant;
 /**
  * 一次显式连接检查的类型化结果投影。
  *
- * <p>只包含安装身份、本次检查所依据的已应用坐标、检查时刻与三个类型化维度：没有异常消息、远端 URI、远端正文或任何凭据；未核验的维度明确为 {@code NOT_CHECKED}，
- * 无法证明的维度明确为 {@code INDETERMINATE}，绝不以健康值代言未知。三个维度都是本模块自己的封闭枚举，wire 上只出现契约内的精确名称。
+ * <p>只包含安装身份、本次检查所依据的已应用版本、检查时刻与三个类型化维度：没有异常消息、远端 URI、远端正文或任何凭据；未核验的维度明确为 {@code
+ * NOT_CHECKED}，无法证明的维度明确为 {@code INDETERMINATE}，绝不以健康值代言未知。
  */
 @Data
 public class PluginConnectionCheckDTO {
@@ -55,8 +55,8 @@ public class PluginConnectionCheckDTO {
   /** Plugin 全局唯一不可变安装身份。 */
   private String pluginId;
 
-  /** 本次检查所依据的已应用配置修订（canonical 非负十进制字符串）。 */
-  private String appliedRevision;
+  /** 本次检查所依据的已应用配置版本（canonical 非负十进制字符串）。 */
+  private String appliedVersion;
 
   /** 本次检查的执行时刻。 */
   private Instant checkedAt;

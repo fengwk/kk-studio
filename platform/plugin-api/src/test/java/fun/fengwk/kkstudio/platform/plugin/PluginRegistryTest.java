@@ -18,16 +18,16 @@ import java.util.Set;
 /**
  * 启动期 classpath Plugin 安装注册表契约测试。
  *
- * <p>目录收集 Spring 容器内的 StudioPlugin bean，启动期一次性冻结，支持按 pluginId 排序存储、查找与唯一性校验。
+ * <p>目录收集 Spring 容器内的 Plugin bean，启动期一次性冻结，支持按 pluginId 排序存储、查找与唯一性校验。
  */
-class StudioPluginRegistryTest {
+class PluginRegistryTest {
 
   private static final PluginConfigSchema SCHEMA =
       new PluginConfigSchema(new InputSchema(null, Map.of(), Set.of(), false), "{}", Map.of());
 
-  private StudioPlugin createMockPlugin(String pluginId, String name) {
+  private Plugin createMockPlugin(String pluginId, String name) {
     PluginDescriptor descriptor = new PluginDescriptor(pluginId, name, "1.0");
-    return new StudioPlugin() {
+    return new Plugin() {
       @Override
       public PluginDescriptor descriptor() {
         return descriptor;
@@ -66,7 +66,7 @@ class StudioPluginRegistryTest {
   /** 空列表可正常构造，size() 为 0，查询均返回 empty。 */
   @Test
   void constructsWithEmptyList() {
-    StudioPluginRegistry registry = new StudioPluginRegistry(List.of());
+    PluginRegistry registry = new PluginRegistry(List.of());
 
     assertEquals(0, registry.size());
     assertTrue(registry.plugins().isEmpty());
@@ -94,7 +94,7 @@ class StudioPluginRegistryTest {
             "plugin-d",
             "plugin-k",
             "plugin-e");
-    List<StudioPlugin> plugins =
+    List<Plugin> plugins =
         declared.stream().map(id -> createMockPlugin(id, "Plugin " + id)).toList();
     List<String> expected =
         List.of(
@@ -109,7 +109,7 @@ class StudioPluginRegistryTest {
             "plugin-y",
             "plugin-z");
 
-    StudioPluginRegistry registry = new StudioPluginRegistry(plugins);
+    PluginRegistry registry = new PluginRegistry(plugins);
 
     assertEquals(expected, registry.pluginIds(), "pluginIds() must be ascending by pluginId");
     assertEquals(
@@ -119,37 +119,36 @@ class StudioPluginRegistryTest {
     assertEquals(declared.size(), registry.size());
   }
 
-  /** find() 命中时返回对应 StudioPlugin，未命中或为 null 时返回 Optional.empty()。 */
+  /** find() 命中时返回对应 Plugin，未命中或为 null 时返回 Optional.empty()。 */
   @Test
   void findHitsAndMisses() {
-    StudioPlugin pluginA = createMockPlugin("plugin-a", "Plugin A");
-    StudioPlugin pluginB = createMockPlugin("plugin-b", "Plugin B");
+    Plugin pluginA = createMockPlugin("plugin-a", "Plugin A");
+    Plugin pluginB = createMockPlugin("plugin-b", "Plugin B");
 
-    StudioPluginRegistry registry = new StudioPluginRegistry(List.of(pluginA, pluginB));
+    PluginRegistry registry = new PluginRegistry(List.of(pluginA, pluginB));
 
-    Optional<StudioPlugin> hit = registry.find("plugin-a");
+    Optional<Plugin> hit = registry.find("plugin-a");
     assertTrue(hit.isPresent());
     assertEquals("plugin-a", hit.get().descriptor().pluginId());
 
-    Optional<StudioPlugin> miss = registry.find("plugin-unknown");
+    Optional<Plugin> miss = registry.find("plugin-unknown");
     assertFalse(miss.isPresent());
 
-    Optional<StudioPlugin> nullFind = registry.find(null);
+    Optional<Plugin> nullFind = registry.find(null);
     assertFalse(nullFind.isPresent());
   }
 
   /** 重复 pluginId 必须在构造期抛出 IllegalStateException，且消息中包含重复 pluginId 与双方类名。 */
   @Test
   void rejectsDuplicatePluginIdDuringConstruction() {
-    StudioPlugin first = createMockPlugin("dupe-plugin", "First Dupe");
-    StudioPlugin second = createMockPlugin("dupe-plugin", "Second Dupe");
+    Plugin first = createMockPlugin("dupe-plugin", "First Dupe");
+    Plugin second = createMockPlugin("dupe-plugin", "Second Dupe");
 
     IllegalStateException ex =
-        assertThrows(
-            IllegalStateException.class, () -> new StudioPluginRegistry(List.of(first, second)));
+        assertThrows(IllegalStateException.class, () -> new PluginRegistry(List.of(first, second)));
 
     assertTrue(
-        ex.getMessage().contains("duplicate StudioPlugin pluginId: dupe-plugin"),
+        ex.getMessage().contains("duplicate Plugin pluginId: dupe-plugin"),
         "error message must mention duplicate pluginId");
     assertTrue(
         ex.getMessage().contains(first.getClass().getName()),

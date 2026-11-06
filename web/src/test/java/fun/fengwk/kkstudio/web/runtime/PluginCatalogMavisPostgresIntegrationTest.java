@@ -16,8 +16,8 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
-import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
-import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
+import fun.fengwk.kkstudio.platform.plugin.Plugin;
+import fun.fengwk.kkstudio.platform.plugin.PluginRegistry;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialStore;
 import fun.fengwk.kkstudio.platform.pluginhost.catalog.PluginCatalogRuntime;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRepository;
@@ -117,7 +117,7 @@ class PluginCatalogMavisPostgresIntegrationTest {
               assertEquals(
                   ENABLED_DEFAULTS,
                   restarted
-                      .getBean(StudioPluginRegistry.class)
+                      .getBean(PluginRegistry.class)
                       .find(MAVIS)
                       .orElseThrow()
                       .configurationSchema()
@@ -165,8 +165,8 @@ class PluginCatalogMavisPostgresIntegrationTest {
   static class RegistryConfiguration {
 
     @Bean
-    StudioPluginRegistry studioPluginRegistry(ObjectProvider<StudioPlugin> plugins) {
-      return new StudioPluginRegistry(plugins.orderedStream().toList());
+    PluginRegistry pluginRegistry(ObjectProvider<Plugin> plugins) {
+      return new PluginRegistry(plugins.orderedStream().toList());
     }
   }
 }

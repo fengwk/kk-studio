@@ -8,8 +8,8 @@ import org.springframework.context.annotation.DependsOn;
 /**
  * MiniMax Mavis Plugin 的唯一装配入口，由 {@code AutoConfiguration.imports} 声明。
  *
- * <p>这是「插件是否安装」的唯一开关：本 JAR 在 classpath 上（web 的 runtime dependency 决定），就出现 Studio Plugin
- * 安装定义；把它从依赖里去掉并重新 构建，安装定义与其无状态认证依赖全部消失。
+ * <p>这是「插件是否安装」的唯一开关：本 JAR 在 classpath 上（web 的 runtime dependency 决定），就出现 Plugin 安装定义；把它从依赖里去掉并重新
+ * 构建，安装定义与其无状态认证依赖全部消失。
  *
  * <p>启动期只做静态冻结：构造 descriptor 与受控配置 schema，不访问 Mavis、不解析凭据。15 个模型工具、capability 缓存与工具执行器都不是容器 bean，而由
  * {@link MiniMaxMavisPlugin#configure} 按一次配置装配为归实例所有、可关闭的资源。资源网关是可选依赖：没有绑定实现时，涉及会话资源或媒体输出的调用在发送前
@@ -45,7 +45,7 @@ public class MiniMaxMavisAutoConfiguration {
 
   @Bean
   @ConditionalOnMissingBean
-  public MiniMaxMavisPlugin mavisStudioPlugin(
+  public MiniMaxMavisPlugin mavisPlugin(
       MavisClient mavisClient,
       MiniMaxMavisAuthHandler mavisAuthHandler,
       MiniMaxMavisCredentialRefresher mavisCredentialRefresher) {

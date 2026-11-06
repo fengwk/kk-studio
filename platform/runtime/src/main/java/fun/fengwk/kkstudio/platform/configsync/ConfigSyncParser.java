@@ -15,8 +15,8 @@ import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogService;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentInstallConfigs;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentService;
 import fun.fengwk.kkstudio.platform.harness.builtin.BuiltinConfigSyncAdapter;
-import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
-import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
+import fun.fengwk.kkstudio.platform.plugin.Plugin;
+import fun.fengwk.kkstudio.platform.plugin.PluginRegistry;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsCodec;
 import fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentDefinitionEditablePropertiesDTO;
@@ -75,7 +75,7 @@ public final class ConfigSyncParser {
   private final AgentDefinitionService agentService;
   private final SkillCatalogService skillCatalogService;
   private final SystemSettingsCodec systemSettingsCodec;
-  private final StudioPluginRegistry pluginRegistry;
+  private final PluginRegistry pluginRegistry;
 
   public ConfigSyncParser(
       ConfigSyncYaml yaml,
@@ -84,7 +84,7 @@ public final class ConfigSyncParser {
       AgentDefinitionService agentService,
       SkillCatalogService skillCatalogService,
       SystemSettingsCodec systemSettingsCodec,
-      StudioPluginRegistry pluginRegistry) {
+      PluginRegistry pluginRegistry) {
     this.yaml = yaml;
     this.providerService = providerService;
     this.modelService = modelService;
@@ -414,7 +414,7 @@ public final class ConfigSyncParser {
     String pluginId = entry.reqName("pluginId");
     declared.add(pluginId);
     String valuesJson = entry.reqString("valuesJson");
-    Optional<StudioPlugin> plugin = pluginRegistry.find(pluginId);
+    Optional<Plugin> plugin = pluginRegistry.find(pluginId);
     String resolvedValues = null;
     if (plugin.isPresent()) {
       // known 字段非法值（类型不符、未声明字段、超限）即使伴随未知字段也必须硬拒绝：与其它类别一样先用写入路径校验，再判定未知字段 skip。

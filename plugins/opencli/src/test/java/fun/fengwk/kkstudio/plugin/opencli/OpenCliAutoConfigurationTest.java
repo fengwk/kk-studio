@@ -12,7 +12,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
-import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
+import fun.fengwk.kkstudio.platform.plugin.Plugin;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -31,16 +31,16 @@ class OpenCliAutoConfigurationTest {
           .withConfiguration(AutoConfigurations.of(OpenCliAutoConfiguration.class));
 
   @Test
-  void autoConfigurationRegistersOnlyOneStudioPluginBean() {
+  void autoConfigurationRegistersOnlyOnePluginBean() {
     runner.run(
         context -> {
           assertThat(context).hasNotFailed();
 
-          // 只注册一个 StudioPlugin bean
-          assertThat(context).hasSingleBean(StudioPlugin.class);
+          // 只注册一个 Plugin bean
+          assertThat(context).hasSingleBean(Plugin.class);
           assertThat(context).hasSingleBean(OpenCliPlugin.class);
 
-          StudioPlugin plugin = context.getBean(StudioPlugin.class);
+          Plugin plugin = context.getBean(Plugin.class);
           assertEquals(OpenCliPlugin.PLUGIN_ID, plugin.descriptor().pluginId());
 
           // 不发布 client、adapter 或 contributor 为宿主内置 Bean
@@ -61,8 +61,8 @@ class OpenCliAutoConfigurationTest {
         .run(
             context -> {
               assertThat(context).hasNotFailed();
-              assertThat(context).hasSingleBean(StudioPlugin.class);
-              assertEquals(customPlugin, context.getBean(StudioPlugin.class));
+              assertThat(context).hasSingleBean(Plugin.class);
+              assertEquals(customPlugin, context.getBean(Plugin.class));
               assertThat(context).hasSingleBean(OpenCliPlugin.class);
             });
   }
@@ -70,11 +70,11 @@ class OpenCliAutoConfigurationTest {
   @Test
   void unrelatedPluginDoesNotSuppressOpenCliInstallation() {
     runner
-        .withBean("anotherPlugin", StudioPlugin.class, () -> mock(StudioPlugin.class))
+        .withBean("anotherPlugin", Plugin.class, () -> mock(Plugin.class))
         .run(
             context -> {
               assertThat(context).hasNotFailed();
-              assertThat(context.getBeansOfType(StudioPlugin.class)).hasSize(2);
+              assertThat(context.getBeansOfType(Plugin.class)).hasSize(2);
               assertThat(context).hasSingleBean(OpenCliPlugin.class);
             });
   }
@@ -88,7 +88,7 @@ class OpenCliAutoConfigurationTest {
         .run(
             context -> {
               assertThat(context).hasNotFailed();
-              assertThat(context).hasSingleBean(StudioPlugin.class);
+              assertThat(context).hasSingleBean(Plugin.class);
               assertThat(context).hasSingleBean(OpenCliPlugin.class);
             });
   }

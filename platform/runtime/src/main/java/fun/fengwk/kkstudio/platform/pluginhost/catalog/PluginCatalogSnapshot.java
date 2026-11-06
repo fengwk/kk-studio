@@ -5,12 +5,12 @@ import lombok.extern.slf4j.Slf4j;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
+import fun.fengwk.kkstudio.platform.plugin.Plugin;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfig;
 import fun.fengwk.kkstudio.platform.plugin.PluginContext;
 import fun.fengwk.kkstudio.platform.plugin.PluginDescriptor;
 import fun.fengwk.kkstudio.platform.plugin.PluginInstance;
-import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
-import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
+import fun.fengwk.kkstudio.platform.plugin.PluginRegistry;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -57,7 +57,7 @@ public final class PluginCatalogSnapshot implements AutoCloseable {
    * @throws IllegalStateException 配置缺失、configure 失败或任一目录（含产品目录）校验失败时（只带 stage 与 pluginId）
    */
   public static PluginCatalogSnapshot build(
-      StudioPluginRegistry registry,
+      PluginRegistry registry,
       Map<String, PluginConfig> configurations,
       Function<String, PluginContext> contexts,
       List<HarnessContributor> builtins,
@@ -68,7 +68,7 @@ public final class PluginCatalogSnapshot implements AutoCloseable {
     String stage = "configure";
     String activeId = null;
     try {
-      for (StudioPlugin plugin : registry.plugins()) {
+      for (Plugin plugin : registry.plugins()) {
         activeId = plugin.descriptor().pluginId();
         stage = "configure";
         plugin.authenticationSpec().requireConsistentWith(plugin.authHandler());

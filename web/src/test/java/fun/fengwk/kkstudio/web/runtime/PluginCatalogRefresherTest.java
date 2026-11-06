@@ -16,7 +16,7 @@ import static org.mockito.Mockito.when;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
-import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
+import fun.fengwk.kkstudio.platform.plugin.PluginRegistry;
 import fun.fengwk.kkstudio.platform.pluginhost.catalog.PluginCatalogRuntime;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRepository;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRow;
@@ -252,7 +252,7 @@ class PluginCatalogRefresherTest {
   private static PluginCatalogRuntime runtime(GatedRepository repository) {
     PluginCatalogRuntime runtime =
         new PluginCatalogRuntime(
-            new StudioPluginRegistry(List.of()),
+            new PluginRegistry(List.of()),
             repository,
             pluginId -> {
               throw new AssertionError("no plugin is installed");

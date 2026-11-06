@@ -1,10 +1,11 @@
-package fun.fengwk.kkstudio.share.plugin;
+package fun.fengwk.kkstudio.platform.pluginhost.dto;
 
 import lombok.Data;
 import lombok.ToString;
 
 /**
- * {@code POST /api/plugins/{pluginId}/auth/prepare} 响应体：本次 pending attempt 的句柄与要在新窗口打开的官方登录链接。
+ * {@code POST /api/platform/plugins/{pluginId}/auth/prepare} 响应体：本次 pending attempt
+ * 的句柄与要在新窗口打开的官方登录链接。
  *
  * <p>链接只能是 Plugin 为所选 region 声明的固定公开 origin，不含任何动态脚本、token 或签名参数；{@code authAttemptId}
  * 是一次性句柄，只用于随后的 complete，不含任何可推导的秘密。

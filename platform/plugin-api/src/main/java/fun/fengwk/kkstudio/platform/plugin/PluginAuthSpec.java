@@ -13,8 +13,8 @@ import java.util.regex.Pattern;
  * Plugin 安装期的认证交互声明：封闭的 {@code None} / {@code StaticKey} / {@code DeepLink} 三态。
  *
  * <p>region 候选只属于 {@link DeepLink}：只有它会发起拨出式登录跳转，因此也只有它需要固定 region 集合。{@link StaticKey}
- * 的密钥由平台秘密存取提供，其字段必须由 {@link PluginConfigSchema#secrets()} 声明。三态与 {@link
- * StudioPlugin#authHandler()} 强一致：只有 {@link DeepLink} 允许存在交互式登录处理器。
+ * 的密钥由平台秘密存取提供，其字段必须由 {@link PluginConfigSchema#secrets()} 声明。三态与 {@link Plugin#authHandler()}
+ * 强一致：只有 {@link DeepLink} 允许存在交互式登录处理器。
  *
  * <p>{@link #contextFields()} 是「普通配置里决定认证目标与权限的字段」：这些字段变化而没有同时重新录入密钥时，已保存的密钥被丢弃，避免把密钥发往新目标。只有
  * {@link StaticKey} 声明它；{@link None} 与 {@link DeepLink} 的目标由固定协议（region 候选）控制，当前为空集合。

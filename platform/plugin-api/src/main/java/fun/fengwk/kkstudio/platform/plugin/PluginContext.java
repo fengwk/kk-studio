@@ -9,7 +9,7 @@ import java.util.Objects;
 import java.util.Optional;
 
 /**
- * {@link StudioPlugin#configure(PluginConfig, PluginContext)} 的宿主上下文。
+ * {@link Plugin#configure(PluginConfig, PluginContext)} 的宿主上下文。
  *
  * <p>只暴露本 Plugin 的 scoped {@link PluginCredentialAccess}，以及部署可选绑定的既有资源网关与 Prompt 窄端口。Plugin 拿不到
  * credential store、repository、主密钥、其它 Plugin 的凭据，也拿不到 Harness 消息、存储上传行或任务内部身份。

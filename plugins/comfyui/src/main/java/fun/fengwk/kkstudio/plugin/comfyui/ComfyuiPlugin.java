@@ -12,13 +12,13 @@ import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.common.schema.IntegerSchema;
 import fun.fengwk.kkstudio.common.schema.ObjectSchema;
 import fun.fengwk.kkstudio.common.schema.StringSchema;
+import fun.fengwk.kkstudio.platform.plugin.Plugin;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthSpec;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfig;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfigSchema;
 import fun.fengwk.kkstudio.platform.plugin.PluginContext;
 import fun.fengwk.kkstudio.platform.plugin.PluginDescriptor;
 import fun.fengwk.kkstudio.platform.plugin.PluginInstance;
-import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
 
 import java.util.List;
 import java.util.Map;
@@ -26,13 +26,13 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * ComfyUI 的 Studio Plugin 安装期定义：安装身份、受控配置、静态密钥认证与运行期实例装配。
+ * ComfyUI 的 Plugin 安装期定义：安装身份、受控配置、静态密钥认证与运行期实例装配。
  *
  * <p>受控配置是唯一事实来源：连接与认证、Prompt 预算以及冻结工作流集合都来自 schema 声明的默认值与普通配置修订，秘密只有 {@code apiKey}。启动期只静态冻结
  * descriptor 与 schema，不联网也不解析凭据；运行期实例由 {@link #configure(PluginConfig, PluginContext)} 装配并归本 Plugin
  * 所有。
  */
-public final class ComfyuiPlugin implements StudioPlugin {
+public final class ComfyuiPlugin implements Plugin {
 
   public static final String PLUGIN_ID = "comfyui";
   public static final String PLUGIN_NAME = "ComfyUI";

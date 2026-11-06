@@ -17,6 +17,7 @@ import org.springframework.test.annotation.DirtiesContext;
 import tools.jackson.databind.JsonNode;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
+import fun.fengwk.kkstudio.common.json.JsonValues;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgentDefinitions;
@@ -71,7 +72,7 @@ class PluginConfigSyncIntegrationTest extends ConfigSyncTestSupport {
   @Test
   void exportTreatsInstalledPluginsAsPortableEighthKind() throws Exception {
     Map<String, String> plugins = installedPluginValues();
-    assertFalse(plugins.isEmpty(), "the web context must install at least one StudioPlugin");
+    assertFalse(plugins.isEmpty(), "the web context must install at least one Plugin");
     String pluginId = plugins.keySet().iterator().next();
     String valuesJson = plugins.get(pluginId);
 
@@ -129,7 +130,7 @@ class PluginConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     assertEquals(plugins.get(pluginId), row.valuesJson());
     assertNotEquals(
         "CONNECTED",
-        getData("/api/plugins/" + pluginId).path("status").asText(),
+        getData("/api/platform/plugins/" + pluginId).path("status").asText(),
         "an ordinary import must never fabricate a credential for an installed plugin");
   }
 
@@ -167,7 +168,7 @@ class PluginConfigSyncIntegrationTest extends ConfigSyncTestSupport {
 
     // 并发写入：按计划期的修订保存一次普通配置。
     pluginManagementService.updateConfiguration(
-        pluginId, row.version(), row.valuesJson(), Map.of());
+        pluginId, Long.toString(row.version()), JsonValues.readTree(row.valuesJson()), Map.of());
 
     assertThrows(DomainException.class, () -> applier.apply(plan, List.of()));
 
@@ -276,10 +277,10 @@ class PluginConfigSyncIntegrationTest extends ConfigSyncTestSupport {
   /** 已安装插件的 pluginId 到权威普通值文本；只取真实存在配置投影的插件。 */
   private Map<String, String> installedPluginValues() throws Exception {
     Map<String, String> values = new LinkedHashMap<>();
-    for (JsonNode node : getData("/api/plugins")) {
-      String valuesJson = node.path("configuration").path("valuesJson").asText();
-      if (!valuesJson.isEmpty()) {
-        values.put(node.path("pluginId").asText(), valuesJson);
+    for (JsonNode node : getData("/api/platform/plugins")) {
+      JsonNode pluginValues = node.path("configuration").path("values");
+      if (pluginValues.isObject()) {
+        values.put(node.path("pluginId").asText(), JsonValues.write(pluginValues));
       }
     }
     return values;

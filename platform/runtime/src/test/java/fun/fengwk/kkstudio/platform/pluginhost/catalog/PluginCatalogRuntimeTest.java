@@ -14,14 +14,14 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
+import fun.fengwk.kkstudio.platform.plugin.Plugin;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthSpec;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfig;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfigSchema;
 import fun.fengwk.kkstudio.platform.plugin.PluginContext;
 import fun.fengwk.kkstudio.platform.plugin.PluginDescriptor;
 import fun.fengwk.kkstudio.platform.plugin.PluginInstance;
-import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
-import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
+import fun.fengwk.kkstudio.platform.plugin.PluginRegistry;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialAccess;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRepository;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRow;
@@ -64,7 +64,7 @@ class PluginCatalogRuntimeTest {
     stored(1L);
     runtime =
         new PluginCatalogRuntime(
-            new StudioPluginRegistry(List.of(plugin)),
+            new PluginRegistry(List.of(plugin)),
             repository,
             pluginId ->
                 new PluginContext(
@@ -214,7 +214,7 @@ class PluginCatalogRuntimeTest {
   }
 
   /** 每次 configure 产出一个可计数关闭的实例，可注入 configure 失败。 */
-  private static final class TestPlugin implements StudioPlugin {
+  private static final class TestPlugin implements Plugin {
 
     private final List<CountingInstance> instances = new ArrayList<>();
     private RuntimeException failure;

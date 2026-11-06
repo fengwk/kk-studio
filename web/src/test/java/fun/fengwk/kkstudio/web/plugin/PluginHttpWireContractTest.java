@@ -3,12 +3,13 @@ package fun.fengwk.kkstudio.web.plugin;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -36,15 +37,18 @@ import fun.fengwk.kkstudio.common.schema.SchemaJsonCodec;
 import fun.fengwk.kkstudio.common.schema.StringSchema;
 import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfigSchema;
+import fun.fengwk.kkstudio.platform.plugin.PluginCredentialStatus;
+import fun.fengwk.kkstudio.platform.pluginhost.dto.PluginAuthKindDTO;
+import fun.fengwk.kkstudio.platform.pluginhost.dto.PluginAuthPrepareDTO;
+import fun.fengwk.kkstudio.platform.pluginhost.dto.PluginConfigurationDTO;
+import fun.fengwk.kkstudio.platform.pluginhost.dto.PluginConnectionCheckDTO;
+import fun.fengwk.kkstudio.platform.pluginhost.dto.PluginDTO;
+import fun.fengwk.kkstudio.platform.pluginhost.dto.PluginSecretProjectionDTO;
+import fun.fengwk.kkstudio.platform.pluginhost.http.PluginController;
 import fun.fengwk.kkstudio.platform.pluginhost.service.PluginManagementService;
-import fun.fengwk.kkstudio.share.plugin.PluginAuthKindDTO;
-import fun.fengwk.kkstudio.share.plugin.PluginAuthPrepareDTO;
-import fun.fengwk.kkstudio.share.plugin.PluginConfigurationDTO;
-import fun.fengwk.kkstudio.share.plugin.PluginConnectionCheckDTO;
-import fun.fengwk.kkstudio.share.plugin.PluginDTO;
-import fun.fengwk.kkstudio.share.plugin.PluginSecretProjectionDTO;
 import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
 import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
+import fun.fengwk.kkstudio.web.advice.RequestBodyRequiredValidationAdvice;
 import fun.fengwk.kkstudio.web.advice.StudioProblemAdvice;
 
 import java.io.IOException;
@@ -57,7 +61,7 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * {@code /api/plugins} 管理面的 HTTP wire 契约 golden：由生产 HTTP Jackson 3 mapper（Boot4 {@code
+ * {@code /api/platform/plugins} 管理面的 HTTP wire 契约 golden：由生产 HTTP Jackson 3 mapper（Boot4 {@code
  * JacksonAutoConfiguration} + 生产 {@code StrictJacksonConfiguration}）自己的 {@link
  * JacksonJsonHttpMessageConverter} 在 MockMvc 上真实产出，因此手写 DTO fixture 证明不了的实际形态（null 是否省略、{@code
  * Instant} 的 token 形态、schema 派生文本的数字精度）都在这里被锁定。
@@ -70,9 +74,9 @@ class PluginHttpWireContractTest {
   /** 生产 HTTP mapper：Boot4 自动装配 + 生产严格定制，绝不以 plain {@code new JsonMapper()} 代替。 */
   private static final JsonMapper HTTP_MAPPER = StrictHttpJsonMapperTestSupport.get();
 
-  /** 该 mapper 自己的 MVC converter，用来证明响应确实由这份 profile 产出。 */
+  /** 该 mapper 自己的 MVC converter：与生产一致地走严格 HTTP 输入，响应仍是同一份 wire profile。 */
   private static final JacksonJsonHttpMessageConverter HTTP_CONVERTER =
-      new JacksonJsonHttpMessageConverter(HTTP_MAPPER);
+      new JacksonJsonHttpMessageConverter(StrictHttpJsonMapperTestSupport.strictHttp());
 
   private static final String GOLDEN_DIR = "fun/fengwk/kkstudio/web/plugin/";
   private static final String SECRET_FIELD = "apiKey";
@@ -123,17 +127,20 @@ class PluginHttpWireContractTest {
   @BeforeEach
   void setUp() {
     pluginManagementService = mock(PluginManagementService.class);
-    StudioPluginController controller = new StudioPluginController(pluginManagementService);
+    PluginController controller = new PluginController(pluginManagementService);
     StudioProblemAdvice errorAdvice = new StudioProblemAdvice(new StudioMessageService());
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
             // 只注册生产 mapper 的 converter：MVC 没有机会回退到构件自建或 Jackson 2 的副本。
             .setMessageConverters(HTTP_CONVERTER)
-            .setControllerAdvice(new ApiResponseStatusAdvice(), errorAdvice)
+            .setControllerAdvice(
+                new ApiResponseStatusAdvice(),
+                new RequestBodyRequiredValidationAdvice(HTTP_MAPPER),
+                errorAdvice)
             .build();
   }
 
-  /** 测试意图：GET /api/plugins 的真实响应体必须与已提交的共用 golden 逐值一致。 */
+  /** 测试意图：GET /api/platform/plugins 的真实响应体必须与已提交的共用 golden 逐值一致。 */
   @Test
   void listPluginsResponseMatchesCommittedHttpWireGolden() throws Exception {
     when(pluginManagementService.listPlugins()).thenReturn(pluginCatalogue());
@@ -144,10 +151,9 @@ class PluginHttpWireContractTest {
     assertWireMatchesGolden("plugins-http.json", response);
   }
 
-  /** 测试意图：wire 上的 DTO 列表必须与同一 Boot mapper 直接序列化的结果一致，证明 MVC 选中的正是该 mapper。 */
+  /** 测试意图：wire 上的 DTO 列表必须与同一 Boot mapper 直接序列化的结果一致，证明 MVC 选中的正是该 profile。 */
   @Test
   void listPluginsDataIsProducedByTheSameBootJacksonMapper() throws Exception {
-    assertSame(HTTP_MAPPER, HTTP_CONVERTER.getMapper());
     List<PluginDTO> catalogue = pluginCatalogue();
     when(pluginManagementService.listPlugins()).thenReturn(catalogue);
 
@@ -209,9 +215,9 @@ class PluginHttpWireContractTest {
     assertInstantToken(connected.get("nextRefreshAt"), DEEP_CONNECTED_NEXT_REFRESH_AT);
     assertInstantToken(connected.get("lastRefreshedAt"), DEEP_CONNECTED_LAST_REFRESHED_AT);
 
-    assertEquals(JsonNodeType.STRING, connected.get("desiredRevision").getNodeType());
-    assertEquals("8", connected.get("desiredRevision").asString());
-    assertEquals("8", connected.get("appliedRevision").asString());
+    assertEquals(JsonNodeType.STRING, connected.get("desiredVersion").getNodeType());
+    assertEquals("8", connected.get("desiredVersion").asString());
+    assertEquals("8", connected.get("appliedVersion").asString());
   }
 
   /** 测试意图：保存不等于发布——desired 坐标、applied 坐标与固定去敏说明必须同时出现在同一份响应里。 */
@@ -222,14 +228,14 @@ class PluginHttpWireContractTest {
     JsonNode pending = responseBody(listPlugins()).get(3);
 
     assertEquals("beta-deep-pending", pending.get("pluginId").asString());
-    assertEquals("2", pending.get("desiredRevision").asString());
-    assertEquals("1", pending.get("appliedRevision").asString());
+    assertEquals("2", pending.get("desiredVersion").asString());
+    assertEquals("1", pending.get("appliedVersion").asString());
     assertEquals(
         PluginManagementService.PENDING_APPLICATION_ERROR,
         pending.get("applicationError").asString());
   }
 
-  /** 测试意图：配置投影携带真实 schema 派生的 values schema/默认值，且 valuesJson 保留数字精度与特殊属性名。 */
+  /** 测试意图：配置投影携带真实 schema 派生的 values schema/默认值，且 values 保留数字精度与特殊属性名。 */
   @Test
   void configurationCarriesSchemaDerivedValuesDefaultsAndRawNumberScale() throws Exception {
     when(pluginManagementService.getPlugin("beta-deep-connected"))
@@ -237,9 +243,9 @@ class PluginHttpWireContractTest {
 
     JsonNode configuration = responseBody(getPlugin("beta-deep-connected")).get("configuration");
 
-    assertEquals("8", configuration.get("revision").asString());
+    assertEquals("8", configuration.get("version").asString());
 
-    JsonNode values = JsonValues.readTree(configuration.get("valuesJson").asString());
+    JsonNode values = configuration.get("values");
     assertEquals(9007199254740993L, values.get("limits").get("maxTokens").longValue());
     assertEquals("1.230000", values.get("limits").get("temperature").toString());
     assertEquals("1E+1000", values.get("weight").toString());
@@ -248,7 +254,7 @@ class PluginHttpWireContractTest {
     assertEquals("BALANCED", values.get("mode").asString());
     assertEquals(3, values.get("retries").size());
 
-    JsonNode valuesSchema = JsonValues.readTree(configuration.get("valuesSchema").asString());
+    JsonNode valuesSchema = configuration.get("valuesSchema");
     assertEquals("object", valuesSchema.get("type").asString());
     assertFalse(valuesSchema.get("additionalProperties").booleanValue());
     assertTrue(valuesSchema.get("properties").has("__proto__"));
@@ -275,7 +281,7 @@ class PluginHttpWireContractTest {
     assertEquals("boolean", valuesSchema.get("properties").get("verbose").get("type").asString());
     assertEquals("string", valuesSchema.get("properties").get("mode").get("type").asString());
 
-    JsonNode defaults = JsonValues.readTree(configuration.get("defaultsJson").asString());
+    JsonNode defaults = configuration.get("defaults");
     assertEquals("FAST", defaults.get("mode").asString());
     assertEquals(4096, defaults.get("limits").get("maxTokens").intValue());
 
@@ -284,7 +290,7 @@ class PluginHttpWireContractTest {
     assertTrue(secret.get("configured").booleanValue());
   }
 
-  /** 测试意图：已保存的 canonical valuesJson 文本被 HTTP 层原样转发，defaultsJson 始终是 schema 的默认值声明。 */
+  /** 测试意图：已保存的配置值以 JSON 节点转发，defaults 始终是 schema 的默认值声明。 */
   @Test
   void configurationForwardsStoredValuesJsonAndSchemaDefaultsVerbatim() throws Exception {
     PluginDTO none = nonePlugin();
@@ -292,11 +298,10 @@ class PluginHttpWireContractTest {
 
     JsonNode configuration = responseBody(getPlugin("alpha-none")).get("configuration");
 
-    assertEquals(
-        none.getConfiguration().getValuesJson(), configuration.get("valuesJson").asString());
-    assertEquals(CONFIG_SCHEMA.defaultsJson(), configuration.get("defaultsJson").asString());
+    assertEquals(none.getConfiguration().getValues(), configuration.get("values"));
+    assertEquals(JsonValues.readTree(CONFIG_SCHEMA.defaultsJson()), configuration.get("defaults"));
 
-    JsonNode values = JsonValues.readTree(configuration.get("valuesJson").asString());
+    JsonNode values = configuration.get("values");
     assertEquals("https://alpha-none.example.com", values.get("endpoint").asString());
     assertEquals(2048, values.get("limits").get("maxTokens").intValue());
     assertEquals("FAST", values.get("mode").asString());
@@ -322,15 +327,15 @@ class PluginHttpWireContractTest {
   /** 测试意图：POST connection-check 的真实响应体（含 no-store 头）必须与已提交的共用 golden 逐值一致。 */
   @Test
   void checkConnectionResponseMatchesCommittedHttpWireGolden() throws Exception {
-    when(pluginManagementService.checkConnection("beta-deep-connected", 8L))
+    when(pluginManagementService.checkConnection("beta-deep-connected", "8"))
         .thenReturn(connectionCheck("beta-deep-connected", "8"));
 
     MockHttpServletResponse response =
         mockMvc
             .perform(
-                post("/api/plugins/beta-deep-connected/connection-check")
+                post("/api/platform/plugins/beta-deep-connected/check-connection")
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content("{\"expectedRevision\":\"8\"}"))
+                    .content("{\"expectedVersion\":\"8\"}"))
             .andReturn()
             .getResponse();
 
@@ -342,15 +347,15 @@ class PluginHttpWireContractTest {
   /** 测试意图：检查结果只含类型化维度与已应用坐标，绝不回显远端地址、正文、凭据或异常文本。 */
   @Test
   void checkConnectionBodyNeverCarriesRemoteMaterial() throws Exception {
-    when(pluginManagementService.checkConnection("beta-deep-connected", 8L))
+    when(pluginManagementService.checkConnection("beta-deep-connected", "8"))
         .thenReturn(connectionCheck("beta-deep-connected", "8"));
 
     MockHttpServletResponse response =
         mockMvc
             .perform(
-                post("/api/plugins/beta-deep-connected/connection-check")
+                post("/api/platform/plugins/beta-deep-connected/check-connection")
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content("{\"expectedRevision\":\"8\"}"))
+                    .content("{\"expectedVersion\":\"8\"}"))
             .andReturn()
             .getResponse();
 
@@ -378,7 +383,7 @@ class PluginHttpWireContractTest {
     MockHttpServletResponse response =
         mockMvc
             .perform(
-                post("/api/plugins/beta-deep-connected/auth/prepare")
+                post("/api/platform/plugins/beta-deep-connected/auth/prepare")
                     .contentType(MediaType.APPLICATION_JSON)
                     .content("{\"region\":\"us-east-1\"}"))
             .andReturn()
@@ -387,6 +392,37 @@ class PluginHttpWireContractTest {
     assertEquals(200, response.getStatus());
     assertEquals("no-store", response.getHeader(HttpHeaders.CACHE_CONTROL));
     assertWireMatchesGolden("auth-prepare-http.json", response);
+  }
+
+  /** 测试意图：配置请求只在 HTTP 边界校验必填、未知字段、标量强制转换与秘密操作，错误去敏且不回显正文。 */
+  @Test
+  void configurationRequestStrictnessIsEnforcedAtTheHttpBoundary() throws Exception {
+    String secretMarker = "SECRET_PATCH_VALUE_ABC123456";
+    for (String body :
+        List.of(
+            "{\"values\":{}}",
+            "{\"expectedVersion\":7,\"values\":{}}",
+            "{\"expectedVersion\":\"7\",\"values\":{},\"unknown\":true}",
+            "{\"expectedVersion\":\"7\",\"values\":{},\"secretPatch\":{\"apiKey\":"
+                + "{\"operation\":\"SET\",\"value\":12345678}}}",
+            "{\"expectedVersion\":\"7\",\"values\":{},\"secretPatch\":{\"apiKey\":"
+                + "{\"operation\":\"KEEP\",\"value\":\""
+                + secretMarker
+                + "\"}}}")) {
+      MockHttpServletResponse response =
+          mockMvc
+              .perform(
+                  put("/api/platform/plugins/my-plugin/configuration")
+                      .contentType(MediaType.APPLICATION_JSON)
+                      .content(body))
+              .andReturn()
+              .getResponse();
+      assertEquals(400, response.getStatus(), body + " -> " + bodyText(response));
+      assertEquals(
+          "validation", JsonValues.readTree(bodyText(response)).get("code").asString(), body);
+      assertFalse(bodyText(response).contains(secretMarker), body);
+    }
+    verifyNoInteractions(pluginManagementService);
   }
 
   /** 测试意图：golden 里绝不允许出现凭据、密文或回调原文等敏感材料。 */
@@ -410,11 +446,11 @@ class PluginHttpWireContractTest {
   }
 
   private MockHttpServletResponse listPlugins() throws Exception {
-    return mockMvc.perform(get("/api/plugins")).andReturn().getResponse();
+    return mockMvc.perform(get("/api/platform/plugins")).andReturn().getResponse();
   }
 
   private MockHttpServletResponse getPlugin(String pluginId) throws Exception {
-    return mockMvc.perform(get("/api/plugins/" + pluginId)).andReturn().getResponse();
+    return mockMvc.perform(get("/api/platform/plugins/" + pluginId)).andReturn().getResponse();
   }
 
   private JsonNode responseBody(MockHttpServletResponse response) throws Exception {
@@ -515,8 +551,8 @@ class PluginHttpWireContractTest {
                 false,
                 "1"),
             false));
-    dto.setDesiredRevision("1");
-    dto.setAppliedRevision("1");
+    dto.setDesiredVersion("1");
+    dto.setAppliedVersion("1");
     return dto;
   }
 
@@ -524,7 +560,7 @@ class PluginHttpWireContractTest {
   private static PluginDTO staticKeyConnectedPlugin() {
     PluginDTO dto = basePlugin("alpha-static", "Alpha Static", "2.4.1");
     dto.setAuthKind(new PluginAuthKindDTO.StaticKey(SECRET_FIELD));
-    dto.setStatus("CONNECTED");
+    dto.setStatus(PluginCredentialStatus.CONNECTED);
     dto.setHarnessToolNames(List.of("alpha-static-tool"));
     dto.setCanvasFunctionNames(List.of("alpha-static-fn"));
     dto.setConfiguration(
@@ -538,8 +574,8 @@ class PluginHttpWireContractTest {
                 false,
                 "2"),
             true));
-    dto.setDesiredRevision("3");
-    dto.setAppliedRevision("3");
+    dto.setDesiredVersion("3");
+    dto.setAppliedVersion("3");
     return dto;
   }
 
@@ -547,7 +583,7 @@ class PluginHttpWireContractTest {
   private static PluginDTO staticKeyReauthRequiredPlugin() {
     PluginDTO dto = basePlugin("alpha-static-reauth", "Alpha Static Reauth", "2.4.2");
     dto.setAuthKind(new PluginAuthKindDTO.StaticKey(SECRET_FIELD));
-    dto.setStatus("REAUTH_REQUIRED");
+    dto.setStatus(PluginCredentialStatus.REAUTH_REQUIRED);
     dto.setLastRefreshError("provider rejected the stored static key");
     dto.setHarnessToolNames(List.of("alpha-static-reauth-tool"));
     dto.setCanvasFunctionNames(List.of());
@@ -562,8 +598,8 @@ class PluginHttpWireContractTest {
                 true,
                 "3"),
             false));
-    dto.setDesiredRevision("5");
-    dto.setAppliedRevision("5");
+    dto.setDesiredVersion("5");
+    dto.setAppliedVersion("5");
     return dto;
   }
 
@@ -571,7 +607,7 @@ class PluginHttpWireContractTest {
   private static PluginDTO deepLinkPendingPlugin() {
     PluginDTO dto = basePlugin("beta-deep-pending", "Beta Deep Pending", "3.0.0");
     dto.setAuthKind(new PluginAuthKindDTO.DeepLink(List.of("us-east-1", "eu-west-1")));
-    dto.setStatus("CONNECTED");
+    dto.setStatus(PluginCredentialStatus.CONNECTED);
     dto.setRegion("us-east-1");
     dto.setExpiresAt(DEEP_PENDING_EXPIRES_AT);
     dto.setNextRefreshAt(DEEP_PENDING_NEXT_REFRESH_AT);
@@ -589,8 +625,8 @@ class PluginHttpWireContractTest {
                 false,
                 "4"),
             true));
-    dto.setDesiredRevision("2");
-    dto.setAppliedRevision("1");
+    dto.setDesiredVersion("2");
+    dto.setAppliedVersion("1");
     dto.setApplicationError(PluginManagementService.PENDING_APPLICATION_ERROR);
     return dto;
   }
@@ -600,7 +636,7 @@ class PluginHttpWireContractTest {
     PluginDTO dto = basePlugin("beta-deep-connected", "Beta Deep Connected", "3.1.0");
     dto.setAuthKind(
         new PluginAuthKindDTO.DeepLink(List.of("us-east-1", "eu-west-1", "ap-northeast-1")));
-    dto.setStatus("CONNECTED");
+    dto.setStatus(PluginCredentialStatus.CONNECTED);
     dto.setRegion("eu-west-1");
     dto.setExpiresAt(DEEP_CONNECTED_EXPIRES_AT);
     dto.setNextRefreshAt(DEEP_CONNECTED_NEXT_REFRESH_AT);
@@ -609,16 +645,16 @@ class PluginHttpWireContractTest {
     dto.setCanvasFunctionNames(List.of("beta-deep-connected-fn"));
     dto.setConfiguration(configuration("8", PROBE_VALUES_JSON, true));
     dto.setConnectionCheckSupported(true);
-    dto.setDesiredRevision("8");
-    dto.setAppliedRevision("8");
+    dto.setDesiredVersion("8");
+    dto.setAppliedVersion("8");
     return dto;
   }
 
   /** 显式连接检查的响应 fixture：只有类型化维度与本次已应用坐标。 */
-  private static PluginConnectionCheckDTO connectionCheck(String pluginId, String appliedRevision) {
+  private static PluginConnectionCheckDTO connectionCheck(String pluginId, String appliedVersion) {
     PluginConnectionCheckDTO dto = new PluginConnectionCheckDTO();
     dto.setPluginId(pluginId);
-    dto.setAppliedRevision(appliedRevision);
+    dto.setAppliedVersion(appliedVersion);
     dto.setCheckedAt(CHECKED_AT);
     dto.setReachability(PluginConnectionCheckDTO.Reachability.REACHABLE);
     dto.setAuthentication(PluginConnectionCheckDTO.Authentication.ACCEPTED);
@@ -637,12 +673,12 @@ class PluginHttpWireContractTest {
   }
 
   private static PluginConfigurationDTO configuration(
-      String revision, String valuesJson, boolean secretConfigured) {
+      String version, String valuesJson, boolean secretConfigured) {
     PluginConfigurationDTO configuration = new PluginConfigurationDTO();
-    configuration.setRevision(revision);
-    configuration.setValuesJson(valuesJson);
-    configuration.setValuesSchema(VALUES_SCHEMA_JSON);
-    configuration.setDefaultsJson(CONFIG_SCHEMA.defaultsJson());
+    configuration.setVersion(version);
+    configuration.setValues(JsonValues.readTree(valuesJson));
+    configuration.setValuesSchema(JsonValues.readTree(VALUES_SCHEMA_JSON));
+    configuration.setDefaults(JsonValues.readTree(CONFIG_SCHEMA.defaultsJson()));
     PluginSecretProjectionDTO secret = new PluginSecretProjectionDTO();
     secret.setDescription(SECRET_DESCRIPTION);
     secret.setConfigured(secretConfigured);

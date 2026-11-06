@@ -14,6 +14,7 @@ import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorDescriptor;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
+import fun.fengwk.kkstudio.platform.plugin.Plugin;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthSpec;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfig;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfigSchema;
@@ -23,8 +24,7 @@ import fun.fengwk.kkstudio.platform.plugin.PluginCredentialUnavailableException;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialUnavailableReason;
 import fun.fengwk.kkstudio.platform.plugin.PluginDescriptor;
 import fun.fengwk.kkstudio.platform.plugin.PluginInstance;
-import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
-import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
+import fun.fengwk.kkstudio.platform.plugin.PluginRegistry;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialAccess;
 import fun.fengwk.kkstudio.platform.pluginhost.testing.TestPluginFixtures;
 
@@ -88,7 +88,7 @@ class PluginCatalogSnapshotTest {
             new RecordingInstance(
                 List.of(contributor("beta.contrib")), List.of(new FakeAdapter("beta.run")));
     // registry 打乱输入顺序，验证快照仍按 pluginId 升序冻结。
-    StudioPluginRegistry registry = new StudioPluginRegistry(List.of(beta, alpha));
+    PluginRegistry registry = new PluginRegistry(List.of(beta, alpha));
 
     PluginCatalogSnapshot snapshot =
         build(registry, initialConfigurations(registry), List.of(contributor("builtin.contrib")));
@@ -117,7 +117,7 @@ class PluginCatalogSnapshotTest {
   /** 产品目录视图只按类型读取：请求未冻结的类型时固定失败，绝不返回其它产品的视图。 */
   @Test
   void productCatalogIsReadableOnlyThroughItsOwnType() {
-    StudioPluginRegistry registry = new StudioPluginRegistry(List.of(new TestPlugin(PLUGIN_ALPHA)));
+    PluginRegistry registry = new PluginRegistry(List.of(new TestPlugin(PLUGIN_ALPHA)));
     try (PluginCatalogSnapshot snapshot =
         build(registry, initialConfigurations(registry), List.of())) {
       assertSame(
@@ -139,7 +139,7 @@ class PluginCatalogSnapshotTest {
                 null, Map.of("enabled", new BooleanSchema(null)), Set.of("enabled"), false),
             "{\"enabled\":true}",
             Map.of());
-    StudioPluginRegistry registry = new StudioPluginRegistry(List.of(plugin));
+    PluginRegistry registry = new PluginRegistry(List.of(plugin));
     try (PluginCatalogSnapshot snapshot =
         build(registry, Map.of(PLUGIN_ALPHA, new PluginConfig(7, "{}")), List.of())) {
       assertEquals(new PluginConfig(7, "{\"enabled\":true}"), plugin.receivedConfig);
@@ -151,8 +151,7 @@ class PluginCatalogSnapshotTest {
   @Test
   void buildRejectsConfigurationCoverageGaps() {
     TestPlugin alpha = new TestPlugin(PLUGIN_ALPHA);
-    StudioPluginRegistry registry =
-        new StudioPluginRegistry(List.of(alpha, new TestPlugin(PLUGIN_BETA)));
+    PluginRegistry registry = new PluginRegistry(List.of(alpha, new TestPlugin(PLUGIN_BETA)));
 
     IllegalStateException missing =
         assertThrows(
@@ -179,7 +178,7 @@ class PluginCatalogSnapshotTest {
         new RecordingInstance(List.of(contributor("beta.contrib")), List.of());
     betaInstance.nullContributions = true;
     beta.configure = () -> betaInstance;
-    StudioPluginRegistry registry = new StudioPluginRegistry(List.of(alpha, beta));
+    PluginRegistry registry = new PluginRegistry(List.of(alpha, beta));
 
     IllegalStateException failure =
         assertThrows(
@@ -202,7 +201,7 @@ class PluginCatalogSnapshotTest {
     RecordingInstance betaInstance =
         new RecordingInstance(List.of(contributor("dup.contrib")), List.of());
     beta.configure = () -> betaInstance;
-    StudioPluginRegistry registry = new StudioPluginRegistry(List.of(alpha, beta));
+    PluginRegistry registry = new PluginRegistry(List.of(alpha, beta));
 
     IllegalStateException conflict =
         assertThrows(
@@ -226,7 +225,7 @@ class PluginCatalogSnapshotTest {
     RecordingInstance betaInstance =
         new RecordingInstance(List.of(), List.of(new FakeAdapter("duplicate.run")));
     beta.configure = () -> betaInstance;
-    StudioPluginRegistry registry = new StudioPluginRegistry(List.of(alpha, beta));
+    PluginRegistry registry = new PluginRegistry(List.of(alpha, beta));
 
     IllegalStateException failure =
         assertThrows(
@@ -256,7 +255,7 @@ class PluginCatalogSnapshotTest {
     alpha.configure = () -> alphaInstance;
     TestPlugin beta = new TestPlugin(PLUGIN_BETA);
     beta.configureRuntime = new RuntimeException("raw provider token abc123");
-    StudioPluginRegistry registry = new StudioPluginRegistry(List.of(alpha, beta));
+    PluginRegistry registry = new PluginRegistry(List.of(alpha, beta));
 
     IllegalStateException failure =
         assertThrows(
@@ -279,7 +278,7 @@ class PluginCatalogSnapshotTest {
     TestPlugin beta = new TestPlugin(PLUGIN_BETA);
     Error fatal = new AssertionError("fatal configure error");
     beta.configureError = fatal;
-    StudioPluginRegistry registry = new StudioPluginRegistry(List.of(alpha, beta));
+    PluginRegistry registry = new PluginRegistry(List.of(alpha, beta));
 
     Error propagated =
         assertThrows(
@@ -295,7 +294,7 @@ class PluginCatalogSnapshotTest {
     TestPlugin delta = new TestPlugin("zeta.plugin");
     Error original = new AssertionError("original fatal");
     delta.configureError = original;
-    StudioPluginRegistry secondRegistry = new StudioPluginRegistry(List.of(gamma, delta));
+    PluginRegistry secondRegistry = new PluginRegistry(List.of(gamma, delta));
 
     Error second =
         assertThrows(
@@ -315,7 +314,7 @@ class PluginCatalogSnapshotTest {
     TestPlugin first = new TestPlugin(PLUGIN_ALPHA, () -> instance);
     TestPlugin failing = new TestPlugin(PLUGIN_BETA);
     failing.configureRuntime = new IllegalStateException("configuration failed");
-    StudioPluginRegistry registry = new StudioPluginRegistry(List.of(first, failing));
+    PluginRegistry registry = new PluginRegistry(List.of(first, failing));
     Error fatal =
         assertThrows(
             Error.class, () -> build(registry, initialConfigurations(registry), List.of()));
@@ -336,7 +335,7 @@ class PluginCatalogSnapshotTest {
     plugins.put(PLUGIN_ALPHA, new TestPlugin(PLUGIN_ALPHA, () -> alpha));
     plugins.put(PLUGIN_BETA, new TestPlugin(PLUGIN_BETA, () -> beta));
     plugins.put(PLUGIN_GAMMA, new TestPlugin(PLUGIN_GAMMA, () -> gamma));
-    StudioPluginRegistry registry = new StudioPluginRegistry(new ArrayList<>(plugins.values()));
+    PluginRegistry registry = new PluginRegistry(new ArrayList<>(plugins.values()));
 
     PluginCatalogSnapshot snapshot = build(registry, initialConfigurations(registry), List.of());
 
@@ -353,7 +352,7 @@ class PluginCatalogSnapshotTest {
   }
 
   private static PluginCatalogSnapshot build(
-      StudioPluginRegistry registry,
+      PluginRegistry registry,
       Map<String, PluginConfig> configurations,
       List<HarnessContributor> builtins) {
     return PluginCatalogSnapshot.build(
@@ -370,9 +369,9 @@ class PluginCatalogSnapshotTest {
         registrar -> {});
   }
 
-  private static Map<String, PluginConfig> initialConfigurations(StudioPluginRegistry registry) {
+  private static Map<String, PluginConfig> initialConfigurations(PluginRegistry registry) {
     Map<String, PluginConfig> configurations = new LinkedHashMap<>();
-    for (StudioPlugin plugin : registry.plugins()) {
+    for (Plugin plugin : registry.plugins()) {
       String pluginId = plugin.descriptor().pluginId();
       configurations.put(
           pluginId, new PluginConfig(0, plugin.configurationSchema().defaultsJson()));
@@ -400,7 +399,7 @@ class PluginCatalogSnapshotTest {
   }
 
   /** 可配置失败模式的 Plugin 定义；默认无认证、空 schema、返回空实例。 */
-  private static final class TestPlugin implements StudioPlugin {
+  private static final class TestPlugin implements Plugin {
 
     private final PluginDescriptor descriptor;
     private PluginConfigSchema schema = SCHEMA;

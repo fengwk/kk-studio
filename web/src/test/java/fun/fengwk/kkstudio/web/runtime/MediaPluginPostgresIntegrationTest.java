@@ -21,8 +21,8 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalog;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionDefinition;
 import fun.fengwk.kkstudio.canvas.infra.platform.PluginCanvasFunctionCatalog;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
-import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
-import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
+import fun.fengwk.kkstudio.platform.plugin.Plugin;
+import fun.fengwk.kkstudio.platform.plugin.PluginRegistry;
 import fun.fengwk.kkstudio.platform.pluginhost.catalog.PluginCatalogRuntime;
 import fun.fengwk.kkstudio.platform.pluginhost.catalog.PluginCatalogSnapshot;
 import fun.fengwk.kkstudio.platform.pluginhost.credential.DatabasePluginCredentialStore;
@@ -76,8 +76,8 @@ class MediaPluginPostgresIntegrationTest {
     createContextRunner()
         .run(
             context -> {
-              StudioPluginRegistry registry = context.getBean(StudioPluginRegistry.class);
-              assertEquals(1, registry.size(), "media must be the only installed StudioPlugin");
+              PluginRegistry registry = context.getBean(PluginRegistry.class);
+              assertEquals(1, registry.size(), "media must be the only installed Plugin");
               assertTrue(
                   context.getBeansOfType(CanvasFunctionAdapter.class).isEmpty(),
                   "media must not also publish a builtin adapter bean");
@@ -171,7 +171,7 @@ class MediaPluginPostgresIntegrationTest {
   /** 与生产一致的写入口；提交后立即在本节点应用。 */
   private PluginConfigurationService configurationService(
       ApplicationContext context, PluginCatalogRuntime runtime) {
-    StudioPluginRegistry registry = context.getBean(StudioPluginRegistry.class);
+    PluginRegistry registry = context.getBean(PluginRegistry.class);
     return new PluginConfigurationService(
         registry,
         configurationRepository,
@@ -187,8 +187,8 @@ class MediaPluginPostgresIntegrationTest {
   @Configuration(proxyBeanMethods = false)
   static class RegistryConfiguration {
     @Bean
-    StudioPluginRegistry studioPluginRegistry(ObjectProvider<StudioPlugin> plugins) {
-      return new StudioPluginRegistry(plugins.orderedStream().toList());
+    PluginRegistry pluginRegistry(ObjectProvider<Plugin> plugins) {
+      return new PluginRegistry(plugins.orderedStream().toList());
     }
   }
 }

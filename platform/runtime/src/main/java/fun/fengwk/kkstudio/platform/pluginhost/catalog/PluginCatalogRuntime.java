@@ -3,10 +3,10 @@ package fun.fengwk.kkstudio.platform.pluginhost.catalog;
 import lombok.extern.slf4j.Slf4j;
 
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
+import fun.fengwk.kkstudio.platform.plugin.Plugin;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfig;
 import fun.fengwk.kkstudio.platform.plugin.PluginContext;
-import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
-import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
+import fun.fengwk.kkstudio.platform.plugin.PluginRegistry;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRepository;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRow;
 
@@ -27,7 +27,7 @@ import java.util.function.Function;
 @Slf4j
 public final class PluginCatalogRuntime implements AutoCloseable {
 
-  private final StudioPluginRegistry registry;
+  private final PluginRegistry registry;
   private final PluginConfigurationRepository repository;
   private final Function<String, PluginContext> contexts;
   private final List<HarnessContributor> builtins;
@@ -41,7 +41,7 @@ public final class PluginCatalogRuntime implements AutoCloseable {
   private boolean closed;
 
   public PluginCatalogRuntime(
-      StudioPluginRegistry registry,
+      PluginRegistry registry,
       PluginConfigurationRepository repository,
       Function<String, PluginContext> contexts,
       List<HarnessContributor> builtins,
@@ -51,7 +51,7 @@ public final class PluginCatalogRuntime implements AutoCloseable {
     this.contexts = Objects.requireNonNull(contexts, "contexts");
     this.builtins = List.copyOf(builtins);
     this.productCatalog = Objects.requireNonNull(productCatalog, "productCatalog");
-    for (StudioPlugin plugin : registry.plugins()) {
+    for (Plugin plugin : registry.plugins()) {
       repository.insertIfMissing(
           plugin.descriptor().pluginId(), plugin.configurationSchema().defaultsJson());
     }
