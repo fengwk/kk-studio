@@ -20,8 +20,8 @@ import fun.fengwk.kkstudio.ide.browser.IdeBrowserUseRegistry;
 import fun.fengwk.kkstudio.ide.browser.IdeBrowserUseView;
 import fun.fengwk.kkstudio.ide.http.IdeBrowserUseInternalController;
 import fun.fengwk.kkstudio.platform.cluster.HmacClusterInternalAuthentication;
-import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
-import fun.fengwk.kkstudio.web.advice.StudioProblemAdvice;
+import fun.fengwk.kkstudio.platform.i18n.MessageService;
+import fun.fengwk.kkstudio.web.advice.ProblemAdvice;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -56,7 +56,7 @@ class IdeBrowserUseInternalControllerTest {
     mockMvc =
         MockMvcBuilders.standaloneSetup(
                 new IdeBrowserUseInternalController(authentication, registry))
-            .setControllerAdvice(new StudioProblemAdvice(new StudioMessageService()))
+            .setControllerAdvice(new ProblemAdvice(new MessageService()))
             .build();
   }
 

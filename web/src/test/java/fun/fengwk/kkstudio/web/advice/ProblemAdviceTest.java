@@ -25,18 +25,15 @@ import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.cluster.ClusterInternalAuthenticationException;
-import fun.fengwk.kkstudio.platform.harness.builtin.query.ProviderRequestPreviewUnavailableException;
-import fun.fengwk.kkstudio.platform.harness.builtin.query.ProviderRequestPreviewUnavailableException.Reason;
-import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
-import fun.fengwk.kkstudio.share.runtime.HarnessRequestFormatException;
+import fun.fengwk.kkstudio.platform.i18n.MessageService;
 
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
-class StudioProblemAdviceTest {
+class ProblemAdviceTest {
 
-  private final StudioProblemAdvice advice = new StudioProblemAdvice(new StudioMessageService());
+  private final ProblemAdvice advice = new ProblemAdvice(new MessageService());
   private final MockMvc mvc =
       MockMvcBuilders.standaloneSetup(new Probe()).setControllerAdvice(advice).build();
 
@@ -86,11 +83,6 @@ class StudioProblemAdviceTest {
     assertCategory(504, "upstream_failed");
     assertCategory(503, "unavailable");
     assertCategory(418, "internal");
-    var preview =
-        new ProviderRequestPreviewUnavailableException(Reason.PREVIEW_UNSUPPORTED, "safe");
-    var response =
-        advice.responseStatus(new ResponseStatusException(HttpStatus.CONFLICT, "safe", preview));
-    assertEquals("PREVIEW_UNSUPPORTED", response.getBody().get("reason"));
     DomainException conflict = DomainException.conflict("STALE_COMMAND_CURSOR", "stale cursor");
     var wrapped =
         advice.responseStatus(
@@ -155,44 +147,14 @@ class StudioProblemAdviceTest {
     }
   }
 
-  /** 预览原因只能来自直接的 typed cause，不能从消息或嵌套异常猜测。 */
+  /** 普通 parser 异常不回显正文。 */
   @Test
-  void previewReasonRequiresDirectCause() {
-    for (Reason reason : Reason.values()) {
-      var preview = new ProviderRequestPreviewUnavailableException(reason, "safe");
-      var body =
-          advice
-              .responseStatus(new ResponseStatusException(HttpStatus.CONFLICT, "safe", preview))
-              .getBody();
-      assertEquals(reason.name(), body.get("reason"));
-      assertEquals("safe", body.get("detail"));
-    }
-    var nested =
-        new RuntimeException(
-            new ProviderRequestPreviewUnavailableException(Reason.PREVIEW_UNSUPPORTED, "secret"));
-    var body =
-        advice
-            .responseStatus(new ResponseStatusException(HttpStatus.CONFLICT, "safe", nested))
-            .getBody();
-    assertEquals("HTTP_CONFLICT", body.get("reason"));
-  }
-
-  /** 普通 parser 异常不回显正文，仅可信 Harness 格式异常可提供 detail。 */
-  @Test
-  void unreadableBodyIsSanitizedExceptKnownFormatDetail() {
+  void unreadableBodyIsSanitized() {
     MockHttpInputMessage input = new MockHttpInputMessage(new byte[0]);
     Map<String, Object> ordinary =
         advice.unreadable(new HttpMessageNotReadableException("secret", input)).getBody();
+    assertEquals("validation", ordinary.get("code"));
     assertEquals("Failed to read request", ordinary.get("detail"));
-    Map<String, Object> harness =
-        advice
-            .unreadable(
-                new HttpMessageNotReadableException(
-                    "secret",
-                    new HarnessRequestFormatException("unknown command field: extra"),
-                    input))
-            .getBody();
-    assertEquals("unknown command field: extra", harness.get("detail"));
   }
 
   /** 未知异常不得泄露内部消息。 */

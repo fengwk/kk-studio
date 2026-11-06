@@ -22,11 +22,11 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.harness.builtin.realtime.HarnessStreamCatchupService;
 import fun.fengwk.kkstudio.platform.harness.http.HarnessThreadStreamCatchupController;
-import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
+import fun.fengwk.kkstudio.platform.i18n.MessageService;
 import fun.fengwk.kkstudio.web.HttpBoundaryConfiguration;
 import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
+import fun.fengwk.kkstudio.web.advice.ProblemAdvice;
 import fun.fengwk.kkstudio.web.advice.RequestBodyRequiredValidationAdvice;
-import fun.fengwk.kkstudio.web.advice.StudioProblemAdvice;
 
 import java.util.UUID;
 
@@ -51,7 +51,7 @@ class StudioHarnessThreadStreamCatchupControllerTest {
             .setMessageConverters(
                 new JacksonJsonHttpMessageConverter(StrictHttpJsonMapperTestSupport.strictHttp()))
             .setControllerAdvice(
-                new StudioProblemAdvice(new StudioMessageService()),
+                new ProblemAdvice(new MessageService()),
                 new RequestBodyRequiredValidationAdvice(StrictHttpJsonMapperTestSupport.get()),
                 new HttpBoundaryConfiguration.CanonicalUuidBinding())
             .build();

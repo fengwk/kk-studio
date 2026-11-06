@@ -32,8 +32,8 @@ import fun.fengwk.kkstudio.chat.dto.ChatYoloUpdateDTO;
 import fun.fengwk.kkstudio.chat.http.ChatController;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessSessionSummaryDTO;
-import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
-import fun.fengwk.kkstudio.web.advice.StudioProblemAdvice;
+import fun.fengwk.kkstudio.platform.i18n.MessageService;
+import fun.fengwk.kkstudio.web.advice.ProblemAdvice;
 
 import java.util.List;
 import java.util.UUID;
@@ -53,7 +53,7 @@ class ChatControllerTest {
     chatService = mock(ChatService.class);
     mockMvc =
         MockMvcBuilders.standaloneSetup(new ChatController(chatService))
-            .setControllerAdvice(new StudioProblemAdvice(new StudioMessageService()))
+            .setControllerAdvice(new ProblemAdvice(new MessageService()))
             .build();
   }
 

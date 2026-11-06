@@ -37,8 +37,8 @@ import fun.fengwk.kkstudio.ide.http.ClusterEnvironmentIdeInternalController;
 import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
 import fun.fengwk.kkstudio.platform.cluster.HmacClusterInternalAuthentication;
-import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
-import fun.fengwk.kkstudio.web.advice.StudioProblemAdvice;
+import fun.fengwk.kkstudio.platform.i18n.MessageService;
+import fun.fengwk.kkstudio.web.advice.ProblemAdvice;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -79,7 +79,7 @@ class ClusterEnvironmentIdeInternalControllerTest {
         MockMvcBuilders.standaloneSetup(
                 new ClusterEnvironmentIdeInternalController(
                     localEnvironmentIdeService, clusterNodeRegistry, authentication))
-            .setControllerAdvice(new StudioProblemAdvice(new StudioMessageService()))
+            .setControllerAdvice(new ProblemAdvice(new MessageService()))
             .build();
   }
 

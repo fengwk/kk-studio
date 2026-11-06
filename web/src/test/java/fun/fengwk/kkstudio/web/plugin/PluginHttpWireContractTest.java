@@ -35,7 +35,7 @@ import fun.fengwk.kkstudio.common.schema.ObjectSchema;
 import fun.fengwk.kkstudio.common.schema.SchemaElement;
 import fun.fengwk.kkstudio.common.schema.SchemaJsonCodec;
 import fun.fengwk.kkstudio.common.schema.StringSchema;
-import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
+import fun.fengwk.kkstudio.platform.i18n.MessageService;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfigSchema;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialStatus;
 import fun.fengwk.kkstudio.platform.pluginhost.dto.PluginAuthKindDTO;
@@ -47,8 +47,8 @@ import fun.fengwk.kkstudio.platform.pluginhost.dto.PluginSecretProjectionDTO;
 import fun.fengwk.kkstudio.platform.pluginhost.http.PluginController;
 import fun.fengwk.kkstudio.platform.pluginhost.service.PluginManagementService;
 import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
+import fun.fengwk.kkstudio.web.advice.ProblemAdvice;
 import fun.fengwk.kkstudio.web.advice.RequestBodyRequiredValidationAdvice;
-import fun.fengwk.kkstudio.web.advice.StudioProblemAdvice;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -127,7 +127,7 @@ class PluginHttpWireContractTest {
   void setUp() {
     pluginManagementService = mock(PluginManagementService.class);
     PluginController controller = new PluginController(pluginManagementService);
-    StudioProblemAdvice errorAdvice = new StudioProblemAdvice(new StudioMessageService());
+    ProblemAdvice errorAdvice = new ProblemAdvice(new MessageService());
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
             // 只注册生产 mapper 的 converter：MVC 没有机会回退到构件自建或 Jackson 2 的副本。

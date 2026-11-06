@@ -16,14 +16,14 @@ import org.springframework.web.servlet.ModelAndView;
 import java.io.IOException;
 
 /**
- * {@link StudioDisconnectedClientExceptionResolver} 的边界单元测试。
+ * {@link DisconnectedClientExceptionResolver} 的边界单元测试。
  *
  * <p>验证只有客户端断连与已提交响应被隔离为“已处理、无 body”，普通/上游 IOException 必须返回 {@code null} 继续交给既有翻译链。
  */
-class StudioDisconnectedClientExceptionResolverTest {
+class DisconnectedClientExceptionResolverTest {
 
-  private final StudioDisconnectedClientExceptionResolver resolver =
-      new StudioDisconnectedClientExceptionResolver();
+  private final DisconnectedClientExceptionResolver resolver =
+      new DisconnectedClientExceptionResolver();
 
   private static MockHttpServletRequest request() {
     return new MockHttpServletRequest("GET", "/assets/index.js");

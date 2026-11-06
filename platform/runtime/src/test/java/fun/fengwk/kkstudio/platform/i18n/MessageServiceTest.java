@@ -16,9 +16,9 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.MissingResourceException;
 
-class StudioMessageServiceTest {
+class MessageServiceTest {
 
-  private final StudioMessageService messageService = new StudioMessageService();
+  private final MessageService messageService = new MessageService();
 
   private Locale originalDefault;
 
@@ -86,8 +86,7 @@ class StudioMessageServiceTest {
   void explicitEnglishAndUnsupportedLocalesIgnoreTheJvmDefaultLanguage() {
     Locale.setDefault(Locale.SIMPLIFIED_CHINESE);
     // 独立 loader 隔离 ResourceBundle 缓存，验证中文宿主上的首次装配。
-    StudioMessageService service =
-        new StudioMessageService(new ClassLoader(getClass().getClassLoader()) {});
+    MessageService service = new MessageService(new ClassLoader(getClass().getClassLoader()) {});
 
     String key = "studio.error.http.not_found.message";
     assertEquals(

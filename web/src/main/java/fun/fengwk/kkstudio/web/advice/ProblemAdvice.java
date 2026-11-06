@@ -16,9 +16,7 @@ import org.springframework.web.server.ResponseStatusException;
 import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.cluster.ClusterInternalAuthenticationException;
-import fun.fengwk.kkstudio.platform.harness.builtin.query.ProviderRequestPreviewUnavailableException;
-import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
-import fun.fengwk.kkstudio.share.runtime.HarnessRequestFormatException;
+import fun.fengwk.kkstudio.platform.i18n.MessageService;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -26,11 +24,11 @@ import java.util.Map;
 /** HTTP 失败的统一翻译；已提交的响应与断连由前置 resolver 处理。 */
 @Order(Ordered.HIGHEST_PRECEDENCE)
 @RestControllerAdvice
-public class StudioProblemAdvice {
+public class ProblemAdvice {
 
-  private final StudioMessageService messages;
+  private final MessageService messages;
 
-  public StudioProblemAdvice(StudioMessageService messages) {
+  public ProblemAdvice(MessageService messages) {
     this.messages = messages;
   }
 
@@ -64,8 +62,6 @@ public class StudioProblemAdvice {
     if (error.getCause() instanceof DomainException domain
         && domain.code() == DomainErrorCode.CONFLICT) {
       reason = domain.reason();
-    } else if (error.getCause() instanceof ProviderRequestPreviewUnavailableException preview) {
-      reason = preview.reason().name();
     }
     return framework(error.getStatusCode().value(), error.getReason(), reason);
   }
@@ -98,16 +94,7 @@ public class StudioProblemAdvice {
 
   @ExceptionHandler(HttpMessageNotReadableException.class)
   public ResponseEntity<Map<String, Object>> unreadable(HttpMessageNotReadableException error) {
-    String detail = "Failed to read request";
-    for (Throwable cause = error.getCause(); cause != null; cause = cause.getCause()) {
-      if (cause instanceof HarnessRequestFormatException
-          && cause.getMessage() != null
-          && !cause.getMessage().isBlank()) {
-        detail = cause.getMessage();
-        break;
-      }
-    }
-    return framework(400, detail, null);
+    return framework(400, "Failed to read request", null);
   }
 
   @ExceptionHandler(Exception.class)

@@ -14,12 +14,12 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
-import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
+import fun.fengwk.kkstudio.platform.i18n.MessageService;
 import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;
 import fun.fengwk.kkstudio.platform.storage.http.StorageController;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
-import fun.fengwk.kkstudio.web.advice.StudioProblemAdvice;
+import fun.fengwk.kkstudio.web.advice.ProblemAdvice;
 
 import java.util.UUID;
 
@@ -29,7 +29,7 @@ class StudioStorageProblemWireTest {
   private final StorageBlobManager blobs = mock(StorageBlobManager.class);
   private final MockMvc mvc =
       standaloneSetup(new StorageController(uploads, blobs))
-          .setControllerAdvice(new StudioProblemAdvice(new StudioMessageService()))
+          .setControllerAdvice(new ProblemAdvice(new MessageService()))
           .build();
 
   /** 上传校验异常保留冲突语义和稳定原因，而不是走另一套错误信封。 */

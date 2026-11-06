@@ -18,7 +18,7 @@ import java.nio.charset.StandardCharsets;
  * 链上复现客户端断连、已提交响应与正常 API 错误三类边界。
  */
 @RestController
-public class StudioErrorBoundaryProbeController {
+public class ErrorBoundaryProbeController {
 
   /** 客户端断连：Jetty 以 EofException、或以消息为 {@code Broken pipe} 的 IOException 表达。 */
   @GetMapping("/__probe/disconnect")

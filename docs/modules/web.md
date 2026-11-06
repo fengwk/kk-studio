@@ -203,9 +203,9 @@ required-nullable 响应字段由 DTO 显式 ALWAYS。[`HttpBoundaryConfiguratio
 UUID 路径和查询参数统一使用规范小写转换。领域 codec 另有严格语法校验。
 
 领域失败由 [`DomainException`](../../common/src/main/java/fun/fengwk/kkstudio/common/error/DomainException.java)
-表达，全局 [`StudioProblemAdvice`](../../web/src/main/java/fun/fengwk/kkstudio/web/advice/StudioProblemAdvice.java)
+表达，全局 [`ProblemAdvice`](../../web/src/main/java/fun/fengwk/kkstudio/web/advice/ProblemAdvice.java)
 按错误类别、原因或框架状态生成 problem 响应。领域版本坐标和 Canvas 冲突详情放在 `errors` 中，内部
-`resource` 不进入 wire。请求体无法解析时只输出固定去敏详情，可信的 Harness 格式异常保留其详情；未预期异常不暴露内部消息。
+`resource` 不进入 wire。请求体无法解析时只输出固定去敏详情；未预期异常不暴露内部消息。
 locale 支持 en-US/zh-CN，其他回退英文。错误类别与成员见[系统设计的 HTTP 契约](../system-design.md#http-契约)。
 
 用户认证、TLS 和 ingress 访问控制由部署边界提供。

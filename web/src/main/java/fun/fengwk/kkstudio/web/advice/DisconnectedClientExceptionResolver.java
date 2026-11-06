@@ -24,11 +24,10 @@ import org.springframework.web.util.DisconnectedClientHelper;
  */
 @Slf4j
 @Component
-public class StudioDisconnectedClientExceptionResolver
-    implements HandlerExceptionResolver, Ordered {
+public class DisconnectedClientExceptionResolver implements HandlerExceptionResolver, Ordered {
 
   private static final DisconnectedClientHelper DISCONNECTED_CLIENT_HELPER =
-      new DisconnectedClientHelper(StudioDisconnectedClientExceptionResolver.class.getName());
+      new DisconnectedClientHelper(DisconnectedClientExceptionResolver.class.getName());
 
   @Override
   public ModelAndView resolveException(
