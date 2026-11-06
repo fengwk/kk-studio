@@ -3,7 +3,7 @@ import { expect, test, type Page } from './fixture'
 const HARNESS_URL = '/browser-tests/chat-defaults-harness.html'
 
 async function setupEnvironmentRoute(page: Page) {
-  await page.route('**/api/environments**', async (route) => {
+  await page.route('**/api/platform/environments**', async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -11,18 +11,18 @@ async function setupEnvironmentRoute(page: Page) {
         {
           id: 'env-docker-node',
           name: 'docker-node',
-          status: 'ONLINE',
+          status: 'READY',
           version: '1',
-          createTime: 1790812800,
-          updateTime: 1790812800,
+          createdAt: 1790812800,
+          updatedAt: 1790812800,
         },
         {
           id: 'env-ubuntu',
           name: 'ubuntu',
-          status: 'ONLINE',
+          status: 'READY',
           version: '1',
-          createTime: 1790812800,
-          updateTime: 1790812800,
+          createdAt: 1790812800,
+          updatedAt: 1790812800,
         },
       ]),
     })

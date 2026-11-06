@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { EnvironmentManagementModal } from '@/features/environment/EnvironmentManagementModal'
 import { environmentService } from '@/features/environment/environment-service'
-import type { EnvironmentCardDTO, EnvironmentEventDTO } from '@/shared/api/generated/contracts'
+import type { EnvironmentDTO, EnvironmentEventDTO } from '@/shared/api/generated/contracts'
 
 vi.mock('@/features/environment/environment-service', () => ({
   environmentService: {
@@ -14,30 +14,30 @@ vi.mock('@/features/environment/environment-service', () => ({
   },
 }))
 
-function testEnvironment(overrides: Partial<EnvironmentCardDTO> = {}): EnvironmentCardDTO {
+function testEnvironment(overrides: Partial<EnvironmentDTO> = {}): EnvironmentDTO {
   return {
     id: 'env-test-1',
     name: 'test-environment',
     userName: 'dev-user',
     homeDirectory: '/home/dev',
-    operatingSystem: 'Linux 5.15.0',
+    operatingSystem: 'linux',
     timeZone: 'Asia/Shanghai',
     note: 'Production host',
     daemonVersion: '1.2.3',
     status: 'READY',
     ready: true,
     statusExpiresAt: null,
-    lastSeen: 1784512800,
+    lastSeenAt: 1784512800,
     capabilities: [],
     version: '1',
-    createTime: 1784505600,
-    updateTime: 1784505600,
+    createdAt: 1784505600,
+    updatedAt: 1784505600,
     ...overrides,
   }
 }
 
 function renderModal(
-  environment: EnvironmentCardDTO = testEnvironment(),
+  environment: EnvironmentDTO = testEnvironment(),
   onClose = vi.fn(),
   queryClient = new QueryClient({
     defaultOptions: {
@@ -67,7 +67,7 @@ describe('EnvironmentManagementModal', () => {
     vi.mocked(environmentService.listEnvironmentEvents).mockResolvedValue([])
     renderModal(testEnvironment())
 
-    expect(screen.getByText('Linux 5.15.0')).toBeInTheDocument()
+    expect(screen.getByText('linux')).toBeInTheDocument()
     expect(screen.getByText('Asia/Shanghai')).toBeInTheDocument()
     // 宿主信息展示实际 daemon 构建版本，与 CAS 配置版本不是同一事实。
     expect(screen.getByText('Daemon 版本')).toBeInTheDocument()
@@ -106,13 +106,13 @@ describe('EnvironmentManagementModal', () => {
   it('renders events list with distinguishable levels and empty state when none', async () => {
     const mockEvents: EnvironmentEventDTO[] = [
       {
-        time: 1784509200,
+        occurredAt: 1784509200,
         level: 'INFO',
         type: 'READY',
         message: 'Host connected successfully',
       },
       {
-        time: 1784509500,
+        occurredAt: 1784509500,
         level: 'WARN',
         type: 'SKILL_SYNC_FAILED',
         message: 'Failed to synchronize skill package',

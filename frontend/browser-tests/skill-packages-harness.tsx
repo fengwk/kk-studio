@@ -9,7 +9,7 @@ import { storageService } from '@/shared/api/storage-service'
 import { environmentService } from '@/features/environment/environment-service'
 import { SkillPackagesPage } from '@/features/catalog/skills/SkillPackagesPage'
 import type {
-  EnvironmentCardDTO,
+  EnvironmentDTO,
   SkillEnvironmentSyncDTO,
   SkillManifestEntryDTO,
   SkillPackageDetailDTO,
@@ -160,16 +160,16 @@ const packages = new Map<string, FakePackage>([
   ],
 ])
 
-function environment(id: string, name: string, ready: boolean): EnvironmentCardDTO {
+function environment(id: string, name: string, ready: boolean): EnvironmentDTO {
   return {
     id,
     name,
     installConfig: null,
     registrationToken: null,
-    status: ready ? 'ONLINE' : 'OFFLINE',
+    status: ready ? 'READY' : 'OFFLINE',
     ready,
     statusExpiresAt: null,
-    lastSeen: null,
+    lastSeenAt: null,
     operatingSystem: null,
     timeZone: null,
     userName: null,
@@ -178,8 +178,8 @@ function environment(id: string, name: string, ready: boolean): EnvironmentCardD
     daemonVersion: null,
     capabilities: [],
     version: '1',
-    createTime: 0,
-    updateTime: 0,
+    createdAt: 0,
+    updatedAt: 0,
   }
 }
 

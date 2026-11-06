@@ -12,7 +12,7 @@ import type { ThreadProjection } from '@/features/thread/runtime/useThreadProjec
 import type { TurnUsage } from '@/features/thread/runtime/thread-timeline-types'
 import { getBuiltinModelSelection } from '@/shared/api/contracts/ai-runtime'
 import type {
-  EnvironmentCardDTO,
+  EnvironmentDTO,
   HarnessModelRequestDebugRequestDTO,
 } from '@/shared/api/generated/contracts'
 
@@ -215,7 +215,7 @@ export function useBoundThreadPanelViews(
 
 /** Footer 只展示已经生效的 snapshot facts，不能把 pane-local draft 混进来。 */
 export function useBoundThreadPanelLabels(
-  environments: EnvironmentCardDTO[],
+  environments: EnvironmentDTO[],
   controller: {
     runtimeLabels: {
       environmentName: string | null

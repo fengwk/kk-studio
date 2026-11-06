@@ -13,7 +13,7 @@ import { createBuiltinExecution } from '@/shared/api/contracts/ai-runtime'
 import { useThreadPresentation } from './thread-presentation'
 import { ThreadPresentationActions } from './ThreadPresentationActions'
 import type {
-  EnvironmentCardDTO,
+  EnvironmentDTO,
   HarnessModelRequestDebugDTO,
 } from '@/shared/api/generated/contracts'
 
@@ -193,20 +193,20 @@ it('passes composer draft model and environment to debug and ignores stale respo
   expect(result.current.debug?.systemInstruction).toBe('planned with dev-box')
 })
 
-const READY_ENVIRONMENT: EnvironmentCardDTO = {
+const READY_ENVIRONMENT: EnvironmentDTO = {
   id: '8d347585-fd47-46da-9e0b-66d61e0ff21b',
   name: 'dev-box',
   registrationToken: null,
   status: 'READY',
   statusExpiresAt: null,
   ready: true,
-  lastSeen: 1789776000,
+  lastSeenAt: 1789776000,
   capabilities: [],
   userName: 'dev-user',
   homeDirectory: '/home/dev',
   version: '1',
-  createTime: 1789776000,
-  updateTime: 1789776000,
+  createdAt: 1789776000,
+  updatedAt: 1789776000,
 }
 
 describe('useBoundThreadPanelLabels', () => {

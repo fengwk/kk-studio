@@ -32,7 +32,7 @@ import type {
   AgentModelConfigDTO,
   AgentModelDTO,
   AgentProviderDTO,
-  EnvironmentCardDTO,
+  EnvironmentDTO,
 } from '@/shared/api/generated/contracts'
 
 function modelDraft(overrides: Partial<ModelDraft> = {}): ModelDraft {
@@ -376,7 +376,7 @@ describe('AI domain utilities', () => {
     expect(filterProviders(providers, '').map((item) => item.name)).toEqual(['minimax', 'openai'])
     const envA = { name: 'tool-e2e', status: 'READY', lastSeen: null, capabilities: [], skills: [] }
     const envB = { name: 'platform', status: 'READY', lastSeen: null, capabilities: [], skills: [] }
-    expect(filterEnvironments([envA, envB] as unknown as EnvironmentCardDTO[], '').map((item) => item.name)).toEqual([
+    expect(filterEnvironments([envA, envB] as unknown as EnvironmentDTO[], '').map((item) => item.name)).toEqual([
       'platform',
       'tool-e2e',
     ])

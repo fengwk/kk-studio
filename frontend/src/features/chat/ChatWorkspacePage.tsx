@@ -43,7 +43,7 @@ import '@/features/thread/thread-state.css'
 import type {
   AgentDefinitionDTO,
   ChatDTO,
-  EnvironmentCardDTO,
+  EnvironmentDTO,
 } from '@/shared/api/generated/contracts'
 
 const LAYOUTS: Array<{ value: ChatLayout; label: string }> = [
@@ -86,7 +86,7 @@ export function ChatLayoutSelector({
 interface ChatWorkspaceContentProps {
   chat: ChatDTO
   agents: AgentDefinitionDTO[]
-  environments: EnvironmentCardDTO[]
+  environments: EnvironmentDTO[]
 }
 
 /**

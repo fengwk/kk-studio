@@ -146,18 +146,18 @@ async function installSkillHintApi(
       })
       return
     }
-    if (path === '/api/environments') {
+    if (path === '/api/platform/environments') {
       await route.fulfill({
         json: [
             {
               id: NAS_ID, name: 'NAS', status: 'READY', ready: true, statusExpiresAt: null,
-              lastSeen: 1790812800, capabilities: [], userName: null, homeDirectory: null,
-              version: '1', createTime: 1790812800, updateTime: 1790812800,
+              lastSeenAt: 1790812800, capabilities: [], userName: null, homeDirectory: null,
+              version: '1', createdAt: 1790812800, updatedAt: 1790812800,
             },
             {
               id: BUILDER_ID, name: 'builder', status: 'READY', ready: true, statusExpiresAt: null,
-              lastSeen: 1790812800, capabilities: [], userName: null, homeDirectory: null,
-              version: '1', createTime: 1790812800, updateTime: 1790812800,
+              lastSeenAt: 1790812800, capabilities: [], userName: null, homeDirectory: null,
+              version: '1', createdAt: 1790812800, updatedAt: 1790812800,
             },
           ],
       })

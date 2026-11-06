@@ -11,11 +11,11 @@ import {
 } from '@/features/environment/environment-utils'
 import { EnvironmentHostSection } from '@/features/environment/EnvironmentHostSection'
 import { StateBlock } from '@/shared/ui/feedback/StateBlock'
-import type { EnvironmentCardDTO } from '@/shared/api/generated/contracts'
+import type { EnvironmentDTO } from '@/shared/api/generated/contracts'
 import './environment-management.css'
 
 export interface EnvironmentManagementModalProps {
-  environment: EnvironmentCardDTO
+  environment: EnvironmentDTO
   onClose: () => void
 }
 
@@ -61,7 +61,7 @@ export function EnvironmentManagementModal({
               <div className="env-events-list">
                 {orderedEvents.map((evt, idx) => {
                   const levelClass = environmentEventLevelClass(evt.level)
-                  const timeStr = formatTimestamp(evt.time, locale)
+                  const timeStr = formatTimestamp(evt.occurredAt, locale)
                   return (
                     <div
                       key={`${evt.type}-${idx}`}

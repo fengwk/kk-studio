@@ -18,7 +18,7 @@ import type { EnvironmentStatusIdentity } from '@/features/thread/runtime/thread
 import type { TurnUsage } from '@/features/thread/runtime/thread-timeline-types'
 import { useI18n } from '@/shared/i18n'
 import { toolExecutionState } from '@/features/thread/runtime/thread-panel/messages/tool-message-view'
-import type { EnvironmentCardDTO } from '@/shared/api/generated/contracts'
+import type { EnvironmentDTO } from '@/shared/api/generated/contracts'
 
 /** 只读 Footer facts；缺失字段整段省略。 */
 export interface ThreadPaneLabels {
@@ -61,7 +61,7 @@ export function ThreadPane({
   views,
 }: {
   projection: ThreadProjection
-  environments: EnvironmentCardDTO[]
+  environments: EnvironmentDTO[]
   heading?: ReactNode
   /** 输入与控制区：仅根面板传入；只读身份与导航由宿主单一顶栏呈现。 */
   controls?: ReactNode

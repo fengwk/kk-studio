@@ -844,7 +844,7 @@ export interface CreateProjectRequestDTO {
   yoloEnabled?: boolean | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.environment.DaemonConfiguration */
+/** Java：fun.fengwk.kkstudio.platform.environment.dto.DaemonConfiguration */
 export interface DaemonConfiguration {
   studioUrl: string
   note?: string | null
@@ -852,12 +852,12 @@ export interface DaemonConfiguration {
   lsp?: DaemonLspConfiguration | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.environment.DaemonLspConfiguration */
+/** Java：fun.fengwk.kkstudio.platform.environment.dto.DaemonLspConfiguration */
 export interface DaemonLspConfiguration {
   servers: Record<string, DaemonLspServerConfiguration>
 }
 
-/** Java：fun.fengwk.kkstudio.share.environment.DaemonLspServerConfiguration */
+/** Java：fun.fengwk.kkstudio.platform.environment.dto.DaemonLspServerConfiguration */
 export interface DaemonLspServerConfiguration {
   command: string[]
   extensions?: string[] | null
@@ -865,17 +865,36 @@ export interface DaemonLspServerConfiguration {
   firstMatchMarkers?: string[] | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.environment.EnvironmentCardDTO */
-export interface EnvironmentCardDTO {
+/** Java：fun.fengwk.kkstudio.platform.daemon.DaemonOperatingSystem */
+export type DaemonOperatingSystem =
+  | 'windows'
+  | 'wsl'
+  | 'linux'
+  | 'macos'
+
+export const DAEMON_OPERATING_SYSTEM_VALUES: readonly DaemonOperatingSystem[] = [
+  'windows',
+  'wsl',
+  'linux',
+  'macos',
+]
+
+/** Java：fun.fengwk.kkstudio.platform.environment.dto.EnvironmentCreateDTO */
+export interface EnvironmentCreateDTO {
+  name: string
+}
+
+/** Java：fun.fengwk.kkstudio.platform.environment.dto.EnvironmentDTO */
+export interface EnvironmentDTO {
   id: string
   name: string
   installConfig?: EnvironmentInstallConfigDTO | null
   registrationToken?: string | null
-  status: string
+  status: EnvironmentStatus
   ready: boolean
   statusExpiresAt: number | null
-  lastSeen?: number | null
-  operatingSystem?: string | null
+  lastSeenAt?: number | null
+  operatingSystem?: DaemonOperatingSystem | null
   timeZone?: string | null
   userName?: string | null
   homeDirectory?: string | null
@@ -883,22 +902,51 @@ export interface EnvironmentCardDTO {
   daemonVersion?: string | null
   capabilities: LiveEnvironmentCapabilityDTO[]
   version: string
-  createTime: number
-  updateTime: number
+  createdAt: number
+  updatedAt: number
 }
 
-/** Java：fun.fengwk.kkstudio.share.environment.EnvironmentCreateDTO */
-export interface EnvironmentCreateDTO {
-  name: string
-}
-
-/** Java：fun.fengwk.kkstudio.share.environment.EnvironmentEventDTO */
+/** Java：fun.fengwk.kkstudio.platform.environment.dto.EnvironmentEventDTO */
 export interface EnvironmentEventDTO {
-  time: number
-  level: string
-  type: string
+  occurredAt: number
+  level: EnvironmentEventLevel
+  type: EnvironmentEventType
   message: string
 }
+
+/** Java：fun.fengwk.kkstudio.platform.environment.dto.EnvironmentEventLevel */
+export type EnvironmentEventLevel =
+  | 'INFO'
+  | 'WARN'
+  | 'ERROR'
+
+export const ENVIRONMENT_EVENT_LEVEL_VALUES: readonly EnvironmentEventLevel[] = [
+  'INFO',
+  'WARN',
+  'ERROR',
+]
+
+/** Java：fun.fengwk.kkstudio.platform.environment.dto.EnvironmentEventType */
+export type EnvironmentEventType =
+  | 'CONNECTING'
+  | 'READY'
+  | 'DISCONNECTED'
+  | 'SKILL_SYNC_STARTED'
+  | 'SKILL_SYNC_SUCCEEDED'
+  | 'SKILL_SYNC_FAILED'
+  | 'SKILL_STATE_UPDATED'
+  | 'UPDATE_FAILED'
+
+export const ENVIRONMENT_EVENT_TYPE_VALUES: readonly EnvironmentEventType[] = [
+  'CONNECTING',
+  'READY',
+  'DISCONNECTED',
+  'SKILL_SYNC_STARTED',
+  'SKILL_SYNC_SUCCEEDED',
+  'SKILL_SYNC_FAILED',
+  'SKILL_STATE_UPDATED',
+  'UPDATE_FAILED',
+]
 
 /** Java：fun.fengwk.kkstudio.ide.dto.EnvironmentIdeChangeDirectoryDTO */
 export interface EnvironmentIdeChangeDirectoryDTO {
@@ -966,39 +1014,57 @@ export interface EnvironmentIdeViewsDTO {
   views: EnvironmentIdeViewDTO[]
 }
 
-/** Java：fun.fengwk.kkstudio.share.environment.EnvironmentInstallCodeDTO */
+/** Java：fun.fengwk.kkstudio.platform.environment.dto.EnvironmentInstallCodeDTO */
 export interface EnvironmentInstallCodeDTO {
   code: string
   expiresAt: number
 }
 
-/** Java：fun.fengwk.kkstudio.share.environment.EnvironmentInstallCodeRequestDTO */
+/** Java：fun.fengwk.kkstudio.platform.environment.dto.EnvironmentInstallCodeRequestDTO */
 export interface EnvironmentInstallCodeRequestDTO {
   expectedVersion: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.environment.EnvironmentInstallConfigDTO */
+/** Java：fun.fengwk.kkstudio.platform.environment.dto.EnvironmentInstallConfigDTO */
 export interface EnvironmentInstallConfigDTO {
-  operatingSystem: string
+  operatingSystem: DaemonOperatingSystem
   daemon: DaemonConfiguration
 }
 
-/** Java：fun.fengwk.kkstudio.share.environment.EnvironmentRotateTokenDTO */
+/** Java：fun.fengwk.kkstudio.platform.environment.dto.EnvironmentInstallConfigUpdateDTO */
+export interface EnvironmentInstallConfigUpdateDTO {
+  expectedVersion: string
+  installConfig: EnvironmentInstallConfigDTO
+}
+
+/** Java：fun.fengwk.kkstudio.platform.environment.dto.EnvironmentRotateTokenDTO */
 export interface EnvironmentRotateTokenDTO {
   expectedVersion: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.environment.EnvironmentRuntimeDTO */
+/** Java：fun.fengwk.kkstudio.platform.environment.dto.EnvironmentRuntimeDTO */
 export interface EnvironmentRuntimeDTO {
   daemonVersion: string
   update: EnvironmentUpdateProgressDTO | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.environment.EnvironmentRuntimeStatusDTO */
+/** Java：fun.fengwk.kkstudio.platform.environment.dto.EnvironmentRuntimeStatusDTO */
 export interface EnvironmentRuntimeStatusDTO {
   revision: string
   status: EnvironmentRuntimeDTO
 }
+
+/** Java：fun.fengwk.kkstudio.platform.environment.dto.EnvironmentStatus */
+export type EnvironmentStatus =
+  | 'CONNECTING'
+  | 'READY'
+  | 'OFFLINE'
+
+export const ENVIRONMENT_STATUS_VALUES: readonly EnvironmentStatus[] = [
+  'CONNECTING',
+  'READY',
+  'OFFLINE',
+]
 
 /** Java：fun.fengwk.kkstudio.share.catalog.EnvironmentSupportDTO */
 export type EnvironmentSupportDTO =
@@ -1012,17 +1078,29 @@ export const ENVIRONMENT_SUPPORT_DTO_VALUES: readonly EnvironmentSupportDTO[] = 
   'REQUIRED',
 ]
 
-/** Java：fun.fengwk.kkstudio.share.environment.EnvironmentUpdateProgressDTO */
+/** Java：fun.fengwk.kkstudio.platform.environment.dto.EnvironmentUpdateCommandStatus */
+export type EnvironmentUpdateCommandStatus =
+  | 'CURRENT'
+  | 'IN_PROGRESS'
+  | 'SENT_UNCONFIRMED'
+
+export const ENVIRONMENT_UPDATE_COMMAND_STATUS_VALUES: readonly EnvironmentUpdateCommandStatus[] = [
+  'CURRENT',
+  'IN_PROGRESS',
+  'SENT_UNCONFIRMED',
+]
+
+/** Java：fun.fengwk.kkstudio.platform.environment.dto.EnvironmentUpdateProgressDTO */
 export interface EnvironmentUpdateProgressDTO {
   targetVersion: string
   downloadedBytes: string
   totalBytes: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.environment.EnvironmentUpdateStartDTO */
+/** Java：fun.fengwk.kkstudio.platform.environment.dto.EnvironmentUpdateStartDTO */
 export interface EnvironmentUpdateStartDTO {
   runtimeStatus: EnvironmentRuntimeStatusDTO
-  commandStatus: string
+  commandStatus: EnvironmentUpdateCommandStatus
 }
 
 /** Java：fun.fengwk.kkstudio.share.runtime.HarnessAcceptedCommandsDTO */
@@ -1650,7 +1728,7 @@ export interface IssueStageBudgetDTO {
   remainingRuns: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.environment.LiveEnvironmentCapabilityDTO */
+/** Java：fun.fengwk.kkstudio.platform.environment.dto.LiveEnvironmentCapabilityDTO */
 export interface LiveEnvironmentCapabilityDTO {
   id: string
 }
@@ -2385,11 +2463,6 @@ export interface ApiRoutes {
     query: { expectedVersion: string }
     response: void
   }
-  'DELETE /api/environments/{environmentId}': {
-    path: { environmentId: string }
-    query: { expectedVersion: string }
-    response: void
-  }
   'DELETE /api/environments/{environmentId}/ide/views/{viewId}': {
     path: { environmentId: string; viewId: string }
     body: EnvironmentIdeCloseViewDTO
@@ -2407,6 +2480,11 @@ export interface ApiRoutes {
   }
   'DELETE /api/models/{*modelName}': {
     path: { modelName: string }
+    query: { expectedVersion: string }
+    response: void
+  }
+  'DELETE /api/platform/environments/{environmentId}': {
+    path: { environmentId: string }
     query: { expectedVersion: string }
     response: void
   }
@@ -2472,36 +2550,10 @@ export interface ApiRoutes {
     path: { chatId: string; sessionId: string }
     response: HarnessSessionSummaryDTO
   }
-  'GET /api/environments': {
-    response: EnvironmentCardDTO[]
-  }
-  'GET /api/environments/uninstall/{operatingSystem}': {
-    path: { operatingSystem: string }
-    response: string
-    responseType: 'text'
-  }
-  'GET /api/environments/{environmentId}': {
-    path: { environmentId: string }
-    response: EnvironmentCardDTO
-  }
-  'GET /api/environments/{environmentId}/events': {
-    path: { environmentId: string }
-    response: EnvironmentEventDTO[]
-  }
   'GET /api/environments/{environmentId}/ide/directories': {
     path: { environmentId: string }
     query: { path?: string }
     response: EnvironmentIdeDirectoryListingDTO
-  }
-  'GET /api/environments/{environmentId}/install': {
-    path: { environmentId: string }
-    query: { code: string }
-    response: string
-    responseType: 'text'
-  }
-  'GET /api/environments/{environmentId}/runtime': {
-    path: { environmentId: string }
-    response: EnvironmentRuntimeStatusDTO
   }
   'GET /api/interactions': {
     query: { cursor?: string; limit?: string; rootThreadId?: string }
@@ -2535,6 +2587,32 @@ export interface ApiRoutes {
   'GET /api/models': {
     query: { pageNumber?: number; pageSize?: number }
     response: Page<AgentModelDTO>
+  }
+  'GET /api/platform/daemon-uninstall-scripts/{operatingSystem}': {
+    path: { operatingSystem: DaemonOperatingSystem }
+    response: string
+    responseType: 'text'
+  }
+  'GET /api/platform/environments': {
+    response: EnvironmentDTO[]
+  }
+  'GET /api/platform/environments/{environmentId}': {
+    path: { environmentId: string }
+    response: EnvironmentDTO
+  }
+  'GET /api/platform/environments/{environmentId}/events': {
+    path: { environmentId: string }
+    response: EnvironmentEventDTO[]
+  }
+  'GET /api/platform/environments/{environmentId}/install-script': {
+    path: { environmentId: string }
+    query: { code: string }
+    response: string
+    responseType: 'text'
+  }
+  'GET /api/platform/environments/{environmentId}/runtime': {
+    path: { environmentId: string }
+    response: EnvironmentRuntimeStatusDTO
   }
   'GET /api/plugins': {
     response: PluginDTO[]
@@ -2684,10 +2762,6 @@ export interface ApiRoutes {
     body: HarnessCommandBatchDTO
     response: HarnessAcceptedCommandsDTO
   }
-  'POST /api/environments': {
-    body: EnvironmentCreateDTO
-    response: EnvironmentCardDTO
-  }
   'POST /api/environments/{environmentId}/ide/views': {
     path: { environmentId: string }
     body: EnvironmentIdeOpenViewDTO
@@ -2703,23 +2777,9 @@ export interface ApiRoutes {
     body: EnvironmentIdeViewBindingDTO
     response: void
   }
-  'POST /api/environments/{environmentId}/install-code': {
-    path: { environmentId: string }
-    body: EnvironmentInstallCodeRequestDTO
-    response: EnvironmentInstallCodeDTO
-  }
-  'POST /api/environments/{environmentId}/registration-token': {
-    path: { environmentId: string }
-    body: EnvironmentRotateTokenDTO
-    response: EnvironmentCardDTO
-  }
   'POST /api/environments/{environmentId}/skills/resync': {
     path: { environmentId: string }
     response: void
-  }
-  'POST /api/environments/{environmentId}/update': {
-    path: { environmentId: string }
-    response: EnvironmentUpdateStartDTO
   }
   'POST /api/interactions/{interactionId}/input': {
     path: { interactionId: string }
@@ -2796,6 +2856,24 @@ export interface ApiRoutes {
   'POST /api/models': {
     body: AgentModelCreateDTO
     response: AgentModelDTO
+  }
+  'POST /api/platform/environments': {
+    body: EnvironmentCreateDTO
+    response: EnvironmentDTO
+  }
+  'POST /api/platform/environments/{environmentId}/install-codes': {
+    path: { environmentId: string }
+    body: EnvironmentInstallCodeRequestDTO
+    response: EnvironmentInstallCodeDTO
+  }
+  'POST /api/platform/environments/{environmentId}/rotate-token': {
+    path: { environmentId: string }
+    body: EnvironmentRotateTokenDTO
+    response: EnvironmentDTO
+  }
+  'POST /api/platform/environments/{environmentId}/update-daemon': {
+    path: { environmentId: string }
+    response: EnvironmentUpdateStartDTO
   }
   'POST /api/plugins/{pluginId}/auth/complete': {
     path: { pluginId: string }
@@ -2948,11 +3026,6 @@ export interface ApiRoutes {
     body: EnvironmentIdeChangeDirectoryDTO
     response: EnvironmentIdeViewDTO
   }
-  'PUT /api/environments/{environmentId}/install-config': {
-    path: { environmentId: string }
-    body: Record<string, unknown>
-    response: EnvironmentCardDTO
-  }
   'PUT /api/issues/{issueId}': {
     path: { issueId: string }
     body: UpdateIssueRequestDTO
@@ -2967,6 +3040,11 @@ export interface ApiRoutes {
     path: { modelName: string }
     body: AgentModelUpdateDTO
     response: AgentModelDTO
+  }
+  'PUT /api/platform/environments/{environmentId}/install-settings': {
+    path: { environmentId: string }
+    body: EnvironmentInstallConfigUpdateDTO
+    response: EnvironmentDTO
   }
   'PUT /api/plugins/{pluginId}/configuration': {
     path: { pluginId: string }
@@ -3025,7 +3103,7 @@ export interface ApiRoutes {
 }
 
 export const API_RESPONSE_TYPES: Partial<Record<keyof ApiRoutes, 'text' | 'blob'>> = {
-  'GET /api/environments/uninstall/{operatingSystem}': 'text',
-  'GET /api/environments/{environmentId}/install': 'text',
+  'GET /api/platform/daemon-uninstall-scripts/{operatingSystem}': 'text',
+  'GET /api/platform/environments/{environmentId}/install-script': 'text',
   'GET /api/sessions/{sessionId}/files/download': 'blob',
 }

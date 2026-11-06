@@ -73,14 +73,14 @@ import type {
 } from '@/features/thread/runtime/root-thread/types'
 import type {
   AgentDefinitionDTO,
-  EnvironmentCardDTO,
+  EnvironmentDTO,
 } from '@/shared/api/generated/contracts'
 
 export interface UseRootThreadControlOptions {
   owner?: AgentRuntimeOwnerDTO
   paneId: string
   agents: AgentDefinitionDTO[]
-  environments: EnvironmentCardDTO[]
+  environments: EnvironmentDTO[]
   defaults: AgentPaneDefaults
   focused: boolean
   covered?: boolean

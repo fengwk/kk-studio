@@ -6,7 +6,7 @@ import { ApplicationEventProvider } from '@/shared/app-events'
 import { FakeWebSocketHarness, type FakeWebSocket } from '@/shared/app-events/__tests__/fake-websocket'
 import { ApiError } from '@/shared/api/client'
 import type {
-  EnvironmentCardDTO,
+  EnvironmentDTO,
   EnvironmentIdeOpenViewDTO,
 } from '@/shared/api/generated/contracts'
 import { queryKeys } from '@/shared/lib/query-keys'
@@ -46,18 +46,18 @@ function card(
   id: string,
   name: string,
   ready = true,
-): EnvironmentCardDTO {
+): EnvironmentDTO {
   return {
     id,
     name,
     ready,
     status: ready ? 'READY' : 'OFFLINE',
     version: '1',
-    createTime: 1790812800,
-    updateTime: 1790812800,
+    createdAt: 1790812800,
+    updatedAt: 1790812800,
     capabilities: [],
     statusExpiresAt: null,
-    lastSeen: null,
+    lastSeenAt: null,
   }
 }
 

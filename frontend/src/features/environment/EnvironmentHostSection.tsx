@@ -1,16 +1,16 @@
 import { useI18n } from '@/shared/i18n'
 import { Mono } from '@/shared/ui/data/Mono'
 import { formatTimestamp } from '@/features/environment/environment-utils'
-import type { EnvironmentCardDTO } from '@/shared/api/generated/contracts'
+import type { EnvironmentDTO } from '@/shared/api/generated/contracts'
 import './environment-management.css'
 
 export interface EnvironmentHostSectionProps {
-  environment: EnvironmentCardDTO
+  environment: EnvironmentDTO
 }
 
 export function EnvironmentHostSection({ environment }: EnvironmentHostSectionProps) {
   const { t, locale } = useI18n()
-  const lastSeen = formatTimestamp(environment.lastSeen, locale)
+  const lastSeen = formatTimestamp(environment.lastSeenAt, locale)
 
   return (
     <section className="env-mgmt-section" aria-label={t('ai.environment.runtime.title')}>

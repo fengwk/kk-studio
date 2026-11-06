@@ -84,7 +84,7 @@ for (const scenario of ['pane-root', 'pane-child']) {
           status: 'IDLE', executionControl: 'RUNNABLE', turnCount: 1, toolCallCount: 1,
           outcome: null, updateTime: now / 1000,
         }))
-      } else if (path === '/api/environments') {
+      } else if (path === '/api/platform/environments') {
         data = []
       }
       await route.fulfill({ json: data })

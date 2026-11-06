@@ -9,7 +9,7 @@ import {
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useResourceSync } from '@/shared/app-events/useResourceSync'
 import { environmentService } from '@/features/environment/environment-service'
-import type { EnvironmentCardDTO } from '@/shared/api/generated/contracts'
+import type { EnvironmentDTO } from '@/shared/api/generated/contracts'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { isCanonicalUuid } from '@/shared/lib/uuid'
 import {
@@ -41,7 +41,7 @@ export interface IdePanelStorageProps {
   storage?: IdeTabStorage
 }
 
-function toEnvironmentInfo(card: EnvironmentCardDTO): IdeEnvironmentInfo {
+function toEnvironmentInfo(card: EnvironmentDTO): IdeEnvironmentInfo {
   return { id: card.id, name: card.name, ready: card.ready }
 }
 

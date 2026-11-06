@@ -6,7 +6,7 @@ import { queryKeys } from '@/shared/lib/query-keys'
 import { unavailableSkills } from '@/features/thread/runtime/skill-availability'
 import type {
   AgentDefinitionDTO,
-  EnvironmentCardDTO,
+  EnvironmentDTO,
   SkillEnvironmentSyncDTO,
 } from '@/shared/api/generated/contracts'
 import '@/features/thread/runtime/skill-environment-hint.css'
@@ -30,7 +30,7 @@ export function SkillEnvironmentHint({
   /** 执行根生效的 Environment 名；null 表示未选择环境。 */
   environmentName: string | null
   agents: AgentDefinitionDTO[]
-  environments: EnvironmentCardDTO[]
+  environments: EnvironmentDTO[]
 }) {
   const { t } = useI18n()
   const queryClient = useQueryClient()

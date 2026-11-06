@@ -26,7 +26,7 @@ import {
 } from './install-command'
 import './environment-install.css'
 import type {
-  EnvironmentCardDTO,
+  EnvironmentDTO,
   EnvironmentInstallConfigDTO,
 } from '@/shared/api/generated/contracts'
 
@@ -38,7 +38,7 @@ type LoadError =
   | { kind: 'invalid'; field: string }
 
 interface Props {
-  environment: EnvironmentCardDTO
+  environment: EnvironmentDTO
   uninstall?: boolean
   onClose: () => void
 }
