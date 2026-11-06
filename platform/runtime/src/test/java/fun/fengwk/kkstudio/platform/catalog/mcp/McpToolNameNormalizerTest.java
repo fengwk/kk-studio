@@ -8,6 +8,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
+
 import java.util.Locale;
 
 /**
@@ -56,17 +58,15 @@ class McpToolNameNormalizerTest {
   @ParameterizedTest
   @ValueSource(strings = {"", "   ", "\t\n", "___", "--", "@#$%"})
   void rejectsBlankOrEmptyNormalization(String invalid) {
-    // 意图：验证空白或规范化后为空的工具名抛出 IllegalArgumentException
+    // 意图：验证空白或规范化后为空的工具名抛出 validation
     assertThrows(
-        IllegalArgumentException.class,
-        () -> McpToolNameNormalizer.normalizeSourceToolName(invalid));
+        DomainException.class, () -> McpToolNameNormalizer.normalizeSourceToolName(invalid));
   }
 
   @Test
   void rejectsNullSourceToolName() {
-    // 意图：验证 null sourceToolName 抛出 IllegalArgumentException
-    assertThrows(
-        IllegalArgumentException.class, () -> McpToolNameNormalizer.normalizeSourceToolName(null));
+    // 意图：验证 null sourceToolName 抛出 validation
+    assertThrows(DomainException.class, () -> McpToolNameNormalizer.normalizeSourceToolName(null));
   }
 
   @Test
@@ -83,14 +83,11 @@ class McpToolNameNormalizerTest {
   void rejectsInvalidServerNameInModelToolName() {
     // 意图：验证 server 名不符合 ^[a-z][a-z0-9_]*$ 时抛出异常
     assertThrows(
-        IllegalArgumentException.class,
-        () -> McpToolNameNormalizer.modelToolName("GitHub", "search"));
+        DomainException.class, () -> McpToolNameNormalizer.modelToolName("GitHub", "search"));
     assertThrows(
-        IllegalArgumentException.class,
-        () -> McpToolNameNormalizer.modelToolName("123server", "search"));
+        DomainException.class, () -> McpToolNameNormalizer.modelToolName("123server", "search"));
     assertThrows(
-        IllegalArgumentException.class,
-        () -> McpToolNameNormalizer.modelToolName("server-dash", "search"));
+        DomainException.class, () -> McpToolNameNormalizer.modelToolName("server-dash", "search"));
     assertThrows(
         NullPointerException.class, () -> McpToolNameNormalizer.modelToolName(null, "search"));
   }
@@ -106,9 +103,9 @@ class McpToolNameNormalizerTest {
     assertEquals("mcp_srv_" + max56, valid64);
 
     String over57 = "a".repeat(57);
-    IllegalArgumentException ex =
+    DomainException ex =
         assertThrows(
-            IllegalArgumentException.class,
+            DomainException.class,
             () -> McpToolNameNormalizer.requireModelToolName(server, over57));
     assertTrue(ex.getMessage().contains("exceeds 64 characters"));
   }

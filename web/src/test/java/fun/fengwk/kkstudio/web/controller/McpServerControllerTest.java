@@ -308,6 +308,31 @@ public class McpServerControllerTest extends WebPostgresTestSupport {
   }
 
   /** 请求体用 JSON 数字表达 Long：生成契约的请求侧 Long 是数值，服务端拒绝标量强转。 */
+  /** 远端工具名无法规范化时 discovery 以 validation 拒绝，原因来自规范化器的产生处校验。 */
+  @Test
+  public void discoverRejectsUnnormalizableRemoteToolName() throws Exception {
+    fakeServer.addTool("!!!", "bad name", "{}");
+    String name = "web_mcp_bad_" + System.nanoTime();
+    mockMvc
+        .perform(
+            post(BASE)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(createBody(name, fakeServer.endpointUrl(), 15000L).toString()))
+        .andExpect(status().isCreated());
+
+    McpServerDiscoverDTO discover = new McpServerDiscoverDTO();
+    discover.setExpectedVersion("0");
+    mockMvc
+        .perform(
+            post(BASE + "/{name}/discover", name)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(discover)))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("validation"))
+        .andExpect(
+            jsonPath("$.detail").value("source tool name normalizes to an empty identifier: !!!"));
+  }
+
   private ObjectNode createBody(String name, String url, long timeoutMillis) {
     ObjectNode body = objectMapper.createObjectNode();
     body.put("name", name);

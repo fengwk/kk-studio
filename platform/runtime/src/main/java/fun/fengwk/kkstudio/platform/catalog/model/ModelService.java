@@ -276,15 +276,10 @@ public class ModelService {
     if (group == null) {
       return;
     }
-    try {
-      groupCodec.validateShape(group);
-    } catch (IllegalArgumentException error) {
-      throw DomainException.validation(RESOURCE, error.getMessage(), error);
-    }
+    groupCodec.validateShape(group);
     Set<String> names = new TreeSet<>();
     if (existing.groupConfigJson() != null) {
-      groupCodec
-          .decode(existing.groupConfigJson())
+      decodeStoredGroup(existing, existing.groupConfigJson())
           .getMembers()
           .forEach(member -> names.add(member.getModelName()));
     }
@@ -374,7 +369,17 @@ public class ModelService {
     if (model.groupConfigJson() == null || model.groupConfigJson().isBlank()) {
       throw DomainException.validation(RESOURCE, "model group config is required: " + model.name());
     }
-    return groupCodec.decode(model.groupConfigJson());
+    return decodeStoredGroup(model, model.groupConfigJson());
+  }
+
+  /** 持久化的组配置必须由写入路径保证合法：损坏时按内部错误处理，而不是请求错误。 */
+  private ModelGroupConfigDTO decodeStoredGroup(Model model, String groupConfigJson) {
+    try {
+      return groupCodec.decode(groupConfigJson);
+    } catch (DomainException error) {
+      throw new IllegalStateException(
+          "stored model group config is invalid: " + model.name(), error);
+    }
   }
 
   private ModelConfigDTO deriveGroupConfig(ModelGroupConfigDTO group) {
@@ -489,12 +494,7 @@ public class ModelService {
     if (group == null) {
       throw DomainException.validation(RESOURCE, RESOURCE + " group must not be null");
     }
-    String groupConfigJson;
-    try {
-      groupConfigJson = groupCodec.encode(group);
-    } catch (IllegalArgumentException error) {
-      throw DomainException.validation(RESOURCE, error.getMessage(), error);
-    }
+    String groupConfigJson = groupCodec.encode(group);
     return new Mutation(
         name,
         ModelKind.GROUP,

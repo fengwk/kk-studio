@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.json.JsonMapper;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelGroupConfigDTO;
 
 import java.util.Collections;
@@ -55,7 +56,7 @@ class ModelGroupConfigCodecTest {
             "{\"members\":[{\"modelName\":\"a\",\"variant\":\"v\"}],\"fallbackStatusCodes\":[429,429],\"cooldownSeconds\":0}",
             "{\"members\":[{\"modelName\":\"a\",\"variant\":\"v\"}],\"fallbackStatusCodes\":[],\"cooldownSeconds\":1.5}",
             "{\"members\":[],\"members\":[],\"fallbackStatusCodes\":[],\"cooldownSeconds\":0}")) {
-      assertThrows(IllegalArgumentException.class, () -> codec.decode(json), json);
+      assertThrows(DomainException.class, () -> codec.decode(json), json);
     }
   }
 
@@ -69,11 +70,11 @@ class ModelGroupConfigCodecTest {
     member.setModelName("x".repeat(129));
     assertEquals(
         "group.members[0].modelName must be <= 128 characters",
-        assertThrows(IllegalArgumentException.class, () -> codec.encode(group)).getMessage());
+        assertThrows(DomainException.class, () -> codec.encode(group)).getMessage());
     member.setModelName("a");
     group.setMembers(Collections.nCopies(65, member));
     assertEquals(
         "group.members must not exceed 64",
-        assertThrows(IllegalArgumentException.class, () -> codec.encode(group)).getMessage());
+        assertThrows(DomainException.class, () -> codec.encode(group)).getMessage());
   }
 }

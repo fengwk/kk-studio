@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.platform.catalog.mcp;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
+
 import java.util.Locale;
 import java.util.Objects;
 import java.util.regex.Pattern;
@@ -24,18 +26,18 @@ public final class McpToolNameNormalizer {
   /**
    * 规范化远端 source tool name。
    *
-   * @throws IllegalArgumentException 名称为空白或规范化后为空
+   * @throws DomainException 名称为空白或规范化后为空（validation）
    */
   public static String normalizeSourceToolName(String sourceToolName) {
     if (sourceToolName == null || sourceToolName.isBlank()) {
-      throw new IllegalArgumentException("source tool name must not be blank");
+      throw DomainException.validation("mcp_tool", "source tool name must not be blank");
     }
     String replaced = sourceToolName.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]", "_");
     String merged = replaced.replaceAll("_+", "_");
     String trimmed = trimUnderscores(merged);
     if (trimmed.isEmpty()) {
-      throw new IllegalArgumentException(
-          "source tool name normalizes to an empty identifier: " + sourceToolName);
+      throw DomainException.validation(
+          "mcp_tool", "source tool name normalizes to an empty identifier: " + sourceToolName);
     }
     return trimmed;
   }
@@ -44,7 +46,8 @@ public final class McpToolNameNormalizer {
   public static String modelToolName(String serverName, String sourceToolName) {
     Objects.requireNonNull(serverName, "serverName");
     if (!SERVER_NAME.matcher(serverName).matches()) {
-      throw new IllegalArgumentException("server name must match ^[a-z][a-z0-9_]*$: " + serverName);
+      throw DomainException.validation(
+          "mcp_tool", "server name must match ^[a-z][a-z0-9_]*$: " + serverName);
     }
     return PREFIX + serverName + "_" + normalizeSourceToolName(sourceToolName);
   }
@@ -52,12 +55,13 @@ public final class McpToolNameNormalizer {
   /**
    * 返回模型可见工具名；超过 {@value #MAX_MODEL_NAME_LENGTH} 字符时抛出，绝不追加 hash 后缀。
    *
-   * @throws IllegalArgumentException 规范化结果超长
+   * @throws DomainException 规范化结果超长（validation）
    */
   public static String requireModelToolName(String serverName, String sourceToolName) {
     String modelName = modelToolName(serverName, sourceToolName);
     if (modelName.length() > MAX_MODEL_NAME_LENGTH) {
-      throw new IllegalArgumentException(
+      throw DomainException.validation(
+          "mcp_tool",
           "normalized model tool name exceeds "
               + MAX_MODEL_NAME_LENGTH
               + " characters: "

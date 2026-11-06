@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.platform.catalog.definition;
 
 import org.springframework.stereotype.Component;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.platform.catalog.dto.AgentConfigDTO;
@@ -43,11 +44,11 @@ public final class AgentConfigValidator {
       for (String toolName : values) {
         ToolContribution contribution = lease.catalog().findTool(toolName).orElse(null);
         if (contribution == null) {
-          throw new IllegalArgumentException("unknown agent tool: " + toolName);
+          throw DomainException.validation("agent", "unknown agent tool: " + toolName);
         }
         if (contribution.definition().visibility() != ToolVisibility.SELECTABLE) {
-          throw new IllegalArgumentException(
-              "internal tool cannot be selected by an Agent: " + toolName);
+          throw DomainException.validation(
+              "agent", "internal tool cannot be selected by an Agent: " + toolName);
         }
       }
     }
@@ -55,18 +56,21 @@ public final class AgentConfigValidator {
 
   private static void validateSkills(List<SkillRefDTO> skills) {
     if (skills == null) {
-      throw new IllegalArgumentException("agent config skills is required");
+      throw DomainException.validation("agent", "agent config skills is required");
     }
     Set<SkillRefKey> seen = new HashSet<>();
     for (SkillRefDTO skill : skills) {
       if (skill == null) {
-        throw new IllegalArgumentException("agent config skills must not contain null elements");
+        throw DomainException.validation(
+            "agent", "agent config skills must not contain null elements");
       }
       try {
         SkillNames.canonicalPackageName(skill.getPackageName());
         SkillNames.canonicalSkillName(skill.getName());
-      } catch (IllegalArgumentException | NullPointerException error) {
-        throw new IllegalArgumentException(
+      } catch (IllegalArgumentException error) {
+        // SkillNames 是与导入路径共享的纯校验器；这里为 Agent 配置补上字段上下文，错误分类仍在产生处完成。
+        throw DomainException.validation(
+            "agent",
             "agent config skills must contain canonical short names: "
                 + skill.getPackageName()
                 + "/"
@@ -74,7 +78,8 @@ public final class AgentConfigValidator {
             error);
       }
       if (!seen.add(new SkillRefKey(skill.getPackageName(), skill.getName()))) {
-        throw new IllegalArgumentException(
+        throw DomainException.validation(
+            "agent",
             "agent config skills must not contain duplicates: "
                 + skill.getPackageName()
                 + "/"
@@ -88,7 +93,8 @@ public final class AgentConfigValidator {
   private static void validateSubagents(List<String> names) {
     for (String name : names) {
       if (name.length() > 64) {
-        throw new IllegalArgumentException("subagent name must be <= 64 characters: " + name);
+        throw DomainException.validation(
+            "agent", "subagent name must be <= 64 characters: " + name);
       }
     }
   }

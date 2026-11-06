@@ -831,6 +831,54 @@ public class AgentProviderModelControllerTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.errors.resource").doesNotExist());
   }
 
+  /** Agent 配置中选择未知工具时，校验器在产生处给出的 validation 直接到达 HTTP 边界。 */
+  @Test
+  void shouldRejectAgentConfigSelectionsAtTheHttpBoundary() throws Exception {
+    builtinAgentInitializer.afterPropertiesSet();
+    AgentConfigDTO config = new AgentConfigDTO();
+    config.setTools(List.of("missing_tool"));
+    config.setSkills(List.of());
+    config.setSubagents(List.of());
+    AgentUpdateDTO update = new AgentUpdateDTO();
+    update.setExpectedVersion("0");
+    update.setConfig(config);
+
+    mockMvc
+        .perform(
+            put("/api/platform/agents/{name}", "Compaction")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(update)))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("validation"))
+        .andExpect(jsonPath("$.detail").value("unknown agent tool: missing_tool"));
+  }
+
+  /** 组配置的结构错误由共享 codec 在产生处按 validation 拒绝，而不是变成内部错误。 */
+  @Test
+  void shouldRejectInvalidModelGroupShapeAtTheHttpBoundary() throws Exception {
+    ModelGroupMemberDTO member = new ModelGroupMemberDTO();
+    member.setModelName("p/m");
+    member.setVariant("default");
+    ModelGroupConfigDTO group = new ModelGroupConfigDTO();
+    group.setMembers(List.of(member));
+    group.setFallbackStatusCodes(List.of(429, 429));
+    group.setCooldownSeconds(0);
+    ModelGroupCreateDTO create = new ModelGroupCreateDTO();
+    create.setName("bad-group-" + System.nanoTime());
+    create.setGroup(group);
+
+    mockMvc
+        .perform(
+            post("/api/platform/models")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(create)))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("validation"))
+        .andExpect(
+            jsonPath("$.detail")
+                .value("group.fallbackStatusCodes must not contain duplicate statuses"));
+  }
+
   private static HarnessExecutionSelectionDTO execution(String modelName) {
     HarnessExecutionSelectionDTO execution = new HarnessExecutionSelectionDTO();
     execution.setDriver("builtin");

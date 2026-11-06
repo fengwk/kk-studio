@@ -9,6 +9,7 @@ import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.ObjectReader;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelGroupConfigDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelGroupMemberDTO;
 
@@ -42,7 +43,7 @@ public final class ModelGroupConfigCodec {
 
   public ModelGroupConfigDTO decode(String json) {
     if (json == null || json.isBlank()) {
-      throw new IllegalArgumentException("group config must not be blank");
+      throw DomainException.validation("model", "group config must not be blank");
     }
     try {
       StoredGroup stored = reader.readValue(json);
@@ -50,10 +51,10 @@ public final class ModelGroupConfigCodec {
       validateShape(group);
       return group;
     } catch (DatabindException error) {
-      throw new IllegalArgumentException(
-          "group config is invalid: " + error.getOriginalMessage(), error);
+      throw DomainException.validation(
+          "model", "group config is invalid: " + error.getOriginalMessage(), error);
     } catch (JacksonException error) {
-      throw new IllegalArgumentException("group config must be valid JSON object", error);
+      throw DomainException.validation("model", "group config must be valid JSON object", error);
     }
   }
 
@@ -78,28 +79,29 @@ public final class ModelGroupConfigCodec {
    */
   public void validateShape(ModelGroupConfigDTO group) {
     if (group == null) {
-      throw new IllegalArgumentException("group config is required");
+      throw DomainException.validation("model", "group config is required");
     }
     List<ModelGroupMemberDTO> members = group.getMembers();
     if (members == null || members.isEmpty()) {
-      throw new IllegalArgumentException("group.members must not be empty");
+      throw DomainException.validation("model", "group.members must not be empty");
     }
     if (members.size() > MAX_MEMBERS) {
-      throw new IllegalArgumentException("group.members must not exceed " + MAX_MEMBERS);
+      throw DomainException.validation("model", "group.members must not exceed " + MAX_MEMBERS);
     }
     Set<String> seen = new HashSet<>();
     List<ModelGroupMemberDTO> checked = new ArrayList<>(members.size());
     for (int index = 0; index < members.size(); index++) {
       ModelGroupMemberDTO member = members.get(index);
       if (member == null) {
-        throw new IllegalArgumentException("group.members[" + index + "] must not be null");
+        throw DomainException.validation("model", "group.members[" + index + "] must not be null");
       }
       String modelName =
           requireCanonical(member.getModelName(), "group.members[" + index + "].modelName");
       String variant =
           requireCanonical(member.getVariant(), "group.members[" + index + "].variant");
       if (!seen.add(modelName + '\u0000' + variant)) {
-        throw new IllegalArgumentException("group.members must not repeat a member reference");
+        throw DomainException.validation(
+            "model", "group.members must not repeat a member reference");
       }
       ModelGroupMemberDTO normalized = new ModelGroupMemberDTO();
       normalized.setModelName(modelName);
@@ -110,24 +112,25 @@ public final class ModelGroupConfigCodec {
 
     List<Integer> rawCodes = group.getFallbackStatusCodes();
     if (rawCodes == null) {
-      throw new IllegalArgumentException("group.fallbackStatusCodes is required");
+      throw DomainException.validation("model", "group.fallbackStatusCodes is required");
     }
     Set<Integer> codes = new HashSet<>();
     for (Integer code : rawCodes) {
       if (code == null || code < 400 || code > 599) {
-        throw new IllegalArgumentException(
-            "group.fallbackStatusCodes must contain only HTTP error statuses 400-599");
+        throw DomainException.validation(
+            "model", "group.fallbackStatusCodes must contain only HTTP error statuses 400-599");
       }
       if (!codes.add(code)) {
-        throw new IllegalArgumentException(
-            "group.fallbackStatusCodes must not contain duplicate statuses");
+        throw DomainException.validation(
+            "model", "group.fallbackStatusCodes must not contain duplicate statuses");
       }
     }
     group.setFallbackStatusCodes(List.copyOf(rawCodes));
 
     Integer cooldown = group.getCooldownSeconds();
     if (cooldown == null || cooldown < 0) {
-      throw new IllegalArgumentException("group.cooldownSeconds must be a non-negative integer");
+      throw DomainException.validation(
+          "model", "group.cooldownSeconds must be a non-negative integer");
     }
   }
 
@@ -157,6 +160,7 @@ public final class ModelGroupConfigCodec {
 
   private record StoredGroup(
       List<StoredMember> members, List<Integer> fallbackStatusCodes, Integer cooldownSeconds) {
+    /** Jackson 反序列化回调：异常会被包装成 DatabindException，再由 decode 统一翻译为 validation。 */
     @JsonAnySetter
     public void rejectUnknownField(String name, Object value) {
       throw new IllegalArgumentException("unknown model group field: " + name);
@@ -164,6 +168,7 @@ public final class ModelGroupConfigCodec {
   }
 
   private record StoredMember(String modelName, String variant) {
+    /** Jackson 反序列化回调：异常会被包装成 DatabindException，再由 decode 统一翻译为 validation。 */
     @JsonAnySetter
     public void rejectUnknownField(String name, Object value) {
       throw new IllegalArgumentException("unknown model group member field: " + name);
@@ -172,13 +177,13 @@ public final class ModelGroupConfigCodec {
 
   private static String requireCanonical(String value, String field) {
     if (value == null || value.isBlank()) {
-      throw new IllegalArgumentException(field + " must not be blank");
+      throw DomainException.validation("model", field + " must not be blank");
     }
     if (!value.equals(value.strip())) {
-      throw new IllegalArgumentException(field + " must not contain surrounding whitespace");
+      throw DomainException.validation("model", field + " must not contain surrounding whitespace");
     }
     if (value.length() > 128) {
-      throw new IllegalArgumentException(field + " must be <= 128 characters");
+      throw DomainException.validation("model", field + " must be <= 128 characters");
     }
     return value;
   }
