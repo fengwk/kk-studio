@@ -7,7 +7,7 @@ import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.api.CompactThreadResult;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
+import fun.fengwk.kkstudio.harness.api.HarnessConflictReason;
 import fun.fengwk.kkstudio.harness.api.ManualCompactionAvailability;
 import fun.fengwk.kkstudio.harness.api.RenameSessionCommand;
 import fun.fengwk.kkstudio.harness.api.RenameThreadCommand;
@@ -152,8 +152,7 @@ public final class HarnessRuntime {
    * Thread（version 0 / nextCommandSequence 1）+ preflight + Commands（sequence 从 1 起）+ THREAD Work，最后
    * version/next sequence 原子推进；任一步失败整个回滚。以 client threadId 做初始创建 replay：命中现有 Thread 后先按 immutable
    * sessionId KEY SHARE Session、再锁 Thread 复核（禁止混合 unlocked snapshot）；同 creation request hash + 同
-   * Session 精确重放（返回现有接受事实，不写任何行），不同 hash 冲突为 {@link
-   * HarnessRuntimeConflictException.Reason#THREAD_ID_REUSED}。
+   * Session 精确重放（返回现有接受事实，不写任何行），不同 hash 冲突为 {@link HarnessConflictReason#THREAD_ID_REUSED}。
    *
    * <p><b>NEW_THREAD</b>：<b>KEY SHARE</b> 锁既有 Session（不串行化同 Session 的 sibling 初始创建）、验证 start Entry
    * 属于该 Session、预分配 {@code threadId}，插入 Thread + preflight + Commands + Work；不复制 Entry（新 Thread
@@ -512,7 +511,7 @@ public final class HarnessRuntime {
           }
           if (!stored.threadId().equals(threadId)) {
             throw conflict(
-                HarnessRuntimeConflictException.Reason.EXIT_ABANDON_NOT_APPLICABLE,
+                HarnessConflictReason.EXIT_ABANDON_NOT_APPLICABLE,
                 "execution " + executionId + " does not belong to thread " + threadId);
           }
           if (stored.state() == ExecutionExitState.ABANDONED || stored.state().confirmed()) {
@@ -520,12 +519,12 @@ public final class HarnessRuntime {
           }
           if (!thread.executionControl().isStopped()) {
             throw conflict(
-                HarnessRuntimeConflictException.Reason.EXIT_ABANDON_NOT_APPLICABLE,
+                HarnessConflictReason.EXIT_ABANDON_NOT_APPLICABLE,
                 "thread " + threadId + " must be STOPPED before an exit can be abandoned");
           }
           if (thread.version() != expectedVersion) {
             throw conflict(
-                HarnessRuntimeConflictException.Reason.STALE_VERSION,
+                HarnessConflictReason.STALE_VERSION,
                 "thread "
                     + threadId
                     + " version is "
@@ -909,8 +908,7 @@ public final class HarnessRuntime {
     }
   }
 
-  private static HarnessRuntimeConflictException conflict(
-      HarnessRuntimeConflictException.Reason reason, String message) {
-    return new HarnessRuntimeConflictException(reason, message);
+  private static DomainException conflict(HarnessConflictReason reason, String message) {
+    return DomainException.conflict(reason.name(), message);
   }
 }
