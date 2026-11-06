@@ -30,6 +30,18 @@ class RuntimeErrorsTest {
     assertEquals(HttpStatus.NOT_FOUND, response.getStatusCode());
     assertSame(missing, response.getCause());
 
+    DomainException missingTask = DomainException.notFound("agent_task", "task missing");
+    ResponseStatusException taskResponse =
+        assertThrows(
+            ResponseStatusException.class,
+            () ->
+                RuntimeErrors.translate(
+                    () -> {
+                      throw missingTask;
+                    }));
+    assertEquals(HttpStatus.NOT_FOUND, taskResponse.getStatusCode());
+    assertSame(missingTask, taskResponse.getCause());
+
     for (DomainException other :
         new DomainException[] {
           DomainException.notFound("project", "project missing"),

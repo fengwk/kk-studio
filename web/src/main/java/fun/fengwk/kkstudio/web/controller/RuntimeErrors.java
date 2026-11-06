@@ -23,7 +23,8 @@ final class RuntimeErrors {
     try {
       return operation.get();
     } catch (DomainException error) {
-      if (error.code() == DomainErrorCode.NOT_FOUND && "thread".equals(error.resource())) {
+      if (error.code() == DomainErrorCode.NOT_FOUND
+          && ("thread".equals(error.resource()) || "agent_task".equals(error.resource()))) {
         throw new ResponseStatusException(HttpStatus.NOT_FOUND, error.getMessage(), error);
       }
       throw error;

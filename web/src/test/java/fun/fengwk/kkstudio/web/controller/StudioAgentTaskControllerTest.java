@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -21,6 +22,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.api.join.ThreadJoinOutcome;
@@ -251,7 +253,21 @@ class StudioAgentTaskControllerTest {
   @Test
   void unknownTicketIsNotFoundAndMalformedTicketIsABadRequest() throws Exception {
     when(agentTasks.observe(TICKET_ID)).thenReturn(Optional.empty());
-    mockMvc.perform(get("/api/agent-tasks/" + TICKET_ID)).andExpect(status().isNotFound());
+    mockMvc
+        .perform(get("/api/agent-tasks/" + TICKET_ID))
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.code").value("NOT_FOUND"))
+        .andExpect(
+            jsonPath("$.errors.detail").value("agent task " + TICKET_ID + " does not exist"));
+    doThrow(DomainException.notFound("agent_task", "agent task " + TICKET_ID + " does not exist"))
+        .when(agentTasks)
+        .stop(TICKET_ID);
+    mockMvc
+        .perform(post("/api/agent-tasks/" + TICKET_ID + "/stop"))
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.code").value("NOT_FOUND"))
+        .andExpect(
+            jsonPath("$.errors.detail").value("agent task " + TICKET_ID + " does not exist"));
     mockMvc.perform(get("/api/agent-tasks/not-a-uuid")).andExpect(status().isBadRequest());
   }
 
