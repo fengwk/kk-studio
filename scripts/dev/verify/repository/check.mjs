@@ -1081,7 +1081,6 @@ const platformDomainRoots = [
 const shareDomainRoots = [
   'catalog',
   'configsync',
-  'environment',
   'interaction',
   'mcp',
   'plugin',
