@@ -26,7 +26,7 @@ public class StorageBlobRepository {
 
   private static final String COLUMNS =
       "id, sha256, size_bytes, media_type, width, height, duration_ms, archive_index, ref_count, "
-          + "state, created_at as create_time, updated_at as update_time";
+          + "state, created_at, updated_at";
 
   private static final String INSERT_ACTIVE_SQL =
       """
@@ -172,10 +172,10 @@ public class StorageBlobRepository {
     blob.setArchiveIndex(rs.getString("archive_index"));
     blob.setRefCount(rs.getLong("ref_count"));
     blob.setState(StorageBlobState.valueOf(rs.getString("state")));
-    blob.setCreateTime(
-        PostgresJdbcTypes.toInstant(rs.getObject("create_time", OffsetDateTime.class)));
-    blob.setUpdateTime(
-        PostgresJdbcTypes.toInstant(rs.getObject("update_time", OffsetDateTime.class)));
+    blob.setCreatedAt(
+        PostgresJdbcTypes.toInstant(rs.getObject("created_at", OffsetDateTime.class)));
+    blob.setUpdatedAt(
+        PostgresJdbcTypes.toInstant(rs.getObject("updated_at", OffsetDateTime.class)));
     return blob;
   }
 

@@ -158,7 +158,7 @@ final class StorageUploadExpiryService {
     }
     boolean cleanupStarted =
         upload.getCleanupRequestedAt() != null || upload.getCleanupToken() != null;
-    if (!cleanupStarted && !isExpired(upload.getCreateTime(), now, uploadTtlSeconds)) {
+    if (!cleanupStarted && !isExpired(upload.getCreatedAt(), now, uploadTtlSeconds)) {
       return false;
     }
     return upload.getCleanupToken() == null || !upload.getCleanupUntil().isAfter(now);

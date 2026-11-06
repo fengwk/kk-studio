@@ -45,5 +45,5 @@ public class StorageUpload {
    * <p>过期权威事实：未显式请求清理、未被 claim 的上传在 {@code created_at + 当前 upload TTL} 之后过期，TTL 每次操作从 {@code
    * SystemSettingsSnapshot} 现读，因此缩短 TTL 会立即让存量过期、延长 TTL 会立即让未 claim 的存量继续有效。
    */
-  private Instant createTime;
+  private Instant createdAt;
 }
