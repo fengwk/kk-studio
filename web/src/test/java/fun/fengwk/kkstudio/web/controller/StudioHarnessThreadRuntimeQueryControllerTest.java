@@ -55,22 +55,22 @@ class StudioHarnessThreadRuntimeQueryControllerTest extends HarnessThreadControl
     mockMvc
         .perform(get("/api/threads/" + idText(1) + "/tree"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.length()").value(2))
-        .andExpect(jsonPath("$.data[0].threadId").value(idText(2)))
-        .andExpect(jsonPath("$.data[0].parentThreadId").hasJsonPath())
-        .andExpect(jsonPath("$.data[0].parentThreadId").value(nullValue()))
-        .andExpect(jsonPath("$.data[0].outcome").hasJsonPath())
-        .andExpect(jsonPath("$.data[0].outcome").value(nullValue()))
-        .andExpect(jsonPath("$.data[0].execution.driver").value("builtin"))
-        .andExpect(jsonPath("$.data[0].execution.settings.modelName").value("gpt-5"))
-        .andExpect(jsonPath("$.data[0].turnCount").value(0))
-        .andExpect(jsonPath("$.data[0].toolCallCount").value(0))
-        .andExpect(jsonPath("$.data[0].entries").doesNotExist())
-        .andExpect(jsonPath("$.data[0].queuedCommands").doesNotExist())
-        .andExpect(jsonPath("$.data[1].parentThreadId").value(idText(2)))
-        .andExpect(jsonPath("$.data[1].status").value("IDLE"))
-        .andExpect(jsonPath("$.data[1].executionControl").value("RUNNABLE"))
-        .andExpect(jsonPath("$.data[1].processing").doesNotExist());
+        .andExpect(jsonPath("$.length()").value(2))
+        .andExpect(jsonPath("$[0].threadId").value(idText(2)))
+        .andExpect(jsonPath("$[0].parentThreadId").hasJsonPath())
+        .andExpect(jsonPath("$[0].parentThreadId").value(nullValue()))
+        .andExpect(jsonPath("$[0].outcome").hasJsonPath())
+        .andExpect(jsonPath("$[0].outcome").value(nullValue()))
+        .andExpect(jsonPath("$[0].execution.driver").value("builtin"))
+        .andExpect(jsonPath("$[0].execution.settings.modelName").value("gpt-5"))
+        .andExpect(jsonPath("$[0].turnCount").value(0))
+        .andExpect(jsonPath("$[0].toolCallCount").value(0))
+        .andExpect(jsonPath("$[0].entries").doesNotExist())
+        .andExpect(jsonPath("$[0].queuedCommands").doesNotExist())
+        .andExpect(jsonPath("$[1].parentThreadId").value(idText(2)))
+        .andExpect(jsonPath("$[1].status").value("IDLE"))
+        .andExpect(jsonPath("$[1].executionControl").value("RUNNABLE"))
+        .andExpect(jsonPath("$[1].processing").doesNotExist());
 
     verify(runtime).getThreadTree(id(1));
     verify(runtime, never()).getThreadSnapshot(any());
@@ -89,7 +89,7 @@ class StudioHarnessThreadRuntimeQueryControllerTest extends HarnessThreadControl
     mockMvc
         .perform(get("/api/threads/" + idText(999) + "/tree"))
         .andExpect(status().isNotFound())
-        .andExpect(jsonPath("$.errors.detail").value("thread " + idText(999) + " does not exist"));
+        .andExpect(jsonPath("$.detail").value("thread " + idText(999) + " does not exist"));
   }
 
   /** 意图：独立 advisory 端点按需返回既有压缩判断，非法 id 为 400、缺失 Thread 为 404。 */
@@ -103,8 +103,8 @@ class StudioHarnessThreadRuntimeQueryControllerTest extends HarnessThreadControl
     mockMvc
         .perform(get("/api/threads/" + idText(1) + "/compaction-availability"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.available").value(false))
-        .andExpect(jsonPath("$.data.disabledReason").value("BELOW_MINIMUM"));
+        .andExpect(jsonPath("$.available").value(false))
+        .andExpect(jsonPath("$.disabledReason").value("BELOW_MINIMUM"));
     verify(runtime).manualCompactionAvailability(id(1));
     verify(runtime, never()).getThreadSnapshot(any());
 
@@ -118,6 +118,6 @@ class StudioHarnessThreadRuntimeQueryControllerTest extends HarnessThreadControl
     mockMvc
         .perform(get("/api/threads/" + idText(999) + "/compaction-availability"))
         .andExpect(status().isNotFound())
-        .andExpect(jsonPath("$.errors.detail").value("thread " + idText(999) + " does not exist"));
+        .andExpect(jsonPath("$.detail").value("thread " + idText(999) + " does not exist"));
   }
 }

@@ -43,31 +43,30 @@ class StudioHarnessThreadModelRequestDebugControllerTest
                     "{\"model\":{\"modelName\":\"draft-model\","
                         + "\"variant\":\"draft-variant\"},\"environmentName\":\"env-c\"}"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.kind").value("NEXT_REQUEST_PREVIEW"))
-        .andExpect(jsonPath("$.data.model.modelName").value("model"))
-        .andExpect(jsonPath("$.data.model.variant").value("default"))
-        .andExpect(jsonPath("$.data.environmentName").value(nullValue()))
-        .andExpect(jsonPath("$.data.systemInstruction").value("system instruction"))
-        .andExpect(jsonPath("$.data.tools[0].name").value("read"))
-        .andExpect(jsonPath("$.data.tools[0].state").value("SENT"))
-        .andExpect(jsonPath("$.data.tools[0].environmentSupport").value("ROUTED"))
-        .andExpect(jsonPath("$.data.tools[0].filterReason").value(nullValue()))
-        .andExpect(jsonPath("$.data.tools[1].name").value("bash"))
-        .andExpect(jsonPath("$.data.tools[1].state").value("FILTERED"))
-        .andExpect(jsonPath("$.data.tools[1].filterReason").value("ENVIRONMENT_NOT_SELECTED"))
-        .andExpect(jsonPath("$.data.skills[0].delivery").value("PLATFORM"))
-        .andExpect(jsonPath("$.data.skills[0].headCommit").value(nullValue()))
-        .andExpect(jsonPath("$.data.subagents[0].name").value("coder"))
-        .andExpect(jsonPath("$.data.subagents[0].tools[0]").value("read"))
-        .andExpect(jsonPath("$.data.subagents[0].skills[0].packageName").value("pkg"))
-        .andExpect(jsonPath("$.data.subagents[0].subagents[0]").value("nested"))
-        .andExpect(
-            jsonPath("$.data.subagents[0].configurationJson").value("{\"tools\":[\"read\"]}"))
-        .andExpect(jsonPath("$.data.cacheControl.retention").value("NONE"))
-        .andExpect(jsonPath("$.data.cacheControl.key").value(nullValue()))
-        .andExpect(jsonPath("$.data.cacheControl.affinityKey").doesNotExist())
-        .andExpect(jsonPath("$.data.planningError").value(nullValue()))
-        .andExpect(jsonPath("$.data.frozenInvocation").value(nullValue()));
+        .andExpect(jsonPath("$.kind").value("NEXT_REQUEST_PREVIEW"))
+        .andExpect(jsonPath("$.model.modelName").value("model"))
+        .andExpect(jsonPath("$.model.variant").value("default"))
+        .andExpect(jsonPath("$.environmentName").value(nullValue()))
+        .andExpect(jsonPath("$.systemInstruction").value("system instruction"))
+        .andExpect(jsonPath("$.tools[0].name").value("read"))
+        .andExpect(jsonPath("$.tools[0].state").value("SENT"))
+        .andExpect(jsonPath("$.tools[0].environmentSupport").value("ROUTED"))
+        .andExpect(jsonPath("$.tools[0].filterReason").value(nullValue()))
+        .andExpect(jsonPath("$.tools[1].name").value("bash"))
+        .andExpect(jsonPath("$.tools[1].state").value("FILTERED"))
+        .andExpect(jsonPath("$.tools[1].filterReason").value("ENVIRONMENT_NOT_SELECTED"))
+        .andExpect(jsonPath("$.skills[0].delivery").value("PLATFORM"))
+        .andExpect(jsonPath("$.skills[0].headCommit").value(nullValue()))
+        .andExpect(jsonPath("$.subagents[0].name").value("coder"))
+        .andExpect(jsonPath("$.subagents[0].tools[0]").value("read"))
+        .andExpect(jsonPath("$.subagents[0].skills[0].packageName").value("pkg"))
+        .andExpect(jsonPath("$.subagents[0].subagents[0]").value("nested"))
+        .andExpect(jsonPath("$.subagents[0].configurationJson").value("{\"tools\":[\"read\"]}"))
+        .andExpect(jsonPath("$.cacheControl.retention").value("NONE"))
+        .andExpect(jsonPath("$.cacheControl.key").value(nullValue()))
+        .andExpect(jsonPath("$.cacheControl.affinityKey").doesNotExist())
+        .andExpect(jsonPath("$.planningError").value(nullValue()))
+        .andExpect(jsonPath("$.frozenInvocation").value(nullValue()));
 
     // 活动 Invocation 的冻结视图原样透传：kind 与 canonical request JSON 按字符串承载。
     HarnessModelRequestDebugDTO frozen = sampleDebug();
@@ -87,9 +86,8 @@ class StudioHarnessThreadModelRequestDebugControllerTest
                     "{\"model\":{\"modelName\":\"draft-model\","
                         + "\"variant\":\"draft-variant\"},\"environmentName\":\"env-c\"}"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.frozenInvocation.kind").value("FROZEN_INVOCATION"))
-        .andExpect(
-            jsonPath("$.data.frozenInvocation.requestJson").value("{\"model\":\"wire-model\"}"));
+        .andExpect(jsonPath("$.frozenInvocation.kind").value("FROZEN_INVOCATION"))
+        .andExpect(jsonPath("$.frozenInvocation.requestJson").value("{\"model\":\"wire-model\"}"));
 
     verify(modelRequestDebugService, times(2)).getModelRequestDebug(id(1), draftModel, "env-c");
     // Debug 是纯查询：Controller 不得调用任何 Runtime 控制面方法。
