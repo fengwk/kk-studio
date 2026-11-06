@@ -89,14 +89,22 @@ class CanvasResourceControllerTest {
     when(blobManager.presignPreviewUrl(BLOB)).thenReturn(signed);
 
     mockMvc
-        .perform(post("/api/canvases/" + CANVAS + "/resources/" + MEDIA_RESOURCE + "/download-url"))
+        .perform(
+            post(
+                "/api/canvas/canvases/"
+                    + CANVAS
+                    + "/resources/"
+                    + MEDIA_RESOURCE
+                    + "/download-url"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.method").value("GET"))
         .andExpect(jsonPath("$.url").value("https://s3.fengwk.fun/signed"))
         .andExpect(jsonPath("$.key").doesNotExist())
         .andExpect(jsonPath("$.bucket").doesNotExist());
     mockMvc
-        .perform(post("/api/canvases/" + CANVAS + "/resources/" + MEDIA_RESOURCE + "/preview-url"))
+        .perform(
+            post(
+                "/api/canvas/canvases/" + CANVAS + "/resources/" + MEDIA_RESOURCE + "/preview-url"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.url").value("https://s3.fengwk.fun/signed"));
     verify(blobManager).presignOriginalUrl(BLOB);
@@ -107,23 +115,31 @@ class CanvasResourceControllerTest {
   @Test
   void textResourceUnknownAndInvalidRequestsAreRejected() throws Exception {
     mockMvc
-        .perform(post("/api/canvases/" + CANVAS + "/resources/" + TEXT_RESOURCE + "/download-url"))
+        .perform(
+            post(
+                "/api/canvas/canvases/" + CANVAS + "/resources/" + TEXT_RESOURCE + "/download-url"))
         .andExpect(status().isBadRequest());
     mockMvc
         .perform(
-            post("/api/canvases/" + CANVAS + "/resources/" + MISSING_RESOURCE + "/download-url"))
+            post(
+                "/api/canvas/canvases/"
+                    + CANVAS
+                    + "/resources/"
+                    + MISSING_RESOURCE
+                    + "/download-url"))
         .andExpect(status().isNotFound());
     mockMvc
         .perform(
             post(
-                "/api/canvases/"
+                "/api/canvas/canvases/"
                     + new UUID(0L, 99L)
                     + "/resources/"
                     + MEDIA_RESOURCE
                     + "/download-url"))
         .andExpect(status().isNotFound());
     mockMvc
-        .perform(post("/api/canvases/not-a-uuid/resources/" + MEDIA_RESOURCE + "/download-url"))
+        .perform(
+            post("/api/canvas/canvases/not-a-uuid/resources/" + MEDIA_RESOURCE + "/download-url"))
         .andExpect(status().isBadRequest());
     verify(blobManager, never()).presignOriginalUrl(any());
   }

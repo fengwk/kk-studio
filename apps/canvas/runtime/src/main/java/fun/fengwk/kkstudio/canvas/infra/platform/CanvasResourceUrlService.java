@@ -31,7 +31,7 @@ public class CanvasResourceUrlService {
                         : DomainException.notFound(
                             "canvas_resource", "unknown resource: " + resourceId));
     if (resource.isText()) {
-      throw new IllegalArgumentException("TEXT resource has no blob content");
+      throw DomainException.validation("canvas_resource", "TEXT resource has no blob content");
     }
     return original
         ? blobManager.presignOriginalUrl(resource.blobId())

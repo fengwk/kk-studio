@@ -1,59 +1,67 @@
 package fun.fengwk.kkstudio.canvas.dto;
 
-import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.annotation.JsonInclude;
-import lombok.Data;
+import com.fasterxml.jackson.annotation.JsonSubTypes;
+import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import org.jspecify.annotations.Nullable;
 
+import fun.fengwk.kkstudio.canvas.function.CanvasResourceKind;
+
+import java.time.Instant;
+
 /**
- * Canvas 资源的持久投影。immutable 资源行包含 ownerNodeId/resourceIndex， 与所属节点一起 upsert；kind 由 API 按
- * mediaType/textContent 派生，宽高/时长来自服务端媒体校验（可为 null，TEXT 资源没有 blob）。 契约绝不暴露 bucket/key/URI。
+ * Canvas 资源的持久投影，按内容形态分为内联文本与 blob 两种。
+ *
+ * <p>immutable 资源行包含 ownerNodeId/resourceIndex，与所属节点一起 upsert；{@code kind} 由 API 按
+ * mediaType/textContent 派生，宽高/时长来自服务端媒体校验。契约绝不暴露 bucket/key/URI。
  */
-@Data
-public class CanvasResourceDTO {
+@JsonTypeInfo(use = JsonTypeInfo.Id.NAME, property = "type")
+@JsonSubTypes({
+  @JsonSubTypes.Type(value = CanvasResourceDTO.Text.class, name = "TEXT"),
+  @JsonSubTypes.Type(value = CanvasResourceDTO.Blob.class, name = "BLOB")
+})
+public sealed interface CanvasResourceDTO permits CanvasResourceDTO.Text, CanvasResourceDTO.Blob {
 
-  private String id;
+  String id();
 
-  private String canvasId;
+  String canvasId();
 
-  private String ownerNodeId;
+  String ownerNodeId();
 
-  private int resourceIndex;
+  int resourceIndex();
 
-  /** TEXT 资源内容在 textContent 中，无对象存储 blob；其余资源引用共享存储的持久 blob。 */
-  @JsonInclude(JsonInclude.Include.ALWAYS)
-  private @Nullable String blobId;
+  String name();
 
-  private String name;
+  CanvasResourceKind kind();
 
-  /** required-nullable：媒体资源无文本内容，必须显式输出 null。 */
-  @JsonInclude(JsonInclude.Include.ALWAYS)
-  private @Nullable String textContent;
+  Instant createdAt();
 
-  private String kind;
+  /** 内联文本资源：内容直接保存在资源行，没有对象存储 blob。 */
+  record Text(
+      String id,
+      String canvasId,
+      String ownerNodeId,
+      int resourceIndex,
+      String name,
+      String textContent,
+      CanvasResourceKind kind,
+      Instant createdAt)
+      implements CanvasResourceDTO {}
 
-  /** required-nullable：TEXT 资源无媒体事实，必须显式输出 null。 */
-  @JsonInclude(JsonInclude.Include.ALWAYS)
-  private @Nullable String mediaType;
-
-  /** required-nullable：媒体校验缺失时显式输出 null；非 null 时 wire 为规范非负十进制字符串。 */
-  @JsonInclude(JsonInclude.Include.ALWAYS)
-  private @Nullable Long sizeBytes;
-
-  @JsonInclude(JsonInclude.Include.ALWAYS)
-  private @Nullable Integer width;
-
-  @JsonInclude(JsonInclude.Include.ALWAYS)
-  private @Nullable Integer height;
-
-  /** required-nullable：媒体校验缺失时显式输出 null；非 null 时 wire 为规范非负十进制字符串。 */
-  @JsonInclude(JsonInclude.Include.ALWAYS)
-  private @Nullable Long durationMs;
-
-  private String createdAt;
-
-  @JsonAnySetter
-  public void rejectUnknownField(String field, Object value) {
-    throw new IllegalArgumentException("unknown field: " + field);
-  }
+  /** blob 资源：内容引用共享存储的持久 blob，媒体事实来自 blob 行。 */
+  record Blob(
+      String id,
+      String canvasId,
+      String ownerNodeId,
+      int resourceIndex,
+      String blobId,
+      String name,
+      CanvasResourceKind kind,
+      String mediaType,
+      @JsonInclude(JsonInclude.Include.ALWAYS) @Nullable Long sizeBytes,
+      @JsonInclude(JsonInclude.Include.ALWAYS) @Nullable Integer width,
+      @JsonInclude(JsonInclude.Include.ALWAYS) @Nullable Integer height,
+      @JsonInclude(JsonInclude.Include.ALWAYS) @Nullable Long durationMs,
+      Instant createdAt)
+      implements CanvasResourceDTO {}
 }

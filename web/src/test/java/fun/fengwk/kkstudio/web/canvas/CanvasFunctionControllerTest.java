@@ -1,9 +1,10 @@
-package fun.fengwk.kkstudio.canvas.http;
+package fun.fengwk.kkstudio.web.canvas;
 
 import static org.hamcrest.Matchers.nullValue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -20,11 +21,9 @@ import org.springframework.http.MediaType;
 import org.springframework.http.converter.json.JacksonJsonHttpMessageConverter;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
-import tools.jackson.core.StreamReadFeature;
 import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRun;
-import fun.fengwk.kkstudio.canvas.CanvasFunctionRunException;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRunStatus;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionUnknownResolution;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionVersion;
@@ -37,16 +36,23 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionOutputSpec;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionReferencePolicy;
 import fun.fengwk.kkstudio.canvas.function.CanvasJson;
 import fun.fengwk.kkstudio.canvas.function.CanvasResourceKind;
+import fun.fengwk.kkstudio.canvas.http.CanvasFunctionController;
 import fun.fengwk.kkstudio.canvas.infra.dto.CanvasDtoMapper;
 import fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionService;
-import fun.fengwk.kkstudio.canvas.testing.TestCanvasFunctionCatalogSource;
+import fun.fengwk.kkstudio.canvas.infra.platform.PluginCanvasFunctionCatalogSource;
+import fun.fengwk.kkstudio.common.error.DomainException;
+import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
+import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
+import fun.fengwk.kkstudio.web.advice.RequestBodyRequiredValidationAdvice;
+import fun.fengwk.kkstudio.web.advice.StudioProblemAdvice;
 
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Function 目录/run HTTP 契约、状态码与 stateJson 隔离。
@@ -62,9 +68,12 @@ class CanvasFunctionControllerTest {
   private static final UUID REQUEST = new UUID(0L, 3L);
   private static final String VERIFICATION = "checked the provider console";
 
+  private static final String RUN_PATH =
+      "/api/canvas/canvases/" + CANVAS + "/nodes/" + NODE + "/function-run";
+
   private MockMvc mockMvc;
   private CanvasFunctionService runtimeService;
-  private TestCanvasFunctionCatalogSource catalogSource;
+  private TestCatalogSource catalogSource;
 
   @BeforeEach
   void setUp() {
@@ -74,16 +83,18 @@ class CanvasFunctionControllerTest {
 
   /** 以给定适配器重建 HTTP 边界；仅用于目录可用性断言。 */
   private void install(CanvasFunctionAdapter adapter) {
-    CanvasFunctionCatalog catalog = CanvasFunctionCatalog.from(List.of(adapter));
-    catalogSource = new TestCanvasFunctionCatalogSource(catalog);
+    catalogSource = new TestCatalogSource(CanvasFunctionCatalog.from(List.of(adapter)));
+    JsonMapper mapper = StrictHttpJsonMapperTestSupport.strictHttp();
     mockMvc =
         standaloneSetup(
                 new CanvasFunctionController(
                     catalogSource.source(),
                     runtimeService,
                     new CanvasDtoMapper(mock(StorageBlobManager.class))))
-            .setControllerAdvice(new TestApiResponseStatusAdvice())
-            .setMessageConverters(strictJsonConverter())
+            .setControllerAdvice(
+                new RequestBodyRequiredValidationAdvice(mapper),
+                new StudioProblemAdvice(new StudioMessageService()))
+            .setMessageConverters(new JacksonJsonHttpMessageConverter(mapper))
             .build();
   }
 
@@ -91,24 +102,25 @@ class CanvasFunctionControllerTest {
   @Test
   void listsFunctionsByNameAndArgsSchema() throws Exception {
     mockMvc
-        .perform(get("/api/canvas-functions"))
+        .perform(get("/api/canvas/functions"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data[0].length()").value(8))
-        .andExpect(jsonPath("$.data[0].name").value("fake-image"))
-        .andExpect(jsonPath("$.data[0].description").value("Fake Image"))
-        .andExpect(jsonPath("$.data[0].argsSchema.type").value("object"))
-        .andExpect(jsonPath("$.data[0].argsSchema.properties.prompt.type").value("string"))
-        .andExpect(jsonPath("$.data[0].outputs.length()").value(1))
-        .andExpect(jsonPath("$.data[0].outputs[0].kind").value("IMAGE"))
-        .andExpect(jsonPath("$.data[0].outputs[0].name").value(nullValue()))
-        .andExpect(jsonPath("$.data[0].referencePolicy.allowedKinds[0]").value("IMAGE"))
-        .andExpect(jsonPath("$.data[0].available").value(true))
-        .andExpect(jsonPath("$.data[0].unavailableReason").value(nullValue()))
-        .andExpect(jsonPath("$.data[0].version.length()").value(1))
+        .andExpect(jsonPath("$.length()").value(1))
+        .andExpect(jsonPath("$[0].name").value("fake-image"))
+        .andExpect(jsonPath("$[0].description").value("Fake Image"))
+        .andExpect(jsonPath("$[0].argsSchema.type").value("object"))
+        .andExpect(jsonPath("$[0].argsSchema.properties.prompt.type").value("string"))
+        .andExpect(jsonPath("$[0].outputs.length()").value(1))
+        .andExpect(jsonPath("$[0].outputs[0].kind").value("IMAGE"))
+        .andExpect(jsonPath("$[0].outputs[0].name").doesNotExist())
+        .andExpect(jsonPath("$[0].referencePolicy.allowedKinds[0]").value("IMAGE"))
+        .andExpect(jsonPath("$[0].available").value(true))
+        .andExpect(jsonPath("$[0].unavailableReason").value(nullValue()))
+        .andExpect(jsonPath("$[0].version.length()").value(1))
         .andExpect(
-            jsonPath("$.data[0].version.definitionFingerprint")
+            jsonPath("$[0].version.definitionFingerprint")
                 .value(expectedVersion().definitionFingerprint()));
     // 目录读取必须是一次租用，并在响应前释放。
+    assertEquals(1, catalogSource.acquireCalls());
     assertEquals(0, catalogSource.openLeases());
   }
 
@@ -130,10 +142,7 @@ class CanvasFunctionControllerTest {
               + "\"}}",
         }) {
       mockMvc
-          .perform(
-              post("/api/canvases/" + CANVAS + "/nodes/" + NODE + "/function-run")
-                  .contentType(MediaType.APPLICATION_JSON)
-                  .content(body))
+          .perform(post(RUN_PATH).contentType(MediaType.APPLICATION_JSON).content(body))
           .andExpect(status().isBadRequest());
     }
     verify(runtimeService, never()).start(any(), any(), any(), any());
@@ -145,7 +154,7 @@ class CanvasFunctionControllerTest {
     for (String value : new String[] {"123", "true", "[\"x\"]", "null"}) {
       mockMvc
           .perform(
-              post("/api/canvases/" + CANVAS + "/nodes/" + NODE + "/function-run")
+              post(RUN_PATH)
                   .contentType(MediaType.APPLICATION_JSON)
                   .content(
                       "{\"requestId\":\"request-1\",\"expectedVersion\":{\"definitionFingerprint\":"
@@ -161,21 +170,12 @@ class CanvasFunctionControllerTest {
   void mapsCatalogChangedConflictTo409() throws Exception {
     when(runtimeService.start(any(), any(), anyString(), any()))
         .thenThrow(
-            new CanvasFunctionRunException(
-                CanvasFunctionRunException.Reason.CONFLICT,
+            DomainException.conflict(
+                "FUNCTION_RUN_CONFLICT",
                 "Canvas Function catalog changed; refresh the directory before starting"
                     + " this function"));
 
-    mockMvc
-        .perform(
-            post("/api/canvases/" + CANVAS + "/nodes/" + NODE + "/function-run")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(
-                    "{\"requestId\":\"request-1\",\"expectedVersion\":{"
-                        + "\"definitionFingerprint\":\""
-                        + expectedVersion().definitionFingerprint()
-                        + "\"}}"))
-        .andExpect(status().isConflict());
+    mockMvc.perform(start("request-1")).andExpect(status().isConflict());
   }
 
   /** 测试意图：cancel 只携带 requestId；start 的 expectedVersion 不能混进 cancel wire。 */
@@ -186,7 +186,7 @@ class CanvasFunctionControllerTest {
 
     mockMvc
         .perform(
-            post("/api/canvases/" + CANVAS + "/nodes/" + NODE + "/function-run/cancel")
+            post(RUN_PATH + "/cancel")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"requestId\":\"request-1\"}"))
         .andExpect(status().isOk());
@@ -195,7 +195,7 @@ class CanvasFunctionControllerTest {
 
     mockMvc
         .perform(
-            post("/api/canvases/" + CANVAS + "/nodes/" + NODE + "/function-run/cancel")
+            post(RUN_PATH + "/cancel")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     "{\"requestId\":\"request-1\",\"expectedVersion\":{"
@@ -210,13 +210,12 @@ class CanvasFunctionControllerTest {
   void reportsInstalledButUnavailableFunctionsWithReason() throws Exception {
     install(adapter("mini-max", false, "comfy endpoint is not configured"));
     mockMvc
-        .perform(get("/api/canvas-functions"))
+        .perform(get("/api/canvas/functions"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.length()").value(1))
-        .andExpect(jsonPath("$.data[0].name").value("mini-max"))
-        .andExpect(jsonPath("$.data[0].available").value(false))
-        .andExpect(
-            jsonPath("$.data[0].unavailableReason").value("comfy endpoint is not configured"));
+        .andExpect(jsonPath("$.length()").value(1))
+        .andExpect(jsonPath("$[0].name").value("mini-max"))
+        .andExpect(jsonPath("$[0].available").value(false))
+        .andExpect(jsonPath("$[0].unavailableReason").value("comfy endpoint is not configured"));
   }
 
   /**
@@ -233,30 +232,22 @@ class CanvasFunctionControllerTest {
         .thenReturn(run(CanvasFunctionRunStatus.CANCELLED, "CANCELLED"));
 
     mockMvc
-        .perform(
-            post("/api/canvases/" + CANVAS + "/nodes/" + NODE + "/function-run")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(
-                    "{\"requestId\":\"request-1\",\"expectedVersion\":{"
-                        + "\"definitionFingerprint\":\""
-                        + version.definitionFingerprint()
-                        + "\"}}"))
+        .perform(start("request-1"))
         .andExpect(status().isAccepted())
-        .andExpect(jsonPath("$.code").value("ACCEPTED"))
-        .andExpect(jsonPath("$.data.status").value("READY"))
-        .andExpect(jsonPath("$.data.stage").value("QUEUED"))
-        .andExpect(jsonPath("$.data.stateJson").doesNotExist());
+        .andExpect(jsonPath("$.status").value("READY"))
+        .andExpect(jsonPath("$.stage").value("QUEUED"))
+        .andExpect(jsonPath("$.stateJson").doesNotExist());
     mockMvc
-        .perform(get("/api/canvases/" + CANVAS + "/nodes/" + NODE + "/function-run"))
+        .perform(get(RUN_PATH))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.requestId").value(REQUEST.toString()));
+        .andExpect(jsonPath("$.requestId").value(REQUEST.toString()));
     mockMvc
         .perform(
-            post("/api/canvases/" + CANVAS + "/nodes/" + NODE + "/function-run/cancel")
+            post(RUN_PATH + "/cancel")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"requestId\":\"request-1\"}"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.status").value("CANCELLED"));
+        .andExpect(jsonPath("$.status").value("CANCELLED"));
     verify(runtimeService).start(CANVAS, NODE, "request-1", version);
     verify(runtimeService).cancel(CANVAS, NODE, "request-1");
   }
@@ -269,16 +260,10 @@ class CanvasFunctionControllerTest {
         .thenReturn(run(CanvasFunctionRunStatus.READY, "SUBMITTED"));
 
     mockMvc
-        .perform(
-            post("/api/canvases/" + CANVAS + "/nodes/" + NODE + "/function-run/resolve")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(
-                    "{\"requestId\":\"request-1\",\"resolution\":\"RESUME\",\"verification\":\""
-                        + VERIFICATION
-                        + "\"}"))
+        .perform(resolve("RESUME"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.status").value("READY"))
-        .andExpect(jsonPath("$.data.stage").value("SUBMITTED"));
+        .andExpect(jsonPath("$.status").value("READY"))
+        .andExpect(jsonPath("$.stage").value("SUBMITTED"));
     verify(runtimeService)
         .resolve(CANVAS, NODE, "request-1", CanvasFunctionUnknownResolution.RESUME, VERIFICATION);
   }
@@ -296,11 +281,11 @@ class CanvasFunctionControllerTest {
     mockMvc
         .perform(resolve("FAILED"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.status").value("FAILED"));
+        .andExpect(jsonPath("$.status").value("FAILED"));
     mockMvc
         .perform(resolve("CANCELLED"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.status").value("CANCELLED"));
+        .andExpect(jsonPath("$.status").value("CANCELLED"));
   }
 
   /** 测试意图：非法 resolution 与缺失必填核查事实都在边界处被拒绝，不会触达应用服务。 */
@@ -309,18 +294,18 @@ class CanvasFunctionControllerTest {
     mockMvc.perform(resolve("resume")).andExpect(status().isBadRequest());
     verify(runtimeService, never()).resolve(any(), any(), any(), any(), any());
 
-    // 缺失与纯空白核查事实由应用服务拒绝，边界统一映射为 400 BadRequest。
+    // 缺失与纯空白核查事实由应用服务拒绝，统一映射为 400 BadRequest。
     when(runtimeService.resolve(any(), any(), anyString(), any(), any()))
-        .thenThrow(new IllegalArgumentException("verification must not be blank"));
+        .thenThrow(DomainException.validation("verification", "verification must not be blank"));
     mockMvc
         .perform(
-            post("/api/canvases/" + CANVAS + "/nodes/" + NODE + "/function-run/resolve")
+            post(RUN_PATH + "/resolve")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"requestId\":\"request-1\",\"resolution\":\"RESUME\"}"))
         .andExpect(status().isBadRequest());
     mockMvc
         .perform(
-            post("/api/canvases/" + CANVAS + "/nodes/" + NODE + "/function-run/resolve")
+            post(RUN_PATH + "/resolve")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     "{\"requestId\":\"request-1\",\"resolution\":\"RESUME\",\"verification\":\" \"}"))
@@ -332,7 +317,7 @@ class CanvasFunctionControllerTest {
   void rejectsUnknownResolveFields() throws Exception {
     mockMvc
         .perform(
-            post("/api/canvases/" + CANVAS + "/nodes/" + NODE + "/function-run/resolve")
+            post(RUN_PATH + "/resolve")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     "{\"requestId\":\"request-1\",\"resolution\":\"RESUME\",\"verification\":\"v\","
@@ -341,27 +326,24 @@ class CanvasFunctionControllerTest {
     verify(runtimeService, never()).resolve(any(), any(), any(), any(), any());
   }
 
-  /**
-   * 测试意图：验证 POST /api/canvases/{canvasId}/nodes/{nodeId}/function-run 严格校验 UUID 格式与非重复请求体，返回 400
-   * BadRequest。
-   */
+  /** 测试意图：function-run 严格校验 UUID 格式与非重复请求体，未知字段不会被静默忽略。 */
   @Test
   void rejectsUnknownDuplicateAndNonCanonicalIds() throws Exception {
     mockMvc
         .perform(
-            post("/api/canvases/" + CANVAS + "/nodes/" + NODE + "/function-run")
+            post(RUN_PATH)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"requestId\":\"r\",\"extra\":true}"))
         .andExpect(status().isBadRequest());
     mockMvc
         .perform(
-            post("/api/canvases/" + CANVAS + "/nodes/" + NODE + "/function-run")
+            post(RUN_PATH)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"requestId\":\"r\",\"requestId\":\"r\"}"))
         .andExpect(status().isBadRequest());
     mockMvc
         .perform(
-            post("/api/canvases/not-a-uuid/nodes/" + NODE + "/function-run")
+            post("/api/canvas/canvases/not-a-uuid/nodes/" + NODE + "/function-run")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     "{\"requestId\":\"r\",\"expectedVersion\":{"
@@ -372,7 +354,7 @@ class CanvasFunctionControllerTest {
     // expectedVersion 内部的未知字段同样被拒绝，不能静默忽略。
     mockMvc
         .perform(
-            post("/api/canvases/" + CANVAS + "/nodes/" + NODE + "/function-run")
+            post(RUN_PATH)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     "{\"requestId\":\"r\",\"expectedVersion\":{"
@@ -382,49 +364,49 @@ class CanvasFunctionControllerTest {
         .andExpect(status().isBadRequest());
   }
 
-  /** 测试意图：验证业务异常精准映射为 404 NotFound 与 409 Conflict 状态码，UNKNOWN 未核查前不可再启动或取消。 */
+  /** 测试意图：业务异常精准映射为 404 NotFound 与 409 Conflict 状态码，UNKNOWN 未核查前不可再启动或取消。 */
   @Test
   void mapsNotFoundAndConflictPrecisely() throws Exception {
     when(runtimeService.get(any(), any()))
-        .thenThrow(
-            new CanvasFunctionRunException(CanvasFunctionRunException.Reason.NOT_FOUND, "missing"));
+        .thenThrow(DomainException.notFound("canvas_function_run", "missing"));
     when(runtimeService.start(any(), any(), anyString(), any()))
-        .thenThrow(
-            new CanvasFunctionRunException(CanvasFunctionRunException.Reason.CONFLICT, "running"));
+        .thenThrow(DomainException.conflict("FUNCTION_RUN_CONFLICT", "running"));
     when(runtimeService.cancel(any(), any(), anyString()))
         .thenThrow(
-            new CanvasFunctionRunException(
-                CanvasFunctionRunException.Reason.CONFLICT,
-                "UNKNOWN FunctionRun must be resolved, not cancelled"));
+            DomainException.conflict(
+                "FUNCTION_RUN_CONFLICT", "UNKNOWN FunctionRun must be resolved, not cancelled"));
     when(runtimeService.resolve(any(), any(), anyString(), any(), any()))
         .thenThrow(
-            new CanvasFunctionRunException(
-                CanvasFunctionRunException.Reason.CONFLICT, "only an UNKNOWN FunctionRun"));
+            DomainException.conflict("FUNCTION_RUN_CONFLICT", "only an UNKNOWN FunctionRun"));
 
+    mockMvc.perform(get(RUN_PATH)).andExpect(status().isNotFound());
     mockMvc
-        .perform(get("/api/canvases/" + CANVAS + "/nodes/" + NODE + "/function-run"))
-        .andExpect(status().isNotFound());
-    mockMvc
-        .perform(
-            post("/api/canvases/" + CANVAS + "/nodes/" + NODE + "/function-run")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(
-                    "{\"requestId\":\"r\",\"expectedVersion\":{"
-                        + "\"definitionFingerprint\":\""
-                        + expectedVersion().definitionFingerprint()
-                        + "\"}}"))
-        .andExpect(status().isConflict());
+        .perform(start("r"))
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.code").value("conflict"))
+        .andExpect(jsonPath("$.reason").value("FUNCTION_RUN_CONFLICT"));
     mockMvc
         .perform(
-            post("/api/canvases/" + CANVAS + "/nodes/" + NODE + "/function-run/cancel")
+            post(RUN_PATH + "/cancel")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"requestId\":\"r\"}"))
         .andExpect(status().isConflict());
     mockMvc.perform(resolve("RESUME")).andExpect(status().isConflict());
   }
 
+  private MockHttpServletRequestBuilder start(String requestId) {
+    return post(RUN_PATH)
+        .contentType(MediaType.APPLICATION_JSON)
+        .content(
+            "{\"requestId\":\""
+                + requestId
+                + "\",\"expectedVersion\":{\"definitionFingerprint\":\""
+                + expectedVersion().definitionFingerprint()
+                + "\"}}");
+  }
+
   private static MockHttpServletRequestBuilder resolve(String resolution) {
-    return post("/api/canvases/" + CANVAS + "/nodes/" + NODE + "/function-run/resolve")
+    return post(RUN_PATH + "/resolve")
         .contentType(MediaType.APPLICATION_JSON)
         .content(
             "{\"requestId\":\"request-1\",\"resolution\":\""
@@ -432,11 +414,6 @@ class CanvasFunctionControllerTest {
                 + "\",\"verification\":\""
                 + VERIFICATION
                 + "\"}");
-  }
-
-  private static JacksonJsonHttpMessageConverter strictJsonConverter() {
-    return new JacksonJsonHttpMessageConverter(
-        JsonMapper.builder().enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION).build());
   }
 
   private static CanvasFunctionRun run(CanvasFunctionRunStatus status, String stage) {
@@ -515,5 +492,46 @@ class CanvasFunctionControllerTest {
         throw new UnsupportedOperationException();
       }
     };
+  }
+
+  /** 单次目录读取的租用替身：记录 acquire 次数与仍未关闭的租用数。 */
+  private static final class TestCatalogSource {
+
+    private final AtomicInteger openLeases = new AtomicInteger();
+    private final AtomicInteger acquireCalls = new AtomicInteger();
+    private final PluginCanvasFunctionCatalogSource source;
+
+    private TestCatalogSource(CanvasFunctionCatalog catalog) {
+      source = mock(PluginCanvasFunctionCatalogSource.class);
+      when(source.acquire())
+          .thenAnswer(
+              invocation -> {
+                acquireCalls.incrementAndGet();
+                PluginCanvasFunctionCatalogSource.Lease lease =
+                    mock(PluginCanvasFunctionCatalogSource.Lease.class);
+                when(lease.catalog()).thenReturn(catalog);
+                doAnswer(
+                        ignored -> {
+                          openLeases.decrementAndGet();
+                          return null;
+                        })
+                    .when(lease)
+                    .close();
+                openLeases.incrementAndGet();
+                return lease;
+              });
+    }
+
+    private PluginCanvasFunctionCatalogSource source() {
+      return source;
+    }
+
+    private int openLeases() {
+      return openLeases.get();
+    }
+
+    private int acquireCalls() {
+      return acquireCalls.get();
+    }
   }
 }

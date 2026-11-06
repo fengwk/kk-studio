@@ -30,15 +30,6 @@ class CanvasFunctionPortsTest {
         NullPointerException.class, () -> new BlobFacts(null, "image/png", 1L, null, null, null));
   }
 
-  /** run 异常携带公开 reason 与消息。 */
-  @Test
-  void runExceptionCarriesPublicReason() {
-    CanvasFunctionRunException notFound =
-        new CanvasFunctionRunException(CanvasFunctionRunException.Reason.NOT_FOUND, "missing");
-    assertEquals(CanvasFunctionRunException.Reason.NOT_FOUND, notFound.reason());
-    assertEquals("missing", notFound.getMessage());
-  }
-
   /** 人工决议枚举是 UNKNOWN Run 的唯一处置集合。 */
   @Test
   void unknownResolutionEnumeratesAllOutcomes() {

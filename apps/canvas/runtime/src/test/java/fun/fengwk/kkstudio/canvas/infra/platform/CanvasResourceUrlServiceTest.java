@@ -79,11 +79,10 @@ class CanvasResourceUrlServiceTest {
             RESOURCE, CANVAS, new UUID(0, 4), 0, null, "note", "text", Instant.EPOCH);
     when(query.findResource(CANVAS, RESOURCE)).thenReturn(Optional.of(text));
     for (boolean original : new boolean[] {true, false}) {
-      assertEquals(
-          "TEXT resource has no blob content",
-          assertThrows(
-                  IllegalArgumentException.class, () -> service.presign(CANVAS, RESOURCE, original))
-              .getMessage());
+      DomainException rejected =
+          assertThrows(DomainException.class, () -> service.presign(CANVAS, RESOURCE, original));
+      assertEquals(DomainErrorCode.VALIDATION, rejected.code());
+      assertEquals("TEXT resource has no blob content", rejected.getMessage());
     }
     verify(blobs, never()).presignOriginalUrl(any());
     verify(blobs, never()).presignPreviewUrl(any());

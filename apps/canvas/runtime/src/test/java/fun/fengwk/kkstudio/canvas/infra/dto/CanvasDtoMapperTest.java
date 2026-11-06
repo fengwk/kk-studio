@@ -44,6 +44,7 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionOutputSpec;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionReferencePolicy;
 import fun.fengwk.kkstudio.canvas.function.CanvasJson;
 import fun.fengwk.kkstudio.canvas.function.CanvasResourceKind;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 import fun.fengwk.kkstudio.share.storage.StoragePresignedUrlDTO;
@@ -76,12 +77,10 @@ class CanvasDtoMapperTest {
         fingerprint,
         CanvasDtoMapper.parseVersion(version, "expectedVersion").definitionFingerprint());
     assertThrows(
-        IllegalArgumentException.class,
-        () -> CanvasDtoMapper.parseVersion(null, "expectedVersion"));
+        DomainException.class, () -> CanvasDtoMapper.parseVersion(null, "expectedVersion"));
     version.setDefinitionFingerprint("ABC");
     assertThrows(
-        IllegalArgumentException.class,
-        () -> CanvasDtoMapper.parseVersion(version, "expectedVersion"));
+        DomainException.class, () -> CanvasDtoMapper.parseVersion(version, "expectedVersion"));
   }
 
   @Test
@@ -94,24 +93,26 @@ class CanvasDtoMapperTest {
 
     CanvasResource text =
         new CanvasResource(UUID.randomUUID(), canvasId, nodeId, 0, null, "note.txt", "hello", NOW);
-    CanvasResourceDTO textDto = mapper.toDto(text);
-    assertEquals("TEXT", textDto.getKind());
-    assertNull(textDto.getMediaType());
+    CanvasResourceDTO.Text textDto =
+        assertInstanceOf(CanvasResourceDTO.Text.class, mapper.toDto(text));
+    assertEquals(CanvasResourceKind.TEXT, textDto.kind());
+    assertEquals("hello", textDto.textContent());
 
     CanvasResource video =
         new CanvasResource(UUID.randomUUID(), canvasId, nodeId, 0, blobId, "clip.mp4", null, NOW);
-    CanvasResourceDTO videoDto = mapper.toDto(video);
-    assertEquals("VIDEO", videoDto.getKind());
-    assertEquals("video/mp4", videoDto.getMediaType());
-    assertEquals(90L, videoDto.getDurationMs());
-    assertEquals(30, videoDto.getWidth());
+    CanvasResourceDTO.Blob videoDto =
+        assertInstanceOf(CanvasResourceDTO.Blob.class, mapper.toDto(video));
+    assertEquals(CanvasResourceKind.VIDEO, videoDto.kind());
+    assertEquals("video/mp4", videoDto.mediaType());
+    assertEquals(90L, videoDto.durationMs());
+    assertEquals(30, videoDto.width());
 
     when(blobManager.getBlob(blobId)).thenReturn(blob("audio/mpeg", 1L, null, null, 20L));
-    assertEquals("AUDIO", mapper.toDto(video).getKind());
+    assertEquals(CanvasResourceKind.AUDIO, mapper.toDto(video).kind());
     when(blobManager.getBlob(blobId)).thenReturn(blob("image/png", 1L, null, null, null));
-    assertEquals("IMAGE", mapper.toDto(video).getKind());
+    assertEquals(CanvasResourceKind.IMAGE, mapper.toDto(video).kind());
     when(blobManager.getBlob(blobId)).thenReturn(blob("text/plain", 1L, null, null, null));
-    assertEquals("TEXT", mapper.toDto(video).getKind());
+    assertEquals(CanvasResourceKind.TEXT, mapper.toDto(video).kind());
     when(blobManager.getBlob(blobId)).thenReturn(blob("application/pdf", 1L, null, null, null));
     assertThrows(IllegalArgumentException.class, () -> mapper.toDto(video));
     when(blobManager.getBlob(blobId)).thenReturn(blob(null, 1L, null, null, null));
@@ -141,7 +142,7 @@ class CanvasDtoMapperTest {
             new CanvasSnapshot(document, List.of(node), List.of(group), List.of(reference)));
     assertEquals("3", snapshot.getDocument().getRevision());
     assertEquals("image.crop", snapshot.getNodes().get(0).getFunction().name());
-    assertEquals("RUNNING", snapshot.getNodes().get(0).getRun().getStatus());
+    assertEquals(CanvasFunctionRunStatus.RUNNING, snapshot.getNodes().get(0).getRun().getStatus());
     assertEquals(sourceId.toString(), snapshot.getReferences().get(0).getSourceNodeId());
 
     CanvasPatchDTO patch =
@@ -191,7 +192,9 @@ class CanvasDtoMapperTest {
                 Map.of(CanvasResourceKind.VIDEO, 1)));
     CanvasFunctionDefinitionDTO dto = mapper.toDto(definition, false, "offline");
     assertEquals("image.crop", dto.getName());
-    assertEquals(List.of("IMAGE", "VIDEO"), dto.getReferencePolicy().getAllowedKinds());
+    assertEquals(
+        List.of(CanvasResourceKind.IMAGE, CanvasResourceKind.VIDEO),
+        dto.getReferencePolicy().getAllowedKinds());
     assertEquals(1, dto.getReferencePolicy().getMaxByKind().get("VIDEO"));
     assertEquals(64, dto.getVersion().getDefinitionFingerprint().length());
     assertEquals("offline", dto.getUnavailableReason());
@@ -206,6 +209,7 @@ class CanvasDtoMapperTest {
     var copied = CanvasDtoMapper.toPresignedUrlDto(signed);
     assertEquals(signed.getUrl(), copied.getUrl());
     assertEquals(signed.getHeaders(), copied.getHeaders());
+    assertEquals(NOW, copied.getExpiresAt());
   }
 
   @Test
@@ -219,25 +223,23 @@ class CanvasDtoMapperTest {
         mapper.toCommands(
             List.of(
                 new CanvasCommandDTO.CreateNode(
-                    nodeId.toString(),
+                    nodeId,
                     "shot",
                     TRANSFORM_DTO,
                     List.of(
-                        new CanvasResourceInputDTO.Keep(resourceId.toString()),
+                        new CanvasResourceInputDTO.Keep(resourceId),
                         new CanvasResourceInputDTO.Text("note.txt", "hello"),
-                        new CanvasResourceInputDTO.Blob("shot.png", blobId.toString()))),
-                new CanvasCommandDTO.RenameNode(nodeId.toString(), "old", "shot"),
-                new CanvasCommandDTO.SetNodeResources(
-                    nodeId.toString(), List.of(resourceId.toString()), List.of()),
-                new CanvasCommandDTO.SetNodeFunction(nodeId.toString(), null, functionDto),
-                new CanvasCommandDTO.SetNodeGroup(nodeId.toString(), null, groupId.toString()),
-                new CanvasCommandDTO.DeleteNode(nodeId.toString(), List.of(), functionDto),
-                new CanvasCommandDTO.UpdateNodeTransform(nodeId.toString(), TRANSFORM_DTO, null),
-                new CanvasCommandDTO.CreateGroup(groupId.toString(), "group", TRANSFORM_DTO),
-                new CanvasCommandDTO.RenameGroup(groupId.toString(), "old", "group"),
-                new CanvasCommandDTO.UpdateGroupTransform(
-                    groupId.toString(), TRANSFORM_DTO, TRANSFORM_DTO),
-                new CanvasCommandDTO.DeleteGroup(groupId.toString(), List.of(nodeId.toString()))));
+                        new CanvasResourceInputDTO.Blob("shot.png", blobId))),
+                new CanvasCommandDTO.RenameNode(nodeId, "old", "shot"),
+                new CanvasCommandDTO.SetNodeResources(nodeId, List.of(resourceId), List.of()),
+                new CanvasCommandDTO.SetNodeFunction(nodeId, null, functionDto),
+                new CanvasCommandDTO.SetNodeGroup(nodeId, null, groupId),
+                new CanvasCommandDTO.DeleteNode(nodeId, List.of(), functionDto),
+                new CanvasCommandDTO.UpdateNodeTransform(nodeId, TRANSFORM_DTO, null),
+                new CanvasCommandDTO.CreateGroup(groupId, "group", TRANSFORM_DTO),
+                new CanvasCommandDTO.RenameGroup(groupId, "old", "group"),
+                new CanvasCommandDTO.UpdateGroupTransform(groupId, TRANSFORM_DTO, TRANSFORM_DTO),
+                new CanvasCommandDTO.DeleteGroup(groupId, List.of(nodeId))));
     assertEquals(11, commands.size());
     CanvasCommand.CreateNode created = (CanvasCommand.CreateNode) commands.get(0);
     assertInstanceOf(CanvasResourceInput.Keep.class, created.resources().get(0));
@@ -249,47 +251,44 @@ class CanvasDtoMapperTest {
 
   @Test
   void rejectsMalformedCommandsAndJsonValues() {
-    assertThrows(IllegalArgumentException.class, () -> mapper.toCommands(null));
-    assertThrows(IllegalArgumentException.class, () -> mapper.toCommands(List.of()));
+    assertThrows(DomainException.class, () -> mapper.toCommands(null));
+    assertThrows(DomainException.class, () -> mapper.toCommands(List.of()));
     List<CanvasCommandDTO> withNull = new ArrayList<>();
     withNull.add(null);
-    assertThrows(IllegalArgumentException.class, () -> mapper.toCommands(withNull));
+    assertThrows(DomainException.class, () -> mapper.toCommands(withNull));
 
     UUID nodeId = UUID.randomUUID();
     List<CanvasResourceInputDTO> resources = new ArrayList<>();
     resources.add(null);
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () ->
             mapper.toCommands(
                 List.of(
-                    new CanvasCommandDTO.CreateNode(
-                        nodeId.toString(), "shot", TRANSFORM_DTO, resources))));
+                    new CanvasCommandDTO.CreateNode(nodeId, "shot", TRANSFORM_DTO, resources))));
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () ->
             mapper.toCommands(
                 List.of(
                     new CanvasCommandDTO.CreateNode(
-                        nodeId.toString(),
+                        nodeId,
                         "shot",
                         null,
                         List.of(new CanvasResourceInputDTO.Text("note.txt", null))))));
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () ->
             mapper.toCommands(
-                List.of(
-                    new CanvasCommandDTO.SetNodeFunction(nodeId.toString(), null, nullArgs()))));
+                List.of(new CanvasCommandDTO.SetNodeFunction(nodeId, null, nullArgs()))));
 
     LinkedHashMap<String, Object> badNumber = new LinkedHashMap<>();
     badNumber.put("value", Double.NaN);
-    assertThrows(IllegalArgumentException.class, () -> commandWithArgs(badNumber));
+    assertThrows(DomainException.class, () -> commandWithArgs(badNumber));
     LinkedHashMap<String, Object> badKey = new LinkedHashMap<>();
     badKey.put("nested", Map.of(1, "x"));
-    assertThrows(IllegalArgumentException.class, () -> commandWithArgs(badKey));
-    assertThrows(
-        IllegalArgumentException.class, () -> commandWithArgs(Map.of("value", new Object())));
+    assertThrows(DomainException.class, () -> commandWithArgs(badKey));
+    assertThrows(DomainException.class, () -> commandWithArgs(Map.of("value", new Object())));
 
     LinkedHashMap<String, Object> deep = new LinkedHashMap<>();
     Object current = deep;
@@ -298,7 +297,7 @@ class CanvasDtoMapperTest {
       ((Map<String, Object>) current).put("child", next);
       current = next;
     }
-    assertThrows(IllegalArgumentException.class, () -> commandWithArgs(deep));
+    assertThrows(DomainException.class, () -> commandWithArgs(deep));
   }
 
   @Test
@@ -322,7 +321,7 @@ class CanvasDtoMapperTest {
     mapper.toCommands(
         List.of(
             new CanvasCommandDTO.SetNodeFunction(
-                UUID.randomUUID().toString(), null, new CanvasFunctionDTO("image.crop", args))));
+                UUID.randomUUID(), null, new CanvasFunctionDTO("image.crop", args))));
   }
 
   private static CanvasFunctionDTO nullArgs() {

@@ -42,7 +42,7 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-jdbc</artifactId>
         </dependency>
-        <!-- HTTP 边界控制器只依赖 spring-web 的注解、HttpStatus 与 ResponseStatusException。 -->
+        <!-- HTTP 边界控制器只依赖 spring-web 的注解与 ResponseEntity。 -->
         <dependency>
             <groupId>org.springframework</groupId>
             <artifactId>spring-web</artifactId>

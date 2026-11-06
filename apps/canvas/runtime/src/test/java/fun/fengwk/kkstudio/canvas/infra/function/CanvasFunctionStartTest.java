@@ -11,7 +11,6 @@ import org.postgresql.PGNotification;
 import org.springframework.context.annotation.Import;
 
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRun;
-import fun.fengwk.kkstudio.canvas.CanvasFunctionRunException;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRunStatus;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionVersion;
 import fun.fengwk.kkstudio.canvas.CanvasResource;
@@ -25,6 +24,8 @@ import fun.fengwk.kkstudio.canvas.function.CanvasResourceKind;
 import fun.fengwk.kkstudio.canvas.infra.platform.PluginCanvasFunctionCatalogSource;
 import fun.fengwk.kkstudio.canvas.notification.CanvasVersionNotifications;
 import fun.fengwk.kkstudio.canvas.testing.TestCanvasFunctionCatalogSource;
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 
 import java.sql.Connection;
 import java.util.List;
@@ -54,7 +55,7 @@ class CanvasFunctionStartTest extends CanvasFunctionRuntimeTestSupport {
     assertEquals(first.status(), replay.run().status());
     assertEquals(decode(first), decode(replay.run()));
     assertEquals(1L, version(canvasId), "exact replay must not bump version");
-    assertThrows(CanvasFunctionRunException.class, () -> startRun(canvasId, nodeId, REQUEST_2));
+    assertThrows(DomainException.class, () -> startRun(canvasId, nodeId, REQUEST_2));
 
     CanvasFunctionFrozenRun firstFrozen = decode(first);
     CanvasResource cancelledTarget =
@@ -164,15 +165,15 @@ class CanvasFunctionStartTest extends CanvasFunctionRuntimeTestSupport {
     // 目录变化后，用旧版本对另一节点 start 必须 409：既不自动重读最新目录，也不自动 retry。
     UUID otherNode = addFunctionNode(canvasId, "other", configWithoutReferences());
     long versionBeforeReject = version(canvasId);
-    CanvasFunctionRunException rejected =
+    DomainException rejected =
         assertThrows(
-            CanvasFunctionRunException.class,
+            DomainException.class,
             () ->
                 transactions.execute(
                     status ->
                         driftTransactions.start(
                             canvasId, otherNode, REQUEST_2, versionOf(DEFINITION))));
-    assertEquals(CanvasFunctionRunException.Reason.CONFLICT, rejected.reason());
+    assertEquals("FUNCTION_RUN_CONFLICT", rejected.reason());
     assertTrue(runRepository.findByNodeId(otherNode).isEmpty());
     assertEquals(versionBeforeReject, version(canvasId));
     assertEquals(0, source.openLeases());
@@ -193,16 +194,16 @@ class CanvasFunctionStartTest extends CanvasFunctionRuntimeTestSupport {
         new TestCanvasFunctionCatalogSource(catalogOf(adapter));
     CanvasFunctionRunTransactions candidate = transactionsFor(source.source());
 
-    CanvasFunctionRunException conflict =
+    DomainException conflict =
         assertThrows(
-            CanvasFunctionRunException.class,
+            DomainException.class,
             () ->
                 transactions.execute(
                     status ->
                         candidate.start(
                             canvasId, nodeId, REQUEST_1, versionOf(MULTI_MEDIA_DEFINITION))));
 
-    assertEquals(CanvasFunctionRunException.Reason.CONFLICT, conflict.reason());
+    assertEquals("FUNCTION_RUN_CONFLICT", conflict.reason());
     assertEquals(0, adapter.preflightCalls, "stale fingerprint must not reach the adapter");
     assertTrue(runRepository.findByNodeId(nodeId).isEmpty());
     assertTrue(pinRepository.findByNode(canvasId, nodeId).isEmpty());
@@ -225,15 +226,15 @@ class CanvasFunctionStartTest extends CanvasFunctionRuntimeTestSupport {
       TestCanvasFunctionCatalogSource source = new TestCanvasFunctionCatalogSource(current);
       CanvasFunctionRunTransactions candidate = transactionsFor(source.source());
 
-      CanvasFunctionRunException conflict =
+      DomainException conflict =
           assertThrows(
-              CanvasFunctionRunException.class,
+              DomainException.class,
               () ->
                   transactions.execute(
                       status ->
                           candidate.start(canvasId, nodeId, REQUEST_1, versionOf(DEFINITION))));
 
-      assertEquals(CanvasFunctionRunException.Reason.CONFLICT, conflict.reason());
+      assertEquals("FUNCTION_RUN_CONFLICT", conflict.reason());
       assertEquals(
           "Canvas Function catalog changed; refresh the directory before starting this function",
           conflict.getMessage());
@@ -313,13 +314,15 @@ class CanvasFunctionStartTest extends CanvasFunctionRuntimeTestSupport {
     UUID canvasId = addDocument();
     UUID nodeId = addPlainNode(canvasId, "text");
 
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            transactions.execute(
-                status ->
-                    runtimeTransactions.start(
-                        canvasId, nodeId, REQUEST_1, currentVersion(DEFINITION.name()))));
+    DomainException rejected =
+        assertThrows(
+            DomainException.class,
+            () ->
+                transactions.execute(
+                    status ->
+                        runtimeTransactions.start(
+                            canvasId, nodeId, REQUEST_1, currentVersion(DEFINITION.name()))));
+    assertEquals(DomainErrorCode.VALIDATION, rejected.code());
 
     assertEquals(0, catalogSource.openLeases());
     assertTrue(runRepository.findByNodeId(nodeId).isEmpty());

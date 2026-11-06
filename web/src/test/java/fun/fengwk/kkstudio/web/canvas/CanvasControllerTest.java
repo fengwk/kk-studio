@@ -10,6 +10,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -61,7 +62,7 @@ import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
-import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
+import fun.fengwk.kkstudio.web.advice.RequestBodyRequiredValidationAdvice;
 import fun.fengwk.kkstudio.web.advice.StudioProblemAdvice;
 
 import java.time.Instant;
@@ -94,8 +95,8 @@ class CanvasControllerTest {
   @BeforeEach
   @SuppressWarnings("unchecked")
   void setUp() {
-    // 与生产 HTTP 一致：Long 输出十进制字符串、默认 NON_NULL、DTO 声明顺序，未知字段由 DTO @JsonAnySetter 拒绝。
-    objectMapper = StrictHttpJsonMapperTestSupport.get();
+    // 与生产 HTTP 一致：Long 输出十进制字符串、默认 NON_NULL、DTO 声明顺序，未知字段与标量强转由严格 mapper 拒绝。
+    objectMapper = StrictHttpJsonMapperTestSupport.strictHttp();
     queryService = mock(CanvasQueryService.class);
     commandService = mock(CanvasCommandService.class);
     blobManager = mock(StorageBlobManager.class);
@@ -112,7 +113,8 @@ class CanvasControllerTest {
         standaloneSetup(controller)
             .setMessageConverters(new JacksonJsonHttpMessageConverter(objectMapper))
             .setControllerAdvice(
-                new ApiResponseStatusAdvice(), new StudioProblemAdvice(new StudioMessageService()))
+                new RequestBodyRequiredValidationAdvice(objectMapper),
+                new StudioProblemAdvice(new StudioMessageService()))
             .build();
   }
 
@@ -124,7 +126,7 @@ class CanvasControllerTest {
 
     MvcResult list =
         mockMvc
-            .perform(get("/api/canvases"))
+            .perform(get("/api/canvas/canvases"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$[0].id").value(CANVAS.toString()))
             .andExpect(jsonPath("$[0].revision").value("3"))
@@ -137,11 +139,12 @@ class CanvasControllerTest {
 
     MvcResult snapshotResult =
         mockMvc
-            .perform(get("/api/canvases/" + CANVAS))
+            .perform(get("/api/canvas/canvases/" + CANVAS))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.document.revision").value("3"))
             .andExpect(jsonPath("$.nodes[0].id").value(NODE_1.toString()))
             .andExpect(jsonPath("$.nodes[0].resources[0].id").value(RESOURCE_1.toString()))
+            .andExpect(jsonPath("$.nodes[0].resources[0].type").value("BLOB"))
             .andExpect(jsonPath("$.nodes[0].resources[0].blobId").value(BLOB_1.toString()))
             .andExpect(jsonPath("$.nodes[0].resources[0].kind").value("IMAGE"))
             .andExpect(jsonPath("$.nodes[0].resources[0].mediaType").value("image/png"))
@@ -179,7 +182,9 @@ class CanvasControllerTest {
   /** 测试意图：Canvas 不拥有 Session，工作上下文属于 Harness，因此不注册任何 canvas session 归属入口。 */
   @Test
   void canvasHasNoSessionOwnershipEndpoint() throws Exception {
-    mockMvc.perform(get("/api/canvases/" + CANVAS + "/sessions")).andExpect(status().isNotFound());
+    mockMvc
+        .perform(get("/api/canvas/canvases/" + CANVAS + "/sessions"))
+        .andExpect(status().isNotFound());
   }
 
   /** 测试意图：TEXT 资源没有媒体事实，创建画布必须显式提供非空白标题。 */
@@ -207,22 +212,20 @@ class CanvasControllerTest {
     when(commandService.createCanvas(any())).thenReturn(document());
 
     mockMvc
-        .perform(get("/api/canvases/" + CANVAS))
+        .perform(get("/api/canvas/canvases/" + CANVAS))
         .andExpect(status().isOk())
+        .andExpect(jsonPath("$.nodes[0].resources[0].type").value("TEXT"))
         .andExpect(jsonPath("$.nodes[0].resources[0].kind").value("TEXT"))
         .andExpect(jsonPath("$.nodes[0].resources[0].textContent").value("hello"))
-        .andExpect(jsonPath("$.nodes[0].resources[0].blobId").value(nullValue()))
-        .andExpect(jsonPath("$.nodes[0].resources[0].mediaType").value(nullValue()))
-        .andExpect(jsonPath("$.nodes[0].resources[0].sizeBytes").value(nullValue()))
-        .andExpect(jsonPath("$.nodes[0].resources[0].width").value(nullValue()))
-        .andExpect(jsonPath("$.nodes[0].resources[0].height").value(nullValue()))
-        .andExpect(jsonPath("$.nodes[0].resources[0].durationMs").value(nullValue()));
+        .andExpect(jsonPath("$.nodes[0].resources[0].blobId").doesNotExist())
+        .andExpect(jsonPath("$.nodes[0].resources[0].mediaType").doesNotExist())
+        .andExpect(jsonPath("$.nodes[0].resources[0].sizeBytes").doesNotExist());
 
     CreateCanvasRequestDTO body = new CreateCanvasRequestDTO();
     body.setTitle("board");
     mockMvc
         .perform(
-            post("/api/canvases")
+            post("/api/canvas/canvases")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsBytes(body)))
         .andExpect(status().isCreated())
@@ -230,16 +233,17 @@ class CanvasControllerTest {
         .andExpect(jsonPath("$.id").value(CANVAS.toString()));
     verify(commandService).createCanvas("board");
 
+    // 边界只保证 title 必填；空白与超长标题是领域规则，由真实服务拒绝。
     mockMvc
         .perform(
-            post("/api/canvases")
+            post("/api/canvas/canvases")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"title\":\"   \"}"))
+                .content("{\"title\":null}"))
         .andExpect(status().isBadRequest());
     mockMvc
-        .perform(post("/api/canvases").contentType(MediaType.APPLICATION_JSON))
+        .perform(post("/api/canvas/canvases").contentType(MediaType.APPLICATION_JSON))
         .andExpect(status().isBadRequest());
-    verify(commandService, never()).createCanvas(null);
+    verify(commandService, times(1)).createCanvas("board");
   }
 
   /** 测试意图：11 种 typed command 直映射为领域命令，前置条件是各语义组的编辑起点旧值。 */
@@ -248,36 +252,34 @@ class CanvasControllerTest {
     when(commandService.applyCommands(any(UUID.class), any(UUID.class), anyList()))
         .thenReturn(new CanvasCommandResult.Accepted(patch()));
     ApplyCanvasCommandsRequestDTO request = new ApplyCanvasCommandsRequestDTO();
-    request.setIdempotencyKey(COMMAND.toString());
+    request.setIdempotencyKey(COMMAND);
     request.setCommands(
         List.of(
             new CanvasCommandDTO.CreateNode(
-                NODE_1.toString(),
+                NODE_1,
                 "note",
                 new CanvasTransformDTO(1, 2, 100, 80),
                 List.of(
                     new CanvasResourceInputDTO.Text("body", "hello"),
-                    new CanvasResourceInputDTO.Blob("a.png", BLOB_1.toString()))),
-            new CanvasCommandDTO.RenameNode(NODE_1.toString(), "note", "renamed"),
+                    new CanvasResourceInputDTO.Blob("a.png", BLOB_1))),
+            new CanvasCommandDTO.RenameNode(NODE_1, "note", "renamed"),
             new CanvasCommandDTO.SetNodeResources(
-                NODE_1.toString(),
-                List.of(RESOURCE_1.toString()),
-                List.of(new CanvasResourceInputDTO.Keep(RESOURCE_1.toString()))),
-            new CanvasCommandDTO.SetNodeFunction(NODE_1.toString(), null, functionDto()),
-            new CanvasCommandDTO.SetNodeGroup(NODE_1.toString(), null, GROUP.toString()),
+                NODE_1, List.of(RESOURCE_1), List.of(new CanvasResourceInputDTO.Keep(RESOURCE_1))),
+            new CanvasCommandDTO.SetNodeFunction(NODE_1, null, functionDto()),
+            new CanvasCommandDTO.SetNodeGroup(NODE_1, null, GROUP),
             new CanvasCommandDTO.UpdateNodeTransform(
-                NODE_1.toString(), new CanvasTransformDTO(1, 2, 100, 80), null),
+                NODE_1, new CanvasTransformDTO(1, 2, 100, 80), null),
             new CanvasCommandDTO.CreateGroup(
-                GROUP.toString(), "group", new CanvasTransformDTO(0, 0, 400, 200)),
-            new CanvasCommandDTO.RenameGroup(GROUP.toString(), "group", "renamed group"),
+                GROUP, "group", new CanvasTransformDTO(0, 0, 400, 200)),
+            new CanvasCommandDTO.RenameGroup(GROUP, "group", "renamed group"),
             new CanvasCommandDTO.UpdateGroupTransform(
-                GROUP.toString(), new CanvasTransformDTO(0, 0, 400, 200), null),
-            new CanvasCommandDTO.DeleteGroup(GROUP.toString(), List.of(NODE_1.toString())),
-            new CanvasCommandDTO.DeleteNode(NODE_2.toString(), List.of(), functionDto())));
+                GROUP, new CanvasTransformDTO(0, 0, 400, 200), null),
+            new CanvasCommandDTO.DeleteGroup(GROUP, List.of(NODE_1)),
+            new CanvasCommandDTO.DeleteNode(NODE_2, List.of(), functionDto())));
 
     mockMvc
         .perform(
-            post("/api/canvases/" + CANVAS + "/commands")
+            post("/api/canvas/canvases/" + CANVAS + "/commands")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsBytes(request)))
         .andExpect(status().isOk())
@@ -333,7 +335,7 @@ class CanvasControllerTest {
 
     mockMvc
         .perform(
-            post("/api/canvases/" + CANVAS + "/commands")
+            post("/api/canvas/canvases/" + CANVAS + "/commands")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(commandJson("")))
         .andExpect(status().isConflict())
@@ -361,11 +363,10 @@ class CanvasControllerTest {
         .thenThrow(missing);
     assertSame(
         missing,
-        assertThrows(
-            DomainException.class, () -> controller.applyCommands(CANVAS.toString(), request)));
+        assertThrows(DomainException.class, () -> controller.applyCommands(CANVAS, request)));
     mockMvc
         .perform(
-            post("/api/canvases/" + CANVAS + "/commands")
+            post("/api/canvas/canvases/" + CANVAS + "/commands")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(commandJson("")))
         .andExpect(status().isNotFound())
@@ -378,11 +379,10 @@ class CanvasControllerTest {
         .applyCommands(any(UUID.class), any(UUID.class), anyList());
     assertSame(
         conflict,
-        assertThrows(
-            DomainException.class, () -> controller.applyCommands(CANVAS.toString(), request)));
+        assertThrows(DomainException.class, () -> controller.applyCommands(CANVAS, request)));
     mockMvc
         .perform(
-            post("/api/canvases/" + CANVAS + "/commands")
+            post("/api/canvas/canvases/" + CANVAS + "/commands")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(commandJson("")))
         .andExpect(status().isConflict())
@@ -398,7 +398,7 @@ class CanvasControllerTest {
 
     mockMvc
         .perform(
-            post("/api/canvases/" + CANVAS + "/commands")
+            post("/api/canvas/canvases/" + CANVAS + "/commands")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(commandJson("")))
         .andExpect(status().isOk())
@@ -414,14 +414,14 @@ class CanvasControllerTest {
     // 顶层未知字段。
     mockMvc
         .perform(
-            post("/api/canvases/" + CANVAS + "/commands")
+            post("/api/canvas/canvases/" + CANVAS + "/commands")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(commandJson("\"extra\":true")))
         .andExpect(status().isBadRequest());
     // 未知命令类型同样拒绝。
     mockMvc
         .perform(
-            post("/api/canvases/" + CANVAS + "/commands")
+            post("/api/canvas/canvases/" + CANVAS + "/commands")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     """
@@ -431,7 +431,7 @@ class CanvasControllerTest {
         .andExpect(status().isBadRequest());
     mockMvc
         .perform(
-            post("/api/canvases/" + CANVAS + "/commands")
+            post("/api/canvas/canvases/" + CANVAS + "/commands")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     """
@@ -443,7 +443,7 @@ class CanvasControllerTest {
     // 嵌套资源槽位的未知判别值。
     mockMvc
         .perform(
-            post("/api/canvases/" + CANVAS + "/commands")
+            post("/api/canvas/canvases/" + CANVAS + "/commands")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     """
@@ -456,28 +456,29 @@ class CanvasControllerTest {
     // 非 canonical 的幂等键。
     mockMvc
         .perform(
-            post("/api/canvases/" + CANVAS + "/commands")
+            post("/api/canvas/canvases/" + CANVAS + "/commands")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(commandJson("").replace(COMMAND.toString(), "cmd-1")))
         .andExpect(status().isBadRequest());
     // 缺失或空命令批，以及缺失请求体。
     mockMvc
         .perform(
-            post("/api/canvases/" + CANVAS + "/commands")
+            post("/api/canvas/canvases/" + CANVAS + "/commands")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"idempotencyKey\":\"%s\"}".formatted(COMMAND)))
         .andExpect(status().isBadRequest());
     mockMvc
         .perform(
-            post("/api/canvases/" + CANVAS + "/commands")
+            post("/api/canvas/canvases/" + CANVAS + "/commands")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"idempotencyKey\":\"%s\",\"commands\":[]}".formatted(COMMAND)))
         .andExpect(status().isBadRequest());
     mockMvc
         .perform(
-            post("/api/canvases/" + CANVAS + "/commands").contentType(MediaType.APPLICATION_JSON))
+            post("/api/canvas/canvases/" + CANVAS + "/commands")
+                .contentType(MediaType.APPLICATION_JSON))
         .andExpect(status().isBadRequest());
-    mockMvc.perform(get("/api/canvases/not-a-uuid")).andExpect(status().isBadRequest());
+    mockMvc.perform(get("/api/canvas/canvases/not-a-uuid")).andExpect(status().isBadRequest());
 
     verify(commandService, never()).applyCommands(any(UUID.class), any(UUID.class), anyList());
   }
@@ -488,7 +489,7 @@ class CanvasControllerTest {
     // args 不是 object。
     mockMvc
         .perform(
-            post("/api/canvases/" + CANVAS + "/commands")
+            post("/api/canvas/canvases/" + CANVAS + "/commands")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(setFunctionJson("5")))
         .andExpect(status().isBadRequest());
@@ -503,14 +504,14 @@ class CanvasControllerTest {
     }
     mockMvc
         .perform(
-            post("/api/canvases/" + CANVAS + "/commands")
+            post("/api/canvas/canvases/" + CANVAS + "/commands")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(setFunctionJson(nested.toString())))
         .andExpect(status().isBadRequest());
     // 超过 CanvasJson.MAX_LENGTH 的 args。
     mockMvc
         .perform(
-            post("/api/canvases/" + CANVAS + "/commands")
+            post("/api/canvas/canvases/" + CANVAS + "/commands")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     setFunctionJson("{\"text\":\"" + "x".repeat(CanvasJson.MAX_LENGTH) + "\"}")))
@@ -522,7 +523,9 @@ class CanvasControllerTest {
   /** 不提供画布删除入口。 */
   @Test
   void deleteCanvasEndpointIsNotAvailable() throws Exception {
-    mockMvc.perform(delete("/api/canvases/" + CANVAS)).andExpect(status().isMethodNotAllowed());
+    mockMvc
+        .perform(delete("/api/canvas/canvases/" + CANVAS))
+        .andExpect(status().isMethodNotAllowed());
   }
 
   /** 一个最小合法命令批；{@code extraFields} 为附加的顶层成员片段（不含逗号）。 */
