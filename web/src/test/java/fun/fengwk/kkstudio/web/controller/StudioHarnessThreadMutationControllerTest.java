@@ -51,8 +51,8 @@ class StudioHarnessThreadMutationControllerTest extends HarnessThreadControllerT
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"expectedVersion\":\"4\"}"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.thread.threadId").value(idText(7)))
-        .andExpect(jsonPath("$.data.version").value("3"));
+        .andExpect(jsonPath("$.thread.threadId").value(idText(7)))
+        .andExpect(jsonPath("$.version").value("3"));
 
     verify(runtime).abandonExecution(id(7), id(9), 4L);
   }
@@ -96,9 +96,9 @@ class StudioHarnessThreadMutationControllerTest extends HarnessThreadControllerT
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"expectedVersion\":\"3\"}"))
         .andExpect(status().isAccepted())
-        .andExpect(jsonPath("$.data.thread.threadId").value(idText(1)))
-        .andExpect(jsonPath("$.data.turnStartEntryId").value(idText(2)))
-        .andExpect(jsonPath("$.data.childThreadId").value(nullValue()));
+        .andExpect(jsonPath("$.thread.threadId").value(idText(1)))
+        .andExpect(jsonPath("$.turnStartEntryId").value(idText(2)))
+        .andExpect(jsonPath("$.childThreadId").value(nullValue()));
 
     ArgumentCaptor<CompactThreadCommand> captor =
         ArgumentCaptor.forClass(CompactThreadCommand.class);
@@ -121,7 +121,8 @@ class StudioHarnessThreadMutationControllerTest extends HarnessThreadControllerT
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"expectedVersion\":\"3\"}"))
         .andExpect(status().isConflict())
-        .andExpect(jsonPath("$.errors.reason").value("MANUAL_COMPACTION_UNAVAILABLE"));
+        .andExpect(jsonPath("$.code").value("conflict"))
+        .andExpect(jsonPath("$.reason").value("MANUAL_COMPACTION_UNAVAILABLE"));
   }
 
   /** 意图：验证手动压缩拒绝非字符串 version。 */
@@ -162,7 +163,8 @@ class StudioHarnessThreadMutationControllerTest extends HarnessThreadControllerT
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"name\":\"main\"}"))
         .andExpect(status().isConflict())
-        .andExpect(jsonPath("$.errors.reason").value("THREAD_NAME_CONFLICT"));
+        .andExpect(jsonPath("$.code").value("conflict"))
+        .andExpect(jsonPath("$.reason").value("THREAD_NAME_CONFLICT"));
   }
 
   /** 验证重命名成功后从权威 snapshot 回读 name/version。 */
@@ -179,9 +181,9 @@ class StudioHarnessThreadMutationControllerTest extends HarnessThreadControllerT
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"name\":\"  new thread name  \"}"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.threadId").value(idText(1)))
-        .andExpect(jsonPath("$.data.name").value("new thread name"))
-        .andExpect(jsonPath("$.data.version").value("4"));
+        .andExpect(jsonPath("$.threadId").value(idText(1)))
+        .andExpect(jsonPath("$.name").value("new thread name"))
+        .andExpect(jsonPath("$.version").value("4"));
 
     ArgumentCaptor<RenameThreadCommand> captor = ArgumentCaptor.forClass(RenameThreadCommand.class);
     verify(runtime).renameThread(captor.capture());
@@ -267,8 +269,8 @@ class StudioHarnessThreadMutationControllerTest extends HarnessThreadControllerT
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"yoloEnabled\":true}"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.threadId").value(idText(1)))
-        .andExpect(jsonPath("$.data.status").value("IDLE"));
+        .andExpect(jsonPath("$.threadId").value(idText(1)))
+        .andExpect(jsonPath("$.status").value("IDLE"));
 
     ArgumentCaptor<SetThreadYoloCommand> captor =
         ArgumentCaptor.forClass(SetThreadYoloCommand.class);
@@ -389,19 +391,17 @@ class StudioHarnessThreadMutationControllerTest extends HarnessThreadControllerT
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"stopRequestId\":\"" + idText(9) + "\",\"expectedVersion\":\"3\"}"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.status").value("STOPPED"))
-        .andExpect(jsonPath("$.data.stoppedThreads[0].threadId").value(idText(1)))
-        .andExpect(jsonPath("$.data.stoppedThreads[0].stopRequestId").value(idText(9)))
-        .andExpect(jsonPath("$.data.stoppedThreads[0].stoppedTurnEndEntryId").value(idText(6)))
-        .andExpect(jsonPath("$.data.stoppedThreads[0].cancelledCommandCount").value(2))
-        .andExpect(jsonPath("$.data.stoppedThreads[0].cancelledInputs[0].sequence").value("1"))
+        .andExpect(jsonPath("$.status").value("STOPPED"))
+        .andExpect(jsonPath("$.stoppedThreads[0].threadId").value(idText(1)))
+        .andExpect(jsonPath("$.stoppedThreads[0].stopRequestId").value(idText(9)))
+        .andExpect(jsonPath("$.stoppedThreads[0].stoppedTurnEndEntryId").value(idText(6)))
+        .andExpect(jsonPath("$.stoppedThreads[0].cancelledCommandCount").value(2))
+        .andExpect(jsonPath("$.stoppedThreads[0].cancelledInputs[0].sequence").value("1"))
         .andExpect(
-            jsonPath("$.data.stoppedThreads[0].cancelledInputs[0].idempotencyKey")
-                .value(idText(50)))
+            jsonPath("$.stoppedThreads[0].cancelledInputs[0].idempotencyKey").value(idText(50)))
+        .andExpect(jsonPath("$.stoppedThreads[0].cancelledInputs[0].type").value("USER_MESSAGE"))
         .andExpect(
-            jsonPath("$.data.stoppedThreads[0].cancelledInputs[0].type").value("USER_MESSAGE"))
-        .andExpect(
-            jsonPath("$.data.stoppedThreads[0].cancelledInputs[0].payloadJson")
+            jsonPath("$.stoppedThreads[0].cancelledInputs[0].payloadJson")
                 .value(
                     "{\"message\":{\"role\":\"USER\",\"contents\":[{\"type\":\"text\",\"text\":\"hello\"}]}}"));
   }
