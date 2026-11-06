@@ -1,7 +1,6 @@
 import {
   assert,
   cid,
-  envelopeData,
   HttpError,
   sleep,
 } from './http.mjs'
@@ -181,7 +180,7 @@ export async function createChat(
     environmentName,
   })
   assert(status === 201, `create Chat status ${status}: ${JSON.stringify(json)}`)
-  const chat = envelopeData(json)
+  const chat = json
   assert(chat?.id && chat?.agentName, `invalid Chat: ${JSON.stringify(chat)}`)
   assert(
     Object.hasOwn(chat, 'environmentName'),
@@ -354,7 +353,7 @@ export async function acceptCommandBatch(ctx, { owner, target, commands }) {
       body,
     )
     assert(status === 202, `accept thread command batch status ${status}: ${JSON.stringify(json)}`)
-    accepted = envelopeData(json)
+    accepted = json
     assertAcceptedCommands(accepted)
     assert(
       String(accepted.thread?.threadId) === threadId,
@@ -379,7 +378,7 @@ export async function acceptCommandBatch(ctx, { owner, target, commands }) {
     commands,
   })
   assert(status === 202, `accept command batch status ${status}: ${JSON.stringify(json)}`)
-  accepted = envelopeData(json)
+  accepted = json
   assertAcceptedCommands(accepted)
   // target 一致性：threadId 恒等于 target.threadId。
   assert(
@@ -567,7 +566,7 @@ export async function previewProviderRequest(
     },
   )
   assert(status === 200, `provider request preview status ${status}: ${JSON.stringify(json)}`)
-  return assertProviderPreview(envelopeData(json), 'DRAFT_REQUEST_PREVIEW')
+  return assertProviderPreview(json, 'DRAFT_REQUEST_PREVIEW')
 }
 
 /**
@@ -583,7 +582,7 @@ export async function previewSessionDraftRequest(ctx, sessionId, { startEntryId,
     { startEntryId: canonicalUuid(startEntryId, 'startEntryId'), commands },
   )
   assert(status === 200, `session draft preview status ${status}: ${JSON.stringify(json)}`)
-  return assertProviderPreview(envelopeData(json), 'DRAFT_REQUEST_PREVIEW')
+  return assertProviderPreview(json, 'DRAFT_REQUEST_PREVIEW')
 }
 
 /**
@@ -600,7 +599,7 @@ export async function previewHistoricalRequest(ctx, sessionId, entryId) {
     `/api/sessions/${encodeURIComponent(id)}/entries/${encodeURIComponent(entry)}/provider-request-preview`,
   )
   assert(status === 200, `historical preview status ${status}: ${JSON.stringify(json)}`)
-  return assertProviderPreview(envelopeData(json), 'HISTORICAL_REQUEST_PREVIEW')
+  return assertProviderPreview(json, 'HISTORICAL_REQUEST_PREVIEW')
 }
 
 // ---------- Session / Thread 查询 ----------
@@ -637,7 +636,7 @@ async function listChatPages(ctx, path, validateItem = () => {}) {
     const query = cursor == null ? '' : `?cursor=${encodeURIComponent(cursor)}`
     const { status, json } = await ctx.call('GET', `${path}${query}`)
     assert(status === 200, `Chat page status ${status}: ${JSON.stringify(json)}`)
-    const page = envelopeData(json)
+    const page = json
     assert(Array.isArray(page?.items), `expected Chat page: ${JSON.stringify(json)}`)
     assert(
       Object.hasOwn(page, 'nextCursor')
@@ -668,7 +667,7 @@ export async function listSessionThreads(ctx, sessionId) {
     'GET',
     `/api/sessions/${encodeURIComponent(sessionId)}/threads`,
   )
-  const threads = envelopeData(json)
+  const threads = json
   assert(Array.isArray(threads), `expected Thread summary array: ${JSON.stringify(json)}`)
   for (const item of threads) {
     canonicalUuid(item?.threadId, 'thread.threadId')
@@ -751,7 +750,7 @@ export async function listSessionEntries(ctx, sessionId) {
       'GET',
       `/api/sessions/${encodeURIComponent(sessionId)}/entries${query}`,
     )
-    const page = envelopeData(json)
+    const page = json
     assert(Array.isArray(page?.items), `expected Session Entry page: ${JSON.stringify(json)}`)
     for (const entry of page.items) {
       assertSessionEntry(entry, { sessionId })
@@ -771,7 +770,7 @@ export async function getThreadSnapshot(ctx, threadId) {
     'GET',
     `/api/threads/${encodeURIComponent(threadId)}`,
   )
-  const snapshot = envelopeData(json)
+  const snapshot = json
   assert(snapshot?.thread, `expected Thread snapshot: ${JSON.stringify(json)}`)
   threadIdOf(snapshot.thread)
   return snapshot
@@ -828,7 +827,7 @@ export async function snapshotEntries(ctx, threadId) {
  */
 export async function listEnvironments(ctx) {
   const { json } = await ctx.call('GET', '/api/environments')
-  const environments = envelopeData(json)
+  const environments = json
   assert(Array.isArray(environments), `expected Environment array: ${JSON.stringify(json)}`)
   for (const environment of environments) {
     canonicalUuid(environment.id, 'environment.id')
@@ -905,7 +904,7 @@ export async function setThreadYolo(ctx, threadId, { yoloEnabled }) {
     { yoloEnabled },
   )
   assert(status === 200, `set thread yolo status ${status}: ${JSON.stringify(json)}`)
-  const updated = envelopeData(json)
+  const updated = json
   threadIdOf(updated)
   return updated
 }
@@ -923,7 +922,7 @@ export async function renameSession(ctx, sessionId, name) {
     { name },
   )
   assert(status === 200, `rename session status ${status}: ${JSON.stringify(json)}`)
-  const renamed = envelopeData(json)
+  const renamed = json
   canonicalUuid(renamed?.sessionId, 'renamed.sessionId')
   assert(String(renamed.sessionId) === String(sessionId), JSON.stringify(renamed))
   assert(
@@ -946,7 +945,7 @@ export async function renameThread(ctx, threadId, name) {
     { name },
   )
   assert(status === 200, `rename thread status ${status}: ${JSON.stringify(json)}`)
-  const renamed = envelopeData(json)
+  const renamed = json
   threadIdOf(renamed)
   assert(String(renamed.threadId) === String(threadId), JSON.stringify(renamed))
   return renamed
@@ -1000,7 +999,7 @@ export async function stopThread(ctx, threadId, { stopRequestId, expectedVersion
     },
   )
   assert(status === 200, `stop status ${status}: ${JSON.stringify(json)}`)
-  const stop = envelopeData(json)
+  const stop = json
   assert(stop?.thread, `expected stop result thread: ${JSON.stringify(json)}`)
   threadIdOf(stop.thread)
   assert(
@@ -1093,7 +1092,7 @@ export async function approveToolInvocation(
     { decision, decisionId, reason },
   )
   assert(status === 200, `approval status ${status}: ${JSON.stringify(json)}`)
-  const invocation = envelopeData(json)
+  const invocation = json
   assert(invocation?.id && invocation.status, `invalid ToolInvocationDTO: ${JSON.stringify(json)}`)
   canonicalUuid(invocation.id, 'invocation.id')
   return invocation

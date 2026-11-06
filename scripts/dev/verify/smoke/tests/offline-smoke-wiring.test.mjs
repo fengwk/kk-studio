@@ -7,16 +7,36 @@
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
+import { createServer } from 'node:http'
 import path from 'node:path'
 import test from 'node:test'
 
 import { repositoryRoot } from '../../../lib/repo-root.mjs'
 import { functionBatch } from '../offline-canvas-contract.mjs'
-import { createAndRun, initializeOpencliPlugin } from '../offline-smoke.mjs'
+import { createAndRun, createClient, initializeOpencliPlugin } from '../offline-smoke.mjs'
 import { CANVAS_ID, documentDto, functionDefinitions, functionVersion, patchDto, runDto } from './support/canvas-dto.mjs'
 
 const REPOSITORY_ROOT = repositoryRoot()
 const clone = (value) => structuredClone(value)
+
+test('application client reads resource bodies and empty 204 responses', async () => {
+  // Exercise the actual fetch path rather than a substituted jsonCall.
+  const server = createServer((request, response) => {
+    if (request.url === '/empty') {
+      response.writeHead(204).end()
+    } else {
+      response.writeHead(200, { 'Content-Type': 'application/json' }).end('{"id":"canvas"}')
+    }
+  })
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  try {
+    const client = createClient(`http://127.0.0.1:${server.address().port}`)
+    assert.deepEqual(await client.jsonCall('GET', '/canvas'), { id: 'canvas' })
+    assert.equal(await client.jsonCall('DELETE', '/empty'), null)
+  } finally {
+    await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
+  }
+})
 
 /**
  * 按固定顺序应答 createAndRun 的请求，并记录它真正发出的 wire payload。

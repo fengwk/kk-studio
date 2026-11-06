@@ -1,171 +1,225 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
-  ApiError,
-  apiClient,
-  apiErrorDetail,
-  isConflictError,
-  isConflictReason,
-  isNotFoundError,
-} from '@/shared/api/client'
+  ApiError, apiClient, apiErrorDetail, isConflictError, isConflictReason, isNotFoundError, request, url,
+} from './client'
 import { setLocale } from '@/shared/i18n'
 
-const axiosMock = vi.hoisted(() => {
-  const client = {
-    get: vi.fn(),
-    post: vi.fn(),
-    put: vi.fn(),
-    delete: vi.fn(),
-    interceptors: {
-      request: {
-        use: vi.fn(),
-      },
-      response: {
-        use: vi.fn(),
-      },
-    },
-  }
-  return {
-    client,
-    create: vi.fn(() => client),
-  }
+afterEach(() => {
+  vi.unstubAllGlobals()
+  vi.useRealTimers()
 })
 
-vi.mock('axios', () => ({
-  default: {
-    create: axiosMock.create,
-  },
-}))
-
-describe('apiClient', () => {
-  // Git 请求显式关闭总时限，其余 API 仍继承 60s；POST/PUT 配置必须透传。
-  it('preserves default timeout and passes per-request timeout overrides', async () => {
-    expect(axiosMock.create).toHaveBeenCalledWith({ baseURL: '/api', timeout: 60000 })
-    await apiClient.post('/git', {}, { timeout: 0 })
-    await apiClient.put('/git', {}, { timeout: 0 })
-    expect(axiosMock.client.post).toHaveBeenCalledWith('/git', '{}', {
-      timeout: 0,
-      headers: { 'Content-Type': 'application/json' },
-    })
-    expect(axiosMock.client.put).toHaveBeenCalledWith('/git', '{}', {
-      timeout: 0,
-      headers: { 'Content-Type': 'application/json' },
-    })
+describe('HTTP client', () => {
+  // 类型与编码都来自实际生成的路由；通配符只保留段间斜线。
+  it('builds typed URLs with path and query encoding', () => {
+    expect(url('DELETE /api/models/{*modelName}', {
+      path: { modelName: 'a/b c' }, query: { expectedVersion: '1' },
+    })).toBe('/api/models/a/b%20c?expectedVersion=1')
+    expect(url('GET /api/canvases/{canvasId}', { path: { canvasId: 'a/b c' } }))
+      .toBe('/api/canvases/a%2Fb%20c')
+    // 类型断言由 tsc 检查，不执行无效请求。
+    // eslint-disable-next-line no-constant-condition
+    if (false) {
+      // @ts-expect-error 未知路由不能调用。
+      request('GET /api/not-a-route', {})
+      // @ts-expect-error 必填查询参数不能省略。
+      request('DELETE /api/providers/{name}', { path: { name: 'x' } })
+      // @ts-expect-error 路径参数类型由路由表约束。
+      url('GET /api/canvases/{canvasId}', { path: { canvasId: 1 } })
+    }
   })
-  it('adds the current locale to every request', () => {
-    const [withLocale] = axiosMock.client.interceptors.request.use.mock.calls[0]
 
+  // 成功体就是资源，空体无值；外观与核心共享语言、序列化及解析。
+  it('reads resource bodies and supports the temporary facade', async () => {
     setLocale('en-US')
-    expect(withLocale({ headers: {} }).headers['Accept-Language']).toBe('en-US')
-
-    setLocale('zh-CN')
-    expect(withLocale({ headers: {} }).headers['Accept-Language']).toBe('zh-CN')
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response('{"title":"A"}', { headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+    vi.stubGlobal('fetch', fetchMock)
+    expect(await request('POST /api/canvases', { body: { title: 'A' } }))
+      .toEqual({ title: 'A' })
+    expect(fetchMock.mock.calls[0]![0]).toBe('/api/canvases')
+    expect(fetchMock.mock.calls[0]![1]).toMatchObject({
+      method: 'POST', body: '{"title":"A"}',
+      headers: { 'Accept-Language': 'en-US', 'Content-Type': 'application/json' },
+    })
+    await expect(apiClient.delete('/models/a', { params: { v: 1 }, data: { x: 2 } }))
+      .resolves.toBeUndefined()
+    expect(fetchMock.mock.calls[1]![0]).toBe('/api/models/a?v=1')
+    expect(fetchMock.mock.calls[1]![1].body).toBe('{"x":2}')
   })
 
-  it('unwraps backend result envelopes and rejects failed envelopes', async () => {
-    const [unwrap] = axiosMock.client.interceptors.response.use.mock.calls[0]
-
-    expect(unwrap({ data: { status: 200, data: { ok: true } } })).toEqual({ ok: true })
-    expect(unwrap({ data: { plain: true } })).toEqual({ plain: true })
-    await expect(unwrap({ data: { status: 500, message: 'boom' } })).rejects.toThrow('boom')
-    await expect(unwrap({ data: { status: 500 } })).rejects.toThrow('请求失败')
+  // 外观保留已有的 GET 参数、请求头、无损解析与 PUT/POST 序列化。
+  it('retains facade request options and mutations', async () => {
+    const transport = vi.fn(async (_url: string, _init: RequestInit) =>
+      new Response('{"n":9007199254740993}', { headers: { 'Content-Type': 'application/json' } }))
+    vi.stubGlobal('fetch', transport)
+    const parser = vi.fn((raw: string) => raw)
+    expect(await apiClient.get('/models?existing=1', {
+      params: { q: 'a b', omit: undefined, enabled: false },
+      headers: { 'Cache-Control': 'no-store' },
+      jsonParser: parser,
+    })).toBe('{"n":9007199254740993}')
+    expect(transport.mock.calls[0]![0]).toBe('/api/models?existing=1&q=a+b&enabled=false')
+    expect(transport.mock.calls[0]![1].headers).toMatchObject({ 'Cache-Control': 'no-store' })
+    expect(parser).toHaveBeenCalledOnce()
+    await apiClient.post('/models', { name: 'x' }, { timeout: 0 })
+    await apiClient.put('/models/x', { name: 'y' }, { headers: { 'Content-Type': 'application/json' } })
+    expect(transport.mock.calls[1]![1]).toMatchObject({ method: 'POST', body: '{"name":"x"}' })
+    expect(transport.mock.calls[2]![1]).toMatchObject({ method: 'PUT', body: '{"name":"y"}' })
   })
 
-  it('normalizes transport errors with backend, network and fallback messages', async () => {
-    const [, normalizeError] = axiosMock.client.interceptors.response.use.mock.calls[0]
-
-    await expect(normalizeError({ response: { data: { message: 'backend failed' } } })).rejects.toThrow('backend failed')
-    await expect(normalizeError({ message: 'network failed' })).rejects.toThrow('network failed')
-    await expect(normalizeError({})).rejects.toThrow('请求失败')
-  })
-
-  it('preserves backend code and error context without changing generic conflict handling', async () => {
-    const [unwrap, normalizeError] = axiosMock.client.interceptors.response.use.mock.calls[0]
-
-    let envelopeError: ApiError | undefined
+  // problem 扩展字段位于顶层，非 problem 不得被当作错误信封解析。
+  it('maps problem details and uses a safe fallback for other responses', async () => {
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        title: 'Conflict', code: 'conflict', reason: 'STALE', detail: 'changed',
+        errors: { conflicts: [] },
+      }), { status: 409, headers: { 'Content-Type': 'application/problem+json' } }))
+      .mockResolvedValueOnce(new Response('{"title":"not a problem"}', {
+        status: 502, headers: { 'Content-Type': 'application/json' },
+      })))
+    let error: unknown
     try {
-      await unwrap({
-        data: {
-          status: 409,
-          code: 'version_conflict',
-          message: 'stale',
-          errors: { resource: 'agent_model', expectedVersion: '2', actualVersion: '3' },
-        },
-      })
-    } catch (error) {
-      envelopeError = error as ApiError
+      await request('GET /api/canvases', {})
+    } catch (caught) {
+      error = caught
     }
-    expect(envelopeError).toMatchObject({
-      status: 409,
-      code: 'version_conflict',
-      errors: { resource: 'agent_model', expectedVersion: '2', actualVersion: '3' },
+    expect(error).toMatchObject({
+      message: 'Conflict', status: 409, code: 'conflict', reason: 'STALE',
+      detail: 'changed', errors: { conflicts: [] },
     })
-    expect(isConflictError(envelopeError)).toBe(true)
-
-    let transportError: ApiError | undefined
-    try {
-      await normalizeError({
-        response: {
-          status: 409,
-          data: { code: 'in_use', message: 'referenced', errors: { resource: 'agent_model' } },
-        },
-      })
-    } catch (error) {
-      transportError = error as ApiError
-    }
-    expect(transportError).toMatchObject({
-      status: 409,
-      code: 'in_use',
-      errors: { resource: 'agent_model' },
+    expect(isConflictReason(error, 'STALE')).toBe(true)
+    expect(apiErrorDetail(error)).toBe('changed')
+    expect(isConflictReason(new ApiError('x', 409, 'conflict', { reason: 'STALE' }), 'STALE'))
+      .toBe(false)
+    await expect(request('GET /api/canvases', {})).rejects.toMatchObject({
+      status: 502, code: 'upstream_failed',
     })
-    expect(isConflictError(new ApiError('thread conflict', 409))).toBe(true)
-    expect(
-      isConflictReason(
-        new ApiError('stale', 409, 'CONFLICT', { reason: 'STALE_COMMAND_CURSOR' }),
-        'STALE_COMMAND_CURSOR',
-      ),
-    ).toBe(true)
-    expect(
-      isConflictReason(new ApiError('generic', 409, 'CONFLICT'), 'STALE_COMMAND_CURSOR'),
-    ).toBe(false)
   })
 
-  it('classifies not-found errors without matching other failures', () => {
-    expect(isNotFoundError(new ApiError('missing', 404, 'NOT_FOUND'))).toBe(true)
-    expect(isNotFoundError(new ApiError('failed', 500))).toBe(false)
-    expect(isNotFoundError(new Error('missing'))).toBe(false)
+  // 状态分类仅接受对应 HTTP 状态的 ApiError，不把普通错误或相似对象当作服务端回执。
+  it('classifies conflict and not-found errors by status', () => {
+    const conflict = new ApiError('conflict', 409, 'conflict')
+    const notFound = new ApiError('missing', 404, 'not_found')
+    expect(isConflictError(conflict)).toBe(true)
+    expect(isConflictError(notFound)).toBe(false)
+    expect(isNotFoundError(notFound)).toBe(true)
+    expect(isNotFoundError(conflict)).toBe(false)
+    expect(isConflictError(new ApiError('network'))).toBe(false)
+    expect(isNotFoundError(new ApiError('network'))).toBe(false)
+    expect(isConflictError({ status: 409 })).toBe(false)
+    expect(isNotFoundError({ status: 404 })).toBe(false)
+    expect(isConflictError(new Error('conflict'))).toBe(false)
+    expect(isNotFoundError(null)).toBe(false)
   })
 
-  // 测试意图：只有 ApiError 回执里的非空字符串 detail 才是去敏失败原因，其余一律返回 null。
-  it('extracts only non-empty string details from api errors', () => {
-    expect(
-      apiErrorDetail(new ApiError('unavailable', 409, 'environment_unavailable', { detail: 'no READY owner' })),
-    ).toBe('no READY owner')
-    expect(apiErrorDetail(new ApiError('blank', 400, 'BAD_REQUEST', { detail: '' }))).toBeNull()
-    expect(apiErrorDetail(new ApiError('typed', 400, 'BAD_REQUEST', { detail: 42 }))).toBeNull()
-    expect(apiErrorDetail(new ApiError('plain', 500))).toBeNull()
-    expect(apiErrorDetail(new Error('plain'))).toBeNull()
-    expect(apiErrorDetail('plain')).toBeNull()
-    expect(apiErrorDetail(null)).toBeNull()
+  // 解析器接受原始文本，下载与脚本通过媒体类型区分。
+  it('handles custom JSON, text and binary responses', async () => {
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(new Response('{"n":1}', { headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response('script', { headers: { 'Content-Type': 'application/octet-stream' } }))
+      .mockResolvedValueOnce(new Response('bytes', { headers: { 'Content-Type': 'text/plain' } })))
+    const parser = vi.fn(() => ['parsed'])
+    expect(await request('GET /api/canvases', {}, { jsonParser: parser })).toEqual(['parsed'])
+    expect(parser).toHaveBeenCalledWith('{"n":1}')
+    expect(await request('GET /api/environments/uninstall/{operatingSystem}', {
+      path: { operatingSystem: 'linux' },
+    })).toBe('script')
+    const blob = await request('GET /api/sessions/{sessionId}/files/download', {
+      path: { sessionId: 's' }, query: { ownerId: '1', ownerKind: 'chat', path: 'x' },
+    })
+    expect(await blob.text()).toBe('bytes')
   })
 
-  it('delegates http requests to axios instance', async () => {
-    axiosMock.client.get.mockResolvedValueOnce({ ok: true })
-    axiosMock.client.post.mockResolvedValueOnce({ created: true })
-    axiosMock.client.put.mockResolvedValueOnce({ updated: true })
-    axiosMock.client.delete.mockResolvedValueOnce(undefined)
+  // 空体和非法 problem 响应均有确定回退，不读取旧信封。
+  it('handles empty and malformed HTTP bodies', async () => {
+    const transport = vi.fn()
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(new Response('', { headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response('', { headers: { 'Content-Type': 'text/plain' } }))
+      .mockResolvedValueOnce(new Response('', { headers: { 'Content-Type': 'application/octet-stream' } }))
+      .mockResolvedValueOnce(new Response('{', {
+        status: 404, headers: { 'Content-Type': 'application/problem+json; charset=utf-8' },
+      }))
+    vi.stubGlobal('fetch', transport)
+    await expect(request('GET /api/canvases', {})).resolves.toBeUndefined()
+    await expect(request('GET /api/canvases', {})).resolves.toBeUndefined()
+    await expect(request('GET /api/environments/uninstall/{operatingSystem}', {
+      path: { operatingSystem: 'linux' },
+    })).resolves.toBeUndefined()
+    await expect(request('GET /api/sessions/{sessionId}/files/download', {
+      path: { sessionId: 's' }, query: { ownerId: '1', ownerKind: 'chat', path: 'x' },
+    })).resolves.toBeUndefined()
+    await expect(request('GET /api/canvases', {}))
+      .rejects.toMatchObject({ status: 404, code: 'not_found' })
+  })
 
-    await expect(apiClient.get('/agents', { params: { pageNumber: 1 } })).resolves.toEqual({ ok: true })
-    await expect(apiClient.post('/ai/chat', { agentName: 'assistant' })).resolves.toEqual({ created: true })
-    await expect(apiClient.put('/agents/default-assistant', { name: 'Default' })).resolves.toEqual({ updated: true })
-    await expect(apiClient.delete('/agents/default-assistant')).resolves.toBeUndefined()
+  // 过渡外观保留二进制传输，不误用 JSON.stringify。
+  it('preserves binary bodies and text responses in the facade', async () => {
+    const transport = vi.fn(async (_url: string, _init: RequestInit) =>
+      new Response('plain', { headers: { 'Content-Type': 'text/plain' } }))
+    vi.stubGlobal('fetch', transport)
+    const form = new FormData()
+    form.set('field', 'value')
+    await expect(apiClient.post('/form', form)).resolves.toBe('plain')
+    expect(transport.mock.calls[0]![1].body).toBe(form)
+    await apiClient.post('/blob', new Blob(['data']))
+    await apiClient.post('/buffer', new ArrayBuffer(2))
+    await apiClient.post('/form-url', new URLSearchParams({ a: 'b' }))
+    expect(transport.mock.calls[3]![1].body).toBeInstanceOf(URLSearchParams)
+  })
 
-    expect(axiosMock.client.get).toHaveBeenCalledWith('/agents', { params: { pageNumber: 1 } })
-    expect(axiosMock.client.post).toHaveBeenCalledWith('/ai/chat', '{"agentName":"assistant"}', {
-      headers: { 'Content-Type': 'application/json' },
-    })
-    expect(axiosMock.client.put).toHaveBeenCalledWith('/agents/default-assistant', '{"name":"Default"}', {
-      headers: { 'Content-Type': 'application/json' },
-    })
-    expect(axiosMock.client.delete).toHaveBeenCalledWith('/agents/default-assistant')
+  // 本地取消在 fetch 前生效；缺省 problem 成员从状态回退。
+  it('handles already-aborted requests and incomplete problem details', async () => {
+    const transport = vi.fn().mockResolvedValue(new Response('{}', {
+      status: 409, headers: { 'Content-Type': 'application/problem+json' },
+    }))
+    vi.stubGlobal('fetch', transport)
+    await expect(request('GET /api/canvases', {}, { signal: AbortSignal.abort() }))
+      .rejects.toMatchObject({ name: 'AbortError' })
+    expect(transport).not.toHaveBeenCalled()
+    await expect(request('GET /api/canvases', {}))
+      .rejects.toMatchObject({ status: 409, code: 'conflict' })
+  })
+
+  // 超时和调用方取消在响应体读取期间仍生效。
+  it('aborts timed out and externally cancelled requests', async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('fetch', vi.fn((_url, init: RequestInit) => new Promise((_resolve, reject) => {
+      init.signal?.addEventListener('abort', () => reject(init.signal?.reason))
+    })))
+    const timed = request('GET /api/canvases', {})
+    const assertion = expect(timed).rejects.toMatchObject({ code: 'timeout' })
+    await vi.advanceTimersByTimeAsync(60000)
+    await assertion
+    const controller = new AbortController()
+    const aborted = request('GET /api/canvases', {}, { signal: controller.signal, timeoutMs: 0 })
+    controller.abort()
+    await expect(aborted).rejects.toMatchObject({ name: 'AbortError' })
+  })
+
+  // 收到响应头后仍可能等待响应体，超时必须覆盖这段时间。
+  it('keeps the timeout active while reading the response body', async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init: RequestInit) => ({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'Content-Type': 'application/json' }),
+      text: () => new Promise((_resolve, reject) => {
+        init.signal?.addEventListener('abort', () => reject(init.signal?.reason))
+      }),
+    })))
+    const pending = request('GET /api/canvases', {}, { timeoutMs: 5 })
+    const assertion = expect(pending).rejects.toMatchObject({ code: 'timeout' })
+    await vi.advanceTimersByTimeAsync(5)
+    await assertion
+  })
+
+  // 网络失败不依赖服务端错误信封。
+  it('normalizes network failures', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('offline')))
+    await expect(request('GET /api/canvases', {}))
+      .rejects.toMatchObject({ name: 'ApiError', code: 'network_error', message: 'offline' })
   })
 })

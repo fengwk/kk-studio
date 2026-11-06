@@ -151,7 +151,7 @@ public class SkillPackageRepository {
   }
 
   /**
-   * 以 {@code expectedVersion} 为条件切换当前发布版本（版本号、归档、清单与发布时间）并推进 version。
+   * 以 {@code expectedVersion} 为条件切换当前发布版本（描述、版本号、归档、清单与发布时间）并推进 version。
    *
    * <p>影响行数为 0 表示不存在或并发冲突；归档引用切换与旧引用释放由调用方在同一事务内完成。
    */
@@ -162,7 +162,8 @@ public class SkillPackageRepository {
             .sql(
                 """
                 update skill_package
-                set package_version = :packageVersion,
+                set description = :description,
+                    package_version = :packageVersion,
                     artifact_blob_id = :artifactBlobId,
                     manifest = cast(:manifestJson as jsonb),
                     published_at = :publishedAt,
@@ -170,6 +171,7 @@ public class SkillPackageRepository {
                     updated_at = greatest(updated_at, current_timestamp)
                 where package_name = :packageName and version = :expectedVersion
                 """)
+            .param("description", published.description())
             .param("packageVersion", published.packageVersion())
             .param("artifactBlobId", published.artifactBlobId())
             .param("manifestJson", encodeManifest(published.skills()))

@@ -48,21 +48,22 @@ async function transport(page: Page) {
     if (path === `/api/projects/${ID}/snapshot`) {
       state.snapshotReads++
       if (state.fail) {
-        await route.fulfill({ status: 503, json: { status: 503, message: 'Reference service unavailable' } })
+        await route.fulfill({ status: 503, contentType: 'application/problem+json',
+          json: { type: 'about:blank', status: 503, code: 'unavailable', title: 'Reference service unavailable' } })
       } else {
-        await route.fulfill({ json: { status: 200, data: {
+        await route.fulfill({ json: {
           project: state.project, issues: [], referencedStateCodes: state.references,
-        } } })
+        } })
       }
     } else if (route.request().method() === 'PUT') {
       state.writes.push(route.request().postDataJSON())
-      await route.fulfill({ json: { status: 200, data: { ...state.project, version: '10' } } })
+      await route.fulfill({ json: { ...state.project, version: '10' } })
     } else if (path === '/api/projects') {
-      await route.fulfill({ json: { status: 200, data: [state.project] } })
+      await route.fulfill({ json: [state.project] })
     } else if (path === '/api/agents') {
-      await route.fulfill({ json: { status: 200, data: { results: [], totalCount: '0', pageNumber: 1, pageSize: 50 } } })
+      await route.fulfill({ json: { results: [], totalCount: '0', pageNumber: 1, pageSize: 50 } })
     } else if (path === '/api/environments') {
-      await route.fulfill({ json: { status: 200, data: [] } })
+      await route.fulfill({ json: [] })
     } else {
       throw new Error(`Unexpected harness request: ${path}`)
     }

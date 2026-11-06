@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { HttpError } from '../lib/http.mjs'
+import { problemError } from './fixtures/problem.mjs'
 import { createCaseAdder } from '../lib/registry.mjs'
 
 import { ALL_CASES, getCase } from '../run-matrix.mjs'
@@ -85,7 +85,7 @@ test('config_sync.inventory_contract guards secret leakage and validates exact f
     vars: {},
     async call(method, path) {
       if (method === 'GET' && path === '/api/settings/sync') {
-        return { status: 200, json: { data: cleanInventory } }
+        return { status: 200, json: cleanInventory }
       }
       assert.fail(`unexpected call ${method} ${path}`)
     },
@@ -108,7 +108,7 @@ test('config_sync.inventory_contract guards secret leakage and validates exact f
     vars: {},
     async call(method, path) {
       if (method === 'GET' && path === '/api/settings/sync') {
-        return { status: 200, json: { data: dirtyInventory } }
+        return { status: 200, json: dirtyInventory }
       }
       assert.fail(`unexpected call ${method} ${path}`)
     },
@@ -136,7 +136,7 @@ test('config_sync.inventory_contract guards secret leakage and validates exact f
       vars: {},
       async call(method, path) {
         if (method === 'GET' && path === '/api/settings/sync') {
-          return { status: 200, json: { data: forbiddenInventory } }
+          return { status: 200, json: forbiddenInventory }
         }
         assert.fail(`unexpected call ${method} ${path}`)
       },
@@ -156,30 +156,30 @@ test('precheck case enforces read-only checking and explicit partial import befo
     async call(method, path, body) {
       if (method === 'GET') {
         assert.equal(path, '/api/providers?pageNumber=1&pageSize=100')
-        return { json: { data: { results: provider ? [provider] : [] } } }
+        return { json: { results: provider ? [provider] : [] } }
       }
       if (method === 'DELETE') {
         assert.ok(path.includes(encodeURIComponent(provider.name)))
         provider = null
-        return { json: { data: null } }
+        return { status: 204, json: null }
       }
       const name = body.yaml.match(/name: (.+)/)[1]
       if (!body.yaml.includes('providerType:')) {
-        throw new HttpError(400, 'providerType is required', path)
+        throw problemError(400, 'validation', 'providerType is required', path)
       }
       if (path.endsWith('/check')) {
         return {
           headers: new Headers({ 'cache-control': 'no-store' }),
-          json: { data: { created: [{ kind: 'providers', name }], updated: [], skipped: [{ kind: 'futureConfig', name: '', reason: 'unknown config category' }] } },
+          json: { created: [{ kind: 'providers', name }], updated: [], skipped: [{ kind: 'futureConfig', name: '', reason: 'unknown config category' }] },
         }
       }
       assert.equal(path, '/api/settings/sync/import')
       if (!body.allowPartial) {
-        throw new HttpError(400, 'partial import requires explicit confirmation', path)
+        throw problemError(400, 'validation', 'partial import requires explicit confirmation', path)
       }
       writes.push(body)
       provider = { name, version: '0' }
-      return { json: { data: { imported: [{ kind: 'providers', name }], skipped: [{ kind: 'futureConfig', name: '', reason: 'unknown config category' }] } } }
+      return { json: { imported: [{ kind: 'providers', name }], skipped: [{ kind: 'futureConfig', name: '', reason: 'unknown config category' }] } }
     },
   }
   await getCase('config_sync.import_precheck_and_partial_confirmation').run(ctx)
@@ -195,21 +195,21 @@ test('install config hard-invalid precheck rejects every endpoint without side e
     async call(method, path, body) {
       if (method === 'GET') {
         assert.equal(path, '/api/environments')
-        return { json: { data: [] } }
+        return { json: [] }
       }
       assert.equal(method, 'POST')
       assert.ok(['/api/settings/sync/import/check', '/api/settings/sync/import'].includes(path))
       requests.push({ path, yaml: body.yaml, allowPartial: body.allowPartial })
-      throw new HttpError(400, 'environment installConfig.daemon.studioUrl is invalid', path)
+      throw problemError(400, 'validation', 'environment installConfig.daemon.studioUrl is invalid', path)
     },
   }
   await getCase('config_sync.install_config_hard_invalid_precheck').run(ctx)
   // 4 组非法配置 × 2 个端点，全部硬拒绝。
   assert.equal(requests.length, 8)
   assert.equal(
-    requests.filter((request) => request.yaml.includes('"javaHome":"/opt/jdk"')).length,
+    requests.filter((request) => request.yaml.includes('"unknownField":"/opt/jdk"')).length,
     2,
-    'retired javaHome must be probed at both import/check and import',
+    'unknown top-level field must be probed at both import/check and import',
   )
   for (const request of requests) {
     assert.equal(request.allowPartial, true)
@@ -245,27 +245,25 @@ test('environment install-config roundtrip case wires PUT/export/import/clear/cl
           installConfig: null,
           version: '0',
         }
-        return { json: { data: { ...state, registrationToken: 'e2e-token-original' } } }
+        return { json: { ...state, registrationToken: 'e2e-token-original' } }
       }
       if (method === 'PUT' && path === `${base}/install-config`) {
         assert.equal(body.expectedVersion, state.version, 'PUT must CAS on the current version')
         state = { ...state, installConfig: body.installConfig, version: String(Number(state.version) + 1) }
-        return { json: { data: { id: environmentId, installConfig: state.installConfig, version: state.version } } }
+        return { json: { id: environmentId, installConfig: state.installConfig, version: state.version } }
       }
       if (method === 'POST' && path === '/api/settings/sync/export') {
         return {
           json: {
-            data: {
-              yaml: JSON.stringify({
-                environments: [
-                  {
-                    name: state.name,
-                    registrationTokenHash: state.registrationTokenHash,
-                    installConfig: state.installConfig,
-                  },
-                ],
-              }),
-            },
+            yaml: JSON.stringify({
+              environments: [
+                {
+                  name: state.name,
+                  registrationTokenHash: state.registrationTokenHash,
+                  installConfig: state.installConfig,
+                },
+              ],
+            }),
           },
         }
       }
@@ -274,11 +272,9 @@ test('environment install-config roundtrip case wires PUT/export/import/clear/cl
         // 预检查只暴露覆盖引用，绝不回显 token 或 installConfig 值。
         return {
           json: {
-            data: {
-              created: [],
-              updated: [{ kind: 'environments', name: state.name }],
-              skipped: [],
-            },
+            created: [],
+            updated: [{ kind: 'environments', name: state.name }],
+            skipped: [],
           },
         }
       }
@@ -296,17 +292,17 @@ test('environment install-config roundtrip case wires PUT/export/import/clear/cl
           installConfig: nextConfig,
           version: String(Number(state.version) + 1),
         }
-        return { json: { data: { imported: [{ kind: 'environments', name: state.name }], skipped: [] } } }
+        return { json: { imported: [{ kind: 'environments', name: state.name }], skipped: [] } }
       }
       if (method === 'GET' && path === base) {
-        return { json: { data: { id: environmentId, installConfig: state.installConfig, version: state.version } } }
+        return { json: { id: environmentId, installConfig: state.installConfig, version: state.version } }
       }
       if (method === 'DELETE' && path.startsWith(base)) {
         const expected = new URLSearchParams(path.slice(path.indexOf('?') + 1)).get('expectedVersion')
         assert.equal(expected, state.version, 'DELETE must use the freshest persisted version')
         deleteSnapshot = { tokenHash: state.registrationTokenHash, config: state.installConfig }
         deleted = true
-        return { json: { data: null } }
+        return { status: 204, json: null }
       }
       assert.fail(`unexpected call ${method} ${path}`)
     },

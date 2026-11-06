@@ -373,9 +373,8 @@ describe('SkillPackagesPage', () => {
   it('deletes from the detail dialog and surfaces the backend reason when in use', async () => {
     const user = userEvent.setup()
     vi.mocked(agentService.deleteSkillPackage).mockRejectedValue(
-      new ApiError('Request failed with status 409', 409, 'in_use', {
-        detail: 'Skill package is still referenced by Agent demo',
-      }),
+      new ApiError('Request failed with status 409', 409, 'in_use', undefined, undefined,
+        'Skill package is still referenced by Agent demo'),
     )
     renderPage()
 

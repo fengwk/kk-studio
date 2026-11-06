@@ -144,13 +144,11 @@ function createStopCaseContext({ exitConverges = true } = {}) {
     return {
       status: 200,
       json: {
-        data: {
-          thread: { ...thread },
-          entries: entries.map((entry) => ({ ...entry })),
-          queuedCommands: [],
-          activeAssistantOutput: null,
-          toolInvocations: [],
-        },
+        thread: { ...thread },
+        entries: entries.map((entry) => ({ ...entry })),
+        queuedCommands: [],
+        activeAssistantOutput: null,
+        toolInvocations: [],
       },
     }
   }
@@ -159,18 +157,16 @@ function createStopCaseContext({ exitConverges = true } = {}) {
     return {
       status,
       json: {
-        data: {
-          session: { sessionId, name: 'stop-partial-session' },
-          rootEntry: { entryId: rootEntryId, sessionId, entryType: 'ROOT' },
-          thread: { ...thread },
-          acceptedCommands: commands.map((command, index) => ({
-            type: command.type,
-            idempotencyKey: command.idempotencyKey,
-            threadId,
-            sequence: String(index + 1),
-          })),
-          replayed: false,
-        },
+        session: { sessionId, name: 'stop-partial-session' },
+        rootEntry: { entryId: rootEntryId, sessionId, entryType: 'ROOT' },
+        thread: { ...thread },
+        acceptedCommands: commands.map((command, index) => ({
+          type: command.type,
+          idempotencyKey: command.idempotencyKey,
+          threadId,
+          sequence: String(index + 1),
+        })),
+        replayed: false,
       },
     }
   }
@@ -234,13 +230,13 @@ function createStopCaseContext({ exitConverges = true } = {}) {
     async call(method, url, body) {
       if (method === 'DELETE') {
         deleted.push(url)
-        return { status: 200, json: { data: null } }
+        return { status: 204, json: null }
       }
       if (method === 'GET' && url.startsWith('/api/providers?')) {
         return {
           status: 200,
           json: {
-            data: [{
+            results: [{
               name: MODEL.providerName,
               providerType: MODEL.providerType,
               configured: true,
@@ -253,7 +249,7 @@ function createStopCaseContext({ exitConverges = true } = {}) {
         return {
           status: 200,
           json: {
-            data: [{
+            results: [{
               name: MODEL.modelName,
               providerName: MODEL.providerName,
               config: { variants: MODEL.variants.map((id) => ({ id })) },
@@ -265,18 +261,16 @@ function createStopCaseContext({ exitConverges = true } = {}) {
         assert.deepEqual(body.execution, {
           driver: 'builtin', settings: { modelName: MODEL.modelName, variant: MODEL.variant },
         })
-        return { status: 201, json: { data: { name: body.name, execution: body.execution, version: '0' } } }
+        return { status: 201, json: { name: body.name, execution: body.execution, version: '0' } }
       }
       if (method === 'POST' && url === '/api/chats') {
         return {
           status: 201,
           json: {
-            data: {
-              id: chatId,
-              agentName: body.agentName,
-              environmentName: null,
-              version: '0',
-            },
+            id: chatId,
+            agentName: body.agentName,
+            environmentName: null,
+            version: '0',
           },
         }
       }
@@ -390,9 +384,7 @@ function createStopCaseContext({ exitConverges = true } = {}) {
           phase = 'stopped-unconfirmed'
           return {
             status: 200,
-            json: {
-              data: { status: 'STOPPED', thread: { ...thread }, stoppedThreads: [stopReceipt()] },
-            },
+            json: { status: 'STOPPED', thread: { ...thread }, stoppedThreads: [stopReceipt()] },
           }
         }
         assert.equal(body.stopRequestId, firstStopRequest.stopRequestId)
@@ -407,9 +399,7 @@ function createStopCaseContext({ exitConverges = true } = {}) {
         replayVersion = thread.version
         return {
           status: 200,
-          json: {
-            data: { status: 'REPLAYED', thread: { ...thread }, stoppedThreads: [stopReceipt()] },
-          },
+          json: { status: 'REPLAYED', thread: { ...thread }, stoppedThreads: [stopReceipt()] },
         }
       }
       throw new Error(`unexpected mock call: ${method} ${url}`)

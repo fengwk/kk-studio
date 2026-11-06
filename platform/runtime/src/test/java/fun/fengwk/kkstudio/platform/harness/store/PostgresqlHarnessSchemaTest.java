@@ -11,8 +11,13 @@ import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
+
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 class PostgresqlHarnessSchemaTest {
 
@@ -448,13 +453,13 @@ class PostgresqlHarnessSchemaTest {
             .contains("(invocation_id, attempt)"));
     // 未收尾 ToolInvocation 的公共查找路径必须只覆盖全部非终态（含人工输入等待），且按 thread_id 建键。
     assertTrue(toolNonterminal.contains("(thread_id)"));
-    for (String nonterminal :
-        List.of("WAITING_APPROVAL", "WAITING_INPUT", "WAITING_REQUEST", "READY", "RUNNING")) {
-      assertTrue(toolNonterminal.contains("'" + nonterminal + "'"));
-    }
-    for (String terminal : List.of("SUCCEEDED", "FAILED", "CANCELLED", "UNKNOWN")) {
-      assertFalse(toolNonterminal.contains("'" + terminal + "'"));
-    }
+    assertEquals(
+        Set.of("WAITING_APPROVAL", "WAITING_INPUT", "READY", "RUNNING"),
+        Pattern.compile("'([^']+)'")
+            .matcher(toolNonterminal)
+            .results()
+            .map(match -> match.group(1))
+            .collect(Collectors.toSet()));
     // 等待人工输入/审批的待处理分页必须按 (created_at, id) 稳定排序，且只覆盖两种等待状态。
     String pending = indexDefinition("idx_harness_tool_invocation_pending");
     assertTrue(pending.contains("(created_at, id)"));
@@ -532,10 +537,11 @@ class PostgresqlHarnessSchemaTest {
                 null,
                 "[\"not_an_object\"]"),
         "a non-object input receipt must be rejected");
+    UUID invocationId = UUID.randomUUID();
     assertDoesNotThrow(
         () ->
             insertToolInvocation(
-                UUID.randomUUID(),
+                invocationId,
                 0,
                 threadId,
                 turnStartEntryId,
@@ -547,6 +553,36 @@ class PostgresqlHarnessSchemaTest {
                 null,
                 "{\"submissionId\":\"11111111-1111-1111-1111-111111111111\","
                     + "\"actor\":\"alice\",\"acceptedAt\":\"2026-09-27T00:00:00Z\"}"));
+
+    // 数据库接受全部当前状态，拒绝不属于状态枚举的值。
+    String statusCheck =
+        jdbc.queryForObject(
+            "select pg_get_constraintdef(oid) from pg_constraint"
+                + " where conname = 'ck_harness_tool_invocation_status'",
+            String.class);
+    assertEquals(
+        Set.of(ToolInvocationStatus.values()).stream()
+            .map(ToolInvocationStatus::name)
+            .collect(Collectors.toSet()),
+        Pattern.compile("'([^']+)'")
+            .matcher(statusCheck)
+            .results()
+            .map(match -> match.group(1))
+            .collect(Collectors.toSet()));
+    for (ToolInvocationStatus status : ToolInvocationStatus.values()) {
+      assertEquals(
+          1,
+          jdbc.update(
+              "update harness_tool_invocation set status = ? where id = ?",
+              status.name(),
+              invocationId));
+    }
+    assertThrows(
+        DataIntegrityViolationException.class,
+        () ->
+            jdbc.update(
+                "update harness_tool_invocation set status = 'INVALID' where id = ?",
+                invocationId));
   }
 
   private void insertToolInvocation(

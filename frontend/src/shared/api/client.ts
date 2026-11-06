@@ -1,7 +1,25 @@
-import axios from 'axios'
-import type { ResultEnvelope } from '@/shared/api/contracts/base'
+import { API_RESPONSE_TYPES, type ApiRoutes } from './generated/contracts'
 import { getLocale, translate } from '@/shared/i18n'
-type JsonParser = (text: string) => unknown
+
+export type JsonParser = (text: string) => unknown
+
+export interface RequestOptions {
+  signal?: AbortSignal
+  timeoutMs?: number
+  jsonParser?: JsonParser
+}
+
+interface FetchRequestConfig {
+  method?: string
+  headers?: Record<string, string>
+  body?: unknown
+  signal?: AbortSignal
+  timeoutMs?: number
+  jsonParser?: JsonParser
+  responseType?: 'json' | 'text' | 'blob'
+  fetchImpl?: typeof fetch
+  readResponse?: (response: Response) => Promise<unknown>
+}
 
 interface RequestConfig {
   headers?: Record<string, string>
@@ -31,18 +49,28 @@ export interface HttpClient {
 
 export const apiBaseUrl = '/api'
 
-/** 携带后端 HTTP 状态的传输/信封失败，供调用方按场景恢复。 */
 export class ApiError extends Error {
   readonly status?: number
   readonly code?: string
   readonly errors?: Record<string, unknown>
+  readonly reason?: string
+  readonly detail?: string
 
-  constructor(message: string, status?: number, code?: string, errors?: Record<string, unknown>) {
+  constructor(
+    message: string,
+    status?: number,
+    code?: string,
+    errors?: Record<string, unknown>,
+    reason?: string,
+    detail?: string,
+  ) {
     super(message)
     this.name = 'ApiError'
     this.status = status
     this.code = code
     this.errors = errors
+    this.reason = reason
+    this.detail = detail
   }
 }
 
@@ -53,7 +81,11 @@ export function isConflictError(error: unknown): boolean {
 
 /** 仅匹配后端显式暴露的稳定冲突分类；通用 409 不能据此自动重试。 */
 export function isConflictReason(error: unknown, reason: string): boolean {
-  return error instanceof ApiError && error.status === 409 && error.errors?.reason === reason
+  return (
+    error instanceof ApiError &&
+    error.status === 409 &&
+    error.reason === reason
+  )
 }
 
 /** 请求的资源已不存在；调用方可以丢弃过期的本地引用。 */
@@ -64,136 +96,364 @@ export function isNotFoundError(error: unknown): boolean {
 /** 后端回执中的去敏失败原因；没有可展示文本时返回 null。 */
 export function apiErrorDetail(error: unknown): string | null {
   if (error instanceof ApiError) {
-    const detail = error.errors?.detail
-    if (typeof detail === 'string' && detail.length > 0) {
-      return detail
+    if (typeof error.detail === 'string' && error.detail.length > 0) {
+      return error.detail
     }
   }
   return null
 }
 
-/** 只在本次请求 opt-in lossless parser；未指定时保留 Axios 默认 JSON transform。 */
-function requestConfig(config?: GetConfig | MutationConfig | DeleteConfig): Record<string, unknown> | undefined {
-  if (!config) {
-    return undefined
+function statusToFallbackCode(status: number): string {
+  if (
+    status === 400 ||
+    status === 405 ||
+    status === 406 ||
+    status === 413 ||
+    status === 415 ||
+    status === 422
+  ) {
+    return 'validation'
   }
-  const { jsonParser, ...rest } = config
-  return jsonParser ? { ...rest, transformResponse: [jsonParser] } : rest
+  if (status === 401 || status === 403) {
+    return 'unauthorized'
+  }
+  if (status === 404) {
+    return 'not_found'
+  }
+  if (status === 409) {
+    return 'conflict'
+  }
+  if (status === 502 || status === 504) {
+    return 'upstream_failed'
+  }
+  if (status === 503) {
+    return 'unavailable'
+  }
+  return 'internal'
 }
 
-function isOrdinaryJsonData(data: unknown): data is Record<string, unknown> | unknown[] {
-  if (Array.isArray(data)) {
-    return true
-  }
-  if (data === null || typeof data !== 'object') {
-    return false
-  }
-  const prototype = Object.getPrototypeOf(data)
-  return prototype === Object.prototype || prototype === null
+/** 解析路径模板中的单段参数与尾段通配参数。 */
+function resolvePath(
+  pathTemplate: string,
+  pathParams?: Record<string, unknown>,
+): string {
+  return pathTemplate.replace(/\{(\*?)([^}]+)\}/g, (_match, isWildcard, paramName) => {
+    const rawVal = pathParams?.[paramName]
+    if (rawVal === undefined || rawVal === null) {
+      throw new Error(`Missing path parameter: ${paramName}`)
+    }
+    const str = String(rawVal)
+    if (isWildcard) {
+      return str
+        .split('/')
+        .map((seg) => encodeURIComponent(seg))
+        .join('/')
+    }
+    return encodeURIComponent(str)
+  })
 }
 
-function jsonHeaders(headers?: Record<string, string>): Record<string, string> {
-  const result = { ...(headers ?? {}) }
-  if (!Object.keys(result).some((key) => key.toLowerCase() === 'content-type')) {
-    result['Content-Type'] = 'application/json'
+/** 将查询参数拼接到已有 URL 路径后。 */
+function appendQueryParams(
+  urlPath: string,
+  queryParams?: Record<string, unknown>,
+): string {
+  if (!queryParams) {
+    return urlPath
   }
-  return result
+  const searchParams = new URLSearchParams()
+  for (const [key, val] of Object.entries(queryParams)) {
+    if (val === undefined || val === null) {
+      continue
+    }
+    if (Array.isArray(val)) {
+      for (const item of val) {
+        if (item !== undefined && item !== null) {
+          searchParams.append(key, String(item))
+        }
+      }
+    } else {
+      searchParams.set(key, String(val))
+    }
+  }
+  const queryString = searchParams.toString()
+  if (!queryString) {
+    return urlPath
+  }
+  const separator = urlPath.includes('?') ? '&' : '?'
+  return `${urlPath}${separator}${queryString}`
 }
 
-/** 普通对象/数组在 Axios mergeConfig 之前原生序列化，保留调用方其它 headers。 */
-function serializeBody(
-  data: unknown,
-  config?: MutationConfig | DeleteConfig,
-): { data: unknown; config?: MutationConfig | DeleteConfig } {
-  if (!isOrdinaryJsonData(data)) {
-    return { data, config }
-  }
-  const serialized = JSON.stringify(data)
-  if (serialized === undefined) {
-    return { data, config }
+/** 从形如 "METHOD /path" 的路由定义提取方法与模板。 */
+function parseRoute(route: string): { method: string; pathTemplate: string } {
+  const trimmed = route.trim()
+  const spaceIdx = trimmed.indexOf(' ')
+  if (spaceIdx === -1) {
+    return { method: 'GET', pathTemplate: trimmed }
   }
   return {
-    data: serialized,
-    config: { ...config, headers: jsonHeaders(config?.headers) },
+    method: trimmed.slice(0, spaceIdx).toUpperCase(),
+    pathTemplate: trimmed.slice(spaceIdx + 1).trim(),
   }
 }
 
-const axiosClient = axios.create({
-  baseURL: apiBaseUrl,
-  timeout: 60000,
-})
-
-axiosClient.interceptors.request.use((config) => {
-  const locale = getLocale()
-  if (typeof config.headers?.set === 'function') {
-    config.headers.set('Accept-Language', locale)
-  } else {
-    const headers = config.headers ?? {}
-    Object.assign(headers, { 'Accept-Language': locale })
-    config.headers = headers as unknown as typeof config.headers
+function isBinaryBody(body: unknown): boolean {
+  if (typeof FormData !== 'undefined' && body instanceof FormData) {
+    return true
   }
-  return config
-})
+  if (typeof Blob !== 'undefined' && body instanceof Blob) {
+    return true
+  }
+  if (typeof ArrayBuffer !== 'undefined' && body instanceof ArrayBuffer) {
+    return true
+  }
+  if (typeof URLSearchParams !== 'undefined' && body instanceof URLSearchParams) {
+    return true
+  }
+  return false
+}
 
-axiosClient.interceptors.response.use(
-  (response) => {
-    const envelope = response.data as ResultEnvelope<unknown>
-    if (!envelope || typeof envelope.status !== 'number') {
-      return response.data
-    }
-    if (envelope.status < 200 || envelope.status >= 300) {
-      return Promise.reject(
-        new ApiError(
-          envelope.message || translate('shared.requestFailed'),
-          envelope.status,
-          envelope.code,
-          envelope.errors ?? undefined,
-        ),
-      )
-    }
-    return envelope.data
-  },
-  (error) => {
-    const envelope = error?.response?.data as Partial<ResultEnvelope<unknown>> | undefined
-    const message = envelope?.message || error?.message || translate('shared.requestFailed')
-    return Promise.reject(
-      new ApiError(message, error?.response?.status, envelope?.code, envelope?.errors ?? undefined),
-    )
-  },
-)
+/**
+ * 集中底层 fetch 执行器，供 request()、apiClient 外观及其他流（如 session 文件下载）复用。
+ */
+export async function executeFetch<T = unknown>(
+  inputUrl: string,
+  config: FetchRequestConfig = {},
+): Promise<T> {
+  const method = (config.method ?? 'GET').toUpperCase()
+  const headers: Record<string, string> = {
+    'Accept-Language': getLocale(),
+    Accept: 'application/json, text/plain, */*',
+    ...(config.headers ?? {}),
+  }
 
+  let bodyPayload: BodyInit | undefined
+  if (config.body !== undefined) {
+    if (typeof config.body === 'string' || isBinaryBody(config.body)) {
+      bodyPayload = config.body as BodyInit
+    } else {
+      bodyPayload = JSON.stringify(config.body)
+      if (!Object.keys(headers).some((k) => k.toLowerCase() === 'content-type')) {
+        headers['Content-Type'] = 'application/json'
+      }
+    }
+  }
+
+  const timeoutMs = config.timeoutMs !== undefined ? config.timeoutMs : 60000
+  const controller = new AbortController()
+  let isTimedOut = false
+  let timer: ReturnType<typeof setTimeout> | undefined
+
+  if (timeoutMs > 0) {
+    timer = setTimeout(() => {
+      isTimedOut = true
+      controller.abort(new DOMException('Request timeout', 'TimeoutError'))
+    }, timeoutMs)
+  }
+
+  const externalSignal = config.signal
+  let abortListener: (() => void) | undefined
+  if (externalSignal) {
+    if (externalSignal.aborted) {
+      if (timer !== undefined) {
+        clearTimeout(timer)
+      }
+      throw externalSignal.reason ?? new DOMException('The operation was aborted', 'AbortError')
+    }
+    abortListener = () => {
+      controller.abort(externalSignal.reason)
+    }
+    externalSignal.addEventListener('abort', abortListener, { once: true })
+  }
+
+  try {
+    const response = await (config.fetchImpl ?? fetch)(inputUrl, {
+      method,
+      headers,
+      body: bodyPayload,
+      signal: controller.signal,
+    })
+    if (!response.ok) {
+      throw await problemError(response)
+    }
+    if (config.readResponse) {
+      return await config.readResponse(response) as T
+    }
+    return await readSuccess<T>(response, config)
+  } catch (error: unknown) {
+    if (isTimedOut) {
+      throw new ApiError('Request timeout', undefined, 'timeout')
+    }
+    if (externalSignal?.aborted) {
+      throw error
+    }
+    if (error instanceof ApiError) {
+      throw error
+    }
+    const message = error instanceof Error ? error.message : translate('shared.requestFailed')
+    throw new ApiError(message, undefined, 'network_error')
+  } finally {
+    if (timer !== undefined) {
+      clearTimeout(timer)
+    }
+    if (externalSignal && abortListener) {
+      externalSignal.removeEventListener('abort', abortListener)
+    }
+  }
+}
+
+async function problemError(response: Response): Promise<ApiError> {
+  let problem: Record<string, unknown> = {}
+  if (response.headers.get('content-type')?.toLowerCase().split(';')[0]?.trim() === 'application/problem+json') {
+    const text = await response.text()
+    try {
+      const value: unknown = JSON.parse(text)
+      if (value && typeof value === 'object' && !Array.isArray(value)) {
+        problem = value as Record<string, unknown>
+      }
+    } catch {
+      // 格式错误时使用稳定的 HTTP 回退。
+    }
+  }
+  const errors = problem.errors
+  return new ApiError(
+    typeof problem.title === 'string' ? problem.title : translate('shared.requestFailed'),
+    response.status,
+    typeof problem.code === 'string' ? problem.code : statusToFallbackCode(response.status),
+    errors && typeof errors === 'object' && !Array.isArray(errors) ? errors as Record<string, unknown> : undefined,
+    typeof problem.reason === 'string' ? problem.reason : undefined,
+    typeof problem.detail === 'string' ? problem.detail : undefined,
+  )
+}
+
+async function readSuccess<T>(response: Response, config: FetchRequestConfig): Promise<T> {
+  if (response.status === 204 || response.status === 205 || response.headers.get('content-length') === '0') {
+    return undefined as T
+  }
+
+  const contentType = response.headers.get('content-type') ?? ''
+  const responseType = config.responseType
+
+  if (responseType === 'blob') {
+    const blob = await response.blob()
+    return (blob.size === 0 ? undefined : blob) as T
+  }
+  if (responseType === 'text') {
+    const text = await response.text()
+    return (text.length === 0 ? undefined : text) as T
+  }
+
+  const isJson = contentType.includes('application/json') || contentType.includes('+json')
+  if (isJson || (!contentType && !responseType)) {
+    const rawText = await response.text()
+    if (rawText.trim().length === 0) {
+      return undefined as T
+    }
+    if (config.jsonParser) {
+      return config.jsonParser(rawText) as T
+    }
+    return JSON.parse(rawText) as T
+  }
+
+  if (contentType.startsWith('text/')) {
+    const text = await response.text()
+    return (text.length === 0 ? undefined : text) as T
+  }
+
+  return (await response.blob()) as T
+}
+
+type QueryArgs<T> = T extends { query: infer Q }
+  ? Record<never, never> extends Q ? { query?: Q } : { query: Q }
+  : Record<never, never>
+export type RouteArgs<R extends keyof ApiRoutes> =
+  Pick<ApiRoutes[R], Extract<keyof ApiRoutes[R], 'path' | 'body'>> & QueryArgs<ApiRoutes[R]>
+export type RouteResponse<R extends keyof ApiRoutes> = ApiRoutes[R]['response']
+
+/**
+ * 构造类型化路由的完整相对 URL（包含路径参数替换与查询参数拼接）。
+ */
+export function url<R extends keyof ApiRoutes>(route: R, args: RouteArgs<R>): string {
+  const { pathTemplate } = parseRoute(route)
+  const params = args as { path?: Record<string, unknown>; query?: Record<string, unknown> }
+  return appendQueryParams(resolvePath(pathTemplate, params.path), params.query)
+}
+
+/**
+ * 前端核心类型化 fetch 请求。
+ */
+export function request<R extends keyof ApiRoutes>(
+  route: R,
+  args: RouteArgs<R>,
+  options?: RequestOptions,
+): Promise<RouteResponse<R>> {
+  const { method } = parseRoute(route)
+  const params = args as { body?: unknown }
+  return executeFetch<RouteResponse<R>>(url(route, args), {
+    method,
+    body: params.body,
+    signal: options?.signal,
+    timeoutMs: options?.timeoutMs,
+    jsonParser: options?.jsonParser,
+    responseType: API_RESPONSE_TYPES[route],
+  })
+}
+
+function normalizeApiUrl(rawUrl: string): string {
+  if (rawUrl.startsWith('http://') || rawUrl.startsWith('https://')) {
+    return rawUrl
+  }
+  if (rawUrl.startsWith(apiBaseUrl + '/') || rawUrl === apiBaseUrl) {
+    return rawUrl
+  }
+  const cleanUrl = rawUrl.startsWith('/') ? rawUrl : `/${rawUrl}`
+  return `${apiBaseUrl}${cleanUrl}`
+}
+
+/**
+ * 临时 apiClient 外观，保留原有 HttpClient 签名与配置，底层直接调用集中 fetch helper。
+ */
 export const apiClient: HttpClient = {
-  get: <T>(url: string, config?: GetConfig) => {
-    const request = requestConfig(config)
-    return (request === undefined
-      ? axiosClient.get(url)
-      : axiosClient.get(url, request)) as Promise<T>
+  get: <T>(rawUrl: string, config?: GetConfig) => {
+    const targetUrl = appendQueryParams(normalizeApiUrl(rawUrl), config?.params)
+    return executeFetch<T>(targetUrl, {
+      method: 'GET',
+      headers: config?.headers,
+      signal: config?.signal,
+      jsonParser: config?.jsonParser,
+    })
   },
-  post: <T>(url: string, data?: unknown, config?: MutationConfig) => {
-    const body = serializeBody(data, config)
-    const request = requestConfig(body.config)
-    return (request === undefined
-      ? axiosClient.post(url, body.data)
-      : axiosClient.post(url, body.data, request)) as Promise<T>
+  post: <T>(rawUrl: string, data?: unknown, config?: MutationConfig) => {
+    const targetUrl = normalizeApiUrl(rawUrl)
+    return executeFetch<T>(targetUrl, {
+      method: 'POST',
+      body: data,
+      headers: config?.headers,
+      signal: config?.signal,
+      timeoutMs: config?.timeout,
+      jsonParser: config?.jsonParser,
+    })
   },
-  put: <T>(url: string, data?: unknown, config?: MutationConfig) => {
-    const body = serializeBody(data, config)
-    const request = requestConfig(body.config)
-    return (request === undefined
-      ? axiosClient.put(url, body.data)
-      : axiosClient.put(url, body.data, request)) as Promise<T>
+  put: <T>(rawUrl: string, data?: unknown, config?: MutationConfig) => {
+    const targetUrl = normalizeApiUrl(rawUrl)
+    return executeFetch<T>(targetUrl, {
+      method: 'PUT',
+      body: data,
+      headers: config?.headers,
+      signal: config?.signal,
+      timeoutMs: config?.timeout,
+      jsonParser: config?.jsonParser,
+    })
   },
-  delete: <T>(url: string, config?: DeleteConfig) => {
-    const body = serializeBody(config?.data, config)
-    const request = requestConfig(body.config)
-    if (request === undefined) {
-      return (body.data === undefined
-        ? axiosClient.delete(url)
-        : axiosClient.delete(url, { data: body.data })) as Promise<T>
-    }
-    return axiosClient.delete(
-      url,
-      body.data === undefined ? request : { ...request, data: body.data },
-    ) as Promise<T>
+  delete: <T>(rawUrl: string, config?: DeleteConfig) => {
+    const targetUrl = appendQueryParams(normalizeApiUrl(rawUrl), config?.params)
+    return executeFetch<T>(targetUrl, {
+      method: 'DELETE',
+      body: config?.data,
+      headers: config?.headers,
+      signal: config?.signal,
+      timeoutMs: config?.timeout,
+      jsonParser: config?.jsonParser,
+    })
   },
 }

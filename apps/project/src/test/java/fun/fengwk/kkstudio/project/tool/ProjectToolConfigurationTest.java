@@ -1,13 +1,17 @@
 package fun.fengwk.kkstudio.project.tool;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
+import fun.fengwk.kkstudio.harness.contributor.api.HarnessRegistrar;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
@@ -61,7 +65,10 @@ class ProjectToolConfigurationTest {
           assertEquals("project:issue.transition", tool.id().toString());
           assertEquals(List.of(tool), catalog.selectableTools());
 
-          assertTrue(catalog.customEntryTypes().isEmpty());
+          HarnessRegistrar registrar = mock(HarnessRegistrar.class);
+          context.getBean(ProjectHarnessContributor.class).contribute(registrar);
+          verify(registrar, never()).registerCustomEntryType(anyString(), anyString(), anyInt());
+          verify(registrar, never()).registerCustomEntryType(anyString(), anyString());
         });
   }
 }

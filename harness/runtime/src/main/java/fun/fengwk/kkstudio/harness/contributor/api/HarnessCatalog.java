@@ -34,7 +34,6 @@ public final class HarnessCatalog {
   private final List<ToolContribution> selectableTools;
   private final Map<String, ToolContribution> toolsByName;
   private final Map<ContributionId, ToolContribution> toolsById;
-  private final List<CustomEntryTypeContribution> customEntryTypes;
   private final Map<CustomTypeKey, CustomEntryTypeContribution> customEntryTypesByKey;
 
   private HarnessCatalog(
@@ -59,7 +58,6 @@ public final class HarnessCatalog {
     this.selectableTools = List.copyOf(selectables);
     this.toolsByName = Map.copyOf(byName);
     this.toolsById = Map.copyOf(byId);
-    this.customEntryTypes = List.copyOf(customEntryTypes);
     Map<CustomTypeKey, CustomEntryTypeContribution> customEntryTypeIndex = new LinkedHashMap<>();
     for (CustomEntryTypeContribution contribution : customEntryTypes) {
       customEntryTypeIndex.put(
@@ -105,11 +103,6 @@ public final class HarnessCatalog {
   /** 按冻结 scoped contribution identity 查找 Tool 贡献。 */
   public Optional<ToolContribution> findTool(ContributionId id) {
     return Optional.ofNullable(toolsById.get(Objects.requireNonNull(id, "id")));
-  }
-
-  /** 按 requires 传递闭包偏序、priority 降序和 ContributionId 字典序冻结的 custom entry 列表。 */
-  public List<CustomEntryTypeContribution> customEntryTypes() {
-    return customEntryTypes;
   }
 
   /** 按结构化 ownership 键 {@code (contributorId, customType)} 查找贡献；未注册返回 empty。 */

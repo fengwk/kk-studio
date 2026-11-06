@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.web;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -60,12 +61,26 @@ class WebJacksonWiringIntegrationTest extends WebPostgresTestSupport {
 
     // 显式 ApiResponse 状态同步 advice 是活跃响应信封处理器。
     assertFalse(context.getBeanNamesForType(ApiResponseStatusAdvice.class).length == 0);
+    // 生产容器也注册 UUID binder，阻止 Spring 宽松的属性编辑器回退。
+    context.getBean(HttpBoundaryConfiguration.CanonicalUuidBinding.class);
   }
 
   @Test
   void mvcSelectsTheJackson3ConverterForJsonDtoReadsAndWrites() {
     // Bean 身份不足以证明 wire 选择；检查 MVC 按顺序实际选中的读写 converter。
     var converters = context.getBean(RequestMappingHandlerAdapter.class).getMessageConverters();
+    var selected =
+        (JacksonJsonHttpMessageConverter)
+            converters.stream()
+                .filter(
+                    converter ->
+                        converter.canRead(AgentModelVariantDTO.class, MediaType.APPLICATION_JSON))
+                .findFirst()
+                .orElseThrow();
+    // 真实 MVC 转换器使用派生的严格 mapper，而容器 bean 不被替换。
+    assertThrows(
+        RuntimeException.class,
+        () -> selected.getMapper().readValue("{\"id\":1}", AgentModelVariantDTO.class));
     assertInstanceOf(
         JacksonJsonHttpMessageConverter.class,
         converters.stream()

@@ -89,16 +89,10 @@ export async function httpJson(
   }
 }
 
-export function envelopeData(payload) {
-  assert(payload && typeof payload === 'object', `expected envelope object, got ${typeof payload}`)
-  return payload.data
-}
-
 export function pageResults(payload) {
-  const data = envelopeData(payload)
-  if (data && typeof data === 'object' && Array.isArray(data.results)) return data.results
-  if (Array.isArray(data)) return data
-  throw new Error(`expected page/list data, got ${JSON.stringify(data)?.slice(0, 200)}`)
+  if (payload && typeof payload === 'object' && Array.isArray(payload.results)) return payload.results
+  if (Array.isArray(payload)) return payload
+  throw new Error(`expected page/list data, got ${JSON.stringify(payload)?.slice(0, 200)}`)
 }
 
 export function sleep(ms) {

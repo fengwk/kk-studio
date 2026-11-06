@@ -9,13 +9,14 @@ const RUNTIME_CASE_ID = 'environment.runtime_absent_unavailable'
 const IDE_CASE_ID = 'environment.ide_view_no_ready_owner_rejected'
 const ENVIRONMENT_ID = '00000000-0000-4000-8000-000000000abc'
 
-function canonicalErrorBody(status, code, detail) {
+function canonicalErrorBody(status, code, detail, reason) {
   return JSON.stringify({
+    type: 'about:blank',
+    title: 'canonical error',
     status,
     code,
-    message: 'canonical error',
-    data: null,
-    errors: { resource: 'environment', detail },
+    detail,
+    ...(reason ? { reason } : {}),
   })
 }
 
@@ -31,10 +32,10 @@ function environmentWithoutDaemon() {
     async call(method, path, body) {
       calls.push({ method, path, body })
       if (method === 'POST' && path === '/api/environments') {
-        return { json: { data: { id: ENVIRONMENT_ID, name: body.name, version } } }
+        return { json: { id: ENVIRONMENT_ID, name: body.name, version } }
       }
       if (method === 'GET' && path === `/api/environments/${ENVIRONMENT_ID}`) {
-        return { json: { data: { id: ENVIRONMENT_ID, version } } }
+        return { json: { id: ENVIRONMENT_ID, version } }
       }
       if (method === 'DELETE' && path.startsWith(`/api/environments/${ENVIRONMENT_ID}?`)) {
         deleted = true
@@ -50,14 +51,14 @@ function environmentWithoutDaemon() {
       if (path.endsWith('/runtime')) {
         throw new HttpError(
           409,
-          canonicalErrorBody(409, 'environment_unavailable', 'environment has no current READY owner route'),
+          canonicalErrorBody(409, 'unavailable', 'environment has no current READY owner route', 'ENVIRONMENT_UNAVAILABLE'),
           path,
         )
       }
       if (path.includes('/ide/views') || path.endsWith('/ide/directories')) {
         throw new HttpError(
           409,
-          canonicalErrorBody(409, 'ide_unavailable', 'environment IDE owner route is unavailable'),
+          canonicalErrorBody(409, 'unavailable', 'environment IDE owner route is unavailable', 'IDE_UNAVAILABLE'),
           path,
         )
       }
@@ -81,7 +82,7 @@ test('runtime and IDE cases are registered as free L1 matrix cases', () => {
 })
 
 test('runtime absence case rejects with the canonical code and never fabricates a snapshot', async () => {
-  // 测试意图：真实执行 runtime case，证明它读运行快照时拿到 409 environment_unavailable，
+  // 测试意图：真实执行 runtime case，证明它读运行快照时拿到 409 unavailable + ENVIRONMENT_UNAVAILABLE，
   // 并断言响应里没有任何伪造的运行快照字段，最后按权威 version 清理环境。
   const { ctx, calls, isDeleted } = environmentWithoutDaemon()
 
@@ -99,7 +100,7 @@ test('runtime absence case rejects with the canonical code and never fabricates 
 })
 
 test('IDE view case checks no-READY-owner rejection for canonical view commands', async () => {
-  // 以 HTTP recorder 执行 IDE case，检查无 READY owner 时各命令的 409 ide_unavailable 断言；
+  // 以 HTTP recorder 执行 IDE case，检查无 READY owner 时各命令的 409 unavailable + IDE_UNAVAILABLE 断言；
   // 不返回任何绑定结果，并且非 canonical environmentId 走 400 validation。
   const { ctx, calls, isDeleted } = environmentWithoutDaemon()
 
@@ -153,7 +154,7 @@ test('environment fixture cleanup uses the authoritative version and tolerates a
       async call(method, path) {
         assert.equal(method, 'POST')
         assert.equal(path, '/api/environments')
-        return { json: { data: { id: ENVIRONMENT_ID, version: '7' } } }
+        return { json: { id: ENVIRONMENT_ID, version: '7' } }
       },
     },
     'e2e-fixture',
@@ -166,7 +167,7 @@ test('environment fixture cleanup uses the authoritative version and tolerates a
     {
       async call(method, path) {
         if (method === 'GET') {
-          return { json: { data: { id: ENVIRONMENT_ID, version: '9' } } }
+          return { json: { id: ENVIRONMENT_ID, version: '9' } }
         }
         deletes.push(path)
         return { json: null }
@@ -182,7 +183,7 @@ test('environment fixture cleanup uses the authoritative version and tolerates a
     {
       async call(method) {
         if (method === 'GET') {
-          throw new HttpError(404, '{"code":"resource_not_found"}', '/api/environments/missing')
+          throw new HttpError(404, canonicalErrorBody(404, 'not_found', 'environment not found'), '/api/environments/missing')
         }
         deleteCalls++
         return { json: null }
@@ -197,7 +198,7 @@ test('environment fixture cleanup uses the authoritative version and tolerates a
       deleteEnvironmentFixture(
         {
           async call() {
-            throw new HttpError(409, '{"code":"version_conflict"}', '/api/environments/conflict')
+            throw new HttpError(409, canonicalErrorBody(409, 'version_conflict', 'version conflict'), '/api/environments/conflict')
           },
         },
         ENVIRONMENT_ID,

@@ -130,7 +130,7 @@ describe('EnvironmentInstallModal', () => {
   it('presents CAS conflict, preserves draft and refreshes version without replacing edited fields', async () => {
     const user = userEvent.setup()
     vi.mocked(environmentService.saveInstallConfig).mockRejectedValueOnce(
-      new ApiError('conflict', 409, 'CONFLICT', { reason: 'stale_version', detail: 'Install settings changed' }))
+      new ApiError('conflict', 409, 'version_conflict', undefined, undefined, 'Install settings changed'))
     open()
     await waitFor(() => expect(copyButton()).toBeEnabled())
     await user.clear(origin()); await user.type(origin(), 'https://draft.example.com')

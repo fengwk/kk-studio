@@ -10,7 +10,7 @@ import { REPOSITORY_ROOT } from '../../../tests/support/shell.mjs'
 const PROBE = path.join(REPOSITORY_ROOT, 'scripts/dev/verify/e2e/lib/json-probe.mjs')
 const probe = (args, document) =>
   spawnSync(process.execPath, [PROBE, ...args], { input: JSON.stringify(document), encoding: 'utf8' })
-const models = (first) => ({ data: { results: first === undefined ? [] : [first] } })
+const models = (first) => ({ results: first === undefined ? [] : [first] })
 
 test('test intent: model-config-print requires a structured config with a default variant', () => {
   const ok = probe(['model-config-print'], models({ config: { defaultVariant: 'default' } }))
@@ -28,14 +28,14 @@ test('test intent: model-config-check succeeds only for a structured config obje
 })
 
 test('test intent: environment-status prints the named status or an empty line', () => {
-  const rows = { data: [{ name: 'a', status: 'READY' }, { name: 'b', status: 'OFFLINE' }] }
+  const rows = [{ name: 'a', status: 'READY' }, { name: 'b', status: 'OFFLINE' }]
   assert.equal(probe(['environment-status', 'b'], rows).stdout, 'OFFLINE\n')
   assert.equal(probe(['environment-status', 'zzz'], rows).stdout, '\n')
-  assert.equal(probe(['environment-status', 'a'], { data: [{ name: 'a', status: false }] }).stdout, 'False\n')
+  assert.equal(probe(['environment-status', 'a'], [{ name: 'a', status: false }]).stdout, 'False\n')
 })
 
 test('test intent: environment-ready exits zero only for a READY named environment', () => {
-  const rows = { data: [{ name: 'a', status: 'READY' }, { name: 'b', status: 'OFFLINE' }] }
+  const rows = [{ name: 'a', status: 'READY' }, { name: 'b', status: 'OFFLINE' }]
   assert.equal(probe(['environment-ready', 'a'], rows).status, 0)
   assert.equal(probe(['environment-ready', 'b'], rows).status, 1)
   assert.equal(probe(['environment-ready', 'zzz'], rows).status, 1)
@@ -49,7 +49,7 @@ test('test intent: unknown commands retain their exit code and diagnostic', () =
 })
 
 test('test intent: providers-ready lists the missing target providers in sorted order', () => {
-  const configured = (...names) => ({ data: { results: names.map((name) => ({ name, configured: true, baseUrl: 'u' })) } })
+  const configured = (...names) => ({ results: names.map((name) => ({ name, configured: true, baseUrl: 'u' })) })
   assert.equal(probe(['providers-ready'], configured('google', 'openai', 'minimax-anthropic', 'deepseek')).stdout, 'ok\n')
   assert.equal(probe(['providers-ready'], configured('openai')).stdout, 'missing:deepseek,google,minimax-anthropic\n')
 })

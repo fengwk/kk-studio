@@ -56,32 +56,35 @@ async function transport(page: Page, pauseReason: 'USER' | 'ERROR' | null = null
     const path = new URL(route.request().url()).pathname
     if (path === `/api/issues/${ISSUE}` && route.request().method() === 'GET') {
       state.issueReads++
-      await route.fulfill({ json: { status: 200, data: { ...detail, issue: state.issue } } })
+      await route.fulfill({ json: { ...detail, issue: state.issue } })
     } else if (path === `/api/issues/${ISSUE}/evidence`) {
-      await route.fulfill({ json: { status: 200, data: [] } })
+      await route.fulfill({ json: [] })
     } else if (path === `/api/issues/${ISSUE}/resume` && route.request().method() === 'POST') {
       const request = route.request().postDataJSON() as ResumeIssueRequestDTO
       state.resumeRequests.push(request)
       const previousVersion = state.committed.get(request.requestKey)
       if (previousVersion !== undefined) {
         if (previousVersion !== request.expectedVersion) {
-          await route.fulfill({ status: 409, json: { status: 409, message: 'Identity conflict' } })
+          await route.fulfill({ status: 409, contentType: 'application/problem+json',
+            json: { type: 'about:blank', status: 409, code: 'conflict', reason: 'IDENTITY_CONFLICT', title: 'Identity conflict' } })
           return
         }
       } else {
         if (request.expectedVersion !== state.issue.version) {
-          await route.fulfill({ status: 409, json: { status: 409, message: 'Version conflict' } })
+          await route.fulfill({ status: 409, contentType: 'application/problem+json',
+            json: { type: 'about:blank', status: 409, code: 'version_conflict', title: 'Version conflict' } })
           return
         }
         state.committed.set(request.requestKey, request.expectedVersion)
         state.issue = { ...state.issue, pauseReason: null, pauseDetail: null, version: '2' }
         if (failResumeOnce) {
           // 模拟服务端已提交而网关返回 503：后续同身份重放只返回现状。
-          await route.fulfill({ status: 503, json: { status: 503, message: 'Outcome unknown' } })
+          await route.fulfill({ status: 503, contentType: 'application/problem+json',
+            json: { type: 'about:blank', status: 503, code: 'unavailable', title: 'Outcome unknown' } })
           return
         }
       }
-      await route.fulfill({ json: { status: 200, data: state.issue } })
+      await route.fulfill({ json: state.issue })
     } else {
       throw new Error(`Unexpected offline request: ${path}`)
     }

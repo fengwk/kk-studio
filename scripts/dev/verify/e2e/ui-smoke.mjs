@@ -100,7 +100,7 @@ async function apiDeleteByName(backendUrl, resource, name) {
   const resourcePath = resource === 'chats' ? '/api/chats' : `/api/${resource}`
   const list = resource === 'chats'
     ? await listChats({ call: (method, requestPath) => apiJson(backendUrl, method, requestPath) })
-    : (await apiJson(backendUrl, 'GET', `${resourcePath}?pageNumber=1&pageSize=100`)).json?.data?.results || []
+    : (await apiJson(backendUrl, 'GET', `${resourcePath}?pageNumber=1&pageSize=100`)).json?.results || []
   const key = resource === 'chats' ? 'title' : 'name'
   const hit = list.find((item) => item[key] === name)
   if (!hit) return false
@@ -125,8 +125,8 @@ async function apiDeleteByName(backendUrl, resource, name) {
 async function requireRealMiniMaxM3(backendUrl, modelDef = MINIMAX_ANTHROPIC_M3) {
   const { json: modelsJson } = await apiJson(backendUrl, 'GET', '/api/models?pageNumber=1&pageSize=50')
   const { json: providersJson } = await apiJson(backendUrl, 'GET', '/api/providers?pageNumber=1&pageSize=50')
-  const models = modelsJson?.data?.results || []
-  const providers = providersJson?.data?.results || []
+  const models = modelsJson?.results || []
+  const providers = providersJson?.results || []
   const model = models.find((candidate) => candidate.name === modelDef.modelName)
   const provider = providers.find((candidate) => candidate.name === model?.providerName)
   assert(
@@ -148,7 +148,7 @@ async function requireProviderExecutionBoundary(backendUrl, real) {
     'GET',
     '/api/providers?pageNumber=1&pageSize=50',
   )
-  const providers = json?.data?.results || []
+  const providers = json?.results || []
   assertProviderExecutionBoundary({ real: false, providers })
   console.log('Provider boundary: free UI mode confirmed every provider is unconfigured')
 }
@@ -853,10 +853,10 @@ async function main(argv) {
       // 付费边界：本 case 只允许绑定 fake-image，提交任何运行前都必须按真实快照断言函数身份，
       // 绝不触碰 gpt-image-2 / seedance2.0* 等付费 Function。
       const catalog = await apiJson(args.backendUrl, 'GET', '/api/canvas-functions')
-      const fakeImage = (catalog.json?.data || []).find((item) => item.name === 'fake-image')
+      const fakeImage = (catalog.json || []).find((item) => item.name === 'fake-image')
       assert(
         fakeImage?.available === true,
-        `fake-image Canvas Function must be available (run with --with-canvas-function): ${JSON.stringify(catalog.json?.data?.map((f) => [f.name, f.available]))}`,
+        `fake-image Canvas Function must be available (run with --with-canvas-function): ${JSON.stringify(catalog.json?.map((f) => [f.name, f.available]))}`,
       )
       // 目录必须暴露完整版本身份；前端把它作为 start 的 expectedVersion 回传。
       assert(
@@ -871,7 +871,7 @@ async function main(argv) {
       const snapshot = async () => {
         const { status, json } = await apiJson(args.backendUrl, 'GET', `/api/canvases/${canvasId}`)
         assert(status === 200, `canvas snapshot failed: ${status}`)
-        return json.data
+        return json
       }
       const nodeById = (snap, nodeId) => snap.nodes.find((node) => node.id === nodeId)
       const nodeElement = (nodeId) => page.locator(`.react-flow__node[data-id="${nodeId}"]`)
@@ -1283,8 +1283,8 @@ async function main(argv) {
         `failed to create temporary agent '${tempAgentName}' (expected 201, got ${agentCreateRes.status}): ${JSON.stringify(agentCreateRes.json)}`,
       )
       assert(
-        !Object.hasOwn(agentCreateRes.json.data, 'environmentId')
-          && !Object.hasOwn(agentCreateRes.json.data, 'branchSettings'),
+        !Object.hasOwn(agentCreateRes.json, 'environmentId')
+          && !Object.hasOwn(agentCreateRes.json, 'branchSettings'),
         'Agent Definition must not own branch environment settings',
       )
 

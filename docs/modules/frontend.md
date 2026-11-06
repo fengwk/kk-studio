@@ -42,11 +42,12 @@ Thread panel 消费 timeline presentation 类型，宿主负责 API、realtime �
 
 ## API 与 wire 校验
 
-[`client.ts`](../../frontend/src/shared/api/client.ts) 使用 `/api` 并设置请求超时，
-注入 Accept-Language 并解包 ResultEnvelope。ApiError 保留 status、code、errors；
-恢复逻辑按精确 reason 判断，未知 reason 使用安全提示。
+[`client.ts`](../../frontend/src/shared/api/client.ts) 提供类型化 `request` 与 `url`，
+统一注入 Accept-Language 并设置请求超时。成功响应直接读取资源，空体返回 undefined；
+错误响应按 problem+json 解析，`ApiError` 保留 status、code、reason、detail 和 errors。
+恢复逻辑按精确 reason 判断，未知 reason 使用安全提示。过渡期间 `apiClient` 是同一传输核心的外观。
 
-全部 HTTP 传输类型由 Web 控制器签名与生产 HTTP Jackson mapper 生成到
+HTTP 路由与传输类型由 Web 控制器签名与生产 HTTP Jackson mapper 生成到
 [`generated/contracts.ts`](../../frontend/src/shared/api/generated/contracts.ts)：
 字段、可空性与枚举值跟随 Java DTO，Java long 在响应中是十进制字符串，`Instant` 是 epoch 秒数字。
 生成物不手改；漂移由 [`check.sh`](../../scripts/dev/verify/generated-contracts/check.sh)
@@ -60,7 +61,7 @@ service 按职责归属：Chat、Environment、Extensions、Catalog、Settings �
 `shared/api` 只保留 HTTP client、生成契约和 Harness/Agent/Storage/Interaction 平台客户端。
 [Projects feature](../../frontend/src/features/projects) 使用生成的 HTTP 契约；
 [Canvas 接口客户端](../../frontend/src/features/canvas/canvas-api.ts) 由 Canvas feature 持有。
-HTTP 路由事实源见 [Web](web.md)，JSON 字段规则见 [Share](share.md)。
+公开 HTTP 路由事实源是生成的 `ApiRoutes`，JSON 字段规则见 [Share](share.md)。
 Java long 游标保持字符串，版本比较使用长度与字典序，保留整数精度。
 
 ## Snapshot、realtime 与恢复

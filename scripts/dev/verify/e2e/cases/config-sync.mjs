@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { assert, envelopeData, assertExactFields, cid, expectHttpError } from '../lib/http.mjs'
+import { assert, assertExactFields, cid, expectHttpError } from '../lib/http.mjs'
 import { providerCreateBody } from '../lib/fixtures.mjs'
 import { createCaseAdder } from '../lib/registry.mjs'
 import { assertInstallConfig, linuxInstallConfig } from './environment-install-config.mjs'
@@ -29,7 +29,7 @@ registerCase({
   docs: 'GET /api/settings/sync 返回仅含引用（kind/name）与依赖闭包（dependencies）的 inventory；每项严格限定字段，且响应中绝不包含凭据、token、headers、url 等敏感配置值',
   async run(ctx) {
     const { json } = await ctx.call('GET', '/api/settings/sync')
-    const data = envelopeData(json)
+    const data = json
     const rawJson = JSON.stringify(data)
 
     const prohibitedKeyPattern = /"(credential|registrationToken|headers|url)"\s*:/i
@@ -62,7 +62,7 @@ registerCase({
     let latestVersion = null
 
     const { json: createJson } = await ctx.call('POST', '/api/providers', body)
-    const created = envelopeData(createJson)
+    const created = createJson
     providerName = created.name
     latestVersion = String(created.version)
     assert(providerName, 'created provider must have name')
@@ -72,22 +72,22 @@ registerCase({
       const { json: exportJson } = await ctx.call('POST', '/api/settings/sync/export', {
         items: [{ kind: 'providers', name: providerName }],
       })
-      const exportData = envelopeData(exportJson)
+      const exportData = exportJson
       const yaml = exportData?.yaml
       assert(typeof yaml === 'string' && yaml.trim().length > 0, 'export yaml must be non-empty string')
       assert(yaml.includes(providerName), `export yaml must contain provider name ${providerName}`)
 
       const { json: checkJson } = await ctx.call('POST', '/api/settings/sync/import/check', { yaml })
-      const check = envelopeData(checkJson)
+      const check = checkJson
       assertImportCheck(check)
       assert(check.created.length === 0 && check.skipped.length === 0, 'same-name check must only update')
       assert(check.updated.some((item) => item.kind === 'providers' && item.name === providerName), 'check must list provider overwrite')
       const { json: listJson } = await ctx.call('GET', '/api/providers?pageNumber=1&pageSize=100')
-      const found = envelopeData(listJson).results.find((provider) => provider.name === providerName)
+      const found = listJson.results.find((provider) => provider.name === providerName)
       assert(String(found?.version) === latestVersion, 'precheck must not advance provider version')
 
       const { json: importJson } = await ctx.call('POST', '/api/settings/sync/import', { yaml, allowPartial: false })
-      const importResult = envelopeData(importJson)
+      const importResult = importJson
       assert(Array.isArray(importResult?.imported), 'import result must contain imported array')
       const importedProvider = importResult.imported.find(
         (item) => item.kind === 'providers' && item.name === providerName,
@@ -105,7 +105,7 @@ registerCase({
           let versionToDelete = latestVersion
           try {
             const { json } = await ctx.call('GET', '/api/providers?pageNumber=1&pageSize=100')
-            const listData = envelopeData(json)
+            const listData = json
             const list = Array.isArray(listData?.results)
               ? listData.results
               : Array.isArray(listData)
@@ -146,7 +146,7 @@ registerCase({
     const { json: createJson } = await ctx.call('POST', '/api/environments', {
       name: envName,
     })
-    const created = envelopeData(createJson)
+    const created = createJson
     envId = created.id
     const originalName = created.name
     const originalToken = created.registrationToken
@@ -161,7 +161,7 @@ registerCase({
       const { json: exportJson } = await ctx.call('POST', '/api/settings/sync/export', {
         items: [{ kind: 'environments', name: envName }],
       })
-      const exportData = envelopeData(exportJson)
+      const exportData = exportJson
       const yaml = exportData?.yaml
       assert(typeof yaml === 'string' && yaml.trim().length > 0, 'export yaml must be non-empty string')
       assert(yaml.includes(envName), `export yaml must contain environment name ${envName}`)
@@ -169,13 +169,13 @@ registerCase({
       assert(!yaml.includes(originalToken), 'export yaml must never contain the plaintext registration token')
 
       const { json: checkJson } = await ctx.call('POST', '/api/settings/sync/import/check', { yaml })
-      const check = envelopeData(checkJson)
+      const check = checkJson
       assertImportCheck(check)
       assert(check.updated.some((item) => item.kind === 'environments' && item.name === envName), 'check must list environment overwrite')
       assert(!JSON.stringify(check).includes(originalToken), 'check must not echo registrationToken')
 
       const { json: importJson } = await ctx.call('POST', '/api/settings/sync/import', { yaml, allowPartial: false })
-      const importResult = envelopeData(importJson)
+      const importResult = importJson
       assert(Array.isArray(importResult?.imported), 'import result must contain imported array')
       const importedEnv = importResult.imported.find(
         (item) => item.kind === 'environments' && item.name === envName,
@@ -186,12 +186,12 @@ registerCase({
         items: [{ kind: 'environments', name: envName }],
       })
       assert(
-        envelopeData(reexportJson).yaml.includes(tokenHash(originalToken)),
+        reexportJson.yaml.includes(tokenHash(originalToken)),
         'import must keep the original registration token hash',
       )
 
       const { json: listJson } = await ctx.call('GET', '/api/environments')
-      const envList = envelopeData(listJson)
+      const envList = listJson
       assert(Array.isArray(envList), 'environment list must be an array')
       const matching = envList.filter((e) => e.name === envName)
       assert(matching.length === 1, `expected exactly one environment with name ${envName}, got ${matching.length}`)
@@ -204,7 +204,7 @@ registerCase({
               'GET',
               `/api/environments/${encodeURIComponent(envId)}`,
             )
-            const card = envelopeData(json)
+            const card = json
             if (card?.version != null) {
               versionToDelete = String(card.version)
             }
@@ -236,11 +236,11 @@ registerCase({
     const invalidYaml = `providers:\n  - name: ${name}\n    credential: ${secret}\n`
     const providerList = async () => {
       const { json } = await ctx.call('GET', '/api/providers?pageNumber=1&pageSize=100')
-      return envelopeData(json).results
+      return json.results
     }
     try {
       const { json, headers } = await ctx.call('POST', '/api/settings/sync/import/check', { yaml })
-      const check = envelopeData(json)
+      const check = json
       assertImportCheck(check)
       assert(headers.get('cache-control') === 'no-store', 'precheck must be no-store')
       assert(check.created.some((item) => item.kind === 'providers' && item.name === name), 'check must list new provider')
@@ -257,7 +257,7 @@ registerCase({
       assert(!(await providerList()).some((provider) => provider.name === name), 'unconfirmed partial import must not write')
 
       const { json: importedJson } = await ctx.call('POST', '/api/settings/sync/import', { yaml, allowPartial: true })
-      const result = envelopeData(importedJson)
+      const result = importedJson
       assert(result.imported.some((item) => item.kind === 'providers' && item.name === name), 'authorized partial import must create provider')
       assert(result.skipped.some((item) => item.kind === 'futureConfig'), 'partial import must report skipped category')
       assert((await providerList()).some((provider) => provider.name === name), 'confirmed provider must exist')
@@ -283,7 +283,7 @@ registerCase({
     let envId = null
 
     const { json: createJson } = await ctx.call('POST', '/api/environments', { name: envName })
-    const created = envelopeData(createJson)
+    const created = createJson
     envId = created.id
     const originalToken = created.registrationToken
     assert(envId && originalToken, `created environment must carry id and token: ${JSON.stringify(created)}`)
@@ -293,12 +293,12 @@ registerCase({
         expectedVersion: String(created.version),
         installConfig: linuxInstallConfig(),
       })
-      assertInstallConfig(envelopeData(putJson).installConfig)
+      assertInstallConfig(putJson.installConfig)
 
       const { json: exportJson } = await ctx.call('POST', '/api/settings/sync/export', {
         items: [{ kind: 'environments', name: envName }],
       })
-      const yaml = envelopeData(exportJson)?.yaml
+      const yaml = exportJson?.yaml
       assert(typeof yaml === 'string' && yaml.trim().length > 0, 'export yaml must be non-empty string')
       assert(yaml.includes(envName), 'export yaml must contain environment name')
       assert(yaml.includes(tokenHash(originalToken)), 'export yaml must contain the registration token hash')
@@ -307,7 +307,7 @@ registerCase({
       assert(yaml.includes('jdtls'), 'export yaml must contain nested LSP server')
 
       const { json: checkJson } = await ctx.call('POST', '/api/settings/sync/import/check', { yaml })
-      const check = envelopeData(checkJson)
+      const check = checkJson
       assertImportCheck(check)
       assert(
         check.updated.some((item) => item.kind === 'environments' && item.name === envName),
@@ -317,11 +317,11 @@ registerCase({
 
       const { json: importJson } = await ctx.call('POST', '/api/settings/sync/import', { yaml, allowPartial: false })
       assert(
-        envelopeData(importJson).imported.some((item) => item.kind === 'environments' && item.name === envName),
+        importJson.imported.some((item) => item.kind === 'environments' && item.name === envName),
         'import must report the environment',
       )
       const { json: afterImportJson } = await ctx.call('GET', cardPath(envId))
-      assertInstallConfig(envelopeData(afterImportJson).installConfig)
+      assertInstallConfig(afterImportJson.installConfig)
 
       // 原子更新：新 token + 新配置在同一 environment 条目内一次导入生效。
       const updatedConfig = linuxInstallConfig()
@@ -336,12 +336,12 @@ registerCase({
         items: [{ kind: 'environments', name: envName }],
       })
       assert(
-        envelopeData(updatedExportJson).yaml.includes(tokenHash(newToken)),
+        updatedExportJson.yaml.includes(tokenHash(newToken)),
         'atomic sync update must replace the registration token hash',
       )
       const { json: updatedCardJson } = await ctx.call('GET', cardPath(envId))
       assert(
-        envelopeData(updatedCardJson).installConfig?.daemon?.note === 'e2e install config updated',
+        updatedCardJson.installConfig?.daemon?.note === 'e2e install config updated',
         'atomic sync update must persist the new install config alongside the token',
       )
 
@@ -352,13 +352,13 @@ registerCase({
       await ctx.call('POST', '/api/settings/sync/import', { yaml: clearYaml, allowPartial: false })
       const { json: clearedJson } = await ctx.call('GET', cardPath(envId))
       assert(
-        envelopeData(clearedJson).installConfig == null,
-        `absent installConfig must clear saved settings: ${JSON.stringify(envelopeData(clearedJson).installConfig)}`,
+        clearedJson.installConfig == null,
+        `absent installConfig must clear saved settings: ${JSON.stringify(clearedJson.installConfig)}`,
       )
     } finally {
       if (envId) {
         const { json } = await ctx.call('GET', cardPath(envId))
-        const current = envelopeData(json)
+        const current = json
         await ctx.call(
           'DELETE',
           `${cardPath(envId)}?expectedVersion=${encodeURIComponent(String(current.version))}`,
@@ -372,7 +372,7 @@ registerCase({
   id: 'config_sync.install_config_hard_invalid_precheck',
   level: 'L1',
   title: '配置同步 installConfig 硬错误预检查与零副作用',
-  docs: 'import/check 与 import 都必须深度校验 environment.installConfig：非法 studioUrl、未知字段、退役 javaHome、缺 operatingSystem 一律 400 硬拒绝（不得降级为 skipped 部分导入），不回显提交值，且不创建任何 Environment',
+  docs: 'import/check 与 import 都必须深度校验 environment.installConfig：非法 studioUrl、顶层或嵌套未知字段、缺 operatingSystem 一律 400 硬拒绝（不得降级为 skipped 部分导入），不回显提交值，且不创建任何 Environment',
   async run(ctx) {
     const suffix = cid().slice(0, 8)
     const name = `e2e-sync-bad-${suffix}`
@@ -383,7 +383,7 @@ registerCase({
       { daemon: { studioUrl: 'http://127.0.0.1:18081' } },
       {
         operatingSystem: 'linux',
-        javaHome: '/opt/jdk',
+        unknownField: '/opt/jdk',
         daemon: { studioUrl: 'http://127.0.0.1:18081' },
       },
     ]
@@ -405,7 +405,7 @@ registerCase({
     }
 
     const { json: listJson } = await ctx.call('GET', '/api/environments')
-    const list = envelopeData(listJson)
+    const list = listJson
     assert(Array.isArray(list), 'environment list must be an array')
     assert(
       !list.some((environment) => environment.name === name),

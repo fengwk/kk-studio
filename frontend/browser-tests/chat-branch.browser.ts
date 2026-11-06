@@ -192,15 +192,13 @@ async function installChatApi(
     const method = request.method()
 
     if (path === `/api/chats/${CHAT_ID}`) {
-      await route.fulfill({ json: { status: 200, data: chat() } })
+      await route.fulfill({ json: chat() })
       return
     }
     if (path === `/api/chats/${CHAT_ID}/sessions`) {
       // 归属 Session 摘要按 keyset 分页返回（ChatSessionPageDTO），首屏无下一页。
       await route.fulfill({
         json: {
-          status: 200,
-          data: {
             items: [{
               sessionId: SESSION_ID,
               name: 'Session One',
@@ -210,7 +208,6 @@ async function installChatApi(
               threadCount: 1,
             }],
             nextCursor: null,
-          },
         },
       })
       return
@@ -218,8 +215,6 @@ async function installChatApi(
     if (path === '/api/agents') {
       await route.fulfill({
         json: {
-          status: 200,
-          data: {
             pageNumber: 1,
             pageSize: 50,
             totalCount: '1',
@@ -234,7 +229,6 @@ async function installChatApi(
               createTime: null,
               updateTime: null,
             }],
-          },
         },
       })
       return
@@ -242,8 +236,6 @@ async function installChatApi(
     if (path === '/api/models') {
       await route.fulfill({
         json: {
-          status: 200,
-          data: {
             pageNumber: 1,
             pageSize: 50,
             totalCount: '2',
@@ -292,13 +284,12 @@ async function installChatApi(
                 updateTime: null,
               },
             ],
-          },
         },
       })
       return
     }
     if (path === '/api/environments') {
-      await route.fulfill({ json: { status: 200, data: [] } })
+      await route.fulfill({ json: [] })
       return
     }
     if (path === `/api/sessions/${SESSION_ID}/entries`) {
@@ -308,7 +299,8 @@ async function installChatApi(
         ? -1
         : entryList.findIndex((entry) => entry.entryId === cursor)
       if (cursor != null && cursorIndex < 0) {
-        await route.fulfill({ json: { status: 400, message: `unknown cursor ${cursor}` } })
+        await route.fulfill({ status: 400, contentType: 'application/problem+json',
+          json: { type: 'about:blank', status: 400, code: 'validation', title: `unknown cursor ${cursor}` } })
         return
       }
       const start = cursorIndex + 1
@@ -316,21 +308,18 @@ async function installChatApi(
       const nextIndex = start + items.length
       await route.fulfill({
         json: {
-          status: 200,
-          data: {
-            items,
-            nextCursor: nextIndex < entryList.length ? items.at(-1)!.entryId : null,
-          },
+          items,
+          nextCursor: nextIndex < entryList.length ? items.at(-1)!.entryId : null,
         },
       })
       return
     }
     if (path === `/api/sessions/${SESSION_ID}/threads`) {
-      await route.fulfill({ json: { status: 200, data: [{
+      await route.fulfill({ json: [{
         threadId: THREAD_ID, parentThreadId: null, name: boundThread.name,
         createdAt: boundThread.createTime, updatedAt: boundThread.updateTime, status: 'IDLE',
         executionControl: 'RUNNABLE', model: { modelName: 'MiniMax', variant: 'default' }, headMessagePreview: 'hello',
-      }] } })
+      }] })
       return
     }
     if (path === `/api/sessions/${SESSION_ID}/provider-request-preview` && method === 'POST') {
@@ -342,8 +331,6 @@ async function installChatApi(
       recorded.branchPreviews.push(body)
       await route.fulfill({
         json: {
-          status: 200,
-          data: {
             kind: 'DRAFT_REQUEST_PREVIEW',
             providerType: 'openai-compatible',
             modelName: 'MiniMax',
@@ -351,14 +338,13 @@ async function installChatApi(
             bodyJson: JSON.stringify({ model: 'MiniMax', draft: 'branch draft preview' }, null, 2),
             sourceHeadEntryId: body.startEntryId,
             generatedAt: '2026-10-01T00:03:00Z',
-          },
         },
       })
       return
     }
     if (path === `/api/threads/${CHILD_ID}` || path === `/api/threads/${GRANDCHILD_ID}`) {
       const grandchild = path.endsWith(GRANDCHILD_ID)
-      await route.fulfill({ json: { status: 200, data: {
+      await route.fulfill({ json: {
         version: grandchild && grandCompleted ? '1' : '0',
         thread: { ...boundThread,
           threadId: grandchild ? GRANDCHILD_ID : CHILD_ID,
@@ -381,7 +367,7 @@ async function installChatApi(
         ], baseEntryId: null, queuedCommands: [], executionStatus: grandchild && !grandCompleted ? 'RUNNING' : 'IDLE',
         activeAssistantOutput: null, toolInvocations: [], generationFailures: [],
         stopReceipts: [], unconfirmedExecutions: [],
-      } } })
+      } })
       return
     }
     if (path === `/api/threads/${THREAD_ID}` || (createdThread != null && path === `/api/threads/${createdThread.threadId}`)) {
@@ -389,8 +375,6 @@ async function installChatApi(
       const currentThread = isCreated ? createdThread! : { ...boundThread, version: String(boundVersion) }
       await route.fulfill({
         json: {
-          status: 200,
-          data: {
             version: currentThread.version,
             thread: currentThread,
             baseEntryId: null,
@@ -402,14 +386,13 @@ async function installChatApi(
             generationFailures: [],
             stopReceipts: [],
             unconfirmedExecutions: [],
-          },
         },
       })
       return
     }
     if (path === `/api/threads/${THREAD_ID}/tree`) {
       recorded.treeReads += 1
-      await route.fulfill({ json: { status: 200, data: [
+      await route.fulfill({ json: [
         { threadId: THREAD_ID, parentThreadId: null, name: boundThread.name, agentName: 'assistant',
           model: { modelName: 'MiniMax', variant: 'default' }, status: 'IDLE', executionControl: 'RUNNABLE',
           turnCount: 1, toolCallCount: 0, outcome: 'COMPLETED', updateTime: 1790812800 },
@@ -420,7 +403,7 @@ async function installChatApi(
           model: { modelName: 'MiniMax', variant: 'deep' },
           status: grandCompleted ? 'IDLE' : 'RUNNING', executionControl: 'RUNNABLE',
           turnCount: 4, toolCallCount: 5, outcome: grandCompleted ? 'COMPLETED' : null, updateTime: 1790812920 },
-      ] } })
+      ] })
       return
     }
     if (path.endsWith('/command-batches') && method === 'POST') {
@@ -431,7 +414,8 @@ async function installChatApi(
       }
       recorded.commandBatches.push(body)
       if (options.conflictFirstSend && recorded.commandBatches.length === 1) {
-        await route.fulfill({ status: 409, json: { status: 409, code: 'THREAD_NAME_CONFLICT', message: 'name conflict', errors: { reason: 'THREAD_NAME_CONFLICT' } } })
+        await route.fulfill({ status: 409, contentType: 'application/problem+json',
+          json: { type: 'about:blank', status: 409, code: 'conflict', reason: 'THREAD_NAME_CONFLICT', title: 'name conflict' } })
         return
       }
       if (body.target == null) {
@@ -455,38 +439,37 @@ async function installChatApi(
           }
         })
         queuedCommands = [...queuedCommands, ...accepted]
-        await route.fulfill({ json: { status: 200, data: {
+        await route.fulfill({ json: {
           session: { sessionId: SESSION_ID, name: 'Session One', createdAt: null },
           rootEntry: entryList[0],
           thread: { ...boundThread, version: String(boundVersion) },
           acceptedCommands: accepted,
           replayed: false,
-        } } })
+        } })
         return
       }
       createdThread = { ...boundThread, threadId: body.target.threadId, name: body.target.threadName, headEntryId: body.target.startEntryId }
-      await route.fulfill({ json: { status: 200, data: {
+      await route.fulfill({ json: {
         session: { sessionId: SESSION_ID, name: 'Session One', createdAt: null },
         rootEntry: entryList[0], thread: createdThread, acceptedCommands: [], replayed: false,
-      } } })
+      } })
       return
     }
     if (path === '/api/interactions') {
-      await route.fulfill({ json: { status: 200, data: { items: [], nextCursor: null, total: 0, freshnessAt: null } } })
+      await route.fulfill({ json: { items: [], nextCursor: null, total: 0, freshnessAt: null } })
       return
     }
     if (path.endsWith('/model-request-debug')) {
       // 只读调试预览是 POST-only：非 POST 一律 405，POST 记录草稿选择（model/environmentName）。
       if (method !== 'POST') {
-        await route.fulfill({ status: 405, json: { status: 405, message: 'Method Not Allowed' } })
+        await route.fulfill({ status: 405, contentType: 'application/problem+json',
+          json: { type: 'about:blank', status: 405, code: 'validation', title: 'Method Not Allowed' } })
         return
       }
       const body = request.postDataJSON() as { model: unknown; environmentName: string | null }
       recorded.modelRequestDebug.push(body)
       await route.fulfill({
         json: {
-          status: 200,
-          data: {
             kind: 'NEXT_REQUEST_PREVIEW',
             generatedAt: '2026-10-01T00:00:00Z',
             model: body.model,
@@ -498,12 +481,11 @@ async function installChatApi(
             cacheControl: null,
             planningError: null,
             frozenInvocation: null,
-          },
         },
       })
       return
     }
-    await route.fulfill({ json: { status: 200, data: {} } })
+    await route.fulfill({ json: {} })
   })
   return recorded
 }

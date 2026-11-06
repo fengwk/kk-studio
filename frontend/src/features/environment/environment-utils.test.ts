@@ -44,15 +44,17 @@ describe('update progress formatting', () => {
     ).toEqual({ downloaded: '8 MB', total: null, percent: null })
   })
 
-  // 测试意图：只有显式 environment_unavailable（409）才归为无 READY 快照，普通 409 仍是冲突。
-  it('recognizes only the runtime-unavailable conflict code', () => {
+  // 测试意图：只有显式 code unavailable + reason ENVIRONMENT_UNAVAILABLE（409）才归为无 READY 快照，普通 409 仍是冲突。
+  it('recognizes only the runtime-unavailable conflict code and reason', () => {
     expect(
       isEnvironmentRuntimeUnavailableError(
-        new ApiError('unavailable', 409, 'environment_unavailable'),
+        new ApiError('unavailable', 409, 'unavailable', undefined, 'ENVIRONMENT_UNAVAILABLE'),
       ),
     ).toBe(true)
     expect(
-      isEnvironmentRuntimeUnavailableError(new ApiError('busy', 409, 'environment_busy')),
+      isEnvironmentRuntimeUnavailableError(
+        new ApiError('busy', 409, 'conflict', undefined, 'ENVIRONMENT_BUSY'),
+      ),
     ).toBe(false)
     expect(isEnvironmentRuntimeUnavailableError(new Error('network'))).toBe(false)
   })

@@ -3,7 +3,6 @@ import path from 'node:path'
 import {
   assert,
   assertExactFields,
-  envelopeData,
   expectHttpError,
   pageResults,
   sleep,
@@ -578,7 +577,7 @@ for (const def of REAL_MODEL_DEFINITIONS) {
           execution: { driver: 'builtin', settings: { modelName: resolved.modelName, variant: resolved.variant } },
           config: { tools: [], skills: [], subagents: [] },
         })
-        agent = envelopeData(agentJson)
+        agent = agentJson
         chat = await createChat(ctx, {
           title: `e2e-chat-${def.idSuffix}-${suffix}`,
           agentName: agent.name,
@@ -777,7 +776,7 @@ export async function runRealReasoningLevelsSmoke(ctx, def) {
         execution: { driver: 'builtin', settings: { modelName: resolved.modelName, variant } },
         config: { tools: [], skills: [], subagents: [] },
       })
-      varAgent = envelopeData(varAgentJson)
+      varAgent = varAgentJson
       varChat = await createChat(ctx, {
         title: `e2e-reason-chat-${def.idSuffix}-${variant}-${varSuffix}`,
         agentName: varAgent.name,
@@ -914,7 +913,7 @@ for (const def of REAL_MODEL_DEFINITIONS) {
             subagents: [],
           },
         })
-        agent = envelopeData(agentJson)
+        agent = agentJson
         chat = await createChat(ctx, {
           title: `e2e-tool-chat-${def.idSuffix}-${suffix}`,
           agentName: agent.name,
@@ -1148,8 +1147,7 @@ registerCase({
     let chat = null
     let parentThreadId = null
     try {
-      childAgent = envelopeData(
-        (
+      childAgent = (
           await ctx.call('POST', '/api/agents', {
             name: `e2e-task-child-${suffix}`,
             description: 'Return the requested marker without using tools.',
@@ -1158,10 +1156,8 @@ registerCase({
             execution: { driver: 'builtin', settings: { modelName: model.modelName, variant: model.variant } },
             config: { tools: [], skills: [], subagents: [] },
           })
-        ).json,
-      )
-      parentAgent = envelopeData(
-        (
+        ).json
+      parentAgent = (
           await ctx.call('POST', '/api/agents', {
             name: `e2e-task-parent-${suffix}`,
             description: 'Always delegates once to the configured child.',
@@ -1179,8 +1175,7 @@ registerCase({
               subagents: [childAgent.name],
             },
           })
-        ).json,
-      )
+        ).json
       assert(
         JSON.stringify(parentAgent.config?.subagents) === JSON.stringify([childAgent.name]),
         safeDiagnosticJson(parentAgent),
@@ -1342,7 +1337,7 @@ registerCase({
         execution: { driver: 'builtin', settings: { modelName: minimaxModel.modelName, variant: minimaxModel.variant } },
         config: { tools: [], skills: [], subagents: [] },
       })
-      tempAgent = envelopeData(agentJson)
+      tempAgent = agentJson
 
       chat = await createChat(ctx, {
         title: `e2e-stop-partial-${suffix}`,
@@ -1586,7 +1581,7 @@ registerCase({
         execution: { driver: 'builtin', settings: { modelName: minimaxModel.modelName, variant: minimaxModel.variant } },
         config: { tools: [], skills: [], subagents: [] },
       })
-      agent = envelopeData(agentJson)
+      agent = agentJson
       chat = await createChat(ctx, {
         title: `e2e-branch-chat-${suffix}`,
         agentName: agent.name,
@@ -1761,16 +1756,15 @@ registerCase({
     )
     assert(!ids.includes('fs.list-directory'), safeDiagnosticJson(actualCapabilities))
     assert(!ids.some((id) => id.startsWith('skill.source.')), safeDiagnosticJson(actualCapabilities))
-    // Card 只投影 canonical capability 与保留的宿主事实：不公开工具/技能目录、raw workdir 或凭据。
-    assert(
-      !Object.hasOwn(match, 'tools')
-        && !Object.hasOwn(match, 'skills')
-        && !Object.hasOwn(match, 'mcpServers')
-        && !Object.hasOwn(match, 'workingDirectory')
-        && !Object.hasOwn(match, 'rootPath')
-        && !Object.hasOwn(match, 'registrationToken'),
-      safeDiagnosticJson(match),
-    )
+    // Card 只投影公开字段；nullable 字段按 NON_NULL 规则可省略，凭据绝不属于读取结果。
+    const optionalFields = [
+      'installConfig', 'lastSeen', 'operatingSystem', 'timeZone', 'userName',
+      'homeDirectory', 'note', 'daemonVersion',
+    ]
+    assertExactFields(match, [
+      'id', 'name', 'status', 'ready', 'statusExpiresAt', 'capabilities', 'version',
+      'createTime', 'updateTime', ...optionalFields.filter((key) => Object.hasOwn(match, key)),
+    ], 'environment card')
     assert(match.ready === true, safeDiagnosticJson(match))
     ctx.vars.daemonEnvironment = match
   },
@@ -1800,7 +1794,7 @@ registerCase({
         subagents: [],
       },
     })
-    const toolAgent = envelopeData(agentJson)
+    const toolAgent = agentJson
     assert(toolAgent?.name, safeDiagnosticJson(agentJson))
     // Environment 不是 Agent 的字段：请求体或响应出现 environmentId 都说明契约漂移。
     assertExactFields(
@@ -1882,9 +1876,10 @@ registerCase({
           accepted.thread.branchSettings,
         )}`,
       )
-      assert(
-        !Object.hasOwn(accepted.thread.branchSettings, 'workspacePath'),
-        safeDiagnosticJson(accepted.thread.branchSettings),
+      assertExactFields(
+        accepted.thread.branchSettings,
+        ['agentName', 'execution', 'environmentName', 'goal'],
+        'thread branchSettings',
       )
       let waiting = null
       let readInvocation = null
@@ -1915,21 +1910,16 @@ registerCase({
       )
       assert(readInvocation, `no WAITING_APPROVAL read invocation: ${safeDiagnosticJson(waiting)}`)
       assert(readInvocation.status === 'WAITING_APPROVAL', safeDiagnosticJson(readInvocation))
-      assert(
-        !Object.hasOwn(readInvocation, 'toolId'),
-        `ToolInvocationDTO must not expose toolId: ${safeDiagnosticJson(readInvocation)}`,
-      )
-      assert(
-        !Object.hasOwn(readInvocation, 'toolVersion'),
-        `ToolInvocationDTO must not expose toolVersion: ${safeDiagnosticJson(readInvocation)}`,
-      )
+      assertExactFields(readInvocation, [
+        'id', 'threadId', 'turnStartEntryId', 'assistantEntryId', 'callIndex', 'status',
+        'attempt', 'toolCallId', 'toolName', 'rendererKey', 'environmentId',
+        'requiredEnvironmentId', 'requiredEnvironmentName', 'environmentWaitFreshnessAt',
+        'waitingForEnvironment', 'argumentsJson', 'approvalJson', 'resultJson', 'errorJson',
+        'createTime', 'updateTime',
+      ], 'tool invocation')
       assert(
         readInvocation.toolName === 'read',
         `WAITING read invocation must identify the read tool by name: ${safeDiagnosticJson(readInvocation)}`,
-      )
-      assert(
-        !Object.hasOwn(readInvocation, 'toolBackend'),
-        `ToolInvocationDTO must not expose toolBackend: ${safeDiagnosticJson(readInvocation)}`,
       )
       assert(
         readInvocation.environmentId === ctx.vars.daemonEnvironment.id,
@@ -1937,14 +1927,6 @@ registerCase({
           readInvocation,
           expectedEnvironmentId: ctx.vars.daemonEnvironment.id,
         })}`,
-      )
-      assert(
-        !Object.hasOwn(readInvocation, 'environment'),
-        `ToolInvocationDTO must not expose the removed EnvironmentBinding wrapper: ${safeDiagnosticJson(readInvocation)}`,
-      )
-      assert(
-        !Object.hasOwn(readInvocation, 'location'),
-        `ToolInvocationDTO must not expose location: ${safeDiagnosticJson(readInvocation)}`,
       )
       assert(
         readInvocation.toolCallId
@@ -2099,10 +2081,6 @@ function assertAssistantAbortedEntry(entry) {
   assert(
     Object.keys(payload).length === 1 && Object.hasOwn(payload, 'message'),
     `ASSISTANT_ABORTED must contain only message: ${safeDiagnosticJson(payload)}`,
-  )
-  assert(
-    !Object.hasOwn(payload, 'assistantMetadata'),
-    `ASSISTANT_ABORTED must not carry assistantMetadata: ${safeDiagnosticJson(payload)}`,
   )
   assert(
     payload.message?.role === 'ASSISTANT' && Array.isArray(payload.message?.contents),

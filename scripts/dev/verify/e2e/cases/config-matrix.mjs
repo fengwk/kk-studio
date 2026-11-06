@@ -1,4 +1,4 @@
-import { assert, envelopeData, expectHttpError, cid } from '../lib/http.mjs'
+import { assert, expectHttpError, cid } from '../lib/http.mjs'
 import {
   agentConfigMatrix,
   baseModelConfig,
@@ -27,7 +27,7 @@ registerCase({
   docs: '供 config.model.* 复用，避免每行都建 provider',
   async run(ctx) {
     const { json } = await ctx.call('POST', '/api/providers', providerCreateBody(`mx-${cid().slice(0, 6)}`))
-    const provider = envelopeData(json)
+    const provider = json
     sharedProviderName = String(provider.name)
     sharedProviderExpectedVersion = String(provider.version)
     ctx.vars.matrixProviderName = sharedProviderName
@@ -61,7 +61,7 @@ for (const row of modelConfigMatrix()) {
       if (row.ok) {
         const { status, json } = await ctx.call('POST', '/api/models', body)
         assert([200, 201].includes(status), `status ${status}`)
-        const model = envelopeData(json)
+        const model = json
         assert(model?.name, JSON.stringify(json))
         ctx.writeArtifact(`model-${row.id}.json`, JSON.stringify(model, null, 2))
         // cleanup model immediately to keep list small
@@ -108,7 +108,7 @@ registerCase({
       '/api/providers',
       providerCreateBody(`ag-${cid().slice(0, 6)}`),
     )
-    const provider = envelopeData(pCreate)
+    const provider = pCreate
     const providerName = String(provider.name)
     ctx.vars.agentMatrixProviderName = providerName
     ctx.vars.agentMatrixProviderExpectedVersion = String(provider.version)
@@ -120,7 +120,7 @@ registerCase({
       description: 'for agent matrix',
       config: baseModelConfig(),
     })
-    const model = envelopeData(mCreate)
+    const model = mCreate
     sharedModelRefForAgent = model.name
     sharedModelVersionForAgent = String(model.version)
     ctx.vars.agentMatrixModel = sharedModelRefForAgent
@@ -145,7 +145,7 @@ for (const row of agentConfigMatrix()) {
       if (row.ok) {
         const { status, json } = await ctx.call('POST', '/api/agents', body)
         assert([200, 201].includes(status), `status ${status} ${JSON.stringify(json)}`)
-        const agent = envelopeData(json)
+        const agent = json
         assert(agent?.name, JSON.stringify(json))
         if (typeof row.assertCreated === 'function') row.assertCreated(agent)
         ctx.writeArtifact(`agent-${row.id}.json`, JSON.stringify(agent, null, 2))
@@ -173,7 +173,7 @@ registerCase({
     // best-effort cleanup of leftover matrix agents that block model delete
     try {
       const { json } = await ctx.call('GET', '/api/agents?pageNumber=1&pageSize=100')
-      const agents = (json?.data?.results || [])
+      const agents = (json?.results || [])
       for (const agent of agents) {
         const name = String(agent.name || '')
         if (name.startsWith('ag-') || name.startsWith('e2e-agent-') || name.startsWith('t-[')) {

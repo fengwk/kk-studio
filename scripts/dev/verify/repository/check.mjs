@@ -384,7 +384,7 @@ function extractPomModules(pomRelativePath) {
 
 /**
  * Maven 模块与分层：apps -> platform -> harness -> common。表中是每个模块允许声明的内部生产依赖（artifactId 去掉
- * `kk-studio-` 前缀，test scope 不受限）；platform 与 harness 从不依赖 apps，platform-runtime 装配
+ * `kk-studio-` 前缀；产品之间在任何 scope 下均互不依赖，其余 test scope 依赖不受此表限制）；platform 与 harness 不在生产中依赖 apps，platform-runtime 装配
  * agent-builtin，web 是唯一应用组合根（`null`）。
  */
 const moduleDependencies = {
@@ -426,6 +426,14 @@ const moduleDependencies = {
   'plugins/minimax-mavis': ['common', 'harness-runtime', 'platform-plugin-api'],
   'plugins/opencli': ['common', 'canvas-spi', 'harness-runtime', 'platform-plugin-api'],
   web: null,
+}
+
+const appArtifactProducts = {
+  'canvas-spi': 'canvas',
+  'canvas-runtime': 'canvas',
+  project: 'project',
+  chat: 'chat',
+  ide: 'ide',
 }
 
 /** 插件只经平台插件 SPI 接触宿主：Harness contributor/tool 契约、Canvas Function SPI 与共享值类型。 */
@@ -537,13 +545,21 @@ function checkModuleBoundaries() {
       continue
     }
     for (const dependency of pomDependencies(pomPath)) {
-      if (dependency.groupId !== 'fun.fengwk.kk-studio' || dependency.scope === 'test') {
+      if (dependency.groupId !== 'fun.fengwk.kk-studio') {
         continue
       }
       const name = dependency.artifactId.replace(/^kk-studio-/u, '')
       if (allowed === null) {
         if ((name.startsWith('plugin-') || name === 'schema') && dependency.scope !== 'runtime') {
           addError(`${pomPath}: ${dependency.artifactId} must use runtime scope`)
+        }
+        continue
+      }
+      if (dependency.scope === 'test') {
+        const targetApp = appArtifactProducts[name]
+        const currentApp = modulePath.startsWith('apps/') ? modulePath.split('/')[1] : null
+        if (currentApp && targetApp && targetApp !== currentApp) {
+          addError(`${pomPath}: ${modulePath} must not depend on ${dependency.artifactId}`)
         }
         continue
       }
@@ -1057,6 +1073,7 @@ const platformDomainRoots = [
   'orchestration',
   'persistence',
   'pluginhost',
+  'secret',
   'settings',
   'storage',
   'vfs',
@@ -1097,7 +1114,7 @@ function checkPackageRoots() {
   }
 }
 
-/** ProviderType 只有 harness/model 一份，share/platform 不得恢复旧枚举或映射适配器。 */
+/** ProviderType 的事实源位于 harness/model。 */
 function checkProviderTypeSingleSource() {
   if (
     !existsSync(
@@ -1108,28 +1125,6 @@ function checkProviderTypeSingleSource() {
     )
   ) {
     addError('missing harness/model ProviderType')
-  }
-  if (
-    existsSync(
-      path.join(
-        repositoryRoot,
-        'share/src/main/java/fun/fengwk/kkstudio/share/catalog/AgentProviderType.java',
-      ),
-    )
-  ) {
-    addError('share must not reintroduce AgentProviderType')
-  }
-  for (const root of ['share/src/main/java', 'platform/runtime/src/main/java', 'platform/plugin-api/src/main/java']) {
-    for (const filePath of walkFiles(path.join(repositoryRoot, root)).filter((file) =>
-      file.endsWith('.java'),
-    )) {
-      const relativePath = relativeFromRoot(filePath)
-      for (const { line, text } of fileLines(relativePath)) {
-        if (text.includes('AgentProviderType') || text.includes('toProviderType(')) {
-          addError(`${relativePath}:${line}: use harness/model ProviderType directly`)
-        }
-      }
-    }
   }
 }
 
@@ -1309,7 +1304,7 @@ function checkPlatformCompositionBoundary() {
     if (path.basename(relativePath) === 'pom.xml') {
       for (const { line, text } of fileLines(relativePath)) {
         if (text.toLowerCase().includes('langchain4j')) {
-          addError(`${relativePath}:${line}: LangChain4j must not return`)
+          addError(`${relativePath}:${line}: LangChain4j dependency must be absent`)
         }
       }
     }

@@ -165,7 +165,8 @@ async function mockPendingApi(page: Page, options: PendingApiOptions = {}): Prom
         if (options.failFirstList && state.listCalls === 1) {
           await route.fulfill({
             status: 500,
-            json: { status: 500, message: options.listFailureMessage ?? '服务暂时不可用' },
+            contentType: 'application/problem+json',
+            json: { type: 'about:blank', status: 500, code: 'internal', title: options.listFailureMessage ?? '服务暂时不可用' },
           })
           return
         }
@@ -175,15 +176,15 @@ async function mockPendingApi(page: Page, options: PendingApiOptions = {}): Prom
         const cursor = new URL(request.url()).searchParams.get('cursor')
         if (cursor && options.failFirstNextPage && !nextPageFailed) {
           nextPageFailed = true
-          await route.fulfill({ status: 500, json: { status: 500, message: '下一页暂时不可用' } })
+          await route.fulfill({ status: 500, contentType: 'application/problem+json',
+            json: { type: 'about:blank', status: 500, code: 'internal', title: '下一页暂时不可用' } })
           return
         }
         const items = options.paginate ? (cursor ? allItems.slice(1) : allItems.slice(0, 1)) : allItems
         const nextCursor = options.paginate && !cursor ? 'page-2' : null
         // total 是同一过滤条件下的真实可见待处理总数，与游标分页位置无关。
         await route.fulfill({
-          json: { status: 200, data: { items, nextCursor, total: allItems.length,
-            freshnessAt: 1791194400 } },
+          json: { items, nextCursor, total: allItems.length, freshnessAt: 1791194400 },
         })
         return
       }
@@ -196,7 +197,9 @@ async function mockPendingApi(page: Page, options: PendingApiOptions = {}): Prom
         if (options.approvalStatus && options.approvalStatus >= 400) {
           await route.fulfill({
             status: options.approvalStatus,
-            json: { status: options.approvalStatus, message: 'interaction already decided' },
+            contentType: 'application/problem+json',
+            json: { type: 'about:blank', status: options.approvalStatus, code: 'conflict',
+              reason: 'INTERACTION_ALREADY_DECIDED', title: 'interaction already decided' },
           })
           return
         }
@@ -204,7 +207,8 @@ async function mockPendingApi(page: Page, options: PendingApiOptions = {}): Prom
           approvalFailuresLeft -= 1
           await route.fulfill({
             status: 500,
-            json: { status: 500, message: '审批服务暂时不可用' },
+            contentType: 'application/problem+json',
+            json: { type: 'about:blank', status: 500, code: 'internal', title: '审批服务暂时不可用' },
           })
           return
         }
@@ -212,7 +216,7 @@ async function mockPendingApi(page: Page, options: PendingApiOptions = {}): Prom
         if (invocationId) {
           state.decidedApprovals.add(decodeURIComponent(invocationId))
         }
-        await route.fulfill({ json: { status: 200, data: { id: 'inv-1' } } })
+        await route.fulfill({ json: { id: 'inv-1' } })
         return
       }
 
@@ -227,15 +231,12 @@ async function mockPendingApi(page: Page, options: PendingApiOptions = {}): Prom
         }
         await route.fulfill({
           json: {
-            status: 200,
-            data: {
               threadId: 'thread-questionnaire',
               interactionId: QUESTIONNAIRE_INTERACTION_ID,
               submissionId: 'sub-1',
               actor: 'user',
               acceptedAt: 1791194400,
               materialized: true,
-            },
           },
         })
         return
@@ -244,8 +245,6 @@ async function mockPendingApi(page: Page, options: PendingApiOptions = {}): Prom
       if (requestPath === `/api/issues/${ISSUE_ID}` && method === 'GET') {
         await route.fulfill({
           json: {
-            status: 200,
-            data: {
               issue: {
                 id: ISSUE_ID,
                 projectId: PROJECT_ID,
@@ -265,7 +264,6 @@ async function mockPendingApi(page: Page, options: PendingApiOptions = {}): Prom
               latestRun: null,
               stageBudgets: [],
               agentThreads: [],
-            },
           },
         })
         return
@@ -273,7 +271,8 @@ async function mockPendingApi(page: Page, options: PendingApiOptions = {}): Prom
 
       await route.fulfill({
         status: 404,
-        json: { status: 404, message: `unmocked ${method} ${requestPath}` },
+        contentType: 'application/problem+json',
+        json: { type: 'about:blank', status: 404, code: 'not_found', title: `unmocked ${method} ${requestPath}` },
       })
     },
   )

@@ -226,22 +226,47 @@ class BoundaryProbe {}
   }
 })
 
-test('ported architecture guards reject stale provider enums and Redis configuration', () => {
-  // Test intent: removed handwritten tests keep their behavioral constraints in the repository check.
+test('architecture guard rejects Redis configuration', () => {
+  // Test intent: Redis configuration remains outside the platform composition.
   const root = createRoot({
-    'share/src/main/java/fun/fengwk/kkstudio/share/catalog/AgentProviderType.java':
-      'package fun.fengwk.kkstudio.share.catalog;\nclass AgentProviderType {}\n',
     'web/src/main/resources/application.yml': 'redis:\n  url: redis://localhost:6379\n',
   })
   try {
     const messages = diagnostics(root)
     assert.equal(
-      messages.some((message) => message.includes('share must not reintroduce AgentProviderType')),
-      true,
-    )
-    assert.equal(
       messages.some((message) => message.includes('application.yml:2: Redis configuration must be absent')),
       true,
+    )
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('architecture guard rejects LangChain4j dependencies and production imports', () => {
+  // Test intent: repository forbids LangChain4j in POM dependencies and production imports.
+  const root = createRoot({
+    'platform/runtime/pom.xml':
+      '<project><dependencies><dependency><groupId>dev.langchain4j</groupId><artifactId>langchain4j-core</artifactId></dependency></dependencies></project>\n',
+    'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog/LangChainLeak.java':
+      'package fun.fengwk.kkstudio.platform.catalog;\nimport dev.langchain4j.model.chat.ChatLanguageModel;\nclass LangChainLeak {}\n',
+  })
+  try {
+    const messages = diagnostics(root)
+    assert.equal(
+      messages.some((message) =>
+        message.includes('platform/runtime/pom.xml:1: LangChain4j dependency must be absent'),
+      ),
+      true,
+      'LangChain4j dependency in pom.xml must be rejected',
+    )
+    assert.equal(
+      messages.some((message) =>
+        message.includes(
+          'LangChainLeak.java:2: production sources must not import LangChain4j',
+        ),
+      ),
+      true,
+      'LangChain4j import in production java must be rejected',
     )
   } finally {
     rmSync(root, { recursive: true, force: true })

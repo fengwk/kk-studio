@@ -93,6 +93,7 @@ class CanvasFunctionControllerTest {
     mockMvc
         .perform(get("/api/canvas-functions"))
         .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data[0].length()").value(8))
         .andExpect(jsonPath("$.data[0].name").value("fake-image"))
         .andExpect(jsonPath("$.data[0].description").value("Fake Image"))
         .andExpect(jsonPath("$.data[0].argsSchema.type").value("object"))
@@ -100,19 +101,13 @@ class CanvasFunctionControllerTest {
         .andExpect(jsonPath("$.data[0].outputs.length()").value(1))
         .andExpect(jsonPath("$.data[0].outputs[0].kind").value("IMAGE"))
         .andExpect(jsonPath("$.data[0].outputs[0].name").value(nullValue()))
-        .andExpect(jsonPath("$.data[0].outputKind").doesNotExist())
         .andExpect(jsonPath("$.data[0].referencePolicy.allowedKinds[0]").value("IMAGE"))
         .andExpect(jsonPath("$.data[0].available").value(true))
         .andExpect(jsonPath("$.data[0].unavailableReason").value(nullValue()))
-        .andExpect(jsonPath("$.data[0].version.catalogEpoch").doesNotExist())
+        .andExpect(jsonPath("$.data[0].version.length()").value(1))
         .andExpect(
             jsonPath("$.data[0].version.definitionFingerprint")
-                .value(expectedVersion().definitionFingerprint()))
-        .andExpect(jsonPath("$.data[0].key").doesNotExist())
-        .andExpect(jsonPath("$.data[0].model").doesNotExist())
-        .andExpect(jsonPath("$.data[0].parameters").doesNotExist())
-        .andExpect(jsonPath("$.data[0].endpoint").doesNotExist())
-        .andExpect(jsonPath("$.data[0].workflow").doesNotExist());
+                .value(expectedVersion().definitionFingerprint()));
     // 目录读取必须是一次租用，并在响应前释放。
     assertEquals(0, catalogSource.openLeases());
   }
@@ -129,7 +124,7 @@ class CanvasFunctionControllerTest {
               + "A".repeat(64)
               + "\"}}",
           "{\"requestId\":\"request-1\",\"expectedVersion\":{\"definitionFingerprint\":\"abc\"}}",
-          "{\"requestId\":\"request-1\",\"expectedVersion\":{\"catalogEpoch\":\"1\","
+          "{\"requestId\":\"request-1\",\"expectedVersion\":{\"unknownField\":\"1\","
               + "\"definitionFingerprint\":\""
               + "a".repeat(64)
               + "\"}}",

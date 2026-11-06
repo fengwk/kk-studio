@@ -17,7 +17,7 @@ import { render, runProbe } from '../../lib/json-probe.mjs'
 class ProbeError extends Error {}
 
 const input = readFileSync(0, 'utf8')
-const environments = (name) => ((JSON.parse(input).data ?? []).find((row) => row?.name === name))
+const environments = (name) => JSON.parse(input).find((row) => row?.name === name)
 const container = () => JSON.parse(input)[0]
 
 const commands = {

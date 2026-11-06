@@ -82,7 +82,7 @@ describe('sessionFileService', () => {
 
   /**
    * 测试意图：下载端点返回裸字节而非 API 信封；成功时保留附件文件名，
-   * 失败时把 JSON 信封翻译成带 HTTP 状态的 ApiError，供面板区分 404 与 422。
+   * 失败时把 problem 翻译成带 HTTP 状态的 ApiError，供面板区分 404 与 422。
    */
   it('downloads bytes and preserves the attachment file name', async () => {
     const http = createMockHttpClient()
@@ -102,22 +102,23 @@ describe('sessionFileService', () => {
     expect(fetchImpl).toHaveBeenCalledWith(
       `/api/sessions/${SESSION_ID}/files/download?ownerKind=CHAT&ownerId=${OWNER.id}`
         + `&path=${encodeURIComponent(FILE_PATH).replace(/%20/g, '+')}`,
-      { headers: { 'Accept-Language': 'zh-CN' }, signal: undefined },
+      expect.objectContaining({ headers: expect.objectContaining({ 'Accept-Language': 'zh-CN' }) }),
     )
     expect(download.fileName).toBe('notes.txt')
     expect(Array.from(new Uint8Array(await download.blob.arrayBuffer()))).toEqual([1, 2, 3])
   })
 
-  it('rejects a download with the backend error envelope', async () => {
+  // 测试意图：下载失败时服务端返回 problem+json，客户端构造带 status、code 与 detail 的 ApiError
+  it('rejects a download with the backend problem+json error', async () => {
     const http = createMockHttpClient()
     const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(JSON.stringify({
+        type: 'about:blank',
+        title: 'HTTP error (status 422).',
         status: 422,
-        code: 'UNPROCESSABLE_CONTENT',
-        message: 'HTTP error (status 422).',
-        data: null,
-        errors: { detail: 'file appears to be binary' },
-      }), { status: 422, headers: { 'Content-Type': 'application/json' } }),
+        code: 'validation',
+        detail: 'file appears to be binary',
+      }), { status: 422, headers: { 'Content-Type': 'application/problem+json' } }),
     )
     const service = createSessionFileService(http, fetchImpl)
 
@@ -126,7 +127,8 @@ describe('sessionFileService', () => {
 
     expect(failure).toBeInstanceOf(ApiError)
     expect((failure as ApiError).status).toBe(422)
-    expect((failure as ApiError).errors?.detail).toBe('file appears to be binary')
+    expect((failure as ApiError).code).toBe('validation')
+    expect((failure as ApiError).detail).toBe('file appears to be binary')
     expect(isNotFoundError(failure)).toBe(false)
   })
 

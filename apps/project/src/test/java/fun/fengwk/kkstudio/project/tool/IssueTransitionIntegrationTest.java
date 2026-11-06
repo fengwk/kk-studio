@@ -5,14 +5,19 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.aop.support.AopUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationContext;
 
-import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
+import fun.fengwk.kkstudio.harness.contributor.api.HarnessRegistrar;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.platform.error.DomainException;
@@ -55,10 +60,10 @@ class IssueTransitionIntegrationTest extends ProjectTestSupport {
         harnessCatalog.selectableTools().stream()
             .anyMatch(candidate -> candidate.id().equals(tool.id())));
     // Issue 的运行上下文由 Markdown 任务消息承载，不注册 custom entry type。
-    ContributorId contributorId = tool.id().contributorId();
-    assertTrue(
-        harnessCatalog.customEntryTypes().stream()
-            .noneMatch(entryType -> entryType.id().contributorId().equals(contributorId)));
+    HarnessRegistrar registrar = mock(HarnessRegistrar.class);
+    applicationContext.getBean(ProjectHarnessContributor.class).contribute(registrar);
+    verify(registrar, never()).registerCustomEntryType(anyString(), anyString(), anyInt());
+    verify(registrar, never()).registerCustomEntryType(anyString(), anyString());
   }
 
   /** 建一个 Issue 处于 DESIGN 阶段、已有活动 Run 的场景，返回该 Run。 */

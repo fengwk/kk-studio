@@ -281,11 +281,7 @@ export function validateHealthResponse(response) {
 
 export function validateCatalogResponse(response) {
   requireStatus(response, 200, 'catalog')
-  requireObject(response.json, 'catalog response')
-  if (!Object.prototype.hasOwnProperty.call(response.json, 'data')) {
-    throw new BenchmarkError('catalog response is missing the data envelope')
-  }
-  const data = response.json.data
+  const data = response.json
   requireObject(data, 'catalog data')
   if (!Array.isArray(data.results)) {
     throw new BenchmarkError('catalog data.results must be an array')
@@ -331,11 +327,7 @@ export function validateCanvasCreateResponse(response) {
   if (!response || response.status < 200 || response.status >= 300) {
     throw new BenchmarkError(`canvas create expected a 2xx response, got ${response?.status}`)
   }
-  requireObject(response.json, 'canvas create response')
-  if (!Object.prototype.hasOwnProperty.call(response.json, 'data')) {
-    throw new BenchmarkError('canvas create response is missing the data envelope')
-  }
-  const canvas = response.json.data
+  const canvas = response.json
   requireObject(canvas, 'canvas create data')
   if (typeof canvas.id !== 'string' || !UUID_PATTERN.test(canvas.id)) {
     throw new BenchmarkError(`canvas create id must be a canonical UUID: ${JSON.stringify(canvas.id)}`)

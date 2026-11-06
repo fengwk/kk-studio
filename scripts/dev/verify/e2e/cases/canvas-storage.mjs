@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 
-import { assert, assertDecimalVersion, cid, envelopeData, expectHttpError } from '../lib/http.mjs'
+import { assert, assertDecimalVersion, cid, expectHttpError } from '../lib/http.mjs'
 import { createCaseAdder } from '../lib/registry.mjs'
 
 export const cases = []
@@ -56,7 +56,7 @@ async function uploadPng(ctx) {
     sizeBytes: PNG_BYTES.length,
     sha256,
   })
-  const upload = envelopeData(reserved.json)
+  const upload = reserved.json
   assert(UUID_TEXT.test(upload.id), JSON.stringify(upload))
   assert(!('bucket' in upload) && !('key' in upload), JSON.stringify(upload))
   if (upload.state === 'READY') {
@@ -73,9 +73,7 @@ async function uploadPng(ctx) {
     body: PNG_BYTES,
   })
   assert(putResponse.ok, `direct PUT HTTP ${putResponse.status}`)
-  const completed = envelopeData(
-    (await ctx.call('POST', `/api/storage/uploads/${upload.id}/complete`)).json,
-  )
+  const completed = (await ctx.call('POST', `/api/storage/uploads/${upload.id}/complete`)).json
   assert(
     completed.state === 'READY'
       && UUID_TEXT.test(completed.blobId)
@@ -97,7 +95,7 @@ registerCase({
       title: `e2e-resource-storage-${cid().slice(0, 8)}`,
     })
     assert(created.status === 201, `create canvas status ${created.status}`)
-    const canvas = envelopeData(created.json)
+    const canvas = created.json
     assert(UUID_TEXT.test(canvas.id), JSON.stringify(canvas))
     assertDecimalVersion(canvas.revision, 'canvas.revision')
     assert(canvas.revision === '0', JSON.stringify(canvas))
@@ -105,9 +103,7 @@ registerCase({
     const upload = await uploadPng(ctx)
 
     // Storage blob URL：POST download-url 携带 blob 权威媒体事实，preview-url 只签发 GET。
-    const blobDownload = envelopeData(
-      (await ctx.call('POST', `/api/storage/blobs/${upload.blobId}/download-url`)).json,
-    )
+    const blobDownload = (await ctx.call('POST', `/api/storage/blobs/${upload.blobId}/download-url`)).json
     assert(
       blobDownload.method === 'GET'
         && /^https?:\/\//.test(blobDownload.url)
@@ -116,9 +112,7 @@ registerCase({
     )
     assertDecimalVersion(blobDownload.sizeBytes, 'blob sizeBytes')
     assert(blobDownload.sizeBytes === String(PNG_BYTES.length), JSON.stringify(blobDownload))
-    const blobPreview = envelopeData(
-      (await ctx.call('POST', `/api/storage/blobs/${upload.blobId}/preview-url`)).json,
-    )
+    const blobPreview = (await ctx.call('POST', `/api/storage/blobs/${upload.blobId}/preview-url`)).json
     assert(blobPreview.method === 'GET' && /^https?:\/\//.test(blobPreview.url), JSON.stringify(blobPreview))
     assert(blobPreview.mediaType === null && blobPreview.sizeBytes === null, JSON.stringify(blobPreview))
 
@@ -140,7 +134,7 @@ registerCase({
         ],
       },
     )
-    const patch = envelopeData(commandJson)
+    const patch = commandJson
     assert(patch.revision === '1', JSON.stringify(patch))
     const upsert = patch.nodes.find((item) => item.op === 'UPSERT' && item.node.id === nodeId)
     assert(upsert, JSON.stringify(patch.nodes))
@@ -176,7 +170,7 @@ registerCase({
         },
       ],
     })
-    const keepPatch = envelopeData(keepJson)
+    const keepPatch = keepJson
     assert(
       keepPatch.revision === '1' && keepPatch.nodes.length === 0,
       JSON.stringify(keepPatch),
@@ -184,7 +178,7 @@ registerCase({
 
     // Resource 直读预签名：只暴露 method/url/headers/expiresAt，字节与上传一致。
     const download = assertPresigned(
-      envelopeData((await ctx.call('POST', `/api/canvases/${canvas.id}/resources/${resource.id}/download-url`)).json),
+      (await ctx.call('POST', `/api/canvases/${canvas.id}/resources/${resource.id}/download-url`)).json,
       'resource download url',
     )
     const downloadResponse = await fetch(download.url, { headers: download.headers || {} })
@@ -196,7 +190,7 @@ registerCase({
       'downloaded bytes differ from uploaded bytes',
     )
     assertPresigned(
-      envelopeData((await ctx.call('POST', `/api/canvases/${canvas.id}/resources/${resource.id}/preview-url`)).json),
+      (await ctx.call('POST', `/api/canvases/${canvas.id}/resources/${resource.id}/preview-url`)).json,
       'resource preview url',
     )
 
@@ -214,7 +208,7 @@ registerCase({
         },
       ],
     })
-    const textPatch = envelopeData(textJson)
+    const textPatch = textJson
     assert(textPatch.revision === '2', JSON.stringify(textPatch))
     const textResourceId = textPatch.nodes.find((item) => item.node?.id === textNodeId).node.resources[0].id
     await expectHttpError(

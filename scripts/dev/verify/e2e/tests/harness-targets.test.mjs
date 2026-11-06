@@ -28,7 +28,7 @@ test('harness owner helpers expose only the Chat owner shape', async () => {
   await assert.rejects(
     () =>
       acceptCommandBatch(
-        { call: async () => ({ status: 202, json: { data: {} } }) },
+        { call: async () => ({ status: 202, json: {} }) },
         {
           owner: { kind: 'CANVAS', id: sampleId() },
           target: newSessionTarget({ sessionId: sampleId(), threadId: sampleId(), rootSettings: {} }),
@@ -218,7 +218,7 @@ test('Session summaries preserve same-named root and child parent identities', a
     call: async (method, path) => {
       assert.equal(method, 'GET')
       assert.equal(path, `/api/sessions/${sampleId()}/threads`)
-      return { json: { data: [root, child] } }
+      return { json: [root, child] }
     },
   }
   assert.deepEqual(await listSessionThreads(ctx, sampleId()), [root, child])
@@ -230,7 +230,7 @@ test('Session summaries preserve same-named root and child parent identities', a
   ].map((parentThreadId) => ({ ...child, parentThreadId }))]
   for (const invalid of invalidParents) {
     await assert.rejects(
-      () => listSessionThreads({ call: async () => ({ json: { data: [invalid] } }) }, sampleId()),
+      () => listSessionThreads({ call: async () => ({ json: [invalid] }) }, sampleId()),
       /parentThreadId/,
     )
   }
@@ -339,13 +339,11 @@ test('createChat sends a nullable environmentName and requires the projected fie
       return {
         status: 201,
         json: {
-          data: {
-            id: cid(),
-            agentName: body.agentName,
-            environmentName: body.environmentName,
-            yoloEnabled: body.yoloEnabled,
-            version: '0',
-          },
+          id: cid(),
+          agentName: body.agentName,
+          environmentName: body.environmentName,
+          yoloEnabled: body.yoloEnabled,
+          version: '0',
         },
       }
     },
@@ -371,7 +369,7 @@ test('createChat sends a nullable environmentName and requires the projected fie
       {
         call: async () => ({
           status: 201,
-          json: { data: { id: cid(), agentName: 'agent', yoloEnabled: false, version: '0' } },
+          json: { id: cid(), agentName: 'agent', yoloEnabled: false, version: '0' },
         }),
       },
       { title: 't', agentName: 'agent' },
@@ -392,7 +390,7 @@ test('environment status deadline is required and explicitly null while offline'
   const environment = {
     id: cid(), name: 'offline', version: '0', ready: false, status: 'OFFLINE', statusExpiresAt: null,
   }
-  const ctx = (data) => ({ call: async () => ({ json: { data: [data] } }) })
+  const ctx = (data) => ({ call: async () => ({ json: [data] }) })
   assert.deepEqual(await listEnvironments(ctx(environment)), [environment])
   const { statusExpiresAt: _deadline, ...missing } = environment
   await assert.rejects(() => listEnvironments(ctx(missing)), /statusExpiresAt/)
