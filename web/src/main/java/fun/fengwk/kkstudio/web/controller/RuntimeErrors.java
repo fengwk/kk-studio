@@ -5,9 +5,12 @@ import org.springframework.web.server.ResponseStatusException;
 
 import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
+import fun.fengwk.kkstudio.harness.api.HarnessConflictReason;
 import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
 
+import java.util.Arrays;
+import java.util.Set;
 import java.util.function.Supplier;
 
 /**
@@ -17,6 +20,9 @@ import java.util.function.Supplier;
  */
 final class RuntimeErrors {
 
+  private static final Set<String> HARNESS_RESOURCES =
+      Set.of("thread", "session", "entry", "execution", "agent_task");
+
   private RuntimeErrors() {}
 
   static <T> T translate(Supplier<T> operation) {
@@ -24,8 +30,14 @@ final class RuntimeErrors {
       return operation.get();
     } catch (DomainException error) {
       if (error.code() == DomainErrorCode.NOT_FOUND
-          && ("thread".equals(error.resource()) || "agent_task".equals(error.resource()))) {
+          && error.resource() != null
+          && HARNESS_RESOURCES.contains(error.resource())) {
         throw new ResponseStatusException(HttpStatus.NOT_FOUND, error.getMessage(), error);
+      }
+      if (error.code() == DomainErrorCode.CONFLICT
+          && Arrays.stream(HarnessConflictReason.values())
+              .anyMatch(reason -> reason.name().equals(error.reason()))) {
+        throw new ResponseStatusException(HttpStatus.CONFLICT, error.getMessage(), error);
       }
       throw error;
     } catch (HarnessRuntimeNotFoundException error) {

@@ -14,6 +14,7 @@ import org.springframework.mock.http.MockHttpInputMessage;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.web.server.ResponseStatusException;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.platform.harness.builtin.query.ProviderRequestPreviewUnavailableException;
 import fun.fengwk.kkstudio.platform.harness.builtin.query.ProviderRequestPreviewUnavailableException.Reason;
@@ -104,6 +105,18 @@ class StudioResponseStatusErrorAdviceTest {
             "reason",
             "STALE_COMMAND_CURSOR"),
         response.getBody().getErrors());
+  }
+
+  @Test
+  void exposesDomainConflictReasonInTheExistingEnvelope() {
+    // DomainException 替代旧异常后，客户端重试所用 reason 不得变化。
+    DomainException conflict = DomainException.conflict("STALE_COMMAND_CURSOR", "stale cursor");
+    var response =
+        advice.handle(
+            new ResponseStatusException(HttpStatus.CONFLICT, conflict.getMessage(), conflict),
+            null);
+    assertEquals(409, response.getStatusCode().value());
+    assertEquals("STALE_COMMAND_CURSOR", response.getBody().getErrors().get("reason"));
   }
 
   @Test

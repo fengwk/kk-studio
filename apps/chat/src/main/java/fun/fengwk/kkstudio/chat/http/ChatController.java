@@ -19,12 +19,17 @@ import fun.fengwk.kkstudio.chat.dto.ChatDTO;
 import fun.fengwk.kkstudio.chat.dto.ChatPageDTO;
 import fun.fengwk.kkstudio.chat.dto.ChatSessionPageDTO;
 import fun.fengwk.kkstudio.chat.dto.ChatUpdateDTO;
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.number.DecimalLongs;
+import fun.fengwk.kkstudio.harness.api.HarnessConflictReason;
 import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
 import fun.fengwk.kkstudio.share.runtime.HarnessSessionSummaryDTO;
 
+import java.util.Arrays;
+import java.util.Set;
 import java.util.function.Supplier;
 
 /** Chat 集合 CRUD、keyset 分页与 Chat owner 的 Harness Session 摘要查询。 */
@@ -35,6 +40,8 @@ public class ChatController {
 
   private static final int DEFAULT_LIMIT = 50;
   private static final int MAX_LIMIT = 100;
+  private static final Set<String> HARNESS_RESOURCES =
+      Set.of("thread", "session", "entry", "execution", "agent_task");
 
   private final ChatService chatService;
 
@@ -108,6 +115,18 @@ public class ChatController {
   private static <T> T withRuntimeTranslation(Supplier<T> operation) {
     try {
       return operation.get();
+    } catch (DomainException error) {
+      if (error.code() == DomainErrorCode.NOT_FOUND
+          && error.resource() != null
+          && HARNESS_RESOURCES.contains(error.resource())) {
+        throw new ResponseStatusException(HttpStatus.NOT_FOUND, error.getMessage(), error);
+      }
+      if (error.code() == DomainErrorCode.CONFLICT
+          && Arrays.stream(HarnessConflictReason.values())
+              .anyMatch(reason -> reason.name().equals(error.reason()))) {
+        throw new ResponseStatusException(HttpStatus.CONFLICT, error.getMessage(), error);
+      }
+      throw error;
     } catch (HarnessRuntimeNotFoundException error) {
       throw new ResponseStatusException(HttpStatus.NOT_FOUND, error.getMessage(), error);
     } catch (HarnessRuntimeConflictException error) {
