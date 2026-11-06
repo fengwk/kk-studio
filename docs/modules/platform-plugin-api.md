@@ -10,11 +10,11 @@
 
 ## 定义与配置实例
 
-[`StudioPlugin`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/StudioPlugin.java) 是安装期定义，由插件 JAR 的 auto-configuration 注册。它声明唯一 [`PluginDescriptor`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/PluginDescriptor.java)（pluginId、展示名、代码版本）、配置 Schema、认证形态，并通过 `configure(config, context)` 构建 [`PluginInstance`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/PluginInstance.java)。
+[`Plugin`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/Plugin.java) 是安装期定义，由插件 JAR 的 auto-configuration 注册。它声明唯一 [`PluginDescriptor`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/PluginDescriptor.java)（pluginId、展示名、代码版本）、配置 Schema、认证形态，并通过 `configure(config, context)` 构建 [`PluginInstance`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/PluginInstance.java)。
 
 实例通过 `harnessContributors()` 返回冻结的 Harness Contributor 列表，通过 `contributions(Class<T>)` 返回指定产品域能力的冻结列表；两份列表都可为空，读取结果不可变。产品域能力类型属于产品模块（当前只有 Canvas 的 `CanvasFunctionAdapter`），平台只按自己拥有的类型读取，从不解释产品语义。实例只关闭自己创建的资源，不关闭注入的共享客户端或宿主端口。插件贡献不另注册为 Spring bean，因此一个定义只产生一份配置实例和能力来源。Mavis 的 enabled 配置控制是否贡献工具，启用实例保留完整工具集合。
 
-[`StudioPluginRegistry`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/StudioPluginRegistry.java) 是当前 classpath 的安装目录：构造期按 `pluginId` 升序冻结全部 `StudioPlugin`，重复身份即启动失败；目录构造完成后不可变，没有运行时安装或刷新入口。
+[`PluginRegistry`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/PluginRegistry.java) 是当前 classpath 的安装目录：构造期按 `pluginId` 升序冻结全部 `Plugin`，重复身份即启动失败；目录构造完成后不可变，没有运行时安装或刷新入口。
 
 ## 产品域能力
 
@@ -42,7 +42,7 @@
 | `Authentication` | `ACCEPTED` / `REJECTED` / `UNAVAILABLE` / `NOT_CHECKED` | 只有远端确定性拒绝本次凭据才是 `REJECTED`，只有成功合法响应才是 `ACCEPTED`；`UNAVAILABLE` 仅表示本地没有可用凭据，其它故障一律 `NOT_CHECKED` |
 | `BrowserSession` | `UNKNOWN` | 浏览器登录态不由本能力核验 |
 
-实现只把已类型化的失败投影为维度，绝不从异常文本猜分类；未定义的运行时失败与进程级 `Error` 原样上抛，既不降级为维度也不伪装成健康结果。结果不携带异常文本、远端 URI、远端正文或凭据。宿主入口是 `POST /api/plugins/{pluginId}/connection-check`，请求体给出 `expectedEpoch` 与 `expectedRevision`，响应只回已应用坐标与上述维度并显式 `no-store`：未安装是 404，实例未声明能力是 400，期望坐标与当前已应用坐标不一致（含尚未应用）是 409，检查本身在数据库事务外、一次已应用租用内执行。管理面的 `connectionCheckSupported` 如实投影本节点已应用实例是否声明该能力。
+实现只把已类型化的失败投影为维度，绝不从异常文本猜分类；未定义的运行时失败与进程级 `Error` 原样上抛，既不降级为维度也不伪装成健康结果。结果不携带异常文本、远端 URI、远端正文或凭据。宿主入口是 `POST /api/platform/plugins/{pluginId}/check-connection`，请求体给出 `expectedVersion`，响应只回 `appliedVersion` 与上述维度并显式 `no-store`：未安装是 404，实例未声明能力是 400，期望版本与当前已应用版本不一致（含尚未应用）是 409，检查本身在数据库事务外、一次已应用租用内执行。管理面的 `connectionCheckSupported` 如实投影本节点已应用实例是否声明该能力。
 
 ## 凭据契约
 

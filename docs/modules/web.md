@@ -70,7 +70,7 @@ health、资源下载和 WebSocket 使用各自传输形式。公开路由如下
 | Catalog | `/api/providers|models|agents|tools|model-defaults` | Provider/MODEL/GROUP/Agent CRUD、工具候选、Provider 远端模型 ID（`providers/{name}/remote-models`）、新建模型的目录默认参数候选与手动刷新（`model-defaults`、`model-defaults/refresh`）；Model 的 PUT/DELETE 为 `/models/{*modelName}`，名称可含斜杠；变更使用 expectedVersion |
 | Skill | `/api/skill-packages` | CRUD、check、exact commit update |
 | MCP | `/api/mcp-servers` | name-keyed CRUD、显式 no-store config、同步 discover |
-| Plugin | `/api/plugins` | 安全投影、普通配置 PUT、auth/prepare、auth/complete、删除 auth；`{pluginId}/connection-check` 按 expected 坐标执行一次显式只读连接检查 |
+| Plugin | `/api/platform/plugins` | 安全投影、普通配置 PUT、auth/prepare、auth/complete、删除 auth；`{pluginId}/check-connection` 按 expected 版本执行一次显式只读连接检查 |
 | Chat | `/api/chats` | 由 [Chat](chat.md) 模块提供的 CRUD 与归属 Session；Web 只做装配 |
 | Harness command | `/api/command-batches`、`/api/threads/{threadId}/command-batches` | 创建型 Chat 命令接受（owner-aware）与既有 Thread 的 owner-free 续写；都返回 202 |
 | Session | `/api/sessions/{sessionId}` | threads、entries（keyset 分页，含读取时 `usageCost`）、name、草稿/历史请求预览 |

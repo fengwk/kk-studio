@@ -8,7 +8,7 @@
 
 ## 架构与安装模型
 
-每个插件是一个实现了 [`StudioPlugin`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/StudioPlugin.java) 的顶层组件，通过 Spring Boot 的 `AutoConfiguration.imports` 注册。
+每个插件是一个实现了 [`Plugin`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/Plugin.java) 的顶层组件，通过 Spring Boot 的 `AutoConfiguration.imports` 注册。
 
 - **身份声明**：`descriptor()` 返回全局唯一的 `PluginDescriptor(id, name, version)`。
 - **受控配置 Schema**：`configurationSchema()` 声明强类型普通配置（`valuesSchema`）、初始默认值 JSON（`defaultsJson`）与受保护秘密定义（`secrets`）。配置校验与存储遵循严格 JSON 规范，秘密绝不以明文回读或导出。
