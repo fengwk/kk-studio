@@ -106,7 +106,8 @@ export function cid() {
 /**
  * 断言调用失败并返回错误响应，但不断言状态。
  *
- * <p>只用于状态由运行环境决定的故障注入检查；调用方必须立即锁定可接受的 status、code 与 reason。
+ * <p>只用于状态无法事先唯一确定的故障注入与清理时序检查；调用方必须立即锁定可接受的确切 status、code 与 reason，
+ * 不能把“任意失败”当作通过。
  */
 export async function captureHttpError(fn) {
   try {
