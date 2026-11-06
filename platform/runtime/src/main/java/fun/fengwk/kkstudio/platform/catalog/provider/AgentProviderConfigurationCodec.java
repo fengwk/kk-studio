@@ -21,7 +21,7 @@ import java.util.Objects;
  * 读写 Provider 内部配置 JSON 中的模型调用超时策略与 Provider HTTP 重试白名单覆盖。
  *
  * <p>读取入口启用自己的 {@code USE_BIG_DECIMAL_FOR_FLOATS} profile（从注入 mapper 派生，不修改它），使 merge 保留 Provider
- * 扩展值的高精度与极值；等价判断额外规范化尾零，保持「同值不同 scale 相等」的既有数值语义。
+ * 扩展值的高精度与极值。
  */
 @Component
 public final class AgentProviderConfigurationCodec {
