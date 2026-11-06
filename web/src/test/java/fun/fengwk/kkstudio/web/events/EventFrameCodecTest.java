@@ -31,7 +31,8 @@ class EventFrameCodecTest {
   private static final ResourceKey THREAD_KEY = new ResourceKey(ResourceKind.THREAD, THREAD);
   private static final ResourceKey CANVAS_KEY = new ResourceKey(ResourceKind.CANVAS, CANVAS);
   private static final ResourceKey PROJECTS_KEY = new ResourceKey(ResourceKind.PROJECTS, null);
-  private static final ResourceKey TREE_KEY = new ResourceKey(ResourceKind.TREE, THREAD);
+  private static final ResourceKey THREAD_TREE_KEY =
+      new ResourceKey(ResourceKind.THREAD_TREE, THREAD);
   private static final ResourceKey INTERACTIONS_KEY =
       new ResourceKey(ResourceKind.INTERACTIONS, null);
   private static final ResourceKey ENVIRONMENTS_KEY =
@@ -64,19 +65,12 @@ class EventFrameCodecTest {
         CODEC.decode("{\"type\":\"subscribe\",\"resource\":{\"kind\":\"projects\"}}"));
     // 执行树按真实根 id 订阅；交互与 Environment 是无 id 的全局资源。
     assertEquals(
-        new EventFrameCodec.SubscriptionFrame(EventFrameCodec.SubscriptionType.SUBSCRIBE, TREE_KEY),
+        new EventFrameCodec.SubscriptionFrame(
+            EventFrameCodec.SubscriptionType.SUBSCRIBE, THREAD_TREE_KEY),
         CODEC.decode(
             "{\"type\":\"subscribe\",\"resource\":{\"kind\":\"thread-tree\",\"id\":\""
                 + THREAD
                 + "\"}}"));
-    // 旧 kind 不再是 wire 协议的一部分。
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            CODEC.decode(
-                "{\"type\":\"subscribe\",\"resource\":{\"kind\":\"tree\",\"id\":\""
-                    + THREAD
-                    + "\"}}"));
     assertEquals(
         new EventFrameCodec.SubscriptionFrame(
             EventFrameCodec.SubscriptionType.SUBSCRIBE, INTERACTIONS_KEY),
@@ -85,6 +79,23 @@ class EventFrameCodecTest {
         new EventFrameCodec.SubscriptionFrame(
             EventFrameCodec.SubscriptionType.SUBSCRIBE, ENVIRONMENTS_KEY),
         CODEC.decode("{\"type\":\"subscribe\",\"resource\":{\"kind\":\"environments\"}}"));
+  }
+
+  /** 旧 kind "tree" 不是 wire 词汇：只接受 "thread-tree"。 */
+  @Test
+  void rejectsLegacyTreeResourceKind() {
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                CODEC.decode(
+                    "{\"type\":\"subscribe\",\"resource\":{\"kind\":\"tree\",\"id\":\""
+                        + THREAD
+                        + "\"}}"));
+    assertEquals(
+        "frame.resource.kind must be thread, canvas, thread-tree, projects, interactions, or"
+            + " environments",
+        error.getMessage());
   }
 
   @Test
@@ -240,7 +251,7 @@ class EventFrameCodecTest {
         "{\"type\":\"subscribed\",\"resource\":{\"kind\":\"thread-tree\",\"id\":\""
             + THREAD
             + "\"},\"cursor\":\"0\"}",
-        CODEC.subscribed(TREE_KEY, 0L));
+        CODEC.subscribed(THREAD_TREE_KEY, 0L));
     assertEquals(
         "{\"type\":\"subscribed\",\"resource\":{\"kind\":\"interactions\"},\"cursor\":\"0\"}",
         CODEC.subscribed(INTERACTIONS_KEY, 0L));
@@ -249,7 +260,7 @@ class EventFrameCodecTest {
         CODEC.subscribed(ENVIRONMENTS_KEY, 0L));
     assertThrows(IllegalArgumentException.class, () -> CODEC.subscribed(THREAD_KEY, -1L));
     assertThrows(IllegalArgumentException.class, () -> CODEC.subscribed(PROJECTS_KEY, 1L));
-    assertThrows(IllegalArgumentException.class, () -> CODEC.subscribed(TREE_KEY, 1L));
+    assertThrows(IllegalArgumentException.class, () -> CODEC.subscribed(THREAD_TREE_KEY, 1L));
     assertThrows(IllegalArgumentException.class, () -> CODEC.subscribed(INTERACTIONS_KEY, 1L));
     assertThrows(IllegalArgumentException.class, () -> CODEC.subscribed(ENVIRONMENTS_KEY, 1L));
   }
@@ -295,7 +306,7 @@ class EventFrameCodecTest {
         "{\"type\":\"event\",\"resource\":{\"kind\":\"thread-tree\",\"id\":\""
             + THREAD
             + "\"},\"name\":\"changed\",\"data\":{}}",
-        CODEC.event(TREE_KEY, new Signal.TreeChanged()));
+        CODEC.event(THREAD_TREE_KEY, new Signal.ThreadTreeChanged()));
     assertEquals(
         "{\"type\":\"event\",\"resource\":{\"kind\":\"environments\"},\"name\":\"changed\",\"data\":{}}",
         CODEC.event(ENVIRONMENTS_KEY, new Signal.EnvironmentChanged()));
@@ -309,16 +320,17 @@ class EventFrameCodecTest {
   @Test
   void hintSignalsRequireTheirOwnResourceKind() {
     assertThrows(
-        IllegalArgumentException.class, () -> CODEC.event(PROJECTS_KEY, new Signal.TreeChanged()));
+        IllegalArgumentException.class,
+        () -> CODEC.event(PROJECTS_KEY, new Signal.ThreadTreeChanged()));
     assertThrows(
         IllegalArgumentException.class,
-        () -> CODEC.event(TREE_KEY, new Signal.EnvironmentChanged()));
+        () -> CODEC.event(THREAD_TREE_KEY, new Signal.EnvironmentChanged()));
     assertThrows(
         IllegalArgumentException.class,
-        () -> CODEC.event(TREE_KEY, new Signal.InteractionsChanged(THREAD)));
+        () -> CODEC.event(THREAD_TREE_KEY, new Signal.InteractionsChanged(THREAD)));
     assertThrows(
         IllegalArgumentException.class,
-        () -> CODEC.event(INTERACTIONS_KEY, new Signal.TreeChanged()));
+        () -> CODEC.event(INTERACTIONS_KEY, new Signal.ThreadTreeChanged()));
   }
 
   @Test
