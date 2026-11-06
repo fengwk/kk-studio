@@ -31,8 +31,6 @@ import java.util.UUID;
 @RequestMapping("/api/harness")
 public class InteractionController {
 
-  private static final int DEFAULT_LIMIT = 50;
-
   private final InteractionQueryService interactionQueryService;
   private final InteractionService interactionService;
 
