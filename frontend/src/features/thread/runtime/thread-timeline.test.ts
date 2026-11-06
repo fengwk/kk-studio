@@ -16,13 +16,9 @@ import type { EntryEventDialogueMessage, ToolDialogueMessage } from '@/features/
 import { buildThreadTimeline, isThreadWorking } from '@/features/thread/runtime/thread-timeline'
 import { buildThreadTimeline as buildCompactionTimeline } from '@/features/thread/runtime/thread-timeline-builder'
 import { FULL_COMPACTION_SUMMARY } from '@/test-support/resources/compaction-summary'
-import type {
-  HarnessActiveAssistantOutputDTO,
-  HarnessGenerationFailureDTO,
-  HarnessSessionEntryDTO,
-  HarnessThreadCommandDTO,
-  ToolInvocationDTO,
-} from '@/shared/api/generated/contracts'
+import type { HarnessActiveAssistantOutputDTO, HarnessGenerationFailureDTO, HarnessSessionEntryDTO, HarnessThreadCommandDTO, ToolInvocationDTO } from '@/shared/api/generated/contracts'
+import type { ToolInvocationStatus } from '@/shared/api/generated/contracts'
+import type { GenerationStatus } from '@/shared/api/generated/contracts'
 
 /**
  * 完整成功压缩的健康路径：
@@ -288,7 +284,7 @@ describe('compaction summary projection', () => {
       parentEntryId: null,
       entryType,
       payloadJson: JSON.stringify(payload),
-      createTime: 1767225600 + (entryId === 'assistant' ? 2 : 3),
+      createdAt: 1767225600 + (entryId === 'assistant' ? 2 : 3),
       usageCost: null,
     }
   }
@@ -300,7 +296,7 @@ describe('thread timeline', () => {
     'SUCCEEDED', 'FAILED', 'CANCELLED', 'UNKNOWN',
   ])('preserves durable %s and frozen environment facts at the sole overlay boundary', (status) => {
     const tool = invocation('inv-status', 'assistant-status', 'call-status', {
-      status, requiredEnvironmentId: 'frozen-route', requiredEnvironmentName: 'archlinux',
+      status: status as ToolInvocationStatus, requiredEnvironmentId: 'frozen-route', requiredEnvironmentName: 'archlinux',
       waitingForEnvironment: status === 'READY', environmentWaitFreshnessAt: 1791417600,
     })
     const timeline = buildThreadTimeline([
@@ -1230,8 +1226,8 @@ describe('thread timeline', () => {
         approvalJson: JSON.stringify({ required: true, decision: null, decisionId: null }),
         resultJson: null,
         errorJson: null,
-        createTime: 1785232800,
-        updateTime: 1785232800,
+        createdAt: 1785232800,
+        updatedAt: 1785232800,
       },
     ]
     const toolStreams = new Map<string, RealtimeToolStream>([
@@ -1300,8 +1296,8 @@ describe('thread timeline', () => {
       approvalJson: JSON.stringify({ required: true, decision: null, decisionId: null }),
       resultJson: null,
       errorJson: null,
-      createTime: 1785232800,
-      updateTime: 1785232800,
+      createdAt: 1785232800,
+      updatedAt: 1785232800,
     }
     const toolStreams = new Map<string, RealtimeToolStream>([
       ['inv-2', {
@@ -1393,8 +1389,8 @@ describe('thread timeline', () => {
       approvalJson: JSON.stringify({ required: true, decision: null, decisionId: null }),
       resultJson: null,
       errorJson: null,
-      createTime: 1785232800,
-      updateTime: 1785232800,
+      createdAt: 1785232800,
+      updatedAt: 1785232800,
     }
     const timeline = buildThreadTimeline(
       [
@@ -1447,9 +1443,9 @@ describe('thread timeline', () => {
   it('preserves backend Entry path order when wall-clock timestamps regress', () => {
     const timeline = buildThreadTimeline(
       [
-        { ...entry('1', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: 'A' }])), createTime: 1767225603 },
-        { ...entry('2', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: 'B' }])), createTime: 1767225601 },
-        { ...entry('3', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: 'C' }])), createTime: 1767225602 },
+        { ...entry('1', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: 'A' }])), createdAt: 1767225603 },
+        { ...entry('2', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: 'B' }])), createdAt: 1767225601 },
+        { ...entry('3', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: 'C' }])), createdAt: 1767225602 },
       ],
       [],
       [],
@@ -1460,10 +1456,10 @@ describe('thread timeline', () => {
   it('keeps multi-turn USER then ASSISTANT causality when child timestamps regress', () => {
     const timeline = buildThreadTimeline(
       [
-        { ...entry('1', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: '问题一' }])), createTime: 1767225603 },
-        { ...entry('2', 'MESSAGE', messagePayload('ASSISTANT', [{ type: 'text', text: '回答一' }])), createTime: 1767225601 },
-        { ...entry('3', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: '问题二' }])), createTime: 1767225606 },
-        { ...entry('4', 'MESSAGE', messagePayload('ASSISTANT', [{ type: 'text', text: '回答二' }])), createTime: 1767225604 },
+        { ...entry('1', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: '问题一' }])), createdAt: 1767225603 },
+        { ...entry('2', 'MESSAGE', messagePayload('ASSISTANT', [{ type: 'text', text: '回答一' }])), createdAt: 1767225601 },
+        { ...entry('3', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: '问题二' }])), createdAt: 1767225606 },
+        { ...entry('4', 'MESSAGE', messagePayload('ASSISTANT', [{ type: 'text', text: '回答二' }])), createdAt: 1767225604 },
       ],
       [],
       [],
@@ -1477,12 +1473,12 @@ describe('thread timeline', () => {
     ])
   })
 
-  it('does not inspect createTime when projecting the backend Entry path', () => {
+  it('does not inspect createdAt when projecting the backend Entry path', () => {
     const timeline = buildThreadTimeline(
       [
-        { ...entry('1', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: 'late-valid' }])), createTime: 1767225603 },
-        { ...entry('2', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: 'invalid' }])), createTime: Number.NaN },
-        { ...entry('3', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: 'early-valid' }])), createTime: 1767225601 },
+        { ...entry('1', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: 'late-valid' }])), createdAt: 1767225603 },
+        { ...entry('2', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: 'invalid' }])), createdAt: Number.NaN },
+        { ...entry('3', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: 'early-valid' }])), createdAt: 1767225601 },
       ],
       [],
       [],
@@ -1549,7 +1545,7 @@ describe('thread timeline', () => {
     // resultJson 已物化的终态 overlay：status 投影为 done，partial 字段消失。
     const invocations: ToolInvocationDTO[] = [
       invocation('inv-done', '40', 'call-1', {
-        status: 'COMPLETED',
+        status: 'SUCCEEDED',
         attempt: 1,
         resultJson: JSON.stringify({ contents: [{ type: 'text', text: 'ok' }], error: false }),
         errorJson: null,
@@ -1999,7 +1995,7 @@ describe('thread timeline', () => {
     // 的审批条目不投影（builder 只输出 required 的 approval）。
     const invocations: ToolInvocationDTO[] = [
       invocation('inv-decided', '40', 'call-1', {
-        status: 'COMPLETED',
+        status: 'SUCCEEDED',
         attempt: 1,
         approvalJson: JSON.stringify({
           required: true,
@@ -2274,7 +2270,7 @@ function entry(entryId: string, entryType: EntryType, payload: Record<string, un
     parentEntryId: null,
     entryType,
     payloadJson: JSON.stringify(payload),
-    createTime: 1767225600,
+    createdAt: 1767225600,
     usageCost: null,
   }
 }
@@ -2294,7 +2290,7 @@ function command(
     idempotencyKey: `cid-${label}`,
     payloadJson: JSON.stringify(payload),
     cancelledAt: null,
-    createTime: 1767225600,
+    createdAt: 1767225600,
   }
 }
 
@@ -2371,7 +2367,7 @@ function generationFailure(
  * contents 承载已完成的 text/thinking 片段。
  */
 function activeAssistantOutput(
-  status: string,
+  status: GenerationStatus,
   attempt: number,
   overrides: Partial<HarnessActiveAssistantOutputDTO> = {},
 ): HarnessActiveAssistantOutputDTO {
@@ -2385,8 +2381,8 @@ function activeAssistantOutput(
     contents: [],
     error: null,
     resultEntryId: null,
-    createTime: 1785232800,
-    updateTime: 1785232800,
+    createdAt: 1785232800,
+    updatedAt: 1785232800,
     ...overrides,
   }
 }
@@ -2426,8 +2422,8 @@ function invocation(
     approvalJson: null,
     resultJson: null,
     errorJson: null,
-    createTime: 1785232800,
-    updateTime: 1785232800,
+    createdAt: 1785232800,
+    updatedAt: 1785232800,
     ...overrides,
   }
 }

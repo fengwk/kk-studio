@@ -90,8 +90,8 @@ function thread(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
       environmentName: null,
       goal: null,
     },
-    createTime: 1785232800,
-    updateTime: 1785232800,
+    createdAt: 1785232800,
+    updatedAt: 1785232800,
     ...overrides,
   }
 }
@@ -116,7 +116,7 @@ function snapshotWithPendingTool(targetThreadId: string): HarnessThreadSnapshotD
         ],
       },
     }),
-    createTime: 1785232801,
+    createdAt: 1785232801,
     usageCost: null,
   }
 
@@ -151,8 +151,8 @@ function snapshotWithPendingTool(targetThreadId: string): HarnessThreadSnapshotD
         }),
         resultJson: null,
         errorJson: null,
-        createTime: 1785232801,
-        updateTime: 1785232801,
+        createdAt: 1785232801,
+        updatedAt: 1785232801,
       },
     ],
     baseEntryId: null,
@@ -213,7 +213,7 @@ function userEntry(text: string, entryId: string): HarnessSessionEntryDTO {
     payloadJson: JSON.stringify({
       message: { role: 'USER', contents: [{ type: 'text', text }] },
     }),
-    createTime: 1785232800,
+    createdAt: 1785232800,
     usageCost: null,
   }
 }
@@ -247,7 +247,7 @@ function snapshotFor(
             message: { role: 'USER', contents: [{ type: 'text', text: 'parent queued' }] },
           }),
           cancelledAt: null,
-          createTime: 1785232802,
+          createdAt: 1785232802,
         }],
     toolInvocations: [],
     ...overrides,
@@ -288,7 +288,7 @@ describe('ThreadWorkspacePage', () => {
         parentEntryId: null,
         entryType: 'ROOT',
         payloadJson: '{}',
-        createTime: 0,
+        createdAt: 0,
         usageCost: null,
       },
       thread: thread(),
@@ -557,7 +557,7 @@ describe('ThreadWorkspacePage', () => {
         turnCount: 2,
         toolCallCount: 1,
         outcome: null,
-        updateTime: 1774958400,
+        updatedAt: 1774958400,
       },
       {
         threadId: CHILD_THREAD_ID,
@@ -570,7 +570,7 @@ describe('ThreadWorkspacePage', () => {
         turnCount: 1,
         toolCallCount: 1,
         outcome: null,
-        updateTime: 1774958400,
+        updatedAt: 1774958400,
       },
       {
         threadId: OTHER_CHILD_THREAD_ID,
@@ -583,7 +583,7 @@ describe('ThreadWorkspacePage', () => {
         turnCount: 1,
         toolCallCount: 0,
         outcome: 'FAILED',
-        updateTime: 1774958400,
+        updatedAt: 1774958400,
       },
     ])
 

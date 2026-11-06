@@ -16,12 +16,12 @@ import fun.fengwk.kkstudio.platform.catalog.definition.Agent;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentConfigCodec;
 import fun.fengwk.kkstudio.platform.catalog.dto.AgentConfigDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessModelRequestDebugDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessModelSelectionDTO;
 import fun.fengwk.kkstudio.platform.harness.task.AgentPromptComposer;
 import fun.fengwk.kkstudio.platform.harness.thread.command.DatabaseTurnResolver;
 import fun.fengwk.kkstudio.platform.harness.thread.command.LiveTurnPlan;
 import fun.fengwk.kkstudio.share.catalog.EnvironmentSupportDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessModelRequestDebugDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessModelSelectionDTO;
 
 import java.time.Clock;
 import java.util.List;
@@ -50,12 +50,6 @@ import java.util.UUID;
  * <p>Platform 不是 Harness 组合根，本服务由 Web 组合根在 {@link HarnessRuntime} 完整装配后显式创建。
  */
 public final class ModelRequestDebugService {
-
-  /** 现算预览的视图判别符。 */
-  public static final String PREVIEW_KIND = "NEXT_REQUEST_PREVIEW";
-
-  /** 活动 ModelInvocation 冻结请求的视图判别符。 */
-  public static final String FROZEN_INVOCATION_KIND = "FROZEN_INVOCATION";
 
   private static final ModelRequestSpecJsonCodec BUILTIN_REQUESTS = new ModelRequestSpecJsonCodec();
 
@@ -109,7 +103,7 @@ public final class ModelRequestDebugService {
             .withEnvironmentName(environmentName);
 
     HarnessModelRequestDebugDTO dto = new HarnessModelRequestDebugDTO();
-    dto.setKind(PREVIEW_KIND);
+    dto.setKind(HarnessModelRequestDebugDTO.Kind.NEXT_REQUEST_PREVIEW);
     dto.setGeneratedAt(clock.instant());
     dto.setModel(modelSelection(model));
     dto.setEnvironmentName(environmentName);
@@ -159,8 +153,8 @@ public final class ModelRequestDebugService {
     // Debug 与 Tool catalog 共用同一个 wire 枚举，两端名字一一对应。
     dto.setEnvironmentSupport(EnvironmentSupportDTO.valueOf(tool.environmentSupport().name()));
     dto.setProvenance(tool.provenance());
-    dto.setState(tool.state().name());
-    dto.setFilterReason(tool.filterReason() == null ? null : tool.filterReason().name());
+    dto.setState(tool.state());
+    dto.setFilterReason(tool.filterReason());
     return dto;
   }
 
@@ -171,7 +165,7 @@ public final class ModelRequestDebugService {
     dto.setName(skill.name());
     dto.setDescription(skill.description());
     dto.setPath(skill.path());
-    dto.setDelivery(skill.delivery().name());
+    dto.setDelivery(skill.delivery());
     dto.setPackageVersion(skill.packageVersion());
     dto.setHeadCommit(skill.headCommit());
     dto.setArtifactSha256(skill.artifactSha256());
@@ -219,7 +213,9 @@ public final class ModelRequestDebugService {
       ProviderCacheControl cacheControl) {
     HarnessModelRequestDebugDTO.CacheControlDTO dto =
         new HarnessModelRequestDebugDTO.CacheControlDTO();
-    dto.setRetention(cacheControl.retention().name());
+    dto.setRetention(
+        HarnessModelRequestDebugDTO.CacheControlDTO.Retention.valueOf(
+            cacheControl.retention().name()));
     dto.setKey(cacheControl.key());
     return dto;
   }
@@ -239,7 +235,7 @@ public final class ModelRequestDebugService {
     }
     HarnessModelRequestDebugDTO.FrozenInvocationDTO dto =
         new HarnessModelRequestDebugDTO.FrozenInvocationDTO();
-    dto.setKind(FROZEN_INVOCATION_KIND);
+    dto.setKind(HarnessModelRequestDebugDTO.FrozenInvocationDTO.FrozenKind.FROZEN_INVOCATION);
     dto.setGenerationId(view.generationId().toString());
     dto.setAttempt(view.attempt());
     dto.setRequestJson(BUILTIN_REQUESTS.encode(view.requestSpec()));

@@ -20,15 +20,15 @@ function makeThread(threadId: string): HarnessThreadDTO {
     nextCommandSequence: '1',
     version: '3',
     status: 'IDLE',
-    executionControl: 'AUTONOMOUS',
+    executionControl: 'RUNNABLE',
     branchSettings: {
       agentName: 'assistant',
       execution: { driver: 'builtin', settings: { modelName: 'test-model', variant: 'default' } },
       environmentName: null,
       goal: null,
     },
-    createTime: 1000,
-    updateTime: 1000,
+    createdAt: 1000,
+    updatedAt: 1000,
   }
 }
 

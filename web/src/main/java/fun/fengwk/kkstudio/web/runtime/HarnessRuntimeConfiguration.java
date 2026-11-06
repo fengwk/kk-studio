@@ -17,7 +17,6 @@ import fun.fengwk.kkstudio.harness.builtin.query.BuiltinRequestQuery;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
-import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorConfig;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor;
 import fun.fengwk.kkstudio.harness.spi.compaction.CompactionConfigProvider;
 import fun.fengwk.kkstudio.harness.spi.driver.AgentDriver;
@@ -180,29 +179,13 @@ public class HarnessRuntimeConfiguration {
         runtime, turnResolver, agentRepository, agentConfigCodec, builtinRequestQuery, clock);
   }
 
-  /**
-   * 发送前请求预览：与正式发送共用同一 candidate 规划、resolver、materializer、Provider 解析与协议编码，因此同样只在完整 Runtime
-   * 装配后创建；压缩判定复用 ThreadProcessor 的同一 {@link ThreadProcessorConfig#compactionProvider()}。
-   */
+  /** 历史模型输出请求重建：与正式发送共用同一 resolver、materializer、Provider 解析与协议编码，只在完整 Runtime 装配后创建。 */
   @Bean
   public ProviderRequestPreviewService providerRequestPreviewService(
       HarnessRuntime runtime,
       DatabaseTurnResolver turnResolver,
-      DatabaseProviderResolutionService providerResolution,
-      ThreadProcessorConfig threadProcessorConfig,
-      SessionBlobRefManager sessionBlobRefManager,
-      StorageBlobManager storageBlobManager,
-      StorageUploadService storageUploadService,
-      Clock clock) {
-    return new ProviderRequestPreviewService(
-        runtime,
-        turnResolver,
-        providerResolution,
-        threadProcessorConfig.compactionProvider(),
-        sessionBlobRefManager,
-        storageBlobManager,
-        storageUploadService,
-        clock);
+      DatabaseProviderResolutionService providerResolution) {
+    return new ProviderRequestPreviewService(runtime, turnResolver, providerResolution);
   }
 
   /** fail-fast 单线程 drain executor：串行执行 drain，拒绝时同步抛错。 */

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import type { TurnEndOutcome } from '@/shared/api/generated/contracts'
 import {
   projectActiveThreadTree,
   projectThreadTree,
@@ -22,7 +23,7 @@ function node(
     turnCount: 1,
     toolCallCount: 0,
     outcome: null,
-    updateTime: 1774958400000,
+    updatedAt: 1774958400000,
     ...overrides,
   }
 }
@@ -39,33 +40,33 @@ describe('projectActiveThreadTree', () => {
 
   it('sorts each sibling group by active status, time and ID, retaining real connectors', () => {
     const tree = projectThreadTree([
-      node('root', null), node('old', 'root', { updateTime: 0 }),
-      node('z', 'root', { updateTime: 1775001600000 }),
-      node('a', 'root', { updateTime: 1775001600000 }),
+      node('root', null), node('old', 'root', { updatedAt: 0 }),
+      node('z', 'root', { updatedAt: 1775001600000 }),
+      node('a', 'root', { updatedAt: 1775001600000 }),
       node('active', 'root', { status: 'RUNNING' }),
-      node('grand', 'active', { updateTime: 1767225600000 }),
+      node('grand', 'active', { updatedAt: 1767225600000 }),
     ])
     expect(tree.historyRows.map((row) => row.node.threadId)).toEqual(['active', 'grand', 'a', 'z', 'old'])
     expect(tree.historyRows[1]).toMatchObject({ depth: 1, ancestorContinues: [true], isLast: true })
     expect(tree.historyRows.at(-1)?.isLast).toBe(true)
-    expect(() => projectThreadTree([node('root', null, { updateTime: Number.NaN })])).toThrow(/updateTime/)
+    expect(() => projectThreadTree([node('root', null, { updatedAt: Number.NaN })])).toThrow(/updatedAt/)
     expect(() => projectThreadTree([node('root', null), node('x', 'y'), node('y', 'x')])).toThrow(/cycle/)
     expect(() => projectThreadTree([node('root', null), node('other', null)])).toThrow(/root/)
   })
 
   it('orders epoch milliseconds including sub-second differences', () => {
     const tree = projectThreadTree([
-      node('root', null), node('a-older', 'root', { updateTime: 1774958400000 }),
-      node('z-newer', 'root', { updateTime: 1774958400125 }),
+      node('root', null), node('a-older', 'root', { updatedAt: 1774958400000 }),
+      node('z-newer', 'root', { updatedAt: 1774958400125 }),
     ])
     expect(tree.historyRows.map((row) => row.node.threadId)).toEqual(['z-newer', 'a-older'])
   })
 
   it.each([undefined, null, NaN, Infinity, -Infinity, [2026, 4, 1], '', 'invalid'])(
-    'rejects missing or invalid Instant updateTime %j', (updateTime) => {
+    'rejects missing or invalid Instant updatedAt %j', (updatedAt) => {
       // 模拟未经 TypeScript 校验的 HTTP 响应。
-      const invalid = { ...node('root', null), updateTime } as unknown as ActiveThreadTreeNode
-      expect(() => projectThreadTree([invalid])).toThrow(/updateTime/)
+      const invalid = { ...node('root', null), updatedAt } as unknown as ActiveThreadTreeNode
+      expect(() => projectThreadTree([invalid])).toThrow(/updatedAt/)
     },
   )
   it('keeps active (non-IDLE) nodes with their idle ancestors, rooted at the execution root children', () => {
@@ -156,6 +157,6 @@ describe('projectActiveThreadTree', () => {
     expect(threadTreeOutcome(node('a', 'root', { status: 'IDLE', outcome: 'COMPLETED' }))).toBe('COMPLETED')
     expect(threadTreeOutcome(node('a', 'root', { status: 'RUNNING', outcome: 'COMPLETED' }))).toBeNull()
     expect(threadTreeOutcome(node('a', 'root', { status: 'WAITING', outcome: 'COMPLETED' }))).toBeNull()
-    expect(threadTreeOutcome(node('a', 'root', { status: 'IDLE', outcome: 'UNKNOWN' }))).toBeNull()
+    expect(threadTreeOutcome(node('a', 'root', { status: 'IDLE', outcome: 'UNKNOWN' as TurnEndOutcome }))).toBeNull()
   })
 })

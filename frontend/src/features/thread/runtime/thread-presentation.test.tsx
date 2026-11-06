@@ -11,7 +11,7 @@ const thread: HarnessThreadDTO = {
   threadId: 'child', name: 'worker', sessionId: 'session', headEntryId: 'head',
   parentThreadId: 'parent', rootThreadId: 'root', yoloEnabled: false,
   nextCommandSequence: '1', version: '1', status: 'IDLE',
-  executionControl: 'RUNNABLE', createTime: 0, updateTime: 0,
+  executionControl: 'RUNNABLE', createdAt: 0, updatedAt: 0,
   branchSettings: {
     agentName: 'researcher', execution: createBuiltinExecution('model', 'deep'),
     environmentName: null, goal: null,

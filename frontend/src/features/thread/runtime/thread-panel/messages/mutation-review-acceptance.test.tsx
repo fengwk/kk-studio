@@ -430,7 +430,7 @@ describe('真实 AgentMessageJsonCodec 历史生命周期与真实组件验收�
       parentEntryId: null,
       entryType,
       payloadJson: JSON.stringify(payload),
-      createTime: 1792404000,
+      createdAt: 1792404000,
       usageCost: null,
     }
   }
@@ -465,8 +465,8 @@ describe('真实 AgentMessageJsonCodec 历史生命周期与真实组件验收�
       approvalJson: null,
       resultJson: null,
       errorJson: null,
-      createTime: 1792404000,
-      updateTime: 1792404000,
+      createdAt: 1792404000,
+      updatedAt: 1792404000,
       ...overrides,
     }
   }

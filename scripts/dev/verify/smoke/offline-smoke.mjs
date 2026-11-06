@@ -240,7 +240,7 @@ async function offlineChat(client) {
   const threadId = randomUUID()
   const accepted = await jsonCall(
     'POST',
-    '/api/command-batches',
+    '/api/harness/command-batches',
     buildOfflineChatBatchRequest({
       chatId: chat.id,
       sessionId,
@@ -257,7 +257,7 @@ async function offlineChat(client) {
   let current
   let quiescent = false
   for (let attempt = 0; attempt < 240 && !quiescent; attempt += 1) {
-    current = await jsonCall('GET', `/api/threads/${threadId}`)
+    current = await jsonCall('GET', `/api/harness/threads/${threadId}`)
     const candidate = current.thread
     quiescent =
       candidate.status === 'IDLE' &&

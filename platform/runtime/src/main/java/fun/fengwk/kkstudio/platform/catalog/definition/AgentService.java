@@ -15,10 +15,10 @@ import fun.fengwk.kkstudio.platform.catalog.dto.AgentCreateDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.AgentDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.AgentEditablePropertiesDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.AgentUpdateDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.HarnessExecutionSelectionDTO;
 import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.platform.error.CatalogVersions;
 import fun.fengwk.kkstudio.platform.pluginhost.service.PluginAgentDependencies;
-import fun.fengwk.kkstudio.share.runtime.HarnessExecutionSelectionDTO;
 
 import java.util.List;
 import java.util.Map;

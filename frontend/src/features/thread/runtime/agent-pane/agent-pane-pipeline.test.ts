@@ -49,8 +49,8 @@ const thread: HarnessThreadDTO = {
     environmentName: null,
     goal: null,
   },
-  createTime: 0,
-  updateTime: 0,
+  createdAt: 0,
+  updatedAt: 0,
 }
 
 describe('AgentPane acceptance pipeline', () => {

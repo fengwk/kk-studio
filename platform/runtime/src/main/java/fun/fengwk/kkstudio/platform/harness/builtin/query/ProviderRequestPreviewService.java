@@ -2,16 +2,11 @@ package fun.fengwk.kkstudio.platform.harness.builtin.query;
 
 import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
-import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
-import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
-import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
-import fun.fengwk.kkstudio.harness.api.command.ThreadCommandType;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.api.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.api.history.CompactionPayload;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.history.EntryPath;
-import fun.fengwk.kkstudio.harness.api.history.EntryType;
 import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
@@ -20,7 +15,6 @@ import fun.fengwk.kkstudio.harness.api.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
-import fun.fengwk.kkstudio.harness.api.thread.ThreadLiveState;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
@@ -31,21 +25,14 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
-import fun.fengwk.kkstudio.harness.spi.compaction.CompactionConfigProvider;
 import fun.fengwk.kkstudio.platform.harness.builtin.query.ProviderRequestPreviewUnavailableException.Reason;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessProviderRequestPreviewDTO;
 import fun.fengwk.kkstudio.platform.harness.model.DatabaseProviderResolutionService;
 import fun.fengwk.kkstudio.platform.harness.model.ProviderResolutionService;
 import fun.fengwk.kkstudio.platform.harness.thread.command.DatabaseTurnResolver;
 import fun.fengwk.kkstudio.platform.harness.thread.command.LiveTurnPlan;
-import fun.fengwk.kkstudio.platform.orchestration.UserMessageContentPreparer;
-import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;
-import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
-import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
-import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
-import fun.fengwk.kkstudio.share.runtime.HarnessProviderRequestPreviewDTO;
 
 import java.nio.charset.StandardCharsets;
-import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -56,148 +43,27 @@ import java.util.Objects;
 import java.util.UUID;
 
 /**
- * 发送前 Provider 协议请求体预览：在只读事实上用正式发送路径的规划、物化、Provider 解析与协议编码生成最终请求体，不写任何 durable 状态、不消费 upload、不触发
- * transport。
+ * 历史模型输出的 Provider 协议请求体重建：在只读事实上用正式发送路径的规划、物化、Provider 解析与协议编码生成请求体，不写任何 durable 状态、不触发 transport。
  *
- * <p>三个入口只在「事实边界」上不同：既有 Thread 的下一轮草稿用快照 cursor 与空闲/queued/压缩判定；本地分支草稿只有 Session 与分支起点
- * Entry，草稿尚未落库为 Thread，因此 candidate Thread/Entry id 都只是本次内存 UUID；历史模型输出以 ROOT 到其 parent 为请求前缀，并把该
- * 输出的记录时间显式交给规划，绝不用当前时间冒充。
- *
- * <p>预览与正式发送同源：candidate 历史由同一 {@link HarnessRuntime#previewInputCandidatePath} 构造，冻结请求来自同一 {@link
- * DatabaseTurnResolver#planLive(UUID, UUID, EntryPath)}（历史模型输出走 {@link
- * DatabaseTurnResolver#planHistorical(UUID, UUID, EntryPath)}），有效请求来自同一 {@link
- * DatabaseProviderResolutionService#resolve}，最终字节来自同一 {@link
- * ProviderAdapter#encodeRequestBody}。附件只做 READY 的只读 peek，RESOURCE 仍必须由目标 Session 持有。压缩 Turn
- * 也是真实模型输出：按其 durable COMPACTION TURN_START 冻结的 executionModel 与预算走同一条物化/编码路径。
+ * <p>请求前缀严格是 ROOT 到该输出的 parent，并把该输出的记录时间显式交给规划，绝不用当前时间冒充。冻结请求来自同一 {@link
+ * DatabaseTurnResolver#planHistorical(UUID, UUID, EntryPath)}，有效请求来自同一 {@link
+ * DatabaseProviderResolutionService#resolve}，最终字节来自同一 {@link ProviderAdapter#encodeRequestBody}。压缩
+ * Turn 也是真实模型输出： 按其 durable COMPACTION TURN_START 冻结的 executionModel 与预算走同一条物化/编码路径。
  */
 public final class ProviderRequestPreviewService {
-
-  /** 尚未落库的分支草稿没有 Thread cursor：它的第一批命令就是该新 Thread 的 sequence 起点。 */
-  private static final long FIRST_COMMAND_SEQUENCE = 1L;
 
   private final HarnessRuntime runtime;
   private final DatabaseTurnResolver turnResolver;
   private final DatabaseProviderResolutionService providerResolution;
-  private final CompactionConfigProvider compactionConfigProvider;
-  private final StorageUploadService uploadService;
-  private final Clock clock;
   private final ModelRequestMaterializer materializer = new ModelRequestMaterializer();
-  private final UserMessageContentPreparer contentPreparer;
 
   public ProviderRequestPreviewService(
       HarnessRuntime runtime,
       DatabaseTurnResolver turnResolver,
-      DatabaseProviderResolutionService providerResolution,
-      CompactionConfigProvider compactionConfigProvider,
-      SessionBlobRefManager refManager,
-      StorageBlobManager blobManager,
-      StorageUploadService uploadService,
-      Clock clock) {
+      DatabaseProviderResolutionService providerResolution) {
     this.runtime = Objects.requireNonNull(runtime, "runtime");
     this.turnResolver = Objects.requireNonNull(turnResolver, "turnResolver");
     this.providerResolution = Objects.requireNonNull(providerResolution, "providerResolution");
-    this.compactionConfigProvider =
-        Objects.requireNonNull(compactionConfigProvider, "compactionConfigProvider");
-    this.uploadService = Objects.requireNonNull(uploadService, "uploadService");
-    this.clock = Objects.requireNonNull(clock, "clock");
-    // 预览侧只做 READY 的只读 peek：绝不 retain、绝不 delete、绝不写 Session ref。
-    this.contentPreparer =
-        new UserMessageContentPreparer(
-            Objects.requireNonNull(refManager, "refManager"),
-            Objects.requireNonNull(blobManager, "blobManager"),
-            this::peekAttachment);
-  }
-
-  /**
-   * 现算一次草稿的 Provider 协议请求体预览。
-   *
-   * @param threadId path 中的目标 Thread，必须与 batch 的 threadId 完全一致
-   * @param command 与发送完全相同的通用命令批（target 必须是 THREAD）
-   * @return 最终请求体、UTF-8 字节数、providerType/modelName、source head cursor 与固定 notice
-   * @throws ProviderRequestPreviewUnavailableException 当前事实不允许精确预览（快照漂移、非空闲、queued、压缩、附件未 READY、
-   *     adapter 不支持预览或编码失败）
-   */
-  public HarnessProviderRequestPreviewDTO preview(UUID threadId, AcceptCommandsCommand command) {
-    Objects.requireNonNull(threadId, "threadId");
-    Objects.requireNonNull(command, "command");
-    AcceptCommandsTarget.Thread target = requireThreadTarget(threadId, command.target());
-    requirePreviewCommandShape(command.commands());
-
-    ThreadSnapshot snapshot = runtime.getThreadSnapshot(threadId);
-    requirePreviewableSnapshot(snapshot, target);
-
-    // 顺序契约：所有廉价快照闸门（cursor / queued / 空闲 / 下一步压缩）先于内容换算，因此未 READY 的表单或会被压缩的
-    // Thread 都在任何 upload 行锁、blob 读取与 Session ref 查询之前失败。
-    List<NewThreadCommand> prepared =
-        contentPreparer.prepare(snapshot.thread().sessionId(), command.commands());
-    Instant now = clock.instant();
-    boolean childThread = !threadId.equals(snapshot.thread().rootThreadId());
-    ThreadSnapshot rootSnapshot =
-        childThread ? runtime.getThreadSnapshot(snapshot.thread().rootThreadId()) : null;
-    String rootEnvironmentName =
-        rootSnapshot == null
-            ? null
-            : rootSnapshot.requireFullPath().baseSettings().environmentName();
-    UUID rootSessionId =
-        rootSnapshot == null ? snapshot.thread().sessionId() : rootSnapshot.thread().sessionId();
-    EntryPath candidatePath =
-        runtime.previewInputCandidatePath(
-            threadId,
-            snapshot.requireFullPath(),
-            snapshot.thread().nextCommandSequence(),
-            prepared,
-            now,
-            childThread,
-            rootEnvironmentName);
-    return planAndEncode(
-        turnResolver.planLive(threadId, rootSessionId, candidatePath),
-        candidatePath,
-        now,
-        snapshot.entryState().head().id(),
-        HarnessProviderRequestPreviewDTO.DRAFT_REQUEST_PREVIEW,
-        HarnessProviderRequestPreviewDTO.DRAFT_NOTICE);
-  }
-
-  /**
-   * 现算一次本地分支草稿的 Provider 协议请求体预览：草稿尚未落库为 Thread，因此边界只有 Session 与分支起点 Entry （ROOT 或已关闭的 TURN_END，与
-   * NEW_THREAD 的合法落点一致）。
-   *
-   * <p>不做任何 Thread cursor / queued / 空闲 / 自动压缩判定（那些事实属于既有 Thread），也绝不为了预览先创建 Thread。
-   *
-   * @param sessionId path 中的目标 Session；不存在时由 {@link HarnessRuntime} 以 typed 异常拒绝
-   * @param startEntryId 草稿分支起点，必须属于该 Session
-   * @param commands 与发送完全相同的通用命令批（SET_* 前缀 + 末尾 USER_MESSAGE）
-   */
-  public HarnessProviderRequestPreviewDTO previewDraft(
-      UUID sessionId, UUID startEntryId, List<NewThreadCommand> commands) {
-    Objects.requireNonNull(sessionId, "sessionId");
-    Objects.requireNonNull(startEntryId, "startEntryId");
-    Objects.requireNonNull(commands, "commands");
-    requirePreviewCommandShape(commands);
-
-    Map<UUID, Entry> entries = sessionEntries(sessionId);
-    Entry source = requireSessionEntry(entries, startEntryId, "start entry");
-    requireDraftStartEntry(source);
-    EntryPath sourcePath = entryPath(entries, source.id());
-    List<NewThreadCommand> prepared = contentPreparer.prepare(sessionId, commands);
-
-    Instant now = clock.instant();
-    UUID candidateThreadId = UUID.randomUUID();
-    EntryPath candidatePath =
-        runtime.previewInputCandidatePath(
-            candidateThreadId, sourcePath, FIRST_COMMAND_SEQUENCE, prepared, now, false, null);
-    if (!BuiltinExecution.DRIVER.equals(candidatePath.baseSettings().execution().driver())) {
-      throw new ProviderRequestPreviewUnavailableException(
-          Reason.PREVIEW_UNSUPPORTED,
-          "provider request preview is only supported for builtin execution driver");
-    }
-    return planAndEncode(
-        turnResolver.planLive(candidateThreadId, sessionId, candidatePath),
-        candidatePath,
-        now,
-        source.id(),
-        HarnessProviderRequestPreviewDTO.DRAFT_REQUEST_PREVIEW,
-        HarnessProviderRequestPreviewDTO.DRAFT_NOTICE);
   }
 
   /**
@@ -237,9 +103,7 @@ public final class ProviderRequestPreviewService {
         turnResolver.planHistorical(candidateThreadId, sessionId, requestPath),
         requestPath,
         recordedAt,
-        requestHeadEntryId,
-        HarnessProviderRequestPreviewDTO.HISTORICAL_REQUEST_PREVIEW,
-        HarnessProviderRequestPreviewDTO.HISTORICAL_NOTICE);
+        requestHeadEntryId);
   }
 
   /**
@@ -337,13 +201,7 @@ public final class ProviderRequestPreviewService {
               planned.candidateTools(),
               planned.skills());
     }
-    return planAndEncode(
-        plan,
-        requestPath,
-        recordedAt,
-        requestHeadEntryId,
-        HarnessProviderRequestPreviewDTO.HISTORICAL_REQUEST_PREVIEW,
-        HarnessProviderRequestPreviewDTO.HISTORICAL_NOTICE);
+    return planAndEncode(plan, requestPath, recordedAt, requestHeadEntryId);
   }
 
   /**
@@ -481,14 +339,9 @@ public final class ProviderRequestPreviewService {
         Reason.PREVIEW_UNSUPPORTED, detail, cause);
   }
 
-  /** 三种预览共用的只读尾部：冻结规划 -> 物化 -> 正式协议编码 -> 稳定响应投影。 */
+  /** 历史重建共用的只读尾部：冻结规划 -> 物化 -> 正式协议编码 -> 稳定响应投影。 */
   private HarnessProviderRequestPreviewDTO planAndEncode(
-      LiveTurnPlan plan,
-      EntryPath candidatePath,
-      Instant plannedAt,
-      UUID sourceHeadEntryId,
-      String kind,
-      String notice) {
+      LiveTurnPlan plan, EntryPath candidatePath, Instant plannedAt, UUID sourceHeadEntryId) {
     if (plan instanceof LiveTurnPlan.Rejected) {
       // 规划的错误码与自由文本详情都不属于公开预览协议。
       throw new ProviderRequestPreviewUnavailableException(
@@ -500,14 +353,14 @@ public final class ProviderRequestPreviewService {
     byte[] body = encodeRequestBody(execution.providerType(), execution, request);
 
     HarnessProviderRequestPreviewDTO dto = new HarnessProviderRequestPreviewDTO();
-    dto.setKind(kind);
+    dto.setKind(HarnessProviderRequestPreviewDTO.Kind.HISTORICAL_REQUEST_PREVIEW);
     dto.setGeneratedAt(plannedAt);
     dto.setProviderType(spec.providerType().name());
     dto.setModelName(spec.model().modelName());
     dto.setBodyByteSize(body.length);
     dto.setBodyJson(new String(body, StandardCharsets.UTF_8));
     dto.setSourceHeadEntryId(sourceHeadEntryId.toString());
-    dto.setNotice(notice);
+    dto.setNotice(HarnessProviderRequestPreviewDTO.HISTORICAL_NOTICE);
     return dto;
   }
 
@@ -528,20 +381,6 @@ public final class ProviderRequestPreviewService {
       throw new IllegalArgumentException(name + " does not belong to the session: " + entryId);
     }
     return entry;
-  }
-
-  /**
-   * 草稿分支起点必须与 NEW_THREAD 的合法落点一致：ROOT 或已关闭的 TURN_END。
-   *
-   * <p>消息内部、工具结果或仍在进行中的回合都无法承载新 Turn，预览必须与正式接受一样在触碰任何规划/编码之前确定性拒绝；起点自身就是 durable
-   * 记录的一部分，因此不需要（也不允许）调用方伪造 owner 或先创建 Thread。
-   */
-  private static void requireDraftStartEntry(Entry entry) {
-    EntryType type = entry.payload().type();
-    if (type != EntryType.ROOT && type != EntryType.TURN_END) {
-      throw new IllegalArgumentException(
-          "draft preview requires a ROOT or TURN_END start entry but got " + type);
-    }
   }
 
   /**
@@ -583,101 +422,6 @@ public final class ProviderRequestPreviewService {
       cursor = entry.parentEntryId();
     }
     return new EntryPath(chain);
-  }
-
-  /** preview 只覆盖既有 Thread：target 必须是 THREAD 且 threadId 与 path 完全一致。 */
-  private static AcceptCommandsTarget.Thread requireThreadTarget(
-      UUID threadId, AcceptCommandsTarget target) {
-    if (!(target instanceof AcceptCommandsTarget.Thread thread)) {
-      throw new IllegalArgumentException("provider request preview requires a THREAD target");
-    }
-    if (!thread.threadId().equals(threadId)) {
-      throw new IllegalArgumentException("target threadId does not match the request path");
-    }
-    return thread;
-  }
-
-  /**
-   * 预览命令形状：可执行的前置 SET_* 设置（固定顺序、各自至多一次）加上恰好一条末尾 USER_MESSAGE。GOAL 与 CUSTOM_MESSAGE
-   * 是各自的专属功能，不属于草稿消息预览，因此一律拒绝。
-   */
-  private static void requirePreviewCommandShape(List<NewThreadCommand> commands) {
-    if (commands.isEmpty()) {
-      throw new IllegalArgumentException("commands must not be empty");
-    }
-    for (int i = 0; i < commands.size(); i++) {
-      ThreadCommandType type = commands.get(i).payload().type();
-      if (type == ThreadCommandType.USER_MESSAGE) {
-        if (i != commands.size() - 1) {
-          throw new IllegalArgumentException("the preview user message must be the final command");
-        }
-        return;
-      }
-      if (!type.isSetting()) {
-        throw new IllegalArgumentException(
-            "provider request preview only accepts SET_* settings before the user message: "
-                + type);
-      }
-    }
-    throw new IllegalArgumentException(
-        "provider request preview requires exactly one trailing USER_MESSAGE");
-  }
-
-  /** 快照必须空闲、无 queued 命令且 cursor 与 batch 期望完全一致，否则 fail closed。 */
-  private void requirePreviewableSnapshot(
-      ThreadSnapshot snapshot, AcceptCommandsTarget.Thread target) {
-    ThreadState thread = snapshot.thread();
-    if (!target.hasCursor()
-        || !thread.headEntryId().equals(target.expectedHeadEntryId())
-        || thread.nextCommandSequence() != target.expectedNextCommandSequence()) {
-      throw new ProviderRequestPreviewUnavailableException(
-          Reason.PREVIEW_STALE_CURSOR,
-          "thread head/next command sequence does not match the preview expectation");
-    }
-    if (!snapshot.queuedCommands().isEmpty()) {
-      throw new ProviderRequestPreviewUnavailableException(
-          Reason.PREVIEW_QUEUED_COMMANDS,
-          "thread still has queued commands; the preview would not reflect them");
-    }
-    if (snapshot.liveState() != ThreadLiveState.IDLE_OR_HISTORICAL) {
-      throw new ProviderRequestPreviewUnavailableException(
-          Reason.PREVIEW_THREAD_BUSY, "thread is not idle; the next step is not an input turn");
-    }
-    if (runtime.prepareAutomaticCompaction(
-            thread, snapshot.requireFullPath(), compactionConfigProvider.compactionConfig(), true)
-        != null) {
-      throw new ProviderRequestPreviewUnavailableException(
-          Reason.PREVIEW_COMPACTION_REQUIRED,
-          "the next step for this thread is automatic compaction; the request cannot be previewed "
-              + "precisely");
-    }
-    if (!BuiltinExecution.DRIVER.equals(
-        snapshot.entryState().baseSettings().execution().driver())) {
-      throw new ProviderRequestPreviewUnavailableException(
-          Reason.PREVIEW_UNSUPPORTED,
-          "provider request preview is only supported for builtin execution driver");
-    }
-  }
-
-  /**
-   * 附件只读 peek：取得权威 blobId 与文件名，但绝不 retain、delete 或标记 cleanup。未 READY 的上传（PENDING / 过期 / 已请求 cleanup
-   * / 已被 claim）与缺失上传一律确定性拒绝，预览绝不等同于消费授权。
-   */
-  private UserMessageContentPreparer.ReadyAttachment peekAttachment(UUID sessionId, UUID uploadId) {
-    StorageUploadService.ReadyUpload ready;
-    try {
-      ready = uploadService.peekReady(uploadId);
-    } catch (DomainException error) {
-      if (error.code() != DomainErrorCode.NOT_FOUND || !"upload".equals(error.resource())) {
-        throw error;
-      }
-      throw new ProviderRequestPreviewUnavailableException(
-          Reason.PREVIEW_ATTACHMENT_NOT_READY, "attachment upload is not READY for preview");
-    } catch (StorageVerificationException error) {
-      throw new ProviderRequestPreviewUnavailableException(
-          Reason.PREVIEW_ATTACHMENT_NOT_READY, "attachment upload is not READY for preview");
-    }
-    return new UserMessageContentPreparer.ReadyAttachment(ready.blobId(), ready.filename());
   }
 
   /** Provider 解析与编码：generation/type 漂移、adapter 缺失一律确定性拒绝；不支持预览的 adapter 绝不伪装成空体。 */

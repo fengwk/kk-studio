@@ -41,7 +41,7 @@ function makeInitialEntries(): HarnessSessionEntryDTO[] {
           contents: [{ type: 'text', text: INITIAL_TASK_TEXT }],
         },
       }),
-      createTime: 1774958400,
+      createdAt: 1774958400,
       usageCost: null,
     },
   ]
@@ -62,7 +62,7 @@ function makeInitialQueuedCommands(): HarnessThreadCommandDTO[] {
         },
       }),
       cancelledAt: null,
-      createTime: 1774958420,
+      createdAt: 1774958420,
     },
   ]
 }
@@ -89,7 +89,7 @@ export function CustomMessageQueueHarness() {
             contents: [{ type: 'text', text: SUPPLEMENTARY_TEXT }],
           },
         }),
-        createTime: 1774958460,
+        createdAt: 1774958460,
         usageCost: null,
       },
     ])
@@ -135,8 +135,8 @@ export function CustomMessageQueueHarness() {
         environmentName: null,
         goal: null,
       },
-      createTime: 1774958400,
-      updateTime: 1774958400,
+      createdAt: 1774958400,
+      updatedAt: 1774958400,
     },
     bound: true,
     isRoot: false,

@@ -120,14 +120,14 @@ export function projectDurableEntry(
         createModelAttemptFailureMessage({
           id: entry.entryId,
           subjectEntryId: entry.entryId,
-          createdAt: entry.createTime,
+          createdAt: entry.createdAt,
           attempt: attempt.attempt,
           sequence: attempt.sequence,
           text: attempt.text,
           thinking: attempt.thinking,
           errorCode: getString(error.code),
           errorMessage: getString(error.message) || translate('ai.runtime.message.assistantFailed'),
-          failedAt: entry.createTime,
+          failedAt: entry.createdAt,
           retryAt: null,
           nextAttempt: null,
         }),
@@ -139,7 +139,7 @@ export function projectDurableEntry(
       role: 'assistant',
       subjectEntryId: entry.entryId,
       text: getString(error.message) || translate('ai.runtime.entry.assistantRequestFailed'),
-      createdAt: entry.createTime,
+      createdAt: entry.createdAt,
       status: 'error',
     })
     return
@@ -159,7 +159,7 @@ export function projectDurableEntry(
         subjectEntryId: entry.entryId,
         text,
         thinking: thinking || undefined,
-        createdAt: entry.createTime,
+        createdAt: entry.createdAt,
         status: 'done',
         aborted: true,
       })
@@ -201,7 +201,7 @@ export function projectDurableEntry(
         subjectEntryId: entry.entryId,
         text,
         contents: displayContents,
-        createdAt: entry.createTime,
+        createdAt: entry.createdAt,
         status: 'done',
       })
     } else {
@@ -229,7 +229,7 @@ export function projectDurableEntry(
         subjectEntryId: entry.entryId,
         text,
         thinking: thinking || undefined,
-        createdAt: entry.createTime,
+        createdAt: entry.createdAt,
         status: 'done',
       })
     }
@@ -247,7 +247,7 @@ export function projectDurableEntry(
       context.pendingTurnSummary = createTurnUsageMetaMessage(
         entry.entryId,
         context.pendingTurnUsage,
-        entry.createTime,
+        entry.createdAt,
       )
     }
     return
@@ -288,7 +288,7 @@ function turnEndMeta(
     kind: 'turn_usage',
     subjectEntryId: entry.entryId,
     text: '-',
-    createdAt: entry.createTime,
+    createdAt: entry.createdAt,
     status: 'done',
     endEntryId: entry.entryId,
   }
@@ -307,14 +307,14 @@ function parseModelAttemptFailure(
   return createModelAttemptFailureMessage({
     id: entry.entryId,
     subjectEntryId: entry.entryId,
-    createdAt: entry.createTime,
+    createdAt: entry.createdAt,
     attempt: attempt.attempt,
     sequence: attempt.sequence,
     text: attempt.text,
     thinking: attempt.thinking,
     errorCode: getString(error.code),
     errorMessage: getString(error.message) || translate('ai.runtime.message.assistantFailed'),
-    failedAt: entry.createTime,
+    failedAt: entry.createdAt,
     retryAt,
     nextAttempt: attempt.attempt + 1,
   })
@@ -373,7 +373,7 @@ function projectToolCall(
     rendererKey: getString(content.rendererKey),
     arguments: getString(content.argumentsJson),
     contents: [],
-    createdAt: entry.createTime,
+    createdAt: entry.createdAt,
     status: 'done',
     callIdentity: strictToolCallIdentity(entry.entryId, callIndex),
   }
@@ -402,7 +402,7 @@ function projectToolResult(
     contents: projected.contents,
     details: projected.details,
     errorMessage: projected.errorMessage,
-    createdAt: entry.createTime,
+    createdAt: entry.createdAt,
     status: projected.status,
     editReview: projected.editReview,
     // Invocation 行物化后会删除；终态身份只取 durable toolResultMetadata。

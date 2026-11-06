@@ -18,7 +18,7 @@ function makeEntry(overrides: Partial<HarnessSessionEntryDTO> = {}): HarnessSess
         reportedAt: '2026-09-24T12:00:00Z',
       },
     }),
-    createTime: 1790251200,
+    createdAt: 1790251200,
     usageCost: null,
     ...overrides,
   }
@@ -57,7 +57,7 @@ describe('parseGoalProgress', () => {
       status: 'complete',
       reason: 'All requirements verified',
       reportedAt: '2026-09-24T10:00:00Z',
-      createTime: 1790251200,
+      createdAt: 1790251200,
     })
   })
 
@@ -83,7 +83,7 @@ describe('parseGoalProgress', () => {
       status: 'blocked',
       reason: 'Missing API key',
       reportedAt: '2026-09-24T11:00:00Z',
-      createTime: 1790251200,
+      createdAt: 1790251200,
     })
   })
 
@@ -109,7 +109,7 @@ describe('parseGoalProgress', () => {
       status: 'complete',
       reason: 'Old task completed',
       reportedAt: '2026-09-24T09:00:00Z',
-      createTime: 1790251200,
+      createdAt: 1790251200,
     })
   })
 

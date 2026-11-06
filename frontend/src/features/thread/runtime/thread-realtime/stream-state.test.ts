@@ -276,8 +276,8 @@ describe('thread realtime state', () => {
       approvalJson: null,
       resultJson: null,
       errorJson: null,
-      createTime: 1785232800,
-      updateTime: 1785232800,
+      createdAt: 1785232800,
+      updatedAt: 1785232800,
     }
     // toolCallId 直接来自 invocation，绝不能从 argumentsJson 推测。
     const active = snapshotToolStream(base, '7')
@@ -347,8 +347,8 @@ describe('thread realtime state', () => {
       approvalJson: null,
       resultJson: null,
       errorJson: null,
-      createTime: 1785232800,
-      updateTime: 1785232800,
+      createdAt: 1785232800,
+      updatedAt: 1785232800,
     }
     // 瞬时上传引用投影为 attachment；invalid result 回退
     // 到空文本 base；空白 resultJson 不算终态；非法 errorJson 原样暴露 message。
@@ -849,7 +849,7 @@ describe('thread realtime state', () => {
   })
 
   it('accepts a tool overlay only for the matching invocation attempt', () => {
-    const invocation = (attempt: number) => ({
+    const invocation = (attempt: number): ToolInvocationDTO => ({
       id: 'inv-t',
       threadId: 'thread-1',
       turnStartEntryId: 'turn-1',
@@ -869,8 +869,8 @@ describe('thread realtime state', () => {
       approvalJson: null,
       resultJson: null,
       errorJson: null,
-      createTime: 1785232800,
-      updateTime: 1785232800,
+      createdAt: 1785232800,
+      updatedAt: 1785232800,
     })
     const overlay: RealtimeToolStream = {
       threadId: '7',
@@ -1702,8 +1702,8 @@ function toolInvocation(overrides: Partial<ToolInvocationDTO> = {}): ToolInvocat
     approvalJson: null,
     resultJson: null,
     errorJson: null,
-    createTime: 1785232800,
-    updateTime: 1785232800,
+    createdAt: 1785232800,
+    updatedAt: 1785232800,
     ...overrides,
   }
 }
@@ -1722,8 +1722,8 @@ function activeOutput(
     contents: [],
     error: null,
     resultEntryId: null,
-    createTime: 1785232800,
-    updateTime: 1785232800,
+    createdAt: 1785232800,
+    updatedAt: 1785232800,
     ...overrides,
   }
 }

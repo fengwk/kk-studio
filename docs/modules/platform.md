@@ -30,6 +30,8 @@ Environment、Settings 与 Catalog 的实体仓库直接以 `JdbcClient` 承担 
 | --- | --- |
 | [catalog](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog) | Provider/Model/Agent、Git Skill Package、MCP Server/Tool 的名称寻址与 CAS；每个实体一个包，以 record、`JdbcClient` Repository（SQL、行锁与 CAS）和 Service（校验、引用保护与 DTO 投影）为主；`catalog/model` 另含模型配置的严格 codec、组配置与其能力派生、Variant 解析 |
 | [harness/model](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/model) | Provider 解析、资源物化、Model admission 与流式网关 |
+| [harness/dto](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/dto) | Harness HTTP 请求/响应 DTO：command、target 与用户消息均为 `type` discriminator 的 sealed union；固定取值使用最终枚举，时间字段统一为 `createdAt` / `updatedAt` |
+| [harness/http](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/http) | Harness HTTP 边界：`/api/harness` 下的命令、Thread、模型请求调试与历史 Provider 请求；UUID/枚举参数直接类型化，命令接受返回 202，错误统一翻译为 `DomainException` |
 | [catalog/tool](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog/tool) | `RuntimeToolCatalog` 聚合静态与 MCP 工具，提供工具目录查询 |
 | [catalog/mcp/client](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog/mcp/client) | MCP Streamable HTTP client：单一 deadline、调用级取消与结果映射 |
 | [harness/tool](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/tool) | 执行网关校验冻结绑定并终态化结果 |
@@ -55,6 +57,10 @@ Environment、Settings 与 Catalog 的实体仓库直接以 `JdbcClient` 承担 
 | [events](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/events) | 各模块共享的进程内订阅原语：`SubscriptionFanOut` 的 UUID 定点/全局注册、幂等注销与消费者隔离投递，`SourceSubscribed` 的 ack 游标与释放句柄；不含领域事件语义、持久化或 LISTEN |
 | [http](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/http) | 各模块共享的 HTTP 边界约定：过渡期成功响应 `ApiResponse` 与路径、分页参数的共同翻译 `RequestParameters`；不含 advice、MVC 装配或容器 |
 | [i18n](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/i18n) | 请求 locale 的用户可见消息解析 `StudioMessageService`；资源包随本模块发布，中英文缺键回退固定 |
+
+Harness HTTP DTO 的 wire 契约由
+[`HarnessRuntimeDtoContractTest`](../../platform/runtime/src/test/java/fun/fengwk/kkstudio/platform/harness/dto/HarnessRuntimeDtoContractTest.java)
+锁定：sealed union 的 discriminator 与 explicit null、固定枚举、最终字段名，以及请求未知字段的 fail-closed 行为。
 
 ## Harness 持久化与调度
 

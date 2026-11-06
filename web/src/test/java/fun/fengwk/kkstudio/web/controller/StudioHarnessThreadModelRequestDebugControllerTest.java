@@ -13,9 +13,11 @@ import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
+import fun.fengwk.kkstudio.platform.environment.skill.SkillPromptResolution;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessModelRequestDebugDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessModelSelectionDTO;
+import fun.fengwk.kkstudio.platform.harness.thread.command.LiveTurnPlan;
 import fun.fengwk.kkstudio.share.catalog.EnvironmentSupportDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessModelRequestDebugDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessModelSelectionDTO;
 import fun.fengwk.kkstudio.share.skill.SkillRefDTO;
 
 import java.time.Instant;
@@ -26,8 +28,9 @@ class StudioHarnessThreadModelRequestDebugControllerTest
     extends HarnessThreadControllerTestSupport {
 
   /**
-   * 意图：POST /api/threads/{threadId}/model-request-debug 以请求体草稿 model/environment 只读转发到结构化 Debug
-   * 服务并按 DTO 契约序列化（required-nullable 字段显式发射 null），且绝不触碰 HarnessRuntime（无任何写入/控制面副作用）。
+   * 意图：POST /api/harness/builtin/threads/{threadId}/model-request-debug 以请求体草稿 model/environment
+   * 只读转发到结构化 Debug 服务并按 DTO 契约序列化（required-nullable 字段显式发射 null），且绝不触碰
+   * HarnessRuntime（无任何写入/控制面副作用）。
    */
   @Test
   void modelRequestDebugReturnsStructuredPreviewWithoutTouchingRuntime() throws Exception {
@@ -37,7 +40,7 @@ class StudioHarnessThreadModelRequestDebugControllerTest
 
     mockMvc
         .perform(
-            post("/api/threads/" + idText(1) + "/model-request-debug")
+            post("/api/harness/builtin/threads/" + idText(1) + "/model-request-debug")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     "{\"model\":{\"modelName\":\"draft-model\","
@@ -72,7 +75,8 @@ class StudioHarnessThreadModelRequestDebugControllerTest
     HarnessModelRequestDebugDTO frozen = sampleDebug();
     HarnessModelRequestDebugDTO.FrozenInvocationDTO frozenInvocation =
         new HarnessModelRequestDebugDTO.FrozenInvocationDTO();
-    frozenInvocation.setKind("FROZEN_INVOCATION");
+    frozenInvocation.setKind(
+        HarnessModelRequestDebugDTO.FrozenInvocationDTO.FrozenKind.FROZEN_INVOCATION);
     frozenInvocation.setRequestJson("{\"model\":\"wire-model\"}");
     frozen.setFrozenInvocation(frozenInvocation);
     when(modelRequestDebugService.getModelRequestDebug(id(1), draftModel, "env-c"))
@@ -80,7 +84,7 @@ class StudioHarnessThreadModelRequestDebugControllerTest
 
     mockMvc
         .perform(
-            post("/api/threads/" + idText(1) + "/model-request-debug")
+            post("/api/harness/builtin/threads/" + idText(1) + "/model-request-debug")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     "{\"model\":{\"modelName\":\"draft-model\","
@@ -103,7 +107,7 @@ class StudioHarnessThreadModelRequestDebugControllerTest
 
     mockMvc
         .perform(
-            post("/api/threads/" + idText(1) + "/model-request-debug")
+            post("/api/harness/builtin/threads/" + idText(1) + "/model-request-debug")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"model\":{\"modelName\":\"model\"," + "\"variant\":\"default\"}}"))
         .andExpect(status().isOk());
@@ -117,14 +121,14 @@ class StudioHarnessThreadModelRequestDebugControllerTest
   void modelRequestDebugRejectsInvalidBodyBeforeReachingTheService() throws Exception {
     mockMvc
         .perform(
-            post("/api/threads/" + idText(1) + "/model-request-debug")
+            post("/api/harness/builtin/threads/" + idText(1) + "/model-request-debug")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"model\":{\"modelName\":\"," + "\"variant\":\"default\"}}"))
         .andExpect(status().isBadRequest());
 
     mockMvc
         .perform(
-            post("/api/threads/" + idText(1) + "/model-request-debug")
+            post("/api/harness/builtin/threads/" + idText(1) + "/model-request-debug")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     "{\"model\":{\"modelName\":\"model\","
@@ -133,7 +137,7 @@ class StudioHarnessThreadModelRequestDebugControllerTest
 
     mockMvc
         .perform(
-            post("/api/threads/" + idText(1) + "/model-request-debug")
+            post("/api/harness/builtin/threads/" + idText(1) + "/model-request-debug")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     "{\"model\":{\"modelName\":\"model\","
@@ -144,12 +148,12 @@ class StudioHarnessThreadModelRequestDebugControllerTest
     verifyNoInteractions(runtime);
   }
 
-  /** 意图：非 canonical threadId 在到达 Debug 服务前以 400 拒绝，不产生任何查询副作用。 */
+  /** 意图：非法 threadId 在到达 Debug 服务前以 400 拒绝，不产生任何查询副作用。 */
   @Test
-  void modelRequestDebugRejectsNonCanonicalThreadId() throws Exception {
+  void modelRequestDebugRejectsMalformedThreadId() throws Exception {
     mockMvc
         .perform(
-            post("/api/threads/not-a-uuid/model-request-debug")
+            post("/api/harness/builtin/threads/not-a-uuid/model-request-debug")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"model\":{\"modelName\":\"model\"," + "\"variant\":\"default\"}}"))
         .andExpect(status().isBadRequest());
@@ -166,7 +170,7 @@ class StudioHarnessThreadModelRequestDebugControllerTest
     sent.setInputSchemaJson("{\"type\":\"object\"}");
     sent.setEnvironmentSupport(EnvironmentSupportDTO.ROUTED);
     sent.setProvenance("builtin:read");
-    sent.setState("SENT");
+    sent.setState(LiveTurnPlan.ToolState.SENT);
     sent.setFilterReason(null);
 
     HarnessModelRequestDebugDTO.ToolDTO filtered = new HarnessModelRequestDebugDTO.ToolDTO();
@@ -175,15 +179,15 @@ class StudioHarnessThreadModelRequestDebugControllerTest
     filtered.setInputSchemaJson("{\"type\":\"object\"}");
     filtered.setEnvironmentSupport(EnvironmentSupportDTO.REQUIRED);
     filtered.setProvenance("builtin:bash");
-    filtered.setState("FILTERED");
-    filtered.setFilterReason("ENVIRONMENT_NOT_SELECTED");
+    filtered.setState(LiveTurnPlan.ToolState.FILTERED);
+    filtered.setFilterReason(LiveTurnPlan.FilterReason.ENVIRONMENT_NOT_SELECTED);
 
     HarnessModelRequestDebugDTO.SkillDTO skill = new HarnessModelRequestDebugDTO.SkillDTO();
     skill.setPackageName("test-package");
     skill.setName("dev");
     skill.setDescription("dev description");
     skill.setPath("vfs:/skills/test-package/dev/SKILL.md");
-    skill.setDelivery("PLATFORM");
+    skill.setDelivery(SkillPromptResolution.Delivery.PLATFORM);
     skill.setPackageVersion("0123456789abcdef0123456789abcdef01234567");
     skill.setHeadCommit(null);
     skill.setArtifactSha256("a".repeat(64));
@@ -204,12 +208,12 @@ class StudioHarnessThreadModelRequestDebugControllerTest
 
     HarnessModelRequestDebugDTO.CacheControlDTO cacheControl =
         new HarnessModelRequestDebugDTO.CacheControlDTO();
-    cacheControl.setRetention("NONE");
+    cacheControl.setRetention(HarnessModelRequestDebugDTO.CacheControlDTO.Retention.NONE);
     // NONE 时 key 显式 null：wire 上「未启用」与「有 key」必须可区分。
     cacheControl.setKey(null);
 
     HarnessModelRequestDebugDTO debug = new HarnessModelRequestDebugDTO();
-    debug.setKind("NEXT_REQUEST_PREVIEW");
+    debug.setKind(HarnessModelRequestDebugDTO.Kind.NEXT_REQUEST_PREVIEW);
     debug.setGeneratedAt(Instant.parse("2026-08-17T00:00:00Z"));
     HarnessModelSelectionDTO model = new HarnessModelSelectionDTO();
     model.setModelName("model");

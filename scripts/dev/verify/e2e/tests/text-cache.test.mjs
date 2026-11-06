@@ -55,12 +55,12 @@ function mockContext(def, { hitAt = 2, fault } = {}) {
       }
       if (
         method === 'POST'
-        && (url === '/api/command-batches'
-          || url === `/api/threads/${thread?.threadId}/command-batches`)
+        && (url === '/api/harness/command-batches'
+          || url === `/api/harness/threads/${thread?.threadId}/command-batches`)
       ) {
         requestCount++
         snapshotReads = 0
-        if (url === '/api/command-batches') {
+        if (url === '/api/harness/command-batches') {
           assert.equal(body.target.type, 'NEW_SESSION')
           thread = { threadId: body.target.threadId, sessionId: body.target.sessionId,
             name: 'cache-test', parentThreadId: null, status: 'IDLE',
@@ -98,7 +98,7 @@ function mockContext(def, { hitAt = 2, fault } = {}) {
           })),
         }, 202)
       }
-      if (method === 'GET' && url === `/api/threads/${thread?.threadId}`) {
+      if (method === 'GET' && url === `/api/harness/threads/${thread?.threadId}`) {
         snapshotReads++
         const snapshot = { thread, entries, activeAssistantOutput: null, queuedCommands: [], toolInvocations: [] }
         // 稳定轮询之后的独立快照发生变化，验证 case 自身也会拒绝新出现的 active work。

@@ -1,5 +1,4 @@
 import { readFileSync } from 'node:fs'
-import { createServer } from 'node:http'
 import path from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 
@@ -23,8 +22,6 @@ import {
   listChatSessions,
   listSessionEntries,
   listSessionThreads,
-  previewHistoricalRequest,
-  previewSessionDraftRequest,
   renameSession,
   renameThread,
   setAgentCommand,
@@ -235,7 +232,7 @@ registerCase({
   id: 'thread.new_session_submission_atomic',
   level: 'L1',
   title: 'NEW_SESSION 原子创建返回完整 accepted 快照',
-  docs: 'POST /api/command-batches owner={CHAT,id} target=NEW_SESSION{sessionId,threadId,rootSettings,yoloEnabled} => 202 HarnessAcceptedCommandsDTO{session,rootEntry,thread,acceptedCommands,replayed=false}；首 Command sequence=1 已接受 => thread.nextCommandSequence 精确 2、version >= 1；accepted command 的 sequence=1；thread/entry/session/command 标识全为 canonical UUID string；rootEntry 即 head 或其后继（processor 可能已消费）；Chat owner Session 摘要包含新 Session',
+  docs: 'POST /api/harness/command-batches owner={CHAT,id} target=NEW_SESSION{sessionId,threadId,rootSettings,yoloEnabled} => 202 HarnessAcceptedCommandsDTO{session,rootEntry,thread,acceptedCommands,replayed=false}；首 Command sequence=1 已接受 => thread.nextCommandSequence 精确 2、version >= 1；accepted command 的 sequence=1；thread/entry/session/command 标识全为 canonical UUID string；rootEntry 即 head 或其后继（processor 可能已消费）；Chat owner Session 摘要包含新 Session',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -305,367 +302,13 @@ registerCase({
   },
 })
 
-registerCase({
-  id: 'thread.provider_request_preview_guard',
-  level: 'L1',
-  title: '发送前请求预览不接受不准确的游标或无法规划的草稿',
-  docs: 'POST /api/threads/{threadId}/provider-request-preview 使用 owner-free 的 HarnessThreadCommandBatchDTO wire（{expectedHeadEntryId,expectedNextCommandSequence,commands}，无 owner/target）；陈旧 head/sequence 返回 409；无法解析 Agent 的空闲 Thread 返回 409，且预览不入队、不推进游标。完整 wire body/附件等价性由有 S3 与 Provider 编码器的自动化集成测试覆盖。',
-  async run(ctx) {
-    if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
-    if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
-    const chat = await createChat(ctx, {
-      title: `e2e-preview-${cid().slice(0, 8)}`,
-      agentName: ctx.vars.agent.name,
-      yoloEnabled: false,
-    })
-    const owner = chatOwner(chat.id)
-    const threadId = cid()
-    await createNewSession(ctx, {
-      owner,
-      sessionId: cid(),
-      threadId,
-      rootSettings: branchSettingsOf(
-        { name: `e2e-preview-missing-${cid().slice(0, 8)}` },
-        modelSelectionOf(ctx),
-      ),
-      commands: [userMessageCommand('establish history', cid())],
-    })
-    const thread = await waitForQuiescentThread(ctx, threadId, { timeoutMs: 60_000, intervalMs: 100 })
-    const endpoint = `/api/threads/${encodeURIComponent(threadId)}/provider-request-preview`
-    // 预览面 owner-free：body 只带精确 cursor 与有序命令，不携带 owner/target。
-    const draft = {
-      expectedHeadEntryId: thread.headEntryId,
-      expectedNextCommandSequence: thread.nextCommandSequence,
-      commands: [userMessageCommand('preview only', cid())],
-    }
-    const stale = await expectHttpError(() => ctx.call('POST', endpoint, {
-      ...draft,
-      expectedNextCommandSequence: String(BigInt(thread.nextCommandSequence) + 1n),
-    }), { status: 409 })
-    const staleProblem = JSON.parse(stale.body)
-    assert(staleProblem.code === 'conflict' && staleProblem.reason === 'PREVIEW_STALE_CURSOR', 'preview stale cursor reason missing or mismatched')
-    const planning = await expectHttpError(() => ctx.call('POST', endpoint, draft), { status: 409 })
-    const planningProblem = JSON.parse(planning.body)
-    assert(planningProblem.code === 'conflict' && planningProblem.reason === 'PREVIEW_PLANNING_FAILED', 'preview planning reason missing or mismatched')
-    const after = await getThreadSnapshot(ctx, threadId)
-    assert(after.thread.headEntryId === thread.headEntryId, 'preview advanced thread head')
-    assert(after.thread.nextCommandSequence === thread.nextCommandSequence, 'preview reserved command sequence')
-    assert(after.queuedCommands.length === 0, 'preview enqueued a command')
-  },
-})
 
-registerCase({
-  id: 'thread.provider_request_preview_readonly',
-  level: 'L1',
-  // 本 case 把专用 Provider 的 baseUrl 指向 case 内自建的宿主 127.0.0.1 trap；distributed 容器内无法回连宿主 loopback。
-  requires: ['host-mock'],
-  title: '草稿与历史请求预览只读且边界严格',
-  docs: 'POST /api/sessions/{sessionId}/provider-request-preview（body 只有 {startEntryId,commands}，无 cursor）返回 200 DRAFT_REQUEST_PREVIEW；GET /api/sessions/{sessionId}/entries/{entryId}/provider-request-preview 返回 200 HISTORICAL_REQUEST_PREVIEW；两者都是精确 8 字段、固定 notice、bodyByteSize==UTF-8 字节数、bodyJson 不泄漏 endpoint/credential；草稿起点只接受 ROOT 或已闭合 TURN_END（消息/中间 Entry 400），跨 Session 或不属于该 Session 的 Entry 400，Session 缺失 404，非 canonical 路径 400；历史预览只接受携带 assistantMetadata 的模型输出（其它 Entry 400）；全部预览不写任何 durable 状态（Entry Tree/Thread cursor/Thread 列表不变）。本 case 自建专用 Provider（endpoint/凭据均缺省）先覆盖 409 PREVIEW_PROVIDER_UNAVAILABLE，再把 endpoint 指向宿主 127.0.0.1 trap，证明只读预览只编码请求体、绝不触达 transport。历史预览的正向 200 由 interaction.pending_input_contract 在真实模型输出上覆盖。',
-  async run(ctx) {
-    const suffix = cid().slice(0, 8)
-    const trap = new ProviderPreviewTrap()
-    let provider = null
-    let model = null
-    let agent = null
-    let chat = null
-    let threadId = null
-    let primaryError = null
-    const cleanupErrors = []
-    const cleanup = async (label, action) => {
-      try {
-        await action()
-      } catch (error) {
-        cleanupErrors.push(`${label}: ${error?.message || String(error)}`)
-      }
-    }
-    try {
-      // 专用 Provider：endpoint 与凭据都缺省，ProviderDescriptor 要求 endpoint 非空白，因此该配置下预览必定无法解析 Provider。
-      const providerResponse = await ctx.call('POST', '/api/platform/providers', {
-        name: `e2e-provider-preview-${suffix}`,
-        description: 'Local trap provider for readonly request preview E2E.',
-        providerType: 'openai',
-        baseUrl: null,
-        credential: null,
-        modelCallTimeoutMillis: 30_000,
-        modelCallIdleTimeoutMillis: 10_000,
-      })
-      provider = providerResponse.json
-      assert(provider?.name && provider?.version, JSON.stringify(providerResponse.json))
-
-      const modelResponse = await ctx.call('POST', '/api/platform/models', {
-        type: 'MODEL',
-        providerName: provider.name,
-        name: `e2e-model-preview-${suffix}`,
-        modelId: `wire-preview-${suffix}`,
-        description: 'Local readonly preview E2E model.',
-        config: baseModelConfig({ limit: { context: 4096, output: 128 } }),
-      })
-      model = modelResponse.json
-      assert(
-        model?.providerName === provider.name && model?.name,
-        JSON.stringify(modelResponse.json),
-      )
-
-      const agentResponse = await ctx.call('POST', '/api/platform/agents', {
-        name: `e2e-agent-preview-${suffix}`,
-        description: 'Local readonly preview E2E agent.',
-        systemPrompt: 'Reply with a short deterministic acknowledgement.',
-        execution: { driver: 'builtin', settings: { modelName: model.name, variant: 'default' } },
-        config: { tools: [], skills: [], subagents: [] },
-      })
-      agent = agentResponse.json
-      assert(
-        agent?.name && agent.execution?.driver === 'builtin' && agent.execution.settings?.modelName === model.name,
-        JSON.stringify(agentResponse.json),
-      )
-
-      chat = await createChat(ctx, {
-        title: `e2e-preview-readonly-${suffix}`,
-        agentName: agent.name,
-        yoloEnabled: false,
-      })
-      const sessionId = cid()
-      const tid = cid()
-      await createNewSession(ctx, {
-        owner: chatOwner(chat.id),
-        sessionId,
-        threadId: tid,
-        rootSettings: branchSettingsOf(agent, {
-          ...agent.execution.settings,
-        }),
-        yoloEnabled: false,
-        commands: [userMessageCommand(`preview readonly ${suffix}`, cid())],
-      })
-      threadId = String(tid)
-      // endpoint 缺省的 Provider 让初始回合确定性失败并收敛为闭合 TURN_END（无真实模型用量）。
-      const quiescent = await waitForQuiescentThread(ctx, threadId, {
-        timeoutMs: 60_000,
-        intervalMs: 100,
-      })
-      assert(quiescent.status === 'IDLE', JSON.stringify(quiescent))
-
-      const before = await listSessionEntries(ctx, sessionId)
-      const threadsBefore = await listSessionThreads(ctx, sessionId)
-      const snapshotBefore = await getThreadSnapshot(ctx, threadId)
-      // 费用投影与 durable 历史解耦：本回合确定性失败、没有真实模型用量，因此所有 Entry 必须显式 null，
-      // 绝不伪装成 0 费用；有价值的正向投影由带真实用量的集成/真实模型用例覆盖。
-      assert(
-        before.every((entry) => entry.usageCost === null),
-        `non-model entries must project usageCost: null rather than a fake zero: ${JSON.stringify(
-          before.map((entry) => [entry.entryType, entry.usageCost]),
-        )}`,
-      )
-      const byType = (type) =>
-        before.filter((entry) => String(entry.entryType || '').toUpperCase() === type)
-      const turnEnd = byType('TURN_END').at(-1)
-      const rootEntry = byType('ROOT')[0]
-      const midTurn = [...byType('MESSAGE'), ...byType('TURN_START')]
-      assert(turnEnd && rootEntry && midTurn.length > 0, JSON.stringify(before))
-      assert(
-        String(snapshotBefore.thread.headEntryId) === String(turnEnd.entryId),
-        `quiescent head must be the closed TURN_END: ${JSON.stringify(snapshotBefore.thread)}`,
-      )
-
-      // endpoint 缺省时无法解析 Provider：ROOT 与已闭合 TURN_END 起点都稳定返回 409 PREVIEW_PROVIDER_UNAVAILABLE。
-      for (const startEntryId of [String(rootEntry.entryId), String(turnEnd.entryId)]) {
-        const unavailable = await expectHttpError(
-          () =>
-            previewSessionDraftRequest(ctx, sessionId, {
-              startEntryId,
-              commands: [userMessageCommand(`draft ${suffix}`, cid())],
-            }),
-          { status: 409 },
-        )
-        const problem = JSON.parse(unavailable.body)
-        assert(
-          problem.code === 'conflict' && problem.reason === 'PREVIEW_PROVIDER_UNAVAILABLE',
-          `draft preview reason missing or mismatched: ${unavailable.body}`,
-        )
-      }
-
-      // 启用宿主 trap，只补 endpoint（凭据维持 null 的匿名编码路径）：预览只编码请求体，绝不应触达 transport。
-      await trap.start()
-      const providerUpdate = await ctx.call(
-        'PUT',
-        `/api/platform/providers/${encodeURIComponent(provider.name)}`,
-        {
-          expectedVersion: provider.version,
-          description: 'Local trap provider for readonly request preview E2E.',
-          credential: { operation: 'KEEP' },
-          baseUrl: trap.baseUrl('/v1'),
-          modelCallTimeoutMillis: 30_000,
-          modelCallIdleTimeoutMillis: 10_000,
-        },
-      )
-      provider = providerUpdate.json
-      assert(provider?.name && provider?.version, JSON.stringify(providerUpdate.json))
-
-      // 正向：以 ROOT 与已闭合 TURN_END 为起点都能得到只读草稿预览（预览绝不创建 Thread）。
-      for (const startEntryId of [String(rootEntry.entryId), String(turnEnd.entryId)]) {
-        const preview = await previewSessionDraftRequest(ctx, sessionId, {
-          startEntryId,
-          commands: [userMessageCommand(`draft ${suffix}`, cid())],
-        })
-        assert(
-          preview.sourceHeadEntryId === startEntryId,
-          `draft preview source head must be the start entry: ${JSON.stringify(preview)}`,
-        )
-        assert(
-          typeof JSON.parse(preview.bodyJson) === 'object',
-          JSON.stringify(preview.bodyJson),
-        )
-        assert(
-          !/(authorization|api[_-]?key|credential|secret)/i.test(preview.bodyJson),
-          `preview body must not leak endpoint/credential material: ${preview.bodyJson}`,
-        )
-      }
-
-      // 负向：起点不是合法 fork 边界、不属于该 Session、或 Session 缺失都确定性拒绝。
-      for (const entry of midTurn) {
-        await expectHttpError(
-          () =>
-            previewSessionDraftRequest(ctx, sessionId, {
-              startEntryId: String(entry.entryId),
-              commands: [userMessageCommand(`draft ${suffix}`, cid())],
-            }),
-          { status: 400 },
-        )
-      }
-      await expectHttpError(
-        () =>
-          previewSessionDraftRequest(ctx, sessionId, {
-            startEntryId: cid(),
-            commands: [userMessageCommand(`draft ${suffix}`, cid())],
-          }),
-        { status: 400 },
-      )
-      await expectHttpError(
-        () =>
-          previewSessionDraftRequest(ctx, cid(), {
-            startEntryId: String(turnEnd.entryId),
-            commands: [userMessageCommand(`draft ${suffix}`, cid())],
-          }),
-        { status: 404 },
-      )
-      // 历史预览只接受携带 assistantMetadata 的模型输出：非模型输出 Entry 与未知 Entry 都是 400，Session 缺失 404。
-      for (const entry of [turnEnd, ...midTurn]) {
-        await expectHttpError(() => previewHistoricalRequest(ctx, sessionId, String(entry.entryId)), {
-          status: 400,
-        })
-      }
-      await expectHttpError(() => previewHistoricalRequest(ctx, sessionId, cid()), { status: 400 })
-      await expectHttpError(() => previewHistoricalRequest(ctx, cid(), String(turnEnd.entryId)), {
-        status: 404,
-      })
-      await expectHttpError(
-        () =>
-          ctx.call(
-            'GET',
-            `/api/sessions/${encodeURIComponent(String(sessionId))}/entries/not-a-uuid/provider-request-preview`,
-          ),
-        { status: 400 },
-      )
-
-      // 只读：预览绝不写 Entry、不推进 cursor、不创建 Thread，也不触达 Provider transport。
-      assert(
-        JSON.stringify(await listSessionEntries(ctx, sessionId)) === JSON.stringify(before),
-        'preview must not write any Entry',
-      )
-      assert(
-        JSON.stringify(await listSessionThreads(ctx, sessionId)) === JSON.stringify(threadsBefore),
-        'preview must not create a Thread',
-      )
-      const snapshotAfter = await getThreadSnapshot(ctx, threadId)
-      assert(
-        String(snapshotAfter.thread.headEntryId) === String(snapshotBefore.thread.headEntryId)
-          && String(snapshotAfter.thread.version) === String(snapshotBefore.thread.version)
-          && String(snapshotAfter.thread.nextCommandSequence)
-            === String(snapshotBefore.thread.nextCommandSequence)
-          && snapshotAfter.queuedCommands.length === 0
-          && snapshotAfter.activeAssistantOutput === null,
-        JSON.stringify({ before: snapshotBefore.thread, after: snapshotAfter.thread }),
-      )
-      assert(
-        trap.requests === 0,
-        `request preview must never reach the provider transport: ${trap.requests}`,
-      )
-    } catch (error) {
-      primaryError = error
-    } finally {
-      await cleanup('stop active thread', async () => {
-        if (!threadId) return
-        const snapshot = await getThreadSnapshot(ctx, threadId)
-        if (
-          snapshot.thread.status !== 'IDLE'
-          || snapshot.queuedCommands.length > 0
-          || snapshot.activeAssistantOutput !== null
-        ) {
-          await stopThread(ctx, threadId, {
-            stopRequestId: cid(),
-            expectedVersion: snapshot.thread.version,
-          })
-        }
-      })
-      await cleanup('trap server', () => trap.close())
-      await cleanup('chat', async () => {
-        if (chat?.id) {
-          await ctx.call(
-            'DELETE',
-            `/api/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(
-              chat.version,
-            )}`,
-          )
-        }
-      })
-      await cleanup('agent', async () => {
-        if (agent?.name) {
-          await ctx.call(
-            'DELETE',
-            `/api/platform/agents/${encodeURIComponent(agent.name)}?expectedVersion=${encodeURIComponent(
-              agent.version,
-            )}`,
-          )
-        }
-      })
-      await cleanup('model', async () => {
-        if (model?.name) {
-          await ctx.call(
-            'DELETE',
-            `/api/platform/models/${encodePathTail(model.name)}?expectedVersion=${encodeURIComponent(
-              model.version,
-            )}`,
-          )
-        }
-      })
-      await cleanup('provider', async () => {
-        if (provider?.name) {
-          await ctx.call(
-            'DELETE',
-            `/api/platform/providers/${encodeURIComponent(
-              provider.name,
-            )}?expectedVersion=${encodeURIComponent(provider.version)}`,
-          )
-        }
-      })
-      if (cleanupErrors.length > 0) {
-        const cleanupMessage = `E2E cleanup failed: ${cleanupErrors.join(' | ')}`
-        try {
-          ctx.writeArtifact('cleanup-errors.txt', `${cleanupMessage}\n`)
-        } catch {
-          // 保留原始错误。
-        }
-        if (primaryError == null) primaryError = new Error(cleanupMessage)
-      }
-    }
-    if (primaryError != null) throw primaryError
-  },
-})
 
 registerCase({
   id: 'thread.model_request_debug_draft_settings',
   level: 'L1',
   title: 'Model Request Debug 草稿设置只读投影',
-  docs: 'POST /api/threads/{threadId}/model-request-debug 以 UI 草稿 {model, environmentName}（environmentName 可空，null 表示未选 Environment）在真实 snapshot 上只读现算；本 case 以缺失 Agent 的既有 Thread 让规划确定性 PLANNING_FAILED（不调用真实 Provider）：响应回显草稿 model/env，planningError 只回显稳定 error code 且不泄漏缺失 Agent 名，tools/skills/subagents 安全为空；frozenInvocation 与草稿选择相互独立（本 Thread 无活动 Invocation 时显式 null）；缺 model 或非 canonical environmentName => 400，GET => 405；查询不改变 head/version/nextCommandSequence、不入队命令、不启动 Invocation',
+  docs: 'POST /api/harness/threads/{threadId}/model-request-debug 以 UI 草稿 {model, environmentName}（environmentName 可空，null 表示未选 Environment）在真实 snapshot 上只读现算；本 case 以缺失 Agent 的既有 Thread 让规划确定性 PLANNING_FAILED（不调用真实 Provider）：响应回显草稿 model/env，planningError 只回显稳定 error code 且不泄漏缺失 Agent 名，tools/skills/subagents 安全为空；frozenInvocation 与草稿选择相互独立（本 Thread 无活动 Invocation 时显式 null）；缺 model 或非 canonical environmentName => 400，GET => 405；查询不改变 head/version/nextCommandSequence、不入队命令、不启动 Invocation',
   async run(ctx) {
     const target = await resolveAnyCatalogTarget(ctx)
     const missingAgentName = `missing-debug-agent-${cid().slice(0, 8)}`
@@ -687,7 +330,7 @@ registerCase({
       })
       await waitForQuiescentThread(ctx, threadId, { timeoutMs: 60_000, intervalMs: 100 })
       const before = await getThreadSnapshot(ctx, threadId)
-      const endpoint = `/api/threads/${encodeURIComponent(threadId)}/model-request-debug`
+      const endpoint = `/api/harness/builtin/threads/${encodeURIComponent(threadId)}/model-request-debug`
 
       const { status, json } = await ctx.call('POST', endpoint, {
         model: target.model,
@@ -1428,7 +1071,7 @@ registerCase({
         { status: 400 },
       )
       // 拒绝必须是零写入：预分配 Thread 未创建、Session Entry Tree 与源 Thread head 一字不动。
-      await expectHttpError(() => ctx.call('GET', `/api/threads/${rejectedThreadId}`), {
+      await expectHttpError(() => ctx.call('GET', `/api/harness/threads/${rejectedThreadId}`), {
         status: 404,
       })
     }
@@ -1474,7 +1117,7 @@ registerCase({
   id: 'thread.session_entry_tree',
   level: 'L1',
   title: '完整 Session Entry Tree 保留非当前历史分支',
-  docs: 'GET /api/sessions/{sessionId}/entries 返回 Session 全部 immutable Entries；NEW_THREAD 创建新 Thread 形成分叉后，snapshot 仅含当前 root-to-head，而 entries 同时保留原分支与当前分支及稳定 parent 关系；listSessionThreads 反映两条 Thread',
+  docs: 'GET /api/harness/sessions/{sessionId}/entries 返回 Session 全部 immutable Entries；NEW_THREAD 创建新 Thread 形成分叉后，snapshot 仅含当前 root-to-head，而 entries 同时保留原分支与当前分支及稳定 parent 关系；listSessionThreads 反映两条 Thread',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -1700,7 +1343,7 @@ registerCase({
     )
     // rejectedThreadId 未创建：snapshot 404。
     await expectHttpError(
-      () => ctx.call('GET', `/api/threads/${rejectedThreadId}`),
+      () => ctx.call('GET', `/api/harness/threads/${rejectedThreadId}`),
       { status: 404 },
     )
     // 清理：删除 owner Chat（连带两个 Session/Thread/Entry 资源）。
@@ -1904,7 +1547,7 @@ registerCase({
   id: 'thread.session_thread_rename_persistence',
   level: 'L1',
   title: 'Session/Thread 重命名持久化：UUID 不变、Thread version 精确 +1、规范同名 no-op',
-  docs: 'PUT /api/sessions/{id}/name {name} 与 PUT /api/threads/{id}/name {name} 返回权威 DTO：Session（sessionId/name/createdAt）UUID/createdAt 不变、owner 摘要 fresh 持久；Thread 本体 UUID/head/session 不变、实际改名 version 精确 +1，snapshot 可观测的 queuedCommands/activeAssistantOutput/toolInvocations 与 entries 均不变、Thread 摘要 fresh 持久；规范化同名（空白变体）no-op：返回 canonical name 且 version 零触碰；不依赖真实 Provider（缺失 Agent 确定性 PLANNING_FAILED）',
+  docs: 'PUT /api/harness/sessions/{id}/name {name} 与 PUT /api/harness/threads/{id}/name {name} 返回权威 DTO：Session（sessionId/name/createdAt）UUID/createdAt 不变、owner 摘要 fresh 持久；Thread 本体 UUID/head/session 不变、实际改名 version 精确 +1，snapshot 可观测的 queuedCommands/activeAssistantOutput/toolInvocations 与 entries 均不变、Thread 摘要 fresh 持久；规范化同名（空白变体）no-op：返回 canonical name 且 version 零触碰；不依赖真实 Provider（缺失 Agent 确定性 PLANNING_FAILED）',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -2282,7 +1925,7 @@ registerCase({
   id: 'thread.yolo_direct_update',
   level: 'L1',
   title: 'Thread YOLO 直接控制面（单字段幂等与同值 no-op）',
-  docs: 'PUT /api/threads/{id}/yolo {yoloEnabled} => 200 权威 Thread；同值请求 no-op 且 version 零触碰；值变化时 version 精确 +1，不与完整 Thread version 做 CAS；不创建 Command/Entry/Work',
+  docs: 'PUT /api/harness/threads/{id}/yolo {yoloEnabled} => 200 权威 Thread；同值请求 no-op 且 version 零触碰；值变化时 version 精确 +1，不与完整 Thread version 做 CAS；不创建 Command/Entry/Work',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -2351,7 +1994,7 @@ registerCase({
   id: 'thread_tree.query_contract',
   level: 'L1',
   title: 'Agent 关系树最小只读投影',
-  docs: 'GET /api/threads/{id}/tree：真实根 parentThreadId 与未结束 outcome 显式可空；状态、回合与工具数来源于当前 head，查询不推进版本；updateTime 为只读的 Thread 权威更新时刻且与 Thread 快照一致；缺失 Agent 确定性失败，无真实 Provider 调用',
+  docs: 'GET /api/harness/threads/{id}/tree：真实根 parentThreadId 与未结束 outcome 显式可空；状态、回合与工具数来源于当前 head，查询不推进版本；updatedAt 为只读的 Thread 权威更新时刻且与 Thread 快照一致；缺失 Agent 确定性失败，无真实 Provider 调用',
   async run(ctx) {
     const target = await resolveAnyCatalogTarget(ctx)
     const chat = await createChat(ctx, {
@@ -2371,31 +2014,31 @@ registerCase({
       })
       await waitForQuiescentThread(ctx, threadId, { timeoutMs: 60_000, intervalMs: 100 })
       const before = await getThreadSnapshot(ctx, threadId)
-      const { json } = await ctx.call('GET', `/api/threads/${threadId}/tree`)
+      const { json } = await ctx.call('GET', `/api/harness/threads/${threadId}/tree`)
       const nodes = json
       assert(Array.isArray(nodes) && nodes.length === 1, JSON.stringify(nodes))
       const root = nodes[0]
       assertExactFields(
         root,
-        ['threadId', 'parentThreadId', 'name', 'agentName', 'execution', 'status', 'executionControl', 'turnCount', 'toolCallCount', 'outcome', 'updateTime'],
+        ['threadId', 'parentThreadId', 'name', 'agentName', 'execution', 'status', 'executionControl', 'turnCount', 'toolCallCount', 'outcome', 'updatedAt'],
         'HarnessThreadTreeNodeDTO',
       )
       assert(root.threadId === threadId && root.parentThreadId === null, JSON.stringify(root))
       assert(root.status === 'IDLE' && root.executionControl === 'RUNNABLE', JSON.stringify(root))
       assert(root.outcome === 'FAILED' && root.turnCount === 1 && root.toolCallCount === 0, JSON.stringify(root))
       assert(isDeepStrictEqual(root.execution, before.thread.branchSettings.execution), JSON.stringify(root))
-      // updateTime 是 Thread.updatedAt 的只读投影：非空有限的 epoch 毫秒，且与权威 Thread 快照精确相同。
+      // updatedAt 是 Thread.updatedAt 的只读投影：非空有限的 epoch 毫秒，且与权威 Thread 快照精确相同。
       assert(
-        typeof root.updateTime === 'number'
-          && Number.isFinite(root.updateTime)
-          && root.updateTime >= 0
-          && root.updateTime === before.thread.updateTime,
-        JSON.stringify({ root: root.updateTime, thread: before.thread.updateTime }),
+        typeof root.updatedAt === 'number'
+          && Number.isFinite(root.updatedAt)
+          && root.updatedAt >= 0
+          && root.updatedAt === before.thread.updatedAt,
+        JSON.stringify({ root: root.updatedAt, thread: before.thread.updatedAt }),
       )
       const after = await getThreadSnapshot(ctx, threadId)
       assert(after.thread.version === before.thread.version, 'tree query must not change version')
       assert(after.thread.headEntryId === before.thread.headEntryId, 'tree query must not change head')
-      assert(after.thread.updateTime === before.thread.updateTime, 'tree query must not change updateTime')
+      assert(after.thread.updatedAt === before.thread.updatedAt, 'tree query must not change updatedAt')
     } finally {
       await ctx.call(
         'DELETE',
@@ -2409,14 +2052,14 @@ registerCase({
   id: 'thread_tree.invalid_and_unknown_thread',
   level: 'L1',
   title: 'Agent 关系树 UUID 与缺失节点校验',
-  docs: 'GET /api/threads/{id}/tree：非 canonical UUID 为 400，未知 Thread 为 404',
+  docs: 'GET /api/harness/threads/{id}/tree：非 canonical UUID 为 400，未知 Thread 为 404',
   async run(ctx) {
     await expectHttpError(
-      () => ctx.call('GET', '/api/threads/1-1-1-1-1/tree'),
+      () => ctx.call('GET', '/api/harness/threads/not-a-uuid/tree'),
       { status: 400 },
     )
     await expectHttpError(
-      () => ctx.call('GET', '/api/threads/00000000-0000-0000-0000-000000000999/tree'),
+      () => ctx.call('GET', '/api/harness/threads/00000000-0000-0000-0000-000000000999/tree'),
       { status: 404 },
     )
   },
@@ -2426,11 +2069,11 @@ registerCase({
   id: 'thread_snapshot.unknown_thread_404',
   level: 'L1',
   title: '未知 Thread snapshot 404',
-  docs: 'GET /api/threads/{canonical unknown UUID} => 404 unknown thread',
+  docs: 'GET /api/harness/threads/{canonical unknown UUID} => 404 unknown thread',
   async run(ctx) {
     const unknownThreadId = '00000000-0000-0000-0000-000000000999'
     await expectHttpError(
-      () => ctx.call('GET', `/api/threads/${unknownThreadId}`),
+      () => ctx.call('GET', `/api/harness/threads/${unknownThreadId}`),
       { status: 404, messageIncludes: new RegExp(`thread ${unknownThreadId} does not exist`) },
     )
   },
@@ -2440,7 +2083,7 @@ registerCase({
   id: 'thread_snapshot.incremental_read',
   level: 'L1',
   title: 'Thread 快照 afterEntryId 增量读取与边界回退',
-  docs: 'GET /api/threads/{id}?afterEntryId：非法 UUID 返回 400；ROOT 游标只返回其后的 Entry 且 baseEntryId=ROOT；cursor=head 时返回空 delta 且 baseEntryId=head；非祖先游标回退全量快照且 baseEntryId=null；无真实 Provider 调用',
+  docs: 'GET /api/harness/threads/{id}?afterEntryId：非法 UUID 返回 400；ROOT 游标只返回其后的 Entry 且 baseEntryId=ROOT；cursor=head 时返回空 delta 且 baseEntryId=head；非祖先游标回退全量快照且 baseEntryId=null；无真实 Provider 调用',
   async run(ctx) {
     const target = await resolveAnyCatalogTarget(ctx)
     const chat = await createChat(ctx, {
@@ -2465,14 +2108,14 @@ registerCase({
 
       // 1. 非 canonical afterEntryId -> 400
       await expectHttpError(
-        () => ctx.call('GET', `/api/threads/${threadId}?afterEntryId=not-a-valid-uuid`),
+        () => ctx.call('GET', `/api/harness/threads/${threadId}?afterEntryId=not-a-valid-uuid`),
         { status: 400 },
       )
 
       // 2. ROOT 是 head 的祖先 -> 只返回 ROOT 之后的 Entry，顺序与完整历史一致
       const rootId = full.entries[0].entryId
       assert(full.entries.length > 1, 'quiescent thread must have entries after ROOT')
-      const { json: afterRootJson } = await ctx.call('GET', `/api/threads/${threadId}?afterEntryId=${rootId}`)
+      const { json: afterRootJson } = await ctx.call('GET', `/api/harness/threads/${threadId}?afterEntryId=${rootId}`)
       const afterRootData = afterRootJson
       assert(afterRootData.baseEntryId === rootId, 'ancestor cursor must be echoed as baseEntryId')
       assert(
@@ -2484,14 +2127,14 @@ registerCase({
       )
 
       // 3. cursor=head -> 空 delta，baseEntryId=head
-      const { json: atHeadJson } = await ctx.call('GET', `/api/threads/${threadId}?afterEntryId=${headId}`)
+      const { json: atHeadJson } = await ctx.call('GET', `/api/harness/threads/${threadId}?afterEntryId=${headId}`)
       const atHeadData = atHeadJson
       assert(atHeadData.baseEntryId === headId, 'cursor at head must return baseEntryId as head')
       assert(atHeadData.entries.length === 0, 'cursor at head must return empty entries list')
 
       // 4. 非祖先游标 -> 回退全量，baseEntryId=null
       const nonAncestorId = '00000000-0000-0000-0000-000000000999'
-      const { json: nonAncestorJson } = await ctx.call('GET', `/api/threads/${threadId}?afterEntryId=${nonAncestorId}`)
+      const { json: nonAncestorJson } = await ctx.call('GET', `/api/harness/threads/${threadId}?afterEntryId=${nonAncestorId}`)
       const nonAncestorData = nonAncestorJson
       assert(nonAncestorData.baseEntryId === null, 'non-ancestor cursor must fallback to full snapshot with null baseEntryId')
       assert(nonAncestorData.entries.length === full.entries.length, 'fallback full snapshot must have same entry count')
@@ -2570,57 +2213,4 @@ async function resolveAnyCatalogTarget(ctx) {
   throw new Error(
     `no resolvable Agent/Model in current Catalog: ${JSON.stringify({ agents, models })}`,
   )
-}
-
-/**
- * 只读请求预览的宿主 trap：监听 127.0.0.1 随机端口，只累计被调用次数，不记录 header/token/body；任何调用都返回 500。
- * 预览只做请求体编码、绝不打开 Provider transport，因此期望计数始终为 0。
- */
-export class ProviderPreviewTrap {
-  constructor() {
-    this.requests = 0
-    this.sockets = new Set()
-    this.listening = false
-    this.base = null
-    this.server = createServer((request, response) => {
-      this.requests += 1
-      response.writeHead(500, { 'Content-Type': 'application/json', Connection: 'close' })
-      response.end(
-        JSON.stringify({ error: { message: 'preview must not reach the provider transport' } }),
-      )
-    })
-    this.server.on('connection', (socket) => {
-      this.sockets.add(socket)
-      socket.once('close', () => this.sockets.delete(socket))
-    })
-  }
-
-  async start() {
-    await new Promise((resolve, reject) => {
-      this.server.once('error', reject)
-      this.server.listen(0, '127.0.0.1', () => {
-        this.server.removeListener('error', reject)
-        resolve()
-      })
-    })
-    const address = this.server.address()
-    assert(address && typeof address === 'object', 'trap server did not bind an address')
-    this.base = `http://127.0.0.1:${address.port}`
-    this.listening = true
-  }
-
-  baseUrl(suffix = '') {
-    assert(this.base, 'trap server is not started')
-    return `${this.base}${suffix}`
-  }
-
-  async close() {
-    for (const socket of this.sockets) socket.destroy()
-    this.sockets.clear()
-    if (!this.listening) return
-    await new Promise((resolve, reject) => {
-      this.server.close((error) => (error ? reject(error) : resolve()))
-    })
-    this.listening = false
-  }
 }

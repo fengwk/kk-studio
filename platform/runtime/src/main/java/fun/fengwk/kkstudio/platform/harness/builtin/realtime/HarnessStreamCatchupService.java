@@ -4,6 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.PreparedStatementCallback;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.generation.GenerationProjection;
 import fun.fengwk.kkstudio.harness.api.generation.GenerationStatus;
 import fun.fengwk.kkstudio.harness.builtin.port.ModelCheckpointRequester;
@@ -64,7 +65,7 @@ public final class HarnessStreamCatchupService {
     Objects.requireNonNull(threadId, "threadId");
     Objects.requireNonNull(invocationId, "invocationId");
     if (attempt <= 0) {
-      throw new IllegalArgumentException("attempt must be positive");
+      throw DomainException.validation("stream_catchup", "attempt must be positive");
     }
     GenerationProjection generation = runtime.getThreadSnapshot(threadId).generation();
     if (generation == null

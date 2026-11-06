@@ -35,8 +35,8 @@ import fun.fengwk.kkstudio.chat.dto.ChatSessionPageDTO;
 import fun.fengwk.kkstudio.chat.dto.ChatUpdateDTO;
 import fun.fengwk.kkstudio.chat.http.ChatController;
 import fun.fengwk.kkstudio.common.error.DomainException;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessSessionSummaryDTO;
 import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
-import fun.fengwk.kkstudio.share.runtime.HarnessSessionSummaryDTO;
 import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
 import fun.fengwk.kkstudio.web.advice.StudioProblemAdvice;
 

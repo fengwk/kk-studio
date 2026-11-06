@@ -5,19 +5,22 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.BeforeEach;
+import org.springframework.http.converter.json.JacksonJsonHttpMessageConverter;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentService;
 import fun.fengwk.kkstudio.platform.harness.builtin.query.ModelRequestDebugService;
+import fun.fengwk.kkstudio.platform.harness.http.HarnessModelRequestDebugController;
+import fun.fengwk.kkstudio.platform.harness.http.HarnessThreadController;
+import fun.fengwk.kkstudio.platform.harness.http.HarnessThreadService;
 import fun.fengwk.kkstudio.platform.harness.thread.query.EnvironmentWaitProjectionService;
 import fun.fengwk.kkstudio.platform.harness.thread.query.UsageCostProjectionService;
 import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.platform.interaction.InteractionService;
-import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
+import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
 import fun.fengwk.kkstudio.web.advice.StudioProblemAdvice;
-import fun.fengwk.kkstudio.web.harness.HarnessThreadService;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeTestFixtures;
 
 import java.util.Map;
@@ -45,19 +48,20 @@ abstract class HarnessThreadControllerTestSupport {
     usageCostProjectionService = mock(UsageCostProjectionService.class);
     environmentService = mock(EnvironmentService.class);
     when(usageCostProjectionService.project(any())).thenReturn(Map.of());
-    StudioHarnessThreadController controller =
-        new StudioHarnessThreadController(
+    HarnessThreadController controller =
+        new HarnessThreadController(
             runtime,
             new HarnessThreadService(
                 runtime,
                 usageCostProjectionService,
                 new EnvironmentWaitProjectionService(runtime, environmentService)),
-            modelRequestDebugService,
             interactionService);
     mockMvc =
-        MockMvcBuilders.standaloneSetup(controller)
-            .setControllerAdvice(
-                new StudioProblemAdvice(new StudioMessageService()), new ApiResponseStatusAdvice())
+        MockMvcBuilders.standaloneSetup(
+                controller, new HarnessModelRequestDebugController(modelRequestDebugService))
+            .setMessageConverters(
+                new JacksonJsonHttpMessageConverter(StrictHttpJsonMapperTestSupport.strictHttp()))
+            .setControllerAdvice(new StudioProblemAdvice(new StudioMessageService()))
             .build();
   }
 

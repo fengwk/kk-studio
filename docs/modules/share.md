@@ -41,13 +41,6 @@ Web 的 HTTP mapper 全局默认是 `NON_NULL` 与 `STRICT_DUPLICATE_DETECTION`�
 | [`IssueRunDTO`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/dto/IssueRunDTO.java) | `agentName`、`endEntryId`、`finalAnswerEntryId`、`nextState`、`error`、`endedAt` |
 | [`IssueRunSummaryDTO`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/dto/IssueRunSummaryDTO.java) | `agentName`、`endedAt` |
 | [`IssueEvidenceDTO`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/dto/IssueEvidenceDTO.java) | `actorAgentName`、`runId` |
-| [`HarnessThreadDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/runtime/HarnessThreadDTO.java) | `parentThreadId` |
-| [`HarnessThreadSummaryDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/runtime/HarnessThreadSummaryDTO.java) | `parentThreadId`、`headMessagePreview` |
-| [`HarnessThreadSnapshotDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/runtime/HarnessThreadSnapshotDTO.java) | `baseEntryId`、`activeAssistantOutput` |
-| [`HarnessManualCompactionDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/runtime/HarnessManualCompactionDTO.java) | `disabledReason` |
-| [`ToolInvocationDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/runtime/ToolInvocationDTO.java) | `environmentId`、`requiredEnvironmentId`、`requiredEnvironmentName`、`environmentWaitFreshnessAt`、`approvalJson`、`resultJson`、`errorJson` |
-| [`HarnessStoppedThreadReceiptDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/runtime/HarnessStoppedThreadReceiptDTO.java) | `stoppedTurnEndEntryId` |
-| [`HarnessSessionEntryDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/runtime/HarnessSessionEntryDTO.java) | `parentEntryId`、`usageCost` |
 | [`EnvironmentCardDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/environment/EnvironmentCardDTO.java) | `statusExpiresAt` |
 
 请求 DTO 同受这条规则约束：[`CreateProjectRequestDTO`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/dto/CreateProjectRequestDTO.java) 的 `description`/`yoloEnabled`、[`UpdateProjectRequestDTO`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/dto/UpdateProjectRequestDTO.java) 的 `title`/`description`、[`CreateIssueRequestDTO`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/dto/CreateIssueRequestDTO.java) 与 [`UpdateIssueRequestDTO`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/dto/UpdateIssueRequestDTO.java) 的可空字段、[`StopIssueRequestDTO`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/dto/StopIssueRequestDTO.java) 的 `detail` 与 [`AppendIssueActivityRequestDTO`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/dto/AppendIssueActivityRequestDTO.java) 的 `kind` 都用 `@JsonInclude(ALWAYS)` 显式发 null。
@@ -124,7 +117,6 @@ Work 冻结路由，`requiredEnvironmentName` 沿此身份读取环境目录，�
 | 领域 | 测试目录 | 代表测试 |
 | --- | --- | --- |
 | Canvas | [canvas/dto/](../../apps/canvas/runtime/src/test/java/fun/fengwk/kkstudio/canvas/dto/) | [`CanvasDtoContractTest.java`](../../apps/canvas/runtime/src/test/java/fun/fengwk/kkstudio/canvas/dto/CanvasDtoContractTest.java)：十进 revision、required-nullable 发射、独立 document 字段、派生引用投影，以及与领域命令一致的 11 个 typed command |
-| Harness Runtime | [runtime/](../../share/src/test/java/fun/fengwk/kkstudio/share/runtime/) | [`HarnessRuntimeDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/runtime/HarnessRuntimeDtoContractTest.java)：严格字段、字符串游标与 nullable 发射 |
 | Project | [project/dto/](../../apps/project/src/test/java/fun/fengwk/kkstudio/project/dto/) | [`ProjectDtoContractTest.java`](../../apps/project/src/test/java/fun/fengwk/kkstudio/project/dto/ProjectDtoContractTest.java)：Project/Issue wire 的严格字段、decimal version 与全包 33 个 DTO 字段集合精确匹配 |
 | Catalog | [catalog/dto/](../../platform/runtime/src/test/java/fun/fengwk/kkstudio/platform/catalog/dto/) | [`ModelPricingDtoJsonTest.java`](../../platform/runtime/src/test/java/fun/fengwk/kkstudio/platform/catalog/dto/ModelPricingDtoJsonTest.java)：pricing 十进制 wire；[`ToolCatalogDtoContractTest.java`](../../platform/runtime/src/test/java/fun/fengwk/kkstudio/platform/catalog/dto/ToolCatalogDtoContractTest.java)：工具目录契约 |
 | Storage | [storage/](../../share/src/test/java/fun/fengwk/kkstudio/share/storage/) | [`StorageDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/storage/StorageDtoContractTest.java)：upload/presign 的 nullable 字段与请求侧 `sizeBytes` 类型 |

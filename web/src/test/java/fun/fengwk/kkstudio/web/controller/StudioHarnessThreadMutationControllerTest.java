@@ -45,7 +45,7 @@ class StudioHarnessThreadMutationControllerTest extends HarnessThreadControllerT
 
     mockMvc
         .perform(
-            post("/api/threads/" + idText(7) + "/executions/" + idText(9) + "/abandon")
+            post("/api/harness/threads/" + idText(7) + "/executions/" + idText(9) + "/abandon")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"expectedVersion\":\"4\"}"))
         .andExpect(status().isOk())
@@ -66,14 +66,14 @@ class StudioHarnessThreadMutationControllerTest extends HarnessThreadControllerT
             "{\"expectedVersion\":\"4\",\"unknown\":true}")) {
       mockMvc
           .perform(
-              post("/api/threads/" + idText(7) + "/executions/" + idText(9) + "/abandon")
+              post("/api/harness/threads/" + idText(7) + "/executions/" + idText(9) + "/abandon")
                   .contentType(MediaType.APPLICATION_JSON)
                   .content(body))
           .andExpect(status().isBadRequest());
     }
     mockMvc
         .perform(
-            post("/api/threads/not-a-uuid/executions/" + idText(9) + "/abandon")
+            post("/api/harness/threads/not-a-uuid/executions/" + idText(9) + "/abandon")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"expectedVersion\":\"4\"}"))
         .andExpect(status().isBadRequest());
@@ -81,7 +81,9 @@ class StudioHarnessThreadMutationControllerTest extends HarnessThreadControllerT
     verifyNoInteractions(runtime, modelRequestDebugService, interactionService);
   }
 
-  /** 意图：验证 POST /api/threads/{threadId}/compact 调用受 version 保护的手动压缩并返回 HTTP 202 Accepted。 */
+  /**
+   * 意图：验证 POST /api/harness/threads/{threadId}/compact 调用受 version 保护的手动压缩并返回 HTTP 202 Accepted。
+   */
   @Test
   void compactCallsInjectedHarnessRuntimeWithVersionFenceAndMapsCommitResult() throws Exception {
     when(runtime.compactThread(any(CompactThreadCommand.class)))
@@ -90,7 +92,7 @@ class StudioHarnessThreadMutationControllerTest extends HarnessThreadControllerT
 
     mockMvc
         .perform(
-            post("/api/threads/" + idText(1) + "/compact")
+            post("/api/harness/threads/" + idText(1) + "/compact")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"expectedVersion\":\"3\"}"))
         .andExpect(status().isAccepted())
@@ -115,7 +117,7 @@ class StudioHarnessThreadMutationControllerTest extends HarnessThreadControllerT
 
     mockMvc
         .perform(
-            post("/api/threads/" + idText(1) + "/compact")
+            post("/api/harness/threads/" + idText(1) + "/compact")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"expectedVersion\":\"3\"}"))
         .andExpect(status().isConflict())
@@ -128,7 +130,7 @@ class StudioHarnessThreadMutationControllerTest extends HarnessThreadControllerT
   void compactRejectsNonStringVersionAtTheHttpBoundary() throws Exception {
     mockMvc
         .perform(
-            post("/api/threads/" + idText(1) + "/compact")
+            post("/api/harness/threads/" + idText(1) + "/compact")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"expectedVersion\":3}"))
         .andExpect(status().isBadRequest());
@@ -140,7 +142,7 @@ class StudioHarnessThreadMutationControllerTest extends HarnessThreadControllerT
   void compactRejectsNonCanonicalThreadIdBeforeRuntimeMutation() throws Exception {
     mockMvc
         .perform(
-            post("/api/threads/not-a-uuid/compact")
+            post("/api/harness/threads/not-a-uuid/compact")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"expectedVersion\":\"3\"}"))
         .andExpect(status().isBadRequest());
@@ -155,7 +157,7 @@ class StudioHarnessThreadMutationControllerTest extends HarnessThreadControllerT
         .thenThrow(DomainException.conflict("THREAD_NAME_CONFLICT", "name already used"));
     mockMvc
         .perform(
-            put("/api/threads/" + idText(1) + "/name")
+            put("/api/harness/threads/" + idText(1) + "/name")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"name\":\"main\"}"))
         .andExpect(status().isConflict())
@@ -173,7 +175,7 @@ class StudioHarnessThreadMutationControllerTest extends HarnessThreadControllerT
 
     mockMvc
         .perform(
-            put("/api/threads/" + idText(1) + "/name")
+            put("/api/harness/threads/" + idText(1) + "/name")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"name\":\"  new thread name  \"}"))
         .andExpect(status().isOk())
@@ -193,31 +195,31 @@ class StudioHarnessThreadMutationControllerTest extends HarnessThreadControllerT
   void renameThreadRejectsStrictBodyViolationsAndMapsMissingThreadToNotFound() throws Exception {
     mockMvc
         .perform(
-            put("/api/threads/" + idText(1) + "/name")
+            put("/api/harness/threads/" + idText(1) + "/name")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"name\":\"ok\",\"unknown\":true}"))
         .andExpect(status().isBadRequest());
     mockMvc
         .perform(
-            put("/api/threads/" + idText(1) + "/name")
+            put("/api/harness/threads/" + idText(1) + "/name")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"name\":42}"))
         .andExpect(status().isBadRequest());
     mockMvc
         .perform(
-            put("/api/threads/" + idText(1) + "/name")
+            put("/api/harness/threads/" + idText(1) + "/name")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{}"))
         .andExpect(status().isBadRequest());
     mockMvc
         .perform(
-            put("/api/threads/" + idText(1) + "/name")
+            put("/api/harness/threads/" + idText(1) + "/name")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"name\":null}"))
         .andExpect(status().isBadRequest());
     mockMvc
         .perform(
-            put("/api/threads/" + idText(1) + "/name")
+            put("/api/harness/threads/" + idText(1) + "/name")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"name\":\"   \"}"))
         .andExpect(status().isBadRequest());
@@ -227,7 +229,7 @@ class StudioHarnessThreadMutationControllerTest extends HarnessThreadControllerT
         .thenThrow(DomainException.notFound("thread", "thread is missing"));
     mockMvc
         .perform(
-            put("/api/threads/" + idText(1) + "/name")
+            put("/api/harness/threads/" + idText(1) + "/name")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"name\":\"ok\"}"))
         .andExpect(status().isNotFound());
@@ -240,7 +242,7 @@ class StudioHarnessThreadMutationControllerTest extends HarnessThreadControllerT
     String response =
         mockMvc
             .perform(
-                put("/api/threads/" + idText(1) + "/name")
+                put("/api/harness/threads/" + idText(1) + "/name")
                     .contentType(MediaType.APPLICATION_JSON)
                     .content("{\"name\":\"" + overlongName + "\"}"))
             .andExpect(status().isBadRequest())
@@ -252,7 +254,7 @@ class StudioHarnessThreadMutationControllerTest extends HarnessThreadControllerT
     verify(runtime, never()).renameThread(any(RenameThreadCommand.class));
   }
 
-  /** 意图：验证 PUT /api/threads/{threadId}/yolo 直接更新 YOLO policy 并返回权威当前 Thread。 */
+  /** 意图：验证 PUT /api/harness/threads/{threadId}/yolo 直接更新 YOLO policy 并返回权威当前 Thread。 */
   @Test
   void yoloUpdatesPolicyAndReturnsCurrentThread() throws Exception {
     when(runtime.setThreadYolo(any(SetThreadYoloCommand.class)))
@@ -261,7 +263,7 @@ class StudioHarnessThreadMutationControllerTest extends HarnessThreadControllerT
 
     mockMvc
         .perform(
-            put("/api/threads/" + idText(1) + "/yolo")
+            put("/api/harness/threads/" + idText(1) + "/yolo")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"yoloEnabled\":true}"))
         .andExpect(status().isOk())
@@ -286,7 +288,7 @@ class StudioHarnessThreadMutationControllerTest extends HarnessThreadControllerT
             "{\"yoloEnabled\":true,\"expectedVersion\":\"0\"}")) {
       mockMvc
           .perform(
-              put("/api/threads/" + idText(1) + "/yolo")
+              put("/api/harness/threads/" + idText(1) + "/yolo")
                   .contentType(MediaType.APPLICATION_JSON)
                   .content(body))
           .andExpect(status().isBadRequest());
@@ -299,7 +301,7 @@ class StudioHarnessThreadMutationControllerTest extends HarnessThreadControllerT
   void yoloRejectsNonCanonicalThreadIdBeforeRuntimeMutation() throws Exception {
     mockMvc
         .perform(
-            put("/api/threads/not-a-uuid/yolo")
+            put("/api/harness/threads/not-a-uuid/yolo")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"yoloEnabled\":true}"))
         .andExpect(status().isBadRequest());
@@ -319,25 +321,25 @@ class StudioHarnessThreadMutationControllerTest extends HarnessThreadControllerT
 
     mockMvc
         .perform(
-            put("/api/threads/" + idText(7) + "/name")
+            put("/api/harness/threads/" + idText(7) + "/name")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"name\":\"ok\"}"))
         .andExpect(status().isConflict());
     mockMvc
         .perform(
-            post("/api/threads/" + idText(7) + "/compact")
+            post("/api/harness/threads/" + idText(7) + "/compact")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"expectedVersion\":\"3\"}"))
         .andExpect(status().isConflict());
     mockMvc
         .perform(
-            put("/api/threads/" + idText(7) + "/yolo")
+            put("/api/harness/threads/" + idText(7) + "/yolo")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"yoloEnabled\":true}"))
         .andExpect(status().isConflict());
     mockMvc
         .perform(
-            post("/api/threads/" + idText(7) + "/stop")
+            post("/api/harness/threads/" + idText(7) + "/stop")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"stopRequestId\":\"" + idText(9) + "\",\"expectedVersion\":\"3\"}"))
         .andExpect(status().isConflict());
@@ -355,7 +357,7 @@ class StudioHarnessThreadMutationControllerTest extends HarnessThreadControllerT
 
     mockMvc
         .perform(
-            put("/api/threads/" + idText(1) + "/yolo")
+            put("/api/harness/threads/" + idText(1) + "/yolo")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"yoloEnabled\":true}"))
         .andExpect(status().isOk());
@@ -383,10 +385,10 @@ class StudioHarnessThreadMutationControllerTest extends HarnessThreadControllerT
     when(runtime.getThreadSnapshot(id(1))).thenReturn(HarnessRuntimeTestFixtures.idleSnapshot());
     mockMvc
         .perform(
-            post("/api/threads/" + idText(1) + "/stop")
+            post("/api/harness/threads/" + idText(1) + "/stop")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"stopRequestId\":\"" + idText(9) + "\",\"expectedVersion\":\"3\"}"))
-        .andExpect(status().isOk())
+        .andExpect(status().isAccepted())
         .andExpect(jsonPath("$.status").value("STOPPED"))
         .andExpect(jsonPath("$.stoppedThreads[0].threadId").value(idText(1)))
         .andExpect(jsonPath("$.stoppedThreads[0].stopRequestId").value(idText(9)))

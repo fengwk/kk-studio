@@ -13,7 +13,7 @@ import fun.fengwk.kkstudio.platform.catalog.model.Model;
 import fun.fengwk.kkstudio.platform.catalog.model.ModelKind;
 import fun.fengwk.kkstudio.platform.catalog.model.ModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.model.ModelRuntimeConfigParser;
-import fun.fengwk.kkstudio.share.runtime.HarnessUsageCostDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessUsageCostDTO;
 
 import java.util.HashMap;
 import java.util.List;

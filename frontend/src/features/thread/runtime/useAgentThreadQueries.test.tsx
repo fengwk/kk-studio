@@ -25,7 +25,7 @@ function snapshot(id = ROOT, overrides: Partial<ToolInvocationDTO> = {}): Harnes
       executionControl: 'RUNNABLE',
       branchSettings: { agentName: 'agent', execution: createBuiltinExecution('m', 'default'),
         environmentName: 'composer-is-not-the-route', goal: null },
-      createTime: 0, updateTime: 0,
+      createdAt: 0, updatedAt: 0,
     },
     baseEntryId: null,
     entries: [], queuedCommands: [], executionStatus: 'IDLE', activeAssistantOutput: null, generationFailures: [], stopReceipts: [], unconfirmedExecutions: [],
@@ -35,7 +35,7 @@ function snapshot(id = ROOT, overrides: Partial<ToolInvocationDTO> = {}): Harnes
       environmentId: null, requiredEnvironmentId: 'frozen-environment',
       requiredEnvironmentName: 'archlinux', waitingForEnvironment: true, environmentWaitFreshnessAt: null,
       argumentsJson: '{"command":"pwd"}', approvalJson: null, resultJson: null, errorJson: null,
-      createTime: 0, updateTime: 0, ...overrides,
+      createdAt: 0, updatedAt: 0, ...overrides,
     }],
   }
 }

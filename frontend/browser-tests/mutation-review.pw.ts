@@ -257,7 +257,7 @@ test.describe('Mutation Review UI Acceptance & Browser Regression', () => {
     await expect(denyBtn).toBeEnabled()
 
     let interceptedDecision: string | null = null
-    await page.route('**/api/threads/*/tool-invocations/*/approval', async (route) => {
+    await page.route('**/api/harness/threads/*/tool-invocations/*/approval', async (route) => {
       const req = route.request()
       expect(req.method()).toBe('PUT')
       const payload = req.postDataJSON()
@@ -284,7 +284,7 @@ test.describe('Mutation Review UI Acceptance & Browser Regression', () => {
       const approvalPane = page.locator('[data-testid="approval-card-pane"]')
       await expect(approvalPane.getByRole('button', { name: '允许' })).toBeDisabled()
 
-      await page.route(`**/api/threads/thread-1/tool-invocations/${invocationId}/approval`, (route) =>
+      await page.route(`**/api/harness/threads/thread-1/tool-invocations/${invocationId}/approval`, (route) =>
         route.fulfill({ status: 200, contentType: 'application/json', body: '{}' }),
       )
       const submitted = page.waitForRequest((request) =>

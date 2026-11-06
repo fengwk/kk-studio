@@ -4,10 +4,10 @@ import fun.fengwk.kkstudio.common.json.StrictJson;
 import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
+import fun.fengwk.kkstudio.platform.catalog.dto.HarnessExecutionSelectionDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelConfigDTO;
 import fun.fengwk.kkstudio.platform.catalog.model.ModelDefaultVariantResolver;
 import fun.fengwk.kkstudio.platform.catalog.model.ModelKind;
-import fun.fengwk.kkstudio.share.runtime.HarnessExecutionSelectionDTO;
 
 /** 配置同步对 Builtin 模型引用与导入后 variant 的判定。 */
 public final class BuiltinConfigSyncAdapter {

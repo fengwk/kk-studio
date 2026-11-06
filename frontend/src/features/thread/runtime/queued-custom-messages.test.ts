@@ -19,7 +19,7 @@ function createCommand(overrides: Partial<HarnessThreadCommandDTO>): HarnessThre
       },
     }),
     cancelledAt: null,
-    createTime: 1774958400,
+    createdAt: 1774958400,
     ...overrides,
   }
 }

@@ -26,8 +26,8 @@ const thread: HarnessThreadDTO = {
   status: 'IDLE',
   executionControl: 'RUNNABLE',
   branchSettings: { agentName: 'coder', execution: draft.execution, environmentName: null, goal: null },
-  createTime: 0,
-  updateTime: 0,
+  createdAt: 0,
+  updatedAt: 0,
 }
 
 /** Reads the serialized request captured by the adapter, failing loudly on a missing entry. */
@@ -61,7 +61,7 @@ describe('owner-free HTTP wire', () => {
     })
     await harnessService.acceptCommandBatch(created.request)
     const { url, data } = wireAt(0)
-    expect(url).toBe('/api/command-batches')
+    expect(url).toBe('/api/harness/command-batches')
     const body = JSON.parse(data) as {
       owner: unknown
       target: { type: string }
@@ -84,7 +84,7 @@ describe('owner-free HTTP wire', () => {
     })
     await harnessService.acceptThreadCommandBatch('thread-1', plan.request)
     const { url, data } = wireAt(0)
-    expect(url).toBe('/api/threads/thread-1/command-batches')
+    expect(url).toBe('/api/harness/threads/thread-1/command-batches')
     const body = JSON.parse(data) as Record<string, unknown>
     expect(Object.keys(body).sort()).toEqual(['commands'])
     expect(body).not.toHaveProperty('owner')
@@ -106,7 +106,7 @@ describe('owner-free HTTP wire', () => {
     })
     await harnessService.acceptThreadCommandBatch('thread-1', plan.request)
     const { url, data } = wireAt(0)
-    expect(url).toBe('/api/threads/thread-1/command-batches')
+    expect(url).toBe('/api/harness/threads/thread-1/command-batches')
     const body = JSON.parse(data) as {
       commands: Array<{ type: string }>
     } & Record<string, unknown>
@@ -161,6 +161,6 @@ describe('owner-free HTTP wire', () => {
       createCommandId: () => 'cmd-1',
     })
     await harnessService.acceptThreadCommandBatch('thread /1', plan.request)
-    expect(wireAt(0).url).toBe('/api/threads/thread%20%2F1/command-batches')
+    expect(wireAt(0).url).toBe('/api/harness/threads/thread%20%2F1/command-batches')
   })
 })

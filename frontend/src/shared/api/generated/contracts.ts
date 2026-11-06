@@ -629,6 +629,40 @@ export interface DaemonLspServerConfiguration {
   firstMatchMarkers?: string[] | null
 }
 
+/** Java：fun.fengwk.kkstudio.harness.api.history.EntryType */
+export type EntryType =
+  | 'ROOT'
+  | 'TURN_START'
+  | 'MESSAGE'
+  | 'CUSTOM'
+  | 'MODEL_ATTEMPT_FAILURE'
+  | 'NATIVE_COMPACTION'
+  | 'CUSTOM_MESSAGE'
+  | 'ASSISTANT_ERROR'
+  | 'ASSISTANT_ABORTED'
+  | 'COMPACTION'
+  | 'TURN_END'
+  | 'NOTIFICATION'
+  | 'SETTINGS'
+  | 'FORK'
+
+export const ENTRY_TYPE_VALUES: readonly EntryType[] = [
+  'ROOT',
+  'TURN_START',
+  'MESSAGE',
+  'CUSTOM',
+  'MODEL_ATTEMPT_FAILURE',
+  'NATIVE_COMPACTION',
+  'CUSTOM_MESSAGE',
+  'ASSISTANT_ERROR',
+  'ASSISTANT_ABORTED',
+  'COMPACTION',
+  'TURN_END',
+  'NOTIFICATION',
+  'SETTINGS',
+  'FORK',
+]
+
 /** Java：fun.fengwk.kkstudio.share.environment.EnvironmentCardDTO */
 export interface EnvironmentCardDTO {
   id: string
@@ -801,7 +835,39 @@ export interface EnvironmentUpdateStartDTO {
   commandStatus: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.runtime.HarnessAcceptedCommandsDTO */
+/** Java：fun.fengwk.kkstudio.harness.api.execution.ExecutionExitKind */
+export type ExecutionExitKind =
+  | 'DRIVER'
+  | 'TOOL'
+  | 'REMOTE'
+
+export const EXECUTION_EXIT_KIND_VALUES: readonly ExecutionExitKind[] = [
+  'DRIVER',
+  'TOOL',
+  'REMOTE',
+]
+
+/** Java：fun.fengwk.kkstudio.harness.api.generation.GenerationStatus */
+export type GenerationStatus =
+  | 'READY'
+  | 'RUNNING'
+  | 'WAITING_RETRY'
+  | 'SUCCEEDED'
+  | 'FAILED'
+  | 'CANCELLED'
+  | 'BLOCKED'
+
+export const GENERATION_STATUS_VALUES: readonly GenerationStatus[] = [
+  'READY',
+  'RUNNING',
+  'WAITING_RETRY',
+  'SUCCEEDED',
+  'FAILED',
+  'CANCELLED',
+  'BLOCKED',
+]
+
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessAcceptedCommandsDTO */
 export interface HarnessAcceptedCommandsDTO {
   session: HarnessSessionDTO
   rootEntry: HarnessSessionEntryDTO
@@ -810,34 +876,44 @@ export interface HarnessAcceptedCommandsDTO {
   replayed: boolean
 }
 
-/** Java：fun.fengwk.kkstudio.share.runtime.HarnessActiveAssistantOutputDTO */
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessActiveAssistantOutputDTO */
 export interface HarnessActiveAssistantOutputDTO {
   generationId: string
   turnStartEntryId: string
   requestHeadEntryId: string
-  status: string
+  status: GenerationStatus
   attempt: number
   sequence: string
   contents: HarnessAgentMessageContentDTO[]
   error: HarnessAssistantErrorDTO | null
   resultEntryId: string | null
-  createTime: number
-  updateTime: number
+  createdAt: number
+  updatedAt: number
 }
 
-/** Java：fun.fengwk.kkstudio.share.runtime.HarnessAgentMessageContentDTO */
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessAgentMessageContentDTO */
 export interface HarnessAgentMessageContentDTO {
-  type: string
+  type: HarnessAgentMessageContentType
   text?: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.runtime.HarnessAssistantErrorDTO */
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessAgentMessageContentDTO.Type */
+export type HarnessAgentMessageContentType =
+  | 'text'
+  | 'thinking'
+
+export const HARNESS_AGENT_MESSAGE_CONTENT_TYPE_VALUES: readonly HarnessAgentMessageContentType[] = [
+  'text',
+  'thinking',
+]
+
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessAssistantErrorDTO */
 export interface HarnessAssistantErrorDTO {
   code: string
   message: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.runtime.HarnessBranchSettingsDTO */
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessBranchSettingsDTO */
 export interface HarnessBranchSettingsDTO {
   agentName: string
   execution: HarnessExecutionSelectionDTO
@@ -845,33 +921,65 @@ export interface HarnessBranchSettingsDTO {
   goal: HarnessGoalSettingDTO | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.runtime.HarnessCancelledInputDTO */
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessCancelledInputDTO */
 export interface HarnessCancelledInputDTO {
   sequence: string
   idempotencyKey: string
-  type: string
+  type: ThreadCommandType
   payloadJson: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.runtime.HarnessCommandBatchDTO */
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessCommandBatchDTO */
 export interface HarnessCommandBatchDTO {
   owner: HarnessCommandOwnerDTO
   target: HarnessCommandTargetDTO
   commands: HarnessCommandCreateDTO[]
 }
 
-/** Java：fun.fengwk.kkstudio.share.runtime.HarnessCommandCreateDTO */
-export interface HarnessCommandCreateDTO {
-  type: string
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessCommandCreateDTO.UserMessageDTO */
+export interface HarnessCommandCreateUserMessageDTO {
+  type: 'USER_MESSAGE'
   idempotencyKey: string
-  contents?: HarnessUserMessageContentDTO[] | null
-  agentName?: string | null
-  execution?: HarnessExecutionSelectionDTO | null
-  environmentName?: string | null
+  contents: HarnessUserMessageContentDTO[]
+}
+
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessCommandCreateDTO.GoalDTO */
+export interface HarnessCommandCreateGoalDTO {
+  type: 'GOAL'
+  idempotencyKey: string
   text?: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.runtime.HarnessCommandOwnerDTO */
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessCommandCreateDTO.SetAgentDTO */
+export interface HarnessCommandCreateSetAgentDTO {
+  type: 'SET_AGENT'
+  idempotencyKey: string
+  agentName: string
+}
+
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessCommandCreateDTO.SetExecutionDTO */
+export interface HarnessCommandCreateSetExecutionDTO {
+  type: 'SET_EXECUTION'
+  idempotencyKey: string
+  execution: HarnessExecutionSelectionDTO
+}
+
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessCommandCreateDTO.SetEnvironmentDTO */
+export interface HarnessCommandCreateSetEnvironmentDTO {
+  type: 'SET_ENVIRONMENT'
+  idempotencyKey: string
+  environmentName?: string | null
+}
+
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessCommandCreateDTO */
+export type HarnessCommandCreateDTO =
+  | HarnessCommandCreateUserMessageDTO
+  | HarnessCommandCreateGoalDTO
+  | HarnessCommandCreateSetAgentDTO
+  | HarnessCommandCreateSetExecutionDTO
+  | HarnessCommandCreateSetEnvironmentDTO
+
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessCommandOwnerDTO */
 export interface HarnessCommandOwnerDTO {
   kind: string
   id: string
@@ -879,45 +987,62 @@ export interface HarnessCommandOwnerDTO {
   link?: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.runtime.HarnessCommandTargetDTO */
-export interface HarnessCommandTargetDTO {
-  type: string
-  sessionId?: string | null
-  startEntryId?: string | null
-  threadId?: string | null
-  threadName?: string | null
-  sourceThreadId?: string | null
-  rootSettings?: HarnessBranchSettingsDTO | null
-  yoloEnabled?: boolean | null
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessCommandTargetDTO.NewSessionDTO */
+export interface HarnessCommandTargetNewSessionDTO {
+  type: 'NEW_SESSION'
+  sessionId: string
+  threadId: string
+  rootSettings: HarnessBranchSettingsDTO
+  yoloEnabled: boolean
 }
 
-/** Java：fun.fengwk.kkstudio.share.runtime.HarnessDraftPreviewRequestDTO */
-export interface HarnessDraftPreviewRequestDTO {
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessCommandTargetDTO.NewThreadDTO */
+export interface HarnessCommandTargetNewThreadDTO {
+  type: 'NEW_THREAD'
+  sessionId: string
   startEntryId: string
-  commands: HarnessCommandCreateDTO[]
+  threadId: string
+  threadName: string
+  yoloEnabled: boolean
 }
 
-/** Java：fun.fengwk.kkstudio.share.runtime.HarnessExecutionAbandonDTO */
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessCommandTargetDTO.NewForkedSessionDTO */
+export interface HarnessCommandTargetNewForkedSessionDTO {
+  type: 'NEW_FORKED_SESSION'
+  sourceThreadId: string
+  startEntryId: string
+  sessionId: string
+  threadId: string
+  yoloEnabled: boolean
+}
+
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessCommandTargetDTO */
+export type HarnessCommandTargetDTO =
+  | HarnessCommandTargetNewSessionDTO
+  | HarnessCommandTargetNewThreadDTO
+  | HarnessCommandTargetNewForkedSessionDTO
+
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessExecutionAbandonDTO */
 export interface HarnessExecutionAbandonDTO {
   expectedVersion: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.runtime.HarnessExecutionExitDTO */
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessExecutionExitDTO */
 export interface HarnessExecutionExitDTO {
   executionId: string
   invocationId: string
   attempt: number
-  kind: string
+  kind: ExecutionExitKind
   registeredAt: number
 }
 
-/** Java：fun.fengwk.kkstudio.share.runtime.HarnessExecutionSelectionDTO */
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.HarnessExecutionSelectionDTO */
 export interface HarnessExecutionSelectionDTO {
   driver: string
   settings: Record<string, unknown>
 }
 
-/** Java：fun.fengwk.kkstudio.share.runtime.HarnessGenerationFailureDTO */
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessGenerationFailureDTO */
 export interface HarnessGenerationFailureDTO {
   generationId: string
   turnStartEntryId: string
@@ -932,27 +1057,51 @@ export interface HarnessGenerationFailureDTO {
   retryAt: number
 }
 
-/** Java：fun.fengwk.kkstudio.share.runtime.HarnessGoalSettingDTO */
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessGoalSettingDTO */
 export interface HarnessGoalSettingDTO {
   id: string
   text: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.runtime.HarnessManualCompactionDTO */
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessImageInputTier */
+export type HarnessImageInputTier =
+  | '720P'
+  | '1080P'
+  | 'ORIGINAL'
+
+export const HARNESS_IMAGE_INPUT_TIER_VALUES: readonly HarnessImageInputTier[] = [
+  '720P',
+  '1080P',
+  'ORIGINAL',
+]
+
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessManualCompactionDTO */
 export interface HarnessManualCompactionDTO {
   available: boolean
   disabledReason: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.runtime.HarnessModelRequestDebugDTO.CacheControlDTO */
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessModelRequestDebugDTO.CacheControlDTO */
 export interface HarnessModelRequestDebugCacheControlDTO {
-  retention: string
+  retention: HarnessModelRequestDebugCacheControlRetention
   key: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.runtime.HarnessModelRequestDebugDTO */
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessModelRequestDebugDTO.CacheControlDTO.Retention */
+export type HarnessModelRequestDebugCacheControlRetention =
+  | 'NONE'
+  | 'SHORT'
+  | 'LONG'
+
+export const HARNESS_MODEL_REQUEST_DEBUG_CACHE_CONTROL_RETENTION_VALUES: readonly HarnessModelRequestDebugCacheControlRetention[] = [
+  'NONE',
+  'SHORT',
+  'LONG',
+]
+
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessModelRequestDebugDTO */
 export interface HarnessModelRequestDebugDTO {
-  kind: string
+  kind: HarnessModelRequestDebugKind
   generatedAt: number
   model: HarnessModelSelectionDTO
   environmentName: string | null
@@ -965,27 +1114,41 @@ export interface HarnessModelRequestDebugDTO {
   frozenInvocation: HarnessModelRequestDebugFrozenInvocationDTO | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.runtime.HarnessModelRequestDebugDTO.FrozenInvocationDTO */
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessModelRequestDebugDTO.FrozenInvocationDTO */
 export interface HarnessModelRequestDebugFrozenInvocationDTO {
-  kind: string
+  kind: HarnessModelRequestDebugFrozenInvocationFrozenKind
   generationId: string
   attempt: number
   requestJson: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.runtime.HarnessModelRequestDebugRequestDTO */
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessModelRequestDebugDTO.FrozenInvocationDTO.FrozenKind */
+export type HarnessModelRequestDebugFrozenInvocationFrozenKind = 'FROZEN_INVOCATION'
+
+export const HARNESS_MODEL_REQUEST_DEBUG_FROZEN_INVOCATION_FROZEN_KIND_VALUES: readonly HarnessModelRequestDebugFrozenInvocationFrozenKind[] = [
+  'FROZEN_INVOCATION',
+]
+
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessModelRequestDebugDTO.Kind */
+export type HarnessModelRequestDebugKind = 'NEXT_REQUEST_PREVIEW'
+
+export const HARNESS_MODEL_REQUEST_DEBUG_KIND_VALUES: readonly HarnessModelRequestDebugKind[] = [
+  'NEXT_REQUEST_PREVIEW',
+]
+
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessModelRequestDebugRequestDTO */
 export interface HarnessModelRequestDebugRequestDTO {
   model: HarnessModelSelectionDTO
   environmentName?: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.runtime.HarnessModelRequestDebugDTO.SkillDTO */
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessModelRequestDebugDTO.SkillDTO */
 export interface HarnessModelRequestDebugSkillDTO {
   packageName: string
   name: string
   description: string
   path: string
-  delivery: string
+  delivery: SkillPromptResolutionDelivery
   packageVersion: string
   headCommit: string | null
   artifactSha256: string
@@ -993,7 +1156,7 @@ export interface HarnessModelRequestDebugSkillDTO {
   promptXml: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.runtime.HarnessModelRequestDebugDTO.SubagentDTO */
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessModelRequestDebugDTO.SubagentDTO */
 export interface HarnessModelRequestDebugSubagentDTO {
   name: string
   description: string
@@ -1003,59 +1166,66 @@ export interface HarnessModelRequestDebugSubagentDTO {
   configurationJson: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.runtime.HarnessModelRequestDebugDTO.ToolDTO */
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessModelRequestDebugDTO.ToolDTO */
 export interface HarnessModelRequestDebugToolDTO {
   name: string
   description: string
   inputSchemaJson: string
   environmentSupport: EnvironmentSupportDTO
   provenance: string
-  state: string
-  filterReason: string | null
+  state: LiveTurnPlanToolState
+  filterReason: LiveTurnPlanFilterReason | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.runtime.HarnessModelSelectionDTO */
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessModelSelectionDTO */
 export interface HarnessModelSelectionDTO {
   modelName: string
   variant?: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.runtime.HarnessNameUpdateDTO */
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessNameUpdateDTO */
 export interface HarnessNameUpdateDTO {
   name: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.runtime.HarnessProviderRequestPreviewDTO */
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessProviderRequestPreviewDTO */
 export interface HarnessProviderRequestPreviewDTO {
-  kind: string
+  kind: HarnessProviderRequestPreviewKind
   generatedAt: number
   providerType: string
   modelName: string
   bodyByteSize: number
   bodyJson: string
   sourceHeadEntryId?: string | null
-  notice?: string | null
+  notice: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.runtime.HarnessSessionDTO */
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessProviderRequestPreviewDTO.Kind */
+export type HarnessProviderRequestPreviewKind = 'HISTORICAL_REQUEST_PREVIEW'
+
+export const HARNESS_PROVIDER_REQUEST_PREVIEW_KIND_VALUES: readonly HarnessProviderRequestPreviewKind[] = [
+  'HISTORICAL_REQUEST_PREVIEW',
+]
+
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessSessionDTO */
 export interface HarnessSessionDTO {
   sessionId: string
   name: string
   createdAt: number
 }
 
-/** Java：fun.fengwk.kkstudio.share.runtime.HarnessSessionEntryDTO */
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessSessionEntryDTO */
 export interface HarnessSessionEntryDTO {
   entryId: string
   sessionId: string
   parentEntryId: string | null
-  entryType: string
+  entryType: EntryType
   payloadJson: string
-  createTime: number
+  createdAt: number
   usageCost: HarnessUsageCostDTO | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.runtime.HarnessSessionEntryPageDTO */
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessSessionEntryPageDTO */
 export interface HarnessSessionEntryPageDTO {
   items: HarnessSessionEntryDTO[]
   nextCursor: string | null
@@ -1088,7 +1258,7 @@ export interface HarnessSessionFileListDTO {
   entries: HarnessSessionFileEntryDTO[]
 }
 
-/** Java：fun.fengwk.kkstudio.share.runtime.HarnessSessionSummaryDTO */
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessSessionSummaryDTO */
 export interface HarnessSessionSummaryDTO {
   sessionId: string
   name: string
@@ -1098,7 +1268,7 @@ export interface HarnessSessionSummaryDTO {
   threadCount: number
 }
 
-/** Java：fun.fengwk.kkstudio.share.runtime.HarnessStoppedThreadReceiptDTO */
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessStoppedThreadReceiptDTO */
 export interface HarnessStoppedThreadReceiptDTO {
   threadId: string
   stopRequestId: string
@@ -1107,38 +1277,38 @@ export interface HarnessStoppedThreadReceiptDTO {
   cancelledInputs: HarnessCancelledInputDTO[]
 }
 
-/** Java：fun.fengwk.kkstudio.share.runtime.HarnessThreadCommandBatchDTO */
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadCommandBatchDTO */
 export interface HarnessThreadCommandBatchDTO {
   expectedHeadEntryId?: string | null
   expectedNextCommandSequence?: string | null
   commands: HarnessCommandCreateDTO[]
 }
 
-/** Java：fun.fengwk.kkstudio.share.runtime.HarnessThreadCommandDTO */
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadCommandDTO */
 export interface HarnessThreadCommandDTO {
   threadId: string
   sequence: string
-  type: string
-  state: string
+  type: ThreadCommandType
+  state: ThreadCommandState
   idempotencyKey: string
   payloadJson: string
   cancelledAt: number | null
-  createTime: number
+  createdAt: number
 }
 
-/** Java：fun.fengwk.kkstudio.share.runtime.HarnessThreadCompactDTO */
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadCompactDTO */
 export interface HarnessThreadCompactDTO {
   expectedVersion: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.runtime.HarnessThreadCompactResultDTO */
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadCompactResultDTO */
 export interface HarnessThreadCompactResultDTO {
   thread: HarnessThreadDTO
   turnStartEntryId: string
   childThreadId: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.runtime.HarnessThreadDTO */
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadDTO */
 export interface HarnessThreadDTO {
   threadId: string
   parentThreadId: string | null
@@ -1149,14 +1319,14 @@ export interface HarnessThreadDTO {
   yoloEnabled: boolean
   nextCommandSequence: string
   version: string
-  status: string
-  executionControl: string
+  status: ThreadRuntimeStatus
+  executionControl: ThreadExecutionControl
   branchSettings: HarnessBranchSettingsDTO
-  createTime: number
-  updateTime: number
+  createdAt: number
+  updatedAt: number
 }
 
-/** Java：fun.fengwk.kkstudio.share.runtime.HarnessThreadSnapshotDTO */
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadSnapshotDTO */
 export interface HarnessThreadSnapshotDTO {
   version: string
   thread: HarnessThreadDTO
@@ -1171,64 +1341,84 @@ export interface HarnessThreadSnapshotDTO {
   unconfirmedExecutions: HarnessExecutionExitDTO[]
 }
 
-/** Java：fun.fengwk.kkstudio.share.runtime.HarnessThreadStopDTO */
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadStopDTO */
 export interface HarnessThreadStopDTO {
   stopRequestId: string
   expectedVersion: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.runtime.HarnessThreadStopResultDTO */
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadStopResultDTO */
 export interface HarnessThreadStopResultDTO {
-  status: string
+  status: HarnessThreadStopResultStatus
   thread: HarnessThreadDTO
   stoppedThreads: HarnessStoppedThreadReceiptDTO[]
 }
 
-/** Java：fun.fengwk.kkstudio.share.runtime.HarnessThreadStreamCatchupDTO */
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadStopResultDTO.Status */
+export type HarnessThreadStopResultStatus =
+  | 'STOPPED'
+  | 'REPLAYED'
+
+export const HARNESS_THREAD_STOP_RESULT_STATUS_VALUES: readonly HarnessThreadStopResultStatus[] = [
+  'STOPPED',
+  'REPLAYED',
+]
+
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadStreamCatchupDTO */
 export interface HarnessThreadStreamCatchupDTO {
   invocationId: string
   attempt: number
 }
 
-/** Java：fun.fengwk.kkstudio.share.runtime.HarnessThreadSummaryDTO */
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadSummaryDTO */
 export interface HarnessThreadSummaryDTO {
   threadId: string
   parentThreadId: string | null
   name: string
   createdAt: number
   updatedAt: number
-  status: string
-  executionControl: string
+  status: ThreadRuntimeStatus
+  executionControl: ThreadExecutionControl
   execution: HarnessExecutionSelectionDTO
   headMessagePreview: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.runtime.HarnessThreadTreeNodeDTO */
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadTreeNodeDTO */
 export interface HarnessThreadTreeNodeDTO {
   threadId: string
   parentThreadId: string | null
   name: string
   agentName: string
   execution: HarnessExecutionSelectionDTO
-  status: string
-  executionControl: string
+  status: ThreadRuntimeStatus
+  executionControl: ThreadExecutionControl
   turnCount: number
   toolCallCount: number
-  outcome: string | null
-  updateTime: number
+  outcome: TurnEndOutcome | null
+  updatedAt: number
 }
 
-/** Java：fun.fengwk.kkstudio.share.runtime.HarnessThreadYoloUpdateDTO */
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadYoloUpdateDTO */
 export interface HarnessThreadYoloUpdateDTO {
   yoloEnabled: boolean
 }
 
-/** Java：fun.fengwk.kkstudio.share.runtime.HarnessToolApprovalDTO */
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessToolApprovalDTO */
 export interface HarnessToolApprovalDTO {
-  decision: string
+  decision: HarnessToolApprovalDecision
   decisionId: string
   reason?: string | null
 }
+
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessToolApprovalDTO.Decision */
+export type HarnessToolApprovalDecision =
+  | 'ALLOW'
+  | 'DENY'
+
+export const HARNESS_TOOL_APPROVAL_DECISION_VALUES: readonly HarnessToolApprovalDecision[] = [
+  'ALLOW',
+  'DENY',
+]
 
 /** Java：fun.fengwk.kkstudio.share.interaction.HarnessToolInputDTO */
 export interface HarnessToolInputDTO {
@@ -1248,22 +1438,39 @@ export interface HarnessToolInputResultDTO {
   materialized: boolean
 }
 
-/** Java：fun.fengwk.kkstudio.share.runtime.HarnessUsageCostDTO */
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessUsageCostDTO */
 export interface HarnessUsageCostDTO {
   currency: string
   amount: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.runtime.HarnessUserMessageContentDTO */
-export interface HarnessUserMessageContentDTO {
-  type: string
-  text?: string | null
-  uploadId?: string | null
-  blobId?: string | null
-  name?: string | null
-  preview?: string | null
-  imageTier?: string | null
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessUserMessageContentDTO.TextDTO */
+export interface HarnessUserMessageContentTextDTO {
+  type: 'TEXT'
+  text: string
 }
+
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessUserMessageContentDTO.AttachmentDTO */
+export interface HarnessUserMessageContentAttachmentDTO {
+  type: 'ATTACHMENT'
+  uploadId: string
+  imageTier?: HarnessImageInputTier | null
+}
+
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessUserMessageContentDTO.ResourceDTO */
+export interface HarnessUserMessageContentResourceDTO {
+  type: 'RESOURCE'
+  blobId: string
+  name: string
+  preview?: string | null
+  imageTier?: HarnessImageInputTier | null
+}
+
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessUserMessageContentDTO */
+export type HarnessUserMessageContentDTO =
+  | HarnessUserMessageContentTextDTO
+  | HarnessUserMessageContentAttachmentDTO
+  | HarnessUserMessageContentResourceDTO
 
 /** Java：fun.fengwk.kkstudio.ide.browser.IdeBrowserUseIntentReply */
 export interface IdeBrowserUseIntentReply {
@@ -1430,6 +1637,23 @@ export interface IssueStageBudgetDTO {
 export interface LiveEnvironmentCapabilityDTO {
   id: string
 }
+
+/** Java：fun.fengwk.kkstudio.platform.harness.thread.command.LiveTurnPlan.FilterReason */
+export type LiveTurnPlanFilterReason = 'ENVIRONMENT_NOT_SELECTED'
+
+export const LIVE_TURN_PLAN_FILTER_REASON_VALUES: readonly LiveTurnPlanFilterReason[] = [
+  'ENVIRONMENT_NOT_SELECTED',
+]
+
+/** Java：fun.fengwk.kkstudio.platform.harness.thread.command.LiveTurnPlan.ToolState */
+export type LiveTurnPlanToolState =
+  | 'SENT'
+  | 'FILTERED'
+
+export const LIVE_TURN_PLAN_TOOL_STATE_VALUES: readonly LiveTurnPlanToolState[] = [
+  'SENT',
+  'FILTERED',
+]
 
 /** Java：fun.fengwk.kkstudio.share.mcp.McpServerConfigDTO */
 export interface McpServerConfigDTO {
@@ -2167,6 +2391,16 @@ export interface SkillPackageUploadPublishDTO {
   expectedVersion?: string | null
 }
 
+/** Java：fun.fengwk.kkstudio.platform.environment.skill.SkillPromptResolution.Delivery */
+export type SkillPromptResolutionDelivery =
+  | 'LOCAL'
+  | 'PLATFORM'
+
+export const SKILL_PROMPT_RESOLUTION_DELIVERY_VALUES: readonly SkillPromptResolutionDelivery[] = [
+  'LOCAL',
+  'PLATFORM',
+]
+
 /** Java：fun.fengwk.kkstudio.share.skill.SkillRefDTO */
 export interface SkillRefDTO {
   packageName: string
@@ -2383,6 +2617,60 @@ export interface SystemSettingsUpdateDTO {
   expectedVersion: string
 }
 
+/** Java：fun.fengwk.kkstudio.harness.api.command.ThreadCommandState */
+export type ThreadCommandState =
+  | 'QUEUED'
+  | 'APPLIED'
+  | 'CANCELLED'
+
+export const THREAD_COMMAND_STATE_VALUES: readonly ThreadCommandState[] = [
+  'QUEUED',
+  'APPLIED',
+  'CANCELLED',
+]
+
+/** Java：fun.fengwk.kkstudio.harness.api.command.ThreadCommandType */
+export type ThreadCommandType =
+  | 'USER_MESSAGE'
+  | 'CUSTOM_MESSAGE'
+  | 'GOAL'
+  | 'SET_AGENT'
+  | 'SET_EXECUTION'
+  | 'SET_ENVIRONMENT'
+  | 'NOTIFICATION'
+
+export const THREAD_COMMAND_TYPE_VALUES: readonly ThreadCommandType[] = [
+  'USER_MESSAGE',
+  'CUSTOM_MESSAGE',
+  'GOAL',
+  'SET_AGENT',
+  'SET_EXECUTION',
+  'SET_ENVIRONMENT',
+  'NOTIFICATION',
+]
+
+/** Java：fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl */
+export type ThreadExecutionControl =
+  | 'RUNNABLE'
+  | 'STOPPED'
+
+export const THREAD_EXECUTION_CONTROL_VALUES: readonly ThreadExecutionControl[] = [
+  'RUNNABLE',
+  'STOPPED',
+]
+
+/** Java：fun.fengwk.kkstudio.harness.api.thread.ThreadRuntimeStatus */
+export type ThreadRuntimeStatus =
+  | 'RUNNING'
+  | 'WAITING'
+  | 'IDLE'
+
+export const THREAD_RUNTIME_STATUS_VALUES: readonly ThreadRuntimeStatus[] = [
+  'RUNNING',
+  'WAITING',
+  'IDLE',
+]
+
 /** Java：fun.fengwk.kkstudio.platform.catalog.dto.ToolCatalogEntryDTO */
 export interface ToolCatalogEntryDTO {
   name: string
@@ -2390,14 +2678,14 @@ export interface ToolCatalogEntryDTO {
   environmentSupport?: EnvironmentSupport | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.runtime.ToolInvocationDTO */
+/** Java：fun.fengwk.kkstudio.platform.harness.dto.ToolInvocationDTO */
 export interface ToolInvocationDTO {
   id: string
   threadId: string
   turnStartEntryId: string
   assistantEntryId: string
   callIndex: number
-  status: string
+  status: ToolInvocationStatus
   attempt: number
   toolCallId: string
   toolName: string
@@ -2411,9 +2699,31 @@ export interface ToolInvocationDTO {
   approvalJson: string | null
   resultJson: string | null
   errorJson: string | null
-  createTime: number
-  updateTime: number
+  createdAt: number
+  updatedAt: number
 }
+
+/** Java：fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus */
+export type ToolInvocationStatus =
+  | 'WAITING_APPROVAL'
+  | 'WAITING_INPUT'
+  | 'READY'
+  | 'RUNNING'
+  | 'SUCCEEDED'
+  | 'FAILED'
+  | 'CANCELLED'
+  | 'UNKNOWN'
+
+export const TOOL_INVOCATION_STATUS_VALUES: readonly ToolInvocationStatus[] = [
+  'WAITING_APPROVAL',
+  'WAITING_INPUT',
+  'READY',
+  'RUNNING',
+  'SUCCEEDED',
+  'FAILED',
+  'CANCELLED',
+  'UNKNOWN',
+]
 
 /** Java：fun.fengwk.kkstudio.project.dto.TransitionIssueRequestDTO */
 export interface TransitionIssueRequestDTO {
@@ -2421,6 +2731,20 @@ export interface TransitionIssueRequestDTO {
   requestKey: string
   toState: string
 }
+
+/** Java：fun.fengwk.kkstudio.harness.api.entry.TurnEndOutcome */
+export type TurnEndOutcome =
+  | 'COMPLETED'
+  | 'FAILED'
+  | 'STOPPED'
+  | 'CANCELLED'
+
+export const TURN_END_OUTCOME_VALUES: readonly TurnEndOutcome[] = [
+  'COMPLETED',
+  'FAILED',
+  'STOPPED',
+  'CANCELLED',
+]
 
 /** Java：fun.fengwk.kkstudio.project.dto.UnarchiveIssueRequestDTO */
 export interface UnarchiveIssueRequestDTO {
@@ -2578,6 +2902,32 @@ export interface ApiRoutes {
     path: { environmentId: string }
     response: EnvironmentRuntimeStatusDTO
   }
+  'GET /api/harness/builtin/sessions/{sessionId}/entries/{entryId}/provider-request': {
+    path: { entryId: string; sessionId: string }
+    response: HarnessProviderRequestPreviewDTO
+  }
+  'GET /api/harness/sessions/{sessionId}/entries': {
+    path: { sessionId: string }
+    query: { cursor?: string; limit?: number }
+    response: HarnessSessionEntryPageDTO
+  }
+  'GET /api/harness/sessions/{sessionId}/threads': {
+    path: { sessionId: string }
+    response: HarnessThreadSummaryDTO[]
+  }
+  'GET /api/harness/threads/{threadId}': {
+    path: { threadId: string }
+    query: { afterEntryId?: string }
+    response: HarnessThreadSnapshotDTO
+  }
+  'GET /api/harness/threads/{threadId}/compaction-availability': {
+    path: { threadId: string }
+    response: HarnessManualCompactionDTO
+  }
+  'GET /api/harness/threads/{threadId}/tree': {
+    path: { threadId: string }
+    response: HarnessThreadTreeNodeDTO[]
+  }
   'GET /api/interactions': {
     query: { cursor?: string; limit?: string; rootThreadId?: string }
     response: InteractionPageDTO
@@ -2642,15 +2992,6 @@ export interface ApiRoutes {
     path: { projectId: string }
     response: ProjectSnapshotDTO
   }
-  'GET /api/sessions/{sessionId}/entries': {
-    path: { sessionId: string }
-    query: { cursor?: string; limit?: string }
-    response: HarnessSessionEntryPageDTO
-  }
-  'GET /api/sessions/{sessionId}/entries/{entryId}/provider-request-preview': {
-    path: { entryId: string; sessionId: string }
-    response: HarnessProviderRequestPreviewDTO
-  }
   'GET /api/sessions/{sessionId}/files': {
     path: { sessionId: string }
     query: { ownerId: string; ownerKind: string; path?: string }
@@ -2666,10 +3007,6 @@ export interface ApiRoutes {
     query: { ownerId: string; ownerKind: string; path: string }
     response: Blob
     responseType: 'blob'
-  }
-  'GET /api/sessions/{sessionId}/threads': {
-    path: { sessionId: string }
-    response: HarnessThreadSummaryDTO[]
   }
   'GET /api/settings': {
     response: SystemSettingsDTO
@@ -2694,19 +3031,6 @@ export interface ApiRoutes {
   'GET /api/skill-packages/{name}/files': {
     path: { name: string }
     response: SkillPackageFileDTO[]
-  }
-  'GET /api/threads/{threadId}': {
-    path: { threadId: string }
-    query: { afterEntryId?: string }
-    response: HarnessThreadSnapshotDTO
-  }
-  'GET /api/threads/{threadId}/compaction-availability': {
-    path: { threadId: string }
-    response: HarnessManualCompactionDTO
-  }
-  'GET /api/threads/{threadId}/tree': {
-    path: { threadId: string }
-    response: HarnessThreadTreeNodeDTO[]
   }
   'POST /api/agent-tasks': {
     body: AgentTaskSubmitDTO
@@ -2752,10 +3076,6 @@ export interface ApiRoutes {
     body?: ChatCreateDTO
     response: ChatDTO
   }
-  'POST /api/command-batches': {
-    body: HarnessCommandBatchDTO
-    response: HarnessAcceptedCommandsDTO
-  }
   'POST /api/environments': {
     body: EnvironmentCreateDTO
     response: EnvironmentCardDTO
@@ -2792,6 +3112,40 @@ export interface ApiRoutes {
   'POST /api/environments/{environmentId}/update': {
     path: { environmentId: string }
     response: EnvironmentUpdateStartDTO
+  }
+  'POST /api/harness/builtin/threads/{threadId}/model-request-debug': {
+    path: { threadId: string }
+    body: HarnessModelRequestDebugRequestDTO
+    response: HarnessModelRequestDebugDTO
+  }
+  'POST /api/harness/builtin/threads/{threadId}/stream-catchup': {
+    path: { threadId: string }
+    body: HarnessThreadStreamCatchupDTO
+    response: void
+  }
+  'POST /api/harness/command-batches': {
+    body: HarnessCommandBatchDTO
+    response: HarnessAcceptedCommandsDTO
+  }
+  'POST /api/harness/threads/{threadId}/command-batches': {
+    path: { threadId: string }
+    body: HarnessThreadCommandBatchDTO
+    response: HarnessAcceptedCommandsDTO
+  }
+  'POST /api/harness/threads/{threadId}/compact': {
+    path: { threadId: string }
+    body: HarnessThreadCompactDTO
+    response: HarnessThreadCompactResultDTO
+  }
+  'POST /api/harness/threads/{threadId}/executions/{executionId}/abandon': {
+    path: { executionId: string; threadId: string }
+    body: HarnessExecutionAbandonDTO
+    response: HarnessThreadSnapshotDTO
+  }
+  'POST /api/harness/threads/{threadId}/stop': {
+    path: { threadId: string }
+    body: HarnessThreadStopDTO
+    response: HarnessThreadStopResultDTO
   }
   'POST /api/interactions/{interactionId}/input': {
     path: { interactionId: string }
@@ -2911,11 +3265,6 @@ export interface ApiRoutes {
     body: ProjectVersionRequestDTO
     response: ProjectDTO
   }
-  'POST /api/sessions/{sessionId}/provider-request-preview': {
-    path: { sessionId: string }
-    body: HarnessDraftPreviewRequestDTO
-    response: HarnessProviderRequestPreviewDTO
-  }
   'POST /api/settings/sync/export': {
     body: ConfigSyncExportRequestDTO
     response: ConfigSyncExportDTO
@@ -2974,41 +3323,6 @@ export interface ApiRoutes {
     path: { uploadId: string }
     response: StorageUploadDTO
   }
-  'POST /api/threads/{threadId}/command-batches': {
-    path: { threadId: string }
-    body: HarnessThreadCommandBatchDTO
-    response: HarnessAcceptedCommandsDTO
-  }
-  'POST /api/threads/{threadId}/compact': {
-    path: { threadId: string }
-    body: HarnessThreadCompactDTO
-    response: HarnessThreadCompactResultDTO
-  }
-  'POST /api/threads/{threadId}/executions/{executionId}/abandon': {
-    path: { executionId: string; threadId: string }
-    body: HarnessExecutionAbandonDTO
-    response: HarnessThreadSnapshotDTO
-  }
-  'POST /api/threads/{threadId}/model-request-debug': {
-    path: { threadId: string }
-    body: HarnessModelRequestDebugRequestDTO
-    response: HarnessModelRequestDebugDTO
-  }
-  'POST /api/threads/{threadId}/provider-request-preview': {
-    path: { threadId: string }
-    body: HarnessThreadCommandBatchDTO
-    response: HarnessProviderRequestPreviewDTO
-  }
-  'POST /api/threads/{threadId}/stop': {
-    path: { threadId: string }
-    body: HarnessThreadStopDTO
-    response: HarnessThreadStopResultDTO
-  }
-  'POST /api/threads/{threadId}/stream-catchup': {
-    path: { threadId: string }
-    body: HarnessThreadStreamCatchupDTO
-    response: void
-  }
   'PUT /api/chats/{chatId}': {
     path: { chatId: string }
     body: ChatUpdateDTO
@@ -3023,6 +3337,26 @@ export interface ApiRoutes {
     path: { environmentId: string }
     body: Record<string, unknown>
     response: EnvironmentCardDTO
+  }
+  'PUT /api/harness/sessions/{sessionId}/name': {
+    path: { sessionId: string }
+    body: HarnessNameUpdateDTO
+    response: HarnessSessionDTO
+  }
+  'PUT /api/harness/threads/{threadId}/name': {
+    path: { threadId: string }
+    body: HarnessNameUpdateDTO
+    response: HarnessThreadDTO
+  }
+  'PUT /api/harness/threads/{threadId}/tool-invocations/{toolInvocationId}/approval': {
+    path: { threadId: string; toolInvocationId: string }
+    body: HarnessToolApprovalDTO
+    response: ToolInvocationDTO
+  }
+  'PUT /api/harness/threads/{threadId}/yolo': {
+    path: { threadId: string }
+    body: HarnessThreadYoloUpdateDTO
+    response: HarnessThreadDTO
   }
   'PUT /api/issues/{issueId}': {
     path: { issueId: string }
@@ -3069,11 +3403,6 @@ export interface ApiRoutes {
     body: UpdateProjectYoloRequestDTO
     response: ProjectDTO
   }
-  'PUT /api/sessions/{sessionId}/name': {
-    path: { sessionId: string }
-    body: HarnessNameUpdateDTO
-    response: HarnessSessionDTO
-  }
   'PUT /api/settings': {
     body: SystemSettingsUpdateDTO
     response: SystemSettingsDTO
@@ -3082,21 +3411,6 @@ export interface ApiRoutes {
     path: { name: string }
     body: SkillPackageEditDTO
     response: SkillPackageDetailDTO
-  }
-  'PUT /api/threads/{threadId}/name': {
-    path: { threadId: string }
-    body: HarnessNameUpdateDTO
-    response: HarnessThreadDTO
-  }
-  'PUT /api/threads/{threadId}/tool-invocations/{toolInvocationId}/approval': {
-    path: { threadId: string; toolInvocationId: string }
-    body: HarnessToolApprovalDTO
-    response: ToolInvocationDTO
-  }
-  'PUT /api/threads/{threadId}/yolo': {
-    path: { threadId: string }
-    body: HarnessThreadYoloUpdateDTO
-    response: HarnessThreadDTO
   }
 }
 

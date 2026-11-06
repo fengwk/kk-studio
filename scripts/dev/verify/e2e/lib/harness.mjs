@@ -9,18 +9,17 @@ import {
  * Harness Runtime 单轨契约 helper（创建型 owner-aware batch + owner-free Thread 续写 + Session/Thread 查询）。
  *
  * 端点事实源（web 模块）：
- * - POST /api/command-batches                 创建型产品写入口：owner + NEW_SESSION/NEW_THREAD（202 accepted）
- * - POST /api/threads/{id}/command-batches    既有 Thread 续写：owner-free，body 只带 cursor 与 commands
- * - POST /api/threads/{id}/provider-request-preview  同一 owner-free body，200 返回发送前请求体
+ * - POST /api/harness/command-batches         创建型产品写入口：owner + NEW_SESSION/NEW_THREAD（202 accepted）
+ * - POST /api/harness/threads/{id}/command-batches  既有 Thread 续写：owner-free，body 只带 cursor 与 commands
  * - GET  /api/chats/{chatId}/sessions       Chat owner 的 Session 摘要（新到旧）
- * - GET  /api/sessions/{sessionId}/threads   Session 下 Thread 摘要
- * - GET  /api/sessions/{sessionId}/entries   完整不可变 Entry Tree
- * - GET  /api/threads/{id}             一致快照（单事务，含 stopReceipts）
- * - PUT  /api/threads/{id}/yolo        {yoloEnabled}（单字段幂等，不与 Thread version 做 CAS）
- * - POST /api/threads/{id}/stop        {stopRequestId,expectedVersion}（同 id 幂等 replay，返回每 Thread 回执）
- * - PUT  /api/threads/{id}/tool-invocations/{toolInvocationId}/approval
- * - PUT  /api/sessions/{id}/name       {name}（200 权威 HarnessSessionDTO）
- * - PUT  /api/threads/{id}/name        {name}（200 权威 HarnessThreadDTO）
+ * - GET  /api/harness/sessions/{sessionId}/threads   Session 下 Thread 摘要
+ * - GET  /api/harness/sessions/{sessionId}/entries   完整不可变 Entry Tree
+ * - GET  /api/harness/threads/{id}     一致快照（单事务，含 stopReceipts）
+ * - PUT  /api/harness/threads/{id}/yolo  {yoloEnabled}（单字段幂等，不与 Thread version 做 CAS）
+ * - POST /api/harness/threads/{id}/stop  {stopRequestId,expectedVersion}（同 id 幂等 replay，返回每 Thread 回执）
+ * - PUT  /api/harness/threads/{id}/tool-invocations/{toolInvocationId}/approval
+ * - PUT  /api/harness/sessions/{id}/name       {name}（200 权威 HarnessSessionDTO）
+ * - PUT  /api/harness/threads/{id}/name  {name}（200 权威 HarnessThreadDTO）
  * - WS   /api/events                        应用级 Thread/Canvas 事件订阅
  * - GET  /api/environments             只读 Environment 注册表（Card UUID id = canonical 路由身份）
  *
@@ -270,7 +269,7 @@ export function newThreadTarget({ sessionId, startEntryId, threadId, threadName,
 /**
  * THREAD target：既有 Thread 续写的 helper 路由描述符（内部转为 owner-free body）。
  *
- * <p>它不是 HTTP wire：真实请求发往 {@code POST /api/threads/{threadId}/command-batches}，body 只含 {@code commands}
+ * <p>它不是 HTTP wire：真实请求发往 {@code POST /api/harness/threads/{threadId}/command-batches}，body 只含 {@code commands}
  * 与（非单条纯 USER_MESSAGE 批次必需的）{@code expectedHeadEntryId, expectedNextCommandSequence}，不带 owner/target/type。
  */
 export function threadTarget({ threadId, expectedHeadEntryId, expectedNextCommandSequence }) {
@@ -349,7 +348,7 @@ export async function acceptCommandBatch(ctx, { owner, target, commands }) {
     }
     const { status, json } = await ctx.call(
       'POST',
-      `/api/threads/${encodeURIComponent(threadId)}/command-batches`,
+      `/api/harness/threads/${encodeURIComponent(threadId)}/command-batches`,
       body,
     )
     assert(status === 202, `accept thread command batch status ${status}: ${JSON.stringify(json)}`)
@@ -372,7 +371,7 @@ export async function acceptCommandBatch(ctx, { owner, target, commands }) {
     Object.keys(owner).sort().join(',') === 'id,kind',
     `owner must contain only kind and id: ${JSON.stringify(owner)}`,
   )
-  const { status, json } = await ctx.call('POST', '/api/command-batches', {
+  const { status, json } = await ctx.call('POST', '/api/harness/command-batches', {
     owner,
     target,
     commands,
@@ -482,12 +481,6 @@ const PREVIEW_FIELDS = [
   'notice',
 ]
 
-/** 草稿预览的固定能力声明（镜像 {@code HarnessProviderRequestPreviewDTO.DRAFT_NOTICE}）。 */
-export const DRAFT_PREVIEW_NOTICE =
-  'Preview is a click-time snapshot of the request that would be sent now. It does not '
-  + 'consume uploads or write anything, so a later send may observe different history, '
-  + 'attachments or provider configuration.'
-
 /** 历史预览的固定能力声明（镜像 {@code HarnessProviderRequestPreviewDTO.HISTORICAL_NOTICE}）。 */
 export const HISTORICAL_PREVIEW_NOTICE =
   'Preview is reconstructed from the current catalog, provider configuration and model '
@@ -495,7 +488,7 @@ export const HISTORICAL_PREVIEW_NOTICE =
   + 'request that was sent, and it does not consume uploads or write anything.'
 
 /** 严格校验一份预览响应：精确字段、kind、固定 notice、来源 head 与请求体自洽。 */
-export function assertProviderPreview(preview, expectedKind) {
+export function assertProviderPreview(preview) {
   assert(preview && typeof preview === 'object' && !Array.isArray(preview), JSON.stringify(preview))
   const actual = Object.keys(preview).sort()
   assert(
@@ -503,7 +496,7 @@ export function assertProviderPreview(preview, expectedKind) {
       && actual.every((field, index) => field === [...PREVIEW_FIELDS].sort()[index]),
     `preview fields must be ${[...PREVIEW_FIELDS].sort().join(',')}, got ${actual.join(',')}`,
   )
-  assert(preview.kind === expectedKind, `preview kind ${preview.kind} != ${expectedKind}: ${JSON.stringify(preview)}`)
+  assert(preview.kind === 'HISTORICAL_REQUEST_PREVIEW', `preview kind ${preview.kind} is not historical: ${JSON.stringify(preview)}`)
   assert(
     (typeof preview.generatedAt === 'number' && Number.isFinite(preview.generatedAt))
       || (typeof preview.generatedAt === 'string' && Number.isFinite(Date.parse(preview.generatedAt))),
@@ -530,63 +523,15 @@ export function assertProviderPreview(preview, expectedKind) {
     })}`,
   )
   canonicalUuid(preview.sourceHeadEntryId, 'preview.sourceHeadEntryId')
-  const expectedNotice =
-    expectedKind === 'DRAFT_REQUEST_PREVIEW' ? DRAFT_PREVIEW_NOTICE : HISTORICAL_PREVIEW_NOTICE
   assert(
-    preview.notice === expectedNotice,
-    `preview notice must be the fixed ${expectedKind} capability statement: ${JSON.stringify(preview.notice)}`,
+    preview.notice === HISTORICAL_PREVIEW_NOTICE,
+    `preview notice must be the fixed historical capability statement: ${JSON.stringify(preview.notice)}`,
   )
   return preview
 }
 
 /**
- * 发送前请求预览：owner-free POST /api/threads/{threadId}/provider-request-preview。
- *
- * <p>body 与既有 Thread 续写面同形（{@link HarnessThreadCommandBatchDTO} 的
- * {@code {expectedHeadEntryId, expectedNextCommandSequence, commands}}），不写 durable 状态、不消费 upload。
- * 返回 200 的 {@code HarnessProviderRequestPreviewDTO} 或抛 {@link HttpError}（409 表示该快照下不可精确预览）。
- */
-export async function previewProviderRequest(
-  ctx,
-  threadId,
-  { expectedHeadEntryId, expectedNextCommandSequence, commands },
-) {
-  const id = canonicalUuid(threadId, 'threadId')
-  assert(Array.isArray(commands) && commands.length > 0, 'commands required')
-  const { status, json } = await ctx.call(
-    'POST',
-    `/api/threads/${encodeURIComponent(id)}/provider-request-preview`,
-    {
-      expectedHeadEntryId: canonicalUuid(expectedHeadEntryId, 'expectedHeadEntryId'),
-      expectedNextCommandSequence: positiveDecimal(
-        expectedNextCommandSequence,
-        'expectedNextCommandSequence',
-      ),
-      commands,
-    },
-  )
-  assert(status === 200, `provider request preview status ${status}: ${JSON.stringify(json)}`)
-  return assertProviderPreview(json, 'DRAFT_REQUEST_PREVIEW')
-}
-
-/**
- * 本地分支草稿预览：POST /api/sessions/{sessionId}/provider-request-preview，body 只有
- * {@code {startEntryId, commands}}。草稿尚未落库，因此不携带任何 cursor；同样不写 durable 状态、不消费 upload。
- */
-export async function previewSessionDraftRequest(ctx, sessionId, { startEntryId, commands }) {
-  const id = canonicalUuid(sessionId, 'sessionId')
-  assert(Array.isArray(commands) && commands.length > 0, 'commands required')
-  const { status, json } = await ctx.call(
-    'POST',
-    `/api/sessions/${encodeURIComponent(id)}/provider-request-preview`,
-    { startEntryId: canonicalUuid(startEntryId, 'startEntryId'), commands },
-  )
-  assert(status === 200, `session draft preview status ${status}: ${JSON.stringify(json)}`)
-  return assertProviderPreview(json, 'DRAFT_REQUEST_PREVIEW')
-}
-
-/**
- * 历史请求预览：GET /api/sessions/{sessionId}/entries/{entryId}/provider-request-preview。
+ * 历史请求预览：GET /api/harness/builtin/sessions/{sessionId}/entries/{entryId}/provider-request。
  *
  * <p>按当前 catalog 与 Provider 配置重建该模型输出之前的请求前缀；响应 MUST 是 HISTORICAL_REQUEST_PREVIEW，
  * 不得冒充当时的原始发送字节。
@@ -596,10 +541,10 @@ export async function previewHistoricalRequest(ctx, sessionId, entryId) {
   const entry = canonicalUuid(entryId, 'entryId')
   const { status, json } = await ctx.call(
     'GET',
-    `/api/sessions/${encodeURIComponent(id)}/entries/${encodeURIComponent(entry)}/provider-request-preview`,
+    `/api/harness/builtin/sessions/${encodeURIComponent(id)}/entries/${encodeURIComponent(entry)}/provider-request`,
   )
   assert(status === 200, `historical preview status ${status}: ${JSON.stringify(json)}`)
-  return assertProviderPreview(json, 'HISTORICAL_REQUEST_PREVIEW')
+  return assertProviderPreview(json)
 }
 
 // ---------- Session / Thread 查询 ----------
@@ -665,7 +610,7 @@ export async function listChatSessions(ctx, chatId) {
 export async function listSessionThreads(ctx, sessionId) {
   const { json } = await ctx.call(
     'GET',
-    `/api/sessions/${encodeURIComponent(sessionId)}/threads`,
+    `/api/harness/sessions/${encodeURIComponent(sessionId)}/threads`,
   )
   const threads = json
   assert(Array.isArray(threads), `expected Thread summary array: ${JSON.stringify(json)}`)
@@ -748,7 +693,7 @@ export async function listSessionEntries(ctx, sessionId) {
     const query = cursor == null ? '' : `?cursor=${encodeURIComponent(cursor)}`
     const { json } = await ctx.call(
       'GET',
-      `/api/sessions/${encodeURIComponent(sessionId)}/entries${query}`,
+      `/api/harness/sessions/${encodeURIComponent(sessionId)}/entries${query}`,
     )
     const page = json
     assert(Array.isArray(page?.items), `expected Session Entry page: ${JSON.stringify(json)}`)
@@ -768,7 +713,7 @@ export async function listSessionEntries(ctx, sessionId) {
 export async function getThreadSnapshot(ctx, threadId) {
   const { json } = await ctx.call(
     'GET',
-    `/api/threads/${encodeURIComponent(threadId)}`,
+    `/api/harness/threads/${encodeURIComponent(threadId)}`,
   )
   const snapshot = json
   assert(snapshot?.thread, `expected Thread snapshot: ${JSON.stringify(json)}`)
@@ -900,7 +845,7 @@ export async function setThreadYolo(ctx, threadId, { yoloEnabled }) {
   assert(typeof yoloEnabled === 'boolean', 'yoloEnabled must be boolean')
   const { status, json } = await ctx.call(
     'PUT',
-    `/api/threads/${encodeURIComponent(threadId)}/yolo`,
+    `/api/harness/threads/${encodeURIComponent(threadId)}/yolo`,
     { yoloEnabled },
   )
   assert(status === 200, `set thread yolo status ${status}: ${JSON.stringify(json)}`)
@@ -918,7 +863,7 @@ export async function renameSession(ctx, sessionId, name) {
   canonicalUuid(sessionId, 'sessionId')
   const { status, json } = await ctx.call(
     'PUT',
-    `/api/sessions/${encodeURIComponent(sessionId)}/name`,
+    `/api/harness/sessions/${encodeURIComponent(sessionId)}/name`,
     { name },
   )
   assert(status === 200, `rename session status ${status}: ${JSON.stringify(json)}`)
@@ -941,7 +886,7 @@ export async function renameThread(ctx, threadId, name) {
   canonicalUuid(threadId, 'threadId')
   const { status, json } = await ctx.call(
     'PUT',
-    `/api/threads/${encodeURIComponent(threadId)}/name`,
+    `/api/harness/threads/${encodeURIComponent(threadId)}/name`,
     { name },
   )
   assert(status === 200, `rename thread status ${status}: ${JSON.stringify(json)}`)
@@ -992,13 +937,13 @@ export async function stopThread(ctx, threadId, { stopRequestId, expectedVersion
   canonicalUuid(stopRequestId, 'stopRequestId')
   const { status, json } = await ctx.call(
     'POST',
-    `/api/threads/${encodeURIComponent(targetThreadId)}/stop`,
+    `/api/harness/threads/${encodeURIComponent(targetThreadId)}/stop`,
     {
       stopRequestId,
       expectedVersion: nonNegativeDecimal(expectedVersion, 'expectedVersion'),
     },
   )
-  assert(status === 200, `stop status ${status}: ${JSON.stringify(json)}`)
+  assert(status === 202, `stop status ${status}: ${JSON.stringify(json)}`)
   const stop = json
   assert(stop?.thread, `expected stop result thread: ${JSON.stringify(json)}`)
   threadIdOf(stop.thread)
@@ -1088,7 +1033,7 @@ export async function approveToolInvocation(
   assert(reason == null || typeof reason === 'string', 'reason must be string|null')
   const { status, json } = await ctx.call(
     'PUT',
-    `/api/threads/${encodeURIComponent(threadId)}/tool-invocations/${encodeURIComponent(toolInvocationId)}/approval`,
+    `/api/harness/threads/${encodeURIComponent(threadId)}/tool-invocations/${encodeURIComponent(toolInvocationId)}/approval`,
     { decision, decisionId, reason },
   )
   assert(status === 200, `approval status ${status}: ${JSON.stringify(json)}`)

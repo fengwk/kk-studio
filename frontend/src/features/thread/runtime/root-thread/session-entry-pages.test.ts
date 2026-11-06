@@ -14,7 +14,7 @@ function entry(entryId: string, parentEntryId: string | null = null): HarnessSes
     parentEntryId,
     entryType: parentEntryId == null ? 'ROOT' : 'MESSAGE',
     payloadJson: '{}',
-    createTime: 0,
+    createdAt: 0,
     usageCost: null,
   }
 }

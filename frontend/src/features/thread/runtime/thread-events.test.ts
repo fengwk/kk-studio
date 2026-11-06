@@ -8,12 +8,8 @@ import {
 import type {
   RealtimeModelStream,
 } from '@/features/thread/runtime/thread-realtime/model-stream'
-import type {
-  HarnessActiveAssistantOutputDTO,
-  HarnessGenerationFailureDTO,
-  HarnessSessionEntryDTO,
-  ToolInvocationDTO,
-} from '@/shared/api/generated/contracts'
+import type { HarnessActiveAssistantOutputDTO, HarnessGenerationFailureDTO, HarnessSessionEntryDTO, ToolInvocationDTO } from '@/shared/api/generated/contracts'
+import type { GenerationStatus } from '@/shared/api/generated/contracts'
 
 /**
  * Event 投影矩阵（冻结方案）：每个 durable Entry 恰好一条 ThreadEventRecord；
@@ -26,7 +22,7 @@ function entry(
   entryId: string,
   entryType: EntryType,
   payload: Record<string, unknown>,
-  createTime = 1785232800,
+  createdAt = 1785232800,
 ): HarnessSessionEntryDTO {
   return {
     entryId,
@@ -34,7 +30,7 @@ function entry(
     parentEntryId: null,
     entryType,
     payloadJson: JSON.stringify(payload),
-    createTime,
+    createdAt,
     usageCost: null,
   }
 }
@@ -49,7 +45,7 @@ function messagePayload(role: string, contents: Array<Record<string, unknown>>, 
 
 /** 当前 generation 的公共活跃输出快照：只有 typed 字段，没有 Provider 原始 JSON。 */
 function activeAssistantOutput(
-  status: string,
+  status: GenerationStatus,
   attempt: number,
   overrides: Partial<HarnessActiveAssistantOutputDTO> = {},
 ): HarnessActiveAssistantOutputDTO {
@@ -63,8 +59,8 @@ function activeAssistantOutput(
     contents: [],
     error: null,
     resultEntryId: null,
-    createTime: 1785232800,
-    updateTime: 1785232800,
+    createdAt: 1785232800,
+    updatedAt: 1785232800,
     ...overrides,
   }
 }
@@ -109,8 +105,8 @@ function toolInvocation(overrides: Partial<ToolInvocationDTO> = {}): ToolInvocat
     approvalJson: null,
     resultJson: null,
     errorJson: null,
-    createTime: 1785232800,
-    updateTime: 1785232800,
+    createdAt: 1785232800,
+    updatedAt: 1785232800,
     ...overrides,
   }
 }
@@ -547,7 +543,7 @@ describe('buildThreadEventTimeline', () => {
       entry('user-1', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: 'go' }])),
     ]
     const byStatus = (raw: string) =>
-      build(entries, { activeAssistantOutput: activeAssistantOutput(raw, 1) }).find(
+      build(entries, { activeAssistantOutput: activeAssistantOutput(raw as GenerationStatus, 1) }).find(
         (event) => event.source === 'active-model',
       )!.status
     expect(byStatus('READY')).toBe('pending')
@@ -837,7 +833,7 @@ describe('buildThreadEventTimeline', () => {
       entry('user-1', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: 'go' }])),
     ]
     // 未知 active output 状态冻结为 pending（不做猜测）。
-    const unknown = build(entries, { activeAssistantOutput: activeAssistantOutput('STRANGE', 1) }).find(
+    const unknown = build(entries, { activeAssistantOutput: activeAssistantOutput('STRANGE' as GenerationStatus, 1) }).find(
       (event) => event.source === 'active-model',
     )!
     expect(unknown.status).toBe('pending')
@@ -976,7 +972,7 @@ describe('buildThreadEventTimeline', () => {
       turnStartEntryId: 'turn-1',
       assistantEntryId: 'assistant-1',
       callIndex: 2,
-      status: 'COMPLETED',
+      status: 'SUCCEEDED',
       attempt: 1,
       toolCallId: 'call-full',
       toolName: 'bash',
@@ -1017,7 +1013,7 @@ describe('buildThreadEventTimeline', () => {
     // details 验证结构化展示
     const detailMap = new Map(toolEvent!.details.map((d) => [d.label, d.value]))
     expect(detailMap.get('状态')).toBe('已完成')
-    expect(detailMap.get('原始状态')).toBe('COMPLETED')
+    expect(detailMap.get('原始状态')).toBe('SUCCEEDED')
     expect(detailMap.get('调用 ID')).toBe('inv-full')
     expect(detailMap.get('会话线程 ID')).toBe('thread-1')
     expect(detailMap.get('回合起始 Entry ID')).toBe('turn-1')

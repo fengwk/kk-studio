@@ -14,7 +14,7 @@ function message(contents: Record<string, unknown>[]) {
     parentEntryId: null,
     entryType: 'MESSAGE',
     payloadJson: JSON.stringify({ message: { role: 'USER', contents } }),
-    createTime: 1790380800,
+    createdAt: 1790380800,
     usageCost: null,
   }], [], [])
   const projected = timeline.messages[0]!

@@ -7,7 +7,7 @@ export interface GoalProgressRecord {
   status: 'complete' | 'blocked'
   reason: string
   reportedAt: string
-  createTime: number
+  createdAt: number
 }
 
 export interface BranchGoalProgressResult {
@@ -72,7 +72,7 @@ export function parseGoalProgress(
       status,
       reason,
       reportedAt,
-      createTime: entry.createTime,
+      createdAt: entry.createdAt,
     }
 
     if (currentGoalId != null && goalId === currentGoalId) {

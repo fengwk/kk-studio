@@ -289,6 +289,7 @@ describe('request source fences', () => {
     const preview: HarnessProviderRequestPreviewDTO = {
       kind: 'HISTORICAL_REQUEST_PREVIEW', providerType: 'OPENAI', modelName: 'm',
       bodyByteSize: 2, bodyJson: '{}', sourceHeadEntryId: 'head', generatedAt: 1790504400,
+      notice: 'Preview is reconstructed from the current catalog, provider configuration and model selection against the recorded history before this output.',
     }
     let finish!: (value: HarnessProviderRequestPreviewDTO) => void
     vi.mocked(harnessService.previewHistoricalRequest)

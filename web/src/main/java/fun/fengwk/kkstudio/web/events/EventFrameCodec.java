@@ -63,7 +63,7 @@ final class EventFrameCodec {
   private static final String THREAD = ResourceKind.THREAD.name().toLowerCase();
   private static final String CANVAS = ResourceKind.CANVAS.name().toLowerCase();
   private static final String PROJECTS = ResourceKind.PROJECTS.name().toLowerCase();
-  private static final String TREE = ResourceKind.TREE.name().toLowerCase();
+  private static final String TREE = "thread-tree";
   private static final String INTERACTIONS = ResourceKind.INTERACTIONS.name().toLowerCase();
   private static final String ENVIRONMENTS = ResourceKind.ENVIRONMENTS.name().toLowerCase();
 
@@ -349,7 +349,7 @@ final class EventFrameCodec {
       return new ResourceKey(ResourceKind.ENVIRONMENTS, null);
     }
     throw new IllegalArgumentException(
-        "frame.resource.kind must be thread, canvas, tree, projects, interactions, or environments");
+        "frame.resource.kind must be thread, canvas, thread-tree, projects, interactions, or environments");
   }
 
   private static UUID resourceId(ObjectNode node) {

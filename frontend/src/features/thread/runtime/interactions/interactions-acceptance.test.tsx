@@ -238,8 +238,8 @@ describe('Interactions Acceptance Suite (Spec §5)', () => {
       approvalJson: '{"required":true}',
       resultJson: null,
       errorJson: null,
-      createTime: 1790467200,
-      updateTime: 1790467200,
+      createdAt: 1790467200,
+      updatedAt: 1790467200,
     })
 
     render(

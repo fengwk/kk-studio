@@ -23,7 +23,7 @@ export function projectThreadTree(nodes: readonly ActiveThreadTreeNode[]) {
       }
       continue
     }
-    timeValue(node.updateTime)
+    timeValue(node.updatedAt)
     nodesById.set(node.threadId, node)
   }
   const unique = [...nodesById.values()]
@@ -63,7 +63,7 @@ export function projectThreadTree(nodes: readonly ActiveThreadTreeNode[]) {
   }
   for (const siblings of children.values()) {
     siblings.sort((a, b) => Number(b.status !== 'IDLE') - Number(a.status !== 'IDLE')
-      || timeValue(b.updateTime) - timeValue(a.updateTime)
+      || timeValue(b.updatedAt) - timeValue(a.updatedAt)
       || a.threadId.localeCompare(b.threadId))
   }
   const visible = new Set<string>()
@@ -100,7 +100,7 @@ export function projectActiveThreadTree(nodes: readonly ActiveThreadTreeNode[]):
 
 function signature(node: ActiveThreadTreeNode): string {
   return JSON.stringify([
-    node.threadId, node.parentThreadId, node.updateTime, node.name, node.agentName,
+    node.threadId, node.parentThreadId, node.updatedAt, node.name, node.agentName,
     node.execution.driver, node.execution.settings,
     node.status, node.executionControl, node.turnCount, node.toolCallCount, node.outcome,
   ])
@@ -109,7 +109,7 @@ function signature(node: ActiveThreadTreeNode): string {
 function timeValue(value: number): number {
   // Jackson 的 Instant 数字是 epoch 毫秒；Number.isFinite 不做类型转换，未经校验的非数字直接拒绝。
   if (!Number.isFinite(value)) {
-    throw new Error('invalid thread updateTime')
+    throw new Error('invalid thread updatedAt')
   }
   return value
 }

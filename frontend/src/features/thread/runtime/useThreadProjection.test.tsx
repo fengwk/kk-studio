@@ -33,8 +33,8 @@ function createSnapshot(queuedCommands: HarnessThreadSnapshotDTO['queuedCommands
         environmentName: null,
         goal: null,
       },
-      createTime: 1774958400,
-      updateTime: 1774958400,
+      createdAt: 1774958400,
+      updatedAt: 1774958400,
     },
     baseEntryId: null,
     entries: [],
@@ -89,7 +89,7 @@ describe('useThreadProjection queuedCustomMessages derivation', () => {
             },
           }),
           cancelledAt: null,
-          createTime: 1774958410,
+          createdAt: 1774958410,
         },
         {
           threadId: THREAD_ID,
@@ -104,7 +104,7 @@ describe('useThreadProjection queuedCustomMessages derivation', () => {
             },
           }),
           cancelledAt: null,
-          createTime: 1774958420,
+          createdAt: 1774958420,
         },
       ]),
     )
@@ -141,7 +141,7 @@ describe('useThreadProjection queuedCustomMessages derivation', () => {
             },
           }),
           cancelledAt: null,
-          createTime: 1774958410,
+          createdAt: 1774958410,
         },
       ]),
     )
@@ -166,7 +166,7 @@ describe('useThreadProjection queuedCustomMessages derivation', () => {
             },
           }),
           cancelledAt: null,
-          createTime: 1774958410,
+          createdAt: 1774958410,
         },
       ]),
     )

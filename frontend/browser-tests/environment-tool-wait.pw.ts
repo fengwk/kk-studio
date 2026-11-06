@@ -31,7 +31,7 @@ for (const scenario of ['pane-root', 'pane-child']) {
       const path = new URL(route.request().url()).pathname
       if (route.request().method() !== 'GET') writes.push(path)
       let data: unknown = { results: [], totalCount: '0', pageNumber: 1, pageSize: 50 }
-      if (path === `/api/threads/${id}`) {
+      if (path === `/api/harness/threads/${id}`) {
         reads += 1
         data = {
           version: '1',
@@ -45,11 +45,11 @@ for (const scenario of ['pane-root', 'pane-child']) {
             branchSettings: { agentName: 'assistant',
               execution: { driver: 'builtin', settings: { modelName: 'VeryLongModelName', variant: 'default' } },
               environmentName: null, goal: null },
-            createTime: now, updateTime: now,
+            createdAt: now, updatedAt: now,
           },
           entries: [{
             entryId: 'assistant-wait', parentEntryId: null, sessionId: 'session-wait',
-            entryType: 'MESSAGE', createTime: now,
+            entryType: 'MESSAGE', createdAt: now,
             payloadJson: JSON.stringify({ message: { role: 'ASSISTANT', contents: [{
               type: 'tool_call', toolCallId: 'call-wait', toolName: 'bash', rendererKey: 'bash',
               argumentsJson: '{"command":"pwd","workdir":"/srv/frozen-workdir"}',
@@ -63,7 +63,7 @@ for (const scenario of ['pane-root', 'pane-child']) {
             environmentId: null, requiredEnvironmentId: 'frozen-env', requiredEnvironmentName: 'archlinux',
             waitingForEnvironment: waiting, environmentWaitFreshnessAt: freshnessAt,
             argumentsJson: '{"command":"pwd","workdir":"/srv/frozen-workdir"}',
-            approvalJson: null, resultJson: null, errorJson: null, createTime: now, updateTime: now,
+            approvalJson: null, resultJson: null, errorJson: null, createdAt: now, updatedAt: now,
           }],
         }
       } else if (path === '/api/interactions') {
@@ -74,7 +74,7 @@ for (const scenario of ['pane-root', 'pane-child']) {
           toolCallId: 'approval-call', toolName: 'bash',
           argumentsJson: '{"command":"deploy --dry-run","workdir":"/srv/approval-workdir"}',
           approvalJson: '{"required":true,"reason":"Permission rules require approval"}',
-          environmentId: null, environmentName: null, waitingCount: null, createTime: now,
+          environmentId: null, environmentName: null, waitingCount: null, createdAt: now,
         }], total: 1, nextCursor: null, freshnessAt: null }
       } else if (path.endsWith('/tree')) {
         data = [ROOT, CHILD].map((threadId) => ({
@@ -82,7 +82,7 @@ for (const scenario of ['pane-root', 'pane-child']) {
           name: threadId === ROOT ? '等待工具 Thread' : 'worker',
           agentName: 'assistant', model: { modelName: 'VeryLongModelName', variant: 'default' },
           status: 'IDLE', executionControl: 'RUNNABLE', turnCount: 1, toolCallCount: 1,
-          outcome: null, updateTime: now,
+          outcome: null, updatedAt: now,
         }))
       } else if (path === '/api/platform/agents') {
         data = []

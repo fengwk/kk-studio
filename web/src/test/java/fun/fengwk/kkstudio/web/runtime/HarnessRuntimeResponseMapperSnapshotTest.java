@@ -16,12 +16,15 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.common.json.StrictJson;
 import fun.fengwk.kkstudio.common.result.TextResultContent;
+import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.api.ManualCompactionAvailability;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
+import fun.fengwk.kkstudio.harness.api.command.ThreadCommandState;
 import fun.fengwk.kkstudio.harness.api.generation.FailureProjection;
 import fun.fengwk.kkstudio.harness.api.generation.GenerationProjection;
 import fun.fengwk.kkstudio.harness.api.generation.GenerationStatus;
 import fun.fengwk.kkstudio.harness.api.history.AssistantError;
+import fun.fengwk.kkstudio.harness.api.history.EntryType;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
@@ -34,14 +37,15 @@ import fun.fengwk.kkstudio.harness.codec.ToolApprovalJsonCodec;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec;
-import fun.fengwk.kkstudio.share.runtime.HarnessActiveAssistantOutputDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessAgentMessageContentDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessManualCompactionDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessSessionEntryDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessThreadCommandDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessThreadSnapshotDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessUsageCostDTO;
-import fun.fengwk.kkstudio.share.runtime.ToolInvocationDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessActiveAssistantOutputDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessAgentMessageContentDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessManualCompactionDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessSessionEntryDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadCommandDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadSnapshotDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessUsageCostDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.ToolInvocationDTO;
+import fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeResponseMapper;
 
 import java.util.List;
 import java.util.Map;
@@ -62,27 +66,43 @@ class HarnessRuntimeResponseMapperSnapshotTest {
         HarnessRuntimeResponseMapper.toEntryDto(
             HarnessRuntimeTestFixtures.userMessageEntry(), usageCost);
     assertNull(root.getParentEntryId());
-    assertEquals("ROOT", root.getEntryType());
+    assertEquals(EntryType.ROOT, root.getEntryType());
     assertNull(root.getUsageCost());
     assertEquals(idText(2), user.getParentEntryId());
-    assertEquals("MESSAGE", user.getEntryType());
+    assertEquals(EntryType.MESSAGE, user.getEntryType());
     assertEquals("USD", user.getUsageCost().getCurrency());
     assertEquals("0.010000000000", user.getUsageCost().getAmount());
 
     ThreadCommand queued = HarnessRuntimeTestFixtures.queuedUserMessageCommand();
     ThreadCommand applied = queued.markApplied(id(2));
     ThreadCommand cancelled = queued.cancel(id(90), NOW.plusSeconds(1));
-    HarnessThreadCommandDTO queuedDto = HarnessRuntimeResponseMapper.toCommandDto(queued);
-    HarnessThreadCommandDTO appliedDto = HarnessRuntimeResponseMapper.toCommandDto(applied);
-    HarnessThreadCommandDTO cancelledDto = HarnessRuntimeResponseMapper.toCommandDto(cancelled);
+    HarnessThreadCommandDTO queuedDto = acceptedCommand(queued);
+    HarnessThreadCommandDTO appliedDto = acceptedCommand(applied);
+    HarnessThreadCommandDTO cancelledDto = acceptedCommand(cancelled);
 
-    assertEquals("QUEUED", queuedDto.getState());
+    assertEquals(ThreadCommandState.QUEUED, queuedDto.getState());
     assertNull(queuedDto.getCancelledAt());
-    assertEquals("APPLIED", appliedDto.getState());
-    assertEquals("CANCELLED", cancelledDto.getState());
+    assertEquals(ThreadCommandState.APPLIED, appliedDto.getState());
+    assertEquals(ThreadCommandState.CANCELLED, cancelledDto.getState());
     assertEquals(NOW.plusSeconds(1), cancelledDto.getCancelledAt());
     assertEquals("4", queuedDto.getSequence());
-    assertEquals(NOW, queuedDto.getCreateTime());
+    assertEquals(NOW, queuedDto.getCreatedAt());
+  }
+
+  /** 重放回执可以包含已应用或取消的命令，而快照的 queuedCommands 只能包含排队命令。 */
+  private static HarnessThreadCommandDTO acceptedCommand(ThreadCommand command) {
+    AcceptedCommands accepted =
+        new AcceptedCommands(
+            HarnessRuntimeTestFixtures.session(),
+            HarnessRuntimeTestFixtures.rootEntry(),
+            HarnessRuntimeTestFixtures.thread(id(1)),
+            List.of(command),
+            true,
+            false);
+    return HarnessRuntimeResponseMapper.toAcceptedCommandsDto(
+            accepted, HarnessRuntimeTestFixtures.idleSnapshot())
+        .getAcceptedCommands()
+        .getFirst();
   }
 
   @Test
@@ -98,22 +118,24 @@ class HarnessRuntimeResponseMapperSnapshotTest {
             null,
             List.of());
     HarnessActiveAssistantOutputDTO runningDto =
-        HarnessRuntimeResponseMapper.toActiveAssistantOutputDto(running);
+        HarnessRuntimeResponseMapper.toSnapshotDto(modelSnapshot(running, List.of()), Map.of())
+            .getActiveAssistantOutput();
     assertEquals(idText(10), runningDto.getGenerationId());
     assertEquals(idText(2), runningDto.getTurnStartEntryId());
     assertEquals(idText(3), runningDto.getRequestHeadEntryId());
-    assertEquals("RUNNING", runningDto.getStatus());
+    assertEquals(GenerationStatus.RUNNING, runningDto.getStatus());
     assertEquals(1, runningDto.getAttempt());
     assertEquals("7", runningDto.getSequence());
     assertEquals(
-        List.of("text", "thinking"),
+        List.of(
+            HarnessAgentMessageContentDTO.Type.TEXT, HarnessAgentMessageContentDTO.Type.THINKING),
         runningDto.getContents().stream().map(HarnessAgentMessageContentDTO::getType).toList());
     assertEquals("partial", runningDto.getContents().get(0).getText());
     assertEquals("thinking", runningDto.getContents().get(1).getText());
     assertNull(runningDto.getError());
     assertNull(runningDto.getResultEntryId());
-    assertEquals(NOW, runningDto.getCreateTime());
-    assertEquals(NOW.plusSeconds(1), runningDto.getUpdateTime());
+    assertEquals(NOW, runningDto.getCreatedAt());
+    assertEquals(NOW.plusSeconds(1), runningDto.getUpdatedAt());
 
     GenerationProjection succeeded =
         generation(
@@ -125,8 +147,9 @@ class HarnessRuntimeResponseMapperSnapshotTest {
             id(4),
             List.of());
     HarnessActiveAssistantOutputDTO succeededDto =
-        HarnessRuntimeResponseMapper.toActiveAssistantOutputDto(succeeded);
-    assertEquals("SUCCEEDED", succeededDto.getStatus());
+        HarnessRuntimeResponseMapper.toSnapshotDto(modelSnapshot(succeeded, List.of()), Map.of())
+            .getActiveAssistantOutput();
+    assertEquals(GenerationStatus.SUCCEEDED, succeededDto.getStatus());
     assertEquals("8", succeededDto.getSequence());
     assertEquals("answer", succeededDto.getContents().getFirst().getText());
     assertEquals(idText(4), succeededDto.getResultEntryId());
@@ -136,8 +159,9 @@ class HarnessRuntimeResponseMapperSnapshotTest {
     GenerationProjection failed =
         generation(GenerationStatus.FAILED, 3, 9L, List.of(), error, null, List.of());
     HarnessActiveAssistantOutputDTO failedDto =
-        HarnessRuntimeResponseMapper.toActiveAssistantOutputDto(failed);
-    assertEquals("FAILED", failedDto.getStatus());
+        HarnessRuntimeResponseMapper.toSnapshotDto(modelSnapshot(failed, List.of()), Map.of())
+            .getActiveAssistantOutput();
+    assertEquals(GenerationStatus.FAILED, failedDto.getStatus());
     assertEquals("TRANSIENT", failedDto.getError().getCode());
     assertEquals("provider unavailable", failedDto.getError().getMessage());
     assertTrue(failedDto.getContents().isEmpty());
@@ -188,8 +212,8 @@ class HarnessRuntimeResponseMapperSnapshotTest {
     assertEquals(0, unboundDto.getCallIndex());
     assertEquals("call-1", unboundDto.getToolCallId());
     assertEquals("{\"x\":1}", unboundDto.getArgumentsJson());
-    assertEquals(NOW, unboundDto.getCreateTime());
-    assertEquals(NOW.plusSeconds(1), unboundDto.getUpdateTime());
+    assertEquals(NOW, unboundDto.getCreatedAt());
+    assertEquals(NOW.plusSeconds(1), unboundDto.getUpdatedAt());
   }
 
   @Test
@@ -220,14 +244,14 @@ class HarnessRuntimeResponseMapperSnapshotTest {
     assertEquals("3", dto.getVersion());
     assertEquals(3, dto.getEntries().size());
     assertEquals(
-        List.of("ROOT", "TURN_START", "MESSAGE"),
+        List.of(EntryType.ROOT, EntryType.TURN_START, EntryType.MESSAGE),
         dto.getEntries().stream().map(HarnessSessionEntryDTO::getEntryType).toList());
     // 读取时费用按 entry id 精确落位：只有被投影的 Entry 有值，其余显式缺席。
     assertEquals("0.010000000000", dto.getEntries().get(2).getUsageCost().getAmount());
     assertNull(dto.getEntries().get(0).getUsageCost());
     assertNull(dto.getEntries().get(1).getUsageCost());
     assertEquals(1, dto.getQueuedCommands().size());
-    assertEquals("RUNNING", dto.getActiveAssistantOutput().getStatus());
+    assertEquals(GenerationStatus.RUNNING, dto.getActiveAssistantOutput().getStatus());
     assertEquals("partial", dto.getActiveAssistantOutput().getContents().getFirst().getText());
     assertTrue(dto.getToolInvocations().isEmpty());
     assertEquals(1, dto.getGenerationFailures().size());
@@ -253,9 +277,10 @@ class HarnessRuntimeResponseMapperSnapshotTest {
     HarnessThreadSnapshotDTO dto = HarnessRuntimeResponseMapper.toSnapshotDto(snapshot, Map.of());
 
     assertEquals(4, dto.getEntries().size());
-    assertEquals("SUCCEEDED", dto.getActiveAssistantOutput().getStatus());
+    assertEquals(GenerationStatus.SUCCEEDED, dto.getActiveAssistantOutput().getStatus());
     assertEquals(1, dto.getToolInvocations().size());
-    assertEquals("WAITING_APPROVAL", dto.getToolInvocations().getFirst().getStatus());
+    assertEquals(
+        ToolInvocationStatus.WAITING_APPROVAL, dto.getToolInvocations().getFirst().getStatus());
     assertTrue(dto.getGenerationFailures().isEmpty());
     assertNull(dto.getBaseEntryId());
     HarnessManualCompactionDTO availability =

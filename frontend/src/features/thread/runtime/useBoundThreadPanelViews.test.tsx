@@ -48,12 +48,12 @@ function boundController(): BoundThreadPanelController {
       nextCommandSequence: '1', version: '1', status: 'RUNNING',
       executionControl: 'RUNNABLE', branchSettings: {
         agentName: 'agent', execution: createBuiltinExecution(DEBUG.model.modelName, DEBUG.model.variant), environmentName: null, goal: null,
-      }, createTime: 1790504400, updateTime: 1790504400,
+      }, createdAt: 1790504400, updatedAt: 1790504400,
     },
     activeAssistantOutput: {
       generationId: 'generation-1', turnStartEntryId: 'turn', requestHeadEntryId: 'head',
       status: 'READY', attempt: 1, sequence: '0', contents: [],
-      error: null, resultEntryId: null, createTime: 1790504400, updateTime: 1790504400,
+      error: null, resultEntryId: null, createdAt: 1790504400, updatedAt: 1790504400,
     },
   }
 }
@@ -96,6 +96,7 @@ it('renders on-demand preview, inspector and history actions and clears history 
   vi.mocked(harnessService.previewHistoricalRequest).mockResolvedValue({
     kind: 'HISTORICAL_REQUEST_PREVIEW', providerType: 'OPENAI', modelName: 'm',
     bodyByteSize: 2, bodyJson: '{"history":true}', sourceHeadEntryId: 'head', generatedAt: 1790504400,
+    notice: 'Preview is reconstructed from the current catalog, provider configuration and model selection against the recorded history before this output.',
   })
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const controller = boundController()

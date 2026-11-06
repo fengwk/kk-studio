@@ -29,6 +29,7 @@ import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgentIniti
 import fun.fengwk.kkstudio.platform.catalog.dto.AgentConfigDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.AgentCreateDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.AgentUpdateDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.HarnessExecutionSelectionDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelAbilitiesDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelConfigDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelGroupConfigDTO;
@@ -43,7 +44,6 @@ import fun.fengwk.kkstudio.platform.catalog.dto.ProviderUpdateDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.SingleModelCreateDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.SingleModelUpdateDTO;
 import fun.fengwk.kkstudio.platform.secret.SecretUpdate;
-import fun.fengwk.kkstudio.share.runtime.HarnessExecutionSelectionDTO;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
 import java.io.OutputStream;

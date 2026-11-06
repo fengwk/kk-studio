@@ -26,19 +26,6 @@ interface SnapshotRequest {
   nextCommandSequence: string
 }
 
-interface PreviewRequest {
-  kind: 'preview'
-  body: {
-    expectedHeadEntryId: string
-    expectedNextCommandSequence: string
-    commands: Array<{
-      type: string
-      contents?: Array<{ type: string; text?: string }>
-      execution?: { driver?: string; settings?: { modelName?: string; variant?: string | null } }
-    }>
-  }
-}
-
 /** 只读 Model Request Debug POST 的草稿选择，用于断言 POST 与界面当前选择严格同源。 */
 interface DebugRequest {
   kind: 'debug'
@@ -48,7 +35,7 @@ interface DebugRequest {
   }
 }
 
-type RecordedRequest = SnapshotRequest | PreviewRequest | DebugRequest
+type RecordedRequest = SnapshotRequest | DebugRequest
 
 function threadSnapshot(cursor: Cursor, entries: unknown[] = []) {
   return {
@@ -71,8 +58,8 @@ function threadSnapshot(cursor: Cursor, entries: unknown[] = []) {
           environmentName: 'dev-node',
           goal: null,
         },
-        createTime: 1790812800,
-        updateTime: 1790812800,
+        createdAt: 1790812800,
+        updatedAt: 1790812800,
       },
       baseEntryId: null,
       entries,
@@ -142,46 +129,15 @@ function modelRequestDebug(draft?: DebugRequest['body']) {
   }
 }
 
-/** 预览响应回显 POST target 的游标，让 inspector 渲染值与请求游标严格同源。 */
-function draftRequestPreview(target: Cursor, modelName = 'minimax-m2.7') {
-  return {
-      kind: 'DRAFT_REQUEST_PREVIEW',
-      providerType: 'openai-compatible',
-      modelName,
-      bodyByteSize: 2048,
-      bodyJson: JSON.stringify(
-        {
-          model: modelName,
-          messages: [{ role: 'user', content: DRAFT }],
-          sourceHeadEntryId: target.headEntryId,
-          nextCommandSequence: target.nextCommandSequence,
-        },
-        null,
-        2,
-      ),
-      sourceHeadEntryId: target.headEntryId,
-      generatedAt: '2026-10-02T00:01:00.000Z',
-      notice: 'Preview is a click-time reconstruction. A later send may observe different facts.',
-  }
-}
-
-interface PreviewFulfillment {
-  status?: number
-  json: unknown
-}
-
-
 /**
  * 安装后端 mock 并返回请求录制器。
  *
- * 快照 GET 永远返回 `options.cursor()` 当前游标；预览 POST 默认回显请求 target 的游标。
- * `onPreview` 用于接管预览响应（可控 gate / 错误分支）。
+ * 快照 GET 永远返回 `options.cursor()` 当前游标。
  */
 async function installPreviewApiMock(
   page: Page,
   options: {
     cursor: () => Cursor
-    onPreview?: (body: PreviewRequest['body']) => Promise<PreviewFulfillment>
     agentSelection?: boolean
     entries?: unknown[]
   },
@@ -199,22 +155,7 @@ async function installPreviewApiMock(
       const path = url.pathname
       const method = route.request().method()
 
-      if (path === `/api/threads/${THREAD_ID}/provider-request-preview` && method === 'POST') {
-        const body = route.request().postDataJSON() as PreviewRequest['body']
-        recorded.push({ kind: 'preview', body })
-        if (options.onPreview) {
-          await route.fulfill(await options.onPreview(body))
-          return
-        }
-        await route.fulfill({
-          json: draftRequestPreview({
-            headEntryId: body.expectedHeadEntryId,
-            nextCommandSequence: body.expectedNextCommandSequence,
-          }, (body.commands.find((command) => command.type === 'SET_EXECUTION')?.execution?.settings as { modelName?: string } | undefined)?.modelName),
-        })
-        return
-      }
-      if (path === `/api/threads/${THREAD_ID}/model-request-debug`) {
+      if (path === `/api/harness/builtin/threads/${THREAD_ID}/model-request-debug`) {
         // 只读调试预览是 POST-only：GET 等其它方法必须被拒绝，且每次 POST 的草稿选择都要录制。
         if (method !== 'POST') {
           await route.fulfill({
@@ -229,7 +170,7 @@ async function installPreviewApiMock(
         await route.fulfill({ json: modelRequestDebug(body) })
         return
       }
-      if (path === `/api/threads/${THREAD_ID}/tree`) {
+      if (path === `/api/harness/threads/${THREAD_ID}/tree`) {
         const thread = threadSnapshot(INITIAL_CURSOR).thread
         await route.fulfill({
           json: [{
@@ -243,12 +184,12 @@ async function installPreviewApiMock(
               turnCount: 0,
               toolCallCount: 0,
               outcome: null,
-              updateTime: 1774958400,
+              updatedAt: 1774958400,
             }],
         })
         return
       }
-      if (path === `/api/threads/${THREAD_ID}`) {
+      if (path === `/api/harness/threads/${THREAD_ID}`) {
         const cursor = options.cursor()
         recorded.push({ kind: 'snapshot', ...cursor })
         await route.fulfill({ json: threadSnapshot(cursor, options.entries ?? []) })
@@ -368,7 +309,7 @@ test('owner-free bound thread renders a NOTIFICATION entry as a system card', as
       sourceThreadId,
       message: { role: 'USER', contents: [{ type: 'text', text: receipt }] },
     }),
-    createTime: 1790812805,
+    createdAt: 1790812805,
   }
   const recorded = await installPreviewApiMock(page, { cursor: () => INITIAL_CURSOR, entries: [notificationEntry] })
   const writes: string[] = []

@@ -5,7 +5,6 @@ import lombok.Data;
 import org.jspecify.annotations.Nullable;
 
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentType;
-import fun.fengwk.kkstudio.share.runtime.HarnessExecutionSelectionDTO;
 
 import java.time.Instant;
 

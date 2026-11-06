@@ -54,7 +54,7 @@ function notificationEntry(
       sourceThreadId,
       message: { role: 'USER', contents: [{ type: 'text', text }] },
     }),
-    createTime: 1785232800,
+    createdAt: 1785232800,
     usageCost: null,
   }
 }

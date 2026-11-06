@@ -382,7 +382,7 @@ registerCase({
 })
 
 async function getThreadSnapshotFromNode(callNode, node, threadId) {
-  const { json } = await callNode(node, 'GET', `/api/threads/${encodeURIComponent(threadId)}`)
+  const { json } = await callNode(node, 'GET', `/api/harness/threads/${encodeURIComponent(threadId)}`)
   return json
 }
 

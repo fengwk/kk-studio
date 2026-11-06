@@ -10,7 +10,7 @@
  * <p>客户端帧（严格 JSON，字段集精确）：
  *
  * <pre>{@code
- * {"type":"subscribe","resource":{"kind":"thread"|"canvas"|"tree","id":"<canonical UUID>"}}
+ * {"type":"subscribe","resource":{"kind":"thread"|"canvas"|"thread-tree","id":"<canonical UUID>"}}
  * {"type":"subscribe","resource":{"kind":"projects"|"interactions"|"environments"}}
  * {"type":"unsubscribe","resource":{...}}
  * {"type":"ide-use","documentId":"<canonical UUID>","revision":"<positive decimal>","views":[{"environmentId":"<canonical UUID>","viewId":"<canonical UUID>","claimId":"<canonical UUID>","bindingEpoch":"<positive decimal>"}]}

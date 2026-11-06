@@ -1,10 +1,7 @@
-import { apiClient, type HttpClient } from '@/shared/api/client'
-import type {
-  HarnessCommandBatchDTO,
-  HarnessThreadCommandBatchDTO,
-} from '@/shared/api/contracts/ai-runtime'
+import { request } from '@/shared/api/client'
 import type {
   HarnessAcceptedCommandsDTO,
+  HarnessCommandBatchDTO,
   HarnessManualCompactionDTO,
   HarnessModelRequestDebugDTO,
   HarnessModelRequestDebugRequestDTO,
@@ -12,13 +9,13 @@ import type {
   HarnessProviderRequestPreviewDTO,
   HarnessSessionDTO,
   HarnessSessionEntryPageDTO,
+  HarnessThreadCommandBatchDTO,
   HarnessThreadCompactDTO,
   HarnessThreadCompactResultDTO,
   HarnessThreadDTO,
   HarnessThreadSnapshotDTO,
   HarnessThreadStopDTO,
   HarnessThreadStopResultDTO,
-  HarnessThreadStreamCatchupDTO,
   HarnessThreadSummaryDTO,
   HarnessThreadTreeNodeDTO,
   HarnessThreadYoloUpdateDTO,
@@ -26,25 +23,6 @@ import type {
   ToolInvocationDTO,
 } from '@/shared/api/generated/contracts'
 
-/**
- * Harness runtime 客户端调用统一收敛：
- * - POST /command-batches（NEW_SESSION / NEW_THREAD / NEW_FORKED_SESSION 创建）
- * - POST /threads/{id}/command-batches（既有 Thread 的通用写入口）
- * - GET /sessions/{id}/threads
- * - GET /sessions/{id}/entries
- * - PUT /sessions/{id}/name
- * - GET /threads/{id}（Thread snapshot 查询，支持 afterEntryId 游标增量）
- * - GET /threads/{id}/compaction-availability（Thread 手动压缩可用性查询）
- * - POST /threads/{id}/stream-catchup（RUNNING model attempt 的 best-effort 追帧）
- * - GET /threads/{id}/tree（真实 root 的父子 Agent 关系树）
- * - PUT /threads/{id}/name
- * - POST /threads/{id}/compact
- * - GET /threads/{id}/system-prompt
- * - PUT /threads/{id}/yolo
- * - POST /threads/{id}/stop
- * - POST /threads/{threadId}/executions/{executionId}/abandon
- * - PUT /threads/{threadId}/tool-invocations/{invocationId}/approval
- */
 interface GetThreadSnapshotOptions {
   afterEntryId?: string | null
   signal?: AbortSignal
@@ -60,142 +38,150 @@ interface GetCompactionAvailabilityOptions {
   signal?: AbortSignal
 }
 
-export function createHarnessService(client: HttpClient = apiClient) {
-  return {
-    acceptCommandBatch: (
-      data: HarnessCommandBatchDTO,
-    ): Promise<HarnessAcceptedCommandsDTO> =>
-      client.post('/command-batches', data),
+/** Harness runtime 的 UI 调用入口；路由、参数与响应类型全部来自生成契约。 */
+export const harnessService = {
+  acceptCommandBatch: (data: HarnessCommandBatchDTO): Promise<HarnessAcceptedCommandsDTO> =>
+    request('POST /api/harness/command-batches', { body: data }),
 
-    /**
-     * 既有 Thread 的通用命令写入口：服务端从 path 解析 Session 与 owner 之外的授权，
-     * 客户端只提交 CAS 游标与命令，不包含产品 owner。
-     */
-    acceptThreadCommandBatch: (
-      threadId: string,
-      data: HarnessThreadCommandBatchDTO,
-    ): Promise<HarnessAcceptedCommandsDTO> =>
-      client.post(
-        `/threads/${encodeURIComponent(threadId)}/command-batches`,
-        data,
-      ),
+  /**
+   * 既有 Thread 的通用命令写入口：服务端从 path 解析 Session 与 owner 之外的授权，
+   * 客户端只提交 CAS 游标与命令，不包含产品 owner。
+   */
+  acceptThreadCommandBatch: (
+    threadId: string,
+    data: HarnessThreadCommandBatchDTO,
+  ): Promise<HarnessAcceptedCommandsDTO> =>
+    request('POST /api/harness/threads/{threadId}/command-batches', {
+      path: { threadId },
+      body: data,
+    }),
 
-    listSessionThreads: (sessionId: string): Promise<HarnessThreadSummaryDTO[]> =>
-      client.get(`/sessions/${encodeURIComponent(sessionId)}/threads`),
+  listSessionThreads: (sessionId: string): Promise<HarnessThreadSummaryDTO[]> =>
+    request('GET /api/harness/sessions/{sessionId}/threads', {
+      path: { sessionId },
+    }),
 
-    /** 一页 Session Entry；`nextCursor` 原样回传即可继续翻页，null 表示末页。 */
-    listSessionEntries: (
-      sessionId: string,
-      options?: ListSessionEntriesOptions,
-    ): Promise<HarnessSessionEntryPageDTO> => {
-      const params: Record<string, unknown> = {}
-      if (options?.cursor != null) {
-        params.cursor = options.cursor
-      }
-      if (options?.limit != null) {
-        params.limit = options.limit
-      }
-      return client.get(`/sessions/${encodeURIComponent(sessionId)}/entries`, {
-        params,
-        signal: options?.signal,
-      })
-    },
+  /** 一页 Session Entry；`nextCursor` 原样回传即可继续翻页，null 表示末页。 */
+  listSessionEntries: (
+    sessionId: string,
+    options?: ListSessionEntriesOptions,
+  ): Promise<HarnessSessionEntryPageDTO> =>
+    request(
+      'GET /api/harness/sessions/{sessionId}/entries',
+      {
+        path: { sessionId },
+        query: {
+          ...(options?.cursor != null ? { cursor: options.cursor } : {}),
+          ...(options?.limit != null ? { limit: options.limit } : {}),
+        },
+      },
+      { signal: options?.signal },
+    ),
 
-    renameSession: (
-      sessionId: string,
-      data: HarnessNameUpdateDTO,
-    ): Promise<HarnessSessionDTO> =>
-      client.put(`/sessions/${encodeURIComponent(sessionId)}/name`, data),
+  renameSession: (sessionId: string, data: HarnessNameUpdateDTO): Promise<HarnessSessionDTO> =>
+    request('PUT /api/harness/sessions/{sessionId}/name', {
+      path: { sessionId },
+      body: data,
+    }),
 
-    getThreadSnapshot: (
-      threadId: string,
-      options?: GetThreadSnapshotOptions,
-    ): Promise<HarnessThreadSnapshotDTO> => {
-      const params = options?.afterEntryId ? { afterEntryId: options.afterEntryId } : undefined
-      return client.get(`/threads/${encodeURIComponent(threadId)}`, {
-        params,
-        signal: options?.signal,
-      })
-    },
+  getThreadSnapshot: (
+    threadId: string,
+    options?: GetThreadSnapshotOptions,
+  ): Promise<HarnessThreadSnapshotDTO> =>
+    request(
+      'GET /api/harness/threads/{threadId}',
+      {
+        path: { threadId },
+        query: options?.afterEntryId ? { afterEntryId: options.afterEntryId } : {},
+      },
+      { signal: options?.signal },
+    ),
 
-    getCompactionAvailability: (
-      threadId: string,
-      options?: GetCompactionAvailabilityOptions,
-    ): Promise<HarnessManualCompactionDTO> =>
-      client.get(
-        `/threads/${encodeURIComponent(threadId)}/compaction-availability`,
-        { signal: options?.signal },
-      ),
+  getCompactionAvailability: (
+    threadId: string,
+    options?: GetCompactionAvailabilityOptions,
+  ): Promise<HarnessManualCompactionDTO> =>
+    request(
+      'GET /api/harness/threads/{threadId}/compaction-availability',
+      { path: { threadId } },
+      { signal: options?.signal },
+    ),
 
-    /** 202 只表示 best-effort 请求被接受；客户端不得据此推断 owner 在线或 checkpoint 已推进。 */
-    requestStreamCatchup: (
-      threadId: string,
-      data: HarnessThreadStreamCatchupDTO,
-    ): Promise<void> =>
-      client.post(`/threads/${encodeURIComponent(threadId)}/stream-catchup`, data),
+  getThreadTree: (threadId: string): Promise<HarnessThreadTreeNodeDTO[]> =>
+    request('GET /api/harness/threads/{threadId}/tree', { path: { threadId } }),
 
-    getThreadTree: (threadId: string): Promise<HarnessThreadTreeNodeDTO[]> =>
-      client.get(`/threads/${encodeURIComponent(threadId)}/tree`),
+  renameThread: (threadId: string, data: HarnessNameUpdateDTO): Promise<HarnessThreadDTO> =>
+    request('PUT /api/harness/threads/{threadId}/name', {
+      path: { threadId },
+      body: data,
+    }),
 
-    renameThread: (threadId: string, data: HarnessNameUpdateDTO): Promise<HarnessThreadDTO> =>
-      client.put(`/threads/${encodeURIComponent(threadId)}/name`, data),
+  compactThread: (
+    threadId: string,
+    data: HarnessThreadCompactDTO,
+  ): Promise<HarnessThreadCompactResultDTO> =>
+    request('POST /api/harness/threads/{threadId}/compact', {
+      path: { threadId },
+      body: data,
+    }),
 
-    compactThread: (
-      threadId: string,
-      data: HarnessThreadCompactDTO,
-    ): Promise<HarnessThreadCompactResultDTO> =>
-      client.post(`/threads/${encodeURIComponent(threadId)}/compact`, data),
+  getModelRequestDebug: (
+    threadId: string,
+    data: HarnessModelRequestDebugRequestDTO,
+  ): Promise<HarnessModelRequestDebugDTO> =>
+    request('POST /api/harness/builtin/threads/{threadId}/model-request-debug', {
+      path: { threadId },
+      body: data,
+    }),
 
-    getModelRequestDebug: (
-      threadId: string,
-      data: HarnessModelRequestDebugRequestDTO,
-    ): Promise<HarnessModelRequestDebugDTO> =>
-      client.post(`/threads/${encodeURIComponent(threadId)}/model-request-debug`, data),
+  previewHistoricalRequest: (
+    sessionId: string,
+    entryId: string,
+  ): Promise<HarnessProviderRequestPreviewDTO> =>
+    request(
+      'GET /api/harness/builtin/sessions/{sessionId}/entries/{entryId}/provider-request',
+      { path: { sessionId, entryId } },
+    ),
 
-    previewHistoricalRequest: (
-      sessionId: string,
-      entryId: string,
-    ): Promise<HarnessProviderRequestPreviewDTO> =>
-      client.get(
-        `/sessions/${encodeURIComponent(sessionId)}/entries/${encodeURIComponent(entryId)}/provider-request-preview`,
-      ),
+  setThreadYolo: (
+    threadId: string,
+    data: HarnessThreadYoloUpdateDTO,
+  ): Promise<HarnessThreadDTO> =>
+    request('PUT /api/harness/threads/{threadId}/yolo', {
+      path: { threadId },
+      body: data,
+    }),
 
-    setThreadYolo: (
-      threadId: string,
-      data: HarnessThreadYoloUpdateDTO,
-    ): Promise<HarnessThreadDTO> =>
-      client.put(`/threads/${encodeURIComponent(threadId)}/yolo`, data),
+  stopThread: (
+    threadId: string,
+    data: HarnessThreadStopDTO,
+  ): Promise<HarnessThreadStopResultDTO> =>
+    request('POST /api/harness/threads/{threadId}/stop', {
+      path: { threadId },
+      body: data,
+    }),
 
-    stopThread: (
-      threadId: string,
-      data: HarnessThreadStopDTO,
-    ): Promise<HarnessThreadStopResultDTO> =>
-      client.post(`/threads/${encodeURIComponent(threadId)}/stop`, data),
+  /**
+   * 显式放弃等待一个未确认退出事实。服务端按 `(threadId, executionId, expectedVersion)`
+   * CAS；重复放弃或已真实确认的执行安全 replay，返回当前完整快照。
+   */
+  abandonExecution: (
+    threadId: string,
+    executionId: string,
+    data: { expectedVersion: string },
+  ): Promise<HarnessThreadSnapshotDTO> =>
+    request('POST /api/harness/threads/{threadId}/executions/{executionId}/abandon', {
+      path: { threadId, executionId },
+      body: data,
+    }),
 
-    /**
-     * 显式放弃等待一个未确认退出事实。服务端按 `(threadId, executionId, expectedVersion)`
-     * CAS；重复放弃或已真实确认的执行安全 replay，返回当前完整快照。
-     */
-    abandonExecution: (
-      threadId: string,
-      executionId: string,
-      data: { expectedVersion: string },
-    ): Promise<HarnessThreadSnapshotDTO> =>
-      client.post(
-        `/threads/${encodeURIComponent(threadId)}/executions/${encodeURIComponent(executionId)}/abandon`,
-        data,
-      ),
-
-    decideApproval: (
-      threadId: string,
-      toolInvocationId: string,
-      data: HarnessToolApprovalDTO,
-    ): Promise<ToolInvocationDTO> =>
-      client.put(
-        `/threads/${encodeURIComponent(threadId)}/tool-invocations/${encodeURIComponent(toolInvocationId)}/approval`,
-        data,
-      ),
-  }
+  decideApproval: (
+    threadId: string,
+    toolInvocationId: string,
+    data: HarnessToolApprovalDTO,
+  ): Promise<ToolInvocationDTO> =>
+    request('PUT /api/harness/threads/{threadId}/tool-invocations/{toolInvocationId}/approval', {
+      path: { threadId, toolInvocationId },
+      body: data,
+    }),
 }
-
-export const harnessService = createHarnessService()

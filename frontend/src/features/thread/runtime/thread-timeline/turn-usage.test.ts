@@ -36,7 +36,7 @@ function assistantEntry(
       message: { role: 'ASSISTANT', contents: [{ type: 'text', text: 'ok' }] },
       ...(norm != null ? { assistantMetadata: { usage: norm } } : {}),
     }),
-    createTime: 1785232800,
+    createdAt: 1785232800,
     usageCost: usageCost ?? null,
   }
 }
@@ -48,7 +48,7 @@ function otherEntry(entryId: string, entryType: HarnessSessionEntryDTO['entryTyp
     parentEntryId: null,
     entryType,
     payloadJson: JSON.stringify({ reason: 'USER_MESSAGE' }),
-    createTime: 1785232740,
+    createdAt: 1785232740,
     usageCost: null,
   }
 }
@@ -69,7 +69,7 @@ function compactionEntry(
       summaryText: 'summarized',
       assistantMetadata: norm == null ? null : { stopReason: 'COMPLETE', usage: norm },
     }),
-    createTime: 1785232800,
+    createdAt: 1785232800,
     usageCost: usageCost ?? null,
   }
 }
@@ -218,7 +218,7 @@ describe('aggregateEntryUsage', () => {
         payloadJson: JSON.stringify({
           message: { role: 'ASSISTANT', contents: [{ type: 'text', text: '人工消息' }] },
         }),
-        createTime: 1785232800,
+        createdAt: 1785232800,
         usageCost: null,
       },
       otherEntry('end-1', 'TURN_END'),
@@ -239,7 +239,7 @@ describe('aggregateEntryUsage', () => {
         payloadJson: JSON.stringify({
           message: { role: 'ASSISTANT', contents: [{ type: 'text', text: '人工消息' }] },
         }),
-        createTime: 1785232810,
+        createdAt: 1785232810,
         usageCost: null,
       },
       otherEntry('end-1', 'TURN_END'),
@@ -267,7 +267,7 @@ describe('aggregateEntryUsage', () => {
         message: { role: 'ASSISTANT', contents: [{ type: 'text', text: '模型调用输出' }] },
         assistantMetadata: {}, // 显式空 metadata 不是人工消息
       }),
-      createTime: 1785232850,
+      createdAt: 1785232850,
       usageCost: { currency: 'USD', amount: '0.02' },
     }
 
@@ -321,7 +321,7 @@ describe('aggregateEntryUsage', () => {
           usage: { inputTokens: 50, outputTokens: 20, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: null },
         },
       }),
-      createTime: 1785232800,
+      createdAt: 1785232800,
       usageCost: { currency: 'USD', amount: '0.005' },
     }
     const e2 = assistantEntry('e2', {

@@ -465,8 +465,8 @@ describe('thread timeline edge branches', () => {
       approvalJson: null,
       resultJson: null,
       errorJson: null,
-      createTime: 1767225600,
-      updateTime: 1767225600,
+      createdAt: 1767225600,
+      updatedAt: 1767225600,
     }
     const timeline = buildThreadTimeline(
       [
@@ -899,7 +899,7 @@ function entry(entryId: string, entryType: EntryType, payload: Record<string, un
     parentEntryId: null,
     entryType,
     payloadJson: JSON.stringify(payload),
-    createTime: 1767225600,
+    createdAt: 1767225600,
     usageCost: null,
   }
 }
@@ -919,7 +919,7 @@ function command(
     idempotencyKey: `cid-${label}`,
     payloadJson: JSON.stringify(payload),
     cancelledAt: null,
-    createTime: 1767225600,
+    createdAt: 1767225600,
   }
 }
 
@@ -947,7 +947,7 @@ describe('Turn usage after TURN_END', () => {
     entryId: string,
     entryType: EntryType,
     payload: Record<string, unknown>,
-    createTime = 1785232800,
+    createdAt = 1785232800,
   ): HarnessSessionEntryDTO {
     return {
       entryId,
@@ -955,7 +955,7 @@ describe('Turn usage after TURN_END', () => {
       parentEntryId: null,
       entryType,
       payloadJson: JSON.stringify(payload),
-      createTime,
+      createdAt,
       usageCost: null,
     }
   }

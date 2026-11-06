@@ -229,7 +229,7 @@ describe('InteractionsPage', () => {
       turnStartEntryId: 'turn-1',
       assistantEntryId: 'entry-2',
       callIndex: 0,
-      status: 'PENDING',
+      status: 'READY',
       attempt: 1,
       toolCallId: 'call-2',
       toolName: 'write',
@@ -243,8 +243,8 @@ describe('InteractionsPage', () => {
       approvalJson: '{"decision":"ALLOWED"}',
       resultJson: null,
       errorJson: null,
-      createTime: 1790503500,
-      updateTime: 1790503560,
+      createdAt: 1790503500,
+      updatedAt: 1790503560,
     })
     fireEvent.click(screen.getByRole('button', { name: '允许' }))
     await waitFor(() => expect(screen.queryByText('write')).not.toBeInTheDocument())

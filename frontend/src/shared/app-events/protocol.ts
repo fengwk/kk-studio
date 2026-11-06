@@ -2,7 +2,7 @@
  * 应用事件 WebSocket 协议（/api/events）。
  *
  * client -> server（JSON 文本）：
- * - {"type":"subscribe","resource":{"kind":"thread"|"canvas"|"tree","id":"<UUID>"}}
+ * - {"type":"subscribe","resource":{"kind":"thread"|"canvas"|"thread-tree","id":"<UUID>"}}
  * - {"type":"subscribe","resource":{"kind":"projects"|"interactions"|"environments"}}
  * - {"type":"unsubscribe","resource":{...}}
  * - {"type":"ide-use","documentId":"<UUID>","revision":"<positive decimal>",
@@ -20,7 +20,7 @@
  *     绝不携带 cursor。
  *   - canvas revision：data {"revision":"N"}，cursor 必带且与 data.revision 完全相等。
  *   - projects changed：data {"projectId":"<UUID>"}，只提示回读 Project Snapshot，不带 cursor。
- *   - tree changed：resource 带真实执行根 id，data 恒为 {}，只提示回读该根的执行树，不带 cursor。
+ *   - thread-tree changed：resource 带真实执行根 id，data 恒为 {}，只提示回读该根的执行树，不带 cursor。
  *   - interactions changed：data {"rootThreadId":"<UUID>"}，只提示回读待处理交互与全局角标，不带 cursor。
  *   - environments changed：data 恒为 {}，只提示回读环境列表，不带 cursor。
  * - {"type":"resync","resource":{...}}：需要整体替换为全量快照。
@@ -32,9 +32,9 @@
  * resource 精确只有 kind+id 且 id 必须是 canonical UUID（小写十六进制）；
  * 全局 projects/interactions/environments resource 不带 id；
  * resource/name 组合必须合法（thread 仅 version|realtime，canvas 仅 revision，
- * projects|interactions|environments 仅 changed，tree 仅 changed）；cursor 与
+ * projects|interactions|environments 仅 changed，thread-tree 仅 changed）；cursor 与
  * version data 必须是 canonical 非负十进制字符串，durable 事件的 cursor 必须
- * 存在且与 data 值完全相等，提示型资源（projects/tree/interactions/environments）
+ * 存在且与 data 值完全相等，提示型资源（projects/thread-tree/interactions/environments）
  * 的 ack cursor 恒为 '0' 且事件绝不携带 cursor；realtime data 必须是非数组 JSON
  * 对象且不得携带 cursor。connected 的两个身份、revision 与 bindingEpoch 都是
  * canonical UUID / 正十进制字符串（不超过 9223372036854775807）。畸形消息永远不会
@@ -44,7 +44,7 @@
 export type ApplicationEventResourceKind =
   | 'thread'
   | 'canvas'
-  | 'tree'
+  | 'thread-tree'
   | 'projects'
   | 'interactions'
   | 'environments'
@@ -52,7 +52,7 @@ export type ApplicationEventResourceKind =
 export type ApplicationEventResource =
   | { kind: 'thread'; id: string }
   | { kind: 'canvas'; id: string }
-  | { kind: 'tree'; id: string }
+  | { kind: 'thread-tree'; id: string }
   | { kind: 'projects' }
   | { kind: 'interactions' }
   | { kind: 'environments' }
@@ -129,10 +129,10 @@ type ApplicationEventProjectChangedEvent = {
   data: { projectId: string }
 }
 
-/** tree 的提示型 changed 事件：根 id 已在 resource 上，data 恒为空对象且绝不携带 cursor。 */
+/** thread-tree 的提示型 changed 事件：根 id 已在 resource 上，data 恒为空对象且绝不携带 cursor。 */
 type ApplicationEventTreeChangedEvent = {
   type: 'event'
-  resource: ApplicationEventResource & { kind: 'tree' }
+  resource: ApplicationEventResource & { kind: 'thread-tree' }
   name: 'changed'
   data: Record<string, never>
 }
@@ -297,7 +297,7 @@ export function decodeServerMessage(raw: string): ApplicationEventServerMessage 
         }
         return { type: 'event', resource, name: 'changed', data: { projectId } }
       }
-      if (resource.kind === 'tree' && parsed.name === 'changed') {
+      if (resource.kind === 'thread-tree' && parsed.name === 'changed') {
         // 提示型事件只提示回读：data 恒为空对象且绝不携带 cursor。
         if (!hasExactFields(parsed.data, []) || parsed.cursor !== undefined) {
           return null
@@ -376,7 +376,7 @@ function parseResource(value: unknown): ApplicationEventResource | null {
     return hasExactFields(value, ['kind']) ? { kind: value.kind } : null
   }
   if (
-    (value.kind !== 'thread' && value.kind !== 'canvas' && value.kind !== 'tree')
+    (value.kind !== 'thread' && value.kind !== 'canvas' && value.kind !== 'thread-tree')
     || !hasExactFields(value, ['kind', 'id'])
     || typeof value.id !== 'string'
     || !CANONICAL_UUID.test(value.id)
@@ -389,7 +389,7 @@ function parseResource(value: unknown): ApplicationEventResource | null {
 /** 提示型资源没有持久游标：ack 恒为 '0'，事件绝不携带 cursor。 */
 function isHintResourceKind(kind: ApplicationEventResourceKind): boolean {
   return (
-    kind === 'projects' || kind === 'tree' || kind === 'interactions' || kind === 'environments'
+    kind === 'projects' || kind === 'thread-tree' || kind === 'interactions' || kind === 'environments'
   )
 }
 

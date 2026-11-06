@@ -5,6 +5,7 @@ import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useBoundBranchPanel } from '@/features/thread/runtime/useBoundBranchPanel'
 import { useThreadProjection, type ThreadProjection } from '@/features/thread/runtime/useThreadProjection'
+import type { ThreadCommandType, ThreadExecutionControl } from '@/shared/api/generated/contracts'
 import type { ComposerPart } from '@/features/thread/composer/composer-parts'
 
 function useTestBoundBranchPanel({
@@ -110,8 +111,8 @@ function threadFixture(
     status: 'IDLE',
     executionControl: 'RUNNABLE',
     branchSettings: branchSettings(),
-    createTime: 1767225600,
-    updateTime: 1767312000,
+    createdAt: 1767225600,
+    updatedAt: 1767312000,
     ...rest,
   }
 }
@@ -138,7 +139,7 @@ function snapshotOf(
 
 function queuedSettingCommand(
   sequence: string,
-  type: string,
+  type: ThreadCommandType,
   payload: Record<string, unknown>,
 ): HarnessThreadCommandDTO {
   return {
@@ -149,7 +150,7 @@ function queuedSettingCommand(
     idempotencyKey: `queued-${sequence}`,
     payloadJson: JSON.stringify(payload),
     cancelledAt: null,
-    createTime: 0,
+    createdAt: 0,
   }
 }
 
@@ -188,7 +189,7 @@ function acceptedSettingCommand(
     idempotencyKey: command.idempotencyKey,
     payloadJson: JSON.stringify(acceptedCommandPayload(command)),
     cancelledAt: null,
-    createTime: 0,
+    createdAt: 0,
   }
 }
 
@@ -204,7 +205,7 @@ function acceptedResponse(
       parentEntryId: null,
       entryType: 'ROOT',
       payloadJson: '{}',
-      createTime: 0,
+      createdAt: 0,
       usageCost: null,
     },
     thread,
@@ -1175,7 +1176,7 @@ describe('useBoundBranchPanel', () => {
       vi.mocked(agentService.listAgents).mockResolvedValue(agents)
       vi.mocked(agentService.listModels).mockResolvedValue([modelEntry, claudeModelEntry])
       vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
-        snapshotOf(threadFixture(THREAD_ID, { status: 'IDLE', executionControl })),
+        snapshotOf(threadFixture(THREAD_ID, { status: 'IDLE', executionControl: executionControl as ThreadExecutionControl })),
       )
       vi.mocked(harnessService.acceptThreadCommandBatch).mockResolvedValue(
         acceptedResponse(threadFixture(THREAD_ID), []),

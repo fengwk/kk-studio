@@ -30,7 +30,7 @@ registerCase({
   id: 'i18n.error_response_accept_language',
   level: 'L1',
   title: 'HTTP 错误响应按 Accept-Language 返回英文或中文',
-  docs: 'Domain error 与 ResponseStatusException 保持 status/code/detail，仅本地化 title；不支持语言回退英文',
+  docs: 'Domain error 与类型化参数校验保持 problem status/code/detail，仅本地化 title；不支持语言回退英文',
   async run(ctx) {
     const unknownChatPath = '/api/chats/00000000-0000-0000-0000-000000000999'
     const englishDomain = problemBody(await localizedGet(ctx, unknownChatPath, 'en-US', 404))
@@ -65,17 +65,23 @@ registerCase({
       JSON.stringify(fallbackValidation),
     )
 
-    // Controller-originated ResponseStatusException 保持 HTTP 状态与稳定 code，仅本地化 title。
-    const responseStatusPath = '/api/threads/not-a-number'
+    // 类型化 UUID 参数经 Spring 转换失败，由 Domain advice 归一为 validation。
+    const responseStatusPath = '/api/harness/threads/not-a-number'
     const englishHttp = problemBody(await localizedGet(ctx, responseStatusPath, 'en-US'))
     const chineseHttp = problemBody(await localizedGet(ctx, responseStatusPath, 'zh-CN'))
     const fallbackHttp = problemBody(await localizedGet(ctx, responseStatusPath, 'fr-FR'))
     assert(englishHttp.code === 'validation', JSON.stringify(englishHttp))
-    assert(englishHttp.title === 'The request is invalid.', JSON.stringify(englishHttp))
-    assert(chineseHttp.code === 'validation', JSON.stringify(chineseHttp))
-    assert(chineseHttp.title === '请求无效。', JSON.stringify(chineseHttp))
     assert(
-      chineseHttp.detail === 'threadId must be a canonical UUID: not-a-number',
+      englishHttp.title === 'The threadId parameter has an invalid value.',
+      JSON.stringify(englishHttp),
+    )
+    assert(chineseHttp.code === 'validation', JSON.stringify(chineseHttp))
+    assert(
+      chineseHttp.title === 'threadId 参数的值无效。',
+      JSON.stringify(chineseHttp),
+    )
+    assert(
+      chineseHttp.detail === 'threadId has an invalid value',
       JSON.stringify(chineseHttp),
     )
     assert(fallbackHttp.code === englishHttp.code, JSON.stringify(fallbackHttp))

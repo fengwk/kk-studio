@@ -298,7 +298,7 @@ function event(
     title,
     text,
     subjectEntryId: entry.entryId,
-    createdAt: entry.createTime,
+    createdAt: entry.createdAt,
     status: 'done',
   }
 }

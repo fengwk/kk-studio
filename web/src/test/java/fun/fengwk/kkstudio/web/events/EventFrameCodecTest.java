@@ -66,7 +66,17 @@ class EventFrameCodecTest {
     assertEquals(
         new EventFrameCodec.SubscriptionFrame(EventFrameCodec.SubscriptionType.SUBSCRIBE, TREE_KEY),
         CODEC.decode(
-            "{\"type\":\"subscribe\",\"resource\":{\"kind\":\"tree\",\"id\":\"" + THREAD + "\"}}"));
+            "{\"type\":\"subscribe\",\"resource\":{\"kind\":\"thread-tree\",\"id\":\""
+                + THREAD
+                + "\"}}"));
+    // 旧 kind 不再是 wire 协议的一部分。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            CODEC.decode(
+                "{\"type\":\"subscribe\",\"resource\":{\"kind\":\"tree\",\"id\":\""
+                    + THREAD
+                    + "\"}}"));
     assertEquals(
         new EventFrameCodec.SubscriptionFrame(
             EventFrameCodec.SubscriptionType.SUBSCRIBE, INTERACTIONS_KEY),
@@ -186,7 +196,7 @@ class EventFrameCodecTest {
         IllegalArgumentException.class,
         () -> CODEC.decode(prefix + "{\"kind\":\"environments\",\"id\":\"" + THREAD + "\"}}"));
     assertThrows(
-        IllegalArgumentException.class, () -> CODEC.decode(prefix + "{\"kind\":\"tree\"}}"));
+        IllegalArgumentException.class, () -> CODEC.decode(prefix + "{\"kind\":\"thread-tree\"}}"));
     assertThrows(
         IllegalArgumentException.class, () -> CODEC.decode(prefix + "{\"kind\":\"thread\"}}"));
     assertThrows(IllegalArgumentException.class, () -> CODEC.decode(prefix + "\"nope\"}"));
@@ -227,7 +237,7 @@ class EventFrameCodecTest {
         "{\"type\":\"subscribed\",\"resource\":{\"kind\":\"projects\"},\"cursor\":\"0\"}",
         CODEC.subscribed(PROJECTS_KEY, 0L));
     assertEquals(
-        "{\"type\":\"subscribed\",\"resource\":{\"kind\":\"tree\",\"id\":\""
+        "{\"type\":\"subscribed\",\"resource\":{\"kind\":\"thread-tree\",\"id\":\""
             + THREAD
             + "\"},\"cursor\":\"0\"}",
         CODEC.subscribed(TREE_KEY, 0L));
@@ -282,7 +292,7 @@ class EventFrameCodecTest {
 
     // 提示型资源：执行树/Environment 的 data 为空对象（标识只在 resource），交互携带真实执行根。
     assertEquals(
-        "{\"type\":\"event\",\"resource\":{\"kind\":\"tree\",\"id\":\""
+        "{\"type\":\"event\",\"resource\":{\"kind\":\"thread-tree\",\"id\":\""
             + THREAD
             + "\"},\"name\":\"changed\",\"data\":{}}",
         CODEC.event(TREE_KEY, new Signal.TreeChanged()));

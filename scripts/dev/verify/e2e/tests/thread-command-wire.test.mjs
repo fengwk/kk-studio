@@ -4,9 +4,7 @@ import test from 'node:test'
 import {
   acceptCommandBatch,
   chatOwner,
-  DRAFT_PREVIEW_NOTICE,
   newThreadTarget,
-  previewProviderRequest,
   stopThread,
   stopThreadForCleanup,
   threadTarget,
@@ -67,7 +65,7 @@ test('THREAD continuation routes to the owner-free thread command-batches endpoi
   assert.equal(calls.length, 1)
   const [method, url, body] = calls[0]
   assert.equal(method, 'POST')
-  assert.equal(url, `/api/threads/${threadId}/command-batches`)
+  assert.equal(url, `/api/harness/threads/${threadId}/command-batches`)
   assert.deepEqual(Object.keys(body).sort(), [
     'commands',
     'expectedHeadEntryId',
@@ -97,7 +95,7 @@ test('pure THREAD message omits both cursor fields from the owner-free wire body
   })
 
   const [, url, body] = calls[0]
-  assert.equal(url, `/api/threads/${threadId}/command-batches`)
+  assert.equal(url, `/api/harness/threads/${threadId}/command-batches`)
   assert.deepEqual(Object.keys(body).sort(), ['commands'])
   assert.deepEqual(body.commands, [command])
 })
@@ -111,7 +109,7 @@ test('cursor-bound THREAD batch without cursor is not silently completed by the 
   ]
   const ctx = {
     async call(method, url, body) {
-      assert.equal(url, `/api/threads/${threadId}/command-batches`)
+      assert.equal(url, `/api/harness/threads/${threadId}/command-batches`)
       assert.deepEqual(Object.keys(body).sort(), ['commands'])
       throw new HttpError(400, JSON.stringify({ type: 'about:blank', title: 'Invalid request', status: 400, code: 'validation', detail: 'cursor required' }), url)
     },
@@ -137,7 +135,7 @@ test('THREAD continuation surfaces the public rejection of NOTIFICATION commands
   }
   const ctx = {
     async call(method, url, body) {
-      assert.equal(url, `/api/threads/${threadId}/command-batches`)
+      assert.equal(url, `/api/harness/threads/${threadId}/command-batches`)
       assert.equal(body.commands[0].type, 'NOTIFICATION')
       throw new HttpError(400, JSON.stringify({ type: 'about:blank', title: 'Invalid request', status: 400, code: 'validation', detail: 'NOTIFICATION is internal-only' }), url)
     },
@@ -154,76 +152,6 @@ test('THREAD continuation surfaces the public rejection of NOTIFICATION commands
       }),
     (error) => error instanceof HttpError && error.status === 400,
   )
-})
-
-const previewDto = (overrides = {}) => ({
-  kind: 'DRAFT_REQUEST_PREVIEW',
-  generatedAt: 1_700_000_000,
-  providerType: 'openai',
-  modelName: 'fixture-model',
-  bodyByteSize: Buffer.byteLength('{"model":"fixture"}', 'utf8'),
-  bodyJson: '{"model":"fixture"}',
-  sourceHeadEntryId: cid(),
-  notice: DRAFT_PREVIEW_NOTICE,
-  ...overrides,
-})
-
-test('previewProviderRequest posts the owner-free cursor body and validates the preview DTO', async () => {
-  // 测试意图：发送前预览与续写面共用 owner-free body，响应必须是精确 8 字段的 DRAFT_REQUEST_PREVIEW。
-  const threadId = cid()
-  const headEntryId = cid()
-  const command = userMessageCommand('preview', cid())
-  const calls = []
-  const ctx = {
-    async call(...args) {
-      calls.push(args)
-      return { status: 200, json: previewDto() }
-    },
-  }
-  const preview = await previewProviderRequest(ctx, threadId, {
-    expectedHeadEntryId: headEntryId,
-    expectedNextCommandSequence: '1',
-    commands: [command],
-  })
-  assert.equal(preview.kind, 'DRAFT_REQUEST_PREVIEW')
-
-  const [method, url, body] = calls[0]
-  assert.equal(method, 'POST')
-  assert.equal(url, `/api/threads/${threadId}/provider-request-preview`)
-  assert.deepEqual(Object.keys(body).sort(), [
-    'commands',
-    'expectedHeadEntryId',
-    'expectedNextCommandSequence',
-  ])
-  assert.equal(Object.hasOwn(body, 'owner'), false)
-  assert.equal(Object.hasOwn(body, 'target'), false)
-})
-
-test('preview wire rejects a non-preview shape instead of guessing notice/kind', async () => {
-  // 测试意图：非契约字段（如 snapshotNotice）或非预览形状（以及缺字段/多字段/错 kind）都不是预览契约，
-  // helper 必须直接拒绝，而不是继续接受一个无法证明「按当前 catalog 重建」的响应。
-  const { notice: _omitted, ...withoutNotice } = previewDto()
-  const cases = [
-    withoutNotice,
-    { ...withoutNotice, snapshotNotice: 'click-time snapshot' },
-    previewDto({ kind: 'HISTORICAL_REQUEST_PREVIEW' }),
-  ]
-  for (const malformed of cases) {
-    const ctx = {
-      async call() {
-        return { status: 200, json: malformed }
-      },
-    }
-    await assert.rejects(
-      () =>
-        previewProviderRequest(ctx, cid(), {
-          expectedHeadEntryId: cid(),
-          expectedNextCommandSequence: '1',
-          commands: [userMessageCommand('preview', cid())],
-        }),
-      /preview/,
-    )
-  }
 })
 
 test('NEW_THREAD target requires an explicit normalized threadName', () => {
@@ -321,7 +249,7 @@ test('cleanup does not repeat an accepted stop while the Thread remains RUNNING'
       return { json: snapshot }
     },
   }, threadId)
-  assert.deepEqual(calls, [['GET', `/api/threads/${threadId}`]])
+  assert.deepEqual(calls, [['GET', `/api/harness/threads/${threadId}`]])
   assert.equal(snapshot.thread.status, 'RUNNING')
 })
 
@@ -345,7 +273,7 @@ test('stopThread validates per-thread receipts', async () => {
   const stopCtx = {
     async call() {
       return {
-        status: 200,
+        status: 202,
         json: {
           status: 'STOPPED',
           thread: threadDto(threadId, {
@@ -374,7 +302,7 @@ test('stopThread validates per-thread receipts', async () => {
   ]) {
     await assert.rejects(() =>
       stopThread(
-        { call: async () => ({ status: 200, json: malformed }) },
+        { call: async () => ({ status: 202, json: malformed }) },
         threadId,
         { stopRequestId, expectedVersion: '1' },
       ),

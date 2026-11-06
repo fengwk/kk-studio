@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.web;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -15,12 +15,12 @@ import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.chat.dto.ChatDTO;
 import fun.fengwk.kkstudio.harness.model.ModelPricingCondition;
+import fun.fengwk.kkstudio.platform.catalog.dto.HarnessExecutionSelectionDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelConfigDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelVariantDTO;
 import fun.fengwk.kkstudio.platform.catalog.model.ModelRuntimeConfigParser;
-import fun.fengwk.kkstudio.share.runtime.HarnessBranchSettingsDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessCommandCreateDTO;
-import fun.fengwk.kkstudio.share.runtime.HarnessExecutionSelectionDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessBranchSettingsDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessCommandCreateDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsNetworkDTO;
 
 import java.time.Instant;
@@ -135,16 +135,6 @@ class StrictJacksonConfigurationTest {
               mapper
                   .readValue(expectedWithEnvironment, HarnessBranchSettingsDTO.class)
                   .getEnvironmentName());
-
-          assertThrows(
-              JacksonException.class,
-              () ->
-                  mapper.readValue(
-                      "{\"unknownField\":\"value\",\"agentName\":\"code-assistant\","
-                          + "\"model\":{\"modelName\":"
-                          + "\"claude-3-5-sonnet\",\"variant\":\"default\"},"
-                          + "\"environmentName\":null}",
-                      HarnessBranchSettingsDTO.class));
         });
   }
 
@@ -168,9 +158,9 @@ class StrictJacksonConfigurationTest {
         });
   }
 
-  /** 测试意图：SET_ENVIRONMENT 命令的显式 null 必须在 wire 上保留，且请求字段出现性可被精确判定。 */
+  /** SET_ENVIRONMENT 的显式 null 必须反序列化为明确 variant，并在序列化时保留 null 字段。 */
   @Test
-  void shouldPreserveExplicitNullEnvironmentNameOnCommandDto() {
+  void shouldPreserveExplicitNullEnvironmentNameOnCommandUnion() {
     runner.run(
         context -> {
           JsonMapper mapper = context.getBean(JsonMapper.class);
@@ -178,26 +168,28 @@ class StrictJacksonConfigurationTest {
           String cleared =
               "{\"type\":\"SET_ENVIRONMENT\",\"idempotencyKey\":\"id-1\",\"environmentName\":null}";
           HarnessCommandCreateDTO dto = mapper.readValue(cleared, HarnessCommandCreateDTO.class);
-          assertTrue(dto.hasEnvironmentNameField());
-          assertNull(dto.getEnvironmentName());
+          HarnessCommandCreateDTO.SetEnvironmentDTO environment =
+              assertInstanceOf(HarnessCommandCreateDTO.SetEnvironmentDTO.class, dto);
+          assertNull(environment.environmentName());
 
           String selected =
               "{\"type\":\"SET_ENVIRONMENT\",\"idempotencyKey\":\"id-1\","
                   + "\"environmentName\":\"local\"}";
           HarnessCommandCreateDTO withName =
               mapper.readValue(selected, HarnessCommandCreateDTO.class);
-          assertTrue(withName.hasEnvironmentNameField());
-          assertEquals("local", withName.getEnvironmentName());
+          assertEquals(
+              "local",
+              assertInstanceOf(HarnessCommandCreateDTO.SetEnvironmentDTO.class, withName)
+                  .environmentName());
 
           HarnessCommandCreateDTO absent =
               mapper.readValue(
                   "{\"type\":\"SET_AGENT\",\"idempotencyKey\":\"id-1\",\"agentName\":\"a\"}",
                   HarnessCommandCreateDTO.class);
-          assertFalse(absent.hasEnvironmentNameField());
-          // 序列化仍按声明顺序输出 text；SET_ENVIRONMENT 的请求形态不允许携带它，因此只断言输出形态。
+          assertInstanceOf(HarnessCommandCreateDTO.SetAgentDTO.class, absent);
           assertEquals(
               "{\"type\":\"SET_ENVIRONMENT\",\"idempotencyKey\":\"id-1\","
-                  + "\"environmentName\":null,\"text\":null}",
+                  + "\"environmentName\":null}",
               mapper.writeValueAsString(dto));
         });
   }

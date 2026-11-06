@@ -145,8 +145,8 @@ function thread(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
       environmentName: null,
       goal: null,
     },
-    createTime: 0,
-    updateTime: 0,
+    createdAt: 0,
+    updatedAt: 0,
     ...overrides,
   }
 }
@@ -174,7 +174,7 @@ function acceptedResponse(currentThread = thread()): HarnessAcceptedCommandsDTO 
     parentEntryId: null,
     entryType: 'ROOT',
     payloadJson: '{}',
-    createTime: 0,
+    createdAt: 0,
     usageCost: null,
   }
   return {
@@ -674,7 +674,7 @@ describe('ChatWorkspacePage 新建分支路由', () => {
     parentEntryId: null,
     entryType: 'ROOT',
     payloadJson: '{}',
-    createTime: 0,
+    createdAt: 0,
     usageCost: null,
   }
   const TURN_END_ENTRY: HarnessSessionEntryDTO = {
@@ -683,7 +683,7 @@ describe('ChatWorkspacePage 新建分支路由', () => {
     parentEntryId: 'entry-1',
     entryType: 'TURN_END',
     payloadJson: JSON.stringify({ outcome: 'COMPLETED' }),
-    createTime: 0,
+    createdAt: 0,
     usageCost: null,
   }
   const MESSAGE_ENTRY: HarnessSessionEntryDTO = {
@@ -694,7 +694,7 @@ describe('ChatWorkspacePage 新建分支路由', () => {
     payloadJson: JSON.stringify({
       message: { role: 'USER', contents: [{ type: 'text', text: 'hello' }] },
     }),
-    createTime: 0,
+    createdAt: 0,
     usageCost: null,
   }
 
@@ -846,7 +846,7 @@ describe('ChatWorkspacePage 新建分支路由', () => {
     const user = userEvent.setup()
     const summary = {
       threadId: 'subagent', parentThreadId: null as string | null, name: 'duplicate',
-      createdAt: 0, updatedAt: 0, status: 'IDLE', executionControl: 'RUNNABLE',
+      createdAt: 0, updatedAt: 0, status: 'IDLE' as const, executionControl: 'RUNNABLE' as const,
       execution: { driver: 'builtin', settings: { modelName: 'MiniMax', variant: 'default' } }, headMessagePreview: null,
     }
     vi.mocked(harnessService.listSessionThreads).mockResolvedValue([summary])
@@ -1025,7 +1025,7 @@ describe('ChatWorkspacePage 新建分支路由', () => {
     if (scenario === 'root' || scenario === 'subagent') {
       vi.mocked(harnessService.listSessionThreads).mockResolvedValue([{
         threadId: 'existing', parentThreadId: scenario === 'root' ? null : 'parent', name: 'duplicate',
-        createdAt: 0, updatedAt: 0, status: 'IDLE', executionControl: 'RUNNABLE',
+        createdAt: 0, updatedAt: 0, status: 'IDLE' as const, executionControl: 'RUNNABLE' as const,
         execution: thread().branchSettings.execution, headMessagePreview: null,
       }])
     }

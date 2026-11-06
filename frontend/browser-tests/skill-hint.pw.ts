@@ -117,11 +117,11 @@ async function installSkillHintApi(
   })
   await page.route((url) => new URL(url).pathname.startsWith('/api/'), async (route: Route) => {
     const path = new URL(route.request().url()).pathname
-    if (path === `/api/threads/${ROOT_ID}`) {
+    if (path === `/api/harness/threads/${ROOT_ID}`) {
       await route.fulfill({ json: snapshot(state.environmentName) })
       return
     }
-    if (path === `/api/threads/${ROOT_ID}/tree`) {
+    if (path === `/api/harness/threads/${ROOT_ID}/tree`) {
       // 执行树必须包含被绑定的执行根，否则面板按非法树报错；根自身不出活跃行。
       await route.fulfill({
         json: [{
