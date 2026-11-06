@@ -92,19 +92,19 @@ class StudioInteractionControllerTest {
     mockMvc
         .perform(get("/api/interactions"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.items[0].interactionId").value(idText(1)))
-        .andExpect(jsonPath("$.data.items[0].status").value("WAITING_INPUT"))
-        .andExpect(jsonPath("$.data.items[0].threadId").value(idText(2)))
-        .andExpect(jsonPath("$.data.items[0].sessionId").value(idText(3)))
-        .andExpect(jsonPath("$.data.items[0].rootThreadId").value(idText(5)))
-        .andExpect(jsonPath("$.data.items[0].owner.kind").value("CHAT"))
-        .andExpect(jsonPath("$.data.items[0].owner.id").value(idText(4)))
-        .andExpect(jsonPath("$.data.items[0].owner.title").hasJsonPath())
-        .andExpect(jsonPath("$.data.items[0].owner.link").hasJsonPath())
-        .andExpect(jsonPath("$.data.items[0].toolCallId").value("call-1"))
-        .andExpect(jsonPath("$.data.items[0].toolName").value("ask_user"))
-        .andExpect(jsonPath("$.data.items[0].argumentsJson").value("{\"questions\":[]}"))
-        .andExpect(jsonPath("$.data.nextCursor").value("1000:" + idText(1)));
+        .andExpect(jsonPath("$.items[0].interactionId").value(idText(1)))
+        .andExpect(jsonPath("$.items[0].status").value("WAITING_INPUT"))
+        .andExpect(jsonPath("$.items[0].threadId").value(idText(2)))
+        .andExpect(jsonPath("$.items[0].sessionId").value(idText(3)))
+        .andExpect(jsonPath("$.items[0].rootThreadId").value(idText(5)))
+        .andExpect(jsonPath("$.items[0].owner.kind").value("CHAT"))
+        .andExpect(jsonPath("$.items[0].owner.id").value(idText(4)))
+        .andExpect(jsonPath("$.items[0].owner.title").hasJsonPath())
+        .andExpect(jsonPath("$.items[0].owner.link").hasJsonPath())
+        .andExpect(jsonPath("$.items[0].toolCallId").value("call-1"))
+        .andExpect(jsonPath("$.items[0].toolName").value("ask_user"))
+        .andExpect(jsonPath("$.items[0].argumentsJson").value("{\"questions\":[]}"))
+        .andExpect(jsonPath("$.nextCursor").value("1000:" + idText(1)));
 
     verify(interactionQueryService).listInteractions(null, null, 50);
   }
@@ -122,7 +122,7 @@ class StudioInteractionControllerTest {
     mockMvc
         .perform(get("/api/interactions").param("cursor", cursor).param("limit", "20"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.items").isEmpty());
+        .andExpect(jsonPath("$.items").isEmpty());
 
     verify(interactionQueryService).listInteractions(null, cursor, 20);
   }
@@ -141,7 +141,7 @@ class StudioInteractionControllerTest {
     verify(interactionQueryService).listInteractions(id(7), null, 50);
   }
 
-  /** 测试意图：迁移后的根线程不存在仍通过旧错误信封返回 404 和原始 detail。 */
+  /** 测试意图：根线程不存在时返回 404 problem 和原始安全 detail。 */
   @Test
   void listInteractionsReportsMissingRootAsNotFound() throws Exception {
     when(interactionQueryService.listInteractions(id(7), null, 50))
@@ -150,8 +150,8 @@ class StudioInteractionControllerTest {
     mockMvc
         .perform(get("/api/interactions").param("rootThreadId", idText(7)))
         .andExpect(status().isNotFound())
-        .andExpect(jsonPath("$.code").value("NOT_FOUND"))
-        .andExpect(jsonPath("$.errors.detail").value("thread missing"));
+        .andExpect(jsonPath("$.code").value("not_found"))
+        .andExpect(jsonPath("$.detail").value("thread missing"));
   }
 
   /** 测试意图：非 canonical 的 rootThreadId 在触达查询服务前以 400 拒绝。 */
@@ -239,11 +239,11 @@ class StudioInteractionControllerTest {
                 .content(body)
                 .principal(() -> "  alice  "))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.threadId").value(threadId.toString()))
-        .andExpect(jsonPath("$.data.interactionId").value(invocationId.toString()))
-        .andExpect(jsonPath("$.data.submissionId").value(submissionId.toString()))
-        .andExpect(jsonPath("$.data.actor").value("alice"))
-        .andExpect(jsonPath("$.data.materialized").value(false));
+        .andExpect(jsonPath("$.threadId").value(threadId.toString()))
+        .andExpect(jsonPath("$.interactionId").value(invocationId.toString()))
+        .andExpect(jsonPath("$.submissionId").value(submissionId.toString()))
+        .andExpect(jsonPath("$.actor").value("alice"))
+        .andExpect(jsonPath("$.materialized").value(false));
 
     ArgumentCaptor<ToolInputSubmissionCommand> captor =
         ArgumentCaptor.forClass(ToolInputSubmissionCommand.class);
@@ -292,11 +292,11 @@ class StudioInteractionControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.threadId").value(threadId.toString()))
-        .andExpect(jsonPath("$.data.interactionId").value(invocationId.toString()))
-        .andExpect(jsonPath("$.data.submissionId").value(submissionId.toString()))
-        .andExpect(jsonPath("$.data.actor").value("local-user"))
-        .andExpect(jsonPath("$.data.materialized").value(true));
+        .andExpect(jsonPath("$.threadId").value(threadId.toString()))
+        .andExpect(jsonPath("$.interactionId").value(invocationId.toString()))
+        .andExpect(jsonPath("$.submissionId").value(submissionId.toString()))
+        .andExpect(jsonPath("$.actor").value("local-user"))
+        .andExpect(jsonPath("$.materialized").value(true));
 
     ArgumentCaptor<ToolInputSubmissionCommand> captor =
         ArgumentCaptor.forClass(ToolInputSubmissionCommand.class);
