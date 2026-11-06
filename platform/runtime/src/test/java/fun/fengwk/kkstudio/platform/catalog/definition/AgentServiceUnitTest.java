@@ -133,7 +133,7 @@ class AgentServiceUnitTest {
     when(resolver.requireAgentAndSubagentsForUpdate("agent", List.of())).thenReturn(current);
     when(repository.updateByName(any(), eq(0L))).thenReturn(true);
     when(repository.getByName("agent")).thenReturn(current);
-    AgentUpdateDTO update = update("0");
+    AgentUpdateDTO update = update(0L);
     update.setDescription("updated");
     update.setExecution(execution("vendor/other model", "quality"));
     service.updateAgent("agent", update);
@@ -252,7 +252,7 @@ class AgentServiceUnitTest {
     when(resolver.requireAgentAndSubagentsForUpdate("agent", List.of())).thenReturn(current);
     when(repository.updateByName(any(), eq(0L))).thenReturn(true);
     when(repository.getByName("agent")).thenReturn(current);
-    AgentUpdateDTO update = update("0");
+    AgentUpdateDTO update = update(0L);
     update.getConfig().setSkills(List.of(skillRef));
     service.updateAgent("agent", update);
     verify(resolver, times(2)).requireReferencedLifecycles(List.of(skillRef), List.of());
@@ -284,28 +284,26 @@ class AgentServiceUnitTest {
     when(resolver.requireAgentAndSubagentsForUpdate("agent", List.of())).thenReturn(current);
     when(repository.updateByName(any(), eq(0L))).thenReturn(false);
     when(repository.getByName("agent")).thenReturn(null);
-    assertThrows(DomainException.class, () -> service.updateAgent("agent", update("0")));
+    assertThrows(DomainException.class, () -> service.updateAgent("agent", update(0L)));
     when(repository.getByName("agent")).thenReturn(current.toBuilder().version(7L).build());
-    assertThrows(DomainException.class, () -> service.updateAgent("agent", update("0")));
+    assertThrows(DomainException.class, () -> service.updateAgent("agent", update(0L)));
     doThrow(foreignKey).when(repository).updateByName(any(), eq(0L));
     assertSame(
         foreignKey,
         assertThrows(
-            DataIntegrityViolationException.class,
-            () -> service.updateAgent("agent", update("0"))));
+            DataIntegrityViolationException.class, () -> service.updateAgent("agent", update(0L))));
     doThrow(nonForeignKey).when(repository).updateByName(any(), eq(0L));
     assertSame(
         nonForeignKey,
         assertThrows(
-            DataIntegrityViolationException.class,
-            () -> service.updateAgent("agent", update("0"))));
+            DataIntegrityViolationException.class, () -> service.updateAgent("agent", update(0L))));
   }
 
   /** 版本过期在模型校验与改写之前确定性拒绝。 */
   @Test
   void staleVersionWinsOverModelValidation() {
     when(resolver.requireAgent("agent")).thenReturn(definition().toBuilder().version(1L).build());
-    assertThrows(DomainException.class, () -> service.updateAgent("agent", update("0")));
+    assertThrows(DomainException.class, () -> service.updateAgent("agent", update(0L)));
     verify(modelRepository, never()).getByNameForUpdate(any());
     verify(repository, never()).updateByName(any(), anyLong());
   }
@@ -317,13 +315,13 @@ class AgentServiceUnitTest {
     when(resolver.requireAgentForUpdate("agent")).thenReturn(current);
     when(repository.deleteByName("agent", 3L)).thenReturn(false);
     when(repository.getByName("agent")).thenReturn(null);
-    assertThrows(DomainException.class, () -> service.deleteAgent("agent", "3"));
+    assertThrows(DomainException.class, () -> service.deleteAgent("agent", 3L));
     when(repository.getByName("agent")).thenReturn(current.toBuilder().version(7L).build());
-    assertThrows(DomainException.class, () -> service.deleteAgent("agent", "3"));
+    assertThrows(DomainException.class, () -> service.deleteAgent("agent", 3L));
 
     when(repository.deleteByName("agent", 3L)).thenReturn(true);
-    service.deleteAgent("agent", "3");
-    assertThrows(DomainException.class, () -> service.deleteAgent("agent", "0"));
+    service.deleteAgent("agent", 3L);
+    assertThrows(DomainException.class, () -> service.deleteAgent("agent", 0L));
     verify(repository, never()).deleteByName("agent", 0L);
   }
 
@@ -333,12 +331,12 @@ class AgentServiceUnitTest {
     when(resolver.requireAgentForUpdate("agent")).thenReturn(definition());
     when(pluginAgentDependencies.pluginsDeclaringAgent("agent")).thenReturn(Set.of("acme.plugin"));
     DomainException plugin =
-        assertThrows(DomainException.class, () -> service.deleteAgent("agent", "0"));
+        assertThrows(DomainException.class, () -> service.deleteAgent("agent", 0L));
     assertTrue(plugin.getMessage().contains("referenced by plugin configuration"));
 
     when(otherProductReference.isReferenced("agent")).thenReturn(true);
     DomainException product =
-        assertThrows(DomainException.class, () -> service.deleteAgent("agent", "0"));
+        assertThrows(DomainException.class, () -> service.deleteAgent("agent", 0L));
     assertTrue(product.getMessage().contains("referenced by a product"));
     verify(productReference, atLeastOnce()).isReferenced("agent");
     verify(otherProductReference, atLeastOnce()).isReferenced("agent");
@@ -354,14 +352,14 @@ class AgentServiceUnitTest {
 
     Agent builtin = definition().toBuilder().type(AgentType.BUILTIN).execution(null).build();
     when(resolver.requireAgentForUpdate("agent")).thenReturn(builtin);
-    assertThrows(DomainException.class, () -> service.deleteAgent("agent", "0"));
+    assertThrows(DomainException.class, () -> service.deleteAgent("agent", 0L));
     verify(repository, never()).deleteByName(any(), anyLong());
 
     when(resolver.requireAgent("agent")).thenReturn(builtin);
     when(resolver.requireAgentAndSubagentsForUpdate("agent", List.of())).thenReturn(builtin);
     when(repository.updateByName(any(), eq(0L))).thenReturn(true);
     when(repository.getByName("agent")).thenReturn(builtin);
-    AgentUpdateDTO unconfigured = update("0");
+    AgentUpdateDTO unconfigured = update(0L);
     unconfigured.setExecution(null);
     AgentDTO dto = service.updateAgent("agent", unconfigured);
     assertNull(dto.getExecution());
@@ -378,7 +376,7 @@ class AgentServiceUnitTest {
   @Test
   void userAgentUpdateRequiresModel() {
     when(resolver.requireAgent("agent")).thenReturn(definition());
-    AgentUpdateDTO update = update("0");
+    AgentUpdateDTO update = update(0L);
     update.setExecution(null);
     assertThrows(DomainException.class, () -> service.updateAgent("agent", update));
     verify(modelRepository, never()).getByNameForUpdate(any());
@@ -391,7 +389,7 @@ class AgentServiceUnitTest {
     AgentDTO dto = service.toDto(definition());
     assertEquals("agent", dto.getName());
     assertEquals(execution("model", null), dto.getExecution());
-    assertEquals("0", dto.getVersion());
+    assertEquals(0L, dto.getVersion());
     assertNull(service.toDto(definition().toBuilder().execution(null).build()).getExecution());
   }
 
@@ -492,7 +490,7 @@ class AgentServiceUnitTest {
     return create;
   }
 
-  private static AgentUpdateDTO update(String version) {
+  private static AgentUpdateDTO update(long version) {
     AgentUpdateDTO update = new AgentUpdateDTO();
     update.setExecution(execution("model", null));
     update.setConfig(emptyConfig());

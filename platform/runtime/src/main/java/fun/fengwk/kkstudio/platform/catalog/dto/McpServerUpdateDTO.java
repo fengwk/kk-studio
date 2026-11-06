@@ -13,8 +13,8 @@ import fun.fengwk.kkstudio.platform.secret.SecretUpdate;
 @Data
 public class McpServerUpdateDTO {
 
-  /** 必填非负十进制字符串；必须与当前 Server 版本一致。 */
-  private String expectedVersion;
+  /** 必填非负版本号；必须与当前 Server 版本一致。 */
+  private Long expectedVersion;
 
   /** 必填 Streamable HTTP endpoint URL。 */
   private String url;

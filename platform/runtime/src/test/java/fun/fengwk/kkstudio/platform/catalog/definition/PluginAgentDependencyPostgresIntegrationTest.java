@@ -294,7 +294,7 @@ class PluginAgentDependencyPostgresIntegrationTest {
                             definitionRepository.getByNameForUpdate(DECLARED_AGENT);
                             deleteLockHeld.countDown();
                             awaitLatchQuietly(releaseDelete);
-                            definitionService.deleteAgent(DECLARED_AGENT, "0");
+                            definitionService.deleteAgent(DECLARED_AGENT, 0L);
                             return null;
                           }));
       awaitLatch(deleteLockHeld, "the delete must hold the Agent row lock before the save starts");
@@ -396,7 +396,7 @@ class PluginAgentDependencyPostgresIntegrationTest {
     new TransactionTemplate(transactionManager)
         .execute(
             status -> {
-              definitionService.deleteAgent(name, String.valueOf(expectedVersion));
+              definitionService.deleteAgent(name, expectedVersion);
               return null;
             });
   }

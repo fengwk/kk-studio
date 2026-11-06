@@ -18,7 +18,7 @@ public class ProviderRepository {
 
   private static final String COLUMNS =
       "name, description, provider_type, base_url, credential, config, connection_generation_id, version, "
-          + "created_at as create_time, updated_at as update_time";
+          + "created_at, updated_at";
 
   private static final RowMapper<Provider> ROW_MAPPER =
       (rs, rowNum) ->
@@ -31,8 +31,8 @@ public class ProviderRepository {
               rs.getString("config"),
               rs.getObject("connection_generation_id", UUID.class),
               rs.getLong("version"),
-              PostgresJdbcTypes.toInstant(rs.getObject("create_time", OffsetDateTime.class)),
-              PostgresJdbcTypes.toInstant(rs.getObject("update_time", OffsetDateTime.class)));
+              PostgresJdbcTypes.toInstant(rs.getObject("created_at", OffsetDateTime.class)),
+              PostgresJdbcTypes.toInstant(rs.getObject("updated_at", OffsetDateTime.class)));
 
   private final JdbcClient jdbcClient;
 

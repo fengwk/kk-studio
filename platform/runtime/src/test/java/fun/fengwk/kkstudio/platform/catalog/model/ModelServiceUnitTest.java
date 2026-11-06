@@ -119,7 +119,7 @@ class ModelServiceUnitTest {
     rates.setCacheWriteByTtl(Map.of("300", new BigDecimal("3")));
     rates.setReasoning(new BigDecimal("4"));
     config.getPricing().setBase(rates);
-    SingleModelUpdateDTO update = update("model", "0");
+    SingleModelUpdateDTO update = update("model", 0L);
     update.setDescription("updated");
     update.setConfig(config);
 
@@ -161,19 +161,19 @@ class ModelServiceUnitTest {
     when(repository.getByName("new-name"))
         .thenReturn(existing.toBuilder().name("new-name").version(1L).build());
 
-    service.updateModel("old-name", update("new-name", "0"));
+    service.updateModel("old-name", update("new-name", 0L));
     ArgumentCaptor<Model> captor = ArgumentCaptor.forClass(Model.class);
     verify(repository).rename(eq("old-name"), captor.capture(), eq(0L));
     assertEquals("new-name", captor.getValue().name());
 
     for (String invalid : List.of("   ", " padded-name ", "n".repeat(129))) {
       assertThrows(
-          DomainException.class, () -> service.updateModel("old-name", update(invalid, "0")));
+          DomainException.class, () -> service.updateModel("old-name", update(invalid, 0L)));
     }
     ModelGroupUpdateDTO toGroup = new ModelGroupUpdateDTO();
     toGroup.setName("old-name");
     toGroup.setGroup(group(member("member", "default")));
-    toGroup.setExpectedVersion("0");
+    toGroup.setExpectedVersion(0L);
     DomainException error =
         assertThrows(DomainException.class, () -> service.updateModel("old-name", toGroup));
     assertEquals("model type cannot be changed", error.getMessage());
@@ -201,7 +201,7 @@ class ModelServiceUnitTest {
 
     DomainException error =
         assertThrows(
-            DomainException.class, () -> service.updateModel("model", update("model", "0")));
+            DomainException.class, () -> service.updateModel("model", update("model", 0L)));
     assertEquals("model variant is still referenced: model variant=fast", error.getMessage());
     verify(repository, never()).updateByName(any(), anyLong());
   }
@@ -228,24 +228,24 @@ class ModelServiceUnitTest {
     when(repository.getByNameForUpdate("model")).thenReturn(model);
     when(repository.updateByName(any(), eq(0L))).thenReturn(false);
     when(repository.getByName("model")).thenReturn(null);
-    assertThrows(DomainException.class, () -> service.updateModel("model", update("model", "0")));
+    assertThrows(DomainException.class, () -> service.updateModel("model", update("model", 0L)));
     Model reread = existing("model", 3L);
     when(repository.getByName("model")).thenReturn(reread);
-    assertThrows(DomainException.class, () -> service.updateModel("model", update("model", "0")));
+    assertThrows(DomainException.class, () -> service.updateModel("model", update("model", 0L)));
     when(repository.updateByName(any(), eq(0L))).thenThrow(new DuplicateKeyException("dup"));
-    assertThrows(DomainException.class, () -> service.updateModel("model", update("model", "0")));
+    assertThrows(DomainException.class, () -> service.updateModel("model", update("model", 0L)));
     doThrow(new DuplicateKeyException("dup")).when(repository).rename(eq("model"), any(), eq(0L));
     assertThrows(
-        DomainException.class, () -> service.updateModel("model", update("renamed-model", "0")));
+        DomainException.class, () -> service.updateModel("model", update("renamed-model", 0L)));
 
     when(repository.deleteByName(eq("model"), anyLong())).thenReturn(false);
     when(repository.getByName("model")).thenReturn(null);
-    assertThrows(DomainException.class, () -> service.deleteModel("model", "0"));
+    assertThrows(DomainException.class, () -> service.deleteModel("model", 0L));
     when(repository.getByName("model")).thenReturn(reread);
-    assertThrows(DomainException.class, () -> service.deleteModel("model", "0"));
+    assertThrows(DomainException.class, () -> service.deleteModel("model", 0L));
     verify(repository, atLeastOnce()).getByNameForUpdate("model");
     when(repository.getByNameForUpdate("ghost")).thenReturn(null);
-    assertThrows(DomainException.class, () -> service.deleteModel("ghost", "0"));
+    assertThrows(DomainException.class, () -> service.deleteModel("ghost", 0L));
   }
 
   /** 版本过期优先于删除引用检查；仍被 Agent 或模型组引用的模型拒绝删除。 */
@@ -254,15 +254,15 @@ class ModelServiceUnitTest {
     when(repository.getByNameForUpdate("model")).thenReturn(existing("model", 1L));
     when(repository.hasAgents("model")).thenReturn(true);
 
-    assertThrows(DomainException.class, () -> service.updateModel("model", update("model", "0")));
+    assertThrows(DomainException.class, () -> service.updateModel("model", update("model", 0L)));
     verify(repository, never()).updateByName(any(), anyLong());
-    assertThrows(DomainException.class, () -> service.deleteModel("model", "0"));
+    assertThrows(DomainException.class, () -> service.deleteModel("model", 0L));
     verify(repository, never()).hasAgents("model");
 
-    assertThrows(DomainException.class, () -> service.deleteModel("model", "1"));
+    assertThrows(DomainException.class, () -> service.deleteModel("model", 1L));
     when(repository.hasAgents("model")).thenReturn(false);
     when(repository.hasGroupsReferencing("model")).thenReturn(true);
-    assertThrows(DomainException.class, () -> service.deleteModel("model", "1"));
+    assertThrows(DomainException.class, () -> service.deleteModel("model", 1L));
     verify(repository, never()).deleteByName(any(), anyLong());
   }
 
@@ -368,7 +368,7 @@ class ModelServiceUnitTest {
     return create;
   }
 
-  private static SingleModelUpdateDTO update(String name, String expectedVersion) {
+  private static SingleModelUpdateDTO update(String name, long expectedVersion) {
     SingleModelUpdateDTO update = new SingleModelUpdateDTO();
     update.setName(name);
     update.setProviderName("provider");

@@ -256,7 +256,7 @@ class ConfigSyncApplierTest {
         new SystemSettingsCodec().toSections(SystemSettingsTestFixture.DEFAULT);
     sections.getNetwork().setProxyUrl("http://127.0.0.1:9");
     sections.getNetwork().setNoProxyHosts("localhost,127.0.0.1");
-    ConfigSyncPlan.SettingsUpdate update = new ConfigSyncPlan.SettingsUpdate(sections, "9");
+    ConfigSyncPlan.SettingsUpdate update = new ConfigSyncPlan.SettingsUpdate(sections, 9L);
 
     applier.apply(
         plan(List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), update), List.of());
@@ -575,7 +575,7 @@ class ConfigSyncApplierTest {
 
     ArgumentCaptor<ModelUpdateDTO> captor = ArgumentCaptor.forClass(ModelUpdateDTO.class);
     verify(modelService).updateModel(eq("m"), captor.capture());
-    assertEquals("4", captor.getValue().getExpectedVersion());
+    assertEquals(4L, captor.getValue().getExpectedVersion());
     verify(modelService, never()).createModel(any());
   }
 
@@ -597,6 +597,6 @@ class ConfigSyncApplierTest {
     verify(definitionService, never()).createAgent(any());
     ArgumentCaptor<AgentUpdateDTO> captor = ArgumentCaptor.forClass(AgentUpdateDTO.class);
     verify(definitionService).updateAgent(eq("a"), captor.capture());
-    assertEquals("7", captor.getValue().getExpectedVersion());
+    assertEquals(7L, captor.getValue().getExpectedVersion());
   }
 }

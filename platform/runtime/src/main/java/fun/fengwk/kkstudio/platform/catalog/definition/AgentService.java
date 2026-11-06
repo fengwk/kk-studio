@@ -17,7 +17,6 @@ import fun.fengwk.kkstudio.platform.catalog.dto.AgentEditablePropertiesDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.AgentUpdateDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.HarnessExecutionSelectionDTO;
 import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
-import fun.fengwk.kkstudio.platform.error.CatalogVersions;
 import fun.fengwk.kkstudio.platform.pluginhost.service.PluginAgentDependencies;
 
 import java.util.List;
@@ -98,13 +97,12 @@ public class AgentService {
 
   @Transactional
   public AgentDTO updateAgent(String name, AgentUpdateDTO updateDTO) {
-    String rawExpected = updateDTO == null ? null : updateDTO.getExpectedVersion();
-    if (rawExpected == null) {
+    Long expected = updateDTO == null ? null : updateDTO.getExpectedVersion();
+    if (expected == null) {
       throw DomainException.validation(RESOURCE, "expectedVersion is required");
     }
-    long expected = CatalogVersions.parse(rawExpected, "expectedVersion");
     Agent current = referenceResolver.requireAgent(name);
-    ensureExpectedVersion(current, rawExpected, expected);
+    ensureExpectedVersion(current, expected);
     // 内置 Agent 允许显式未配置 execution。
     boolean executionRequired = current.type() != AgentType.BUILTIN;
     Agent definition =
@@ -114,27 +112,26 @@ public class AgentService {
     validateConfig(config);
     referenceResolver.requireReferencedLifecycles(config.getSkills(), config.getTools());
     Agent locked = referenceResolver.requireAgentAndSubagentsForUpdate(name, config.getSubagents());
-    ensureExpectedVersion(locked, rawExpected, expected);
+    ensureExpectedVersion(locked, expected);
     if (!repository.updateByName(definition, expected)) {
       Agent reread = repository.getByName(name);
       if (reread == null) {
         throw DomainException.notFound(RESOURCE);
       }
       throw DomainException.versionConflict(
-          RESOURCE, rawExpected, CatalogVersions.format(reread.version()));
+          RESOURCE, Long.toString(expected), Long.toString(reread.version()));
     }
     return toDto(repository.getByName(name));
   }
 
   @Transactional
-  public void deleteAgent(String name, String expectedVersion) {
-    long expected = CatalogVersions.parse(expectedVersion, "expectedVersion");
+  public void deleteAgent(String name, long expected) {
     Agent definition = referenceResolver.requireAgentForUpdate(name);
     if (definition.type() == AgentType.BUILTIN) {
       // 内置 Agent 的名称与存在性由系统持有，用户不能删除。
       throw DomainException.inUse(RESOURCE, "built-in agent cannot be deleted: " + name);
     }
-    ensureExpectedVersion(definition, expectedVersion, expected);
+    ensureExpectedVersion(definition, expected);
     referenceResolver.ensureNotReferencedAsSubagent(name);
     for (AgentReferenceCheck reference : productReferences) {
       if (reference.isReferenced(name)) {
@@ -153,7 +150,7 @@ public class AgentService {
         throw DomainException.notFound(RESOURCE);
       }
       throw DomainException.versionConflict(
-          RESOURCE, expectedVersion, CatalogVersions.format(reread.version()));
+          RESOURCE, Long.toString(expected), Long.toString(reread.version()));
     }
   }
 
@@ -171,17 +168,16 @@ public class AgentService {
     dto.setSystemPrompt(definition.systemPrompt());
     dto.setExecution(toExecutionDto(definition.execution()));
     dto.setConfig(configCodec.decode(definition.configJson()));
-    dto.setVersion(CatalogVersions.format(definition.version()));
-    dto.setCreatedAt(definition.createTime());
-    dto.setUpdatedAt(definition.updateTime());
+    dto.setVersion(definition.version());
+    dto.setCreatedAt(definition.createdAt());
+    dto.setUpdatedAt(definition.updatedAt());
     return dto;
   }
 
-  private static void ensureExpectedVersion(
-      Agent definition, String expectedVersion, long expected) {
+  private static void ensureExpectedVersion(Agent definition, long expected) {
     if (definition.version() != expected) {
       throw DomainException.versionConflict(
-          RESOURCE, expectedVersion, CatalogVersions.format(definition.version()));
+          RESOURCE, Long.toString(expected), Long.toString(definition.version()));
     }
   }
 

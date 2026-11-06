@@ -22,6 +22,6 @@ public non-sealed class SingleModelUpdateDTO implements ModelUpdateDTO {
   /** 必填结构化配置。 */
   private ModelConfigDTO config;
 
-  /** 必填非负十进制字符串；必须与当前模型版本一致。 */
-  private String expectedVersion;
+  /** 必填非负版本号；必须与当前模型版本一致。 */
+  private Long expectedVersion;
 }

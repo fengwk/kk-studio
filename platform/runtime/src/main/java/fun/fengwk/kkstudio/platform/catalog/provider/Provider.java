@@ -24,8 +24,8 @@ public record Provider(
     String configJson,
     UUID connectionGenerationId,
     Long version,
-    Instant createTime,
-    Instant updateTime) {
+    Instant createdAt,
+    Instant updatedAt) {
 
   /** 不输出凭据与配置，避免经日志泄露。 */
   @Override

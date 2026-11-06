@@ -177,7 +177,7 @@ public class McpRuntimeToolIntegrationTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.discoveryStatus").value("UNVERIFIED"));
 
     McpServerDiscoverDTO discover = new McpServerDiscoverDTO();
-    discover.setExpectedVersion("0");
+    discover.setExpectedVersion(0L);
     mockMvc
         .perform(
             post("/api/platform/mcp-servers/{name}/discover", serverName)

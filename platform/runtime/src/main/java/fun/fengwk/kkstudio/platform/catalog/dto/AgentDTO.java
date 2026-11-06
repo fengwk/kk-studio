@@ -31,8 +31,8 @@ public class AgentDTO {
   /** 结构化执行配置（tools/skills/subagents），来自持久化的 config JSONB 列。 */
   private AgentConfigDTO config;
 
-  /** 非负十进制字符串版本号；客户端每次更新时必须回传。 */
-  private String version;
+  /** 非负版本号；客户端每次更新时必须回传。 */
+  private Long version;
 
   /** 创建时间（UTC Instant）。 */
   private Instant createdAt;

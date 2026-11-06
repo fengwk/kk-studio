@@ -11,7 +11,6 @@ import fun.fengwk.kkstudio.chat.dto.ChatUpdateDTO;
 import fun.fengwk.kkstudio.chat.dto.ChatYoloUpdateDTO;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.id.Uuids;
-import fun.fengwk.kkstudio.platform.error.CatalogVersions;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessSessionSummaryDTO;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessOwnerQueryService;
 import fun.fengwk.kkstudio.platform.orchestration.SessionDeletionOrchestrator;
@@ -120,13 +119,12 @@ public class ChatService {
 
   @Transactional
   public ChatDTO updateChat(String id, ChatUpdateDTO updateDTO) {
-    String rawExpected = updateDTO == null ? null : updateDTO.getExpectedVersion();
-    if (rawExpected == null) {
+    Long expected = updateDTO == null ? null : updateDTO.getExpectedVersion();
+    if (expected == null) {
       throw DomainException.validation(RESOURCE, "expectedVersion is required");
     }
-    long expected = CatalogVersions.parse(rawExpected, "expectedVersion");
     Chat existing = guard.requireChat(id);
-    ensureExpectedVersion(existing, id, rawExpected, expected);
+    ensureExpectedVersion(existing, expected);
     String previousAgentName = existing.getAgentName();
     String previousEnvironmentName = existing.getEnvironmentName();
     mutationFactory.apply(existing, updateDTO);
@@ -136,28 +134,30 @@ public class ChatService {
     if (!Objects.equals(previousEnvironmentName, existing.getEnvironmentName())) {
       guard.ensureEnvironmentExists(existing.getEnvironmentName());
     }
-    return persistUpdate(existing, rawExpected, expected);
+    return persistUpdate(existing, expected);
   }
 
   /** YOLO 是独立子资源，但与 Chat 其他修改共享同一个版本。 */
   @Transactional
   public ChatDTO updateYolo(String id, ChatYoloUpdateDTO updateDTO) {
-    String rawExpected = updateDTO.getExpectedVersion();
-    long expected = CatalogVersions.parse(rawExpected, "expectedVersion");
+    Long expected = updateDTO == null ? null : updateDTO.getExpectedVersion();
+    if (expected == null) {
+      throw DomainException.validation(RESOURCE, "expectedVersion is required");
+    }
     Chat existing = guard.requireChat(id);
-    ensureExpectedVersion(existing, id, rawExpected, expected);
+    ensureExpectedVersion(existing, expected);
     existing.setYoloEnabled(updateDTO.isYoloEnabled());
-    return persistUpdate(existing, rawExpected, expected);
+    return persistUpdate(existing, expected);
   }
 
-  private ChatDTO persistUpdate(Chat existing, String rawExpected, long expected) {
+  private ChatDTO persistUpdate(Chat existing, long expected) {
     if (!repository.updateById(existing, expected)) {
       Chat reread = repository.getById(existing.getId());
       if (reread == null) {
         throw DomainException.notFound(RESOURCE);
       }
       throw DomainException.versionConflict(
-          RESOURCE, rawExpected, CatalogVersions.format(reread.getVersion()));
+          RESOURCE, Long.toString(expected), Long.toString(reread.getVersion()));
     }
     return convert(repository.getById(existing.getId()));
   }
@@ -168,14 +168,13 @@ public class ChatService {
    * ON DELETE CASCADE 旁路 blob 引用计数。
    */
   @Transactional
-  public void deleteChat(String id, String expectedVersion) {
-    long expected = CatalogVersions.parse(expectedVersion, "expectedVersion");
+  public void deleteChat(String id, long expected) {
     UUID parsed = Uuids.parseCanonical(id, "id");
     Chat locked = repository.lockById(parsed);
     if (locked == null) {
       throw DomainException.notFound(RESOURCE);
     }
-    ensureExpectedVersion(locked, id, expectedVersion, expected);
+    ensureExpectedVersion(locked, expected);
     sessionDeletionService.deleteSessionsByOwner(
         new SessionOwner("CHAT", locked.getId().toString()));
     if (!repository.deleteById(locked.getId(), expected)) {
@@ -193,7 +192,7 @@ public class ChatService {
     dto.setAgentName(chat.getAgentName());
     dto.setEnvironmentName(chat.getEnvironmentName());
     dto.setYoloEnabled(chat.isYoloEnabled());
-    dto.setVersion(CatalogVersions.format(chat.getVersion()));
+    dto.setVersion(chat.getVersion());
     dto.setCreatedAt(chat.getCreatedAt());
     dto.setUpdatedAt(chat.getUpdatedAt());
     return dto;
@@ -205,11 +204,10 @@ public class ChatService {
     }
   }
 
-  private static void ensureExpectedVersion(
-      Chat chat, String id, String expectedVersion, long expected) {
+  private static void ensureExpectedVersion(Chat chat, long expected) {
     if (chat.getVersion() != expected) {
       throw DomainException.versionConflict(
-          RESOURCE, expectedVersion, CatalogVersions.format(chat.getVersion()));
+          RESOURCE, Long.toString(expected), Long.toString(chat.getVersion()));
     }
   }
 }

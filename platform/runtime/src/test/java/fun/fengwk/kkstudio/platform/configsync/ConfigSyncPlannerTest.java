@@ -553,7 +553,7 @@ class ConfigSyncPlannerTest {
         plan(ConfigSyncFixtures.settingsYaml(ConfigSyncFixtures.defaultSettings()));
 
     assertNotNull(plan.settings());
-    assertEquals("5", plan.settings().expectedVersion());
+    assertEquals(5L, plan.settings().expectedVersion());
     assertTrue(plan.imported().contains(new ConfigSyncRef(ConfigSyncKind.SETTINGS, "settings")));
   }
 

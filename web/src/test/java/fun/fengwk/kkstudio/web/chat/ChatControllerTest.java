@@ -19,6 +19,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.format.support.DefaultFormattingConversionService;
 import org.springframework.http.MediaType;
 import org.springframework.http.converter.json.JacksonJsonHttpMessageConverter;
 import org.springframework.test.web.servlet.MockMvc;
@@ -38,6 +39,7 @@ import fun.fengwk.kkstudio.chat.http.ChatController;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessSessionSummaryDTO;
 import fun.fengwk.kkstudio.platform.i18n.MessageService;
+import fun.fengwk.kkstudio.web.HttpBoundaryConfiguration;
 import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
 import fun.fengwk.kkstudio.web.advice.ProblemAdvice;
 
@@ -61,10 +63,16 @@ class ChatControllerTest {
   @BeforeEach
   void setUp() {
     chatService = mock(ChatService.class);
+    // 与生产一致：严格 JSON mapper 与 query 的规范十进制 Long 转换器同时生效。
+    var conversionService = new DefaultFormattingConversionService();
+    new HttpBoundaryConfiguration(objectMapper).addFormatters(conversionService);
     mockMvc =
         MockMvcBuilders.standaloneSetup(new ChatController(chatService))
-            .setControllerAdvice(new ProblemAdvice(new MessageService()))
+            .setControllerAdvice(
+                new ProblemAdvice(new MessageService()),
+                new HttpBoundaryConfiguration.CanonicalUuidBinding())
             .setMessageConverters(new JacksonJsonHttpMessageConverter(objectMapper))
+            .setConversionService(conversionService)
             .build();
   }
 
@@ -190,7 +198,7 @@ class ChatControllerTest {
     assertEquals("two", replacement.getValue().getTitle());
     assertEquals("assistant", replacement.getValue().getAgentName());
     assertNull(replacement.getValue().getEnvironmentName());
-    assertEquals("1", replacement.getValue().getExpectedVersion());
+    assertEquals(1L, replacement.getValue().getExpectedVersion());
 
     mockMvc
         .perform(
@@ -201,12 +209,12 @@ class ChatControllerTest {
     ArgumentCaptor<ChatYoloUpdateDTO> yolo = ArgumentCaptor.forClass(ChatYoloUpdateDTO.class);
     verify(chatService).updateYolo(eq(idText(1)), yolo.capture());
     assertTrue(yolo.getValue().isYoloEnabled());
-    assertEquals("2", yolo.getValue().getExpectedVersion());
+    assertEquals(2L, yolo.getValue().getExpectedVersion());
 
     mockMvc
         .perform(delete("/api/chat/chats/{chatId}", idText(1)).param("expectedVersion", "3"))
         .andExpect(status().isNoContent());
-    verify(chatService).deleteChat(idText(1), "3");
+    verify(chatService).deleteChat(idText(1), 3L);
 
     mockMvc
         .perform(delete("/api/chat/chats/{chatId}", idText(1)))
@@ -236,6 +244,26 @@ class ChatControllerTest {
     verifyNoInteractions(chatService);
   }
 
+  /** 非法 expectedVersion 必须由 HTTP 边界拒绝：请求体与 query 都返回 validation，不落到服务层。 */
+  @Test
+  void rejectsMalformedExpectedVersionOnBodyAndQuery() throws Exception {
+    mockMvc
+        .perform(
+            put("/api/chat/chats/{chatId}", idText(1))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    "{\"title\":\"two\",\"agentName\":\"assistant\","
+                        + "\"environmentName\":null,\"expectedVersion\":\" 1\"}"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("validation"));
+
+    mockMvc
+        .perform(delete("/api/chat/chats/{chatId}", idText(1)).param("expectedVersion", " 1"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("validation"));
+    verifyNoInteractions(chatService);
+  }
+
   /** 生产 mapper 把 Instant 写成 epoch 毫秒整数，而不是小数秒。 */
   @Test
   void writesChatInstantsAsEpochMilliseconds() throws Exception {
@@ -243,7 +271,7 @@ class ChatControllerTest {
     chat.setId(idText(1));
     chat.setTitle("chat-1");
     chat.setAgentName("assistant");
-    chat.setVersion("0");
+    chat.setVersion(0L);
     chat.setCreatedAt(Instant.ofEpochMilli(1720000000123L));
     chat.setUpdatedAt(Instant.ofEpochMilli(1720000000456L));
     when(chatService.getChat(idText(1))).thenReturn(chat);

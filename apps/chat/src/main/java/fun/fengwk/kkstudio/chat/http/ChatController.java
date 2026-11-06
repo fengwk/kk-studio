@@ -65,8 +65,7 @@ public class ChatController {
   @DeleteMapping("/{chatId}")
   @ResponseStatus(HttpStatus.NO_CONTENT)
   public void deleteChat(
-      @PathVariable("chatId") UUID chatId,
-      @RequestParam("expectedVersion") String expectedVersion) {
+      @PathVariable("chatId") UUID chatId, @RequestParam("expectedVersion") long expectedVersion) {
     chatService.deleteChat(chatId.toString(), expectedVersion);
   }
 

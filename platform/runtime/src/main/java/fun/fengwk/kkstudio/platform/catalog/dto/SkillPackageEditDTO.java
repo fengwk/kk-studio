@@ -14,8 +14,8 @@ import fun.fengwk.kkstudio.platform.secret.SecretUpdate;
 @Data
 public class SkillPackageEditDTO {
 
-  /** 客户端已展示的 CAS 版本号（十进制字符串）。 */
-  private String expectedVersion;
+  /** 客户端已展示的 CAS 版本号。 */
+  private Long expectedVersion;
 
   /** 可空包描述；null 表示清空。 */
   private @Nullable String description;

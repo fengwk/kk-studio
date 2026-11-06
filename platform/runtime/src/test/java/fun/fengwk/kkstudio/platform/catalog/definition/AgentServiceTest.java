@@ -52,9 +52,9 @@ public class AgentServiceTest extends PostgresSpringTestSupport {
     assertEquals(List.of(), definition.getConfig().getTools());
     assertEquals(List.of(), definition.getConfig().getSkills());
     assertEquals(List.of(), definition.getConfig().getSubagents());
-    assertEquals("0", definition.getVersion());
+    assertEquals(0L, definition.getVersion());
     assertThrows(DomainException.class, () -> agentService.createAgent(agent(modelRef, name)));
-    assertThrows(DomainException.class, () -> agentModelService.deleteModel(model.getName(), "0"));
+    assertThrows(DomainException.class, () -> agentModelService.deleteModel(model.getName(), 0L));
 
     AgentUpdateDTO update = new AgentUpdateDTO();
     update.setDescription("updated");
@@ -66,7 +66,7 @@ public class AgentServiceTest extends PostgresSpringTestSupport {
     assertEquals(name, updated.getName());
     assertEquals(modelRef, updated.getExecution().getSettings().get("modelName"));
     assertEquals("updated", updated.getDescription());
-    assertEquals("1", updated.getVersion());
+    assertEquals(1L, updated.getVersion());
     assertTrue(
         agentService.listAgents().stream().anyMatch(candidate -> candidate.getName().equals(name)));
 
@@ -80,9 +80,9 @@ public class AgentServiceTest extends PostgresSpringTestSupport {
     agentService.deleteAgent(name, updated.getVersion());
     // 硬删除：同名立即可重建。
     AgentDTO recreated = agentService.createAgent(agent(modelRef, name));
-    assertEquals("0", recreated.getVersion());
+    assertEquals(0L, recreated.getVersion());
     agentService.deleteAgent(name, recreated.getVersion());
-    assertThrows(DomainException.class, () -> agentService.deleteAgent(name, "0"));
+    assertThrows(DomainException.class, () -> agentService.deleteAgent(name, 0L));
     agentModelService.deleteModel(model.getName(), model.getVersion());
     agentProviderService.deleteProvider(provider.getName(), provider.getVersion());
   }

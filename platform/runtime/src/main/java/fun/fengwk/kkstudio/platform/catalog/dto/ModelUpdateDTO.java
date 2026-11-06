@@ -17,5 +17,5 @@ public sealed interface ModelUpdateDTO permits SingleModelUpdateDTO, ModelGroupU
 
   String getName();
 
-  String getExpectedVersion();
+  Long getExpectedVersion();
 }

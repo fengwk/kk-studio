@@ -19,7 +19,7 @@ public class ModelRepository {
 
   private static final String COLUMNS =
       "name, kind, provider_name, model_id, description, config, group_config, version, "
-          + "created_at as create_time, updated_at as update_time";
+          + "created_at, updated_at";
 
   private static final RowMapper<Model> ROW_MAPPER =
       (rs, rowNum) ->
@@ -32,8 +32,8 @@ public class ModelRepository {
               rs.getString("config"),
               rs.getString("group_config"),
               rs.getLong("version"),
-              PostgresJdbcTypes.toInstant(rs.getObject("create_time", OffsetDateTime.class)),
-              PostgresJdbcTypes.toInstant(rs.getObject("update_time", OffsetDateTime.class)));
+              PostgresJdbcTypes.toInstant(rs.getObject("created_at", OffsetDateTime.class)),
+              PostgresJdbcTypes.toInstant(rs.getObject("updated_at", OffsetDateTime.class)));
 
   /** 引用 {@code :oldName} 的组：成员 JSON 中逐项改名，保持成员顺序。 */
   private static final String RENAME_GROUP_MEMBERS_SQL =

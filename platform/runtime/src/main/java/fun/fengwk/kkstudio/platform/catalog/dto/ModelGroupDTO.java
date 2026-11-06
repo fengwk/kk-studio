@@ -21,8 +21,8 @@ public non-sealed class ModelGroupDTO implements ModelDTO {
   /** 从成员派生的只读能力摘要。 */
   private ModelConfigDTO config;
 
-  /** 非负十进制字符串版本号。 */
-  private String version;
+  /** 非负版本号。 */
+  private Long version;
 
   /** 创建时间。 */
   private Instant createdAt;

@@ -16,6 +16,6 @@ public non-sealed class ModelGroupUpdateDTO implements ModelUpdateDTO {
   /** 必填组配置。 */
   private ModelGroupConfigDTO group;
 
-  /** 必填非负十进制字符串；必须与当前模型版本一致。 */
-  private String expectedVersion;
+  /** 必填非负版本号；必须与当前模型版本一致。 */
+  private Long expectedVersion;
 }

@@ -8,6 +8,6 @@ import lombok.EqualsAndHashCode;
 @EqualsAndHashCode(callSuper = true)
 public class AgentUpdateDTO extends AgentEditablePropertiesDTO {
 
-  /** 必填非负十进制字符串；必须与当前 Agent 版本一致。 */
-  private String expectedVersion;
+  /** 必填非负版本号；必须与当前 Agent 版本一致。 */
+  private Long expectedVersion;
 }

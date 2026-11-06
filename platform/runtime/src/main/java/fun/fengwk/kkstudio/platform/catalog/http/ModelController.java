@@ -50,7 +50,7 @@ public class ModelController {
   @DeleteMapping("/{*name}")
   @ResponseStatus(HttpStatus.NO_CONTENT)
   public void deleteModel(
-      @PathVariable("name") String name, @RequestParam("expectedVersion") String expectedVersion) {
+      @PathVariable("name") String name, @RequestParam("expectedVersion") long expectedVersion) {
     modelService.deleteModel(stripLeadingSlash(name), expectedVersion);
   }
 
