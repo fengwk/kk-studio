@@ -51,7 +51,8 @@ public class ApiResponseStatusAdvice implements ResponseBodyAdvice<Object> {
       response.setStatusCode(
           HttpStatusCode.valueOf(
               data == null && status == 200 ? HttpStatus.NO_CONTENT.value() : status));
-      return data;
+      // 信封自身按 data 序列化（见 ApiResponse 的 @JsonValue）；保持返回类型不变，避开 Spring 对声明类型的强制转换。
+      return data == null ? null : body;
     }
     return body;
   }
