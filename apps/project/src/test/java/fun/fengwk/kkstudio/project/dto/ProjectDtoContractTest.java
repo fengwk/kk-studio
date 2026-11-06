@@ -56,13 +56,12 @@ class ProjectDtoContractTest {
     "IssueEvidenceDTO.runId"
   };
 
-  private static final String[] DECIMAL_STRING_FIELDS = {
+  private static final String[] DECIMAL_LONG_FIELDS = {
     "ProjectDTO.nextIssueNumber",
     "ProjectDTO.version",
     "IssueDTO.number",
     "IssueDTO.version",
     "IssueActivityDTO.sequence",
-    "IssueDetailDTO.nextActivityCursor",
     "IssueRunDTO.ordinal",
     "IssueRunDTO.observedActivitySequence",
     "IssueRunDTO.remainingExecutionMs",
@@ -83,7 +82,8 @@ class ProjectDtoContractTest {
     "ReopenIssueRequestDTO.expectedVersion",
     "ResetStageBudgetRequestDTO.expectedVersion",
     "StopIssueRequestDTO.expectedVersion",
-    "AppendIssueActivityRequestDTO.expectedVersion"
+    "AppendIssueActivityRequestDTO.expectedVersion",
+    "ProjectWorkflowStateDTO.maxRuns"
   };
 
   /** 测试意图：精确验证 DTO 的实例字段集合。 */
@@ -272,13 +272,14 @@ class ProjectDtoContractTest {
     }
   }
 
-  /** 测试意图：验证计数、版本和游标等字段在 wire DTO 上均保持 String 类型，避免 64 位浮点精度截断。 */
+  /** 测试意图：计数和版本采用 Long，游标仍是不透明字符串。 */
   @Test
-  void decimalFieldsAreWireStrings() throws Exception {
-    for (String fieldPath : DECIMAL_STRING_FIELDS) {
+  void decimalFieldsAreLongs() throws Exception {
+    for (String fieldPath : DECIMAL_LONG_FIELDS) {
       Field f = resolveField(fieldPath);
-      assertEquals(String.class, f.getType(), fieldPath + " must be a String");
+      assertEquals(Long.class, f.getType(), fieldPath + " must be a Long");
     }
+    assertEquals(String.class, resolveField("IssueDetailDTO.nextActivityCursor").getType());
   }
 
   /** 测试意图：验证 ProjectWorkflowDTO 的完整 JSON 编解码回环，包含工作流状态列表与可空字段。 */
@@ -291,7 +292,7 @@ class ProjectDtoContractTest {
             .agent("engineer")
             .environment("standard")
             .instructions("build something")
-            .maxRuns("5")
+            .maxRuns(5L)
             .enabled(true)
             .next(List.of("REVIEW"))
             .build();
@@ -356,7 +357,7 @@ class ProjectDtoContractTest {
         IssueDTO.builder()
             .id("11111111-1111-1111-1111-111111111111")
             .projectId("22222222-2222-2222-2222-222222222222")
-            .number("1")
+            .number(1L)
             .title("Issue 1")
             .description("Description")
             .state("TODO")
@@ -364,7 +365,7 @@ class ProjectDtoContractTest {
             .blockReason(null)
             .pauseReason(null)
             .pauseDetail(null)
-            .version("0")
+            .version(0L)
             .createdAt(Instant.parse("2026-09-27T10:00:00Z"))
             .updatedAt(Instant.parse("2026-09-27T10:00:00Z"))
             .build();
@@ -372,7 +373,7 @@ class ProjectDtoContractTest {
     IssueActivityDTO activity =
         IssueActivityDTO.builder()
             .issueId(issue.getId())
-            .sequence("1")
+            .sequence(1L)
             .kind(IssueActivityKind.COMMENT)
             .actorType(IssueActivityActorType.HUMAN)
             .actorAgentName(null)
@@ -386,7 +387,7 @@ class ProjectDtoContractTest {
         IssueRunDTO.builder()
             .id("33333333-3333-3333-3333-333333333333")
             .issueId(issue.getId())
-            .ordinal("1")
+            .ordinal(1L)
             .state("BUILD")
             .agentName(null)
             .sessionId("sess-1")
@@ -396,10 +397,10 @@ class ProjectDtoContractTest {
             .endEntryId(null)
             .finalAnswerEntryId(null)
             .nextState(null)
-            .observedActivitySequence("0")
-            .remainingExecutionMs("300000")
+            .observedActivitySequence(0L)
+            .remainingExecutionMs(300000L)
             .error(null)
-            .version("1")
+            .version(1L)
             .startedAt(Instant.parse("2026-09-27T10:00:00Z"))
             .endedAt(null)
             .build();
@@ -408,9 +409,9 @@ class ProjectDtoContractTest {
         IssueStageBudgetDTO.builder()
             .state("BUILD")
             .maxRuns(3)
-            .budgetAfterOrdinal("0")
-            .usedRuns("1")
-            .remainingRuns("2")
+            .budgetAfterOrdinal(0L)
+            .usedRuns(1L)
+            .remainingRuns(2L)
             .build();
 
     IssueAgentThreadDTO thread =

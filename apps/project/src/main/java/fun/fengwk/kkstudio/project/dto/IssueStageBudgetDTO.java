@@ -14,7 +14,7 @@ public class IssueStageBudgetDTO {
 
   private String state;
   private Integer maxRuns;
-  private String budgetAfterOrdinal;
-  private String usedRuns;
-  private String remainingRuns;
+  private Long budgetAfterOrdinal;
+  private Long usedRuns;
+  private Long remainingRuns;
 }

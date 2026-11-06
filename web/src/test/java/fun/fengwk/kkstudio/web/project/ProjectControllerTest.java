@@ -246,6 +246,24 @@ class ProjectControllerTest {
         .andExpect(jsonPath("$.version").value("2"));
   }
 
+  /** 工作流 maxRuns 也必须走严格 Long 输入边界，不能交给服务宽松解析。 */
+  @Test
+  void rejectsMalformedWorkflowMaxRuns() throws Exception {
+    for (String token : List.of("1", "\" 1\"", "\"9223372036854775808\"")) {
+      mockMvc
+          .perform(
+              put("/api/project/projects/" + projectId + "/workflow")
+                  .contentType(MediaType.APPLICATION_JSON)
+                  .content(
+                      "{\"expectedVersion\":\"1\",\"workflow\":{\"states\":["
+                          + "{\"state\":\"WORK\",\"name\":\"Work\",\"maxRuns\":"
+                          + token
+                          + "}]}}"))
+          .andExpect(status().isBadRequest())
+          .andExpect(jsonPath("$.code").value("validation"));
+    }
+  }
+
   @Test
   void testUpdateYolo() throws Exception {
     UpdateProjectYoloRequestDTO req =

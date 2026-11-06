@@ -24,7 +24,7 @@ import java.time.Instant;
 public class IssueActivityDTO {
 
   private String issueId;
-  private String sequence;
+  private Long sequence;
   private IssueActivityKind kind;
   private IssueActivityActorType actorType;
 

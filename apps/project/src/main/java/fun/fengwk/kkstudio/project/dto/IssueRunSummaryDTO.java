@@ -20,7 +20,7 @@ public class IssueRunSummaryDTO {
 
   private String id;
   private String issueId;
-  private String ordinal;
+  private Long ordinal;
 
   /** 工作流自然状态编码，保持开放字符串。 */
   private String state;

@@ -20,7 +20,7 @@ public class IssueRunDTO {
 
   private String id;
   private String issueId;
-  private String ordinal;
+  private Long ordinal;
 
   /** 工作流自然状态编码，保持开放字符串。 */
   private String state;
@@ -42,13 +42,13 @@ public class IssueRunDTO {
   @JsonInclude(JsonInclude.Include.ALWAYS)
   private @Nullable String nextState;
 
-  private String observedActivitySequence;
-  private String remainingExecutionMs;
+  private Long observedActivitySequence;
+  private Long remainingExecutionMs;
 
   @JsonInclude(JsonInclude.Include.ALWAYS)
   private @Nullable String error;
 
-  private String version;
+  private Long version;
   private Instant startedAt;
 
   @JsonInclude(JsonInclude.Include.ALWAYS)

@@ -25,7 +25,7 @@ public class IssueDTO {
 
   private String id;
   private String projectId;
-  private String number;
+  private Long number;
   private String title;
   private String description;
   private String state;
@@ -42,7 +42,7 @@ public class IssueDTO {
   @JsonInclude(JsonInclude.Include.ALWAYS)
   private @Nullable String pauseDetail;
 
-  private String version;
+  private Long version;
   private Instant createdAt;
   private Instant updatedAt;
 }

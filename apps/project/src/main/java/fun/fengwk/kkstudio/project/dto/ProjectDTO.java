@@ -25,8 +25,8 @@ public class ProjectDTO {
   private String description;
   private ProjectWorkflowDTO workflow;
   private boolean yoloEnabled;
-  private String nextIssueNumber;
-  private String version;
+  private Long nextIssueNumber;
+  private Long version;
 
   @JsonInclude(JsonInclude.Include.ALWAYS)
   private @Nullable Instant archivedAt;

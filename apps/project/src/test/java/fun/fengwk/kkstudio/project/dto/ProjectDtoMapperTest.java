@@ -16,6 +16,7 @@ import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.module.SimpleModule;
 import tools.jackson.databind.ser.std.ToStringSerializer;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
 import fun.fengwk.kkstudio.project.domain.ProjectStateCode;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflow;
@@ -46,15 +47,6 @@ class ProjectDtoMapperTest {
   // 与生产 HTTP profile 相同的 Long 字符串与 NON_NULL 规则；容器注入身份由 web 装配测试核验。
   private final JsonMapper httpMapper = httpMapper();
   private final ProjectDtoMapper mapper = new ProjectDtoMapper(codec, httpMapper);
-
-  @Test
-  void testWorkflowMaxRunsRejectsNonCanonicalDecimal() {
-    // 测试意图：maxRuns 走共享 canonical 十进制；空白仍表示缺省，前后空白不被裁剪接受。
-    ProjectWorkflowDTO padded = maxRunsWorkflow(" 1");
-    IllegalArgumentException error =
-        assertThrows(IllegalArgumentException.class, () -> mapper.toWorkflow(padded));
-    assertTrue(error.getMessage().contains("maxRuns"));
-  }
 
   @Test
   void testProjectMapping() {
@@ -113,8 +105,8 @@ class ProjectDtoMapperTest {
     assertNotNull(dto.getWorkflow());
     assertEquals(3, dto.getWorkflow().getStates().size());
     assertTrue(dto.isYoloEnabled());
-    assertEquals("10", dto.getNextIssueNumber());
-    assertEquals("2", dto.getVersion());
+    assertEquals(10L, dto.getNextIssueNumber());
+    assertEquals(2L, dto.getVersion());
     assertEquals(now, dto.getArchivedAt());
     assertEquals(now, dto.getCreatedAt());
   }
@@ -134,7 +126,7 @@ class ProjectDtoMapperTest {
             .state("WORK")
             .name("Working")
             .agent("coder")
-            .maxRuns("5")
+            .maxRuns(5L)
             .enabled(true)
             .next(List.of("DONE"))
             .build();
@@ -160,37 +152,30 @@ class ProjectDtoMapperTest {
 
     ProjectWorkflowDTO mappedBack = mapper.toWorkflowDto(model);
     assertEquals(4, mappedBack.getStates().size());
-    assertEquals("5", mappedBack.getStates().get(1).getMaxRuns());
+    assertEquals(5L, mappedBack.getStates().get(1).getMaxRuns());
     assertEquals("coder", mappedBack.getStates().get(1).getAgent());
   }
 
   @Test
   void testMaxRunsRejectsValuesOutsideIntRange() {
     // 测试意图：maxRuns 的领域类型是 Integer，超过 int 范围时禁止 long 截断，必须拒绝。
-    IllegalArgumentException overflow =
-        assertThrows(
-            IllegalArgumentException.class, () -> mapper.toWorkflow(maxRunsWorkflow("2147483648")));
+    DomainException overflow =
+        assertThrows(DomainException.class, () -> mapper.toWorkflow(maxRunsWorkflow(2147483648L)));
     assertTrue(overflow.getMessage().contains("maxRuns"));
     assertTrue(
         overflow.getMessage().contains("int") || overflow.getMessage().contains("range"),
         () -> "truncation must be rejected as a range error, but was: " + overflow.getMessage());
 
-    IllegalArgumentException beyondLong =
-        assertThrows(
-            IllegalArgumentException.class,
-            () -> mapper.toWorkflow(maxRunsWorkflow("9223372036854775808")));
-    assertTrue(beyondLong.getMessage().contains("maxRuns"));
-
-    IllegalArgumentException negative =
-        assertThrows(
-            IllegalArgumentException.class, () -> mapper.toWorkflow(maxRunsWorkflow("-1")));
+    DomainException negative =
+        assertThrows(DomainException.class, () -> mapper.toWorkflow(maxRunsWorkflow(-1L)));
     assertTrue(negative.getMessage().contains("maxRuns"));
+    assertThrows(DomainException.class, () -> mapper.toWorkflow(maxRunsWorkflow(0L)));
 
-    ProjectWorkflow accepted = mapper.toWorkflow(maxRunsWorkflow("2147483647"));
+    ProjectWorkflow accepted = mapper.toWorkflow(maxRunsWorkflow(2147483647L));
     assertEquals(Integer.MAX_VALUE, accepted.states().get(1).maxRuns());
   }
 
-  private static ProjectWorkflowDTO maxRunsWorkflow(String maxRuns) {
+  private static ProjectWorkflowDTO maxRunsWorkflow(Long maxRuns) {
     ProjectWorkflowStateDTO init =
         ProjectWorkflowStateDTO.builder()
             .state("INIT")
@@ -250,13 +235,13 @@ class ProjectDtoMapperTest {
     IssueDTO dto = mapper.toDto(issue);
     assertEquals(id.toString().toLowerCase(), dto.getId());
     assertEquals(projectId.toString().toLowerCase(), dto.getProjectId());
-    assertEquals("1", dto.getNumber());
+    assertEquals(1L, dto.getNumber());
     assertEquals("BLOCKED", dto.getState());
     assertEquals("WORK", dto.getBlockedFromState());
     assertEquals("Waiting for review", dto.getBlockReason());
     assertEquals(PauseReason.USER, dto.getPauseReason());
     assertEquals("User paused execution", dto.getPauseDetail());
-    assertEquals("3", dto.getVersion());
+    assertEquals(3L, dto.getVersion());
   }
 
   @Test
@@ -279,7 +264,7 @@ class ProjectDtoMapperTest {
 
     IssueActivityDTO dto = mapper.toDto(activity);
     assertEquals(issueId.toString().toLowerCase(), dto.getIssueId());
-    assertEquals("5", dto.getSequence());
+    assertEquals(5L, dto.getSequence());
     assertEquals(IssueActivityKind.COMMENT, dto.getKind());
     assertEquals(IssueActivityActorType.HUMAN, dto.getActorType());
     assertNull(dto.getActorAgentName());
@@ -369,9 +354,9 @@ class ProjectDtoMapperTest {
     IssueStageBudgetDTO dto = mapper.toDto(view);
     assertEquals("WORK", dto.getState());
     assertEquals(5, dto.getMaxRuns());
-    assertEquals("2", dto.getBudgetAfterOrdinal());
-    assertEquals("1", dto.getUsedRuns());
-    assertEquals("4", dto.getRemainingRuns());
+    assertEquals(2L, dto.getBudgetAfterOrdinal());
+    assertEquals(1L, dto.getUsedRuns());
+    assertEquals(4L, dto.getRemainingRuns());
   }
 
   @Test
@@ -405,7 +390,7 @@ class ProjectDtoMapperTest {
 
     IssueRunSummaryDTO summary = mapper.toSummaryDto(run, "coder");
     assertNotNull(summary);
-    assertEquals("1", summary.getOrdinal());
+    assertEquals(1L, summary.getOrdinal());
     assertEquals(IssueRunStatus.RUNNING, summary.getStatus());
     assertEquals("WORK", summary.getState());
     assertEquals("coder", summary.getAgentName());
@@ -415,9 +400,9 @@ class ProjectDtoMapperTest {
     assertEquals("coder", detail.getAgentName());
     assertEquals(sessionId.toString().toLowerCase(), detail.getSessionId());
     assertEquals(threadId.toString().toLowerCase(), detail.getThreadId());
-    assertEquals("4", detail.getVersion());
-    assertEquals("2", detail.getObservedActivitySequence());
-    assertEquals("60000", detail.getRemainingExecutionMs());
+    assertEquals(4L, detail.getVersion());
+    assertEquals(2L, detail.getObservedActivitySequence());
+    assertEquals(60000L, detail.getRemainingExecutionMs());
   }
 
   /** 复现宿主 HTTP profile 中本测试依赖的写出规则，不装配 Spring 容器。 */
