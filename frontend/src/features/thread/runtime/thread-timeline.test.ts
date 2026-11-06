@@ -1169,6 +1169,9 @@ describe('thread timeline', () => {
                 { type: 'text', text: 'ok' },
                 { type: 'json', json: '{"nested":true,"n":1}' },
                 { type: 'json', json: '[1,2]' },
+                // Durable codec stores json content as raw text, including string scalars.
+                { type: 'json', json: '"{\\"nested\\":true}"' },
+                { type: 'json', json: { nested: true } },
               ],
             },
           ]),
@@ -1198,6 +1201,7 @@ describe('thread timeline', () => {
           { type: 'text', text: 'ok' },
           { type: 'json', value: { nested: true, n: 1 } },
           { type: 'json', value: [1, 2] },
+          { type: 'json', value: '{"nested":true}' },
         ],
         status: 'done',
       },

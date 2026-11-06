@@ -436,11 +436,14 @@ function decodeDurableToolResultContent(content: Record<string, unknown>): Recor
     ...content,
     // AgentMessageJsonCodec 的 durable content.json 是明确的 JSON 原文；
     // ToolResultJsonCodec 的实时和 invocation content.json 则已是节点。
-    contents: getRecordList(content.contents).map((item) =>
-      item.type === 'json' && typeof item.json === 'string'
-        ? { ...item, json: parseRawJsonText(item.json) }
-        : item,
-    ),
+    contents: getRecordList(content.contents).flatMap((item) => {
+      if (item.type !== 'json') {
+        return [item]
+      }
+      return typeof item.json === 'string'
+        ? [{ ...item, json: parseRawJsonText(item.json) }]
+        : []
+    }),
     details,
   }
 }
