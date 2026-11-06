@@ -13,7 +13,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.api.thread.StopCommand;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
@@ -81,13 +82,15 @@ class StopTreeCollectorTest {
 
   @Test
   void missingTargetIsNotFoundBeforeAnyCollection() {
-    HarnessRuntimeNotFoundException error =
+    DomainException error =
         assertThrows(
-            HarnessRuntimeNotFoundException.class,
+            DomainException.class,
             () ->
                 store.transaction(
                     tx -> StopTreeCollector.collect(tx, new StopCommand(id(99L), id(43L), 0L))));
 
+    assertEquals(DomainErrorCode.NOT_FOUND, error.code());
+    assertEquals("thread", error.resource());
     assertTrue(error.getMessage().contains(id(99L).toString()));
   }
 

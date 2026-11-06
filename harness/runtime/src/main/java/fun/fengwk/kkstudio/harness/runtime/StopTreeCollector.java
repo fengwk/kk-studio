@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.thread.StopCommand;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
@@ -53,8 +53,8 @@ final class StopTreeCollector {
             .find(command.threadId())
             .orElseThrow(
                 () ->
-                    new HarnessRuntimeNotFoundException(
-                        "thread " + command.threadId() + " does not exist"));
+                    DomainException.notFound(
+                        "thread", "thread " + command.threadId() + " does not exist"));
 
     // 收集目标线程及其所有永久后代线程，并派生确定的子 stopRequestId
     List<Candidate> candidates = new ArrayList<>();

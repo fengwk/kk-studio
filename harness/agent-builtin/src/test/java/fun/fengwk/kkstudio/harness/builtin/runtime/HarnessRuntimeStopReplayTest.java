@@ -36,10 +36,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.CancelledThreadInput;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException.Reason;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
+import fun.fengwk.kkstudio.harness.api.HarnessConflictReason;
 import fun.fengwk.kkstudio.harness.api.StopResult;
 import fun.fengwk.kkstudio.harness.api.StoppedThreadReceipt;
 import fun.fengwk.kkstudio.harness.api.ToolApprovalCommand;
@@ -344,11 +344,12 @@ class HarnessRuntimeStopReplayTest {
             TestIds.id(3),
             "tester",
             "approve"));
-    HarnessRuntimeConflictException error =
+    DomainException error =
         assertThrows(
-            HarnessRuntimeConflictException.class,
+            DomainException.class,
             () -> runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 1)));
-    assertEquals(Reason.STALE_VERSION, error.reason());
+    assertEquals(DomainErrorCode.CONFLICT, error.code());
+    assertEquals(HarnessConflictReason.STALE_VERSION.name(), error.reason());
     ToolInvocation tool = store.transaction(tx -> tx.tools().find(baseline.toolId()).orElseThrow());
     assertEquals(ToolInvocationStatus.READY, tool.status());
     assertEquals(
@@ -438,10 +439,12 @@ class HarnessRuntimeStopReplayTest {
 
   @Test
   void missingThreadIsNotFound() {
-    HarnessRuntimeNotFoundException error =
+    DomainException error =
         assertThrows(
-            HarnessRuntimeNotFoundException.class,
+            DomainException.class,
             () -> runtime.stop(new StopCommand(TestIds.id(999), TestIds.id(1), 0)));
+    assertEquals(DomainErrorCode.NOT_FOUND, error.code());
+    assertEquals("thread", error.resource());
     assertNotNull(error.getMessage());
   }
 }

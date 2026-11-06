@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
+import fun.fengwk.kkstudio.common.error.DomainException;
+import fun.fengwk.kkstudio.harness.api.HarnessConflictReason;
 import fun.fengwk.kkstudio.harness.api.StopResult;
 import fun.fengwk.kkstudio.harness.api.StoppedThreadReceipt;
 import fun.fengwk.kkstudio.harness.api.command.NotificationCommandPayload;
@@ -138,8 +138,7 @@ final class StopControl {
               .lock(threadId)
               .orElseThrow(
                   () ->
-                      new HarnessRuntimeNotFoundException(
-                          "thread " + threadId + " does not exist"));
+                      DomainException.notFound("thread", "thread " + threadId + " does not exist"));
       lockedThreads.put(threadId, locked);
     }
 
@@ -155,7 +154,7 @@ final class StopControl {
     // 单节点回执命中但没有该 root 对：该派生 stopRequestId 已被其它 root 使用，派生身份不得伪装成新的 root。
     if (tx.stops().findReceipt(command.threadId(), command.stopRequestId()).isPresent()) {
       throw conflict(
-          HarnessRuntimeConflictException.Reason.STOP_REQUEST_ID_REUSED,
+          HarnessConflictReason.STOP_REQUEST_ID_REUSED,
           "stopRequestId "
               + command.stopRequestId()
               + " on thread "
@@ -165,7 +164,7 @@ final class StopControl {
 
     if (lockedTarget.version() != command.expectedVersion()) {
       throw conflict(
-          HarnessRuntimeConflictException.Reason.STALE_VERSION,
+          HarnessConflictReason.STALE_VERSION,
           "thread "
               + lockedTarget.id()
               + " version "
@@ -181,7 +180,7 @@ final class StopControl {
       ThreadState locked = lockedThreads.get(candidate.thread().id());
       if (tx.stops().findReceipt(locked.id(), candidate.stopRequestId()).isPresent()) {
         throw conflict(
-            HarnessRuntimeConflictException.Reason.STOP_REQUEST_ID_REUSED,
+            HarnessConflictReason.STOP_REQUEST_ID_REUSED,
             "stop identity ("
                 + locked.id()
                 + ", "
@@ -916,9 +915,8 @@ final class StopControl {
         turnStartEntryId, TurnEndOutcome.STOPPED, false, TurnEndReason.USER_STOP, stopRequestId);
   }
 
-  private static HarnessRuntimeConflictException conflict(
-      HarnessRuntimeConflictException.Reason reason, String message) {
-    return new HarnessRuntimeConflictException(reason, message);
+  private static DomainException conflict(HarnessConflictReason reason, String message) {
+    return DomainException.conflict(reason.name(), message);
   }
 
   /** Durable Stop 结果，加上 transaction 提交后需取消的全部 process-local execution。 */
