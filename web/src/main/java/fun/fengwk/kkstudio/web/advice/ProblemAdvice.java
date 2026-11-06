@@ -93,7 +93,7 @@ public class ProblemAdvice {
   }
 
   @ExceptionHandler(HttpMessageNotReadableException.class)
-  public ResponseEntity<Map<String, Object>> unreadable(HttpMessageNotReadableException error) {
+  public ResponseEntity<Map<String, Object>> unreadable() {
     return framework(400, "Failed to read request", null);
   }
 
