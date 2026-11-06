@@ -476,7 +476,12 @@ public final class HarnessRuntimeRequestMapper {
     }
   }
 
-  private static <T> T validation(String resource, Supplier<T> construction) {
+  /**
+   * 客户端值构造的窄范围转换：只翻译 {@link IllegalArgumentException}，{@link DomainException} 原样透传。
+   *
+   * <p>包内共享给同样在构造单个客户端命令的 HTTP 控制器；绝不捕获 {@link NullPointerException}，也不包住领域动作。
+   */
+  static <T> T validation(String resource, Supplier<T> construction) {
     try {
       return construction.get();
     } catch (DomainException error) {

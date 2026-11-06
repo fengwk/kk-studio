@@ -9,7 +9,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.ToolInputAcceptance;
 import fun.fengwk.kkstudio.harness.api.ToolInputSubmissionCommand;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessToolInputDTO;
@@ -77,16 +76,22 @@ public class InteractionController {
   /** 问卷回答与拒答的唯一差别在于命令中的 declined 与答案集合。 */
   private static ToolInputSubmissionCommand toCommand(
       HarnessToolInputDTO request, UUID threadId, UUID toolInvocationId, String actor) {
-    try {
-      return switch (request) {
-        case HarnessToolInputDTO.Answer answer -> new ToolInputSubmissionCommand(
-            threadId, toolInvocationId, answer.submissionId(), actor, false, answer.answers());
-        case HarnessToolInputDTO.Decline decline -> new ToolInputSubmissionCommand(
-            threadId, toolInvocationId, decline.submissionId(), actor, true, List.of());
-      };
-    } catch (IllegalArgumentException | NullPointerException error) {
-      throw DomainException.validation("toolInput", "tool input submission is invalid", error);
-    }
+    // 必填字段由 HTTP 边界（RequestBodyRequiredValidationAdvice）拒绝；这里只为客户端值构造做单点窄范围转换，
+    // 只翻译构造器抛出的 IllegalArgumentException，不捕获 NullPointerException。
+    return HarnessRuntimeRequestMapper.validation(
+        "toolInput",
+        () ->
+            switch (request) {
+              case HarnessToolInputDTO.Answer answer -> new ToolInputSubmissionCommand(
+                  threadId,
+                  toolInvocationId,
+                  answer.submissionId(),
+                  actor,
+                  false,
+                  answer.answers());
+              case HarnessToolInputDTO.Decline decline -> new ToolInputSubmissionCommand(
+                  threadId, toolInvocationId, decline.submissionId(), actor, true, List.of());
+            });
   }
 
   private static HarnessToolInputResultDTO toResultDto(ToolInputAcceptance acceptance) {
