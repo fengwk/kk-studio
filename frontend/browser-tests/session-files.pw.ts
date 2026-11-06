@@ -147,9 +147,11 @@ async function installSessionFilesApi(page: Page): Promise<RecordedRequest[]> {
           return
         }
         if (path === `${SESSION_ROOT}binary.bin`) {
-          await fulfillJson(route, 422, problem(
-            422, 'validation', 'HTTP error (status 422).', 'file appears to be binary',
-          ))
+          // 非文本内容以 validation + SESSION_FILE_NOT_TEXT 拒绝；面板只停用预览、保留下载。
+          await fulfillJson(route, 400, {
+            ...problem(400, 'validation', 'HTTP error (status 400).', 'file appears to be binary'),
+            reason: 'SESSION_FILE_NOT_TEXT',
+          })
           return
         }
         if (path === `${SESSION_ROOT}missing.txt`) {
