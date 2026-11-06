@@ -152,8 +152,8 @@ class ChatServiceTest {
     chat.setTitle("chat-" + id);
     chat.setAgentName("assistant");
     chat.setVersion(0L);
-    chat.setCreateTime(BASE);
-    chat.setUpdateTime(updatedAt);
+    chat.setCreatedAt(BASE);
+    chat.setUpdatedAt(updatedAt);
     return chat;
   }
 

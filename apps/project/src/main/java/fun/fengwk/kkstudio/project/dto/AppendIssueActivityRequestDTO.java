@@ -6,8 +6,6 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.jspecify.annotations.Nullable;
 
-import fun.fengwk.kkstudio.project.model.IssueActivityKind;
-
 /** 追加 Issue Activity 请求 DTO。 */
 @Data
 @Builder
@@ -19,7 +17,7 @@ public class AppendIssueActivityRequestDTO {
   private String requestKey;
 
   /** 人工活动类型，只接受 COMMENT 与 INSTRUCTION；省略等同 COMMENT。 */
-  private @Nullable IssueActivityKind kind;
+  private @Nullable IssueActivityRequestKind kind;
 
   private String body;
 }

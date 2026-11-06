@@ -194,8 +194,8 @@ public class ChatService {
     dto.setEnvironmentName(chat.getEnvironmentName());
     dto.setYoloEnabled(chat.isYoloEnabled());
     dto.setVersion(CatalogVersions.format(chat.getVersion()));
-    dto.setCreatedAt(chat.getCreateTime());
-    dto.setUpdatedAt(chat.getUpdateTime());
+    dto.setCreatedAt(chat.getCreatedAt());
+    dto.setUpdatedAt(chat.getUpdatedAt());
     return dto;
   }
 

@@ -184,6 +184,7 @@ registerCase({
   async run(ctx) {
     const suffix = cid().slice(0, 8)
     let project = null
+    let activeProject = null
     try {
       const createdProject = await ctx.call('POST', '/api/project/projects', {
         title: `E2E Project ${suffix}`,
@@ -229,6 +230,13 @@ registerCase({
 
       const listed = (await ctx.call('GET', '/api/project/projects')).json
       assert(listed.some((candidate) => candidate.id === project.id), 'created Project not listed')
+      const listedWithArchived = (
+        await ctx.call('GET', '/api/project/projects?includeArchived=true')
+      ).json
+      assert(
+        listedWithArchived.some((candidate) => candidate.id === project.id),
+        'active Project must appear with includeArchived=true',
+      )
 
       // 公共 batch 端点只服务直接持有 Session 的 Chat owner：Project 不是 owner 形态，
       // Issue+Agent 命令由 Issue 业务工作流拥有，都不能借该端点伪造命令。
@@ -696,6 +704,13 @@ registerCase({
         JSON.stringify(remaining.referencedStateCodes),
       )
 
+      // 保留一个活跃项目作对照：includeArchived 必须同时返回活跃与已归档项目。
+      activeProject = (
+        await ctx.call('POST', '/api/project/projects', {
+          title: `E2E Active Project ${suffix}`,
+          description: 'Project kept active for archive listing',
+        })
+      ).json
       project = (
           await ctx.call('POST', `/api/project/projects/${project.id}/archive`, {
             expectedVersion: project.version,
@@ -712,15 +727,17 @@ registerCase({
       )
       const activeProjects = (await ctx.call('GET', '/api/project/projects')).json
       assert(
-        !activeProjects.some((candidate) => candidate.id === project.id),
-        'archived Project must not appear in the default list',
+        !activeProjects.some((candidate) => candidate.id === project.id) &&
+          activeProjects.some((candidate) => candidate.id === activeProject.id),
+        'default list must contain active Projects only',
       )
       const archivedProjects = (
         await ctx.call('GET', '/api/project/projects?includeArchived=true')
       ).json
       assert(
-        archivedProjects.some((candidate) => candidate.id === project.id),
-        'archived Project must appear with includeArchived=true',
+        archivedProjects.some((candidate) => candidate.id === project.id) &&
+          archivedProjects.some((candidate) => candidate.id === activeProject.id),
+        'includeArchived=true must list both active and archived projects',
       )
       project = (
           await ctx.call('POST', `/api/project/projects/${project.id}/unarchive`, {
@@ -733,6 +750,9 @@ registerCase({
       await expectHttpError(() => ctx.call('GET', `/api/project/projects/${project.id}`), { status: 404 })
       project = null
     } finally {
+      if (activeProject?.id) {
+        await deleteProjectIfPresent(ctx, activeProject.id)
+      }
       if (project?.id) {
         await deleteProjectIfPresent(ctx, project.id)
       }

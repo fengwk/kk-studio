@@ -19,8 +19,7 @@ import java.util.UUID;
 public class ChatRepository {
 
   private static final String COLUMNS =
-      "id, title, agent_name, environment_name, yolo_enabled, version, "
-          + "created_at as create_time, updated_at as update_time";
+      "id, title, agent_name, environment_name, yolo_enabled, version, created_at, updated_at";
 
   private static final String ORDER_BY =
       " order by updated_at desc, created_at desc, title asc, id asc";
@@ -160,10 +159,10 @@ public class ChatRepository {
     chat.setEnvironmentName(rs.getString("environment_name"));
     chat.setYoloEnabled(rs.getBoolean("yolo_enabled"));
     chat.setVersion(rs.getLong("version"));
-    chat.setCreateTime(
-        PostgresJdbcTypes.toInstant(rs.getObject("create_time", OffsetDateTime.class)));
-    chat.setUpdateTime(
-        PostgresJdbcTypes.toInstant(rs.getObject("update_time", OffsetDateTime.class)));
+    chat.setCreatedAt(
+        PostgresJdbcTypes.toInstant(rs.getObject("created_at", OffsetDateTime.class)));
+    chat.setUpdatedAt(
+        PostgresJdbcTypes.toInstant(rs.getObject("updated_at", OffsetDateTime.class)));
     return chat;
   }
 }

@@ -182,13 +182,11 @@ public class ProjectRepository {
     return allocated;
   }
 
-  public List<Project> listByArchived(boolean archived) {
+  /** 列表按最近更新排序；{@code includeArchived} 为 true 时同时返回活跃与已归档项目。 */
+  public List<Project> list(boolean includeArchived) {
+    String where = includeArchived ? "" : " where archived_at is null";
     return jdbc.sql(
-            "select "
-                + COLUMNS
-                + " from project where (archived_at is not null) = :archived"
-                + " order by updated_at desc, id asc")
-        .param("archived", archived)
+            "select " + COLUMNS + " from project" + where + " order by updated_at desc, id asc")
         .query(ROW_MAPPER)
         .list();
   }

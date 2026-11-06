@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -19,8 +20,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.http.MediaType;
+import org.springframework.http.converter.json.JacksonJsonHttpMessageConverter;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.chat.ChatService;
 import fun.fengwk.kkstudio.chat.dto.ChatCreateDTO;
@@ -33,9 +38,11 @@ import fun.fengwk.kkstudio.chat.http.ChatController;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessSessionSummaryDTO;
 import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
+import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
 import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
 import fun.fengwk.kkstudio.web.advice.StudioProblemAdvice;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
@@ -44,6 +51,9 @@ class ChatControllerTest {
 
   private ChatService chatService;
   private MockMvc mockMvc;
+
+  // 与生产 HTTP 一致：严格拒绝未知字段、Long 输出字符串、Instant 输出 epoch 毫秒。
+  private final JsonMapper objectMapper = StrictHttpJsonMapperTestSupport.strictHttp();
 
   private static String idText(long value) {
     return new UUID(0L, value).toString();
@@ -56,6 +66,7 @@ class ChatControllerTest {
         MockMvcBuilders.standaloneSetup(new ChatController(chatService))
             .setControllerAdvice(
                 new ApiResponseStatusAdvice(), new StudioProblemAdvice(new StudioMessageService()))
+            .setMessageConverters(new JacksonJsonHttpMessageConverter(objectMapper))
             .build();
   }
 
@@ -108,6 +119,24 @@ class ChatControllerTest {
         .andExpect(jsonPath("$.sessionId").value(idText(2)))
         .andExpect(jsonPath("$.name").value("session name"));
     verify(chatService).getSession(idText(7), idText(2));
+  }
+
+  /** 分页 limit 越界由领域规则拒绝，统一 advice 输出 validation problem。 */
+  @Test
+  void rejectsOutOfRangeChatListLimit() throws Exception {
+    when(chatService.listChats(null, 0))
+        .thenThrow(DomainException.validation("chat", "limit must be within [1, 100]"));
+    when(chatService.listChats(null, 101))
+        .thenThrow(DomainException.validation("chat", "limit must be within [1, 100]"));
+
+    for (String limit : List.of("0", "101")) {
+      mockMvc
+          .perform(get("/api/chat/chats").param("limit", limit))
+          .andExpect(status().isBadRequest())
+          .andExpect(jsonPath("$.status").value(400))
+          .andExpect(jsonPath("$.code").value("validation"))
+          .andExpect(jsonPath("$.detail").value("limit must be within [1, 100]"));
+    }
   }
 
   /** 领域错误交给统一 advice：缺失 Chat 输出 not_found problem，控制器不再自行翻译。 */
@@ -185,5 +214,51 @@ class ChatControllerTest {
         .perform(delete("/api/chat/chats/{chatId}", idText(1)))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.code").value("validation"));
+  }
+
+  /** 生产严格 mapper 拒绝创建与整体替换请求中的未知字段。 */
+  @Test
+  void rejectsUnknownChatRequestFields() throws Exception {
+    mockMvc
+        .perform(
+            post("/api/chat/chats")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"title\":\"one\",\"agentName\":\"assistant\",\"extra\":true}"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("validation"));
+    mockMvc
+        .perform(
+            put("/api/chat/chats/{chatId}", idText(1))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    "{\"title\":\"two\",\"agentName\":\"assistant\","
+                        + "\"environmentName\":null,\"expectedVersion\":\"1\",\"extra\":true}"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("validation"));
+    verifyNoInteractions(chatService);
+  }
+
+  /** 生产 mapper 把 Instant 写成 epoch 毫秒整数，而不是小数秒。 */
+  @Test
+  void writesChatInstantsAsEpochMilliseconds() throws Exception {
+    ChatDTO chat = new ChatDTO();
+    chat.setId(idText(1));
+    chat.setTitle("chat-1");
+    chat.setAgentName("assistant");
+    chat.setVersion("0");
+    chat.setCreatedAt(Instant.ofEpochMilli(1720000000123L));
+    chat.setUpdatedAt(Instant.ofEpochMilli(1720000000456L));
+    when(chatService.getChat(idText(1))).thenReturn(chat);
+
+    MvcResult result =
+        mockMvc
+            .perform(get("/api/chat/chats/{chatId}", idText(1)))
+            .andExpect(status().isOk())
+            .andReturn();
+    JsonNode body = objectMapper.readTree(result.getResponse().getContentAsByteArray());
+    assertTrue(body.get("createdAt").isIntegralNumber());
+    assertTrue(body.get("updatedAt").isIntegralNumber());
+    assertEquals(1720000000123L, body.get("createdAt").longValue());
+    assertEquals(1720000000456L, body.get("updatedAt").longValue());
   }
 }

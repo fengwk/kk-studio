@@ -327,6 +327,96 @@ describe('useChatListController', () => {
     expect(result.current.createChatModal.title).toBe('Corrected Title')
   })
 
+  // 验证 YOLO 写入失败后整体替换已保存：列表刷新，弹窗以新版本为基准，重试使用新版本而非旧值。
+  it('keeps the replaced Chat as the edit base and retries YOLO with the new version', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>{children}</MemoryRouter>
+      </QueryClientProvider>
+    )
+    vi.mocked(chatService.updateChat)
+      .mockResolvedValueOnce({
+        id: 'chat-yolo',
+        title: 'Renamed Chat',
+        agentName: 'coder',
+        environmentName: null,
+        yoloEnabled: false,
+        version: '6',
+        createdAt: 0,
+        updatedAt: 0,
+      })
+      .mockResolvedValueOnce({
+        id: 'chat-yolo',
+        title: 'Renamed Chat',
+        agentName: 'coder',
+        environmentName: null,
+        yoloEnabled: false,
+        version: '7',
+        createdAt: 0,
+        updatedAt: 0,
+      })
+    vi.mocked(chatService.updateYolo).mockRejectedValueOnce(new Error('network down'))
+
+    const { result } = renderHook(() => useChatListController(agents, true), { wrapper })
+    await waitFor(() => expect(result.current.chatsQuery.isSuccess).toBe(true))
+    expect(chatService.listChats).toHaveBeenCalledTimes(1)
+
+    act(() =>
+      result.current.openEditChat({
+        id: 'chat-yolo',
+        title: 'Original Title',
+        agentName: 'assistant',
+        environmentName: null,
+        yoloEnabled: false,
+        version: '5',
+        createdAt: 0,
+        updatedAt: 0,
+      }),
+    )
+    act(() => {
+      result.current.createChatModal.onTitleChange('Renamed Chat')
+      result.current.createChatModal.onSelectAgent('coder')
+      result.current.createChatModal.onYoloChange(true)
+    })
+
+    await act(async () => {
+      result.current.createChatModal.onSubmit({ preventDefault() {} } as never)
+    })
+
+    await waitFor(() => {
+      expect(chatService.updateChat).toHaveBeenCalledWith('chat-yolo', {
+        title: 'Renamed Chat',
+        agentName: 'coder',
+        environmentName: null,
+        expectedVersion: '5',
+      })
+      expect(chatService.updateYolo).toHaveBeenCalledWith('chat-yolo', {
+        yoloEnabled: true,
+        expectedVersion: '6',
+      })
+      expect(result.current.createChatModal.open).toBe(true)
+    })
+    // 第一次整体替换成功后即刷新列表，不依赖 YOLO 是否成功。
+    await waitFor(() => expect(chatService.listChats).toHaveBeenCalledTimes(2))
+
+    await act(async () => {
+      result.current.createChatModal.onSubmit({ preventDefault() {} } as never)
+    })
+
+    await waitFor(() => {
+      expect(chatService.updateChat).toHaveBeenCalledTimes(2)
+      expect(vi.mocked(chatService.updateChat).mock.calls.at(-1)?.[1]).toMatchObject({
+        expectedVersion: '6',
+      })
+      expect(vi.mocked(chatService.updateYolo).mock.calls.at(-1)?.[1]).toEqual({
+        yoloEnabled: true,
+        expectedVersion: '7',
+      })
+      expect(result.current.createChatModal.open).toBe(false)
+    })
+  })
+
   // 验证取消操作：关闭弹窗且不触发任何写入
   it('closes modal on cancel without performing any writes', async () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })

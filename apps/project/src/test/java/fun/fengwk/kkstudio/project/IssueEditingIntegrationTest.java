@@ -540,27 +540,40 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
     assertValidation(() -> issueEditingService.updateIssue(issue.getId(), 0L, "修改需求", "描述"));
   }
 
-  /** archiveProject 与 unarchiveProject 切换项目归档状态并在 listProjects(archived) 间迁移。 */
+  /** archiveProject 与 unarchiveProject 切换归档状态；includeArchived 同时返回活跃与已归档项目。 */
   @Test
   void archiveAndUnarchiveProjectTogglesArchivedAtAndFilterMembership() {
     Project project = projectService.createProject("生命周期项目", "描述", true);
+    Project activeProject = projectService.createProject("保持活跃项目", "描述", true);
 
     assertTrue(
         projectService.listProjects(false).stream()
             .anyMatch(p -> p.getId().equals(project.getId())));
-    assertFalse(
+    assertTrue(
+        projectService.listProjects(false).stream()
+            .anyMatch(p -> p.getId().equals(activeProject.getId())));
+    assertTrue(
         projectService.listProjects(true).stream()
             .anyMatch(p -> p.getId().equals(project.getId())));
+    assertTrue(
+        projectService.listProjects(true).stream()
+            .anyMatch(p -> p.getId().equals(activeProject.getId())));
 
-    // 归档
+    // 归档：默认列表只保留活跃项目，includeArchived 同时返回两者。
     Project archived = projectService.archiveProject(project.getId(), 0L);
     assertTrue(archived.isArchived());
     assertFalse(
         projectService.listProjects(false).stream()
             .anyMatch(p -> p.getId().equals(project.getId())));
     assertTrue(
+        projectService.listProjects(false).stream()
+            .anyMatch(p -> p.getId().equals(activeProject.getId())));
+    assertTrue(
         projectService.listProjects(true).stream()
             .anyMatch(p -> p.getId().equals(project.getId())));
+    assertTrue(
+        projectService.listProjects(true).stream()
+            .anyMatch(p -> p.getId().equals(activeProject.getId())));
 
     // 当前版本重复归档返回当前事实；陈旧版本冲突。
     Project reArchived = projectService.archiveProject(project.getId(), 1L);
@@ -574,7 +587,7 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
     assertTrue(
         projectService.listProjects(false).stream()
             .anyMatch(p -> p.getId().equals(project.getId())));
-    assertFalse(
+    assertTrue(
         projectService.listProjects(true).stream()
             .anyMatch(p -> p.getId().equals(project.getId())));
 

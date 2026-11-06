@@ -51,7 +51,14 @@ import { useIssueActionRunner } from './issue-detail/useIssueActionRunner'
 import { useIssueEvidence } from './issue-detail/useIssueEvidence'
 import { useKeyedRequest } from './issue-detail/useKeyedRequest'
 import './issue-detail-alerts.css'
-import type { ProjectWorkflowDTO } from '@/shared/api/generated/contracts'
+import {
+  ISSUE_ACTIVITY_REQUEST_KIND_VALUES,
+  type IssueActivityRequestKind,
+  type ProjectWorkflowDTO,
+} from '@/shared/api/generated/contracts'
+
+const isIssueActivityRequestKind = (value: string): value is IssueActivityRequestKind =>
+  ISSUE_ACTIVITY_REQUEST_KIND_VALUES.some((kind) => kind === value)
 
 export interface IssueDetailModalProps {
   isOpen: boolean
@@ -114,9 +121,9 @@ export function IssueDetailModal({
   const [specVersion, setSpecVersion] = useState('0')
 
   // 2. 各写操作表单：值 + 幂等请求身份
-  const [activityKind, setActivityKind] = useState<'COMMENT' | 'INSTRUCTION'>('COMMENT')
+  const [activityKind, setActivityKind] = useState<IssueActivityRequestKind>('COMMENT')
   const [activityBody, setActivityBody] = useState('')
-  const activityRequest = useKeyedRequest<{ kind: string; body: string }>()
+  const activityRequest = useKeyedRequest<{ kind: IssueActivityRequestKind; body: string }>()
   const [isBlockModalOpen, setIsBlockModalOpen] = useState(false)
   const [blockReason, setBlockReason] = useState('')
   const blockRequest = useKeyedRequest<{ reason: string }>()
@@ -255,7 +262,7 @@ export function IssueDetailModal({
     setActivityBody(value)
     activityRequest.invalidateIfChanged((frozen) => frozen.body === value)
   })
-  const handleActivityKindChange = (kind: 'COMMENT' | 'INSTRUCTION') => guardedChange('ACTIVITY', 'projects.issue.pendingActivityModifyBlocked', () => {
+  const handleActivityKindChange = (kind: IssueActivityRequestKind) => guardedChange('ACTIVITY', 'projects.issue.pendingActivityModifyBlocked', () => {
     setActivityKind(kind)
     activityRequest.invalidateIfChanged((frozen) => frozen.kind === kind)
   })
@@ -789,7 +796,11 @@ export function IssueDetailModal({
                           { value: 'COMMENT', label: t('projects.issue.activityCommentOption') },
                           { value: 'INSTRUCTION', label: t('projects.issue.activityInstructionOption') },
                         ]}
-                        onChange={(value) => handleActivityKindChange(value as 'COMMENT' | 'INSTRUCTION')}
+                        onChange={(value) => {
+                          if (isIssueActivityRequestKind(value)) {
+                            handleActivityKindChange(value)
+                          }
+                        }}
                       />
 
                       <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--fg-muted)' }}>

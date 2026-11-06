@@ -67,10 +67,10 @@ describe('ChatCard', () => {
     expect(screen.getByRole('button', { name: '删除 Draft' })).toBeDisabled()
   })
 
-  it('uses the Chat id when the title is absent and marks a missing Agent', () => {
+  it('uses the Chat id when the title is empty and marks a missing Agent', () => {
     render(
       <MemoryRouter>
-        <ChatCard chat={{ ...chat(), title: null, agentName: 'missing' }} agents={[]} />
+        <ChatCard chat={{ ...chat(), title: '', agentName: 'missing' }} agents={[]} />
       </MemoryRouter>,
     )
     expect(screen.getByRole('button', { name: '进入 Chat chat-1' })).toBeInTheDocument()

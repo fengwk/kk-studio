@@ -14,7 +14,7 @@ public class ChatDTO {
   private String id;
 
   /** 聊天标题：非空白且 ≤256 字符。 */
-  private @Nullable String title;
+  private String title;
 
   /** 必填可见 Agent 身份；Agent 删除后该值可能过期。 */
   private String agentName;
