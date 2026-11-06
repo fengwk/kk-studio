@@ -347,7 +347,11 @@ registerCase({
             `/api/harness/interactions?limit=100&rootThreadId=${encodeURIComponent(threadId)}`,
           )
         ).json
-      assertExactFields(filtered, INTERACTION_PAGE_FIELDS, 'root-filtered interaction page')
+      assertExactFields(
+        { nextCursor: null, freshnessAt: null, ...filtered },
+        INTERACTION_PAGE_FIELDS,
+        'root-filtered interaction page',
+      )
       // 本 case 的等待全部来自本地 ask_user，没有任何 Environment Tool 等待，因此不存在时间驱动的环境等待变更时刻。
       assert(filtered.freshnessAt == null, JSON.stringify(filtered.freshnessAt))
       assert(
