@@ -35,6 +35,7 @@ import fun.fengwk.kkstudio.share.catalog.AgentModelPricingDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentModelRateSetDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentModelVariantDTO;
 import fun.fengwk.kkstudio.share.catalog.HarnessExecutionSelectionDTO;
+import fun.fengwk.kkstudio.share.catalog.PromptCacheRetention;
 import fun.fengwk.kkstudio.share.skill.SkillRefDTO;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
@@ -97,7 +98,7 @@ public abstract class ConfigSyncTestSupport extends WebPostgresTestSupport {
     return data(result);
   }
 
-  /** GET 请求；断言 2xx 后返回 {@code data} 节点。 */
+  /** GET 请求；断言 2xx 后返回资源体。 */
   protected JsonNode getData(String path) throws Exception {
     MvcResult result = mockMvc.perform(get(path)).andExpect(status().is2xxSuccessful()).andReturn();
     return data(result);
@@ -107,8 +108,7 @@ public abstract class ConfigSyncTestSupport extends WebPostgresTestSupport {
     return objectMapper
         .reader()
         .with(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
-        .readTree(result.getResponse().getContentAsString())
-        .path("data");
+        .readTree(result.getResponse().getContentAsString());
   }
 
   protected JsonNode envelope(MvcResult result) throws Exception {
@@ -174,6 +174,7 @@ public abstract class ConfigSyncTestSupport extends WebPostgresTestSupport {
 
     AgentModelVariantDTO variant = new AgentModelVariantDTO();
     variant.setId("default");
+    variant.setPromptCacheRetention(PromptCacheRetention.NONE);
     variant.setProtocolOptionsJson(protocolOptionsJson);
 
     AgentModelConfigDTO config = new AgentModelConfigDTO();

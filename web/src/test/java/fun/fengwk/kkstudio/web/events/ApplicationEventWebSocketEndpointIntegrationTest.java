@@ -222,7 +222,7 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
                 .build(),
             HttpResponse.BodyHandlers.ofString());
     assertEquals(201, chatResponse.statusCode(), chatResponse.body());
-    String chatId = MAPPER.readTree(chatResponse.body()).path("data").path("id").asText();
+    String chatId = MAPPER.readTree(chatResponse.body()).path("id").asText();
 
     String sessionId = UUID.randomUUID().toString();
     String threadId = UUID.randomUUID().toString();

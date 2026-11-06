@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.chat;
+package fun.fengwk.kkstudio.web.chat;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -27,6 +27,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.server.ResponseStatusException;
 
+import fun.fengwk.kkstudio.chat.ChatService;
 import fun.fengwk.kkstudio.chat.dto.ChatCreateDTO;
 import fun.fengwk.kkstudio.chat.dto.ChatDTO;
 import fun.fengwk.kkstudio.chat.dto.ChatPageDTO;
@@ -35,6 +36,9 @@ import fun.fengwk.kkstudio.chat.dto.ChatUpdateDTO;
 import fun.fengwk.kkstudio.chat.http.ChatController;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessSessionSummaryDTO;
+import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
+import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
+import fun.fengwk.kkstudio.web.advice.StudioProblemAdvice;
 
 import java.util.List;
 import java.util.UUID;
@@ -58,11 +62,12 @@ class ChatControllerTest {
     chatService = mock(ChatService.class);
     mockMvc =
         MockMvcBuilders.standaloneSetup(new ChatController(chatService))
-            .setControllerAdvice(new TestApiResponseStatusAdvice())
+            .setControllerAdvice(
+                new ApiResponseStatusAdvice(), new StudioProblemAdvice(new StudioMessageService()))
             .build();
   }
 
-  /** 测试意图：验证 GET /api/chats 返回稳定分页信封（items + nextCursor）与 200 OK 状态码。 */
+  /** 测试意图：验证 GET /api/chats 返回分页资源（items + nextCursor）与 200 OK 状态码。 */
   @Test
   void listChatsReturnsPageWithCursor() throws Exception {
     ChatDTO chat = new ChatDTO();
@@ -76,9 +81,9 @@ class ChatControllerTest {
     mockMvc
         .perform(get("/api/chats"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.items[0].id").value(idText(1)))
-        .andExpect(jsonPath("$.data.items[0].title").value("chat-1"))
-        .andExpect(jsonPath("$.data.nextCursor").value("cursor-2"));
+        .andExpect(jsonPath("$.items[0].id").value(idText(1)))
+        .andExpect(jsonPath("$.items[0].title").value("chat-1"))
+        .andExpect(jsonPath("$.nextCursor").value("cursor-2"));
     verify(chatService).listChats(null, 50);
   }
 
@@ -133,8 +138,8 @@ class ChatControllerTest {
     mockMvc
         .perform(get("/api/chats/{chatId}", idText(5)))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.id").value(idText(5)))
-        .andExpect(jsonPath("$.data.title").value("chat-5"));
+        .andExpect(jsonPath("$.id").value(idText(5)))
+        .andExpect(jsonPath("$.title").value("chat-5"));
     verify(chatService).getChat(idText(5));
   }
 
@@ -147,7 +152,7 @@ class ChatControllerTest {
     verify(chatService).deleteChat(idText(9), "3");
   }
 
-  /** 测试意图：验证 GET /api/chats/{chatId}/sessions 返回分页信封并透传 chatId、cursor 与 limit。 */
+  /** 测试意图：验证 GET /api/chats/{chatId}/sessions 返回分页资源并透传 chatId、cursor 与 limit。 */
   @Test
   void listChatSessionsForwardsChatIdAndPagingParameters() throws Exception {
     HarnessSessionSummaryDTO summary = new HarnessSessionSummaryDTO();
@@ -167,11 +172,11 @@ class ChatControllerTest {
                 .param("cursor", "cursor-1")
                 .param("limit", "10"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.items[0].sessionId").value(idText(2)))
-        .andExpect(jsonPath("$.data.items[0].name").value("session name"))
-        .andExpect(jsonPath("$.data.items[0].firstMessagePreview").value("hello"))
-        .andExpect(jsonPath("$.data.items[0].threadCount").value(2))
-        .andExpect(jsonPath("$.data.nextCursor").value("next"));
+        .andExpect(jsonPath("$.items[0].sessionId").value(idText(2)))
+        .andExpect(jsonPath("$.items[0].name").value("session name"))
+        .andExpect(jsonPath("$.items[0].firstMessagePreview").value("hello"))
+        .andExpect(jsonPath("$.items[0].threadCount").value(2))
+        .andExpect(jsonPath("$.nextCursor").value("next"));
     verify(chatService).listSessions(idText(7), "cursor-1", 10);
   }
 
@@ -186,8 +191,8 @@ class ChatControllerTest {
     mockMvc
         .perform(get("/api/chats/" + idText(7) + "/sessions/" + idText(3)))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.sessionId").value(idText(3)))
-        .andExpect(jsonPath("$.data.name").value("focused session"));
+        .andExpect(jsonPath("$.sessionId").value(idText(3)))
+        .andExpect(jsonPath("$.name").value("focused session"));
     verify(chatService).getSession(idText(7), idText(3));
   }
 
@@ -288,7 +293,7 @@ class ChatControllerTest {
                     "{\"title\":\"t\",\"agentName\":\"default-assistant\","
                         + "\"environmentName\":\"env-a\"}"))
         .andExpect(status().isCreated())
-        .andExpect(jsonPath("$.data.environmentName").value("env-a"));
+        .andExpect(jsonPath("$.environmentName").value("env-a"));
 
     ArgumentCaptor<ChatCreateDTO> captor = ArgumentCaptor.forClass(ChatCreateDTO.class);
     verify(chatService).createChat(captor.capture());

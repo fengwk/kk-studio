@@ -64,6 +64,7 @@ import fun.fengwk.kkstudio.share.catalog.AgentModelRateSetDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentModelVariantDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.catalog.HarnessExecutionSelectionDTO;
+import fun.fengwk.kkstudio.share.catalog.PromptCacheRetention;
 import fun.fengwk.kkstudio.share.mcp.McpServerCreateDTO;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
@@ -159,12 +160,14 @@ public class StudioMcpRuntimeToolIntegrationTest extends WebPostgresTestSupport 
     createMcp.setHeaders(Map.of("Authorization", "Bearer secret-bearer-token-do-not-leak"));
     createMcp.setEnabled(true);
     createMcp.setTimeoutMillis(15000L);
+    ObjectNode createMcpBody = objectMapper.valueToTree(createMcp);
+    createMcpBody.put("timeoutMillis", 15000);
 
     mockMvc
         .perform(
             post("/api/mcp-servers")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(createMcp)))
+                .content(createMcpBody.toString()))
         .andExpect(status().isCreated())
         .andExpect(jsonPath("$.name").value(serverName))
         .andExpect(jsonPath("$.version").value("0"))
@@ -211,6 +214,8 @@ public class StudioMcpRuntimeToolIntegrationTest extends WebPostgresTestSupport 
     providerDto.setModelCallIdleTimeoutMillis(3000L);
     ObjectNode providerBody = objectMapper.valueToTree(providerDto);
     providerBody.put("credential", providerDto.getCredential());
+    providerBody.put("modelCallTimeoutMillis", 120000);
+    providerBody.put("modelCallIdleTimeoutMillis", 3000);
 
     mockMvc
         .perform(
@@ -388,7 +393,7 @@ public class StudioMcpRuntimeToolIntegrationTest extends WebPostgresTestSupport 
   }
 
   private JsonNode data(MvcResult result) throws Exception {
-    return objectMapper.readTree(result.getResponse().getContentAsString()).path("data");
+    return objectMapper.readTree(result.getResponse().getContentAsString());
   }
 
   private static void configureExecutableModel(AgentModelCreateDTO model) {
@@ -417,6 +422,7 @@ public class StudioMcpRuntimeToolIntegrationTest extends WebPostgresTestSupport 
     config.setPricing(pricing);
     AgentModelVariantDTO variant = new AgentModelVariantDTO();
     variant.setId("default");
+    variant.setPromptCacheRetention(PromptCacheRetention.NONE);
     config.setVariants(List.of(variant));
     config.setDefaultVariant("default");
     model.setConfig(config);

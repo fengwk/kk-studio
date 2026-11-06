@@ -776,7 +776,7 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
   private JsonNode snapshotHttp(MockMvc mvc, UUID threadId) throws Exception {
     var response = mvc.perform(get("/api/harness/threads/" + threadId)).andReturn().getResponse();
     assertEquals(200, response.getStatus());
-    return jsonMapper.readTree(response.getContentAsString()).path("data");
+    return jsonMapper.readTree(response.getContentAsString());
   }
 
   /** 环境等待分组的公共断言：聚合身份、展示名、计数、排序代表、归属，且绝不冒充可操作 interaction。 */
