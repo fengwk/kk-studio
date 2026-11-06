@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.project.dto;
 import org.springframework.stereotype.Component;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
@@ -238,14 +239,14 @@ public class ProjectDtoMapper {
         .build();
   }
 
-  private Object decodeJsonData(String data) {
+  private JsonNode decodeJsonData(String data) {
     if (data == null || data.isBlank()) {
       return null;
     }
     try {
-      // 活动扩展数据按 BigDecimal 读取；其整数写出仍使用宿主 HTTP profile。
+      // 自由 JSON 以节点保留数字形态，不受 DTO 的 Long 字符串序列化规则影响。
       return objectMapper
-          .readerFor(Object.class)
+          .readerFor(JsonNode.class)
           .with(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
           .readValue(data);
     } catch (JacksonException error) {

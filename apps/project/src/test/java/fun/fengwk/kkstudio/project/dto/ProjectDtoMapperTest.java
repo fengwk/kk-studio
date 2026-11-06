@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.project.dto;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -34,10 +33,8 @@ import fun.fengwk.kkstudio.project.model.Project;
 import fun.fengwk.kkstudio.project.service.StageBudgetView;
 
 import java.math.BigDecimal;
-import java.math.BigInteger;
 import java.time.Instant;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 /** 验证 ProjectDtoMapper 的严格双向映射与格式校验。 */
@@ -270,13 +267,13 @@ class ProjectDtoMapperTest {
     assertNull(dto.getActorAgentName());
     assertNull(dto.getRunId());
     assertEquals("Input body", dto.getBody());
-    assertTrue(dto.getData() instanceof Map);
+    assertTrue(dto.getData().isObject());
     assertEquals(now, dto.getCreatedAt());
   }
 
   @Test
   void activityDataRetainsExactNumbersThroughTheHttpProfile() {
-    // 活动扩展数据不得经 Double 损失精度；整数仍遵循 HTTP Long 字符串规则。
+    // 自由 JSON 数字不得损失精度或被 DTO 的 Long 序列化规则转成字符串。
     IssueActivity activity =
         IssueActivity.builder()
             .data(
@@ -287,22 +284,22 @@ class ProjectDtoMapperTest {
                 """)
             .build();
     IssueActivityDTO dto = mapper.toDto(activity);
-    Map<?, ?> data = assertInstanceOf(Map.class, dto.getData());
+    var data = dto.getData();
     BigDecimal precise = new BigDecimal("0.123456789012345678901234567890");
-    assertEquals(precise, data.get("precise"));
-    assertEquals(new BigDecimal("1e309"), data.get("huge"));
-    assertEquals(new BigDecimal("1e-324"), data.get("tiny"));
-    assertEquals(new BigDecimal("1.5000"), data.get("scaled"));
-    assertEquals(9007199254740993L, data.get("long"));
-    assertEquals(new BigInteger("9223372036854775808"), data.get("wide"));
-    assertEquals(List.of(precise), data.get("nested"));
+    assertEquals(0, precise.compareTo(data.get("precise").decimalValue()));
+    assertEquals(0, new BigDecimal("1e309").compareTo(data.get("huge").decimalValue()));
+    assertEquals(0, new BigDecimal("1e-324").compareTo(data.get("tiny").decimalValue()));
+    assertEquals(0, new BigDecimal("1.5000").compareTo(data.get("scaled").decimalValue()));
+    assertEquals(9007199254740993L, data.get("long").longValue());
+    assertEquals("9223372036854775808", data.get("wide").asString());
+    assertEquals(0, precise.compareTo(data.get("nested").get(0).decimalValue()));
 
     String wire = httpMapper.writeValueAsString(dto);
     assertTrue(wire.contains("\"precise\":" + precise));
     assertTrue(wire.contains("\"huge\":1E+309"));
     assertTrue(wire.contains("\"tiny\":1E-324"));
     assertTrue(wire.contains("\"scaled\":1.5000"));
-    assertTrue(wire.contains("\"long\":\"9007199254740993\""));
+    assertTrue(wire.contains("\"long\":9007199254740993"));
     assertTrue(wire.contains("\"wide\":9223372036854775808"));
   }
 

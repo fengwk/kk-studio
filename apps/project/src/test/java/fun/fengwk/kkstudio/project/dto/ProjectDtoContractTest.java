@@ -18,7 +18,6 @@ import java.lang.reflect.Modifier;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -379,7 +378,7 @@ class ProjectDtoContractTest {
             .actorAgentName(null)
             .runId(null)
             .body("comment body")
-            .data(Map.of("key", "value", "count", 42))
+            .data(objectMapper.readTree("{\"key\":\"value\",\"count\":42}"))
             .createdAt(Instant.parse("2026-09-27T10:00:00Z"))
             .build();
 
