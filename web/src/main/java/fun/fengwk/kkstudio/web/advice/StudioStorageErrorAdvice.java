@@ -8,7 +8,6 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
-import fun.fengwk.kkstudio.platform.storage.error.StorageConflictException;
 import fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;
 import fun.fengwk.kkstudio.web.controller.StudioStorageController;
@@ -24,7 +23,7 @@ import java.util.Map;
  *   <li>{@link StorageResourceNotFoundException} → 404（上传或 blob 不存在、blob 已 DELETING；重复删除/重复
  *       complete 幂等）
  *   <li>{@link StorageVerificationException} → 409（对象大小/校验和不匹配或对象缺失，上传保持 PENDING 可重传）
- *   <li>{@link StorageConflictException} → 409（并发去重未收敛，可重试）
+ *   <li>领域冲突 → 409（上传锁竞争，可重试），由通用领域 advice 处理
  * </ul>
  *
  * @author fengwk
@@ -46,11 +45,6 @@ public class StudioStorageErrorAdvice {
   @ExceptionHandler(StorageVerificationException.class)
   public ResponseEntity<ApiResponse<Void>> handleVerification(StorageVerificationException error) {
     return build(HttpStatus.CONFLICT, "STORAGE_VERIFICATION", error.getMessage());
-  }
-
-  @ExceptionHandler(StorageConflictException.class)
-  public ResponseEntity<ApiResponse<Void>> handleConflict(StorageConflictException error) {
-    return build(HttpStatus.CONFLICT, "STORAGE_CONFLICT", error.getMessage());
   }
 
   private ResponseEntity<ApiResponse<Void>> build(HttpStatus status, String code, String message) {

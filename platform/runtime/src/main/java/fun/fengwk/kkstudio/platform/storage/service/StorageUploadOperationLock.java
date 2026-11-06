@@ -2,7 +2,7 @@ package fun.fengwk.kkstudio.platform.storage.service;
 
 import lombok.extern.slf4j.Slf4j;
 
-import fun.fengwk.kkstudio.platform.storage.error.StorageConflictException;
+import fun.fengwk.kkstudio.common.error.DomainException;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -30,8 +30,8 @@ import java.util.UUID;
  * 0x6B6B5354/0x6A6F696E}。本类固定使用不同的 {@link #NAMESPACE}，避免与它们在同一把 advisory 锁上意外串行。
  *
  * <p>每次 acquire 用一条独立物理会话（autocommit，不开任何业务事务、不持行锁）。阻塞取锁受会话局部 {@code statement_timeout} 约束： 超过预算
- * Postgres 会取消这条语句并返回 {@link StorageConflictException}，绝不让请求线程无限挂起；该超时只作用于这条专用会话，不修改业务池或实例级设置。
- * close 时显式解锁并关闭会话，即使调用方崩溃或忘记解锁，会话结束也会由 PostgreSQL 释放锁。
+ * Postgres 会取消这条语句并返回 {@link DomainException} 冲突，绝不让请求线程无限挂起；该超时只作用于这条专用会话，不修改业务池或实例级设置。 close
+ * 时显式解锁并关闭会话，即使调用方崩溃或忘记解锁，会话结束也会由 PostgreSQL 释放锁。
  *
  * @author fengwk
  */
@@ -65,8 +65,7 @@ public class StorageUploadOperationLock {
   /**
    * 阻塞获取同一 upload 的独占锁：持锁方完成写对象与绑定后才会返回。
    *
-   * @throws fun.fengwk.kkstudio.platform.storage.error.StorageConflictException
-   *     等待超过取锁预算，上传仍被其它方占用（可重试）
+   * @throws DomainException 等待超过取锁预算，上传仍被其它方占用（可重试）
    * @throws IllegalStateException 锁基础设施不可用（连接或 SQL 失败）
    */
   public Handle acquire(UUID uploadId) {
@@ -109,7 +108,8 @@ public class StorageUploadOperationLock {
       return handle;
     } catch (SQLException error) {
       if (QUERY_CANCELED_SQL_STATE.equals(error.getSQLState())) {
-        throw new StorageConflictException("upload " + uploadId + " is busy; retry later");
+        throw DomainException.conflict(
+            "STORAGE_CONFLICT", "upload " + uploadId + " is busy; retry later");
       }
       throw new IllegalStateException("failed to acquire storage upload lock", error);
     } finally {

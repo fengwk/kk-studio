@@ -12,7 +12,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.platform.storage.error.StorageConflictException;
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -83,7 +84,10 @@ class StorageUploadOperationLockTest {
         new StorageUploadOperationLock(this::openConnection, Duration.ofMillis(400));
     try (StorageUploadOperationLock.Handle held = lock.acquire(uploadId)) {
       long startedAt = System.nanoTime();
-      assertThrows(StorageConflictException.class, () -> shortTimeoutLock.acquire(uploadId));
+      DomainException error =
+          assertThrows(DomainException.class, () -> shortTimeoutLock.acquire(uploadId));
+      assertEquals(DomainErrorCode.CONFLICT, error.code());
+      assertEquals("STORAGE_CONFLICT", error.reason());
       long elapsedMillis = Duration.ofNanos(System.nanoTime() - startedAt).toMillis();
       assertTrue(elapsedMillis >= 300L, "the acquisition must actually wait: " + elapsedMillis);
       assertTrue(
