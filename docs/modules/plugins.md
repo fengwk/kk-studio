@@ -11,7 +11,7 @@
 每个插件是一个实现了 [`Plugin`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/Plugin.java) 的顶层组件，通过 Spring Boot 的 `AutoConfiguration.imports` 注册。
 
 - **身份声明**：`descriptor()` 返回全局唯一的 `PluginDescriptor(id, name, version)`。
-- **受控配置 Schema**：`configurationSchema()` 声明强类型普通配置（`valuesSchema`）、初始默认值 JSON（`defaultsJson`）与受保护秘密定义（`secrets`）。配置校验与存储遵循严格 JSON 规范，普通值以 `valuesJson` 原文保留大整数、精确小数与超范围指数；秘密绝不以明文回读或导出，管理面仅投影每个秘密字段的 `{description, configured}`。
+- **受控配置 Schema**：`configurationSchema()` 声明强类型普通配置（`valuesSchema`）、初始默认值 JSON（`defaultsJson`）与受保护秘密定义（`secrets`）。管理 API 的 `valuesJson` 是 JSON 文本字符串；宿主校验、补默认值后保存并返回规范文本，数值逐值保真，不保证原始排版或数字 token。`valuesSchema` 和 `defaults` 作为 JSON 节点返回。秘密绝不以明文回读或导出，管理面仅投影每个秘密字段的 `{description, configured}`。
 - **认证规范**：`authenticationSpec()` 声明插件的认证模式，支持 `None`（无认证）、`StaticKey`（静态 API Key / Token，支持声明变更时失效认证代际的上下文关联字段）和 `DeepLink`（OAuth 风格的两阶段认证，支持区域候选）。
 - **实例装配**：`configure(config, context)` 根据数据库中经 CAS 校验的当前配置与只读凭据端口装配 `PluginInstance`。实例暴露两类贡献：
   - `harnessContributors()`：向 Harness Runtime 贡献 Agent 外部工具（`HarnessContributor`）；
