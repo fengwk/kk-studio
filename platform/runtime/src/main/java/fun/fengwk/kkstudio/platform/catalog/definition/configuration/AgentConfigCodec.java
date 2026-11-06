@@ -11,8 +11,8 @@ import tools.jackson.databind.cfg.CoercionInputShape;
 import tools.jackson.databind.type.LogicalType;
 
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentConfigDTO;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillNames;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.skill.SkillRefDTO;
 
 import java.util.HashSet;
@@ -20,14 +20,14 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 
-/** Agent Definition 结构化配置的唯一持久化 JSON 边界。 */
+/** Agent 结构化配置的唯一持久化 JSON 边界。 */
 @Component
-public class AgentDefinitionConfigCodec {
+public class AgentConfigCodec {
 
   private final ObjectMapper objectMapper;
   private final ObjectReader configReader;
 
-  public AgentDefinitionConfigCodec(ObjectMapper objectMapper) {
+  public AgentConfigCodec(ObjectMapper objectMapper) {
     this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
     ObjectMapper strictMapper =
         objectMapper
@@ -57,15 +57,15 @@ public class AgentDefinitionConfigCodec {
                         .setCoercion(CoercionInputShape.Float, CoercionAction.Fail)
                         .setCoercion(CoercionInputShape.Boolean, CoercionAction.Fail))
             .build();
-    this.configReader = strictMapper.readerFor(AgentDefinitionConfigDTO.class);
+    this.configReader = strictMapper.readerFor(AgentConfigDTO.class);
   }
 
-  public AgentDefinitionConfigDTO decode(String configJson) {
+  public AgentConfigDTO decode(String configJson) {
     if (configJson == null || configJson.isBlank()) {
       throw new IllegalStateException("stored agent definition config is blank");
     }
     try {
-      AgentDefinitionConfigDTO config = configReader.readValue(configJson);
+      AgentConfigDTO config = configReader.readValue(configJson);
       try {
         validate(config);
       } catch (IllegalArgumentException error) {
@@ -77,7 +77,7 @@ public class AgentDefinitionConfigCodec {
     }
   }
 
-  public String encode(AgentDefinitionConfigDTO config) {
+  public String encode(AgentConfigDTO config) {
     validate(config);
     try {
       return objectMapper.writeValueAsString(config);
@@ -86,7 +86,7 @@ public class AgentDefinitionConfigCodec {
     }
   }
 
-  private static void validate(AgentDefinitionConfigDTO config) {
+  private static void validate(AgentConfigDTO config) {
     if (config == null) {
       throw new IllegalArgumentException("agent definition config is required");
     }

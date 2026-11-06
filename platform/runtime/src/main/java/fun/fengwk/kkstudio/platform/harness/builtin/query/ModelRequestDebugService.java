@@ -12,13 +12,13 @@ import fun.fengwk.kkstudio.harness.builtin.query.BuiltinRequestQuery;
 import fun.fengwk.kkstudio.harness.builtin.query.BuiltinRequestView;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
-import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
+import fun.fengwk.kkstudio.platform.catalog.definition.Agent;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentRepository;
+import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentConfigCodec;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentConfigDTO;
 import fun.fengwk.kkstudio.platform.harness.task.AgentPromptComposer;
 import fun.fengwk.kkstudio.platform.harness.thread.command.DatabaseTurnResolver;
 import fun.fengwk.kkstudio.platform.harness.thread.command.LiveTurnPlan;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.catalog.EnvironmentSupportDTO;
 import fun.fengwk.kkstudio.share.runtime.HarnessModelRequestDebugDTO;
 import fun.fengwk.kkstudio.share.runtime.HarnessModelSelectionDTO;
@@ -45,8 +45,7 @@ import java.util.UUID;
  * <p>冻结请求视图与顶层现算预览相互独立——预览被拒绝时冻结事实仍然成立。
  *
  * <p>每个 subagent binding 额外附带目标 Agent 当前配置声明（tools/skills/subagents 与 canonical config JSON）：它只读
- * {@link AgentDefinitionRepository} 与 {@link AgentDefinitionConfigCodec}，同名缺失或配置非法时明确拒绝，绝不静默返回空数组，
- * 也不递归展开下一层 Agent。
+ * {@link AgentRepository} 与 {@link AgentConfigCodec}，同名缺失或配置非法时明确拒绝，绝不静默返回空数组， 也不递归展开下一层 Agent。
  *
  * <p>Platform 不是 Harness 组合根，本服务由 Web 组合根在 {@link HarnessRuntime} 完整装配后显式创建。
  */
@@ -62,22 +61,21 @@ public final class ModelRequestDebugService {
 
   private final HarnessRuntime runtime;
   private final DatabaseTurnResolver turnResolver;
-  private final AgentDefinitionRepository agentDefinitionRepository;
-  private final AgentDefinitionConfigCodec agentConfigCodec;
+  private final AgentRepository agentRepository;
+  private final AgentConfigCodec agentConfigCodec;
   private final BuiltinRequestQuery builtinRequests;
   private final Clock clock;
 
   public ModelRequestDebugService(
       HarnessRuntime runtime,
       DatabaseTurnResolver turnResolver,
-      AgentDefinitionRepository agentDefinitionRepository,
-      AgentDefinitionConfigCodec agentConfigCodec,
+      AgentRepository agentRepository,
+      AgentConfigCodec agentConfigCodec,
       BuiltinRequestQuery builtinRequests,
       Clock clock) {
     this.runtime = Objects.requireNonNull(runtime, "runtime");
     this.turnResolver = Objects.requireNonNull(turnResolver, "turnResolver");
-    this.agentDefinitionRepository =
-        Objects.requireNonNull(agentDefinitionRepository, "agentDefinitionRepository");
+    this.agentRepository = Objects.requireNonNull(agentRepository, "agentRepository");
     this.agentConfigCodec = Objects.requireNonNull(agentConfigCodec, "agentConfigCodec");
     this.builtinRequests = Objects.requireNonNull(builtinRequests, "builtinRequests");
     this.clock = Objects.requireNonNull(clock, "clock");
@@ -192,11 +190,11 @@ public final class ModelRequestDebugService {
    * <p>声明读取时同名定义缺失或配置非法必须明确失败，不静默返回空配置。
    */
   private HarnessModelRequestDebugDTO.SubagentDTO subagent(SubagentBinding binding) {
-    AgentDefinition definition = agentDefinitionRepository.getByName(binding.name());
+    Agent definition = agentRepository.getByName(binding.name());
     if (definition == null) {
       throw new IllegalStateException("subagent definition not found: " + binding.name());
     }
-    AgentDefinitionConfigDTO config = decodeSubagentConfig(definition);
+    AgentConfigDTO config = decodeSubagentConfig(definition);
     HarnessModelRequestDebugDTO.SubagentDTO dto = new HarnessModelRequestDebugDTO.SubagentDTO();
     dto.setName(binding.name());
     dto.setDescription(binding.description());
@@ -208,7 +206,7 @@ public final class ModelRequestDebugService {
     return dto;
   }
 
-  private AgentDefinitionConfigDTO decodeSubagentConfig(AgentDefinition definition) {
+  private AgentConfigDTO decodeSubagentConfig(Agent definition) {
     try {
       return agentConfigCodec.decode(definition.configJson());
     } catch (IllegalStateException error) {

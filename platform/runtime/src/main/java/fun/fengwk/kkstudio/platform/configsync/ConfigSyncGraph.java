@@ -3,8 +3,9 @@ package fun.fengwk.kkstudio.platform.configsync;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
-import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
+import fun.fengwk.kkstudio.platform.catalog.definition.Agent;
+import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentConfigCodec;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentConfigDTO;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServer;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpTool;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
@@ -15,7 +16,6 @@ import fun.fengwk.kkstudio.platform.environment.Environment;
 import fun.fengwk.kkstudio.platform.harness.builtin.BuiltinConfigSyncAdapter;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRow;
 import fun.fengwk.kkstudio.platform.pluginhost.service.PluginAgentDependencies;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentModelKind;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncKind;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncRef;
@@ -42,12 +42,12 @@ public final class ConfigSyncGraph {
 
   private static final String RESOURCE = "config_sync";
 
-  private final AgentDefinitionConfigCodec agentConfigCodec;
+  private final AgentConfigCodec agentConfigCodec;
   private final AgentModelGroupConfigCodec modelGroupConfigCodec;
   private final PluginAgentDependencies pluginAgentDependencies;
 
   public ConfigSyncGraph(
-      AgentDefinitionConfigCodec agentConfigCodec,
+      AgentConfigCodec agentConfigCodec,
       AgentModelGroupConfigCodec modelGroupConfigCodec,
       PluginAgentDependencies pluginAgentDependencies) {
     this.agentConfigCodec = agentConfigCodec;
@@ -70,7 +70,7 @@ public final class ConfigSyncGraph {
     for (AgentModel model : snapshot.models()) {
       edges.put(ConfigSyncRefs.model(model.name()), modelDependencies(model));
     }
-    for (AgentDefinition agent : snapshot.agents()) {
+    for (Agent agent : snapshot.agents()) {
       edges.put(agentRef(agent), agentDependencies(agent, toolServer, builtinAgentNames));
     }
     for (SkillPackage pkg : snapshot.skillPackages()) {
@@ -190,13 +190,13 @@ public final class ConfigSyncGraph {
 
   /** Agent 引用的 subagent：系统内置 Agent 已由系统满足，绝不作为 portable 依赖输出。 */
   private List<ConfigSyncRef> agentDependencies(
-      AgentDefinition agent, Map<String, String> toolServer, Set<String> builtinAgentNames) {
+      Agent agent, Map<String, String> toolServer, Set<String> builtinAgentNames) {
     Set<ConfigSyncRef> deps = new LinkedHashSet<>();
     var model = BuiltinConfigSyncAdapter.model(agent.execution());
     if (model != null) {
       deps.add(ConfigSyncRefs.model(model.modelName()));
     }
-    AgentDefinitionConfigDTO config = agentConfigCodec.decode(agent.configJson());
+    AgentConfigDTO config = agentConfigCodec.decode(agent.configJson());
     if (config.getSkills() != null) {
       for (SkillRefDTO skill : config.getSkills()) {
         deps.add(ConfigSyncRefs.ref(ConfigSyncKind.SKILL_PACKAGES, skill.getPackageName()));
@@ -242,7 +242,7 @@ public final class ConfigSyncGraph {
     return ConfigSyncRefs.ref(ConfigSyncKind.PROVIDERS, provider.name());
   }
 
-  private static ConfigSyncRef agentRef(AgentDefinition agent) {
+  private static ConfigSyncRef agentRef(Agent agent) {
     return ConfigSyncRefs.ref(ConfigSyncKind.AGENTS, agent.name());
   }
 

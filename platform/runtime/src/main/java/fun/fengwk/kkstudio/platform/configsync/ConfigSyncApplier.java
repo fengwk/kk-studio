@@ -5,9 +5,13 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionService;
+import fun.fengwk.kkstudio.platform.catalog.definition.Agent;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentRepository;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentService;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentConfigDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentCreateDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentEditablePropertiesDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentUpdateDTO;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerService;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
@@ -22,10 +26,6 @@ import fun.fengwk.kkstudio.platform.error.CatalogVersions;
 import fun.fengwk.kkstudio.platform.pluginhost.service.PluginAgentDependencies;
 import fun.fengwk.kkstudio.platform.pluginhost.service.PluginConfigurationService;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsService;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionCreateDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionEditablePropertiesDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionUpdateDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentModelCreateDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentModelEditablePropertiesDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentModelUpdateDTO;
@@ -55,8 +55,8 @@ public class ConfigSyncApplier {
   private final AgentModelService modelService;
   private final SkillCatalogService skillCatalogService;
   private final McpServerService mcpServerService;
-  private final AgentDefinitionRepository definitionRepository;
-  private final AgentDefinitionService definitionService;
+  private final AgentRepository agentRepository;
+  private final AgentService agentService;
   private final EnvironmentRepository environmentRepository;
   private final EnvironmentService environmentService;
   private final SystemSettingsService systemSettingsService;
@@ -130,17 +130,17 @@ public class ConfigSyncApplier {
   private void applyAgents(List<ConfigSyncParser.AgentSpec> agents) {
     // 阶段一：先以空 subagent allowlist 创建新 Agent，使同事务内的循环引用有目标行可引用。
     for (ConfigSyncParser.AgentSpec spec : agents) {
-      if (definitionRepository.getByName(spec.name()) == null) {
-        AgentDefinitionCreateDTO create = buildAgentCreate(spec);
-        definitionService.createAgent(create);
+      if (agentRepository.getByName(spec.name()) == null) {
+        AgentCreateDTO create = buildAgentCreate(spec);
+        agentService.createAgent(create);
       }
     }
     // 阶段二：把所有 Agent 更新为完整配置，此时全部被引用的 Agent 已存在。
     for (ConfigSyncParser.AgentSpec spec : agents) {
-      AgentDefinition current = definitionRepository.getByName(spec.name());
-      AgentDefinitionUpdateDTO update = buildAgentUpdate(spec);
+      Agent current = agentRepository.getByName(spec.name());
+      AgentUpdateDTO update = buildAgentUpdate(spec);
       update.setExpectedVersion(CatalogVersions.format(current.version()));
-      definitionService.updateAgent(spec.name(), update);
+      agentService.updateAgent(spec.name(), update);
     }
   }
 
@@ -189,32 +189,31 @@ public class ConfigSyncApplier {
     target.setGroup(source.getGroup());
   }
 
-  private static AgentDefinitionCreateDTO buildAgentCreate(ConfigSyncParser.AgentSpec spec) {
-    AgentDefinitionCreateDTO create = new AgentDefinitionCreateDTO();
+  private static AgentCreateDTO buildAgentCreate(ConfigSyncParser.AgentSpec spec) {
+    AgentCreateDTO create = new AgentCreateDTO();
     copyAgent(spec.properties(), create);
     create.setName(spec.name());
     create.setConfig(withSubagents(spec.properties().getConfig(), List.of()));
     return create;
   }
 
-  private static AgentDefinitionUpdateDTO buildAgentUpdate(ConfigSyncParser.AgentSpec spec) {
-    AgentDefinitionUpdateDTO update = new AgentDefinitionUpdateDTO();
+  private static AgentUpdateDTO buildAgentUpdate(ConfigSyncParser.AgentSpec spec) {
+    AgentUpdateDTO update = new AgentUpdateDTO();
     copyAgent(spec.properties(), update);
     update.setConfig(spec.properties().getConfig());
     return update;
   }
 
   private static void copyAgent(
-      AgentDefinitionEditablePropertiesDTO source, AgentDefinitionEditablePropertiesDTO target) {
+      AgentEditablePropertiesDTO source, AgentEditablePropertiesDTO target) {
     target.setDescription(source.getDescription());
     target.setSystemPrompt(source.getSystemPrompt());
     target.setExecution(source.getExecution());
     target.setConfig(source.getConfig());
   }
 
-  private static AgentDefinitionConfigDTO withSubagents(
-      AgentDefinitionConfigDTO config, List<String> subagents) {
-    AgentDefinitionConfigDTO copy = new AgentDefinitionConfigDTO();
+  private static AgentConfigDTO withSubagents(AgentConfigDTO config, List<String> subagents) {
+    AgentConfigDTO copy = new AgentConfigDTO();
     copy.setTools(config.getTools());
     copy.setSkills(config.getSkills());
     copy.setSubagents(subagents);

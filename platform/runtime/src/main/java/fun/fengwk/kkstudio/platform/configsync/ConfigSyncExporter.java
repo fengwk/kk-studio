@@ -6,8 +6,8 @@ import org.springframework.stereotype.Component;
 import fun.fengwk.kkstudio.common.json.StrictJson;
 import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
-import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
+import fun.fengwk.kkstudio.platform.catalog.definition.Agent;
+import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentConfigCodec;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServer;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModelGroupConfigCodec;
@@ -44,7 +44,7 @@ public final class ConfigSyncExporter {
   private final AgentProviderConfigurationCodec providerConfigurationCodec;
   private final AgentModelRuntimeConfigParser modelConfigParser;
   private final AgentModelGroupConfigCodec modelGroupConfigCodec;
-  private final AgentDefinitionConfigCodec agentConfigCodec;
+  private final AgentConfigCodec agentConfigCodec;
   private final SystemSettingsCodec systemSettingsCodec;
   private final ConfigSyncYaml yaml;
 
@@ -70,7 +70,7 @@ public final class ConfigSyncExporter {
     putIfNotEmpty(document, ConfigSyncKind.MODELS, models);
 
     List<Object> agents = new ArrayList<>();
-    for (AgentDefinition agent : snapshot.agents()) {
+    for (Agent agent : snapshot.agents()) {
       if (selected.contains(ConfigSyncRefs.ref(ConfigSyncKind.AGENTS, agent.name()))) {
         agents.add(exportAgent(agent));
       }
@@ -167,7 +167,7 @@ public final class ConfigSyncExporter {
     return map;
   }
 
-  private Map<String, Object> exportAgent(AgentDefinition agent) {
+  private Map<String, Object> exportAgent(Agent agent) {
     Map<String, Object> map = new LinkedHashMap<>();
     map.put("name", agent.name());
     putIfNotNull(map, "description", agent.description());

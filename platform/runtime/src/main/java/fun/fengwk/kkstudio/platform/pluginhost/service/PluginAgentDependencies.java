@@ -4,7 +4,7 @@ import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentRepository;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfig;
 import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
 import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
@@ -45,7 +45,7 @@ public class PluginAgentDependencies {
 
   private final StudioPluginRegistry registry;
   private final PluginConfigurationRepository configurationRepository;
-  private final AgentDefinitionRepository definitionRepository;
+  private final AgentRepository agentRepository;
 
   /** 一份待核验的插件普通配置声明：安装身份、配置修订与普通值原文。 */
   public record Declaration(String pluginId, long revision, String valuesJson) {
@@ -101,7 +101,7 @@ public class PluginAgentDependencies {
               declaration.pluginId(), declaration.revision(), declaration.valuesJson()));
     }
     for (String agent : required) {
-      if (definitionRepository.getByNameForUpdate(agent) == null) {
+      if (agentRepository.getByNameForUpdate(agent) == null) {
         throw DomainException.validation(RESOURCE, MISSING_AGENT);
       }
     }

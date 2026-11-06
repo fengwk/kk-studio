@@ -5,13 +5,10 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 import tools.jackson.databind.ObjectMapper;
 
-import fun.fengwk.kkstudio.common.page.Page;
-import fun.fengwk.kkstudio.common.page.PageQuery;
 import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.codec.ExecutionSelectionJsonCodec;
 import fun.fengwk.kkstudio.harness.model.HarnessJson;
 import fun.fengwk.kkstudio.platform.persistence.PostgresJdbcTypes;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionType;
 
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -19,7 +16,7 @@ import java.util.Objects;
 
 /** {@code agent} 的 JdbcClient 仓库；写入以 (name, version) 做原子 CAS，并提供删除前的引用查询。 */
 @Repository
-public class AgentDefinitionRepository {
+public class AgentRepository {
 
   private static final ObjectMapper MAPPER = HarnessJson.STRICT_DECIMAL;
 
@@ -48,11 +45,11 @@ public class AgentDefinitionRepository {
       where name = :name and version = :expectedVersion
       """;
 
-  private static final RowMapper<AgentDefinition> ROW_MAPPER =
+  private static final RowMapper<Agent> ROW_MAPPER =
       (rs, rowNum) ->
-          new AgentDefinition(
+          new Agent(
               rs.getString("name"),
-              AgentDefinitionType.valueOf(rs.getString("type")),
+              AgentType.valueOf(rs.getString("type")),
               rs.getString("description"),
               rs.getString("system_prompt"),
               decodeExecution(rs.getString("execution")),
@@ -63,56 +60,25 @@ public class AgentDefinitionRepository {
 
   private final JdbcClient jdbcClient;
 
-  public AgentDefinitionRepository(JdbcClient jdbcClient) {
+  public AgentRepository(JdbcClient jdbcClient) {
     this.jdbcClient = Objects.requireNonNull(jdbcClient, "jdbcClient");
   }
 
-  public Page<AgentDefinition> page(PageQuery pageQuery) {
-    // 聚合行始终存在，左连接保留越界空页的 total；同一语句共享 PostgreSQL 快照。
-    List<PageRow> rows =
-        jdbcClient
-            .sql(
-                """
-                select page.*, totals.total_count
-                from (select count(*) as total_count from agent) totals
-                left join lateral (
-                    select %s from agent order by name asc limit :limit offset :offset
-                ) page on true
-                order by page.name asc
-                """
-                    .formatted(COLUMNS))
-            .param("limit", pageQuery.getPageSize())
-            .param("offset", pageQuery.getOffset())
-            .query(
-                (rs, rowNum) ->
-                    new PageRow(
-                        rs.getString("name") == null ? null : ROW_MAPPER.mapRow(rs, rowNum),
-                        rs.getLong("total_count")))
-            .list();
-    List<AgentDefinition> results =
-        rows.stream().map(PageRow::definition).filter(Objects::nonNull).toList();
-    return new Page<>(
-        pageQuery.getPageNumber(), pageQuery.getPageSize(), results, rows.getFirst().total());
-  }
-
-  private record PageRow(AgentDefinition definition, long total) {}
-
-  /** 按 {@code name asc} 列出全部 Agent definition，用于一次性导出快照。 */
-  public List<AgentDefinition> listAll() {
+  /** 按 {@code name asc} 列出全部 Agent，用于列表读取与一次性导出快照。 */
+  public List<Agent> listAll() {
     return jdbcClient
         .sql("select " + COLUMNS + " from agent order by name asc")
         .query(ROW_MAPPER)
         .list();
   }
 
-  public AgentDefinition getByName(String name) {
+  public Agent getByName(String name) {
     return findOne("select " + COLUMNS + " from agent where name = :name", name);
   }
 
   /** 返回 Agent 并持有其行锁，直到外层事务结束。 */
-  public AgentDefinition getByNameForUpdate(String name) {
-    return findOne(
-        "select " + COLUMNS + " from agent where name = :name for update", name);
+  public Agent getByNameForUpdate(String name) {
+    return findOne("select " + COLUMNS + " from agent where name = :name for update", name);
   }
 
   /** 是否有其它 Agent 的 subagents allowlist 引用该 Agent。 */
@@ -156,7 +122,7 @@ public class AgentDefinitionRepository {
         .single();
   }
 
-  public boolean create(AgentDefinition agent) {
+  public boolean create(Agent agent) {
     return jdbcClient
             .sql(INSERT_SQL)
             .param("name", agent.name())
@@ -170,7 +136,7 @@ public class AgentDefinitionRepository {
   }
 
   /** 基于 (name, expectedVersion) 的原子 CAS 更新。 */
-  public boolean updateByName(AgentDefinition agent, long expectedVersion) {
+  public boolean updateByName(Agent agent, long expectedVersion) {
     return jdbcClient
             .sql(UPDATE_BY_NAME_SQL)
             .param("description", agent.description())
@@ -193,7 +159,7 @@ public class AgentDefinitionRepository {
         == 1;
   }
 
-  private AgentDefinition findOne(String sql, String name) {
+  private Agent findOne(String sql, String name) {
     return jdbcClient.sql(sql).param("name", name).query(ROW_MAPPER).optional().orElse(null);
   }
 

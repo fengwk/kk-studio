@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.platform.configsync;
 
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
+import fun.fengwk.kkstudio.platform.catalog.definition.Agent;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServer;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpTool;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
@@ -27,7 +27,7 @@ import java.util.Set;
 public record ConfigSyncSnapshot(
     List<AgentProvider> providers,
     List<AgentModel> models,
-    List<AgentDefinition> agents,
+    List<Agent> agents,
     Set<String> builtinAgentNames,
     List<SkillPackage> skillPackages,
     List<Environment> environments,

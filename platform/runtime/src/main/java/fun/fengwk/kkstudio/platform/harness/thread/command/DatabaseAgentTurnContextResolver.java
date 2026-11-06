@@ -16,9 +16,10 @@ import fun.fengwk.kkstudio.harness.contributor.builtin.environment.FileTool;
 import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.TaskTool;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
-import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
+import fun.fengwk.kkstudio.platform.catalog.definition.Agent;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentRepository;
+import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentConfigCodec;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentConfigDTO;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillManifestEntry;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageRepository;
@@ -37,7 +38,6 @@ import fun.fengwk.kkstudio.platform.harness.task.CurrentEnvironmentContext;
 import fun.fengwk.kkstudio.platform.harness.task.SkillPromptEntry;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.skill.SkillRefDTO;
 
 import java.util.ArrayList;
@@ -56,8 +56,8 @@ import java.util.UUID;
 @Component
 public final class DatabaseAgentTurnContextResolver {
 
-  private final AgentDefinitionRepository agentDefinitionRepository;
-  private final AgentDefinitionConfigCodec agentConfigCodec;
+  private final AgentRepository agentRepository;
+  private final AgentConfigCodec agentConfigCodec;
   private final RuntimeToolCatalogSource toolCatalogSource;
   private final EnvironmentRegistry environmentRegistry;
   private final EnvironmentRepository environmentRepository;
@@ -68,8 +68,8 @@ public final class DatabaseAgentTurnContextResolver {
   private final SchemaJsonCodec schemaCodec;
 
   public DatabaseAgentTurnContextResolver(
-      AgentDefinitionRepository agentDefinitionRepository,
-      AgentDefinitionConfigCodec agentConfigCodec,
+      AgentRepository agentRepository,
+      AgentConfigCodec agentConfigCodec,
       RuntimeToolCatalogSource toolCatalogSource,
       EnvironmentRegistry environmentRegistry,
       EnvironmentRepository environmentRepository,
@@ -77,8 +77,7 @@ public final class DatabaseAgentTurnContextResolver {
       SkillPromptPathResolver skillPromptPathResolver,
       StorageBlobManager blobManager,
       AgentPromptComposer promptComposer) {
-    this.agentDefinitionRepository =
-        Objects.requireNonNull(agentDefinitionRepository, "agentDefinitionRepository");
+    this.agentRepository = Objects.requireNonNull(agentRepository, "agentRepository");
     this.agentConfigCodec = Objects.requireNonNull(agentConfigCodec, "agentConfigCodec");
     this.toolCatalogSource = Objects.requireNonNull(toolCatalogSource, "toolCatalogSource");
     this.environmentRegistry = Objects.requireNonNull(environmentRegistry, "environmentRegistry");
@@ -101,11 +100,11 @@ public final class DatabaseAgentTurnContextResolver {
     Objects.requireNonNull(path, "path");
     Objects.requireNonNull(settings, "settings");
 
-    AgentDefinition agent =
+    Agent agent =
         require(
-            agentDefinitionRepository.getByName(settings.agentName()),
+            agentRepository.getByName(settings.agentName()),
             "agent not found: " + settings.agentName());
-    AgentDefinitionConfigDTO agentConfig = decodeAgentConfig(agent);
+    AgentConfigDTO agentConfig = decodeAgentConfig(agent);
 
     // Environment 只由 branch settings 的可空 environmentName 决定。
     Environment selectedEnvironment = resolveEnvironment(settings.environmentName());
@@ -155,7 +154,7 @@ public final class DatabaseAgentTurnContextResolver {
     return environment;
   }
 
-  private AgentDefinitionConfigDTO decodeAgentConfig(AgentDefinition agent) {
+  private AgentConfigDTO decodeAgentConfig(Agent agent) {
     try {
       return agentConfigCodec.decode(agent.configJson());
     } catch (IllegalStateException error) {
@@ -168,8 +167,7 @@ public final class DatabaseAgentTurnContextResolver {
    *
    * <p>Agent 只能声明 SELECTABLE 工具；Catalog 缺该工具时按通用规则拒绝规划，绝不静默少一个受控工具。
    */
-  private List<String> resolveToolNames(
-      RuntimeToolCatalog catalog, AgentDefinitionConfigDTO config) {
+  private List<String> resolveToolNames(RuntimeToolCatalog catalog, AgentConfigDTO config) {
     LinkedHashSet<String> toolNames = new LinkedHashSet<>();
     for (String toolName : config.getTools()) {
       if (toolName == null || toolName.isBlank()) {
@@ -381,8 +379,7 @@ public final class DatabaseAgentTurnContextResolver {
     }
     List<SubagentBinding> bindings = new ArrayList<>(names.size());
     for (String name : names) {
-      AgentDefinition subagent =
-          require(agentDefinitionRepository.getByName(name), "subagent not found: " + name);
+      Agent subagent = require(agentRepository.getByName(name), "subagent not found: " + name);
       bindings.add(
           new SubagentBinding(
               subagent.name(), subagent.description() == null ? "" : subagent.description()));

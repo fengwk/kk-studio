@@ -150,7 +150,7 @@ public class HarnessModelRequestDebugDTO {
     /** 目标 Agent 配置声明的 subagent 短名，按声明顺序；不递归展开。 */
     private List<String> subagents;
 
-    /** 目标 Agent 配置声明的 canonical config JSON（AgentDefinitionConfigCodec 编码），不含任何凭据。 */
+    /** 目标 Agent 配置声明的 canonical config JSON（AgentConfigCodec 编码），不含任何凭据。 */
     private String configurationJson;
   }
 

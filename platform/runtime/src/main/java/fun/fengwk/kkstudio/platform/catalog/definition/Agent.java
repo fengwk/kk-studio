@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.platform.catalog.definition;
 import lombok.Builder;
 
 import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionType;
 
 import java.time.Instant;
 
@@ -15,9 +14,9 @@ import java.time.Instant;
  * skills / subagents）。{@code version} 从 0 开始，每次写入 +1，作为 CAS 依据；新建未持久化的实例为 null。
  */
 @Builder(toBuilder = true)
-public record AgentDefinition(
+public record Agent(
     String name,
-    AgentDefinitionType type,
+    AgentType type,
     String description,
     String systemPrompt,
     ExecutionSelection execution,

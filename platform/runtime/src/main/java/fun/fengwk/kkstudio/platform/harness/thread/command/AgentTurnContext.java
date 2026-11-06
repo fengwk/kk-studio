@@ -2,9 +2,9 @@ package fun.fengwk.kkstudio.platform.harness.thread.command;
 
 import fun.fengwk.kkstudio.harness.api.history.SubagentBinding;
 import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
+import fun.fengwk.kkstudio.platform.catalog.definition.Agent;
+import fun.fengwk.kkstudio.platform.catalog.dto.AgentConfigDTO;
 import fun.fengwk.kkstudio.platform.harness.task.CurrentEnvironmentContext;
-import fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO;
 
 import java.util.List;
 import java.util.Objects;
@@ -17,8 +17,8 @@ import java.util.Objects;
  * 事实。
  */
 public record AgentTurnContext(
-    AgentDefinition agent,
-    AgentDefinitionConfigDTO agentConfig,
+    Agent agent,
+    AgentConfigDTO agentConfig,
     CurrentEnvironmentContext currentEnvironment,
     List<LiveTurnPlan.PlannedSkill> skills,
     List<SubagentBinding> subagentBindings,

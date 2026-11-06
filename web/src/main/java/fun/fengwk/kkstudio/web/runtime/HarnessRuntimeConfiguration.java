@@ -24,8 +24,8 @@ import fun.fengwk.kkstudio.harness.spi.driver.AgentDriver;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.spi.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
-import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentRepository;
+import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentConfigCodec;
 import fun.fengwk.kkstudio.platform.catalog.mcp.runtime.McpToolCatalog;
 import fun.fengwk.kkstudio.platform.catalog.tool.PluginRuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalogSource;
@@ -172,17 +172,12 @@ public class HarnessRuntimeConfiguration {
   public ModelRequestDebugService modelRequestDebugService(
       HarnessRuntime runtime,
       DatabaseTurnResolver turnResolver,
-      AgentDefinitionRepository agentDefinitionRepository,
-      AgentDefinitionConfigCodec agentDefinitionConfigCodec,
+      AgentRepository agentRepository,
+      AgentConfigCodec agentConfigCodec,
       BuiltinRequestQuery builtinRequestQuery,
       Clock clock) {
     return new ModelRequestDebugService(
-        runtime,
-        turnResolver,
-        agentDefinitionRepository,
-        agentDefinitionConfigCodec,
-        builtinRequestQuery,
-        clock);
+        runtime, turnResolver, agentRepository, agentConfigCodec, builtinRequestQuery, clock);
   }
 
   /**

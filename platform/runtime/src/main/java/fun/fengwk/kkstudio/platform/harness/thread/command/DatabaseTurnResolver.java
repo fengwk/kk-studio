@@ -25,9 +25,9 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.spi.TurnResolveTransientException;
 import fun.fengwk.kkstudio.harness.spi.compaction.CompactionConfigProvider;
 import fun.fengwk.kkstudio.harness.spi.compaction.RequestTokenEstimator;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
-import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgentDefinitions;
+import fun.fengwk.kkstudio.platform.catalog.definition.Agent;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentRepository;
+import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgents;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModelGroupConfigCodec;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
@@ -72,7 +72,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
   /** 所有确定性拒绝共用的稳定 AssistantError code。 */
   public static final String REJECTION_CODE = "PLANNING_FAILED";
 
-  private final AgentDefinitionRepository agentDefinitionRepository;
+  private final AgentRepository agentRepository;
   private final AgentModelRepository modelRepository;
   private final AgentProviderRepository providerRepository;
   private final AgentModelRuntimeConfigParser modelConfigParser;
@@ -83,7 +83,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
   private final RequestTokenEstimator requestTokenEstimator;
 
   public DatabaseTurnResolver(
-      AgentDefinitionRepository agentDefinitionRepository,
+      AgentRepository agentRepository,
       AgentModelRepository modelRepository,
       AgentProviderRepository providerRepository,
       AgentModelRuntimeConfigParser modelConfigParser,
@@ -92,8 +92,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
       CompactionConfigProvider compactionConfigProvider,
       DatabaseAgentTurnContextResolver contextResolver,
       RequestTokenEstimator requestTokenEstimator) {
-    this.agentDefinitionRepository =
-        Objects.requireNonNull(agentDefinitionRepository, "agentDefinitionRepository");
+    this.agentRepository = Objects.requireNonNull(agentRepository, "agentRepository");
     this.modelRepository = Objects.requireNonNull(modelRepository, "modelRepository");
     this.providerRepository = Objects.requireNonNull(providerRepository, "providerRepository");
     this.modelConfigParser = Objects.requireNonNull(modelConfigParser, "modelConfigParser");
@@ -250,7 +249,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
    * 时，原模型改用自身的默认 variant，回退模型依次取 Agent 声明的 variant 与模型自身的默认 variant。只对模型回退，Agent 与 Environment
    * 失效一律停止。
    */
-  private ResolvedSelection resolveSelection(ModelSelection requested, AgentDefinition agent) {
+  private ResolvedSelection resolveSelection(ModelSelection requested, Agent agent) {
     AgentModel model = modelRepository.getByName(requested.modelName());
     if (model != null) {
       return resolveLogical(model, requested.variant(), null);
@@ -270,7 +269,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
     return resolveLogical(fallback, requested.variant(), defaultSelection.variant());
   }
 
-  private static ModelSelection builtinAgentModel(AgentDefinition agent) {
+  private static ModelSelection builtinAgentModel(Agent agent) {
     ExecutionSelection execution = agent.execution();
     if (execution == null || !BuiltinExecution.DRIVER.equals(execution.driver())) {
       return null;
@@ -413,10 +412,10 @@ public final class DatabaseTurnResolver implements TurnResolver {
    * removedPrefixTokens 现算。
    */
   private Result resolveCompaction(CompactionPreparation preparation) {
-    String compactionAgentName = BuiltinAgentDefinitions.COMPACTION_NAME;
-    AgentDefinition agent =
+    String compactionAgentName = BuiltinAgents.COMPACTION_NAME;
+    Agent agent =
         require(
-            agentDefinitionRepository.getByName(compactionAgentName),
+            agentRepository.getByName(compactionAgentName),
             "agent not found: " + compactionAgentName);
     if (agent.execution() == null) {
       throw rejection("compaction agent has no configured model");

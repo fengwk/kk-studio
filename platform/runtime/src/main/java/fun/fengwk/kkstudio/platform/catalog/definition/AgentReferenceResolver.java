@@ -30,30 +30,30 @@ import java.util.TreeSet;
  */
 @AllArgsConstructor
 @Component
-public final class AgentDefinitionReferenceResolver {
+public final class AgentReferenceResolver {
 
-  private static final String DEFINITION_RESOURCE = "agent";
+  private static final String AGENT_RESOURCE = "agent";
   private static final String SKILL_RESOURCE = "skill";
   private static final String TOOL_RESOURCE = "agent_tool";
   private static final ContributorId MCP_CONTRIBUTOR = McpToolCatalog.CONTRIBUTOR_ID;
 
-  private final AgentDefinitionRepository agentDefinitionRepository;
+  private final AgentRepository agentRepository;
   private final SkillPackageRepository skillPackageRepository;
   private final McpServerRepository mcpServerRepository;
   private final RuntimeToolCatalogSource toolCatalogSource;
 
-  AgentDefinition requireAgent(String name) {
-    AgentDefinition definition = agentDefinitionRepository.getByName(name);
+  Agent requireAgent(String name) {
+    Agent definition = agentRepository.getByName(name);
     if (definition == null) {
-      throw DomainException.notFound(DEFINITION_RESOURCE);
+      throw DomainException.notFound(AGENT_RESOURCE);
     }
     return definition;
   }
 
-  AgentDefinition requireAgentForUpdate(String name) {
-    AgentDefinition definition = agentDefinitionRepository.getByNameForUpdate(name);
+  Agent requireAgentForUpdate(String name) {
+    Agent definition = agentRepository.getByNameForUpdate(name);
     if (definition == null) {
-      throw DomainException.notFound(DEFINITION_RESOURCE);
+      throw DomainException.notFound(AGENT_RESOURCE);
     }
     return definition;
   }
@@ -174,12 +174,12 @@ public final class AgentDefinitionReferenceResolver {
    *
    * @return 已锁定的待更新 Agent
    */
-  AgentDefinition requireAgentAndSubagentsForUpdate(String agentName, List<String> subagentNames) {
+  Agent requireAgentAndSubagentsForUpdate(String agentName, List<String> subagentNames) {
     TreeSet<String> names = new TreeSet<>(subagentNames);
     names.add(agentName);
-    AgentDefinition target = null;
+    Agent target = null;
     for (String name : names) {
-      AgentDefinition definition = requireAgentForUpdate(name);
+      Agent definition = requireAgentForUpdate(name);
       if (name.equals(agentName)) {
         target = definition;
       }
@@ -188,10 +188,10 @@ public final class AgentDefinitionReferenceResolver {
   }
 
   void ensureNotReferencedAsSubagent(String name) {
-    if (agentDefinitionRepository.existsReferencingSubagent(name)) {
+    if (agentRepository.existsReferencingSubagent(name)) {
       throw DomainException.inUse(
-          DEFINITION_RESOURCE,
-          DEFINITION_RESOURCE + " is referenced by another agent subagents allowlist: " + name);
+          AGENT_RESOURCE,
+          AGENT_RESOURCE + " is referenced by another agent subagents allowlist: " + name);
     }
   }
 }

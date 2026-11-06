@@ -1,22 +1,23 @@
-package fun.fengwk.kkstudio.share.catalog;
+package fun.fengwk.kkstudio.platform.catalog.dto;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
 import org.jspecify.annotations.Nullable;
 
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentType;
 import fun.fengwk.kkstudio.share.runtime.HarnessExecutionSelectionDTO;
 
 import java.time.Instant;
 
-/** 全局 Agent definition 的公开表示。 */
+/** 全局 Agent 的公开表示。 */
 @Data
-public class AgentDefinitionDTO {
+public class AgentDTO {
 
   /** Agent 唯一名（资源路由身份）：非空白、不得包含 {@code '/'}、≤64 字符。 */
   private String name;
 
-  /** 系统持有的所有权类型；用户创建的 Agent 为 {@link AgentDefinitionType#USER}，内置 Agent 为 BUILTIN。 */
-  private AgentDefinitionType type;
+  /** 系统持有的所有权类型；用户创建的 Agent 为 {@link AgentType#USER}，内置 Agent 为 BUILTIN。 */
+  private AgentType type;
 
   /** 可空描述（text，无长度上限）。 */
   private @Nullable String description;
@@ -29,14 +30,14 @@ public class AgentDefinitionDTO {
   private @Nullable HarnessExecutionSelectionDTO execution;
 
   /** 结构化执行配置（tools/skills/subagents），来自持久化的 config JSONB 列。 */
-  private AgentDefinitionConfigDTO config;
+  private AgentConfigDTO config;
 
   /** 非负十进制字符串版本号；客户端每次更新时必须回传。 */
   private String version;
 
   /** 创建时间（UTC Instant）。 */
-  private Instant createTime;
+  private Instant createdAt;
 
   /** 更新时间（UTC Instant）。 */
-  private Instant updateTime;
+  private Instant updatedAt;
 }
