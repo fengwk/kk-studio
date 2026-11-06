@@ -213,7 +213,7 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
     HttpClient http = HttpClient.newHttpClient();
     HttpResponse<String> chatResponse =
         http.send(
-            HttpRequest.newBuilder(uri("/api/chats"))
+            HttpRequest.newBuilder(uri("/api/chat/chats"))
                 .timeout(Duration.ofSeconds(10))
                 .header("Content-Type", "application/json")
                 .POST(

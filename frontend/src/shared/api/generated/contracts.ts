@@ -706,7 +706,7 @@ export interface CanvasTransformDTO {
 
 /** Java：fun.fengwk.kkstudio.chat.dto.ChatCreateDTO */
 export interface ChatCreateDTO {
-  title?: string | null
+  title: string
   agentName: string
   environmentName?: string | null
   yoloEnabled?: boolean | null
@@ -720,8 +720,8 @@ export interface ChatDTO {
   environmentName: string | null
   yoloEnabled: boolean
   version: string
-  createTime: number
-  updateTime: number
+  createdAt: number
+  updatedAt: number
 }
 
 /** Java：fun.fengwk.kkstudio.chat.dto.ChatPageDTO */
@@ -738,11 +738,16 @@ export interface ChatSessionPageDTO {
 
 /** Java：fun.fengwk.kkstudio.chat.dto.ChatUpdateDTO */
 export interface ChatUpdateDTO {
-  title?: string | null
-  agentName?: string | null
-  expectedVersion: string
+  title: string
+  agentName: string
   environmentName?: string | null
-  yoloEnabled?: boolean | null
+  expectedVersion: string
+}
+
+/** Java：fun.fengwk.kkstudio.chat.dto.ChatYoloUpdateDTO */
+export interface ChatYoloUpdateDTO {
+  yoloEnabled: boolean
+  expectedVersion: string
 }
 
 /** Java：fun.fengwk.kkstudio.share.configsync.ConfigSyncExportDTO */
@@ -2380,7 +2385,7 @@ export interface ApiRoutes {
     query: { expectedVersion: string }
     response: void
   }
-  'DELETE /api/chats/{chatId}': {
+  'DELETE /api/chat/chats/{chatId}': {
     path: { chatId: string }
     query: { expectedVersion: string }
     response: void
@@ -2455,20 +2460,20 @@ export interface ApiRoutes {
     path: { canvasId: string; nodeId: string }
     response: CanvasFunctionRunDTO
   }
-  'GET /api/chats': {
-    query: { cursor?: string; limit?: string }
+  'GET /api/chat/chats': {
+    query: { cursor?: string; limit?: number }
     response: ChatPageDTO
   }
-  'GET /api/chats/{chatId}': {
+  'GET /api/chat/chats/{chatId}': {
     path: { chatId: string }
     response: ChatDTO
   }
-  'GET /api/chats/{chatId}/sessions': {
+  'GET /api/chat/chats/{chatId}/sessions': {
     path: { chatId: string }
-    query: { cursor?: string; limit?: string }
+    query: { cursor?: string; limit?: number }
     response: ChatSessionPageDTO
   }
-  'GET /api/chats/{chatId}/sessions/{sessionId}': {
+  'GET /api/chat/chats/{chatId}/sessions/{sessionId}': {
     path: { chatId: string; sessionId: string }
     response: HarnessSessionSummaryDTO
   }
@@ -2676,8 +2681,8 @@ export interface ApiRoutes {
     path: { canvasId: string; resourceId: string }
     response: CanvasPresignedUrlDTO
   }
-  'POST /api/chats': {
-    body?: ChatCreateDTO
+  'POST /api/chat/chats': {
+    body: ChatCreateDTO
     response: ChatDTO
   }
   'POST /api/command-batches': {
@@ -2938,9 +2943,14 @@ export interface ApiRoutes {
     body: AgentDefinitionUpdateDTO
     response: AgentDefinitionDTO
   }
-  'PUT /api/chats/{chatId}': {
+  'PUT /api/chat/chats/{chatId}': {
     path: { chatId: string }
     body: ChatUpdateDTO
+    response: ChatDTO
+  }
+  'PUT /api/chat/chats/{chatId}/yolo': {
+    path: { chatId: string }
+    body: ChatYoloUpdateDTO
     response: ChatDTO
   }
   'PUT /api/environments/{environmentId}/ide/views/{viewId}/directory': {

@@ -20,6 +20,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import fun.fengwk.kkstudio.chat.dto.ChatCreateDTO;
 import fun.fengwk.kkstudio.chat.dto.ChatDTO;
 import fun.fengwk.kkstudio.chat.dto.ChatUpdateDTO;
+import fun.fengwk.kkstudio.chat.dto.ChatYoloUpdateDTO;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
@@ -111,17 +112,22 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
       ChatUpdateDTO badUpdate = new ChatUpdateDTO();
       assertThrows(DomainException.class, () -> chatService.updateChat(chatId, badUpdate));
       badUpdate.setAgentName("missing-agent");
+      badUpdate.setTitle("alpha");
       badUpdate.setExpectedVersion("0");
       assertThrows(DomainException.class, () -> chatService.updateChat(chatId, badUpdate));
 
       ChatUpdateDTO update = new ChatUpdateDTO();
       update.setTitle("beta");
-      update.setYoloEnabled(true);
+      update.setAgentName("default-assistant");
       update.setExpectedVersion("0");
       ChatDTO updated = chatService.updateChat(chatId, update);
       assertEquals("beta", updated.getTitle());
-      assertTrue(updated.isYoloEnabled());
       assertEquals("1", updated.getVersion());
+      ChatYoloUpdateDTO yolo = new ChatYoloUpdateDTO();
+      yolo.setYoloEnabled(true);
+      yolo.setExpectedVersion(updated.getVersion());
+      assertTrue(chatService.updateYolo(chatId, yolo).isYoloEnabled());
+      assertThrows(DomainException.class, () -> chatService.updateYolo(chatId, yolo));
 
       ChatUpdateDTO stale = new ChatUpdateDTO();
       stale.setAgentName("missing-agent");
@@ -193,19 +199,19 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
 
       ChatUpdateDTO staleAgentUpdate = new ChatUpdateDTO();
       staleAgentUpdate.setTitle("still editable");
-      staleAgentUpdate.setYoloEnabled(false);
-      staleAgentUpdate.setExpectedVersion("1");
+      staleAgentUpdate.setAgentName("default-assistant");
+      staleAgentUpdate.setExpectedVersion("2");
       ChatDTO updatedWithStaleAgent = chatService.updateChat(chatId, staleAgentUpdate);
       assertEquals("default-assistant", updatedWithStaleAgent.getAgentName());
       assertEquals("still editable", updatedWithStaleAgent.getTitle());
-      assertEquals(false, updatedWithStaleAgent.isYoloEnabled());
+      assertTrue(updatedWithStaleAgent.isYoloEnabled());
     } finally {
       chatService.deleteChat(chatId, chatService.getChat(chatId).getVersion());
       assertThrows(DomainException.class, () -> chatService.getChat(chatId));
     }
   }
 
-  /** Chat 默认环境按名称保存：null 合法，非 null 必须存在且 canonical；更新区分省略与显式清空，CAS 失败不写入。 */
+  /** Chat 默认环境按名称保存：null 清空，非 null 必须存在且 canonical；CAS 失败不写入。 */
   @Test
   void persistsDefaultEnvironmentAndRejectsUnknownOrMalformedNames() throws Exception {
     try (Connection conn = newConnection();
@@ -236,20 +242,26 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
       malformed.setEnvironmentName("bad/env");
       assertThrows(DomainException.class, () -> chatService.createChat(malformed));
 
-      // 更新省略保留当前环境。
-      ChatUpdateDTO omit = new ChatUpdateDTO();
-      omit.setTitle("renamed");
-      omit.setExpectedVersion(created.getVersion());
-      assertEquals("env-a", chatService.updateChat(created.getId(), omit).getEnvironmentName());
+      // 整体替换回传当前环境时保持不变。
+      ChatUpdateDTO keep = new ChatUpdateDTO();
+      keep.setTitle("renamed");
+      keep.setAgentName("default-assistant");
+      keep.setEnvironmentName("env-a");
+      keep.setExpectedVersion(created.getVersion());
+      assertEquals("env-a", chatService.updateChat(created.getId(), keep).getEnvironmentName());
 
       // 显式 null 清空默认环境。
       ChatUpdateDTO clear = new ChatUpdateDTO();
+      clear.setTitle("renamed");
+      clear.setAgentName("default-assistant");
       clear.setEnvironmentName(null);
       clear.setExpectedVersion(chatService.getChat(created.getId()).getVersion());
       assertNull(chatService.updateChat(created.getId(), clear).getEnvironmentName());
 
       // CAS 失败不得写入。
       ChatUpdateDTO stale = new ChatUpdateDTO();
+      stale.setTitle("renamed");
+      stale.setAgentName("default-assistant");
       stale.setEnvironmentName("env-a");
       stale.setExpectedVersion("0");
       assertThrows(DomainException.class, () -> chatService.updateChat(created.getId(), stale));

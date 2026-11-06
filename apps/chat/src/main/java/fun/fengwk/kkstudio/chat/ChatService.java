@@ -8,6 +8,7 @@ import fun.fengwk.kkstudio.chat.dto.ChatDTO;
 import fun.fengwk.kkstudio.chat.dto.ChatPageDTO;
 import fun.fengwk.kkstudio.chat.dto.ChatSessionPageDTO;
 import fun.fengwk.kkstudio.chat.dto.ChatUpdateDTO;
+import fun.fengwk.kkstudio.chat.dto.ChatYoloUpdateDTO;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.platform.error.CatalogVersions;
@@ -53,7 +54,13 @@ public class ChatService {
 
   /** 一页对话，按最近更新倒序稳定推进；{@code nextCursor} 非空表示还有下一页。 */
   public ChatPageDTO listChats(String cursor, int limit) {
-    ChatCursor parsed = ChatCursor.parse(cursor);
+    validateLimit(limit);
+    ChatCursor parsed;
+    try {
+      parsed = ChatCursor.parse(cursor);
+    } catch (IllegalArgumentException error) {
+      throw DomainException.validation(RESOURCE, error.getMessage());
+    }
     List<Chat> rows = repository.listPage(parsed, limit + 1);
     boolean hasMore = rows.size() > limit;
     List<Chat> page = hasMore ? rows.subList(0, limit) : rows;
@@ -66,7 +73,13 @@ public class ChatService {
   /** 一页 Chat 归属 Session 摘要，按归属时间从新到旧稳定推进。 */
   public ChatSessionPageDTO listSessions(String chatId, String cursor, int limit) {
     UUID id = Uuids.parseCanonical(chatId, "chatId");
-    ChatSessionCursor parsed = ChatSessionCursor.parse(cursor);
+    validateLimit(limit);
+    ChatSessionCursor parsed;
+    try {
+      parsed = ChatSessionCursor.parse(cursor);
+    } catch (IllegalArgumentException error) {
+      throw DomainException.validation(RESOURCE, error.getMessage());
+    }
     guard.requireChat(id);
     List<ChatSessionRow> rows = sessions.listPage(id, parsed, limit + 1);
     boolean hasMore = rows.size() > limit;
@@ -114,15 +127,30 @@ public class ChatService {
     long expected = CatalogVersions.parse(rawExpected, "expectedVersion");
     Chat existing = guard.requireChat(id);
     ensureExpectedVersion(existing, id, rawExpected, expected);
-    boolean agentNameProvided = updateDTO.getAgentName() != null;
-    boolean environmentNameProvided = updateDTO.isEnvironmentNameProvided();
+    String previousAgentName = existing.getAgentName();
+    String previousEnvironmentName = existing.getEnvironmentName();
     mutationFactory.apply(existing, updateDTO);
-    if (agentNameProvided) {
+    if (!Objects.equals(previousAgentName, existing.getAgentName())) {
       guard.ensureAgentExists(existing.getAgentName());
     }
-    if (environmentNameProvided) {
+    if (!Objects.equals(previousEnvironmentName, existing.getEnvironmentName())) {
       guard.ensureEnvironmentExists(existing.getEnvironmentName());
     }
+    return persistUpdate(existing, rawExpected, expected);
+  }
+
+  /** YOLO 是独立子资源，但与 Chat 其他修改共享同一个版本。 */
+  @Transactional
+  public ChatDTO updateYolo(String id, ChatYoloUpdateDTO updateDTO) {
+    String rawExpected = updateDTO.getExpectedVersion();
+    long expected = CatalogVersions.parse(rawExpected, "expectedVersion");
+    Chat existing = guard.requireChat(id);
+    ensureExpectedVersion(existing, id, rawExpected, expected);
+    existing.setYoloEnabled(updateDTO.isYoloEnabled());
+    return persistUpdate(existing, rawExpected, expected);
+  }
+
+  private ChatDTO persistUpdate(Chat existing, String rawExpected, long expected) {
     if (!repository.updateById(existing, expected)) {
       Chat reread = repository.getById(existing.getId());
       if (reread == null) {
@@ -166,9 +194,15 @@ public class ChatService {
     dto.setEnvironmentName(chat.getEnvironmentName());
     dto.setYoloEnabled(chat.isYoloEnabled());
     dto.setVersion(CatalogVersions.format(chat.getVersion()));
-    dto.setCreateTime(chat.getCreateTime());
-    dto.setUpdateTime(chat.getUpdateTime());
+    dto.setCreatedAt(chat.getCreateTime());
+    dto.setUpdatedAt(chat.getUpdateTime());
     return dto;
+  }
+
+  private static void validateLimit(int limit) {
+    if (limit < 1 || limit > 100) {
+      throw DomainException.validation(RESOURCE, "limit must be within [1, 100]");
+    }
   }
 
   private static void ensureExpectedVersion(

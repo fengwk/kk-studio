@@ -61,11 +61,6 @@ class ChatMutationFactoryTest {
     ChatUpdateDTO update = new ChatUpdateDTO();
     update.setTitle("t".repeat(257));
     assertThrows(DomainException.class, () -> factory.apply(chat, update));
-
-    ChatUpdateDTO clear = new ChatUpdateDTO();
-    clear.setYoloEnabled(true);
-    factory.apply(chat, clear);
-    assertTrue(chat.isYoloEnabled());
   }
 
   /** Environment name 复用 BranchSettings 的 canonical 规则；显式 null 表示清空默认环境。 */
@@ -76,61 +71,35 @@ class ChatMutationFactoryTest {
 
     for (String invalid : List.of("", "  ", " env", "env ", "a/b", "e".repeat(65))) {
       ChatUpdateDTO update = new ChatUpdateDTO();
+      update.setTitle("title");
+      update.setAgentName("assistant");
       update.setEnvironmentName(invalid);
       assertThrows(DomainException.class, () -> factory.apply(chat, update), invalid);
     }
 
     chat.setEnvironmentName("env-a");
     ChatUpdateDTO clear = new ChatUpdateDTO();
+    clear.setTitle("title");
+    clear.setAgentName("assistant");
     clear.setEnvironmentName(null);
     factory.apply(chat, clear);
     assertNull(chat.getEnvironmentName());
   }
 
-  /** 更新省略 Environment/YOLO 保留当前值；显式 null YOLO 被拒绝，显式 null Environment 清空。 */
+  /** 整体替换清空默认环境，但不修改独立的 YOLO 子资源。 */
   @Test
-  void updateRetainsOmittedFieldsAndRejectsExplicitNullYolo() {
+  void replaceClearsEnvironmentAndLeavesYolo() {
     ChatMutationFactory factory = factory();
     Chat chat = chatWith("assistant");
     chat.setEnvironmentName("env-a");
     chat.setYoloEnabled(true);
 
-    ChatUpdateDTO omitted = new ChatUpdateDTO();
-    omitted.setTitle("next");
-    factory.apply(chat, omitted);
-    assertEquals("env-a", chat.getEnvironmentName());
-    assertTrue(chat.isYoloEnabled());
-
-    ChatUpdateDTO nullYolo = new ChatUpdateDTO();
-    nullYolo.setYoloEnabled(null);
-    assertThrows(DomainException.class, () -> factory.apply(chat, nullYolo));
-
-    ChatUpdateDTO nullEnvironment = new ChatUpdateDTO();
-    nullEnvironment.setEnvironmentName(null);
-    factory.apply(chat, nullEnvironment);
+    ChatUpdateDTO replacement = new ChatUpdateDTO();
+    replacement.setTitle("next");
+    replacement.setAgentName("assistant");
+    factory.apply(chat, replacement);
     assertNull(chat.getEnvironmentName());
-  }
-
-  /** 创建与更新均严格拒绝未知字段。 */
-  @Test
-  void rejectsUnknownFieldsOnCreateAndUpdate() {
-    ChatMutationFactory factory = factory();
-
-    ChatCreateDTO create = new ChatCreateDTO();
-    create.setTitle("valid");
-    create.setAgentName("assistant");
-    Chat chat = factory.newChat(create);
-    assertEquals("valid", chat.getTitle());
-
-    ChatUpdateDTO update = new ChatUpdateDTO();
-    update.setTitle("next");
-    factory.apply(chat, update);
-    assertEquals("next", chat.getTitle());
-
-    assertThrows(
-        IllegalArgumentException.class, () -> create.rejectUnknownField("unknownField", "value"));
-    assertThrows(
-        IllegalArgumentException.class, () -> update.rejectUnknownField("unknownField", "value"));
+    assertTrue(chat.isYoloEnabled());
   }
 
   private static Chat chatWith(String agentName) {
