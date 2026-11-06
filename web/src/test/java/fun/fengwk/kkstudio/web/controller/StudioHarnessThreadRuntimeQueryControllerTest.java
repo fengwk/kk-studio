@@ -20,7 +20,7 @@ import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.api.history.EntryPathMetrics;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadRuntimeStatus;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
-import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeTestFixtures;
+import fun.fengwk.kkstudio.platformtest.harness.HarnessRuntimeTestFixtures;
 
 import java.util.List;
 

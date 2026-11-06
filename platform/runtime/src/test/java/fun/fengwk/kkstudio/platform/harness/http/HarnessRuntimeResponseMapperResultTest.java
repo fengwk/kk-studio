@@ -1,10 +1,10 @@
-package fun.fengwk.kkstudio.web.runtime;
+package fun.fengwk.kkstudio.platform.harness.http;
 
-import static fun.fengwk.kkstudio.web.runtime.HarnessRuntimeResponseMapperTestSupport.NOW;
-import static fun.fengwk.kkstudio.web.runtime.HarnessRuntimeResponseMapperTestSupport.id;
-import static fun.fengwk.kkstudio.web.runtime.HarnessRuntimeResponseMapperTestSupport.idText;
-import static fun.fengwk.kkstudio.web.runtime.HarnessRuntimeResponseMapperTestSupport.snapshot;
-import static fun.fengwk.kkstudio.web.runtime.HarnessRuntimeResponseMapperTestSupport.withVersion;
+import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeResponseMapperTestSupport.NOW;
+import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeResponseMapperTestSupport.id;
+import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeResponseMapperTestSupport.idText;
+import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeResponseMapperTestSupport.snapshot;
+import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeResponseMapperTestSupport.withVersion;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -34,7 +34,7 @@ import fun.fengwk.kkstudio.platform.harness.dto.HarnessStoppedThreadReceiptDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadCompactResultDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadSnapshotDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadStopResultDTO;
-import fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeResponseMapper;
+import fun.fengwk.kkstudio.platformtest.harness.HarnessRuntimeTestFixtures;
 
 import java.util.List;
 import java.util.Map;

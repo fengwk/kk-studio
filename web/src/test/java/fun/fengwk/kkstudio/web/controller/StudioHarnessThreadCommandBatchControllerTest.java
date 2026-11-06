@@ -35,9 +35,9 @@ import fun.fengwk.kkstudio.platform.harness.http.HarnessThreadCommandBatchContro
 import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrchestrator;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwner;
+import fun.fengwk.kkstudio.platformtest.harness.HarnessRuntimeTestFixtures;
 import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
 import fun.fengwk.kkstudio.web.advice.StudioProblemAdvice;
-import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeTestFixtures;
 
 import java.util.List;
 import java.util.Optional;

@@ -19,9 +19,9 @@ import fun.fengwk.kkstudio.platform.harness.thread.query.EnvironmentWaitProjecti
 import fun.fengwk.kkstudio.platform.harness.thread.query.UsageCostProjectionService;
 import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.platform.interaction.InteractionService;
+import fun.fengwk.kkstudio.platformtest.harness.HarnessRuntimeTestFixtures;
 import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
 import fun.fengwk.kkstudio.web.advice.StudioProblemAdvice;
-import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeTestFixtures;
 
 import java.util.Map;
 import java.util.UUID;

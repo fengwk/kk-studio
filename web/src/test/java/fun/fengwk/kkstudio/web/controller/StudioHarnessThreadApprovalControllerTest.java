@@ -16,7 +16,7 @@ import org.springframework.http.MediaType;
 
 import fun.fengwk.kkstudio.harness.api.ToolApprovalCommand;
 import fun.fengwk.kkstudio.harness.api.tool.ToolApprovalDecision;
-import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeTestFixtures;
+import fun.fengwk.kkstudio.platformtest.harness.HarnessRuntimeTestFixtures;
 
 import java.util.List;
 import java.util.UUID;

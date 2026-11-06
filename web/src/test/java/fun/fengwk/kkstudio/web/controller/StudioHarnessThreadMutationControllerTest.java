@@ -28,7 +28,7 @@ import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.api.thread.CompactThreadCommand;
 import fun.fengwk.kkstudio.harness.api.thread.SetThreadYoloCommand;
-import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeTestFixtures;
+import fun.fengwk.kkstudio.platformtest.harness.HarnessRuntimeTestFixtures;
 
 import java.util.List;
 import java.util.Optional;

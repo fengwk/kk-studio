@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.web.runtime;
+package fun.fengwk.kkstudio.platformtest.harness;
 
 import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.api.StoppedThreadReceipt;

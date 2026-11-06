@@ -1,13 +1,13 @@
-package fun.fengwk.kkstudio.web.runtime;
+package fun.fengwk.kkstudio.platform.harness.http;
 
-import static fun.fengwk.kkstudio.web.runtime.HarnessRuntimeResponseMapperTestSupport.NOW;
-import static fun.fengwk.kkstudio.web.runtime.HarnessRuntimeResponseMapperTestSupport.environmentToolBinding;
-import static fun.fengwk.kkstudio.web.runtime.HarnessRuntimeResponseMapperTestSupport.generation;
-import static fun.fengwk.kkstudio.web.runtime.HarnessRuntimeResponseMapperTestSupport.id;
-import static fun.fengwk.kkstudio.web.runtime.HarnessRuntimeResponseMapperTestSupport.idText;
-import static fun.fengwk.kkstudio.web.runtime.HarnessRuntimeResponseMapperTestSupport.modelSnapshot;
-import static fun.fengwk.kkstudio.web.runtime.HarnessRuntimeResponseMapperTestSupport.toolInvocation;
-import static fun.fengwk.kkstudio.web.runtime.HarnessRuntimeResponseMapperTestSupport.toolSnapshot;
+import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeResponseMapperTestSupport.NOW;
+import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeResponseMapperTestSupport.environmentToolBinding;
+import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeResponseMapperTestSupport.generation;
+import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeResponseMapperTestSupport.id;
+import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeResponseMapperTestSupport.idText;
+import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeResponseMapperTestSupport.modelSnapshot;
+import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeResponseMapperTestSupport.toolInvocation;
+import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeResponseMapperTestSupport.toolSnapshot;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -45,7 +45,7 @@ import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadCommandDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadSnapshotDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessUsageCostDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.ToolInvocationDTO;
-import fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeResponseMapper;
+import fun.fengwk.kkstudio.platformtest.harness.HarnessRuntimeTestFixtures;
 
 import java.util.List;
 import java.util.Map;

@@ -1,12 +1,12 @@
-package fun.fengwk.kkstudio.web.runtime;
+package fun.fengwk.kkstudio.platform.harness.http;
 
-import static fun.fengwk.kkstudio.web.runtime.HarnessRuntimeResponseMapperTestSupport.NOW;
-import static fun.fengwk.kkstudio.web.runtime.HarnessRuntimeResponseMapperTestSupport.id;
-import static fun.fengwk.kkstudio.web.runtime.HarnessRuntimeResponseMapperTestSupport.idText;
-import static fun.fengwk.kkstudio.web.runtime.HarnessRuntimeResponseMapperTestSupport.idleSnapshot;
-import static fun.fengwk.kkstudio.web.runtime.HarnessRuntimeResponseMapperTestSupport.modelSnapshot;
-import static fun.fengwk.kkstudio.web.runtime.HarnessRuntimeResponseMapperTestSupport.snapshot;
-import static fun.fengwk.kkstudio.web.runtime.HarnessRuntimeResponseMapperTestSupport.toolSnapshot;
+import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeResponseMapperTestSupport.NOW;
+import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeResponseMapperTestSupport.id;
+import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeResponseMapperTestSupport.idText;
+import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeResponseMapperTestSupport.idleSnapshot;
+import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeResponseMapperTestSupport.modelSnapshot;
+import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeResponseMapperTestSupport.snapshot;
+import static fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeResponseMapperTestSupport.toolSnapshot;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -28,7 +28,7 @@ import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadTreeNodeDTO;
-import fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeResponseMapper;
+import fun.fengwk.kkstudio.platformtest.harness.HarnessRuntimeTestFixtures;
 
 import java.util.LinkedHashMap;
 import java.util.List;
