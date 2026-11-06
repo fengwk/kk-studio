@@ -15,7 +15,7 @@ function project(): ProjectDTO {
       { state: 'BLOCKED', name: '阻塞', agent: null, environment: null, instructions: null, maxRuns: null }, { state: 'DONE', name: '完成', agent: null, environment: null, instructions: null, maxRuns: null },
     ] },
     yoloEnabled: false, nextIssueNumber: '1', version: '1', archivedAt: null,
-    createdAt: '2026-09-20T00:00:00Z', updatedAt: '2026-09-20T00:00:00Z',
+    createdAt: Date.UTC(2026, 8, 20), updatedAt: Date.UTC(2026, 8, 20),
   }
 }
 
@@ -45,7 +45,7 @@ async function transport(page: Page) {
   })
   await page.route('**/api/**', async (route) => {
     const path = new globalThis.URL(route.request().url()).pathname
-    if (path === `/api/projects/${ID}/snapshot`) {
+    if (path === `/api/project/projects/${ID}/snapshot`) {
       state.snapshotReads++
       if (state.fail) {
         await route.fulfill({ status: 503, contentType: 'application/problem+json',
@@ -58,7 +58,7 @@ async function transport(page: Page) {
     } else if (route.request().method() === 'PUT') {
       state.writes.push(route.request().postDataJSON())
       await route.fulfill({ json: { ...state.project, version: '10' } })
-    } else if (path === '/api/projects') {
+    } else if (path === '/api/project/projects') {
       await route.fulfill({ json: [state.project] })
     } else if (path === '/api/agents') {
       await route.fulfill({ json: { results: [], totalCount: '0', pageNumber: 1, pageSize: 50 } })
@@ -85,7 +85,7 @@ test('single header, back and explicit failed-load retry', async ({ page }) => {
   await expect(page).toHaveURL(/\/list$/)
 })
 
-test('structured multi-edge editing, real Tabs styling and archived-only reference protection', async ({ page }) => {
+test('structured multi-edge editing, real Tabs styling and hidden reference protection', async ({ page }) => {
   const state = await transport(page)
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.goto(URL)

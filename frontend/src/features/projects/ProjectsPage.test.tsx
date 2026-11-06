@@ -36,8 +36,8 @@ describe('ProjectsPage', () => {
       nextIssueNumber: '5',
       version: '1',
       archivedAt: null,
-      createdAt: '2026-09-14T00:00:00Z',
-      updatedAt: '2026-09-14T00:00:00Z',
+      createdAt: Date.UTC(2026, 8, 14),
+      updatedAt: Date.UTC(2026, 8, 14),
     },
     {
       id: 'a0000000-0000-0000-0000-000000000002',
@@ -53,9 +53,9 @@ describe('ProjectsPage', () => {
       yoloEnabled: false,
       nextIssueNumber: '1',
       version: '0',
-      archivedAt: '2026-09-14T01:00:00Z',
-      createdAt: '2026-09-14T00:00:00Z',
-      updatedAt: '2026-09-14T01:00:00Z',
+      archivedAt: Date.UTC(2026, 8, 14, 1),
+      createdAt: Date.UTC(2026, 8, 14),
+      updatedAt: Date.UTC(2026, 8, 14, 1),
     },
   ]
 
@@ -139,8 +139,8 @@ describe('ProjectsPage', () => {
       nextIssueNumber: '1',
       version: '0',
       archivedAt: null,
-      createdAt: '2026-09-14T00:00:00Z',
-      updatedAt: '2026-09-14T00:00:00Z',
+      createdAt: Date.UTC(2026, 8, 14),
+      updatedAt: Date.UTC(2026, 8, 14),
     }
     const api = createMockApi({
       createProject: vi.fn().mockResolvedValue(newProj),

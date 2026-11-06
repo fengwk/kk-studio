@@ -73,8 +73,8 @@ const mockProject: ProjectDTO = {
   nextIssueNumber: '1',
   version: '1',
   archivedAt: null,
-  createdAt: '2026-09-14T00:00:00Z',
-  updatedAt: '2026-09-14T00:00:00Z',
+  createdAt: Date.UTC(2026, 8, 14),
+  updatedAt: Date.UTC(2026, 8, 14),
 }
 
 /** 多 next 图 + 停用阶段 + Agent 阶段，用于结构化往返与引用约束。 */
@@ -950,7 +950,7 @@ describe('EditProjectModal', () => {
     renderWithClient(
       <EditProjectModal
         isOpen={true}
-        project={{ ...workflowProject, archivedAt: '2026-09-20T00:00:00Z' }}
+        project={{ ...workflowProject, archivedAt: Date.UTC(2026, 8, 20) }}
         onClose={vi.fn()}
         onSuccess={vi.fn()}
         api={{ updateWorkflow: vi.fn() } as unknown as ProjectsApi}

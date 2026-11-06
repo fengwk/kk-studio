@@ -1,5 +1,6 @@
 import { Bot, Eye, User } from 'lucide-react'
 import { useI18n } from '@/shared/i18n'
+import { formatBackendDate } from '@/shared/lib/date-format'
 import { Button } from '@/shared/ui/controls/Button'
 import { Badge } from '@/shared/ui/data/Badge'
 import { EmptyState } from '@/shared/ui/feedback/EmptyState'
@@ -32,7 +33,7 @@ export function IssueActivityTimeline({ activities }: { activities: IssueDetailD
                   <span>{t('projects.issue.actorSystem')}</span>
                 )}
               </span>
-              <span className="activity-time">{act.createdAt}</span>
+              <span className="activity-time">{formatBackendDate(act.createdAt)}</span>
               <span className="activity-seq">#{act.sequence}</span>
             </div>
 

@@ -101,8 +101,8 @@ describe('ProjectDetailPage', () => {
       nextIssueNumber: '5',
       version: '2',
       archivedAt: null,
-      createdAt: '2026-09-14T00:00:00Z',
-      updatedAt: '2026-09-14T01:00:00Z',
+      createdAt: Date.UTC(2026, 8, 14),
+      updatedAt: Date.UTC(2026, 8, 14, 1),
     },
     issues: [
       {
@@ -114,9 +114,8 @@ describe('ProjectDetailPage', () => {
           description: 'Postgres tables',
           state: 'INIT',
           version: '1',
-          archivedAt: null,
-          createdAt: '2026-09-14T00:00:00Z',
-          updatedAt: '2026-09-14T00:00:00Z',
+          createdAt: Date.UTC(2026, 8, 14),
+          updatedAt: Date.UTC(2026, 8, 14),
         },
         currentOrLatestRun: null,
       },
@@ -129,9 +128,8 @@ describe('ProjectDetailPage', () => {
           description: 'Controller endpoints',
           state: 'IN_PROGRESS',
           version: '2',
-          archivedAt: null,
-          createdAt: '2026-09-14T00:00:00Z',
-          updatedAt: '2026-09-14T01:00:00Z',
+          createdAt: Date.UTC(2026, 8, 14),
+          updatedAt: Date.UTC(2026, 8, 14, 1),
         },
         currentOrLatestRun: {
           id: 'd0000000-0000-0000-0000-000000000001',
@@ -140,7 +138,7 @@ describe('ProjectDetailPage', () => {
           state: 'IN_PROGRESS',
           agentName: 'backend-dev',
           status: 'RUNNING',
-          startedAt: '2026-09-14T00:30:00Z',
+          startedAt: Date.UTC(2026, 8, 14, 0, 30),
           endedAt: null,
         },
       },
@@ -683,7 +681,7 @@ describe('ProjectDetailPage', () => {
     // 测试意图：验证头部归档/取消归档切换、编辑与删除弹窗打开与关闭，以及 onBack 点击
     const onBack = vi.fn()
     const api = createMockApi({
-      archiveProject: vi.fn().mockResolvedValue({ ...mockSnapshot.project, archivedAt: '2026-09-30T00:00:00Z' }),
+      archiveProject: vi.fn().mockResolvedValue({ ...mockSnapshot.project, archivedAt: Date.UTC(2026, 8, 30) }),
       unarchiveProject: vi.fn().mockResolvedValue({ ...mockSnapshot.project, archivedAt: null }),
     })
     renderPage(<ProjectDetailPage projectId={projectId} onBack={onBack} api={api} />)
@@ -803,7 +801,7 @@ describe('ProjectDetailPage', () => {
       ...mockSnapshot,
       project: {
         ...mockSnapshot.project,
-        archivedAt: '2026-09-30T00:00:00Z',
+        archivedAt: Date.UTC(2026, 8, 30),
       },
     }
     const api = createMockApi({

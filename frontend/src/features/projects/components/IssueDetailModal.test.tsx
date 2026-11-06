@@ -51,9 +51,8 @@ describe('IssueDetailModal', () => {
       pauseReason: null,
       pauseDetail: null,
       version: '3',
-      archivedAt: null,
-      createdAt: '2026-09-20T10:00:00Z',
-      updatedAt: '2026-09-20T11:00:00Z',
+      createdAt: Date.UTC(2026, 8, 20, 10),
+      updatedAt: Date.UTC(2026, 8, 20, 11),
     },
     activities: [
       {
@@ -64,7 +63,7 @@ describe('IssueDetailModal', () => {
         actorAgentName: 'Lead Architect',
         runId: null,
         body: 'Use standard authorization code flow with PKCE.',
-        createdAt: '2026-09-20T10:05:00Z',
+        createdAt: Date.UTC(2026, 8, 20, 10, 5),
       },
     ],
     agentThreads: [
@@ -92,7 +91,7 @@ describe('IssueDetailModal', () => {
         remainingExecutionMs: '120000',
         error: null,
         version: '1',
-        startedAt: '2026-09-20T10:01:00Z',
+        startedAt: Date.UTC(2026, 8, 20, 10, 1),
         endedAt: null,
       },
     ],
@@ -139,7 +138,7 @@ describe('IssueDetailModal', () => {
       name: 'Architecture diagram',
       actorAgentName: null,
       runId: null,
-      createdAt: '2026-09-20T10:15:00Z',
+      createdAt: Date.UTC(2026, 8, 20, 10, 15),
     }),
     listIssueEvidence: vi.fn().mockResolvedValue([]),
     deleteIssue: vi.fn().mockResolvedValue(undefined),
@@ -159,8 +158,8 @@ describe('IssueDetailModal', () => {
     uploadFile: vi.fn().mockResolvedValue(undefined),
     completeUpload: vi.fn().mockResolvedValue(mockUploadDTO),
     deleteUpload: vi.fn().mockResolvedValue(undefined),
-    getBlobDownloadUrl: vi.fn().mockResolvedValue({ url: 'https://storage.example.com/download/blob-1', expiresAt: '2026-09-27T00:00:00Z', sizeBytes: 1024, mediaType: 'image/png' }),
-    getBlobPreviewUrl: vi.fn().mockResolvedValue({ url: 'https://storage.example.com/preview/blob-1', expiresAt: '2026-09-27T00:00:00Z' }),
+    getBlobDownloadUrl: vi.fn().mockResolvedValue({ url: 'https://storage.example.com/download/blob-1', expiresAt: Date.UTC(2026, 8, 27), sizeBytes: 1024, mediaType: 'image/png' }),
+    getBlobPreviewUrl: vi.fn().mockResolvedValue({ url: 'https://storage.example.com/preview/blob-1', expiresAt: Date.UTC(2026, 8, 27) }),
   })
 
   it('renders issue detail header, tabs, and natural state token', async () => {
@@ -698,7 +697,7 @@ describe('IssueDetailModal', () => {
         actorAgentName: 'pm',
         uri: '',
         runId: null,
-        createdAt: '2026-09-27T10:00:00Z',
+        createdAt: Date.UTC(2026, 8, 27, 10),
       }),
     })
     const storageService = createMockStorageService()

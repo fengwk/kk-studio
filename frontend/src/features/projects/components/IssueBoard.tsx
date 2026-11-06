@@ -7,9 +7,8 @@ import type { ProjectIssueSnapshotDTO, ProjectWorkflowDTO } from '@/shared/api/g
 export interface IssueBoardProps {
   workflow?: ProjectWorkflowDTO
   issues: ProjectIssueSnapshotDTO[]
-  /** 搜索与归档筛选由页面头部持有；看板只按结果渲染列与卡片。 */
+  /** 搜索由页面头部持有；看板只按结果渲染列与卡片。 */
   searchQuery: string
-  includeArchived: boolean
   onSelectIssue: (issueId: string) => void
   onTransitionIssue: (issueId: string, expectedVersion: string, toState: string) => void
   onBlockIssue: (issueId: string, expectedVersion: string) => void
@@ -21,7 +20,6 @@ export function IssueBoard({
   workflow,
   issues,
   searchQuery,
-  includeArchived,
   onSelectIssue,
   onTransitionIssue,
   onBlockIssue,
@@ -52,9 +50,6 @@ export function IssueBoard({
   const filteredIssues = useMemo(() => {
     const q = searchQuery.trim().toLowerCase()
     return issues.filter((item) => {
-      if (!includeArchived && item.issue.archivedAt) {
-        return false
-      }
       if (!q) {
         return true
       }
@@ -64,7 +59,7 @@ export function IssueBoard({
         item.issue.state.toLowerCase().includes(q)
       )
     })
-  }, [issues, searchQuery, includeArchived])
+  }, [issues, searchQuery])
 
   // 按状态自然 token 组织 Issue 列表
   const issuesByState = useMemo(() => {

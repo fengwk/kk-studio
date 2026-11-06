@@ -26,8 +26,8 @@ function createProjectSnapshot() {
         nextIssueNumber: '2',
         version: '1',
         archivedAt: null,
-        createdAt: '2026-09-20T00:00:00Z',
-        updatedAt: '2026-09-20T00:00:00Z',
+        createdAt: Date.UTC(2026, 8, 20),
+        updatedAt: Date.UTC(2026, 8, 20),
       },
       issues: [
         {
@@ -40,9 +40,8 @@ function createProjectSnapshot() {
             state: 'INIT',
             paused: false,
             version: '1',
-            archivedAt: null,
-            createdAt: '2026-09-20T00:00:00Z',
-            updatedAt: '2026-09-20T00:00:00Z',
+            createdAt: Date.UTC(2026, 8, 20),
+            updatedAt: Date.UTC(2026, 8, 20),
           },
           run: null,
         },
@@ -62,9 +61,8 @@ function createIssueDetail() {
         state: 'INIT',
         paused: false,
         version: '1',
-        archivedAt: null,
-        createdAt: '2026-09-20T00:00:00Z',
-        updatedAt: '2026-09-20T00:00:00Z',
+        createdAt: Date.UTC(2026, 8, 20),
+        updatedAt: Date.UTC(2026, 8, 20),
       },
       activities: [],
       nextActivityCursor: null,
@@ -218,31 +216,31 @@ test.describe('Project Agent Real Browser Wiring & Control Gatekeeping', () => {
           await route.fulfill({ json: [] })
           return
         }
-        if (path === `/api/issues/${ISSUE_ID}`) {
+        if (path === `/api/project/issues/${ISSUE_ID}`) {
           await route.fulfill({ json: createIssueDetail() })
           return
         }
-        if (path === `/api/issues/${ISSUE_ID}/activities` && method === 'POST') {
+        if (path === `/api/project/issues/${ISSUE_ID}/activities` && method === 'POST') {
           issueActivities.push(route.request().postDataJSON())
           await route.fulfill({ json: [] })
           return
         }
-        if (path === `/api/issues/${ISSUE_ID}/evidence`) {
+        if (path === `/api/project/issues/${ISSUE_ID}/evidence`) {
           await route.fulfill({ json: [] })
           return
         }
-        if (path.startsWith(`/api/issues/${ISSUE_ID}`)) {
+        if (path.startsWith(`/api/project/issues/${ISSUE_ID}`)) {
           if (path.endsWith('/stop') && method === 'POST') {
             issueStops.push(route.request().postDataJSON())
           }
           await route.fulfill({ json: createIssueDetail().issue })
           return
         }
-        if (path === `/api/projects/${PROJECT_ID}/snapshot`) {
+        if (path === `/api/project/projects/${PROJECT_ID}/snapshot`) {
           await route.fulfill({ json: createProjectSnapshot() })
           return
         }
-        if (path.startsWith(`/api/projects/${PROJECT_ID}/issues/${ISSUE_ID}`)) {
+        if (path.startsWith(`/api/project/projects/${PROJECT_ID}/issues/${ISSUE_ID}`)) {
           await route.fulfill({ json: createIssueDetail() })
           return
         }

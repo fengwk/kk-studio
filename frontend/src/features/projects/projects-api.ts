@@ -1,4 +1,4 @@
-import { apiClient, type HttpClient } from '@/shared/api/client'
+import { request } from '@/shared/api/client'
 import type {
   AddIssueEvidenceRequestDTO,
   AppendIssueActivityRequestDTO,
@@ -25,67 +25,91 @@ import type {
   UpdateProjectYoloRequestDTO,
 } from '@/shared/api/generated/contracts'
 
-export interface ProjectsApiOptions {
-  client?: HttpClient
-}
-
-/** 产品 HTTP 数据直接使用生成的传输契约；HTTP 信封由共享客户端处理。 */
-export function createProjectsApi(options: ProjectsApiOptions = {}) {
-  const client = options.client ?? apiClient
+/**
+ * Project 与 Issue 产品 HTTP 客户端：按生成的路由键委托 shared/api/client 的 request()。
+ *
+ * <p>Issue 没有归档状态；Project 的归档是项目生命周期的一部分。
+ */
+export function createProjectsApi() {
   return {
     listProjects: (includeArchived = false): Promise<ProjectDTO[]> =>
-      client.get('/projects', { params: { includeArchived } }),
-    createProject: (request: CreateProjectRequestDTO): Promise<ProjectDTO> =>
-      client.post('/projects', request),
+      request('GET /api/project/projects', { query: { includeArchived } }),
+    createProject: (body: CreateProjectRequestDTO): Promise<ProjectDTO> =>
+      request('POST /api/project/projects', { body }),
     getProject: (projectId: string): Promise<ProjectDTO> =>
-      client.get(`/projects/${encodeURIComponent(projectId)}`),
-    updateProject: (projectId: string, request: UpdateProjectRequestDTO): Promise<ProjectDTO> =>
-      client.put(`/projects/${encodeURIComponent(projectId)}`, request),
-    updateWorkflow: (projectId: string, request: UpdateProjectWorkflowRequestDTO): Promise<ProjectDTO> =>
-      client.put(`/projects/${encodeURIComponent(projectId)}/workflow`, request),
-    updateYolo: (projectId: string, request: UpdateProjectYoloRequestDTO): Promise<ProjectDTO> =>
-      client.put(`/projects/${encodeURIComponent(projectId)}/yolo`, request),
+      request('GET /api/project/projects/{projectId}', { path: { projectId } }),
+    updateProject: (projectId: string, body: UpdateProjectRequestDTO): Promise<ProjectDTO> =>
+      request('PUT /api/project/projects/{projectId}', { path: { projectId }, body }),
+    updateWorkflow: (
+      projectId: string,
+      body: UpdateProjectWorkflowRequestDTO,
+    ): Promise<ProjectDTO> =>
+      request('PUT /api/project/projects/{projectId}/workflow', { path: { projectId }, body }),
+    updateYolo: (projectId: string, body: UpdateProjectYoloRequestDTO): Promise<ProjectDTO> =>
+      request('PUT /api/project/projects/{projectId}/yolo', { path: { projectId }, body }),
     deleteProject: (projectId: string, expectedVersion: string): Promise<void> =>
-      client.delete(`/projects/${encodeURIComponent(projectId)}`, { params: { expectedVersion } }),
-    archiveProject: (projectId: string, request: ProjectVersionRequestDTO): Promise<ProjectDTO> =>
-      client.post(`/projects/${encodeURIComponent(projectId)}/archive`, request),
-    unarchiveProject: (projectId: string, request: ProjectVersionRequestDTO): Promise<ProjectDTO> =>
-      client.post(`/projects/${encodeURIComponent(projectId)}/unarchive`, request),
+      request('DELETE /api/project/projects/{projectId}', {
+        path: { projectId },
+        query: { expectedVersion: Number(expectedVersion) },
+      }),
+    archiveProject: (
+      projectId: string,
+      body: ProjectVersionRequestDTO,
+    ): Promise<ProjectDTO> =>
+      request('POST /api/project/projects/{projectId}/archive', { path: { projectId }, body }),
+    unarchiveProject: (
+      projectId: string,
+      body: ProjectVersionRequestDTO,
+    ): Promise<ProjectDTO> =>
+      request('POST /api/project/projects/{projectId}/unarchive', { path: { projectId }, body }),
     getProjectSnapshot: (projectId: string): Promise<ProjectSnapshotDTO> =>
-      client.get(`/projects/${encodeURIComponent(projectId)}/snapshot`),
-    createIssue: (projectId: string, request: CreateIssueRequestDTO): Promise<IssueDTO> =>
-      client.post(`/projects/${encodeURIComponent(projectId)}/issues`, request),
+      request('GET /api/project/projects/{projectId}/snapshot', { path: { projectId } }),
+    createIssue: (projectId: string, body: CreateIssueRequestDTO): Promise<IssueDTO> =>
+      request('POST /api/project/projects/{projectId}/issues', { path: { projectId }, body }),
     getIssue: (issueId: string, afterSequence?: string, limit?: number): Promise<IssueDetailDTO> =>
-      client.get(`/issues/${encodeURIComponent(issueId)}`, {
-        params: {
-          ...(afterSequence ? { afterSequence } : {}),
+      request('GET /api/project/issues/{issueId}', {
+        path: { issueId },
+        query: {
+          ...(afterSequence ? { afterSequence: Number(afterSequence) } : {}),
           ...(typeof limit === 'number' ? { limit } : {}),
         },
       }),
-    updateIssue: (issueId: string, request: UpdateIssueRequestDTO): Promise<IssueDTO> =>
-      client.put(`/issues/${encodeURIComponent(issueId)}`, request),
-    transitionIssue: (issueId: string, request: TransitionIssueRequestDTO): Promise<IssueDTO> =>
-      client.post(`/issues/${encodeURIComponent(issueId)}/transition`, request),
-    blockIssue: (issueId: string, request: BlockIssueRequestDTO): Promise<IssueDTO> =>
-      client.post(`/issues/${encodeURIComponent(issueId)}/block`, request),
-    recoverIssue: (issueId: string, request: RecoverIssueRequestDTO): Promise<IssueDTO> =>
-      client.post(`/issues/${encodeURIComponent(issueId)}/recover`, request),
-    resumeIssue: (issueId: string, request: ResumeIssueRequestDTO): Promise<IssueDTO> =>
-      client.post(`/issues/${encodeURIComponent(issueId)}/resume`, request),
-    stopIssue: (issueId: string, request: StopIssueRequestDTO): Promise<IssueDTO> =>
-      client.post(`/issues/${encodeURIComponent(issueId)}/stop`, request),
+    updateIssue: (issueId: string, body: UpdateIssueRequestDTO): Promise<IssueDTO> =>
+      request('PUT /api/project/issues/{issueId}', { path: { issueId }, body }),
+    transitionIssue: (issueId: string, body: TransitionIssueRequestDTO): Promise<IssueDTO> =>
+      request('POST /api/project/issues/{issueId}/transition', { path: { issueId }, body }),
+    blockIssue: (issueId: string, body: BlockIssueRequestDTO): Promise<IssueDTO> =>
+      request('POST /api/project/issues/{issueId}/block', { path: { issueId }, body }),
+    recoverIssue: (issueId: string, body: RecoverIssueRequestDTO): Promise<IssueDTO> =>
+      request('POST /api/project/issues/{issueId}/recover', { path: { issueId }, body }),
+    resumeIssue: (issueId: string, body: ResumeIssueRequestDTO): Promise<IssueDTO> =>
+      request('POST /api/project/issues/{issueId}/resume', { path: { issueId }, body }),
+    stopIssue: (issueId: string, body: StopIssueRequestDTO): Promise<IssueDTO> =>
+      request('POST /api/project/issues/{issueId}/stop', { path: { issueId }, body }),
     deleteIssue: (issueId: string, expectedVersion: string): Promise<void> =>
-      client.delete(`/issues/${encodeURIComponent(issueId)}`, { params: { expectedVersion } }),
-    reopenIssue: (issueId: string, request: ReopenIssueRequestDTO): Promise<IssueDTO> =>
-      client.post(`/issues/${encodeURIComponent(issueId)}/reopen`, request),
-    resetStageBudget: (issueId: string, request: ResetStageBudgetRequestDTO): Promise<IssueStageBudgetDTO> =>
-      client.post(`/issues/${encodeURIComponent(issueId)}/budget-reset`, request),
-    appendIssueActivity: (issueId: string, request: AppendIssueActivityRequestDTO): Promise<IssueActivityDTO> =>
-      client.post(`/issues/${encodeURIComponent(issueId)}/activities`, request),
-    addIssueEvidence: (issueId: string, request: AddIssueEvidenceRequestDTO): Promise<IssueEvidenceDTO> =>
-      client.post(`/issues/${encodeURIComponent(issueId)}/evidence`, request),
+      request('DELETE /api/project/issues/{issueId}', {
+        path: { issueId },
+        query: { expectedVersion: Number(expectedVersion) },
+      }),
+    reopenIssue: (issueId: string, body: ReopenIssueRequestDTO): Promise<IssueDTO> =>
+      request('POST /api/project/issues/{issueId}/reopen', { path: { issueId }, body }),
+    resetStageBudget: (
+      issueId: string,
+      body: ResetStageBudgetRequestDTO,
+    ): Promise<IssueStageBudgetDTO> =>
+      request('POST /api/project/issues/{issueId}/reset-budget', { path: { issueId }, body }),
+    appendIssueActivity: (
+      issueId: string,
+      body: AppendIssueActivityRequestDTO,
+    ): Promise<IssueActivityDTO> =>
+      request('POST /api/project/issues/{issueId}/activities', { path: { issueId }, body }),
+    addIssueEvidence: (
+      issueId: string,
+      body: AddIssueEvidenceRequestDTO,
+    ): Promise<IssueEvidenceDTO> =>
+      request('POST /api/project/issues/{issueId}/evidence', { path: { issueId }, body }),
     listIssueEvidence: (issueId: string): Promise<IssueEvidenceDTO[]> =>
-      client.get(`/issues/${encodeURIComponent(issueId)}/evidence`),
+      request('GET /api/project/issues/{issueId}/evidence', { path: { issueId } }),
   }
 }
 

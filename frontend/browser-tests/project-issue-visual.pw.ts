@@ -4,7 +4,9 @@ import type { IssueDetailDTO, ResumeIssueRequestDTO } from '@/shared/api/generat
 const PROJECT = 'a0000000-0000-0000-0000-000000000001'
 const ISSUE = 'a0000000-0000-0000-0000-000000000002'
 const RUN = 'a0000000-0000-0000-0000-000000000003'
-const STAMP = '2026-10-01T00:00:00Z'
+const STAMP = Date.UTC(2026, 9, 1)
+/** 侧车记录自己的 createdAt 是本地 ISO 文本，不是后端 Instant。 */
+const SIDECAR_STAMP = '2026-10-01T00:00:00Z'
 const STORAGE_KEY = `kk-studio.projects.pending-action:${ISSUE}`
 const PAUSE_DETAIL = '外部支付请求结果未知，请核查交易是否已完成。'
 const detail: IssueDetailDTO = {
@@ -12,7 +14,7 @@ const detail: IssueDetailDTO = {
     id: ISSUE, projectId: PROJECT, number: '12', title: 'Offline visual issue',
     description: 'Actual IssueDetailModal with offline API transport', state: 'WORK',
     blockedFromState: null, blockReason: null, pauseReason: null, pauseDetail: null,
-    version: '1', archivedAt: null, createdAt: STAMP, updatedAt: STAMP,
+    version: '1', createdAt: STAMP, updatedAt: STAMP,
   },
   activities: [], nextActivityCursor: null, agentThreads: [], currentRun: null, latestRun: null,
   runs: [{
@@ -54,12 +56,12 @@ async function transport(page: Page, pauseReason: 'USER' | 'ERROR' | null = null
   })
   await page.route('**/api/**', async (route) => {
     const path = new URL(route.request().url()).pathname
-    if (path === `/api/issues/${ISSUE}` && route.request().method() === 'GET') {
+    if (path === `/api/project/issues/${ISSUE}` && route.request().method() === 'GET') {
       state.issueReads++
       await route.fulfill({ json: { ...detail, issue: state.issue } })
-    } else if (path === `/api/issues/${ISSUE}/evidence`) {
+    } else if (path === `/api/project/issues/${ISSUE}/evidence`) {
       await route.fulfill({ json: [] })
-    } else if (path === `/api/issues/${ISSUE}/resume` && route.request().method() === 'POST') {
+    } else if (path === `/api/project/issues/${ISSUE}/resume` && route.request().method() === 'POST') {
       const request = route.request().postDataJSON() as ResumeIssueRequestDTO
       state.resumeRequests.push(request)
       const previousVersion = state.committed.get(request.requestKey)
@@ -117,7 +119,7 @@ for (const width of [320, 1280]) {
         issueId: issue, kind: 'BLOCK', requestKey: 'offline-request-with-long-identity',
         expectedVersion: '1', payload: { reason: 'Offline test' }, createdAt: stamp, isUnknown: true,
       }))
-    }, { key: STORAGE_KEY, issue: ISSUE, stamp: STAMP })
+    }, { key: STORAGE_KEY, issue: ISSUE, stamp: SIDECAR_STAMP })
     await page.goto('/browser-tests/project-workflow-harness.html?issue')
     const dialog = page.getByRole('dialog')
     await expect(dialog.getByText('Offline visual issue', { exact: true })).toBeVisible()

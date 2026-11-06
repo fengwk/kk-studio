@@ -23,7 +23,6 @@ import { AgentPane } from '@/features/thread/runtime/AgentPane'
 import { agentService } from '@/shared/api/agent-service'
 import { environmentService } from '@/features/environment/environment-service'
 import { Button } from '@/shared/ui/controls/Button'
-import { Checkbox } from '@/shared/ui/controls/Checkbox'
 import { IconButton } from '@/shared/ui/controls/IconButton'
 import { SearchField } from '@/shared/ui/controls/SearchField'
 import { StateBlock } from '@/shared/ui/feedback/StateBlock'
@@ -80,9 +79,8 @@ export function ProjectDetailPage({
   const [isCreateIssueOpen, setIsCreateIssueOpen] = useState(false)
   const [isManualModalOpen, setIsManualModalOpen] = useState(false)
 
-  // 看板筛选（搜索 / 归档）由页面头部统一持有，IssueBoard 只负责按结果渲染列与卡片。
+  // 看板搜索由页面头部统一持有，IssueBoard 只负责按结果渲染列与卡片。
   const [searchQuery, setSearchQuery] = useState('')
-  const [includeArchived, setIncludeArchived] = useState(false)
 
   // 路由或参数变化时关闭 manualModal，避免前进后退复活弹窗
   useEffect(() => {
@@ -412,11 +410,6 @@ export function ProjectDetailPage({
             placeholder={t('projects.detail.searchPlaceholder')}
             aria-label={t('projects.detail.searchIssues')}
           />
-          <Checkbox
-            checked={includeArchived}
-            onChange={setIncludeArchived}
-            label={t('projects.includeArchived')}
-          />
           <ToolbarActions>
             <Button onClick={() => setIsCreateIssueOpen(true)}>
               <Plus size={14} aria-hidden="true" />
@@ -453,7 +446,6 @@ export function ProjectDetailPage({
           workflow={project.workflow}
           issues={snapshot.issues}
           searchQuery={searchQuery}
-          includeArchived={includeArchived}
           onSelectIssue={(id) => handleSelectIssue(id)}
           onTransitionIssue={handleTransitionIssue}
           onBlockIssue={handleBlockIssue}

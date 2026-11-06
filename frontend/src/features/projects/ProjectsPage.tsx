@@ -16,6 +16,7 @@ import { EditProjectModal } from './components/EditProjectModal'
 import type { ProjectsApi } from './projects-api'
 import { projectsApi } from './projects-api'
 import { useI18n } from '@/shared/i18n'
+import { formatBackendDate } from '@/shared/lib/date-format'
 import { queryKeys } from '@/shared/lib/query-keys'
 import './projects.css'
 import type { ProjectDTO } from '@/shared/api/generated/contracts'
@@ -146,7 +147,7 @@ export function ProjectsPage({
                 t('projects.meta.stages'),
                 t('projects.meta.stagesValue', { count: project.workflow?.states?.length ?? 0 }),
               ],
-              [t('projects.meta.updatedAt'), project.updatedAt],
+              [t('projects.meta.updatedAt'), formatBackendDate(project.updatedAt)],
               [t('projects.meta.nextIssueNumber'), `#${project.nextIssueNumber}`],
             ]}
             actions={

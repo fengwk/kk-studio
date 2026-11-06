@@ -318,7 +318,7 @@ export interface AgentTaskSubmitDTO {
 export interface AppendIssueActivityRequestDTO {
   expectedVersion: string
   requestKey: string
-  kind?: string | null
+  kind?: IssueActivityKind | null
   body: string
 }
 
@@ -326,11 +326,6 @@ export interface AppendIssueActivityRequestDTO {
 export interface ApplyCanvasCommandsRequestDTO {
   idempotencyKey: string
   commands: CanvasCommandDTO[]
-}
-
-/** Java：fun.fengwk.kkstudio.project.dto.ArchiveIssueRequestDTO */
-export interface ArchiveIssueRequestDTO {
-  expectedVersion: string
 }
 
 /** Java：fun.fengwk.kkstudio.project.dto.BlockIssueRequestDTO */
@@ -1546,18 +1541,48 @@ export interface InteractionPageDTO {
   freshnessAt: number | null
 }
 
+/** Java：fun.fengwk.kkstudio.project.model.IssueActivityActorType */
+export type IssueActivityActorType =
+  | 'HUMAN'
+  | 'AGENT'
+  | 'SYSTEM'
+
+export const ISSUE_ACTIVITY_ACTOR_TYPE_VALUES: readonly IssueActivityActorType[] = [
+  'HUMAN',
+  'AGENT',
+  'SYSTEM',
+]
+
 /** Java：fun.fengwk.kkstudio.project.dto.IssueActivityDTO */
 export interface IssueActivityDTO {
   issueId: string
   sequence: string
-  kind: string
-  actorType: string
+  kind: IssueActivityKind
+  actorType: IssueActivityActorType
   actorAgentName: string | null
   runId: string | null
   body: string | null
   data?: unknown | null
-  createdAt: string
+  createdAt: number
 }
+
+/** Java：fun.fengwk.kkstudio.project.model.IssueActivityKind */
+export type IssueActivityKind =
+  | 'COMMENT'
+  | 'RUN'
+  | 'INSTRUCTION'
+  | 'SPEC_CHANGE'
+  | 'STATE_CHANGE'
+  | 'CONTROL'
+
+export const ISSUE_ACTIVITY_KIND_VALUES: readonly IssueActivityKind[] = [
+  'COMMENT',
+  'RUN',
+  'INSTRUCTION',
+  'SPEC_CHANGE',
+  'STATE_CHANGE',
+  'CONTROL',
+]
 
 /** Java：fun.fengwk.kkstudio.project.dto.IssueAgentThreadDTO */
 export interface IssueAgentThreadDTO {
@@ -1576,12 +1601,11 @@ export interface IssueDTO {
   state: string
   blockedFromState: string | null
   blockReason: string | null
-  pauseReason: string | null
+  pauseReason: PauseReason | null
   pauseDetail: string | null
   version: string
-  archivedAt: string | null
-  createdAt: string
-  updatedAt: string
+  createdAt: number
+  updatedAt: number
 }
 
 /** Java：fun.fengwk.kkstudio.project.dto.IssueDetailDTO */
@@ -1604,7 +1628,7 @@ export interface IssueEvidenceDTO {
   name?: string | null
   actorAgentName: string | null
   runId: string | null
-  createdAt: string
+  createdAt: number
 }
 
 /** Java：fun.fengwk.kkstudio.project.dto.IssueRunDTO */
@@ -1616,7 +1640,7 @@ export interface IssueRunDTO {
   agentName: string | null
   sessionId: string
   threadId: string
-  status: string
+  status: IssueRunStatus
   startEntryId: string
   endEntryId: string | null
   finalAnswerEntryId: string | null
@@ -1625,9 +1649,25 @@ export interface IssueRunDTO {
   remainingExecutionMs: string
   error: string | null
   version: string
-  startedAt: string
-  endedAt: string | null
+  startedAt: number
+  endedAt: number | null
 }
+
+/** Java：fun.fengwk.kkstudio.project.domain.IssueRunStatus */
+export type IssueRunStatus =
+  | 'RUNNING'
+  | 'WAITING'
+  | 'COMPLETED'
+  | 'FAILED'
+  | 'CANCELLED'
+
+export const ISSUE_RUN_STATUS_VALUES: readonly IssueRunStatus[] = [
+  'RUNNING',
+  'WAITING',
+  'COMPLETED',
+  'FAILED',
+  'CANCELLED',
+]
 
 /** Java：fun.fengwk.kkstudio.project.dto.IssueRunSummaryDTO */
 export interface IssueRunSummaryDTO {
@@ -1635,10 +1675,10 @@ export interface IssueRunSummaryDTO {
   issueId: string
   ordinal: string
   state: string
-  status: string
+  status: IssueRunStatus
   agentName: string | null
-  startedAt: string
-  endedAt: string | null
+  startedAt: number
+  endedAt: number | null
 }
 
 /** Java：fun.fengwk.kkstudio.project.dto.IssueStageBudgetDTO */
@@ -1738,6 +1778,16 @@ export interface Page<T> {
   results: T[]
   totalCount: string
 }
+
+/** Java：fun.fengwk.kkstudio.project.model.PauseReason */
+export type PauseReason =
+  | 'USER'
+  | 'ERROR'
+
+export const PAUSE_REASON_VALUES: readonly PauseReason[] = [
+  'USER',
+  'ERROR',
+]
 
 /** Java：fun.fengwk.kkstudio.share.plugin.PluginAuthCompleteRequestDTO */
 export interface PluginAuthCompleteRequestDTO {
@@ -1881,9 +1931,9 @@ export interface ProjectDTO {
   yoloEnabled: boolean
   nextIssueNumber: string
   version: string
-  archivedAt: string | null
-  createdAt: string
-  updatedAt: string
+  archivedAt: number | null
+  createdAt: number
+  updatedAt: number
 }
 
 /** Java：fun.fengwk.kkstudio.project.dto.ProjectIssueSnapshotDTO */
@@ -2343,22 +2393,17 @@ export interface TransitionIssueRequestDTO {
   toState: string
 }
 
-/** Java：fun.fengwk.kkstudio.project.dto.UnarchiveIssueRequestDTO */
-export interface UnarchiveIssueRequestDTO {
-  expectedVersion: string
-}
-
 /** Java：fun.fengwk.kkstudio.project.dto.UpdateIssueRequestDTO */
 export interface UpdateIssueRequestDTO {
   expectedVersion: string
-  title?: string | null
+  title: string
   description?: string | null
 }
 
 /** Java：fun.fengwk.kkstudio.project.dto.UpdateProjectRequestDTO */
 export interface UpdateProjectRequestDTO {
   expectedVersion: string
-  title?: string | null
+  title: string
   description?: string | null
 }
 
@@ -2395,11 +2440,6 @@ export interface ApiRoutes {
     body: EnvironmentIdeCloseViewDTO
     response: void
   }
-  'DELETE /api/issues/{issueId}': {
-    path: { issueId: string }
-    query: { expectedVersion: string }
-    response: void
-  }
   'DELETE /api/mcp-servers/{name}': {
     path: { name: string }
     query: { expectedVersion: string }
@@ -2414,9 +2454,14 @@ export interface ApiRoutes {
     path: { pluginId: string }
     response: void
   }
-  'DELETE /api/projects/{projectId}': {
+  'DELETE /api/project/issues/{issueId}': {
+    path: { issueId: string }
+    query: { expectedVersion: number }
+    response: void
+  }
+  'DELETE /api/project/projects/{projectId}': {
     path: { projectId: string }
-    query: { expectedVersion: string }
+    query: { expectedVersion: number }
     response: void
   }
   'DELETE /api/providers/{name}': {
@@ -2507,15 +2552,6 @@ export interface ApiRoutes {
     query: { cursor?: string; limit?: string; rootThreadId?: string }
     response: InteractionPageDTO
   }
-  'GET /api/issues/{issueId}': {
-    path: { issueId: string }
-    query: { afterSequence?: string; limit?: string }
-    response: IssueDetailDTO
-  }
-  'GET /api/issues/{issueId}/evidence': {
-    path: { issueId: string }
-    response: IssueEvidenceDTO[]
-  }
   'GET /api/mcp-servers': {
     query: { pageNumber?: number; pageSize?: number }
     response: Page<McpServerDTO>
@@ -2543,15 +2579,24 @@ export interface ApiRoutes {
     path: { pluginId: string }
     response: PluginDTO
   }
-  'GET /api/projects': {
+  'GET /api/project/issues/{issueId}': {
+    path: { issueId: string }
+    query: { afterSequence?: number; limit?: number }
+    response: IssueDetailDTO
+  }
+  'GET /api/project/issues/{issueId}/evidence': {
+    path: { issueId: string }
+    response: IssueEvidenceDTO[]
+  }
+  'GET /api/project/projects': {
     query: { includeArchived?: boolean }
     response: ProjectDTO[]
   }
-  'GET /api/projects/{projectId}': {
+  'GET /api/project/projects/{projectId}': {
     path: { projectId: string }
     response: ProjectDTO
   }
-  'GET /api/projects/{projectId}/snapshot': {
+  'GET /api/project/projects/{projectId}/snapshot': {
     path: { projectId: string }
     response: ProjectSnapshotDTO
   }
@@ -2726,61 +2771,6 @@ export interface ApiRoutes {
     body: HarnessToolInputDTO
     response: HarnessToolInputResultDTO
   }
-  'POST /api/issues/{issueId}/activities': {
-    path: { issueId: string }
-    body: AppendIssueActivityRequestDTO
-    response: IssueActivityDTO
-  }
-  'POST /api/issues/{issueId}/archive': {
-    path: { issueId: string }
-    body: ArchiveIssueRequestDTO
-    response: IssueDTO
-  }
-  'POST /api/issues/{issueId}/block': {
-    path: { issueId: string }
-    body: BlockIssueRequestDTO
-    response: IssueDTO
-  }
-  'POST /api/issues/{issueId}/budget-reset': {
-    path: { issueId: string }
-    body: ResetStageBudgetRequestDTO
-    response: IssueStageBudgetDTO
-  }
-  'POST /api/issues/{issueId}/evidence': {
-    path: { issueId: string }
-    body: AddIssueEvidenceRequestDTO
-    response: IssueEvidenceDTO
-  }
-  'POST /api/issues/{issueId}/recover': {
-    path: { issueId: string }
-    body: RecoverIssueRequestDTO
-    response: IssueDTO
-  }
-  'POST /api/issues/{issueId}/reopen': {
-    path: { issueId: string }
-    body: ReopenIssueRequestDTO
-    response: IssueDTO
-  }
-  'POST /api/issues/{issueId}/resume': {
-    path: { issueId: string }
-    body: ResumeIssueRequestDTO
-    response: IssueDTO
-  }
-  'POST /api/issues/{issueId}/stop': {
-    path: { issueId: string }
-    body: StopIssueRequestDTO
-    response: IssueDTO
-  }
-  'POST /api/issues/{issueId}/transition': {
-    path: { issueId: string }
-    body: TransitionIssueRequestDTO
-    response: IssueDTO
-  }
-  'POST /api/issues/{issueId}/unarchive': {
-    path: { issueId: string }
-    body: UnarchiveIssueRequestDTO
-    response: IssueDTO
-  }
   'POST /api/mcp-servers': {
     body: McpServerCreateDTO
     response: McpServerDTO
@@ -2812,21 +2802,66 @@ export interface ApiRoutes {
     body: PluginConnectionCheckRequestDTO
     response: PluginConnectionCheckDTO
   }
-  'POST /api/projects': {
+  'POST /api/project/issues/{issueId}/activities': {
+    path: { issueId: string }
+    body: AppendIssueActivityRequestDTO
+    response: IssueActivityDTO
+  }
+  'POST /api/project/issues/{issueId}/block': {
+    path: { issueId: string }
+    body: BlockIssueRequestDTO
+    response: IssueDTO
+  }
+  'POST /api/project/issues/{issueId}/evidence': {
+    path: { issueId: string }
+    body: AddIssueEvidenceRequestDTO
+    response: IssueEvidenceDTO
+  }
+  'POST /api/project/issues/{issueId}/recover': {
+    path: { issueId: string }
+    body: RecoverIssueRequestDTO
+    response: IssueDTO
+  }
+  'POST /api/project/issues/{issueId}/reopen': {
+    path: { issueId: string }
+    body: ReopenIssueRequestDTO
+    response: IssueDTO
+  }
+  'POST /api/project/issues/{issueId}/reset-budget': {
+    path: { issueId: string }
+    body: ResetStageBudgetRequestDTO
+    response: IssueStageBudgetDTO
+  }
+  'POST /api/project/issues/{issueId}/resume': {
+    path: { issueId: string }
+    body: ResumeIssueRequestDTO
+    response: IssueDTO
+  }
+  'POST /api/project/issues/{issueId}/stop': {
+    path: { issueId: string }
+    body: StopIssueRequestDTO
+    response: IssueDTO
+  }
+  'POST /api/project/issues/{issueId}/transition': {
+    path: { issueId: string }
+    body: TransitionIssueRequestDTO
+    response: IssueDTO
+  }
+  'POST /api/project/projects': {
     body: CreateProjectRequestDTO
     response: ProjectDTO
   }
-  'POST /api/projects/{projectId}/archive': {
+  'POST /api/project/projects/{projectId}/archive': {
     path: { projectId: string }
     body: ProjectVersionRequestDTO
     response: ProjectDTO
   }
-  'POST /api/projects/{projectId}/issues': {
+  'POST /api/project/projects/{projectId}/issues': {
     path: { projectId: string }
     body: CreateIssueRequestDTO
     response: IssueDTO
   }
-  'POST /api/projects/{projectId}/unarchive': {
+  'POST /api/project/projects/{projectId}/unarchive': {
     path: { projectId: string }
     body: ProjectVersionRequestDTO
     response: ProjectDTO
@@ -2953,11 +2988,6 @@ export interface ApiRoutes {
     body: Record<string, unknown>
     response: EnvironmentCardDTO
   }
-  'PUT /api/issues/{issueId}': {
-    path: { issueId: string }
-    body: UpdateIssueRequestDTO
-    response: IssueDTO
-  }
   'PUT /api/mcp-servers/{name}': {
     path: { name: string }
     body: McpServerUpdateDTO
@@ -2973,17 +3003,22 @@ export interface ApiRoutes {
     body: PluginConfigurationUpdateRequestDTO
     response: PluginDTO
   }
-  'PUT /api/projects/{projectId}': {
+  'PUT /api/project/issues/{issueId}': {
+    path: { issueId: string }
+    body: UpdateIssueRequestDTO
+    response: IssueDTO
+  }
+  'PUT /api/project/projects/{projectId}': {
     path: { projectId: string }
     body: UpdateProjectRequestDTO
     response: ProjectDTO
   }
-  'PUT /api/projects/{projectId}/workflow': {
+  'PUT /api/project/projects/{projectId}/workflow': {
     path: { projectId: string }
     body: UpdateProjectWorkflowRequestDTO
     response: ProjectDTO
   }
-  'PUT /api/projects/{projectId}/yolo': {
+  'PUT /api/project/projects/{projectId}/yolo': {
     path: { projectId: string }
     body: UpdateProjectYoloRequestDTO
     response: ProjectDTO
