@@ -45,7 +45,7 @@ Thread panel 消费 timeline presentation 类型，宿主负责 API、realtime �
 [`client.ts`](../../frontend/src/shared/api/client.ts) 提供类型化 `request` 与 `url`，
 统一注入 Accept-Language 并设置请求超时。成功响应直接读取资源，空体返回 undefined；
 错误响应按 problem+json 解析，`ApiError` 保留 status、code、reason、detail 和 errors。
-恢复逻辑按精确 reason 判断，未知 reason 使用安全提示。过渡期间 `apiClient` 是同一传输核心的外观。
+恢复逻辑按精确 reason 判断，未知 reason 使用安全提示。
 
 HTTP 路由与传输类型由 Web 控制器签名与生产 HTTP Jackson mapper 生成到
 [`generated/contracts.ts`](../../frontend/src/shared/api/generated/contracts.ts)：

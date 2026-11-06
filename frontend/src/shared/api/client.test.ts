@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
-  ApiError, apiClient, apiErrorDetail, isConflictError, isConflictReason, isNotFoundError, request, url,
+  ApiError, apiErrorDetail, executeFetch, isConflictError, isConflictReason, isNotFoundError, request, url,
 } from './client'
 import { setLocale } from '@/shared/i18n'
 
@@ -23,14 +23,14 @@ describe('HTTP client', () => {
       // @ts-expect-error 未知路由不能调用。
       request('GET /api/not-a-route', {})
       // @ts-expect-error 必填查询参数不能省略。
-      request('DELETE /api/providers/{name}', { path: { name: 'x' } })
+      request('DELETE /api/platform/providers/{name}', { path: { name: 'x' } })
       // @ts-expect-error 路径参数类型由路由表约束。
       url('GET /api/canvas/canvases/{canvasId}', { path: { canvasId: 1 } })
     }
   })
 
-  // 成功体就是资源，空体无值；外观与核心共享语言、序列化及解析。
-  it('reads resource bodies and supports the temporary facade', async () => {
+  // 成功体就是资源，空体无值。
+  it('reads resource bodies', async () => {
     setLocale('en-US')
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response('{"title":"A"}', { headers: { 'Content-Type': 'application/json' } }))
@@ -43,30 +43,11 @@ describe('HTTP client', () => {
       method: 'POST', body: '{"title":"A"}',
       headers: { 'Accept-Language': 'en-US', 'Content-Type': 'application/json' },
     })
-    await expect(apiClient.delete('/platform/models/a', { params: { v: 1 }, data: { x: 2 } }))
-      .resolves.toBeUndefined()
-    expect(fetchMock.mock.calls[1]![0]).toBe('/api/platform/models/a?v=1')
-    expect(fetchMock.mock.calls[1]![1].body).toBe('{"x":2}')
-  })
-
-  // 外观保留已有的 GET 参数、请求头、无损解析与 PUT/POST 序列化。
-  it('retains facade request options and mutations', async () => {
-    const transport = vi.fn(async (_url: string, _init: RequestInit) =>
-      new Response('{"n":9007199254740993}', { headers: { 'Content-Type': 'application/json' } }))
-    vi.stubGlobal('fetch', transport)
-    const parser = vi.fn((raw: string) => raw)
-    expect(await apiClient.get('/platform/models?existing=1', {
-      params: { q: 'a b', omit: undefined, enabled: false },
-      headers: { 'Cache-Control': 'no-store' },
-      jsonParser: parser,
-    })).toBe('{"n":9007199254740993}')
-    expect(transport.mock.calls[0]![0]).toBe('/api/platform/models?existing=1&q=a+b&enabled=false')
-    expect(transport.mock.calls[0]![1].headers).toMatchObject({ 'Cache-Control': 'no-store' })
-    expect(parser).toHaveBeenCalledOnce()
-    await apiClient.post('/models', { name: 'x' }, { timeout: 0 })
-    await apiClient.put('/models/x', { name: 'y' }, { headers: { 'Content-Type': 'application/json' } })
-    expect(transport.mock.calls[1]![1]).toMatchObject({ method: 'POST', body: '{"name":"x"}' })
-    expect(transport.mock.calls[2]![1]).toMatchObject({ method: 'PUT', body: '{"name":"y"}' })
+    await expect(request('DELETE /api/platform/models/{*name}', {
+      path: { name: 'a' }, query: { expectedVersion: '1' },
+    })).resolves.toBeUndefined()
+    expect(fetchMock.mock.calls[1]![0]).toBe('/api/platform/models/a?expectedVersion=1')
+    expect(fetchMock.mock.calls[1]![1]).toMatchObject({ method: 'DELETE' })
   })
 
   // problem 扩展字段位于顶层，非 problem 不得被当作错误信封解析。
@@ -155,18 +136,20 @@ describe('HTTP client', () => {
       .rejects.toMatchObject({ status: 404, code: 'not_found' })
   })
 
-  // 过渡外观保留二进制传输，不误用 JSON.stringify。
-  it('preserves binary bodies and text responses in the facade', async () => {
+  // 底层执行器直接透传二进制体，不误用 JSON.stringify。
+  it('preserves binary bodies in the fetch executor', async () => {
     const transport = vi.fn(async (_url: string, _init: RequestInit) =>
       new Response('plain', { headers: { 'Content-Type': 'text/plain' } }))
     vi.stubGlobal('fetch', transport)
     const form = new FormData()
     form.set('field', 'value')
-    await expect(apiClient.post('/form', form)).resolves.toBe('plain')
+    await expect(executeFetch('/api/form', { method: 'POST', body: form })).resolves.toBe('plain')
     expect(transport.mock.calls[0]![1].body).toBe(form)
-    await apiClient.post('/blob', new Blob(['data']))
-    await apiClient.post('/buffer', new ArrayBuffer(2))
-    await apiClient.post('/form-url', new URLSearchParams({ a: 'b' }))
+    await executeFetch('/api/blob', { method: 'POST', body: new Blob(['data']) })
+    await executeFetch('/api/buffer', { method: 'POST', body: new ArrayBuffer(2) })
+    await executeFetch('/api/form-url', {
+      method: 'POST', body: new URLSearchParams({ a: 'b' }),
+    })
     expect(transport.mock.calls[3]![1].body).toBeInstanceOf(URLSearchParams)
   })
 

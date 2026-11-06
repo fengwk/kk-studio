@@ -1,11 +1,3 @@
-/** convention4j 分页结果；Java long 的 totalCount 在 wire 上是十进制字符串。 */
-export interface PageResult<T> {
-  pageNumber: number
-  pageSize: number
-  totalCount: string
-  results: T[]
-}
-
 /** 非负十进制乐观锁 token。 */
 export type CatalogVersion = string
 
