@@ -85,12 +85,12 @@ L2               │                  │ harness-runtime │◀─────�
       │ harness-environment │◀──────────┘ │ harness-model │
       └──────────┬──────────┘             └───────────────┘
                  ▼
-            ┌────────┐    ┌──────┐   ┌───────┐   ┌────────┐
-L1          │ common │◀───│ work │   │ share │   │ schema │
-            └────────┘    └──────┘   └───────┘   └────────┘
+            ┌────────┐    ┌──────┐    ┌────────┐
+L1          │ common │◀───│ work │    │ schema │
+            └────────┘    └──────┘    └────────┘
 ```
 
-图中只画不能由其他路径推出的直接依赖。没有画出的边：`platform-runtime` 依赖 `share` 与 `work`；`canvas-spi`
+图中只画不能由其他路径推出的直接依赖。没有画出的边：`platform-runtime` 依赖 `work`；`canvas-spi`
 与多数模块直接依赖 `common`；`web` 以 runtime 范围依赖四个插件与 `schema`。插件中只有 `minimax-mavis` 不依赖
 `canvas-spi`；`harness-model` 不依赖任何内部模块。测试只复用下层模块的测试夹具（test-jar）与 `schema`。
 
