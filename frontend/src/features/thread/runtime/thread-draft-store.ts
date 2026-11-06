@@ -8,6 +8,7 @@ import {
   prependCancelledMessages,
 } from '@/features/thread/runtime/cancelled-message-parts'
 import type { HarnessStoppedThreadReceiptDTO } from '@/shared/api/generated/contracts'
+import { isRecord } from '@/shared/lib/value'
 
 /**
  * 绑定 Thread 的本地草稿事实源。
@@ -298,8 +299,4 @@ function isPersistablePart(value: unknown): value is ComposerPart {
   return value.type === 'resource'
     && typeof value.blobId === 'string'
     && typeof value.name === 'string'
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value != null && typeof value === 'object' && !Array.isArray(value)
 }
