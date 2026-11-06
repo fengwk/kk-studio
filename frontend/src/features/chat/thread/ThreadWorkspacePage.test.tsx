@@ -90,8 +90,8 @@ function thread(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
       environmentName: null,
       goal: null,
     },
-    createdAt: 1785232800,
-    updatedAt: 1785232800,
+    createdAt: 1785232800000,
+    updatedAt: 1785232800000,
     ...overrides,
   }
 }
@@ -116,7 +116,7 @@ function snapshotWithPendingTool(targetThreadId: string): HarnessThreadSnapshotD
         ],
       },
     }),
-    createdAt: 1785232801,
+    createdAt: 1785232801000,
     usageCost: null,
   }
 
@@ -151,8 +151,8 @@ function snapshotWithPendingTool(targetThreadId: string): HarnessThreadSnapshotD
         }),
         resultJson: null,
         errorJson: null,
-        createdAt: 1785232801,
-        updatedAt: 1785232801,
+        createdAt: 1785232801000,
+        updatedAt: 1785232801000,
       },
     ],
     baseEntryId: null,
@@ -213,7 +213,7 @@ function userEntry(text: string, entryId: string): HarnessSessionEntryDTO {
     payloadJson: JSON.stringify({
       message: { role: 'USER', contents: [{ type: 'text', text }] },
     }),
-    createdAt: 1785232800,
+    createdAt: 1785232800000,
     usageCost: null,
   }
 }
@@ -247,7 +247,7 @@ function snapshotFor(
             message: { role: 'USER', contents: [{ type: 'text', text: 'parent queued' }] },
           }),
           cancelledAt: null,
-          createdAt: 1785232802,
+          createdAt: 1785232802000,
         }],
     toolInvocations: [],
     ...overrides,
@@ -553,7 +553,7 @@ describe('ThreadWorkspacePage', () => {
         turnCount: 2,
         toolCallCount: 1,
         outcome: null,
-        updatedAt: 1774958400,
+        updatedAt: 1774958400000,
       },
       {
         threadId: CHILD_THREAD_ID,
@@ -566,7 +566,7 @@ describe('ThreadWorkspacePage', () => {
         turnCount: 1,
         toolCallCount: 1,
         outcome: null,
-        updatedAt: 1774958400,
+        updatedAt: 1774958400000,
       },
       {
         threadId: OTHER_CHILD_THREAD_ID,
@@ -579,7 +579,7 @@ describe('ThreadWorkspacePage', () => {
         turnCount: 1,
         toolCallCount: 0,
         outcome: 'FAILED',
-        updatedAt: 1774958400,
+        updatedAt: 1774958400000,
       },
     ])
 

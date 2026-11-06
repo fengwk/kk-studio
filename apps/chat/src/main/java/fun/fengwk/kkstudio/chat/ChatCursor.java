@@ -28,8 +28,7 @@ record ChatCursor(Instant updatedAt, Instant createdAt, String title, UUID id) {
   }
 
   static ChatCursor of(Chat chat) {
-    return new ChatCursor(
-        chat.getUpdateTime(), chat.getCreateTime(), chat.getTitle(), chat.getId());
+    return new ChatCursor(chat.getUpdatedAt(), chat.getCreatedAt(), chat.getTitle(), chat.getId());
   }
 
   /** 解析客户端回传的游标；空游标表示首屏，非法形状抛 {@link IllegalArgumentException}（翻译为 400）。 */

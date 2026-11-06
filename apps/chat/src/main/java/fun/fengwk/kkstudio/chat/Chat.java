@@ -28,8 +28,8 @@ public class Chat {
   private Long version;
 
   /** 创建时间（映射 {@code created_at} timestamptz，毫秒精度）。 */
-  private Instant createTime;
+  private Instant createdAt;
 
   /** 更新时间（映射 {@code updated_at} timestamptz，应用侧维护，毫秒精度）。 */
-  private Instant updateTime;
+  private Instant updatedAt;
 }

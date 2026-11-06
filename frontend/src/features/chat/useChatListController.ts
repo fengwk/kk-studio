@@ -117,11 +117,14 @@ export function useChatListController(
         environmentName: selectedEnvironmentName ?? null,
         expectedVersion: editingChat.version,
       })
-      if (yoloEnabled === editingChat.yoloEnabled) {
+      // 整体替换已提交：即使随后 YOLO 写入失败，弹窗也以新版本为基准，并让列表反映已保存的字段。
+      setEditingChat(updated)
+      await queryClient.invalidateQueries({ queryKey: queryKeys.chats.list })
+      if (yoloEnabled === updated.yoloEnabled) {
         return updated
       }
       // YOLO 是独立子资源，跟随整体替换后的新版本单独提交。
-      return chatService.updateYolo(editingChat.id, {
+      return chatService.updateYolo(updated.id, {
         yoloEnabled,
         expectedVersion: updated.version,
       })
