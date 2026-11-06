@@ -18,6 +18,7 @@ import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeDirectoryListingDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeOpenViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewBindingDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewState;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewsDTO;
 import fun.fengwk.kkstudio.platform.daemon.DaemonIdeLease;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeCommand;
@@ -210,7 +211,7 @@ class IdeLeaseCoordinatorTest {
     dto.setBindingEpoch(Long.toString(epoch));
     dto.setDirectory("/dir");
     dto.setWorkspacePath("/ws");
-    dto.setState("OPEN");
+    dto.setState(EnvironmentIdeViewState.OPEN);
     return dto;
   }
 

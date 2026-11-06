@@ -13,9 +13,11 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityU
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeChangeDirectoryDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeCloseViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeDirectoryListingDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeOpenMode;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeOpenViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewBindingDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewState;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewsDTO;
 import fun.fengwk.kkstudio.ide.gateway.IdeGatewayConstants;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeAction;
@@ -85,7 +87,7 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     UUID eventNodeId = parseUuid(request.getEventNodeId(), "eventNodeId");
     UUID connectionId = parseUuid(request.getConnectionId(), "connectionId");
     UUID claimId = parseUuid(request.getClaimId(), "claimId");
-    IdeOpenMode mode = parseMode(request.getMode());
+    IdeOpenMode mode = protocolMode(request.getMode());
     String directory = parseDirectory(request.getDirectory());
     requireIntent(eventNodeId, connectionId, documentId, environmentId, viewId, claimId);
     ensureCapacity(environmentId);
@@ -321,7 +323,7 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     UUID parsedViewId = parseViewId(viewId);
     UUID documentId = parseUuid(request.getDocumentId(), "documentId");
     long bindingEpoch = parseEpoch(request.getBindingEpoch());
-    boolean discard = requireDiscard(request.getDiscard());
+    boolean discard = request.isDiscard();
     IdeViewBindingRegistry.Binding binding =
         requireBinding(environmentId, parsedViewId, documentId, bindingEpoch);
     IdeCommand command =
@@ -656,7 +658,7 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     EnvironmentIdeViewDTO dto = toDto(view.binding());
     dto.setDirectory(view.directory());
     dto.setWorkspacePath(view.workspacePath());
-    dto.setState(view.state().name());
+    dto.setState(viewState(view.state()));
     return dto;
   }
 
@@ -695,16 +697,22 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     }
   }
 
-  private static IdeOpenMode parseMode(String value) {
-    if (value != null) {
-      if (value.equalsIgnoreCase("create")) {
-        return IdeOpenMode.CREATE;
-      }
-      if (value.equalsIgnoreCase("resume")) {
-        return IdeOpenMode.RESUME;
-      }
+  private static EnvironmentIdeViewState viewState(IdeViewState state) {
+    return switch (state) {
+      case OPEN -> EnvironmentIdeViewState.OPEN;
+      case CLOSING -> EnvironmentIdeViewState.CLOSING;
+      default -> throw protocolFailure("Daemon returned an unsupported IDE view state: " + state);
+    };
+  }
+
+  private static IdeOpenMode protocolMode(EnvironmentIdeOpenMode mode) {
+    if (mode == null) {
+      throw DomainException.validation("environment", "mode must be create or resume");
     }
-    throw DomainException.validation("environment", "mode must be create or resume");
+    return switch (mode) {
+      case CREATE -> IdeOpenMode.CREATE;
+      case RESUME -> IdeOpenMode.RESUME;
+    };
   }
 
   public static String parseDirectory(String value) {
@@ -723,13 +731,6 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
         throw DomainException.validation(
             "environment", "directory must not contain control characters");
       }
-    }
-    return value;
-  }
-
-  private static boolean requireDiscard(Boolean value) {
-    if (value == null) {
-      throw DomainException.validation("environment", "discard is required");
     }
     return value;
   }

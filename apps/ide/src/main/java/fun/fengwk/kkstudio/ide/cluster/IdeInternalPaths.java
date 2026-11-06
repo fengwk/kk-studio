@@ -36,4 +36,8 @@ public final class IdeInternalPaths {
   public static String closePath(EnvironmentId environmentId, String viewId) {
     return viewsPath(environmentId) + "/" + viewId + "/close";
   }
+
+  public static String mobileLayoutPath(EnvironmentId environmentId, String viewId) {
+    return viewsPath(environmentId) + "/" + viewId + "/apply-mobile-layout";
+  }
 }

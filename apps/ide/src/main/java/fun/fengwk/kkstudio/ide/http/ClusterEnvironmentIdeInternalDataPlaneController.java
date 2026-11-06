@@ -9,7 +9,6 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
-import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.cluster.IdeInternalPaths;
 import fun.fengwk.kkstudio.ide.gateway.IdeForwardedRequest;
@@ -18,7 +17,6 @@ import fun.fengwk.kkstudio.platform.cluster.ClusterInternalAuthentication;
 import fun.fengwk.kkstudio.platform.cluster.ClusterInternalRequests;
 import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
-import fun.fengwk.kkstudio.platform.http.RequestParameters;
 
 import java.io.IOException;
 import java.util.Objects;
@@ -49,39 +47,37 @@ public class ClusterEnvironmentIdeInternalDataPlaneController {
 
   @RequestMapping("/data-http")
   public void dataHttp(
-      @PathVariable String environmentId,
-      @RequestParam("viewId") String viewIdStr,
+      @PathVariable UUID environmentId,
+      @RequestParam("viewId") UUID viewId,
       @RequestParam("path") String rawPathAndQuery,
       HttpServletRequest request,
       HttpServletResponse response)
       throws IOException {
     EnvironmentId envId = authenticateAndAuthorize(request, environmentId);
-    UUID viewId = Uuids.parseCanonical(viewIdStr, "viewId");
     HttpServletRequest forwarded = IdeForwardedRequest.of(request, rawPathAndQuery);
     dataPlane.handleInternalDataPlane(envId, viewId, rawPathAndQuery, forwarded, response);
   }
 
   @GetMapping("/data-ws")
   public void dataWebSocket(
-      @PathVariable String environmentId,
-      @RequestParam("viewId") String viewIdStr,
+      @PathVariable UUID environmentId,
+      @RequestParam("viewId") UUID viewId,
       @RequestParam("path") String rawPathAndQuery,
       HttpServletRequest request,
       HttpServletResponse response)
       throws IOException {
     EnvironmentId envId = authenticateAndAuthorize(request, environmentId);
-    UUID viewId = Uuids.parseCanonical(viewIdStr, "viewId");
     HttpServletRequest forwarded = IdeForwardedRequest.of(request, rawPathAndQuery);
     dataPlane.handleInternalDataPlane(envId, viewId, rawPathAndQuery, forwarded, response);
   }
 
   /** 认证与 owner 核对先于任何转发；失败不会进入数据面。 */
-  private EnvironmentId authenticateAndAuthorize(HttpServletRequest request, String environmentId) {
+  private EnvironmentId authenticateAndAuthorize(HttpServletRequest request, UUID environmentId) {
     authentication.verify(
         request.getMethod(),
         ClusterInternalRequests.canonicalPath(request),
         ClusterInternalRequests.authHeaders(request));
-    EnvironmentId envId = RequestParameters.environmentId(environmentId);
+    EnvironmentId envId = EnvironmentId.of(environmentId);
     boolean local = clusterNodeRegistry.route(envId).filter(ClusterOwnerRoute::local).isPresent();
     if (!local) {
       throw DomainException.unavailable(

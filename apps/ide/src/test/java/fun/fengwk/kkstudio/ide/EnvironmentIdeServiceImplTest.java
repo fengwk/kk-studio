@@ -16,9 +16,11 @@ import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.browser.IdeBrowserUseClient;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeChangeDirectoryDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeCloseViewDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeOpenMode;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeOpenViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewBindingDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewState;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewsDTO;
 import fun.fengwk.kkstudio.ide.gateway.IdeGatewayConstants;
 import fun.fengwk.kkstudio.platform.daemon.DaemonIdeLease;
@@ -95,7 +97,7 @@ class EnvironmentIdeServiceImplTest {
     assertEquals("7", dto.getBindingEpoch());
     assertEquals("/daemon/dir", dto.getDirectory());
     assertEquals("/daemon/ws", dto.getWorkspacePath());
-    assertEquals("OPEN", dto.getState());
+    assertEquals(EnvironmentIdeViewState.OPEN, dto.getState());
     assertTrue(
         dto.getEntryUrl()
             .startsWith(
@@ -237,17 +239,11 @@ class EnvironmentIdeServiceImplTest {
   }
 
   @Test
-  void closeRequiresDiscardAndRevokesAuthorizationOnViewGone() {
+  void closeRevokesAuthorizationOnViewGone() {
     open();
     EnvironmentIdeCloseViewDTO request = new EnvironmentIdeCloseViewDTO();
     request.setDocumentId(DOCUMENT.toString());
     request.setBindingEpoch("7");
-
-    assertThrows(DomainException.class, () -> service.closeView(ENV, VIEW.toString(), request));
-    assertTrue(
-        transport.commands.stream()
-            .noneMatch(command -> command.getAction() == IdeAction.CLOSE_VIEW));
-
     request.setDiscard(false);
     transport.replies.add(
         IdeResult.newBuilder()
@@ -301,7 +297,7 @@ class EnvironmentIdeServiceImplTest {
 
     EnvironmentIdeViewDTO changed = service.changeDirectory(ENV, VIEW.toString(), request);
     assertEquals("/daemon/next", changed.getDirectory());
-    assertEquals("CLOSING", changed.getState());
+    assertEquals(EnvironmentIdeViewState.CLOSING, changed.getState());
     assertTrue(bindings.find(ENV, VIEW).orElseThrow().matches(DOCUMENT, 7L));
     assertEquals("/client/link/.", transport.commands.get(1).getDirectory());
     assertEquals(IdeAction.LIST_VIEWS, transport.commands.getLast().getAction());
@@ -668,7 +664,7 @@ class EnvironmentIdeServiceImplTest {
     request.setEventNodeId(EVENT_NODE.toString());
     request.setConnectionId(CONNECTION.toString());
     request.setClaimId(CLAIM.toString());
-    request.setMode("create");
+    request.setMode(EnvironmentIdeOpenMode.CREATE);
     request.setDirectory(directory);
     return request;
   }

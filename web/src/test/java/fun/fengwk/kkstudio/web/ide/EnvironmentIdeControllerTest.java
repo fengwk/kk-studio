@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.web.ide;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.nullValue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -23,6 +24,7 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.http.MediaType;
+import org.springframework.http.converter.json.JacksonJsonHttpMessageConverter;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import tools.jackson.databind.ObjectMapper;
@@ -40,6 +42,7 @@ import fun.fengwk.kkstudio.ide.IdeViewBindingRegistry;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeChangeDirectoryDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeCloseViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeDirectoryListingDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeOpenMode;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeOpenViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewBindingDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO;
@@ -50,6 +53,8 @@ import fun.fengwk.kkstudio.platform.daemon.protocol.IdeResult;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
 import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer;
 import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
+import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
+import fun.fengwk.kkstudio.web.advice.RequestBodyRequiredValidationAdvice;
 import fun.fengwk.kkstudio.web.advice.StudioProblemAdvice;
 
 import java.time.Duration;
@@ -80,9 +85,13 @@ class EnvironmentIdeControllerTest {
   void setUp() {
     environmentIdeService = mock(EnvironmentIdeService.class);
     EnvironmentIdeController controller = new EnvironmentIdeController(environmentIdeService);
+    JsonMapper mapper = StrictHttpJsonMapperTestSupport.strictHttp();
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
-            .setControllerAdvice(new StudioProblemAdvice(new StudioMessageService()))
+            .setControllerAdvice(
+                new RequestBodyRequiredValidationAdvice(mapper),
+                new StudioProblemAdvice(new StudioMessageService()))
+            .setMessageConverters(new JacksonJsonHttpMessageConverter(mapper))
             .build();
   }
 
@@ -125,7 +134,7 @@ class EnvironmentIdeControllerTest {
             post("/api/ide/environments/" + ENV_ID + "/views")
                 .locale(Locale.US)
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"viewId\":\"" + VIEW_ID + "\",\"directory\":\"/workspace\"}"))
+                .content(openViewBody("/workspace")))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.viewId").value(VIEW_ID))
         .andExpect(jsonPath("$.environmentId").value(ENV_ID.toString()))
@@ -155,7 +164,10 @@ class EnvironmentIdeControllerTest {
             put("/api/ide/environments/" + ENV_ID + "/views/" + VIEW_ID + "/directory")
                 .locale(Locale.US)
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"directory\":\"/workspace/subdir\"}"))
+                .content(
+                    "{\"documentId\":\""
+                        + DOCUMENT_ID
+                        + "\",\"bindingEpoch\":\"7\",\"directory\":\"/workspace/subdir\"}"))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.status").value(400))
         .andExpect(jsonPath("$.code").value("validation"))
@@ -209,7 +221,10 @@ class EnvironmentIdeControllerTest {
             put("/api/ide/environments/" + ENV_ID + "/views/" + VIEW_ID + "/directory")
                 .locale(Locale.forLanguageTag(languageTag))
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"directory\":\"/workspace/subdir\"}"))
+                .content(
+                    "{\"documentId\":\""
+                        + DOCUMENT_ID
+                        + "\",\"bindingEpoch\":\"7\",\"directory\":\"/workspace/subdir\"}"))
         .andExpect(status().isConflict())
         .andExpect(jsonPath("$.status").value(409))
         .andExpect(jsonPath("$.code").value("unavailable"))
@@ -226,7 +241,7 @@ class EnvironmentIdeControllerTest {
             post("/api/ide/environments/not-a-uuid/views")
                 .locale(Locale.US)
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"viewId\":\"" + VIEW_ID + "\"}"))
+                .content(openViewBody("/workspace")))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.code").value("validation"))
         .andExpect(jsonPath("$.detail").value(containsString("environmentId")));
@@ -285,7 +300,23 @@ class EnvironmentIdeControllerTest {
     assertEquals("7", focus.getValue().getBindingEpoch());
     assertEquals(DOCUMENT_ID, close.getValue().getDocumentId());
     assertEquals("7", close.getValue().getBindingEpoch());
-    assertEquals(Boolean.FALSE, close.getValue().getDiscard());
+    assertFalse(close.getValue().isDiscard());
+  }
+
+  /** 关闭必须显式给出 discard；缺失在 HTTP 边界即为 validation，不落到默认 false。 */
+  @Test
+  void closeRequiresExplicitDiscard() throws Exception {
+    mockMvc
+        .perform(
+            post("/api/ide/environments/" + ENV_ID + "/views/" + VIEW_ID + "/close")
+                .locale(Locale.US)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"documentId\":\"" + DOCUMENT_ID + "\",\"bindingEpoch\":\"7\"}"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("validation"))
+        .andExpect(jsonPath("$.detail").value("discard is required"));
+
+    verifyNoInteractions(environmentIdeService);
   }
 
   /** 意图：未知字段必须被严格拒绝，避免 IDE 契约静默漂移。 */
@@ -296,7 +327,10 @@ class EnvironmentIdeControllerTest {
             put("/api/ide/environments/" + ENV_ID + "/views/" + VIEW_ID + "/directory")
                 .locale(Locale.US)
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"directory\":\"/workspace\",\"unknown\":true}"))
+                .content(
+                    "{\"documentId\":\""
+                        + DOCUMENT_ID
+                        + "\",\"bindingEpoch\":\"7\",\"directory\":\"/workspace\",\"unknown\":true}"))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.code").value("validation"))
         .andExpect(jsonPath("$.detail").value(containsString("Failed to read request")));
@@ -332,7 +366,7 @@ class EnvironmentIdeControllerTest {
     openRequest.setEventNodeId(UUID.randomUUID().toString());
     openRequest.setConnectionId(UUID.randomUUID().toString());
     openRequest.setClaimId(UUID.randomUUID().toString());
-    openRequest.setMode("create");
+    openRequest.setMode(EnvironmentIdeOpenMode.CREATE);
     openRequest.setDirectory(directory);
     realChain
         .perform(
@@ -371,6 +405,18 @@ class EnvironmentIdeControllerTest {
     view.setEnvironmentId(ENV_ID.toString());
     view.setDirectory(directory);
     return view;
+  }
+
+  private static String openViewBody(String directory) throws Exception {
+    EnvironmentIdeOpenViewDTO request = new EnvironmentIdeOpenViewDTO();
+    request.setViewId(VIEW_ID);
+    request.setDocumentId(DOCUMENT_ID);
+    request.setEventNodeId(UUID.randomUUID().toString());
+    request.setConnectionId(UUID.randomUUID().toString());
+    request.setClaimId(UUID.randomUUID().toString());
+    request.setMode(EnvironmentIdeOpenMode.CREATE);
+    request.setDirectory(directory);
+    return OBJECT_MAPPER.writeValueAsString(request);
   }
 
   /** 记录发出的 IDE 命令的传输替身：真实服务链路只需证明坏目录未产生任何命令。 */
