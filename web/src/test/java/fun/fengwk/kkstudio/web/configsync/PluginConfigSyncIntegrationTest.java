@@ -17,7 +17,6 @@ import org.springframework.test.annotation.DirtiesContext;
 import tools.jackson.databind.JsonNode;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
-import fun.fengwk.kkstudio.common.json.JsonValues;
 import fun.fengwk.kkstudio.platform.catalog.definition.Agent;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentType;
@@ -104,12 +103,12 @@ class PluginConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     assertFalse(yamlText.contains("secrets"), "secret projections never leave the host");
   }
 
-  /** 一次导入把插件与 settings 放进同一事务：导入后插件修订恰好前进一次且不产生任何凭据。 */
+  /** 一次导入把插件与 settings 放进同一事务：导入后插件版本恰好前进一次且不产生任何凭据。 */
   @Test
   void importAppliesPluginsTogetherWithOtherKinds() throws Exception {
     Map<String, String> plugins = installedPluginValues();
     String pluginId = plugins.keySet().iterator().next();
-    long revisionBefore = pluginRow(snapshotReader.read(), pluginId).version();
+    long versionBefore = pluginRow(snapshotReader.read(), pluginId).version();
 
     String yaml =
         mutateYaml(
@@ -126,7 +125,7 @@ class PluginConfigSyncIntegrationTest extends ConfigSyncTestSupport {
 
     ConfigSyncSnapshot after = snapshotReader.read();
     PluginConfigurationRow row = pluginRow(after, pluginId);
-    assertEquals(revisionBefore + 1, row.version(), "exactly one plugin write");
+    assertEquals(versionBefore + 1, row.version(), "exactly one plugin write");
     assertEquals(plugins.get(pluginId), row.valuesJson());
     assertNotEquals(
         "CONNECTED",
@@ -134,7 +133,7 @@ class PluginConfigSyncIntegrationTest extends ConfigSyncTestSupport {
         "an ordinary import must never fabricate a credential for an installed plugin");
   }
 
-  /** 同一次导入里第二个插件的修订冲突必须让第一个插件与 providers 的写入一起完整回滚。 */
+  /** 同一次导入里第二个插件的版本冲突必须让第一个插件与 providers 的写入一起完整回滚。 */
   @Test
   void secondPluginConflictRollsBackEveryKind() throws Exception {
     List<String> pluginIds = new ArrayList<>(installedPluginValues().keySet());
@@ -158,7 +157,7 @@ class PluginConfigSyncIntegrationTest extends ConfigSyncTestSupport {
         "an earlier provider write must be rolled back with the failing plugin");
   }
 
-  /** 导入事务外并发保存插件配置时，插件的修订 CAS 失败必须回滚本次导入已写入的 providers。 */
+  /** 导入事务外并发保存插件配置时，插件的版本 CAS 失败必须回滚本次导入已写入的 providers。 */
   @Test
   void concurrentPluginSaveRollsBackEveryKind() throws Exception {
     String pluginId = installedPluginValues().keySet().iterator().next();
@@ -166,9 +165,9 @@ class PluginConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     ConfigSyncSnapshot before = snapshotReader.read();
     PluginConfigurationRow row = pluginRow(before, pluginId);
 
-    // 并发写入：按计划期的修订保存一次普通配置。
+    // 并发写入：按计划期的版本保存一次普通配置。
     pluginManagementService.updateConfiguration(
-        pluginId, Long.toString(row.version()), JsonValues.readTree(row.valuesJson()), Map.of());
+        pluginId, Long.toString(row.version()), row.valuesJson(), Map.of());
 
     assertThrows(DomainException.class, () -> applier.apply(plan, List.of()));
 
@@ -176,7 +175,7 @@ class PluginConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     assertEquals(row.version() + 1, pluginRow(after, pluginId).version());
     assertFalse(
         providerNames(after).contains(CAS_PROVIDER),
-        "the earlier provider write must be rolled back when the plugin revision CAS fails");
+        "the earlier provider write must be rolled back when the plugin version CAS fails");
   }
 
   /**
@@ -273,13 +272,13 @@ class PluginConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     return names;
   }
 
-  /** 已安装插件的 pluginId 到权威普通值文本；只取真实存在配置投影的插件。 */
+  /** 已安装插件的 pluginId 到权威普通值原文；只取真实存在配置投影的插件。 */
   private Map<String, String> installedPluginValues() throws Exception {
     Map<String, String> values = new LinkedHashMap<>();
     for (JsonNode node : getData("/api/platform/plugins")) {
-      JsonNode pluginValues = node.path("configuration").path("values");
-      if (pluginValues.isObject()) {
-        values.put(node.path("pluginId").asText(), JsonValues.write(pluginValues));
+      JsonNode valuesJson = node.path("configuration").path("valuesJson");
+      if (valuesJson.isTextual()) {
+        values.put(node.path("pluginId").asText(), valuesJson.asText());
       }
     }
     return values;
@@ -303,7 +302,7 @@ class PluginConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     return planner.plan(parser.parse(yaml));
   }
 
-  /** 把指定插件的计划期修订改为陈旧值，模拟计划与提交之间的并发推进。 */
+  /** 把指定插件的计划期版本改为陈旧值，模拟计划与提交之间的并发推进。 */
   private static ConfigSyncPlan withStalePlugin(ConfigSyncPlan plan, String pluginId) {
     List<ConfigSyncPlan.PluginImport> plugins =
         plan.plugins().stream()
@@ -311,7 +310,7 @@ class PluginConfigSyncIntegrationTest extends ConfigSyncTestSupport {
                 plugin ->
                     plugin.pluginId().equals(pluginId)
                         ? new ConfigSyncPlan.PluginImport(
-                            plugin.pluginId(), plugin.expectedRevision() + 1, plugin.valuesJson())
+                            plugin.pluginId(), plugin.expectedVersion() + 1, plugin.valuesJson())
                         : plugin)
             .toList();
     return new ConfigSyncPlan(

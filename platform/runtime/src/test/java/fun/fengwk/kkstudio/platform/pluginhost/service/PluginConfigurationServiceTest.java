@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.platform.pluginhost.service;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
@@ -15,6 +16,8 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.schema.InputSchema;
+import fun.fengwk.kkstudio.common.schema.IntegerSchema;
+import fun.fengwk.kkstudio.common.schema.NumberSchema;
 import fun.fengwk.kkstudio.common.schema.StringSchema;
 import fun.fengwk.kkstudio.platform.plugin.Plugin;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthHandler;
@@ -149,6 +152,35 @@ class PluginConfigurationServiceTest {
     assertEquals(0, catalogWakes.get());
   }
 
+  /** 提交原文超 64 KiB 预算即拒绝：判定对象是用户提交文本，而不是归一化后的文本。 */
+  @Test
+  void rejectsSubmittedValuesOverTheUtf8BudgetBeforeNormalizing() {
+    String padded =
+        "{"
+            + " ".repeat(PluginConfig.MAX_VALUES_UTF8_BYTES)
+            + "\"endpoint\":\"https://a.example\"}";
+
+    assertThrows(DomainException.class, () -> service.configure(STATIC_ID, 3L, padded, Map.of()));
+    verify(configurations, never()).update(anyString(), anyLong(), anyString());
+  }
+
+  /** 归一化文本按原词法保存大整数、精确小数与超范围指数，不经过 double。 */
+  @Test
+  void storesExactNumberTokensWithoutReserializationLoss() {
+    String values =
+        "{\"endpoint\":\"https://a.example\","
+            + "\"maxTokens\":9007199254740993123456789,"
+            + "\"temperature\":1.230000,"
+            + "\"weight\":1E+1000}";
+
+    service.configure(STATIC_ID, 3L, values, Map.of());
+
+    String stored = staticPlugin.lastConfig.valuesJson();
+    assertTrue(stored.contains("\"maxTokens\":9007199254740993123456789"), stored);
+    assertTrue(stored.contains("\"temperature\":1.230000"), stored);
+    assertTrue(stored.contains("\"weight\":1E+1000"), stored);
+  }
+
   /** 未安装 Plugin、非法值、未声明的秘密字段、交互凭据补丁与插件拒绝都在写入前失败。 */
   @Test
   void rejectsInvalidRequestsBeforeWriting() {
@@ -220,7 +252,14 @@ class PluginConfigurationServiceTest {
     public PluginConfigSchema configurationSchema() {
       return new PluginConfigSchema(
           new InputSchema(
-              "config", Map.of("endpoint", new StringSchema("endpoint")), Set.of(), false),
+              "config",
+              Map.of(
+                  "endpoint", new StringSchema("endpoint"),
+                  "maxTokens", new IntegerSchema("maximum tokens"),
+                  "temperature", new NumberSchema("sampling temperature"),
+                  "weight", new NumberSchema("large exponent probe")),
+              Set.of(),
+              false),
           VALUES_A,
           Map.of("apiKey", "API key", "region", "Region"));
     }

@@ -45,7 +45,7 @@ import java.util.Map;
  * Environment → Agent → Plugin → Settings。新增 Agent 先以空 subagent allowlist
  * 创建，再在同一事务内统一更新为完整列表，使循环引用可解且事务外不可见中间态。任何写入失败都随异常整体回滚，绝不 捕获后继续。
  *
- * <p>插件复用唯一写入口 {@link PluginConfigurationService}：每项都比较该插件计划期的配置修订；任一项冲突或失败都让整份导入回滚，提交后才在本节点应用。
+ * <p>插件复用唯一写入口 {@link PluginConfigurationService}：每项都比较该插件计划期的配置版本；任一项冲突或失败都让整份导入回滚，提交后才在本节点应用。
  *
  * <p>计划在写事务外形成，因此事务内先按同一份插件声明重新核验依赖的 Agent 仍然存在（行锁读取，锁持有到外层事务结束），避免提交悬空依赖。
  */
@@ -168,22 +168,22 @@ public class ConfigSyncApplier {
   }
 
   /**
-   * 插件按计划顺序串行写入唯一提交入口，各自比较计划期配置修订。
+   * 插件按计划顺序串行写入唯一提交入口，各自比较计划期配置版本。
    *
    * <p>导入只承载普通值，秘密补丁恒为空（全部 KEEP），因此绝不复制或恢复任何凭据。
    */
   private void applyPlugins(ConfigSyncPlan plan) {
-    // 计划到写入之间删除的 Agent 无法被配置修订 CAS 发现：先按同一声明批量预锁，再开始任何插件写入。
+    // 计划到写入之间删除的 Agent 无法被配置版本 CAS 发现：先按同一声明批量预锁，再开始任何插件写入。
     pluginAgentDependencies.requireDeclaredAgents(
         plan.plugins().stream()
             .map(
                 plugin ->
                     new PluginAgentDependencies.Declaration(
-                        plugin.pluginId(), plugin.expectedRevision(), plugin.valuesJson()))
+                        plugin.pluginId(), plugin.expectedVersion(), plugin.valuesJson()))
             .toList());
     for (ConfigSyncPlan.PluginImport plugin : plan.plugins()) {
       pluginConfigurationService.configure(
-          plugin.pluginId(), plugin.expectedRevision(), plugin.valuesJson(), Map.of());
+          plugin.pluginId(), plugin.expectedVersion(), plugin.valuesJson(), Map.of());
     }
   }
 

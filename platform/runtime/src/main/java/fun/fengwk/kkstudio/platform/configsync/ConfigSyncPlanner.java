@@ -501,7 +501,7 @@ public final class ConfigSyncPlanner {
     return new AgentPlan(agentPool, agents);
   }
 
-  /** 插件只判定其普通配置声明的 Agent 依赖，并携带导入事务内的配置修订 CAS 坐标。 */
+  /** 插件只判定其普通配置声明的 Agent 依赖，并携带导入事务内的配置版本 CAS 坐标。 */
   private List<ConfigSyncPlan.PluginImport> planPlugins(
       ConfigSyncParser.ParsedDocument document,
       ConfigSyncSnapshot snapshot,
@@ -509,24 +509,24 @@ public final class ConfigSyncPlanner {
       List<ConfigSyncSkipped> skipped,
       List<ConfigSyncRef> imported) {
     List<ConfigSyncPlan.PluginImport> pluginImports = new ArrayList<>();
-    Map<String, Long> pluginRevisions = new LinkedHashMap<>();
+    Map<String, Long> pluginVersions = new LinkedHashMap<>();
     for (PluginConfigurationRow row : snapshot.plugins()) {
-      pluginRevisions.put(row.pluginId(), row.version());
+      pluginVersions.put(row.pluginId(), row.version());
     }
     for (ConfigSyncParser.PluginSpec spec : document.plugins()) {
-      Long revision = pluginRevisions.get(spec.pluginId());
-      if (revision == null) {
+      Long version = pluginVersions.get(spec.pluginId());
+      if (version == null) {
         // 权威目录与安装集合必须一致：解析期已确认安装，却没有任何目录坐标意味着目录被篡改，绝不静默导入。
         throw DomainException.validation(
             RESOURCE, "plugin catalog is inconsistent: " + spec.pluginId());
       }
-      String reason = pluginUnsatisfiedReason(spec, revision, agentPool);
+      String reason = pluginUnsatisfiedReason(spec, version, agentPool);
       if (reason != null) {
         skipped.add(new ConfigSyncSkipped(ConfigSyncKind.PLUGINS, spec.pluginId(), reason));
         continue;
       }
       pluginImports.add(
-          new ConfigSyncPlan.PluginImport(spec.pluginId(), revision, spec.valuesJson()));
+          new ConfigSyncPlan.PluginImport(spec.pluginId(), version, spec.valuesJson()));
       imported.add(ConfigSyncRefs.ref(ConfigSyncKind.PLUGINS, spec.pluginId()));
     }
     return pluginImports;
@@ -556,9 +556,9 @@ public final class ConfigSyncPlanner {
    * <p>文件里声明但被跳过的 Agent 已从池中移除，因此插件绝不会靠旧快照同名 Agent 蒙混过关；错误消息只带安全条目名，不回显配置或 cause。
    */
   private String pluginUnsatisfiedReason(
-      ConfigSyncParser.PluginSpec spec, long revision, Set<String> agentPool) {
+      ConfigSyncParser.PluginSpec spec, long version, Set<String> agentPool) {
     for (String agent :
-        pluginAgentDependencies.declaredAgentNames(spec.pluginId(), revision, spec.valuesJson())) {
+        pluginAgentDependencies.declaredAgentNames(spec.pluginId(), version, spec.valuesJson())) {
       if (!agentPool.contains(agent)) {
         return "missing agent: " + agent;
       }

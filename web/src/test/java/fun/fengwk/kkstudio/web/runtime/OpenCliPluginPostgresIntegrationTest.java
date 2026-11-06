@@ -28,7 +28,9 @@ import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.transaction.PlatformTransactionManager;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionBinding;
@@ -386,8 +388,8 @@ class OpenCliPluginPostgresIntegrationTest {
               String body = new String(response.getContentAsByteArray(), StandardCharsets.UTF_8);
               assertFalse(body.contains(HTTP_GOLDEN_API_KEY));
               assertEquals(
-                  JsonValues.readTree(goldenText(HTTP_GOLDEN)),
-                  JsonValues.readTree(body),
+                  withParsedValuesJson(JsonValues.readTree(goldenText(HTTP_GOLDEN))),
+                  withParsedValuesJson(JsonValues.readTree(body)),
                   HTTP_GOLDEN + " must match the live HTTP body");
             });
   }
@@ -416,7 +418,7 @@ class OpenCliPluginPostgresIntegrationTest {
               PluginDTO privateOnly = management.getPlugin(PLUGIN_ID);
               assertEquals(PluginCredentialStatus.NOT_CONNECTED, privateOnly.getStatus());
               PluginConfigurationDTO projected = privateOnly.getConfiguration();
-              assertFalse(projected.getValues().toString().contains(privateIdentity));
+              assertFalse(projected.getValuesJson().contains(privateIdentity));
               assertTrue(projected.getSecrets().get("instanceId").isConfigured());
               assertFalse(projected.getSecrets().get("apiKey").isConfigured());
 
@@ -462,6 +464,17 @@ class OpenCliPluginPostgresIntegrationTest {
 
   private void submit(CanvasFunctionAdapter adapter, String prompt) {
     adapter.submit(execContext, createTestRun(adapter.functions().get(0), prompt));
+  }
+
+  /** {@code valuesJson} 是原文，但缺省值补齐后的键序不属于契约；比较其 JSON 值，其余字段仍逐值比对。 */
+  private static JsonNode withParsedValuesJson(JsonNode plugin) {
+    ObjectNode copy = (ObjectNode) plugin.deepCopy();
+    ObjectNode configuration = (ObjectNode) copy.get("configuration");
+    JsonNode valuesJson = configuration.get("valuesJson");
+    if (valuesJson != null && valuesJson.isString()) {
+      configuration.set("valuesJson", JsonValues.readTree(valuesJson.asString()));
+    }
+    return copy;
   }
 
   /** 已提交的共用 golden 原文：测试只读取，绝不在运行时改写资源。 */

@@ -29,7 +29,7 @@ vi.mock('@/shared/api/client', async (importOriginal) => {
 const plugin: PluginDTO = {
   pluginId: 'demo',
   name: 'Demo',
-  version: '1',
+  pluginVersion: '1',
   status: 'NOT_CONNECTED',
   authKind: { type: 'DEEP_LINK', regionCandidates: ['CN', 'EN'] },
   region: null,
@@ -39,12 +39,11 @@ const plugin: PluginDTO = {
   lastRefreshError: null,
   configuration: {
     version: '1',
-    values: {},
+    valuesJson: '{}',
     valuesSchema: { type: 'object', properties: {} },
     defaults: {},
     secrets: {},
   },
-  desiredVersion: '1',
   appliedVersion: '1',
   connectionCheckSupported: false,
   harnessToolNames: [],

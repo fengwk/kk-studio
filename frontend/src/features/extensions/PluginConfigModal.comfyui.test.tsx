@@ -111,7 +111,7 @@ describe('PluginConfigModal real ComfyUI workflow', () => {
 
   it('shows the real ComfyUI API graph unescaped in the multiline editor', async () => {
     const plugin = comfyuiHttpGolden()
-    const values = plugin.configuration.values as {
+    const values = JSON.parse(plugin.configuration.valuesJson) as {
       workflows: { workflowJson: string; argsSchemaJson: string }[]
     }
     renderModal(plugin)
@@ -133,13 +133,13 @@ describe('PluginConfigModal real ComfyUI workflow', () => {
     renderModal(plugin)
 
     const payload = await save()
-    expect(payload.values).toEqual(plugin.configuration.values)
+    expect(payload.valuesJson).toBe(plugin.configuration.valuesJson)
   })
 
   it('keeps the preset graph byte-identical while editing sibling fields', async () => {
     const plugin = comfyuiHttpGolden()
     vi.mocked(request).mockResolvedValue(plugin)
-    const original = plugin.configuration.values as {
+    const original = JSON.parse(plugin.configuration.valuesJson) as {
       workflows: { id: string; workflowJson: string; parameterBindings: unknown[] }[]
     }
     renderModal(plugin)
@@ -150,9 +150,9 @@ describe('PluginConfigModal real ComfyUI workflow', () => {
     })
     const payload = await save()
 
-    const edited = payload.values as typeof original
+    const edited = JSON.parse(payload.valuesJson) as typeof original
     expect(edited.workflows[0].id).toBe('h3-edited')
-    expect(JSON.stringify(edited)).toContain(JSON.stringify(original.workflows[0].workflowJson))
+    expect(payload.valuesJson).toContain(JSON.stringify(original.workflows[0].workflowJson))
     expect(edited.workflows[0].parameterBindings).toEqual(original.workflows[0].parameterBindings)
   })
 
@@ -167,17 +167,22 @@ describe('PluginConfigModal real ComfyUI workflow', () => {
     expect(within(added).getByRole('textbox', { name: 'id' })).toHaveValue('')
 
     let payload = await save()
-    let workflows = (payload.values as { workflows: Record<string, unknown>[] }).workflows
+    let workflows = (JSON.parse(payload.valuesJson) as {
+      workflows: Record<string, unknown>[]
+    }).workflows
     expect(workflows).toHaveLength(2)
     // 占位只包含 schema 声明的必需属性，绝不为可选属性发明值。
     expect(Object.keys(workflows[1]).sort()).toEqual(requiredKeysOf(workflowItemSchema()))
     expect(workflows[1].outputs).toEqual([])
     expect(workflows[1].mediaBindings).toEqual([])
     // 真实预置工作流逐字节保留，没有被重新格式化。
-    expect(JSON.stringify(payload.values)).toContain(JSON.stringify(
-      (plugin.configuration.values as { workflows: { workflowJson: string }[] }).workflows[0]
-        .workflowJson,
-    ))
+    expect(payload.valuesJson).toContain(
+      JSON.stringify(
+        (JSON.parse(plugin.configuration.valuesJson) as {
+          workflows: { workflowJson: string }[]
+        }).workflows[0].workflowJson,
+      ),
+    )
 
     await user.click(
       within(screen.getByRole('group', { name: 'workflows[1]' })).getByRole('button', {
@@ -185,8 +190,10 @@ describe('PluginConfigModal real ComfyUI workflow', () => {
       }),
     )
     payload = await save()
-    workflows = (payload.values as { workflows: Record<string, unknown>[] }).workflows
+    workflows = (JSON.parse(payload.valuesJson) as {
+      workflows: Record<string, unknown>[]
+    }).workflows
     expect(workflows).toHaveLength(1)
-    expect(payload.values).toEqual(plugin.configuration.values)
+    expect(payload.valuesJson).toBe(plugin.configuration.valuesJson)
   })
 })

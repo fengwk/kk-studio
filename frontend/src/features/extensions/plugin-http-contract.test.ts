@@ -1,8 +1,10 @@
 import { readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { findNodeAtLocation } from 'jsonc-parser'
 import { describe, expect, it } from 'vitest'
 import type { PluginDTO } from '@/shared/api/generated/contracts'
+import { getNodeSlice, parseStrictJsonObject } from './plugin-config-json'
 import { parsePluginValuesSchema } from './plugin-schema'
 
 function httpGoldenData(filename: string): unknown {
@@ -23,27 +25,27 @@ describe('plugin HTTP contract', () => {
     expect(plugins[1].authKind?.type).toBe('STATIC_KEY')
     expect(plugins[2].status).toBe('REAUTH_REQUIRED')
     expect(plugins[2].lastRefreshError).toBe('provider rejected the stored static key')
-    expect(plugins[3].desiredVersion).toBe('2')
+    expect(plugins[3].configuration.version).toBe('2')
     expect(plugins[3].appliedVersion).toBe('1')
     expect(plugins[3].applicationError).not.toBeNull()
     expect(plugins[4].expiresAt).toBe(1777574730000)
     expect(plugins[0].connectionCheckSupported).toBe(false)
     expect(plugins[4].connectionCheckSupported).toBe(true)
-    const values = plugins[4].configuration.values as {
-      limits: { maxTokens: number; temperature: number }
-      mode: string
-      retries: number[]
-      weight: number
-      __proto__: string
-      constructor: boolean
+    const raw = plugins[4].configuration.valuesJson
+    const parsed = parseStrictJsonObject(raw)
+    expect(parsed.ok).toBe(true)
+    if (parsed.ok) {
+      expect(getNodeSlice(raw, findNodeAtLocation(parsed.tree, ['limits', 'maxTokens'])!))
+        .toBe('9007199254740993123456789')
+      expect(getNodeSlice(raw, findNodeAtLocation(parsed.tree, ['limits', 'temperature'])!))
+        .toBe('1.230000')
+      expect(getNodeSlice(raw, findNodeAtLocation(parsed.tree, ['weight'])!)).toBe('1E+1000')
+      expect(getNodeSlice(raw, findNodeAtLocation(parsed.tree, ['mode'])!)).toBe('"BALANCED"')
+      expect(getNodeSlice(raw, findNodeAtLocation(parsed.tree, ['retries'])!)).toBe('[1,2,3]')
+      expect(getNodeSlice(raw, findNodeAtLocation(parsed.tree, ['__proto__'])!))
+        .toBe('"own-key-probe"')
+      expect(getNodeSlice(raw, findNodeAtLocation(parsed.tree, ['constructor'])!)).toBe('false')
     }
-    expect(values.limits.maxTokens).toBe(9007199254740992)
-    expect(values.limits.temperature).toBe(1.23)
-    expect(values.weight).toBe(Infinity)
-    expect(values.__proto__).toBe('own-key-probe')
-    expect(values.constructor).toBe(false)
-    expect(values.mode).toBe('BALANCED')
-    expect(values.retries).toEqual([1, 2, 3])
     for (const plugin of plugins) {
       const schema = parsePluginValuesSchema(plugin.configuration.valuesSchema)
       expect(schema.ok).toBe(true)

@@ -215,7 +215,7 @@ class ConfigSyncPluginImportPostgresIntegrationTest {
                     1L,
                     "{\"promptAgentName\":\"" + DEPENDENCY_AGENT + "\"}")));
 
-    // 计划与写入之间删除依赖：插件配置修订不变，CAS 无法发现它。
+    // 计划与写入之间删除依赖：插件配置版本不变，CAS 无法发现它。
     assertTrue(definitionRepository.deleteByName(DEPENDENCY_AGENT, 0L));
 
     DomainException error = assertThrows(DomainException.class, () -> applyInTransaction(plan));
@@ -271,7 +271,7 @@ class ConfigSyncPluginImportPostgresIntegrationTest {
     assertEquals(VALUES_V2, current.valuesJson());
   }
 
-  /** 为已安装 Plugin 写入默认配置（revision 1）。 */
+  /** 为已安装 Plugin 写入默认配置（version 1）。 */
   private void seedCatalog() {
     for (Plugin plugin : registry.plugins()) {
       configurationRepository.insertIfMissing(

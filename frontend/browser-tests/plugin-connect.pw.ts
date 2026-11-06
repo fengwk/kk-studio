@@ -4,7 +4,7 @@ import type { PluginDTO } from '@/shared/api/generated/contracts'
 const deepLinkPlugin: PluginDTO = {
   pluginId: 'offline-deeplink',
   name: 'Offline DeepLink Plugin',
-  version: '1.0.0',
+  pluginVersion: '1.0.0',
   authKind: { type: 'DEEP_LINK', regionCandidates: ['CN', 'EN'] },
   status: 'NOT_CONNECTED',
   region: null,
@@ -14,7 +14,7 @@ const deepLinkPlugin: PluginDTO = {
   lastRefreshError: null,
   configuration: {
     version: '1',
-    values: { enabled: true },
+    valuesJson: '{"enabled":true}',
     valuesSchema: {
       type: 'object',
       description: 'Plugin configuration schema',
@@ -32,7 +32,6 @@ const deepLinkPlugin: PluginDTO = {
       },
     },
   },
-  desiredVersion: '1',
   appliedVersion: '1',
   connectionCheckSupported: false,
   harnessToolNames: ['search_tool'],
@@ -43,7 +42,7 @@ const deepLinkPlugin: PluginDTO = {
 const staticKeyPlugin: PluginDTO = {
   pluginId: 'offline-statickey',
   name: 'Offline StaticKey Plugin',
-  version: '2.0.0',
+  pluginVersion: '2.0.0',
   authKind: { type: 'STATIC_KEY', secretField: 'token' },
   status: 'CONNECTED',
   region: null,
@@ -53,7 +52,7 @@ const staticKeyPlugin: PluginDTO = {
   lastRefreshError: null,
   configuration: {
     version: '2',
-    values: { timeout: 30 },
+    valuesJson: '{"timeout":30}',
     valuesSchema: {
       type: 'object',
       properties: {
@@ -70,7 +69,6 @@ const staticKeyPlugin: PluginDTO = {
       },
     },
   },
-  desiredVersion: '2',
   appliedVersion: '2',
   connectionCheckSupported: false,
   harnessToolNames: ['static_tool'],
@@ -81,7 +79,7 @@ const staticKeyPlugin: PluginDTO = {
 const noAuthPlugin: PluginDTO = {
   pluginId: 'offline-noauth',
   name: 'Offline NoAuth Plugin',
-  version: '0.9.0',
+  pluginVersion: '0.9.0',
   authKind: null,
   status: null,
   region: null,
@@ -91,7 +89,7 @@ const noAuthPlugin: PluginDTO = {
   lastRefreshError: null,
   configuration: {
     version: '0',
-    values: { debug: false },
+    valuesJson: '{"debug":false}',
     valuesSchema: {
       type: 'object',
       properties: {
@@ -103,7 +101,6 @@ const noAuthPlugin: PluginDTO = {
     defaults: { debug: false },
     secrets: {},
   },
-  desiredVersion: '0',
   appliedVersion: null,
   connectionCheckSupported: false,
   harnessToolNames: [],
@@ -114,7 +111,7 @@ const noAuthPlugin: PluginDTO = {
 const checkPlugin: PluginDTO = {
   pluginId: 'offline-check',
   name: 'Offline Check Plugin',
-  version: '3.1.0',
+  pluginVersion: '3.1.0',
   authKind: { type: 'STATIC_KEY', secretField: 'token' },
   status: 'CONNECTED',
   region: null,
@@ -124,7 +121,7 @@ const checkPlugin: PluginDTO = {
   lastRefreshError: null,
   configuration: {
     version: '3',
-    values: { timeout: 30 },
+    valuesJson: '{"timeout":30}',
     valuesSchema: {
       type: 'object',
       properties: {
@@ -141,7 +138,6 @@ const checkPlugin: PluginDTO = {
       },
     },
   },
-  desiredVersion: '3',
   appliedVersion: '3',
   connectionCheckSupported: true,
   harnessToolNames: [],
@@ -210,14 +206,14 @@ async function transport(
       })
     } else if (path.endsWith('/configuration') && route.request().method() === 'PUT') {
       requests.push(path)
-      const postData = route.request().postDataJSON() as { values: unknown }
+      const postData = route.request().postDataJSON() as { valuesJson: string }
       await route.fulfill({
         status: 200,
         json: {
           ...deepLinkPlugin,
           configuration: {
             ...deepLinkPlugin.configuration,
-            values: postData.values,
+            valuesJson: postData.valuesJson,
           },
         },
       })

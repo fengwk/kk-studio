@@ -4,7 +4,10 @@ import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -13,6 +16,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -22,6 +26,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.JsonNodeType;
 
 import fun.fengwk.kkstudio.common.json.JsonValues;
@@ -54,6 +59,7 @@ import fun.fengwk.kkstudio.web.advice.StudioProblemAdvice;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
+import java.math.BigInteger;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -99,15 +105,15 @@ class PluginHttpWireContractTest {
       new SchemaJsonCodec().encode(CONFIG_SCHEMA.valuesSchema());
 
   /**
-   * 数字精度探针：{@code 9007199254740993} 超出 double 精度、{@code 1.230000} 带 scale、{@code 1e1000} 不得折叠为
-   * Infinity。
+   * 数字精度探针：{@code 9007199254740993123456789} 超出 double 与 long、{@code 1.230000} 带 scale、{@code
+   * 1E+1000} 不得折叠为 Infinity。
    */
   private static final String PROBE_VALUES_JSON =
       CONFIG_SCHEMA.resolveValues(
           "{\"endpoint\":\"https://beta-deep.example.com\","
-              + "\"limits\":{\"maxTokens\":9007199254740993,\"temperature\":1.230000},"
+              + "\"limits\":{\"maxTokens\":9007199254740993123456789,\"temperature\":1.230000},"
               + "\"mode\":\"BALANCED\",\"retries\":[1,2,3],\"verbose\":true,"
-              + "\"weight\":1e1000,"
+              + "\"weight\":1E+1000,"
               + "\"__proto__\":\"own-key-probe\",\"constructor\":false}");
 
   private static final Instant DEEP_PENDING_EXPIRES_AT = Instant.parse("2026-03-01T12:00:00Z");
@@ -215,12 +221,13 @@ class PluginHttpWireContractTest {
     assertInstantToken(connected.get("nextRefreshAt"), DEEP_CONNECTED_NEXT_REFRESH_AT);
     assertInstantToken(connected.get("lastRefreshedAt"), DEEP_CONNECTED_LAST_REFRESHED_AT);
 
-    assertEquals(JsonNodeType.STRING, connected.get("desiredVersion").getNodeType());
-    assertEquals("8", connected.get("desiredVersion").asString());
+    assertFalse(connected.has("desiredVersion"));
+    assertEquals(JsonNodeType.STRING, connected.get("appliedVersion").getNodeType());
     assertEquals("8", connected.get("appliedVersion").asString());
+    assertEquals("8", connected.get("configuration").get("version").asString());
   }
 
-  /** 测试意图：保存不等于发布——desired 坐标、applied 坐标与固定去敏说明必须同时出现在同一份响应里。 */
+  /** 测试意图：保存不等于发布——配置版本、applied 坐标与固定去敏说明必须同时出现在同一份响应里。 */
   @Test
   void deepLinkPendingPluginSeparatesDesiredAndAppliedCoordinates() throws Exception {
     when(pluginManagementService.listPlugins()).thenReturn(pluginCatalogue());
@@ -228,14 +235,14 @@ class PluginHttpWireContractTest {
     JsonNode pending = responseBody(listPlugins()).get(3);
 
     assertEquals("beta-deep-pending", pending.get("pluginId").asString());
-    assertEquals("2", pending.get("desiredVersion").asString());
+    assertEquals("2", pending.get("configuration").get("version").asString());
     assertEquals("1", pending.get("appliedVersion").asString());
     assertEquals(
         PluginManagementService.PENDING_APPLICATION_ERROR,
         pending.get("applicationError").asString());
   }
 
-  /** 测试意图：配置投影携带真实 schema 派生的 values schema/默认值，且 values 保留数字精度与特殊属性名。 */
+  /** 测试意图：配置投影携带真实 schema 派生的 values schema/默认值，valuesJson 逐字保留数字精度与特殊属性名。 */
   @Test
   void configurationCarriesSchemaDerivedValuesDefaultsAndRawNumberScale() throws Exception {
     when(pluginManagementService.getPlugin("beta-deep-connected"))
@@ -245,8 +252,17 @@ class PluginHttpWireContractTest {
 
     assertEquals("8", configuration.get("version").asString());
 
-    JsonNode values = configuration.get("values");
-    assertEquals(9007199254740993L, values.get("limits").get("maxTokens").longValue());
+    JsonNode valuesJson = configuration.get("valuesJson");
+    assertEquals(JsonNodeType.STRING, valuesJson.getNodeType());
+    assertEquals(PROBE_VALUES_JSON, valuesJson.asString());
+    assertTrue(valuesJson.asString().contains("\"maxTokens\":9007199254740993123456789"));
+    assertTrue(valuesJson.asString().contains("\"temperature\":1.230000"));
+    assertTrue(valuesJson.asString().contains("\"weight\":1E+1000"));
+
+    JsonNode values = JsonValues.readTree(valuesJson.asString());
+    assertEquals(
+        new BigInteger("9007199254740993123456789"),
+        values.get("limits").get("maxTokens").bigIntegerValue());
     assertEquals("1.230000", values.get("limits").get("temperature").toString());
     assertEquals("1E+1000", values.get("weight").toString());
     assertEquals("own-key-probe", values.get("__proto__").asString());
@@ -290,7 +306,7 @@ class PluginHttpWireContractTest {
     assertTrue(secret.get("configured").booleanValue());
   }
 
-  /** 测试意图：已保存的配置值以 JSON 节点转发，defaults 始终是 schema 的默认值声明。 */
+  /** 测试意图：已保存的配置值以原文字符串转发，defaults 始终是 schema 的默认值声明（JSON 节点）。 */
   @Test
   void configurationForwardsStoredValuesJsonAndSchemaDefaultsVerbatim() throws Exception {
     PluginDTO none = nonePlugin();
@@ -298,10 +314,11 @@ class PluginHttpWireContractTest {
 
     JsonNode configuration = responseBody(getPlugin("alpha-none")).get("configuration");
 
-    assertEquals(none.getConfiguration().getValues(), configuration.get("values"));
+    assertEquals(
+        none.getConfiguration().getValuesJson(), configuration.get("valuesJson").asString());
     assertEquals(JsonValues.readTree(CONFIG_SCHEMA.defaultsJson()), configuration.get("defaults"));
 
-    JsonNode values = configuration.get("values");
+    JsonNode values = JsonValues.readTree(configuration.get("valuesJson").asString());
     assertEquals("https://alpha-none.example.com", values.get("endpoint").asString());
     assertEquals(2048, values.get("limits").get("maxTokens").intValue());
     assertEquals("FAST", values.get("mode").asString());
@@ -394,18 +411,53 @@ class PluginHttpWireContractTest {
     assertWireMatchesGolden("auth-prepare-http.json", response);
   }
 
+  /** 测试意图：请求体里的 valuesJson 原文在 HTTP 边界不被解析或重排，逐字交给领域写入口。 */
+  @Test
+  void configurationUpdateForwardsSubmittedValuesJsonVerbatim() throws Exception {
+    String valuesJson =
+        "{\"limits\":{\"maxTokens\":9007199254740993123456789,"
+            + "\"temperature\":1.230000},\"weight\":1E+1000}";
+    when(pluginManagementService.updateConfiguration(eq("alpha-none"), eq("1"), any(), any()))
+        .thenReturn(nonePlugin());
+
+    MockHttpServletResponse response =
+        mockMvc
+            .perform(
+                put("/api/platform/plugins/alpha-none/configuration")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(
+                        JsonValues.write(
+                            JsonNodeFactory.instance
+                                .objectNode()
+                                .put("expectedVersion", "1")
+                                .put("valuesJson", valuesJson))))
+            .andReturn()
+            .getResponse();
+
+    assertEquals(200, response.getStatus());
+    ArgumentCaptor<String> submitted = ArgumentCaptor.forClass(String.class);
+    verify(pluginManagementService)
+        .updateConfiguration(eq("alpha-none"), eq("1"), submitted.capture(), any());
+    assertEquals(valuesJson, submitted.getValue());
+    assertTrue(submitted.getValue().contains("9007199254740993123456789"));
+    assertTrue(submitted.getValue().contains("1.230000"));
+    assertTrue(submitted.getValue().contains("1E+1000"));
+  }
+
   /** 测试意图：配置请求只在 HTTP 边界校验必填、未知字段、标量强制转换与秘密操作，错误去敏且不回显正文。 */
   @Test
   void configurationRequestStrictnessIsEnforcedAtTheHttpBoundary() throws Exception {
     String secretMarker = "SECRET_PATCH_VALUE_ABC123456";
     for (String body :
         List.of(
-            "{\"values\":{}}",
-            "{\"expectedVersion\":7,\"values\":{}}",
-            "{\"expectedVersion\":\"7\",\"values\":{},\"unknown\":true}",
-            "{\"expectedVersion\":\"7\",\"values\":{},\"secretPatch\":{\"apiKey\":"
+            "{\"valuesJson\":\"{}\"}",
+            "{\"expectedVersion\":7,\"valuesJson\":\"{}\"}",
+            "{\"expectedVersion\":\"7\",\"valuesJson\":{}}",
+            "{\"expectedVersion\":\"7\",\"valuesJson\":\"{}\",\"unknown\":true}",
+            "{\"expectedVersion\":\"7\",\"valuesJson\":\"{}\",\"values\":{}}",
+            "{\"expectedVersion\":\"7\",\"valuesJson\":\"{}\",\"secretPatch\":{\"apiKey\":"
                 + "{\"operation\":\"SET\",\"value\":12345678}}}",
-            "{\"expectedVersion\":\"7\",\"values\":{},\"secretPatch\":{\"apiKey\":"
+            "{\"expectedVersion\":\"7\",\"valuesJson\":\"{}\",\"secretPatch\":{\"apiKey\":"
                 + "{\"operation\":\"KEEP\",\"value\":\""
                 + secretMarker
                 + "\"}}}")) {
@@ -551,7 +603,6 @@ class PluginHttpWireContractTest {
                 false,
                 "1"),
             false));
-    dto.setDesiredVersion("1");
     dto.setAppliedVersion("1");
     return dto;
   }
@@ -574,7 +625,6 @@ class PluginHttpWireContractTest {
                 false,
                 "2"),
             true));
-    dto.setDesiredVersion("3");
     dto.setAppliedVersion("3");
     return dto;
   }
@@ -598,7 +648,6 @@ class PluginHttpWireContractTest {
                 true,
                 "3"),
             false));
-    dto.setDesiredVersion("5");
     dto.setAppliedVersion("5");
     return dto;
   }
@@ -625,7 +674,6 @@ class PluginHttpWireContractTest {
                 false,
                 "4"),
             true));
-    dto.setDesiredVersion("2");
     dto.setAppliedVersion("1");
     dto.setApplicationError(PluginManagementService.PENDING_APPLICATION_ERROR);
     return dto;
@@ -645,7 +693,6 @@ class PluginHttpWireContractTest {
     dto.setCanvasFunctionNames(List.of("beta-deep-connected-fn"));
     dto.setConfiguration(configuration("8", PROBE_VALUES_JSON, true));
     dto.setConnectionCheckSupported(true);
-    dto.setDesiredVersion("8");
     dto.setAppliedVersion("8");
     return dto;
   }
@@ -666,7 +713,7 @@ class PluginHttpWireContractTest {
     PluginDTO dto = new PluginDTO();
     dto.setPluginId(pluginId);
     dto.setName(name);
-    dto.setVersion(version);
+    dto.setPluginVersion(version);
     dto.setHarnessToolNames(List.of());
     dto.setCanvasFunctionNames(List.of());
     return dto;
@@ -676,7 +723,7 @@ class PluginHttpWireContractTest {
       String version, String valuesJson, boolean secretConfigured) {
     PluginConfigurationDTO configuration = new PluginConfigurationDTO();
     configuration.setVersion(version);
-    configuration.setValues(JsonValues.readTree(valuesJson));
+    configuration.setValuesJson(valuesJson);
     configuration.setValuesSchema(JsonValues.readTree(VALUES_SCHEMA_JSON));
     configuration.setDefaults(JsonValues.readTree(CONFIG_SCHEMA.defaultsJson()));
     PluginSecretProjectionDTO secret = new PluginSecretProjectionDTO();

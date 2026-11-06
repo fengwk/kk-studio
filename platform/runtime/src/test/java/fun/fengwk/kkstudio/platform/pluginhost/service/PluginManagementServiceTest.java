@@ -19,7 +19,6 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
-import fun.fengwk.kkstudio.common.json.JsonValues;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
 import fun.fengwk.kkstudio.platform.plugin.Plugin;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthHandler;
@@ -157,7 +156,8 @@ class PluginManagementServiceTest {
     assertEquals(PluginCredentialStatus.CONNECTED, staticPlugin.getStatus());
     assertTrue(staticPlugin.getConfiguration().getSecrets().get("apiKey").isConfigured());
     assertFalse(staticPlugin.toString().contains("secret-value"));
-    assertEquals("2", staticPlugin.getDesiredVersion());
+    assertEquals("2", staticPlugin.getConfiguration().getVersion());
+    assertEquals("{}", staticPlugin.getConfiguration().getValuesJson());
     assertEquals("2", staticPlugin.getAppliedVersion());
     assertNull(staticPlugin.getApplicationError());
     assertTrue(staticPlugin.isConnectionCheckSupported());
@@ -168,6 +168,24 @@ class PluginManagementServiceTest {
     assertEquals(PluginCredentialStatus.NOT_CONNECTED, deepLink.getStatus());
     assertNull(service.getPlugin(NONE_ID).getAuthKind());
     assertThrows(DomainException.class, () -> service.getPlugin("ghost"));
+  }
+
+  /** 管理面投影逐字转发数据库中的 valuesJson，不重新解析或序列化数字。 */
+  @Test
+  void projectsStoredValuesJsonVerbatim() {
+    String exact =
+        "{\"maxTokens\":9007199254740993123456789,"
+            + "\"temperature\":1.230000,"
+            + "\"weight\":1E+1000}";
+    when(configurations.find(STATIC_ID))
+        .thenReturn(Optional.of(new PluginConfigurationRow(STATIC_ID, 2L, exact)));
+
+    PluginDTO dto = service.getPlugin(STATIC_ID);
+
+    assertEquals(exact, dto.getConfiguration().getValuesJson());
+    assertTrue(dto.getConfiguration().getValuesJson().contains("9007199254740993123456789"));
+    assertTrue(dto.getConfiguration().getValuesJson().contains("1.230000"));
+    assertTrue(dto.getConfiguration().getValuesJson().contains("1E+1000"));
   }
 
   /** 静态密钥字段未录入时显示未连接；已保存但本节点尚未应用时给出待应用说明。 */
@@ -190,12 +208,11 @@ class PluginManagementServiceTest {
                     1L)));
     stored(STATIC_ID, 3L);
 
-    PluginDTO dto =
-        service.updateConfiguration(STATIC_ID, "2", JsonValues.readTree("{}"), Map.of());
+    PluginDTO dto = service.updateConfiguration(STATIC_ID, "2", "{}", Map.of());
 
     verify(configurationService).configure(STATIC_ID, 2L, "{}", Map.of());
     assertEquals(PluginCredentialStatus.NOT_CONNECTED, dto.getStatus());
-    assertEquals("3", dto.getDesiredVersion());
+    assertEquals("3", dto.getConfiguration().getVersion());
     assertEquals("2", dto.getAppliedVersion());
     assertEquals(
         "configuration is saved but this node has not applied it yet", dto.getApplicationError());
@@ -205,16 +222,13 @@ class PluginManagementServiceTest {
   @Test
   void validatesSecretPatchFieldNamesBeforeSaving() {
     String secret = "sensitive-patch-marker";
-    service.updateConfiguration(
-        STATIC_ID, "2", JsonValues.readTree("{}"), Map.of("apiKey", SecretUpdate.set(secret)));
+    service.updateConfiguration(STATIC_ID, "2", "{}", Map.of("apiKey", SecretUpdate.set(secret)));
     verify(configurationService)
         .configure(STATIC_ID, 2L, "{}", Map.of("apiKey", SecretUpdate.set(secret)));
-    service.updateConfiguration(
-        STATIC_ID, "2", JsonValues.readTree("{}"), Map.of("apiKey", SecretUpdate.keep()));
+    service.updateConfiguration(STATIC_ID, "2", "{}", Map.of("apiKey", SecretUpdate.keep()));
     verify(configurationService)
         .configure(STATIC_ID, 2L, "{}", Map.of("apiKey", SecretUpdate.keep()));
-    service.updateConfiguration(
-        STATIC_ID, "2", JsonValues.readTree("{}"), Map.of("apiKey", SecretUpdate.clear()));
+    service.updateConfiguration(STATIC_ID, "2", "{}", Map.of("apiKey", SecretUpdate.clear()));
     verify(configurationService)
         .configure(STATIC_ID, 2L, "{}", Map.of("apiKey", SecretUpdate.clear()));
 
@@ -225,8 +239,7 @@ class PluginManagementServiceTest {
       DomainException error =
           assertThrows(
               DomainException.class,
-              () ->
-                  service.updateConfiguration(STATIC_ID, "2", JsonValues.readTree("{}"), invalid));
+              () -> service.updateConfiguration(STATIC_ID, "2", "{}", invalid));
       assertFalse(error.toString().contains(secret));
     }
   }

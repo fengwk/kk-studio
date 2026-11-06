@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.platform.plugin;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.JsonNode;
@@ -272,6 +273,26 @@ class PluginConfigSchemaTest {
     assertEquals(
         0,
         new BigDecimal("123456789012345678901234567890").compareTo(node.get("big").decimalValue()));
+  }
+
+  /** 归一化文本逐字保留大整数、带 scale 的小数与超范围指数的原始词法，不经过 double。 */
+  @Test
+  void preservesExactNumberTokens() {
+    Map<String, SchemaElement> properties =
+        Map.of(
+            "big", new IntegerSchema(null),
+            "precise", new NumberSchema(null),
+            "huge", new NumberSchema(null));
+    PluginConfigSchema schema =
+        new PluginConfigSchema(new InputSchema(null, properties, Set.of(), false), "{}", Map.of());
+
+    String resolved =
+        schema.resolveValues(
+            "{\"big\":9007199254740993123456789,\"precise\":1.230000,\"huge\":1E+1000}");
+
+    assertTrue(resolved.contains("\"big\":9007199254740993123456789"));
+    assertTrue(resolved.contains("\"precise\":1.230000"));
+    assertTrue(resolved.contains("\"huge\":1E+1000"));
   }
 
   @Test

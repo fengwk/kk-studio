@@ -104,14 +104,15 @@ export async function createAndRun(client, canvasId, functionName, name, paramet
 
 /**
  * Offline seed/smoke: initialize the opencli plugin through the unified plugin configuration and
- * secret API. Secrets never enter seed or schema. The desired version comes from the GET.
+ * secret API. Secrets never enter seed or schema. The expected version is the current
+ * configuration version from the GET.
  */
 export async function initializeOpencliPlugin(client) {
   const { jsonCall, sleep: wait } = client
   const descriptor = await jsonCall('GET', '/api/platform/plugins/opencli')
   await jsonCall('PUT', '/api/platform/plugins/opencli/configuration', {
-    expectedVersion: descriptor.desiredVersion,
-    values: {
+    expectedVersion: descriptor.configuration.version,
+    valuesJson: JSON.stringify({
       enabled: true,
       baseUrl: 'http://opencli-hub:8080',
       gptImage2: { paidEnabled: true },
@@ -121,7 +122,7 @@ export async function initializeOpencliPlugin(client) {
         statusPollIntervalMillis: 10,
         maxWaitMillis: 30000,
       },
-    },
+    }),
     secretPatch: { apiKey: { operation: 'SET', value: 'synthetic-opencli-key' } },
   })
   let current
@@ -129,7 +130,7 @@ export async function initializeOpencliPlugin(client) {
     current = await jsonCall('GET', '/api/platform/plugins/opencli')
     if (
       current.status === 'CONNECTED' &&
-      current.appliedVersion === current.desiredVersion &&
+      current.appliedVersion === current.configuration.version &&
       (current.applicationError ?? null) === null
     ) {
       return

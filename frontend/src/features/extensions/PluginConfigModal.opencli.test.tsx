@@ -132,7 +132,7 @@ describe('PluginConfigModal OpenCLI regression coverage', () => {
       )
     })
 
-    const parsedValues = savedPayload().values as {
+    const parsedValues = JSON.parse(savedPayload().valuesJson) as {
       baseUrl: string
       gptImage2: { paidEnabled: boolean }
       seedance: { retry: number }
@@ -201,7 +201,7 @@ describe('PluginConfigModal OpenCLI regression coverage', () => {
     })
     expect(apiKeyInput).toHaveValue('')
     expect(instInput).toHaveValue('')
-    const submittedValues = JSON.stringify(savedPayload().values)
+    const submittedValues = savedPayload().valuesJson
     expect(submittedValues).not.toContain(testInstanceId)
     expect(submittedValues).not.toContain(testApiKey)
   })

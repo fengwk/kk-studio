@@ -34,7 +34,7 @@ import java.util.Optional;
 /**
  * Plugin 普通配置与凭据的唯一写入口：保存配置、登录完成与断连。
  *
- * <p>保存配置在同一事务内以 revision CAS 写普通值，并按秘密补丁（KEEP / SET / CLEAR）写入或删除凭据行。静态密钥的 {@code
+ * <p>保存配置在同一事务内以 version CAS 写普通值，并按秘密补丁（KEEP / SET / CLEAR）写入或删除凭据行。静态密钥的 {@code
  * contextFields}（例如目标地址）变化而本次没有重新录入密钥时，旧凭据被删除，避免把密钥发往新的目标。保存前先用候选配置与候选凭据 configure
  * 一次目标插件，配置不可用时直接拒绝。提交后唤醒本节点目录刷新与凭据刷新调度。
  */

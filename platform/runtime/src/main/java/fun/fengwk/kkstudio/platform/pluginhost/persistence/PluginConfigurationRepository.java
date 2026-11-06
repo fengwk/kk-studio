@@ -54,14 +54,14 @@ public class PluginConfigurationRepository {
   }
 
   /** 以 version CAS 保存普通配置；未命中返回 false。 */
-  public boolean update(String pluginId, long expectedRevision, String valuesJson) {
+  public boolean update(String pluginId, long expectedVersion, String valuesJson) {
     return jdbc.sql(
                 "update plugin_configuration set values_json = :valuesJson,"
                     + " version = version + 1, updated_at = current_timestamp"
-                    + " where plugin_id = :pluginId and version = :expectedRevision")
+                    + " where plugin_id = :pluginId and version = :expectedVersion")
             .param("valuesJson", valuesJson)
             .param("pluginId", pluginId)
-            .param("expectedRevision", expectedRevision)
+            .param("expectedVersion", expectedVersion)
             .update()
         == 1;
   }
