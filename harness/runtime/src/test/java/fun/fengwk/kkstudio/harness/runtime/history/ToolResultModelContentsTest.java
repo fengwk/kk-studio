@@ -84,7 +84,7 @@ class ToolResultModelContentsTest {
     IllegalArgumentException error =
         assertThrows(
             IllegalArgumentException.class, () -> ToolResultModelContents.contentsOf(result));
-    assertTrue(error.getMessage().contains("editReview must be an object"));
+    assertTrue(error.getMessage().contains("editReview must be a JSON object"));
   }
 
   @Test

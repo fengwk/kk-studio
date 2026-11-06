@@ -2,7 +2,7 @@
 
 `harness-model` 同时承载无状态的模型契约与四种模型协议实现。契约侧描述 Model/Variant、定价、用量、prompt cache 与 Provider 中立消息；协议侧用 JDK 21 `HttpClient` 实现四种模型协议，以有界增量解析器读取 SSE，将正常结束、安全过滤、截断与连接故障收敛为 Runtime 能消费的中立结果。它还负责原生推理回放，并把运行时根据冻结 variant 与 Session 生成的 `ProviderCacheControl` 映射为各协议 prompt cache wire 字段；错误只做分类，保留上游诊断正文。
 
-模型模块是可独立编译的叶子模块，生产依赖只有 Jackson 3（`tools.jackson.core:jackson-databind`），不依赖 Runtime、Environment、Thread、Invocation 或工具执行；Runtime 单向依赖本模块的契约。凭据、HttpClient 与 Watchdog 调度器由 [Platform](platform.md) 注入。依赖声明见 [`pom.xml`](../../harness/model/pom.xml)，方向由仓库检查 [`check.mjs`](../../scripts/dev/verify/repository/check.mjs) 校验。Platform 使用 HTTP/1.1、Redirect.NEVER，HttpClient 内部 executor 复用受管虚拟线程。
+模型模块是可独立编译的叶子模块，生产依赖只有 Jackson 3（`tools.jackson.core:jackson-databind`），不依赖 Runtime、Environment、Thread、Invocation 或工具执行；Runtime 单向依赖本模块的契约，Canvas 运行时只复用本模块的共享 JSON 校验原语。凭据、HttpClient 与 Watchdog 调度器由 [Platform](platform.md) 注入。依赖声明见 [`pom.xml`](../../harness/model/pom.xml)，方向由仓库检查 [`check.mjs`](../../scripts/dev/verify/repository/check.mjs) 校验。Platform 使用 HTTP/1.1、Redirect.NEVER，HttpClient 内部 executor 复用受管虚拟线程。
 
 ## 传输层
 

@@ -12,6 +12,8 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 
 class IdeDataPathsTest {
@@ -38,6 +40,19 @@ class IdeDataPathsTest {
     String wsPath = IdeDataPaths.dataWebSocketPath(ENV, VIEW, "/ws");
     assertTrue(wsPath.contains("/internal/ide/environments/" + ENV + "/data-ws"));
     assertTrue(wsPath.contains("viewId=" + VIEW));
+  }
+
+  /** path query 值按 RFC 3986 编码：空格 %20、加号 %2B、斜杠 %2F，表单解码方仍还原原文。 */
+  @Test
+  void dataPathEncodesRawPathAndQueryForFormDecoding() throws Exception {
+    String rawPathAndQuery = "/workspace/my dir/a+b.ts?q=1";
+
+    String path = IdeDataPaths.dataHttpPath(ENV, VIEW, rawPathAndQuery);
+
+    assertTrue(path.endsWith("&path=%2Fworkspace%2Fmy%20dir%2Fa%2Bb.ts%3Fq%3D1"), path);
+    assertFalse(path.contains("+"), path);
+    String encoded = path.substring(path.indexOf("&path=") + "&path=".length());
+    assertEquals(rawPathAndQuery, URLDecoder.decode(encoded, StandardCharsets.UTF_8));
   }
 
   @Test

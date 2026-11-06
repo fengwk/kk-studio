@@ -85,7 +85,11 @@ final class GeminiEndpoints {
   /**
    * 按照 RFC 3986 path-segment 语义对字符串的 UTF-8 字节进行百分号编码。
    *
-   * <p>仅 unreserved 字符 (ALPHA / DIGIT / "-" / "." / "_" / "~") 保持原样，其余所有字符均进行大写 %XX 编码。
+   * <p>仅 unreserved 字符 (ALPHA / DIGIT / "-" / "." / "_" / "~") 保持原样，其余所有字符均进行大写 %XX 编码；空格是 {@code
+   * %20}，绝不使用表单语义的 {@code +}。
+   *
+   * <p>与 common 的 {@code UrlEncoding} 规则相同，但 harness-model 是可独立编译的叶子模块、不依赖 common，因此本模块保留
+   * 自己的实现；本类是模型侧唯一的 path-segment 编码器，规则变更必须与 common 同步。
    */
   static String encodePathSegment(String value) {
     if (value == null || value.isEmpty()) {

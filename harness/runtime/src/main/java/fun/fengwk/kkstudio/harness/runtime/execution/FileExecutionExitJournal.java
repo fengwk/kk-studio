@@ -9,6 +9,7 @@ import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitKind;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitState;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.model.HarnessJson;
+import fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -51,6 +52,19 @@ public final class FileExecutionExitJournal implements ExecutionExitJournal {
   private static final Set<PosixFilePermission> FILE_PERMISSIONS =
       PosixFilePermissions.fromString("rw-------");
   private static final ObjectMapper MAPPER = HarnessJson.STRICT;
+
+  private static final Set<String> FIELDS =
+      Set.of(
+          "executionId",
+          "threadId",
+          "invocationId",
+          "attempt",
+          "ownerLeaseToken",
+          "kind",
+          "parentExecutionId",
+          "environmentId",
+          "targetState",
+          "confirmedAt");
 
   private final Path directory;
   private final FileChannel lockChannel;
@@ -308,10 +322,7 @@ public final class FileExecutionExitJournal implements ExecutionExitJournal {
       throw new EntryReadFailure(ExecutionExitJournalFailure.Reason.UNREADABLE, error);
     }
     try {
-      JsonNode parsed = MAPPER.readTree(json);
-      if (!(parsed instanceof ObjectNode node)) {
-        throw new IllegalArgumentException("journal entry must be a JSON object");
-      }
+      ObjectNode node = JsonCodecSupport.object(MAPPER.readTree(json), "journal entry");
       return decode(node);
     } catch (JacksonException | IllegalArgumentException | DateTimeException error) {
       throw new EntryReadFailure(ExecutionExitJournalFailure.Reason.CORRUPT, error);
@@ -346,18 +357,7 @@ public final class FileExecutionExitJournal implements ExecutionExitJournal {
   }
 
   private static ExecutionExitJournalRecord decode(ObjectNode node) {
-    requireFields(
-        node,
-        "executionId",
-        "threadId",
-        "invocationId",
-        "attempt",
-        "ownerLeaseToken",
-        "kind",
-        "parentExecutionId",
-        "environmentId",
-        "targetState",
-        "confirmedAt");
+    JsonCodecSupport.requireFields(node, FIELDS, "execution exit journal entry");
     JsonNode attemptNode = node.get("attempt");
     if (attemptNode == null || !attemptNode.isIntegralNumber() || !attemptNode.canConvertToInt()) {
       throw new IllegalArgumentException("attempt must be an integer");
@@ -392,17 +392,6 @@ public final class FileExecutionExitJournal implements ExecutionExitJournal {
       throw new IllegalArgumentException(name + " must be non-empty text");
     }
     return node.stringValue();
-  }
-
-  private static void requireFields(ObjectNode node, String... names) {
-    if (node.size() != names.length) {
-      throw new IllegalArgumentException("unexpected execution exit journal fields");
-    }
-    for (String name : names) {
-      if (!node.has(name)) {
-        throw new IllegalArgumentException("missing execution exit journal field: " + name);
-      }
-    }
   }
 
   private void writeDurably(Path file, String content) throws IOException {

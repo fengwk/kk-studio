@@ -90,9 +90,10 @@ L1          │ common │◀───│ work │    │ schema │
             └────────┘    └──────┘    └────────┘
 ```
 
-图中只画不能由其他路径推出的直接依赖。没有画出的边：`platform-runtime` 依赖 `work`；`canvas-spi`
-与多数模块直接依赖 `common`；`web` 以 runtime 范围依赖四个插件与 `schema`。插件中只有 `minimax-mavis` 不依赖
-`canvas-spi`；`harness-model` 不依赖任何内部模块。测试只复用下层模块的测试夹具（test-jar）与 `schema`。
+图中只画不能由其他路径推出的直接依赖。没有画出的边：`platform-runtime` 依赖 `work`；`canvas-runtime` 依赖
+`harness-model` 的共享 JSON 校验原语；`canvas-spi` 与多数模块直接依赖 `common`；`web` 以 runtime 范围依赖四个插件与
+`schema`。插件中只有 `minimax-mavis` 不依赖 `canvas-spi`；`harness-model` 不依赖任何内部模块。测试只复用下层模块的
+测试夹具（test-jar）与 `schema`。
 
 Maven 之外的连接：
 

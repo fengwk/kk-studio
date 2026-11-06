@@ -26,6 +26,11 @@
             <groupId>fun.fengwk.kk-studio</groupId>
             <artifactId>kk-studio-canvas-spi</artifactId>
         </dependency>
+        <!-- Function Run 状态的严格 JSON codec 复用 harness-model 的共享节点校验原语。 -->
+        <dependency>
+            <groupId>fun.fengwk.kk-studio</groupId>
+            <artifactId>kk-studio-harness-model</artifactId>
+        </dependency>
         <dependency>
             <groupId>fun.fengwk.kk-studio</groupId>
             <artifactId>kk-studio-common</artifactId>

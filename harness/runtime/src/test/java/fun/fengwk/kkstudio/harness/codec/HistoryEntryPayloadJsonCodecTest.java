@@ -1282,6 +1282,34 @@ class HistoryEntryPayloadJsonCodecTest {
         + "}";
   }
 
+  /** TURN_END 的 requiredPositiveId / nullablePositiveId 只接受 canonical UUID 文本：短写与大写都被拒绝。 */
+  @Test
+  void rejectsNonCanonicalUuidText() {
+    for (String nonCanonical : List.of("1-1-1-1-1", "00000000-0000-0000-0000-00000000000A")) {
+      assertThrows(
+          IllegalArgumentException.class,
+          () ->
+              CODEC.decode(
+                  EntryType.TURN_END,
+                  turnEndWith(
+                      "{\"turnStartEntryId\":\""
+                          + nonCanonical
+                          + "\",\"outcome\":\"COMPLETED\",")));
+      assertThrows(
+          IllegalArgumentException.class,
+          () ->
+              CODEC.decode(
+                  EntryType.TURN_END,
+                  turnEndWith(
+                      "{\"turnStartEntryId\":\""
+                          + UUID_7
+                          + "\",\"outcome\":\"COMPLETED\","
+                          + "\"continueModel\":true,\"reason\":null,\"closeRequestId\":\""
+                          + nonCanonical
+                          + "\"}")));
+    }
+  }
+
   private static String rootSettingsWith(String reasonField) {
     return reasonField
         + "\"settings\":{\"agentName\":\"a\","

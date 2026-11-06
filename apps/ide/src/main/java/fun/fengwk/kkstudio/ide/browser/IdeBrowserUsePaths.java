@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.ide.browser;
 
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
+import fun.fengwk.kkstudio.common.uri.UrlEncoding;
+
 import java.util.UUID;
 
 /** 事件节点 IDE 使用查询的内部 REST 路径与请求上限。 */
@@ -32,6 +32,6 @@ public final class IdeBrowserUsePaths {
   }
 
   private static String encode(UUID value) {
-    return URLEncoder.encode(value.toString(), StandardCharsets.UTF_8);
+    return UrlEncoding.encode(value.toString());
   }
 }
