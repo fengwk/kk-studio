@@ -32,7 +32,7 @@ import java.util.TreeSet;
 @Component
 public final class AgentDefinitionReferenceResolver {
 
-  private static final String DEFINITION_RESOURCE = "agent_definition";
+  private static final String DEFINITION_RESOURCE = "agent";
   private static final String SKILL_RESOURCE = "skill";
   private static final String TOOL_RESOURCE = "agent_tool";
   private static final ContributorId MCP_CONTRIBUTOR = McpToolCatalog.CONTRIBUTOR_ID;

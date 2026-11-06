@@ -14,7 +14,7 @@ import java.util.UUID;
 public class ChatGuard {
 
   private static final String RESOURCE = "chat";
-  private static final String AGENT_RESOURCE = "agent_definition";
+  private static final String AGENT_RESOURCE = "agent";
   private static final String ENVIRONMENT_RESOURCE = "environment";
 
   private final ChatRepository chatRepository;

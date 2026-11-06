@@ -917,7 +917,7 @@ comment on column agent_model.kind is 'MODEL 或 GROUP；决定 provider/model/c
 comment on column agent_model.model_id is 'MODEL 发往上游 Provider 的真实 wire 模型标识：非空白、无环绕空白、≤256；与逻辑 name 独立且不唯一；GROUP 为 null';
 comment on column agent_model.group_config is 'GROUP 的有序成员、立即降级 HTTP 状态码与固定冷却秒数；MODEL 为 null';
 
-create table agent_definition (
+create table agent (
     name            varchar(64)   primary key,
     type            varchar(16)   not null default 'USER',
     description     text,
@@ -927,14 +927,14 @@ create table agent_definition (
     created_at      timestamptz(3) not null default current_timestamp,
     updated_at      timestamptz(3) not null default current_timestamp,
     version         bigint        not null default 0,
-    constraint ck_agent_definition_name check (
+    constraint ck_agent_name check (
         name !~ '^[[:space:]]'
         and name !~ '[[:space:]]$'
         and char_length(name) > 0
         and position('/' in name) = 0
     ),
-    constraint ck_agent_definition_type check (type in ('USER', 'BUILTIN')),
-    constraint ck_agent_definition_execution_shape check (
+    constraint ck_agent_type check (type in ('USER', 'BUILTIN')),
+    constraint ck_agent_execution_shape check (
         execution is null or case when jsonb_typeof(execution) = 'object' then coalesce(
             execution ? 'driver' and execution ? 'settings'
             and execution - 'driver' - 'settings' = '{}'::jsonb
@@ -942,11 +942,11 @@ create table agent_definition (
             and length(btrim(execution ->> 'driver')) > 0
             and jsonb_typeof(execution -> 'settings') = 'object', false) else false end
     ),
-    constraint ck_agent_definition_version_nonneg check (version >= 0)
+    constraint ck_agent_version_nonneg check (version >= 0)
 );
 
-create index idx_agent_definition_model
-    on agent_definition ((execution -> 'settings' ->> 'modelName'))
+create index idx_agent_model_reference
+    on agent ((execution -> 'settings' ->> 'modelName'))
     where execution ->> 'driver' = 'builtin';
 
 create table agent_model_group_cooldown (
@@ -1495,7 +1495,7 @@ create table chat (
     id                  uuid          primary key,
     title               varchar(256),
     -- agent_name 故意不加 FK：它只按名称引用 Agent。Agent 硬删除期间该引用失效
-    -- （turn/attempt fail closed），同名重建后既有 Chat 引用解析到当前 AgentDefinition。
+    -- （turn/attempt fail closed），同名重建后既有 Chat 引用解析到当前 Agent。
     agent_name          varchar(64)   not null,
     -- environment_name 故意不加 FK：它只按名称引用 Environment。Environment 硬删除期间该引用
     -- 失效（发送时 planner fail closed），同名重建后既有 Chat 引用解析到当前 Environment。
@@ -1610,7 +1610,7 @@ create table project_issue_agent_thread (
     constraint fk_project_issue_agent_thread_issue foreign key (issue_id)
         references project_issue (id) on delete restrict,
     constraint fk_project_issue_agent_thread_agent foreign key (agent_name)
-        references agent_definition (name) on delete restrict,
+        references agent (name) on delete restrict,
     constraint fk_project_issue_agent_thread_thread foreign key (session_id, thread_id)
         references harness_thread (session_id, id) on delete restrict
 );
@@ -1717,7 +1717,7 @@ create table project_issue_activity (
     constraint fk_project_issue_activity_issue foreign key (issue_id)
         references project_issue (id) on delete restrict,
     constraint fk_project_issue_activity_agent foreign key (actor_agent_name)
-        references agent_definition (name) on delete restrict,
+        references agent (name) on delete restrict,
     constraint fk_project_issue_activity_run foreign key (run_id, issue_id)
         references project_issue_run (id, issue_id) on delete restrict,
     check (
@@ -1757,7 +1757,7 @@ create table project_issue_evidence (
     constraint fk_project_issue_evidence_blob foreign key (blob_id)
         references storage_blob (id) on delete restrict,
     constraint fk_project_issue_evidence_agent foreign key (actor_agent_name)
-        references agent_definition (name) on delete restrict,
+        references agent (name) on delete restrict,
     constraint fk_project_issue_evidence_run foreign key (run_id, issue_id)
         references project_issue_run (id, issue_id) on delete restrict,
     constraint ck_project_issue_evidence_author check (run_id is null or actor_agent_name is not null)

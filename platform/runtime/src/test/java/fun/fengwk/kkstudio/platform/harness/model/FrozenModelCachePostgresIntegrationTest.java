@@ -51,7 +51,7 @@ class FrozenModelCachePostgresIntegrationTest extends PostgresSpringTestSupport 
             + " values ('cache-model', 'MODEL', 'cache-provider', 'wire-model', ?::jsonb)",
         config("SHORT"));
     jdbc.update(
-        "insert into agent_definition (name, description, system_prompt, execution, config)"
+        "insert into agent (name, description, system_prompt, execution, config)"
             + " values ('cache-agent', '', 'system',"
             + " '{\"driver\":\"builtin\",\"settings\":{\"modelName\":\"cache-model\",\"variant\":\"default\"}}'::jsonb,"
             + " '{\"tools\":[],\"skills\":[],\"subagents\":[]}'::jsonb)");

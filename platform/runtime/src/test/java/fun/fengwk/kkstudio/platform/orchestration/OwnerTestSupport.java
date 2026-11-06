@@ -13,7 +13,7 @@ import java.util.concurrent.atomic.AtomicLong;
 /**
  * Issue+Agent owner 归属集成测试的共享装配与 fixture 构建。
  *
- * <p>owner 行、product 层级（project → issue → agent_definition）与 harness_session / harness_thread /
+ * <p>owner 行、product 层级（project → issue → agent）与 harness_session / harness_thread /
  * harness_entry 事实直接经 store 或 JDBC 构造（跳过业务服务校验分支），使测试聚焦于归属关系自身的 FK/PK/UK 契约。每个测试前由 {@link
  * PostgresSpringTestSupport} 重置并重新迁移 schema。
  */
@@ -44,7 +44,7 @@ public abstract class OwnerTestSupport extends PostgresSpringTestSupport {
         providerName,
         "wire-" + suffix);
     jdbc.update(
-        "insert into agent_definition (name, execution, config)"
+        "insert into agent (name, execution, config)"
             + " values (?, jsonb_build_object('driver', 'builtin', 'settings',"
             + " jsonb_build_object('modelName', cast(? as text), 'variant', null)), '{}'::jsonb)",
         agentName,

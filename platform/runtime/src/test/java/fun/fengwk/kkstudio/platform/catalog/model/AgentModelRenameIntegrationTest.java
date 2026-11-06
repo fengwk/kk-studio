@@ -73,7 +73,7 @@ class AgentModelRenameIntegrationTest {
           repository.rename("model", renamedModel("model-renamed", "provider"), 0L);
         });
 
-    verify(observed, times(1)).sql(contains("update agent_definition"));
+    verify(observed, times(1)).sql(contains("update agent"));
     assertAgentReference("alpha", "model-renamed", 1L);
     assertAgentReference("zeta", "model-renamed", 1L);
     assertAgentReference("manual", "model", 0L);
@@ -103,7 +103,7 @@ class AgentModelRenameIntegrationTest {
                   transaction.executeWithoutResult(
                       status -> {
                         fixture
-                            .sql("select name from agent_definition where name = :name for update")
+                            .sql("select name from agent where name = :name for update")
                             .param("name", "zeta")
                             .query(String.class)
                             .single();
@@ -144,7 +144,7 @@ class AgentModelRenameIntegrationTest {
         modelName,
         fixture
             .sql(
-                "select execution -> 'settings' ->> 'modelName' from agent_definition"
+                "select execution -> 'settings' ->> 'modelName' from agent"
                     + " where name = :name")
             .param("name", agentName)
             .query(String.class)
@@ -152,7 +152,7 @@ class AgentModelRenameIntegrationTest {
     assertEquals(
         version,
         fixture
-            .sql("select version from agent_definition where name = :name")
+            .sql("select version from agent where name = :name")
             .param("name", agentName)
             .query(Long.class)
             .single());
@@ -197,7 +197,7 @@ class AgentModelRenameIntegrationTest {
     fixture
         .sql(
             """
-            insert into agent_definition (name, type, execution, config)
+            insert into agent (name, type, execution, config)
             values (:name, 'BUILTIN',
                     jsonb_build_object('driver', :driver,
                         'settings', jsonb_build_object(

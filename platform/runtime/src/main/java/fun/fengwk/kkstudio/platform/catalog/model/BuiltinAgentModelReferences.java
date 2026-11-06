@@ -21,7 +21,7 @@ public final class BuiltinAgentModelReferences {
   public List<String> lockAgents(String modelName) {
     return jdbcClient
         .sql(
-            "select name from agent_definition where execution ->> 'driver' = 'builtin'"
+            "select name from agent where execution ->> 'driver' = 'builtin'"
                 + " and execution -> 'settings' ->> 'modelName' = :name order by name for update")
         .param("name", modelName)
         .query(String.class)
@@ -35,7 +35,7 @@ public final class BuiltinAgentModelReferences {
     }
     jdbcClient
         .sql(
-            "update agent_definition set execution = jsonb_set(execution,"
+            "update agent set execution = jsonb_set(execution,"
                 + " '{settings,modelName}', to_jsonb(cast(:modelName as text))),"
                 + " version = version + 1,"
                 + " updated_at = greatest(updated_at, current_timestamp)"
@@ -48,7 +48,7 @@ public final class BuiltinAgentModelReferences {
   public boolean hasAgents(String modelName) {
     return jdbcClient
         .sql(
-            "select exists (select 1 from agent_definition"
+            "select exists (select 1 from agent"
                 + " where execution ->> 'driver' = 'builtin'"
                 + " and execution -> 'settings' ->> 'modelName' = :name)")
         .param("name", modelName)
@@ -59,7 +59,7 @@ public final class BuiltinAgentModelReferences {
   public boolean hasVariant(String modelName, String variant) {
     return jdbcClient
         .sql(
-            "select exists (select 1 from agent_definition"
+            "select exists (select 1 from agent"
                 + " where execution ->> 'driver' = 'builtin'"
                 + " and execution -> 'settings' ->> 'modelName' = :name"
                 + " and execution -> 'settings' ->> 'variant' = :variant)")

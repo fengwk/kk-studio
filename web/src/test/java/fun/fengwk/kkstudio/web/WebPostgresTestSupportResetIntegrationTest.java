@@ -85,7 +85,7 @@ class WebPostgresTestSupportResetIntegrationTest extends WebPostgresTestSupport 
     assertEquals(
         1L,
         jdbcClient
-            .sql("select count(*) from agent_definition where name = 'default-assistant'")
+            .sql("select count(*) from agent where name = 'default-assistant'")
             .query(Long.class)
             .single());
   }
@@ -127,7 +127,7 @@ class WebPostgresTestSupportResetIntegrationTest extends WebPostgresTestSupport 
       assertEquals(
           1L,
           jdbcClient
-              .sql("select count(*) from agent_definition where name = 'default-assistant'")
+              .sql("select count(*) from agent where name = 'default-assistant'")
               .query(Long.class)
               .single());
     } finally {

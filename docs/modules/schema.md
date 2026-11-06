@@ -27,7 +27,7 @@ V1 的 `system_setting` seed 行是默认聚合的唯一事实源；测试用 `S
 | --- | --- | --- |
 | 1 共享基础 | storage_blob、storage_upload、storage_object_cleanup：全局内容寻址、上传契约与对象删除墓碑 | [Storage](platform.md#storageblob-与-resource) |
 | 2 平台内核存储 | environment、environment_connection、cluster_node、system_setting；harness_session/entry/thread/thread_command/realtime_subscription/tool_invocation/execution_exit/thread_join/thread_stop_receipt；durable_work；session_blob_ref、session_file | [Environment](harness-environment.md)、[Harness Runtime](harness-runtime.md)、[Durable Work](work.md)、[Storage](platform.md#storageblob-与-resource) |
-| 3 平台 Driver 存储 | agent_provider、agent_model（MODEL/GROUP 共用名称空间）、agent_model_group_cooldown、agent_definition、skill_package、skill_package_git_source；plugin_configuration、plugin_credential、plugin_auth_attempt；mcp_server、mcp_tool；builtin_model_invocation | [Platform Catalog](platform.md#catalog)、[Plugin 配置存储](platform.md#plugin-配置存储)、[Platform MCP](platform.md#mcp-server-与运行时工具目录) |
+| 3 平台 Driver 存储 | agent_provider、agent_model（MODEL/GROUP 共用名称空间）、agent_model_group_cooldown、agent、skill_package、skill_package_git_source；plugin_configuration、plugin_credential、plugin_auth_attempt；mcp_server、mcp_tool；builtin_model_invocation | [Platform Catalog](platform.md#catalog)、[Plugin 配置存储](platform.md#plugin-配置存储)、[Platform MCP](platform.md#mcp-server-与运行时工具目录) |
 | 4 产品 | Canvas：canvas_document/group/node/resource/function_run/function_resource_pin/command_dedup；Chat：chat、chat_session；Project：project、project_issue 与 agent_thread/stage_budget/run/activity/evidence | [Canvas](canvas.md)、[Project](project.md) |
 
 ```text
@@ -110,7 +110,7 @@ Issue 同时保持工作阶段、控制暂停和 Run 执行状态；同 Issue �
 阶段预算按 Issue/state，Work 为每 Issue 一个 durable 邮箱。
 `harness_entry.entry_seq` 是数据库分配的追加序号（identity），同一 Session 内严格递增且父先于子，只用于创建序读取与 keyset 分页，不是业务身份。Harness 命令按 sequence 与 idempotencyKey 唯一，Thread 持有 `execution_control`（`RUNNABLE`/`STOPPED`）与 `input_through_sequence` 输入水位；`harness_execution_exit` 每个具体 Driver/Tool/Remote 代次一行，以不可变 identity（thread/invocation/attempt/lease/kind/parent）关联，保存 `UNCONFIRMED`、三类真实退出之一或显式 `ABANDONED`，不随 Invocation 删除。`ABANDONED` 只带 `abandoned_at`，真实证据只带 `confirmed_at`；真实证据替换放弃时保留原 `abandoned_at`，两种时间都不得早于 `registered_at`，但彼此没有先后约束。仅 DRIVER/TOOL 可确认 `STUDIO_EXITED`，仅 REMOTE 可确认 `REMOTE_ACKNOWLEDGED`；REMOTE 代次必须携带 `environment_id`，DRIVER/TOOL 该列必须为 NULL。部分索引 `idx_harness_execution_exit_unconfirmed_remote` 支持按环境查询 `UNCONFIRMED` 远端代次。远端代次必须挂同 Thread/invocation/attempt/lease 的 TOOL 或 DRIVER 父代。Join 固定 `terminal_entry_id`/`final_answer_entry_id` 回执与交付坐标；Stop 在 `harness_thread_stop_receipt` 按 `(thread_id, stop_request_id)` 保存逐 Thread 回执；`root_stop_request_id` 归组同一次根停止，取消计数与人工输入由命令表派生。
 同一 Session 的执行根（`parent_thread_id IS NULL`）按规范化后的名称精确唯一，部分唯一索引 `uk_harness_thread_root_name` 裁决并发创建与重命名；冲突返回 HTTP 409、reason `THREAD_NAME_CONFLICT`。跨 Session 或子代理同名不受此约束，精确创建重放仍返回已有身份，不再次插入。
-`agent_definition.execution` 为可空 JSONB：USER 必填，BUILTIN 可为 null；非空对象恰含
+`agent.execution` 为可空 JSONB：USER 必填，BUILTIN 可为 null；非空对象恰含
 `driver` 和对象类型的 `settings`。具体 settings、注册 Driver 和模型引用由应用校验，
 Builtin 模型引用通过按 driver 过滤的索引与同事务行锁保护，不依赖数据库外键。
 Work lease 成对，环境亲和性由各模块声明。Fill First 模型组的有序成员保存在 `agent_model.group_config`，成员 Variant、立即降级状态码与

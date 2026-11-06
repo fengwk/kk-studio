@@ -213,7 +213,7 @@ class CatalogPaginationIntegrationTest {
     fixture
         .sql(
             """
-            insert into agent_definition (name, type, execution, config)
+            insert into agent (name, type, execution, config)
             values (:name, 'BUILTIN', null, '{}'::jsonb)
             """)
         .param("name", name)
@@ -224,7 +224,7 @@ class CatalogPaginationIntegrationTest {
     fixture
         .sql(
             """
-            insert into agent_definition (name, type, execution, config)
+            insert into agent (name, type, execution, config)
             values (:name, 'BUILTIN',
                     jsonb_build_object('driver', :driver,
                         'settings', jsonb_build_object(

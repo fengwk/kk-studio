@@ -69,7 +69,7 @@ test('test intent: the E2E seed pre-seeds exactly four disposable Environment Ca
   assert.ok(!content.includes('delete from environment'))
 
   // 3. default-assistant is NOT bound to any topology-specific environment
-  const match = /insert into agent_definition\s*\([^)]*\)\s*values\s*\([^)]*'default-assistant'[^;]*;/i.exec(content)
+  const match = /insert into agent\s*\([^)]*\)\s*values\s*\([^)]*'default-assistant'[^;]*;/i.exec(content)
   assert.ok(match)
   assert.ok(!match[0].includes('environmentId'))
   assert.ok(!match[0].includes('11111111-1111-1111-1111-111111111111'))

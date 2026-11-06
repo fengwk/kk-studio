@@ -17,7 +17,7 @@ import java.util.Objects;
 @Component
 public final class BuiltinAgentExecutionValidator {
 
-  private static final String RESOURCE = "agent_definition";
+  private static final String RESOURCE = "agent";
   private final AgentModelRepository modelRepository;
   private final AgentModelDefaultVariantResolver variantResolver;
 

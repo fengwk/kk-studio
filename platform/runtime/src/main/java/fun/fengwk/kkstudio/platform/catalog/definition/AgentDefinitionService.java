@@ -36,7 +36,7 @@ import java.util.Objects;
 @Service
 public class AgentDefinitionService {
 
-  private static final String RESOURCE = "agent_definition";
+  private static final String RESOURCE = "agent";
   private static final int NAME_MAX_LENGTH = 64;
   private static final StrictJson JSON = StrictJson.standard();
 

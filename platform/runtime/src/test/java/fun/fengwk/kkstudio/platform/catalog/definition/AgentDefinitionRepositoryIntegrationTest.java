@@ -19,7 +19,7 @@ import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.UUID;
 
-/** {@code agent_definition} 读取路径的真实 SQL 覆盖：listAll 排序、count 与 jsonb 引用检查。 */
+/** {@code agent} 读取路径的真实 SQL 覆盖：listAll 排序、count 与 jsonb 引用检查。 */
 class AgentDefinitionRepositoryIntegrationTest {
 
   private static JdbcClient jdbcClient;

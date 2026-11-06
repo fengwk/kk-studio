@@ -230,10 +230,10 @@ public abstract class WebPostgresTestSupport {
     try (Statement st = conn.createStatement();
         ResultSet rs =
             st.executeQuery(
-                "select count(*) from agent_definition where name = 'default-assistant'")) {
+                "select count(*) from agent where name = 'default-assistant'")) {
       if (!rs.next() || rs.getLong(1) != 1L) {
         throw new IllegalStateException(
-            "fixture seed did not insert agent_definition default-assistant");
+            "fixture seed did not insert agent default-assistant");
       }
     }
   }

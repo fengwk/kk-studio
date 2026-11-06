@@ -8,7 +8,7 @@ import fun.fengwk.kkstudio.share.skill.SkillRefDTO;
 import java.util.List;
 
 /**
- * 持久化到 {@code agent_definition.config} JSONB 列的 Agent definition 执行配置。
+ * 持久化到 {@code agent.config} JSONB 列的 Agent definition 执行配置。
  *
  * <p>{@code tools} 使用有序、唯一的模型可见 tool name；{@code skills} 使用有序、唯一的 {@link
  * fun.fengwk.kkstudio.share.skill.SkillRefDTO}（{@code (packageName, name)}，每个引用都必须命中对应 Package 当前

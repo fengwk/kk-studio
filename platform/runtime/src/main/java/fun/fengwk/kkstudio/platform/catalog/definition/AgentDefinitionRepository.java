@@ -17,7 +17,7 @@ import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Objects;
 
-/** {@code agent_definition} 的 JdbcClient 仓库；写入以 (name, version) 做原子 CAS，并提供删除前的引用查询。 */
+/** {@code agent} 的 JdbcClient 仓库；写入以 (name, version) 做原子 CAS，并提供删除前的引用查询。 */
 @Repository
 public class AgentDefinitionRepository {
 
@@ -29,7 +29,7 @@ public class AgentDefinitionRepository {
 
   private static final String INSERT_SQL =
       """
-      insert into agent_definition (
+      insert into agent (
           name, type, description, system_prompt, execution, config,
           created_at, updated_at, version
       ) values (
@@ -40,7 +40,7 @@ public class AgentDefinitionRepository {
 
   private static final String UPDATE_BY_NAME_SQL =
       """
-      update agent_definition
+      update agent
       set description = :description, system_prompt = :systemPrompt,
           execution = cast(:executionJson as jsonb),
           config = cast(:configJson as jsonb),
@@ -74,9 +74,9 @@ public class AgentDefinitionRepository {
             .sql(
                 """
                 select page.*, totals.total_count
-                from (select count(*) as total_count from agent_definition) totals
+                from (select count(*) as total_count from agent) totals
                 left join lateral (
-                    select %s from agent_definition order by name asc limit :limit offset :offset
+                    select %s from agent order by name asc limit :limit offset :offset
                 ) page on true
                 order by page.name asc
                 """
@@ -100,19 +100,19 @@ public class AgentDefinitionRepository {
   /** 按 {@code name asc} 列出全部 Agent definition，用于一次性导出快照。 */
   public List<AgentDefinition> listAll() {
     return jdbcClient
-        .sql("select " + COLUMNS + " from agent_definition order by name asc")
+        .sql("select " + COLUMNS + " from agent order by name asc")
         .query(ROW_MAPPER)
         .list();
   }
 
   public AgentDefinition getByName(String name) {
-    return findOne("select " + COLUMNS + " from agent_definition where name = :name", name);
+    return findOne("select " + COLUMNS + " from agent where name = :name", name);
   }
 
   /** 返回 Agent 并持有其行锁，直到外层事务结束。 */
   public AgentDefinition getByNameForUpdate(String name) {
     return findOne(
-        "select " + COLUMNS + " from agent_definition where name = :name for update", name);
+        "select " + COLUMNS + " from agent where name = :name for update", name);
   }
 
   /** 是否有其它 Agent 的 subagents allowlist 引用该 Agent。 */
@@ -122,7 +122,7 @@ public class AgentDefinitionRepository {
             """
             select exists (
                 select 1
-                from agent_definition
+                from agent
                 where name <> :name
                   and jsonb_exists(config -> 'subagents', :name)
             )
@@ -139,7 +139,7 @@ public class AgentDefinitionRepository {
             """
             select exists (
                 select 1
-                from agent_definition,
+                from agent,
                      lateral jsonb_array_elements(
                          case when jsonb_typeof(config -> 'skills') = 'array'
                               then config -> 'skills'
@@ -186,7 +186,7 @@ public class AgentDefinitionRepository {
   /** 基于 (name, expectedVersion) 的硬删除 CAS；返回 false 表示 name 缺失或 version 不匹配。 */
   public boolean deleteByName(String name, long expectedVersion) {
     return jdbcClient
-            .sql("delete from agent_definition where name = :name and version = :expectedVersion")
+            .sql("delete from agent where name = :name and version = :expectedVersion")
             .param("name", name)
             .param("expectedVersion", expectedVersion)
             .update()
@@ -200,7 +200,7 @@ public class AgentDefinitionRepository {
   private static ExecutionSelection decodeExecution(String json) {
     return json == null
         ? null
-        : ExecutionSelectionJsonCodec.decode(MAPPER.readTree(json), "agent_definition.execution");
+        : ExecutionSelectionJsonCodec.decode(MAPPER.readTree(json), "agent.execution");
   }
 
   private static String encodeExecution(ExecutionSelection selection) {

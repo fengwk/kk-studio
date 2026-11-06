@@ -71,14 +71,14 @@ public class AgentModelServiceTest extends PostgresSpringTestSupport {
     AgentModelDTO model = agentModelService.createModel(model(providerName, original));
     // 相同字段出现在其他 driver 中时不是 Builtin 模型引用。
     jdbc.update(
-        "insert into agent_definition(name, execution, config) values"
+        "insert into agent(name, execution, config) values"
             + " (?, jsonb_build_object('driver', ?, 'settings',"
             + " jsonb_build_object('modelName', ?, 'variant', 'default')), '{}'::jsonb)",
         builtin,
         "builtin",
         original);
     jdbc.update(
-        "insert into agent_definition(name, execution, config) values"
+        "insert into agent(name, execution, config) values"
             + " (?, jsonb_build_object('driver', ?, 'settings',"
             + " jsonb_build_object('modelName', ?, 'variant', 'default')), '{}'::jsonb)",
         other,
@@ -92,30 +92,30 @@ public class AgentModelServiceTest extends PostgresSpringTestSupport {
     assertEquals(
         renamed,
         jdbc.queryForObject(
-            "select execution -> 'settings' ->> 'modelName' from agent_definition where name = ?",
+            "select execution -> 'settings' ->> 'modelName' from agent where name = ?",
             String.class,
             builtin));
     assertEquals(
         1L,
         jdbc.queryForObject(
-            "select version from agent_definition where name = ?", Long.class, builtin));
+            "select version from agent where name = ?", Long.class, builtin));
     assertEquals(
         original,
         jdbc.queryForObject(
-            "select execution -> 'settings' ->> 'modelName' from agent_definition where name = ?",
+            "select execution -> 'settings' ->> 'modelName' from agent where name = ?",
             String.class,
             other));
     assertEquals(
         0L,
         jdbc.queryForObject(
-            "select version from agent_definition where name = ?", Long.class, other));
+            "select version from agent where name = ?", Long.class, other));
     assertFalse(agentModelRepository.hasAgents(original));
     assertFalse(agentModelRepository.hasVariantReferences(original, "default"));
     AgentModelDTO recreated = agentModelService.createModel(model(providerName, original));
     agentModelService.deleteModel(original, recreated.getVersion());
     assertThrows(
         DomainException.class, () -> agentModelService.deleteModel(renamed, result.getVersion()));
-    jdbc.update("delete from agent_definition where name = ?", builtin);
+    jdbc.update("delete from agent where name = ?", builtin);
     agentModelService.deleteModel(renamed, result.getVersion());
   }
 

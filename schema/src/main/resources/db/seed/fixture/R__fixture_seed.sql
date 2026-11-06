@@ -6,7 +6,7 @@
 -- exact definitions in this file on every repeatable migration run.
 -- FK dependency order is preserved by cleaning dependent agents and models first.
 
-delete from agent_definition where name = 'default-assistant';
+delete from agent where name = 'default-assistant';
 delete from agent_model where provider_name = 'stub';
 delete from agent_provider where name = 'stub';
 
@@ -31,7 +31,7 @@ insert into agent_model (
     current_timestamp, current_timestamp, 0
 );
 
-insert into agent_definition (
+insert into agent (
     name, description, system_prompt, execution, config,
     created_at, updated_at, version
 ) values (

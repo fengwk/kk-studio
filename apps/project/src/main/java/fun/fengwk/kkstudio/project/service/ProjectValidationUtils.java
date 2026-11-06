@@ -22,7 +22,7 @@ public final class ProjectValidationUtils {
   /** {@code varchar(256)} 的字符上限。 */
   public static final int MAX_TITLE_LENGTH = 256;
 
-  /** {@code agent_definition.name}/{@code environment.name} 的列宽上限。 */
+  /** {@code agent.name}/{@code environment.name} 的列宽上限。 */
   public static final int MAX_CANONICAL_NAME_LENGTH = 64;
 
   /** {@code project.description} 的字节上限（64 KiB）。 */

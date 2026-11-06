@@ -140,7 +140,7 @@ insert into agent_provider (name, provider_type, base_url, config, connection_ge
     values ('fixture', 'openai', 'https://example.invalid', '{}', pg_temp.uid(9999));
 insert into agent_model (name, kind, provider_name, model_id, config)
     values ('fixture', 'MODEL', 'fixture', 'fixture', '{}');
-insert into agent_definition (name, execution, config)
+insert into agent (name, execution, config)
     values ('designer', '{"driver":"builtin","settings":{"modelName":"fixture","variant":null}}', '{}'),
            ('reviewer', '{"driver":"builtin","settings":{"modelName":"fixture","variant":null}}', '{}');
 
@@ -164,30 +164,30 @@ select pg_temp.assert_true('group kind accepts only group config',
 
 -- Catalog ownership and explicit unconfigured built-in models are database facts.
 select pg_temp.assert_true('user agent is the default ownership',
-    (select type = 'USER' from agent_definition where name = 'designer'));
-insert into agent_definition (name, type, config)
+    (select type = 'USER' from agent where name = 'designer'));
+insert into agent (name, type, config)
     values ('probe-builtin', 'BUILTIN', '{}');
 select pg_temp.assert_true('built-in agent accepts unconfigured execution',
     (select execution is null
-        from agent_definition where name = 'probe-builtin'));
+        from agent where name = 'probe-builtin'));
 select pg_temp.rejects('unknown agent ownership is rejected',
-    $$insert into agent_definition(name,type,execution,config)
+    $$insert into agent(name,type,execution,config)
       values('probe-unknown','ROOT','{"driver":"x","settings":{}}','{}')$$,
-    '23514', 'ck_agent_definition_type');
+    '23514', 'ck_agent_type');
 select pg_temp.assert_true('agent stores builtin execution',
-    (select execution -> 'settings' ->> 'modelName' = 'fixture' from agent_definition where name = 'designer'));
+    (select execution -> 'settings' ->> 'modelName' = 'fixture' from agent where name = 'designer'));
 select pg_temp.rejects('execution requires object settings',
-    $$insert into agent_definition(name,type,execution,config)
+    $$insert into agent(name,type,execution,config)
       values('probe-invalid','BUILTIN','{"driver":"x","settings":null}','{}')$$,
-    '23514', 'ck_agent_definition_execution_shape');
+    '23514', 'ck_agent_execution_shape');
 select pg_temp.rejects('execution rejects extra fields',
-    $$insert into agent_definition(name,execution,config)
+    $$insert into agent(name,execution,config)
       values('probe-extra','{"driver":"x","settings":{},"extra":true}','{}')$$,
-    '23514', 'ck_agent_definition_execution_shape');
+    '23514', 'ck_agent_execution_shape');
 select pg_temp.rejects('execution requires a driver',
-    $$insert into agent_definition(name,execution,config)
+    $$insert into agent(name,execution,config)
       values('probe-missing','{"settings":{}}','{}')$$,
-    '23514', 'ck_agent_definition_execution_shape');
+    '23514', 'ck_agent_execution_shape');
 
 insert into project (id, title, description, workflow) values
     (pg_temp.uid(1), 'one', '',

@@ -248,7 +248,7 @@ public class McpServerServiceTest extends PostgresSpringTestSupport {
     assertThrows(DomainException.class, () -> mcpServerService.deleteServer("delete_guard", "0"));
     assertEquals(1, repository.listTools("delete_guard").size());
 
-    jdbc.update("delete from agent_definition where name = 'test_agent_mcp'");
+    jdbc.update("delete from agent where name = 'test_agent_mcp'");
     mcpServerService.deleteServer("delete_guard", "0");
 
     assertEquals(0, countServers());
@@ -305,7 +305,7 @@ public class McpServerServiceTest extends PostgresSpringTestSupport {
             + "values ('m1', 'MODEL', 'test_p_mcp', 'm1', '{}'::jsonb) on conflict do nothing");
 
     jdbc.update(
-        "insert into agent_definition (name, execution, config) "
+        "insert into agent (name, execution, config) "
             + "values ('test_agent_mcp', "
             + "'{\"driver\":\"builtin\",\"settings\":{\"modelName\":\"m1\",\"variant\":null}}'::jsonb, "
             + "cast('{\"tools\": [\""
