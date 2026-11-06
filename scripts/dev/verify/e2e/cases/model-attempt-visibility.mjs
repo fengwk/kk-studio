@@ -503,9 +503,9 @@ function assertFirstTurnDurable(
     `durable failure error/retryAt mismatch: ${JSON.stringify({ expected: failure, actual: failurePayload })}`,
   )
   assert(
-    instantEpochMillis(failureEntry.createTime) === instantEpochMillis(failure.failedAt),
+    instantEpochMillis(failureEntry.createdAt) === instantEpochMillis(failure.failedAt),
     `durable failure failedAt mismatch: ${JSON.stringify({
-      entryCreateTime: failureEntry.createTime,
+      entryCreatedAt: failureEntry.createdAt,
       failedAt: failure.failedAt,
     })}`,
   )

@@ -12,7 +12,7 @@
     "status": 400,
     "code": "validation",
     "messages": { "en-US": "The limit parameter has an invalid value.", "zh-CN": "limit 参数的值无效。" },
-    "detail": "limit has invalid value: abc"
+    "detail": "limit has an invalid value"
   },
   "responseStatus": {
     "status": 400,
