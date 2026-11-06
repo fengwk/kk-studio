@@ -91,7 +91,7 @@ class ModelCatalogControllerTest {
     candidate.setSupportIssues(List.of());
 
     ModelCatalogPageDTO page = new ModelCatalogPageDTO();
-    page.setGeneration("7");
+    page.setGeneration(7L);
     page.setFetchedAt(Instant.parse("2026-01-01T00:00:00Z"));
     page.setLoading(loading);
     page.setItems(List.of(candidate));

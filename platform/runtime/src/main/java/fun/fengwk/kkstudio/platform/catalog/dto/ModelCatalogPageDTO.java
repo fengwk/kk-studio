@@ -10,7 +10,7 @@ import java.util.List;
 @Data
 public class ModelCatalogPageDTO {
 
-  private String generation;
+  private Long generation;
 
   private @Nullable Instant fetchedAt;
 
