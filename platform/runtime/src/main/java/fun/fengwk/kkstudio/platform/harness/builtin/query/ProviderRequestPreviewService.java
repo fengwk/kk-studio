@@ -289,6 +289,11 @@ public final class ProviderRequestPreviewService {
     ThreadSnapshot childSnapshot;
     try {
       childSnapshot = runtime.getThreadSnapshot(frozen.childThreadId());
+    } catch (DomainException error) {
+      if (error.code() != DomainErrorCode.NOT_FOUND) {
+        throw error;
+      }
+      throw frozenCompactionUnavailable("compaction child thread does not exist", error);
     } catch (HarnessRuntimeNotFoundException error) {
       throw frozenCompactionUnavailable("compaction child thread does not exist", error);
     }

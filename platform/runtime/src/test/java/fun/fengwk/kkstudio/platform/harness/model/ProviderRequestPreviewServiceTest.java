@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -13,6 +14,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.atLeast;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -25,6 +27,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.api.command.GoalCommandPayload;
@@ -1087,6 +1090,30 @@ class ProviderRequestPreviewServiceTest {
     verify(turnResolver, never()).planHistorical(any(), any(), any());
     verify(turnResolver, never()).planLive(any(), any(), any());
     verify(providerResolution, never()).resolve(any(), any(), any());
+  }
+
+  @Test
+  void frozenCompactionOnlyTranslatesDomainNotFound() {
+    // 迁移后子线程缺失仍是预览不可用；其他领域失败不能被掩盖。
+    when(runtime.getSessionEntries(SESSION_ID)).thenReturn(compactionOutputPath().entries());
+    when(runtime.findJoin(COMPACTION_JOIN_ID))
+        .thenReturn(Optional.of(compactionJoin(CHILD_THREAD_ID)));
+    DomainException missing = DomainException.notFound("thread", "child missing");
+    when(runtime.getThreadSnapshot(CHILD_THREAD_ID)).thenThrow(missing);
+    ProviderRequestPreviewUnavailableException rejected =
+        assertThrows(
+            ProviderRequestPreviewUnavailableException.class,
+            () -> service.previewHistorical(SESSION_ID, COMPACTION_ENTRY_ID));
+    assertEquals(Reason.PREVIEW_UNSUPPORTED, rejected.reason());
+    assertSame(missing, rejected.getCause());
+
+    DomainException other = DomainException.validation("thread", "invalid");
+    doThrow(other).when(runtime).getThreadSnapshot(CHILD_THREAD_ID);
+    assertSame(
+        other,
+        assertThrows(
+            DomainException.class,
+            () -> service.previewHistorical(SESSION_ID, COMPACTION_ENTRY_ID)));
   }
 
   /**
