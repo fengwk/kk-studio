@@ -22,7 +22,7 @@ function node(
     turnCount: 1,
     toolCallCount: 0,
     outcome: null,
-    updateTime: 1774958400,
+    updateTime: 1774958400000,
     ...overrides,
   }
 }
@@ -40,10 +40,10 @@ describe('projectActiveThreadTree', () => {
   it('sorts each sibling group by active status, time and ID, retaining real connectors', () => {
     const tree = projectThreadTree([
       node('root', null), node('old', 'root', { updateTime: 0 }),
-      node('z', 'root', { updateTime: 1775001600 }),
-      node('a', 'root', { updateTime: 1775001600 }),
+      node('z', 'root', { updateTime: 1775001600000 }),
+      node('a', 'root', { updateTime: 1775001600000 }),
       node('active', 'root', { status: 'RUNNING' }),
-      node('grand', 'active', { updateTime: 1767225600 }),
+      node('grand', 'active', { updateTime: 1767225600000 }),
     ])
     expect(tree.historyRows.map((row) => row.node.threadId)).toEqual(['active', 'grand', 'a', 'z', 'old'])
     expect(tree.historyRows[1]).toMatchObject({ depth: 1, ancestorContinues: [true], isLast: true })
@@ -53,10 +53,10 @@ describe('projectActiveThreadTree', () => {
     expect(() => projectThreadTree([node('root', null), node('other', null)])).toThrow(/root/)
   })
 
-  it('compares epoch seconds against ISO milliseconds, including fractional seconds', () => {
+  it('orders epoch milliseconds including sub-second differences', () => {
     const tree = projectThreadTree([
-      node('root', null), node('a-older', 'root', { updateTime: 1774958400 }),
-      node('z-newer', 'root', { updateTime: 1774958400.125 }),
+      node('root', null), node('a-older', 'root', { updateTime: 1774958400000 }),
+      node('z-newer', 'root', { updateTime: 1774958400125 }),
     ])
     expect(tree.historyRows.map((row) => row.node.threadId)).toEqual(['z-newer', 'a-older'])
   })

@@ -9,11 +9,11 @@ import { setLocale } from '@/shared/i18n'
 setLocale('zh-CN')
 
 // Both selectors use their production item builders and renderers, without a backend.
-// Wire Instants are epoch seconds; the fractional value keeps sub-second precision.
+// Wire Instants are epoch milliseconds, including sub-second precision.
 const dates = [
-  { id: 'instant', value: Date.parse('2026-10-08T13:15:00Z') / 1000 },
-  { id: 'cross-day', value: Date.parse('2026-10-08T01:15:00Z') / 1000 },
-  { id: 'fractional', value: Date.parse('2026-10-08T13:15:42.250Z') / 1000 },
+  { id: 'instant', value: Date.parse('2026-10-08T13:15:00Z') },
+  { id: 'cross-day', value: Date.parse('2026-10-08T01:15:00Z') },
+  { id: 'fractional', value: Date.parse('2026-10-08T13:15:42.250Z') },
 ]
 
 export function Harness() {

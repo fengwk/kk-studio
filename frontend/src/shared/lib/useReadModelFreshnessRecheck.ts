@@ -58,8 +58,8 @@ export function useReadModelFreshnessRecheck(
 ): void {
   const queryClient = useQueryClient()
   const scope = hashKey(queryKey)
-  // 服务端 Instant 是 epoch 秒，归一到毫秒。
-  const deadline = freshnessAt == null ? null : freshnessAt * 1000
+  // 服务端 Instant 已是 epoch 毫秒。
+  const deadline = freshnessAt
   useEffect(() => {
     if (deadline == null || !Number.isFinite(deadline)) {
       return
