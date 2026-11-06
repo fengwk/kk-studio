@@ -84,7 +84,7 @@ class FlywayAutoConfigurationIntegrationTest {
           st.executeQuery(
               "select count(*) from information_schema.columns"
                   + " where table_schema = 'public'"
-                  + " and table_name = 'agent_model'"
+                  + " and table_name = 'model'"
                   + " and column_name = 'model_id' and is_nullable = 'YES'")) {
         assertTrue(modelIdColumn.next());
         assertEquals(1L, modelIdColumn.getLong(1), "GROUP has no wire model_id");
@@ -92,7 +92,7 @@ class FlywayAutoConfigurationIntegrationTest {
       try (ResultSet kindColumn =
           st.executeQuery(
               "select count(*) from information_schema.columns where table_schema='public'"
-                  + " and table_name='agent_model' and column_name='kind' and is_nullable='NO'")) {
+                  + " and table_name='model' and column_name='kind' and is_nullable='NO'")) {
         assertTrue(kindColumn.next());
         assertEquals(1L, kindColumn.getLong(1));
       }
@@ -102,25 +102,25 @@ class FlywayAutoConfigurationIntegrationTest {
               SQLException.class,
               () ->
                   st.executeUpdate(
-                      "insert into agent_model(name,kind,provider_name,config)"
+                      "insert into model(name,kind,provider_name,config)"
                           + " values ('missing-wire','MODEL','stub','{}'::jsonb)"));
       assertEquals("23514", invalidModel.getSQLState());
-      assertTrue(invalidModel.getMessage().contains("ck_agent_model_shape"));
+      assertTrue(invalidModel.getMessage().contains("ck_model_shape"));
       try {
         assertEquals(
             1,
             st.executeUpdate(
-                "insert into agent_model(name,kind,group_config)"
+                "insert into model(name,kind,group_config)"
                     + " values ('group-without-wire','GROUP','{}'::jsonb)"));
         try (ResultSet group =
             st.executeQuery(
-                "select count(*) from agent_model where name='group-without-wire'"
+                "select count(*) from model where name='group-without-wire'"
                     + " and kind='GROUP' and model_id is null and provider_name is null and config is null")) {
           assertTrue(group.next());
           assertEquals(1L, group.getLong(1));
         }
       } finally {
-        st.executeUpdate("delete from agent_model where name='group-without-wire'");
+        st.executeUpdate("delete from model where name='group-without-wire'");
       }
       try (ResultSet seed =
           st.executeQuery(

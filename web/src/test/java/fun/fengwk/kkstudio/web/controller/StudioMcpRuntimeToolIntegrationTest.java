@@ -40,12 +40,23 @@ import fun.fengwk.kkstudio.harness.contributor.api.CustomStateSnapshot;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.contributor.api.GoalSnapshot;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.model.ModelInputModality;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.spi.ToolGateway;
 import fun.fengwk.kkstudio.harness.spi.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.TurnMediaCapabilities;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelAbilitiesDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelConfigDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelLimitDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelRateSetDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelVariantDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ProviderCreateDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.SingleModelCreateDTO;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerRepository;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpTool;
 import fun.fengwk.kkstudio.platform.catalog.mcp.runtime.McpToolCatalog;
@@ -53,16 +64,6 @@ import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalog;
 import fun.fengwk.kkstudio.platform.harness.thread.command.DatabaseTurnResolver;
 import fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentDefinitionCreateDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelAbilitiesDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelConfigDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelCreateDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelInputModality;
-import fun.fengwk.kkstudio.share.catalog.AgentModelKind;
-import fun.fengwk.kkstudio.share.catalog.AgentModelLimitDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelPricingDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelRateSetDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelVariantDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.mcp.McpServerCreateDTO;
 import fun.fengwk.kkstudio.share.runtime.HarnessExecutionSelectionDTO;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
@@ -187,9 +188,9 @@ public class StudioMcpRuntimeToolIntegrationTest extends WebPostgresTestSupport 
     // 校验生产 RuntimeToolCatalog 也立即按该 name 查询到该工具
     assertTrue(runtimeToolCatalog.findTool(modelName).isPresent());
 
-    // 3. 验证 GET /api/tools 只按 name 暴露该动态工具元数据（不含 id/version）
+    // 3. 验证 GET /api/platform/tools 只按 name 暴露该动态工具元数据（不含 id/version）
     mockMvc
-        .perform(get("/api/tools"))
+        .perform(get("/api/platform/tools"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$[?(@.name == '" + modelName + "')].name").value(modelName))
         .andExpect(jsonPath("$[?(@.name == '" + modelName + "')].description").value("Echo text"))
@@ -202,10 +203,10 @@ public class StudioMcpRuntimeToolIntegrationTest extends WebPostgresTestSupport 
     String configuredModelName = "model-" + suffix;
     String agentName = "agent-" + suffix;
 
-    AgentProviderCreateDTO providerDto = new AgentProviderCreateDTO();
+    ProviderCreateDTO providerDto = new ProviderCreateDTO();
     providerDto.setName(providerName);
     providerDto.setDescription("provider description");
-    providerDto.setProviderType("openai");
+    providerDto.setProviderType(ProviderType.OPENAI);
     providerDto.setCredential("secret-credential-value");
     providerDto.setModelCallTimeoutMillis(120000L);
     providerDto.setModelCallIdleTimeoutMillis(3000L);
@@ -214,21 +215,20 @@ public class StudioMcpRuntimeToolIntegrationTest extends WebPostgresTestSupport 
 
     mockMvc
         .perform(
-            post("/api/providers")
+            post("/api/platform/providers")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(providerBody.toString()))
         .andExpect(status().isCreated())
         .andExpect(jsonPath("$.name").value(providerName));
 
-    AgentModelCreateDTO modelDto = new AgentModelCreateDTO();
-    modelDto.setKind(AgentModelKind.MODEL);
+    SingleModelCreateDTO modelDto = new SingleModelCreateDTO();
     modelDto.setProviderName(providerName);
     modelDto.setName(configuredModelName);
     configureExecutableModel(modelDto);
 
     mockMvc
         .perform(
-            post("/api/models")
+            post("/api/platform/models")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(modelDto)))
         .andExpect(status().isCreated())
@@ -391,20 +391,20 @@ public class StudioMcpRuntimeToolIntegrationTest extends WebPostgresTestSupport 
     return objectMapper.readTree(result.getResponse().getContentAsString()).path("data");
   }
 
-  private static void configureExecutableModel(AgentModelCreateDTO model) {
+  private static void configureExecutableModel(SingleModelCreateDTO model) {
     model.setModelId(model.getName());
-    AgentModelConfigDTO config = new AgentModelConfigDTO();
-    AgentModelLimitDTO limit = new AgentModelLimitDTO();
+    ModelConfigDTO config = new ModelConfigDTO();
+    ModelLimitDTO limit = new ModelLimitDTO();
     limit.setContext(32768);
     limit.setOutput(4096);
     config.setLimit(limit);
-    AgentModelAbilitiesDTO abilities = new AgentModelAbilitiesDTO();
+    ModelAbilitiesDTO abilities = new ModelAbilitiesDTO();
     abilities.setTools(true);
     abilities.setReasoning(false);
-    abilities.setInputModalities(List.of(AgentModelInputModality.TEXT));
+    abilities.setInputModalities(List.of(ModelInputModality.TEXT));
     config.setAbilities(abilities);
-    AgentModelPricingDTO pricing = new AgentModelPricingDTO();
-    AgentModelRateSetDTO base = new AgentModelRateSetDTO();
+    ModelPricingDTO pricing = new ModelPricingDTO();
+    ModelRateSetDTO base = new ModelRateSetDTO();
     base.setInput(BigDecimal.ZERO);
     base.setOutput(BigDecimal.ZERO);
     base.setCacheRead(BigDecimal.ZERO);
@@ -415,8 +415,9 @@ public class StudioMcpRuntimeToolIntegrationTest extends WebPostgresTestSupport 
     pricing.setOverrides(List.of());
     pricing.setMultipliers(List.of());
     config.setPricing(pricing);
-    AgentModelVariantDTO variant = new AgentModelVariantDTO();
+    ModelVariantDTO variant = new ModelVariantDTO();
     variant.setId("default");
+    variant.setPromptCacheRetention(PromptCacheRetention.SHORT);
     config.setVariants(List.of(variant));
     config.setDefaultVariant("default");
     model.setConfig(config);

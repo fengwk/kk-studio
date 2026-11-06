@@ -14,8 +14,8 @@ import ch.qos.logback.core.read.ListAppender;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 
-import fun.fengwk.kkstudio.share.catalog.ModelCatalogPageDTO;
-import fun.fengwk.kkstudio.share.catalog.ModelDefaultCandidateDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelCatalogCandidateDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelCatalogPageDTO;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
@@ -211,7 +211,7 @@ class ModelCatalogServiceTest {
   }
 
   private static List<String> modelIds(ModelCatalogPageDTO page) {
-    return page.getItems().stream().map(ModelDefaultCandidateDTO::getModelId).toList();
+    return page.getItems().stream().map(ModelCatalogCandidateDTO::getModelId).toList();
   }
 
   private static String cursor(String value) {

@@ -29,9 +29,9 @@ import fun.fengwk.kkstudio.harness.spi.ToolResultHistoryMaterializer;
 import fun.fengwk.kkstudio.harness.spi.compaction.CompactionConfigProvider;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.spi.work.ProcessorLeaseConfig;
-import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
-import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderConfigurationCodec;
-import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderRepository;
+import fun.fengwk.kkstudio.platform.catalog.provider.Provider;
+import fun.fengwk.kkstudio.platform.catalog.provider.ProviderConfigurationCodec;
+import fun.fengwk.kkstudio.platform.catalog.provider.ProviderRepository;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 
@@ -77,8 +77,8 @@ public class HarnessProcessorConfiguration {
   @Bean
   public Function<String, ModelHttpErrorPolicy> modelHttpErrorPolicyProvider(
       SystemSettingsSnapshot systemSettingsSnapshot,
-      AgentProviderRepository agentProviderRepository,
-      AgentProviderConfigurationCodec providerConfigurationCodec) {
+      ProviderRepository agentProviderRepository,
+      ProviderConfigurationCodec providerConfigurationCodec) {
     return providerName -> {
       // live 路径绝不允许 null/blank：冻结 Provider 身份来自 Invocation；未知名称才按“继承系统名单”处理。
       Objects.requireNonNull(providerName, "providerName");
@@ -87,7 +87,7 @@ public class HarnessProcessorConfiguration {
       }
       SystemSettings.AiRuntime aiRuntime = systemSettingsSnapshot.get().aiRuntime();
       List<Integer> effective = aiRuntime.modelHttpRetryStatusCodes();
-      AgentProvider provider = agentProviderRepository.getByName(providerName);
+      Provider provider = agentProviderRepository.getByName(providerName);
       if (provider != null) {
         List<Integer> override =
             providerConfigurationCodec.readHttpRetryStatusCodes(provider.configJson());

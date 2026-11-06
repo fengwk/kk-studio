@@ -21,8 +21,6 @@ import fun.fengwk.kkstudio.common.page.Page;
 import fun.fengwk.kkstudio.common.page.PageQuery;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionService;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerService;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModelService;
-import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderService;
 import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
 import fun.fengwk.kkstudio.web.advice.StudioProblemAdvice;
@@ -33,22 +31,16 @@ import java.util.List;
 class StudioCatalogPaginationContractTest {
 
   private AgentDefinitionService agentDefinitionService;
-  private AgentModelService agentModelService;
-  private AgentProviderService agentProviderService;
   private McpServerService mcpServerService;
   private MockMvc mockMvc;
 
   @BeforeEach
   void setUp() {
     agentDefinitionService = mock(AgentDefinitionService.class);
-    agentModelService = mock(AgentModelService.class);
-    agentProviderService = mock(AgentProviderService.class);
     mcpServerService = mock(McpServerService.class);
     mockMvc =
         MockMvcBuilders.standaloneSetup(
                 new StudioAgentDefinitionController(agentDefinitionService),
-                new StudioAgentModelController(agentModelService),
-                new StudioAgentProviderController(agentProviderService),
                 new StudioMcpServerController(mcpServerService))
             .setControllerAdvice(
                 new ApiResponseStatusAdvice(), new StudioProblemAdvice(new StudioMessageService()))
@@ -58,8 +50,6 @@ class StudioCatalogPaginationContractTest {
   @Test
   void rejectsOutOfRangePageNumberOnEveryCatalogEndpoint() throws Exception {
     assertRejected("/api/agents", "pageNumber", "0");
-    assertRejected("/api/models", "pageNumber", "0");
-    assertRejected("/api/providers", "pageNumber", "0");
     assertRejected("/api/mcp-servers", "pageNumber", "0");
     verifyNoServiceCalls();
   }
@@ -68,10 +58,6 @@ class StudioCatalogPaginationContractTest {
   void rejectsOutOfRangePageSizeOnEveryCatalogEndpoint() throws Exception {
     assertRejected("/api/agents", "pageSize", "0");
     assertRejected("/api/agents", "pageSize", "1001");
-    assertRejected("/api/models", "pageSize", "0");
-    assertRejected("/api/models", "pageSize", "1001");
-    assertRejected("/api/providers", "pageSize", "0");
-    assertRejected("/api/providers", "pageSize", "1001");
     assertRejected("/api/mcp-servers", "pageSize", "0");
     assertRejected("/api/mcp-servers", "pageSize", "1001");
     verifyNoServiceCalls();
@@ -130,7 +116,6 @@ class StudioCatalogPaginationContractTest {
   }
 
   private void verifyNoServiceCalls() {
-    verifyNoInteractions(
-        agentDefinitionService, agentModelService, agentProviderService, mcpServerService);
+    verifyNoInteractions(agentDefinitionService, mcpServerService);
   }
 }

@@ -28,19 +28,20 @@ import tools.jackson.databind.JsonNode;
 
 import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelConfigDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelVariantDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ProviderUpdateDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.SingleModelCreateDTO;
 import fun.fengwk.kkstudio.platform.configsync.ConfigSyncApplier;
 import fun.fengwk.kkstudio.platform.configsync.ConfigSyncParser;
 import fun.fengwk.kkstudio.platform.configsync.ConfigSyncPlan;
 import fun.fengwk.kkstudio.platform.configsync.ConfigSyncPlanner;
 import fun.fengwk.kkstudio.platform.configsync.ConfigSyncYaml;
 import fun.fengwk.kkstudio.platform.environment.RegistrationTokens;
+import fun.fengwk.kkstudio.platform.secret.SecretUpdate;
 import fun.fengwk.kkstudio.share.catalog.AgentDefinitionCreateDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentDefinitionUpdateDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelConfigDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelCreateDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelKind;
-import fun.fengwk.kkstudio.share.catalog.AgentModelVariantDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.environment.EnvironmentCreateDTO;
 import fun.fengwk.kkstudio.share.mcp.McpServerCreateDTO;
 import fun.fengwk.kkstudio.share.skill.SkillPackageGitCreateDTO;
@@ -118,7 +119,10 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
 
     // 直接写入的 credential 在公开 DTO 中不可读；inventory 更不得包含任何配置值。
     assertTrue(token.length() > 0);
-    assertFalse(providerDto.has("credential"), "provider public DTO must not expose credential");
+    assertFalse(
+        providerDto.path("credential").has("value"),
+        "provider public DTO must expose only credential.configured, never the value");
+    assertFalse(providerDto.toString().contains(credential), "credential value must never echo");
 
     MvcResult inventoryResult =
         mockMvc
@@ -193,7 +197,8 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
 
     // 清理本用例新建资源，避免污染同库后续断言。
     deleteOk("/api/environments/" + envDto.path("id").asText(), envDto.path("version").asText());
-    deleteOk("/api/providers/" + provider, findProvider(provider).path("version").asText());
+    deleteOk(
+        "/api/platform/providers/" + provider, findProvider(provider).path("version").asText());
   }
 
   // ---------------------------------------------------------------- import precheck
@@ -226,7 +231,8 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     assertTrue(newCheck.path("updated").isEmpty());
     assertNull(findProvider(created), "check must not write");
 
-    deleteOk("/api/providers/" + existing, findProvider(existing).path("version").asText());
+    deleteOk(
+        "/api/platform/providers/" + existing, findProvider(existing).path("version").asText());
   }
 
   /** 预检查与执行都严格拒绝未知请求字段与错误字段类型。 */
@@ -352,7 +358,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     createModel(provider, model, "1.25", "{}"); // DB config 只声明 default variant。
 
     String fileOnly = "file_variant_" + suffix;
-    AgentModelConfigDTO fileConfig = modelConfigWithVariants(List.of(fileOnly));
+    ModelConfigDTO fileConfig = modelConfigWithVariants(List.of(fileOnly));
     String credential = "vv-secret-" + suffix;
 
     // Agent 引用文件新增 variant：预检查按文件 config 通过，且不写。
@@ -393,7 +399,8 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     assertTrue(imported.path("skipped").findValuesAsString("kind").contains("unknownThing"));
     assertNotNull(findProvider(provider));
 
-    deleteOk("/api/providers/" + provider, findProvider(provider).path("version").asText());
+    deleteOk(
+        "/api/platform/providers/" + provider, findProvider(provider).path("version").asText());
   }
 
   /**
@@ -449,7 +456,8 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     assertNull(
         findProvider(unknownProvider),
         "entry carrying an unknown field must be skipped, not imported");
-    deleteOk("/api/providers/" + provider, findProvider(provider).path("version").asText());
+    deleteOk(
+        "/api/platform/providers/" + provider, findProvider(provider).path("version").asText());
   }
 
   // ---------------------------------------------------------------- seven kinds round trip
@@ -529,11 +537,11 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     JsonNode unlinkedA = putData("/api/agents/" + agentA, unlinkA);
     deleteOk("/api/agents/" + agentB, findAgent(agentB).path("version").asText());
     deleteOk("/api/agents/" + agentA, unlinkedA.path("version").asText());
-    deleteOk("/api/models/" + model, modelDto.path("version").asText());
+    deleteOk("/api/platform/models/" + model, modelDto.path("version").asText());
     deleteOk("/api/skill-packages/" + pkg, skillDto.path("version").asText());
     deleteOk("/api/mcp-servers/" + mcpName, discoveredMcp.path("version").asText());
     deleteOk("/api/environments/" + envDto.path("id").asText(), envDto.path("version").asText());
-    deleteOk("/api/providers/" + provider, providerDto.path("version").asText());
+    deleteOk("/api/platform/providers/" + provider, providerDto.path("version").asText());
     assertNull(findAgent(agentA), "agent must be gone before import");
 
     JsonNode importResult = importYaml(yaml);
@@ -705,12 +713,10 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
             .path("yaml")
             .asText();
 
-    AgentProviderCreateDTO update = new AgentProviderCreateDTO();
-    update.setName(name);
+    ProviderUpdateDTO update = new ProviderUpdateDTO();
     update.setDescription("changed later");
-    update.setProviderType("openai");
     update.setBaseUrl("https://example.com/v2");
-    update.setCredential("sk-updated");
+    update.setCredential(SecretUpdate.set("sk-updated"));
     update.setModelCallTimeoutMillis(123456L);
     update.setModelCallIdleTimeoutMillis(60000L);
     // provider 更新走 PUT，expectedVersion 来自创建响应。
@@ -746,18 +752,19 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
   void sameNameProviderWithoutCredentialClearsTheTargetCredential() throws Exception {
     String name = "clear_credential_" + unique();
     JsonNode created = createProvider(name, "configured target");
-    assertTrue(created.path("configured").asBoolean());
+    assertTrue(created.path("credential").path("configured").asBoolean());
     String originalYaml =
         postData("/api/settings/sync/export", exportRequest(providerRef(name)))
             .path("yaml")
             .asText();
-    putData(
-        "/api/providers/" + name,
-        Map.of(
-            "providerType", "openai",
-            "baseUrl", "https://example.com/v1",
-            "expectedVersion", created.path("version").asText()));
-    assertTrue(findProvider(name).path("configured").asBoolean());
+    ProviderUpdateDTO keepCredential = new ProviderUpdateDTO();
+    keepCredential.setDescription("configured target");
+    keepCredential.setBaseUrl("https://example.com/v1");
+    keepCredential.setCredential(SecretUpdate.keep());
+    keepCredential.setModelCallTimeoutMillis(120000L);
+    keepCredential.setModelCallIdleTimeoutMillis(30000L);
+    putData("/api/platform/providers/" + name, keepCredential, created.path("version").asText());
+    assertTrue(findProvider(name).path("credential").path("configured").asBoolean());
     assertTrue(
         postData("/api/settings/sync/export", exportRequest(providerRef(name)))
             .path("yaml")
@@ -767,7 +774,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
 
     importYaml("providers:\n  - name: " + name + "\n    providerType: openai\n");
 
-    assertFalse(findProvider(name).path("configured").asBoolean());
+    assertFalse(findProvider(name).path("credential").path("configured").asBoolean());
     String exported =
         postData("/api/settings/sync/export", exportRequest(providerRef(name)))
             .path("yaml")
@@ -776,7 +783,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
         exported.contains("credential:"),
         "an unconfigured provider must not retain the target credential");
     importYaml(originalYaml);
-    assertTrue(findProvider(name).path("configured").asBoolean());
+    assertTrue(findProvider(name).path("credential").path("configured").asBoolean());
     assertEquals(
         parseYaml(originalYaml),
         parseYaml(
@@ -1108,7 +1115,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
         postData("/api/settings/sync/export", exportRequest(ref("models", model)))
             .path("yaml")
             .asText();
-    deleteOk("/api/models/" + model, modelDto.path("version").asText());
+    deleteOk("/api/platform/models/" + model, modelDto.path("version").asText());
     importYaml(yaml);
     JsonNode reModel = findModel(provider, model);
     assertEquals(
@@ -1136,7 +1143,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
   private JsonNode createProvider(String name, String description) throws Exception {
     // credential 为 WRITE_ONLY；测试请求不能通过响应侧 DTO 序列化，否则会悄悄丢掉待验证的凭据。
     return postData(
-        "/api/providers",
+        "/api/platform/providers",
         Map.of(
             "name",
             name,
@@ -1154,31 +1161,27 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
             30000L));
   }
 
-  private void updateProviderPut(String name, String expectedVersion, AgentProviderCreateDTO source)
+  private void updateProviderPut(String name, String expectedVersion, ProviderUpdateDTO update)
       throws Exception {
-    // WRITE_ONLY 凭据不会被 DTO 序列化，显式构造请求以命中真实的凭据更新。
-    Map<String, Object> update = new LinkedHashMap<>();
-    update.put("description", source.getDescription());
-    update.put("providerType", source.getProviderType());
-    update.put("baseUrl", source.getBaseUrl());
-    update.put("credential", source.getCredential());
-    update.put("modelCallTimeoutMillis", source.getModelCallTimeoutMillis());
-    update.put("modelCallIdleTimeoutMillis", source.getModelCallIdleTimeoutMillis());
-    update.put("expectedVersion", expectedVersion);
-    putData("/api/providers/" + name, update);
+    putData("/api/platform/providers/" + name, update, expectedVersion);
+  }
+
+  private void putData(String path, ProviderUpdateDTO update, String expectedVersion)
+      throws Exception {
+    update.setExpectedVersion(expectedVersion);
+    putData(path, update);
   }
 
   private JsonNode createModel(
       String providerName, String name, String inputPrice, String protocolOptionsJson)
       throws Exception {
-    AgentModelCreateDTO dto = new AgentModelCreateDTO();
-    dto.setKind(AgentModelKind.MODEL);
+    SingleModelCreateDTO dto = new SingleModelCreateDTO();
     dto.setProviderName(providerName);
     dto.setName(name);
     dto.setModelId("wire-" + name);
     dto.setDescription("model " + name);
     dto.setConfig(modelConfig(protocolOptionsJson, inputPrice));
-    return postData("/api/models", dto);
+    return postData("/api/platform/models", dto);
   }
 
   private JsonNode createAgent(
@@ -1302,11 +1305,11 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
   }
 
   private JsonNode findProvider(String name) throws Exception {
-    return findByName(getData("/api/providers?pageNumber=1&pageSize=100").path("results"), name);
+    return findByName(getData("/api/platform/providers"), name);
   }
 
   private JsonNode findModel(String providerName, String name) throws Exception {
-    for (JsonNode node : getData("/api/models?pageNumber=1&pageSize=100").path("results")) {
+    for (JsonNode node : getData("/api/platform/models")) {
       if (name.equals(node.path("name").asText())
           && providerName.equals(node.path("providerName").asText())) {
         return node;
@@ -1361,12 +1364,13 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
   }
 
   /** 单一 "default" variant 的模型 config 之外，按需构造只声明文件内 variant 的 config。 */
-  private static AgentModelConfigDTO modelConfigWithVariants(List<String> variantIds) {
-    AgentModelConfigDTO config = modelConfig("{}", "1.25");
-    List<AgentModelVariantDTO> variants = new ArrayList<>();
+  private static ModelConfigDTO modelConfigWithVariants(List<String> variantIds) {
+    ModelConfigDTO config = modelConfig("{}", "1.25");
+    List<ModelVariantDTO> variants = new ArrayList<>();
     for (String id : variantIds) {
-      AgentModelVariantDTO variant = new AgentModelVariantDTO();
+      ModelVariantDTO variant = new ModelVariantDTO();
       variant.setId(id);
+      variant.setPromptCacheRetention(PromptCacheRetention.SHORT);
       variants.add(variant);
     }
     config.setVariants(variants);
@@ -1379,7 +1383,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
       String provider,
       String model,
       String credential,
-      AgentModelConfigDTO config,
+      ModelConfigDTO config,
       String agent,
       String variant) {
     Map<String, Object> providerEntry = new LinkedHashMap<>();

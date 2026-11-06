@@ -32,26 +32,26 @@ import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.api.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
+import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelPricingCondition;
 import fun.fengwk.kkstudio.harness.model.ModelRequestBodyPricing;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.RequestBodyPricingSnapshot;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRuntimeConfigParser;
-import fun.fengwk.kkstudio.share.catalog.AgentModelAbilitiesDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelConfigDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelInputModality;
-import fun.fengwk.kkstudio.share.catalog.AgentModelKind;
-import fun.fengwk.kkstudio.share.catalog.AgentModelLimitDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelPricingConditionDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelPricingDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelPricingOverrideDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelPricingRequestBodyConditionDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelRatePatchDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelRateSetDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelVariantDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelAbilitiesDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelConfigDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelLimitDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingConditionDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingOverrideDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingRequestBodyConditionDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelRatePatchDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelRateSetDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelVariantDTO;
+import fun.fengwk.kkstudio.platform.catalog.model.Model;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelKind;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelRepository;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelRuntimeConfigParser;
 import fun.fengwk.kkstudio.share.runtime.HarnessUsageCostDTO;
 
 import java.math.BigDecimal;
@@ -82,9 +82,9 @@ class UsageCostProjectionServiceTest {
   private static final ModelSelection MODEL_A = new ModelSelection("model-a", "default");
   private static final ModelSelection MODEL_B = new ModelSelection("model-b", "default");
 
-  private final AgentModelRepository modelRepository = mock(AgentModelRepository.class);
-  private final AgentModelRuntimeConfigParser configParser =
-      new AgentModelRuntimeConfigParser(JsonMapper.builder().build());
+  private final ModelRepository modelRepository = mock(ModelRepository.class);
+  private final ModelRuntimeConfigParser configParser =
+      new ModelRuntimeConfigParser(JsonMapper.builder().build());
 
   private final UsageCostProjectionService service =
       new UsageCostProjectionService(modelRepository, configParser);
@@ -207,7 +207,7 @@ class UsageCostProjectionServiceTest {
   void keepsEntriesAbsentWhenTheExecutedModelNameNowBelongsToAGroup() {
     stubModel("provider-a", "model-a", pricing(BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ZERO));
     when(modelRepository.getByName("model-b"))
-        .thenReturn(AgentModel.builder().kind(AgentModelKind.GROUP).name("model-b").build());
+        .thenReturn(Model.builder().kind(ModelKind.GROUP).name("model-b").build());
 
     Map<UUID, HarnessUsageCostDTO> costs =
         service.project(
@@ -403,9 +403,9 @@ class UsageCostProjectionServiceTest {
   /** 测试意图：catalog 定义本身非法属于数据损坏，照常抛出而不是静默把该 Entry 降级为「未计价」。 */
   @Test
   void propagatesMalformedCatalogConfigInsteadOfUnpricingTheEntry() {
-    AgentModel broken =
-        AgentModel.builder()
-            .kind(AgentModelKind.MODEL)
+    Model broken =
+        Model.builder()
+            .kind(ModelKind.MODEL)
             .providerName("provider-a")
             .name("model-a")
             .configJson("{}")
@@ -431,17 +431,16 @@ class UsageCostProjectionServiceTest {
   /** 测试意图：同一 request-body 条件在价格变化后仍按记录的指纹重新计价；旧记录缺快照或条件已变时保持未知。 */
   @Test
   void projectsRequestBodyPricingFromDurableFingerprintOnly() {
-    AgentModelPricingDTO pricing = pricing(new BigDecimal("1"), BigDecimal.ZERO, BigDecimal.ZERO);
-    AgentModelPricingOverrideDTO override = new AgentModelPricingOverrideDTO();
+    ModelPricingDTO pricing = pricing(new BigDecimal("1"), BigDecimal.ZERO, BigDecimal.ZERO);
+    ModelPricingOverrideDTO override = new ModelPricingOverrideDTO();
     override.setId("fast");
-    AgentModelPricingConditionDTO when = new AgentModelPricingConditionDTO();
-    AgentModelPricingRequestBodyConditionDTO requestBody =
-        new AgentModelPricingRequestBodyConditionDTO();
+    ModelPricingConditionDTO when = new ModelPricingConditionDTO();
+    ModelPricingRequestBodyConditionDTO requestBody = new ModelPricingRequestBodyConditionDTO();
     requestBody.setPath("/speed");
     requestBody.setEquals(JsonNodeFactory.instance.textNode("fast"));
     when.setRequestBody(requestBody);
     override.setWhen(when);
-    AgentModelRatePatchDTO rates = new AgentModelRatePatchDTO();
+    ModelRatePatchDTO rates = new ModelRatePatchDTO();
     rates.setInput(new BigDecimal("2"));
     override.setRates(rates);
     pricing.setOverrides(List.of(override));
@@ -502,10 +501,10 @@ class UsageCostProjectionServiceTest {
         NOW);
   }
 
-  private void stubModel(String providerName, String modelName, AgentModelPricingDTO pricing) {
-    AgentModel model =
-        AgentModel.builder()
-            .kind(AgentModelKind.MODEL)
+  private void stubModel(String providerName, String modelName, ModelPricingDTO pricing) {
+    Model model =
+        Model.builder()
+            .kind(ModelKind.MODEL)
             .providerName(providerName)
             .name(modelName)
             .configJson(configParser.encode(config(pricing)))
@@ -513,12 +512,12 @@ class UsageCostProjectionServiceTest {
     when(modelRepository.getByName(modelName)).thenReturn(model);
   }
 
-  private static AgentModelPricingDTO pricing(
+  private static ModelPricingDTO pricing(
       BigDecimal inputPerMillionTokens,
       BigDecimal outputPerMillionTokens,
       BigDecimal cacheReadPerMillionTokens) {
-    AgentModelPricingDTO pricing = new AgentModelPricingDTO();
-    AgentModelRateSetDTO base = new AgentModelRateSetDTO();
+    ModelPricingDTO pricing = new ModelPricingDTO();
+    ModelRateSetDTO base = new ModelRateSetDTO();
     base.setInput(inputPerMillionTokens);
     base.setOutput(outputPerMillionTokens);
     base.setCacheRead(cacheReadPerMillionTokens);
@@ -531,20 +530,20 @@ class UsageCostProjectionServiceTest {
     return pricing;
   }
 
-  private static AgentModelConfigDTO config(AgentModelPricingDTO pricing) {
-    AgentModelConfigDTO config = new AgentModelConfigDTO();
-    AgentModelLimitDTO limit = new AgentModelLimitDTO();
+  private static ModelConfigDTO config(ModelPricingDTO pricing) {
+    ModelConfigDTO config = new ModelConfigDTO();
+    ModelLimitDTO limit = new ModelLimitDTO();
     limit.setContext(32768);
     limit.setOutput(4096);
     config.setLimit(limit);
 
-    AgentModelAbilitiesDTO abilities = new AgentModelAbilitiesDTO();
+    ModelAbilitiesDTO abilities = new ModelAbilitiesDTO();
     abilities.setTools(true);
     abilities.setReasoning(false);
-    abilities.setInputModalities(List.of(AgentModelInputModality.TEXT));
+    abilities.setInputModalities(List.of(ModelInputModality.TEXT));
     config.setAbilities(abilities);
 
-    AgentModelVariantDTO variant = new AgentModelVariantDTO();
+    ModelVariantDTO variant = new ModelVariantDTO();
     variant.setId("default");
     config.setVariants(List.of(variant));
     config.setDefaultVariant("default");

@@ -19,10 +19,8 @@ import fun.fengwk.kkstudio.common.page.Page;
 import fun.fengwk.kkstudio.common.page.PageQuery;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
-import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
-import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderRepository;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelRepository;
+import fun.fengwk.kkstudio.platform.catalog.provider.ProviderRepository;
 import fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchemaSupport;
 
 import java.sql.Connection;
@@ -53,48 +51,6 @@ class CatalogPaginationIntegrationTest {
   }
 
   @Test
-  void agentModelPageReturnsResultsAndTotalFromOneStatement() {
-    insertProvider("provider");
-    insertModel("delta", "provider");
-    insertModel("alpha", "provider");
-    insertModel("charlie", "provider");
-    insertModel("bravo", "provider");
-    AgentModelRepository repository = new AgentModelRepository(observed);
-
-    assertModelPage(repository.page(new PageQuery(1, 3)), List.of("alpha", "bravo", "charlie"), 4);
-    verify(observed, times(1)).sql(anyString());
-
-    reset(observed);
-    assertModelPage(repository.page(new PageQuery(2, 3)), List.of("delta"), 4);
-    verify(observed, times(1)).sql(anyString());
-
-    reset(observed);
-    assertModelPage(repository.page(new PageQuery(3, 3)), List.of(), 4);
-    verify(observed, times(1)).sql(anyString());
-  }
-
-  @Test
-  void agentProviderPageReturnsResultsAndTotalFromOneStatement() {
-    insertProvider("delta");
-    insertProvider("alpha");
-    insertProvider("charlie");
-    insertProvider("bravo");
-    AgentProviderRepository repository = new AgentProviderRepository(observed);
-
-    assertProviderPage(
-        repository.page(new PageQuery(1, 3)), List.of("alpha", "bravo", "charlie"), 4);
-    verify(observed, times(1)).sql(anyString());
-
-    reset(observed);
-    assertProviderPage(repository.page(new PageQuery(2, 3)), List.of("delta"), 4);
-    verify(observed, times(1)).sql(anyString());
-
-    reset(observed);
-    assertProviderPage(repository.page(new PageQuery(3, 3)), List.of(), 4);
-    verify(observed, times(1)).sql(anyString());
-  }
-
-  @Test
   void agentDefinitionPageReturnsResultsAndTotalFromOneStatement() {
     insertDefinition("delta");
     insertDefinition("alpha");
@@ -116,16 +72,7 @@ class CatalogPaginationIntegrationTest {
   }
 
   @Test
-  void emptyCatalogPagesStillReportZeroTotalInOneStatement() {
-    assertModelPage(new AgentModelRepository(observed).page(new PageQuery(1, 2)), List.of(), 0);
-    verify(observed, times(1)).sql(anyString());
-
-    reset(observed);
-    assertProviderPage(
-        new AgentProviderRepository(observed).page(new PageQuery(1, 2)), List.of(), 0);
-    verify(observed, times(1)).sql(anyString());
-
-    reset(observed);
+  void emptyAgentPageStillReportsZeroTotalInOneStatement() {
     assertDefinitionPage(
         new AgentDefinitionRepository(observed).page(new PageQuery(1, 2)), List.of(), 0);
     verify(observed, times(1)).sql(anyString());
@@ -139,8 +86,8 @@ class CatalogPaginationIntegrationTest {
     insertGroup("group", "member", "default");
     insertDefinition("builtin-agent", "member", "fast", "builtin");
     insertDefinition("other-agent", "member", "fast", "other");
-    AgentProviderRepository providers = new AgentProviderRepository(observed);
-    AgentModelRepository models = new AgentModelRepository(observed);
+    ProviderRepository providers = new ProviderRepository(observed);
+    ModelRepository models = new ModelRepository(observed);
 
     assertTrue(providers.hasModels("provider"));
     assertFalse(providers.hasModels("unused-provider"));
@@ -153,16 +100,6 @@ class CatalogPaginationIntegrationTest {
     assertFalse(models.hasAgents("unknown"));
   }
 
-  private void assertModelPage(Page<AgentModel> page, List<String> names, long total) {
-    assertEquals(total, page.getTotalCount());
-    assertEquals(names, page.getResults().stream().map(AgentModel::name).toList());
-  }
-
-  private void assertProviderPage(Page<AgentProvider> page, List<String> names, long total) {
-    assertEquals(total, page.getTotalCount());
-    assertEquals(names, page.getResults().stream().map(AgentProvider::name).toList());
-  }
-
   private void assertDefinitionPage(Page<AgentDefinition> page, List<String> names, long total) {
     assertEquals(total, page.getTotalCount());
     assertEquals(names, page.getResults().stream().map(AgentDefinition::name).toList());
@@ -172,7 +109,7 @@ class CatalogPaginationIntegrationTest {
     fixture
         .sql(
             """
-            insert into agent_provider (name, provider_type, config, connection_generation_id)
+            insert into provider (name, provider_type, config, connection_generation_id)
             values (:name, 'openai', '{}'::jsonb, :generation)
             """)
         .param("name", name)
@@ -184,7 +121,7 @@ class CatalogPaginationIntegrationTest {
     fixture
         .sql(
             """
-            insert into agent_model (name, kind, provider_name, model_id, config)
+            insert into model (name, kind, provider_name, model_id, config)
             values (:name, 'MODEL', :providerName, :modelId, '{}'::jsonb)
             """)
         .param("name", name)
@@ -197,7 +134,7 @@ class CatalogPaginationIntegrationTest {
     fixture
         .sql(
             """
-            insert into agent_model (name, kind, group_config)
+            insert into model (name, kind, group_config)
             values (:name, 'GROUP',
                     jsonb_build_object('members',
                         jsonb_build_array(jsonb_build_object(

@@ -76,14 +76,14 @@ class AgentDefinitionRepositoryIntegrationTest {
     String modelName = "mod-" + id;
     jdbcClient
         .sql(
-            "insert into agent_provider (name, provider_type, config, connection_generation_id)"
+            "insert into provider (name, provider_type, config, connection_generation_id)"
                 + " values (:name, 'openai', '{}'::jsonb, :generation)")
         .param("name", providerName)
         .param("generation", UUID.randomUUID())
         .update();
     jdbcClient
         .sql(
-            "insert into agent_model (name, kind, provider_name, model_id, config)"
+            "insert into model (name, kind, provider_name, model_id, config)"
                 + " values (:model, 'MODEL', :provider, :modelId, '{}'::jsonb)")
         .param("provider", providerName)
         .param("model", modelName)

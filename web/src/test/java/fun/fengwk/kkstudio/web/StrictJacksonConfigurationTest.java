@@ -15,9 +15,9 @@ import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.chat.dto.ChatDTO;
 import fun.fengwk.kkstudio.harness.model.ModelPricingCondition;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRuntimeConfigParser;
-import fun.fengwk.kkstudio.share.catalog.AgentModelConfigDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelVariantDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelConfigDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelVariantDTO;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelRuntimeConfigParser;
 import fun.fengwk.kkstudio.share.runtime.HarnessBranchSettingsDTO;
 import fun.fengwk.kkstudio.share.runtime.HarnessCommandCreateDTO;
 import fun.fengwk.kkstudio.share.runtime.HarnessExecutionSelectionDTO;
@@ -59,11 +59,11 @@ class StrictJacksonConfigurationTest {
         context -> {
           JsonMapper mapper = context.getBean(JsonMapper.class);
 
-          AgentModelVariantDTO variantOnlyId = new AgentModelVariantDTO();
+          ModelVariantDTO variantOnlyId = new ModelVariantDTO();
           variantOnlyId.setId("standard");
           assertEquals("{\"id\":\"standard\"}", mapper.writeValueAsString(variantOnlyId));
 
-          AgentModelVariantDTO variantWithReasoning = new AgentModelVariantDTO();
+          ModelVariantDTO variantWithReasoning = new ModelVariantDTO();
           variantWithReasoning.setId("standard");
           variantWithReasoning.setReasoningEffort("low");
           assertEquals(
@@ -209,8 +209,8 @@ class StrictJacksonConfigurationTest {
     runner.run(
         context -> {
           JsonMapper httpMapper = context.getBean(JsonMapper.class);
-          AgentModelRuntimeConfigParser parser =
-              new AgentModelRuntimeConfigParser(JsonMapper.builder().build());
+          ModelRuntimeConfigParser parser =
+              new ModelRuntimeConfigParser(JsonMapper.builder().build());
 
           String configJson =
               requestBodyConfig(
@@ -226,7 +226,7 @@ class StrictJacksonConfigurationTest {
                       + "{\"id\":\"null\",\"when\":{\"requestBody\":"
                       + "{\"path\":\"/null\",\"equals\":null}},"
                       + "\"rates\":{\"input\":\"5\"}}");
-          AgentModelConfigDTO dto = httpMapper.readValue(configJson, AgentModelConfigDTO.class);
+          ModelConfigDTO dto = httpMapper.readValue(configJson, ModelConfigDTO.class);
           String encoded = parser.encode(dto);
           assertTrue(encoded.contains("\"equals\":0.123456789012345678"), encoded);
           String httpEncoded = httpMapper.writeValueAsString(dto);
@@ -245,12 +245,12 @@ class StrictJacksonConfigurationTest {
               ModelPricingCondition.ScalarType.NULL, overrides.get(3).when().requestBody().type());
           assertEquals("", overrides.get(3).when().requestBody().canonicalValue());
 
-          AgentModelConfigDTO missingEquals =
+          ModelConfigDTO missingEquals =
               httpMapper.readValue(
                   requestBodyConfig(
                       "{\"id\":\"missing\",\"when\":{\"requestBody\":"
                           + "{\"path\":\"/missing\"}},\"rates\":{\"input\":\"6\"}}"),
-                  AgentModelConfigDTO.class);
+                  ModelConfigDTO.class);
           assertThrows(IllegalArgumentException.class, () -> parser.parse(missingEquals));
         });
   }
@@ -290,7 +290,7 @@ class StrictJacksonConfigurationTest {
               JacksonException.class,
               () ->
                   mapper.readValue(
-                      "{\"id\":\"default\",\"temperature\":0.5}", AgentModelVariantDTO.class));
+                      "{\"id\":\"default\",\"temperature\":0.5}", ModelVariantDTO.class));
         });
   }
 
@@ -304,17 +304,16 @@ class StrictJacksonConfigurationTest {
         context -> {
           JsonMapper mapper = context.getBean(JsonMapper.class);
 
-          AgentModelVariantDTO accepted =
+          ModelVariantDTO accepted =
               mapper.readValue(
-                  "{\"id\":\"default\",\"protocolOptionsJson\":\"{}\"}",
-                  AgentModelVariantDTO.class);
+                  "{\"id\":\"default\",\"protocolOptionsJson\":\"{}\"}", ModelVariantDTO.class);
           assertEquals("{}", accepted.getProtocolOptionsJson());
 
           for (String token : List.of("123", "1.5", "true", "false", "{}", "[]")) {
             String json = "{\"id\":\"default\",\"protocolOptionsJson\":" + token + "}";
             assertThrows(
                 JacksonException.class,
-                () -> mapper.readValue(json, AgentModelVariantDTO.class),
+                () -> mapper.readValue(json, ModelVariantDTO.class),
                 "non-string protocolOptionsJson token must be rejected: " + token);
           }
         });

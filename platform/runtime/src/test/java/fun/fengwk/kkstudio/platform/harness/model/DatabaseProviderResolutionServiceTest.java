@@ -47,9 +47,9 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderThinkingBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolResultBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
-import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
-import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderConfigurationCodec;
-import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderRepository;
+import fun.fengwk.kkstudio.platform.catalog.provider.Provider;
+import fun.fengwk.kkstudio.platform.catalog.provider.ProviderConfigurationCodec;
+import fun.fengwk.kkstudio.platform.catalog.provider.ProviderRepository;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
@@ -63,10 +63,9 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
- * {@link DatabaseProviderResolutionService} 的单元测试：不依赖 PostgreSQL，mock {@link
- * AgentProviderRepository} 并使用真实 {@link AgentProviderConfigurationCodec}，覆盖 resolve 全部分支——Provider
- * 行缺失 / 类型非法 / factory 未注册 / 空白 endpoint / adapter 构造失败，opener 的 ModelProvider 构造失败，以及规划期冻结的 cache
- * control 原样透传。
+ * {@link DatabaseProviderResolutionService} 的单元测试：不依赖 PostgreSQL，mock {@link ProviderRepository}
+ * 并使用真实 {@link ProviderConfigurationCodec}，覆盖 resolve 全部分支——Provider 行缺失 / 类型非法 / factory 未注册 / 空白
+ * endpoint / adapter 构造失败，opener 的 ModelProvider 构造失败，以及规划期冻结的 cache control 原样透传。
  */
 class DatabaseProviderResolutionServiceTest {
 
@@ -74,9 +73,9 @@ class DatabaseProviderResolutionServiceTest {
   private static final String ENDPOINT = "https://example/v1";
   private static final UUID GENERATION_ID = new UUID(0L, 1L);
 
-  private final AgentProviderRepository repository = mock(AgentProviderRepository.class);
-  private final AgentProviderConfigurationCodec configurationCodec =
-      new AgentProviderConfigurationCodec(JsonMapper.builder().build());
+  private final ProviderRepository repository = mock(ProviderRepository.class);
+  private final ProviderConfigurationCodec configurationCodec =
+      new ProviderConfigurationCodec(JsonMapper.builder().build());
 
   // ---------- resolve 失败路径 ----------
 
@@ -121,7 +120,7 @@ class DatabaseProviderResolutionServiceTest {
 
   @Test
   void resolveRejectsProviderWithNullConnectionGenerationId() {
-    AgentProvider p =
+    Provider p =
         provider(ProviderType.OPENAI, ENDPOINT).toBuilder().connectionGenerationId(null).build();
     when(repository.getByName(PROVIDER_NAME)).thenReturn(p);
     ProviderFactory factory = openAiFactory(PromptCacheRetention.NONE);
@@ -138,7 +137,7 @@ class DatabaseProviderResolutionServiceTest {
 
   @Test
   void resolveRejectsFrozenConnectionGenerationDrift() {
-    AgentProvider provider =
+    Provider provider =
         provider(ProviderType.OPENAI, ENDPOINT).toBuilder()
             .connectionGenerationId(new UUID(0L, 2L))
             .build();
@@ -216,7 +215,7 @@ class DatabaseProviderResolutionServiceTest {
   void resolveWrapsPersistedConfigurationFailureWithoutUntrustedCause() {
     // 意图：损坏的持久 Provider 配置可能含敏感内容；解析边界只暴露稳定定位信息，不保留原始
     // Jackson cause 或配置片段。
-    AgentProvider p =
+    Provider p =
         provider(ProviderType.OPENAI, ENDPOINT).toBuilder()
             .configJson("{\"credential\":\"sensitive-value\"")
             .build();
@@ -771,8 +770,8 @@ class DatabaseProviderResolutionServiceTest {
     return adapter;
   }
 
-  private static AgentProvider provider(ProviderType type, String baseUrl) {
-    return AgentProvider.builder()
+  private static Provider provider(ProviderType type, String baseUrl) {
+    return Provider.builder()
         .name(PROVIDER_NAME)
         .providerType(type)
         .baseUrl(baseUrl)

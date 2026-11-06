@@ -37,15 +37,15 @@ class DomainExceptionTest {
   void preservedValidationAndReferenceApis() {
     // 验证保留的既有校验、唯一性冲突、资源在用与上游异常工厂保持正确的状态码、resource 与 cause。
     IllegalStateException cause = new IllegalStateException("cause");
-    DomainException validation = DomainException.validation("agent_provider", "invalid", cause);
+    DomainException validation = DomainException.validation("provider", "invalid", cause);
     assertEquals(DomainErrorCode.VALIDATION, validation.code());
-    assertEquals("agent_provider", validation.resource());
+    assertEquals("provider", validation.resource());
     assertEquals("invalid", validation.getMessage());
     assertSame(cause, validation.getCause());
     assertNull(validation.reason());
     assertNull(validation.errors());
 
-    DomainException validationNoCause = DomainException.validation("agent_provider", "invalid");
+    DomainException validationNoCause = DomainException.validation("provider", "invalid");
     assertEquals(DomainErrorCode.VALIDATION, validationNoCause.code());
     assertNull(validationNoCause.getCause());
 
@@ -66,9 +66,9 @@ class DomainExceptionTest {
     assertEquals(DomainErrorCode.IN_USE, inUseWithCause.code());
     assertSame(cause, inUseWithCause.getCause());
 
-    DomainException upstream = DomainException.upstream("agent_provider", "HTTP 502");
+    DomainException upstream = DomainException.upstream("provider", "HTTP 502");
     assertEquals(DomainErrorCode.UPSTREAM_FAILED, upstream.code());
-    assertEquals("agent_provider", upstream.resource());
+    assertEquals("provider", upstream.resource());
     assertEquals("HTTP 502", upstream.getMessage());
   }
 
@@ -82,10 +82,10 @@ class DomainExceptionTest {
     assertNull(notFound.getCause());
     assertNull(notFound.reason());
 
-    DomainException conflict = DomainException.versionConflict("agent_model", "3", "4");
+    DomainException conflict = DomainException.versionConflict("model", "3", "4");
     assertEquals(DomainErrorCode.VERSION_CONFLICT, conflict.code());
-    assertEquals("agent_model", conflict.resource());
-    assertEquals("agent_model version conflict: expected=3 actual=4", conflict.getMessage());
+    assertEquals("model", conflict.resource());
+    assertEquals("model version conflict: expected=3 actual=4", conflict.getMessage());
     assertEquals("3", conflict.expectedVersion());
     assertEquals("4", conflict.actualVersion());
     assertNull(conflict.reason());

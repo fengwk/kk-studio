@@ -22,8 +22,8 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelVariantDTO;
 import fun.fengwk.kkstudio.project.dto.ProjectDtoMapper;
-import fun.fengwk.kkstudio.share.catalog.AgentModelVariantDTO;
 import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
 
 import java.lang.reflect.Field;
@@ -74,27 +74,25 @@ class WebJacksonWiringIntegrationTest extends WebPostgresTestSupport {
             converters.stream()
                 .filter(
                     converter ->
-                        converter.canRead(AgentModelVariantDTO.class, MediaType.APPLICATION_JSON))
+                        converter.canRead(ModelVariantDTO.class, MediaType.APPLICATION_JSON))
                 .findFirst()
                 .orElseThrow();
     // 真实 MVC 转换器使用派生的严格 mapper，而容器 bean 不被替换。
     assertThrows(
         RuntimeException.class,
-        () -> selected.getMapper().readValue("{\"id\":1}", AgentModelVariantDTO.class));
+        () -> selected.getMapper().readValue("{\"id\":1}", ModelVariantDTO.class));
     assertInstanceOf(
         JacksonJsonHttpMessageConverter.class,
         converters.stream()
             .filter(
-                converter ->
-                    converter.canRead(AgentModelVariantDTO.class, MediaType.APPLICATION_JSON))
+                converter -> converter.canRead(ModelVariantDTO.class, MediaType.APPLICATION_JSON))
             .findFirst()
             .orElseThrow());
     assertInstanceOf(
         JacksonJsonHttpMessageConverter.class,
         converters.stream()
             .filter(
-                converter ->
-                    converter.canWrite(AgentModelVariantDTO.class, MediaType.APPLICATION_JSON))
+                converter -> converter.canWrite(ModelVariantDTO.class, MediaType.APPLICATION_JSON))
             .findFirst()
             .orElseThrow());
   }

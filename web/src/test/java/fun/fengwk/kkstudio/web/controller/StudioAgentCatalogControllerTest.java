@@ -22,24 +22,27 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.harness.model.ModelInputModality;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgentInitializer;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelAbilitiesDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelConfigDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelGroupConfigDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelGroupCreateDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelGroupMemberDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelLimitDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelRateSetDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelVariantDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ProviderCreateDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ProviderUpdateDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.SingleModelCreateDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.SingleModelUpdateDTO;
+import fun.fengwk.kkstudio.platform.secret.SecretUpdate;
 import fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentDefinitionCreateDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentDefinitionUpdateDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelAbilitiesDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelConfigDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelCreateDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelGroupDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelGroupMemberDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelInputModality;
-import fun.fengwk.kkstudio.share.catalog.AgentModelKind;
-import fun.fengwk.kkstudio.share.catalog.AgentModelLimitDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelPricingDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelRateSetDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelUpdateDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelVariantDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentProviderCreateDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentProviderUpdateDTO;
 import fun.fengwk.kkstudio.share.runtime.HarnessExecutionSelectionDTO;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
@@ -84,21 +87,21 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
       String reachable = "remote-" + suffix;
       createProvider(reachable, "http://127.0.0.1:" + upstream.getAddress().getPort() + "/v1");
       mockMvc
-          .perform(get("/api/providers/{name}/remote-models", reachable))
+          .perform(get("/api/platform/providers/{name}/remote-models", reachable))
           .andExpect(status().isOk())
           .andExpect(jsonPath("$[0]").value("m-a"))
           .andExpect(jsonPath("$[1]").value("m-b"));
 
       upstreamStatus.set(401);
       mockMvc
-          .perform(get("/api/providers/{name}/remote-models", reachable))
+          .perform(get("/api/platform/providers/{name}/remote-models", reachable))
           .andExpect(status().isBadGateway())
           .andExpect(jsonPath("$.code").value("upstream_failed"));
 
       String noBaseUrl = "remote-nourl-" + suffix;
       createProvider(noBaseUrl, null);
       mockMvc
-          .perform(get("/api/providers/{name}/remote-models", noBaseUrl))
+          .perform(get("/api/platform/providers/{name}/remote-models", noBaseUrl))
           .andExpect(status().isBadRequest())
           .andExpect(jsonPath("$.code").value("validation"));
     } finally {
@@ -116,7 +119,9 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
     }
     mockMvc
         .perform(
-            post("/api/providers").contentType(MediaType.APPLICATION_JSON).content(body.toString()))
+            post("/api/platform/providers")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body.toString()))
         .andExpect(status().isCreated());
   }
 
@@ -127,10 +132,10 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
     String modelName = "vendor/model with space-" + suffix;
     String agentName = "agent-" + suffix;
 
-    AgentProviderCreateDTO provider = new AgentProviderCreateDTO();
+    ProviderCreateDTO provider = new ProviderCreateDTO();
     provider.setName(providerName);
     provider.setDescription("provider description");
-    provider.setProviderType("openai");
+    provider.setProviderType(ProviderType.OPENAI);
     provider.setCredential("secret-value");
     provider.setModelCallTimeoutMillis(120_000L);
     provider.setModelCallIdleTimeoutMillis(3_000L);
@@ -140,42 +145,42 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
         data(
             mockMvc
                 .perform(
-                    post("/api/providers")
+                    post("/api/platform/providers")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(providerBody.toString()))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.name").value(providerName))
                 .andExpect(jsonPath("$.id").doesNotExist())
-                .andExpect(jsonPath("$.credential").doesNotExist())
-                .andExpect(jsonPath("$.configured").value(true))
+                .andExpect(jsonPath("$.credential.configured").value(true))
+                .andExpect(jsonPath("$.configured").doesNotExist())
                 .andExpect(jsonPath("$.version").value("0"))
                 .andReturn());
     assertEquals(providerName, providerData.path("name").asText());
     assertFalse(providerData.has("id"));
-    assertFalse(providerData.has("credential"));
+    assertEquals(true, providerData.path("credential").path("configured").asBoolean());
 
-    AgentProviderCreateDTO duplicateProvider = new AgentProviderCreateDTO();
+    ProviderCreateDTO duplicateProvider = new ProviderCreateDTO();
     duplicateProvider.setName(providerName);
-    duplicateProvider.setProviderType("openai");
+    duplicateProvider.setProviderType(ProviderType.OPENAI);
     mockMvc
         .perform(
-            post("/api/providers")
+            post("/api/platform/providers")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(duplicateProvider)))
         .andExpect(status().isConflict())
         .andExpect(jsonPath("$.code").value("duplicate"))
         .andExpect(jsonPath("$.errors.resource").doesNotExist());
 
-    AgentModelCreateDTO model = new AgentModelCreateDTO();
+    SingleModelCreateDTO model = new SingleModelCreateDTO();
     model.setProviderName(providerName);
     model.setName(modelName);
     configureExecutableModel(model);
-    // 其余字段合法时缺少 kind 必须失败，不能由 fixture 掩盖必填字段契约。
+    // 其余字段合法时缺少联合判别字段 type 必须失败，不能由 fixture 掩盖必填字段契约。
     ObjectNode missingKind = objectMapper.valueToTree(model);
-    missingKind.remove("kind");
+    missingKind.remove("type");
     mockMvc
         .perform(
-            post("/api/models")
+            post("/api/platform/models")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(missingKind.toString()))
         .andExpect(status().isBadRequest())
@@ -184,7 +189,7 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
         data(
             mockMvc
                 .perform(
-                    post("/api/models")
+                    post("/api/platform/models")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(model)))
                 .andExpect(status().isCreated())
@@ -236,13 +241,16 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
     assertFalse(agentData.has("modelId"));
 
     JsonNode providerPage =
-        data(mockMvc.perform(get("/api/providers")).andExpect(status().isOk()).andReturn());
+        data(
+            mockMvc.perform(get("/api/platform/providers")).andExpect(status().isOk()).andReturn());
     JsonNode listedProvider = findResult(providerPage, providerName);
     assertFalse(listedProvider.has("id"));
-    assertFalse(listedProvider.has("credential"));
+    // 凭据只以 SecretConfiguredDTO 形式回读，绝不回显值。
+    assertTrue(listedProvider.path("credential").path("configured").asBoolean());
+    assertFalse(listedProvider.has("configured"));
 
     JsonNode modelPage =
-        data(mockMvc.perform(get("/api/models")).andExpect(status().isOk()).andReturn());
+        data(mockMvc.perform(get("/api/platform/models")).andExpect(status().isOk()).andReturn());
     JsonNode listedModel = findResult(modelPage, modelName);
     assertEquals(providerName, listedModel.path("providerName").asText());
     assertEquals(WIRE_MODEL_ID, listedModel.path("modelId").asText());
@@ -258,15 +266,17 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
     assertFalse(listedAgent.has("id"));
     assertFalse(listedAgent.has("modelId"));
 
-    AgentProviderUpdateDTO providerUpdate = new AgentProviderUpdateDTO();
+    ProviderUpdateDTO providerUpdate = new ProviderUpdateDTO();
     providerUpdate.setDescription("updated provider");
-    providerUpdate.setProviderType("openai");
+    providerUpdate.setCredential(SecretUpdate.keep());
+    providerUpdate.setModelCallTimeoutMillis(1_800_000L);
+    providerUpdate.setModelCallIdleTimeoutMillis(120_000L);
     providerUpdate.setExpectedVersion("0");
     ObjectNode providerUpdateBody = objectMapper.valueToTree(providerUpdate);
     providerUpdateBody.put("name", "renamed-" + providerName);
     mockMvc
         .perform(
-            put("/api/providers/{name}", providerName)
+            put("/api/platform/providers/{name}", providerName)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(providerUpdateBody.toString()))
         .andExpect(status().isBadRequest());
@@ -274,24 +284,24 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
         data(
             mockMvc
                 .perform(
-                    put("/api/providers/{name}", providerName)
+                    put("/api/platform/providers/{name}", providerName)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(providerUpdate)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.name").value(providerName))
                 .andExpect(jsonPath("$.description").value("updated provider"))
                 .andExpect(jsonPath("$.id").doesNotExist())
-                .andExpect(jsonPath("$.credential").doesNotExist())
+                .andExpect(jsonPath("$.credential.configured").value(true))
                 .andExpect(jsonPath("$.version").value("1"))
                 .andReturn());
     assertEquals(providerName, updatedProvider.path("name").asText());
     assertFalse(updatedProvider.has("id"));
-    assertFalse(updatedProvider.has("credential"));
+    assertTrue(updatedProvider.path("credential").path("configured").asBoolean());
 
     providerUpdate.setExpectedVersion("0");
     mockMvc
         .perform(
-            put("/api/providers/{name}", providerName)
+            put("/api/platform/providers/{name}", providerName)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(providerUpdate)))
         .andExpect(status().isConflict())
@@ -300,8 +310,7 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.errors.expectedVersion").value("0"))
         .andExpect(jsonPath("$.errors.actualVersion").value("1"));
 
-    AgentModelUpdateDTO modelUpdate = new AgentModelUpdateDTO();
-    modelUpdate.setKind(AgentModelKind.MODEL);
+    SingleModelUpdateDTO modelUpdate = new SingleModelUpdateDTO();
     modelUpdate.setProviderName(providerName);
     modelUpdate.setName(modelName);
     modelUpdate.setModelId(WIRE_MODEL_ID);
@@ -317,7 +326,7 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(modelUpdateBody.toString()))
         .andExpect(status().isBadRequest());
-    // 测试意图：验证 PUT /api/models/{*modelName} 使用 body 中的 expectedVersion CAS
+    // 测试意图：验证 PUT /api/platform/models/{*modelName} 使用 body 中的 expectedVersion CAS
     // 更新可变属性，返回 200 OK。
     JsonNode updatedModel =
         data(
@@ -338,7 +347,7 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
     assertEquals(modelName, updatedModel.path("name").asText());
     assertEquals(WIRE_MODEL_ID, updatedModel.path("modelId").asText());
 
-    // 测试意图：验证 PUT /api/models/{*modelName} 在 expectedVersion 过期时触发 CAS
+    // 测试意图：验证 PUT /api/platform/models/{*modelName} 在 expectedVersion 过期时触发 CAS
     // 版本冲突，返回 409 Conflict。
     modelUpdate.setExpectedVersion("0");
     mockMvc
@@ -402,11 +411,12 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.errors.actualVersion").value("1"));
 
     mockMvc
-        .perform(delete("/api/providers/{name}", providerName).param("expectedVersion", "1"))
+        .perform(
+            delete("/api/platform/providers/{name}", providerName).param("expectedVersion", "1"))
         .andExpect(status().isConflict())
         .andExpect(jsonPath("$.code").value("in_use"))
         .andExpect(jsonPath("$.errors.resource").doesNotExist());
-    // 测试意图：验证 DELETE /api/models/{*modelName}?expectedVersion=... 在被 Agent
+    // 测试意图：验证 DELETE /api/platform/models/{*modelName}?expectedVersion=... 在被 Agent
     // 引用时拒绝删除，返回 409 Conflict。
     mockMvc
         .perform(delete(modelPath(providerName, modelName)).param("expectedVersion", "1"))
@@ -417,7 +427,7 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
     mockMvc
         .perform(delete("/api/agents/{name}", agentName).param("expectedVersion", "1"))
         .andExpect(status().isNoContent());
-    // 测试意图：验证 DELETE /api/models/{*modelName}?expectedVersion=... 解除引用后成功
+    // 测试意图：验证 DELETE /api/platform/models/{*modelName}?expectedVersion=... 解除引用后成功
     // CAS 硬删除，返回 204 NoContent。
     mockMvc
         .perform(delete(modelPath(providerName, modelName)).param("expectedVersion", "1"))
@@ -425,7 +435,7 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
     // catch-all 路由将集合路径解析为空名称；不接受 query 参数代替路径身份。
     mockMvc
         .perform(
-            put("/api/models")
+            put("/api/platform/models")
                 .param("providerName", providerName)
                 .param("modelName", modelName)
                 .contentType(MediaType.APPLICATION_JSON)
@@ -434,14 +444,15 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.code").value("validation"));
     mockMvc
         .perform(
-            delete("/api/models")
+            delete("/api/platform/models")
                 .param("providerName", providerName)
                 .param("modelName", modelName)
                 .param("expectedVersion", "1"))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.code").value("validation"));
     mockMvc
-        .perform(delete("/api/providers/{name}", providerName).param("expectedVersion", "1"))
+        .perform(
+            delete("/api/platform/providers/{name}", providerName).param("expectedVersion", "1"))
         .andExpect(status().isNoContent());
   }
 
@@ -503,7 +514,7 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.code").value("validation"))
         .andExpect(jsonPath("$.errors.resource").doesNotExist());
 
-    AgentModelCreateDTO idBasedModel = new AgentModelCreateDTO();
+    SingleModelCreateDTO idBasedModel = new SingleModelCreateDTO();
     idBasedModel.setName("id-based-model-" + suffix);
     configureExecutableModel(idBasedModel);
     ObjectNode idBasedModelBody = objectMapper.valueToTree(idBasedModel);
@@ -511,7 +522,7 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
     idBasedModelBody.put("unknownField", "1");
     mockMvc
         .perform(
-            post("/api/models")
+            post("/api/platform/models")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(idBasedModelBody.toString()))
         .andExpect(status().isBadRequest());
@@ -542,19 +553,20 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
     idBasedProviderBody.put("providerType", "openai");
     mockMvc
         .perform(
-            post("/api/providers")
+            post("/api/platform/providers")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(idBasedProviderBody.toString()))
         .andExpect(status().isBadRequest());
 
-    mockMvc.perform(get("/api/providers/1")).andExpect(status().isMethodNotAllowed());
-    mockMvc.perform(get("/api/models/1")).andExpect(status().isMethodNotAllowed());
+    mockMvc.perform(get("/api/platform/providers/1")).andExpect(status().isMethodNotAllowed());
+    mockMvc.perform(get("/api/platform/models/1")).andExpect(status().isMethodNotAllowed());
     mockMvc.perform(get("/api/agents/1")).andExpect(status().isMethodNotAllowed());
     mockMvc
-        .perform(put("/api/models/1").contentType(MediaType.APPLICATION_JSON).content("{}"))
+        .perform(
+            put("/api/platform/models/1").contentType(MediaType.APPLICATION_JSON).content("{}"))
         .andExpect(status().isBadRequest());
     mockMvc
-        .perform(delete("/api/models/1").param("expectedVersion", "0"))
+        .perform(delete("/api/platform/models/1").param("expectedVersion", "0"))
         .andExpect(status().isNotFound());
   }
 
@@ -566,17 +578,17 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
     String newModelName = "vendor/new model-" + suffix;
     String agentName = "agent-cascade-" + suffix;
 
-    AgentProviderCreateDTO provider = new AgentProviderCreateDTO();
+    ProviderCreateDTO provider = new ProviderCreateDTO();
     provider.setName(providerName);
-    provider.setProviderType("openai");
+    provider.setProviderType(ProviderType.OPENAI);
     mockMvc
         .perform(
-            post("/api/providers")
+            post("/api/platform/providers")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(provider)))
         .andExpect(status().isCreated());
 
-    AgentModelCreateDTO model = new AgentModelCreateDTO();
+    SingleModelCreateDTO model = new SingleModelCreateDTO();
     model.setProviderName(providerName);
     model.setName(oldModelName);
     configureExecutableModel(model);
@@ -584,7 +596,7 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
         data(
             mockMvc
                 .perform(
-                    post("/api/models")
+                    post("/api/platform/models")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(model)))
                 .andExpect(status().isCreated())
@@ -605,9 +617,8 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
                 .content(objectMapper.writeValueAsString(agent)))
         .andExpect(status().isCreated());
 
-    // 1. 验证通过 PUT /api/models/{*oldModelName} 进行重命名
-    AgentModelUpdateDTO renameUpdate = new AgentModelUpdateDTO();
-    renameUpdate.setKind(AgentModelKind.MODEL);
+    // 1. 验证通过 PUT /api/platform/models/{*oldModelName} 进行重命名
+    SingleModelUpdateDTO renameUpdate = new SingleModelUpdateDTO();
     renameUpdate.setProviderName(providerName);
     renameUpdate.setName(newModelName);
     renameUpdate.setModelId(WIRE_MODEL_ID);
@@ -628,8 +639,7 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
                 .andExpect(jsonPath("$.version").value("1"))
                 .andReturn());
     assertEquals(newModelName, renamedResult.path("name").asText());
-    assertEquals(
-        createdModel.path("createTime").asText(), renamedResult.path("createTime").asText());
+    assertEquals(createdModel.path("createdAt").asText(), renamedResult.path("createdAt").asText());
 
     // 2. 验证旧路径更新返回 404
     mockMvc
@@ -641,7 +651,7 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
 
     // 3. 验证模型列表已更新为新名称，旧名称不再存在
     JsonNode modelPage =
-        data(mockMvc.perform(get("/api/models")).andExpect(status().isOk()).andReturn());
+        data(mockMvc.perform(get("/api/platform/models")).andExpect(status().isOk()).andReturn());
     assertFalse(hasResult(modelPage, oldModelName));
     JsonNode listedRenamedModel = findResult(modelPage, newModelName);
     assertEquals(providerName, listedRenamedModel.path("providerName").asText());
@@ -659,14 +669,14 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
 
     // 5. 即使目标 Model 属于另一个 Provider，rename 仍返回 409 duplicate。
     String otherModelName = "vendor/other-model-" + suffix;
-    AgentModelCreateDTO otherModel = new AgentModelCreateDTO();
+    SingleModelCreateDTO otherModel = new SingleModelCreateDTO();
     String otherProviderName = "other-provider-" + suffix;
-    AgentProviderCreateDTO otherProvider = new AgentProviderCreateDTO();
+    ProviderCreateDTO otherProvider = new ProviderCreateDTO();
     otherProvider.setName(otherProviderName);
-    otherProvider.setProviderType("openai");
+    otherProvider.setProviderType(ProviderType.OPENAI);
     mockMvc
         .perform(
-            post("/api/providers")
+            post("/api/platform/providers")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(otherProvider)))
         .andExpect(status().isCreated());
@@ -675,13 +685,12 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
     configureExecutableModel(otherModel);
     mockMvc
         .perform(
-            post("/api/models")
+            post("/api/platform/models")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(otherModel)))
         .andExpect(status().isCreated());
 
-    AgentModelUpdateDTO conflictRename = new AgentModelUpdateDTO();
-    conflictRename.setKind(AgentModelKind.MODEL);
+    SingleModelUpdateDTO conflictRename = new SingleModelUpdateDTO();
     conflictRename.setProviderName(providerName);
     conflictRename.setName(otherModelName);
     conflictRename.setModelId(WIRE_MODEL_ID);
@@ -697,20 +706,19 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.errors.resource").doesNotExist());
 
     // 全局名称跨 Provider 与 MODEL/GROUP 唯一：合法组也不能占用已有 Model 名。
-    AgentModelGroupMemberDTO member = new AgentModelGroupMemberDTO();
+    ModelGroupMemberDTO member = new ModelGroupMemberDTO();
     member.setModelName(otherModelName);
     member.setVariant("default");
-    AgentModelGroupDTO group = new AgentModelGroupDTO();
+    ModelGroupConfigDTO group = new ModelGroupConfigDTO();
     group.setMembers(List.of(member));
     group.setFallbackStatusCodes(List.of(429));
     group.setCooldownSeconds(0);
-    AgentModelCreateDTO duplicateGroup = new AgentModelCreateDTO();
+    ModelGroupCreateDTO duplicateGroup = new ModelGroupCreateDTO();
     duplicateGroup.setName(newModelName);
-    duplicateGroup.setKind(AgentModelKind.GROUP);
     duplicateGroup.setGroup(group);
     mockMvc
         .perform(
-            post("/api/models")
+            post("/api/platform/models")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(duplicateGroup)))
         .andExpect(status().isConflict())
@@ -718,7 +726,7 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
     otherModel.setName(newModelName);
     mockMvc
         .perform(
-            post("/api/models")
+            post("/api/platform/models")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(otherModel)))
         .andExpect(status().isConflict())
@@ -734,8 +742,7 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
     assertEquals("1", agentAfterConflict.path("version").asText());
 
     // 6. 验证 expectedVersion 过期时触发 CAS 版本冲突 409
-    AgentModelUpdateDTO staleRename = new AgentModelUpdateDTO();
-    staleRename.setKind(AgentModelKind.MODEL);
+    SingleModelUpdateDTO staleRename = new SingleModelUpdateDTO();
     staleRename.setProviderName(providerName);
     staleRename.setName("vendor/stale-model-" + suffix);
     staleRename.setModelId(WIRE_MODEL_ID);
@@ -751,8 +758,7 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.errors.resource").doesNotExist());
 
     // 7. 验证非法名称返回 400 validation
-    AgentModelUpdateDTO invalidRename = new AgentModelUpdateDTO();
-    invalidRename.setKind(AgentModelKind.MODEL);
+    SingleModelUpdateDTO invalidRename = new SingleModelUpdateDTO();
     invalidRename.setProviderName(providerName);
     invalidRename.setName("   ");
     invalidRename.setModelId(WIRE_MODEL_ID);
@@ -830,7 +836,7 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
   }
 
   private static boolean hasResult(JsonNode page, String name) {
-    for (JsonNode result : page.path("results")) {
+    for (JsonNode result : results(page)) {
       if (name.equals(result.path("name").asText())) {
         return true;
       }
@@ -839,7 +845,7 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
   }
 
   private static JsonNode findResult(JsonNode page, String name) {
-    for (JsonNode result : page.path("results")) {
+    for (JsonNode result : results(page)) {
       if (name.equals(result.path("name").asText())) {
         return result;
       }
@@ -847,27 +853,32 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
     throw new AssertionError("missing page result: " + name);
   }
 
-  private static URI modelPath(String providerName, String modelName) {
-    // provider 不是路径身份的一部分；URI 预编码保留名称中的空格及斜杠。
-    return URI.create("/api/models/" + UriUtils.encodePath(modelName, StandardCharsets.UTF_8));
+  /** Catalog 列表现在直接返回数组；Agent 列表仍为分页信封，两者共用同一查找助手。 */
+  private static JsonNode results(JsonNode page) {
+    return page.isArray() ? page : page.path("results");
   }
 
-  private static void configureExecutableModel(AgentModelCreateDTO model) {
-    model.setKind(AgentModelKind.MODEL);
+  private static URI modelPath(String providerName, String modelName) {
+    // provider 不是路径身份的一部分；URI 预编码保留名称中的空格及斜杠。
+    return URI.create(
+        "/api/platform/models/" + UriUtils.encodePath(modelName, StandardCharsets.UTF_8));
+  }
+
+  private static void configureExecutableModel(SingleModelCreateDTO model) {
     // wire 模型标识与逻辑 name 独立：这里刻意取不同值，证明 API 契约同时暴露二者。
     model.setModelId(WIRE_MODEL_ID);
-    AgentModelConfigDTO config = new AgentModelConfigDTO();
-    AgentModelLimitDTO limit = new AgentModelLimitDTO();
+    ModelConfigDTO config = new ModelConfigDTO();
+    ModelLimitDTO limit = new ModelLimitDTO();
     limit.setContext(32768);
     limit.setOutput(4096);
     config.setLimit(limit);
-    AgentModelAbilitiesDTO abilities = new AgentModelAbilitiesDTO();
+    ModelAbilitiesDTO abilities = new ModelAbilitiesDTO();
     abilities.setTools(true);
     abilities.setReasoning(false);
-    abilities.setInputModalities(List.of(AgentModelInputModality.TEXT));
+    abilities.setInputModalities(List.of(ModelInputModality.TEXT));
     config.setAbilities(abilities);
-    AgentModelPricingDTO pricing = new AgentModelPricingDTO();
-    AgentModelRateSetDTO base = new AgentModelRateSetDTO();
+    ModelPricingDTO pricing = new ModelPricingDTO();
+    ModelRateSetDTO base = new ModelRateSetDTO();
     base.setInput(BigDecimal.ZERO);
     base.setOutput(BigDecimal.ZERO);
     base.setCacheRead(BigDecimal.ZERO);
@@ -878,8 +889,9 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
     pricing.setOverrides(List.of());
     pricing.setMultipliers(List.of());
     config.setPricing(pricing);
-    AgentModelVariantDTO variant = new AgentModelVariantDTO();
+    ModelVariantDTO variant = new ModelVariantDTO();
     variant.setId("default");
+    variant.setPromptCacheRetention(PromptCacheRetention.SHORT);
     config.setVariants(List.of(variant));
     config.setDefaultVariant("default");
     model.setConfig(config);

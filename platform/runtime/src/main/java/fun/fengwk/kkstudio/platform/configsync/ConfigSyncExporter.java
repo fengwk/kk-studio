@@ -9,17 +9,17 @@ import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServer;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModelGroupConfigCodec;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRuntimeConfigParser;
-import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
-import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderConfigurationCodec;
+import fun.fengwk.kkstudio.platform.catalog.model.Model;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelGroupConfigCodec;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelKind;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelRuntimeConfigParser;
+import fun.fengwk.kkstudio.platform.catalog.provider.Provider;
+import fun.fengwk.kkstudio.platform.catalog.provider.ProviderConfigurationCodec;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageGitSource;
 import fun.fengwk.kkstudio.platform.environment.Environment;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRow;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsCodec;
-import fun.fengwk.kkstudio.share.catalog.AgentModelKind;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncKind;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncRef;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSectionsDTO;
@@ -41,9 +41,9 @@ import java.util.Set;
 @Component
 public final class ConfigSyncExporter {
 
-  private final AgentProviderConfigurationCodec providerConfigurationCodec;
-  private final AgentModelRuntimeConfigParser modelConfigParser;
-  private final AgentModelGroupConfigCodec modelGroupConfigCodec;
+  private final ProviderConfigurationCodec providerConfigurationCodec;
+  private final ModelRuntimeConfigParser modelConfigParser;
+  private final ModelGroupConfigCodec modelGroupConfigCodec;
   private final AgentDefinitionConfigCodec agentConfigCodec;
   private final SystemSettingsCodec systemSettingsCodec;
   private final ConfigSyncYaml yaml;
@@ -54,7 +54,7 @@ public final class ConfigSyncExporter {
     Map<String, Object> document = new LinkedHashMap<>();
 
     List<Object> providers = new ArrayList<>();
-    for (AgentProvider provider : snapshot.providers()) {
+    for (Provider provider : snapshot.providers()) {
       if (selected.contains(ConfigSyncRefs.ref(ConfigSyncKind.PROVIDERS, provider.name()))) {
         providers.add(exportProvider(provider));
       }
@@ -62,7 +62,7 @@ public final class ConfigSyncExporter {
     putIfNotEmpty(document, ConfigSyncKind.PROVIDERS, providers);
 
     List<Object> models = new ArrayList<>();
-    for (AgentModel model : snapshot.models()) {
+    for (Model model : snapshot.models()) {
       if (selected.contains(ConfigSyncRefs.model(model.name()))) {
         models.add(exportModel(model));
       }
@@ -132,7 +132,7 @@ public final class ConfigSyncExporter {
     return map;
   }
 
-  private Map<String, Object> exportProvider(AgentProvider provider) {
+  private Map<String, Object> exportProvider(Provider provider) {
     ModelCallTimeoutPolicy timeout =
         providerConfigurationCodec.readTimeoutPolicy(provider.configJson());
     Map<String, Object> map = new LinkedHashMap<>();
@@ -150,12 +150,12 @@ public final class ConfigSyncExporter {
     return map;
   }
 
-  private Map<String, Object> exportModel(AgentModel model) {
+  private Map<String, Object> exportModel(Model model) {
     Map<String, Object> map = new LinkedHashMap<>();
     map.put("kind", model.kind().name());
     map.put("name", model.name());
     putIfNotNull(map, "description", model.description());
-    if (model.kind() == AgentModelKind.MODEL) {
+    if (model.kind() == ModelKind.MODEL) {
       map.put("providerName", model.providerName());
       map.put("modelId", model.modelId());
       map.put("config", yaml.toMap(modelConfigParser.decode(model.configJson()), "model.config"));

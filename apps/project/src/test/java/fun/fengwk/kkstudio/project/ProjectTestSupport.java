@@ -103,7 +103,7 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
 
   private static final AtomicLong FIXTURE_COUNTER = new AtomicLong();
 
-  /** 合法的最小 AgentModel runtime config：物化分支 settings 时必须通过严格解析。 */
+  /** 合法的最小 Model runtime config：物化分支 settings 时必须通过严格解析。 */
   private static final String VALID_MODEL_CONFIG =
       "{\"limit\":{\"context\":128000,\"output\":8192},"
           + "\"abilities\":{\"tools\":true,\"reasoning\":true,\"inputModalities\":[\"TEXT\"]},"
@@ -136,12 +136,12 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
     String modelName = "mod-" + id;
     String agentName = "agent-" + id;
     jdbc.update(
-        "insert into agent_provider (name, provider_type, config, connection_generation_id)"
+        "insert into provider (name, provider_type, config, connection_generation_id)"
             + " values (?, 'openai', '{}'::jsonb, ?::uuid)",
         providerName,
         UUID.randomUUID());
     jdbc.update(
-        "insert into agent_model (name, kind, provider_name, model_id, config)"
+        "insert into model (name, kind, provider_name, model_id, config)"
             + " values (?, 'MODEL', ?, ?, ?::jsonb)",
         modelName,
         providerName,

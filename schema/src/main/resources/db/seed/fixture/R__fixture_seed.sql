@@ -7,10 +7,10 @@
 -- FK dependency order is preserved by cleaning dependent agents and models first.
 
 delete from agent_definition where name = 'default-assistant';
-delete from agent_model where provider_name = 'stub';
-delete from agent_provider where name = 'stub';
+delete from model where provider_name = 'stub';
+delete from provider where name = 'stub';
 
-insert into agent_provider (
+insert into provider (
     name, description, provider_type, base_url, credential, config, connection_generation_id,
     created_at, updated_at, version
 ) values (
@@ -21,7 +21,7 @@ insert into agent_provider (
     current_timestamp, current_timestamp, 0
 );
 
-insert into agent_model (
+insert into model (
     name, kind, provider_name, model_id, description, config,
     created_at, updated_at, version
 ) values (

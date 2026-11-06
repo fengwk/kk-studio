@@ -3,8 +3,8 @@ package fun.fengwk.kkstudio.platform.configsync;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServer;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpTool;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
-import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
+import fun.fengwk.kkstudio.platform.catalog.model.Model;
+import fun.fengwk.kkstudio.platform.catalog.provider.Provider;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
 import fun.fengwk.kkstudio.platform.environment.Environment;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRow;
@@ -25,8 +25,8 @@ import java.util.Set;
  * inventory、也不允许被导入覆盖，但作为「已存在」满足 Agent 引用依赖（插件声明的 Agent 与 Agent 的 subagent）。
  */
 public record ConfigSyncSnapshot(
-    List<AgentProvider> providers,
-    List<AgentModel> models,
+    List<Provider> providers,
+    List<Model> models,
     List<AgentDefinition> agents,
     Set<String> builtinAgentNames,
     List<SkillPackage> skillPackages,

@@ -175,7 +175,7 @@ abstract class ProviderRequestPreviewContractTest {
     dto.setKind(kind);
     dto.setNotice(notice);
     dto.setGeneratedAt(Instant.parse("2026-01-01T00:00:00Z"));
-    dto.setProviderType("OPENAI");
+    dto.setProviderType("openai");
     dto.setModelName("acceptance-stub");
     dto.setBodyByteSize(body.getBytes(StandardCharsets.UTF_8).length);
     dto.setBodyJson(body);

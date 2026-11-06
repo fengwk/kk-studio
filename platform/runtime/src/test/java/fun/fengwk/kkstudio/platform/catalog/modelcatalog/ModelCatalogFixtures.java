@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.platform.catalog.modelcatalog;
 
-import fun.fengwk.kkstudio.share.catalog.ModelDefaultCandidateDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelCatalogCandidateDTO;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -29,9 +29,9 @@ final class ModelCatalogFixtures {
     }
   }
 
-  static Map<String, ModelDefaultCandidateDTO> index(List<ModelDefaultCandidateDTO> candidates) {
-    Map<String, ModelDefaultCandidateDTO> index = new LinkedHashMap<>();
-    for (ModelDefaultCandidateDTO candidate : candidates) {
+  static Map<String, ModelCatalogCandidateDTO> index(List<ModelCatalogCandidateDTO> candidates) {
+    Map<String, ModelCatalogCandidateDTO> index = new LinkedHashMap<>();
+    for (ModelCatalogCandidateDTO candidate : candidates) {
       String key = candidate.getProvider() + "/" + candidate.getModelId();
       if (index.put(key, candidate) != null) {
         throw new AssertionError("duplicate catalog candidate: " + key);

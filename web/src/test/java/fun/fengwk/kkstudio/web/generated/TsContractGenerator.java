@@ -5,6 +5,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import com.fasterxml.jackson.annotation.JsonUnwrapped;
+import com.fasterxml.jackson.annotation.JsonValue;
 import org.jspecify.annotations.Nullable;
 import org.springframework.core.annotation.AnnotatedElementUtils;
 import org.springframework.core.io.Resource;
@@ -28,9 +29,9 @@ import tools.jackson.databind.introspect.ClassIntrospector;
 import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.common.page.Page;
+import fun.fengwk.kkstudio.platform.catalog.dto.DecimalStringSerializer;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelRatePatchDTOSerializer;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
-import fun.fengwk.kkstudio.share.catalog.AgentModelRatePatchDTOSerializer;
-import fun.fengwk.kkstudio.share.catalog.DecimalStringSerializer;
 
 import java.io.InputStream;
 import java.lang.annotation.Annotation;
@@ -134,7 +135,7 @@ final class TsContractGenerator {
 
   /** 写出属性与类型不变、只省略未声明字段的类级序列化器：任何属性都可能缺省。 */
   private static final Set<Class<?>> PRESENCE_SERIALIZERS =
-      Set.of(AgentModelRatePatchDTOSerializer.class);
+      Set.of(ModelRatePatchDTOSerializer.class);
 
   private static final String HEADER =
       """
@@ -397,7 +398,7 @@ final class TsContractGenerator {
     return "non-scalar " + node.getNodeType();
   }
 
-  /** 枚举：TS 联合类型 + 由 mapper 序列化真实常量得到的 readonly wire 值数组。 */
+  /** 枚举：TS 联合类型 + 由 mapper 序列化真实常量得到的 readonly wire 值数组；@JsonValue 提供 wire 词汇。 */
   private void appendEnum(StringBuilder builder, Class<?> type) {
     List<String> wireValues = wireValues(type);
     String name = tsName(type);
@@ -430,8 +431,21 @@ final class TsContractGenerator {
       throw new IllegalStateException("enum has no constants: " + javaName(type));
     }
     List<String> values = new ArrayList<>(constants.length);
+    Method jsonValue =
+        Arrays.stream(type.getMethods())
+            .filter(method -> method.isAnnotationPresent(JsonValue.class))
+            .findFirst()
+            .orElse(null);
     for (Object constant : constants) {
-      JsonNode node = mapper.readTree(mapper.writeValueAsString(constant));
+      Object wire = constant;
+      if (jsonValue != null) {
+        try {
+          wire = jsonValue.invoke(constant);
+        } catch (ReflectiveOperationException error) {
+          throw new IllegalStateException(javaName(type) + " @JsonValue must be callable", error);
+        }
+      }
+      JsonNode node = mapper.readTree(mapper.writeValueAsString(wire));
       if (!node.isString()) {
         throw new IllegalStateException(
             javaName(type) + "." + constant + " must serialize to a JSON string, was " + node);
@@ -599,7 +613,7 @@ final class TsContractGenerator {
     if (classFormat != null && !isDefaultAnnotation(classFormat, JSON_FORMAT_MEMBERS)) {
       throw new IllegalStateException(javaName(type) + " declares a class-level @JsonFormat");
     }
-    if (bean.findJsonValueAccessor() != null) {
+    if (bean.findJsonValueAccessor() != null && !type.isEnum()) {
       throw new IllegalStateException(javaName(type) + " declares @JsonValue");
     }
     if (bean.findAnyGetter() != null) {

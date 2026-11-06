@@ -22,8 +22,8 @@ import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionService;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
-import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderRepository;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelRepository;
+import fun.fengwk.kkstudio.platform.catalog.provider.ProviderRepository;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageRepository;
 import fun.fengwk.kkstudio.platform.catalog.skill.archive.SkillArchiveBuilder;
@@ -97,8 +97,8 @@ class ConfigSyncGitAtomicIntegrationTest extends ConfigSyncTestSupport {
   @Autowired private ConfigSyncService configSyncService;
   @Autowired private ConfigSyncYaml configSyncYaml;
   @Autowired private SkillPackageRepository skillPackageRepository;
-  @Autowired private AgentProviderRepository agentProviderRepository;
-  @Autowired private AgentModelRepository agentModelRepository;
+  @Autowired private ProviderRepository agentProviderRepository;
+  @Autowired private ModelRepository agentModelRepository;
   @Autowired private AgentDefinitionRepository agentDefinitionRepository;
   @Autowired private AgentDefinitionService agentDefinitionService;
   @Autowired private StorageUploadRepository storageUploadRepository;
@@ -342,10 +342,8 @@ class ConfigSyncGitAtomicIntegrationTest extends ConfigSyncTestSupport {
               assertEquals(
                   0,
                   jdbcTemplate.queryForObject(
-                      "select count(*) from agent_provider where name = ?",
-                      Integer.class,
-                      providerName),
-                  "agent_provider table must not contain rows during Git prepare");
+                      "select count(*) from provider where name = ?", Integer.class, providerName),
+                  "provider table must not contain rows during Git prepare");
               assertNull(
                   skillPackageRepository.getPackage(STAGED_PKG),
                   "staged-pkg must not be written to catalog DB during Git prepare");

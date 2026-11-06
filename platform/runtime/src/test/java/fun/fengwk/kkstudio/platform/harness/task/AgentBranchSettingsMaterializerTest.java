@@ -20,28 +20,28 @@ import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgentDefinitions;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRuntimeConfigParser;
+import fun.fengwk.kkstudio.platform.catalog.model.Model;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelKind;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelRepository;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelRuntimeConfigParser;
 import fun.fengwk.kkstudio.platform.harness.builtin.BuiltinAgentExecutionMaterializer;
-import fun.fengwk.kkstudio.share.catalog.AgentModelKind;
 
 /** 按最新 Agent/Model catalog 为子 Agent 物化 branch settings。 */
 class AgentBranchSettingsMaterializerTest {
 
   private AgentDefinitionRepository agentRepository;
-  private AgentModelRepository modelRepository;
+  private ModelRepository modelRepository;
   private AgentBranchSettingsMaterializer materializer;
 
   @BeforeEach
   void setUp() {
     agentRepository = mock(AgentDefinitionRepository.class);
-    modelRepository = mock(AgentModelRepository.class);
+    modelRepository = mock(ModelRepository.class);
     materializer =
         new AgentBranchSettingsMaterializer(
             agentRepository,
             new BuiltinAgentExecutionMaterializer(
-                modelRepository, new AgentModelRuntimeConfigParser(JsonMapper.builder().build())));
+                modelRepository, new ModelRuntimeConfigParser(JsonMapper.builder().build())));
   }
 
   private void stub(String agentName, String variant, String modelConfigJson) {
@@ -53,9 +53,9 @@ class AgentBranchSettingsMaterializerTest {
             .build();
     when(agentRepository.getByName(agentName)).thenReturn(agent);
 
-    AgentModel model =
-        AgentModel.builder()
-            .kind(AgentModelKind.MODEL)
+    Model model =
+        Model.builder()
+            .kind(ModelKind.MODEL)
             .providerName("openai")
             .name("gpt-x")
             .modelId("gpt-x-wire")
@@ -93,7 +93,7 @@ class AgentBranchSettingsMaterializerTest {
   void materializesGroupWithoutVariant() {
     stub("alpha", null, validModelConfig());
     when(modelRepository.getByName("gpt-x"))
-        .thenReturn(AgentModel.builder().name("gpt-x").kind(AgentModelKind.GROUP).build());
+        .thenReturn(Model.builder().name("gpt-x").kind(ModelKind.GROUP).build());
     assertEquals(
         BuiltinExecution.of(ModelSelection.group("gpt-x")),
         materializer.materialize("alpha").execution());

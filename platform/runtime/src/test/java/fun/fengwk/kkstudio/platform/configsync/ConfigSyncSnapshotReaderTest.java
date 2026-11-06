@@ -23,8 +23,8 @@ import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgentDefinitions;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerRepository;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
-import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderRepository;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelRepository;
+import fun.fengwk.kkstudio.platform.catalog.provider.ProviderRepository;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageRepository;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRepository;
@@ -40,8 +40,8 @@ class ConfigSyncSnapshotReaderTest {
 
   private static final String PLUGIN_VALUES = "{\"promptAgentName\":\"h3-agent\"}";
 
-  private final AgentProviderRepository providerRepository = mock(AgentProviderRepository.class);
-  private final AgentModelRepository modelRepository = mock(AgentModelRepository.class);
+  private final ProviderRepository providerRepository = mock(ProviderRepository.class);
+  private final ModelRepository modelRepository = mock(ModelRepository.class);
   private final AgentDefinitionRepository definitionRepository =
       mock(AgentDefinitionRepository.class);
   private final SkillPackageRepository skillPackageRepository = mock(SkillPackageRepository.class);

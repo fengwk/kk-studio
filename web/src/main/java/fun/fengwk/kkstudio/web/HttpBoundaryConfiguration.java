@@ -88,7 +88,7 @@ public class HttpBoundaryConfiguration implements WebMvcConfigurer {
         .addModule(
             new SimpleModule("CanonicalHttpUuid")
                 .addDeserializer(UUID.class, new CanonicalUuidDeserializer()))
-        // Settings 的 Long wire 本就明确为十进制字符串，而不是 JSON 数字。
+        // Settings 的 Long wire 是十进制字符串，而不是 JSON 数字。
         .addMixIn(SystemSettingsToolDTO.class, SettingsToolMixin.class)
         .addMixIn(SystemSettingsAiRuntimeDTO.class, SettingsAiRuntimeMixin.class)
         .addMixIn(SystemSettingsEnvironmentDTO.class, SettingsEnvironmentMixin.class)

@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributionId;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
+import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
@@ -17,8 +18,8 @@ import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
+import fun.fengwk.kkstudio.platform.catalog.dto.ToolCatalogEntryDTO;
 import fun.fengwk.kkstudio.platform.testing.TestCatalogSources;
-import fun.fengwk.kkstudio.share.catalog.ToolCatalogEntryDTO;
 
 import java.time.Duration;
 import java.util.List;
@@ -47,6 +48,7 @@ class ToolCatalogQueryServiceTest {
     assertEquals(2, dtos.size());
     assertEquals("read", dtos.get(0).getName());
     assertEquals("read files", dtos.get(0).getDescription());
+    assertEquals(EnvironmentSupport.NONE, dtos.get(0).getEnvironmentSupport());
 
     assertEquals("search", dtos.get(1).getName());
     assertEquals("search web", dtos.get(1).getDescription());

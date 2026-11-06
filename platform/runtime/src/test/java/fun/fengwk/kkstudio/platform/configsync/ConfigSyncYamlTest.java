@@ -10,8 +10,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
-import fun.fengwk.kkstudio.share.catalog.AgentModelConfigDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelInputModality;
+import fun.fengwk.kkstudio.harness.model.ModelInputModality;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelConfigDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsToolDTO;
 
 import java.math.BigDecimal;
@@ -196,7 +196,7 @@ class ConfigSyncYamlTest {
     pricing.put("multipliers", List.of());
     config.put("pricing", pricing);
 
-    AgentModelConfigDTO dto = yaml.convert(config, AgentModelConfigDTO.class, "model.config");
+    ModelConfigDTO dto = yaml.convert(config, ModelConfigDTO.class, "model.config");
     assertEquals("{\"a\":1}", dto.getVariants().get(0).getProtocolOptionsJson());
     assertEquals(Integer.valueOf(1000), dto.getLimit().getContext());
   }
@@ -208,7 +208,7 @@ class ConfigSyncYamlTest {
     List<String> removed = new ArrayList<>();
 
     Object cleaned =
-        yaml.removeUnknownProperties(AgentModelConfigDTO.class, config, "model.config", removed);
+        yaml.removeUnknownProperties(ModelConfigDTO.class, config, "model.config", removed);
 
     assertEquals(List.of("model.config.limit.bogus"), removed);
     assertTrue(cleaned instanceof Map<?, ?>);
@@ -262,6 +262,6 @@ class ConfigSyncYamlTest {
     public BigDecimal ratio;
     public String name;
     public Boolean enabled;
-    public AgentModelInputModality modality;
+    public ModelInputModality modality;
   }
 }

@@ -82,7 +82,6 @@ class ConfigSyncParserTest {
                 + "    modelHttpRetryStatusCodes: [500, 503]\n");
 
     var properties = document.providers().get(0).properties();
-    assertTrue(properties.isModelHttpRetryStatusCodesProvided());
     assertEquals(List.of(500, 503), properties.getModelHttpRetryStatusCodes());
   }
 
@@ -91,7 +90,6 @@ class ConfigSyncParserTest {
     var document = parser.parse("providers:\n" + provider("p", "openai"));
 
     var properties = document.providers().get(0).properties();
-    assertTrue(properties.isModelHttpRetryStatusCodesProvided());
     assertNull(properties.getModelHttpRetryStatusCodes());
   }
 

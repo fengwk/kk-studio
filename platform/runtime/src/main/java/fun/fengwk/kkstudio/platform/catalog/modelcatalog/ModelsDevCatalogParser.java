@@ -3,20 +3,20 @@ package fun.fengwk.kkstudio.platform.catalog.modelcatalog;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
 
-import fun.fengwk.kkstudio.share.catalog.AgentModelInputModality;
-import fun.fengwk.kkstudio.share.catalog.AgentModelPricingConditionDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelPricingContextConditionDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelPricingDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelPricingDateConditionDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelPricingFactorsDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelPricingMultiplierDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelPricingOverrideDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelPricingTimeConditionDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelRatePatchDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelRateSetDTO;
-import fun.fengwk.kkstudio.share.catalog.ModelDefaultAbilitiesDTO;
-import fun.fengwk.kkstudio.share.catalog.ModelDefaultCandidateDTO;
-import fun.fengwk.kkstudio.share.catalog.ModelDefaultLimitDTO;
+import fun.fengwk.kkstudio.harness.model.ModelInputModality;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelCatalogAbilitiesDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelCatalogCandidateDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelCatalogLimitDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingConditionDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingContextConditionDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingDateConditionDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingFactorsDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingMultiplierDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingOverrideDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingTimeConditionDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelRatePatchDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelRateSetDTO;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -56,9 +56,9 @@ public class ModelsDevCatalogParser {
   private static final Set<String> TOKEN_UNITS =
       Set.of("token", "tokens", "per_million", "million_tokens");
 
-  public List<ModelDefaultCandidateDTO> parse(String json) {
+  public List<ModelCatalogCandidateDTO> parse(String json) {
     JsonNode root = CatalogJson.parse(json);
-    List<ModelDefaultCandidateDTO> candidates = new ArrayList<>();
+    List<ModelCatalogCandidateDTO> candidates = new ArrayList<>();
     for (Map.Entry<String, JsonNode> providerEntry : root.properties()) {
       String providerId = providerEntry.getKey();
       JsonNode provider = providerEntry.getValue();
@@ -83,11 +83,11 @@ public class ModelsDevCatalogParser {
 
   private static final String ID_PREFIX = "models_dev:";
 
-  private ModelDefaultCandidateDTO toCandidate(
+  private ModelCatalogCandidateDTO toCandidate(
       String provider, String fallbackModelId, JsonNode model) {
     String modelId = CatalogJson.text(model.get("id"), fallbackModelId);
     List<String> issues = new ArrayList<>();
-    ModelDefaultCandidateDTO candidate = new ModelDefaultCandidateDTO();
+    ModelCatalogCandidateDTO candidate = new ModelCatalogCandidateDTO();
     candidate.setId(ID_PREFIX + provider + ":" + modelId);
     candidate.setProvider(provider);
     candidate.setModelId(modelId);
@@ -96,7 +96,7 @@ public class ModelsDevCatalogParser {
     candidate.setAbilities(abilities(model, issues));
     candidate.setSupportIssues(issues);
     try {
-      AgentModelPricingDTO pricing = pricing(model.get("cost"), issues);
+      ModelPricingDTO pricing = pricing(model.get("cost"), issues);
       CatalogPricingValidator.validate(pricing);
       candidate.setPricing(pricing);
       candidate.setPricingSupported(true);
@@ -108,7 +108,7 @@ public class ModelsDevCatalogParser {
     return candidate;
   }
 
-  private static ModelDefaultLimitDTO limit(JsonNode node, List<String> issues) {
+  private static ModelCatalogLimitDTO limit(JsonNode node, List<String> issues) {
     if (node == null || node.isNull()) {
       return null;
     }
@@ -119,7 +119,7 @@ public class ModelsDevCatalogParser {
       if (context == null && output == null) {
         return null;
       }
-      ModelDefaultLimitDTO limit = new ModelDefaultLimitDTO();
+      ModelCatalogLimitDTO limit = new ModelCatalogLimitDTO();
       limit.setContext(context);
       limit.setOutput(output);
       return limit;
@@ -129,15 +129,15 @@ public class ModelsDevCatalogParser {
     }
   }
 
-  private static ModelDefaultAbilitiesDTO abilities(JsonNode model, List<String> issues) {
-    ModelDefaultAbilitiesDTO abilities = new ModelDefaultAbilitiesDTO();
+  private static ModelCatalogAbilitiesDTO abilities(JsonNode model, List<String> issues) {
+    ModelCatalogAbilitiesDTO abilities = new ModelCatalogAbilitiesDTO();
     JsonNode capabilities = model.get("capabilities");
     if (capabilities != null && capabilities.isObject()) {
       abilities.setTools(capability(capabilities.get("tools"), "capabilities.tools", issues));
       abilities.setReasoning(
           capability(capabilities.get("reasoning"), "capabilities.reasoning", issues));
     }
-    List<AgentModelInputModality> modalities = modalities(model.get("modalities"), issues);
+    List<ModelInputModality> modalities = modalities(model.get("modalities"), issues);
     if (modalities != null && !modalities.isEmpty()) {
       abilities.setInputModalities(modalities);
     }
@@ -159,7 +159,7 @@ public class ModelsDevCatalogParser {
     }
   }
 
-  private static List<AgentModelInputModality> modalities(JsonNode node, List<String> issues) {
+  private static List<ModelInputModality> modalities(JsonNode node, List<String> issues) {
     if (node == null || node.isNull()) {
       return null;
     }
@@ -171,13 +171,13 @@ public class ModelsDevCatalogParser {
       issues.add("modalities.input must be an array");
       return null;
     }
-    List<AgentModelInputModality> modalities = new ArrayList<>();
+    List<ModelInputModality> modalities = new ArrayList<>();
     for (JsonNode value : input) {
       if (!value.isString()) {
         issues.add("modalities.input values must be text");
         continue;
       }
-      AgentModelInputModality modality = modality(value.stringValue());
+      ModelInputModality modality = modality(value.stringValue());
       if (modality == null) {
         issues.add("unsupported input modality: " + value.stringValue());
       } else if (!modalities.contains(modality)) {
@@ -187,20 +187,20 @@ public class ModelsDevCatalogParser {
     return modalities;
   }
 
-  private static AgentModelInputModality modality(String value) {
+  private static ModelInputModality modality(String value) {
     return switch (value.toLowerCase(Locale.ROOT)) {
-      case "text" -> AgentModelInputModality.TEXT;
-      case "image" -> AgentModelInputModality.IMAGE;
-      case "audio" -> AgentModelInputModality.AUDIO;
-      case "video" -> AgentModelInputModality.VIDEO;
-      case "pdf", "document", "application/pdf" -> AgentModelInputModality.DOCUMENT;
+      case "text" -> ModelInputModality.TEXT;
+      case "image" -> ModelInputModality.IMAGE;
+      case "audio" -> ModelInputModality.AUDIO;
+      case "video" -> ModelInputModality.VIDEO;
+      case "pdf", "document", "application/pdf" -> ModelInputModality.DOCUMENT;
       default -> null;
     };
   }
 
-  private static AgentModelPricingDTO pricing(JsonNode node, List<String> issues) {
-    AgentModelPricingDTO pricing = new AgentModelPricingDTO();
-    AgentModelRateSetDTO base = new AgentModelRateSetDTO();
+  private static ModelPricingDTO pricing(JsonNode node, List<String> issues) {
+    ModelPricingDTO pricing = new ModelPricingDTO();
+    ModelRateSetDTO base = new ModelRateSetDTO();
     pricing.setBase(base);
     pricing.setOverrides(new ArrayList<>());
     pricing.setMultipliers(new ArrayList<>());
@@ -229,7 +229,7 @@ public class ModelsDevCatalogParser {
         throw new CatalogPriceException("unsupported v2 text cost field: " + key);
       }
     }
-    List<AgentModelPricingOverrideDTO> overrides = new ArrayList<>();
+    List<ModelPricingOverrideDTO> overrides = new ArrayList<>();
     JsonNode input = textCost.get("input");
     if (input != null && !input.isNull()) {
       JsonNode inputNode = CatalogJson.requireObject(input, "cost.text.input");
@@ -272,7 +272,7 @@ public class ModelsDevCatalogParser {
       base.setReasoning(null);
     }
     int index = 0;
-    for (AgentModelPricingOverrideDTO override : overrides) {
+    for (ModelPricingOverrideDTO override : overrides) {
       override.setId("override-" + index++);
       pricing.getOverrides().add(override);
     }
@@ -311,7 +311,7 @@ public class ModelsDevCatalogParser {
     }
   }
 
-  private static void applyCacheWrite(AgentModelRateSetDTO base, JsonNode write) {
+  private static void applyCacheWrite(ModelRateSetDTO base, JsonNode write) {
     if (write == null || write.isNull()) {
       base.setCacheWrite(BigDecimal.ZERO);
       base.setCacheWriteByTtl(Map.of());
@@ -326,7 +326,7 @@ public class ModelsDevCatalogParser {
     base.setCacheWriteByTtl(ttlRates(write, "cost.text.input.cache.write"));
   }
 
-  private static void applyCacheWrite(AgentModelRatePatchDTO patch, JsonNode write) {
+  private static void applyCacheWrite(ModelRatePatchDTO patch, JsonNode write) {
     if (write == null || write.isNull()) {
       return;
     }
@@ -386,7 +386,7 @@ public class ModelsDevCatalogParser {
   private static void collectOverrides(
       JsonNode array,
       boolean inputSide,
-      List<AgentModelPricingOverrideDTO> overrides,
+      List<ModelPricingOverrideDTO> overrides,
       List<String> issues) {
     if (array == null || array.isNull()) {
       return;
@@ -398,7 +398,7 @@ public class ModelsDevCatalogParser {
       JsonNode override = CatalogJson.requireObject(item, "cost.text override");
       validateKeys(
           override, inputSide ? INPUT_OVERRIDE_KEYS : OUTPUT_OVERRIDE_KEYS, "text override");
-      AgentModelRatePatchDTO patch = new AgentModelRatePatchDTO();
+      ModelRatePatchDTO patch = new ModelRatePatchDTO();
       if (inputSide) {
         patch.setInput(CatalogJson.decimal(override.get("price"), "input override price"));
         JsonNode cache = override.get("cache");
@@ -415,28 +415,27 @@ public class ModelsDevCatalogParser {
               CatalogJson.decimal(override.get("reasoning"), "output override reasoning"));
         }
       }
-      AgentModelPricingOverrideDTO rule = new AgentModelPricingOverrideDTO();
+      ModelPricingOverrideDTO rule = new ModelPricingOverrideDTO();
       rule.setWhen(condition(override.get("when"), 0));
       rule.setRates(patch);
       overrides.add(rule);
     }
   }
 
-  private static List<AgentModelPricingMultiplierDTO> multipliers(
-      JsonNode array, List<String> issues) {
-    List<AgentModelPricingMultiplierDTO> multipliers = new ArrayList<>();
+  private static List<ModelPricingMultiplierDTO> multipliers(JsonNode array, List<String> issues) {
+    List<ModelPricingMultiplierDTO> multipliers = new ArrayList<>();
     if (array == null || array.isNull()) {
       return multipliers;
     }
     if (!array.isArray()) {
       throw new CatalogPriceException("cost.multipliers must be an array");
     }
-    List<AgentModelPricingMultiplierDTO> parsed = new ArrayList<>();
+    List<ModelPricingMultiplierDTO> parsed = new ArrayList<>();
     int index = 0;
     for (JsonNode item : array) {
       JsonNode multiplier = CatalogJson.requireObject(item, "cost.multipliers[" + index + "]");
       validateKeys(multiplier, MULTIPLIER_KEYS, "multiplier");
-      AgentModelPricingMultiplierDTO dto = new AgentModelPricingMultiplierDTO();
+      ModelPricingMultiplierDTO dto = new ModelPricingMultiplierDTO();
       dto.setId("multiplier-" + index);
       MultiplierImportContext context = new MultiplierImportContext();
       dto.setWhen(condition(multiplier.get("when"), 0, context));
@@ -449,7 +448,7 @@ public class ModelsDevCatalogParser {
     }
     if (parsed.size() != multipliers.size()) {
       // 被忽略的规则也必须通过其余条件、倍率精度和数量校验；临时定义只校验，不用于计价。
-      AgentModelPricingDTO validation = new AgentModelPricingDTO();
+      ModelPricingDTO validation = new ModelPricingDTO();
       validation.setMultipliers(parsed);
       CatalogPricingValidator.validate(validation);
       issues.add("ignored region multiplier");
@@ -457,11 +456,11 @@ public class ModelsDevCatalogParser {
     return multipliers;
   }
 
-  private static AgentModelPricingFactorsDTO factors(JsonNode node, List<String> issues) {
+  private static ModelPricingFactorsDTO factors(JsonNode node, List<String> issues) {
     if (node == null || node.isNull()) {
       throw new CatalogPriceException("cost.multipliers factor is required");
     }
-    AgentModelPricingFactorsDTO factors = new AgentModelPricingFactorsDTO();
+    ModelPricingFactorsDTO factors = new ModelPricingFactorsDTO();
     if (node.isNumber()) {
       BigDecimal factor = CatalogJson.decimal(node, "multiplier factor");
       factors.setInput(factor);
@@ -523,7 +522,7 @@ public class ModelsDevCatalogParser {
     return factors;
   }
 
-  private static AgentModelPricingConditionDTO condition(JsonNode node, int depth) {
+  private static ModelPricingConditionDTO condition(JsonNode node, int depth) {
     return condition(node, depth, null);
   }
 
@@ -531,16 +530,16 @@ public class ModelsDevCatalogParser {
     private boolean hasRegion;
   }
 
-  private static AgentModelPricingConditionDTO condition(
+  private static ModelPricingConditionDTO condition(
       JsonNode node, int depth, MultiplierImportContext importContext) {
     if (depth > 8) {
       throw new CatalogPriceException("pricing condition nesting is too deep");
     }
     if (node == null || node.isNull()) {
-      return new AgentModelPricingConditionDTO();
+      return new ModelPricingConditionDTO();
     }
     JsonNode when = CatalogJson.requireObject(node, "pricing condition");
-    AgentModelPricingConditionDTO condition = new AgentModelPricingConditionDTO();
+    ModelPricingConditionDTO condition = new ModelPricingConditionDTO();
     for (String key : when.propertyNames()) {
       switch (key) {
         case "region" -> {
@@ -578,10 +577,10 @@ public class ModelsDevCatalogParser {
     return condition;
   }
 
-  private static AgentModelPricingContextConditionDTO context(JsonNode node) {
+  private static ModelPricingContextConditionDTO context(JsonNode node) {
     JsonNode context = CatalogJson.requireObject(node, "condition.context");
     validateKeys(context, CONTEXT_KEYS, "condition.context");
-    AgentModelPricingContextConditionDTO dto = new AgentModelPricingContextConditionDTO();
+    ModelPricingContextConditionDTO dto = new ModelPricingContextConditionDTO();
     dto.setGt(CatalogJson.nonNegativeInt(context.get("gt"), "condition.context.gt"));
     dto.setGte(CatalogJson.nonNegativeInt(context.get("gte"), "condition.context.gte"));
     dto.setLt(CatalogJson.nonNegativeInt(context.get("lt"), "condition.context.lt"));
@@ -612,10 +611,10 @@ public class ModelsDevCatalogParser {
     return values;
   }
 
-  private static AgentModelPricingDateConditionDTO date(JsonNode node) {
+  private static ModelPricingDateConditionDTO date(JsonNode node) {
     JsonNode date = CatalogJson.requireObject(node, "condition.date");
     validateKeys(date, DATE_KEYS, "condition.date");
-    AgentModelPricingDateConditionDTO dto = new AgentModelPricingDateConditionDTO();
+    ModelPricingDateConditionDTO dto = new ModelPricingDateConditionDTO();
     dto.setGte(dateText(date.get("gte"), "condition.date.gte"));
     dto.setLt(dateText(date.get("lt"), "condition.date.lt"));
     if (dto.getGte() != null && dto.getLt() != null) {
@@ -641,7 +640,7 @@ public class ModelsDevCatalogParser {
     }
   }
 
-  private static AgentModelPricingTimeConditionDTO time(JsonNode hours, JsonNode days) {
+  private static ModelPricingTimeConditionDTO time(JsonNode hours, JsonNode days) {
     String start = "00:00";
     String end = "24:00";
     if (hours != null && !hours.isNull()) {
@@ -655,7 +654,7 @@ public class ModelsDevCatalogParser {
       start = gte == null ? "00:00" : gte;
       end = lt == null ? "24:00" : lt;
     }
-    AgentModelPricingTimeConditionDTO dto = new AgentModelPricingTimeConditionDTO();
+    ModelPricingTimeConditionDTO dto = new ModelPricingTimeConditionDTO();
     dto.setStart(start);
     dto.setEnd(end);
     dto.setTimezone("UTC");
@@ -722,7 +721,7 @@ public class ModelsDevCatalogParser {
     };
   }
 
-  private static List<AgentModelPricingConditionDTO> conditions(
+  private static List<ModelPricingConditionDTO> conditions(
       JsonNode node, int depth, MultiplierImportContext importContext) {
     if (node == null || node.isNull()) {
       return null;
@@ -730,7 +729,7 @@ public class ModelsDevCatalogParser {
     if (!node.isArray()) {
       throw new CatalogPriceException("condition all/any must be an array");
     }
-    List<AgentModelPricingConditionDTO> conditions = new ArrayList<>();
+    List<ModelPricingConditionDTO> conditions = new ArrayList<>();
     for (JsonNode item : node) {
       conditions.add(condition(item, depth, importContext));
     }
@@ -751,7 +750,7 @@ public class ModelsDevCatalogParser {
     return node.stringValue();
   }
 
-  private static void zero(AgentModelRateSetDTO rates) {
+  private static void zero(ModelRateSetDTO rates) {
     rates.setInput(BigDecimal.ZERO);
     rates.setOutput(BigDecimal.ZERO);
     rates.setCacheRead(BigDecimal.ZERO);

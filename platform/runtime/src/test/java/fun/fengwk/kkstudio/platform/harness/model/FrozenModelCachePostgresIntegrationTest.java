@@ -43,11 +43,11 @@ class FrozenModelCachePostgresIntegrationTest extends PostgresSpringTestSupport 
     UUID invocationId = UUID.randomUUID();
     UUID generation = UUID.randomUUID();
     jdbc.update(
-        "insert into agent_provider (name, provider_type, base_url, config, connection_generation_id)"
+        "insert into provider (name, provider_type, base_url, config, connection_generation_id)"
             + " values ('cache-provider', 'openai', 'https://example.invalid/v1', '{}'::jsonb, ?)",
         generation);
     jdbc.update(
-        "insert into agent_model (name, kind, provider_name, model_id, config)"
+        "insert into model (name, kind, provider_name, model_id, config)"
             + " values ('cache-model', 'MODEL', 'cache-provider', 'wire-model', ?::jsonb)",
         config("SHORT"));
     jdbc.update(
@@ -110,8 +110,7 @@ class FrozenModelCachePostgresIntegrationTest extends PostgresSpringTestSupport 
         turnId,
         turnId,
         codec.encode(frozen));
-    jdbc.update(
-        "update agent_model set config = ?::jsonb where name = 'cache-model'", config("LONG"));
+    jdbc.update("update model set config = ?::jsonb where name = 'cache-model'", config("LONG"));
 
     ModelRequestSpec durable =
         codec.decode(

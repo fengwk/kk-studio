@@ -8,11 +8,17 @@ import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionService;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelCreateDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelGroupCreateDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelGroupUpdateDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelUpdateDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.SingleModelCreateDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.SingleModelUpdateDTO;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerService;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModelService;
-import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderService;
+import fun.fengwk.kkstudio.platform.catalog.model.Model;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelRepository;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelService;
+import fun.fengwk.kkstudio.platform.catalog.provider.ProviderService;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogService;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogService.PreparedGitImport;
 import fun.fengwk.kkstudio.platform.environment.Environment;
@@ -26,9 +32,6 @@ import fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentDefinitionCreateDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentDefinitionEditablePropertiesDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentDefinitionUpdateDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelCreateDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelEditablePropertiesDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelUpdateDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSectionsDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsUpdateDTO;
 
@@ -50,9 +53,9 @@ import java.util.Map;
 @Component
 public class ConfigSyncApplier {
 
-  private final AgentProviderService providerService;
-  private final AgentModelRepository modelRepository;
-  private final AgentModelService modelService;
+  private final ProviderService providerService;
+  private final ModelRepository modelRepository;
+  private final ModelService modelService;
   private final SkillCatalogService skillCatalogService;
   private final McpServerService mcpServerService;
   private final AgentDefinitionRepository definitionRepository;
@@ -90,25 +93,45 @@ public class ConfigSyncApplier {
 
   private void applyProviders(List<ConfigSyncParser.ProviderSpec> providers) {
     for (ConfigSyncParser.ProviderSpec spec : providers) {
-      // 导入是恢复文件业务事实：使用显式导入命令，凭据为 null 表示清空而非沿用旧值。
-      providerService.importProvider(spec.name(), spec.properties());
+      // 导入是恢复文件业务事实：凭据为 null 表示清空而非沿用旧值；同名不同类型在写入时拒绝。
+      providerService.importProvider(spec.properties());
     }
   }
 
   private void applyModels(List<ConfigSyncParser.ModelSpec> models) {
     for (ConfigSyncParser.ModelSpec spec : models) {
-      AgentModel existing = modelRepository.getByName(spec.name());
+      Model existing = modelRepository.getByName(spec.name());
       if (existing == null) {
-        AgentModelCreateDTO create = new AgentModelCreateDTO();
-        copyModel(spec.properties(), create);
-        modelService.createModel(create);
+        modelService.createModel(spec.properties());
       } else {
-        AgentModelUpdateDTO update = new AgentModelUpdateDTO();
-        copyModel(spec.properties(), update);
-        update.setExpectedVersion(CatalogVersions.format(existing.version()));
-        modelService.updateModel(spec.name(), update);
+        modelService.updateModel(
+            spec.name(), toUpdate(spec.properties(), CatalogVersions.format(existing.version())));
       }
     }
+  }
+
+  /** 文件只描述创建形态的完整模型定义；导入覆盖现有行时补上计划期 CAS 版本。 */
+  private static ModelUpdateDTO toUpdate(ModelCreateDTO create, String expectedVersion) {
+    return switch (create) {
+      case SingleModelCreateDTO single -> {
+        SingleModelUpdateDTO update = new SingleModelUpdateDTO();
+        update.setName(single.getName());
+        update.setDescription(single.getDescription());
+        update.setProviderName(single.getProviderName());
+        update.setModelId(single.getModelId());
+        update.setConfig(single.getConfig());
+        update.setExpectedVersion(expectedVersion);
+        yield update;
+      }
+      case ModelGroupCreateDTO group -> {
+        ModelGroupUpdateDTO update = new ModelGroupUpdateDTO();
+        update.setName(group.getName());
+        update.setDescription(group.getDescription());
+        update.setGroup(group.getGroup());
+        update.setExpectedVersion(expectedVersion);
+        yield update;
+      }
+    };
   }
 
   private void applyEnvironments(List<ConfigSyncParser.EnvironmentSpec> environments) {
@@ -176,17 +199,6 @@ public class ConfigSyncApplier {
     // 使用计划期快照版本做 CAS：计划到 apply 之间 settings 若被并发修改会正常冲突并随事务整体回滚。
     dto.setExpectedVersion(update.expectedVersion());
     systemSettingsService.update(dto);
-  }
-
-  private static void copyModel(
-      AgentModelEditablePropertiesDTO source, AgentModelEditablePropertiesDTO target) {
-    target.setName(source.getName());
-    target.setKind(source.getKind());
-    target.setProviderName(source.getProviderName());
-    target.setModelId(source.getModelId());
-    target.setDescription(source.getDescription());
-    target.setConfig(source.getConfig());
-    target.setGroup(source.getGroup());
   }
 
   private static AgentDefinitionCreateDTO buildAgentCreate(ConfigSyncParser.AgentSpec spec) {
