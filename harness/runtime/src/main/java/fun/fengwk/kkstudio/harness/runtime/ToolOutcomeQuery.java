@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.json.StrictJson;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.harness.api.ToolOutcomeView;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.history.EntryPath;
@@ -50,8 +50,8 @@ public final class ToolOutcomeQuery {
                   .find(threadId)
                   .orElseThrow(
                       () ->
-                          new HarnessRuntimeNotFoundException(
-                              "thread " + threadId + " does not exist"));
+                          DomainException.notFound(
+                              "thread", "thread " + threadId + " does not exist"));
           return find(tx, thread, invocationId);
         });
   }

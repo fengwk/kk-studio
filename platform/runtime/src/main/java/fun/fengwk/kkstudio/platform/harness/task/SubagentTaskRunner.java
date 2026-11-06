@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.platform.harness.task;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.hash.Sha256;
 import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
@@ -31,6 +33,7 @@ import fun.fengwk.kkstudio.platform.agenttask.AgentTaskService;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Objects;
@@ -133,6 +136,16 @@ public class SubagentTaskRunner implements SubagentRunner {
       } catch (HarnessRuntimeNotFoundException notFound) {
         throw reject("subagent task parent thread no longer exists", notFound);
       } catch (RuntimeException failure) {
+        if (failure instanceof DomainException domain) {
+          if (domain.code() == DomainErrorCode.NOT_FOUND) {
+            throw reject("subagent task parent thread no longer exists", domain);
+          }
+          if (domain.code() != DomainErrorCode.CONFLICT
+              || Arrays.stream(HarnessRuntimeConflictException.Reason.values())
+                  .noneMatch(reason -> reason.name().equals(domain.reason()))) {
+            throw domain;
+          }
+        }
         // 并发胜者可能已经接受票据；先回放，但不能把任意失败当成可重试的游标冲突。
         SubagentTaskAcceptance concurrent;
         try {
@@ -145,8 +158,16 @@ public class SubagentTaskRunner implements SubagentRunner {
         if (concurrent != null) {
           return concurrent;
         }
-        if (!(failure instanceof HarnessRuntimeConflictException conflict)
-            || conflict.reason() != HarnessRuntimeConflictException.Reason.STALE_COMMAND_CURSOR) {
+        boolean staleCursor =
+            (failure instanceof HarnessRuntimeConflictException conflict
+                    && conflict.reason()
+                        == HarnessRuntimeConflictException.Reason.STALE_COMMAND_CURSOR)
+                || (failure instanceof DomainException domain
+                    && domain.code() == DomainErrorCode.CONFLICT
+                    && HarnessRuntimeConflictException.Reason.STALE_COMMAND_CURSOR
+                        .name()
+                        .equals(domain.reason()));
+        if (!staleCursor) {
           throw reject(message(failure), failure);
         }
         lastFailure = failure;
@@ -251,6 +272,11 @@ public class SubagentTaskRunner implements SubagentRunner {
     ThreadSnapshot child;
     try {
       child = runtime.getThreadSnapshot(request.resumeThreadId());
+    } catch (DomainException notFound) {
+      if (notFound.code() != DomainErrorCode.NOT_FOUND) {
+        throw notFound;
+      }
+      throw reject("subagent thread " + request.resumeThreadId() + " was not found", notFound);
     } catch (HarnessRuntimeNotFoundException notFound) {
       throw reject("subagent thread " + request.resumeThreadId() + " was not found", notFound);
     }
@@ -264,6 +290,11 @@ public class SubagentTaskRunner implements SubagentRunner {
     ThreadSnapshot child;
     try {
       child = runtime.getThreadSnapshot(childThreadId);
+    } catch (DomainException notFound) {
+      if (notFound.code() != DomainErrorCode.NOT_FOUND) {
+        throw notFound;
+      }
+      throw reject("subagent thread " + childThreadId + " was not found", notFound);
     } catch (HarnessRuntimeNotFoundException notFound) {
       throw reject("subagent thread " + childThreadId + " was not found", notFound);
     }
@@ -278,6 +309,11 @@ public class SubagentTaskRunner implements SubagentRunner {
     ThreadSnapshot parent;
     try {
       parent = runtime.getThreadSnapshot(request.parentThreadId());
+    } catch (DomainException notFound) {
+      if (notFound.code() != DomainErrorCode.NOT_FOUND) {
+        throw notFound;
+      }
+      throw reject("task invocation is no longer attached to its parent Thread context", notFound);
     } catch (HarnessRuntimeNotFoundException notFound) {
       throw reject("task invocation is no longer attached to its parent Thread context", notFound);
     }
@@ -329,6 +365,11 @@ public class SubagentTaskRunner implements SubagentRunner {
   private static UUID sessionIdOf(HarnessRuntime runtime, UUID childThreadId) {
     try {
       return runtime.getThreadSnapshot(childThreadId).thread().sessionId();
+    } catch (DomainException notFound) {
+      if (notFound.code() != DomainErrorCode.NOT_FOUND) {
+        throw notFound;
+      }
+      throw reject("subagent thread " + childThreadId + " was not found", notFound);
     } catch (HarnessRuntimeNotFoundException notFound) {
       throw reject("subagent thread " + childThreadId + " was not found", notFound);
     }

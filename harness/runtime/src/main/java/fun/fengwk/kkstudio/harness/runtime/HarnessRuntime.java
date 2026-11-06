@@ -206,8 +206,8 @@ public final class HarnessRuntime {
    * ToolResult Entry。
    *
    * <p>严格归属校验：Invocation 经公共 threadId 与 turnStartEntryId 归属该 Thread；历史 Entry 必须位于该 Thread 当前 head
-   * 路径上且最近 TurnStart 由该 Thread 发起。不属于该 Thread、尚未 terminal 或不存在时返回 empty；Thread 本身不存在抛 {@link
-   * HarnessRuntimeNotFoundException}。非成功结果同时返回 durable error kind/message，人工输入返回 durable receipt。
+   * 路径上且最近 TurnStart 由该 Thread 发起。不属于该 Thread、尚未 terminal 或不存在时返回 empty；Thread 本身不存在抛 not-found
+   * 领域异常。非成功结果同时返回 durable error kind/message，人工输入返回 durable receipt。
    */
   public Optional<ToolOutcomeView> findToolOutcome(UUID threadId, UUID invocationId) {
     Objects.requireNonNull(threadId, "threadId");

@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -18,6 +19,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.ObjectProvider;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
@@ -412,6 +414,36 @@ class SubagentTaskRunnerTest {
   }
 
   @Test
+  void domainCursorConflictRetriesAndOtherDomainErrorsPropagate() {
+    // 只能按 conflict + STALE_COMMAND_CURSOR 重试；同 reason 的其他 code 不能转成 tool 拒绝。
+    stubParent(List.of(AGENT));
+    UUID childThreadId = UUID.randomUUID();
+    ThreadSnapshot child = child(childThreadId, parentThreadId, 9L);
+    when(runtime.getThreadSnapshot(childThreadId)).thenReturn(child);
+    when(runtime.spawn(any(), any()))
+        .thenThrow(DomainException.conflict("STALE_COMMAND_CURSOR", "stale"))
+        .thenReturn(accepted(UUID.randomUUID(), childThreadId, false));
+    assertEquals(
+        childThreadId, runner(config()).accept(request(null, childThreadId)).childThreadId());
+    verify(runtime, times(2)).spawn(any(), any());
+
+    DomainException wrongCode =
+        DomainException.validationReason("STALE_COMMAND_CURSOR", "not conflict");
+    doThrow(wrongCode).when(runtime).spawn(any(), any());
+    assertSame(
+        wrongCode,
+        assertThrows(
+            DomainException.class, () -> runner(config()).accept(request(null, childThreadId))));
+    DomainException wrongReason = DomainException.conflict("OTHER_MODULE_CONFLICT", "other");
+    doThrow(wrongReason).when(runtime).spawn(any(), any());
+    assertSame(
+        wrongReason,
+        assertThrows(
+            DomainException.class, () -> runner(config()).accept(request(null, childThreadId))));
+    verify(runtime, times(4)).spawn(any(), any());
+  }
+
+  @Test
   void unexpectedFailureDoesNotResubmit() {
     // 非游标错误只能复核票据，不得重复提交可能已产生副作用的请求。
     stubParent(List.of(AGENT));
@@ -602,6 +634,90 @@ class SubagentTaskRunnerTest {
         replayedMissingChild.getMessage());
 
     verify(runtime, never()).spawn(any(), any());
+  }
+
+  @Test
+  void domainMissingSnapshotsBecomeTaskFailuresButOtherCodesPropagate() {
+    // 父、续接子线程按 not-found 分类；其他 DomainException 原样抛出。
+    stubParent(List.of(AGENT));
+    UUID missingChild = UUID.randomUUID();
+    DomainException missing = DomainException.notFound("thread", "gone");
+    doThrow(missing).when(runtime).getThreadSnapshot(missingChild);
+    SubagentTaskRejectedException rejected =
+        assertThrows(
+            SubagentTaskRejectedException.class,
+            () -> runner(config()).accept(request(null, missingChild)));
+    assertSame(missing, rejected.getCause());
+    assertTrue(rejected.getMessage().contains("was not found"));
+
+    DomainException validation = DomainException.validation("thread", "invalid");
+    doThrow(validation).when(runtime).getThreadSnapshot(missingChild);
+    assertSame(
+        validation,
+        assertThrows(
+            DomainException.class, () -> runner(config()).accept(request(null, missingChild))));
+    doThrow(validation).when(runtime).getThreadSnapshot(parentThreadId);
+    assertSame(
+        validation,
+        assertThrows(DomainException.class, () -> runner(config()).accept(request(null, null))));
+    doThrow(missing).when(runtime).getThreadSnapshot(parentThreadId);
+    rejected =
+        assertThrows(
+            SubagentTaskRejectedException.class,
+            () -> runner(config()).accept(request(null, null)));
+    assertSame(missing, rejected.getCause());
+    assertTrue(rejected.getMessage().contains("no longer attached"));
+  }
+
+  @Test
+  void domainMissingReplayChildIsNotSwallowed() {
+    // 既有票据回放仍需解析子 Session，不存在时保留原始 not-found cause。
+    UUID childThreadId =
+        SubagentTaskRunner.derive(invocationId, "kk-studio/harness/subagent/thread/");
+    when(runtime.findJoin(invocationId))
+        .thenReturn(
+            Optional.of(
+                join(
+                    parentThreadId,
+                    childThreadId,
+                    SubagentTaskRunner.requestHash(request(null, null)),
+                    AGENT,
+                    10)));
+    DomainException missing = DomainException.notFound("thread", "gone");
+    doThrow(missing).when(runtime).getThreadSnapshot(childThreadId);
+    SubagentTaskRejectedException rejected =
+        assertThrows(
+            SubagentTaskRejectedException.class,
+            () -> runner(config()).accept(request(null, null)));
+    assertSame(missing, rejected.getCause());
+    DomainException other = DomainException.validation("thread", "invalid");
+    doThrow(other).when(runtime).getThreadSnapshot(childThreadId);
+    assertSame(
+        other,
+        assertThrows(DomainException.class, () -> runner(config()).accept(request(null, null))));
+  }
+
+  @Test
+  void domainSubmitMissingAndNonCursorConflictBecomeTaskFailures() {
+    // 已知 Harness 业务拒绝保留工具层语义，但不会重试非游标冲突。
+    stubParent(List.of(AGENT));
+    DomainException missing = DomainException.notFound("thread", "gone");
+    doThrow(missing).when(runtime).spawn(any(), any());
+    SubagentTaskRejectedException rejected =
+        assertThrows(
+            SubagentTaskRejectedException.class,
+            () -> runner(config()).accept(request(null, null)));
+    assertSame(missing, rejected.getCause());
+    assertTrue(rejected.getMessage().contains("parent thread no longer exists"));
+
+    DomainException conflict = DomainException.conflict("IDEMPOTENCY_KEY_REUSED", "different");
+    doThrow(conflict).when(runtime).spawn(any(), any());
+    rejected =
+        assertThrows(
+            SubagentTaskRejectedException.class,
+            () -> runner(config()).accept(request(null, null)));
+    assertSame(conflict, rejected.getCause());
+    verify(runtime, times(2)).spawn(any(), any());
   }
 
   @Test
