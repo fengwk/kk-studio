@@ -53,7 +53,7 @@ function renderRealtime(client: QueryClient, initialProps: RealtimeProps = {}) {
       initialProps,
       wrapper: ({ children }: { children: ReactNode }) => (
         <QueryClientProvider client={client}>
-          <ApplicationEventProvider url="ws://test/api/events" socketFactory={sockets.factory}>
+          <ApplicationEventProvider url="ws://test/ws/events" socketFactory={sockets.factory}>
             {children}
           </ApplicationEventProvider>
         </QueryClientProvider>

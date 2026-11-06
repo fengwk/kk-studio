@@ -140,7 +140,7 @@ describe('ChildThreadView 只读子观察面板 QUEUED CUSTOM_MESSAGE', () => {
 
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={queryClient}>
-      <ApplicationEventProvider url="ws://test/api/events" socketFactory={sockets.factory}>
+      <ApplicationEventProvider url="ws://test/ws/events" socketFactory={sockets.factory}>
         <MemoryRouter>
           {children}
         </MemoryRouter>
@@ -340,7 +340,7 @@ describe('子线程只读环境展示', () => {
 
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={queryClient}>
-      <ApplicationEventProvider url="ws://test/api/events" socketFactory={sockets.factory}>
+      <ApplicationEventProvider url="ws://test/ws/events" socketFactory={sockets.factory}>
         <MemoryRouter>
           {children}
         </MemoryRouter>

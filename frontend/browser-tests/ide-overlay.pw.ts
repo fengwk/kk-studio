@@ -129,7 +129,7 @@ const DIRECTORY_FIXTURES: Record<string, DirectoryFixture> = {
 }
 
 async function installTransport(page: Page, state: TransportState): Promise<void> {
-  await page.routeWebSocket(/\/api\/events$/, (socket) => {
+  await page.routeWebSocket(/\/ws\/events$/, (socket) => {
     state.eventConnectionIds.push(connectionId(state.eventConnectionIds.length + 1))
     const currentConnection = state.eventConnectionIds.at(-1)!
     let connected = false

@@ -198,7 +198,7 @@ function renderPage(initialEntries: string[]) {
   const sockets = new FakeWebSocketHarness()
   return render(
     <MemoryRouter initialEntries={initialEntries}>
-      <ApplicationEventProvider url="ws://test/api/events" socketFactory={sockets.factory}>
+      <ApplicationEventProvider url="ws://test/ws/events" socketFactory={sockets.factory}>
         <Routes>
           <Route path="/canvas" element={<CanvasPage />} />
           <Route path="/canvas/:canvasId" element={<CanvasPage />} />

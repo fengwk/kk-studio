@@ -159,7 +159,7 @@ function workbenchTree(
   const sockets = new FakeWebSocketHarness()
   return (
     <QueryClientProvider client={queryClient}>
-      <ApplicationEventProvider url="ws://test/api/events" socketFactory={sockets.factory}>
+      <ApplicationEventProvider url="ws://test/ws/events" socketFactory={sockets.factory}>
         <ApplicationContributionsProvider contributions={contributions}>
           <MemoryRouter initialEntries={[entry]}>
             <Routes>

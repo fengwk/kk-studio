@@ -8,7 +8,7 @@ const THREAD_ID = '11111111-2222-4333-8444-555555555555'
 const CANVAS_ID = 'cccccccc-0000-4000-8000-000000000001'
 const threadResource = { kind: 'thread', id: THREAD_ID } as const
 const canvasResource = { kind: 'canvas', id: CANVAS_ID } as const
-const treeResource = { kind: 'tree', id: THREAD_ID } as const
+const treeResource = { kind: 'thread-tree', id: THREAD_ID } as const
 const projectsResource = { kind: 'projects' } as const
 const interactionsResource = { kind: 'interactions' } as const
 const environmentsResource = { kind: 'environments' } as const
@@ -582,7 +582,7 @@ describe('decodeServerMessage', () => {
     // tree 必须携带 canonical id；提示型全局 resource 不得携带 id。
     expect(
       decodeServerMessage(
-        JSON.stringify({  type: 'subscribed', resource: { kind: 'tree' }, cursor: '0' }),
+        JSON.stringify({  type: 'subscribed', resource: { kind: 'thread-tree' }, cursor: '0' }),
       ),
     ).toBeNull()
     expect(
@@ -645,7 +645,7 @@ describe('decodeServerMessage', () => {
     ).toBeNull()
     expect(
       decodeServerMessage(
-        JSON.stringify({ ...treeChanged, resource: { kind: 'tree', id: THREAD_ID, extra: 1 } }),
+        JSON.stringify({ ...treeChanged, resource: { kind: 'thread-tree', id: THREAD_ID, extra: 1 } }),
       ),
     ).toBeNull()
   })
@@ -737,16 +737,16 @@ describe('backend wire samples', () => {
   it('decodes the backend hint-resource frames', () => {
     expect(
       decodeServerMessage(
-        `{"type":"subscribed","resource":{"kind":"tree","id":"${THREAD_ID}"},"cursor":"0"}`,
+        `{"type":"subscribed","resource":{"kind":"thread-tree","id":"${THREAD_ID}"},"cursor":"0"}`,
       ),
-    ).toEqual({ type: 'subscribed', resource: { kind: 'tree', id: THREAD_ID }, cursor: '0' })
+    ).toEqual({ type: 'subscribed', resource: { kind: 'thread-tree', id: THREAD_ID }, cursor: '0' })
     expect(
       decodeServerMessage(
-        `{"type":"event","resource":{"kind":"tree","id":"${THREAD_ID}"},"name":"changed","data":{}}`,
+        `{"type":"event","resource":{"kind":"thread-tree","id":"${THREAD_ID}"},"name":"changed","data":{}}`,
       ),
     ).toEqual({
       type: 'event',
-      resource: { kind: 'tree', id: THREAD_ID },
+      resource: { kind: 'thread-tree', id: THREAD_ID },
       name: 'changed',
       data: {},
     })

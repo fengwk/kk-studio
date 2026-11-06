@@ -61,7 +61,7 @@ function renderTree(rootId: string, currentThreadId?: string, history = false) {
     sockets,
     ...render(
       <QueryClientProvider client={queryClient}>
-        <ApplicationEventProvider url="ws://test/api/events" socketFactory={sockets.factory}>
+        <ApplicationEventProvider url="ws://test/ws/events" socketFactory={sockets.factory}>
           <MemoryRouter>
             <TreeHarness rootId={rootId} currentThreadId={currentThreadId} history={history} />
           </MemoryRouter>
@@ -125,12 +125,12 @@ describe('ActiveThreadTree', () => {
     expect(link.closest('li')).toHaveAttribute('aria-current', 'true')
     const socket = sockets.openLatest()
     await waitFor(() => expect(socket.sentMessages()).toEqual([
-      { type: 'subscribe', resource: { kind: 'tree', id: ROOT_ID } },
+      { type: 'subscribe', resource: { kind: 'thread-tree', id: ROOT_ID } },
     ]))
     vi.mocked(harnessService.getThreadTree).mockResolvedValue([
       treeNode(ROOT_ID, null, false, 'root'), { ...worker, status: 'IDLE', outcome: 'STOPPED' },
     ])
-    act(() => socket.emitServer({ type: 'event', resource: { kind: 'tree', id: ROOT_ID }, name: 'changed', data: {} }))
+    act(() => socket.emitServer({ type: 'event', resource: { kind: 'thread-tree', id: ROOT_ID }, name: 'changed', data: {} }))
     await waitFor(() => expect(screen.getByRole('link', { name: /Explorer/ })).toHaveTextContent('停止'))
     expect(harnessService.getThreadTree).toHaveBeenLastCalledWith(WORKER_ID)
     expect(queryClient.getQueryData(['threads', 'tree', WORKER_ID])).toBeDefined()
@@ -190,7 +190,7 @@ describe('ActiveThreadTree', () => {
     expect(container.querySelector('.thread-widget-panel')).toBeNull()
     const socket = sockets.openLatest()
     await waitFor(() => expect(socket.sentMessages()).toEqual([
-      { type: 'subscribe', resource: { kind: 'tree', id: ROOT_ID } },
+      { type: 'subscribe', resource: { kind: 'thread-tree', id: ROOT_ID } },
     ]))
 
     // 子代理写入由服务端聚合到真实执行根后推送：changed 只提示回读该根，不需要固定轮询。
@@ -202,7 +202,7 @@ describe('ActiveThreadTree', () => {
     act(() => {
       socket.emitServer({
         type: 'event',
-        resource: { kind: 'tree', id: ROOT_ID },
+        resource: { kind: 'thread-tree', id: ROOT_ID },
         name: 'changed',
         data: {},
       })
@@ -223,7 +223,7 @@ describe('ActiveThreadTree', () => {
     const sockets = new FakeWebSocketHarness()
     render(
       <QueryClientProvider client={queryClient}>
-        <ApplicationEventProvider url="ws://test/api/events" socketFactory={sockets.factory}>
+        <ApplicationEventProvider url="ws://test/ws/events" socketFactory={sockets.factory}>
           <MemoryRouter>
             <ThreadNavigationContext.Provider value={observe}>
               <TreeHarness rootId={ROOT_ID} currentThreadId={WORKER_ID} />
@@ -336,7 +336,7 @@ describe('ActiveThreadTree', () => {
     expect(harnessService.getThreadTree).toHaveBeenCalledTimes(1)
     const first = sockets.openLatest()
     expect(first.sentMessages()).toEqual([
-      { type: 'subscribe', resource: { kind: 'tree', id: ROOT_ID } },
+      { type: 'subscribe', resource: { kind: 'thread-tree', id: ROOT_ID } },
     ])
 
     // 断线后管理器按退避重连：重连必须重新订阅同一执行根，并在服务端 ack 后回读，
@@ -352,13 +352,13 @@ describe('ActiveThreadTree', () => {
       const reconnected = sockets.openLatest()
       await flushApplicationEvents()
       expect(reconnected.sentMessages()).toEqual([
-        { type: 'subscribe', resource: { kind: 'tree', id: ROOT_ID } },
+        { type: 'subscribe', resource: { kind: 'thread-tree', id: ROOT_ID } },
       ])
 
       act(() => {
         reconnected.emitServer({
           type: 'subscribed',
-          resource: { kind: 'tree', id: ROOT_ID },
+          resource: { kind: 'thread-tree', id: ROOT_ID },
           cursor: '0',
         })
       })
@@ -381,7 +381,7 @@ describe('ActiveThreadTree', () => {
 
     // resync 表示服务端要求整体回读：此时不能装作本地状态仍然权威。
     act(() => {
-      socket.emitServer({ type: 'resync', resource: { kind: 'tree', id: ROOT_ID } })
+      socket.emitServer({ type: 'resync', resource: { kind: 'thread-tree', id: ROOT_ID } })
     })
     await waitFor(() => {
       expect(harnessService.getThreadTree).toHaveBeenCalledTimes(2)
@@ -397,7 +397,7 @@ describe('ActiveThreadTree', () => {
     const sockets = new FakeWebSocketHarness()
     const { unmount } = render(
       <QueryClientProvider client={queryClient}>
-        <ApplicationEventProvider url="ws://test/api/events" socketFactory={sockets.factory}>
+        <ApplicationEventProvider url="ws://test/ws/events" socketFactory={sockets.factory}>
           <MemoryRouter>
             <RefcountHarness rootId={ROOT_ID} />
           </MemoryRouter>
@@ -413,7 +413,7 @@ describe('ActiveThreadTree', () => {
     const socket = sockets.openLatest()
     await flushMicrotasks()
     expect(socket.sentMessages()).toEqual([
-      { type: 'subscribe', resource: { kind: 'tree', id: ROOT_ID } },
+      { type: 'subscribe', resource: { kind: 'thread-tree', id: ROOT_ID } },
     ])
 
     // 释放一个面板：仍有消费者，wire 订阅不拆，也不产生多余回读。
@@ -421,20 +421,20 @@ describe('ActiveThreadTree', () => {
     await flushMicrotasks()
     expect(harnessService.getThreadTree).toHaveBeenCalledTimes(1)
     expect(socket.sentMessages()).toEqual([
-      { type: 'subscribe', resource: { kind: 'tree', id: ROOT_ID } },
+      { type: 'subscribe', resource: { kind: 'thread-tree', id: ROOT_ID } },
     ])
 
     // 末次释放拆掉 wire 订阅；此后的迟到事件不得触发任何回读。
     fireEvent.click(screen.getByRole('button', { name: 'remove-all-panes' }))
     await flushMicrotasks()
     expect(socket.sentMessages()).toEqual([
-      { type: 'subscribe', resource: { kind: 'tree', id: ROOT_ID } },
-      { type: 'unsubscribe', resource: { kind: 'tree', id: ROOT_ID } },
+      { type: 'subscribe', resource: { kind: 'thread-tree', id: ROOT_ID } },
+      { type: 'unsubscribe', resource: { kind: 'thread-tree', id: ROOT_ID } },
     ])
     act(() => {
       socket.emitServer({
         type: 'event',
-        resource: { kind: 'tree', id: ROOT_ID },
+        resource: { kind: 'thread-tree', id: ROOT_ID },
         name: 'changed',
         data: {},
       })

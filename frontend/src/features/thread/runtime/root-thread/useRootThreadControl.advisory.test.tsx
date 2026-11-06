@@ -95,7 +95,7 @@ describe('useRootThreadControl advisory query lifecycle', () => {
   function wrapper({ children }: { children: ReactNode }) {
     return (
       <QueryClientProvider client={queryClient}>
-        <ApplicationEventProvider url="ws://test/api/events" socketFactory={sockets.factory}>
+        <ApplicationEventProvider url="ws://test/ws/events" socketFactory={sockets.factory}>
           {children}
         </ApplicationEventProvider>
       </QueryClientProvider>

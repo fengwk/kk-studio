@@ -1,4 +1,3 @@
-import { apiBaseUrl } from '@/shared/api/client'
 import {
   decodeServerMessage,
   encodeClientMessage,
@@ -312,12 +311,11 @@ export class ApplicationEventConnection {
   }
 }
 
-/** 由当前 api base（/api）构造 ws(s)://<host>/api/events；清除 search/hash。 */
+/** 由当前 origin 构造 ws(s)://<host>/ws/events；清除 search/hash。 */
 export function createApplicationEventUrl(): string {
-  const base = new URL(apiBaseUrl, window.location.href)
-  base.pathname = `${base.pathname.replace(/\/+$/, '')}/events`
-  base.protocol = base.protocol === 'https:' ? 'wss:' : 'ws:'
-  base.search = ''
-  base.hash = ''
-  return base.toString()
+  const url = new URL('/ws/events', window.location.href)
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+  url.search = ''
+  url.hash = ''
+  return url.toString()
 }

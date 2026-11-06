@@ -38,7 +38,7 @@ export function useActiveThreadTree(boundThreadId: string | null) {
     }
     void queryClient.invalidateQueries({ queryKey: queryKeys.threads.tree(boundThreadId) })
   }, [queryClient, boundThreadId])
-  useResourceSync(actualRootThreadId == null ? null : { kind: 'tree', id: actualRootThreadId }, {
+  useResourceSync(actualRootThreadId == null ? null : { kind: 'thread-tree', id: actualRootThreadId }, {
     sync: invalidateTree,
     syncOn: (name) => name === 'changed',
   })

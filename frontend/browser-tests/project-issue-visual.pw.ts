@@ -35,7 +35,7 @@ async function transport(page: Page, pauseReason: 'USER' | 'ERROR' | null = null
     committed: new Map<string, string>(),
     issueReads: 0,
   }
-  await page.routeWebSocket('**/api/events', (socket) => {
+  await page.routeWebSocket('**/ws/events', (socket) => {
     let connected = false
     socket.onMessage((raw) => {
       if (!connected) {

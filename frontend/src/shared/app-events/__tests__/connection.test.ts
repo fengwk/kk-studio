@@ -6,7 +6,7 @@ import {
 import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
 import type { ApplicationEventServerMessage } from '@/shared/app-events/protocol'
 
-const URL = 'ws://test/api/events'
+const URL = 'ws://test/ws/events'
 const THREAD_ID = '11111111-2222-4333-8444-555555555555'
 const CANVAS_ID = 'cccccccc-0000-4000-8000-000000000001'
 
@@ -373,10 +373,10 @@ describe('ApplicationEventConnection', () => {
 })
 
 describe('createApplicationEventUrl', () => {
-  it('builds ws://<origin>/api/events and clears search/hash', () => {
+  it('builds ws://<origin>/ws/events and clears search/hash', () => {
     window.history.replaceState({}, '', '/chats/abc?session=1#top')
     const url = createApplicationEventUrl()
-    expect(url).toBe(`ws://${window.location.host}/api/events`)
+    expect(url).toBe(`ws://${window.location.host}/ws/events`)
     expect(url).not.toContain('?')
     expect(url).not.toContain('#')
   })

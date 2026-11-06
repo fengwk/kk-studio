@@ -27,7 +27,7 @@ function renderEvents(initialProps: Props = {}) {
     {
       initialProps,
       wrapper: ({ children }: { children: ReactNode }) => (
-        <ApplicationEventProvider url="ws://test/api/events" socketFactory={sockets.factory}>
+        <ApplicationEventProvider url="ws://test/ws/events" socketFactory={sockets.factory}>
           {children}
         </ApplicationEventProvider>
       ),

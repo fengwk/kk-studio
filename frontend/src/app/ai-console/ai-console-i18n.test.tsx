@@ -56,7 +56,7 @@ function renderWithWorkbench(ui: ReactNode, path: string) {
   // 部分受测页面（如 EnvironmentsPage）依赖唯一应用事件连接：统一注入替身 WebSocket 并保持同一 Provider 契约。
   const sockets = new FakeWebSocketHarness()
   return render(
-    <ApplicationEventProvider url="ws://test/api/events" socketFactory={sockets.factory}>
+    <ApplicationEventProvider url="ws://test/ws/events" socketFactory={sockets.factory}>
       <MemoryRouter initialEntries={[`/${path}`]}>{ui}</MemoryRouter>
     </ApplicationEventProvider>,
   )

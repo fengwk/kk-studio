@@ -25,7 +25,7 @@ async function transport(page: Page) {
     snapshotReads: 0, writes: [] as Record<string, unknown>[],
     socket: null as WebSocketRoute | null,
   }
-  await page.routeWebSocket('**/api/events', (socket) => {
+  await page.routeWebSocket('**/ws/events', (socket) => {
     state.socket = socket
     let connected = false
     socket.onMessage((raw) => {
