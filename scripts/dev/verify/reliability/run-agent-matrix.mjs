@@ -34,7 +34,7 @@ import {
   writeCaseResult,
   writeSummaryAndReport,
 } from './report.mjs'
-import { assert, httpJson, pageResults, cid } from '../e2e/lib/http.mjs'
+import { assert, httpJson, listResults, cid } from '../e2e/lib/http.mjs'
 import {
   assertRootYoloEnabled,
   branchSettingsOf,
@@ -175,8 +175,8 @@ async function validatePreflight(ctx, daemonEnv) {
     ctx.call('GET', '/api/platform/tools'),
     listEnvironments(ctx),
   ])
-  const providers = pageResults(providersResponse.json)
-  const models = pageResults(modelsResponse.json)
+  const providers = listResults(providersResponse.json)
+  const models = listResults(modelsResponse.json)
   const toolCatalog = toolsResponse.json
   assert(
     Array.isArray(toolCatalog),

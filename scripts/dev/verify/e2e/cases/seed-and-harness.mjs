@@ -7,7 +7,7 @@ import {
   assertExactFields,
   expectHttpError,
   httpJson,
-  pageResults,
+  listResults,
   cid,
 } from '../lib/http.mjs'
 import {
@@ -68,7 +68,7 @@ registerCase({
   docs: 'GET /api/platform/models：按全局逻辑名完整匹配 Pi 0.82.1 快照与公开字段集合；种子持久化形态的 variant 省略 protocolOptionsJson，公开契约返回 canonical 字符串（null/空 ≡ "{}"）',
   async run(ctx) {
     const { json } = await ctx.call('GET', '/api/platform/models')
-    const models = pageResults(json)
+    const models = listResults(json)
     const actualCatalog = models
       .map((model) => ({
         provider: model.providerName,
@@ -138,7 +138,7 @@ registerCase({
       'GET',
       '/api/platform/agents',
     )
-    const agents = pageResults(agentsJson)
+    const agents = listResults(agentsJson)
     assert(agents.length > 0, 'no agents')
     const agent = agents.find((candidate) => candidate.name === 'default-assistant')
       || agents.find((candidate) => candidate.type === 'USER' && candidate.execution?.driver === 'builtin')
@@ -165,7 +165,7 @@ registerCase({
       'GET',
       '/api/platform/providers',
     )
-    const providers = pageResults(providersJson)
+    const providers = listResults(providersJson)
     const expectedProviderTypes = new Map([
       ['minimax', 'openai_responses'],
       ['openai', 'openai_responses'],
@@ -2159,7 +2159,7 @@ registerCase({
       'GET',
       '/api/platform/models',
     )
-    const model = pageResults(json)[0]
+    const model = listResults(json)[0]
     assert(model?.type === 'MODEL' && model?.providerName && model?.name && model?.config?.defaultVariant, JSON.stringify(model))
     assertExactFields(
       model,
@@ -2193,10 +2193,10 @@ function modelSelectionOf(ctx) {
 
 /** 免费控制面 case 只需一个当前 Catalog 可解析的 Agent/Model，不依赖完整 E2E seed。 */
 async function resolveAnyCatalogTarget(ctx) {
-  const agents = pageResults(
+  const agents = listResults(
     (await ctx.call('GET', '/api/platform/agents')).json,
   )
-  const models = pageResults(
+  const models = listResults(
     (await ctx.call('GET', '/api/platform/models')).json,
   )
   for (const agent of agents) {

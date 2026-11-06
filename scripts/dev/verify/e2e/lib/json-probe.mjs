@@ -17,7 +17,7 @@ import { PROVIDER_SPECS } from '../sync-provider-credentials.mjs'
 const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
 
 const document = JSON.parse(readFileSync(0, 'utf8'))
-const rows = Array.isArray(document) ? document : document?.results ?? []
+const rows = Array.isArray(document) ? document : []
 const firstModel = () => rows[0] ?? null
 
 const commands = {

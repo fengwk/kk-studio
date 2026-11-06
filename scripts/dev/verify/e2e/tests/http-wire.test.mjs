@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import test from 'node:test'
 
-import { HttpError, httpJson, pageResults } from '../lib/http.mjs'
+import { HttpError, httpJson, listResults } from '../lib/http.mjs'
 
 test('HTTP helper reads resources, empty 204 and problem details without a response wrapper', async () => {
   // Exercise the actual fetch path including the no-content and structured error cases.
@@ -42,11 +42,12 @@ test('HTTP helper reads resources, empty 204 and problem details without a respo
   }
 })
 
-test('pageResults reads the direct page or list and rejects the retired wrapper', () => {
-  // Project endpoints return arrays; catalog endpoints return a page with results.
+test('listResults reads the direct list and rejects retired envelopes', () => {
+  // 所有集合端点直接返回数组；页码分页与响应信封都已删除，对象形状一律视为契约漂移。
   const items = [{ id: 'first' }]
-  assert.equal(pageResults({ results: items }), items)
-  assert.equal(pageResults(items), items)
-  assert.throws(() => pageResults({ data: { results: items } }), /expected page\/list data/)
-  assert.throws(() => pageResults({ results: null }), /expected page\/list data/)
+  assert.equal(listResults(items), items)
+  assert.throws(() => listResults({ results: items }), /expected list data/)
+  assert.throws(() => listResults({ data: { results: items } }), /expected list data/)
+  assert.throws(() => listResults({ items, nextCursor: null }), /expected list data/)
+  assert.throws(() => listResults(null), /expected list data/)
 })

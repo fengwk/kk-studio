@@ -4,7 +4,7 @@ import {
   assert,
   assertExactFields,
   expectHttpError,
-  pageResults,
+  listResults,
   sleep,
   cid,
 } from '../lib/http.mjs'
@@ -81,7 +81,7 @@ export async function resolveRealModel(ctx, modelDef) {
     'GET',
     '/api/platform/providers',
   )
-  const providers = pageResults(providersJson)
+  const providers = listResults(providersJson)
   const provider = providers.find((candidate) => candidate.name === modelDef.providerName)
   assert(
     provider,
@@ -104,7 +104,7 @@ export async function resolveRealModel(ctx, modelDef) {
     'GET',
     '/api/platform/models',
   )
-  const models = pageResults(modelsJson)
+  const models = listResults(modelsJson)
   const model = models.find((candidate) => candidate.name === modelDef.modelName)
   assert(
     model,

@@ -10,7 +10,7 @@ import { REPOSITORY_ROOT } from '../../../tests/support/shell.mjs'
 const PROBE = path.join(REPOSITORY_ROOT, 'scripts/dev/verify/e2e/lib/json-probe.mjs')
 const probe = (args, document) =>
   spawnSync(process.execPath, [PROBE, ...args], { input: JSON.stringify(document), encoding: 'utf8' })
-const models = (first) => ({ results: first === undefined ? [] : [first] })
+const models = (first) => first === undefined ? [] : [first]
 
 test('test intent: model-config-print requires a structured config with a default variant', () => {
   const ok = probe(['model-config-print'], models({ config: { defaultVariant: 'default' } }))

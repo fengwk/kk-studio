@@ -30,7 +30,7 @@ import {
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { randomUUID } from 'node:crypto'
-import { httpJson, pageResults } from './lib/http.mjs'
+import { httpJson, listResults } from './lib/http.mjs'
 import { assertProviderExecutionBoundary } from './lib/provider-boundary.mjs'
 import { copyDistributedAppLogs, createBaseUrls, createNodeCall, runDistributedCommand } from './lib/distributed.mjs'
 import { redactSecrets } from './lib/redact.mjs'
@@ -461,7 +461,7 @@ async function verifyProviderExecutionBoundary(args) {
     'GET',
     '/api/platform/providers',
   )
-  assertProviderExecutionBoundary({ real: false, providers: pageResults(json) })
+  assertProviderExecutionBoundary({ real: false, providers: listResults(json) })
   console.log('Provider boundary: free mode confirmed every provider is unconfigured')
 }
 
