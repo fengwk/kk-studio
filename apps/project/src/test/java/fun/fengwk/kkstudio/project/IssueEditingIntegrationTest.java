@@ -544,23 +544,36 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
   @Test
   void archiveAndUnarchiveProjectTogglesArchivedAtAndFilterMembership() {
     Project project = projectService.createProject("生命周期项目", "描述", true);
+    Project activeProject = projectService.createProject("保持活跃项目", "描述", true);
 
     assertTrue(
         projectService.listProjects(false).stream()
             .anyMatch(p -> p.getId().equals(project.getId())));
     assertTrue(
+        projectService.listProjects(false).stream()
+            .anyMatch(p -> p.getId().equals(activeProject.getId())));
+    assertTrue(
         projectService.listProjects(true).stream()
             .anyMatch(p -> p.getId().equals(project.getId())));
+    assertTrue(
+        projectService.listProjects(true).stream()
+            .anyMatch(p -> p.getId().equals(activeProject.getId())));
 
-    // 归档
+    // 归档：默认列表只保留活跃项目，includeArchived 同时返回两者。
     Project archived = projectService.archiveProject(project.getId(), 0L);
     assertTrue(archived.isArchived());
     assertFalse(
         projectService.listProjects(false).stream()
             .anyMatch(p -> p.getId().equals(project.getId())));
     assertTrue(
+        projectService.listProjects(false).stream()
+            .anyMatch(p -> p.getId().equals(activeProject.getId())));
+    assertTrue(
         projectService.listProjects(true).stream()
             .anyMatch(p -> p.getId().equals(project.getId())));
+    assertTrue(
+        projectService.listProjects(true).stream()
+            .anyMatch(p -> p.getId().equals(activeProject.getId())));
 
     // 当前版本重复归档返回当前事实；陈旧版本冲突。
     Project reArchived = projectService.archiveProject(project.getId(), 1L);

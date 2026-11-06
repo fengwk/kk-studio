@@ -184,6 +184,7 @@ registerCase({
   async run(ctx) {
     const suffix = cid().slice(0, 8)
     let project = null
+    let activeProject = null
     try {
       const createdProject = await ctx.call('POST', '/api/project/projects', {
         title: `E2E Project ${suffix}`,
@@ -703,6 +704,13 @@ registerCase({
         JSON.stringify(remaining.referencedStateCodes),
       )
 
+      // 保留一个活跃项目作对照：includeArchived 必须同时返回活跃与已归档项目。
+      activeProject = (
+        await ctx.call('POST', '/api/project/projects', {
+          title: `E2E Active Project ${suffix}`,
+          description: 'Project kept active for archive listing',
+        })
+      ).json
       project = (
           await ctx.call('POST', `/api/project/projects/${project.id}/archive`, {
             expectedVersion: project.version,
@@ -719,17 +727,16 @@ registerCase({
       )
       const activeProjects = (await ctx.call('GET', '/api/project/projects')).json
       assert(
-        !activeProjects.some((candidate) => candidate.id === project.id),
-        'archived Project must not appear in the default list',
+        !activeProjects.some((candidate) => candidate.id === project.id) &&
+          activeProjects.some((candidate) => candidate.id === activeProject.id),
+        'default list must contain active Projects only',
       )
       const archivedProjects = (
         await ctx.call('GET', '/api/project/projects?includeArchived=true')
       ).json
       assert(
-        activeProjects.every((active) =>
-          archivedProjects.some((candidate) => candidate.id === active.id),
-        ) &&
-          archivedProjects.some((candidate) => candidate.id === project.id),
+        archivedProjects.some((candidate) => candidate.id === project.id) &&
+          archivedProjects.some((candidate) => candidate.id === activeProject.id),
         'includeArchived=true must list both active and archived projects',
       )
       project = (
@@ -743,6 +750,9 @@ registerCase({
       await expectHttpError(() => ctx.call('GET', `/api/project/projects/${project.id}`), { status: 404 })
       project = null
     } finally {
+      if (activeProject?.id) {
+        await deleteProjectIfPresent(ctx, activeProject.id)
+      }
       if (project?.id) {
         await deleteProjectIfPresent(ctx, project.id)
       }
