@@ -18,6 +18,8 @@ import fun.fengwk.kkstudio.platform.http.ApiResponse;
 import fun.fengwk.kkstudio.platform.http.DomainErrorResponses;
 import fun.fengwk.kkstudio.platform.http.DomainErrorStatus;
 import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
+import fun.fengwk.kkstudio.project.http.IssueController;
+import fun.fengwk.kkstudio.project.http.ProjectController;
 import fun.fengwk.kkstudio.web.controller.StudioAgentDefinitionController;
 import fun.fengwk.kkstudio.web.controller.StudioAgentModelController;
 import fun.fengwk.kkstudio.web.controller.StudioAgentProviderController;
@@ -52,6 +54,8 @@ import java.util.Map;
       CanvasFunctionController.class,
       CanvasResourceController.class,
       ChatController.class,
+      IssueController.class,
+      ProjectController.class,
       StudioMcpServerController.class,
       StudioSessionFileController.class,
       StudioEnvironmentController.class,

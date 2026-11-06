@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.project.service;
 
-import fun.fengwk.kkstudio.project.error.ProjectDuplicateException;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.project.model.IssueActivity;
 import fun.fengwk.kkstudio.project.model.IssueActivityKind;
 import fun.fengwk.kkstudio.project.repo.IssueActivityRepository;
@@ -84,7 +84,7 @@ final class IssueActivityIdempotency {
       return null;
     }
     if (!identity.requestHash().equals(existing.getRequestHash())) {
-      throw new ProjectDuplicateException(
+      throw DomainException.duplicate(
           "issue_activity", "Request key was reused with a different request payload");
     }
     return existing;

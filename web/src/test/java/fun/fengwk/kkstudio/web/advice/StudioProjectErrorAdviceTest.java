@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.project.http;
+package fun.fengwk.kkstudio.web.advice;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -10,21 +10,21 @@ import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.BindException;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
 import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
-import fun.fengwk.kkstudio.project.error.ProjectDuplicateException;
-import fun.fengwk.kkstudio.project.error.ProjectNotFoundException;
-import fun.fengwk.kkstudio.project.error.ProjectValidationException;
-import fun.fengwk.kkstudio.project.error.ProjectVersionConflictException;
 
 import java.util.Locale;
 import java.util.Map;
 
-class ProjectErrorAdviceTest {
+class StudioProjectErrorAdviceTest {
 
-  private final ProjectErrorAdvice advice = new ProjectErrorAdvice(new StudioMessageService());
+  private final StudioProjectLegacyErrorAdvice advice =
+      new StudioProjectLegacyErrorAdvice(new StudioMessageService());
+  private final StudioDomainErrorAdvice domain =
+      new StudioDomainErrorAdvice(new StudioMessageService());
 
   @BeforeEach
   void pinEnglishLocale() {
@@ -38,29 +38,37 @@ class ProjectErrorAdviceTest {
 
   @Test
   void handlesVersionConflict() {
-    ProjectVersionConflictException ex = new ProjectVersionConflictException("project", "1", "2");
-    ResponseEntity<ApiResponse<Void>> response = advice.handleVersionConflict(ex);
+    DomainException ex = DomainException.versionConflict("project", "1", "2");
+    ResponseEntity<ApiResponse<Void>> response = domain.handle(ex);
 
     assertEquals(409, response.getStatusCode().value());
     ApiResponse<Void> body = response.getBody();
     assertNotNull(body);
-    assertEquals("PROJECT_VERSION_CONFLICT", body.getCode());
+    assertEquals("version_conflict", body.getCode());
     assertEquals("The project was modified by another request.", body.getMessage());
     assertEquals(
-        Map.of("resource", "project", "expectedVersion", "1", "actualVersion", "2"),
+        Map.of(
+            "resource",
+            "project",
+            "expectedVersion",
+            "1",
+            "actualVersion",
+            "2",
+            "detail",
+            ex.getMessage()),
         body.getErrors());
   }
 
   @Test
   void handlesDuplicateConflict() {
-    ProjectDuplicateException ex =
-        new ProjectDuplicateException("stage_budget", "Stage budget is already authorized");
-    ResponseEntity<ApiResponse<Void>> response = advice.handleDuplicate(ex);
+    DomainException ex =
+        DomainException.duplicate("stage_budget", "Stage budget is already authorized");
+    ResponseEntity<ApiResponse<Void>> response = domain.handle(ex);
 
     assertEquals(409, response.getStatusCode().value());
     ApiResponse<Void> body = response.getBody();
     assertNotNull(body);
-    assertEquals("PROJECT_DUPLICATE_CONFLICT", body.getCode());
+    assertEquals("duplicate", body.getCode());
     assertEquals(
         Map.of("resource", "stage_budget", "detail", "Stage budget is already authorized"),
         body.getErrors());
@@ -82,14 +90,14 @@ class ProjectErrorAdviceTest {
 
   @Test
   void handlesResourceNotFound() {
-    ProjectNotFoundException ex = new ProjectNotFoundException("issue");
-    ResponseEntity<ApiResponse<Void>> response = advice.handleResourceNotFound(ex);
+    DomainException ex = DomainException.notFound("issue");
+    ResponseEntity<ApiResponse<Void>> response = domain.handle(ex);
 
     assertEquals(404, response.getStatusCode().value());
     ApiResponse<Void> body = response.getBody();
     assertNotNull(body);
-    assertEquals("PROJECT_RESOURCE_NOT_FOUND", body.getCode());
-    assertEquals(Map.of("resource", "issue"), body.getErrors());
+    assertEquals("not_found", body.getCode());
+    assertEquals(Map.of("resource", "issue", "detail", ex.getMessage()), body.getErrors());
   }
 
   @Test
@@ -106,14 +114,14 @@ class ProjectErrorAdviceTest {
 
   @Test
   void handlesValidationAndRuntime() {
-    ProjectValidationException ex = new ProjectValidationException("title", "title is required");
-    ResponseEntity<ApiResponse<Void>> response = advice.handleValidation(ex);
+    DomainException ex = DomainException.validation("title", "title is required");
+    ResponseEntity<ApiResponse<Void>> response = domain.handle(ex);
 
     assertEquals(400, response.getStatusCode().value());
     ApiResponse<Void> body = response.getBody();
     assertNotNull(body);
-    assertEquals("PROJECT_VALIDATION_ERROR", body.getCode());
-    assertEquals(Map.of("detail", "title is required"), body.getErrors());
+    assertEquals("validation", body.getCode());
+    assertEquals(Map.of("resource", "title", "detail", "title is required"), body.getErrors());
 
     ResponseEntity<ApiResponse<Void>> internal =
         advice.handleIllegalState(new IllegalStateException("sensitive internal state"));
@@ -137,18 +145,26 @@ class ProjectErrorAdviceTest {
     LocaleContextHolder.setLocale(Locale.SIMPLIFIED_CHINESE);
 
     ResponseEntity<ApiResponse<Void>> conflict =
-        advice.handleVersionConflict(new ProjectVersionConflictException("project", "1", "2"));
+        domain.handle(DomainException.versionConflict("project", "1", "2"));
     assertNotNull(conflict.getBody());
     assertEquals("项目 已被其他请求修改。", conflict.getBody().getMessage());
     assertEquals(
-        Map.of("resource", "project", "expectedVersion", "1", "actualVersion", "2"),
+        Map.of(
+            "resource",
+            "project",
+            "expectedVersion",
+            "1",
+            "actualVersion",
+            "2",
+            "detail",
+            "project version conflict: expected=1 actual=2"),
         conflict.getBody().getErrors());
 
-    ResponseEntity<ApiResponse<Void>> notFound =
-        advice.handleResourceNotFound(new ProjectNotFoundException("issue"));
+    ResponseEntity<ApiResponse<Void>> notFound = domain.handle(DomainException.notFound("issue"));
     assertNotNull(notFound.getBody());
     assertEquals("未找到 Issue。", notFound.getBody().getMessage());
-    assertEquals(Map.of("resource", "issue"), notFound.getBody().getErrors());
+    assertEquals(
+        Map.of("resource", "issue", "detail", "issue not found"), notFound.getBody().getErrors());
 
     ResponseEntity<ApiResponse<Void>> internal =
         advice.handleIllegalState(new IllegalStateException("sensitive internal state"));

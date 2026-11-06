@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.project.service;
 
+import static fun.fengwk.kkstudio.project.ProjectTestAssertions.assertValidation;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -19,6 +20,7 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.ObjectProvider;
 import tools.jackson.databind.json.JsonMapper;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
@@ -36,7 +38,6 @@ import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.platform.harness.task.AgentBranchSettingsMaterializer;
 import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
-import fun.fengwk.kkstudio.project.error.ProjectValidationException;
 import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.IssueRun;
 import fun.fengwk.kkstudio.project.model.Project;
@@ -196,8 +197,7 @@ class IssueRunServiceTest {
     when(projectRepository.lockForShare(PROJECT_ID)).thenReturn(project());
     when(issueRepository.lockById(ISSUE_ID)).thenReturn(issue);
 
-    ProjectValidationException error =
-        assertThrows(ProjectValidationException.class, () -> service.acceptRun(ISSUE_ID, "start"));
+    DomainException error = assertValidation(() -> service.acceptRun(ISSUE_ID, "start"));
     assertTrue(error.getMessage().contains("not in an executable work stage"));
     verify(threadExecutions, never()).submitRunTask(any());
     verify(issueRunRepository, never()).insert(any());
@@ -217,8 +217,7 @@ class IssueRunServiceTest {
     when(projectRepository.lockForShare(PROJECT_ID)).thenReturn(project);
     when(issueRepository.lockById(ISSUE_ID)).thenReturn(issue);
 
-    ProjectValidationException error =
-        assertThrows(ProjectValidationException.class, () -> service.acceptRun(ISSUE_ID, "start"));
+    DomainException error = assertValidation(() -> service.acceptRun(ISSUE_ID, "start"));
     assertTrue(error.getMessage().contains("no enabled agent"));
     verify(stageBudgetRepository, never()).insert(any(), any());
     verify(threadExecutions, never()).submitRunTask(any());
@@ -234,13 +233,11 @@ class IssueRunServiceTest {
     when(issueRepository.lockById(ISSUE_ID)).thenReturn(issue);
 
     project.setArchivedAt(Instant.now());
-    ProjectValidationException projectError =
-        assertThrows(ProjectValidationException.class, () -> service.acceptRun(ISSUE_ID, "start"));
+    DomainException projectError = assertValidation(() -> service.acceptRun(ISSUE_ID, "start"));
     assertTrue(projectError.getMessage().contains("archived project"));
     project.setArchivedAt(null);
     issue.setArchivedAt(Instant.now());
-    ProjectValidationException issueError =
-        assertThrows(ProjectValidationException.class, () -> service.acceptRun(ISSUE_ID, "start"));
+    DomainException issueError = assertValidation(() -> service.acceptRun(ISSUE_ID, "start"));
     assertTrue(issueError.getMessage().contains("archived issue"));
     verify(threadExecutions, never()).submitRunTask(any());
     verify(issueRunRepository, never()).insert(any());
@@ -309,26 +306,19 @@ class IssueRunServiceTest {
     // 不合法状态和跨终态字段不能访问持久化或被幂等重放掩盖。
     UUID runId = UUID.randomUUID();
     UUID end = UUID.randomUUID();
-    assertThrows(
-        ProjectValidationException.class,
+    assertValidation(
         () -> service.finishRun(runId, 0, "key", IssueRunStatus.RUNNING, end, null, null, null));
-    assertThrows(
-        ProjectValidationException.class,
-        () -> service.finishRun(runId, 0, "key", null, end, null, null, null));
-    assertThrows(
-        ProjectValidationException.class,
+    assertValidation(() -> service.finishRun(runId, 0, "key", null, end, null, null, null));
+    assertValidation(
         () ->
             service.finishRun(runId, 0, "key", IssueRunStatus.COMPLETED, end, null, null, "error"));
-    assertThrows(
-        ProjectValidationException.class,
+    assertValidation(
         () -> service.finishRun(runId, 0, "key", IssueRunStatus.CANCELLED, end, end, null, null));
-    assertThrows(
-        ProjectValidationException.class,
+    assertValidation(
         () ->
             service.finishRun(
                 runId, 0, "key", IssueRunStatus.FAILED, end, null, "REVIEW", "error"));
-    assertThrows(
-        ProjectValidationException.class,
+    assertValidation(
         () -> service.finishRun(runId, 0, "key", IssueRunStatus.FAILED, end, null, null, null));
     verify(issueRunRepository, never()).getById(any());
   }
@@ -370,12 +360,12 @@ class IssueRunServiceTest {
     when(issueRepository.lockById(ISSUE_ID)).thenReturn(issue());
     when(issueRunRepository.lockById(runId)).thenReturn(run);
 
-    assertThrows(ProjectValidationException.class, () -> service.waitRun(runId, 1));
+    assertValidation(() -> service.waitRun(runId, 1));
     run.setStatus(IssueRunStatus.WAITING);
-    assertThrows(ProjectValidationException.class, () -> service.resumeRun(runId, 1));
+    assertValidation(() -> service.resumeRun(runId, 1));
     run.setStatus(IssueRunStatus.FAILED);
-    assertThrows(ProjectValidationException.class, () -> service.resumeRun(runId, 1));
-    assertThrows(ProjectValidationException.class, () -> service.waitRun(runId, 1));
+    assertValidation(() -> service.resumeRun(runId, 1));
+    assertValidation(() -> service.waitRun(runId, 1));
     verify(issueRunRepository, never()).updateById(any(), anyLong());
   }
 

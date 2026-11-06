@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.project;
 
+import static fun.fengwk.kkstudio.project.ProjectTestAssertions.assertValidation;
+import static fun.fengwk.kkstudio.project.ProjectTestAssertions.assertVersionConflict;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -24,8 +26,6 @@ import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
-import fun.fengwk.kkstudio.project.error.ProjectValidationException;
-import fun.fengwk.kkstudio.project.error.ProjectVersionConflictException;
 import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.IssueActivity;
 import fun.fengwk.kkstudio.project.model.IssueActivityKind;
@@ -255,16 +255,13 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
     assertEquals(failedIssue.getPauseDetail(), stoppedAgain.getPauseDetail());
 
     // 1. transition 拒绝：暂停门禁未解除
-    assertThrows(
-        ProjectValidationException.class,
+    assertValidation(
         () ->
             issueLifecycleService.transition(
                 stoppedAgain.getId(), stoppedAgain.getVersion(), key("t"), "REVIEW"));
 
     // 2. acceptRun 拒绝：门禁关闭不做自动重试
-    assertThrows(
-        ProjectValidationException.class,
-        () -> issueRunService.acceptRun(failedIssue.getId(), key("a")));
+    assertValidation(() -> issueRunService.acceptRun(failedIssue.getId(), key("a")));
 
     // 3. Reconciler 即使被唤醒也收敛而不新建 Run
     issueWorkQueue.request(issue.getId(), Duration.ZERO);
@@ -414,9 +411,7 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
 
     // 1. 项目删除被拒绝（Issue 2 有活动 Run）
     Project project = projectService.getProject(projectId);
-    assertThrows(
-        ProjectValidationException.class,
-        () -> projectService.deleteProject(projectId, project.getVersion()));
+    assertValidation(() -> projectService.deleteProject(projectId, project.getVersion()));
 
     // 2. 将 Issue 2 的结果不明收尾为 FAILED + ERROR 暂停
     issueRunService.finishRun(
@@ -538,16 +533,13 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
     assertEquals(archived.getId(), archived2.getId());
 
     // 在已归档 Issue 上尝试修改需求、评论、流转等操作均被拒绝
-    assertThrows(
-        ProjectValidationException.class,
+    assertValidation(
         () -> issueEditingService.updateIssue(archived.getId(), archived.getVersion(), "T", "D"));
-    assertThrows(
-        ProjectValidationException.class,
+    assertValidation(
         () ->
             issueEditingService.appendActivity(
                 archived.getId(), archived.getVersion(), "COMMENT", key("c"), "body"));
-    assertThrows(
-        ProjectValidationException.class,
+    assertValidation(
         () ->
             issueLifecycleService.transition(
                 archived.getId(), archived.getVersion(), key("t"), "DESIGN"));
@@ -578,8 +570,7 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
 
     // 非活动 Run 时投递指示拒绝
     Issue withComment = issueEditingService.getIssue(issue.getId());
-    assertThrows(
-        ProjectValidationException.class,
+    assertValidation(
         () ->
             issueEditingService.appendActivity(
                 withComment.getId(),
@@ -594,8 +585,7 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
         issueLifecycleService.transition(fresh.getId(), fresh.getVersion(), key("t1"), "DESIGN");
 
     // 非 BLOCKED 状态调用 recover 拒绝
-    assertThrows(
-        ProjectValidationException.class,
+    assertValidation(
         () ->
             issueLifecycleService.recoverIssue(
                 inDesign.getId(), inDesign.getVersion(), key("rec_err")));
@@ -667,13 +657,10 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
     UUID projectId = createProjectWithStages("CasProj", agent, agent, 3);
     Issue issue = createIssue(projectId);
 
-    assertThrows(
-        ProjectVersionConflictException.class,
-        () -> issueLifecycleService.deleteIssue(issue.getId(), 999L));
+    assertVersionConflict(() -> issueLifecycleService.deleteIssue(issue.getId(), 999L));
 
     Project project = projectService.getProject(projectId);
-    assertThrows(
-        ProjectVersionConflictException.class, () -> projectService.deleteProject(projectId, 999L));
+    assertVersionConflict(() -> projectService.deleteProject(projectId, 999L));
   }
 
   private WorkClaim claimWork() {

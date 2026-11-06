@@ -19,6 +19,8 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.api.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.api.history.EntryPayload;
@@ -35,7 +37,6 @@ import fun.fengwk.kkstudio.platform.storage.StorageMaintenance;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
-import fun.fengwk.kkstudio.project.error.ProjectValidationException;
 import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.IssueRun;
 import fun.fengwk.kkstudio.project.model.Project;
@@ -263,11 +264,14 @@ class IssueEvidenceLifecycleIntegrationTest extends WebPostgresTestSupport {
     IssueRun run = issueRunService.acceptRun(fixture.issueId(), "req:accept:" + UUID.randomUUID());
 
     // 活动 Run 拒绝删除
-    assertThrows(
-        ProjectValidationException.class,
-        () ->
-            projectService.deleteProject(
-                fixture.projectId(), projectService.getProject(fixture.projectId()).getVersion()));
+    DomainException error =
+        assertThrows(
+            DomainException.class,
+            () ->
+                projectService.deleteProject(
+                    fixture.projectId(),
+                    projectService.getProject(fixture.projectId()).getVersion()));
+    assertEquals(DomainErrorCode.VALIDATION, error.code());
 
     // 结果未知的失败收尾（FAILED + ERROR 暂停）不是删除门禁：只要 Run 已收尾就可以深删除
     UUID endEntryId = appendHistoryEntry(run.getThreadId(), run.getSessionId());

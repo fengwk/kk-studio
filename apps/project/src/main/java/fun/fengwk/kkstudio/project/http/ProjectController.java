@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.common.number.DecimalLongs;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
@@ -26,7 +27,6 @@ import fun.fengwk.kkstudio.project.dto.ProjectVersionRequestDTO;
 import fun.fengwk.kkstudio.project.dto.UpdateProjectRequestDTO;
 import fun.fengwk.kkstudio.project.dto.UpdateProjectWorkflowRequestDTO;
 import fun.fengwk.kkstudio.project.dto.UpdateProjectYoloRequestDTO;
-import fun.fengwk.kkstudio.project.error.ProjectNotFoundException;
 import fun.fengwk.kkstudio.project.model.Project;
 import fun.fengwk.kkstudio.project.service.ProjectService;
 import fun.fengwk.kkstudio.project.service.ProjectSnapshotAssembler;
@@ -90,7 +90,7 @@ public class ProjectController {
     UUID projectId = Uuids.parseCanonical(projectIdStr, "projectId");
     Project project = projectService.getProject(projectId);
     if (project == null) {
-      throw new ProjectNotFoundException("project");
+      throw DomainException.notFound("project");
     }
     return ApiResponse.ok(mapper.toDto(project));
   }

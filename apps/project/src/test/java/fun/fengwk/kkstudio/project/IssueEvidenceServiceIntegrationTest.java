@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.project;
 
+import static fun.fengwk.kkstudio.project.ProjectTestAssertions.assertNotFound;
+import static fun.fengwk.kkstudio.project.ProjectTestAssertions.assertValidation;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -36,8 +38,6 @@ import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService.ReadyUp
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService.StagedUpload;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobState;
-import fun.fengwk.kkstudio.project.error.ProjectNotFoundException;
-import fun.fengwk.kkstudio.project.error.ProjectValidationException;
 import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.IssueEvidence;
 import fun.fengwk.kkstudio.project.model.IssueRun;
@@ -277,8 +277,7 @@ class IssueEvidenceServiceIntegrationTest extends ProjectTestSupport {
     UUID blobId = UUID.randomUUID();
     insertStorageBlob(blobId);
 
-    assertThrows(
-        ProjectValidationException.class,
+    assertValidation(
         () ->
             issueEvidenceService.publishBlob(
                 issue2.getId(), agent, runOfIssue1.getId(), blobId, "evidence.txt"));
@@ -321,8 +320,7 @@ class IssueEvidenceServiceIntegrationTest extends ProjectTestSupport {
     UUID blobId = UUID.randomUUID();
     insertStorageBlob(blobId);
 
-    assertThrows(
-        ProjectValidationException.class,
+    assertValidation(
         () ->
             issueEvidenceService.publishBlob(
                 issue.getId(), null, UUID.randomUUID(), blobId, "test.txt"));
@@ -339,8 +337,7 @@ class IssueEvidenceServiceIntegrationTest extends ProjectTestSupport {
     UUID blobId = UUID.randomUUID();
     insertStorageBlob(blobId);
 
-    assertThrows(
-        ProjectValidationException.class,
+    assertValidation(
         () -> issueEvidenceService.publishBlob(issue.getId(), null, null, blobId, "test.txt"));
   }
 
@@ -374,9 +371,7 @@ class IssueEvidenceServiceIntegrationTest extends ProjectTestSupport {
   void publishHumanUploadNonExistentIssueThrowsNotFound() {
     UUID uploadId = UUID.randomUUID();
     UUID nonExistentIssueId = UUID.randomUUID();
-    assertThrows(
-        ProjectNotFoundException.class,
-        () -> issueEvidenceService.publishHumanUpload(nonExistentIssueId, uploadId));
+    assertNotFound(() -> issueEvidenceService.publishHumanUpload(nonExistentIssueId, uploadId));
   }
 
   /** 人工上传目标 Issue 已归档时拒绝发布。 */
@@ -388,9 +383,7 @@ class IssueEvidenceServiceIntegrationTest extends ProjectTestSupport {
         "update project_issue set archived_at = clock_timestamp() where id = ?", issue.getId());
     UUID uploadId = UUID.randomUUID();
 
-    assertThrows(
-        ProjectValidationException.class,
-        () -> issueEvidenceService.publishHumanUpload(issue.getId(), uploadId));
+    assertValidation(() -> issueEvidenceService.publishHumanUpload(issue.getId(), uploadId));
   }
 
   /** 发布 Blob 证据时 blobId 必须非空。 */
@@ -399,8 +392,7 @@ class IssueEvidenceServiceIntegrationTest extends ProjectTestSupport {
     UUID projectId = createProject();
     Issue issue = createIssue(projectId);
 
-    assertThrows(
-        ProjectValidationException.class,
+    assertValidation(
         () -> issueEvidenceService.publishBlob(issue.getId(), null, null, null, "test.pdf"));
   }
 
@@ -410,8 +402,7 @@ class IssueEvidenceServiceIntegrationTest extends ProjectTestSupport {
     UUID blobId = UUID.randomUUID();
     UUID nonExistentIssueId = UUID.randomUUID();
 
-    assertThrows(
-        ProjectNotFoundException.class,
+    assertNotFound(
         () ->
             issueEvidenceService.publishBlob(nonExistentIssueId, null, null, blobId, "report.pdf"));
   }
@@ -425,8 +416,7 @@ class IssueEvidenceServiceIntegrationTest extends ProjectTestSupport {
     UUID blobId = UUID.randomUUID();
     insertStorageBlob(blobId);
 
-    assertThrows(
-        ProjectNotFoundException.class,
+    assertNotFound(
         () ->
             issueEvidenceService.publishBlob(
                 issue.getId(), agent, UUID.randomUUID(), blobId, "report.pdf"));
@@ -484,8 +474,7 @@ class IssueEvidenceServiceIntegrationTest extends ProjectTestSupport {
   /** 不存在的 Issue 不应伪装成空证据列表。 */
   @Test
   void listEvidenceRejectsMissingIssue() {
-    assertThrows(
-        ProjectNotFoundException.class, () -> issueEvidenceService.listEvidence(UUID.randomUUID()));
+    assertNotFound(() -> issueEvidenceService.listEvidence(UUID.randomUUID()));
   }
 
   /**

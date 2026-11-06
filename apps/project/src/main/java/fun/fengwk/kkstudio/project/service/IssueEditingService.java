@@ -4,9 +4,8 @@ import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowReservedState;
-import fun.fengwk.kkstudio.project.error.ProjectNotFoundException;
-import fun.fengwk.kkstudio.project.error.ProjectValidationException;
 import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.IssueActivity;
 import fun.fengwk.kkstudio.project.model.IssueActivityActorType;
@@ -54,11 +53,10 @@ public class IssueEditingService {
     Objects.requireNonNull(projectId, "projectId");
     Project project = projectRepository.getById(projectId);
     if (project == null) {
-      throw new ProjectNotFoundException("project");
+      throw DomainException.notFound("project");
     }
     if (project.isArchived()) {
-      throw new ProjectValidationException(
-          "project", "Cannot create an issue in an archived project");
+      throw DomainException.validation("project", "Cannot create an issue in an archived project");
     }
     String validTitle =
         ProjectValidationUtils.requireDisplayName(
@@ -188,7 +186,7 @@ public class IssueEditingService {
     IssueRun activeRun = issueRunRepository.lockActiveByIssueId(issueId);
     if (activeRun == null) {
       // 没有活动 Run 时不构造隐藏的未来阶段消息队列：先明确启动或恢复。
-      throw new ProjectValidationException(
+      throw DomainException.validation(
           "issue",
           "Cannot deliver an instruction without an active run; start or resume the issue first");
     }
@@ -215,7 +213,7 @@ public class IssueEditingService {
     Objects.requireNonNull(issueId, "issueId");
     getIssue(issueId);
     if (afterSequence < 0) {
-      throw new ProjectValidationException("afterSequence", "afterSequence must be non-negative");
+      throw DomainException.validation("afterSequence", "afterSequence must be non-negative");
     }
     return issueActivityRepository.listPage(issueId, afterSequence, clampLimit(limit));
   }
@@ -229,7 +227,7 @@ public class IssueEditingService {
 
   private static int clampLimit(int limit) {
     if (limit <= 0) {
-      throw new ProjectValidationException("limit", "limit must be positive");
+      throw DomainException.validation("limit", "limit must be positive");
     }
     return Math.min(limit, MAX_ACTIVITY_LIMIT);
   }

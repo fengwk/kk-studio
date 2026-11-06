@@ -1,5 +1,8 @@
 package fun.fengwk.kkstudio.project;
 
+import static fun.fengwk.kkstudio.project.ProjectTestAssertions.assertDuplicate;
+import static fun.fengwk.kkstudio.project.ProjectTestAssertions.assertValidation;
+import static fun.fengwk.kkstudio.project.ProjectTestAssertions.assertVersionConflict;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -12,10 +15,8 @@ import static org.mockito.Mockito.doAnswer;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
-import fun.fengwk.kkstudio.project.error.ProjectDuplicateException;
-import fun.fengwk.kkstudio.project.error.ProjectValidationException;
-import fun.fengwk.kkstudio.project.error.ProjectVersionConflictException;
 import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.IssueRun;
 import fun.fengwk.kkstudio.project.model.Project;
@@ -245,10 +246,8 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
     IssueRun replayed = issueRunService.acceptRun(issue.getId(), acceptKey);
     assertEquals(accepted.getId(), replayed.getId());
     assertEquals(IssueRunStatus.CANCELLED, replayed.getStatus());
-    ProjectValidationException rejected =
-        assertThrows(
-            ProjectValidationException.class,
-            () -> issueRunService.acceptRun(issue.getId(), key("accept")));
+    DomainException rejected =
+        assertValidation(() -> issueRunService.acceptRun(issue.getId(), key("accept")));
     assertTrue(rejected.getMessage().contains("gate is closed"), rejected.getMessage());
     assertEquals(
         1L, count("select count(*) from project_issue_run where issue_id = ?", issue.getId()));
@@ -263,10 +262,8 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
     issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun active = issueRunService.acceptRun(issue.getId(), key("accept"));
 
-    ProjectValidationException rejected =
-        assertThrows(
-            ProjectValidationException.class,
-            () -> issueRunService.acceptRun(issue.getId(), key("accept")));
+    DomainException rejected =
+        assertValidation(() -> issueRunService.acceptRun(issue.getId(), key("accept")));
 
     assertTrue(rejected.getMessage().contains("active run"), rejected.getMessage());
     assertEquals(active.getId(), issueRunRepository.getActiveByIssueId(issue.getId()).getId());
@@ -299,8 +296,7 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
         "run:" + acceptKey,
         "b".repeat(64));
 
-    assertThrows(
-        ProjectDuplicateException.class, () -> issueRunService.acceptRun(issue.getId(), acceptKey));
+    assertDuplicate(() -> issueRunService.acceptRun(issue.getId(), acceptKey));
 
     assertEquals(0L, count("select count(*) from harness_session"));
     assertEquals(0L, count("select count(*) from harness_thread"));
@@ -618,8 +614,7 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
         null,
         null);
 
-    assertThrows(
-        ProjectDuplicateException.class,
+    assertDuplicate(
         () ->
             issueRunService.finishRun(
                 run.getId(),
@@ -652,8 +647,7 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
     UUID end = appendHistoryEntry(run.getThreadId());
     long stale = run.getVersion();
     issueRunService.waitRun(run.getId(), stale);
-    assertThrows(
-        ProjectVersionConflictException.class,
+    assertVersionConflict(
         () ->
             issueRunService.finishRun(
                 run.getId(),
@@ -664,8 +658,7 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
                 null,
                 null,
                 null));
-    assertThrows(
-        ProjectVersionConflictException.class,
+    assertVersionConflict(
         () ->
             issueRunService.finishRun(
                 run.getId(),
@@ -676,8 +669,7 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
                 null,
                 null,
                 null));
-    assertThrows(
-        ProjectVersionConflictException.class,
+    assertVersionConflict(
         () ->
             issueRunService.finishRun(
                 run.getId(), stale, key("fail"), IssueRunStatus.FAILED, end, null, null, "失败"));
@@ -699,8 +691,7 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
     UUID detachedEntryId = insertDetachedEntry(run.getThreadId());
 
     long activityCountBeforeRejection = activityCount(run.getIssueId());
-    assertThrows(
-        ProjectValidationException.class,
+    assertValidation(
         () ->
             issueRunService.finishRun(
                 run.getId(),
@@ -711,8 +702,7 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
                 null,
                 "REVIEW",
                 null));
-    assertThrows(
-        ProjectValidationException.class,
+    assertValidation(
         () ->
             issueRunService.finishRun(
                 run.getId(),
@@ -741,8 +731,7 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
     UUID endEntryId = appendHistoryEntry(run.getThreadId());
 
-    assertThrows(
-        ProjectValidationException.class,
+    assertValidation(
         () ->
             issueRunService.finishRun(
                 run.getId(),
@@ -782,9 +771,7 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
     assertEquals("ERROR", issueEditingService.getIssue(issue.getId()).getPauseReason());
 
     // 门禁关闭期间不自动重试：新 Run 被拒绝，必须由显式 resume 解除。
-    assertThrows(
-        ProjectValidationException.class,
-        () -> issueRunService.acceptRun(issue.getId(), key("accept")));
+    assertValidation(() -> issueRunService.acceptRun(issue.getId(), key("accept")));
 
     Issue afterFail = issueEditingService.getIssue(issue.getId());
     Issue resumed =
@@ -820,9 +807,7 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
     assertEquals(endEntryId, cancelled.getEndEntryId());
     assertNull(cancelled.getError());
     assertEquals("USER", issueEditingService.getIssue(issue.getId()).getPauseReason());
-    assertThrows(
-        ProjectValidationException.class,
-        () -> issueRunService.acceptRun(issue.getId(), key("accept")));
+    assertValidation(() -> issueRunService.acceptRun(issue.getId(), key("accept")));
   }
 
   /** 失败与取消的 receipt 必须绑定精确终态字段，重试不重复写入或解除暂停。 */
@@ -869,8 +854,7 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
               .getVersion());
       assertEquals(status, issueRunService.acceptRun(issue.getId(), acceptKey).getStatus());
       UUID differentEnd = UUID.randomUUID();
-      assertThrows(
-          ProjectDuplicateException.class,
+      assertDuplicate(
           () ->
               issueRunService.finishRun(
                   run.getId(),
@@ -882,8 +866,7 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
                   null,
                   error));
       if (error != null) {
-        assertThrows(
-            ProjectDuplicateException.class,
+        assertDuplicate(
             () ->
                 issueRunService.finishRun(
                     run.getId(), run.getVersion(), terminalKey, status, end, null, null, "other"));
@@ -940,10 +923,8 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
         issueLifecycleService.blockIssue(
             waitingIssue.getId(), waitingIssue.getVersion(), key("block"), "等待外部依赖");
 
-    ProjectValidationException rejected =
-        assertThrows(
-            ProjectValidationException.class,
-            () -> issueRunService.resumeRun(waiting.getId(), waiting.getVersion()));
+    DomainException rejected =
+        assertValidation(() -> issueRunService.resumeRun(waiting.getId(), waiting.getVersion()));
     assertTrue(rejected.getMessage().contains("gate is closed"), rejected.getMessage());
 
     IssueRun unchanged = issueRunRepository.getById(waiting.getId());

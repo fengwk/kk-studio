@@ -1,15 +1,15 @@
 package fun.fengwk.kkstudio.project;
 
+import static fun.fengwk.kkstudio.project.ProjectTestAssertions.assertDuplicate;
+import static fun.fengwk.kkstudio.project.ProjectTestAssertions.assertValidation;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
-import fun.fengwk.kkstudio.project.error.ProjectDuplicateException;
-import fun.fengwk.kkstudio.project.error.ProjectValidationException;
 import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.IssueRun;
 import fun.fengwk.kkstudio.project.model.Project;
@@ -132,9 +132,7 @@ class IssueStageBudgetIntegrationTest extends ProjectTestSupport {
 
     assertEquals(
         0L, issueStageBudgetService.getStageBudget(issue.getId(), "DESIGN").remainingRuns());
-    assertThrows(
-        ProjectValidationException.class,
-        () -> issueRunService.acceptRun(issue.getId(), key("accept")));
+    assertValidation(() -> issueRunService.acceptRun(issue.getId(), key("accept")));
     assertEquals(
         1L, count("select count(*) from project_issue_run where issue_id = ?", issue.getId()));
   }
@@ -178,8 +176,7 @@ class IssueStageBudgetIntegrationTest extends ProjectTestSupport {
         project.getId(), project.getVersion(), workflowJson(agent, agent, 1));
     Issue issue = createIssue(project.getId());
 
-    assertThrows(
-        ProjectValidationException.class,
+    assertValidation(
         () ->
             issueStageBudgetService.authorizeStageBudget(
                 issue.getId(), issue.getVersion(), key("auth"), "INIT", 1));
@@ -190,8 +187,7 @@ class IssueStageBudgetIntegrationTest extends ProjectTestSupport {
             fresh.getId(), fresh.getVersion(), key("auth"), "DESIGN", 2);
     assertEquals(2, view.maxRuns());
     Issue afterAuth = issueEditingService.getIssue(issue.getId());
-    assertThrows(
-        ProjectDuplicateException.class,
+    assertDuplicate(
         () ->
             issueStageBudgetService.authorizeStageBudget(
                 afterAuth.getId(), afterAuth.getVersion(), key("auth"), "DESIGN", 5));
@@ -211,8 +207,7 @@ class IssueStageBudgetIntegrationTest extends ProjectTestSupport {
         authorized,
         issueStageBudgetService.authorizeStageBudget(
             issue.getId(), issue.getVersion(), authKey, "DESIGN", 2));
-    assertThrows(
-        ProjectDuplicateException.class,
+    assertDuplicate(
         () ->
             issueStageBudgetService.authorizeStageBudget(
                 issue.getId(), issue.getVersion(), authKey, "DESIGN", 3));
@@ -230,14 +225,12 @@ class IssueStageBudgetIntegrationTest extends ProjectTestSupport {
         reset,
         issueStageBudgetService.resetStageBudget(
             issue.getId(), afterAuth.getVersion(), resetKey, "REVIEW", 2));
-    assertThrows(
-        ProjectDuplicateException.class,
+    assertDuplicate(
         () ->
             issueStageBudgetService.resetStageBudget(
                 issue.getId(), active.getVersion(), resetKey, "REVIEW", 3));
-    ProjectValidationException error =
-        assertThrows(
-            ProjectValidationException.class,
+    DomainException error =
+        assertValidation(
             () ->
                 issueStageBudgetService.resetStageBudget(
                     issue.getId(), active.getVersion(), key("reset"), "DESIGN", 4));
@@ -335,10 +328,8 @@ class IssueStageBudgetIntegrationTest extends ProjectTestSupport {
     issueLifecycleService.resumeIssue(
         afterFailure.getId(), afterFailure.getVersion(), key("resume"));
 
-    ProjectValidationException budgetExhausted =
-        assertThrows(
-            ProjectValidationException.class,
-            () -> issueRunService.acceptRun(issue.getId(), key("accept")));
+    DomainException budgetExhausted =
+        assertValidation(() -> issueRunService.acceptRun(issue.getId(), key("accept")));
     assertTrue(
         budgetExhausted.getMessage().contains("budget is exhausted"), budgetExhausted.getMessage());
     assertEquals(

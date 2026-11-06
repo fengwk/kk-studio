@@ -6,14 +6,12 @@ import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.project.domain.ProjectStateCode;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflow;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowReservedState;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowState;
-import fun.fengwk.kkstudio.project.error.ProjectNotFoundException;
-import fun.fengwk.kkstudio.project.error.ProjectValidationException;
-import fun.fengwk.kkstudio.project.error.ProjectVersionConflictException;
 import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.IssueActivity;
 import fun.fengwk.kkstudio.project.model.IssueActivityActorType;
@@ -62,7 +60,7 @@ final class IssueMutationSupport {
     Objects.requireNonNull(issueId, "issueId");
     Issue issue = issueRepository.getById(issueId);
     if (issue == null) {
-      throw new ProjectNotFoundException("issue");
+      throw DomainException.notFound("issue");
     }
     return issue;
   }
@@ -89,14 +87,14 @@ final class IssueMutationSupport {
     Issue initial = currentIssue(issueId);
     Project project = projectRepository.lockForKeyShare(initial.getProjectId());
     if (project == null) {
-      throw new ProjectNotFoundException("project");
+      throw DomainException.notFound("project");
     }
     Issue issue = issueRepository.lockById(issueId);
     if (issue == null) {
-      throw new ProjectNotFoundException("issue");
+      throw DomainException.notFound("issue");
     }
     if (!issue.getProjectId().equals(project.getId())) {
-      throw new ProjectValidationException("issue", "Issue hierarchy is inconsistent");
+      throw DomainException.validation("issue", "Issue hierarchy is inconsistent");
     }
     return new Locked(issue, project, workflowCodec.decode(project.getWorkflowJson()));
   }
@@ -104,17 +102,16 @@ final class IssueMutationSupport {
   /** 首次写入前的归档门禁：项目或 Issue 已归档时拒绝；精确重放不经过这里。 */
   void requireMutable(Locked locked, boolean allowArchivedIssue) {
     if (locked.project().isArchived()) {
-      throw new ProjectValidationException(
-          "project", "Cannot modify an issue in an archived project");
+      throw DomainException.validation("project", "Cannot modify an issue in an archived project");
     }
     if (locked.issue().isArchived() && !allowArchivedIssue) {
-      throw new ProjectValidationException("issue", "Cannot modify an archived issue");
+      throw DomainException.validation("issue", "Cannot modify an archived issue");
     }
   }
 
   void requireVersion(Locked locked, long expectedVersion) {
     if (locked.issue().getVersion() != expectedVersion) {
-      throw new ProjectVersionConflictException(
+      throw DomainException.versionConflict(
           "issue", Long.toString(expectedVersion), Long.toString(locked.issue().getVersion()));
     }
   }
@@ -162,7 +159,7 @@ final class IssueMutationSupport {
 
   Issue persist(Locked locked, long expectedVersion) {
     if (!issueRepository.updateById(locked.issue(), expectedVersion)) {
-      throw new ProjectVersionConflictException(
+      throw DomainException.versionConflict(
           "issue", Long.toString(expectedVersion), Long.toString(locked.issue().getVersion()));
     }
     return issueRepository.getById(locked.issue().getId());

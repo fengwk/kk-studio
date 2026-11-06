@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.project.http;
+package fun.fengwk.kkstudio.web.advice;
 
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
@@ -13,10 +13,8 @@ import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
 import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
-import fun.fengwk.kkstudio.project.error.ProjectDuplicateException;
-import fun.fengwk.kkstudio.project.error.ProjectNotFoundException;
-import fun.fengwk.kkstudio.project.error.ProjectValidationException;
-import fun.fengwk.kkstudio.project.error.ProjectVersionConflictException;
+import fun.fengwk.kkstudio.project.http.IssueController;
+import fun.fengwk.kkstudio.project.http.ProjectController;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -28,36 +26,12 @@ import java.util.Map;
  */
 @Order(Ordered.HIGHEST_PRECEDENCE)
 @RestControllerAdvice(assignableTypes = {ProjectController.class, IssueController.class})
-public class ProjectErrorAdvice {
+public class StudioProjectLegacyErrorAdvice {
 
   private final StudioMessageService messageService;
 
-  public ProjectErrorAdvice(StudioMessageService messageService) {
+  public StudioProjectLegacyErrorAdvice(StudioMessageService messageService) {
     this.messageService = messageService;
-  }
-
-  @ExceptionHandler(ProjectVersionConflictException.class)
-  public ResponseEntity<ApiResponse<Void>> handleVersionConflict(
-      ProjectVersionConflictException error) {
-    Map<String, Object> ctx = new LinkedHashMap<>();
-    ctx.put("resource", error.resource());
-    ctx.put("expectedVersion", error.expectedVersion());
-    ctx.put("actualVersion", error.actualVersion());
-    return build(
-        HttpStatus.CONFLICT,
-        "PROJECT_VERSION_CONFLICT",
-        messageService.message(
-            "studio.error.project.version_conflict.message",
-            Map.of("resource", messageService.resourceDisplayName(error.resource()))),
-        ctx);
-  }
-
-  @ExceptionHandler(ProjectDuplicateException.class)
-  public ResponseEntity<ApiResponse<Void>> handleDuplicate(ProjectDuplicateException error) {
-    Map<String, Object> ctx = new LinkedHashMap<>();
-    ctx.put("resource", error.resource());
-    ctx.put("detail", error.getMessage());
-    return build(HttpStatus.CONFLICT, "PROJECT_DUPLICATE_CONFLICT", error.getMessage(), ctx);
   }
 
   @ExceptionHandler(HarnessRuntimeConflictException.class)
@@ -69,19 +43,6 @@ public class ProjectErrorAdvice {
         HttpStatus.CONFLICT,
         "PROJECT_RUNTIME_CONFLICT",
         messageService.message("studio.error.project.runtime_conflict.message", Map.of()),
-        ctx);
-  }
-
-  @ExceptionHandler(ProjectNotFoundException.class)
-  public ResponseEntity<ApiResponse<Void>> handleResourceNotFound(ProjectNotFoundException error) {
-    Map<String, Object> ctx = new LinkedHashMap<>();
-    ctx.put("resource", error.resource());
-    return build(
-        HttpStatus.NOT_FOUND,
-        "PROJECT_RESOURCE_NOT_FOUND",
-        messageService.message(
-            "studio.error.project.resource_not_found.message",
-            Map.of("resource", messageService.resourceDisplayName(error.resource()))),
         ctx);
   }
 
@@ -97,7 +58,7 @@ public class ProjectErrorAdvice {
         ctx);
   }
 
-  @ExceptionHandler({ProjectValidationException.class, IllegalArgumentException.class})
+  @ExceptionHandler(IllegalArgumentException.class)
   public ResponseEntity<ApiResponse<Void>> handleValidation(RuntimeException error) {
     Map<String, Object> ctx = new LinkedHashMap<>();
     ctx.put("detail", error.getMessage());

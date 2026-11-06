@@ -1,8 +1,10 @@
 package fun.fengwk.kkstudio.project;
 
+import static fun.fengwk.kkstudio.project.ProjectTestAssertions.assertDuplicate;
+import static fun.fengwk.kkstudio.project.ProjectTestAssertions.assertValidation;
+import static fun.fengwk.kkstudio.project.ProjectTestAssertions.assertVersionConflict;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -11,9 +13,6 @@ import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
 import fun.fengwk.kkstudio.project.domain.ProjectStateCode;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflow;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
-import fun.fengwk.kkstudio.project.error.ProjectDuplicateException;
-import fun.fengwk.kkstudio.project.error.ProjectValidationException;
-import fun.fengwk.kkstudio.project.error.ProjectVersionConflictException;
 import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.IssueRun;
 import fun.fengwk.kkstudio.project.model.Project;
@@ -65,19 +64,16 @@ class ProjectWorkflowServiceIntegrationTest extends ProjectTestSupport {
     String original = project.getWorkflowJson();
 
     String selfEdge = workflowJson(agent, agent, 3).replace("[\"DESIGN\"]", "[\"INIT\"]");
-    assertThrows(
-        ProjectValidationException.class,
+    assertValidation(
         () -> projectService.updateWorkflow(project.getId(), project.getVersion(), selfEdge));
 
     String unknownField =
         workflowJson(agent, agent, 3).replace("\"name\":\"设计\"", "\"name\":\"设计\",\"bogus\":1");
-    assertThrows(
-        ProjectValidationException.class,
+    assertValidation(
         () -> projectService.updateWorkflow(project.getId(), project.getVersion(), unknownField));
 
     String missingDone = "{\"states\":[{\"state\":\"INIT\",\"name\":\"待开始\"}]}";
-    assertThrows(
-        ProjectValidationException.class,
+    assertValidation(
         () -> projectService.updateWorkflow(project.getId(), project.getVersion(), missingDone));
 
     assertEquals(0L, projectService.getProject(project.getId()).getVersion());
@@ -92,8 +88,7 @@ class ProjectWorkflowServiceIntegrationTest extends ProjectTestSupport {
     projectService.updateWorkflow(
         project.getId(), project.getVersion(), workflowJson(agent, agent, 3));
 
-    assertThrows(
-        ProjectVersionConflictException.class,
+    assertVersionConflict(
         () ->
             projectService.updateWorkflow(
                 project.getId(), project.getVersion(), workflowJson(agent, agent, 5)));
@@ -145,8 +140,7 @@ class ProjectWorkflowServiceIntegrationTest extends ProjectTestSupport {
             + "{\"state\":\"BLOCKED\",\"name\":\"业务阻塞\"},"
             + "{\"state\":\"DONE\",\"name\":\"完成\"}"
             + "]}";
-    assertThrows(
-        ProjectValidationException.class,
+    assertValidation(
         () -> projectService.updateWorkflow(current.getId(), current.getVersion(), withoutDesign));
 
     String withoutReview =
@@ -159,8 +153,7 @@ class ProjectWorkflowServiceIntegrationTest extends ProjectTestSupport {
             + "{\"state\":\"BLOCKED\",\"name\":\"业务阻塞\"},"
             + "{\"state\":\"DONE\",\"name\":\"完成\"}"
             + "]}";
-    assertThrows(
-        ProjectValidationException.class,
+    assertValidation(
         () -> projectService.updateWorkflow(current.getId(), current.getVersion(), withoutReview));
     assertEquals(
         blocked.getBlockedFromState(),
@@ -213,8 +206,7 @@ class ProjectWorkflowServiceIntegrationTest extends ProjectTestSupport {
     issueRunService.acceptRun(inDesign.getId(), key("accept"));
 
     Project current = projectService.getProject(project.getId());
-    assertThrows(
-        ProjectValidationException.class,
+    assertValidation(
         () ->
             projectService.updateWorkflow(
                 current.getId(), current.getVersion(), workflowJson(agent, agent, 9)));
@@ -272,15 +264,13 @@ class ProjectWorkflowServiceIntegrationTest extends ProjectTestSupport {
         project.getId(), project.getVersion(), workflowJson(agent, agent, 3));
     Issue issue = createIssue(project.getId());
 
-    assertThrows(
-        ProjectValidationException.class,
+    assertValidation(
         () ->
             issueLifecycleService.transition(
                 issue.getId(), issue.getVersion(), key("t"), "REVIEW"));
     Issue inDesign =
         issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
-    assertThrows(
-        ProjectVersionConflictException.class,
+    assertVersionConflict(
         () ->
             issueLifecycleService.transition(
                 issue.getId(), issue.getVersion(), key("t"), "REVIEW"));
@@ -301,8 +291,7 @@ class ProjectWorkflowServiceIntegrationTest extends ProjectTestSupport {
     long activityCount = activityCount(issue.getId());
 
     Issue stillStopped = issueEditingService.getIssue(issue.getId());
-    assertThrows(
-        ProjectDuplicateException.class,
+    assertDuplicate(
         () ->
             issueLifecycleService.stopIssue(
                 stillStopped.getId(), stillStopped.getVersion(), stopKey, "第二次终止"));

@@ -1,22 +1,23 @@
 package fun.fengwk.kkstudio.project;
 
+import static fun.fengwk.kkstudio.project.ProjectTestAssertions.assertDuplicate;
+import static fun.fengwk.kkstudio.project.ProjectTestAssertions.assertNotFound;
+import static fun.fengwk.kkstudio.project.ProjectTestAssertions.assertValidation;
+import static fun.fengwk.kkstudio.project.ProjectTestAssertions.assertVersionConflict;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
-import fun.fengwk.kkstudio.project.error.ProjectDuplicateException;
-import fun.fengwk.kkstudio.project.error.ProjectNotFoundException;
-import fun.fengwk.kkstudio.project.error.ProjectValidationException;
-import fun.fengwk.kkstudio.project.error.ProjectVersionConflictException;
 import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.IssueActivity;
 import fun.fengwk.kkstudio.project.model.IssueActivityActorType;
@@ -87,8 +88,7 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
     String originalTitle = issue.getTitle();
     String originalDesc = issue.getDescription();
 
-    assertThrows(
-        ProjectVersionConflictException.class,
+    assertVersionConflict(
         () -> issueEditingService.updateIssue(issue.getId(), 999L, "冲突标题", "冲突描述"));
 
     Map<String, Object> row =
@@ -107,9 +107,7 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
     Issue archived = issueLifecycleService.archiveIssue(issue.getId(), 0L);
     assertEquals(1L, archived.getVersion());
 
-    assertThrows(
-        ProjectValidationException.class,
-        () -> issueEditingService.updateIssue(issue.getId(), 1L, "归档后修改", "描述"));
+    assertValidation(() -> issueEditingService.updateIssue(issue.getId(), 1L, "归档后修改", "描述"));
 
     Map<String, Object> row =
         jdbc.queryForMap("select title, version from project_issue where id = ?", issue.getId());
@@ -169,18 +167,11 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
     Issue issue = createIssue(projectId);
     issueLifecycleService.archiveIssue(issue.getId(), 0L);
 
-    assertThrows(
-        ProjectValidationException.class,
-        () -> issueLifecycleService.transition(issue.getId(), 1L, key("t"), "WORK"));
-    assertThrows(
-        ProjectValidationException.class,
-        () -> issueLifecycleService.blockIssue(issue.getId(), 1L, key("b"), "阻塞原因"));
-    assertThrows(
-        ProjectValidationException.class,
+    assertValidation(() -> issueLifecycleService.transition(issue.getId(), 1L, key("t"), "WORK"));
+    assertValidation(() -> issueLifecycleService.blockIssue(issue.getId(), 1L, key("b"), "阻塞原因"));
+    assertValidation(
         () -> issueEditingService.appendActivity(issue.getId(), 1L, "COMMENT", key("c"), "普通评论"));
-    assertThrows(
-        ProjectValidationException.class,
-        () -> issueLifecycleService.stopIssue(issue.getId(), 1L, key("s"), "终止详情"));
+    assertValidation(() -> issueLifecycleService.stopIssue(issue.getId(), 1L, key("s"), "终止详情"));
 
     assertEquals(
         0L, count("select count(*) from project_issue_activity where issue_id = ?", issue.getId()));
@@ -200,8 +191,7 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
     assertEquals(IssueRunStatus.RUNNING, run.getStatus());
 
     Issue current = issueEditingService.getIssue(issue.getId());
-    assertThrows(
-        ProjectValidationException.class,
+    assertValidation(
         () -> issueLifecycleService.archiveIssue(current.getId(), current.getVersion()));
 
     assertEquals(
@@ -223,9 +213,7 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
 
     Issue replayed = issueLifecycleService.archiveIssue(issue.getId(), 1L);
     assertEquals(1L, replayed.getVersion());
-    assertThrows(
-        ProjectVersionConflictException.class,
-        () -> issueLifecycleService.archiveIssue(issue.getId(), 0L));
+    assertVersionConflict(() -> issueLifecycleService.archiveIssue(issue.getId(), 0L));
     assertTrue(replayed.isArchived());
     assertEquals(
         1L,
@@ -253,9 +241,7 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
     // 恢复归档后的重复调用直接返回当前事实
     Issue reUnarchived = issueLifecycleService.unarchiveIssue(issue.getId(), 2L);
     assertEquals(2L, reUnarchived.getVersion());
-    assertThrows(
-        ProjectVersionConflictException.class,
-        () -> issueLifecycleService.unarchiveIssue(issue.getId(), 1L));
+    assertVersionConflict(() -> issueLifecycleService.unarchiveIssue(issue.getId(), 1L));
     assertFalse(reUnarchived.isArchived());
   }
 
@@ -377,9 +363,8 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
     UUID projectId = createProject();
     Issue issue = createIssue(projectId);
 
-    ProjectValidationException ex =
-        assertThrows(
-            ProjectValidationException.class,
+    DomainException ex =
+        assertValidation(
             () ->
                 issueEditingService.appendActivity(
                     issue.getId(), issue.getVersion(), "INSTRUCTION", key("inst"), "没有 Run 时的指示"));
@@ -430,18 +415,10 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
     assertTrue(emptyPage.isEmpty());
 
     // 参数边界校验
-    assertThrows(
-        ProjectValidationException.class,
-        () -> issueEditingService.listActivities(issue.getId(), -1L, 10));
-    assertThrows(
-        ProjectValidationException.class,
-        () -> issueEditingService.listActivities(issue.getId(), 0L, 0));
-    assertThrows(
-        ProjectValidationException.class,
-        () -> issueEditingService.listActivities(issue.getId(), 0L, -5));
-    assertThrows(
-        ProjectNotFoundException.class,
-        () -> issueEditingService.listActivities(UUID.randomUUID(), 0L, 10));
+    assertValidation(() -> issueEditingService.listActivities(issue.getId(), -1L, 10));
+    assertValidation(() -> issueEditingService.listActivities(issue.getId(), 0L, 0));
+    assertValidation(() -> issueEditingService.listActivities(issue.getId(), 0L, -5));
+    assertNotFound(() -> issueEditingService.listActivities(UUID.randomUUID(), 0L, 10));
   }
 
   // =========================================================================
@@ -540,9 +517,8 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
             "select count(*) from project_issue_activity where issue_id = ? and kind = 'COMMENT'",
             issue.getId()));
 
-    // 同键异指纹（请求键复用）：抛出 ProjectDuplicateException 冲突，且不写入新活动
-    assertThrows(
-        ProjectDuplicateException.class,
+    // 同键异指纹（请求键复用）：抛出 duplicate 冲突，且不写入新活动
+    assertDuplicate(
         () ->
             issueEditingService.appendActivity(
                 issue.getId(), 1L, "COMMENT", commentKey, "被篡改的不同评论正文"));
@@ -583,8 +559,7 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
             issue.getId()));
 
     // 同键异指纹（同一个 key 试图流转到 DONE 或不同目标状态）：抛出冲突，状态不改变
-    assertThrows(
-        ProjectDuplicateException.class,
+    assertDuplicate(
         () -> issueLifecycleService.transition(issue.getId(), 1L, transitionKey, "DONE"));
     assertEquals("WORK", issueEditingService.getIssue(issue.getId()).getState());
     assertEquals(
@@ -625,8 +600,7 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
             issue.getId()));
 
     // 同键异指纹（不同 reason）
-    assertThrows(
-        ProjectDuplicateException.class,
+    assertDuplicate(
         () -> issueLifecycleService.blockIssue(inWork.getId(), 2L, blockKey, "篡改后的阻塞原因"));
     assertEquals(
         1L,
@@ -659,8 +633,7 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
     assertEquals(1L, ((Number) row.get("version")).longValue());
 
     // 过期版本 CAS 冲突
-    assertThrows(
-        ProjectVersionConflictException.class,
+    assertVersionConflict(
         () -> projectService.updateConfiguration(project.getId(), 0L, "再次更新", "描述"));
   }
 
@@ -677,23 +650,15 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
     assertEquals(1L, archived.getVersion());
 
     // 项目配置类修改被拒绝
-    assertThrows(
-        ProjectValidationException.class,
+    assertValidation(
         () -> projectService.updateConfiguration(project.getId(), 1L, "归档后标题", "归档后描述"));
-    assertThrows(
-        ProjectValidationException.class,
+    assertValidation(
         () -> projectService.updateWorkflow(project.getId(), 1L, workflowJson(agent, agent, 3)));
-    assertThrows(
-        ProjectValidationException.class,
-        () -> projectService.updateYolo(project.getId(), 1L, false));
+    assertValidation(() -> projectService.updateYolo(project.getId(), 1L, false));
 
     // 归档项目下的 Issue 写操作与新建 Issue 被拒绝
-    assertThrows(
-        ProjectValidationException.class,
-        () -> issueEditingService.createIssue(project.getId(), "新需求", "描述"));
-    assertThrows(
-        ProjectValidationException.class,
-        () -> issueEditingService.updateIssue(issue.getId(), 0L, "修改需求", "描述"));
+    assertValidation(() -> issueEditingService.createIssue(project.getId(), "新需求", "描述"));
+    assertValidation(() -> issueEditingService.updateIssue(issue.getId(), 0L, "修改需求", "描述"));
   }
 
   /** archiveProject 与 unarchiveProject 切换项目归档状态并在 listProjects(archived) 间迁移。 */
@@ -722,9 +687,7 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
     Project reArchived = projectService.archiveProject(project.getId(), 1L);
     assertTrue(reArchived.isArchived());
     assertEquals(1L, reArchived.getVersion());
-    assertThrows(
-        ProjectVersionConflictException.class,
-        () -> projectService.archiveProject(project.getId(), 0L));
+    assertVersionConflict(() -> projectService.archiveProject(project.getId(), 0L));
 
     // 恢复归档
     Project unarchived = projectService.unarchiveProject(project.getId(), 1L);
@@ -740,9 +703,7 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
     Project reUnarchived = projectService.unarchiveProject(project.getId(), 2L);
     assertFalse(reUnarchived.isArchived());
     assertEquals(2L, reUnarchived.getVersion());
-    assertThrows(
-        ProjectVersionConflictException.class,
-        () -> projectService.unarchiveProject(project.getId(), 1L));
+    assertVersionConflict(() -> projectService.unarchiveProject(project.getId(), 1L));
   }
 
   /** 下属 Issue 存在活动 Run 时拒绝归档项目。 */
@@ -756,9 +717,7 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
     issueRunService.acceptRun(inDesign.getId(), key("accept"));
 
     Project current = projectService.getProject(projectId);
-    assertThrows(
-        ProjectValidationException.class,
-        () -> projectService.archiveProject(current.getId(), current.getVersion()));
+    assertValidation(() -> projectService.archiveProject(current.getId(), current.getVersion()));
 
     assertEquals(
         0L,
@@ -831,8 +790,8 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
       Object left = first.get(15, TimeUnit.SECONDS);
       Object right = second.get(15, TimeUnit.SECONDS);
       assertTrue(left instanceof IssueActivity ^ right instanceof IssueActivity);
-      assertTrue(
-          left instanceof ProjectDuplicateException || right instanceof ProjectDuplicateException);
+      Object failure = left instanceof IssueActivity ? right : left;
+      assertEquals(DomainErrorCode.DUPLICATE, ((DomainException) failure).code());
     } finally {
       executor.shutdownNow();
     }
@@ -847,7 +806,11 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
   private Object invokeComment(UUID issueId, String commentKey, String body) {
     try {
       return issueEditingService.appendActivity(issueId, 0L, "COMMENT", commentKey, body);
-    } catch (ProjectDuplicateException conflict) {
+    } catch (DomainException conflict) {
+      if (conflict.code() != DomainErrorCode.DUPLICATE
+          || !"issue_activity".equals(conflict.resource())) {
+        throw conflict;
+      }
       return conflict;
     }
   }
@@ -932,15 +895,12 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
     // 无 Issue 的项目支持删除
     Project cleanProject = projectService.createProject("空项目", "描述", true);
     // 过期版本拒绝
-    assertThrows(
-        ProjectVersionConflictException.class,
-        () -> projectService.deleteProject(cleanProject.getId(), 999L));
+    assertVersionConflict(() -> projectService.deleteProject(cleanProject.getId(), 999L));
     assertEquals(1L, count("select count(*) from project where id = ?", cleanProject.getId()));
 
     // 正确版本删除
     projectService.deleteProject(cleanProject.getId(), cleanProject.getVersion());
     assertEquals(0L, count("select count(*) from project where id = ?", cleanProject.getId()));
-    assertThrows(
-        ProjectNotFoundException.class, () -> projectService.getProject(cleanProject.getId()));
+    assertNotFound(() -> projectService.getProject(cleanProject.getId()));
   }
 }

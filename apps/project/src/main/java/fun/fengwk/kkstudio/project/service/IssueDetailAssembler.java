@@ -4,6 +4,8 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflow;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
@@ -14,7 +16,6 @@ import fun.fengwk.kkstudio.project.dto.IssueDetailDTO;
 import fun.fengwk.kkstudio.project.dto.IssueRunDTO;
 import fun.fengwk.kkstudio.project.dto.IssueStageBudgetDTO;
 import fun.fengwk.kkstudio.project.dto.ProjectDtoMapper;
-import fun.fengwk.kkstudio.project.error.ProjectNotFoundException;
 import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.IssueActivity;
 import fun.fengwk.kkstudio.project.model.IssueAgentThread;
@@ -110,24 +111,33 @@ public class IssueDetailAssembler {
             : null;
 
     List<IssueStageBudgetDTO> stageBudgets = new ArrayList<>();
+    Project project;
     try {
-      Project project = projectService.getProject(issue.getProjectId());
-      if (project != null
-          && project.getWorkflowJson() != null
-          && !project.getWorkflowJson().isBlank()) {
-        ProjectWorkflow workflow = workflowCodec.decode(project.getWorkflowJson());
-        for (ProjectWorkflowState state : workflow.workStages()) {
-          try {
-            StageBudgetView view =
-                issueStageBudgetService.getStageBudget(issueId, state.state().value());
-            stageBudgets.add(mapper.toDto(view));
-          } catch (ProjectNotFoundException ignored) {
-            // 阶段额度尚未授权时静默跳过
+      project = projectService.getProject(issue.getProjectId());
+    } catch (DomainException error) {
+      if (error.code() != DomainErrorCode.NOT_FOUND || !"project".equals(error.resource())) {
+        throw error;
+      }
+      // 项目未找到时跳过
+      project = null;
+    }
+    if (project != null
+        && project.getWorkflowJson() != null
+        && !project.getWorkflowJson().isBlank()) {
+      ProjectWorkflow workflow = workflowCodec.decode(project.getWorkflowJson());
+      for (ProjectWorkflowState state : workflow.workStages()) {
+        try {
+          StageBudgetView view =
+              issueStageBudgetService.getStageBudget(issueId, state.state().value());
+          stageBudgets.add(mapper.toDto(view));
+        } catch (DomainException error) {
+          if (error.code() != DomainErrorCode.NOT_FOUND
+              || !"stage_budget".equals(error.resource())) {
+            throw error;
           }
+          // 阶段额度尚未授权时静默跳过
         }
       }
-    } catch (ProjectNotFoundException ignored) {
-      // 项目未找到时跳过
     }
 
     return IssueDetailDTO.builder()
