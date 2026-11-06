@@ -48,7 +48,7 @@ function summary(overrides: Partial<SkillPackageSummaryDTO> = {}): SkillPackageS
     packageName: 'core-tools',
     description: 'Core developer skills',
     packageVersion: PACKAGE_VERSION,
-    publishedAt: 1784505600,
+    publishedAt: 1784505600000,
     skills: [
       { name: 'dev', description: 'developer workflow' },
       { name: 'bash', description: 'bash runner' },
@@ -56,8 +56,8 @@ function summary(overrides: Partial<SkillPackageSummaryDTO> = {}): SkillPackageS
     source: 'GIT',
     updateAvailable: false,
     version: '1',
-    createTime: 1784505600,
-    updateTime: 1784509200,
+    createdAt: 1784505600000,
+    updatedAt: 1784509200000,
     ...overrides,
   }
 }
@@ -65,9 +65,13 @@ function summary(overrides: Partial<SkillPackageSummaryDTO> = {}): SkillPackageS
 function detail(overrides: Partial<SkillPackageDetailDTO> = {}): SkillPackageDetailDTO {
   return {
     ...summary(),
-    git: { repositoryUrl: 'https://github.com/example/skills.git', branch: 'main', hasToken: false },
+    git: {
+      repositoryUrl: 'https://github.com/example/skills.git',
+      branch: 'main',
+      token: { configured: false },
+    },
     headCommit: null,
-    headCheckedAt: 1784509200,
+    headCheckedAt: 1784509200000,
     headCheckError: null,
     artifactSha256: 'a'.repeat(64),
     artifactSizeBytes: '2048',
@@ -148,7 +152,7 @@ describe('SkillPackagesPage', () => {
         method: 'GET',
         url: 'http://s3.example/archive',
         headers: {},
-        expiresAt: '1784509200',
+        expiresAt: '1784509200000',
         mediaType: 'application/zip',
         sizeBytes: '2048',
       },

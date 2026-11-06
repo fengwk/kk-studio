@@ -14,8 +14,8 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.transaction.PlatformTransactionManager;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
+import fun.fengwk.kkstudio.platform.catalog.dto.McpServerDTO;
 import fun.fengwk.kkstudio.platform.catalog.mcp.discovery.McpToolDiscovery;
-import fun.fengwk.kkstudio.share.mcp.McpServerDTO;
 
 import java.util.List;
 import java.util.Map;
@@ -64,7 +64,7 @@ class McpServerServiceImportTest {
         service.importServer("mcp", URL, Map.of(), Boolean.TRUE, 30_000L, List.of(discovered));
 
     verify(repository).insertTool(discovered);
-    assertEquals("AVAILABLE", dto.getDiscoveryStatus());
+    assertEquals(McpDiscoveryStatus.AVAILABLE, dto.getDiscoveryStatus());
     assertEquals(1, dto.getToolCount());
     assertEquals("0", dto.getVersion());
   }
@@ -77,7 +77,7 @@ class McpServerServiceImportTest {
     McpServerDTO dto = service.importServer("mcp", URL, Map.of(), Boolean.TRUE, 30_000L, null);
 
     verify(repository, never()).insertTool(any());
-    assertEquals("UNVERIFIED", dto.getDiscoveryStatus());
+    assertEquals(McpDiscoveryStatus.UNVERIFIED, dto.getDiscoveryStatus());
     assertEquals(0, dto.getToolCount());
   }
 
@@ -150,7 +150,7 @@ class McpServerServiceImportTest {
 
     McpServerDTO dto = service.importServer("mcp", URL, Map.of(), Boolean.TRUE, 30_000L, null);
 
-    assertEquals("UNVERIFIED", dto.getDiscoveryStatus());
+    assertEquals(McpDiscoveryStatus.UNVERIFIED, dto.getDiscoveryStatus());
     assertEquals(1, dto.getToolCount());
   }
 
@@ -187,7 +187,7 @@ class McpServerServiceImportTest {
 
     verify(repository).deleteTools("mcp");
     verify(repository).insertTool(replacement);
-    assertEquals("AVAILABLE", dto.getDiscoveryStatus());
+    assertEquals(McpDiscoveryStatus.AVAILABLE, dto.getDiscoveryStatus());
     assertEquals(1, dto.getToolCount());
   }
 }

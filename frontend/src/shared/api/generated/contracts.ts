@@ -1692,40 +1692,63 @@ export const LIVE_TURN_PLAN_TOOL_STATE_VALUES: readonly LiveTurnPlanToolState[] 
   'FILTERED',
 ]
 
-/** Java：fun.fengwk.kkstudio.share.mcp.McpServerConfigDTO */
-export interface McpServerConfigDTO {
-  name: string
-  version: string
-  url: string
-  headers?: Record<string, string> | null
-}
+/** Java：fun.fengwk.kkstudio.platform.catalog.mcp.McpDiscoveryStatus */
+export type McpDiscoveryStatus =
+  | 'UNVERIFIED'
+  | 'AVAILABLE'
+  | 'FAILED'
 
-/** Java：fun.fengwk.kkstudio.share.mcp.McpServerCreateDTO */
+export const MCP_DISCOVERY_STATUS_VALUES: readonly McpDiscoveryStatus[] = [
+  'UNVERIFIED',
+  'AVAILABLE',
+  'FAILED',
+]
+
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.McpServerCreateDTO */
 export interface McpServerCreateDTO {
   name: string
   url: string
-  headers?: Record<string, string> | null
+  headers?: SecretUpdate | null
   enabled?: boolean | null
   timeoutMillis?: number | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.mcp.McpServerDTO */
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.McpServerDTO */
 export interface McpServerDTO {
+  name: string
+  url: string
+  enabled: boolean
+  timeoutMillis: string
+  discoveryStatus: McpDiscoveryStatus
+  headers: SecretConfiguredDTO
+  toolCount: number
+  version: string
+  createdAt: number
+  updatedAt: number
+}
+
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.McpServerDiscoverDTO */
+export interface McpServerDiscoverDTO {
+  expectedVersion: string
+}
+
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.McpServerSummaryDTO */
+export interface McpServerSummaryDTO {
   name: string
   enabled: boolean
   timeoutMillis: string
-  discoveryStatus: string
+  discoveryStatus: McpDiscoveryStatus
   toolCount: number
   version: string
-  createTime: number
-  updateTime: number
+  createdAt: number
+  updatedAt: number
 }
 
-/** Java：fun.fengwk.kkstudio.share.mcp.McpServerUpdateDTO */
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.McpServerUpdateDTO */
 export interface McpServerUpdateDTO {
   expectedVersion: string
   url: string
-  headers?: Record<string, string> | null
+  headers?: SecretUpdate | null
   enabled?: boolean | null
   timeoutMillis?: number | null
 }
@@ -1993,14 +2016,6 @@ export interface ModelVariantDTO {
   promptCacheRetention: PromptCacheRetention
   reasoningEffort?: string | null
   protocolOptionsJson?: string | null
-}
-
-/** Java：fun.fengwk.kkstudio.common.page.Page */
-export interface Page<T> {
-  pageNumber: number
-  pageSize: number
-  results: T[]
-  totalCount: string
 }
 
 /** Java：fun.fengwk.kkstudio.share.plugin.PluginAuthCompleteRequestDTO */
@@ -2299,7 +2314,7 @@ export const SECRET_UPDATE_OPERATION_VALUES: readonly SecretUpdateOperation[] = 
   'CLEAR',
 ]
 
-/** Java：fun.fengwk.kkstudio.share.skill.SkillArchiveDownloadDTO */
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.SkillArchiveDownloadDTO */
 export interface SkillArchiveDownloadDTO {
   filename: string
   sha256: string
@@ -2307,7 +2322,7 @@ export interface SkillArchiveDownloadDTO {
   download: StoragePresignedUrlDTO
 }
 
-/** Java：fun.fengwk.kkstudio.share.skill.SkillEnvironmentSyncDTO */
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.SkillEnvironmentSyncDTO */
 export interface SkillEnvironmentSyncDTO {
   environmentId: string
   installedSha256: string | null
@@ -2316,32 +2331,41 @@ export interface SkillEnvironmentSyncDTO {
   upToDate: boolean
 }
 
-/** Java：fun.fengwk.kkstudio.share.skill.SkillGitSourceDTO */
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.SkillGitSourceDTO */
 export interface SkillGitSourceDTO {
   repositoryUrl: string
   branch: string
-  hasToken: boolean
+  token: SecretConfiguredDTO
 }
 
-/** Java：fun.fengwk.kkstudio.share.skill.SkillManifestEntryDTO */
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.SkillManifestEntryDTO */
 export interface SkillManifestEntryDTO {
   name: string
   description: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.skill.SkillPackageCheckDTO */
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.SkillPackageCheckDTO */
 export interface SkillPackageCheckDTO {
   expectedVersion: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.skill.SkillPackageDetailDTO */
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.SkillPackageCreateDTO */
+export interface SkillPackageCreateDTO {
+  packageName: string
+  description?: string | null
+  repositoryUrl: string
+  branch: string
+  token?: SecretUpdate | null
+}
+
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.SkillPackageDetailDTO */
 export interface SkillPackageDetailDTO {
   packageName: string
   description?: string | null
   packageVersion: string
   publishedAt: number
   skills: SkillManifestEntryDTO[]
-  source: string
+  source: SkillPackageSource
   git: SkillGitSourceDTO | null
   headCommit: string | null
   headCheckedAt: number | null
@@ -2350,42 +2374,51 @@ export interface SkillPackageDetailDTO {
   artifactSha256: string
   artifactSizeBytes: string
   version: string
-  createTime: number
-  updateTime: number
+  createdAt: number
+  updatedAt: number
 }
 
-/** Java：fun.fengwk.kkstudio.share.skill.SkillPackageEditDTO */
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.SkillPackageEditDTO */
 export interface SkillPackageEditDTO {
   expectedVersion: string
   description?: string | null
   branch?: string | null
-  token?: string | null
+  token?: SecretUpdate | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.skill.SkillPackageFileDTO */
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.SkillPackageFileDTO */
 export interface SkillPackageFileDTO {
   path: string
   size: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.skill.SkillPackageGitCreateDTO */
-export interface SkillPackageGitCreateDTO {
-  packageName: string
-  description?: string | null
-  repositoryUrl: string
-  branch: string
-  token?: string | null
-}
-
-/** Java：fun.fengwk.kkstudio.share.skill.SkillPackageGitPublishDTO */
-export interface SkillPackageGitPublishDTO {
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.SkillPackagePublishDTO */
+export interface SkillPackagePublishDTO {
   expectedVersion: string
   targetCommit: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.skill.SkillPackagePreviewDTO */
-export interface SkillPackagePreviewDTO {
-  stagingUploadId: string
+/** Java：fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageSource */
+export type SkillPackageSource =
+  | 'GIT'
+  | 'UPLOAD'
+
+export const SKILL_PACKAGE_SOURCE_VALUES: readonly SkillPackageSource[] = [
+  'GIT',
+  'UPLOAD',
+]
+
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.SkillPackageStagingCreateDTO */
+export interface SkillPackageStagingCreateDTO {
+  uploadId: string
+  packageName: string
+  packageVersion: string
+  description?: string | null
+}
+
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.SkillPackageStagingDTO */
+export interface SkillPackageStagingDTO {
+  id: string
   packageName: string
   packageVersion: string
   description?: string | null
@@ -2397,35 +2430,26 @@ export interface SkillPackagePreviewDTO {
   fileCount: number
 }
 
-/** Java：fun.fengwk.kkstudio.share.skill.SkillPackageSummaryDTO */
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.SkillPackageStagingPublishDTO */
+export interface SkillPackageStagingPublishDTO {
+  packageName: string
+  packageVersion: string
+  description?: string | null
+  expectedVersion?: string | null
+}
+
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.SkillPackageSummaryDTO */
 export interface SkillPackageSummaryDTO {
   packageName: string
   description?: string | null
   packageVersion: string
   publishedAt: number
   skills: SkillManifestEntryDTO[]
-  source: string
+  source: SkillPackageSource
   updateAvailable: boolean
   version: string
-  createTime: number
-  updateTime: number
-}
-
-/** Java：fun.fengwk.kkstudio.share.skill.SkillPackageUploadPreviewDTO */
-export interface SkillPackageUploadPreviewDTO {
-  uploadId: string
-  packageName: string
-  packageVersion: string
-  description?: string | null
-}
-
-/** Java：fun.fengwk.kkstudio.share.skill.SkillPackageUploadPublishDTO */
-export interface SkillPackageUploadPublishDTO {
-  stagingUploadId: string
-  packageName: string
-  packageVersion: string
-  description?: string | null
-  expectedVersion?: string | null
+  createdAt: number
+  updatedAt: number
 }
 
 /** Java：fun.fengwk.kkstudio.platform.environment.skill.SkillPromptResolution.Delivery */
@@ -2835,12 +2859,12 @@ export interface ApiRoutes {
     query: { expectedVersion: string }
     response: void
   }
-  'DELETE /api/mcp-servers/{name}': {
+  'DELETE /api/platform/agents/{name}': {
     path: { name: string }
     query: { expectedVersion: string }
     response: void
   }
-  'DELETE /api/platform/agents/{name}': {
+  'DELETE /api/platform/mcp-servers/{name}': {
     path: { name: string }
     query: { expectedVersion: string }
     response: void
@@ -2855,17 +2879,21 @@ export interface ApiRoutes {
     query: { expectedVersion: string }
     response: void
   }
+  'DELETE /api/platform/skill-package-stagings/{stagingId}': {
+    path: { stagingId: string }
+    response: void
+  }
+  'DELETE /api/platform/skill-packages/{name}': {
+    path: { name: string }
+    query: { expectedVersion: string }
+    response: void
+  }
   'DELETE /api/plugins/{pluginId}/auth': {
     path: { pluginId: string }
     response: void
   }
   'DELETE /api/projects/{projectId}': {
     path: { projectId: string }
-    query: { expectedVersion: string }
-    response: void
-  }
-  'DELETE /api/skill-packages/{name}': {
-    path: { name: string }
     query: { expectedVersion: string }
     response: void
   }
@@ -2994,20 +3022,15 @@ export interface ApiRoutes {
     path: { issueId: string }
     response: IssueEvidenceDTO[]
   }
-  'GET /api/mcp-servers': {
-    query: { pageNumber?: number; pageSize?: number }
-    response: Page<McpServerDTO>
-  }
-  'GET /api/mcp-servers/{name}': {
-    path: { name: string }
-    response: McpServerDTO
-  }
-  'GET /api/mcp-servers/{name}/config': {
-    path: { name: string }
-    response: McpServerConfigDTO
-  }
   'GET /api/platform/agents': {
     response: AgentDTO[]
+  }
+  'GET /api/platform/mcp-servers': {
+    response: McpServerSummaryDTO[]
+  }
+  'GET /api/platform/mcp-servers/{name}': {
+    path: { name: string }
+    response: McpServerDTO
   }
   'GET /api/platform/model-catalog': {
     query: { cursor?: string; limit?: number; query?: string }
@@ -3022,6 +3045,21 @@ export interface ApiRoutes {
   'GET /api/platform/providers/{name}/remote-models': {
     path: { name: string }
     response: string[]
+  }
+  'GET /api/platform/skill-packages': {
+    response: SkillPackageSummaryDTO[]
+  }
+  'GET /api/platform/skill-packages/{name}': {
+    path: { name: string }
+    response: SkillPackageDetailDTO
+  }
+  'GET /api/platform/skill-packages/{name}/environments': {
+    path: { name: string }
+    response: SkillEnvironmentSyncDTO[]
+  }
+  'GET /api/platform/skill-packages/{name}/files': {
+    path: { name: string }
+    response: SkillPackageFileDTO[]
   }
   'GET /api/platform/tools': {
     response: ToolCatalogEntryDTO[]
@@ -3053,21 +3091,6 @@ export interface ApiRoutes {
   }
   'GET /api/settings/sync': {
     response: ConfigSyncInventoryDTO
-  }
-  'GET /api/skill-packages': {
-    response: SkillPackageSummaryDTO[]
-  }
-  'GET /api/skill-packages/{name}': {
-    path: { name: string }
-    response: SkillPackageDetailDTO
-  }
-  'GET /api/skill-packages/{name}/environments': {
-    path: { name: string }
-    response: SkillEnvironmentSyncDTO[]
-  }
-  'GET /api/skill-packages/{name}/files': {
-    path: { name: string }
-    response: SkillPackageFileDTO[]
   }
   'POST /api/agent-tasks': {
     body: AgentTaskSubmitDTO
@@ -3141,10 +3164,6 @@ export interface ApiRoutes {
     path: { environmentId: string }
     body: EnvironmentRotateTokenDTO
     response: EnvironmentCardDTO
-  }
-  'POST /api/environments/{environmentId}/skills/resync': {
-    path: { environmentId: string }
-    response: void
   }
   'POST /api/environments/{environmentId}/update': {
     path: { environmentId: string }
@@ -3244,18 +3263,22 @@ export interface ApiRoutes {
     body: UnarchiveIssueRequestDTO
     response: IssueDTO
   }
-  'POST /api/mcp-servers': {
-    body: McpServerCreateDTO
-    response: McpServerDTO
-  }
-  'POST /api/mcp-servers/{name}/discover': {
-    path: { name: string }
-    query: { expectedVersion: string }
-    response: McpServerDTO
-  }
   'POST /api/platform/agents': {
     body: AgentCreateDTO
     response: AgentDTO
+  }
+  'POST /api/platform/environments/{environmentId}/resync-skills': {
+    path: { environmentId: string }
+    response: void
+  }
+  'POST /api/platform/mcp-servers': {
+    body: McpServerCreateDTO
+    response: McpServerDTO
+  }
+  'POST /api/platform/mcp-servers/{name}/discover': {
+    path: { name: string }
+    body: McpServerDiscoverDTO
+    response: McpServerDTO
   }
   'POST /api/platform/model-catalog/refresh': {
     response: ModelCatalogPageDTO
@@ -3267,6 +3290,33 @@ export interface ApiRoutes {
   'POST /api/platform/providers': {
     body: ProviderCreateDTO
     response: ProviderDTO
+  }
+  'POST /api/platform/skill-package-stagings': {
+    body: SkillPackageStagingCreateDTO
+    response: SkillPackageStagingDTO
+  }
+  'POST /api/platform/skill-package-stagings/{stagingId}/publish': {
+    path: { stagingId: string }
+    body: SkillPackageStagingPublishDTO
+    response: SkillPackageDetailDTO
+  }
+  'POST /api/platform/skill-packages': {
+    body: SkillPackageCreateDTO
+    response: SkillPackageDetailDTO
+  }
+  'POST /api/platform/skill-packages/{name}/archive-url': {
+    path: { name: string }
+    response: SkillArchiveDownloadDTO
+  }
+  'POST /api/platform/skill-packages/{name}/check': {
+    path: { name: string }
+    body: SkillPackageCheckDTO
+    response: SkillPackageDetailDTO
+  }
+  'POST /api/platform/skill-packages/{name}/publish': {
+    path: { name: string }
+    body: SkillPackagePublishDTO
+    response: SkillPackageDetailDTO
   }
   'POST /api/plugins/{pluginId}/auth/complete': {
     path: { pluginId: string }
@@ -3313,36 +3363,6 @@ export interface ApiRoutes {
   'POST /api/settings/sync/import/check': {
     body: ConfigSyncImportCheckRequestDTO
     response: ConfigSyncImportCheckDTO
-  }
-  'POST /api/skill-packages/git': {
-    body: SkillPackageGitCreateDTO
-    response: SkillPackageDetailDTO
-  }
-  'POST /api/skill-packages/git/{name}/check': {
-    path: { name: string }
-    body: SkillPackageCheckDTO
-    response: SkillPackageDetailDTO
-  }
-  'POST /api/skill-packages/git/{name}/publish': {
-    path: { name: string }
-    body: SkillPackageGitPublishDTO
-    response: SkillPackageDetailDTO
-  }
-  'POST /api/skill-packages/uploads/preview': {
-    body: SkillPackageUploadPreviewDTO
-    response: SkillPackagePreviewDTO
-  }
-  'POST /api/skill-packages/uploads/publish': {
-    body: SkillPackageUploadPublishDTO
-    response: SkillPackageDetailDTO
-  }
-  'POST /api/skill-packages/uploads/{stagingUploadId}/cancel': {
-    path: { stagingUploadId: string }
-    response: void
-  }
-  'POST /api/skill-packages/{name}/archive-url': {
-    path: { name: string }
-    response: SkillArchiveDownloadDTO
   }
   'POST /api/storage/blobs/{blobId}/download-url': {
     path: { blobId: string }
@@ -3400,15 +3420,15 @@ export interface ApiRoutes {
     body: UpdateIssueRequestDTO
     response: IssueDTO
   }
-  'PUT /api/mcp-servers/{name}': {
-    path: { name: string }
-    body: McpServerUpdateDTO
-    response: McpServerDTO
-  }
   'PUT /api/platform/agents/{name}': {
     path: { name: string }
     body: AgentUpdateDTO
     response: AgentDTO
+  }
+  'PUT /api/platform/mcp-servers/{name}': {
+    path: { name: string }
+    body: McpServerUpdateDTO
+    response: McpServerDTO
   }
   'PUT /api/platform/models/{*name}': {
     path: { name: string }
@@ -3419,6 +3439,11 @@ export interface ApiRoutes {
     path: { name: string }
     body: ProviderUpdateDTO
     response: ProviderDTO
+  }
+  'PUT /api/platform/skill-packages/{name}': {
+    path: { name: string }
+    body: SkillPackageEditDTO
+    response: SkillPackageDetailDTO
   }
   'PUT /api/plugins/{pluginId}/configuration': {
     path: { pluginId: string }
@@ -3443,11 +3468,6 @@ export interface ApiRoutes {
   'PUT /api/settings': {
     body: SystemSettingsUpdateDTO
     response: SystemSettingsDTO
-  }
-  'PUT /api/skill-packages/{name}': {
-    path: { name: string }
-    body: SkillPackageEditDTO
-    response: SkillPackageDetailDTO
   }
 }
 

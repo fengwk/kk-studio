@@ -78,7 +78,7 @@ function skillSync(
 
 /**
  * NAS 上三个 Package 分别是安装失败、版本不一致与从未上报；builder 全部为当前版本。
- * 从未上报的 Package 在该 Environment 没有摘要行，与既有契约 `GET /skill-packages/{name}/environments` 一致。
+ * 从未上报的 Package 在该 Environment 没有摘要行，与既有契约 `GET /api/platform/skill-packages/{name}/environments` 一致。
  */
 function summaries(state: InstallState, packageName: string) {
   const builder = skillSync(BUILDER_ID, { installedSha256: CURRENT_SHA, upToDate: true })
@@ -163,7 +163,7 @@ async function installSkillHintApi(
       })
       return
     }
-    const skillMatch = /^\/api\/skill-packages\/([^/]+)\/environments$/.exec(path)
+    const skillMatch = /^\/api\/platform\/skill-packages\/([^/]+)\/environments$/.exec(path)
     if (skillMatch != null) {
       const packageName = decodeURIComponent(skillMatch[1]!)
       await route.fulfill({ json: summaries(state, packageName) })

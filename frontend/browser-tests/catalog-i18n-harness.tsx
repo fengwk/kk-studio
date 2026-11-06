@@ -19,7 +19,7 @@ const SAMPLE_PACKAGES: SkillPackageDetailDTO[] = [
     packageName: 'core-tools',
     description: '核心开发技能集',
     packageVersion: '1111111111111111111111111111111111111111',
-    publishedAt: 1784505600,
+    publishedAt: 1784505600000,
     skills: [
       { name: 'dev', description: 'developer workflow' },
       { name: 'bash', description: 'bash execution' },
@@ -28,7 +28,7 @@ const SAMPLE_PACKAGES: SkillPackageDetailDTO[] = [
     git: {
       repositoryUrl: 'https://github.com/example/skills.git',
       branch: 'main',
-      hasToken: false,
+      token: { configured: false },
     },
     headCommit: null,
     headCheckedAt: null,
@@ -37,59 +37,59 @@ const SAMPLE_PACKAGES: SkillPackageDetailDTO[] = [
     artifactSha256: 'mock-sha256-core',
     artifactSizeBytes: '1024',
     version: '1',
-    createTime: 1784505600,
-    updateTime: 1784509200,
+    createdAt: 1784505600000,
+    updatedAt: 1784509200000,
   },
   {
     packageName: 'browser-skills',
     description: 'Browser automation package',
     packageVersion: '2222222222222222222222222222222222222222',
-    publishedAt: 1784505600,
+    publishedAt: 1784505600000,
     skills: [{ name: 'opencli', description: 'browser cli' }],
     source: 'GIT',
     git: {
       repositoryUrl: 'https://github.com/example/browser.git',
       branch: 'main',
-      hasToken: true,
+      token: { configured: true },
     },
     headCommit: '3333333333333333333333333333333333333333',
-    headCheckedAt: 1784512800,
+    headCheckedAt: 1784512800000,
     headCheckError: null,
     updateAvailable: true,
     artifactSha256: 'mock-sha256-browser',
     artifactSizeBytes: '2048',
     version: '2',
-    createTime: 1784505600,
-    updateTime: 1784512800,
+    createdAt: 1784505600000,
+    updatedAt: 1784512800000,
   },
   {
     packageName: 'diagnostics-kit',
     description: 'Upstream error demo',
     packageVersion: '4444444444444444444444444444444444444444',
-    publishedAt: 1784505600,
+    publishedAt: 1784505600000,
     skills: [],
     source: 'GIT',
     git: {
       repositoryUrl: 'https://github.com/example/diag.git',
       branch: 'main',
-      hasToken: false,
+      token: { configured: false },
     },
     headCommit: null,
-    headCheckedAt: 1784516400,
+    headCheckedAt: 1784516400000,
     headCheckError: 'fatal: repository not reachable',
     updateAvailable: false,
     artifactSha256: 'mock-sha256-diag',
     artifactSizeBytes: '512',
     version: '1',
-    createTime: 1784505600,
-    updateTime: 1784516400,
+    createdAt: 1784505600000,
+    updatedAt: 1784516400000,
   },
 ]
 
 // 本地化回归只读取固定数据，不允许弹窗取消或校验流程发起 mutation。
 const SAMPLE_DETAILS = new Map(SAMPLE_PACKAGES.map((pkg) => [pkg.packageName, pkg]))
 agentService.listSkillPackages = async () =>
-  SAMPLE_PACKAGES.map(({ packageName, description, packageVersion, publishedAt, skills, source, updateAvailable, version, createTime, updateTime }) => ({
+  SAMPLE_PACKAGES.map(({ packageName, description, packageVersion, publishedAt, skills, source, updateAvailable, version, createdAt, updatedAt }) => ({
     packageName,
     description,
     packageVersion,
@@ -98,8 +98,8 @@ agentService.listSkillPackages = async () =>
     source,
     updateAvailable,
     version,
-    createTime,
-    updateTime,
+    createdAt,
+    updatedAt,
   }))
 agentService.getSkillPackage = async (name: string) => {
   const detail = SAMPLE_DETAILS.get(name)

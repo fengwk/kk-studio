@@ -11,16 +11,17 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
-import fun.fengwk.kkstudio.common.page.Page;
-import fun.fengwk.kkstudio.common.page.PageQuery;
+import fun.fengwk.kkstudio.platform.catalog.dto.McpServerCreateDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.McpServerDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.McpServerDiscoverDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.McpServerSummaryDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.McpServerUpdateDTO;
 import fun.fengwk.kkstudio.platform.catalog.mcp.test.FakeStreamableHttpMcpServer;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
-import fun.fengwk.kkstudio.share.mcp.McpServerConfigDTO;
-import fun.fengwk.kkstudio.share.mcp.McpServerCreateDTO;
-import fun.fengwk.kkstudio.share.mcp.McpServerDTO;
-import fun.fengwk.kkstudio.share.mcp.McpServerUpdateDTO;
+import fun.fengwk.kkstudio.platform.secret.SecretUpdate;
 
 import java.io.IOException;
 import java.lang.reflect.Field;
@@ -36,6 +37,8 @@ import java.util.Map;
  * 执行并整体物理替换工具行、CAS 并发冲突、发现失败不破坏既有快照、被 Agent 引用的工具删除 fail closed， 以及 name 即身份的 CRUD 契约。
  */
 public class McpServerServiceTest extends PostgresSpringTestSupport {
+
+  private static final JsonMapper JSON = JsonMapper.builder().build();
 
   @Autowired private McpServerService mcpServerService;
   @Autowired private McpServerRepository repository;
@@ -71,26 +74,26 @@ public class McpServerServiceTest extends PostgresSpringTestSupport {
     assertEquals("github_core", server.getName());
     assertEquals("0", server.getVersion());
     assertEquals(10000L, server.getTimeoutMillis());
-    assertEquals("UNVERIFIED", server.getDiscoveryStatus());
+    assertEquals(McpDiscoveryStatus.UNVERIFIED, server.getDiscoveryStatus());
     assertEquals(0, server.getToolCount());
     assertEquals(0, fakeServer.toolCallCount());
 
-    McpServerConfigDTO configDTO = mcpServerService.getServerConfig("github_core");
-    assertEquals("github_core", configDTO.getName());
-    assertEquals(fakeServer.endpointUrl(), configDTO.getUrl());
-    assertEquals("Bearer secret_token_123", configDTO.getHeaders().get("Authorization"));
-    assertEquals("0", configDTO.getVersion());
+    McpServerDTO detail = mcpServerService.getServer("github_core");
+    assertEquals("github_core", detail.getName());
+    assertEquals(fakeServer.endpointUrl(), detail.getUrl());
+    assertTrue(detail.getHeaders().configured());
+    assertEquals("0", detail.getVersion());
 
-    // 公开视图物理上只有安全元数据字段：不存在 url、headers、type、environmentId 或任何代理 id
+    // 列表项物理上只有安全元数据字段：不存在 url、headers、type、environmentId 或任何代理 id
     assertEquals(
         List.of(
-            "createTime",
+            "createdAt",
             "discoveryStatus",
             "enabled",
             "name",
             "timeoutMillis",
             "toolCount",
-            "updateTime",
+            "updatedAt",
             "version"),
         declaredFieldNames());
 
@@ -130,8 +133,8 @@ public class McpServerServiceTest extends PostgresSpringTestSupport {
         createDto(
             "remote_sync", fakeServer.endpointUrl(), Map.of("Authorization", "Bearer tok"), 5000L));
 
-    McpServerDTO discovered = mcpServerService.discoverServer("remote_sync", "0");
-    assertEquals("AVAILABLE", discovered.getDiscoveryStatus());
+    McpServerDTO discovered = discover("remote_sync", "0");
+    assertEquals(McpDiscoveryStatus.AVAILABLE, discovered.getDiscoveryStatus());
     assertEquals(2, discovered.getToolCount());
     assertEquals("0", discovered.getVersion());
 
@@ -152,7 +155,7 @@ public class McpServerServiceTest extends PostgresSpringTestSupport {
         "Updated desc",
         "{\"type\":\"object\",\"properties\":{\"q\":{\"type\":\"string\"}}}");
 
-    McpServerDTO rediscovered = mcpServerService.discoverServer("remote_sync", "0");
+    McpServerDTO rediscovered = discover("remote_sync", "0");
     assertEquals(1, rediscovered.getToolCount());
 
     List<McpTool> after = repository.listTools("remote_sync");
@@ -166,14 +169,15 @@ public class McpServerServiceTest extends PostgresSpringTestSupport {
     // 意图：发现网络失败时抛 DomainException，既有工具行与状态保持原样，不被清空
     fakeServer.addTool("stable", "Stable tool", "{\"type\":\"object\"}");
     mcpServerService.createServer(createDto("failing", fakeServer.endpointUrl(), Map.of(), 5000L));
-    mcpServerService.discoverServer("failing", "0");
+    discover("failing", "0");
     assertEquals(1, repository.listTools("failing").size());
 
     fakeServer.setFailDiscovery(true);
-    assertThrows(DomainException.class, () -> mcpServerService.discoverServer("failing", "0"));
+    assertThrows(DomainException.class, () -> discover("failing", "0"));
 
     assertEquals(1, repository.listTools("failing").size());
-    assertEquals("AVAILABLE", mcpServerService.getServer("failing").getDiscoveryStatus());
+    assertEquals(
+        McpDiscoveryStatus.AVAILABLE, mcpServerService.getServer("failing").getDiscoveryStatus());
     // 失败绝不推进版本或改变状态
     assertEquals("0", mcpServerService.getServer("failing").getVersion());
   }
@@ -184,8 +188,10 @@ public class McpServerServiceTest extends PostgresSpringTestSupport {
     fakeServer.addTool("ping", "Ping", "{}");
     mcpServerService.createServer(
         createDto("update_test", fakeServer.endpointUrl(), Map.of(), 5000L));
-    mcpServerService.discoverServer("update_test", "0");
-    assertEquals("AVAILABLE", mcpServerService.getServer("update_test").getDiscoveryStatus());
+    discover("update_test", "0");
+    assertEquals(
+        McpDiscoveryStatus.AVAILABLE,
+        mcpServerService.getServer("update_test").getDiscoveryStatus());
 
     McpServerUpdateDTO update = new McpServerUpdateDTO();
     update.setExpectedVersion("0");
@@ -195,13 +201,13 @@ public class McpServerServiceTest extends PostgresSpringTestSupport {
     McpServerDTO updated = mcpServerService.updateServer("update_test", update);
     assertEquals("1", updated.getVersion());
     assertEquals(8000L, updated.getTimeoutMillis());
-    assertEquals("UNVERIFIED", updated.getDiscoveryStatus());
+    assertEquals(McpDiscoveryStatus.UNVERIFIED, updated.getDiscoveryStatus());
 
     // 同一 expectedVersion 再次提交必须冲突
     assertThrows(DomainException.class, () -> mcpServerService.updateServer("update_test", update));
 
     // discover 与 delete 也必须校验版本
-    assertThrows(DomainException.class, () -> mcpServerService.discoverServer("update_test", "0"));
+    assertThrows(DomainException.class, () -> discover("update_test", "0"));
     assertThrows(DomainException.class, () -> mcpServerService.deleteServer("update_test", "0"));
   }
 
@@ -212,7 +218,7 @@ public class McpServerServiceTest extends PostgresSpringTestSupport {
     fakeServer.addTool("removable_tool", "Removable", "{}");
     mcpServerService.createServer(
         createDto("inuse_test", fakeServer.endpointUrl(), Map.of(), 5000L));
-    mcpServerService.discoverServer("inuse_test", "0");
+    discover("inuse_test", "0");
 
     String referencedName =
         repository.listTools("inuse_test").stream()
@@ -226,12 +232,14 @@ public class McpServerServiceTest extends PostgresSpringTestSupport {
     fakeServer.clearTools();
     fakeServer.addTool("removable_tool", "Removable", "{}");
 
-    assertThrows(DomainException.class, () -> mcpServerService.discoverServer("inuse_test", "0"));
+    assertThrows(DomainException.class, () -> discover("inuse_test", "0"));
 
     List<McpTool> preserved = repository.listTools("inuse_test");
     assertEquals(2, preserved.size());
     assertTrue(preserved.stream().anyMatch(t -> t.name().equals(referencedName)));
-    assertEquals("AVAILABLE", mcpServerService.getServer("inuse_test").getDiscoveryStatus());
+    assertEquals(
+        McpDiscoveryStatus.AVAILABLE,
+        mcpServerService.getServer("inuse_test").getDiscoveryStatus());
   }
 
   @Test
@@ -240,7 +248,7 @@ public class McpServerServiceTest extends PostgresSpringTestSupport {
     fakeServer.addTool("critical_tool", "Critical", "{}");
     mcpServerService.createServer(
         createDto("delete_guard", fakeServer.endpointUrl(), Map.of(), 5000L));
-    mcpServerService.discoverServer("delete_guard", "0");
+    discover("delete_guard", "0");
 
     String referencedName = repository.listTools("delete_guard").get(0).name();
     insertFakeAgentReferencingTool(referencedName);
@@ -264,13 +272,57 @@ public class McpServerServiceTest extends PostgresSpringTestSupport {
 
     McpServerDTO retrieved = mcpServerService.getServer("page_test");
     assertEquals("page_test", retrieved.getName());
-    assertEquals("UNVERIFIED", retrieved.getDiscoveryStatus());
+    assertEquals(McpDiscoveryStatus.UNVERIFIED, retrieved.getDiscoveryStatus());
 
     assertThrows(DomainException.class, () -> mcpServerService.getServer("no_such_server"));
 
-    Page<McpServerDTO> page = mcpServerService.pageServers(new PageQuery(1, 10));
-    assertNotNull(page);
-    assertTrue(page.getResults().stream().anyMatch(s -> "page_test".equals(s.getName())));
+    List<McpServerSummaryDTO> servers = mcpServerService.listServers();
+    assertTrue(servers.stream().anyMatch(s -> "page_test".equals(s.getName())));
+  }
+
+  @Test
+  public void headerSecretKeepsClearsAndReplacesAsAWhole() {
+    // 意图：PUT 的 headers 秘密更新 KEEP 保留、CLEAR 清空、SET 整体替换；响应只暴露 configured 事实
+    mcpServerService.createServer(
+        createDto(
+            "headers_secret",
+            fakeServer.endpointUrl(),
+            Map.of("Authorization", "Bearer a"),
+            5000L));
+    assertTrue(mcpServerService.getServer("headers_secret").getHeaders().configured());
+
+    McpServerUpdateDTO keep = new McpServerUpdateDTO();
+    keep.setExpectedVersion("0");
+    keep.setUrl(fakeServer.endpointUrl());
+    keep.setHeaders(SecretUpdate.keep());
+    assertTrue(mcpServerService.updateServer("headers_secret", keep).getHeaders().configured());
+    assertEquals(
+        "Bearer a",
+        repository.getByName("headers_secret").orElseThrow().headers().get("Authorization"));
+
+    McpServerUpdateDTO clear = new McpServerUpdateDTO();
+    clear.setExpectedVersion("1");
+    clear.setUrl(fakeServer.endpointUrl());
+    clear.setHeaders(SecretUpdate.clear());
+    assertFalse(mcpServerService.updateServer("headers_secret", clear).getHeaders().configured());
+    assertTrue(repository.getByName("headers_secret").orElseThrow().headers().isEmpty());
+
+    McpServerUpdateDTO set = new McpServerUpdateDTO();
+    set.setExpectedVersion("2");
+    set.setUrl(fakeServer.endpointUrl());
+    set.setHeaders(SecretUpdate.set("{\"X-Token\":\"b\"}"));
+    assertTrue(mcpServerService.updateServer("headers_secret", set).getHeaders().configured());
+    assertEquals(
+        Map.of("X-Token", "b"), repository.getByName("headers_secret").orElseThrow().headers());
+
+    // 非法 header 文本在落库前拒绝，且不推进版本
+    McpServerUpdateDTO invalid = new McpServerUpdateDTO();
+    invalid.setExpectedVersion("3");
+    invalid.setUrl(fakeServer.endpointUrl());
+    invalid.setHeaders(SecretUpdate.set("not-json"));
+    assertThrows(
+        DomainException.class, () -> mcpServerService.updateServer("headers_secret", invalid));
+    assertEquals("3", mcpServerService.getServer("headers_secret").getVersion());
   }
 
   private static McpServerCreateDTO createDto(
@@ -278,15 +330,29 @@ public class McpServerServiceTest extends PostgresSpringTestSupport {
     McpServerCreateDTO createDTO = new McpServerCreateDTO();
     createDTO.setName(name);
     createDTO.setUrl(url);
-    createDTO.setHeaders(headers);
+    createDTO.setHeaders(headersSecret(headers));
     createDTO.setTimeoutMillis(timeoutMillis);
     return createDTO;
   }
 
-  /** 公开视图 DTO 的声明字段集合，用于断言不存在隐藏身份或敏感字段。 */
+  /** headers 以秘密更新的 SET 值提交：JSON 对象文本。 */
+  private static SecretUpdate headersSecret(Map<String, String> headers) {
+    if (headers.isEmpty()) {
+      return SecretUpdate.keep();
+    }
+    return SecretUpdate.set(JSON.writeValueAsString(headers));
+  }
+
+  private McpServerDTO discover(String name, String expectedVersion) {
+    McpServerDiscoverDTO discoverDTO = new McpServerDiscoverDTO();
+    discoverDTO.setExpectedVersion(expectedVersion);
+    return mcpServerService.discoverServer(name, discoverDTO);
+  }
+
+  /** 列表项 DTO 的声明字段集合，用于断言不存在隐藏身份或敏感字段。 */
   private static List<String> declaredFieldNames() {
     List<String> names = new ArrayList<>();
-    for (Field field : McpServerDTO.class.getDeclaredFields()) {
+    for (Field field : McpServerSummaryDTO.class.getDeclaredFields()) {
       names.add(field.getName());
     }
     Collections.sort(names);

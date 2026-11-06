@@ -24,12 +24,12 @@ import type {
   SkillPackageDetailDTO,
   SkillPackageEditDTO,
   SkillPackageFileDTO,
-  SkillPackageGitCreateDTO,
-  SkillPackageGitPublishDTO,
-  SkillPackagePreviewDTO,
+  SkillPackageCreateDTO,
+  SkillPackagePublishDTO,
+  SkillPackageStagingCreateDTO,
+  SkillPackageStagingDTO,
+  SkillPackageStagingPublishDTO,
   SkillPackageSummaryDTO,
-  SkillPackageUploadPreviewDTO,
-  SkillPackageUploadPublishDTO,
   ToolCatalogEntryDTO,
   ApiRoutes,
 } from '@/shared/api/generated/contracts'
@@ -127,64 +127,77 @@ export function createAgentService(
 
     // --- Global Skills & Skill Packages ---
 
-    listSkillPackages: (): Promise<SkillPackageSummaryDTO[]> => client.get('/skill-packages'),
+    listSkillPackages: (): Promise<SkillPackageSummaryDTO[]> =>
+      request('GET /api/platform/skill-packages', {}),
 
     getSkillPackage: (name: string): Promise<SkillPackageDetailDTO> =>
-      client.get(`/skill-packages/${encodeURIComponent(name)}`),
+      request('GET /api/platform/skill-packages/{name}', { path: { name } }),
 
     getSkillPackageArchiveUrl: (name: string): Promise<SkillArchiveDownloadDTO> =>
-      client.post(`/skill-packages/${encodeURIComponent(name)}/archive-url`),
+      request('POST /api/platform/skill-packages/{name}/archive-url', { path: { name } }),
 
     listSkillPackageEnvironments: (name: string): Promise<SkillEnvironmentSyncDTO[]> =>
-      client.get(`/skill-packages/${encodeURIComponent(name)}/environments`),
+      request('GET /api/platform/skill-packages/{name}/environments', { path: { name } }),
 
     listSkillPackageFiles: (name: string): Promise<SkillPackageFileDTO[]> =>
-      client.get(`/skill-packages/${encodeURIComponent(name)}/files`),
+      request('GET /api/platform/skill-packages/{name}/files', { path: { name } }),
 
-    createSkillPackage: (data: SkillPackageGitCreateDTO): Promise<SkillPackageDetailDTO> =>
-      client.post('/skill-packages/git', data, { timeout: 0 }),
+    createSkillPackage: (data: SkillPackageCreateDTO): Promise<SkillPackageDetailDTO> =>
+      request('POST /api/platform/skill-packages', { body: data }, { timeoutMs: 0 }),
 
-    editSkillPackage: (
-      name: string,
-      data: SkillPackageEditDTO,
-    ): Promise<SkillPackageDetailDTO> =>
-      client.put(`/skill-packages/${encodeURIComponent(name)}`, data),
+    editSkillPackage: (name: string, data: SkillPackageEditDTO): Promise<SkillPackageDetailDTO> =>
+      request('PUT /api/platform/skill-packages/{name}', { path: { name }, body: data }),
 
     checkSkillPackage: (
       name: string,
       data: SkillPackageCheckDTO,
     ): Promise<SkillPackageDetailDTO> =>
-      client.post(`/skill-packages/git/${encodeURIComponent(name)}/check`, data, { timeout: 0 }),
+      request(
+        'POST /api/platform/skill-packages/{name}/check',
+        { path: { name }, body: data },
+        { timeoutMs: 0 },
+      ),
 
     publishSkillPackage: (
       name: string,
-      data: SkillPackageGitPublishDTO,
+      data: SkillPackagePublishDTO,
     ): Promise<SkillPackageDetailDTO> =>
-      client.post(`/skill-packages/git/${encodeURIComponent(name)}/publish`, data, { timeout: 0 }),
+      request(
+        'POST /api/platform/skill-packages/{name}/publish',
+        { path: { name }, body: data },
+        { timeoutMs: 0 },
+      ),
 
-    deleteSkillPackage: (
-      name: string,
-      expectedVersion: string,
-    ): Promise<void> =>
-      client.delete(`/skill-packages/${encodeURIComponent(name)}`, {
-        params: { expectedVersion },
+    deleteSkillPackage: (name: string, expectedVersion: string): Promise<void> =>
+      request('DELETE /api/platform/skill-packages/{name}', {
+        path: { name },
+        query: { expectedVersion },
       }),
 
-    previewSkillPackageUpload: (
-      data: SkillPackageUploadPreviewDTO,
-    ): Promise<SkillPackagePreviewDTO> =>
-      client.post('/skill-packages/uploads/preview', data, { timeout: 0 }),
+    createSkillPackageStaging: (
+      data: SkillPackageStagingCreateDTO,
+    ): Promise<SkillPackageStagingDTO> =>
+      request('POST /api/platform/skill-package-stagings', { body: data }, { timeoutMs: 0 }),
 
-    publishSkillPackageUpload: (
-      data: SkillPackageUploadPublishDTO,
+    publishSkillPackageStaging: (
+      stagingId: string,
+      data: SkillPackageStagingPublishDTO,
     ): Promise<SkillPackageDetailDTO> =>
-      client.post('/skill-packages/uploads/publish', data, { timeout: 0 }),
+      request(
+        'POST /api/platform/skill-package-stagings/{stagingId}/publish',
+        { path: { stagingId }, body: data },
+        { timeoutMs: 0 },
+      ),
 
-    cancelSkillPackageUpload: (stagingUploadId: string): Promise<void> =>
-      client.post(`/skill-packages/uploads/${encodeURIComponent(stagingUploadId)}/cancel`),
+    cancelSkillPackageStaging: (stagingId: string): Promise<void> =>
+      request('DELETE /api/platform/skill-package-stagings/{stagingId}', {
+        path: { stagingId },
+      }),
 
     resyncEnvironmentSkills: (environmentId: string): Promise<void> =>
-      client.post(`/environments/${encodeURIComponent(environmentId)}/skills/resync`),
+      request('POST /api/platform/environments/{environmentId}/resync-skills', {
+        path: { environmentId },
+      }),
 
   }
 }

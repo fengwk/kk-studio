@@ -5,13 +5,21 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { McpServersPage } from '@/features/catalog/mcp/McpServersPage'
 import { mcpServerService } from '@/features/catalog/mcp-server-service'
 import { ApiError } from '@/shared/api/client'
-import type { McpServerConfigDTO, McpServerDTO } from '@/shared/api/generated/contracts'
+import type {
+  McpServerDTO,
+  McpServerSummaryDTO,
+} from '@/shared/api/generated/contracts'
 
 vi.mock('@/features/catalog/mcp-server-service', () => ({
+  headersUpdate: vi.fn((headers: Record<string, string> | null, clear: boolean) => {
+    if (headers && Object.keys(headers).length > 0) {
+      return { operation: 'SET', value: JSON.stringify(headers) }
+    }
+    return { operation: clear ? 'CLEAR' : 'KEEP' }
+  }),
   mcpServerService: {
-    pageServers: vi.fn(),
+    listServers: vi.fn(),
     getServer: vi.fn(),
-    getServerConfig: vi.fn(),
     createServer: vi.fn(),
     updateServer: vi.fn(),
     discoverServer: vi.fn(),
@@ -35,7 +43,9 @@ function renderPage() {
   return { queryClient, view }
 }
 
-function mockServer(overrides: Partial<McpServerDTO> = {}): McpServerDTO {
+const SEEDED_AT = 1784505600000
+
+function summary(overrides: Partial<McpServerSummaryDTO> = {}): McpServerSummaryDTO {
   return {
     name: 'filesystem',
     enabled: true,
@@ -43,8 +53,24 @@ function mockServer(overrides: Partial<McpServerDTO> = {}): McpServerDTO {
     discoveryStatus: 'AVAILABLE',
     toolCount: 3,
     version: '1',
-    createTime: 1784505600,
-    updateTime: 1784505600,
+    createdAt: SEEDED_AT,
+    updatedAt: SEEDED_AT,
+    ...overrides,
+  }
+}
+
+function detail(overrides: Partial<McpServerDTO> = {}): McpServerDTO {
+  return {
+    name: 'filesystem',
+    url: 'https://example.com/mcp',
+    enabled: true,
+    timeoutMillis: '30000',
+    discoveryStatus: 'AVAILABLE',
+    headers: { configured: false },
+    toolCount: 0,
+    version: '1',
+    createdAt: SEEDED_AT,
+    updatedAt: SEEDED_AT,
     ...overrides,
   }
 }
@@ -52,30 +78,22 @@ function mockServer(overrides: Partial<McpServerDTO> = {}): McpServerDTO {
 describe('McpServersPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    vi.mocked(mcpServerService.pageServers).mockResolvedValue({
-      pageNumber: 1,
-      pageSize: 100,
-      totalCount: '0',
-      results: [],
-    })
+    vi.mocked(mcpServerService.listServers).mockResolvedValue([])
+    vi.mocked(mcpServerService.getServer).mockResolvedValue(detail())
+    vi.mocked(mcpServerService.deleteServer).mockResolvedValue(undefined)
   })
 
-  it('renders server card metadata and actions without leaking URL or headers in list', async () => {
-    vi.mocked(mcpServerService.pageServers).mockResolvedValue({
-      pageNumber: 1,
-      pageSize: 100,
-      totalCount: '1',
-      results: [
-        mockServer({
-          name: 'fs_prod',
-          enabled: true,
-          timeoutMillis: '45000',
-          discoveryStatus: 'AVAILABLE',
-          toolCount: 5,
-          version: '2',
-        }),
-      ],
-    })
+  it('renders server summary metadata and actions without URL or headers', async () => {
+    vi.mocked(mcpServerService.listServers).mockResolvedValue([
+      summary({
+        name: 'fs_prod',
+        enabled: true,
+        timeoutMillis: '45000',
+        discoveryStatus: 'AVAILABLE',
+        toolCount: 5,
+        version: '2',
+      }),
+    ])
 
     renderPage()
 
@@ -87,116 +105,54 @@ describe('McpServersPage', () => {
     expect(screen.getByText('2')).toBeInTheDocument()
     expect(screen.getByText('已启用')).toBeInTheDocument()
 
-    // 确保卡片上无 URL 或 headers
+    // 列表项只有安全元数据：URL 与 headers 不进入卡片
     expect(screen.queryByText(/http:\/\//)).not.toBeInTheDocument()
     expect(screen.queryByText(/https:\/\//)).not.toBeInTheDocument()
     expect(screen.queryByText(/Authorization/)).not.toBeInTheDocument()
 
-    // 操作按钮 aria-label 包含 server.name
     expect(screen.getByLabelText('编辑 MCP 服务 fs_prod')).toBeInTheDocument()
     expect(screen.getByLabelText('删除 MCP 服务 fs_prod')).toBeInTheDocument()
   })
 
-  it('handles loading and error states for server list', async () => {
-    vi.mocked(mcpServerService.pageServers).mockRejectedValue(new Error('Network offline'))
+  it('handles loading and error states for the server list', async () => {
+    vi.mocked(mcpServerService.listServers).mockRejectedValue(new Error('Network offline'))
     renderPage()
 
     expect(await screen.findByText('Network offline')).toBeInTheDocument()
   })
 
-  it('retains cached servers and create action when background refetch fails with an error', async () => {
-    vi.mocked(mcpServerService.pageServers).mockResolvedValueOnce({
-      pageNumber: 1,
-      pageSize: 100,
-      totalCount: '1',
-      results: [mockServer({ name: 'cached-server' })],
-    })
-    const { queryClient } = renderPage()
-
-    expect(await screen.findByText('cached-server')).toBeInTheDocument()
-    expect(screen.getByText('创建 MCP 服务')).toBeInTheDocument()
-
-    // 模拟后台 refetch 发生网络错误
-    vi.mocked(mcpServerService.pageServers).mockRejectedValueOnce(new Error('background mcp error'))
-    await act(async () => {
-      await queryClient.refetchQueries()
-    })
-
-    // 验证：既展示错误提示，又保留已有缓存数据与创建卡操作
-    expect(await screen.findByText('background mcp error')).toBeInTheDocument()
-    expect(screen.getByText('cached-server')).toBeInTheDocument()
-    expect(screen.getByText('创建 MCP 服务')).toBeInTheDocument()
-  })
-
-  it('opens create modal, validates inputs, and submits new HTTP MCP server', async () => {
+  it('creates a server with headers submitted as one secret', async () => {
     const user = userEvent.setup()
-    vi.mocked(mcpServerService.createServer).mockResolvedValue(mockServer({ name: 'github' }))
+    vi.mocked(mcpServerService.createServer).mockResolvedValue(detail({ name: 'new_srv' }))
 
     renderPage()
 
     await user.click(await screen.findByRole('button', { name: '创建 MCP 服务' }))
-
     const modal = screen.getByRole('dialog', { name: '创建 MCP 服务' })
-    expect(modal).toBeInTheDocument()
 
-    const nameInput = screen.getByPlaceholderText('e.g. filesystem')
-    const urlInput = screen.getByPlaceholderText('https://example.com/mcp')
-    const headersInput = screen.getByLabelText(/JSON 请求头/)
-    const submitBtn = within(modal).getByRole('button', { name: '确认' })
-
-    // 校验：无效 name
-    await user.clear(nameInput)
-    await user.type(nameInput, 'INVALID-NAME!')
-    await user.type(urlInput, 'https://example.com/mcp')
-    await user.click(submitBtn)
-    expect(screen.getByRole('alert')).toHaveTextContent(/Name must start with lowercase letter/)
-
-    // 校验：无效 URL
-    await user.clear(nameInput)
-    await user.type(nameInput, 'github')
-    await user.clear(urlInput)
-    await user.type(urlInput, 'ftp://invalid-scheme.com')
-    await user.click(submitBtn)
-    expect(screen.getByRole('alert')).toHaveTextContent(/URL scheme must be http or https/)
-
-    // 校验：无效 headers JSON
-    await user.clear(urlInput)
-    await user.type(urlInput, 'https://example.com/mcp')
-    fireEvent.change(headersInput, { target: { value: '{ not valid json }' } })
-    await user.click(submitBtn)
-    expect(screen.getByRole('alert')).toHaveTextContent(/Headers must be valid JSON/)
-
-    // 校验：非字符串属性值 headers
-    fireEvent.change(headersInput, { target: { value: '{"auth": 123}' } })
-    await user.click(submitBtn)
-    expect(screen.getByRole('alert')).toHaveTextContent(/Header value for "auth" must be a string/)
-
-    // 输入有效值并提交，header 属性值必须保留空格
-    fireEvent.change(headersInput, {
-      target: { value: '{"Authorization": " Bearer my_token "}' },
+    await user.type(screen.getByPlaceholderText('e.g. filesystem'), 'new_srv')
+    await user.type(screen.getByPlaceholderText('https://example.com/mcp'), 'https://example.com/mcp')
+    fireEvent.change(screen.getByLabelText(/JSON 请求头/), {
+      target: { value: '{"Authorization": "Bearer secret"}' },
     })
-
-    await user.click(submitBtn)
+    await user.click(within(modal).getByRole('button', { name: '确认' }))
 
     await waitFor(() => {
       expect(mcpServerService.createServer).toHaveBeenCalledWith({
-        name: 'github',
+        name: 'new_srv',
         url: 'https://example.com/mcp',
-        headers: { Authorization: ' Bearer my_token ' },
+        headers: { operation: 'SET', value: '{"Authorization":"Bearer secret"}' },
         enabled: true,
         timeoutMillis: 60000,
       })
-      expect(screen.queryByRole('dialog', { name: '创建 MCP 服务' })).not.toBeInTheDocument()
     })
   })
 
-  it('handles create conflict presentation', async () => {
+  it('shows a conflict presenter when create conflicts', async () => {
     const user = userEvent.setup()
     vi.mocked(mcpServerService.createServer).mockRejectedValue(
-      new ApiError('Resource exists', 409, 'CONFLICT', {
-        errorType: 'OUTDATED_SNAPSHOT',
-        message: 'Conflict',
-        expectedVersion: '0',
+      new ApiError('Conflict', 409, 'duplicate', {
+        name: 'conflict_srv',
         currentVersion: '1',
       }),
     )
@@ -205,184 +161,176 @@ describe('McpServersPage', () => {
 
     await user.click(await screen.findByRole('button', { name: '创建 MCP 服务' }))
     const modal = screen.getByRole('dialog', { name: '创建 MCP 服务' })
-    const nameInput = screen.getByPlaceholderText('e.g. filesystem')
-    const urlInput = screen.getByPlaceholderText('https://example.com/mcp')
-
-    await user.type(nameInput, 'conflict_srv')
-    await user.type(urlInput, 'https://example.com/mcp')
+    await user.type(screen.getByPlaceholderText('e.g. filesystem'), 'conflict_srv')
+    await user.type(screen.getByPlaceholderText('https://example.com/mcp'), 'https://example.com/mcp')
     await user.click(within(modal).getByRole('button', { name: '确认' }))
 
-    // 冲突弹窗出现
     expect(await screen.findByText('数据已发生变化')).toBeInTheDocument()
   })
 
-  it('opens edit modal, fetches config, displays immutable name, and submits full replacement PUT', async () => {
+  it('edits from the detail projection and keeps stored headers unless replaced or cleared', async () => {
     const user = userEvent.setup()
-    const serverInstance = mockServer({
-      name: 'srv_edit',
-      version: '3',
-      enabled: true,
-      timeoutMillis: '30000',
-    })
-
-    vi.mocked(mcpServerService.pageServers).mockResolvedValue({
-      pageNumber: 1,
-      pageSize: 100,
-      totalCount: '1',
-      results: [serverInstance],
-    })
-
-    const configResponse: McpServerConfigDTO = {
-      name: 'srv_edit',
-      version: '3',
-      url: 'https://example.com/api',
-      headers: { Authorization: 'Bearer token-abc' },
-    }
-    vi.mocked(mcpServerService.getServerConfig).mockResolvedValue(configResponse)
-    vi.mocked(mcpServerService.updateServer).mockResolvedValue(mockServer({ name: 'srv_edit', version: '4' }))
+    vi.mocked(mcpServerService.listServers).mockResolvedValue([summary({ name: 'srv_edit', version: '3' })])
+    vi.mocked(mcpServerService.getServer).mockResolvedValue(
+      detail({
+        name: 'srv_edit',
+        url: 'https://example.com/api',
+        version: '3',
+        headers: { configured: true },
+      }),
+    )
+    vi.mocked(mcpServerService.updateServer).mockResolvedValue(detail({ name: 'srv_edit', version: '4' }))
 
     renderPage()
 
     await user.click(await screen.findByLabelText('编辑 MCP 服务 srv_edit'))
 
-    // 验证调用了 getServerConfig(name)
-    expect(mcpServerService.getServerConfig).toHaveBeenCalledWith('srv_edit')
-
+    expect(mcpServerService.getServer).toHaveBeenCalledWith('srv_edit')
     const modal = await screen.findByRole('dialog', { name: '编辑 MCP 服务 · srv_edit' })
-    expect(modal).toBeInTheDocument()
+    expect(screen.getByDisplayValue('srv_edit')).toBeDisabled()
 
-    // 验证 Name 为只读展示
-    const nameInput = screen.getByDisplayValue('srv_edit')
-    expect(nameInput).toBeDisabled()
-
-    // 验证 URL 和 headers 回填
     const urlInput = screen.getByDisplayValue('https://example.com/api')
-    expect(urlInput).toBeInTheDocument()
+    // headers 已保存，但从不回读：输入框为空，提示留空保持
+    const headersArea = screen.getByLabelText(/JSON 请求头/)
+    expect(headersArea).toHaveValue('')
+    expect(within(modal).getByText('留空保持已保存的请求头。')).toBeInTheDocument()
 
-    // 编辑 URL、headers、enabled 和 timeout
     await user.clear(urlInput)
     await user.type(urlInput, 'https://example.com/api-v2')
-
-    const headersArea = screen.getByLabelText(/JSON 请求头/)
-    fireEvent.change(headersArea, {
-      target: { value: '{"X-Api-Key": "key_123"}' },
-    })
-
-    // 提交更新
     await user.click(within(modal).getByRole('button', { name: '确认' }))
 
     await waitFor(() => {
       expect(mcpServerService.updateServer).toHaveBeenCalledWith('srv_edit', {
         expectedVersion: '3',
         url: 'https://example.com/api-v2',
-        headers: { 'X-Api-Key': 'key_123' },
+        headers: { operation: 'KEEP' },
         enabled: true,
         timeoutMillis: 30000,
       })
-      expect(screen.queryByRole('dialog', { name: '编辑 MCP 服务 · srv_edit' })).not.toBeInTheDocument()
     })
   })
 
-  it('blocks discover if unsaved changes exist in edit form, and discovers tools when clean', async () => {
+  it('replaces headers with a SET secret and clears them with CLEAR', async () => {
     const user = userEvent.setup()
-    const serverInstance = mockServer({ name: 'srv_disc', version: '2' })
-    vi.mocked(mcpServerService.pageServers).mockResolvedValue({
-      pageNumber: 1,
-      pageSize: 100,
-      totalCount: '1',
-      results: [serverInstance],
+    vi.mocked(mcpServerService.listServers).mockResolvedValue([summary({ name: 'srv_hdr', version: '1' })])
+    vi.mocked(mcpServerService.getServer).mockResolvedValue(
+      detail({ name: 'srv_hdr', version: '1', headers: { configured: true } }),
+    )
+    vi.mocked(mcpServerService.updateServer).mockResolvedValue(detail({ name: 'srv_hdr', version: '2' }))
+
+    renderPage()
+
+    await user.click(await screen.findByLabelText('编辑 MCP 服务 srv_hdr'))
+    const modal = await screen.findByRole('dialog', { name: '编辑 MCP 服务 · srv_hdr' })
+
+    fireEvent.change(screen.getByLabelText(/JSON 请求头/), {
+      target: { value: '{"X-Api-Key": "key_123"}' },
+    })
+    await user.click(within(modal).getByRole('button', { name: '确认' }))
+
+    await waitFor(() => {
+      expect(mcpServerService.updateServer).toHaveBeenCalledWith('srv_hdr', {
+        expectedVersion: '1',
+        url: 'https://example.com/mcp',
+        headers: { operation: 'SET', value: '{"X-Api-Key":"key_123"}' },
+        enabled: true,
+        timeoutMillis: 30000,
+      })
     })
 
-    vi.mocked(mcpServerService.getServerConfig).mockResolvedValue({
-      name: 'srv_disc',
-      version: '2',
-      url: 'https://example.com/mcp',
-      headers: { Authorization: 'Bearer tok' },
+    await user.click(await screen.findByLabelText('编辑 MCP 服务 srv_hdr'))
+    const secondModal = await screen.findByRole('dialog', { name: '编辑 MCP 服务 · srv_hdr' })
+    await user.click(within(secondModal).getByLabelText('清除已保存的请求头'))
+    await user.click(within(secondModal).getByRole('button', { name: '确认' }))
+
+    await waitFor(() => {
+      expect(mcpServerService.updateServer).toHaveBeenLastCalledWith('srv_hdr', {
+        expectedVersion: '1',
+        url: 'https://example.com/mcp',
+        headers: { operation: 'CLEAR' },
+        enabled: true,
+        timeoutMillis: 30000,
+      })
     })
+  })
+
+  it('blocks discover while the form has unsaved changes and discovers when clean', async () => {
+    const user = userEvent.setup()
+    vi.mocked(mcpServerService.listServers).mockResolvedValue([summary({ name: 'srv_disc', version: '2' })])
+    vi.mocked(mcpServerService.getServer).mockResolvedValue(
+      detail({ name: 'srv_disc', url: 'https://example.com/mcp', version: '2' }),
+    )
     vi.mocked(mcpServerService.discoverServer).mockResolvedValue(
-      mockServer({ name: 'srv_disc', version: '2', discoveryStatus: 'AVAILABLE', toolCount: 4 }),
+      detail({ name: 'srv_disc', version: '2', discoveryStatus: 'AVAILABLE', toolCount: 4 }),
     )
 
     renderPage()
 
     await user.click(await screen.findByLabelText('编辑 MCP 服务 srv_disc'))
     const modal = await screen.findByRole('dialog', { name: '编辑 MCP 服务 · srv_disc' })
-
     const urlInput = screen.getByDisplayValue('https://example.com/mcp')
     const discoverBtn = within(modal).getByRole('button', { name: '发现工具' })
 
-    // 修改 URL 但未保存，点击发现应被拦截
     await user.type(urlInput, '-modified')
     await user.click(discoverBtn)
 
     expect(screen.getByRole('alert')).toHaveTextContent('存在未保存的配置更改，请先保存再发现工具。')
     expect(mcpServerService.discoverServer).not.toHaveBeenCalled()
 
-    // 恢复 URL，使表单与 loadedConfig 一致
     await user.clear(urlInput)
     await user.type(urlInput, 'https://example.com/mcp')
-
-    // 再次点击发现，应发起 discoverServer
     await user.click(discoverBtn)
 
     await waitFor(() => {
       expect(mcpServerService.discoverServer).toHaveBeenCalledWith('srv_disc', '2')
-      expect(screen.queryByRole('dialog', { name: '编辑 MCP 服务 · srv_disc' })).not.toBeInTheDocument()
     })
   })
 
-  it('opens delete modal and calls deleteServer with name and expectedVersion', async () => {
+  it('deletes with the displayed version', async () => {
     const user = userEvent.setup()
-    const serverInstance = mockServer({ name: 'srv_del', version: '5' })
-    vi.mocked(mcpServerService.pageServers).mockResolvedValue({
-      pageNumber: 1,
-      pageSize: 100,
-      totalCount: '1',
-      results: [serverInstance],
-    })
-    vi.mocked(mcpServerService.deleteServer).mockResolvedValue(undefined)
+    vi.mocked(mcpServerService.listServers).mockResolvedValue([summary({ name: 'srv_del', version: '5' })])
 
     renderPage()
 
     await user.click(await screen.findByLabelText('删除 MCP 服务 srv_del'))
-
     expect(screen.getByText('确认删除 MCP 服务「srv_del」？')).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: '删除 MCP 服务' }))
 
     await waitFor(() => {
       expect(mcpServerService.deleteServer).toHaveBeenCalledWith('srv_del', '5')
-      expect(screen.queryByText('确认删除 MCP 服务「srv_del」？')).not.toBeInTheDocument()
     })
   })
 
-  it('renders retry button when getServerConfig fails', async () => {
+  it('offers retry when the detail projection cannot be loaded', async () => {
     const user = userEvent.setup()
-    const serverInstance = mockServer({ name: 'srv_err' })
-    vi.mocked(mcpServerService.pageServers).mockResolvedValue({
-      pageNumber: 1,
-      pageSize: 100,
-      totalCount: '1',
-      results: [serverInstance],
-    })
-    vi.mocked(mcpServerService.getServerConfig).mockRejectedValueOnce(new Error('Failed to load config'))
+    vi.mocked(mcpServerService.listServers).mockResolvedValue([summary({ name: 'srv_err' })])
+    vi.mocked(mcpServerService.getServer).mockRejectedValueOnce(new Error('Failed to load detail'))
 
     renderPage()
 
     await user.click(await screen.findByLabelText('编辑 MCP 服务 srv_err'))
 
-    expect(await screen.findByText('Failed to load config')).toBeInTheDocument()
-    const retryBtn = screen.getByRole('button', { name: '重试' })
-    expect(retryBtn).toBeInTheDocument()
+    expect(await screen.findByText('Failed to load detail')).toBeInTheDocument()
+    vi.mocked(mcpServerService.getServer).mockResolvedValueOnce(
+      detail({ name: 'srv_err', url: 'https://example.com/ok' }),
+    )
+    await user.click(screen.getByRole('button', { name: '重试' }))
+    expect(await screen.findByDisplayValue('https://example.com/ok')).toBeInTheDocument()
+  })
 
-    vi.mocked(mcpServerService.getServerConfig).mockResolvedValueOnce({
-      name: 'srv_err',
-      version: '1',
-      url: 'https://example.com/ok',
-      headers: {},
+  it('refreshes cached servers on background refetch errors', async () => {
+    vi.mocked(mcpServerService.listServers).mockResolvedValueOnce([summary({ name: 'cached-server' })])
+    const { queryClient } = renderPage()
+    expect(await screen.findByText('cached-server')).toBeInTheDocument()
+
+    vi.mocked(mcpServerService.listServers).mockRejectedValueOnce(new Error('background mcp error'))
+    await act(async () => {
+      await queryClient.refetchQueries()
     })
 
-    await user.click(retryBtn)
-    expect(await screen.findByDisplayValue('https://example.com/ok')).toBeInTheDocument()
+    expect(await screen.findByText('background mcp error')).toBeInTheDocument()
+    expect(screen.getByText('cached-server')).toBeInTheDocument()
+    expect(screen.getByText('创建 MCP 服务')).toBeInTheDocument()
   })
 })

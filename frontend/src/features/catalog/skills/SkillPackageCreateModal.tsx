@@ -5,10 +5,11 @@ import { isNotFoundError } from '@/shared/api/client'
 import { agentService } from '@/shared/api/agent-service'
 import type {
   SkillManifestEntryDTO,
+  SkillPackageCreateDTO,
   SkillPackageDetailDTO,
-  SkillPackagePreviewDTO,
-  SkillPackageUploadPreviewDTO,
-  SkillPackageUploadPublishDTO,
+  SkillPackageStagingCreateDTO,
+  SkillPackageStagingDTO,
+  SkillPackageStagingPublishDTO,
 } from '@/shared/api/generated/contracts'
 import { useI18n, type TranslationKey } from '@/shared/i18n'
 import { formatByteCount as formatBytes } from '@/shared/lib/format-bytes'
@@ -75,7 +76,7 @@ function UploadPreview({
   publishError,
   publishing,
 }: {
-  preview: SkillPackagePreviewDTO
+  preview: SkillPackageStagingDTO
   existing: SkillPackageDetailDTO | null
   publishError: string | null
   publishing: boolean
@@ -262,7 +263,7 @@ export function SkillPackageCreateModal({
   const [file, setFile] = useState<File | null>(null)
   const [stage, setStage] = useState<UploadStage | null>(null)
   const [progress, setProgress] = useState<UploadProgress | null>(null)
-  const [preview, setPreview] = useState<SkillPackagePreviewDTO | null>(null)
+  const [preview, setPreview] = useState<SkillPackageStagingDTO | null>(null)
   const [existing, setExisting] = useState<SkillPackageDetailDTO | null>(null)
   const [formError, setFormError] = useState<string | null>(null)
   const [publishError, setPublishError] = useState<string | null>(null)
@@ -273,14 +274,16 @@ export function SkillPackageCreateModal({
   useEffect(() => () => abortRef.current?.abort(), [])
 
   const createGitMutation = useMutation({
-    mutationFn: () =>
-      agentService.createSkillPackage({
+    mutationFn: () => {
+      const payload: SkillPackageCreateDTO = {
         packageName: packageName.trim(),
         description: normalizeDescription(description),
         repositoryUrl: repositoryUrl.trim(),
         branch: branch.trim(),
-        ...(token.trim() ? { token: token.trim() } : {}),
-      }),
+        ...(token.trim() ? { token: { operation: 'SET', value: token.trim() } } : {}),
+      }
+      return agentService.createSkillPackage(payload)
+    },
     onSuccess: (detail) => {
       queryClient.setQueryData(skillPackageQueryKeys.detail(detail.packageName), detail)
       void queryClient.invalidateQueries({ queryKey: skillPackageQueryKeys.list })
@@ -290,7 +293,8 @@ export function SkillPackageCreateModal({
   })
 
   const publishMutation = useMutation({
-    mutationFn: (payload: SkillPackageUploadPublishDTO) => agentService.publishSkillPackageUpload(payload),
+    mutationFn: (input: { stagingId: string; payload: SkillPackageStagingPublishDTO }) =>
+      agentService.publishSkillPackageStaging(input.stagingId, input.payload),
     onSuccess: (detail) => {
       queryClient.setQueryData(skillPackageQueryKeys.detail(detail.packageName), detail)
       void queryClient.invalidateQueries({ queryKey: skillPackageQueryKeys.list })
@@ -386,13 +390,13 @@ export function SkillPackageCreateModal({
         return
       }
       setStage('PACKAGING')
-      const payload: SkillPackageUploadPreviewDTO = {
+      const payload: SkillPackageStagingCreateDTO = {
         uploadId,
         packageName: name,
         packageVersion: version,
         description: normalizeDescription(description),
       }
-      const result = await agentService.previewSkillPackageUpload(payload)
+      const result = await agentService.createSkillPackageStaging(payload)
       if (controller.signal.aborted) {
         return
       }
@@ -414,11 +418,13 @@ export function SkillPackageCreateModal({
     }
     setPublishError(null)
     publishMutation.mutate({
-      stagingUploadId: preview.stagingUploadId,
-      packageName: preview.packageName,
-      packageVersion: preview.packageVersion,
-      description: preview.description ?? null,
-      expectedVersion: existing?.version ?? null,
+      stagingId: preview.id,
+      payload: {
+        packageName: preview.packageName,
+        packageVersion: preview.packageVersion,
+        description: preview.description ?? null,
+        expectedVersion: existing?.version ?? null,
+      },
     })
   }
 
@@ -429,7 +435,7 @@ export function SkillPackageCreateModal({
     setCancelPending(true)
     setPublishError(null)
     try {
-      await agentService.cancelSkillPackageUpload(preview.stagingUploadId)
+      await agentService.cancelSkillPackageStaging(preview.id)
       setCancelPending(false)
       onClose()
     } catch (error) {

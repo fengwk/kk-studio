@@ -368,10 +368,10 @@ current artifact 完全一致时使用其本地稳定路径，否则该技能不
 
 ### MCP server 与运行时工具目录
 
-Server 以不可变 name 寻址。常规 Card 返回 enabled、timeout、发现状态、工具数和版本；
-URL 与 headers 仅在显式配置查询中以 `no-store` 返回，变量占位符保持原样。
-分页的 Server 列表与总数来自同一数据库语句快照，越界空页仍返回总数；
-本页工具数另以一次分组查询获取，未发现工具的 Server 计数为零。
+Server 以不可变 name 寻址。列表是有界配置集合，直接返回全部摘要（enabled、timeout、发现状态、
+工具数与版本）；详情额外返回 URL，headers 只以 `{configured}` 事实出现，变量占位符在服务端解析前保持原样。
+headers 作为整体秘密更新（`KEEP` / `SET` / `CLEAR`），`SET` 的值是 header 映射的 JSON 对象文本。
+列表在一次语句中读取全部 Server，工具数另以一次分组查询获取，未发现工具的 Server 计数为零。
 发现先在事务外完成 HTTP 握手、`tools/list` 与 schema 校验，再锁 server、校验版本、
 原子替换该 server 的工具行；失败保留整批旧目录，Agent 引用保护仍生效。
 

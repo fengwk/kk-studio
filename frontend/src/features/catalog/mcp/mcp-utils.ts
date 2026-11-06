@@ -172,38 +172,3 @@ export function validateTimeoutMillis(val: unknown): TimeoutValidationResult {
   }
   return { valid: true, timeoutMillis: num }
 }
-
-/**
- * 比较两份 headers 字典是否完全一致。
- */
-export function areHeadersEqual(
-  a: Record<string, string> | null | undefined,
-  b: Record<string, string> | null | undefined,
-): boolean {
-  const mapA = a ?? {}
-  const mapB = b ?? {}
-  const keysA = Object.keys(mapA)
-  const keysB = Object.keys(mapB)
-  if (keysA.length !== keysB.length) return false
-  for (const k of keysA) {
-    if (mapA[k] !== mapB[k]) return false
-  }
-  return true
-}
-
-export interface McpConfigFields {
-  url: string
-  headers: Record<string, string>
-  enabled: boolean
-  timeoutMillis: number
-}
-
-/**
- * 检查当前表单值与已加载配置是否存在未保存的语义修改。
- */
-export function hasUnsavedChanges(current: McpConfigFields, loaded: McpConfigFields): boolean {
-  if (current.url !== loaded.url) return true
-  if (current.enabled !== loaded.enabled) return true
-  if (current.timeoutMillis !== loaded.timeoutMillis) return true
-  return !areHeadersEqual(current.headers, loaded.headers)
-}

@@ -58,8 +58,7 @@ Plugin 投影遵循同一边界：`PluginDTO` 只有安装元数据、region、�
 | 包 | 当前 wire |
 | --- | --- |
 | [catalog](../../share/src/main/java/fun/fengwk/kkstudio/share/catalog/) | Provider、MODEL/GROUP、Agent、Tool catalog |
-| [skill](../../share/src/main/java/fun/fengwk/kkstudio/share/skill/) | Git Skill Package、branch 更新检查、exact commit 发布与派生 Skill 列表 |
-| [mcp](../../share/src/main/java/fun/fengwk/kkstudio/share/mcp/) | MCP Server 安全投影、显式配置 DTO 与显式 HTTP 创建/更新请求 |
+| [skill](../../share/src/main/java/fun/fengwk/kkstudio/share/skill/) | 仅保留嵌入 Agent 配置的 `SkillRef`（`packageName` + `name`）；技能包与 MCP 的 HTTP DTO 由 `platform.catalog.dto` 拥有 |
 | [plugin](../../share/src/main/java/fun/fengwk/kkstudio/share/plugin/) | 已安装构建期 Plugin、安全认证状态、续期运维投影与 prepare/complete 请求和响应 |
 | [environment](../../share/src/main/java/fun/fengwk/kkstudio/share/environment/) | Environment Card CRUD、registration token、保存的安装设置（`installConfig` 与共享 Daemon 配置模型）、最近一次 READY 的 OS/user/HOME 投影与有界运维事件 |
 | [runtime](../../share/src/main/java/fun/fengwk/kkstudio/share/runtime/) | Session、Entry 与读取时 `usageCost`、Thread Snapshot、Command batch（创建型与 owner-free Thread 续写）、请求预览（草稿与历史）、Invocation、approval、Stop 回执、compaction |
@@ -121,7 +120,7 @@ Work 冻结路由，`requiredEnvironmentName` 沿此身份读取环境目录，�
 | Storage | [storage/](../../share/src/test/java/fun/fengwk/kkstudio/share/storage/) | [`StorageDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/storage/StorageDtoContractTest.java)：upload/presign 的 nullable 字段与请求侧 `sizeBytes` 类型 |
 | Settings | [systemsettings/](../../share/src/test/java/fun/fengwk/kkstudio/share/systemsettings/) | [`SystemSettingsDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/systemsettings/SystemSettingsDtoContractTest.java)：每一层嵌套的未知字段拒绝与秘密字段扫描 |
 | Chat | [chat/](../../apps/chat/src/test/java/fun/fengwk/kkstudio/chat/) | [`ChatDtoContractTest.java`](../../apps/chat/src/test/java/fun/fengwk/kkstudio/chat/ChatDtoContractTest.java)：Chat 与 Session 分页 wire 的严格字段 |
-| MCP、Environment、Plugin | [mcp/](../../share/src/test/java/fun/fengwk/kkstudio/share/mcp/)、[environment/](../../share/src/test/java/fun/fengwk/kkstudio/share/environment/)、[plugin/](../../share/src/test/java/fun/fengwk/kkstudio/share/plugin/) | [`McpServerDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/mcp/McpServerDtoContractTest.java)、[`EnvironmentDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/environment/EnvironmentDtoContractTest.java)、[`PluginDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/plugin/PluginDtoContractTest.java) |
+| Environment、Plugin | [environment/](../../share/src/test/java/fun/fengwk/kkstudio/share/environment/)、[plugin/](../../share/src/test/java/fun/fengwk/kkstudio/share/plugin/) | [`EnvironmentDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/environment/EnvironmentDtoContractTest.java)、[`PluginDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/plugin/PluginDtoContractTest.java) |
 
 ---
 

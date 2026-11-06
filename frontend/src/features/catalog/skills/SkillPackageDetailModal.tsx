@@ -167,7 +167,7 @@ export function SkillPackageDetailModal({
                     <div>
                       <dt>{t('ai.skillPackages.token')}</dt>
                       <dd>
-                        {detail.git.hasToken
+                        {detail.git.token.configured
                           ? t('ai.skillPackages.tokenConfigured')
                           : t('ai.skillPackages.tokenNotConfigured')}
                       </dd>

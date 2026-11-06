@@ -68,8 +68,8 @@ health、资源下载和 WebSocket 使用各自传输形式。公开路由如下
 | --- | --- | --- |
 | Health | `/healthz` | 存活探针 |
 | Catalog | `/api/platform/{providers,models,model-catalog,tools,agents}` | Provider/MODEL/GROUP/Agent CRUD、工具候选、Provider 远端模型 ID（`providers/{name}/remote-models`）、新建模型的目录候选与手动刷新（`model-catalog`、`model-catalog/refresh`）；Provider/Model/Agent 列表直接返回数组，Model 的 PUT/DELETE 为 `/models/{*name}`，名称可含斜杠；变更使用 expectedVersion |
-| Skill | `/api/skill-packages` | CRUD、check、exact commit update |
-| MCP | `/api/mcp-servers` | name-keyed CRUD、显式 no-store config、同步 discover |
+| Skill | `/api/platform/skill-packages`、`/api/platform/skill-package-stagings` | CRUD、branch check、exact commit 发布、上传暂存与发布、环境技能重同步（`environments/{environmentId}/resync-skills`）；Git 令牌用 SecretUpdate，响应只回 `configured` |
+| MCP | `/api/platform/mcp-servers` | name-keyed CRUD、摘要数组、headers 用 SecretUpdate 且只回 `configured`、同步 discover |
 | Plugin | `/api/plugins` | 安全投影、普通配置 PUT、auth/prepare、auth/complete、删除 auth；`{pluginId}/connection-check` 按 expected 坐标执行一次显式只读连接检查 |
 | Chat | `/api/chats` | 由 [Chat](chat.md) 模块提供的 CRUD 与归属 Session；Web 只做装配 |
 | Harness command | `/api/harness/command-batches`、`/api/harness/threads/{threadId}/command-batches` | 创建型 Chat 命令接受（owner-aware）与既有 Thread 的 owner-free 续写；都返回 202 |

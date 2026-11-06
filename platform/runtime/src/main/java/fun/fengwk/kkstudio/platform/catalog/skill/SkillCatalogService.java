@@ -9,6 +9,20 @@ import org.springframework.transaction.annotation.Transactional;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentRepository;
+import fun.fengwk.kkstudio.platform.catalog.dto.SkillArchiveDownloadDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.SkillEnvironmentSyncDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.SkillGitSourceDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.SkillManifestEntryDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.SkillPackageCheckDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.SkillPackageCreateDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.SkillPackageDetailDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.SkillPackageEditDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.SkillPackageFileDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.SkillPackagePublishDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.SkillPackageStagingCreateDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.SkillPackageStagingDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.SkillPackageStagingPublishDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.SkillPackageSummaryDTO;
 import fun.fengwk.kkstudio.platform.catalog.skill.archive.SkillArchiveBuilder;
 import fun.fengwk.kkstudio.platform.catalog.skill.archive.SkillArchiveIndex;
 import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitException;
@@ -18,26 +32,14 @@ import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentSkillState;
 import fun.fengwk.kkstudio.platform.error.CatalogVersions;
+import fun.fengwk.kkstudio.platform.secret.SecretConfiguredDTO;
+import fun.fengwk.kkstudio.platform.secret.SecretUpdate;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageBlobRepository;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobContent;
-import fun.fengwk.kkstudio.share.skill.SkillArchiveDownloadDTO;
-import fun.fengwk.kkstudio.share.skill.SkillEnvironmentSyncDTO;
-import fun.fengwk.kkstudio.share.skill.SkillGitSourceDTO;
-import fun.fengwk.kkstudio.share.skill.SkillManifestEntryDTO;
-import fun.fengwk.kkstudio.share.skill.SkillPackageCheckDTO;
-import fun.fengwk.kkstudio.share.skill.SkillPackageDetailDTO;
-import fun.fengwk.kkstudio.share.skill.SkillPackageEditDTO;
-import fun.fengwk.kkstudio.share.skill.SkillPackageFileDTO;
-import fun.fengwk.kkstudio.share.skill.SkillPackageGitCreateDTO;
-import fun.fengwk.kkstudio.share.skill.SkillPackageGitPublishDTO;
-import fun.fengwk.kkstudio.share.skill.SkillPackagePreviewDTO;
-import fun.fengwk.kkstudio.share.skill.SkillPackageSummaryDTO;
-import fun.fengwk.kkstudio.share.skill.SkillPackageUploadPreviewDTO;
-import fun.fengwk.kkstudio.share.skill.SkillPackageUploadPublishDTO;
 import fun.fengwk.kkstudio.share.storage.StoragePresignedUrlDTO;
 
 import java.io.ByteArrayInputStream;
@@ -67,9 +69,6 @@ import java.util.regex.Pattern;
 public class SkillCatalogService {
 
   private static final String RESOURCE = "skill_package";
-
-  private static final String SOURCE_GIT = "GIT";
-  private static final String SOURCE_UPLOAD = "UPLOAD";
 
   /** 40 或 64 位小写 hex object id。 */
   private static final Pattern COMMIT = Pattern.compile("^([0-9a-f]{40}|[0-9a-f]{64})$");
@@ -161,7 +160,7 @@ public class SkillCatalogService {
 
   /** 新建 Git 渠道 Package，并发布当时解析出的 branch HEAD。 */
   @Transactional(propagation = Propagation.NOT_SUPPORTED)
-  public SkillPackageDetailDTO createGitPackage(SkillPackageGitCreateDTO createDTO) {
+  public SkillPackageDetailDTO createGitPackage(SkillPackageCreateDTO createDTO) {
     if (createDTO == null) {
       throw DomainException.validation(RESOURCE, "request body must not be null");
     }
@@ -169,7 +168,7 @@ public class SkillCatalogService {
     String description = requireDescription(createDTO.getDescription());
     String repositoryUrl = requireRepositoryUrl(createDTO.getRepositoryUrl());
     String branch = requireBranch(createDTO.getBranch());
-    String token = requireTokenOrNull(createDTO.getToken());
+    String token = tokenOf(createDTO.getToken());
     if (skillPackageRepository.getPackage(packageName) != null) {
       throw DomainException.duplicate(RESOURCE, "skill package already exists: " + packageName);
     }
@@ -267,7 +266,7 @@ public class SkillCatalogService {
   /** 发布最近一次检查到的 exact commit，并原子切换当前版本与归档。 */
   @Transactional(propagation = Propagation.NOT_SUPPORTED)
   public SkillPackageDetailDTO publishGitPackage(
-      String packageName, SkillPackageGitPublishDTO publishDTO) {
+      String packageName, SkillPackagePublishDTO publishDTO) {
     if (publishDTO == null) {
       throw DomainException.validation(RESOURCE, "request body must not be null");
     }
@@ -354,7 +353,7 @@ public class SkillCatalogService {
     requireCurrentVersion(current, rawExpected, expected);
     String description = requireDescription(editDTO.getDescription());
     if (!current.isGit()) {
-      if (editDTO.getBranch() != null || editDTO.isTokenProvided()) {
+      if (editDTO.getBranch() != null || editDTO.getToken() != null) {
         throw DomainException.validation(
             RESOURCE, "branch and token are only valid for Git packages");
       }
@@ -365,20 +364,21 @@ public class SkillCatalogService {
       }
       return getPackage(packageName);
     }
-    String branch =
-        editDTO.getBranch() == null
-            ? current.gitSource().branch()
-            : requireBranch(editDTO.getBranch());
+    String branch = requireBranch(editDTO.getBranch());
     boolean tokenChanged = false;
     String storedToken = current.gitSource().token();
-    if (editDTO.isTokenProvided()) {
-      String token = editDTO.getToken();
-      if (token == null) {
-        tokenChanged = current.gitSource().token() != null;
-        storedToken = null;
-      } else {
-        storedToken = requireToken(token);
-        tokenChanged = !storedToken.equals(current.gitSource().token());
+    SecretUpdate tokenUpdate = editDTO.getToken();
+    if (tokenUpdate != null) {
+      switch (tokenUpdate.operation()) {
+        case KEEP -> {}
+        case CLEAR -> {
+          tokenChanged = storedToken != null;
+          storedToken = null;
+        }
+        case SET -> {
+          storedToken = requireToken(tokenUpdate.value());
+          tokenChanged = !storedToken.equals(current.gitSource().token());
+        }
       }
     }
     if (!Objects.equals(description, current.description())) {
@@ -396,7 +396,7 @@ public class SkillCatalogService {
 
   /** 用已完成的原始上传构建预览；原始上传被消费，规范化归档作为暂存上传保留。 */
   @Transactional(propagation = Propagation.NOT_SUPPORTED)
-  public SkillPackagePreviewDTO previewUpload(SkillPackageUploadPreviewDTO previewDTO) {
+  public SkillPackageStagingDTO previewUpload(SkillPackageStagingCreateDTO previewDTO) {
     if (previewDTO == null) {
       throw DomainException.validation(RESOURCE, "request body must not be null");
     }
@@ -422,8 +422,8 @@ public class SkillCatalogService {
       throw error;
     }
     StorageBlob staged = requireArtifact(stagingUploadId);
-    SkillPackagePreviewDTO dto = new SkillPackagePreviewDTO();
-    dto.setStagingUploadId(stagingUploadId.toString());
+    SkillPackageStagingDTO dto = new SkillPackageStagingDTO();
+    dto.setId(stagingUploadId.toString());
     dto.setPackageName(packageName);
     dto.setPackageVersion(packageVersion);
     dto.setDescription(description);
@@ -439,7 +439,8 @@ public class SkillCatalogService {
 
   /** 发布暂存的上传归档；{@code expectedVersion} 为 null 表示新建上传渠道包。 */
   @Transactional(propagation = Propagation.NOT_SUPPORTED)
-  public SkillPackageDetailDTO publishUpload(SkillPackageUploadPublishDTO publishDTO) {
+  public SkillPackageDetailDTO publishUpload(
+      UUID stagingUploadId, SkillPackageStagingPublishDTO publishDTO) {
     if (publishDTO == null) {
       throw DomainException.validation(RESOURCE, "request body must not be null");
     }
@@ -447,7 +448,6 @@ public class SkillCatalogService {
     String packageVersion = requireVersionText(publishDTO.getPackageVersion());
     String description = requireDescription(publishDTO.getDescription());
     String rawExpected = publishDTO.getExpectedVersion();
-    UUID stagingUploadId = requireUploadId(publishDTO.getStagingUploadId(), "stagingUploadId");
     SkillPackage existing = skillPackageRepository.getPackage(packageName);
     if (existing != null && existing.isGit()) {
       throw DomainException.validation(
@@ -526,8 +526,8 @@ public class SkillCatalogService {
 
   /** 取消未发布的暂存归档。 */
   @Transactional(propagation = Propagation.NOT_SUPPORTED)
-  public void cancelUpload(String stagingUploadId) {
-    uploadService.delete(requireUploadId(stagingUploadId, "stagingUploadId"));
+  public void cancelUpload(UUID stagingUploadId) {
+    uploadService.delete(stagingUploadId);
   }
 
   /** 删除 Package；仍被 Agent {@code SkillRef} 引用时拒绝。 */
@@ -869,8 +869,12 @@ public class SkillCatalogService {
     }
   }
 
-  private static String requireTokenOrNull(String raw) {
-    return raw == null ? null : requireToken(raw);
+  /** 秘密更新到存储令牌：省略、KEEP 或 CLEAR 表示无令牌，SET 使用其值。 */
+  private static String tokenOf(SecretUpdate update) {
+    if (update == null || update.operation() != SecretUpdate.Operation.SET) {
+      return null;
+    }
+    return requireToken(update.value());
   }
 
   private static String requireToken(String raw) {
@@ -1038,11 +1042,11 @@ public class SkillCatalogService {
         skillPackage.skills() == null
             ? List.of()
             : skillPackage.skills().stream().map(SkillCatalogService::toDto).toList());
-    dto.setSource(skillPackage.isGit() ? SOURCE_GIT : SOURCE_UPLOAD);
+    dto.setSource(sourceOf(skillPackage));
     dto.setUpdateAvailable(updateAvailable(skillPackage));
     dto.setVersion(CatalogVersions.format(skillPackage.version()));
-    dto.setCreateTime(skillPackage.createdAt());
-    dto.setUpdateTime(skillPackage.updatedAt());
+    dto.setCreatedAt(skillPackage.createdAt());
+    dto.setUpdatedAt(skillPackage.updatedAt());
     return dto;
   }
 
@@ -1063,12 +1067,12 @@ public class SkillCatalogService {
         skillPackage.skills() == null
             ? List.of()
             : skillPackage.skills().stream().map(SkillCatalogService::toDto).toList());
-    dto.setSource(skillPackage.isGit() ? SOURCE_GIT : SOURCE_UPLOAD);
+    dto.setSource(sourceOf(skillPackage));
     if (skillPackage.isGit()) {
       SkillGitSourceDTO git = new SkillGitSourceDTO();
       git.setRepositoryUrl(skillPackage.gitSource().repositoryUrl());
       git.setBranch(skillPackage.gitSource().branch());
-      git.setHasToken(skillPackage.gitSource().token() != null);
+      git.setToken(SecretConfiguredDTO.of(skillPackage.gitSource().token() != null));
       dto.setGit(git);
       dto.setHeadCommit(skillPackage.gitSource().headCommit());
       dto.setHeadCheckedAt(skillPackage.gitSource().checkedAt());
@@ -1078,9 +1082,13 @@ public class SkillCatalogService {
     dto.setArtifactSha256(artifact.getSha256());
     dto.setArtifactSizeBytes(artifact.getSizeBytes());
     dto.setVersion(CatalogVersions.format(skillPackage.version()));
-    dto.setCreateTime(skillPackage.createdAt());
-    dto.setUpdateTime(skillPackage.updatedAt());
+    dto.setCreatedAt(skillPackage.createdAt());
+    dto.setUpdatedAt(skillPackage.updatedAt());
     return dto;
+  }
+
+  private static SkillPackageSource sourceOf(SkillPackage skillPackage) {
+    return skillPackage.isGit() ? SkillPackageSource.GIT : SkillPackageSource.UPLOAD;
   }
 
   private static SkillEnvironmentSyncDTO toEnvironmentSync(

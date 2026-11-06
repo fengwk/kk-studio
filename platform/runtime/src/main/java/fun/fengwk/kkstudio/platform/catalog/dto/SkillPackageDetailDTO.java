@@ -1,8 +1,10 @@
-package fun.fengwk.kkstudio.share.skill;
+package fun.fengwk.kkstudio.platform.catalog.dto;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
 import org.jspecify.annotations.Nullable;
+
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageSource;
 
 import java.time.Instant;
 import java.util.List;
@@ -26,8 +28,8 @@ public class SkillPackageDetailDTO {
   /** 从当前版本归档读出的 Skill 清单（按 name 升序）。 */
   private List<SkillManifestEntryDTO> skills;
 
-  /** 渠道：{@code GIT} 或 {@code UPLOAD}。 */
-  private String source;
+  /** 发布渠道。 */
+  private SkillPackageSource source;
 
   /** Git 渠道的仓库事实；上传渠道为 null。 */
   @JsonInclude(JsonInclude.Include.ALWAYS)
@@ -58,8 +60,8 @@ public class SkillPackageDetailDTO {
   private String version;
 
   /** 创建时间。 */
-  private Instant createTime;
+  private Instant createdAt;
 
   /** 最后更新时间。 */
-  private Instant updateTime;
+  private Instant updatedAt;
 }

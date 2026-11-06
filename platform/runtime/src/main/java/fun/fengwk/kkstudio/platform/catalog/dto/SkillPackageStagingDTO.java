@@ -1,16 +1,16 @@
-package fun.fengwk.kkstudio.share.skill;
+package fun.fengwk.kkstudio.platform.catalog.dto;
 
 import lombok.Data;
 import org.jspecify.annotations.Nullable;
 
 import java.util.List;
 
-/** 预览结果：规范化归档已作为暂存上传对象保留，{@code stagingUploadId} 用于发布或取消。 */
+/** 上传渠道预览结果：规范化归档已作为暂存对象保留，{@code id} 用于发布或取消。 */
 @Data
-public class SkillPackagePreviewDTO {
+public class SkillPackageStagingDTO {
 
   /** 暂存的上传 id：发布时消费，取消时释放。 */
-  private String stagingUploadId;
+  private String id;
 
   /** 目标包名。 */
   private String packageName;

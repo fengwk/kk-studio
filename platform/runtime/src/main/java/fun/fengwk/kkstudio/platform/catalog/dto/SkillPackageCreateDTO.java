@@ -1,13 +1,13 @@
-package fun.fengwk.kkstudio.share.skill;
+package fun.fengwk.kkstudio.platform.catalog.dto;
 
-import com.fasterxml.jackson.annotation.JsonAnySetter;
 import lombok.Data;
-import lombok.ToString;
 import org.jspecify.annotations.Nullable;
+
+import fun.fengwk.kkstudio.platform.secret.SecretUpdate;
 
 /** 新建 Git 渠道技能包：创建即发布当时解析出的 branch HEAD。 */
 @Data
-public class SkillPackageGitCreateDTO {
+public class SkillPackageCreateDTO {
 
   /** 包名（1–64 个小写字母或数字，以单个连字符分隔）。 */
   private String packageName;
@@ -21,11 +21,6 @@ public class SkillPackageGitCreateDTO {
   /** 只用于检查候选更新的 branch。 */
   private String branch;
 
-  /** 可空私有仓库访问令牌；绝不回显。 */
-  @ToString.Exclude private @Nullable String token;
-
-  @JsonAnySetter
-  public void rejectUnknownField(String fieldName, Object ignoredValue) {
-    throw new IllegalArgumentException("unknown skill package field: " + fieldName);
-  }
+  /** 私有仓库访问令牌：省略或 KEEP 表示无令牌，SET 用作凭据；绝不回显。 */
+  private @Nullable SecretUpdate token;
 }

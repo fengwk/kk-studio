@@ -12,6 +12,8 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
+import fun.fengwk.kkstudio.platform.catalog.dto.SkillPackageDetailDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.SkillPackageStagingPublishDTO;
 import fun.fengwk.kkstudio.platform.catalog.skill.archive.SkillArchiveBuilder;
 import fun.fengwk.kkstudio.platform.catalog.skill.archive.SkillArchiveBuilder.InputEntry;
 import fun.fengwk.kkstudio.platform.catalog.skill.archive.SkillArchiveBuilder.Type;
@@ -24,8 +26,6 @@ import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobState;
-import fun.fengwk.kkstudio.share.skill.SkillPackageDetailDTO;
-import fun.fengwk.kkstudio.share.skill.SkillPackageUploadPublishDTO;
 
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
@@ -70,12 +70,11 @@ class SkillCatalogPublishIntegrationTest extends PostgresSpringTestSupport {
   void concurrentPublishWithSameExpectedVersionOneWinsAndOtherConflicts() throws Exception {
     // 初始发布包（version 0）
     UUID initialUpload = stageArchiveUpload(PACKAGE, "skill-init", "initial skill");
-    SkillPackageUploadPublishDTO initDto = new SkillPackageUploadPublishDTO();
+    SkillPackageStagingPublishDTO initDto = new SkillPackageStagingPublishDTO();
     initDto.setPackageName(PACKAGE);
     initDto.setPackageVersion("1.0.0");
     initDto.setDescription("initial description");
-    initDto.setStagingUploadId(initialUpload.toString());
-    skillCatalogService.publishUpload(initDto);
+    skillCatalogService.publishUpload(initialUpload, initDto);
 
     SkillPackage current = skillPackageRepository.getPackage(PACKAGE);
     assertNotNull(current);
@@ -85,19 +84,17 @@ class SkillCatalogPublishIntegrationTest extends PostgresSpringTestSupport {
     UUID stage1 = stageArchiveUpload(PACKAGE, "skill-v1", "v1 skill");
     UUID stage2 = stageArchiveUpload(PACKAGE, "skill-v2", "v2 skill");
 
-    SkillPackageUploadPublishDTO publish1 = new SkillPackageUploadPublishDTO();
+    SkillPackageStagingPublishDTO publish1 = new SkillPackageStagingPublishDTO();
     publish1.setPackageName(PACKAGE);
     publish1.setPackageVersion("1.1.0");
     publish1.setDescription("v1.1 description");
     publish1.setExpectedVersion("0");
-    publish1.setStagingUploadId(stage1.toString());
 
-    SkillPackageUploadPublishDTO publish2 = new SkillPackageUploadPublishDTO();
+    SkillPackageStagingPublishDTO publish2 = new SkillPackageStagingPublishDTO();
     publish2.setPackageName(PACKAGE);
     publish2.setPackageVersion("1.2.0");
     publish2.setDescription("v1.2 description");
     publish2.setExpectedVersion("0");
-    publish2.setStagingUploadId(stage2.toString());
 
     ExecutorService executor = Executors.newFixedThreadPool(2);
     CountDownLatch startLatch = new CountDownLatch(1);
@@ -106,13 +103,13 @@ class SkillCatalogPublishIntegrationTest extends PostgresSpringTestSupport {
           executor.submit(
               () -> {
                 startLatch.await();
-                return skillCatalogService.publishUpload(publish1);
+                return skillCatalogService.publishUpload(stage1, publish1);
               });
       Future<SkillPackageDetailDTO> f2 =
           executor.submit(
               () -> {
                 startLatch.await();
-                return skillCatalogService.publishUpload(publish2);
+                return skillCatalogService.publishUpload(stage2, publish2);
               });
 
       startLatch.countDown();
@@ -150,12 +147,11 @@ class SkillCatalogPublishIntegrationTest extends PostgresSpringTestSupport {
   void successfulPublishSwitchesArtifactAndReleasesPreviousBlobReference() throws Exception {
     // 1. 初始发布
     UUID stage1 = stageArchiveUpload(PACKAGE, "skill-a", "skill a");
-    SkillPackageUploadPublishDTO publish1 = new SkillPackageUploadPublishDTO();
+    SkillPackageStagingPublishDTO publish1 = new SkillPackageStagingPublishDTO();
     publish1.setPackageName(PACKAGE);
     publish1.setPackageVersion("1.0.0");
     publish1.setDescription("initial");
-    publish1.setStagingUploadId(stage1.toString());
-    skillCatalogService.publishUpload(publish1);
+    skillCatalogService.publishUpload(stage1, publish1);
 
     SkillPackage pkg1 = skillPackageRepository.getPackage(PACKAGE);
     assertEquals("initial", pkg1.description());
@@ -167,13 +163,12 @@ class SkillCatalogPublishIntegrationTest extends PostgresSpringTestSupport {
 
     // 2. 第二次发布，切换到新归档
     UUID stage2 = stageArchiveUpload(PACKAGE, "skill-b", "skill b");
-    SkillPackageUploadPublishDTO publish2 = new SkillPackageUploadPublishDTO();
+    SkillPackageStagingPublishDTO publish2 = new SkillPackageStagingPublishDTO();
     publish2.setPackageName(PACKAGE);
     publish2.setPackageVersion("2.0.0");
     publish2.setDescription("updated");
     publish2.setExpectedVersion("0");
-    publish2.setStagingUploadId(stage2.toString());
-    skillCatalogService.publishUpload(publish2);
+    skillCatalogService.publishUpload(stage2, publish2);
 
     SkillPackage pkg2 = skillPackageRepository.getPackage(PACKAGE);
     UUID blob2Id = pkg2.artifactBlobId();
@@ -197,12 +192,11 @@ class SkillCatalogPublishIntegrationTest extends PostgresSpringTestSupport {
   @Test
   void deletePackageRemovesRowAndReleasesBlobReference() throws Exception {
     UUID stage = stageArchiveUpload(PACKAGE, "skill-a", "skill a");
-    SkillPackageUploadPublishDTO publish = new SkillPackageUploadPublishDTO();
+    SkillPackageStagingPublishDTO publish = new SkillPackageStagingPublishDTO();
     publish.setPackageName(PACKAGE);
     publish.setPackageVersion("1.0.0");
     publish.setDescription("to delete");
-    publish.setStagingUploadId(stage.toString());
-    skillCatalogService.publishUpload(publish);
+    skillCatalogService.publishUpload(stage, publish);
 
     SkillPackage pkg = skillPackageRepository.getPackage(PACKAGE);
     UUID blobId = pkg.artifactBlobId();

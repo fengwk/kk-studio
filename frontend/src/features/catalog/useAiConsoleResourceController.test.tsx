@@ -365,13 +365,13 @@ describe('useAiConsoleResourceController', () => {
         packageName: 'core',
         description: 'Core skills',
         packageVersion: '1111111111111111111111111111111111111111',
-        publishedAt: 1789948800,
+        publishedAt: 1789948800000,
         skills: [{ name: 'dev', description: 'dev skill' }],
         source: 'GIT',
         updateAvailable: false,
         version: '1',
-        createTime: 1789948800,
-        updateTime: 1789948800,
+        createdAt: 1789948800000,
+        updatedAt: 1789948800000,
       },
     ])
 

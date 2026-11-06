@@ -11,8 +11,9 @@ import org.junit.jupiter.params.provider.NullSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
+import fun.fengwk.kkstudio.platform.catalog.dto.McpServerCreateDTO;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpConfigParser.HttpConfig;
-import fun.fengwk.kkstudio.share.mcp.McpServerCreateDTO;
+import fun.fengwk.kkstudio.platform.secret.SecretUpdate;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -21,7 +22,7 @@ import java.util.Map;
  * MCP Server 名称与显式 HTTP 配置的校验测试。
  *
  * <p>只接受显式 HTTP 配置：name 必须满足 {@code ^[a-z][a-z0-9_]*$} 且 ≤32 字符，url 必须是绝对 http/https 地址且不含
- * user-info 凭据，headers 允许 {@code ${VAR}} 占位符但拒绝控制字符，timeout 缺省为 60 秒。
+ * user-info 凭据，headers 以 JSON 对象文本提交并允许 {@code ${VAR}} 占位符但拒绝控制字符，timeout 缺省为 60 秒。
  */
 class McpConfigParserTest {
 
@@ -31,7 +32,7 @@ class McpConfigParserTest {
     McpServerCreateDTO dto = new McpServerCreateDTO();
     dto.setName("github_mcp");
     dto.setUrl("https://mcp.github.com/api");
-    dto.setHeaders(Map.of("Authorization", "Bearer ${GITHUB_TOKEN}"));
+    dto.setHeaders(SecretUpdate.set("{\"Authorization\":\"Bearer ${GITHUB_TOKEN}\"}"));
 
     HttpConfig normalized = normalizeCreate(dto);
 
@@ -56,6 +57,24 @@ class McpConfigParserTest {
     dto.setUrl("https://a.example.com/mcp");
 
     assertTrue(normalizeCreate(dto).headers().isEmpty());
+  }
+
+  @Test
+  void parsesHeadersSecretAsJsonObjectOfStrings() {
+    // 意图：秘密更新的 SET 值是 header 映射的 JSON 对象文本；数组、非字符串值与非法 JSON 都确定性拒绝
+    Map<String, String> headers =
+        McpConfigParser.parseHeaders("{\"Authorization\":\"Bearer x\",\"X-Trace\":\"\"}");
+
+    assertEquals("Bearer x", headers.get("Authorization"));
+    assertEquals("", headers.get("X-Trace"));
+    assertTrue(McpConfigParser.parseHeaders("{}").isEmpty());
+    assertThrows(DomainException.class, () -> McpConfigParser.parseHeaders(null));
+    assertThrows(DomainException.class, () -> McpConfigParser.parseHeaders("  "));
+    assertThrows(DomainException.class, () -> McpConfigParser.parseHeaders("not-json"));
+    assertThrows(DomainException.class, () -> McpConfigParser.parseHeaders("[]"));
+    assertThrows(DomainException.class, () -> McpConfigParser.parseHeaders("{\"X-Count\":1}"));
+    assertThrows(
+        DomainException.class, () -> McpConfigParser.parseHeaders("{\"X-Bad\":\"value\\r\\n\"}"));
   }
 
   @ParameterizedTest
@@ -172,10 +191,17 @@ class McpConfigParserTest {
         () -> McpConfigParser.resolveHeaders(Map.of("Authorization", "${MISSING}"), name -> null));
   }
 
-  /** 与 create 入口一致：先校验名称，再规范化显式 HTTP 配置。 */
+  /** 与 create 入口一致：先校验名称，再把秘密更新解析为 header 映射并规范化。 */
   private static HttpConfig normalizeCreate(McpServerCreateDTO dto) {
     McpConfigParser.requireName(dto.getName());
     return McpConfigParser.normalizeHttpConfig(
-        dto.getUrl(), dto.getHeaders(), dto.getEnabled(), dto.getTimeoutMillis());
+        dto.getUrl(), headersOf(dto.getHeaders()), dto.getEnabled(), dto.getTimeoutMillis());
+  }
+
+  private static Map<String, String> headersOf(SecretUpdate update) {
+    if (update == null || update.operation() != SecretUpdate.Operation.SET) {
+      return Map.of();
+    }
+    return McpConfigParser.parseHeaders(update.value());
   }
 }

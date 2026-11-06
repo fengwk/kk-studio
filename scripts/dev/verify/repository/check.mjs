@@ -1085,7 +1085,7 @@ const shareDomainRoots = [
   'catalog',
   'configsync',
   'environment',
-  'mcp',
+  'plugin',
   'plugin',
   'runtime',
   'skill',

@@ -124,9 +124,9 @@ function EditPackageForm({
     if (gitPackage) {
       payload.branch = branch.trim()
       if (clearToken) {
-        payload.token = null
+        payload.token = { operation: 'CLEAR' }
       } else if (token.trim()) {
-        payload.token = token.trim()
+        payload.token = { operation: 'SET', value: token.trim() }
       }
     }
     onSubmit(payload)

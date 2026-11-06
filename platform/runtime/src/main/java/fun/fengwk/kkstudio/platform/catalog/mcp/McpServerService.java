@@ -8,15 +8,16 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
-import fun.fengwk.kkstudio.common.page.Page;
-import fun.fengwk.kkstudio.common.page.PageQuery;
+import fun.fengwk.kkstudio.platform.catalog.dto.McpServerCreateDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.McpServerDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.McpServerDiscoverDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.McpServerSummaryDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.McpServerUpdateDTO;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpConfigParser.HttpConfig;
 import fun.fengwk.kkstudio.platform.catalog.mcp.discovery.McpToolDiscovery;
 import fun.fengwk.kkstudio.platform.error.CatalogVersions;
-import fun.fengwk.kkstudio.share.mcp.McpServerConfigDTO;
-import fun.fengwk.kkstudio.share.mcp.McpServerCreateDTO;
-import fun.fengwk.kkstudio.share.mcp.McpServerDTO;
-import fun.fengwk.kkstudio.share.mcp.McpServerUpdateDTO;
+import fun.fengwk.kkstudio.platform.secret.SecretConfiguredDTO;
+import fun.fengwk.kkstudio.platform.secret.SecretUpdate;
 
 import java.util.HashSet;
 import java.util.List;
@@ -29,7 +30,7 @@ import java.util.stream.Collectors;
  * Platform MCP server 应用服务：name-keyed CRUD/CAS、显式发现与引用保护。
  *
  * <p>发现的网络 I/O 与工具名校验全部发生在事务之外，事务内只在父 Server 行锁下原子替换当前工具行；被 Agent 引用的工具名若将消失则 fail closed
- * 并完整保留旧快照。公开 DTO 绝不回显 URL 与 headers。
+ * 并完整保留旧快照。列表只暴露安全元数据；详情返回 URL，headers 只以「已配置」事实回显。
  */
 @Service
 public class McpServerService {
@@ -56,28 +57,19 @@ public class McpServerService {
         new TransactionTemplate(Objects.requireNonNull(transactionManager, "transactionManager"));
   }
 
-  public Page<McpServerDTO> pageServers(PageQuery pageQuery) {
-    Page<McpServer> page = repository.page(pageQuery);
+  /** 有界配置集合：返回全部 Server 摘要，按 name 升序。 */
+  public List<McpServerSummaryDTO> listServers() {
+    List<McpServer> servers = repository.listAllServers();
     Map<String, Integer> toolCounts =
-        repository.countToolsByServerNames(
-            page.getResults().stream().map(McpServer::name).toList());
-    return page.map(server -> toDto(server, toolCounts.getOrDefault(server.name(), 0)));
+        repository.countToolsByServerNames(servers.stream().map(McpServer::name).toList());
+    return servers.stream()
+        .map(server -> toSummary(server, toolCounts.getOrDefault(server.name(), 0)))
+        .toList();
   }
 
-  /** 按不可变 name 获取 Server 安全公开视图。 */
+  /** 按不可变 name 获取 Server 详情：URL 是普通字段，headers 只回显已配置事实。 */
   public McpServerDTO getServer(String name) {
-    return toDto(requireServer(name), repository.countTools(name));
-  }
-
-  /** 读取 Server 显式 HTTP 配置；headers 可能内嵌凭据，调用方必须禁止缓存。 */
-  public McpServerConfigDTO getServerConfig(String name) {
-    McpServer server = requireServer(name);
-    McpServerConfigDTO configDTO = new McpServerConfigDTO();
-    configDTO.setName(server.name());
-    configDTO.setVersion(CatalogVersions.format(server.version()));
-    configDTO.setUrl(server.url());
-    configDTO.setHeaders(server.headers());
-    return configDTO;
+    return toDetail(requireServer(name), repository.countTools(name));
   }
 
   /** 创建 Server 配置：仅校验并持久化为 UNVERIFIED，不发起任何网络 I/O。 */
@@ -89,14 +81,14 @@ public class McpServerService {
     HttpConfig config =
         McpConfigParser.normalizeHttpConfig(
             createDTO.getUrl(),
-            createDTO.getHeaders(),
+            applyHeaders(Map.of(), createDTO.getHeaders()),
             createDTO.getEnabled(),
             createDTO.getTimeoutMillis());
     if (repository.getByName(name).isPresent()) {
       throw DomainException.duplicate(RESOURCE, "mcp server name already exists: " + name);
     }
     McpServer server = insert(name, config);
-    return toDto(server, 0);
+    return toDetail(server, 0);
   }
 
   /** 基于 (name, expectedVersion) 的 CAS 全量更新：仅更新配置并重置状态为 UNVERIFIED，不发起发现。 */
@@ -107,18 +99,17 @@ public class McpServerService {
     }
     String rawExpectedVersion = updateDTO.getExpectedVersion();
     long expectedVersion = CatalogVersions.parse(rawExpectedVersion, "expectedVersion");
-    HttpConfig config =
-        McpConfigParser.normalizeHttpConfig(
-            updateDTO.getUrl(),
-            updateDTO.getHeaders(),
-            updateDTO.getEnabled(),
-            updateDTO.getTimeoutMillis());
-
     McpServer updatedServer =
         transactionTemplate.execute(
             status -> {
               McpServer locked = requireServerForUpdate(name);
               requireVersion(locked, expectedVersion, rawExpectedVersion);
+              HttpConfig config =
+                  McpConfigParser.normalizeHttpConfig(
+                      updateDTO.getUrl(),
+                      applyHeaders(locked.headers(), updateDTO.getHeaders()),
+                      updateDTO.getEnabled(),
+                      updateDTO.getTimeoutMillis());
               McpServer updated = withConfig(locked, config);
               if (!repository.update(updated, expectedVersion)) {
                 throw DomainException.versionConflict(
@@ -126,11 +117,15 @@ public class McpServerService {
               }
               return updated.toBuilder().version(expectedVersion + 1).build();
             });
-    return toDto(updatedServer, repository.countTools(name));
+    return toDetail(updatedServer, repository.countTools(name));
   }
 
   /** 基于 (name, expectedVersion) 的显式发现：同步握手并原子替换当前工具行。 */
-  public McpServerDTO discoverServer(String name, String rawExpectedVersion) {
+  public McpServerDTO discoverServer(String name, McpServerDiscoverDTO discoverDTO) {
+    if (discoverDTO == null || discoverDTO.getExpectedVersion() == null) {
+      throw DomainException.validation(RESOURCE, "expectedVersion must not be null");
+    }
+    String rawExpectedVersion = discoverDTO.getExpectedVersion();
     long expectedVersion = CatalogVersions.parse(rawExpectedVersion, "expectedVersion");
     McpServer server = requireServer(name);
     requireVersion(server, expectedVersion, rawExpectedVersion);
@@ -146,7 +141,7 @@ public class McpServerService {
               replaceTools(locked, discovered);
               return locked.toBuilder().discoveryStatus(McpDiscoveryStatus.AVAILABLE).build();
             });
-    return toDto(appliedServer, discovered.size());
+    return toDetail(appliedServer, discovered.size());
   }
 
   /**
@@ -179,10 +174,10 @@ public class McpServerService {
       server = server.toBuilder().version(expected + 1).build();
     }
     if (discoveredTools == null) {
-      return toDto(server, repository.countTools(canonicalName));
+      return toDetail(server, repository.countTools(canonicalName));
     }
     replaceTools(server, discoveredTools);
-    return toDto(
+    return toDetail(
         server.toBuilder().discoveryStatus(McpDiscoveryStatus.AVAILABLE).build(),
         discoveredTools.size());
   }
@@ -276,17 +271,45 @@ public class McpServerService {
     }
   }
 
-  /** Server 行到公开安全视图的投影：绝不回显 URL 与 headers。 */
-  private static McpServerDTO toDto(McpServer server, int toolCount) {
-    McpServerDTO dto = new McpServerDTO();
+  /** headers 秘密更新：省略与 KEEP 保留现有映射，CLEAR 清空，SET 用 JSON 对象文本整体替换。 */
+  private static Map<String, String> applyHeaders(
+      Map<String, String> current, SecretUpdate update) {
+    if (update == null || update.operation() == SecretUpdate.Operation.KEEP) {
+      return current;
+    }
+    if (update.operation() == SecretUpdate.Operation.CLEAR) {
+      return Map.of();
+    }
+    return McpConfigParser.parseHeaders(update.value());
+  }
+
+  /** Server 行到列表项的安全投影：不含 URL 与 headers。 */
+  private static McpServerSummaryDTO toSummary(McpServer server, int toolCount) {
+    McpServerSummaryDTO dto = new McpServerSummaryDTO();
     dto.setName(server.name());
     dto.setEnabled(server.enabled());
     dto.setTimeoutMillis(server.timeoutMillis());
-    dto.setDiscoveryStatus(server.discoveryStatus().name());
+    dto.setDiscoveryStatus(server.discoveryStatus());
     dto.setToolCount(toolCount);
     dto.setVersion(CatalogVersions.format(server.version()));
-    dto.setCreateTime(server.createTime());
-    dto.setUpdateTime(server.updateTime());
+    dto.setCreatedAt(server.createTime());
+    dto.setUpdatedAt(server.updateTime());
+    return dto;
+  }
+
+  /** Server 行到详情的投影：返回 URL，headers 只陈述是否已配置。 */
+  private static McpServerDTO toDetail(McpServer server, int toolCount) {
+    McpServerDTO dto = new McpServerDTO();
+    dto.setName(server.name());
+    dto.setUrl(server.url());
+    dto.setEnabled(server.enabled());
+    dto.setTimeoutMillis(server.timeoutMillis());
+    dto.setDiscoveryStatus(server.discoveryStatus());
+    dto.setHeaders(SecretConfiguredDTO.of(!server.headers().isEmpty()));
+    dto.setToolCount(toolCount);
+    dto.setVersion(CatalogVersions.format(server.version()));
+    dto.setCreatedAt(server.createTime());
+    dto.setUpdatedAt(server.updateTime());
     return dto;
   }
 }

@@ -1,8 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  areHeadersEqual,
   DEFAULT_TIMEOUT_MILLIS,
-  hasUnsavedChanges,
   parseAndValidateHeaders,
   validateMcpName,
   validateMcpUrl,
@@ -178,37 +176,6 @@ describe('mcp-utils', () => {
       expect(validateTimeoutMillis(12.34).valid).toBe(false)
       expect(validateTimeoutMillis('abc').valid).toBe(false)
       expect(validateTimeoutMillis(NaN).valid).toBe(false)
-    })
-  })
-
-  describe('areHeadersEqual and hasUnsavedChanges', () => {
-    it('correctly checks header equality with exact whitespace matching', () => {
-      expect(areHeadersEqual({}, {})).toBe(true)
-      expect(areHeadersEqual({ a: '1' }, { a: '1' })).toBe(true)
-      expect(areHeadersEqual({ a: ' 1 ' }, { a: '1' })).toBe(false)
-      expect(areHeadersEqual({ a: '1' }, { a: '2' })).toBe(false)
-      expect(areHeadersEqual({ a: '1' }, { b: '1' })).toBe(false)
-    })
-
-    it('detects unsaved changes in URL, headers, enabled, or timeout', () => {
-      const base = {
-        url: 'https://example.com/mcp',
-        headers: { Authorization: 'Bearer 123' },
-        enabled: true,
-        timeoutMillis: 60000,
-      }
-
-      expect(hasUnsavedChanges(base, { ...base })).toBe(false)
-
-      expect(hasUnsavedChanges({ ...base, url: 'https://example.com/other' }, base)).toBe(true)
-      expect(
-        hasUnsavedChanges(
-          { ...base, headers: { Authorization: 'Bearer 123', 'X-New': '1' } },
-          base,
-        ),
-      ).toBe(true)
-      expect(hasUnsavedChanges({ ...base, enabled: false }, base)).toBe(true)
-      expect(hasUnsavedChanges({ ...base, timeoutMillis: 30000 }, base)).toBe(true)
     })
   })
 })

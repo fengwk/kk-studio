@@ -1,8 +1,10 @@
-package fun.fengwk.kkstudio.share.skill;
+package fun.fengwk.kkstudio.platform.catalog.dto;
 
 import lombok.Data;
 
-/** Git 渠道技能包的仓库事实投影：令牌只以 {@code hasToken} 表达，绝不回显。 */
+import fun.fengwk.kkstudio.platform.secret.SecretConfiguredDTO;
+
+/** Git 渠道技能包的仓库事实投影：令牌只以已配置事实表达，绝不回显。 */
 @Data
 public class SkillGitSourceDTO {
 
@@ -13,5 +15,5 @@ public class SkillGitSourceDTO {
   private String branch;
 
   /** 是否配置了私有仓库访问令牌。 */
-  private boolean hasToken;
+  private SecretConfiguredDTO token;
 }

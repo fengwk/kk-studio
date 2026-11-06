@@ -28,10 +28,12 @@ import tools.jackson.databind.ObjectMapper;
 import fun.fengwk.kkstudio.platform.catalog.dto.AgentConfigDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.AgentCreateDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.HarnessExecutionSelectionDTO;
-import fun.fengwk.kkstudio.share.skill.SkillPackageCheckDTO;
-import fun.fengwk.kkstudio.share.skill.SkillPackageEditDTO;
-import fun.fengwk.kkstudio.share.skill.SkillPackageGitCreateDTO;
-import fun.fengwk.kkstudio.share.skill.SkillPackageGitPublishDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.SkillPackageCheckDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.SkillPackageCreateDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.SkillPackageEditDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.SkillPackagePublishDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.SkillPackageStagingCreateDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.SkillPackageStagingPublishDTO;
 import fun.fengwk.kkstudio.share.skill.SkillRefDTO;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 import fun.fengwk.kkstudio.web.storage.WebStorageS3TestConfiguration;
@@ -43,17 +45,18 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.stream.Stream;
 
 /**
  * Platform 技能包 Web REST API 的 HTTP 契约测试。
  *
- * <p>验证 {@code /api/skill-packages} 下的列表、详情、Git 创建/编辑/检查/发布、归档下载、各环境同步状态与环境重新同步：创建发布当时解析出的 branch
- * HEAD；检查只更新观察值；发布只接受该 version 展示过的 exact commit；陈旧卡片、重复名与 Agent 引用保护映射到稳定的 HTTP 状态码。
+ * <p>验证 {@code /api/platform/skill-packages} 下的列表、详情、Git 创建/编辑/检查/发布、归档下载、各环境同步状态与环境重新同步：创建发布当时解析出的
+ * branch HEAD；检查只更新观察值；发布只接受该 version 展示过的 exact commit；陈旧卡片、重复名与 Agent 引用保护映射到稳定的 HTTP 状态码。
  */
 @AutoConfigureMockMvc
 @Import(WebStorageS3TestConfiguration.class)
-class StudioSkillCatalogControllerTest extends WebPostgresTestSupport {
+class SkillCatalogControllerTest extends WebPostgresTestSupport {
 
   private static final String DEV_SKILL_MD =
       """
@@ -92,7 +95,7 @@ class StudioSkillCatalogControllerTest extends WebPostgresTestSupport {
             .andExpect(jsonPath("$.source").value("GIT"))
             .andExpect(jsonPath("$.git.repositoryUrl").value(git.url()))
             .andExpect(jsonPath("$.git.branch").value("main"))
-            .andExpect(jsonPath("$.git.hasToken").value(false))
+            .andExpect(jsonPath("$.git.token.configured").value(false))
             .andExpect(jsonPath("$.headCommit").value(firstCommit))
             .andExpect(jsonPath("$.headCheckError").value(nullValue()))
             .andExpect(jsonPath("$.updateAvailable").value(false))
@@ -105,7 +108,7 @@ class StudioSkillCatalogControllerTest extends WebPostgresTestSupport {
     // 列表与单读回读同一条权威事实。
     assertTrue(packageNames().contains(name), "created package must appear in the list");
     mockMvc
-        .perform(get("/api/skill-packages/{name}", name))
+        .perform(get("/api/platform/skill-packages/{name}", name))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.packageVersion").value(firstCommit))
         .andExpect(jsonPath("$.version").value("0"));
@@ -124,7 +127,7 @@ class StudioSkillCatalogControllerTest extends WebPostgresTestSupport {
     edit.setBranch("release");
     mockMvc
         .perform(
-            put("/api/skill-packages/{name}", name)
+            put("/api/platform/skill-packages/{name}", name)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(edit)))
         .andExpect(status().isOk())
@@ -157,7 +160,7 @@ class StudioSkillCatalogControllerTest extends WebPostgresTestSupport {
 
     // 文件清单只来自服务端归档索引，按路径升序返回 path 与解压后大小。
     mockMvc
-        .perform(get("/api/skill-packages/{name}/files", name))
+        .perform(get("/api/platform/skill-packages/{name}/files", name))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.length()").value(2))
         .andExpect(jsonPath("$[0].path").value("dev/SKILL.md"))
@@ -166,7 +169,7 @@ class StudioSkillCatalogControllerTest extends WebPostgresTestSupport {
 
     // 归档下载返回预签名 GET 与摘要。
     mockMvc
-        .perform(post("/api/skill-packages/{name}/archive-url", name))
+        .perform(post("/api/platform/skill-packages/{name}/archive-url", name))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.filename").value(name + "-" + secondCommit + ".zip"))
         .andExpect(jsonPath("$.sha256").isNotEmpty())
@@ -174,23 +177,25 @@ class StudioSkillCatalogControllerTest extends WebPostgresTestSupport {
 
     // 环境同步状态按环境投影，新建包尚未安装。
     mockMvc
-        .perform(get("/api/skill-packages/{name}/environments", name))
+        .perform(get("/api/platform/skill-packages/{name}/environments", name))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$").isArray());
 
     // 陈旧卡片的删除必须冲突，命中当前 version 才删除。
     mockMvc
-        .perform(delete("/api/skill-packages/{name}", name).param("expectedVersion", "1"))
+        .perform(delete("/api/platform/skill-packages/{name}", name).param("expectedVersion", "1"))
         .andExpect(status().isConflict());
     mockMvc
-        .perform(delete("/api/skill-packages/{name}", name).param("expectedVersion", "2"))
+        .perform(delete("/api/platform/skill-packages/{name}", name).param("expectedVersion", "2"))
         .andExpect(status().isNoContent());
-    mockMvc.perform(get("/api/skill-packages/{name}", name)).andExpect(status().isNotFound());
+    mockMvc
+        .perform(get("/api/platform/skill-packages/{name}", name))
+        .andExpect(status().isNotFound());
   }
 
-  /** 测试意图：统一编辑省略 branch 时保持 Git 检查分支，只改描述也推进 CAS version。 */
+  /** 测试意图：PUT 整体替换可编辑属性——Git 渠道必须给出检查分支，只改描述也推进 CAS version。 */
   @Test
-  void unifiedEditKeepsGitBranchWhenOmitted() throws Exception {
+  void unifiedEditReplacesEditableGitProperties() throws Exception {
     GitFixture git = GitFixture.init("edit-desc", Map.of("dev/SKILL.md", DEV_SKILL_MD));
     String name = packageName("edit-desc");
     mockMvc.perform(createRequest(name, git.url())).andExpect(status().isCreated());
@@ -198,9 +203,10 @@ class StudioSkillCatalogControllerTest extends WebPostgresTestSupport {
     SkillPackageEditDTO edit = new SkillPackageEditDTO();
     edit.setExpectedVersion("0");
     edit.setDescription("description only");
+    edit.setBranch("main");
     mockMvc
         .perform(
-            put("/api/skill-packages/{name}", name)
+            put("/api/platform/skill-packages/{name}", name)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(edit)))
         .andExpect(status().isOk())
@@ -208,8 +214,20 @@ class StudioSkillCatalogControllerTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.git.branch").value("main"))
         .andExpect(jsonPath("$.version").value("1"));
 
+    // Git 渠道省略 branch 不再是「保持当前值」：整体替换缺必填属性时拒绝
+    SkillPackageEditDTO missingBranch = new SkillPackageEditDTO();
+    missingBranch.setExpectedVersion("1");
+    missingBranch.setDescription("description only");
     mockMvc
-        .perform(get("/api/skill-packages/{name}/files", packageName("missing")))
+        .perform(
+            put("/api/platform/skill-packages/{name}", name)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(missingBranch)))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("validation"));
+
+    mockMvc
+        .perform(get("/api/platform/skill-packages/{name}/files", packageName("missing")))
         .andExpect(status().isNotFound());
   }
 
@@ -224,11 +242,11 @@ class StudioSkillCatalogControllerTest extends WebPostgresTestSupport {
     mockMvc
         .perform(createRequest(packageName("bad-url"), "not-a-url"))
         .andExpect(status().isBadRequest());
-    SkillPackageGitCreateDTO badBranch = create(packageName("bad-branch"), git.url());
+    SkillPackageCreateDTO badBranch = create(packageName("bad-branch"), git.url());
     badBranch.setBranch("no-such-branch");
     mockMvc
         .perform(
-            post("/api/skill-packages/git")
+            post("/api/platform/skill-packages")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(badBranch)))
         .andExpect(status().isBadRequest());
@@ -245,12 +263,12 @@ class StudioSkillCatalogControllerTest extends WebPostgresTestSupport {
     mockMvc.perform(createRequest(name, git.url())).andExpect(status().isCreated());
 
     mockMvc
-        .perform(get("/api/skill-packages/{name}", packageName("missing")))
+        .perform(get("/api/platform/skill-packages/{name}", packageName("missing")))
         .andExpect(status().isNotFound());
     mockMvc.perform(checkRequest(packageName("missing"), "0")).andExpect(status().isNotFound());
     mockMvc
         .perform(
-            delete("/api/skill-packages/{name}", packageName("missing"))
+            delete("/api/platform/skill-packages/{name}", packageName("missing"))
                 .param("expectedVersion", "0"))
         .andExpect(status().isNotFound());
 
@@ -260,7 +278,7 @@ class StudioSkillCatalogControllerTest extends WebPostgresTestSupport {
     stale.setBranch("main");
     mockMvc
         .perform(
-            put("/api/skill-packages/{name}", name)
+            put("/api/platform/skill-packages/{name}", name)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(stale)))
         .andExpect(status().isConflict());
@@ -293,10 +311,10 @@ class StudioSkillCatalogControllerTest extends WebPostgresTestSupport {
     referencingAgent(name, "dev");
 
     mockMvc
-        .perform(delete("/api/skill-packages/{name}", name).param("expectedVersion", "0"))
+        .perform(delete("/api/platform/skill-packages/{name}", name).param("expectedVersion", "0"))
         .andExpect(status().isConflict());
     mockMvc
-        .perform(get("/api/skill-packages/{name}", name))
+        .perform(get("/api/platform/skill-packages/{name}", name))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.version").value("0"))
         .andExpect(jsonPath("$.packageVersion").value(git.firstCommit()));
@@ -318,7 +336,7 @@ class StudioSkillCatalogControllerTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.headCommit").value(removingCommit));
     mockMvc.perform(publishRequest(name, "0", removingCommit)).andExpect(status().isConflict());
     mockMvc
-        .perform(get("/api/skill-packages/{name}", name))
+        .perform(get("/api/platform/skill-packages/{name}", name))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.packageVersion").value(firstCommit))
         .andExpect(jsonPath("$.skills[0].name").value("dev"))
@@ -331,9 +349,50 @@ class StudioSkillCatalogControllerTest extends WebPostgresTestSupport {
     mockMvc
         .perform(
             post(
-                "/api/environments/{environmentId}/skills/resync",
+                "/api/platform/environments/{environmentId}/resync-skills",
                 "00000000-0000-0000-0000-000000000001"))
         .andExpect(status().isNotFound());
+  }
+
+  /** 测试意图：暂存归档是独立资源——id 在路径上以 UUID 解析，未知暂存 404、非 UUID 路径 400。 */
+  @Test
+  void stagingRoutesAddressTheStagedArchiveById() throws Exception {
+    SkillPackageStagingCreateDTO staging = new SkillPackageStagingCreateDTO();
+    staging.setUploadId(UUID.randomUUID().toString());
+    staging.setPackageName("web-staged-pkg");
+    staging.setPackageVersion("v1");
+    mockMvc
+        .perform(json(post("/api/platform/skill-package-stagings"), staging))
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.code").value("not_found"));
+
+    SkillPackageStagingPublishDTO publish = new SkillPackageStagingPublishDTO();
+    publish.setPackageName("web-staged-pkg");
+    publish.setPackageVersion("v1");
+    mockMvc
+        .perform(
+            json(
+                post("/api/platform/skill-package-stagings/{stagingId}/publish", UUID.randomUUID()),
+                publish))
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.code").value("not_found"));
+
+    mockMvc
+        .perform(
+            json(
+                post("/api/platform/skill-package-stagings/{stagingId}/publish", "not-a-uuid"),
+                publish))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("validation"));
+
+    mockMvc
+        .perform(delete("/api/platform/skill-package-stagings/{stagingId}", UUID.randomUUID()))
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.code").value("not_found"));
+    mockMvc
+        .perform(delete("/api/platform/skill-package-stagings/{stagingId}", "not-a-uuid"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("validation"));
   }
 
   /** 通过公开 API 建立真实 Skill 引用：Agent config 精确指向某 Package 的 Skill。 */
@@ -361,22 +420,22 @@ class StudioSkillCatalogControllerTest extends WebPostgresTestSupport {
 
   private MockHttpServletRequestBuilder createRequest(String packageName, String repositoryUrl)
       throws Exception {
-    return json(post("/api/skill-packages/git"), create(packageName, repositoryUrl));
+    return json(post("/api/platform/skill-packages"), create(packageName, repositoryUrl));
   }
 
   private MockHttpServletRequestBuilder checkRequest(String packageName, String expectedVersion)
       throws Exception {
     SkillPackageCheckDTO check = new SkillPackageCheckDTO();
     check.setExpectedVersion(expectedVersion);
-    return json(post("/api/skill-packages/git/{name}/check", packageName), check);
+    return json(post("/api/platform/skill-packages/{name}/check", packageName), check);
   }
 
   private MockHttpServletRequestBuilder publishRequest(
       String packageName, String expectedVersion, String targetCommit) throws Exception {
-    SkillPackageGitPublishDTO publish = new SkillPackageGitPublishDTO();
+    SkillPackagePublishDTO publish = new SkillPackagePublishDTO();
     publish.setExpectedVersion(expectedVersion);
     publish.setTargetCommit(targetCommit);
-    return json(post("/api/skill-packages/git/{name}/publish", packageName), publish);
+    return json(post("/api/platform/skill-packages/{name}/publish", packageName), publish);
   }
 
   private MockHttpServletRequestBuilder json(MockHttpServletRequestBuilder builder, Object body)
@@ -386,8 +445,8 @@ class StudioSkillCatalogControllerTest extends WebPostgresTestSupport {
         .content(objectMapper.writeValueAsString(body));
   }
 
-  private static SkillPackageGitCreateDTO create(String packageName, String repositoryUrl) {
-    SkillPackageGitCreateDTO create = new SkillPackageGitCreateDTO();
+  private static SkillPackageCreateDTO create(String packageName, String repositoryUrl) {
+    SkillPackageCreateDTO create = new SkillPackageCreateDTO();
     create.setPackageName(packageName);
     create.setDescription("web skill package");
     create.setRepositoryUrl(repositoryUrl);
@@ -408,7 +467,11 @@ class StudioSkillCatalogControllerTest extends WebPostgresTestSupport {
 
   private List<String> packageNames() throws Exception {
     JsonNode list =
-        data(mockMvc.perform(get("/api/skill-packages")).andExpect(status().isOk()).andReturn());
+        data(
+            mockMvc
+                .perform(get("/api/platform/skill-packages"))
+                .andExpect(status().isOk())
+                .andReturn());
     List<String> names = new ArrayList<>();
     list.forEach(node -> names.add(node.path("packageName").asText()));
     return names;

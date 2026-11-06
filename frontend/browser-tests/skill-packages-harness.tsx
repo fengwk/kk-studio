@@ -14,17 +14,17 @@ import type {
   SkillManifestEntryDTO,
   SkillPackageDetailDTO,
   SkillPackageFileDTO,
-  SkillPackageGitCreateDTO,
-  SkillPackagePreviewDTO,
+  SkillPackageCreateDTO,
+  SkillPackageStagingDTO,
   SkillPackageSummaryDTO,
-  SkillPackageUploadPublishDTO,
+  SkillPackageStagingPublishDTO,
 } from '@/shared/api/generated/contracts'
 
 setLocale('zh-CN')
 
 const SEED_COMMIT = '1111111111111111111111111111111111111111'
 const NEW_HEAD = '9999999999999999999999999999999999999999'
-const SEEDED_AT = 1784505600
+const SEEDED_AT = 1784505600000
 
 interface FakePackage {
   detail: SkillPackageDetailDTO
@@ -47,8 +47,8 @@ function summaryOf(detail: SkillPackageDetailDTO): SkillPackageSummaryDTO {
     source: detail.source,
     updateAvailable: detail.updateAvailable,
     version: detail.version,
-    createTime: detail.createTime,
-    updateTime: detail.updateTime,
+    createdAt: detail.createdAt,
+    updatedAt: detail.updatedAt,
   }
 }
 
@@ -63,7 +63,11 @@ function gitDetail(
     publishedAt: SEEDED_AT,
     skills: DEV_SKILLS,
     source: 'GIT',
-    git: { repositoryUrl: `https://github.com/example/${packageName}.git`, branch: 'main', hasToken: false },
+    git: {
+      repositoryUrl: `https://github.com/example/${packageName}.git`,
+      branch: 'main',
+      token: { configured: false },
+    },
     headCommit: null,
     headCheckedAt: null,
     headCheckError: null,
@@ -71,8 +75,8 @@ function gitDetail(
     artifactSha256: 'a'.repeat(64),
     artifactSizeBytes: '2048',
     version: '1',
-    createTime: SEEDED_AT,
-    updateTime: SEEDED_AT,
+    createdAt: SEEDED_AT,
+    updatedAt: SEEDED_AT,
     ...overrides,
   }
 }
@@ -220,7 +224,7 @@ agentService.listSkillPackageFiles = async (name: string) => clone(requirePackag
 agentService.listSkillPackageEnvironments = async (name: string) =>
   clone(requirePackage(name).environments)
 
-agentService.createSkillPackage = async (payload: SkillPackageGitCreateDTO) => {
+agentService.createSkillPackage = async (payload: SkillPackageCreateDTO) => {
   await delay(120)
   if (packages.has(payload.packageName)) {
     throw new ApiError('duplicate', 409, 'duplicate',
@@ -229,7 +233,11 @@ agentService.createSkillPackage = async (payload: SkillPackageGitCreateDTO) => {
   const detail = gitDetail(payload.packageName, {
     description: payload.description ?? null,
     packageVersion: SEED_COMMIT,
-    git: { repositoryUrl: payload.repositoryUrl, branch: payload.branch, hasToken: Boolean(payload.token) },
+    git: {
+      repositoryUrl: payload.repositoryUrl,
+      branch: payload.branch,
+      token: { configured: Boolean(payload.token?.value) },
+    },
     headCommit: null,
     headCheckedAt: null,
     version: '0',
@@ -319,10 +327,10 @@ const PREVIEW_FILES: SkillPackageFileDTO[] = [
 
 const staged = new Map<string, { packageName: string; packageVersion: string; description: string | null }>()
 
-agentService.previewSkillPackageUpload = async (payload) => {
+agentService.createSkillPackageStaging = async (payload) => {
   await delay(200)
-  const preview: SkillPackagePreviewDTO = {
-    stagingUploadId: 'stage-1',
+  const preview: SkillPackageStagingDTO = {
+    id: 'stage-1',
     packageName: payload.packageName,
     packageVersion: payload.packageVersion,
     description: payload.description ?? null,
@@ -333,7 +341,7 @@ agentService.previewSkillPackageUpload = async (payload) => {
     contentSizeBytes: '16384',
     fileCount: 3,
   }
-  staged.set(preview.stagingUploadId, {
+  staged.set(preview.id, {
     packageName: preview.packageName,
     packageVersion: preview.packageVersion,
     description: preview.description ?? null,
@@ -341,9 +349,12 @@ agentService.previewSkillPackageUpload = async (payload) => {
   return preview
 }
 
-agentService.publishSkillPackageUpload = async (payload: SkillPackageUploadPublishDTO) => {
+agentService.publishSkillPackageStaging = async (
+  stagingId: string,
+  payload: SkillPackageStagingPublishDTO,
+) => {
   await delay(160)
-  const pending = staged.get(payload.stagingUploadId)
+  const pending = staged.get(stagingId)
   if (!pending) {
     throw new ApiError('staging upload expired', 409, 'version_conflict',
       undefined, undefined, 'The staged archive has expired')
@@ -397,12 +408,12 @@ agentService.publishSkillPackageUpload = async (payload: SkillPackageUploadPubli
       },
     ],
   })
-  staged.delete(payload.stagingUploadId)
+  staged.delete(stagingId)
   return clone(detail)
 }
 
-agentService.cancelSkillPackageUpload = async (stagingUploadId: string) => {
-  staged.delete(stagingUploadId)
+agentService.cancelSkillPackageStaging = async (stagingId: string) => {
+  staged.delete(stagingId)
 }
 
 agentService.getSkillPackageArchiveUrl = async (name: string) => {
