@@ -24,7 +24,7 @@ import fun.fengwk.kkstudio.share.catalog.AgentProviderEditablePropertiesDTO;
 import java.util.ArrayList;
 import java.util.List;
 
-/** HTTP JSON 全局配置：严格拒绝重复键、默认省略 null、按 DTO 声明顺序输出、写 long 时间戳并将 Long 序列化为字符串。 */
+/** HTTP JSON 全局配置：严格拒绝重复键、默认省略 null、按 DTO 声明顺序输出、时间戳为毫秒并将 Long 序列化为字符串。 */
 @Configuration(proxyBeanMethods = false)
 public class StrictJacksonConfiguration {
 
@@ -33,6 +33,8 @@ public class StrictJacksonConfiguration {
     return builder -> {
       builder.enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION);
       builder.enable(DateTimeFeature.WRITE_DATES_AS_TIMESTAMPS);
+      builder.disable(DateTimeFeature.WRITE_DATE_TIMESTAMPS_AS_NANOSECONDS);
+      builder.disable(DateTimeFeature.READ_DATE_TIMESTAMPS_AS_NANOSECONDS);
       builder.changeDefaultPropertyInclusion(
           incl ->
               incl.withValueInclusion(JsonInclude.Include.NON_NULL)

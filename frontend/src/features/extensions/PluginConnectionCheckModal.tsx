@@ -16,9 +16,9 @@ interface PluginConnectionCheckModalProps {
   onClose: () => void
 }
 
-/** 后端 Instant 的 wire 约定是 epoch seconds。 */
+/** 后端 Instant 的 wire 约定是 epoch 毫秒。 */
 function formatCheckedAt(value: number, locale: AppLocale): string {
-  const date = new Date(value * 1000)
+  const date = new Date(value)
   return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString(locale)
 }
 
