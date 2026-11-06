@@ -20,6 +20,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
@@ -435,11 +436,11 @@ class PostgresqlSubagentContinuationTest {
                   childId, child.headEntryId(), child.nextCommandSequence()),
               List.of(set, prompt("direct")));
       assertThrows(
-          IllegalArgumentException.class,
+          DomainException.class,
           () -> runtime.acceptCommands(direct, AcceptancePreflight.IDENTITY));
       UUID continuationTicket = UUID.randomUUID();
       assertThrows(
-          IllegalArgumentException.class,
+          DomainException.class,
           () ->
               SpawnTestSupport.acceptAndJoin(
                   runtime,
@@ -449,7 +450,7 @@ class PostgresqlSubagentContinuationTest {
       assertTrue(runtime.findJoin(continuationTicket).isEmpty());
       UUID newTicket = UUID.randomUUID();
       assertThrows(
-          IllegalArgumentException.class,
+          DomainException.class,
           () ->
               SpawnTestSupport.acceptAndJoin(
                   runtime,
@@ -471,7 +472,7 @@ class PostgresqlSubagentContinuationTest {
             List.of(commands.getFirst().withPayload(new SetEnvironmentCommandPayload(null)));
     ThreadState child = before.thread();
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () ->
             runtime.acceptCommands(
                 new AcceptCommandsCommand(
@@ -481,7 +482,7 @@ class PostgresqlSubagentContinuationTest {
                 rewrite));
     UUID rewrittenTicket = UUID.randomUUID();
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () ->
             SpawnTestSupport.acceptAndJoin(
                 runtime,
