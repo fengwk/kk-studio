@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { ChevronRight, CornerLeftUp, Folder, HelpCircle } from 'lucide-react'
 import { ApiError } from '@/shared/api/client'
-import { environmentService } from '@/features/environment/environment-service'
+import { listIdeDirectories } from '@/features/environment/ide/environment-ide-service'
 import type {
   EnvironmentIdeDirectoryListingDTO,
   EnvironmentIdeDirectoryListingEntry,
@@ -227,7 +227,7 @@ export function OpenDirectoryModal({
     setRootLoading(true)
     setRootError(null)
     try {
-      const listing = await environmentService.listIdeDirectories(
+      const listing = await listIdeDirectories(
         environmentId,
         path,
         signalRef.current,
@@ -257,7 +257,7 @@ export function OpenDirectoryModal({
     nodeTokensRef.current.set(path, token)
     setNodes((current) => ({ ...current, [path]: { status: 'loading' } }))
     try {
-      const listing = await environmentService.listIdeDirectories(
+      const listing = await listIdeDirectories(
         environmentId,
         path,
         signalRef.current,

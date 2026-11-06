@@ -30,7 +30,7 @@ describe('vite dev proxy', () => {
 
   it('preserves browser Host and Origin for same-origin IDE HTTP and WebSocket proxy', () => {
     const source = readFileSync(path.resolve(process.cwd(), 'vite.config.ts'), 'utf8')
-    const ideProxy = source.match(/'\/environment-ide': \{([\s\S]*?)\n\s{6}\},/)
+    const ideProxy = source.match(/'\/ide': \{([\s\S]*?)\n\s{6}\},/)
 
     expect(ideProxy?.[1]).toContain("target: process.env.API_PROXY_TARGET || 'http://127.0.0.1:8080'")
     expect(ideProxy?.[1]).toContain('changeOrigin: false')
@@ -161,7 +161,7 @@ describe('vite dev proxy', () => {
 
       // 1. IDE Bootstrap GET: path & query must NOT be rewritten
       const bootstrapPath =
-        '/environment-ide/e1000000-0000-4000-8000-000000000001/__ide/bootstrap?token=test-token-123'
+        '/ide/e1000000-0000-4000-8000-000000000001/__ide/bootstrap?token=test-token-123'
       const getRes = await sendRequest({
         path: bootstrapPath,
         headers: { Host: `127.0.0.1:${vitePort}` },
@@ -174,7 +174,7 @@ describe('vite dev proxy', () => {
 
       // 2. Unsafe HTTP POST: Host & Origin paired together without rewrite (changeOrigin: false)
       const postPath =
-        '/environment-ide/e1000000-0000-4000-8000-000000000001/api/terminal?rows=24&cols=80'
+        '/ide/e1000000-0000-4000-8000-000000000001/api/terminal?rows=24&cols=80'
       const expectedHost = `127.0.0.1:${vitePort}`
       const expectedOrigin = `http://127.0.0.1:${vitePort}`
 
@@ -198,7 +198,7 @@ describe('vite dev proxy', () => {
 
       // 3. WebSocket Upgrade: upgrade reaches stub and preserves same-origin without rewrite
       const wsPath =
-        '/environment-ide/e1000000-0000-4000-8000-000000000001/vscode-stream?token=test-token-123'
+        '/ide/e1000000-0000-4000-8000-000000000001/vscode-stream?token=test-token-123'
       await new Promise<void>((resolve, reject) => {
         const req = http.request({
           hostname: '127.0.0.1',

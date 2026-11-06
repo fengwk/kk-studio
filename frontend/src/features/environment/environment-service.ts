@@ -3,12 +3,6 @@ import type {
   EnvironmentCardDTO,
   EnvironmentCreateDTO,
   EnvironmentEventDTO,
-  EnvironmentIdeChangeDirectoryDTO,
-  EnvironmentIdeCloseViewDTO,
-  EnvironmentIdeDirectoryListingDTO,
-  EnvironmentIdeOpenViewDTO,
-  EnvironmentIdeViewBindingDTO,
-  EnvironmentIdeViewDTO,
   EnvironmentInstallCodeDTO,
   EnvironmentInstallConfigDTO,
   EnvironmentRuntimeStatusDTO,
@@ -70,64 +64,7 @@ export function createEnvironmentService(client: HttpClient = apiClient) {
       client.delete(
         `/environments/${encodeURIComponent(id)}?expectedVersion=${encodeURIComponent(expectedVersion)}`,
       ),
-
-    /** 打开或恢复 view：claimId 与 mode 由调用方持有，失败后只允许按原 claimId 对账。 */
-    openIdeView: (environmentId: string, data: EnvironmentIdeOpenViewDTO): Promise<EnvironmentIdeViewDTO> =>
-      client.post(`/environments/${encodeURIComponent(environmentId)}/ide/views`, data),
-
-    changeIdeViewDirectory: (
-      environmentId: string,
-      viewId: string,
-      data: EnvironmentIdeChangeDirectoryDTO,
-    ): Promise<EnvironmentIdeViewDTO> =>
-      client.put(
-        `/environments/${encodeURIComponent(environmentId)}/ide/views/${encodeURIComponent(viewId)}/directory`,
-        data,
-      ),
-
-    /**
-     * 目录选择器只列直接子目录；path 省略时服务端返回宿主主目录。
-     * 结果中的 path 是服务端规范化后的目录，调用方用它确认切换目标。
-     */
-    listIdeDirectories: (
-      environmentId: string,
-      path?: string | null,
-      signal?: AbortSignal,
-    ): Promise<EnvironmentIdeDirectoryListingDTO> =>
-      client.get(
-        `/environments/${encodeURIComponent(environmentId)}/ide/directories`,
-        path == null ? { signal } : { params: { path }, signal },
-      ),
-
-    openIdeViewTerminal: (
-      environmentId: string,
-      viewId: string,
-      data: EnvironmentIdeViewBindingDTO,
-    ): Promise<void> =>
-      client.post(
-        `/environments/${encodeURIComponent(environmentId)}/ide/views/${encodeURIComponent(viewId)}/terminal`,
-        data,
-      ),
-
-    setIdeViewMobileLayout: (
-      environmentId: string,
-      viewId: string,
-      data: EnvironmentIdeViewBindingDTO,
-    ): Promise<void> =>
-      client.post(`${ideViewPath(environmentId, viewId)}/mobile-layout`, data),
-
-    /** 普通关闭等待 IDE 内用户操作；仅在状态未知并经用户确认时强制关闭。 */
-    closeIdeView: (
-      environmentId: string,
-      viewId: string,
-      data: EnvironmentIdeCloseViewDTO,
-    ): Promise<void> =>
-      client.delete(ideViewPath(environmentId, viewId), data.discard ? { data } : { data, timeout: 0 }),
   }
-}
-
-function ideViewPath(environmentId: string, viewId: string): string {
-  return `/environments/${encodeURIComponent(environmentId)}/ide/views/${encodeURIComponent(viewId)}`
 }
 
 export const environmentService = createEnvironmentService()

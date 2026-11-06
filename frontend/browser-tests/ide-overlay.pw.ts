@@ -170,7 +170,7 @@ async function installTransport(page: Page, state: TransportState): Promise<void
       return
     }
 
-    const openMatch = path.match(/^\/api\/environments\/([^/]+)\/ide\/views$/)
+    const openMatch = path.match(/^\/api\/ide\/environments\/([^/]+)\/views$/)
     if (method === 'POST' && openMatch != null) {
       const environmentId = decodeURIComponent(openMatch[1]!)
       const body = (request.postDataJSON() as Record<string, unknown> | null) ?? {}
@@ -208,13 +208,13 @@ async function installTransport(page: Page, state: TransportState): Promise<void
         directory: directory(environmentId),
         workspacePath: directory(environmentId),
         state: 'OPEN',
-        entryUrl: `/environment-ide/${environmentId}/${viewId}/__ide/bootstrap?token=${viewId}-${state.epoch}`,
+        entryUrl: `/ide/${environmentId}/${viewId}/__ide/bootstrap?token=${viewId}-${state.epoch}`,
       }
       await route.fulfill({ json: response })
       return
     }
 
-    const terminalMatch = path.match(/^\/api\/environments\/([^/]+)\/ide\/views\/([^/]+)\/terminal$/)
+    const terminalMatch = path.match(/^\/api\/ide\/environments\/([^/]+)\/views\/([^/]+)\/focus-terminal$/)
     if (method === 'POST' && terminalMatch != null) {
       state.terminalCalls.push({
         environmentId: decodeURIComponent(terminalMatch[1]!),
@@ -225,7 +225,7 @@ async function installTransport(page: Page, state: TransportState): Promise<void
       return
     }
 
-    const directoryListMatch = path.match(/^\/api\/environments\/([^/]+)\/ide\/directories$/)
+    const directoryListMatch = path.match(/^\/api\/ide\/environments\/([^/]+)\/directories$/)
     if (method === 'GET' && directoryListMatch != null) {
       const environmentId = decodeURIComponent(directoryListMatch[1]!)
       const requestedPath = parsed.searchParams.get('path')
@@ -256,7 +256,7 @@ async function installTransport(page: Page, state: TransportState): Promise<void
       return
     }
 
-    const directoryMatch = path.match(/^\/api\/environments\/([^/]+)\/ide\/views\/([^/]+)\/directory$/)
+    const directoryMatch = path.match(/^\/api\/ide\/environments\/([^/]+)\/views\/([^/]+)\/directory$/)
     if (method === 'PUT' && directoryMatch != null) {
       const environmentId = decodeURIComponent(directoryMatch[1]!)
       const viewId = decodeURIComponent(directoryMatch[2]!)
@@ -282,8 +282,8 @@ async function installTransport(page: Page, state: TransportState): Promise<void
       return
     }
 
-    const closeMatch = path.match(/^\/api\/environments\/([^/]+)\/ide\/views\/([^/]+)$/)
-    if (method === 'DELETE' && closeMatch != null) {
+    const closeMatch = path.match(/^\/api\/ide\/environments\/([^/]+)\/views\/([^/]+)\/close$/)
+    if (method === 'POST' && closeMatch != null) {
       const environmentId = decodeURIComponent(closeMatch[1]!)
       const viewId = decodeURIComponent(closeMatch[2]!)
       const body = (request.postDataJSON() as Record<string, unknown> | null) ?? {}
@@ -314,10 +314,10 @@ async function installTransport(page: Page, state: TransportState): Promise<void
     })
   })
 
-  await page.route('**/environment-ide/**/__ide/bootstrap*', async (route) => {
+  await page.route('**/ide/**/__ide/bootstrap*', async (route) => {
     const parsed = new URL(route.request().url())
     const match = parsed.pathname.match(
-      /^\/environment-ide\/([^/]+)\/([^/]+)\/__ide\/bootstrap$/,
+      /^\/ide\/([^/]+)\/([^/]+)\/__ide\/bootstrap$/,
     )
     if (match == null) {
       await route.fulfill({ status: 404 })
