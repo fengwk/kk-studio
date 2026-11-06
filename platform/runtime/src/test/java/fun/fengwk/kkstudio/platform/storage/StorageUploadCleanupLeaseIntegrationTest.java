@@ -1,10 +1,10 @@
 package fun.fengwk.kkstudio.platform.storage;
 
+import static fun.fengwk.kkstudio.platform.storage.StorageUploadAssertions.assertStorageVerification;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.AfterEach;
@@ -20,7 +20,6 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadDTO;
-import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageUploadRepository;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageUpload;
@@ -228,7 +227,8 @@ class StorageUploadCleanupLeaseIntegrationTest extends PostgresSpringTestSupport
         status ->
             uploadRepository.claimById(
                 pendingId, now, now.plusSeconds(30), token("pending-cleanup")));
-    assertThrows(StorageVerificationException.class, () -> uploadService.complete(pendingId));
+    assertStorageVerification(
+        () -> uploadService.complete(pendingId), "cleanup is already claimed");
 
     StorageUploadDTO readyPending =
         storage.reserve(
@@ -240,9 +240,8 @@ class StorageUploadCleanupLeaseIntegrationTest extends PostgresSpringTestSupport
         status ->
             uploadRepository.claimById(readyId, now, now.plusSeconds(30), token("ready-cleanup")));
 
-    assertThrows(
-        StorageVerificationException.class,
-        () -> tx.execute(status -> uploadService.lockReady(readyId)));
+    assertStorageVerification(
+        () -> tx.execute(status -> uploadService.lockReady(readyId)), "cleanup is already claimed");
   }
 
   @Test
@@ -295,7 +294,7 @@ class StorageUploadCleanupLeaseIntegrationTest extends PostgresSpringTestSupport
     UUID pendingId = UUID.fromString(pending.getId());
     uploadService.delete(pendingId);
     s3Storage.clearNetworkCalls();
-    assertThrows(StorageVerificationException.class, () -> uploadService.complete(pendingId));
+    assertStorageVerification(() -> uploadService.complete(pendingId), "cleanup was requested");
     assertTrue(s3Storage.networkCalls().isEmpty(), "complete must fail before any S3 call");
 
     StorageUploadDTO readyPending =
@@ -309,9 +308,8 @@ class StorageUploadCleanupLeaseIntegrationTest extends PostgresSpringTestSupport
     UUID readyId = UUID.fromString(ready.getId());
     uploadService.delete(readyId);
 
-    assertThrows(
-        StorageVerificationException.class,
-        () -> tx.execute(status -> uploadService.lockReady(readyId)));
+    assertStorageVerification(
+        () -> tx.execute(status -> uploadService.lockReady(readyId)), "cleanup was requested");
   }
 
   private static UUID token(String value) {

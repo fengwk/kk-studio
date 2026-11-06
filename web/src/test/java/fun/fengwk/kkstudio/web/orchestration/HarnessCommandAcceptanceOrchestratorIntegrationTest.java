@@ -14,6 +14,8 @@ import org.springframework.test.context.TestPropertySource;
 import fun.fengwk.kkstudio.chat.ChatService;
 import fun.fengwk.kkstudio.chat.ChatSessionRepository;
 import fun.fengwk.kkstudio.chat.dto.ChatCreateDTO;
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
@@ -196,9 +198,13 @@ class HarnessCommandAcceptanceOrchestratorIntegrationTest extends WebPostgresTes
                 AgentMessageRole.USER,
                 List.of(new AttachmentMessageContent(UUID.fromString(pending.getId())))));
 
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> accept(new SessionOwner("CHAT", chatId.toString()), sessionId, threadId, payload));
+    DomainException conflict =
+        assertThrows(
+            DomainException.class,
+            () ->
+                accept(new SessionOwner("CHAT", chatId.toString()), sessionId, threadId, payload));
+    assertEquals(DomainErrorCode.CONFLICT, conflict.code());
+    assertEquals("STORAGE_VERIFICATION", conflict.reason());
 
     assertEquals(1, count("storage_upload", "id", UUID.fromString(pending.getId())));
     assertEquals(0, count("chat_session", "session_id", sessionId));

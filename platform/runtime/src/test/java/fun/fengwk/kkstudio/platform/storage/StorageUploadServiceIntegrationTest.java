@@ -1,5 +1,8 @@
 package fun.fengwk.kkstudio.platform.storage;
 
+import static fun.fengwk.kkstudio.platform.storage.StorageUploadAssertions.assertStorageVerification;
+import static fun.fengwk.kkstudio.platform.storage.StorageUploadAssertions.assertStorageVerificationCause;
+import static fun.fengwk.kkstudio.platform.storage.StorageUploadAssertions.assertValidation;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -41,7 +44,6 @@ import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadPendingDTO;
 import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadReadyDTO;
 import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadReserveRequestDTO;
 import fun.fengwk.kkstudio.platform.storage.dto.StorageUrlMethod;
-import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageUploadRepository;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobPreviewService;
@@ -256,7 +258,7 @@ class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
               ExecutionException.class,
               () -> staged.get(30, TimeUnit.SECONDS),
               "an upload that expired while its write window was open must fail closed");
-      assertInstanceOf(StorageVerificationException.class, failure.getCause());
+      assertStorageVerificationCause(failure);
 
       // 写窗口结束后：失败只留下耐久锚点（行 + 已 PUT 的临时对象），清理仍由后台在锁内完成。
       assertEquals(
@@ -400,22 +402,18 @@ class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
 
   @Test
   void reserveValidatesDeclarationsAndNormalizesSha256Case() throws Exception {
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> reserve("  ", "image/png", 1L, sha256Hex(new byte[] {1})));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> reserve("a.png", "not-a-media-type", 1L, sha256Hex(new byte[] {1})));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> reserve("a.png", "image/png", -1L, sha256Hex(new byte[] {1})));
-    assertThrows(IllegalArgumentException.class, () -> reserve("a.png", "image/png", 1L, "xyz"));
+    assertValidation(() -> reserve("  ", "image/png", 1L, sha256Hex(new byte[] {1})), "filename");
+    assertValidation(
+        () -> reserve("a.png", "not-a-media-type", 1L, sha256Hex(new byte[] {1})), "mediaType");
+    assertValidation(
+        () -> reserve("a.png", "image/png", -1L, sha256Hex(new byte[] {1})), "sizeBytes");
+    assertValidation(() -> reserve("a.png", "image/png", 1L, "xyz"), "sha256");
     StorageUploadReserveRequestDTO missingSize = new StorageUploadReserveRequestDTO();
     missingSize.setFilename("a.png");
     missingSize.setMediaType("image/png");
     missingSize.setSizeBytes(null);
     missingSize.setSha256(sha256Hex(new byte[] {1}));
-    assertThrows(IllegalArgumentException.class, () -> storageUploadService.reserve(missingSize));
+    assertValidation(() -> storageUploadService.reserve(missingSize), "sizeBytes");
 
     byte[] content = new byte[] {7};
     StorageUploadDTO upload =
@@ -490,11 +488,8 @@ class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
         reserve("bad.bin", "application/octet-stream", 3, sha256Hex(declared));
     putUploadContent(pending.getId(), new byte[] {9, 9, 9}, "application/octet-stream");
 
-    StorageVerificationException error =
-        assertThrows(
-            StorageVerificationException.class,
-            () -> storageUploadService.complete(UUID.fromString(pending.getId())));
-    assertTrue(error.getMessage().contains("checksum"), "actual: " + error.getMessage());
+    assertStorageVerification(
+        () -> storageUploadService.complete(UUID.fromString(pending.getId())), "checksum");
 
     assertNull(uploadBlobId(pending.getId()), "mismatch must keep the upload PENDING");
     assertEquals(0, jdbc.queryForObject("select count(*) from storage_blob", Integer.class));
@@ -507,11 +502,8 @@ class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
         reserve("size.bin", "application/octet-stream", 5, sha256Hex(content));
     putUploadContent(pending.getId(), content, "application/octet-stream");
 
-    StorageVerificationException error =
-        assertThrows(
-            StorageVerificationException.class,
-            () -> storageUploadService.complete(UUID.fromString(pending.getId())));
-    assertTrue(error.getMessage().contains("size"), "actual: " + error.getMessage());
+    assertStorageVerification(
+        () -> storageUploadService.complete(UUID.fromString(pending.getId())), "size mismatch");
     assertNull(uploadBlobId(pending.getId()));
   }
 
@@ -519,9 +511,8 @@ class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
   void completeRejectsMissingObject() {
     StorageUploadDTO pending =
         reserve("void.bin", "application/octet-stream", 1, sha256Hex(new byte[] {1}));
-    assertThrows(
-        StorageVerificationException.class,
-        () -> storageUploadService.complete(UUID.fromString(pending.getId())));
+    assertStorageVerification(
+        () -> storageUploadService.complete(UUID.fromString(pending.getId())), "object not found");
   }
 
   @Test
@@ -813,7 +804,7 @@ class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
               ExecutionException.class,
               () -> completing.get(30, TimeUnit.SECONDS),
               "an upload that expired mid-write must fail closed instead of binding");
-      assertInstanceOf(StorageVerificationException.class, failure.getCause());
+      assertStorageVerificationCause(failure);
     } finally {
       executor.shutdownNow();
     }
@@ -872,7 +863,7 @@ class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
               ExecutionException.class,
               () -> completing.get(30, TimeUnit.SECONDS),
               "cleanup was requested during the write window; complete must fail closed");
-      assertInstanceOf(StorageVerificationException.class, failure.getCause());
+      assertStorageVerificationCause(failure);
     } finally {
       executor.shutdownNow();
     }

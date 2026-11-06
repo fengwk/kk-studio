@@ -25,6 +25,7 @@ import org.mockito.InOrder;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.dao.DataIntegrityViolationException;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
@@ -55,7 +56,6 @@ import fun.fengwk.kkstudio.platform.orchestration.DirectCommandsNotAllowedExcept
 import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrchestrator;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwner;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwnership;
-import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
@@ -482,8 +482,8 @@ class HarnessCommandAcceptanceOrchestratorTest {
   }
 
   @Test
-  void translatesAttachmentLookupAndVerificationFailures() {
-    // Storage 的 not-found 与 verification 失败都统一成为非法用户内容，且不得 retain/delete。
+  void mapsMissingAttachmentUploadAndPropagatesVerificationConflict() {
+    // Storage 的 not-found 收敛为非法用户内容；未就绪的 upload 保持领域冲突，且不得 retain/delete。
     AcceptCommandsCommand command =
         newSession(THREAD_ID, user(new AttachmentMessageContent(UPLOAD_ID)));
     when(chatSessionRepository.insert(SESSION_ID, CHAT_ID)).thenReturn(true);
@@ -498,14 +498,17 @@ class HarnessCommandAcceptanceOrchestratorTest {
             preflight.prepare(
                 new Session(SESSION_ID, "session", NOW), command.commands(), List.of()));
 
-    doThrow(new StorageVerificationException("upload is pending"))
+    doThrow(DomainException.conflict("STORAGE_VERIFICATION", "upload is pending"))
         .when(uploadService)
         .lockReady(UPLOAD_ID);
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            preflight.prepare(
-                new Session(SESSION_ID, "session", NOW), command.commands(), List.of()));
+    DomainException conflict =
+        assertThrows(
+            DomainException.class,
+            () ->
+                preflight.prepare(
+                    new Session(SESSION_ID, "session", NOW), command.commands(), List.of()));
+    assertEquals(DomainErrorCode.CONFLICT, conflict.code());
+    assertEquals("STORAGE_VERIFICATION", conflict.reason());
     verify(refManager, never()).retainRef(any(), any());
     verify(uploadService, never()).delete(any());
   }

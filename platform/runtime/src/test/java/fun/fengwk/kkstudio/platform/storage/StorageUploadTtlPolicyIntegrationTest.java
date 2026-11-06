@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.platform.storage;
 
+import static fun.fengwk.kkstudio.platform.storage.StorageUploadAssertions.assertStorageVerification;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.AfterEach;
@@ -21,7 +21,6 @@ import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsTestFixture;
 import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadDTO;
 import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadReadyDTO;
-import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageUploadRepository;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobPreviewService;
@@ -92,9 +91,7 @@ class StorageUploadTtlPolicyIntegrationTest extends PostgresSpringTestSupport {
     setUploadTtl(1L);
     backdateCreatedAt(uploadId, 5L);
 
-    StorageVerificationException error =
-        assertThrows(StorageVerificationException.class, () -> uploadService.complete(uploadId));
-    assertTrue(error.getMessage().contains("expired"), "actual: " + error.getMessage());
+    assertStorageVerification(() -> uploadService.complete(uploadId), "expired");
 
     assertEquals(1, uploadService.expireOnce(), "the expired unclaimed upload must be reclaimed");
     assertEquals(
@@ -120,11 +117,8 @@ class StorageUploadTtlPolicyIntegrationTest extends PostgresSpringTestSupport {
     // 缩短 TTL 后回拨创建时间：该 READY 存量在上一次判断中已过期，消费被拒绝。
     setUploadTtl(1L);
     backdateCreatedAt(uploadId, 5L);
-    StorageVerificationException error =
-        assertThrows(
-            StorageVerificationException.class,
-            () -> tx.execute(status -> uploadService.lockReady(uploadId)));
-    assertTrue(error.getMessage().contains("expired"), "actual: " + error.getMessage());
+    assertStorageVerification(
+        () -> tx.execute(status -> uploadService.lockReady(uploadId)), "expired");
 
     // 延长 TTL：同一条未 claim 上传立即恢复可消费（每次消费现读最新 policy），且不再是清理候选。
     setUploadTtl(86_400L);
@@ -161,10 +155,8 @@ class StorageUploadTtlPolicyIntegrationTest extends PostgresSpringTestSupport {
 
     // TTL 被大幅延长：已 claim 的行不受影响，仍必须被续完清理。
     setUploadTtl(86_400L);
-    assertThrows(
-        StorageVerificationException.class,
-        () -> tx.execute(status -> uploadService.lockReady(uploadId)),
-        "a claimed upload must never be consumable again");
+    assertStorageVerification(
+        () -> tx.execute(status -> uploadService.lockReady(uploadId)), "PENDING");
     assertEquals(1, uploadService.expireOnce(), "a claimed cleanup must always be finalized");
     assertEquals(
         0,

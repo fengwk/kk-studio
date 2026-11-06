@@ -30,7 +30,6 @@ import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadDTO;
 import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadPendingDTO;
 import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadReadyDTO;
 import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadReserveRequestDTO;
-import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;
 import fun.fengwk.kkstudio.platform.storage.media.FfmpegStorageMediaProbe;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageBlobRepository;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageUploadRepository;
@@ -274,8 +273,8 @@ public class StorageUploadService {
         while ((read = content.read(buffer)) != -1) {
           total += read;
           if (total > maxBytes) {
-            throw new IllegalArgumentException(
-                "staged content must not exceed " + maxBytes + " bytes");
+            throw DomainException.validation(
+                "content", "staged content must not exceed " + maxBytes + " bytes");
           }
           digest.update(buffer, 0, read);
           output.write(buffer, 0, read);
@@ -436,8 +435,8 @@ public class StorageUploadService {
    * upload owner；全部在同一事务内完成，上传行保留到后台清理完成。
    *
    * @throws DomainException 上传不存在
-   * @throws fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException 上传仍为
-   *     PENDING、已过期、 已请求 cleanup 或已被 claim
+   * @throws DomainException {@link DomainErrorCode#CONFLICT} reason {@code
+   *     STORAGE_VERIFICATION}：上传仍为 PENDING、已过期、 已请求 cleanup 或已被 claim
    */
   public ReadyUpload lockReady(UUID uploadId) {
     Objects.requireNonNull(uploadId, "uploadId must not be null");
@@ -449,7 +448,8 @@ public class StorageUploadService {
             throw DomainException.notFound("upload", "unknown upload: " + uploadId);
           }
           if (locked.getBlobId() == null) {
-            throw new StorageVerificationException(
+            throw DomainException.conflict(
+                "STORAGE_VERIFICATION",
                 "upload " + uploadId + " is PENDING; complete it before consuming");
           }
           requireCleanupAvailable(locked, uploadTtl);
@@ -464,8 +464,8 @@ public class StorageUploadService {
    * 类只读预览使用；调用方绝不能据此获得 owner 权限——真正的消费仍必须走 {@link #lockReady}。
    *
    * @throws DomainException 上传不存在
-   * @throws fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException 上传仍为
-   *     PENDING、已过期、 已请求 cleanup 或已被 claim
+   * @throws DomainException {@link DomainErrorCode#CONFLICT} reason {@code
+   *     STORAGE_VERIFICATION}：上传仍为 PENDING、已过期、 已请求 cleanup 或已被 claim
    */
   public ReadyUpload peekReady(UUID uploadId) {
     Objects.requireNonNull(uploadId, "uploadId must not be null");
@@ -476,7 +476,8 @@ public class StorageUploadService {
       throw DomainException.notFound("upload", "unknown upload: " + uploadId);
     }
     if (upload.getBlobId() == null) {
-      throw new StorageVerificationException(
+      throw DomainException.conflict(
+          "STORAGE_VERIFICATION",
           "upload " + uploadId + " is PENDING; complete it before previewing");
     }
     requireCleanupAvailable(upload, uploadTtl);
@@ -524,10 +525,10 @@ public class StorageUploadService {
   private void requestFailedStageCleanup(StorageUpload upload) {
     try {
       delete(upload.getId());
-    } catch (StorageVerificationException ignored) {
-      log.warn("deferred storage cleanup for staged upload {}", upload.getId());
     } catch (DomainException error) {
-      if (error.code() == DomainErrorCode.NOT_FOUND && "upload".equals(error.resource())) {
+      if ((error.code() == DomainErrorCode.NOT_FOUND && "upload".equals(error.resource()))
+          || (error.code() == DomainErrorCode.CONFLICT
+              && "STORAGE_VERIFICATION".equals(error.reason()))) {
         log.warn("deferred storage cleanup for staged upload {}", upload.getId());
       } else {
         throw error;
@@ -543,7 +544,8 @@ public class StorageUploadService {
       throw DomainException.notFound("upload", "unknown upload: " + uploadId);
     }
     if (locked.getCleanupToken() != null) {
-      throw new StorageVerificationException("upload " + uploadId + " cleanup is already claimed");
+      throw DomainException.conflict(
+          "STORAGE_VERIFICATION", "upload " + uploadId + " cleanup is already claimed");
     }
     if (locked.getCleanupRequestedAt() != null) {
       return;
@@ -559,14 +561,16 @@ public class StorageUploadService {
 
   private void requireCleanupAvailable(StorageUpload upload, long uploadTtl) {
     if (upload.getCleanupRequestedAt() != null) {
-      throw new StorageVerificationException("upload " + upload.getId() + " cleanup was requested");
+      throw DomainException.conflict(
+          "STORAGE_VERIFICATION", "upload " + upload.getId() + " cleanup was requested");
     }
     if (upload.getCleanupToken() != null) {
-      throw new StorageVerificationException(
-          "upload " + upload.getId() + " cleanup is already claimed");
+      throw DomainException.conflict(
+          "STORAGE_VERIFICATION", "upload " + upload.getId() + " cleanup is already claimed");
     }
     if (StorageUploadExpiryService.isExpired(upload.getCreateTime(), clock.instant(), uploadTtl)) {
-      throw new StorageVerificationException("upload " + upload.getId() + " expired");
+      throw DomainException.conflict(
+          "STORAGE_VERIFICATION", "upload " + upload.getId() + " expired");
     }
   }
 
@@ -594,7 +598,8 @@ public class StorageUploadService {
     }
     String tempKey = StorageObjectKeys.uploadOriginal(uploadId);
     if (!s3StorageService.exists(tempKey)) {
-      throw new StorageVerificationException(
+      throw DomainException.conflict(
+          "STORAGE_VERIFICATION",
           "upload " + uploadId + " original object is missing; re-upload and complete again");
     }
     s3StorageService.copyObject(tempKey, originalKey);
@@ -604,7 +609,8 @@ public class StorageUploadService {
     try {
       return s3StorageService.headObjectWithChecksum(tempKey);
     } catch (NoSuchKeyException e) {
-      throw new StorageVerificationException(
+      throw DomainException.conflict(
+          "STORAGE_VERIFICATION",
           "upload " + uploadId + " object not found; PUT the content first");
     }
   }

@@ -22,7 +22,6 @@ import org.mockito.InOrder;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.platform.plugin.prompt.PluginPromptResources;
-import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 
@@ -157,7 +156,7 @@ class PluginPromptResourceBridgeTest {
   @Test
   void acceptRejectsNotReadyUploadDeterministically() {
     when(uploadService.lockReady(UPLOAD_ID))
-        .thenThrow(new StorageVerificationException("still pending"));
+        .thenThrow(DomainException.conflict("STORAGE_VERIFICATION", "still pending"));
 
     IllegalArgumentException failure =
         assertThrows(

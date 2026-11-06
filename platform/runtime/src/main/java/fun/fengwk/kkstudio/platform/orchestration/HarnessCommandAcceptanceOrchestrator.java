@@ -21,7 +21,6 @@ import fun.fengwk.kkstudio.harness.api.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.spi.AcceptancePreflight;
-import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
@@ -249,8 +248,6 @@ public class HarnessCommandAcceptanceOrchestrator {
       if (error.code() != DomainErrorCode.NOT_FOUND || !"upload".equals(error.resource())) {
         throw error;
       }
-      throw new IllegalArgumentException("Attachment upload cannot be consumed");
-    } catch (StorageVerificationException error) {
       throw new IllegalArgumentException("Attachment upload cannot be consumed");
     }
     refManager.retainRef(sessionId, ready.blobId());

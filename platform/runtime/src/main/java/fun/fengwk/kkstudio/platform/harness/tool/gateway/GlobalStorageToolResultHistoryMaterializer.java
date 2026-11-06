@@ -13,7 +13,6 @@ import fun.fengwk.kkstudio.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.spi.ToolOutcomeMaterializationException;
 import fun.fengwk.kkstudio.harness.spi.ToolResultHistoryMaterializer;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
-import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
@@ -115,12 +114,12 @@ public class GlobalStorageToolResultHistoryMaterializer implements ToolResultHis
     try {
       ready = uploadService.lockReady(uploadId);
     } catch (DomainException error) {
-      if (error.code() != DomainErrorCode.NOT_FOUND || !"upload".equals(error.resource())) {
-        throw error;
+      if ((error.code() == DomainErrorCode.NOT_FOUND && "upload".equals(error.resource()))
+          || (error.code() == DomainErrorCode.CONFLICT
+              && "STORAGE_VERIFICATION".equals(error.reason()))) {
+        throw new ToolOutcomeMaterializationException("uploaded resource is not ready for history");
       }
-      throw new ToolOutcomeMaterializationException("uploaded resource is not ready for history");
-    } catch (StorageVerificationException error) {
-      throw new ToolOutcomeMaterializationException("uploaded resource is not ready for history");
+      throw error;
     }
     StorageBlob blob = blobManager.getBlob(ready.blobId());
     if (blob == null

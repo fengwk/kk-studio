@@ -156,8 +156,9 @@ class IssueEvidencePublishIntegrationTest extends WebPostgresTestSupport {
             post("/api/project/issues/" + issueId + "/evidence")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"uploadId\":\"" + uploadId + "\"}"))
-        .andExpect(status().isBadRequest())
-        .andExpect(jsonPath("$.code").value("validation"));
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.code").value("conflict"))
+        .andExpect(jsonPath("$.reason").value("STORAGE_VERIFICATION"));
 
     assertEquals(1, support.count("project_issue_evidence", "issue_id", issueId));
     assertEquals(1L, support.refCount(blobId), "rejected replay must not retain the blob again");
@@ -177,8 +178,9 @@ class IssueEvidencePublishIntegrationTest extends WebPostgresTestSupport {
             post("/api/project/issues/" + issueId + "/evidence")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"uploadId\":\"" + pending.getId() + "\"}"))
-        .andExpect(status().isBadRequest())
-        .andExpect(jsonPath("$.code").value("validation"));
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.code").value("conflict"))
+        .andExpect(jsonPath("$.reason").value("STORAGE_VERIFICATION"));
 
     mockMvc
         .perform(
