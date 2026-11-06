@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.harness.codec;
 
+import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.requireFields;
+
 import tools.jackson.core.JacksonException;
 import tools.jackson.core.StreamReadFeature;
 import tools.jackson.databind.DeserializationFeature;
@@ -27,7 +29,6 @@ import fun.fengwk.kkstudio.harness.model.HarnessJson;
 import fun.fengwk.kkstudio.harness.model.ImageInputTier;
 
 import java.util.ArrayList;
-import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
@@ -138,7 +139,7 @@ public final class AgentMessageJsonCodec {
   public AgentMessage decodeNode(JsonNode value) {
     Objects.requireNonNull(value, "value");
     ObjectNode node = requireObject(value, "message");
-    requireExactFields(node, MESSAGE_FIELDS, "message");
+    requireFields(node, MESSAGE_FIELDS, "message");
     AgentMessageRole role = readEnum(AgentMessageRole.class, text(node, "role"), "message.role");
     ArrayNode contentsNode = requireArray(node.get("contents"), "message.contents");
     List<AgentMessageContent> contents = new ArrayList<>(contentsNode.size());
@@ -225,21 +226,21 @@ public final class AgentMessageJsonCodec {
     String type = typeNode.stringValue();
     return switch (type) {
       case "text" -> {
-        requireExactFields(node, TEXT_FIELDS, "content");
+        requireFields(node, TEXT_FIELDS, "content");
         // TextMessageContent.text 域约束仅 non-null，decode 必须允许空字符串。
         yield new TextMessageContent(requiredTextAllowEmpty(node, "text", "content"));
       }
       case "thinking" -> {
-        requireExactFields(node, THINKING_FIELDS, "content");
+        requireFields(node, THINKING_FIELDS, "content");
         yield new ThinkingMessageContent(requiredTextAllowEmpty(node, "text", "content"));
       }
       case "json" -> {
-        requireExactFields(node, JSON_FIELDS, "content");
+        requireFields(node, JSON_FIELDS, "content");
         String rawJson = requiredStrictJsonValueString(node, "json", "content");
         yield new JsonMessageContent(rawJson);
       }
       case "tool_call" -> {
-        requireExactFields(node, TOOL_CALL_FIELDS, "content");
+        requireFields(node, TOOL_CALL_FIELDS, "content");
         yield new ToolCallMessageContent(
             requiredText(node, "toolCallId", "content"),
             requiredText(node, "toolName", "content"),
@@ -249,7 +250,7 @@ public final class AgentMessageJsonCodec {
             nullableText(node, "environmentName", "content"));
       }
       case "tool_result" -> {
-        requireExactFields(node, TOOL_RESULT_FIELDS, "content");
+        requireFields(node, TOOL_RESULT_FIELDS, "content");
         ArrayNode contentsArray = requireArray(node.get("contents"), "content.contents");
         List<AgentMessageContent> nestedContents = new ArrayList<>(contentsArray.size());
         for (JsonNode element : contentsArray) {
@@ -270,7 +271,7 @@ public final class AgentMessageJsonCodec {
             requiredStrictJsonObjectString(node, "detailsJson", "content"));
       }
       case "resource" -> {
-        requireExactFields(node, RESOURCE_FIELDS, "content");
+        requireFields(node, RESOURCE_FIELDS, "content");
         yield new ResourceMessageContent(
             canonicalUuid(node, "blobId", "content"),
             nullableText(node, "name", "content"),
@@ -476,18 +477,6 @@ public final class AgentMessageJsonCodec {
               + " values: "
               + name,
           error);
-    }
-  }
-
-  private static void requireExactFields(ObjectNode node, Set<String> expected, String context) {
-    Set<String> actual = new LinkedHashSet<>();
-    Iterator<String> names = node.propertyNames().iterator();
-    while (names.hasNext()) {
-      actual.add(names.next());
-    }
-    if (!actual.equals(expected)) {
-      throw new IllegalArgumentException(
-          context + " unexpected fields: " + actual + " (expected " + expected + ")");
     }
   }
 

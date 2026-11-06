@@ -8,9 +8,9 @@ import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.model.HarnessJson;
+import fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport;
 
 import java.util.Collections;
-import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.Objects;
 import java.util.Set;
@@ -42,8 +42,8 @@ public final class ExecutionSelectionJsonCodec {
   }
 
   public static ExecutionSelection decode(JsonNode value, String context) {
-    ObjectNode node = requireObject(value, context);
-    requireExactFields(node, FIELDS, context);
+    ObjectNode node = JsonCodecSupport.object(value, context);
+    JsonCodecSupport.requireFields(node, FIELDS, context);
     String driver = requiredText(node, "driver", context);
     JsonNode settingsNode = node.get("settings");
     if (settingsNode == null || !settingsNode.isObject()) {
@@ -58,31 +58,12 @@ public final class ExecutionSelectionJsonCodec {
     return new ExecutionSelection(driver, settingsJson);
   }
 
-  private static ObjectNode requireObject(JsonNode value, String context) {
-    if (!(value instanceof ObjectNode object)) {
-      throw new IllegalArgumentException(context + " must be a JSON object");
-    }
-    return object;
-  }
-
   private static String requiredText(ObjectNode node, String field, String context) {
     JsonNode value = node.get(field);
     if (value == null || !value.isString()) {
       throw new IllegalArgumentException(context + "." + field + " must be text");
     }
     return value.stringValue();
-  }
-
-  private static void requireExactFields(ObjectNode node, Set<String> expected, String context) {
-    Set<String> actual = new LinkedHashSet<>();
-    Iterator<String> names = node.propertyNames().iterator();
-    while (names.hasNext()) {
-      actual.add(names.next());
-    }
-    if (!actual.equals(expected)) {
-      throw new IllegalArgumentException(
-          context + " unexpected fields: " + actual + " (expected " + expected + ")");
-    }
   }
 
   private static Set<String> orderedSet(String... values) {

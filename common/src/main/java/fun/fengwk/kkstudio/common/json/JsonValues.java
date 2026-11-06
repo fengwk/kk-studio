@@ -15,6 +15,10 @@ import java.util.Objects;
  *
  * <p>启用 {@link StreamReadFeature#STRICT_DUPLICATE_DETECTION} 与 {@link
  * DeserializationFeature#FAIL_ON_TRAILING_TOKENS}，在边界严格拒绝重复字段与尾随 token。
+ *
+ * <p>本类是 common 层唯一的严格 JSON 文本/树门禁，供 HTTP 边界、配置与插件使用。harness 的 {@code HarnessJson.STRICT_DECIMAL}
+ * 使用同样的树读取配置，但 harness-model 是可独立编译的叶子模块（生产依赖只有 Jackson），两层因此各自持有本层的常量配置，不互相 依赖；模型与 runtime 侧的
+ * codec 使用 {@code HarnessJson}，其余调用方使用本类。
  */
 public final class JsonValues {
 

@@ -7,6 +7,7 @@ import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.contributor.api.CustomStateSnapshot;
 import fun.fengwk.kkstudio.harness.model.HarnessJson;
+import fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport;
 
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
@@ -43,10 +44,8 @@ final class GoalProgressCodec {
   GoalProgress decode(CustomStateSnapshot snapshot) {
     Objects.requireNonNull(snapshot, "snapshot");
     JsonNode parsed = parse(snapshot.dataJson(), "goal progress");
-    if (!(parsed instanceof ObjectNode node)) {
-      throw new IllegalArgumentException("goal progress must be an object");
-    }
-    requireFields(node);
+    ObjectNode node = JsonCodecSupport.object(parsed, "goal progress");
+    JsonCodecSupport.requireFields(node, FIELDS, "goal progress");
     UUID goalId;
     try {
       goalId = UUID.fromString(requiredText(node, "goalId"));
@@ -71,17 +70,6 @@ final class GoalProgressCodec {
       return value;
     } catch (JacksonException error) {
       throw new IllegalArgumentException("malformed " + context + " JSON", error);
-    }
-  }
-
-  private static void requireFields(ObjectNode node) {
-    if (node.size() != FIELDS.size()) {
-      throw new IllegalArgumentException("goal progress fields must be exactly " + FIELDS);
-    }
-    for (String field : FIELDS) {
-      if (!node.has(field)) {
-        throw new IllegalArgumentException("goal progress must declare " + field);
-      }
     }
   }
 

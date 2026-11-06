@@ -53,16 +53,9 @@ public final class InvocationJsonSupport {
     return JsonCodecSupport.object(value, context);
   }
 
+  /** 字段集合与上下文名称的适配：校验由 {@link JsonCodecSupport#requireFields} 唯一实现。 */
   public static void requireFields(ObjectNode node, String context, String... names) {
-    Set<String> expected = Set.of(names);
-    if (node.size() != expected.size()) {
-      throw new IllegalArgumentException(context + " must declare exactly " + expected);
-    }
-    for (String name : expected) {
-      if (!node.has(name)) {
-        throw new IllegalArgumentException(context + " must declare " + name);
-      }
-    }
+    JsonCodecSupport.requireFields(node, Set.of(names), context);
   }
 
   public static JsonNode required(ObjectNode node, String field, String context) {

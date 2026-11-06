@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.harness.codec;
 
+import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.requireFields;
+
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -16,7 +18,6 @@ import fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec;
 
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
-import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.Objects;
 import java.util.Set;
@@ -132,7 +133,7 @@ public final class RealtimeEventJsonCodec {
     ObjectNode node = requireObject(value, "realtimeEvent");
     String typeName = requiredText(node, "type", "realtimeEvent");
     RealtimeEventType type = readEnum(RealtimeEventType.class, typeName, "realtimeEvent.type");
-    requireExactFields(
+    requireFields(
         node,
         switch (type) {
           case MODEL_DELTA -> MODEL_EVENT_FIELDS;
@@ -274,17 +275,17 @@ public final class RealtimeEventJsonCodec {
     String kind = kindNode.stringValue();
     return switch (kind) {
       case TEXT_DELTA -> {
-        requireExactFields(node, TEXT_PAYLOAD_FIELDS, "realtimeEvent.payload");
+        requireFields(node, TEXT_PAYLOAD_FIELDS, "realtimeEvent.payload");
         yield new ProviderStreamEvent.TextDelta(
             requiredText(node, "text", "realtimeEvent.payload"));
       }
       case THINKING_DELTA -> {
-        requireExactFields(node, THINKING_PAYLOAD_FIELDS, "realtimeEvent.payload");
+        requireFields(node, THINKING_PAYLOAD_FIELDS, "realtimeEvent.payload");
         yield new ProviderStreamEvent.ThinkingDelta(
             requiredText(node, "text", "realtimeEvent.payload"));
       }
       case TOOL_CALL_DELTA -> {
-        requireExactFields(node, TOOL_CALL_PAYLOAD_FIELDS, "realtimeEvent.payload");
+        requireFields(node, TOOL_CALL_PAYLOAD_FIELDS, "realtimeEvent.payload");
         int index = requiredNonNegativeInt(node, "index", "realtimeEvent.payload");
         JsonNode idNode = node.get("id");
         String id = decodeNullableText(idNode, "id", "realtimeEvent.payload");
@@ -398,18 +399,6 @@ public final class RealtimeEventJsonCodec {
               + " values: "
               + name,
           error);
-    }
-  }
-
-  private static void requireExactFields(ObjectNode node, Set<String> expected, String context) {
-    Set<String> actual = new LinkedHashSet<>();
-    Iterator<String> names = node.propertyNames().iterator();
-    while (names.hasNext()) {
-      actual.add(names.next());
-    }
-    if (!actual.equals(expected)) {
-      throw new IllegalArgumentException(
-          context + " unexpected fields: " + actual + " (expected " + expected + ")");
     }
   }
 

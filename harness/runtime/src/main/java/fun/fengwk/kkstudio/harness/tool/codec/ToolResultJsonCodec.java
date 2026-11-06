@@ -17,18 +17,26 @@ import fun.fengwk.kkstudio.common.result.ResultContent;
 import fun.fengwk.kkstudio.common.result.TextArtifactMetadata;
 import fun.fengwk.kkstudio.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.model.HarnessJson;
+import fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 
 /** 最终与部分 ToolResult 的严格持久化 codec。 */
 public final class ToolResultJsonCodec {
 
   private static final ObjectMapper OBJECT_MAPPER = HarnessJson.STRICT_DECIMAL;
-  private static final List<String> RESOURCE_BASE_FIELDS =
-      List.of("type", "uri", "mediaType", "name", "size", "sha256");
+  private static final Set<String> TOOL_RESULT_FIELDS =
+      Set.of("toolCallId", "contents", "error", "details");
+  private static final Set<String> TEXT_CONTENT_FIELDS = Set.of("type", "text");
+  private static final Set<String> JSON_CONTENT_FIELDS = Set.of("type", "json");
+  private static final Set<String> RESOURCE_BASE_FIELDS =
+      Set.of("type", "uri", "mediaType", "name", "size", "sha256");
+  private static final Set<String> TEXT_METADATA_FIELDS = Set.of("totalBytes", "totalLines");
 
   private ToolResultJsonCodec() {}
 
@@ -193,7 +201,7 @@ public final class ToolResultJsonCodec {
       if (parsed == null || parsed.isMissingNode() || !(parsed instanceof ObjectNode node)) {
         throw new IllegalArgumentException("tool result must be an object");
       }
-      requireFields(node, "toolCallId", "contents", "error", "details");
+      JsonCodecSupport.requireFields(node, TOOL_RESULT_FIELDS, "tool result");
       ArrayNode array = requireArray(node.get("contents"), "contents");
       List<ResultContent> contents = new ArrayList<>(array.size());
       for (JsonNode content : array) {
@@ -242,11 +250,11 @@ public final class ToolResultJsonCodec {
     String type = text(node, "type");
     return switch (type) {
       case "text" -> {
-        requireFields(node, "type", "text");
+        JsonCodecSupport.requireFields(node, TEXT_CONTENT_FIELDS, "content");
         yield new TextResultContent(textAllowEmpty(node, "text"));
       }
       case "json" -> {
-        requireFields(node, "type", "json");
+        JsonCodecSupport.requireFields(node, JSON_CONTENT_FIELDS, "content");
         try {
           yield new JsonResultContent(OBJECT_MAPPER.writeValueAsString(node.get("json")));
         } catch (JacksonException exception) {
@@ -254,14 +262,14 @@ public final class ToolResultJsonCodec {
         }
       }
       case "resource" -> {
-        List<String> names = new ArrayList<>(RESOURCE_BASE_FIELDS);
+        Set<String> names = new HashSet<>(RESOURCE_BASE_FIELDS);
         if (node.has("preview")) {
           names.add("preview");
         }
         if (node.has("textMetadata")) {
           names.add("textMetadata");
         }
-        requireFields(node, names.toArray(String[]::new));
+        JsonCodecSupport.requireFields(node, names, "content");
         JsonNode size = node.get("size");
         if (!size.isNull() && (!size.isIntegralNumber() || !size.canConvertToLong())) {
           throw new IllegalArgumentException("size must be an integer or null");
@@ -346,7 +354,7 @@ public final class ToolResultJsonCodec {
 
   private static TextArtifactMetadata textMetadata(JsonNode value) {
     ObjectNode node = requireObject(value, "textMetadata");
-    requireFields(node, "totalBytes", "totalLines");
+    JsonCodecSupport.requireFields(node, TEXT_METADATA_FIELDS, "textMetadata");
     return new TextArtifactMetadata(
         nonNegativeLong(node, "totalBytes"), nonNegativeLong(node, "totalLines"));
   }
@@ -384,16 +392,5 @@ public final class ToolResultJsonCodec {
       throw new IllegalArgumentException(name + " must be boolean");
     }
     return value.booleanValue();
-  }
-
-  private static void requireFields(ObjectNode node, String... names) {
-    if (node.size() != names.length) {
-      throw new IllegalArgumentException("unexpected tool result fields");
-    }
-    for (String name : names) {
-      if (!node.has(name)) {
-        throw new IllegalArgumentException("missing tool result field: " + name);
-      }
-    }
   }
 }

@@ -1,8 +1,8 @@
 package fun.fengwk.kkstudio.harness.model.provider.codec;
 
-import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.objectNode;
+import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.object;
 import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.orderedSet;
-import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.requireFieldsWithCount;
+import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.requireFieldsWithoutEcho;
 import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.text;
 
 import tools.jackson.core.JacksonException;
@@ -56,8 +56,8 @@ public final class ProviderReplayStateJsonCodec {
   }
 
   public ProviderReplayState decodeNode(JsonNode node) {
-    ObjectNode root = objectNode(node, "providerReplayState");
-    requireFieldsWithCount(root, ROOT_FIELDS, "providerReplayState");
+    ObjectNode root = object(node, "providerReplayState");
+    requireFieldsWithoutEcho(root, ROOT_FIELDS, "providerReplayState");
 
     ProviderReplayFormat format;
     try {
@@ -84,8 +84,8 @@ public final class ProviderReplayStateJsonCodec {
   }
 
   private ProviderReplayAffinity decodeAffinity(JsonNode node) {
-    ObjectNode object = objectNode(node, "affinity");
-    requireFieldsWithCount(object, AFFINITY_FIELDS, "affinity");
+    ObjectNode object = object(node, "affinity");
+    requireFieldsWithoutEcho(object, AFFINITY_FIELDS, "affinity");
 
     ProviderType providerType;
     try {
