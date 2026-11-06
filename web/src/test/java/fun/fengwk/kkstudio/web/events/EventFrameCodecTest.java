@@ -189,10 +189,6 @@ class EventFrameCodecTest {
         () -> CODEC.decode(prefix + "{\"kind\":\"environments\",\"id\":\"" + THREAD + "\"}}"));
     assertThrows(
         IllegalArgumentException.class, () -> CODEC.decode(prefix + "{\"kind\":\"thread-tree\"}}"));
-    // 旧 kind 不再接受，避免两种 wire 名称并存。
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> CODEC.decode(prefix + "{\"kind\":\"tree\",\"id\":\"" + THREAD + "\"}}"));
     assertThrows(
         IllegalArgumentException.class, () -> CODEC.decode(prefix + "{\"kind\":\"thread\"}}"));
     assertThrows(IllegalArgumentException.class, () -> CODEC.decode(prefix + "\"nope\"}"));

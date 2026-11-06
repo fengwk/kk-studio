@@ -349,7 +349,8 @@ final class EventFrameCodec {
       return new ResourceKey(ResourceKind.ENVIRONMENTS, null);
     }
     throw new IllegalArgumentException(
-        "frame.resource.kind must be thread, canvas, tree, projects, interactions, or environments");
+        "frame.resource.kind must be thread, canvas, thread-tree, projects, interactions, or"
+            + " environments");
   }
 
   private static UUID resourceId(ObjectNode node) {
