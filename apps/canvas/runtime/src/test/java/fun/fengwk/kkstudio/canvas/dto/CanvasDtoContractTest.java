@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonSubTypes;
+import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -13,6 +14,7 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.lang.reflect.RecordComponent;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -55,6 +57,23 @@ class CanvasDtoContractTest {
     COMMAND_WIRE_NAMES.put("RenameGroup", "RENAME_GROUP");
     COMMAND_WIRE_NAMES.put("UpdateGroupTransform", "UPDATE_GROUP_TRANSFORM");
     COMMAND_WIRE_NAMES.put("DeleteGroup", "DELETE_GROUP");
+  }
+
+  /** 多形态 DTO 只有一个判别属性名，前端与错误载荷不按 DTO 猜测不同字段。 */
+  @Test
+  void polymorphicDtosUseTypeDiscriminator() {
+    for (Class<?> type :
+        List.of(
+            CanvasCommandDTO.class,
+            CanvasResourceInputDTO.class,
+            CanvasConflictDTO.class,
+            CanvasNodePatchDTO.class,
+            CanvasGroupPatchDTO.class,
+            CanvasResourceDTO.class)) {
+      JsonTypeInfo info = type.getAnnotation(JsonTypeInfo.class);
+      assertNotNull(info, type.getSimpleName() + " must declare its wire discriminator");
+      assertEquals("type", info.property(), type.getSimpleName() + " discriminator");
+    }
   }
 
   @Test

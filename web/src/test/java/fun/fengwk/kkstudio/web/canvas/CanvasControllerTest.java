@@ -284,9 +284,9 @@ class CanvasControllerTest {
                 .content(objectMapper.writeValueAsBytes(request)))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.revision").value("3"))
-        .andExpect(jsonPath("$.nodes[0].op").value("REMOVE"))
+        .andExpect(jsonPath("$.nodes[0].type").value("REMOVE"))
         .andExpect(jsonPath("$.nodes[0].nodeId").value(NODE_2.toString()))
-        .andExpect(jsonPath("$.groups[0].op").value("UPSERT"))
+        .andExpect(jsonPath("$.groups[0].type").value("UPSERT"))
         .andExpect(jsonPath("$.groups[0].group.id").value(GROUP.toString()));
 
     verify(commandService)
@@ -341,15 +341,15 @@ class CanvasControllerTest {
         .andExpect(status().isConflict())
         .andExpect(jsonPath("$.code").value("conflict"))
         .andExpect(jsonPath("$.reason").value("CANVAS_COMMAND_CONFLICT"))
-        .andExpect(jsonPath("$.errors.conflicts[0].kind").value("TARGET_MISSING"))
+        .andExpect(jsonPath("$.errors.conflicts[0].type").value("TARGET_MISSING"))
         .andExpect(jsonPath("$.errors.conflicts[0].targetId").value(NODE_2.toString()))
         .andExpect(jsonPath("$.errors.conflicts[0].target").value("NODE"))
-        .andExpect(jsonPath("$.errors.conflicts[1].kind").value("STALE_NODE"))
+        .andExpect(jsonPath("$.errors.conflicts[1].type").value("STALE_NODE"))
         .andExpect(jsonPath("$.errors.conflicts[1].group").value("NAME"))
         .andExpect(jsonPath("$.errors.conflicts[1].current.name").value("server name"))
-        .andExpect(jsonPath("$.errors.conflicts[2].kind").value("NODE_REFERENCED"))
+        .andExpect(jsonPath("$.errors.conflicts[2].type").value("NODE_REFERENCED"))
         .andExpect(jsonPath("$.errors.conflicts[2].referencingNodeIds[0]").value(NODE_1.toString()))
-        .andExpect(jsonPath("$.errors.conflicts[3].kind").value("NODE_RUNNING"))
+        .andExpect(jsonPath("$.errors.conflicts[3].type").value("NODE_RUNNING"))
         .andExpect(jsonPath("$.errors.conflicts[3].run.status").value("RUNNING"));
   }
 
@@ -449,7 +449,7 @@ class CanvasControllerTest {
                     """
                     {"idempotencyKey":"%s","commands":[{"type":"CREATE_NODE","nodeId":"%s",
                      "name":"n","transform":{"x":0,"y":0,"width":1,"height":1},
-                     "resources":[{"kind":"UPLOAD","uploadId":"%s"}]}]}
+                     "resources":[{"type":"UPLOAD","uploadId":"%s"}]}]}
                     """
                         .formatted(COMMAND, NODE_1, BLOB_1)))
         .andExpect(status().isBadRequest());

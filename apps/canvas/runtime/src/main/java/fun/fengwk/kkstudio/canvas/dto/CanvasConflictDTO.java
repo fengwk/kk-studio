@@ -11,9 +11,9 @@ import java.util.List;
  * 一次命令批中无法按前置条件执行的具体原因，随 409 响应返回。
  *
  * <p>冲突不是新的编辑基线：它只携带受影响对象与服务端权威值，由客户端决定合并、另存或放弃草稿，服务端不会用旧内容偷偷重试。冲突出现在错误响应的 {@code errors.conflicts}
- * 列表中；判别值 {@code kind} 来自类型信息，运行时类型自身携带该注解，因此即使列表位于无类型的错误上下文里也会写出。
+ * 列表中；判别值 {@code type} 来自类型信息，运行时类型自身携带该注解，因此即使列表位于无类型的错误上下文里也会写出。
  */
-@JsonTypeInfo(use = JsonTypeInfo.Id.NAME, property = "kind")
+@JsonTypeInfo(use = JsonTypeInfo.Id.NAME, property = "type")
 @JsonSubTypes({
   @JsonSubTypes.Type(value = CanvasConflictDTO.TargetMissing.class, name = "TARGET_MISSING"),
   @JsonSubTypes.Type(value = CanvasConflictDTO.TargetPresent.class, name = "TARGET_PRESENT"),
