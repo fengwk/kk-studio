@@ -69,9 +69,11 @@ public class HarnessCommandAcceptanceOrchestrator {
     requireCreationTarget(command.target());
     List<SessionOwnership> matches =
         ownerships.stream().filter(item -> owner.kind().equals(item.kind())).toList();
+    if (matches.isEmpty()) {
+      throw DomainException.validation("owner", "Unknown session owner kind: " + owner.kind());
+    }
     if (matches.size() != 1) {
-      throw new IllegalArgumentException(
-          "Unknown or ambiguous session owner kind: " + owner.kind());
+      throw new IllegalStateException("Ambiguous session owner kind: " + owner.kind());
     }
     SessionOwnership ownership = matches.getFirst();
     if (!ownership.allowsDirectCommands()) {
@@ -109,7 +111,8 @@ public class HarnessCommandAcceptanceOrchestrator {
     if (!(target instanceof AcceptCommandsTarget.NewRootSession)
         && !(target instanceof AcceptCommandsTarget.NewThread)
         && !(target instanceof AcceptCommandsTarget.NewForkedSession)) {
-      throw new IllegalArgumentException(
+      throw DomainException.validation(
+          "target",
           "owner-aware command acceptance is limited to NEW_SESSION / NEW_THREAD /"
               + " NEW_FORKED_SESSION creation");
     }
@@ -144,7 +147,7 @@ public class HarnessCommandAcceptanceOrchestrator {
           ownership, owner, newThread.sessionId());
       case AcceptCommandsTarget.NewForkedSession forkedSession -> {
         if (!ownership.allowsFork()) {
-          throw new IllegalArgumentException("Owner does not support NEW_FORKED_SESSION");
+          throw DomainException.validation("target", "Owner does not support NEW_FORKED_SESSION");
         }
         requireOwnedSession(ownership, owner, sourceSessionId(forkedSession.sourceThreadId()));
       }
@@ -157,7 +160,7 @@ public class HarnessCommandAcceptanceOrchestrator {
   private UUID sourceSessionId(UUID sourceThreadId) {
     return requireRuntime()
         .findThreadSessionId(sourceThreadId)
-        .orElseThrow(() -> new IllegalArgumentException("fork source thread does not exist"));
+        .orElseThrow(() -> DomainException.notFound("thread", "fork source thread does not exist"));
   }
 
   /** Session 已存在时，NEW_SESSION 只能作为同 owner 的精确 replay，内部无归属 Session 也不得被产品 owner 接管。 */
@@ -167,7 +170,7 @@ public class HarnessCommandAcceptanceOrchestrator {
 
   private void requireOwnedSession(SessionOwnership ownership, SessionOwner owner, UUID sessionId) {
     if (!ownership.ownsSession(owner, sessionId)) {
-      throw new IllegalArgumentException("Session ownership is inconsistent");
+      throw DomainException.validation("session", "Session ownership is inconsistent");
     }
   }
 
@@ -248,7 +251,7 @@ public class HarnessCommandAcceptanceOrchestrator {
       if (error.code() != DomainErrorCode.NOT_FOUND || !"upload".equals(error.resource())) {
         throw error;
       }
-      throw new IllegalArgumentException("Attachment upload cannot be consumed");
+      throw DomainException.validation("attachment", "Attachment upload cannot be consumed");
     }
     refManager.retainRef(sessionId, ready.blobId());
     uploadService.delete(uploadId);

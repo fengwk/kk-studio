@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.platform.orchestration;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
@@ -106,7 +107,7 @@ public final class UserMessageContentPreparer {
   private ResourceMessageContent requireOwnedResource(
       UUID sessionId, ResourceMessageContent resource) {
     if (!refManager.contains(sessionId, resource.blobId())) {
-      throw new IllegalArgumentException("Resource is not owned by the current session");
+      throw DomainException.validation("resource", "Resource is not owned by the current session");
     }
     if (resource.imageTier() == null) {
       return resource;

@@ -14,6 +14,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
@@ -82,13 +83,15 @@ class HarnessOwnerQueryServiceTest {
   @Test
   void missingOwnersFailBeforeSessionAndRuntimeLookup() {
     SessionOwner owner = new SessionOwner("OTHER", "1");
-    assertThrows(IllegalArgumentException.class, () -> service.listSessions(owner));
+    assertEquals(
+        DomainErrorCode.VALIDATION,
+        assertThrows(DomainException.class, () -> service.listSessions(owner)).code());
     SessionOwnership duplicate = mock(SessionOwnership.class);
     when(duplicate.kind()).thenReturn("CHAT");
     HarnessOwnerQueryService ambiguous =
         new HarnessOwnerQueryService(List.of(ownership, duplicate), runtimes);
     assertThrows(
-        IllegalArgumentException.class,
+        IllegalStateException.class,
         () -> ambiguous.listSessions(new SessionOwner("CHAT", id(1).toString())));
     verifyNoInteractions(runtime);
   }
