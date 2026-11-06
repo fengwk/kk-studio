@@ -57,7 +57,7 @@ describe('Unified Transport & Control Protocol', () => {
       dataDir: tempDir,
       tokenPath,
       studioUrl: 'http://127.0.0.1:8080',
-      gatewayUri: 'ws://127.0.0.1:8080/api/harness/environment-daemon',
+      gatewayUri: 'ws://127.0.0.1:8080/ws/daemon',
       bashExecutable: '/bin/bash',
       note: 'test note',
       lsp: {},
@@ -132,7 +132,7 @@ describe('Unified Transport & Control Protocol', () => {
     })
     applyNetworkSettings('http://127.0.0.1:1', '')
     const transport = createDaemonTransport({
-      gatewayUri: `wss://127.0.0.1:${port}/api/harness/environment-daemon`,
+      gatewayUri: `wss://127.0.0.1:${port}/ws/daemon`,
       config,
       ide: {} as IdeService,
       daemonInstanceId: randomUUID(),

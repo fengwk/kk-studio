@@ -36,7 +36,7 @@ export function testConfig(overrides: Partial<DaemonConfig> = {}): DaemonConfig 
     dataDir: root,
     tokenPath: join(root, 'daemon.token'),
     studioUrl: 'https://studio.example.com',
-    gatewayUri: 'wss://studio.example.com/api/harness/environment-daemon',
+    gatewayUri: 'wss://studio.example.com/ws/daemon',
     bashExecutable: 'bash',
     note: null,
     lsp: {},

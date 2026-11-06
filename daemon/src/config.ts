@@ -180,7 +180,7 @@ function parseStudioOrigin(value: unknown): string {
 function gatewayUri(studioOrigin: string): string {
   const scheme = studioOrigin.startsWith('https://') ? 'wss' : 'ws'
   const authority = studioOrigin.replace(/^https?:\/\//, '')
-  return `${scheme}://${authority}/api/harness/environment-daemon`
+  return `${scheme}://${authority}/ws/daemon`
 }
 
 function parseNote(value: unknown): string | null {
