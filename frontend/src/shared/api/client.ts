@@ -11,13 +11,11 @@ export interface RequestOptions {
 
 interface FetchRequestConfig {
   method?: string
-  headers?: Record<string, string>
   body?: unknown
   signal?: AbortSignal
   timeoutMs?: number
   jsonParser?: JsonParser
   responseType?: 'json' | 'text' | 'blob'
-  fetchImpl?: typeof fetch
   readResponse?: (response: Response) => Promise<unknown>
 }
 
@@ -196,7 +194,6 @@ export async function executeFetch<T = unknown>(
   const headers: Record<string, string> = {
     'Accept-Language': getLocale(),
     Accept: 'application/json, text/plain, */*',
-    ...(config.headers ?? {}),
   }
 
   let bodyPayload: BodyInit | undefined
@@ -205,9 +202,7 @@ export async function executeFetch<T = unknown>(
       bodyPayload = config.body as BodyInit
     } else {
       bodyPayload = JSON.stringify(config.body)
-      if (!Object.keys(headers).some((k) => k.toLowerCase() === 'content-type')) {
-        headers['Content-Type'] = 'application/json'
-      }
+      headers['Content-Type'] = 'application/json'
     }
   }
 
@@ -239,7 +234,7 @@ export async function executeFetch<T = unknown>(
   }
 
   try {
-    const response = await (config.fetchImpl ?? fetch)(inputUrl, {
+    const response = await fetch(inputUrl, {
       method,
       headers,
       body: bodyPayload,
