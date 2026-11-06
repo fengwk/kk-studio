@@ -14,7 +14,6 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
-import fun.fengwk.kkstudio.common.number.DecimalLongs;
 import fun.fengwk.kkstudio.project.dto.AddIssueEvidenceRequestDTO;
 import fun.fengwk.kkstudio.project.dto.AppendIssueActivityRequestDTO;
 import fun.fengwk.kkstudio.project.dto.BlockIssueRequestDTO;
@@ -111,8 +110,7 @@ public class IssueController {
   @PutMapping("/issues/{issueId}")
   public IssueDTO updateIssue(
       @PathVariable("issueId") UUID issueId, @RequestBody UpdateIssueRequestDTO request) {
-    long expectedVersion =
-        DecimalLongs.parseNonNegative(request.getExpectedVersion(), "expectedVersion");
+    long expectedVersion = request.getExpectedVersion();
     Issue updated =
         issueEditingService.updateIssue(
             issueId, expectedVersion, request.getTitle(), request.getDescription());
@@ -122,8 +120,7 @@ public class IssueController {
   @PostMapping("/issues/{issueId}/transition")
   public IssueDTO transition(
       @PathVariable("issueId") UUID issueId, @RequestBody TransitionIssueRequestDTO request) {
-    long expectedVersion =
-        DecimalLongs.parseNonNegative(request.getExpectedVersion(), "expectedVersion");
+    long expectedVersion = request.getExpectedVersion();
     Issue updated =
         issueLifecycleService.transition(
             issueId, expectedVersion, request.getRequestKey(), request.getToState());
@@ -133,8 +130,7 @@ public class IssueController {
   @PostMapping("/issues/{issueId}/block")
   public IssueDTO block(
       @PathVariable("issueId") UUID issueId, @RequestBody BlockIssueRequestDTO request) {
-    long expectedVersion =
-        DecimalLongs.parseNonNegative(request.getExpectedVersion(), "expectedVersion");
+    long expectedVersion = request.getExpectedVersion();
     Issue blocked =
         issueLifecycleService.blockIssue(
             issueId, expectedVersion, request.getRequestKey(), request.getReason());
@@ -144,8 +140,7 @@ public class IssueController {
   @PostMapping("/issues/{issueId}/recover")
   public IssueDTO recover(
       @PathVariable("issueId") UUID issueId, @RequestBody RecoverIssueRequestDTO request) {
-    long expectedVersion =
-        DecimalLongs.parseNonNegative(request.getExpectedVersion(), "expectedVersion");
+    long expectedVersion = request.getExpectedVersion();
     Issue recovered =
         issueLifecycleService.recoverIssue(issueId, expectedVersion, request.getRequestKey());
     return mapper.toDto(recovered);
@@ -154,8 +149,7 @@ public class IssueController {
   @PostMapping("/issues/{issueId}/resume")
   public IssueDTO resume(
       @PathVariable("issueId") UUID issueId, @RequestBody ResumeIssueRequestDTO request) {
-    long expectedVersion =
-        DecimalLongs.parseNonNegative(request.getExpectedVersion(), "expectedVersion");
+    long expectedVersion = request.getExpectedVersion();
     Issue resumed =
         issueLifecycleService.resumeIssue(issueId, expectedVersion, request.getRequestKey());
     return mapper.toDto(resumed);
@@ -164,8 +158,7 @@ public class IssueController {
   @PostMapping("/issues/{issueId}/stop")
   public IssueDTO stop(
       @PathVariable("issueId") UUID issueId, @RequestBody StopIssueRequestDTO request) {
-    long expectedVersion =
-        DecimalLongs.parseNonNegative(request.getExpectedVersion(), "expectedVersion");
+    long expectedVersion = request.getExpectedVersion();
     Issue stopped =
         issueLifecycleService.stopIssue(
             issueId, expectedVersion, request.getRequestKey(), request.getDetail());
@@ -183,8 +176,7 @@ public class IssueController {
   @PostMapping("/issues/{issueId}/reopen")
   public IssueDTO reopen(
       @PathVariable("issueId") UUID issueId, @RequestBody ReopenIssueRequestDTO request) {
-    long expectedVersion =
-        DecimalLongs.parseNonNegative(request.getExpectedVersion(), "expectedVersion");
+    long expectedVersion = request.getExpectedVersion();
     Issue reopened =
         issueLifecycleService.reopen(issueId, expectedVersion, request.getRequestKey());
     return mapper.toDto(reopened);
@@ -193,8 +185,7 @@ public class IssueController {
   @PostMapping("/issues/{issueId}/reset-budget")
   public IssueStageBudgetDTO resetBudget(
       @PathVariable("issueId") UUID issueId, @RequestBody ResetStageBudgetRequestDTO request) {
-    long expectedVersion =
-        DecimalLongs.parseNonNegative(request.getExpectedVersion(), "expectedVersion");
+    long expectedVersion = request.getExpectedVersion();
     StageBudgetView view =
         issueStageBudgetService.resetStageBudget(
             issueId,
@@ -208,8 +199,7 @@ public class IssueController {
   @PostMapping("/issues/{issueId}/activities")
   public ResponseEntity<IssueActivityDTO> appendActivity(
       @PathVariable("issueId") UUID issueId, @RequestBody AppendIssueActivityRequestDTO request) {
-    long expectedVersion =
-        DecimalLongs.parseNonNegative(request.getExpectedVersion(), "expectedVersion");
+    long expectedVersion = request.getExpectedVersion();
     IssueActivityKind kind =
         switch (request.getKind() == null ? IssueActivityRequestKind.COMMENT : request.getKind()) {
           case COMMENT -> IssueActivityKind.COMMENT;

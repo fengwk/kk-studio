@@ -36,6 +36,7 @@ import fun.fengwk.kkstudio.project.http.ProjectController;
 import fun.fengwk.kkstudio.project.model.Project;
 import fun.fengwk.kkstudio.project.service.ProjectService;
 import fun.fengwk.kkstudio.project.service.ProjectSnapshotAssembler;
+import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
 import fun.fengwk.kkstudio.web.advice.ProblemAdvice;
 
 import java.time.Instant;
@@ -68,7 +69,8 @@ class ProjectControllerTest {
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
             .setControllerAdvice(new ProblemAdvice(new MessageService()))
-            .setMessageConverters(new JacksonJsonHttpMessageConverter(objectMapper))
+            .setMessageConverters(
+                new JacksonJsonHttpMessageConverter(StrictHttpJsonMapperTestSupport.strictHttp()))
             .build();
   }
 
@@ -158,7 +160,7 @@ class ProjectControllerTest {
   void testUpdateProjectSuccess() throws Exception {
     UpdateProjectRequestDTO req =
         UpdateProjectRequestDTO.builder()
-            .expectedVersion("1")
+            .expectedVersion(1L)
             .title("Updated Title")
             .description("Updated Desc")
             .build();
@@ -187,7 +189,7 @@ class ProjectControllerTest {
   void testUpdateProjectConflict() throws Exception {
     UpdateProjectRequestDTO req =
         UpdateProjectRequestDTO.builder()
-            .expectedVersion("1")
+            .expectedVersion(1L)
             .title("Updated Title")
             .description("Updated Desc")
             .build();
@@ -230,7 +232,7 @@ class ProjectControllerTest {
         ProjectWorkflowDTO.builder().states(List.of(init, blocked, done)).build();
 
     UpdateProjectWorkflowRequestDTO req =
-        UpdateProjectWorkflowRequestDTO.builder().expectedVersion("1").workflow(wf).build();
+        UpdateProjectWorkflowRequestDTO.builder().expectedVersion(1L).workflow(wf).build();
 
     Project updated = Project.builder().id(projectId).version(2L).build();
     when(projectService.updateWorkflow(eq(projectId), eq(1L), anyString())).thenReturn(updated);
@@ -247,7 +249,7 @@ class ProjectControllerTest {
   @Test
   void testUpdateYolo() throws Exception {
     UpdateProjectYoloRequestDTO req =
-        UpdateProjectYoloRequestDTO.builder().expectedVersion("1").yoloEnabled(true).build();
+        UpdateProjectYoloRequestDTO.builder().expectedVersion(1L).yoloEnabled(true).build();
     Project updated = Project.builder().id(projectId).version(2L).yoloEnabled(true).build();
     when(projectService.updateYolo(projectId, 1L, true)).thenReturn(updated);
 
@@ -271,7 +273,7 @@ class ProjectControllerTest {
 
   @Test
   void testArchiveProject() throws Exception {
-    ProjectVersionRequestDTO req = ProjectVersionRequestDTO.builder().expectedVersion("0").build();
+    ProjectVersionRequestDTO req = ProjectVersionRequestDTO.builder().expectedVersion(0L).build();
     Project archived = Project.builder().id(projectId).version(1L).archivedAt(now).build();
     when(projectService.archiveProject(projectId, 0L)).thenReturn(archived);
 
@@ -286,7 +288,7 @@ class ProjectControllerTest {
 
   @Test
   void testUnarchiveProject() throws Exception {
-    ProjectVersionRequestDTO req = ProjectVersionRequestDTO.builder().expectedVersion("1").build();
+    ProjectVersionRequestDTO req = ProjectVersionRequestDTO.builder().expectedVersion(1L).build();
     Project unarchived = Project.builder().id(projectId).version(2L).archivedAt(null).build();
     when(projectService.unarchiveProject(projectId, 1L)).thenReturn(unarchived);
 

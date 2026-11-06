@@ -12,7 +12,7 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 public class ResetStageBudgetRequestDTO {
 
-  private String expectedVersion;
+  private Long expectedVersion;
   private String requestKey;
 
   /** 工作流自然状态编码。 */

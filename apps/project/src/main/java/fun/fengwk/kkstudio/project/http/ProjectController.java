@@ -13,7 +13,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import fun.fengwk.kkstudio.common.number.DecimalLongs;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflow;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
 import fun.fengwk.kkstudio.project.dto.CreateProjectRequestDTO;
@@ -87,8 +86,7 @@ public class ProjectController {
   @PutMapping("/{projectId}")
   public ProjectDTO updateProject(
       @PathVariable("projectId") UUID projectId, @RequestBody UpdateProjectRequestDTO request) {
-    long expectedVersion =
-        DecimalLongs.parseNonNegative(request.getExpectedVersion(), "expectedVersion");
+    long expectedVersion = request.getExpectedVersion();
     Project updated =
         projectService.updateConfiguration(
             projectId, expectedVersion, request.getTitle(), request.getDescription());
@@ -99,8 +97,7 @@ public class ProjectController {
   public ProjectDTO updateWorkflow(
       @PathVariable("projectId") UUID projectId,
       @RequestBody UpdateProjectWorkflowRequestDTO request) {
-    long expectedVersion =
-        DecimalLongs.parseNonNegative(request.getExpectedVersion(), "expectedVersion");
+    long expectedVersion = request.getExpectedVersion();
     ProjectWorkflow workflow = mapper.toWorkflow(request.getWorkflow());
     Project updated =
         projectService.updateWorkflow(projectId, expectedVersion, workflowCodec.encode(workflow));
@@ -110,8 +107,7 @@ public class ProjectController {
   @PutMapping("/{projectId}/yolo")
   public ProjectDTO updateYolo(
       @PathVariable("projectId") UUID projectId, @RequestBody UpdateProjectYoloRequestDTO request) {
-    long expectedVersion =
-        DecimalLongs.parseNonNegative(request.getExpectedVersion(), "expectedVersion");
+    long expectedVersion = request.getExpectedVersion();
     Project updated =
         projectService.updateYolo(projectId, expectedVersion, request.getYoloEnabled());
     return mapper.toDto(updated);
@@ -128,16 +124,14 @@ public class ProjectController {
   @PostMapping("/{projectId}/archive")
   public ProjectDTO archiveProject(
       @PathVariable("projectId") UUID projectId, @RequestBody ProjectVersionRequestDTO request) {
-    long expectedVersion =
-        DecimalLongs.parseNonNegative(request.getExpectedVersion(), "expectedVersion");
+    long expectedVersion = request.getExpectedVersion();
     return mapper.toDto(projectService.archiveProject(projectId, expectedVersion));
   }
 
   @PostMapping("/{projectId}/unarchive")
   public ProjectDTO unarchiveProject(
       @PathVariable("projectId") UUID projectId, @RequestBody ProjectVersionRequestDTO request) {
-    long expectedVersion =
-        DecimalLongs.parseNonNegative(request.getExpectedVersion(), "expectedVersion");
+    long expectedVersion = request.getExpectedVersion();
     return mapper.toDto(projectService.unarchiveProject(projectId, expectedVersion));
   }
 

@@ -12,5 +12,5 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 public class ProjectVersionRequestDTO {
 
-  private String expectedVersion;
+  private Long expectedVersion;
 }
