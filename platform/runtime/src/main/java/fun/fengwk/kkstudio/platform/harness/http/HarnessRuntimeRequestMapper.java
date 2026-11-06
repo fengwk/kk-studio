@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.platform.harness.http;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.common.json.StrictJson;
 import fun.fengwk.kkstudio.common.number.DecimalLongs;
@@ -115,10 +116,13 @@ public final class HarnessRuntimeRequestMapper {
 
   /** 把 PUT name 请求映射为 Session 重命名命令；只校验 name 存在且非 blank，规范化与长度上限由 Core {@code Names} 权威处理。 */
   public static RenameSessionCommand toRenameSessionCommand(
-      String sessionId, HarnessNameUpdateDTO dto) {
-    requireNonNull(dto, "nameUpdateDTO");
-    return new RenameSessionCommand(
-        Uuids.parseCanonical(sessionId, "sessionId"), requireText(dto.getName(), "name"));
+      UUID sessionId, HarnessNameUpdateDTO dto) {
+    try {
+      requireNonNull(dto, "nameUpdateDTO");
+      return new RenameSessionCommand(sessionId, requireText(dto.getName(), "name"));
+    } catch (IllegalArgumentException error) {
+      throw DomainException.validation("session", error.getMessage());
+    }
   }
 
   /** 把 PUT name 请求映射为 Thread 重命名命令；只校验 name 存在且非 blank，规范化与长度上限由 Core {@code Names} 权威处理。 */

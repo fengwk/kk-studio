@@ -19,6 +19,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.http.MediaType;
+import org.springframework.http.converter.json.JacksonJsonHttpMessageConverter;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
@@ -36,13 +37,16 @@ import fun.fengwk.kkstudio.harness.api.session.Session;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
+import fun.fengwk.kkstudio.platform.harness.http.HarnessSessionController;
 import fun.fengwk.kkstudio.platform.harness.thread.query.UsageCostProjectionService;
 import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessOwnerQueryService;
 import fun.fengwk.kkstudio.share.runtime.HarnessExecutionSelectionDTO;
 import fun.fengwk.kkstudio.share.runtime.HarnessThreadSummaryDTO;
 import fun.fengwk.kkstudio.share.runtime.HarnessUsageCostDTO;
-import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
+import fun.fengwk.kkstudio.web.HttpBoundaryConfiguration;
+import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
+import fun.fengwk.kkstudio.web.advice.RequestBodyRequiredValidationAdvice;
 import fun.fengwk.kkstudio.web.advice.StudioProblemAdvice;
 
 import java.time.Instant;
@@ -67,10 +71,14 @@ class StudioHarnessSessionControllerTest {
     usageCostProjectionService = mock(UsageCostProjectionService.class);
     mockMvc =
         MockMvcBuilders.standaloneSetup(
-                new StudioHarnessSessionController(
+                new HarnessSessionController(
                     harnessQueryService, runtime, usageCostProjectionService))
+            .setMessageConverters(
+                new JacksonJsonHttpMessageConverter(StrictHttpJsonMapperTestSupport.strictHttp()))
             .setControllerAdvice(
-                new StudioProblemAdvice(new StudioMessageService()), new ApiResponseStatusAdvice())
+                new StudioProblemAdvice(new StudioMessageService()),
+                new RequestBodyRequiredValidationAdvice(StrictHttpJsonMapperTestSupport.get()),
+                new HttpBoundaryConfiguration.CanonicalUuidBinding())
             .build();
   }
 
@@ -83,7 +91,7 @@ class StudioHarnessSessionControllerTest {
 
     mockMvc
         .perform(
-            put("/api/sessions/" + SESSION_ID + "/name")
+            put("/api/harness/sessions/" + SESSION_ID + "/name")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"name\":\"  canonical name  \"}"))
         .andExpect(status().isOk())
@@ -102,25 +110,25 @@ class StudioHarnessSessionControllerTest {
     // 意图：name missing / 显式 null / 非字符串 / blank 都在到达 Runtime 前被拒绝（400），绝不回显非法名称值。
     mockMvc
         .perform(
-            put("/api/sessions/" + SESSION_ID + "/name")
+            put("/api/harness/sessions/" + SESSION_ID + "/name")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{}"))
         .andExpect(status().isBadRequest());
     mockMvc
         .perform(
-            put("/api/sessions/" + SESSION_ID + "/name")
+            put("/api/harness/sessions/" + SESSION_ID + "/name")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"name\":null}"))
         .andExpect(status().isBadRequest());
     mockMvc
         .perform(
-            put("/api/sessions/" + SESSION_ID + "/name")
+            put("/api/harness/sessions/" + SESSION_ID + "/name")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"name\":42}"))
         .andExpect(status().isBadRequest());
     mockMvc
         .perform(
-            put("/api/sessions/" + SESSION_ID + "/name")
+            put("/api/harness/sessions/" + SESSION_ID + "/name")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"name\":\"   \"}"))
         .andExpect(status().isBadRequest());
@@ -135,7 +143,7 @@ class StudioHarnessSessionControllerTest {
     String response =
         mockMvc
             .perform(
-                put("/api/sessions/" + SESSION_ID + "/name")
+                put("/api/harness/sessions/" + SESSION_ID + "/name")
                     .contentType(MediaType.APPLICATION_JSON)
                     .content(body))
             .andExpect(status().isBadRequest())
@@ -152,7 +160,7 @@ class StudioHarnessSessionControllerTest {
     // 意图：未知字段（strict DTO）与不存在的 Session 分别映射 400 / 404。
     mockMvc
         .perform(
-            put("/api/sessions/" + SESSION_ID + "/name")
+            put("/api/harness/sessions/" + SESSION_ID + "/name")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"name\":\"ok\",\"extra\":true}"))
         .andExpect(status().isBadRequest());
@@ -161,7 +169,7 @@ class StudioHarnessSessionControllerTest {
         .thenThrow(DomainException.notFound("session", "session is missing"));
     mockMvc
         .perform(
-            put("/api/sessions/" + SESSION_ID + "/name")
+            put("/api/harness/sessions/" + SESSION_ID + "/name")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"name\":\"ok\"}"))
         .andExpect(status().isNotFound());
@@ -192,7 +200,7 @@ class StudioHarnessSessionControllerTest {
     when(harnessQueryService.listThreadSummaries(SESSION_ID)).thenReturn(List.of(thread, child));
 
     mockMvc
-        .perform(get("/api/sessions/" + SESSION_ID + "/threads"))
+        .perform(get("/api/harness/sessions/" + SESSION_ID + "/threads"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.length()").value(2))
         .andExpect(jsonPath("$[0].threadId").value(thread.getThreadId()))
@@ -243,7 +251,7 @@ class StudioHarnessSessionControllerTest {
     when(usageCostProjectionService.project(entries)).thenReturn(Map.of(user.id(), cost));
 
     mockMvc
-        .perform(get("/api/sessions/" + SESSION_ID + "/entries"))
+        .perform(get("/api/harness/sessions/" + SESSION_ID + "/entries"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.items[0].entryId").value(root.id().toString()))
         .andExpect(jsonPath("$.items[0].sessionId").value(SESSION_ID.toString()))
@@ -280,7 +288,7 @@ class StudioHarnessSessionControllerTest {
 
     mockMvc
         .perform(
-            get("/api/sessions/" + SESSION_ID + "/entries")
+            get("/api/harness/sessions/" + SESSION_ID + "/entries")
                 .param("cursor", cursor.toString())
                 .param("limit", "25"))
         .andExpect(status().isOk())
@@ -292,11 +300,12 @@ class StudioHarnessSessionControllerTest {
     // 分页边界在到达查询服务前拒绝：0、超过上限、非十进制与非法游标都是 400。
     for (String limit : List.of("0", "201", "abc")) {
       mockMvc
-          .perform(get("/api/sessions/" + SESSION_ID + "/entries").param("limit", limit))
+          .perform(get("/api/harness/sessions/" + SESSION_ID + "/entries").param("limit", limit))
           .andExpect(status().isBadRequest());
     }
     mockMvc
-        .perform(get("/api/sessions/" + SESSION_ID + "/entries").param("cursor", "not-a-uuid"))
+        .perform(
+            get("/api/harness/sessions/" + SESSION_ID + "/entries").param("cursor", "not-a-uuid"))
         .andExpect(status().isBadRequest());
     verify(harnessQueryService, times(1)).listSessionEntries(any(), any(), anyInt());
   }
@@ -307,7 +316,7 @@ class StudioHarnessSessionControllerTest {
         .thenThrow(DomainException.notFound("session", "session is missing"));
 
     mockMvc
-        .perform(get("/api/sessions/" + SESSION_ID + "/threads"))
+        .perform(get("/api/harness/sessions/" + SESSION_ID + "/threads"))
         .andExpect(status().isNotFound());
   }
 }

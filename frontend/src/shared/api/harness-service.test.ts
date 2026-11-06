@@ -89,16 +89,16 @@ describe('harnessService', () => {
 
     expect(http.get).toHaveBeenNthCalledWith(
       1,
-      '/sessions/session%20%2F1/threads',
+      '/harness/sessions/session%20%2F1/threads',
     )
     expect(http.get).toHaveBeenNthCalledWith(
       2,
-      '/sessions/session%20%2F1/entries',
+      '/harness/sessions/session%20%2F1/entries',
       { params: {}, signal: undefined },
     )
     expect(http.get).toHaveBeenNthCalledWith(
       3,
-      '/sessions/session%20%2F2/entries',
+      '/harness/sessions/session%20%2F2/entries',
       { params: { cursor: 'cursor-1', limit: 25 }, signal },
     )
   })
@@ -201,7 +201,7 @@ describe('harnessService', () => {
 
     expect(http.put).toHaveBeenNthCalledWith(
       1,
-      '/sessions/session%20%2F1/name',
+      '/harness/sessions/session%20%2F1/name',
       { name: '新 Session 名' },
     )
     expect(http.put).toHaveBeenNthCalledWith(

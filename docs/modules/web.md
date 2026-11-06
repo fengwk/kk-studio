@@ -73,7 +73,7 @@ health、资源下载和 WebSocket 使用各自传输形式。公开路由如下
 | Plugin | `/api/plugins` | 安全投影、普通配置 PUT、auth/prepare、auth/complete、删除 auth；`{pluginId}/connection-check` 按 expected 坐标执行一次显式只读连接检查 |
 | Chat | `/api/chats` | 由 [Chat](chat.md) 模块提供的 CRUD 与归属 Session；Web 只做装配 |
 | Harness command | `/api/command-batches`、`/api/threads/{threadId}/command-batches` | 创建型 Chat 命令接受（owner-aware）与既有 Thread 的 owner-free 续写；都返回 202 |
-| Session | `/api/sessions/{sessionId}` | threads、entries（keyset 分页，含读取时 `usageCost`）、name、草稿/历史请求预览 |
+| Session | `/api/harness/sessions/{sessionId}` | threads、entries（keyset 分页，含读取时 `usageCost`）与 name |
 | Session files | `/api/sessions/{sessionId}/files` | 只读会话文件面板：列目录、文本窗口（`/content`）、下载（`/download`）；按 `ownerKind` + `ownerId` 校验归属 |
 | Thread | `/api/threads/{threadId}` | Snapshot、执行树、name、Debug、协议预览、compact、yolo、stop、tool approval |
 | Builtin 追帧 | `/api/harness/builtin/threads/{threadId}/stream-catchup` | 为活动模型请求 best-effort checkpoint |

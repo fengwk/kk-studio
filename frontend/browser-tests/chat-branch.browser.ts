@@ -292,7 +292,7 @@ async function installChatApi(
       await route.fulfill({ json: [] })
       return
     }
-    if (path === `/api/sessions/${SESSION_ID}/entries`) {
+    if (path === `/api/harness/sessions/${SESSION_ID}/entries`) {
       // 每页 2 条模拟真实 keyset 分页：历史树必须逐页累积后才能得到完整行数。
       const cursor = new URL(request.url()).searchParams.get('cursor')
       const cursorIndex = cursor == null
@@ -314,7 +314,7 @@ async function installChatApi(
       })
       return
     }
-    if (path === `/api/sessions/${SESSION_ID}/threads`) {
+    if (path === `/api/harness/sessions/${SESSION_ID}/threads`) {
       await route.fulfill({ json: [{
         threadId: THREAD_ID, parentThreadId: null, name: boundThread.name,
         createdAt: boundThread.createTime, updatedAt: boundThread.updateTime, status: 'IDLE',

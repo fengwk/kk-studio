@@ -22,6 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.api.RenameSessionCommand;
 import fun.fengwk.kkstudio.harness.api.RenameThreadCommand;
@@ -176,7 +177,7 @@ class HarnessRuntimeRequestMapperCommandTest {
     body.setName("  my session  ");
 
     RenameSessionCommand sessionCommand =
-        HarnessRuntimeRequestMapper.toRenameSessionCommand(idText(2), body);
+        HarnessRuntimeRequestMapper.toRenameSessionCommand(id(2), body);
     assertEquals(id(2), sessionCommand.sessionId());
     assertEquals("my session", sessionCommand.name());
 
@@ -187,13 +188,10 @@ class HarnessRuntimeRequestMapperCommandTest {
 
     assertThrows(
         IllegalArgumentException.class,
-        () -> HarnessRuntimeRequestMapper.toRenameSessionCommand("not-a-uuid", body));
-    assertThrows(
-        IllegalArgumentException.class,
         () -> HarnessRuntimeRequestMapper.toRenameThreadCommand(null, body));
     assertThrows(
-        IllegalArgumentException.class,
-        () -> HarnessRuntimeRequestMapper.toRenameSessionCommand(idText(2), null));
+        DomainException.class,
+        () -> HarnessRuntimeRequestMapper.toRenameSessionCommand(id(2), null));
     assertThrows(
         IllegalArgumentException.class,
         () -> HarnessRuntimeRequestMapper.toRenameThreadCommand(THREAD_ID, null));
@@ -205,8 +203,8 @@ class HarnessRuntimeRequestMapperCommandTest {
     HarnessNameUpdateDTO blank = new HarnessNameUpdateDTO();
     blank.setName("   ");
     assertThrows(
-        IllegalArgumentException.class,
-        () -> HarnessRuntimeRequestMapper.toRenameSessionCommand(idText(2), blank));
+        DomainException.class,
+        () -> HarnessRuntimeRequestMapper.toRenameSessionCommand(id(2), blank));
     assertThrows(
         IllegalArgumentException.class,
         () -> HarnessRuntimeRequestMapper.toRenameThreadCommand(THREAD_ID, blank));

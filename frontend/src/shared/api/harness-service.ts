@@ -29,9 +29,9 @@ import type {
  * Harness runtime 客户端调用统一收敛：
  * - POST /command-batches（NEW_SESSION / NEW_THREAD / NEW_FORKED_SESSION 创建）
  * - POST /threads/{id}/command-batches（既有 Thread 的通用写入口）
- * - GET /sessions/{id}/threads
- * - GET /sessions/{id}/entries
- * - PUT /sessions/{id}/name
+ * - GET /harness/sessions/{id}/threads
+ * - GET /harness/sessions/{id}/entries
+ * - PUT /harness/sessions/{id}/name
  * - GET /threads/{id}（Thread snapshot 查询，支持 afterEntryId 游标增量）
  * - GET /threads/{id}/compaction-availability（Thread 手动压缩可用性查询）
  * - GET /threads/{id}/tree（真实 root 的父子 Agent 关系树）
@@ -79,7 +79,7 @@ export function createHarnessService(client: HttpClient = apiClient) {
       ),
 
     listSessionThreads: (sessionId: string): Promise<HarnessThreadSummaryDTO[]> =>
-      client.get(`/sessions/${encodeURIComponent(sessionId)}/threads`),
+      client.get(`/harness/sessions/${encodeURIComponent(sessionId)}/threads`),
 
     /** 一页 Session Entry；`nextCursor` 原样回传即可继续翻页，null 表示末页。 */
     listSessionEntries: (
@@ -93,7 +93,7 @@ export function createHarnessService(client: HttpClient = apiClient) {
       if (options?.limit != null) {
         params.limit = options.limit
       }
-      return client.get(`/sessions/${encodeURIComponent(sessionId)}/entries`, {
+      return client.get(`/harness/sessions/${encodeURIComponent(sessionId)}/entries`, {
         params,
         signal: options?.signal,
       })
@@ -103,7 +103,7 @@ export function createHarnessService(client: HttpClient = apiClient) {
       sessionId: string,
       data: HarnessNameUpdateDTO,
     ): Promise<HarnessSessionDTO> =>
-      client.put(`/sessions/${encodeURIComponent(sessionId)}/name`, data),
+      client.put(`/harness/sessions/${encodeURIComponent(sessionId)}/name`, data),
 
     getThreadSnapshot: (
       threadId: string,

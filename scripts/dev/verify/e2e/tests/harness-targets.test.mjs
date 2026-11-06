@@ -217,7 +217,7 @@ test('Session summaries preserve same-named root and child parent identities', a
   const ctx = {
     call: async (method, path) => {
       assert.equal(method, 'GET')
-      assert.equal(path, `/api/sessions/${sampleId()}/threads`)
+      assert.equal(path, `/api/harness/sessions/${sampleId()}/threads`)
       return { json: [root, child] }
     },
   }

@@ -2503,6 +2503,15 @@ export interface ApiRoutes {
     path: { environmentId: string }
     response: EnvironmentRuntimeStatusDTO
   }
+  'GET /api/harness/sessions/{sessionId}/entries': {
+    path: { sessionId: string }
+    query: { cursor?: string; limit?: number }
+    response: HarnessSessionEntryPageDTO
+  }
+  'GET /api/harness/sessions/{sessionId}/threads': {
+    path: { sessionId: string }
+    response: HarnessThreadSummaryDTO[]
+  }
   'GET /api/interactions': {
     query: { cursor?: string; limit?: string; rootThreadId?: string }
     response: InteractionPageDTO
@@ -2563,11 +2572,6 @@ export interface ApiRoutes {
     path: { name: string }
     response: string[]
   }
-  'GET /api/sessions/{sessionId}/entries': {
-    path: { sessionId: string }
-    query: { cursor?: string; limit?: string }
-    response: HarnessSessionEntryPageDTO
-  }
   'GET /api/sessions/{sessionId}/entries/{entryId}/provider-request-preview': {
     path: { entryId: string; sessionId: string }
     response: HarnessProviderRequestPreviewDTO
@@ -2587,10 +2591,6 @@ export interface ApiRoutes {
     query: { ownerId: string; ownerKind: string; path: string }
     response: Blob
     responseType: 'blob'
-  }
-  'GET /api/sessions/{sessionId}/threads': {
-    path: { sessionId: string }
-    response: HarnessThreadSummaryDTO[]
   }
   'GET /api/settings': {
     response: SystemSettingsDTO
@@ -2953,6 +2953,11 @@ export interface ApiRoutes {
     body: Record<string, unknown>
     response: EnvironmentCardDTO
   }
+  'PUT /api/harness/sessions/{sessionId}/name': {
+    path: { sessionId: string }
+    body: HarnessNameUpdateDTO
+    response: HarnessSessionDTO
+  }
   'PUT /api/issues/{issueId}': {
     path: { issueId: string }
     body: UpdateIssueRequestDTO
@@ -2992,11 +2997,6 @@ export interface ApiRoutes {
     path: { name: string }
     body: AgentProviderUpdateDTO
     response: AgentProviderDTO
-  }
-  'PUT /api/sessions/{sessionId}/name': {
-    path: { sessionId: string }
-    body: HarnessNameUpdateDTO
-    response: HarnessSessionDTO
   }
   'PUT /api/settings': {
     body: SystemSettingsUpdateDTO

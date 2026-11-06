@@ -13,13 +13,13 @@ import {
  * - POST /api/threads/{id}/command-batches    既有 Thread 续写：owner-free，body 只带 cursor 与 commands
  * - POST /api/threads/{id}/provider-request-preview  同一 owner-free body，200 返回发送前请求体
  * - GET  /api/chats/{chatId}/sessions       Chat owner 的 Session 摘要（新到旧）
- * - GET  /api/sessions/{sessionId}/threads   Session 下 Thread 摘要
- * - GET  /api/sessions/{sessionId}/entries   完整不可变 Entry Tree
+ * - GET  /api/harness/sessions/{sessionId}/threads   Session 下 Thread 摘要
+ * - GET  /api/harness/sessions/{sessionId}/entries   完整不可变 Entry Tree
  * - GET  /api/threads/{id}             一致快照（单事务，含 stopReceipts）
  * - PUT  /api/threads/{id}/yolo        {yoloEnabled}（单字段幂等，不与 Thread version 做 CAS）
  * - POST /api/threads/{id}/stop        {stopRequestId,expectedVersion}（同 id 幂等 replay，返回每 Thread 回执）
  * - PUT  /api/threads/{id}/tool-invocations/{toolInvocationId}/approval
- * - PUT  /api/sessions/{id}/name       {name}（200 权威 HarnessSessionDTO）
+ * - PUT  /api/harness/sessions/{id}/name       {name}（200 权威 HarnessSessionDTO）
  * - PUT  /api/threads/{id}/name        {name}（200 权威 HarnessThreadDTO）
  * - WS   /api/events                        应用级 Thread/Canvas 事件订阅
  * - GET  /api/environments             只读 Environment 注册表（Card UUID id = canonical 路由身份）
@@ -665,7 +665,7 @@ export async function listChatSessions(ctx, chatId) {
 export async function listSessionThreads(ctx, sessionId) {
   const { json } = await ctx.call(
     'GET',
-    `/api/sessions/${encodeURIComponent(sessionId)}/threads`,
+    `/api/harness/sessions/${encodeURIComponent(sessionId)}/threads`,
   )
   const threads = json
   assert(Array.isArray(threads), `expected Thread summary array: ${JSON.stringify(json)}`)
@@ -748,7 +748,7 @@ export async function listSessionEntries(ctx, sessionId) {
     const query = cursor == null ? '' : `?cursor=${encodeURIComponent(cursor)}`
     const { json } = await ctx.call(
       'GET',
-      `/api/sessions/${encodeURIComponent(sessionId)}/entries${query}`,
+      `/api/harness/sessions/${encodeURIComponent(sessionId)}/entries${query}`,
     )
     const page = json
     assert(Array.isArray(page?.items), `expected Session Entry page: ${JSON.stringify(json)}`)
@@ -918,7 +918,7 @@ export async function renameSession(ctx, sessionId, name) {
   canonicalUuid(sessionId, 'sessionId')
   const { status, json } = await ctx.call(
     'PUT',
-    `/api/sessions/${encodeURIComponent(sessionId)}/name`,
+    `/api/harness/sessions/${encodeURIComponent(sessionId)}/name`,
     { name },
   )
   assert(status === 200, `rename session status ${status}: ${JSON.stringify(json)}`)
