@@ -292,7 +292,7 @@ Stop 在 tree 锁内校验目标 version 与 `stopRequestId`，按 `parentThread
 
 `ask_user` 不经过 preflight 或网关：ToolProcessor 在锁内把 READY 冻结为 `WAITING_INPUT`，问卷由调用 arguments 冻结。`submitToolInput` 在单事务内校验调用仍处于当前 `TOOL_ACTIVE` 上下文，按问卷校验并规范化答案，答案与提交回执同事务落盘（答复或明确拒答都收敛为 `SUCCEEDED`），随后唤醒 THREAD 物化结果；答案非法、目标不适用与提交身份冲突分别为 `INPUT_SUBMISSION_INVALID`、`INPUT_SUBMISSION_NOT_APPLICABLE` 与 `INPUT_SUBMISSION_MISMATCH`。`listPendingInteractions` 按 `(createdAt, id)` keyset 分页读取两种等待态，产品归属由上层解析。
 
-[Tool 权限策略](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/permission/PermissionEvaluator.java) 由平台在 Tool 网关的 preflight 边界实现：`PermissionEvaluator` 按有序规则产出 Allow / Ask / Deny 候选：规则键是 `*` 或模型可见工具名，从全局到具体工具求值，数组顺序即求值顺序；文件路径取调用显式的绝对 `path` 或 `vfs:/` 路径，按 gitignore 语义匹配，VFS 路径保留 `vfs:/` 前缀，其他非绝对路径只命中通配规则。工具不携带 `workdir`，不存在隐藏默认目录。真实文件边界、符号链接与进程隔离由 Environment Daemon 在执行入口落实。部署范围内的 permission 设置由 [`ToolSettingsProvider`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/permission/ToolSettingsProvider.java) 在每次 preflight 前现读，不缓存快照。
+[Tool 权限策略](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/permission/PermissionEvaluator.java) 由平台在 Tool 网关的 preflight 边界实现：`PermissionEvaluator` 按有序规则产出 Allow / Ask / Deny 候选：规则键是 `*` 或模型可见工具名，从全局到具体工具求值，数组顺序即求值顺序；文件工具的路径取调用显式的绝对 `path` 或 `vfs:/` 路径，按 gitignore 语义匹配，VFS 路径保留 `vfs:/` 前缀，其他非绝对路径只命中通配规则；文件工具不携带 `workdir`。`bash` 的 `workdir` 是 `process.exec` 的调用参数，不参与文件路径规则，也不存在隐藏默认目录。真实文件边界、符号链接与进程隔离由 Environment Daemon 在执行入口落实。部署范围内的 permission 设置由 [`ToolSettingsProvider`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/permission/ToolSettingsProvider.java) 在每次 preflight 前现读，不缓存快照。
 
 ## 子智能体委派与 Join
 
@@ -399,14 +399,14 @@ System prompt 固定按 `[agent]` → `[harness]` → `[paths]` → `[environmen
 
 ## 严格 JSON 契约
 
-持久状态与 wire 载荷由各自的 Jackson 3 codec 校验：拒绝重复键、尾随内容，以及未声明、缺失或类型错误的字段；自由 JSON 子树（厂商选项、Contributor state、CUSTOM payload、native replay、工具详情）允许自有字段，并以 `BigDecimal` 搬运，`1e309` 与高精度小数不会经 double 丢失数量级或有效位。以字符串保存的 `argumentsJson`、`detailsJson`、`rawUsageJson` 保留原文；厂商选项的 canonical 编码移除无意义的尾零，无法映射为 JSON 的输入明确拒绝。
+持久状态与 wire 载荷由各自的 Jackson 3 codec 校验：拒绝重复键、尾随内容，以及未声明、缺失或类型错误的字段；自由 JSON 子树（厂商选项、Contributor state、CUSTOM payload、native replay、工具详情）允许自有字段，并以 `BigDecimal` 搬运，`1e309` 与高精度小数不会经 double 丢失数量级或有效位。以字符串保存的 `argumentsJson`、`detailsJson` 保留原文；Provider 的 `rawUsageJson` 只是响应内的文本事实，不进入 durable 历史。厂商选项的 canonical 编码移除无意义的尾零，无法映射为 JSON 的输入明确拒绝。
 
-Harness 的严格读取配置集中在模型模块的 [`HarnessJson`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/HarnessJson.java)：普通树、保精度树和选项 canonical 化各使用对应的共享 mapper；请求体定价另保留自己的字节与嵌套深度限制。各 codec 仍负责自己的字段校验和错误语义。
+Harness 的严格读取配置集中在模型模块的 [`HarnessJson`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/HarnessJson.java)：普通树、保精度树和选项 canonical 化各使用对应的共享 mapper；请求体定价另保留自己的字节与嵌套深度限制。object 判定、精确字段集合与标量原语统一走模型模块的 [`JsonCodecSupport`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/codec/JsonCodecSupport.java)，各 codec 只声明自己的字段集合、错误上下文与值类型语义；持久化身份中的 UUID 经 [`Uuids.parseCanonical`](../../common/src/main/java/fun/fengwk/kkstudio/common/id/Uuids.java) 解析，非 canonical 文本直接拒绝。
 
 平台 HTTP 投影直接承载 codec 定义的 JSON 节点：Entry、队列命令与取消输入的 `payload`，
 工具调用的 `result` / `error` / `approval`、交互的 `approval`，以及 Debug 的
 `inputSchema` / `configuration`。模型输出的 `argumentsJson` 可能不是合法 JSON，Provider 请求的
-`requestJson` 也保持原文字符串；execution 的 `settings` 是 JSON 对象。64 位整数在 HTTP 请求与响应中
+`requestJson` 也保持原文字符串；execution 的 `settings` 是 JSON 对象。64 位整数（非负）在 HTTP 请求与响应中
 都是规范十进制字符串，客户端输入错误在产生处以 `DomainException` 表达。
 
 ## 包架构

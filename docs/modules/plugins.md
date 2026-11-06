@@ -44,7 +44,7 @@
   - `workflows`：受控 ComfyUI 工作流定义列表，默认包含内置的 MiniMax H3 视频生成工作流。
 - **内置 H3 视频生成**：
   - 内置工作流模板：[`minimax-h3-ref2va-workflow.json`](../../plugins/comfyui/src/main/resources/fun/fengwk/kkstudio/plugin/comfyui/minimax-h3-ref2va-workflow.json)，基于 MiniMax H3 架构实现参考图加音频生成视频；
-  - 执行流程：由 [`ComfyuiCanvasFunctionAdapter`](../../plugins/comfyui/src/main/java/fun/fengwk/kkstudio/plugin/comfyui/ComfyuiCanvasFunctionAdapter.java) 校验入参，前置下载或读取引用的图像/音频资源，通过 [`StandardComfyuiClient`](../../plugins/comfyui/src/main/java/fun/fengwk/kkstudio/plugin/comfyui/StandardComfyuiClient.java) 上传素材至 ComfyUI 输入目录，提交 Prompt 队列并通过 `/history/{promptId}` 轮询结果；
+  - 执行流程：由 [`ComfyuiCanvasFunctionAdapter`](../../plugins/comfyui/src/main/java/fun/fengwk/kkstudio/plugin/comfyui/ComfyuiCanvasFunctionAdapter.java) 校验入参，前置下载或读取引用的图像/音频资源，通过 [`StandardComfyuiClient`](../../plugins/comfyui/src/main/java/fun/fengwk/kkstudio/plugin/comfyui/StandardComfyuiClient.java) 上传素材至 ComfyUI 输入目录，提交 Prompt 队列并通过 `/history/{promptId}` 轮询结果；路径段与 query 值统一经 `common.uri.UrlEncoding` 编码；
   - 产物物化：解析输出节点中的视频文件，下载并写入 Storage 形成不可变 `Blob`，返回 Canvas 节点执行结果。
 
 ---

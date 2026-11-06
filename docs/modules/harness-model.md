@@ -2,7 +2,7 @@
 
 `harness-model` 同时承载无状态的模型契约与四种模型协议实现。契约侧描述 Model/Variant、定价、用量、prompt cache 与 Provider 中立消息；协议侧用 JDK 21 `HttpClient` 实现四种模型协议，以有界增量解析器读取 SSE，将正常结束、安全过滤、截断与连接故障收敛为 Runtime 能消费的中立结果。它还负责原生推理回放，并把运行时根据冻结 variant 与 Session 生成的 `ProviderCacheControl` 映射为各协议 prompt cache wire 字段；错误只做分类，保留上游诊断正文。
 
-模型模块是可独立编译的叶子模块，生产依赖只有 Jackson 3（`tools.jackson.core:jackson-databind`），不依赖 Runtime、Environment、Thread、Invocation 或工具执行；Runtime 单向依赖本模块的契约。凭据、HttpClient 与 Watchdog 调度器由 [Platform](platform.md) 注入。依赖声明见 [`pom.xml`](../../harness/model/pom.xml)，方向由仓库检查 [`check.mjs`](../../scripts/dev/verify/repository/check.mjs) 校验。Platform 使用 HTTP/1.1、Redirect.NEVER，HttpClient 内部 executor 复用受管虚拟线程。
+模型模块是可独立编译的叶子模块，生产依赖只有 Jackson 3（`tools.jackson.core:jackson-databind`），不依赖 Runtime、Environment、Thread、Invocation 或工具执行；Runtime 单向依赖本模块的契约，Canvas 运行时只复用本模块的共享 JSON 校验原语。凭据、HttpClient 与 Watchdog 调度器由 [Platform](platform.md) 注入。依赖声明见 [`pom.xml`](../../harness/model/pom.xml)，方向由仓库检查 [`check.mjs`](../../scripts/dev/verify/repository/check.mjs) 校验。Platform 使用 HTTP/1.1、Redirect.NEVER，HttpClient 内部 executor 复用受管虚拟线程。
 
 ## 传输层
 
@@ -236,7 +236,7 @@ Anthropic 的 `usage.output_tokens_details.thinking_tokens` 是输出的只读�
 | --- | --- | --- |
 | `fun.fengwk.kkstudio.harness.model` | 顶层 `ModelDescriptor`、`ModelVariant`、`ModelUsage`、`ModelCost`、`ModelPricing`、`ModelInvocationError` 等无状态值对象 | 不依赖 Tool、Session、Runtime 编排、Spring、JDBC、HTTP 或 SDK 类型 |
 | `fun.fengwk.kkstudio.harness.model.cache` | prompt cache 留存档位、能力与请求级 `ProviderCacheControl` | 只定义与 Provider 解耦的静态契约；协议字段映射由 Provider 编码器完成 |
-| `fun.fengwk.kkstudio.harness.model.codec` | `ModelDescriptor` / `ModelVariant` 的权威严格 JSON codec | 拒绝未知字段、重复键、错误类型与 trailing token；不接触持久化或网络 |
+| `fun.fengwk.kkstudio.harness.model.codec` | `ModelDescriptor` / `ModelVariant` 的权威严格 JSON codec，以及跨模块共享的 [`JsonCodecSupport`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/codec/JsonCodecSupport.java)（object 判定、精确字段集合与标量原语） | 拒绝未知字段、重复键、错误类型与 trailing token；Provider replay 的持久化 UUID 在模块内做无回显 canonical 校验（本模块不依赖 Common）；不接触持久化或网络 |
 | `fun.fengwk.kkstudio.harness.model.provider` | Provider 中立请求、响应、消息、内容块、流事件、`ProviderAdapter`、replay state 与 context-pressure 判定 | 不出现 SDK 类型；wire 编码与 I/O 位于同模块的 `harness.model.provider.impl` |
 | `fun.fengwk.kkstudio.harness.model.provider.codec` | Provider 响应、replay state 与工具调用诊断的严格 JSON codec | 仅依赖 Jackson 与同模块模型值 |
 | `fun.fengwk.kkstudio.harness.model.provider.impl` | 跨协议共享的流式生命周期桥接 `ProviderStreamBridge`、阻塞调用骨架 `ProviderSseCall`、HTTP 错误格式化与分类骨架 `ProviderErrorHelper`、严格 JSON 与 usage 解析 `ProviderJsonHelper`、媒体白名单与 Base64 data URI 校验 `ProviderMediaValidator`、请求体上限守卫 `RequestBodySizeGuard` 与模型列表发现 `ProviderModelDiscovery` | 不修改原始响应正文；厂商特有错误关键词、文案与媒体策略留在各协议包；桥接器只承载 terminal-once 与 handler 失败封口 |

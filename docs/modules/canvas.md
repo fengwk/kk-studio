@@ -5,7 +5,7 @@ Canvas 是建立在平台之上的图形编辑应用：用户在画布上摆放�
 | 模块 | 职责 | 依赖 |
 | --- | --- | --- |
 | [`apps/canvas/spi`](../../apps/canvas/spi/) | Canvas Function 能力 SPI：adapter、函数定义与参数 schema、冻结运行计划、执行上下文与严格 JSON 模型 | [Common](common.md)、Jackson 3 流式 API |
-| [`apps/canvas/runtime`](../../apps/canvas/runtime/) | graph、typed command、领域模型、PostgreSQL 持久化、Function Run 运行时、目录冻结与投影、revision 通知纵向切片、HTTP 边界、DTO 映射与平台适配 | [Canvas SPI](#canvas-function-spi)、[Common](common.md)、[Platform Plugin API](platform-plugin-api.md)、[Platform](platform.md)、[Durable Work](work.md)、Spring JDBC、Spring Web |
+| [`apps/canvas/runtime`](../../apps/canvas/runtime/) | graph、typed command、领域模型、PostgreSQL 持久化、Function Run 运行时、目录冻结与投影、revision 通知纵向切片、HTTP 边界、DTO 映射与平台适配 | [Canvas SPI](#canvas-function-spi)、[Common](common.md)、[Harness Model](harness-model.md)、[Platform Plugin API](platform-plugin-api.md)、[Platform](platform.md)、[Durable Work](work.md)、Spring JDBC、Spring Web |
 
 平台从不依赖 Canvas：Canvas 经平台的公开服务使用全局 Blob 与插件快照。[Canvas DTO](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/dto/) 和领域间的映射在 [`CanvasDtoMapper`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/dto/CanvasDtoMapper.java)，由 [`CanvasPlatformAutoConfiguration`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/platform/CanvasPlatformAutoConfiguration.java) 使用平台 Storage 显式装配；独立 Canvas 运行时不加载它。[Web](web.md) 是组合根，Canvas 自己的 [`CanvasHttpAutoConfiguration`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/http/CanvasHttpAutoConfiguration.java) 把控制器注册进宿主的 MVC。Canvas 与 Project 并列存在，各自拥有领域数据，跨域数据约束与 ER 关系见 [Schema](schema.md)。
 
@@ -216,7 +216,8 @@ heartbeat 按固定间隔续租，不触碰业务事实；续租失败即停止�
 
 读模型的固定取值是 wire 枚举：资源与 Function 输出的 `kind`（`IMAGE` / `VIDEO` / `AUDIO` / `TEXT`）、Function run 的
 `status`、UNKNOWN 决议与画布冲突的 `target` / `group`。时间字段是 epoch 毫秒的 `Instant`（`createdAt`、`updatedAt`、
-预签名 `expiresAt`）；`revision` 等 64 位整数在请求与响应中都是规范十进制字符串。资源按内容形态是 sealed 联合：`TEXT` 只带 `textContent`，
+预签名 `expiresAt`）；`revision` 等 64 位整数（非负）在请求与响应中都是规范十进制字符串。Function 的
+`args` 与 `argsSchema` 在 HTTP 上是 JSON 节点。资源按内容形态是 sealed 联合：`TEXT` 只带 `textContent`，
 `BLOB` 只带 `blobId` 与服务端媒体事实。Canvas 的多形态 DTO（命令、资源槽位、快照资源、节点/分组 patch 与冲突载荷）统一用
 `type` 判别；资源自身的 `kind` 是内容品类，不是判别属性。
 

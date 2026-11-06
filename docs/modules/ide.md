@@ -56,13 +56,13 @@ Server 只用 `CHANGE_DIRECTORY` 的确认回执确定目录，缺失或无效�
 
 目录查询只列直接真实子目录，不跟随子目录符号链接；输入目录自身按宿主 `realpath` 规范化。结果按名称排序，最多 1000 项，响应字节达到上限也会截断并设置 `truncated`。不可访问或不存在的目录返回错误，不返回伪造的空列表。
 
-HTTP 中 64 位整数在请求与响应中使用规范十进制字符串；元数据业务输入错误由产生处抛出 `DomainException`，由宿主统一映射为 problem 响应。
+HTTP 中 64 位整数（非负）在请求与响应中使用规范十进制字符串；元数据业务输入错误由产生处抛出 `DomainException`，由宿主统一映射为 problem 响应。
 
 正常关闭等待 IDE 原生对话框，不设命令超时；取消以 `validation` / `IDE_CLOSE_CANCELLED` 返回，视图保持打开，也不触发外层放弃确认。控制连接中断时结果未知，不回放副作用或采用迟到结果；用户可在状态未知时显式确认强制关闭。
 
 ### 浏览器同源入口
 
-iframe 使用同源视图作用域路径 `/ide/{environmentId}/{viewId}/...`。bootstrap 入口是 `/ide/{environmentId}/{viewId}/__ide/bootstrap?token=...`，消费一次性票据后设置 Path 限定为该 view 基址的 HttpOnly/SameSite=Strict cookie（可信 TLS 下加 Secure），再跳转到 code-server 的 `/?workspace=<encoded>`；同源网关另有 `__ide/session` 只报告当前 cookie 与代际是否仍可进入数据面，不续租、不重建视图。HTTP、WS upgrade 和逻辑流 OPEN 均复核当前视图绑定；关闭或换代后旧 cookie 失效。
+iframe 使用同源视图作用域路径 `/ide/{environmentId}/{viewId}/...`。bootstrap 入口是 `/ide/{environmentId}/{viewId}/__ide/bootstrap?token=...`，消费一次性票据后设置 Path 限定为该 view 基址的 HttpOnly/SameSite=Strict cookie（可信 TLS 下加 Secure），再跳转到 code-server 的 `/?workspace=<encoded>`；同源网关另有 `__ide/session` 只报告当前 cookie 与代际是否仍可进入数据面，不续租、不重建视图。路径段与 query 值统一经 `common.uri.UrlEncoding` 做 RFC 3986 百分号编码，空格是 `%20`，不使用表单语义的 `+`。HTTP、WS upgrade 和逻辑流 OPEN 均复核当前视图绑定；关闭或换代后旧 cookie 失效。
 
 - `openView` 先向事件节点核验 exact intent：只有该物理连接与 document 仍存活、且登记了完全相同的 environment/view/claim 意图时才发命令（[`IdeBrowserUseGateway`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/IdeBrowserUseGateway.java)）；事件节点不可达时不建立新绑定。`claimId` 在单次请求未确认期间保持不变，同 claimId 的同形请求返回同一绑定，参数漂移被拒绝。
 - 绑定身份缓存由 [`IdeViewBindingRegistry`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/IdeViewBindingRegistry.java) 持有：仅保存当前绑定身份，不缓存视图目录与状态；缓存缺失或漂移时先用 `LIST_VIEWS` 重建再判定，旧 epoch 的关闭、目录与终端请求不作用于新绑定。

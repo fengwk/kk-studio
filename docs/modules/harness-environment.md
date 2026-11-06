@@ -42,8 +42,9 @@ capability 身份是 [`EnvironmentCapabilityId`](../../harness/environment/src/m
 的 canonical 形式：`[a-z0-9]+(?:[.-][a-z0-9]+)*`，最长 128 字符。
 
 各能力的 arguments schema 是冻结的 classpath 资源。只有 `process.exec` 要求每次显式提供绝对
-`workdir`；`fs.read`、`fs.write`、`fs.edit`、`fs.edit.preview`、`fs.grep`、`fs.find` 与三个 `lsp.*` 能力的本地 `path`
-必须是绝对路径，相对路径直接拒绝，且不接受 `workdir`。反编译 `target` 接受绝对 class 路径、`file:` 或 `jdt:` URI。
+`workdir`；`fs.read`、`fs.write`、`fs.edit`、`fs.edit.preview`、`fs.grep` 与 `fs.find` 的 `path`
+接受目标主机上的绝对路径或 `vfs:` 会话路径，相对路径直接拒绝，且不接受 `workdir`；三个 `lsp.*` 能力的本地 `path`
+必须是绝对路径，相对路径直接拒绝，也不接受 `workdir`。反编译 `target` 接受绝对 class 路径、`file:` 或 `jdt:` URI。
 `process.exec` 的 `workdir` 必须是目标 Daemon 文件系统上的绝对现存目录，
 绝不回退到 cwd、HOME、Environment 根或任何会话默认值。
 
@@ -351,17 +352,20 @@ COMPLETED
 
 ### 锁边界
 
-理解并发时先区分协议推进、状态快照与回调执行。连接级锁的嵌套顺序为 `gate > state > inventory`，调用与 transfer 另有各自 monitor：
+理解并发时先区分协议推进、状态快照与回调执行。连接级 monitor 为 `DaemonConnectionSession.gate`、同一会话的
+`stateLock` 与核心 `EnvironmentDaemonServer.inventory`；调用与 transfer 另有各自 monitor：
 
 | monitor | 保护对象 |
 | --- | --- |
 | 每个连接代际的 `gate` | 该连接的入站协议处理序列与该连接待执行回调批次的排队 |
-| `ConnectionState` 自身 | 该连接的协议字段（绑定、`leaseToken`、`ready`、清理标记、目标 OS）与该连接最近送达的临时资源 TTL/扫描间隔基线 |
+| 同一会话的 `stateLock` | 该连接的协议字段（绑定、`leaseToken`、`ready`、清理标记、目标 OS）与该连接最近送达的临时资源 TTL/扫描间隔基线 |
 | 核心 `inventory` | 环境目录、连接目录、`invocationId` 目录与 tombstone |
 | 每个 `ActiveInvocation` | 其 transfer 集合与取消意图（终态标记是无锁 `AtomicBoolean`） |
 | 每个 `TransferBinding` | 该 transfer 的请求事实、已签发 uploadId、票据缓存与释放标记 |
 
-租约存储访问发生在连接 `gate` 内，但不持有 `state`、`inventory`、`ActiveInvocation` 或 `TransferBinding`；`invoke` 的围栏复核、票据服务 I/O、上传释放、连接关闭与全部 listener/session 回调都在上述锁之外执行，因此回调中重入核心 API 不会死锁。
+协议推进在 `gate` 内可以进入 `stateLock`（例如 READY、心跳与入站帧处理）；`inventory` 只作为叶子使用，持有它时不回调会话。
+租约存储访问发生在 `gate` 内时不持有 `inventory`、`ActiveInvocation` 或 `TransferBinding`。`invoke` 在 `stateLock` 内完成
+围栏复核与在途登记，票据服务 I/O、上传释放、连接清理以及全部 listener/session 回调都在这些 monitor 之外执行，因此回调中重入核心 API 不会死锁。
 
 回调本身不占用 `gate`：一帧产生的回调批次只在 `gate` 内按处理顺序入队，之后由单一 drainer 在锁外同步执行，其余并发 `receive` 把批次留在队列里即返回。因此同一连接上不存在两个线程同时执行回调，`onPartial` 阻塞只会推迟该连接后续批次的 drain，不会阻塞其他连接的协议处理，也允许回调内重入 `receive`。核心不持久化任何状态：进程重启后的会话事实由 daemon 重新握手建立。
 

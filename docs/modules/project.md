@@ -189,9 +189,9 @@ Issue 工具说明、交接回执与当前 Run 的任务消息使用本模块的
 [`IssueAgentThread`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/model/IssueAgentThread.java)
 保存 `(issueId, agentName) -> threadId` 稳定绑定；
 [`IssueRun`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/model/IssueRun.java)
-保存 `(startEntryId, endEntryId]`、Session/Thread、阶段与终态事实。每 Issue 唯一活动 Run、
-终态必须冻结区间、FAILED 必须给出原因等不变量由 `project_issue_run` 的检查约束与
-部分唯一索引最终保证；Entry 父链、跨表外键与锁序校验由 service 与 Runtime 负责，领域层不重复实现。
+保存 `(startEntryId, endEntryId]`、Session/Thread、阶段与终态事实。每 Issue 唯一活动 Run 由
+`project_issue_run` 的部分唯一索引保证；终态必须冻结区间、FAILED 必须给出原因等状态形状由应用维护
+（列注释已明确这一归属），Entry 父链、跨表外键与锁序校验由 service 与 Runtime 负责，领域层不重复实现。
 
 Run 的预算、等待与停止政策只消费 Runtime 投影的统一执行事实 [`ThreadExecutionFacts`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/thread/ThreadExecutionFacts.java)：存在在途工作（排队命令 / 合法本地 Model / `READY`、`RUNNING` 工具 / owned continuation）时 `reconcile` 只延后重检，绝不投递指示或收尾；只有 `WAITING_APPROVAL` / `WAITING_INPUT` 才把 Run 转入等待；`UNKNOWN` 工具是已收敛的模型反馈。人工停止时仍有在途工作或结果未定则收敛为 FAILED 和 ERROR 暂停。Project 通过 `ThreadExecutionFacts` 统一判断「在途」。
 
@@ -285,8 +285,9 @@ Project 与 Issue 的公开接口都在 `/api/project` 命名空间下：项目�
 Issue 没有归档状态，删除是唯一的移除方式；Project 归档保留，默认列表只返回活跃项目，
 `includeArchived=true` 同时返回活跃与已归档项目。
 HTTP DTO 的工作流是结构化对象，数值坐标（包括 workflow 的 `maxRuns`、版本与序号）中
-64 位整数使用规范十进制字符串；上例展示的是存储 codec 的形态，不是请求体。
-时间字段是 epoch 毫秒整数，固定取值（暂停原因、Activity 种类与操作者、Run 状态）使用领域枚举。
+64 位整数（非负）使用规范十进制字符串；上例展示的是存储 codec 的形态，不是请求体。
+时间字段是 epoch 毫秒整数，固定取值（暂停原因、Activity 种类与操作者、Run 状态）使用领域枚举；
+Activity 的 `data` 在 HTTP 上是 JSON 节点，不是转义后的文本。
 完整路由表以生成的 `ApiRoutes` 为准。
 
 ## 错误映射

@@ -30,7 +30,7 @@ Environment、Settings 与 Catalog 的实体仓库直接以 `JdbcClient` 承担 
 | --- | --- |
 | [catalog](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog) | Provider/Model/Agent、Git Skill Package、MCP Server/Tool 的名称寻址与 CAS；每个实体一个包，以 record、`JdbcClient` Repository（SQL、行锁与 CAS）和 Service（校验、引用保护与 DTO 投影）为主；`catalog/model` 另含模型配置的严格 codec、组配置与其能力派生、Variant 解析 |
 | [harness/model](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/model) | Provider 解析、资源物化、Model admission 与流式网关 |
-| [harness/dto](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/dto) | Harness HTTP 请求/响应 DTO：command、target 与用户消息均为 `type` discriminator 的 sealed union；固定取值使用最终枚举，时间字段统一为 `createdAt` / `updatedAt` |
+| [harness/dto](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/dto) | Harness HTTP 请求/响应 DTO：command、target 与用户消息均为 `type` discriminator 的 sealed union；固定取值使用最终枚举，实体创建/更新时间字段为 `createdAt` / `updatedAt`，事件时刻使用各自语义化名称 |
 | [harness/http](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/http) | Harness HTTP 边界：`/api/harness` 下的命令、Thread、模型请求调试与历史 Provider 请求；UUID/枚举参数类型化，命令接受返回 202 |
 | [catalog/tool](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog/tool) | `RuntimeToolCatalog` 聚合静态与 MCP 工具，提供工具目录查询 |
 | [catalog/mcp/client](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog/mcp/client) | MCP Streamable HTTP client：单一 deadline、调用级取消与结果映射 |
@@ -55,16 +55,16 @@ Environment、Settings 与 Catalog 的实体仓库直接以 `JdbcClient` 承担 
 | [settings](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/settings) | 全局设置、严格 codec、编辑 schema、版本快照与运行时现读的全局代理装配 |
 | [configsync](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/configsync) | `ConfigSyncService` 编排八类配置的 YAML 读写、依赖闭包与导入 |
 | [events](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/events) | 各模块共享的进程内订阅原语：`SubscriptionFanOut` 的 UUID 定点/全局注册、幂等注销与消费者隔离投递，`SourceSubscribed` 的 ack 游标与释放句柄；不含领域事件语义、持久化或 LISTEN |
-| [http](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/http) | HTTP 请求参数的共享适配；不含 advice 或 MVC 装配 |
 | [i18n](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/i18n) | 请求 locale 的用户可见消息解析 `MessageService`；资源包随本模块发布，中英文缺键回退固定 |
 
 Harness HTTP DTO 的 wire 契约由
 [`HarnessHttpDtoContractTest`](../../platform/runtime/src/test/java/fun/fengwk/kkstudio/platform/harness/dto/HarnessHttpDtoContractTest.java)
 锁定：sealed union 的 discriminator 与 explicit null、固定枚举、最终字段名，以及请求未知字段的 fail-closed 行为。
 HTTP 上 Entry、命令与取消输入的 `payload`、工具调用的 `result` / `error` / `approval`、
-交互的 `approval`、Debug 的 `inputSchema` / `configuration` 均为 JSON 节点，结构由 Harness 的
-canonical codec 定义；模型产生的 `argumentsJson` 与 Provider 的 `requestJson` 保持字符串原文。
-64 位整数字段在请求和响应中使用规范十进制字符串，客户端输入错误由产生处抛出
+交互的 `approval`、Debug 的 `inputSchema` / `configuration`，以及 Agent/`ExecutionSelection` 的
+`settings` 均为 JSON 节点，结构由 Harness 的 canonical codec 定义；模型产生的
+`argumentsJson` 与 Provider 的 `requestJson` 保持字符串原文。
+64 位整数（非负）在请求和响应中使用规范十进制字符串，客户端输入错误由产生处抛出
 `DomainException`，Web 统一映射为 problem 响应。
 
 ## Harness 持久化与调度
@@ -110,7 +110,7 @@ Thread version 的注册与分发复用 `platform.notification` 的
 
 ```text
 前置 advisory 围栏：task 准入（仅接受路径）-> tree（根 UUID 升序）
-行锁阶梯：Session -> Thread -> Command -> Driver -> Tool -> Work
+行锁阶梯：Session -> Thread -> Command -> Driver 私有行 -> Tool -> Work
 ```
 
 advisory 围栏与六级行锁分别记录。Thread 按 UUID、Command 按 sequence、Tool siblings
@@ -315,7 +315,8 @@ GROUP 的成员顺序就是 Fill First 顺序，成员只能是 MODEL 且其 Var
 Agent 被其它 Agent 的 subagents、插件普通配置或产品引用时不能删除；产品通过 `AgentReferenceCheck` 参与删除前检查，Project 检查未归档项目的工作流阶段。Chat 只按名称软引用 Agent，
 删除后其下一回合确定性失败，同名重建即恢复。
 
-Provider credential 在创建请求或 PUT 的 `SecretUpdate`（KEEP/SET/CLEAR）中写入，常规响应只给 `{configured}` 安全投影；配置同步导出显式包含原值。`promptCacheRetentions` 由 `providerType` 派生且只读。运行时类型取自
+Provider credential 通过创建请求的可空 `SecretUpdate`（只接受 `SET`）或 PUT 的必填
+`SecretUpdate`（`KEEP`/`SET`/`CLEAR`）写入，常规响应只给 `{configured}` 安全投影；配置同步导出显式包含原值。`promptCacheRetentions` 由 `providerType` 派生且只读。运行时类型取自
 [`ProviderType`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/provider/ProviderType.java)：
 `openai`、`openai_responses`、`anthropic`、`google`，按精确 wire value 解析。
 `GET /api/platform/providers/{name}/remote-models` 用已保存的 baseUrl 与 credential 读取 Provider 的
@@ -489,7 +490,7 @@ Environment 管理调用，不写 Thread Tool 执行账本。
 因此 platform 不复制规划算法，也不直接依赖 `runtime.*` 实现类。
 入口、`kind` 与冲突契约见 [Web](web.md)。
 
-用量与费用只在读取时投影：durable 只保存 ASSISTANT `MESSAGE` 与 COMPACTION 结果的真实 `assistantMetadata`（`stopReason`、`usage`、可选 `decodeDurationMillis`，以及实际执行的 `model`、请求时刻 `requestedAt` 与 Provider 报告的 `responseServiceTier`），绝不持久化金额。`UsageCostProjectionService` 按 metadata 中实际执行的模型读取当前 catalog 价格，以请求时刻、上下文 token 与 service tier 依次应用覆盖与倍率规则，用纯 `BigDecimal` 现算并输出精确十进制字符串 `amount`；catalog 中已没有该单模型（已删除，或改名/删除后同名被模型组复用）则费用缺席，定义损坏则抛错，绝不伪装成 0。同一投影内每个出现过的模型至多查一次 catalog；计费细节见 [Harness Model：用量与计价](harness-model.md#用量与计价)。
+用量与费用只在读取时投影：durable 只保存 ASSISTANT `MESSAGE` 与 COMPACTION 结果的真实 `assistantMetadata`（`stopReason`、`usage`、可选 `decodeDurationMillis`，以及实际执行的 `model`、请求时刻 `requestedAt`、Provider 报告的 `responseServiceTier` 与请求体条件指纹 `requestBodyPricing`），绝不持久化金额。`UsageCostProjectionService` 按 metadata 中实际执行的模型读取当前 catalog 价格，以请求时刻、上下文 token 与 service tier 依次应用覆盖与倍率规则，用纯 `BigDecimal` 现算并输出精确十进制字符串 `amount`；catalog 中已没有该单模型（已删除，或改名/删除后同名被模型组复用）则费用缺席，定义损坏则抛错，绝不伪装成 0。同一投影内每个出现过的模型至多查一次 catalog；计费细节见 [Harness Model：用量与计价](harness-model.md#用量与计价)。
 
 ## Storage、Blob 与 Resource
 
@@ -708,7 +709,8 @@ Skill Package 私有仓库访问令牌与 Provider 凭据采用同一策略：�
 运行态、数据库身份、版本和时间戳不进入文件。
 
 导入检查复用写入路径的字段与 codec 校验，在一次计划快照上分类新增、覆盖和跳过，不写数据库。
-未知或不支持内容、依赖不满足和外部准备失败可明确跳过；必填缺失、结构/类型/有效值错误、
+未知或不支持内容、依赖不满足和外部准备失败可明确跳过：条目的未知字段按条目级跳过并报告
+（包括 Agent 的旧顶层 `model` / `variant`），已知字段仍先按写入路径校验，未知字段不能绕过硬错误；必填缺失、结构/类型/有效值错误、
 Environment 令牌摘要冲突、Skill 仓库身份变化和移除仍被引用的 Skill/MCP 工具整份拒绝。
 Environment 的 `installConfig` 在未知字段跳过判断之前就用同一 codec 深度校验，已知非法设置不会被
 条目级跳过；条目省略该键表示清空现有安装设置。
