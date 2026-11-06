@@ -1,6 +1,5 @@
-package fun.fengwk.kkstudio.share.skill;
+package fun.fengwk.kkstudio.platform.catalog.dto;
 
-import com.fasterxml.jackson.annotation.JsonAnySetter;
 import lombok.Data;
 
 /**
@@ -17,9 +16,4 @@ public class SkillRefDTO {
 
   /** Skill 名遵循同一短名规则，且与 {@code <repository>/<name>/SKILL.md} 的目录名一致。 */
   private String name;
-
-  @JsonAnySetter
-  public void rejectUnknownField(String fieldName, Object ignoredValue) {
-    throw new IllegalArgumentException("unknown skill ref field: " + fieldName);
-  }
 }

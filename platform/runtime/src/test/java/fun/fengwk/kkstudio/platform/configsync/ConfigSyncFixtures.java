@@ -34,6 +34,7 @@ import fun.fengwk.kkstudio.platform.catalog.dto.ModelLimitDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelRateSetDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelVariantDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.SkillRefDTO;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpDiscoveryStatus;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServer;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpTool;
@@ -72,7 +73,6 @@ import fun.fengwk.kkstudio.platform.settings.SystemSettingsCodec;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsRepository;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsTestFixture;
 import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsSectionsDTO;
-import fun.fengwk.kkstudio.share.skill.SkillRefDTO;
 
 import java.io.IOException;
 import java.io.InputStream;

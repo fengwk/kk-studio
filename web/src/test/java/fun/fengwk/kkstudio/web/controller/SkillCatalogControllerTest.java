@@ -34,7 +34,7 @@ import fun.fengwk.kkstudio.platform.catalog.dto.SkillPackageEditDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.SkillPackagePublishDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.SkillPackageStagingCreateDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.SkillPackageStagingPublishDTO;
-import fun.fengwk.kkstudio.share.skill.SkillRefDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.SkillRefDTO;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 import fun.fengwk.kkstudio.web.storage.WebStorageS3TestConfiguration;
 

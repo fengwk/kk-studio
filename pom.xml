@@ -10,7 +10,6 @@
 
     <modules>
         <module>common</module>
-        <module>share</module>
         <module>schema</module>
         <module>work</module>
         <module>harness</module>
@@ -120,11 +119,6 @@
                 <version>${spring-boot.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
-            </dependency>
-            <dependency>
-                <groupId>fun.fengwk.kk-studio</groupId>
-                <artifactId>kk-studio-share</artifactId>
-                <version>${kk-studio.version}</version>
             </dependency>
             <dependency>
                 <groupId>fun.fengwk.kk-studio</groupId>

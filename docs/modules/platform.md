@@ -791,5 +791,5 @@ Harness 的定向入口：
 `FakeAgentDriver` 的进程内私有状态不参与数据库事务。
 真实设施测试基座、执行命令和覆盖率入口见 [开发与测试](../operations/development-and-testing.md)。
 
-上级：[系统设计](../system-design.md)。相关文档：[Web](web.md)、[Share](share.md)、
+上级：[系统设计](../system-design.md)。相关文档：[Web](web.md)、
 [Schema](schema.md)、[Harness Runtime](harness-runtime.md)、[Canvas](canvas.md)、[Project](project.md)、[IDE](ide.md)。

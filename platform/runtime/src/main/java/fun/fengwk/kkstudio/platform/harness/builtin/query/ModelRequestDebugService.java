@@ -21,7 +21,6 @@ import fun.fengwk.kkstudio.platform.harness.dto.HarnessModelSelectionDTO;
 import fun.fengwk.kkstudio.platform.harness.task.AgentPromptComposer;
 import fun.fengwk.kkstudio.platform.harness.thread.command.DatabaseTurnResolver;
 import fun.fengwk.kkstudio.platform.harness.thread.command.LiveTurnPlan;
-import fun.fengwk.kkstudio.share.catalog.EnvironmentSupportDTO;
 
 import java.time.Clock;
 import java.util.List;
@@ -150,8 +149,7 @@ public final class ModelRequestDebugService {
     dto.setName(tool.name());
     dto.setDescription(tool.description());
     dto.setInputSchemaJson(tool.inputSchemaJson());
-    // Debug 与 Tool catalog 共用同一个 wire 枚举，两端名字一一对应。
-    dto.setEnvironmentSupport(EnvironmentSupportDTO.valueOf(tool.environmentSupport().name()));
+    dto.setEnvironmentSupport(tool.environmentSupport());
     dto.setProvenance(tool.provenance());
     dto.setState(tool.state());
     dto.setFilterReason(tool.filterReason());

@@ -4,11 +4,11 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
 import org.jspecify.annotations.Nullable;
 
+import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
+import fun.fengwk.kkstudio.platform.catalog.dto.SkillRefDTO;
 import fun.fengwk.kkstudio.platform.environment.skill.SkillPromptResolution;
 import fun.fengwk.kkstudio.platform.harness.thread.command.LiveTurnPlan;
 import fun.fengwk.kkstudio.platform.harness.thread.command.LiveTurnPlan.FilterReason;
-import fun.fengwk.kkstudio.share.catalog.EnvironmentSupportDTO;
-import fun.fengwk.kkstudio.share.skill.SkillRefDTO;
 
 import java.time.Instant;
 import java.util.List;
@@ -78,7 +78,7 @@ public class HarnessModelRequestDebugDTO {
     private String inputSchemaJson;
 
     /** Tool 与 Environment 的关系，与 Tool catalog 共用同一个枚举。 */
-    private EnvironmentSupportDTO environmentSupport;
+    private EnvironmentSupport environmentSupport;
 
     /** Contributor 归属身份（{@code contributorId:localName}）。 */
     private String provenance;

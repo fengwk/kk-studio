@@ -20,10 +20,6 @@
         </dependency>
         <dependency>
             <groupId>fun.fengwk.kk-studio</groupId>
-            <artifactId>kk-studio-share</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>fun.fengwk.kk-studio</groupId>
             <artifactId>kk-studio-platform-plugin-api</artifactId>
         </dependency>
         <dependency>

@@ -5,7 +5,7 @@ Canvas 是建立在平台之上的图形编辑应用：用户在画布上摆放�
 | 模块 | 职责 | 依赖 |
 | --- | --- | --- |
 | [`apps/canvas/spi`](../../apps/canvas/spi/) | Canvas Function 能力 SPI：adapter、函数定义与参数 schema、冻结运行计划、执行上下文与严格 JSON 模型 | [Common](common.md)、Jackson 3 流式 API |
-| [`apps/canvas/runtime`](../../apps/canvas/runtime/) | graph、typed command、领域模型、PostgreSQL 持久化、Function Run 运行时、目录冻结与投影、revision 通知纵向切片、HTTP 边界、DTO 映射与平台适配 | [Canvas SPI](#canvas-function-spi)、[Common](common.md)、[Platform Plugin API](platform-plugin-api.md)、[Share](share.md)、[Platform](platform.md)、[Durable Work](work.md)、Spring JDBC、Spring Web |
+| [`apps/canvas/runtime`](../../apps/canvas/runtime/) | graph、typed command、领域模型、PostgreSQL 持久化、Function Run 运行时、目录冻结与投影、revision 通知纵向切片、HTTP 边界、DTO 映射与平台适配 | [Canvas SPI](#canvas-function-spi)、[Common](common.md)、[Platform Plugin API](platform-plugin-api.md)、[Platform](platform.md)、[Durable Work](work.md)、Spring JDBC、Spring Web |
 
 平台从不依赖 Canvas：Canvas 经平台的公开服务使用全局 Blob 与插件快照。[Canvas DTO](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/dto/) 和领域间的映射在 [`CanvasDtoMapper`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/dto/CanvasDtoMapper.java)，由 [`CanvasPlatformAutoConfiguration`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/platform/CanvasPlatformAutoConfiguration.java) 使用平台 Storage 显式装配；独立 Canvas 运行时不加载它。[Web](web.md) 是组合根，Canvas 自己的 [`CanvasHttpAutoConfiguration`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/http/CanvasHttpAutoConfiguration.java) 把控制器注册进宿主的 MVC。Canvas 与 Project 并列存在，各自拥有领域数据，跨域数据约束与 ER 关系见 [Schema](schema.md)。
 

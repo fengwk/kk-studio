@@ -35,8 +35,8 @@ import fun.fengwk.kkstudio.platform.catalog.dto.ModelLimitDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelRateSetDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelVariantDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.SkillRefDTO;
 import fun.fengwk.kkstudio.platform.pluginhost.credential.PluginCredentialRefreshDispatcher;
-import fun.fengwk.kkstudio.share.skill.SkillRefDTO;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
 import java.io.IOException;

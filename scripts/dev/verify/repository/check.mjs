@@ -34,7 +34,6 @@ const moduleDocuments = [
   'plugins.md',
   'project.md',
   'schema.md',
-  'share.md',
   'web.md',
   'work.md',
 ]
@@ -68,7 +67,6 @@ const checkableTopLevels = new Set([
   'plugins',
   'schema',
   'scripts',
-  'share',
   'web',
   'work',
   'checkstyle.xml',
@@ -390,7 +388,6 @@ function extractPomModules(pomRelativePath) {
 const moduleDependencies = {
   common: [],
   schema: [],
-  share: [],
   work: ['common'],
   'harness/environment': ['common'],
   'harness/model': [],
@@ -400,7 +397,6 @@ const moduleDependencies = {
   'platform/daemon-server': ['common', 'harness-environment'],
   'platform/runtime': [
     'common',
-    'share',
     'work',
     'harness-environment',
     'harness-model',
@@ -412,15 +408,14 @@ const moduleDependencies = {
   'apps/canvas/spi': ['common'],
   'apps/canvas/runtime': [
     'common',
-    'share',
     'work',
     'canvas-spi',
     'platform-plugin-api',
     'platform-runtime',
   ],
-  'apps/project': ['common', 'share', 'work', 'harness-runtime', 'platform-runtime'],
-  'apps/chat': ['common', 'share', 'harness-runtime', 'platform-runtime'],
-  'apps/ide': ['common', 'share', 'harness-environment', 'platform-daemon-server', 'platform-runtime'],
+  'apps/project': ['common', 'work', 'harness-runtime', 'platform-runtime'],
+  'apps/chat': ['common', 'harness-runtime', 'platform-runtime'],
+  'apps/ide': ['common', 'harness-environment', 'platform-daemon-server', 'platform-runtime'],
   'plugins/comfyui': ['common', 'canvas-spi', 'harness-runtime', 'platform-plugin-api'],
   'plugins/media': ['common', 'canvas-spi', 'harness-runtime', 'platform-plugin-api'],
   'plugins/minimax-mavis': ['common', 'harness-runtime', 'platform-plugin-api'],
@@ -921,7 +916,6 @@ function checkHarnessPackageAccess() {
  */
 const tableOwners = [
   ['agent', 'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog'],
-  ['agent_', 'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog'],
   ['builtin_model_', 'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/builtin'],
   ['canvas_', 'apps/canvas'],
   ['chat', 'apps/chat'],
@@ -1081,17 +1075,10 @@ const platformDomainRoots = [
   'storage',
   'vfs',
 ]
-const shareDomainRoots = [
-  'catalog',
-  'runtime',
-  'skill',
-]
-
-/** 平台与共享契约的子域根保持精确，新增子域必须显式更新这里。 */
+/** 平台契约的子域根保持精确，新增子域必须显式更新这里。 */
 function checkPackageRoots() {
   for (const [relativePath, expected] of [
     ['platform/runtime/src/main/java/fun/fengwk/kkstudio/platform', platformDomainRoots],
-    ['share/src/main/java/fun/fengwk/kkstudio/share', shareDomainRoots],
   ]) {
     const absolutePath = path.join(repositoryRoot, relativePath)
     if (!existsSync(absolutePath)) {

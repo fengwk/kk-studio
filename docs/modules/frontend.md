@@ -61,7 +61,7 @@ service 按职责归属：Chat、Environment、Extensions、Catalog、Settings �
 `shared/api` 只保留 HTTP client、生成契约和 Harness/Agent/Storage/Interaction 平台客户端。
 [Projects feature](../../frontend/src/features/projects) 使用生成的 HTTP 契约；
 [Canvas 接口客户端](../../frontend/src/features/canvas/canvas-api.ts) 由 Canvas feature 持有。
-公开 HTTP 路由事实源是生成的 `ApiRoutes`，JSON 字段规则见 [Share](share.md)。
+公开 HTTP 路由事实源是生成的 `ApiRoutes`，JSON 字段规则见 [Web 的 JSON 与错误边界](web.md#json错误与信任边界)。
 Java long 游标保持字符串，版本比较使用长度与字典序，保留整数精度。
 
 ## Snapshot、realtime 与恢复
@@ -609,5 +609,5 @@ Vitest/jsdom 测试与实现就近组织，Canvas 集成用例在 feature 的测
 命令队列、Snapshot/realtime、上传、控制与可访问交互。
 构建、lint、coverage 和 E2E 的命令与分类见 [开发与测试](../operations/development-and-testing.md)。
 
-上级：[系统设计](../system-design.md)。相关文档：[Share](share.md)、[Web](web.md)、
+上级：[系统设计](../system-design.md)。相关文档：[Web](web.md)、
 [Canvas](canvas.md)、[Project](project.md)。
