@@ -617,10 +617,10 @@ describe('EnvironmentsPage', () => {
     expect(screen.getByText('创建环境')).toBeInTheDocument()
   })
 
-  it('formats epoch-second lastSeen, including fractional seconds', async () => {
+  it('formats epoch-millisecond lastSeen, including sub-second values', async () => {
     vi.mocked(environmentService.listEnvironments).mockResolvedValue([
-      environment({ id: 'env-id-sec', name: 'seconds-box', lastSeen: 1750000000 }),
-      environment({ id: 'env-id-frac', name: 'fraction-box', lastSeen: 1750000000.5 }),
+      environment({ id: 'env-id-sec', name: 'seconds-box', lastSeen: 1750000000000 }),
+      environment({ id: 'env-id-frac', name: 'fraction-box', lastSeen: 1750000000500 }),
     ])
     renderPage()
 
@@ -794,8 +794,8 @@ describe('EnvironmentsPage', () => {
     try {
       vi.setSystemTime(new Date('2026-07-20T00:00:00.000Z'))
       vi.mocked(environmentService.listEnvironments).mockResolvedValue([
-        environment({ id: 'env-1', name: 'later-box', statusExpiresAt: 1784505660 }),
-        environment({ id: 'env-2', name: 'sooner-box', statusExpiresAt: 1784505610 }),
+        environment({ id: 'env-1', name: 'later-box', statusExpiresAt: 1784505660000 }),
+        environment({ id: 'env-2', name: 'sooner-box', statusExpiresAt: 1784505610000 }),
       ])
       renderPage()
       await flushUntil(() => screen.queryByText('later-box') != null)
@@ -825,10 +825,10 @@ describe('EnvironmentsPage', () => {
   })
 
   /**
-   * 测试意图：后端把 statusExpiresAt 写成 epoch 秒（可带小数），页面必须按真实截止点排一次回读。
+   * 测试意图：后端把 statusExpiresAt 写成 epoch 毫秒整数，页面必须按真实截止点排一次回读。
    */
   it.each([
-    ['带小数 epoch 秒', 1784505610.25],
+    ['非整秒的 epoch 毫秒', 1784505610250],
   ])('rechecks once at the lease deadline served as %s and never polls', async (_label, statusExpiresAt) => {
     vi.useFakeTimers()
     try {
@@ -875,11 +875,11 @@ describe('EnvironmentsPage', () => {
 
   /**
    * 测试意图：心跳续租会把截止点推后；页面必须取消旧定时器并按新截止点重排，而不是在旧截止点提前回读。
-   * 数字 epoch 秒形态同样如此，否则毫秒/秒混淆会让旧截止点立即触发一次回读。
+   * 整秒与非整秒毫秒值同样如此。
    */
   it.each([
-    ['整数 epoch 秒', 1784505610, 1784505670],
-    ['带小数 epoch 秒', 1784505610.5, 1784505670.5],
+    ['整秒', 1784505610000, 1784505670000],
+    ['非整秒', 1784505610500, 1784505670500],
   ])('cancels and rearms the deadline when a committed change renews the lease (%s)', async (_label, initial, renewed) => {
     vi.useFakeTimers()
     try {
@@ -933,7 +933,7 @@ describe('EnvironmentsPage', () => {
     try {
       vi.setSystemTime(new Date('2026-07-20T00:00:00.000Z'))
       vi.mocked(environmentService.listEnvironments).mockResolvedValue([
-        environment({ id: 'env-1', name: 'dying-box', statusExpiresAt: 1784505610 }),
+        environment({ id: 'env-1', name: 'dying-box', statusExpiresAt: 1784505610000 }),
       ])
       renderPage()
       await flushUntil(() => screen.queryByText('dying-box') != null)
@@ -970,7 +970,7 @@ describe('EnvironmentsPage', () => {
     try {
       vi.setSystemTime(new Date('2026-07-20T00:00:00.000Z'))
       vi.mocked(environmentService.listEnvironments).mockResolvedValue([
-        environment({ id: 'env-1', name: 'local-dev', statusExpiresAt: 1784505610 }),
+        environment({ id: 'env-1', name: 'local-dev', statusExpiresAt: 1784505610000 }),
       ])
       const { view } = renderPage()
       await flushUntil(() => screen.queryByText('local-dev') != null)

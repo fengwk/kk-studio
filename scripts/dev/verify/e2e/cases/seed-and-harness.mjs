@@ -2028,7 +2028,7 @@ registerCase({
       assert(root.status === 'IDLE' && root.executionControl === 'RUNNABLE', JSON.stringify(root))
       assert(root.outcome === 'FAILED' && root.turnCount === 1 && root.toolCallCount === 0, JSON.stringify(root))
       assert(isDeepStrictEqual(root.execution, before.thread.branchSettings.execution), JSON.stringify(root))
-      // updatedAt 是 Thread.updatedAt 的只读投影：与权威 Thread 快照精确相同，具体数值编码由时间切片定义。
+      // updatedAt 是 Thread.updatedAt 的只读投影：非空有限的 epoch 毫秒，且与权威 Thread 快照精确相同。
       assert(
         typeof root.updatedAt === 'number'
           && Number.isFinite(root.updatedAt)

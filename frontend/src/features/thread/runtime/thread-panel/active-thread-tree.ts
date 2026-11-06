@@ -107,11 +107,11 @@ function signature(node: ActiveThreadTreeNode): string {
 }
 
 function timeValue(value: number): number {
-  // Jackson 的 Instant 数字是 Unix 秒；Number.isFinite 不做类型转换，未经校验的非数字直接拒绝。
+  // Jackson 的 Instant 数字是 epoch 毫秒；Number.isFinite 不做类型转换，未经校验的非数字直接拒绝。
   if (!Number.isFinite(value)) {
     throw new Error('invalid thread updatedAt')
   }
-  return value * 1000
+  return value
 }
 
 /** 未知 outcome 或非 IDLE 不伪造终态。 */

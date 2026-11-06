@@ -10,7 +10,7 @@ HTTP Jackson 3 mapper 生成，漂移在 CI 中失败。生成器与产物测试
 
 - 属性名、顺序与枚举 wire 值来自真实 mapper；未标 jspecify `@Nullable` 的属性必填且非空。
 - 写出方向 `@JsonInclude(ALWAYS)` 的可空属性写作 `T | null`，其它可空属性写作 `?: T | null`。
-- Java `long`/`Long` 在响应中是十进制字符串，只读入的请求属性写作 `number`；`Instant` 是 epoch 秒数字。
+- Java `long`/`Long` 在响应中是十进制字符串，只读入的请求属性写作 `number`；`Instant` 是 epoch 毫秒整数。
 - `@JsonTypeInfo` 密封类型生成带判别字面量的子类型与联合。
 - 会改变写出形态的定制（未登记的自定义序列化器、格式化、unwrapped、any getter、契约包外的对象类型）直接失败，
   不回退成 `unknown`。登记的序列化器只有两个：`DecimalStringSerializer` 把价格 decimal 写作 `string`，

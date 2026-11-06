@@ -8,7 +8,7 @@ describe('formatBackendDate', () => {
     expect(formatBackendDate(1e20)).toBe('-')
   })
 
-  it('formats epoch seconds in local time independently of the host timezone', () => {
+  it('formats epoch milliseconds in local time independently of the host timezone', () => {
     // Intl is an independent local-time oracle; fixed timezone browser cases cover the wire paths.
     const milliseconds = Date.parse('2026-10-08T13:15:00Z')
     const parts = new Intl.DateTimeFormat('en-CA', {
@@ -17,9 +17,8 @@ describe('formatBackendDate', () => {
     }).formatToParts(milliseconds)
     const fields = Object.fromEntries(parts.map(({ type, value }) => [type, value]))
     const expected = `${fields.year}-${fields.month}-${fields.day} ${fields.hour}:${fields.minute}`
-    expect(formatBackendDate(milliseconds / 1000)).toBe(expected)
-    // fractional seconds keep the same minute
-    expect(formatBackendDate(milliseconds / 1000 + 0.25)).toBe(expected)
+    expect(formatBackendDate(milliseconds)).toBe(expected)
+    expect(formatBackendDate(milliseconds + 250)).toBe(expected)
   })
 })
 
@@ -35,12 +34,12 @@ describe('formatDateTime24', () => {
 })
 
 describe('timestampMillis', () => {
-  // 测试意图：wire 时间戳的三种形态都能换算为毫秒，秒/毫秒按数量级区分。
-  it('converts epoch seconds, millisecond timestamps, ISO strings and UTC arrays', () => {
+  // 测试意图：数字无论大小均为毫秒，其余输入形态按日期解析。
+  it('converts millisecond timestamps, ISO strings and UTC arrays', () => {
     const instant = Date.UTC(2026, 6, 28, 10, 0, 5)
-    expect(timestampMillis(instant / 1000)).toBe(instant)
-    expect(timestampMillis(instant / 1000 + 0.25)).toBe(instant + 250)
     expect(timestampMillis(instant)).toBe(instant)
+    expect(timestampMillis(123)).toBe(123)
+    expect(timestampMillis(-123)).toBe(-123)
     expect(timestampMillis('2026-07-28T10:00:05Z')).toBe(instant)
     expect(timestampMillis([2026, 7, 28, 10, 0, 5])).toBe(instant)
     // 只给年月日时，时分秒缺省为 0（UTC 零点）。

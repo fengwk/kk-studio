@@ -23,6 +23,7 @@ import fun.fengwk.kkstudio.share.catalog.AgentModelVariantDTO;
 import fun.fengwk.kkstudio.share.catalog.HarnessExecutionSelectionDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsNetworkDTO;
 
+import java.time.Instant;
 import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -35,6 +36,23 @@ class StrictJacksonConfigurationTest {
       new ApplicationContextRunner()
           .withConfiguration(AutoConfigurations.of(JacksonAutoConfiguration.class))
           .withUserConfiguration(StrictJacksonConfiguration.class);
+
+  /** 共享 mapper 与 HTTP 派生 mapper 均以毫秒整数读写 Instant，包含负值和非整秒。 */
+  @Test
+  void instantUsesEpochMillisecondsInBothMappers() {
+    runner.run(
+        context -> {
+          JsonMapper shared = context.getBean(JsonMapper.class);
+          for (JsonMapper mapper :
+              List.of(shared, HttpBoundaryConfiguration.strictHttpMapper(shared))) {
+            for (long millis : new long[] {1772366400123L, 123L, -123L}) {
+              Instant instant = Instant.ofEpochMilli(millis);
+              assertEquals(Long.toString(millis), mapper.writeValueAsString(instant));
+              assertEquals(instant, mapper.readValue(Long.toString(millis), Instant.class));
+            }
+          }
+        });
+  }
 
   /** Chat 默认环境是 required-nullable，不能被全局 NON_NULL 配置省略。 */
   @Test
