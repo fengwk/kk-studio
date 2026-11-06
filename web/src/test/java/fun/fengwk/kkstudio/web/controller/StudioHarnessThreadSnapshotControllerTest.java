@@ -41,15 +41,15 @@ import java.util.UUID;
 class StudioHarnessThreadSnapshotControllerTest extends HarnessThreadControllerTestSupport {
 
   @Test
-  void missingSnapshotRetainsNotFoundEnvelope() throws Exception {
-    // 真实 Runtime 的 Domain not-found 在旧 advice 下仍返回原有 404。
+  void missingSnapshotReturnsNotFoundProblem() throws Exception {
+    // 真实 Runtime 的 Domain not-found 返回稳定类别和安全详情。
     when(runtime.getThreadSnapshot(id(1)))
         .thenThrow(DomainException.notFound("thread", "thread missing"));
     mockMvc
         .perform(get("/api/threads/" + idText(1)))
         .andExpect(status().isNotFound())
-        .andExpect(jsonPath("$.code").value("NOT_FOUND"))
-        .andExpect(jsonPath("$.errors.detail").value("thread missing"));
+        .andExpect(jsonPath("$.code").value("not_found"))
+        .andExpect(jsonPath("$.detail").value("thread missing"));
   }
 
   /** 无本地工作和未完成直接委派时透传 IDLE/RUNNABLE，并暴露执行父关系；路由不另行推导状态。 */
@@ -61,10 +61,10 @@ class StudioHarnessThreadSnapshotControllerTest extends HarnessThreadControllerT
     mockMvc
         .perform(get("/api/threads/" + idText(1)))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.thread.status").value("IDLE"))
-        .andExpect(jsonPath("$.data.thread.executionControl").value("RUNNABLE"))
-        .andExpect(jsonPath("$.data.thread.processing").doesNotExist())
-        .andExpect(jsonPath("$.data.thread.parentThreadId").value(idText(2)));
+        .andExpect(jsonPath("$.thread.status").value("IDLE"))
+        .andExpect(jsonPath("$.thread.executionControl").value("RUNNABLE"))
+        .andExpect(jsonPath("$.thread.processing").doesNotExist())
+        .andExpect(jsonPath("$.thread.parentThreadId").value(idText(2)));
   }
 
   /** 意图：快照的每个 Entry 都带读取时费用投影，未计价 Entry 显式为 null；投影只发生一次（不逐消息请求）。 */
@@ -81,10 +81,10 @@ class StudioHarnessThreadSnapshotControllerTest extends HarnessThreadControllerT
     mockMvc
         .perform(get("/api/threads/" + idText(1)))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.entries[0].usageCost").value(nullValue()))
-        .andExpect(jsonPath("$.data.entries[3].entryId").value(idText(4)))
-        .andExpect(jsonPath("$.data.entries[3].usageCost.currency").value("USD"))
-        .andExpect(jsonPath("$.data.entries[3].usageCost.amount").value("0.500000000000"));
+        .andExpect(jsonPath("$.entries[0].usageCost").value(nullValue()))
+        .andExpect(jsonPath("$.entries[3].entryId").value(idText(4)))
+        .andExpect(jsonPath("$.entries[3].usageCost.currency").value("USD"))
+        .andExpect(jsonPath("$.entries[3].usageCost.amount").value("0.500000000000"));
 
     // 一次快照只投影一次，绝不逐消息请求。
     verify(usageCostProjectionService, times(1)).project(any());
@@ -146,11 +146,10 @@ class StudioHarnessThreadSnapshotControllerTest extends HarnessThreadControllerT
     mockMvc
         .perform(get("/api/threads/" + idText(1)))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.toolInvocations[0].requiredEnvironmentId").value(idText(200)))
-        .andExpect(jsonPath("$.data.toolInvocations[0].requiredEnvironmentName").value("archlinux"))
+        .andExpect(jsonPath("$.toolInvocations[0].requiredEnvironmentId").value(idText(200)))
+        .andExpect(jsonPath("$.toolInvocations[0].requiredEnvironmentName").value("archlinux"))
         .andExpect(
-            jsonPath("$.data.toolInvocations[0].environmentWaitFreshnessAt")
-                .value(deadline.toString()));
+            jsonPath("$.toolInvocations[0].environmentWaitFreshnessAt").value(deadline.toString()));
     verify(runtime, times(1)).listEnvironmentToolWaits(Set.of(id(100)));
   }
 
@@ -162,9 +161,9 @@ class StudioHarnessThreadSnapshotControllerTest extends HarnessThreadControllerT
     mockMvc
         .perform(get("/api/threads/" + idText(1)))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.version").value("3"))
-        .andExpect(jsonPath("$.data.thread.threadId").value(idText(1)))
-        .andExpect(jsonPath("$.data.baseEntryId").value(nullValue()));
+        .andExpect(jsonPath("$.version").value("3"))
+        .andExpect(jsonPath("$.thread.threadId").value(idText(1)))
+        .andExpect(jsonPath("$.baseEntryId").value(nullValue()));
 
     verify(runtime, never()).manualCompactionAvailability(any());
   }
@@ -174,7 +173,7 @@ class StudioHarnessThreadSnapshotControllerTest extends HarnessThreadControllerT
     mockMvc
         .perform(get("/api/threads/" + idText(1) + "?afterEntryId=not-a-valid-uuid"))
         .andExpect(status().isBadRequest())
-        .andExpect(jsonPath("$.code").value("BAD_REQUEST"));
+        .andExpect(jsonPath("$.code").value("validation"));
   }
 
   @Test
@@ -212,8 +211,8 @@ class StudioHarnessThreadSnapshotControllerTest extends HarnessThreadControllerT
     mockMvc
         .perform(get("/api/threads/" + idText(1) + "?afterEntryId=" + headId))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.baseEntryId").value(headId.toString()))
-        .andExpect(jsonPath("$.data.entries").isEmpty());
+        .andExpect(jsonPath("$.baseEntryId").value(headId.toString()))
+        .andExpect(jsonPath("$.entries").isEmpty());
     verify(runtime).getThreadSnapshot(threadId, headId);
   }
 
@@ -241,8 +240,8 @@ class StudioHarnessThreadSnapshotControllerTest extends HarnessThreadControllerT
     mockMvc
         .perform(get("/api/threads/" + idText(1) + "?afterEntryId=" + nonAncestorId))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.baseEntryId").value(nullValue()))
-        .andExpect(jsonPath("$.data.entries.length()").value(1));
+        .andExpect(jsonPath("$.baseEntryId").value(nullValue()))
+        .andExpect(jsonPath("$.entries.length()").value(1));
     verify(runtime).getThreadSnapshot(threadId, nonAncestorId);
   }
 
@@ -294,11 +293,11 @@ class StudioHarnessThreadSnapshotControllerTest extends HarnessThreadControllerT
     mockMvc
         .perform(get("/api/threads/" + idText(1) + "?afterEntryId=" + cursorId))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.baseEntryId").value(cursorId.toString()))
-        .andExpect(jsonPath("$.data.entries.length()").value(1))
-        .andExpect(jsonPath("$.data.entries[0].entryId").value(newEntryId.toString()))
-        .andExpect(jsonPath("$.data.entries[0].usageCost.currency").value("USD"))
-        .andExpect(jsonPath("$.data.entries[0].usageCost.amount").value("0.420000000000"));
+        .andExpect(jsonPath("$.baseEntryId").value(cursorId.toString()))
+        .andExpect(jsonPath("$.entries.length()").value(1))
+        .andExpect(jsonPath("$.entries[0].entryId").value(newEntryId.toString()))
+        .andExpect(jsonPath("$.entries[0].usageCost.currency").value("USD"))
+        .andExpect(jsonPath("$.entries[0].usageCost.amount").value("0.420000000000"));
     verify(usageCostProjectionService).project(List.of(entry2));
     verify(usageCostProjectionService, never())
         .project(argThat((List<Entry> list) -> list.contains(root) || list.contains(entry1)));
