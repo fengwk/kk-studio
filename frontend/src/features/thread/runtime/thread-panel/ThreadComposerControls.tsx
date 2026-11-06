@@ -7,7 +7,7 @@ import {
 } from 'react'
 import { Check, ChevronDown, ChevronLeft } from 'lucide-react'
 import { formatModelLabel } from '@/features/catalog'
-import type { ModelKind } from '@/shared/api/contracts/ai-catalog'
+import type { ModelDTO } from '@/shared/api/generated/contracts'
 import { useI18n } from '@/shared/i18n'
 import './thread-composer-controls.css'
 
@@ -20,7 +20,7 @@ export interface ThreadComposerModelSelection {
 
 export interface ThreadComposerModelOption {
   name: string
-  type: ModelKind
+  type: ModelDTO['type']
   config?: {
     defaultVariant?: string | null
     variants?: ReadonlyArray<{ id: string }>

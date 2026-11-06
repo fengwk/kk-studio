@@ -53,7 +53,7 @@ export function ModelCatalogPicker({
       setError(null)
     }
     try {
-      const page = await agentService.listModelDefaults(search, cursor, pageSize)
+      const page = await agentService.listModelCatalog(search, cursor, pageSize)
       accept(page, epoch, append)
     } catch (cause) {
       if (epoch === requestEpoch.current) {
@@ -85,7 +85,7 @@ export function ModelCatalogPicker({
     setLoading(true)
     setError(null)
     try {
-      const page = await agentService.refreshModelDefaults()
+      const page = await agentService.refreshModelCatalog()
       accept(page, epoch, false)
     } catch (cause) {
       if (epoch === requestEpoch.current) {

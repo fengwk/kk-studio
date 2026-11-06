@@ -195,9 +195,10 @@ registerCase({
           'modelCallTimeoutMillis',
           'modelCallIdleTimeoutMillis',
           'modelHttpRetryStatusCodes',
+          'promptCacheRetentions',
           'version',
-          'createTime',
-          'updateTime',
+          'createdAt',
+          'updatedAt',
         ],
         'ProviderDTO',
       )

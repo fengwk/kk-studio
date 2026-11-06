@@ -60,15 +60,15 @@ export function toUserFacingErrorMessage(error: unknown): string {
     { match: /providerType|provider type/i, key: 'ai.catalog.validation.providerType' },
     { match: /providerName|请选择 Provider/i, key: 'ai.catalog.validation.provider' },
     {
-      match: /agent model name already exists under this provider:?\s*(.*)$/i,
+      match: /model name already exists:?\s*(.*)$/i,
       key: 'ai.catalog.validation.duplicateModel',
     },
     {
-      match: /agent provider name already exists:?\s*(.*)$/i,
+      match: /provider name already exists:?\s*(.*)$/i,
       key: 'ai.catalog.validation.duplicateProvider',
     },
     {
-      match: /agent definition name already exists:?\s*(.*)$/i,
+      match: /agent name already exists:?\s*(.*)$/i,
       key: 'ai.catalog.validation.duplicateAgent',
     },
     { match: /pricing|PerMillion|serviceTier|must not be negative|must be a number/i, key: 'ai.catalog.validation.pricing' },

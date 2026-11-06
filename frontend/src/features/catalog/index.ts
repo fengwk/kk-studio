@@ -2,6 +2,4 @@ export { extractContextWindow } from '@/features/catalog/ai-resource-draft-codec
 export {
   formatExecutionModelLabel,
   formatModelLabel,
-  toAgentModelViews,
-  type AgentModelView,
-} from '@/features/catalog/AgentModelView'
+} from '@/features/catalog/model-labels'

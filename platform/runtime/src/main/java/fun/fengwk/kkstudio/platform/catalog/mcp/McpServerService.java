@@ -81,7 +81,7 @@ public class McpServerService {
     HttpConfig config =
         McpConfigParser.normalizeHttpConfig(
             createDTO.getUrl(),
-            applyHeaders(Map.of(), createDTO.getHeaders()),
+            createHeaders(createDTO.getHeaders()),
             createDTO.getEnabled(),
             createDTO.getTimeoutMillis());
     if (repository.getByName(name).isPresent()) {
@@ -105,7 +105,7 @@ public class McpServerService {
               McpServer locked = requireServerForUpdate(name);
               requireVersion(locked, expectedVersion, rawExpectedVersion);
               HttpConfig config =
-                  McpConfigParser.normalizeHttpConfig(
+                  McpConfigParser.requireHttpConfig(
                       updateDTO.getUrl(),
                       applyHeaders(locked.headers(), updateDTO.getHeaders()),
                       updateDTO.getEnabled(),
@@ -271,16 +271,25 @@ public class McpServerService {
     }
   }
 
-  /** headers 秘密更新：省略与 KEEP 保留现有映射，CLEAR 清空，SET 用 JSON 对象文本整体替换。 */
-  private static Map<String, String> applyHeaders(
-      Map<String, String> current, SecretUpdate update) {
-    if (update == null || update.operation() == SecretUpdate.Operation.KEEP) {
-      return current;
-    }
-    if (update.operation() == SecretUpdate.Operation.CLEAR) {
+  /** 创建请求的 headers 秘密字段：省略表示无 header，只接受 SET。 */
+  private static Map<String, String> createHeaders(SecretUpdate update) {
+    if (update == null) {
       return Map.of();
     }
+    if (update.operation() != SecretUpdate.Operation.SET) {
+      throw DomainException.validation(RESOURCE, "headers must use the SET operation on create");
+    }
     return McpConfigParser.parseHeaders(update.value());
+  }
+
+  /** headers 秘密更新：KEEP 保留现有映射，CLEAR 清空，SET 用 JSON 对象文本整体替换。 */
+  private static Map<String, String> applyHeaders(
+      Map<String, String> current, SecretUpdate update) {
+    return switch (update.operation()) {
+      case KEEP -> current;
+      case CLEAR -> Map.of();
+      case SET -> McpConfigParser.parseHeaders(update.value());
+    };
   }
 
   /** Server 行到列表项的安全投影：不含 URL 与 headers。 */

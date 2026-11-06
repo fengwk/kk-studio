@@ -120,6 +120,8 @@ function EditPackageForm({
     const payload: SkillPackageEditDTO = {
       expectedVersion: target.version,
       description: normalizeDescription(description),
+      // 令牌字段必填：未修改时显式 KEEP；上传渠道同样只接受 KEEP。
+      token: { operation: 'KEEP' },
     }
     if (gitPackage) {
       payload.branch = branch.trim()

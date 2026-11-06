@@ -100,7 +100,10 @@ export function McpServersPage() {
       mcpServerService.createServer({
         name: data.name,
         url: data.url,
-        headers: headersUpdate(data.headers, false),
+        // 创建只接受 SET：没有 header 时省略字段即未配置，KEEP/CLEAR 在创建时无效。
+        ...(Object.keys(data.headers).length > 0
+          ? { headers: headersUpdate(data.headers, false) }
+          : {}),
         enabled: data.enabled,
         timeoutMillis: data.timeoutMillis,
       }),

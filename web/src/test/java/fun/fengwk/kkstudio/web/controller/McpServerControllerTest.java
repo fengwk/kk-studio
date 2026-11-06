@@ -117,11 +117,12 @@ public class McpServerControllerTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.toolCount").value(1))
         .andExpect(jsonPath("$.headers.configured").value(true));
 
-    // 更新：KEEP 保留 headers，URL 与超时整体替换，状态重置为 UNVERIFIED
+    // 更新：KEEP 保留 headers，URL、enabled 与超时整体替换，状态重置为 UNVERIFIED
     ObjectNode update = objectMapper.createObjectNode();
     update.put("expectedVersion", "0");
     update.put("url", fakeServer.endpointUrl());
     update.putObject("headers").put("operation", "KEEP");
+    update.put("enabled", true);
     update.put("timeoutMillis", 20000L);
 
     mockMvc
@@ -158,6 +159,8 @@ public class McpServerControllerTest extends WebPostgresTestSupport {
     clear.put("expectedVersion", "0");
     clear.put("url", fakeServer.endpointUrl());
     clear.putObject("headers").put("operation", "CLEAR");
+    clear.put("enabled", true);
+    clear.put("timeoutMillis", 5000L);
     mockMvc
         .perform(
             put(BASE + "/{name}", name)
@@ -181,6 +184,9 @@ public class McpServerControllerTest extends WebPostgresTestSupport {
     ObjectNode badVersionUpdate = objectMapper.createObjectNode();
     badVersionUpdate.put("expectedVersion", "999");
     badVersionUpdate.put("url", fakeServer.endpointUrl());
+    badVersionUpdate.putObject("headers").put("operation", "KEEP");
+    badVersionUpdate.put("enabled", true);
+    badVersionUpdate.put("timeoutMillis", 5000L);
 
     mockMvc
         .perform(
@@ -216,6 +222,55 @@ public class McpServerControllerTest extends WebPostgresTestSupport {
     String responseBody = result.getResponse().getContentAsString();
     assertFalse(responseBody.contains("secret"));
     assertFalse(responseBody.contains("user:secret@example.com"));
+  }
+
+  @Test
+  public void requiresCompleteUpdateBodyAndSetOnlyCreateSecrets() throws Exception {
+    String name = "strict_mcp_" + System.nanoTime();
+    mockMvc
+        .perform(
+            post(BASE)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(createBody(name, fakeServer.endpointUrl(), 5000L).toString()))
+        .andExpect(status().isCreated());
+
+    // 创建时 headers 缺省即未配置：KEEP 没有可保留的旧值，只接受 SET
+    String keepOnCreate =
+        """
+        {"name":"%s","url":"%s","headers":{"operation":"KEEP"}}
+        """
+            .formatted(name + "_keep", fakeServer.endpointUrl());
+    mockMvc
+        .perform(post(BASE).contentType(MediaType.APPLICATION_JSON).content(keepOnCreate))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("validation"));
+
+    // 更新是整体替换：headers、enabled 与 timeoutMillis 缺一即 400
+    ObjectNode missingEnabled = objectMapper.createObjectNode();
+    missingEnabled.put("expectedVersion", "0");
+    missingEnabled.put("url", fakeServer.endpointUrl());
+    missingEnabled.putObject("headers").put("operation", "KEEP");
+    missingEnabled.put("timeoutMillis", 5000L);
+    mockMvc
+        .perform(
+            put(BASE + "/{name}", name)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(missingEnabled.toString()))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("validation"));
+
+    ObjectNode missingHeaders = objectMapper.createObjectNode();
+    missingHeaders.put("expectedVersion", "0");
+    missingHeaders.put("url", fakeServer.endpointUrl());
+    missingHeaders.put("enabled", true);
+    missingHeaders.put("timeoutMillis", 5000L);
+    mockMvc
+        .perform(
+            put(BASE + "/{name}", name)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(missingHeaders.toString()))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("validation"));
   }
 
   @Test

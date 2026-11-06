@@ -148,6 +148,29 @@ describe('McpServersPage', () => {
     })
   })
 
+  it('omits headers on create when none are provided', async () => {
+    const user = userEvent.setup()
+    vi.mocked(mcpServerService.createServer).mockResolvedValue(detail({ name: 'no_headers' }))
+
+    renderPage()
+
+    await user.click(await screen.findByRole('button', { name: '创建 MCP 服务' }))
+    const modal = screen.getByRole('dialog', { name: '创建 MCP 服务' })
+
+    await user.type(screen.getByPlaceholderText('e.g. filesystem'), 'no_headers')
+    await user.type(screen.getByPlaceholderText('https://example.com/mcp'), 'https://example.com/mcp')
+    await user.click(within(modal).getByRole('button', { name: '确认' }))
+
+    await waitFor(() => {
+      expect(mcpServerService.createServer).toHaveBeenCalledWith({
+        name: 'no_headers',
+        url: 'https://example.com/mcp',
+        enabled: true,
+        timeoutMillis: 60000,
+      })
+    })
+  })
+
   it('shows a conflict presenter when create conflicts', async () => {
     const user = userEvent.setup()
     vi.mocked(mcpServerService.createServer).mockRejectedValue(

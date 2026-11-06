@@ -8,7 +8,7 @@ import { ProviderForm } from '@/features/catalog/AiProviderResourceForm'
 import type { AgentDraft, ModelDraft, ModelGroupDraft, ProviderDraft, ResourceModal } from '@/features/catalog/ai-console-types'
 import type { ResourceFieldKey } from '@/features/catalog/ai-resource-form-validation'
 import { resourceTitle } from '@/features/catalog/catalog-utils'
-import type { AgentModelView } from '@/features/catalog/AgentModelView'
+import type { ModelDTO } from '@/shared/api/generated/contracts'
 import { useI18n } from '@/shared/i18n'
 import type {
   AgentDTO,
@@ -44,7 +44,7 @@ export function ResourceEditorModal({
 }: {
   modal: ResourceModal | null
   providers: ProviderDTO[]
-  models: AgentModelView[]
+  models: ModelDTO[]
   agents?: AgentDTO[]
   toolCatalog?: ToolCatalogEntryDTO[]
   skills?: SkillPackageSummaryDTO[]

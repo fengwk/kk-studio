@@ -1,8 +1,6 @@
 import { useMemo, useRef } from 'react'
-import {
-  extractContextWindow,
-  type AgentModelView,
-} from '@/features/catalog'
+import { extractContextWindow } from '@/features/catalog'
+import type { ModelDTO } from '@/shared/api/generated/contracts'
 import { buildThreadTimeline, isThreadWorking } from '@/features/thread/runtime/thread-timeline'
 import { buildThreadEventTimeline } from '@/features/thread/runtime/thread-events'
 import { aggregateEntryUsage } from '@/features/thread/runtime/thread-timeline/turn-usage'
@@ -117,7 +115,7 @@ export function useThreadProjection(threadId: string) {
 
 function resolveRuntimeLabels(
   thread: ReturnType<typeof useAgentThreadQueries>['thread'],
-  models: AgentModelView[],
+  models: ModelDTO[],
 ) {
   const settings = thread?.branchSettings
   const builtinModel = getBuiltinModelSelection(settings?.execution)

@@ -2,7 +2,8 @@ import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
 import { TextInput } from '@/shared/ui/controls/TextInput'
 import { Select } from '@/shared/ui/controls/Select'
 import { TagInput } from '@/shared/ui/controls/TagInput'
-import { AGENT_PROVIDER_TYPES, type AgentProviderType } from '@/shared/api/contracts/ai-catalog'
+import type { ProviderType } from '@/shared/api/generated/contracts'
+import { PROVIDER_TYPE_VALUES } from '@/shared/api/generated/contracts'
 import type { ProviderDraft } from '@/features/catalog/ai-console-types'
 import type { ResourceFieldKey } from '@/features/catalog/ai-resource-form-validation'
 import { useI18n } from '@/shared/i18n'
@@ -63,15 +64,23 @@ export function ProviderForm({
       </label>
       <label className="form-group">
         <FieldLabel required>{t('ai.catalog.form.providerType')}</FieldLabel>
-        <Select
-          aria-label={t('ai.catalog.form.providerType')}
-          value={draft.providerType}
-          required
-          options={AGENT_PROVIDER_TYPES.map((providerType) => ({ value: providerType, label: providerType }))}
-          onChange={(providerType) =>
-            onChange({ ...draft, providerType: providerType as AgentProviderType })
-          }
-        />
+        {mode === 'edit' ? (
+          <TextInput
+            value={draft.providerType}
+            aria-label={t('ai.catalog.form.providerType')}
+            readOnly
+          />
+        ) : (
+          <Select
+            aria-label={t('ai.catalog.form.providerType')}
+            value={draft.providerType}
+            required
+            options={PROVIDER_TYPE_VALUES.map((providerType) => ({ value: providerType, label: providerType }))}
+            onChange={(providerType) =>
+              onChange({ ...draft, providerType: providerType as ProviderType })
+            }
+          />
+        )}
       </label>
       <label className={`form-group${fieldErrors.baseUrl ? ' is-error' : ''}`}>
         <FieldLabel>{t('ai.catalog.form.baseUrl')}</FieldLabel>

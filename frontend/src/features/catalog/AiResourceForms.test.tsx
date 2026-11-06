@@ -248,6 +248,9 @@ describe('AiResourceForms', () => {
     expect(screen.getByText('留空会保留已配置的 API Key；密钥不会回显。')).toBeInTheDocument()
     expect(screen.getByPlaceholderText('留空保留当前密钥')).toHaveValue('')
     expect(screen.getByPlaceholderText('minimax')).toHaveAttribute('readonly')
+    // ProviderUpdateDTO 没有 providerType：编辑模式只读显示，创建后不可改协议。
+    expect(screen.getByLabelText('Provider Type')).toHaveValue('openai')
+    expect(screen.getByLabelText('Provider Type')).toHaveAttribute('readonly')
     const labels = Array.from(container.querySelectorAll('label > span')).map((label) => label.textContent)
     expect(labels[0]).toMatch(/^Name(?: \*)?$/)
     expect(labels[1]).toBe('API Key')

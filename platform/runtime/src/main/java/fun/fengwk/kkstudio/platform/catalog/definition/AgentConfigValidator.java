@@ -55,20 +55,19 @@ public final class AgentConfigValidator {
 
   private static void validateSkills(List<SkillRefDTO> skills) {
     if (skills == null) {
-      throw new IllegalArgumentException("agent definition config skills is required");
+      throw new IllegalArgumentException("agent config skills is required");
     }
     Set<SkillRefKey> seen = new HashSet<>();
     for (SkillRefDTO skill : skills) {
       if (skill == null) {
-        throw new IllegalArgumentException(
-            "agent definition config skills must not contain null elements");
+        throw new IllegalArgumentException("agent config skills must not contain null elements");
       }
       try {
         SkillNames.canonicalPackageName(skill.getPackageName());
         SkillNames.canonicalSkillName(skill.getName());
       } catch (IllegalArgumentException | NullPointerException error) {
         throw new IllegalArgumentException(
-            "agent definition config skills must contain canonical short names: "
+            "agent config skills must contain canonical short names: "
                 + skill.getPackageName()
                 + "/"
                 + skill.getName(),
@@ -76,7 +75,7 @@ public final class AgentConfigValidator {
       }
       if (!seen.add(new SkillRefKey(skill.getPackageName(), skill.getName()))) {
         throw new IllegalArgumentException(
-            "agent definition config skills must not contain duplicates: "
+            "agent config skills must not contain duplicates: "
                 + skill.getPackageName()
                 + "/"
                 + skill.getName());

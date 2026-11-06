@@ -88,7 +88,7 @@ import java.util.UUID;
  * 5. 生产装配的 {@link ToolGateway} 正确派发并两阶段激活执行，真实调用假 MCP Server 并完成终端断言。
  */
 @AutoConfigureMockMvc
-public class StudioMcpRuntimeToolIntegrationTest extends WebPostgresTestSupport {
+public class McpRuntimeToolIntegrationTest extends WebPostgresTestSupport {
 
   @Autowired private MockMvc mockMvc;
   @Autowired private ObjectMapper objectMapper;

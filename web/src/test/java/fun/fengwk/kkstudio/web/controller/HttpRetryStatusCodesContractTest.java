@@ -42,7 +42,7 @@ import java.util.List;
  * 始终显式输出 null 覆盖；严格整数数组从 wire 层拒绝 {@code 429.5}/{@code 429.0}/{@code "429"}/null 元素/重复/越界；null
  * 表示继承系统名单。
  */
-class StudioHttpRetryStatusCodesContractTest {
+class HttpRetryStatusCodesContractTest {
 
   private static final List<String> INVALID_LISTS =
       List.of("429.5", "429.0", "\"429\"", "[null]", "[429,429]", "[399]", "[600]", "429", "{}");

@@ -276,7 +276,7 @@ describe('useAiConsoleResourceController', () => {
     expect(screen.getByTestId('field-error')).toHaveTextContent('请填写名称')
 
     act(() => {
-      rejectUpdate(new Error('agent provider name already exists'))
+      rejectUpdate(new Error('provider name already exists'))
     })
     await waitFor(() => {
       expect(screen.getByTestId('form-error')).toHaveTextContent('Provider 名称已存在')

@@ -2,10 +2,9 @@ import { ResourceCardLayout } from '@/features/catalog/AiResourceCardLayout'
 import { Badge } from '@/shared/ui/data/Badge'
 import {
   formatModelLabel,
-  type AgentModelView,
-} from '@/features/catalog/AgentModelView'
+} from '@/features/catalog/model-labels'
 import { translate, useI18n } from '@/shared/i18n'
-import type { AgentDTO } from '@/shared/api/generated/contracts'
+import type { AgentDTO, ModelDTO } from '@/shared/api/generated/contracts'
 import { getBuiltinModelSelection } from '@/shared/api/contracts/ai-runtime'
 
 /**
@@ -14,7 +13,7 @@ import { getBuiltinModelSelection } from '@/shared/api/contracts/ai-runtime'
  * 不回退父模型或 catalog 中的第一个 model。
  */
 function formatEffectiveModel(
-  model: AgentModelView | undefined,
+  model: ModelDTO | undefined,
   modelRefValue: string,
   variantOverride: string | null,
 ): string {
@@ -43,7 +42,7 @@ export function AgentResourceCard({
   deletePending,
 }: {
   agent: AgentDTO
-  models?: AgentModelView[]
+  models?: ModelDTO[]
   onEdit: () => void
   onDelete: () => void
   deletePending: boolean

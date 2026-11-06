@@ -25,8 +25,8 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
- * 全局 Agent definition CRUD：字段与结构化执行配置规范化、Model / Skill / MCP / subagent 引用的有序加锁校验、(name, version)
- * CAS 与删除前的引用检查。
+ * 全局 Agent CRUD：字段与结构化执行配置规范化、Model / Skill / MCP / subagent 引用的有序加锁校验、(name, version) CAS
+ * 与删除前的引用检查。
  *
  * <p>内置 Agent 的名称与存在性由系统持有：用户不能同名创建或删除，但可以编辑，且允许显式未配置 execution。
  */
@@ -87,11 +87,11 @@ public class AgentService {
     referenceResolver.requireSubagentsForCreate(definition.name(), config.getSubagents());
     try {
       if (!repository.create(definition)) {
-        throw new IllegalStateException("create agent definition failed");
+        throw new IllegalStateException("create agent failed");
       }
     } catch (DuplicateKeyException error) {
       throw DomainException.duplicate(
-          RESOURCE, "agent definition name already exists: " + definition.name(), error);
+          RESOURCE, "agent name already exists: " + definition.name(), error);
     }
     return toDto(repository.getByName(definition.name()));
   }
@@ -162,7 +162,7 @@ public class AgentService {
     mutation(name, properties, true);
   }
 
-  /** 将 Agent definition 投影为公开 DTO。 */
+  /** 将 Agent 投影为公开 DTO。 */
   public AgentDTO toDto(Agent definition) {
     AgentDTO dto = new AgentDTO();
     dto.setName(definition.name());
@@ -193,7 +193,7 @@ public class AgentService {
     if (BuiltinAgents.isReservedName(normalized)) {
       // 内置 Agent 的身份由系统持有：用户不能以同名创建自己的 Agent 覆盖它。
       throw DomainException.duplicate(
-          RESOURCE, "agent definition name is reserved for a built-in agent: " + normalized);
+          RESOURCE, "agent name is reserved for a built-in agent: " + normalized);
     }
   }
 

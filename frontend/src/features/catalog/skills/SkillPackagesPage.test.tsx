@@ -337,6 +337,7 @@ describe('SkillPackagesPage', () => {
         expectedVersion: '2',
         description: 'Updated description',
         branch: 'develop',
+        token: { operation: 'KEEP' },
       })
     })
   })
@@ -365,6 +366,7 @@ describe('SkillPackagesPage', () => {
       expect(agentService.editSkillPackage).toHaveBeenCalledWith('core-tools', {
         expectedVersion: '2',
         description: 'Only description',
+        token: { operation: 'KEEP' },
       })
     })
   })

@@ -81,7 +81,7 @@ export function createAgentService(catalogRequest: CatalogRequester = request) {
         query: { expectedVersion },
       }),
 
-    listModelDefaults: (
+    listModelCatalog: (
       query = '',
       cursor?: string | null,
       limit = 20,
@@ -98,7 +98,7 @@ export function createAgentService(catalogRequest: CatalogRequester = request) {
         { jsonParser: parseJsonPreservingPathEqualsNumbers },
       ),
 
-    refreshModelDefaults: (): Promise<ModelCatalogPageDTO> =>
+    refreshModelCatalog: (): Promise<ModelCatalogPageDTO> =>
       catalogRequest('POST /api/platform/model-catalog/refresh', {}, {
         jsonParser: parseJsonPreservingPathEqualsNumbers,
       }),

@@ -21,6 +21,6 @@ public class SkillPackageCreateDTO {
   /** 只用于检查候选更新的 branch。 */
   private String branch;
 
-  /** 私有仓库访问令牌：省略或 KEEP 表示无令牌，SET 用作凭据；绝不回显。 */
+  /** 私有仓库访问令牌：省略表示无令牌，只接受 SET；绝不回显。 */
   private @Nullable SecretUpdate token;
 }

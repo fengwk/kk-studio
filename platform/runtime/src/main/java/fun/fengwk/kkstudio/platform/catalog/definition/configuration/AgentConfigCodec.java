@@ -62,18 +62,18 @@ public class AgentConfigCodec {
 
   public AgentConfigDTO decode(String configJson) {
     if (configJson == null || configJson.isBlank()) {
-      throw new IllegalStateException("stored agent definition config is blank");
+      throw new IllegalStateException("stored agent config is blank");
     }
     try {
       AgentConfigDTO config = configReader.readValue(configJson);
       try {
         validate(config);
       } catch (IllegalArgumentException error) {
-        throw new IllegalStateException("stored agent definition config is incomplete", error);
+        throw new IllegalStateException("stored agent config is incomplete", error);
       }
       return config;
     } catch (JacksonException error) {
-      throw new IllegalStateException("stored agent definition config is invalid", error);
+      throw new IllegalStateException("stored agent config is invalid", error);
     }
   }
 
@@ -82,13 +82,13 @@ public class AgentConfigCodec {
     try {
       return objectMapper.writeValueAsString(config);
     } catch (JacksonException error) {
-      throw new IllegalArgumentException("agent definition config cannot be serialized", error);
+      throw new IllegalArgumentException("agent config cannot be serialized", error);
     }
   }
 
   private static void validate(AgentConfigDTO config) {
     if (config == null) {
-      throw new IllegalArgumentException("agent definition config is required");
+      throw new IllegalArgumentException("agent config is required");
     }
     validateToolNames(config.getTools());
     validateSkills(config.getSkills());
@@ -98,20 +98,19 @@ public class AgentConfigCodec {
   /** 校验选中的全局 Skill 引用列表：非空列表、非空元素、canonical 短名、保序且不重复。 */
   private static void validateSkills(List<SkillRefDTO> skills) {
     if (skills == null) {
-      throw new IllegalArgumentException("agent definition config skills is required");
+      throw new IllegalArgumentException("agent config skills is required");
     }
     Set<SkillRefKey> seen = new HashSet<>();
     for (SkillRefDTO skill : skills) {
       if (skill == null) {
-        throw new IllegalArgumentException(
-            "agent definition config skills must not contain null elements");
+        throw new IllegalArgumentException("agent config skills must not contain null elements");
       }
       try {
         SkillNames.canonicalPackageName(skill.getPackageName());
         SkillNames.canonicalSkillName(skill.getName());
       } catch (IllegalArgumentException | NullPointerException error) {
         throw new IllegalArgumentException(
-            "agent definition config skills must contain canonical short names: "
+            "agent config skills must contain canonical short names: "
                 + skill.getPackageName()
                 + "/"
                 + skill.getName(),
@@ -119,7 +118,7 @@ public class AgentConfigCodec {
       }
       if (!seen.add(new SkillRefKey(skill.getPackageName(), skill.getName()))) {
         throw new IllegalArgumentException(
-            "agent definition config skills must not contain duplicates: "
+            "agent config skills must not contain duplicates: "
                 + skill.getPackageName()
                 + "/"
                 + skill.getName());
@@ -131,34 +130,34 @@ public class AgentConfigCodec {
 
   private static void validateToolNames(List<String> values) {
     if (values == null) {
-      throw new IllegalArgumentException("agent definition config tools is required");
+      throw new IllegalArgumentException("agent config tools is required");
     }
     Set<String> seen = new HashSet<>();
     for (String value : values) {
       if (!ToolDescriptor.isValidName(value)) {
         throw new IllegalArgumentException(
-            "agent definition config tools must contain valid model-visible tool names: " + value);
+            "agent config tools must contain valid model-visible tool names: " + value);
       }
       if (!seen.add(value)) {
         throw new IllegalArgumentException(
-            "agent definition config tools must not contain duplicates: " + value);
+            "agent config tools must not contain duplicates: " + value);
       }
     }
   }
 
   private static void validateNames(List<String> values, String field) {
     if (values == null) {
-      throw new IllegalArgumentException("agent definition config " + field + " is required");
+      throw new IllegalArgumentException("agent config " + field + " is required");
     }
     Set<String> seen = new HashSet<>();
     for (String value : values) {
       if (value == null || value.isBlank()) {
         throw new IllegalArgumentException(
-            "agent definition config " + field + " must contain non-blank names");
+            "agent config " + field + " must contain non-blank names");
       }
       if (!value.equals(value.trim())) {
         throw new IllegalArgumentException(
-            "agent definition config " + field + " must not contain surrounding whitespace");
+            "agent config " + field + " must not contain surrounding whitespace");
       }
       if (value.length() > 128
           || value.indexOf(':') >= 0
@@ -166,11 +165,11 @@ public class AgentConfigCodec {
           || value.indexOf('@') >= 0
           || value.indexOf('\\') >= 0) {
         throw new IllegalArgumentException(
-            "agent definition config " + field + " must contain short names only: " + value);
+            "agent config " + field + " must contain short names only: " + value);
       }
       if (!seen.add(value)) {
         throw new IllegalArgumentException(
-            "agent definition config " + field + " must not contain duplicates: " + value);
+            "agent config " + field + " must not contain duplicates: " + value);
       }
     }
   }

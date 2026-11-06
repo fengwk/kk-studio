@@ -10,8 +10,7 @@ import {
   toProviderDraft,
 } from '@/features/catalog/ai-resource-draft-codecs'
 import type { ResourceEditorPlan } from '@/features/catalog/ai-resource-editor-plan-types'
-import type { AgentModelView } from '@/features/catalog/AgentModelView'
-import type { AgentDTO, ProviderDTO } from '@/shared/api/generated/contracts'
+import type { AgentDTO, ModelDTO, ProviderDTO } from '@/shared/api/generated/contracts'
 import { getBuiltinModelSelection } from '@/shared/api/contracts/ai-runtime'
 
 export function createProviderEditorPlan(): Extract<ResourceEditorPlan, { kind: 'provider' }> {
@@ -50,7 +49,7 @@ export function createModelEditorPlan(
 }
 
 export function editModelEditorPlan(
-  models: AgentModelView[],
+  models: ModelDTO[],
   modelName: string,
 ): Extract<ResourceEditorPlan, { kind: 'model' }> | null {
   const model = models.find((item) => item.name === modelName)
@@ -74,7 +73,7 @@ export function editModelEditorPlan(
 }
 
 export function createAgentEditorPlan(
-  models: AgentModelView[],
+  models: ModelDTO[],
 ): Extract<ResourceEditorPlan, { kind: 'agent' }> {
   return {
     kind: 'agent',
@@ -85,7 +84,7 @@ export function createAgentEditorPlan(
 
 export function editAgentEditorPlan(
   agents: AgentDTO[],
-  models: AgentModelView[],
+  models: ModelDTO[],
   agentName: string,
 ): Extract<ResourceEditorPlan, { kind: 'agent' }> | null {
   const agent = agents.find((item) => item.name === agentName)

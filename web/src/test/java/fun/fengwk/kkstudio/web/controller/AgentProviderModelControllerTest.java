@@ -57,7 +57,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 /** Provider、Model、Agent Catalog Controller 的 HTTP 契约。 */
 @AutoConfigureMockMvc
-public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
+public class AgentProviderModelControllerTest extends WebPostgresTestSupport {
 
   /** 用于证明 wire modelId 与逻辑 name 相互独立的固定值。 */
   private static final String WIRE_MODEL_ID = "wire-model-id";

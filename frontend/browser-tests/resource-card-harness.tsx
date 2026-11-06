@@ -11,11 +11,10 @@ import { ModelForm } from '@/features/catalog/AiModelResourceForm'
 import { ProviderForm } from '@/features/catalog/AiProviderResourceForm'
 import { emptyAgentDraft, emptyModelDraft, emptyProviderDraft } from '@/features/catalog/ai-resource-draft-codecs'
 import { ModelsPanel, ProvidersPanel } from '@/features/catalog/AiConsolePanels'
-import type { AgentModelView } from '@/features/catalog/AgentModelView'
 import { setLocale } from '@/shared/i18n'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { PluginsTab } from '@/features/extensions/PluginsTab'
-import type { ProviderDTO } from '@/shared/api/generated/contracts'
+import type { ModelDTO, ProviderDTO } from '@/shared/api/generated/contracts'
 
 setLocale(new URLSearchParams(location.search).get('locale') === 'en-US' ? 'en-US' : 'zh-CN')
 
@@ -126,7 +125,7 @@ if (rootEl) {
   )
 }
 
-const SAMPLE_MODEL: AgentModelView = {
+const SAMPLE_MODEL: ModelDTO = {
   providerName: 'openai',
   type: 'MODEL',
   name: 'gpt-4o',
@@ -155,7 +154,7 @@ const SAMPLE_MODEL: AgentModelView = {
   updatedAt: 0,
 }
 
-const LONG_MODEL: AgentModelView = {
+const LONG_MODEL: ModelDTO = {
   ...SAMPLE_MODEL,
   name: 'gpt-4o-extended',
   modelId: 'gpt-4o-extended-wire-long-identifier',

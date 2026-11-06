@@ -1,11 +1,5 @@
 import { getBuiltinModelSelection } from '@/shared/api/contracts/ai-runtime'
-import type { ModelDTO, HarnessExecutionSelectionDTO } from '@/shared/api/generated/contracts'
-
-/**
- * {@link ModelDTO} 的客户端投影。逻辑名全局唯一，不包含 provider 前缀；
- * 单 Model 与组的展示/引用都直接使用 {@link AgentModelView.name}。
- */
-export type AgentModelView = ModelDTO
+import type { HarnessExecutionSelectionDTO } from '@/shared/api/generated/contracts'
 
 /** 组合逻辑名与 Variant 的展示标签；组没有组级 Variant，不伪造默认值。 */
 export function formatModelLabel(
@@ -24,8 +18,4 @@ export function formatModelLabel(
 export function formatExecutionModelLabel(execution: HarnessExecutionSelectionDTO): string {
   const model = getBuiltinModelSelection(execution)
   return formatModelLabel(model?.modelName, model?.variant)
-}
-
-export function toAgentModelViews(models: ModelDTO[]): AgentModelView[] {
-  return models.map((model) => ({ ...model }))
 }

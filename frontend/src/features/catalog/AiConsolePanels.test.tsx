@@ -3,9 +3,8 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router'
 import { describe, expect, it, vi } from 'vitest'
 import { AgentsPanel, ModelsPanel, ProvidersPanel } from '@/features/catalog/AiConsolePanels'
-import type { AgentModelView } from '@/features/catalog/AgentModelView'
 import { ChatCardsPanel } from '@/features/chat/ChatCardsPanel'
-import type { ModelConfigDTO, ChatDTO } from '@/shared/api/generated/contracts'
+import type { ModelConfigDTO, ChatDTO, ModelDTO } from '@/shared/api/generated/contracts'
 
 const baseConfig: ModelConfigDTO = {
   limit: { context: 128000, output: 8192 },
@@ -19,7 +18,7 @@ const baseConfig: ModelConfigDTO = {
   variants: [{ id: 'default', promptCacheRetention: 'NONE' }],
 }
 
-function modelWithProvider(): AgentModelView {
+function modelWithProvider(): ModelDTO {
   return {
     providerName: 'minimax',
     type: 'MODEL',
