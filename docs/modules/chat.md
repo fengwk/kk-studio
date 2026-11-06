@@ -42,7 +42,8 @@ Chat 是直接持有 Harness Session 的产品之一：一次对话把多个 Ses
 成功响应直接返回资源；响应的 `environmentName` 是始终存在的 required-nullable 字段（未选择时为
 null）。`agentName` 与 `environmentName` 只按名称软引用目录行，不建立
 外键：Agent 或 Environment 硬删除期间引用暂时无法解析，同名重建后重新生效。名称的 canonical
-校验只由本模块写入路径按当前目录完成，数据库不重复目录命名规则；Chat 的生命周期由创建、修改和深删除直接管理。
+校验只由本模块写入路径按当前目录完成，且只校验本次整体替换中发生变化的值，因此目录行已删除时
+仍可编辑 Chat 的其他字段；数据库不重复目录命名规则；Chat 的生命周期由创建、修改和深删除直接管理。
 版本是 non-negative 十进制字符串，客户端每次更新必须回传。
 
 ## 归属与深删除
