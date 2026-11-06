@@ -84,7 +84,8 @@ V1 的 Platform Driver 分段声明 `builtin_model_invocation`；`durable_work.t
 
 ## 类型与命名
 
-- 主键、外键和业务 ID 使用 `uuid`；时间列统一 `created_at` / `updated_at` / `last_seen_at`，类型为 `timestamptz(3)`。
+- 主键、外键和业务 ID 使用 `uuid`。通用创建/更新时间列命名为 `created_at` / `updated_at`，连接心跳使用
+  `last_seen_at`；业务时点列（如 `expires_at`、`registered_at`、`abandoned_at`）保留语义名。所有时间列均为 `timestamptz(3)`。
 - 乐观锁统一 `bigint version`；`plugin_configuration.version` 与 `plugin_auth_attempt.config_version` 是配置 CAS 的同一代次。
 - 租约令牌统一 `uuid`：`durable_work.lease_token`、`plugin_credential.refresh_lease_token`、`harness_execution_exit.owner_lease_token`、`storage_upload.cleanup_token`。
 - 结构化载荷使用 `jsonb`；需要保留原始文本预算的 Plugin 配置使用严格 JSON object 的 `text`。

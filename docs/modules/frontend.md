@@ -15,8 +15,9 @@ QueryClient → ApplicationContributions → BrowserPreferences → ApplicationE
 查询默认关闭自动 retry 与窗口聚焦刷新；共享 ApplicationEvent manager 管理订阅。
 
 [`AppRouter`](../../frontend/src/app/router.tsx) 将 `/` 转至 `/chats`，`/interactions` 由应用层
-[`InteractionsPage`](../../frontend/src/app/pages/InteractionsPage.tsx) 承载问卷与审批并提供来源导航，
-其余交给 [`WorkbenchShell`](../../frontend/src/platform/workbench/WorkbenchShell.tsx)。
+[`InteractionsPage`](../../frontend/src/app/pages/InteractionsPage.tsx) 汇总所有待处理的问卷与审批，并按
+`owner` 提供来源导航；无产品页面的独立 `AGENT_TASK` 只在这里显示来源标签，不生成导航入口。
+其余路由交给 [`WorkbenchShell`](../../frontend/src/platform/workbench/WorkbenchShell.tsx)。
 AppShell 与 WorkbenchShell 的 `navItems` 必传，由应用组合根
 [`navigation.ts`](../../frontend/src/app/navigation.ts) 组装；platform 不导入 feature。
 PageContribution 的 navGroup/workspace 决定当前导航分组高亮和沉浸布局，
@@ -49,8 +50,9 @@ Thread panel 消费 timeline presentation 类型，宿主负责 API、realtime �
 
 HTTP 路由与传输类型由领域控制器签名与生产 HTTP Jackson mapper 生成到
 [`generated/contracts.ts`](../../frontend/src/shared/api/generated/contracts.ts)：
-字段、可空性与枚举值跟随各领域模块的 Java DTO，Java long 在请求和响应中都是规范十进制字符串，
-`Instant` 是 epoch 毫秒整数。
+字段、可空性与枚举值跟随各领域模块的 Java DTO，Java long 在请求和响应中都是规范非负十进制字符串，
+`Instant` 是 epoch 毫秒整数。Provider、MCP 与 Git 技能包的创建请求把密钥放在可空 `SecretUpdate` 中，
+非空时只接受 `SET`；编辑请求的密钥字段必填，`KEEP` / `CLEAR` 必须显式提交。
 生成物不手改；漂移由 [`check.sh`](../../scripts/dev/verify/generated-contracts/check.sh)
 （`mvn verify` 内执行同一测试）拦截，更新走同目录
 [`write.sh`](../../scripts/dev/verify/generated-contracts/write.sh)。
@@ -59,7 +61,7 @@ HTTP 路由与传输类型由领域控制器签名与生产 HTTP Jackson mapper 
 HTTP 的命令、上传与资源等联合类型消费生成契约，在使用点按 `type` 分支。
 浏览器本地存储与应用事件 WebSocket 不经生成契约约束，仍保留结构校验。
 service 按职责归属：Chat、Environment、Extensions、Catalog、Settings 的接口客户端位于各自 feature；
-`shared/api` 只保留 HTTP client、生成契约和 Harness/Agent/Storage/Interaction 平台客户端。
+`shared/api` 只保留 HTTP client、生成契约和 Harness/Agent/Session-file/Storage/Interaction 平台客户端。
 [Projects feature](../../frontend/src/features/projects) 使用生成的 HTTP 契约；
 [Canvas 接口客户端](../../frontend/src/features/canvas/canvas-api.ts) 由 Canvas feature 持有。
 公开 HTTP 路由事实源是生成的 `ApiRoutes`，JSON 字段规则见 [Web 的 JSON 与错误边界](web.md#json错误与信任边界)。

@@ -1,6 +1,8 @@
 # Common
 
-`common` 是全仓最底层的值契约：领域错误、严格 JSON、规范 Resource 引用、结果内容、输入 schema、SHA-256 与 Durable Work 的纯调度状态。Harness、Platform、应用与插件都依赖它，它不依赖任何内部模块，也不保存业务状态。有界调度骨架在 [Durable Work](work.md)。
+`common` 是全仓最底层的值契约：领域错误、严格 JSON、URI 编码、规范 Resource 引用、结果内容、输入 schema、
+SHA-256 与 Durable Work 的纯调度状态。Harness、Platform、应用与插件都依赖它，它不依赖任何内部模块，
+也不保存业务状态。有界调度骨架在 [Durable Work](work.md)。
 
 这些类型在调用边界完成校验，再交给执行模块使用。值对象内部的构造约束与编码故障以各类型契约为准；
 HTTP 可达的客户端输入错误在产生处以 `DomainException` 表达，内部故障不伪装成客户端错误。
@@ -17,6 +19,7 @@ HTTP 可达的客户端输入错误在产生处以 `DomainException` 表达，�
 | `fun.fengwk.kkstudio.common.id` | canonical UUID 文本解析的唯一入口 | 只依赖 JDK；要求与 `UUID.toString()` 往返一致，不做大小写归一 |
 | `fun.fengwk.kkstudio.common.number` | canonical 非负与正数十进制 long 解析的唯一入口 | 只依赖 JDK；拒绝空白、符号、前导零和超过 `Long.MAX_VALUE` 的值 |
 | `fun.fengwk.kkstudio.common.time` | durable 毫秒时间边界：毫秒 Clock 包装与毫秒精度校验的唯一入口 | 只依赖 JDK；不承担时区、格式化或领域状态，非法输入以 `IllegalArgumentException` 表达 |
+| `fun.fengwk.kkstudio.common.uri` | RFC 3986 百分号编码的唯一入口：路径段与 query 值共用 | 只依赖 JDK；只保留 unreserved 字符，空格是 `%20`，不使用表单语义的 `+` |
 | `fun.fengwk.kkstudio.common.resource` | 不可变规范 Resource URI 引用与逐 scheme 校验 | 受支持的 scheme 与字节上限在此固定；下载、传输与存储由外部能力承接 |
 | `fun.fengwk.kkstudio.common.result` | sealed 结果内容单元 Text / Json / Binary / Resource 与文本工件元数据 | 纯不可变值模型；执行生命周期、权限与持久化调度由运行时承接 |
 | `fun.fengwk.kkstudio.common.schema` | 输入参数 schema 结构、严格校验器、容错归一化器与确定性 JSON 编解码器 | 属性字典序的确定性编解码；执行路由与 Provider 转换由上层处理 |
@@ -33,6 +36,17 @@ HTTP 可达的客户端输入错误在产生处以 `DomainException` 表达，�
 [`ToolArguments`](../../common/src/main/java/fun/fengwk/kkstudio/common/json/ToolArguments.java) 是 Tool 历史 action 渲染器的只读 arguments 读取器：`parse` 把 arguments 文本解析为 JSON object（畸形、非 object 或空白返回 `null`），`text` / `flag` 按语义字段名取用并把缺失、类型不符或空白视为「未提供」，`render` 把调用方给出的字段渲染函数应用到指定字段。它对所有畸形输入都返回中性结果而不是抛出，因为渲染器只描述历史、绝不改写 durable 事实，无法形成动作时由 Runtime 回退。
 
 [`BoundedJsonWriter`](../../common/src/main/java/fun/fengwk/kkstudio/common/json/BoundedJsonWriter.java) 在流式写入时累计 UTF-8 字节数，一旦超过 `maxBytes` 立即中止并返回 `null`，不会先在内存里物化超限内容；`fits(node, maxBytes)` 用同一套边界只做判定、不保留字节。这两个方法服务于「先判断能否放下、再决定是否序列化」的场景，例如 Daemon 报文的 16 MiB 预算。上限判定与计数由共享的 `BoundedOutputStream` 承担：构造要求正数 `maxBytes`，默认只计数、不保留任何字节，`retainBytes=true` 时保留已写字节并可用 `toUtf8String()` 还原文本；累计超过上限即原子中止（本次写入不生效、不推进计数）并抛出专属的 `LimitExceededException`。Jackson 3 将输出流异常包装为 `JacksonException`，调用方只沿 cause 链识别专属超限异常；其它编码或 I/O 失败明确抛出，不能误报为超限。[Harness Runtime](harness-runtime.md#tool-契约) 里 Tool 结果的字节预算判定与它复用同一实现。
+
+## URL 编码
+
+`common.uri` 的 `UrlEncoding` 是路径段与 query 参数值的唯一编码入口：只保留 unreserved 字符
+（`A-Z`、`a-z`、`0-9`、`-`、`.`、`_`、`~`），其余 UTF-8 字节写成大写 `%XX`，空格是 `%20`。
+产物同时是合法的单个 path segment 与合法的 query 值，`/`、`+`、`&`、`=` 都被编码，因此接收方按
+RFC 3986 或按表单解码都还原原值。`java.net.URLEncoder` 的 form-urlencoded 输出把空格写成 `+`，
+只在接收方同样按表单解码时才成立，不能用于路径段。
+
+Harness Model 的 Gemini path-segment 编码规则与本类相同，但该模块是可独立编译的叶子模块、不依赖 `common`，
+因此那边保留自己的实现；两处规则变更必须同步。
 
 ## Resource 引用与 URI 校验
 
@@ -74,7 +88,7 @@ HTTP 可达的客户端输入错误在产生处以 `DomainException` 表达，�
 - Schema：[`InputSchema.java`](../../common/src/main/java/fun/fengwk/kkstudio/common/schema/InputSchema.java)、[`InputValidator.java`](../../common/src/main/java/fun/fengwk/kkstudio/common/schema/InputValidator.java)、[`InputNormalizer.java`](../../common/src/main/java/fun/fengwk/kkstudio/common/schema/InputNormalizer.java)、[`SchemaJsonCodec.java`](../../common/src/main/java/fun/fengwk/kkstudio/common/schema/SchemaJsonCodec.java)
 - 标识：[`Uuids.java`](../../common/src/main/java/fun/fengwk/kkstudio/common/id/Uuids.java) 解析 canonical UUID
 - 十进制：[`DecimalLongs.java`](../../common/src/main/java/fun/fengwk/kkstudio/common/number/DecimalLongs.java) 解析 canonical 非负与正数 long；HTTP Long 的 wire 规则见[系统设计](../system-design.md#http-契约)
-- 领域错误：[`DomainException.java`](../../common/src/main/java/fun/fengwk/kkstudio/common/error/DomainException.java) 与 [`DomainErrorCode.java`](../../common/src/main/java/fun/fengwk/kkstudio/common/error/DomainErrorCode.java)
+- 领域错误：[`DomainException.java`](../../common/src/main/java/fun/fengwk/kkstudio/common/error/DomainException.java) 与 [`DomainErrorCode.java`](../../common/src/main/java/fun/fengwk/kkstudio/common/error/DomainErrorCode.java)；版本冲突以 `long` 版本坐标构造，HTTP 层再按 Long 规则序列化
 - 调度状态：[`WorkState.java`](../../common/src/main/java/fun/fengwk/kkstudio/common/work/WorkState.java)；有界调度骨架见 [Durable Work](work.md)。
 - [`ResourceRefTest.java`](../../common/src/test/java/fun/fengwk/kkstudio/common/resource/ResourceRefTest.java) 覆盖各类 scheme 与 data URI 解码，[`InputNormalizerTest.java`](../../common/src/test/java/fun/fengwk/kkstudio/common/schema/InputNormalizerTest.java) 锁定容错与拒绝的边界，[`SchemaJsonCodecTest.java`](../../common/src/test/java/fun/fengwk/kkstudio/common/schema/SchemaJsonCodecTest.java) 锁定确定性编码；同包 `BoundedOutputStreamTest` 与 `BoundedJsonWriterTest` 覆盖中文与 emoji 的 UTF-8 字节边界、只计数不保留字节与超限早停。
 

@@ -70,7 +70,7 @@ health、资源下载和 WebSocket 使用各自传输形式。业务路由按所
 | family | 路径 | 用途 |
 | --- | --- | --- |
 | Health | `/actuator/health` | 健康探针 |
-| Catalog | `/api/platform/{providers,models,model-catalog,tools,agents}` | Provider/MODEL/GROUP/Agent CRUD、工具候选、Provider 远端模型 ID（`providers/{name}/remote-models`）、新建模型的目录候选与手动刷新（`model-catalog`、`model-catalog/refresh`）；Provider/Model/Agent 列表直接返回数组，Model 的 PUT/DELETE 为 `/models/{*name}`，名称可含斜杠；变更使用 expectedVersion |
+| Catalog | `/api/platform/{providers,models,model-catalog,tools,agents}` | Provider/MODEL/GROUP/Agent CRUD、工具候选、Provider 远端模型 ID（`providers/{name}/remote-models`）、新建模型的目录候选与手动刷新（`model-catalog`、`model-catalog/refresh`）；Provider credential 用 SecretUpdate 且只回 `configured`；Provider/Model/Agent 列表直接返回数组，Model 的 PUT/DELETE 为 `/models/{*name}`，名称可含斜杠；变更使用 expectedVersion |
 | Skill | `/api/platform/skill-packages`、`/api/platform/skill-package-stagings` | CRUD、branch check、exact commit 发布、上传暂存与发布、环境技能重同步（`environments/{environmentId}/resync-skills`）；Git 令牌用 SecretUpdate，响应只回 `configured` |
 | MCP | `/api/platform/mcp-servers` | name-keyed CRUD、摘要数组、headers 用 SecretUpdate 且只回 `configured`、同步 discover |
 | Plugin | `/api/platform/plugins` | 安全投影、普通配置 PUT、auth/prepare、auth/complete、删除 auth；`{pluginId}/check-connection` 按 expected 版本执行一次显式只读连接检查 |
@@ -199,18 +199,23 @@ JSON Controller 直接返回资源本身：读取、更新与动作 200，创建
 （例如 `protocolOptionsJson` 与网络文本字段只接受 JSON 字符串 token）。`protocolOptionsJson` 的内容语法、64 KiB 上限与 canonical 化
 由 harness-model 的 `ProviderProtocolOptions` 在平台解析配置时统一执行，HTTP mapper 只检查 wire 形状，不重复解析选项。
 wire DTO 归属各领域模块：平台族在 `platform.runtime` 的 `<feature>.dto`（Harness DTO 在 `platform.harness.dto`），Canvas 与
-Project 在各自 `dto` 包。
+Project 在各自 `dto` 包。持久化 JSON 的领域 codec 复用
+[`JsonCodecSupport`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/codec/JsonCodecSupport.java)
+的节点读取、精确字段集合与“不回声上游字段集合”校验原语，各 codec 只声明字段集合和值类型。
 required-nullable 响应字段由 DTO 显式 ALWAYS。[`HttpBoundaryConfiguration`](../../web/src/main/java/fun/fengwk/kkstudio/web/HttpBoundaryConfiguration.java)
 从容器 mapper 派生仅供 HTTP 消息转换器使用的配置，拒绝未知字段、标量强转、基本类型 null、重复键和尾随内容，
-不改变持久化、集群客户端和插件使用的 mapper。Long 在请求与响应中均为规范十进制字符串，
+不改变持久化、集群客户端和插件使用的 mapper。Long 在请求与响应中均为规范非负十进制字符串，
 DTO 使用 `Long` / `long`，HTTP 边界统一解析并拒绝非法值。请求体按字段或 record 组件的 `@Nullable`
 统一检查必填性并递归检查 DTO、集合与 Map；未标注的属性缺失或为 null 时报告属性路径。
-UUID 路径和查询参数统一使用规范小写转换。领域 codec 另有严格语法校验。
+创建请求中的 Provider credential、MCP headers 与 Git 技能包 token 是可空 `SecretUpdate`，非空时只接受
+`SET`；更新请求中的对应密钥字段必填，`KEEP` / `CLEAR` 必须显式提交，读取投影只返回 `configured`。
+UUID 路径和查询参数统一按 canonical 小写文本解析，非规范形式拒绝。领域 codec 另有严格语法校验。
 
 领域失败由 [`DomainException`](../../common/src/main/java/fun/fengwk/kkstudio/common/error/DomainException.java)
 表达，全局 [`ProblemAdvice`](../../web/src/main/java/fun/fengwk/kkstudio/web/advice/ProblemAdvice.java)
 按错误类别、原因或框架状态生成 problem 响应。领域版本坐标和 Canvas 冲突详情放在 `errors` 中，内部
-`resource` 不进入 wire。请求体无法解析时只输出固定去敏详情；未预期异常不暴露内部消息。
+`resource` 不进入 wire。请求体含未知字段或标量类型/格式错误时，`detail` 指出字段路径与错误类别；
+无法定位到字段或语法本身损坏时使用固定文案，任何情况都不回显输入。未预期异常不暴露内部消息。
 locale 支持 en-US/zh-CN，其他回退英文。错误类别与成员见[系统设计的 HTTP 契约](../system-design.md#http-契约)。
 
 用户认证、TLS 和 ingress 访问控制由部署边界提供。

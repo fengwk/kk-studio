@@ -382,7 +382,8 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
 矩阵分成 L1 免费 API 契约、L2 真实文本与推理、L3 真实分支、L4 Environment/Tool/approval、L5
 双节点分布式，外加独立的 UI 矩阵。每个 level 的 case 数、标题与 `requires` 只由
 `node scripts/dev/verify/e2e/run-matrix.mjs --list` 与 `--docs` 生成，不要把它们抄进文档；默认执行哪些 case
-由 flag 组合和 case 的 `requires` 共同决定。
+由 flag 组合和 case 的 `requires` 共同决定。所有 HTTP 4xx 断言必须显式给出 problem `code`；
+`code=conflict` 必须同时给出精确 `reason`，其他 reason 一旦断言也按完整字符串匹配，不能只检查状态码。
 
 Agent execution 的读取、CRUD 和内置身份约束属于免费 L1：目录请求使用
 `{driver, settings}`，Builtin settings 包含 `modelName` 与可空 `variant`；Agent config
@@ -390,7 +391,8 @@ Agent execution 的读取、CRUD 和内置身份约束属于免费 L1：目录�
 更改 Agent 契约时同步 case、fixture 与生成的前端契约。
 
 Project 的 UUID 与版本输入属于免费 L1 契约：`project.issue_lifecycle` 验证大写 UUID 和带前后空白的版本
-返回 400，不把它们归一后写入业务状态。合法 ID 必须与 `UUID.toString()` 一致，版本必须是无前导零的非负十进制 long。
+返回 `400` / `code: validation`，不把它们归一后写入业务状态。合法 ID 必须与 `UUID.toString()` 一致，
+版本必须是无前导零的非负十进制 long。
 用例验证空闲 Issue 的 STOP 产生 USER 暂停、暂停期间禁止合法流转且显式 resume 解除门禁；
 活动流通过详情接口的 `afterSequence`、`limit` 和 `nextActivityCursor` 验证有界分页。
 
@@ -405,10 +407,11 @@ Linux 脚本只下载并检查保存配置与响应头，不执行安装；卸�
 只验证用例与 HTTP mock 的契约，不能替代真实 HTTP L1 验收。
 
 运行快照与 IDE 拒绝路径也属于免费 L1：
-`environment.runtime_absent_unavailable` 验证无本代 READY 时返回 canonical
-`409 environment_unavailable`，而不是伪造空快照；`environment.ide_view_no_ready_owner_rejected`
-使用合法视图命令输入验证打开、目录列举与切换、终端、移动布局及关闭在无 READY owner 时的 `409 ide_unavailable`，并验证非法环境 ID
-返回 `400 validation`。二者均创建并清理独立 Environment，不连接 Daemon 或模型。
+`environment.runtime_absent_unavailable` 验证无本代 READY 时返回
+`409` / `code: unavailable` / `reason: ENVIRONMENT_UNAVAILABLE`，而不是伪造空快照；
+`environment.ide_view_no_ready_owner_rejected` 使用合法视图命令输入验证打开、目录列举与切换、终端、移动布局及关闭
+在无 READY owner 时的 `409` / `code: unavailable` / `reason: IDE_UNAVAILABLE`，并验证非 canonical
+environmentId 返回 `400` / `code: validation`。二者均创建并清理独立 Environment，不连接 Daemon 或模型。
 无 owner 时请求先被路由拒绝，因此这不证明已 READY 场景的 exact-intent 校验、
 视图占用、续租或真实数据面行为。脚本 fixture 测试也不替代对真实测试服务执行这些 L1 case。
 
@@ -644,7 +647,8 @@ Daemon。
 百分位是 nearest-rank，按 `ceil(p / 100 × n)` 取值；错误请求仍计入延迟，少于 20 个测量样本
 fail closed。Canvas warmup 和测量创建的行会保留，超时或中断的请求也可能已创建行；
 runner 不通过 HTTP 清理，直到隔离测试数据库/volume 清理时才消失。正常、失败、超时、INT、
-TERM 时脚本执行 `down --volumes --remove-orphans`。基线测量的是创建事务。
+TERM 时脚本执行 `down --volumes --remove-orphans`。当前仅创建事务的结果不能与旧的
+create+delete 工作负载结果比较。
 
 ## 供应链门禁
 
@@ -711,7 +715,8 @@ user（UID `10001`）下检查 `/opt/kk-studio/daemon/main.js` 与冻结运行�
 Daemon 镜像以 Node 24.21.0 为 builder、`debian:bookworm-slim` 为 runtime，并将 npm bundle 的
 `brace-expansion`、`ip-address`、`undici` 分别更新到 `5.0.12`、`10.7.3`、`6.28.1`；`tar` 使用 npm
 自带的 `7.5.22`。
-镜像扫描以当次 Trivy 结果为准，不将探针断言当作漏洞扫描通过。
+`http-cache-semantics<=4.2.0` 的 HIGH `CVE-2026-93748` 当前尚无上游补丁，保持原包并报告未解决风险，
+不能据此宣称镜像扫描通过。
 
 Daemon 原有 smoke 成功后，通过 stdin 注入
 [`npm-cache-probe.mjs`](../../scripts/dev/verify/supply-chain/npm-cache-probe.mjs)，无需重建镜像。
@@ -732,6 +737,7 @@ JSON 记录 runtime/shared、origin hits、第二次 body 来源、cache status 
 - 无 Vary 的认证变更、响应 `no-cache` + `Age: 120` 后请求 `max-stale` 只记录
   `OBSERVED` / `NOT_OBSERVED`；无 public 的 Set-Cookie case 观察头剥离，不证明 body 隔离。
 
+实测 `shared=false` 下无 Vary 仍复用 A body，`no-cache` 回源保护仍被 `max-stale` 绕过。
 `ASSERTIONS_SATISFIED` 不证明安全、漏洞修复或不受影响；同 OS 用户 cache 不是跨租户隔离，
 **不要跨互不信任主体共享 npm cache**，认证响应需正确配置 Vary，禁止存储用响应 no-store。
 退出非零、JSON 空/非法或预期报告缺失使 Daemon smoke 失败，随后仍运行 Trivy；
@@ -840,7 +846,7 @@ Model 包含 Provider；插件条目只带 `pluginId` 与普通值，并按插�
 没有跳过项时点击“确认导入”；有跳过项时，可取消或明确选择“仅导入可用配置”。
 没有可导入项时不提供执行按钮。不支持的条目及依赖它们的配置不会被悄悄改写。
 
-YAML 结构、类型、有效值错误或当前必填字段缺失会直接拒绝整份文件，不进入导入计划；应根据错误提示修改文件后重新检查。预检发现的可跳过项（如未知系统设置字段）会在确认页列出原因，用户可取消或选择“仅导入可用配置”。
+YAML 结构、类型、有效值错误或当前必填字段缺失会直接拒绝整份文件，不进入导入计划；应根据错误提示修改文件后重新检查。预检发现的可跳过项（如未知条目字段、未知系统设置字段或未知顶层类别）会在确认页列出原因，用户可取消或选择“仅导入可用配置”；条目的已知字段仍先按写入路径校验。
 条目名称须非空且没有首尾空白，重复名称不会依次覆盖；注册令牌摘要被不同 Environment 占用、
 同名 Skill Package 更换仓库地址、移除仍被引用的 Skill 或 MCP 工具也会整份拒绝。
 文件未包含的类别保持原样，但包含系统设置时必须提供当前完整设置结构，不能只提供局部字段。
@@ -946,7 +952,7 @@ dump 之后、冻结之前提交的写入。冻结后的 `<db>_pre_<UTCstamp>` �
 [`V1__schema.sql`](../../schema/src/main/resources/db/migration/V1__schema.sql)。这一步不属于维护
 脚本。随后仅向维护人员开放产品入口，Worker 保持停止。
 
-4. 在“设置 → 同步”导入之前保存的 YAML。系统预检区分文件级解析错误与条目级可跳过项：若存在语法错误、必填项缺失或旧版废弃字段，会直接整份拒绝，须调整 YAML 内容后重试；存在未知设置项等可跳过条目时，支持在确认页选择“仅导入可用配置”。Git 渠道技能包在导入时会向远端重新解析分支 HEAD，须确保远端 Git 网络连通。检查已导入和跳过的条目，在平台“技能包”重新上传发布上传渠道技能包，并在平台“系统设置 → 网络”核对全局代理配置，补齐目标部署的 Git/MCP 访问条件与 Plugin 认证后再恢复 Worker、Daemon 和对外访问。
+4. 在“设置 → 同步”导入之前保存的 YAML。系统预检区分文件级错误与条目级可跳过项：语法错误、错误类型、必填项缺失或已知字段非法值会整份拒绝；未知条目字段（包括旧版 Agent `model` / `variant`）、未知顶层类别与未知系统设置项会被跳过并列出原因，用户可选择“仅导入可用配置”。可跳过条目的已知字段仍先按写入路径校验，非法值不会因同时含未知字段而降级。Git 渠道技能包在导入时会向远端重新解析分支 HEAD，须确保远端 Git 网络连通。检查已导入和跳过的条目，在平台“技能包”重新上传发布上传渠道技能包，并在平台“系统设置 → 网络”核对全局代理配置，补齐目标部署的 Git/MCP 访问条件与 Plugin 认证后再恢复 Worker、Daemon 和对外访问。
 
 5. 检查 App 健康、配置、Daemon 重连、关键业务和既有 bucket。
    验收结束前保留完整备份、冻结库和对象存储数据；失败时保持停写，按部署恢复流程决定回退。
