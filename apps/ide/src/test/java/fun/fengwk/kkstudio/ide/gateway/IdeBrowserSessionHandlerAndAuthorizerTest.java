@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -12,6 +13,7 @@ import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.IdeBootstrapTicketService;
@@ -86,6 +88,35 @@ class IdeBrowserSessionHandlerAndAuthorizerTest {
     HttpServletResponse invalidRes = mock(HttpServletResponse.class);
     handler.handleBootstrap(ENV, VIEW, invalidReq, invalidRes);
     verify(invalidRes).sendError(HttpServletResponse.SC_GONE);
+  }
+
+  /** bootstrap 重定向的 workspace 参数按 RFC 3986 编码：空格是 %20，不使用表单语义的 +。 */
+  @Test
+  void handlerBootstrapEncodesWorkspacePathWithoutFormSemantics() throws IOException {
+    String workspace = "/managed/my project/a+b";
+    IdeBootstrapTicketService tickets = mock(IdeBootstrapTicketService.class);
+    IdeBrowserSessionRegistry registry = new IdeBrowserSessionRegistry();
+    IdeCommandTransport transport = mock(IdeCommandTransport.class);
+    when(transport.connectionIdentity(ENV)).thenReturn(Optional.of(IDENTITY));
+    registry.viewOpened(IDENTITY, VIEW.toString(), 1L, workspace);
+    when(tickets.consume("ticket"))
+        .thenReturn(
+            Optional.of(
+                new IdeBootstrapTicketService.Ticket(IDENTITY, VIEW.toString(), 1L, workspace)));
+
+    IdeBrowserSessionHandler handler = new IdeBrowserSessionHandler(tickets, registry, transport);
+    HttpServletRequest req = mock(HttpServletRequest.class);
+    when(req.getParameter("token")).thenReturn("ticket");
+    when(req.getContextPath()).thenReturn("");
+    HttpServletResponse res = mock(HttpServletResponse.class);
+
+    handler.handleBootstrap(ENV, VIEW, req, res);
+
+    ArgumentCaptor<String> location = ArgumentCaptor.forClass(String.class);
+    verify(res).setHeader(eq("Location"), location.capture());
+    assertTrue(
+        location.getValue().endsWith("?workspace=%2Fmanaged%2Fmy%20project%2Fa%2Bb"),
+        location.getValue());
   }
 
   @Test

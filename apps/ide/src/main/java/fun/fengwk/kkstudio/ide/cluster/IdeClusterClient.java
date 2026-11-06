@@ -5,6 +5,7 @@ import tools.jackson.databind.ObjectMapper;
 
 import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
+import fun.fengwk.kkstudio.common.uri.UrlEncoding;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeChangeDirectoryDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeCloseViewDTO;
@@ -20,7 +21,6 @@ import fun.fengwk.kkstudio.platform.cluster.ClusterInternalErrors.Problem;
 import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
 
 import java.net.URI;
-import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -148,7 +148,7 @@ public class IdeClusterClient {
       EnvironmentId environmentId, ClusterOwnerRoute owner, String path) {
     String target = IdeInternalPaths.environmentPrefix(environmentId) + "/directories";
     if (path != null) {
-      target += "?path=" + URLEncoder.encode(path, StandardCharsets.UTF_8);
+      target += "?path=" + UrlEncoding.encode(path);
     }
     return exchange("GET", target, owner, null, EnvironmentIdeDirectoryListingDTO.class);
   }
