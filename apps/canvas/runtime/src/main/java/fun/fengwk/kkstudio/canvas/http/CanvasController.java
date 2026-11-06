@@ -21,10 +21,10 @@ import fun.fengwk.kkstudio.canvas.dto.CreateCanvasRequestDTO;
 import fun.fengwk.kkstudio.canvas.infra.dto.CanvasDtoMapper;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasCommandService;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasQueryService;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
 
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -112,8 +112,8 @@ public class CanvasController {
       return switch (result) {
         case CanvasCommandResult.Accepted accepted -> ResponseEntity.ok(
             ApiResponse.ok(mapper.toDto(accepted.patch())));
-        case CanvasCommandResult.Conflicted conflicted -> ResponseEntity.status(HttpStatus.CONFLICT)
-            .body(conflict(mapper.toDto(conflicted.conflicts())));
+        case CanvasCommandResult.Conflicted conflicted -> throw conflict(
+            mapper.toDto(conflicted.conflicts()));
       };
     } catch (CanvasConflictException ex) {
       HttpStatus status =
@@ -127,14 +127,11 @@ public class CanvasController {
   }
 
   /** 冲突响应只透出受影响对象、语义组与服务端权威值，不携带新的编辑基线。 */
-  private static ApiResponse<CanvasPatchDTO> conflict(List<CanvasConflictDTO> conflicts) {
-    Map<String, Object> errorContext = new LinkedHashMap<>();
-    errorContext.put("type", "about:blank");
-    errorContext.put("title", "Canvas command conflict");
-    errorContext.put("detail", "command prerequisites are stale; no write was applied");
+  private static DomainException conflict(List<CanvasConflictDTO> conflicts) {
     // 数组保留元素的静态类型，判别值 kind 才会随类型信息写出；List 在无类型上下文里会丢失它。
-    errorContext.put("conflicts", conflicts.toArray(CanvasConflictDTO[]::new));
-    return ApiResponse.error(
-        HttpStatus.CONFLICT, "CANVAS_COMMAND_CONFLICT", "Canvas command conflict", errorContext);
+    return DomainException.conflict(
+        "CANVAS_COMMAND_CONFLICT",
+        "command prerequisites are stale; no write was applied",
+        Map.of("conflicts", conflicts.toArray(CanvasConflictDTO[]::new)));
   }
 }

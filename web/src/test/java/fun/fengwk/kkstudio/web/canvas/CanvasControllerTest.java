@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.canvas.http;
+package fun.fengwk.kkstudio.web.canvas;
 
 import static org.hamcrest.Matchers.nullValue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -19,6 +19,7 @@ import static org.springframework.test.web.servlet.setup.MockMvcBuilders.standal
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
+import org.springframework.http.converter.json.JacksonJsonHttpMessageConverter;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import tools.jackson.databind.JsonNode;
@@ -49,11 +50,16 @@ import fun.fengwk.kkstudio.canvas.dto.CanvasResourceInputDTO;
 import fun.fengwk.kkstudio.canvas.dto.CanvasTransformDTO;
 import fun.fengwk.kkstudio.canvas.dto.CreateCanvasRequestDTO;
 import fun.fengwk.kkstudio.canvas.function.CanvasJson;
+import fun.fengwk.kkstudio.canvas.http.CanvasController;
 import fun.fengwk.kkstudio.canvas.infra.dto.CanvasDtoMapper;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasCommandService;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasQueryService;
+import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
+import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
+import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
+import fun.fengwk.kkstudio.web.advice.StudioProblemAdvice;
 
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -85,7 +91,7 @@ class CanvasControllerTest {
   @SuppressWarnings("unchecked")
   void setUp() {
     // 与生产 HTTP 一致：Long 输出十进制字符串、默认 NON_NULL、DTO 声明顺序，未知字段由 DTO @JsonAnySetter 拒绝。
-    objectMapper = CanvasHttpJsonTestSupport.get();
+    objectMapper = StrictHttpJsonMapperTestSupport.get();
     queryService = mock(CanvasQueryService.class);
     commandService = mock(CanvasCommandService.class);
     blobManager = mock(StorageBlobManager.class);
@@ -100,7 +106,9 @@ class CanvasControllerTest {
         standaloneSetup(
                 new CanvasController(
                     queryService, commandService, new CanvasDtoMapper(blobManager)))
-            .setMessageConverters(CanvasHttpJsonTestSupport.converter())
+            .setMessageConverters(new JacksonJsonHttpMessageConverter(objectMapper))
+            .setControllerAdvice(
+                new ApiResponseStatusAdvice(), new StudioProblemAdvice(new StudioMessageService()))
             .build();
   }
 
@@ -114,54 +122,54 @@ class CanvasControllerTest {
         mockMvc
             .perform(get("/api/canvases"))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data[0].id").value(CANVAS.toString()))
-            .andExpect(jsonPath("$.data[0].revision").value("3"))
-            .andExpect(jsonPath("$.data[0].version").doesNotExist())
+            .andExpect(jsonPath("$[0].id").value(CANVAS.toString()))
+            .andExpect(jsonPath("$[0].revision").value("3"))
+            .andExpect(jsonPath("$[0].version").doesNotExist())
             .andReturn();
     JsonNode listJson = readTree(list);
     assertEquals(
-        true, listJson.at("/data/0/revision").isTextual(), "revision wire must be a JSON string");
-    assertEquals("3", listJson.at("/data/0/revision").asText());
+        true, listJson.at("/0/revision").isTextual(), "revision wire must be a JSON string");
+    assertEquals("3", listJson.at("/0/revision").asText());
 
     MvcResult snapshotResult =
         mockMvc
             .perform(get("/api/canvases/" + CANVAS))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data.document.revision").value("3"))
-            .andExpect(jsonPath("$.data.nodes[0].id").value(NODE_1.toString()))
-            .andExpect(jsonPath("$.data.nodes[0].resources[0].id").value(RESOURCE_1.toString()))
-            .andExpect(jsonPath("$.data.nodes[0].resources[0].blobId").value(BLOB_1.toString()))
-            .andExpect(jsonPath("$.data.nodes[0].resources[0].kind").value("IMAGE"))
-            .andExpect(jsonPath("$.data.nodes[0].resources[0].mediaType").value("image/png"))
-            .andExpect(jsonPath("$.data.nodes[0].resources[0].sizeBytes").value("5"))
-            .andExpect(jsonPath("$.data.nodes[0].resources[0].width").value(640))
-            .andExpect(jsonPath("$.data.nodes[0].resources[0].height").value(480))
-            .andExpect(jsonPath("$.data.nodes[0].resources[0].durationMs").value(nullValue()))
-            .andExpect(jsonPath("$.data.nodes[0].groupId").value(GROUP.toString()))
-            .andExpect(jsonPath("$.data.nodes[0].function").value(nullValue()))
-            .andExpect(jsonPath("$.data.nodes[0].run").value(nullValue()))
-            .andExpect(jsonPath("$.data.nodes[1].function.name").value("image.crop"))
-            .andExpect(jsonPath("$.data.nodes[1].function.args.x").value(100))
-            .andExpect(jsonPath("$.data.nodes[1].function.args.source.index").value(0))
-            .andExpect(jsonPath("$.data.nodes[1].groupId").value(nullValue()))
-            .andExpect(jsonPath("$.data.nodes[1].run.stage").value("QUEUED"))
-            .andExpect(jsonPath("$.data.nodes[1].run.requestId").value(REQUEST.toString()))
-            .andExpect(jsonPath("$.data.nodes[1].run.error").value(nullValue()))
-            .andExpect(jsonPath("$.data.nodes[1].run.stateJson").doesNotExist())
-            .andExpect(jsonPath("$.data.groups[0].id").value(GROUP.toString()))
-            .andExpect(jsonPath("$.data.references[0].canvasId").value(CANVAS.toString()))
-            .andExpect(jsonPath("$.data.references[0].sourceNodeId").value(NODE_1.toString()))
-            .andExpect(jsonPath("$.data.references[0].targetNodeId").value(NODE_2.toString()))
-            .andExpect(jsonPath("$.data.references[0].index").value(0))
-            .andExpect(jsonPath("$.data.links").doesNotExist())
+            .andExpect(jsonPath("$.document.revision").value("3"))
+            .andExpect(jsonPath("$.nodes[0].id").value(NODE_1.toString()))
+            .andExpect(jsonPath("$.nodes[0].resources[0].id").value(RESOURCE_1.toString()))
+            .andExpect(jsonPath("$.nodes[0].resources[0].blobId").value(BLOB_1.toString()))
+            .andExpect(jsonPath("$.nodes[0].resources[0].kind").value("IMAGE"))
+            .andExpect(jsonPath("$.nodes[0].resources[0].mediaType").value("image/png"))
+            .andExpect(jsonPath("$.nodes[0].resources[0].sizeBytes").value("5"))
+            .andExpect(jsonPath("$.nodes[0].resources[0].width").value(640))
+            .andExpect(jsonPath("$.nodes[0].resources[0].height").value(480))
+            .andExpect(jsonPath("$.nodes[0].resources[0].durationMs").value(nullValue()))
+            .andExpect(jsonPath("$.nodes[0].groupId").value(GROUP.toString()))
+            .andExpect(jsonPath("$.nodes[0].function").value(nullValue()))
+            .andExpect(jsonPath("$.nodes[0].run").value(nullValue()))
+            .andExpect(jsonPath("$.nodes[1].function.name").value("image.crop"))
+            .andExpect(jsonPath("$.nodes[1].function.args.x").value(100))
+            .andExpect(jsonPath("$.nodes[1].function.args.source.index").value(0))
+            .andExpect(jsonPath("$.nodes[1].groupId").value(nullValue()))
+            .andExpect(jsonPath("$.nodes[1].run.stage").value("QUEUED"))
+            .andExpect(jsonPath("$.nodes[1].run.requestId").value(REQUEST.toString()))
+            .andExpect(jsonPath("$.nodes[1].run.error").value(nullValue()))
+            .andExpect(jsonPath("$.nodes[1].run.stateJson").doesNotExist())
+            .andExpect(jsonPath("$.groups[0].id").value(GROUP.toString()))
+            .andExpect(jsonPath("$.references[0].canvasId").value(CANVAS.toString()))
+            .andExpect(jsonPath("$.references[0].sourceNodeId").value(NODE_1.toString()))
+            .andExpect(jsonPath("$.references[0].targetNodeId").value(NODE_2.toString()))
+            .andExpect(jsonPath("$.references[0].index").value(0))
+            .andExpect(jsonPath("$.links").doesNotExist())
             .andReturn();
     JsonNode json = readTree(snapshotResult);
-    assertTextual(json, "/data/document/revision", "3");
-    assertTextual(json, "/data/nodes/0/resources/0/sizeBytes", "5");
-    assertNullPresent(json, "/data/nodes/0/resources/0/durationMs");
-    assertNullPresent(json, "/data/nodes/0/function");
-    assertNullPresent(json, "/data/nodes/0/run");
-    assertNullPresent(json, "/data/nodes/1/run/error");
+    assertTextual(json, "/document/revision", "3");
+    assertTextual(json, "/nodes/0/resources/0/sizeBytes", "5");
+    assertNullPresent(json, "/nodes/0/resources/0/durationMs");
+    assertNullPresent(json, "/nodes/0/function");
+    assertNullPresent(json, "/nodes/0/run");
+    assertNullPresent(json, "/nodes/1/run/error");
   }
 
   /** 测试意图：Canvas 不拥有 Session，工作上下文属于 Harness，因此不注册任何 canvas session 归属入口。 */
@@ -197,14 +205,14 @@ class CanvasControllerTest {
     mockMvc
         .perform(get("/api/canvases/" + CANVAS))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.nodes[0].resources[0].kind").value("TEXT"))
-        .andExpect(jsonPath("$.data.nodes[0].resources[0].textContent").value("hello"))
-        .andExpect(jsonPath("$.data.nodes[0].resources[0].blobId").value(nullValue()))
-        .andExpect(jsonPath("$.data.nodes[0].resources[0].mediaType").value(nullValue()))
-        .andExpect(jsonPath("$.data.nodes[0].resources[0].sizeBytes").value(nullValue()))
-        .andExpect(jsonPath("$.data.nodes[0].resources[0].width").value(nullValue()))
-        .andExpect(jsonPath("$.data.nodes[0].resources[0].height").value(nullValue()))
-        .andExpect(jsonPath("$.data.nodes[0].resources[0].durationMs").value(nullValue()));
+        .andExpect(jsonPath("$.nodes[0].resources[0].kind").value("TEXT"))
+        .andExpect(jsonPath("$.nodes[0].resources[0].textContent").value("hello"))
+        .andExpect(jsonPath("$.nodes[0].resources[0].blobId").value(nullValue()))
+        .andExpect(jsonPath("$.nodes[0].resources[0].mediaType").value(nullValue()))
+        .andExpect(jsonPath("$.nodes[0].resources[0].sizeBytes").value(nullValue()))
+        .andExpect(jsonPath("$.nodes[0].resources[0].width").value(nullValue()))
+        .andExpect(jsonPath("$.nodes[0].resources[0].height").value(nullValue()))
+        .andExpect(jsonPath("$.nodes[0].resources[0].durationMs").value(nullValue()));
 
     CreateCanvasRequestDTO body = new CreateCanvasRequestDTO();
     body.setTitle("board");
@@ -213,10 +221,9 @@ class CanvasControllerTest {
             post("/api/canvases")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsBytes(body)))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.code").value("CREATED"))
-        .andExpect(jsonPath("$.data.revision").value("3"))
-        .andExpect(jsonPath("$.data.id").value(CANVAS.toString()));
+        .andExpect(status().isCreated())
+        .andExpect(jsonPath("$.revision").value("3"))
+        .andExpect(jsonPath("$.id").value(CANVAS.toString()));
     verify(commandService).createCanvas("board");
 
     mockMvc
@@ -270,11 +277,11 @@ class CanvasControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsBytes(request)))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.revision").value("3"))
-        .andExpect(jsonPath("$.data.nodes[0].op").value("REMOVE"))
-        .andExpect(jsonPath("$.data.nodes[0].nodeId").value(NODE_2.toString()))
-        .andExpect(jsonPath("$.data.groups[0].op").value("UPSERT"))
-        .andExpect(jsonPath("$.data.groups[0].group.id").value(GROUP.toString()));
+        .andExpect(jsonPath("$.revision").value("3"))
+        .andExpect(jsonPath("$.nodes[0].op").value("REMOVE"))
+        .andExpect(jsonPath("$.nodes[0].nodeId").value(NODE_2.toString()))
+        .andExpect(jsonPath("$.groups[0].op").value("UPSERT"))
+        .andExpect(jsonPath("$.groups[0].group.id").value(GROUP.toString()));
 
     verify(commandService)
         .applyCommands(
@@ -326,7 +333,8 @@ class CanvasControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(commandJson("")))
         .andExpect(status().isConflict())
-        .andExpect(jsonPath("$.code").value("CANVAS_COMMAND_CONFLICT"))
+        .andExpect(jsonPath("$.code").value("conflict"))
+        .andExpect(jsonPath("$.reason").value("CANVAS_COMMAND_CONFLICT"))
         .andExpect(jsonPath("$.errors.conflicts[0].kind").value("TARGET_MISSING"))
         .andExpect(jsonPath("$.errors.conflicts[0].targetId").value(NODE_2.toString()))
         .andExpect(jsonPath("$.errors.conflicts[0].target").value("NODE"))
@@ -377,10 +385,10 @@ class CanvasControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(commandJson("")))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.revision").value("2"))
-        .andExpect(jsonPath("$.data.nodes").isEmpty())
-        .andExpect(jsonPath("$.data.groups").isEmpty())
-        .andExpect(jsonPath("$.data.baseVersion").doesNotExist());
+        .andExpect(jsonPath("$.revision").value("2"))
+        .andExpect(jsonPath("$.nodes").isEmpty())
+        .andExpect(jsonPath("$.groups").isEmpty())
+        .andExpect(jsonPath("$.baseVersion").doesNotExist());
   }
 
   /** 测试意图：严格请求校验——未知字段、未知命令类型、非法 id、缺失或空命令批都在触达服务前被拒绝。 */
