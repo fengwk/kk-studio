@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.platform.harness.dto;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
 import org.jspecify.annotations.Nullable;
+import tools.jackson.databind.JsonNode;
 
 import fun.fengwk.kkstudio.harness.api.history.EntryType;
 
@@ -27,13 +28,13 @@ public class HarnessSessionEntryDTO {
   private EntryType entryType;
 
   /** canonical JSON（HistoryEntryPayloadJsonCodec 编码），内容形态随 entryType 变化。 */
-  private String payloadJson;
+  private JsonNode payload;
 
   /** Entry 创建时间（UTC Instant）。 */
   private Instant createdAt;
 
   /**
-   * 读取时按当前目录价现算的费用投影；绝不属于 durable 历史（不进入 payloadJson / assistantMetadata）。
+   * 读取时按当前目录价现算的费用投影；绝不属于 durable 历史（不进入 payload / assistantMetadata）。
    *
    * <p>只有记录了真实 model 用量、且祖先 TURN_START 的模型选择能在当前 catalog 命中价格的 ASSISTANT 结果才有值；其余情况 （非模型输出、模型已从
    * catalog 删除、价格不可得）显式输出 null，绝不伪装成 0 费用。{@code @JsonInclude(ALWAYS)} 让「未计价」 与「计价为 0」在 wire 上可区分。

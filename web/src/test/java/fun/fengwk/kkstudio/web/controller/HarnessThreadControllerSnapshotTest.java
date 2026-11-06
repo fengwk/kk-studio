@@ -38,7 +38,7 @@ import java.util.Set;
 import java.util.UUID;
 
 /** Thread 快照读取端点：完整快照、增量快照、费用投影与环境等待叠加。 */
-class StudioHarnessThreadSnapshotControllerTest extends HarnessThreadControllerTestSupport {
+class HarnessThreadControllerSnapshotTest extends HarnessThreadControllerTestSupport {
 
   @Test
   void missingSnapshotReturnsNotFoundProblem() throws Exception {

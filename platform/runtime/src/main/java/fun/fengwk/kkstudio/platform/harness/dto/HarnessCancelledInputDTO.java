@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.platform.harness.dto;
 
 import lombok.Data;
+import tools.jackson.databind.JsonNode;
 
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommandType;
 
@@ -8,7 +9,7 @@ import fun.fengwk.kkstudio.harness.api.command.ThreadCommandType;
  * Stop 取消的一条人工输入。
  *
  * <p>只包含 HUMAN USER_MESSAGE / GOAL：{@code CUSTOM_MESSAGE} 与 NOTIFICATION 不是用户草稿，不在此返回。{@code
- * payloadJson} 是 canonical {@code ThreadCommandPayload} JSON，随命令类型变化；{@code type} 是命令类型名。sequence 按
+ * payload} 是 canonical {@code ThreadCommandPayload} JSON，随命令类型变化；{@code type} 是命令类型名。sequence 按
  * Thread command sequence 严格递增。
  */
 @Data
@@ -24,5 +25,5 @@ public class HarnessCancelledInputDTO {
   private ThreadCommandType type;
 
   /** 原命令载荷的 canonical ThreadCommandPayload JSON。 */
-  private String payloadJson;
+  private JsonNode payload;
 }

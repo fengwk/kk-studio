@@ -19,6 +19,7 @@ import org.springframework.beans.factory.ObjectProvider;
 
 import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
+import fun.fengwk.kkstudio.common.json.JsonValues;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.api.history.EntryCurrentState;
@@ -251,7 +252,7 @@ class InteractionQueryServiceTest {
     assertEquals(sessionId2.toString(), dto2.sessionId());
     assertEquals(threadId2.toString(), dto2.rootThreadId());
     assertEquals("{\"env\":\"prod\"}", dto2.argumentsJson());
-    assertEquals("{\"allowed\":false}", dto2.approvalJson());
+    assertEquals(JsonValues.readTree("{\"allowed\":false}"), dto2.approval());
     assertEquals(t2, dto2.createdAt());
     assertEquals("ISSUE_AGENT", dto2.owner().getKind());
     assertEquals(id(2001).toString(), dto2.owner().getId());

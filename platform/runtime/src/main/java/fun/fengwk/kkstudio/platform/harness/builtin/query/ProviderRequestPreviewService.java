@@ -25,7 +25,6 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
-import fun.fengwk.kkstudio.platform.harness.builtin.query.ProviderRequestPreviewUnavailableException.Reason;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessProviderRequestPreviewDTO;
 import fun.fengwk.kkstudio.platform.harness.model.DatabaseProviderResolutionService;
 import fun.fengwk.kkstudio.platform.harness.model.ProviderResolutionService;
@@ -92,8 +91,8 @@ public final class ProviderRequestPreviewService {
     UUID requestHeadEntryId = requireRequestHead(output);
     EntryPath requestPath = entryPath(entries, requestHeadEntryId);
     if (!BuiltinExecution.DRIVER.equals(requestPath.baseSettings().execution().driver())) {
-      throw new ProviderRequestPreviewUnavailableException(
-          Reason.PREVIEW_UNSUPPORTED,
+      throw DomainException.conflict(
+          "PREVIEW_UNSUPPORTED",
           "provider request preview is only supported for builtin execution driver");
     }
     Instant recordedAt = output.createdAt();
@@ -328,15 +327,13 @@ public final class ProviderRequestPreviewService {
         spec.groupExecution());
   }
 
-  private static ProviderRequestPreviewUnavailableException frozenCompactionUnavailable(
-      String detail) {
-    return new ProviderRequestPreviewUnavailableException(Reason.PREVIEW_UNSUPPORTED, detail);
+  private static DomainException frozenCompactionUnavailable(String detail) {
+    return DomainException.conflict("PREVIEW_UNSUPPORTED", detail);
   }
 
-  private static ProviderRequestPreviewUnavailableException frozenCompactionUnavailable(
+  private static DomainException frozenCompactionUnavailable(
       String detail, RuntimeException cause) {
-    return new ProviderRequestPreviewUnavailableException(
-        Reason.PREVIEW_UNSUPPORTED, detail, cause);
+    return DomainException.conflict("PREVIEW_UNSUPPORTED", detail, cause);
   }
 
   /** 历史重建共用的只读尾部：冻结规划 -> 物化 -> 正式协议编码 -> 稳定响应投影。 */
@@ -344,8 +341,8 @@ public final class ProviderRequestPreviewService {
       LiveTurnPlan plan, EntryPath candidatePath, Instant plannedAt, UUID sourceHeadEntryId) {
     if (plan instanceof LiveTurnPlan.Rejected) {
       // 规划的错误码与自由文本详情都不属于公开预览协议。
-      throw new ProviderRequestPreviewUnavailableException(
-          Reason.PREVIEW_PLANNING_FAILED, "request cannot be planned for preview");
+      throw DomainException.conflict(
+          "PREVIEW_PLANNING_FAILED", "request cannot be planned for preview");
     }
     ModelRequestSpec spec = ((LiveTurnPlan.Planned) plan).spec();
     ModelRequestSpec execution = spec.groupExecution() == null ? spec : spec.forMember(0);
@@ -432,19 +429,18 @@ public final class ProviderRequestPreviewService {
       resolved =
           providerResolution.resolve(providerType, spec.providerConnectionGenerationId(), request);
     } catch (IllegalArgumentException | IllegalStateException error) {
-      throw new ProviderRequestPreviewUnavailableException(
-          Reason.PREVIEW_PROVIDER_UNAVAILABLE, "cannot resolve the current provider for preview");
+      throw DomainException.conflict(
+          "PREVIEW_PROVIDER_UNAVAILABLE", "cannot resolve the current provider for preview");
     }
     try {
       return resolved.encodeRequestBody();
     } catch (UnsupportedOperationException error) {
-      throw new ProviderRequestPreviewUnavailableException(
-          Reason.PREVIEW_UNSUPPORTED,
-          providerType + " adapter does not support request body preview");
+      throw DomainException.conflict(
+          "PREVIEW_UNSUPPORTED", providerType + " adapter does not support request body preview");
     } catch (ProviderException error) {
       // 编码失败的原因文本可能携带请求细节，这里只保留稳定的失败类别。
-      throw new ProviderRequestPreviewUnavailableException(
-          Reason.PREVIEW_ENCODING_FAILED, "request body cannot be encoded for preview", error);
+      throw DomainException.conflict(
+          "PREVIEW_ENCODING_FAILED", "request body cannot be encoded for preview", error);
     }
   }
 }

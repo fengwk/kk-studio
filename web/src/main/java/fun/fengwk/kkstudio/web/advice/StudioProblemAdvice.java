@@ -16,7 +16,6 @@ import org.springframework.web.server.ResponseStatusException;
 import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.cluster.ClusterInternalAuthenticationException;
-import fun.fengwk.kkstudio.platform.harness.builtin.query.ProviderRequestPreviewUnavailableException;
 import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.share.runtime.HarnessRequestFormatException;
 
@@ -64,8 +63,6 @@ public class StudioProblemAdvice {
     if (error.getCause() instanceof DomainException domain
         && domain.code() == DomainErrorCode.CONFLICT) {
       reason = domain.reason();
-    } else if (error.getCause() instanceof ProviderRequestPreviewUnavailableException preview) {
-      reason = preview.reason().name();
     }
     return framework(error.getStatusCode().value(), error.getReason(), reason);
   }

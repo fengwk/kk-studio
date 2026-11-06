@@ -3,12 +3,14 @@ package fun.fengwk.kkstudio.platform.harness.http;
 import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Service;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessAcceptedCommandsDTO;
+import fun.fengwk.kkstudio.platform.orchestration.DirectCommandsNotAllowedException;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrchestrator;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwner;
 
@@ -32,7 +34,11 @@ public class HarnessCommandBatchService {
     } else if (command.target() instanceof AcceptCommandsTarget.NewForkedSession forkedSession) {
       ManualThreadControlGuard.requireForkRootSourceThread(runtime, forkedSession.sourceThreadId());
     }
-    return toAcceptedDto(acceptanceService.accept(owner, command));
+    try {
+      return toAcceptedDto(acceptanceService.accept(owner, command));
+    } catch (DirectCommandsNotAllowedException error) {
+      throw DomainException.conflict("DIRECT_COMMANDS_NOT_ALLOWED", error.getMessage(), error);
+    }
   }
 
   /** 接受既有 Thread 的 owner-free 续写；target 必须是执行根。 */

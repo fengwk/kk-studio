@@ -25,8 +25,6 @@ import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.cluster.ClusterInternalAuthenticationException;
-import fun.fengwk.kkstudio.platform.harness.builtin.query.ProviderRequestPreviewUnavailableException;
-import fun.fengwk.kkstudio.platform.harness.builtin.query.ProviderRequestPreviewUnavailableException.Reason;
 import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.share.runtime.HarnessRequestFormatException;
 
@@ -86,11 +84,6 @@ class StudioProblemAdviceTest {
     assertCategory(504, "upstream_failed");
     assertCategory(503, "unavailable");
     assertCategory(418, "internal");
-    var preview =
-        new ProviderRequestPreviewUnavailableException(Reason.PREVIEW_UNSUPPORTED, "safe");
-    var response =
-        advice.responseStatus(new ResponseStatusException(HttpStatus.CONFLICT, "safe", preview));
-    assertEquals("PREVIEW_UNSUPPORTED", response.getBody().get("reason"));
     DomainException conflict = DomainException.conflict("STALE_COMMAND_CURSOR", "stale cursor");
     var wrapped =
         advice.responseStatus(
@@ -153,28 +146,6 @@ class StudioProblemAdviceTest {
     } finally {
       LocaleContextHolder.resetLocaleContext();
     }
-  }
-
-  /** 预览原因只能来自直接的 typed cause，不能从消息或嵌套异常猜测。 */
-  @Test
-  void previewReasonRequiresDirectCause() {
-    for (Reason reason : Reason.values()) {
-      var preview = new ProviderRequestPreviewUnavailableException(reason, "safe");
-      var body =
-          advice
-              .responseStatus(new ResponseStatusException(HttpStatus.CONFLICT, "safe", preview))
-              .getBody();
-      assertEquals(reason.name(), body.get("reason"));
-      assertEquals("safe", body.get("detail"));
-    }
-    var nested =
-        new RuntimeException(
-            new ProviderRequestPreviewUnavailableException(Reason.PREVIEW_UNSUPPORTED, "secret"));
-    var body =
-        advice
-            .responseStatus(new ResponseStatusException(HttpStatus.CONFLICT, "safe", nested))
-            .getBody();
-    assertEquals("HTTP_CONFLICT", body.get("reason"));
   }
 
   /** 普通 parser 异常不回显正文，仅可信 Harness 格式异常可提供 detail。 */

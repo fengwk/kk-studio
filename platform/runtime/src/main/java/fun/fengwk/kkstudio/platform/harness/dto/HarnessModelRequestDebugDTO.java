@@ -3,7 +3,9 @@ package fun.fengwk.kkstudio.platform.harness.dto;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
 import org.jspecify.annotations.Nullable;
+import tools.jackson.databind.JsonNode;
 
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.platform.environment.skill.SkillPromptResolution;
 import fun.fengwk.kkstudio.platform.harness.thread.command.LiveTurnPlan;
 import fun.fengwk.kkstudio.platform.harness.thread.command.LiveTurnPlan.FilterReason;
@@ -22,7 +24,8 @@ import java.util.List;
  * 现算，不写回任何持久事实。活动 ModelInvocation 的冻结 canonical ProviderRequest 只出现在可空的 {@link FrozenInvocationDTO}
  * 中，且始终按原始 snapshot 与原路径物化，与草稿选择无关；已结束 Turn 的 Invocation 行已被删除，因此那里 不会有残留。
  *
- * <p>完整 schema 与请求 JSON 按字符串原样展示；credential、Authorization header、对象存储内部地址与 Base64 正文一律不进入本 DTO。
+ * <p>完整 schema 与配置以 JSON 节点展示，Provider 请求体保持原文字符串；credential、Authorization header、对象存储内部地址与 Base64
+ * 正文一律不进入本 DTO。
  */
 @Data
 public class HarnessModelRequestDebugDTO {
@@ -74,8 +77,8 @@ public class HarnessModelRequestDebugDTO {
     /** 工具描述。 */
     private String description;
 
-    /** 工具最终 Provider definition 的 input schema 原文。 */
-    private String inputSchemaJson;
+    /** 工具最终 Provider definition 的 input schema。 */
+    private JsonNode inputSchema;
 
     /** Tool 与 Environment 的关系，与 Tool catalog 共用同一个枚举。 */
     private EnvironmentSupportDTO environmentSupport;
@@ -155,7 +158,7 @@ public class HarnessModelRequestDebugDTO {
     private List<String> subagents;
 
     /** 目标 Agent 配置声明的 canonical config JSON（AgentConfigCodec 编码），不含任何凭据。 */
-    private String configurationJson;
+    private JsonNode configuration;
   }
 
   /** Provider cache control 事实，与冻结的 {@code ProviderCacheControl} 一一对应。 */
@@ -163,14 +166,7 @@ public class HarnessModelRequestDebugDTO {
   public static class CacheControlDTO {
 
     /** 留存档位，取 {@code NONE / SHORT / LONG}。 */
-    private Retention retention;
-
-    /** 缓存留存档位。 */
-    public enum Retention {
-      NONE,
-      SHORT,
-      LONG
-    }
+    private PromptCacheRetention retention;
 
     /** 稳定缓存前缀标识（session UUID 文本）；{@code retention = NONE} 时为 null（required-nullable）。 */
     @JsonInclude(JsonInclude.Include.ALWAYS)

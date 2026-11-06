@@ -36,9 +36,6 @@ public class HarnessThreadSnapshotDTO {
   /** 当前仍处于 QUEUED 状态的命令列表（不可变列表，默认空）。 */
   private List<HarnessThreadCommandDTO> queuedCommands = List.of();
 
-  /** Runtime 三态执行状态：RUNNING / WAITING / IDLE。 */
-  private String executionStatus;
-
   /** 当前 open Turn 的公共 Assistant 输出；无输出或输出已物化时为 null。 */
   @JsonInclude(JsonInclude.Include.ALWAYS)
   private @Nullable HarnessActiveAssistantOutputDTO activeAssistantOutput;

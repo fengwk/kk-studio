@@ -56,7 +56,7 @@ import java.util.Map;
 import java.util.UUID;
 
 /** Runtime Session 的 HTTP 契约：rename、Thread 摘要列表与 parent-linked Entry tree。 */
-class StudioHarnessSessionControllerTest {
+class HarnessSessionControllerTest {
 
   private static final UUID SESSION_ID = new UUID(0L, 1L);
 

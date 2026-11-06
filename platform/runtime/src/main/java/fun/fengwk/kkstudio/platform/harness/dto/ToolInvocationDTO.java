@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.platform.harness.dto;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
 import org.jspecify.annotations.Nullable;
+import tools.jackson.databind.JsonNode;
 
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
 
@@ -14,8 +15,8 @@ import java.time.Instant;
  * <p>工具身份字段由 durable ToolCall 直接派生：{@code toolCallId} / {@code toolName} / {@code argumentsJson}
  * 恒有值，{@code toolName} 是唯一模型可见工具身份。binding 派生字段仅在 binding 非 null 时有值：{@code environmentId} （binding
  * 为 null（unknown tool 槽位）时显式序列化 null），而 {@code rendererKey} 在 binding 非 null 时来自 binding，否则固定回退为
- * {@code tool}。{@code approvalJson} / {@code resultJson} / {@code errorJson} 为 canonical runtime
- * codec JSON，仅对应阶段非 null；{@code environmentId} 为 nullable 环境路由身份（canonical UUID string 或 null）。
+ * {@code tool}。{@code approval} / {@code result} / {@code error} 为 canonical runtime codec
+ * JSON，仅对应阶段非 null；{@code environmentId} 为 nullable 环境路由身份（canonical UUID string 或 null）。
  */
 @Data
 public class ToolInvocationDTO {
@@ -78,18 +79,18 @@ public class ToolInvocationDTO {
 
   /** 审批状态：canonical JSON（ToolApprovalJsonCodec）；记录决策后非 null（{@code @JsonInclude(ALWAYS)}）。 */
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private @Nullable String approvalJson;
+  private @Nullable JsonNode approval;
 
   /** 执行结果：canonical JSON（ToolResultJsonCodec）；仅成功阶段非 null（{@code @JsonInclude(ALWAYS)}）。 */
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private @Nullable String resultJson;
+  private @Nullable JsonNode result;
 
   /**
    * 错误详情：canonical JSON（ToolInvocationError record 的严格绑定）；仅记录错误后非
    * null（{@code @JsonInclude(ALWAYS)}）。
    */
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private @Nullable String errorJson;
+  private @Nullable JsonNode error;
 
   /** 创建时间（UTC Instant）。 */
   private Instant createdAt;

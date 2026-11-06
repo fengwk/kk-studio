@@ -121,7 +121,11 @@ public final class ThreadCommandPayloadJsonCodec {
 
   // ---------- 编码器 ----------
 
-  private static ObjectNode encodeNode(ThreadCommandPayload payload) {
+  /**
+   * 把 {@link ThreadCommandPayload} 编码为 deterministic canonical {@link ObjectNode}；String API 委派此方法。
+   */
+  public ObjectNode encodeNode(ThreadCommandPayload payload) {
+    Objects.requireNonNull(payload, "payload");
     return encodeNode(payload, false);
   }
 

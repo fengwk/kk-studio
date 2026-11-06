@@ -22,7 +22,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 /** Harness HTTP DTO 契约：sealed union、固定枚举、请求严格性与明确 nullable 的 wire 形态。 */
-class HarnessRuntimeDtoContractTest {
+class HarnessHttpDtoContractTest {
 
   private static final JsonMapper MAPPER = JsonMapper.builder().build();
 
@@ -122,7 +122,7 @@ class HarnessRuntimeDtoContractTest {
               "sessionId": "s-1",
               "parentEntryId": null,
               "entryType": "MESSAGE",
-              "payloadJson": "{}",
+              "payload": {},
               "usageCost": null
             }
             """,
@@ -184,8 +184,8 @@ class HarnessRuntimeDtoContractTest {
     assertTrue(json.get("requiredEnvironmentName").isNull());
     assertTrue(json.has("environmentWaitFreshnessAt"));
     assertTrue(json.get("environmentWaitFreshnessAt").isNull());
-    assertTrue(json.has("approvalJson"));
-    assertTrue(json.get("approvalJson").isNull());
+    assertTrue(json.has("approval"));
+    assertTrue(json.get("approval").isNull());
   }
 
   private static Set<String> subtypes(Class<?> union) {

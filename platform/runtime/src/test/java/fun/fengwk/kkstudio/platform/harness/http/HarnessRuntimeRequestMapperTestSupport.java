@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.platform.harness.http;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageContent;
 import fun.fengwk.kkstudio.platform.catalog.dto.HarnessExecutionSelectionDTO;
@@ -41,7 +42,7 @@ final class HarnessRuntimeRequestMapperTestSupport {
   static void assertRejectedUserContent(HarnessUserMessageContentDTO content, String why) {
     HarnessCommandCreateDTO command = userCommand("rejected-user-content", List.of(content));
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () ->
             HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(
                 THREAD_ID, threadBatch(command)),
@@ -50,7 +51,7 @@ final class HarnessRuntimeRequestMapperTestSupport {
 
   static void assertCommandRejected(HarnessCommandCreateDTO command) {
     assertThrows(
-        IllegalArgumentException.class,
+        DomainException.class,
         () ->
             HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(
                 THREAD_ID, threadBatch(command, userCommand("tail"))));

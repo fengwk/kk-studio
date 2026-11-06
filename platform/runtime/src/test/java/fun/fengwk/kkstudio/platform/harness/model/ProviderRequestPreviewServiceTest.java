@@ -24,6 +24,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
@@ -80,8 +81,6 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.platform.harness.builtin.query.ProviderRequestPreviewService;
-import fun.fengwk.kkstudio.platform.harness.builtin.query.ProviderRequestPreviewUnavailableException;
-import fun.fengwk.kkstudio.platform.harness.builtin.query.ProviderRequestPreviewUnavailableException.Reason;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessProviderRequestPreviewDTO;
 import fun.fengwk.kkstudio.platform.harness.model.ProviderResolutionService.ResolvedExecution;
 import fun.fengwk.kkstudio.platform.harness.thread.command.DatabaseTurnResolver;
@@ -207,24 +206,6 @@ class ProviderRequestPreviewServiceTest {
     verifyNoMoreInteractions(turnResolver);
     verify(providerResolution, atLeast(0)).resolve(any(), any(), any());
     verifyNoMoreInteractions(providerResolution);
-  }
-
-  @Test
-  void exceptionRequiresReasonAndSafeMessageAndRetainsOptionalCause() {
-    // 测试意图：禁止无 reason 的拒绝，cause 只用于内部诊断，不改变公开的安全消息。
-    assertThrows(
-        NullPointerException.class,
-        () -> new ProviderRequestPreviewUnavailableException(null, "safe"));
-    assertThrows(
-        NullPointerException.class,
-        () -> new ProviderRequestPreviewUnavailableException(Reason.PREVIEW_ENCODING_FAILED, null));
-    RuntimeException cause = new RuntimeException("private detail");
-    ProviderRequestPreviewUnavailableException error =
-        new ProviderRequestPreviewUnavailableException(
-            Reason.PREVIEW_ENCODING_FAILED, "safe", cause);
-    assertEquals(cause, error.getCause());
-    assertEquals("safe", error.getMessage());
-    assertEquals(Reason.PREVIEW_ENCODING_FAILED, error.reason());
   }
 
   /**
@@ -393,11 +374,12 @@ class ProviderRequestPreviewServiceTest {
         .thenReturn(Optional.of(compactionJoin(CHILD_THREAD_ID)));
     DomainException missing = DomainException.notFound("thread", "child missing");
     when(runtime.getThreadSnapshot(CHILD_THREAD_ID)).thenThrow(missing);
-    ProviderRequestPreviewUnavailableException rejected =
+    DomainException rejected =
         assertThrows(
-            ProviderRequestPreviewUnavailableException.class,
+            DomainException.class,
             () -> service.previewHistorical(SESSION_ID, COMPACTION_ENTRY_ID));
-    assertEquals(Reason.PREVIEW_UNSUPPORTED, rejected.reason());
+    assertEquals(DomainErrorCode.CONFLICT, rejected.code());
+    assertEquals("PREVIEW_UNSUPPORTED", rejected.reason());
     assertSame(missing, rejected.getCause());
 
     DomainException other = DomainException.validation("thread", "invalid");
@@ -590,11 +572,12 @@ class ProviderRequestPreviewServiceTest {
   }
 
   private void assertFrozenCompactionRejected() {
-    ProviderRequestPreviewUnavailableException rejected =
+    DomainException rejected =
         assertThrows(
-            ProviderRequestPreviewUnavailableException.class,
+            DomainException.class,
             () -> service.previewHistorical(SESSION_ID, COMPACTION_ENTRY_ID));
-    assertEquals(Reason.PREVIEW_UNSUPPORTED, rejected.reason());
+    assertEquals(DomainErrorCode.CONFLICT, rejected.code());
+    assertEquals("PREVIEW_UNSUPPORTED", rejected.reason());
   }
 
   /** ROOT + 一个关闭 INPUT turn + 其 parent 为 COMPACTION TURN_START 的压缩结果。 */
