@@ -210,7 +210,7 @@ test('settings contract accepts an empty existing HTTP retry list without mutati
       getCase('settings.system_contract_cas').run({
         async call(method) {
           assert.equal(method, 'GET')
-          return { json: { data: invalid } }
+          return { json: invalid }
         },
       }),
       /fields must be/,
@@ -224,7 +224,7 @@ test('tool catalog case accepts its public fields and rejects extra fields', asy
     name, description: 'fixture', environmentSupport: 'NONE',
   }))
   const run = (tools) => getCase('catalog.internal_tools_hidden').run({
-    async call() { return { json: { data: tools } } },
+    async call() { return { json: tools } },
   })
   await run(entries)
   await assert.rejects(run([{ ...entries[0], unexpected: true }, entries[1]]), /fields must be/)
