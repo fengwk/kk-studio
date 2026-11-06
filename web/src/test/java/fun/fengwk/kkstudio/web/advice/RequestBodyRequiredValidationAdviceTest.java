@@ -437,7 +437,7 @@ class RequestBodyRequiredValidationAdviceTest {
 
   @Test
   void nestedResourceDiscriminatorUsesItsOwnSubtypeAndPath() throws Exception {
-    // Canvas 请求中 type 和 kind 是两个独立的 NAME/PROPERTY union。
+    // 资源槽位与命令各自是独立的 NAME union，两级都用 type 判别。
     String prefix =
         "{\"idempotencyKey\":\"00000000-0000-0000-0000-000000000001\",\"commands\":[{\"type\":\"CREATE_NODE\","
             + "\"nodeId\":\"00000000-0000-0000-0000-000000000002\",\"name\":\"n\","
@@ -445,9 +445,9 @@ class RequestBodyRequiredValidationAdviceTest {
     String suffix = "]}]}";
     for (var entry :
         Map.of(
-                "{\"kind\":\"KEEP\"}", "resourceId",
-                "{\"kind\":\"TEXT\",\"name\":\"n\"}", "textContent",
-                "{\"kind\":\"BLOB\",\"name\":\"n\"}", "blobId")
+                "{\"type\":\"KEEP\"}", "resourceId",
+                "{\"type\":\"TEXT\",\"name\":\"n\"}", "textContent",
+                "{\"type\":\"BLOB\",\"name\":\"n\"}", "blobId")
             .entrySet()) {
       MvcResult result =
           mockMvc
@@ -466,7 +466,7 @@ class RequestBodyRequiredValidationAdviceTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     prefix
-                        + "{\"kind\":\"TEXT\",\"name\":\"n\",\"textContent\":\"body\"}"
+                        + "{\"type\":\"TEXT\",\"name\":\"n\",\"textContent\":\"body\"}"
                         + suffix))
         .andExpect(status().isOk());
   }
@@ -624,7 +624,7 @@ class RequestBodyRequiredValidationAdviceTest {
               post("/test/plugin")
                   .contentType(MediaType.APPLICATION_JSON)
                   .content(
-                      "{\"expectedVersion\":\"0\",\"values\":{},\"secretPatch\":{\"key\":"
+                      "{\"expectedVersion\":\"0\",\"valuesJson\":\"{}\",\"secretPatch\":{\"key\":"
                           + patch
                           + "}}"))
           .andExpect(status().isOk());
