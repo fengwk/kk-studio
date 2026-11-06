@@ -3,6 +3,8 @@ package fun.fengwk.kkstudio.web.controller;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
 
@@ -20,6 +22,12 @@ final class RuntimeErrors {
   static <T> T translate(Supplier<T> operation) {
     try {
       return operation.get();
+    } catch (DomainException error) {
+      if (error.code() == DomainErrorCode.NOT_FOUND
+          && ("thread".equals(error.resource()) || "agent_task".equals(error.resource()))) {
+        throw new ResponseStatusException(HttpStatus.NOT_FOUND, error.getMessage(), error);
+      }
+      throw error;
     } catch (HarnessRuntimeNotFoundException error) {
       throw new ResponseStatusException(HttpStatus.NOT_FOUND, error.getMessage(), error);
     } catch (HarnessRuntimeConflictException error) {

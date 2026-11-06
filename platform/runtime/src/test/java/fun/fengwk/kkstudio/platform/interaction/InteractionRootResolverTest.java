@@ -10,7 +10,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
 
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 
 import java.util.Optional;
@@ -51,7 +52,11 @@ class InteractionRootResolverTest {
   void requireRootIdFailsExplicitlyWhenThreadDoesNotExist() {
     when(runtime.findRootThreadId(id(9))).thenReturn(Optional.empty());
 
-    assertThrows(HarnessRuntimeNotFoundException.class, () -> resolver.requireRootId(id(9)));
+    DomainException error =
+        assertThrows(DomainException.class, () -> resolver.requireRootId(id(9)));
+    assertEquals(DomainErrorCode.NOT_FOUND, error.code());
+    assertEquals("thread", error.resource());
+    assertEquals("thread " + id(9) + " does not exist", error.getMessage());
   }
 
   /** 测试意图：null threadId 直接 NPE；Runtime 未就绪时 requireRootId / requireRuntime 都确定性拒绝。 */

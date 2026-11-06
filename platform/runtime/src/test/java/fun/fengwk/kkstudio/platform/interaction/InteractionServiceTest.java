@@ -17,7 +17,8 @@ import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 import org.springframework.beans.factory.ObjectProvider;
 
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.ToolApprovalCommand;
 import fun.fengwk.kkstudio.harness.api.ToolInputAcceptance;
 import fun.fengwk.kkstudio.harness.api.ToolInputSubmissionCommand;
@@ -169,12 +170,16 @@ class InteractionServiceTest {
 
     ToolInputSubmissionCommand submit =
         new ToolInputSubmissionCommand(threadId, id(101), id(102), "alice", true, List.of());
-    assertThrows(HarnessRuntimeNotFoundException.class, () -> service.submitInput(submit));
+    assertEquals(
+        DomainErrorCode.NOT_FOUND,
+        assertThrows(DomainException.class, () -> service.submitInput(submit)).code());
 
     ToolApprovalCommand approval =
         new ToolApprovalCommand(
             threadId, id(101), ToolApprovalDecision.ALLOWED, id(102), "alice", "ok");
-    assertThrows(HarnessRuntimeNotFoundException.class, () -> service.decideApproval(approval));
+    assertEquals(
+        DomainErrorCode.NOT_FOUND,
+        assertThrows(DomainException.class, () -> service.decideApproval(approval)).code());
 
     verifyNoInteractions(ownership, otherOwnership);
     verify(runtime, never()).submitToolInput(any());

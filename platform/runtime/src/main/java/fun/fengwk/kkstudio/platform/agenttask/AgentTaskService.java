@@ -4,6 +4,7 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
@@ -165,7 +166,7 @@ public class AgentTaskService {
   }
 
   /**
-   * 按票据停止执行它的 Thread（含其子树）；票据不存在时抛 {@link HarnessRuntimeNotFoundException}。
+   * 按票据停止执行它的 Thread（含其子树）；票据不存在时抛 not-found {@link DomainException}。
    *
    * <p>已冻结结果或被后续 Run supersede 的票据是历史事实，必须 no-op：否则同一个 Thread 上的后续 Run 会被旧票据误停。每次 CAS 重试都在 取得新
    * snapshot 后复核票据状态；后续 Run 改写 Thread 会让旧 version 的 stop 失败，从而回到复核。
@@ -175,8 +176,8 @@ public class AgentTaskService {
         findTicket(ticketId)
             .orElseThrow(
                 () ->
-                    new HarnessRuntimeNotFoundException(
-                        "agent task " + ticketId + " does not exist"));
+                    DomainException.notFound(
+                        "agent_task", "agent task " + ticketId + " does not exist"));
     if (isTerminal(initial)) {
       return;
     }

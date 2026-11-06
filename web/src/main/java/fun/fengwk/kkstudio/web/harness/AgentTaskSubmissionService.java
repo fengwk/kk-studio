@@ -3,7 +3,7 @@ package fun.fengwk.kkstudio.web.harness;
 import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Service;
 
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.SpawnRequest;
 import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
@@ -81,8 +81,8 @@ public class AgentTaskSubmissionService {
             .observe(ticketId)
             .orElseThrow(
                 () ->
-                    new HarnessRuntimeNotFoundException(
-                        "agent task " + ticketId + " does not exist"));
+                    DomainException.notFound(
+                        "agent_task", "agent task " + ticketId + " does not exist"));
     AgentTaskDTO dto = new AgentTaskDTO();
     dto.setTicketId(status.ticketId().toString());
     dto.setThreadId(status.threadId().toString());

@@ -18,6 +18,8 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.ObjectProvider;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
@@ -213,7 +215,10 @@ class AgentTaskServiceTest {
 
     assertTrue(service.observe(ticketId).isEmpty());
     assertTrue(service.result(ticketId).isEmpty());
-    assertThrows(HarnessRuntimeNotFoundException.class, () -> service.stop(ticketId));
+    DomainException error = assertThrows(DomainException.class, () -> service.stop(ticketId));
+    assertEquals(DomainErrorCode.NOT_FOUND, error.code());
+    assertEquals("agent_task", error.resource());
+    assertEquals("agent task " + ticketId + " does not exist", error.getMessage());
     verify(runtime, never()).getThreadSnapshot(any());
   }
 
