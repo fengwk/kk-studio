@@ -10,9 +10,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.CompactThreadResult;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
+import fun.fengwk.kkstudio.harness.api.HarnessConflictReason;
 import fun.fengwk.kkstudio.harness.api.ManualCompactionAvailability;
 import fun.fengwk.kkstudio.harness.api.StopResult;
 import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
@@ -153,23 +154,24 @@ class HarnessRuntimeManualCompactionTest {
   void compactThreadUsesTypedVersionAndAvailabilityConflicts() {
     Fixture staleFixture = fixture();
     ClosedTurnBaseline stale = seedCompactionReadyClosedTurn(staleFixture.store);
-    HarnessRuntimeConflictException staleError =
+    DomainException staleError =
         assertThrows(
-            HarnessRuntimeConflictException.class,
+            DomainException.class,
             () ->
                 staleFixture.runtime.compactThread(new CompactThreadCommand(stale.threadId(), 1)));
-    assertEquals(HarnessRuntimeConflictException.Reason.STALE_VERSION, staleError.reason());
+    assertEquals(DomainErrorCode.CONFLICT, staleError.code());
+    assertEquals(HarnessConflictReason.STALE_VERSION.name(), staleError.reason());
     assertEquals(9, path(staleFixture.store, stale.threadId()).entries().size());
 
     Fixture busyFixture = fixture();
     HarnessRuntimeTestSupport.TurnBaseline busy =
         HarnessRuntimeTestSupport.seedOpenTurn(busyFixture.store);
-    HarnessRuntimeConflictException busyError =
+    DomainException busyError =
         assertThrows(
-            HarnessRuntimeConflictException.class,
+            DomainException.class,
             () -> busyFixture.runtime.compactThread(new CompactThreadCommand(busy.threadId(), 0)));
-    assertEquals(
-        HarnessRuntimeConflictException.Reason.MANUAL_COMPACTION_UNAVAILABLE, busyError.reason());
+    assertEquals(DomainErrorCode.CONFLICT, busyError.code());
+    assertEquals(HarnessConflictReason.MANUAL_COMPACTION_UNAVAILABLE.name(), busyError.reason());
   }
 
   @Test
@@ -198,12 +200,17 @@ class HarnessRuntimeManualCompactionTest {
     // Thread 不存在时，availability 与 compact 都由根控制面确定性返回 NotFound。
     Fixture fixture = fixture();
     UUID missing = UUID.randomUUID();
-    assertThrows(
-        HarnessRuntimeNotFoundException.class,
-        () -> fixture.runtime.manualCompactionAvailability(missing));
-    assertThrows(
-        HarnessRuntimeNotFoundException.class,
-        () -> fixture.runtime.compactThread(new CompactThreadCommand(missing, 0)));
+    assertEquals(
+        DomainErrorCode.NOT_FOUND,
+        assertThrows(
+                DomainException.class, () -> fixture.runtime.manualCompactionAvailability(missing))
+            .code());
+    assertEquals(
+        DomainErrorCode.NOT_FOUND,
+        assertThrows(
+                DomainException.class,
+                () -> fixture.runtime.compactThread(new CompactThreadCommand(missing, 0)))
+            .code());
   }
 
   /** Stop 后 Thread 拒绝手动压缩：守卫发生在 resolve/写入之前，且重放 Stop 不改变结论。 */
@@ -229,14 +236,14 @@ class HarnessRuntimeManualCompactionTest {
     assertEquals(
         ManualCompactionAvailability.DisabledReason.THREAD_STOPPED, availability.disabledReason());
 
-    HarnessRuntimeConflictException rejected =
+    DomainException rejected =
         assertThrows(
-            HarnessRuntimeConflictException.class,
+            DomainException.class,
             () ->
                 fixture.runtime.compactThread(
                     new CompactThreadCommand(baseline.threadId(), stoppedVersion)));
-    assertEquals(
-        HarnessRuntimeConflictException.Reason.MANUAL_COMPACTION_UNAVAILABLE, rejected.reason());
+    assertEquals(DomainErrorCode.CONFLICT, rejected.code());
+    assertEquals(HarnessConflictReason.MANUAL_COMPACTION_UNAVAILABLE.name(), rejected.reason());
     assertEquals(0, fixture.resolver.calls, "STOPPED must be rejected before turn resolution");
     assertUnchanged(fixture, baseline.threadId(), stoppedHeadId, stoppedVersion, stoppedEntryCount);
 
@@ -248,11 +255,15 @@ class HarnessRuntimeManualCompactionTest {
     assertEquals(
         ManualCompactionAvailability.DisabledReason.THREAD_STOPPED,
         fixture.runtime.manualCompactionAvailability(baseline.threadId()).disabledReason());
-    assertThrows(
-        HarnessRuntimeConflictException.class,
-        () ->
-            fixture.runtime.compactThread(
-                new CompactThreadCommand(baseline.threadId(), stoppedVersion)));
+    DomainException replayConflict =
+        assertThrows(
+            DomainException.class,
+            () ->
+                fixture.runtime.compactThread(
+                    new CompactThreadCommand(baseline.threadId(), stoppedVersion)));
+    assertEquals(DomainErrorCode.CONFLICT, replayConflict.code());
+    assertEquals(
+        HarnessConflictReason.MANUAL_COMPACTION_UNAVAILABLE.name(), replayConflict.reason());
     assertEquals(0, fixture.resolver.calls);
     assertUnchanged(fixture, baseline.threadId(), stoppedHeadId, stoppedVersion, stoppedEntryCount);
   }
@@ -603,12 +614,12 @@ class HarnessRuntimeManualCompactionTest {
     assertEquals(
         ManualCompactionAvailability.DisabledReason.THREAD_BUSY,
         descendantAvailability.disabledReason());
-    HarnessRuntimeConflictException rejected =
+    DomainException rejected =
         assertThrows(
-            HarnessRuntimeConflictException.class,
+            DomainException.class,
             () -> fixture.runtime.compactThread(new CompactThreadCommand(descendant, 0)));
-    assertEquals(
-        HarnessRuntimeConflictException.Reason.MANUAL_COMPACTION_UNAVAILABLE, rejected.reason());
+    assertEquals(DomainErrorCode.CONFLICT, rejected.code());
+    assertEquals(HarnessConflictReason.MANUAL_COMPACTION_UNAVAILABLE.name(), rejected.reason());
 
     assertFalse(fixture.runtime.manualCompactionAvailability(compactionChild).available());
 

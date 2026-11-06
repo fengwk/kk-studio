@@ -1,8 +1,8 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.CompactThreadResult;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
+import fun.fengwk.kkstudio.harness.api.HarnessConflictReason;
 import fun.fengwk.kkstudio.harness.api.ManualCompactionAvailability;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionConfig;
@@ -279,8 +279,7 @@ final class ManualCompactionControl {
         tx.threads()
             .find(threadId)
             .orElseThrow(
-                () ->
-                    new HarnessRuntimeNotFoundException("thread " + threadId + " does not exist"));
+                () -> DomainException.notFound("thread", "thread " + threadId + " does not exist"));
     // 树锁内 Thread 不会被删除，其 Session 由外键保证存在。
     tx.sessions().lockForKeyShare(thread.sessionId()).orElseThrow();
     return tx.threads().lock(threadId).orElseThrow();
@@ -296,10 +295,10 @@ final class ManualCompactionControl {
     return false;
   }
 
-  private static HarnessRuntimeConflictException staleManualVersion(
+  private static DomainException staleManualVersion(
       CompactThreadCommand command, ThreadState thread) {
-    return new HarnessRuntimeConflictException(
-        HarnessRuntimeConflictException.Reason.STALE_VERSION,
+    return DomainException.conflict(
+        HarnessConflictReason.STALE_VERSION.name(),
         "thread "
             + thread.id()
             + " version "
@@ -308,10 +307,10 @@ final class ManualCompactionControl {
             + command.expectedVersion());
   }
 
-  private static HarnessRuntimeConflictException manualUnavailable(
+  private static DomainException manualUnavailable(
       ThreadState thread, ManualCompactionAvailability.DisabledReason reason) {
-    return new HarnessRuntimeConflictException(
-        HarnessRuntimeConflictException.Reason.MANUAL_COMPACTION_UNAVAILABLE,
+    return DomainException.conflict(
+        HarnessConflictReason.MANUAL_COMPACTION_UNAVAILABLE.name(),
         "thread " + thread.id() + " cannot be compacted manually: " + reason);
   }
 
