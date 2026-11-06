@@ -97,7 +97,7 @@ function chatDefaultEnvironmentFixture() {
           }
           chat.environmentName = body.environmentName
         }
-        chat.version = String(Number(chat.version) + 1)
+        chat.version = String(BigInt(chat.version) + 1n)
         return { status: 200, json: { ...chat } }
       }
       if (method === 'DELETE') {
