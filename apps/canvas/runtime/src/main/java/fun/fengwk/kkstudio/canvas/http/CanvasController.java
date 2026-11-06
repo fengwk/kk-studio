@@ -11,7 +11,6 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 import fun.fengwk.kkstudio.canvas.CanvasCommandResult;
-import fun.fengwk.kkstudio.canvas.CanvasConflictException;
 import fun.fengwk.kkstudio.canvas.dto.ApplyCanvasCommandsRequestDTO;
 import fun.fengwk.kkstudio.canvas.dto.CanvasConflictDTO;
 import fun.fengwk.kkstudio.canvas.dto.CanvasDocumentDTO;
@@ -115,12 +114,6 @@ public class CanvasController {
         case CanvasCommandResult.Conflicted conflicted -> ResponseEntity.status(HttpStatus.CONFLICT)
             .body(conflict(mapper.toDto(conflicted.conflicts())));
       };
-    } catch (CanvasConflictException ex) {
-      HttpStatus status =
-          ex.reason() == CanvasConflictException.Reason.CANVAS_NOT_FOUND
-              ? HttpStatus.NOT_FOUND
-              : HttpStatus.CONFLICT;
-      throw new ResponseStatusException(status, ex.reason().name(), ex);
     } catch (IllegalArgumentException ex) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
     }

@@ -1,9 +1,9 @@
 package fun.fengwk.kkstudio.canvas;
 
+import static fun.fengwk.kkstudio.canvas.CanvasTestAssertions.assertValidation;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -20,7 +20,7 @@ class CanvasFunctionCommandHashTest {
   @Test
   void functionRejectsNonObjectOrBlankName() {
     CanvasJson.JsonObject args = CanvasJson.parseObject("{}");
-    assertThrows(CanvasValidationException.class, () -> new CanvasFunction(" ", args));
+    assertValidation(() -> new CanvasFunction(" ", args));
     assertEquals("{}", new CanvasFunction("image.crop", args).argsJson());
   }
 
@@ -48,15 +48,13 @@ class CanvasFunctionCommandHashTest {
   /** 形状不合法的引用值不能被当成普通对象跳过，否则既会丢连线也会漏掉引用保护。 */
   @Test
   void functionRejectsMalformedReferenceValues() {
-    assertThrows(
-        CanvasValidationException.class,
+    assertValidation(
         () ->
             new CanvasFunction(
                     "video.generate",
                     CanvasJson.parseObject("{\"source\":{\"type\":\"resource\",\"nodeId\":\"x\"}}"))
                 .references());
-    assertThrows(
-        CanvasValidationException.class,
+    assertValidation(
         () ->
             new CanvasFunction(
                     "video.generate",
@@ -64,8 +62,7 @@ class CanvasFunctionCommandHashTest {
                         "{\"source\":{\"type\":\"resource\",\"nodeId\":\"00000000-0000-0000-0000-0000000000aa\","
                             + "\"index\":0,\"extra\":1}}"))
                 .references());
-    assertThrows(
-        CanvasValidationException.class,
+    assertValidation(
         () ->
             new CanvasFunction(
                     "video.generate",
@@ -73,8 +70,7 @@ class CanvasFunctionCommandHashTest {
                         "{\"source\":{\"type\":\"resource\",\"nodeId\":\"00000000-0000-0000-0000-0000000000aa\","
                             + "\"index\":1.5}}"))
                 .references());
-    assertThrows(
-        CanvasValidationException.class,
+    assertValidation(
         () ->
             new CanvasFunction(
                     "video.generate",

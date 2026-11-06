@@ -5,6 +5,7 @@ import fun.fengwk.kkstudio.canvas.function.CanvasJson.JsonArray;
 import fun.fengwk.kkstudio.canvas.function.CanvasJson.JsonNumber;
 import fun.fengwk.kkstudio.canvas.function.CanvasJson.JsonObject;
 import fun.fengwk.kkstudio.canvas.function.CanvasJson.JsonText;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.id.Uuids;
 
 import java.util.LinkedHashSet;
@@ -39,7 +40,7 @@ public record CanvasFunction(String name, CanvasJson.JsonObject args) {
   }
 
   /**
-   * 按首次出现顺序返回去重后的引用；出现非法引用形状时抛 {@link CanvasValidationException}。
+   * 按首次出现顺序返回去重后的引用；出现非法引用形状时抛 {@link DomainException}。
    *
    * <p>即使函数插件未安装，也能从已有配置中识别引用，从而展示连线并在删除源节点前要求显式解除引用。
    */
@@ -47,8 +48,8 @@ public record CanvasFunction(String name, CanvasJson.JsonObject args) {
     Set<CanvasResourceReference> references = new LinkedHashSet<>();
     collect(args, references, 0);
     if (references.size() > MAX_REFERENCES) {
-      throw new CanvasValidationException(
-          "function args must not declare more than " + MAX_REFERENCES + " references");
+      throw DomainException.validation(
+          "function", "function args must not declare more than " + MAX_REFERENCES + " references");
     }
     return List.copyOf(references);
   }
@@ -56,8 +57,8 @@ public record CanvasFunction(String name, CanvasJson.JsonObject args) {
   private static void collect(
       CanvasJson value, Set<CanvasResourceReference> references, int depth) {
     if (depth > CanvasJson.MAX_DEPTH) {
-      throw new CanvasValidationException(
-          "function args nesting must not exceed " + CanvasJson.MAX_DEPTH);
+      throw DomainException.validation(
+          "function", "function args nesting must not exceed " + CanvasJson.MAX_DEPTH);
     }
     switch (value) {
       case JsonObject object -> {
@@ -88,33 +89,33 @@ public record CanvasFunction(String name, CanvasJson.JsonObject args) {
 
   private static CanvasResourceReference parseReference(JsonObject object) {
     if (!object.values().keySet().equals(REFERENCE_FIELDS)) {
-      throw new CanvasValidationException(
-          "resource reference must declare exactly type/nodeId/index");
+      throw DomainException.validation(
+          "function", "resource reference must declare exactly type/nodeId/index");
     }
     CanvasJson nodeId = object.values().get("nodeId");
     if (!(nodeId instanceof JsonText text)) {
-      throw new CanvasValidationException(
-          "resource reference nodeId must be a canonical UUID string");
+      throw DomainException.validation(
+          "function", "resource reference nodeId must be a canonical UUID string");
     }
     UUID parsedNodeId;
     try {
       parsedNodeId = Uuids.parseCanonical(text.value(), "resource reference nodeId");
     } catch (IllegalArgumentException error) {
-      throw new CanvasValidationException(
-          "resource reference nodeId must be a canonical UUID string", error);
+      throw DomainException.validation(
+          "function", "resource reference nodeId must be a canonical UUID string", error);
     }
     CanvasJson index = object.values().get("index");
     if (!(index instanceof JsonNumber number)) {
-      throw new CanvasValidationException("resource reference index must be an integer");
+      throw DomainException.validation("function", "resource reference index must be an integer");
     }
     int parsedIndex;
     try {
       parsedIndex = number.value().intValueExact();
     } catch (ArithmeticException error) {
-      throw new CanvasValidationException("resource reference index must be an integer");
+      throw DomainException.validation("function", "resource reference index must be an integer");
     }
     if (parsedIndex < 0) {
-      throw new CanvasValidationException("resource reference index must be nonnegative");
+      throw DomainException.validation("function", "resource reference index must be nonnegative");
     }
     return new CanvasResourceReference(parsedNodeId, parsedIndex);
   }

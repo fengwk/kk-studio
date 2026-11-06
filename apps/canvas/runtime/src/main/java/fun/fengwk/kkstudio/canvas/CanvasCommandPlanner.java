@@ -14,6 +14,7 @@ import fun.fengwk.kkstudio.canvas.CanvasMutation.InsertResource;
 import fun.fengwk.kkstudio.canvas.CanvasMutation.ReleaseNodePins;
 import fun.fengwk.kkstudio.canvas.CanvasMutation.UpdateGroup;
 import fun.fengwk.kkstudio.canvas.CanvasMutation.UpdateNode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 
 import java.time.Clock;
 import java.util.ArrayList;
@@ -50,7 +51,7 @@ public final class CanvasCommandPlanner {
     this.resourceIds = Objects.requireNonNull(resourceIds, "resourceIds");
   }
 
-  /** 规划一个命令批；结构性非法请求抛 {@link CanvasValidationException}，语义组过期返回冲突。 */
+  /** 规划一个命令批；结构性非法请求抛 {@link DomainException}，语义组过期返回冲突。 */
   public CanvasCommandPlan plan(CanvasGraph graph, List<CanvasCommand> commands) {
     Objects.requireNonNull(graph, "graph");
     Objects.requireNonNull(commands, "commands");
@@ -113,8 +114,8 @@ public final class CanvasCommandPlanner {
     private void createNode(CanvasCommand.CreateNode command) {
       UUID nodeId = command.nodeId();
       if (removedNodes.contains(nodeId)) {
-        throw new CanvasValidationException(
-            "node id deleted in this batch must not be reused by create");
+        throw DomainException.validation(
+            "canvas", "node id deleted in this batch must not be reused by create");
       }
       if (nodes.containsKey(nodeId)) {
         conflicts.add(new CanvasConflict.TargetPresent(nodeId, Target.NODE));
@@ -256,8 +257,8 @@ public final class CanvasCommandPlanner {
     private void createGroup(CanvasCommand.CreateGroup command) {
       UUID groupId = command.groupId();
       if (removedGroups.contains(groupId)) {
-        throw new CanvasValidationException(
-            "group id deleted in this batch must not be reused by create");
+        throw DomainException.validation(
+            "canvas", "group id deleted in this batch must not be reused by create");
       }
       if (groups.containsKey(groupId)) {
         conflicts.add(new CanvasConflict.TargetPresent(groupId, Target.GROUP));
@@ -350,8 +351,8 @@ public final class CanvasCommandPlanner {
      */
     private boolean applyResources(NodeState node, List<CanvasResourceInput> inputs) {
       if (inputs.size() > MAX_RESOURCES_PER_NODE) {
-        throw new CanvasValidationException(
-            "node must not hold more than " + MAX_RESOURCES_PER_NODE + " resources");
+        throw DomainException.validation(
+            "canvas", "node must not hold more than " + MAX_RESOURCES_PER_NODE + " resources");
       }
       List<UUID> previous = List.copyOf(node.resourceIds);
       List<CanvasResource> slots = new ArrayList<>(inputs.size());
@@ -362,11 +363,11 @@ public final class CanvasCommandPlanner {
         switch (input) {
           case CanvasResourceInput.Keep keep -> {
             if (!previous.contains(keep.resourceId())) {
-              throw new CanvasValidationException(
-                  "kept resource must be part of the edited node resource list");
+              throw DomainException.validation(
+                  "canvas", "kept resource must be part of the edited node resource list");
             }
             if (!keptIds.add(keep.resourceId())) {
-              throw new CanvasValidationException("kept resource must not appear twice");
+              throw DomainException.validation("canvas", "kept resource must not appear twice");
             }
             slots.add(requireResource(keep.resourceId()).withSlot(node.id, index));
             kept.add(true);
@@ -471,12 +472,12 @@ public final class CanvasCommandPlanner {
         }
         for (CanvasResourceReference reference : node.function.references()) {
           if (reference.nodeId().equals(node.id)) {
-            throw new CanvasValidationException("function must not reference its own node");
+            throw DomainException.validation("canvas", "function must not reference its own node");
           }
           if (!nodes.containsKey(reference.nodeId())
               && !removedNodes.contains(reference.nodeId())) {
-            throw new CanvasValidationException(
-                "referenced source node must exist in the same canvas");
+            throw DomainException.validation(
+                "canvas", "referenced source node must exist in the same canvas");
           }
         }
       }
@@ -570,7 +571,8 @@ public final class CanvasCommandPlanner {
       String key = CanvasNames.key(name);
       for (NodeState node : nodes.values()) {
         if (!node.id.equals(nodeId) && CanvasNames.key(node.name).equals(key)) {
-          throw new CanvasValidationException("node name is already used in this canvas: " + name);
+          throw DomainException.validation(
+              "canvas", "node name is already used in this canvas: " + name);
         }
       }
     }
@@ -582,8 +584,8 @@ public final class CanvasCommandPlanner {
       boolean text = slots.get(0).isText();
       for (CanvasResource slot : slots) {
         if (slot.isText() != text) {
-          throw new CanvasValidationException(
-              "node resources must share one content kind: text or media");
+          throw DomainException.validation(
+              "canvas", "node resources must share one content kind: text or media");
         }
       }
     }

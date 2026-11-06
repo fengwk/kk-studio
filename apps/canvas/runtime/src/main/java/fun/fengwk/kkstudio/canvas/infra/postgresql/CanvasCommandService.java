@@ -10,7 +10,6 @@ import fun.fengwk.kkstudio.canvas.CanvasCommandPlanner;
 import fun.fengwk.kkstudio.canvas.CanvasCommandResult;
 import fun.fengwk.kkstudio.canvas.CanvasCommandResult.Accepted;
 import fun.fengwk.kkstudio.canvas.CanvasCommandResult.Conflicted;
-import fun.fengwk.kkstudio.canvas.CanvasConflictException;
 import fun.fengwk.kkstudio.canvas.CanvasDocument;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionResourcePin;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRun;
@@ -19,9 +18,9 @@ import fun.fengwk.kkstudio.canvas.CanvasMutation;
 import fun.fengwk.kkstudio.canvas.CanvasPatch;
 import fun.fengwk.kkstudio.canvas.CanvasResource;
 import fun.fengwk.kkstudio.canvas.CanvasResourceNode;
-import fun.fengwk.kkstudio.canvas.CanvasValidationException;
 import fun.fengwk.kkstudio.canvas.CommandDedup;
 import fun.fengwk.kkstudio.canvas.NodeRecord;
+import fun.fengwk.kkstudio.common.error.DomainException;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -70,19 +69,19 @@ public class CanvasCommandService {
   @Transactional
   public CanvasDocument createCanvas(String title) {
     if (title == null) {
-      throw new CanvasValidationException("title must not be null");
+      throw DomainException.validation("title", "title must not be null");
     }
     String validated = title.strip();
     if (validated.isEmpty()) {
-      throw new CanvasValidationException("title must not be blank");
+      throw DomainException.validation("title", "title must not be blank");
     }
     if (validated.length() > MAX_TITLE_LENGTH) {
-      throw new CanvasValidationException(
-          "title must not exceed " + MAX_TITLE_LENGTH + " characters");
+      throw DomainException.validation(
+          "title", "title must not exceed " + MAX_TITLE_LENGTH + " characters");
     }
     for (int index = 0; index < validated.length(); index++) {
       if (Character.isISOControl(validated.charAt(index))) {
-        throw new CanvasValidationException("title must not contain control characters");
+        throw DomainException.validation("title", "title must not contain control characters");
       }
     }
     return canvasStore.addDocument(UUID.randomUUID(), validated);
@@ -99,16 +98,12 @@ public class CanvasCommandService {
         canvasStore
             .lockDocument(canvasId)
             .orElseThrow(
-                () ->
-                    new CanvasConflictException(
-                        CanvasConflictException.Reason.CANVAS_NOT_FOUND,
-                        "canvas document not found: " + canvasId));
+                () -> DomainException.notFound("canvas", "canvas document not found: " + canvasId));
     CommandDedup dedup = canvasStore.findCommandDedup(canvasId, idempotencyKey).orElse(null);
     if (dedup != null) {
       if (!dedup.requestHash().equals(requestHash)) {
-        throw new CanvasConflictException(
-            CanvasConflictException.Reason.IDEMPOTENCY_CONFLICT,
-            "idempotency key is bound to a different request");
+        throw DomainException.conflict(
+            "IDEMPOTENCY_CONFLICT", "idempotency key is bound to a different request");
       }
       return new Accepted(CanvasPatch.receipt(dedup.acceptedRevision()));
     }
