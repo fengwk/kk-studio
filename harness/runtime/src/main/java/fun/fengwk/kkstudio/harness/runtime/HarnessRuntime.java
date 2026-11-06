@@ -409,7 +409,8 @@ public final class HarnessRuntime {
                           DomainException.notFound(
                               "thread", "thread " + command.threadId() + " does not exist"));
           if (thread.parentThreadId() != null) {
-            throw new IllegalArgumentException(
+            throw DomainException.validation(
+                "thread",
                 "thread "
                     + command.threadId()
                     + " follows its execution root and does not own a yolo switch");
@@ -478,7 +479,7 @@ public final class HarnessRuntime {
     Objects.requireNonNull(threadId, "threadId");
     Objects.requireNonNull(executionId, "executionId");
     if (expectedVersion < 0) {
-      throw new IllegalArgumentException("expectedVersion must not be negative");
+      throw DomainException.validation("expectedVersion", "expectedVersion must not be negative");
     }
     store.transaction(
         tx -> {
@@ -553,7 +554,7 @@ public final class HarnessRuntime {
     Objects.requireNonNull(afterCreatedAt, "afterCreatedAt");
     Objects.requireNonNull(afterId, "afterId");
     if (limit <= 0) {
-      throw new IllegalArgumentException("limit must be positive");
+      throw DomainException.validation("limit", "limit must be positive");
     }
     int probeSize = limit == Integer.MAX_VALUE ? limit : limit + 1;
     return store.transaction(
@@ -600,7 +601,7 @@ public final class HarnessRuntime {
     Objects.requireNonNull(afterRepresentativeCreatedAt, "afterRepresentativeCreatedAt");
     Objects.requireNonNull(afterRepresentativeInvocationId, "afterRepresentativeInvocationId");
     if (limit <= 0) {
-      throw new IllegalArgumentException("limit must be positive");
+      throw DomainException.validation("limit", "limit must be positive");
     }
     int probeSize = limit == Integer.MAX_VALUE ? limit : limit + 1;
     return store.transaction(
@@ -800,7 +801,7 @@ public final class HarnessRuntime {
   public SessionEntryPage listSessionEntryPage(UUID sessionId, UUID afterEntryId, int limit) {
     Objects.requireNonNull(sessionId, "sessionId");
     if (limit <= 0) {
-      throw new IllegalArgumentException("limit must be positive");
+      throw DomainException.validation("limit", "limit must be positive");
     }
     int probeSize = limit == Integer.MAX_VALUE ? limit : limit + 1;
     return store.transaction(
