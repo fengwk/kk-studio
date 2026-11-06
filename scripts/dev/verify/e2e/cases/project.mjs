@@ -256,7 +256,7 @@ registerCase({
         { status: 400, code: 'validation' },
       )
       assert(
-        /Unknown or ambiguous session owner kind: PROJECT/.test(JSON.parse(projectOwnerBatch.body).detail),
+        JSON.parse(projectOwnerBatch.body).detail === 'Unknown or ambiguous session owner kind: PROJECT',
         projectOwnerBatch.body,
       )
       const issueOwnerBatch = await expectHttpError(
@@ -275,9 +275,8 @@ registerCase({
         { status: 409, code: 'conflict', reason: 'DIRECT_COMMANDS_NOT_ALLOWED' },
       )
       assert(
-        /Direct commands are not allowed for this session owner/.test(
-          JSON.parse(issueOwnerBatch.body).detail,
-        ),
+        JSON.parse(issueOwnerBatch.body).detail
+          === 'Direct commands are not allowed for this session owner',
         issueOwnerBatch.body,
       )
 

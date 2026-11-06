@@ -3,6 +3,7 @@ import { createServer } from 'node:http'
 
 import {
   assert,
+  captureHttpError,
   cid,
   expectHttpError,
 } from '../lib/http.mjs'
@@ -196,18 +197,17 @@ registerCase({
       { status: 404, code: 'not_found' },
     )
 
-    // 8. 已消费的行可能正在等待清理，也可能已清理完成。
-    const consumed = await expectHttpError(
-      () =>
-        acceptCommandBatch(ctx, {
-          owner: chatOwner(chat.id),
-          target: threadTarget({
-            threadId,
-          }),
-          commands: [
-            { type: 'USER_MESSAGE', idempotencyKey: cid(), contents: [{ type: 'ATTACHMENT', uploadId }] },
-          ],
+    // 8. 已消费的行可能正在等待清理，也可能已清理完成；两种结果都必须锁定确切 problem。
+    const consumed = await captureHttpError(() =>
+      acceptCommandBatch(ctx, {
+        owner: chatOwner(chat.id),
+        target: threadTarget({
+          threadId,
         }),
+        commands: [
+          { type: 'USER_MESSAGE', idempotencyKey: cid(), contents: [{ type: 'ATTACHMENT', uploadId }] },
+        ],
+      }),
     )
     const consumedProblem = JSON.parse(consumed.body)
     assert(

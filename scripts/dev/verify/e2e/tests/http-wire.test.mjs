@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import test from 'node:test'
 
-import { HttpError, expectHttpError, httpJson, listResults } from '../lib/http.mjs'
+import { HttpError, captureHttpError, expectHttpError, httpJson, listResults } from '../lib/http.mjs'
 
 test('HTTP helper reads resources, empty 204 and problem details without a response wrapper', async () => {
   // Exercise the actual fetch path including the no-content and structured error cases.
@@ -20,6 +20,10 @@ test('HTTP helper reads resources, empty 204 and problem details without a respo
       response.writeHead(204).end()
     } else if (request.url === '/conflict') {
       response.writeHead(409, { 'Content-Type': 'application/problem+json' }).end(JSON.stringify(problem))
+    } else if (request.url === '/upstream') {
+      response
+        .writeHead(502, { 'Content-Type': 'application/problem+json' })
+        .end(JSON.stringify({ type: 'about:blank', title: 'failed', status: 502, code: 'upstream_failed' }))
     } else {
       response.writeHead(201, { 'Content-Type': 'application/json' }).end('{"id":"canvas"}')
     }
@@ -63,6 +67,18 @@ test('HTTP helper reads resources, empty 204 and problem details without a respo
       }),
       /expected code version_conflict/,
     )
+    // status 必须显式给出；只有环境决定的故障注入才用 captureHttpError 自行收紧。
+    await assert.rejects(
+      () => expectHttpError(() => httpJson(base, 'GET', '/conflict'), {
+        code: 'conflict', reason: 'STALE_COMMAND_CURSOR',
+      }),
+      /requires the exact expected HTTP status/,
+    )
+    await assert.rejects(() => captureHttpError(() => httpJson(base, 'GET', '/empty')), /call succeeded/)
+    const captured = await captureHttpError(() => httpJson(base, 'GET', '/upstream'))
+    assert.equal(captured.status, 502)
+    // 5xx 只要求状态；problem code 不参与断言。
+    await expectHttpError(() => httpJson(base, 'GET', '/upstream'), { status: 502 })
   } finally {
     await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
   }

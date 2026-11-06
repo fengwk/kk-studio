@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { assert, assertDecimalVersion, expectHttpError, sleep } from '../lib/http.mjs'
+import { assert, assertDecimalVersion, captureHttpError, expectHttpError, sleep } from '../lib/http.mjs'
 import {
   assertDistributedContext,
   ENV_A_ID,
@@ -22,6 +22,19 @@ export const cases = []
 const registerCase = createCaseAdder(cases)
 
 const ENV_C_NAME = 'distributed-c'
+
+/**
+ * DB 网络断开期间的 DB 权威读必须失败：具体 4xx/5xx 由应用错误映射决定，
+ * 关键是绝不回退本机 websocket 返回 200。
+ */
+async function expectDatabaseFailClosed(fn) {
+  const error = await captureHttpError(fn)
+  assert(
+    error.status >= 400,
+    `DB loss must fail closed instead of serving the local websocket, got ${error.status}`,
+  )
+  return error
+}
 
 async function waitForEnvironmentReady(callNode, node, envId, maxAttempts = 60) {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -330,7 +343,7 @@ registerCase({
       ctx.runDistributedCommand('disconnect-db-a')
 
       const elapsed = createDurationTimer()
-      dbLossError = await expectHttpError(() =>
+      dbLossError = await expectDatabaseFailClosed(() =>
         ctx.callNode(
           'a',
           'GET',
@@ -340,11 +353,6 @@ registerCase({
         ),
       )
       dbLossDurationMs = elapsed()
-      // 只约束「必须失败」：具体 4xx/5xx 由应用错误映射决定，关键是绝不返回 200。
-      assert(
-        dbLossError.status >= 400,
-        `DB loss must fail closed instead of serving the local websocket, got ${dbLossError.status}`,
-      )
     } finally {
       // 3. finally 无条件恢复 node A DB 网络连接
       ctx.runDistributedCommand('reconnect-db-a')

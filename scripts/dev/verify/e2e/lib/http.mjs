@@ -104,43 +104,58 @@ export function cid() {
 }
 
 /**
- * 断言调用失败，并锁定 canonical problem 信封。
+ * 断言调用失败并返回错误响应，但不断言状态。
  *
- * <p>4xx 必须显式给出确切的 problem {@code code}；{@code code=conflict} 还必须给出确切的 {@code reason}。
- * 期望值来自产品抛出处的 {@code DomainException} 与 web `ProblemAdvice` 的状态映射，不接受“code 非空即可”。
+ * <p>只用于状态由运行环境决定的故障注入检查；调用方必须立即锁定可接受的 status、code 与 reason。
  */
-export async function expectHttpError(fn, { status, code, reason, messageIncludes } = {}) {
+export async function captureHttpError(fn) {
   try {
     await fn()
-    throw new Error('expected HTTP error, but call succeeded')
   } catch (err) {
     assert(err instanceof HttpError, `expected HttpError, got ${err}`)
-    if (status != null) assert(err.status === status, `expected status ${status}, got ${err.status}: ${err.body}`)
-    if (status >= 400 && status < 500) {
-      assert(
-        typeof code === 'string' && code.length > 0,
-        `expectHttpError requires an explicit problem code for status ${status}`,
-      )
-      let problem = null
-      try {
-        problem = JSON.parse(err.body)
-      } catch {
-        problem = null
-      }
-      assert(problem && typeof problem === 'object', `response body must be a problem object: ${err.body}`)
-      assert(problem.code === code, `expected code ${code}, got ${problem.code}: ${err.body}`)
-      if (code === 'conflict') {
-        assert(
-          typeof reason === 'string' && reason.length > 0,
-          'conflict assertions must pin the exact problem reason',
-        )
-      }
-      if (reason != null) assert(problem.reason === reason, `expected reason ${reason}: ${err.body}`)
-    }
-    if (messageIncludes) {
-      const re = messageIncludes instanceof RegExp ? messageIncludes : new RegExp(messageIncludes)
-      assert(re.test(String(err.body)), `body not match ${re}: ${err.body}`)
-    }
     return err
   }
+  throw new Error('expected HTTP error, but call succeeded')
+}
+
+/**
+ * 断言调用失败，并锁定 canonical problem 信封。
+ *
+ * <p>必须显式给出确切的 {@code status}；4xx 还必须给出确切的 problem {@code code}，{@code code=conflict}
+ * 还必须给出确切的 {@code reason}。期望值来自产品抛出处的 {@code DomainException} 与 web `ProblemAdvice`
+ * 的状态映射，不接受“code 非空即可”或“任意失败即可”。
+ */
+export async function expectHttpError(fn, { status, code, reason, messageIncludes } = {}) {
+  assert(
+    typeof status === 'number',
+    'expectHttpError requires the exact expected HTTP status; use captureHttpError for env-dependent failures',
+  )
+  const err = await captureHttpError(fn)
+  assert(err.status === status, `expected status ${status}, got ${err.status}: ${err.body}`)
+  if (status >= 400 && status < 500) {
+    assert(
+      typeof code === 'string' && code.length > 0,
+      `expectHttpError requires an explicit problem code for status ${status}`,
+    )
+    let problem = null
+    try {
+      problem = JSON.parse(err.body)
+    } catch {
+      problem = null
+    }
+    assert(problem && typeof problem === 'object', `response body must be a problem object: ${err.body}`)
+    assert(problem.code === code, `expected code ${code}, got ${problem.code}: ${err.body}`)
+    if (code === 'conflict') {
+      assert(
+        typeof reason === 'string' && reason.length > 0,
+        'conflict assertions must pin the exact problem reason',
+      )
+    }
+    if (reason != null) assert(problem.reason === reason, `expected reason ${reason}: ${err.body}`)
+  }
+  if (messageIncludes) {
+    const re = messageIncludes instanceof RegExp ? messageIncludes : new RegExp(messageIncludes)
+    assert(re.test(String(err.body)), `body not match ${re}: ${err.body}`)
+  }
+  return err
 }

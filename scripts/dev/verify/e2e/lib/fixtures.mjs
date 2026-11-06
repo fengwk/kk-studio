@@ -243,7 +243,7 @@ export function modelConfigMatrix() {
       ok: false,
       expectStatus: 400,
       expectCode: 'validation',
-      messageIncludes: /pricing\.base\.input has an invalid value/,
+      messageIncludes: /config\.pricing\.base\.input has an invalid value/,
       title: '价格必须是十进制字符串而非 JSON 数值',
       build: () => baseModelConfig({ pricing: basePricing({ base: { input: 1 } }) }),
     },
@@ -310,7 +310,7 @@ export function modelConfigMatrix() {
       ok: false,
       expectStatus: 400,
       expectCode: 'validation',
-      messageIncludes: /variants\[0\]\.temperature is not allowed/,
+      messageIncludes: /config\.variants\[0\]\.temperature is not allowed/,
       title: '未知 variant 字段被拒绝',
       build: () =>
         baseModelConfig({
@@ -346,7 +346,7 @@ export function modelConfigMatrix() {
       ok: false,
       expectStatus: 400,
       expectCode: 'validation',
-      messageIncludes: /variants\[0\]\.promptCacheRetention has an invalid value/,
+      messageIncludes: /config\.variants\[0\]\.promptCacheRetention has an invalid value/,
       title: '非法 promptCacheRetention 档位',
       build: () =>
         baseModelConfig({
@@ -484,7 +484,7 @@ export function agentConfigMatrix() {
       ok: false,
       expectStatus: 400,
       expectCode: 'validation',
-      messageIncludes: /unexpected is not allowed/,
+      messageIncludes: /config\.unexpected is not allowed/,
       title: '未知字段 rejected',
       build: () => ({
         tools: [],

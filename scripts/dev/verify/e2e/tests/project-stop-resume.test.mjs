@@ -61,6 +61,6 @@ test('project lifecycle checks STOP, paused transition and resume using the retu
 test('project lifecycle rejects a server that permits a paused transition', async () => {
   // 即使流转目标合法，门禁失效时 E2E 必须失败，不能继续报告恢复成功。
   const fixture = issueFixture({ allowTransition: true })
-  await assert.rejects(verifyIssueStopResume(fixture.ctx, fixture.initial), /expected HttpError/)
+  await assert.rejects(verifyIssueStopResume(fixture.ctx, fixture.initial), /expected HTTP error, but call succeeded/)
   assert.equal(fixture.requests.length, 2)
 })
