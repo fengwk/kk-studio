@@ -1,13 +1,17 @@
 # Common
 
-`common` 是全仓最底层的值契约：严格 JSON、规范 Resource 引用、结果内容、输入 schema、SHA-256 与 Durable Work 的纯调度状态。Harness、Platform、应用与插件都依赖它，它不依赖任何内部模块，也不保存业务状态。有界调度骨架在 [Durable Work](work.md)。
+`common` 是全仓最底层的值契约：领域错误、严格 JSON、规范 Resource 引用、结果内容、输入 schema、SHA-256 与 Durable Work 的纯调度状态。Harness、Platform、应用与插件都依赖它，它不依赖任何内部模块，也不保存业务状态。有界调度骨架在 [Durable Work](work.md)。
 
-这些类型在调用边界完成校验，再交给执行模块使用。构造约束通常以 `IllegalArgumentException` 表达，编码阶段的不可恢复失败为 `IllegalStateException`；null 的拒绝或缺省处理以具体入口为准。生产依赖只有 JDK 与 Jackson 3（见 [`pom.xml`](../../common/pom.xml)），模块依赖方向由仓库检查 [`check.mjs`](../../scripts/dev/verify/repository/check.mjs) 校验。资源打开与关闭由调用方负责，Common 只消费已经提供的值或字符流。
+这些类型在调用边界完成校验，再交给执行模块使用。值对象内部的构造约束与编码故障以各类型契约为准；
+HTTP 可达的客户端输入错误在产生处以 `DomainException` 表达，内部故障不伪装成客户端错误。
+生产依赖只有 JDK 与 Jackson 3（见 [`pom.xml`](../../common/pom.xml)），模块依赖方向由仓库检查
+[`check.mjs`](../../scripts/dev/verify/repository/check.mjs) 校验。资源打开与关闭由调用方负责。
 
 ## 包架构
 
 | 包名 | 职责 | 明确边界 |
 | --- | --- | --- |
+| `fun.fengwk.kkstudio.common.error` | 领域错误类别、稳定原因与版本冲突坐标 | HTTP 状态与 problem 响应由 Web 映射 |
 | `fun.fengwk.kkstudio.common.json` | 严格 JSON 门禁、共享有界输出流与有界 UTF-8 JSON 编码器 | 校验语法与体积，超限中止编码；业务结构由调用方定义 |
 | `fun.fengwk.kkstudio.common.hash` | SHA-256 摘要与 64 位小写十六进制编码的唯一入口 | 只依赖 JDK；被哈希的字节与领域分隔由调用方决定 |
 | `fun.fengwk.kkstudio.common.id` | canonical UUID 文本解析的唯一入口 | 只依赖 JDK；要求与 `UUID.toString()` 往返一致，不做大小写归一 |
@@ -68,8 +72,9 @@
 - Resource：[`ResourceRef.java`](../../common/src/main/java/fun/fengwk/kkstudio/common/resource/ResourceRef.java)、[`ResourceUriValidator.java`](../../common/src/main/java/fun/fengwk/kkstudio/common/resource/ResourceUriValidator.java)
 - Result：[`ResultContent.java`](../../common/src/main/java/fun/fengwk/kkstudio/common/result/ResultContent.java)、[`TextArtifactMetadata.java`](../../common/src/main/java/fun/fengwk/kkstudio/common/result/TextArtifactMetadata.java)
 - Schema：[`InputSchema.java`](../../common/src/main/java/fun/fengwk/kkstudio/common/schema/InputSchema.java)、[`InputValidator.java`](../../common/src/main/java/fun/fengwk/kkstudio/common/schema/InputValidator.java)、[`InputNormalizer.java`](../../common/src/main/java/fun/fengwk/kkstudio/common/schema/InputNormalizer.java)、[`SchemaJsonCodec.java`](../../common/src/main/java/fun/fengwk/kkstudio/common/schema/SchemaJsonCodec.java)
-- 标识：[`Uuids.java`](../../common/src/main/java/fun/fengwk/kkstudio/common/id/Uuids.java) 解析 canonical UUID，Canvas 与 Storage 的 HTTP 边界直接调用它
-- 十进制：[`DecimalLongs.java`](../../common/src/main/java/fun/fengwk/kkstudio/common/number/DecimalLongs.java) 解析 canonical 非负与正数 long，Catalog、Harness 与 Project 的 HTTP 边界直接调用它
+- 标识：[`Uuids.java`](../../common/src/main/java/fun/fengwk/kkstudio/common/id/Uuids.java) 解析 canonical UUID
+- 十进制：[`DecimalLongs.java`](../../common/src/main/java/fun/fengwk/kkstudio/common/number/DecimalLongs.java) 解析 canonical 非负与正数 long；HTTP Long 的 wire 规则见[系统设计](../system-design.md#http-契约)
+- 领域错误：[`DomainException.java`](../../common/src/main/java/fun/fengwk/kkstudio/common/error/DomainException.java) 与 [`DomainErrorCode.java`](../../common/src/main/java/fun/fengwk/kkstudio/common/error/DomainErrorCode.java)
 - 调度状态：[`WorkState.java`](../../common/src/main/java/fun/fengwk/kkstudio/common/work/WorkState.java)；有界调度骨架见 [Durable Work](work.md)。
 - [`ResourceRefTest.java`](../../common/src/test/java/fun/fengwk/kkstudio/common/resource/ResourceRefTest.java) 覆盖各类 scheme 与 data URI 解码，[`InputNormalizerTest.java`](../../common/src/test/java/fun/fengwk/kkstudio/common/schema/InputNormalizerTest.java) 锁定容错与拒绝的边界，[`SchemaJsonCodecTest.java`](../../common/src/test/java/fun/fengwk/kkstudio/common/schema/SchemaJsonCodecTest.java) 锁定确定性编码；同包 `BoundedOutputStreamTest` 与 `BoundedJsonWriterTest` 覆盖中文与 emoji 的 UTF-8 字节边界、只计数不保留字节与超限早停。
 

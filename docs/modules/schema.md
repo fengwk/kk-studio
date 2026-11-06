@@ -52,7 +52,6 @@ harness_session
   |       +--< harness_execution_exit >-- environment
   |       +--< harness_tool_invocation
   |       +--< builtin_model_invocation >-- harness_entry
-  |       +--< durable_work
   +--< session_blob_ref / session_file
 
 canvas_document
@@ -74,6 +73,8 @@ project
           +--< project_issue_evidence >-- storage_blob / project_issue_run
 ```
 
+`durable_work` 通过 `(target_type, target_id)` 表示各模块的调度目标，目标 ID 不设到具体业务表的外键；
+可选的 `required_environment_id` 引用 Environment。
 Canvas Resource 与 pin 使用同画布外键，Run 保存 requestId，调度与租约保存在 `durable_work`；Project Run 通过
 复合外键关联同 Issue 的 Thread 和同阶段预算，Entry 坐标是应用维护的历史引用。
 父链区间、权限、workflow 合法性和输出完整性由应用验证。表、列的准确清单与约束名直接查 V1。
@@ -96,8 +97,8 @@ Agent、Environment 等目录名称的 canonical 规则只在应用写入路径�
 所有外键为即时校验，删除依赖由应用按明确顺序处理；MCP 工具随所属 server 级联删除。
 
 Plugin 配置每个 pluginId 一行，`version` 为正并以 CAS 推进。`values_json` 是 text：
-数据库要求严格 JSON object、每层对象键唯一及最多 65,536 UTF-8 字节，
-避免 jsonb 数值展开改变普通值的字节预算和恢复形态。秘密只在 `plugin_credential.payload_json` 中，
+数据库要求严格 JSON object、对象键唯一及最多 65,536 UTF-8 字节。应用按 Schema 校验并补默认值，
+存储规范化的紧凑文本，同时逐值保留大整数、精确小数与超范围指数。秘密只在 `plugin_credential.payload_json` 中，
 其每次写入推进 `version`。`plugin_auth_attempt` 只保存 nonce 摘要与 prepare 时的 `config_version`。
 
 Canvas Resource 的 blob/text 恰好一个非空，owner/index 成对且槽位唯一。
