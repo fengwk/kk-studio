@@ -277,8 +277,6 @@ public class SubagentTaskRunner implements SubagentRunner {
         throw notFound;
       }
       throw reject("subagent thread " + request.resumeThreadId() + " was not found", notFound);
-    } catch (HarnessRuntimeNotFoundException notFound) {
-      throw reject("subagent thread " + request.resumeThreadId() + " was not found", notFound);
     }
     if (!Objects.equals(request.parentThreadId(), child.thread().parentThreadId())) {
       throw reject(INVALID_RESUME_THREAD_MESSAGE);
@@ -294,8 +292,6 @@ public class SubagentTaskRunner implements SubagentRunner {
       if (notFound.code() != DomainErrorCode.NOT_FOUND) {
         throw notFound;
       }
-      throw reject("subagent thread " + childThreadId + " was not found", notFound);
-    } catch (HarnessRuntimeNotFoundException notFound) {
       throw reject("subagent thread " + childThreadId + " was not found", notFound);
     }
     if (!parent.threadId().equals(child.thread().parentThreadId())) {
@@ -313,8 +309,6 @@ public class SubagentTaskRunner implements SubagentRunner {
       if (notFound.code() != DomainErrorCode.NOT_FOUND) {
         throw notFound;
       }
-      throw reject("task invocation is no longer attached to its parent Thread context", notFound);
-    } catch (HarnessRuntimeNotFoundException notFound) {
       throw reject("task invocation is no longer attached to its parent Thread context", notFound);
     }
     if (parent.toolSiblings().stream()
@@ -369,8 +363,6 @@ public class SubagentTaskRunner implements SubagentRunner {
       if (notFound.code() != DomainErrorCode.NOT_FOUND) {
         throw notFound;
       }
-      throw reject("subagent thread " + childThreadId + " was not found", notFound);
-    } catch (HarnessRuntimeNotFoundException notFound) {
       throw reject("subagent thread " + childThreadId + " was not found", notFound);
     }
   }
