@@ -1,51 +1,50 @@
-import { apiClient, type HttpClient } from '@/shared/api/client'
-import type { PageResult } from '@/shared/api/contracts/base'
+import { request } from '@/shared/api/client'
 import type {
-  McpServerConfigDTO,
   McpServerCreateDTO,
   McpServerDTO,
+  McpServerSummaryDTO,
   McpServerUpdateDTO,
+  SecretUpdate,
 } from '@/shared/api/generated/contracts'
 
-export function createMcpServerService(client: HttpClient = apiClient) {
-  return {
-    pageServers: (pageNumber = 1, pageSize = 50): Promise<PageResult<McpServerDTO>> =>
-      client.get('/mcp-servers', { params: { pageNumber, pageSize } }),
-
-    getServer: (name: string): Promise<McpServerDTO> =>
-      client.get(`/mcp-servers/${encodeURIComponent(name)}`),
-
-    /**
-     * 按需读取当前完整配置（含 URL 与 headers，强制 Cache-Control: no-store）。
-     * 仅在显式编辑时直读，绝不进入 React Query、LocalStorage 或 URL。
-     */
-    getServerConfig: (name: string): Promise<McpServerConfigDTO> =>
-      client.get(`/mcp-servers/${encodeURIComponent(name)}/config`, {
-        headers: { 'Cache-Control': 'no-store' },
-      }),
-
-    createServer: (data: McpServerCreateDTO): Promise<McpServerDTO> =>
-      client.post('/mcp-servers', data),
-
-    updateServer: (name: string, data: McpServerUpdateDTO): Promise<McpServerDTO> =>
-      client.put(`/mcp-servers/${encodeURIComponent(name)}`, data),
-
-    /**
-     * 触发 MCP Server 工具发现（POST /mcp-servers/{name}/discover?expectedVersion=...）。
-     */
-    discoverServer: (
-      name: string,
-      expectedVersion: string,
-    ): Promise<McpServerDTO> =>
-      client.post(
-        `/mcp-servers/${encodeURIComponent(name)}/discover?expectedVersion=${encodeURIComponent(expectedVersion)}`,
-      ),
-
-    deleteServer: (name: string, expectedVersion: string): Promise<void> =>
-      client.delete(
-        `/mcp-servers/${encodeURIComponent(name)}?expectedVersion=${encodeURIComponent(expectedVersion)}`,
-      ),
+/**
+ * header 映射以整体秘密提交：非空映射为 SET（值是 JSON 对象文本），显式清除为 CLEAR，其余保持原值。
+ *
+ * <p>headers 从不回读，因此界面只能提交替换、清除或保持三种意图。
+ */
+export function headersUpdate(
+  headers: Record<string, string> | null,
+  clear: boolean,
+): SecretUpdate {
+  if (headers && Object.keys(headers).length > 0) {
+    return { operation: 'SET', value: JSON.stringify(headers) }
   }
+  return { operation: clear ? 'CLEAR' : 'KEEP' }
 }
 
-export const mcpServerService = createMcpServerService()
+/** MCP Server 路由：列表是摘要数组，详情携带 URL 与 headers 的已配置事实。 */
+export const mcpServerService = {
+  listServers: (): Promise<McpServerSummaryDTO[]> =>
+    request('GET /api/platform/mcp-servers', {}),
+
+  getServer: (name: string): Promise<McpServerDTO> =>
+    request('GET /api/platform/mcp-servers/{name}', { path: { name } }),
+
+  createServer: (data: McpServerCreateDTO): Promise<McpServerDTO> =>
+    request('POST /api/platform/mcp-servers', { body: data }),
+
+  updateServer: (name: string, data: McpServerUpdateDTO): Promise<McpServerDTO> =>
+    request('PUT /api/platform/mcp-servers/{name}', { path: { name }, body: data }),
+
+  discoverServer: (name: string, expectedVersion: string): Promise<McpServerDTO> =>
+    request('POST /api/platform/mcp-servers/{name}/discover', {
+      path: { name },
+      body: { expectedVersion },
+    }),
+
+  deleteServer: (name: string, expectedVersion: string): Promise<void> =>
+    request('DELETE /api/platform/mcp-servers/{name}', {
+      path: { name },
+      query: { expectedVersion },
+    }),
+}

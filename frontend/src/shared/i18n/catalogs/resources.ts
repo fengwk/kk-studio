@@ -1512,6 +1512,14 @@ export const resourcesCatalog = {
     'en-US': 'JSON object of request headers. Values may contain ${VAR} placeholders.',
     'zh-CN': '请求头 JSON 对象，属性值支持 ${VAR} 环境变量占位符。',
   },
+  'ai.mcp.headersKeepHint': {
+    'en-US': 'Leave empty to keep the stored headers.',
+    'zh-CN': '留空保持已保存的请求头。',
+  },
+  'ai.mcp.clearHeaders': {
+    'en-US': 'Clear stored headers',
+    'zh-CN': '清除已保存的请求头',
+  },
   'ai.mcp.toolCount': {
     'en-US': 'Tools',
     'zh-CN': '工具数量',

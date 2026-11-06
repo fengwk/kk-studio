@@ -38,7 +38,7 @@ export const queryKeys = {
   },
   mcpServers: {
     all: ['mcp-servers'] as const,
-    list: (pageNumber = 1, pageSize = 50) => ['mcp-servers', 'list', pageNumber, pageSize] as const,
+    list: () => ['mcp-servers', 'list'] as const,
     detail: (name: string) => ['mcp-servers', 'detail', name] as const,
   },
   chats: {

@@ -9,7 +9,7 @@ import { hashSkillArchive, uploadSkillArchive } from '@/features/catalog/skills/
 import type {
   AgentDefinitionDTO,
   SkillPackageDetailDTO,
-  SkillPackagePreviewDTO,
+  SkillPackageStagingDTO,
 } from '@/shared/api/generated/contracts'
 
 vi.mock('@/shared/api/agent-service', () => ({
@@ -17,9 +17,9 @@ vi.mock('@/shared/api/agent-service', () => ({
     createSkillPackage: vi.fn(),
     getSkillPackage: vi.fn(),
     listAgents: vi.fn(),
-    previewSkillPackageUpload: vi.fn(),
-    publishSkillPackageUpload: vi.fn(),
-    cancelSkillPackageUpload: vi.fn(),
+    createSkillPackageStaging: vi.fn(),
+    publishSkillPackageStaging: vi.fn(),
+    cancelSkillPackageStaging: vi.fn(),
   },
 }))
 
@@ -47,15 +47,15 @@ function detail(overrides: Partial<SkillPackageDetailDTO> = {}): SkillPackageDet
     artifactSha256: 'a'.repeat(64),
     artifactSizeBytes: '2048',
     version: '3',
-    createTime: 1784505600,
-    updateTime: 1784509200,
+    createdAt: 1784505600,
+    updatedAt: 1784509200,
     ...overrides,
   }
 }
 
-function preview(overrides: Partial<SkillPackagePreviewDTO> = {}): SkillPackagePreviewDTO {
+function preview(overrides: Partial<SkillPackageStagingDTO> = {}): SkillPackageStagingDTO {
   return {
-    stagingUploadId: 'stage-1',
+    id: 'stage-1',
     packageName: 'core-tools',
     packageVersion: '2026.09.1',
     description: 'Core developer skills',
@@ -101,7 +101,7 @@ describe('SkillPackageCreateModal', () => {
     vi.mocked(agentService.createSkillPackage).mockResolvedValue(detail({ source: 'GIT', git: {
       repositoryUrl: 'https://github.com/example/skills.git',
       branch: 'main',
-      hasToken: false,
+      token: { configured: false },
     } }))
     vi.mocked(agentService.getSkillPackage).mockRejectedValue(new ApiError('not found', 404))
     vi.mocked(agentService.listAgents).mockResolvedValue({
@@ -112,9 +112,9 @@ describe('SkillPackageCreateModal', () => {
     })
     vi.mocked(hashSkillArchive).mockResolvedValue('c'.repeat(64))
     vi.mocked(uploadSkillArchive).mockResolvedValue('upload-1')
-    vi.mocked(agentService.previewSkillPackageUpload).mockResolvedValue(preview())
-    vi.mocked(agentService.publishSkillPackageUpload).mockResolvedValue(detail())
-    vi.mocked(agentService.cancelSkillPackageUpload).mockResolvedValue(undefined)
+    vi.mocked(agentService.createSkillPackageStaging).mockResolvedValue(preview())
+    vi.mocked(agentService.publishSkillPackageStaging).mockResolvedValue(detail())
+    vi.mocked(agentService.cancelSkillPackageStaging).mockResolvedValue(undefined)
   })
 
   afterEach(() => {
@@ -148,7 +148,7 @@ describe('SkillPackageCreateModal', () => {
         description: null,
         repositoryUrl: 'https://github.com/myorg/skills.git',
         branch: 'main',
-        token: 'ghp_secret',
+        token: { operation: 'SET', value: 'ghp_secret' },
       })
     })
     await waitFor(() => expect(onCreated).toHaveBeenCalledWith(expect.objectContaining({
@@ -201,7 +201,7 @@ describe('SkillPackageCreateModal', () => {
     finishUpload!()
 
     await waitFor(() => {
-      expect(agentService.previewSkillPackageUpload).toHaveBeenCalledWith({
+      expect(agentService.createSkillPackageStaging).toHaveBeenCalledWith({
         uploadId: 'upload-1',
         packageName: 'core-tools',
         packageVersion: '2026.09.1',
@@ -225,8 +225,7 @@ describe('SkillPackageCreateModal', () => {
     await user.click(within(previewDialog).getByRole('button', { name: '发布' }))
 
     await waitFor(() => {
-      expect(agentService.publishSkillPackageUpload).toHaveBeenCalledWith({
-        stagingUploadId: 'stage-1',
+      expect(agentService.publishSkillPackageStaging).toHaveBeenCalledWith('stage-1', {
         packageName: 'core-tools',
         packageVersion: '2026.09.1',
         description: 'Core developer skills',
@@ -264,7 +263,8 @@ describe('SkillPackageCreateModal', () => {
     await user.click(within(previewDialog).getByRole('button', { name: '发布' }))
 
     await waitFor(() => {
-      expect(agentService.publishSkillPackageUpload).toHaveBeenCalledWith(
+      expect(agentService.publishSkillPackageStaging).toHaveBeenCalledWith(
+        'stage-1',
         expect.objectContaining({ expectedVersion: '3' }),
       )
     })
@@ -285,17 +285,21 @@ describe('SkillPackageCreateModal', () => {
     await user.click(within(previewDialog).getByRole('button', { name: /取消/ }))
 
     await waitFor(() => {
-      expect(agentService.cancelSkillPackageUpload).toHaveBeenCalledWith('stage-1')
+      expect(agentService.cancelSkillPackageStaging).toHaveBeenCalledWith('stage-1')
     })
     await waitFor(() => expect(onClose).toHaveBeenCalled())
-    expect(agentService.publishSkillPackageUpload).not.toHaveBeenCalled()
+    expect(agentService.publishSkillPackageStaging).not.toHaveBeenCalled()
   })
 
   it('refuses to upload over a Git-backed package', async () => {
     const user = userEvent.setup()
     vi.mocked(agentService.getSkillPackage).mockResolvedValue(detail({
       source: 'GIT',
-      git: { repositoryUrl: 'https://github.com/example/skills.git', branch: 'main', hasToken: false },
+      git: {
+        repositoryUrl: 'https://github.com/example/skills.git',
+        branch: 'main',
+        token: { configured: false },
+      },
     }))
     renderModal()
 

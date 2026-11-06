@@ -40,8 +40,8 @@ function skillPackage(
     source: 'GIT',
     updateAvailable: false,
     version: '1',
-    createTime: 1784505600,
-    updateTime: 1784509200,
+    createdAt: 1784505600,
+    updatedAt: 1784509200,
   }
 }
 

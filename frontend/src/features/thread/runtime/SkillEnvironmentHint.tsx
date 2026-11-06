@@ -15,7 +15,7 @@ import '@/features/thread/runtime/skill-environment-hint.css'
  * 执行根技能可用性提示：所选 Environment 拿不到 Agent 技能的当前版本时，列出受影响的技能与原因。
  *
  * 两个事实都来自既有契约：Agent 配置的 `config.skills` 与每个 Skill Package 的环境安装摘要
- * `GET /skill-packages/{name}/environments`。本组件不推断安装事实，任一 Package 摘要尚未就绪
+ * `GET /api/platform/skill-packages/{name}/environments`。本组件不推断安装事实，任一 Package 摘要尚未就绪
  * 或读取失败时不出提示；Environment 推送的 changed 只提示回读摘要，切换 Environment 或安装完成
  * 后提示随之消失。
  */

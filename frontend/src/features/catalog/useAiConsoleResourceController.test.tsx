@@ -360,8 +360,8 @@ describe('useAiConsoleResourceController', () => {
         source: 'GIT',
         updateAvailable: false,
         version: '1',
-        createTime: 1789948800,
-        updateTime: 1789948800,
+        createdAt: 1789948800,
+        updatedAt: 1789948800,
       },
     ])
 

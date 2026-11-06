@@ -56,8 +56,8 @@ function summary(overrides: Partial<SkillPackageSummaryDTO> = {}): SkillPackageS
     source: 'GIT',
     updateAvailable: false,
     version: '1',
-    createTime: 1784505600,
-    updateTime: 1784509200,
+    createdAt: 1784505600,
+    updatedAt: 1784509200,
     ...overrides,
   }
 }
@@ -65,7 +65,11 @@ function summary(overrides: Partial<SkillPackageSummaryDTO> = {}): SkillPackageS
 function detail(overrides: Partial<SkillPackageDetailDTO> = {}): SkillPackageDetailDTO {
   return {
     ...summary(),
-    git: { repositoryUrl: 'https://github.com/example/skills.git', branch: 'main', hasToken: false },
+    git: {
+      repositoryUrl: 'https://github.com/example/skills.git',
+      branch: 'main',
+      token: { configured: false },
+    },
     headCommit: null,
     headCheckedAt: 1784509200,
     headCheckError: null,

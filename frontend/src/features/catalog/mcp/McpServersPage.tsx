@@ -18,21 +18,20 @@ import { StateBlock } from '@/shared/ui/feedback/StateBlock'
 import { Dialog } from '@/shared/ui/overlays/Dialog'
 import { ConfirmActionModal } from '@/shared/ui/overlays/ConfirmActionModal'
 import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
-import { mcpServerService } from '@/features/catalog/mcp-server-service'
+import { headersUpdate, mcpServerService } from '@/features/catalog/mcp-server-service'
 import { AiNavigation } from '@/app/ai-console/AiNavigation'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n } from '@/shared/i18n'
 import { formatDateTime24 } from '@/shared/lib/date-format'
 import {
   DEFAULT_TIMEOUT_MILLIS,
-  hasUnsavedChanges,
   parseAndValidateHeaders,
   validateMcpName,
   validateMcpUrl,
   validateTimeoutMillis,
 } from './mcp-utils'
 import './mcp-servers.css'
-import type { McpServerDTO } from '@/shared/api/generated/contracts'
+import type { McpServerSummaryDTO } from '@/shared/api/generated/contracts'
 
 interface CreateModalState {
   name: string
@@ -44,18 +43,19 @@ interface CreateModalState {
 }
 
 interface EditModalState {
-  server: McpServerDTO
+  server: McpServerSummaryDTO
   loading: boolean
   fetchError: string | null
   loadedVersion: string | null
-  loadedConfig: {
+  loaded: {
     url: string
-    headers: Record<string, string>
     enabled: boolean
     timeoutMillis: number
+    headersConfigured: boolean
   } | null
   url: string
   headersText: string
+  clearHeaders: boolean
   enabled: boolean
   timeoutMillis: string | number
   error: string | null
@@ -68,7 +68,7 @@ export function McpServersPage() {
 
   const [createModal, setCreateModal] = useState<CreateModalState | null>(null)
   const [editModal, setEditModal] = useState<EditModalState | null>(null)
-  const [deleteTarget, setDeleteTarget] = useState<McpServerDTO | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<McpServerSummaryDTO | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [conflict, setConflict] = useState<ConflictPresentation | null>(null)
 
@@ -83,11 +83,11 @@ export function McpServersPage() {
   }, [])
 
   const serversQuery = useQuery({
-    queryKey: queryKeys.mcpServers.list(1, 100),
-    queryFn: () => mcpServerService.pageServers(1, 100),
+    queryKey: queryKeys.mcpServers.list(),
+    queryFn: () => mcpServerService.listServers(),
   })
 
-  const servers: McpServerDTO[] = serversQuery.data?.results ?? []
+  const servers: McpServerSummaryDTO[] = serversQuery.data ?? []
 
   const createMutation = useMutation({
     mutationFn: (data: {
@@ -100,7 +100,7 @@ export function McpServersPage() {
       mcpServerService.createServer({
         name: data.name,
         url: data.url,
-        headers: data.headers,
+        headers: headersUpdate(data.headers, false),
         enabled: data.enabled,
         timeoutMillis: data.timeoutMillis,
       }),
@@ -126,6 +126,7 @@ export function McpServersPage() {
         expectedVersion: string
         url: string
         headers: Record<string, string>
+        clearHeaders: boolean
         enabled: boolean
         timeoutMillis: number
       }
@@ -133,7 +134,7 @@ export function McpServersPage() {
       mcpServerService.updateServer(args.name, {
         expectedVersion: args.data.expectedVersion,
         url: args.data.url,
-        headers: args.data.headers,
+        headers: headersUpdate(args.data.headers, args.data.clearHeaders),
         enabled: args.data.enabled,
         timeoutMillis: args.data.timeoutMillis,
       }),
@@ -187,7 +188,7 @@ export function McpServersPage() {
     })
   }
 
-  function handleOpenEdit(server: McpServerDTO) {
+  function handleOpenEdit(server: McpServerSummaryDTO) {
     setConflict(null)
     const generation = ++editRequestGenerationRef.current
     setEditModal({
@@ -195,9 +196,10 @@ export function McpServersPage() {
       loading: true,
       fetchError: null,
       loadedVersion: null,
-      loadedConfig: null,
+      loaded: null,
       url: '',
       headersText: '',
+      clearHeaders: false,
       enabled: server.enabled,
       timeoutMillis: Number(server.timeoutMillis) || DEFAULT_TIMEOUT_MILLIS,
       error: null,
@@ -205,31 +207,28 @@ export function McpServersPage() {
     })
 
     mcpServerService
-      .getServerConfig(server.name)
-      .then((config) => {
+      .getServer(server.name)
+      .then((detail) => {
         if (editRequestGenerationRef.current !== generation) {
           return
         }
-        const rawHeaders = config.headers ?? {}
-        const headersText = Object.keys(rawHeaders).length > 0 ? JSON.stringify(rawHeaders, null, 2) : ''
-        const enabled = server.enabled
-        const timeoutMillis = Number(server.timeoutMillis) || DEFAULT_TIMEOUT_MILLIS
-        const loadedConfig = {
-          url: config.url ?? '',
-          headers: rawHeaders,
-          enabled,
-          timeoutMillis,
-        }
+        const timeoutMillis = Number(detail.timeoutMillis) || DEFAULT_TIMEOUT_MILLIS
         setEditModal((prev) => {
           if (!prev || editRequestGenerationRef.current !== generation) return null
           return {
             ...prev,
             loading: false,
-            loadedVersion: config.version,
-            loadedConfig,
-            url: config.url ?? '',
-            headersText,
-            enabled,
+            loadedVersion: detail.version,
+            loaded: {
+              url: detail.url,
+              enabled: detail.enabled,
+              timeoutMillis,
+              headersConfigured: detail.headers.configured,
+            },
+            url: detail.url,
+            headersText: '',
+            clearHeaders: false,
+            enabled: detail.enabled,
             timeoutMillis,
           }
         })
@@ -313,7 +312,9 @@ export function McpServersPage() {
       return
     }
 
-    const headersVal = parseAndValidateHeaders(editModal.headersText)
+    const headersVal = parseAndValidateHeaders(
+      editModal.clearHeaders ? '' : editModal.headersText,
+    )
     if (!headersVal.valid) {
       setEditModal({ ...editModal, error: headersVal.error ?? 'Invalid headers' })
       return
@@ -331,6 +332,7 @@ export function McpServersPage() {
         expectedVersion: editModal.loadedVersion,
         url: editModal.url,
         headers: headersVal.headers,
+        clearHeaders: editModal.clearHeaders,
         enabled: editModal.enabled,
         timeoutMillis: timeoutVal.timeoutMillis,
       },
@@ -341,7 +343,9 @@ export function McpServersPage() {
     if (!editModal || !editModal.loadedVersion) return
     setConflict(null)
 
-    const headersVal = parseAndValidateHeaders(editModal.headersText)
+    const headersVal = parseAndValidateHeaders(
+      editModal.clearHeaders ? '' : editModal.headersText,
+    )
     if (!headersVal.valid) {
       setEditModal((prev) =>
         prev ? { ...prev, error: headersVal.error ?? 'Invalid headers' } : null,
@@ -357,19 +361,19 @@ export function McpServersPage() {
       return
     }
 
-    if (editModal.loadedConfig) {
-      const currentFields = {
-        url: editModal.url,
-        headers: headersVal.headers,
-        enabled: editModal.enabled,
-        timeoutMillis: timeoutVal.timeoutMillis,
-      }
-      if (hasUnsavedChanges(currentFields, editModal.loadedConfig)) {
-        setEditModal((prev) =>
-          prev ? { ...prev, error: t('ai.mcp.unsavedDiscoverBlocked') } : null,
-        )
-        return
-      }
+    // headers 不回读，任何一次提交（替换或清除）都视为未保存的配置变更
+    const headersDirty = editModal.headersText.trim().length > 0 || editModal.clearHeaders
+    if (
+      editModal.loaded &&
+      (editModal.url !== editModal.loaded.url ||
+        editModal.enabled !== editModal.loaded.enabled ||
+        timeoutVal.timeoutMillis !== editModal.loaded.timeoutMillis ||
+        headersDirty)
+    ) {
+      setEditModal((prev) =>
+        prev ? { ...prev, error: t('ai.mcp.unsavedDiscoverBlocked') } : null,
+      )
+      return
     }
 
     setEditModal((prev) => (prev ? { ...prev, discoverPending: true, error: null } : null))
@@ -414,8 +418,8 @@ export function McpServersPage() {
               subtitle={t('ai.mcp.createDescription')}
               onClick={handleOpenCreate}
             />
-          {servers.map((server: McpServerDTO) => {
-            const updateTime = formatDateTime24(new Date(server.updateTime * 1000), locale)
+          {servers.map((server: McpServerSummaryDTO) => {
+            const updateTime = formatDateTime24(new Date(server.updatedAt * 1000), locale)
 
             const statusLabel =
               server.discoveryStatus === 'AVAILABLE'
@@ -635,12 +639,41 @@ export function McpServersPage() {
                       className="mcp-headers-textarea"
                       value={editModal.headersText}
                       onChange={(e) =>
-                        setEditModal({ ...editModal, headersText: e.target.value, error: null })
+                        setEditModal({
+                          ...editModal,
+                          headersText: e.target.value,
+                          clearHeaders: false,
+                          error: null,
+                        })
                       }
-                      disabled={updateMutation.isPending || editModal.discoverPending}
+                      placeholder={'{\n  "Authorization": "Bearer ${AUTH_TOKEN}"\n}'}
+                      disabled={
+                        updateMutation.isPending ||
+                        editModal.discoverPending ||
+                        editModal.clearHeaders
+                      }
                       rows={4}
                     />
-                    <span className="inline-hint">{t('ai.mcp.headersHint')}</span>
+                    <span className="inline-hint">
+                      {editModal.loaded?.headersConfigured
+                        ? t('ai.mcp.headersKeepHint')
+                        : t('ai.mcp.headersHint')}
+                    </span>
+                    {editModal.loaded?.headersConfigured && (
+                      <Checkbox
+                        checked={editModal.clearHeaders}
+                        onChange={(clearHeaders) =>
+                          setEditModal({
+                            ...editModal,
+                            clearHeaders,
+                            headersText: clearHeaders ? '' : editModal.headersText,
+                            error: null,
+                          })
+                        }
+                        disabled={updateMutation.isPending || editModal.discoverPending}
+                        label={t('ai.mcp.clearHeaders')}
+                      />
+                    )}
                   </label>
 
                   <label className="form-group">

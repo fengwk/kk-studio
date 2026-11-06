@@ -28,7 +28,7 @@ const SAMPLE_PACKAGES: SkillPackageDetailDTO[] = [
     git: {
       repositoryUrl: 'https://github.com/example/skills.git',
       branch: 'main',
-      hasToken: false,
+      token: { configured: false },
     },
     headCommit: null,
     headCheckedAt: null,
@@ -37,8 +37,8 @@ const SAMPLE_PACKAGES: SkillPackageDetailDTO[] = [
     artifactSha256: 'mock-sha256-core',
     artifactSizeBytes: '1024',
     version: '1',
-    createTime: 1784505600,
-    updateTime: 1784509200,
+    createdAt: 1784505600,
+    updatedAt: 1784509200,
   },
   {
     packageName: 'browser-skills',
@@ -50,7 +50,7 @@ const SAMPLE_PACKAGES: SkillPackageDetailDTO[] = [
     git: {
       repositoryUrl: 'https://github.com/example/browser.git',
       branch: 'main',
-      hasToken: true,
+      token: { configured: true },
     },
     headCommit: '3333333333333333333333333333333333333333',
     headCheckedAt: 1784512800,
@@ -59,8 +59,8 @@ const SAMPLE_PACKAGES: SkillPackageDetailDTO[] = [
     artifactSha256: 'mock-sha256-browser',
     artifactSizeBytes: '2048',
     version: '2',
-    createTime: 1784505600,
-    updateTime: 1784512800,
+    createdAt: 1784505600,
+    updatedAt: 1784512800,
   },
   {
     packageName: 'diagnostics-kit',
@@ -72,7 +72,7 @@ const SAMPLE_PACKAGES: SkillPackageDetailDTO[] = [
     git: {
       repositoryUrl: 'https://github.com/example/diag.git',
       branch: 'main',
-      hasToken: false,
+      token: { configured: false },
     },
     headCommit: null,
     headCheckedAt: 1784516400,
@@ -81,15 +81,15 @@ const SAMPLE_PACKAGES: SkillPackageDetailDTO[] = [
     artifactSha256: 'mock-sha256-diag',
     artifactSizeBytes: '512',
     version: '1',
-    createTime: 1784505600,
-    updateTime: 1784516400,
+    createdAt: 1784505600,
+    updatedAt: 1784516400,
   },
 ]
 
 // 本地化回归只读取固定数据，不允许弹窗取消或校验流程发起 mutation。
 const SAMPLE_DETAILS = new Map(SAMPLE_PACKAGES.map((pkg) => [pkg.packageName, pkg]))
 agentService.listSkillPackages = async () =>
-  SAMPLE_PACKAGES.map(({ packageName, description, packageVersion, publishedAt, skills, source, updateAvailable, version, createTime, updateTime }) => ({
+  SAMPLE_PACKAGES.map(({ packageName, description, packageVersion, publishedAt, skills, source, updateAvailable, version, createdAt, updatedAt }) => ({
     packageName,
     description,
     packageVersion,
@@ -98,8 +98,8 @@ agentService.listSkillPackages = async () =>
     source,
     updateAvailable,
     version,
-    createTime,
-    updateTime,
+    createdAt,
+    updatedAt,
   }))
 agentService.getSkillPackage = async (name: string) => {
   const detail = SAMPLE_DETAILS.get(name)
