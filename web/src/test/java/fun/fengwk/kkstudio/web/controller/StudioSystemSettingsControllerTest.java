@@ -40,20 +40,20 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
     mockMvc
         .perform(get("/api/settings"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.version").value("0"))
-        .andExpect(jsonPath("$.data.tool.modelGatewayBusyRetryMillis").value("5000"))
-        .andExpect(jsonPath("$.data.tool.permission['bash'][0].pattern").value("*"))
-        .andExpect(jsonPath("$.data.tool.permission['bash'][0].action").value("ask"))
-        .andExpect(jsonPath("$.data.aiRuntime.retryBackoffStrategy").value("EXPONENTIAL"))
-        .andExpect(jsonPath("$.data.aiRuntime.retryMaxRetries").value(3))
+        .andExpect(jsonPath("$.version").value("0"))
+        .andExpect(jsonPath("$.tool.modelGatewayBusyRetryMillis").value("5000"))
+        .andExpect(jsonPath("$.tool.permission['bash'][0].pattern").value("*"))
+        .andExpect(jsonPath("$.tool.permission['bash'][0].action").value("ask"))
+        .andExpect(jsonPath("$.aiRuntime.retryBackoffStrategy").value("EXPONENTIAL"))
+        .andExpect(jsonPath("$.aiRuntime.retryMaxRetries").value(3))
         // 仓库/Web 约定：Long 字段（时长/字节）在 wire 上输出十进制字符串；Integer 字段为数值。
-        .andExpect(jsonPath("$.data.environment.maxResourceBytes").value("16777216"))
-        .andExpect(jsonPath("$.data.environment.maxResourceBytes").isString())
-        .andExpect(jsonPath("$.data.network.proxyUrl").doesNotExist())
-        .andExpect(jsonPath("$.data.network.noProxyHosts").value("localhost,127.*,::1"))
-        .andExpect(jsonPath("$.data.advanced.applicationEventQueueCapacity").value(512))
-        .andExpect(jsonPath("$.data.createTime").exists())
-        .andExpect(jsonPath("$.data.updateTime").exists());
+        .andExpect(jsonPath("$.environment.maxResourceBytes").value("16777216"))
+        .andExpect(jsonPath("$.environment.maxResourceBytes").isString())
+        .andExpect(jsonPath("$.network.proxyUrl").doesNotExist())
+        .andExpect(jsonPath("$.network.noProxyHosts").value("localhost,127.*,::1"))
+        .andExpect(jsonPath("$.advanced.applicationEventQueueCapacity").value(512))
+        .andExpect(jsonPath("$.createTime").exists())
+        .andExpect(jsonPath("$.updateTime").exists());
   }
 
   @Test
@@ -63,22 +63,22 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
         .andExpect(status().isOk())
         // section 顺序：aiRuntime -> tool -> environment -> network -> storageMedia
         // -> advanced（General 是前端本地 tab，不在 server schema）。
-        .andExpect(jsonPath("$.data.sections[0].key").value("aiRuntime"))
-        .andExpect(jsonPath("$.data.sections[1].key").value("tool"))
-        .andExpect(jsonPath("$.data.sections[2].key").value("environment"))
-        .andExpect(jsonPath("$.data.sections[3].key").value("network"))
-        .andExpect(jsonPath("$.data.sections[4].key").value("storageMedia"))
-        .andExpect(jsonPath("$.data.sections[5].key").value("advanced"))
+        .andExpect(jsonPath("$.sections[0].key").value("aiRuntime"))
+        .andExpect(jsonPath("$.sections[1].key").value("tool"))
+        .andExpect(jsonPath("$.sections[2].key").value("environment"))
+        .andExpect(jsonPath("$.sections[3].key").value("network"))
+        .andExpect(jsonPath("$.sections[4].key").value("storageMedia"))
+        .andExpect(jsonPath("$.sections[5].key").value("advanced"))
         // 精确顺序断言：每个 section 的完整 key 序列必须与基线 tabs 完全一致。
         .andExpect(
-            jsonPath("$.data.sections[*].key")
+            jsonPath("$.sections[*].key")
                 .value(
                     contains(
                         "aiRuntime", "tool", "environment", "network", "storageMedia", "advanced")))
         // custom atomic leaf、HTTP 名单和自动压缩组的顺序与路径。
-        .andExpect(jsonPath("$.data.sections[1].groups[0].fields[0].path").value("tool.permission"))
+        .andExpect(jsonPath("$.sections[1].groups[0].fields[0].path").value("tool.permission"))
         .andExpect(
-            jsonPath("$.data.sections[0].groups[*].key")
+            jsonPath("$.sections[0].groups[*].key")
                 .value(
                     contains(
                         "aiRuntime.retry",
@@ -86,71 +86,67 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
                         "aiRuntime.compaction",
                         "aiRuntime.subagent")))
         .andExpect(
-            jsonPath("$.data.sections[0].groups[1].fields[0].path")
+            jsonPath("$.sections[0].groups[1].fields[0].path")
                 .value("aiRuntime.modelHttpRetryStatusCodes"))
-        .andExpect(jsonPath("$.data.sections[0].groups[1].fields.length()").value(1))
-        .andExpect(jsonPath("$.data.sections[0].groups[1].fields[0].type").value("INTEGER_LIST"))
-        .andExpect(jsonPath("$.data.sections[0].groups[1].fields[0].nullable").value(false))
-        .andExpect(jsonPath("$.data.sections[0].groups[1].fields[0].min").value(400))
-        .andExpect(jsonPath("$.data.sections[0].groups[1].fields[0].max").value(599))
+        .andExpect(jsonPath("$.sections[0].groups[1].fields.length()").value(1))
+        .andExpect(jsonPath("$.sections[0].groups[1].fields[0].type").value("INTEGER_LIST"))
+        .andExpect(jsonPath("$.sections[0].groups[1].fields[0].nullable").value(false))
+        .andExpect(jsonPath("$.sections[0].groups[1].fields[0].min").value(400))
+        .andExpect(jsonPath("$.sections[0].groups[1].fields[0].max").value(599))
         .andExpect(
-            jsonPath("$.data.sections[0].groups[2].fields[0].path")
+            jsonPath("$.sections[0].groups[2].fields[0].path")
                 .value("aiRuntime.compactionKeepRecentTokens"))
         // field 最小结构：path/labelKey/type/nullable；min/max/options 由 server 表达。
-        .andExpect(jsonPath("$.data.sections[0].groups[2].fields[0].type").value("INTEGER"))
-        .andExpect(jsonPath("$.data.sections[0].groups[2].fields[0].min").value(1))
+        .andExpect(jsonPath("$.sections[0].groups[2].fields[0].type").value("INTEGER"))
+        .andExpect(jsonPath("$.sections[0].groups[2].fields[0].min").value(1))
         // ENUM options 由 server 表达。
-        .andExpect(jsonPath("$.data.sections[0].groups[0].fields[1].type").value("ENUM"))
+        .andExpect(jsonPath("$.sections[0].groups[0].fields[1].type").value("ENUM"))
+        .andExpect(jsonPath("$.sections[0].groups[0].fields[1].options[0].value").value("FIXED"))
         .andExpect(
-            jsonPath("$.data.sections[0].groups[0].fields[1].options[0].value").value("FIXED"))
-        .andExpect(
-            jsonPath("$.data.sections[0].groups[0].fields[1].options[1].value")
-                .value("EXPONENTIAL"))
+            jsonPath("$.sections[0].groups[0].fields[1].options[1].value").value("EXPONENTIAL"))
         // PERMISSION options 由 server 表达。
-        .andExpect(
-            jsonPath("$.data.sections[1].groups[0].fields[0].options[0].value").value("allow"))
-        .andExpect(jsonPath("$.data.sections[1].groups[0].fields[0].options[1].value").value("ask"))
-        .andExpect(
-            jsonPath("$.data.sections[1].groups[0].fields[0].options[2].value").value("deny"))
+        .andExpect(jsonPath("$.sections[1].groups[0].fields[0].options[0].value").value("allow"))
+        .andExpect(jsonPath("$.sections[1].groups[0].fields[0].options[1].value").value("ask"))
+        .andExpect(jsonPath("$.sections[1].groups[0].fields[0].options[2].value").value("deny"))
         // group 最小结构：key/labelKey/restartRequired/applyTiming。
-        .andExpect(jsonPath("$.data.sections[1].groups[0].key").value("tool.permission"))
-        .andExpect(jsonPath("$.data.sections[1].groups[0].restartRequired").value(false))
-        .andExpect(jsonPath("$.data.sections[1].groups[0].applyTiming").value("NEXT_INVOCATION"))
+        .andExpect(jsonPath("$.sections[1].groups[0].key").value("tool.permission"))
+        .andExpect(jsonPath("$.sections[1].groups[0].restartRequired").value(false))
+        .andExpect(jsonPath("$.sections[1].groups[0].applyTiming").value("NEXT_INVOCATION"))
         // 四组顺序固定；全部对下一 invocation 生效。
-        .andExpect(jsonPath("$.data.sections[0].groups[0].restartRequired").value(false))
-        .andExpect(jsonPath("$.data.sections[0].groups[0].applyTiming").value("NEXT_INVOCATION"))
-        .andExpect(jsonPath("$.data.sections[0].groups[1].restartRequired").value(false))
-        .andExpect(jsonPath("$.data.sections[0].groups[1].applyTiming").value("NEXT_INVOCATION"))
-        .andExpect(jsonPath("$.data.sections[0].groups[2].restartRequired").value(false))
-        .andExpect(jsonPath("$.data.sections[0].groups[2].applyTiming").value("NEXT_INVOCATION"))
-        .andExpect(jsonPath("$.data.sections[0].groups[3].restartRequired").value(false))
-        .andExpect(jsonPath("$.data.sections[0].groups[3].applyTiming").value("NEXT_INVOCATION"))
-        .andExpect(jsonPath("$.data.sections[0].groups.length()").value(4))
+        .andExpect(jsonPath("$.sections[0].groups[0].restartRequired").value(false))
+        .andExpect(jsonPath("$.sections[0].groups[0].applyTiming").value("NEXT_INVOCATION"))
+        .andExpect(jsonPath("$.sections[0].groups[1].restartRequired").value(false))
+        .andExpect(jsonPath("$.sections[0].groups[1].applyTiming").value("NEXT_INVOCATION"))
+        .andExpect(jsonPath("$.sections[0].groups[2].restartRequired").value(false))
+        .andExpect(jsonPath("$.sections[0].groups[2].applyTiming").value("NEXT_INVOCATION"))
+        .andExpect(jsonPath("$.sections[0].groups[3].restartRequired").value(false))
+        .andExpect(jsonPath("$.sections[0].groups[3].applyTiming").value("NEXT_INVOCATION"))
+        .andExpect(jsonPath("$.sections[0].groups.length()").value(4))
         // restartRequired section 标记：aiRuntime live，tool 不需要重启。
-        .andExpect(jsonPath("$.data.sections[0].restartRequired").value(false))
-        .andExpect(jsonPath("$.data.sections[1].restartRequired").value(false))
-        .andExpect(jsonPath("$.data.sections[1].groups[1].key").value("tool.gateway"))
-        .andExpect(jsonPath("$.data.sections[1].groups[1].restartRequired").value(false))
-        .andExpect(jsonPath("$.data.sections[1].groups[1].applyTiming").value("NEXT_INVOCATION"))
-        .andExpect(jsonPath("$.data.sections[2].key").value("environment"))
-        .andExpect(jsonPath("$.data.sections[2].restartRequired").value(false))
-        .andExpect(jsonPath("$.data.sections[2].groups[0].key").value("environment.runtime"))
-        .andExpect(jsonPath("$.data.sections[2].groups[0].restartRequired").value(false))
-        .andExpect(jsonPath("$.data.sections[2].groups[0].applyTiming").value("NEXT_INVOCATION"))
-        .andExpect(jsonPath("$.data.sections[2].groups.length()").value(1))
+        .andExpect(jsonPath("$.sections[0].restartRequired").value(false))
+        .andExpect(jsonPath("$.sections[1].restartRequired").value(false))
+        .andExpect(jsonPath("$.sections[1].groups[1].key").value("tool.gateway"))
+        .andExpect(jsonPath("$.sections[1].groups[1].restartRequired").value(false))
+        .andExpect(jsonPath("$.sections[1].groups[1].applyTiming").value("NEXT_INVOCATION"))
+        .andExpect(jsonPath("$.sections[2].key").value("environment"))
+        .andExpect(jsonPath("$.sections[2].restartRequired").value(false))
+        .andExpect(jsonPath("$.sections[2].groups[0].key").value("environment.runtime"))
+        .andExpect(jsonPath("$.sections[2].groups[0].restartRequired").value(false))
+        .andExpect(jsonPath("$.sections[2].groups[0].applyTiming").value("NEXT_INVOCATION"))
+        .andExpect(jsonPath("$.sections[2].groups.length()").value(1))
         // network 唯一全局分组，保存后新请求生效，不暴露模块覆盖。
-        .andExpect(jsonPath("$.data.sections[3].restartRequired").value(false))
-        .andExpect(jsonPath("$.data.sections[3].groups.length()").value(1))
-        .andExpect(jsonPath("$.data.sections[3].groups[0].key").value("network.proxy"))
-        .andExpect(jsonPath("$.data.sections[3].groups[0].restartRequired").value(false))
-        .andExpect(jsonPath("$.data.sections[3].groups[0].applyTiming").value("NEXT_HTTP_REQUEST"))
-        .andExpect(jsonPath("$.data.sections[3].groups[0].fields.length()").value(2))
-        .andExpect(jsonPath("$.data.sections[3].groups[0].fields[0].max").value(2048))
-        .andExpect(jsonPath("$.data.sections[3].groups[0].fields[1].max").value(4096))
-        .andExpect(jsonPath("$.data.sections[4].key").value("storageMedia"))
-        .andExpect(jsonPath("$.data.sections[4].groups[1].key").value("storageMedia.canvasMedia"))
-        .andExpect(jsonPath("$.data.sections[4].groups[1].restartRequired").value(false))
-        .andExpect(jsonPath("$.data.sections[4].groups[1].applyTiming").value("NEXT_INVOCATION"));
+        .andExpect(jsonPath("$.sections[3].restartRequired").value(false))
+        .andExpect(jsonPath("$.sections[3].groups.length()").value(1))
+        .andExpect(jsonPath("$.sections[3].groups[0].key").value("network.proxy"))
+        .andExpect(jsonPath("$.sections[3].groups[0].restartRequired").value(false))
+        .andExpect(jsonPath("$.sections[3].groups[0].applyTiming").value("NEXT_HTTP_REQUEST"))
+        .andExpect(jsonPath("$.sections[3].groups[0].fields.length()").value(2))
+        .andExpect(jsonPath("$.sections[3].groups[0].fields[0].max").value(2048))
+        .andExpect(jsonPath("$.sections[3].groups[0].fields[1].max").value(4096))
+        .andExpect(jsonPath("$.sections[4].key").value("storageMedia"))
+        .andExpect(jsonPath("$.sections[4].groups[1].key").value("storageMedia.canvasMedia"))
+        .andExpect(jsonPath("$.sections[4].groups[1].restartRequired").value(false))
+        .andExpect(jsonPath("$.sections[4].groups[1].applyTiming").value("NEXT_INVOCATION"));
   }
 
   @Test
@@ -164,8 +160,8 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
     mockMvc
         .perform(put("/api/settings").contentType(MediaType.APPLICATION_JSON).content(first))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.version").value("1"))
-        .andExpect(jsonPath("$.data.tool.modelGatewayBusyRetryMillis").value("6000"));
+        .andExpect(jsonPath("$.version").value("1"))
+        .andExpect(jsonPath("$.tool.modelGatewayBusyRetryMillis").value("6000"));
 
     // 再次 PUT 必须使用最新版本。
     String second =
@@ -177,8 +173,8 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
     mockMvc
         .perform(put("/api/settings").contentType(MediaType.APPLICATION_JSON).content(second))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.version").value("2"))
-        .andExpect(jsonPath("$.data.tool.modelGatewayBusyRetryMillis").value("7000"));
+        .andExpect(jsonPath("$.version").value("2"))
+        .andExpect(jsonPath("$.tool.modelGatewayBusyRetryMillis").value("7000"));
   }
 
   @Test
@@ -260,14 +256,14 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
     mockMvc
         .perform(put("/api/settings").contentType(MediaType.APPLICATION_JSON).content(proxy))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.version").value("1"))
-        .andExpect(jsonPath("$.data.network.proxyUrl").value("http://proxy:3128"))
-        .andExpect(jsonPath("$.data.network.noProxyHosts").value(""));
+        .andExpect(jsonPath("$.version").value("1"))
+        .andExpect(jsonPath("$.network.proxyUrl").value("http://proxy:3128"))
+        .andExpect(jsonPath("$.network.noProxyHosts").value(""));
     mockMvc
         .perform(get("/api/settings"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.network.proxyUrl").value("http://proxy:3128"))
-        .andExpect(jsonPath("$.data.network.noProxyHosts").value(""));
+        .andExpect(jsonPath("$.network.proxyUrl").value("http://proxy:3128"))
+        .andExpect(jsonPath("$.network.noProxyHosts").value(""));
     String direct =
         bodyFromGet(
             update -> {
@@ -277,9 +273,9 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
     mockMvc
         .perform(put("/api/settings").contentType(MediaType.APPLICATION_JSON).content(direct))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.version").value("2"))
-        .andExpect(jsonPath("$.data.network.proxyUrl").doesNotExist())
-        .andExpect(jsonPath("$.data.network.noProxyHosts").value(""));
+        .andExpect(jsonPath("$.version").value("2"))
+        .andExpect(jsonPath("$.network.proxyUrl").doesNotExist())
+        .andExpect(jsonPath("$.network.noProxyHosts").value(""));
   }
 
   /** 非法代理/凭据 fail-closed：400 消息不含敏感输入，默认行与 CAS 版本均不变。 */
@@ -312,9 +308,9 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
     mockMvc
         .perform(get("/api/settings"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.version").value("0"))
-        .andExpect(jsonPath("$.data.network.proxyUrl").doesNotExist())
-        .andExpect(jsonPath("$.data.network.noProxyHosts").value("localhost,127.*,::1"));
+        .andExpect(jsonPath("$.version").value("0"))
+        .andExpect(jsonPath("$.network.proxyUrl").doesNotExist())
+        .andExpect(jsonPath("$.network.noProxyHosts").value("localhost,127.*,::1"));
   }
 
   /** 完整 wire 请求严格拒绝缺 network、缺 bypass、错误类型和额外运行期开关。 */
@@ -345,13 +341,13 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
     mockMvc
         .perform(get("/api/settings"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.version").value("0"));
+        .andExpect(jsonPath("$.version").value("0"));
   }
 
   private String bodyFromGet(Consumer<ObjectNode> mutator) throws Exception {
     MvcResult result = mockMvc.perform(get("/api/settings")).andExpect(status().isOk()).andReturn();
-    JsonNode data = objectMapper.readTree(result.getResponse().getContentAsString()).get("data");
-    assertNotNull(data, "GET must return a data envelope");
+    JsonNode data = objectMapper.readTree(result.getResponse().getContentAsString());
+    assertNotNull(data, "GET must return the settings resource");
     ObjectNode body = ((ObjectNode) data).deepCopy();
     // version / createTime / updateTime 是只读输出，写请求 DTO 没有这些字段，必须先剔除。
     body.remove("version");
