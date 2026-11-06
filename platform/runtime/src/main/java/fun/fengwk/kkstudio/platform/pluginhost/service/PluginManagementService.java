@@ -5,7 +5,6 @@ import tools.jackson.databind.JsonNode;
 
 import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
-import fun.fengwk.kkstudio.common.json.BoundedJsonWriter;
 import fun.fengwk.kkstudio.common.json.JsonValues;
 import fun.fengwk.kkstudio.common.schema.SchemaJsonCodec;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
@@ -13,7 +12,6 @@ import fun.fengwk.kkstudio.platform.error.CatalogVersions;
 import fun.fengwk.kkstudio.platform.plugin.Plugin;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthHandler;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthSpec;
-import fun.fengwk.kkstudio.platform.plugin.PluginConfig;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfigSchema;
 import fun.fengwk.kkstudio.platform.plugin.PluginConnectionCheck;
 import fun.fengwk.kkstudio.platform.plugin.PluginConnectionCheckResult;
@@ -124,22 +122,12 @@ public final class PluginManagementService {
   public PluginDTO updateConfiguration(
       String pluginId,
       String expectedVersion,
-      JsonNode values,
+      String valuesJson,
       Map<String, SecretUpdate> secretPatch) {
     long version = parseVersion(expectedVersion);
     Plugin plugin = requirePlugin(pluginId);
-    configurationService.configure(
-        pluginId, version, valuesJson(values), canonicalPatch(secretPatch));
+    configurationService.configure(pluginId, version, valuesJson, canonicalPatch(secretPatch));
     return describe(plugin);
-  }
-
-  /** 普通配置值由 Plugin schema 决定，转换为有界 JSON 文本后交给唯一写入口。 */
-  private static String valuesJson(JsonNode values) {
-    String text = BoundedJsonWriter.write(values, PluginConfig.MAX_VALUES_UTF8_BYTES);
-    if (text == null) {
-      throw DomainException.validation(RESOURCE, "values must match the plugin schema");
-    }
-    return text;
   }
 
   /** 秘密补丁的字段名必须是规范的已声明字段名；操作与值由 {@link SecretUpdate} 自身约束，错误不得包含秘密值。 */
@@ -304,7 +292,7 @@ public final class PluginManagementService {
     PluginDTO dto = new PluginDTO();
     dto.setPluginId(pluginId);
     dto.setName(descriptor.name());
-    dto.setVersion(descriptor.version());
+    dto.setPluginVersion(descriptor.version());
     PluginAuthKindDTO authKind = authKindOf(plugin.authenticationSpec());
     dto.setAuthKind(authKind);
     if (authKind != null) {
@@ -331,7 +319,6 @@ public final class PluginManagementService {
       dto.setLastRefreshError(projection.lastRefreshError());
     }
     dto.setConfiguration(configurationOf(plugin, desired, configuredSecrets));
-    dto.setDesiredVersion(Long.toString(desired.version()));
     Optional<PluginCatalogSnapshot.ConfiguredPlugin> applied = applied(snapshot, pluginId);
     long appliedVersion = applied.map(entry -> entry.config().revision()).orElse(0L);
     dto.setAppliedVersion(applied.isPresent() ? Long.toString(appliedVersion) : null);
@@ -367,7 +354,7 @@ public final class PluginManagementService {
     PluginConfigSchema schema = plugin.configurationSchema();
     PluginConfigurationDTO configuration = new PluginConfigurationDTO();
     configuration.setVersion(Long.toString(desired.version()));
-    configuration.setValues(JsonValues.readTree(desired.valuesJson()));
+    configuration.setValuesJson(desired.valuesJson());
     configuration.setValuesSchema(JsonValues.readTree(SCHEMA_CODEC.encode(schema.valuesSchema())));
     configuration.setDefaults(JsonValues.readTree(schema.defaultsJson()));
     Map<String, PluginSecretProjectionDTO> secrets = new LinkedHashMap<>();

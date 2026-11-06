@@ -2267,7 +2267,7 @@ export interface PluginAuthPrepareRequestDTO {
 /** Java：fun.fengwk.kkstudio.platform.pluginhost.dto.PluginConfigurationDTO */
 export interface PluginConfigurationDTO {
   version: string
-  values: unknown
+  valuesJson: string
   valuesSchema: unknown
   defaults: unknown
   secrets: Record<string, PluginSecretProjectionDTO>
@@ -2276,7 +2276,7 @@ export interface PluginConfigurationDTO {
 /** Java：fun.fengwk.kkstudio.platform.pluginhost.dto.PluginConfigurationUpdateRequestDTO */
 export interface PluginConfigurationUpdateRequestDTO {
   expectedVersion: string
-  values: unknown
+  valuesJson: string
   secretPatch?: Record<string, SecretUpdate> | null
 }
 
@@ -2350,7 +2350,7 @@ export const PLUGIN_CREDENTIAL_STATUS_VALUES: readonly PluginCredentialStatus[] 
 export interface PluginDTO {
   pluginId: string
   name: string
-  version: string
+  pluginVersion: string
   authKind?: PluginAuthKindDTO | null
   status?: PluginCredentialStatus | null
   region?: string | null
@@ -2359,7 +2359,6 @@ export interface PluginDTO {
   lastRefreshedAt?: number | null
   lastRefreshError?: string | null
   configuration: PluginConfigurationDTO
-  desiredVersion: string
   appliedVersion?: string | null
   connectionCheckSupported: boolean
   harnessToolNames: string[]

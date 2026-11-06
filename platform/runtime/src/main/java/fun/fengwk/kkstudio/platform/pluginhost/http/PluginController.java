@@ -61,7 +61,10 @@ public class PluginController {
       @RequestBody PluginConfigurationUpdateRequestDTO request) {
     PluginDTO plugin =
         pluginManagementService.updateConfiguration(
-            pluginId, request.getExpectedVersion(), request.getValues(), request.getSecretPatch());
+            pluginId,
+            request.getExpectedVersion(),
+            request.getValuesJson(),
+            request.getSecretPatch());
     HttpStatus status = plugin.getApplicationError() == null ? HttpStatus.OK : HttpStatus.ACCEPTED;
     return ResponseEntity.status(status).header(HttpHeaders.CACHE_CONTROL, NO_STORE).body(plugin);
   }

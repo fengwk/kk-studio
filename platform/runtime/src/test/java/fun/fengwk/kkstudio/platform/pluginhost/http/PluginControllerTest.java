@@ -12,8 +12,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialStatus;
 import fun.fengwk.kkstudio.platform.pluginhost.dto.PluginAuthCompleteRequestDTO;
@@ -34,8 +32,7 @@ import java.util.Map;
 /** {@link PluginController} 的委托、状态码与 no-store 边界；错误映射由 web 的统一 advice 负责。 */
 class PluginControllerTest {
 
-  private static final JsonNode VALUES =
-      JsonMapper.builder().build().readTree("{\"enabled\":true}");
+  private static final String VALUES_JSON = "{\"enabled\":true}";
 
   private PluginManagementService pluginManagementService;
   private PluginController controller;
@@ -60,12 +57,12 @@ class PluginControllerTest {
   void configurationUpdatePassesTheTypedRequestThrough() {
     PluginDTO applied = samplePluginDTO("my-plugin");
     when(pluginManagementService.updateConfiguration(
-            "my-plugin", "7", VALUES, Map.of("apiKey", SecretUpdate.set("secret"))))
+            "my-plugin", "7", VALUES_JSON, Map.of("apiKey", SecretUpdate.set("secret"))))
         .thenReturn(applied);
 
     PluginConfigurationUpdateRequestDTO request = new PluginConfigurationUpdateRequestDTO();
     request.setExpectedVersion("7");
-    request.setValues(VALUES);
+    request.setValuesJson(VALUES_JSON);
     request.setSecretPatch(Map.of("apiKey", SecretUpdate.set("secret")));
 
     ResponseEntity<PluginDTO> response = controller.updateConfiguration("my-plugin", request);
@@ -80,12 +77,12 @@ class PluginControllerTest {
   void pendingApplicationIsReportedAsAccepted() {
     PluginDTO pending = samplePluginDTO("my-plugin");
     pending.setApplicationError("configuration is saved but this node has not applied it yet");
-    when(pluginManagementService.updateConfiguration("my-plugin", "7", VALUES, null))
+    when(pluginManagementService.updateConfiguration("my-plugin", "7", VALUES_JSON, null))
         .thenReturn(pending);
 
     PluginConfigurationUpdateRequestDTO request = new PluginConfigurationUpdateRequestDTO();
     request.setExpectedVersion("7");
-    request.setValues(VALUES);
+    request.setValuesJson(VALUES_JSON);
 
     ResponseEntity<PluginDTO> response = controller.updateConfiguration("my-plugin", request);
 
@@ -157,7 +154,7 @@ class PluginControllerTest {
     PluginDTO dto = new PluginDTO();
     dto.setPluginId(pluginId);
     dto.setName("Test Plugin");
-    dto.setVersion("1.0.0");
+    dto.setPluginVersion("1.0.0");
     dto.setAuthKind(new PluginAuthKindDTO.DeepLink(List.of("us-east-1")));
     dto.setStatus(PluginCredentialStatus.CONNECTED);
     dto.setRegion("us-east-1");

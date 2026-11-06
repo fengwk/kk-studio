@@ -321,7 +321,7 @@ class ConfigSyncApplierTest {
   @Test
   void pluginCommitFailurePropagatesWithoutSecretPatch() {
     when(pluginConfigurationService.configure(anyString(), anyLong(), anyString(), any()))
-        .thenThrow(DomainException.versionConflict("plugin", "revision=1", "revision=2"));
+        .thenThrow(DomainException.versionConflict("plugin", "version=1", "version=2"));
 
     assertThrows(
         DomainException.class,

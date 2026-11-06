@@ -13,7 +13,7 @@ import java.util.Map;
  *
  * <p>{@code imported} 是最终会实际写入的引用，{@code skipped} 是被明确跳过的条目；两者都已在计划阶段定性。
  *
- * <p>{@code plugins} 每项携带该插件计划期的配置修订，只作为导入事务内的 CAS 坐标，绝不进入 portable 导出。
+ * <p>{@code plugins} 每项携带该插件计划期的配置版本，只作为导入事务内的 CAS 坐标，绝不进入 portable 导出。
  */
 public record ConfigSyncPlan(
     List<ConfigSyncParser.ProviderSpec> providers,
@@ -53,11 +53,11 @@ public record ConfigSyncPlan(
       List<McpTool> discoveredTools) {}
 
   /**
-   * 一个已安装插件的普通配置导入：安装身份、计划期配置修订与归一化后的普通值文本。
+   * 一个已安装插件的普通配置导入：安装身份、计划期配置版本与归一化后的普通值文本。
    *
-   * <p>{@code expectedRevision} 是该插件在计划快照中的修订，导入事务内以它做 CAS；秘密不在此承载，导入不携带任何秘密补丁。
+   * <p>{@code expectedVersion} 是该插件在计划快照中的版本，导入事务内以它做 CAS；秘密不在此承载，导入不携带任何秘密补丁。
    */
-  public record PluginImport(String pluginId, long expectedRevision, String valuesJson) {}
+  public record PluginImport(String pluginId, long expectedVersion, String valuesJson) {}
 
   /** 已在解析期按完整七节契约校验的 settings 更新；{@code expectedVersion} 是计划期读到的快照版本，写事务内以其做 CAS。 */
   public record SettingsUpdate(SystemSettingsSectionsDTO sections, String expectedVersion) {}

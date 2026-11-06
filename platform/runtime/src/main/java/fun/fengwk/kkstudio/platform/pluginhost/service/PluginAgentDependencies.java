@@ -47,8 +47,8 @@ public class PluginAgentDependencies {
   private final PluginConfigurationRepository configurationRepository;
   private final AgentRepository agentRepository;
 
-  /** 一份待核验的插件普通配置声明：安装身份、配置修订与普通值原文。 */
-  public record Declaration(String pluginId, long revision, String valuesJson) {
+  /** 一份待核验的插件普通配置声明：安装身份、配置版本与普通值原文。 */
+  public record Declaration(String pluginId, long version, String valuesJson) {
 
     public Declaration {
       Objects.requireNonNull(pluginId, "pluginId");
@@ -64,11 +64,11 @@ public class PluginAgentDependencies {
    * @throws DomainException 普通值不符合插件 Schema，或插件拒绝该配置（已知输入边界）
    * @throws IllegalStateException 插件未安装（目录与安装集合漂移）
    */
-  public Set<String> declaredAgentNames(String pluginId, long revision, String valuesJson) {
+  public Set<String> declaredAgentNames(String pluginId, long version, String valuesJson) {
     Plugin plugin = requireInstalled(pluginId);
     PluginConfig config;
     try {
-      config = new PluginConfig(revision, plugin.configurationSchema().resolveValues(valuesJson));
+      config = new PluginConfig(version, plugin.configurationSchema().resolveValues(valuesJson));
     } catch (IllegalArgumentException error) {
       throw invalidConfiguration(pluginId);
     }
@@ -84,8 +84,8 @@ public class PluginAgentDependencies {
    *
    * @throws DomainException 声明无效或引用的 Agent 不存在（固定去敏 400）
    */
-  public void requireDeclaredAgents(String pluginId, long revision, String valuesJson) {
-    requireDeclaredAgents(List.of(new Declaration(pluginId, revision, valuesJson)));
+  public void requireDeclaredAgents(String pluginId, long version, String valuesJson) {
+    requireDeclaredAgents(List.of(new Declaration(pluginId, version, valuesJson)));
   }
 
   /**
@@ -98,7 +98,7 @@ public class PluginAgentDependencies {
     for (Declaration declaration : declarations) {
       required.addAll(
           declaredAgentNames(
-              declaration.pluginId(), declaration.revision(), declaration.valuesJson()));
+              declaration.pluginId(), declaration.version(), declaration.valuesJson()));
     }
     for (String agent : required) {
       if (agentRepository.getByNameForUpdate(agent) == null) {

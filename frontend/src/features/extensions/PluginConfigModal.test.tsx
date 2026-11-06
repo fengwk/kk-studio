@@ -43,21 +43,14 @@ const sampleSchema = {
   additionalProperties: false,
 }
 
-const sampleValues = {
-  enabled: true,
-  bigInt: 1234567890,
-  decimal: 1.5,
-  exp: 1000,
-  mode: 'FAST',
-  siteName: 'MySite',
-  tags: ['a', 'b'],
-  nested: { host: '127.0.0.1' },
-}
+/** wire 上的配置原文：大整数、带 scale 的小数与超范围指数都必须按原词法往返。 */
+const sampleValuesJson =
+  '{"enabled":true,"bigInt":9007199254740993123456789,"decimal":1.230000,"exp":1E+1000,"mode":"FAST","siteName":"MySite","tags":["a","b"],"nested":{"host":"127.0.0.1"}}'
 
 const samplePlugin: PluginDTO = {
   pluginId: 'demo-plugin',
   name: 'Demo Plugin',
-  version: '1.0.0',
+  pluginVersion: '1.0.0',
   authKind: {
     type: 'STATIC_KEY',
     secretField: 'apiKey',
@@ -70,7 +63,7 @@ const samplePlugin: PluginDTO = {
   lastRefreshError: null,
   configuration: {
     version: '3',
-    values: sampleValues,
+    valuesJson: sampleValuesJson,
     valuesSchema: sampleSchema,
     defaults: { enabled: true },
     secrets: {
@@ -80,7 +73,6 @@ const samplePlugin: PluginDTO = {
       },
     },
   },
-  desiredVersion: '3',
   appliedVersion: '3',
   connectionCheckSupported: false,
   harnessToolNames: ['search'],
@@ -137,16 +129,16 @@ describe('PluginConfigModal', () => {
     const checkbox = screen.getByRole('checkbox', { name: 'enabled' })
     expect(checkbox).toBeChecked()
 
-    // 数字按 JSON 节点的实际取值渲染
-    expect(screen.getByRole('textbox', { name: 'bigInt' })).toHaveValue('1234567890')
-    expect(screen.getByRole('textbox', { name: 'decimal' })).toHaveValue('1.5')
-    expect(screen.getByRole('textbox', { name: 'exp' })).toHaveValue('1000')
+    // 数字按原文 token 渲染，绝不经过 JS number
+    expect(screen.getByRole('textbox', { name: 'bigInt' })).toHaveValue('9007199254740993123456789')
+    expect(screen.getByRole('textbox', { name: 'decimal' })).toHaveValue('1.230000')
+    expect(screen.getByRole('textbox', { name: 'exp' })).toHaveValue('1E+1000')
 
     // Text inputs and nested objects
     expect(screen.getByRole('textbox', { name: 'siteName' })).toHaveValue('MySite')
     expect(screen.getByRole('textbox', { name: 'host' })).toHaveValue('127.0.0.1')
 
-    // Array container rendered as the pretty-printed JSON projection
+    // Array container rendered from the same raw JSON text
     expect(
       (screen.getByRole('textbox', { name: 'tags' }) as HTMLTextAreaElement).value.replace(
         /\s+/g,
@@ -162,6 +154,21 @@ describe('PluginConfigModal', () => {
 
     // 全局 mutationCache 保持为空
     expect(queryClient.getMutationCache().getAll()).toHaveLength(0)
+  })
+
+  it('round-trips every exact number token through the editor without JSON.parse', async () => {
+    const user = userEvent.setup()
+    vi.mocked(request).mockResolvedValue(samplePlugin)
+    renderModal()
+
+    await user.click(screen.getByRole('button', { name: '保存配置' }))
+
+    await waitFor(() => {
+      expect(savedPayload().valuesJson).toBe(sampleValuesJson)
+    })
+    expect(savedPayload().valuesJson).toContain('9007199254740993123456789')
+    expect(savedPayload().valuesJson).toContain('1.230000')
+    expect(savedPayload().valuesJson).toContain('1E+1000')
   })
 
   it('supports progressive user typing for negative numbers, decimals, and exponents without bouncing back', async () => {
@@ -193,7 +200,7 @@ describe('PluginConfigModal', () => {
 
     await user.click(saveBtn)
     await waitFor(() => {
-      expectSaved({ values: expect.objectContaining({ decimal: -0.54321 }) })
+      expectSaved({ valuesJson: expect.stringContaining('"decimal":-0.54321') })
     })
 
     // 全局 mutationCache 保持为空
@@ -222,7 +229,7 @@ describe('PluginConfigModal', () => {
       ...samplePlugin,
       configuration: {
         ...samplePlugin.configuration,
-        values: { ...sampleValues, mode: undefined },
+        valuesJson: sampleValuesJson.replace('"mode":"FAST",', ''),
       },
     })
     expect(screen.getByRole('button', { name: 'mode' })).not.toHaveTextContent('FAST')
@@ -241,7 +248,7 @@ describe('PluginConfigModal', () => {
     expect(screen.queryByRole('button', { name: '未设置 mode' })).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: '保存配置' }))
-    const values = savedPayload().values as Record<string, unknown>
+    const values = JSON.parse(savedPayload().valuesJson) as Record<string, unknown>
     expect(Object.hasOwn(values, 'mode')).toBe(false)
   })
 
@@ -266,7 +273,7 @@ describe('PluginConfigModal', () => {
       ...samplePlugin,
       configuration: {
         ...samplePlugin.configuration,
-        values: { ...sampleValues, tags: [10, 20] },
+        valuesJson: sampleValuesJson.replace('["a","b"]', '[10,20]'),
         valuesSchema: {
           type: 'object',
           properties: { tags: { type: 'array', items: { type: 'number' } } },
@@ -285,7 +292,7 @@ describe('PluginConfigModal', () => {
     await user.click(saveBtn)
 
     await waitFor(() => {
-      expectSaved({ values: expect.objectContaining({ tags: [10, 20.5] }) })
+      expectSaved({ valuesJson: expect.stringContaining('[10,20.5]') })
     })
   })
 
@@ -420,7 +427,7 @@ describe('PluginConfigModal', () => {
     await user.click(saveBtn)
 
     await waitFor(() => {
-      expectSaved({ values: expect.objectContaining({ siteName: 'AwesomeSite' }) })
+      expectSaved({ valuesJson: expect.stringContaining('"siteName":"AwesomeSite"') })
     })
   })
 
@@ -444,14 +451,14 @@ describe('PluginConfigModal', () => {
           required: [],
           additionalProperties: false,
         },
-        values: { customObj: { big: 1234567890 } },
+        valuesJson: '{"customObj":{"big":9007199254740993123456789}}',
       },
     }
     renderModal(pluginWithOpenObject)
 
     const objArea = screen.getByRole('textbox', { name: 'customObj' })
     expect((objArea as HTMLTextAreaElement).value.replace(/\s+/g, '')).toBe(
-      '{"big":1234567890}',
+      '{"big":9007199254740993123456789}',
     )
 
     // 输入非法 JSON
@@ -539,7 +546,7 @@ describe('PluginConfigModal', () => {
     await user.click(saveBtn)
 
     await waitFor(() => {
-      expectSaved({ values: { valid: true } })
+      expectSaved({ valuesJson: '{"valid":true}' })
     })
     expect(onSuccess).toHaveBeenCalledTimes(1)
   })
@@ -591,7 +598,7 @@ describe('PluginConfigModal', () => {
     await user.click(screen.getByRole('button', { name: /表单编辑/ }))
     expect(screen.getByRole('textbox', { name: 'decimal' })).toHaveValue('-2.500000')
     await user.click(screen.getByRole('button', { name: '保存配置' }))
-    expectSaved({ values: expect.objectContaining({ decimal: -2.5 }) })
+    expectSaved({ valuesJson: expect.stringContaining('"decimal":-2.500000') })
   })
 
   it('separates dotted property paths from nested paths and treats constructor as an own field', () => {
@@ -599,7 +606,7 @@ describe('PluginConfigModal', () => {
       ...samplePlugin,
       configuration: {
         ...samplePlugin.configuration,
-        values: { 'a.b': 10, a: { b: 20 }, constructor: 30 },
+        valuesJson: '{"a.b":10,"a":{"b":20},"constructor":30}',
         valuesSchema: {
           type: 'object',
           properties: {

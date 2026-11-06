@@ -22,7 +22,7 @@ function comfyuiPluginFromGolden(): PluginDTO {
 
 const comfyuiPlugin = comfyuiPluginFromGolden()
 const originalWorkflowJson = (
-  comfyuiPlugin.configuration.values as {
+  JSON.parse(comfyuiPlugin.configuration.valuesJson) as {
     workflows: { workflowJson: string }[]
   }
 ).workflows[0].workflowJson
@@ -46,7 +46,7 @@ async function transport(page: Page, plugin: PluginDTO = comfyuiPlugin): Promise
       await route.fulfill({
         json: {
             ...plugin,
-            configuration: { ...plugin.configuration, values: body.values },
+            configuration: { ...plugin.configuration, valuesJson: body.valuesJson as string },
         },
       })
       return
@@ -194,7 +194,8 @@ test('desktop: edits the real H3 preset workflow, imports a graph file and saves
 
     const payload = recorded.puts[0]
     expect(payload.secretPatch).toEqual({ apiKey: { operation: 'KEEP' } })
-    const values = payload.values as {
+    const valuesJson = payload.valuesJson as string
+    const values = JSON.parse(valuesJson) as {
       workflows: {
         id: string
         workflowJson: string

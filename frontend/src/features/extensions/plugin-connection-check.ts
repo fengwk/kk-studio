@@ -12,7 +12,7 @@ import type {
  */
 export type PluginConnectionCheckPhase = 'pending' | 'done' | 'mismatch' | 'conflict' | 'failed'
 
-/** canonical 正十进制：已应用配置修订的合法形态。 */
+/** canonical 正十进制：已应用配置版本的合法形态。 */
 const POSITIVE_DECIMAL = /^[1-9]\d*$/
 
 export interface PluginConnectionCheckRun {
@@ -25,8 +25,8 @@ export interface PluginConnectionCheckRun {
 }
 
 /**
- * 可提交的期望坐标：只有实例真实声明能力、已应用坐标存在、修订为正且与本节点 desired 一致时才返回坐标。
- * 未应用、本地 pending、null 坐标或 0 修订一律返回 null，调用方据此禁用入口，绝不提交不可用坐标。
+ * 可提交的期望坐标：只有实例真实声明能力、已应用坐标存在、版本为正且与当前配置版本一致时才返回坐标。
+ * 未应用、本地 pending、null 坐标或 0 版本一律返回 null，调用方据此禁用入口，绝不提交不可用坐标。
  */
 export function pluginConnectionCheckExpected(
   plugin: PluginDTO,
@@ -38,11 +38,11 @@ export function pluginConnectionCheckExpected(
   if (appliedVersion == null) {
     return null
   }
-  // 已应用实例的配置修订恒为正；0 表示尚无已应用配置，不得作为检查坐标提交。
+  // 已应用实例的配置版本恒为正；0 表示尚无已应用配置，不得作为检查坐标提交。
   if (!POSITIVE_DECIMAL.test(appliedVersion)) {
     return null
   }
-  if (plugin.desiredVersion !== appliedVersion) {
+  if (plugin.configuration.version !== appliedVersion) {
     return null
   }
   return { expectedVersion: appliedVersion }

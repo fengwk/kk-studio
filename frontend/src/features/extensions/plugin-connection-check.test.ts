@@ -10,7 +10,7 @@ function plugin(overrides: Partial<PluginDTO> = {}): PluginDTO {
   return {
     pluginId: 'opencli',
     name: 'OpenCLI',
-    version: '1.0.0',
+    pluginVersion: '1.0.0',
     authKind: null,
     status: null,
     region: null,
@@ -20,12 +20,11 @@ function plugin(overrides: Partial<PluginDTO> = {}): PluginDTO {
     lastRefreshError: null,
     configuration: {
       version: '8',
-      values: {},
+      valuesJson: '{}',
       valuesSchema: { type: 'object', properties: {}, required: [], additionalProperties: false },
       defaults: {},
       secrets: {},
     },
-    desiredVersion: '8',
     appliedVersion: '8',
     connectionCheckSupported: true,
     harnessToolNames: [],
@@ -74,21 +73,24 @@ describe('pluginConnectionCheckExpected', () => {
     expect(pluginConnectionCheckExpected(plugin({ appliedVersion: null }))).toBeNull()
   })
 
-  it('never submits a zero applied revision', () => {
-    // 已应用修订恒为正：0 表示本节点还没有已应用配置，不能作为检查坐标。
+  it('never submits a zero applied version', () => {
+    // 已应用版本恒为正：0 表示本节点还没有已应用配置，不能作为检查坐标。
     expect(
       pluginConnectionCheckExpected(
         plugin({
           appliedVersion: '0',
-          desiredVersion: '0',
           configuration: { ...plugin().configuration, version: '0' },
         }),
       ),
     ).toBeNull()
   })
 
-  it('refuses the entry while the local applied coordinates are behind desired', () => {
-    expect(pluginConnectionCheckExpected(plugin({ desiredVersion: '9' }))).toBeNull()
+  it('refuses the entry while the local applied coordinates are behind the configuration version', () => {
+    expect(
+      pluginConnectionCheckExpected(
+        plugin({ configuration: { ...plugin().configuration, version: '9' } }),
+      ),
+    ).toBeNull()
   })
 })
 
@@ -98,16 +100,21 @@ describe('pluginConnectionCheckIsStale', () => {
   })
 
   it('marks a late result stale once the applied coordinates changed', () => {
-    const revisionChanged = pluginConnectionCheckExpected(
-      plugin({ appliedVersion: '9', desiredVersion: '9' }),
+    const versionChanged = pluginConnectionCheckExpected(
+      plugin({
+        appliedVersion: '9',
+        configuration: { ...plugin().configuration, version: '9' },
+      }),
     )
-    expect(pluginConnectionCheckIsStale(doneRun(), revisionChanged)).toBe(true)
+    expect(pluginConnectionCheckIsStale(doneRun(), versionChanged)).toBe(true)
   })
 
   it('marks a result stale when the plugin is no longer checkable or has disappeared', () => {
     expect(pluginConnectionCheckIsStale(doneRun(), null)).toBe(true)
     // 列表换版后本节点又变成待应用：结果不再对应当前配置。
-    const pendingAgain = pluginConnectionCheckExpected(plugin({ desiredVersion: '9' }))
+    const pendingAgain = pluginConnectionCheckExpected(
+      plugin({ configuration: { ...plugin().configuration, version: '9' } }),
+    )
     expect(pendingAgain).toBeNull()
     expect(pluginConnectionCheckIsStale(doneRun(), pendingAgain)).toBe(true)
   })

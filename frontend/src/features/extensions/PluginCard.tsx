@@ -63,10 +63,10 @@ export function PluginCard({
   const isConnected = plugin.status === 'CONNECTED'
   const isNotConnected = plugin.status === 'NOT_CONNECTED'
 
-  // 修订不同或存在 applicationError 即为待应用状态，不能展示为全局已生效
+  // 配置版本不同或存在 applicationError 即为待应用状态，不能展示为全局已生效
   const isPendingApplication =
     plugin.applicationError !== null ||
-    plugin.desiredVersion !== plugin.appliedVersion
+    plugin.configuration.version !== plugin.appliedVersion
 
   // 能力来自实例 metadata；未应用或坐标缺失时不提供可提交的检查坐标。
   const connectionCheckAvailable = pluginConnectionCheckExpected(plugin) !== null
@@ -78,8 +78,8 @@ export function PluginCard({
 
   const rows: ResourceCardMetaRow[] = [
     [
-      t('plugins.desiredVersion'),
-      `v${plugin.desiredVersion}`,
+      t('plugins.configurationVersion'),
+      `v${plugin.configuration.version}`,
     ],
     [
       t('plugins.appliedVersion'),
@@ -138,7 +138,7 @@ export function PluginCard({
       subtitle={plugin.pluginId}
       badge={
         <>
-          <Badge mono>v{plugin.version}</Badge>
+          <Badge mono>v{plugin.pluginVersion}</Badge>
           <Badge
             tone={isPendingApplication ? 'warning' : 'success'}
             data-testid={`plugin-app-status-${plugin.pluginId}`}

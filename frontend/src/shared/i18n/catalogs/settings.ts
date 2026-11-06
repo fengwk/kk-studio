@@ -353,9 +353,9 @@ export const settingsCatalog = {
     'en-US': 'Resolve draft errors before removing {{name}} items',
     'zh-CN': '请先解决草稿错误，再删除 {{name}} 条目',
   },
-  'plugins.desiredVersion': {
-    'en-US': 'Desired Version',
-    'zh-CN': '期望版本',
+  'plugins.configurationVersion': {
+    'en-US': 'Configuration Version',
+    'zh-CN': '配置版本',
   },
   'plugins.appliedVersion': {
     'en-US': 'Applied Version',

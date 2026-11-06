@@ -48,10 +48,8 @@ export function PluginConfigModal({
   const isDeepLink = plugin.authKind?.type === 'DEEP_LINK'
   const version = plugin.configuration.version
 
-  // 配置值由插件 schema 决定，wire 上是 JSON 节点；编辑器内部仍用严格 JSON 文本承载用户输入。
-  const [valuesJson, setValuesJson] = useState(() =>
-    JSON.stringify(plugin.configuration.values ?? {}, null, 2),
-  )
+  // 配置值在 wire 上是用户编辑的 JSON 原文；编辑器全程按原文承载，绝不 JSON.parse/stringify。
+  const [valuesJson, setValuesJson] = useState(plugin.configuration.valuesJson)
   const [secretOperations, setSecretOperations] = useState<
     Record<string, SecretUpdateOperation>
   >(() => {
@@ -159,7 +157,7 @@ export function PluginConfigModal({
 
     const payload: PluginConfigurationUpdateRequestDTO = {
       expectedVersion: version,
-      values: JSON.parse(valuesJson) as unknown,
+      valuesJson,
       secretPatch: Object.keys(secretPatch).length > 0 ? secretPatch : undefined,
     }
 

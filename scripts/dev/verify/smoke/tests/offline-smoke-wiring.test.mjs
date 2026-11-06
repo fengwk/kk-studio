@@ -196,20 +196,20 @@ test('test intent: opencli initialization takes coordinates from the GET and sen
     if (method === 'GET' && requestPath === '/api/platform/plugins/opencli') {
       return requests.length === 1
         ? {
-            desiredVersion: '99',
+            configuration: { version: '99' },
             appliedVersion: '98',
             status: 'NOT_CONNECTED',
             applicationError: null,
           }
         : {
-            desiredVersion: '100',
+            configuration: { version: '100' },
             appliedVersion: '100',
             status: 'CONNECTED',
             applicationError: null,
           }
     }
     if (method === 'PUT' && requestPath === '/api/platform/plugins/opencli/configuration') {
-      return { desiredVersion: '100' }
+      return { configuration: { version: '100' } }
     }
     throw new assert.AssertionError({ message: `unexpected request ${method} ${requestPath}` })
   }
@@ -224,7 +224,7 @@ test('test intent: opencli initialization takes coordinates from the GET and sen
   // 验证从 GET 实际取得坐标
   assert.equal(putBody.expectedVersion, '99')
   assert.deepEqual(putBody.secretPatch, { apiKey: { operation: 'SET', value: 'synthetic-opencli-key' } })
-  const values = putBody.values
+  const values = JSON.parse(putBody.valuesJson)
   assert.equal(values.enabled, true)
   assert.equal(values.baseUrl, 'http://opencli-hub:8080')
   assert.equal(values.gptImage2.paidEnabled, true)
@@ -236,7 +236,7 @@ test('test intent: opencli initialization fails when the poll never converges', 
   const jsonCall = async (method) =>
     method === 'GET'
       ? {
-          desiredVersion: '1',
+          configuration: { version: '1' },
           appliedVersion: '0',
           status: 'NOT_CONNECTED',
           applicationError: 'saving',

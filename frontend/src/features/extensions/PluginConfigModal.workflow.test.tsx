@@ -61,19 +61,13 @@ const WORKFLOW_SCHEMA = {
   additionalProperties: false,
 }
 
-const WORKFLOW_VALUES = {
-  title: 'root',
-  graphJson: '{"1":{"seed":9007199254740993123456789}}',
-  entries: [
-    { id: 'a', slot: { index: 0, kind: 'ALPHA' }, outputs: [{ index: 0 }] },
-    { id: 'b', slot: { index: 1, kind: 'BETA' }, outputs: [{ index: 1 }] },
-  ],
-}
+const WORKFLOW_VALUES_JSON =
+  '{"title":"root","graphJson":"{\\"1\\":{\\"seed\\":9007199254740993123456789}}","entries":[{"id":"a","slot":{"index":0,"kind":"ALPHA"},"outputs":[{"index":0}]},{"id":"b","slot":{"index":1,"kind":"BETA"},"outputs":[{"index":1}]}]}'
 
 const workflowPlugin: PluginDTO = {
   pluginId: 'generic-workflow',
   name: 'Generic Workflow',
-  version: '1.0.0',
+  pluginVersion: '1.0.0',
   authKind: { type: 'STATIC_KEY', secretField: 'apiKey' },
   status: 'CONNECTED',
   region: null,
@@ -83,12 +77,11 @@ const workflowPlugin: PluginDTO = {
   lastRefreshError: null,
   configuration: {
     version: '4',
-    values: WORKFLOW_VALUES,
+    valuesJson: WORKFLOW_VALUES_JSON,
     valuesSchema: WORKFLOW_SCHEMA,
     defaults: { entries: [] },
     secrets: { apiKey: { description: 'workflow credential', configured: true } },
   },
-  desiredVersion: '4',
   appliedVersion: '4',
   connectionCheckSupported: false,
   harnessToolNames: [],
@@ -127,7 +120,7 @@ describe('PluginConfigModal workflow editing', () => {
     await waitFor(() => {
       expect(request).toHaveBeenCalledTimes(1)
     })
-    return savedPayload().values as Record<string, unknown>
+    return JSON.parse(savedPayload().valuesJson) as Record<string, unknown>
   }
 
   /** 可控的在途文件读取：arrayBuffer 由测试显式放行，用来构造"读取中"的真实时序。 */
@@ -624,7 +617,7 @@ describe('PluginConfigModal workflow editing', () => {
 
     const payload = savedPayload()
     expect(payload.secretPatch).toEqual({ apiKey: { operation: 'KEEP' } })
-    expect(JSON.stringify(payload.values)).not.toContain('apiKey')
+    expect(payload.valuesJson).not.toContain('apiKey')
     expect(onSuccess).toHaveBeenCalledTimes(1)
   })
 })

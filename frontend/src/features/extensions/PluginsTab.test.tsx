@@ -58,7 +58,7 @@ function samplePlugin(overrides: Partial<PluginDTO> = {}): PluginDTO {
   return {
     pluginId: 'minimax-mavis',
     name: 'MiniMax Mavis',
-    version: '1.0.0',
+    pluginVersion: '1.0.0',
     authKind: {
       type: 'DEEP_LINK',
       regionCandidates: ['CN', 'EN'],
@@ -71,7 +71,7 @@ function samplePlugin(overrides: Partial<PluginDTO> = {}): PluginDTO {
     lastRefreshError: null,
     configuration: {
       version: '1',
-      values: { enabled: true },
+      valuesJson: '{"enabled":true}',
       valuesSchema: {
         type: 'object',
         properties: { enabled: { type: 'boolean' } },
@@ -81,7 +81,6 @@ function samplePlugin(overrides: Partial<PluginDTO> = {}): PluginDTO {
       defaults: { enabled: true },
       secrets: {},
     },
-    desiredVersion: '1',
     appliedVersion: '1',
     connectionCheckSupported: false,
     harnessToolNames: ['search'],
@@ -189,7 +188,7 @@ describe('PluginsTab', () => {
       region: null,
       configuration: {
         version: '2',
-        values: {},
+        valuesJson: '{}',
         valuesSchema: {
           type: 'object',
           properties: {},
@@ -511,16 +510,19 @@ describe('PluginsTab', () => {
   })
 
   function checkablePlugin(overrides: Partial<PluginDTO> = {}): PluginDTO {
-    return samplePlugin({
+    const base = samplePlugin({
       pluginId: 'opencli',
       name: 'OpenCLI Probe',
       status: 'CONNECTED',
       region: 'CN',
       connectionCheckSupported: true,
-      desiredVersion: '8',
       appliedVersion: '8',
-      ...overrides,
     })
+    return {
+      ...base,
+      ...overrides,
+      configuration: { ...base.configuration, version: '8', ...(overrides.configuration ?? {}) },
+    }
   }
 
   function checkResult(
@@ -582,16 +584,19 @@ describe('PluginsTab', () => {
   it('disables the entry with an explanation while the local coordinates are unusable', async () => {
     const user = userEvent.setup()
     vi.mocked(client.listPlugins).mockResolvedValue([
-      checkablePlugin({ desiredVersion: '9', applicationError: 'configuration is not applied yet' }),
+      checkablePlugin({
+        configuration: { ...samplePlugin().configuration, version: '9' },
+        applicationError: 'configuration is not applied yet',
+      }),
       checkablePlugin({
         pluginId: 'no-applied',
         name: 'No Applied Plugin',
         appliedVersion: null,
       }),
       checkablePlugin({
-        pluginId: 'zero-revision',
-        name: 'Zero Revision Plugin',
-        desiredVersion: '0',
+        pluginId: 'zero-version',
+        name: 'Zero Version Plugin',
+        configuration: { ...samplePlugin().configuration, version: '0' },
         appliedVersion: '0',
       }),
     ])
@@ -600,15 +605,15 @@ describe('PluginsTab', () => {
 
     await waitFor(() => {
       expect(screen.getByText('No Applied Plugin')).toBeInTheDocument()
-      expect(screen.getByText('Zero Revision Plugin')).toBeInTheDocument()
+      expect(screen.getByText('Zero Version Plugin')).toBeInTheDocument()
     })
 
-    for (const name of ['OpenCLI Probe', 'No Applied Plugin', 'Zero Revision Plugin']) {
+    for (const name of ['OpenCLI Probe', 'No Applied Plugin', 'Zero Version Plugin']) {
       expect(checkButton(name)).toBeDisabled()
     }
     expect(screen.getByTestId('plugin-check-blocked-opencli')).toHaveTextContent('尚未应用当前配置')
     expect(screen.getByTestId('plugin-check-blocked-no-applied')).toHaveTextContent('尚未应用当前配置')
-    expect(screen.getByTestId('plugin-check-blocked-zero-revision')).toHaveTextContent('尚未应用当前配置')
+    expect(screen.getByTestId('plugin-check-blocked-zero-version')).toHaveTextContent('尚未应用当前配置')
 
     // 禁用入口绝不发出请求，也绝不提交 null 或 0 坐标。
     await user.click(checkButton('No Applied Plugin'))
@@ -820,7 +825,10 @@ describe('PluginsTab', () => {
 
     // 异步换版：列表刷新为新的已应用坐标。
     vi.mocked(client.listPlugins).mockResolvedValue([
-      checkablePlugin({ desiredVersion: '9', appliedVersion: '9' }),
+      checkablePlugin({
+        configuration: { ...samplePlugin().configuration, version: '9' },
+        appliedVersion: '9',
+      }),
     ])
     await act(async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.plugins.all })
@@ -854,7 +862,9 @@ describe('PluginsTab', () => {
     expect(screen.queryByTestId('plugin-check-reachability')).toBeNull()
 
     // 关闭后列表换版：既不复活旧结果，也不自动重新检查。
-    vi.mocked(client.listPlugins).mockResolvedValue([checkablePlugin({ desiredVersion: '9' })])
+    vi.mocked(client.listPlugins).mockResolvedValue([
+      checkablePlugin({ configuration: { ...samplePlugin().configuration, version: '9' } }),
+    ])
     await act(async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.plugins.all })
     })
