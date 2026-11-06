@@ -265,7 +265,8 @@ class StrictJacksonConfigurationTest {
         + "\"overrides\":["
         + overrides
         + "],\"multipliers\":[]},"
-        + "\"defaultVariant\":\"default\",\"variants\":[{\"id\":\"default\"}]}";
+        + "\"defaultVariant\":\"default\","
+        + "\"variants\":[{\"id\":\"default\",\"promptCacheRetention\":\"NONE\"}]}";
   }
 
   /** 测试意图：验证严格重复键检测仍然生效，解析包含重复 key 的 JSON 时拒绝。 */
