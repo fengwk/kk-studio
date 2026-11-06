@@ -42,7 +42,7 @@ function mockContext(def, { hitAt = 2, fault } = {}) {
         return response({ results: [{ providerName: def.providerName, name: def.modelName,
           config: { variants: def.variants.map((id) => ({ id })), private: 'excluded' } }] })
       }
-      if (method === 'POST' && url === '/api/agents') {
+      if (method === 'POST' && url === '/api/platform/agents') {
         assert.deepEqual(body.config.tools, [])
         assert.deepEqual(body.execution, { driver: 'builtin', settings: { modelName: def.modelName, variant: def.variant } })
         return response({ name: body.name, version: '0', execution: body.execution }, 201)

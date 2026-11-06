@@ -54,11 +54,11 @@ test('agent matrix consumes resource and page bodies for setup and cleanup', asy
         assert.equal(body.providerName, 'provider')
         return { status: 201, json: { name: 'model', version: '2' } }
       }
-      if (method === 'POST' && path === '/api/agents') {
+      if (method === 'POST' && path === '/api/platform/agents') {
         return { status: 201, json: { name: body.name, config: body.config, version: '3' } }
       }
-      if (method === 'GET' && path.startsWith('/api/agents?')) {
-        return { status: 200, json: { results: [{ name: 'ag-leftover', version: '4' }] } }
+      if (method === 'GET' && path.startsWith('/api/platform/agents?')) {
+        return { status: 200, json: [{ name: 'ag-leftover', version: '4' }] }
       }
       if (method === 'DELETE') {
         deletes.push(path)
@@ -70,9 +70,9 @@ test('agent matrix consumes resource and page bodies for setup and cleanup', asy
   await run('matrix.agent.setup_model', ctx)
   await run('config.agent.valid.empty_lists', ctx)
   await run('matrix.agent.teardown_model', ctx)
-  assert.match(deletes[0], /^\/api\/agents\/ag-valid\.empty_lists-.*\?expectedVersion=3$/)
+  assert.match(deletes[0], /^\/api\/platform\/agents\/ag-valid\.empty_lists-.*\?expectedVersion=3$/)
   assert.deepEqual(deletes.slice(1), [
-    '/api/agents/ag-leftover?expectedVersion=4',
+    '/api/platform/agents/ag-leftover?expectedVersion=4',
     '/api/models/model?expectedVersion=2',
     '/api/providers/provider?expectedVersion=1',
   ])

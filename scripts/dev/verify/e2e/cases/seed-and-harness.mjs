@@ -139,7 +139,7 @@ registerCase({
   async run(ctx) {
     const { json: agentsJson } = await ctx.call(
       'GET',
-      '/api/agents?pageNumber=1&pageSize=50',
+      '/api/platform/agents?pageNumber=1&pageSize=50',
     )
     const agents = pageResults(agentsJson)
     assert(agents.length > 0, 'no agents')
@@ -156,10 +156,10 @@ registerCase({
         'execution',
         'config',
         'version',
-        'createTime',
-        'updateTime',
+        'createdAt',
+        'updatedAt',
       ],
-      'AgentDefinitionDTO',
+      'AgentDTO',
     )
     assert(agent.name && agent.execution?.driver === 'builtin' && agent.execution.settings?.modelName && agent.config, JSON.stringify(agent))
     ctx.vars.agent = agent
@@ -277,7 +277,6 @@ registerCase({
       'executionEpoch',
       'environment',
       'environmentName',
-      'activeAgentDefinitionId',
       'activeAgentName',
       'modelId',
       'usage',
@@ -407,7 +406,7 @@ registerCase({
         JSON.stringify(modelResponse.json),
       )
 
-      const agentResponse = await ctx.call('POST', '/api/agents', {
+      const agentResponse = await ctx.call('POST', '/api/platform/agents', {
         name: `e2e-agent-preview-${suffix}`,
         description: 'Local readonly preview E2E agent.',
         systemPrompt: 'Reply with a short deterministic acknowledgement.',
@@ -619,7 +618,7 @@ registerCase({
         if (agent?.name) {
           await ctx.call(
             'DELETE',
-            `/api/agents/${encodeURIComponent(agent.name)}?expectedVersion=${encodeURIComponent(
+            `/api/platform/agents/${encodeURIComponent(agent.name)}?expectedVersion=${encodeURIComponent(
               agent.version,
             )}`,
           )
@@ -2549,7 +2548,7 @@ function modelSelectionOf(ctx) {
 /** 免费控制面 case 只需一个当前 Catalog 可解析的 Agent/Model，不依赖完整 E2E seed。 */
 async function resolveAnyCatalogTarget(ctx) {
   const agents = pageResults(
-    (await ctx.call('GET', '/api/agents?pageNumber=1&pageSize=50')).json,
+    (await ctx.call('GET', '/api/platform/agents?pageNumber=1&pageSize=50')).json,
   )
   const models = pageResults(
     (await ctx.call('GET', '/api/models?pageNumber=1&pageSize=50')).json,

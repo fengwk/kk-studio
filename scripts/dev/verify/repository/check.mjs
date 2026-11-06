@@ -1166,7 +1166,7 @@ const harnessCatalogImporters = new Set([
 const harnessCatalogConsumers = [
   'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/thread/command/DatabaseAgentTurnContextResolver.java',
   'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/gateway/ToolExecutionGateway.java',
-  'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog/definition/AgentDefinitionConfigValidator.java',
+  'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog/definition/AgentConfigValidator.java',
   'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog/tool/ToolCatalogQueryService.java',
 ]
 const harnessCatalogGatewayRun =
@@ -1192,7 +1192,7 @@ function checkHarnessCatalogBoundary() {
     if (
       relativePath.endsWith('DatabaseAgentTurnContextResolver.java') ||
       relativePath.endsWith('ToolExecutionGateway.java') ||
-      relativePath.endsWith('AgentDefinitionConfigValidator.java')
+      relativePath.endsWith('AgentConfigValidator.java')
     ) {
       if (!source.includes('import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalogSource;')) {
         addError(`${relativePath}: must import RuntimeToolCatalogSource`)

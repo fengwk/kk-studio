@@ -1271,7 +1271,7 @@ async function main(argv) {
       const tempAgentName = `e2e-ui-agent-${stamp}`
 
       // Environment 由运行分支显式绑定，不属于 Agent Definition。
-      const agentCreateRes = await apiJson(args.backendUrl, 'POST', '/api/agents', {
+      const agentCreateRes = await apiJson(args.backendUrl, 'POST', '/api/platform/agents', {
         name: tempAgentName,
         description: `Temporary e2e agent for ${args.daemonEnv}`,
         systemPrompt: 'You are an e2e test agent.',
@@ -1363,7 +1363,7 @@ async function main(argv) {
     await run('ui.chat.blank_first_send_real', 'Blank pane 首发真实消息并出现用户气泡', async (caseArt) => {
       const title = `e2e-ui-send-${stamp}`
       const realAgentName = `e2e-ui-real-agent-${stamp}`
-      const agentCreateRes = await apiJson(args.backendUrl, 'POST', '/api/agents', {
+      const agentCreateRes = await apiJson(args.backendUrl, 'POST', '/api/platform/agents', {
         name: realAgentName,
         description: 'Temporary real UI E2E agent.',
         systemPrompt: 'Reply concisely and never call tools.',

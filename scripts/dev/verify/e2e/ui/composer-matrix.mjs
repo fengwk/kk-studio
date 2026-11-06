@@ -1392,7 +1392,7 @@ async function createHoldingQueueFixture(
 
     const agentResponse = await apiCtx.call(
       'POST',
-      '/api/agents',
+      '/api/platform/agents',
       {
         name: `e2e-ui-hold-agent-${suffix}`,
         description: 'Local hold agent for free UI queue tests.',
@@ -1520,7 +1520,7 @@ async function cleanupFixture(state) {
     if (!state.agent) return
     await deleteCatalogResource(
       state.apiCtx,
-      `/api/agents/${encodeURIComponent(state.agent.name)}`
+      `/api/platform/agents/${encodeURIComponent(state.agent.name)}`
         + `?expectedVersion=${encodeURIComponent(state.agent.version)}`,
     )
   })
@@ -1598,7 +1598,7 @@ async function clearBrowserFixtureState(page, fixture) {
 async function resolveCatalogTarget(apiCtx) {
   const agentsResponse = await apiCtx.call(
     'GET',
-    '/api/agents?pageNumber=1&pageSize=50',
+    '/api/platform/agents?pageNumber=1&pageSize=50',
   )
   const modelsResponse = await apiCtx.call(
     'GET',
@@ -1611,7 +1611,7 @@ async function resolveCatalogTarget(apiCtx) {
       models: modelsResponse,
     })}`,
   )
-  const agents = agentsResponse.json?.results || []
+  const agents = Array.isArray(agentsResponse.json) ? agentsResponse.json : []
   const models = modelsResponse.json?.results || []
   for (const agent of agents) {
     if (agent.execution?.driver !== 'builtin') continue

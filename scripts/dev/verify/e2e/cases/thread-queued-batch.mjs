@@ -111,7 +111,7 @@ registerCase({
         model?.providerName === provider.name && model?.name,
         JSON.stringify(modelResponse.json),
       )
-      const agentResponse = await ctx.call('POST', '/api/agents', {
+      const agentResponse = await ctx.call('POST', '/api/platform/agents', {
         name: `e2e-agent-queue-${suffix}`,
         description: 'Local queued command batch E2E agent.',
         systemPrompt: 'Reply with the exact mock response. Do not call tools.',
@@ -333,7 +333,7 @@ registerCase({
         if (agent?.name) {
           await ctx.call(
             'DELETE',
-            `/api/agents/${encodeURIComponent(agent.name)}?expectedVersion=${encodeURIComponent(
+            `/api/platform/agents/${encodeURIComponent(agent.name)}?expectedVersion=${encodeURIComponent(
               agent.version,
             )}`,
           )

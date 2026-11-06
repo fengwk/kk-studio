@@ -257,7 +257,7 @@ function createStopCaseContext({ exitConverges = true } = {}) {
           },
         }
       }
-      if (method === 'POST' && url === '/api/agents') {
+      if (method === 'POST' && url === '/api/platform/agents') {
         assert.deepEqual(body.execution, {
           driver: 'builtin', settings: { modelName: MODEL.modelName, variant: MODEL.variant },
         })

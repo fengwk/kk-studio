@@ -93,7 +93,7 @@ registerCase({
       model = modelResponse.json
       assert(model?.providerName === provider.name && model?.name, JSON.stringify(modelResponse.json))
 
-      const agentResponse = await ctx.call('POST', '/api/agents', {
+      const agentResponse = await ctx.call('POST', '/api/platform/agents', {
         name: `e2e-agent-attempt-${suffix}`,
         description: 'Local model attempt visibility E2E agent.',
         systemPrompt: 'Reply with the exact mock response. Do not call tools.',
@@ -331,7 +331,7 @@ registerCase({
         if (agent?.name) {
           await ctx.call(
             'DELETE',
-            `/api/agents/${encodeURIComponent(agent.name)}?expectedVersion=${encodeURIComponent(agent.version)}`,
+            `/api/platform/agents/${encodeURIComponent(agent.name)}?expectedVersion=${encodeURIComponent(agent.version)}`,
           )
         }
       })

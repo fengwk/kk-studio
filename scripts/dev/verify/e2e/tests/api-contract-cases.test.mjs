@@ -38,8 +38,8 @@ function chatDefaultEnvironmentFixture() {
   const call = async (method, path, body) => {
     requests.push({ method, path, body })
     const pathname = new URL(path, 'http://fixture.local').pathname
-    if (method === 'GET' && pathname === '/api/agents') {
-      return { status: 200, json: { results: [agent] } }
+    if (method === 'GET' && pathname === '/api/platform/agents') {
+      return { status: 200, json: [agent] }
     }
     if (method === 'POST' && pathname === '/api/environments') {
       const environment = {

@@ -117,7 +117,7 @@ registerCase({
   id: 'crud.agent.invalid_name',
   level: 'L1',
   title: 'Agent 非法 name 拒绝',
-  docs: 'POST /api/agents name 空白或包含 / => 400',
+  docs: 'POST /api/platform/agents name 空白或包含 / => 400',
   async run(ctx) {
     const model = await firstModel(ctx)
     for (const [name, messageIncludes] of [
@@ -126,7 +126,7 @@ registerCase({
     ]) {
       await expectHttpError(
         () =>
-          ctx.call('POST', '/api/agents', {
+          ctx.call('POST', '/api/platform/agents', {
             name,
             description: 'd',
             systemPrompt: 's',
@@ -143,12 +143,12 @@ registerCase({
   id: 'crud.agent.invalid_variant',
   level: 'L1',
   title: 'Agent 不存在的 Variant 拒绝',
-  docs: 'POST /api/agents variant 不属于所选 Model => 400',
+  docs: 'POST /api/platform/agents variant 不属于所选 Model => 400',
   async run(ctx) {
     const model = await firstModel(ctx)
     await expectHttpError(
       () =>
-        ctx.call('POST', '/api/agents', {
+        ctx.call('POST', '/api/platform/agents', {
           name: `e2e-invalid-variant-${cid().slice(0, 8)}`,
           description: 'd',
           systemPrompt: 's',
@@ -437,7 +437,7 @@ registerCase({
     const [model, updatedModel] = await firstTwoModels(ctx)
     const name = `e2e-agent-${cid().slice(0, 8)}`
     const agent = (
-        await ctx.call('POST', '/api/agents', {
+        await ctx.call('POST', '/api/platform/agents', {
           name,
           description: 'create',
           systemPrompt: 'you are e2e',
@@ -447,7 +447,7 @@ registerCase({
       ).json
     assert(agent?.name === name && agent.execution?.driver === 'builtin' && agent.execution.settings?.modelName === modelRef(model) && !('id' in agent), JSON.stringify(agent))
     const updated = (
-        await ctx.call('PUT', `/api/agents/${encodeURIComponent(name)}`, {
+        await ctx.call('PUT', `/api/platform/agents/${encodeURIComponent(name)}`, {
           description: 'updated',
           systemPrompt: 'updated prompt',
           execution: { driver: 'builtin', settings: { modelName: modelRef(updatedModel), variant: updatedModel.config.defaultVariant } },
@@ -463,16 +463,16 @@ registerCase({
     assert(Object.keys(updated.config ?? {}).sort().join(',') === 'skills,subagents,tools', JSON.stringify(updated))
     await ctx.call(
       'DELETE',
-      `/api/agents/${encodeURIComponent(name)}?expectedVersion=${encodeURIComponent(updated.version)}`,
+      `/api/platform/agents/${encodeURIComponent(name)}?expectedVersion=${encodeURIComponent(updated.version)}`,
     )
     const agents = pageResults(
-      (await ctx.call('GET', '/api/agents?pageNumber=1&pageSize=100')).json,
+      (await ctx.call('GET', '/api/platform/agents?pageNumber=1&pageSize=100')).json,
     )
     assert(!agents.some((candidate) => candidate.name === name), 'Agent still listed')
 
     // 硬删除后同名可重建：version 从 0 重新开始，且严格使用新请求体 prompt。
     const recreated = (
-        await ctx.call('POST', '/api/agents', {
+        await ctx.call('POST', '/api/platform/agents', {
           name,
           description: 'recreated',
           systemPrompt: 'recreated prompt',
@@ -484,12 +484,12 @@ registerCase({
     assert(String(recreated.version) === '0', JSON.stringify(recreated))
     assert(recreated.systemPrompt === 'recreated prompt', JSON.stringify(recreated))
     const relisted = pageResults(
-      (await ctx.call('GET', '/api/agents?pageNumber=1&pageSize=100')).json,
+      (await ctx.call('GET', '/api/platform/agents?pageNumber=1&pageSize=100')).json,
     )
     assert(relisted.some((candidate) => candidate.name === name), 'recreated Agent not listed')
     await ctx.call(
       'DELETE',
-      `/api/agents/${encodeURIComponent(name)}?expectedVersion=${encodeURIComponent(recreated.version)}`,
+      `/api/platform/agents/${encodeURIComponent(name)}?expectedVersion=${encodeURIComponent(recreated.version)}`,
     )
   },
 })
@@ -506,7 +506,7 @@ registerCase({
     let parent = null
     try {
       child = (
-          await ctx.call('POST', '/api/agents', {
+          await ctx.call('POST', '/api/platform/agents', {
             name: `e2e-child-${suffix}`,
             description: 'subagent child',
             systemPrompt: 'return a concise report',
@@ -515,7 +515,7 @@ registerCase({
           })
         ).json
       parent = (
-          await ctx.call('POST', '/api/agents', {
+          await ctx.call('POST', '/api/platform/agents', {
             name: `e2e-parent-${suffix}`,
             description: 'subagent parent',
             systemPrompt: 'delegate when needed',
@@ -540,14 +540,14 @@ registerCase({
         () =>
           ctx.call(
             'DELETE',
-            `/api/agents/${encodeURIComponent(child.name)}?expectedVersion=${encodeURIComponent(child.version)}`,
+            `/api/platform/agents/${encodeURIComponent(child.name)}?expectedVersion=${encodeURIComponent(child.version)}`,
           ),
         { status: 409, messageIncludes: /in use|subagent|referenc/i },
       )
       parent = (
           await ctx.call(
             'PUT',
-            `/api/agents/${encodeURIComponent(parent.name)}`,
+            `/api/platform/agents/${encodeURIComponent(parent.name)}`,
             {
               description: parent.description,
               systemPrompt: parent.systemPrompt,
@@ -563,12 +563,12 @@ registerCase({
         ).json
       await ctx.call(
         'DELETE',
-        `/api/agents/${encodeURIComponent(child.name)}?expectedVersion=${encodeURIComponent(child.version)}`,
+        `/api/platform/agents/${encodeURIComponent(child.name)}?expectedVersion=${encodeURIComponent(child.version)}`,
       )
       child = null
       await ctx.call(
         'DELETE',
-        `/api/agents/${encodeURIComponent(parent.name)}?expectedVersion=${encodeURIComponent(parent.version)}`,
+        `/api/platform/agents/${encodeURIComponent(parent.name)}?expectedVersion=${encodeURIComponent(parent.version)}`,
       )
       parent = null
     } finally {
@@ -577,7 +577,7 @@ registerCase({
         try {
           await ctx.call(
             'DELETE',
-            `/api/agents/${encodeURIComponent(agent.name)}?expectedVersion=${encodeURIComponent(agent.version)}`,
+            `/api/platform/agents/${encodeURIComponent(agent.name)}?expectedVersion=${encodeURIComponent(agent.version)}`,
           )
         } catch {
           // 保留主断言失败；隔离 E2E schema 会在下一次 rebuild 清理。
@@ -1037,10 +1037,10 @@ registerCase({
   id: 'crud.agent.builtin_identity',
   level: 'L1',
   title: '内置 Compaction Agent identity 只读与改名/删除拒绝',
-  docs: 'GET /api/agents 必含内置 Compaction：type=BUILTIN，execution 字段显式输出；PUT 携带由系统持有的 name 字段 => 400；DELETE => 409；拒绝后 identity/version 不变',
+  docs: 'GET /api/platform/agents 必含内置 Compaction：type=BUILTIN，execution 字段显式输出；PUT 携带由系统持有的 name 字段 => 400；DELETE => 409；拒绝后 identity/version 不变',
   async run(ctx) {
     const agents = pageResults(
-      (await ctx.call('GET', '/api/agents?pageNumber=1&pageSize=100')).json,
+      (await ctx.call('GET', '/api/platform/agents?pageNumber=1&pageSize=100')).json,
     )
     const compaction = agents.find((agent) => agent.name === 'Compaction')
     assert(
@@ -1060,7 +1060,7 @@ registerCase({
     for (const identity of [{ name: 'compaction-renamed' }, { type: 'USER' }]) {
       await expectHttpError(
         () =>
-        ctx.call('PUT', '/api/agents/Compaction', {
+        ctx.call('PUT', '/api/platform/agents/Compaction', {
           ...identity,
           description: compaction.description,
           systemPrompt: compaction.systemPrompt,
@@ -1076,13 +1076,13 @@ registerCase({
       () =>
         ctx.call(
           'DELETE',
-          `/api/agents/Compaction?expectedVersion=${encodeURIComponent(compaction.version)}`,
+          `/api/platform/agents/Compaction?expectedVersion=${encodeURIComponent(compaction.version)}`,
         ),
       { status: 409 },
     )
     // 拒绝后 identity/version 严格不变。
     const after = pageResults(
-      (await ctx.call('GET', '/api/agents?pageNumber=1&pageSize=100')).json,
+      (await ctx.call('GET', '/api/platform/agents?pageNumber=1&pageSize=100')).json,
     ).find((agent) => agent.name === 'Compaction')
     assert(
       after && after.type === 'BUILTIN' && String(after.version) === String(compaction.version),
@@ -1125,7 +1125,7 @@ async function firstTwoModels(ctx) {
 
 async function firstAgent(ctx) {
   const agents = pageResults(
-    (await ctx.call('GET', '/api/agents?pageNumber=1&pageSize=10')).json,
+    (await ctx.call('GET', '/api/platform/agents?pageNumber=1&pageSize=10')).json,
   )
   const agent = agents.find((candidate) => candidate.type === 'USER' && candidate.execution?.driver === 'builtin')
   assert(agent?.name, 'need a configured USER Agent')
