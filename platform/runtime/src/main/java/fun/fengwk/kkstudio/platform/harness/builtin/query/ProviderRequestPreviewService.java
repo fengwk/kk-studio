@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.platform.harness.builtin.query;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
@@ -288,6 +290,11 @@ public final class ProviderRequestPreviewService {
     ThreadSnapshot childSnapshot;
     try {
       childSnapshot = runtime.getThreadSnapshot(frozen.childThreadId());
+    } catch (DomainException error) {
+      if (error.code() != DomainErrorCode.NOT_FOUND) {
+        throw error;
+      }
+      throw frozenCompactionUnavailable("compaction child thread does not exist", error);
     } catch (HarnessRuntimeNotFoundException error) {
       throw frozenCompactionUnavailable("compaction child thread does not exist", error);
     }
