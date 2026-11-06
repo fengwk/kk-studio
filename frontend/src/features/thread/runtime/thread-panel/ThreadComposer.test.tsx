@@ -488,7 +488,7 @@ describe('ThreadComposer and commands', () => {
           modelSelection: { modelName: 'MiniMax', variant: 'high' },
           models: [
             {
-              kind: 'MODEL',
+              type: 'MODEL',
               name: 'MiniMax',
               config: {
                 defaultVariant: 'default',
@@ -532,7 +532,7 @@ describe('ThreadComposer and commands', () => {
           modelSelection: { modelName: 'MiniMax', variant: 'default' },
           models: [
             {
-              kind: 'MODEL',
+              type: 'MODEL',
               name: 'MiniMax',
               config: {
                 defaultVariant: 'default',
@@ -540,7 +540,7 @@ describe('ThreadComposer and commands', () => {
               },
             },
             {
-              kind: 'MODEL',
+              type: 'MODEL',
               name: 'gpt',
               config: {
                 defaultVariant: 'fast',
@@ -590,7 +590,7 @@ describe('ThreadComposer and commands', () => {
           modelSelection: { modelName: 'MiniMax', variant: 'default' },
           models: [
             {
-              kind: 'MODEL',
+              type: 'MODEL',
               name: 'MiniMax',
               config: {
                 defaultVariant: 'default',
@@ -1239,7 +1239,7 @@ describe('ThreadComposer interactions', () => {
     const user = userEvent.setup()
     const dummySettings: ThreadComposerSettingsInput = {
       modelSelection: { modelName: 'MiniMax', variant: 'default' },
-      models: [{ kind: 'MODEL', name: 'MiniMax', config: { defaultVariant: 'default', variants: [{ id: 'default' }] } }],
+      models: [{ type: 'MODEL', name: 'MiniMax', config: { defaultVariant: 'default', variants: [{ id: 'default' }] } }],
       yoloEnabled: false,
       environmentName: null,
       environments: [],
@@ -1360,7 +1360,7 @@ const MODEL_SETTINGS: ThreadComposerSettingsInput = {
   modelSelection: { modelName: 'MiniMax', variant: 'default' },
   models: [
     {
-      kind: 'MODEL',
+      type: 'MODEL',
       name: 'MiniMax',
       config: {
         defaultVariant: 'default',

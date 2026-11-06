@@ -62,8 +62,8 @@ describe('useChatPageController', () => {
   // 没有可用 Agent 时才查询 Provider / Model，用于首次使用引导。
   it('reports catalog setup progress when no usable agent exists', async () => {
     vi.mocked(agentService.listAgents).mockResolvedValue(page([agent({ execution: null })]))
-    vi.mocked(agentService.listProviders).mockResolvedValue(page([{ name: 'p' }]) as never)
-    vi.mocked(agentService.listModels).mockResolvedValue(page([]) as never)
+    vi.mocked(agentService.listProviders).mockResolvedValue([{ name: 'p' }] as never)
+    vi.mocked(agentService.listModels).mockResolvedValue([])
 
     const { result } = renderHook(() => useChatPageController(), {
       wrapper: queryWrapper(new QueryClient(queryClientOptions)),

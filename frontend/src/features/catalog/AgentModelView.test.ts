@@ -3,10 +3,10 @@ import {
   formatModelLabel,
   toAgentModelViews,
 } from '@/features/catalog/AgentModelView'
-import type { AgentModelConfigDTO, AgentModelDTO } from '@/shared/api/generated/contracts'
+import type { ModelConfigDTO, ModelDTO } from '@/shared/api/generated/contracts'
 
-function model(name = 'MiniMax-M2.7'): AgentModelDTO {
-  const config: AgentModelConfigDTO = {
+function model(name = 'MiniMax-M2.7'): ModelDTO {
+  const config: ModelConfigDTO = {
     limit: { context: 128000, output: 8192 },
     abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
     pricing: {
@@ -19,14 +19,14 @@ function model(name = 'MiniMax-M2.7'): AgentModelDTO {
   }
   return {
     providerName: 'minimax',
-    kind: 'MODEL',
+    type: 'MODEL',
     name,
     modelId: name.toLowerCase(),
     description: null,
     config,
     version: '1',
-    createTime: 0,
-    updateTime: 0,
+    createdAt: 0,
+    updatedAt: 0,
   }
 }
 

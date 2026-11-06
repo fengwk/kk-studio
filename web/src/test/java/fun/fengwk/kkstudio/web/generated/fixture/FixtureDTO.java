@@ -8,7 +8,7 @@ import org.jspecify.annotations.Nullable;
 import tools.jackson.databind.annotation.JsonSerialize;
 import tools.jackson.databind.ser.std.ToStringSerializer;
 
-import fun.fengwk.kkstudio.share.catalog.DecimalStringSerializer;
+import fun.fengwk.kkstudio.platform.catalog.dto.DecimalStringSerializer;
 
 import java.math.BigDecimal;
 import java.net.URI;

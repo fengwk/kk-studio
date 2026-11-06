@@ -33,9 +33,10 @@ import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.spi.driver.AgentDriver;
 import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgentDefinitions;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModelDefaultVariantResolver;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
+import fun.fengwk.kkstudio.platform.catalog.model.Model;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelDefaultVariantResolver;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelKind;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.platform.catalog.tool.TestRuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.pluginhost.service.PluginAgentDependencies;
@@ -44,7 +45,6 @@ import fun.fengwk.kkstudio.share.catalog.AgentDefinitionCreateDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentDefinitionDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentDefinitionType;
 import fun.fengwk.kkstudio.share.catalog.AgentDefinitionUpdateDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelKind;
 import fun.fengwk.kkstudio.share.runtime.HarnessExecutionSelectionDTO;
 import fun.fengwk.kkstudio.share.skill.SkillRefDTO;
 
@@ -62,8 +62,8 @@ class AgentDefinitionServiceUnitTest {
   private final ObjectMapper objectMapper = JsonMapper.builder().build();
   private AgentDefinitionRepository repository;
   private AgentDefinitionReferenceResolver resolver;
-  private AgentModelRepository modelRepository;
-  private AgentModelDefaultVariantResolver variants;
+  private ModelRepository modelRepository;
+  private ModelDefaultVariantResolver variants;
   private PluginAgentDependencies pluginAgentDependencies;
   private AgentReferenceCheck productReference;
   private AgentReferenceCheck otherProductReference;
@@ -73,13 +73,13 @@ class AgentDefinitionServiceUnitTest {
   void setUp() {
     repository = mock(AgentDefinitionRepository.class);
     resolver = mock(AgentDefinitionReferenceResolver.class);
-    modelRepository = mock(AgentModelRepository.class);
-    variants = mock(AgentModelDefaultVariantResolver.class);
+    modelRepository = mock(ModelRepository.class);
+    variants = mock(ModelDefaultVariantResolver.class);
     pluginAgentDependencies = mock(PluginAgentDependencies.class);
     productReference = mock(AgentReferenceCheck.class);
     otherProductReference = mock(AgentReferenceCheck.class);
     when(modelRepository.getByNameForUpdate(any()))
-        .thenAnswer(invocation -> model(invocation.getArgument(0), AgentModelKind.MODEL));
+        .thenAnswer(invocation -> model(invocation.getArgument(0), ModelKind.MODEL));
     AgentDriver builtin = mock(AgentDriver.class);
     when(builtin.id()).thenReturn(BuiltinExecution.DRIVER);
     doAnswer(
@@ -225,8 +225,7 @@ class AgentDefinitionServiceUnitTest {
         DomainException.class,
         () -> service.createAgent(create("agent", "model", emptyConfig(), "bad-variant")));
 
-    when(modelRepository.getByNameForUpdate("group"))
-        .thenReturn(model("group", AgentModelKind.GROUP));
+    when(modelRepository.getByNameForUpdate("group")).thenReturn(model("group", ModelKind.GROUP));
     DomainException groupVariant =
         assertThrows(
             DomainException.class,
@@ -486,8 +485,8 @@ class AgentDefinitionServiceUnitTest {
         .build();
   }
 
-  private static AgentModel model(String name, AgentModelKind kind) {
-    return AgentModel.builder().name(name).kind(kind).version(0L).build();
+  private static Model model(String name, ModelKind kind) {
+    return Model.builder().name(name).kind(kind).version(0L).build();
   }
 
   private static AgentDefinitionCreateDTO create(

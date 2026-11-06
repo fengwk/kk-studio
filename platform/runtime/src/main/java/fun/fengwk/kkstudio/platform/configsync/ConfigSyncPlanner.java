@@ -7,14 +7,17 @@ import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelConfigDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelGroupConfigDTO;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpConfigParser;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServer;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerRepository;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpTool;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModelDefaultVariantResolver;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModelGroupConfigCodec;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRuntimeConfigParser;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModelService;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelDefaultVariantResolver;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelGroupConfigCodec;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelKind;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelRuntimeConfigParser;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelService;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillManifestEntry;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalog;
@@ -26,9 +29,6 @@ import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRo
 import fun.fengwk.kkstudio.platform.pluginhost.service.PluginAgentDependencies;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsVersions;
 import fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelConfigDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelGroupDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelKind;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncKind;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncRef;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncSkipped;
@@ -69,8 +69,8 @@ public final class ConfigSyncPlanner {
   private final ConfigSyncMcpDiscovery mcpDiscovery;
   private final McpServerRepository mcpServerRepository;
   private final RuntimeToolCatalogSource toolCatalogSource;
-  private final AgentModelRuntimeConfigParser configParser;
-  private final AgentModelGroupConfigCodec groupConfigCodec;
+  private final ModelRuntimeConfigParser configParser;
+  private final ModelGroupConfigCodec groupConfigCodec;
   private final PluginAgentDependencies pluginAgentDependencies;
 
   /** 读取快照后按 ParsedDocument 构建可写入计划。 */
@@ -169,7 +169,7 @@ public final class ConfigSyncPlanner {
       if (skippedModels.contains(key)) {
         continue;
       }
-      if (model.kind() == AgentModelKind.MODEL) {
+      if (model.kind() == ModelKind.MODEL) {
         if (!availableProviders.contains(model.providerName())) {
           continue;
         }
@@ -178,7 +178,7 @@ public final class ConfigSyncPlanner {
             key,
             new ModelAvailability(
                 key,
-                AgentModelKind.MODEL,
+                ModelKind.MODEL,
                 configParser.decode(model.configJson()),
                 null,
                 model.providerName()));
@@ -187,7 +187,7 @@ public final class ConfigSyncPlanner {
             key,
             new ModelAvailability(
                 key,
-                AgentModelKind.GROUP,
+                ModelKind.GROUP,
                 null,
                 groupConfigCodec.decode(model.groupConfigJson()),
                 null));
@@ -198,38 +198,29 @@ public final class ConfigSyncPlanner {
       providerTypes.put(provider.name(), provider.providerType());
     }
     for (ConfigSyncParser.ProviderSpec providerSpec : document.providers()) {
-      providerTypes.put(
-          providerSpec.name(),
-          ProviderType.fromWireValue(providerSpec.properties().getProviderType()));
+      providerTypes.put(providerSpec.name(), providerSpec.providerType());
     }
     Map<String, ConfigSyncParser.ModelSpec> candidateModels = new LinkedHashMap<>();
     for (ConfigSyncParser.ModelSpec spec : document.models()) {
       String key = spec.name();
-      AgentModelKind kind = spec.properties().getKind();
-      if (kind == AgentModelKind.MODEL) {
-        if (!availableProviders.contains(spec.properties().getProviderName())) {
+      ModelKind kind = spec.kind();
+      if (kind == ModelKind.MODEL) {
+        if (!availableProviders.contains(spec.providerName())) {
           skipped.add(
               new ConfigSyncSkipped(
                   ConfigSyncKind.MODELS.wireValue(),
                   key,
-                  "missing provider: " + spec.properties().getProviderName()));
+                  "missing provider: " + spec.providerName()));
           skippedModels.add(key);
           availableModels.remove(key);
           continue;
         }
-        ProviderType providerType = providerTypes.get(spec.properties().getProviderName());
-        AgentModelService.validateVariantRetentions(
-            spec.properties().getProviderName(), providerType, spec.properties().getConfig());
+        ProviderType providerType = providerTypes.get(spec.providerName());
+        ModelService.validateVariantRetentions(spec.providerName(), providerType, spec.config());
       }
       // 文件内同名 Model 覆盖快照：预检查按导入后将生效的配置判定。
       availableModels.put(
-          key,
-          new ModelAvailability(
-              key,
-              kind,
-              spec.properties().getConfig(),
-              spec.properties().getGroup(),
-              spec.properties().getProviderName()));
+          key, new ModelAvailability(key, kind, spec.config(), spec.group(), spec.providerName()));
       candidateModels.put(key, spec);
     }
     removeUnsatisfiedGroups(availableModels, skippedModels, skipped);
@@ -265,9 +256,9 @@ public final class ConfigSyncPlanner {
       Map<String, ModelAvailability> availableModels,
       List<ConfigSyncRef> imported) {
     List<ConfigSyncParser.ModelSpec> models = new ArrayList<>();
-    for (AgentModelKind kind : List.of(AgentModelKind.MODEL, AgentModelKind.GROUP)) {
+    for (ModelKind kind : List.of(ModelKind.MODEL, ModelKind.GROUP)) {
       for (ConfigSyncParser.ModelSpec spec : candidateModels.values()) {
-        if (!availableModels.containsKey(spec.name()) || spec.properties().getKind() != kind) {
+        if (!availableModels.containsKey(spec.name()) || spec.kind() != kind) {
           continue;
         }
         models.add(spec);
@@ -612,7 +603,7 @@ public final class ConfigSyncPlanner {
   /** 非组的可用性恒为满足；组要求每个成员都是当前池中的 MODEL 且 Variant 已声明。 */
   private static String groupUnsatisfiedReason(
       ModelAvailability model, Map<String, ModelAvailability> availableModels) {
-    if (model.kind() == AgentModelKind.MODEL) {
+    if (model.kind() == ModelKind.MODEL) {
       return null;
     }
     for (var member : model.group().getMembers()) {
@@ -620,12 +611,12 @@ public final class ConfigSyncPlanner {
       if (target == null) {
         return "missing group member: " + member.getModelName();
       }
-      if (target.kind() != AgentModelKind.MODEL) {
+      if (target.kind() != ModelKind.MODEL) {
         return "group member is not a model: " + member.getModelName();
       }
       if (member.getVariant() != null && !member.getVariant().isBlank()) {
         try {
-          AgentModelDefaultVariantResolver.resolveConfiguredVariant(
+          ModelDefaultVariantResolver.resolveConfiguredVariant(
               member.getModelName(), member.getVariant(), target.config());
         } catch (IllegalArgumentException error) {
           return "group member references unknown variant: " + member.getModelName();
@@ -650,9 +641,9 @@ public final class ConfigSyncPlanner {
 
   private record ModelAvailability(
       String name,
-      AgentModelKind kind,
-      AgentModelConfigDTO config,
-      AgentModelGroupDTO group,
+      ModelKind kind,
+      ModelConfigDTO config,
+      ModelGroupConfigDTO group,
       String providerName) {}
 
   private static Set<String> skippedNames(List<ConfigSyncSkipped> skipped, ConfigSyncKind kind) {

@@ -6,10 +6,10 @@ import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModelDefaultVariantResolver;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
-import fun.fengwk.kkstudio.share.catalog.AgentModelKind;
+import fun.fengwk.kkstudio.platform.catalog.model.Model;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelDefaultVariantResolver;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelKind;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelRepository;
 
 import java.util.Objects;
 
@@ -18,11 +18,11 @@ import java.util.Objects;
 public final class BuiltinAgentExecutionValidator {
 
   private static final String RESOURCE = "agent_definition";
-  private final AgentModelRepository modelRepository;
-  private final AgentModelDefaultVariantResolver variantResolver;
+  private final ModelRepository modelRepository;
+  private final ModelDefaultVariantResolver variantResolver;
 
   public BuiltinAgentExecutionValidator(
-      AgentModelRepository modelRepository, AgentModelDefaultVariantResolver variantResolver) {
+      ModelRepository modelRepository, ModelDefaultVariantResolver variantResolver) {
     this.modelRepository = Objects.requireNonNull(modelRepository, "modelRepository");
     this.variantResolver = Objects.requireNonNull(variantResolver, "variantResolver");
   }
@@ -40,15 +40,15 @@ public final class BuiltinAgentExecutionValidator {
       return;
     }
     ModelSelection selection = model(execution);
-    AgentModel model = modelRepository.getByNameForUpdate(selection.modelName());
+    Model model = modelRepository.getByNameForUpdate(selection.modelName());
     if (model == null) {
-      throw DomainException.notFound("agent_model");
+      throw DomainException.notFound("model");
     }
     String variant = selection.variant();
     if (variant == null) {
       return;
     }
-    if (model.kind() == AgentModelKind.GROUP) {
+    if (model.kind() == ModelKind.GROUP) {
       throw DomainException.validation(
           RESOURCE, "variant must be blank when the selected model is a GROUP");
     }

@@ -1,6 +1,6 @@
 import { ResourceCardLayout } from '@/features/catalog/AiResourceCardLayout'
 import { translate, useI18n } from '@/shared/i18n'
-import type { AgentProviderDTO } from '@/shared/api/generated/contracts'
+import type { ProviderDTO } from '@/shared/api/generated/contracts'
 
 function formatMs(value: number | string | null | undefined): string {
   if (value == null || value === '') {
@@ -22,7 +22,7 @@ export function ProviderResourceCard({
   onDelete,
   deletePending,
 }: {
-  provider: AgentProviderDTO
+  provider: ProviderDTO
   onEdit: () => void
   onDelete: () => void
   deletePending: boolean
@@ -38,7 +38,7 @@ export function ProviderResourceCard({
         [t('ai.catalog.card.url'), provider.baseUrl || t('ai.catalog.card.emptyValue')],
         [
           t('ai.catalog.card.apiKey'),
-          provider.configured
+          provider.credential.configured
             ? t('ai.catalog.card.configured')
             : t('ai.catalog.card.unconfiguredApiKey'),
         ],

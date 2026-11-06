@@ -21,8 +21,8 @@ public final class GroupCooldownRepository {
             """
             select exists (
                 select 1
-                from agent_model_group_cooldown c
-                join agent_model m on m.name = c.group_name
+                from model_group_cooldown c
+                join model m on m.name = c.group_name
                 where c.group_name = ?
                   and c.member_model_name = ?
                   and c.member_variant = ?
@@ -52,7 +52,7 @@ public final class GroupCooldownRepository {
     Instant now = tx.now();
     Long currentVersion =
         tx.queryOne(
-                "select version from agent_model where name = ? for share",
+                "select version from model where name = ? for share",
                 (rs, rowNumber) -> rs.getLong(1),
                 groupName)
             .orElse(null);
@@ -61,18 +61,18 @@ public final class GroupCooldownRepository {
     }
     tx.updateJdbc(
         """
-        insert into agent_model_group_cooldown (
+        insert into model_group_cooldown (
             group_name, member_model_name, member_variant, group_version, cooldown_until,
             created_at, updated_at
         )
         values (?, ?, ?, ?, ?, ?, ?)
         on conflict (group_name, member_model_name, member_variant) do update
         set cooldown_until = greatest(
-                agent_model_group_cooldown.cooldown_until,
+                model_group_cooldown.cooldown_until,
                 excluded.cooldown_until),
             group_version = excluded.group_version,
             updated_at = excluded.updated_at
-        where agent_model_group_cooldown.group_version = excluded.group_version
+        where model_group_cooldown.group_version = excluded.group_version
         """,
         groupName,
         memberModelName,

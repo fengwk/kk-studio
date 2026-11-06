@@ -15,14 +15,16 @@ import {
 } from '@/shared/api/contracts/ai-runtime'
 import type {
   AgentDefinitionDTO,
-  AgentModelDTO,
+  ModelDTO,
+  SingleModelDTO,
+  ModelGroupDTO,
   HarnessBranchSettingsDTO,
   HarnessThreadCommandDTO,
 } from '@/shared/api/generated/contracts'
 
-const model: AgentModelDTO = {
+const model: SingleModelDTO = {
   providerName: 'provider',
-  kind: 'MODEL',
+  type: 'MODEL',
   name: 'model',
   modelId: 'model',
   description: null,
@@ -38,11 +40,11 @@ const model: AgentModelDTO = {
     variants: [{ id: 'default', promptCacheRetention: 'NONE' }],
   },
   version: '1',
-  createTime: 1786233600,
-  updateTime: 1786233600,
+  createdAt: 1786233600,
+  updatedAt: 1786233600,
 }
 
-const modelWithoutDefaultVariant: AgentModelDTO = {
+const modelWithoutDefaultVariant: SingleModelDTO = {
   ...model,
   config: {
     ...model.config!,
@@ -51,7 +53,7 @@ const modelWithoutDefaultVariant: AgentModelDTO = {
   },
 }
 
-const modelWithoutCatalogEntry: AgentModelDTO = {
+const modelWithoutCatalogEntry: SingleModelDTO = {
   ...model,
   providerName: 'another',
   name: 'other-model',
@@ -153,7 +155,20 @@ describe('BranchDraft materialization failures', () => {
 
   it('keeps a group selection variant-free through draft, queued command and HTTP snapshot', () => {
     // 组不拥有 variant；初始化、持久命令回放和 HTTP 省略 null 时都不能继承旧模型的 variant。
-    const group = { ...model, kind: 'GROUP' as const, name: 'group' }
+    const group: ModelGroupDTO = {
+      type: 'GROUP',
+      name: 'group',
+      description: null,
+      config: model.config,
+      group: {
+        members: [{ modelName: 'model', variant: 'default' }],
+        fallbackStatusCodes: [429],
+        cooldownSeconds: 0,
+      },
+      version: model.version,
+      createdAt: model.createdAt,
+      updatedAt: model.updatedAt,
+    }
     const draft = materializeBlankBranchDraft({ ...agent([], [], []), execution: createBuiltinExecution('group', null) }, false, [group])
     expect(draft?.execution).toEqual(createBuiltinExecution('group', null))
     const base = draftWith()
@@ -256,7 +271,7 @@ describe('BranchDraft conversion and diff semantics', () => {
 
   // 显式 Agent 选择应用完整模型预设，不能复用旧模型；其它草稿设置保持不变。
   describe('materializeAgentBranchDraft model follow behavior', () => {
-    const claudeModel: AgentModelDTO = {
+    const claudeModel: ModelDTO = {
       ...model,
       providerName: 'anthropic',
       name: 'claude',

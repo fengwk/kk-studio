@@ -14,18 +14,18 @@ import org.junit.jupiter.api.Test;
 import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.model.ModelCost;
+import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModelPricingCodec;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRuntimeConfigParser;
-import fun.fengwk.kkstudio.share.catalog.AgentModelConfigDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelInputModality;
-import fun.fengwk.kkstudio.share.catalog.AgentModelPricingConditionDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelPricingDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelPricingMultiplierDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelPricingOverrideDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelRatePatchDTO;
-import fun.fengwk.kkstudio.share.catalog.ModelDefaultCandidateDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelCatalogCandidateDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelConfigDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingConditionDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingMultiplierDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingOverrideDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelRatePatchDTO;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelPricingCodec;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelRuntimeConfigParser;
 
 import java.time.Instant;
 import java.util.List;
@@ -35,8 +35,8 @@ import java.util.Map;
 class ModelsDevCatalogParserTest {
 
   private final ModelsDevCatalogParser parser = new ModelsDevCatalogParser();
-  private Map<String, ModelDefaultCandidateDTO> real;
-  private Map<String, ModelDefaultCandidateDTO> validation;
+  private Map<String, ModelCatalogCandidateDTO> real;
+  private Map<String, ModelCatalogCandidateDTO> validation;
 
   @BeforeEach
   void setUp() {
@@ -46,9 +46,9 @@ class ModelsDevCatalogParserTest {
 
   @Test
   void mergesFieldWiseOverridesAndPreservesMultiplierConditions() {
-    ModelDefaultCandidateDTO candidate = real.get("databricks/databricks-gpt-5-6-sol");
+    ModelCatalogCandidateDTO candidate = real.get("databricks/databricks-gpt-5-6-sol");
     assertTrue(candidate.isPricingSupported());
-    AgentModelPricingDTO pricing = candidate.getPricing();
+    ModelPricingDTO pricing = candidate.getPricing();
     assertDecimal("4", pricing.getBase().getInput());
     assertDecimal("20", pricing.getBase().getOutput());
     assertDecimal("0.4", pricing.getBase().getCacheRead());
@@ -56,13 +56,13 @@ class ModelsDevCatalogParserTest {
 
     // input/output 各自保留原顺序，不按条件合并。
     assertEquals(2, pricing.getOverrides().size());
-    AgentModelPricingOverrideDTO input = pricing.getOverrides().get(0);
+    ModelPricingOverrideDTO input = pricing.getOverrides().get(0);
     assertEquals(272000, input.getWhen().getContext().getGt());
     assertDecimal("8", input.getRates().getInput());
     assertDecimal("0.8", input.getRates().getCacheRead());
     assertDecimal("10", input.getRates().getCacheWrite());
     assertNull(input.getRates().getOutput());
-    AgentModelPricingOverrideDTO output = pricing.getOverrides().get(1);
+    ModelPricingOverrideDTO output = pricing.getOverrides().get(1);
     assertEquals(272000, output.getWhen().getContext().getGt());
     assertNull(output.getRates().getInput());
     assertDecimal("30", output.getRates().getOutput());
@@ -72,7 +72,7 @@ class ModelsDevCatalogParserTest {
     assertEquals(List.of("priority"), pricing.getMultipliers().get(0).getWhen().getServiceTier());
     assertDecimal("2", pricing.getMultipliers().get(0).getFactors().getInput());
     assertDecimal("2", pricing.getMultipliers().get(0).getFactors().getReasoning());
-    AgentModelPricingConditionDTO dateRule = pricing.getMultipliers().get(1).getWhen();
+    ModelPricingConditionDTO dateRule = pricing.getMultipliers().get(1).getWhen();
     assertEquals("2026-11-22", dateRule.getDate().getGte());
     assertNull(dateRule.getDate().getLt());
     assertDecimal("1.25", pricing.getMultipliers().get(1).getFactors().getInput());
@@ -82,13 +82,13 @@ class ModelsDevCatalogParserTest {
 
   @Test
   void convertsTtlCacheWritesToPositiveSeconds() {
-    AgentModelPricingDTO pricing = real.get("opencode/claude-sonnet-4-6").getPricing();
+    ModelPricingDTO pricing = real.get("opencode/claude-sonnet-4-6").getPricing();
     assertDecimal("0", pricing.getBase().getCacheWrite());
     assertEquals(2, pricing.getBase().getCacheWriteByTtl().size());
     assertDecimal("3.75", pricing.getBase().getCacheWriteByTtl().get("300"));
     assertDecimal("6", pricing.getBase().getCacheWriteByTtl().get("3600"));
 
-    AgentModelPricingDTO day = validation.get("validation/ttl-days").getPricing();
+    ModelPricingDTO day = validation.get("validation/ttl-days").getPricing();
     assertDecimal("4", day.getBase().getCacheWriteByTtl().get("86400"));
   }
 
@@ -105,7 +105,7 @@ class ModelsDevCatalogParserTest {
 
   @Test
   void supportsRegionMultiplierByIgnoringAndWarning() {
-    ModelDefaultCandidateDTO candidate = real.get("opencode/region-only");
+    ModelCatalogCandidateDTO candidate = real.get("opencode/region-only");
     assertNotNull(candidate);
     assertTrue(candidate.isPricingSupported());
     assertNotNull(candidate.getPricing());
@@ -118,15 +118,15 @@ class ModelsDevCatalogParserTest {
   /** 公开定价结构取自 https://models.dev/api/v2.json；忽略 region 后仍按 TTL 与 fast 倍率计价。 */
   @Test
   void parsesClaudeOpusAndCalculatesCostWithoutRegionMultiplier() {
-    Map<String, ModelDefaultCandidateDTO> candidates =
+    Map<String, ModelCatalogCandidateDTO> candidates =
         index(parser.parse(resource("models-dev-claude-opus-5-5.json")));
-    ModelDefaultCandidateDTO opus = candidates.get("anthropic/claude-opus-5-5");
+    ModelCatalogCandidateDTO opus = candidates.get("anthropic/claude-opus-5-5");
     assertNotNull(opus);
     assertTrue(opus.isPricingSupported());
     assertTrue(hasIssue(opus, "ignored region multiplier"));
     assertTrue(hasIssue(opus, "non-token cost is not included: web_search"));
 
-    AgentModelPricingDTO pricingDto = opus.getPricing();
+    ModelPricingDTO pricingDto = opus.getPricing();
     assertNotNull(pricingDto);
     assertDecimal("4", pricingDto.getBase().getInput());
     assertDecimal("20", pricingDto.getBase().getOutput());
@@ -138,7 +138,7 @@ class ModelsDevCatalogParserTest {
 
     // fast 倍率保留，region us 倍率整条忽略并不进入 multipliers
     assertEquals(1, pricingDto.getMultipliers().size());
-    AgentModelPricingMultiplierDTO fastMultiplier = pricingDto.getMultipliers().get(0);
+    ModelPricingMultiplierDTO fastMultiplier = pricingDto.getMultipliers().get(0);
     assertEquals(List.of("fast"), fastMultiplier.getWhen().getServiceTier());
     assertDecimal("2", fastMultiplier.getFactors().getInput());
     assertDecimal("2", fastMultiplier.getFactors().getOutput());
@@ -147,7 +147,7 @@ class ModelsDevCatalogParserTest {
     assertDecimal("2", fastMultiplier.getFactors().getReasoning());
 
     // 经唯一 parser 解析为 ModelPricing
-    ModelPricing modelPricing = AgentModelPricingCodec.parsePricing(pricingDto);
+    ModelPricing modelPricing = ModelPricingCodec.parsePricing(pricingDto);
     assertNotNull(modelPricing);
     assertEquals(1, modelPricing.multipliers().size());
 
@@ -190,7 +190,7 @@ class ModelsDevCatalogParserTest {
   /** 组合条件不能通过仅删 region 节点变成无条件加价；必须丢弃整条 multiplier。 */
   @Test
   void skipsMultiplierWhenRegionIsNestedOrMixed() {
-    Map<String, ModelDefaultCandidateDTO> candidates =
+    Map<String, ModelCatalogCandidateDTO> candidates =
         index(parser.parse(resource("models-dev-region.json")));
 
     for (String key :
@@ -199,7 +199,7 @@ class ModelsDevCatalogParserTest {
             "provider/mixed-all",
             "provider/mixed-any",
             "provider/mixed-top-level")) {
-      ModelDefaultCandidateDTO candidate = candidates.get(key);
+      ModelCatalogCandidateDTO candidate = candidates.get(key);
       assertNotNull(candidate, key);
       assertTrue(candidate.isPricingSupported(), key + " must be pricing supported");
       assertTrue(
@@ -215,7 +215,7 @@ class ModelsDevCatalogParserTest {
   /** 地区倍率忽略策略不能遮蔽其他未知条件、非法结构或运行时会拒绝的定义。 */
   @Test
   void rejectsRegionWithUnknownConditionOrInvalidFactor() {
-    Map<String, ModelDefaultCandidateDTO> candidates =
+    Map<String, ModelCatalogCandidateDTO> candidates =
         index(parser.parse(resource("models-dev-region.json")));
     assertRejected(candidates.get("provider/region-unknown-condition"));
     assertRejected(candidates.get("provider/region-unknown-clause"));
@@ -230,7 +230,7 @@ class ModelsDevCatalogParserTest {
   /** 例外仅限 multiplier，不悄悄忽略会覆盖基础价的地区 override。 */
   @Test
   void rejectsRegionConditionInOverrides() {
-    Map<String, ModelDefaultCandidateDTO> candidates =
+    Map<String, ModelCatalogCandidateDTO> candidates =
         index(parser.parse(resource("models-dev-region.json")));
     assertRejected(candidates.get("provider/region-input-override"));
     assertRejected(candidates.get("provider/region-output-override"));
@@ -239,71 +239,71 @@ class ModelsDevCatalogParserTest {
 
   @Test
   void defaultsMissingPricesToZeroAndKeepsReasoningInheritance() {
-    AgentModelPricingDTO free = real.get("opencode/free").getPricing();
+    ModelPricingDTO free = real.get("opencode/free").getPricing();
     assertDecimal("0", free.getBase().getInput());
     assertDecimal("0", free.getBase().getOutput());
     assertNull(free.getBase().getReasoning());
 
-    AgentModelPricingDTO noCost = validation.get("validation/no-cost").getPricing();
+    ModelPricingDTO noCost = validation.get("validation/no-cost").getPricing();
     assertDecimal("0", noCost.getBase().getInput());
     assertDecimal("0", noCost.getBase().getOutput());
     assertDecimal("0", noCost.getBase().getCacheRead());
     assertDecimal("0", noCost.getBase().getCacheWrite());
     assertNull(noCost.getBase().getReasoning());
 
-    AgentModelPricingDTO nullPrices = validation.get("validation/null-prices").getPricing();
+    ModelPricingDTO nullPrices = validation.get("validation/null-prices").getPricing();
     assertDecimal("0", nullPrices.getBase().getInput());
     assertDecimal("0", nullPrices.getBase().getOutput());
     assertNull(nullPrices.getBase().getReasoning());
 
-    AgentModelPricingDTO missingInput = validation.get("validation/missing-input").getPricing();
+    ModelPricingDTO missingInput = validation.get("validation/missing-input").getPricing();
     assertDecimal("0", missingInput.getBase().getInput());
     assertDecimal("2", missingInput.getBase().getOutput());
 
-    AgentModelPricingDTO missingOutput = validation.get("validation/missing-output").getPricing();
+    ModelPricingDTO missingOutput = validation.get("validation/missing-output").getPricing();
     assertDecimal("1", missingOutput.getBase().getInput());
     assertDecimal("0", missingOutput.getBase().getOutput());
   }
 
   @Test
   void preservesExplicitReasoningZeroOnlyWhenDeclared() {
-    AgentModelPricingDTO capable = validation.get("validation/capable").getPricing();
+    ModelPricingDTO capable = validation.get("validation/capable").getPricing();
     assertDecimal("0", capable.getBase().getReasoning());
 
-    AgentModelPricingDTO inherited = validation.get("validation/missing-capabilities").getPricing();
+    ModelPricingDTO inherited = validation.get("validation/missing-capabilities").getPricing();
     assertNull(inherited.getBase().getReasoning());
   }
 
   @Test
   void keepsTokenPriceWhileReportingNonTokenCosts() {
-    ModelDefaultCandidateDTO audio = validation.get("validation/audio-cost");
+    ModelCatalogCandidateDTO audio = validation.get("validation/audio-cost");
     assertTrue(audio.isPricingSupported());
     assertDecimal("1", audio.getPricing().getBase().getInput());
     assertTrue(hasIssue(audio, "non-token cost"));
 
-    ModelDefaultCandidateDTO cacheFlags = validation.get("validation/cache-flags");
+    ModelCatalogCandidateDTO cacheFlags = validation.get("validation/cache-flags");
     assertTrue(cacheFlags.isPricingSupported());
     assertDecimal("1", cacheFlags.getPricing().getBase().getInput());
     assertTrue(hasIssue(cacheFlags, "explicit cache pricing"));
     assertTrue(hasIssue(cacheFlags, "cache storage cost"));
 
-    ModelDefaultCandidateDTO multiplier = validation.get("validation/multiplier-audio");
+    ModelCatalogCandidateDTO multiplier = validation.get("validation/multiplier-audio");
     assertTrue(multiplier.isPricingSupported());
     assertTrue(hasIssue(multiplier, "non-token multiplier"));
   }
 
   @Test
   void outputOverrideOnlyResetsReasoningWhenFieldIsDeclared() {
-    AgentModelPricingDTO pricing =
+    ModelPricingDTO pricing =
         validation.get("validation/output-override-no-reasoning").getPricing();
-    AgentModelRatePatchDTO patch = pricing.getOverrides().get(0).getRates();
+    ModelRatePatchDTO patch = pricing.getOverrides().get(0).getRates();
     assertDecimal("3", patch.getOutput());
     assertFalse(patch.isReasoningSpecified());
   }
 
   @Test
   void keepsEveryFieldWiseOverrideInSourceOrder() {
-    AgentModelPricingDTO pricing = validation.get("validation/override-order").getPricing();
+    ModelPricingDTO pricing = validation.get("validation/override-order").getPricing();
     assertEquals(3, pricing.getOverrides().size());
     assertEquals("override-0", pricing.getOverrides().get(0).getId());
     assertEquals("override-1", pricing.getOverrides().get(1).getId());
@@ -353,7 +353,7 @@ class ModelsDevCatalogParserTest {
         }}}
         """
             .formatted(tooDeep, manyNodes, manyNodes);
-    Map<String, ModelDefaultCandidateDTO> candidates = index(parser.parse(json));
+    Map<String, ModelCatalogCandidateDTO> candidates = index(parser.parse(json));
     assertRejected(candidates.get("p/too-deep"));
     assertRejected(candidates.get("p/too-many"));
     assertRejected(candidates.get("p/region-too-many"));
@@ -361,7 +361,7 @@ class ModelsDevCatalogParserTest {
 
   @Test
   void keepsExplicitEndAtMidnightAndDefaultsMissingEndToEndOfDay() {
-    AgentModelPricingConditionDTO explicit =
+    ModelPricingConditionDTO explicit =
         validation
             .get("validation/utc-hours-lt-midnight")
             .getPricing()
@@ -374,22 +374,22 @@ class ModelsDevCatalogParserTest {
 
   @Test
   void keepsOpenEndedDatesWithoutSentinelBounds() {
-    AgentModelPricingDTO gteOnly = validation.get("validation/date-gte-only").getPricing();
+    ModelPricingDTO gteOnly = validation.get("validation/date-gte-only").getPricing();
     assertEquals("2026-01-01", gteOnly.getOverrides().get(0).getWhen().getDate().getGte());
     assertNull(gteOnly.getOverrides().get(0).getWhen().getDate().getLt());
 
-    AgentModelPricingDTO ltOnly = validation.get("validation/date-lt-only").getPricing();
+    ModelPricingDTO ltOnly = validation.get("validation/date-lt-only").getPricing();
     assertNull(ltOnly.getOverrides().get(0).getWhen().getDate().getGte());
     assertEquals("2027-01-01", ltOnly.getOverrides().get(0).getWhen().getDate().getLt());
   }
 
   @Test
   void mapsServiceTierAndWeekdayConditions() {
-    AgentModelPricingConditionDTO tier =
+    ModelPricingConditionDTO tier =
         validation.get("validation/service-tier-in").getPricing().getOverrides().get(0).getWhen();
     assertEquals(List.of("priority", "flex"), tier.getServiceTier());
 
-    AgentModelPricingConditionDTO time =
+    ModelPricingConditionDTO time =
         validation.get("validation/utc-days-equals").getPricing().getOverrides().get(0).getWhen();
     assertEquals("01:00", time.getTime().getStart());
     assertEquals("24:00", time.getTime().getEnd());
@@ -399,14 +399,14 @@ class ModelsDevCatalogParserTest {
 
   @Test
   void mapsWeekdayWindowAndScalarMultiplier() {
-    AgentModelPricingConditionDTO day =
+    ModelPricingConditionDTO day =
         real.get("time-vendor/weekday-day").getPricing().getOverrides().get(0).getWhen();
     assertEquals(List.of(1, 2, 3, 4, 5), day.getTime().getWeekdays());
     assertEquals("00:00", day.getTime().getStart());
     assertEquals("24:00", day.getTime().getEnd());
     assertEquals(2, day.getAll().size());
 
-    AgentModelPricingDTO scalar = validation.get("validation/scalar-multiplier").getPricing();
+    ModelPricingDTO scalar = validation.get("validation/scalar-multiplier").getPricing();
     assertEquals(1, scalar.getMultipliers().size());
     assertDecimal("1.25", scalar.getMultipliers().get(0).getFactors().getInput());
     assertDecimal("1.25", scalar.getMultipliers().get(0).getFactors().getOutput());
@@ -417,22 +417,19 @@ class ModelsDevCatalogParserTest {
 
   @Test
   void mapsExplicitFalseAbilitiesAndMissingCapabilities() {
-    ModelDefaultCandidateDTO capable = validation.get("validation/capable");
+    ModelCatalogCandidateDTO capable = validation.get("validation/capable");
     assertEquals("models_dev:validation:capable", capable.getId());
     assertEquals(Boolean.FALSE, capable.getAbilities().getTools());
     assertEquals(Boolean.TRUE, capable.getAbilities().getReasoning());
     assertEquals(
-        List.of(
-            AgentModelInputModality.TEXT,
-            AgentModelInputModality.IMAGE,
-            AgentModelInputModality.DOCUMENT),
+        List.of(ModelInputModality.TEXT, ModelInputModality.IMAGE, ModelInputModality.DOCUMENT),
         capable.getAbilities().getInputModalities());
     assertEquals(128000, capable.getLimit().getContext());
     assertTrue(hasIssue(capable, "unsupported input modality"));
     assertNull(capable.getVariants());
     assertNull(capable.getDefaultVariant());
 
-    ModelDefaultCandidateDTO missing = validation.get("validation/missing-capabilities");
+    ModelCatalogCandidateDTO missing = validation.get("validation/missing-capabilities");
     assertNull(missing.getAbilities().getTools());
     assertNull(missing.getAbilities().getReasoning());
     assertNull(missing.getLimit());
@@ -441,7 +438,7 @@ class ModelsDevCatalogParserTest {
   /** supported 候选的 pricing DTO 必须能经唯一 parser 保存并保持等价定价。 */
   @Test
   void supportedCandidatePricingSurvivesParserConfigRoundTrip() throws Exception {
-    AgentModelPricingDTO pricing = real.get("databricks/databricks-gpt-5-6-sol").getPricing();
+    ModelPricingDTO pricing = real.get("databricks/databricks-gpt-5-6-sol").getPricing();
     JsonMapper mapper = JsonMapper.builder().build();
     String config =
         "{\"limit\":{\"context\":128000,\"output\":8192},"
@@ -453,15 +450,15 @@ class ModelsDevCatalogParserTest {
             + mapper.writeValueAsString(pricing)
             + "}";
 
-    AgentModelRuntimeConfigParser parser = new AgentModelRuntimeConfigParser(mapper);
-    AgentModelConfigDTO decoded = parser.decode(config);
+    ModelRuntimeConfigParser parser = new ModelRuntimeConfigParser(mapper);
+    ModelConfigDTO decoded = parser.decode(config);
     assertEquals(pricing, decoded.getPricing());
     String encoded = parser.encode(decoded);
     assertEquals(pricing, parser.decode(encoded).getPricing());
-    assertEquals(AgentModelPricingCodec.parsePricing(pricing), parser.parse(encoded).pricing());
+    assertEquals(ModelPricingCodec.parsePricing(pricing), parser.parse(encoded).pricing());
   }
 
-  private static void assertRejected(ModelDefaultCandidateDTO candidate) {
+  private static void assertRejected(ModelCatalogCandidateDTO candidate) {
     assertNotNull(candidate);
     assertFalse(candidate.isPricingSupported());
     assertNull(candidate.getPricing());
@@ -469,7 +466,7 @@ class ModelsDevCatalogParserTest {
     assertFalse(candidate.getSupportIssues().isEmpty());
   }
 
-  private static boolean hasIssue(ModelDefaultCandidateDTO candidate, String text) {
+  private static boolean hasIssue(ModelCatalogCandidateDTO candidate, String text) {
     return candidate.getSupportIssues().stream().anyMatch(issue -> issue.contains(text));
   }
 }

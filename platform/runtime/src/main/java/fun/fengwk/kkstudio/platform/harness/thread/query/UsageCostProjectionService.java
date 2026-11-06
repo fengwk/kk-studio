@@ -9,10 +9,10 @@ import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.api.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.model.ModelCost;
 import fun.fengwk.kkstudio.harness.model.ModelPricing;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRuntimeConfigParser;
-import fun.fengwk.kkstudio.share.catalog.AgentModelKind;
+import fun.fengwk.kkstudio.platform.catalog.model.Model;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelKind;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelRepository;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelRuntimeConfigParser;
 import fun.fengwk.kkstudio.share.runtime.HarnessUsageCostDTO;
 
 import java.util.HashMap;
@@ -31,11 +31,11 @@ import java.util.UUID;
 @Component
 public class UsageCostProjectionService {
 
-  private final AgentModelRepository modelRepository;
-  private final AgentModelRuntimeConfigParser modelConfigParser;
+  private final ModelRepository modelRepository;
+  private final ModelRuntimeConfigParser modelConfigParser;
 
   public UsageCostProjectionService(
-      AgentModelRepository modelRepository, AgentModelRuntimeConfigParser modelConfigParser) {
+      ModelRepository modelRepository, ModelRuntimeConfigParser modelConfigParser) {
     this.modelRepository = Objects.requireNonNull(modelRepository, "modelRepository");
     this.modelConfigParser = Objects.requireNonNull(modelConfigParser, "modelConfigParser");
   }
@@ -100,9 +100,9 @@ public class UsageCostProjectionService {
     if (pricingByModel.containsKey(key)) {
       return pricingByModel.get(key);
     }
-    AgentModel model = modelRepository.getByName(selection.modelName());
+    Model model = modelRepository.getByName(selection.modelName());
     ModelPricing pricing =
-        model == null || model.kind() != AgentModelKind.MODEL
+        model == null || model.kind() != ModelKind.MODEL
             ? null
             : modelConfigParser.parse(model.configJson()).pricing();
     pricingByModel.put(key, pricing);

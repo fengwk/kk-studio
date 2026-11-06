@@ -7,24 +7,24 @@ import { emptyModelDraft } from '@/features/catalog/ai-model-draft-codec'
 import { emptyModelGroupDraft } from '@/features/catalog/ai-model-group-draft-codec'
 import { emptyProviderDraft } from '@/features/catalog/ai-provider-draft-codec'
 import type { ModelDraft } from '@/features/catalog/ai-console-types'
-import type { AgentProviderDTO } from '@/shared/api/generated/contracts'
+import type { ProviderDTO } from '@/shared/api/generated/contracts'
 import { setLocale } from '@/shared/i18n'
 
 setLocale('zh-CN')
 
-const SAMPLE_PROVIDER: AgentProviderDTO = {
+const SAMPLE_PROVIDER: ProviderDTO = {
   name: 'openai',
   description: 'OpenAI 兼容端点',
   providerType: 'openai',
   promptCacheRetentions: ['NONE', 'SHORT', 'LONG'],
   baseUrl: 'https://api.example.com/v1',
-  configured: true,
+  credential: { configured: true },
   modelCallTimeoutMillis: '1800000',
   modelCallIdleTimeoutMillis: '120000',
   modelHttpRetryStatusCodes: null,
   version: '1',
-  createTime: 0,
-  updateTime: 0,
+  createdAt: 0,
+  updatedAt: 0,
 }
 
 /** 打开一个覆盖折叠规则、TTL 与移动端触区的完整 Catalog 编辑器。 */

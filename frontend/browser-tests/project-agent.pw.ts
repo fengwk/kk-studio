@@ -261,15 +261,8 @@ test.describe('Project Agent Real Browser Wiring & Control Gatekeeping', () => {
           })
           return
         }
-        if (path === '/api/models') {
-          await route.fulfill({
-            json: {
-                pageNumber: 1,
-                pageSize: 50,
-                totalCount: '0',
-                results: [],
-            },
-          })
+        if (path === '/api/platform/models') {
+          await route.fulfill({ json: [] })
           return
         }
         if (path === '/api/interactions' && method === 'GET') {

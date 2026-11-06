@@ -8,19 +8,18 @@ import {
   emptyPricingDraft,
   normalizePricing,
 } from '@/features/catalog/ai-model-pricing-codec'
-import {
-  defaultPromptCacheRetention,
-  type AgentModelEditablePropertiesDTO,
-} from '@/shared/api/contracts/ai-catalog'
+import { defaultPromptCacheRetention } from '@/shared/api/contracts/ai-catalog'
 import type {
-  AgentModelConfigDTO,
-  AgentModelDTO,
-  AgentModelInputModality,
-  AgentModelVariantDTO,
-  AgentProviderDTO,
+  ModelConfigDTO,
+  ModelDTO,
+  ModelInputModality,
+  ModelVariantDTO,
+  ProviderDTO,
+  SingleModelCreateDTO,
+  SingleModelDTO,
 } from '@/shared/api/generated/contracts'
 
-const AGENT_MODEL_MODALITIES: AgentModelInputModality[] = [
+const AGENT_MODEL_MODALITIES: ModelInputModality[] = [
   'TEXT',
   'IMAGE',
   'AUDIO',
@@ -30,7 +29,7 @@ const AGENT_MODEL_MODALITIES: AgentModelInputModality[] = [
 const AGENT_MODEL_MODALITY_SET = new Set<string>(AGENT_MODEL_MODALITIES)
 
 export function emptyModelDraft(
-  provider?: ({ name: string } & Partial<Pick<AgentProviderDTO, 'promptCacheRetentions'>>) | null,
+  provider?: ({ name: string } & Partial<Pick<ProviderDTO, 'promptCacheRetentions'>>) | null,
 ): ModelDraft {
   const retention = defaultPromptCacheRetention(
     provider?.promptCacheRetentions ? { promptCacheRetentions: provider.promptCacheRetentions } : null,
@@ -75,7 +74,7 @@ export function parseProtocolOptionsJson(
   return trimmed
 }
 
-function parseVariant(variant: AgentModelVariantDTO): VariantDraft {
+function parseVariant(variant: ModelVariantDTO): VariantDraft {
   return newVariantDraft({
     id: variant.id,
     reasoningEffort: variant.reasoningEffort == null ? '' : String(variant.reasoningEffort),
@@ -84,7 +83,10 @@ function parseVariant(variant: AgentModelVariantDTO): VariantDraft {
   })
 }
 
-export function toModelDraft(model: AgentModelDTO): ModelDraft {
+export function toModelDraft(model: ModelDTO): ModelDraft {
+  if (model.type !== 'MODEL') {
+    throw new Error(`${model.name} is not a single model`)
+  }
   const config = model.config
   // 单 Model 的 config 总是完整的；pricing/defaultVariant 只在组的派生摘要里为空。
   if (!config?.pricing || !config.defaultVariant) {
@@ -120,13 +122,13 @@ function requirePositiveInt(value: string, field: string): number {
 }
 
 function normalizeModalities(
-  values: ReadonlyArray<AgentModelInputModality>,
+  values: ReadonlyArray<ModelInputModality>,
   field: string,
-): AgentModelInputModality[] {
+): ModelInputModality[] {
   if (values.length === 0) {
     throw new Error(`${field} must contain at least one input modality`)
   }
-  const seen = new Set<AgentModelInputModality>()
+  const seen = new Set<ModelInputModality>()
   for (const value of values) {
     if (!AGENT_MODEL_MODALITY_SET.has(value)) {
       throw new Error(`${field} contains unsupported value: ${value}`)
@@ -142,7 +144,7 @@ function normalizeModalities(
 function serializeVariants(
   variants: VariantDraft[],
   reasoningEnabled = true,
-): AgentModelVariantDTO[] {
+): ModelVariantDTO[] {
   if (variants.length === 0) {
     throw new Error('at least one variant is required')
   }
@@ -157,7 +159,7 @@ function serializeVariants(
     }
     ids.add(id)
 
-    const payload: AgentModelVariantDTO = {
+    const payload: ModelVariantDTO = {
       id,
       promptCacheRetention: variant.promptCacheRetention,
     }
@@ -176,7 +178,7 @@ function serializeVariants(
   })
 }
 
-export function buildModelConfig(draft: ModelDraft): AgentModelConfigDTO {
+export function buildModelConfig(draft: ModelDraft): ModelConfigDTO {
   const contextWindow = requirePositiveInt(draft.contextWindow, 'config.limit.context')
   const maxOutputTokens = requirePositiveInt(
     draft.maxOutputTokens,
@@ -215,14 +217,14 @@ function requireNonBlank(value: string, field: string): string {
 }
 
 /** MODEL 的完整可编辑属性：创建与 PUT 都整体替换，Provider 是必填属性而不是路径身份。 */
-export function toEditableModel(draft: ModelDraft): AgentModelEditablePropertiesDTO {
+export function toEditableModel(draft: ModelDraft): SingleModelCreateDTO {
   const providerName = draft.providerName.trim()
   if (!providerName) {
     throw new Error('providerName is required')
   }
   return {
     name: requireNonBlank(draft.name, 'name'),
-    kind: 'MODEL',
+    type: 'MODEL',
     description: trimToNull(draft.description),
     providerName,
     modelId: requireNonBlank(draft.modelId, 'modelId'),
@@ -230,18 +232,22 @@ export function toEditableModel(draft: ModelDraft): AgentModelEditableProperties
   }
 }
 
-export function extractVariantIdsFromModel(model?: AgentModelDTO | null): string[] {
-  return model?.config?.variants?.map((variant) => variant.id) ?? []
+function asSingleModel(model?: ModelDTO | null): SingleModelDTO | null {
+  return model?.type === 'MODEL' ? model : null
 }
 
-export function extractDefaultVariantFromModel(model?: AgentModelDTO | null): string {
-  return model?.config?.defaultVariant ?? ''
+export function extractVariantIdsFromModel(model?: ModelDTO | null): string[] {
+  return asSingleModel(model)?.config.variants.map((variant) => variant.id) ?? []
 }
 
-export function extractContextWindow(model?: AgentModelDTO | null): number | undefined {
-  return model?.config?.limit?.context
+export function extractDefaultVariantFromModel(model?: ModelDTO | null): string {
+  return asSingleModel(model)?.config.defaultVariant ?? ''
 }
 
-export function extractMaxOutputTokens(model?: AgentModelDTO | null): number | undefined {
-  return model?.config?.limit?.output
+export function extractContextWindow(model?: ModelDTO | null): number | undefined {
+  return asSingleModel(model)?.config.limit.context
+}
+
+export function extractMaxOutputTokens(model?: ModelDTO | null): number | undefined {
+  return asSingleModel(model)?.config.limit.output
 }

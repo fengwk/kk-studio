@@ -1347,7 +1347,7 @@ async function createHoldingQueueFixture(
     await mock.start()
     const providerResponse = await apiCtx.call(
       'POST',
-      '/api/providers',
+      '/api/platform/providers',
       {
         name: `e2e-ui-hold-provider-${suffix}`,
         description: 'Local hold provider for free UI queue tests.',
@@ -1366,9 +1366,9 @@ async function createHoldingQueueFixture(
 
     const modelResponse = await apiCtx.call(
       'POST',
-      '/api/models',
+      '/api/platform/models',
       {
-        kind: 'MODEL',
+        type: 'MODEL',
         providerName: state.provider.name,
         name: `e2e-ui-hold-model-${suffix}`,
         modelId: `wire-ui-hold-${suffix}`,
@@ -1528,7 +1528,7 @@ async function cleanupFixture(state) {
     if (!state.model) return
     await deleteCatalogResource(
       state.apiCtx,
-      `/api/models/${encodePathTail(state.model.name)}`
+      `/api/platform/models/${encodePathTail(state.model.name)}`
         + `?expectedVersion=${encodeURIComponent(state.model.version)}`,
     )
   })
@@ -1536,7 +1536,7 @@ async function cleanupFixture(state) {
     if (!state.provider) return
     await deleteCatalogResource(
       state.apiCtx,
-      `/api/providers/${encodeURIComponent(state.provider.name)}`
+      `/api/platform/providers/${encodeURIComponent(state.provider.name)}`
         + `?expectedVersion=${encodeURIComponent(state.provider.version)}`,
     )
   })
@@ -1602,7 +1602,7 @@ async function resolveCatalogTarget(apiCtx) {
   )
   const modelsResponse = await apiCtx.call(
     'GET',
-    '/api/models?pageNumber=1&pageSize=50',
+    '/api/platform/models',
   )
   assert(
     agentsResponse.status === 200 && modelsResponse.status === 200,
@@ -1612,7 +1612,7 @@ async function resolveCatalogTarget(apiCtx) {
     })}`,
   )
   const agents = agentsResponse.json?.results || []
-  const models = modelsResponse.json?.results || []
+  const models = Array.isArray(modelsResponse.json) ? modelsResponse.json : []
   for (const agent of agents) {
     if (agent.execution?.driver !== 'builtin') continue
     const { modelName, variant } = agent.execution.settings || {}

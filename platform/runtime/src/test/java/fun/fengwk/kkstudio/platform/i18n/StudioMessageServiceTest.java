@@ -39,9 +39,9 @@ class StudioMessageServiceTest {
   void resolvesDomainAndHttpMessagesForSupportedLocales() {
     LocaleContextHolder.setLocale(Locale.US);
     assertEquals(
-        "The agent model was modified by another request.",
+        "The model was modified by another request.",
         messageService.domainMessage(
-            DomainErrorCode.VERSION_CONFLICT, Map.of("resource", "agent_model")));
+            DomainErrorCode.VERSION_CONFLICT, Map.of("resource", "model")));
     assertEquals("The request is invalid.", messageService.httpMessage(400));
     assertEquals("Bad Request", messageService.httpTitle(400));
     assertEquals("The server encountered an unexpected error.", messageService.httpMessage(500));
@@ -49,9 +49,9 @@ class StudioMessageServiceTest {
 
     LocaleContextHolder.setLocale(Locale.SIMPLIFIED_CHINESE);
     assertEquals(
-        "Agent Model 已被其他请求修改。",
+        "Model 已被其他请求修改。",
         messageService.domainMessage(
-            DomainErrorCode.VERSION_CONFLICT, Map.of("resource", "agent_model")));
+            DomainErrorCode.VERSION_CONFLICT, Map.of("resource", "model")));
     assertEquals("limit 参数为必填项。", messageService.validationRequired("limit"));
     assertEquals("limit 参数的值无效。", messageService.validationTypeMismatch("limit"));
     assertEquals("请求无效。", messageService.httpMessage(400));

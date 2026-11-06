@@ -1,32 +1,32 @@
 import type {
-  AgentModelDTO,
-  AgentProviderDTO,
+  ModelDTO,
+  ProviderDTO,
   ModelCatalogPageDTO,
-  ModelDefaultCandidateDTO,
+  ModelCatalogCandidateDTO,
 } from '@/shared/api/generated/contracts'
 
 /**
  * 离线浏览器验收的固定目录数据。所有价格均为 wire 十进制字符串，
  * 候选价格完整且包含 TTL/推理/覆盖/倍率，用来验证一键填入的全部可写字段。
  */
-export const FIXTURE_PROVIDER: AgentProviderDTO = {
+export const FIXTURE_PROVIDER: ProviderDTO = {
   name: 'acme',
   description: 'Offline fixture provider',
   providerType: 'openai',
   promptCacheRetentions: ['NONE', 'SHORT', 'LONG'],
   baseUrl: 'https://fixture.example/v1',
-  configured: true,
+  credential: { configured: true },
   modelCallTimeoutMillis: '1800000',
   modelCallIdleTimeoutMillis: '120000',
   modelHttpRetryStatusCodes: [429, 503],
   version: '1',
-  createTime: 1792454400,
-  updateTime: 1792454400,
+  createdAt: 1792454400,
+  updatedAt: 1792454400,
 }
 
-export const FIXTURE_MAIN_MODEL: AgentModelDTO = {
+export const FIXTURE_MAIN_MODEL: ModelDTO = {
   name: 'main',
-  kind: 'MODEL',
+  type: 'MODEL',
   description: 'Primary fixture model',
   providerName: 'acme',
   modelId: 'acme-main-v1',
@@ -49,13 +49,13 @@ export const FIXTURE_MAIN_MODEL: AgentModelDTO = {
     variants: [{ id: 'standard', reasoningEffort: 'HIGH', promptCacheRetention: 'SHORT' }, { id: 'fast', promptCacheRetention: 'SHORT' }],
   },
   version: '1',
-  createTime: 1792454400,
-  updateTime: 1792454400,
+  createdAt: 1792454400,
+  updatedAt: 1792454400,
 }
 
-export const FIXTURE_BACKUP_MODEL: AgentModelDTO = {
+export const FIXTURE_BACKUP_MODEL: ModelDTO = {
   name: 'backup',
-  kind: 'MODEL',
+  type: 'MODEL',
   description: 'Backup fixture model',
   providerName: 'acme',
   modelId: 'acme-backup-v1',
@@ -78,14 +78,20 @@ export const FIXTURE_BACKUP_MODEL: AgentModelDTO = {
     variants: [{ id: 'default', promptCacheRetention: 'SHORT' }],
   },
   version: '1',
-  createTime: 1792454400,
-  updateTime: 1792454400,
+  createdAt: 1792454400,
+  updatedAt: 1792454400,
 }
 
-export const FIXTURE_GROUP: AgentModelDTO = {
+export const FIXTURE_GROUP: ModelDTO = {
   name: 'coding',
-  kind: 'GROUP',
+  type: 'GROUP',
   description: 'Ordered coding fallback',
+  config: {
+    limit: { context: 128000, output: 4096 },
+    abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
+    defaultVariant: 'standard',
+    variants: [{ id: 'standard', promptCacheRetention: 'SHORT' }],
+  },
   group: {
     members: [
       { modelName: 'main', variant: 'standard' },
@@ -95,17 +101,17 @@ export const FIXTURE_GROUP: AgentModelDTO = {
     cooldownSeconds: 42,
   },
   version: '3',
-  createTime: 1792454400,
-  updateTime: 1792454400,
+  createdAt: 1792454400,
+  updatedAt: 1792454400,
 }
 
-export const FIXTURE_MODELS: AgentModelDTO[] = [
+export const FIXTURE_MODELS: ModelDTO[] = [
   FIXTURE_MAIN_MODEL,
   FIXTURE_BACKUP_MODEL,
   FIXTURE_GROUP,
 ]
 
-export const FIXTURE_CANDIDATES: ModelDefaultCandidateDTO[] = [
+export const FIXTURE_CANDIDATES: ModelCatalogCandidateDTO[] = [
   {
     id: 'models_dev_v2/acme/catalog-a',
     provider: 'acme',

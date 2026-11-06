@@ -7,8 +7,8 @@ import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerRepository;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
-import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderRepository;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelRepository;
+import fun.fengwk.kkstudio.platform.catalog.provider.ProviderRepository;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageRepository;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentRepository;
@@ -31,8 +31,8 @@ public class ConfigSyncSnapshotReader {
 
   private static final String RESOURCE = "system_settings";
 
-  private final AgentProviderRepository providerRepository;
-  private final AgentModelRepository modelRepository;
+  private final ProviderRepository providerRepository;
+  private final ModelRepository modelRepository;
   private final AgentDefinitionRepository definitionRepository;
   private final SkillPackageRepository skillPackageRepository;
   private final EnvironmentRepository environmentRepository;

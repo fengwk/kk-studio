@@ -49,7 +49,7 @@ test('test intent: unknown commands retain their exit code and diagnostic', () =
 })
 
 test('test intent: providers-ready lists the missing target providers in sorted order', () => {
-  const configured = (...names) => ({ results: names.map((name) => ({ name, configured: true, baseUrl: 'u' })) })
+  const configured = (...names) => names.map((name) => ({ name, credential: { configured: true }, baseUrl: 'u' }))
   assert.equal(probe(['providers-ready'], configured('google', 'openai', 'minimax-anthropic', 'deepseek')).stdout, 'ok\n')
   assert.equal(probe(['providers-ready'], configured('openai')).stdout, 'missing:deepseek,google,minimax-anthropic\n')
 })

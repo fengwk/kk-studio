@@ -170,9 +170,9 @@ export async function main(argv = process.argv.slice(2)) {
 
 async function validatePreflight(ctx, daemonEnv) {
   const [providersResponse, modelsResponse, toolsResponse, environments] = await Promise.all([
-    ctx.call('GET', '/api/providers?pageNumber=1&pageSize=100'),
-    ctx.call('GET', '/api/models?pageNumber=1&pageSize=100'),
-    ctx.call('GET', '/api/tools'),
+    ctx.call('GET', '/api/platform/providers?pageNumber=1&pageSize=100'),
+    ctx.call('GET', '/api/platform/models?pageNumber=1&pageSize=100'),
+    ctx.call('GET', '/api/platform/tools'),
     listEnvironments(ctx),
   ])
   const providers = pageResults(providersResponse.json)
@@ -185,7 +185,7 @@ async function validatePreflight(ctx, daemonEnv) {
 
   const provider = providers.find((candidate) => candidate.name === 'minimax')
   assert(provider, 'required provider is missing: minimax')
-  assert(provider.configured === true, 'required provider is not configured: minimax')
+  assert(provider.credential?.configured === true, 'required provider is not configured: minimax')
   const checkedModels = []
   for (const expected of MODELS) {
     const model = models.find(

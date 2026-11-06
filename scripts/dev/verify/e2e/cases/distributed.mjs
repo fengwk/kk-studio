@@ -387,7 +387,7 @@ async function getThreadSnapshotFromNode(callNode, node, threadId) {
 }
 
 async function setupDistributedHarness(ctx, suffix) {
-  const providerRes = await ctx.callNode('a', 'POST', '/api/providers', {
+  const providerRes = await ctx.callNode('a', 'POST', '/api/platform/providers', {
     name: `e2e-dist-prov-${suffix}`,
     description: 'Distributed test provider',
     providerType: 'openai',
@@ -399,8 +399,8 @@ async function setupDistributedHarness(ctx, suffix) {
   const provider = providerRes.json
   assert(provider?.name, 'provider creation failed')
 
-  const modelRes = await ctx.callNode('a', 'POST', '/api/models', {
-    kind: 'MODEL',
+  const modelRes = await ctx.callNode('a', 'POST', '/api/platform/models', {
+    type: 'MODEL',
     providerName: provider.name,
     name: `e2e-dist-model-${suffix}`,
     modelId: 'gpt-4o',
@@ -456,14 +456,14 @@ async function cleanupDistributedHarness(ctx, { agent, model, provider }) {
       await ctx.callNode(
         'a',
         'DELETE',
-        `/api/models/${encodeURIComponent(model.name)}?expectedVersion=${encodeURIComponent(model.version)}`,
+        `/api/platform/models/${encodeURIComponent(model.name)}?expectedVersion=${encodeURIComponent(model.version)}`,
       )
     } catch {
       try {
         await ctx.callNode(
           'b',
           'DELETE',
-          `/api/models/${encodeURIComponent(model.name)}?expectedVersion=${encodeURIComponent(model.version)}`,
+          `/api/platform/models/${encodeURIComponent(model.name)}?expectedVersion=${encodeURIComponent(model.version)}`,
         )
       } catch {
         // best effort
@@ -475,14 +475,14 @@ async function cleanupDistributedHarness(ctx, { agent, model, provider }) {
       await ctx.callNode(
         'a',
         'DELETE',
-        `/api/providers/${encodeURIComponent(provider.name)}?expectedVersion=${encodeURIComponent(provider.version)}`,
+        `/api/platform/providers/${encodeURIComponent(provider.name)}?expectedVersion=${encodeURIComponent(provider.version)}`,
       )
     } catch {
       try {
         await ctx.callNode(
           'b',
           'DELETE',
-          `/api/providers/${encodeURIComponent(provider.name)}?expectedVersion=${encodeURIComponent(provider.version)}`,
+          `/api/platform/providers/${encodeURIComponent(provider.name)}?expectedVersion=${encodeURIComponent(provider.version)}`,
         )
       } catch {
         // best effort

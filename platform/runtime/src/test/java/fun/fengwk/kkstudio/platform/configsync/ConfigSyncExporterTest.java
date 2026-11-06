@@ -18,7 +18,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
-import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
+import fun.fengwk.kkstudio.platform.catalog.provider.Provider;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
 import fun.fengwk.kkstudio.platform.environment.RegistrationTokens;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsCodec;
@@ -55,7 +55,7 @@ class ConfigSyncExporterTest {
 
   @Test
   void exportIncludesProviderHttpRetryOverride() {
-    AgentProvider p =
+    Provider p =
         provider("p").toBuilder().configJson("{\"modelHttpRetryStatusCodes\":[408,429]}").build();
     ConfigSyncSnapshot snapshot =
         snapshot(List.of(p), List.of(), List.of(), List.of(), List.of(), List.of(), List.of());

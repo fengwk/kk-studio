@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { ChevronDown, ChevronRight, RefreshCw } from 'lucide-react'
 import type {
   ModelCatalogPageDTO,
-  ModelDefaultCandidateDTO,
+  ModelCatalogCandidateDTO,
 } from '@/shared/api/generated/contracts'
 import { agentService } from '@/shared/api/agent-service'
 import { toUserFacingErrorMessage } from '@/shared/lib/user-facing-error'
@@ -20,11 +20,11 @@ import './ai-model-catalog-picker.css'
 export function ModelCatalogPicker({
   onApply,
 }: {
-  onApply: (candidate: ModelDefaultCandidateDTO) => void
+  onApply: (candidate: ModelCatalogCandidateDTO) => void
 }) {
   const { t } = useI18n()
   const [query, setQuery] = useState('')
-  const [items, setItems] = useState<ModelDefaultCandidateDTO[]>([])
+  const [items, setItems] = useState<ModelCatalogCandidateDTO[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [nextCursor, setNextCursor] = useState<string | null>(null)
@@ -182,7 +182,7 @@ export function ModelCatalogPicker({
   )
 }
 
-function CandidatePreview({ candidate }: { candidate: ModelDefaultCandidateDTO }) {
+function CandidatePreview({ candidate }: { candidate: ModelCatalogCandidateDTO }) {
   const { t } = useI18n()
   const abilities = candidate.abilities
   const capabilityParts: string[] = []

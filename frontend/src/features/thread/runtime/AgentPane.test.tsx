@@ -65,7 +65,7 @@ import { createMockIDBFactory } from '@/features/canvas/__tests__/mock-idb'
 import { entryPage } from '@/test-support/session-entry-page'
 import type {
   AgentDefinitionDTO,
-  AgentModelDTO,
+  ModelDTO,
   EnvironmentCardDTO,
   HarnessModelRequestDebugDTO,
   HarnessProviderRequestPreviewDTO,
@@ -326,9 +326,9 @@ const agents: AgentDefinitionDTO[] = [{
   updateTime: 0,
 }]
 
-const models: AgentModelDTO[] = [{
+const models: ModelDTO[] = [{
   providerName: 'minimax',
-  kind: 'MODEL',
+  type: 'MODEL',
   name: 'MiniMax',
   modelId: 'minimax/MiniMax',
   description: null,
@@ -344,8 +344,8 @@ const models: AgentModelDTO[] = [{
     variants: [{ id: 'default', promptCacheRetention: 'NONE' }],
   },
   version: '0',
-  createTime: 0,
-  updateTime: 0,
+  createdAt: 0,
+  updatedAt: 0,
 }]
 
 function thread(
@@ -522,12 +522,7 @@ beforeEach(() => {
     totalCount: String(agents.length),
     results: agents,
   })
-  vi.mocked(agentService.listModels).mockResolvedValue({
-    pageNumber: 1,
-    pageSize: 50,
-    totalCount: String(models.length),
-    results: models,
-  })
+  vi.mocked(agentService.listModels).mockResolvedValue(models)
   vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshot())
   vi.mocked(harnessService.getCompactionAvailability).mockResolvedValue({
     available: false,
@@ -4145,9 +4140,9 @@ function previewResponse(overrides: Partial<HarnessProviderRequestPreviewDTO> = 
   })
 
   describe('selectAgent model follow & validation behavior', () => {
-    const claudeModel: AgentModelDTO = {
+    const claudeModel: ModelDTO = {
       providerName: 'anthropic',
-      kind: 'MODEL',
+      type: 'MODEL',
       name: 'Claude',
       modelId: 'anthropic/Claude',
       description: null,
@@ -4163,8 +4158,8 @@ function previewResponse(overrides: Partial<HarnessProviderRequestPreviewDTO> = 
         variants: [{ id: 'v1', promptCacheRetention: 'NONE' }, { id: 'fast', promptCacheRetention: 'NONE' }],
       },
       version: '0',
-      createTime: 0,
-      updateTime: 0,
+      createdAt: 0,
+      updatedAt: 0,
     }
 
     const coderAgent: AgentDefinitionDTO = {
@@ -4199,12 +4194,7 @@ function previewResponse(overrides: Partial<HarnessProviderRequestPreviewDTO> = 
         totalCount: '3',
         results: [agents[0]!, coderAgent, brokenAgent],
       })
-      vi.mocked(agentService.listModels).mockResolvedValue({
-        pageNumber: 1,
-        pageSize: 50,
-        totalCount: '2',
-        results: [models[0]!, claudeModel],
-      })
+      vi.mocked(agentService.listModels).mockResolvedValue([models[0]!, claudeModel])
 
       if (mode === 'bound') {
         localStorage.setItem(
@@ -4276,12 +4266,7 @@ function previewResponse(overrides: Partial<HarnessProviderRequestPreviewDTO> = 
         totalCount: '2',
         results: [agents[0]!, coderAgent],
       })
-      vi.mocked(agentService.listModels).mockResolvedValue({
-        pageNumber: 1,
-        pageSize: 50,
-        totalCount: '2',
-        results: [models[0]!, claudeModel],
-      })
+      vi.mocked(agentService.listModels).mockResolvedValue([models[0]!, claudeModel])
 
       localStorage.setItem(
         `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:probe`,

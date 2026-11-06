@@ -459,7 +459,7 @@ async function verifyProviderExecutionBoundary(args) {
   const { json } = await httpJson(
     args.baseUrl,
     'GET',
-    '/api/providers?pageNumber=1&pageSize=50',
+    '/api/platform/providers',
   )
   assertProviderExecutionBoundary({ real: false, providers: pageResults(json) })
   console.log('Provider boundary: free mode confirmed every provider is unconfigured')

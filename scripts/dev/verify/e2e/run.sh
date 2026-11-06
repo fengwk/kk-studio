@@ -194,7 +194,7 @@ if [ "$REAL" = "true" ]; then
   sync_e2e_provider_credentials
 fi
 if [ "$REAL" = "true" ]; then
-  providers_ready=$(curl -fsS "$BACKEND_URL/api/providers?pageNumber=1&pageSize=50" \
+  providers_ready=$(curl -fsS "$BACKEND_URL/api/platform/providers" \
     | node "$SCRIPT_DIR/lib/json-probe.mjs" providers-ready)
   if [ "$providers_ready" != "ok" ]; then
     die "All target providers must be configured for --real ($providers_ready)"

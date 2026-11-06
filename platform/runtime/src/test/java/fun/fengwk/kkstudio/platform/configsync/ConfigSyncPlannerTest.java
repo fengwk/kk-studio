@@ -25,20 +25,20 @@ import static org.mockito.Mockito.when;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelGroupCreateDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.SingleModelCreateDTO;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerRepository;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpTool;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModelService;
-import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
-import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderRepository;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelRepository;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelService;
+import fun.fengwk.kkstudio.platform.catalog.provider.Provider;
+import fun.fengwk.kkstudio.platform.catalog.provider.ProviderRepository;
 import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalog;
 import fun.fengwk.kkstudio.platform.testing.TestCatalogSources;
 import fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelCreateDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelKind;
-import fun.fengwk.kkstudio.share.catalog.PromptCacheRetention;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncKind;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncRef;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncSkipped;
@@ -128,20 +128,19 @@ class ConfigSyncPlannerTest {
             .replace("promptCacheRetention: NONE", "promptCacheRetention: LONG");
     DomainException imported = assertThrows(DomainException.class, () -> plan(unsupported));
 
-    AgentProviderRepository providers = mock(AgentProviderRepository.class);
+    ProviderRepository providers = mock(ProviderRepository.class);
     when(providers.getByNameForUpdate("p"))
-        .thenReturn(AgentProvider.builder().name("p").providerType(ProviderType.GOOGLE).build());
-    AgentModelService service =
-        new AgentModelService(
-            mock(AgentModelRepository.class),
+        .thenReturn(Provider.builder().name("p").providerType(ProviderType.GOOGLE).build());
+    ModelService service =
+        new ModelService(
+            mock(ModelRepository.class),
             providers,
             new AgentEditableSupport(ConfigSyncFixtures.MAPPER),
             ConfigSyncFixtures.MODEL_CONFIG_PARSER,
             ConfigSyncFixtures.GROUP_CONFIG_CODEC);
     var config = ConfigSyncFixtures.modelConfig();
     config.getVariants().getFirst().setPromptCacheRetention(PromptCacheRetention.LONG);
-    AgentModelCreateDTO create = new AgentModelCreateDTO();
-    create.setKind(AgentModelKind.MODEL);
+    SingleModelCreateDTO create = new SingleModelCreateDTO();
     create.setProviderName("p");
     create.setName("m");
     create.setModelId("gpt");
@@ -722,7 +721,12 @@ class ConfigSyncPlannerTest {
     assertEquals(
         List.of("m", "g"), plan.models().stream().map(ConfigSyncParser.ModelSpec::name).toList());
     assertEquals(
-        "m", plan.models().get(1).properties().getGroup().getMembers().get(0).getModelName());
+        "m",
+        ((ModelGroupCreateDTO) plan.models().get(1).properties())
+            .getGroup()
+            .getMembers()
+            .get(0)
+            .getModelName());
     // 即便组及成员都将被导入，组级 Variant 仍必须在预检中拒绝。
     document.put(
         "agents",

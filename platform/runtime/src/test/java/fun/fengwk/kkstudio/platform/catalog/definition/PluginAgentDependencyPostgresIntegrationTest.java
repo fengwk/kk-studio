@@ -405,14 +405,14 @@ class PluginAgentDependencyPostgresIntegrationTest {
   private void seedAgentModel() {
     jdbcClient
         .sql(
-            "insert into agent_provider (name, provider_type, config, connection_generation_id)"
+            "insert into provider (name, provider_type, config, connection_generation_id)"
                 + " values (:name, 'openai', '{}'::jsonb, cast(:generation as uuid))")
         .param("name", MODEL_PROVIDER)
         .param("generation", UUID.randomUUID().toString())
         .update();
     jdbcClient
         .sql(
-            "insert into agent_model (name, kind, provider_name, model_id, config)"
+            "insert into model (name, kind, provider_name, model_id, config)"
                 + " values (:name, 'MODEL', :provider, :modelId, '{}'::jsonb)")
         .param("provider", MODEL_PROVIDER)
         .param("name", MODEL_NAME)

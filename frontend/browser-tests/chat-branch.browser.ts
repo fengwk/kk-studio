@@ -233,16 +233,12 @@ async function installChatApi(
       })
       return
     }
-    if (path === '/api/models') {
+    if (path === '/api/platform/models') {
       await route.fulfill({
-        json: {
-            pageNumber: 1,
-            pageSize: 50,
-            totalCount: '2',
-            results: [
+        json: [
               {
                 providerName: 'minimax',
-                kind: 'MODEL',
+                type: 'MODEL',
                 name: 'MiniMax',
                 modelId: 'MiniMax-upstream',
                 description: null,
@@ -258,13 +254,13 @@ async function installChatApi(
     },
                 },
                 version: '1',
-                createTime: null,
-                updateTime: null,
+                createdAt: 0,
+                updatedAt: 0,
               },
               {
                 // 单 variant 模型：一次点击即完成选择（无需进入二级 variant 菜单）。
                 providerName: 'minimax',
-                kind: 'MODEL',
+                type: 'MODEL',
                 name: 'Echo',
                 modelId: 'Echo-upstream',
                 description: null,
@@ -280,11 +276,10 @@ async function installChatApi(
     },
                 },
                 version: '1',
-                createTime: null,
-                updateTime: null,
+                createdAt: 0,
+                updatedAt: 0,
               },
-            ],
-        },
+        ],
       })
       return
     }

@@ -6,7 +6,10 @@ import { VariantListEditor } from '@/features/catalog/AiVariantListEditor'
 import { ModelPricingEditor } from '@/features/catalog/AiModelPricingEditor'
 import { ModelCatalogPicker } from '@/features/catalog/AiModelCatalogPicker'
 import { applyCatalogCandidate } from '@/features/catalog/ai-model-catalog-apply'
-import { resolvePromptCacheRetentions } from '@/shared/api/contracts/ai-catalog'
+import {
+  defaultPromptCacheRetention,
+  resolvePromptCacheRetentions,
+} from '@/shared/api/contracts/ai-catalog'
 import { Button } from '@/shared/ui/controls/Button'
 import { Checkbox } from '@/shared/ui/controls/Checkbox'
 import { NumberInput } from '@/shared/ui/controls/NumberInput'
@@ -15,12 +18,12 @@ import { TextInput } from '@/shared/ui/controls/TextInput'
 import { Select } from '@/shared/ui/controls/Select'
 import { useI18n } from '@/shared/i18n'
 import { RemoteModelIdPicker } from '@/features/catalog/AiRemoteModelIdPicker'
-import type { AgentModelInputModality, AgentProviderDTO } from '@/shared/api/generated/contracts'
+import type { ModelInputModality, ProviderDTO } from '@/shared/api/generated/contracts'
 import './capability-picker.css'
 import './catalog-form-layout.css'
 import './ai-model-resource-form.css'
 
-const AGENT_MODEL_INPUT_MODALITIES: AgentModelInputModality[] = [
+const AGENT_MODEL_INPUT_MODALITIES: ModelInputModality[] = [
   'TEXT',
   'IMAGE',
   'AUDIO',
@@ -38,7 +41,7 @@ export function ModelForm({
 }: {
   draft: ModelDraft
   mode: 'create' | 'edit'
-  providers: AgentProviderDTO[]
+  providers: ProviderDTO[]
   fieldErrors?: Partial<Record<ResourceFieldKey, string>>
   onChange: (draft: ModelDraft) => void
   loadRemoteModelIds?: (providerName: string) => Promise<string[]>
@@ -66,6 +69,19 @@ export function ModelForm({
     ? draft.defaultVariant.trim()
     : (variantOptions[0] ?? '')
 
+  /** Provider 切换后，逐 Variant 把新协议不支持的缓存档位重置为该 Provider 的默认档位。 */
+  function changeProvider(providerName: string) {
+    const provider = providers.find((item) => item.name === providerName)
+    const supported = resolvePromptCacheRetentions(provider)
+    const fallback = defaultPromptCacheRetention(provider)
+    const variants = draft.variants.map((variant) =>
+      supported.includes(variant.promptCacheRetention)
+        ? variant
+        : { ...variant, promptCacheRetention: fallback },
+    )
+    onChange({ ...draft, providerName, variants })
+  }
+
   function commitVariants(nextVariants: VariantDraft[], preferredDefaultVariant?: string) {
     const nextOptions = variantOptionsFromDraft(nextVariants)
     const preferred = preferredDefaultVariant?.trim() || draft.defaultVariant.trim()
@@ -83,7 +99,7 @@ export function ModelForm({
     onChange({ ...draft, modelId, name: nameFollows ? modelId : draft.name })
   }
 
-  function toggleInputModality(value: AgentModelInputModality) {
+  function toggleInputModality(value: ModelInputModality) {
     const has = draft.inputModalities.includes(value)
     const next = has
       ? draft.inputModalities.filter((item) => item !== value)
@@ -108,7 +124,7 @@ export function ModelForm({
           required
           disabled={mode === 'edit'}
           options={providerOptions}
-          onChange={(providerName) => onChange({ ...draft, providerName })}
+          onChange={changeProvider}
         />
         {providerUnavailable ? (
           <span id="model-provider-identity-status" className="inline-hint" role="status">

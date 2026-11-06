@@ -2,9 +2,7 @@ package fun.fengwk.kkstudio.web.controller;
 
 import static org.hamcrest.Matchers.nullValue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
@@ -24,11 +22,13 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import tools.jackson.databind.json.JsonMapper;
 
-import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderService;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
+import fun.fengwk.kkstudio.platform.catalog.dto.ProviderCreateDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ProviderDTO;
+import fun.fengwk.kkstudio.platform.catalog.http.ProviderController;
+import fun.fengwk.kkstudio.platform.catalog.provider.ProviderService;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSchemaProvider;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsService;
-import fun.fengwk.kkstudio.share.catalog.AgentProviderCreateDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentProviderDTO;
 import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
 import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
 
@@ -38,25 +38,25 @@ import java.util.List;
  * provider 与 system settings HTTP 边界上的 {@code modelHttpRetryStatusCodes} 契约。
  *
  * <p>用真实 Jackson 3 wire mapper（{@link StrictHttpJsonMapperTestSupport}）与 MockMvc 验证：Provider DTO
- * 始终显式输出 null 覆盖；严格整数数组从 wire 层拒绝 {@code 429.5}/{@code 429.0}/{@code "429"}/null 元素/重复/越界，且解析器确实接到
- * {@code @JsonSetter} 三态入口。
+ * 始终显式输出 null 覆盖；严格整数数组从 wire 层拒绝 {@code 429.5}/{@code 429.0}/{@code "429"}/null 元素/重复/越界；null
+ * 表示继承系统名单。
  */
 class StudioHttpRetryStatusCodesContractTest {
 
   private static final List<String> INVALID_LISTS =
       List.of("429.5", "429.0", "\"429\"", "[null]", "[429,429]", "[399]", "[600]", "429", "{}");
 
-  private AgentProviderService providerService;
+  private ProviderService providerService;
   private SystemSettingsService settingsService;
   private MockMvc mockMvc;
 
   @BeforeEach
   void setUp() {
-    providerService = mock(AgentProviderService.class);
+    providerService = mock(ProviderService.class);
     settingsService = mock(SystemSettingsService.class);
     mockMvc =
         MockMvcBuilders.standaloneSetup(
-                new StudioAgentProviderController(providerService),
+                new ProviderController(providerService),
                 new StudioSystemSettingsController(
                     settingsService, mock(SystemSettingsSchemaProvider.class)))
             .setMessageConverters(new JacksonJsonHttpMessageConverter(strictHttpMapper()))
@@ -67,68 +67,47 @@ class StudioHttpRetryStatusCodesContractTest {
   /** Provider 公开 DTO 的覆盖字段前端契约为 {@code number[] | null}：无覆盖时也必须显式输出 null。 */
   @Test
   void providerResponseCarriesExplicitNullRetryOverrides() throws Exception {
-    AgentProviderDTO created = new AgentProviderDTO();
+    ProviderDTO created = new ProviderDTO();
     created.setName("p");
-    created.setProviderType("openai");
+    created.setProviderType(ProviderType.OPENAI);
     created.setVersion("1");
     when(providerService.createProvider(any())).thenReturn(created);
 
     mockMvc
         .perform(
-            post("/api/providers")
+            post("/api/platform/providers")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"providerType\":\"openai\",\"credential\":\"k\"}"))
         .andExpect(status().is2xxSuccessful())
         .andExpect(jsonPath("$.modelHttpRetryStatusCodes").value(nullValue()));
   }
 
-  /** 合法整数数组必须被接受，并经 {@code @JsonSetter} 入口标记“字段出现”。 */
+  /** 合法整数数组与显式 null 都必须被接受：null 表示继承系统名单。 */
   @Test
-  void providerCreateAcceptsStrictIntegerListThroughSetter() throws Exception {
-    when(providerService.createProvider(any())).thenReturn(new AgentProviderDTO());
+  void providerCreateAcceptsStrictIntegerListAndExplicitNull() throws Exception {
+    when(providerService.createProvider(any())).thenReturn(new ProviderDTO());
 
     mockMvc
         .perform(
-            post("/api/providers")
+            post("/api/platform/providers")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
-                    "{\"providerType\":\"openai\",\"credential\":\"k\","
+                    "{\"name\":\"p\",\"providerType\":\"openai\",\"credential\":\"k\","
                         + "\"modelHttpRetryStatusCodes\":[500,503]}"))
         .andExpect(status().is2xxSuccessful());
-
-    ArgumentCaptor<AgentProviderCreateDTO> captor =
-        ArgumentCaptor.forClass(AgentProviderCreateDTO.class);
-    verify(providerService).createProvider(captor.capture());
-    assertTrue(captor.getValue().isModelHttpRetryStatusCodesProvided());
-    assertEquals(List.of(500, 503), captor.getValue().getModelHttpRetryStatusCodes());
-  }
-
-  /** 省略字段与显式 null 必须可区分：省略不触发 setter，显式 null 触发但值为 null。 */
-  @Test
-  void providerCreateDistinguishesOmittedFromExplicitNull() throws Exception {
-    when(providerService.createProvider(any())).thenReturn(new AgentProviderDTO());
-
     mockMvc
         .perform(
-            post("/api/providers")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"providerType\":\"openai\",\"credential\":\"k\"}"))
-        .andExpect(status().is2xxSuccessful());
-    mockMvc
-        .perform(
-            post("/api/providers")
+            post("/api/platform/providers")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
-                    "{\"providerType\":\"openai\",\"credential\":\"k\","
+                    "{\"name\":\"p\",\"providerType\":\"openai\",\"credential\":\"k\","
                         + "\"modelHttpRetryStatusCodes\":null}"))
         .andExpect(status().is2xxSuccessful());
 
-    ArgumentCaptor<AgentProviderCreateDTO> captor =
-        ArgumentCaptor.forClass(AgentProviderCreateDTO.class);
+    ArgumentCaptor<ProviderCreateDTO> captor = ArgumentCaptor.forClass(ProviderCreateDTO.class);
     verify(providerService, times(2)).createProvider(captor.capture());
-    List<AgentProviderCreateDTO> values = captor.getAllValues();
-    assertFalse(values.get(0).isModelHttpRetryStatusCodesProvided());
-    assertTrue(values.get(1).isModelHttpRetryStatusCodesProvided());
+    List<ProviderCreateDTO> values = captor.getAllValues();
+    assertEquals(List.of(500, 503), values.get(0).getModelHttpRetryStatusCodes());
     assertNull(values.get(1).getModelHttpRetryStatusCodes());
   }
 
@@ -138,10 +117,10 @@ class StudioHttpRetryStatusCodesContractTest {
     for (String token : INVALID_LISTS) {
       mockMvc
           .perform(
-              post("/api/providers")
+              post("/api/platform/providers")
                   .contentType(MediaType.APPLICATION_JSON)
                   .content(
-                      "{\"providerType\":\"openai\",\"credential\":\"k\","
+                      "{\"name\":\"p\",\"providerType\":\"openai\",\"credential\":\"k\","
                           + "\"modelHttpRetryStatusCodes\":"
                           + token
                           + "}"))
@@ -149,10 +128,14 @@ class StudioHttpRetryStatusCodesContractTest {
 
       mockMvc
           .perform(
-              put("/api/providers/p")
+              put("/api/platform/providers/p")
                   .contentType(MediaType.APPLICATION_JSON)
                   .content(
-                      "{\"providerType\":\"openai\",\"modelHttpRetryStatusCodes\":" + token + "}"))
+                      "{\"credential\":{\"operation\":\"KEEP\"},"
+                          + "\"modelCallTimeoutMillis\":1,\"modelCallIdleTimeoutMillis\":1,"
+                          + "\"modelHttpRetryStatusCodes\":"
+                          + token
+                          + "}"))
           .andExpect(status().isBadRequest());
 
       mockMvc

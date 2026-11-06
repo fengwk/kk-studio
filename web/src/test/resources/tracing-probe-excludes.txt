@@ -15,3 +15,4 @@ fun.fengwk.kkstudio.plugin.comfyui.ComfyuiAutoConfiguration
 fun.fengwk.kkstudio.plugin.opencli.OpenCliAutoConfiguration
 fun.fengwk.kkstudio.plugin.media.MediaAutoConfiguration
 fun.fengwk.kkstudio.plugin.minimaxmavis.MiniMaxMavisAutoConfiguration
+fun.fengwk.kkstudio.chat.ChatAutoConfiguration

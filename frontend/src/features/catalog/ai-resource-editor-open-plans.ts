@@ -11,7 +11,7 @@ import {
 } from '@/features/catalog/ai-resource-draft-codecs'
 import type { ResourceEditorPlan } from '@/features/catalog/ai-resource-editor-plan-types'
 import type { AgentModelView } from '@/features/catalog/AgentModelView'
-import type { AgentDefinitionDTO, AgentProviderDTO } from '@/shared/api/generated/contracts'
+import type { AgentDefinitionDTO, ProviderDTO } from '@/shared/api/generated/contracts'
 import { getBuiltinModelSelection } from '@/shared/api/contracts/ai-runtime'
 
 export function createProviderEditorPlan(): Extract<ResourceEditorPlan, { kind: 'provider' }> {
@@ -23,7 +23,7 @@ export function createProviderEditorPlan(): Extract<ResourceEditorPlan, { kind: 
 }
 
 export function editProviderEditorPlan(
-  providers: AgentProviderDTO[],
+  providers: ProviderDTO[],
   providerName: string,
 ): Extract<ResourceEditorPlan, { kind: 'provider' }> | null {
   const provider = providers.find((item) => item.name === providerName)
@@ -38,7 +38,7 @@ export function editProviderEditorPlan(
 }
 
 export function createModelEditorPlan(
-  providers: AgentProviderDTO[],
+  providers: ProviderDTO[],
 ): Extract<ResourceEditorPlan, { kind: 'model' }> {
   return {
     kind: 'model',
@@ -62,14 +62,14 @@ export function editModelEditorPlan(
     modal: {
       kind: 'model',
       mode: 'edit',
-      resourceKind: model.kind,
+      resourceKind: model.type,
       name: model.name,
       expectedVersion: model.version,
     },
     modelDraft: normalizeModelDraftDefaultVariant(
-      model.kind === 'MODEL' ? toModelDraft(model) : emptyModelDraft({ name: model.providerName ?? '' }),
+      model.type === 'MODEL' ? toModelDraft(model) : emptyModelDraft(null),
     ),
-    modelGroupDraft: model.kind === 'GROUP' ? toModelGroupDraft(model) : emptyModelGroupDraft(),
+    modelGroupDraft: model.type === 'GROUP' ? toModelGroupDraft(model) : emptyModelGroupDraft(),
   }
 }
 

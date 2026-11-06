@@ -1,11 +1,11 @@
 import type {
-  AgentModelPricingConditionDTO,
-  AgentModelPricingDTO,
-  AgentModelPricingFactorsDTO,
-  AgentModelPricingMultiplierDTO,
-  AgentModelPricingOverrideDTO,
-  AgentModelRatePatchDTO,
-  AgentModelRateSetDTO,
+  ModelPricingConditionDTO,
+  ModelPricingDTO,
+  ModelPricingFactorsDTO,
+  ModelPricingMultiplierDTO,
+  ModelPricingOverrideDTO,
+  ModelRatePatchDTO,
+  ModelRateSetDTO,
 } from '@/shared/api/generated/contracts'
 import {
   normalizePricingScalar,
@@ -39,7 +39,7 @@ export function emptyPricingDraft(): ModelPricingDraft {
 }
 
 /** 深拷贝价格定义，避免表单直接修改查询结果对象。 */
-export function clonePricing(pricing: AgentModelPricingDTO): ModelPricingDraft {
+export function clonePricing(pricing: ModelPricingDTO): ModelPricingDraft {
   return {
     base: {
       ...pricing.base,
@@ -60,7 +60,7 @@ export function clonePricing(pricing: AgentModelPricingDTO): ModelPricingDraft {
   }
 }
 
-export function cloneCondition(condition: AgentModelPricingConditionDTO): AgentModelPricingConditionDTO {
+export function cloneCondition(condition: ModelPricingConditionDTO): ModelPricingConditionDTO {
   return {
     ...(condition.context ? { context: { ...condition.context } } : {}),
     ...(condition.serviceTier ? { serviceTier: [...condition.serviceTier] } : {}),
@@ -131,11 +131,11 @@ function requireInteger(
 /** 校验并返回完整价格定义；任何缺字段都不自动补 0，避免把“继承”误写成显式价格。 */
 export function normalizePricing(
   draft: ModelPricingDraft,
-): AgentModelPricingDTO {
+): ModelPricingDTO {
   if (!draft || !draft.base) {
     throw new Error('pricing.base is required')
   }
-  const base: AgentModelRateSetDTO = {
+  const base: ModelRateSetDTO = {
     input: requireDecimal(draft.base.input, 'pricing.base.input'),
     output: requireDecimal(draft.base.output, 'pricing.base.output'),
     cacheRead: requireDecimal(draft.base.cacheRead, 'pricing.base.cacheRead'),
@@ -165,8 +165,8 @@ function normalizeRuleId(id: string, index: number, ids: Set<string>): string {
   return normalized
 }
 
-function normalizeRatePatch(rates: AgentModelRatePatchDTO): AgentModelRatePatchDTO {
-  const result: AgentModelRatePatchDTO = {}
+function normalizeRatePatch(rates: ModelRatePatchDTO): ModelRatePatchDTO {
+  const result: ModelRatePatchDTO = {}
   if (rates.input != null && rates.input.trim() !== '') {
     result.input = requireDecimal(rates.input, 'override.rates.input')
   }
@@ -193,10 +193,10 @@ function normalizeRatePatch(rates: AgentModelRatePatchDTO): AgentModelRatePatchD
 }
 
 function normalizeOverride(
-  rule: AgentModelPricingOverrideDTO,
+  rule: ModelPricingOverrideDTO,
   index: number,
   ids: Set<string>,
-): AgentModelPricingOverrideDTO {
+): ModelPricingOverrideDTO {
   return {
     id: normalizeRuleId(rule.id, index, ids),
     when: normalizeCondition(rule.when, 0, `pricing.overrides[${index}].when`),
@@ -204,8 +204,8 @@ function normalizeOverride(
   }
 }
 
-function normalizeFactors(factors: AgentModelPricingFactorsDTO): AgentModelPricingFactorsDTO {
-  const result: AgentModelPricingFactorsDTO = {}
+function normalizeFactors(factors: ModelPricingFactorsDTO): ModelPricingFactorsDTO {
+  const result: ModelPricingFactorsDTO = {}
   for (const field of ['input', 'output', 'cacheRead', 'cacheWrite', 'reasoning'] as const) {
     const value = factors[field]
     if (value != null && value.trim() !== '') {
@@ -216,10 +216,10 @@ function normalizeFactors(factors: AgentModelPricingFactorsDTO): AgentModelPrici
 }
 
 function normalizeMultiplier(
-  rule: AgentModelPricingMultiplierDTO,
+  rule: ModelPricingMultiplierDTO,
   index: number,
   ids: Set<string>,
-): AgentModelPricingMultiplierDTO {
+): ModelPricingMultiplierDTO {
   return {
     id: normalizeRuleId(rule.id, index, ids),
     when: normalizeCondition(rule.when, 0, `pricing.multipliers[${index}].when`),
@@ -232,14 +232,14 @@ function normalizeMultiplier(
  * weekday 1..7，以及 all/any/not 的深度和宽度均有界；空对象恒真。
  */
 export function normalizeCondition(
-  condition: AgentModelPricingConditionDTO,
+  condition: ModelPricingConditionDTO,
   depth = 0,
   field = 'condition',
-): AgentModelPricingConditionDTO {
+): ModelPricingConditionDTO {
   if (depth > MAX_CONDITION_DEPTH) {
     throw new Error(`${field} exceeds maximum nesting depth`)
   }
-  const result: AgentModelPricingConditionDTO = {}
+  const result: ModelPricingConditionDTO = {}
 
   if (condition.context) {
     const context = condition.context
@@ -390,7 +390,7 @@ function uniqueNonBlank(values: ReadonlyArray<string>): string[] {
 }
 
 /** 供规则摘要显示；只描述结构化条件，不拼接原始 JSON。 */
-export function describeCondition(condition: AgentModelPricingConditionDTO): string {
+export function describeCondition(condition: ModelPricingConditionDTO): string {
   const parts: string[] = []
   if (condition.context) {
     const context = condition.context

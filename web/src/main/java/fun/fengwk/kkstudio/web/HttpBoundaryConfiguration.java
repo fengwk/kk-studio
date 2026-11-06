@@ -26,6 +26,8 @@ import tools.jackson.databind.type.LogicalType;
 
 import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.common.number.DecimalLongs;
+import fun.fengwk.kkstudio.platform.catalog.dto.ProviderCreateDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ProviderUpdateDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsAdvancedDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsAiRuntimeDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsEnvironmentDTO;
@@ -88,12 +90,14 @@ public class HttpBoundaryConfiguration implements WebMvcConfigurer {
         .addModule(
             new SimpleModule("CanonicalHttpUuid")
                 .addDeserializer(UUID.class, new CanonicalUuidDeserializer()))
-        // Settings 的 Long wire 本就明确为十进制字符串，而不是 JSON 数字。
+        // Settings 的 Long wire 是十进制字符串，而不是 JSON 数字。
         .addMixIn(SystemSettingsToolDTO.class, SettingsToolMixin.class)
         .addMixIn(SystemSettingsAiRuntimeDTO.class, SettingsAiRuntimeMixin.class)
         .addMixIn(SystemSettingsEnvironmentDTO.class, SettingsEnvironmentMixin.class)
         .addMixIn(SystemSettingsStorageMediaDTO.class, SettingsStorageMediaMixin.class)
         .addMixIn(SystemSettingsAdvancedDTO.class, SettingsAdvancedMixin.class)
+        .addMixIn(ProviderCreateDTO.class, ProviderTimeoutMixin.class)
+        .addMixIn(ProviderUpdateDTO.class, ProviderTimeoutMixin.class)
         .build();
   }
 
@@ -108,6 +112,34 @@ public class HttpBoundaryConfiguration implements WebMvcConfigurer {
       } catch (IllegalArgumentException error) {
         throw DatabindException.from(parser, "UUID must be a canonical lowercase string");
       }
+    }
+  }
+
+  /** Provider 超时同时接受十进制字符串（服务端写出形态）与 JSON 整数（生成契约的请求形态）。 */
+  abstract static class ProviderTimeoutMixin {
+
+    @JsonDeserialize(using = ProviderTimeoutDeserializer.class)
+    Long modelCallTimeoutMillis;
+
+    @JsonDeserialize(using = ProviderTimeoutDeserializer.class)
+    Long modelCallIdleTimeoutMillis;
+  }
+
+  static class ProviderTimeoutDeserializer extends ValueDeserializer<Long> {
+    @Override
+    public Long deserialize(JsonParser parser, DeserializationContext context) {
+      JsonToken token = parser.currentToken();
+      try {
+        if (token == JsonToken.VALUE_NUMBER_INT) {
+          return parser.getLongValue();
+        }
+        if (token == JsonToken.VALUE_STRING) {
+          return DecimalLongs.parseNonNegative(parser.getString(), "provider timeout");
+        }
+      } catch (IllegalArgumentException error) {
+        throw DatabindException.from(parser, "provider timeout must be a non-negative decimal");
+      }
+      throw DatabindException.from(parser, "provider timeout must be a decimal string or integer");
     }
   }
 

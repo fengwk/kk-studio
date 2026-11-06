@@ -531,7 +531,7 @@ subscribe -> 注册资源 -> 读取 durable cursor -> subscribed(cursor) -> even
 | --- | --- |
 | 1 | 共享基础：全局 Blob（`storage_blob` 含 `archive_index`）、上传（`storage_upload`）与对象清理（`storage_object_cleanup`） |
 | 2 | 平台内核存储：环境（`environment`、`environment_connection`、`cluster_node`）、单行 `system_setting`、Harness 执行协议（`harness_session`、`harness_entry`、`harness_thread`、`realtime_subscription`、`harness_thread_command`、`harness_tool_invocation`、`durable_work`、`harness_thread_join`、`harness_thread_stop_receipt`、`harness_execution_exit`）与 Session 引用（`session_blob_ref`、`session_file`） |
-| 3 | 平台 Driver 存储：目录（`agent_provider`、`agent_model`、`agent_definition`、`agent_model_group_cooldown`）、技能包（`skill_package`、`skill_package_git_source`）、插件（`plugin_configuration`、`plugin_credential`、`plugin_auth_attempt`）、MCP（`mcp_server`、`mcp_tool`）与 `builtin_model_invocation` |
+| 3 | 平台 Driver 存储：目录（`provider`、`model`、`agent_definition`、`model_group_cooldown`）、技能包（`skill_package`、`skill_package_git_source`）、插件（`plugin_configuration`、`plugin_credential`、`plugin_auth_attempt`）、MCP（`mcp_server`、`mcp_tool`）与 `builtin_model_invocation` |
 | 4 | 产品表：Canvas（`canvas_*`）、Chat（`chat`、`chat_session`）与 Project（`project_*`） |
 
 - 表与 SQL 只由归属模块访问：产品表由产品模块维护，目录、设置、存储、环境与插件由平台维护，`harness_*` 由平台的

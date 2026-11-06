@@ -5,7 +5,7 @@ import { setLocale } from '@/shared/i18n'
 import { createBuiltinExecution } from '@/shared/api/contracts/ai-runtime'
 import { paneTargetViewKey, threadIdentity, useThreadPresentation } from './thread-presentation'
 import { ThreadPresentationActions } from './ThreadPresentationActions'
-import type { AgentModelDTO, HarnessThreadDTO } from '@/shared/api/generated/contracts'
+import type { ModelDTO, HarnessThreadDTO } from '@/shared/api/generated/contracts'
 
 const thread: HarnessThreadDTO = {
   threadId: 'child', name: 'worker', sessionId: 'session', headEntryId: 'head',
@@ -17,9 +17,9 @@ const thread: HarnessThreadDTO = {
     environmentName: null, goal: null,
   },
 }
-const model: AgentModelDTO = {
-  providerName: 'provider', kind: 'MODEL', name: 'model', modelId: 'actual-model', description: null,
-  version: '1', createTime: 0, updateTime: 0,
+const model: ModelDTO = {
+  providerName: 'provider', type: 'MODEL', name: 'model', modelId: 'actual-model', description: null,
+  version: '1', createdAt: 0, updatedAt: 0,
   config: {
     limit: { context: 10000, output: 1000 },
     abilities: { tools: true, reasoning: true, inputModalities: ['TEXT'] },

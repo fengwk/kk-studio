@@ -9,9 +9,9 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderFactory;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
-import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
-import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderConfigurationCodec;
-import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderRepository;
+import fun.fengwk.kkstudio.platform.catalog.provider.Provider;
+import fun.fengwk.kkstudio.platform.catalog.provider.ProviderConfigurationCodec;
+import fun.fengwk.kkstudio.platform.catalog.provider.ProviderRepository;
 
 import java.util.Map;
 import java.util.Objects;
@@ -19,7 +19,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * 按当前 {@code agent_provider} 行解析每次 Model attempt 的 Provider。
+ * 按当前 {@code provider} 行解析每次 Model attempt 的 Provider。
  *
  * <p>每次 {@link #resolve} 都按 {@code request.model().providerName()} 读取最新一行，并在创建 adapter 前校验
  * providerType 与 connection generation 均等于 invocation 冻结值。endpoint、credential 或协议配置变化以及同名重建都会轮换
@@ -32,14 +32,14 @@ import java.util.UUID;
 @Component
 public final class DatabaseProviderResolutionService implements ProviderResolutionService {
 
-  private final AgentProviderRepository providerRepository;
-  private final AgentProviderConfigurationCodec providerConfigurationCodec;
+  private final ProviderRepository providerRepository;
+  private final ProviderConfigurationCodec providerConfigurationCodec;
   private final Map<ProviderType, ProviderFactory> providerFactories;
   private final ProviderResourceMaterializer resourceMaterializer;
 
   public DatabaseProviderResolutionService(
-      AgentProviderRepository providerRepository,
-      AgentProviderConfigurationCodec providerConfigurationCodec,
+      ProviderRepository providerRepository,
+      ProviderConfigurationCodec providerConfigurationCodec,
       Map<ProviderType, ProviderFactory> providerFactories,
       ProviderResourceMaterializer resourceMaterializer) {
     this.providerRepository = Objects.requireNonNull(providerRepository, "providerRepository");
@@ -58,7 +58,7 @@ public final class DatabaseProviderResolutionService implements ProviderResoluti
     Objects.requireNonNull(frozenConnectionGenerationId, "frozenConnectionGenerationId");
     Objects.requireNonNull(request, "request");
     String providerName = request.model().providerName();
-    AgentProvider provider = providerRepository.getByName(providerName);
+    Provider provider = providerRepository.getByName(providerName);
     if (provider == null) {
       throw new IllegalArgumentException("provider not found: " + providerName);
     }

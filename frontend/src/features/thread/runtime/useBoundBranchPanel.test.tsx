@@ -32,7 +32,7 @@ import {
 } from '@/shared/api/contracts/ai-runtime'
 import type {
   AgentDefinitionDTO,
-  AgentModelDTO,
+  ModelDTO,
   HarnessAcceptedCommandsDTO,
   HarnessBranchSettingsDTO,
   HarnessModelSelectionDTO,
@@ -280,9 +280,9 @@ const agents: AgentDefinitionDTO[] = [
   },
 ]
 
-const claudeModelEntry: AgentModelDTO = {
+const claudeModelEntry: ModelDTO = {
   providerName: 'anthropic',
-  kind: 'MODEL',
+  type: 'MODEL',
   name: 'Claude',
   modelId: 'anthropic/Claude',
   description: null,
@@ -298,13 +298,13 @@ const claudeModelEntry: AgentModelDTO = {
     variants: [{ id: 'v1', promptCacheRetention: 'NONE' }, { id: 'fast', promptCacheRetention: 'NONE' }],
   },
   version: '0',
-  createTime: 0,
-  updateTime: 0,
+  createdAt: 0,
+  updatedAt: 0,
 }
 
-const modelEntry: AgentModelDTO = {
+const modelEntry: ModelDTO = {
   providerName: 'minimax',
-  kind: 'MODEL',
+  type: 'MODEL',
   name: 'MiniMax',
   modelId: 'minimax/MiniMax',
   description: null,
@@ -320,8 +320,8 @@ const modelEntry: AgentModelDTO = {
     variants: [{ id: 'default', promptCacheRetention: 'NONE' }],
   },
   version: '0',
-  createTime: 0,
-  updateTime: 0,
+  createdAt: 0,
+  updatedAt: 0,
 }
 
 function clientWrapper(client: QueryClient) {
@@ -362,12 +362,7 @@ describe('useBoundBranchPanel', () => {
       totalCount: String(agents.length),
       results: agents,
     })
-    vi.mocked(agentService.listModels).mockResolvedValue({
-      pageNumber: 1,
-      pageSize: 50,
-      totalCount: '2',
-      results: [modelEntry, claudeModelEntry],
-    })
+    vi.mocked(agentService.listModels).mockResolvedValue([modelEntry, claudeModelEntry])
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
       snapshotOf(threadFixture(THREAD_ID)),
     )
@@ -1188,12 +1183,7 @@ describe('useBoundBranchPanel', () => {
         totalCount: String(agents.length),
         results: agents,
       })
-      vi.mocked(agentService.listModels).mockResolvedValue({
-        pageNumber: 1,
-        pageSize: 50,
-        totalCount: '2',
-        results: [modelEntry, claudeModelEntry],
-      })
+      vi.mocked(agentService.listModels).mockResolvedValue([modelEntry, claudeModelEntry])
       vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
         snapshotOf(threadFixture(THREAD_ID, { status: 'IDLE', executionControl })),
       )

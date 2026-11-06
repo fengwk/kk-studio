@@ -5,11 +5,11 @@ import org.springframework.stereotype.Component;
 import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRuntimeConfigParser;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRuntimeConfigParser.ParsedAgentModelConfig;
-import fun.fengwk.kkstudio.share.catalog.AgentModelKind;
+import fun.fengwk.kkstudio.platform.catalog.model.Model;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelKind;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelRepository;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelRuntimeConfigParser;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelRuntimeConfigParser.ParsedAgentModelConfig;
 
 import java.util.Objects;
 
@@ -17,22 +17,22 @@ import java.util.Objects;
 @Component
 public final class BuiltinAgentExecutionMaterializer {
 
-  private final AgentModelRepository modelRepository;
-  private final AgentModelRuntimeConfigParser modelConfigParser;
+  private final ModelRepository modelRepository;
+  private final ModelRuntimeConfigParser modelConfigParser;
 
   public BuiltinAgentExecutionMaterializer(
-      AgentModelRepository modelRepository, AgentModelRuntimeConfigParser modelConfigParser) {
+      ModelRepository modelRepository, ModelRuntimeConfigParser modelConfigParser) {
     this.modelRepository = Objects.requireNonNull(modelRepository, "modelRepository");
     this.modelConfigParser = Objects.requireNonNull(modelConfigParser, "modelConfigParser");
   }
 
   public ExecutionSelection materialize(String agentName, ExecutionSelection execution) {
     ModelSelection selection = BuiltinExecution.model(execution);
-    AgentModel model = modelRepository.getByName(selection.modelName());
+    Model model = modelRepository.getByName(selection.modelName());
     if (model == null) {
       throw new IllegalArgumentException("subagent model not found: " + selection.modelName());
     }
-    if (model.kind() == AgentModelKind.GROUP) {
+    if (model.kind() == ModelKind.GROUP) {
       if (selection.variant() != null) {
         throw new IllegalArgumentException(
             "subagent model group must not select a variant: " + agentName);

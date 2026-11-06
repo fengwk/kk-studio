@@ -13,11 +13,11 @@ import {
 import type { AgentModelView } from '@/features/catalog/AgentModelView'
 import type {
   AgentDefinitionDTO,
-  AgentModelConfigDTO,
+  ModelConfigDTO,
   SkillPackageSummaryDTO,
 } from '@/shared/api/generated/contracts'
 
-const baseConfig: AgentModelConfigDTO = {
+const baseConfig: ModelConfigDTO = {
   limit: { context: 128000, output: 8192 },
   abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
   pricing: {
@@ -35,14 +35,14 @@ const baseConfig: AgentModelConfigDTO = {
 function modelWithVariants(): AgentModelView {
   return {
     providerName: 'minimax',
-    kind: 'MODEL',
+    type: 'MODEL',
     name: 'MiniMax',
     modelId: 'minimax-variants',
     description: null,
     config: baseConfig,
     version: '1',
-    createTime: 0,
-    updateTime: 0,
+    createdAt: 0,
+    updatedAt: 0,
   }
 }
 

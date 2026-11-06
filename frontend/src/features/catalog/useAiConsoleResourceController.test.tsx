@@ -7,8 +7,8 @@ import { agentService } from '@/shared/api/agent-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 import type {
   AgentDefinitionDTO,
-  AgentModelDTO,
-  AgentProviderDTO,
+  SingleModelDTO,
+  ProviderDTO,
 } from '@/shared/api/generated/contracts'
 
 vi.mock('@/features/environment/environment-service', () => ({
@@ -48,8 +48,8 @@ describe('useAiConsoleResourceController', () => {
     currentModel = model()
     currentAgent = agent()
 
-    vi.mocked(agentService.listProviders).mockImplementation(async () => page([currentProvider]))
-    vi.mocked(agentService.listModels).mockImplementation(async () => page([currentModel]))
+    vi.mocked(agentService.listProviders).mockImplementation(async () => [currentProvider])
+    vi.mocked(agentService.listModels).mockImplementation(async () => [currentModel])
     vi.mocked(agentService.listAgents).mockImplementation(async () => page([currentAgent]))
     vi.mocked(agentService.listTools).mockResolvedValue([])
     vi.mocked(agentService.createProvider).mockResolvedValue(currentProvider)
@@ -65,8 +65,13 @@ describe('useAiConsoleResourceController', () => {
         ...data,
         description: data.description !== undefined ? data.description : currentProvider.description,
         baseUrl: data.baseUrl !== undefined ? data.baseUrl : currentProvider.baseUrl,
-        modelCallTimeoutMillis: data.modelCallTimeoutMillis != null ? String(data.modelCallTimeoutMillis) : currentProvider.modelCallTimeoutMillis,
-        modelCallIdleTimeoutMillis: data.modelCallIdleTimeoutMillis != null ? String(data.modelCallIdleTimeoutMillis) : currentProvider.modelCallIdleTimeoutMillis,
+        credential:
+          data.credential.operation === 'KEEP'
+            ? currentProvider.credential
+            : { configured: data.credential.operation === 'SET' },
+        modelCallTimeoutMillis: String(data.modelCallTimeoutMillis),
+        modelCallIdleTimeoutMillis: String(data.modelCallIdleTimeoutMillis),
+        promptCacheRetentions: currentProvider.promptCacheRetentions,
         modelHttpRetryStatusCodes: data.modelHttpRetryStatusCodes !== undefined ? data.modelHttpRetryStatusCodes : currentProvider.modelHttpRetryStatusCodes,
       }
       currentModel = { ...currentModel, providerName: currentProvider.name }
@@ -74,10 +79,15 @@ describe('useAiConsoleResourceController', () => {
       return currentProvider
     })
     vi.mocked(agentService.updateModel).mockImplementation(async (_modelName, data) => {
-      currentModel = {
-        ...currentModel,
-        ...data,
-        description: data.description !== undefined ? data.description : currentModel.description,
+      if (data.type === 'MODEL') {
+        currentModel = {
+          ...currentModel,
+          name: data.name,
+          providerName: data.providerName,
+          modelId: data.modelId,
+          description: data.description !== undefined ? data.description : currentModel.description,
+          config: data.config,
+        }
       }
       currentAgent = { ...currentAgent, execution: { driver: 'builtin', settings: { modelName: currentModel.name, variant: 'default' } } }
       return currentModel
@@ -156,7 +166,7 @@ describe('useAiConsoleResourceController', () => {
     await user.type(screen.getByTestId('agent-description'), 'edited description')
 
     act(() => {
-      queryClient.setQueryData(queryKeys.models.list, page([{ ...currentModel, providerName: 'stub-v2', name: 'acceptance-stub-v2' }]))
+      queryClient.setQueryData(queryKeys.models.list, [{ ...currentModel, providerName: 'stub-v2', name: 'acceptance-stub-v2' }])
       queryClient.setQueryData(
         queryKeys.agents.list,
         page([{ ...currentAgent, execution: { driver: 'builtin', settings: { modelName: 'acceptance-stub-v2', variant: 'default' } } }]),
@@ -572,27 +582,27 @@ function page<T>(results: T[]) {
   }
 }
 
-function provider(): AgentProviderDTO {
+function provider(): ProviderDTO {
   return {
     name: 'stub',
     description: 'Local deterministic provider',
     providerType: 'openai',
     promptCacheRetentions: ['NONE', 'SHORT', 'LONG'],
     baseUrl: 'http://stub.local/v1',
-    configured: true,
+    credential: { configured: true },
     modelCallTimeoutMillis: '1800000',
     modelCallIdleTimeoutMillis: '120000',
     version: '0',
-    createTime: 1781920800,
-    updateTime: 1781920800,
+    createdAt: 1781920800,
+    updatedAt: 1781920800,
     modelHttpRetryStatusCodes: null,
   }
 }
 
-function model(): AgentModelDTO {
+function model(): SingleModelDTO {
   return {
     providerName: 'stub',
-    kind: 'MODEL',
+    type: 'MODEL',
     name: 'acceptance-stub',
     modelId: 'acceptance-wire-id',
     description: 'Acceptance model',
@@ -608,8 +618,8 @@ function model(): AgentModelDTO {
       variants: [{ id: 'default', promptCacheRetention: 'NONE' }],
     },
     version: '0',
-    createTime: 1781920800,
-    updateTime: 1781920800,
+    createdAt: 1781920800,
+    updatedAt: 1781920800,
   }
 }
 

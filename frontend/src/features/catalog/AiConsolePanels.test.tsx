@@ -5,9 +5,9 @@ import { describe, expect, it, vi } from 'vitest'
 import { AgentsPanel, ModelsPanel, ProvidersPanel } from '@/features/catalog/AiConsolePanels'
 import type { AgentModelView } from '@/features/catalog/AgentModelView'
 import { ChatCardsPanel } from '@/features/chat/ChatCardsPanel'
-import type { AgentModelConfigDTO, ChatDTO } from '@/shared/api/generated/contracts'
+import type { ModelConfigDTO, ChatDTO } from '@/shared/api/generated/contracts'
 
-const baseConfig: AgentModelConfigDTO = {
+const baseConfig: ModelConfigDTO = {
   limit: { context: 128000, output: 8192 },
   abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
   pricing: {
@@ -22,14 +22,14 @@ const baseConfig: AgentModelConfigDTO = {
 function modelWithProvider(): AgentModelView {
   return {
     providerName: 'minimax',
-    kind: 'MODEL',
+    type: 'MODEL',
     name: 'MiniMax',
     modelId: 'minimax',
     description: null,
     config: baseConfig,
     version: '1',
-    createTime: 0,
-    updateTime: 0,
+    createdAt: 0,
+    updatedAt: 0,
   }
 }
 
@@ -97,12 +97,12 @@ describe('AiConsolePanels', () => {
               providerType: 'openai',
               promptCacheRetentions: ['NONE', 'SHORT', 'LONG'],
               baseUrl: null,
-              configured: true,
+              credential: { configured: true },
               modelCallTimeoutMillis: '1',
               modelCallIdleTimeoutMillis: '1',
               version: '1',
-              createTime: 0,
-              updateTime: 0,
+              createdAt: 0,
+              updatedAt: 0,
               modelHttpRetryStatusCodes: null,
             },
           ]}

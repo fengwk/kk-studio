@@ -283,12 +283,13 @@ revision 不同但状态内容相同的快照不发布。发布失败或围栏�
 
 ## Catalog
 
-Provider 与 Agent 以不可变 `name` 寻址。MODEL 与 MODEL GROUP 共用全局唯一的逻辑 `name`
-命名空间：MODEL 另以 `providerName` 指向 Provider，并用独立的 `modelId` 保存发往上游的 wire
+Provider 与 Agent 以不可变 `name` 寻址。Provider 的 `name` 与 `providerType` 只在创建时设置，
+更新请求不携带二者；换协议必须新建 Provider，再让模型改指向它。MODEL 与 MODEL GROUP 共用全局唯一的逻辑 `name`
+命名空间，并以 `type`（`MODEL`/`GROUP`）判别：MODEL 另以 `providerName` 指向 Provider，用独立的 `modelId` 保存发往上游的 wire
 模型标识；GROUP 只保存有序成员、`fallbackStatusCodes` 与 `cooldownSeconds`，不得携带
-`providerName`、`modelId` 或模型 `config`。两类资源都通过 `/api/models` 创建和查询，
-PUT/DELETE 使用 `/api/models/{*modelName}`；名称可以包含斜杠，客户端必须把逻辑名作为
-路径 tail 按 `/` 分段编码，保留层级分隔。变更携带 `expectedVersion`。PUT 通过请求体 `name` 支持改名，同一事务更新
+`providerName`、`modelId` 或单模型配置。两类资源都通过 `/api/platform/models` 创建和查询，
+PUT/DELETE 使用 `/api/platform/models/{*name}`；列表直接返回数组。名称可以包含斜杠，客户端必须把逻辑名作为
+路径 tail 按 `/` 分段编码，保留层级分隔。变更携带 `expectedVersion`。PUT 整体替换可编辑属性；MODEL 更新请求体的 `name` 支持改名，同一事务更新
 引用，任何 CAS、类型变更或引用校验失败整体回滚。删除 MODEL 前校验 Agent 与 GROUP 入边，
 删除 GROUP 前校验 Agent 入边；Builtin Agent 引用由应用在持有模型行锁的同一事务中校验和更新。
 
@@ -301,10 +302,10 @@ GROUP 的成员顺序就是 Fill First 顺序，成员只能是 MODEL 且其 Var
 Agent 被其它 Agent 的 subagents、插件普通配置或产品引用时不能删除；产品通过 `AgentReferenceCheck` 参与删除前检查，Project 检查未归档项目的工作流阶段。Chat 只按名称软引用 Agent，
 删除后其下一回合确定性失败，同名重建即恢复。
 
-Provider credential 在显式写入口接收，常规响应给出安全投影；配置同步导出显式包含原值。运行时类型取自
+Provider credential 在创建请求或 PUT 的 `SecretUpdate`（KEEP/SET/CLEAR）中写入，常规响应只给 `{configured}` 安全投影；配置同步导出显式包含原值。`promptCacheRetentions` 由 `providerType` 派生且只读。运行时类型取自
 [`ProviderType`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/provider/ProviderType.java)：
 `openai`、`openai_responses`、`anthropic`、`google`，按精确 wire value 解析。
-`GET /api/providers/{name}/remote-models` 用已保存的 baseUrl 与 credential 读取 Provider 的
+`GET /api/platform/providers/{name}/remote-models` 用已保存的 baseUrl 与 credential 读取 Provider 的
 模型列表（[`ProviderModelDiscovery`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/provider/impl/ProviderModelDiscovery.java)），
 返回去重排序的模型 ID，只用于添加模型时预填，不写入 Catalog；请求不在数据库事务内，缺少 baseUrl 为校验错误，
 上游不可达或非 2xx 返回 502 `upstream_failed`，detail 带上游状态与截断正文。

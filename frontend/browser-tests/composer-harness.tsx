@@ -16,7 +16,7 @@ setLocale('zh-CN')
 
 const INITIAL_MODELS: readonly ThreadComposerModelOption[] = [
   {
-    kind: 'MODEL',
+    type: 'MODEL',
     name: 'MiniMax-M2.7',
     config: {
       defaultVariant: 'default',
@@ -24,7 +24,7 @@ const INITIAL_MODELS: readonly ThreadComposerModelOption[] = [
     },
   },
   {
-    kind: 'MODEL',
+    type: 'MODEL',
     name: 'gpt-4o',
     config: {
       defaultVariant: 'default',

@@ -28,17 +28,17 @@ import fun.fengwk.kkstudio.harness.spi.compaction.RequestTokenEstimator;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgentDefinitions;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModelGroupConfigCodec;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRuntimeConfigParser;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRuntimeConfigParser.ParsedAgentModelConfig;
-import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
-import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderRepository;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelGroupConfigDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelGroupMemberDTO;
+import fun.fengwk.kkstudio.platform.catalog.model.Model;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelGroupConfigCodec;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelKind;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelRepository;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelRuntimeConfigParser;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelRuntimeConfigParser.ParsedAgentModelConfig;
+import fun.fengwk.kkstudio.platform.catalog.provider.Provider;
+import fun.fengwk.kkstudio.platform.catalog.provider.ProviderRepository;
 import fun.fengwk.kkstudio.platform.harness.builtin.BuiltinModelBudget;
-import fun.fengwk.kkstudio.share.catalog.AgentModelGroupDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelGroupMemberDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelKind;
 
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -73,10 +73,10 @@ public final class DatabaseTurnResolver implements TurnResolver {
   public static final String REJECTION_CODE = "PLANNING_FAILED";
 
   private final AgentDefinitionRepository agentDefinitionRepository;
-  private final AgentModelRepository modelRepository;
-  private final AgentProviderRepository providerRepository;
-  private final AgentModelRuntimeConfigParser modelConfigParser;
-  private final AgentModelGroupConfigCodec groupConfigCodec;
+  private final ModelRepository modelRepository;
+  private final ProviderRepository providerRepository;
+  private final ModelRuntimeConfigParser modelConfigParser;
+  private final ModelGroupConfigCodec groupConfigCodec;
   private final Map<ProviderType, ProviderFactory> providerFactories;
   private final CompactionConfigProvider compactionConfigProvider;
   private final DatabaseAgentTurnContextResolver contextResolver;
@@ -84,10 +84,10 @@ public final class DatabaseTurnResolver implements TurnResolver {
 
   public DatabaseTurnResolver(
       AgentDefinitionRepository agentDefinitionRepository,
-      AgentModelRepository modelRepository,
-      AgentProviderRepository providerRepository,
-      AgentModelRuntimeConfigParser modelConfigParser,
-      AgentModelGroupConfigCodec groupConfigCodec,
+      ModelRepository modelRepository,
+      ProviderRepository providerRepository,
+      ModelRuntimeConfigParser modelConfigParser,
+      ModelGroupConfigCodec groupConfigCodec,
       Map<ProviderType, ProviderFactory> providerFactories,
       CompactionConfigProvider compactionConfigProvider,
       DatabaseAgentTurnContextResolver contextResolver,
@@ -251,13 +251,13 @@ public final class DatabaseTurnResolver implements TurnResolver {
    * 失效一律停止。
    */
   private ResolvedSelection resolveSelection(ModelSelection requested, AgentDefinition agent) {
-    AgentModel model = modelRepository.getByName(requested.modelName());
+    Model model = modelRepository.getByName(requested.modelName());
     if (model != null) {
       return resolveLogical(model, requested.variant(), null);
     }
     ModelSelection defaultSelection = builtinAgentModel(agent);
     String defaultModel = defaultSelection == null ? null : defaultSelection.modelName();
-    AgentModel fallback =
+    Model fallback =
         defaultModel == null || defaultModel.equals(requested.modelName())
             ? null
             : modelRepository.getByName(defaultModel);
@@ -288,8 +288,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
    * variant）；GROUP 没有组级 variant，一次性冻结组版本与有序成员。
    */
   private ResolvedSelection resolveLogical(
-      AgentModel model, String preferredVariant, String secondaryVariant) {
-    if (model.kind() == AgentModelKind.GROUP) {
+      Model model, String preferredVariant, String secondaryVariant) {
+    if (model.kind() == ModelKind.GROUP) {
       if (preferredVariant != null) {
         throw rejection("model group must not select a variant: " + model.name());
       }
@@ -308,18 +308,18 @@ public final class DatabaseTurnResolver implements TurnResolver {
   }
 
   /** 冻结组版本、有序成员及其 Provider/连接代际/Descriptor/Variant：组能力取成员输入模态的交集、上下文取最小值，成员切换绝不重新读取 Catalog。 */
-  private ResolvedSelection resolveGroup(AgentModel groupModel) {
-    AgentModelGroupDTO group = groupConfigCodec.decode(groupModel.groupConfigJson());
+  private ResolvedSelection resolveGroup(Model groupModel) {
+    ModelGroupConfigDTO group = groupConfigCodec.decode(groupModel.groupConfigJson());
     List<MemberRuntime> members = new ArrayList<>(group.getMembers().size());
     List<ModelGroupMemberExecution> executions = new ArrayList<>(group.getMembers().size());
     Set<ModelInputModality> modalities = null;
     int contextWindow = Integer.MAX_VALUE;
-    for (AgentModelGroupMemberDTO member : group.getMembers()) {
-      AgentModel memberModel =
+    for (ModelGroupMemberDTO member : group.getMembers()) {
+      Model memberModel =
           require(
               modelRepository.getByName(member.getModelName()),
               "group member model not found: " + member.getModelName());
-      if (memberModel.kind() != AgentModelKind.MODEL) {
+      if (memberModel.kind() != ModelKind.MODEL) {
         throw rejection("group member is not a single model: " + member.getModelName());
       }
       MemberRuntime runtime = resolveMember(memberModel, member.getVariant());
@@ -361,8 +361,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
   }
 
   /** 解析单 Model 的执行身份；{@code variantName} 必须由该 Model 的 config 声明。 */
-  private MemberRuntime resolveMember(AgentModel model, String variantName) {
-    AgentProvider provider =
+  private MemberRuntime resolveMember(Model model, String variantName) {
+    Provider provider =
         require(
             providerRepository.getByName(model.providerName()),
             "provider not found: " + model.providerName());
@@ -425,7 +425,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
       throw rejection("compaction agent must use builtin execution");
     }
     ModelSelection selection = builtinAgentModel(agent);
-    AgentModel model =
+    Model model =
         require(
             modelRepository.getByName(selection.modelName()),
             "model not found: " + selection.modelName());
@@ -486,7 +486,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
     }
   }
 
-  private ParsedAgentModelConfig parseModel(AgentModel model) {
+  private ParsedAgentModelConfig parseModel(Model model) {
     try {
       return modelConfigParser.parse(model.configJson());
     } catch (IllegalArgumentException error) {
@@ -504,7 +504,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
   /** 一个单 Model 的已解析执行身份；模型组的每个成员各有一份。 */
   private record MemberRuntime(
       String modelName,
-      AgentProvider provider,
+      Provider provider,
       ProviderType providerType,
       UUID providerConnectionGenerationId,
       ParsedAgentModelConfig parsed,

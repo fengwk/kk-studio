@@ -79,7 +79,7 @@ export function buildTextCacheSystemPrompt() {
 export async function resolveRealModel(ctx, modelDef) {
   const { json: providersJson } = await ctx.call(
     'GET',
-    '/api/providers?pageNumber=1&pageSize=50',
+    '/api/platform/providers',
   )
   const providers = pageResults(providersJson)
   const provider = providers.find((candidate) => candidate.name === modelDef.providerName)
@@ -92,7 +92,7 @@ export async function resolveRealModel(ctx, modelDef) {
     `provider ${modelDef.providerName} type mismatch: expected ${modelDef.providerType}, got ${provider.providerType}`,
   )
   assert(
-    provider.configured === true,
+    provider.credential?.configured === true,
     `provider ${modelDef.providerName} is not configured`,
   )
   assert(
@@ -102,7 +102,7 @@ export async function resolveRealModel(ctx, modelDef) {
 
   const { json: modelsJson } = await ctx.call(
     'GET',
-    '/api/models?pageNumber=1&pageSize=50',
+    '/api/platform/models',
   )
   const models = pageResults(modelsJson)
   const model = models.find((candidate) => candidate.name === modelDef.modelName)

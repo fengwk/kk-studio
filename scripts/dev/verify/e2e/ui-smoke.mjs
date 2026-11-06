@@ -97,10 +97,17 @@ async function apiJson(backendUrl, method, requestPath, body) {
 }
 
 async function apiDeleteByName(backendUrl, resource, name) {
-  const resourcePath = resource === 'chats' ? '/api/chats' : `/api/${resource}`
+  const isCatalog = resource === 'providers' || resource === 'models'
+  const resourcePath = resource === 'chats'
+    ? '/api/chats'
+    : isCatalog
+      ? `/api/platform/${resource}`
+      : `/api/${resource}`
   const list = resource === 'chats'
     ? await listChats({ call: (method, requestPath) => apiJson(backendUrl, method, requestPath) })
-    : (await apiJson(backendUrl, 'GET', `${resourcePath}?pageNumber=1&pageSize=100`)).json?.results || []
+    : isCatalog
+      ? (await apiJson(backendUrl, 'GET', resourcePath)).json || []
+      : (await apiJson(backendUrl, 'GET', `${resourcePath}?pageNumber=1&pageSize=100`)).json?.results || []
   const key = resource === 'chats' ? 'title' : 'name'
   const hit = list.find((item) => item[key] === name)
   if (!hit) return false
@@ -123,16 +130,16 @@ async function apiDeleteByName(backendUrl, resource, name) {
 }
 
 async function requireRealMiniMaxM3(backendUrl, modelDef = MINIMAX_ANTHROPIC_M3) {
-  const { json: modelsJson } = await apiJson(backendUrl, 'GET', '/api/models?pageNumber=1&pageSize=50')
-  const { json: providersJson } = await apiJson(backendUrl, 'GET', '/api/providers?pageNumber=1&pageSize=50')
-  const models = modelsJson?.results || []
-  const providers = providersJson?.results || []
+  const { json: modelsJson } = await apiJson(backendUrl, 'GET', '/api/platform/models')
+  const { json: providersJson } = await apiJson(backendUrl, 'GET', '/api/platform/providers')
+  const models = Array.isArray(modelsJson) ? modelsJson : []
+  const providers = Array.isArray(providersJson) ? providersJson : []
   const model = models.find((candidate) => candidate.name === modelDef.modelName)
   const provider = providers.find((candidate) => candidate.name === model?.providerName)
   assert(
     provider?.name === modelDef.providerName
       && provider.providerType === modelDef.providerType
-      && provider.configured === true
+      && provider.credential?.configured === true
       && typeof provider.baseUrl === 'string'
       && provider.baseUrl.trim().length > 0
       && model?.name === modelDef.modelName
@@ -143,12 +150,8 @@ async function requireRealMiniMaxM3(backendUrl, modelDef = MINIMAX_ANTHROPIC_M3)
 
 async function requireProviderExecutionBoundary(backendUrl, real) {
   if (real) return
-  const { json } = await apiJson(
-    backendUrl,
-    'GET',
-    '/api/providers?pageNumber=1&pageSize=50',
-  )
-  const providers = json?.results || []
+  const { json } = await apiJson(backendUrl, 'GET', '/api/platform/providers')
+  const providers = Array.isArray(json) ? json : []
   assertProviderExecutionBoundary({ real: false, providers })
   console.log('Provider boundary: free UI mode confirmed every provider is unconfigured')
 }

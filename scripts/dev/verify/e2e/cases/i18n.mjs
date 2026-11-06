@@ -42,22 +42,22 @@ registerCase({
     assert(chineseDomain.detail === 'chat not found', JSON.stringify(chineseDomain))
 
     // Catalog controller 的类型不匹配由 Domain advice 归一为 validation。
-    const mismatchPath = '/api/models?pageNumber=abc&pageSize=1'
+    const mismatchPath = '/api/platform/model-catalog?limit=abc'
     const englishValidation = problemBody(await localizedGet(ctx, mismatchPath, 'en-US'))
     const chineseValidation = problemBody(await localizedGet(ctx, mismatchPath, 'zh-CN'))
     const fallbackValidation = problemBody(await localizedGet(ctx, mismatchPath, 'fr-FR'))
     assert(englishValidation.code === 'validation', JSON.stringify(englishValidation))
     assert(
-      englishValidation.title === 'The pageNumber parameter has an invalid value.',
+      englishValidation.title === 'The limit parameter has an invalid value.',
       JSON.stringify(englishValidation),
     )
     assert(chineseValidation.code === 'validation', JSON.stringify(chineseValidation))
     assert(
-      chineseValidation.title === 'pageNumber 参数的值无效。',
+      chineseValidation.title === 'limit 参数的值无效。',
       JSON.stringify(chineseValidation),
     )
     assert(
-      chineseValidation.detail === 'pageNumber has invalid value: abc',
+      chineseValidation.detail === 'limit has invalid value: abc',
       JSON.stringify(chineseValidation),
     )
     assert(

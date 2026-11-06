@@ -14,15 +14,15 @@ import {
 import { emptyModelDraft } from '@/features/catalog/ai-model-draft-codec'
 import { newVariantDraft } from '@/features/catalog/ai-resource-draft-primitives'
 import type {
-  AgentModelConfigDTO,
-  AgentModelDTO,
-  AgentModelVariantDTO,
-  AgentProviderDTO,
+  ModelConfigDTO,
+  SingleModelDTO,
+  ModelVariantDTO,
+  ProviderDTO,
 } from '@/shared/api/generated/contracts'
 
-const v = (id: string): AgentModelVariantDTO => ({ id, promptCacheRetention: 'NONE' })
+const v = (id: string): ModelVariantDTO => ({ id, promptCacheRetention: 'NONE' })
 
-function modelConfig(overrides: Partial<AgentModelConfigDTO> = {}): AgentModelConfigDTO {
+function modelConfig(overrides: Partial<ModelConfigDTO> = {}): ModelConfigDTO {
   return {
     limit: { context: 128000, output: 8192 },
     abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
@@ -37,34 +37,34 @@ function modelConfig(overrides: Partial<AgentModelConfigDTO> = {}): AgentModelCo
   }
 }
 
-function model(overrides: Partial<AgentModelDTO>): AgentModelDTO {
+function model(overrides: Partial<SingleModelDTO>): SingleModelDTO {
   return {
     providerName: 'minimax',
-    kind: 'MODEL',
+    type: 'MODEL',
     name: 'MiniMax-M2.7',
     modelId: 'minimax-m2.7',
     description: null,
     config: modelConfig(),
     version: '1',
-    createTime: 1781920800,
-    updateTime: 1781920800,
+    createdAt: 1781920800,
+    updatedAt: 1781920800,
     ...overrides,
   }
 }
 
-function provider(name: string): AgentProviderDTO {
+function provider(name: string): ProviderDTO {
   return {
     name,
     description: null,
     providerType: 'openai',
     promptCacheRetentions: ['NONE', 'SHORT', 'LONG'],
     baseUrl: null,
-    configured: true,
+    credential: { configured: true },
     modelCallTimeoutMillis: '1800000',
     modelCallIdleTimeoutMillis: '120000',
     version: '1',
-    createTime: 0,
-    updateTime: 0,
+    createdAt: 0,
+    updatedAt: 0,
     modelHttpRetryStatusCodes: null,
   }
 }

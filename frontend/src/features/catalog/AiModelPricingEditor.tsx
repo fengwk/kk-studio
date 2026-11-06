@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import {
-  type AgentModelPricingMultiplierDTO,
-  type AgentModelPricingOverrideDTO,
+  type ModelPricingMultiplierDTO,
+  type ModelPricingOverrideDTO,
 } from '@/shared/api/generated/contracts'
 import type { ModelPricingDraft } from '@/features/catalog/ai-console-types'
 import { ConditionEditor } from '@/features/catalog/AiPricingConditionEditor'
@@ -43,11 +43,11 @@ export function ModelPricingEditor({
     })
   }
 
-  function updateOverrides(overrides: AgentModelPricingOverrideDTO[]) {
+  function updateOverrides(overrides: ModelPricingOverrideDTO[]) {
     onChange({ ...pricing, overrides })
   }
 
-  function updateMultipliers(multipliers: AgentModelPricingMultiplierDTO[]) {
+  function updateMultipliers(multipliers: ModelPricingMultiplierDTO[]) {
     onChange({ ...pricing, multipliers })
   }
 
@@ -121,7 +121,7 @@ export function ModelPricingEditor({
         ) : null}
       </div>
 
-      <PricingRuleList<AgentModelPricingOverrideDTO>
+      <PricingRuleList<ModelPricingOverrideDTO>
         idPrefix="override"
         title={t('ai.catalog.form.priceOverrides')}
         addLabel={t('ai.catalog.form.addPriceOverride')}
@@ -170,7 +170,7 @@ export function ModelPricingEditor({
         )}
       />
 
-      <PricingRuleList<AgentModelPricingMultiplierDTO>
+      <PricingRuleList<ModelPricingMultiplierDTO>
         idPrefix="multiplier"
         title={t('ai.catalog.form.priceMultipliers')}
         addLabel={t('ai.catalog.form.addPriceMultiplier')}

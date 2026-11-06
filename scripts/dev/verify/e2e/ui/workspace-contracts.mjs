@@ -815,7 +815,7 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
     )
     state.environment = environmentResponse.json
 
-    const providerResponse = await apiCtx.call('POST', '/api/providers', {
+    const providerResponse = await apiCtx.call('POST', '/api/platform/providers', {
       name: `e2e-ui-usage-provider-${suffix}`,
       description: 'Local completion provider for free Footer usage tests.',
       providerType: 'openai',
@@ -827,8 +827,8 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
     assert(providerResponse.status === 201, `create usage provider: ${JSON.stringify(providerResponse)}`)
     state.provider = providerResponse.json
 
-    const modelResponse = await apiCtx.call('POST', '/api/models', {
-      kind: 'MODEL',
+    const modelResponse = await apiCtx.call('POST', '/api/platform/models', {
+      type: 'MODEL',
       providerName: state.provider.name,
       name: `e2e-ui-usage-model-${suffix}`,
       modelId: `wire-ui-usage-${suffix}`,
@@ -958,7 +958,7 @@ async function createActiveTaskFixture(apiCtx, stamp) {
   }
   try {
     await mock.start()
-    const providerResponse = await apiCtx.call('POST', '/api/providers', {
+    const providerResponse = await apiCtx.call('POST', '/api/platform/providers', {
       name: `e2e-ui-task-provider-${suffix}`,
       description: 'Local task provider for free TaskStatus UI tests.',
       providerType: 'openai',
@@ -970,8 +970,8 @@ async function createActiveTaskFixture(apiCtx, stamp) {
     assert(providerResponse.status === 201, `create task provider: ${JSON.stringify(providerResponse)}`)
     state.provider = providerResponse.json
 
-    const modelResponse = await apiCtx.call('POST', '/api/models', {
-      kind: 'MODEL',
+    const modelResponse = await apiCtx.call('POST', '/api/platform/models', {
+      type: 'MODEL',
       providerName: state.provider.name,
       name: `e2e-ui-task-model-${suffix}`,
       modelId: `wire-ui-task-${suffix}`,
@@ -1122,7 +1122,7 @@ async function createToolCardFixture(apiCtx, stamp, daemonEnv) {
     await mkdir(path.dirname(filePath), { recursive: true })
     await writeFile(filePath, Array.from({ length: 8 }, (_, index) => `old-${index + 1}`).join('\n'))
     await mock.start()
-    const providerResponse = await apiCtx.call('POST', '/api/providers', {
+    const providerResponse = await apiCtx.call('POST', '/api/platform/providers', {
       name: `e2e-ui-tool-card-provider-${suffix}`,
       description: 'Local streaming provider for Tool card browser contracts.',
       providerType: 'openai',
@@ -1134,8 +1134,8 @@ async function createToolCardFixture(apiCtx, stamp, daemonEnv) {
     assert(providerResponse.status === 201, `create tool-card provider: ${JSON.stringify(providerResponse)}`)
     state.provider = providerResponse.json
 
-    const modelResponse = await apiCtx.call('POST', '/api/models', {
-      kind: 'MODEL',
+    const modelResponse = await apiCtx.call('POST', '/api/platform/models', {
+      type: 'MODEL',
       providerName: state.provider.name,
       name: `e2e-ui-tool-card-model-${suffix}`,
       modelId: `wire-ui-tool-card-${suffix}`,
@@ -1283,7 +1283,7 @@ async function cleanupCompletedUsageFixture(state) {
     if (state.model?.name) {
       await state.apiCtx.call(
         'DELETE',
-        `/api/models/${encodePathTail(state.model.name)}?expectedVersion=${encodeURIComponent(state.model.version)}`,
+        `/api/platform/models/${encodePathTail(state.model.name)}?expectedVersion=${encodeURIComponent(state.model.version)}`,
       )
     }
   })
@@ -1291,7 +1291,7 @@ async function cleanupCompletedUsageFixture(state) {
     if (state.provider?.name) {
       await state.apiCtx.call(
         'DELETE',
-        `/api/providers/${encodeURIComponent(state.provider.name)}?expectedVersion=${encodeURIComponent(state.provider.version)}`,
+        `/api/platform/providers/${encodeURIComponent(state.provider.name)}?expectedVersion=${encodeURIComponent(state.provider.version)}`,
       )
     }
   })
@@ -1332,7 +1332,7 @@ async function cleanupActiveTaskFixture(state) {
     if (state.model?.name) {
       await state.apiCtx.call(
         'DELETE',
-        `/api/models/${encodePathTail(state.model.name)}?expectedVersion=${encodeURIComponent(state.model.version)}`,
+        `/api/platform/models/${encodePathTail(state.model.name)}?expectedVersion=${encodeURIComponent(state.model.version)}`,
       )
     }
   })
@@ -1340,7 +1340,7 @@ async function cleanupActiveTaskFixture(state) {
     if (state.provider?.name) {
       await state.apiCtx.call(
         'DELETE',
-        `/api/providers/${encodeURIComponent(state.provider.name)}?expectedVersion=${encodeURIComponent(state.provider.version)}`,
+        `/api/platform/providers/${encodeURIComponent(state.provider.name)}?expectedVersion=${encodeURIComponent(state.provider.version)}`,
       )
     }
   })
@@ -1377,7 +1377,7 @@ async function cleanupToolCardFixture(state) {
     if (state.model?.name) {
       await state.apiCtx.call(
         'DELETE',
-        `/api/models/${encodePathTail(state.model.name)}?expectedVersion=${encodeURIComponent(state.model.version)}`,
+        `/api/platform/models/${encodePathTail(state.model.name)}?expectedVersion=${encodeURIComponent(state.model.version)}`,
       )
     }
   })
@@ -1385,7 +1385,7 @@ async function cleanupToolCardFixture(state) {
     if (state.provider?.name) {
       await state.apiCtx.call(
         'DELETE',
-        `/api/providers/${encodeURIComponent(state.provider.name)}?expectedVersion=${encodeURIComponent(state.provider.version)}`,
+        `/api/platform/providers/${encodeURIComponent(state.provider.name)}?expectedVersion=${encodeURIComponent(state.provider.version)}`,
       )
     }
   })

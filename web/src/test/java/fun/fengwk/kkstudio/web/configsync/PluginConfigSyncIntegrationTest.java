@@ -20,7 +20,7 @@ import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgentDefinitions;
-import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
+import fun.fengwk.kkstudio.platform.catalog.provider.Provider;
 import fun.fengwk.kkstudio.platform.configsync.ConfigSyncApplier;
 import fun.fengwk.kkstudio.platform.configsync.ConfigSyncParser;
 import fun.fengwk.kkstudio.platform.configsync.ConfigSyncPlan;
@@ -336,7 +336,7 @@ class PluginConfigSyncIntegrationTest extends ConfigSyncTestSupport {
 
   private static List<String> providerNames(ConfigSyncSnapshot snapshot) {
     List<String> names = new ArrayList<>();
-    for (AgentProvider provider : snapshot.providers()) {
+    for (Provider provider : snapshot.providers()) {
       names.add(provider.name());
     }
     return names;

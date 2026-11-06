@@ -7,16 +7,16 @@ import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServer;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpTool;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModelGroupConfigCodec;
-import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
+import fun.fengwk.kkstudio.platform.catalog.model.Model;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelGroupConfigCodec;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelKind;
+import fun.fengwk.kkstudio.platform.catalog.provider.Provider;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
 import fun.fengwk.kkstudio.platform.environment.Environment;
 import fun.fengwk.kkstudio.platform.harness.builtin.BuiltinConfigSyncAdapter;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRow;
 import fun.fengwk.kkstudio.platform.pluginhost.service.PluginAgentDependencies;
 import fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelKind;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncKind;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncRef;
 import fun.fengwk.kkstudio.share.skill.SkillRefDTO;
@@ -43,12 +43,12 @@ public final class ConfigSyncGraph {
   private static final String RESOURCE = "config_sync";
 
   private final AgentDefinitionConfigCodec agentConfigCodec;
-  private final AgentModelGroupConfigCodec modelGroupConfigCodec;
+  private final ModelGroupConfigCodec modelGroupConfigCodec;
   private final PluginAgentDependencies pluginAgentDependencies;
 
   public ConfigSyncGraph(
       AgentDefinitionConfigCodec agentConfigCodec,
-      AgentModelGroupConfigCodec modelGroupConfigCodec,
+      ModelGroupConfigCodec modelGroupConfigCodec,
       PluginAgentDependencies pluginAgentDependencies) {
     this.agentConfigCodec = agentConfigCodec;
     this.modelGroupConfigCodec = modelGroupConfigCodec;
@@ -64,10 +64,10 @@ public final class ConfigSyncGraph {
     Set<String> builtinAgentNames = snapshot.builtinAgentNames();
 
     Map<ConfigSyncRef, List<ConfigSyncRef>> edges = new LinkedHashMap<>();
-    for (AgentProvider provider : snapshot.providers()) {
+    for (Provider provider : snapshot.providers()) {
       edges.put(providerRef(provider), List.of());
     }
-    for (AgentModel model : snapshot.models()) {
+    for (Model model : snapshot.models()) {
       edges.put(ConfigSyncRefs.model(model.name()), modelDependencies(model));
     }
     for (AgentDefinition agent : snapshot.agents()) {
@@ -176,8 +176,8 @@ public final class ConfigSyncGraph {
   }
 
   /** MODEL 直接依赖 Provider；GROUP 依赖各成员 Model，组版本与运行态冷却不进依赖图。 */
-  private List<ConfigSyncRef> modelDependencies(AgentModel model) {
-    if (model.kind() == AgentModelKind.MODEL) {
+  private List<ConfigSyncRef> modelDependencies(Model model) {
+    if (model.kind() == ModelKind.MODEL) {
       return List.of(ConfigSyncRefs.ref(ConfigSyncKind.PROVIDERS, model.providerName()));
     }
     Set<ConfigSyncRef> deps = new LinkedHashSet<>();
@@ -238,7 +238,7 @@ public final class ConfigSyncGraph {
     return List.copyOf(deps);
   }
 
-  private static ConfigSyncRef providerRef(AgentProvider provider) {
+  private static ConfigSyncRef providerRef(Provider provider) {
     return ConfigSyncRefs.ref(ConfigSyncKind.PROVIDERS, provider.name());
   }
 

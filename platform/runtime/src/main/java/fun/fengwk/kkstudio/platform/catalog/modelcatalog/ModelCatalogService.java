@@ -4,8 +4,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
-import fun.fengwk.kkstudio.share.catalog.ModelCatalogPageDTO;
-import fun.fengwk.kkstudio.share.catalog.ModelDefaultCandidateDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelCatalogCandidateDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelCatalogPageDTO;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
@@ -103,7 +103,7 @@ public class ModelCatalogService {
             () -> {
               try {
                 String json = transport.fetch();
-                List<ModelDefaultCandidateDTO> candidates = parser.parse(json);
+                List<ModelCatalogCandidateDTO> candidates = parser.parse(json);
                 synchronized (lock) {
                   if (loadGeneration == generation.get()) {
                     state.snapshot = List.copyOf(candidates);
@@ -131,7 +131,7 @@ public class ModelCatalogService {
     int size = pageSize <= 0 ? DEFAULT_PAGE_SIZE : Math.min(pageSize, MAX_PAGE_SIZE);
     String generationText = Long.toString(state.generation);
     int offset = cursorOffset(cursor, generationText);
-    List<ModelDefaultCandidateDTO> filtered = filter(state.snapshot, query);
+    List<ModelCatalogCandidateDTO> filtered = filter(state.snapshot, query);
     int from = Math.min(offset, filtered.size());
     int to = Math.min(from + size, filtered.size());
     ModelCatalogPageDTO page = new ModelCatalogPageDTO();
@@ -144,21 +144,21 @@ public class ModelCatalogService {
     return page;
   }
 
-  private static List<ModelDefaultCandidateDTO> filter(
-      List<ModelDefaultCandidateDTO> candidates, String query) {
+  private static List<ModelCatalogCandidateDTO> filter(
+      List<ModelCatalogCandidateDTO> candidates, String query) {
     if (candidates == null || candidates.isEmpty()) {
       return List.of();
     }
     String needle = normalizeQuery(query);
-    List<ModelDefaultCandidateDTO> filtered = new ArrayList<>();
-    for (ModelDefaultCandidateDTO candidate : candidates) {
+    List<ModelCatalogCandidateDTO> filtered = new ArrayList<>();
+    for (ModelCatalogCandidateDTO candidate : candidates) {
       if (needle.isEmpty() || matches(candidate, needle)) {
         filtered.add(candidate);
       }
     }
     filtered.sort(
         Comparator.comparing(
-                (ModelDefaultCandidateDTO candidate) ->
+                (ModelCatalogCandidateDTO candidate) ->
                     candidate.getProvider() == null ? "" : candidate.getProvider(),
                 String.CASE_INSENSITIVE_ORDER)
             .thenComparing(
@@ -178,7 +178,7 @@ public class ModelCatalogService {
     return normalized.toLowerCase(Locale.ROOT);
   }
 
-  private static boolean matches(ModelDefaultCandidateDTO candidate, String needle) {
+  private static boolean matches(ModelCatalogCandidateDTO candidate, String needle) {
     return contains(candidate.getName(), needle)
         || contains(candidate.getProvider(), needle)
         || contains(candidate.getModelId(), needle);
@@ -221,7 +221,7 @@ public class ModelCatalogService {
 
   private static final class CatalogState {
 
-    private List<ModelDefaultCandidateDTO> snapshot;
+    private List<ModelCatalogCandidateDTO> snapshot;
     private Instant fetchedAt;
     private long generation;
     private boolean loading;

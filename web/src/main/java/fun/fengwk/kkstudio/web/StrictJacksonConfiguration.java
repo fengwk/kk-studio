@@ -18,7 +18,8 @@ import tools.jackson.databind.module.SimpleModule;
 import tools.jackson.databind.ser.std.ToStringSerializer;
 
 import fun.fengwk.kkstudio.harness.api.retry.ModelHttpErrorPolicy;
-import fun.fengwk.kkstudio.share.catalog.AgentProviderEditablePropertiesDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ProviderCreateDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ProviderUpdateDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsAiRuntimeDTO;
 
 import java.util.ArrayList;
@@ -47,7 +48,8 @@ public class StrictJacksonConfiguration {
       // 系统设置与 Provider create/update 的 HTTP 重试白名单是严格整数列表：数字 token 绝不做 float/字符串
       // 强制转换；Wire 层只保证 JSON 形态，范围/重复/不可变副本统一由 ModelHttpErrorPolicy 决定。
       builder.addMixIn(SystemSettingsAiRuntimeDTO.class, HttpRetryStatusListMixin.class);
-      builder.addMixIn(AgentProviderEditablePropertiesDTO.class, HttpRetryStatusListMixin.class);
+      builder.addMixIn(ProviderCreateDTO.class, HttpRetryStatusListMixin.class);
+      builder.addMixIn(ProviderUpdateDTO.class, HttpRetryStatusListMixin.class);
     };
   }
 

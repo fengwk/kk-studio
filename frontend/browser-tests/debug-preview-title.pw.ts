@@ -267,10 +267,10 @@ async function installPreviewApiMock(
         })
         return
       }
-      if (path === '/api/models') {
+      if (path === '/api/platform/models') {
         const results = options.agentSelection ? [{
           providerName: 'anthropic',
-          kind: 'MODEL',
+          type: 'MODEL',
           name: 'Claude',
           modelId: 'claude',
           description: null,
@@ -286,12 +286,10 @@ async function installPreviewApiMock(
             variants: [{ id: 'default' }, { id: 'fast' }],
           },
           version: '1',
-          createTime: '2026-01-01T00:00:00Z',
-          updateTime: '2026-01-01T00:00:00Z',
+          createdAt: 0,
+          updatedAt: 0,
         }] : []
-        await route.fulfill({
-          json: { pageNumber: 1, pageSize: 50, totalCount: String(results.length), results },
-        })
+        await route.fulfill({ json: results })
         return
       }
       if (path === '/api/interactions' && method === 'GET') {

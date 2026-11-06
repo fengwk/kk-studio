@@ -4,10 +4,10 @@ import { useInvalidateMutation } from '@/shared/lib/useInvalidateMutation'
 import type {
   AgentDefinitionCreateDTO,
   AgentDefinitionUpdateDTO,
-  AgentModelCreateDTO,
-  AgentModelUpdateDTO,
-  AgentProviderCreateDTO,
-  AgentProviderUpdateDTO,
+  ModelCreateDTO,
+  ModelUpdateDTO,
+  ProviderCreateDTO,
+  ProviderUpdateDTO,
 } from '@/shared/api/generated/contracts'
 
 export function useAiConsoleResourceMutations({
@@ -18,12 +18,12 @@ export function useAiConsoleResourceMutations({
   onDeleteCompleted: () => void
 }) {
   const createProviderMutation = useInvalidateMutation({
-    mutationFn: (provider: AgentProviderCreateDTO) => agentService.createProvider(provider),
+    mutationFn: (provider: ProviderCreateDTO) => agentService.createProvider(provider),
     invalidateQueryKeys: [queryKeys.providers.list],
     onSuccess: onResourceSaved,
   })
   const updateProviderMutation = useInvalidateMutation({
-    mutationFn: ({ name, data }: { name: string; data: AgentProviderUpdateDTO }) =>
+    mutationFn: ({ name, data }: { name: string; data: ProviderUpdateDTO }) =>
       agentService.updateProvider(name, data),
     invalidateQueryKeys: [queryKeys.providers.list, queryKeys.models.list, queryKeys.agents.list],
     onSuccess: onResourceSaved,
@@ -35,7 +35,7 @@ export function useAiConsoleResourceMutations({
     onSuccess: onDeleteCompleted,
   })
   const createModelMutation = useInvalidateMutation({
-    mutationFn: (model: AgentModelCreateDTO) => agentService.createModel(model),
+    mutationFn: (model: ModelCreateDTO) => agentService.createModel(model),
     invalidateQueryKeys: [queryKeys.models.list],
     onSuccess: onResourceSaved,
   })
@@ -45,7 +45,7 @@ export function useAiConsoleResourceMutations({
       data,
     }: {
       name: string
-      data: AgentModelUpdateDTO
+      data: ModelUpdateDTO
     }) => agentService.updateModel(name, data),
     invalidateQueryKeys: [queryKeys.models.list, queryKeys.agents.list],
     onSuccess: onResourceSaved,
@@ -92,13 +92,13 @@ export function useAiConsoleResourceMutations({
       createModelMutation.isPending || updateModelMutation.isPending ||
       createAgentMutation.isPending || updateAgentMutation.isPending,
     deleteConfirmPending: deleteProviderMutation.isPending || deleteModelMutation.isPending || deleteAgentMutation.isPending,
-    createProvider: (data: AgentProviderCreateDTO) => createProviderMutation.mutate(data),
-    updateProvider: (name: string, data: AgentProviderUpdateDTO) =>
+    createProvider: (data: ProviderCreateDTO) => createProviderMutation.mutate(data),
+    updateProvider: (name: string, data: ProviderUpdateDTO) =>
       updateProviderMutation.mutate({ name, data }),
     deleteProvider: (name: string, expectedVersion: string) =>
       deleteProviderMutation.mutate({ name, expectedVersion }),
-    createModel: (data: AgentModelCreateDTO) => createModelMutation.mutate(data),
-    updateModel: (name: string, data: AgentModelUpdateDTO) =>
+    createModel: (data: ModelCreateDTO) => createModelMutation.mutate(data),
+    updateModel: (name: string, data: ModelUpdateDTO) =>
       updateModelMutation.mutate({ name, data }),
     deleteModel: (name: string, expectedVersion: string) =>
       deleteModelMutation.mutate({ name, expectedVersion }),

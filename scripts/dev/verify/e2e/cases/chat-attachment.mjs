@@ -278,7 +278,7 @@ registerCase({
     const cleanupErrors = []
     try {
       provider = (
-          await ctx.call('POST', '/api/providers', {
+          await ctx.call('POST', '/api/platform/providers', {
             name: `e2e-provider-image-${suffix}`,
             description: 'Local Responses probe for attachment materialization.',
             providerType: 'openai_responses',
@@ -289,8 +289,8 @@ registerCase({
           })
         ).json
       model = (
-          await ctx.call('POST', '/api/models', {
-            kind: 'MODEL',
+          await ctx.call('POST', '/api/platform/models', {
+            type: 'MODEL',
             providerName: provider.name,
             name: `e2e-model-image-${suffix}`,
             modelId: `wire-image-${suffix}`,
@@ -491,14 +491,14 @@ registerCase({
         if (!model?.name) return
         await ctx.call(
           'DELETE',
-          `/api/models/${encodePathTail(model.name)}?expectedVersion=${encodeURIComponent(model.version)}`,
+          `/api/platform/models/${encodePathTail(model.name)}?expectedVersion=${encodeURIComponent(model.version)}`,
         )
       })
       await cleanup('provider', cleanupErrors, async () => {
         if (!provider?.name) return
         await ctx.call(
           'DELETE',
-          `/api/providers/${encodeURIComponent(provider.name)}?expectedVersion=${encodeURIComponent(provider.version)}`,
+          `/api/platform/providers/${encodeURIComponent(provider.name)}?expectedVersion=${encodeURIComponent(provider.version)}`,
         )
       })
       if (cleanupErrors.length > 0 && primaryError == null) {

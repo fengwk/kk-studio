@@ -6,7 +6,7 @@ import {
   newGroupMemberDraft,
   toModelGroupDraft,
 } from '@/features/catalog/ai-model-group-draft-codec'
-import type { AgentModelDTO } from '@/shared/api/generated/contracts'
+import type { ModelDTO } from '@/shared/api/generated/contracts'
 
 function groupDraft(overrides: Partial<ModelGroupDraft> = {}): ModelGroupDraft {
   return {
@@ -21,10 +21,10 @@ function groupDraft(overrides: Partial<ModelGroupDraft> = {}): ModelGroupDraft {
   }
 }
 
-function groupModel(): AgentModelDTO {
+function groupModel(): ModelDTO {
   return {
     name: 'coding',
-    kind: 'GROUP',
+    type: 'GROUP',
     description: 'fallback chain',
     group: {
       members: [
@@ -34,9 +34,14 @@ function groupModel(): AgentModelDTO {
       fallbackStatusCodes: [429, 503],
       cooldownSeconds: 0,
     },
+    config: {
+      limit: { context: 128000, output: 8192 },
+      abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
+      variants: [{ id: 'standard', promptCacheRetention: 'NONE' }],
+    },
     version: '1',
-    createTime: 0,
-    updateTime: 0,
+    createdAt: 0,
+    updatedAt: 0,
   }
 }
 
@@ -50,7 +55,7 @@ describe('ai-model-group-draft-codec', () => {
     const payload = toEditableModelGroup(groupDraft())
     expect(payload).toEqual({
       name: 'coding',
-      kind: 'GROUP',
+      type: 'GROUP',
       description: 'fallback chain',
       group: {
         members: [

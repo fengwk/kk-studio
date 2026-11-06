@@ -259,13 +259,9 @@ describe('ThreadWorkspacePage', () => {
     vi.clearAllMocks()
     setLocale('zh-CN')
     vi.mocked(agentService.listAgents).mockResolvedValue({ pageNumber: 1, pageSize: 50, totalCount: '0', results: [] })
-    vi.mocked(agentService.listModels).mockResolvedValue({
-      pageNumber: 1,
-      pageSize: 50,
-      totalCount: '1',
-      results: [{
+    vi.mocked(agentService.listModels).mockResolvedValue([{
         providerName: 'minimax',
-        kind: 'MODEL',
+        type: 'MODEL',
         name: 'MiniMax',
         modelId: 'MiniMax',
         description: null,
@@ -281,10 +277,9 @@ describe('ThreadWorkspacePage', () => {
           variants: [{ id: 'default', promptCacheRetention: 'NONE' }],
         },
         version: '0',
-        createTime: 0,
-        updateTime: 0,
-      }],
-    })
+        createdAt: 0,
+        updatedAt: 0,
+      }])
     vi.mocked(harnessService.acceptThreadCommandBatch).mockResolvedValue({
       session: { sessionId: 'session-1', name: 'Session', createdAt: 0 },
       rootEntry: {
@@ -300,7 +295,7 @@ describe('ThreadWorkspacePage', () => {
       acceptedCommands: [],
       replayed: false,
     })
-    vi.mocked(agentService.listProviders).mockResolvedValue({ pageNumber: 1, pageSize: 50, totalCount: '0', results: [] })
+    vi.mocked(agentService.listProviders).mockResolvedValue([])
     vi.mocked(environmentService.listEnvironments).mockResolvedValue([])
     vi.mocked(harnessService.decideApproval).mockResolvedValue(snapshotWithPendingTool(CHILD_THREAD_ID).toolInvocations[0])
     vi.mocked(interactionService.listInteractions).mockResolvedValue({

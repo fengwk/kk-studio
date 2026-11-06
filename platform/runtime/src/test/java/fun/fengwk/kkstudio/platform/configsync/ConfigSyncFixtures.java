@@ -14,6 +14,8 @@ import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.common.schema.StringSchema;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
+import fun.fengwk.kkstudio.harness.model.ModelInputModality;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.model.provider.impl.ProviderModelDiscovery;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
@@ -25,19 +27,26 @@ import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionService;
 import fun.fengwk.kkstudio.platform.catalog.definition.BuiltinAgentExecutionValidator;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelAbilitiesDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelConfigDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelLimitDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelRateSetDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelVariantDTO;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpDiscoveryStatus;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServer;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpTool;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModelDefaultVariantResolver;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModelGroupConfigCodec;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRuntimeConfigParser;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModelService;
-import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
-import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderConfigurationCodec;
-import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderRepository;
-import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderService;
+import fun.fengwk.kkstudio.platform.catalog.model.Model;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelDefaultVariantResolver;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelGroupConfigCodec;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelKind;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelRepository;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelRuntimeConfigParser;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelService;
+import fun.fengwk.kkstudio.platform.catalog.provider.Provider;
+import fun.fengwk.kkstudio.platform.catalog.provider.ProviderConfigurationCodec;
+import fun.fengwk.kkstudio.platform.catalog.provider.ProviderRepository;
+import fun.fengwk.kkstudio.platform.catalog.provider.ProviderService;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogService;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogTestFixtures;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillManifestEntry;
@@ -62,15 +71,6 @@ import fun.fengwk.kkstudio.platform.settings.SystemSettingsCodec;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsRepository;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsTestFixture;
 import fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelAbilitiesDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelConfigDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelInputModality;
-import fun.fengwk.kkstudio.share.catalog.AgentModelKind;
-import fun.fengwk.kkstudio.share.catalog.AgentModelLimitDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelPricingDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelRateSetDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelVariantDTO;
-import fun.fengwk.kkstudio.share.catalog.PromptCacheRetention;
 import fun.fengwk.kkstudio.share.skill.SkillRefDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSectionsDTO;
 
@@ -94,27 +94,25 @@ final class ConfigSyncFixtures {
   static final ObjectMapper MAPPER = JsonMapper.builder().build();
   static final AgentDefinitionConfigCodec AGENT_CONFIG_CODEC =
       new AgentDefinitionConfigCodec(MAPPER);
-  static final AgentModelRuntimeConfigParser MODEL_CONFIG_PARSER =
-      new AgentModelRuntimeConfigParser(MAPPER);
-  static final AgentModelGroupConfigCodec GROUP_CONFIG_CODEC =
-      new AgentModelGroupConfigCodec(MAPPER);
-  static final AgentProviderConfigurationCodec PROVIDER_CONFIG_CODEC =
-      new AgentProviderConfigurationCodec(MAPPER);
+  static final ModelRuntimeConfigParser MODEL_CONFIG_PARSER = new ModelRuntimeConfigParser(MAPPER);
+  static final ModelGroupConfigCodec GROUP_CONFIG_CODEC = new ModelGroupConfigCodec(MAPPER);
+  static final ProviderConfigurationCodec PROVIDER_CONFIG_CODEC =
+      new ProviderConfigurationCodec(MAPPER);
   private static final AgentEditableSupport EDITABLE_SUPPORT = new AgentEditableSupport(MAPPER);
 
-  /** 真实 {@code AgentProviderService.validateImport}：纯静态校验，仓储与上游发现以 mock 占位。 */
-  static final AgentProviderService PROVIDER_SERVICE =
-      new AgentProviderService(
-          mock(AgentProviderRepository.class),
+  /** 真实 {@code ProviderService.validateImport}：纯静态校验，仓储与上游发现以 mock 占位。 */
+  static final ProviderService PROVIDER_SERVICE =
+      new ProviderService(
+          mock(ProviderRepository.class),
           PROVIDER_CONFIG_CODEC,
           EDITABLE_SUPPORT,
           mock(ProviderModelDiscovery.class));
 
-  /** 真实 {@code AgentModelService.validateImport}：纯静态校验，仓储以 mock 占位。 */
-  static final AgentModelService MODEL_SERVICE =
-      new AgentModelService(
-          mock(AgentModelRepository.class),
-          mock(AgentProviderRepository.class),
+  /** 真实 {@code ModelService.validateImport}：纯静态校验，仓储以 mock 占位。 */
+  static final ModelService MODEL_SERVICE =
+      new ModelService(
+          mock(ModelRepository.class),
+          mock(ProviderRepository.class),
           EDITABLE_SUPPORT,
           MODEL_CONFIG_PARSER,
           GROUP_CONFIG_CODEC);
@@ -126,7 +124,7 @@ final class ConfigSyncFixtures {
           mock(AgentDefinitionReferenceResolver.class),
           builtinDrivers(),
           new BuiltinAgentExecutionValidator(
-              mock(AgentModelRepository.class), mock(AgentModelDefaultVariantResolver.class)),
+              mock(ModelRepository.class), mock(ModelDefaultVariantResolver.class)),
           mock(AgentDefinitionConfigValidator.class),
           AGENT_CONFIG_CODEC,
           EDITABLE_SUPPORT,
@@ -171,16 +169,16 @@ final class ConfigSyncFixtures {
         pluginRegistry);
   }
 
-  static AgentModelConfigDTO modelConfig() {
-    AgentModelLimitDTO limit = new AgentModelLimitDTO();
+  static ModelConfigDTO modelConfig() {
+    ModelLimitDTO limit = new ModelLimitDTO();
     limit.setContext(1000);
     limit.setOutput(100);
-    AgentModelAbilitiesDTO abilities = new AgentModelAbilitiesDTO();
+    ModelAbilitiesDTO abilities = new ModelAbilitiesDTO();
     abilities.setTools(true);
     abilities.setReasoning(false);
-    abilities.setInputModalities(List.of(AgentModelInputModality.TEXT));
-    AgentModelPricingDTO pricing = new AgentModelPricingDTO();
-    AgentModelRateSetDTO base = new AgentModelRateSetDTO();
+    abilities.setInputModalities(List.of(ModelInputModality.TEXT));
+    ModelPricingDTO pricing = new ModelPricingDTO();
+    ModelRateSetDTO base = new ModelRateSetDTO();
     base.setInput(BigDecimal.ZERO);
     base.setOutput(BigDecimal.ZERO);
     base.setCacheRead(BigDecimal.ZERO);
@@ -190,10 +188,10 @@ final class ConfigSyncFixtures {
     pricing.setBase(base);
     pricing.setOverrides(List.of());
     pricing.setMultipliers(List.of());
-    AgentModelVariantDTO variant = new AgentModelVariantDTO();
+    ModelVariantDTO variant = new ModelVariantDTO();
     variant.setId("default");
     variant.setPromptCacheRetention(PromptCacheRetention.NONE);
-    AgentModelConfigDTO config = new AgentModelConfigDTO();
+    ModelConfigDTO config = new ModelConfigDTO();
     config.setLimit(limit);
     config.setAbilities(abilities);
     config.setPricing(pricing);
@@ -202,12 +200,11 @@ final class ConfigSyncFixtures {
     return config;
   }
 
-  static AgentModelConfigDTO modelConfigWithVariants(
-      List<String> variantIds, String defaultVariant) {
-    AgentModelConfigDTO config = modelConfig();
-    List<AgentModelVariantDTO> variants = new ArrayList<>();
+  static ModelConfigDTO modelConfigWithVariants(List<String> variantIds, String defaultVariant) {
+    ModelConfigDTO config = modelConfig();
+    List<ModelVariantDTO> variants = new ArrayList<>();
     for (String id : variantIds) {
-      AgentModelVariantDTO variant = new AgentModelVariantDTO();
+      ModelVariantDTO variant = new ModelVariantDTO();
       variant.setId(id);
       variant.setPromptCacheRetention(PromptCacheRetention.NONE);
       variants.add(variant);
@@ -233,8 +230,8 @@ final class ConfigSyncFixtures {
     return ref;
   }
 
-  static AgentProvider provider(String name) {
-    return AgentProvider.builder()
+  static Provider provider(String name) {
+    return Provider.builder()
         .name(name)
         .providerType(ProviderType.OPENAI)
         .baseUrl("https://api.example.com")
@@ -243,13 +240,13 @@ final class ConfigSyncFixtures {
         .build();
   }
 
-  static AgentModel model(String providerName, String name) {
+  static Model model(String providerName, String name) {
     return model(providerName, name, modelConfig());
   }
 
-  static AgentModel model(String providerName, String name, AgentModelConfigDTO config) {
-    return AgentModel.builder()
-        .kind(AgentModelKind.MODEL)
+  static Model model(String providerName, String name, ModelConfigDTO config) {
+    return Model.builder()
+        .kind(ModelKind.MODEL)
         .providerName(providerName)
         .name(name)
         .modelId("gpt-4")
@@ -345,8 +342,8 @@ final class ConfigSyncFixtures {
   }
 
   static ConfigSyncSnapshot snapshot(
-      List<AgentProvider> providers,
-      List<AgentModel> models,
+      List<Provider> providers,
+      List<Model> models,
       List<AgentDefinition> agents,
       List<SkillPackage> skillPackages,
       List<Environment> environments,
@@ -365,8 +362,8 @@ final class ConfigSyncFixtures {
   }
 
   static ConfigSyncSnapshot snapshotWithPlugins(
-      List<AgentProvider> providers,
-      List<AgentModel> models,
+      List<Provider> providers,
+      List<Model> models,
       List<AgentDefinition> agents,
       Set<String> builtinAgentNames,
       List<SkillPackage> skillPackages,
@@ -552,7 +549,7 @@ final class ConfigSyncFixtures {
   }
 
   /** 把 typed Agent Model config 序列化为 config sync 纯结构，便于构造文件内 Model 条目。 */
-  static Map<String, Object> modelConfigMap(AgentModelConfigDTO config) {
+  static Map<String, Object> modelConfigMap(ModelConfigDTO config) {
     return new ConfigSyncYaml().toMap(config, "config");
   }
 

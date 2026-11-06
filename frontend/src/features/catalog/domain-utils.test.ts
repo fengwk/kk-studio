@@ -29,9 +29,9 @@ import {
   toProviderDraft,
 } from '@/features/catalog/ai-resource-draft-codecs'
 import type {
-  AgentModelConfigDTO,
-  AgentModelDTO,
-  AgentProviderDTO,
+  ModelConfigDTO,
+  SingleModelDTO,
+  ProviderDTO,
   EnvironmentCardDTO,
 } from '@/shared/api/generated/contracts'
 
@@ -45,7 +45,7 @@ function modelDraft(overrides: Partial<ModelDraft> = {}): ModelDraft {
   }
 }
 
-function fullConfig(): AgentModelConfigDTO {
+function fullConfig(): ModelConfigDTO {
   return {
     limit: { context: 128000, output: 8192 },
     abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
@@ -59,17 +59,17 @@ function fullConfig(): AgentModelConfigDTO {
   }
 }
 
-function model(overrides: Partial<AgentModelDTO> = {}): AgentModelDTO {
+function model(overrides: Partial<SingleModelDTO> = {}): SingleModelDTO {
   return {
     providerName: 'minimax',
-    kind: 'MODEL',
+    type: 'MODEL',
     name: 'MiniMax-M2.7',
     modelId: 'minimax-upstream',
     description: 'Chat model',
     config: fullConfig(),
     version: '1',
-    createTime: 1781920800,
-    updateTime: 1781920800,
+    createdAt: 1781920800,
+    updatedAt: 1781920800,
     ...overrides,
   }
 }
@@ -102,12 +102,12 @@ describe('AI domain utilities', () => {
         providerType: 'openai_responses',
         promptCacheRetentions: ['NONE', 'SHORT', 'LONG'],
         baseUrl: 'https://api.minimax.io/v1',
-        configured: true,
+        credential: { configured: true },
         modelCallTimeoutMillis: '120000',
         modelCallIdleTimeoutMillis: '3000',
         version: '1',
-        createTime: 1781920800,
-        updateTime: 1781920800,
+        createdAt: 1781920800,
+        updatedAt: 1781920800,
         modelHttpRetryStatusCodes: null,
       }),
     ).toEqual({
@@ -202,9 +202,8 @@ describe('AI domain utilities', () => {
     })
     expect(toEditableProviderUpdate(providerInput)).toEqual({
       description: 'provider desc',
-      providerType: 'openai_responses',
       baseUrl: 'https://api.minimax.io/v1',
-      credential: 'secret',
+      credential: { operation: 'SET', value: 'secret' },
       modelCallTimeoutMillis: 120000,
       modelCallIdleTimeoutMillis: 3000,
       modelHttpRetryStatusCodes: null,
@@ -334,19 +333,19 @@ describe('AI domain utilities', () => {
       { ...model({ name: 'MiniMax-M2.7' }), providerName: 'minimax' },
       { ...model({ name: 'gpt-5.4', modelId: 'gpt-5.4' }), providerName: 'openai' },
     ]
-    const providers: AgentProviderDTO[] = [
+    const providers: ProviderDTO[] = [
       {
         name: 'minimax',
         description: 'MiniMax endpoint',
         providerType: 'openai',
         promptCacheRetentions: ['NONE', 'SHORT', 'LONG'],
         baseUrl: 'https://api.minimax.io/v1',
-        configured: true,
+        credential: { configured: true },
         modelCallTimeoutMillis: '1800000',
         modelCallIdleTimeoutMillis: '120000',
         version: '1',
-        createTime: 1781920800,
-        updateTime: 1781920800,
+        createdAt: 1781920800,
+        updatedAt: 1781920800,
         modelHttpRetryStatusCodes: null,
       },
       {
@@ -355,12 +354,12 @@ describe('AI domain utilities', () => {
         providerType: 'openai_responses',
         promptCacheRetentions: ['NONE', 'SHORT', 'LONG'],
         baseUrl: null,
-        configured: true,
+        credential: { configured: true },
         modelCallTimeoutMillis: '1800000',
         modelCallIdleTimeoutMillis: '120000',
         version: '1',
-        createTime: 1781920800,
-        updateTime: 1781920800,
+        createdAt: 1781920800,
+        updatedAt: 1781920800,
         modelHttpRetryStatusCodes: null,
       },
     ]
@@ -397,7 +396,7 @@ describe('AI domain utilities', () => {
         description: null,
         providerType: null,
         baseUrl: null,
-        configured: false,
+        credential: { configured: false },
         modelCallTimeoutMillis: 1800000,
         modelCallIdleTimeoutMillis: 120000,
         version: '1',

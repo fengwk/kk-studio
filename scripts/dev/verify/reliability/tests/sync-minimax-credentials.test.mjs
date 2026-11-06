@@ -41,10 +41,9 @@ test('test intent: a complete pair updates the Responses provider and appends /v
   )
 
   assert.equal(calls.length, 2)
-  assert.equal(calls[1][0], 'http://backend/api/providers/minimax')
+  assert.equal(calls[1][0], 'http://backend/api/platform/providers/minimax')
   assert.equal(calls[1][1].baseUrl, 'https://api.minimax.example/v1')
-  assert.equal(calls[1][1].providerType, 'openai_responses')
-  assert.equal(calls[1][1].credential, 'secret-minimax')
+  assert.deepEqual(calls[1][1].credential, { operation: 'SET', value: 'secret-minimax' })
   assert.deepEqual(lines, ['minimax: configured=True baseUrl_set=True'])
 })
 

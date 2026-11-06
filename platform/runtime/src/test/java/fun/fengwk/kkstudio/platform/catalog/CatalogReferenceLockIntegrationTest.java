@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.platform.catalog;
 
-import static fun.fengwk.kkstudio.platform.catalog.model.AgentModelTestData.executable;
+import static fun.fengwk.kkstudio.platform.catalog.model.ModelTestData.executable;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -14,14 +14,19 @@ import org.springframework.transaction.support.TransactionTemplate;
 import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionService;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ProviderCreateDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ProviderDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.SingleModelCreateDTO;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerRepository;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerService;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpTool;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModelService;
-import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderService;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelService;
+import fun.fengwk.kkstudio.platform.catalog.provider.ProviderService;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillManifestEntry;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageGitSource;
@@ -31,11 +36,6 @@ import fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentDefinitionCreateDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentDefinitionDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentDefinitionUpdateDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelCreateDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelKind;
-import fun.fengwk.kkstudio.share.catalog.AgentProviderCreateDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentProviderDTO;
 import fun.fengwk.kkstudio.share.mcp.McpServerCreateDTO;
 import fun.fengwk.kkstudio.share.mcp.McpServerDTO;
 import fun.fengwk.kkstudio.share.runtime.HarnessExecutionSelectionDTO;
@@ -69,8 +69,8 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
 
   @Autowired private AgentDefinitionService definitionService;
   @Autowired private AgentDefinitionRepository definitionRepository;
-  @Autowired private AgentProviderService providerService;
-  @Autowired private AgentModelService modelService;
+  @Autowired private ProviderService providerService;
+  @Autowired private ModelService modelService;
   @Autowired private SkillPackageRepository skillPackages;
   @Autowired private McpServerService mcpServerService;
   @Autowired private McpServerRepository mcpServers;
@@ -606,16 +606,15 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
   }
 
   private Model model(String suffix) {
-    AgentProviderCreateDTO provider = new AgentProviderCreateDTO();
+    ProviderCreateDTO provider = new ProviderCreateDTO();
     provider.setName("provider-" + suffix);
-    provider.setProviderType("openai");
-    AgentProviderDTO createdProvider = providerService.createProvider(provider);
-    AgentModelCreateDTO model = new AgentModelCreateDTO();
-    model.setKind(AgentModelKind.MODEL);
+    provider.setProviderType(ProviderType.OPENAI);
+    ProviderDTO createdProvider = providerService.createProvider(provider);
+    SingleModelCreateDTO model = new SingleModelCreateDTO();
     model.setProviderName(createdProvider.getName());
     model.setName("model-" + suffix);
     executable(model);
-    AgentModelDTO createdModel = modelService.createModel(model);
+    ModelDTO createdModel = modelService.createModel(model);
     return new Model(createdProvider, createdModel);
   }
 
@@ -677,10 +676,10 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
   private record Outcome<T>(T value, Throwable error) {}
 
   private final class Model {
-    private final AgentProviderDTO provider;
-    private final AgentModelDTO model;
+    private final ProviderDTO provider;
+    private final ModelDTO model;
 
-    private Model(AgentProviderDTO provider, AgentModelDTO model) {
+    private Model(ProviderDTO provider, ModelDTO model) {
       this.provider = provider;
       this.model = model;
     }

@@ -4,9 +4,9 @@ import fun.fengwk.kkstudio.common.json.StrictJson;
 import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModelDefaultVariantResolver;
-import fun.fengwk.kkstudio.share.catalog.AgentModelConfigDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelKind;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelConfigDTO;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelDefaultVariantResolver;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelKind;
 import fun.fengwk.kkstudio.share.runtime.HarnessExecutionSelectionDTO;
 
 /** 配置同步对 Builtin 模型引用与导入后 variant 的判定。 */
@@ -33,15 +33,15 @@ public final class BuiltinConfigSyncAdapter {
   }
 
   public static VariantIssue variantIssue(
-      ModelSelection selection, AgentModelKind kind, AgentModelConfigDTO config) {
+      ModelSelection selection, ModelKind kind, ModelConfigDTO config) {
     if (selection.variant() == null) {
       return null;
     }
-    if (kind == AgentModelKind.GROUP) {
+    if (kind == ModelKind.GROUP) {
       return VariantIssue.GROUP_VARIANT;
     }
     try {
-      AgentModelDefaultVariantResolver.resolveConfiguredVariant(
+      ModelDefaultVariantResolver.resolveConfiguredVariant(
           selection.modelName(), selection.variant(), config);
       return null;
     } catch (IllegalArgumentException error) {

@@ -4,10 +4,10 @@ import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.harness.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.model.ModelRequestBodyPricing;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRuntimeConfigParser;
-import fun.fengwk.kkstudio.share.catalog.AgentModelKind;
+import fun.fengwk.kkstudio.platform.catalog.model.Model;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelKind;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelRepository;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelRuntimeConfigParser;
 
 import java.util.Objects;
 
@@ -20,18 +20,17 @@ import java.util.Objects;
 @Component
 final class ModelPricingPlanSource {
 
-  private final AgentModelRepository modelRepository;
-  private final AgentModelRuntimeConfigParser configParser;
+  private final ModelRepository modelRepository;
+  private final ModelRuntimeConfigParser configParser;
 
-  ModelPricingPlanSource(
-      AgentModelRepository modelRepository, AgentModelRuntimeConfigParser configParser) {
+  ModelPricingPlanSource(ModelRepository modelRepository, ModelRuntimeConfigParser configParser) {
     this.modelRepository = Objects.requireNonNull(modelRepository, "modelRepository");
     this.configParser = Objects.requireNonNull(configParser, "configParser");
   }
 
   ModelRequestBodyPricing.Plan plan(String modelName) {
-    AgentModel model = modelRepository.getByName(modelName);
-    if (model == null || model.kind() != AgentModelKind.MODEL) {
+    Model model = modelRepository.getByName(modelName);
+    if (model == null || model.kind() != ModelKind.MODEL) {
       return ModelRequestBodyPricing.plan(ModelPricing.ZERO);
     }
     try {

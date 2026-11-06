@@ -2,15 +2,18 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { AgentResourceCard } from '@/features/catalog/AiAgentResourceCard'
-import type { AgentModelView } from '@/features/catalog/AgentModelView'
 import { ModelResourceCard } from '@/features/catalog/AiModelResourceCard'
 import { ProviderResourceCard } from '@/features/catalog/AiProviderResourceCard'
-import type { AgentDefinitionDTO, AgentProviderDTO } from '@/shared/api/generated/contracts'
+import type {
+  AgentDefinitionDTO,
+  ProviderDTO,
+  SingleModelDTO,
+} from '@/shared/api/generated/contracts'
 
-function model(overrides: Partial<AgentModelView> = {}): AgentModelView {
+function model(overrides: Partial<SingleModelDTO> = {}): SingleModelDTO {
   return {
     providerName: 'minimax',
-    kind: 'MODEL',
+    type: 'MODEL',
     name: 'MiniMax',
     modelId: 'minimax-upstream',
     description: 'model description',
@@ -31,8 +34,8 @@ function model(overrides: Partial<AgentModelView> = {}): AgentModelView {
       ],
     },
     version: '1',
-    createTime: 0,
-    updateTime: 0,
+    createdAt: 0,
+    updatedAt: 0,
     ...overrides,
   }
 }
@@ -56,19 +59,19 @@ function agent(overrides: Partial<AgentDefinitionDTO> = {}): AgentDefinitionDTO 
   }
 }
 
-function provider(overrides: Partial<AgentProviderDTO> = {}): AgentProviderDTO {
+function provider(overrides: Partial<ProviderDTO> = {}): ProviderDTO {
   return {
     name: 'minimax',
     description: null,
     providerType: 'openai',
     promptCacheRetentions: ['NONE', 'SHORT', 'LONG'],
     baseUrl: 'https://api.example.test',
-    configured: true,
+    credential: { configured: true },
     modelCallTimeoutMillis: '180000',
     modelCallIdleTimeoutMillis: '1500',
     version: '1',
-    createTime: 0,
-    updateTime: 0,
+    createdAt: 0,
+    updatedAt: 0,
     modelHttpRetryStatusCodes: null,
     ...overrides,
   }
@@ -336,7 +339,7 @@ describe('AI resource cards', () => {
         provider={provider({
           description: 'provider description',
           baseUrl: null,
-          configured: false,
+          credential: { configured: false },
           modelCallTimeoutMillis: '',
           modelCallIdleTimeoutMillis: 'not-a-number',
         })}

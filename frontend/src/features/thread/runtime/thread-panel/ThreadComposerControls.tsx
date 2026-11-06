@@ -7,7 +7,7 @@ import {
 } from 'react'
 import { Check, ChevronDown, ChevronLeft } from 'lucide-react'
 import { formatModelLabel } from '@/features/catalog'
-import type { AgentModelKind } from '@/shared/api/generated/contracts'
+import type { ModelKind } from '@/shared/api/contracts/ai-catalog'
 import { useI18n } from '@/shared/i18n'
 import './thread-composer-controls.css'
 
@@ -20,7 +20,7 @@ export interface ThreadComposerModelSelection {
 
 export interface ThreadComposerModelOption {
   name: string
-  kind: AgentModelKind
+  type: ModelKind
   config?: {
     defaultVariant?: string | null
     variants?: ReadonlyArray<{ id: string }>
@@ -94,7 +94,7 @@ export function ThreadComposerControls({
   const models = settings.models
   const modelSelection = settings.modelSelection
   const usableModels = useMemo(
-    () => models.filter((model) => model.kind === 'GROUP' || variantIds(model).length > 0),
+    () => models.filter((model) => model.type === 'GROUP' || variantIds(model).length > 0),
     [models],
   )
   const currentModel = models.find((model) => model.name === modelSelection?.modelName)
@@ -121,7 +121,7 @@ export function ThreadComposerControls({
         return [{ id: model.name, label: model.name }]
       })
     }
-    if (menu === 'variant' && variantTarget != null && variantTarget.kind === 'MODEL') {
+    if (menu === 'variant' && variantTarget != null && variantTarget.type === 'MODEL') {
       return variantIds(variantTarget).map((variant) => ({ id: variant, label: variant }))
     }
     return []
@@ -224,7 +224,7 @@ export function ThreadComposerControls({
       if (selected == null) {
         return
       }
-      if (selected.kind === 'GROUP') {
+      if (selected.type === 'GROUP') {
         // 组选择即完成；成员 Variant 由组配置决定，绝不进入第二级或伪造 default。
         settings.onModelChange({ modelName: selected.name, variant: null })
         onMenuChange(null, true)
@@ -455,7 +455,7 @@ export function ThreadComposerControls({
 }
 
 function variantIds(model: ThreadComposerModelOption): string[] {
-  if (model.kind !== 'MODEL') {
+  if (model.type !== 'MODEL') {
     return []
   }
   return Array.from(

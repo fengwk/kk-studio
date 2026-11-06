@@ -14,7 +14,7 @@ async function withResponses(mutate, run) {
     const language = req.headers['accept-language'] === 'zh-CN' ? 'zh-CN' : 'en-US'
     const kind = req.url.startsWith('/api/chats/')
       ? 'domain'
-      : req.url.startsWith('/api/models?')
+      : req.url.startsWith('/api/platform/model-catalog?')
         ? 'validation'
         : 'responseStatus'
     const fixture = fixtures[kind]

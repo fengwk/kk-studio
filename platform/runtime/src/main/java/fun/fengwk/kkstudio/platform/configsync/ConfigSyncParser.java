@@ -8,9 +8,16 @@ import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionService;
 import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgentDefinitions;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelConfigDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelCreateDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelGroupConfigDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelGroupCreateDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ProviderCreateDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.SingleModelCreateDTO;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpConfigParser;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModelService;
-import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderService;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelKind;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelService;
+import fun.fengwk.kkstudio.platform.catalog.provider.ProviderService;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogService;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentInstallConfigs;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentService;
@@ -20,11 +27,6 @@ import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsCodec;
 import fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentDefinitionEditablePropertiesDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelConfigDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelEditablePropertiesDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelGroupDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelKind;
-import fun.fengwk.kkstudio.share.catalog.AgentProviderEditablePropertiesDTO;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncKind;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncSkipped;
 import fun.fengwk.kkstudio.share.environment.EnvironmentInstallConfigDTO;
@@ -70,8 +72,8 @@ public final class ConfigSyncParser {
           ConfigSyncKind.PLUGINS.wireValue());
 
   private final ConfigSyncYaml yaml;
-  private final AgentProviderService providerService;
-  private final AgentModelService modelService;
+  private final ProviderService providerService;
+  private final ModelService modelService;
   private final AgentDefinitionService agentService;
   private final SkillCatalogService skillCatalogService;
   private final SystemSettingsCodec systemSettingsCodec;
@@ -79,8 +81,8 @@ public final class ConfigSyncParser {
 
   public ConfigSyncParser(
       ConfigSyncYaml yaml,
-      AgentProviderService providerService,
-      AgentModelService modelService,
+      ProviderService providerService,
+      ModelService modelService,
       AgentDefinitionService agentService,
       SkillCatalogService skillCatalogService,
       SystemSettingsCodec systemSettingsCodec,
@@ -233,17 +235,17 @@ public final class ConfigSyncParser {
               ConfigSyncKind.PROVIDERS.wireValue(), name, "unsupported provider protocol"));
       return null;
     }
-    AgentProviderEditablePropertiesDTO properties = new AgentProviderEditablePropertiesDTO();
+    ProviderCreateDTO properties = new ProviderCreateDTO();
+    properties.setName(name);
     properties.setDescription(entry.optString("description"));
-    properties.setProviderType(type.wireValue());
+    properties.setProviderType(type);
     properties.setBaseUrl(entry.optString("baseUrl"));
     properties.setCredential(entry.optString("credential"));
     properties.setModelCallTimeoutMillis(entry.optLong("modelCallTimeoutMillis"));
     properties.setModelCallIdleTimeoutMillis(entry.optLong("modelCallIdleTimeoutMillis"));
-    properties.applyModelHttpRetryStatusCodes(entry.optIntegerList("modelHttpRetryStatusCodes"));
+    properties.setModelHttpRetryStatusCodes(entry.optIntegerList("modelHttpRetryStatusCodes"));
     // 先用写入路径校验已知字段，未知字段不能绕过缺必填与非法值。
-    validateEntry(
-        ConfigSyncKind.PROVIDERS, name, () -> providerService.validateImport(name, properties));
+    validateEntry(ConfigSyncKind.PROVIDERS, name, () -> providerService.validateImport(properties));
     if (skipUnknown(entry, ConfigSyncKind.PROVIDERS, name, skipped)) {
       return null;
     }
@@ -255,33 +257,37 @@ public final class ConfigSyncParser {
     String name = entry.reqName("name");
     declared.add(name);
     String kindText = entry.reqString("kind");
-    AgentModelKind kind;
+    ModelKind kind;
     try {
-      kind = AgentModelKind.valueOf(kindText);
+      kind = ModelKind.valueOf(kindText);
     } catch (IllegalArgumentException error) {
       throw DomainException.validation(RESOURCE, entry.path + ".kind must be MODEL or GROUP");
     }
-    AgentModelEditablePropertiesDTO properties = new AgentModelEditablePropertiesDTO();
-    properties.setName(name);
-    properties.setKind(kind);
-    properties.setDescription(entry.optString("description"));
+    String description = entry.optString("description");
     List<String> removed = new ArrayList<>();
-    if (kind == AgentModelKind.MODEL) {
-      properties.setProviderName(entry.reqName("providerName"));
-      properties.setModelId(entry.reqString("modelId"));
+    ModelCreateDTO properties;
+    if (kind == ModelKind.MODEL) {
       Object configNode = requireObject(entry, "config");
       Object cleanedConfig =
           yaml.removeUnknownProperties(
-              AgentModelConfigDTO.class, configNode, entry.path + ".config", removed);
-      properties.setConfig(
-          yaml.convert(cleanedConfig, AgentModelConfigDTO.class, entry.path + ".config"));
+              ModelConfigDTO.class, configNode, entry.path + ".config", removed);
+      SingleModelCreateDTO single = new SingleModelCreateDTO();
+      single.setName(name);
+      single.setDescription(description);
+      single.setProviderName(entry.reqName("providerName"));
+      single.setModelId(entry.reqString("modelId"));
+      single.setConfig(yaml.convert(cleanedConfig, ModelConfigDTO.class, entry.path + ".config"));
+      properties = single;
     } else {
       Object groupNode = requireObject(entry, "group");
       Object cleanedGroup =
           yaml.removeUnknownProperties(
-              AgentModelGroupDTO.class, groupNode, entry.path + ".group", removed);
-      properties.setGroup(
-          yaml.convert(cleanedGroup, AgentModelGroupDTO.class, entry.path + ".group"));
+              ModelGroupConfigDTO.class, groupNode, entry.path + ".group", removed);
+      ModelGroupCreateDTO group = new ModelGroupCreateDTO();
+      group.setName(name);
+      group.setDescription(description);
+      group.setGroup(yaml.convert(cleanedGroup, ModelGroupConfigDTO.class, entry.path + ".group"));
+      properties = group;
     }
     // 先用写入路径校验 known 字段（含嵌套 config/group 缺必填/非法值），未知字段不能绕过硬错误。
     validateEntry(ConfigSyncKind.MODELS, name, () -> modelService.validateImport(name, properties));
@@ -291,7 +297,7 @@ public final class ConfigSyncParser {
     if (reportUnknownConfig(removed, ConfigSyncKind.MODELS, name, skipped)) {
       return null;
     }
-    return new ModelSpec(name, properties);
+    return new ModelSpec(name, kind, properties);
   }
 
   private AgentSpec parseAgent(
@@ -535,9 +541,27 @@ public final class ConfigSyncParser {
       SystemSettingsSectionsDTO settings,
       List<ConfigSyncSkipped> skipped) {}
 
-  public record ProviderSpec(String name, AgentProviderEditablePropertiesDTO properties) {}
+  public record ProviderSpec(String name, ProviderCreateDTO properties) {
 
-  public record ModelSpec(String name, AgentModelEditablePropertiesDTO properties) {}
+    ProviderType providerType() {
+      return properties.getProviderType();
+    }
+  }
+
+  public record ModelSpec(String name, ModelKind kind, ModelCreateDTO properties) {
+
+    String providerName() {
+      return properties instanceof SingleModelCreateDTO single ? single.getProviderName() : null;
+    }
+
+    ModelConfigDTO config() {
+      return properties instanceof SingleModelCreateDTO single ? single.getConfig() : null;
+    }
+
+    ModelGroupConfigDTO group() {
+      return properties instanceof ModelGroupCreateDTO group ? group.getGroup() : null;
+    }
+  }
 
   public record AgentSpec(
       String name, ModelSelection builtinModel, AgentDefinitionEditablePropertiesDTO properties) {}

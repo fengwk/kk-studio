@@ -1,5 +1,8 @@
 package fun.fengwk.kkstudio.harness.model.provider;
 
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonValue;
+
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 
@@ -59,6 +62,7 @@ public enum ProviderType {
   }
 
   /** 返回 Catalog / HTTP / database 使用的稳定 wire 值。 */
+  @JsonValue
   public String wireValue() {
     return wireValue;
   }
@@ -78,6 +82,7 @@ public enum ProviderType {
    *
    * <p>解析不做 trim 或大小写折叠，避免把非法持久化数据静默修复为另一个 Provider。
    */
+  @JsonCreator
   public static ProviderType fromWireValue(String value) {
     if (value == null) {
       throw new IllegalArgumentException("provider type wire value must not be null");

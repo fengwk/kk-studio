@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.platform.catalog.modelcatalog;
 
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModelPricingCodec;
-import fun.fengwk.kkstudio.share.catalog.AgentModelPricingDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingDTO;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelPricingCodec;
 
 /**
  * 用唯一 pricing parser 校验目录候选；只有能完整保存/求值的价格才标记为 supported。
@@ -12,9 +12,9 @@ final class CatalogPricingValidator {
 
   private CatalogPricingValidator() {}
 
-  static void validate(AgentModelPricingDTO pricing) {
+  static void validate(ModelPricingDTO pricing) {
     try {
-      AgentModelPricingCodec.parsePricing(pricing);
+      ModelPricingCodec.parsePricing(pricing);
     } catch (IllegalArgumentException error) {
       String message = error.getMessage();
       throw new CatalogPriceException(

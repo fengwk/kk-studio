@@ -136,9 +136,9 @@ select pg_temp.rejects('cluster node lease must be after last_seen_at',
             now(), now() + interval '1 minute')$$,
     '23514', 'ck_cluster_node_lease');
 
-insert into agent_provider (name, provider_type, base_url, config, connection_generation_id)
+insert into provider (name, provider_type, base_url, config, connection_generation_id)
     values ('fixture', 'openai', 'https://example.invalid', '{}', pg_temp.uid(9999));
-insert into agent_model (name, kind, provider_name, model_id, config)
+insert into model (name, kind, provider_name, model_id, config)
     values ('fixture', 'MODEL', 'fixture', 'fixture', '{}');
 insert into agent_definition (name, execution, config)
     values ('designer', '{"driver":"builtin","settings":{"modelName":"fixture","variant":null}}', '{}'),
@@ -146,20 +146,20 @@ insert into agent_definition (name, execution, config)
 
 -- 名称是跨 MODEL/GROUP 的全局主键；MODEL/GROUP 字段形状由数据库约束保证。
 select pg_temp.rejects('agent model name is globally unique',
-    $$insert into agent_model(name,kind,provider_name,model_id,config)
+    $$insert into model(name,kind,provider_name,model_id,config)
       values('fixture','MODEL','fixture','other','{}')$$,
-    '23505', 'agent_model_pkey');
+    '23505', 'model_pkey');
 select pg_temp.rejects('model kind requires provider and wire model',
-    $$insert into agent_model(name,kind,config) values('probe-model','MODEL','{}')$$,
-    '23514', 'ck_agent_model_shape');
+    $$insert into model(name,kind,config) values('probe-model','MODEL','{}')$$,
+    '23514', 'ck_model_shape');
 select pg_temp.rejects('group kind must not carry single model fields',
-    $$insert into agent_model(name,kind,provider_name,group_config)
+    $$insert into model(name,kind,provider_name,group_config)
       values('probe-group','GROUP','fixture','{}')$$,
-    '23514', 'ck_agent_model_shape');
-insert into agent_model (name, kind, group_config) values ('probe-group', 'GROUP', '{}');
+    '23514', 'ck_model_shape');
+insert into model (name, kind, group_config) values ('probe-group', 'GROUP', '{}');
 select pg_temp.assert_true('group kind accepts only group config',
     (select group_config is not null and config is null
-        from agent_model
+        from model
         where name = 'probe-group' and kind = 'GROUP'));
 
 -- Catalog ownership and explicit unconfigured built-in models are database facts.

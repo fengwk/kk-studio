@@ -54,9 +54,10 @@ import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
-import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
-import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderRepository;
-import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderService;
+import fun.fengwk.kkstudio.platform.catalog.dto.ProviderUpdateDTO;
+import fun.fengwk.kkstudio.platform.catalog.provider.Provider;
+import fun.fengwk.kkstudio.platform.catalog.provider.ProviderRepository;
+import fun.fengwk.kkstudio.platform.catalog.provider.ProviderService;
 import fun.fengwk.kkstudio.platform.error.CatalogVersions;
 import fun.fengwk.kkstudio.platform.harness.builtin.query.ProviderRequestPreviewService;
 import fun.fengwk.kkstudio.platform.harness.builtin.query.ProviderRequestPreviewUnavailableException;
@@ -69,8 +70,8 @@ import fun.fengwk.kkstudio.platform.harness.thread.command.DatabaseTurnResolver;
 import fun.fengwk.kkstudio.platform.harness.thread.command.LiveTurnPlan;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrchestrator;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwner;
+import fun.fengwk.kkstudio.platform.secret.SecretUpdate;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
-import fun.fengwk.kkstudio.share.catalog.AgentProviderUpdateDTO;
 import fun.fengwk.kkstudio.share.runtime.HarnessProviderRequestPreviewDTO;
 import fun.fengwk.kkstudio.share.storage.StorageUploadDTO;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
@@ -127,8 +128,8 @@ class ProviderRequestPreviewIntegrationTest extends WebPostgresTestSupport {
   @Autowired private ProviderRequestPreviewService previewService;
   @Autowired private DatabaseTurnResolver turnResolver;
   @Autowired private DatabaseProviderResolutionService providerResolution;
-  @Autowired private AgentProviderService agentProviderService;
-  @Autowired private AgentProviderRepository agentProviderRepository;
+  @Autowired private ProviderService agentProviderService;
+  @Autowired private ProviderRepository agentProviderRepository;
   @Autowired private StorageUploadService storageUploadService;
   @Autowired private InMemoryS3StorageService s3Storage;
   @Autowired private JdbcTemplate jdbc;
@@ -769,12 +770,11 @@ class ProviderRequestPreviewIntegrationTest extends WebPostgresTestSupport {
 
   /** 真实 provider 连接配置：把 fixture seed 的 stub provider 指到本地 deterministic SSE 服务。 */
   private void pointStubProviderAtLocalServer() {
-    AgentProvider provider = agentProviderRepository.getByName("stub");
+    Provider provider = agentProviderRepository.getByName("stub");
     assertNotNull(provider, "fixture seed 必须提供 stub provider");
-    AgentProviderUpdateDTO update = new AgentProviderUpdateDTO();
-    update.setProviderType("openai");
+    ProviderUpdateDTO update = new ProviderUpdateDTO();
     update.setBaseUrl(providerBaseUrl());
-    update.setCredential("stub-key");
+    update.setCredential(SecretUpdate.set("stub-key"));
     update.setModelCallTimeoutMillis(30_000L);
     update.setModelCallIdleTimeoutMillis(10_000L);
     update.setExpectedVersion(CatalogVersions.format(provider.version()));

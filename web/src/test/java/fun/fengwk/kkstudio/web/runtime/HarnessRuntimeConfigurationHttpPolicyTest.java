@@ -11,9 +11,9 @@ import org.junit.jupiter.api.Test;
 import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.api.retry.ModelHttpErrorPolicy;
-import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
-import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderConfigurationCodec;
-import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderRepository;
+import fun.fengwk.kkstudio.platform.catalog.provider.Provider;
+import fun.fengwk.kkstudio.platform.catalog.provider.ProviderConfigurationCodec;
+import fun.fengwk.kkstudio.platform.catalog.provider.ProviderRepository;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsTestFixture;
@@ -26,9 +26,9 @@ import java.util.function.Function;
 /** 生产 HTTP 策略解析：Provider 覆盖优先于系统名单，省略继承、空数组禁用。 */
 class HarnessRuntimeConfigurationHttpPolicyTest {
 
-  private final AgentProviderConfigurationCodec codec =
-      new AgentProviderConfigurationCodec(JsonMapper.builder().build());
-  private final Map<String, AgentProvider> providers = new HashMap<>();
+  private final ProviderConfigurationCodec codec =
+      new ProviderConfigurationCodec(JsonMapper.builder().build());
+  private final Map<String, Provider> providers = new HashMap<>();
 
   @Test
   void providerOverrideTakesPriorityOverSystemList() {
@@ -70,8 +70,8 @@ class HarnessRuntimeConfigurationHttpPolicyTest {
   }
 
   /** 只读 Provider 仓库替身：仅 getByName 参与策略解析。 */
-  private AgentProviderRepository repository() {
-    AgentProviderRepository repository = mock(AgentProviderRepository.class);
+  private ProviderRepository repository() {
+    ProviderRepository repository = mock(ProviderRepository.class);
     when(repository.getByName(anyString()))
         .thenAnswer(invocation -> providers.get(invocation.<String>getArgument(0)));
     return repository;
@@ -108,7 +108,7 @@ class HarnessRuntimeConfigurationHttpPolicyTest {
         SystemSettingsTestFixture.DEFAULT.advanced());
   }
 
-  private static AgentProvider provider(String name, String configJson) {
-    return AgentProvider.builder().name(name).configJson(configJson).build();
+  private static Provider provider(String name, String configJson) {
+    return Provider.builder().name(name).configJson(configJson).build();
   }
 }

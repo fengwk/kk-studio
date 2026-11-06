@@ -68,9 +68,9 @@ registerCase({
   id: 'seed.structured_model_config',
   level: 'L1',
   title: 'Model 公开契约与 Pi 默认目录一致',
-  docs: 'GET /api/models：按全局逻辑名完整匹配 Pi 0.82.1 快照与公开字段集合；种子持久化形态的 variant 省略 protocolOptionsJson，公开契约返回 canonical 字符串（null/空 ≡ "{}"）',
+  docs: 'GET /api/platform/models：按全局逻辑名完整匹配 Pi 0.82.1 快照与公开字段集合；种子持久化形态的 variant 省略 protocolOptionsJson，公开契约返回 canonical 字符串（null/空 ≡ "{}"）',
   async run(ctx) {
-    const { json } = await ctx.call('GET', '/api/models?pageNumber=1&pageSize=50')
+    const { json } = await ctx.call('GET', '/api/platform/models?pageNumber=1&pageSize=50')
     const models = pageResults(json)
     const actualCatalog = models
       .map((model) => ({
@@ -99,11 +99,11 @@ registerCase({
       })}`,
     )
     for (const model of models) {
-      if (model.kind === 'MODEL') {
+      if (model.type === 'MODEL') {
         assertExactFields(
           model,
-          ['name', 'kind', 'providerName', 'modelId', 'description', 'config', 'version', 'createTime', 'updateTime'],
-          'AgentModelDTO(MODEL)',
+          ['name', 'type', 'providerName', 'modelId', 'description', 'config', 'version', 'createdAt', 'updatedAt'],
+          'ModelDTO(MODEL)',
         )
         assert(model.group === undefined, 'MODEL wire contract must omit group')
         assert(model.providerName && model.name, JSON.stringify(model))
@@ -113,11 +113,11 @@ registerCase({
           JSON.stringify(model.config),
         )
         assert(Number(model.config?.limit?.context || 0) > 0, JSON.stringify(model.config))
-      } else if (model.kind === 'GROUP') {
+      } else if (model.type === 'GROUP') {
         assertExactFields(
           model,
-          ['name', 'kind', 'description', 'config', 'group', 'version', 'createTime', 'updateTime'],
-          'AgentModelDTO(GROUP)',
+          ['name', 'type', 'description', 'config', 'group', 'version', 'createdAt', 'updatedAt'],
+          'ModelDTO(GROUP)',
         )
         assert(model.group && Array.isArray(model.group.members), 'GROUP wire contract must include group with members')
       } else {
@@ -166,7 +166,7 @@ registerCase({
 
     const { json: providersJson } = await ctx.call(
       'GET',
-      '/api/providers?pageNumber=1&pageSize=50',
+      '/api/platform/providers?pageNumber=1&pageSize=50',
     )
     const providers = pageResults(providersJson)
     const expectedProviderTypes = new Map([
@@ -185,7 +185,7 @@ registerCase({
       const hasBaseUrl = Object.hasOwn(provider, 'baseUrl')
       assert(
         !hasBaseUrl || (typeof provider.baseUrl === 'string' && provider.baseUrl.length > 0),
-        `AgentProviderDTO.baseUrl must be omitted or a non-empty string: ${JSON.stringify(provider)}`,
+        `ProviderDTO.baseUrl must be omitted or a non-empty string: ${JSON.stringify(provider)}`,
       )
       assertExactFields(
         provider,
@@ -194,7 +194,7 @@ registerCase({
           'description',
           'providerType',
           ...(hasBaseUrl ? ['baseUrl'] : []),
-          'configured',
+          'credential',
           'modelCallTimeoutMillis',
           'modelCallIdleTimeoutMillis',
           'modelHttpRetryStatusCodes',
@@ -202,7 +202,7 @@ registerCase({
           'createTime',
           'updateTime',
         ],
-        'AgentProviderDTO',
+        'ProviderDTO',
       )
     }
     ctx.vars.provider = providers.find((provider) => provider.name === 'minimax')
@@ -213,9 +213,9 @@ registerCase({
   id: 'catalog.internal_tools_hidden',
   level: 'L1',
   title: '内部 HOST Tool 不进入 Agent 可选目录',
-  docs: 'GET /api/tools 只返回 SELECTABLE Tool；load_skill/task 由 skills/subagents 派生激活，不能直接写入 Agent config.tools；Goal contributor 只贡献 get_goal/update_goal（目标正文由用户维护，无创建工具）',
+  docs: 'GET /api/platform/tools 只返回 SELECTABLE Tool；load_skill/task 由 skills/subagents 派生激活，不能直接写入 Agent config.tools；Goal contributor 只贡献 get_goal/update_goal（目标正文由用户维护，无创建工具）',
   async run(ctx) {
-    const tools = (await ctx.call('GET', '/api/tools')).json
+    const tools = (await ctx.call('GET', '/api/platform/tools')).json
     assert(Array.isArray(tools), JSON.stringify(tools))
     const names = tools.map((tool) => String(tool.name))
     assert(!names.includes('load_skill'), `load_skill must be internal: ${JSON.stringify(names)}`)
@@ -381,7 +381,7 @@ registerCase({
     }
     try {
       // 专用 Provider：endpoint 与凭据都缺省，ProviderDescriptor 要求 endpoint 非空白，因此该配置下预览必定无法解析 Provider。
-      const providerResponse = await ctx.call('POST', '/api/providers', {
+      const providerResponse = await ctx.call('POST', '/api/platform/providers', {
         name: `e2e-provider-preview-${suffix}`,
         description: 'Local trap provider for readonly request preview E2E.',
         providerType: 'openai',
@@ -393,8 +393,8 @@ registerCase({
       provider = providerResponse.json
       assert(provider?.name && provider?.version, JSON.stringify(providerResponse.json))
 
-      const modelResponse = await ctx.call('POST', '/api/models', {
-        kind: 'MODEL',
+      const modelResponse = await ctx.call('POST', '/api/platform/models', {
+        type: 'MODEL',
         providerName: provider.name,
         name: `e2e-model-preview-${suffix}`,
         modelId: `wire-preview-${suffix}`,
@@ -488,11 +488,14 @@ registerCase({
       await trap.start()
       const providerUpdate = await ctx.call(
         'PUT',
-        `/api/providers/${encodeURIComponent(provider.name)}`,
+        `/api/platform/providers/${encodeURIComponent(provider.name)}`,
         {
           expectedVersion: provider.version,
-          providerType: 'openai',
+          description: 'Local trap provider for readonly request preview E2E.',
+          credential: { operation: 'KEEP' },
           baseUrl: trap.baseUrl('/v1'),
+          modelCallTimeoutMillis: 30_000,
+          modelCallIdleTimeoutMillis: 10_000,
         },
       )
       provider = providerUpdate.json
@@ -629,7 +632,7 @@ registerCase({
         if (model?.name) {
           await ctx.call(
             'DELETE',
-            `/api/models/${encodePathTail(model.name)}?expectedVersion=${encodeURIComponent(
+            `/api/platform/models/${encodePathTail(model.name)}?expectedVersion=${encodeURIComponent(
               model.version,
             )}`,
           )
@@ -639,7 +642,7 @@ registerCase({
         if (provider?.name) {
           await ctx.call(
             'DELETE',
-            `/api/providers/${encodeURIComponent(
+            `/api/platform/providers/${encodeURIComponent(
               provider.name,
             )}?expectedVersion=${encodeURIComponent(provider.version)}`,
           )
@@ -2506,20 +2509,20 @@ registerCase({
   id: 'frontend.proxy_model_contract',
   level: 'L1',
   title: 'Frontend 代理 model 契约',
-  docs: '5173 /api/models 返回 name-based 结构化 config',
+  docs: '5173 /api/platform/models 返回 name-based 结构化 config',
   async run(ctx) {
     assert(ctx.vars.frontendUrl, 'frontendUrl required')
     const { json } = await httpJson(
       ctx.vars.frontendUrl,
       'GET',
-      '/api/models?pageNumber=1&pageSize=1',
+      '/api/platform/models?pageNumber=1&pageSize=1',
     )
     const model = pageResults(json)[0]
-    assert(model?.kind === 'MODEL' && model?.providerName && model?.name && model?.config?.defaultVariant, JSON.stringify(model))
+    assert(model?.type === 'MODEL' && model?.providerName && model?.name && model?.config?.defaultVariant, JSON.stringify(model))
     assertExactFields(
       model,
-      ['name', 'kind', 'providerName', 'modelId', 'description', 'config', 'version', 'createTime', 'updateTime'],
-      'AgentModelDTO(MODEL)',
+      ['name', 'type', 'providerName', 'modelId', 'description', 'config', 'version', 'createdAt', 'updatedAt'],
+      'ModelDTO(MODEL)',
     )
     assert(model.group === undefined, 'MODEL wire contract must omit group')
   },
@@ -2552,7 +2555,7 @@ async function resolveAnyCatalogTarget(ctx) {
     (await ctx.call('GET', '/api/agents?pageNumber=1&pageSize=50')).json,
   )
   const models = pageResults(
-    (await ctx.call('GET', '/api/models?pageNumber=1&pageSize=50')).json,
+    (await ctx.call('GET', '/api/platform/models?pageNumber=1&pageSize=50')).json,
   )
   for (const agent of agents) {
     if (agent.execution?.driver !== 'builtin') continue

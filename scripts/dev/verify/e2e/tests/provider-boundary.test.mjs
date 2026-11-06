@@ -9,10 +9,10 @@ test('free mode accepts only an entirely unconfigured provider catalog', () => {
     assertProviderExecutionBoundary({
       real: false,
       providers: [
-        { name: 'google', configured: false, baseUrl: null },
-        { name: 'openai', configured: false },
-        { name: 'minimax-anthropic', configured: false, baseUrl: null },
-        { name: 'deepseek', configured: false, baseUrl: null },
+        { name: 'google', credential: { configured: false }, baseUrl: null },
+        { name: 'openai', credential: { configured: false } },
+        { name: 'minimax-anthropic', credential: { configured: false }, baseUrl: null },
+        { name: 'deepseek', credential: { configured: false }, baseUrl: null },
       ],
     }),
   )
@@ -25,12 +25,12 @@ test('free mode fails closed without exposing provider details', () => {
     [],
     null,
     [null],
-    [{ name: 'minimax', configured: true, baseUrl: null }],
-    [{ name: 'minimax', configured: false, baseUrl: endpoint }],
+    [{ name: 'minimax', credential: { configured: true }, baseUrl: null }],
+    [{ name: 'minimax', credential: { configured: false }, baseUrl: endpoint }],
     [{ name: 'minimax', baseUrl: null }],
     [
-      { name: 'minimax', configured: false, baseUrl: null },
-      { name: 'openai', configured: true, baseUrl: null },
+      { name: 'minimax', credential: { configured: false }, baseUrl: null },
+      { name: 'openai', credential: { configured: true }, baseUrl: null },
     ],
   ]) {
     let error = null
@@ -53,7 +53,7 @@ test('real mode bypasses the free-provider state guard', () => {
       providers: [
         {
           name: 'minimax',
-          configured: true,
+          credential: { configured: true },
           baseUrl: 'https://example.invalid/v1',
         },
       ],
@@ -66,7 +66,7 @@ test('real mode bypasses the free-provider state guard', () => {
     () =>
       assertProviderExecutionBoundary({
         real: 'true',
-        providers: [{ name: 'minimax', configured: true }],
+        providers: [{ name: 'minimax', credential: { configured: true } }],
       }),
     /free E2E requires every catalog provider/,
   )

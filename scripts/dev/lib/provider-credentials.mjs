@@ -105,7 +105,7 @@ async function defaultRequest(url, { body, headers = {}, timeoutMillis = 30000 }
 export async function getProviders(backendUrl, request = defaultRequest) {
   const base = backendUrl.replace(/\/+$/, '')
   try {
-    return await request(`${base}/api/providers?pageNumber=1&pageSize=50`)
+    return await request(`${base}/api/platform/providers`)
   } catch {
     throw new Error('Failed to fetch existing providers from backend')
   }
@@ -120,7 +120,7 @@ function quoteAll(value) {
 export async function putProvider(backendUrl, providerName, payload, request = defaultRequest) {
   const base = backendUrl.replace(/\/+$/, '')
   try {
-    return await request(`${base}/api/providers/${quoteAll(providerName)}`, {
+    return await request(`${base}/api/platform/providers/${quoteAll(providerName)}`, {
       body: JSON.stringify(payload),
       headers: { 'Content-Type': 'application/json' },
     })
@@ -138,9 +138,8 @@ export function buildPayload(baseUrl, apiKey, current, spec = null) {
   const description = current.description || (spec !== null ? spec.defaultDescription : '')
   return {
     description,
-    providerType,
     baseUrl,
-    credential: apiKey,
+    credential: { operation: 'SET', value: apiKey },
     expectedVersion: String(current.version),
     modelCallTimeoutMillis: Math.trunc(Number(current.modelCallTimeoutMillis || DEFAULT_MODEL_CALL_TIMEOUT_MILLIS)),
     modelCallIdleTimeoutMillis: Math.trunc(
@@ -181,7 +180,7 @@ export async function syncProviderSpecs(backendUrl, specs, envValues, request = 
 
   // Step 3: Fetch existing providers once
   const listed = await getProviders(base, request)
-  const rows = listed?.results || []
+  const rows = Array.isArray(listed) ? listed : []
   const rowMap = new Map(
     rows.filter((row) => row !== null && typeof row === 'object' && 'name' in row).map((row) => [row.name, row]),
   )
@@ -208,7 +207,7 @@ export async function syncProviderSpecs(backendUrl, specs, envValues, request = 
   const results = new Map()
   for (const [spec, payload] of validations) {
     const body = await putProvider(base, spec.name, payload, request)
-    results.set(spec.name, `${spec.name}: configured=${flag(body?.configured)} baseUrl_set=${flag(body?.baseUrl)}`)
+    results.set(spec.name, `${spec.name}: configured=${flag(body?.credential?.configured)} baseUrl_set=${flag(body?.baseUrl)}`)
   }
 
   // Step 6: Return formatted lines in deterministic spec order

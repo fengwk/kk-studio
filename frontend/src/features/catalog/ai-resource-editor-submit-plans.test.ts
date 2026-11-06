@@ -39,7 +39,7 @@ describe('ai-resource-editor-submit-plans', () => {
       data: { expectedVersion: '7', name: 'renamed-model' },
     })
     if (plan.kind !== 'model' || plan.mode !== 'edit') return
-    expect(plan.data).toHaveProperty('kind', 'MODEL')
+    expect(plan.data).toHaveProperty('type', 'MODEL')
     // PUT 整体替换：Provider 是必填属性而不是路径身份。
     expect(plan.data).toHaveProperty('providerName', 'unrelated-provider')
     expect(plan.data.name).toBe('renamed-model')

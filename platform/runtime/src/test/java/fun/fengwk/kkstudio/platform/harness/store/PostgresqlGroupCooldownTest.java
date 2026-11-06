@@ -58,9 +58,9 @@ class PostgresqlGroupCooldownTest {
 
     // 模拟 catalog writer 的合法 group config 修改事务：升版本并清除旧冷却。
     execute(
-        "update agent_model set version = 1, updated_at = updated_at + interval '1 millisecond'"
+        "update model set version = 1, updated_at = updated_at + interval '1 millisecond'"
             + " where name = 'group'",
-        "delete from agent_model_group_cooldown where group_name = 'group'");
+        "delete from model_group_cooldown where group_name = 'group'");
 
     freeze("model", now.plusSeconds(60));
 
@@ -68,7 +68,7 @@ class PostgresqlGroupCooldownTest {
     assertFalse(cooling(store, "model"));
   }
 
-  /** 并发旧 callback 必须等待 catalog writer 的 agent_model 行锁；提交后看到新版本即放弃写入，且不死锁。 */
+  /** 并发旧 callback 必须等待 catalog writer 的 model 行锁；提交后看到新版本即放弃写入，且不死锁。 */
   @Test
   void concurrentStaleCallbackWaitsForCatalogWriterAndCannotWriteNewVersion() throws Exception {
     CountDownLatch updated = new CountDownLatch(1);
@@ -83,11 +83,11 @@ class PostgresqlGroupCooldownTest {
                   connection.setAutoCommit(false);
                   try (Statement statement = connection.createStatement()) {
                     statement.executeUpdate(
-                        "update agent_model set version = 1,"
+                        "update model set version = 1,"
                             + " updated_at = updated_at + interval '1 millisecond'"
                             + " where name = 'group'");
                     statement.executeUpdate(
-                        "delete from agent_model_group_cooldown where group_name = 'group'");
+                        "delete from model_group_cooldown where group_name = 'group'");
                   }
                   updated.countDown();
                   if (!release.await(10, TimeUnit.SECONDS)) {
@@ -260,8 +260,7 @@ class PostgresqlGroupCooldownTest {
   private static int cooldownRows() {
     try (Connection connection = PostgresqlHarnessStoreFixture.dataSource().getConnection();
         Statement statement = connection.createStatement();
-        ResultSet result =
-            statement.executeQuery("select count(*) from agent_model_group_cooldown")) {
+        ResultSet result = statement.executeQuery("select count(*) from model_group_cooldown")) {
       result.next();
       return result.getInt(1);
     } catch (SQLException error) {
@@ -274,7 +273,7 @@ class PostgresqlGroupCooldownTest {
         Statement statement = connection.createStatement();
         ResultSet result =
             statement.executeQuery(
-                "select cooldown_until from agent_model_group_cooldown"
+                "select cooldown_until from model_group_cooldown"
                     + " where group_name = 'group' and member_model_name = 'model'")) {
       assertTrue(result.next());
       return result.getTimestamp(1).toInstant();
@@ -287,18 +286,18 @@ class PostgresqlGroupCooldownTest {
     try (Connection connection = PostgresqlHarnessStoreFixture.dataSource().getConnection()) {
       try (PreparedStatement provider =
           connection.prepareStatement(
-              "insert into agent_provider"
+              "insert into provider"
                   + " (name, provider_type, config, connection_generation_id)"
                   + " values ('provider', 'openai', '{}'::jsonb, ?)")) {
         provider.setObject(1, UUID.fromString("00000000-0000-0000-0000-000000000001"));
         provider.executeUpdate();
       }
       execute(
-          "insert into agent_model (name, kind, provider_name, model_id, config)"
+          "insert into model (name, kind, provider_name, model_id, config)"
               + " values ('model', 'MODEL', 'provider', 'model', '{}'::jsonb)",
-          "insert into agent_model (name, kind, provider_name, model_id, config)"
+          "insert into model (name, kind, provider_name, model_id, config)"
               + " values ('model2', 'MODEL', 'provider', 'model2', '{}'::jsonb)",
-          "insert into agent_model (name, kind, group_config)"
+          "insert into model (name, kind, group_config)"
               + " values ('group', 'GROUP', '{}'::jsonb)");
     } catch (SQLException error) {
       throw new IllegalStateException(error);

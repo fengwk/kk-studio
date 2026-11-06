@@ -20,13 +20,14 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderFactory;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMediaCapabilities;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
-import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderConfigurationCodec;
-import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderRepository;
-import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderService;
+import fun.fengwk.kkstudio.platform.catalog.dto.ProviderCreateDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ProviderDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ProviderUpdateDTO;
+import fun.fengwk.kkstudio.platform.catalog.provider.ProviderConfigurationCodec;
+import fun.fengwk.kkstudio.platform.catalog.provider.ProviderRepository;
+import fun.fengwk.kkstudio.platform.catalog.provider.ProviderService;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
-import fun.fengwk.kkstudio.share.catalog.AgentProviderCreateDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentProviderDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentProviderUpdateDTO;
+import fun.fengwk.kkstudio.platform.secret.SecretUpdate;
 
 import java.time.Duration;
 import java.util.List;
@@ -37,14 +38,14 @@ import java.util.stream.Collectors;
 
 /**
  * 基于 PostgreSQL 的 attempt-time Provider 解析证据：冻结 Provider type 与 connection generation 必须和当前 {@code
- * agent_provider} 行一致；连接配置更新、删除或同名重建后，旧 invocation 确定性拒绝，重新规划的 invocation 才能使用当前
+ * provider} 行一致；连接配置更新、删除或同名重建后，旧 invocation 确定性拒绝，重新规划的 invocation 才能使用当前
  * credential/endpoint/timeout 与 {@link ProviderFactory}。
  */
 class DatabaseProviderResolutionServiceIntegrationTest extends PostgresSpringTestSupport {
 
-  @Autowired private AgentProviderService providerService;
-  @Autowired private AgentProviderRepository providerRepository;
-  @Autowired private AgentProviderConfigurationCodec configurationCodec;
+  @Autowired private ProviderService providerService;
+  @Autowired private ProviderRepository providerRepository;
+  @Autowired private ProviderConfigurationCodec configurationCodec;
   @Autowired private ProviderResourceMaterializer providerResourceMaterializer;
 
   @Test
@@ -54,7 +55,7 @@ class DatabaseProviderResolutionServiceIntegrationTest extends PostgresSpringTes
     CapturingFactory openAiResponses = new CapturingFactory(ProviderType.OPENAI_RESPONSES);
     DatabaseProviderResolutionService resolution = resolution(openAi, openAiResponses);
 
-    AgentProviderDTO created =
+    ProviderDTO created =
         createProvider(name, "openai", "https://original.example/v1", "original-secret", 12_000L);
     UUID firstGen = connectionGenerationId(name);
     ProviderRequest request =
@@ -71,13 +72,13 @@ class DatabaseProviderResolutionServiceIntegrationTest extends PostgresSpringTes
     assertEquals("https://original.example/v1", openAi.descriptor.endpoint());
     assertEquals(firstGen, openAi.descriptor.connectionGenerationId());
 
-    AgentProviderUpdateDTO liveUpdate = new AgentProviderUpdateDTO();
-    liveUpdate.setProviderType("openai");
+    ProviderUpdateDTO liveUpdate = new ProviderUpdateDTO();
     liveUpdate.setBaseUrl("https://updated.example/v2");
-    liveUpdate.setCredential("updated-secret");
+    liveUpdate.setCredential(SecretUpdate.set("updated-secret"));
     liveUpdate.setModelCallTimeoutMillis(60_000L);
+    liveUpdate.setModelCallIdleTimeoutMillis(120_000L);
     liveUpdate.setExpectedVersion(created.getVersion());
-    AgentProviderDTO updated = providerService.updateProvider(name, liveUpdate);
+    ProviderDTO updated = providerService.updateProvider(name, liveUpdate);
 
     IllegalArgumentException generationDrift =
         assertThrows(
@@ -95,18 +96,6 @@ class DatabaseProviderResolutionServiceIntegrationTest extends PostgresSpringTes
     assertEquals("https://updated.example/v2", openAi.descriptor.endpoint());
     assertNotEquals(firstGen, secondGen, "凭据与 endpoint 更新必须轮换 generationId");
     assertEquals(secondGen, openAi.descriptor.connectionGenerationId());
-
-    AgentProviderUpdateDTO typeUpdate = new AgentProviderUpdateDTO();
-    typeUpdate.setProviderType("openai_responses");
-    typeUpdate.setExpectedVersion(updated.getVersion());
-    providerService.updateProvider(name, typeUpdate);
-    IllegalArgumentException typeDrift =
-        assertThrows(
-            IllegalArgumentException.class,
-            () -> resolution.resolve(ProviderType.OPENAI, secondGen, request));
-    assertEquals(
-        "provider type drift: frozen=OPENAI current=OPENAI_RESPONSES", typeDrift.getMessage());
-    assertEquals(0, openAiResponses.openCount, "协议漂移不得打开新 factory");
   }
 
   @Test
@@ -115,7 +104,7 @@ class DatabaseProviderResolutionServiceIntegrationTest extends PostgresSpringTes
     CapturingFactory openAi = new CapturingFactory(ProviderType.OPENAI);
     DatabaseProviderResolutionService resolution = resolution(openAi);
 
-    AgentProviderDTO created =
+    ProviderDTO created =
         createProvider(name, "openai", "https://original.example/v1", "secret", 12_000L);
     UUID generationId = connectionGenerationId(name);
     providerService.deleteProvider(name, created.getVersion());
@@ -137,12 +126,12 @@ class DatabaseProviderResolutionServiceIntegrationTest extends PostgresSpringTes
     CapturingFactory openAi = new CapturingFactory(ProviderType.OPENAI);
     DatabaseProviderResolutionService resolution = resolution(openAi);
 
-    AgentProviderDTO created =
+    ProviderDTO created =
         createProvider(name, "openai", "https://first.example/v1", "first-secret", 12_000L);
     UUID firstGenerationId = connectionGenerationId(name);
     providerService.deleteProvider(name, created.getVersion());
 
-    AgentProviderDTO recreated =
+    ProviderDTO recreated =
         createProvider(name, "openai", "https://second.example/v1", "second-secret", 30_000L);
     ProviderRequest request = request(name, ProviderCacheControl.none());
 
@@ -173,11 +162,11 @@ class DatabaseProviderResolutionServiceIntegrationTest extends PostgresSpringTes
         providerResourceMaterializer);
   }
 
-  private AgentProviderDTO createProvider(
+  private ProviderDTO createProvider(
       String name, String providerType, String baseUrl, String credential, long timeoutMillis) {
-    AgentProviderCreateDTO create = new AgentProviderCreateDTO();
+    ProviderCreateDTO create = new ProviderCreateDTO();
     create.setName(name);
-    create.setProviderType(providerType);
+    create.setProviderType(ProviderType.fromWireValue(providerType));
     create.setBaseUrl(baseUrl);
     create.setCredential(credential);
     create.setModelCallTimeoutMillis(timeoutMillis);

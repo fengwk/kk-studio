@@ -25,16 +25,16 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.cfg.JsonNodeFeature;
 
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
+import fun.fengwk.kkstudio.harness.model.ModelInputModality;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelAbilitiesDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelConfigDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelLimitDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelRateSetDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelVariantDTO;
 import fun.fengwk.kkstudio.platform.pluginhost.credential.PluginCredentialRefreshDispatcher;
 import fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelAbilitiesDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelConfigDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelInputModality;
-import fun.fengwk.kkstudio.share.catalog.AgentModelLimitDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelPricingDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelRateSetDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelVariantDTO;
-import fun.fengwk.kkstudio.share.catalog.PromptCacheRetention;
 import fun.fengwk.kkstudio.share.runtime.HarnessExecutionSelectionDTO;
 import fun.fengwk.kkstudio.share.skill.SkillRefDTO;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
@@ -105,6 +105,7 @@ public abstract class ConfigSyncTestSupport extends WebPostgresTestSupport {
   }
 
   protected JsonNode data(MvcResult result) throws Exception {
+    // 成功响应已改为直接资源；分页列表仍在根节点携带 results。
     return objectMapper
         .reader()
         .with(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
@@ -150,18 +151,18 @@ public abstract class ConfigSyncTestSupport extends WebPostgresTestSupport {
   }
 
   /** 一个合法、带可辨识精度与 protocolOptionsJson 的 Model config。 */
-  protected static AgentModelConfigDTO modelConfig(String protocolOptionsJson, String inputPrice) {
-    AgentModelLimitDTO limit = new AgentModelLimitDTO();
+  protected static ModelConfigDTO modelConfig(String protocolOptionsJson, String inputPrice) {
+    ModelLimitDTO limit = new ModelLimitDTO();
     limit.setContext(4096);
     limit.setOutput(1024);
 
-    AgentModelAbilitiesDTO abilities = new AgentModelAbilitiesDTO();
+    ModelAbilitiesDTO abilities = new ModelAbilitiesDTO();
     abilities.setTools(true);
     abilities.setReasoning(false);
-    abilities.setInputModalities(List.of(AgentModelInputModality.TEXT));
+    abilities.setInputModalities(List.of(ModelInputModality.TEXT));
 
-    AgentModelPricingDTO pricing = new AgentModelPricingDTO();
-    AgentModelRateSetDTO base = new AgentModelRateSetDTO();
+    ModelPricingDTO pricing = new ModelPricingDTO();
+    ModelRateSetDTO base = new ModelRateSetDTO();
     base.setInput(new BigDecimal(inputPrice));
     base.setOutput(new BigDecimal("2.5"));
     base.setCacheRead(BigDecimal.ZERO);
@@ -172,12 +173,13 @@ public abstract class ConfigSyncTestSupport extends WebPostgresTestSupport {
     pricing.setOverrides(List.of());
     pricing.setMultipliers(List.of());
 
-    AgentModelVariantDTO variant = new AgentModelVariantDTO();
+    ModelVariantDTO variant = new ModelVariantDTO();
     variant.setId("default");
     variant.setPromptCacheRetention(PromptCacheRetention.NONE);
     variant.setProtocolOptionsJson(protocolOptionsJson);
+    variant.setPromptCacheRetention(PromptCacheRetention.SHORT);
 
-    AgentModelConfigDTO config = new AgentModelConfigDTO();
+    ModelConfigDTO config = new ModelConfigDTO();
     config.setLimit(limit);
     config.setAbilities(abilities);
     config.setPricing(pricing);

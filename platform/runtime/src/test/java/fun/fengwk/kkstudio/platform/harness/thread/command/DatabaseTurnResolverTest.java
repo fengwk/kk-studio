@@ -97,19 +97,22 @@ import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelGroupConfigDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelGroupMemberDTO;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpDiscoveryStatus;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServer;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerRepository;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpTool;
 import fun.fengwk.kkstudio.platform.catalog.mcp.runtime.McpToolCatalog;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModelGroupConfigCodec;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRuntimeConfigParser;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRuntimeConfigParser.ParsedAgentModelConfig;
-import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
-import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderConfigurationCodec;
-import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderRepository;
+import fun.fengwk.kkstudio.platform.catalog.model.Model;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelGroupConfigCodec;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelKind;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelRepository;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelRuntimeConfigParser;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelRuntimeConfigParser.ParsedAgentModelConfig;
+import fun.fengwk.kkstudio.platform.catalog.provider.Provider;
+import fun.fengwk.kkstudio.platform.catalog.provider.ProviderConfigurationCodec;
+import fun.fengwk.kkstudio.platform.catalog.provider.ProviderRepository;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillManifestEntry;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageGitSource;
@@ -136,9 +139,6 @@ import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 import fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelGroupDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelGroupMemberDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelKind;
 import fun.fengwk.kkstudio.share.skill.SkillRefDTO;
 
 import java.time.Duration;
@@ -218,7 +218,7 @@ class DatabaseTurnResolverTest {
     assertEquals("provider", requestSpec.model().providerName());
     assertEquals("model", requestSpec.model().modelName());
     assertEquals(new UUID(0L, 42L), requestSpec.providerConnectionGenerationId());
-    // 上游 wire 标识来自 AgentModel.modelId，与 catalog 逻辑名相互独立。
+    // 上游 wire 标识来自 Model.modelId，与 catalog 逻辑名相互独立。
     assertEquals("wire-model", requestSpec.model().modelId());
     assertEquals(Set.of(ModelInputModality.TEXT), requestSpec.model().inputModalities());
     assertEquals("custom", requestSpec.variant().id());
@@ -1665,7 +1665,7 @@ class DatabaseTurnResolverTest {
             PromptCacheRetention.SHORT,
             true);
     fixture.editProvider(provider -> provider.baseUrl("https://example.invalid/v1"));
-    AgentModel model = fixture.models.getByName("model");
+    Model model = fixture.models.getByName("model");
     when(fixture.models.getByName("model"))
         .thenReturn(model.toBuilder().modelId("gpt-5.6").build());
     ProviderFactory factory = fixture.resolverProviderFactory();
@@ -1687,7 +1687,7 @@ class DatabaseTurnResolverTest {
     DatabaseProviderResolutionService resolution =
         new DatabaseProviderResolutionService(
             fixture.providers,
-            new AgentProviderConfigurationCodec(JsonMapper.builder().build()),
+            new ProviderConfigurationCodec(JsonMapper.builder().build()),
             Map.of(factory.providerType(), factory),
             new ProviderResourceMaterializer(blobs, content));
     ResolvedExecution execution =
@@ -2731,7 +2731,7 @@ class DatabaseTurnResolverTest {
                 "assistant", BuiltinExecution.of(ModelSelection.group("group")), null));
     when(fixture.models.getByName("second")).thenReturn(null);
     assertEquals("group member model not found: second", fixture.rejected(path).error().message());
-    AgentModel nested = AgentModel.builder().name("second").kind(AgentModelKind.GROUP).build();
+    Model nested = Model.builder().name("second").kind(ModelKind.GROUP).build();
     when(fixture.models.getByName("second")).thenReturn(nested);
     assertEquals(
         "group member is not a single model: second", fixture.rejected(path).error().message());
@@ -2800,19 +2800,19 @@ class DatabaseTurnResolverTest {
                 new ModelVariant("careful", "high", PromptCacheRetention.NONE, null)),
             "fast",
             pricing()));
-    AgentModel group =
-        AgentModel.builder()
+    Model group =
+        Model.builder()
             .name("group")
-            .kind(AgentModelKind.GROUP)
+            .kind(ModelKind.GROUP)
             .version(7L)
             .groupConfigJson("group-config")
             .build();
     when(fixture.models.getByName("group")).thenReturn(group);
-    var config = new AgentModelGroupDTO();
-    var first = new AgentModelGroupMemberDTO();
+    var config = new ModelGroupConfigDTO();
+    var first = new ModelGroupMemberDTO();
     first.setModelName("model");
     first.setVariant("custom");
-    var second = new AgentModelGroupMemberDTO();
+    var second = new ModelGroupMemberDTO();
     second.setModelName("second");
     second.setVariant("fast");
     config.setMembers(List.of(first, second));
@@ -3000,14 +3000,12 @@ class DatabaseTurnResolverTest {
   private static final class Fixture {
 
     private final AgentDefinitionRepository agents = mock(AgentDefinitionRepository.class);
-    private final AgentModelRepository models = mock(AgentModelRepository.class);
-    private final AgentProviderRepository providers = mock(AgentProviderRepository.class);
+    private final ModelRepository models = mock(ModelRepository.class);
+    private final ProviderRepository providers = mock(ProviderRepository.class);
     private final AgentDefinitionConfigCodec agentConfigCodec =
         mock(AgentDefinitionConfigCodec.class);
-    private final AgentModelRuntimeConfigParser modelConfigParser =
-        mock(AgentModelRuntimeConfigParser.class);
-    private final AgentModelGroupConfigCodec groupConfigCodec =
-        mock(AgentModelGroupConfigCodec.class);
+    private final ModelRuntimeConfigParser modelConfigParser = mock(ModelRuntimeConfigParser.class);
+    private final ModelGroupConfigCodec groupConfigCodec = mock(ModelGroupConfigCodec.class);
     private final EnvironmentRegistry environmentRegistry = mock(EnvironmentRegistry.class);
     private final SkillPromptPathResolver skillPromptPathResolver =
         new SkillPromptPathResolver(environmentRegistry);
@@ -3019,7 +3017,7 @@ class DatabaseTurnResolverTest {
     private String observedHeadCommit;
     private AgentDefinition agent;
     private final AgentDefinitionConfigDTO agentConfig = new AgentDefinitionConfigDTO();
-    private AgentProvider provider;
+    private Provider provider;
     private final ProviderFactory providerFactory = mock(ProviderFactory.class);
 
     /** 输入 token 估算与正式发送同源：Fixture 用同一 runtime 实现绑定端口，测试期望值也来自该实现。 */
@@ -3114,16 +3112,16 @@ class DatabaseTurnResolverTest {
       bindEnvironment(ENV_B_NAME, ENV_B);
 
       editProvider(
-          AgentProvider.builder()
+          Provider.builder()
               .name("provider")
               .providerType(persistedProviderType)
               .connectionGenerationId(new UUID(0L, 42L))
               .version(0L)
               .build());
 
-      AgentModel model =
-          AgentModel.builder()
-              .kind(AgentModelKind.MODEL)
+      Model model =
+          Model.builder()
+              .kind(ModelKind.MODEL)
               .providerName("provider")
               .name("model")
               .modelId("wire-model")
@@ -3290,7 +3288,7 @@ class DatabaseTurnResolverTest {
     }
 
     /** Provider 为不可变记录：整体替换并重新绑定仓库桩。 */
-    private void editProvider(AgentProvider replacement) {
+    private void editProvider(Provider replacement) {
       provider = replacement;
       when(providers.getByName("provider")).thenReturn(provider);
     }
@@ -3303,16 +3301,16 @@ class DatabaseTurnResolverTest {
       when(agents.getByName("assistant")).thenReturn(agent);
     }
 
-    private void editProvider(Consumer<AgentProvider.AgentProviderBuilder> edit) {
-      AgentProvider.AgentProviderBuilder builder = provider.toBuilder();
+    private void editProvider(Consumer<Provider.ProviderBuilder> edit) {
+      Provider.ProviderBuilder builder = provider.toBuilder();
       edit.accept(builder);
       editProvider(builder.build());
     }
 
     private void addModel(
         String providerName, ModelSelection selection, ParsedAgentModelConfig parsedModel) {
-      AgentProvider fallbackProvider =
-          AgentProvider.builder()
+      Provider fallbackProvider =
+          Provider.builder()
               .name(providerName)
               .providerType(ProviderType.OPENAI)
               .connectionGenerationId(new UUID(0L, 43L))
@@ -3321,9 +3319,9 @@ class DatabaseTurnResolverTest {
       when(providers.getByName(providerName)).thenReturn(fallbackProvider);
 
       String configJson = providerName + "-config";
-      AgentModel fallbackModel =
-          AgentModel.builder()
-              .kind(AgentModelKind.MODEL)
+      Model fallbackModel =
+          Model.builder()
+              .kind(ModelKind.MODEL)
               .providerName(providerName)
               .name(selection.modelName())
               .modelId(selection.modelName())

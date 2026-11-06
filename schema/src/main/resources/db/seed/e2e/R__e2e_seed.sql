@@ -9,14 +9,14 @@
 -- This file must never contain real secrets.
 
 delete from agent_definition where name = 'default-assistant';
-delete from agent_model where provider_name in (
+delete from model where provider_name in (
     'minimax', 'openai', 'xai', 'deepseek', 'google', 'anthropic', 'zai', 'minimax-anthropic'
 );
-delete from agent_provider where name in (
+delete from provider where name in (
     'minimax', 'openai', 'xai', 'deepseek', 'google', 'anthropic', 'zai', 'minimax-anthropic'
 );
 
-insert into agent_provider (
+insert into provider (
     name, description, provider_type, base_url, credential, config, connection_generation_id,
     created_at, updated_at, version
 ) values
@@ -89,7 +89,7 @@ with model_seed (
     ('anthropic', 'claude-fable-5', 'claude-fable-5', 'Claude Fable 5', 1000000, 128000, '["TEXT","IMAGE"]'::jsonb, 'max', '[{"id":"minimal","reasoningEffort":"low","promptCacheRetention":"SHORT"},{"id":"low","reasoningEffort":"low","promptCacheRetention":"SHORT"},{"id":"medium","reasoningEffort":"medium","promptCacheRetention":"SHORT"},{"id":"high","reasoningEffort":"high","promptCacheRetention":"SHORT"},{"id":"xhigh","reasoningEffort":"high","promptCacheRetention":"SHORT"},{"id":"max","reasoningEffort":"high","promptCacheRetention":"SHORT"}]'::jsonb, 10, 50, 1, 12.5, 0),
     ('zai', 'glm-5.2', 'glm-5.2', 'GLM-5.2', 200000, 128000, '["TEXT"]'::jsonb, 'max', '[{"id":"off","reasoningEffort":"off","promptCacheRetention":"SHORT"},{"id":"low","reasoningEffort":"low","promptCacheRetention":"SHORT"},{"id":"medium","reasoningEffort":"medium","promptCacheRetention":"SHORT"},{"id":"high","reasoningEffort":"high","promptCacheRetention":"SHORT"},{"id":"max","reasoningEffort":"high","promptCacheRetention":"SHORT"}]'::jsonb, 0, 0, 0, 0, 0)
 )
-insert into agent_model (
+insert into model (
     name, kind, provider_name, model_id, description, config,
     created_at, updated_at, version
 )

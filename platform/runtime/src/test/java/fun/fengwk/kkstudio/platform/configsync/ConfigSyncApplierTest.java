@@ -23,15 +23,21 @@ import org.mockito.Mockito;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionService;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelCreateDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelUpdateDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ProviderCreateDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.SingleModelCreateDTO;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerService;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpTool;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModelService;
-import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderService;
+import fun.fengwk.kkstudio.platform.catalog.model.Model;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelKind;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelRepository;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelService;
+import fun.fengwk.kkstudio.platform.catalog.provider.ProviderService;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogService;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillManifestEntry;
 import fun.fengwk.kkstudio.platform.environment.Environment;
@@ -46,11 +52,6 @@ import fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentDefinitionCreateDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentDefinitionEditablePropertiesDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentDefinitionUpdateDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelCreateDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelEditablePropertiesDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelKind;
-import fun.fengwk.kkstudio.share.catalog.AgentModelUpdateDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentProviderEditablePropertiesDTO;
 import fun.fengwk.kkstudio.share.runtime.HarnessExecutionSelectionDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSectionsDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsUpdateDTO;
@@ -67,9 +68,9 @@ class ConfigSyncApplierTest {
 
   private static final String DEPENDENT_PLUGIN_ID = "dep.plugin";
 
-  private final AgentProviderService providerService = mock(AgentProviderService.class);
-  private final AgentModelRepository modelRepository = mock(AgentModelRepository.class);
-  private final AgentModelService modelService = mock(AgentModelService.class);
+  private final ProviderService providerService = mock(ProviderService.class);
+  private final ModelRepository modelRepository = mock(ModelRepository.class);
+  private final ModelService modelService = mock(ModelService.class);
   private final SkillCatalogService skillCatalogService = mock(SkillCatalogService.class);
   private final McpServerService mcpServerService = mock(McpServerService.class);
   private final AgentDefinitionRepository definitionRepository =
@@ -146,8 +147,9 @@ class ConfigSyncApplierTest {
   }
 
   private static ConfigSyncParser.ProviderSpec providerSpec(String name) {
-    AgentProviderEditablePropertiesDTO properties = new AgentProviderEditablePropertiesDTO();
-    properties.setProviderType("openai");
+    ProviderCreateDTO properties = new ProviderCreateDTO();
+    properties.setName(name);
+    properties.setProviderType(ProviderType.OPENAI);
     properties.setBaseUrl("https://api.example.com");
     properties.setCredential("secret");
     return new ConfigSyncParser.ProviderSpec(name, properties);
@@ -218,8 +220,8 @@ class ConfigSyncApplierTest {
         List.of());
 
     // 导入使用显式 upsert 命令恢复文件事实，不区分 create/update，不读取 repository 判断存在性。
-    verify(providerService).importProvider("new", created.properties());
-    verify(providerService).importProvider("old", existing.properties());
+    verify(providerService).importProvider(created.properties());
+    verify(providerService).importProvider(existing.properties());
     verify(providerService, never()).createProvider(any());
     verify(providerService, never()).updateProvider(any(), any());
   }
@@ -275,21 +277,21 @@ class ConfigSyncApplierTest {
   @Test
   void modelImportCreatesNewModel() {
     when(modelRepository.getByName("m")).thenReturn(null);
-    AgentModelEditablePropertiesDTO properties = new AgentModelEditablePropertiesDTO();
-    properties.setKind(AgentModelKind.MODEL);
+    SingleModelCreateDTO properties = new SingleModelCreateDTO();
     properties.setProviderName("p");
     properties.setName("m");
     properties.setModelId("gpt");
     properties.setConfig(ConfigSyncFixtures.modelConfig());
-    ConfigSyncParser.ModelSpec spec = new ConfigSyncParser.ModelSpec("m", properties);
+    ConfigSyncParser.ModelSpec spec =
+        new ConfigSyncParser.ModelSpec("m", ModelKind.MODEL, properties);
 
     applier.apply(
         plan(List.of(), List.of(spec), List.of(), List.of(), List.of(), List.of(), null),
         List.of());
 
-    ArgumentCaptor<AgentModelCreateDTO> captor = ArgumentCaptor.forClass(AgentModelCreateDTO.class);
+    ArgumentCaptor<ModelCreateDTO> captor = ArgumentCaptor.forClass(ModelCreateDTO.class);
     verify(modelService).createModel(captor.capture());
-    assertEquals("p", captor.getValue().getProviderName());
+    assertEquals("p", ((SingleModelCreateDTO) captor.getValue()).getProviderName());
     assertEquals("m", captor.getValue().getName());
   }
 
@@ -560,27 +562,22 @@ class ConfigSyncApplierTest {
   /** 意图：既有 Model 走 CAS 更新并携带既有版本，绝不重复创建。 */
   @Test
   void existingModelIsUpdatedWithExistingVersionCas() {
-    AgentModel existing =
-        AgentModel.builder()
-            .kind(AgentModelKind.MODEL)
-            .providerName("p")
-            .name("m")
-            .version(4L)
-            .build();
+    Model existing =
+        Model.builder().kind(ModelKind.MODEL).providerName("p").name("m").version(4L).build();
     when(modelRepository.getByName("m")).thenReturn(existing);
-    AgentModelEditablePropertiesDTO properties = new AgentModelEditablePropertiesDTO();
-    properties.setKind(AgentModelKind.MODEL);
+    SingleModelCreateDTO properties = new SingleModelCreateDTO();
     properties.setProviderName("p");
     properties.setName("m");
     properties.setModelId("gpt");
     properties.setConfig(ConfigSyncFixtures.modelConfig());
-    ConfigSyncParser.ModelSpec spec = new ConfigSyncParser.ModelSpec("m", properties);
+    ConfigSyncParser.ModelSpec spec =
+        new ConfigSyncParser.ModelSpec("m", ModelKind.MODEL, properties);
 
     applier.apply(
         plan(List.of(), List.of(spec), List.of(), List.of(), List.of(), List.of(), null),
         List.of());
 
-    ArgumentCaptor<AgentModelUpdateDTO> captor = ArgumentCaptor.forClass(AgentModelUpdateDTO.class);
+    ArgumentCaptor<ModelUpdateDTO> captor = ArgumentCaptor.forClass(ModelUpdateDTO.class);
     verify(modelService).updateModel(eq("m"), captor.capture());
     assertEquals("4", captor.getValue().getExpectedVersion());
     verify(modelService, never()).createModel(any());

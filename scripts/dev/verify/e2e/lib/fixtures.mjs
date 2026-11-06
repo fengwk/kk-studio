@@ -66,7 +66,7 @@ export function seedCatalogWithVariants(models, variantsByName) {
 /**
  * 把种子目录（持久化形态：variant 允许省略 `protocolOptionsJson`）规范化为公开读取契约的 canonical 形态。
  *
- * <p>产品读取路径（`AgentModelRuntimeConfigParser`）对每个 variant 统一返回 `protocolOptionsJson` 字符串，其中 null / 空选项
+ * <p>产品读取路径（`ModelRuntimeConfigParser`）对每个 variant 统一返回 `protocolOptionsJson` 字符串，其中 null / 空选项
  * 等价于 `{}`；既有选项文本原样保留，其它字段一概不改写、不丢弃。
  */
 export function canonicalSeedCatalog(models) {
@@ -485,15 +485,14 @@ export function providerCreateBody(suffix) {
 }
 
 /**
- * Provider PUT 可编辑字段（不含 `name`：资源路由身份在 path，请求体携带 `name` 会被严格反序列化拒绝）。
- * `overrides` 用于表达 `modelHttpRetryStatusCodes` 的省略（不传键）/ 显式 null / 数组三态。
+ * Provider PUT 是完整可编辑资源替换：不含不可变的 `name`/`providerType`，凭据通过 SecretUpdate 表达。
+ * `overrides` 可替换 `modelHttpRetryStatusCodes`；省略该键即按整体替换写入 null（继承系统名单）。
  */
 export function providerUpdateBody(overrides = {}) {
   return {
     description: 'e2e provider updated',
-    providerType: 'openai',
     baseUrl: 'https://example.com/v1',
-    credential: '', // 保留密钥
+    credential: { operation: 'KEEP' },
     modelCallTimeoutMillis: 1_800_000,
     modelCallIdleTimeoutMillis: 120_000,
     ...overrides,

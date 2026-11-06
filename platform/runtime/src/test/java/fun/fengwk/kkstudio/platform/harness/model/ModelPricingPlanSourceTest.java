@@ -11,20 +11,20 @@ import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.model.ModelPricingCondition;
 import fun.fengwk.kkstudio.harness.model.ModelRequestBodyPricing;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRuntimeConfigParser;
-import fun.fengwk.kkstudio.share.catalog.AgentModelKind;
+import fun.fengwk.kkstudio.platform.catalog.model.Model;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelKind;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelRepository;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelRuntimeConfigParser;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
 class ModelPricingPlanSourceTest {
 
-  private final AgentModelRepository repository = mock(AgentModelRepository.class);
+  private final ModelRepository repository = mock(ModelRepository.class);
   private final ModelPricingPlanSource source =
       new ModelPricingPlanSource(
-          repository, new AgentModelRuntimeConfigParser(JsonMapper.builder().build()));
+          repository, new ModelRuntimeConfigParser(JsonMapper.builder().build()));
 
   /** 每次 attempt 读取当前模型，已冻结的计划不因后续配置变化而改变。 */
   @Test
@@ -38,7 +38,7 @@ class ModelPricingPlanSourceTest {
           "rates":{"input":"1"}}]}}
         """;
     when(repository.getByName("m"))
-        .thenReturn(model(AgentModelKind.MODEL, config), model(AgentModelKind.MODEL, "{}"));
+        .thenReturn(model(ModelKind.MODEL, config), model(ModelKind.MODEL, "{}"));
 
     ModelRequestBodyPricing.Plan frozen = source.plan("m");
     assertTrue(frozen.hasConditions());
@@ -54,14 +54,14 @@ class ModelPricingPlanSourceTest {
   /** 缺失、组类型和损坏配置不阻塞模型调用，均产生空计划。 */
   @Test
   void absentGroupAndInvalidConfigProduceEmptyPlans() {
-    when(repository.getByName("group")).thenReturn(model(AgentModelKind.GROUP, null));
-    when(repository.getByName("invalid")).thenReturn(model(AgentModelKind.MODEL, "invalid"));
+    when(repository.getByName("group")).thenReturn(model(ModelKind.GROUP, null));
+    when(repository.getByName("invalid")).thenReturn(model(ModelKind.MODEL, "invalid"));
     assertFalse(source.plan("missing").hasConditions());
     assertFalse(source.plan("group").hasConditions());
     assertFalse(source.plan("invalid").hasConditions());
   }
 
-  private static AgentModel model(AgentModelKind kind, String config) {
-    return AgentModel.builder().kind(kind).configJson(config).build();
+  private static Model model(ModelKind kind, String config) {
+    return Model.builder().kind(kind).configJson(config).build();
   }
 }

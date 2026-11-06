@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.platform.catalog;
 
-import static fun.fengwk.kkstudio.platform.catalog.model.AgentModelTestData.executable;
+import static fun.fengwk.kkstudio.platform.catalog.model.ModelTestData.executable;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -12,22 +12,23 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionService;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModelService;
-import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderRepository;
-import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderService;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelCreateDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ProviderCreateDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ProviderDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.SingleModelCreateDTO;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelRepository;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelService;
+import fun.fengwk.kkstudio.platform.catalog.provider.ProviderRepository;
+import fun.fengwk.kkstudio.platform.catalog.provider.ProviderService;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentDefinitionCreateDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentDefinitionDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentDefinitionUpdateDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelCreateDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentModelKind;
-import fun.fengwk.kkstudio.share.catalog.AgentProviderCreateDTO;
-import fun.fengwk.kkstudio.share.catalog.AgentProviderDTO;
 import fun.fengwk.kkstudio.share.runtime.HarnessExecutionSelectionDTO;
 
 import java.util.List;
@@ -42,20 +43,20 @@ import java.util.concurrent.atomic.AtomicReference;
 /** 父行锁串行化子行创建与父行删除。 */
 class CatalogParentLockIntegrationTest extends PostgresSpringTestSupport {
 
-  @Autowired private AgentProviderService providerService;
-  @Autowired private AgentModelService modelService;
+  @Autowired private ProviderService providerService;
+  @Autowired private ModelService modelService;
   @Autowired private AgentDefinitionService definitionService;
-  @Autowired private AgentProviderRepository providerRepository;
-  @Autowired private AgentModelRepository modelRepository;
+  @Autowired private ProviderRepository providerRepository;
+  @Autowired private ModelRepository modelRepository;
   @Autowired private AgentDefinitionRepository definitionRepository;
   @Autowired private PlatformTransactionManager transactionManager;
 
   @Test
   void providerDeleteCannotCommitAfterModelCreationHoldingProviderLock() throws Exception {
     String suffix = Long.toString(System.nanoTime());
-    AgentProviderDTO provider = providerService.createProvider(provider("lock-provider-" + suffix));
-    AgentModelCreateDTO modelCreate = model(provider.getName(), "lock-model-" + suffix);
-    AtomicReference<AgentModelDTO> createdModel = new AtomicReference<>();
+    ProviderDTO provider = providerService.createProvider(provider("lock-provider-" + suffix));
+    ModelCreateDTO modelCreate = model(provider.getName(), "lock-model-" + suffix);
+    AtomicReference<ModelDTO> createdModel = new AtomicReference<>();
     CountDownLatch childCreated = new CountDownLatch(1);
     CountDownLatch releaseChildTransaction = new CountDownLatch(1);
     CountDownLatch deleteStarted = new CountDownLatch(1);
@@ -95,7 +96,7 @@ class CatalogParentLockIntegrationTest extends PostgresSpringTestSupport {
       releaseChildTransaction.countDown();
       executor.shutdownNow();
     }
-    AgentModelDTO model = createdModel.get();
+    ModelDTO model = createdModel.get();
     modelService.deleteModel(model.getName(), model.getVersion());
     providerService.deleteProvider(provider.getName(), provider.getVersion());
   }
@@ -103,9 +104,9 @@ class CatalogParentLockIntegrationTest extends PostgresSpringTestSupport {
   @Test
   void modelDeleteCannotCommitAfterAgentCreationHoldingModelLock() throws Exception {
     String suffix = Long.toString(System.nanoTime());
-    AgentProviderDTO provider =
+    ProviderDTO provider =
         providerService.createProvider(provider("lock-agent-provider-" + suffix));
-    AgentModelDTO model =
+    ModelDTO model =
         modelService.createModel(model(provider.getName(), "lock-agent-model-" + suffix));
     AgentDefinitionCreateDTO agentCreate = agent(model.getName(), "lock-agent-" + suffix);
     AtomicReference<AgentDefinitionDTO> createdAgent = new AtomicReference<>();
@@ -155,9 +156,9 @@ class CatalogParentLockIntegrationTest extends PostgresSpringTestSupport {
   @Test
   void crossReferencedAgentUpdatesUseOneCanonicalLockOrder() throws Exception {
     String suffix = Long.toString(System.nanoTime());
-    AgentProviderDTO provider =
+    ProviderDTO provider =
         providerService.createProvider(provider("cross-agent-provider-" + suffix));
-    AgentModelDTO model =
+    ModelDTO model =
         modelService.createModel(model(provider.getName(), "cross-agent-model-" + suffix));
     String modelRef = model.getName();
     AgentDefinitionDTO createdAlpha =
@@ -201,16 +202,15 @@ class CatalogParentLockIntegrationTest extends PostgresSpringTestSupport {
     providerService.deleteProvider(provider.getName(), provider.getVersion());
   }
 
-  private AgentProviderCreateDTO provider(String name) {
-    AgentProviderCreateDTO create = new AgentProviderCreateDTO();
+  private ProviderCreateDTO provider(String name) {
+    ProviderCreateDTO create = new ProviderCreateDTO();
     create.setName(name);
-    create.setProviderType("openai");
+    create.setProviderType(ProviderType.OPENAI);
     return create;
   }
 
-  private AgentModelCreateDTO model(String providerName, String name) {
-    AgentModelCreateDTO create = new AgentModelCreateDTO();
-    create.setKind(AgentModelKind.MODEL);
+  private ModelCreateDTO model(String providerName, String name) {
+    SingleModelCreateDTO create = new SingleModelCreateDTO();
     create.setProviderName(providerName);
     create.setName(name);
     executable(create);

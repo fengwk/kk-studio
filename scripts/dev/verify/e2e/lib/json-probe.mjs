@@ -17,7 +17,8 @@ import { PROVIDER_SPECS } from '../sync-provider-credentials.mjs'
 const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
 
 const document = JSON.parse(readFileSync(0, 'utf8'))
-const firstModel = () => document?.results?.[0] ?? null
+const rows = Array.isArray(document) ? document : document?.results ?? []
+const firstModel = () => rows[0] ?? null
 
 const commands = {
   'model-config-print'() {
@@ -40,8 +41,7 @@ const commands = {
     console.log(match ? render(match.status) : '')
   },
   'providers-ready'() {
-    const rows = document?.results ?? []
-    const configured = new Set(rows.filter((row) => row.configured && row.baseUrl).map((row) => row.name))
+    const configured = new Set(rows.filter((row) => row.credential?.configured && row.baseUrl).map((row) => row.name))
     const missing = PROVIDER_SPECS.map((spec) => spec.name).filter((name) => !configured.has(name)).sort()
     console.log(missing.length > 0 ? `missing:${missing.join(',')}` : 'ok')
   },

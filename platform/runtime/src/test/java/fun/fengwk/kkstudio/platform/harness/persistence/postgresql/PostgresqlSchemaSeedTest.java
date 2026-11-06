@@ -108,7 +108,7 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
           try (Connection conn = newConnection();
               PreparedStatement ps =
                   conn.prepareStatement(
-                      "insert into agent_provider (name, provider_type, config, connection_generation_id) values (?,"
+                      "insert into provider (name, provider_type, config, connection_generation_id) values (?,"
                           + " 'openai', '{}'::jsonb, '00000000-0000-0000-0000-000000000088'::uuid)")) {
             ps.setString(1, "post-seed-provider");
             ps.executeUpdate();
@@ -128,25 +128,24 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
             singleString(
                 st,
                 "select string_agg(name || ':' || provider_type, ',' order by name)"
-                    + " from agent_provider"),
+                    + " from provider"),
             "the complete E2E seed catalog must retain its deterministic provider names");
         assertEquals(
             "minimax:openai_responses",
             singleString(
-                st,
-                "select name || ':' || provider_type from agent_provider where name = 'minimax'"),
+                st, "select name || ':' || provider_type from provider where name = 'minimax'"),
             "the MiniMax credential synchronizer targets the minimax provider name");
         assertEquals(
             "minimax-anthropic:anthropic",
             singleString(
                 st,
-                "select name || ':' || provider_type from agent_provider"
+                "select name || ':' || provider_type from provider"
                     + " where name = 'minimax-anthropic'"),
             "the real E2E credential synchronizer targets the minimax-anthropic provider name");
         // 所有 Provider 都只能携带超时配置；缓存和原生 thinking 由 variant 定义。
         assertSingleLong(
             conn,
-            "select count(*) from agent_provider"
+            "select count(*) from provider"
                 + " where config <> '{\"modelCallTimeoutMillis\":1800000,"
                 + "\"modelCallIdleTimeoutMillis\":120000}'::jsonb",
             0L);
@@ -154,7 +153,7 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
             "claude-fable-5-dd-3M-xaMiniM",
             singleString(
                 st,
-                "select model_id from agent_model"
+                "select model_id from model"
                     + " where provider_name = 'minimax-anthropic' and name = 'MiniMax-M3'"),
             "minimax-anthropic/MiniMax-M3 must carry its real upstream wire model identity");
         assertEquals(
@@ -162,14 +161,14 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
             singleString(
                 st,
                 "select string_agg(provider_name || '/' || name, ',' order by provider_name, name)"
-                    + " from agent_model where name <> model_id"),
+                    + " from model where name <> model_id"),
             "only the two MiniMax rows may differ between logical name and wire modelId");
 
         JsonNode geminiVariants =
             OBJECT_MAPPER.readTree(
                 singleString(
                     st,
-                    "select (config->'variants')::text from agent_model where provider_name = 'google' and name = 'gemini-3.8-flash'"));
+                    "select (config->'variants')::text from model where provider_name = 'google' and name = 'gemini-3.8-flash'"));
         JsonNode minimalVariant = null;
         for (JsonNode v : geminiVariants) {
           if ("minimal".equals(v.path("id").asText())) {
@@ -282,7 +281,7 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
           "select string_agg(version, ',' order by installed_rank)"
               + " from flyway_schema_history where version is not null",
           VERSIONED_MIGRATIONS);
-      assertSingleLong(conn, "select count(*) from agent_provider", 0L);
+      assertSingleLong(conn, "select count(*) from provider", 0L);
       assertSingleLong(conn, "select count(*) from system_setting where id = 1", 1L);
     }
   }
@@ -327,23 +326,22 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
 
         // 2. 人为篡改 seed-owned 数据：修改属性并插入陈旧/多余行
         try (Statement st = conn.createStatement()) {
-          st.executeUpdate(
-              "update agent_provider set credential = 'tampered-key' where name = 'stub'");
+          st.executeUpdate("update provider set credential = 'tampered-key' where name = 'stub'");
           st.executeUpdate(
               "update agent_definition set system_prompt = 'tampered-prompt' where name ="
                   + " 'default-assistant'");
           st.executeUpdate(
-              "insert into agent_model"
+              "insert into model"
                   + " (name, kind, provider_name, model_id, description, config) "
                   + "values ('extraneous-stub-model', 'MODEL', 'stub', 'stub-wire-extra',"
                   + " 'extraneous', '{}'::jsonb)");
         }
         assertSingleLong(
             conn,
-            "select count(*) from agent_provider where name = 'stub' and credential ="
+            "select count(*) from provider where name = 'stub' and credential ="
                 + " 'tampered-key'",
             1L);
-        assertSingleLong(conn, "select count(*) from agent_model where provider_name = 'stub'", 2L);
+        assertSingleLong(conn, "select count(*) from model where provider_name = 'stub'", 2L);
 
         // 3. 修改 R__fixture_seed.sql 内容，触发 checksum 变化
         String updatedRDevContent =
@@ -362,7 +360,7 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
 
         // 6. 断言 seed 数据被确定性收敛恢复：tampered 属性恢复，多余的 extraneous model 被清除
         assertFixtureSeedPresent(conn);
-        assertSingleLong(conn, "select count(*) from agent_model where provider_name = 'stub'", 1L);
+        assertSingleLong(conn, "select count(*) from model where provider_name = 'stub'", 1L);
       }
     } finally {
       deleteRecursively(tempDir);
@@ -401,19 +399,18 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
 
   private static void assertFixtureSeedPresent(Connection conn) throws Exception {
     try (Statement st = conn.createStatement();
-        ResultSet rs = st.executeQuery("select count(*) from agent_provider where name = 'stub'")) {
+        ResultSet rs = st.executeQuery("select count(*) from provider where name = 'stub'")) {
       assertTrue(rs.next());
       assertEquals(1L, rs.getLong(1));
     }
     try (Statement st = conn.createStatement();
-        ResultSet rs =
-            st.executeQuery("select credential from agent_provider where name = 'stub'")) {
+        ResultSet rs = st.executeQuery("select credential from provider where name = 'stub'")) {
       assertTrue(rs.next());
       assertEquals("stub-key", rs.getString(1));
     }
     try (Statement st = conn.createStatement();
         ResultSet rs =
-            st.executeQuery("select count(*) from agent_model where name = 'acceptance-stub'")) {
+            st.executeQuery("select count(*) from model where name = 'acceptance-stub'")) {
       assertTrue(rs.next());
       assertEquals(1L, rs.getLong(1));
     }
@@ -429,15 +426,15 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
   private static void assertE2eSeedContent(Connection conn) throws Exception {
     try (Statement st = conn.createStatement();
         ResultSet rs =
-            st.executeQuery("select count(*) from agent_provider where credential is not null")) {
+            st.executeQuery("select count(*) from provider where credential is not null")) {
       assertTrue(rs.next());
       assertEquals(
           0L,
           rs.getLong(1),
           "no e2e provider may carry a credential; a real secret must never be checked in");
     }
-    assertSingleCount(conn, "agent_provider", 8L);
-    assertSingleCount(conn, "agent_model", 21L);
+    assertSingleCount(conn, "provider", 8L);
+    assertSingleCount(conn, "model", 21L);
     assertSingleCount(conn, "agent_definition", 1L);
     try (Statement st = conn.createStatement()) {
       assertEquals(
@@ -455,7 +452,7 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
               st,
               "select m.provider_name || ':' || m.kind"
                   + " from agent_definition a"
-                  + " join agent_model m on m.name = a.execution -> 'settings' ->> 'modelName'"
+                  + " join model m on m.name = a.execution -> 'settings' ->> 'modelName'"
                   + " where a.name = 'default-assistant'"),
           "the default E2E agent model must resolve to the minimax MODEL row");
     }
@@ -490,8 +487,8 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
                       + "'description', m.description,"
                       + "'config', m.config"
                       + ") order by m.provider_name, m.name)::text"
-                      + " from agent_model m"
-                      + " join agent_provider p on p.name = m.provider_name"
+                      + " from model m"
+                      + " join provider p on p.name = m.provider_name"
                       + " where m.kind = 'MODEL'"));
       assertEquals(
           canonicalModels(expected),
@@ -529,13 +526,13 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
           singleString(
               st,
               "select string_agg(name || '|' || provider_type || '|' || coalesce(credential,''),"
-                  + " ';' order by name) from agent_provider"));
+                  + " ';' order by name) from provider"));
       sb.append('|');
       sb.append(
           singleString(
               st,
               "select string_agg(provider_name || '/' || name || '|' || version,"
-                  + " ';' order by provider_name, name) from agent_model"));
+                  + " ';' order by provider_name, name) from model"));
       sb.append('|');
       sb.append(
           singleString(
@@ -553,8 +550,8 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
         ResultSet rs =
             st.executeQuery(
                 "select greatest("
-                    + "(select coalesce(max(version), 0) from agent_provider),"
-                    + "(select coalesce(max(version), 0) from agent_model),"
+                    + "(select coalesce(max(version), 0) from provider),"
+                    + "(select coalesce(max(version), 0) from model),"
                     + "(select coalesce(max(version), 0) from agent_definition))")) {
       assertTrue(rs.next());
       max = rs.getLong(1);
@@ -571,14 +568,14 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
               st,
               "select string_agg(name || '|' || provider_type || '|' ||"
                   + " coalesce(base_url, '') || '|' || coalesce(credential, '') || '|' ||"
-                  + " version, ';' order by name) from agent_provider"));
+                  + " version, ';' order by name) from provider"));
       sb.append('|');
       sb.append(
           singleString(
               st,
               "select string_agg(provider_name || '/' || name || '|' || coalesce(description, '')"
                   + " || '|' || config::text || '|' || version,"
-                  + " ';' order by provider_name, name) from agent_model"));
+                  + " ';' order by provider_name, name) from model"));
       sb.append('|');
       sb.append(
           singleString(

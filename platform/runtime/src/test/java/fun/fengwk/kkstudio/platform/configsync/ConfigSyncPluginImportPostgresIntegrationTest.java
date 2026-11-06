@@ -23,13 +23,15 @@ import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.common.schema.StringSchema;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionService;
+import fun.fengwk.kkstudio.platform.catalog.dto.ProviderCreateDTO;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerService;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModelService;
-import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderService;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelRepository;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelService;
+import fun.fengwk.kkstudio.platform.catalog.provider.ProviderService;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogService;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentService;
@@ -53,7 +55,6 @@ import fun.fengwk.kkstudio.platform.pluginhost.service.PluginSecretPatch;
 import fun.fengwk.kkstudio.platform.pluginhost.testing.TestPluginFixtures;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsService;
 import fun.fengwk.kkstudio.share.catalog.AgentDefinitionType;
-import fun.fengwk.kkstudio.share.catalog.AgentProviderEditablePropertiesDTO;
 
 import javax.sql.DataSource;
 
@@ -115,7 +116,7 @@ class ConfigSyncPluginImportPostgresIntegrationTest {
   private PluginConfigurationService configurationService;
   private AgentDefinitionRepository definitionRepository;
   private ConfigSyncApplier applier;
-  private AgentProviderService providerService;
+  private ProviderService providerService;
 
   @BeforeAll
   static void beforeAll() throws SQLException {
@@ -167,16 +168,16 @@ class ConfigSyncPluginImportPostgresIntegrationTest {
             dispatcherWakes::incrementAndGet);
 
     // provider 服务是唯一真实库写入的替身：只在同一事务内真插一行 provider，用于证明它随插件失败一起回滚。
-    providerService = mock(AgentProviderService.class);
-    when(providerService.importProvider(any(), any()))
+    providerService = mock(ProviderService.class);
+    when(providerService.importProvider(any()))
         .thenAnswer(
             invocation -> {
               jdbcClient
                   .sql(
-                      "insert into agent_provider"
+                      "insert into provider"
                           + " (name, provider_type, config, connection_generation_id)"
                           + " values (:name, 'openai', '{}'::jsonb, cast(:generation as uuid))")
-                  .param("name", invocation.getArgument(0, String.class))
+                  .param("name", invocation.getArgument(0, ProviderCreateDTO.class).getName())
                   .param("generation", UUID.randomUUID().toString())
                   .update();
               return null;
@@ -185,8 +186,8 @@ class ConfigSyncPluginImportPostgresIntegrationTest {
     applier =
         new ConfigSyncApplier(
             providerService,
-            mock(AgentModelRepository.class),
-            mock(AgentModelService.class),
+            mock(ModelRepository.class),
+            mock(ModelService.class),
             mock(SkillCatalogService.class),
             mock(McpServerService.class),
             definitionRepository,
@@ -221,8 +222,7 @@ class ConfigSyncPluginImportPostgresIntegrationTest {
 
     assertEquals("plugins reference a missing agent", error.getMessage());
     assertEquals(null, error.getCause(), "the recheck must not leak a cause");
-    assertEquals(
-        0L, count("select count(*) from agent_provider where name = '" + PROVIDER_NAME + "'"));
+    assertEquals(0L, count("select count(*) from provider where name = '" + PROVIDER_NAME + "'"));
     assertEquals(1L, configurationRepository.find(DEPENDENT_PLUGIN_ID).orElseThrow().version());
     assertEquals(0, dispatcherWakes.get());
     assertEquals(0, catalogWakes.get(), "a rolled back import must not notify the catalog");
@@ -297,8 +297,9 @@ class ConfigSyncPluginImportPostgresIntegrationTest {
   }
 
   private static ConfigSyncParser.ProviderSpec providerSpec(String name) {
-    AgentProviderEditablePropertiesDTO properties = new AgentProviderEditablePropertiesDTO();
-    properties.setProviderType("openai");
+    ProviderCreateDTO properties = new ProviderCreateDTO();
+    properties.setName(name);
+    properties.setProviderType(ProviderType.OPENAI);
     properties.setBaseUrl("https://api.example.com");
     properties.setCredential("synthetic");
     return new ConfigSyncParser.ProviderSpec(name, properties);
@@ -308,14 +309,14 @@ class ConfigSyncPluginImportPostgresIntegrationTest {
   private static void seedAgentModel() {
     jdbcClient
         .sql(
-            "insert into agent_provider (name, provider_type, config, connection_generation_id)"
+            "insert into provider (name, provider_type, config, connection_generation_id)"
                 + " values (:name, 'openai', '{}'::jsonb, cast(:generation as uuid))")
         .param("name", MODEL_PROVIDER)
         .param("generation", UUID.randomUUID().toString())
         .update();
     jdbcClient
         .sql(
-            "insert into agent_model (kind, provider_name, name, model_id, config)"
+            "insert into model (kind, provider_name, name, model_id, config)"
                 + " values ('MODEL', :provider, :name, :modelId, '{}'::jsonb)")
         .param("provider", MODEL_PROVIDER)
         .param("name", MODEL_NAME)

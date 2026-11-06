@@ -299,9 +299,9 @@ public class McpServerServiceTest extends PostgresSpringTestSupport {
 
   private void insertFakeAgentDefinitionReferencingTool(String modelName) {
     jdbc.update(
-        "insert into agent_provider (name, provider_type, config, connection_generation_id) values ('test_p_mcp', 'openai', '{}'::jsonb, '00000000-0000-0000-0000-000000000099'::uuid) on conflict do nothing");
+        "insert into provider (name, provider_type, config, connection_generation_id) values ('test_p_mcp', 'openai', '{}'::jsonb, '00000000-0000-0000-0000-000000000099'::uuid) on conflict do nothing");
     jdbc.update(
-        "insert into agent_model (name, kind, provider_name, model_id, config) "
+        "insert into model (name, kind, provider_name, model_id, config) "
             + "values ('m1', 'MODEL', 'test_p_mcp', 'm1', '{}'::jsonb) on conflict do nothing");
 
     jdbc.update(
