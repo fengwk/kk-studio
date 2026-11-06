@@ -46,7 +46,7 @@ final class ApplicationEventHub implements AutoCloseable {
     THREAD,
     CANVAS,
     PROJECTS,
-    TREE,
+    THREAD_TREE,
     INTERACTIONS,
     ENVIRONMENTS
   }
@@ -65,7 +65,7 @@ final class ApplicationEventHub implements AutoCloseable {
     private static boolean requiresId(ResourceKind kind) {
       return kind == ResourceKind.THREAD
           || kind == ResourceKind.CANVAS
-          || kind == ResourceKind.TREE;
+          || kind == ResourceKind.THREAD_TREE;
     }
   }
 
@@ -74,7 +74,7 @@ final class ApplicationEventHub implements AutoCloseable {
       permits Signal.Version,
           Signal.Realtime,
           Signal.ProjectChanged,
-          Signal.TreeChanged,
+          Signal.ThreadTreeChanged,
           Signal.InteractionsChanged,
           Signal.EnvironmentChanged,
           Signal.Resync {
@@ -89,7 +89,7 @@ final class ApplicationEventHub implements AutoCloseable {
     }
 
     /** 该根的执行树需要回读；资源本身已带根 id。 */
-    record TreeChanged() implements Signal {}
+    record ThreadTreeChanged() implements Signal {}
 
     /** 执行根的待处理交互需要回读（全局资源，data 携带真实执行根）。 */
     record InteractionsChanged(UUID rootThreadId) implements Signal {
@@ -274,7 +274,7 @@ final class ApplicationEventHub implements AutoCloseable {
       }
       case PROJECTS -> state.invalidationRelease =
           projectChangeSource.subscribe(null, event -> fanoutInvalidation(state, event));
-      case TREE -> {
+      case THREAD_TREE -> {
         HarnessChangeSubscription subscription =
             harnessChanges
                 .executionTree()
@@ -304,7 +304,7 @@ final class ApplicationEventHub implements AutoCloseable {
   /** 执行树按资源自带根 id 定点失效，事件本身不携带额外坐标。 */
   private static Signal executionTreeSignal(HarnessInvalidationChanges.Event event) {
     if (event instanceof HarnessInvalidationChanges.Event.Changed) {
-      return new Signal.TreeChanged();
+      return new Signal.ThreadTreeChanged();
     }
     return new Signal.Resync();
   }

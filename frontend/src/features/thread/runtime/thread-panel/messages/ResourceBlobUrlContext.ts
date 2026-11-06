@@ -8,8 +8,8 @@ export interface ResourceBlobUrls {
   preview: string | null
   /** storage_blob 的权威媒体类型；不从文件名或 URL 猜测。 */
   mediaType: string | null
-  /** storage_blob 的权威原件字节数。 */
-  sizeBytes: number | null
+  /** storage_blob 的权威原件字节数（Java Long 的十进制字符串 wire）。 */
+  sizeBytes: string | null
 }
 
 /**

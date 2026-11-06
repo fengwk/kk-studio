@@ -43,11 +43,11 @@ registerCase({
   title: 'Environment 运行快照缺失时明确 unavailable，不伪造空快照',
   docs: 'GET /api/platform/environments/{id}/runtime 在没有本代 READY 快照（无 READY owner 路由）时返回 409 unavailable + ENVIRONMENT_UNAVAILABLE，响应不含 revision/daemonVersion/update 等运行快照字段，绝不伪造 update=null 的假快照；非 canonical environmentId 返回 400 validation；用例创建的 Environment 在结束时按权威 version 清理',
   async run(ctx) {
-    const card = await createEnvironmentFixture(ctx, `e2e-runtime-absent-${cid().slice(0, 8)}`)
+    const environment = await createEnvironmentFixture(ctx, `e2e-runtime-absent-${cid().slice(0, 8)}`)
 
     try {
       const error = await expectHttpError(
-        () => ctx.call('GET', `/api/platform/environments/${encodeURIComponent(card.id)}/runtime`),
+        () => ctx.call('GET', `/api/platform/environments/${encodeURIComponent(environment.id)}/runtime`),
         { status: 409 },
       )
       assertCanonicalError(error, { status: 409, code: 'unavailable', reason: 'ENVIRONMENT_UNAVAILABLE' })
@@ -71,7 +71,7 @@ registerCase({
       )
       assertCanonicalError(invalid, { status: 400, code: 'validation' })
     } finally {
-      await deleteEnvironmentFixture(ctx, card.id)
+      await deleteEnvironmentFixture(ctx, environment.id)
     }
   },
 })
@@ -82,8 +82,8 @@ registerCase({
   title: 'IDE 视图在没有 READY owner 时明确拒绝，不伪造绑定',
   docs: '在新建且没有 READY owner 的 Environment 上，IDE 打开、列举目录、切换目录、终端、移动布局和关闭返回 409 unavailable + IDE_UNAVAILABLE，且不伪造绑定；非 canonical environmentId 返回 400 validation；结束时按权威 version 清理。本用例只证明无 owner 路由拒绝，不证明 exact-intent 强制校验；READY owner 下的精确意图校验需单独验收，此处未验证',
   async run(ctx) {
-    const card = await createEnvironmentFixture(ctx, `e2e-ide-no-owner-${cid().slice(0, 8)}`)
-    const viewsPath = `/api/ide/environments/${encodeURIComponent(card.id)}/views`
+    const environment = await createEnvironmentFixture(ctx, `e2e-ide-no-owner-${cid().slice(0, 8)}`)
+    const viewsPath = `/api/ide/environments/${encodeURIComponent(environment.id)}/views`
     const openBody = {
       viewId: IDE_VIEW_ID,
       documentId: IDE_DOCUMENT_ID,
@@ -128,7 +128,7 @@ registerCase({
       assertCanonicalError(terminalError, { status: 409, code: 'unavailable', reason: 'IDE_UNAVAILABLE' })
 
       const listError = await expectHttpError(
-        () => ctx.call('GET', `/api/ide/environments/${encodeURIComponent(card.id)}/directories`),
+        () => ctx.call('GET', `/api/ide/environments/${encodeURIComponent(environment.id)}/directories`),
         { status: 409 },
       )
       assertCanonicalError(listError, { status: 409, code: 'unavailable', reason: 'IDE_UNAVAILABLE' })
@@ -159,7 +159,7 @@ registerCase({
       )
       assertCanonicalError(invalid, { status: 400, code: 'validation' })
     } finally {
-      await deleteEnvironmentFixture(ctx, card.id)
+      await deleteEnvironmentFixture(ctx, environment.id)
     }
   },
 })

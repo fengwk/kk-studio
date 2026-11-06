@@ -1,9 +1,8 @@
 package fun.fengwk.kkstudio.platform.storage.service;
 
-import org.springframework.util.Assert;
 import org.springframework.util.MimeTypeUtils;
 
-import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.storage.s3.S3ObjectMetadata;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageUpload;
 
@@ -17,38 +16,55 @@ final class StorageUploadValidation {
   private StorageUploadValidation() {}
 
   static String validateFilename(String filename) {
-    Assert.hasText(filename, "filename must not be blank");
-    Assert.isTrue(filename.length() <= 512, "filename must not exceed 512 characters");
+    if (filename == null || filename.isBlank()) {
+      throw DomainException.validation("filename", "filename must not be blank");
+    }
+    if (filename.length() > 512) {
+      throw DomainException.validation("filename", "filename must not exceed 512 characters");
+    }
     return filename;
   }
 
   static long validateSize(Long sizeBytes) {
-    Assert.isTrue(sizeBytes != null, "sizeBytes must not be null");
-    Assert.isTrue(sizeBytes >= 0L, "sizeBytes must be greater than or equal to 0");
+    if (sizeBytes == null) {
+      throw DomainException.validation("sizeBytes", "sizeBytes must not be null");
+    }
+    if (sizeBytes < 0L) {
+      throw DomainException.validation("sizeBytes", "sizeBytes must be greater than or equal to 0");
+    }
     return sizeBytes;
   }
 
   static String validateSha256(String sha256) {
-    Assert.hasText(sha256, "sha256 must not be blank");
+    if (sha256 == null || sha256.isBlank()) {
+      throw DomainException.validation("sha256", "sha256 must not be blank");
+    }
     String normalized = sha256.trim().toLowerCase(Locale.ROOT);
-    Assert.isTrue(
-        normalized.matches("[0-9a-f]{64}"), "sha256 must be a 64-character hexadecimal digest");
+    if (!normalized.matches("[0-9a-f]{64}")) {
+      throw DomainException.validation(
+          "sha256", "sha256 must be a 64-character hexadecimal digest");
+    }
     return normalized;
   }
 
   static String normalizeMediaType(String mediaType) {
-    Assert.hasText(mediaType, "mediaType must not be blank");
+    if (mediaType == null || mediaType.isBlank()) {
+      throw DomainException.validation("mediaType", "mediaType must not be blank");
+    }
     for (int i = 0; i < mediaType.length(); i++) {
-      Assert.isTrue(
-          !Character.isISOControl(mediaType.charAt(i)),
-          "mediaType must not contain control characters");
+      if (Character.isISOControl(mediaType.charAt(i))) {
+        throw DomainException.validation(
+            "mediaType", "mediaType must not contain control characters");
+      }
     }
     String normalized = mediaType.trim();
-    Assert.isTrue(normalized.length() <= 255, "mediaType must not exceed 255 characters");
+    if (normalized.length() > 255) {
+      throw DomainException.validation("mediaType", "mediaType must not exceed 255 characters");
+    }
     try {
       return MimeTypeUtils.parseMimeType(normalized).toString();
     } catch (IllegalArgumentException e) {
-      throw new IllegalArgumentException("mediaType must be a valid media type", e);
+      throw DomainException.validation("mediaType", "mediaType must be a valid media type", e);
     }
   }
 
@@ -64,7 +80,8 @@ final class StorageUploadValidation {
 
   static void verifyObject(S3ObjectMetadata head, StorageUpload upload) {
     if (head.contentLength() != upload.getDeclaredSize()) {
-      throw new StorageVerificationException(
+      throw DomainException.conflict(
+          "STORAGE_VERIFICATION",
           "upload "
               + upload.getId()
               + " size mismatch: declared "
@@ -77,11 +94,13 @@ final class StorageUploadValidation {
     try {
       actual = Base64.getDecoder().decode(head.checksumSha256());
     } catch (IllegalArgumentException | NullPointerException e) {
-      throw new StorageVerificationException(
+      throw DomainException.conflict(
+          "STORAGE_VERIFICATION",
           "upload " + upload.getId() + " checksum unavailable or malformed");
     }
     if (!Arrays.equals(expected, actual)) {
-      throw new StorageVerificationException("upload " + upload.getId() + " checksum mismatch");
+      throw DomainException.conflict(
+          "STORAGE_VERIFICATION", "upload " + upload.getId() + " checksum mismatch");
     }
   }
 }

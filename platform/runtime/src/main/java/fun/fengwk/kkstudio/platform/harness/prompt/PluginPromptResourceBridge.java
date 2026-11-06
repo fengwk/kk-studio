@@ -8,7 +8,6 @@ import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.platform.plugin.prompt.PluginPromptResources;
-import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 
@@ -73,12 +72,12 @@ public final class PluginPromptResourceBridge implements PluginPromptResources {
     try {
       ready = uploadService.lockReady(staged.uploadId());
     } catch (DomainException error) {
-      if (error.code() != DomainErrorCode.NOT_FOUND || !"upload".equals(error.resource())) {
-        throw error;
+      if ((error.code() == DomainErrorCode.NOT_FOUND && "upload".equals(error.resource()))
+          || (error.code() == DomainErrorCode.CONFLICT
+              && "STORAGE_VERIFICATION".equals(error.reason()))) {
+        throw new IllegalArgumentException("staged prompt media cannot be consumed");
       }
-      throw new IllegalArgumentException("staged prompt media cannot be consumed");
-    } catch (StorageVerificationException error) {
-      throw new IllegalArgumentException("staged prompt media cannot be consumed");
+      throw error;
     }
     if (!staged.blobId().equals(ready.blobId())) {
       throw new IllegalArgumentException("staged prompt media failed integrity validation");

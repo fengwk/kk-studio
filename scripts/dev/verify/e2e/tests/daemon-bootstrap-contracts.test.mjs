@@ -43,10 +43,10 @@ function runBootstrap(env, { script = BOOTSTRAP } = {}) {
   return spawnSync('bash', [script], { env, encoding: 'utf8' })
 }
 
-test('test intent: the E2E seed pre-seeds exactly four disposable Environment Cards and stays re-runnable', () => {
+test('test intent: the E2E seed pre-seeds exactly four disposable Environments and stays re-runnable', () => {
   const content = readFileSync(SCHEMA_SEED, 'utf8')
 
-  // 1. Four Cards check
+  // 1. Four Environments check
   for (const expected of [
     '11111111-1111-1111-1111-111111111111',
     'tool-e2e',

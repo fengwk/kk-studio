@@ -36,7 +36,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 
-/** 稳定 Environment Card 业务服务。 */
+/** 稳定 Environment 业务服务。 */
 @AllArgsConstructor
 @Service
 public class EnvironmentService {

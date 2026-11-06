@@ -500,9 +500,9 @@ export function providerUpdateBody(overrides = {}) {
 }
 
 /**
- * Environment fixture：创建一次性 Environment Card 并返回权威 Card。
+ * Environment fixture：创建一次性 Environment 并返回权威资源。
  *
- * <p>用例只依赖 Card 的 id 与 CAS version；一次性 registrationToken 不进入断言，也不写入 artifact。
+ * <p>用例只依赖 Environment 的 id 与 CAS version；一次性 registrationToken 不进入断言，也不写入 artifact。
  */
 export async function createEnvironmentFixture(ctx, name) {
   const { json } = await ctx.call('POST', '/api/platform/environments', { name })

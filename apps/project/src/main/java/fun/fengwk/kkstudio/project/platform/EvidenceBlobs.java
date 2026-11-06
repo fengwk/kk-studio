@@ -5,7 +5,6 @@ import org.springframework.stereotype.Service;
 
 import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
-import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
@@ -19,8 +18,8 @@ import java.util.UUID;
  * Project/Issue 证据所需的全局 Blob 能力。
  *
  * <p>只暴露证据发布与释放真正需要的最小事实：人工上传的权威消费、全局 Blob 引用计数与 Blob 活跃性判定。所有变更方法都加入调用方已有的同一物理事务（{@code
- * StorageUploadService.lockReady}、{@code StorageBlobManager.retain/release} 都要求活动事务），存储异常在此收敛为
- * Project 领域异常。
+ * StorageUploadService.lockReady}、{@code StorageBlobManager.retain/release} 都要求活动事务）；上传不存在在此收敛为
+ * Project 领域异常，不可消费的上传保持存储的 {@code STORAGE_VERIFICATION} 冲突。
  */
 @AllArgsConstructor
 @Service
@@ -47,8 +46,6 @@ public class EvidenceBlobs {
         throw error;
       }
       throw DomainException.notFound("storage_upload");
-    } catch (StorageVerificationException error) {
-      throw DomainException.validation("upload", "Upload is not ready to be published as evidence");
     }
   }
 

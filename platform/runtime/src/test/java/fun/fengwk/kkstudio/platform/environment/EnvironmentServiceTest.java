@@ -81,7 +81,7 @@ class EnvironmentServiceTest {
         }
       };
 
-  /** 测试意图：Environment 创建只写入 Card 行，创建时不存在任何已被接受的 READY 宿主 metadata。 */
+  /** 测试意图：Environment 创建只写入 Environment 行，创建时不存在任何已被接受的 READY 宿主 metadata。 */
   @Test
   void createLeavesNoAcceptedHostMetadata() {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
@@ -121,9 +121,9 @@ class EnvironmentServiceTest {
     assertNull(card.getHomeDirectory());
   }
 
-  /** 测试意图：Card 行创建失败必须向上冒泡，绝不留下半成品。 */
+  /** 测试意图：Environment 行创建失败必须向上冒泡，绝不留下半成品。 */
   @Test
-  void createPropagatesCardInsertFailure() {
+  void createPropagatesEnvironmentInsertFailure() {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
     EnvironmentRegistry registry = mock(EnvironmentRegistry.class);
     AgentRepository agents = mock(AgentRepository.class);
@@ -240,9 +240,9 @@ class EnvironmentServiceTest {
     assertEquals(EnvironmentStatus.READY, list.get(0).getStatus());
   }
 
-  /** 测试意图：从未连接过的 Environment 没有保留的宿主 metadata，Card 除状态外全部为空。 */
+  /** 测试意图：从未连接过的 Environment 没有保留的宿主 metadata，Environment 除状态外全部为空。 */
   @Test
-  void neverConnectedCardHasNoHostMetadata() {
+  void neverConnectedEnvironmentHasNoHostMetadata() {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
     EnvironmentRegistry registry = mock(EnvironmentRegistry.class);
     AgentRepository agents = mock(AgentRepository.class);
@@ -275,7 +275,7 @@ class EnvironmentServiceTest {
   }
 
   /**
-   * 测试意图：CONNECTING 连接行仍保留最近一次 READY 的宿主 metadata，Card 直接投影该保留事实而不清空。
+   * 测试意图：CONNECTING 连接行仍保留最近一次 READY 的宿主 metadata，Environment 直接投影该保留事实而不清空。
    *
    * <p>这是"断线或重新 CONNECTING 不清空 runtime_info"契约在产品投影侧的可观察行为。
    */
@@ -527,7 +527,7 @@ class EnvironmentServiceTest {
   }
 
   /**
-   * 测试意图：Card 不内嵌历史事件；有历史 WARN 且当前 READY 时只暴露当前 READY 状态，而完整历史（历史 WARN 与后续 READY）仍由 events
+   * 测试意图：Environment 不内嵌历史事件；有历史 WARN 且当前 READY 时只暴露当前 READY 状态，而完整历史（历史 WARN 与后续 READY）仍由 events
    * 端点按时间正序保留，不以删除事件让卡片干净。
    */
   @Test

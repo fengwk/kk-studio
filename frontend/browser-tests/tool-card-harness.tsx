@@ -249,7 +249,7 @@ function createBlobResolver(delayMs: number, imageUrl: string) {
         original: imageUrl,
         preview: imageUrl,
         mediaType: 'image/png',
-        sizeBytes: 1_024,
+        sizeBytes: '1024',
       }
     }
     if (blobId === UNKNOWN_BLOB_ID) {
@@ -257,7 +257,7 @@ function createBlobResolver(delayMs: number, imageUrl: string) {
         original: 'https://example.invalid/unknown.txt',
         preview: null,
         mediaType: 'text/plain',
-        sizeBytes: 12,
+        sizeBytes: '12',
       }
     }
     return null

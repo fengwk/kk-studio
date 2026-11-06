@@ -241,38 +241,38 @@ test('environment install-script case checks code, headers and rotation without 
 
 for (const failure of ['http', 'timeout']) {
   test(`install-script ${failure} failure omits code and response credentials and still cleans up`, async () => {
-    const card = {
+    const environment = {
       id: '00000000-0000-4000-8000-000000000def',
       version: '0',
       installConfig: null,
     }
     const token = 'synthetic-registration-token'
     const code = 'synthetic-install-code'
-    const cardPath = `/api/platform/environments/${card.id}`
+    const environmentPath = `/api/platform/environments/${environment.id}`
     let deleted = false
     const ctx = {
       async call(method, path, body) {
         if (method === 'POST' && path === '/api/platform/environments') {
-          return { json: { ...card, registrationToken: token } }
+          return { json: { ...environment, registrationToken: token } }
         }
-        if (method === 'PUT' && path === `${cardPath}/install-settings`) {
-          card.version = '1'
-          card.installConfig = linuxInstallConfig()
-          return { json: card }
+        if (method === 'PUT' && path === `${environmentPath}/install-settings`) {
+          environment.version = '1'
+          environment.installConfig = linuxInstallConfig()
+          return { json: environment }
         }
-        if (method === 'POST' && path === `${cardPath}/install-codes`) {
-          if (body.expectedVersion !== card.version) throw problemError(409, 'version_conflict', 'version conflict', path)
+        if (method === 'POST' && path === `${environmentPath}/install-codes`) {
+          if (body.expectedVersion !== environment.version) throw problemError(409, 'version_conflict', 'version conflict', path)
           return {
             json: { code, expiresAt: Date.now() + 300_000 },
             headers: new Headers({ 'cache-control': 'no-store' }),
           }
         }
-        if (method === 'GET' && path === cardPath) return { json: card }
-        if (method === 'GET' && path.startsWith(`${cardPath}/install-script?`)) {
+        if (method === 'GET' && path === environmentPath) return { json: environment }
+        if (method === 'GET' && path.startsWith(`${environmentPath}/install-script?`)) {
           if (failure === 'http') throw problemError(500, 'internal', token, path)
           throw new Error(`timeout GET ${path}`)
         }
-        if (method === 'DELETE' && path.startsWith(`${cardPath}?`)) {
+        if (method === 'DELETE' && path.startsWith(`${environmentPath}?`)) {
           deleted = true
           return { json: null }
         }

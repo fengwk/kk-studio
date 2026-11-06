@@ -7,7 +7,7 @@ import java.util.regex.Pattern;
  * Daemon READY 上报的宿主 metadata。
  *
  * <p>这是 READY 的宿主 metadata：Daemon 自身构建版本与一份 {@link DaemonEnvironmentInfo}。READY
- * 只描述宿主本身，不携带任何产品目录事实；{@code daemonVersion} 是构建事实，与 Card 上的 CAS {@code version} 无关。
+ * 只描述宿主本身，不携带任何产品目录事实；{@code daemonVersion} 是构建事实，与 Environment 上的 CAS {@code version} 无关。
  */
 public record DaemonCapabilities(String daemonVersion, DaemonEnvironmentInfo environment) {
 
@@ -26,7 +26,7 @@ public record DaemonCapabilities(String daemonVersion, DaemonEnvironmentInfo env
   /**
    * 校验 daemon 自报的构建版本：非空白且只含版本字符。
    *
-   * <p>该值是 manifest 派生的构建事实，进入 Card 展示与更新目标判定，因此不接受空白、控制字符或任意自由文本。
+   * <p>该值是 manifest 派生的构建事实，进入 Environment 展示与更新目标判定，因此不接受空白、控制字符或任意自由文本。
    */
   public static String validateDaemonVersion(String value) {
     if (value == null || value.isBlank()) {

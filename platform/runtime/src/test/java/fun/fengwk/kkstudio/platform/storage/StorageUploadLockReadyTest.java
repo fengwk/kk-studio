@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.platform.storage;
 
+import static fun.fengwk.kkstudio.platform.storage.StorageUploadAssertions.assertStorageVerification;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -29,7 +30,6 @@ import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadDTO;
 import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadReadyDTO;
-import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 
 import java.nio.charset.StandardCharsets;
@@ -137,13 +137,10 @@ class StorageUploadLockReadyTest extends PostgresSpringTestSupport {
     StorageUploadDTO pending =
         storage.reserve(
             "pending.bin", "application/octet-stream", 1, storage.sha256Hex(new byte[] {1}));
-    StorageVerificationException error =
-        assertThrows(
-            StorageVerificationException.class,
-            () ->
-                tx.execute(
-                    status -> storageUploadService.lockReady(UUID.fromString(pending.getId()))));
-    assertTrue(error.getMessage().contains("PENDING"), "actual: " + error.getMessage());
+    assertStorageVerification(
+        () ->
+            tx.execute(status -> storageUploadService.lockReady(UUID.fromString(pending.getId()))),
+        "PENDING");
     assertEquals(
         1,
         jdbc.queryForObject(
@@ -164,13 +161,9 @@ class StorageUploadLockReadyTest extends PostgresSpringTestSupport {
         (StorageUploadReadyDTO) storageUploadService.complete(UUID.fromString(pending.getId()));
     storage.backdateUpload(ready.getId());
 
-    StorageVerificationException error =
-        assertThrows(
-            StorageVerificationException.class,
-            () ->
-                tx.execute(
-                    status -> storageUploadService.lockReady(UUID.fromString(ready.getId()))));
-    assertTrue(error.getMessage().contains("expired"), "actual: " + error.getMessage());
+    assertStorageVerification(
+        () -> tx.execute(status -> storageUploadService.lockReady(UUID.fromString(ready.getId()))),
+        "expired");
     assertEquals(
         1,
         jdbc.queryForObject(
@@ -311,12 +304,8 @@ class StorageUploadLockReadyTest extends PostgresSpringTestSupport {
     StorageUploadDTO pending =
         storage.reserve(
             "pending-peek.bin", "application/octet-stream", 1, storage.sha256Hex(new byte[] {1}));
-    StorageVerificationException pendingError =
-        assertThrows(
-            StorageVerificationException.class,
-            () -> storageUploadService.peekReady(UUID.fromString(pending.getId())));
-    assertTrue(
-        pendingError.getMessage().contains("PENDING"), "actual: " + pendingError.getMessage());
+    assertStorageVerification(
+        () -> storageUploadService.peekReady(UUID.fromString(pending.getId())), "PENDING");
 
     byte[] expiredContent = "expired-peek".getBytes(StandardCharsets.UTF_8);
     StorageUploadDTO expiring =
@@ -328,12 +317,8 @@ class StorageUploadLockReadyTest extends PostgresSpringTestSupport {
     storage.putUploadContent(expiring.getId(), expiredContent, "application/octet-stream");
     StorageUploadDTO expired = storageUploadService.complete(UUID.fromString(expiring.getId()));
     storage.backdateUpload(expired.getId());
-    StorageVerificationException expiredError =
-        assertThrows(
-            StorageVerificationException.class,
-            () -> storageUploadService.peekReady(UUID.fromString(expired.getId())));
-    assertTrue(
-        expiredError.getMessage().contains("expired"), "actual: " + expiredError.getMessage());
+    assertStorageVerification(
+        () -> storageUploadService.peekReady(UUID.fromString(expired.getId())), "expired");
 
     byte[] consumedContent = "consumed-peek".getBytes(StandardCharsets.UTF_8);
     StorageUploadDTO consumable =
@@ -350,13 +335,9 @@ class StorageUploadLockReadyTest extends PostgresSpringTestSupport {
           storageUploadService.delete(UUID.fromString(consumed.getId()));
           return null;
         });
-    StorageVerificationException consumedError =
-        assertThrows(
-            StorageVerificationException.class,
-            () -> storageUploadService.peekReady(UUID.fromString(consumed.getId())));
-    assertTrue(
-        consumedError.getMessage().contains("cleanup was requested"),
-        "actual: " + consumedError.getMessage());
+    assertStorageVerification(
+        () -> storageUploadService.peekReady(UUID.fromString(consumed.getId())),
+        "cleanup was requested");
 
     assertEquals(
         DomainErrorCode.NOT_FOUND,

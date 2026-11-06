@@ -1,6 +1,9 @@
-import type {
-  DaemonLspServerConfiguration,
-  EnvironmentInstallConfigDTO,
+import { url } from '@/shared/api/client'
+import {
+  DAEMON_OPERATING_SYSTEM_VALUES,
+  type DaemonLspServerConfiguration,
+  type DaemonOperatingSystem,
+  type EnvironmentInstallConfigDTO,
 } from '@/shared/api/generated/contracts'
 
 /**
@@ -24,8 +27,15 @@ function fail(field: string): never {
 // Java Character.isISOControl (C0 + C1) plus the JSON/JS line separators.
 // eslint-disable-next-line no-control-regex
 const controls = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/
-export const INSTALL_OPERATING_SYSTEMS = ['linux', 'macos', 'windows'] as const
-export type InstallOperatingSystem = (typeof INSTALL_OPERATING_SYSTEMS)[number]
+/**
+ * 可安装的宿主系统：Daemon 还能运行在 WSL，但没有独立的安装/卸载脚本；
+ * 安装入口只服务生成值中除 WSL 以外的系统。
+ */
+export type InstallOperatingSystem = Exclude<DaemonOperatingSystem, 'wsl'>
+export const INSTALL_OPERATING_SYSTEMS: readonly InstallOperatingSystem[] =
+  DAEMON_OPERATING_SYSTEM_VALUES.filter(
+    (operatingSystem): operatingSystem is InstallOperatingSystem => operatingSystem !== 'wsl',
+  )
 
 /** 校验后的安装设置：操作系统收窄为受支持的取值。 */
 export interface ValidatedInstallConfig extends EnvironmentInstallConfigDTO {
@@ -238,15 +248,23 @@ export function generateInstallCommand(
   nonblankText(environmentId, 'environmentId')
   nonblankText(code, 'installCode')
   if (!isInstallOperatingSystem(os)) fail('operatingSystem')
-  const url = scriptUrl(
+  const downloadUrl = scriptUrl(
     origin,
-    `/api/platform/environments/${encodeURIComponent(environmentId)}/install-script?code=${encodeURIComponent(code)}`,
+    url('GET /api/platform/environments/{environmentId}/install-script', {
+      path: { environmentId },
+      query: { code },
+    }),
   )
-  return os === 'windows' ? windowsCommand(url) : unixCommand(url)
+  return os === 'windows' ? windowsCommand(downloadUrl) : unixCommand(downloadUrl)
 }
 
 export function generateUninstallCommand(os: InstallOperatingSystem, origin: string): string {
   if (!isInstallOperatingSystem(os)) fail('operatingSystem')
-  const url = scriptUrl(origin, `/api/platform/daemon-uninstall-scripts/${encodeURIComponent(os)}`)
-  return os === 'windows' ? windowsCommand(url) : unixCommand(url)
+  const downloadUrl = scriptUrl(
+    origin,
+    url('GET /api/platform/daemon-uninstall-scripts/{operatingSystem}', {
+      path: { operatingSystem: os },
+    }),
+  )
+  return os === 'windows' ? windowsCommand(downloadUrl) : unixCommand(downloadUrl)
 }

@@ -386,7 +386,7 @@ class ApplicationEventHubTest {
   @Test
   void resourceKeysEnforceVersionedAndGlobalShapes() {
     assertThrows(NullPointerException.class, () -> new ResourceKey(ResourceKind.THREAD, null));
-    assertThrows(NullPointerException.class, () -> new ResourceKey(ResourceKind.TREE, null));
+    assertThrows(NullPointerException.class, () -> new ResourceKey(ResourceKind.THREAD_TREE, null));
     assertThrows(
         IllegalArgumentException.class,
         () -> new ResourceKey(ResourceKind.PROJECTS, UUID.randomUUID()));
@@ -413,17 +413,17 @@ class ApplicationEventHubTest {
 
     List<Signal> signals = new ArrayList<>();
     Subscription subscription =
-        hub.subscribe(new ResourceKey(ResourceKind.TREE, THREAD), signals::add);
+        hub.subscribe(new ResourceKey(ResourceKind.THREAD_TREE, THREAD), signals::add);
     assertEquals(THREAD, subscribedKey.get(), "树上游必须按真实根订阅");
     assertEquals(0L, subscription.cursor());
     subscription.activate();
 
     consumer.get().accept(new HarnessInvalidationChanges.Event.Changed(THREAD));
-    assertEquals(List.of(new Signal.TreeChanged()), signals);
+    assertEquals(List.of(new Signal.ThreadTreeChanged()), signals);
 
     // 提示型资源没有持久游标：resync 必须同样到达（不因 cursor 过滤被丢弃）。
     consumer.get().accept(new HarnessInvalidationChanges.Event.Resync());
-    assertEquals(List.of(new Signal.TreeChanged(), new Signal.Resync()), signals);
+    assertEquals(List.of(new Signal.ThreadTreeChanged(), new Signal.Resync()), signals);
   }
 
   @Test

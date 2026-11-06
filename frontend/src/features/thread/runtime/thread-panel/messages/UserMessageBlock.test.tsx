@@ -39,7 +39,7 @@ describe('UserMessageBlock ordered contents', () => {
         original: `https://media.test/${blobId}`,
         preview: `https://media.test/preview/${blobId}`,
         mediaType: 'image/png',
-        sizeBytes: 128,
+        sizeBytes: '128',
       })}>
         <UserMessageBlock message={projected} />
       </ResourceBlobUrlContext.Provider>,

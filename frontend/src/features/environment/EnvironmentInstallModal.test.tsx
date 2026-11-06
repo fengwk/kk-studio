@@ -6,7 +6,7 @@ import { setLocale } from '@/shared/i18n'
 import { EnvironmentInstallModal } from './EnvironmentInstallModal'
 import { environmentService } from '@/features/environment/environment-service'
 import { copyTextToClipboard } from '@/shared/lib/clipboard'
-import { ApiError } from '@/shared/api/client'
+import { ApiError, url } from '@/shared/api/client'
 import { chooseSelectOption } from '@/test-support/chooseSelectOption'
 import type {
   EnvironmentDTO,
@@ -95,8 +95,12 @@ describe('EnvironmentInstallModal', () => {
     expect(vi.mocked(environmentService.saveInstallConfig).mock.invocationCallOrder[0])
       .toBeLessThan(vi.mocked(environmentService.createInstallCode).mock.invocationCallOrder[0]!)
     const copied = vi.mocked(copyTextToClipboard).mock.calls[0]![0]
+    const scriptUrl = url('GET /api/platform/environments/{environmentId}/install-script', {
+      path: { environmentId: 'env-1' },
+      query: { code: "short-code'汉字" },
+    })
     expect(copied).toBe(
-      `(set -o pipefail; curl -fsSL $'${window.location.origin}/api/platform/environments/env-1/install-script?code=${encodeURIComponent("short-code'汉字").replaceAll("'", "\\'")}' | bash)`,
+      `(set -o pipefail; curl -fsSL $'${window.location.origin}${scriptUrl.replaceAll("'", "\\'")}' | bash)`,
     )
     expect(copied).not.toContain('canonical.example.com')
     expect(copied).not.toContain('registrationToken')

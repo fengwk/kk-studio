@@ -14,7 +14,6 @@ import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadDTO;
 import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadPendingDTO;
 import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadReadyDTO;
 import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadReserveRequestDTO;
-import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 
 import java.util.Map;
@@ -71,9 +70,13 @@ public class StorageDaemonResourceTicketService implements DaemonResourceTicketS
         throw new IllegalStateException("complete must return READY for the requested upload");
       }
       return ticket;
-    } catch (StorageVerificationException error) {
-      // 对象尚未就绪或校验失败是可重试事实，不回显服务端细节。
-      return new Ticket.Failed("uploaded object is not ready yet");
+    } catch (DomainException error) {
+      if (error.code() == DomainErrorCode.CONFLICT
+          && "STORAGE_VERIFICATION".equals(error.reason())) {
+        // 对象尚未就绪或校验失败是可重试事实，不回显服务端细节。
+        return new Ticket.Failed("uploaded object is not ready yet");
+      }
+      return failed();
     } catch (RuntimeException error) {
       return failed();
     }

@@ -47,8 +47,8 @@ import { harnessService } from '@/shared/api/harness-service'
 import type {
   InteractionDTO,
   InteractionPageDTO,
+  StoragePresignedUrlDTO,
 } from '@/shared/api/generated/contracts'
-import type { StorageBlobUrl } from '@/shared/api/contracts/storage'
 import {
   type AgentRuntimeOwnerDTO,
   createBuiltinExecution,
@@ -262,16 +262,19 @@ const { fakeStorage } = vi.hoisted(() => {
       getBlobDownloadUrl: vi.fn(
         async (
           _blobId: string,
-        ): Promise<StorageBlobUrl> => ({
+        ): Promise<StoragePresignedUrlDTO> => ({
+          method: 'GET',
           url: 'https://storage.test/blob',
+          headers: {},
+          expiresAt: 0,
           mediaType: 'application/octet-stream',
-          sizeBytes: 128,
+          sizeBytes: '128',
         }),
       ),
       getBlobPreviewUrl: vi.fn(
         async (
           _blobId: string,
-        ): Promise<StorageBlobUrl | null> => null,
+        ): Promise<StoragePresignedUrlDTO | null> => null,
       ),
     },
   }
@@ -4896,21 +4899,40 @@ describe('AgentPane root control mounting', () => {
       entries: [resourceEntry('user-blob-1', 'blob-1'), resourceEntry('user-blob-2', 'blob-2')],
     }))
 
-    const defaultDownload = async (_blobId: string = ''): Promise<StorageBlobUrl> => ({
+    const defaultDownload = async (
+      _blobId: string = '',
+    ): Promise<StoragePresignedUrlDTO> => ({
+      method: 'GET',
       url: 'https://storage.test/blob',
+      headers: {},
+      expiresAt: 0,
       mediaType: null,
       sizeBytes: null,
     })
     fakeStorage.getBlobDownloadUrl.mockImplementation(async (blobId: string) => {
       if (blobId === 'blob-1') {
-        return { url: 'https://storage.test/blob-1', mediaType: 'image/png', sizeBytes: 128 }
+        return {
+          method: 'GET',
+          url: 'https://storage.test/blob-1',
+          headers: {},
+          expiresAt: 0,
+          mediaType: 'image/png',
+          sizeBytes: '128',
+        }
       }
       // 第二个资源解析直接失败：适配层必须吞掉失败并退化为无预览。
       throw new Error('blob-2 unavailable')
     })
     fakeStorage.getBlobPreviewUrl.mockImplementation(async (blobId: string) => (
       blobId === 'blob-1'
-        ? { url: 'https://storage.test/preview-1', mediaType: 'image/png', sizeBytes: 128 }
+        ? {
+          method: 'GET',
+          url: 'https://storage.test/preview-1',
+          headers: {},
+          expiresAt: 0,
+          mediaType: 'image/png',
+          sizeBytes: '128',
+        }
         : (() => { throw new Error('blob-2 unavailable') })()
     ))
 

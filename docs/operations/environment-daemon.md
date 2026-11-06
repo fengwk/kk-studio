@@ -203,7 +203,7 @@ Web 保存的 `EnvironmentInstallConfigDTO`：
   一律拒绝**，包括 `requestTimeoutMs`。
 
 `PUT /api/platform/environments/{id}/install-settings` 以 `{expectedVersion, installConfig}` 保存，
-`installConfig` 不可为 null；版本不匹配返回冲突，配置未变则幂等不写行。响应 Card 不包含 token。
+`installConfig` 不可为 null；版本不匹配返回冲突，配置未变则幂等不写行。响应 Environment 不包含 token。
 安装 UI 不读取长期 token，只请求安装 code：
 
 | 入口 | 契约 |

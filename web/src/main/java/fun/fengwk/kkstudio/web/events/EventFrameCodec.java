@@ -63,7 +63,7 @@ final class EventFrameCodec {
   private static final String THREAD = ResourceKind.THREAD.name().toLowerCase();
   private static final String CANVAS = ResourceKind.CANVAS.name().toLowerCase();
   private static final String PROJECTS = ResourceKind.PROJECTS.name().toLowerCase();
-  private static final String TREE = "thread-tree";
+  private static final String THREAD_TREE = "thread-tree";
   private static final String INTERACTIONS = ResourceKind.INTERACTIONS.name().toLowerCase();
   private static final String ENVIRONMENTS = ResourceKind.ENVIRONMENTS.name().toLowerCase();
 
@@ -185,9 +185,10 @@ final class EventFrameCodec {
       ObjectNode data = NODES.objectNode();
       data.put("projectId", projectChanged.projectId().toString());
       node.set("data", data);
-    } else if (signal instanceof Signal.TreeChanged) {
-      if (resource.kind() != ResourceKind.TREE) {
-        throw new IllegalArgumentException("tree change signal requires the tree resource");
+    } else if (signal instanceof Signal.ThreadTreeChanged) {
+      if (resource.kind() != ResourceKind.THREAD_TREE) {
+        throw new IllegalArgumentException(
+            "thread-tree change signal requires the thread-tree resource");
       }
       // 根 id 已在 resource 中，事件 data 无需重复携带。
       node.put("name", "changed");
@@ -333,8 +334,8 @@ final class EventFrameCodec {
     if (CANVAS.equals(kindName)) {
       return new ResourceKey(ResourceKind.CANVAS, resourceId(node));
     }
-    if (TREE.equals(kindName)) {
-      return new ResourceKey(ResourceKind.TREE, resourceId(node));
+    if (THREAD_TREE.equals(kindName)) {
+      return new ResourceKey(ResourceKind.THREAD_TREE, resourceId(node));
     }
     if (PROJECTS.equals(kindName)) {
       requireExactFields(node, GLOBAL_RESOURCE_FIELDS, "frame.resource");
@@ -363,7 +364,7 @@ final class EventFrameCodec {
     switch (resource.kind()) {
       case THREAD -> node.put("kind", THREAD);
       case CANVAS -> node.put("kind", CANVAS);
-      case TREE -> node.put("kind", TREE);
+      case THREAD_TREE -> node.put("kind", THREAD_TREE);
       case PROJECTS -> node.put("kind", PROJECTS);
       case INTERACTIONS -> node.put("kind", INTERACTIONS);
       case ENVIRONMENTS -> node.put("kind", ENVIRONMENTS);
@@ -377,7 +378,7 @@ final class EventFrameCodec {
   /** 提示型（无持久游标）资源：ack cursor 恒为 0，只提示回读。 */
   private static boolean isHintResource(ResourceKind kind) {
     return kind == ResourceKind.PROJECTS
-        || kind == ResourceKind.TREE
+        || kind == ResourceKind.THREAD_TREE
         || kind == ResourceKind.INTERACTIONS
         || kind == ResourceKind.ENVIRONMENTS;
   }

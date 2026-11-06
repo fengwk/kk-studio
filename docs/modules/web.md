@@ -85,7 +85,7 @@ health、资源下载和 WebSocket 使用各自传输形式。公开路由如下
 | Issue | `/api/project/issues/{issueId}` | CRUD、活动/证据、流转、阻塞/恢复、stop/继续、额度重置、重开（控制器在 [apps/project](project.md)） |
 | Settings | `/api/platform/settings` | 聚合 GET/CAS PUT、编辑 schema |
 | Configuration sync | `/api/platform/config-sync` | 清单、选择导出、导入检查与确认执行；响应禁止缓存 |
-| Environment | `/api/platform/environments`、`/{id}/runtime`、`/{id}/install-settings`、`/{id}/install-codes`、`/{id}/install-script`、`/{id}/rotate-token`、`/{id}/update-daemon`、`/api/platform/daemon-uninstall-scripts/{os}` | Card、当前运行状态快照、注册令牌轮换（明文只在创建与轮换响应中返回一次）、安装设置保存、安装命令与一次性安装码、卸载脚本、受管二进制在线更新（POST 发起并返回当前运行快照）、运维 events |
+| Environment | `/api/platform/environments`、`/{id}/runtime`、`/{id}/install-settings`、`/{id}/install-codes`、`/{id}/install-script`、`/{id}/rotate-token`、`/{id}/update-daemon`、`/api/platform/daemon-uninstall-scripts/{os}` | 配置 CRUD、当前运行状态快照、注册令牌轮换（明文只在创建与轮换响应中返回一次）、安装设置保存、安装命令与一次性安装码、卸载脚本、受管二进制在线更新（POST 发起并返回当前运行快照）、运维 events |
 | Environment IDE | `/api/ide/environments/{id}/views`、`/ide/{environmentId}/{viewId}/` | 打开/关闭视图、切换目录与终端；同源 IDE 固定入口、bootstrap 票据与 HTTP/WebSocket 数据面 |
 | Environment Daemon | `/ws/daemon` | Daemon 准入裁决与 WebSocket 升级端点，承载控制与数据传输 |
 
@@ -212,7 +212,7 @@ locale 支持 en-US/zh-CN，其他回退英文。错误类别与成员见[系统
 
 用户认证、TLS 和 ingress 访问控制由部署边界提供。
 配置同步导出包含所需凭据；三个端点的成功和错误响应均为 `no-store`，请求体与 YAML 不记日志。
-Daemon registration token 在准入请求中绑定 Environment，通用 Card 只返回安全投影。
+Daemon registration token 在准入请求中绑定 Environment，通用 Environment 响应只返回安全投影。
 Plugin auth 请求 no-store，凭据只在数据库中保存，任何响应都不回显。
 Storage/Canvas 签发有限期 URL，客户端使用受控存储入口。
 Provider 上游错误正文沿其协议契约进入持久记录与客户端，可能包含上游回显的敏感信息；
@@ -262,7 +262,7 @@ Thread 的首个本地订阅同时向平台订阅服务登记 `(threadId, nodeIn
 订阅服务生命周期边界，再删除本节点全部订阅，迟到的登记或续租不得复活租约。
 只有其它节点存在该 Thread 的有效订阅（订阅租约与 `cluster_node` 租约均未过期）时，普通 realtime 才跨节点
 发布；流式追帧请求仍按“其它活跃节点”广播。
-Environment 的连接状态不做推送：Card 的 `status` / `statusExpiresAt` 在读取时由
+Environment 的连接状态不做推送：Environment 的 `status` / `statusExpiresAt` 在读取时由
 `min(leaseUntil, lastSeenAt + heartbeatTimeout)` 派生，浏览器只按 `environments` 失效提示回读。
 非法帧、过载和关闭按稳定错误与 WebSocket close code 收尾。
 

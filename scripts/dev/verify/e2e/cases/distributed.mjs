@@ -27,9 +27,9 @@ async function waitForEnvironmentReady(callNode, node, envId, maxAttempts = 60) 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       const res = await callNode(node, 'GET', `/api/platform/environments/${encodeURIComponent(envId)}`)
-      const card = res.json
-      if (card?.ready === true && card?.status === 'READY') {
-        return card
+      const environment = res.json
+      if (environment?.ready === true && environment?.status === 'READY') {
+        return environment
       }
     } catch {
       // transient startup / reconnecting
@@ -83,7 +83,7 @@ registerCase({
   level: 'L5',
   title: '双节点共享状态：跨节点 Environment 创建/token 轮换 CAS/删除与 404',
   requires: ['distributed'],
-  docs: '在 node A 创建临时 Environment Card，在 node B 读取并轮换 registrationToken（CAS 推进 version、name 恒定），回 node A 用陈旧 version 轮换得 409、用新 version 轮换取到不同 token；再跨节点删除并在两节点验证 404；finally 尽力清理，禁止将一次性 registrationToken 写入 artifact/log',
+  docs: '在 node A 创建临时 Environment，在 node B 读取并轮换 registrationToken（CAS 推进 version、name 恒定），回 node A 用陈旧 version 轮换得 409、用新 version 轮换取到不同 token；再跨节点删除并在两节点验证 404；finally 尽力清理，禁止将一次性 registrationToken 写入 artifact/log',
   async run(ctx) {
     assertDistributedContext(ctx)
 
@@ -92,7 +92,7 @@ registerCase({
     let latestVersion = null
 
     try {
-      // 1. 在 node A 创建临时 Environment Card
+      // 1. 在 node A 创建临时 Environment
       const createRes = await ctx.callNode('a', 'POST', '/api/platform/environments', { name: envName })
       const created = createRes.json
       assert(created?.id, 'expected created environment id')
@@ -206,16 +206,16 @@ registerCase({
       )
       createdId = null
     } finally {
-      // 尽力清理临时环境卡片
+      // 尽力清理临时 Environment
       if (createdId) {
         try {
           const probe = await ctx.callNode('a', 'GET', `/api/platform/environments/${encodeURIComponent(createdId)}`)
-          const card = probe.json
-          if (card?.version) {
+          const environment = probe.json
+          if (environment?.version) {
             await ctx.callNode(
               'a',
               'DELETE',
-              `/api/platform/environments/${encodeURIComponent(createdId)}?expectedVersion=${encodeURIComponent(card.version)}`,
+              `/api/platform/environments/${encodeURIComponent(createdId)}?expectedVersion=${encodeURIComponent(environment.version)}`,
             )
           }
         } catch {
@@ -236,20 +236,20 @@ registerCase({
     assertDistributedContext(ctx)
 
     // 1. 两个 App 都必须投影两者 READY
-    const cardAOnA = await waitForEnvironmentReady(ctx.callNode, 'a', ENV_A_ID)
-    const cardBOnA = await waitForEnvironmentReady(ctx.callNode, 'a', ENV_B_ID)
-    const cardAOnB = await waitForEnvironmentReady(ctx.callNode, 'b', ENV_A_ID)
-    const cardBOnB = await waitForEnvironmentReady(ctx.callNode, 'b', ENV_B_ID)
+    const environmentAOnA = await waitForEnvironmentReady(ctx.callNode, 'a', ENV_A_ID)
+    const environmentBOnA = await waitForEnvironmentReady(ctx.callNode, 'a', ENV_B_ID)
+    const environmentAOnB = await waitForEnvironmentReady(ctx.callNode, 'b', ENV_A_ID)
+    const environmentBOnB = await waitForEnvironmentReady(ctx.callNode, 'b', ENV_B_ID)
 
     assert(
-      cardAOnA.ready && cardBOnA.ready && cardAOnB.ready && cardBOnB.ready,
+      environmentAOnA.ready && environmentBOnA.ready && environmentAOnB.ready && environmentBOnB.ready,
       'all four projections must be ready',
     )
 
     // 2. 跨节点投影必须逐字段一致：DB 是唯一路由权威，node B 读取 env A 时不得回退本机连接。
     for (const [label, fromA, fromB] of [
-      ['env A', cardAOnA, cardAOnB],
-      ['env B', cardBOnA, cardBOnB],
+      ['env A', environmentAOnA, environmentAOnB],
+      ['env B', environmentBOnA, environmentBOnB],
     ]) {
       assert(fromA.id === fromB.id, `${label}: id must match across nodes`)
       assert(fromA.name === fromB.name, `${label}: name must match across nodes`)
@@ -268,8 +268,8 @@ registerCase({
         `${label}: host facts must come from DB routing, not the caller's local socket`,
       )
       // live 投影的原子能力来自权威能力目录。
-      const capabilityKey = (card) =>
-        (card.capabilities || [])
+      const capabilityKey = (environment) =>
+        (environment.capabilities || [])
           .map((capability) => capability.id)
           .sort()
           .join(',')
@@ -289,8 +289,8 @@ registerCase({
       'lease-routing.json',
       JSON.stringify(
         {
-          envA: { onA: cardAOnA, onB: cardAOnB },
-          envB: { onA: cardBOnA, onB: cardBOnB },
+          envA: { onA: environmentAOnA, onB: environmentAOnB },
+          envB: { onA: environmentBOnA, onB: environmentBOnB },
         },
         null,
         2,
@@ -313,13 +313,13 @@ registerCase({
     )
 
     // 1. 先证明 node A 与 node B 都能读取 env A 的 DB 权威投影
-    const preCardA = await waitForEnvironmentReady(ctx.callNode, 'a', ENV_A_ID)
-    const preCardAOnB = await waitForEnvironmentReady(ctx.callNode, 'b', ENV_A_ID)
+    const preEnvironmentA = await waitForEnvironmentReady(ctx.callNode, 'a', ENV_A_ID)
+    const preEnvironmentAOnB = await waitForEnvironmentReady(ctx.callNode, 'b', ENV_A_ID)
     assert(
-      preCardA.homeDirectory === preCardAOnB.homeDirectory,
+      preEnvironmentA.homeDirectory === preEnvironmentAOnB.homeDirectory,
       `pre-check: cross-node host fact mismatch: ${JSON.stringify({
-        onA: preCardA.homeDirectory,
-        onB: preCardAOnB.homeDirectory,
+        onA: preEnvironmentA.homeDirectory,
+        onB: preEnvironmentAOnB.homeDirectory,
       })}`,
     )
 
@@ -355,14 +355,14 @@ registerCase({
     const recoveredOnB = await waitForEnvironmentReady(ctx.callNode, 'b', ENV_A_ID, 60)
     assert(recoveredOnA?.status === 'READY', 'node A failed to recover READY status')
     assert(
-      recoveredOnA.homeDirectory === preCardA.homeDirectory,
+      recoveredOnA.homeDirectory === preEnvironmentA.homeDirectory,
       `node A homeDirectory must recover to the same DB-authoritative value: ${
         recoveredOnA.homeDirectory
-      } != ${preCardA.homeDirectory}`,
+      } != ${preEnvironmentA.homeDirectory}`,
     )
     assert(
-      recoveredOnB.homeDirectory === preCardA.homeDirectory,
-      `node B must observe the recovered route: ${recoveredOnB.homeDirectory} != ${preCardA.homeDirectory}`,
+      recoveredOnB.homeDirectory === preEnvironmentA.homeDirectory,
+      `node B must observe the recovered route: ${recoveredOnB.homeDirectory} != ${preEnvironmentA.homeDirectory}`,
     )
 
     ctx.writeArtifact(

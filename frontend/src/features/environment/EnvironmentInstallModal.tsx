@@ -15,6 +15,7 @@ import { useI18n, type InterpolationValues, type TranslationKey } from '@/shared
 import { queryKeys } from '@/shared/lib/query-keys'
 import { copyTextToClipboard } from '@/shared/lib/clipboard'
 import {
+  INSTALL_OPERATING_SYSTEMS,
   InstallConfigError,
   detectInstallOS,
   generateInstallCommand,
@@ -76,6 +77,17 @@ const LSP_EXAMPLE_TEXT = `{
     "rootMarkers": ["pom.xml"]
   }
 }`
+
+/** 选择器的操作系统取值来自生成契约；名称只属于界面展示。 */
+const OPERATING_SYSTEM_LABELS: Record<InstallOperatingSystem, string> = {
+  linux: 'Linux',
+  macos: 'macOS',
+  windows: 'Windows',
+}
+const OPERATING_SYSTEM_OPTIONS = INSTALL_OPERATING_SYSTEMS.map(value => ({
+  value,
+  label: OPERATING_SYSTEM_LABELS[value],
+}))
 
 /** 路径示例只随所选操作系统变化，不检测本机、不写入表单值。 */
 const PATH_EXAMPLES: Record<InstallOperatingSystem, { bash: string }> = {
@@ -299,11 +311,7 @@ export function EnvironmentInstallModal({ environment, uninstall = false, onClos
                 value={os}
                 onChange={value => setOS(value as InstallOperatingSystem)}
                 disabled={disabled}
-                options={[
-                  { value: 'linux', label: 'Linux' },
-                  { value: 'macos', label: 'macOS' },
-                  { value: 'windows', label: 'Windows' },
-                ]}
+                options={OPERATING_SYSTEM_OPTIONS}
               />
             </div>
             {!uninstall && (

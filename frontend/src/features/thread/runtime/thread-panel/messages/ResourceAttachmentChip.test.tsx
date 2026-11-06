@@ -24,7 +24,7 @@ function urls(overrides: Partial<ResourceBlobUrls> = {}): ResourceBlobUrls {
     original: 'https://s3.test/orig',
     preview: 'https://s3.test/prev',
     mediaType: 'application/pdf',
-    sizeBytes: 42,
+    sizeBytes: '42',
     ...overrides,
   }
 }

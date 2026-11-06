@@ -211,9 +211,9 @@ registerCase({
               'GET',
               `/api/platform/environments/${encodeURIComponent(envId)}`,
             )
-            const card = json
-            if (card?.version != null) {
-              versionToDelete = String(card.version)
+            const environment = json
+            if (environment?.version != null) {
+              versionToDelete = String(environment.version)
             }
           } catch {
             // fallback to latestVersion
@@ -281,12 +281,12 @@ registerCase({
   id: 'config_sync.environment_install_config_roundtrip',
   level: 'L1',
   title: '配置同步 Environment installConfig 导出导入往返、原子更新与清除',
-  docs: 'Environment 导出在 registrationTokenHash 旁嵌套 installConfig；导入预检查只列覆盖引用；确认导入保留配置；以新摘要+新配置的条目可原子更新（重新导出得到新摘要、Card 读到新配置）；缺少 installConfig 字段的条目清空已保存配置',
+  docs: 'Environment 导出在 registrationTokenHash 旁嵌套 installConfig；导入预检查只列覆盖引用；确认导入保留配置；以新摘要+新配置的条目可原子更新（重新导出得到新摘要、Environment 读到新配置）；缺少 installConfig 字段的条目清空已保存配置',
   async run(ctx) {
     const suffix = cid().slice(0, 8)
     const envName = `e2e-sync-cfg-${suffix}`
     const newToken = `e2e-sync-cfg-token-${suffix}`
-    const cardPath = (id) => `/api/platform/environments/${encodeURIComponent(id)}`
+    const environmentPath = (id) => `/api/platform/environments/${encodeURIComponent(id)}`
     let envId = null
 
     const { json: createJson } = await ctx.call('POST', '/api/platform/environments', { name: envName })
@@ -296,7 +296,7 @@ registerCase({
     assert(envId && originalToken, `created environment must carry id and token: ${JSON.stringify(created)}`)
 
     try {
-      const { json: putJson } = await ctx.call('PUT', `${cardPath(envId)}/install-settings`, {
+      const { json: putJson } = await ctx.call('PUT', `${environmentPath(envId)}/install-settings`, {
         expectedVersion: String(created.version),
         installConfig: linuxInstallConfig(),
       })
@@ -327,7 +327,7 @@ registerCase({
         importJson.imported.some((item) => item.kind === 'environments' && item.name === envName),
         'import must report the environment',
       )
-      const { json: afterImportJson } = await ctx.call('GET', cardPath(envId))
+      const { json: afterImportJson } = await ctx.call('GET', environmentPath(envId))
       assertInstallConfig(afterImportJson.installConfig)
 
       // 原子更新：新 token + 新配置在同一 environment 条目内一次导入生效。
@@ -346,9 +346,9 @@ registerCase({
         updatedExportJson.yaml.includes(tokenHash(newToken)),
         'atomic sync update must replace the registration token hash',
       )
-      const { json: updatedCardJson } = await ctx.call('GET', cardPath(envId))
+      const { json: updatedEnvironmentJson } = await ctx.call('GET', environmentPath(envId))
       assert(
-        updatedCardJson.installConfig?.daemon?.note === 'e2e install config updated',
+        updatedEnvironmentJson.installConfig?.daemon?.note === 'e2e install config updated',
         'atomic sync update must persist the new install config alongside the token',
       )
 
@@ -357,18 +357,18 @@ registerCase({
         environments: [{ name: envName, registrationTokenHash: tokenHash(newToken) }],
       })
       await ctx.call('POST', '/api/platform/config-sync/import', { yaml: clearYaml, allowPartial: false })
-      const { json: clearedJson } = await ctx.call('GET', cardPath(envId))
+      const { json: clearedJson } = await ctx.call('GET', environmentPath(envId))
       assert(
         clearedJson.installConfig == null,
         `absent installConfig must clear saved settings: ${JSON.stringify(clearedJson.installConfig)}`,
       )
     } finally {
       if (envId) {
-        const { json } = await ctx.call('GET', cardPath(envId))
+        const { json } = await ctx.call('GET', environmentPath(envId))
         const current = json
         await ctx.call(
           'DELETE',
-          `${cardPath(envId)}?expectedVersion=${encodeURIComponent(String(current.version))}`,
+          `${environmentPath(envId)}?expectedVersion=${encodeURIComponent(String(current.version))}`,
         )
       }
     }

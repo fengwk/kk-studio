@@ -3,6 +3,7 @@ import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync } from 'no
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
+import { url } from '@/shared/api/client'
 import { generateInstallCommand, generateUninstallCommand } from './install-command'
 
 const origin = 'https://studio.example.com'
@@ -56,7 +57,10 @@ if ($ErrorActionPreference -ne 'Continue' -or $script -ne 'outer') { throw 'call
       expect(record.marker).toBe('执行-汉字')
       expect(record.token).toBe('private-synthetic-token')
       expect(record.url).toBe(
-        `https://studio.example.com/api/platform/environments/${encodeURIComponent(environmentId)}/install-script?code=${encodeURIComponent(installCode)}`,
+        `${origin}${url('GET /api/platform/environments/{environmentId}/install-script', {
+          path: { environmentId },
+          query: { code: installCode },
+        })}`,
       )
       expect(downloaded.stdout + downloaded.stderr).not.toContain('private-synthetic-token')
       expect(existsSync(join(dir, 'NEVER'))).toBe(false)
