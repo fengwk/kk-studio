@@ -241,7 +241,7 @@ Harness 的公共内核与 Builtin Driver 分属 [`harness/runtime`](../../harne
 
 ### Fat JAR
 
-根 POM 的 reactor 当前是 [`common`](../../common)、[`share`](../../share)、[`schema`](../../schema)、
+根 POM 的 reactor 当前是 [`common`](../../common)、[`schema`](../../schema)、
 [`work`](../../work)、[`harness`](../../harness)、[`platform`](../../platform)、[`apps`](../../apps)、
 [`plugins`](../../plugins)、[`web`](../../web)。需要可运行产物时：
 

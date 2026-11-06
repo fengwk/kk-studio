@@ -170,8 +170,8 @@ export async function main(argv = process.argv.slice(2)) {
 
 async function validatePreflight(ctx, daemonEnv) {
   const [providersResponse, modelsResponse, toolsResponse, environments] = await Promise.all([
-    ctx.call('GET', '/api/platform/providers?pageNumber=1&pageSize=100'),
-    ctx.call('GET', '/api/platform/models?pageNumber=1&pageSize=100'),
+    ctx.call('GET', '/api/platform/providers'),
+    ctx.call('GET', '/api/platform/models'),
     ctx.call('GET', '/api/platform/tools'),
     listEnvironments(ctx),
   ])

@@ -43,7 +43,7 @@ vi.mock('@/shared/api/agent-service', () => ({
         environmentId: null,
       },
     ]),
-    listModels: vi.fn(async () => ({ pageNumber: 1, pageSize: 50, totalCount: '0', results: [] })),
+    listModels: vi.fn(async () => []),
   },
 }))
 

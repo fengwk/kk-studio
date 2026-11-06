@@ -170,7 +170,3 @@ export const FIXTURE_DEFAULTS_PAGE: ModelCatalogPageDTO = {
   items: FIXTURE_CANDIDATES,
   nextCursor: null,
 }
-
-export function pageResult<T>(results: T[]) {
-  return { pageNumber: 1, pageSize: 50, totalCount: String(results.length), results }
-}

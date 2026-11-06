@@ -67,7 +67,7 @@ registerCase({
   title: 'Model 公开契约与 Pi 默认目录一致',
   docs: 'GET /api/platform/models：按全局逻辑名完整匹配 Pi 0.82.1 快照与公开字段集合；种子持久化形态的 variant 省略 protocolOptionsJson，公开契约返回 canonical 字符串（null/空 ≡ "{}"）',
   async run(ctx) {
-    const { json } = await ctx.call('GET', '/api/platform/models?pageNumber=1&pageSize=50')
+    const { json } = await ctx.call('GET', '/api/platform/models')
     const models = pageResults(json)
     const actualCatalog = models
       .map((model) => ({
@@ -136,7 +136,7 @@ registerCase({
   async run(ctx) {
     const { json: agentsJson } = await ctx.call(
       'GET',
-      '/api/platform/agents?pageNumber=1&pageSize=50',
+      '/api/platform/agents',
     )
     const agents = pageResults(agentsJson)
     assert(agents.length > 0, 'no agents')
@@ -163,7 +163,7 @@ registerCase({
 
     const { json: providersJson } = await ctx.call(
       'GET',
-      '/api/platform/providers?pageNumber=1&pageSize=50',
+      '/api/platform/providers',
     )
     const providers = pageResults(providersJson)
     const expectedProviderTypes = new Map([
@@ -2157,7 +2157,7 @@ registerCase({
     const { json } = await httpJson(
       ctx.vars.frontendUrl,
       'GET',
-      '/api/platform/models?pageNumber=1&pageSize=1',
+      '/api/platform/models',
     )
     const model = pageResults(json)[0]
     assert(model?.type === 'MODEL' && model?.providerName && model?.name && model?.config?.defaultVariant, JSON.stringify(model))
@@ -2194,10 +2194,10 @@ function modelSelectionOf(ctx) {
 /** 免费控制面 case 只需一个当前 Catalog 可解析的 Agent/Model，不依赖完整 E2E seed。 */
 async function resolveAnyCatalogTarget(ctx) {
   const agents = pageResults(
-    (await ctx.call('GET', '/api/platform/agents?pageNumber=1&pageSize=50')).json,
+    (await ctx.call('GET', '/api/platform/agents')).json,
   )
   const models = pageResults(
-    (await ctx.call('GET', '/api/platform/models?pageNumber=1&pageSize=50')).json,
+    (await ctx.call('GET', '/api/platform/models')).json,
   )
   for (const agent of agents) {
     if (agent.execution?.driver !== 'builtin') continue

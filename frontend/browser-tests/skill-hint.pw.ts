@@ -175,7 +175,7 @@ async function installSkillHintApi(
       return
     }
     await route.fulfill({
-      json: { pageNumber: 1, pageSize: 50, totalCount: '0', results: [] },
+      json: [],
     })
   })
   return state

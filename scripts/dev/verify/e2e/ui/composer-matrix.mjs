@@ -1598,7 +1598,7 @@ async function clearBrowserFixtureState(page, fixture) {
 async function resolveCatalogTarget(apiCtx) {
   const agentsResponse = await apiCtx.call(
     'GET',
-    '/api/platform/agents?pageNumber=1&pageSize=50',
+    '/api/platform/agents',
   )
   const modelsResponse = await apiCtx.call(
     'GET',

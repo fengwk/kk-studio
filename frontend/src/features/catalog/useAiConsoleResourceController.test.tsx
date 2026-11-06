@@ -169,7 +169,7 @@ describe('useAiConsoleResourceController', () => {
       queryClient.setQueryData(queryKeys.models.list, [{ ...currentModel, providerName: 'stub-v2', name: 'acceptance-stub-v2' }])
       queryClient.setQueryData(
         queryKeys.agents.list,
-        page([{ ...currentAgent, execution: { driver: 'builtin', settings: { modelName: 'acceptance-stub-v2', variant: 'default' } } }]),
+        [{ ...currentAgent, execution: { driver: 'builtin', settings: { modelName: 'acceptance-stub-v2', variant: 'default' } } }],
       )
     })
 
@@ -570,15 +570,6 @@ function renderHarness() {
   return {
     queryClient,
     ...rendered,
-  }
-}
-
-function page<T>(results: T[]) {
-  return {
-    pageNumber: 1,
-    pageSize: 50,
-    totalCount: String(results.length),
-    results,
   }
 }
 
