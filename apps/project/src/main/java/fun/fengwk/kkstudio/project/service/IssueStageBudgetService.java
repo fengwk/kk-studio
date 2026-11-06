@@ -35,11 +35,11 @@ public class IssueStageBudgetService {
   public StageBudgetView authorizeStageBudget(
       UUID issueId, long expectedVersion, String requestKey, String state, int maxRuns) {
     Objects.requireNonNull(issueId, "issueId");
-    Objects.requireNonNull(state, "state");
+    ProjectStateCode code = ProjectValidationUtils.requireStateCode(state, "state");
     String key = ProjectValidationUtils.requireRequestKey(requestKey);
     Identity identity =
         IssueActivityIdempotency.identity(
-            IssueActivityKind.CONTROL, "AUTHORIZE", key, state, maxRuns);
+            IssueActivityKind.CONTROL, "AUTHORIZE", key, code.value(), maxRuns);
     ReceiptLock<IssueMutationSupport.Locked> receipt =
         mutationSupport.lockUnlessReplayed(issueId, identity);
     if (receipt.activity() != null) {
@@ -48,7 +48,6 @@ public class IssueStageBudgetService {
     IssueMutationSupport.Locked locked = receipt.locked();
     mutationSupport.requireMutable(locked);
     mutationSupport.requireVersion(locked, expectedVersion);
-    ProjectStateCode code = ProjectStateCode.of(state);
     StageBudgetView authorized =
         ProjectValidationUtils.resolve(
             "stage_budget", () -> StageBudgetView.authorize(locked.workflow(), code, maxRuns));
@@ -74,10 +73,11 @@ public class IssueStageBudgetService {
   public StageBudgetView resetStageBudget(
       UUID issueId, long expectedVersion, String requestKey, String state, int maxRuns) {
     Objects.requireNonNull(issueId, "issueId");
-    Objects.requireNonNull(state, "state");
+    ProjectStateCode code = ProjectValidationUtils.requireStateCode(state, "state");
     String key = ProjectValidationUtils.requireRequestKey(requestKey);
     Identity identity =
-        IssueActivityIdempotency.identity(IssueActivityKind.CONTROL, "RESET", key, state, maxRuns);
+        IssueActivityIdempotency.identity(
+            IssueActivityKind.CONTROL, "RESET", key, code.value(), maxRuns);
     ReceiptLock<IssueMutationSupport.Locked> receipt =
         mutationSupport.lockUnlessReplayed(issueId, identity);
     if (receipt.activity() != null) {
@@ -90,7 +90,6 @@ public class IssueStageBudgetService {
       throw DomainException.validation(
           "stage_budget", "Cannot reset stage budget while an active run exists");
     }
-    ProjectStateCode code = ProjectStateCode.of(state);
     StageBudgetView existing = stageBudgetRepository.get(issueId, state);
     long previousMax = existing != null ? existing.maxRuns() : 0;
     long previousAfter = existing != null ? existing.budgetAfterOrdinal() : 0;

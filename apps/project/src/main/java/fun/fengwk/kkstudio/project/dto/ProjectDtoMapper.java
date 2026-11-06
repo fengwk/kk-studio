@@ -5,6 +5,7 @@ import tools.jackson.core.JacksonException;
 import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.ObjectMapper;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.number.DecimalLongs;
 import fun.fengwk.kkstudio.platform.plugin.resource.SessionResourceUri;
 import fun.fengwk.kkstudio.project.domain.ProjectStateCode;
@@ -46,38 +47,55 @@ public class ProjectDtoMapper {
   }
 
   public ProjectWorkflow toWorkflow(ProjectWorkflowDTO dto) {
-    Objects.requireNonNull(dto, "dto");
-    if (dto.getStates() == null) {
-      throw new IllegalArgumentException("workflow states must not be null");
+    if (dto == null) {
+      throw DomainException.validation("workflow", "workflow is required");
     }
-    List<ProjectWorkflowState> states = new ArrayList<>();
-    for (ProjectWorkflowStateDTO stateDto : dto.getStates()) {
-      if (stateDto == null) {
-        throw new IllegalArgumentException("workflow state must not be null");
+    try {
+      if (dto.getStates() == null) {
+        throw new IllegalArgumentException("workflow states must not be null");
       }
-      ProjectStateCode stateCode = ProjectStateCode.of(stateDto.getState());
-      String name = stateDto.getName();
-      String agent = stateDto.getAgent();
-      String environment = stateDto.getEnvironment();
-      String instructions = stateDto.getInstructions();
-      Integer maxRuns = null;
-      if (stateDto.getMaxRuns() != null && !stateDto.getMaxRuns().isBlank()) {
-        long parsed = DecimalLongs.parseNonNegative(stateDto.getMaxRuns(), "maxRuns");
-        if (parsed > Integer.MAX_VALUE) {
-          throw new IllegalArgumentException("maxRuns exceeds int range");
+      List<ProjectWorkflowState> states = new ArrayList<>();
+      for (ProjectWorkflowStateDTO stateDto : dto.getStates()) {
+        if (stateDto == null) {
+          throw new IllegalArgumentException("workflow state must not be null");
         }
-        maxRuns = (int) parsed;
+        ProjectStateCode stateCode = requireWorkflowStateCode(stateDto.getState(), "state");
+        String name = stateDto.getName();
+        String agent = stateDto.getAgent();
+        String environment = stateDto.getEnvironment();
+        String instructions = stateDto.getInstructions();
+        Integer maxRuns = null;
+        if (stateDto.getMaxRuns() != null && !stateDto.getMaxRuns().isBlank()) {
+          long parsed = DecimalLongs.parseNonNegative(stateDto.getMaxRuns(), "maxRuns");
+          if (parsed > Integer.MAX_VALUE) {
+            throw new IllegalArgumentException("maxRuns exceeds int range");
+          }
+          maxRuns = (int) parsed;
+        }
+        boolean enabled = stateDto.getEnabled() == null || stateDto.getEnabled();
+        List<ProjectStateCode> next =
+            stateDto.getNext() == null
+                ? List.of()
+                : stateDto.getNext().stream()
+                    .map(value -> requireWorkflowStateCode(value, "next"))
+                    .toList();
+        states.add(
+            new ProjectWorkflowState(
+                stateCode, name, agent, environment, instructions, maxRuns, enabled, next));
       }
-      boolean enabled = stateDto.getEnabled() == null || stateDto.getEnabled();
-      List<ProjectStateCode> next =
-          stateDto.getNext() == null
-              ? List.of()
-              : stateDto.getNext().stream().map(ProjectStateCode::of).toList();
-      states.add(
-          new ProjectWorkflowState(
-              stateCode, name, agent, environment, instructions, maxRuns, enabled, next));
+      return new ProjectWorkflow(states);
+    } catch (DomainException error) {
+      throw error;
+    } catch (IllegalArgumentException error) {
+      throw DomainException.validation("workflow", error.getMessage(), error);
     }
-    return new ProjectWorkflow(states);
+  }
+
+  private static ProjectStateCode requireWorkflowStateCode(String value, String field) {
+    if (value == null) {
+      throw new IllegalArgumentException("workflow " + field + " must not be null");
+    }
+    return ProjectStateCode.of(value);
   }
 
   ProjectWorkflowDTO toWorkflowDto(ProjectWorkflow workflow) {
