@@ -240,7 +240,7 @@ Snapshot、Debug、用量并展示真实身份，并在顶部提供返回直属�
 执行根没有环境时显示“环境：未选择 · 跟随主对话”，执行根自身不显示该行。
 执行根已选择环境时，[`SkillEnvironmentHint`](../../frontend/src/features/thread/runtime/SkillEnvironmentHint.tsx)
 在输入区上方列出该环境拿不到当前版本的技能与原因：未安装、版本不一致、安装失败。
-两类事实只读既有契约：Agent 的 `config.skills` 与 `GET /skill-packages/{name}/environments` 的
+两类事实只读既有契约：Agent 的 `config.skills` 与 `GET /api/platform/skill-packages/{name}/environments` 的
 `installedSha256` / `error` / `upToDate`；判定与 system prompt 的技能路径同源，安装失败优先于
 版本判断，缺少环境行按未安装处理。任一 Package 摘要尚未就绪或读取失败时不提示，不推断安装状态。
 未选择环境时不出现提示，技能走 `vfs:` 路径。提示跟随执行根生效的 Agent 与环境草稿：
@@ -375,7 +375,8 @@ pricing；金额输入按十进制字符串提交，不引入 currency 或 unpri
 Catalog 三个目录页共享 `CatalogRuntime` 上下文：页面控制器负责搜索、过滤与查询聚合；
 资源控制器持有编辑器草稿、打开计划、校验、保存与删除确认；查询和写入分别由数据 Hook 承担。
 全局弹窗贡献只从上下文读取控制器，不复制状态。
-MCP Card 消费安全投影，编辑时读取 no-store 配置并用 generation fence 保护迟到响应。
+MCP Card 只消费摘要投影，编辑时读取详情（URL 与 headers 的 `configured` 事实）并用 generation fence
+保护迟到响应；headers 从不回读，界面只能保持、替换或清除已保存的映射。
 Environment 管理面展示宿主事实与有界运维事件窗口，并提供“安装 / 覆盖”与“卸载”入口：安装弹窗
 保存安装设置后签发一次性安装码，生成安装/卸载命令并复制到剪贴板；下载安装脚本时服务端轮换注册凭证，安装码随即失效；
 卸载命令不需要安装码或注册凭证。前端不读取长期注册凭据，保存只写设置、不代表已部署。
