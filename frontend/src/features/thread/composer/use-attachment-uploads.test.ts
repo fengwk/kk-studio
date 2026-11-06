@@ -23,17 +23,17 @@ function createFakeStorageService(overrides?: Partial<StorageService>): StorageS
         url: 'https://upload.example.com/put',
         method: 'PUT',
         headers: {},
-        expiresAt: 1767225600,
+        expiresAt: 1767225600000,
         mediaType: null,
         sizeBytes: null,
       },
-      expiresAt: 1767225600,
+      expiresAt: 1767225600000,
     })),
     completeUpload: vi.fn().mockImplementation(async (id: string): Promise<StorageUploadDTO> => ({
       id,
       blobId: 'blob-1',
       type: 'READY',
-      expiresAt: 1767225600,
+      expiresAt: 1767225600000,
     })),
     deleteUpload: vi.fn().mockResolvedValue(undefined),
     uploadFile: vi.fn().mockResolvedValue(undefined),
@@ -566,7 +566,7 @@ describe('Attachment uploads lifecycle & safety', () => {
           id: 'res-alpha',
           blobId: 'b',
           type: 'READY',
-          expiresAt: 1767225600,
+          expiresAt: 1767225600000,
         })
       })
 
@@ -713,7 +713,7 @@ describe('Attachment uploads lifecycle & safety', () => {
           id: 'upload-a-1',
           blobId: 'blob-a-1',
           type: 'READY',
-          expiresAt: 1767225600,
+          expiresAt: 1767225600000,
         })
       })
 
@@ -791,7 +791,7 @@ describe('Attachment uploads lifecycle & safety', () => {
           id: 'upload-cancel-1',
           blobId: 'blob-cancel-1',
           type: 'READY',
-          expiresAt: 1767225600,
+          expiresAt: 1767225600000,
         })
       })
 
