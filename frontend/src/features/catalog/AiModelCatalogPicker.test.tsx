@@ -10,7 +10,7 @@ import { setLocale } from '@/shared/i18n'
 
 vi.mock('@/shared/api/agent-service', () => ({
   agentService: {
-    listModelDefaults: vi.fn(),
+    listModelCatalog: vi.fn(),
   },
 }))
 
@@ -53,7 +53,7 @@ describe('ModelCatalogPicker request fencing', () => {
     const first = deferred<ModelCatalogPageDTO>()
     const stale = deferred<ModelCatalogPageDTO>()
     const current = deferred<ModelCatalogPageDTO>()
-    vi.mocked(agentService.listModelDefaults)
+    vi.mocked(agentService.listModelCatalog)
       .mockReturnValueOnce(first.promise)
       .mockReturnValueOnce(stale.promise)
       .mockReturnValueOnce(current.promise)
@@ -72,13 +72,13 @@ describe('ModelCatalogPicker request fencing', () => {
     await act(async () => {
       vi.advanceTimersByTime(250)
     })
-    expect(agentService.listModelDefaults).toHaveBeenCalledTimes(2)
+    expect(agentService.listModelCatalog).toHaveBeenCalledTimes(2)
 
     fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'third' } })
     await act(async () => {
       vi.advanceTimersByTime(250)
     })
-    expect(agentService.listModelDefaults).toHaveBeenCalledTimes(3)
+    expect(agentService.listModelCatalog).toHaveBeenCalledTimes(3)
     await act(async () => {
       current.resolve(page('gen-2', [candidate('refreshed')]))
       await current.promise
@@ -111,7 +111,7 @@ describe('ModelCatalogPicker request fencing', () => {
         multipliers: [],
       },
     }
-    vi.mocked(agentService.listModelDefaults).mockResolvedValueOnce(
+    vi.mocked(agentService.listModelCatalog).mockResolvedValueOnce(
       page('gen-1', [item]),
     )
     const onApply = vi.fn()
@@ -144,7 +144,7 @@ describe('ModelCatalogPicker request fencing', () => {
       ],
       pricingSupported: false,
     }
-    vi.mocked(agentService.listModelDefaults).mockResolvedValueOnce(
+    vi.mocked(agentService.listModelCatalog).mockResolvedValueOnce(
       page('gen-1', [unsupportedItem]),
     )
 
@@ -175,7 +175,7 @@ describe('ModelCatalogPicker request fencing', () => {
       nextCursor: 'cursor-1',
     }
     const nextGenPage = page('gen-2', [candidate('m2')])
-    vi.mocked(agentService.listModelDefaults)
+    vi.mocked(agentService.listModelCatalog)
       .mockResolvedValueOnce(initialPage)
       .mockResolvedValueOnce(nextGenPage)
 

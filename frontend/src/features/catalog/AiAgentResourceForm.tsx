@@ -15,7 +15,6 @@ import {
 } from '@/features/catalog/agent-capability-candidates'
 import type { AgentDraft } from '@/features/catalog/ai-console-types'
 import { applyAgentModelSelection, variantOptionsFromModel } from '@/features/catalog/ai-draft-normalizers'
-import type { AgentModelView } from '@/features/catalog/AgentModelView'
 import { emptyAgentDraft } from '@/features/catalog/ai-resource-draft-codecs'
 import type { ResourceFieldKey } from '@/features/catalog/ai-resource-form-validation'
 import { Select } from '@/shared/ui/controls/Select'
@@ -23,6 +22,7 @@ import { translate, useI18n } from '@/shared/i18n'
 import type {
   AgentDTO,
   AgentType,
+  ModelDTO,
   SkillPackageSummaryDTO,
   ToolCatalogEntryDTO,
 } from '@/shared/api/generated/contracts'
@@ -49,7 +49,7 @@ export function AgentForm({
   mode?: 'create' | 'edit'
   /** 系统持有的 Agent 类型；BUILTIN 允许未配置模型，USER 保持必填。 */
   agentType?: AgentType
-  models: AgentModelView[]
+  models: ModelDTO[]
   toolCatalog?: ToolCatalogEntryDTO[]
   agents?: AgentDTO[]
   skills?: SkillPackageSummaryDTO[]

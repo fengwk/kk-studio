@@ -1,6 +1,5 @@
 import type { AgentDraft, ModelDraft } from '@/features/catalog/ai-console-types'
-import type { AgentModelView } from '@/features/catalog/AgentModelView'
-import type { ProviderDTO } from '@/shared/api/generated/contracts'
+import type { ModelDTO, ProviderDTO } from '@/shared/api/generated/contracts'
 import {
   resolvePreferredVariant,
   trimValue,
@@ -53,7 +52,7 @@ export function normalizeEditModelDraftProvider(
     : { ...draft, providerName: immutableProviderName }
 }
 
-export function normalizeAgentDraftDefaultVariant(draft: AgentDraft, models: AgentModelView[]): AgentDraft {
+export function normalizeAgentDraftDefaultVariant(draft: AgentDraft, models: ModelDTO[]): AgentDraft {
   const selectedModel = models.find((model) => model.name === draft.model)
   if (!selectedModel) {
     // 模型不在当前页时不丢弃持久化选择，等待详情/下一页重新校验；仅归一化空白值。
@@ -81,7 +80,7 @@ export function normalizeAgentDraftDefaultVariant(draft: AgentDraft, models: Age
 
 export function normalizeCreateAgentDraftSelection(
   draft: AgentDraft,
-  models: AgentModelView[],
+  models: ModelDTO[],
   preferredModel?: string | null,
 ): AgentDraft {
   if (models.some((model) => model.name === draft.model)) {
@@ -121,7 +120,7 @@ export function normalizeCreateAgentDraftSelection(
 export function applyAgentModelSelection(
   draft: AgentDraft,
   model: string,
-  models: AgentModelView[],
+  models: ModelDTO[],
 ): AgentDraft {
   const selectedModel = models.find((item) => item.name === model)
   if (!selectedModel) {

@@ -10,10 +10,10 @@ import {
   toEditableAgent,
   toEditableAgentUpdate,
 } from '@/features/catalog/ai-agent-draft-codec'
-import type { AgentModelView } from '@/features/catalog/AgentModelView'
 import type {
   AgentDTO,
   ModelConfigDTO,
+  ModelDTO,
   SkillPackageSummaryDTO,
 } from '@/shared/api/generated/contracts'
 
@@ -32,7 +32,7 @@ const baseConfig: ModelConfigDTO = {
   ],
 }
 
-function modelWithVariants(): AgentModelView {
+function modelWithVariants(): ModelDTO {
   return {
     providerName: 'minimax',
     type: 'MODEL',

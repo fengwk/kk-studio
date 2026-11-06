@@ -158,8 +158,8 @@ describe('agentService', () => {
     const catalogRequest = createCatalogRequest()
     const service = createAgentService(catalogRequest)
 
-    await service.listModelDefaults('speed', 'cursor-1', 10)
-    await service.refreshModelDefaults()
+    await service.listModelCatalog('speed', 'cursor-1', 10)
+    await service.refreshModelCatalog()
 
     expect(catalogRequest).toHaveBeenNthCalledWith(
       1,

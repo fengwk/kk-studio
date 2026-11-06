@@ -1,4 +1,3 @@
-import type { AgentEditablePropertiesDTO } from '@/shared/api/contracts/ai-catalog'
 import type { AgentDraft } from '@/features/catalog/ai-console-types'
 import { trimToNull } from '@/features/catalog/ai-resource-draft-primitives'
 import { createBuiltinExecution, getBuiltinModelSelection } from '@/shared/api/contracts/ai-runtime'
@@ -7,6 +6,7 @@ import type {
   AgentConfigDTO,
   AgentCreateDTO,
   AgentDTO,
+  AgentUpdateDTO,
   ModelDTO,
   SkillRefDTO,
 } from '@/shared/api/generated/contracts'
@@ -150,7 +150,7 @@ function draftExecution(draft: AgentDraft, allowUnconfigured: boolean) {
 export function toEditableAgentUpdate(
   draft: AgentDraft,
   allowUnconfiguredModel = false,
-): AgentEditablePropertiesDTO {
+): Omit<AgentUpdateDTO, 'expectedVersion'> {
   return {
     description: trimToNull(draft.description),
     systemPrompt: trimToNull(draft.systemPrompt),

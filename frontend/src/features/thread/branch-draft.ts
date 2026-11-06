@@ -4,7 +4,6 @@ import {
   getBuiltinModelSelection,
   isSameExecution,
 } from '@/shared/api/contracts/ai-runtime'
-import type { AgentModelView } from '@/features/catalog'
 import { parsePayload } from '@/features/thread/runtime/payload-json'
 import type {
   AgentDTO,
@@ -12,6 +11,7 @@ import type {
   HarnessExecutionSelectionDTO,
   HarnessThreadCommandDTO,
   HarnessThreadDTO,
+  ModelDTO,
 } from '@/shared/api/generated/contracts'
 
 /**
@@ -32,7 +32,7 @@ export interface BranchDraft {
 export function materializeBlankBranchDraft(
   agent: AgentDTO | undefined,
   yoloEnabled: boolean,
-  models: AgentModelView[],
+  models: ModelDTO[],
   environmentName?: string | null,
 ): BranchDraft | null {
   if (!agent?.execution) {
@@ -74,7 +74,7 @@ export function materializeBlankBranchDraft(
  */
 export function materializeAgentBranchDraft(
   agent: AgentDTO,
-  models: AgentModelView[],
+  models: ModelDTO[],
   existing: BranchDraft | null,
   fallbackYoloEnabled?: boolean,
   fallbackEnvironmentName?: string | null,

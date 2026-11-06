@@ -6,10 +6,10 @@ import {
 } from '@/features/catalog/ai-model-draft-codec'
 import { formatCompactList } from '@/features/catalog/ai-resource-card-format'
 import { ResourceCardLayout } from '@/features/catalog/AiResourceCardLayout'
-import type { AgentModelView } from '@/features/catalog/AgentModelView'
+import type { ModelDTO } from '@/shared/api/generated/contracts'
 import { translate, useI18n } from '@/shared/i18n'
 
-function formatAbilities(model: AgentModelView): string {
+function formatAbilities(model: ModelDTO): string {
   if (!model.config) {
     return translate('ai.catalog.card.emptyValue')
   }
@@ -28,7 +28,7 @@ function formatAbilities(model: AgentModelView): string {
   return flags.length > 0 ? flags.join(' · ') : translate('ai.catalog.card.emptyValue')
 }
 
-function formatLimit(model: AgentModelView): string {
+function formatLimit(model: ModelDTO): string {
   const contextWindow = extractContextWindow(model)
   const output = extractMaxOutputTokens(model)
   const parts: string[] = []
@@ -42,7 +42,7 @@ function formatLimit(model: AgentModelView): string {
 }
 
 /** 组卡只显示成员顺序、触发码与固定冷却；不把组当成第二个定价或能力配置入口。 */
-function formatGroupMembers(model: AgentModelView): string {
+function formatGroupMembers(model: ModelDTO): string {
   const members = model.type === 'GROUP' ? model.group.members : []
   if (members.length === 0) {
     return translate('ai.catalog.card.emptyValue')
@@ -60,7 +60,7 @@ export function ModelResourceCard({
   onDelete,
   deletePending,
 }: {
-  model: AgentModelView
+  model: ModelDTO
   onEdit: () => void
   onDelete: () => void
   deletePending: boolean

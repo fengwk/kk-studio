@@ -5,11 +5,10 @@ import {
   filterModels,
   filterProviders,
 } from '@/features/catalog/catalog-utils'
-import type { AgentModelView } from '@/features/catalog/AgentModelView'
 import { useAiConsoleResourceController } from '@/features/catalog/useAiConsoleResourceController'
 import type { AiConsoleResourceQueryEnabled } from '@/features/catalog/useAiConsoleResourceQueries'
 import { useI18n } from '@/shared/i18n'
-import type { AgentDTO, ProviderDTO } from '@/shared/api/generated/contracts'
+import type { AgentDTO, ModelDTO, ProviderDTO } from '@/shared/api/generated/contracts'
 
 export type CatalogPageScope = 'agents' | 'models' | 'providers'
 
@@ -101,8 +100,8 @@ export function useCatalogPageController(scope: CatalogPageScope) {
       models,
       deletePending: deletePending.model,
       onCreate: editorActions.createModel,
-      onEdit: (model: AgentModelView) => editorActions.editModel(model.name),
-      onDelete: (model: AgentModelView) =>
+      onEdit: (model: ModelDTO) => editorActions.editModel(model.name),
+      onDelete: (model: ModelDTO) =>
         deleteResource.model(model.name, model.version),
     },
     providerPanelProps: {

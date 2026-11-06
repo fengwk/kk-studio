@@ -12,9 +12,7 @@ import {
   includesSearch,
   naturalNameCompare,
 } from '@/shared/lib/search-utils'
-import type { AgentModelView } from '@/features/catalog/AgentModelView'
 import { type ModelDraft, type ProviderDraft } from '@/features/catalog/ai-console-types'
-import { AGENT_PROVIDER_TYPES } from '@/shared/api/contracts/ai-catalog'
 import {
   emptyAgentDraft,
   emptyModelDraft,
@@ -30,6 +28,7 @@ import {
 } from '@/features/catalog/ai-resource-draft-codecs'
 import type {
   ModelConfigDTO,
+  ModelDTO,
   SingleModelDTO,
   ProviderDTO,
   EnvironmentDTO,
@@ -171,11 +170,6 @@ describe('AI domain utilities', () => {
     })
   })
 
-  /** providerType 选择项必须与 AgentProviderType wire 契约暴露同一组合法枚举。 */
-  it('lists the supported provider type wire values', () => {
-    expect(AGENT_PROVIDER_TYPES).toEqual(['openai', 'openai_responses', 'anthropic', 'google'])
-  })
-
   /** 结构化草稿必须按当前的 provider/model/agent API payload 契约序列化。 */
   it('serializes structured drafts into backend payloads', () => {
     const providerInput: ProviderDraft = {
@@ -188,8 +182,7 @@ describe('AI domain utilities', () => {
       modelCallIdleTimeoutMillis: '3000',
       modelHttpRetryStatusCodes: null,
     }
-    // 注入带空白的非法枚举值，验证运行时输入标准化。
-    Reflect.set(providerInput, 'providerType', ' openai_responses ')
+    // 枚举取自已生成的 ProviderType 契约，序列化时原样发送。
     expect(toEditableProvider(providerInput)).toEqual({
       name: 'minimax',
       description: 'provider desc',
@@ -328,7 +321,7 @@ describe('AI domain utilities', () => {
         updatedAt: 1781920800,
       },
     ]
-    const models: AgentModelView[] = [
+    const models: ModelDTO[] = [
       { ...model({ name: 'MiniMax-M2.7' }), providerName: 'minimax' },
       { ...model({ name: 'gpt-5.4', modelId: 'gpt-5.4' }), providerName: 'openai' },
     ]
@@ -393,14 +386,14 @@ describe('AI domain utilities', () => {
       Reflect.apply(toProviderDraft, undefined, [{
         name: 'stub',
         description: null,
-        providerType: null,
+        providerType: 'openai',
         baseUrl: null,
         credential: { configured: false },
         modelCallTimeoutMillis: 1800000,
         modelCallIdleTimeoutMillis: 120000,
         version: '1',
-        createTime: 1781920800,
-        updateTime: 1781920800,
+        createdAt: 1781920800,
+        updatedAt: 1781920800,
         modelHttpRetryStatusCodes: null,
       }]),
     ).toMatchObject({
@@ -448,7 +441,7 @@ describe('AI domain utilities', () => {
       Reflect.apply(toEditableProvider, undefined, [{
         name: ' stub ',
         description: '   ',
-        providerType: ' openai ',
+        providerType: 'openai',
         baseUrl: '   ',
         credential: '   ',
         modelCallTimeoutMillis: '   ',

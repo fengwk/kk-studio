@@ -1,18 +1,19 @@
-import type { AgentProviderType, ModelKind } from '@/shared/api/contracts/ai-catalog'
 import type { CatalogVersion } from '@/shared/api/contracts/base'
 import type {
   AgentType,
+  ModelDTO,
   ModelInputModality,
   ModelPricingDTO,
   HarnessExecutionSelectionDTO,
   PromptCacheRetention,
+  ProviderType,
   SkillRefDTO,
 } from '@/shared/api/generated/contracts'
 
 export interface ProviderDraft {
   name: string
   description: string
-  providerType: AgentProviderType
+  providerType: ProviderType
   baseUrl: string
   credential: string
   modelCallTimeoutMillis: string
@@ -96,11 +97,11 @@ export interface AgentDraft {
 export type ResourceModal =
   | { kind: 'provider'; mode: 'create' }
   | { kind: 'provider'; mode: 'edit'; name: string; expectedVersion: CatalogVersion }
-  | { kind: 'model'; mode: 'create'; resourceKind: ModelKind }
+  | { kind: 'model'; mode: 'create'; resourceKind: ModelDTO['type'] }
   | {
       kind: 'model'
       mode: 'edit'
-      resourceKind: ModelKind
+      resourceKind: ModelDTO['type']
       name: string
       expectedVersion: CatalogVersion
     }

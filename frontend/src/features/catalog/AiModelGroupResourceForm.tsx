@@ -1,7 +1,6 @@
 import { ArrowDown, ArrowUp, Trash2 } from 'lucide-react'
 import type { ModelGroupDraft } from '@/features/catalog/ai-console-types'
-import type { AgentModelView } from '@/features/catalog/AgentModelView'
-import type { SingleModelDTO } from '@/shared/api/generated/contracts'
+import type { SingleModelDTO, ModelDTO } from '@/shared/api/generated/contracts'
 import { variantOptionsFromModel } from '@/features/catalog/ai-draft-variant-options'
 import { newGroupMemberDraft } from '@/features/catalog/ai-model-group-draft-codec'
 import type { ResourceFieldKey } from '@/features/catalog/ai-resource-form-validation'
@@ -22,7 +21,7 @@ export function ModelGroupForm({
   onChange,
 }: {
   draft: ModelGroupDraft
-  models: AgentModelView[]
+  models: ModelDTO[]
   fieldErrors?: Partial<Record<ResourceFieldKey, string>>
   onChange: (draft: ModelGroupDraft) => void
 }) {
@@ -205,7 +204,7 @@ interface GroupSummaryData {
 }
 
 /** 能力取所有已配置成员交集；上下限取最小值；缺配置不伪造 false。 */
-function summarizeGroup(models: AgentModelView[]): GroupSummaryData {
+function summarizeGroup(models: ModelDTO[]): GroupSummaryData {
   const configs = models
     .map((model) => model.config)
     .filter((config): config is NonNullable<typeof config> => config != null)

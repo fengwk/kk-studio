@@ -1,7 +1,6 @@
 import { useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { agentService } from '@/shared/api/agent-service'
-import { toAgentModelViews } from '@/features/catalog'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { readInteractionsChangedRoot } from '@/shared/app-events'
 import { useResourceSync } from '@/shared/app-events/useResourceSync'
@@ -30,7 +29,7 @@ export function useAgentThreadQueries(threadId: string) {
   // 为派生数组提供稳定的身份，避免依赖它们的 hook 在每次渲染时都重跑。
   const agents = useMemo(() => agentsQuery.data ?? [], [agentsQuery.data])
   const models = useMemo(
-    () => toAgentModelViews(modelsQuery.data ?? []),
+    () => modelsQuery.data ?? [],
     [modelsQuery.data],
   )
   const entries = useMemo(() => snapshot?.entries ?? [], [snapshot])

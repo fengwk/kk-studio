@@ -1,4 +1,3 @@
-import { isAgentProviderType, type AgentProviderType } from '@/shared/api/contracts/ai-catalog'
 import type { ProviderDraft } from '@/features/catalog/ai-console-types'
 import { numberToNull, trimToNull } from '@/features/catalog/ai-resource-draft-primitives'
 import { assembleHttpStatusCodeList } from '@/shared/lib/integer-list'
@@ -25,7 +24,7 @@ export function toProviderDraft(provider: ProviderDTO): ProviderDraft {
   return {
     name: provider.name,
     description: provider.description || '',
-    providerType: isAgentProviderType(provider.providerType) ? provider.providerType : 'openai',
+    providerType: provider.providerType,
     baseUrl: provider.baseUrl || '',
     credential: '',
     modelCallTimeoutMillis: String(provider.modelCallTimeoutMillis),
@@ -41,7 +40,7 @@ export function toEditableProvider(draft: ProviderDraft): ProviderCreateDTO {
   return {
     name: draft.name.trim(),
     description: trimToNull(draft.description),
-    providerType: draft.providerType.trim() as AgentProviderType,
+    providerType: draft.providerType,
     baseUrl: trimToNull(draft.baseUrl),
     credential: trimToNull(draft.credential),
     modelCallTimeoutMillis: numberToNull(draft.modelCallTimeoutMillis),
