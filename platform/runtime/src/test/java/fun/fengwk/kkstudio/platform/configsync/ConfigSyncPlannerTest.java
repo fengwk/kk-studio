@@ -38,6 +38,7 @@ import fun.fengwk.kkstudio.platform.testing.TestCatalogSources;
 import fun.fengwk.kkstudio.share.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentModelCreateDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentModelKind;
+import fun.fengwk.kkstudio.share.catalog.PromptCacheRetention;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncKind;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncRef;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncSkipped;
@@ -138,7 +139,7 @@ class ConfigSyncPlannerTest {
             ConfigSyncFixtures.MODEL_CONFIG_PARSER,
             ConfigSyncFixtures.GROUP_CONFIG_CODEC);
     var config = ConfigSyncFixtures.modelConfig();
-    config.getVariants().getFirst().setPromptCacheRetention("LONG");
+    config.getVariants().getFirst().setPromptCacheRetention(PromptCacheRetention.LONG);
     AgentModelCreateDTO create = new AgentModelCreateDTO();
     create.setKind(AgentModelKind.MODEL);
     create.setProviderName("p");

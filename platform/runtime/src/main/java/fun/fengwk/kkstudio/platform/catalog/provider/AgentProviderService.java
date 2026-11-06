@@ -6,7 +6,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import fun.fengwk.kkstudio.common.page.Page;
 import fun.fengwk.kkstudio.common.page.PageQuery;
-import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.model.provider.impl.ProviderModelDiscovery;
 import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
@@ -16,6 +15,7 @@ import fun.fengwk.kkstudio.share.catalog.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentProviderDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentProviderEditablePropertiesDTO;
 import fun.fengwk.kkstudio.share.catalog.AgentProviderUpdateDTO;
+import fun.fengwk.kkstudio.share.catalog.PromptCacheRetention;
 
 import java.util.List;
 import java.util.Objects;
@@ -299,7 +299,7 @@ public class AgentProviderService {
     dto.setPromptCacheRetentions(
         provider.providerType().promptCacheRetentions().stream()
             .sorted()
-            .map(PromptCacheRetention::name)
+            .map(retention -> PromptCacheRetention.valueOf(retention.name()))
             .toList());
     dto.setVersion(CatalogVersions.format(provider.version()));
     dto.setCreateTime(provider.createTime());

@@ -581,6 +581,19 @@ class AgentModelRuntimeConfigParserTest {
         validConfig().replace("[\"TEXT\",\"IMAGE\"]", "[\"UNKNOWN\"]"), "inputModalities[0]");
   }
 
+  /** 留存必须显式给定已知枚举，输入不能使用数字或带空格的近似值。 */
+  @Test
+  void requiresExactPromptCacheRetention() {
+    assertInvalid(
+        validConfig().replace(",\"promptCacheRetention\":\"SHORT\"", ""), "promptCacheRetention");
+    for (String token : List.of("null", "1", "\"UNKNOWN\"", "\" SHORT \"")) {
+      assertInvalid(
+          validConfig()
+              .replace("\"promptCacheRetention\":\"SHORT\"", "\"promptCacheRetention\":" + token),
+          "promptCacheRetention");
+    }
+  }
+
   /** 结构和数值边界会拒绝任何可能导致模型不可用的形态。 */
   @Test
   void rejectsInvalidVariantPricingAndJsonBoundaries() {

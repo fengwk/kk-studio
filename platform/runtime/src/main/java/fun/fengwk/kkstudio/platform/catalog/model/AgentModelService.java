@@ -238,7 +238,7 @@ public class AgentModelService {
         Objects.requireNonNull(providerType, "providerType").promptCacheRetentions();
     for (AgentModelVariantDTO variant : config.getVariants()) {
       PromptCacheRetention retention =
-          PromptCacheRetention.valueOf(variant.getPromptCacheRetention());
+          PromptCacheRetention.valueOf(variant.getPromptCacheRetention().name());
       if (!supported.contains(retention)) {
         throw DomainException.validation(
             RESOURCE,

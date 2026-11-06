@@ -250,6 +250,7 @@ export interface AgentModelUpdateDTO {
 /** Java：fun.fengwk.kkstudio.share.catalog.AgentModelVariantDTO */
 export interface AgentModelVariantDTO {
   id: string
+  promptCacheRetention: PromptCacheRetention
   reasoningEffort?: string | null
   protocolOptionsJson?: string | null
 }
@@ -276,6 +277,7 @@ export interface AgentProviderDTO {
   modelCallTimeoutMillis: string
   modelCallIdleTimeoutMillis: string
   modelHttpRetryStatusCodes: number[] | null
+  promptCacheRetentions: PromptCacheRetention[]
   version: string
   createTime: number
   updateTime: number
@@ -1918,6 +1920,18 @@ export interface ProjectWorkflowStateDTO {
   enabled?: boolean | null
   next?: string[] | null
 }
+
+/** Java：fun.fengwk.kkstudio.share.catalog.PromptCacheRetention */
+export type PromptCacheRetention =
+  | 'NONE'
+  | 'SHORT'
+  | 'LONG'
+
+export const PROMPT_CACHE_RETENTION_VALUES: readonly PromptCacheRetention[] = [
+  'NONE',
+  'SHORT',
+  'LONG',
+]
 
 /** Java：fun.fengwk.kkstudio.project.dto.RecoverIssueRequestDTO */
 export interface RecoverIssueRequestDTO {
