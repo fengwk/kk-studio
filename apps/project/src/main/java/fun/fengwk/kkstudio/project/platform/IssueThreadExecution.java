@@ -4,6 +4,7 @@ import lombok.AllArgsConstructor;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.api.SpawnRequest;
@@ -40,7 +41,7 @@ public class IssueThreadExecution {
   /**
    * 读取单个线程的一致权威事实切片：当前 Session、head Entry、version、下一条命令序号、root-to-head 历史路径与统一执行事实。
    *
-   * @throws IllegalStateException 目标线程不存在
+   * @throws DomainException 目标线程不存在
    */
   public IssueThreadView readThread(UUID threadId) {
     ThreadSnapshot snapshot = requireRuntime().getThreadSnapshot(threadId);

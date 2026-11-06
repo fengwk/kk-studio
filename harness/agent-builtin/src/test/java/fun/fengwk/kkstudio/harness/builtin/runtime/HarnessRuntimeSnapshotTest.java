@@ -19,9 +19,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommandState;
 import fun.fengwk.kkstudio.harness.api.generation.GenerationStatus;
@@ -188,8 +189,12 @@ class HarnessRuntimeSnapshotTest {
 
   @Test
   void missingThreadIsNotFound() {
-    assertThrows(
-        HarnessRuntimeNotFoundException.class, () -> runtime.getThreadSnapshot(TestIds.id(999)));
+    DomainException error =
+        assertThrows(DomainException.class, () -> runtime.getThreadSnapshot(TestIds.id(999)));
+    assertEquals(DomainErrorCode.NOT_FOUND, error.code());
+    assertEquals("thread", error.resource());
+    assertNull(error.reason());
+    assertEquals("thread " + TestIds.id(999) + " does not exist", error.getMessage());
   }
 
   @Test
