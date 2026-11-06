@@ -388,7 +388,8 @@ class IssueEvidenceLifecycleIntegrationTest extends WebPostgresTestSupport {
         "wire-" + id,
         "{\"limit\":{\"context\":128000,\"output\":8192},"
             + "\"abilities\":{\"tools\":true,\"reasoning\":true,\"inputModalities\":[\"TEXT\"]},"
-            + "\"variants\":[{\"id\":\"default\"}],\"defaultVariant\":\"default\","
+            + "\"variants\":[{\"id\":\"default\",\"promptCacheRetention\":\"NONE\"}],"
+            + "\"defaultVariant\":\"default\","
             + "\"pricing\":{\"base\":{\"input\":\"0\",\"output\":\"0\",\"cacheRead\":\"0\","
             + "\"cacheWrite\":\"0\",\"cacheWriteByTtl\":{},\"reasoning\":\"0\"},"
             + "\"overrides\":[],\"multipliers\":[]}}");

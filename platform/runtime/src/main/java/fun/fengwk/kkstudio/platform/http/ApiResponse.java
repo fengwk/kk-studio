@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.platform.http;
 
+import com.fasterxml.jackson.annotation.JsonValue;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.ToString;
@@ -27,7 +28,10 @@ public final class ApiResponse<T> {
   private final int status;
   private final String code;
   private final String message;
-  private final T data;
+
+  /** 过渡期内 HTTP 只写出资源本身；信封在第三波删除。 */
+  @JsonValue private final T data;
+
   private final Map<String, Object> errors;
 
   private ApiResponse(int status, String code, String message, T data, Map<String, Object> errors) {
