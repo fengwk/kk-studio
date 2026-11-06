@@ -1083,7 +1083,6 @@ const shareDomainRoots = [
   'configsync',
   'environment',
   'interaction',
-  'mcp',
   'plugin',
   'runtime',
   'skill',
