@@ -23,8 +23,6 @@ import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.number.DecimalLongs;
 import fun.fengwk.kkstudio.harness.api.HarnessConflictReason;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
 import fun.fengwk.kkstudio.share.runtime.HarnessSessionSummaryDTO;
 
@@ -127,10 +125,6 @@ public class ChatController {
         throw new ResponseStatusException(HttpStatus.CONFLICT, error.getMessage(), error);
       }
       throw error;
-    } catch (HarnessRuntimeNotFoundException error) {
-      throw new ResponseStatusException(HttpStatus.NOT_FOUND, error.getMessage(), error);
-    } catch (HarnessRuntimeConflictException error) {
-      throw new ResponseStatusException(HttpStatus.CONFLICT, error.getMessage(), error);
     } catch (IllegalArgumentException error) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, error.getMessage(), error);
     }

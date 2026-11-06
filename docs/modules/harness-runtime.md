@@ -27,7 +27,7 @@ Join                         一次子执行委派的票据，只记凭据与冻
 
 每个控制操作在**一个** [`HarnessStore.Transaction`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/store/HarnessStore.java) 内完成全部写入并原子提交；手工压缩也只用一个短事务（锁内复验、同步 resolve、提交）。查询同样走 Store 事务，快照查询会加锁。Stop 的本地取消登记在 `afterCommit` 上，只在物理事务真正提交后执行，外层回滚即不取消，取消失败也不回滚已提交的事实。
 
-业务拒绝使用类型化的 [`HarnessRuntimeConflictException`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/HarnessRuntimeConflictException.java) 与 `HarnessRuntimeNotFoundException`（游标冲突、幂等身份复用、审批或输入不适用、压缩不可用等）；被破坏的持久化不变量（所有权错误、sibling 混合挂接、`callIndex` 不连续）以 `IllegalStateException` 拒绝继续，绝不降级为业务错误。
+业务拒绝使用通用 [`DomainException`](../../common/src/main/java/fun/fengwk/kkstudio/common/error/DomainException.java)：资源不存在为 `not_found`，业务冲突为 `conflict`，其稳定 reason 来自 [`HarnessConflictReason`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/HarnessConflictReason.java)，涵盖游标冲突、幂等身份复用、审批或输入不适用、压缩不可用等；被破坏的持久化不变量（所有权错误、sibling 混合挂接、`callIndex` 不连续）以 `IllegalStateException` 拒绝继续，绝不降级为业务错误。
 
 多行事务按同一层级取锁，实现层在真正取锁前拒绝逆序：
 
@@ -411,7 +411,7 @@ Harness 的严格读取配置集中在模型模块的 [`HarnessJson`](../../harn
 
 | 包名 | 职责与边界 |
 | --- | --- |
-| `api` | 对外公开的消费契约与公开值类型：`HarnessChangeSubscriptions` 暴露 Thread version、执行树与待处理交互的变更订阅，事件与句柄不可变，不泄漏 Store 或 channel 协议；同一根包承载控制面入参与查询结果的形状（`AcceptCommandsCommand`、`SpawnRequest`、`StopResult`、`StoppedThreadReceipt`、`ThreadTreeNode`、`ToolOutcomeView`、`ManualCompactionAvailability`、`Names`）与类型化的 `HarnessRuntimeConflictException` / `HarnessRuntimeNotFoundException`；实现由平台提供 |
+| `api` | 对外公开的消费契约与公开值类型：`HarnessChangeSubscriptions` 暴露 Thread version、执行树与待处理交互的变更订阅，事件与句柄不可变，不泄漏 Store 或 channel 协议；同一根包承载控制面入参与查询结果的形状（`AcceptCommandsCommand`、`SpawnRequest`、`StopResult`、`StoppedThreadReceipt`、`ThreadTreeNode`、`ToolOutcomeView`、`ManualCompactionAvailability`、`Names`）及冲突原因名称 `HarnessConflictReason`；实现由平台提供 |
 | `api.command` | 命令邮箱的公开值类型：`ThreadCommand`、封闭 payload 族与派生的 `ThreadCommandState`；只做不变量校验与纯派生，JSON 形态与 request hash 在 `codec`，harvest 归约在 `runtime.thread.command` |
 | `api.compaction` | 压缩的公开值类型：`CompactionConfig`（只含 `keepRecentTokens` 与阈值换算的纯函数）、`CompactionPhase` / `CompactionTrigger`、切分事实 `CompactionPreparation` 与 `TURN_START` 上冻结的 `CompactionStart` |
 | `api.entry` | 分支配置与回合边界值：`BranchSettings`、`ExecutionSelection`、`ModelSelection`、`GoalSetting`、`TurnStartReason` 与 `TurnEndOutcome` |

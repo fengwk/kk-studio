@@ -23,7 +23,6 @@ import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.api.command.GoalCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommandType;
@@ -432,9 +431,7 @@ class StudioHarnessCommandBatchControllerTest {
   void preservesCommandReplayConflictReasonInUnifiedErrorEnvelope() throws Exception {
     when(acceptanceService.accept(any(SessionOwner.class), any(AcceptCommandsCommand.class)))
         .thenThrow(
-            new HarnessRuntimeConflictException(
-                HarnessRuntimeConflictException.Reason.IDEMPOTENCY_KEY_REUSED,
-                "client command id was reused"));
+            DomainException.conflict("IDEMPOTENCY_KEY_REUSED", "client command id was reused"));
 
     mockMvc
         .perform(

@@ -15,7 +15,6 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.web.server.ResponseStatusException;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.platform.harness.builtin.query.ProviderRequestPreviewUnavailableException;
 import fun.fengwk.kkstudio.platform.harness.builtin.query.ProviderRequestPreviewUnavailableException.Reason;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
@@ -85,9 +84,7 @@ class StudioResponseStatusErrorAdviceTest {
 
   @Test
   void exposesTheStableHarnessConflictReasonForClientRecovery() {
-    HarnessRuntimeConflictException conflict =
-        new HarnessRuntimeConflictException(
-            HarnessRuntimeConflictException.Reason.STALE_COMMAND_CURSOR, "stale cursor");
+    DomainException conflict = DomainException.conflict("STALE_COMMAND_CURSOR", "stale cursor");
     ResponseStatusException error =
         new ResponseStatusException(HttpStatus.CONFLICT, conflict.getMessage(), conflict);
 

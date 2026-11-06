@@ -13,8 +13,6 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.validation.BindException;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
 import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.project.error.ProjectDuplicateException;
@@ -71,10 +69,8 @@ class ProjectErrorAdviceTest {
 
   @Test
   void handlesHarnessConflict() {
-    HarnessRuntimeConflictException ex =
-        new HarnessRuntimeConflictException(
-            HarnessRuntimeConflictException.Reason.STALE_VERSION, "issue runtime busy");
-    ResponseEntity<ApiResponse<Void>> response = advice.handleHarnessConflict(ex);
+    DomainException ex = DomainException.conflict("STALE_VERSION", "issue runtime busy");
+    ResponseEntity<ApiResponse<Void>> response = advice.handleHarnessDomain(ex);
 
     assertEquals(409, response.getStatusCode().value());
     ApiResponse<Void> body = response.getBody();
@@ -97,8 +93,8 @@ class ProjectErrorAdviceTest {
 
   @Test
   void handlesHarnessNotFound() {
-    HarnessRuntimeNotFoundException ex = new HarnessRuntimeNotFoundException("session missing");
-    ResponseEntity<ApiResponse<Void>> response = advice.handleHarnessNotFound(ex);
+    DomainException ex = DomainException.notFound("session", "session missing");
+    ResponseEntity<ApiResponse<Void>> response = advice.handleHarnessDomain(ex);
 
     assertEquals(404, response.getStatusCode().value());
     ApiResponse<Void> body = response.getBody();

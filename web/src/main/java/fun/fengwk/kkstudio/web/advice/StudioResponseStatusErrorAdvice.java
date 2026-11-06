@@ -16,7 +16,6 @@ import fun.fengwk.kkstudio.canvas.http.CanvasResourceController;
 import fun.fengwk.kkstudio.chat.http.ChatController;
 import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.ide.web.StudioEnvironmentIdeController;
 import fun.fengwk.kkstudio.platform.harness.builtin.query.ProviderRequestPreviewUnavailableException;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
@@ -68,9 +67,7 @@ public class StudioResponseStatusErrorAdvice {
       ResponseStatusException error, HttpServletRequest request) {
     int status = error.getStatusCode().value();
     String reason = null;
-    if (error.getCause() instanceof HarnessRuntimeConflictException conflict) {
-      reason = conflict.reason().name();
-    } else if (error.getCause() instanceof DomainException conflict
+    if (error.getCause() instanceof DomainException conflict
         && conflict.code() == DomainErrorCode.CONFLICT) {
       reason = conflict.reason();
     } else if (error.getCause() instanceof ProviderRequestPreviewUnavailableException preview) {

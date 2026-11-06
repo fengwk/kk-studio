@@ -48,8 +48,8 @@ class StudioHarnessThreadApprovalActorIntegrationTest extends WebPostgresTestSup
   }
 
   /**
-   * 意图：不携带身份字段的合法形状请求必须通过反序列化并进入领域判定——这里目标 Thread 不存在，根归属解析在进入 Runtime 之前就以 {@code
-   * HarnessRuntimeNotFoundException} 作答（404，detail 精确指出缺失 Thread），而不是在 wire 层被 400 拒绝，也不是被当作 业务冲突。
+   * 意图：不携带身份字段的合法形状请求必须通过反序列化并进入领域判定——这里目标 Thread 不存在，根归属解析在进入 Runtime 之前就以 {@code DomainException}
+   * 的 not-found 作答（404，detail 精确指出缺失 Thread），而不是在 wire 层被 400 拒绝，也不是被当作业务冲突。
    */
   @Test
   void actorlessBodyReachesDomainDecision() throws Exception {

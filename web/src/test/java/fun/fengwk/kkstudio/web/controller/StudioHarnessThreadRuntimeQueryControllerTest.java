@@ -12,7 +12,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.ManualCompactionAvailability;
 import fun.fengwk.kkstudio.harness.api.ThreadTreeNode;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
@@ -83,8 +83,7 @@ class StudioHarnessThreadRuntimeQueryControllerTest extends HarnessThreadControl
     mockMvc.perform(get("/api/threads/1-1-1-1-1/tree")).andExpect(status().isBadRequest());
     verifyNoInteractions(runtime);
     when(runtime.getThreadTree(id(999)))
-        .thenThrow(
-            new HarnessRuntimeNotFoundException("thread " + idText(999) + " does not exist"));
+        .thenThrow(DomainException.notFound("thread", "thread " + idText(999) + " does not exist"));
 
     mockMvc
         .perform(get("/api/threads/" + idText(999) + "/tree"))
@@ -113,8 +112,7 @@ class StudioHarnessThreadRuntimeQueryControllerTest extends HarnessThreadControl
         .andExpect(status().isBadRequest());
 
     when(runtime.manualCompactionAvailability(id(999)))
-        .thenThrow(
-            new HarnessRuntimeNotFoundException("thread " + idText(999) + " does not exist"));
+        .thenThrow(DomainException.notFound("thread", "thread " + idText(999) + " does not exist"));
     mockMvc
         .perform(get("/api/threads/" + idText(999) + "/compaction-availability"))
         .andExpect(status().isNotFound())

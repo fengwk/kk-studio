@@ -21,7 +21,6 @@ import org.springframework.http.MediaType;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.CancelledThreadInput;
 import fun.fengwk.kkstudio.harness.api.CompactThreadResult;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.harness.api.RenameThreadCommand;
 import fun.fengwk.kkstudio.harness.api.StopResult;
 import fun.fengwk.kkstudio.harness.api.StoppedThreadReceipt;
@@ -223,7 +222,7 @@ class StudioHarnessThreadMutationControllerTest extends HarnessThreadControllerT
     verify(runtime, never()).renameThread(any(RenameThreadCommand.class));
 
     when(runtime.renameThread(any(RenameThreadCommand.class)))
-        .thenThrow(new HarnessRuntimeNotFoundException("thread is missing"));
+        .thenThrow(DomainException.notFound("thread", "thread is missing"));
     mockMvc
         .perform(
             put("/api/threads/" + idText(1) + "/name")

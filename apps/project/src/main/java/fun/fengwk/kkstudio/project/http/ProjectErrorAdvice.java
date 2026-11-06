@@ -12,8 +12,6 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.HarnessConflictReason;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
 import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.project.error.ProjectDuplicateException;
@@ -68,18 +66,6 @@ public class ProjectErrorAdvice {
     return build(HttpStatus.CONFLICT, "PROJECT_DUPLICATE_CONFLICT", error.getMessage(), ctx);
   }
 
-  @ExceptionHandler(HarnessRuntimeConflictException.class)
-  public ResponseEntity<ApiResponse<Void>> handleHarnessConflict(
-      HarnessRuntimeConflictException error) {
-    Map<String, Object> ctx = new LinkedHashMap<>();
-    ctx.put("detail", "Issue runtime conflict occurred");
-    return build(
-        HttpStatus.CONFLICT,
-        "PROJECT_RUNTIME_CONFLICT",
-        messageService.message("studio.error.project.runtime_conflict.message", Map.of()),
-        ctx);
-  }
-
   @ExceptionHandler(ProjectNotFoundException.class)
   public ResponseEntity<ApiResponse<Void>> handleResourceNotFound(ProjectNotFoundException error) {
     Map<String, Object> ctx = new LinkedHashMap<>();
@@ -90,18 +76,6 @@ public class ProjectErrorAdvice {
         messageService.message(
             "studio.error.project.resource_not_found.message",
             Map.of("resource", messageService.resourceDisplayName(error.resource()))),
-        ctx);
-  }
-
-  @ExceptionHandler(HarnessRuntimeNotFoundException.class)
-  public ResponseEntity<ApiResponse<Void>> handleHarnessNotFound(
-      HarnessRuntimeNotFoundException error) {
-    Map<String, Object> ctx = new LinkedHashMap<>();
-    ctx.put("detail", "Issue runtime resource not found");
-    return build(
-        HttpStatus.NOT_FOUND,
-        "PROJECT_RUNTIME_NOT_FOUND",
-        messageService.message("studio.error.project.runtime_not_found.message", Map.of()),
         ctx);
   }
 

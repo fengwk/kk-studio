@@ -17,9 +17,6 @@ import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.api.CancelledThreadInput;
 import fun.fengwk.kkstudio.harness.api.CompactThreadResult;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException.Reason;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.harness.api.ManualCompactionAvailability;
 import fun.fengwk.kkstudio.harness.api.StopResult;
 import fun.fengwk.kkstudio.harness.api.StoppedThreadReceipt;
@@ -618,20 +615,6 @@ class HarnessRuntimeApiRecordsTest {
                 false,
                 List.of(),
                 false));
-  }
-
-  @Test
-  void conflictExceptionCarriesTypedReasonAndMessage() {
-    HarnessRuntimeConflictException error =
-        new HarnessRuntimeConflictException(Reason.STALE_VERSION, "stale");
-    assertEquals(Reason.STALE_VERSION, error.reason());
-    assertEquals("stale", error.getMessage());
-    assertThrows(NullPointerException.class, () -> new HarnessRuntimeConflictException(null, "x"));
-  }
-
-  @Test
-  void notFoundExceptionCarriesMessage() {
-    assertEquals("gone", new HarnessRuntimeNotFoundException("gone").getMessage());
   }
 
   private static ThreadState storeThread() {
