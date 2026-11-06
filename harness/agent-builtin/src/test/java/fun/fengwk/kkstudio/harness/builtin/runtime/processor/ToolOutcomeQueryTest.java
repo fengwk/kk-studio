@@ -18,6 +18,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.api.ToolOutcomeView;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionConfig;
@@ -49,6 +51,22 @@ import java.util.UUID;
 
 /** 统一结果查询：terminal Invocation 与已物化 Entry 拥有相同投影，且绝不跨 Thread 泄漏。 */
 class ToolOutcomeQueryTest {
+
+  @Test
+  void missingThreadIsReportedAsNotFound() {
+    // 工具结果查询对不存在的 Thread 明确报告 not_found，不伪装成空结果。
+    UUID threadId = UUID.randomUUID();
+    DomainException error =
+        assertThrows(
+            DomainException.class,
+            () ->
+                runtime(new InMemoryBuiltinHarnessStore())
+                    .findToolOutcome(threadId, UUID.randomUUID()));
+    assertEquals(DomainErrorCode.NOT_FOUND, error.code());
+    assertEquals("thread", error.resource());
+    assertEquals("thread " + threadId + " does not exist", error.getMessage());
+    assertNull(error.reason());
+  }
 
   @Test
   void terminalInvocationAndMaterializedEntryProjectTheSameOutcome() {
