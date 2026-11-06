@@ -349,18 +349,18 @@ Agent 定义另有系统拥有的不可变 `type`（`USER` / `BUILTIN`），只�
 
 ### Git Skill Package
 
-每个 Package 保存不可变 `packageName`、repository URL，以及 branch、`currentCommit`、
-`observedHeadCommit`、检查结果和从当前 commit 派生的 Skill 列表。
+每个 Package 保存不可变 `packageName`、当前 `packageVersion` 及其 Skill 列表。
+Git 渠道另保存不可变 repository URL、branch、最近检查的 `headCommit` 与检查结果；
+Git 渠道的 `packageVersion` 是发布的 commit SHA。
 Package 名和 Skill 名均为 1–64 个小写字母或数字，以单个连字符分隔。
 根目录 `<name>/SKILL.md` 的 frontmatter 名称必须与目录一致；description 去掉首尾空白后为
 1–1024 个字符，允许换行；
 路径和符号链接保持在仓库树内。正文和附属文件由 Git 保存。
 
-创建发布当时 branch 的 exact HEAD；Check 只更新观察事实。Update 要求
-`targetCommit + expectedVersion`，target 必须等于该 Card 快照的 observed commit，
-校验全部 Skill 与 Agent 引用后原子替换 current commit 和 Skill 列表。
-检查失败保留已发布内容。状态由观察事实派生为 `UNCHECKED`、`UP_TO_DATE`、
-`UPDATE_AVAILABLE` 或 `CHECK_FAILED`。
+创建发布当时 branch 的 exact HEAD；Check 只更新观察事实。发布要求
+`targetCommit + expectedVersion`，target 必须等于最近检查的 `headCommit`，
+校验全部 Skill 与 Agent 引用后原子替换当前版本和 Skill 列表。
+检查失败保留已发布内容；详情返回检查时间、错误与 `updateAvailable`。
 
 稳定路径为 `vfs:/skills/<package>/<skill>/...`，每次读取 Package 当前版本归档中的内容。
 发布时使用临时 bare 仓库浅拉取目标 commit 并生成 Skill 归档，完成后立即清理临时仓库，
@@ -555,8 +555,8 @@ HTTP 契约见 [Web](web.md)。
 
 Environment 的 name 不可变，UUID 用于路由；`environment_connection` 以
 `environmentId + ownerNodeId + leaseToken` 围栏保存当前路由和租约。
-READY 更新宿主 OS、时区、进程用户、HOME、note 与**实际 daemon 构建版本**（`daemonVersion`，取自运行中
-JAR manifest，未打包时为 `development`），断线保留最后已接受的 metadata；`daemonVersion`
+READY 更新宿主 OS、时区、进程用户、HOME、note 与 Daemon 上报的 `daemonVersion`
+（生产进程取自 [`config.ts`](../../daemon/src/config.ts) 的 `DAEMON_VERSION`），断线保留最后已接受的 metadata；`daemonVersion`
 与 Environment 的 CAS 配置版本是两个不同事实。
 Skill 同步结果按 owner/lease fence 写回，运维窗口保存有界、去敏事件。
 
