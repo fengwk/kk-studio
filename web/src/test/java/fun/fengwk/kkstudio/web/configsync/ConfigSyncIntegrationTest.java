@@ -506,7 +506,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     link.setSystemPrompt("prompt " + agentB);
     link.setExecution(execution(model, "default"));
     link.setConfig(agentConfig(List.of(mcpTool), List.of(skillRef(pkg, "dev")), List.of(agentA)));
-    link.setExpectedVersion(agentBPage.path("version").asText());
+    link.setExpectedVersion(Long.parseLong(agentBPage.path("version").asText()));
     putData("/api/platform/agents/" + agentB, link);
 
     List<Map<String, String>> selection =
@@ -538,7 +538,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     unlinkA.setSystemPrompt("prompt " + agentA);
     unlinkA.setExecution(execution(model, "default"));
     unlinkA.setConfig(agentConfig(List.of(mcpTool), List.of(skillRef(pkg, "dev")), List.of()));
-    unlinkA.setExpectedVersion(agentADto.path("version").asText());
+    unlinkA.setExpectedVersion(Long.parseLong(agentADto.path("version").asText()));
     JsonNode unlinkedA = putData("/api/platform/agents/" + agentA, unlinkA);
     deleteOk("/api/platform/agents/" + agentB, findAgent(agentB).path("version").asText());
     deleteOk("/api/platform/agents/" + agentA, unlinkedA.path("version").asText());
@@ -1181,7 +1181,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
 
   private void putData(String path, ProviderUpdateDTO update, String expectedVersion)
       throws Exception {
-    update.setExpectedVersion(expectedVersion);
+    update.setExpectedVersion(Long.parseLong(expectedVersion));
     putData(path, update);
   }
 
@@ -1240,7 +1240,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
 
   private JsonNode discover(String name, String expectedVersion) throws Exception {
     McpServerDiscoverDTO discover = new McpServerDiscoverDTO();
-    discover.setExpectedVersion(expectedVersion);
+    discover.setExpectedVersion(Long.parseLong(expectedVersion));
     return postData("/api/platform/mcp-servers/" + name + "/discover", discover);
   }
 

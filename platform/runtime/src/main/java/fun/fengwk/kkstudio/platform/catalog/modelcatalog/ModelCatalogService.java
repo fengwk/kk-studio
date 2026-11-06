@@ -135,7 +135,7 @@ public class ModelCatalogService {
     int from = Math.min(offset, filtered.size());
     int to = Math.min(from + size, filtered.size());
     ModelCatalogPageDTO page = new ModelCatalogPageDTO();
-    page.setGeneration(generationText);
+    page.setGeneration(state.generation);
     page.setFetchedAt(state.fetchedAt);
     page.setLoading(state.loading);
     page.setError(state.error);

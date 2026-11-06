@@ -148,7 +148,7 @@ class SkillPackageChangeNotificationIntegrationTest extends PostgresSpringTestSu
 
       // 编辑可编辑字段但事实未变化：服务直接返回，不写行、不通知。
       SkillPackageEditDTO unchanged = new SkillPackageEditDTO();
-      unchanged.setExpectedVersion("0");
+      unchanged.setExpectedVersion(0L);
       unchanged.setDescription("notify package");
       unchanged.setBranch("main");
       unchanged.setToken(SecretUpdate.keep());
@@ -158,7 +158,7 @@ class SkillPackageChangeNotificationIntegrationTest extends PostgresSpringTestSu
 
       // 陈旧版本编辑：在写行前就 conflict，静默。
       SkillPackageEditDTO stale = new SkillPackageEditDTO();
-      stale.setExpectedVersion("9");
+      stale.setExpectedVersion(9L);
       stale.setDescription("changed");
       stale.setBranch("release");
       stale.setToken(SecretUpdate.keep());

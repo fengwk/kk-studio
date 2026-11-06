@@ -69,7 +69,7 @@ class HttpRetryStatusCodesContractTest {
     ProviderDTO created = new ProviderDTO();
     created.setName("p");
     created.setProviderType(ProviderType.OPENAI);
-    created.setVersion("1");
+    created.setVersion(1L);
     when(providerService.createProvider(any())).thenReturn(created);
 
     mockMvc

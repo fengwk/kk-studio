@@ -24,7 +24,6 @@ import fun.fengwk.kkstudio.platform.catalog.dto.SingleModelUpdateDTO;
 import fun.fengwk.kkstudio.platform.catalog.provider.Provider;
 import fun.fengwk.kkstudio.platform.catalog.provider.ProviderRepository;
 import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
-import fun.fengwk.kkstudio.platform.error.CatalogVersions;
 import fun.fengwk.kkstudio.platform.persistence.PostgresqlIntegrityViolationClassifier;
 
 import java.util.ArrayList;
@@ -103,11 +102,10 @@ public class ModelService {
 
   @Transactional
   public ModelDTO updateModel(String modelName, ModelUpdateDTO updateDTO) {
-    String rawExpected = expectedVersion(updateDTO);
-    if (rawExpected == null) {
+    Long expected = expectedVersion(updateDTO);
+    if (expected == null) {
       throw DomainException.validation(RESOURCE, "expectedVersion is required");
     }
-    long expected = CatalogVersions.parse(rawExpected, "expectedVersion");
     String name = canonicalName(modelName);
     Model snapshot = repository.getByName(name);
     if (snapshot != null
@@ -117,7 +115,7 @@ public class ModelService {
       lockMembers(snapshot, groupUpdate.getGroup());
     }
     Model current = requireModelForUpdate(name);
-    ensureExpectedVersion(current, rawExpected, expected);
+    ensureExpectedVersion(current, expected);
     Mutation mutation = mutation(updateDTO);
     if (current.kind() != mutation.kind()) {
       throw DomainException.validation(RESOURCE, "model type cannot be changed");
@@ -150,7 +148,7 @@ public class ModelService {
           throw DomainException.notFound(RESOURCE);
         }
         throw DomainException.versionConflict(
-            RESOURCE, rawExpected, CatalogVersions.format(reread.version()));
+            RESOURCE, Long.toString(expected), Long.toString(reread.version()));
       }
     } catch (DuplicateKeyException error) {
       throw DomainException.duplicate(
@@ -165,11 +163,10 @@ public class ModelService {
   }
 
   @Transactional
-  public void deleteModel(String modelName, String expectedVersion) {
-    long expected = CatalogVersions.parse(expectedVersion, "expectedVersion");
+  public void deleteModel(String modelName, long expected) {
     String name = canonicalName(modelName);
     Model model = requireModelForUpdate(name);
-    ensureExpectedVersion(model, expectedVersion, expected);
+    ensureExpectedVersion(model, expected);
     if (repository.hasAgents(name)) {
       throw DomainException.inUse(RESOURCE, RESOURCE + " in use by agents: " + name);
     }
@@ -182,7 +179,7 @@ public class ModelService {
         throw DomainException.notFound(RESOURCE);
       }
       throw DomainException.versionConflict(
-          RESOURCE, expectedVersion, CatalogVersions.format(reread.version()));
+          RESOURCE, Long.toString(expected), Long.toString(reread.version()));
     }
   }
 
@@ -194,7 +191,6 @@ public class ModelService {
 
   /** 将 model 行映射为公开 DTO；GROUP 的 config 是从成员派生的只读能力摘要，不承载组级价格或 Variant。 */
   public ModelDTO toDto(Model model) {
-    String version = CatalogVersions.format(model.version());
     if (model.kind() == ModelKind.MODEL) {
       SingleModelDTO dto = new SingleModelDTO();
       dto.setName(model.name());
@@ -202,9 +198,9 @@ public class ModelService {
       dto.setProviderName(model.providerName());
       dto.setModelId(model.modelId());
       dto.setConfig(decodeConfig(model));
-      dto.setVersion(version);
-      dto.setCreatedAt(model.createTime());
-      dto.setUpdatedAt(model.updateTime());
+      dto.setVersion(model.version());
+      dto.setCreatedAt(model.createdAt());
+      dto.setUpdatedAt(model.updatedAt());
       return dto;
     }
     ModelGroupConfigDTO group = decodeGroup(model);
@@ -213,9 +209,9 @@ public class ModelService {
     dto.setDescription(model.description());
     dto.setGroup(group);
     dto.setConfig(deriveGroupConfig(group));
-    dto.setVersion(version);
-    dto.setCreatedAt(model.createTime());
-    dto.setUpdatedAt(model.updateTime());
+    dto.setVersion(model.version());
+    dto.setCreatedAt(model.createdAt());
+    dto.setUpdatedAt(model.updatedAt());
     return dto;
   }
 
@@ -394,14 +390,14 @@ public class ModelService {
     }
   }
 
-  private static void ensureExpectedVersion(Model model, String expectedVersion, long expected) {
+  private static void ensureExpectedVersion(Model model, long expected) {
     if (model.version() != expected) {
       throw DomainException.versionConflict(
-          RESOURCE, expectedVersion, CatalogVersions.format(model.version()));
+          RESOURCE, Long.toString(expected), Long.toString(model.version()));
     }
   }
 
-  private static String expectedVersion(ModelUpdateDTO updateDTO) {
+  private static Long expectedVersion(ModelUpdateDTO updateDTO) {
     if (updateDTO == null) {
       throw DomainException.validation(RESOURCE, RESOURCE + " body must not be null");
     }

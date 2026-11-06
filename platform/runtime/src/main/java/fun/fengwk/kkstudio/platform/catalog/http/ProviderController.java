@@ -55,7 +55,7 @@ public class ProviderController {
   @DeleteMapping("/{name}")
   @ResponseStatus(HttpStatus.NO_CONTENT)
   public void deleteProvider(
-      @PathVariable("name") String name, @RequestParam("expectedVersion") String expectedVersion) {
+      @PathVariable("name") String name, @RequestParam("expectedVersion") long expectedVersion) {
     providerService.deleteProvider(name, expectedVersion);
   }
 }

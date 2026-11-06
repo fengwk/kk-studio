@@ -32,7 +32,6 @@ import fun.fengwk.kkstudio.platform.harness.builtin.BuiltinConfigSyncAdapter;
 import fun.fengwk.kkstudio.platform.harness.builtin.BuiltinConfigSyncAdapter.VariantIssue;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRow;
 import fun.fengwk.kkstudio.platform.pluginhost.service.PluginAgentDependencies;
-import fun.fengwk.kkstudio.platform.settings.SystemSettingsVersions;
 import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsSectionsDTO;
 
 import java.util.ArrayList;
@@ -544,8 +543,7 @@ public final class ConfigSyncPlanner {
     // 完整契约已在解析期校验；设置自身不持有任何 Agent 引用，因此没有额外依赖判定。
     // 携带计划期读到的版本：apply 时以 CAS 写入，中间若有并发修改会正常冲突并整体回滚。
     ConfigSyncPlan.SettingsUpdate settingsUpdate =
-        new ConfigSyncPlan.SettingsUpdate(
-            sections, SystemSettingsVersions.format(snapshot.settings().version()));
+        new ConfigSyncPlan.SettingsUpdate(sections, snapshot.settings().version());
     imported.add(ConfigSyncRefs.ref(ConfigSyncKind.SETTINGS, SETTINGS_NAME));
     return settingsUpdate;
   }

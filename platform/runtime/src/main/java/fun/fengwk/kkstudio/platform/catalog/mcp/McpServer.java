@@ -20,8 +20,8 @@ public record McpServer(
     Long timeoutMillis,
     McpDiscoveryStatus discoveryStatus,
     Long version,
-    Instant createTime,
-    Instant updateTime) {
+    Instant createdAt,
+    Instant updatedAt) {
 
   @Override
   public String toString() {

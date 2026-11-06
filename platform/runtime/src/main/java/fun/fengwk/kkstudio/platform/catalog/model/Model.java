@@ -21,5 +21,5 @@ public record Model(
     String configJson,
     String groupConfigJson,
     Long version,
-    Instant createTime,
-    Instant updateTime) {}
+    Instant createdAt,
+    Instant updatedAt) {}

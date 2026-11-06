@@ -28,7 +28,6 @@ import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogService.PreparedGi
 import fun.fengwk.kkstudio.platform.environment.Environment;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentService;
-import fun.fengwk.kkstudio.platform.error.CatalogVersions;
 import fun.fengwk.kkstudio.platform.pluginhost.service.PluginAgentDependencies;
 import fun.fengwk.kkstudio.platform.pluginhost.service.PluginConfigurationService;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsService;
@@ -104,14 +103,13 @@ public class ConfigSyncApplier {
       if (existing == null) {
         modelService.createModel(spec.properties());
       } else {
-        modelService.updateModel(
-            spec.name(), toUpdate(spec.properties(), CatalogVersions.format(existing.version())));
+        modelService.updateModel(spec.name(), toUpdate(spec.properties(), existing.version()));
       }
     }
   }
 
   /** 文件只描述创建形态的完整模型定义；导入覆盖现有行时补上计划期 CAS 版本。 */
-  private static ModelUpdateDTO toUpdate(ModelCreateDTO create, String expectedVersion) {
+  private static ModelUpdateDTO toUpdate(ModelCreateDTO create, long expectedVersion) {
     return switch (create) {
       case SingleModelCreateDTO single -> {
         SingleModelUpdateDTO update = new SingleModelUpdateDTO();
@@ -141,11 +139,12 @@ public class ConfigSyncApplier {
         environmentService.importEnvironment(
             spec.name(), spec.registrationTokenHash(), spec.installConfig());
       } else {
+        // Environment 仍以字符串承载 CAS 坐标，跨族边界只做最小适配。
         environmentService.updateImportedEnvironment(
             EnvironmentId.of(existing.getId()),
             spec.registrationTokenHash(),
             spec.installConfig(),
-            CatalogVersions.format(existing.getVersion()));
+            Long.toString(existing.getVersion()));
       }
     }
   }
@@ -162,7 +161,7 @@ public class ConfigSyncApplier {
     for (ConfigSyncParser.AgentSpec spec : agents) {
       Agent current = agentRepository.getByName(spec.name());
       AgentUpdateDTO update = buildAgentUpdate(spec);
-      update.setExpectedVersion(CatalogVersions.format(current.version()));
+      update.setExpectedVersion(current.version());
       agentService.updateAgent(spec.name(), update);
     }
   }
@@ -197,7 +196,7 @@ public class ConfigSyncApplier {
     dto.setStorageMedia(sections.getStorageMedia());
     dto.setAdvanced(sections.getAdvanced());
     // 使用计划期快照版本做 CAS：计划到 apply 之间 settings 若被并发修改会正常冲突并随事务整体回滚。
-    dto.setExpectedVersion(update.expectedVersion());
+    dto.setExpectedVersion(Long.toString(update.expectedVersion()));
     systemSettingsService.update(dto);
   }
 

@@ -18,7 +18,6 @@ import fun.fengwk.kkstudio.platform.catalog.dto.AgentConfigDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.AgentCreateDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.AgentDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.AgentUpdateDTO;
-import fun.fengwk.kkstudio.platform.error.CatalogVersions;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 
 import java.util.List;
@@ -66,7 +65,7 @@ public class BuiltinAgentLifecycleIntegrationTest extends PostgresSpringTestSupp
     update.setSystemPrompt("custom summarization prompt");
     update.setExecution(null);
     update.setConfig(configCodec.decode(current.configJson()));
-    update.setExpectedVersion(CatalogVersions.format(current.version()));
+    update.setExpectedVersion(current.version());
     AgentDTO updated = definitionService.updateAgent(COMPACTION, update);
     assertEquals("custom summarization prompt", updated.getSystemPrompt());
     assertNull(updated.getExecution());
@@ -84,9 +83,7 @@ public class BuiltinAgentLifecycleIntegrationTest extends PostgresSpringTestSupp
     Agent compaction = definitionRepository.getByName(COMPACTION);
     assertThrows(
         DomainException.class,
-        () ->
-            definitionService.deleteAgent(
-                COMPACTION, CatalogVersions.format(compaction.version())));
+        () -> definitionService.deleteAgent(COMPACTION, compaction.version()));
 
     Agent synthetic =
         Agent.builder()
@@ -98,9 +95,7 @@ public class BuiltinAgentLifecycleIntegrationTest extends PostgresSpringTestSupp
     Agent stored = definitionRepository.getByName("synthetic-builtin");
     assertThrows(
         DomainException.class,
-        () ->
-            definitionService.deleteAgent(
-                "synthetic-builtin", CatalogVersions.format(stored.version())));
+        () -> definitionService.deleteAgent("synthetic-builtin", stored.version()));
   }
 
   /** 用户不能以保留名创建自己的 Agent 覆盖系统身份。 */

@@ -124,7 +124,7 @@ class SkillCatalogControllerTest extends WebPostgresTestSupport {
 
     // 编辑：只有可编辑字段变化，version 前进。
     SkillPackageEditDTO edit = new SkillPackageEditDTO();
-    edit.setExpectedVersion("0");
+    edit.setExpectedVersion(0L);
     edit.setDescription("updated description");
     edit.setBranch("release");
     edit.setToken(SecretUpdate.keep());
@@ -204,7 +204,7 @@ class SkillCatalogControllerTest extends WebPostgresTestSupport {
     mockMvc.perform(createRequest(name, git.url())).andExpect(status().isCreated());
 
     SkillPackageEditDTO edit = new SkillPackageEditDTO();
-    edit.setExpectedVersion("0");
+    edit.setExpectedVersion(0L);
     edit.setDescription("description only");
     edit.setBranch("main");
     edit.setToken(SecretUpdate.keep());
@@ -220,7 +220,7 @@ class SkillCatalogControllerTest extends WebPostgresTestSupport {
 
     // Git 渠道省略 branch 不再是「保持当前值」：整体替换缺必填属性时拒绝
     SkillPackageEditDTO missingBranch = new SkillPackageEditDTO();
-    missingBranch.setExpectedVersion("1");
+    missingBranch.setExpectedVersion(1L);
     missingBranch.setDescription("description only");
     missingBranch.setToken(SecretUpdate.keep());
     mockMvc
@@ -278,7 +278,7 @@ class SkillCatalogControllerTest extends WebPostgresTestSupport {
         .andExpect(status().isNotFound());
 
     SkillPackageEditDTO stale = new SkillPackageEditDTO();
-    stale.setExpectedVersion("7");
+    stale.setExpectedVersion(7L);
     stale.setDescription("stale edit");
     stale.setBranch("main");
     stale.setToken(SecretUpdate.keep());
@@ -445,14 +445,14 @@ class SkillCatalogControllerTest extends WebPostgresTestSupport {
   private MockHttpServletRequestBuilder checkRequest(String packageName, String expectedVersion)
       throws Exception {
     SkillPackageCheckDTO check = new SkillPackageCheckDTO();
-    check.setExpectedVersion(expectedVersion);
+    check.setExpectedVersion(Long.parseLong(expectedVersion));
     return json(post("/api/platform/skill-packages/{name}/check", packageName), check);
   }
 
   private MockHttpServletRequestBuilder publishRequest(
       String packageName, String expectedVersion, String targetCommit) throws Exception {
     SkillPackagePublishDTO publish = new SkillPackagePublishDTO();
-    publish.setExpectedVersion(expectedVersion);
+    publish.setExpectedVersion(Long.parseLong(expectedVersion));
     publish.setTargetCommit(targetCommit);
     return json(post("/api/platform/skill-packages/{name}/publish", packageName), publish);
   }

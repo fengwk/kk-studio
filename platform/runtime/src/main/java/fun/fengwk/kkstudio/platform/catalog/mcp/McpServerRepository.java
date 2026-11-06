@@ -30,7 +30,7 @@ public class McpServerRepository {
 
   private static final String SERVER_COLUMNS =
       "name, url, headers::text as headers_json, enabled, timeout_millis, discovery_status, "
-          + "version, created_at as create_time, updated_at as update_time";
+          + "version, created_at, updated_at";
 
   private static final String TOOL_COLUMNS =
       "name, server_name, source_name, description, input_schema::text as input_schema_json";
@@ -45,8 +45,8 @@ public class McpServerRepository {
               rs.getObject("timeout_millis", Long.class),
               McpDiscoveryStatus.valueOf(rs.getString("discovery_status")),
               rs.getLong("version"),
-              PostgresJdbcTypes.toInstant(rs.getObject("create_time", OffsetDateTime.class)),
-              PostgresJdbcTypes.toInstant(rs.getObject("update_time", OffsetDateTime.class)));
+              PostgresJdbcTypes.toInstant(rs.getObject("created_at", OffsetDateTime.class)),
+              PostgresJdbcTypes.toInstant(rs.getObject("updated_at", OffsetDateTime.class)));
 
   private static final RowMapper<McpTool> TOOL_ROW_MAPPER =
       (rs, rowNum) ->

@@ -126,21 +126,21 @@ class ChatSessionRepositoryIntegrationTest extends PostgresSpringTestSupport {
         "test-session");
   }
 
-  private UUID ownedSession(UUID chatId, Instant createTime) {
-    return ownedSessionAt(chatId, createTime, UUID.randomUUID());
+  private UUID ownedSession(UUID chatId, Instant createdAt) {
+    return ownedSessionAt(chatId, createdAt, UUID.randomUUID());
   }
 
-  private UUID ownedSessionAt(UUID chatId, Instant createTime, UUID sessionId) {
+  private UUID ownedSessionAt(UUID chatId, Instant createdAt, UUID sessionId) {
     jdbc.update(
         "insert into harness_session (id, name, created_at) values (?, ?, ?)",
         sessionId,
         "test-session",
-        Timestamp.from(createTime));
+        Timestamp.from(createdAt));
     jdbc.update(
         "insert into chat_session (session_id, chat_id, created_at) values (?, ?, ?)",
         sessionId,
         chatId,
-        Timestamp.from(createTime));
+        Timestamp.from(createdAt));
     return sessionId;
   }
 

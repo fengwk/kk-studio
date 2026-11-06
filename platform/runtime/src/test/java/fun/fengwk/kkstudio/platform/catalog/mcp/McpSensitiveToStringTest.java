@@ -45,7 +45,7 @@ class McpSensitiveToStringTest {
     detail.setName("sensitive_server");
     detail.setUrl("https://mcp.example.com/mcp");
     detail.setHeaders(new SecretConfiguredDTO(true));
-    detail.setVersion("0");
+    detail.setVersion(0L);
     detail.setCreatedAt(Instant.now());
     detail.setUpdatedAt(Instant.now());
     assertTrue(detail.toString().contains("sensitive_server"));

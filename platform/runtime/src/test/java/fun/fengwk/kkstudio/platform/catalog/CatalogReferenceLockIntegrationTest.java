@@ -107,7 +107,7 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
     } else {
       assertTrue(domainFailure(created.error(), DomainErrorCode.VALIDATION));
       if (persisted != null) {
-        agentService.deleteAgent(persisted.name(), String.valueOf(persisted.version()));
+        agentService.deleteAgent(persisted.name(), persisted.version());
       }
     }
     deletePackage(packageName, skillPackages.getPackage(packageName) == null ? -1 : 0);
@@ -143,7 +143,7 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
     }
     assertTrue(
         updated.value() != null || domainFailure(updated.error(), DomainErrorCode.VALIDATION));
-    agentService.deleteAgent(persisted.name(), String.valueOf(persisted.version()));
+    agentService.deleteAgent(persisted.name(), persisted.version());
     if (skillPackages.getPackage(packageName) != null) {
       deletePackage(packageName, skillPackages.getPackage(packageName).version());
     }
@@ -178,7 +178,7 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
     assertTrue(
         created.value() != null || domainFailure(created.error(), DomainErrorCode.VALIDATION));
     if (persisted != null) {
-      agentService.deleteAgent(persisted.name(), String.valueOf(persisted.version()));
+      agentService.deleteAgent(persisted.name(), persisted.version());
     }
     if (skillPackages.getPackage(packageName) != null) {
       deletePackage(packageName, skillPackages.getPackage(packageName).version());
@@ -215,7 +215,7 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
           () -> created.value() + " / " + created.error() + " / " + persisted.configJson());
     }
     if (persisted != null) {
-      agentService.deleteAgent(persisted.name(), String.valueOf(persisted.version()));
+      agentService.deleteAgent(persisted.name(), persisted.version());
     }
     assertTrue(
         created.value() != null
@@ -258,7 +258,7 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
             || domainFailure(created.error(), DomainErrorCode.VALIDATION)
             || persisted == null);
     if (persisted != null) {
-      agentService.deleteAgent(persisted.name(), String.valueOf(persisted.version()));
+      agentService.deleteAgent(persisted.name(), persisted.version());
     }
     mcpServerService.deleteServer(server.getName(), currentServerVersion(server.getName()));
     model.delete();
@@ -288,7 +288,7 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
     Agent persisted = agentRepository.getByName(create.getName());
     if (persisted != null && persisted.configJson().contains(toolName)) {
       assertTrue(mcpServers.getTool(toolName).isPresent());
-      agentService.deleteAgent(persisted.name(), String.valueOf(persisted.version()));
+      agentService.deleteAgent(persisted.name(), persisted.version());
     }
     mcpServerService.deleteServer(server.getName(), currentServerVersion(server.getName()));
     model.delete();
@@ -328,12 +328,12 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
     if (persisted.configJson().contains(toolName)) {
       assertTrue(mcpServers.getByName(server.getName()).isPresent());
       assertTrue(mcpServers.getTool(toolName).isPresent());
-      agentService.deleteAgent(persisted.name(), String.valueOf(persisted.version()));
+      agentService.deleteAgent(persisted.name(), persisted.version());
       mcpServerService.deleteServer(server.getName(), currentServerVersion(server.getName()));
     } else {
       assertTrue(
           domainFailure(updated.error(), DomainErrorCode.VALIDATION) || updated.value() != null);
-      agentService.deleteAgent(persisted.name(), String.valueOf(persisted.version()));
+      agentService.deleteAgent(persisted.name(), persisted.version());
       if (mcpServers.getByName(server.getName()).isPresent()) {
         mcpServerService.deleteServer(server.getName(), currentServerVersion(server.getName()));
       }
@@ -394,7 +394,7 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
               .count(),
           results::toString);
       Agent persisted = agentRepository.getByName(created.getName());
-      agentService.deleteAgent(persisted.name(), String.valueOf(persisted.version()));
+      agentService.deleteAgent(persisted.name(), persisted.version());
     } finally {
       start.countDown();
       executor.shutdownNow();
@@ -597,8 +597,8 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
     jdbc.update("update mcp_server set discovery_status = 'AVAILABLE' where name = ?", serverName);
   }
 
-  private String currentServerVersion(String name) {
-    return String.valueOf(mcpServers.getByName(name).orElseThrow().version());
+  private long currentServerVersion(String name) {
+    return mcpServers.getByName(name).orElseThrow().version();
   }
 
   private Model model(String suffix) {

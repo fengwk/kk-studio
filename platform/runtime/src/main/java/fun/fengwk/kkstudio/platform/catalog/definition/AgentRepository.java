@@ -22,7 +22,7 @@ public class AgentRepository {
 
   private static final String COLUMNS =
       "name, type, description, system_prompt, execution, config,"
-          + " version, created_at as create_time, updated_at as update_time";
+          + " version, created_at, updated_at";
 
   private static final String INSERT_SQL =
       """
@@ -55,8 +55,8 @@ public class AgentRepository {
               decodeExecution(rs.getString("execution")),
               rs.getString("config"),
               rs.getLong("version"),
-              PostgresJdbcTypes.toInstant(rs.getObject("create_time", OffsetDateTime.class)),
-              PostgresJdbcTypes.toInstant(rs.getObject("update_time", OffsetDateTime.class)));
+              PostgresJdbcTypes.toInstant(rs.getObject("created_at", OffsetDateTime.class)),
+              PostgresJdbcTypes.toInstant(rs.getObject("updated_at", OffsetDateTime.class)));
 
   private final JdbcClient jdbcClient;
 

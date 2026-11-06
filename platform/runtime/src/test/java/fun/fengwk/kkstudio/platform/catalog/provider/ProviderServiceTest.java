@@ -40,7 +40,7 @@ public class ProviderServiceTest extends PostgresSpringTestSupport {
     assertTrue(provider.getCredential().configured());
     assertEquals(name, provider.getName());
     assertEquals(ProviderType.OPENAI, provider.getProviderType());
-    assertEquals("0", provider.getVersion());
+    assertEquals(0L, provider.getVersion());
     assertThrows(
         DomainException.class, () -> providerService.createProvider(provider(name, "another")));
     assertTrue(
@@ -52,7 +52,7 @@ public class ProviderServiceTest extends PostgresSpringTestSupport {
     assertEquals(name, updated.getName());
     assertEquals(ProviderType.OPENAI, updated.getProviderType());
     assertTrue(updated.getCredential().configured());
-    assertEquals("1", updated.getVersion());
+    assertEquals(1L, updated.getVersion());
     assertThrows(DomainException.class, () -> providerService.updateProvider(name, update));
 
     ProviderUpdateDTO badUpdate = new ProviderUpdateDTO();
@@ -68,7 +68,7 @@ public class ProviderServiceTest extends PostgresSpringTestSupport {
     ProviderDTO recreated = providerService.createProvider(provider(name, "replacement"));
     assertEquals(name, recreated.getName());
     providerService.deleteProvider(name, recreated.getVersion());
-    assertThrows(DomainException.class, () -> providerService.deleteProvider(name, "0"));
+    assertThrows(DomainException.class, () -> providerService.deleteProvider(name, 0L));
   }
 
   /** 更新用 SecretUpdate 三态：KEEP 保留、CLEAR 清除、SET 覆盖。 */
@@ -112,7 +112,7 @@ public class ProviderServiceTest extends PostgresSpringTestSupport {
       start.countDown();
 
       int successes = 0;
-      String currentVersion = null;
+      Long currentVersion = null;
       for (Future<ProviderDTO> result : Arrays.asList(firstResult, secondResult)) {
         try {
           ProviderDTO updated = result.get(5, TimeUnit.SECONDS);
@@ -139,7 +139,7 @@ public class ProviderServiceTest extends PostgresSpringTestSupport {
     return providerService.updateProvider(name, update);
   }
 
-  private static ProviderUpdateDTO update(SecretUpdate credential, String expectedVersion) {
+  private static ProviderUpdateDTO update(SecretUpdate credential, long expectedVersion) {
     ProviderUpdateDTO update = new ProviderUpdateDTO();
     update.setCredential(credential);
     update.setModelCallTimeoutMillis(1_800_000L);

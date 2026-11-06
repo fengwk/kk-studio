@@ -22,5 +22,5 @@ public record Agent(
     ExecutionSelection execution,
     String configJson,
     Long version,
-    Instant createTime,
-    Instant updateTime) {}
+    Instant createdAt,
+    Instant updatedAt) {}

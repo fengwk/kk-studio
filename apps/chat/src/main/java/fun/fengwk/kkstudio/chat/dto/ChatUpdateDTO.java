@@ -9,5 +9,5 @@ public class ChatUpdateDTO {
   private String title;
   private String agentName;
   private @Nullable String environmentName;
-  private String expectedVersion;
+  private Long expectedVersion;
 }

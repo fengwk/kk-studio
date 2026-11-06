@@ -106,7 +106,7 @@ public class McpServerControllerTest extends WebPostgresTestSupport {
 
     // 同步发现：CAS 坐标在请求体
     McpServerDiscoverDTO discover = new McpServerDiscoverDTO();
-    discover.setExpectedVersion("0");
+    discover.setExpectedVersion(0L);
     mockMvc
         .perform(
             post(BASE + "/{name}/discover", name)
@@ -197,7 +197,7 @@ public class McpServerControllerTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.code").value("version_conflict"));
 
     McpServerDiscoverDTO staleDiscover = new McpServerDiscoverDTO();
-    staleDiscover.setExpectedVersion("999");
+    staleDiscover.setExpectedVersion(999L);
     mockMvc
         .perform(
             post(BASE + "/{name}/discover", name)
