@@ -1063,7 +1063,6 @@ const platformDomainRoots = [
   'error',
   'events',
   'harness',
-  'http',
   'i18n',
   'interaction',
   'notification',
