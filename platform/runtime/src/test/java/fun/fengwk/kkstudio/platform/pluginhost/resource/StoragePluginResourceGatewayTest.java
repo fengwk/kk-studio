@@ -22,13 +22,14 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialUnavailableException;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialUnavailableReason;
 import fun.fengwk.kkstudio.platform.plugin.resource.PluginMediaFamily;
 import fun.fengwk.kkstudio.platform.plugin.resource.PluginResourceUnavailableException;
 import fun.fengwk.kkstudio.platform.pluginhost.PluginProperties;
-import fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
@@ -179,21 +180,21 @@ class StoragePluginResourceGatewayTest {
     verifyNoInteractions(storageBlobManager);
   }
 
-  /** 签发原件 URL 抛出 StorageResourceNotFoundException 时必须收敛为 PluginResourceUnavailableException。 */
+  /** 不存在的 blob 必须收敛为 PluginResourceUnavailableException。 */
   @Test
   void resolveSessionResourceConvergencesStorageResourceNotFoundException() {
     UUID blobId = UUID.randomUUID();
     UUID sessionId = UUID.randomUUID();
     when(sessionBlobRefManager.contains(sessionId, blobId)).thenReturn(true);
     when(storageBlobManager.presignOriginalUrl(blobId))
-        .thenThrow(new StorageResourceNotFoundException("blob", blobId.toString()));
+        .thenThrow(DomainException.notFound("blob", "unknown blob: " + blobId));
 
     PluginResourceUnavailableException exception =
         assertThrows(
             PluginResourceUnavailableException.class,
             () -> gateway.resolveSessionResource(sessionId, "vfs:/resources/" + blobId));
     assertTrue(exception.getMessage().contains("is no longer available"));
-    assertTrue(exception.getCause() instanceof StorageResourceNotFoundException);
+    assertEquals(DomainErrorCode.NOT_FOUND, ((DomainException) exception.getCause()).code());
   }
 
   /** 预签名返回非 HTTPS、带 userinfo、空 host 或格式非法时必须拒绝，防不可用地址交给插件。 */

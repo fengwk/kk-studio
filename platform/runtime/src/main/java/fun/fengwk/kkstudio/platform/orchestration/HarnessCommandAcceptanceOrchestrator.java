@@ -4,6 +4,8 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
@@ -19,7 +21,6 @@ import fun.fengwk.kkstudio.harness.api.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.spi.AcceptancePreflight;
-import fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
@@ -244,7 +245,12 @@ public class HarnessCommandAcceptanceOrchestrator {
     StorageUploadService.ReadyUpload ready;
     try {
       ready = uploadService.lockReady(uploadId);
-    } catch (StorageResourceNotFoundException | StorageVerificationException error) {
+    } catch (DomainException error) {
+      if (error.code() != DomainErrorCode.NOT_FOUND || !"upload".equals(error.resource())) {
+        throw error;
+      }
+      throw new IllegalArgumentException("Attachment upload cannot be consumed");
+    } catch (StorageVerificationException error) {
       throw new IllegalArgumentException("Attachment upload cannot be consumed");
     }
     refManager.retainRef(sessionId, ready.blobId());

@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.platform.harness.builtin.query;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
@@ -38,7 +40,6 @@ import fun.fengwk.kkstudio.platform.harness.model.ProviderResolutionService;
 import fun.fengwk.kkstudio.platform.harness.thread.command.DatabaseTurnResolver;
 import fun.fengwk.kkstudio.platform.harness.thread.command.LiveTurnPlan;
 import fun.fengwk.kkstudio.platform.orchestration.UserMessageContentPreparer;
-import fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
@@ -667,7 +668,13 @@ public final class ProviderRequestPreviewService {
     StorageUploadService.ReadyUpload ready;
     try {
       ready = uploadService.peekReady(uploadId);
-    } catch (StorageResourceNotFoundException | StorageVerificationException error) {
+    } catch (DomainException error) {
+      if (error.code() != DomainErrorCode.NOT_FOUND || !"upload".equals(error.resource())) {
+        throw error;
+      }
+      throw new ProviderRequestPreviewUnavailableException(
+          Reason.PREVIEW_ATTACHMENT_NOT_READY, "attachment upload is not READY for preview");
+    } catch (StorageVerificationException error) {
       throw new ProviderRequestPreviewUnavailableException(
           Reason.PREVIEW_ATTACHMENT_NOT_READY, "attachment upload is not READY for preview");
     }

@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.platform.harness.read;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.tool.TurnMediaCapabilities;
@@ -7,7 +9,6 @@ import fun.fengwk.kkstudio.platform.harness.model.ProviderResourceMaterializer;
 import fun.fengwk.kkstudio.platform.storage.ReadDeadline;
 import fun.fengwk.kkstudio.platform.storage.error.StorageReadInterruptedException;
 import fun.fengwk.kkstudio.platform.storage.error.StorageReadTimeoutException;
-import fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
@@ -173,7 +174,10 @@ public class PlatformResourceContentReader {
         throw new PlatformReadException("resource content is unavailable: " + blobId);
       }
       return text;
-    } catch (StorageResourceNotFoundException e) {
+    } catch (DomainException e) {
+      if (e.code() != DomainErrorCode.NOT_FOUND || !"blob".equals(e.resource())) {
+        throw e;
+      }
       throw new PlatformReadException("resource not found: " + blobId, e);
     } catch (StorageReadTimeoutException e) {
       throw new PlatformReadException("resource read timed out: " + blobId, e);

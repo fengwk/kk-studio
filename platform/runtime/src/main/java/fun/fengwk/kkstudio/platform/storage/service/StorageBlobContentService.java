@@ -4,6 +4,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.storage.ReadDeadline;
 import fun.fengwk.kkstudio.platform.storage.StorageObjectKeys;
 import fun.fengwk.kkstudio.platform.storage.s3.S3StorageService;
@@ -43,8 +44,7 @@ public class StorageBlobContentService {
    * @param blobId 目标 blob ID
    * @param maxSizeBytes 最大允许读取字节数（负数表示不限）
    * @return 权威 blob 内容与元数据
-   * @throws fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException 当 blob
-   *     不存在或已非 ACTIVE 时抛出
+   * @throws DomainException 当 blob 不存在或已非 ACTIVE 时抛出
    * @throws IllegalArgumentException 当 blob 大小超过最大允许限制时抛出
    */
   public StorageBlobContent readBlobContent(UUID blobId, long maxSizeBytes) {

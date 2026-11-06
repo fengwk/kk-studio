@@ -3,6 +3,8 @@ package fun.fengwk.kkstudio.platform.harness.tool.gateway;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.common.result.JsonResultContent;
 import fun.fengwk.kkstudio.common.result.ResourceResultContent;
@@ -11,7 +13,6 @@ import fun.fengwk.kkstudio.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.spi.ToolOutcomeMaterializationException;
 import fun.fengwk.kkstudio.harness.spi.ToolResultHistoryMaterializer;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
-import fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
@@ -113,7 +114,12 @@ public class GlobalStorageToolResultHistoryMaterializer implements ToolResultHis
     StorageUploadService.ReadyUpload ready;
     try {
       ready = uploadService.lockReady(uploadId);
-    } catch (StorageResourceNotFoundException | StorageVerificationException error) {
+    } catch (DomainException error) {
+      if (error.code() != DomainErrorCode.NOT_FOUND || !"upload".equals(error.resource())) {
+        throw error;
+      }
+      throw new ToolOutcomeMaterializationException("uploaded resource is not ready for history");
+    } catch (StorageVerificationException error) {
       throw new ToolOutcomeMaterializationException("uploaded resource is not ready for history");
     }
     StorageBlob blob = blobManager.getBlob(ready.blobId());

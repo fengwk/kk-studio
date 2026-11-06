@@ -2,6 +2,8 @@ package fun.fengwk.kkstudio.platform.pluginhost.resource;
 
 import lombok.extern.slf4j.Slf4j;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialUnavailableException;
@@ -10,7 +12,6 @@ import fun.fengwk.kkstudio.platform.plugin.resource.PluginResourceGateway;
 import fun.fengwk.kkstudio.platform.plugin.resource.PluginResourceUnavailableException;
 import fun.fengwk.kkstudio.platform.plugin.resource.SessionResourceUri;
 import fun.fengwk.kkstudio.platform.pluginhost.PluginProperties;
-import fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
@@ -143,7 +144,10 @@ public final class StoragePluginResourceGateway implements PluginResourceGateway
     StoragePresignedUrlDTO presigned;
     try {
       presigned = storageBlobManager.presignOriginalUrl(blobId);
-    } catch (StorageResourceNotFoundException error) {
+    } catch (DomainException error) {
+      if (error.code() != DomainErrorCode.NOT_FOUND || !"blob".equals(error.resource())) {
+        throw error;
+      }
       throw new PluginResourceUnavailableException(
           "session resource is no longer available", error);
     } catch (RuntimeException error) {

@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.platform.storage.service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.storage.persistence.SessionBlobRefRepository;
 
 import java.util.List;
@@ -35,8 +36,7 @@ public class SessionBlobRefManager {
    * 事务内 {@code retainRef}：ref 行不存在时插入并 retain 该 blob 恰好一次；ref 已存在时 no-op（同一 Session 复用同一 blob
    * 不重复计数）。命令路径消费 upload 前调用本方法，保证 upload release 之前新 ref 的 retain 已生效。
    *
-   * @throws fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException blob 不存在或已
-   *     DELETING
+   * @throws DomainException blob 不存在或已 DELETING
    */
   @Transactional(propagation = Propagation.MANDATORY)
   public void retainRef(UUID sessionId, UUID blobId) {
