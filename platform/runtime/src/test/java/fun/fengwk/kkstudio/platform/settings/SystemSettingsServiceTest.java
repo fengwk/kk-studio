@@ -15,8 +15,8 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
-import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSectionsDTO;
-import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsUpdateDTO;
+import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsSectionsDTO;
+import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsUpdateDTO;
 
 import java.time.Instant;
 
@@ -202,8 +202,8 @@ class SystemSettingsServiceTest {
     var response = service.get();
     assertEquals(settings, codec.fromDto(response));
     assertEquals("1", response.getVersion());
-    assertEquals(CREATED_AT, response.getCreateTime());
-    assertEquals(UPDATED_AT, response.getUpdateTime());
+    assertEquals(CREATED_AT, response.getCreatedAt());
+    assertEquals(UPDATED_AT, response.getUpdatedAt());
   }
 
   private SystemSettingsUpdateDTO update(

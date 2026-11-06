@@ -19,13 +19,14 @@ import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsTestFixture;
+import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadDTO;
+import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadReadyDTO;
 import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageUploadRepository;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobPreviewService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobState;
-import fun.fengwk.kkstudio.share.storage.StorageUploadDTO;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
@@ -114,7 +115,7 @@ class StorageUploadTtlPolicyIntegrationTest extends PostgresSpringTestSupport {
             "extend.bin", "application/octet-stream", content.length, storage.sha256Hex(content));
     storage.putUploadContent(pending.getId(), content, "application/octet-stream");
     UUID uploadId = UUID.fromString(pending.getId());
-    StorageUploadDTO ready = uploadService.complete(uploadId);
+    StorageUploadReadyDTO ready = (StorageUploadReadyDTO) uploadService.complete(uploadId);
 
     // 缩短 TTL 后回拨创建时间：该 READY 存量在上一次判断中已过期，消费被拒绝。
     setUploadTtl(1L);
@@ -183,7 +184,7 @@ class StorageUploadTtlPolicyIntegrationTest extends PostgresSpringTestSupport {
             storage.sha256Hex(content));
     storage.putUploadContent(pending.getId(), content, "application/octet-stream");
     UUID uploadId = UUID.fromString(pending.getId());
-    StorageUploadDTO ready = uploadService.complete(uploadId);
+    StorageUploadReadyDTO ready = (StorageUploadReadyDTO) uploadService.complete(uploadId);
     UUID blobId = UUID.fromString(ready.getBlobId());
 
     // 持久 owner（Session 引用/Canvas 资源）：在 upload 引用之外再加一个引用。

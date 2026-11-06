@@ -50,7 +50,7 @@ function assertPresigned(value, label) {
 /** 预约并直传一份 PNG，返回 READY 上传（含 blobId）；同内容已去重命中时直接复用既有 blob。 */
 async function uploadPng(ctx) {
   const sha256 = createHash('sha256').update(PNG_BYTES).digest('hex')
-  const reserved = await ctx.call('POST', '/api/storage/uploads', {
+  const reserved = await ctx.call('POST', '/api/platform/storage/uploads', {
     filename: 'tiny.png',
     mediaType: 'image/png',
     sizeBytes: PNG_BYTES.length,
@@ -59,12 +59,12 @@ async function uploadPng(ctx) {
   const upload = reserved.json
   assert(UUID_TEXT.test(upload.id), JSON.stringify(upload))
   assert(!('bucket' in upload) && !('key' in upload), JSON.stringify(upload))
-  if (upload.state === 'READY') {
+  if (upload.type === 'READY') {
     // 内容哈希去重命中：同一份 ACTIVE 内容不重复上传。
-    assert(UUID_TEXT.test(upload.blobId) && upload.presignedPut === null, JSON.stringify(upload))
+    assert(UUID_TEXT.test(upload.blobId) && !('presignedPut' in upload), JSON.stringify(upload))
     return upload
   }
-  assert(upload.state === 'PENDING' && upload.blobId === null, JSON.stringify(upload))
+  assert(upload.type === 'PENDING' && !('blobId' in upload), JSON.stringify(upload))
   assert(upload.presignedPut?.method === 'PUT', JSON.stringify(upload))
   assert(/^https?:\/\//.test(upload.presignedPut.url), JSON.stringify(upload))
   const putResponse = await fetch(upload.presignedPut.url, {
@@ -73,11 +73,11 @@ async function uploadPng(ctx) {
     body: PNG_BYTES,
   })
   assert(putResponse.ok, `direct PUT HTTP ${putResponse.status}`)
-  const completed = (await ctx.call('POST', `/api/storage/uploads/${upload.id}/complete`)).json
+  const completed = (await ctx.call('POST', `/api/platform/storage/uploads/${upload.id}/complete`)).json
   assert(
-    completed.state === 'READY'
+    completed.type === 'READY'
       && UUID_TEXT.test(completed.blobId)
-      && completed.presignedPut === null,
+      && !('presignedPut' in completed),
     JSON.stringify(completed),
   )
   return completed
@@ -89,7 +89,7 @@ registerCase({
   requires: ['canvas-storage'],
   title: 'Canvas Resource 直读预签名与全局 Blob 存储边界',
   docs:
-    '需 backend 启用 S3；验证无公开 /api/s3/** 接口，全局 upload reserve->PUT->complete 后可通过 /api/storage/blobs/{blobId}/download-url|preview-url 获取预签名 URL（原件 URL 另带权威 mediaType/sizeBytes），typed command CREATE_NODE 的 BLOB 资源槽位引用 READY blob、KEEP 复用同一 Resource 且不推进 revision，Resource download/preview-url 只暴露 method/url/headers/expiresAt，TEXT 资源与未知资源明确拒绝',
+    '需 backend 启用 S3；验证无公开 /api/s3/** 接口，全局 upload reserve->PUT->complete 后可通过 /api/platform/storage/blobs/{blobId}/download-url|preview-url 获取预签名 URL（原件 URL 另带权威 mediaType/sizeBytes），typed command CREATE_NODE 的 BLOB 资源槽位引用 READY blob、KEEP 复用同一 Resource 且不推进 revision，Resource download/preview-url 只暴露 method/url/headers/expiresAt，TEXT 资源与未知资源明确拒绝',
   async run(ctx) {
     const created = await ctx.call('POST', '/api/canvases', {
       title: `e2e-resource-storage-${cid().slice(0, 8)}`,
@@ -103,7 +103,7 @@ registerCase({
     const upload = await uploadPng(ctx)
 
     // Storage blob URL：POST download-url 携带 blob 权威媒体事实，preview-url 只签发 GET。
-    const blobDownload = (await ctx.call('POST', `/api/storage/blobs/${upload.blobId}/download-url`)).json
+    const blobDownload = (await ctx.call('POST', `/api/platform/storage/blobs/${upload.blobId}/download-url`)).json
     assert(
       blobDownload.method === 'GET'
         && /^https?:\/\//.test(blobDownload.url)
@@ -112,7 +112,7 @@ registerCase({
     )
     assertDecimalVersion(blobDownload.sizeBytes, 'blob sizeBytes')
     assert(blobDownload.sizeBytes === String(PNG_BYTES.length), JSON.stringify(blobDownload))
-    const blobPreview = (await ctx.call('POST', `/api/storage/blobs/${upload.blobId}/preview-url`)).json
+    const blobPreview = (await ctx.call('POST', `/api/platform/storage/blobs/${upload.blobId}/preview-url`)).json
     assert(blobPreview.method === 'GET' && /^https?:\/\//.test(blobPreview.url), JSON.stringify(blobPreview))
     assert(blobPreview.mediaType === null && blobPreview.sizeBytes === null, JSON.stringify(blobPreview))
 

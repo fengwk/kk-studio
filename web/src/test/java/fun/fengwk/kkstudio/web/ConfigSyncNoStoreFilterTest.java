@@ -20,13 +20,13 @@ class ConfigSyncNoStoreFilterTest {
 
   @ParameterizedTest
   @CsvSource({
-    "/api/settings/sync,200",
-    "/api/settings/sync/export,200",
-    "/api/settings/sync/import,400",
-    "/api/settings/sync/import,409",
-    "/api/settings/sync/import,500",
-    "/api/settings/sync/import/check,200",
-    "/api/settings/sync/import/check,400"
+    "/api/platform/config-sync,200",
+    "/api/platform/config-sync/export,200",
+    "/api/platform/config-sync/import,400",
+    "/api/platform/config-sync/import,409",
+    "/api/platform/config-sync/import,500",
+    "/api/platform/config-sync/check-import,200",
+    "/api/platform/config-sync/check-import,400"
   })
   void appliesBeforeDownstreamProcessing(String path, int status) throws Exception {
     MockHttpServletRequest request = new MockHttpServletRequest("POST", path);
@@ -45,7 +45,8 @@ class ConfigSyncNoStoreFilterTest {
 
   @Test
   void matchesInsideAServletContextWithoutDependingOnServletPath() throws Exception {
-    MockHttpServletRequest request = new MockHttpServletRequest("GET", "/studio/api/settings/sync");
+    MockHttpServletRequest request =
+        new MockHttpServletRequest("GET", "/studio/api/platform/config-sync");
     request.setContextPath("/studio");
     MockHttpServletResponse response = new MockHttpServletResponse();
     filter.doFilter(request, response, (req, res) -> {});
@@ -55,9 +56,9 @@ class ConfigSyncNoStoreFilterTest {
   @ParameterizedTest
   @ValueSource(
       strings = {
-        "/api/settings/%73ync",
-        "/api/settings/sync;parameter=1",
-        "//api/settings/sync/import"
+        "/api/platform/config-%73ync",
+        "/api/platform/config-sync;parameter=1",
+        "//api/platform/config-sync/import"
       })
   void normalizesEquivalentServletPathsBeforeMatching(String path) throws Exception {
     // URI 编码、路径参数或多余斜杠不能绕过同一同步路由的缓存保护。
@@ -70,7 +71,7 @@ class ConfigSyncNoStoreFilterTest {
   @Test
   void establishesProtectionBeforeAnUnhandledFailure() {
     MockHttpServletRequest request =
-        new MockHttpServletRequest("POST", "/api/settings/sync/import");
+        new MockHttpServletRequest("POST", "/api/platform/config-sync/import");
     MockHttpServletResponse response = new MockHttpServletResponse();
     assertThrows(
         ServletException.class,
@@ -85,7 +86,12 @@ class ConfigSyncNoStoreFilterTest {
   }
 
   @ParameterizedTest
-  @ValueSource(strings = {"/api/settings", "/api/settings/sync-other", "/api/settings/sync.yaml"})
+  @ValueSource(
+      strings = {
+        "/api/platform/settings",
+        "/api/platform/config-sync-other",
+        "/api/platform/config-sync.yaml"
+      })
   void leavesUnrelatedAndLookalikeRoutesUntouched(String path) throws Exception {
     MockHttpServletRequest request = new MockHttpServletRequest("GET", path);
     MockHttpServletResponse response = new MockHttpServletResponse();

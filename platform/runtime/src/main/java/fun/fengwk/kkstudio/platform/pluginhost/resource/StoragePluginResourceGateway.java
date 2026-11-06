@@ -12,13 +12,15 @@ import fun.fengwk.kkstudio.platform.plugin.resource.PluginResourceGateway;
 import fun.fengwk.kkstudio.platform.plugin.resource.PluginResourceUnavailableException;
 import fun.fengwk.kkstudio.platform.plugin.resource.SessionResourceUri;
 import fun.fengwk.kkstudio.platform.pluginhost.PluginProperties;
+import fun.fengwk.kkstudio.platform.storage.dto.StoragePresignedUrlDTO;
+import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadDTO;
+import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadPendingDTO;
+import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadReadyDTO;
+import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadReserveRequestDTO;
+import fun.fengwk.kkstudio.platform.storage.dto.StorageUrlMethod;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
-import fun.fengwk.kkstudio.share.storage.StoragePresignedUrlDTO;
-import fun.fengwk.kkstudio.share.storage.StorageUploadDTO;
-import fun.fengwk.kkstudio.share.storage.StorageUploadReserveRequestDTO;
-import fun.fengwk.kkstudio.share.storage.StorageUploadState;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -241,15 +243,13 @@ public final class StoragePluginResourceGateway implements PluginResourceGateway
     UUID uploadId = parseUploadId(reserved);
     try {
       StorageUploadDTO upload = reserved;
-      if (reserved.getState() == StorageUploadState.PENDING) {
+      if (reserved instanceof StorageUploadPendingDTO pending) {
         // 下载已经完成不代表 PUT 获准：真正上传的紧前再检查一次当前授权。
         beforeRequest.run();
-        putObject(reserved.getPresignedPut(), media.path());
+        putObject(pending.getPresignedPut(), media.path());
         upload = storageUploadService.complete(uploadId);
       }
-      if (upload == null
-          || upload.getState() != StorageUploadState.READY
-          || upload.getBlobId() == null) {
+      if (!(upload instanceof StorageUploadReadyDTO)) {
         throw new PluginResourceUnavailableException("staged upload did not become READY");
       }
       log.debug(
@@ -278,7 +278,7 @@ public final class StoragePluginResourceGateway implements PluginResourceGateway
     if (presignedPut == null || presignedPut.getUrl() == null || presignedPut.getUrl().isBlank()) {
       throw new PluginResourceUnavailableException("staged upload has no presigned target");
     }
-    if (!"PUT".equalsIgnoreCase(presignedPut.getMethod())) {
+    if (!StorageUrlMethod.PUT.equals(presignedPut.getMethod())) {
       throw new PluginResourceUnavailableException("staged upload requires an unexpected method");
     }
     URI target = parseAbsoluteUri(presignedPut.getUrl());

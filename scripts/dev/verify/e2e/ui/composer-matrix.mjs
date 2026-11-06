@@ -710,7 +710,7 @@ export async function runComposerMatrix(ui) {
     'Composer 附件只显示文件名，并按图片、视频和通用文件类型展示缩略图或图标',
     async (caseArt) => {
       const uploadRoute = createReadyUploadRoute()
-      await page.route('**/api/storage/uploads**', uploadRoute)
+      await page.route('**/api/platform/storage/uploads**', uploadRoute)
       try {
         await withUiFixture(
           page,
@@ -794,7 +794,7 @@ export async function runComposerMatrix(ui) {
           },
         )
       } finally {
-        await page.unroute('**/api/storage/uploads**', uploadRoute)
+        await page.unroute('**/api/platform/storage/uploads**', uploadRoute)
       }
     },
   )
@@ -1846,7 +1846,7 @@ function createReadyUploadRoute() {
     const pathname = new URL(request.url()).pathname
     const completeMatch = pathname.match(/\/api\/storage\/uploads\/([^/]+)\/complete$/u)
     const deleteMatch = pathname.match(/\/api\/storage\/uploads\/([^/]+)$/u)
-    if (request.method() === 'POST' && pathname.endsWith('/api/storage/uploads')) {
+    if (request.method() === 'POST' && pathname.endsWith('/api/platform/storage/uploads')) {
       sequence += 1
       const suffix = String(sequence).padStart(12, '0')
       const id = `00000000-0000-4000-8000-${suffix}`

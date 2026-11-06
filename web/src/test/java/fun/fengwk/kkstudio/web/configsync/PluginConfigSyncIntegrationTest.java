@@ -76,7 +76,7 @@ class PluginConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     String pluginId = plugins.keySet().iterator().next();
     String valuesJson = plugins.get(pluginId);
 
-    JsonNode inventory = getData("/api/settings/sync");
+    JsonNode inventory = getData("/api/platform/config-sync");
     JsonNode pluginItem = findItem(inventory.path("items"), "plugins", pluginId);
     assertNotNull(pluginItem, "inventory must list every installed plugin as its own entry");
     assertEquals(
@@ -86,7 +86,7 @@ class PluginConfigSyncIntegrationTest extends ConfigSyncTestSupport {
 
     JsonNode exported =
         postData(
-            "/api/settings/sync/export",
+            "/api/platform/config-sync/export",
             Map.of("items", List.of(Map.of("kind", "plugins", "name", pluginId))));
     String yamlText = exported.path("yaml").asText();
     Map<String, Object> document = parseYaml(yamlText);
@@ -120,7 +120,7 @@ class PluginConfigSyncIntegrationTest extends ConfigSyncTestSupport {
                     List.of(Map.of("pluginId", pluginId, "valuesJson", plugins.get(pluginId)))));
 
     JsonNode result =
-        postData("/api/settings/sync/import", Map.of("yaml", yaml, "allowPartial", true));
+        postData("/api/platform/config-sync/import", Map.of("yaml", yaml, "allowPartial", true));
     assertTrue(references(result.path("imported")).contains("plugins/" + pluginId));
     assertTrue(references(result.path("imported")).contains("settings/settings"));
 
@@ -191,7 +191,7 @@ class PluginConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     String agent = "builtin-dep-agent";
     createBuiltinDependentAgent(agent);
 
-    JsonNode items = getData("/api/settings/sync").path("items");
+    JsonNode items = getData("/api/platform/config-sync").path("items");
     assertNotNull(findItem(items, "agents", agent));
     assertNull(
         findItem(items, "agents", BuiltinAgents.COMPACTION_NAME),
@@ -199,7 +199,7 @@ class PluginConfigSyncIntegrationTest extends ConfigSyncTestSupport {
 
     JsonNode exported =
         postData(
-            "/api/settings/sync/export",
+            "/api/platform/config-sync/export",
             Map.of("items", List.of(Map.of("kind", "agents", "name", agent))));
     String yaml = exported.path("yaml").asText();
     assertEquals(
@@ -208,7 +208,7 @@ class PluginConfigSyncIntegrationTest extends ConfigSyncTestSupport {
         "only the selected custom agent may be exported; the builtin subagent must not become an item");
 
     JsonNode result =
-        postData("/api/settings/sync/import", Map.of("yaml", yaml, "allowPartial", true));
+        postData("/api/platform/config-sync/import", Map.of("yaml", yaml, "allowPartial", true));
     assertTrue(references(result.path("imported")).contains("agents/" + agent));
     assertTrue(references(result.path("skipped")).isEmpty());
 
@@ -223,7 +223,7 @@ class PluginConfigSyncIntegrationTest extends ConfigSyncTestSupport {
             + "    config: {tools: [], skills: [], subagents: []}\n";
     mockMvc
         .perform(
-            post("/api/settings/sync/import")
+            post("/api/platform/config-sync/import")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(Map.of("yaml", reserved))))
         .andExpect(status().isBadRequest());

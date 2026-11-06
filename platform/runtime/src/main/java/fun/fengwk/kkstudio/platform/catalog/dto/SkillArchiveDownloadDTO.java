@@ -2,7 +2,7 @@ package fun.fengwk.kkstudio.platform.catalog.dto;
 
 import lombok.Data;
 
-import fun.fengwk.kkstudio.share.storage.StoragePresignedUrlDTO;
+import fun.fengwk.kkstudio.platform.storage.dto.StoragePresignedUrlDTO;
 
 /** 当前版本归档的下载信息：预签名 GET 由浏览器直连对象存储。 */
 @Data

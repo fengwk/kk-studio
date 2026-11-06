@@ -12,12 +12,12 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.canvas.BlobFacts;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionResourceStream;
 import fun.fengwk.kkstudio.platform.storage.StorageObjectKeys;
+import fun.fengwk.kkstudio.platform.storage.dto.StoragePresignedUrlDTO;
 import fun.fengwk.kkstudio.platform.storage.s3.S3ObjectMetadata;
 import fun.fengwk.kkstudio.platform.storage.s3.S3ObjectStream;
 import fun.fengwk.kkstudio.platform.storage.s3.S3StorageService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
-import fun.fengwk.kkstudio.share.storage.StoragePresignedUrlDTO;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;

@@ -27,9 +27,10 @@ import org.springframework.transaction.support.TransactionTemplate;
 import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
+import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadDTO;
+import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadReadyDTO;
 import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
-import fun.fengwk.kkstudio.share.storage.StorageUploadDTO;
 
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;
@@ -86,7 +87,8 @@ class StorageUploadLockReadyTest extends PostgresSpringTestSupport {
     StorageUploadDTO pending =
         storage.reserve("report.txt", "text/plain", content.length, storage.sha256Hex(content));
     storage.putUploadContent(pending.getId(), content, "text/plain");
-    StorageUploadDTO ready = storageUploadService.complete(UUID.fromString(pending.getId()));
+    StorageUploadReadyDTO ready =
+        (StorageUploadReadyDTO) storageUploadService.complete(UUID.fromString(pending.getId()));
 
     StorageUploadService.ReadyUpload consumed =
         tx.execute(status -> storageUploadService.lockReady(UUID.fromString(ready.getId())));
@@ -158,7 +160,8 @@ class StorageUploadLockReadyTest extends PostgresSpringTestSupport {
         storage.reserve(
             "stale.bin", "application/octet-stream", content.length, storage.sha256Hex(content));
     storage.putUploadContent(pending.getId(), content, "application/octet-stream");
-    StorageUploadDTO ready = storageUploadService.complete(UUID.fromString(pending.getId()));
+    StorageUploadReadyDTO ready =
+        (StorageUploadReadyDTO) storageUploadService.complete(UUID.fromString(pending.getId()));
     storage.backdateUpload(ready.getId());
 
     StorageVerificationException error =
@@ -193,7 +196,8 @@ class StorageUploadLockReadyTest extends PostgresSpringTestSupport {
         storage.reserve(
             "atomic.bin", "application/octet-stream", content.length, storage.sha256Hex(content));
     storage.putUploadContent(pending.getId(), content, "application/octet-stream");
-    StorageUploadDTO ready = storageUploadService.complete(UUID.fromString(pending.getId()));
+    StorageUploadReadyDTO ready =
+        (StorageUploadReadyDTO) storageUploadService.complete(UUID.fromString(pending.getId()));
     UUID uploadUuid = UUID.fromString(ready.getId());
 
     // 回滚：lockReady + delete 的消费标记必须随外层事务一并还原。
@@ -262,7 +266,8 @@ class StorageUploadLockReadyTest extends PostgresSpringTestSupport {
     StorageUploadDTO pending =
         storage.reserve("preview.txt", "text/plain", content.length, storage.sha256Hex(content));
     storage.putUploadContent(pending.getId(), content, "text/plain");
-    StorageUploadDTO ready = storageUploadService.complete(UUID.fromString(pending.getId()));
+    StorageUploadReadyDTO ready =
+        (StorageUploadReadyDTO) storageUploadService.complete(UUID.fromString(pending.getId()));
     s3Storage.clearNetworkCalls();
 
     // peek 不需要活动事务：只读预览路径就是这样直接调用它的。

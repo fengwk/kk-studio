@@ -11,7 +11,7 @@ export const DEFAULT_MAX_RESOURCE_BYTES = '16777216'
 export const DEFAULT_MODEL_HTTP_RETRY_STATUS_CODES = [408, 429, 500, 502, 503, 504]
 
 /**
- * 测试基座：与 share DTO / V1 默认行一致的完整 GET {@code /api/settings} 响应形状。
+ * 测试基座：与 share DTO / V1 默认行一致的完整 GET {@code /api/platform/settings} 响应形状。
  *
  * 仅用于前端测试验证「严格契约字段映射 / 聚合 hydration / 完整聚合 CAS PUT」，
  * 不是前端运行时默认值（生产 draft 只从 GET 权威数据派生）。
@@ -73,13 +73,13 @@ export function makeSettingsDto(overrides: { version?: string } = {}): SystemSet
       postgresqlWorkReconnectBackoffMillis: '1000',
     },
     version: overrides.version ?? '0',
-    createTime: 1767225600,
-    updateTime: 1767225600,
+    createdAt: 1767225600000,
+    updatedAt: 1767225600000,
   }
 }
 
 /**
- * 测试基座：与 {@code GET /api/settings/schema} 响应形状一致的 schema。
+ * 测试基座：与 {@code GET /api/platform/settings/schema} 响应形状一致的 schema。
  *
  * 字段 path/分组与 core 的 SystemSettingsSchemaProvider 一一对应；测试用它驱动渲染与 fail-closed 校验。
  */

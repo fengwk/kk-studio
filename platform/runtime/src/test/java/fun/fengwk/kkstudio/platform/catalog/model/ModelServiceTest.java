@@ -38,8 +38,8 @@ import fun.fengwk.kkstudio.platform.catalog.dto.SingleModelDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.SingleModelUpdateDTO;
 import fun.fengwk.kkstudio.platform.catalog.provider.ProviderService;
 import fun.fengwk.kkstudio.platform.configsync.ConfigSyncService;
+import fun.fengwk.kkstudio.platform.configsync.dto.ConfigSyncImportRequestDTO;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
-import fun.fengwk.kkstudio.share.configsync.ConfigSyncImportRequestDTO;
 
 import java.util.HashMap;
 import java.util.List;

@@ -57,15 +57,17 @@ class BootPlatformCompatibilityIntegrationTest extends WebPostgresTestSupport {
     ServletContext servletContext =
         ((ServletWebServerApplicationContext) applicationContext).getServletContext();
 
-    // 纯存活端点不依赖数据库、S3 或外部服务，因此这里的 200 只证明容器在该端口提供 servlet 服务。
+    // 设置 schema 不依赖数据库、S3 或外部服务，200 证明容器在该端口提供 servlet 服务。
     HttpResponse<String> response =
         HttpClient.newHttpClient()
             .send(
-                HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/healthz"))
+                HttpRequest.newBuilder(
+                        URI.create("http://127.0.0.1:" + port + "/api/platform/settings/schema"))
                     .GET()
                     .build(),
                 HttpResponse.BodyHandlers.ofString());
-    assertEquals(200, response.statusCode(), "the embedded container must serve /healthz");
+    assertEquals(
+        200, response.statusCode(), "the embedded container must serve the settings schema");
 
     assertEquals(
         6, servletContext.getMajorVersion(), "Boot 4 requires a Servlet 6.1 or newer container");

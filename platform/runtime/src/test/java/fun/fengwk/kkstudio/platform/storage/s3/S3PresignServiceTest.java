@@ -20,7 +20,6 @@ import fun.fengwk.kkstudio.platform.settings.SystemSettingsTestFixture;
 import fun.fengwk.kkstudio.platform.storage.configuration.S3StorageProperties;
 
 import java.net.URI;
-import java.time.Instant;
 import java.util.Base64;
 import java.util.Map;
 
@@ -144,7 +143,7 @@ public class S3PresignServiceTest {
     try (TestContext context = newTestContext()) {
       long before = System.currentTimeMillis();
       S3PresignedUrl resp = context.service.presignDownload("docs/readme.md", null);
-      long delta = Instant.parse(resp.getExpiresAt()).toEpochMilli() - before;
+      long delta = resp.getExpiresAt().toEpochMilli() - before;
       long defaultExpiresMillis =
           SystemSettingsTestFixture.STORAGE_MEDIA.s3PresignDefaultExpiresSeconds() * 1000L;
       // SDK 签名窗口存在数秒抖动，给一个 30s 的余量
@@ -162,7 +161,7 @@ public class S3PresignServiceTest {
     try (TestContext context = new TestContext(props, snapshot)) {
       long before = System.currentTimeMillis();
       S3PresignedUrl first = context.service.presignDownload("docs/live.md", null);
-      long firstDelta = Instant.parse(first.getExpiresAt()).toEpochMilli() - before;
+      long firstDelta = first.getExpiresAt().toEpochMilli() - before;
       assertTrue(
           firstDelta >= 1_800_000L - 30_000L && firstDelta <= 1_800_000L + 30_000L,
           "default 1800s window, got delta " + firstDelta);
@@ -174,13 +173,13 @@ public class S3PresignServiceTest {
                   86_400L, 900L, 3_600L, 30_000L, 512, 80, 259_200L, 1_800L)));
       long secondBefore = System.currentTimeMillis();
       S3PresignedUrl second = context.service.presignDownload("docs/live.md", null);
-      long secondDelta = Instant.parse(second.getExpiresAt()).toEpochMilli() - secondBefore;
+      long secondDelta = second.getExpiresAt().toEpochMilli() - secondBefore;
       assertTrue(
           secondDelta >= 900_000L - 30_000L && secondDelta <= 900_000L + 30_000L,
           "updated 900s window, got delta " + secondDelta);
 
       // 已签发 URL 不被追溯改写：其到期时刻仍落在最初的 1800s 窗口。
-      long firstRemaining = Instant.parse(first.getExpiresAt()).toEpochMilli() - secondBefore;
+      long firstRemaining = first.getExpiresAt().toEpochMilli() - secondBefore;
       assertTrue(
           firstRemaining > 900_000L,
           "an already-issued URL must keep its original validity, got " + firstRemaining);

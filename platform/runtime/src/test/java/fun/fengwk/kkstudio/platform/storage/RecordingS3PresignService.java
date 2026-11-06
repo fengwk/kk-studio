@@ -76,7 +76,7 @@ public class RecordingS3PresignService extends S3PresignService {
         .method(method)
         .url("https://cdn.example.com/test-bucket/" + key + "?X-Amz-Signature=fake")
         .headers(headers)
-        .expiresAt(Instant.now().plusSeconds(600L).toString())
+        .expiresAt(Instant.now().plusSeconds(600L))
         .build();
   }
 

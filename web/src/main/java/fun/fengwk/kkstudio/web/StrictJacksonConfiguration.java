@@ -20,7 +20,7 @@ import tools.jackson.databind.ser.std.ToStringSerializer;
 import fun.fengwk.kkstudio.harness.api.retry.ModelHttpErrorPolicy;
 import fun.fengwk.kkstudio.platform.catalog.dto.ProviderCreateDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ProviderUpdateDTO;
-import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsAiRuntimeDTO;
+import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsAiRuntimeDTO;
 
 import java.util.ArrayList;
 import java.util.List;

@@ -142,7 +142,7 @@ export async function initializeOpencliPlugin(client) {
 /** Upload a Blob through a presigned PUT and verify the create-only guarantees. */
 async function uploadBlob(client, image) {
   const sha256 = createHash('sha256').update(image).digest('hex')
-  const reservation = await client.jsonCall('POST', '/api/storage/uploads', {
+  const reservation = await client.jsonCall('POST', '/api/platform/storage/uploads', {
     filename: 'tiny.png',
     mediaType: 'image/png',
     sizeBytes: image.length,
@@ -168,7 +168,7 @@ async function uploadBlob(client, image) {
     `create-only presigned PUT unexpectedly overwrote original: ${overwrite.status}`,
   )
 
-  const completed = await client.jsonCall('POST', `/api/storage/uploads/${reservation.id}/complete`)
+  const completed = await client.jsonCall('POST', `/api/platform/storage/uploads/${reservation.id}/complete`)
   assert.equal(completed.id, reservation.id)
   assert.equal(completed.state, 'READY')
   assert.equal(completed.presignedPut, null)

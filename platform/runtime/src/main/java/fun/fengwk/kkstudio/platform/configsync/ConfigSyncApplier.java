@@ -32,8 +32,8 @@ import fun.fengwk.kkstudio.platform.error.CatalogVersions;
 import fun.fengwk.kkstudio.platform.pluginhost.service.PluginAgentDependencies;
 import fun.fengwk.kkstudio.platform.pluginhost.service.PluginConfigurationService;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsService;
-import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSectionsDTO;
-import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsUpdateDTO;
+import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsSectionsDTO;
+import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsUpdateDTO;
 
 import java.util.List;
 import java.util.Map;

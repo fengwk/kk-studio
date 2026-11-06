@@ -1,33 +1,27 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { HttpClient } from '@/shared/api/client'
+import { request } from '@/shared/api/client'
 import { createStorageService } from '@/shared/api/storage-service'
-import type { StorageUploadDTO } from '@/shared/api/contracts/storage'
+import type {
+  StorageUploadPendingDTO,
+  StorageUploadReadyDTO,
+} from '@/shared/api/generated/contracts'
+
+vi.mock('@/shared/api/client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/shared/api/client')>()
+  return { ...actual, request: vi.fn() }
+})
+
+const apiRequest = vi.mocked(request)
 
 /**
- * 共享存储客户端契约测试：API 面（HttpClient）为透传封装，直传面（uploadFile）
+ * 共享存储客户端契约测试：API 面（request）为类型化路由，直传面（uploadFile）
  * 负责浏览器安全的签名 URL 直传。覆盖 PENDING=需直传 / READY=sha256 命中免直传、
- * 编码路径、header 过滤与错误映射。
+ * 路由参数、header 过滤与错误映射。
  */
-function fakeClient() {
-  const post = vi.fn()
-  const get = vi.fn()
-  const deleteFn = vi.fn()
+function pendingUpload(id: string): StorageUploadPendingDTO {
   return {
-    client: { get, post, put: vi.fn(), delete: deleteFn } as unknown as HttpClient,
-    post,
-    get,
-    deleteFn,
-  }
-}
-
-function pendingUpload(
-  id: string,
-  overrides: Partial<Extract<StorageUploadDTO, { state: 'PENDING' }>> = {},
-): Extract<StorageUploadDTO, { state: 'PENDING' }> {
-  return {
+    type: 'PENDING',
     id,
-    state: 'PENDING',
-    blobId: null,
     presignedPut: {
       method: 'PUT',
       url: `https://s3.test/${id}`,
@@ -37,24 +31,26 @@ function pendingUpload(
         host: 's3.test',
         'content-length': '128',
       },
+      expiresAt: 1786492800000,
+      mediaType: null,
+      sizeBytes: null,
     },
-    expiresAt: 1786492800,
-    ...overrides,
+    expiresAt: 1786492800000,
   }
 }
 
-function readyUpload(id: string): StorageUploadDTO {
+function readyUpload(id: string): StorageUploadReadyDTO {
   return {
+    type: 'READY',
     id,
-    state: 'READY',
     blobId: 'blob-1',
-    presignedPut: null,
-    expiresAt: 1786492800,
+    expiresAt: 1786492800000,
   }
 }
 
 describe('storage-service', () => {
   beforeEach(() => {
+    apiRequest.mockReset()
     vi.stubGlobal('fetch', vi.fn())
   })
 
@@ -63,47 +59,49 @@ describe('storage-service', () => {
   })
 
   it('reserves uploads with the full request body and passes the DTO through', async () => {
-    const { client, post } = fakeClient()
-    const service = createStorageService(client)
-    const request = {
+    const service = createStorageService()
+    const body = {
       filename: 'photo.png',
       mediaType: 'image/png',
       sizeBytes: 64,
       sha256: 'a'.repeat(64),
     }
-    post.mockResolvedValue(pendingUpload('up-1'))
+    apiRequest.mockResolvedValue(pendingUpload('up-1'))
 
-    await expect(service.reserveUpload(request)).resolves.toEqual(pendingUpload('up-1'))
-    expect(post).toHaveBeenCalledWith('/storage/uploads', request)
+    await expect(service.reserveUpload(body)).resolves.toEqual(pendingUpload('up-1'))
+    expect(apiRequest).toHaveBeenCalledWith('POST /api/platform/storage/uploads', { body })
     // wire 请求不含 mediaKind（严格 Jackson 契约只接受四个字段）。
-    expect(request).not.toHaveProperty('mediaKind')
+    expect(body).not.toHaveProperty('mediaKind')
   })
 
-  it('routes complete to the encoded upload path and returns the same DTO shape', async () => {
-    const { client, post } = fakeClient()
-    const service = createStorageService(client)
-    post.mockResolvedValue(readyUpload('u/1'))
+  it('routes complete to the upload path and returns the same DTO shape', async () => {
+    const service = createStorageService()
+    apiRequest.mockResolvedValue(readyUpload('u/1'))
 
     await expect(service.completeUpload('u/1')).resolves.toEqual(readyUpload('u/1'))
-    expect(post).toHaveBeenCalledWith('/storage/uploads/u%2F1/complete')
+    expect(apiRequest).toHaveBeenCalledWith('POST /api/platform/storage/uploads/{uploadId}/complete', {
+      path: { uploadId: 'u/1' },
+    })
   })
 
   it('deletes by the upload handle, never by blob', async () => {
-    const { client, deleteFn } = fakeClient()
-    const service = createStorageService(client)
-    deleteFn.mockResolvedValue(undefined)
+    const service = createStorageService()
+    apiRequest.mockResolvedValue(undefined)
 
     await service.deleteUpload('up-1')
-    expect(deleteFn).toHaveBeenCalledWith('/storage/uploads/up-1')
+    expect(apiRequest).toHaveBeenCalledWith('DELETE /api/platform/storage/uploads/{uploadId}', {
+      path: { uploadId: 'up-1' },
+    })
   })
 
   it('resolves original and preview blob URLs via POST on the blob path', async () => {
-    const { client, post } = fakeClient()
-    const service = createStorageService(client)
+    const service = createStorageService()
     // 原件 sizeBytes 是 Java long：wire 为 decimal string，adapter 归一化为 number。
-    post.mockResolvedValue({
+    apiRequest.mockResolvedValue({
+      method: 'GET',
       url: 'https://s3.test/orig',
-      expiresAt: '2026-08-12T00:00:00Z',
+      headers: {},
+      expiresAt: 1786492800000,
       mediaType: 'image/png',
       sizeBytes: '64',
     })
@@ -112,37 +110,70 @@ describe('storage-service', () => {
       url: 'https://s3.test/orig',
       sizeBytes: 64,
     })
-    expect(post).toHaveBeenCalledWith('/storage/blobs/blob-1/download-url')
+    expect(apiRequest).toHaveBeenCalledWith(
+      'POST /api/platform/storage/blobs/{blobId}/download-url',
+      { path: { blobId: 'blob-1' } },
+    )
 
     await expect(service.getBlobPreviewUrl('blob-1')).resolves.toMatchObject({
       url: 'https://s3.test/orig',
       sizeBytes: 64,
     })
-    expect(post).toHaveBeenCalledWith('/storage/blobs/blob-1/preview-url')
+    expect(apiRequest).toHaveBeenCalledWith(
+      'POST /api/platform/storage/blobs/{blobId}/preview-url',
+      { path: { blobId: 'blob-1' } },
+    )
   })
 
   it('decodes missing sizeBytes as null', async () => {
-    const { client, post } = fakeClient()
-    const service = createStorageService(client)
-    post.mockResolvedValueOnce({ url: 'https://s3.test/a', expiresAt: '2026-08-12T00:00:00Z' })
-      .mockResolvedValueOnce({ url: 'https://s3.test/b', expiresAt: '2026-08-12T00:00:00Z', sizeBytes: '9' })
+    const service = createStorageService()
+    apiRequest
+      .mockResolvedValueOnce({
+        method: 'GET',
+        url: 'https://s3.test/a',
+        headers: {},
+        expiresAt: 1786492800000,
+        mediaType: null,
+        sizeBytes: null,
+      })
+      .mockResolvedValueOnce({
+        method: 'GET',
+        url: 'https://s3.test/b',
+        headers: {},
+        expiresAt: 1786492800000,
+        mediaType: null,
+        sizeBytes: '9',
+      })
 
     await expect(service.getBlobDownloadUrl('blob-1')).resolves.toMatchObject({ sizeBytes: null })
     await expect(service.getBlobPreviewUrl('blob-1')).resolves.toMatchObject({ sizeBytes: 9 })
   })
 
   it('fails closed on unsafe or malformed sizeBytes instead of silent zero', async () => {
-    const { client, post } = fakeClient()
-    const service = createStorageService(client)
+    const service = createStorageService()
     const invalid = ['9007199254740993', '-1', '01', 'abc', 9, 1.5, Number.NaN]
     for (const sizeBytes of invalid) {
-      post.mockResolvedValueOnce({ url: 'https://s3.test/x', expiresAt: '2026-08-12T00:00:00Z', sizeBytes })
+      apiRequest.mockResolvedValueOnce({
+        method: 'GET',
+        url: 'https://s3.test/x',
+        headers: {},
+        expiresAt: 1786492800000,
+        mediaType: null,
+        sizeBytes,
+      } as never)
       await expect(service.getBlobDownloadUrl('blob-1')).rejects.toMatchObject({
         name: 'ApiError',
         message: expect.stringContaining('sizeBytes'),
       })
     }
-    post.mockResolvedValueOnce({ expiresAt: '2026-08-12T00:00:00Z' })
+    apiRequest.mockResolvedValueOnce({
+      method: 'GET',
+      url: null,
+      headers: {},
+      expiresAt: 1786492800000,
+      mediaType: null,
+      sizeBytes: null,
+    } as never)
     await expect(service.getBlobDownloadUrl('blob-1')).rejects.toMatchObject({
       name: 'ApiError',
       message: expect.stringContaining('url'),
@@ -150,8 +181,7 @@ describe('storage-service', () => {
   })
 
   it('PUTs object bytes with signed headers minus browser-forbidden ones', async () => {
-    const { client } = fakeClient()
-    const service = createStorageService(client)
+    const service = createStorageService()
     const file = new File([new Uint8Array(4)], 'a.png', { type: 'image/png' })
     vi.mocked(fetch).mockResolvedValue(new Response(null, { status: 200 }))
 
@@ -174,34 +204,37 @@ describe('storage-service', () => {
   })
 
   it('maps non-2xx direct uploads to ApiError with the HTTP status', async () => {
-    const { client } = fakeClient()
-    const service = createStorageService(client)
+    const service = createStorageService()
     vi.mocked(fetch).mockResolvedValue(new Response('nope', { status: 403 }))
 
-    await expect(service.uploadFile(pendingUpload('up-1').presignedPut, new File([], 'a.txt'))).rejects.toMatchObject({
+    await expect(
+      service.uploadFile(pendingUpload('up-1').presignedPut, new File([], 'a.txt')),
+    ).rejects.toMatchObject({
       name: 'ApiError',
       status: 403,
     })
   })
 
   it('maps network failures to ApiError without status and rethrows aborts unchanged', async () => {
-    const { client } = fakeClient()
-    const service = createStorageService(client)
+    const service = createStorageService()
     vi.mocked(fetch).mockRejectedValueOnce(new TypeError('Failed to fetch'))
 
-    await expect(service.uploadFile(pendingUpload('up-1').presignedPut, new File([], 'a.txt'))).rejects.toMatchObject({
+    await expect(
+      service.uploadFile(pendingUpload('up-1').presignedPut, new File([], 'a.txt')),
+    ).rejects.toMatchObject({
       name: 'ApiError',
       message: 'Failed to fetch',
     })
 
     const abort = new DOMException('aborted', 'AbortError')
     vi.mocked(fetch).mockRejectedValueOnce(abort)
-    await expect(service.uploadFile(pendingUpload('up-1').presignedPut, new File([], 'a.txt'))).rejects.toBe(abort)
+    await expect(
+      service.uploadFile(pendingUpload('up-1').presignedPut, new File([], 'a.txt')),
+    ).rejects.toBe(abort)
   })
 
   it('maps non-Error fetch rejections to the generic direct-upload message', async () => {
-    const { client } = fakeClient()
-    const service = createStorageService(client)
+    const service = createStorageService()
     vi.mocked(fetch).mockRejectedValueOnce('network down')
 
     await expect(
@@ -214,8 +247,7 @@ describe('storage-service', () => {
 
   it('forwards AbortSignal to fetch and rejects with AbortError when aborted', async () => {
     // 测试意图：验证 uploadFile 将 AbortSignal 传递给底层 fetch，并支持请求中断
-    const { client } = fakeClient()
-    const service = createStorageService(client)
+    const service = createStorageService()
     const controller = new AbortController()
 
     vi.mocked(fetch).mockImplementationOnce((_url, init) => {

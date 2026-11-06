@@ -499,6 +499,13 @@ retain/release 加入调用方事务；引用减至零时切为 DELETING，后�
 `storage/persistence` 的实体仓库直接持有 `JdbcClient`，SQL、行映射与条件 CAS 全部内联；
 `storage/service` 是具体的生命周期服务，不存在单实现接口或 `service/impl` 层。
 
+HTTP 边界是 [`StorageController`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/storage/http/StorageController.java)，
+挂在 `/api/platform/storage`：`POST /uploads` 返回 201，`POST /uploads/{uploadId}/complete` 与两个 blob URL 端点返回 200，
+`DELETE /uploads/{uploadId}` 返回 204；`{uploadId}`、`{blobId}` 是类型化 UUID。上传响应是 `type` 判别的 PENDING/READY
+联合：PENDING 携带 `presignedPut`，READY 只携带 `blobId`；两者都带响应时刻的 `expiresAt`（Instant）。
+blob URL 只暴露 `method`、`url`、必须回传的 `headers`、`expiresAt`、权威 `mediaType`/`sizeBytes`，不含 bucket 或对象 key。
+DTO 位于 [`platform/storage/dto`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/storage/dto/)。
+
 上传使用 reserve → 浏览器 PUT → complete。complete 在专用会话级 upload advisory lock
 内做事务外 checksum HEAD、媒体 probe 与 copy，再短事务绑定 Blob。
 服务端 `stage` 有界落盘、计算摘要，复用上传生命周期。清理先取得同一操作锁、
@@ -677,6 +684,12 @@ OpenCLI 的配置完全归属于插件：受控 schema 声明字段、结构与�
 
 ### 配置同步
 
+[`ConfigSyncController`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/configsync/http/ConfigSyncController.java)
+挂在 `/api/platform/config-sync`：`GET` 返回清单，`POST /export`、`POST /check-import`、`POST /import` 承担选择导出、
+只读预检查与确认执行；响应由 `ConfigSyncNoStoreFilter` 统一设置 `no-store`。DTO 位于
+[`platform/configsync/dto`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/configsync/dto/)，
+跳过项的 `kind` 是配置集合枚举（未知顶层类别为 null，原始类别名保留在 `name`）。
+
 `ConfigSyncService` 提供条目清单、选择导出、导入检查与 YAML 导入。清单和检查结果不含配置值；
 导出在单一只读数据库快照中沿依赖边补齐选择，循环 Subagent 去重，不做反向扩展。
 YAML 使用业务名称寻址，只保存可编辑字段，显式包含 Provider 凭据、Environment 注册令牌的摘要、Skill Package 私有仓库访问令牌与保存的安装设置，以及 MCP headers。
@@ -711,6 +724,11 @@ configurationSchema 归一化普通值，非法值整份拒绝。普通值可随
 产品操作、恢复范围与保密要求见[配置导入与导出](../operations/development-and-testing.md#配置导入与导出)。
 
 ### 在线设置与启动配置
+
+[`SystemSettingsController`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/settings/http/SystemSettingsController.java)
+挂在 `/api/platform/settings`，提供聚合 GET、编辑 schema 与 CAS PUT，直接返回资源；DTO 位于
+[`platform/settings/dto`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/settings/dto/)，
+时间字段为 `createdAt`/`updatedAt`（Instant），固定取值（如 `retryBackoffStrategy`）使用领域枚举。
 
 在线设置由单行 `system_setting` 保存，包含 tool、aiRuntime、environment、network、
 storageMedia、advanced 六个 section。strict codec 与 record 校验完整聚合，

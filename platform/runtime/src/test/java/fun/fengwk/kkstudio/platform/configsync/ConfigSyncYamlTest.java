@@ -12,7 +12,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelConfigDTO;
-import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsToolDTO;
+import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsToolDTO;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;

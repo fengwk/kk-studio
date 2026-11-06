@@ -162,7 +162,7 @@ public class S3PresignService {
         .method(method)
         .url(presigned.url().toString())
         .headers(flatHeaders)
-        .expiresAt(presigned.expiration().toString())
+        .expiresAt(presigned.expiration())
         .build();
   }
 }

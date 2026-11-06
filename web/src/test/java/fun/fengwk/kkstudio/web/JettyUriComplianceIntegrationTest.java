@@ -31,7 +31,11 @@ class JettyUriComplianceIntegrationTest extends WebPostgresTestSupport {
 
   @ParameterizedTest
   @ValueSource(
-      strings = {"/healthz", "/healthz?msg=hello%20world", "/healthz;jsessionid=testsession123"})
+      strings = {
+        "/api/platform/settings/schema",
+        "/api/platform/settings/schema?msg=hello%20world",
+        "/api/platform/settings/schema;jsessionid=testsession123"
+      })
   void applicationRoutesReachApplication(String path) throws Exception {
     HttpResponse<String> resp = send(path);
     assertEquals(200, resp.statusCode(), "合法应用探活路由应到达应用层并返回 200: " + path);
@@ -63,7 +67,7 @@ class JettyUriComplianceIntegrationTest extends WebPostgresTestSupport {
   @ParameterizedTest
   @ValueSource(
       strings = {
-        "//healthz",
+        "//api/platform/settings/schema",
         "/environment-ide/" + ENV_ID + "/" + VIEW_ID + "//stable-hash1234/static/workbench.js",
         "/environment-ide/"
             + ENV_ID

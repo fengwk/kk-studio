@@ -21,10 +21,11 @@ import org.springframework.transaction.support.TransactionTemplate;
 import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
+import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadDTO;
+import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadReadyDTO;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
-import fun.fengwk.kkstudio.share.storage.StorageUploadDTO;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -157,7 +158,8 @@ class SessionBlobRefManagerIntegrationTest extends PostgresSpringTestSupport {
         storage.reserve(
             "zero.bin", "application/octet-stream", content.length, storage.sha256Hex(content));
     storage.putUploadContent(pending.getId(), content, "application/octet-stream");
-    StorageUploadDTO ready = storageUploadService.complete(UUID.fromString(pending.getId()));
+    StorageUploadReadyDTO ready =
+        (StorageUploadReadyDTO) storageUploadService.complete(UUID.fromString(pending.getId()));
     UUID uploadUuid = UUID.fromString(ready.getId());
     UUID blobUuid = UUID.fromString(ready.getBlobId());
     s3Storage.putDirect(StorageObjectKeys.blobPreview(blobUuid), content, "image/webp");
@@ -261,7 +263,8 @@ class SessionBlobRefManagerIntegrationTest extends PostgresSpringTestSupport {
         storage.reserve(
             "paired.bin", "application/octet-stream", content.length, storage.sha256Hex(content));
     storage.putUploadContent(pending.getId(), content, "application/octet-stream");
-    StorageUploadDTO ready = storageUploadService.complete(UUID.fromString(pending.getId()));
+    StorageUploadReadyDTO ready =
+        (StorageUploadReadyDTO) storageUploadService.complete(UUID.fromString(pending.getId()));
     UUID blobUuid = UUID.fromString(ready.getBlobId());
     assertEquals(1L, storage.blobRefCount(ready.getBlobId()));
 

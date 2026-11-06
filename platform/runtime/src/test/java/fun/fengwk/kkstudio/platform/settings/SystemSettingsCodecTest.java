@@ -14,9 +14,9 @@ import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionAction;
 import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionRule;
-import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsNetworkDTO;
-import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSectionsDTO;
-import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsToolDTO;
+import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsNetworkDTO;
+import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsSectionsDTO;
+import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsToolDTO;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;

@@ -99,7 +99,7 @@ export function useCanvasUploadPipeline(options: CanvasUploadPipelineOptions): C
         return
       }
       setUploadProgress(localId, 0.5)
-      if (reservation.state === 'PENDING') {
+      if (reservation.type === 'PENDING') {
         // PENDING = 对象尚未落库：必须直传；READY = sha256 命中，跳过直传。
         await service.uploadFile(reservation.presignedPut, file)
         if (!active()) {
@@ -119,7 +119,7 @@ export function useCanvasUploadPipeline(options: CanvasUploadPipelineOptions): C
       // 最终命令失败不删除已完成的句柄：它可能已被服务端资源引用，
       // 交由存储过期回收；绝不删除已消费（complete）的句柄。
       const alias = reserveNodeAlias(file.name)
-      const blobId = (completed.blobId ?? uploadId)
+      const blobId = completed.type === 'READY' ? completed.blobId : uploadId
       try {
         await executeCommands([{
           type: 'CREATE_NODE',

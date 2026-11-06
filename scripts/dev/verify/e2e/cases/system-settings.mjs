@@ -62,7 +62,7 @@ registerCase({
     'GET 六 section + decimal-string Long/version，aiRuntime.modelHttpRetryStatusCodes 为 400–599 整数数组，storageMedia.tmp TTL/扫描间隔为正整数字符串；PUT 全局代理与重试名单 roundtrip；非法代理/凭据/重试名单形状和缺 network 400 fail-closed；严格权限和 CAS；finally 用最新版本恢复原值',
   async run(ctx) {
     const readSettings = async () => {
-      const { json } = await ctx.call('GET', '/api/settings')
+      const { json } = await ctx.call('GET', '/api/platform/settings')
       return json
     }
 
@@ -75,7 +75,7 @@ registerCase({
       before.aiRuntime.retryBaseDelayMillis,
       'aiRuntime.retryBaseDelayMillis',
     )
-    assertExactFields(before, [...SECTION_NAMES, 'version', 'createTime', 'updateTime'], 'SystemSettings')
+    assertExactFields(before, [...SECTION_NAMES, 'version', 'createdAt', 'updatedAt'], 'SystemSettings')
     assertExactFields(before.storageMedia, [
       'uploadExpiresSeconds', 's3PresignDefaultExpiresSeconds', 's3PresignMaxExpiresSeconds',
       'canvasMediaProcessTimeoutMillis', 'thumbnailMaxDimension', 'thumbnailQuality',
@@ -109,7 +109,7 @@ registerCase({
       update.aiRuntime.modelHttpRetryStatusCodes = changedRetryCodes
       // 仅保存重启生效配置，不连接代理、不更改运行期客户端。
       update.network = { proxyUrl: 'http://proxy.example.test:3128', noProxyHosts: '' }
-      const { json } = await ctx.call('PUT', '/api/settings', update)
+      const { json } = await ctx.call('PUT', '/api/platform/settings', update)
       const saved = json
       assertDecimalVersion(saved.version, 'saved system settings version')
       assert(saved.version !== before.version, 'SystemSettings CAS PUT must advance version')
@@ -139,7 +139,7 @@ registerCase({
       ]) {
         const invalid = updateBody(structuredClone(saved))
         invalid.network.proxyUrl = proxyUrl
-        const error = await expectHttpError(() => ctx.call('PUT', '/api/settings', invalid), { status: 400 })
+        const error = await expectHttpError(() => ctx.call('PUT', '/api/platform/settings', invalid), { status: 400 })
         assert(
           !String(error.body).includes('synthetic-user') &&
             !String(error.body).includes('synthetic-password'),
@@ -148,7 +148,7 @@ registerCase({
       }
       const missingNetwork = updateBody(structuredClone(saved))
       delete missingNetwork.network
-      await expectHttpError(() => ctx.call('PUT', '/api/settings', missingNetwork), { status: 400 })
+      await expectHttpError(() => ctx.call('PUT', '/api/platform/settings', missingNetwork), { status: 400 })
       const afterInvalid = await readSettings()
       assert(
         afterInvalid.version === saved.version &&
@@ -171,7 +171,7 @@ registerCase({
       ]) {
         const invalid = updateBody(structuredClone(saved))
         invalid.aiRuntime.modelHttpRetryStatusCodes = invalidList
-        await expectHttpError(() => ctx.call('PUT', '/api/settings', invalid), { status: 400 })
+        await expectHttpError(() => ctx.call('PUT', '/api/platform/settings', invalid), { status: 400 })
       }
       const afterInvalidRetry = await readSettings()
       assert(
@@ -184,7 +184,7 @@ registerCase({
       const badPermission = updateBody(structuredClone(saved))
       badPermission.tool.permission[' write'] = badPermission.tool.permission['write']
       delete badPermission.tool.permission['write']
-      await expectHttpError(() => ctx.call('PUT', '/api/settings', badPermission), {
+      await expectHttpError(() => ctx.call('PUT', '/api/platform/settings', badPermission), {
         status: 400,
       })
       assert(
@@ -196,7 +196,7 @@ registerCase({
         () =>
           ctx.call(
             'PUT',
-            '/api/settings',
+            '/api/platform/settings',
             updateBody(structuredClone(saved), before.version),
           ),
         { status: 409 },
@@ -222,7 +222,7 @@ registerCase({
         restore.aiRuntime.modelHttpRetryStatusCodes = originalRetryCodes
         restore.network = originalNetwork
         try {
-          await ctx.call('PUT', '/api/settings', restore)
+          await ctx.call('PUT', '/api/platform/settings', restore)
           break
         } catch (error) {
           if (!(error instanceof HttpError) || error.status !== 409) {

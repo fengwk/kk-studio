@@ -1083,11 +1083,8 @@ const platformDomainRoots = [
 ]
 const shareDomainRoots = [
   'catalog',
-  'configsync',
   'runtime',
   'skill',
-  'storage',
-  'systemsettings',
 ]
 
 /** 平台与共享契约的子域根保持精确，新增子域必须显式更新这里。 */

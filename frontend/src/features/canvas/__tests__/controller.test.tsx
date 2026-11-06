@@ -419,21 +419,22 @@ describe('useCanvasController real snapshot runtime', () => {
     })
     vi.mocked(storageService.reserveUpload).mockResolvedValue({
       id: UPLOAD_ID,
-      state: 'PENDING',
-      blobId: null,
+      type: 'PENDING',
       presignedPut: {
         method: 'PUT',
         url: 'https://s3.example/upload',
         headers: { 'If-None-Match': '*' },
+        expiresAt: 1786320900000,
+        mediaType: null,
+        sizeBytes: null,
       },
-      expiresAt: 1786320900,
+      expiresAt: 1786320900000,
     })
     vi.mocked(storageService.uploadFile).mockResolvedValue()
     vi.mocked(storageService.completeUpload).mockResolvedValue({
       id: UPLOAD_ID,
-      state: 'READY',
+      type: 'READY',
       blobId: 'blob-upload',
-      presignedPut: null,
       expiresAt: 1786320900,
     })
     vi.mocked(startCanvasFunctionRun).mockResolvedValue({
@@ -851,16 +852,14 @@ describe('useCanvasController real snapshot runtime', () => {
   it('allocates unique aliases from the command queue snapshot across rapid creates and uploads', async () => {
     vi.mocked(storageService.reserveUpload).mockResolvedValue({
       id: 'eeeeeeee-0000-4000-8000-000000000090',
-      state: 'READY',
+      type: 'READY',
       blobId: 'blob-existing',
-      presignedPut: null,
       expiresAt: 1786320900,
     })
     vi.mocked(storageService.completeUpload).mockImplementation(async (uploadId) => ({
       id: uploadId,
-      state: 'READY',
+      type: 'READY',
       blobId: 'blob-dedup',
-      presignedPut: null,
       expiresAt: 1786320900,
     }))
 

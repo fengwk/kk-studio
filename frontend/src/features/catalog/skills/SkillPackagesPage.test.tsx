@@ -152,7 +152,7 @@ describe('SkillPackagesPage', () => {
         method: 'GET',
         url: 'http://s3.example/archive',
         headers: {},
-        expiresAt: '1784509200000',
+        expiresAt: 1784509200000,
         mediaType: 'application/zip',
         sizeBytes: '2048',
       },

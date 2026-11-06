@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiError } from '@/shared/api/client'
-import type { StoragePresignedPutDTO } from '@/shared/api/contracts/storage'
+import type { StoragePresignedUrlDTO } from '@/shared/api/generated/contracts'
 import { storageService } from '@/shared/api/storage-service'
 import {
   putFileWithProgress,
@@ -9,9 +9,12 @@ import {
   type UploadProgress,
 } from '@/features/catalog/skills/skill-package-upload'
 
-const presigned: StoragePresignedPutDTO = {
+const presigned: StoragePresignedUrlDTO = {
   method: 'PUT',
   url: 'http://s3.example/presigned',
+  expiresAt: 0,
+  mediaType: 'application/zip',
+  sizeBytes: null,
   headers: {
     'content-type': 'application/zip',
     'x-amz-date': '20260101T000000Z',
@@ -146,16 +149,14 @@ describe('skill package upload', () => {
   it('reserves with the archive media type, uploads when pending and completes the upload', async () => {
     const reserve = vi.spyOn(storageService, 'reserveUpload').mockResolvedValue({
       id: 'upload-1',
-      state: 'PENDING',
-      blobId: null,
+      type: 'PENDING',
       presignedPut: presigned,
       expiresAt: 1,
     })
     const complete = vi.spyOn(storageService, 'completeUpload').mockResolvedValue({
       id: 'upload-1',
-      state: 'READY',
+      type: 'READY',
       blobId: 'blob-1',
-      presignedPut: null,
       expiresAt: 1,
     })
 
@@ -180,16 +181,14 @@ describe('skill package upload', () => {
   it('skips the direct upload when the server already holds identical content', async () => {
     vi.spyOn(storageService, 'reserveUpload').mockResolvedValue({
       id: 'upload-2',
-      state: 'READY',
+      type: 'READY',
       blobId: 'blob-2',
-      presignedPut: null,
       expiresAt: 1,
     })
     const complete = vi.spyOn(storageService, 'completeUpload').mockResolvedValue({
       id: 'upload-2',
-      state: 'READY',
+      type: 'READY',
       blobId: 'blob-2',
-      presignedPut: null,
       expiresAt: 1,
     })
     const progress: UploadProgress[] = []

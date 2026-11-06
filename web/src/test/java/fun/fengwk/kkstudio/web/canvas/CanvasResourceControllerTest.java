@@ -21,8 +21,9 @@ import fun.fengwk.kkstudio.canvas.http.CanvasResourceController;
 import fun.fengwk.kkstudio.canvas.infra.platform.CanvasResourceUrlService;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasQueryService;
 import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
+import fun.fengwk.kkstudio.platform.storage.dto.StoragePresignedUrlDTO;
+import fun.fengwk.kkstudio.platform.storage.dto.StorageUrlMethod;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
-import fun.fengwk.kkstudio.share.storage.StoragePresignedUrlDTO;
 import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
 import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
 import fun.fengwk.kkstudio.web.advice.StudioProblemAdvice;
@@ -80,10 +81,10 @@ class CanvasResourceControllerTest {
   void resourceUrlResponsesHideStorageCoordinates() throws Exception {
     StoragePresignedUrlDTO signed =
         StoragePresignedUrlDTO.builder()
-            .method("GET")
+            .method(StorageUrlMethod.GET)
             .url("https://s3.fengwk.fun/signed")
             .headers(Map.of())
-            .expiresAt(NOW.plusSeconds(600).toString())
+            .expiresAt(NOW.plusSeconds(600))
             .build();
     when(blobManager.presignOriginalUrl(BLOB)).thenReturn(signed);
     when(blobManager.presignPreviewUrl(BLOB)).thenReturn(signed);

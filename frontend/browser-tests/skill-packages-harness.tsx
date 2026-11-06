@@ -427,7 +427,7 @@ agentService.getSkillPackageArchiveUrl = async (name: string) => {
       method: 'GET',
       url: 'data:application/zip;base64,UEsFBgAAAAAAAAAAAAAAAAAAAAAAAA==',
       headers: {},
-      expiresAt: String(Date.now() + 900_000),
+      expiresAt: Date.now() + 900_000,
       mediaType: 'application/zip',
       sizeBytes: '4096',
     },
@@ -453,16 +453,21 @@ agentService.listAgents = async () => [
 // 上传直传由可控的 XHR 替身驱动：只在浏览器内模拟进度事件，服务端校验仍由预览接口承担。
 storageService.reserveUpload = async () => ({
   id: 'upload-1',
-  state: 'PENDING',
-  blobId: null,
-  presignedPut: { method: 'PUT', url: 'http://harness.local/upload', headers: {} },
+  type: 'PENDING',
+  presignedPut: {
+    method: 'PUT',
+    url: 'http://harness.local/upload',
+    headers: {},
+    expiresAt: Date.now() + 900_000,
+    mediaType: null,
+    sizeBytes: null,
+  },
   expiresAt: Date.now() + 900_000,
 })
 storageService.completeUpload = async (uploadId: string) => ({
   id: uploadId,
-  state: 'READY',
+  type: 'READY',
   blobId: 'blob-1',
-  presignedPut: null,
   expiresAt: Date.now() + 900_000,
 })
 

@@ -1,34 +1,38 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { request } from '@/shared/api/client'
 import { createSystemSettingsService } from '@/features/settings/system-settings-service'
-import { createMockHttpClient } from '@/test-support/mock-http-client'
 import {
   DEFAULT_MAX_RESOURCE_BYTES,
   makeSettingsDto,
 } from '@/test-support/settings-test-fixtures'
 
-function createClient() {
-  return createMockHttpClient()
-}
+vi.mock('@/shared/api/client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/shared/api/client')>()
+  return { ...actual, request: vi.fn() }
+})
+
+const apiRequest = vi.mocked(request)
 
 describe('systemSettingsService', () => {
-  afterEach(() => vi.unstubAllGlobals())
+  afterEach(() => {
+    apiRequest.mockReset()
+    vi.unstubAllGlobals()
+  })
 
-  it('maps GET to /settings and passes the envelope data through', async () => {
-    const client = createClient()
+  it('maps GET to the platform settings resource and passes the body through', async () => {
     const dto = makeSettingsDto()
-    vi.mocked(client.get).mockResolvedValue(dto)
-    const service = createSystemSettingsService(client)
+    apiRequest.mockResolvedValue(dto)
+    const service = createSystemSettingsService()
 
     await expect(service.get()).resolves.toBe(dto)
-    expect(client.get).toHaveBeenCalledWith('/settings')
+    expect(apiRequest).toHaveBeenCalledWith('GET /api/platform/settings', {})
     // Long / Integer / version wire 形态在契约层原样保留。
     expect(dto.environment.maxResourceBytes).toBe(DEFAULT_MAX_RESOURCE_BYTES)
     expect(dto.aiRuntime.retryMaxRetries).toBe(3)
     expect(dto.version).toBe('0')
   })
 
-  it('maps PUT to /settings with the full aggregate and expectedVersion', async () => {
-    const client = createClient()
+  it('maps PUT to the platform settings resource with the full aggregate and expectedVersion', async () => {
     const base = makeSettingsDto()
     const update = {
       tool: base.tool,
@@ -41,18 +45,17 @@ describe('systemSettingsService', () => {
     }
     const updated = makeSettingsDto({ version: '1' })
     updated.tool.modelGatewayBusyRetryMillis = '6000'
-    vi.mocked(client.put).mockResolvedValue(updated)
-    const service = createSystemSettingsService(client)
+    apiRequest.mockResolvedValue(updated)
+    const service = createSystemSettingsService()
 
     await expect(service.update(update)).resolves.toBe(updated)
-    expect(client.put).toHaveBeenCalledWith('/settings', update)
+    expect(apiRequest).toHaveBeenCalledWith('PUT /api/platform/settings', { body: update })
   })
 
   it('keeps Long fields as decimal strings and Integer fields as numbers on the wire', async () => {
-    const client = createClient()
-    const service = createSystemSettingsService(client)
+    const service = createSystemSettingsService()
     const wire = makeSettingsDto({ version: '1' })
-    vi.mocked(client.put).mockResolvedValue(wire)
+    apiRequest.mockResolvedValue(wire)
 
     const payload = {
       tool: wire.tool,
@@ -64,7 +67,7 @@ describe('systemSettingsService', () => {
       expectedVersion: wire.version,
     }
     await service.update(payload)
-    const sent = vi.mocked(client.put).mock.calls[0][1] as typeof payload
+    const sent = (apiRequest.mock.calls[0]?.[1] as { body: typeof payload }).body
     expect(sent.expectedVersion).toBe('1')
     expect(sent.advanced.processorLeaseDurationMillis).toBe('30000')
     expect(sent.advanced.applicationEventQueueCapacity).toBe(512)

@@ -6,8 +6,8 @@ import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
-import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsDTO;
-import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsUpdateDTO;
+import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsDTO;
+import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsUpdateDTO;
 
 import java.util.Objects;
 
@@ -102,8 +102,8 @@ public class SystemSettingsService {
     SystemSettingsDTO dto =
         systemSettingsCodec.toSections(record.settings(), new SystemSettingsDTO());
     dto.setVersion(SystemSettingsVersions.format(record.version()));
-    dto.setCreateTime(record.createTime());
-    dto.setUpdateTime(record.updateTime());
+    dto.setCreatedAt(record.createTime());
+    dto.setUpdatedAt(record.updateTime());
     return dto;
   }
 }

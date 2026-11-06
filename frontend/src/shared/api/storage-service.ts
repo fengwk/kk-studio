@@ -1,10 +1,10 @@
-import { ApiError, apiClient, type HttpClient } from '@/shared/api/client'
+import { ApiError, request } from '@/shared/api/client'
+import type { StorageBlobUrl } from '@/shared/api/contracts/storage'
 import type {
-  StorageBlobUrl,
-  StoragePresignedPutDTO,
+  StoragePresignedUrlDTO,
   StorageUploadDTO,
-} from '@/shared/api/contracts/storage'
-import type { StorageUploadReserveRequestDTO } from '@/shared/api/generated/contracts'
+  StorageUploadReserveRequestDTO,
+} from '@/shared/api/generated/contracts'
 
 /** 直传签名响应中禁止浏览器发送的请求头（浏览器会拒绝或改写它们）。 */
 export const FORBIDDEN_UPLOAD_HEADERS = new Set([
@@ -37,40 +37,42 @@ export const FORBIDDEN_UPLOAD_HEADERS = new Set([
 
 /**
  * 共享存储上传/资源面：
- * - POST /storage/uploads（预留，PENDING=需直传 / READY=sha256 命中免直传）
+ * - POST /api/platform/storage/uploads（预留，PENDING=需直传 / READY=sha256 命中免直传）
  * - 直传 PUT（仅 PENDING 预留；跨域签名 URL，使用 fetch）
- * - POST /storage/uploads/{id}/complete（返回同一 StorageUploadDTO，句柄不变）
- * - DELETE /storage/uploads/{id}（释放句柄；绝不按 blobId 删除）
- * - POST /storage/blobs/{blobId}/download-url|preview-url（渲染期解析）
+ * - POST /api/platform/storage/uploads/{id}/complete（返回同一 StorageUploadDTO，句柄不变）
+ * - DELETE /api/platform/storage/uploads/{id}（释放句柄；绝不按 blobId 删除）
+ * - POST /api/platform/storage/blobs/{blobId}/download-url|preview-url（渲染期解析）
  *
  * 该契约绝不暴露 bucket/key，客户端也不能提交对象 key。
  */
-export function createStorageService(client: HttpClient = apiClient) {
-  const getBlobDownloadUrl = async (blobId: string): Promise<StorageBlobUrl> => {
-    const raw = await client.post<unknown>(
-      `/storage/blobs/${encodeURIComponent(blobId)}/download-url`,
+export function createStorageService() {
+  const getBlobDownloadUrl = async (blobId: string): Promise<StorageBlobUrl> =>
+    decodeBlobUrl(
+      await request('POST /api/platform/storage/blobs/{blobId}/download-url', {
+        path: { blobId },
+      }),
     )
-    return decodeBlobUrl(raw)
-  }
 
   return {
-    reserveUpload: (request: StorageUploadReserveRequestDTO): Promise<StorageUploadDTO> =>
-      client.post('/storage/uploads', request),
+    reserveUpload: (body: StorageUploadReserveRequestDTO): Promise<StorageUploadDTO> =>
+      request('POST /api/platform/storage/uploads', { body }),
     completeUpload: (uploadId: string): Promise<StorageUploadDTO> =>
-      client.post(`/storage/uploads/${encodeURIComponent(uploadId)}/complete`),
+      request('POST /api/platform/storage/uploads/{uploadId}/complete', {
+        path: { uploadId },
+      }),
     deleteUpload: (uploadId: string): Promise<void> =>
-      client.delete(`/storage/uploads/${encodeURIComponent(uploadId)}`),
+      request('DELETE /api/platform/storage/uploads/{uploadId}', { path: { uploadId } }),
     /** 下载 URL 端点（原件）：给出权威 mediaType 与 sizeBytes。 */
     getBlobDownloadUrl,
-    getBlobPreviewUrl: async (blobId: string): Promise<StorageBlobUrl> => {
-      const raw = await client.post<unknown>(
-        `/storage/blobs/${encodeURIComponent(blobId)}/preview-url`,
-      )
-      return decodeBlobUrl(raw)
-    },
+    getBlobPreviewUrl: async (blobId: string): Promise<StorageBlobUrl> =>
+      decodeBlobUrl(
+        await request('POST /api/platform/storage/blobs/{blobId}/preview-url', {
+          path: { blobId },
+        }),
+      ),
     /** 直传对象字节到签名 URL；仅发送签名响应提供的浏览器安全请求头。 */
     uploadFile: async (
-      presignedPut: StoragePresignedPutDTO,
+      presignedPut: StoragePresignedUrlDTO,
       file: Blob,
       signal?: AbortSignal,
     ): Promise<void> => {

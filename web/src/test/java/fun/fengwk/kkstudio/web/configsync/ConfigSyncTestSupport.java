@@ -137,7 +137,7 @@ public abstract class ConfigSyncTestSupport extends WebPostgresTestSupport {
   /** 导出当前完整 settings YAML，供必须完整七节的导入用例构造文件。 */
   protected String exportedSettingsYaml() throws Exception {
     return postData(
-            "/api/settings/sync/export",
+            "/api/platform/config-sync/export",
             Map.of("items", List.of(Map.of("kind", "settings", "name", "settings"))))
         .path("yaml")
         .asText();

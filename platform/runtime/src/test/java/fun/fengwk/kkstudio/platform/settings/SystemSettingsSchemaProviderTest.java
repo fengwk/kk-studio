@@ -6,7 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSchemaDTO;
+import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsSchemaDTO;
 
 import java.lang.reflect.RecordComponent;
 import java.util.HashSet;

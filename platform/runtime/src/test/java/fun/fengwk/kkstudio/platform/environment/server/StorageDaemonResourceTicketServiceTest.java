@@ -13,11 +13,13 @@ import org.mockito.ArgumentCaptor;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonResourceTicketService.Ticket;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonResourceTicketService.TransferRequest;
+import fun.fengwk.kkstudio.platform.storage.dto.StoragePresignedUrlDTO;
+import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadDTO;
+import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadPendingDTO;
+import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadReadyDTO;
+import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadReserveRequestDTO;
+import fun.fengwk.kkstudio.platform.storage.dto.StorageUrlMethod;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
-import fun.fengwk.kkstudio.share.storage.StoragePresignedUrlDTO;
-import fun.fengwk.kkstudio.share.storage.StorageUploadDTO;
-import fun.fengwk.kkstudio.share.storage.StorageUploadReserveRequestDTO;
-import fun.fengwk.kkstudio.share.storage.StorageUploadState;
 
 import java.time.Instant;
 import java.util.Map;
@@ -128,12 +130,8 @@ class StorageDaemonResourceTicketServiceTest {
   void rejectsMalformedStorageUploadShape() {
     StorageUploadService uploadService = mock(StorageUploadService.class);
     StorageUploadDTO malformed =
-        StorageUploadDTO.builder()
-            .id(UUID.randomUUID().toString())
-            .state(StorageUploadState.READY)
-            .blobId(null)
-            .presignedPut(presignedPut())
-            .build();
+        new StorageUploadReadyDTO(
+            UUID.randomUUID().toString(), null, Instant.parse("2026-07-28T10:01:00Z"));
     when(uploadService.reserve(any())).thenReturn(malformed);
     StorageDaemonResourceTicketService service =
         new StorageDaemonResourceTicketService(uploadService);
@@ -150,29 +148,21 @@ class StorageDaemonResourceTicketServiceTest {
   }
 
   private static StorageUploadDTO pendingUpload(UUID uploadId) {
-    return StorageUploadDTO.builder()
-        .id(uploadId.toString())
-        .state(StorageUploadState.PENDING)
-        .blobId(null)
-        .presignedPut(presignedPut())
-        .build();
+    return new StorageUploadPendingDTO(
+        uploadId.toString(), presignedPut(), Instant.parse("2026-07-28T10:01:00Z"));
   }
 
   private static StorageUploadDTO readyUpload(UUID uploadId, UUID blobId) {
-    return StorageUploadDTO.builder()
-        .id(uploadId.toString())
-        .state(StorageUploadState.READY)
-        .blobId(blobId.toString())
-        .presignedPut(null)
-        .build();
+    return new StorageUploadReadyDTO(
+        uploadId.toString(), blobId.toString(), Instant.parse("2026-07-28T10:01:00Z"));
   }
 
   private static StoragePresignedUrlDTO presignedPut() {
     return StoragePresignedUrlDTO.builder()
-        .method("PUT")
+        .method(StorageUrlMethod.PUT)
         .url("https://storage.example.test/upload")
         .headers(Map.of("x-amz-checksum-sha256", "checksum"))
-        .expiresAt("2026-07-28T10:01:00Z")
+        .expiresAt(Instant.parse("2026-07-28T10:01:00Z"))
         .build();
   }
 }

@@ -11,7 +11,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
-import fun.fengwk.kkstudio.share.configsync.ConfigSyncSkipped;
+import fun.fengwk.kkstudio.platform.configsync.dto.ConfigSyncKind;
+import fun.fengwk.kkstudio.platform.configsync.dto.ConfigSyncSkipped;
 
 import java.util.List;
 import java.util.Map;
@@ -153,7 +154,7 @@ class ConfigSyncParserTest {
 
     assertTrue(document.providers().isEmpty());
     assertEquals(1, document.skipped().size());
-    assertEquals("providers", document.skipped().get(0).getKind());
+    assertEquals(ConfigSyncKind.PROVIDERS, document.skipped().get(0).getKind());
     assertEquals("p", document.skipped().get(0).getName());
   }
 
@@ -182,7 +183,8 @@ class ConfigSyncParserTest {
     assertTrue(document.models().isEmpty());
     assertTrue(
         document.skipped().stream()
-            .anyMatch(skip -> "models".equals(skip.getKind()) && "m".equals(skip.getName())));
+            .anyMatch(
+                skip -> skip.getKind() == ConfigSyncKind.MODELS && "m".equals(skip.getName())));
   }
 
   @Test
@@ -201,7 +203,8 @@ class ConfigSyncParserTest {
     assertTrue(document.agents().isEmpty());
     assertTrue(
         document.skipped().stream()
-            .anyMatch(skip -> "agents".equals(skip.getKind()) && "a".equals(skip.getName())));
+            .anyMatch(
+                skip -> skip.getKind() == ConfigSyncKind.AGENTS && "a".equals(skip.getName())));
   }
 
   @Test
@@ -218,7 +221,9 @@ class ConfigSyncParserTest {
     assertNotNull(document.settings());
     assertNotNull(document.settings().getTool());
     List<ConfigSyncSkipped> settingsSkips =
-        document.skipped().stream().filter(skip -> "settings".equals(skip.getKind())).toList();
+        document.skipped().stream()
+            .filter(skip -> skip.getKind() == ConfigSyncKind.SETTINGS)
+            .toList();
     assertEquals(3, settingsSkips.size());
     assertTrue(
         settingsSkips.stream().anyMatch(skip -> skip.getReason().contains("extraSection")),
@@ -267,7 +272,9 @@ class ConfigSyncParserTest {
   void unknownTopLevelCategoryIsReported() {
     ConfigSyncParser.ParsedDocument document = parser.parse("bogus: []\n");
     assertEquals(1, document.skipped().size());
-    assertEquals("bogus", document.skipped().get(0).getKind());
+    // 未知顶层类别不属于任何配置集合：kind 为空，原始类别名保留在 name 中。
+    assertNull(document.skipped().get(0).getKind());
+    assertEquals("bogus", document.skipped().get(0).getName());
   }
 
   @Test
@@ -384,7 +391,7 @@ class ConfigSyncParserTest {
                 + "\n");
     assertTrue(skill.skillPackages().isEmpty());
     assertEquals(1, skill.skipped().size());
-    assertEquals("skillPackages", skill.skipped().get(0).getKind());
+    assertEquals(ConfigSyncKind.SKILL_PACKAGES, skill.skipped().get(0).getKind());
     assertTrue(skill.skipped().get(0).getReason().contains("currentCommit"));
   }
 
@@ -582,7 +589,7 @@ class ConfigSyncParserTest {
 
     assertTrue(document.plugins().isEmpty());
     assertEquals(1, document.skipped().size());
-    assertEquals("plugins", document.skipped().get(0).getKind());
+    assertEquals(ConfigSyncKind.PLUGINS, document.skipped().get(0).getKind());
     assertEquals(PLUGIN_ID, document.skipped().get(0).getName());
   }
 
@@ -593,7 +600,7 @@ class ConfigSyncParserTest {
 
     assertTrue(document.plugins().isEmpty());
     assertEquals(1, document.skipped().size());
-    assertEquals("plugins", document.skipped().get(0).getKind());
+    assertEquals(ConfigSyncKind.PLUGINS, document.skipped().get(0).getKind());
   }
 
   /** 已声明的普通字段类型不符是硬错误，绝不被降级成 skip；附加未知字段也不能让它提前变成 skip。 */

@@ -1,9 +1,9 @@
 package fun.fengwk.kkstudio.platform.configsync;
 
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpTool;
-import fun.fengwk.kkstudio.share.configsync.ConfigSyncRef;
-import fun.fengwk.kkstudio.share.configsync.ConfigSyncSkipped;
-import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSectionsDTO;
+import fun.fengwk.kkstudio.platform.configsync.dto.ConfigSyncRef;
+import fun.fengwk.kkstudio.platform.configsync.dto.ConfigSyncSkipped;
+import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsSectionsDTO;
 
 import java.util.List;
 import java.util.Map;

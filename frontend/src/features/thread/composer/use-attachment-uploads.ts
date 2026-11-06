@@ -7,7 +7,7 @@ import {
   type ImageInputTier,
 } from '@/features/thread/composer/composer-parts'
 import { storageService, type StorageService } from '@/shared/api/storage-service'
-import type { StorageUploadDTO } from '@/shared/api/contracts/storage'
+import type { StorageUploadDTO } from '@/shared/api/generated/contracts'
 import { ApiError } from '@/shared/api/client'
 import {
   loadUnknownUploads,
@@ -274,7 +274,7 @@ export function useAttachmentUploads(options?: {
           return
         }
         patchUpload(localId, { uploadId: reservation.id, progress: 0.4 })
-        if (reservation.state === 'PENDING') {
+        if (reservation.type === 'PENDING') {
           // PENDING = 对象尚未落库：必须直传；READY = sha256 命中，跳过直传。
           await service.uploadFile(reservation.presignedPut, file, controller?.signal)
           if (!active()) {

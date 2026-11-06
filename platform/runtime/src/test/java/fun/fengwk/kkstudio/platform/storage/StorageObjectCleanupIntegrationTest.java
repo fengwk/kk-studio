@@ -22,6 +22,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.platform.storage.configuration.StorageMaintenanceProperties;
+import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadDTO;
+import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadReadyDTO;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageObjectCleanupRepository;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageUploadRepository;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
@@ -31,8 +33,6 @@ import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobState;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageUpload;
-import fun.fengwk.kkstudio.share.storage.StorageUploadDTO;
-import fun.fengwk.kkstudio.share.storage.StorageUploadState;
 
 import java.io.ByteArrayInputStream;
 import java.sql.Timestamp;
@@ -242,8 +242,7 @@ class StorageObjectCleanupIntegrationTest extends PostgresSpringTestSupport {
 
     // 第二个上传命中同一 ACTIVE 内容，直接 READY 并 retain。
     StorageUploadDTO second = reserve("second.bin", "application/octet-stream", content);
-    assertEquals(StorageUploadState.READY, second.getState());
-    assertEquals(blobId.toString(), second.getBlobId());
+    assertEquals(blobId.toString(), ((StorageUploadReadyDTO) second).getBlobId());
 
     uploadService.delete(firstId);
     assertEquals(1, uploadService.expireOnce());
@@ -508,7 +507,7 @@ class StorageObjectCleanupIntegrationTest extends PostgresSpringTestSupport {
   private String complete(StorageUploadDTO pending, byte[] content, String contentType) {
     UUID uploadId = UUID.fromString(pending.getId());
     s3Storage.putDirect(StorageObjectKeys.uploadOriginal(uploadId), content, contentType);
-    return uploadService.complete(uploadId).getBlobId();
+    return ((StorageUploadReadyDTO) uploadService.complete(uploadId)).getBlobId();
   }
 
   private UUID candidateBlobIdOf(UUID uploadId) {

@@ -34,15 +34,15 @@ import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitException;
 import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitRepository;
 import fun.fengwk.kkstudio.platform.configsync.ConfigSyncService;
 import fun.fengwk.kkstudio.platform.configsync.ConfigSyncYaml;
+import fun.fengwk.kkstudio.platform.configsync.dto.ConfigSyncImportRequestDTO;
+import fun.fengwk.kkstudio.platform.configsync.dto.ConfigSyncImportResultDTO;
+import fun.fengwk.kkstudio.platform.configsync.dto.ConfigSyncKind;
 import fun.fengwk.kkstudio.platform.storage.StorageMaintenance;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageUploadRepository;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobState;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageUpload;
-import fun.fengwk.kkstudio.share.configsync.ConfigSyncImportRequestDTO;
-import fun.fengwk.kkstudio.share.configsync.ConfigSyncImportResultDTO;
-import fun.fengwk.kkstudio.share.configsync.ConfigSyncKind;
 import fun.fengwk.kkstudio.share.skill.SkillRefDTO;
 import fun.fengwk.kkstudio.web.storage.WebStorageS3TestConfiguration;
 

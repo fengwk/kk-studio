@@ -11,9 +11,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
-import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsDTO;
-import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSectionsDTO;
-import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsUpdateDTO;
+import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsDTO;
+import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsSectionsDTO;
+import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsUpdateDTO;
 
 /** System settings 服务契约：GET 默认聚合、PUT 完整替换 CAS、陈旧版本 409、非法聚合 400、live 快照 afterCommit 替换。 */
 public class SystemSettingsServiceIntegrationTest extends PostgresSpringTestSupport {
@@ -26,8 +26,8 @@ public class SystemSettingsServiceIntegrationTest extends PostgresSpringTestSupp
   public void getReturnsDefaultsWithVersionAndTimestamps() {
     SystemSettingsDTO dto = systemSettingsService.get();
     assertEquals("0", dto.getVersion());
-    assertNotNull(dto.getCreateTime());
-    assertNotNull(dto.getUpdateTime());
+    assertNotNull(dto.getCreatedAt());
+    assertNotNull(dto.getUpdatedAt());
     assertEquals(
         systemSettingsCodec.toSections(SystemSettingsTestFixture.DEFAULT), sectionsOf(dto));
     assertTrue(dto.getTool().getPermission().containsKey("bash"));

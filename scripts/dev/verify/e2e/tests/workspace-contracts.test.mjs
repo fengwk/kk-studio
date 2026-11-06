@@ -61,7 +61,7 @@ function createSettingsWorld(network) {
       return { status: 200, json: world.get() }
     },
     call(method, requestPath, body) {
-      assert.equal(requestPath, '/api/settings')
+      assert.equal(requestPath, '/api/platform/settings')
       if (method === 'GET') {
         return Promise.resolve({ status: 200, json: world.get() })
       }

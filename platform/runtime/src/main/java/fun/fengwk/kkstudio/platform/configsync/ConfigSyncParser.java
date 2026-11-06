@@ -22,6 +22,8 @@ import fun.fengwk.kkstudio.platform.catalog.model.ModelKind;
 import fun.fengwk.kkstudio.platform.catalog.model.ModelService;
 import fun.fengwk.kkstudio.platform.catalog.provider.ProviderService;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogService;
+import fun.fengwk.kkstudio.platform.configsync.dto.ConfigSyncKind;
+import fun.fengwk.kkstudio.platform.configsync.dto.ConfigSyncSkipped;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentInstallConfigs;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentService;
 import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentInstallConfigDTO;
@@ -29,9 +31,7 @@ import fun.fengwk.kkstudio.platform.harness.builtin.BuiltinConfigSyncAdapter;
 import fun.fengwk.kkstudio.platform.plugin.Plugin;
 import fun.fengwk.kkstudio.platform.plugin.PluginRegistry;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsCodec;
-import fun.fengwk.kkstudio.share.configsync.ConfigSyncKind;
-import fun.fengwk.kkstudio.share.configsync.ConfigSyncSkipped;
-import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSectionsDTO;
+import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsSectionsDTO;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
@@ -103,7 +103,7 @@ public final class ConfigSyncParser {
 
     for (String key : document.keySet()) {
       if (!CATEGORIES.contains(key)) {
-        skipped.add(new ConfigSyncSkipped(key, "", "unknown config category"));
+        skipped.add(new ConfigSyncSkipped(null, key, "unknown config category"));
       }
     }
 
@@ -231,8 +231,7 @@ public final class ConfigSyncParser {
       type = ProviderType.fromWireValue(providerType);
     } catch (IllegalArgumentException error) {
       skipped.add(
-          new ConfigSyncSkipped(
-              ConfigSyncKind.PROVIDERS.wireValue(), name, "unsupported provider protocol"));
+          new ConfigSyncSkipped(ConfigSyncKind.PROVIDERS, name, "unsupported provider protocol"));
       return null;
     }
     ProviderCreateDTO properties = new ProviderCreateDTO();
@@ -436,8 +435,7 @@ public final class ConfigSyncParser {
     if (plugin.isEmpty()) {
       // 安装身份由依赖决定：文件里未安装的 id 按既有条目级 skip 上报，不加载也不合成插件。
       skipped.add(
-          new ConfigSyncSkipped(
-              ConfigSyncKind.PLUGINS.wireValue(), pluginId, "plugin is not installed"));
+          new ConfigSyncSkipped(ConfigSyncKind.PLUGINS, pluginId, "plugin is not installed"));
       return null;
     }
     return new PluginSpec(pluginId, resolvedValues);
@@ -462,7 +460,9 @@ public final class ConfigSyncParser {
     Object cleaned =
         yaml.removeUnknownProperties(SystemSettingsSectionsDTO.class, raw, key, removed);
     for (String path : removed) {
-      skipped.add(new ConfigSyncSkipped(key, SETTINGS_ITEM_NAME, "unsupported field: " + path));
+      skipped.add(
+          new ConfigSyncSkipped(
+              ConfigSyncKind.SETTINGS, SETTINGS_ITEM_NAME, "unsupported field: " + path));
     }
     SystemSettingsSectionsDTO sections =
         yaml.convert(cleaned, SystemSettingsSectionsDTO.class, key);
@@ -488,8 +488,7 @@ public final class ConfigSyncParser {
     if (removed.isEmpty()) {
       return false;
     }
-    skipped.add(
-        new ConfigSyncSkipped(kind.wireValue(), name, "unsupported field: " + removed.get(0)));
+    skipped.add(new ConfigSyncSkipped(kind, name, "unsupported field: " + removed.get(0)));
     return true;
   }
 
@@ -501,8 +500,7 @@ public final class ConfigSyncParser {
     }
     String first = unknown.iterator().next();
     skipped.add(
-        new ConfigSyncSkipped(
-            kind.wireValue(), name, "unsupported field: " + entry.path + "." + first));
+        new ConfigSyncSkipped(kind, name, "unsupported field: " + entry.path + "." + first));
     return true;
   }
 

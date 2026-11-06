@@ -35,6 +35,12 @@ import tools.jackson.databind.ObjectMapper;
 import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
+import fun.fengwk.kkstudio.platform.storage.dto.StoragePresignedUrlDTO;
+import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadDTO;
+import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadPendingDTO;
+import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadReadyDTO;
+import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadReserveRequestDTO;
+import fun.fengwk.kkstudio.platform.storage.dto.StorageUrlMethod;
 import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageUploadRepository;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
@@ -44,10 +50,6 @@ import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobState;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageUpload;
-import fun.fengwk.kkstudio.share.storage.StoragePresignedUrlDTO;
-import fun.fengwk.kkstudio.share.storage.StorageUploadDTO;
-import fun.fengwk.kkstudio.share.storage.StorageUploadReserveRequestDTO;
-import fun.fengwk.kkstudio.share.storage.StorageUploadState;
 
 import javax.sql.DataSource;
 
@@ -323,15 +325,13 @@ class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
   void reserveMissReturnsPendingWithChecksummedCreateOnlyPut() throws Exception {
     byte[] content = "abc".getBytes(StandardCharsets.UTF_8);
     StorageUploadDTO upload = reserve("photo.png", "image/png", content.length, sha256Hex(content));
+    StorageUploadPendingDTO pending = pendingOf(upload);
 
-    assertEquals(StorageUploadState.PENDING, upload.getState());
-    assertNull(upload.getBlobId());
-    assertNotNull(upload.getPresignedPut());
-    assertEquals("PUT", upload.getPresignedPut().getMethod());
-    assertEquals("*", upload.getPresignedPut().getHeaders().get("if-none-match"));
+    assertEquals(StorageUrlMethod.PUT, pending.getPresignedPut().getMethod());
+    assertEquals("*", pending.getPresignedPut().getHeaders().get("if-none-match"));
     assertEquals(
         Base64.getEncoder().encodeToString(sha256(content)),
-        upload.getPresignedPut().getHeaders().get("x-amz-checksum-sha256"));
+        pending.getPresignedPut().getHeaders().get("x-amz-checksum-sha256"));
 
     RecordingS3PresignService.PresignRecord record =
         s3Presigner.records().get(s3Presigner.records().size() - 1);
@@ -367,9 +367,7 @@ class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
 
     StorageUploadDTO upload = reserve("copy.png", "image/png", content.length, sha256Hex(content));
 
-    assertEquals(StorageUploadState.READY, upload.getState());
-    assertEquals(blobId, upload.getBlobId());
-    assertNull(upload.getPresignedPut());
+    assertEquals(blobId, readyOf(upload).getBlobId());
     assertEquals(
         2L,
         blobRefCount(blobId),
@@ -387,7 +385,7 @@ class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
     StorageUploadDTO pending = reserve("tiny.png", "image/png", content.length, sha256Hex(content));
     putUploadContent(pending.getId(), content, "image/png");
     StorageUploadDTO first = storageUploadService.complete(UUID.fromString(pending.getId()));
-    UUID blobId = UUID.fromString(first.getBlobId());
+    UUID blobId = UUID.fromString(readyOf(first).getBlobId());
 
     doThrow(new IllegalStateException("preview failed"))
         .when(blobPreviewService)
@@ -396,8 +394,7 @@ class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
         assertDoesNotThrow(
             () -> reserve("tiny-copy.png", "image/png", content.length, sha256Hex(content)));
 
-    assertEquals(StorageUploadState.READY, duplicate.getState());
-    assertEquals(first.getBlobId(), duplicate.getBlobId());
+    assertEquals(readyOf(first).getBlobId(), readyOf(duplicate).getBlobId());
     verify(blobPreviewService, times(2)).ensurePreview(blobId, "image/png");
   }
 
@@ -444,11 +441,8 @@ class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
         reserve("hello.txt", "text/plain", content.length, sha256Hex(content));
     putUploadContent(pending.getId(), content, "text/plain");
 
-    StorageUploadDTO ready = storageUploadService.complete(UUID.fromString(pending.getId()));
-
-    assertEquals(StorageUploadState.READY, ready.getState());
-    assertNotNull(ready.getBlobId());
-    assertNull(ready.getPresignedPut());
+    StorageUploadReadyDTO ready =
+        readyOf(storageUploadService.complete(UUID.fromString(pending.getId())));
 
     BlobRow blob = blobRow(ready.getBlobId());
     assertEquals(sha256Hex(content), blob.sha256());
@@ -476,7 +470,7 @@ class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
     putUploadContent(pending.getId(), content, "image/png");
 
     StorageUploadDTO first = storageUploadService.complete(UUID.fromString(pending.getId()));
-    UUID blobId = UUID.fromString(first.getBlobId());
+    UUID blobId = UUID.fromString(readyOf(first).getBlobId());
     verify(blobPreviewService).ensurePreview(blobId, "image/png");
 
     doThrow(new IllegalStateException("preview failed"))
@@ -485,7 +479,7 @@ class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
     StorageUploadDTO second =
         assertDoesNotThrow(() -> storageUploadService.complete(UUID.fromString(pending.getId())));
 
-    assertEquals(first.getBlobId(), second.getBlobId());
+    assertEquals(readyOf(first).getBlobId(), readyOf(second).getBlobId());
     verify(blobPreviewService, times(2)).ensurePreview(blobId, "image/png");
   }
 
@@ -548,10 +542,11 @@ class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
     StorageUploadDTO first = storageUploadService.complete(UUID.fromString(pending.getId()));
     StorageUploadDTO second = storageUploadService.complete(UUID.fromString(pending.getId()));
 
-    assertEquals(StorageUploadState.READY, first.getState());
-    assertEquals(StorageUploadState.READY, second.getState());
-    assertEquals(first.getBlobId(), second.getBlobId());
-    assertEquals(1L, blobRefCount(first.getBlobId()), "retry must not double-count references");
+    assertInstanceOf(StorageUploadReadyDTO.class, first);
+    assertInstanceOf(StorageUploadReadyDTO.class, second);
+    assertEquals(readyOf(first).getBlobId(), readyOf(second).getBlobId());
+    assertEquals(
+        1L, blobRefCount(readyOf(first).getBlobId()), "retry must not double-count references");
     assertEquals(1, jdbc.queryForObject("select count(*) from storage_blob", Integer.class));
   }
 
@@ -570,10 +565,10 @@ class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
 
     StorageUploadDTO ready = storageUploadService.complete(uploadUuid);
 
-    assertEquals(StorageUploadState.READY, ready.getState());
+    assertInstanceOf(StorageUploadReadyDTO.class, ready);
     assertEquals(
         candidateUuid.toString(),
-        ready.getBlobId(),
+        readyOf(ready).getBlobId(),
         "crash-window retry must bind the pre-copied candidate");
     assertTrue(
         s3Storage.hasObject(StorageObjectKeys.blobOriginal(candidateUuid)),
@@ -601,14 +596,17 @@ class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
     StorageUploadDTO readyFirst = storageUploadService.complete(UUID.fromString(first.getId()));
     StorageUploadDTO readySecond = storageUploadService.complete(UUID.fromString(second.getId()));
 
-    assertEquals(readyFirst.getBlobId(), readySecond.getBlobId(), "both must dedup to one blob");
     assertEquals(
-        UUID.fromString(readyFirst.getBlobId()),
+        readyOf(readyFirst).getBlobId(),
+        readyOf(readySecond).getBlobId(),
+        "both must dedup to one blob");
+    assertEquals(
+        UUID.fromString(readyOf(readyFirst).getBlobId()),
         candidateBlobIdOf(first.getId()),
         "the first completer wins with its candidate");
     assertTrue(
         s3Storage.hasObject(
-            StorageObjectKeys.blobOriginal(UUID.fromString(readyFirst.getBlobId()))));
+            StorageObjectKeys.blobOriginal(UUID.fromString(readyOf(readyFirst).getBlobId()))));
     assertFalse(
         s3Storage.hasObject(StorageObjectKeys.blobOriginal(secondCandidate)),
         "dedup loser's unused candidate object must be cleaned");
@@ -656,10 +654,11 @@ class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
 
       StorageUploadDTO readyA = a.get(30, TimeUnit.SECONDS);
       StorageUploadDTO readyB = b.get(30, TimeUnit.SECONDS);
-      assertEquals(StorageUploadState.READY, readyA.getState());
-      assertEquals(StorageUploadState.READY, readyB.getState());
-      assertEquals(existingBlobId, readyA.getBlobId(), "both must resolve to the existing blob");
-      assertEquals(existingBlobId, readyB.getBlobId());
+      assertInstanceOf(StorageUploadReadyDTO.class, readyA);
+      assertInstanceOf(StorageUploadReadyDTO.class, readyB);
+      assertEquals(
+          existingBlobId, readyOf(readyA).getBlobId(), "both must resolve to the existing blob");
+      assertEquals(existingBlobId, readyOf(readyB).getBlobId());
     } finally {
       executor.shutdownNow();
     }
@@ -945,9 +944,12 @@ class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
 
       StorageUploadDTO readyA = a.get(30, TimeUnit.SECONDS);
       StorageUploadDTO readyB = b.get(30, TimeUnit.SECONDS);
-      assertEquals(StorageUploadState.READY, readyA.getState());
-      assertEquals(StorageUploadState.READY, readyB.getState());
-      assertEquals(readyA.getBlobId(), readyB.getBlobId(), "both uploads must resolve to one blob");
+      assertInstanceOf(StorageUploadReadyDTO.class, readyA);
+      assertInstanceOf(StorageUploadReadyDTO.class, readyB);
+      assertEquals(
+          readyOf(readyA).getBlobId(),
+          readyOf(readyB).getBlobId(),
+          "both uploads must resolve to one blob");
     } finally {
       executor.shutdownNow();
     }
@@ -998,21 +1000,21 @@ class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
         reserve("lifecycle.bin", "application/octet-stream", content.length, sha256Hex(content));
     putUploadContent(pending.getId(), content, "application/octet-stream");
     StorageUploadDTO ready = storageUploadService.complete(UUID.fromString(pending.getId()));
-    UUID blobUuid = UUID.fromString(ready.getBlobId());
+    UUID blobUuid = UUID.fromString(readyOf(ready).getBlobId());
 
     StorageBlob retained = tx.execute(status -> storageBlobManager.retain(blobUuid));
     assertEquals(2L, retained.getRefCount());
-    assertEquals(2L, blobRefCount(ready.getBlobId()));
+    assertEquals(2L, blobRefCount(readyOf(ready).getBlobId()));
 
     boolean releasedOnce = tx.execute(status -> storageBlobManager.release(blobUuid));
     assertTrue(releasedOnce);
-    assertEquals(1L, blobRefCount(ready.getBlobId()));
+    assertEquals(1L, blobRefCount(readyOf(ready).getBlobId()));
 
     // 生产顺序：owner（upload 行）先删除，再释放最后一个引用；FK RESTRICT 禁止反向顺序。
     storageUploadService.delete(UUID.fromString(ready.getId()));
     assertEquals(
         StorageBlobState.DELETING,
-        blobRow(ready.getBlobId()).state(),
+        blobRow(readyOf(ready).getBlobId()).state(),
         "commit must only persist DELETING and wake background maintenance");
     assertEquals(1, storageUploadService.expireOnce(), "upload cleanup must precede blob sweep");
     storageBlobManager.sweepDeleting();
@@ -1037,7 +1039,7 @@ class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
         reserve("sweep.bin", "application/octet-stream", content.length, sha256Hex(content));
     putUploadContent(pending.getId(), content, "application/octet-stream");
     StorageUploadDTO ready = storageUploadService.complete(UUID.fromString(pending.getId()));
-    UUID blobUuid = UUID.fromString(ready.getBlobId());
+    UUID blobUuid = UUID.fromString(readyOf(ready).getBlobId());
 
     // 模拟中断残留：blob 已 DELETING，但 owner upload 行仍引用它。
     jdbc.update("update storage_blob set state = 'DELETING', ref_count = 0 where id = ?", blobUuid);
@@ -1073,7 +1075,7 @@ class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
         reserve("object-retry.bin", "application/octet-stream", content.length, sha256Hex(content));
     putUploadContent(pending.getId(), content, "application/octet-stream");
     StorageUploadDTO ready = storageUploadService.complete(UUID.fromString(pending.getId()));
-    UUID blobId = UUID.fromString(ready.getBlobId());
+    UUID blobId = UUID.fromString(readyOf(ready).getBlobId());
     storageUploadService.delete(UUID.fromString(ready.getId()));
     assertEquals(1, storageUploadService.expireOnce(), "upload cleanup must precede blob sweep");
     String originalKey = StorageObjectKeys.blobOriginal(blobId);
@@ -1291,7 +1293,7 @@ class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
     StorageUploadDTO ready =
         reserve(
             "ready-delete-hit.bin", "application/octet-stream", content.length, sha256Hex(content));
-    assertEquals(firstReady.getBlobId(), ready.getBlobId());
+    assertEquals(readyOf(firstReady).getBlobId(), readyOf(ready).getBlobId());
     // 模拟 complete 在 DB 提交后、删除临时对象前崩溃：临时对象残留。
     s3Storage.putDirect(
         StorageObjectKeys.uploadOriginal(UUID.fromString(ready.getId())), content, "text/plain");
@@ -1309,7 +1311,7 @@ class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
         "READY delete must retain the cleanup evidence row");
     assertEquals(
         1L,
-        blobRefCount(ready.getBlobId()),
+        blobRefCount(readyOf(ready).getBlobId()),
         "READY delete must release the upload reference exactly once");
     assertFalse(
         s3Storage.networkCalls().stream().anyMatch(call -> call.operation().startsWith("delete")),
@@ -1326,7 +1328,7 @@ class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
         "the other upload must remain after the requested row is finalized");
     assertEquals(
         1L,
-        blobRefCount(ready.getBlobId()),
+        blobRefCount(readyOf(ready).getBlobId()),
         "finalizing an explicit request must not release its blob a second time");
     storageUploadService.delete(UUID.fromString(firstReady.getId()));
     assertEquals(1, storageUploadService.expireOnce());
@@ -1336,7 +1338,8 @@ class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
         jdbc.queryForObject("select count(*) from storage_blob", Integer.class),
         "last reference release must delete the blob row afterCommit");
     assertFalse(
-        s3Storage.hasObject(StorageObjectKeys.blobOriginal(UUID.fromString(ready.getBlobId()))));
+        s3Storage.hasObject(
+            StorageObjectKeys.blobOriginal(UUID.fromString(readyOf(ready).getBlobId()))));
   }
 
   @Test
@@ -1373,7 +1376,7 @@ class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
 
     StorageUploadService.ReadyUpload facts =
         tx.execute(status -> storageUploadService.lockReady(uploadId));
-    assertEquals(UUID.fromString(ready.getBlobId()), facts.blobId());
+    assertEquals(UUID.fromString(readyOf(ready).getBlobId()), facts.blobId());
     assertEquals("authoritative.txt", facts.filename());
   }
 
@@ -1388,7 +1391,7 @@ class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
     UUID blobUuid = UUID.fromString(blobId);
 
     StoragePresignedUrlDTO original = storageBlobManager.presignOriginalUrl(blobUuid);
-    assertEquals("GET", original.getMethod());
+    assertEquals(StorageUrlMethod.GET, original.getMethod());
     assertTrue(original.getUrl().contains("blobs/" + blobId + "/original"));
     assertEquals("application/octet-stream", original.getMediaType());
     assertEquals((long) content.length, original.getSizeBytes());
@@ -1454,7 +1457,17 @@ class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
     StorageUploadDTO pending =
         reserve("first.bin", "application/octet-stream", content.length, sha256Hex(content));
     putUploadContent(pending.getId(), content, "application/octet-stream");
-    return storageUploadService.complete(UUID.fromString(pending.getId())).getBlobId();
+    return readyOf(storageUploadService.complete(UUID.fromString(pending.getId()))).getBlobId();
+  }
+
+  /** 断言上传已 READY 并返回其子类型。 */
+  private static StorageUploadReadyDTO readyOf(StorageUploadDTO upload) {
+    return assertInstanceOf(StorageUploadReadyDTO.class, upload);
+  }
+
+  /** 断言上传仍 PENDING 并返回其子类型。 */
+  private static StorageUploadPendingDTO pendingOf(StorageUploadDTO upload) {
+    return assertInstanceOf(StorageUploadPendingDTO.class, upload);
   }
 
   private static byte[] tinyPng() throws IOException {

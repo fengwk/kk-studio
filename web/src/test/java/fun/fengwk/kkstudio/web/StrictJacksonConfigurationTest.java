@@ -21,7 +21,7 @@ import fun.fengwk.kkstudio.platform.catalog.dto.ModelVariantDTO;
 import fun.fengwk.kkstudio.platform.catalog.model.ModelRuntimeConfigParser;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessBranchSettingsDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessCommandCreateDTO;
-import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsNetworkDTO;
+import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsNetworkDTO;
 
 import java.time.Instant;
 import java.util.Date;
@@ -332,12 +332,13 @@ class StrictJacksonConfigurationTest {
         });
   }
 
-  /** 测试意图：实际 HTTP Jackson 3 不能把网络字段的布尔/数字转换成合法主机名，同时保留 null 与空字符串语义。 */
+  /** 测试意图：HTTP 严格 mapper 不能把网络字段的布尔/数字转换成合法主机名，同时保留 null 与空字符串语义。 */
   @Test
   void shouldRejectNonStringNetworkTokensAndUnknownFields() {
     runner.run(
         context -> {
-          JsonMapper mapper = context.getBean(JsonMapper.class);
+          JsonMapper mapper =
+              HttpBoundaryConfiguration.strictHttpMapper(context.getBean(JsonMapper.class));
           SystemSettingsNetworkDTO direct =
               mapper.readValue(
                   "{\"proxyUrl\":null,\"noProxyHosts\":\"\"}", SystemSettingsNetworkDTO.class);

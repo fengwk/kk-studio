@@ -41,9 +41,9 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionDefinition;
 import fun.fengwk.kkstudio.canvas.function.CanvasJson;
 import fun.fengwk.kkstudio.canvas.function.CanvasResourceKind;
 import fun.fengwk.kkstudio.common.id.Uuids;
+import fun.fengwk.kkstudio.platform.storage.dto.StoragePresignedUrlDTO;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
-import fun.fengwk.kkstudio.share.storage.StoragePresignedUrlDTO;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
@@ -218,10 +218,10 @@ public class CanvasDtoMapper {
   public static CanvasPresignedUrlDTO toPresignedUrlDto(StoragePresignedUrlDTO signed) {
     Objects.requireNonNull(signed, "signed");
     CanvasPresignedUrlDTO dto = new CanvasPresignedUrlDTO();
-    dto.setMethod(signed.getMethod());
+    dto.setMethod(signed.getMethod().name());
     dto.setUrl(signed.getUrl());
     dto.setHeaders(signed.getHeaders());
-    dto.setExpiresAt(signed.getExpiresAt());
+    dto.setExpiresAt(signed.getExpiresAt().toString());
     return dto;
   }
 

@@ -17,7 +17,19 @@ function assertImportCheck(data) {
   for (const key of ['created', 'updated', 'skipped']) {
     assert(Array.isArray(data[key]), `import check ${key} must be an array`)
     for (const item of data[key]) {
-      assertExactFields(item, key === 'skipped' ? ['kind', 'name', 'reason'] : ['kind', 'name'], key)
+      if (key === 'skipped') {
+        // 未知顶层类别的 skip 没有配置集合 kind，原始类别名保留在 name。
+        assert(
+          Object.keys(item).every((field) => ['kind', 'name', 'reason'].includes(field)),
+          `skipped fields must be kind/name/reason, got ${JSON.stringify(Object.keys(item))}`,
+        )
+        assert(typeof item.name === 'string' && typeof item.reason === 'string', 'skipped name/reason')
+        if ('kind' in item) {
+          assert(typeof item.kind === 'string', 'skipped kind must be a config kind')
+        }
+      } else {
+        assertExactFields(item, ['kind', 'name'], key)
+      }
     }
   }
 }
@@ -26,9 +38,9 @@ registerCase({
   id: 'config_sync.inventory_contract',
   level: 'L1',
   title: '配置同步 inventory 契约校验',
-  docs: 'GET /api/settings/sync 返回仅含引用（kind/name）与依赖闭包（dependencies）的 inventory；每项严格限定字段，且响应中绝不包含凭据、token、headers、url 等敏感配置值',
+  docs: 'GET /api/platform/config-sync 返回仅含引用（kind/name）与依赖闭包（dependencies）的 inventory；每项严格限定字段，且响应中绝不包含凭据、token、headers、url 等敏感配置值',
   async run(ctx) {
-    const { json } = await ctx.call('GET', '/api/settings/sync')
+    const { json } = await ctx.call('GET', '/api/platform/config-sync')
     const data = json
     const rawJson = JSON.stringify(data)
 
@@ -69,7 +81,7 @@ registerCase({
     assert(latestVersion, 'created provider must have version')
 
     try {
-      const { json: exportJson } = await ctx.call('POST', '/api/settings/sync/export', {
+      const { json: exportJson } = await ctx.call('POST', '/api/platform/config-sync/export', {
         items: [{ kind: 'providers', name: providerName }],
       })
       const exportData = exportJson
@@ -77,7 +89,7 @@ registerCase({
       assert(typeof yaml === 'string' && yaml.trim().length > 0, 'export yaml must be non-empty string')
       assert(yaml.includes(providerName), `export yaml must contain provider name ${providerName}`)
 
-      const { json: checkJson } = await ctx.call('POST', '/api/settings/sync/import/check', { yaml })
+      const { json: checkJson } = await ctx.call('POST', '/api/platform/config-sync/check-import', { yaml })
       const check = checkJson
       assertImportCheck(check)
       assert(check.created.length === 0 && check.skipped.length === 0, 'same-name check must only update')
@@ -86,7 +98,7 @@ registerCase({
       const found = listJson.find((provider) => provider.name === providerName)
       assert(String(found?.version) === latestVersion, 'precheck must not advance provider version')
 
-      const { json: importJson } = await ctx.call('POST', '/api/settings/sync/import', { yaml, allowPartial: false })
+      const { json: importJson } = await ctx.call('POST', '/api/platform/config-sync/import', { yaml, allowPartial: false })
       const importResult = importJson
       assert(Array.isArray(importResult?.imported), 'import result must contain imported array')
       const importedProvider = importResult.imported.find(
@@ -153,7 +165,7 @@ registerCase({
     assert(latestVersion, 'created environment must have version')
 
     try {
-      const { json: exportJson } = await ctx.call('POST', '/api/settings/sync/export', {
+      const { json: exportJson } = await ctx.call('POST', '/api/platform/config-sync/export', {
         items: [{ kind: 'environments', name: envName }],
       })
       const exportData = exportJson
@@ -163,13 +175,13 @@ registerCase({
       assert(yaml.includes(tokenHash(originalToken)), 'export yaml must contain the registration token hash')
       assert(!yaml.includes(originalToken), 'export yaml must never contain the plaintext registration token')
 
-      const { json: checkJson } = await ctx.call('POST', '/api/settings/sync/import/check', { yaml })
+      const { json: checkJson } = await ctx.call('POST', '/api/platform/config-sync/check-import', { yaml })
       const check = checkJson
       assertImportCheck(check)
       assert(check.updated.some((item) => item.kind === 'environments' && item.name === envName), 'check must list environment overwrite')
       assert(!JSON.stringify(check).includes(originalToken), 'check must not echo registrationToken')
 
-      const { json: importJson } = await ctx.call('POST', '/api/settings/sync/import', { yaml, allowPartial: false })
+      const { json: importJson } = await ctx.call('POST', '/api/platform/config-sync/import', { yaml, allowPartial: false })
       const importResult = importJson
       assert(Array.isArray(importResult?.imported), 'import result must contain imported array')
       const importedEnv = importResult.imported.find(
@@ -177,7 +189,7 @@ registerCase({
       )
       assert(importedEnv, `imported must contain {kind:'environments',name:${envName}}`)
 
-      const { json: reexportJson } = await ctx.call('POST', '/api/settings/sync/export', {
+      const { json: reexportJson } = await ctx.call('POST', '/api/platform/config-sync/export', {
         items: [{ kind: 'environments', name: envName }],
       })
       assert(
@@ -234,27 +246,27 @@ registerCase({
       return json
     }
     try {
-      const { json, headers } = await ctx.call('POST', '/api/settings/sync/import/check', { yaml })
+      const { json, headers } = await ctx.call('POST', '/api/platform/config-sync/check-import', { yaml })
       const check = json
       assertImportCheck(check)
       assert(headers.get('cache-control') === 'no-store', 'precheck must be no-store')
       assert(check.created.some((item) => item.kind === 'providers' && item.name === name), 'check must list new provider')
       assert(check.updated.length === 0, 'new provider must not be an overwrite')
-      assert(check.skipped.some((item) => item.kind === 'futureConfig'), 'unknown category must be reported')
+      assert(check.skipped.some((item) => item.name === 'futureConfig'), 'unknown category must be reported')
       assert(!JSON.stringify(check).includes(secret), 'precheck must not echo credential')
       assert(!(await providerList()).some((provider) => provider.name === name), 'precheck must not create provider')
 
-      for (const path of ['/api/settings/sync/import/check', '/api/settings/sync/import']) {
+      for (const path of ['/api/platform/config-sync/check-import', '/api/platform/config-sync/import']) {
         const error = await expectHttpError(() => ctx.call('POST', path, { yaml: invalidYaml }), { status: 400 })
         assert(!String(error.body).includes(secret), 'hard-error response must not echo credential')
       }
-      await expectHttpError(() => ctx.call('POST', '/api/settings/sync/import', { yaml }), { status: 400 })
+      await expectHttpError(() => ctx.call('POST', '/api/platform/config-sync/import', { yaml }), { status: 400 })
       assert(!(await providerList()).some((provider) => provider.name === name), 'unconfirmed partial import must not write')
 
-      const { json: importedJson } = await ctx.call('POST', '/api/settings/sync/import', { yaml, allowPartial: true })
+      const { json: importedJson } = await ctx.call('POST', '/api/platform/config-sync/import', { yaml, allowPartial: true })
       const result = importedJson
       assert(result.imported.some((item) => item.kind === 'providers' && item.name === name), 'authorized partial import must create provider')
-      assert(result.skipped.some((item) => item.kind === 'futureConfig'), 'partial import must report skipped category')
+      assert(result.skipped.some((item) => item.name === 'futureConfig'), 'partial import must report skipped category')
       assert((await providerList()).some((provider) => provider.name === name), 'confirmed provider must exist')
     } finally {
       const provider = (await providerList()).find((item) => item.name === name)
@@ -290,7 +302,7 @@ registerCase({
       })
       assertInstallConfig(putJson.installConfig)
 
-      const { json: exportJson } = await ctx.call('POST', '/api/settings/sync/export', {
+      const { json: exportJson } = await ctx.call('POST', '/api/platform/config-sync/export', {
         items: [{ kind: 'environments', name: envName }],
       })
       const yaml = exportJson?.yaml
@@ -301,7 +313,7 @@ registerCase({
       assert(yaml.includes('http://127.0.0.1:18081'), 'export yaml must contain studioUrl')
       assert(yaml.includes('jdtls'), 'export yaml must contain nested LSP server')
 
-      const { json: checkJson } = await ctx.call('POST', '/api/settings/sync/import/check', { yaml })
+      const { json: checkJson } = await ctx.call('POST', '/api/platform/config-sync/check-import', { yaml })
       const check = checkJson
       assertImportCheck(check)
       assert(
@@ -310,7 +322,7 @@ registerCase({
       )
       assert(!JSON.stringify(check).includes(originalToken), 'check must not echo registrationToken')
 
-      const { json: importJson } = await ctx.call('POST', '/api/settings/sync/import', { yaml, allowPartial: false })
+      const { json: importJson } = await ctx.call('POST', '/api/platform/config-sync/import', { yaml, allowPartial: false })
       assert(
         importJson.imported.some((item) => item.kind === 'environments' && item.name === envName),
         'import must report the environment',
@@ -324,10 +336,10 @@ registerCase({
       const updateYaml = JSON.stringify({
         environments: [{ name: envName, registrationTokenHash: tokenHash(newToken), installConfig: updatedConfig }],
       })
-      await ctx.call('POST', '/api/settings/sync/import/check', { yaml: updateYaml })
-      await ctx.call('POST', '/api/settings/sync/import', { yaml: updateYaml, allowPartial: false })
+      await ctx.call('POST', '/api/platform/config-sync/check-import', { yaml: updateYaml })
+      await ctx.call('POST', '/api/platform/config-sync/import', { yaml: updateYaml, allowPartial: false })
 
-      const { json: updatedExportJson } = await ctx.call('POST', '/api/settings/sync/export', {
+      const { json: updatedExportJson } = await ctx.call('POST', '/api/platform/config-sync/export', {
         items: [{ kind: 'environments', name: envName }],
       })
       assert(
@@ -344,7 +356,7 @@ registerCase({
       const clearYaml = JSON.stringify({
         environments: [{ name: envName, registrationTokenHash: tokenHash(newToken) }],
       })
-      await ctx.call('POST', '/api/settings/sync/import', { yaml: clearYaml, allowPartial: false })
+      await ctx.call('POST', '/api/platform/config-sync/import', { yaml: clearYaml, allowPartial: false })
       const { json: clearedJson } = await ctx.call('GET', cardPath(envId))
       assert(
         clearedJson.installConfig == null,
@@ -385,7 +397,7 @@ registerCase({
 
     for (const installConfig of invalidConfigs) {
       const yaml = JSON.stringify({ environments: [{ name, registrationTokenHash: tokenHash(token), installConfig }] })
-      for (const path of ['/api/settings/sync/import/check', '/api/settings/sync/import']) {
+      for (const path of ['/api/platform/config-sync/check-import', '/api/platform/config-sync/import']) {
         const error = await expectHttpError(
           () => ctx.call('POST', path, { yaml, allowPartial: true }),
           { status: 400 },

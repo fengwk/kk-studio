@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { IssueDetailModal } from './IssueDetailModal'
 import type { ProjectsApi } from '../projects-api'
 import type { StorageService } from '@/shared/api/storage-service'
-import type { StorageUploadDTO } from '@/shared/api/contracts/storage'
+import type { StorageUploadDTO } from '@/shared/api/generated/contracts'
 import { ApiError } from '@/shared/api/client'
 import { LOCALE_STORAGE_KEY, setLocale } from '@/shared/i18n'
 import { queryKeys } from '@/shared/lib/query-keys'
@@ -148,9 +148,8 @@ describe('IssueDetailModal', () => {
 
   const mockUploadDTO: StorageUploadDTO = {
     id: 'mock-upload-id',
-    state: 'READY',
+    type: 'READY',
     blobId: 'mock-blob-id',
-    presignedPut: null,
     expiresAt: 1789905600,
   }
 
