@@ -3,7 +3,9 @@
 [`WebApplication`](../../web/src/main/java/fun/fengwk/kkstudio/web/WebApplication.java)
 是生产 Spring Boot 组合根：装配 Platform、Project、Canvas/Harness runtime、
 Contributor 和构建期 Plugin，提供 REST、静态 SPA、浏览器事件与 Daemon WebSocket。
-Web 保留组合根自身与 Harness/Platform 的 Controller；Canvas、Project 的 Controller、DTO 映射与错误 advice 随各自产品模块，经自动装配进入 MVC。Controller 解析请求（统一使用 `Uuids.parseCanonical`、`DecimalLongs` 以及 `platform.http.RequestParameters` 解析校验 environmentId 与 limit 等）并返回结果；Harness 控制面的快照投影、写后回读、命令批归属判定与 Environment owner 路由由 `web.harness` / `web.environment` 的应用服务编排。DTO 映射规则：Harness 领域类型由 web 的 Harness mapper 映射；Canvas、Project 领域服务返回领域类型，由各自模块的映射器转换，web 在 HTTP 边界调用；Platform 用例服务直接返回所属模块的 DTO。领域行为、用例组装与事务由相应模块持有，Web 模块不直连业务表或业务 repository。
+Platform 与 Harness 的 Controller、DTO 和编排位于 `platform/runtime`，Chat、Canvas、Project 与 IDE 的
+Controller 和 DTO 位于各自产品模块。Web 装配这些接口以及组合根自身的传输入口；领域规则、映射和事务由所属模块持有。
+HTTP 边界统一配置 JSON、参数绑定与错误映射，Web 不直连业务表或业务 repository。
 
 ## 组合与生命周期
 
@@ -62,7 +64,8 @@ Skill 同步与 PluginResourceGateway 留在 Harness 组合内，因为它们需
 ## HTTP 入口
 
 JSON Controller 的成功响应直接返回资源，status 与业务结果对齐；
-health、资源下载和 WebSocket 使用各自传输形式。公开路由如下：
+health、资源下载和 WebSocket 使用各自传输形式。业务路由按所属命名空间组织，完整方法、参数与响应以
+生成的 [`ApiRoutes`](../../frontend/src/shared/api/generated/contracts.ts) 为准：
 
 | family | 路径 | 用途 |
 | --- | --- | --- |
@@ -149,9 +152,9 @@ Snapshot 不携带手动压缩可用性：`GET /api/harness/threads/{threadId}/c
 按该模型输出记录时间重建当时的请求前缀。它复用正式规划/物化/编码器，不推进游标、不调用 transport；
 接受普通 assistant 输出，并对父 COMPACTION 结果通过冻结 child join 的 finalAnswer 前缀重建压缩子最后一次调用。
 `kind` 恒为 `HISTORICAL_REQUEST_PREVIEW`，`bodyJson` 只代表当前 catalog / Provider 定义下的重建结果，不等于原始发送字节。
-当前事实不允许精确重建时返回 409，客户端只按稳定的 `errors.reason` 恢复，不解析描述文本：
+当前事实不允许精确重建时返回 409，客户端只按稳定的顶层 `reason` 恢复，不解析描述文本：
 
-| `errors.reason` | 拒绝事实 |
+| `reason` | 拒绝事实 |
 | --- | --- |
 | `PREVIEW_PLANNING_FAILED` | 历史前缀无法规划 |
 | `PREVIEW_PROVIDER_UNAVAILABLE` | 当前 Provider 无法解析，包括连接 generation 漂移 |
@@ -199,8 +202,8 @@ wire DTO 归属各领域模块：平台族在 `platform.runtime` 的 `<feature>.
 Project 在各自 `dto` 包。
 required-nullable 响应字段由 DTO 显式 ALWAYS。[`HttpBoundaryConfiguration`](../../web/src/main/java/fun/fengwk/kkstudio/web/HttpBoundaryConfiguration.java)
 从容器 mapper 派生仅供 HTTP 消息转换器使用的配置，拒绝未知字段、标量强转、基本类型 null、重复键和尾随内容，
-不改变持久化、集群客户端和插件使用的 mapper。系统设置的 Long 属性以规范十进制字符串作为既有 wire 类型，
-要求与读取响应相同的字符串形态，不接受数值 token。请求体按字段或 record 组件的 `@Nullable`
+不改变持久化、集群客户端和插件使用的 mapper。Long 在请求与响应中均为规范十进制字符串，
+DTO 使用 `Long` / `long`，HTTP 边界统一解析并拒绝非法值。请求体按字段或 record 组件的 `@Nullable`
 统一检查必填性并递归检查 DTO、集合与 Map；未标注的属性缺失或为 null 时报告属性路径。
 UUID 路径和查询参数统一使用规范小写转换。领域 codec 另有严格语法校验。
 
