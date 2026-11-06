@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.project.http;
+package fun.fengwk.kkstudio.web.project.http;
 
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -32,6 +32,7 @@ import fun.fengwk.kkstudio.project.dto.ProjectWorkflowStateDTO;
 import fun.fengwk.kkstudio.project.dto.UpdateProjectRequestDTO;
 import fun.fengwk.kkstudio.project.dto.UpdateProjectWorkflowRequestDTO;
 import fun.fengwk.kkstudio.project.dto.UpdateProjectYoloRequestDTO;
+import fun.fengwk.kkstudio.project.http.ProjectController;
 import fun.fengwk.kkstudio.project.model.Project;
 import fun.fengwk.kkstudio.project.service.ProjectService;
 import fun.fengwk.kkstudio.project.service.ProjectSnapshotAssembler;
