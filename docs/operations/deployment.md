@@ -242,7 +242,7 @@ Studio 当前没有内置登录鉴权。向局域网或公网暴露前，必须�
 | UI 与 REST API | 全部路径，含 SPA 深层路径 | 透传到 App `8080`；App 自行返回 `index.html` fallback |
 | Environment Daemon gateway | `/api/harness/environment-daemon` | 透传 WebSocket；承载 Daemon 准入、控制流与环境隧道数据面 |
 | 浏览器 Application Event WebSocket | `/api/events` | 透传 WebSocket；断线后客户端靠 REST snapshot 重新同步，并以新连接身份登记 IDE 使用证明 |
-| 同源 IDE 数据面与固定入口 | `/environment-ide/{environmentId}/{viewId}/` | 透传 HTTP 与 WebSocket upgrade；保持 view route base 与 Host/Origin 转发 |
+| 同源 IDE 数据面与固定入口 | `/ide/{environmentId}/{viewId}/` | 透传 HTTP 与 WebSocket upgrade；保持 view route base 与 Host/Origin 转发 |
 
 `prod` profile 启用 `server.forward-headers-strategy=framework`，因此代理必须正确设置
 `X-Forwarded-Proto`/`X-Forwarded-Host`，否则重定向与 cookies 会指向内部地址。

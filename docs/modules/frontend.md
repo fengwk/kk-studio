@@ -421,9 +421,9 @@ Chat 入口经 [`ide-panel-context`](../../frontend/src/features/environment/ide
 视图绑定跟随事件通道的连接身份：前端先用 `connected` 帧的 `eventNodeId` 与 `connectionId` 登记
 IDE 使用列表，再以同一身份 claim 视图；服务端核对 environment、view 与 claim 全部匹配才建立绑定。
 迟到的成功来自旧连接时，视图保留原 `viewId` 并按 resume 重新绑定到当前连接。
-入口 URL 必须是同源 bootstrap 路径（`/environment-ide/{environmentId}/{viewId}/__ide/bootstrap?token=...`），
+入口 URL 必须是同源 bootstrap 路径（`/ide/{environmentId}/{viewId}/__ide/bootstrap?token=...`），
 前端逐项校验后用普通 iframe 嵌入；Studio 与受管环境属于同一可信浏览器边界，不要求独立域名。
-本地开发环境由 Vite 的 `/environment-ide` 代理通过 `changeOrigin: false, ws: true` 保留 Host 与 Origin
+本地开发环境由 Vite 的 `/ide` 代理通过 `changeOrigin: false, ws: true` 保留 Host 与 Origin
 并透传 WebSocket。
 
 恢复身份只保存在 sessionStorage：`viewId`、`daemonInstanceId` 与目录；

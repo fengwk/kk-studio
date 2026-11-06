@@ -55,7 +55,7 @@ function environmentWithoutDaemon() {
           path,
         )
       }
-      if (path.includes('/ide/views') || path.endsWith('/ide/directories')) {
+      if (path.includes('/api/ide/environments/')) {
         throw new HttpError(
           409,
           canonicalErrorBody(409, 'unavailable', 'environment IDE owner route is unavailable', 'IDE_UNAVAILABLE'),
@@ -106,9 +106,9 @@ test('IDE view case checks no-READY-owner rejection for canonical view commands'
 
   await getCase(IDE_CASE_ID).run(ctx)
 
-  const ideCalls = calls.filter((call) => call.path.includes('/ide/views'))
-  assert.equal(ideCalls.length, 6, `IDE case must exercise six view requests: ${JSON.stringify(ideCalls)}`)
-  const viewsPath = `/api/environments/${ENVIRONMENT_ID}/ide/views`
+  const ideCalls = calls.filter((call) => call.path.includes('/api/ide/environments/'))
+  assert.equal(ideCalls.length, 7, `IDE case must exercise seven IDE requests: ${JSON.stringify(ideCalls)}`)
+  const viewsPath = `/api/ide/environments/${ENVIRONMENT_ID}/views`
   const open = ideCalls.find((call) => call.method === 'POST' && call.path === viewsPath)
   for (const field of ['viewId', 'documentId', 'eventNodeId', 'connectionId', 'claimId']) {
     assert.match(open.body[field], /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/)
@@ -124,19 +124,19 @@ test('IDE view case checks no-READY-owner rejection for canonical view commands'
     'IDE case must attempt a directory change',
   )
   assert.ok(
-    ideCalls.some((call) => call.method === 'POST' && call.path.endsWith('/terminal')),
+    ideCalls.some((call) => call.method === 'POST' && call.path.endsWith('/focus-terminal')),
     'IDE case must attempt a terminal focus',
   )
   assert.ok(
-    ideCalls.some((call) => call.method === 'POST' && call.path.endsWith('/mobile-layout')),
+    ideCalls.some((call) => call.method === 'POST' && call.path.endsWith('/apply-mobile-layout')),
     'IDE case must attempt mobile layout',
   )
   assert.ok(
-    calls.some((call) => call.method === 'GET' && call.path.endsWith('/ide/directories')),
+    calls.some((call) => call.method === 'GET' && call.path.endsWith('/directories')),
     'IDE case must attempt a directory listing',
   )
   assert.ok(
-    ideCalls.some((call) => call.method === 'DELETE'),
+    ideCalls.some((call) => call.method === 'POST' && call.path.endsWith('/close')),
     'IDE case must attempt a close',
   )
   assert.ok(

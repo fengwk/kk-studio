@@ -45,12 +45,12 @@ Server 只用 `CHANGE_DIRECTORY` 的确认回执确定目录，缺失或无效�
 
 | 接口 | 请求/结果 |
 | --- | --- |
-| POST `/api/environments/{id}/ide/views` | `viewId`、`documentId`、`eventNodeId`、`connectionId`、`claimId`、`mode(create/resume)`、可选 `directory`；成功返回绑定身份、目录、workspacePath 与短期 entryUrl |
-| PUT `/api/environments/{id}/ide/views/{viewId}/directory` | 当前 `documentId`、`bindingEpoch`、目标目录；检查 dirty，成功才写工作区 |
-| POST `/api/environments/{id}/ide/views/{viewId}/terminal` | 当前 `documentId`、`bindingEpoch`；聚焦/创建该视图终端 |
-| POST `/api/environments/{id}/ide/views/{viewId}/mobile-layout` | 当前 `documentId`、`bindingEpoch`；收起工作台原生侧栏和面板，不更改用户设置 |
-| GET `/api/environments/{id}/ide/directories?path=<absolute>` | 省略 path 时使用宿主主目录；返回 `{path,parentPath,children:[{name,path}],truncated}`，根目录的 `parentPath` 为 null |
-| DELETE `/api/environments/{id}/ide/views/{viewId}` | 当前 `documentId`、`bindingEpoch` 与显式 `discard`；正常关闭等待原生保存/不保存/取消，状态未知或不可达时才提供经确认的强制关闭 |
+| POST `/api/ide/environments/{id}/views` | `viewId`、`documentId`、`eventNodeId`、`connectionId`、`claimId`、`mode(create/resume)`、可选 `directory`；成功返回绑定身份、目录、workspacePath 与短期 entryUrl |
+| PUT `/api/ide/environments/{id}/views/{viewId}/directory` | 当前 `documentId`、`bindingEpoch`、目标目录；检查 dirty，成功才写工作区 |
+| POST `/api/ide/environments/{id}/views/{viewId}/focus-terminal` | 当前 `documentId`、`bindingEpoch`；聚焦/创建该视图终端 |
+| POST `/api/ide/environments/{id}/views/{viewId}/apply-mobile-layout` | 当前 `documentId`、`bindingEpoch`；收起工作台原生侧栏和面板，不更改用户设置 |
+| GET `/api/ide/environments/{id}/directories?path=<absolute>` | 省略 path 时使用宿主主目录；返回 `{path,parentPath,children:[{name,path}],truncated}`，根目录的 `parentPath` 为 null |
+| POST `/api/ide/environments/{id}/views/{viewId}/close` | 当前 `documentId`、`bindingEpoch` 与显式 `discard`；正常关闭等待原生保存/不保存/取消，状态未知或不可达时才提供经确认的强制关闭 |
 | 应用事件 WS `ide-use` | `documentId`、`revision`、`views[]`；空列表分离全部，不表示确认销毁 |
 | GET `/api/environments/{id}/runtime` | owner 返回当前 `{revision, status}`；无本代 READY 快照时返回 unavailable |
 
@@ -60,7 +60,7 @@ Server 只用 `CHANGE_DIRECTORY` 的确认回执确定目录，缺失或无效�
 
 ### 浏览器同源入口
 
-iframe 使用同源视图作用域路径 `/environment-ide/{environmentId}/{viewId}/...`。bootstrap 入口是 `/environment-ide/{environmentId}/{viewId}/__ide/bootstrap?token=...`，消费一次性票据后设置 Path 限定为该 view 基址的 HttpOnly/SameSite=Strict cookie（可信 TLS 下加 Secure），再跳转到 code-server 的 `/?workspace=<encoded>`；同源网关另有 `__ide/session` 只报告当前 cookie 与代际是否仍可进入数据面，不续租、不重建视图。HTTP、WS upgrade 和逻辑流 OPEN 均复核当前视图绑定；关闭或换代后旧 cookie 失效。
+iframe 使用同源视图作用域路径 `/ide/{environmentId}/{viewId}/...`。bootstrap 入口是 `/ide/{environmentId}/{viewId}/__ide/bootstrap?token=...`，消费一次性票据后设置 Path 限定为该 view 基址的 HttpOnly/SameSite=Strict cookie（可信 TLS 下加 Secure），再跳转到 code-server 的 `/?workspace=<encoded>`；同源网关另有 `__ide/session` 只报告当前 cookie 与代际是否仍可进入数据面，不续租、不重建视图。HTTP、WS upgrade 和逻辑流 OPEN 均复核当前视图绑定；关闭或换代后旧 cookie 失效。
 
 - `openView` 先向事件节点核验 exact intent：只有该物理连接与 document 仍存活、且登记了完全相同的 environment/view/claim 意图时才发命令（[`IdeBrowserUseGateway`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/IdeBrowserUseGateway.java)）；事件节点不可达时不建立新绑定。`claimId` 在单次请求未确认期间保持不变，同 claimId 的同形请求返回同一绑定，参数漂移被拒绝。
 - 绑定身份缓存由 [`IdeViewBindingRegistry`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/IdeViewBindingRegistry.java) 持有：仅保存当前绑定身份，不缓存视图目录与状态；缓存缺失或漂移时先用 `LIST_VIEWS` 重建再判定，旧 epoch 的关闭、目录与终端请求不作用于新绑定。
@@ -79,9 +79,9 @@ iframe 使用同源视图作用域路径 `/environment-ide/{environmentId}/{view
 按 owner 快照路由。所有内部路径都参与
 HMAC 签名并核对本节点 owner 归属；没有 READY 租约、路由为空或认证失败时立即失败，不改投其它节点、不自动重放。
 
-[`ClusterEnvironmentIdeInternalController`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/web/ClusterEnvironmentIdeInternalController.java)、
-[`ClusterEnvironmentIdeInternalDataPlaneController`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/web/ClusterEnvironmentIdeInternalDataPlaneController.java)
-与 [`IdeBrowserUseInternalController`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/web/IdeBrowserUseInternalController.java)
+[`ClusterEnvironmentIdeInternalController`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/http/ClusterEnvironmentIdeInternalController.java)、
+[`ClusterEnvironmentIdeInternalDataPlaneController`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/http/ClusterEnvironmentIdeInternalDataPlaneController.java)
+与 [`IdeBrowserUseInternalController`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/http/IdeBrowserUseInternalController.java)
 的成功响应是裸 DTO，错误响应与浏览器 API 使用同一 problem+json 格式。认证失败固定 401
 `unauthorized`，请求体超限为 413 `validation`。[`IdeClusterClient`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/cluster/IdeClusterClient.java)
 按 `code`、`reason` 与 `detail` 处理内部错误；关闭取消以 `IDE_CLOSE_CANCELLED` 原因穿透到调用方。
@@ -90,7 +90,7 @@ HMAC 签名并核对本节点 owner 归属；没有 READY 租约、路由为空�
 
 - 新增 IDE 动作：同时修改 [`control.proto`](../../platform/daemon-server/src/main/protocol/control.proto) 与 Daemon 的 [`contracts.ts`](../../daemon/src/contracts.ts)；协议变化属于 Daemon 发布，见 [Environment Daemon](../operations/environment-daemon.md)。
 - 视图语义：[`EnvironmentIdeServiceImpl.java`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/EnvironmentIdeServiceImpl.java)；跨节点：[`cluster`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/cluster/) 包。
-- 测试入口：[`EnvironmentIdeServiceImplTest.java`](../../apps/ide/src/test/java/fun/fengwk/kkstudio/ide/EnvironmentIdeServiceImplTest.java) 覆盖 claim、绑定漂移、回执判定与切目录回读失败；[`IdeLeaseCoordinatorTest.java`](../../apps/ide/src/test/java/fun/fengwk/kkstudio/ide/IdeLeaseCoordinatorTest.java) 覆盖按事件节点核对后的证明批次。内部端点与 problem 传递由 [`web/ide`](../../web/src/test/java/fun/fengwk/kkstudio/web/ide/) 的测试覆盖，公开 API 由 [`StudioEnvironmentIdeControllerTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/controller/StudioEnvironmentIdeControllerTest.java) 守护。连接服务通道的准入与收尾由 [`EnvironmentDaemonServerIdeTest.java`](../../platform/daemon-server/src/test/java/fun/fengwk/kkstudio/platform/daemon/server/EnvironmentDaemonServerIdeTest.java) 覆盖。
+- 测试入口：[`EnvironmentIdeServiceImplTest.java`](../../apps/ide/src/test/java/fun/fengwk/kkstudio/ide/EnvironmentIdeServiceImplTest.java) 覆盖 claim、绑定漂移、回执判定与切目录回读失败；[`IdeLeaseCoordinatorTest.java`](../../apps/ide/src/test/java/fun/fengwk/kkstudio/ide/IdeLeaseCoordinatorTest.java) 覆盖按事件节点核对后的证明批次。内部端点与 problem 传递由 [`web/ide`](../../web/src/test/java/fun/fengwk/kkstudio/web/ide/) 的测试覆盖，公开 API 由 [`EnvironmentIdeControllerTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/ide/EnvironmentIdeControllerTest.java) 守护。连接服务通道的准入与收尾由 [`EnvironmentDaemonServerIdeTest.java`](../../platform/daemon-server/src/test/java/fun/fengwk/kkstudio/platform/daemon/server/EnvironmentDaemonServerIdeTest.java) 覆盖。
 
 ---
 
