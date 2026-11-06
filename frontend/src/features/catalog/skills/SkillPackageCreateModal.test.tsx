@@ -33,7 +33,7 @@ function detail(overrides: Partial<SkillPackageDetailDTO> = {}): SkillPackageDet
     packageName: 'core-tools',
     description: 'Core developer skills',
     packageVersion: '2026.08.1',
-    publishedAt: 1784505600,
+    publishedAt: 1784505600000,
     skills: [
       { name: 'dev', description: 'developer workflow' },
       { name: 'dropped-skill', description: 'skill removed by the upload' },
@@ -47,8 +47,8 @@ function detail(overrides: Partial<SkillPackageDetailDTO> = {}): SkillPackageDet
     artifactSha256: 'a'.repeat(64),
     artifactSizeBytes: '2048',
     version: '3',
-    createdAt: 1784505600,
-    updatedAt: 1784509200,
+    createdAt: 1784505600000,
+    updatedAt: 1784509200000,
     ...overrides,
   }
 }

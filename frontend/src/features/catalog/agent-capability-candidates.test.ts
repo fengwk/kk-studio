@@ -35,13 +35,13 @@ function skillPackage(
     packageName,
     description: null,
     packageVersion: '1111111111111111111111111111111111111111',
-    publishedAt: 1784505600,
+    publishedAt: 1784505600000,
     skills,
     source: 'GIT',
     updateAvailable: false,
     version: '1',
-    createdAt: 1784505600,
-    updatedAt: 1784509200,
+    createdAt: 1784505600000,
+    updatedAt: 1784509200000,
   }
 }
 

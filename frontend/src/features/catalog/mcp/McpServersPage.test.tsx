@@ -43,7 +43,7 @@ function renderPage() {
   return { queryClient, view }
 }
 
-const SEEDED_AT = 1784505600
+const SEEDED_AT = 1784505600000
 
 function summary(overrides: Partial<McpServerSummaryDTO> = {}): McpServerSummaryDTO {
   return {
