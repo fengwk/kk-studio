@@ -209,7 +209,7 @@ Web 保存的 `EnvironmentInstallConfigDTO`：
 | 入口 | 契约 |
 | --- | --- |
 | `POST /api/platform/environments/{id}/install-codes` | `{expectedVersion}` 校验已保存版本，返回 `{code, expiresAt}`；不改变环境版本或配置 |
-| `GET /api/platform/environments/{id}/install-script?code=...` | 校验 code 后，按当前保存的 OS、配置和 token 返回 UTF-8 纯文本脚本 |
+| `GET /api/platform/environments/{id}/install-script?code=...` | 校验并消费 code，轮换 token 后按保存的 OS 和配置返回 UTF-8 纯文本脚本 |
 | `GET /api/platform/daemon-uninstall-scripts/{operatingSystem}` | 返回对应 OS 的卸载脚本，不含环境配置或凭据 |
 
 签发与脚本响应均禁止缓存。code 是 256 bit 安全随机值，服务端只保存 SHA-256 摘要、
@@ -344,8 +344,8 @@ gateway 注册成功**。Linux/macOS 用 `status` 或系统命令检查主机侧
 主机侧的存活与预检都只证明本地条件；**配置是否真正生效、注册是否成功，最后必须在 Studio 的
 Environment 页面确认 `READY`**。只有 READY 才表示 Daemon 已接受当前配置并注册成功；之后可在
 Chat 分支中选择该 Environment，并给 Agent 配置所需的 Environment Tools。READY 后 Platform 会
-异步同步已发布的 Skill Package；同步失败不撤销 READY，其它宿主能力仍可用，技能引用可退回
-Platform Skill URI。
+异步同步已发布的 Skill Package；同步失败不撤销 READY，其它宿主能力仍可用。已选择环境时，
+未安装当前版本的技能不会进入 system prompt。
 
 ## 管理身份与冲突处理
 
@@ -417,7 +417,7 @@ HOME 也不是默认工作目录。
 数据目录持有 `daemon.lock`，同一目录只允许一个 Daemon。`tmp/workspaces/<uuid>` 保存命令与检索的大文本
 全文（`*.part` 中转后原子发布 `*.log`），模型历史可能仍引用其绝对路径。定时清扫（默认 30 分钟一次）
 只回收超过当前保留期（默认 3 天）且未被使用的 workspace，历史引用的全文因此在保留期后可能被自动回收。
-`skills` 保存已安装包，`skill-work` 保存安装暂存与替换备份；安装器负责恢复或清理 staging/backup，
+`skills` 保存已安装包及 `.staging-*` / `.old-*` 安装暂存与替换备份；安装器负责清理暂存，
 并保留已发布的技能包。
 
 ## 参数与排错
