@@ -16,8 +16,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException.Reason;
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
+import fun.fengwk.kkstudio.harness.api.HarnessConflictReason;
 import fun.fengwk.kkstudio.harness.api.ToolApprovalCommand;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.api.tool.ToolApproval;
@@ -183,9 +184,9 @@ class HarnessRuntimeApprovalLockingTest {
             null,
             current.createdAt(),
             T5);
-    HarnessRuntimeConflictException error =
+    DomainException error =
         assertThrows(
-            HarnessRuntimeConflictException.class,
+            DomainException.class,
             () ->
                 HarnessRuntimeTestSupport.runtime(
                         recordingProbeStore(
@@ -194,7 +195,8 @@ class HarnessRuntimeApprovalLockingTest {
                             Map.of("tools.lockByAssistantEntry", args -> List.of(readySibling))),
                         clock)
                     .decideToolApproval(allow(baseline.threadId(), baseline.toolId())));
-    assertEquals(Reason.APPROVAL_NOT_APPLICABLE, error.reason());
+    assertEquals(DomainErrorCode.CONFLICT, error.code());
+    assertEquals(HarnessConflictReason.APPROVAL_NOT_APPLICABLE.name(), error.reason());
   }
 
   /**
@@ -224,9 +226,9 @@ class HarnessRuntimeApprovalLockingTest {
             null,
             current.createdAt(),
             T5);
-    HarnessRuntimeConflictException error =
+    DomainException error =
         assertThrows(
-            HarnessRuntimeConflictException.class,
+            DomainException.class,
             () ->
                 HarnessRuntimeTestSupport.runtime(
                         recordingProbeStore(
@@ -235,7 +237,8 @@ class HarnessRuntimeApprovalLockingTest {
                             Map.of("tools.lockByAssistantEntry", args -> List.of(otherSibling))),
                         clock)
                     .decideToolApproval(allow(baseline.threadId(), baseline.toolId())));
-    assertEquals(Reason.APPROVAL_NOT_APPLICABLE, error.reason());
+    assertEquals(DomainErrorCode.CONFLICT, error.code());
+    assertEquals(HarnessConflictReason.APPROVAL_NOT_APPLICABLE.name(), error.reason());
   }
 
   /** find 之后锁不到行属于持久化不变量破坏：tool vanish、ownership 改变或 approval 丢失都以 ISE 表达， 而不是降级为业务冲突。 */

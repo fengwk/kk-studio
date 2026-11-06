@@ -21,12 +21,15 @@ import org.springframework.web.context.WebApplicationContext;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.schema.ArraySchema;
 import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.common.schema.ObjectSchema;
 import fun.fengwk.kkstudio.common.schema.StringSchema;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
+import fun.fengwk.kkstudio.harness.api.HarnessConflictReason;
 import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.api.SpawnRequest;
 import fun.fengwk.kkstudio.harness.api.ToolApprovalCommand;
@@ -346,9 +349,9 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
         "an exact approval replay must not touch durable state again");
 
     // 改判被类型化拒绝。
-    HarnessRuntimeConflictException conflict =
+    DomainException conflict =
         assertThrows(
-            HarnessRuntimeConflictException.class,
+            DomainException.class,
             () ->
                 interactionService.decideApproval(
                     new ToolApprovalCommand(
@@ -358,8 +361,8 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
                         decisionId,
                         ACTOR,
                         "no")));
-    assertEquals(
-        HarnessRuntimeConflictException.Reason.APPROVAL_DECISION_MISMATCH, conflict.reason());
+    assertEquals(DomainErrorCode.CONFLICT, conflict.code());
+    assertEquals(HarnessConflictReason.APPROVAL_DECISION_MISMATCH.name(), conflict.reason());
 
     // 后续回执仍沿直接派发边界：C 的 join parent 是 A，人工审批不产生任何发给 R 的结果命令。
     assertEquals(tree.a(), joinParentOf(tree.c()));
