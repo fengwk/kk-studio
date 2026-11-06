@@ -18,6 +18,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.http.MediaType;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.CancelledThreadInput;
 import fun.fengwk.kkstudio.harness.api.CompactThreadResult;
 import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
@@ -111,9 +112,8 @@ class StudioHarnessThreadMutationControllerTest extends HarnessThreadControllerT
   void compactConflictPreservesManualUnavailableReason() throws Exception {
     when(runtime.compactThread(any(CompactThreadCommand.class)))
         .thenThrow(
-            new HarnessRuntimeConflictException(
-                HarnessRuntimeConflictException.Reason.MANUAL_COMPACTION_UNAVAILABLE,
-                "manual compaction is disabled"));
+            DomainException.conflict(
+                "MANUAL_COMPACTION_UNAVAILABLE", "manual compaction is disabled"));
 
     mockMvc
         .perform(

@@ -590,7 +590,7 @@ class SubagentTaskRunnerTest {
     // resume 目标已消失：追加命令前重读失败必须收敛为 typed 失败。
     stubParent(List.of(AGENT));
     UUID missingChild = UUID.randomUUID();
-    doThrow(new HarnessRuntimeNotFoundException("child gone"))
+    doThrow(DomainException.notFound("thread", "child gone"))
         .when(runtime)
         .getThreadSnapshot(missingChild);
     SubagentTaskRejectedException goneChild =
@@ -601,7 +601,7 @@ class SubagentTaskRunnerTest {
 
     // 父快照已消失（父线程被删）：同样不得凭 invocationId 继续。
     stubParent(List.of(AGENT));
-    doThrow(new HarnessRuntimeNotFoundException("parent gone"))
+    doThrow(DomainException.notFound("thread", "parent gone"))
         .when(runtime)
         .getThreadSnapshot(parentThreadId);
     SubagentTaskRejectedException goneParent =
@@ -622,7 +622,7 @@ class SubagentTaskRunnerTest {
                     SubagentTaskRunner.requestHash(request(null, null)),
                     AGENT,
                     10)));
-    doThrow(new HarnessRuntimeNotFoundException("child gone"))
+    doThrow(DomainException.notFound("thread", "child gone"))
         .when(runtime)
         .getThreadSnapshot(childThreadId);
     SubagentTaskRejectedException replayedMissingChild =
